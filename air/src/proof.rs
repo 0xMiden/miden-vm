@@ -142,6 +142,10 @@ impl Serializable for HashFunction {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         target.write_u8(*self as u8);
     }
+
+    fn get_size_hint(&self) -> usize {
+        0u8.get_size_hint()
+    }
 }
 
 impl Deserializable for HashFunction {
@@ -152,8 +156,14 @@ impl Deserializable for HashFunction {
 
 impl Serializable for ExecutionProof {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        self.proof.write_into(target);
-        self.hash_fn.write_into(target);
+        let Self { proof, hash_fn } = self;
+        proof.write_into(target);
+        hash_fn.write_into(target);
+    }
+
+    fn get_size_hint(&self) -> usize {
+        let Self { proof, hash_fn } = self;
+        proof.get_size_hint() + hash_fn.get_size_hint()
     }
 }
 

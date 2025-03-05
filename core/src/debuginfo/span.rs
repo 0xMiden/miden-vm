@@ -256,8 +256,16 @@ impl<T: Serializable> Span<T> {
 
 impl<T: Serializable> Serializable for Span<T> {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        self.span.write_into(target);
-        self.spanned.write_into(target);
+        let Self { span, spanned } = self;
+
+        span.write_into(target);
+        spanned.write_into(target);
+    }
+
+    fn get_size_hint(&self) -> usize {
+        let Self { span, spanned } = self;
+
+        span.get_size_hint() + spanned.get_size_hint()
     }
 }
 
@@ -408,9 +416,17 @@ impl From<SourceSpan> for miette::SourceSpan {
 
 impl Serializable for SourceSpan {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        target.write_u32(self.source_id.to_u32());
-        target.write_u32(self.start.into());
-        target.write_u32(self.end.into())
+        let Self { source_id, start, end } = self;
+
+        source_id.write_into(target);
+        start.write_into(target);
+        end.write_into(target);
+    }
+
+    fn get_size_hint(&self) -> usize {
+        let Self { source_id, start, end } = self;
+
+        source_id.get_size_hint() + start.get_size_hint() + end.get_size_hint()
     }
 }
 

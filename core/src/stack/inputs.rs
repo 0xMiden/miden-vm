@@ -96,6 +96,15 @@ impl Serializable for StackInputs {
         target.write_u8(num_stack_values);
         target.write_many(&self.elements[..num_stack_values as usize]);
     }
+
+    fn get_size_hint(&self) -> usize {
+        let num_stack_values = get_num_stack_values(self);
+        let mut size = num_stack_values.get_size_hint();
+        for element in &self.elements[..num_stack_values as usize] {
+            size += element.get_size_hint();
+        }
+        size
+    }
 }
 
 impl Deserializable for StackInputs {

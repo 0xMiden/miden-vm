@@ -7,6 +7,7 @@ use alloc::{
 use core::{fmt, num::NonZeroU32, ops::Range};
 
 use super::{FileLineCol, Position, Selection, SourceId, SourceSpan, Uri};
+use crate::utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
 
 // SOURCE LANGUAGE
 // ================================================================================================
@@ -832,6 +833,22 @@ impl fmt::Display for ByteIndex {
     }
 }
 
+impl Serializable for ByteIndex {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.0.write_into(target)
+    }
+
+    fn get_size_hint(&self) -> usize {
+        self.0.get_size_hint()
+    }
+}
+
+impl Deserializable for ByteIndex {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        source.read_u32().map(Self)
+    }
+}
+
 /// An offset in bytes relative to some [ByteIndex]
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ByteOffset(i64);
@@ -1148,6 +1165,26 @@ macro_rules! declare_dual_number_and_index_type {
         impl fmt::Display for $number_name {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 fmt::Display::fmt(&self.0, f)
+            }
+        }
+
+        impl Serializable for $number_name {
+            fn write_into<W: ByteWriter>(&self, target: &mut W) {
+                self.to_u32().write_into(target)
+            }
+
+            fn get_size_hint(&self) -> usize {
+                self.to_u32().get_size_hint()
+            }
+        }
+
+        impl Deserializable for $number_name {
+            fn read_from<R: ByteReader>(
+                source: &mut R,
+            ) -> Result<$number_name, DeserializationError> {
+                Self::new(source.read_u32()?).ok_or_else(|| {
+                    DeserializationError::InvalidValue("encountered zero".to_string())
+                })
             }
         }
     };

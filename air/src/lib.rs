@@ -339,9 +339,23 @@ impl vm_core::ToElements<Felt> for PublicInputs {
 
 impl Serializable for PublicInputs {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        self.program_info.write_into(target);
-        self.stack_inputs.write_into(target);
-        self.stack_outputs.write_into(target);
+        let Self {
+            program_info,
+            stack_inputs,
+            stack_outputs,
+        } = self;
+        program_info.write_into(target);
+        stack_inputs.write_into(target);
+        stack_outputs.write_into(target);
+    }
+
+    fn get_size_hint(&self) -> usize {
+        let Self {
+            program_info,
+            stack_inputs,
+            stack_outputs,
+        } = self;
+        program_info.get_size_hint() + stack_inputs.get_size_hint() + stack_outputs.get_size_hint()
     }
 }
 

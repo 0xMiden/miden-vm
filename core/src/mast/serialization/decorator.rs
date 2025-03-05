@@ -127,6 +127,12 @@ impl Serializable for DecoratorInfo {
         variant.write_into(target);
         decorator_data_offset.write_into(target);
     }
+
+    fn get_size_hint(&self) -> usize {
+        let Self { variant, decorator_data_offset } = self;
+
+        variant.get_size_hint() + decorator_data_offset.get_size_hint()
+    }
 }
 
 impl Deserializable for DecoratorInfo {
@@ -193,6 +199,10 @@ impl From<&Decorator> for EncodedDecoratorVariant {
 impl Serializable for EncodedDecoratorVariant {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         self.discriminant().write_into(target);
+    }
+
+    fn get_size_hint(&self) -> usize {
+        self.discriminant().get_size_hint()
     }
 }
 

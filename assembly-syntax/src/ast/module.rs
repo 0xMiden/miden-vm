@@ -87,6 +87,10 @@ impl Serializable for ModuleKind {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         target.write_u8(*self as u8)
     }
+
+    fn get_size_hint(&self) -> usize {
+        0u8.get_size_hint()
+    }
 }
 
 impl Deserializable for ModuleKind {

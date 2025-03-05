@@ -804,6 +804,8 @@ impl Serializable for Operation {
             // Note: we explicitly write out all the operations so that whenever we make a
             // modification to the `Operation` enum, we get a compile error here. This
             // should help us remember to properly encode/decode each operation variant.
+            // Any update should also apply to `get_size_hint` where handling of remaining cases
+            // relies on a fallback.
             Operation::Noop
             | Operation::FmpAdd
             | Operation::FmpUpdate
@@ -893,6 +895,24 @@ impl Serializable for Operation {
             | Operation::HornerExt
             | Operation::ArithmeticCircuitEval => (),
         }
+    }
+
+    fn get_size_hint(&self) -> usize {
+        let op_code_len = self.op_code().get_size_hint();
+
+        // For operations that have extra data, encode it in `data`.
+        let data_len = match self {
+            Operation::Assert(err_code)
+            | Operation::MpVerify(err_code)
+            | Operation::U32assert2(err_code) => err_code.get_size_hint(),
+            Operation::Push(value) => value.as_int().get_size_hint(),
+            Operation::Emit(value) => value.get_size_hint(),
+
+            // Match all other cases without data, future opcodes with data must be updated here as
+            // well.
+            _ => 0,
+        };
+        op_code_len + data_len
     }
 }
 

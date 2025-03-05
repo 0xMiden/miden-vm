@@ -17,6 +17,10 @@ impl Serializable for DependencyName {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         self.0.write_into(target);
     }
+
+    fn get_size_hint(&self) -> usize {
+        self.0.get_size_hint()
+    }
 }
 
 impl Deserializable for DependencyName {
@@ -41,8 +45,16 @@ pub struct Dependency {
 
 impl Serializable for Dependency {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        self.name.0.write_into(target);
-        self.digest.write_into(target);
+        let Self { name, digest } = self;
+
+        name.write_into(target);
+        digest.write_into(target);
+    }
+
+    fn get_size_hint(&self) -> usize {
+        let Self { name, digest } = self;
+
+        name.get_size_hint() + digest.get_size_hint()
     }
 }
 

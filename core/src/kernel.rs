@@ -64,6 +64,14 @@ impl Serializable for Kernel {
         target.write_u8(self.0.len().try_into().expect("too many kernel procedures"));
         target.write_many(&self.0)
     }
+
+    fn get_size_hint(&self) -> usize {
+        let mut size = 0u8.get_size_hint();
+        for element in &self.0 {
+            size += element.get_size_hint();
+        }
+        size
+    }
 }
 
 impl Deserializable for Kernel {

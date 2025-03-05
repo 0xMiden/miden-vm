@@ -187,6 +187,11 @@ impl Serializable for MastForest {
         before_enter_decorators.write_into(target);
         after_exit_decorators.write_into(target);
     }
+
+    // TODO: Not clear how to implement simply
+    // fn get_size_hint(&self) -> usize {
+    //     todo!()
+    // }
 }
 
 impl Deserializable for MastForest {

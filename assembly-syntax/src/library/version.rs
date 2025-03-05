@@ -77,9 +77,13 @@ impl fmt::Display for Version {
 }
 impl Serializable for Version {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        target.write_u16(self.major);
-        target.write_u16(self.minor);
-        target.write_u16(self.patch);
+        let Self { major, minor, patch } = *self;
+        [major, minor, patch].write_into(target);
+    }
+
+    fn get_size_hint(&self) -> usize {
+        let Self { major, minor, patch } = self;
+        [major, minor, patch].map(Serializable::get_size_hint).into_iter().sum()
     }
 }
 impl Deserializable for Version {
