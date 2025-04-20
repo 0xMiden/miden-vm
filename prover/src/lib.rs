@@ -71,7 +71,7 @@ pub fn prove(
     tracing::event!(
         tracing::Level::INFO,
         "Generated execution trace of {} columns and {} steps ({}% padded) in {} ms",
-        trace.info().main_trace_width(),
+        trace.trace_len_summary().main_trace_len(),
         trace.trace_len_summary().padded_trace_len(),
         trace.trace_len_summary().padding_percentage(),
         now.elapsed().as_millis()
@@ -79,7 +79,7 @@ pub fn prove(
 
     let stack_outputs = trace.stack_outputs().clone();
     let hash_fn = options.hash_fn();
-
+/*
     // generate STARK proof
     let proof = match hash_fn {
         HashFunction::Blake3_192 => {
@@ -123,6 +123,9 @@ pub fn prove(
     let proof = ExecutionProof::new(proof, hash_fn);
 
     Ok((stack_outputs, proof))
+     */
+
+    todo!()
 }
 
 // PROVER
@@ -176,7 +179,7 @@ where
             .all(|(l, r)| l == r)
     }
 }
-
+/* 
 impl<H, R> Prover for ExecutionProver<H, R>
 where
     H: ElementHasher<BaseField = Felt> + Sync,
@@ -241,7 +244,8 @@ where
         trace: &Self::Trace,
         aux_rand_elements: &AuxRandElements<E>,
     ) -> ColMatrix<E> {
-        trace.build_aux_trace(aux_rand_elements.rand_elements()).unwrap()
+       // trace.build_aux_trace(aux_rand_elements.rand_elements()).unwrap()
+        todo!()
     }
 
     #[maybe_async]
@@ -260,3 +264,4 @@ where
         )
     }
 }
+*/

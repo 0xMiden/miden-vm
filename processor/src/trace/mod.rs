@@ -9,8 +9,10 @@ use miden_air::trace::{
 use vm_core::{ProgramInfo, StackInputs, StackOutputs, ZERO, stack::MIN_STACK_DEPTH};
 use winter_prover::{EvaluationFrame, Trace, TraceInfo, crypto::RandomCoin};
 
+use crate::ColMatrix;
+
 use super::{
-    ColMatrix, Digest, Felt, FieldElement, Process,
+    Digest, Felt, FieldElement, Process,
     chiplets::AuxTraceBuilder as ChipletsAuxTraceBuilder, crypto::RpoRandomCoin,
     decoder::AuxTraceBuilder as DecoderAuxTraceBuilder,
     range::AuxTraceBuilder as RangeCheckerAuxTraceBuilder,
@@ -229,30 +231,9 @@ impl ExecutionTrace {
 
         Some(ColMatrix::new(aux_columns))
     }
-}
-
-// TRACE TRAIT IMPLEMENTATION
-// ================================================================================================
-
-impl Trace for ExecutionTrace {
-    type BaseField = Felt;
 
     fn length(&self) -> usize {
         self.main_trace.num_rows()
-    }
-
-    fn main_segment(&self) -> &ColMatrix<Felt> {
-        &self.main_trace
-    }
-
-    fn read_main_frame(&self, row_idx: usize, frame: &mut EvaluationFrame<Felt>) {
-        let next_row_idx = (row_idx + 1) % self.length();
-        self.main_trace.read_row_into(row_idx, frame.current_mut());
-        self.main_trace.read_row_into(next_row_idx, frame.next_mut());
-    }
-
-    fn info(&self) -> &TraceInfo {
-        &self.trace_info
     }
 }
 

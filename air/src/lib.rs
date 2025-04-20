@@ -16,7 +16,6 @@ use winter_air::{
     Air, AirContext, Assertion, EvaluationFrame, ProofOptions as WinterProofOptions, TraceInfo,
     TransitionConstraintDegree,
 };
-use winter_prover::matrix::ColMatrix;
 
 mod constraints;
 pub use constraints::stack;
@@ -24,6 +23,7 @@ use constraints::{chiplets, range};
 
 pub mod trace;
 pub use trace::rows::RowIndex;
+pub use trace::ColMatrix;
 use trace::*;
 
 mod errors;
