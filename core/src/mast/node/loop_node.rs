@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 use core::fmt;
 
-use miden_crypto::{Felt, hash::rpo::RpoDigest};
+use miden_crypto::{Felt, PrimeCharacteristicRing, hash::rpo::RpoDigest};
 use miden_formatting::prettier::PrettyPrint;
 
 use crate::{
@@ -30,7 +30,9 @@ pub struct LoopNode {
 /// Constants
 impl LoopNode {
     /// The domain of the loop node (used for control block hashing).
-    pub const DOMAIN: Felt = Felt::new(OPCODE_LOOP as u64);
+    pub fn domain() -> Felt {
+        Felt::from_u64(OPCODE_LOOP as u64)
+    }
 }
 
 /// Constructors
@@ -43,7 +45,7 @@ impl LoopNode {
         let digest = {
             let body_hash = mast_forest[body].digest();
 
-            hasher::merge_in_domain(&[body_hash, RpoDigest::default()], Self::DOMAIN)
+            hasher::merge_in_domain(&[body_hash, RpoDigest::default()], Self::domain())
         };
 
         Ok(Self {
@@ -70,12 +72,12 @@ impl LoopNode {
     /// Returns a commitment to this Loop node.
     ///
     /// The commitment is computed as a hash of the loop body and an empty word ([ZERO; 4]) in
-    /// the domain defined by [Self::DOMAIN] - i..e,:
+    /// the domain defined by [Self::domain()] - i..e,:
     /// ```
     /// # use miden_core::mast::LoopNode;
     /// # use miden_crypto::{hash::rpo::{RpoDigest as Digest, Rpo256 as Hasher}};
     /// # let body_digest = Digest::default();
-    /// Hasher::merge_in_domain(&[body_digest, Digest::default()], LoopNode::DOMAIN);
+    /// Hasher::merge_in_domain(&[body_digest, Digest::default()], LoopNode::domain());
     /// ```
     pub fn digest(&self) -> RpoDigest {
         self.digest

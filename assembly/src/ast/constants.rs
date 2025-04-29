@@ -1,7 +1,7 @@
 use alloc::{boxed::Box, string::String};
+use vm_core::{PrimeCharacteristicRing, PrimeField64};
 use core::fmt;
 
-use vm_core::FieldElement;
 
 use crate::{Felt, SourceSpan, Span, Spanned, ast::Ident, parser::ParsingError};
 
@@ -150,7 +150,7 @@ impl ConstantExpr {
                                         },
                                         ConstantOp::IntDiv => Ok(Self::Literal(Span::new(
                                             span,
-                                            Felt::new(lhs.as_int() / rhs.as_int()),
+                                            Felt::from_u64(lhs.as_canonical_u64() / rhs.as_canonical_u64()),
                                         ))),
                                     }
                                 },

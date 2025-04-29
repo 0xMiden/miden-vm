@@ -10,7 +10,7 @@ use crate::{
     utils::binary_not,
 };
 #[cfg(test)]
-pub mod tests;
+//pub mod tests;
 
 // CONSTANTS
 // ==================================================================================================

@@ -3,6 +3,7 @@ use alloc::vec::Vec;
 // RE-EXPORTS
 // ================================================================================================
 pub use vm_core::utils::*;
+use vm_core::{PrimeCharacteristicRing, PrimeField64};
 
 use super::Felt;
 
@@ -18,17 +19,17 @@ pub(crate) fn get_trace_len(trace: &[Vec<Felt>]) -> usize {
 /// Splits an element into two field elements containing 32-bit integer values
 #[inline(always)]
 pub(crate) fn split_element(value: Felt) -> (Felt, Felt) {
-    let value = value.as_int();
+    let value = value.as_canonical_u64();
     let lo = (value as u32) as u64;
     let hi = value >> 32;
-    (Felt::new(hi), Felt::new(lo))
+    (Felt::from_u64(hi), Felt::from_u64(lo))
 }
 
 /// Splits an element into two 16 bit integer limbs. It assumes that the field element contains a
 /// valid 32-bit integer value.
 pub(crate) fn split_element_u32_into_u16(value: Felt) -> (Felt, Felt) {
-    let (hi, lo) = split_u32_into_u16(value.as_int());
-    (Felt::new(hi as u64), Felt::new(lo as u64))
+    let (hi, lo) = split_u32_into_u16(value.as_canonical_u64());
+    (Felt::from_u64(hi as u64), Felt::from_u64(lo as u64))
 }
 
 /// Splits a u64 integer assumed to contain a 32-bit value into two u16 integers.

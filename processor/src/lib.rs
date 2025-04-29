@@ -12,10 +12,10 @@ use miden_air::trace::{
     CHIPLETS_WIDTH, DECODER_TRACE_WIDTH, MIN_TRACE_LEN, RANGE_CHECK_TRACE_WIDTH, STACK_TRACE_WIDTH,
     SYS_TRACE_WIDTH,
 };
-pub use miden_air::{ExecutionOptions, ExecutionOptionsError, RowIndex, ColMatrix};
+pub use miden_air::{ColMatrix, ExecutionOptions, ExecutionOptionsError, RowIndex};
 pub use vm_core::{
-    AssemblyOp, EMPTY_WORD, Felt, Kernel, ONE, Operation, Program, ProgramInfo, QuadExtension,
-    StackInputs, StackOutputs, Word, ZERO,
+    AssemblyOp, EMPTY_WORD, Felt, Kernel, ONE, Operation, Program, ProgramInfo, StackInputs,
+    StackOutputs, Word, ZERO,
     chiplets::hasher::Digest,
     crypto::merkle::SMT_DEPTH,
     errors::InputError,
@@ -24,7 +24,7 @@ pub use vm_core::{
     utils::{DeserializationError, collections::KvMap},
 };
 use vm_core::{
-    Decorator, DecoratorIterator, FieldElement,
+    BinomialExtensionField, Decorator, DecoratorIterator, PrimeField64,
     mast::{
         BasicBlockNode, CallNode, DynNode, JoinNode, LoopNode, OP_GROUP_SIZE, OpBatch, SplitNode,
     },
@@ -70,7 +70,7 @@ pub use debug::{AsmOpInfo, VmState, VmStateIterator};
 // ================================================================================================
 
 pub mod math {
-    pub use vm_core::{Felt, FieldElement, StarkField};
+    pub use vm_core::Felt;
     pub use winter_prover::math::fft;
 }
 
@@ -90,7 +90,7 @@ pub mod crypto {
 // TYPE ALIASES
 // ================================================================================================
 
-type QuadFelt = QuadExtension<Felt>;
+type QuadFelt = BinomialExtensionField<Felt, 2>;
 
 type SysTrace = [Vec<Felt>; SYS_TRACE_WIDTH];
 
@@ -662,7 +662,7 @@ impl ProcessState<'_> {
 
     /// Returns the current value of the free memory pointer.
     pub fn fmp(&self) -> u64 {
-        self.system.fmp().as_int()
+        self.system.fmp().as_canonical_u64()
     }
 
     /// Returns the value located at the specified position on the stack at the current clock cycle.

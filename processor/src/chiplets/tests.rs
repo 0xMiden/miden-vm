@@ -10,7 +10,7 @@ use miden_air::trace::{
         memory::TRACE_WIDTH as MEMORY_TRACE_WIDTH,
     },
 };
-use vm_core::{Felt, ONE, Program, ZERO, mast::MastForest};
+use vm_core::{mast::MastForest, Felt, PrimeCharacteristicRing, Program, ONE, ZERO};
 
 use crate::{
     DefaultHost, ExecutionOptions, ExecutionTrace, Kernel, Operation, Process, StackInputs,
@@ -51,7 +51,7 @@ fn bitwise_chiplet_trace() {
 #[test]
 fn memory_chiplet_trace() {
     // --- single memory operation with no stack manipulation -------------------------------------
-    let addr = Felt::from(4_u32);
+    let addr = Felt::from_u32(4_u32);
     let stack = [1, 2, 3, 4];
     let operations = vec![Operation::Push(addr), Operation::MStoreW];
     let (chiplets_trace, trace_len) = build_trace(&stack, operations, Kernel::default());

@@ -24,17 +24,17 @@ pub use processor::{
 #[cfg(not(target_family = "wasm"))]
 use proptest::prelude::{Arbitrary, Strategy};
 use prover::utils::range;
-pub use prover::{MemAdviceProvider, MerkleTreeVC, ProvingOptions, prove};
+pub use prover::{MemAdviceProvider, ProvingOptions, prove};
 pub use test_case::test_case;
 pub use verifier::{AcceptableOptions, VerifierError, verify};
 pub use vm_core::{
-    EMPTY_WORD, Felt, FieldElement, ONE, StackInputs, StackOutputs, StarkField, WORD_SIZE, Word,
+    EMPTY_WORD, Felt, ONE, StackInputs, StackOutputs, WORD_SIZE, Word,
     ZERO,
     chiplets::hasher::{STATE_WIDTH, hash_elements},
     stack::MIN_STACK_DEPTH,
     utils::{IntoBytes, ToElements, collections, group_slice_elements},
 };
-use vm_core::{ProgramInfo, chiplets::hasher::apply_permutation};
+use vm_core::{chiplets::hasher::apply_permutation, BinomialExtensionField, PrimeCharacteristicRing, PrimeField64, ProgramInfo};
 
 pub mod math {
     pub use winter_prover::math::{
@@ -64,7 +64,7 @@ pub use proptest;
 // TYPE ALIASES
 // ================================================================================================
 
-pub type QuadFelt = vm_core::QuadExtension<Felt>;
+pub type QuadFelt = BinomialExtensionField<Felt, 2>;
 
 // CONSTANTS
 // ================================================================================================
@@ -257,7 +257,7 @@ impl Test {
                 .unwrap_or(ZERO);
             assert_eq!(
                 *mem_value,
-                mem_state.as_int(),
+                mem_state.as_canonical_u64(),
                 "Expected memory [{}] => {:?}, found {:?}",
                 addr,
                 mem_value,
@@ -380,10 +380,10 @@ impl Test {
             host.load_mast_forest(library.mast_forest().clone()).unwrap();
         }
         let (mut stack_outputs, proof) =
-            prover::prove(&program, stack_inputs.clone(), &mut host, ProvingOptions::default())
-                .unwrap();
+        prover::prove(&program, stack_inputs.clone(), &mut host, ProvingOptions::default()).unwrap();
 
         let program_info = ProgramInfo::from(program);
+
         if test_fail {
             stack_outputs.stack_mut()[0] += ONE;
             assert!(verifier::verify(program_info, stack_inputs, stack_outputs, proof).is_err());
@@ -422,7 +422,7 @@ impl Test {
 
 /// Converts a slice of Felts into a vector of u64 values.
 pub fn felt_slice_to_ints(values: &[Felt]) -> Vec<u64> {
-    values.iter().map(|e| (*e).as_int()).collect()
+    values.iter().map(|e| (*e).as_canonical_u64()).collect()
 }
 
 pub fn resize_to_min_stack_depth(values: &[u64]) -> Vec<u64> {
@@ -448,7 +448,7 @@ pub fn prop_randw<T: Arbitrary>() -> impl Strategy<Value = Vec<T>> {
 pub fn build_expected_perm(values: &[u64]) -> [Felt; STATE_WIDTH] {
     let mut expected = [ZERO; STATE_WIDTH];
     for (&value, result) in values.iter().zip(expected.iter_mut()) {
-        *result = Felt::new(value);
+        *result = Felt::from_u64(value);
     }
     apply_permutation(&mut expected);
     expected.reverse();
@@ -457,7 +457,7 @@ pub fn build_expected_perm(values: &[u64]) -> [Felt; STATE_WIDTH] {
 }
 
 pub fn build_expected_hash(values: &[u64]) -> [Felt; 4] {
-    let digest = hash_elements(&values.iter().map(|&v| Felt::new(v)).collect::<Vec<_>>());
+    let digest = hash_elements(&values.iter().map(|&v| Felt::from_u64(v)).collect::<Vec<_>>());
     let mut expected: [Felt; 4] = digest.into();
     expected.reverse();
 

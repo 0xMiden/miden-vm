@@ -4,7 +4,7 @@ use miden_air::trace::{
 };
 use test_utils::rand::rand_array;
 use vm_core::{
-    FieldElement, ONE, Operation, Program, Word, ZERO,
+    ExtensionField, Field, ONE, Operation, PrimeCharacteristicRing, Program, Word, ZERO,
     mast::{MastForest, MastNode},
 };
 
@@ -35,7 +35,7 @@ fn decoder_p1_span_with_respan() {
 
     let row_values = [
         BlockStackTableRow::new(ONE, ZERO, false).to_value(&alphas),
-        BlockStackTableRow::new(Felt::new(9), ZERO, false).to_value(&alphas),
+        BlockStackTableRow::new(Felt::from_u64(9), ZERO, false).to_value(&alphas),
     ];
 
     // make sure the first entry is ONE
@@ -51,7 +51,7 @@ fn decoder_p1_span_with_respan() {
     }
 
     // when RESPAN is executed, the first entry is replaced with a new entry
-    let expected_value = expected_value * row_values[0].inv() * row_values[1];
+    let expected_value = expected_value * row_values[0].inverse() * row_values[1];
     assert_eq!(expected_value, p1[10]);
 
     // for the next 11 cycles (as we execute user ops), the table is not affected
@@ -60,7 +60,7 @@ fn decoder_p1_span_with_respan() {
     }
 
     // at cycle 22, the END operation is executed and the table is cleared
-    let expected_value = expected_value * row_values[1].inv();
+    let expected_value = expected_value * row_values[1].inverse();
     assert_eq!(expected_value, ONE);
     for i in 22..(p1.len() - NUM_RAND_ROWS) {
         assert_eq!(ONE, p1[i]);
@@ -86,8 +86,8 @@ fn decoder_p1_join() {
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p1 = aux_columns.get_column(P1_COL_IDX);
 
-    let a_9 = Felt::new(9);
-    let a_17 = Felt::new(17);
+    let a_9 = Felt::from_u64(9);
+    let a_17 = Felt::from_u64(17);
     let row_values = [
         BlockStackTableRow::new(ONE, ZERO, false).to_value(&alphas),
         BlockStackTableRow::new(a_9, ONE, false).to_value(&alphas),
@@ -109,7 +109,7 @@ fn decoder_p1_join() {
     assert_eq!(expected_value, p1[3]);
 
     // when the first SPAN block ends, its entry is removed from the table
-    expected_value *= row_values[1].inv();
+    expected_value *= row_values[1].inverse();
     assert_eq!(expected_value, p1[4]);
 
     // when the second SPAN is executed, its entry is added to the table
@@ -120,11 +120,11 @@ fn decoder_p1_join() {
     assert_eq!(expected_value, p1[6]);
 
     // when the second SPAN block ends, its entry is removed from the table
-    expected_value *= row_values[2].inv();
+    expected_value *= row_values[2].inverse();
     assert_eq!(expected_value, p1[7]);
 
     // when the JOIN block ends, its entry is removed from the table
-    expected_value *= row_values[0].inv();
+    expected_value *= row_values[0].inverse();
     assert_eq!(expected_value, p1[8]);
 
     // at this point the table should be empty, and thus, all subsequent values must be ONE
@@ -153,7 +153,7 @@ fn decoder_p1_split() {
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p1 = aux_columns.get_column(P1_COL_IDX);
 
-    let a_9 = Felt::new(9);
+    let a_9 = Felt::from_u64(9);
     let row_values = [
         BlockStackTableRow::new(ONE, ZERO, false).to_value(&alphas),
         BlockStackTableRow::new(a_9, ONE, false).to_value(&alphas),
@@ -174,11 +174,11 @@ fn decoder_p1_split() {
     assert_eq!(expected_value, p1[3]);
 
     // when the SPAN block ends, its entry is removed from the table
-    expected_value *= row_values[1].inv();
+    expected_value *= row_values[1].inverse();
     assert_eq!(expected_value, p1[4]);
 
     // when the SPLIT block ends, its entry is removed from the table
-    expected_value *= row_values[0].inv();
+    expected_value *= row_values[0].inverse();
     assert_eq!(expected_value, p1[5]);
 
     // at this point the table should be empty, and thus, all subsequent values must be ONE
@@ -208,12 +208,12 @@ fn decoder_p1_loop_with_repeat() {
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p1 = aux_columns.get_column(P1_COL_IDX);
 
-    let a_9 = Felt::new(9); // address of the JOIN block in the first iteration
-    let a_17 = Felt::new(17); // address of the first SPAN block in the first iteration
-    let a_25 = Felt::new(25); // address of the second SPAN block in the first iteration
-    let a_33 = Felt::new(33); // address of the JOIN block in the second iteration
-    let a_41 = Felt::new(41); // address of the first SPAN block in the second iteration
-    let a_49 = Felt::new(49); // address of the second SPAN block in the second iteration
+    let a_9 = Felt::from_u64(9); // address of the JOIN block in the first iteration
+    let a_17 = Felt::from_u64(17); // address of the first SPAN block in the first iteration
+    let a_25 = Felt::from_u64(25); // address of the second SPAN block in the first iteration
+    let a_33 = Felt::from_u64(33); // address of the JOIN block in the second iteration
+    let a_41 = Felt::from_u64(41); // address of the first SPAN block in the second iteration
+    let a_49 = Felt::from_u64(49); // address of the second SPAN block in the second iteration
     let row_values = [
         BlockStackTableRow::new(ONE, ZERO, true).to_value(&alphas),
         BlockStackTableRow::new(a_9, ONE, false).to_value(&alphas),
@@ -245,7 +245,7 @@ fn decoder_p1_loop_with_repeat() {
     assert_eq!(expected_value, p1[4]);
 
     // when the first SPAN block ends, its entry is removed from the table
-    expected_value *= row_values[2].inv();
+    expected_value *= row_values[2].inverse();
     assert_eq!(expected_value, p1[5]);
 
     // when the second SPAN is executed, its entry is added to the table
@@ -256,11 +256,11 @@ fn decoder_p1_loop_with_repeat() {
     assert_eq!(expected_value, p1[7]);
 
     // when the second SPAN block ends, its entry is removed from the table
-    expected_value *= row_values[3].inv();
+    expected_value *= row_values[3].inverse();
     assert_eq!(expected_value, p1[8]);
 
     // when the JOIN block ends, its entry is removed from the table
-    expected_value *= row_values[1].inv();
+    expected_value *= row_values[1].inverse();
     assert_eq!(expected_value, p1[9]);
 
     // --- second iteration ---------------------------------------------------
@@ -280,7 +280,7 @@ fn decoder_p1_loop_with_repeat() {
     assert_eq!(expected_value, p1[13]);
 
     // when the first SPAN block ends, its entry is removed from the table
-    expected_value *= row_values[5].inv();
+    expected_value *= row_values[5].inverse();
     assert_eq!(expected_value, p1[14]);
 
     // when the second SPAN is executed, its entry is added to the table
@@ -291,15 +291,15 @@ fn decoder_p1_loop_with_repeat() {
     assert_eq!(expected_value, p1[16]);
 
     // when the second SPAN block ends, its entry is removed from the table
-    expected_value *= row_values[6].inv();
+    expected_value *= row_values[6].inverse();
     assert_eq!(expected_value, p1[17]);
 
     // when the JOIN block ends, its entry is removed from the table
-    expected_value *= row_values[4].inv();
+    expected_value *= row_values[4].inverse();
     assert_eq!(expected_value, p1[18]);
 
     // when the LOOP block ends, its entry is removed from the table
-    expected_value *= row_values[0].inv();
+    expected_value *= row_values[0].inverse();
     assert_eq!(expected_value, p1[19]);
 
     // at this point the table should be empty, and thus, all subsequent values must be ONE
@@ -343,7 +343,7 @@ fn decoder_p2_span_with_respan() {
     }
 
     // at cycle 22, the END operation is executed and the table is cleared
-    expected_value *= row_values[0].inv();
+    expected_value *= row_values[0].inverse();
     assert_eq!(expected_value, ONE);
     for i in 22..(p2.len() - NUM_RAND_ROWS) {
         assert_eq!(ONE, p2[i]);
@@ -393,7 +393,7 @@ fn decoder_p2_join() {
     assert_eq!(expected_value, p2[3]);
 
     // when the first SPAN block ends, its entry is removed from the table
-    expected_value *= row_values[1].inv();
+    expected_value *= row_values[1].inverse();
     assert_eq!(expected_value, p2[4]);
 
     // for the next 2 cycles, the table is not affected
@@ -401,11 +401,11 @@ fn decoder_p2_join() {
     assert_eq!(expected_value, p2[6]);
 
     // when the second SPAN block ends, its entry is removed from the table
-    expected_value *= row_values[2].inv();
+    expected_value *= row_values[2].inverse();
     assert_eq!(expected_value, p2[7]);
 
     // when the JOIN block ends, its entry is removed from the table
-    expected_value *= row_values[0].inv();
+    expected_value *= row_values[0].inverse();
     assert_eq!(expected_value, p2[8]);
 
     // at this point the table should be empty, and thus, all subsequent values must be ONE
@@ -454,11 +454,11 @@ fn decoder_p2_split_true() {
     assert_eq!(expected_value, p2[3]);
 
     // when the SPAN block ends, its entry is removed from the table
-    expected_value *= row_values[1].inv();
+    expected_value *= row_values[1].inverse();
     assert_eq!(expected_value, p2[4]);
 
     // when the SPLIT block ends, its entry is removed from the table
-    expected_value *= row_values[0].inv();
+    expected_value *= row_values[0].inverse();
     assert_eq!(expected_value, p2[5]);
 
     // at this point the table should be empty, and thus, all subsequent values must be ONE
@@ -510,11 +510,11 @@ fn decoder_p2_split_false() {
     assert_eq!(expected_value, p2[3]);
 
     // when the SPAN block ends, its entry is removed from the table
-    expected_value *= row_values[1].inv();
+    expected_value *= row_values[1].inverse();
     assert_eq!(expected_value, p2[4]);
 
     // when the SPLIT block ends, its entry is removed from the table
-    expected_value *= row_values[0].inv();
+    expected_value *= row_values[0].inverse();
     assert_eq!(expected_value, p2[5]);
 
     // at this point the table should be empty, and thus, all subsequent values must be ONE
@@ -550,8 +550,8 @@ fn decoder_p2_loop_with_repeat() {
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p2 = aux_columns.get_column(P2_COL_IDX);
 
-    let a_9 = Felt::new(9); // address of the JOIN block in the first iteration
-    let a_33 = Felt::new(33); // address of the JOIN block in the second iteration
+    let a_9 = Felt::from_u64(9); // address of the JOIN block in the first iteration
+    let a_33 = Felt::from_u64(33); // address of the JOIN block in the second iteration
     let row_values = [
         BlockHashTableRow::new_test(ZERO, program.hash().into(), false, false).collapse(&alphas),
         BlockHashTableRow::new_test(ONE, join.digest().into(), false, true).collapse(&alphas),
@@ -584,7 +584,7 @@ fn decoder_p2_loop_with_repeat() {
     assert_eq!(expected_value, p2[4]);
 
     // when the first SPAN block ends, its entry is removed from the table
-    expected_value *= row_values[2].inv();
+    expected_value *= row_values[2].inverse();
     assert_eq!(expected_value, p2[5]);
 
     // for the next 2 cycles, the table is not affected
@@ -592,11 +592,11 @@ fn decoder_p2_loop_with_repeat() {
     assert_eq!(expected_value, p2[7]);
 
     // when the second SPAN block ends, its entry is removed from the table
-    expected_value *= row_values[3].inv();
+    expected_value *= row_values[3].inverse();
     assert_eq!(expected_value, p2[8]);
 
     // when the JOIN block ends, its entry is removed from the table
-    expected_value *= row_values[1].inv();
+    expected_value *= row_values[1].inverse();
     assert_eq!(expected_value, p2[9]);
 
     // --- second iteration ---------------------------------------------------
@@ -614,7 +614,7 @@ fn decoder_p2_loop_with_repeat() {
     assert_eq!(expected_value, p2[13]);
 
     // when the first SPAN block ends, its entry is removed from the table
-    expected_value *= row_values[4].inv();
+    expected_value *= row_values[4].inverse();
     assert_eq!(expected_value, p2[14]);
 
     // for the next 2 cycles, the table is not affected
@@ -622,15 +622,15 @@ fn decoder_p2_loop_with_repeat() {
     assert_eq!(expected_value, p2[16]);
 
     // when the second SPAN block ends, its entry is removed from the table
-    expected_value *= row_values[5].inv();
+    expected_value *= row_values[5].inverse();
     assert_eq!(expected_value, p2[17]);
 
     // when the JOIN block ends, its entry is removed from the table
-    expected_value *= row_values[1].inv();
+    expected_value *= row_values[1].inverse();
     assert_eq!(expected_value, p2[18]);
 
     // when the LOOP block ends, its entry is removed from the table
-    expected_value *= row_values[0].inv();
+    expected_value *= row_values[0].inverse();
     assert_eq!(expected_value, p2[19]);
 
     // at this point the table should be empty, and thus, all subsequent values must be ONE
@@ -672,7 +672,7 @@ fn decoder_p3_trace_one_batch() {
         Operation::Add,
         Operation::Mul,
         Operation::Add,
-        Operation::Push(Felt::new(2)),
+        Operation::Push(Felt::from_u64(2)),
         Operation::Add,
         Operation::Swap,
         Operation::Mul,
@@ -688,8 +688,9 @@ fn decoder_p3_trace_one_batch() {
 
     // make sure 3 groups were inserted at clock cycle 1; these entries are for the two immediate
     // values and the second operation group consisting of [SWAP, MUL, ADD]
-    let g1_value = OpGroupTableRow::new(ONE, Felt::new(3), ONE).to_value(&alphas);
-    let g2_value = OpGroupTableRow::new(ONE, Felt::new(2), Felt::new(2)).to_value(&alphas);
+    let g1_value = OpGroupTableRow::new(ONE, Felt::from_u64(3), ONE).to_value(&alphas);
+    let g2_value =
+        OpGroupTableRow::new(ONE, Felt::from_u64(2), Felt::from_u64(2)).to_value(&alphas);
     let g3_value = OpGroupTableRow::new(ONE, ONE, build_op_group(&ops[9..])).to_value(&alphas);
     let expected_value = g1_value * g2_value * g3_value;
     assert_eq!(expected_value, p3[1]);
@@ -741,13 +742,13 @@ fn decoder_p3_trace_two_batches() {
     // --- first batch ----------------------------------------------------------------------------
     // make sure entries for 7 groups were inserted at clock cycle 1
     let b0_values = [
-        OpGroupTableRow::new(ONE, Felt::new(11), iv[0]).to_value(&alphas),
-        OpGroupTableRow::new(ONE, Felt::new(10), iv[1]).to_value(&alphas),
-        OpGroupTableRow::new(ONE, Felt::new(9), iv[2]).to_value(&alphas),
-        OpGroupTableRow::new(ONE, Felt::new(8), iv[3]).to_value(&alphas),
-        OpGroupTableRow::new(ONE, Felt::new(7), iv[4]).to_value(&alphas),
-        OpGroupTableRow::new(ONE, Felt::new(6), iv[5]).to_value(&alphas),
-        OpGroupTableRow::new(ONE, Felt::new(5), iv[6]).to_value(&alphas),
+        OpGroupTableRow::new(ONE, Felt::from_u64(11), iv[0]).to_value(&alphas),
+        OpGroupTableRow::new(ONE, Felt::from_u64(10), iv[1]).to_value(&alphas),
+        OpGroupTableRow::new(ONE, Felt::from_u64(9), iv[2]).to_value(&alphas),
+        OpGroupTableRow::new(ONE, Felt::from_u64(8), iv[3]).to_value(&alphas),
+        OpGroupTableRow::new(ONE, Felt::from_u64(7), iv[4]).to_value(&alphas),
+        OpGroupTableRow::new(ONE, Felt::from_u64(6), iv[5]).to_value(&alphas),
+        OpGroupTableRow::new(ONE, Felt::from_u64(5), iv[6]).to_value(&alphas),
     ];
     let mut expected_value: Felt = b0_values.iter().fold(ONE, |acc, &val| acc * val);
     assert_eq!(expected_value, p3[1]);
@@ -755,7 +756,7 @@ fn decoder_p3_trace_two_batches() {
     // for the next 7 cycles (2, 3, 4, 5, 6, 7, 8), an entry for an op group is removed from the
     // table
     for (i, clk) in (2..9).enumerate() {
-        expected_value /= b0_values[i];
+        expected_value = expected_value / b0_values[i];
         assert_eq!(expected_value, p3[clk]);
     }
 
@@ -767,11 +768,11 @@ fn decoder_p3_trace_two_batches() {
     // --- second batch ---------------------------------------------------------------------------
     // make sure entries for 3 group are inserted at clock cycle 10 (when RESPAN is executed)
     // group 3 consists of two DROP operations which do not fit into group 0
-    let batch1_addr = ONE + Felt::new(8);
+    let batch1_addr = ONE + Felt::from_u64(8);
     let op_group3 = build_op_group(&[Operation::Drop; 2]);
     let b1_values = [
-        OpGroupTableRow::new(batch1_addr, Felt::new(3), iv[7]).to_value(&alphas),
-        OpGroupTableRow::new(batch1_addr, Felt::new(2), iv[8]).to_value(&alphas),
+        OpGroupTableRow::new(batch1_addr, Felt::from_u64(3), iv[7]).to_value(&alphas),
+        OpGroupTableRow::new(batch1_addr, Felt::from_u64(2), iv[8]).to_value(&alphas),
         OpGroupTableRow::new(batch1_addr, ONE, op_group3).to_value(&alphas),
     ];
     let mut expected_value: Felt = b1_values.iter().fold(ONE, |acc, &val| acc * val);
@@ -779,7 +780,7 @@ fn decoder_p3_trace_two_batches() {
 
     // for the next 2 cycles (11, 12), an entry for an op group is removed from the table
     for (i, clk) in (11..13).enumerate() {
-        expected_value *= b1_values[i].inv();
+        expected_value *= b1_values[i].inverse();
         assert_eq!(expected_value, p3[clk]);
     }
 
@@ -790,7 +791,7 @@ fn decoder_p3_trace_two_batches() {
 
     // at cycle 19 we start executing group 3 - so, the entry for the last op group is removed
     // from the table
-    expected_value *= b1_values[2].inv();
+    expected_value *= b1_values[2].inverse();
     assert_eq!(expected_value, p3[19]);
 
     // at this point, the table should be empty and thus, running product should be ONE
@@ -837,20 +838,20 @@ impl BlockStackTableRow {
 impl BlockStackTableRow {
     /// Reduces this row to a single field element in the field specified by E. This requires
     /// at least 12 alpha values.
-    pub fn to_value<E: FieldElement<BaseField = Felt>>(&self, alphas: &[E]) -> E {
+    pub fn to_value<E: ExtensionField<Felt>>(&self, alphas: &[E]) -> E {
         let is_loop = if self.is_loop { ONE } else { ZERO };
         alphas[0]
-            + alphas[1].mul_base(self.block_id)
-            + alphas[2].mul_base(self.parent_id)
-            + alphas[3].mul_base(is_loop)
-            + alphas[4].mul_base(Felt::from(self.parent_ctx))
-            + alphas[5].mul_base(self.parent_fmp)
-            + alphas[6].mul_base(Felt::from(self.parent_stack_depth))
-            + alphas[7].mul_base(self.parent_next_overflow_addr)
-            + alphas[8].mul_base(self.parent_fn_hash[0])
-            + alphas[9].mul_base(self.parent_fn_hash[1])
-            + alphas[10].mul_base(self.parent_fn_hash[2])
-            + alphas[11].mul_base(self.parent_fn_hash[3])
+            + alphas[1] * (self.block_id)
+            + alphas[2] * (self.parent_id)
+            + alphas[3] * (is_loop)
+            + alphas[4] * (Felt::from_u32(self.parent_ctx.into()))
+            + alphas[5] * (self.parent_fmp)
+            + alphas[6] * (Felt::from_u32(self.parent_stack_depth))
+            + alphas[7] * (self.parent_next_overflow_addr)
+            + alphas[8] * (self.parent_fn_hash[0])
+            + alphas[9] * (self.parent_fn_hash[1])
+            + alphas[10] * (self.parent_fn_hash[2])
+            + alphas[11] * (self.parent_fn_hash[3])
     }
 }
 
@@ -873,10 +874,10 @@ impl OpGroupTableRow {
 impl OpGroupTableRow {
     /// Reduces this row to a single field element in the field specified by E. This requires
     /// at least 4 alpha values.
-    pub fn to_value<E: FieldElement<BaseField = Felt>>(&self, alphas: &[E]) -> E {
+    pub fn to_value<E: ExtensionField<Felt>>(&self, alphas: &[E]) -> E {
         alphas[0]
-            + alphas[1].mul_base(self.batch_id)
-            + alphas[2].mul_base(self.group_pos)
-            + alphas[3].mul_base(self.group_value)
+            + alphas[1] * (self.batch_id)
+            + alphas[2] * (self.group_pos)
+            + alphas[3] * (self.group_value)
     }
 }

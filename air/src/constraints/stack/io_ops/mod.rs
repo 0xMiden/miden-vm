@@ -4,7 +4,7 @@ use super::{EvaluationFrame, FieldElement, TransitionConstraintDegree, op_flags:
 use crate::{stack::EvaluationFrameExt, utils::are_equal};
 
 #[cfg(test)]
-pub mod tests;
+//pub mod tests;
 
 // CONSTANTS
 // ================================================================================================

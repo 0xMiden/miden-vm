@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 use core::fmt;
 
-use miden_crypto::{Felt, hash::rpo::RpoDigest};
+use miden_crypto::{Felt, PrimeCharacteristicRing, hash::rpo::RpoDigest};
 use miden_formatting::prettier::{Document, PrettyPrint, const_text, nl};
 
 use crate::{
@@ -23,10 +23,14 @@ pub struct DynNode {
 /// Constants
 impl DynNode {
     /// The domain of the Dyn block (used for control block hashing).
-    pub const DYN_DOMAIN: Felt = Felt::new(OPCODE_DYN as u64);
+    pub fn dyn_domain() -> Felt {
+        Felt::from_u64(OPCODE_DYN as u64)
+    }
 
     /// The domain of the Dyncall block (used for control block hashing).
-    pub const DYNCALL_DOMAIN: Felt = Felt::new(OPCODE_DYNCALL as u64);
+    pub fn dyncall_domain() -> Felt {
+        Felt::from_u64(OPCODE_DYNCALL as u64)
+    }
 }
 
 /// Public accessors
@@ -57,37 +61,37 @@ impl DynNode {
     /// Returns the domain of this dyn node.
     pub fn domain(&self) -> Felt {
         if self.is_dyncall() {
-            Self::DYNCALL_DOMAIN
+            Self::dyncall_domain()
         } else {
-            Self::DYN_DOMAIN
+            Self::dyn_domain()
         }
     }
 
     /// Returns a commitment to a Dyn node.
     ///
     /// The commitment is computed by hashing two empty words ([ZERO; 4]) in the domain defined
-    /// by [Self::DYN_DOMAIN] or [Self::DYNCALL_DOMAIN], i.e.:
+    /// by [Self::dyn_domain()] or [Self::dyncall_domain()], i.e.:
     ///
     /// ```
     /// # use miden_core::mast::DynNode;
     /// # use miden_crypto::{hash::rpo::{RpoDigest as Digest, Rpo256 as Hasher}};
-    /// Hasher::merge_in_domain(&[Digest::default(), Digest::default()], DynNode::DYN_DOMAIN);
-    /// Hasher::merge_in_domain(&[Digest::default(), Digest::default()], DynNode::DYNCALL_DOMAIN);
+    /// Hasher::merge_in_domain(&[Digest::default(), Digest::default()], DynNode::dyn_domain());
+    /// Hasher::merge_in_domain(&[Digest::default(), Digest::default()], DynNode::dyncall_domain());
     /// ```
     pub fn digest(&self) -> RpoDigest {
         if self.is_dyncall {
             RpoDigest::new([
-                Felt::new(8751004906421739448),
-                Felt::new(13469709002495534233),
-                Felt::new(12584249374630430826),
-                Felt::new(7624899870831503004),
+                Felt::from_u64(8751004906421739448),
+                Felt::from_u64(13469709002495534233),
+                Felt::from_u64(12584249374630430826),
+                Felt::from_u64(7624899870831503004),
             ])
         } else {
             RpoDigest::new([
-                Felt::new(8115106948140260551),
-                Felt::new(13491227816952616836),
-                Felt::new(15015806788322198710),
-                Felt::new(16575543461540527115),
+                Felt::from_u64(8115106948140260551),
+                Felt::from_u64(13491227816952616836),
+                Felt::from_u64(15015806788322198710),
+                Felt::from_u64(16575543461540527115),
             ])
         }
     }
@@ -217,7 +221,7 @@ mod tests {
             DynNode::new_dyn().digest(),
             Rpo256::merge_in_domain(
                 &[RpoDigest::default(), RpoDigest::default()],
-                DynNode::DYN_DOMAIN
+                DynNode::dyn_domain()
             )
         );
 
@@ -225,7 +229,7 @@ mod tests {
             DynNode::new_dyncall().digest(),
             Rpo256::merge_in_domain(
                 &[RpoDigest::default(), RpoDigest::default()],
-                DynNode::DYNCALL_DOMAIN
+                DynNode::dyncall_domain()
             )
         );
     }

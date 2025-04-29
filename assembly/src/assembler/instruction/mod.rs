@@ -1,7 +1,9 @@
 use core::ops::RangeBounds;
 
 use miette::miette;
-use vm_core::{Decorator, ONE, WORD_SIZE, ZERO, debuginfo::Spanned, mast::MastNodeId};
+use vm_core::{
+    Decorator, ONE, PrimeCharacteristicRing, WORD_SIZE, ZERO, debuginfo::Spanned, mast::MastNodeId,
+};
 
 use super::{Assembler, BasicBlockBuilder, Felt, Operation, ProcedureContext, ast::InvokeKind};
 use crate::{AssemblyError, Span, ast::Instruction, utils::bound_into_included_u64};
@@ -296,14 +298,14 @@ impl Assembler {
 
             // ----- input / output instructions --------------------------------------------------
             Instruction::Push(imm) => env_ops::push_one(imm.expect_value(), block_builder),
-            Instruction::PushU8(imm) => env_ops::push_one(*imm, block_builder),
-            Instruction::PushU16(imm) => env_ops::push_one(*imm, block_builder),
-            Instruction::PushU32(imm) => env_ops::push_one(*imm, block_builder),
+            Instruction::PushU8(imm) => env_ops::push_one(Felt::from_u8(*imm), block_builder),
+            Instruction::PushU16(imm) => env_ops::push_one(Felt::from_u16(*imm), block_builder),
+            Instruction::PushU32(imm) => env_ops::push_one(Felt::from_u32(*imm), block_builder),
             Instruction::PushFelt(imm) => env_ops::push_one(*imm, block_builder),
             Instruction::PushWord(imms) => env_ops::push_many(imms, block_builder),
-            Instruction::PushU8List(imms) => env_ops::push_many(imms, block_builder),
-            Instruction::PushU16List(imms) => env_ops::push_many(imms, block_builder),
-            Instruction::PushU32List(imms) => env_ops::push_many(imms, block_builder),
+            Instruction::PushU8List(imms) => env_ops::push_many_felt_u8(imms, block_builder),
+            Instruction::PushU16List(imms) => env_ops::push_many_felt_u16(imms, block_builder),
+            Instruction::PushU32List(imms) => env_ops::push_many_felt_u32(imms, block_builder),
             Instruction::PushFeltList(imms) => env_ops::push_many(imms, block_builder),
             Instruction::Sdepth => block_builder.push_op(SDepth),
             Instruction::Caller => env_ops::caller(block_builder, proc_ctx, instruction.span())?,
@@ -480,7 +482,7 @@ fn push_u32_value(span_builder: &mut BasicBlockBuilder, value: u32) {
         span_builder.push_op(Pad);
         span_builder.push_op(Incr);
     } else {
-        span_builder.push_op(Push(Felt::from(value)));
+        span_builder.push_op(Push(Felt::from_u32(value)));
     }
 }
 

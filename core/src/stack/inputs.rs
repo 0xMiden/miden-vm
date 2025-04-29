@@ -1,9 +1,8 @@
 use alloc::vec::Vec;
 use core::{ops::Deref, slice};
+use miden_crypto::PrimeCharacteristicRing;
 
-use super::{
-    super::ZERO, ByteWriter, Felt, InputError, MIN_STACK_DEPTH, Serializable, get_num_stack_values,
-};
+use super::{super::ZERO, ByteWriter, Felt, InputError, MIN_STACK_DEPTH, Serializable};
 use crate::utils::{ByteReader, Deserializable, DeserializationError};
 
 // STACK INPUTS
@@ -13,7 +12,7 @@ use crate::utils::{ByteReader, Deserializable, DeserializationError};
 ///
 /// The values in the struct are stored in the "stack order" - i.e., the last input is at the top
 /// of the stack (in position 0).
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct StackInputs {
     elements: [Felt; MIN_STACK_DEPTH],
 }
@@ -48,7 +47,9 @@ impl StackInputs {
     {
         let values = iter
             .into_iter()
-            .map(|v| Felt::try_from(v).map_err(|e| InputError::NotFieldElement(v, e)))
+            // TODO(Al)
+            //.map(|v| Felt::try_from(v).map_err(|e| InputError::NotFieldElement(v, e)))
+            .map(|v| Ok(Felt::from_u64(v)))
             .collect::<Result<Vec<_>, _>>()?;
 
         Self::new(values)
@@ -91,15 +92,19 @@ impl IntoIterator for StackInputs {
 // ================================================================================================
 
 impl Serializable for StackInputs {
-    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+    fn write_into<W: ByteWriter>(&self, _target: &mut W) {
+        todo!()
+        /*
         let num_stack_values = get_num_stack_values(self);
         target.write_u8(num_stack_values);
         target.write_many(&self.elements[..num_stack_values as usize]);
+        */
     }
 }
 
 impl Deserializable for StackInputs {
-    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+    fn read_from<R: ByteReader>(_source: &mut R) -> Result<Self, DeserializationError> {
+        /*
         let num_elements = source.read_u8()?;
 
         let mut elements = source.read_many::<Felt>(num_elements.into())?;
@@ -111,5 +116,8 @@ impl Deserializable for StackInputs {
                 MIN_STACK_DEPTH, num_elements
             ))
         })
+         */
+
+        todo!()
     }
 }

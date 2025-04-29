@@ -4,6 +4,7 @@ use miden_air::trace::chiplets::bitwise::{
     A_COL_IDX, A_COL_RANGE, B_COL_IDX, B_COL_RANGE, BITWISE_AND, BITWISE_XOR, OUTPUT_COL_IDX,
     PREV_OUTPUT_COL_IDX, TRACE_WIDTH,
 };
+use vm_core::{PrimeCharacteristicRing, PrimeField64};
 
 use super::{ExecutionError, Felt, TraceFragment, ZERO, utils::get_trace_len};
 
@@ -84,15 +85,15 @@ impl Bitwise {
     /// This also adds 8 rows to the internal execution trace table required for computing the
     /// operation.
     pub fn u32and(&mut self, a: Felt, b: Felt) -> Result<Felt, ExecutionError> {
-        let a = assert_u32(a)?.as_int();
-        let b = assert_u32(b)?.as_int();
+        let a = assert_u32(a)?.as_canonical_u64();
+        let b = assert_u32(b)?.as_canonical_u64();
         let mut result = 0u64;
 
         // append 8 rows to the trace, each row computing bitwise AND in 4 bit limbs starting with
         // the most significant limb.
         for bit_offset in (0..32).step_by(4).rev() {
             // append the previous row's result to the column for previous output values
-            self.trace[PREV_OUTPUT_COL_IDX].push(Felt::new(result));
+            self.trace[PREV_OUTPUT_COL_IDX].push(Felt::from_u64(result));
             // shift a and b so that the next 4-bit limb is in the least significant position
             let a = a >> bit_offset;
             let b = b >> bit_offset;
@@ -107,10 +108,10 @@ impl Bitwise {
             // append the 4 bit result to the result accumulator, and save the current result into
             // the output column in the trace.
             result = (result << 4) | result_4_bit;
-            self.trace[OUTPUT_COL_IDX].push(Felt::new(result));
+            self.trace[OUTPUT_COL_IDX].push(Felt::from_u64(result));
         }
 
-        Ok(Felt::new(result))
+        Ok(Felt::from_u64(result))
     }
 
     /// Computes a bitwise XOR of `a` and `b` and returns the result. We assume that `a` and `b`
@@ -119,15 +120,15 @@ impl Bitwise {
     /// This also adds 8 rows to the internal execution trace table required for computing the
     /// operation.
     pub fn u32xor(&mut self, a: Felt, b: Felt) -> Result<Felt, ExecutionError> {
-        let a = assert_u32(a)?.as_int();
-        let b = assert_u32(b)?.as_int();
+        let a = assert_u32(a)?.as_canonical_u64();
+        let b = assert_u32(b)?.as_canonical_u64();
         let mut result = 0u64;
 
         // append 8 rows to the trace, each row computing bitwise XOR in 4 bit limbs starting with
         // the most significant limb.
         for bit_offset in (0..32).step_by(4).rev() {
             // append the previous row's result to the column for previous output values
-            self.trace[PREV_OUTPUT_COL_IDX].push(Felt::new(result));
+            self.trace[PREV_OUTPUT_COL_IDX].push(Felt::from_u64(result));
             // shift a and b so that the next 4-bit limb is in the least significant position
             let a = a >> bit_offset;
             let b = b >> bit_offset;
@@ -142,10 +143,10 @@ impl Bitwise {
             // append the 4 bit result to the result accumulator, and save the current result into
             // the output column in the trace.
             result = (result << 4) | result_4_bit;
-            self.trace[OUTPUT_COL_IDX].push(Felt::new(result));
+            self.trace[OUTPUT_COL_IDX].push(Felt::from_u64(result));
         }
 
-        Ok(Felt::new(result))
+        Ok(Felt::from_u64(result))
     }
 
     // EXECUTION TRACE GENERATION
@@ -177,18 +178,18 @@ impl Bitwise {
     ///   set elsewhere.
     fn add_bitwise_trace_row(&mut self, selector: Felt, a: u64, b: u64) {
         self.trace[0].push(selector);
-        self.trace[A_COL_IDX].push(Felt::new(a));
-        self.trace[B_COL_IDX].push(Felt::new(b));
+        self.trace[A_COL_IDX].push(Felt::from_u64(a));
+        self.trace[B_COL_IDX].push(Felt::from_u64(b));
 
-        self.trace[A_COL_RANGE.start].push(Felt::new(a & 1));
-        self.trace[A_COL_RANGE.start + 1].push(Felt::new((a >> 1) & 1));
-        self.trace[A_COL_RANGE.start + 2].push(Felt::new((a >> 2) & 1));
-        self.trace[A_COL_RANGE.start + 3].push(Felt::new((a >> 3) & 1));
+        self.trace[A_COL_RANGE.start].push(Felt::from_u64(a & 1));
+        self.trace[A_COL_RANGE.start + 1].push(Felt::from_u64((a >> 1) & 1));
+        self.trace[A_COL_RANGE.start + 2].push(Felt::from_u64((a >> 2) & 1));
+        self.trace[A_COL_RANGE.start + 3].push(Felt::from_u64((a >> 3) & 1));
 
-        self.trace[B_COL_RANGE.start].push(Felt::new(b & 1));
-        self.trace[B_COL_RANGE.start + 1].push(Felt::new((b >> 1) & 1));
-        self.trace[B_COL_RANGE.start + 2].push(Felt::new((b >> 2) & 1));
-        self.trace[B_COL_RANGE.start + 3].push(Felt::new((b >> 3) & 1));
+        self.trace[B_COL_RANGE.start].push(Felt::from_u64(b & 1));
+        self.trace[B_COL_RANGE.start + 1].push(Felt::from_u64((b >> 1) & 1));
+        self.trace[B_COL_RANGE.start + 2].push(Felt::from_u64((b >> 2) & 1));
+        self.trace[B_COL_RANGE.start + 3].push(Felt::from_u64((b >> 3) & 1));
     }
 }
 
@@ -202,7 +203,7 @@ impl Default for Bitwise {
 // --------------------------------------------------------------------------------------------
 
 pub fn assert_u32(value: Felt) -> Result<Felt, ExecutionError> {
-    let val_u64 = value.as_int();
+    let val_u64 = value.as_canonical_u64();
     if val_u64 > u32::MAX.into() {
         Err(ExecutionError::NotU32Value(value, ZERO))
     } else {

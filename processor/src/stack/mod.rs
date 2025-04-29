@@ -1,10 +1,12 @@
+use std::println;
+
 use alloc::vec::Vec;
 
 use miden_air::RowIndex;
-use vm_core::{WORD_SIZE, Word, stack::MIN_STACK_DEPTH};
+use vm_core::{stack::MIN_STACK_DEPTH, PrimeCharacteristicRing, Word, WORD_SIZE};
 
 use super::{
-    ExecutionError, Felt, FieldElement, ONE, STACK_TRACE_WIDTH, StackInputs, StackOutputs, ZERO,
+    ExecutionError, Felt, ONE, STACK_TRACE_WIDTH, StackInputs, StackOutputs, ZERO,
 };
 
 mod trace;
@@ -133,6 +135,7 @@ impl Stack {
     /// # Errors
     /// Returns an error if the overflow table is not empty at the current clock cycle.
     pub fn build_stack_outputs(&self) -> Result<StackOutputs, ExecutionError> {
+        println!("stack is {:?}", self.get_state_at(self.clk));
         if self.overflow.num_active_rows() != 0 {
             return Err(ExecutionError::OutputStackOverflow(self.overflow.num_active_rows()));
         }
@@ -184,8 +187,10 @@ impl Stack {
             self.clk.into(),
             start_pos,
             // TODO: change type of `active_depth` to `u32`
-            Felt::try_from(self.active_depth as u64)
-                .expect("value is greater than or equal to the field modulus"),
+            // TODO(Al)
+            // Felt::try_from(self.active_depth as u64)
+            //    .expect("value is greater than or equal to the field modulus"),
+            Felt::from_u64(self.active_depth as u64),
             self.overflow.last_row_addr(),
         );
     }
@@ -274,7 +279,7 @@ impl Stack {
         // Note: `start_context()` reset `active_depth` to 16, and `overflow.last_row_addr` to 0.
         self.trace.set_helpers_at(
             self.clk.as_usize(),
-            Felt::from(self.active_depth as u32),
+            Felt::from_u32(self.active_depth as u32),
             self.overflow.last_row_addr(),
         );
 

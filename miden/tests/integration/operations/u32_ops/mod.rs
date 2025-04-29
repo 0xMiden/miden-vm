@@ -1,5 +1,6 @@
 use processor::ExecutionError;
 use test_utils::{Felt, U32_BOUND, ZERO, build_op_test, expect_exec_error_matches, prop_randw};
+use vm_core::PrimeCharacteristicRing;
 
 mod arithmetic_ops;
 mod bitwise_ops;
@@ -16,7 +17,7 @@ pub fn test_input_out_of_bounds(asm_op: &str) {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::NotU32Value(value, err_code) if value == Felt::new(U32_BOUND) && err_code == ZERO
+        ExecutionError::NotU32Value(value, err_code) if value == Felt::from_u64(U32_BOUND) && err_code == ZERO
     );
 }
 
@@ -34,7 +35,7 @@ pub fn test_inputs_out_of_bounds(asm_op: &str, input_count: usize) {
 
         expect_exec_error_matches!(
             test,
-            ExecutionError::NotU32Value(value, err_code) if value == Felt::new(U32_BOUND) && err_code == ZERO
+            ExecutionError::NotU32Value(value, err_code) if value == Felt::from_u64(U32_BOUND) && err_code == ZERO
         );
     }
 }

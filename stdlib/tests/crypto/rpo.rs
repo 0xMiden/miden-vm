@@ -1,5 +1,6 @@
 use miden_air::RowIndex;
 use processor::ExecutionError;
+use vm_core::PrimeField64;
 use test_utils::{build_expected_hash, build_expected_perm, expect_exec_error_matches};
 
 #[test]
@@ -47,7 +48,7 @@ fn test_hash_empty() {
     let zero_hash: Vec<u64> = build_expected_hash(&[
         0, 0, 0, 0,
         0, 0, 0, 0,
-    ]).into_iter().map(|e| e.as_int()).collect();
+    ]).into_iter().map(|e| e.as_canonical_u64()).collect();
     build_test!(two_zeros_mem_stream, &[]).expect_stack(&zero_hash);
 
     // checks the hash compute from 8 zero elements is the same when using hash_memory_words
@@ -94,7 +95,7 @@ fn test_single_iteration() {
     let one_hash: Vec<u64> = build_expected_hash(&[
         1, 0, 0, 0,
         0, 0, 0, 0,
-    ]).into_iter().map(|e| e.as_int()).collect();
+    ]).into_iter().map(|e| e.as_canonical_u64()).collect();
     build_test!(one_memstream, &[]).expect_stack(&one_hash);
 
     // checks the hash of 1 is the same when using hash_memory_words
@@ -129,7 +130,7 @@ fn test_hash_one_word() {
     #[rustfmt::skip]
     let one_hash: Vec<u64> = build_expected_hash(&[
         1, 0, 0, 0,
-    ]).into_iter().map(|e| e.as_int()).collect();
+    ]).into_iter().map(|e| e.as_canonical_u64()).collect();
 
     // checks the hash of 1 is the same when using hash_memory_words
     let one_element = "
@@ -175,7 +176,7 @@ fn test_hash_even_words() {
     let even_hash: Vec<u64> = build_expected_hash(&[
         1, 0, 0, 0,
         0, 1, 0, 0,
-    ]).into_iter().map(|e| e.as_int()).collect();
+    ]).into_iter().map(|e| e.as_canonical_u64()).collect();
     build_test!(even_words, &[]).expect_stack(&even_hash);
 }
 
@@ -205,7 +206,7 @@ fn test_hash_odd_words() {
         1, 0, 0, 0,
         0, 1, 0, 0,
         0, 0, 1, 0,
-    ]).into_iter().map(|e| e.as_int()).collect();
+    ]).into_iter().map(|e| e.as_canonical_u64()).collect();
     build_test!(odd_words, &[]).expect_stack(&odd_hash);
 }
 
@@ -234,7 +235,7 @@ fn test_absorb_double_words_from_memory() {
         0, 0, 0, 0, // capacity, no padding required
         1, 0, 0, 0, // first word of the rate
         0, 1, 0, 0, // second word of the rate
-    ]).into_iter().map(|e| e.as_int()).collect();
+    ]).into_iter().map(|e| e.as_canonical_u64()).collect();
 
     // start and end addr
     even_hash.push(1008);
@@ -272,7 +273,7 @@ fn test_squeeze_digest() {
         0, 1, 0, 0,
         0, 0, 1, 0,
         0, 0, 0, 1,
-    ]).into_iter().map(|e| e.as_int()).collect();
+    ]).into_iter().map(|e| e.as_canonical_u64()).collect();
 
     // start and end addr
     even_hash.push(1016);
@@ -304,7 +305,7 @@ fn test_hash_memory() {
     #[rustfmt::skip]
     let mut expected_hash: Vec<u64> = build_expected_hash(&[
         1, 2, 3, 4, 5
-    ]).into_iter().map(|e| e.as_int()).collect();
+    ]).into_iter().map(|e| e.as_canonical_u64()).collect();
     // make sure that value `11` stays unchanged
     expected_hash.push(11);
     build_test!(compute_inputs_hash_5, &[]).expect_stack(&expected_hash);
@@ -330,7 +331,7 @@ fn test_hash_memory() {
     #[rustfmt::skip]
     let mut expected_hash: Vec<u64> = build_expected_hash(&[
         1, 2, 3, 4, 5, 6, 7, 8
-    ]).into_iter().map(|e| e.as_int()).collect();
+    ]).into_iter().map(|e| e.as_canonical_u64()).collect();
     // make sure that value `11` stays unchanged
     expected_hash.push(11);
     build_test!(compute_inputs_hash_8, &[]).expect_stack(&expected_hash);
@@ -361,7 +362,7 @@ fn test_hash_memory() {
         5, 6, 7, 8, 
         9, 10, 11, 12, 
         13, 14, 15
-    ]).into_iter().map(|e| e.as_int()).collect();
+    ]).into_iter().map(|e| e.as_canonical_u64()).collect();
     // make sure that value `11` stays unchanged
     expected_hash.push(11);
     build_test!(compute_inputs_hash_15, &[]).expect_stack(&expected_hash);

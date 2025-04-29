@@ -8,7 +8,7 @@ use miden_crypto::{Felt, utils::collections::KvMap};
 
 use crate::{
     crypto::hash::RpoDigest,
-    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    // utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable}, TODO(Al)
 };
 
 // ADVICE MAP
@@ -106,7 +106,7 @@ impl Extend<(RpoDigest, Vec<Felt>)> for AdviceMap {
         self.0.extend(iter)
     }
 }
-
+/*
 impl Serializable for AdviceMap {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         target.write_usize(self.0.len());
@@ -130,12 +130,14 @@ impl Deserializable for AdviceMap {
 
 #[cfg(test)]
 mod tests {
+    use miden_crypto::PrimeCharacteristicRing;
+
     use super::*;
 
     #[test]
     fn test_advice_map_serialization() {
         let mut map1 = AdviceMap::new();
-        map1.insert(RpoDigest::default(), vec![Felt::from(1u32), Felt::from(2u32)]);
+        map1.insert(RpoDigest::default(), vec![Felt::from_u32(1u32), Felt::from_u32(2u32)]);
 
         let bytes = map1.to_bytes();
 
@@ -144,3 +146,4 @@ mod tests {
         assert_eq!(map1, map2);
     }
 }
+ */

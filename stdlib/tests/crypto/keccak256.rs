@@ -3,6 +3,7 @@ use test_utils::{
     Felt, IntoBytes, MIN_STACK_DEPTH,
     rand::{rand_array, rand_value},
 };
+use vm_core::PrimeCharacteristicRing;
 
 /// Equivalent to https://github.com/itzmeanjan/merklize-sha/blob/1d35aae/include/test_bit_interleaving.hpp#L12-L34
 #[test]
@@ -24,8 +25,8 @@ fn keccak256_bit_interleaving() {
     let test = build_test!(source, &[low, high]);
     let stack = test.get_last_stack_state();
 
-    assert_eq!(stack[0], Felt::new(high));
-    assert_eq!(stack[1], Felt::new(low));
+    assert_eq!(stack[0], Felt::from_u64(high));
+    assert_eq!(stack[1], Felt::from_u64(low));
 }
 
 #[test]

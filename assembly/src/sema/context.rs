@@ -3,6 +3,7 @@ use alloc::{
     sync::Arc,
     vec::Vec,
 };
+use vm_core::{PrimeCharacteristicRing, PrimeField64};
 
 use super::{SemanticAnalysisError, SyntaxError};
 use crate::{
@@ -88,7 +89,7 @@ impl AnalysisContext {
                     ConstantOp::Sub => Ok(lhs - rhs),
                     ConstantOp::Mul => Ok(lhs * rhs),
                     ConstantOp::Div => Ok(lhs / rhs),
-                    ConstantOp::IntDiv => Ok(Felt::new(lhs.as_int() / rhs.as_int())),
+                    ConstantOp::IntDiv => Ok(Felt::from_u64(lhs.as_canonical_u64() / rhs.as_canonical_u64())),
                 }
             },
         }

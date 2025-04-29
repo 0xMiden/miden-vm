@@ -1,22 +1,25 @@
 use super::*;
+use vm_core::{PrimeCharacteristicRing, PrimeField64, lazy_static};
 
 // TEST DATA
 // ================================================================================================
 
+lazy_static! {
 /// Note: We never insert at the same key twice. This is so that the `smt::get` test can loop over
 /// leaves, get the associated value, and compare. We test inserting at the same key twice in tests
 /// that use different data.
-const LEAVES: [(RpoDigest, Word); 2] = [
+    static ref LEAVES: [(RpoDigest, Word); 2] = [
     (
-        RpoDigest::new([Felt::new(101), Felt::new(102), Felt::new(103), Felt::new(104)]),
-        [Felt::new(1_u64), Felt::new(2_u64), Felt::new(3_u64), Felt::new(4_u64)],
+        RpoDigest::new([Felt::from_u64(101), Felt::from_u64(102), Felt::from_u64(103), Felt::from_u64(104)]),
+        [Felt::from_u64(1_u64), Felt::from_u64(2_u64), Felt::from_u64(3_u64), Felt::from_u64(4_u64)],
     ),
     // Most significant Felt differs from previous
     (
-        RpoDigest::new([Felt::new(105), Felt::new(106), Felt::new(107), Felt::new(108)]),
-        [Felt::new(5_u64), Felt::new(6_u64), Felt::new(7_u64), Felt::new(8_u64)],
+        RpoDigest::new([Felt::from_u64(105), Felt::from_u64(106), Felt::from_u64(107), Felt::from_u64(108)]),
+        [Felt::from_u64(5_u64), Felt::from_u64(6_u64), Felt::from_u64(7_u64), Felt::from_u64(8_u64)],
     ),
 ];
+}
 
 /// Tests `get` on every key present in the SMT, as well as an empty leaf
 #[test]
@@ -38,16 +41,21 @@ fn test_smt_get() {
         build_test!(source, &initial_stack, &[], store, advice_map).expect_stack(&expected_output);
     }
 
-    let smt = Smt::with_entries(LEAVES).unwrap();
+    let smt = Smt::with_entries(*LEAVES).unwrap();
 
     // Get all leaves present in tree
-    for (key, value) in LEAVES {
-        expect_value_from_get(key, value, &smt);
+    for (key, value) in LEAVES.iter() {
+        expect_value_from_get(*key, *value, &smt);
     }
 
     // Get an empty leaf
     expect_value_from_get(
-        RpoDigest::new([42_u32.into(), 42_u32.into(), 42_u32.into(), 42_u32.into()]),
+        RpoDigest::new([
+            Felt::from_u32(42_u32),
+            Felt::from_u32(42),
+            Felt::from_u32(42),
+            Felt::from_u32(42),
+        ]),
         EMPTY_WORD,
         &smt,
     );
@@ -71,10 +79,10 @@ fn test_smt_set() {
 
         // insert values one-by-one into the tree
         let mut old_roots = Vec::new();
-        for (key, value) in LEAVES {
+        for (key, value) in LEAVES.iter() {
             old_roots.push(smt.root());
             let (init_stack, final_stack, store, advice_map) =
-                prepare_insert_or_set(key, value, smt);
+                prepare_insert_or_set(*key, *value, smt);
             build_test!(source, &init_stack, &[], store, advice_map).expect_stack(&final_stack);
         }
 
@@ -102,7 +110,7 @@ fn test_smt_set() {
 /// Tests updating an existing key with a different value
 #[test]
 fn test_smt_set_same_key() {
-    let mut smt = Smt::with_entries(LEAVES).unwrap();
+    let mut smt = Smt::with_entries(*LEAVES).unwrap();
 
     let source = "
     use.std::collections::smt
@@ -112,7 +120,7 @@ fn test_smt_set_same_key() {
     ";
 
     let key = LEAVES[0].0;
-    let value = [42323_u32.into(); 4];
+    let value = [Felt::from_u32(42323); 4];
     let (init_stack, final_stack, store, advice_map) = prepare_insert_or_set(key, value, &mut smt);
     build_test!(source, &init_stack, &[], store, advice_map).expect_stack(&final_stack);
 }
@@ -130,7 +138,12 @@ fn test_smt_set_empty_value_to_empty_leaf() {
     end
     ";
 
-    let key = RpoDigest::new([41_u32.into(), 42_u32.into(), 43_u32.into(), 44_u32.into()]);
+    let key = RpoDigest::new([
+        Felt::from_u32(41),
+        Felt::from_u32(42),
+        Felt::from_u32(43),
+        Felt::from_u32(44),
+    ]);
     let value = EMPTY_WORD;
     let (init_stack, final_stack, store, advice_map) = prepare_insert_or_set(key, value, &mut smt);
     build_test!(source, &init_stack, &[], store, advice_map).expect_stack(&final_stack);
@@ -173,8 +186,13 @@ fn test_set_advice_map_empty_key() {
     end
     ";
 
-    let key = RpoDigest::new([41_u32.into(), 42_u32.into(), 43_u32.into(), 44_u32.into()]);
-    let value: [Felt; 4] = [42323_u32.into(); 4];
+    let key = RpoDigest::new([
+        Felt::from_u32(41),
+        Felt::from_u32(42),
+        Felt::from_u32(43),
+        Felt::from_u32(44),
+    ]);
+    let value: [Felt; 4] = [Felt::from_u32(42323); 4];
     let (init_stack, _, store, advice_map) = prepare_insert_or_set(key, value, &mut smt);
 
     // assert is checked in MASM
@@ -184,7 +202,7 @@ fn test_set_advice_map_empty_key() {
 /// Tests that the advice map is properly updated after a `set` on a key that has existing value
 #[test]
 fn test_set_advice_map_single_key() {
-    let mut smt = Smt::with_entries(LEAVES).unwrap();
+    let mut smt = Smt::with_entries(*LEAVES).unwrap();
 
     let source = "
     use.std::collections::smt
@@ -217,7 +235,7 @@ fn test_set_advice_map_single_key() {
     ";
 
     let key = LEAVES[0].0;
-    let value: [Felt; 4] = [42323_u32.into(); 4];
+    let value: [Felt; 4] = [Felt::from_u32(42323); 4];
     let (init_stack, _, store, advice_map) = prepare_insert_or_set(key, value, &mut smt);
 
     // assert is checked in MASM
@@ -228,18 +246,24 @@ fn test_set_advice_map_single_key() {
 /// (i.e. removing a value that's already empty)
 #[test]
 fn test_set_empty_key_in_non_empty_leaf() {
-    let key_mse = Felt::new(42);
+    let key_mse = Felt::from_u64(42);
 
     let leaves: [(RpoDigest, Word); 1] = [(
-        RpoDigest::new([Felt::new(101), Felt::new(102), Felt::new(103), key_mse]),
-        [Felt::new(1_u64), Felt::new(2_u64), Felt::new(3_u64), Felt::new(4_u64)],
+        RpoDigest::new([Felt::from_u64(101), Felt::from_u64(102), Felt::from_u64(103), key_mse]),
+        [
+            Felt::from_u64(1_u64),
+            Felt::from_u64(2_u64),
+            Felt::from_u64(3_u64),
+            Felt::from_u64(4_u64),
+        ],
     )];
 
     let mut smt = Smt::with_entries(leaves).unwrap();
 
     // This key has same most significant element as key in the existing leaf, so will map to that
     // leaf
-    let new_key = RpoDigest::new([Felt::new(1), Felt::new(12), Felt::new(3), key_mse]);
+    let new_key =
+        RpoDigest::new([Felt::from_u64(1), Felt::from_u64(12), Felt::from_u64(3), key_mse]);
 
     let source = "
     use.std::collections::smt
@@ -295,20 +319,20 @@ fn build_advice_inputs(smt: &Smt) -> (MerkleStore, Vec<(RpoDigest, Vec<Felt>)>) 
 
 fn build_expected_stack(word0: Word, word1: Word) -> Vec<u64> {
     vec![
-        word0[3].as_int(),
-        word0[2].as_int(),
-        word0[1].as_int(),
-        word0[0].as_int(),
-        word1[3].as_int(),
-        word1[2].as_int(),
-        word1[1].as_int(),
-        word1[0].as_int(),
+        word0[3].as_canonical_u64(),
+        word0[2].as_canonical_u64(),
+        word0[1].as_canonical_u64(),
+        word0[0].as_canonical_u64(),
+        word1[3].as_canonical_u64(),
+        word1[2].as_canonical_u64(),
+        word1[1].as_canonical_u64(),
+        word1[0].as_canonical_u64(),
     ]
 }
 
 fn append_word_to_vec(target: &mut Vec<u64>, word: Word) {
-    target.push(word[0].as_int());
-    target.push(word[1].as_int());
-    target.push(word[2].as_int());
-    target.push(word[3].as_int());
+    target.push(word[0].as_canonical_u64());
+    target.push(word[1].as_canonical_u64());
+    target.push(word[2].as_canonical_u64());
+    target.push(word[3].as_canonical_u64());
 }

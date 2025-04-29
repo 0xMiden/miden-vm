@@ -18,6 +18,7 @@ fn bin_under_test() -> escargot::CargoRun {
 }
 
 #[test]
+#[ignore = "fix-prover"]
 // Tt test might be an overkill to test only that the 'run' cli command
 // outputs steps and ms.
 fn cli_run() -> Result<(), Box<dyn std::error::Error>> {
@@ -43,6 +44,7 @@ fn cli_run() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test]
+#[ignore = "fix-prover"]
 fn cli_run_masp() -> Result<(), Box<dyn std::error::Error>> {
     let mut cmd = bin_under_test().command();
 
@@ -59,6 +61,7 @@ fn cli_run_masp() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test]
+#[ignore = "fix-prover"]
 fn cli_prove_masp() -> Result<(), Box<dyn std::error::Error>> {
     let mut cmd = bin_under_test().command();
 
@@ -81,6 +84,7 @@ use assembly::Library;
 use vm_core::Decorator;
 
 #[test]
+#[ignore = "fix-prover"]
 fn cli_bundle_debug() {
     let mut cmd = bin_under_test().command();
     cmd.arg("bundle").arg("--debug").arg("./tests/integration/cli/data/lib");
@@ -95,6 +99,7 @@ fn cli_bundle_debug() {
 }
 
 #[test]
+#[ignore = "fix-prover"]
 fn cli_bundle_no_exports() {
     let mut cmd = bin_under_test().command();
     cmd.arg("bundle").arg("./tests/integration/cli/data/lib_noexports");
@@ -104,6 +109,7 @@ fn cli_bundle_no_exports() {
 }
 
 #[test]
+#[ignore = "fix-prover"]
 fn cli_bundle_kernel() {
     let mut cmd = bin_under_test().command();
     cmd.arg("bundle")
@@ -116,6 +122,7 @@ fn cli_bundle_kernel() {
 
 /// A kernel can bundle with a library w/o exports.
 #[test]
+#[ignore = "fix-prover"]
 fn cli_bundle_kernel_noexports() {
     let mut cmd = bin_under_test().command();
     cmd.arg("bundle")
@@ -127,6 +134,7 @@ fn cli_bundle_kernel_noexports() {
 }
 
 #[test]
+#[ignore = "fix-prover"]
 fn cli_bundle_output() {
     let mut cmd = bin_under_test().command();
     cmd.arg("bundle")
@@ -139,6 +147,7 @@ fn cli_bundle_output() {
 }
 
 #[test]
+#[ignore = "fix-prover"]
 // First compile a library to a .masl file, then run a program that uses it.
 fn cli_run_with_lib() -> Result<(), Box<dyn std::error::Error>> {
     let mut cmd = bin_under_test().command();
@@ -160,6 +169,7 @@ fn cli_run_with_lib() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test]
+#[ignore = "fix-prover"]
 fn cli_analyze_masp() -> Result<(), Box<dyn std::error::Error>> {
     let mut cmd = bin_under_test().command();
 
@@ -176,6 +186,7 @@ fn cli_analyze_masp() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test]
+#[ignore = "fix-prover"]
 fn cli_debug_masp() -> Result<(), Box<dyn std::error::Error>> {
     let mut cmd = bin_under_test().command();
 

@@ -1,10 +1,9 @@
-pub mod sync;
-
 use alloc::vec::Vec;
 use core::{
     fmt::Debug,
     ops::{Bound, Range},
 };
+use miden_crypto::{ExtensionField, PrimeCharacteristicRing, PrimeField64};
 
 // RE-EXPORTS
 // ================================================================================================
@@ -16,7 +15,9 @@ pub use miden_crypto::utils::{
 pub use winter_utils::ReadAdapter;
 pub use winter_utils::group_slice_elements;
 
-use crate::Felt;
+pub mod sync;
+
+use super::Felt;
 
 pub mod math {
     pub use math::batch_inversion;
@@ -31,13 +32,13 @@ pub trait ToElements {
 
 impl<const N: usize> ToElements for [u64; N] {
     fn to_elements(&self) -> Vec<Felt> {
-        self.iter().map(|&v| Felt::new(v)).collect()
+        self.iter().map(|&v| Felt::from_u64(v)).collect()
     }
 }
 
 impl ToElements for Vec<u64> {
     fn to_elements(&self) -> Vec<Felt> {
-        self.iter().map(|&v| Felt::new(v)).collect()
+        self.iter().map(|&v| Felt::from_u64(v)).collect()
     }
 }
 
@@ -52,10 +53,10 @@ impl IntoBytes<32> for [Felt; 4] {
     fn into_bytes(self) -> [u8; 32] {
         let mut result = [0; 32];
 
-        result[..8].copy_from_slice(&self[0].as_int().to_le_bytes());
-        result[8..16].copy_from_slice(&self[1].as_int().to_le_bytes());
-        result[16..24].copy_from_slice(&self[2].as_int().to_le_bytes());
-        result[24..].copy_from_slice(&self[3].as_int().to_le_bytes());
+        result[..8].copy_from_slice(&self[0].as_canonical_u64().to_le_bytes());
+        result[8..16].copy_from_slice(&self[1].as_canonical_u64().to_le_bytes());
+        result[16..24].copy_from_slice(&self[2].as_canonical_u64().to_le_bytes());
+        result[24..].copy_from_slice(&self[3].as_canonical_u64().to_le_bytes());
 
         result
     }
@@ -130,3 +131,24 @@ fn debug_assert_is_checked() {
 // ================================================================================================
 
 pub use miden_formatting::hex::{DisplayHex, ToHex, to_hex};
+
+pub fn serial_batch_inversion<E: ExtensionField<Felt>>(values: &[E], result: &mut [E]) {
+    let mut last = E::ONE;
+    for (result, &value) in result.iter_mut().zip(values.iter()) {
+        *result = last;
+        if value != E::ZERO {
+            last *= value;
+        }
+    }
+
+    last = last.inverse();
+
+    for i in (0..values.len()).rev() {
+        if values[i] == E::ZERO {
+            result[i] = E::ZERO;
+        } else {
+            result[i] *= last;
+            last *= values[i];
+        }
+    }
+}

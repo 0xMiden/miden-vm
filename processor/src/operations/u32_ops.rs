@@ -1,6 +1,8 @@
+use vm_core::{Field, PrimeCharacteristicRing, PrimeField64};
+
 use super::{
     super::utils::{split_element, split_u32_into_u16},
-    ExecutionError, Felt, FieldElement, Operation, Process,
+    ExecutionError, Felt, Operation, Process,
 };
 use crate::ZERO;
 
@@ -13,7 +15,7 @@ macro_rules! require_u32_operand {
 
     ($stack:expr, $idx:literal, $errno:expr) => {{
         let operand = $stack.get($idx);
-        if operand.as_int() > U32_MAX {
+        if operand.as_canonical_u64() > U32_MAX {
             return Err(ExecutionError::NotU32Value(operand, $errno));
         }
         operand
@@ -42,8 +44,8 @@ impl Process {
     /// the high values are equal to 0; if they are, puts the original elements back onto the
     /// stack; if they are not, returns an error.
     pub(super) fn op_u32assert2(&mut self, err_code: u32) -> Result<(), ExecutionError> {
-        let b = require_u32_operand!(self.stack, 0, Felt::from(err_code));
-        let a = require_u32_operand!(self.stack, 1, Felt::from(err_code));
+        let b = require_u32_operand!(self.stack, 0, Felt::from_u32(err_code));
+        let a = require_u32_operand!(self.stack, 1, Felt::from_u32(err_code));
 
         self.add_range_checks(Operation::U32assert2(err_code), a, b, false);
 
@@ -57,10 +59,10 @@ impl Process {
     /// Pops two elements off the stack, adds them, splits the result into low and high 32-bit
     /// values, and pushes these values back onto the stack.
     pub(super) fn op_u32add(&mut self) -> Result<(), ExecutionError> {
-        let b = require_u32_operand!(self.stack, 0).as_int();
-        let a = require_u32_operand!(self.stack, 1).as_int();
+        let b = require_u32_operand!(self.stack, 0).as_canonical_u64();
+        let a = require_u32_operand!(self.stack, 1).as_canonical_u64();
 
-        let result = Felt::new(a + b);
+        let result = Felt::from_u64(a + b);
         let (hi, lo) = split_element(result);
         self.add_range_checks(Operation::U32add, lo, hi, false);
 
@@ -73,10 +75,10 @@ impl Process {
     /// Pops three elements off the stack, adds them, splits the result into low and high 32-bit
     /// values, and pushes these values back onto the stack.
     pub(super) fn op_u32add3(&mut self) -> Result<(), ExecutionError> {
-        let c = require_u32_operand!(self.stack, 0).as_int();
-        let b = require_u32_operand!(self.stack, 1).as_int();
-        let a = require_u32_operand!(self.stack, 2).as_int();
-        let result = Felt::new(a + b + c);
+        let c = require_u32_operand!(self.stack, 0).as_canonical_u64();
+        let b = require_u32_operand!(self.stack, 1).as_canonical_u64();
+        let a = require_u32_operand!(self.stack, 2).as_canonical_u64();
+        let result = Felt::from_u64(a + b + c);
         let (hi, lo) = split_element(result);
 
         self.add_range_checks(Operation::U32add3, lo, hi, false);
@@ -91,11 +93,11 @@ impl Process {
     /// pushes the result as well as a flag indicating whether there was underflow back onto the
     /// stack.
     pub(super) fn op_u32sub(&mut self) -> Result<(), ExecutionError> {
-        let b = require_u32_operand!(self.stack, 0).as_int();
-        let a = require_u32_operand!(self.stack, 1).as_int();
+        let b = require_u32_operand!(self.stack, 0).as_canonical_u64();
+        let a = require_u32_operand!(self.stack, 1).as_canonical_u64();
         let result = a.wrapping_sub(b);
-        let d = Felt::new(result >> 63);
-        let c = Felt::new(result & U32_MAX);
+        let d = Felt::from_u64(result >> 63);
+        let c = Felt::from_u64(result & U32_MAX);
 
         // Force this operation to consume 4 range checks, even though only `lo` is needed.
         // This is required for making the constraints more uniform and grouping the opcodes of
@@ -111,9 +113,9 @@ impl Process {
     /// Pops two elements off the stack, multiplies them, splits the result into low and high
     /// 32-bit values, and pushes these values back onto the stack.
     pub(super) fn op_u32mul(&mut self) -> Result<(), ExecutionError> {
-        let b = require_u32_operand!(self.stack, 0).as_int();
-        let a = require_u32_operand!(self.stack, 1).as_int();
-        let result = Felt::new(a * b);
+        let b = require_u32_operand!(self.stack, 0).as_canonical_u64();
+        let a = require_u32_operand!(self.stack, 1).as_canonical_u64();
+        let result = Felt::from_u64(a * b);
         let (hi, lo) = split_element(result);
 
         self.add_range_checks(Operation::U32mul, lo, hi, true);
@@ -128,10 +130,10 @@ impl Process {
     /// the result, splits the result into low and high 32-bit values, and pushes these values
     /// back onto the stack.
     pub(super) fn op_u32madd(&mut self) -> Result<(), ExecutionError> {
-        let b = require_u32_operand!(self.stack, 0).as_int();
-        let a = require_u32_operand!(self.stack, 1).as_int();
-        let c = require_u32_operand!(self.stack, 2).as_int();
-        let result = Felt::new(a * b + c);
+        let b = require_u32_operand!(self.stack, 0).as_canonical_u64();
+        let a = require_u32_operand!(self.stack, 1).as_canonical_u64();
+        let c = require_u32_operand!(self.stack, 2).as_canonical_u64();
+        let result = Felt::from_u64(a * b + c);
         let (hi, lo) = split_element(result);
 
         self.add_range_checks(Operation::U32madd, lo, hi, true);
@@ -148,8 +150,8 @@ impl Process {
     /// # Errors
     /// Returns an error if the divisor is ZERO.
     pub(super) fn op_u32div(&mut self) -> Result<(), ExecutionError> {
-        let b = require_u32_operand!(self.stack, 0).as_int();
-        let a = require_u32_operand!(self.stack, 1).as_int();
+        let b = require_u32_operand!(self.stack, 0).as_canonical_u64();
+        let a = require_u32_operand!(self.stack, 1).as_canonical_u64();
 
         if b == 0 {
             return Err(ExecutionError::DivideByZero(self.system.clk()));
@@ -159,13 +161,13 @@ impl Process {
         let r = a - q * b;
 
         // These range checks help enforce that q <= a.
-        let lo = Felt::new(a - q);
+        let lo = Felt::from_u64(a - q);
         // These range checks help enforce that r < b.
-        let hi = Felt::new(b - r - 1);
+        let hi = Felt::from_u64(b - r - 1);
         self.add_range_checks(Operation::U32div, lo, hi, false);
 
-        self.stack.set(0, Felt::new(r));
-        self.stack.set(1, Felt::new(q));
+        self.stack.set(0, Felt::from_u64(r));
+        self.stack.set(1, Felt::from_u64(q));
         self.stack.copy_state(2);
         Ok(())
     }
@@ -214,18 +216,23 @@ impl Process {
         hi: Felt,
         check_element_validity: bool,
     ) {
-        let (t1, t0) = split_u32_into_u16(lo.as_int());
-        let (t3, t2) = split_u32_into_u16(hi.as_int());
+        let (t1, t0) = split_u32_into_u16(lo.as_canonical_u64());
+        let (t3, t2) = split_u32_into_u16(hi.as_canonical_u64());
 
         // add lookup values to the range checker.
         self.range.add_range_checks(self.system.clk(), &[t0, t1, t2, t3]);
 
         // save the range check lookups to the decoder's user operation helper columns.
-        let mut helper_values =
-            [Felt::from(t0), Felt::from(t1), Felt::from(t2), Felt::from(t3), ZERO];
+        let mut helper_values = [
+            Felt::from_u16(t0),
+            Felt::from_u16(t1),
+            Felt::from_u16(t2),
+            Felt::from_u16(t3),
+            ZERO,
+        ];
 
         if check_element_validity {
-            let m = (Felt::from(u32::MAX) - hi).inv();
+            let m = (Felt::from_u32(u32::MAX) - hi).try_inverse().unwrap_or(ZERO);
             helper_values[4] = m;
         }
 
@@ -240,7 +247,7 @@ impl Process {
 mod tests {
     use miden_air::trace::decoder::NUM_USER_OP_HELPERS;
     use test_utils::rand::rand_value;
-    use vm_core::stack::MIN_STACK_DEPTH;
+    use vm_core::{PrimeCharacteristicRing, stack::MIN_STACK_DEPTH};
 
     use super::{
         super::{Felt, Operation},
@@ -263,8 +270,8 @@ mod tests {
 
         process.execute_op(Operation::U32split, &mut host).unwrap();
         let mut expected = [ZERO; 16];
-        expected[0] = Felt::new(hi);
-        expected[1] = Felt::new(lo);
+        expected[0] = Felt::from_u64(hi);
+        expected[1] = Felt::from_u64(lo);
         assert_eq!(expected, process.stack.trace_state());
 
         // --- test the rest of the stack is not modified -----------------------
@@ -276,9 +283,9 @@ mod tests {
 
         process.execute_op(Operation::U32split, &mut host).unwrap();
         let mut expected = [ZERO; 16];
-        expected[0] = Felt::new(hi);
-        expected[1] = Felt::new(lo);
-        expected[2] = Felt::new(a);
+        expected[0] = Felt::from_u64(hi);
+        expected[1] = Felt::from_u64(lo);
+        expected[2] = Felt::from_u64(a);
         assert_eq!(expected, process.stack.trace_state());
     }
 
@@ -477,7 +484,7 @@ mod tests {
     fn build_expected(values: &[u32]) -> [Felt; MIN_STACK_DEPTH] {
         let mut expected = [ZERO; MIN_STACK_DEPTH];
         for (&value, result) in values.iter().zip(expected.iter_mut()) {
-            *result = Felt::new(value as u64);
+            *result = Felt::from_u64(value as u64);
         }
         expected
     }
@@ -485,7 +492,7 @@ mod tests {
     fn build_expected_helper_registers(values: &[u32]) -> [Felt; NUM_USER_OP_HELPERS] {
         let mut expected = [ZERO; NUM_USER_OP_HELPERS];
         for (&value, result) in values.iter().zip(expected.iter_mut()) {
-            *result = Felt::new(value as u64);
+            *result = Felt::from_u64(value as u64);
         }
         expected
     }

@@ -10,6 +10,7 @@ pub use vm_core::crypto::{
         MmrPeaks, NodeIndex, PartialMerkleTree, SimpleSmt, Smt,
     },
 };
+use vm_core::PrimeCharacteristicRing;
 pub use winter_prover::crypto::{
     BatchMerkleProof, DefaultRandomCoin as WinterRandomCoin, ElementHasher, Hasher, RandomCoin,
 };
@@ -31,5 +32,5 @@ pub fn init_merkle_leaves(values: &[u64]) -> Vec<Word> {
 }
 
 pub fn init_merkle_leaf(value: u64) -> Word {
-    [Felt::new(value), ZERO, ZERO, ZERO]
+    [Felt::from_u64(value), ZERO, ZERO, ZERO]
 }

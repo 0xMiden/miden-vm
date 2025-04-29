@@ -316,13 +316,15 @@ pub(crate) enum MultiMastForestIteratorItem {
 
 #[cfg(test)]
 mod tests {
-    use miden_crypto::hash::rpo::RpoDigest;
+    use miden_crypto::{ZERO, hash::rpo::RpoDigest};
 
     use super::*;
     use crate::Operation;
 
     fn random_digest() -> RpoDigest {
-        RpoDigest::new([rand_utils::rand_value(); 4])
+        // TODO(Al)
+        //RpoDigest::new([rand_utils::rand_value(); 4])
+        RpoDigest::new([ZERO; 4])
     }
 
     #[test]

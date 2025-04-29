@@ -37,6 +37,7 @@ test-case = "3.2"
 verifier = { package = "miden-verifier", path = "../verifier", version = "0.14", default-features = false }
 vm-core = { package = "miden-core", path = "../core", version = "0.14", default-features = false }
 winter-prover = { package = "winter-prover", version = "0.12", default-features = false }
+rand = "0.9"
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 pretty_assertions = { version = "1.4", default-features = false, features = ["alloc"] }

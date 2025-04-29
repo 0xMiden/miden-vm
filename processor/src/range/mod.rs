@@ -1,8 +1,9 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 
 use miden_air::RowIndex;
+use vm_core::PrimeCharacteristicRing;
 
-use super::{Felt, FieldElement, RangeCheckTrace, ZERO, trace::NUM_RAND_ROWS};
+use super::{Felt, RangeCheckTrace, ZERO, trace::NUM_RAND_ROWS};
 use crate::utils::uninit_vector;
 
 mod aux_trace;
@@ -252,7 +253,7 @@ fn write_rows(
 
 /// Populates a single row at the specified step in the trace table.
 fn write_trace_row(trace: &mut [Vec<Felt>], step: &mut usize, num_lookups: usize, value: u64) {
-    trace[0][*step] = Felt::new(num_lookups as u64);
-    trace[1][*step] = Felt::new(value);
+    trace[0][*step] = Felt::from_u64(num_lookups as u64);
+    trace[1][*step] = Felt::from_u64(value);
     *step += 1;
 }

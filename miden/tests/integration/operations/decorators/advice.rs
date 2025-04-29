@@ -3,7 +3,7 @@ use test_utils::{
     crypto::{MerkleStore, RpoDigest},
     rand::rand_value,
 };
-use vm_core::Felt;
+use vm_core::{Felt, PrimeCharacteristicRing};
 
 // ADVICE INJECTION
 // ================================================================================================
@@ -226,7 +226,7 @@ fn advice_push_mapval() {
     let stack_inputs = [1, 2, 3, 4];
     let adv_map = [(
         RpoDigest::try_from(stack_inputs).unwrap(),
-        vec![Felt::new(8), Felt::new(7), Felt::new(6), Felt::new(5)],
+        vec![Felt::from_u64(8), Felt::from_u64(7), Felt::from_u64(6), Felt::from_u64(5)],
     )];
 
     let test = build_test!(source, &stack_inputs, [], MerkleStore::default(), adv_map);
@@ -250,7 +250,7 @@ fn advice_push_mapval() {
     let stack_inputs = [1, 2, 3, 4];
     let adv_map = [(
         RpoDigest::try_from(stack_inputs).unwrap(),
-        vec![Felt::new(11), Felt::new(12), Felt::new(13), Felt::new(14), Felt::new(15)],
+        vec![Felt::from_u64(11), Felt::from_u64(12), Felt::from_u64(13), Felt::from_u64(14), Felt::from_u64(15)],
     )];
 
     let test = build_test!(source, &stack_inputs, [], MerkleStore::default(), adv_map);

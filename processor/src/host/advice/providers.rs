@@ -1,6 +1,6 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 
-use vm_core::crypto::merkle::{MerkleStore, NodeIndex, StoreNode};
+use vm_core::{crypto::merkle::{MerkleStore, NodeIndex, StoreNode}, PrimeCharacteristicRing, PrimeField64};
 
 use super::{
     AdviceInputs, AdviceProvider, AdviceSource, ExecutionError, Felt, MerklePath, RpoDigest, Word,
@@ -99,7 +99,8 @@ where
                 self.stack.extend(values.iter().rev());
                 if include_len {
                     self.stack
-                        .push(Felt::try_from(values.len() as u64).expect("value length too big"));
+                        // TODO(Al) .push(Felt::try_from(values.len() as u64).expect("value length too big"));
+                    .push(Felt::from_u64(values.len() as u64))
                 }
             },
         }
@@ -157,10 +158,10 @@ where
         tree_depth: &Felt,
         index: &Felt,
     ) -> Result<u8, ExecutionError> {
-        let tree_depth = u8::try_from(tree_depth.as_int())
+        let tree_depth = u8::try_from(tree_depth.as_canonical_u64())
             .map_err(|_| ExecutionError::InvalidMerkleTreeDepth { depth: *tree_depth })?;
         self.store
-            .get_leaf_depth(root.into(), tree_depth, index.as_int())
+            .get_leaf_depth(root.into(), tree_depth, index.as_canonical_u64())
             .map_err(ExecutionError::MerkleStoreLookupFailed)
     }
 

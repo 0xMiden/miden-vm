@@ -1,4 +1,4 @@
-use vm_core::{FieldElement, Operation::*, sys_events::SystemEvent};
+use vm_core::{sys_events::SystemEvent, Operation::*, PrimeCharacteristicRing, PrimeField64};
 
 use super::{BasicBlockBuilder, validate_param};
 use crate::{
@@ -8,7 +8,7 @@ use crate::{
 };
 
 /// Field element representing TWO in the base field of the VM.
-const TWO: Felt = Felt::new(2);
+const TWO: Felt = Felt::TWO;
 
 // ASSERTIONS
 // ================================================================================================
@@ -105,7 +105,7 @@ pub fn div_imm(
     } else if imm == ONE {
         span_builder.push_op(Noop);
     } else {
-        span_builder.push_ops([Push(imm.into_inner().inv()), Mul]);
+        span_builder.push_ops([Push(ONE / imm.into_inner()), Mul]);
     }
     Ok(())
 }
@@ -126,7 +126,7 @@ pub fn pow2(span_builder: &mut BasicBlockBuilder) {
 /// VM cycles: 16 cycles
 pub fn append_pow2_op(span_builder: &mut BasicBlockBuilder) {
     // push base 2 onto the stack: [exp, ...] -> [2, exp, ...]
-    span_builder.push_op(Push(2_u8.into()));
+    span_builder.push_op(Push(Felt::TWO));
     // introduce initial value of acc onto the stack: [2, exp, ...] -> [1, 2, exp, ...]
     span_builder.push_ops([Pad, Incr]);
     // arrange the top of the stack for EXPACC operation: [1, 2, exp, ...] -> [0, 2, 1, exp, ...]
@@ -182,12 +182,12 @@ pub fn exp(span_builder: &mut BasicBlockBuilder, num_pow_bits: u8) -> Result<(),
 /// - pow = 7: 12 cycles
 /// - pow > 7: 9 + Ceil(log2(pow))
 pub fn exp_imm(span_builder: &mut BasicBlockBuilder, pow: Felt) -> Result<(), AssemblyError> {
-    if pow.as_int() <= 7 {
-        perform_exp_for_small_power(span_builder, pow.as_int());
+    if pow.as_canonical_u64() <= 7 {
+        perform_exp_for_small_power(span_builder, pow.as_canonical_u64());
         Ok(())
     } else {
         // compute the bits length of the exponent
-        let num_pow_bits = (64 - pow.as_int().leading_zeros()) as u8;
+        let num_pow_bits = (64 - pow.as_canonical_u64().leading_zeros()) as u8;
 
         // pushing the exponent onto the stack.
         span_builder.push_op(Push(pow));

@@ -400,7 +400,7 @@ fn inst_with_pretty_params<P: PrettyPrint>(inst: &'static str, params: &[P]) -> 
 
 #[cfg(test)]
 mod tests {
-    use vm_core::crypto::hash::Rpo256;
+    use vm_core::{crypto::hash::Rpo256, PrimeCharacteristicRing};
 
     use crate::{Felt, Span, ast::*};
 
@@ -412,7 +412,7 @@ mod tests {
         let instruction = format!("{}", Instruction::Add);
         assert_eq!("add", instruction);
 
-        let instruction = format!("{}", Instruction::AddImm(Felt::new(5).into()));
+        let instruction = format!("{}", Instruction::AddImm(Felt::from_u8(5).into()));
         assert_eq!("add.5", instruction);
 
         let instruction = format!("{}", Instruction::ExpBitLength(32));
@@ -420,7 +420,7 @@ mod tests {
 
         let instruction = format!(
             "{}",
-            Instruction::PushFeltList(vec![Felt::new(3), Felt::new(4), Felt::new(8), Felt::new(9)])
+            Instruction::PushFeltList(vec![Felt::from_u8(3), Felt::from_u8(4), Felt::from_u8(8), Felt::from_u8(9)])
         );
         assert_eq!("push.3.4.8.9", instruction);
 

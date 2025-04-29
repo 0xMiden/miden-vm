@@ -4,10 +4,10 @@ use miden_air::{
     RowIndex,
     trace::chiplets::hasher::{Digest, HasherState},
 };
-use vm_core::{Kernel, mast::OpBatch};
+use vm_core::{mast::OpBatch, Kernel, PrimeCharacteristicRing};
 
 use super::{
-    CHIPLETS_WIDTH, ChipletsTrace, EMPTY_WORD, ExecutionError, Felt, FieldElement, ONE,
+    CHIPLETS_WIDTH, ChipletsTrace, EMPTY_WORD, ExecutionError, Felt, ONE,
     RangeChecker, TraceFragment, Word, ZERO, crypto::MerklePath, utils,
 };
 

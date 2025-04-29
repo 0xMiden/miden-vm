@@ -1,6 +1,7 @@
 use alloc::{string::ToString, sync::Arc, vec::Vec};
 
 use pretty_assertions::assert_eq;
+use vm_core::PrimeCharacteristicRing;
 
 use crate::{
     Felt, Span, assert_diagnostic, assert_diagnostic_lines,
@@ -346,20 +347,20 @@ fn test_ast_parsing_program_push() -> Result<(), Report> {
         inst!(PushU8(10)),
         inst!(PushU16(500)),
         inst!(PushU32(70000)),
-        inst!(PushFelt(Felt::new(5000000000_u64))),
-        inst!(PushFelt(Felt::new(5000000000_u64))),
-        inst!(PushFelt(Felt::new(7000000000_u64))),
-        inst!(PushFelt(Felt::new(9000000000_u64))),
-        inst!(PushFelt(Felt::new(11000000000_u64))),
+        inst!(PushFelt(Felt::from_u64(5000000000_u64))),
+        inst!(PushFelt(Felt::from_u64(5000000000_u64))),
+        inst!(PushFelt(Felt::from_u64(7000000000_u64))),
+        inst!(PushFelt(Felt::from_u64(9000000000_u64))),
+        inst!(PushFelt(Felt::from_u64(11000000000_u64))),
         inst!(PushU8(5)),
         inst!(PushU8(7)),
         inst!(PushU16(500)),
         inst!(PushU16(700)),
         inst!(PushU32(70000)),
         inst!(PushU32(90000)),
-        inst!(PushFelt(Felt::new(5000000000_u64))),
-        inst!(PushFelt(Felt::new(7000000000_u64))),
-        inst!(PushWord([Felt::new(0), Felt::new(1), Felt::new(2), Felt::new(3)]))
+        inst!(PushFelt(Felt::from_u64(5000000000_u64))),
+        inst!(PushFelt(Felt::from_u64(7000000000_u64))),
+        inst!(PushWord([Felt::from_u64(0), Felt::from_u64(1), Felt::from_u64(2), Felt::from_u64(3)]))
     ));
 
     assert_eq!(context.parse_forms(source)?, forms);

@@ -1,5 +1,6 @@
 use alloc::string::String;
 use core::{num::IntErrorKind, ops::Range};
+use vm_core::PrimeCharacteristicRing;
 
 use super::{
     BinEncodedValue, BinErrorKind, DocumentationType, HexEncodedValue, HexErrorKind,
@@ -591,7 +592,7 @@ impl<'input> Iterator for Lexer<'input> {
 // ================================================================================================
 
 fn parse_hex(span: SourceSpan, hex_digits: &str) -> Result<HexEncodedValue, ParsingError> {
-    use vm_core::{FieldElement, StarkField};
+    use vm_core::{PrimeCharacteristicRing, PrimeField64};
     match hex_digits.len() {
         // Felt
         n if n <= 16 && n % 2 == 0 => {
@@ -604,7 +605,7 @@ fn parse_hex(span: SourceSpan, hex_digits: &str) -> Result<HexEncodedValue, Pars
                     ),
                 }
             })?;
-            if value > Felt::MODULUS {
+            if value > Felt::ORDER_U64 {
                 return Err(ParsingError::InvalidLiteral {
                     span,
                     kind: LiteralErrorKind::FeltOverflow,
@@ -632,13 +633,13 @@ fn parse_hex(span: SourceSpan, hex_digits: &str) -> Result<HexEncodedValue, Pars
                     })?;
                 }
                 let value = u64::from_le_bytes(felt_bytes);
-                if value > Felt::MODULUS {
+                if value > Felt::ORDER_U64 {
                     return Err(ParsingError::InvalidLiteral {
                         span,
                         kind: LiteralErrorKind::FeltOverflow,
                     });
                 }
-                *element = Felt::new(value);
+                *element = Felt::from_u64(value);
             }
             Ok(HexEncodedValue::Word(word))
         },
@@ -681,7 +682,7 @@ fn shrink_u64_hex(n: u64) -> HexEncodedValue {
     } else if n <= (u32::MAX as u64) {
         HexEncodedValue::U32(n as u32)
     } else {
-        HexEncodedValue::Felt(Felt::new(n))
+        HexEncodedValue::Felt(Felt::from_u64(n))
     }
 }
 

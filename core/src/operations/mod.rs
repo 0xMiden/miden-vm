@@ -5,6 +5,8 @@ mod decorators;
 pub use decorators::{
     AssemblyOp, DebugOptions, Decorator, DecoratorIterator, DecoratorList, SignatureKind,
 };
+use miden_crypto::{PrimeCharacteristicRing, PrimeField64};
+
 // OPERATIONS OP CODES
 // ================================================================================================
 use opcode_constants::*;
@@ -615,7 +617,7 @@ impl Operation {
     pub fn imm_value(&self) -> Option<Felt> {
         match *self {
             Self::Push(imm) => Some(imm),
-            Self::Emit(imm) => Some(imm.into()),
+            Self::Emit(imm) => Some(Felt::from_u32(imm)),
             _ => None,
         }
     }
@@ -788,7 +790,7 @@ impl Serializable for Operation {
             | Operation::U32assert2(err_code) => {
                 err_code.write_into(target);
             },
-            Operation::Push(value) => value.as_int().write_into(target),
+            Operation::Push(value) => (*value).as_canonical_u64().write_into(target),
             Operation::Emit(value) => value.write_into(target),
 
             // Note: we explicitly write out all the operations so that whenever we make a
@@ -993,11 +995,13 @@ impl Deserializable for Operation {
             OPCODE_MRUPDATE => Self::MrUpdate,
             OPCODE_PUSH => {
                 let value_u64 = source.read_u64()?;
-                let value_felt = Felt::try_from(value_u64).map_err(|_| {
-                    DeserializationError::InvalidValue(format!(
-                        "Operation associated data doesn't fit in a field element: {value_u64}"
-                    ))
-                })?;
+                // TODO(Al)
+                //let value_felt = Felt::try_from(value_u64).map_err(|_| {
+                //    DeserializationError::InvalidValue(format!(
+                //        "Operation associated data doesn't fit in a field element: {value_u64}"
+                //    ))
+                //})?;
+                let value_felt = Felt::from_u64(value_u64);
 
                 Self::Push(value_felt)
             },

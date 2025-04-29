@@ -1,4 +1,4 @@
-use vm_core::WORD_SIZE;
+use vm_core::{PrimeCharacteristicRing, WORD_SIZE};
 
 use super::{ExecutionError, Felt, Process};
 use crate::{AdviceProvider, Host, Word};
@@ -147,7 +147,7 @@ impl Process {
         let ctx = self.system.ctx();
         let clk = self.system.clk();
         let addr_first_word = self.stack.get(MEM_ADDR_STACK_IDX);
-        let addr_second_word = addr_first_word + Felt::from(WORD_SIZE as u32);
+        let addr_second_word = addr_first_word + Felt::from_u32(WORD_SIZE as u32);
 
         // load two words from memory
         let words = [
@@ -168,7 +168,7 @@ impl Process {
 
         // increment the address by 8 (2 words)
         self.stack
-            .set(MEM_ADDR_STACK_IDX, addr_first_word + Felt::from(WORD_SIZE as u32 * 2));
+            .set(MEM_ADDR_STACK_IDX, addr_first_word + Felt::from_u32(WORD_SIZE as u32 * 2));
 
         // copy over the rest of the stack
         self.stack.copy_state(13);
@@ -196,7 +196,7 @@ impl Process {
         let ctx = self.system.ctx();
         let clk = self.system.clk();
         let addr_first_word = self.stack.get(MEM_ADDR_STACK_IDX);
-        let addr_second_word = addr_first_word + Felt::from(WORD_SIZE as u32);
+        let addr_second_word = addr_first_word + Felt::from_u32(WORD_SIZE as u32);
 
         // pop two words from the advice stack
         let words = host.advice_provider_mut().pop_stack_dword(self.into())?;
@@ -218,7 +218,7 @@ impl Process {
 
         // increment the address by 8 (2 words)
         self.stack
-            .set(MEM_ADDR_STACK_IDX, addr_first_word + Felt::from(WORD_SIZE as u32 * 2));
+            .set(MEM_ADDR_STACK_IDX, addr_first_word + Felt::from_u32(WORD_SIZE as u32 * 2));
 
         // copy over the rest of the stack
         self.stack.copy_state(13);
@@ -263,7 +263,7 @@ impl Process {
 
 #[cfg(test)]
 mod tests {
-    use vm_core::{ONE, Word, ZERO, assert_matches, utils::ToElements};
+    use vm_core::{assert_matches, utils::ToElements, PrimeCharacteristicRing, Word, ONE, ZERO};
 
     use super::{
         super::{super::AdviceProvider, MIN_STACK_DEPTH, Operation},
@@ -290,10 +290,10 @@ mod tests {
         assert_eq!(expected, process.stack.trace_state());
 
         // push another item onto the stack
-        let op = Operation::Push(Felt::new(3));
+        let op = Operation::Push(Felt::from_u64(3));
         process.execute_op(op, &mut host).unwrap();
         let mut expected = [ZERO; 16];
-        expected[0] = Felt::new(3);
+        expected[0] = Felt::from_u64(3);
         expected[1] = ONE;
 
         assert_eq!(MIN_STACK_DEPTH + 2, process.stack.depth());
@@ -319,7 +319,7 @@ mod tests {
         }
 
         // push the address onto the stack and load the word
-        process.execute_op(Operation::Push(4_u32.into()), &mut host).unwrap();
+        process.execute_op(Operation::Push(Felt::from_u32(4)), &mut host).unwrap();
         process.execute_op(Operation::MLoadW, &mut host).unwrap();
 
         let expected_stack = build_expected_stack(&[7, 5, 3, 1, 7, 5, 3, 1]);
@@ -330,7 +330,7 @@ mod tests {
         assert_eq!(word, process.chiplets.memory.get_word(ContextId::root(), 4).unwrap().unwrap());
 
         // --- calling MLOADW with address greater than u32::MAX leads to an error ----------------
-        process.execute_op(Operation::Push(Felt::new(u64::MAX / 2)), &mut host).unwrap();
+        process.execute_op(Operation::Push(Felt::from_u64(u64::MAX / 2)), &mut host).unwrap();
         assert!(process.execute_op(Operation::MLoadW, &mut host).is_err());
 
         // --- calling MLOADW with a stack of minimum depth is ok ----------------
@@ -349,7 +349,7 @@ mod tests {
         store_value(&mut process, 4, word, &mut host);
 
         // push the address onto the stack and load the element
-        process.execute_op(Operation::Push(Felt::new(4)), &mut host).unwrap();
+        process.execute_op(Operation::Push(Felt::from_u64(4)), &mut host).unwrap();
         process.execute_op(Operation::MLoad, &mut host).unwrap();
 
         let expected_stack = build_expected_stack(&[1, 7, 5, 3, 1]);
@@ -360,7 +360,7 @@ mod tests {
         assert_eq!(word, process.chiplets.memory.get_word(ContextId::root(), 4).unwrap().unwrap());
 
         // --- calling MLOAD with address greater than u32::MAX leads to an error -----------------
-        process.execute_op(Operation::Push(Felt::new(u64::MAX / 2)), &mut host).unwrap();
+        process.execute_op(Operation::Push(Felt::from_u64(u64::MAX / 2)), &mut host).unwrap();
         assert!(process.execute_op(Operation::MLoad, &mut host).is_err());
 
         // --- calling MLOAD with a stack of minimum depth is ok ----------------
@@ -402,10 +402,10 @@ mod tests {
         // - 4 (the address) is at position 12
         // - values 1 - 12 are at positions 0 - 11. Adding the first 8 of these values to the values
         //   stored in memory should result in 35.
-        process.execute_op(Operation::Push(Felt::new(101)), &mut host).unwrap();
-        process.execute_op(Operation::Push(4_u32.into()), &mut host).unwrap();
+        process.execute_op(Operation::Push(Felt::from_u64(101)), &mut host).unwrap();
+        process.execute_op(Operation::Push(Felt::from_u32(4)), &mut host).unwrap();
         for i in 1..13 {
-            process.execute_op(Operation::Push(Felt::new(i)), &mut host).unwrap();
+            process.execute_op(Operation::Push(Felt::from_u64(i)), &mut host).unwrap();
         }
 
         // execute the MSTREAM operation
@@ -465,7 +465,7 @@ mod tests {
         assert_eq!(word2, process.chiplets.memory.get_word(ContextId::root(), 4).unwrap().unwrap());
 
         // --- calling MSTOREW with address greater than u32::MAX leads to an error ----------------
-        process.execute_op(Operation::Push(Felt::new(u64::MAX / 2)), &mut host).unwrap();
+        process.execute_op(Operation::Push(Felt::from_u64(u64::MAX / 2)), &mut host).unwrap();
         assert!(process.execute_op(Operation::MStoreW, &mut host).is_err());
 
         // --- calling STOREW with a stack of minimum depth is ok ----------------
@@ -481,7 +481,7 @@ mod tests {
 
         // push new element onto the stack and save it as first element of the word on
         // uninitialized memory at address 0
-        let element = Felt::new(10);
+        let element = Felt::from_u64(10);
         store_element(&mut process, 0, element, &mut host);
 
         // check stack state
@@ -498,7 +498,7 @@ mod tests {
         store_value(&mut process, 4, word_2, &mut host);
 
         // push new element onto the stack and save it as first element of the word at address 2
-        let element = Felt::new(12);
+        let element = Felt::from_u64(12);
         store_element(&mut process, 4, element, &mut host);
 
         // check stack state
@@ -506,12 +506,12 @@ mod tests {
         assert_eq!(expected_stack, process.stack.trace_state());
 
         // check memory state to make sure the other 3 elements were not affected
-        let mem_2 = [element, Felt::new(3), Felt::new(5), Felt::new(7)];
+        let mem_2 = [element, Felt::from_u64(3), Felt::from_u64(5), Felt::from_u64(7)];
         assert_eq!(2, process.chiplets.memory.num_accessed_words());
         assert_eq!(mem_2, process.chiplets.memory.get_word(ContextId::root(), 4).unwrap().unwrap());
 
         // --- calling MSTORE with address greater than u32::MAX leads to an error ----------------
-        process.execute_op(Operation::Push(Felt::new(u64::MAX / 2)), &mut host).unwrap();
+        process.execute_op(Operation::Push(Felt::from_u64(u64::MAX / 2)), &mut host).unwrap();
         assert!(process.execute_op(Operation::MStore, &mut host).is_err());
 
         // --- calling MSTORE with a stack of minimum depth is ok ----------------
@@ -540,10 +540,10 @@ mod tests {
         // - values 1 - 12 are at positions 0 - 11. Replacing the first 8 of these values with the
         //   values from the advice stack should result in 30 through 23 in stack order (with 23 at
         //   stack[0]).
-        process.execute_op(Operation::Push(Felt::new(101)), &mut host).unwrap();
-        process.execute_op(Operation::Push(4_u32.into()), &mut host).unwrap();
+        process.execute_op(Operation::Push(Felt::from_u64(101)), &mut host).unwrap();
+        process.execute_op(Operation::Push(Felt::from_u32(4)), &mut host).unwrap();
         for i in 1..13 {
-            process.execute_op(Operation::Push(Felt::new(i)), &mut host).unwrap();
+            process.execute_op(Operation::Push(Felt::from_u64(i)), &mut host).unwrap();
         }
 
         // execute the PIPE operation
@@ -665,7 +665,7 @@ mod tests {
         for &value in value.iter() {
             process.execute_op(Operation::Push(value), host).unwrap();
         }
-        let addr = Felt::new(addr);
+        let addr = Felt::from_u64(addr);
         process.execute_op(Operation::Push(addr), host).unwrap();
         process.execute_op(Operation::MStoreW, host).unwrap();
     }
@@ -675,7 +675,7 @@ mod tests {
         H: Host,
     {
         process.execute_op(Operation::Push(value), host).unwrap();
-        let addr = Felt::new(addr);
+        let addr = Felt::from_u64(addr);
         process.execute_op(Operation::Push(addr), host).unwrap();
         process.execute_op(Operation::MStore, host).unwrap();
     }
@@ -683,7 +683,7 @@ mod tests {
     fn build_expected_stack(values: &[u64]) -> [Felt; 16] {
         let mut expected = [ZERO; 16];
         for (&value, result) in values.iter().zip(expected.iter_mut()) {
-            *result = Felt::new(value);
+            *result = Felt::from_u64(value);
         }
         expected
     }

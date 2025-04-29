@@ -1,4 +1,5 @@
 use alloc::vec::Vec;
+use miden_crypto::PrimeCharacteristicRing;
 
 use super::{BATCH_SIZE, Felt, GROUP_SIZE, Operation, ZERO};
 
@@ -145,7 +146,7 @@ impl OpBatchAccumulator {
         // make sure the last group gets added to the group array; we also check the op_idx to
         // handle the case when a group contains a single NOOP operation.
         if self.group != 0 || self.op_idx != 0 {
-            self.groups[self.group_idx] = Felt::new(self.group);
+            self.groups[self.group_idx] = Felt::from_u64(self.group);
             self.op_counts[self.group_idx] = self.op_idx;
         }
 
@@ -163,7 +164,7 @@ impl OpBatchAccumulator {
     /// Saves the current group into the group array, advances current and next group pointers,
     /// and resets group content.
     pub(super) fn finalize_op_group(&mut self) {
-        self.groups[self.group_idx] = Felt::new(self.group);
+        self.groups[self.group_idx] = Felt::from_u64(self.group);
         self.op_counts[self.group_idx] = self.op_idx;
 
         self.group_idx = self.next_group_idx;

@@ -2,9 +2,9 @@ use miden_air::{
     RowIndex,
     trace::{chiplets::hasher::DIGEST_RANGE, main_trace::MainTrace},
 };
-use vm_core::{Kernel, ONE};
+use vm_core::{PrimeField64, ExtensionField, Kernel, PrimeCharacteristicRing, ONE};
 
-use super::{Felt, FieldElement};
+use super::{Felt};
 use crate::{debug::BusDebugger, trace::AuxColumnBuilder};
 
 /// Describes how to construct the execution trace of the chiplets virtual table auxiliary trace
@@ -19,7 +19,7 @@ impl ChipletsVTableColBuilder {
     }
 }
 
-impl<E: FieldElement<BaseField = Felt>> AuxColumnBuilder<E> for ChipletsVTableColBuilder {
+impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for ChipletsVTableColBuilder {
     fn init_requests(
         &self,
         _main_trace: &MainTrace,
@@ -29,11 +29,11 @@ impl<E: FieldElement<BaseField = Felt>> AuxColumnBuilder<E> for ChipletsVTableCo
         let mut requests = E::ONE;
         for (idx, proc_hash) in self.kernel.proc_hashes().iter().enumerate() {
             requests *= alphas[0]
-                + alphas[1].mul_base((idx as u32).into())
-                + alphas[2].mul_base(proc_hash[0])
-                + alphas[3].mul_base(proc_hash[1])
-                + alphas[4].mul_base(proc_hash[2])
-                + alphas[5].mul_base(proc_hash[3]);
+                + alphas[1] * Felt::from_u32(idx as u32)
+                + alphas[2] * proc_hash[0]
+                + alphas[3] * proc_hash[1]
+                + alphas[4] * proc_hash[2]
+                + alphas[5] * proc_hash[3];
         }
         requests
     }
@@ -67,50 +67,50 @@ impl<E: FieldElement<BaseField = Felt>> AuxColumnBuilder<E> for ChipletsVTableCo
 /// computing the new Merkle root.
 fn chiplets_vtable_remove_sibling<E>(main_trace: &MainTrace, alphas: &[E], row: RowIndex) -> E
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     let f_mu: bool = main_trace.f_mu(row);
     let f_mua: bool = main_trace.f_mua(row);
 
     if f_mu {
         let index = main_trace.chiplet_node_index(row);
-        let lsb = index.as_int() & 1;
+        let lsb = index.as_canonical_u64() & 1;
         if lsb == 0 {
             let sibling = &main_trace.chiplet_hasher_state(row)[DIGEST_RANGE.end..];
             alphas[0]
-                + alphas[3].mul_base(index)
-                + alphas[12].mul_base(sibling[0])
-                + alphas[13].mul_base(sibling[1])
-                + alphas[14].mul_base(sibling[2])
-                + alphas[15].mul_base(sibling[3])
+                + alphas[3] * index
+                + alphas[12] * sibling[0]
+                + alphas[13] * sibling[1]
+                + alphas[14] * sibling[2]
+                + alphas[15] * sibling[3]
         } else {
             let sibling = &main_trace.chiplet_hasher_state(row)[DIGEST_RANGE];
             alphas[0]
-                + alphas[3].mul_base(index)
-                + alphas[8].mul_base(sibling[0])
-                + alphas[9].mul_base(sibling[1])
-                + alphas[10].mul_base(sibling[2])
-                + alphas[11].mul_base(sibling[3])
+                + alphas[3] * index
+                + alphas[8] * sibling[0]
+                + alphas[9] * sibling[1]
+                + alphas[10] * sibling[2]
+                + alphas[11] * sibling[3]
         }
     } else if f_mua {
         let index = main_trace.chiplet_node_index(row);
-        let lsb = index.as_int() & 1;
+        let lsb = index.as_canonical_u64() & 1;
         if lsb == 0 {
             let sibling = &main_trace.chiplet_hasher_state(row + 1)[DIGEST_RANGE.end..];
             alphas[0]
-                + alphas[3].mul_base(index)
-                + alphas[12].mul_base(sibling[0])
-                + alphas[13].mul_base(sibling[1])
-                + alphas[14].mul_base(sibling[2])
-                + alphas[15].mul_base(sibling[3])
+                + alphas[3] * index
+                + alphas[12] * sibling[0]
+                + alphas[13] * sibling[1]
+                + alphas[14] * sibling[2]
+                + alphas[15] * sibling[3]
         } else {
             let sibling = &main_trace.chiplet_hasher_state(row + 1)[DIGEST_RANGE];
             alphas[0]
-                + alphas[3].mul_base(index)
-                + alphas[8].mul_base(sibling[0])
-                + alphas[9].mul_base(sibling[1])
-                + alphas[10].mul_base(sibling[2])
-                + alphas[11].mul_base(sibling[3])
+                + alphas[3] * index
+                + alphas[8] * sibling[0]
+                + alphas[9] * sibling[1]
+                + alphas[10] * sibling[2]
+                + alphas[11] * sibling[3]
         }
     } else {
         E::ONE
@@ -124,50 +124,50 @@ where
 /// computing the old Merkle root.
 fn chiplets_vtable_add_sibling<E>(main_trace: &MainTrace, alphas: &[E], row: RowIndex) -> E
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     let f_mv: bool = main_trace.f_mv(row);
     let f_mva: bool = main_trace.f_mva(row);
 
     if f_mv {
         let index = main_trace.chiplet_node_index(row);
-        let lsb = index.as_int() & 1;
+        let lsb = index.as_canonical_u64() & 1;
         if lsb == 0 {
             let sibling = &main_trace.chiplet_hasher_state(row)[DIGEST_RANGE.end..];
             alphas[0]
-                + alphas[3].mul_base(index)
-                + alphas[12].mul_base(sibling[0])
-                + alphas[13].mul_base(sibling[1])
-                + alphas[14].mul_base(sibling[2])
-                + alphas[15].mul_base(sibling[3])
+                + alphas[3] * index
+                + alphas[12] * sibling[0]
+                + alphas[13] * sibling[1]
+                + alphas[14] * sibling[2]
+                + alphas[15] * sibling[3]
         } else {
             let sibling = &main_trace.chiplet_hasher_state(row)[DIGEST_RANGE];
             alphas[0]
-                + alphas[3].mul_base(index)
-                + alphas[8].mul_base(sibling[0])
-                + alphas[9].mul_base(sibling[1])
-                + alphas[10].mul_base(sibling[2])
-                + alphas[11].mul_base(sibling[3])
+                + alphas[3] * index
+                + alphas[8] * sibling[0]
+                + alphas[9] * sibling[1]
+                + alphas[10] * sibling[2]
+                + alphas[11] * sibling[3]
         }
     } else if f_mva {
         let index = main_trace.chiplet_node_index(row);
-        let lsb = index.as_int() & 1;
+        let lsb = index.as_canonical_u64() & 1;
         if lsb == 0 {
             let sibling = &main_trace.chiplet_hasher_state(row + 1)[DIGEST_RANGE.end..];
             alphas[0]
-                + alphas[3].mul_base(index)
-                + alphas[12].mul_base(sibling[0])
-                + alphas[13].mul_base(sibling[1])
-                + alphas[14].mul_base(sibling[2])
-                + alphas[15].mul_base(sibling[3])
+                + alphas[3] * index
+                + alphas[12] * sibling[0]
+                + alphas[13] * sibling[1]
+                + alphas[14] * sibling[2]
+                + alphas[15] * sibling[3]
         } else {
             let sibling = &main_trace.chiplet_hasher_state(row + 1)[DIGEST_RANGE];
             alphas[0]
-                + alphas[3].mul_base(index)
-                + alphas[8].mul_base(sibling[0])
-                + alphas[9].mul_base(sibling[1])
-                + alphas[10].mul_base(sibling[2])
-                + alphas[11].mul_base(sibling[3])
+                + alphas[3] * index
+                + alphas[8] * sibling[0]
+                + alphas[9] * sibling[1]
+                + alphas[10] * sibling[2]
+                + alphas[11] * sibling[3]
         }
     } else {
         E::ONE
@@ -181,7 +181,7 @@ fn build_kernel_procedure_table_inclusions<E>(
     row: RowIndex,
 ) -> E
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     if main_trace.is_kernel_row(row) {
         let idx = main_trace.chiplet_kernel_idx(row);
@@ -203,11 +203,11 @@ where
             let root3 = main_trace.chiplet_kernel_root_3(row);
 
             alphas[0]
-                + alphas[1].mul_base(idx)
-                + alphas[2].mul_base(root0)
-                + alphas[3].mul_base(root1)
-                + alphas[4].mul_base(root2)
-                + alphas[5].mul_base(root3)
+                + alphas[1] * idx
+                + alphas[2] * root0
+                + alphas[3] * root1
+                + alphas[4] * root2
+                + alphas[5] * root3
         } else {
             E::ONE
         }

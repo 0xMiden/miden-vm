@@ -3,10 +3,7 @@ use alloc::vec::Vec;
 use test_utils::rand::rand_array;
 use vm_core::{Kernel, ONE, Operation, Program, StackOutputs, Word, ZERO, mast::MastForest};
 
-use super::{
-    super::chiplets::init_state_from_words, ExecutionTrace, Felt, FieldElement, NUM_RAND_ROWS,
-    Process, Trace,
-};
+use super::{super::chiplets::init_state_from_words, ExecutionTrace, Felt, NUM_RAND_ROWS, Process};
 use crate::{AdviceInputs, DefaultHost, ExecutionOptions, MemAdviceProvider, StackInputs};
 
 mod chiplets;

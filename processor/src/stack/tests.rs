@@ -4,7 +4,7 @@ use miden_air::trace::{
     STACK_TRACE_WIDTH,
     stack::{B0_COL_IDX, B1_COL_IDX, H0_COL_IDX, NUM_STACK_HELPER_COLS},
 };
-use vm_core::FieldElement;
+use vm_core::{PrimeCharacteristicRing, PrimeField64, Field};
 
 use super::{Felt, MIN_STACK_DEPTH, ONE, OverflowTableRow, Stack, StackInputs, ZERO};
 
@@ -26,7 +26,7 @@ fn initialize() {
     // Prepare the expected results.
     stack_inputs.reverse();
     let expected_stack = build_stack(&stack_inputs);
-    let expected_helpers = [Felt::new(MIN_STACK_DEPTH as u64), ZERO, ZERO];
+    let expected_helpers = [Felt::from_u64(MIN_STACK_DEPTH as u64), ZERO, ZERO];
 
     // Check the stack state.
     assert_eq!(stack.trace_state(), expected_stack);
@@ -51,15 +51,15 @@ fn stack_overflow() {
     stack.advance_clock();
 
     stack.shift_right(0);
-    stack.set(0, Felt::from(17u8));
+    stack.set(0, Felt::from_u8(17u8));
     stack.advance_clock();
 
     stack.shift_right(0);
-    stack.set(0, Felt::from(18u8));
+    stack.set(0, Felt::from_u8(18u8));
     stack.advance_clock();
 
     stack.shift_right(0);
-    stack.set(0, Felt::from(19u8));
+    stack.set(0, Felt::from_u8(19u8));
     stack.advance_clock();
 
     // Prepare the expected results.
@@ -68,15 +68,15 @@ fn stack_overflow() {
 
     let expected_depth = stack_values_holder.len() as u64;
     let expected_helpers = [
-        Felt::new(expected_depth),
-        Felt::new(3u64),
-        Felt::new(expected_depth - MIN_STACK_DEPTH as u64),
+        Felt::from_u64(expected_depth),
+        Felt::from_u64(3u64),
+        Felt::from_u64(expected_depth - MIN_STACK_DEPTH as u64),
     ];
     let init_addr = 1;
     let expected_overflow_rows = vec![
-        OverflowTableRow::new(Felt::new(init_addr), ONE, ZERO),
-        OverflowTableRow::new(Felt::new(init_addr + 1), Felt::new(2), Felt::new(init_addr)),
-        OverflowTableRow::new(Felt::new(init_addr + 2), Felt::new(3), Felt::new(init_addr + 1)),
+        OverflowTableRow::new(Felt::from_u64(init_addr), ONE, ZERO),
+        OverflowTableRow::new(Felt::from_u64(init_addr + 1), Felt::from_u64(2), Felt::from_u64(init_addr)),
+        OverflowTableRow::new(Felt::from_u64(init_addr + 2), Felt::from_u64(3), Felt::from_u64(init_addr + 1)),
     ];
     let expected_overflow_active_rows = vec![0, 1, 2];
 
@@ -281,7 +281,7 @@ fn start_restore_context() {
     assert_eq!(stack.trace_state(), build_stack(&stack_state[..16]));
     assert_eq!(
         stack.helpers_state(),
-        build_helpers_partial(ctx0_depth - 16, ctx0_next_overflow_addr.as_int() as usize)
+        build_helpers_partial(ctx0_depth - 16, ctx0_next_overflow_addr.as_canonical_u64() as usize)
     );
 
     // stack depth = 16
@@ -399,16 +399,16 @@ fn generate_trace() {
 fn build_stack(stack_inputs: &[u64]) -> [Felt; MIN_STACK_DEPTH] {
     let mut result = [ZERO; MIN_STACK_DEPTH];
     for (idx, &input) in stack_inputs.iter().enumerate() {
-        result[idx] = Felt::new(input);
+        result[idx] = Felt::from_u64(input);
     }
     result
 }
 
 /// Builds expected values of stack helper registers for the specified parameters.
 fn build_helpers(stack_depth: u64, next_overflow_addr: u64) -> StackHelpersState {
-    let b0 = Felt::new(stack_depth);
-    let b1 = Felt::new(next_overflow_addr);
-    let h0 = (b0 - Felt::new(MIN_STACK_DEPTH as u64)).inv();
+    let b0 = Felt::from_u64(stack_depth);
+    let b1 = Felt::from_u64(next_overflow_addr);
+    let h0 = (b0 - Felt::from_u64(MIN_STACK_DEPTH as u64)).try_inverse().unwrap_or(ZERO);
 
     [b0, b1, h0]
 }
@@ -418,9 +418,9 @@ fn build_helpers(stack_depth: u64, next_overflow_addr: u64) -> StackHelpersState
 /// h0 value.
 fn build_helpers_partial(num_overflow: usize, next_overflow_addr: usize) -> StackHelpersState {
     let depth = MIN_STACK_DEPTH + num_overflow;
-    let b0 = Felt::new(depth as u64);
-    let b1 = Felt::new(next_overflow_addr as u64);
-    let h0 = b0 - Felt::new(MIN_STACK_DEPTH as u64);
+    let b0 = Felt::from_u64(depth as u64);
+    let b1 = Felt::from_u64(next_overflow_addr as u64);
+    let h0 = b0 - Felt::from_u64(MIN_STACK_DEPTH as u64);
 
     [b0, b1, h0]
 }

@@ -1,6 +1,6 @@
 use processor::{AsmOpInfo, ContextId, RowIndex, VmState};
 use test_utils::{Felt, ONE, ToElements, assert_eq, build_debug_test};
-use vm_core::{AssemblyOp, Operation, debuginfo::Location};
+use vm_core::{AssemblyOp, Operation, PrimeCharacteristicRing, debuginfo::Location};
 
 // EXEC ITER TESTS
 // =================================================================
@@ -17,10 +17,10 @@ fn test_exec_iter() {
     let test = build_debug_test!(source, &init_stack);
     let path = test.source.name();
     let traces = test.execute_iter();
-    let fmp = Felt::new(2u64.pow(30));
+    let fmp = Felt::from_u64(2u64.pow(30));
     let next_fmp = fmp + ONE;
     // TODO: double check this value
-    let mem = vec![(1_u64, Felt::from(13_u32))];
+    let mem = vec![(1_u64, Felt::from_u32(13_u32))];
     let mem_storew1_loc = Some(Location {
         path: path.clone(),
         start: 33.into(),
@@ -198,7 +198,7 @@ fn test_exec_iter() {
         VmState {
             clk: RowIndex::from(10),
             ctx: ContextId::root(),
-            op: Some(Operation::Push(Felt::new(17))),
+            op: Some(Operation::Push(Felt::from_u64(17))),
             asmop: Some(AsmOpInfo::new(
                 AssemblyOp::new(
                     push17_loc,
@@ -311,7 +311,7 @@ fn test_exec_iter() {
             )),
             stack: [17, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 0, 0].to_elements(),
             fmp: next_fmp,
-            memory: vec![(1_u64, 13_u32.into()), (2u64.pow(30) + 1, 17_u32.into())],
+            memory: vec![(1_u64, Felt::from_u32(13)), (2u64.pow(30) + 1, Felt::from_u32(17))],
         },
         VmState {
             clk: RowIndex::from(19),
@@ -329,17 +329,17 @@ fn test_exec_iter() {
             )),
             stack: [12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 0, 0, 0, 0].to_elements(),
             fmp: next_fmp,
-            memory: vec![(1_u64, 13_u32.into()), (2u64.pow(30) + 1, 17_u32.into())],
+            memory: vec![(1_u64, Felt::from_u32(13)), (2u64.pow(30) + 1, Felt::from_u32(17))],
         },
         VmState {
             clk: RowIndex::from(20),
             ctx: ContextId::root(),
-            op: Some(Operation::Push(Felt::new(18446744069414584320))),
+            op: Some(Operation::Push(Felt::from_u64(18446744069414584320))),
             asmop: None,
             stack: [18446744069414584320, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 0, 0]
                 .to_elements(),
             fmp: next_fmp,
-            memory: vec![(1_u64, 13_u32.into()), (2u64.pow(30) + 1, 17_u32.into())],
+            memory: vec![(1_u64, Felt::from_u32(13)), (2u64.pow(30) + 1, Felt::from_u32(17))],
         },
         VmState {
             clk: RowIndex::from(21),
@@ -348,7 +348,7 @@ fn test_exec_iter() {
             asmop: None,
             stack: [12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 0, 0, 0].to_elements(),
             fmp,
-            memory: vec![(1_u64, 13_u32.into()), (2u64.pow(30) + 1, 17_u32.into())],
+            memory: vec![(1_u64, Felt::from_u32(13)), (2u64.pow(30) + 1, Felt::from_u32(17))],
         },
         VmState {
             clk: RowIndex::from(22),
@@ -357,7 +357,7 @@ fn test_exec_iter() {
             asmop: None,
             stack: [12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 0, 0, 0].to_elements(),
             fmp,
-            memory: vec![(1_u64, 13_u32.into()), (2u64.pow(30) + 1, 17_u32.into())],
+            memory: vec![(1_u64, Felt::from_u32(13)), (2u64.pow(30) + 1, Felt::from_u32(17))],
         },
         VmState {
             clk: RowIndex::from(23),
@@ -366,7 +366,7 @@ fn test_exec_iter() {
             asmop: None,
             stack: [12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 0, 0, 0].to_elements(),
             fmp,
-            memory: vec![(1_u64, 13_u32.into()), (2u64.pow(30) + 1, 17_u32.into())],
+            memory: vec![(1_u64, Felt::from_u32(13)), (2u64.pow(30) + 1, Felt::from_u32(17))],
         },
         VmState {
             clk: RowIndex::from(24),
@@ -375,7 +375,7 @@ fn test_exec_iter() {
             asmop: None,
             stack: [12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 0, 0, 0].to_elements(),
             fmp,
-            memory: vec![(1_u64, 13_u32.into()), (2u64.pow(30) + 1, 17_u32.into())],
+            memory: vec![(1_u64, Felt::from_u32(13)), (2u64.pow(30) + 1, Felt::from_u32(17))],
         },
     ];
     for (expected, t) in expected_states.iter().zip(traces) {

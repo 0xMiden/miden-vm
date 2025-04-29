@@ -1,3 +1,4 @@
+/*
 use super::{EvaluationFrame, ExtensionOf, Felt, FieldElement};
 use crate::{
     trace::{
@@ -106,3 +107,4 @@ where
         alpha - self.current()[DECODER_USER_OP_HELPERS_OFFSET + 3].into()
     }
 }
+ */

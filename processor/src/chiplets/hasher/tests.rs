@@ -8,7 +8,7 @@ use vm_core::{
     ONE, Operation, ZERO,
     chiplets::hasher,
     crypto::merkle::{MerkleTree, NodeIndex},
-    mast::{MastForest, MastNode},
+    mast::{MastForest, MastNode}, PrimeCharacteristicRing, PrimeField64
 };
 
 use super::{
@@ -58,7 +58,7 @@ fn hasher_permute() {
 
     // make sure the returned addresses are correct (they must be 8 rows apart)
     assert_eq!(ONE, addr1);
-    assert_eq!(Felt::new(9), addr2);
+    assert_eq!(Felt::from_u64(9), addr2);
 
     // make sure the results are correct
     let expected_state1 = apply_permutation(init_state1);
@@ -121,7 +121,7 @@ fn hasher_build_merkle_root() {
     // initialize the hasher and perform one Merkle branch verifications
     let mut hasher = Hasher::default();
     let path = tree.get_path(NodeIndex::new(3, 5).unwrap()).unwrap();
-    hasher.build_merkle_root(leaves[5], &path, Felt::new(5));
+    hasher.build_merkle_root(leaves[5], &path, Felt::from_u64(5));
 
     // build and check the trace for validity
     let trace = build_trace(hasher, 24);
@@ -138,15 +138,15 @@ fn hasher_build_merkle_root() {
 
     let path3 = tree.get_path(NodeIndex::new(3, 3).unwrap()).unwrap();
 
-    hasher.build_merkle_root(leaves[3], &path3, Felt::new(3));
+    hasher.build_merkle_root(leaves[3], &path3, Felt::from_u64(3));
 
     let path7 = tree.get_path(NodeIndex::new(3, 7).unwrap()).unwrap();
 
-    hasher.build_merkle_root(leaves[7], &path7, Felt::new(7));
+    hasher.build_merkle_root(leaves[7], &path7, Felt::from_u64(7));
 
     // path3 again
 
-    hasher.build_merkle_root(leaves[3], &path3, Felt::new(3));
+    hasher.build_merkle_root(leaves[3], &path3, Felt::from_u64(3));
 
     // build and check the trace for validity
     let trace = build_trace(hasher, 96);
@@ -210,18 +210,18 @@ fn hasher_update_merkle_root() {
     let path3 = tree.get_path(NodeIndex::new(3, 3).unwrap()).unwrap();
     let new_leaf3 = init_leaf(23);
 
-    hasher.update_merkle_root(leaves[3], new_leaf3, &path3, Felt::new(3));
+    hasher.update_merkle_root(leaves[3], new_leaf3, &path3, Felt::from_u64(3));
     tree.update_leaf(3, new_leaf3).unwrap();
 
     let path6 = tree.get_path(NodeIndex::new(3, 6).unwrap()).unwrap();
     let new_leaf6 = init_leaf(25);
-    hasher.update_merkle_root(leaves[6], new_leaf6, &path6, Felt::new(6));
+    hasher.update_merkle_root(leaves[6], new_leaf6, &path6, Felt::from_u64(6));
     tree.update_leaf(6, new_leaf6).unwrap();
 
     // update leaf 3 again
     let path3_2 = tree.get_path(NodeIndex::new(3, 3).unwrap()).unwrap();
     let new_leaf3_2 = init_leaf(27);
-    hasher.update_merkle_root(new_leaf3, new_leaf3_2, &path3_2, Felt::new(3));
+    hasher.update_merkle_root(new_leaf3, new_leaf3_2, &path3_2, Felt::from_u64(3));
     tree.update_leaf(3, new_leaf3_2).unwrap();
     assert_ne!(path3, path3_2);
 
@@ -306,7 +306,7 @@ fn hash_memoization_control_blocks() {
     // hash.
     assert_eq!(Digest::new(final_state), expected_hash);
 
-    let start_row = addr.as_int() as usize - 1;
+    let start_row = addr.as_canonical_u64() as usize - 1;
     let end_row = hasher.trace_len() - 1;
 
     let h1: [Felt; DIGEST_LEN] = t_branch
@@ -331,14 +331,14 @@ fn hash_memoization_control_blocks() {
     // make sure the hash of the first and second split blocks is the same.
     assert_eq!(first_block_final_state, final_state);
 
-    let copied_start_row = addr.as_int() as usize - 1;
+    let copied_start_row = addr.as_canonical_u64() as usize - 1;
     let copied_end_row = hasher.trace_len() - 1;
 
     let trace = build_trace(hasher, copied_end_row + 1);
 
     //  check the row address at which memoized block starts.
     let hash_cycle_len: u64 = HASH_CYCLE_LEN.try_into().expect("Could not convert usize to u64");
-    assert_eq!(Felt::new(hash_cycle_len * 2 + 1), addr);
+    assert_eq!(Felt::from_u64(hash_cycle_len * 2 + 1), addr);
     // check the trace length of the final trace.
     assert_eq!(trace.last().unwrap(), &[ZERO; HASH_CYCLE_LEN * 3]);
 
@@ -350,7 +350,7 @@ fn hash_memoization_control_blocks() {
 fn hash_memoization_basic_blocks() {
     // --- basic block with 1 batch ----------------------------------------------------------------
     let basic_block =
-        MastNode::new_basic_block(vec![Operation::Push(Felt::new(10)), Operation::Drop], None)
+        MastNode::new_basic_block(vec![Operation::Push(Felt::from_u64(10)), Operation::Drop], None)
             .unwrap();
 
     hash_memoization_basic_blocks_check(basic_block);
@@ -358,23 +358,23 @@ fn hash_memoization_basic_blocks() {
     // --- basic block with multiple batches -------------------------------------------------------
     let ops = vec![
         Operation::Push(ONE),
-        Operation::Push(Felt::new(2)),
-        Operation::Push(Felt::new(3)),
-        Operation::Push(Felt::new(4)),
-        Operation::Push(Felt::new(5)),
-        Operation::Push(Felt::new(6)),
-        Operation::Push(Felt::new(7)),
-        Operation::Push(Felt::new(8)),
-        Operation::Push(Felt::new(9)),
-        Operation::Push(Felt::new(10)),
-        Operation::Push(Felt::new(11)),
-        Operation::Push(Felt::new(12)),
-        Operation::Push(Felt::new(13)),
-        Operation::Push(Felt::new(14)),
-        Operation::Push(Felt::new(15)),
-        Operation::Push(Felt::new(16)),
-        Operation::Push(Felt::new(17)),
-        Operation::Push(Felt::new(18)),
+        Operation::Push(Felt::from_u64(2)),
+        Operation::Push(Felt::from_u64(3)),
+        Operation::Push(Felt::from_u64(4)),
+        Operation::Push(Felt::from_u64(5)),
+        Operation::Push(Felt::from_u64(6)),
+        Operation::Push(Felt::from_u64(7)),
+        Operation::Push(Felt::from_u64(8)),
+        Operation::Push(Felt::from_u64(9)),
+        Operation::Push(Felt::from_u64(10)),
+        Operation::Push(Felt::from_u64(11)),
+        Operation::Push(Felt::from_u64(12)),
+        Operation::Push(Felt::from_u64(13)),
+        Operation::Push(Felt::from_u64(14)),
+        Operation::Push(Felt::from_u64(15)),
+        Operation::Push(Felt::from_u64(16)),
+        Operation::Push(Felt::from_u64(17)),
+        Operation::Push(Felt::from_u64(18)),
         Operation::Drop,
         Operation::Drop,
         Operation::Drop,
@@ -486,7 +486,7 @@ fn hash_memoization_basic_blocks_check(basic_block: MastNode) {
     let expected_hash = basic_block_1.digest();
     assert_eq!(Digest::new(final_state), expected_hash);
 
-    let start_row = addr.as_int() as usize - 1;
+    let start_row = addr.as_canonical_u64() as usize - 1;
     let end_row = hasher.trace_len() - 1;
 
     let basic_block_2_val = if let MastNode::Block(basic_block) = basic_block_2.clone() {
@@ -509,7 +509,7 @@ fn hash_memoization_basic_blocks_check(basic_block: MastNode) {
     // make sure the hash of the first and second basic blocks is the same.
     assert_eq!(first_basic_block_final_state, final_state);
 
-    let copied_start_row = addr.as_int() as usize - 1;
+    let copied_start_row = addr.as_canonical_u64() as usize - 1;
     let copied_end_row = hasher.trace_len() - 1;
 
     let trace = build_trace(hasher, copied_end_row + 1);
@@ -566,16 +566,16 @@ fn check_merkle_path(
 
     // make sure node index is set correctly
     let node_idx_column = trace.last().unwrap();
-    assert_eq!(Felt::new(node_index), node_idx_column[row_idx]);
+    assert_eq!(Felt::from_u64(node_index), node_idx_column[row_idx]);
     let mut node_index = node_index >> 1;
     for i in 1..8 {
-        assert_eq!(Felt::new(node_index), node_idx_column[row_idx + i])
+        assert_eq!(Felt::from_u64(node_index), node_idx_column[row_idx + i])
     }
 
     for i in 1..path.len() {
         node_index >>= 1;
         for j in 0..8 {
-            assert_eq!(Felt::new(node_index), node_idx_column[row_idx + i * 8 + j])
+            assert_eq!(Felt::from_u64(node_index), node_idx_column[row_idx + i * 8 + j])
         }
     }
 }
@@ -652,5 +652,5 @@ fn init_leaves(values: &[u64]) -> Vec<Word> {
 }
 
 fn init_leaf(value: u64) -> Word {
-    [Felt::new(value), ZERO, ZERO, ZERO]
+    [Felt::from_u64(value), ZERO, ZERO, ZERO]
 }

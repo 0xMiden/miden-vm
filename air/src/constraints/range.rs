@@ -1,5 +1,5 @@
 use alloc::vec::Vec;
-
+/*
 use vm_core::{ExtensionOf, ZERO};
 
 use crate::{
@@ -255,3 +255,4 @@ impl<E: FieldElement> EvaluationFrameExt<E> for &EvaluationFrame<E> {
         self.next()[column] - self.current()[column]
     }
 }
+ */

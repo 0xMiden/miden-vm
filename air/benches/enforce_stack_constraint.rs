@@ -9,7 +9,7 @@ use miden_air::{
     },
     trace::STACK_TRACE_OFFSET,
 };
-use vm_core::{Operation, ZERO};
+use vm_core::{Operation, PrimeCharacteristicRing, ZERO};
 
 fn enforce_stack_constraint(c: &mut Criterion) {
     let mut group = c.benchmark_group("enforce_stack_constraint");
@@ -25,8 +25,8 @@ fn enforce_stack_constraint(c: &mut Criterion) {
             + NUM_GENERAL_CONSTRAINTS;
 
         let mut frame = generate_evaluation_frame(Operation::Inv.op_code() as usize);
-        frame.current_mut()[STACK_TRACE_OFFSET] = Felt::new(89u64);
-        frame.next_mut()[STACK_TRACE_OFFSET] = Felt::new(89u64).inv();
+        frame.current_mut()[STACK_TRACE_OFFSET] = Felt::from_u64(89u64);
+        frame.next_mut()[STACK_TRACE_OFFSET] = Felt::from_u64(89u64).inv();
 
         let mut result = [ZERO; NUM_CONSTRAINTS];
 

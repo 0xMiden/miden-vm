@@ -4,6 +4,7 @@ use miden_air::trace::chiplets::hasher::{
     DIGEST_LEN, DIGEST_RANGE, Digest, LINEAR_HASH, MP_VERIFY, MR_UPDATE_NEW, MR_UPDATE_OLD,
     RATE_LEN, RETURN_HASH, RETURN_STATE, STATE_WIDTH, Selectors, TRACE_WIDTH,
 };
+use vm_core::{PrimeCharacteristicRing, PrimeField64};
 
 use super::{
     Felt, HasherState, MerklePath, MerkleRootUpdate, ONE, OpBatch, TraceFragment, Word, ZERO,
@@ -211,7 +212,7 @@ impl Hasher {
         let addr = self.trace.next_row_addr();
 
         let root =
-            self.verify_merkle_path(value, path, index.as_int(), MerklePathContext::MpVerify);
+            self.verify_merkle_path(value, path, index.as_canonical_u64(), MerklePathContext::MpVerify);
 
         (addr, root)
     }
@@ -233,7 +234,7 @@ impl Hasher {
         index: Felt,
     ) -> MerkleRootUpdate {
         let address = self.trace.next_row_addr();
-        let index = index.as_int();
+        let index = index.as_canonical_u64();
 
         let old_root =
             self.verify_merkle_path(old_value, path, index, MerklePathContext::MrUpdateOld);
@@ -328,9 +329,9 @@ impl Hasher {
         // path), the index for the first row is different from the index for the other rows;
         // otherwise, indexes are the same.
         let (init_index, rest_index) = if init_selectors[0] == ZERO {
-            (Felt::new(*index >> 1), Felt::new(*index >> 1))
+            (Felt::from_u64(*index >> 1), Felt::from_u64(*index >> 1))
         } else {
-            (Felt::new(*index), Felt::new(*index >> 1))
+            (Felt::from_u64(*index), Felt::from_u64(*index >> 1))
         };
 
         // apply the permutation to the state and record its trace
@@ -358,8 +359,8 @@ impl Hasher {
     /// Inserts start and end rows of trace for a program block to the memoized_trace_map.
     fn insert_to_memoized_trace_map(&mut self, addr: Felt, hash: Digest) {
         let key: [u8; 32] = hash.into();
-        let start_row = addr.as_int() as usize - 1;
-        let end_row = self.trace.next_row_addr().as_int() as usize - 1;
+        let start_row = addr.as_canonical_u64() as usize - 1;
+        let end_row = self.trace.next_row_addr().as_canonical_u64() as usize - 1;
         self.memoized_trace_map.insert(key, (start_row, end_row));
     }
 }

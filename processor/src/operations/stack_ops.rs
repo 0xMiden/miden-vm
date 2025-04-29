@@ -1,5 +1,6 @@
 use super::{ExecutionError, MIN_STACK_DEPTH, Process};
 use crate::ZERO;
+use vm_core::PrimeField64;
 
 impl Process {
     // STACK MANIPULATION
@@ -233,7 +234,7 @@ impl Process {
         let b = self.stack.get(1);
         let a = self.stack.get(2);
 
-        match c.as_int() {
+        match c.as_canonical_u64() {
             0 => {
                 self.stack.set(0, b);
                 self.stack.set(1, a);
@@ -265,7 +266,7 @@ impl Process {
         let a2 = self.stack.get(7);
         let a3 = self.stack.get(8);
 
-        match c.as_int() {
+        match c.as_canonical_u64() {
             0 => {
                 self.stack.set(0, b0);
                 self.stack.set(1, b1);
@@ -299,6 +300,8 @@ impl Process {
 
 #[cfg(test)]
 mod tests {
+    use vm_core::PrimeCharacteristicRing;
+
     use super::{
         super::{Operation, Process},
         MIN_STACK_DEPTH,
@@ -340,7 +343,7 @@ mod tests {
         let mut process = Process::new_dummy(stack);
         let mut host = DefaultHost::default();
         process.execute_op(Operation::Push(ONE), &mut host).unwrap();
-        process.execute_op(Operation::Push(Felt::new(2)), &mut host).unwrap();
+        process.execute_op(Operation::Push(Felt::TWO), &mut host).unwrap();
 
         // drop the first value
         process.execute_op(Operation::Drop, &mut host).unwrap();
@@ -382,8 +385,8 @@ mod tests {
         // put 15 more items onto the stack
         let mut expected = [ONE; 16];
         for i in 2..17 {
-            process.execute_op(Operation::Push(Felt::new(i)), &mut host).unwrap();
-            expected[16 - i as usize] = Felt::new(i);
+            process.execute_op(Operation::Push(Felt::from_u64(i)), &mut host).unwrap();
+            expected[16 - i as usize] = Felt::from_u64(i);
         }
         assert_eq!(expected, process.stack.trace_state());
 
@@ -394,7 +397,7 @@ mod tests {
 
         // duplicate 8th stack item
         process.execute_op(Operation::Dup7, &mut host).unwrap();
-        assert_eq!(Felt::new(10), process.stack.trace_state()[0]);
+        assert_eq!(Felt::from_u64(10), process.stack.trace_state()[0]);
         assert_eq!(ONE, process.stack.trace_state()[1]);
         assert_eq!(&expected[..14], &process.stack.trace_state()[2..]);
 
@@ -605,7 +608,7 @@ mod tests {
     fn build_expected(values: &[u64]) -> [Felt; 16] {
         let mut expected = [ZERO; 16];
         for (&value, result) in values.iter().zip(expected.iter_mut()) {
-            *result = Felt::new(value);
+            *result = Felt::from_u64(value);
         }
         expected
     }

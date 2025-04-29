@@ -1,7 +1,7 @@
 use alloc::string::String;
 use core::fmt;
 
-use vm_core::Felt;
+use vm_core::{Felt, PrimeField64};
 
 // DOCUMENTATION TYPE
 // ================================================================================================
@@ -56,14 +56,14 @@ impl fmt::Display for HexEncodedValue {
             Self::U8(value) => write!(f, "{value}"),
             Self::U16(value) => write!(f, "{value}"),
             Self::U32(value) => write!(f, "{value:#04x}"),
-            Self::Felt(value) => write!(f, "{:#08x}", &value.as_int().to_be()),
+            Self::Felt(value) => write!(f, "{:#08x}", &value.as_canonical_u64().to_be()),
             Self::Word(value) => write!(
                 f,
                 "{:#08x}{:08x}{:08x}{:08x}",
-                &value[0].as_int(),
-                &value[1].as_int(),
-                &value[2].as_int(),
-                &value[3].as_int(),
+                &value[0].as_canonical_u64(),
+                &value[1].as_canonical_u64(),
+                &value[2].as_canonical_u64(),
+                &value[3].as_canonical_u64(),
             ),
         }
     }
@@ -86,14 +86,14 @@ impl Ord for HexEncodedValue {
             (Self::U32(l), Self::U32(r)) => l.cmp(r),
             (Self::U32(_), _) => Ordering::Less,
             (Self::Felt(_), Self::U8(_) | Self::U16(_) | Self::U32(_)) => Ordering::Greater,
-            (Self::Felt(l), Self::Felt(r)) => l.as_int().cmp(&r.as_int()),
+            (Self::Felt(l), Self::Felt(r)) => l.as_canonical_u64().cmp(&r.as_canonical_u64()),
             (Self::Felt(_), _) => Ordering::Less,
             (Self::Word([l0, l1, l2, l3]), Self::Word([r0, r1, r2, r3])) => l0
-                .as_int()
-                .cmp(&r0.as_int())
-                .then_with(|| l1.as_int().cmp(&r1.as_int()))
-                .then_with(|| l2.as_int().cmp(&r2.as_int()))
-                .then_with(|| l3.as_int().cmp(&r3.as_int())),
+                .as_canonical_u64()
+                .cmp(&r0.as_canonical_u64())
+                .then_with(|| l1.as_canonical_u64().cmp(&r1.as_canonical_u64()))
+                .then_with(|| l2.as_canonical_u64().cmp(&r2.as_canonical_u64()))
+                .then_with(|| l3.as_canonical_u64().cmp(&r3.as_canonical_u64())),
             (Self::Word(_), _) => Ordering::Greater,
         }
     }
@@ -106,9 +106,9 @@ impl core::hash::Hash for HexEncodedValue {
             Self::U8(value) => value.hash(state),
             Self::U16(value) => value.hash(state),
             Self::U32(value) => value.hash(state),
-            Self::Felt(value) => value.as_int().hash(state),
+            Self::Felt(value) => value.as_canonical_u64().hash(state),
             Self::Word([a, b, c, d]) => {
-                [a.as_int(), b.as_int(), c.as_int(), d.as_int()].hash(state)
+                [a.as_canonical_u64(), b.as_canonical_u64(), c.as_canonical_u64(), d.as_canonical_u64()].hash(state)
             },
         }
     }

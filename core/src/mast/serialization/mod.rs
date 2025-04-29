@@ -148,7 +148,8 @@ impl Serializable for MastForest {
             mast_node_info.write_into(target);
         }
 
-        self.advice_map.write_into(target);
+        // TODO(Al)
+        // self.advice_map.write_into(target);
 
         // write all decorator data below
 
@@ -193,7 +194,9 @@ impl Deserializable for MastForest {
         let mast_node_infos: Vec<MastNodeInfo> = node_infos_iter(source, node_count)
             .collect::<Result<Vec<MastNodeInfo>, DeserializationError>>()?;
 
-        let advice_map = AdviceMap::read_from(source)?;
+        // TODO(Al)
+        //let advice_map = AdviceMap::read_from(source)?;
+        let advice_map = AdviceMap::default();
 
         // Reading Decorators
         let decorator_data: Vec<u8> = Deserializable::read_from(source)?;

@@ -34,7 +34,12 @@ testing = []
 thiserror = { workspace = true }
 vm-core = { package = "miden-core", path = "../core", version = "0.14", default-features = false }
 winter-air = { package = "winter-air", version = "0.12", default-features = false }
-winter-prover = { package = "winter-prover", version = "0.12", default-features = false }
+p3-air = { git = "https://github.com/Plonky3/Plonky3.git", rev = "6364190aa350d3b65d3c5e01dec916b322043573" }
+p3-matrix = { git = "https://github.com/Plonky3/Plonky3.git", rev = "6364190aa350d3b65d3c5e01dec916b322043573" }
+p3-field = { git = "https://github.com/Plonky3/Plonky3.git", rev = "6364190aa350d3b65d3c5e01dec916b322043573" }
+p3-uni-stark = { git = "https://github.com/Plonky3/Plonky3.git", rev = "6364190aa350d3b65d3c5e01dec916b322043573" }
+serde = { version = "1.0", features = ["derive"]}
+bincode = "1.3"
 
 [dev-dependencies]
 criterion = "0.5"

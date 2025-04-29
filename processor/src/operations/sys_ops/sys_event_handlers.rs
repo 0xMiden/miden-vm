@@ -1,14 +1,13 @@
 use alloc::vec::Vec;
 
 use vm_core::{
-    Felt, FieldElement, WORD_SIZE, Word, ZERO,
+    Felt, Field, PrimeCharacteristicRing, PrimeField64, WORD_SIZE, Word, ZERO,
     crypto::{
         hash::{Rpo256, RpoDigest},
         merkle::{EmptySubtreeRoots, SMT_DEPTH, Smt},
     },
     sys_events::SystemEvent,
 };
-use winter_prover::math::fft;
 
 use crate::{
     AdviceProvider, AdviceSource, ExecutionError, Ext2InttError, Host, Process, ProcessState,
@@ -317,15 +316,15 @@ pub fn push_u64_div_result(
     process: ProcessState,
 ) -> Result<(), ExecutionError> {
     let divisor = {
-        let divisor_hi = process.get_stack_item(0).as_int();
-        let divisor_lo = process.get_stack_item(1).as_int();
+        let divisor_hi = process.get_stack_item(0).as_canonical_u64();
+        let divisor_lo = process.get_stack_item(1).as_canonical_u64();
 
         // Ensure the divisor is a pair of u32 values
         if divisor_hi > u32::MAX.into() {
-            return Err(ExecutionError::NotU32Value(Felt::new(divisor_hi), ZERO));
+            return Err(ExecutionError::NotU32Value(Felt::from_u64(divisor_hi), ZERO));
         }
         if divisor_lo > u32::MAX.into() {
-            return Err(ExecutionError::NotU32Value(Felt::new(divisor_lo), ZERO));
+            return Err(ExecutionError::NotU32Value(Felt::from_u64(divisor_lo), ZERO));
         }
 
         let divisor = (divisor_hi << 32) + divisor_lo;
@@ -338,15 +337,15 @@ pub fn push_u64_div_result(
     };
 
     let dividend = {
-        let dividend_hi = process.get_stack_item(2).as_int();
-        let dividend_lo = process.get_stack_item(3).as_int();
+        let dividend_hi = process.get_stack_item(2).as_canonical_u64();
+        let dividend_lo = process.get_stack_item(3).as_canonical_u64();
 
         // Ensure the dividend is a pair of u32 values
         if dividend_hi > u32::MAX.into() {
-            return Err(ExecutionError::NotU32Value(Felt::new(dividend_hi), ZERO));
+            return Err(ExecutionError::NotU32Value(Felt::from_u64(dividend_hi), ZERO));
         }
         if dividend_lo > u32::MAX.into() {
-            return Err(ExecutionError::NotU32Value(Felt::new(dividend_lo), ZERO));
+            return Err(ExecutionError::NotU32Value(Felt::from_u64(dividend_lo), ZERO));
         }
 
         (dividend_hi << 32) + dividend_lo
@@ -387,8 +386,8 @@ pub fn push_falcon_mod_result(
     advice_provider: &mut impl AdviceProvider,
     process: ProcessState,
 ) -> Result<(), ExecutionError> {
-    let dividend_hi = process.get_stack_item(0).as_int();
-    let dividend_lo = process.get_stack_item(1).as_int();
+    let dividend_hi = process.get_stack_item(0).as_canonical_u64();
+    let dividend_lo = process.get_stack_item(1).as_canonical_u64();
     let dividend = (dividend_hi << 32) + dividend_lo;
 
     let (quotient, remainder) = (dividend / M, dividend % M);
@@ -427,11 +426,11 @@ pub fn push_ext2_inv_result(
     let coef0 = process.get_stack_item(1);
     let coef1 = process.get_stack_item(0);
 
-    let element = QuadFelt::new(coef0, coef1);
+    let element = QuadFelt::new_complex(coef0, coef1);
     if element == QuadFelt::ZERO {
         return Err(ExecutionError::DivideByZero(process.clk()));
     }
-    let result = element.inv().to_base_elements();
+    let result = element.inverse().to_array();
 
     advice_provider.push_stack(AdviceSource::Value(result[1]))?;
     advice_provider.push_stack(AdviceSource::Value(result[0]))?;
@@ -468,12 +467,12 @@ pub fn push_ext2_inv_result(
 /// - `input_ptr` is greater than 2^32, or is not aligned on a word boundary.
 /// - `input_ptr + input_size * 2` is greater than 2^32.
 pub fn push_ext2_intt_result(
-    advice_provider: &mut impl AdviceProvider,
+    _advice_provider: &mut impl AdviceProvider,
     process: ProcessState,
 ) -> Result<(), ExecutionError> {
-    let output_size = process.get_stack_item(0).as_int() as usize;
-    let input_size = process.get_stack_item(1).as_int() as usize;
-    let input_start_ptr = process.get_stack_item(2).as_int();
+    let output_size = process.get_stack_item(0).as_canonical_u64() as usize;
+    let input_size = process.get_stack_item(1).as_canonical_u64() as usize;
+    let input_start_ptr = process.get_stack_item(2).as_canonical_u64();
 
     if input_size <= 1 {
         return Err(Ext2InttError::DomainSizeTooSmall(input_size as u64).into());
@@ -509,17 +508,17 @@ pub fn push_ext2_intt_result(
             .get_mem_word(process.ctx(), addr)?
             .ok_or(Ext2InttError::UninitializedMemoryAddress(addr))?;
 
-        poly.push(QuadFelt::new(word[0], word[1]));
-        poly.push(QuadFelt::new(word[2], word[3]));
+        poly.push(QuadFelt::new_complex(word[0], word[1]));
+        poly.push(QuadFelt::new_complex(word[2], word[3]));
     }
+    /*  TODO(Al): Should probably be removed altogether
+       let twiddles = fft::get_inv_twiddles::<Felt>(input_size);
+       fft::interpolate_poly::<Felt, QuadFelt>(&mut poly, &twiddles);
 
-    let twiddles = fft::get_inv_twiddles::<Felt>(input_size);
-    fft::interpolate_poly::<Felt, QuadFelt>(&mut poly, &twiddles);
-
-    for element in QuadFelt::slice_as_base_elements(&poly[..output_size]).iter().rev() {
-        advice_provider.push_stack(AdviceSource::Value(*element))?;
-    }
-
+       for element in QuadFelt::slice_as_base_elements(&poly[..output_size]).iter().rev() {
+           advice_provider.push_stack(AdviceSource::Value(*element))?;
+       }
+    */
     Ok(())
 }
 
@@ -537,7 +536,7 @@ pub fn push_leading_zeros(
     process: ProcessState,
 ) -> Result<(), ExecutionError> {
     push_transformed_stack_top(advice_provider, process, |stack_top| {
-        Felt::from(stack_top.leading_zeros())
+        Felt::from_u32(stack_top.leading_zeros())
     })
 }
 
@@ -555,7 +554,7 @@ pub fn push_trailing_zeros(
     process: ProcessState,
 ) -> Result<(), ExecutionError> {
     push_transformed_stack_top(advice_provider, process, |stack_top| {
-        Felt::from(stack_top.trailing_zeros())
+        Felt::from_u32(stack_top.trailing_zeros())
     })
 }
 
@@ -573,7 +572,7 @@ pub fn push_leading_ones(
     process: ProcessState,
 ) -> Result<(), ExecutionError> {
     push_transformed_stack_top(advice_provider, process, |stack_top| {
-        Felt::from(stack_top.leading_ones())
+        Felt::from_u32(stack_top.leading_ones())
     })
 }
 
@@ -591,7 +590,7 @@ pub fn push_trailing_ones(
     process: ProcessState,
 ) -> Result<(), ExecutionError> {
     push_transformed_stack_top(advice_provider, process, |stack_top| {
-        Felt::from(stack_top.trailing_ones())
+        Felt::from_u32(stack_top.trailing_ones())
     })
 }
 
@@ -610,11 +609,11 @@ pub fn push_ilog2(
     advice_provider: &mut impl AdviceProvider,
     process: ProcessState,
 ) -> Result<(), ExecutionError> {
-    let n = process.get_stack_item(0).as_int();
+    let n = process.get_stack_item(0).as_canonical_u64();
     if n == 0 {
         return Err(ExecutionError::LogArgumentZero(process.clk()));
     }
-    let ilog2 = Felt::from(n.ilog2());
+    let ilog2 = Felt::from_u32(n.ilog2());
     advice_provider.push_stack(AdviceSource::Value(ilog2))?;
     Ok(())
 }
@@ -649,7 +648,7 @@ pub fn push_smtpeek_result(
 
     // get the node from the SMT for the specified key; this node can be either a leaf node,
     // or a root of an empty subtree at the returned depth
-    let node = advice_provider.get_tree_node(root, &Felt::new(SMT_DEPTH as u64), &key[3])?;
+    let node = advice_provider.get_tree_node(root, &Felt::from_u64(SMT_DEPTH as u64), &key[3])?;
 
     if node == Word::from(empty_leaf) {
         // if the node is a root of an empty subtree, then there is no value associated with
@@ -684,8 +683,8 @@ fn get_mem_addr_range(
     start_idx: usize,
     end_idx: usize,
 ) -> Result<(u32, u32), ExecutionError> {
-    let start_addr = process.get_stack_item(start_idx).as_int();
-    let end_addr = process.get_stack_item(end_idx).as_int();
+    let start_addr = process.get_stack_item(start_idx).as_canonical_u64();
+    let end_addr = process.get_stack_item(end_idx).as_canonical_u64();
 
     if start_addr > u32::MAX as u64 {
         return Err(ExecutionError::MemoryAddressOutOfBounds(start_addr));
@@ -702,8 +701,8 @@ fn get_mem_addr_range(
 }
 
 fn u64_to_u32_elements(value: u64) -> (Felt, Felt) {
-    let hi = Felt::from((value >> 32) as u32);
-    let lo = Felt::from(value as u32);
+    let hi = Felt::from_u32((value >> 32) as u32);
+    let lo = Felt::from_u32(value as u32);
     (hi, lo)
 }
 
@@ -716,7 +715,7 @@ fn push_transformed_stack_top<A: AdviceProvider>(
 ) -> Result<(), ExecutionError> {
     let stack_top = process.get_stack_item(0);
     let stack_top: u32 = stack_top
-        .as_int()
+        .as_canonical_u64()
         .try_into()
         .map_err(|_| ExecutionError::NotU32Value(stack_top, ZERO))?;
     let transformed_stack_top = f(stack_top);

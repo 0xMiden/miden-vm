@@ -1,9 +1,13 @@
+use vm_core::{PrimeCharacteristicRing, lazy_static};
+
 use super::{ExecutionError, Felt, Process};
 
 // EXTENSION FIELD OPERATIONS
 // ================================================================================================
 
-const TWO: Felt = Felt::new(2);
+lazy_static! {
+    static ref SEVEN: Felt = Felt::from_u64(7);
+}
 
 impl Process {
     // ARITHMETIC OPERATIONS
@@ -17,8 +21,10 @@ impl Process {
         let [a0, a1, b0, b1] = self.stack.get_word(0);
         self.stack.set(0, b1);
         self.stack.set(1, b0);
-        self.stack.set(2, (b0 + b1) * (a1 + a0) - b0 * a0);
-        self.stack.set(3, b0 * a0 - TWO * b1 * a1);
+        //self.stack.set(2, (b0 + b1) * (a1 + a0) - b0 * a0);
+        //self.stack.set(3, b0 * a0 - TWO * b1 * a1);
+        self.stack.set(2, a0 * b1 + a1 * b0);
+        self.stack.set(3, a0 * b0 + *SEVEN * a1 * b1);
         self.stack.copy_state(4);
         Ok(())
     }
@@ -29,9 +35,9 @@ impl Process {
 
 #[cfg(test)]
 mod tests {
-    type QuadFelt = QuadExtension<Felt>;
+    type QuadFelt = BinomialExtensionField<Felt, 2>;
     use test_utils::rand::rand_value;
-    use vm_core::QuadExtension;
+    use vm_core::BinomialExtensionField;
 
     use super::{
         super::{Felt, MIN_STACK_DEPTH, Operation},
@@ -45,7 +51,7 @@ mod tests {
     #[test]
     fn op_ext2mul() {
         // initialize the stack with a few values
-        let [a0, a1, b0, b1] = [rand_value(); 4];
+        let [a0, a1, b0, b1] = rand_value();
 
         let stack = StackInputs::new(vec![a0, a1, b0, b1]).expect("inputs lenght too long");
         let mut host = DefaultHost::default();
@@ -53,9 +59,9 @@ mod tests {
 
         // multiply the top two values
         process.execute_op(Operation::Ext2Mul, &mut host).unwrap();
-        let a = QuadFelt::new(a0, a1);
-        let b = QuadFelt::new(b0, b1);
-        let c = (b * a).to_base_elements();
+        let a = QuadFelt::new_complex(a0, a1);
+        let b = QuadFelt::new_complex(b0, b1);
+        let c = (b * a).to_array();
         let expected = build_expected(&[b1, b0, c[1], c[0]]);
 
         assert_eq!(MIN_STACK_DEPTH, process.stack.depth());

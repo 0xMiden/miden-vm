@@ -1,9 +1,9 @@
 use alloc::vec::Vec;
 
 use miden_air::trace::main_trace::MainTrace;
-use vm_core::Kernel;
+use vm_core::{ExtensionField, Kernel};
 
-use super::{super::trace::AuxColumnBuilder, Felt, FieldElement};
+use super::{super::trace::AuxColumnBuilder, Felt};
 
 mod bus;
 pub use bus::BusColumnBuilder;
@@ -30,7 +30,7 @@ impl AuxTraceBuilder {
     /// Builds and returns the Chiplets's auxiliary trace columns. Currently this consists of
     /// a single bus column `b_chip` describing chiplet lookups requested by the stack and
     /// provided by chiplets in the Chiplets module.
-    pub fn build_aux_columns<E: FieldElement<BaseField = Felt>>(
+    pub fn build_aux_columns<E: ExtensionField<Felt>>(
         &self,
         main_trace: &MainTrace,
         rand_elements: &[E],

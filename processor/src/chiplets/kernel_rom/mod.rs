@@ -1,6 +1,7 @@
 use alloc::collections::BTreeMap;
 
 use miden_air::{RowIndex, trace::chiplets::kernel_rom::TRACE_WIDTH};
+use vm_core::PrimeCharacteristicRing;
 
 use super::{Digest, ExecutionError, Felt, Kernel, ONE, TraceFragment, Word, ZERO};
 
@@ -100,7 +101,7 @@ impl KernelRom {
         debug_assert_eq!(TRACE_WIDTH, trace.width(), "inconsistent trace fragment width");
         let mut row: RowIndex = 0.into();
         for (idx, access_info) in self.access_map.values().enumerate() {
-            let idx = Felt::from(idx as u16);
+            let idx = Felt::from_u16(idx as u16);
 
             // write at least one row into the trace for each kernel procedure
             access_info.write_into_trace(trace, row, idx);

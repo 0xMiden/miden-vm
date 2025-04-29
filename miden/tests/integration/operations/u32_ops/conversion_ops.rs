@@ -1,8 +1,9 @@
 use processor::ExecutionError;
 use test_utils::{
-    Felt, StarkField, U32_BOUND, WORD_SIZE, ZERO, build_op_test, expect_exec_error_matches,
+    Felt, U32_BOUND, WORD_SIZE, ZERO, build_op_test, expect_exec_error_matches,
     proptest::prelude::*, rand::rand_value,
 };
+use vm_core::{PrimeCharacteristicRing, PrimeField64};
 
 use super::{prop_randw, test_inputs_out_of_bounds};
 
@@ -103,7 +104,7 @@ fn u32assert_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::NotU32Value(value, err_code) if value == Felt::new(equal) && err_code == ZERO
+        ExecutionError::NotU32Value(value, err_code) if value == Felt::from_u64(equal) && err_code == ZERO
     );
 
     // --- test when a > 2^32 ---------------------------------------------------------------------
@@ -111,7 +112,7 @@ fn u32assert_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::NotU32Value(value, err_code) if value == Felt::new(larger) && err_code == ZERO
+        ExecutionError::NotU32Value(value, err_code) if value == Felt::from_u64(larger) && err_code == ZERO
     );
 }
 
@@ -142,7 +143,7 @@ fn u32assert2_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::NotU32Value(value, err_code) if value == Felt::new(value_b) && err_code == ZERO
+        ExecutionError::NotU32Value(value, err_code) if value == Felt::from_u64(value_b) && err_code == ZERO
     );
 
     // -------- Case 2: a > 2^32 and b < 2^32 ---------------------------------------------------
@@ -152,7 +153,7 @@ fn u32assert2_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::NotU32Value(value, err_code) if value == Felt::new(value_a) && err_code == ZERO
+        ExecutionError::NotU32Value(value, err_code) if value == Felt::from_u64(value_a) && err_code == ZERO
     );
 
     // --------- Case 3: a < 2^32 and b > 2^32 --------------------------------------------------
@@ -162,7 +163,7 @@ fn u32assert2_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::NotU32Value(value, err_code) if value == Felt::new(value_b) && err_code == ZERO
+        ExecutionError::NotU32Value(value, err_code) if value == Felt::from_u64(value_b) && err_code == ZERO
     );
 }
 
@@ -188,7 +189,7 @@ fn u32assertw_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::NotU32Value(value, err_code) if value == Felt::new(U32_BOUND) && err_code == ZERO
+        ExecutionError::NotU32Value(value, err_code) if value == Felt::from_u64(U32_BOUND) && err_code == ZERO
     );
 }
 
@@ -246,7 +247,7 @@ proptest! {
         let asm_op = "u32test";
 
         // check to see if the value of the element will be a valid u32
-        let expected_result = if value % Felt::MODULUS < U32_BOUND { 1 } else { 0 };
+        let expected_result = if value % Felt::ORDER_U64 < U32_BOUND { 1 } else { 0 };
 
         let test = build_op_test!(asm_op, &[value]);
         test.prop_expect_stack(&[expected_result, value])?;
@@ -297,7 +298,7 @@ proptest! {
 
         // expected result will be mod 2^32 applied to a field element
         // so the field modulus should be applied first
-        let expected_result = value % Felt::MODULUS % U32_BOUND;
+        let expected_result = value % Felt::ORDER_U64 % U32_BOUND;
 
         let test = build_op_test!(asm_op, &[value]);
         test.prop_expect_stack(&[expected_result])?;
@@ -309,7 +310,7 @@ proptest! {
 
         // expected result will be mod 2^32 applied to a field element
         // so the field modulus must be applied first
-        let felt_value = value % Felt::MODULUS;
+        let felt_value = value % Felt::ORDER_U64;
         let expected_b = felt_value >> 32;
         let expected_c = felt_value as u32 as u64;
 

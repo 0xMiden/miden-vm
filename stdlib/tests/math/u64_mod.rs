@@ -4,7 +4,7 @@ use processor::ExecutionError;
 use test_utils::{
     Felt, U32_BOUND, ZERO, expect_exec_error_matches, proptest::prelude::*, rand::rand_value,
 };
-use vm_core::assert_matches;
+use vm_core::{assert_matches, PrimeCharacteristicRing};
 
 // ADDITION
 // ------------------------------------------------------------------------------------------------
@@ -559,7 +559,7 @@ fn checked_and_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::NotU32Value(value, err_code) if value == Felt::new(a0) && err_code == ZERO
+        ExecutionError::NotU32Value(value, err_code) if value == Felt::from_u64(a0) && err_code == ZERO
     );
 }
 
@@ -601,7 +601,7 @@ fn checked_or_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::NotU32Value(value, err_code) if value == Felt::new(a0) && err_code == ZERO
+        ExecutionError::NotU32Value(value, err_code) if value == Felt::from_u64(a0) && err_code == ZERO
     );
 }
 
@@ -643,7 +643,7 @@ fn checked_xor_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::NotU32Value(value, err_code) if value == Felt::new(a0) && err_code == ZERO
+        ExecutionError::NotU32Value(value, err_code) if value == Felt::from_u64(a0) && err_code == ZERO
     );
 }
 

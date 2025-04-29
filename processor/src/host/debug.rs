@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 use std::{print, println};
 
 use miden_air::RowIndex;
-use vm_core::{DebugOptions, Felt};
+use vm_core::{DebugOptions, Felt, PrimeField64};
 
 use super::ProcessState;
 use crate::system::ContextId;
@@ -189,14 +189,14 @@ fn print_mem_address(
             } else {
                 print!("└── {addr:#010x}: ");
             }
-            println!("{:>width$}\n", value.as_int(), width = element_width);
+            println!("{:>width$}\n", value.as_canonical_u64(), width = element_width);
         } else {
             if is_local {
                 print!("├── {addr:>5}: ");
             } else {
                 print!("├── {addr:#010x}: ");
             }
-            println!("{:>width$}", value.as_int(), width = element_width);
+            println!("{:>width$}", value.as_canonical_u64(), width = element_width);
         }
     } else if is_last {
         if is_local {
@@ -214,7 +214,7 @@ fn print_mem_address(
 /// Returns the number of digits required to print the provided element.
 fn element_printed_width(element: Option<Felt>) -> u32 {
     if let Some(element) = element {
-        element.as_int().checked_ilog10().unwrap_or(1) + 1
+        element.as_canonical_u64().checked_ilog10().unwrap_or(1) + 1
     } else {
         0
     }

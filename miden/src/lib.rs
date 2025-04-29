@@ -15,8 +15,8 @@ pub use processor::{
     VmStateIterator, ZERO, crypto, execute, execute_iter, utils,
 };
 pub use prover::{
-    Digest, ExecutionProof, FieldExtension, HashFunction, InputError, Proof, ProvingOptions,
-    StackOutputs, Word, math, prove,
+    Digest, ExecutionProof, FieldExtension, HashFunction, InputError, ProvingOptions, StackOutputs,
+    Word, math, prove,
 };
 pub use verifier::{VerificationError, verify};
 

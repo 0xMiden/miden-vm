@@ -1,3 +1,5 @@
+use miden_crypto::PrimeCharacteristicRing;
+
 use super::*;
 use crate::{Decorator, ONE, mast::MastForest};
 
@@ -36,7 +38,7 @@ fn batch_ops() {
     assert_eq!(hasher::hash_elements(&batch_groups), hash);
 
     // --- one group with one immediate value -------------------------------------------------
-    let ops = vec![Operation::Add, Operation::Push(Felt::new(12345678))];
+    let ops = vec![Operation::Add, Operation::Push(Felt::from_u64(12345678))];
     let (batches, hash) = super::batch_and_hash_ops(ops.clone());
     assert_eq!(1, batches.len());
 
@@ -46,7 +48,7 @@ fn batch_ops() {
 
     let mut batch_groups = [ZERO; BATCH_SIZE];
     batch_groups[0] = build_group(&ops);
-    batch_groups[1] = Felt::new(12345678);
+    batch_groups[1] = Felt::from_u64(12345678);
 
     assert_eq!(batch_groups, batch.groups);
     assert_eq!([2_usize, 0, 0, 0, 0, 0, 0, 0], batch.op_counts);
@@ -55,12 +57,12 @@ fn batch_ops() {
     // --- one group with 7 immediate values --------------------------------------------------
     let ops = vec![
         Operation::Push(ONE),
-        Operation::Push(Felt::new(2)),
-        Operation::Push(Felt::new(3)),
-        Operation::Push(Felt::new(4)),
-        Operation::Push(Felt::new(5)),
-        Operation::Push(Felt::new(6)),
-        Operation::Push(Felt::new(7)),
+        Operation::Push(Felt::from_u64(2)),
+        Operation::Push(Felt::from_u64(3)),
+        Operation::Push(Felt::from_u64(4)),
+        Operation::Push(Felt::from_u64(5)),
+        Operation::Push(Felt::from_u64(6)),
+        Operation::Push(Felt::from_u64(7)),
         Operation::Add,
     ];
     let (batches, hash) = super::batch_and_hash_ops(ops.clone());
@@ -73,12 +75,12 @@ fn batch_ops() {
     let batch_groups = [
         build_group(&ops),
         ONE,
-        Felt::new(2),
-        Felt::new(3),
-        Felt::new(4),
-        Felt::new(5),
-        Felt::new(6),
-        Felt::new(7),
+        Felt::from_u64(2),
+        Felt::from_u64(3),
+        Felt::from_u64(4),
+        Felt::from_u64(5),
+        Felt::from_u64(6),
+        Felt::from_u64(7),
     ];
 
     assert_eq!(batch_groups, batch.groups);
@@ -90,13 +92,13 @@ fn batch_ops() {
         Operation::Add,
         Operation::Mul,
         Operation::Push(ONE),
-        Operation::Push(Felt::new(2)),
-        Operation::Push(Felt::new(3)),
-        Operation::Push(Felt::new(4)),
-        Operation::Push(Felt::new(5)),
-        Operation::Push(Felt::new(6)),
+        Operation::Push(Felt::from_u64(2)),
+        Operation::Push(Felt::from_u64(3)),
+        Operation::Push(Felt::from_u64(4)),
+        Operation::Push(Felt::from_u64(5)),
+        Operation::Push(Felt::from_u64(6)),
         Operation::Add,
-        Operation::Push(Felt::new(7)),
+        Operation::Push(Felt::from_u64(7)),
     ];
     let (batches, hash) = super::batch_and_hash_ops(ops.clone());
     assert_eq!(2, batches.len());
@@ -108,11 +110,11 @@ fn batch_ops() {
     let batch0_groups = [
         build_group(&ops[..9]),
         ONE,
-        Felt::new(2),
-        Felt::new(3),
-        Felt::new(4),
-        Felt::new(5),
-        Felt::new(6),
+        Felt::from_u64(2),
+        Felt::from_u64(3),
+        Felt::from_u64(4),
+        Felt::from_u64(5),
+        Felt::from_u64(6),
         ZERO,
     ];
 
@@ -125,7 +127,7 @@ fn batch_ops() {
 
     let mut batch1_groups = [ZERO; BATCH_SIZE];
     batch1_groups[0] = build_group(&[ops[9]]);
-    batch1_groups[1] = Felt::new(7);
+    batch1_groups[1] = Felt::from_u64(7);
 
     assert_eq!([1_usize, 0, 0, 0, 0, 0, 0, 0], batch1.op_counts);
     assert_eq!(batch1_groups, batch1.groups);
@@ -138,10 +140,10 @@ fn batch_ops() {
         Operation::Add,
         Operation::Mul,
         Operation::Add,
-        Operation::Push(Felt::new(7)),
+        Operation::Push(Felt::from_u64(7)),
         Operation::Add,
         Operation::Add,
-        Operation::Push(Felt::new(11)),
+        Operation::Push(Felt::from_u64(11)),
         Operation::Mul,
         Operation::Mul,
         Operation::Add,
@@ -156,8 +158,8 @@ fn batch_ops() {
 
     let batch_groups = [
         build_group(&ops[..9]),
-        Felt::new(7),
-        Felt::new(11),
+        Felt::from_u64(7),
+        Felt::from_u64(11),
         build_group(&ops[9..]),
         ZERO,
         ZERO,
@@ -179,7 +181,7 @@ fn batch_ops() {
         Operation::Mul,
         Operation::Mul,
         Operation::Add,
-        Operation::Push(Felt::new(11)),
+        Operation::Push(Felt::from_u64(11)),
     ];
     let (batches, hash) = super::batch_and_hash_ops(ops.clone());
     assert_eq!(1, batches.len());
@@ -191,7 +193,7 @@ fn batch_ops() {
     let batch_groups = [
         build_group(&ops[..8]),
         build_group(&[ops[8]]),
-        Felt::new(11),
+        Felt::from_u64(11),
         ZERO,
         ZERO,
         ZERO,
@@ -213,7 +215,7 @@ fn batch_ops() {
         Operation::Mul,
         Operation::Mul,
         Operation::Push(ONE),
-        Operation::Push(Felt::new(2)),
+        Operation::Push(Felt::from_u64(2)),
     ];
     let (batches, hash) = super::batch_and_hash_ops(ops.clone());
     assert_eq!(1, batches.len());
@@ -226,7 +228,7 @@ fn batch_ops() {
         build_group(&ops[..8]),
         ONE,
         build_group(&[ops[8]]),
-        Felt::new(2),
+        Felt::from_u64(2),
         ZERO,
         ZERO,
         ZERO,
@@ -242,10 +244,10 @@ fn batch_ops() {
         Operation::Add,
         Operation::Mul,
         Operation::Push(ONE),
-        Operation::Push(Felt::new(2)),
-        Operation::Push(Felt::new(3)),
-        Operation::Push(Felt::new(4)),
-        Operation::Push(Felt::new(5)),
+        Operation::Push(Felt::from_u64(2)),
+        Operation::Push(Felt::from_u64(3)),
+        Operation::Push(Felt::from_u64(4)),
+        Operation::Push(Felt::from_u64(5)),
         Operation::Add,
         Operation::Mul,
         Operation::Add,
@@ -256,7 +258,7 @@ fn batch_ops() {
         Operation::Mul,
         Operation::Add,
         Operation::Mul,
-        Operation::Push(Felt::new(6)),
+        Operation::Push(Felt::from_u64(6)),
         Operation::Pad,
     ];
 
@@ -270,10 +272,10 @@ fn batch_ops() {
     let batch0_groups = [
         build_group(&ops[..9]),
         ONE,
-        Felt::new(2),
-        Felt::new(3),
-        Felt::new(4),
-        Felt::new(5),
+        Felt::from_u64(2),
+        Felt::from_u64(3),
+        Felt::from_u64(4),
+        Felt::from_u64(5),
         build_group(&ops[9..17]),
         ZERO,
     ];
@@ -285,7 +287,8 @@ fn batch_ops() {
     assert_eq!(ops[17..], batch1.ops);
     assert_eq!(2, batch1.num_groups());
 
-    let batch1_groups = [build_group(&ops[17..]), Felt::new(6), ZERO, ZERO, ZERO, ZERO, ZERO, ZERO];
+    let batch1_groups =
+        [build_group(&ops[17..]), Felt::from_u64(6), ZERO, ZERO, ZERO, ZERO, ZERO, ZERO];
     assert_eq!(batch1_groups, batch1.groups);
     assert_eq!([2_usize, 0, 0, 0, 0, 0, 0, 0], batch1.op_counts);
 
@@ -339,5 +342,5 @@ fn build_group(ops: &[Operation]) -> Felt {
     for (i, op) in ops.iter().enumerate() {
         group |= (op.op_code() as u64) << (Operation::OP_BITS * i);
     }
-    Felt::new(group)
+    Felt::from_u64(group)
 }

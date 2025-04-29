@@ -1,3 +1,5 @@
+use vm_core::ZERO;
+
 use super::Felt;
 
 // CONSTANTS
@@ -12,4 +14,5 @@ pub const TRACE_WIDTH: usize = 6;
 ///
 /// The unique operation label is computed as 1 plus the combined chiplet and internal selector
 /// with the bits reversed: kernel ROM selector=[1, 1, 1, 0] +1=[0, 0, 0, 1].
-pub const KERNEL_PROC_LABEL: Felt = Felt::new(0b1000);
+pub const KERNEL_PROC_LABEL: Felt = ZERO;
+//pub const KERNEL_PROC_LABEL: Felt = Felt::from_u64(0b1000);

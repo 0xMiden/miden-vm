@@ -1,4 +1,4 @@
-use vm_core::{Felt, Operation, sys_events::SystemEvent};
+use vm_core::{Felt, Operation, sys_events::SystemEvent, PrimeCharacteristicRing, PrimeField64};
 
 use super::{
     super::{
@@ -53,7 +53,7 @@ impl Process {
         let fmp = self.system.fmp();
 
         let new_fmp = fmp + offset;
-        if new_fmp.as_int() < FMP_MIN || new_fmp.as_int() > FMP_MAX {
+        if new_fmp.as_canonical_u64() < FMP_MIN || new_fmp.as_canonical_u64() > FMP_MAX {
             return Err(ExecutionError::InvalidFmpValue(fmp, new_fmp));
         }
 
@@ -70,7 +70,7 @@ impl Process {
     /// the stack.
     pub(super) fn op_sdepth(&mut self) -> Result<(), ExecutionError> {
         let stack_depth = self.stack.depth();
-        self.stack.set(0, Felt::new(stack_depth as u64));
+        self.stack.set(0, Felt::from_u64(stack_depth as u64));
         self.stack.shift_right(0);
         Ok(())
     }
@@ -122,7 +122,7 @@ impl Process {
         H: Host,
     {
         self.stack.copy_state(0);
-        self.decoder.set_user_op_helpers(Operation::Emit(event_id), &[event_id.into()]);
+        self.decoder.set_user_op_helpers(Operation::Emit(event_id), &[Felt::from_u32(event_id)]);
 
         // If it's a system event, handle it directly. Otherwise, forward it to the host.
         if let Some(system_event) = SystemEvent::from_event_id(event_id) {
@@ -138,6 +138,8 @@ impl Process {
 
 #[cfg(test)]
 mod tests {
+    use vm_core::PrimeCharacteristicRing;
+
     use super::{
         super::{MIN_STACK_DEPTH, Operation},
         FMP_MAX, FMP_MIN, Felt, Process,
@@ -164,32 +166,32 @@ mod tests {
         let mut process = Process::new_dummy_with_empty_stack();
 
         // initial value of fmp register should be 2^30
-        assert_eq!(Felt::new(2_u64.pow(30)), process.system.fmp());
+        assert_eq!(Felt::from_u64(2_u64.pow(30)), process.system.fmp());
 
         // increment fmp register
-        process.execute_op(Operation::Push(Felt::new(2)), &mut host).unwrap();
+        process.execute_op(Operation::Push(Felt::from_u64(2)), &mut host).unwrap();
         process.execute_op(Operation::FmpUpdate, &mut host).unwrap();
-        assert_eq!(Felt::new(FMP_MIN + 2), process.system.fmp());
+        assert_eq!(Felt::from_u64(FMP_MIN + 2), process.system.fmp());
 
         // increment fmp register again
-        process.execute_op(Operation::Push(Felt::new(3)), &mut host).unwrap();
+        process.execute_op(Operation::Push(Felt::from_u64(3)), &mut host).unwrap();
         process.execute_op(Operation::FmpUpdate, &mut host).unwrap();
-        assert_eq!(Felt::new(FMP_MIN + 5), process.system.fmp());
+        assert_eq!(Felt::from_u64(FMP_MIN + 5), process.system.fmp());
 
         // decrement fmp register
-        process.execute_op(Operation::Push(-Felt::new(3)), &mut host).unwrap();
+        process.execute_op(Operation::Push(-Felt::from_u64(3)), &mut host).unwrap();
         process.execute_op(Operation::FmpUpdate, &mut host).unwrap();
-        assert_eq!(Felt::new(FMP_MIN + 2), process.system.fmp());
+        assert_eq!(Felt::from_u64(FMP_MIN + 2), process.system.fmp());
 
         // decrementing beyond the minimum fmp value should be an error
-        process.execute_op(Operation::Push(-Felt::new(3)), &mut host).unwrap();
+        process.execute_op(Operation::Push(-Felt::from_u64(3)), &mut host).unwrap();
         assert!(process.execute_op(Operation::FmpUpdate, &mut host).is_err());
 
         // going up to the max fmp value should be OK
         let stack = StackInputs::try_from_ints([MAX_PROC_LOCALS]).unwrap();
         let mut process = Process::new_dummy(stack);
         process.execute_op(Operation::FmpUpdate, &mut host).unwrap();
-        assert_eq!(Felt::new(FMP_MAX), process.system.fmp());
+        assert_eq!(Felt::from_u64(FMP_MAX), process.system.fmp());
 
         // but going beyond that should be an error
         let stack = StackInputs::try_from_ints([MAX_PROC_LOCALS + 1]).unwrap();
@@ -215,7 +217,7 @@ mod tests {
         let mut process = Process::new_dummy_with_empty_stack();
 
         // set value of fmp register
-        process.execute_op(Operation::Push(Felt::new(2)), &mut host).unwrap();
+        process.execute_op(Operation::Push(Felt::from_u64(2)), &mut host).unwrap();
         process.execute_op(Operation::FmpUpdate, &mut host).unwrap();
 
         // compute address of the first local
@@ -226,7 +228,7 @@ mod tests {
         assert_eq!(expected, process.stack.trace_state());
 
         // compute address of second local (also make sure that rest of stack is not affected)
-        process.execute_op(Operation::Push(-Felt::new(2)), &mut host).unwrap();
+        process.execute_op(Operation::Push(-Felt::from_u64(2)), &mut host).unwrap();
         process.execute_op(Operation::FmpAdd, &mut host).unwrap();
 
         let expected = build_expected_stack(&[FMP_MIN, FMP_MIN + 1]);
@@ -273,13 +275,13 @@ mod tests {
         assert_eq!(expected, process.stack.trace_state());
 
         // increment clk register.
-        process.execute_op(Operation::Push(Felt::new(2)), &mut host).unwrap();
+        process.execute_op(Operation::Push(Felt::from_u64(2)), &mut host).unwrap();
         process.execute_op(Operation::Clk, &mut host).unwrap();
         let expected = build_expected_stack(&[3, 2, 1]);
         assert_eq!(expected, process.stack.trace_state());
 
         // increment clk register again.
-        process.execute_op(Operation::Push(Felt::new(3)), &mut host).unwrap();
+        process.execute_op(Operation::Push(Felt::from_u64(3)), &mut host).unwrap();
         process.execute_op(Operation::Clk, &mut host).unwrap();
         let expected = build_expected_stack(&[5, 3, 3, 2, 1]);
         assert_eq!(expected, process.stack.trace_state());
@@ -291,7 +293,7 @@ mod tests {
     fn build_expected_stack(values: &[u64]) -> [Felt; 16] {
         let mut expected = [ZERO; 16];
         for (&value, result) in values.iter().zip(expected.iter_mut()) {
-            *result = Felt::new(value);
+            *result = Felt::from_u64(value);
         }
         expected
     }

@@ -1,5 +1,6 @@
 use alloc::{boxed::Box, string::String};
 use core::error::Error;
+use std::{string::ToString, vec::Vec};
 
 use miden_air::RowIndex;
 use vm_core::{
@@ -7,7 +8,7 @@ use vm_core::{
     stack::MIN_STACK_DEPTH,
     utils::to_hex,
 };
-use winter_prover::{ProverError, math::FieldElement};
+use winter_prover::ProverError;
 
 use super::{
     Digest, Felt, QuadFelt, Word,
@@ -16,14 +17,18 @@ use super::{
 };
 use crate::ContextId;
 
+// TODO(Al)
+fn felts_to_hex(elements: &[Felt]) -> Vec<u8> {
+    elements.iter().flat_map(|e| e.to_string().into_bytes()).collect()
+}
 // EXECUTION ERROR
 // ================================================================================================
 
 #[derive(Debug, thiserror::Error)]
 pub enum ExecutionError {
-    #[error("value for key {} not present in the advice map", to_hex(Felt::elements_as_bytes(.0)))]
+    #[error("value for key {} not present in the advice map", to_hex(felts_to_hex(.0)))]
     AdviceMapKeyNotFound(Word),
-    #[error("value for key {} already present in the advice map", to_hex(Felt::elements_as_bytes(.0)))]
+    #[error("value for key {} already present in the advice map", to_hex(felts_to_hex(.0)))]
     AdviceMapKeyAlreadyPresent(Word),
     #[error("advice stack read failed at step {0}")]
     AdviceStackReadFailed(RowIndex),
@@ -105,7 +110,7 @@ pub enum ExecutionError {
     #[error("word access at memory address {addr} in context {ctx} is unaligned")]
     MemoryUnalignedWordAccessNoClk { addr: u32, ctx: ContextId },
     #[error("merkle path verification failed for value {value} at index {index} in the Merkle tree with root {root} (error code: {err_code})", 
-      value = to_hex(Felt::elements_as_bytes(value)),
+      value = to_hex(felts_to_hex(value)),
       root = to_hex(root.as_bytes()),
     )]
     MerklePathVerificationFailed {
@@ -130,10 +135,10 @@ pub enum ExecutionError {
     ProgramAlreadyExecuted,
     #[error("proof generation failed")]
     ProverError(#[source] ProverError),
-    #[error("smt node {node_hex} not found", node_hex = to_hex(Felt::elements_as_bytes(.0)))]
+    #[error("smt node {node_hex} not found", node_hex = to_hex(felts_to_hex(.0)))]
     SmtNodeNotFound(Word),
     #[error("expected pre-image length of node {node_hex} to be a multiple of 8 but was {preimage_len}",
-      node_hex = to_hex(Felt::elements_as_bytes(.0)),
+      node_hex = to_hex(felts_to_hex(.0)),
       preimage_len = .1
     )]
     SmtNodePreImageNotValid(Word, usize),

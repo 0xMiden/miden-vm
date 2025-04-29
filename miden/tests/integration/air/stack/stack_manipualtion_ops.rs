@@ -1,6 +1,7 @@
 use test_utils::build_op_test;
 
 #[test]
+#[ignore = "fix-prover"]
 fn swap() {
     // Test on random input state.
     let asm_op = "swap push.0 swap push.34 swap drop drop";

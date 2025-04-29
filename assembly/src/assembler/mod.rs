@@ -4,10 +4,7 @@ use basic_block_builder::BasicBlockOrDecorators;
 use mast_forest_builder::MastForestBuilder;
 use module_graph::{ProcedureWrapper, WrappedModule};
 use vm_core::{
-    DecoratorList, Felt, Kernel, Operation, Program, WORD_SIZE,
-    crypto::hash::RpoDigest,
-    debuginfo::SourceSpan,
-    mast::{DecoratorId, MastNodeId},
+    crypto::hash::RpoDigest, debuginfo::SourceSpan, mast::{DecoratorId, MastNodeId}, DecoratorList, Felt, Kernel, Operation, PrimeCharacteristicRing, Program, WORD_SIZE
 };
 
 use crate::{
@@ -577,7 +574,7 @@ impl Assembler {
             // - to allocate procedure locals we need to increment fmp by the number of locals
             //   (rounded up to the word size), and
             // - to deallocate procedure locals we need to decrement it by the same amount.
-            let locals_frame = Felt::from(num_locals.next_multiple_of(WORD_SIZE as u16));
+            let locals_frame = Felt::from_u16(num_locals.next_multiple_of(WORD_SIZE as u16));
             let wrapper = BodyWrapper {
                 prologue: vec![Operation::Push(locals_frame), Operation::FmpUpdate],
                 epilogue: vec![Operation::Push(-locals_frame), Operation::FmpUpdate],

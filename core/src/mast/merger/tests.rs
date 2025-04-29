@@ -1,4 +1,4 @@
-use miden_crypto::{Felt, ONE, hash::rpo::RpoDigest};
+use miden_crypto::{hash::rpo::RpoDigest, Felt, PrimeCharacteristicRing, ONE};
 
 use super::*;
 use crate::{Decorator, Operation};
@@ -802,7 +802,7 @@ fn mast_forest_merge_advice_maps_merged() {
     let id_foo = forest_a.add_node(block_foo()).unwrap();
     let id_call_a = forest_a.add_call(id_foo).unwrap();
     forest_a.make_root(id_call_a);
-    let key_a = RpoDigest::new([Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)]);
+    let key_a = RpoDigest::new([Felt::from_u64(1), Felt::from_u64(2), Felt::from_u64(3), Felt::from_u64(4)]);
     let value_a = vec![ONE, ONE];
     forest_a.advice_map_mut().insert(key_a, value_a.clone());
 
@@ -810,8 +810,8 @@ fn mast_forest_merge_advice_maps_merged() {
     let id_bar = forest_b.add_node(block_bar()).unwrap();
     let id_call_b = forest_b.add_call(id_bar).unwrap();
     forest_b.make_root(id_call_b);
-    let key_b = RpoDigest::new([Felt::new(1), Felt::new(3), Felt::new(2), Felt::new(1)]);
-    let value_b = vec![Felt::new(2), Felt::new(2)];
+    let key_b = RpoDigest::new([Felt::from_u64(1), Felt::from_u64(3), Felt::from_u64(2), Felt::from_u64(1)]);
+    let value_b = vec![Felt::from_u64(2), Felt::from_u64(2)];
     forest_b.advice_map_mut().insert(key_b, value_b.clone());
 
     let (merged, _root_maps) = MastForest::merge([&forest_a, &forest_b]).unwrap();
@@ -829,7 +829,7 @@ fn mast_forest_merge_advice_maps_collision() {
     let id_foo = forest_a.add_node(block_foo()).unwrap();
     let id_call_a = forest_a.add_call(id_foo).unwrap();
     forest_a.make_root(id_call_a);
-    let key_a = RpoDigest::new([Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)]);
+    let key_a = RpoDigest::new([Felt::from_u64(1), Felt::from_u64(2), Felt::from_u64(3), Felt::from_u64(4)]);
     let value_a = vec![ONE, ONE];
     forest_a.advice_map_mut().insert(key_a, value_a.clone());
 
@@ -839,7 +839,7 @@ fn mast_forest_merge_advice_maps_collision() {
     forest_b.make_root(id_call_b);
     // The key collides with key_a in the forest_a.
     let key_b = key_a;
-    let value_b = vec![Felt::new(2), Felt::new(2)];
+    let value_b = vec![Felt::from_u64(2), Felt::from_u64(2)];
     forest_b.advice_map_mut().insert(key_b, value_b.clone());
 
     let err = MastForest::merge([&forest_a, &forest_b]).unwrap_err();

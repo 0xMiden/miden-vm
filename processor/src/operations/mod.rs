@@ -1,6 +1,6 @@
 use vm_core::stack::MIN_STACK_DEPTH;
 
-use super::{ExecutionError, Felt, FieldElement, Host, Operation, Process};
+use super::{ExecutionError, Felt, Host, Operation, Process};
 
 mod crypto_ops;
 mod ext2_ops;

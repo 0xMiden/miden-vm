@@ -36,3 +36,6 @@ overflow-checks = true
 
 [workspace.dependencies]
 thiserror = { version = "2.0", default-features = false }
+
+[patch.crates-io]
+miden-crypto = {path = "/Users/al/Code/crypto/miden-crypto"}

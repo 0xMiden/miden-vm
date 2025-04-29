@@ -1,10 +1,10 @@
 use core::fmt::{Display, Formatter, Result as FmtResult};
-
 use miden_air::{
     RowIndex,
     trace::{chiplets::bitwise::OP_CYCLE_LEN as BITWISE_OP_CYCLE_LEN, main_trace::MainTrace},
 };
-use vm_core::{Felt, FieldElement, ONE, ZERO};
+use vm_core::ExtensionField;
+use vm_core::{Felt, ONE, ZERO};
 
 use super::{build_value, get_op_label};
 use crate::debug::{BusDebugger, BusMessage};
@@ -14,7 +14,7 @@ use crate::debug::{BusDebugger, BusMessage};
 
 /// Builds requests made to the bitwise chiplet. This can be either a request for the computation
 /// of a `XOR` or an `AND` operation.
-pub(super) fn build_bitwise_request<E: FieldElement<BaseField = Felt>>(
+pub(super) fn build_bitwise_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     is_xor: Felt,
     alphas: &[E],
@@ -48,7 +48,7 @@ pub(super) fn build_bitwise_chiplet_responses<E>(
     _debugger: &mut BusDebugger<E>,
 ) -> E
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     let is_xor = main_trace.chiplet_selector_2(row);
     if row.as_usize() % BITWISE_OP_CYCLE_LEN == BITWISE_OP_CYCLE_LEN - 1 {
@@ -84,7 +84,7 @@ pub struct BitwiseMessage {
 
 impl<E> BusMessage<E> for BitwiseMessage
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     fn value(&self, alphas: &[E]) -> E {
         alphas[0] + build_value(&alphas[1..5], [self.op_label, self.a, self.b, self.z])

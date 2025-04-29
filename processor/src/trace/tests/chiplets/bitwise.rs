@@ -2,14 +2,14 @@ use miden_air::{
     RowIndex,
     trace::chiplets::{
         BITWISE_A_COL_IDX, BITWISE_B_COL_IDX, BITWISE_OUTPUT_COL_IDX, BITWISE_TRACE_OFFSET,
-        bitwise::{BITWISE_AND, BITWISE_AND_LABEL, BITWISE_XOR, BITWISE_XOR_LABEL, OP_CYCLE_LEN},
+        bitwise::{BITWISE_AND, BITWISE_XOR, OP_CYCLE_LEN},
     },
 };
+use vm_core::{Field, PrimeCharacteristicRing};
 
 use super::{
-    AUX_TRACE_RAND_ELEMENTS, CHIPLETS_AUX_TRACE_OFFSET, ExecutionTrace, Felt, FieldElement,
-    HASH_CYCLE_LEN, NUM_RAND_ROWS, ONE, Operation, Trace, build_trace_from_ops, rand_array,
-    rand_value,
+    AUX_TRACE_RAND_ELEMENTS, CHIPLETS_AUX_TRACE_OFFSET, ExecutionTrace, Felt, HASH_CYCLE_LEN,
+    NUM_RAND_ROWS, ONE, Operation, build_trace_from_ops, rand_array, rand_value,
 };
 
 /// Tests the generation of the `b_chip` bus column when only bitwise lookups are included. It
@@ -29,8 +29,8 @@ fn b_chip_trace_bitwise() {
     let stack = [a as u64, b as u64];
     let operations = vec![
         Operation::U32and,
-        Operation::Push(Felt::from(a)),
-        Operation::Push(Felt::from(b)),
+        Operation::Push(Felt::from_u32(a)),
+        Operation::Push(Felt::from_u32(b)),
         Operation::U32and,
         // Add 8 padding operations so that U32xor is requested by the stack in the same cycle when
         // U32and is provided by the Bitwise chiplet.
@@ -42,8 +42,8 @@ fn b_chip_trace_bitwise() {
         Operation::Drop,
         Operation::Drop,
         Operation::Drop,
-        Operation::Push(Felt::from(a)),
-        Operation::Push(Felt::from(b)),
+        Operation::Push(Felt::from_u32(a)),
+        Operation::Push(Felt::from_u32(b)),
         Operation::U32xor,
         // Drop 4 values to empty the stack's overflow table.
         Operation::Drop,
@@ -68,12 +68,12 @@ fn b_chip_trace_bitwise() {
     // cycle 1, so the request is included in the next row. (The trace begins by executing `span`).
     let value = build_expected_bitwise(
         &rand_elements,
-        BITWISE_AND_LABEL,
-        Felt::from(a),
-        Felt::from(b),
-        Felt::from(a & b),
+        Felt::from_u64(0b010), //BITWISE_AND_LABEL,
+        Felt::from_u32(a),
+        Felt::from_u32(b),
+        Felt::from_u32(a & b),
     );
-    let mut expected = value.inv();
+    let mut expected = value.inverse();
     assert_eq!(expected, b_chip[2]);
 
     // Nothing changes during user operations with no requests to the Chiplets.
@@ -85,12 +85,12 @@ fn b_chip_trace_bitwise() {
     // cycle 4, so the request is included in the next row.
     let value = build_expected_bitwise(
         &rand_elements,
-        BITWISE_AND_LABEL,
-        Felt::from(a),
-        Felt::from(b),
-        Felt::from(a & b),
+        Felt::from_u64(0b010), //BITWISE_AND_LABEL,
+        Felt::from_u32(a),
+        Felt::from_u32(b),
+        Felt::from_u32(a & b),
     );
-    expected *= value.inv();
+    expected *= value.inverse();
     assert_eq!(expected, b_chip[5]);
 
     // Nothing changes during user operations with no requests to the Chiplets.
@@ -101,7 +101,7 @@ fn b_chip_trace_bitwise() {
     // At cycle 7 the hasher provides the result of the `SPAN` hash. Since this test is for changes
     // from bitwise lookups, just set it explicitly and save the multiplied-in value for later.
     assert_ne!(expected, b_chip[8]);
-    let span_result = b_chip[8] * b_chip[7].inv();
+    let span_result = b_chip[8] * b_chip[7].inverse();
     expected = b_chip[8];
 
     // Nothing changes during user operations with no requests to the Chiplets.
@@ -120,12 +120,12 @@ fn b_chip_trace_bitwise() {
     // chiplet.
     let value = build_expected_bitwise(
         &rand_elements,
-        BITWISE_XOR_LABEL,
-        Felt::from(a),
-        Felt::from(b),
-        Felt::from(a ^ b),
+        Felt::from_u64(0b110), //BITWISE_XOR_LABEL,
+        Felt::from_u32(a),
+        Felt::from_u32(b),
+        Felt::from_u32(a ^ b),
     );
-    expected *= value.inv();
+    expected *= value.inverse();
     expected *=
         build_expected_bitwise_from_trace(&trace, &rand_elements, (response_1_row - 1).into());
     assert_eq!(expected, b_chip[response_1_row]);
@@ -138,7 +138,7 @@ fn b_chip_trace_bitwise() {
     // At cycle 21 the decoder requests the span hash. We set this as the inverse of the previously
     // identified `span_result`, since this test is for consistency of the bitwise lookups.
     assert_ne!(expected, b_chip[22]);
-    expected *= span_result.inv();
+    expected *= span_result.inverse();
     assert_eq!(expected, b_chip[22]);
 
     // Nothing changes until the next time the Bitwise chiplet responds.
@@ -184,9 +184,9 @@ fn build_expected_bitwise_from_trace(
     let selector = trace.main_trace.get_column(BITWISE_TRACE_OFFSET)[row];
 
     let op_id = if selector == BITWISE_AND {
-        BITWISE_AND_LABEL
+        Felt::from_u64(0b010) //BITWISE_AND_LABEL
     } else if selector == BITWISE_XOR {
-        BITWISE_XOR_LABEL
+        Felt::from_u64(0b110) //BITWISE_XOR_LABEL
     } else {
         panic!("Execution trace contains an invalid bitwise operation.")
     };

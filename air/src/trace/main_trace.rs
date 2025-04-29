@@ -2,7 +2,7 @@
 use alloc::vec::Vec;
 use core::ops::{Deref, Range};
 
-use vm_core::{Felt, ONE, Word, ZERO, utils::range};
+use vm_core::{utils::range, Felt, PrimeCharacteristicRing, Word, ONE, ZERO};
 
 use super::{
     CHIPLETS_OFFSET, CLK_COL_IDX, CTX_COL_IDX, DECODER_TRACE_OFFSET, FMP_COL_IDX, FN_HASH_OFFSET,
@@ -303,12 +303,12 @@ impl MainTrace {
         let col_b6 = self.columns.get_column(DECODER_TRACE_OFFSET + 7);
         let [b0, b1, b2, b3, b4, b5, b6] =
             [col_b0[i], col_b1[i], col_b2[i], col_b3[i], col_b4[i], col_b5[i], col_b6[i]];
-        b0 + b1.mul_small(2)
-            + b2.mul_small(4)
-            + b3.mul_small(8)
-            + b4.mul_small(16)
-            + b5.mul_small(32)
-            + b6.mul_small(64)
+        b0 + b1*Felt::from_u64(2)
+            + b2*Felt::from_u64(4)
+            + b3*Felt::from_u64(8)
+            + b4*Felt::from_u64(16)
+            + b5*Felt::from_u64(32)
+            + b6*Felt::from_u64(64)
     }
 
     /// Returns an iterator of [`RowIndex`] values over the row indices of this trace.
@@ -384,7 +384,7 @@ impl MainTrace {
     pub fn is_non_empty_overflow(&self, i: RowIndex) -> bool {
         let b0 = self.columns.get_column(STACK_TRACE_OFFSET + B0_COL_IDX)[i];
         let h0 = self.columns.get_column(STACK_TRACE_OFFSET + H0_COL_IDX)[i];
-        (b0 - Felt::new(16)) * h0 == ONE
+        (b0 - Felt::from_u64(16)) * h0 == ONE
     }
 
     // CHIPLETS COLUMNS

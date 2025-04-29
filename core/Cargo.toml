@@ -45,6 +45,7 @@ num-traits = { version = "0.2", default-features = false }
 parking_lot = { version = "0.12", optional = true }
 thiserror = { workspace = true }
 winter-utils = { package = "winter-utils", version = "0.12", default-features = false }
+lazy_static = "1.4"
 
 [dev-dependencies]
 loom = "0.7"

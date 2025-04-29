@@ -6,15 +6,17 @@ use miden_air::trace::{
     decoder::{NUM_USER_OP_HELPERS, USER_OP_HELPERS_OFFSET},
     main_trace::MainTrace,
 };
-use vm_core::{ProgramInfo, StackInputs, StackOutputs, ZERO, stack::MIN_STACK_DEPTH};
-use winter_prover::{EvaluationFrame, Trace, TraceInfo, crypto::RandomCoin};
+use vm_core::{
+    ExtensionField, PrimeField64, ProgramInfo, StackInputs, StackOutputs, ZERO,
+    stack::MIN_STACK_DEPTH,
+};
+use winter_prover::TraceInfo;
 
 use crate::ColMatrix;
 
 use super::{
-    Digest, Felt, FieldElement, Process,
-    chiplets::AuxTraceBuilder as ChipletsAuxTraceBuilder, crypto::RpoRandomCoin,
-    decoder::AuxTraceBuilder as DecoderAuxTraceBuilder,
+    Digest, Felt, Process, chiplets::AuxTraceBuilder as ChipletsAuxTraceBuilder,
+    crypto::RpoRandomCoin, decoder::AuxTraceBuilder as DecoderAuxTraceBuilder,
     range::AuxTraceBuilder as RangeCheckerAuxTraceBuilder,
     stack::AuxTraceBuilder as StackAuxTraceBuilder,
 };
@@ -53,7 +55,7 @@ pub struct AuxTraceBuilders {
 pub struct ExecutionTrace {
     meta: Vec<u8>,
     trace_info: TraceInfo,
-    main_trace: MainTrace,
+    pub main_trace: MainTrace,
     aux_trace_builders: AuxTraceBuilders,
     program_info: ProgramInfo,
     stack_outputs: StackOutputs,
@@ -179,7 +181,7 @@ impl ExecutionTrace {
         let mut row = [ZERO; TRACE_WIDTH];
         for i in 0..self.length() {
             self.main_trace.read_row_into(i, &mut row);
-            std::println!("{:?}", row.iter().map(|v| v.as_int()).collect::<Vec<_>>());
+            std::println!("{:?}", row.iter().map(|v| v.as_canonical_u64()).collect::<Vec<_>>());
         }
     }
 
@@ -191,7 +193,7 @@ impl ExecutionTrace {
 
     pub fn build_aux_trace<E>(&self, rand_elements: &[E]) -> Option<ColMatrix<E>>
     where
-        E: FieldElement<BaseField = Felt>,
+        E: ExtensionField<Felt>,
     {
         // add decoder's running product columns
         let decoder_aux_columns = self
@@ -214,20 +216,12 @@ impl ExecutionTrace {
             .build_aux_columns(&self.main_trace, rand_elements);
 
         // combine all auxiliary columns into a single vector
-        let mut aux_columns = decoder_aux_columns
+        let aux_columns = decoder_aux_columns
             .into_iter()
             .chain(stack_aux_columns)
             .chain(range_aux_columns)
             .chain(chiplets)
             .collect::<Vec<_>>();
-
-        // inject random values into the last rows of the trace
-        let mut rng = RpoRandomCoin::new(self.program_hash().into());
-        for i in self.length() - NUM_RAND_ROWS..self.length() {
-            for column in aux_columns.iter_mut() {
-                column[i] = rng.draw().expect("failed to draw a random value");
-            }
-        }
 
         Some(ColMatrix::new(aux_columns))
     }
@@ -250,7 +244,7 @@ impl ExecutionTrace {
 ///   in turn, ensures that polynomial degrees of all columns are stable.
 fn finalize_trace(
     process: Process,
-    mut rng: RpoRandomCoin,
+    mut _rng: RpoRandomCoin,
 ) -> (MainTrace, AuxTraceBuilders, TraceLenSummary) {
     let (system, decoder, stack, mut range, chiplets) = process.into_parts();
 
@@ -291,20 +285,13 @@ fn finalize_trace(
     // Combine the range trace segment using the support lookup table
     let range_check_trace = range.into_trace_with_table(range_table_len, trace_len, NUM_RAND_ROWS);
 
-    let mut trace = system_trace
+    let trace = system_trace
         .into_iter()
         .chain(decoder_trace.trace)
         .chain(stack_trace.trace)
         .chain(range_check_trace.trace)
         .chain(chiplets_trace.trace)
         .collect::<Vec<_>>();
-
-    // Inject random values into the last rows of the trace
-    for i in trace_len - NUM_RAND_ROWS..trace_len {
-        for column in trace.iter_mut() {
-            column[i] = rng.draw().expect("failed to draw a random value");
-        }
-    }
 
     let aux_trace_hints = AuxTraceBuilders {
         decoder: decoder_trace.aux_builder,

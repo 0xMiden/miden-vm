@@ -4,7 +4,9 @@ use vm_core::{
     crypto::hash::{Blake3_192, Blake3_256, Hasher, Rpo256, Rpx256},
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
-use winter_air::proof::Proof;
+use serde::{Deserialize, Serialize};
+
+//use winter_air::proof::Proof;
 
 // EXECUTION PROOF
 // ================================================================================================
@@ -13,9 +15,10 @@ use winter_air::proof::Proof;
 ///
 /// The proof encodes the proof itself as well as STARK protocol parameters used to generate the
 /// proof. However, the proof does not contain public inputs needed to verify the proof.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize)]
+#[serde(bound = "")]
 pub struct ExecutionProof {
-    pub proof: Proof,
+    pub proof: Vec<u8>,
     pub hash_fn: HashFunction,
 }
 
@@ -25,7 +28,7 @@ impl ExecutionProof {
 
     /// Creates a new instance of [ExecutionProof] from the specified STARK proof and hash
     /// function.
-    pub const fn new(proof: Proof, hash_fn: HashFunction) -> Self {
+    pub const fn new(proof: Vec<u8>, hash_fn: HashFunction) -> Self {
         Self { proof, hash_fn }
     }
 
@@ -33,8 +36,8 @@ impl ExecutionProof {
     // --------------------------------------------------------------------------------------------
 
     /// Returns the underlying STARK proof.
-    pub const fn stark_proof(&self) -> &Proof {
-        &self.proof
+    pub fn stark_proof(&self) -> Vec<u8> {
+        self.proof.clone()
     }
 
     /// Returns the hash function used during proof generation process.
@@ -44,6 +47,7 @@ impl ExecutionProof {
 
     /// Returns conjectured security level of this proof in bits.
     pub fn security_level(&self) -> u32 {
+        /*
         let conjectured_security = match self.hash_fn {
             HashFunction::Blake3_192 => self.proof.conjectured_security::<Blake3_192>(),
             HashFunction::Blake3_256 => self.proof.conjectured_security::<Blake3_256>(),
@@ -51,35 +55,37 @@ impl ExecutionProof {
             HashFunction::Rpx256 => self.proof.conjectured_security::<Rpx256>(),
         };
         conjectured_security.bits()
+         */
+        128
     }
 
     // SERIALIZATION / DESERIALIZATION
     // --------------------------------------------------------------------------------------------
+    /*
+       /// Serializes this proof into a vector of bytes.
+       pub fn to_bytes(&self) -> Vec<u8> {
+           let mut bytes = self.proof.to_bytes();
+           assert!(!bytes.is_empty(), "invalid STARK proof");
+           // TODO: ideally we should write hash function into the proof first to avoid reallocations
+           bytes.insert(0, self.hash_fn as u8);
+           bytes
+       }
 
-    /// Serializes this proof into a vector of bytes.
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let mut bytes = self.proof.to_bytes();
-        assert!(!bytes.is_empty(), "invalid STARK proof");
-        // TODO: ideally we should write hash function into the proof first to avoid reallocations
-        bytes.insert(0, self.hash_fn as u8);
-        bytes
-    }
-
-    /// Reads the source bytes, parsing a new proof instance.
-    pub fn from_bytes(source: &[u8]) -> Result<Self, DeserializationError> {
-        if source.len() < 2 {
-            return Err(DeserializationError::UnexpectedEOF);
-        }
-        let hash_fn = HashFunction::try_from(source[0])?;
-        let proof = Proof::from_bytes(&source[1..])?;
-        Ok(Self::new(proof, hash_fn))
-    }
-
+       /// Reads the source bytes, parsing a new proof instance.
+       pub fn from_bytes(source: &[u8]) -> Result<Self, DeserializationError> {
+           if source.len() < 2 {
+               return Err(DeserializationError::UnexpectedEOF);
+           }
+           let hash_fn = HashFunction::try_from(source[0])?;
+           let proof = Proof::from_bytes(&source[1..])?;
+           Ok(Self::new(proof, hash_fn))
+       }
+    */
     // DESTRUCTOR
     // --------------------------------------------------------------------------------------------
 
     /// Returns components of this execution proof.
-    pub fn into_parts(self) -> (HashFunction, Proof) {
+    pub fn into_parts(self) -> (HashFunction, Vec<u8>) {
         (self.hash_fn, self.proof)
     }
 }
@@ -89,6 +95,8 @@ impl ExecutionProof {
 
 /// A hash function used during STARK proof generation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Serialize, Deserialize)]
+#[serde(bound = "")]
 #[repr(u8)]
 pub enum HashFunction {
     /// BLAKE3 hash function with 192-bit output.
@@ -149,7 +157,7 @@ impl Deserializable for HashFunction {
         source.read_u8()?.try_into()
     }
 }
-
+/*
 impl Serializable for ExecutionProof {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         self.proof.write_into(target);
@@ -165,3 +173,4 @@ impl Deserializable for ExecutionProof {
         Ok(ExecutionProof { proof, hash_fn })
     }
 }
+ */

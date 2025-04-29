@@ -1,5 +1,6 @@
 use super::{ExecutionError, Operation, Process};
 use crate::{AdviceProvider, Host};
+use vm_core::PrimeField64;
 
 // CRYPTOGRAPHIC OPERATIONS
 // ================================================================================================
@@ -151,7 +152,7 @@ impl Process {
             .advice_provider_mut()
             .update_merkle_node(old_root, &depth, &index, new_node)?;
 
-        assert_eq!(path.len(), depth.as_int() as usize);
+        assert_eq!(path.len(), depth.as_canonical_u64() as usize);
 
         let merkle_tree_update =
             self.chiplets.hasher.update_merkle_root(old_node, new_node, &path, index);
@@ -185,8 +186,8 @@ mod tests {
 
     use test_utils::rand::rand_vector;
     use vm_core::{
-        chiplets::hasher::{STATE_WIDTH, apply_permutation},
-        crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},
+        chiplets::hasher::{apply_permutation, STATE_WIDTH},
+        crypto::merkle::{MerkleStore, MerkleTree, NodeIndex}, PrimeCharacteristicRing, PrimeField64
     };
 
     use super::{
@@ -226,7 +227,7 @@ mod tests {
 
         // --- test that the rest of the stack isn't affected -------------------------------------
         let mut inputs: Vec<u64> = vec![1, 2, 3, 4];
-        let expected = inputs.iter().rev().map(|&v| Felt::new(v)).collect::<Vec<Felt>>();
+        let expected = inputs.iter().rev().map(|&v| Felt::from_u64(v)).collect::<Vec<Felt>>();
         let values: Vec<u64> = vec![2, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0];
         inputs.extend_from_slice(&values);
 
@@ -248,20 +249,20 @@ mod tests {
         let depth = tree.depth() as u64;
 
         let stack_inputs = [
-            root[0].as_int(),
-            root[1].as_int(),
-            root[2].as_int(),
-            root[3].as_int(),
+            root[0].as_canonical_u64(),
+            root[1].as_canonical_u64(),
+            root[2].as_canonical_u64(),
+            root[3].as_canonical_u64(),
             index,
             depth,
-            node[0].as_int(),
-            node[1].as_int(),
-            node[2].as_int(),
-            node[3].as_int(),
+            node[0].as_canonical_u64(),
+            node[1].as_canonical_u64(),
+            node[2].as_canonical_u64(),
+            node[3].as_canonical_u64(),
         ];
 
-        let depth = Felt::new(depth);
-        let index = Felt::new(index);
+        let depth = Felt::from_u64(depth);
+        let index = Felt::from_u64(index);
 
         let advice_inputs = AdviceInputs::default().with_merkle_store(store);
         let stack_inputs = StackInputs::try_from_ints(stack_inputs).unwrap();
@@ -288,20 +289,20 @@ mod tests {
         let new_tree = MerkleTree::new(new_leaves).unwrap();
 
         let stack_inputs = [
-            new_leaf[0].as_int(),
-            new_leaf[1].as_int(),
-            new_leaf[2].as_int(),
-            new_leaf[3].as_int(),
-            tree.root()[0].as_int(),
-            tree.root()[1].as_int(),
-            tree.root()[2].as_int(),
-            tree.root()[3].as_int(),
+            new_leaf[0].as_canonical_u64(),
+            new_leaf[1].as_canonical_u64(),
+            new_leaf[2].as_canonical_u64(),
+            new_leaf[3].as_canonical_u64(),
+            tree.root()[0].as_canonical_u64(),
+            tree.root()[1].as_canonical_u64(),
+            tree.root()[2].as_canonical_u64(),
+            tree.root()[3].as_canonical_u64(),
             leaf_index as u64,
             tree.depth() as u64,
-            leaves[leaf_index][0].as_int(),
-            leaves[leaf_index][1].as_int(),
-            leaves[leaf_index][2].as_int(),
-            leaves[leaf_index][3].as_int(),
+            leaves[leaf_index][0].as_canonical_u64(),
+            leaves[leaf_index][1].as_canonical_u64(),
+            leaves[leaf_index][2].as_canonical_u64(),
+            leaves[leaf_index][3].as_canonical_u64(),
         ];
 
         let store = MerkleStore::from(&tree);
@@ -317,8 +318,8 @@ mod tests {
             new_tree.root()[2],
             new_tree.root()[1],
             new_tree.root()[0],
-            Felt::new(tree.depth() as u64),
-            Felt::new(leaf_index as u64),
+            Felt::from_u64(tree.depth() as u64),
+            Felt::from_u64(leaf_index as u64),
             tree.root()[3],
             tree.root()[2],
             tree.root()[1],
@@ -369,20 +370,20 @@ mod tests {
         // setup the process
         let advice_inputs = AdviceInputs::default().with_merkle_store(store);
         let stack_inputs = [
-            target_node[0].as_int(),
-            target_node[1].as_int(),
-            target_node[2].as_int(),
-            target_node[3].as_int(),
-            replaced_root[0].as_int(),
-            replaced_root[1].as_int(),
-            replaced_root[2].as_int(),
-            replaced_root[3].as_int(),
+            target_node[0].as_canonical_u64(),
+            target_node[1].as_canonical_u64(),
+            target_node[2].as_canonical_u64(),
+            target_node[3].as_canonical_u64(),
+            replaced_root[0].as_canonical_u64(),
+            replaced_root[1].as_canonical_u64(),
+            replaced_root[2].as_canonical_u64(),
+            replaced_root[3].as_canonical_u64(),
             target_index,
             target_depth,
-            replaced_node[0].as_int(),
-            replaced_node[1].as_int(),
-            replaced_node[2].as_int(),
-            replaced_node[3].as_int(),
+            replaced_node[0].as_canonical_u64(),
+            replaced_node[1].as_canonical_u64(),
+            replaced_node[2].as_canonical_u64(),
+            replaced_node[3].as_canonical_u64(),
         ];
         let stack_inputs = StackInputs::try_from_ints(stack_inputs).unwrap();
         let (mut process, mut host) =
@@ -398,8 +399,8 @@ mod tests {
             expected_root[2],
             expected_root[1],
             expected_root[0],
-            Felt::new(target_depth),
-            Felt::new(target_index),
+            Felt::from_u64(target_depth),
+            Felt::from_u64(target_index),
             replaced_root[3],
             replaced_root[2],
             replaced_root[1],
@@ -422,7 +423,7 @@ mod tests {
     }
 
     fn init_node(value: u64) -> Word {
-        [Felt::new(value), ZERO, ZERO, ZERO]
+        [Felt::from_u64(value), ZERO, ZERO, ZERO]
     }
 
     fn build_expected(values: &[Felt]) -> [Felt; 16] {
@@ -436,7 +437,7 @@ mod tests {
     fn build_expected_perm(values: &[u64]) -> [Felt; STATE_WIDTH] {
         let mut expected = [ZERO; STATE_WIDTH];
         for (&value, result) in values.iter().zip(expected.iter_mut()) {
-            *result = Felt::new(value);
+            *result = Felt::from_u64(value);
         }
         apply_permutation(&mut expected);
         expected.reverse();

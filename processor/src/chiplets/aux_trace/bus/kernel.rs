@@ -1,10 +1,7 @@
 use core::fmt::{Display, Formatter, Result as FmtResult};
 
-use miden_air::{
-    RowIndex,
-    trace::{chiplets::kernel_rom::KERNEL_PROC_LABEL, main_trace::MainTrace},
-};
-use vm_core::{Felt, FieldElement, ONE};
+use miden_air::{RowIndex, trace::main_trace::MainTrace};
+use vm_core::{ExtensionField, Felt, ONE, PrimeCharacteristicRing};
 
 use crate::debug::{BusDebugger, BusMessage};
 
@@ -25,7 +22,7 @@ pub(super) fn build_kernel_chiplet_responses<E>(
     _debugger: &mut BusDebugger<E>,
 ) -> E
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     let kernel_chiplet_selector = main_trace.chiplet_selector_4(row);
     if kernel_chiplet_selector == ONE {
@@ -60,15 +57,15 @@ pub struct KernelRomMessage {
 
 impl<E> BusMessage<E> for KernelRomMessage
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     fn value(&self, alphas: &[E]) -> E {
         alphas[0]
-            + alphas[1].mul_base(KERNEL_PROC_LABEL)
-            + alphas[2].mul_base(self.kernel_proc_digest[0])
-            + alphas[3].mul_base(self.kernel_proc_digest[1])
-            + alphas[4].mul_base(self.kernel_proc_digest[2])
-            + alphas[5].mul_base(self.kernel_proc_digest[3])
+            + alphas[1] * Felt::from_u64(0b1000)
+            + alphas[2] * self.kernel_proc_digest[0]
+            + alphas[3] * self.kernel_proc_digest[1]
+            + alphas[4] * self.kernel_proc_digest[2]
+            + alphas[5] * self.kernel_proc_digest[3]
     }
 
     fn source(&self) -> &str {

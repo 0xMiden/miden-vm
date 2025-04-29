@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use miden_crypto::{Felt, hash::rpo::RpoDigest};
+use miden_crypto::{Felt, PrimeCharacteristicRing, hash::rpo::RpoDigest};
 use proptest::prelude::*;
 use rand_utils::prng_array;
 use winter_utils::{Deserializable, Serializable};
@@ -9,8 +9,10 @@ use crate::{Kernel, ProgramInfo, Word, chiplets::hasher, mast::DynNode};
 
 #[test]
 fn dyn_hash_is_correct() {
-    let expected_constant =
-        hasher::merge_in_domain(&[RpoDigest::default(), RpoDigest::default()], DynNode::DYN_DOMAIN);
+    let expected_constant = hasher::merge_in_domain(
+        &[RpoDigest::default(), RpoDigest::default()],
+        DynNode::dyn_domain(),
+    );
     assert_eq!(expected_constant, DynNode::new_dyn().digest());
 }
 
@@ -43,7 +45,7 @@ fn digest_from_seed(seed: [u8; 32]) -> RpoDigest {
     digest.iter_mut().enumerate().for_each(|(i, d)| {
         *d = <[u8; 8]>::try_from(&seed[i * 8..(i + 1) * 8])
             .map(u64::from_le_bytes)
-            .map(Felt::new)
+            .map(Felt::from_u64)
             .unwrap()
     });
     digest.into()

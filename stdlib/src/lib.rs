@@ -80,18 +80,17 @@ pub fn falcon_sign(
     use alloc::{vec, vec::Vec};
 
     use vm_core::{
-        Felt,
         crypto::{
             dsa::rpo_falcon512::{Polynomial, SecretKey},
             hash::Rpo256,
-        },
-        utils::Deserializable,
+        }, utils::Deserializable, Felt, PrimeCharacteristicRing
     };
+    use vm_core::PrimeField64;
 
     // Create the corresponding secret key
     let mut sk_bytes = Vec::with_capacity(sk.len());
     for element in sk {
-        let value = element.as_int();
+        let value = element.as_canonical_u64();
         if value > u8::MAX as u64 {
             return None;
         }
@@ -126,9 +125,9 @@ pub fn falcon_sign(
     // Finally, we push the nonce needed for the hash-to-point algorithm.
 
     let mut polynomials: Vec<Felt> =
-        h.coefficients.iter().map(|a| Felt::from(a.value() as u32)).collect();
-    polynomials.extend(s2.coefficients.iter().map(|a| Felt::from(a.value() as u32)));
-    polynomials.extend(pi.iter().map(|a| Felt::new(*a)));
+        h.coefficients.iter().map(|a| Felt::from_u32(a.value() as u32)).collect();
+    polynomials.extend(s2.coefficients.iter().map(|a| Felt::from_u32(a.value() as u32)));
+    polynomials.extend(pi.iter().map(|a| Felt::from_u64(*a)));
 
     let digest_polynomials = Rpo256::hash_elements(&polynomials);
     let challenge = (digest_polynomials[0], digest_polynomials[1]);

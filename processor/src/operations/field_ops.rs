@@ -1,6 +1,6 @@
-use vm_core::{ONE, Operation, ZERO};
+use vm_core::{ONE, Operation, ZERO, PrimeCharacteristicRing, PrimeField64, Field};
 
-use super::{ExecutionError, Felt, FieldElement, Process, utils::assert_binary};
+use super::{ExecutionError, Felt, Process, utils::assert_binary};
 
 // FIELD OPERATIONS
 // ================================================================================================
@@ -48,7 +48,7 @@ impl Process {
             return Err(ExecutionError::DivideByZero(self.system.clk()));
         }
 
-        self.stack.set(0, a.inv());
+        self.stack.set(0, a.inverse());
         self.stack.copy_state(1);
         Ok(())
     }
@@ -132,7 +132,7 @@ impl Process {
             self.stack.set(0, ZERO);
             // setting h0 to the inverse of the difference between the top two elements of the
             // stack.
-            h0 = (b - a).inv();
+            h0 = (b - a).inverse();
         }
 
         // save h0 in the decoder helper register.
@@ -155,7 +155,7 @@ impl Process {
             self.stack.set(0, ONE);
         } else {
             // setting h0 to the inverse of the top element of the stack.
-            h0 = a.inv();
+            h0 = a.inverse();
             self.stack.set(0, ZERO);
         }
 
@@ -197,11 +197,11 @@ impl Process {
         let old_exp = self.stack.get(3);
 
         // Compute new exponent.
-        let new_exp = Felt::new(old_exp.as_int() >> 1);
+        let new_exp = Felt::from_u64(old_exp.as_canonical_u64() >> 1);
 
         // Compute new accumulator. We update the accumulator only when the least significant bit of
         // the exponent is 1.
-        let exp_lsb = old_exp.as_int() & 1;
+        let exp_lsb = old_exp.as_canonical_u64() & 1;
         let result_acc_update = if exp_lsb == 1 { old_base_acc } else { ONE };
         let new_result_acc = old_result_acc * result_acc_update;
 
@@ -209,7 +209,7 @@ impl Process {
         let new_base_acc = old_base_acc * old_base_acc;
 
         // Update the stack with the new values.
-        self.stack.set(0, Felt::new(exp_lsb));
+        self.stack.set(0, Felt::from_u64(exp_lsb));
         self.stack.set(1, new_base_acc);
         self.stack.set(2, new_result_acc);
         self.stack.set(3, new_exp);
@@ -228,10 +228,10 @@ impl Process {
 #[cfg(test)]
 mod tests {
     use test_utils::rand::rand_value;
-    use vm_core::{ONE, ZERO};
+    use vm_core::{Field, PrimeCharacteristicRing, PrimeField64, ONE, ZERO};
 
     use super::{
-        super::{Felt, FieldElement, MIN_STACK_DEPTH, Operation},
+        super::{Felt, MIN_STACK_DEPTH, Operation},
         Process,
     };
     use crate::{AdviceInputs, DefaultHost, StackInputs};
@@ -243,7 +243,7 @@ mod tests {
     fn op_add() {
         // initialize the stack with a few values
         let (a, b, c) = get_rand_values();
-        let stack = StackInputs::try_from_ints([c.as_int(), b.as_int(), a.as_int()]).unwrap();
+        let stack = StackInputs::try_from_ints([c.as_canonical_u64(), b.as_canonical_u64(), a.as_canonical_u64()]).unwrap();
         let mut process = Process::new_dummy(stack);
         let mut host = DefaultHost::default();
 
@@ -264,7 +264,7 @@ mod tests {
     fn op_neg() {
         // initialize the stack with a few values
         let (a, b, c) = get_rand_values();
-        let stack = StackInputs::try_from_ints([c.as_int(), b.as_int(), a.as_int()]).unwrap();
+        let stack = StackInputs::try_from_ints([c.as_canonical_u64(), b.as_canonical_u64(), a.as_canonical_u64()]).unwrap();
         let mut process = Process::new_dummy(stack);
         let mut host = DefaultHost::default();
 
@@ -281,7 +281,7 @@ mod tests {
     fn op_mul() {
         // initialize the stack with a few values
         let (a, b, c) = get_rand_values();
-        let stack = StackInputs::try_from_ints([c.as_int(), b.as_int(), a.as_int()]).unwrap();
+        let stack = StackInputs::try_from_ints([c.as_canonical_u64(), b.as_canonical_u64(), a.as_canonical_u64()]).unwrap();
         let mut process = Process::new_dummy(stack);
         let mut host = DefaultHost::default();
 
@@ -302,14 +302,14 @@ mod tests {
     fn op_inv() {
         // initialize the stack with a few values
         let (a, b, c) = get_rand_values();
-        let stack = StackInputs::try_from_ints([c.as_int(), b.as_int(), a.as_int()]).unwrap();
+        let stack = StackInputs::try_from_ints([c.as_canonical_u64(), b.as_canonical_u64(), a.as_canonical_u64()]).unwrap();
         let mut process = Process::new_dummy(stack);
         let mut host = DefaultHost::default();
 
         // invert the top value
         if b != ZERO {
             process.execute_op(Operation::Inv, &mut host).unwrap();
-            let expected = build_expected(&[a.inv(), b, c]);
+            let expected = build_expected(&[a.inverse(), b, c]);
 
             assert_eq!(MIN_STACK_DEPTH, process.stack.depth());
             assert_eq!(2, process.stack.current_clk());
@@ -325,7 +325,7 @@ mod tests {
     fn op_incr() {
         // initialize the stack with a few values
         let (a, b, c) = get_rand_values();
-        let stack = StackInputs::try_from_ints([c.as_int(), b.as_int(), a.as_int()]).unwrap();
+        let stack = StackInputs::try_from_ints([c.as_canonical_u64(), b.as_canonical_u64(), a.as_canonical_u64()]).unwrap();
         let mut process = Process::new_dummy(stack);
         let mut host = DefaultHost::default();
 
@@ -349,7 +349,7 @@ mod tests {
         let mut process = Process::new_dummy(stack);
 
         process.execute_op(Operation::And, &mut host).unwrap();
-        let expected = build_expected(&[ZERO, Felt::new(2)]);
+        let expected = build_expected(&[ZERO, Felt::from_u64(2)]);
         assert_eq!(expected, process.stack.trace_state());
 
         // --- test 1 AND 0 ---------------------------------------------------
@@ -357,7 +357,7 @@ mod tests {
         let mut process = Process::new_dummy(stack);
 
         process.execute_op(Operation::And, &mut host).unwrap();
-        let expected = build_expected(&[ZERO, Felt::new(2)]);
+        let expected = build_expected(&[ZERO, Felt::from_u64(2)]);
         assert_eq!(expected, process.stack.trace_state());
 
         // --- test 0 AND 1 ---------------------------------------------------
@@ -365,7 +365,7 @@ mod tests {
         let mut process = Process::new_dummy(stack);
 
         process.execute_op(Operation::And, &mut host).unwrap();
-        let expected = build_expected(&[ZERO, Felt::new(2)]);
+        let expected = build_expected(&[ZERO, Felt::from_u64(2)]);
         assert_eq!(expected, process.stack.trace_state());
 
         // --- test 1 AND 1 ---------------------------------------------------
@@ -373,7 +373,7 @@ mod tests {
         let mut process = Process::new_dummy(stack);
 
         process.execute_op(Operation::And, &mut host).unwrap();
-        let expected = build_expected(&[ONE, Felt::new(2)]);
+        let expected = build_expected(&[ONE, Felt::from_u64(2)]);
         assert_eq!(expected, process.stack.trace_state());
 
         // --- first operand is not binary ------------------------------------
@@ -399,7 +399,7 @@ mod tests {
         let mut process = Process::new_dummy(stack);
 
         process.execute_op(Operation::Or, &mut host).unwrap();
-        let expected = build_expected(&[ZERO, Felt::new(2)]);
+        let expected = build_expected(&[ZERO, Felt::from_u64(2)]);
         assert_eq!(expected, process.stack.trace_state());
 
         // --- test 1 OR 0 ---------------------------------------------------
@@ -407,7 +407,7 @@ mod tests {
         let mut process = Process::new_dummy(stack);
 
         process.execute_op(Operation::Or, &mut host).unwrap();
-        let expected = build_expected(&[ONE, Felt::new(2)]);
+        let expected = build_expected(&[ONE, Felt::from_u64(2)]);
         assert_eq!(expected, process.stack.trace_state());
 
         // --- test 0 OR 1 ---------------------------------------------------
@@ -415,7 +415,7 @@ mod tests {
         let mut process = Process::new_dummy(stack);
 
         process.execute_op(Operation::Or, &mut host).unwrap();
-        let expected = build_expected(&[ONE, Felt::new(2)]);
+        let expected = build_expected(&[ONE, Felt::from_u64(2)]);
         assert_eq!(expected, process.stack.trace_state());
 
         // --- test 1 OR 0 ---------------------------------------------------
@@ -423,7 +423,7 @@ mod tests {
         let mut process = Process::new_dummy(stack);
 
         process.execute_op(Operation::Or, &mut host).unwrap();
-        let expected = build_expected(&[ONE, Felt::new(2)]);
+        let expected = build_expected(&[ONE, Felt::from_u64(2)]);
         assert_eq!(expected, process.stack.trace_state());
 
         // --- first operand is not binary ------------------------------------
@@ -448,14 +448,14 @@ mod tests {
         let stack = StackInputs::try_from_ints([2, 0]).unwrap();
         let mut process = Process::new_dummy(stack);
         process.execute_op(Operation::Not, &mut host).unwrap();
-        let expected = build_expected(&[ONE, Felt::new(2)]);
+        let expected = build_expected(&[ONE, Felt::from_u64(2)]);
         assert_eq!(expected, process.stack.trace_state());
 
         // --- test NOT 1 ----------------------------------------------------
         let stack = StackInputs::try_from_ints([2, 1]).unwrap();
         let mut process = Process::new_dummy(stack);
         process.execute_op(Operation::Not, &mut host).unwrap();
-        let expected = build_expected(&[ZERO, Felt::new(2)]);
+        let expected = build_expected(&[ZERO, Felt::from_u64(2)]);
         assert_eq!(expected, process.stack.trace_state());
 
         // --- operand is not binary ------------------------------------------
@@ -476,7 +476,7 @@ mod tests {
             Process::new_dummy_with_inputs_and_decoder_helpers(stack_inputs, advice_inputs);
 
         process.execute_op(Operation::Eq, &mut host).unwrap();
-        let expected = build_expected(&[ONE, Felt::new(3)]);
+        let expected = build_expected(&[ONE, Felt::from_u64(3)]);
         assert_eq!(expected, process.stack.trace_state());
 
         // --- test when top two values are not equal -------------------------
@@ -486,7 +486,7 @@ mod tests {
             Process::new_dummy_with_inputs_and_decoder_helpers(stack_inputs, advice_inputs);
 
         process.execute_op(Operation::Eq, &mut host).unwrap();
-        let expected = build_expected(&[ZERO, Felt::new(3)]);
+        let expected = build_expected(&[ZERO, Felt::from_u64(3)]);
         assert_eq!(expected, process.stack.trace_state());
 
         // --- calling EQ with a stack of minimum depth is a ok ---------------
@@ -506,7 +506,7 @@ mod tests {
             Process::new_dummy_with_inputs_and_decoder_helpers(stack_inputs, advice_inputs);
 
         process.execute_op(Operation::Eqz, &mut host).unwrap();
-        let expected = build_expected(&[ONE, Felt::new(3)]);
+        let expected = build_expected(&[ONE, Felt::from_u64(3)]);
         assert_eq!(expected, process.stack.trace_state());
 
         // --- test when top is not zero --------------------------------------
@@ -516,7 +516,7 @@ mod tests {
             Process::new_dummy_with_inputs_and_decoder_helpers(stack_inputs, advice_inputs);
 
         process.execute_op(Operation::Eqz, &mut host).unwrap();
-        let expected = build_expected(&[ZERO, Felt::new(3)]);
+        let expected = build_expected(&[ZERO, Felt::from_u64(3)]);
         assert_eq!(expected, process.stack.trace_state());
     }
 
@@ -531,9 +531,9 @@ mod tests {
         let old_acc = 1;
         let old_base = 0;
 
-        let new_exp = Felt::new(4_u64);
-        let new_acc = Felt::new(1_u64);
-        let new_base = Felt::new(0_u64);
+        let new_exp = Felt::from_u64(4_u64);
+        let new_acc = Felt::from_u64(1_u64);
+        let new_base = Felt::from_u64(0_u64);
 
         let advice_inputs = AdviceInputs::default();
         let stack_inputs = StackInputs::try_from_ints([old_exp, old_acc, old_base, 0]).unwrap();
@@ -550,9 +550,9 @@ mod tests {
         let old_acc = 1;
         let old_base = 0;
 
-        let new_exp = Felt::new(4_u64);
-        let new_acc = Felt::new(0_u64);
-        let new_base = Felt::new(0_u64);
+        let new_exp = Felt::from_u64(4_u64);
+        let new_acc = Felt::from_u64(0_u64);
+        let new_base = Felt::from_u64(0_u64);
 
         let advice_inputs = AdviceInputs::default();
         let stack_inputs = StackInputs::try_from_ints([old_exp, old_acc, old_base, 0]).unwrap();
@@ -569,9 +569,9 @@ mod tests {
         let old_acc = 32;
         let old_base = 4;
 
-        let new_exp = Felt::new(0_u64);
-        let new_acc = Felt::new(32_u64);
-        let new_base = Felt::new(16_u64);
+        let new_exp = Felt::from_u64(0_u64);
+        let new_acc = Felt::from_u64(32_u64);
+        let new_base = Felt::from_u64(16_u64);
 
         let advice_inputs = AdviceInputs::default();
         let stack_inputs = StackInputs::try_from_ints([old_exp, old_acc, old_base, 0]).unwrap();
@@ -589,9 +589,9 @@ mod tests {
         let old_acc = 1;
         let old_base = 16;
 
-        let new_exp = Felt::new(1_u64);
-        let new_acc = Felt::new(16_u64);
-        let new_base = Felt::new(16_u64 * 16_u64);
+        let new_exp = Felt::from_u64(1_u64);
+        let new_acc = Felt::from_u64(16_u64);
+        let new_base = Felt::from_u64(16_u64 * 16_u64);
 
         let advice_inputs = AdviceInputs::default();
         let stack_inputs = StackInputs::try_from_ints([old_exp, old_acc, old_base, 0]).unwrap();
@@ -609,9 +609,9 @@ mod tests {
         let old_acc = 5;
         let old_base = u32::MAX as u64 + 1_u64;
 
-        let new_exp = Felt::new(8_u64);
-        let new_acc = Felt::new(old_acc * old_base);
-        let new_base = Felt::new(old_base) * Felt::new(old_base);
+        let new_exp = Felt::from_u64(8_u64);
+        let new_acc = Felt::from_u64(old_acc * old_base);
+        let new_base = Felt::from_u64(old_base) * Felt::from_u64(old_base);
 
         let advice_inputs = AdviceInputs::default();
         let stack_inputs = StackInputs::try_from_ints([old_exp, old_acc, old_base, 0]).unwrap();
@@ -630,7 +630,7 @@ mod tests {
         let a = rand_value();
         let b = rand_value();
         let c = rand_value();
-        (Felt::new(a), Felt::new(b), Felt::new(c))
+        (Felt::from_u64(a), Felt::from_u64(b), Felt::from_u64(c))
     }
 
     fn build_expected(values: &[Felt]) -> [Felt; 16] {

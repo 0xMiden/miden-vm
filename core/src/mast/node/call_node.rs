@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 use core::fmt;
 
-use miden_crypto::{Felt, hash::rpo::RpoDigest};
+use miden_crypto::{Felt, PrimeCharacteristicRing, hash::rpo::RpoDigest};
 use miden_formatting::{
     hex::ToHex,
     prettier::{Document, PrettyPrint, const_text, nl, text},
@@ -35,9 +35,14 @@ pub struct CallNode {
 /// Constants
 impl CallNode {
     /// The domain of the call block (used for control block hashing).
-    pub const CALL_DOMAIN: Felt = Felt::new(OPCODE_CALL as u64);
+    pub fn call_domain() -> Felt {
+        Felt::from_u64(OPCODE_CALL as u64)
+    }
+
     /// The domain of the syscall block (used for control block hashing).
-    pub const SYSCALL_DOMAIN: Felt = Felt::new(OPCODE_SYSCALL as u64);
+    pub fn syscall_domain() -> Felt {
+        Felt::from_u64(OPCODE_SYSCALL as u64)
+    }
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -51,7 +56,7 @@ impl CallNode {
         let digest = {
             let callee_digest = mast_forest[callee].digest();
 
-            hasher::merge_in_domain(&[callee_digest, RpoDigest::default()], Self::CALL_DOMAIN)
+            hasher::merge_in_domain(&[callee_digest, RpoDigest::default()], Self::call_domain())
         };
 
         Ok(Self {
@@ -87,7 +92,7 @@ impl CallNode {
         let digest = {
             let callee_digest = mast_forest[callee].digest();
 
-            hasher::merge_in_domain(&[callee_digest, RpoDigest::default()], Self::SYSCALL_DOMAIN)
+            hasher::merge_in_domain(&[callee_digest, RpoDigest::default()], Self::syscall_domain())
         };
 
         Ok(Self {
@@ -118,20 +123,20 @@ impl CallNode {
     /// Returns a commitment to this Call node.
     ///
     /// The commitment is computed as a hash of the callee and an empty word ([ZERO; 4]) in the
-    /// domain defined by either [Self::CALL_DOMAIN] or [Self::SYSCALL_DOMAIN], depending on
+    /// domain defined by either [Self::call_domain()] or [Self::syscall_domain()], depending on
     /// whether the node represents a simple call or a syscall - i.e.,:
     /// ```
     /// # use miden_core::mast::CallNode;
     /// # use miden_crypto::{hash::rpo::{RpoDigest as Digest, Rpo256 as Hasher}};
     /// # let callee_digest = Digest::default();
-    /// Hasher::merge_in_domain(&[callee_digest, Digest::default()], CallNode::CALL_DOMAIN);
+    /// Hasher::merge_in_domain(&[callee_digest, Digest::default()], CallNode::call_domain());
     /// ```
     /// or
     /// ```
     /// # use miden_core::mast::CallNode;
     /// # use miden_crypto::{hash::rpo::{RpoDigest as Digest, Rpo256 as Hasher}};
     /// # let callee_digest = Digest::default();
-    /// Hasher::merge_in_domain(&[callee_digest, Digest::default()], CallNode::SYSCALL_DOMAIN);
+    /// Hasher::merge_in_domain(&[callee_digest, Digest::default()], CallNode::syscall_domain());
     /// ```
     pub fn digest(&self) -> RpoDigest {
         self.digest
@@ -150,9 +155,9 @@ impl CallNode {
     /// Returns the domain of this call node.
     pub fn domain(&self) -> Felt {
         if self.is_syscall() {
-            Self::SYSCALL_DOMAIN
+            Self::syscall_domain()
         } else {
-            Self::CALL_DOMAIN
+            Self::call_domain()
         }
     }
 

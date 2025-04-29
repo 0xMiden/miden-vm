@@ -1,5 +1,5 @@
 use std::ops::Mul;
-
+use vm_core::PrimeField64;
 use test_utils::{push_inputs, rand::rand_value};
 
 #[derive(Copy, Clone, Debug)]
@@ -274,7 +274,7 @@ fn test_ec_ext5_scalar_mont_mul() {
     let strace = test.get_last_stack_state();
 
     for (i, limb) in c.limbs.iter().enumerate() {
-        assert_eq!(strace[i].as_int(), *limb as u64);
+        assert_eq!(strace[i].as_canonical_u64(), *limb as u64);
     }
 }
 
@@ -320,7 +320,7 @@ fn test_ec_ext5_scalar_to_and_from_mont_repr() {
     let strace = test.get_last_stack_state();
 
     for (i, limb) in c.limbs.iter().enumerate() {
-        assert_eq!(strace[i].as_int(), *limb as u64);
+        assert_eq!(strace[i].as_canonical_u64(), *limb as u64);
     }
 }
 
@@ -362,6 +362,6 @@ fn test_ec_ext5_scalar_inv() {
     let strace = test.get_last_stack_state();
 
     for (i, limb) in b.limbs.iter().enumerate() {
-        assert_eq!(strace[i].as_int(), *limb as u64);
+        assert_eq!(strace[i].as_canonical_u64(), *limb as u64);
     }
 }

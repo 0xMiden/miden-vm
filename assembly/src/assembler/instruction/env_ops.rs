@@ -1,4 +1,4 @@
-use vm_core::Operation::*;
+use vm_core::{Operation::*, PrimeCharacteristicRing};
 
 use super::{BasicBlockBuilder, mem_ops::local_to_absolute_addr, push_felt};
 use crate::{AssemblyError, Felt, SourceSpan, assembler::ProcedureContext};
@@ -29,6 +29,18 @@ where
     T: Into<Felt> + Copy,
 {
     imms.iter().for_each(|imm| push_felt(block_builder, (*imm).into()));
+}
+
+pub fn push_many_felt_u8(imms: &[u8], block_builder: &mut BasicBlockBuilder) {
+    imms.iter().for_each(|imm| push_felt(block_builder, Felt::from_u8(*imm)));
+}
+
+pub fn push_many_felt_u16(imms: &[u16], block_builder: &mut BasicBlockBuilder) {
+    imms.iter().for_each(|imm| push_felt(block_builder, Felt::from_u16(*imm)));
+}
+
+pub fn push_many_felt_u32(imms: &[u32], block_builder: &mut BasicBlockBuilder) {
+    imms.iter().for_each(|imm| push_felt(block_builder, Felt::from_u32(*imm)));
 }
 
 // ENVIRONMENT INPUTS

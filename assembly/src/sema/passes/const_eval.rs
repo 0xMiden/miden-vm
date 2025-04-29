@@ -5,6 +5,7 @@ use crate::{
     ast::*,
     sema::{AnalysisContext, SemanticAnalysisError},
 };
+use vm_core::PrimeField64;
 
 /// This visitor evaluates all constant expressions and folds them to literals.
 pub struct ConstEvalVisitor<'analyzer> {
@@ -27,7 +28,7 @@ impl ConstEvalVisitor<'_> {
             Immediate::Constant(name) => {
                 let span = name.span();
                 match self.analyzer.get_constant(name) {
-                    Ok(value) => match T::try_from(value.as_int()) {
+                    Ok(value) => match T::try_from(value.as_canonical_u64()) {
                         Ok(value) => {
                             *imm = Immediate::Value(Span::new(span, value));
                         },

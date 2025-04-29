@@ -8,12 +8,12 @@ use miden_air::{
         MEMORY_WRITE, TRACE_WIDTH as MEMORY_TRACE_WIDTH,
     },
 };
-use vm_core::{WORD_SIZE, Word, assert_matches};
+use vm_core::{assert_matches, PrimeCharacteristicRing, PrimeField64, Word, WORD_SIZE, Field};
 
 use super::{
     super::ZERO,
     CLK_COL_IDX, CTX_COL_IDX, D_INV_COL_IDX, D0_COL_IDX, D1_COL_IDX, EMPTY_WORD, Felt,
-    FieldElement, Memory, ONE, TraceFragment, V_COL_RANGE, WORD_COL_IDX,
+    Memory, ONE, TraceFragment, V_COL_RANGE, WORD_COL_IDX,
     segment::{MemoryAccessType, MemoryOperation},
 };
 use crate::{ContextId, ExecutionError};
@@ -37,7 +37,7 @@ fn mem_read() {
     assert_eq!(1, mem.trace_len());
 
     // read a value from address 3; clk = 2
-    let addr3 = Felt::from(3_u32);
+    let addr3 = Felt::from_u32(3_u32);
     let value = mem.read(ContextId::root(), addr3, 2.into()).unwrap();
     assert_eq!(ZERO, value);
     assert_eq!(1, mem.num_accessed_words());
@@ -50,7 +50,7 @@ fn mem_read() {
     assert_eq!(3, mem.trace_len());
 
     // read a value from address 2; clk = 4
-    let addr2 = Felt::from(2_u32);
+    let addr2 = Felt::from_u32(2_u32);
     let value = mem.read(ContextId::root(), addr2, 4.into()).unwrap();
     assert_eq!(ZERO, value);
     assert_eq!(1, mem.num_accessed_words());
@@ -131,46 +131,46 @@ fn mem_write() {
     // write a value into address 0; clk = 1
     let addr0 = 0_u32;
     let word1 = [ONE, ZERO, ZERO, ZERO];
-    mem.write_word(ContextId::root(), addr0.into(), 1.into(), word1).unwrap();
+    mem.write_word(ContextId::root(), Felt::from_u32(addr0), 1.into(), word1).unwrap();
     assert_eq!(word1, mem.get_word(ContextId::root(), addr0).unwrap().unwrap());
     assert_eq!(1, mem.num_accessed_words());
     assert_eq!(1, mem.trace_len());
 
     // write a value into address 2; clk = 2
     let addr2 = 2_u32;
-    let value5 = Felt::new(5);
-    mem.write(ContextId::root(), addr2.into(), 2.into(), value5).unwrap();
+    let value5 = Felt::from_u64(5);
+    mem.write(ContextId::root(), Felt::from_u32(addr2), 2.into(), value5).unwrap();
     assert_eq!(value5, mem.get_value(ContextId::root(), addr2).unwrap());
     assert_eq!(1, mem.num_accessed_words());
     assert_eq!(2, mem.trace_len());
 
     // write a value into address 1; clk = 3
     let addr1 = 1_u32;
-    let value7 = Felt::new(7);
-    mem.write(ContextId::root(), addr1.into(), 3.into(), value7).unwrap();
+    let value7 = Felt::from_u64(7);
+    mem.write(ContextId::root(), Felt::from_u32(addr1), 3.into(), value7).unwrap();
     assert_eq!(value7, mem.get_value(ContextId::root(), addr1).unwrap());
     assert_eq!(1, mem.num_accessed_words());
     assert_eq!(3, mem.trace_len());
 
     // write a value into address 3; clk = 4
     let addr3 = 3_u32;
-    let value9 = Felt::new(9);
-    mem.write(ContextId::root(), addr3.into(), 4.into(), value9).unwrap();
+    let value9 = Felt::from_u64(9);
+    mem.write(ContextId::root(), Felt::from_u32(addr3), 4.into(), value9).unwrap();
     assert_eq!(value9, mem.get_value(ContextId::root(), addr3).unwrap());
     assert_eq!(1, mem.num_accessed_words());
     assert_eq!(4, mem.trace_len());
 
     // write a word into address 4; clk = 5
     let addr4 = 4_u32;
-    let word1234 = [ONE, 2_u32.into(), 3_u32.into(), 4_u32.into()];
-    mem.write_word(ContextId::root(), addr4.into(), 5.into(), word1234).unwrap();
+    let word1234 = [ONE, Felt::from_u32(2), Felt::from_u32(3), Felt::from_u32(4)];
+    mem.write_word(ContextId::root(), Felt::from_u32(addr4), 5.into(), word1234).unwrap();
     assert_eq!(word1234, mem.get_word(ContextId::root(), addr4).unwrap().unwrap());
     assert_eq!(2, mem.num_accessed_words());
     assert_eq!(5, mem.trace_len());
 
     // write a word into address 0; clk = 6
-    let word5678: [Felt; 4] = [5_u32.into(), 6_u32.into(), 7_u32.into(), 8_u32.into()];
-    mem.write_word(ContextId::root(), addr0.into(), 6.into(), word5678).unwrap();
+    let word5678: [Felt; 4] = [Felt::from_u32(5), Felt::from_u32(6), Felt::from_u32(7), Felt::from_u32(8)];
+    mem.write_word(ContextId::root(), Felt::from_u32(addr0), 6.into(), word5678).unwrap();
     assert_eq!(word5678, mem.get_word(ContextId::root(), addr0).unwrap().unwrap());
     assert_eq!(2, mem.num_accessed_words());
     assert_eq!(6, mem.trace_len());
@@ -185,7 +185,7 @@ fn mem_write() {
         MemoryOperation::Write,
         MemoryAccessType::Word,
         ContextId::root(),
-        addr0.into(),
+        Felt::from_u32(addr0.into()),
         1.into(),
         word1,
     );
@@ -195,7 +195,7 @@ fn mem_write() {
         MemoryOperation::Write,
         MemoryAccessType::Element { addr_idx_in_word: 2 },
         ContextId::root(),
-        addr2.into(),
+        Felt::from_u32(addr2),
         2.into(),
         [ONE, ZERO, value5, ZERO],
     );
@@ -205,7 +205,7 @@ fn mem_write() {
         MemoryOperation::Write,
         MemoryAccessType::Element { addr_idx_in_word: 1 },
         ContextId::root(),
-        addr1.into(),
+        Felt::from_u32(addr1),
         3.into(),
         [ONE, value7, value5, ZERO],
     );
@@ -215,7 +215,7 @@ fn mem_write() {
         MemoryOperation::Write,
         MemoryAccessType::Element { addr_idx_in_word: 3 },
         ContextId::root(),
-        addr3.into(),
+        Felt::from_u32(addr3),
         4.into(),
         [ONE, value7, value5, value9],
     );
@@ -225,7 +225,7 @@ fn mem_write() {
         MemoryOperation::Write,
         MemoryAccessType::Word,
         ContextId::root(),
-        addr0.into(),
+        Felt::from_u32(addr0.into()),
         6.into(),
         word5678,
     );
@@ -236,7 +236,7 @@ fn mem_write() {
         MemoryOperation::Write,
         MemoryAccessType::Word,
         ContextId::root(),
-        addr4.into(),
+        Felt::from_u32(addr4),
         5.into(),
         word1234,
     );
@@ -269,22 +269,22 @@ fn mem_write_read() {
     let mut clk: RowIndex = 1.into();
 
     // write [1,2,3,4] starting at address 0; clk = 1
-    let word1234 = [ONE, 2_u32.into(), 3_u32.into(), 4_u32.into()];
+    let word1234 = [ONE, Felt::from_u32(2), Felt::from_u32(3), Felt::from_u32(4)];
     mem.write_word(ContextId::root(), ZERO, clk, word1234).unwrap();
     clk += 1;
 
     // read individual values from addresses 3,2,1,0; clk = 2,3,4,5
-    let value_read = mem.read(ContextId::root(), 3_u32.into(), clk).unwrap();
-    assert_eq!(value_read, 4_u32.into());
+    let value_read = mem.read(ContextId::root(), Felt::from_u32(3), clk).unwrap();
+    assert_eq!(value_read, Felt::from_u32(4));
     clk += 1;
-    let value_read = mem.read(ContextId::root(), 2_u32.into(), clk).unwrap();
-    assert_eq!(value_read, 3_u32.into());
+    let value_read = mem.read(ContextId::root(), Felt::from_u32(2), clk).unwrap();
+    assert_eq!(value_read, Felt::from_u32(3));
     clk += 1;
-    let value_read = mem.read(ContextId::root(), 1_u32.into(), clk).unwrap();
-    assert_eq!(value_read, 2_u32.into());
+    let value_read = mem.read(ContextId::root(), Felt::from_u32(1), clk).unwrap();
+    assert_eq!(value_read, Felt::from_u32(2));
     clk += 1;
     let value_read = mem.read(ContextId::root(), ZERO, clk).unwrap();
-    assert_eq!(value_read, 1_u32.into());
+    assert_eq!(value_read, Felt::from_u32(1));
     clk += 1;
 
     // read word from address 0; clk = 6
@@ -293,17 +293,17 @@ fn mem_write_read() {
     clk += 1;
 
     // write 42 into address 2; clk = 7
-    mem.write(ContextId::root(), 2_u32.into(), clk, 42_u32.into()).unwrap();
+    mem.write(ContextId::root(), Felt::from_u32(2), clk, Felt::from_u32(42)).unwrap();
     clk += 1;
 
     // read element from address 2; clk = 8
-    let value_read = mem.read(ContextId::root(), 2_u32.into(), clk).unwrap();
-    assert_eq!(value_read, 42_u32.into());
+    let value_read = mem.read(ContextId::root(), Felt::from_u32(2), clk).unwrap();
+    assert_eq!(value_read, Felt::from_u32(42));
     clk += 1;
 
     // read word from address 0; clk = 9
     let word_read = mem.read_word(ContextId::root(), ZERO, clk).unwrap();
-    assert_eq!(word_read, [ONE, 2_u32.into(), 42_u32.into(), 4_u32.into()]);
+    assert_eq!(word_read, [ONE, Felt::from_u32(2), Felt::from_u32(42), Felt::from_u32(4)]);
     clk += 1;
 
     // check generated trace and memory data provided to the ChipletsBus; rows should be sorted by
@@ -328,7 +328,7 @@ fn mem_write_read() {
         MemoryOperation::Read,
         MemoryAccessType::Element { addr_idx_in_word: 3 },
         ContextId::root(),
-        3_u32.into(),
+        Felt::from_u32(3),
         clk,
         word1234,
     );
@@ -339,7 +339,7 @@ fn mem_write_read() {
         MemoryOperation::Read,
         MemoryAccessType::Element { addr_idx_in_word: 2 },
         ContextId::root(),
-        2_u32.into(),
+        Felt::from_u32(2),
         clk,
         word1234,
     );
@@ -350,7 +350,7 @@ fn mem_write_read() {
         MemoryOperation::Read,
         MemoryAccessType::Element { addr_idx_in_word: 1 },
         ContextId::root(),
-        1_u32.into(),
+        Felt::from_u32(1),
         clk,
         word1234,
     );
@@ -383,9 +383,9 @@ fn mem_write_read() {
         MemoryOperation::Write,
         MemoryAccessType::Element { addr_idx_in_word: 2 },
         ContextId::root(),
-        2_u32.into(),
+        Felt::from_u32(2),
         clk,
-        [ONE, 2_u32.into(), 42_u32.into(), 4_u32.into()],
+        [ONE, Felt::from_u32(2), Felt::from_u32(42), Felt::from_u32(4)],
     );
     prev_row = verify_memory_access(&trace, 6, memory_access, prev_row);
     clk += 1;
@@ -394,9 +394,9 @@ fn mem_write_read() {
         MemoryOperation::Read,
         MemoryAccessType::Element { addr_idx_in_word: 2 },
         ContextId::root(),
-        2_u32.into(),
+        Felt::from_u32(2),
         clk,
-        [ONE, 2_u32.into(), 42_u32.into(), 4_u32.into()],
+        [ONE, Felt::from_u32(2), Felt::from_u32(42), Felt::from_u32(4)],
     );
     prev_row = verify_memory_access(&trace, 7, memory_access, prev_row);
     clk += 1;
@@ -407,7 +407,7 @@ fn mem_write_read() {
         ContextId::root(),
         ZERO,
         clk,
-        [ONE, 2_u32.into(), 42_u32.into(), 4_u32.into()],
+        [ONE, Felt::from_u32(2), Felt::from_u32(42), Felt::from_u32(4)],
     );
     verify_memory_access(&trace, 8, memory_access, prev_row);
 }
@@ -420,12 +420,12 @@ fn mem_get_state_at() {
 
     // Write word starting at (ctx = 0, addr = 40) at clk = 1.
     // This means that mem[40..43] is set at the beginning of clk = 2
-    let word1234 = [ONE, 2_u32.into(), 3_u32.into(), 4_u32.into()];
-    mem.write_word(ContextId::root(), addr_start.into(), 1.into(), word1234)
+    let word1234 = [ONE, Felt::from_u32(2), Felt::from_u32(3), Felt::from_u32(4)];
+    mem.write_word(ContextId::root(), Felt::from_u32(addr_start.into()), 1.into(), word1234)
         .unwrap();
 
-    let word4567: [Felt; 4] = [4_u32.into(), 5_u32.into(), 6_u32.into(), 7_u32.into()];
-    mem.write_word(ContextId::root(), addr_start.into(), 2.into(), word4567)
+    let word4567: [Felt; 4] = [Felt::from_u32(4), Felt::from_u32(5), Felt::from_u32(6), Felt::from_u32(7)];
+    mem.write_word(ContextId::root(), Felt::from_u32(addr_start.into()), 2.into(), word4567)
         .unwrap();
 
     // Check memory state at clk = 2
@@ -478,7 +478,7 @@ impl MemoryAccess {
         word_values: Word,
     ) -> Self {
         if let MemoryAccessType::Element { addr_idx_in_word } = access_type {
-            let addr: u32 = addr.try_into().unwrap();
+            let addr: u32 = addr.as_canonical_u64().try_into().unwrap();
             assert_eq!(addr_idx_in_word as u32, addr % WORD_SIZE as u32);
         }
 
@@ -487,7 +487,7 @@ impl MemoryAccess {
             access_type,
             ctx,
             addr,
-            clk: Felt::from(clk),
+            clk: Felt::from_u32(clk.into()),
             word_values,
         }
     }
@@ -525,9 +525,10 @@ fn build_trace_row(
     } = memory_access;
 
     let (word, idx1, idx0) = {
-        let addr: u32 = addr.try_into().unwrap();
+        let addr: u32 = addr.as_canonical_u64() as u32;
+        //let addr: u32 = addr.try_into().unwrap(); TODO(Al)
         let remainder = addr % WORD_SIZE as u32;
-        let word = Felt::from(addr - remainder);
+        let word = Felt::from_u32(addr - remainder);
 
         match remainder {
             0 => (word, ZERO, ZERO),
@@ -569,7 +570,7 @@ fn build_trace_row(
     let (hi, lo) = super::split_element_u32_into_u16(delta);
     row[D0_COL_IDX] = lo;
     row[D1_COL_IDX] = hi;
-    row[D_INV_COL_IDX] = delta.inv();
+    row[D_INV_COL_IDX] = delta.inverse();
 
     if row[WORD_COL_IDX] == prev_row[WORD_COL_IDX] && row[CTX_COL_IDX] == prev_row[CTX_COL_IDX] {
         row[FLAG_SAME_CONTEXT_AND_WORD] = ONE;

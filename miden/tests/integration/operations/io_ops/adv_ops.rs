@@ -1,6 +1,6 @@
 use processor::{ExecutionError, RowIndex};
 use test_utils::expect_exec_error_matches;
-use vm_core::{Felt, chiplets::hasher::apply_permutation, utils::ToElements};
+use vm_core::{Felt, chiplets::hasher::apply_permutation, utils::ToElements, PrimeField64};
 
 use super::{TRUNCATE_STACK_PROC, build_op_test, build_test};
 
@@ -90,7 +90,7 @@ fn adv_pipe() {
 
     // to get the final state of the stack, reverse the above state and push the expected address
     // to the end (the address will be 2 since 0 + 2 = 2).
-    let mut final_stack = state.iter().map(|&v| v.as_int()).collect::<Vec<u64>>();
+    let mut final_stack = state.iter().map(|&v| v.as_canonical_u64()).collect::<Vec<u64>>();
     final_stack.reverse();
     final_stack.push(8);
 
@@ -127,7 +127,7 @@ fn adv_pipe_with_hperm() {
 
     // to get the final state of the stack, reverse the hasher state and push the expected address
     // to the end (the address will be 2 since 0 + 2 = 2).
-    let mut final_stack = state.iter().map(|&v| v.as_int()).collect::<Vec<u64>>();
+    let mut final_stack = state.iter().map(|&v| v.as_canonical_u64()).collect::<Vec<u64>>();
     final_stack.reverse();
     final_stack.push(8);
 

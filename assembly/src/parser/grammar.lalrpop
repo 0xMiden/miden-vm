@@ -8,7 +8,7 @@ use alloc::{
 use core::{marker::PhantomData, num::NonZeroU32};
 
 use smallvec::smallvec;
-use vm_core::{Felt, FieldElement, StarkField, crypto::hash::RpoDigest};
+use vm_core::{Felt, crypto::hash::RpoDigest, PrimeField64, PrimeCharacteristicRing};
 
 use crate::{LibraryPath, LibraryNamespace, ast::*, diagnostics::SourceFile, SourceSpan};
 use super::{
@@ -1399,7 +1399,7 @@ IntOrHexImm: Immediate<HexEncodedValue> = {
 
 IntOrHex: HexEncodedValue = {
     <l:@L> <n:uint> <r:@R> =>? {
-        if n > Felt::MODULUS {
+        if n > Felt::ORDER_U64 {
             return Err(ParseError::User { error: ParsingError::InvalidLiteral { span: span!(source_file.id(), l, r), kind: LiteralErrorKind::FeltOverflow } });
         }
         if n <= (u8::MAX as u64) {
@@ -1409,7 +1409,7 @@ IntOrHex: HexEncodedValue = {
         } else if n <= (u32::MAX as u64) {
             Ok(HexEncodedValue::U32(n as u32))
         } else {
-            Ok(HexEncodedValue::Felt(Felt::new(n)))
+            Ok(HexEncodedValue::Felt(Felt::from_u64(n)))
         }
     },
 
@@ -1418,17 +1418,17 @@ IntOrHex: HexEncodedValue = {
 
 Felt: Felt = {
     <l:@L> <n:uint> <r:@R> =>? {
-        if n > Felt::MODULUS {
+        if n > Felt::ORDER_U64 {
             return Err(ParseError::User { error: ParsingError::InvalidLiteral { span: span!(source_file.id(), l, r), kind: LiteralErrorKind::FeltOverflow } });
         }
-        Ok(Felt::new(n))
+        Ok(Felt::from_u64(n))
     },
 
     <l:@L> <value:hex_value> <r:@R> =>? {
         Ok(match value {
-            HexEncodedValue::U8(v) => Felt::new(v as u64),
-            HexEncodedValue::U16(v) => Felt::new(v as u64),
-            HexEncodedValue::U32(v) => Felt::new(v as u64),
+            HexEncodedValue::U8(v) => Felt::from_u64(v as u64),
+            HexEncodedValue::U16(v) => Felt::from_u64(v as u64),
+            HexEncodedValue::U32(v) => Felt::from_u64(v as u64),
             HexEncodedValue::Felt(v) => v,
             HexEncodedValue::Word(_) => return Err(ParseError::User {
                 error: ParsingError::InvalidHexLiteral { span: span!(source_file.id(), l, r), kind: HexErrorKind::Overflow },

@@ -209,9 +209,9 @@ impl MastNode {
     pub fn domain(&self) -> Felt {
         match self {
             MastNode::Block(_) => BasicBlockNode::DOMAIN,
-            MastNode::Join(_) => JoinNode::DOMAIN,
-            MastNode::Split(_) => SplitNode::DOMAIN,
-            MastNode::Loop(_) => LoopNode::DOMAIN,
+            MastNode::Join(_) => JoinNode::join_domain(),
+            MastNode::Split(_) => SplitNode::domain(),
+            MastNode::Loop(_) => LoopNode::domain(),
             MastNode::Call(call_node) => call_node.domain(),
             MastNode::Dyn(dyn_node) => dyn_node.domain(),
             MastNode::External(_) => panic!("Can't fetch domain for an `External` node."),

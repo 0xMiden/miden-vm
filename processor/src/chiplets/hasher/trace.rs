@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 use core::ops::Range;
 
 use miden_air::trace::chiplets::hasher::NUM_ROUNDS;
-use vm_core::chiplets::hasher::apply_round;
+use vm_core::{chiplets::hasher::apply_round, PrimeCharacteristicRing};
 
 use super::{Felt, HasherState, STATE_WIDTH, Selectors, TRACE_WIDTH, TraceFragment, ZERO};
 
@@ -37,7 +37,7 @@ impl HasherTrace {
     /// ONE at every row. Starting at ONE is needed for the decoder so that the address of the
     /// first code block is a non-zero value.
     pub fn next_row_addr(&self) -> Felt {
-        Felt::new(self.trace_len() as u64 + 1)
+        Felt::from_u64(self.trace_len() as u64 + 1)
     }
 
     // TRACE MUTATORS

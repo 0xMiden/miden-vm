@@ -1,6 +1,7 @@
 use alloc::{collections::BTreeMap, vec::Vec};
+use vm_core::{PrimeField64, ExtensionField};
 
-use super::{Felt, FieldElement, ZERO};
+use super::{Felt, ZERO};
 
 // OVERFLOW TABLE
 // ================================================================================================
@@ -69,7 +70,7 @@ impl OverflowTable {
 
         if self.trace_enabled {
             // insert a copy of the current table state into the trace
-            self.save_current_state(clk.as_int());
+            self.save_current_state(clk.as_canonical_u64());
         }
     }
 
@@ -202,10 +203,10 @@ impl OverflowTableRow {
 impl OverflowTableRow {
     /// Reduces this row to a single field element in the field specified by E. This requires
     /// at least 4 alpha values.
-    pub fn to_value<E: FieldElement<BaseField = Felt>>(&self, alphas: &[E]) -> E {
+    pub fn to_value<E: ExtensionField<Felt>>(&self, alphas: &[E]) -> E {
         alphas[0]
-            + alphas[1].mul_base(self.clk)
-            + alphas[2].mul_base(self.val)
-            + alphas[3].mul_base(self.prev)
+            + alphas[1] * self.clk
+            + alphas[2] * self.val
+            + alphas[3] * self.prev
     }
 }
