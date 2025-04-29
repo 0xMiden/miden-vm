@@ -8,7 +8,8 @@ extern crate std;
 
 use core::marker::PhantomData;
 use p3_blake3::Blake3;
-use std::{println, vec};
+use prove::{prove_blake, prove_rpo};
+use std::{println, vec, vec::Vec};
 use tracing::instrument;
 
 use air::{ProcessorAir, PublicInputs, trace::TRACE_WIDTH};
@@ -46,10 +47,7 @@ pub use processor::{
 // PROVER
 // ================================================================================================
 
-struct ExecutionProver<SC>
-where
-    SC: StarkGenericConfig,
-{
+struct ExecutionProver<SC> {
     config: SC,
     public_inputs: PublicInputs,
     _sc: PhantomData<SC>,
@@ -84,22 +82,17 @@ where
             .all(|(l, r)| l == r)
     }
 
-    fn prove(
-        &self,
-        trace: RowMajorMatrix<
-            <<<SC as StarkGenericConfig>::Pcs as p3_commit::Pcs<
-                <SC as StarkGenericConfig>::Challenge,
-                <SC as StarkGenericConfig>::Challenger,
-            >>::Domain as PolynomialSpace>::Val,
-        >,
-    ) -> Proof<SC> {
+    fn prove(&self, trace: ExecutionTrace) -> Proof<SC> where {
         let processor_air = ProcessorAir {};
 
         //let mut public_inputs = self.public_inputs.stack_inputs().to_vec();
         //public_inputs.extend_from_slice(&self.public_inputs.stack_outputs().to_vec() );
         //public_inputs.extend_from_slice(&self.public_inputs.program_info().to_elements() );
-        let public_inputs = vec![];
-        prove_uni_stark(&self.config, &processor_air, trace, &public_inputs)
+
+        //let public_inputs = vec![];
+        let trace_row_major = to_row_major(&trace);
+        //prove_uni_stark(&self.config, &processor_air, trace_row_major, &public_inputs)
+        todo!()
     }
 }
 
@@ -131,8 +124,6 @@ where
     let hash_fn = options.hash_fn();
     let program_info = trace.program_info();
     let public_inputs = PublicInputs::new(program_info.clone(), stack_inputs, stack_outputs);
-
-    let trace_row_major = to_row_major(&trace);
 
     type Val = Felt;
     type Challenge = BinomialExtensionField<Val, 2>;
@@ -180,12 +171,12 @@ where
             type Config = StarkConfig<Pcs, Challenge, Challenger>;
             let config = Config::new(pcs, challenger);
 
-            let prover = ExecutionProver::<Config>::new(config, public_inputs);
-            prover.are_inputs_valid(&trace);
-            prover.are_outputs_valid(&trace);
+            //let prover = ExecutionProver::<Config>::new(config.clone(), public_inputs);
+            //prover.are_inputs_valid(&trace);
+            //prover.are_outputs_valid(&trace);
 
-            let proof = prover.prove(trace_row_major);
-            let proof = bincode::serialize(&proof).unwrap();
+            let proof = prove_rpo(config, trace);
+            //let proof = bincode::serialize(&proof).unwrap();
             ExecutionProof::new(proof, hash_fn)
         },
         HashFunction::Blake3_256 | HashFunction::Blake3_192 => {
@@ -223,10 +214,10 @@ where
 
             let config = Config::new(pcs, challenger);
 
-            let prover = ExecutionProver::<Config>::new(config, public_inputs);
+            //let prover = ExecutionProver::<Config>::new(config, public_inputs);
 
-            let proof = prover.prove(trace_row_major);
-            let proof = bincode::serialize(&proof).unwrap();
+            let proof = prove_blake(config, trace);
+            //let proof = bincode::serialize(&proof).unwrap();
             ExecutionProof::new(proof, hash_fn)
         },
 
