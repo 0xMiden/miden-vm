@@ -96,7 +96,7 @@ where
     }
 }
 
-//#[instrument("program proving", skip_all)]
+#[instrument("program proving", skip_all)]
 pub fn prove(
     program: &Program,
     stack_inputs: StackInputs,
