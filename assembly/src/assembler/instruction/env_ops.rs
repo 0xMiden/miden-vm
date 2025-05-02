@@ -44,7 +44,7 @@ pub fn locaddr(
     index: u16,
     proc_ctx: &ProcedureContext,
 ) -> Result<(), AssemblyError> {
-    local_to_absolute_addr(block_builder, index, proc_ctx.num_locals(), true)
+    local_to_absolute_addr(block_builder, proc_ctx, index, proc_ctx.num_locals(), true)
 }
 
 /// Appends CALLER operation to the span which puts the hash of the function which initiated the

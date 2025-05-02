@@ -1,10 +1,11 @@
 use vm_core::{
     Felt,
     Operation::{self, *},
+    debuginfo::Spanned,
     sys_events::SystemEvent,
 };
 
-use super::{BasicBlockBuilder, field_ops::append_pow2_op, push_u32_value, validate_param};
+use super::{BasicBlockBuilder, field_ops::append_pow2_op, push_u32_value};
 use crate::{
     AssemblyError, MAX_U32_ROTATE_VALUE, MAX_U32_SHIFT_VALUE, Span,
     assembler::ProcedureContext,
@@ -191,8 +192,12 @@ pub fn u32not(span_builder: &mut BasicBlockBuilder) {
 /// VM cycles per mode:
 /// - u32shl: 18 cycles
 /// - u32shl.b: 3 cycles
-pub fn u32shl(span_builder: &mut BasicBlockBuilder, imm: Option<u8>) -> Result<(), AssemblyError> {
-    prepare_bitwise::<MAX_U32_SHIFT_VALUE>(span_builder, imm)?;
+pub fn u32shl(
+    span_builder: &mut BasicBlockBuilder,
+    proc_ctx: &ProcedureContext,
+    imm: Option<u8>,
+) -> Result<(), AssemblyError> {
+    prepare_bitwise::<MAX_U32_SHIFT_VALUE>(span_builder, proc_ctx, imm)?;
     if imm != Some(0) {
         span_builder.push_ops([U32mul, Drop]);
     }
@@ -207,8 +212,12 @@ pub fn u32shl(span_builder: &mut BasicBlockBuilder, imm: Option<u8>) -> Result<(
 /// VM cycles per mode:
 /// - u32shr: 18 cycles
 /// - u32shr.b: 3 cycles
-pub fn u32shr(span_builder: &mut BasicBlockBuilder, imm: Option<u8>) -> Result<(), AssemblyError> {
-    prepare_bitwise::<MAX_U32_SHIFT_VALUE>(span_builder, imm)?;
+pub fn u32shr(
+    span_builder: &mut BasicBlockBuilder,
+    proc_ctx: &ProcedureContext,
+    imm: Option<u8>,
+) -> Result<(), AssemblyError> {
+    prepare_bitwise::<MAX_U32_SHIFT_VALUE>(span_builder, proc_ctx, imm)?;
     if imm != Some(0) {
         span_builder.push_ops([U32div, Drop]);
     }
@@ -223,8 +232,12 @@ pub fn u32shr(span_builder: &mut BasicBlockBuilder, imm: Option<u8>) -> Result<(
 /// VM cycles per mode:
 /// - u32rotl: 18 cycles
 /// - u32rotl.b: 3 cycles
-pub fn u32rotl(span_builder: &mut BasicBlockBuilder, imm: Option<u8>) -> Result<(), AssemblyError> {
-    prepare_bitwise::<MAX_U32_ROTATE_VALUE>(span_builder, imm)?;
+pub fn u32rotl(
+    span_builder: &mut BasicBlockBuilder,
+    proc_ctx: &ProcedureContext,
+    imm: Option<u8>,
+) -> Result<(), AssemblyError> {
+    prepare_bitwise::<MAX_U32_ROTATE_VALUE>(span_builder, proc_ctx, imm)?;
     if imm != Some(0) {
         span_builder.push_ops([U32mul, Add]);
     }
@@ -239,14 +252,27 @@ pub fn u32rotl(span_builder: &mut BasicBlockBuilder, imm: Option<u8>) -> Result<
 /// VM cycles per mode:
 /// - u32rotr: 23 cycles
 /// - u32rotr.b: 3 cycles
-pub fn u32rotr(span_builder: &mut BasicBlockBuilder, imm: Option<u8>) -> Result<(), AssemblyError> {
+pub fn u32rotr(
+    span_builder: &mut BasicBlockBuilder,
+    proc_ctx: &ProcedureContext,
+    imm: Option<u8>,
+) -> Result<(), AssemblyError> {
     match imm {
         Some(0) => {
             // if rotation is performed by 0, do nothing (Noop)
             span_builder.push_op(Noop);
         },
         Some(imm) => {
-            validate_param(imm, 1..=MAX_U32_ROTATE_VALUE)?;
+            if imm == 0 || imm > MAX_U32_ROTATE_VALUE {
+                let span = proc_ctx.span();
+                return Err(AssemblyError::InvalidU8Param {
+                    span,
+                    source_file: proc_ctx.source_manager().get(span.source_id()).ok(),
+                    param: imm,
+                    min: 0,
+                    max: MAX_U32_ROTATE_VALUE,
+                });
+            }
             span_builder.push_op(Push(Felt::new(1 << (32 - imm))));
             span_builder.push_ops([U32mul, Add]);
         },
@@ -397,6 +423,7 @@ fn handle_division(
 /// either as a provided immediate value, or as an element that already exists in the stack.
 fn prepare_bitwise<const MAX_VALUE: u8>(
     block_builder: &mut BasicBlockBuilder,
+    proc_ctx: &ProcedureContext,
     imm: Option<u8>,
 ) -> Result<(), AssemblyError> {
     match imm {
@@ -405,7 +432,16 @@ fn prepare_bitwise<const MAX_VALUE: u8>(
             block_builder.push_op(Noop);
         },
         Some(imm) => {
-            validate_param(imm, 1..=MAX_VALUE)?;
+            if imm == 0 || imm > MAX_VALUE {
+                let span = proc_ctx.span();
+                return Err(AssemblyError::InvalidU8Param {
+                    span,
+                    source_file: proc_ctx.source_manager().get(span.source_id()).ok(),
+                    param: imm,
+                    min: 0,
+                    max: MAX_VALUE,
+                });
+            }
             block_builder.push_op(Push(Felt::new(1 << imm)));
         },
         None => {

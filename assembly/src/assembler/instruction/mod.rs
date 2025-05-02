@@ -1,10 +1,7 @@
-use core::ops::RangeBounds;
-
-use miette::miette;
 use vm_core::{Decorator, ONE, WORD_SIZE, ZERO, debuginfo::Spanned, mast::MastNodeId};
 
 use super::{Assembler, BasicBlockBuilder, Felt, Operation, ProcedureContext, ast::InvokeKind};
-use crate::{AssemblyError, Span, ast::Instruction, utils::bound_into_included_u64};
+use crate::{AssemblyError, Span, ast::Instruction};
 
 mod adv_ops;
 mod crypto_ops;
@@ -110,11 +107,20 @@ impl Assembler {
             Instruction::Incr => block_builder.push_op(Incr),
 
             Instruction::Pow2 => field_ops::pow2(block_builder),
-            Instruction::Exp => field_ops::exp(block_builder, 64)?,
-            Instruction::ExpImm(pow) => field_ops::exp_imm(block_builder, pow.expect_value())?,
-            Instruction::ExpBitLength(num_pow_bits) => {
-                field_ops::exp(block_builder, *num_pow_bits)?
+            Instruction::Exp => field_ops::exp(
+                block_builder,
+                proc_ctx,
+                vm_core::debuginfo::Span::new(proc_ctx.span(), 64),
+            )?,
+
+            Instruction::ExpImm(pow) => {
+                field_ops::exp_imm(block_builder, proc_ctx, pow.expect_value())?
             },
+            Instruction::ExpBitLength(num_pow_bits) => field_ops::exp(
+                block_builder,
+                proc_ctx,
+                vm_core::debuginfo::Span::new(proc_ctx.span(), *num_pow_bits),
+            )?,
             Instruction::ILog2 => field_ops::ilog2(block_builder),
 
             Instruction::Not => block_builder.push_op(Not),
@@ -207,14 +213,22 @@ impl Assembler {
             Instruction::U32Or => block_builder.push_ops([Dup1, Dup1, U32and, Neg, Add, Add]),
             Instruction::U32Xor => block_builder.push_op(U32xor),
             Instruction::U32Not => u32_ops::u32not(block_builder),
-            Instruction::U32Shl => u32_ops::u32shl(block_builder, None)?,
-            Instruction::U32ShlImm(v) => u32_ops::u32shl(block_builder, Some(v.expect_value()))?,
-            Instruction::U32Shr => u32_ops::u32shr(block_builder, None)?,
-            Instruction::U32ShrImm(v) => u32_ops::u32shr(block_builder, Some(v.expect_value()))?,
-            Instruction::U32Rotl => u32_ops::u32rotl(block_builder, None)?,
-            Instruction::U32RotlImm(v) => u32_ops::u32rotl(block_builder, Some(v.expect_value()))?,
-            Instruction::U32Rotr => u32_ops::u32rotr(block_builder, None)?,
-            Instruction::U32RotrImm(v) => u32_ops::u32rotr(block_builder, Some(v.expect_value()))?,
+            Instruction::U32Shl => u32_ops::u32shl(block_builder, proc_ctx, None)?,
+            Instruction::U32ShlImm(v) => {
+                u32_ops::u32shl(block_builder, proc_ctx, Some(v.expect_value()))?
+            },
+            Instruction::U32Shr => u32_ops::u32shr(block_builder, proc_ctx, None)?,
+            Instruction::U32ShrImm(v) => {
+                u32_ops::u32shr(block_builder, proc_ctx, Some(v.expect_value()))?
+            },
+            Instruction::U32Rotl => u32_ops::u32rotl(block_builder, proc_ctx, None)?,
+            Instruction::U32RotlImm(v) => {
+                u32_ops::u32rotl(block_builder, proc_ctx, Some(v.expect_value()))?
+            },
+            Instruction::U32Rotr => u32_ops::u32rotr(block_builder, proc_ctx, None)?,
+            Instruction::U32RotrImm(v) => {
+                u32_ops::u32rotr(block_builder, proc_ctx, Some(v.expect_value()))?
+            },
             Instruction::U32Popcnt => u32_ops::u32popcnt(block_builder),
             Instruction::U32Clz => u32_ops::u32clz(block_builder),
             Instruction::U32Ctz => u32_ops::u32ctz(block_builder),
@@ -335,7 +349,9 @@ impl Assembler {
             Instruction::Caller => env_ops::caller(block_builder, proc_ctx, instruction.span())?,
             Instruction::Clk => block_builder.push_op(Clk),
             Instruction::AdvPipe => block_builder.push_op(Pipe),
-            Instruction::AdvPush(n) => adv_ops::adv_push(block_builder, n.expect_value())?,
+            Instruction::AdvPush(n) => {
+                adv_ops::adv_push(block_builder, proc_ctx, n.expect_value())?
+            },
             Instruction::AdvLoadW => block_builder.push_op(AdvPopW),
 
             Instruction::MemStream => block_builder.push_op(MStream),
@@ -526,25 +542,4 @@ fn push_felt(span_builder: &mut BasicBlockBuilder, value: Felt) {
     } else {
         span_builder.push_op(Push(value));
     }
-}
-
-/// Returns an error if the specified value is smaller than or equal to min or greater than or
-/// equal to max. Otherwise, returns Ok(()).
-fn validate_param<I, R>(value: I, range: R) -> Result<(), AssemblyError>
-where
-    I: Ord + Clone + Into<u64>,
-    R: RangeBounds<I>,
-{
-    range.contains(&value).then_some(()).ok_or_else(|| {
-        let value: u64 = value.into();
-        let min = bound_into_included_u64(range.start_bound(), true);
-        let max = bound_into_included_u64(range.end_bound(), false);
-        AssemblyError::Other(
-            miette!(
-                "parameter value must be greater than or equal to {min} and \
-            less than or equal to {max}, but was {value}",
-            )
-            .into(),
-        )
-    })
 }

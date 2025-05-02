@@ -72,6 +72,17 @@ pub enum AssemblyError {
         source_file: Option<Arc<SourceFile>>,
         local_addr: u16,
     },
+    #[error("invalid parameter value: {param}; expected to be between {min} and {max}")]
+    #[diagnostic()]
+    InvalidU8Param {
+        #[label]
+        span: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<SourceFile>>,
+        param: u8,
+        min: u8,
+        max: u8,
+    },
     #[error("invalid use of 'caller' instruction outside of kernel")]
     #[diagnostic(help(
         "the 'caller' instruction is only allowed in procedures defined in a kernel"

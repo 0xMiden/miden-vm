@@ -1,8 +1,8 @@
 use alloc::string::ToString;
 
-use vm_core::{Felt, Operation::*};
+use vm_core::{Felt, Operation::*, debuginfo::Spanned};
 
-use super::{BasicBlockBuilder, push_felt, push_u32_value, validate_param};
+use super::{BasicBlockBuilder, push_felt, push_u32_value};
 use crate::{AssemblyError, assembler::ProcedureContext, diagnostics::Report};
 
 // INSTRUCTION PARSERS
@@ -33,7 +33,7 @@ pub fn mem_read(
     if let Some(addr) = addr {
         if is_local {
             let num_locals = proc_ctx.num_locals();
-            local_to_absolute_addr(block_builder, addr as u16, num_locals, is_single)?;
+            local_to_absolute_addr(block_builder, proc_ctx, addr as u16, num_locals, is_single)?;
         } else {
             push_u32_value(block_builder, addr);
         }
@@ -81,7 +81,13 @@ pub fn mem_write_imm(
     is_single: bool,
 ) -> Result<(), AssemblyError> {
     if is_local {
-        local_to_absolute_addr(block_builder, addr as u16, proc_ctx.num_locals(), is_single)?;
+        local_to_absolute_addr(
+            block_builder,
+            proc_ctx,
+            addr as u16,
+            proc_ctx.num_locals(),
+            is_single,
+        )?;
     } else {
         push_u32_value(block_builder, addr);
     }
@@ -111,6 +117,7 @@ pub fn mem_write_imm(
 /// Returns an error if index is greater than the number of procedure locals.
 pub fn local_to_absolute_addr(
     block_builder: &mut BasicBlockBuilder,
+    proc_ctx: &ProcedureContext,
     index_of_local: u16,
     num_proc_locals: u16,
     is_single: bool,
@@ -133,11 +140,21 @@ pub fn local_to_absolute_addr(
     } else {
         num_proc_locals - 4
     };
-    validate_param(index_of_local, 0..=max)?;
 
     // Local values are placed under the frame pointer, so we need to calculate the offset of the
     // local value from the frame pointer.
     // The offset is in the range [1, num_proc_locals], which is then subtracted from `fmp`.
+    let span = proc_ctx.span();
+    if index_of_local > max {
+        return Err(AssemblyError::InvalidU8Param {
+            span,
+            source_file: proc_ctx.source_manager().get(span.source_id()).ok(),
+            param: index_of_local as u8,
+            min: 0,
+            max: max as u8,
+        });
+    }
+
     let fmp_offset_of_local = num_proc_locals - index_of_local;
     push_felt(block_builder, -Felt::from(fmp_offset_of_local));
     block_builder.push_op(FmpAdd);

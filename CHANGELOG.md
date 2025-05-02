@@ -9,6 +9,7 @@
 - Add `executable` feature to the `make test` and `make test-build` Make commands (#1762).
 
 #### Changes
+- remove usage of validate_param in instruction ops (#1785)
 - [BREAKING] `ExecutionOptions::with_debugging()` now takes a boolean parameter (#1761)
 - Use `MemoryAddress(u32)` for `VmState` memory addresses instead of plain `u64` (#1758).
 

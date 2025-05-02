@@ -1,6 +1,6 @@
-use vm_core::{FieldElement, Operation::*, sys_events::SystemEvent};
+use vm_core::{FieldElement, Operation::*, debuginfo::Spanned, sys_events::SystemEvent};
 
-use super::{BasicBlockBuilder, validate_param};
+use super::BasicBlockBuilder;
 use crate::{
     AssemblyError, Felt, MAX_EXP_BITS, ONE, Span, ZERO,
     assembler::ProcedureContext,
@@ -152,14 +152,27 @@ pub fn append_pow2_op(span_builder: &mut BasicBlockBuilder) {
 ///
 /// # Errors
 /// Returns an error if num_pow_bits is greater than 64.
-pub fn exp(span_builder: &mut BasicBlockBuilder, num_pow_bits: u8) -> Result<(), AssemblyError> {
-    validate_param(num_pow_bits, 0..=MAX_EXP_BITS)?;
+pub fn exp(
+    span_builder: &mut BasicBlockBuilder,
+    proc_ctx: &ProcedureContext,
+    num_pow_bits: Span<u8>,
+) -> Result<(), AssemblyError> {
+    if *num_pow_bits.inner() > MAX_EXP_BITS {
+        let span = num_pow_bits.span();
+        return Err(AssemblyError::InvalidU8Param {
+            span,
+            source_file: proc_ctx.source_manager().get(span.source_id()).ok(),
+            param: *num_pow_bits.inner(),
+            min: 0,
+            max: MAX_EXP_BITS,
+        });
+    }
 
     // arranging the stack to prepare it for expacc instruction.
     span_builder.push_ops([Pad, Incr, MovUp2, Pad]);
 
     // calling expacc instruction n times.
-    span_builder.push_op_many(Expacc, num_pow_bits as usize);
+    span_builder.push_op_many(Expacc, *num_pow_bits.inner() as usize);
 
     // drop the top two elements exp_lsb and base value of the last iteration.
     span_builder.push_ops([Drop, Drop]);
@@ -181,18 +194,23 @@ pub fn exp(span_builder: &mut BasicBlockBuilder, num_pow_bits: u8) -> Result<(),
 /// - pow = 6: 10 cycles
 /// - pow = 7: 12 cycles
 /// - pow > 7: 9 + Ceil(log2(pow))
-pub fn exp_imm(span_builder: &mut BasicBlockBuilder, pow: Felt) -> Result<(), AssemblyError> {
+pub fn exp_imm(
+    span_builder: &mut BasicBlockBuilder,
+    proc_ctx: &ProcedureContext,
+    pow: Felt,
+) -> Result<(), AssemblyError> {
     if pow.as_int() <= 7 {
         perform_exp_for_small_power(span_builder, pow.as_int());
         Ok(())
     } else {
         // compute the bits length of the exponent
         let num_pow_bits = (64 - pow.as_int().leading_zeros()) as u8;
+        let num_pow_bits = Span::<u8>::new(proc_ctx.span(), num_pow_bits);
 
         // pushing the exponent onto the stack.
         span_builder.push_op(Push(pow));
 
-        exp(span_builder, num_pow_bits)
+        exp(span_builder, proc_ctx, num_pow_bits)
     }
 }
 
