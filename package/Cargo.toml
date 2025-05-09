@@ -1,8 +1,8 @@
 [package]
 name = "miden-mast-package"
-version = "0.14.0"
+version = "0.15.0"
 description = "Package containing a compiled Miden MAST artifact with declared dependencies and exports"
-documentation = "https://docs.rs/miden-mast-package/0.14.0"
+documentation = "https://docs.rs/miden-mast-package/0.15.0"
 readme = "README.md"
 categories = ["compilers", "no-std"]
 keywords = ["package", "language", "miden"]
@@ -18,9 +18,9 @@ bench = false
 doctest = false
 
 [dependencies]
-assembly = { package = "miden-assembly", path = "../assembly", version = "0.14", default-features = false }
+assembly = { package = "miden-assembly", path = "../assembly", version = "0.15", default-features = false }
 derive_more = "0.99"
-vm-core = { package = "miden-core", path = "../core", version = "0.14", default-features = false }
+vm-core = { package = "miden-core", path = "../core", version = "0.15", default-features = false }
 
 [dev-dependencies]
 proptest = "1.6"

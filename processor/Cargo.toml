@@ -1,8 +1,8 @@
 [package]
 name = "miden-processor"
-version = "0.14.0"
+version = "0.15.0"
 description = "Miden VM processor"
-documentation = "https://docs.rs/miden-processor/0.14.0"
+documentation = "https://docs.rs/miden-processor/0.15.0"
 readme = "README.md"
 categories = ["emulators", "no-std"]
 keywords = ["miden", "virtual-machine"]
@@ -26,18 +26,18 @@ testing = ["miden-air/testing"]
 bus-debugger = ["testing", "miden-air/testing"]
 
 [dependencies]
-miden-air = { package = "miden-air", path = "../air", version = "0.14", default-features = false }
+miden-air = { package = "miden-air", path = "../air", version = "0.15", default-features = false }
 miette = { package = "miden-miette", version = "8.0", default-features = false, features = [
     "fancy-no-syscall",
     "derive"
 ] }
 tracing = { version = "0.1", default-features = false, features = ["attributes"] }
-vm-core = { package = "miden-core", path = "../core", version = "0.14", default-features = false, features = ["diagnostics"] }
+vm-core = { package = "miden-core", path = "../core", version = "0.15", default-features = false, features = ["diagnostics"] }
 winter-prover = { package = "winter-prover", version = "0.12", default-features = false }
 thiserror = { workspace = true }
 
 [dev-dependencies]
-assembly = { package = "miden-assembly", path = "../assembly", version = "0.14", default-features = false }
+assembly = { package = "miden-assembly", path = "../assembly", version = "0.15", default-features = false }
 logtest = { version = "2.0", default-features = false }
 pretty_assertions = "1.4"
 rstest = { version = "0.24" }

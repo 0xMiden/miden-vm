@@ -1,8 +1,8 @@
 [package]
 name = "miden-air"
-version = "0.14.0"
+version = "0.15.0"
 description = "Algebraic intermediate representation of Miden VM processor"
-documentation = "https://docs.rs/miden-air/0.14.0"
+documentation = "https://docs.rs/miden-air/0.15.0"
 readme = "README.md"
 categories = ["cryptography", "no-std"]
 keywords = ["air", "arithmetization", "crypto", "miden"]
@@ -32,7 +32,7 @@ testing = []
 
 [dependencies]
 thiserror = { workspace = true }
-vm-core = { package = "miden-core", path = "../core", version = "0.14", default-features = false }
+vm-core = { package = "miden-core", path = "../core", version = "0.15", default-features = false }
 winter-air = { package = "winter-air", version = "0.12", default-features = false }
 winter-prover = { package = "winter-prover", version = "0.12", default-features = false }
 

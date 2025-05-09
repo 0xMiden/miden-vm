@@ -1,0 +1,20 @@
+#!/bin/sh
+
+# Expects 
+# 1. to be run from the root of the repository
+# 2. for ~/.cargo/credentials.toml to contain your crates.io token
+#   (see https://doc.rust-lang.org/cargo/reference/publishing.html)
+
+git checkout main
+git pull origin main
+
+cargo publish -p miden-core
+cargo publish -p miden-air
+cargo publish -p miden-processor
+cargo publish -p miden-prover
+cargo publish -p miden-verifier
+cargo publish -p miden-assembly
+cargo publish -p miden-stdlib
+cargo publish -p miden-package
+cargo publish -p miden-test-utils
+cargo publish -p miden-vm

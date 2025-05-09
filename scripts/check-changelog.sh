@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 set -uo pipefail
 
 CHANGELOG_FILE="${1:-CHANGELOG.md}"

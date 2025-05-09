@@ -1,8 +1,8 @@
 [package]
 name = "miden-assembly"
-version = "0.14.0"
+version = "0.15.0"
 description = "Miden VM assembly language"
-documentation = "https://docs.rs/miden-assembly/0.14.0"
+documentation = "https://docs.rs/miden-assembly/0.15.0"
 readme = "README.md"
 categories = ["compilers", "no-std"]
 keywords = ["assembler", "assembly", "language", "miden"]
@@ -38,7 +38,7 @@ smallvec = { version = "1.13", features = ["union", "const_generics", "const_new
 thiserror = { workspace = true }
 tracing = { version = "0.1", default-features = false, features = ["attributes"] }
 unicode-width = { version = "0.2", features = ["no_std"] }
-vm-core = { package = "miden-core", path = "../core", version = "0.14", default-features = false, features = [
+vm-core = { package = "miden-core", path = "../core", version = "0.15", default-features = false, features = [
     "diagnostics",
 ] }
 

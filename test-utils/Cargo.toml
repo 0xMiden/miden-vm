@@ -24,18 +24,18 @@ std = [
 ]
 
 [dependencies]
-air = { package = "miden-air", path = "../air", version = "0.14", default-features = false }
-assembly = { package = "miden-assembly", path = "../assembly", version = "0.14", default-features = false, features = [
+air = { package = "miden-air", path = "../air", version = "0.15", default-features = false }
+assembly = { package = "miden-assembly", path = "../assembly", version = "0.15", default-features = false, features = [
     "testing",
 ] }
-processor = { package = "miden-processor", path = "../processor", version = "0.14", default-features = false, features = [
+processor = { package = "miden-processor", path = "../processor", version = "0.15", default-features = false, features = [
     "testing",
 ] }
-prover = { package = "miden-prover", path = "../prover", version = "0.14", default-features = false }
-stdlib = { package = "miden-stdlib", path = "../stdlib", version = "0.14", default-features = false }
+prover = { package = "miden-prover", path = "../prover", version = "0.15", default-features = false }
+stdlib = { package = "miden-stdlib", path = "../stdlib", version = "0.15", default-features = false }
 test-case = "3.2"
-verifier = { package = "miden-verifier", path = "../verifier", version = "0.14", default-features = false }
-vm-core = { package = "miden-core", path = "../core", version = "0.14", default-features = false }
+verifier = { package = "miden-verifier", path = "../verifier", version = "0.15", default-features = false }
+vm-core = { package = "miden-core", path = "../core", version = "0.15", default-features = false }
 winter-prover = { package = "winter-prover", version = "0.12", default-features = false }
 
 [target.'cfg(target_family = "wasm")'.dependencies]

@@ -1,8 +1,8 @@
 [package]
 name = "miden-vm"
-version = "0.14.0"
+version = "0.15.0"
 description = "Miden virtual machine"
-documentation = "https://docs.rs/miden-vm/0.14.0"
+documentation = "https://docs.rs/miden-vm/0.15.0"
 readme = "README.md"
 categories = ["cryptography", "emulators", "no-std"]
 keywords = ["miden", "stark", "virtual-machine", "zkp"]
@@ -66,23 +66,23 @@ std = ["assembly/std", "processor/std", "prover/std", "verifier/std"]
 internal = ["dep:serde", "dep:serde_derive", "dep:serde_json", "dep:hex"]
 
 [dependencies]
-assembly = { package = "miden-assembly", path = "../assembly", version = "0.14", default-features = false }
+assembly = { package = "miden-assembly", path = "../assembly", version = "0.15", default-features = false }
 blake3 = "1.5"
 clap = { version = "4.4", features = ["derive"], optional = true }
 hex = { version = "0.4", optional = true }
-processor = { package = "miden-processor", path = "../processor", version = "0.14", default-features = false }
-prover = { package = "miden-prover", path = "../prover", version = "0.14", default-features = false }
-package = { package = "miden-mast-package", path = "../package", version = "0.14", default-features = false }
+processor = { package = "miden-processor", path = "../processor", version = "0.15", default-features = false }
+prover = { package = "miden-prover", path = "../prover", version = "0.15", default-features = false }
+package = { package = "miden-mast-package", path = "../package", version = "0.15", default-features = false }
 rustyline = { version = "13.0", default-features = false, optional = true }
 serde = { version = "1.0", optional = true }
 serde_derive = { version = "1.0", optional = true }
 serde_json = { version = "1.0", optional = true }
-stdlib = { package = "miden-stdlib", path = "../stdlib", version = "0.14", default-features = false }
+stdlib = { package = "miden-stdlib", path = "../stdlib", version = "0.15", default-features = false }
 tracing = { version = "0.1", default-features = false, features = ["attributes"] }
 tracing-subscriber = { version = "0.3", optional = true, features = ["std", "env-filter"] }
 tracing-forest = { version = "0.1", optional = true, features = ["ansi", "smallvec"] }
-verifier = { package = "miden-verifier", path = "../verifier", version = "0.14", default-features = false }
-vm-core = { package = "miden-core", path = "../core", version = "0.14", default-features = false }
+verifier = { package = "miden-verifier", path = "../verifier", version = "0.15", default-features = false }
+vm-core = { package = "miden-core", path = "../core", version = "0.15", default-features = false }
 
 [dev-dependencies]
 assert_cmd = "2.0"
@@ -91,7 +91,7 @@ escargot = "0.5"
 num-bigint = "0.4"
 predicates = "3.1"
 test-utils = { package = "miden-test-utils", path = "../test-utils" }
-vm-core = { package = "miden-core", path = "../core", version = "0.14" }
+vm-core = { package = "miden-core", path = "../core", version = "0.15" }
 winter-fri = { package = "winter-fri", version = "0.12" }
 rand_chacha = "0.9"
 walkdir = "2.5"
