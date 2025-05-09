@@ -9,7 +9,7 @@ Internally, Miden VM AIR is separated into several components:
 * AIR for the [range checker](https://0xMiden.github.io/miden-vm/design/range.html), which is responsible for checking if field elements contain values smaller than $2^{16}$.
 * AIR for the [chiplets module](https://0xMiden.github.io/miden-vm/design/chiplets/main.html), which contains specialized circuits responsible for handling complex computations (e.g., hashing) as well as random access memory.
 
-These different components are tied together using multiset checks similar to the ones used in [PLONK](https://hackmd.io/@arielg/ByFgSDA7D).
+These different components are tied together using multiset checks similar to the ones used in [PLONK](https://hackmd.io/@relgabizon/ByFgSDA7D).
 
 All AIR constraints for Miden VM are described in detail in the [design](https://0xMiden.github.io/miden-vm/design/main.html) section of Miden VM documentation.
 

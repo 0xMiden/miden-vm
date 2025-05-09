@@ -9,7 +9,7 @@ use stdlib::StdLibrary;
 use crate::utils::print_mem_address;
 
 // This work is in continuation to the amazing work done by team `Scribe`
-// [here](https://github.com/ControlCplusControlV/Scribe/blob/main/transpiler/src/repl.rs#L8)
+// [here](https://github.com/ControlCplusControlV/Scribe/blob/93b46212b6920c4a9c472cd0c324fb00783d562c/bin/repl/src/repl.rs#L9)
 //
 // The Miden Read–eval–print loop (REPL) is a Miden shell that allows for quick and easy debugging
 // of Miden assembly. To use the repl, simply type "miden repl" after building it with feature

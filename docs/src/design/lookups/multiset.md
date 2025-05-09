@@ -1,6 +1,6 @@
 # Multiset checks
 
-A brief introduction to multiset checks can be found [here](https://hackmd.io/@arielg/ByFgSDA7D). In Miden VM, multiset checks are used to implement [virtual tables](#virtual-tables) and efficient [communication buses](./main.md#communication-buses-in-miden-vm).
+A brief introduction to multiset checks can be found [here](https://hackmd.io/@relgabizon/ByFgSDA7D). In Miden VM, multiset checks are used to implement [virtual tables](#virtual-tables) and efficient [communication buses](./main.md#communication-buses-in-miden-vm).
 
 ## Running product columns
 Although the multiset equality check can be thought of as comparing multiset equality between two vectors $a$ and $b$, in Miden VM it is implemented as a single running product column in the following way:

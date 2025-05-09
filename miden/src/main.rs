@@ -40,7 +40,7 @@ impl Cli {
         match &self.action {
             Actions::Analyze(analyze) => analyze.execute(),
             Actions::Compile(compile) => compile.execute(),
-            Actions::Bundle(compile) => compile.execute(),
+            Actions::Bundle(bundle) => bundle.execute(),
             Actions::Debug(debug) => debug.execute(),
             Actions::Prove(prove) => prove.execute(),
             Actions::Run(run) => run.execute(),
