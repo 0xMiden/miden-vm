@@ -11,7 +11,7 @@ mod trace;
 use trace::StackTrace;
 
 mod overflow;
-use overflow::OverflowTable;
+pub(crate) use overflow::OverflowTable;
 
 mod aux_trace;
 pub use aux_trace::AuxTraceBuilder;

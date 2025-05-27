@@ -23,6 +23,7 @@ use crate::{
 };
 
 mod memory;
+pub mod trace_state;
 
 // Ops
 mod circuit_eval;
@@ -61,6 +62,9 @@ const WORD_SIZE_FELT: Felt = Felt::new(4);
 
 /// The size of a double-word.
 const DOUBLE_WORD_SIZE: Felt = Felt::new(8);
+
+/// The number of rows per core trace fragment.
+pub const NUM_ROWS_PER_CORE_FRAGMENT: usize = 1024;
 
 /// A fast processor which doesn't generate any trace.
 ///
