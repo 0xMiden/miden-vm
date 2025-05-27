@@ -23,6 +23,7 @@ use crate::{
     err_ctx,
 };
 
+pub mod checkpoints;
 mod memory;
 
 // Ops
