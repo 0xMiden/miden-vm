@@ -7,6 +7,9 @@ use miden_vm::{Assembler, DefaultHost, StackInputs, internal::InputFile};
 use tokio::runtime::Runtime;
 use walkdir::WalkDir;
 
+/// The size of each trace fragment (in rows) when executing programs for trace generation.
+const TRACE_FRAGMENT_SIZE: usize = 1024;
+
 /// Benchmark the execution of all the masm examples in the `masm-examples` directory.
 fn program_execution_for_trace(c: &mut Criterion) {
     let mut group = c.benchmark_group("program_execution");
@@ -66,8 +69,10 @@ fn program_execution_for_trace(c: &mut Criterion) {
                             (host, program.clone(), processor)
                         },
                         |(mut host, program, processor)| async move {
-                            let out =
-                                processor.execute_for_trace(&program, &mut host).await.unwrap();
+                            let out = processor
+                                .execute_for_trace(&program, &mut host, TRACE_FRAGMENT_SIZE)
+                                .await
+                                .unwrap();
                             black_box(out);
                         },
                         BatchSize::SmallInput,
