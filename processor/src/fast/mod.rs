@@ -15,10 +15,10 @@ use crate::{
     ProcessState,
     chiplets::Ace,
     continuation_stack::{Continuation, ContinuationStack},
-    fast::{execution_tracer::ExecutionTracer, trace_state::TraceFragmentContext},
+    fast::execution_tracer::{ExecutionTracer, TraceFragmentContexts},
 };
 
-mod execution_tracer;
+pub mod execution_tracer;
 mod memory;
 mod operation;
 pub mod trace_state;
@@ -52,9 +52,6 @@ const STACK_BUFFER_SIZE: usize = 6850;
 /// 0's that were generated automatically to keep the stack depth at 16. In practice, if this
 /// occurs, it is most likely a bug.
 const INITIAL_STACK_TOP_IDX: usize = 250;
-
-/// The number of rows per core trace fragment.
-pub const NUM_ROWS_PER_CORE_FRAGMENT: usize = 1024;
 
 /// A fast processor which doesn't generate any trace.
 ///
@@ -314,8 +311,9 @@ impl FastProcessor {
         self,
         program: &Program,
         host: &mut impl AsyncHost,
-    ) -> Result<(ExecutionOutput, Vec<TraceFragmentContext>), ExecutionError> {
-        let mut tracer = ExecutionTracer::default();
+        fragment_size: usize,
+    ) -> Result<(ExecutionOutput, TraceFragmentContexts), ExecutionError> {
+        let mut tracer = ExecutionTracer::new(fragment_size);
         let execution_output = self.execute_with_tracer(program, host, &mut tracer).await?;
 
         Ok((execution_output, tracer.into_fragment_contexts()))
@@ -671,11 +669,12 @@ impl FastProcessor {
         self,
         program: &Program,
         host: &mut impl AsyncHost,
-    ) -> Result<(ExecutionOutput, Vec<TraceFragmentContext>), ExecutionError> {
+        fragment_size: usize,
+    ) -> Result<(ExecutionOutput, TraceFragmentContexts), ExecutionError> {
         // Create a new Tokio runtime and block on the async execution
         let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
 
-        rt.block_on(self.execute_for_trace(program, host))
+        rt.block_on(self.execute_for_trace(program, host, fragment_size))
     }
 
     /// Similar to [Self::execute_sync], but allows mutable access to the processor.
