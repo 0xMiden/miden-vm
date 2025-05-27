@@ -1741,6 +1741,18 @@ impl FastProcessor {
         Ok(stack_outputs)
     }
 
+    #[cfg(any(test, feature = "testing"))]
+    pub fn execute_for_trace_sync(
+        self,
+        program: &Program,
+        host: &mut impl AsyncHost,
+    ) -> Result<(StackOutputs, AdviceProvider, Vec<CoreTraceState>), ExecutionError> {
+        // Create a new Tokio runtime and block on the async execution
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+
+        rt.block_on(self.execute_for_trace(program, host))
+    }
+
     /// Similar to [Self::execute_sync], but allows mutable access to the processor.
     #[cfg(any(test, feature = "testing"))]
     pub fn execute_sync_mut(
