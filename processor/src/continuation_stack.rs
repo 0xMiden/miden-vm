@@ -39,6 +39,7 @@ pub enum Continuation {
 /// This allows the processor to execute a program iteratively in a loop rather than recursively
 /// traversing the nodes. It also allows the processor to pass the state of execution to another
 /// processor for further processing, which is useful for parallel execution of MAST forests.
+#[derive(Debug)]
 pub struct ContinuationStack {
     stack: Vec<Continuation>,
 }
