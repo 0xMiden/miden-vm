@@ -159,6 +159,11 @@ impl OverflowTable {
         }
     }
 
+    /// Returns the number of elements in the overflow stack for the current context.
+    pub fn num_elements_in_current_ctx(&self) -> usize {
+        self.get_current_overflow_stack().num_elements()
+    }
+
     // PUBLIC MUTATORS
     // --------------------------------------------------------------------------------------------
 
