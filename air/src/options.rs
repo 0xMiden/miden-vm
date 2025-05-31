@@ -25,8 +25,8 @@ impl ProvingOptions {
         8,
         16,
         FieldExtension::Quadratic,
-        8,
-        255,
+        2,
+        127,
         BatchingMethod::Algebraic,
         BatchingMethod::Algebraic,
     );
@@ -37,8 +37,8 @@ impl ProvingOptions {
         16,
         21,
         FieldExtension::Cubic,
-        8,
-        255,
+        2,
+        127,
         BatchingMethod::Algebraic,
         BatchingMethod::Algebraic,
     );
