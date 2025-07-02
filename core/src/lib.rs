@@ -50,7 +50,6 @@ assertion failed: `(left matches right)`
 }
 
 pub mod chiplets;
-pub mod debuginfo;
 pub mod errors;
 
 mod program;
@@ -58,6 +57,7 @@ pub use program::{Program, ProgramInfo};
 
 mod kernel;
 pub use kernel::Kernel;
+pub use miden_core_diagnostics::debuginfo;
 pub use miden_crypto::{EMPTY_WORD, ONE, WORD_SIZE, Word, ZERO};
 pub mod crypto {
     pub mod merkle {

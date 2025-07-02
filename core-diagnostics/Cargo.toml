@@ -1,0 +1,58 @@
+[package]
+name = "miden-core-diagnostics"
+version = "0.15.0"
+description = "Diagnostic infrastructure used in the Miden assembler and VM"
+documentation = "https://docs.rs/miden-core-diagnostics/0.15.0"
+readme = "README.md"
+categories = ["compilers", "no-std"]
+keywords = ["diagnostic", "error", "span"]
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+[features]
+default = ["std"]
+std = [
+    "dep:parking_lot",
+    "memchr/std",
+    "miette/fancy",
+    "miette/std",
+    "miden-crypto/std",
+    "miden-formatting/std",
+    "serde/std",
+    "thiserror/std",
+]
+serde = ["dep:serde", "dep:serde_spanned", "serde_spanned?/serde"]
+
+[dependencies]
+lock_api = { version = "0.4", features = ["arc_lock"] }
+memchr = { version = "2.7", default-features = false }
+miette = { package = "miden-miette", version = "8.0", default-features = false, features = [
+    "fancy-no-syscall",
+    "derive",
+] }
+miden-crypto.workspace = true
+miden-formatting.workspace = true
+parking_lot = { version = "0.12", optional = true }
+paste = "1.0"
+serde = { workspace = true, optional = true }
+serde_spanned = { version = "0.6", optional = true, default-features = false }
+smallvec.workspace = true
+thiserror.workspace = true
+tracing = { version = "0.1", default-features = false, features = [
+    "attributes",
+] }
+
+[dev-dependencies]
+loom = "0.7"
+proptest = "1.6"
+
+[target.'cfg(loom)'.dependencies]
+loom = "0.7"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(loom)'] }

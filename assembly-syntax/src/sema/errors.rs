@@ -1,7 +1,10 @@
 use alloc::{sync::Arc, vec::Vec};
 use core::fmt;
 
-use crate::{SourceFile, SourceSpan, diagnostics::Diagnostic};
+use crate::{
+    SourceFile, SourceSpan,
+    diagnostics::{Diagnostic, miette},
+};
 
 /// The high-level error type for all semantic analysis errors.
 ///

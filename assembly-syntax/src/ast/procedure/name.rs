@@ -15,7 +15,7 @@ use miden_core::utils::{
 use crate::{
     LibraryNamespace, LibraryPath, SourceSpan, Span, Spanned,
     ast::{CaseKindError, Ident, IdentError},
-    diagnostics::{IntoDiagnostic, Report},
+    diagnostics::{IntoDiagnostic, Report, miette},
 };
 
 // QUALIFIED PROCEDURE NAME

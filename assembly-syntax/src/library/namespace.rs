@@ -8,7 +8,11 @@ use miden_core::utils::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
 
-use crate::{LibraryPath, Span, ast::Ident, diagnostics::Diagnostic};
+use crate::{
+    LibraryPath, Span,
+    ast::Ident,
+    diagnostics::{Diagnostic, miette},
+};
 
 // LIBRARY NAMESPACE
 // ================================================================================================

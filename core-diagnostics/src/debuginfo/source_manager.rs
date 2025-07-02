@@ -9,6 +9,8 @@ use super::*;
 /// A [SourceId] represents the index/identifier associated with a unique source file in a
 /// [SourceManager] implementation.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
 pub struct SourceId(u32);
 
 impl Default for SourceId {
@@ -255,7 +257,7 @@ impl<T: ?Sized + SourceManager> SourceManagerExt for T {}
 // DEFAULT SOURCE MANAGER
 // ================================================================================================
 
-use crate::utils::sync::RwLock;
+use crate::sync::RwLock;
 
 #[derive(Debug, Default)]
 pub struct DefaultSourceManager(RwLock<DefaultSourceManagerImpl>);

@@ -9,19 +9,30 @@ extern crate std;
 pub use miden_core::{Felt, FieldElement, StarkField, Word, prettier, utils::DisplayHex};
 
 pub mod ast;
-pub mod diagnostics;
 pub mod library;
 mod parse;
 pub mod parser;
 mod sema;
 pub mod testing;
 
+pub mod diagnostics {
+    pub use miden_core_diagnostics::{
+        debuginfo::{
+            DefaultSourceManager, SourceContent, SourceFile, SourceId, SourceLanguage,
+            SourceManager, SourceSpan, Span, Spanned, Uri,
+        },
+        *,
+    };
+}
+
+pub use miden_core_diagnostics::{
+    Report,
+    debuginfo::{DefaultSourceManager, SourceFile, SourceManager, SourceSpan, Span, Spanned},
+    report,
+};
+
 #[doc(hidden)]
 pub use self::{
-    diagnostics::{
-        DefaultSourceManager, Report, SourceFile, SourceId, SourceManager, SourceSpan, Span,
-        Spanned,
-    },
     library::{
         KernelLibrary, Library, LibraryError, LibraryNamespace, LibraryPath, LibraryPathComponent,
         PathError, Version, VersionError,

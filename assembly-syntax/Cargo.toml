@@ -18,9 +18,8 @@ exclude.workspace = true
 default = ["std"]
 std = [
     "aho-corasick/std",
-    "miette/fancy",
-    "miette/std",
     "miden-core/std",
+    "miden-core-diagnostics/std",
     "thiserror/std",
 ]
 arbitrary = ["dep:proptest", "dep:proptest-derive"]
@@ -31,11 +30,9 @@ logging = ["dep:env_logger"]
 aho-corasick = { version = "1.1", default-features = false }
 env_logger = { version = "0.11", optional = true }
 lalrpop-util = { version = "0.22", default-features = false }
-log = "0.4"
-miette = { package = "miden-miette", version = "8.0", default-features = false, features = [
-    "fancy-no-syscall",
-    "derive",
-] }
+log.workspace = true
+miden-core.workspace = true
+miden-core-diagnostics.workspace = true
 proptest = { version = "1.6", optional = true, default-features = false, features = [
     "no_std",
     "alloc",
@@ -45,18 +42,8 @@ regex = { version = "1.10", default-features = false, features = [
     "unicode",
     "perf",
 ] }
-smallvec = { version = "1.13", features = [
-    "union",
-    "const_generics",
-    "const_new",
-] }
+smallvec.workspace = true
 thiserror.workspace = true
-tracing = { version = "0.1", default-features = false, features = [
-    "attributes",
-] }
-miden-core = { path = "../core", version = "0.15", default-features = false, features = [
-    "diagnostics",
-] }
 
 [dev-dependencies]
 env_logger = "0.11"

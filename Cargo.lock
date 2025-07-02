@@ -1110,7 +1110,7 @@ dependencies = [
  "lalrpop-util",
  "log",
  "miden-core",
- "miden-miette",
+ "miden-core-diagnostics",
  "pretty_assertions",
  "proptest",
  "proptest-derive",
@@ -1118,11 +1118,26 @@ dependencies = [
  "rustc_version 0.4.1",
  "smallvec",
  "thiserror 2.0.12",
- "tracing",
 ]
 
 [[package]]
 name = "miden-core"
+version = "0.15.0"
+dependencies = [
+ "miden-core-diagnostics",
+ "miden-crypto",
+ "miden-formatting",
+ "num-derive",
+ "num-traits",
+ "proptest",
+ "thiserror 2.0.12",
+ "winter-math",
+ "winter-rand-utils",
+ "winter-utils",
+]
+
+[[package]]
+name = "miden-core-diagnostics"
 version = "0.15.0"
 dependencies = [
  "lock_api",
@@ -1131,16 +1146,14 @@ dependencies = [
  "miden-crypto",
  "miden-formatting",
  "miden-miette",
- "num-derive",
- "num-traits",
  "parking_lot",
  "paste",
  "proptest",
  "serde",
+ "serde_spanned",
+ "smallvec",
  "thiserror 2.0.12",
- "winter-math",
- "winter-rand-utils",
- "winter-utils",
+ "tracing",
 ]
 
 [[package]]
@@ -1156,6 +1169,7 @@ dependencies = [
  "num-complex",
  "rand",
  "rand_core",
+ "serde",
  "sha3",
  "thiserror 2.0.12",
  "winter-crypto",
@@ -3122,6 +3136,7 @@ version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "147699a1350037b39c3fbbb993d944532e461fe3e46537ef7c36742ffc1a3498"
 dependencies = [
+ "serde",
  "winter-utils",
 ]
 

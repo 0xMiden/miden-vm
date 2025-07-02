@@ -343,7 +343,7 @@ mod tests {
     use miden_core::assert_matches;
 
     use super::*;
-    use crate::SourceId;
+    use crate::diagnostics::SourceId;
 
     // This test checks the lexer behavior with regard to tokenizing `exp(.u?[\d]+)?`
     #[test]

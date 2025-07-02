@@ -5,7 +5,7 @@ use alloc::{
 use core::{fmt, ops::Range};
 
 use super::{ParseError, SourceSpan};
-use crate::{SourceId, diagnostics::Diagnostic};
+use crate::diagnostics::{Diagnostic, SourceId, miette};
 
 // LITERAL ERROR KIND
 // ================================================================================================

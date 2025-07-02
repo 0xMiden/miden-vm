@@ -7,7 +7,7 @@ use super::{
 };
 use crate::{
     Felt,
-    diagnostics::{ByteOffset, SourceId, SourceSpan},
+    diagnostics::{SourceId, SourceSpan, debuginfo::ByteOffset},
 };
 
 /// The value produced by the [Lexer] when iterated

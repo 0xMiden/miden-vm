@@ -5,6 +5,9 @@ use core::{
     ops::{Bound, Deref, DerefMut, Index, Range, RangeBounds},
 };
 
+#[cfg(feature = "std")]
+use serde::{Deserialize, Serialize};
+
 use super::{ByteIndex, ByteOffset, SourceId};
 use crate::utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
 
@@ -48,6 +51,34 @@ pub struct Span<T> {
     spanned: T,
 }
 
+#[cfg(feature = "serde")]
+impl<'de, T: serde::Deserialize<'de>> serde::Deserialize<'de> for Span<T> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let spanned = serde_spanned::Spanned::<T>::deserialize(deserializer)?;
+        let span = spanned.span();
+        let start = span.start as u32;
+        let end = span.end as u32;
+
+        Ok(Self {
+            span: SourceSpan::from(start..end),
+            spanned: spanned.into_inner(),
+        })
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<T: serde::Serialize> serde::Serialize for Span<T> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        T::serialize(&self.spanned, serializer)
+    }
+}
+
 impl<T> Spanned for Span<T> {
     fn span(&self) -> SourceSpan {
         self.span
@@ -61,6 +92,15 @@ impl<T: Clone> Clone for Span<T> {
         Self {
             span: self.span,
             spanned: self.spanned.clone(),
+        }
+    }
+}
+
+impl<T: Default> Default for Span<T> {
+    fn default() -> Self {
+        Self {
+            span: SourceSpan::UNKNOWN,
+            spanned: T::default(),
         }
     }
 }
@@ -127,6 +167,13 @@ impl<T> Span<T> {
     /// Gets a new [Span] that borrows the inner value.
     pub fn as_ref(&self) -> Span<&T> {
         Span { span: self.span, spanned: &self.spanned }
+    }
+
+    /// Manually set the source id for the span of this item
+    ///
+    /// See also [SourceSpan::set_source_id].
+    pub fn set_source_id(&mut self, id: SourceId) {
+        self.span.set_source_id(id);
     }
 
     /// Shifts the span right by `count` units
@@ -204,8 +251,10 @@ impl<T: fmt::Display> fmt::Display for Span<T> {
     }
 }
 
-impl<T: crate::prettier::PrettyPrint> crate::prettier::PrettyPrint for Span<T> {
-    fn render(&self) -> crate::prettier::Document {
+impl<T: miden_formatting::prettier::PrettyPrint> miden_formatting::prettier::PrettyPrint
+    for Span<T>
+{
+    fn render(&self) -> miden_formatting::prettier::Document {
         self.spanned.render()
     }
 }
@@ -299,7 +348,9 @@ impl<T: Deserializable> Deserializable for Span<T> {
 /// messages, whereas line/column information is useful at a glance in debug output, it is harder
 /// to produce nice errors with it compared to this representation.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 pub struct SourceSpan {
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "SourceId::is_unknown"))]
     source_id: SourceId,
     start: ByteIndex,
     end: ByteIndex,
@@ -363,6 +414,16 @@ impl SourceSpan {
         self.source_id
     }
 
+    /// Manually set the [SourceId] associated with this source span
+    ///
+    /// This is useful in cases where the range of the span is known, but the source id itself
+    /// is not available yet, due to scope or some other limitation. In such cases you might wish
+    /// to visit parsed objects once the source id is available, and update all of their spans
+    /// accordingly.
+    pub fn set_source_id(&mut self, id: SourceId) {
+        self.source_id = id;
+    }
+
     /// Gets the offset in bytes corresponding to the start of this span (inclusive).
     #[inline(always)]
     pub fn start(&self) -> ByteIndex {
@@ -399,7 +460,6 @@ impl SourceSpan {
     }
 }
 
-#[cfg(feature = "diagnostics")]
 impl From<SourceSpan> for miette::SourceSpan {
     fn from(span: SourceSpan) -> Self {
         Self::new(miette::SourceOffset::from(span.start().to_usize()), span.len())
@@ -434,6 +494,24 @@ impl From<SourceSpan> for Range<usize> {
     #[inline(always)]
     fn from(span: SourceSpan) -> Self {
         span.into_slice_index()
+    }
+}
+
+impl From<Range<u32>> for SourceSpan {
+    #[inline]
+    fn from(range: Range<u32>) -> Self {
+        Self::new(SourceId::UNKNOWN, range)
+    }
+}
+
+impl From<Range<ByteIndex>> for SourceSpan {
+    #[inline]
+    fn from(range: Range<ByteIndex>) -> Self {
+        Self {
+            source_id: SourceId::UNKNOWN,
+            start: range.start,
+            end: range.end,
+        }
     }
 }
 

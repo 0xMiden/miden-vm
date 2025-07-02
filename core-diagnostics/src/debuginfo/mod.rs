@@ -8,6 +8,8 @@ use alloc::{string::String, sync::Arc};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "serde")]
+pub use serde_spanned;
 
 #[cfg(feature = "std")]
 pub use self::source_manager::SourceManagerExt;
@@ -58,7 +60,7 @@ impl Uri {
         }
     }
 
-    /// Returns the authority portion of this URI, if present.
+    /// Returns the scheme portion of this URI, if present.
     pub fn authority(&self) -> Option<&str> {
         let uri = self.0.as_ref();
         let (_, rest) = uri.split_once("//")?;

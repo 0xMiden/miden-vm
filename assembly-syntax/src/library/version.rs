@@ -7,7 +7,7 @@ use miden_core::utils::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
 
-use crate::diagnostics::Diagnostic;
+use crate::diagnostics::{Diagnostic, miette};
 
 /// Represents a _Semantic Versioning_ version string, without pre-releases.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, PartialOrd, Ord, Hash)]

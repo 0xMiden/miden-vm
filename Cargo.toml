@@ -4,6 +4,7 @@ members = [
     "assembly",
     "assembly-syntax",
     "core",
+    "core-diagnostics",
     "miden-vm",
     "package",
     "processor",
@@ -37,4 +38,22 @@ debug-assertions = true
 overflow-checks = true
 
 [workspace.dependencies]
+log = "0.4"
+miden-assembly = { path = "./assembly", version = "0.15.0", default-features = false }
+miden-assembly-syntax = { path = "./assembly-syntax", version = "0.15.0", default-features = false }
+miden-core = { path = "./core", version = "0.15.0", default-features = false }
+miden-core-diagnostics = { path = "./core-diagnostics", version = "0.15.0", default-features = false }
+miden-mast-package = { path = "./package", version = "0.15.0", default-features = false }
+miden-crypto = { version = "0.15", default-features = false }
+miden-formatting = { version = "0.1", default-features = false }
+serde = { version = "1.0", default-features = false, features = [
+    "alloc",
+    "derive",
+    "rc",
+] }
+smallvec = { version = "1.13", default-features = false, features = [
+    "union",
+    "const_generics",
+    "const_new",
+] }
 thiserror = { version = "2.0", default-features = false }

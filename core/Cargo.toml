@@ -19,48 +19,27 @@ doctest = false
 
 [features]
 default = ["std"]
-diagnostics = ["dep:miette"]
-serde = ["dep:serde"]
 std = [
-    "dep:parking_lot",
-    "memchr/std",
     "miden-crypto/std",
     "miden-formatting/std",
     "math/std",
-    "serde/std",
     "winter-utils/std",
     "thiserror/std",
 ]
+serde = ["miden-core-diagnostics/serde", "miden-crypto/serde", "math/serde"]
+# DEPRECATED
+diagnostics = []
 
 [dependencies]
-lock_api = { version = "0.4", features = ["arc_lock"] }
 math = { package = "winter-math", version = "0.13", default-features = false }
-memchr = { version = "2.7", default-features = false }
 miden-crypto = { version = "0.15", default-features = false }
-miden-formatting = { version = "0.1", default-features = false }
-miette = { package = "miden-miette", version = "8.0", default-features = false, optional = true, features = [
-    "fancy-no-syscall",
-    "derive",
-] }
+miden-formatting.workspace = true
+miden-core-diagnostics.workspace = true
 num-derive = { version = "0.4", default-features = false }
 num-traits = { version = "0.2", default-features = false }
-parking_lot = { version = "0.12", optional = true }
-paste = "1.0"
-serde = { version = "1.0", optional = true, default-features = false, features = [
-    "alloc",
-    "derive",
-    "rc",
-] }
-thiserror = { workspace = true }
-winter-utils = { package = "winter-utils", version = "0.13", default-features = false }
+thiserror.workspace = true
+winter-utils = { version = "0.13", default-features = false }
 
 [dev-dependencies]
-loom = "0.7"
 proptest = "1.6"
 rand-utils = { package = "winter-rand-utils", version = "0.13" }
-
-[target.'cfg(loom)'.dependencies]
-loom = "0.7"
-
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(loom)'] }

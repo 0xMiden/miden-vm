@@ -25,23 +25,15 @@ logging = ["dep:env_logger"]
 
 [dependencies]
 env_logger = { version = "0.11", optional = true }
-log = "0.4"
-miden-core = { path = "../core", version = "0.15", default-features = false, features = [
-    "diagnostics",
-] }
-miden-assembly-syntax = { path = "../assembly-syntax", version = "0.15", default-features = false }
-miden-mast-package = { path = "../package", version = "0.15", default-features = false }
-smallvec = { version = "1.13", features = [
-    "union",
-    "const_generics",
-    "const_new",
-] }
+log.workspace = true
+miden-core.workspace = true
+miden-assembly-syntax.workspace = true
+miden-mast-package.workspace = true
+smallvec.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
-miden-mast-package = { path = "../package", version = "0.15", features = [
-    "arbitrary",
-] }
+miden-mast-package = { workspace = true, features = ["arbitrary"] }
 pretty_assertions = "1.4"
 proptest = { version = "1.6", default-features = false, features = [
     "no_std",

@@ -26,8 +26,8 @@ mod tests;
 // Re-exported for downstream crates
 pub use miden_assembly_syntax::{
     DefaultSourceManager, KernelLibrary, Library, LibraryNamespace, LibraryPath, ModuleParser,
-    Parse, ParseOptions, Report, SourceFile, SourceId, SourceManager, SourceSpan, Span, Spanned,
-    ast, diagnostics, library, report,
+    Parse, ParseOptions, Report, SourceFile, SourceManager, SourceSpan, Span, Spanned, ast,
+    diagnostics, diagnostics::SourceId, library, report,
 };
 /// Syntax components for the Miden Assembly AST
 /// Merkelized abstract syntax tree (MAST) components defining Miden VM programs.
