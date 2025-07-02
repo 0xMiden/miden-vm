@@ -353,6 +353,88 @@ end
 # GET
 # =================================================================================================
 
+
+#! Inputs:
+#!   Operand stack: [pair_count, K, R]
+#!   Advice stack:  [V1, K2, V2, K2, ...]
+proc.get_multi_leaf_value
+    dup
+    # => [pair_count, pair_count, K, R]
+    movdn.9
+    # => [pair_count, K, R, pair_count]
+
+    gt.0
+    # => [has_more, K, R, pair_count]
+    while.true
+        # => [K, R, pair_count]
+
+        # Get the next pair from the advice stack.
+        adv_push.8
+        # => [V', K', K, R, pair_count]
+
+        # Get the pair's key so we can compare it against the caller-provided key.
+
+        movupw.2
+        # => [K, V', K', R, pair_count]
+
+        movupw.2
+        # => [K', K, V', R, pair_count]
+
+        eqw
+        # => [key_eq, K', K, V', R, pair_count]
+
+        movdn.4
+        # => [K', key_eq, K, V', R, pair_count]
+
+        dropw
+        # => [key_eq, K, V', R, pair_count]
+
+        if.true
+            # => [K, V', R, pair_count]
+
+            # We've found the right pair. Cleanup our stack, and prepare stack outputs.
+
+            # We no longer need the original key.
+            dropw # => [V', R, pair_count]
+
+            push.0
+            # => [has_more_pairs = 0, V', R, pair_count]
+            #movup.9 add.1 movdn.9
+        else
+            # => [V', K, R, pair_count]
+
+            # Discard the pair-value from the advice provider, and prepare the stack
+            # for the next loop condition.
+            swapw dropw
+            # => [K, R, pair_count]
+
+            # Decrement pair_count.
+            movup.8 sub.1 movdn.8
+            # => [K, R, pair_count]
+
+            # Prepare stack for the next while loop condition.
+            dup.8 gt.0
+
+            # => [has_more_pairs, K, R, pair_count]
+        end
+    end # End while
+
+    # While loop over.
+    # => [?, R, pair_count]
+
+    # Check pair_count. It will tell us the meaining of the first stack word.
+    movup.8 eq.0
+    if.true
+        # => [K, R]
+
+        # Value not found for this key.
+        padw swapw dropw
+    else
+        # => [V, R]
+        nop
+    end
+end
+
 #! Returns the value located under the specified key in the Sparse Merkle Tree defined by the
 #! specified root.
 #!
@@ -431,9 +513,21 @@ export.get
             hmerge assert_eqw
             # => [V, R]
         else
-            # Multiple kv-pair case
-            # TODO (fail for now)
-            push.1 assertz
+            # => [leaf_size, NV, K, R]
+
+            movdn.12
+            # => [NV, K, R, leaf_size]
+
+            dropw # We don't care about the node value anymore.
+            # => [K, R, leaf_size]
+
+            # Get pair count from leaf size.
+            movup.8 div.8
+            # => [pair_count, K, R]
+
+            exec.get_multi_leaf_value
+
+            # => [V, R]
         end
     end
 end
