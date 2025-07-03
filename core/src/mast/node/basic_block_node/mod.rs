@@ -40,11 +40,11 @@ pub const BATCH_SIZE: usize = 8;
 /// created according to these rules:
 ///
 /// - A basic block contains one or more batches.
-/// - A batch contains exactly 8 groups.
-/// - A group contains exactly 9 operations or 1 immediate value.
+/// - A batch contains exactly 1, 2, 4 or 8 groups.
+/// - A group contains between 1 and 9 operations or 1 immediate value.
 /// - NOOPs are used to fill a group or batch when necessary.
 /// - An immediate value follows the operation that requires it, using the next available group in
-///   the batch. If there are no batches available in the group, then both the operation and its
+///   the batch. If there are no groups available in the batch, then both the operation and its
 ///   immediate are moved to the next batch.
 ///
 /// Example: 8 pushes result in two operation batches:
@@ -427,6 +427,12 @@ fn batch_ops(ops: Vec<Operation>) -> Vec<OpBatch> {
         batch_acc.add_op(Operation::Noop);
         batches.push(batch_acc.into_batch());
     }
+
+    assert!(
+        batches.iter().all(|b| {
+            b.num_groups() == 1 || b.num_groups() == 2 || b.num_groups() == 4 || b.num_groups() == 8
+        }) && !batches.is_empty()
+    );
 
     batches
 }
