@@ -3,19 +3,20 @@ use super::*;
 // TEST DATA
 // ================================================================================================
 
+const fn word(e0: u64, e1: u64, e2: u64, e3: u64) -> Word {
+    Word::new([Felt::new(e0), Felt::new(e1), Felt::new(e2), Felt::new(e3)])
+}
+
 /// Note: We never insert at the same key twice. This is so that the `smt::get` test can loop over
 /// leaves, get the associated value, and compare. We test inserting at the same key twice in tests
 /// that use different data.
 const LEAVES: [(Word, Word); 2] = [
     (
-        Word::new([Felt::new(101), Felt::new(102), Felt::new(103), Felt::new(104)]),
-        Word::new([Felt::new(1_u64), Felt::new(2_u64), Felt::new(3_u64), Felt::new(4_u64)]),
+        word(101, 102, 103, 104),
+        // Most significant Felt differs from previous
+        word(1_u64, 2_u64, 3_u64, 4_u64),
     ),
-    // Most significant Felt differs from previous
-    (
-        Word::new([Felt::new(105), Felt::new(106), Felt::new(107), Felt::new(108)]),
-        Word::new([Felt::new(5_u64), Felt::new(6_u64), Felt::new(7_u64), Felt::new(8_u64)]),
-    ),
+    (word(105, 106, 107, 108), word(5_u64, 6_u64, 7_u64, 8_u64)),
 ];
 
 /// Tests `get` on every key present in the SMT, as well as an empty leaf
