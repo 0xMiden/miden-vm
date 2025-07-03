@@ -358,13 +358,14 @@ end
 #!   Operand stack: [pair_count, K, R]
 #!   Advice stack:  [V1, K2, V2, K2, ...]
 proc.get_multi_leaf_value
-    dup
-    # => [pair_count, pair_count, K, R]
-    movdn.9
+    dup movdn.9
     # => [pair_count, K, R, pair_count]
 
     gt.0
     # => [has_more, K, R, pair_count]
+    # The loop should always run at least once, or this procedure's invariants are invalid.
+    assert.err="unreachable: get_multi_leaf_value called with 0 pairs"
+    push.1
     while.true
         # => [K, R, pair_count]
 
@@ -374,19 +375,13 @@ proc.get_multi_leaf_value
 
         # Get the pair's key so we can compare it against the caller-provided key.
 
-        movupw.2
-        # => [K, V', K', R, pair_count]
-
-        movupw.2
+        movupw.2 movupw.2
         # => [K', K, V', R, pair_count]
 
         eqw
         # => [key_eq, K', K, V', R, pair_count]
 
-        movdn.4
-        # => [K', key_eq, K, V', R, pair_count]
-
-        dropw
+        movdn.4 dropw
         # => [key_eq, K, V', R, pair_count]
 
         if.true
@@ -399,7 +394,6 @@ proc.get_multi_leaf_value
 
             push.0
             # => [has_more_pairs = 0, V', R, pair_count]
-            #movup.9 add.1 movdn.9
         else
             # => [V', K, R, pair_count]
 
@@ -412,12 +406,12 @@ proc.get_multi_leaf_value
             movup.8 sub.1 movdn.8
             # => [K, R, pair_count]
 
-            # Prepare stack for the next while loop condition.
+            # Prepare stack for the next loop condition.
             dup.8 gt.0
 
             # => [has_more_pairs, K, R, pair_count]
         end
-    end # End while
+    end
 
     # While loop over.
     # => [?, R, pair_count]
@@ -515,13 +509,11 @@ export.get
         else
             # => [leaf_size, NV, K, R]
 
-            movdn.12
-            # => [NV, K, R, leaf_size]
-
-            dropw # We don't care about the node value anymore.
+            # We don't care about the node's hash anymore.
+            movdn.12 dropw
             # => [K, R, leaf_size]
 
-            # Get pair count from leaf size.
+            # Each pair is 8 fields.
             movup.8 div.8
             # => [pair_count, K, R]
 
