@@ -130,14 +130,9 @@ impl AdviceProvider {
         Ok(())
     }
 
-    /// Returns a slice of length `length` from the top of the advice stack.
-    /// If length = 0 returns the whole advice stack.
-    pub fn peek_stack(&self, length: usize) -> &[Felt] {
-        if length == 0 {
-            &self.stack
-        } else {
-            &self.stack[0..length]
-        }
+    /// Returns the current stack.
+    pub fn stack(&self) -> &[Felt] {
+        &self.stack
     }
 
     // ADVICE MAP
