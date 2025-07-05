@@ -38,14 +38,19 @@ debug-assertions = true
 overflow-checks = true
 
 [workspace.dependencies]
-log = "0.4"
+# Workspace crates
 miden-assembly = { path = "./assembly", version = "0.15.0", default-features = false }
 miden-assembly-syntax = { path = "./assembly-syntax", version = "0.15.0", default-features = false }
 miden-core = { path = "./core", version = "0.15.0", default-features = false }
 miden-core-diagnostics = { path = "./core-diagnostics", version = "0.15.0", default-features = false }
 miden-mast-package = { path = "./package", version = "0.15.0", default-features = false }
+
+# Miden crates
 miden-crypto = { version = "0.15", default-features = false }
 miden-formatting = { version = "0.1", default-features = false }
+
+# Third-party crates
+log = "0.4"
 serde = { version = "1.0", default-features = false, features = [
     "alloc",
     "derive",
