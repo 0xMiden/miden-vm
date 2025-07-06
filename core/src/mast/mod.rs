@@ -18,7 +18,7 @@ pub use node::{
 
 use crate::{
     AdviceMap, Decorator, DecoratorList, Felt, Operation, Word,
-    utils::{ByteWriter, DeserializationError, Serializable},
+    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
 mod serialization;
@@ -646,6 +646,22 @@ impl fmt::Display for MastNodeId {
     }
 }
 
+impl Deserializable for MastNodeId {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        source.read_u32().map(Self)
+    }
+}
+
+impl Serializable for MastNodeId {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.0.write_into(target)
+    }
+
+    fn get_size_hint(&self) -> usize {
+        self.0.get_size_hint()
+    }
+}
+
 // ITERATOR
 
 /// Iterates over all the nodes a root depends on, in pre-order. The iteration can include other
@@ -747,6 +763,10 @@ impl fmt::Display for DecoratorId {
 impl Serializable for DecoratorId {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         self.0.write_into(target)
+    }
+
+    fn get_size_hint(&self) -> usize {
+        self.0.get_size_hint()
     }
 }
 

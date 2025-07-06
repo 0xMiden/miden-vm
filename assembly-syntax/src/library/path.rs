@@ -491,14 +491,18 @@ impl FromStr for LibraryPath {
 
 impl Serializable for LibraryPath {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        let len = self.byte_len();
+        let len_u16: u16 = self.byte_len().try_into().expect("path too long");
 
-        target.write_u16(len as u16);
+        len_u16.write_into(target);
         target.write_bytes(self.inner.ns.as_str().as_bytes());
         for component in self.inner.components.iter() {
             target.write_bytes(b"::");
             target.write_bytes(component.as_str().as_bytes());
         }
+    }
+
+    fn get_size_hint(&self) -> usize {
+        0u16.get_size_hint() + self.byte_len()
     }
 }
 

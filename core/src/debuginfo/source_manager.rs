@@ -2,6 +2,7 @@ use alloc::{boxed::Box, collections::BTreeMap, string::String, sync::Arc, vec::V
 use core::{error::Error, fmt::Debug};
 
 use super::*;
+use crate::utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
 
 // SOURCE ID
 // ================================================================================================
@@ -57,6 +58,22 @@ impl TryFrom<usize> for SourceId {
             Ok(n) if n < u32::MAX => Ok(Self(n)),
             _ => Err(()),
         }
+    }
+}
+
+impl Serializable for SourceId {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.0.write_into(target)
+    }
+
+    fn get_size_hint(&self) -> usize {
+        self.0.get_size_hint()
+    }
+}
+
+impl Deserializable for SourceId {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        source.read_u32().map(Self)
     }
 }
 

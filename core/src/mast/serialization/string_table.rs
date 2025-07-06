@@ -63,6 +63,12 @@ impl Serializable for StringTable {
         table.write_into(target);
         data.write_into(target);
     }
+
+    fn get_size_hint(&self) -> usize {
+        let Self { table, data, refc_strings: _ } = self;
+
+        table.get_size_hint() + data.get_size_hint()
+    }
 }
 
 impl Deserializable for StringTable {

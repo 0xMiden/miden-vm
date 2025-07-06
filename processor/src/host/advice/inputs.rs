@@ -142,6 +142,12 @@ impl Serializable for AdviceInputs {
         map.write_into(target);
         store.write_into(target);
     }
+
+    fn get_size_hint(&self) -> usize {
+        let Self { stack, map, store } = self;
+
+        stack.get_size_hint() + map.get_size_hint() + store.get_size_hint()
+    }
 }
 
 impl Deserializable for AdviceInputs {

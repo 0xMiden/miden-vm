@@ -127,8 +127,15 @@ impl fmt::Display for QualifiedProcedureName {
 
 impl Serializable for QualifiedProcedureName {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        self.module.write_into(target);
-        self.name.write_into(target);
+        let Self { span: _, module, name } = self;
+
+        module.write_into(target);
+        name.write_into(target);
+    }
+
+    fn get_size_hint(&self) -> usize {
+        let Self { span: _, module, name } = self;
+        module.get_size_hint() + name.get_size_hint()
     }
 }
 
@@ -368,6 +375,10 @@ fn is_valid_unquoted_identifier_char(c: char) -> bool {
 impl Serializable for ProcedureName {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         self.as_str().write_into(target)
+    }
+
+    fn get_size_hint(&self) -> usize {
+        self.as_str().get_size_hint()
     }
 }
 

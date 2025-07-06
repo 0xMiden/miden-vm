@@ -172,13 +172,13 @@ impl Serializable for Library {
         let Self { digest: _, exports, mast_forest } = self;
 
         mast_forest.write_into(target);
+        exports.write_into(target);
+    }
 
-        target.write_usize(exports.len());
-        for (proc_name, proc_node_id) in exports {
-            proc_name.module.write_into(target);
-            proc_name.name.write_into(target);
-            target.write_u32(proc_node_id.as_u32());
-        }
+    fn get_size_hint(&self) -> usize {
+        let Self { digest: _, exports, mast_forest } = self;
+
+        mast_forest.get_size_hint() + exports.get_size_hint()
     }
 }
 
@@ -346,6 +346,12 @@ impl Serializable for KernelLibrary {
         let Self { kernel: _, kernel_info: _, library } = self;
 
         library.write_into(target);
+    }
+
+    fn get_size_hint(&self) -> usize {
+        let Self { kernel: _, kernel_info: _, library } = self;
+
+        library.get_size_hint()
     }
 }
 

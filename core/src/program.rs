@@ -153,9 +153,17 @@ impl Program {
 
 impl Serializable for Program {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        self.mast_forest.write_into(target);
-        self.kernel.write_into(target);
-        target.write_u32(self.entrypoint.as_u32());
+        let Self { mast_forest, entrypoint, kernel } = self;
+
+        mast_forest.write_into(target);
+        kernel.write_into(target);
+        entrypoint.as_u32().write_into(target);
+    }
+
+    fn get_size_hint(&self) -> usize {
+        let Self { mast_forest, entrypoint, kernel } = self;
+
+        mast_forest.get_size_hint() + kernel.get_size_hint() + entrypoint.get_size_hint()
     }
 }
 
@@ -247,8 +255,16 @@ impl From<Program> for ProgramInfo {
 
 impl Serializable for ProgramInfo {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        self.program_hash.write_into(target);
-        self.kernel.write_into(target);
+        let Self { program_hash, kernel } = self;
+
+        program_hash.write_into(target);
+        kernel.write_into(target);
+    }
+
+    fn get_size_hint(&self) -> usize {
+        let Self { program_hash, kernel } = self;
+
+        program_hash.get_size_hint() + kernel.get_size_hint()
     }
 }
 

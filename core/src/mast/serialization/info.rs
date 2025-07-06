@@ -90,6 +90,12 @@ impl Serializable for MastNodeInfo {
         ty.write_into(target);
         digest.write_into(target);
     }
+
+    fn get_size_hint(&self) -> usize {
+        let Self { ty, digest } = self;
+
+        ty.get_size_hint() + digest.get_size_hint()
+    }
 }
 
 impl Deserializable for MastNodeInfo {
@@ -210,6 +216,10 @@ impl Serializable for MastNodeType {
 
         let value = (discriminant << 60) | payload;
         target.write_u64(value);
+    }
+
+    fn get_size_hint(&self) -> usize {
+        0u64.get_size_hint()
     }
 }
 

@@ -221,10 +221,14 @@ impl Serializable for LibraryNamespace {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         // Catch any situations where a namespace was incorrectly constructed
         let bytes = self.as_bytes();
-        assert!(bytes.len() <= u8::MAX as usize, "namespace too long");
+        let len_u8 = bytes.len().try_into().expect("namespace too long");
 
-        target.write_u8(bytes.len() as u8);
+        target.write_u8(len_u8);
         target.write_bytes(bytes);
+    }
+
+    fn get_size_hint(&self) -> usize {
+        0u8.get_size_hint() + self.len()
     }
 }
 

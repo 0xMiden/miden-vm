@@ -66,21 +66,43 @@ const VERSION: [u8; 3] = [0, 0, 0];
 
 impl Serializable for Package {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        let Self {
+            name,
+            mast,
+            manifest,
+            account_component_metadata_bytes,
+        } = self;
         // Write magic & version
         target.write_bytes(MAGIC_PACKAGE);
         target.write_bytes(&VERSION);
 
         // Write package name
-        self.name.write_into(target);
+        name.write_into(target);
 
         // Write MAST artifact
-        self.mast.write_into(target);
+        mast.write_into(target);
 
         // Write manifest
-        self.manifest.write_into(target);
+        manifest.write_into(target);
 
         // Write optional account component metadata
-        self.account_component_metadata_bytes.write_into(target);
+        account_component_metadata_bytes.write_into(target);
+    }
+
+    fn get_size_hint(&self) -> usize {
+        let Self {
+            name,
+            mast,
+            manifest,
+            account_component_metadata_bytes,
+        } = self;
+
+        MAGIC_PACKAGE.get_size_hint()
+            + VERSION.get_size_hint()
+            + name.get_size_hint()
+            + mast.get_size_hint()
+            + manifest.get_size_hint()
+            + account_component_metadata_bytes.get_size_hint()
     }
 }
 
@@ -138,6 +160,13 @@ impl Serializable for MastArtifact {
             },
         }
     }
+
+    fn get_size_hint(&self) -> usize {
+        match self {
+            Self::Executable(program) => MAGIC_PROGRAM.get_size_hint() + program.get_size_hint(),
+            Self::Library(library) => MAGIC_LIBRARY.get_size_hint() + library.get_size_hint(),
+        }
+    }
 }
 
 impl Deserializable for MastArtifact {
@@ -162,17 +191,16 @@ impl Deserializable for MastArtifact {
 
 impl Serializable for PackageManifest {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        // Write exports
-        target.write_usize(self.exports.len());
-        for export in &self.exports {
-            export.write_into(target);
-        }
+        let Self { exports, dependencies } = self;
 
-        // Write dependencies
-        target.write_usize(self.dependencies.len());
-        for dep in &self.dependencies {
-            dep.write_into(target);
-        }
+        exports.write_into(target);
+        dependencies.write_into(target);
+    }
+
+    fn get_size_hint(&self) -> usize {
+        let Self { exports, dependencies } = self;
+
+        exports.get_size_hint() + dependencies.get_size_hint()
     }
 }
 
@@ -200,8 +228,16 @@ impl Deserializable for PackageManifest {
 // ================================================================================================
 impl Serializable for PackageExport {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        self.name.write_into(target);
-        self.digest.write_into(target);
+        let Self { name, digest } = self;
+
+        name.write_into(target);
+        digest.write_into(target);
+    }
+
+    fn get_size_hint(&self) -> usize {
+        let Self { name, digest } = self;
+
+        name.get_size_hint() + digest.get_size_hint()
     }
 }
 

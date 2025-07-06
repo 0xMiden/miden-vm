@@ -131,10 +131,11 @@ impl Extend<(Word, Vec<Felt>)> for AdviceMap {
 
 impl Serializable for AdviceMap {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        target.write_usize(self.0.len());
-        for (key, values) in self.0.iter() {
-            target.write((key, values));
-        }
+        self.0.write_into(target);
+    }
+
+    fn get_size_hint(&self) -> usize {
+        self.0.get_size_hint()
     }
 }
 
