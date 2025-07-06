@@ -38,8 +38,7 @@
 - Remove decorator for interpolating polynomials over degree 2 extension field ([#1875](https://github.com/0xMiden/miden-vm/issues/1875)).
 - Remove MASM code for probabilistic NTT ([#1875](https://github.com/0xMiden/miden-vm/issues/1875)).
 - [BREAKING] Disallow usage of the field modulus as an immediate value ([#1938](https://github.com/0xMiden/miden-vm/pull/1938)).
-- [BREAKING] Load `MastForest::advice_map` data lazily (#1949)
-  ([#1949](https://github.com/0xMiden/miden-vm/issues/1949)))
+- [BREAKING] Load `MastForest::advice_map` data lazily ([#1949](https://github.com/0xMiden/miden-vm/issues/1949))
 
 #### Enhancements
 
