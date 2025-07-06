@@ -1,15 +1,16 @@
 use alloc::{
-    boxed::Box,
     collections::{
         BTreeMap,
         btree_map::{Entry, IntoIter},
     },
+    sync::Arc,
     vec::Vec,
 };
 
-use miden_crypto::{Felt, Word, utils::collections::KvMap};
-
-use crate::utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
+use crate::{
+    Felt, Word,
+    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+};
 
 // ADVICE MAP
 // ================================================================================================
@@ -20,30 +21,45 @@ use crate::utils::{ByteReader, ByteWriter, Deserializable, DeserializationError,
 /// associated with a given key onto the advice stack using `adv.push_mapval` instruction. The VM
 /// can also insert new values into the advice map during execution.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct AdviceMap(BTreeMap<Word, Vec<Felt>>);
+pub struct AdviceMap(BTreeMap<Word, Arc<[Felt]>>);
 
 /// Pair representing a key-value entry in an [`AdviceMap`]
-type MapEntry = (Word, Vec<Felt>);
+type MapEntry = (Word, Arc<[Felt]>);
 
 impl AdviceMap {
     /// Creates a new advice map.
     pub fn new() -> Self {
-        Self(BTreeMap::<Word, Vec<Felt>>::new())
+        Self::default()
     }
 
     /// Returns the values associated with given key.
     pub fn get(&self, key: &Word) -> Option<&[Felt]> {
-        self.0.get(key).map(|v| v.as_slice())
+        self.0.get(key).map(|v| &**v)
+    }
+
+    /// Returns a pointer to the values associated with given key.
+    pub fn get_arc(&self, key: &Word) -> Option<&Arc<[Felt]>> {
+        self.0.get(key)
+    }
+
+    /// Returns true if the key has a corresponding value in the map.
+    pub fn contains_key(&self, key: &Word) -> bool {
+        self.0.contains_key(key)
     }
 
     /// Inserts a key value pair in the advice map and returns the inserted value.
-    pub fn insert(&mut self, key: Word, value: Vec<Felt>) -> Option<Vec<Felt>> {
-        self.0.insert(key, value)
+    pub fn insert(&mut self, key: Word, value: Vec<Felt>) -> Option<Arc<[Felt]>> {
+        self.0.insert(key, Arc::from(value))
     }
 
     /// Removes the value associated with the key and returns the removed element.
-    pub fn remove(&mut self, key: &Word) -> Option<Vec<Felt>> {
+    pub fn remove(&mut self, key: &Word) -> Option<Arc<[Felt]>> {
         self.0.remove(key)
+    }
+
+    /// Return an iteration over all entries in the map.
+    pub fn iter(&self) -> impl Iterator<Item = (&Word, &Arc<[Felt]>)> {
+        self.0.iter()
     }
 
     /// Returns the number of key value pairs in the advice map.
@@ -57,7 +73,7 @@ impl AdviceMap {
     }
 
     /// Gets the given key's corresponding entry in the map for in-place manipulation.
-    pub fn entry(&mut self, key: Word) -> Entry<'_, Word, Vec<Felt>> {
+    pub fn entry(&mut self, key: Word) -> Entry<'_, Word, Arc<[Felt]>> {
         self.0.entry(key)
     }
 
@@ -66,7 +82,7 @@ impl AdviceMap {
     /// If an entry from the new map already exists with the same key but different value,
     /// an error is returned containing the existing entry along with the value that would replace
     /// it. The current map remains unchanged.
-    pub fn merge(&mut self, other: &Self) -> Result<(), (MapEntry, Vec<Felt>)> {
+    pub fn merge(&mut self, other: &Self) -> Result<(), (MapEntry, Arc<[Felt]>)> {
         if let Some(conflict) = self.find_overlapping_entry(other) {
             Err(conflict)
         } else {
@@ -87,12 +103,12 @@ impl AdviceMap {
     /// # Returns
     /// - `Some` containing the conflicting key, its value from `self`, and the value from `other`.
     /// - `None` if there are no conflicting values.
-    pub fn find_overlapping_entry(&self, other: &Self) -> Option<(MapEntry, Vec<Felt>)> {
+    pub fn find_overlapping_entry(&self, other: &Self) -> Option<(MapEntry, Arc<[Felt]>)> {
         for (key, new_value) in other.iter() {
-            if let Some(existing_value) = self.get(key) {
+            if let Some(existing_value) = self.get_arc(key) {
                 if existing_value != new_value {
                     // Found a conflict.
-                    return Some(((*key, existing_value.to_vec()), new_value.clone()));
+                    return Some(((*key, existing_value.clone()), new_value.clone()));
                 }
             }
         }
@@ -101,56 +117,39 @@ impl AdviceMap {
     }
 }
 
-impl From<BTreeMap<Word, Vec<Felt>>> for AdviceMap {
-    fn from(value: BTreeMap<Word, Vec<Felt>>) -> Self {
+impl From<BTreeMap<Word, Arc<[Felt]>>> for AdviceMap {
+    fn from(value: BTreeMap<Word, Arc<[Felt]>>) -> Self {
         Self(value)
     }
 }
 
 impl IntoIterator for AdviceMap {
-    type Item = (Word, Vec<Felt>);
-    type IntoIter = IntoIter<Word, Vec<Felt>>;
+    type Item = (Word, Arc<[Felt]>);
+    type IntoIter = IntoIter<Word, Arc<[Felt]>>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.0.into_iter()
     }
 }
 
-impl FromIterator<(Word, Vec<Felt>)> for AdviceMap {
-    fn from_iter<T: IntoIterator<Item = (Word, Vec<Felt>)>>(iter: T) -> Self {
-        iter.into_iter().collect::<BTreeMap<Word, Vec<Felt>>>().into()
+impl<V> FromIterator<(Word, V)> for AdviceMap
+where
+    V: Into<Arc<[Felt]>>,
+{
+    fn from_iter<I>(iter: I) -> Self
+    where
+        I: IntoIterator<Item = (Word, V)>,
+    {
+        iter.into_iter()
+            .map(|(key, value)| (key, value.into()))
+            .collect::<BTreeMap<Word, Arc<[Felt]>>>()
+            .into()
     }
 }
 
-impl KvMap<Word, Vec<Felt>> for AdviceMap {
-    fn get(&self, key: &Word) -> Option<&Vec<Felt>> {
-        self.0.get(key)
-    }
-
-    fn contains_key(&self, key: &Word) -> bool {
-        self.0.contains_key(key)
-    }
-
-    fn len(&self) -> usize {
-        self.len()
-    }
-
-    fn insert(&mut self, key: Word, value: Vec<Felt>) -> Option<Vec<Felt>> {
-        self.insert(key, value)
-    }
-
-    fn remove(&mut self, key: &Word) -> Option<Vec<Felt>> {
-        self.remove(key)
-    }
-
-    fn iter(&self) -> Box<dyn Iterator<Item = (&Word, &Vec<Felt>)> + '_> {
-        Box::new(self.0.iter())
-    }
-}
-
-impl Extend<(Word, Vec<Felt>)> for AdviceMap {
-    fn extend<T: IntoIterator<Item = (Word, Vec<Felt>)>>(&mut self, iter: T) {
-        self.0.extend(iter)
+impl<V: Into<Arc<[Felt]>>> Extend<(Word, V)> for AdviceMap {
+    fn extend<I: IntoIterator<Item = (Word, V)>>(&mut self, iter: I) {
+        self.0.extend(iter.into_iter().map(|(key, value)| (key, value.into())))
     }
 }
 
@@ -158,7 +157,7 @@ impl Serializable for AdviceMap {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         target.write_usize(self.0.len());
         for (key, values) in self.0.iter() {
-            target.write((key, values));
+            target.write((key, values.to_vec()));
         }
     }
 }
@@ -168,8 +167,8 @@ impl Deserializable for AdviceMap {
         let mut map = BTreeMap::new();
         let count = source.read_usize()?;
         for _ in 0..count {
-            let (key, values) = source.read()?;
-            map.insert(key, values);
+            let (key, values): (Word, Vec<Felt>) = source.read()?;
+            map.insert(key, Arc::from(values));
         }
         Ok(Self(map))
     }

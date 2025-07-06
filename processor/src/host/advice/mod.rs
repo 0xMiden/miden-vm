@@ -8,7 +8,6 @@ use vm_core::{
     AdviceMap, Felt, Word,
     crypto::merkle::{MerklePath, MerkleStore, NodeIndex, StoreNode},
     mast::MastForest,
-    utils::collections::KvMap,
 };
 
 mod inputs;
@@ -146,17 +145,6 @@ impl AdviceProvider {
     // ADVICE MAP
     // --------------------------------------------------------------------------------------------
 
-    /// Returns a reference to the value(s) for the specified key if they are present in the
-    /// primary advice map.
-    ///
-    /// This function only checks the already-loaded map and does not search the `MastForest`s.
-    ///
-    /// # Errors
-    /// Returns an error if the key is not found in the primary advice map.
-    pub fn get_loaded_mapped_values(&self, key: &Word) -> Result<&[Felt], AdviceError> {
-        self.map.get(key).ok_or(AdviceError::MapKeyNotFound { key: *key })
-    }
-
     /// Returns a reference to the value(s) associated with the specified key in the advice map,
     /// searching secondary storage like `MastForest`s if necessary.
     ///
@@ -210,11 +198,11 @@ impl AdviceProvider {
     pub fn insert_into_map(&mut self, key: Word, values: Vec<Felt>) -> Result<(), AdviceError> {
         match self.map.entry(key) {
             Entry::Vacant(entry) => {
-                entry.insert(values);
+                entry.insert(values.into());
             },
             Entry::Occupied(entry) => {
-                let existing_values = entry.get();
-                if existing_values != &values {
+                let existing_values = entry.get().as_ref();
+                if existing_values != values {
                     return Err(AdviceError::MapKeyAlreadyPresent {
                         key,
                         prev_values: existing_values.to_vec(),
@@ -338,7 +326,11 @@ impl AdviceProvider {
     /// than the one currently stored. The current map remains unchanged.
     pub(crate) fn merge_advice_map(&mut self, other: &AdviceMap) -> Result<(), AdviceError> {
         self.map.merge(other).map_err(|((key, prev_values), new_values)| {
-            AdviceError::MapKeyAlreadyPresent { key, prev_values, new_values }
+            AdviceError::MapKeyAlreadyPresent {
+                key,
+                prev_values: prev_values.to_vec(),
+                new_values: new_values.to_vec(),
+            }
         })
     }
 }
