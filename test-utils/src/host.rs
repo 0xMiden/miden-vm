@@ -15,11 +15,7 @@ impl TestHost {
     }
 }
 
-impl BaseHost for TestHost {
-    fn mast_forests(&self) -> &[Arc<MastForest>] {
-        <DefaultHost as BaseHost>::mast_forests(&self.host)
-    }
-}
+impl BaseHost for TestHost {}
 
 impl SyncHost for TestHost {
     fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>> {

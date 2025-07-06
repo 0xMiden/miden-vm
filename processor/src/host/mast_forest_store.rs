@@ -1,4 +1,4 @@
-use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
+use alloc::{collections::BTreeMap, sync::Arc};
 
 use vm_core::{Word, mast::MastForest};
 
@@ -19,27 +19,15 @@ pub trait MastForestStore {
 #[derive(Debug, Default, Clone)]
 pub struct MemMastForestStore {
     mast_forests: BTreeMap<Word, Arc<MastForest>>,
-    unique_forests: Vec<Arc<MastForest>>,
 }
 
 impl MemMastForestStore {
     /// Inserts all the procedures of the provided MAST forest in the store.
     pub fn insert(&mut self, mast_forest: Arc<MastForest>) {
-        // do not insert a forest if it has already been added.
-        if self.unique_forests.contains(&mast_forest) {
-            return;
-        }
         // only register the procedures which are local to this forest
         for proc_digest in mast_forest.local_procedure_digests() {
             self.mast_forests.insert(proc_digest, mast_forest.clone());
         }
-        // store the forest
-        self.unique_forests.push(mast_forest);
-    }
-
-    /// Returns a list of all unique [`MastForest`]s inserted into the store.
-    pub fn mast_forests(&self) -> &[Arc<MastForest>] {
-        &self.unique_forests
     }
 }
 

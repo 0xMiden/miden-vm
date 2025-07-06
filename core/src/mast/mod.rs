@@ -456,6 +456,23 @@ impl MastForest {
             .expect("MAST forest contains more than 2^32 procedures.")
     }
 
+    /// Returns the [Word] representing the hash of the procedures in this forest.
+    pub fn digest(&self) -> Word {
+        self.digest_from_nodes(&self.roots)
+    }
+
+    /// Returns the [Word] representing the content hash of a subset of [`MastNodeId`]s.
+    pub fn digest_from_nodes<'a>(
+        &self,
+        node_ids: impl IntoIterator<Item = &'a MastNodeId>,
+    ) -> Word {
+        let digests = BTreeSet::from_iter(node_ids.into_iter().map(|&id| self[id].digest()));
+        digests
+            .into_iter()
+            .reduce(|a, b| crate::crypto::hash::Rpo256::merge(&[a, b]))
+            .unwrap()
+    }
+
     /// Returns the number of nodes in this MAST forest.
     pub fn num_nodes(&self) -> u32 {
         self.nodes.len() as u32

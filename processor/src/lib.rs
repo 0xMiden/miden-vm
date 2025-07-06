@@ -6,7 +6,7 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-use alloc::{sync::Arc, vec::Vec};
+use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 use core::fmt::{Display, LowerHex};
 
 use miden_air::trace::{
@@ -247,6 +247,7 @@ pub struct Process {
     pub max_cycles: u32,
     pub enable_tracing: bool,
     pub source_manager: Arc<dyn SourceManager>,
+    pub loaded_procedures: BTreeMap<Word, (MastNodeId, Arc<MastForest>)>,
 }
 
 impl Process {
@@ -294,6 +295,7 @@ impl Process {
             max_cycles: execution_options.max_cycles(),
             enable_tracing: execution_options.enable_tracing(),
             source_manager,
+            loaded_procedures: BTreeMap::default(),
         }
     }
 
@@ -319,8 +321,6 @@ impl Process {
         self.advice
             .merge_advice_map(program.mast_forest().advice_map())
             .map_err(|err| ExecutionError::advice_error(err, RowIndex::from(0), &()))?;
-
-        self.advice.forests = host.mast_forests().to_vec();
 
         self.execute_mast_node(program.entrypoint(), &program.mast_forest().clone(), host)?;
 
@@ -364,7 +364,9 @@ impl Process {
                 )?
             },
             MastNode::External(external_node) => {
-                let (root_id, mast_forest) = resolve_external_node(external_node, host)?;
+                let mut process_state = self.state();
+                let (root_id, mast_forest) =
+                    resolve_external_node(&mut process_state, external_node, host)?;
 
                 self.execute_mast_node(root_id, &mast_forest, host)?;
             },
@@ -738,6 +740,7 @@ pub struct SlowProcessState<'a> {
     system: &'a System,
     stack: &'a Stack,
     chiplets: &'a Chiplets,
+    called_external_procedures: &'a BTreeMap<Word, (MastNodeId, Arc<MastForest>)>,
 }
 
 // PROCESS STATE
@@ -757,6 +760,7 @@ impl Process {
             system: &self.system,
             stack: &self.stack,
             chiplets: &self.chiplets,
+            called_external_procedures: &self.loaded_procedures,
         })
     }
 }
@@ -880,6 +884,22 @@ impl<'a> ProcessState<'a> {
                 state.chiplets.memory.get_state_at(ctx, state.system.clk())
             },
             ProcessState::Fast(state) => state.processor.memory.get_memory_state(ctx),
+        }
+    }
+
+    //
+    // HELPERS
+    // --------------------------------------------------------------------------------------------
+
+    pub(crate) fn cached_external_procedure(
+        &self,
+        digest: &Word,
+    ) -> Option<(MastNodeId, Arc<MastForest>)> {
+        match self {
+            ProcessState::Slow(state) => state.called_external_procedures.get(digest).cloned(),
+            ProcessState::Fast(state) => {
+                state.processor.called_external_procedures.get(digest).cloned()
+            },
         }
     }
 }

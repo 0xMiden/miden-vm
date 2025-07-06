@@ -1,5 +1,5 @@
 use alloc::{
-    collections::{BTreeMap, btree_map::Entry},
+    collections::{BTreeMap, BTreeSet, btree_map::Entry},
     sync::Arc,
     vec::Vec,
 };
@@ -45,7 +45,8 @@ pub struct AdviceProvider {
     pub(crate) stack: Vec<Felt>,
     pub(crate) map: AdviceMap,
     pub(crate) store: MerkleStore<SimpleMerkleMap>,
-    pub(crate) forests: Vec<Arc<MastForest>>,
+    pub pending_forests: Vec<Arc<MastForest>>,
+    pub loaded_forest_digests: BTreeSet<Word>,
 }
 
 impl AdviceProvider {
@@ -145,6 +146,17 @@ impl AdviceProvider {
     // ADVICE MAP
     // --------------------------------------------------------------------------------------------
 
+    /// Returns a reference to the value(s) for the specified key if they are present in the
+    /// primary advice map.
+    ///
+    /// This function only checks the already-loaded map and does not search the `MastForest`s.
+    ///
+    /// # Errors
+    /// Returns an error if the key is not found in the primary advice map.
+    pub fn get_loaded_mapped_values(&self, key: &Word) -> Result<&[Felt], AdviceError> {
+        self.map.get(key).ok_or(AdviceError::MapKeyNotFound { key: *key })
+    }
+
     /// Returns a reference to the value(s) associated with the specified key in the advice map,
     /// searching secondary storage like `MastForest`s if necessary.
     ///
@@ -177,7 +189,9 @@ impl AdviceProvider {
 
         // --- Cold Path ---
         // This code only runs if the `if` block above did not.
-        if let Some(mast_forest) = self.forests.pop_if(|mf| mf.advice_map().contains_key(key)) {
+        if let Some(mast_forest) =
+            self.pending_forests.pop_if(|mf| mf.advice_map().contains_key(key))
+        {
             self.merge_advice_map(mast_forest.advice_map())?;
 
             // This final `get` is safe because we know the value has been merged into `self`
@@ -308,6 +322,16 @@ impl AdviceProvider {
     // HELPERS
     // --------------------------------------------------------------------------------------------
 
+    /// Load a [`MastForest`] into the [`AdviceProvider`] to allow external [`AdviceMap`] entries to
+    /// be queried.
+    pub(crate) fn add_mast_forest(&mut self, mast_forest: &Arc<MastForest>) {
+        let digest = mast_forest.digest();
+        if !self.loaded_forest_digests.contains(&digest) {
+            self.loaded_forest_digests.insert(digest);
+            self.pending_forests.push(mast_forest.clone());
+        }
+    }
+
     /// Merges all entries from the given [`AdviceMap`] into the current advice map.
     ///
     /// Returns an error if any new entry already exists with the same key but a different value
@@ -327,7 +351,8 @@ impl From<AdviceInputs> for AdviceProvider {
             stack,
             map,
             store,
-            forests: Vec::default(),
+            pending_forests: Vec::default(),
+            loaded_forest_digests: BTreeSet::default(),
         }
     }
 }

@@ -1,4 +1,4 @@
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, collections::BTreeMap, sync::Arc, vec::Vec};
 use core::cmp::min;
 
 use memory::Memory;
@@ -144,6 +144,10 @@ pub struct FastProcessor {
     /// return. It is a stack since calls can be nested.
     call_stack: Vec<ExecutionContextInfo>,
 
+    /// Mapping of digests of external procedure digests with their corresponding node ID and
+    /// forest containing the procedure.
+    pub(crate) called_external_procedures: BTreeMap<Word, (MastNodeId, Arc<MastForest>)>,
+
     /// Whether to enable debug statements and tracing.
     in_debug_mode: bool,
 
@@ -215,6 +219,7 @@ impl FastProcessor {
             memory: Memory::new(),
             call_stack: Vec::new(),
             ace: Ace::default(),
+            called_external_procedures: BTreeMap::default(),
             in_debug_mode,
             source_manager,
         }
@@ -330,7 +335,6 @@ impl FastProcessor {
         program: &Program,
         host: &mut impl AsyncHost,
     ) -> Result<StackOutputs, ExecutionError> {
-        self.advice.forests = host.mast_forests().to_vec();
         self.execute_mast_node(program.entrypoint(), program.mast_forest(), program.kernel(), host)
             .await?;
 
@@ -636,7 +640,9 @@ impl FastProcessor {
         kernel: &Kernel,
         host: &mut impl AsyncHost,
     ) -> Result<(), ExecutionError> {
-        let (root_id, mast_forest) = resolve_external_node_async(external_node, host).await?;
+        let mut process_state = self.state(0);
+        let (root_id, mast_forest) =
+            resolve_external_node_async(&mut process_state, external_node, host).await?;
 
         self.execute_mast_node(root_id, &mast_forest, kernel, host).await
     }

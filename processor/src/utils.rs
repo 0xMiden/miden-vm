@@ -1,12 +1,14 @@
 use alloc::{sync::Arc, vec::Vec};
 
-use vm_core::mast::{ExternalNode, MastForest, MastNodeId};
 // RE-EXPORTS
 // ================================================================================================
 pub use vm_core::utils::*;
+use vm_core::{
+    Felt,
+    mast::{ExternalNode, MastForest, MastNodeId},
+};
 
-use super::Felt;
-use crate::{AsyncHost, ExecutionError, SyncHost};
+use crate::{AsyncHost, ExecutionError, ProcessState, SyncHost};
 
 // HELPER FUNCTIONS
 // ================================================================================================
@@ -53,10 +55,17 @@ pub(crate) fn split_u32_into_u16(value: u64) -> (u16, u16) {
 /// This helper function is extracted to ensure that [`crate::Process`] and
 /// [`crate::fast::FastProcessor`] resolve external nodes in the same way.
 pub(crate) fn resolve_external_node(
+    process_state: &mut ProcessState<'_>,
     external_node: &ExternalNode,
     host: &impl SyncHost,
 ) -> Result<(MastNodeId, Arc<MastForest>), ExecutionError> {
     let node_digest = external_node.digest();
+
+    // Check the cache if this procedure has already been called.
+    if let Some((node_id, forest)) = process_state.cached_external_procedure(&node_digest) {
+        return Ok((node_id, forest));
+    }
+
     let mast_forest = host
         .get_mast_forest(&node_digest)
         .ok_or(ExecutionError::no_mast_forest_with_procedure(node_digest, &()))?;
@@ -73,15 +82,24 @@ pub(crate) fn resolve_external_node(
         return Err(ExecutionError::CircularExternalNode(node_digest));
     }
 
+    process_state.advice_provider_mut().add_mast_forest(&mast_forest);
+
     Ok((root_id, mast_forest))
 }
 
 /// Analogous to [`resolve_external_node`], but for asynchronous execution.
 pub(crate) async fn resolve_external_node_async(
+    process_state: &mut ProcessState<'_>,
     external_node: &ExternalNode,
     host: &mut impl AsyncHost,
 ) -> Result<(MastNodeId, Arc<MastForest>), ExecutionError> {
     let node_digest = external_node.digest();
+
+    // Check the cache if this procedure has already been called.
+    if let Some((node_id, forest)) = process_state.cached_external_procedure(&node_digest) {
+        return Ok((node_id, forest));
+    }
+
     let mast_forest = host
         .get_mast_forest(&node_digest)
         .await
@@ -98,6 +116,8 @@ pub(crate) async fn resolve_external_node_async(
     if mast_forest[root_id].is_external() {
         return Err(ExecutionError::CircularExternalNode(node_digest));
     }
+
+    process_state.advice_provider_mut().add_mast_forest(&mast_forest);
 
     Ok((root_id, mast_forest))
 }

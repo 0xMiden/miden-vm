@@ -27,9 +27,6 @@ pub trait BaseHost {
     // REQUIRED METHODS
     // --------------------------------------------------------------------------------------------
 
-    /// Returns the list of all available [MastForest]s.
-    fn mast_forests(&self) -> &[Arc<MastForest>];
-
     /// Handles the debug request from the VM.
     fn on_debug(
         &mut self,
@@ -104,11 +101,7 @@ impl DefaultHost {
     }
 }
 
-impl BaseHost for DefaultHost {
-    fn mast_forests(&self) -> &[Arc<MastForest>] {
-        self.store.mast_forests()
-    }
-}
+impl BaseHost for DefaultHost {}
 
 impl SyncHost for DefaultHost {
     fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>> {

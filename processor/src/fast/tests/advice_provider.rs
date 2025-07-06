@@ -239,10 +239,6 @@ impl ConsistencyHost {
 }
 
 impl BaseHost for ConsistencyHost {
-    fn mast_forests(&self) -> &[Arc<MastForest>] {
-        self.store.mast_forests()
-    }
-
     fn on_trace(
         &mut self,
         process: &mut ProcessState,
