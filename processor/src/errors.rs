@@ -502,7 +502,7 @@ macro_rules! err_ctx {
 ///
 /// This trait contains the same methods as `ErrorContext` to provide a common
 /// interface for error context functionality.
-pub trait ErrorContext {
+pub trait ErrorContext: Sync {
     /// Returns the label and source file associated with the error context, if any.
     ///
     /// Note that `SourceSpan::UNKNOWN` will be returned to indicate an empty span.

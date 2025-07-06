@@ -112,18 +112,13 @@ impl AsyncHost for DefaultHost {
         self.store.get(node_digest)
     }
 
-    // Note: clippy complains about this not using the `async` keyword, but if we use `async`, it
-    // doesn't compile.
-    #[allow(clippy::manual_async_fn)]
-    fn on_event(
+    async fn on_event(
         &mut self,
         process: &mut ProcessState<'_>,
         event_id: u32,
         err_ctx: &impl ErrorContext,
-    ) -> impl Future<Output = Result<(), ExecutionError>> + Send {
-        let _ = (process, event_id, err_ctx);
-        async { Ok(()) }
-        // async move { <Self as SyncHost>::on_event(self, process, event_id, err_ctx) }
+    ) -> Result<(), ExecutionError> {
+        <Self as SyncHost>::on_event(self, process, event_id, err_ctx)
     }
 }
 

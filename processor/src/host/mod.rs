@@ -1,5 +1,4 @@
 use alloc::sync::Arc;
-use core::future::Future;
 
 use vm_core::{DebugOptions, Felt, Word, mast::MastForest};
 

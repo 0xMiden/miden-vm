@@ -271,15 +271,12 @@ impl AsyncHost for ConsistencyHost {
         self.store.get(node_digest)
     }
 
-    // Note: clippy complains about this not using the `async` keyword, but if we use `async`, it
-    // doesn't compile.
-    #[allow(clippy::manual_async_fn)]
-    fn on_event(
+    async fn on_event(
         &mut self,
         _process: &mut ProcessState<'_>,
         _event_id: u32,
         _err_ctx: &impl ErrorContext,
-    ) -> impl Future<Output = Result<(), ExecutionError>> + Send {
-        async { Ok(()) }
+    ) -> Result<(), ExecutionError> {
+        Ok(())
     }
 }
