@@ -234,6 +234,7 @@ pub struct Process {
     max_cycles: u32,
     enable_tracing: bool,
     source_manager: Arc<dyn SourceManager>,
+    loaded_procedures: BTreeMap<Word, (MastNodeId, Arc<MastForest>)>,
 }
 
 #[cfg(any(test, feature = "testing"))]
