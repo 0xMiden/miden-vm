@@ -10,7 +10,7 @@ use crate::{
 // DEFAULT HOST IMPLEMENTATION
 // ================================================================================================
 
-/// A default [Host] implementation that provides the essential functionality required by the VM.
+/// A default Host implementation that provides the essential functionality required by the VM.
 #[derive(Debug)]
 pub struct DefaultHost<D: DebugHandler = DefaultDebugHandler> {
     store: MemMastForestStore,
@@ -45,7 +45,7 @@ impl<D: DebugHandler> DefaultHost<D> {
         Ok(())
     }
 
-    /// Loads a single [`EventHandler`] into this [`Host`]. The handler can be either a closure or a
+    /// Loads a single [`EventHandler`] into this host. The handler can be either a closure or a
     /// free function with signature
     /// `fn(&mut ProcessState) -> Result<(), EventHandler>`
     pub fn load_handler(

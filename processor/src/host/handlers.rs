@@ -36,8 +36,7 @@ where
 // EVENT ERROR
 // ================================================================================================
 
-/// A generic [`Error`] wrapper allowing handlers to return errors to the [`Host`](crate::Host)
-/// caller.
+/// A generic [`Error`] wrapper allowing handlers to return errors to the Host caller.
 ///
 /// Error handlers can define their own [`Error`] type which can be seamlessly converted
 /// into this type since it is a [`Box`].  
