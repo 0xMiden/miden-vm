@@ -1,8 +1,8 @@
 use alloc::{collections::BTreeMap, string::ToString, sync::Arc, vec::Vec};
 
 use miden_assembly_syntax::{
-    self as syntax, DefaultSourceManager, KernelLibrary, Library, LibraryNamespace, LibraryPath,
-    Parse, ParseOptions, SemanticAnalysisError, SourceManager, Spanned,
+    DefaultSourceManager, KernelLibrary, Library, LibraryNamespace, LibraryPath, Parse,
+    ParseOptions, SemanticAnalysisError, SourceManager, Spanned,
     ast::{self, Export, InvocationTarget, InvokeKind, ModuleKind, QualifiedProcedureName},
     diagnostics::{RelatedLabel, Report},
 };
@@ -204,7 +204,9 @@ impl Assembler {
         namespace: crate::LibraryNamespace,
         dir: impl AsRef<std::path::Path>,
     ) -> Result<(), Report> {
-        let modules = syntax::parser::read_modules_from_dir(namespace, dir, &self.source_manager)?;
+        use miden_assembly_syntax::parser;
+
+        let modules = parser::read_modules_from_dir(namespace, dir, &self.source_manager)?;
         self.linker.link_modules(modules)?;
         Ok(())
     }
@@ -391,10 +393,12 @@ impl Assembler {
         path: impl AsRef<std::path::Path>,
         namespace: LibraryNamespace,
     ) -> Result<Library, Report> {
+        use miden_assembly_syntax::parser;
+
         let path = path.as_ref();
 
         let source_manager = self.source_manager.clone();
-        let modules = syntax::parser::read_modules_from_dir(namespace, path, &source_manager)?;
+        let modules = parser::read_modules_from_dir(namespace, path, &source_manager)?;
         self.assemble_library(modules)
     }
 

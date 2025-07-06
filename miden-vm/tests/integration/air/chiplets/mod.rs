@@ -1,4 +1,4 @@
-use test_utils::{build_test, rand::rand_vector};
+use miden_test_utils::{build_test, rand::rand_vector};
 
 mod bitwise;
 mod hasher;

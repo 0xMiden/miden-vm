@@ -29,8 +29,8 @@ impl Process {
 
 #[cfg(test)]
 mod tests {
-    use test_utils::rand::rand_value;
-    use vm_core::{Operation, QuadFelt, ZERO, mast::MastForest};
+    use miden_core::{Operation, QuadFelt, ZERO, mast::MastForest};
+    use miden_test_utils::rand::rand_value;
 
     use super::*;
     use crate::{DefaultHost, StackInputs, operations::MIN_STACK_DEPTH};

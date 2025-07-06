@@ -2,7 +2,7 @@ use miden_air::{
     RowIndex,
     trace::decoder::{OP_BATCH_2_GROUPS, OP_BATCH_4_GROUPS, OP_BATCH_8_GROUPS},
 };
-use vm_core::{OPCODE_EMIT, OPCODE_PUSH, OPCODE_RESPAN, OPCODE_SPAN};
+use miden_core::{OPCODE_EMIT, OPCODE_PUSH, OPCODE_RESPAN, OPCODE_SPAN};
 
 use super::{AuxColumnBuilder, Felt, FieldElement, MainTrace, ONE};
 use crate::debug::BusDebugger;

@@ -4,21 +4,21 @@
 // EXPORTS
 // ================================================================================================
 
-pub use assembly::{
+pub use miden_assembly::{
     self, Assembler,
     ast::{Module, ModuleKind},
     diagnostics,
 };
-pub use processor::{
+pub use miden_processor::{
     AdviceInputs, AdviceProvider, AsmOpInfo, AsyncHost, BaseHost, DefaultHost, ExecutionError,
     ExecutionTrace, Kernel, Operation, Program, ProgramInfo, StackInputs, SyncHost, VmState,
     VmStateIterator, ZERO, crypto, execute, execute_iter, utils,
 };
-pub use prover::{
+pub use miden_prover::{
     ExecutionProof, FieldExtension, HashFunction, InputError, Proof, ProvingOptions, StackOutputs,
     Word, math, prove,
 };
-pub use verifier::{VerificationError, verify};
+pub use miden_verifier::{VerificationError, verify};
 
 // (private) exports
 // ================================================================================================

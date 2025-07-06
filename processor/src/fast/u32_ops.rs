@@ -1,4 +1,4 @@
-use vm_core::{Felt, ZERO};
+use miden_core::{Felt, ZERO};
 
 use super::FastProcessor;
 use crate::{ErrorContext, ExecutionError, utils::split_element};

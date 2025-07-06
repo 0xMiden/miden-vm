@@ -1,5 +1,5 @@
+use miden_core::{Felt, FieldElement, Operation, ZERO};
 use proptest::prelude::*;
-use vm_core::{Felt, FieldElement, Operation, ZERO};
 
 use super::{
     super::{DECODER_TRACE_OFFSET, STACK_TRACE_OFFSET},

@@ -1,13 +1,13 @@
 use core::{marker::PhantomData, mem};
 
-use processor::crypto::{Hasher, RandomCoin, WinterRandomCoin};
-use test_utils::{
+use miden_core::{EMPTY_WORD, Felt, FieldElement, QuadFelt, Word};
+use miden_processor::crypto::{Hasher, RandomCoin, WinterRandomCoin};
+use miden_test_utils::{
     MerkleTreeVC, StarkField,
     crypto::{MerklePath, NodeIndex, PartialMerkleTree, Rpo256 as MidenHasher},
     group_slice_elements,
     math::fft,
 };
-use vm_core::{EMPTY_WORD, Felt, FieldElement, QuadFelt, Word};
 use winter_fri::{
     DefaultProverChannel, FriOptions, FriProof, FriProver, VerifierError, folding::fold_positions,
 };

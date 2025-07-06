@@ -22,24 +22,26 @@ default = ["std"]
 std = [
     "miden-crypto/std",
     "miden-formatting/std",
-    "math/std",
+    "winter-math/std",
     "winter-utils/std",
     "thiserror/std",
 ]
-serde = ["miden-core-diagnostics/serde", "miden-crypto/serde", "math/serde"]
-# DEPRECATED
-diagnostics = []
+serde = [
+    "miden-core-diagnostics/serde",
+    "miden-crypto/serde",
+    "winter-math/serde",
+]
 
 [dependencies]
-math = { package = "winter-math", version = "0.13", default-features = false }
 miden-crypto = { version = "0.15", default-features = false }
 miden-formatting.workspace = true
 miden-core-diagnostics.workspace = true
 num-derive = { version = "0.4", default-features = false }
 num-traits = { version = "0.2", default-features = false }
 thiserror.workspace = true
-winter-utils = { version = "0.13", default-features = false }
+winter-math.workspace = true
+winter-utils.workspace = true
 
 [dev-dependencies]
-proptest = "1.6"
-rand-utils = { package = "winter-rand-utils", version = "0.13" }
+proptest.workspace = true
+winter-rand-utils.workspace = true

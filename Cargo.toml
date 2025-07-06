@@ -39,11 +39,17 @@ overflow-checks = true
 
 [workspace.dependencies]
 # Workspace crates
+miden-air = { path = "./air", version = "0.15.0", default-features = false }
 miden-assembly = { path = "./assembly", version = "0.15.0", default-features = false }
 miden-assembly-syntax = { path = "./assembly-syntax", version = "0.15.0", default-features = false }
 miden-core = { path = "./core", version = "0.15.0", default-features = false }
 miden-core-diagnostics = { path = "./core-diagnostics", version = "0.15.0", default-features = false }
 miden-mast-package = { path = "./package", version = "0.15.0", default-features = false }
+miden-processor = { path = "./processor", version = "0.15.0", default-features = false }
+miden-prover = { path = "./prover", version = "0.15.0", default-features = false }
+miden-stdlib = { path = "./stdlib", version = "0.15.0", default-features = false }
+miden-test-utils = { path = "./test-utils", version = "0.1.0" }
+miden-verifier = { path = "./verifier", version = "0.15.0", default-features = false }
 
 # Miden crates
 miden-crypto = { version = "0.15", default-features = false }
@@ -51,14 +57,30 @@ miden-formatting = { version = "0.1", default-features = false }
 
 # Third-party crates
 log = "0.4"
+proptest = { version = "1.7", default-features = false, features = [
+    "no_std",
+    "alloc",
+] }
+proptest-derive = { version = "0.6", default-features = false }
 serde = { version = "1.0", default-features = false, features = [
     "alloc",
     "derive",
     "rc",
 ] }
+serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
 smallvec = { version = "1.13", default-features = false, features = [
     "union",
     "const_generics",
     "const_new",
 ] }
 thiserror = { version = "2.0", default-features = false }
+tracing = { version = "0.1", default-features = false, features = [
+    "attributes",
+] }
+winter-air = { version = "0.13", default-features = false }
+winter-fri = "0.13"
+winter-math = { version = "0.13", default-features = false }
+winter-prover = { version = "0.13", default-features = false }
+winter-rand-utils = "0.13"
+winter-utils = { version = "0.13", default-features = false }
+winter-verifier = { version = "0.13", default-features = false }

@@ -3,8 +3,8 @@ use std::{
     time::Instant,
 };
 
-use assembly::diagnostics::{IntoDiagnostic, Report, Result, WrapErr};
 use clap::Parser;
+use miden_assembly::diagnostics::{IntoDiagnostic, Report, Result, WrapErr};
 use miden_vm::{Kernel, ProgramInfo, internal::InputFile};
 
 use super::data::{OutputFile, ProgramHash, ProofFile};
@@ -59,7 +59,7 @@ impl VerifyCmd {
 
         // verify proof
         let stack_outputs = outputs_data.stack_outputs().map_err(Report::msg)?;
-        verifier::verify(program_info, stack_inputs, stack_outputs, proof)
+        miden_verifier::verify(program_info, stack_inputs, stack_outputs, proof)
             .into_diagnostic()
             .wrap_err("Program failed verification!")?;
 

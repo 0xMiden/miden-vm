@@ -299,7 +299,7 @@ impl Process {
 
 #[cfg(test)]
 mod tests {
-    use vm_core::mast::MastForest;
+    use miden_core::mast::MastForest;
 
     use super::{
         super::{Operation, Process},

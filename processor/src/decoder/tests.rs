@@ -10,12 +10,12 @@ use miden_air::trace::{
         OP_INDEX_COL_IDX,
     },
 };
-use rstest::rstest;
-use test_utils::rand::rand_value;
-use vm_core::{
+use miden_core::{
     EMPTY_WORD, ONE, Program, WORD_SIZE, ZERO, assert_matches,
     mast::{BasicBlockNode, MastForest, MastNode, MastNodeId, OP_BATCH_SIZE},
 };
+use miden_test_utils::rand::rand_value;
+use rstest::rstest;
 
 use super::{
     super::{

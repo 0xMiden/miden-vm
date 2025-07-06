@@ -1,4 +1,4 @@
-use test_utils::{
+use miden_test_utils::{
     Word, build_op_test,
     crypto::{MerkleStore, MerkleTree, Rpo256, init_merkle_leaf, init_merkle_store},
     rand::rand_vector,

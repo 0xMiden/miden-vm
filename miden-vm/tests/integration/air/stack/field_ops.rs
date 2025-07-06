@@ -1,4 +1,4 @@
-use test_utils::build_op_test;
+use miden_test_utils::build_op_test;
 
 #[test]
 fn incr() {

@@ -1,5 +1,5 @@
 use miden_air::RowIndex;
-use vm_core::{Felt, FieldElement, QuadFelt};
+use miden_core::{Felt, FieldElement, QuadFelt};
 
 use super::{FastProcessor, memory::Memory};
 use crate::{

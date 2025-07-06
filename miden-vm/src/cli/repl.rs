@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
-use assembly::diagnostics::Report;
 use clap::Parser;
+use miden_assembly::diagnostics::Report;
 
 use crate::repl::start_repl;
 

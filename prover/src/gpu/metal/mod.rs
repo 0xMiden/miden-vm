@@ -4,14 +4,14 @@
 
 use std::{boxed::Box, marker::PhantomData, time::Instant, vec::Vec};
 
-use air::{AuxRandElements, PartitionOptions};
 use elsa::FrozenVec;
+use miden_air::{AuxRandElements, PartitionOptions};
 use miden_gpu::{
     HashFn,
     metal::{RowHasher, build_merkle_tree, utils::page_aligned_uninit_vector},
 };
+use miden_processor::crypto::{ElementHasher, Hasher};
 use pollster::block_on;
-use processor::crypto::{ElementHasher, Hasher};
 use tracing::{Level, event};
 use winter_prover::{
     CompositionPoly, CompositionPolyTrace, ConstraintCommitment, ConstraintCompositionCoefficients,

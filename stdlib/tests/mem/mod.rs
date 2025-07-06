@@ -1,9 +1,9 @@
-use processor::{AdviceInputs, ContextId, DefaultHost, Program};
-use test_utils::{
+use miden_core::Word;
+use miden_processor::{AdviceInputs, ContextId, DefaultHost, Program};
+use miden_test_utils::{
     ExecutionOptions, ONE, Process, StackInputs, ZERO, build_expected_hash, build_expected_perm,
     felt_slice_to_ints,
 };
-use vm_core::Word;
 
 #[test]
 fn test_memcopy_words() {
@@ -24,7 +24,7 @@ fn test_memcopy_words() {
     ";
 
     let stdlib = StdLibrary::default();
-    let assembler = assembly::Assembler::default()
+    let assembler = miden_assembly::Assembler::default()
         .with_dynamic_library(&stdlib)
         .expect("failed to load stdlib");
 

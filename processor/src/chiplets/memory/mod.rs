@@ -10,7 +10,7 @@ use miden_air::{
         MEMORY_WRITE, V_COL_RANGE, WORD_COL_IDX,
     },
 };
-use vm_core::{WORD_SIZE, ZERO};
+use miden_core::{WORD_SIZE, ZERO};
 
 use super::{
     EMPTY_WORD, Felt, FieldElement, ONE, RangeChecker, TraceFragment, Word,

@@ -1,13 +1,13 @@
 use std::{path::PathBuf, sync::Arc, time::Instant};
 
-use assembly::{
+use clap::Parser;
+use miden_assembly::{
     DefaultSourceManager,
     diagnostics::{IntoDiagnostic, Report, WrapErr},
 };
-use clap::Parser;
+use miden_processor::{DefaultHost, ExecutionOptions, ExecutionTrace};
+use miden_stdlib::StdLibrary;
 use miden_vm::internal::InputFile;
-use processor::{DefaultHost, ExecutionOptions, ExecutionTrace};
-use stdlib::StdLibrary;
 use tracing::instrument;
 
 use super::{
@@ -152,7 +152,7 @@ fn run_masp_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
     let source_manager = Arc::new(DefaultSourceManager::default());
 
     // execute program and generate outputs
-    let trace = processor::execute(
+    let trace = miden_processor::execute(
         &program,
         stack_inputs,
         advice_inputs,
@@ -201,7 +201,7 @@ fn run_masm_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
 
     let program_hash: [u8; 32] = program.hash().into();
 
-    let trace = processor::execute(
+    let trace = miden_processor::execute(
         &program,
         stack_inputs,
         advice_inputs,

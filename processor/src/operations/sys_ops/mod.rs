@@ -1,4 +1,4 @@
-use vm_core::{Felt, Operation, mast::MastForest, sys_events::SystemEvent};
+use miden_core::{Felt, Operation, mast::MastForest, sys_events::SystemEvent};
 
 use super::{
     super::{
@@ -161,7 +161,7 @@ impl Process {
 
 #[cfg(test)]
 mod tests {
-    use vm_core::mast::MastForest;
+    use miden_core::mast::MastForest;
 
     use super::{
         super::{MIN_STACK_DEPTH, Operation},

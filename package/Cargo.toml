@@ -26,8 +26,8 @@ arbitrary = [
 ]
 
 [dependencies]
-derive_more = { version = "2.0.1", features = ["from"] }
-miden-assembly-syntax = { path = "../assembly-syntax", version = "0.15", default-features = false }
-miden-core = { path = "../core", version = "0.15", default-features = false }
-proptest = { version = "1.6", optional = true }
-proptest-derive = { version = "0.5", optional = true }
+derive_more = { version = "2.0", features = ["from"] }
+miden-assembly-syntax.workspace = true
+miden-core.workspace = true
+proptest = { workspace = true, optional = true }
+proptest-derive = { workspace = true, optional = true }

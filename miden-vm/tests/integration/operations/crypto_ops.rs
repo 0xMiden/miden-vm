@@ -1,4 +1,4 @@
-use test_utils::{
+use miden_test_utils::{
     Felt, build_expected_hash, build_expected_perm, build_op_test,
     crypto::{MerkleTree, NodeIndex, init_merkle_leaf, init_merkle_store},
     rand::rand_vector,

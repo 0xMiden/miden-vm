@@ -1,4 +1,4 @@
-use vm_core::{ExtensionOf, FieldElement, ONE, QuadFelt, StarkField, ZERO};
+use miden_core::{ExtensionOf, FieldElement, ONE, QuadFelt, StarkField, ZERO};
 
 use super::{ExecutionError, Felt, Operation, Process};
 
@@ -242,8 +242,8 @@ fn fold2(f_x: QuadFelt, f_neg_x: QuadFelt, ep: QuadFelt) -> QuadFelt {
 mod tests {
     use alloc::vec::Vec;
 
-    use test_utils::rand::{rand_array, rand_value, rand_vector};
-    use vm_core::{StackInputs, mast::MastForest};
+    use miden_core::{StackInputs, mast::MastForest};
+    use miden_test_utils::rand::{rand_array, rand_value, rand_vector};
     use winter_prover::math::{fft, get_power_series_with_offset};
     use winter_utils::transpose_slice;
 

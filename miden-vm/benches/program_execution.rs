@@ -1,7 +1,7 @@
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
+use miden_processor::{AdviceInputs, ExecutionOptions, execute};
+use miden_stdlib::StdLibrary;
 use miden_vm::{Assembler, DefaultHost, StackInputs, internal::InputFile};
-use processor::{AdviceInputs, ExecutionOptions, execute};
-use stdlib::StdLibrary;
 use walkdir::WalkDir;
 
 /// Benchmark the execution of all the masm examples in the `masm-examples` directory.

@@ -43,13 +43,11 @@ serde = { workspace = true, optional = true }
 serde_spanned = { version = "0.6", optional = true, default-features = false }
 smallvec.workspace = true
 thiserror.workspace = true
-tracing = { version = "0.1", default-features = false, features = [
-    "attributes",
-] }
+tracing.workspace = true
 
 [dev-dependencies]
 loom = "0.7"
-proptest = "1.6"
+proptest.workspace = true
 
 [target.'cfg(loom)'.dependencies]
 loom = "0.7"

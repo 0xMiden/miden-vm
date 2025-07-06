@@ -1,5 +1,5 @@
-use assembly::diagnostics::Report;
 use clap::Parser;
+use miden_assembly::diagnostics::Report;
 #[cfg(feature = "tracing-forest")]
 use tracing_forest::ForestLayer;
 #[cfg(not(feature = "tracing-forest"))]
@@ -92,7 +92,7 @@ pub fn main() -> Result<(), Report> {
 }
 
 fn initialize_diagnostics() {
-    use assembly::diagnostics::reporting::{self, ReportHandlerOpts};
+    use miden_assembly::diagnostics::reporting::{self, ReportHandlerOpts};
 
     #[cfg(feature = "std")]
     {

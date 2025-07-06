@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 use std::{cmp::min, println, string::ToString};
 
-use vm_core::{DebugOptions, Felt};
+use miden_core::{DebugOptions, Felt};
 
 use crate::{MemoryAddress, ProcessState};
 

@@ -1,13 +1,13 @@
 use alloc::sync::Arc;
 
-use assembly::{
+use miden_assembly::{
     Assembler, LibraryPath, Report, SourceManager, ast::ModuleKind, diagnostics::SourceLanguage,
 };
+use miden_processor::ExecutionError;
+use miden_prover::Word;
+use miden_stdlib::StdLibrary;
+use miden_test_utils::{StackInputs, Test, build_test, expect_exec_error_matches, push_inputs};
 use miden_vm::Module;
-use processor::ExecutionError;
-use prover::Word;
-use stdlib::StdLibrary;
-use test_utils::{StackInputs, Test, build_test, expect_exec_error_matches, push_inputs};
 
 // SIMPLE FLOW CONTROL TESTS
 // ================================================================================================
@@ -343,7 +343,7 @@ fn simple_dyn_exec() {
         end";
 
     // The hash of foo can be obtained with:
-    // let context = assembly::testing::TestContext::new();
+    // let context = miden_assembly::testing::TestContext::new();
     // let program = context.assemble(program_source).unwrap();
     // let procedure_digests: Vec<Digest> = program.mast_forest().procedure_digests().collect();
     // let foo_digest = procedure_digests[0];
@@ -441,7 +441,7 @@ fn simple_dyncall() {
         end";
 
     // The hash of foo can be obtained with:
-    // let context = assembly::testing::TestContext::new();
+    // let context = miden_assembly::testing::TestContext::new();
     // let program = context.assemble(program_source).unwrap();
     // let procedure_digests: Vec<Digest> = program.mast_forest().procedure_digests().collect();
     // let foo_digest = procedure_digests[0];
@@ -549,7 +549,7 @@ fn procref() -> Result<(), Report> {
 
     // obtain procedures' MAST roots by compiling them as module
     let mast_roots: Vec<Word> = {
-        let source_manager = Arc::new(assembly::DefaultSourceManager::default());
+        let source_manager = Arc::new(miden_assembly::DefaultSourceManager::default());
         let module_path = "test::foo".parse::<LibraryPath>().unwrap();
         let mut parser = Module::parser(ModuleKind::Library);
         let module = parser.parse_str(module_path, module_source, &source_manager)?;

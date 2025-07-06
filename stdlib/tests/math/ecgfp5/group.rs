@@ -1,6 +1,6 @@
 use std::ops::Add;
 
-use test_utils::{Felt, ONE, ZERO, push_inputs, test_case};
+use miden_test_utils::{Felt, ONE, ZERO, push_inputs, test_case};
 
 use super::base_field::{Ext5, bv_or};
 
@@ -255,7 +255,7 @@ fn test_ec_ext5_point_decode(a0: u64, a1: u64, a2: u64, a3: u64, a4: u64, should
 
     begin
         exec.group::decode
-        
+
         exec.sys::truncate_stack
     end";
 

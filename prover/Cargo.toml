@@ -14,18 +14,18 @@ rust-version.workspace = true
 edition.workspace = true
 
 [features]
-async = ["winter-maybe-async/async"]
-concurrent = ["processor/concurrent", "std", "winter-prover/concurrent"]
 default = ["std"]
+async = ["winter-maybe-async/async"]
+concurrent = ["std", "miden-processor/concurrent", "winter-prover/concurrent"]
 metal = ["dep:miden-gpu", "dep:elsa", "dep:pollster", "concurrent", "std"]
-std = ["air/std", "processor/std", "winter-prover/std"]
+std = ["miden-air/std", "miden-processor/std", "winter-prover/std"]
 
 [dependencies]
-air = { package = "miden-air", path = "../air", version = "0.15", default-features = false }
-processor = { package = "miden-processor", path = "../processor", version = "0.15", default-features = false }
-tracing = { version = "0.1", default-features = false, features = ["attributes"] }
-winter-maybe-async = { package = "winter-maybe-async", version = "0.13", default-features = false }
-winter-prover = { package = "winter-prover", version = "0.13", default-features = false }
+miden-air.workspace = true
+miden-processor.workspace = true
+tracing.workspace = true
+winter-maybe-async = { version = "0.13", default-features = false }
+winter-prover.workspace = true
 
 [target.'cfg(all(target_arch = "aarch64", target_os = "macos"))'.dependencies]
 elsa = { version = "1.9", optional = true }

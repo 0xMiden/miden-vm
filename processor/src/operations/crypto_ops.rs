@@ -1,4 +1,4 @@
-use vm_core::mast::MastForest;
+use miden_core::mast::MastForest;
 
 use super::{ExecutionError, Operation, Process};
 use crate::{ErrorContext, Felt};
@@ -195,12 +195,12 @@ impl Process {
 mod tests {
     use alloc::vec::Vec;
 
-    use test_utils::rand::rand_vector;
-    use vm_core::{
+    use miden_core::{
         chiplets::hasher::{STATE_WIDTH, apply_permutation},
         crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},
         mast::MastForest,
     };
+    use miden_test_utils::rand::rand_vector;
 
     use super::{
         super::{Felt, Operation},

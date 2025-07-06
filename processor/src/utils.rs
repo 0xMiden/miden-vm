@@ -1,10 +1,10 @@
 use alloc::{sync::Arc, vec::Vec};
 
 use miden_air::RowIndex;
-use vm_core::mast::{ExternalNode, MastForest, MastNodeId};
+use miden_core::mast::{ExternalNode, MastForest, MastNodeId};
 // RE-EXPORTS
 // ================================================================================================
-pub use vm_core::utils::*;
+pub use miden_core::utils::*;
 
 use super::{AdviceProvider, Felt};
 use crate::{AsyncHost, ExecutionError, SyncHost};

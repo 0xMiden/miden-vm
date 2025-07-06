@@ -1,10 +1,10 @@
 use alloc::sync::Arc;
 
-use miette::Diagnostic;
-use vm_core::{
+use miden_core::{
     Felt,
     debuginfo::{SourceFile, SourceSpan},
 };
+use miden_core_diagnostics::{Diagnostic, miette};
 
 use crate::{ContextId, ErrorContext};
 

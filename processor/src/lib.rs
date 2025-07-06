@@ -14,8 +14,7 @@ use miden_air::trace::{
     SYS_TRACE_WIDTH,
 };
 pub use miden_air::{ExecutionOptions, ExecutionOptionsError, RowIndex};
-use utils::resolve_external_node;
-pub use vm_core::{
+pub use miden_core::{
     AssemblyOp, EMPTY_WORD, Felt, Kernel, ONE, Operation, Program, ProgramInfo, QuadExtension,
     StackInputs, StackOutputs, Word, ZERO,
     crypto::merkle::SMT_DEPTH,
@@ -25,12 +24,13 @@ pub use vm_core::{
     sys_events::SystemEvent,
     utils::{DeserializationError, collections::KvMap},
 };
-use vm_core::{
+use miden_core::{
     Decorator, DecoratorIterator, FieldElement, WORD_SIZE,
     mast::{
         BasicBlockNode, CallNode, DynNode, JoinNode, LoopNode, OP_GROUP_SIZE, OpBatch, SplitNode,
     },
 };
+use utils::resolve_external_node;
 pub use winter_prover::matrix::ColMatrix;
 
 pub mod fast;
@@ -80,12 +80,12 @@ pub use debug::{AsmOpInfo, VmState, VmStateIterator};
 // ================================================================================================
 
 pub mod math {
-    pub use vm_core::{Felt, FieldElement, StarkField};
+    pub use miden_core::{Felt, FieldElement, StarkField};
     pub use winter_prover::math::fft;
 }
 
 pub mod crypto {
-    pub use vm_core::crypto::{
+    pub use miden_core::crypto::{
         hash::{Blake3_192, Blake3_256, ElementHasher, Hasher, Rpo256, Rpx256},
         merkle::{
             MerkleError, MerklePath, MerkleStore, MerkleTree, NodeIndex, PartialMerkleTree,
@@ -486,7 +486,7 @@ impl Process {
         self.end_call_node(call_node, program, host, &err_ctx)
     }
 
-    /// Executes the specified [vm_core::mast::DynNode].
+    /// Executes the specified [miden_core::mast::DynNode].
     ///
     /// The MAST root of the callee is assumed to be at the top of the stack, and the callee is
     /// expected to be either in the current `program` or in the host.

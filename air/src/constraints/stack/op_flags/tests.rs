@@ -1,4 +1,4 @@
-use vm_core::{ONE, Operation, ZERO};
+use miden_core::{ONE, Operation, ZERO};
 
 use super::{
     DECODER_TRACE_OFFSET, DEGREE_4_OPCODE_ENDS, DEGREE_4_OPCODE_STARTS, DEGREE_6_OPCODE_ENDS,

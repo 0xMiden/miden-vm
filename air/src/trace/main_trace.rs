@@ -2,7 +2,7 @@
 use alloc::vec::Vec;
 use core::ops::{Deref, Range};
 
-use vm_core::{Felt, ONE, Word, ZERO, utils::range};
+use miden_core::{Felt, ONE, Word, ZERO, utils::range};
 
 use super::{
     super::ColMatrix,

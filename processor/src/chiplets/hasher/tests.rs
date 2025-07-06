@@ -3,13 +3,13 @@ use alloc::vec::Vec;
 use miden_air::trace::chiplets::hasher::{
     DIGEST_LEN, HASH_CYCLE_LEN, NUM_ROUNDS, NUM_SELECTORS, STATE_COL_RANGE,
 };
-use test_utils::rand::rand_array;
-use vm_core::{
+use miden_core::{
     ONE, Operation, ZERO,
     chiplets::hasher,
     crypto::merkle::{MerkleTree, NodeIndex},
     mast::{MastForest, MastNode},
 };
+use miden_test_utils::rand::rand_array;
 
 use super::{
     Digest, Felt, Hasher, HasherState, LINEAR_HASH, MP_VERIFY, MR_UPDATE_NEW, MR_UPDATE_OLD,

@@ -1,6 +1,6 @@
-use processor::{AsmOpInfo, ContextId, RowIndex, VmState};
-use test_utils::{Felt, ONE, ToElements, assert_eq, build_debug_test};
-use vm_core::{AssemblyOp, Operation, debuginfo::Location};
+use miden_core::{AssemblyOp, Operation, debuginfo::Location};
+use miden_processor::{AsmOpInfo, ContextId, RowIndex, VmState};
+use miden_test_utils::{Felt, ONE, ToElements, assert_eq, build_debug_test};
 
 // EXEC ITER TESTS
 // =================================================================

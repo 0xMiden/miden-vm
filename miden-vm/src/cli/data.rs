@@ -5,16 +5,16 @@ use std::{
     sync::Arc,
 };
 
-use assembly::{
+use miden_assembly::{
     Assembler, Library, LibraryNamespace, SourceManager,
     ast::{Module, ModuleKind},
     diagnostics::{Report, WrapErr},
     report,
     utils::Deserializable,
 };
+use miden_stdlib::StdLibrary;
 use miden_vm::{ExecutionProof, Program, StackOutputs, Word, utils::SliceReader};
-use serde_derive::{Deserialize, Serialize};
-use stdlib::StdLibrary;
+use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
 // HELPERS
@@ -116,12 +116,12 @@ pub struct ProgramFile {
 impl ProgramFile {
     /// Reads the masm file at the specified path and parses it into a [ProgramFile].
     pub fn read(path: impl AsRef<Path>) -> Result<Self, Report> {
-        let source_manager = Arc::new(assembly::DefaultSourceManager::default());
+        let source_manager = Arc::new(miden_assembly::DefaultSourceManager::default());
         Self::read_with(path, source_manager)
     }
 
     /// Reads the masm file at the specified path and parses it into a [ProgramFile], using the
-    /// provided [assembly::SourceManager] implementation.
+    /// provided [miden_assembly::SourceManager] implementation.
     #[instrument(name = "read_program_file", skip(source_manager), fields(path = %path.as_ref().display()))]
     pub fn read_with(
         path: impl AsRef<Path>,

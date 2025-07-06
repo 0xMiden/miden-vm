@@ -1,13 +1,13 @@
 use std::{sync::Arc, vec};
 
-use assembly::{Assembler, DefaultSourceManager, utils::Serializable};
 use miden_air::{Felt, ProvingOptions, RowIndex};
-use miden_stdlib::{EVENT_FALCON_SIG_TO_STACK, StdLibrary, falcon_sign};
-use processor::{
+use miden_assembly::{Assembler, DefaultSourceManager, utils::Serializable};
+use miden_core::{StarkField, ZERO};
+use miden_processor::{
     AdviceInputs, ExecutionError, Program, ProgramInfo, StackInputs, crypto::RpoRandomCoin,
 };
-use rand::{Rng, rng};
-use test_utils::{
+use miden_stdlib::{EVENT_FALCON_SIG_TO_STACK, StdLibrary, falcon_sign};
+use miden_test_utils::{
     Word,
     crypto::{
         MerkleStore, Rpo256,
@@ -18,7 +18,7 @@ use test_utils::{
     proptest::proptest,
     rand::rand_value,
 };
-use vm_core::{StarkField, ZERO};
+use rand::{Rng, rng};
 
 /// Modulus used for rpo falcon 512.
 const M: u64 = 12289;
@@ -240,7 +240,7 @@ fn falcon_prove_verify() {
         .expect("failed to load mast forest");
 
     let options = ProvingOptions::with_96_bit_security(false);
-    let (stack_outputs, proof) = test_utils::prove(
+    let (stack_outputs, proof) = miden_test_utils::prove(
         &program,
         stack_inputs.clone(),
         advice_inputs,
@@ -251,7 +251,7 @@ fn falcon_prove_verify() {
     .expect("failed to generate proof");
 
     let program_info = ProgramInfo::from(program);
-    let result = test_utils::verify(program_info, stack_inputs, stack_outputs, proof);
+    let result = miden_test_utils::verify(program_info, stack_inputs, stack_outputs, proof);
 
     assert!(result.is_ok(), "error: {result:?}");
 }

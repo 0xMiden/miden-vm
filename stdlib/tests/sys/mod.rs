@@ -1,4 +1,4 @@
-use test_utils::{MIN_STACK_DEPTH, proptest::prelude::*, rand::rand_vector};
+use miden_test_utils::{MIN_STACK_DEPTH, proptest::prelude::*, rand::rand_vector};
 
 #[test]
 fn truncate_stack() {

@@ -10,7 +10,7 @@ use miden_air::{
         },
     },
 };
-use vm_core::{
+use miden_core::{
     AssemblyOp,
     mast::{
         BasicBlockNode, CallNode, DynNode, JoinNode, LoopNode, MastForest, OP_BATCH_SIZE, SplitNode,
@@ -683,7 +683,7 @@ impl Decoder {
     /// Note that even though the hasher decoder columns are populated, the issued hash request is
     /// still for [ZERO; 8 | domain=DYN]. This is because a `DYN` node takes its child on the stack,
     /// and therefore the child hash cannot be included in the `DYN` node hash computation (see
-    /// [`vm_core::mast::DynNode`]). The decoder hasher columns are then not needed for the `DYN`
+    /// [`miden_core::mast::DynNode`]). The decoder hasher columns are then not needed for the `DYN`
     /// node hash computation, and so were used to store the result of the memory read operation for
     /// the child hash.
     ///

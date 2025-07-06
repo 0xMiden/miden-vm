@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use vm_core::{
+use miden_core::{
     Felt, FieldElement, QuadFelt, WORD_SIZE, Word, ZERO,
     crypto::{
         hash::Rpo256,

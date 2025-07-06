@@ -13,7 +13,7 @@ use miden_air::{
         main_trace::MainTrace,
     },
 };
-use vm_core::{
+use miden_core::{
     Felt, FieldElement, ONE, OPCODE_CALL, OPCODE_JOIN, OPCODE_LOOP, OPCODE_SPLIT, ZERO,
     utils::range,
 };

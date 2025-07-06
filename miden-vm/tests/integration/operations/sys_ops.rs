@@ -1,6 +1,6 @@
-use processor::{ExecutionError, RowIndex, ZERO};
-use test_utils::{build_op_test, expect_exec_error_matches};
-use vm_core::mast;
+use miden_core::mast;
+use miden_processor::{ExecutionError, RowIndex, ZERO};
+use miden_test_utils::{build_op_test, expect_exec_error_matches};
 
 // SYSTEM OPS ASSERTIONS - MANUAL TESTS
 // ================================================================================================

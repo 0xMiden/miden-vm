@@ -9,7 +9,7 @@ use miden_air::{
         V_1_1_IDX, V_2_0_IDX, V_2_1_IDX,
     },
 };
-use vm_core::{Felt, FieldElement, QuadFelt, Word};
+use miden_core::{Felt, FieldElement, QuadFelt, Word};
 
 use crate::{
     ContextId, ExecutionError,

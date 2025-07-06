@@ -49,6 +49,8 @@ assertion failed: `(left matches right)`
     }
 }
 
+pub use miden_core_diagnostics::debuginfo;
+
 pub mod chiplets;
 pub mod errors;
 
@@ -57,7 +59,6 @@ pub use program::{Program, ProgramInfo};
 
 mod kernel;
 pub use kernel::Kernel;
-pub use miden_core_diagnostics::debuginfo;
 pub use miden_crypto::{EMPTY_WORD, ONE, WORD_SIZE, Word, ZERO};
 pub mod crypto {
     pub mod merkle {
@@ -90,7 +91,7 @@ pub mod crypto {
 
 pub mod mast;
 
-pub use math::{
+pub use winter_math::{
     ExtensionOf, FieldElement, StarkField, ToElements,
     fields::{QuadExtension, f64::BaseElement as Felt},
     polynom,

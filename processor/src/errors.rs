@@ -2,13 +2,16 @@ use alloc::{boxed::Box, sync::Arc};
 use core::error::Error;
 
 use miden_air::RowIndex;
-use miette::Diagnostic;
-use vm_core::{
+use miden_core::{
     Felt, QuadFelt, Word,
-    debuginfo::{SourceFile, SourceManager, SourceSpan},
     mast::{DecoratorId, MastForest, MastNodeExt, MastNodeId},
     stack::MIN_STACK_DEPTH,
     utils::to_hex,
+};
+use miden_core_diagnostics::{
+    Diagnostic,
+    debuginfo::{SourceFile, SourceManager, SourceSpan},
+    miette,
 };
 use winter_prover::ProverError;
 

@@ -1,9 +1,9 @@
 use alloc::vec::Vec;
 
-use math::FieldElement;
 use miden_crypto::WORD_SIZE;
 use proptest::prelude::*;
-use rand_utils::prng_array;
+use winter_math::FieldElement;
+use winter_rand_utils::prng_array;
 
 use crate::{
     Felt, Kernel, ProgramInfo, Word,

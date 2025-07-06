@@ -1,4 +1,4 @@
-use test_utils::{build_op_test, build_test};
+use miden_test_utils::{build_op_test, build_test};
 
 #[test]
 fn mem_load() {
@@ -42,10 +42,10 @@ fn write_read() {
 #[test]
 fn update() {
     let source = "
-    begin 
-        push.0.0.0.0 
-        mem_loadw.0 
-        mem_storew.0 
+    begin
+        push.0.0.0.0
+        mem_loadw.0
+        mem_storew.0
         swapw dropw
     end";
     let pub_inputs = vec![8, 7, 6, 5, 4, 3, 2, 1];

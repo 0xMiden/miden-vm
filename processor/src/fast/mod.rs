@@ -3,7 +3,7 @@ use core::cmp::min;
 
 use memory::Memory;
 use miden_air::RowIndex;
-use vm_core::{
+use miden_core::{
     Decorator, DecoratorIterator, EMPTY_WORD, Felt, Kernel, ONE, Operation, Program, StackOutputs,
     WORD_SIZE, Word, ZERO,
     debuginfo::{DefaultSourceManager, SourceManager},

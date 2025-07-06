@@ -63,8 +63,8 @@ fn cli_run() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-use assembly::Library;
-use vm_core::Decorator;
+use miden_assembly::Library;
+use miden_core::Decorator;
 
 #[test]
 fn cli_bundle_debug() {

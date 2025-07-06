@@ -1,7 +1,7 @@
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
+use miden_processor::{AdviceInputs, fast::FastProcessor};
+use miden_stdlib::StdLibrary;
 use miden_vm::{Assembler, DefaultHost, StackInputs, internal::InputFile};
-use processor::{AdviceInputs, fast::FastProcessor};
-use stdlib::StdLibrary;
 use tokio::runtime::Runtime;
 use walkdir::WalkDir;
 
@@ -54,7 +54,7 @@ fn program_execution_fast(c: &mut Criterion) {
                     let stack_inputs: Vec<_> = stack_inputs.iter().rev().copied().collect();
                     bench.to_async(Runtime::new().unwrap()).iter_batched(
                         || {
-                            let processor = FastProcessor::new_with_advice_inputs(
+                            let processor = Fastmiden_processor::new_with_advice_inputs(
                                 &stack_inputs,
                                 advice_inputs.clone(),
                             );

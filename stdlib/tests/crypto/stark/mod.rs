@@ -1,19 +1,19 @@
 use std::{array, sync::Arc};
 
-use assembly::{Assembler, DefaultSourceManager};
 use miden_air::{FieldExtension, HashFunction, PublicInputs};
-use processor::{
+use miden_assembly::{Assembler, DefaultSourceManager};
+use miden_core::{Felt, FieldElement, QuadFelt, WORD_SIZE, Word, ZERO};
+use miden_processor::{
     DefaultHost, Program, ProgramInfo,
     crypto::{RandomCoin, Rpo256, RpoRandomCoin},
+};
+use miden_test_utils::{
+    AdviceInputs, ProvingOptions, StackInputs, VerifierError, proptest::proptest, prove,
 };
 use rand::{Rng, RngCore, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use rstest::rstest;
-use test_utils::{
-    AdviceInputs, ProvingOptions, StackInputs, VerifierError, proptest::proptest, prove,
-};
 use verifier_recursive::{VerifierData, generate_advice_inputs};
-use vm_core::{Felt, FieldElement, QuadFelt, WORD_SIZE, Word, ZERO};
 
 mod verifier_recursive;
 
@@ -68,7 +68,7 @@ pub fn generate_recursive_verifier_data(
     let program = {
         match kernel {
             Some(kernel) => {
-                let context = assembly::testing::TestContext::new();
+                let context = miden_assembly::testing::TestContext::new();
                 let kernel_lib =
                     Assembler::new(context.source_manager()).assemble_kernel(kernel).unwrap();
                 let assembler = Assembler::with_kernel(context.source_manager(), kernel_lib);
@@ -380,7 +380,7 @@ const TEST_RANDOM_INDICES_GENERATION: &str = r#"
                 dup
                 neq.0
             end
-            drop  
+            drop
         end
         "#;
 

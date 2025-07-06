@@ -35,7 +35,4 @@ thiserror.workspace = true
 [dev-dependencies]
 miden-mast-package = { workspace = true, features = ["arbitrary"] }
 pretty_assertions = "1.4"
-proptest = { version = "1.6", default-features = false, features = [
-    "no_std",
-    "alloc",
-] }
+proptest = { workspace = true, features = ["std"] }

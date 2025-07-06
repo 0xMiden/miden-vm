@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use vm_core::{
+use miden_core::{
     crypto::hash::{Blake3_192, Blake3_256, Hasher, Rpo256, Rpx256},
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };

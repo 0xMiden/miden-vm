@@ -1,6 +1,6 @@
-use processor::{AsmOpInfo, RowIndex, VmStateIterator};
-use test_utils::{assert_eq, build_debug_test};
-use vm_core::{AssemblyOp, Felt, Operation, debuginfo::Location};
+use miden_core::{AssemblyOp, Felt, Operation, debuginfo::Location};
+use miden_processor::{AsmOpInfo, RowIndex, VmStateIterator};
+use miden_test_utils::{assert_eq, build_debug_test};
 
 #[test]
 fn asmop_one_span_block_test() {

@@ -2,11 +2,11 @@ use miden_air::trace::{
     AUX_TRACE_RAND_ELEMENTS,
     decoder::{P1_COL_IDX, P2_COL_IDX, P3_COL_IDX},
 };
-use test_utils::rand::rand_array;
-use vm_core::{
+use miden_core::{
     FieldElement, ONE, Operation, Program, Word, ZERO,
     mast::{MastForest, MastNode},
 };
+use miden_test_utils::rand::rand_array;
 
 use super::{
     super::{
@@ -817,7 +817,7 @@ impl BlockStackTableRow {
             parent_id,
             is_loop,
             parent_ctx: ContextId::root(),
-            parent_fn_hash: vm_core::EMPTY_WORD,
+            parent_fn_hash: miden_core::EMPTY_WORD,
             parent_fmp: ZERO,
             parent_stack_depth: 0,
             parent_next_overflow_addr: ZERO,
