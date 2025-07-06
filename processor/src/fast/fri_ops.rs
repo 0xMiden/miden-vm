@@ -1,10 +1,10 @@
 // CONSTANTS
 // ================================================================================================
 
-use vm_core::{ExtensionOf, Felt, FieldElement, ONE, StarkField, ZERO};
+use vm_core::{ExtensionOf, Felt, FieldElement, ONE, QuadFelt, StarkField, ZERO};
 
 use super::FastProcessor;
-use crate::{ExecutionError, QuadFelt};
+use crate::ExecutionError;
 
 const EIGHT: Felt = Felt::new(8);
 const TWO_INV: Felt = Felt::new(9223372034707292161);

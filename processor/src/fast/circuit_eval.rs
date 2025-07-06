@@ -1,9 +1,9 @@
 use miden_air::RowIndex;
-use vm_core::{Felt, FieldElement};
+use vm_core::{Felt, FieldElement, QuadFelt};
 
 use super::{FastProcessor, memory::Memory};
 use crate::{
-    ContextId, ExecutionError, QuadFelt,
+    ContextId, ExecutionError,
     chiplets::{CircuitEvaluation, MAX_NUM_ACE_WIRES, PTR_OFFSET_ELEM, PTR_OFFSET_WORD},
     errors::{AceError, ErrorContext},
 };

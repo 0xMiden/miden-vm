@@ -63,11 +63,6 @@ mod test_builders;
 #[cfg(not(target_family = "wasm"))]
 pub use proptest;
 
-// TYPE ALIASES
-// ================================================================================================
-
-pub type QuadFelt = vm_core::QuadExtension<Felt>;
-
 // CONSTANTS
 // ================================================================================================
 

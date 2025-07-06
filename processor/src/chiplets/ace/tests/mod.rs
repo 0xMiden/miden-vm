@@ -10,10 +10,10 @@ use miden_air::{
         V_2_0_IDX, V_2_1_IDX,
     },
 };
-use vm_core::{WORD_SIZE, ZERO};
+use vm_core::{Felt, QuadFelt, WORD_SIZE, Word, ZERO};
 
 use crate::{
-    ContextId, Felt, QuadFelt, Word,
+    ContextId,
     chiplets::{
         ace::{
             eval_circuit,

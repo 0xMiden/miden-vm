@@ -1,6 +1,6 @@
-use vm_core::{Felt, FieldElement, Operation};
+use vm_core::{Felt, FieldElement, Operation, QuadFelt};
 
-use crate::{ExecutionError, Process, QuadFelt, errors::ErrorContext};
+use crate::{ExecutionError, Process, errors::ErrorContext};
 
 // CONSTANTS
 // ================================================================================================
@@ -265,10 +265,10 @@ mod tests {
     use std::vec::Vec;
 
     use test_utils::{build_test, rand::rand_array};
-    use vm_core::{Felt, Operation, StackInputs, ZERO, mast::MastForest};
+    use vm_core::{Felt, Operation, QuadFelt, StackInputs, ZERO, mast::MastForest};
 
     use super::{ACC_HIGH_INDEX, ACC_LOW_INDEX, ALPHA_ADDR_INDEX, *};
-    use crate::{ContextId, DefaultHost, Process, QuadFelt};
+    use crate::{ContextId, DefaultHost, Process};
 
     #[test]
     fn horner_eval_base() {
