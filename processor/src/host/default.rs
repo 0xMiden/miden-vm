@@ -51,7 +51,7 @@ impl<D: DebugHandler> DefaultHost<D> {
     pub fn load_handler(
         &mut self,
         id: u32,
-        handler: impl EventHandler + 'static,
+        handler: impl EventHandler,
     ) -> Result<(), ExecutionError> {
         self.event_handlers.register(id, Box::new(handler))
     }
