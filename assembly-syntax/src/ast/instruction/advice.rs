@@ -14,7 +14,6 @@ use miden_core::sys_events::SystemEvent;
 pub enum SystemEventNode {
     PushU64Div,
     PushFalconDiv,
-    PushExt2intt,
     PushSmtPeek,
     PushMapVal,
     PushMapValN,
@@ -31,7 +30,6 @@ impl From<&SystemEventNode> for SystemEvent {
         match value {
             PushU64Div => Self::U64Div,
             PushFalconDiv => Self::FalconDiv,
-            PushExt2intt => Self::Ext2Intt,
             PushSmtPeek => Self::SmtPeek,
             PushMapVal => Self::MapValueToStack,
             PushMapValN => Self::MapValueToStackN,
@@ -55,7 +53,6 @@ impl fmt::Display for SystemEventNode {
         match self {
             Self::PushU64Div => write!(f, "push_u64div"),
             Self::PushFalconDiv => write!(f, "push_falcon_div"),
-            Self::PushExt2intt => write!(f, "push_ext2intt"),
             Self::PushSmtPeek => write!(f, "push_smtpeek"),
             Self::PushMapVal => write!(f, "push_mapval"),
             Self::PushMapValN => write!(f, "push_mapvaln"),

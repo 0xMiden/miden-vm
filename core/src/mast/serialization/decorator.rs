@@ -2,15 +2,18 @@ use alloc::vec::Vec;
 
 use num_derive::{FromPrimitive, ToPrimitive};
 use num_traits::{FromPrimitive, ToPrimitive};
-use winter_utils::{
-    ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
-};
 
 use super::{
     DecoratorDataOffset,
     string_table::{StringTable, StringTableBuilder},
 };
-use crate::{AssemblyOp, DebugOptions, Decorator, debuginfo::Uri};
+use crate::{
+    AssemblyOp, DebugOptions, Decorator,
+    debuginfo::Uri,
+    utils::{
+        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
+    },
+};
 
 /// Represents a serialized [`Decorator`].
 ///

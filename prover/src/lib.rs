@@ -37,8 +37,8 @@ mod gpu;
 
 pub use air::{DeserializationError, ExecutionProof, FieldExtension, HashFunction, ProvingOptions};
 pub use processor::{
-    AdviceInputs, ExecutionError, Host, InputError, StackInputs, StackOutputs, Word, crypto, math,
-    utils,
+    AdviceInputs, AsyncHost, BaseHost, ExecutionError, InputError, StackInputs, StackOutputs,
+    SyncHost, Word, crypto, math, utils,
 };
 pub use winter_prover::{Proof, crypto::MerkleTree as MerkleTreeVC};
 
@@ -61,7 +61,7 @@ pub fn prove(
     program: &Program,
     stack_inputs: StackInputs,
     advice_inputs: AdviceInputs,
-    host: &mut impl Host,
+    host: &mut impl SyncHost,
     options: ProvingOptions,
     source_manager: Arc<dyn SourceManager>,
 ) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {

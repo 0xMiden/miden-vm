@@ -8,11 +8,8 @@ use vm_core::{
     },
     sys_events::SystemEvent,
 };
-use winter_prover::math::fft;
 
-use crate::{
-    ExecutionError, Ext2InttError, MemoryError, ProcessState, QuadFelt, errors::ErrorContext,
-};
+use crate::{ExecutionError, MemoryError, ProcessState, QuadFelt, errors::ErrorContext};
 
 /// The offset of the domain value on the stack in the `hdword_to_map_with_domain` system event.
 pub const HDWORD_TO_MAP_WITH_DOMAIN_DOMAIN_OFFSET: usize = 8;
@@ -33,14 +30,12 @@ pub fn handle_system_event(
         SystemEvent::U64Div => push_u64_div_result(process, err_ctx),
         SystemEvent::FalconDiv => push_falcon_mod_result(process, err_ctx),
         SystemEvent::Ext2Inv => push_ext2_inv_result(process, err_ctx),
-        SystemEvent::Ext2Intt => push_ext2_intt_result(process),
         SystemEvent::SmtPeek => push_smtpeek_result(process, err_ctx),
         SystemEvent::U32Clz => push_leading_zeros(process, err_ctx),
         SystemEvent::U32Ctz => push_trailing_zeros(process, err_ctx),
         SystemEvent::U32Clo => push_leading_ones(process, err_ctx),
         SystemEvent::U32Cto => push_trailing_ones(process, err_ctx),
         SystemEvent::ILog2 => push_ilog2(process, err_ctx),
-
         SystemEvent::MemToMap => insert_mem_values_into_adv_map(process),
         SystemEvent::HdwordToMap => insert_hdword_into_adv_map(process, ZERO),
         SystemEvent::HdwordToMapWithDomain => {
@@ -427,88 +422,6 @@ fn push_ext2_inv_result(
 
     process.advice_provider_mut().push_stack(result[1]);
     process.advice_provider_mut().push_stack(result[0]);
-    Ok(())
-}
-
-/// Given evaluations of a polynomial over some specified domain, interpolates the evaluations
-///  into a polynomial in coefficient form and pushes the result into the advice stack.
-///
-/// The interpolation is performed using the iNTT algorithm. The evaluations are expected to be
-/// in the quadratic extension.
-///
-/// Inputs:
-///   Operand stack: [output_size, input_size, input_start_ptr, ...]
-///   Advice stack: [...]
-///
-/// Outputs:
-///   Operand stack: [output_size, input_size, input_start_ptr, ...]
-///   Advice stack: [coefficients...]
-///
-/// - `input_size` is the number of evaluations (each evaluation is 2 base field elements). Must be
-///   a power of 2 and greater 1.
-/// - `output_size` is the number of coefficients in the interpolated polynomial (each coefficient
-///   is 2 base field elements). Must be smaller than or equal to the number of input evaluations.
-/// - `input_start_ptr` is the memory address of the first evaluation.
-/// - `coefficients` are the coefficients of the interpolated polynomial such that lowest degree
-///   coefficients are located at the top of the advice stack.
-///
-/// # Errors
-/// Returns an error if:
-/// - `input_size` less than or equal to 1, or is not a power of 2.
-/// - `output_size` is 0 or is greater than the `input_size`.
-/// - `input_ptr` is greater than 2^32, or is not aligned on a word boundary.
-/// - `input_ptr + input_size * 2` is greater than 2^32.
-fn push_ext2_intt_result(process: &mut ProcessState) -> Result<(), ExecutionError> {
-    let output_size = process.get_stack_item(0).as_int() as usize;
-    let input_size = process.get_stack_item(1).as_int() as usize;
-    let input_start_ptr = process.get_stack_item(2).as_int();
-
-    if input_size <= 1 {
-        return Err(Ext2InttError::DomainSizeTooSmall(input_size as u64).into());
-    }
-    if !input_size.is_power_of_two() {
-        return Err(Ext2InttError::DomainSizeNotPowerOf2(input_size as u64).into());
-    }
-    if input_start_ptr >= u32::MAX as u64 {
-        return Err(Ext2InttError::InputStartAddressTooBig(input_start_ptr).into());
-    }
-    if input_start_ptr % WORD_SIZE as u64 != 0 {
-        return Err(Ext2InttError::InputStartNotWordAligned(input_start_ptr).into());
-    }
-    if input_size > u32::MAX as usize {
-        return Err(Ext2InttError::InputSizeTooBig(input_size as u64).into());
-    }
-
-    let input_end_ptr = input_start_ptr + (input_size * 2) as u64;
-    if input_end_ptr > u32::MAX as u64 {
-        return Err(Ext2InttError::InputEndAddressTooBig(input_end_ptr).into());
-    }
-
-    if output_size == 0 {
-        return Err(Ext2InttError::OutputSizeIsZero.into());
-    }
-    if output_size > input_size {
-        return Err(Ext2InttError::OutputSizeTooBig(output_size, input_size).into());
-    }
-
-    let mut poly = Vec::with_capacity(input_size);
-    for addr in ((input_start_ptr as u32)..(input_end_ptr as u32)).step_by(4) {
-        let word = process
-            .get_mem_word(process.ctx(), addr)
-            .map_err(ExecutionError::MemoryError)?
-            .ok_or(Ext2InttError::UninitializedMemoryAddress(addr))?;
-
-        poly.push(QuadFelt::new(word[0], word[1]));
-        poly.push(QuadFelt::new(word[2], word[3]));
-    }
-
-    let twiddles = fft::get_inv_twiddles::<Felt>(input_size);
-    fft::interpolate_poly::<Felt, QuadFelt>(&mut poly, &twiddles);
-
-    for element in QuadFelt::slice_as_base_elements(&poly[..output_size]).iter().rev() {
-        process.advice_provider_mut().push_stack(*element);
-    }
-
     Ok(())
 }
 

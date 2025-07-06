@@ -8,7 +8,7 @@ use super::{
     ExecutionError, Process,
 };
 use crate::{
-    Host, errors::ErrorContext, operations::sys_ops::sys_event_handlers::handle_system_event,
+    SyncHost, errors::ErrorContext, operations::sys_ops::sys_event_handlers::handle_system_event,
 };
 
 pub(crate) mod sys_event_handlers;
@@ -29,7 +29,7 @@ impl Process {
         err_ctx: &impl ErrorContext,
     ) -> Result<(), ExecutionError>
     where
-        H: Host,
+        H: SyncHost,
     {
         if self.stack.get(0) != ONE {
             let process = &mut self.state();
@@ -141,7 +141,7 @@ impl Process {
         err_ctx: &impl ErrorContext,
     ) -> Result<(), ExecutionError>
     where
-        H: Host,
+        H: SyncHost,
     {
         self.stack.copy_state(0);
         self.decoder.set_user_op_helpers(Operation::Emit(event_id), &[event_id.into()]);

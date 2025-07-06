@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
-use processor::{ErrorContext, ExecutionError, Host, MastForest, ProcessState};
+use processor::{
+    AsyncHost, BaseHost, ErrorContext, ExecutionError, MastForest, ProcessState, SyncHost,
+};
 use prover::Word;
 use vm_core::DebugOptions;
 
@@ -17,22 +19,7 @@ pub struct TestHost {
     pub debug_handler: Vec<String>,
 }
 
-impl Host for TestHost {
-    fn get_mast_forest(&self, _node_digest: &Word) -> Option<Arc<MastForest>> {
-        // Empty MAST forest store
-        None
-    }
-
-    fn on_event(
-        &mut self,
-        _process: &mut ProcessState,
-        event_id: u32,
-        _err_ctx: &impl ErrorContext,
-    ) -> Result<(), ExecutionError> {
-        self.event_handler.push(event_id);
-        Ok(())
-    }
-
+impl BaseHost for TestHost {
     fn on_debug(
         &mut self,
         _process: &mut ProcessState,
@@ -49,5 +36,40 @@ impl Host for TestHost {
     ) -> Result<(), ExecutionError> {
         self.trace_handler.push(trace_id);
         Ok(())
+    }
+}
+
+impl SyncHost for TestHost {
+    fn get_mast_forest(&self, _node_digest: &Word) -> Option<Arc<MastForest>> {
+        // Empty MAST forest store
+        None
+    }
+
+    fn on_event(
+        &mut self,
+        _process: &mut ProcessState,
+        event_id: u32,
+        _err_ctx: &impl ErrorContext,
+    ) -> Result<(), ExecutionError> {
+        self.event_handler.push(event_id);
+        Ok(())
+    }
+}
+
+impl AsyncHost for TestHost {
+    async fn get_mast_forest(&self, _node_digest: &Word) -> Option<Arc<MastForest>> {
+        // Empty MAST forest store
+        None
+    }
+
+    fn on_event(
+        &mut self,
+        _process: &mut ProcessState,
+        event_id: u32,
+        _err_ctx: &impl ErrorContext,
+    ) -> impl Future<Output = Result<(), ExecutionError>> + Send {
+        self.event_handler.push(event_id);
+
+        async move { Ok(()) }
     }
 }

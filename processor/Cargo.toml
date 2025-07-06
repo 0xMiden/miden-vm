@@ -21,7 +21,7 @@ doctest = false
 concurrent = ["std", "winter-prover/concurrent"]
 default = ["std"]
 std = ["vm-core/std", "winter-prover/std", "thiserror/std"]
-testing = ["miden-air/testing"]
+testing = ["miden-air/testing", "tokio"]
 # Removes proper error context from the error messages. Enable in production builds that need
 # maximal performance. 
 no_err_ctx = []
@@ -38,6 +38,8 @@ tracing = { version = "0.1", default-features = false, features = ["attributes"]
 vm-core = { package = "miden-core", path = "../core", version = "0.15", default-features = false, features = ["diagnostics"] }
 winter-prover = { package = "winter-prover", version = "0.13", default-features = false }
 thiserror = { workspace = true }
+# For `testing`
+tokio = {version = "1.46", default-features = false, features = ["rt"], optional = true}
 
 [dev-dependencies]
 assembly = { package = "miden-assembly", path = "../assembly", version = "0.15", default-features = false }
@@ -45,5 +47,6 @@ logtest = { version = "2.0", default-features = false }
 pretty_assertions = "1.4"
 rstest = { version = "0.25" }
 test-utils = { package = "miden-test-utils", path = "../test-utils" }
+tokio = {version = "1.46", default-features = false, features = ["rt"]}
 winter-fri = { package = "winter-fri", version = "0.13" }
 winter-utils = { package = "winter-utils", version = "0.13" }

@@ -4,7 +4,9 @@ use pretty_assertions::assert_eq;
 use vm_core::Word;
 
 use super::*;
-use crate::{MastForestStore, MemMastForestStore, MemoryAddress, ProcessState};
+use crate::{
+    AsyncHost, BaseHost, MastForestStore, MemMastForestStore, MemoryAddress, ProcessState, SyncHost,
+};
 
 #[test]
 fn test_advice_provider() {
@@ -154,7 +156,7 @@ fn test_advice_provider() {
     // fast processor
     let mut fast_host = ConsistencyHost::new(kernel_lib.mast_forest().clone());
     let processor = FastProcessor::new_debug(&stack_inputs, AdviceInputs::default());
-    let fast_stack_outputs = processor.execute(&program, &mut fast_host).unwrap();
+    let fast_stack_outputs = processor.execute_sync(&program, &mut fast_host).unwrap();
 
     // slow processor
     let mut slow_host = ConsistencyHost::new(kernel_lib.mast_forest().clone());
@@ -236,11 +238,7 @@ impl ConsistencyHost {
     }
 }
 
-impl Host for ConsistencyHost {
-    fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>> {
-        self.store.get(node_digest)
-    }
-
+impl BaseHost for ConsistencyHost {
     fn on_trace(
         &mut self,
         process: &mut ProcessState,
@@ -250,5 +248,38 @@ impl Host for ConsistencyHost {
         self.snapshots.entry(trace_id).or_default().push(snapshot);
 
         Ok(())
+    }
+}
+
+impl SyncHost for ConsistencyHost {
+    fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>> {
+        self.store.get(node_digest)
+    }
+
+    fn on_event(
+        &mut self,
+        _process: &mut ProcessState<'_>,
+        _event_id: u32,
+        _err_ctx: &impl ErrorContext,
+    ) -> Result<(), ExecutionError> {
+        Ok(())
+    }
+}
+
+impl AsyncHost for ConsistencyHost {
+    async fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>> {
+        self.store.get(node_digest)
+    }
+
+    // Note: clippy complains about this not using the `async` keyword, but if we use `async`, it
+    // doesn't compile.
+    #[allow(clippy::manual_async_fn)]
+    fn on_event(
+        &mut self,
+        _process: &mut ProcessState<'_>,
+        _event_id: u32,
+        _err_ctx: &impl ErrorContext,
+    ) -> impl Future<Output = Result<(), ExecutionError>> + Send {
+        async { Ok(()) }
     }
 }

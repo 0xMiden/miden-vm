@@ -624,7 +624,7 @@ fn parse_hex(span: SourceSpan, hex_digits: &str) -> Result<IntValue, ParsingErro
                     ),
                 }
             })?;
-            if value > Felt::MODULUS {
+            if value >= Felt::MODULUS {
                 return Err(ParsingError::InvalidLiteral {
                     span,
                     kind: LiteralErrorKind::FeltOverflow,
@@ -652,7 +652,7 @@ fn parse_hex(span: SourceSpan, hex_digits: &str) -> Result<IntValue, ParsingErro
                     })?;
                 }
                 let value = u64::from_le_bytes(felt_bytes);
-                if value > Felt::MODULUS {
+                if value >= Felt::MODULUS {
                     return Err(ParsingError::InvalidLiteral {
                         span,
                         kind: LiteralErrorKind::FeltOverflow,

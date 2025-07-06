@@ -249,7 +249,7 @@ fn test_masm_consistency(
 
     // fast processor
     let processor = FastProcessor::new(&stack_inputs);
-    let fast_stack_outputs = processor.execute(&program, &mut host).unwrap();
+    let fast_stack_outputs = processor.execute_sync(&program, &mut host).unwrap();
 
     // slow processor
     let mut slow_processor = Process::new(
@@ -329,7 +329,7 @@ fn test_masm_errors_consistency(
 
     // fast processor
     let processor = FastProcessor::new(&stack_inputs);
-    let fast_stack_outputs = processor.execute(&program, &mut host).unwrap_err();
+    let fast_stack_outputs = processor.execute_sync(&program, &mut host).unwrap_err();
 
     // slow processor
     let mut slow_processor = Process::new(

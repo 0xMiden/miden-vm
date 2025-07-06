@@ -1,6 +1,6 @@
 use vm_core::{mast::MastForest, stack::MIN_STACK_DEPTH};
 
-use super::{ExecutionError, Felt, FieldElement, Host, Operation, Process};
+use super::{ExecutionError, Felt, FieldElement, Operation, Process, SyncHost};
 use crate::errors::ErrorContext;
 
 mod circuit_eval;
@@ -31,7 +31,7 @@ impl Process {
         &mut self,
         op: Operation,
         program: &MastForest,
-        host: &mut impl Host,
+        host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
         self.execute_op_with_error_ctx(op, program, host, &())
     }
@@ -44,7 +44,7 @@ impl Process {
         &mut self,
         op: Operation,
         program: &MastForest,
-        host: &mut impl Host,
+        host: &mut impl SyncHost,
         err_ctx: &impl ErrorContext,
     ) -> Result<(), ExecutionError> {
         // make sure there is enough memory allocated to hold the execution trace

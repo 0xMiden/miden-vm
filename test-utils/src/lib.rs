@@ -483,7 +483,7 @@ impl Test {
         let stack_inputs: Vec<Felt> = self.stack_inputs.clone().into_iter().rev().collect();
         let advice_inputs = self.advice_inputs.clone();
         let fast_process = FastProcessor::new_with_advice_inputs(&stack_inputs, advice_inputs);
-        let fast_stack_outputs = fast_process.execute(&program, &mut host).unwrap();
+        let fast_stack_outputs = fast_process.execute_sync(&program, &mut host).unwrap();
 
         assert_eq!(
             slow_stack_outputs, fast_stack_outputs,
@@ -500,7 +500,7 @@ impl Test {
         let advice_inputs: AdviceInputs = self.advice_inputs.clone();
         let fast_process = FastProcessor::new_with_advice_inputs(&stack_inputs, advice_inputs)
             .with_source_manager(self.source_manager.clone());
-        let fast_result = fast_process.execute(&program, &mut host);
+        let fast_result = fast_process.execute_sync(&program, &mut host);
 
         match slow_result {
             Ok(slow_stack_outputs) => {

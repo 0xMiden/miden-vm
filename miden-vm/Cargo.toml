@@ -32,7 +32,7 @@ harness = false
 
 [[bench]]
 name = "program_execution_fast"
-required-features = ["internal"]
+required-features = ["internal", "no_err_ctx"]
 harness = false
 
 [[bench]]
@@ -97,11 +97,12 @@ vm-core = { package = "miden-core", path = "../core", version = "0.15", default-
 
 [dev-dependencies]
 assert_cmd = "2.0"
-criterion = "0.6"
+criterion = { version = "0.6", features = ["async_tokio"] }
 escargot = "0.5"
 num-bigint = "0.4"
 predicates = "3.1"
 test-utils = { package = "miden-test-utils", path = "../test-utils" }
+tokio = { version = "1.0", features = ["rt", "rt-multi-thread"] }
 vm-core = { package = "miden-core", path = "../core", version = "0.15" }
 winter-fri = { package = "winter-fri", version = "0.13" }
 rand_chacha = "0.9"

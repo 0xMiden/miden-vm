@@ -9,10 +9,12 @@ fn test_memory_word_access_alignment() {
         let program = simple_program_with_ops(vec![Operation::MLoadW]);
 
         // loadw at address 40 is allowed
-        FastProcessor::new(&[40_u32.into()]).execute(&program, &mut host).unwrap();
+        FastProcessor::new(&[40_u32.into()]).execute_sync(&program, &mut host).unwrap();
 
         // but loadw at address 43 is not allowed
-        let err = FastProcessor::new(&[43_u32.into()]).execute(&program, &mut host).unwrap_err();
+        let err = FastProcessor::new(&[43_u32.into()])
+            .execute_sync(&program, &mut host)
+            .unwrap_err();
         assert_eq!(
             err.to_string(),
             "word memory access at address 43 in context 0 is unaligned at clock cycle 1"
@@ -24,10 +26,12 @@ fn test_memory_word_access_alignment() {
         let program = simple_program_with_ops(vec![Operation::MStoreW]);
 
         // storew at address 40 is allowed
-        FastProcessor::new(&[40_u32.into()]).execute(&program, &mut host).unwrap();
+        FastProcessor::new(&[40_u32.into()]).execute_sync(&program, &mut host).unwrap();
 
         // but storew at address 43 is not allowed
-        let err = FastProcessor::new(&[43_u32.into()]).execute(&program, &mut host).unwrap_err();
+        let err = FastProcessor::new(&[43_u32.into()])
+            .execute_sync(&program, &mut host)
+            .unwrap_err();
         assert_eq!(
             err.to_string(),
             "word memory access at address 43 in context 0 is unaligned at clock cycle 1"
@@ -52,7 +56,7 @@ fn test_mloadw_success() {
             .unwrap();
 
         let program = simple_program_with_ops(vec![Operation::MLoadW]);
-        let stack_outputs = processor.execute_impl(&program, &mut host).unwrap();
+        let stack_outputs = processor.execute_sync_mut(&program, &mut host).unwrap();
 
         assert_eq!(
             stack_outputs.stack_truncated(4),
@@ -70,7 +74,7 @@ fn test_mloadw_success() {
             .unwrap();
 
         let program = simple_program_with_ops(vec![Operation::MLoadW]);
-        let stack_outputs = processor.execute_impl(&program, &mut host).unwrap();
+        let stack_outputs = processor.execute_sync_mut(&program, &mut host).unwrap();
 
         assert_eq!(stack_outputs.stack_truncated(16), &vec![ZERO; 16]);
     }
@@ -93,7 +97,7 @@ fn test_mstorew_success() {
         addr,
     ]);
     let program = simple_program_with_ops(vec![Operation::MStoreW]);
-    processor.execute_impl(&program, &mut host).unwrap();
+    processor.execute_sync_mut(&program, &mut host).unwrap();
 
     // Ensure that the memory was correctly modified
     assert_eq!(processor.memory.read_word(ctx, addr, clk, &()).unwrap(), word_to_store.into());
@@ -113,7 +117,7 @@ fn test_mstore_success(#[case] addr: u32, #[case] value_to_store: u32) {
     // Store the value at address 40
     let mut processor = FastProcessor::new(&[value_to_store, addr.into()]);
     let program = simple_program_with_ops(vec![Operation::MStore]);
-    processor.execute_impl(&program, &mut host).unwrap();
+    processor.execute_sync_mut(&program, &mut host).unwrap();
 
     // Ensure that the memory was correctly modified
     let word_addr = addr - (addr % WORD_SIZE as u32);
@@ -141,7 +145,7 @@ fn test_mload_success(#[case] addr_to_access: u32) {
         .unwrap();
 
     let program = simple_program_with_ops(vec![Operation::MLoad]);
-    let stack_outputs = processor.execute_impl(&program, &mut host).unwrap();
+    let stack_outputs = processor.execute_sync_mut(&program, &mut host).unwrap();
 
     // Ensure that Operation::MLoad correctly reads the value on the stack
     assert_eq!(
@@ -178,7 +182,7 @@ fn test_mstream() {
         .unwrap();
 
     let program = simple_program_with_ops(vec![Operation::MStream]);
-    let stack_outputs = processor.execute_impl(&program, &mut host).unwrap();
+    let stack_outputs = processor.execute_sync_mut(&program, &mut host).unwrap();
 
     // Ensure that Operation::MStream correctly reads the values on the stack
     assert_eq!(

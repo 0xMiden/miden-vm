@@ -1,4 +1,3 @@
-use.std::crypto::fri::ext2fri
 use.std::crypto::stark::random_coin
 use.std::crypto::stark::constants
 

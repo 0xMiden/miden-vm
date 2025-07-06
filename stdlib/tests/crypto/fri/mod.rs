@@ -8,8 +8,6 @@ pub(crate) mod verifier_fri_e2f4;
 pub use verifier_fri_e2f4::*;
 use vm_core::Word;
 
-mod remainder;
-
 #[test]
 fn fri_fold4_ext2_remainder64() {
     let source = "

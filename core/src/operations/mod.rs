@@ -1,12 +1,16 @@
 use core::fmt;
 
-use super::Felt;
 mod decorators;
 pub use decorators::{AssemblyOp, DebugOptions, Decorator, DecoratorIterator, DecoratorList};
+use opcode_constants::*;
+
+use crate::{
+    Felt,
+    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+};
+
 // OPERATIONS OP CODES
 // ================================================================================================
-use opcode_constants::*;
-use winter_utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
 
 /// Opcode patterns have the following meanings:
 /// - 00xxxxx operations do not shift the stack; constraint degree can be up to 2.

@@ -34,21 +34,21 @@ fn test_stack_underflow_and_overflow_bounds_failure() {
             ops
         };
         let program_no_underflow = simple_program_with_ops(ops);
-        let result = FastProcessor::new(&[]).execute(&program_no_underflow, &mut host);
+        let result = FastProcessor::new(&[]).execute_sync(&program_no_underflow, &mut host);
         assert!(result.is_ok());
 
         // program 2: just enough drops as to not underflow, but no operation after.
         const NUM_DROPS_NO_UNDERFLOW: usize = NUM_DROPS_NO_UNDERFLOW_SWAPS_ALLOWED + 1;
         let program_no_underflow =
             simple_program_with_ops(vec![Operation::Drop; NUM_DROPS_NO_UNDERFLOW]);
-        let result = FastProcessor::new(&[]).execute(&program_no_underflow, &mut host);
+        let result = FastProcessor::new(&[]).execute_sync(&program_no_underflow, &mut host);
         assert!(result.is_ok());
 
         // program 3: just enough drops to underflow
         const NUM_DROPS_WITH_UNDERFLOW: usize = NUM_DROPS_NO_UNDERFLOW + 1;
         let program_with_underflow =
             simple_program_with_ops(vec![Operation::Drop; NUM_DROPS_WITH_UNDERFLOW]);
-        let err = FastProcessor::new(&[]).execute(&program_with_underflow, &mut host);
+        let err = FastProcessor::new(&[]).execute_sync(&program_with_underflow, &mut host);
 
         assert_matches!(err, Err(ExecutionError::FailedToExecuteProgram(_)));
     }
@@ -69,7 +69,7 @@ fn test_stack_underflow_and_overflow_bounds_failure() {
             ops
         };
         let program_no_overflow = simple_program_with_ops(ops);
-        let result = FastProcessor::new(&[]).execute(&program_no_overflow, &mut host);
+        let result = FastProcessor::new(&[]).execute_sync(&program_no_overflow, &mut host);
         assert_matches!(result, Ok(_));
 
         // program 2: just enough dups to get 1 away from the stack buffer overflow error. Since we
@@ -78,7 +78,7 @@ fn test_stack_underflow_and_overflow_bounds_failure() {
 
         let ops = vec![Operation::Dup0; NUM_DUPS_NO_OVERFLOW];
         let program_output_overflow = simple_program_with_ops(ops);
-        let result = FastProcessor::new(&[]).execute(&program_output_overflow, &mut host);
+        let result = FastProcessor::new(&[]).execute_sync(&program_output_overflow, &mut host);
         assert_matches!(result, Err(ExecutionError::OutputStackOverflow(_)));
 
         // program 3: just enough dups to get 1 away from the stack buffer overflow error. Since we
@@ -87,7 +87,7 @@ fn test_stack_underflow_and_overflow_bounds_failure() {
 
         let ops = vec![Operation::Dup0; NUM_DUPS_WITH_OVERFLOW];
         let program_with_overflow = simple_program_with_ops(ops);
-        let result = FastProcessor::new(&[]).execute(&program_with_overflow, &mut host);
+        let result = FastProcessor::new(&[]).execute_sync(&program_with_overflow, &mut host);
         assert_matches!(result, Err(ExecutionError::FailedToExecuteProgram(_)));
     }
 }
@@ -101,14 +101,14 @@ fn test_stack_overflow_bounds_success() {
     // dup1, add
     {
         let program = simple_program_with_ops(vec![Operation::Dup1, Operation::Add]);
-        FastProcessor::new(&[]).execute(&program, &mut host).unwrap();
+        FastProcessor::new(&[]).execute_sync(&program, &mut host).unwrap();
     }
 
     // the first add doesn't change the stack size, but the subsequent dup1 does
     {
         let program =
             simple_program_with_ops(vec![Operation::Add, Operation::Dup1, Operation::Add]);
-        FastProcessor::new(&[]).execute(&program, &mut host).unwrap();
+        FastProcessor::new(&[]).execute_sync(&program, &mut host).unwrap();
     }
 
     // alternating add/dup1, with some swaps which don't change the stack size.
@@ -134,7 +134,7 @@ fn test_stack_overflow_bounds_success() {
             // stack depth after: 16
             Operation::Swap,
         ]);
-        FastProcessor::new(&[]).execute(&program, &mut host).unwrap();
+        FastProcessor::new(&[]).execute_sync(&program, &mut host).unwrap();
     }
 }
 
@@ -150,7 +150,7 @@ fn test_fmp_add() {
     let mut processor = FastProcessor::new(&stack_inputs);
     processor.fmp = initial_fmp;
 
-    let stack_outputs = processor.execute(&program, &mut host).unwrap();
+    let stack_outputs = processor.execute_sync(&program, &mut host).unwrap();
 
     // Check that the top of the stack is the sum of the initial FMP and the top of the stack input
     let expected_top = initial_fmp + stack_inputs[2];
@@ -169,7 +169,7 @@ fn test_fmp_update() {
     let mut processor = FastProcessor::new(&stack_inputs);
     processor.fmp = initial_fmp;
 
-    let stack_outputs = processor.execute_impl(&program, &mut host).unwrap();
+    let stack_outputs = processor.execute_sync_mut(&program, &mut host).unwrap();
 
     // Check that the FMP is updated correctly
     let expected_fmp = initial_fmp + stack_inputs[0];
@@ -191,7 +191,7 @@ fn test_fmp_update_fail() {
     let mut processor = FastProcessor::new(&stack_inputs);
     processor.fmp = initial_fmp;
 
-    let err = processor.execute(&program, &mut host).unwrap_err();
+    let err = processor.execute_sync(&program, &mut host).unwrap_err();
 
     // Check that the error is due to the FMP exceeding FMP_MAX
     assert_matches!(err, ExecutionError::InvalidFmpValue(_, _));
@@ -204,7 +204,7 @@ fn test_fmp_update_fail() {
     let mut processor = FastProcessor::new(&stack_inputs);
     processor.fmp = initial_fmp;
 
-    let err = processor.execute(&program, &mut host).unwrap_err();
+    let err = processor.execute_sync(&program, &mut host).unwrap_err();
 
     // Check that the error is due to the FMP being less than FMP_MIN
     assert_matches!(err, ExecutionError::InvalidFmpValue(_, _));
@@ -228,7 +228,7 @@ fn test_syscall_fail() {
 
     let processor = FastProcessor::new(&stack_inputs);
 
-    let err = processor.execute(&program, &mut host).unwrap_err();
+    let err = processor.execute_sync(&program, &mut host).unwrap_err();
 
     // Check that the error is due to the syscall target not being in the kernel
     assert_matches!(
@@ -247,7 +247,7 @@ fn test_assert() {
         let program = simple_program_with_ops(vec![Operation::Assert(ZERO)]);
 
         let processor = FastProcessor::new(&stack_inputs);
-        let result = processor.execute(&program, &mut host);
+        let result = processor.execute_sync(&program, &mut host);
 
         // Check that the execution succeeds
         assert!(result.is_ok());
@@ -259,7 +259,7 @@ fn test_assert() {
         let program = simple_program_with_ops(vec![Operation::Assert(ZERO)]);
 
         let processor = FastProcessor::new(&stack_inputs);
-        let err = processor.execute(&program, &mut host).unwrap_err();
+        let err = processor.execute_sync(&program, &mut host).unwrap_err();
 
         // Check that the error is due to a failed assertion
         assert_matches!(err, ExecutionError::FailedAssertion { .. });
@@ -280,7 +280,7 @@ fn test_valid_combinations_and(#[case] stack_inputs: Vec<Felt>, #[case] expected
 
     let mut host = DefaultHost::default();
     let processor = FastProcessor::new(&stack_inputs);
-    let stack_outputs = processor.execute(&program, &mut host).unwrap();
+    let stack_outputs = processor.execute_sync(&program, &mut host).unwrap();
 
     assert_eq!(stack_outputs.stack_truncated(1)[0], expected_output);
 }
@@ -299,7 +299,7 @@ fn test_valid_combinations_or(#[case] stack_inputs: Vec<Felt>, #[case] expected_
 
     let mut host = DefaultHost::default();
     let processor = FastProcessor::new(&stack_inputs);
-    let stack_outputs = processor.execute(&program, &mut host).unwrap();
+    let stack_outputs = processor.execute_sync(&program, &mut host).unwrap();
 
     assert_eq!(stack_outputs.stack_truncated(1)[0], expected_output);
 }
@@ -336,7 +336,7 @@ fn test_frie2f4() {
 
     // fast processor
     let fast_processor = FastProcessor::new(&stack_inputs);
-    let fast_stack_outputs = fast_processor.execute(&program, &mut host).unwrap();
+    let fast_stack_outputs = fast_processor.execute_sync(&program, &mut host).unwrap();
 
     // slow processor
     let mut slow_processor = Process::new(
@@ -418,7 +418,7 @@ fn test_call_node_preserves_stack_overflow_table() {
     ]);
 
     // Execute the program
-    let result = processor.execute_impl(&program, &mut host).unwrap();
+    let result = processor.execute_sync_mut(&program, &mut host).unwrap();
 
     assert_eq!(
         result.stack_truncated(16),

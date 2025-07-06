@@ -6,8 +6,9 @@ use assembly::{
     diagnostics::{Report, WrapErr},
 };
 use clap::Parser;
-use miden_vm::{DefaultHost, Host, Operation, StackInputs, internal::InputFile};
-use processor::{AdviceInputs, AsmOpInfo, TraceLenSummary};
+use miden_vm::{DefaultHost, Operation, StackInputs, SyncHost, internal::InputFile};
+use processor::{AsmOpInfo, TraceLenSummary};
+use prover::AdviceInputs;
 use stdlib::StdLibrary;
 use vm_core::Program;
 
@@ -245,7 +246,7 @@ fn analyze<H>(
     source_manager: Arc<dyn SourceManager>,
 ) -> Result<ExecutionDetails, Report>
 where
-    H: Host,
+    H: SyncHost,
 {
     let mut execution_details = ExecutionDetails::default();
 

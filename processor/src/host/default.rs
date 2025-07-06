@@ -1,10 +1,10 @@
 use alloc::{boxed::Box, sync::Arc};
 
-use vm_core::{DebugOptions, Word, mast::MastForest};
+use vm_core::{DebugOptions, Felt, Word, mast::MastForest};
 
 use crate::{
-    DebugHandler, ErrorContext, EventHandler, EventHandlerRegistry, ExecutionError, Host,
-    HostLibrary, MastForestStore, MemMastForestStore, ProcessState,
+    AsyncHost, BaseHost, DebugHandler, ErrorContext, EventHandler, EventHandlerRegistry,
+    ExecutionError, HostLibrary, MastForestStore, MemMastForestStore, ProcessState, SyncHost,
 };
 
 // DEFAULT HOST IMPLEMENTATION
@@ -66,7 +66,28 @@ impl<D: DebugHandler> DefaultHost<D> {
     }
 }
 
-impl<D: DebugHandler> Host for DefaultHost<D> {
+impl BaseHost for DefaultHost {
+    fn on_debug(
+        &mut self,
+        process: &mut ProcessState,
+        options: &DebugOptions,
+    ) -> Result<(), ExecutionError> {
+        self.debug_handler.on_debug(process, options)
+    }
+
+    fn on_trace(
+        &mut self,
+        process: &mut ProcessState,
+        trace_id: u32,
+    ) -> Result<(), ExecutionError> {
+        self.debug_handler.on_trace(process, trace_id)
+    }
+
+    /// Handles the failure of the assertion instruction.
+    fn on_assert_failed(&mut self, _process: &mut ProcessState, _err_code: Felt) {}
+}
+
+impl SyncHost for DefaultHost {
     fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>> {
         self.store.get(node_digest)
     }
@@ -84,21 +105,25 @@ impl<D: DebugHandler> Host for DefaultHost<D> {
 
         Err(ExecutionError::invalid_event_id_error(event_id, err_ctx))
     }
+}
 
-    fn on_debug(
-        &mut self,
-        process: &mut ProcessState,
-        options: &DebugOptions,
-    ) -> Result<(), ExecutionError> {
-        self.debug_handler.on_debug(process, options)
+impl AsyncHost for DefaultHost {
+    async fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>> {
+        self.store.get(node_digest)
     }
 
-    fn on_trace(
+    // Note: clippy complains about this not using the `async` keyword, but if we use `async`, it
+    // doesn't compile.
+    #[allow(clippy::manual_async_fn)]
+    fn on_event(
         &mut self,
-        process: &mut ProcessState,
-        trace_id: u32,
-    ) -> Result<(), ExecutionError> {
-        self.debug_handler.on_trace(process, trace_id)
+        process: &mut ProcessState<'_>,
+        event_id: u32,
+        err_ctx: &impl ErrorContext,
+    ) -> impl Future<Output = Result<(), ExecutionError>> + Send {
+        let _ = (process, event_id, err_ctx);
+        async { Ok(()) }
+        // async move { <Self as SyncHost>::on_event(self, process, event_id, err_ctx) }
     }
 }
 

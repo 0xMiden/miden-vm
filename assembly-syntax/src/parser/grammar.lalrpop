@@ -60,7 +60,6 @@ extern {
         "adv_pipe" => Token::AdvPipe,
         "adv_push" => Token::AdvPush,
         "adv_stack" => Token::AdvStack,
-        "push_ext2intt" => Token::PushExt2intt,
         "push_mapval" => Token::PushMapval,
         "push_mapvaln" => Token::PushMapvaln,
         "push_mtnode" => Token::PushMtnode,
@@ -698,7 +697,6 @@ SystemEvent: Instruction = {
     "adv" "." "insert_hdword_d" => Instruction::SysEvent(SystemEventNode::InsertHdwordWithDomain),
     "adv" "." "insert_hperm" => Instruction::SysEvent(SystemEventNode::InsertHperm),
     "adv" "." "insert_mem" => Instruction::SysEvent(SystemEventNode::InsertMem),
-    "adv" "." "push_ext2intt" => Instruction::SysEvent(SystemEventNode::PushExt2intt),
     "adv" "." "push_mapval" => Instruction::SysEvent(SystemEventNode::PushMapVal),
     "adv" "." "push_mapvaln" => Instruction::SysEvent(SystemEventNode::PushMapValN),
     "adv" "." "push_mtnode" => Instruction::SysEvent(SystemEventNode::PushMtNode),
@@ -1447,7 +1445,7 @@ IntOrHexImm: Immediate<IntValue> = {
 
 IntValue: IntValue = {
     <l:@L> <n:uint> <r:@R> =>? {
-        if n > Felt::MODULUS {
+        if n >= Felt::MODULUS {
             return Err(ParseError::User { error: ParsingError::InvalidLiteral { span: span!(source_file.id(), l, r), kind: LiteralErrorKind::FeltOverflow } });
         }
         if n <= (u8::MAX as u64) {

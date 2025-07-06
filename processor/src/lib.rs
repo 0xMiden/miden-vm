@@ -53,7 +53,7 @@ use range::RangeChecker;
 
 mod host;
 pub use host::{
-    Host, MastForestStore, MemMastForestStore,
+    AsyncHost, BaseHost, MastForestStore, MemMastForestStore, SyncHost,
     advice::{AdviceError, AdviceInputs, AdviceProvider},
     default::{DefaultDebugHandler, DefaultHost},
     handlers::{DebugHandler, EventError, EventHandler, EventHandlerRegistry},
@@ -69,7 +69,7 @@ use trace::TraceFragment;
 pub use trace::{ChipletsLengths, ExecutionTrace, NUM_RAND_ROWS, TraceLenSummary};
 
 mod errors;
-pub use errors::{ErrorContext, ExecutionError, Ext2InttError};
+pub use errors::{ErrorContext, ExecutionError};
 
 pub mod utils;
 
@@ -180,7 +180,7 @@ pub fn execute(
     program: &Program,
     stack_inputs: StackInputs,
     advice_inputs: AdviceInputs,
-    host: &mut impl Host,
+    host: &mut impl SyncHost,
     options: ExecutionOptions,
     source_manager: Arc<dyn SourceManager>,
 ) -> Result<ExecutionTrace, ExecutionError> {
@@ -198,7 +198,7 @@ pub fn execute_iter(
     program: &Program,
     stack_inputs: StackInputs,
     advice_inputs: AdviceInputs,
-    host: &mut impl Host,
+    host: &mut impl SyncHost,
     source_manager: Arc<dyn SourceManager>,
 ) -> VmStateIterator {
     let mut process = Process::new_debug(program.kernel().clone(), stack_inputs, advice_inputs)
@@ -313,7 +313,7 @@ impl Process {
     pub fn execute(
         &mut self,
         program: &Program,
-        host: &mut impl Host,
+        host: &mut impl SyncHost,
     ) -> Result<StackOutputs, ExecutionError> {
         if self.system.clk() != 0 {
             return Err(ExecutionError::ProgramAlreadyExecuted);
@@ -335,7 +335,7 @@ impl Process {
         &mut self,
         node_id: MastNodeId,
         program: &MastForest,
-        host: &mut impl Host,
+        host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
         let node = program
             .get_node_by_id(node_id)
@@ -385,7 +385,7 @@ impl Process {
         &mut self,
         node: &JoinNode,
         program: &MastForest,
-        host: &mut impl Host,
+        host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
         self.start_join_node(node, program, host)?;
 
@@ -402,7 +402,7 @@ impl Process {
         &mut self,
         node: &SplitNode,
         program: &MastForest,
-        host: &mut impl Host,
+        host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
         // start the SPLIT block; this also pops the stack and returns the popped element
         let condition = self.start_split_node(node, program, host)?;
@@ -426,7 +426,7 @@ impl Process {
         &mut self,
         node: &LoopNode,
         program: &MastForest,
-        host: &mut impl Host,
+        host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
         // start the LOOP block; this also pops the stack and returns the popped element
         let condition = self.start_loop_node(node, program, host)?;
@@ -468,7 +468,7 @@ impl Process {
         &mut self,
         call_node: &CallNode,
         program: &MastForest,
-        host: &mut impl Host,
+        host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
         // call or syscall are not allowed inside a syscall
         if self.system.in_syscall() {
@@ -500,7 +500,7 @@ impl Process {
         &mut self,
         node: &DynNode,
         program: &MastForest,
-        host: &mut impl Host,
+        host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
         // dyn calls are not allowed inside a syscall
         if node.is_dyncall() && self.system.in_syscall() {
@@ -548,7 +548,7 @@ impl Process {
         &mut self,
         basic_block: &BasicBlockNode,
         program: &MastForest,
-        host: &mut impl Host,
+        host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
         self.start_basic_block_node(basic_block, program, host)?;
 
@@ -613,7 +613,7 @@ impl Process {
         decorators: &mut DecoratorIterator,
         op_offset: usize,
         program: &MastForest,
-        host: &mut impl Host,
+        host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
         let op_counts = batch.op_counts();
         let mut op_idx = 0;
@@ -698,7 +698,7 @@ impl Process {
     fn execute_decorator(
         &mut self,
         decorator: &Decorator,
-        host: &mut impl Host,
+        host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
         match decorator {
             Decorator::Debug(options) => {

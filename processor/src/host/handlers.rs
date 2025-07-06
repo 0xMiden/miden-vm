@@ -17,7 +17,7 @@ use crate::{ErrorContext, ExecutionError, ProcessState};
 ///
 /// A struct implementing this trait can access its own state, but any output it produces must
 /// be stored in the process's advice provider.
-pub trait EventHandler {
+pub trait EventHandler: Sync {
     /// Handles the event when triggered.
     fn on_event(&self, process: &mut ProcessState) -> Result<(), EventError>;
 }
@@ -26,7 +26,7 @@ pub trait EventHandler {
 /// `fn(&mut ProcessState) -> Result<(), EventError>`
 impl<F> EventHandler for F
 where
-    F: for<'a> Fn(&'a mut ProcessState) -> Result<(), EventError> + 'static,
+    F: for<'a> Fn(&'a mut ProcessState) -> Result<(), EventError> + 'static + Sync,
 {
     fn on_event(&self, process: &mut ProcessState) -> Result<(), EventError> {
         self(process)
@@ -138,7 +138,7 @@ impl Debug for EventHandlerRegistry {
 // ================================================================================================
 
 /// Handler for debug and trace operations
-pub trait DebugHandler {
+pub trait DebugHandler: Sync {
     /// This function is invoked when the `Debug` decorator is executed.
     fn on_debug(
         &mut self,

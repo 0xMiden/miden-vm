@@ -298,7 +298,7 @@ mod tests {
         super::{MIN_STACK_DEPTH, Operation},
         Felt, Process,
     };
-    use crate::{ContextId, DefaultHost, ExecutionError, Host, MemoryError};
+    use crate::{ContextId, DefaultHost, ExecutionError, MemoryError, SyncHost};
 
     #[test]
     fn op_push() {
@@ -736,7 +736,7 @@ mod tests {
 
     fn store_value<H>(process: &mut Process, addr: u64, value: [Felt; 4], host: &mut H)
     where
-        H: Host,
+        H: SyncHost,
     {
         let program = &MastForest::default();
 
@@ -750,7 +750,7 @@ mod tests {
 
     fn store_element<H>(process: &mut Process, addr: u64, value: Felt, host: &mut H)
     where
-        H: Host,
+        H: SyncHost,
     {
         let program = &MastForest::default();
 

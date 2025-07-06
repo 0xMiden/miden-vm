@@ -21,7 +21,7 @@ use vm_core::{
 use super::{
     EMPTY_WORD, ExecutionError, Felt, MIN_TRACE_LEN, ONE, OpBatch, Operation, Process, Word, ZERO,
 };
-use crate::{Host, errors::ErrorContext};
+use crate::{SyncHost, errors::ErrorContext};
 
 mod trace;
 use trace::DecoderTrace;
@@ -52,7 +52,7 @@ impl Process {
     // --------------------------------------------------------------------------------------------
 
     /// Starts decoding of a JOIN node.
-    pub(super) fn start_join_node<H: Host>(
+    pub(super) fn start_join_node<H: SyncHost>(
         &mut self,
         node: &JoinNode,
         program: &MastForest,
@@ -86,7 +86,7 @@ impl Process {
     }
 
     ///  Ends decoding of a JOIN node.
-    pub(super) fn end_join_node<H: Host>(
+    pub(super) fn end_join_node<H: SyncHost>(
         &mut self,
         node: &JoinNode,
         program: &MastForest,
@@ -104,7 +104,7 @@ impl Process {
 
     /// Starts decoding a SPLIT node. This also pops the value from the top of the stack and
     /// returns it.
-    pub(super) fn start_split_node<H: Host>(
+    pub(super) fn start_split_node<H: SyncHost>(
         &mut self,
         node: &SplitNode,
         program: &MastForest,
@@ -140,7 +140,7 @@ impl Process {
     }
 
     /// Ends decoding of a SPLIT node.
-    pub(super) fn end_split_node<H: Host>(
+    pub(super) fn end_split_node<H: SyncHost>(
         &mut self,
         block: &SplitNode,
         program: &MastForest,
@@ -158,7 +158,7 @@ impl Process {
 
     /// Starts decoding a LOOP node. This also pops the value from the top of the stack and
     /// returns it.
-    pub(super) fn start_loop_node<H: Host>(
+    pub(super) fn start_loop_node<H: SyncHost>(
         &mut self,
         node: &LoopNode,
         program: &MastForest,
@@ -196,7 +196,7 @@ impl Process {
 
     /// Ends decoding of a LOOP block. If pop_stack is set to true, this also removes the
     /// value at the top of the stack.
-    pub(super) fn end_loop_node<H: Host>(
+    pub(super) fn end_loop_node<H: SyncHost>(
         &mut self,
         node: &LoopNode,
         pop_stack: bool,
@@ -225,7 +225,7 @@ impl Process {
     // --------------------------------------------------------------------------------------------
 
     /// Starts decoding of a CALL or a SYSCALL node.
-    pub(super) fn start_call_node<H: Host>(
+    pub(super) fn start_call_node<H: SyncHost>(
         &mut self,
         node: &CallNode,
         program: &MastForest,
@@ -278,7 +278,7 @@ impl Process {
     }
 
     /// Ends decoding of a CALL or a SYSCALL block.
-    pub(super) fn end_call_node<H: Host>(
+    pub(super) fn end_call_node<H: SyncHost>(
         &mut self,
         node: &CallNode,
         program: &MastForest,
@@ -315,7 +315,7 @@ impl Process {
     ///
     /// Note: even though we will write the callee hash to h[0..4] for the chiplets bus and block
     /// hash table, the issued hash request is still hash([ZERO; 8]).
-    pub(super) fn start_dyn_node<H: Host>(
+    pub(super) fn start_dyn_node<H: SyncHost>(
         &mut self,
         dyn_node: &DynNode,
         program: &MastForest,
@@ -410,7 +410,7 @@ impl Process {
     }
 
     /// Ends decoding of a DYN node.
-    pub(super) fn end_dyn_node<H: Host>(
+    pub(super) fn end_dyn_node<H: SyncHost>(
         &mut self,
         dyn_node: &DynNode,
         program: &MastForest,
@@ -424,7 +424,7 @@ impl Process {
     }
 
     /// Ends decoding of a DYNCALL node.
-    pub(super) fn end_dyncall_node<H: Host>(
+    pub(super) fn end_dyncall_node<H: SyncHost>(
         &mut self,
         dyn_node: &DynNode,
         program: &MastForest,
@@ -458,7 +458,7 @@ impl Process {
     // --------------------------------------------------------------------------------------------
 
     /// Starts decoding a BASIC BLOCK node.
-    pub(super) fn start_basic_block_node<H: Host>(
+    pub(super) fn start_basic_block_node<H: SyncHost>(
         &mut self,
         basic_block: &BasicBlockNode,
         program: &MastForest,
@@ -484,7 +484,7 @@ impl Process {
     }
 
     /// Ends decoding a BASIC BLOCK node.
-    pub(super) fn end_basic_block_node<H: Host>(
+    pub(super) fn end_basic_block_node<H: SyncHost>(
         &mut self,
         block: &BasicBlockNode,
         program: &MastForest,

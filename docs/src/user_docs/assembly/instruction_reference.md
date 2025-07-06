@@ -190,7 +190,6 @@ Instructions for moving data between the stack and other sources like program co
 | `adv.push_mapvaln`   | `[K, ... ]`                | `[K, ... ]`                | Pushes `[n, ele1, ele2, ...]` from `advice_map[K]` to advice stack, where `n` is element count.                                        |
 | `adv.push_mtnode`    | `[d, i, R, ... ]`          | `[d, i, R, ... ]`          | Pushes Merkle tree node (root `R`, depth `d`, index `i`) from Merkle store to advice stack.                                           |
 | `adv.push_u64div`    | `[b1, b0, a1, a0, ...]`    | `[b1, b0, a1, a0, ...]`    | Pushes quotient and remainder of u64 division `a/b` (represented by 32-bit limbs) to advice stack.                                   |
-| `adv.push_ext2intt`  | `[osize,isize,iptr,...]`   | `[osize,isize,iptr,...]`   | Interpolates polynomial evaluations (from memory at `iptr`, `isize` evals) and pushes coefficients (`osize`) to advice stack.        |
 | `adv.push_smtpeek`   | `[K, R, ...]`              | `[K, R, ...]`              | Pushes value for key `K` in Sparse Merkle Tree with root `R` to advice stack.                                                          |
 
 *Insert into Advice Map:*
