@@ -1,9 +1,11 @@
 use alloc::vec::Vec;
 
-use winter_utils::{ByteReader, DeserializationError, Serializable, SliceReader};
-
 use super::NodeDataOffset;
-use crate::{Operation, mast::BasicBlockNode};
+use crate::{
+    Operation,
+    mast::BasicBlockNode,
+    utils::{ByteReader, DeserializationError, Serializable, SliceReader},
+};
 
 // BASIC BLOCK DATA BUILDER
 // ================================================================================================

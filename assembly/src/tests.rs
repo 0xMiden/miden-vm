@@ -956,6 +956,8 @@ or \"export\", or \"proc\", or \"use\", or end of file, or doc comment"
 #[test]
 fn constant_must_be_within_valid_felt_range() -> TestResult {
     let context = TestContext::default();
+
+    // test the u64::MAX value
     let source = source_file!(
         &context,
         "const.CONSTANT=18446744073709551615 \
@@ -973,6 +975,45 @@ fn constant_must_be_within_valid_felt_range() -> TestResult {
         "  :                ^^^^^^^^^^^^^^^^^^^^",
         "  `----"
     );
+
+    // test the field modulus value in u64 form
+    let source = source_file!(
+        &context,
+        "const.CONSTANT=18446744069414584321 \
+    begin \
+    push.CONSTANT \
+    end"
+    );
+
+    assert_assembler_diagnostic!(
+        context,
+        source,
+        "invalid literal: value overflowed the field modulus",
+        regex!(r#",-\[test[\d]+:1:16\]"#),
+        "1 | const.CONSTANT=18446744069414584321 begin push.CONSTANT end",
+        "  :                ^^^^^^^^^^^^^^^^^^^^",
+        "  `----"
+    );
+
+    // test the field modulus value in hex form
+    let source = source_file!(
+        &context,
+        "const.CONSTANT=0xFFFFFFFF00000001 \
+    begin \
+    push.CONSTANT \
+    end"
+    );
+
+    assert_assembler_diagnostic!(
+        context,
+        source,
+        "invalid literal: value overflowed the field modulus",
+        regex!(r#",-\[test[\d]+:1:16\]"#),
+        "1 | const.CONSTANT=0xFFFFFFFF00000001 begin push.CONSTANT end",
+        "  :                ^^^^^^^^^^^^^^^^^^",
+        "  `----"
+    );
+
     Ok(())
 }
 

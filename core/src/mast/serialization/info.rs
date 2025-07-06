@@ -1,10 +1,9 @@
 use alloc::vec::Vec;
 
-use winter_utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
-
 use super::{NodeDataOffset, basic_blocks::BasicBlockDataDecoder};
-use crate::mast::{
-    BasicBlockNode, CallNode, JoinNode, LoopNode, MastNode, MastNodeId, SplitNode, Word,
+use crate::{
+    mast::{BasicBlockNode, CallNode, JoinNode, LoopNode, MastNode, MastNodeId, SplitNode, Word},
+    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
 // MAST NODE INFO

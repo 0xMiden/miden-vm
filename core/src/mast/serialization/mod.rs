@@ -47,10 +47,12 @@ use alloc::{
 
 use decorator::{DecoratorDataBuilder, DecoratorInfo};
 use string_table::StringTable;
-use winter_utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
 
 use super::{DecoratorId, MastForest, MastNode, MastNodeId};
-use crate::AdviceMap;
+use crate::{
+    AdviceMap,
+    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+};
 
 mod decorator;
 
