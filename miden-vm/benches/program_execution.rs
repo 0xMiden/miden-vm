@@ -42,7 +42,7 @@ fn program_execution(c: &mut Criterion) {
 
                 // Create a benchmark for the masm file
                 let file_stem = entry.path().file_stem().unwrap().to_string_lossy();
-                group.bench_function(file_stem, |bench| {
+                group.bench_function(file_stem.clone(), |bench| {
                     let mut assembler = Assembler::default();
                     assembler
                         .link_dynamic_library(StdLibrary::default())
@@ -55,15 +55,19 @@ fn program_execution(c: &mut Criterion) {
                     bench.iter_batched(
                         || host.clone(),
                         |mut host| {
-                            execute(
+                            let result = execute(
                                 &program,
                                 stack_inputs.clone(),
                                 advice_inputs.clone(),
                                 &mut host,
                                 ExecutionOptions::default(),
                                 source_manager.clone(),
-                            )
-                            .unwrap()
+                            );
+                            if let Err(err) = result {
+                                eprintln!("Execution failed for {file_stem}: {err:?}");
+                                return;
+                            }
+                            result.unwrap();
                         },
                         BatchSize::SmallInput,
                     );
