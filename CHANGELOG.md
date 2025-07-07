@@ -52,6 +52,7 @@
 - The `SourceManager` API was improved to be more precise about source file locations (URIs) and language type. This is intended to support the LSP server implementation. ([#1937](https://github.com/0xMiden/miden-vm/pull/1937))
 - `SourceManager::update` was added to allow for the LSP server to update documents stored in the source manager based on edits made by the user. ([#1937](https://github.com/0xMiden/miden-vm/pull/1937))
 - [BREAKING] Make `FastProcessor::execute()` async ([#1933](https://github.com/0xMiden/miden-vm/issues/1933)).
+- Add `get_procedure_root_by_name` method to the `Library` struct (#).
 
 #### Fixes
 

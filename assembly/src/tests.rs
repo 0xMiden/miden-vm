@@ -2,6 +2,7 @@ use alloc::{collections::BTreeSet, string::ToString, vec::Vec};
 use core::str::FromStr;
 use std::sync::{Arc, LazyLock};
 
+use miden_assembly_syntax::diagnostics::WrapErr;
 use miden_core::{
     Operation, Program, Word, assert_matches,
     mast::{MastNode, MastNodeId, error_code_from_msg},
@@ -471,6 +472,51 @@ fn get_module_by_path() -> Result<(), Report> {
 
     let (_, foo_proc) = foo_module_info.procedures().next().unwrap();
     assert_eq!(foo_proc.name, ProcedureName::new("foo").unwrap());
+
+    Ok(())
+}
+
+#[test]
+fn get_proc_digest_by_name() -> Result<(), Report> {
+    let context = TestContext::new();
+
+    let testing_module_source = "
+        export.foo
+            push.1.2 add drop
+        end
+
+        export.bar
+            push.5.6 sub drop
+        end
+    ";
+    let testing_module = parse_module!(&context, "test::names", testing_module_source);
+
+    // create the bundle with locations
+    let library = Assembler::new(context.source_manager())
+        .assemble_library([testing_module])
+        .context("failed to assemble library from testing module")?;
+
+    let library_procedure_digests = library
+        .exports()
+        .map(|proc_name| library.mast_forest()[library.get_export_node_id(proc_name)].digest())
+        .collect::<Vec<Word>>();
+
+    let foo_name = QualifiedProcedureName::new(
+        LibraryPath::new("test::names").unwrap(),
+        ProcedureName::new("foo").unwrap(),
+    );
+    let bar_name = QualifiedProcedureName::new(
+        LibraryPath::new("test::names").unwrap(),
+        ProcedureName::new("bar").unwrap(),
+    );
+    let invalid_name = QualifiedProcedureName::new(
+        LibraryPath::new("test::names").unwrap(),
+        ProcedureName::new("baz").unwrap(),
+    );
+
+    assert_eq!(Some(library_procedure_digests[1]), library.get_procedure_root_by_name(foo_name));
+    assert_eq!(Some(library_procedure_digests[0]), library.get_procedure_root_by_name(bar_name));
+    assert_eq!(None, library.get_procedure_root_by_name(invalid_name));
 
     Ok(())
 }

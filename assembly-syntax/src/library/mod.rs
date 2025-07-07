@@ -138,6 +138,13 @@ impl Library {
     pub fn mast_forest(&self) -> &Arc<MastForest> {
         &self.mast_forest
     }
+
+    /// Returns the digest of the procedure with the specified name, or `None` if it was not found
+    /// in the Library.
+    pub fn get_procedure_root_by_name(&self, proc_name: QualifiedProcedureName) -> Option<Word> {
+        let node_id = self.exports.get(&proc_name);
+        node_id.map(|id| self.mast_forest()[*id].digest())
+    }
 }
 
 /// Conversions
