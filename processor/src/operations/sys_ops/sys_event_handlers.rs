@@ -288,7 +288,7 @@ fn copy_map_value_to_adv_stack(
 ///
 /// Outputs:
 ///   Operand stack: [KEY, ...]
-///   Advice stack: [is_key_exist, ...]
+///   Advice stack: [has_key, ...]
 pub fn push_key_presence_flag(process: &mut ProcessState) -> Result<(), ExecutionError> {
     let map_key = [
         process.get_stack_item(3),

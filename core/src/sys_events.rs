@@ -101,10 +101,10 @@ pub enum SystemEvent {
     ///   Advice map: {KEY: values}
     MapValueToStackN,
 
-    /// Pushes a boolean flag onto the advice stack, which indicates whether the advice map has an
-    /// entry with the key specified on the top of the operand stack. I.e. if the advice map has the
-    /// entry with the key equal to the key placed at the top of the operand stack, `1` will be
-    /// pushed to the advice stack and `0` otherwise.
+    /// Pushes a flag onto the advice stack whether advice map has an entry with specified key.
+    ///
+    /// If the advice map has the entry with the key equal to the key placed at the top of the
+    /// operand stack, `1` will be pushed to the advice stack and `0` otherwise.
     ///
     /// Inputs:
     ///   Operand stack: [KEY, ...]
@@ -112,7 +112,7 @@ pub enum SystemEvent {
     ///
     /// Outputs:
     ///   Operand stack: [KEY, ...]
-    ///   Advice stack:  [is_key_exist, ...]
+    ///   Advice stack:  [has_key, ...]
     HasMapKey,
 
     /// Pushes the result of [u64] division (both the quotient and the remainder) onto the advice
