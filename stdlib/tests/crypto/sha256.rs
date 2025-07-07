@@ -1,4 +1,4 @@
-use miden_test_utils::{
+use miden_utils_testing::{
     Felt, IntoBytes, group_slice_elements, push_inputs,
     rand::{rand_array, rand_value, rand_vector},
 };

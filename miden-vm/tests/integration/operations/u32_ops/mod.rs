@@ -1,5 +1,5 @@
 use miden_processor::ExecutionError;
-use miden_test_utils::{
+use miden_utils_testing::{
     Felt, U32_BOUND, ZERO, build_op_test, expect_exec_error_matches, prop_randw,
 };
 

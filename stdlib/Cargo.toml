@@ -40,7 +40,7 @@ blake3 = "1.8"
 criterion = "0.6"
 miden-air.workspace = true
 miden-processor = { workspace = true, features = ["testing"] }
-miden-test-utils.workspace = true
+miden-utils-testing.workspace = true
 num = "0.4"
 num-bigint = "0.4"
 pretty_assertions = "1.4"

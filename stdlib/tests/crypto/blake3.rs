@@ -1,4 +1,4 @@
-use miden_test_utils::{Felt, IntoBytes, group_slice_elements, rand::rand_array};
+use miden_utils_testing::{Felt, IntoBytes, group_slice_elements, rand::rand_array};
 
 #[test]
 fn blake3_hash_64_bytes() {

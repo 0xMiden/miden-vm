@@ -1,6 +1,6 @@
 use core::ops::{Add, Mul, Neg, Sub};
 
-use miden_test_utils::rand::rand_array;
+use miden_utils_testing::rand::rand_array;
 
 /// Secp256k1 base field element, kept in Montgomery form
 #[derive(Copy, Clone, Debug)]

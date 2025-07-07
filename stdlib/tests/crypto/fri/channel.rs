@@ -1,5 +1,5 @@
 use miden_core::Word;
-use miden_test_utils::{
+use miden_utils_testing::{
     Felt, FieldElement, MerkleTreeVC,
     crypto::{BatchMerkleProof, ElementHasher, Hasher as HasherTrait, PartialMerkleTree},
     serde::DeserializationError,

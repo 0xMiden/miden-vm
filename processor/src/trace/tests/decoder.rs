@@ -6,7 +6,7 @@ use miden_core::{
     FieldElement, ONE, Operation, Program, Word, ZERO,
     mast::{MastForest, MastNode},
 };
-use miden_test_utils::rand::rand_array;
+use miden_utils_testing::rand::rand_array;
 
 use super::{
     super::{

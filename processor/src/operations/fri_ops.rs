@@ -243,7 +243,7 @@ mod tests {
     use alloc::vec::Vec;
 
     use miden_core::{StackInputs, mast::MastForest};
-    use miden_test_utils::rand::{rand_array, rand_value, rand_vector};
+    use miden_utils_testing::rand::{rand_array, rand_value, rand_vector};
     use winter_prover::math::{fft, get_power_series_with_offset};
     use winter_utils::transpose_slice;
 

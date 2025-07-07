@@ -1,6 +1,6 @@
 use std::ops::Add;
 
-use miden_test_utils::{Felt, ONE, ZERO, push_inputs, test_case};
+use miden_utils_testing::{Felt, ONE, ZERO, push_inputs, test_case};
 
 use super::base_field::{Ext5, bv_or};
 

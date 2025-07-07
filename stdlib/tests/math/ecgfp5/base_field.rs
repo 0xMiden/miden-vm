@@ -1,6 +1,6 @@
 use core::ops::{Add, Div, Mul, Neg, Sub};
 
-use miden_test_utils::{Felt, FieldElement, ONE, StarkField, ZERO, rand::rand_value};
+use miden_utils_testing::{Felt, FieldElement, ONE, StarkField, ZERO, rand::rand_value};
 
 // Given an element v ∈ Z_q | q = 2^64 - 2^32 + 1, this routine raises
 // it to the power 2^n, by means of n successive squarings

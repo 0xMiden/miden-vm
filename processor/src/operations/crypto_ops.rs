@@ -200,7 +200,7 @@ mod tests {
         crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},
         mast::MastForest,
     };
-    use miden_test_utils::rand::rand_vector;
+    use miden_utils_testing::rand::rand_vector;
 
     use super::{
         super::{Felt, Operation},

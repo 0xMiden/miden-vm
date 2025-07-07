@@ -244,7 +244,7 @@ impl Process {
 mod tests {
     use miden_air::trace::decoder::NUM_USER_OP_HELPERS;
     use miden_core::{mast::MastForest, stack::MIN_STACK_DEPTH};
-    use miden_test_utils::rand::rand_value;
+    use miden_utils_testing::rand::rand_value;
 
     use super::{
         super::{Felt, Operation},

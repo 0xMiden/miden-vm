@@ -5,7 +5,7 @@ use miden_air::trace::chiplets::bitwise::{
     OUTPUT_COL_IDX, PREV_OUTPUT_COL_IDX, TRACE_WIDTH,
 };
 use miden_core::ZERO;
-use miden_test_utils::rand::rand_value;
+use miden_utils_testing::rand::rand_value;
 
 use super::{Bitwise, Felt, TraceFragment};
 

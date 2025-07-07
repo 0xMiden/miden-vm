@@ -1,7 +1,7 @@
 use miden_core::{AssemblyOp, Operation};
 use miden_debuginfo::Location;
 use miden_processor::{AsmOpInfo, ContextId, RowIndex, VmState};
-use miden_test_utils::{Felt, ONE, ToElements, assert_eq, build_debug_test};
+use miden_utils_testing::{Felt, ONE, ToElements, assert_eq, build_debug_test};
 
 // EXEC ITER TESTS
 // =================================================================

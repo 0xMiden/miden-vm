@@ -7,7 +7,7 @@ use miden_processor::{
     AdviceInputs, ExecutionError, Program, ProgramInfo, StackInputs, crypto::RpoRandomCoin,
 };
 use miden_stdlib::{EVENT_FALCON_SIG_TO_STACK, StdLibrary, falcon_sign};
-use miden_test_utils::{
+use miden_utils_testing::{
     Word,
     crypto::{
         MerkleStore, Rpo256,
@@ -240,7 +240,7 @@ fn falcon_prove_verify() {
         .expect("failed to load mast forest");
 
     let options = ProvingOptions::with_96_bit_security(false);
-    let (stack_outputs, proof) = miden_test_utils::prove(
+    let (stack_outputs, proof) = miden_utils_testing::prove(
         &program,
         stack_inputs.clone(),
         advice_inputs,
@@ -251,7 +251,7 @@ fn falcon_prove_verify() {
     .expect("failed to generate proof");
 
     let program_info = ProgramInfo::from(program);
-    let result = miden_test_utils::verify(program_info, stack_inputs, stack_outputs, proof);
+    let result = miden_utils_testing::verify(program_info, stack_inputs, stack_outputs, proof);
 
     assert!(result.is_ok(), "error: {result:?}");
 }

@@ -1,6 +1,6 @@
 extern crate alloc;
 
-use miden_test_utils::{build_op_test, build_test};
+use miden_utils_testing::{build_op_test, build_test};
 
 mod air;
 mod cli;

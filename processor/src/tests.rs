@@ -11,7 +11,7 @@ use miden_core::{
     crypto::merkle::{MerkleStore, MerkleTree},
 };
 use miden_debuginfo::{SourceContent, SourceLanguage, Uri};
-use miden_test_utils::{
+use miden_utils_testing::{
     build_test, build_test_by_mode,
     crypto::{init_merkle_leaves, init_merkle_store},
 };

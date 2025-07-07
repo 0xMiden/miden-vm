@@ -4,7 +4,7 @@ use miden_core::{
 };
 use miden_debuginfo::{SourceLanguage, SourceManager};
 use miden_processor::FMP_MIN;
-use miden_test_utils::{MIN_STACK_DEPTH, StackInputs, Test, Word, build_op_test, build_test};
+use miden_utils_testing::{MIN_STACK_DEPTH, StackInputs, Test, Word, build_op_test, build_test};
 
 use super::TRUNCATE_STACK_PROC;
 

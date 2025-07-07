@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 use miden_air::ProcessorAir;
 use miden_core::{Felt, FieldElement, QuadFelt, ToElements, WORD_SIZE, Word};
 use miden_processor::crypto::RpoRandomCoin;
-use miden_test_utils::{
+use miden_utils_testing::{
     MIN_STACK_DEPTH, VerifierError,
     crypto::{MerkleStore, RandomCoin, Rpo256},
 };

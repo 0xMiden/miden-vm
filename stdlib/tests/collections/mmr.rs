@@ -1,5 +1,5 @@
 use miden_core::WORD_SIZE;
-use miden_test_utils::{
+use miden_utils_testing::{
     EMPTY_WORD, Felt, ONE, StarkField, Word, ZERO,
     crypto::{
         MerkleError, MerkleStore, MerkleTree, Mmr, NodeIndex, init_merkle_leaf, init_merkle_leaves,

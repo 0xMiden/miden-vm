@@ -30,7 +30,7 @@ impl Process {
 #[cfg(test)]
 mod tests {
     use miden_core::{Operation, QuadFelt, ZERO, mast::MastForest};
-    use miden_test_utils::rand::rand_value;
+    use miden_utils_testing::rand::rand_value;
 
     use super::*;
     use crate::{DefaultHost, StackInputs, operations::MIN_STACK_DEPTH};

@@ -1,7 +1,7 @@
 use miden_core::{AssemblyOp, Felt, Operation};
 use miden_debuginfo::Location;
 use miden_processor::{AsmOpInfo, RowIndex, VmStateIterator};
-use miden_test_utils::{assert_eq, build_debug_test};
+use miden_utils_testing::{assert_eq, build_debug_test};
 
 #[test]
 fn asmop_one_span_block_test() {

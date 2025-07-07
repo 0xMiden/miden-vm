@@ -1,7 +1,7 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 
 use miden_core::utils::ToElements;
-use miden_test_utils::rand::rand_array;
+use miden_utils_testing::rand::rand_array;
 
 use super::{Felt, RangeChecker, ZERO};
 use crate::{RangeCheckTrace, utils::get_trace_len};

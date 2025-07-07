@@ -1,4 +1,4 @@
-use miden_test_utils::rand::rand_vector;
+use miden_utils_testing::rand::rand_vector;
 use num_bigint::BigUint;
 
 // MULTIPLICATION

@@ -1,5 +1,5 @@
 use miden_core::chiplets::hasher::apply_permutation;
-use miden_test_utils::{
+use miden_utils_testing::{
     Felt, TRUNCATE_STACK_PROC, ToElements, assert_eq, build_op_test, build_test,
 };
 

@@ -9,7 +9,7 @@ use miden_core::{
     crypto::merkle::{MerkleTree, NodeIndex},
     mast::{MastForest, MastNode},
 };
-use miden_test_utils::rand::rand_array;
+use miden_utils_testing::rand::rand_array;
 
 use super::{
     Digest, Felt, Hasher, HasherState, LINEAR_HASH, MP_VERIFY, MR_UPDATE_NEW, MR_UPDATE_OLD,

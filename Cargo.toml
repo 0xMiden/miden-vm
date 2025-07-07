@@ -10,7 +10,6 @@ members = [
     "processor",
     "prover",
     "stdlib",
-    "test-utils",
     "utils/*",
     "verifier",
 ]
@@ -49,9 +48,9 @@ miden-mast-package = { path = "./package", version = "0.15.0", default-features 
 miden-processor = { path = "./processor", version = "0.15.0", default-features = false }
 miden-prover = { path = "./prover", version = "0.15.0", default-features = false }
 miden-stdlib = { path = "./stdlib", version = "0.15.0", default-features = false }
-miden-test-utils = { path = "./test-utils", version = "0.1.0" }
 miden-utils-diagnostics = { path = "./utils/diagnostics", version = "0.15.0", default-features = false }
 miden-utils-sync = { path = "./utils/sync", version = "0.15.0", default-features = false }
+miden-utils-testing = { path = "./utils/testing", version = "0.1.0", package = "miden-test-utils" }
 miden-verifier = { path = "./verifier", version = "0.15.0", default-features = false }
 
 # Miden crates

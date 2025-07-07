@@ -1,6 +1,6 @@
 use miden_core::Felt;
 use miden_prover::Word;
-use miden_test_utils::{TRUNCATE_STACK_PROC, build_test, crypto::MerkleStore, rand::rand_value};
+use miden_utils_testing::{TRUNCATE_STACK_PROC, build_test, crypto::MerkleStore, rand::rand_value};
 
 // ADVICE INJECTION
 // ================================================================================================

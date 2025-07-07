@@ -1,6 +1,6 @@
 use miden_assembly::testing::regex;
 use miden_processor::{ExecutionError, RowIndex};
-use miden_test_utils::{
+use miden_utils_testing::{
     Felt, FieldElement, ONE, StarkField, WORD_SIZE, ZERO, assert_assembler_diagnostic,
     assert_diagnostic_lines, build_op_test, expect_exec_error_matches, prop_randw,
     proptest::prelude::*, rand::rand_value,

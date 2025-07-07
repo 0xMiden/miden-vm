@@ -229,7 +229,7 @@ impl Process {
 #[cfg(test)]
 mod tests {
     use miden_core::{ONE, ZERO, mast::MastForest};
-    use miden_test_utils::rand::rand_value;
+    use miden_utils_testing::rand::rand_value;
 
     use super::{
         super::{Felt, FieldElement, MIN_STACK_DEPTH, Operation},

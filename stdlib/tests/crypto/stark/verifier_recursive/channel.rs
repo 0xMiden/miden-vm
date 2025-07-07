@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 
 use miden_air::ProcessorAir;
 use miden_core::{Felt, FieldElement, QuadFelt, StarkField, Word};
-use miden_test_utils::{
+use miden_utils_testing::{
     MerkleTreeVC, VerifierError,
     crypto::{BatchMerkleProof, PartialMerkleTree, Rpo256},
     group_slice_elements,

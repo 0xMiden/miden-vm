@@ -7,7 +7,7 @@ use miden_processor::{
     DefaultHost, Program, ProgramInfo,
     crypto::{RandomCoin, Rpo256, RpoRandomCoin},
 };
-use miden_test_utils::{
+use miden_utils_testing::{
     AdviceInputs, ProvingOptions, StackInputs, VerifierError, proptest::proptest, prove,
 };
 use rand::{Rng, RngCore, SeedableRng};

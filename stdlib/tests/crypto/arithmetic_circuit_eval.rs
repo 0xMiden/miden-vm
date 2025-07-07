@@ -1,5 +1,5 @@
 use miden_core::{Felt, FieldElement, ONE, QuadFelt, ZERO};
-use miden_test_utils::rand::rand_value;
+use miden_utils_testing::rand::rand_value;
 
 #[test]
 fn arithmetic_circuit_eval_and_execute() {
@@ -72,7 +72,7 @@ fn arithmetic_circuit_eval_and_execute() {
     let adv_stack = data.repeat(num_repetitions);
     let adv_stack: Vec<u64> = adv_stack.iter().map(|a| a.as_int()).collect();
 
-    let test = miden_test_utils::build_test!(source, &[], &adv_stack);
+    let test = miden_utils_testing::build_test!(source, &[], &adv_stack);
     test.expect_stack(&[]);
     test.prove_and_verify(vec![], false)
 }

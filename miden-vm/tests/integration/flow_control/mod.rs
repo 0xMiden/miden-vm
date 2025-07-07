@@ -5,7 +5,7 @@ use miden_debuginfo::{SourceLanguage, SourceManager};
 use miden_processor::ExecutionError;
 use miden_prover::Word;
 use miden_stdlib::StdLibrary;
-use miden_test_utils::{StackInputs, Test, build_test, expect_exec_error_matches, push_inputs};
+use miden_utils_testing::{StackInputs, Test, build_test, expect_exec_error_matches, push_inputs};
 use miden_vm::Module;
 
 // SIMPLE FLOW CONTROL TESTS

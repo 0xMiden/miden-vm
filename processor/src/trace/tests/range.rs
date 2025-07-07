@@ -2,7 +2,7 @@ use miden_air::trace::{
     AUX_TRACE_RAND_ELEMENTS, chiplets::hasher::HASH_CYCLE_LEN, range::B_RANGE_COL_IDX,
 };
 use miden_core::{ExtensionOf, Operation};
-use miden_test_utils::rand::rand_array;
+use miden_utils_testing::rand::rand_array;
 
 use super::{Felt, FieldElement, NUM_RAND_ROWS, ONE, Trace, ZERO, build_trace_from_ops};
 

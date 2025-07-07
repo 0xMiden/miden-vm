@@ -1,5 +1,5 @@
 use miden_assembly::testing::regex;
-use miden_test_utils::{
+use miden_utils_testing::{
     MIN_STACK_DEPTH, WORD_SIZE, assert_assembler_diagnostic, assert_diagnostic_lines,
     build_op_test, proptest::prelude::*,
 };
