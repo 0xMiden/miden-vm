@@ -27,11 +27,6 @@ pub struct AdviceMap(BTreeMap<Word, Arc<[Felt]>>);
 type MapEntry = (Word, Arc<[Felt]>);
 
 impl AdviceMap {
-    /// Creates a new advice map.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     /// Returns the values associated with given key.
     pub fn get(&self, key: &Word) -> Option<&Arc<[Felt]>> {
         self.0.get(key)
@@ -187,7 +182,7 @@ mod tests {
 
     #[test]
     fn test_advice_map_serialization() {
-        let mut map1 = AdviceMap::new();
+        let mut map1 = AdviceMap::default();
         map1.insert(Word::default(), vec![Felt::from(1u32), Felt::from(2u32)]);
 
         let bytes = map1.to_bytes();
