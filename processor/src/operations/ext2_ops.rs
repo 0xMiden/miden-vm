@@ -29,15 +29,11 @@ impl Process {
 
 #[cfg(test)]
 mod tests {
-    type QuadFelt = QuadExtension<Felt>;
     use test_utils::rand::rand_value;
-    use vm_core::{QuadExtension, mast::MastForest};
+    use vm_core::{Operation, QuadFelt, ZERO, mast::MastForest};
 
-    use super::{
-        super::{Felt, MIN_STACK_DEPTH, Operation},
-        Process,
-    };
-    use crate::{DefaultHost, StackInputs, ZERO};
+    use super::*;
+    use crate::{DefaultHost, StackInputs, operations::MIN_STACK_DEPTH};
 
     // ARITHMETIC OPERATIONS
     // --------------------------------------------------------------------------------------------

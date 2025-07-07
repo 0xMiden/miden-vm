@@ -95,6 +95,7 @@ pub use math::{
     fields::{QuadExtension, f64::BaseElement as Felt},
     polynom,
 };
+pub type QuadFelt = QuadExtension<Felt>;
 
 pub mod prettier {
     pub use miden_formatting::{prettier::*, pretty_via_display, pretty_via_to_string};

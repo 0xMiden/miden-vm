@@ -9,10 +9,10 @@ use miden_air::{
         V_1_1_IDX, V_2_0_IDX, V_2_1_IDX,
     },
 };
-use vm_core::FieldElement;
+use vm_core::{Felt, FieldElement, QuadFelt, Word};
 
 use crate::{
-    ContextId, ExecutionError, Felt, QuadFelt, Word,
+    ContextId, ExecutionError,
     chiplets::ace::{
         MAX_NUM_ACE_WIRES,
         instruction::{Op, decode_instruction},

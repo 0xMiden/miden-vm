@@ -3,6 +3,7 @@ use alloc::sync::Arc;
 use miden_air::RowIndex;
 use miette::Diagnostic;
 use vm_core::{
+    Felt, QuadFelt, Word,
     debuginfo::{SourceFile, SourceManager, SourceSpan},
     mast::{DecoratorId, MastForest, MastNodeExt, MastNodeId},
     stack::MIN_STACK_DEPTH,
@@ -10,11 +11,11 @@ use vm_core::{
 };
 use winter_prover::ProverError;
 
-use super::{
-    EventError, Felt, QuadFelt, Word,
+use crate::{
+    EventError, MemoryError,
+    host::advice::AdviceError,
     system::{FMP_MAX, FMP_MIN},
 };
-use crate::{MemoryError, host::advice::AdviceError};
 
 // EXECUTION ERROR
 // ================================================================================================
