@@ -105,11 +105,11 @@ impl AdviceMap {
     /// - `None` if there are no conflicting values.
     pub fn find_overlapping_entry(&self, other: &Self) -> Option<(MapEntry, Arc<[Felt]>)> {
         for (key, new_value) in other.iter() {
-            if let Some(existing_value) = self.get_arc(key)
-                && existing_value != new_value
-            {
-                // Found a conflict.
-                return Some(((*key, existing_value.clone()), new_value.clone()));
+            if let Some(existing_value) = self.get_arc(key) {
+                if existing_value != new_value {
+                    // Found a conflict.
+                    return Some(((*key, existing_value.clone()), new_value.clone()));
+                }
             }
         }
         // No conflicts found.
