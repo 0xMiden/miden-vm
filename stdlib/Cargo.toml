@@ -32,8 +32,8 @@ with-debug-info = []
 
 [dependencies]
 assembly = { package = "miden-assembly", path = "../assembly", version = "0.15", default-features = false }
-vm-core = { package = "miden-core", path = "../core", version = "0.15", default-features = false }
 thiserror.workspace = true
+vm-core = { package = "miden-core", path = "../core", version = "0.15", default-features = false }
 
 [dev-dependencies]
 blake3 = "1.8"
