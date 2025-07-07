@@ -256,7 +256,7 @@ fn test_move_sig_to_adv_stack() {
     let store = MerkleStore::new();
 
     let mut test = build_test!(source, &op_stack, &adv_stack, store, advice_map.into_iter());
-    test.add_handler(EVENT_FALCON_SIG_TO_STACK, push_falcon_signature);
+    test.add_event_handler(EVENT_FALCON_SIG_TO_STACK, push_falcon_signature);
     test.expect_stack(&[])
 }
 
@@ -269,7 +269,7 @@ fn falcon_execution() {
     let (source, op_stack, adv_stack, store, advice_map) = generate_test(sk, message);
 
     let mut test = build_test!(&source, &op_stack, &adv_stack, store, advice_map.into_iter());
-    test.add_handler(EVENT_FALCON_SIG_TO_STACK, push_falcon_signature);
+    test.add_event_handler(EVENT_FALCON_SIG_TO_STACK, push_falcon_signature);
     test.expect_stack(&[])
 }
 

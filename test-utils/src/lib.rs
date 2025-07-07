@@ -6,6 +6,7 @@ extern crate alloc;
 extern crate std;
 
 use alloc::{
+    collections::BTreeMap,
     format,
     string::{String, ToString},
     sync::Arc,
@@ -182,7 +183,7 @@ pub struct Test {
     pub advice_inputs: AdviceInputs,
     pub in_debug_mode: bool,
     pub libraries: Vec<Library>,
-    pub handlers: Vec<(u32, HandlerFunc)>,
+    pub handlers: BTreeMap<u32, HandlerFunc>,
     pub add_modules: Vec<(LibraryPath, String)>,
 }
 
@@ -202,7 +203,7 @@ impl Test {
             advice_inputs: AdviceInputs::default(),
             in_debug_mode,
             libraries: Vec::default(),
-            handlers: Vec::default(),
+            handlers: BTreeMap::default(),
             add_modules: Vec::default(),
         }
     }
@@ -213,10 +214,13 @@ impl Test {
     }
 
     /// Add a handler for a specifc event when running the `Host`.
+    ///
     /// The `handler_func` can be either a closure or a free function with signature
     /// `fn(&mut ProcessState) -> Result<(), EventError>`.
-    pub fn add_handler(&mut self, id: u32, handler_func: HandlerFunc) {
-        self.handlers.push((id, handler_func))
+    pub fn add_event_handler(&mut self, id: u32, handler_func: HandlerFunc) {
+        if self.handlers.insert(id, handler_func).is_some() {
+            panic!("handler with id {id} was already added")
+        }
     }
 
     // TEST METHODS
@@ -469,8 +473,8 @@ impl Test {
         for library in &self.libraries {
             host.load_mast_forest(library.mast_forest().clone()).unwrap();
         }
-        for &(id, handler_func) in &self.handlers {
-            host.load_handler(id, handler_func).unwrap();
+        for (id, handler_func) in &self.handlers {
+            host.load_handler(*id, *handler_func).unwrap();
         }
 
         (program, host)
