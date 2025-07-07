@@ -460,15 +460,15 @@ impl MastForest {
 
     /// Returns the [Word] representing the hash of the procedures in this forest.
     pub fn digest(&self) -> Word {
-        self.digest_from_nodes(&self.roots)
+        self.nodes_digest(&self.roots)
     }
 
     /// Returns the [Word] representing the content hash of a subset of [`MastNodeId`]s.
-    pub fn digest_from_nodes<'a>(
-        &self,
-        node_ids: impl IntoIterator<Item = &'a MastNodeId>,
-    ) -> Word {
-        let digests = BTreeSet::from_iter(node_ids.into_iter().map(|&id| self[id].digest()));
+    ///
+    /// # Panics
+    /// This function panics if `node_ids` is empty.
+    pub fn nodes_digest<'a>(&self, node_ids: impl IntoIterator<Item = &'a MastNodeId>) -> Word {
+        let digests: BTreeSet<_> = node_ids.into_iter().map(|&id| self[id].digest()).collect();
         digests
             .into_iter()
             .reduce(|a, b| crate::crypto::hash::Rpo256::merge(&[a, b]))
