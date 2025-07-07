@@ -5,7 +5,7 @@
 // ================================================================================================
 
 pub use miden_assembly::{
-    self, Assembler,
+    self as assembly, Assembler,
     ast::{Module, ModuleKind},
     diagnostics,
 };

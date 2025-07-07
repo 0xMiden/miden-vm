@@ -52,7 +52,7 @@ For example:
 ```rust
 use std::sync::Arc;
 use miden_vm::{assembly::DefaultSourceManager, AdviceInputs, Assembler, execute, execute_iter, DefaultHost, Program, StackInputs};
-use processor::ExecutionOptions;
+use miden_processor::ExecutionOptions;
 
 // instantiate default source manager
 let source_manager = Arc::new(DefaultSourceManager::default());
