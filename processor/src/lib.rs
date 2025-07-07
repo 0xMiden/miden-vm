@@ -754,6 +754,8 @@ impl Process {
         }
 
         self.advice.add_mast_forest(&mast_forest);
+        self.loaded_forests_by_procedure
+            .insert(node_digest, (root_id, mast_forest.clone()));
 
         Ok((root_id, mast_forest))
     }

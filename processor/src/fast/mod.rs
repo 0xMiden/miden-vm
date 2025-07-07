@@ -639,7 +639,7 @@ impl FastProcessor {
         kernel: &Kernel,
         host: &mut impl AsyncHost,
     ) -> Result<(), ExecutionError> {
-        let (root_id, mast_forest) = self.resolve_external_node_async(external_node, host).await?;
+        let (root_id, mast_forest) = self.resolve_external_node(external_node, host).await?;
 
         self.execute_mast_node(root_id, &mast_forest, kernel, host).await
     }
@@ -970,7 +970,7 @@ impl FastProcessor {
 
     /// Analogous to [`Process::resolve_external_node`](crate::Process::resolve_external_node), but
     /// for asynchronous execution.
-    async fn resolve_external_node_async(
+    async fn resolve_external_node(
         &mut self,
         external_node: &ExternalNode,
         host: &mut impl AsyncHost,
@@ -1000,6 +1000,8 @@ impl FastProcessor {
         }
 
         self.advice.add_mast_forest(&mast_forest);
+        self.loaded_forests_by_procedure
+            .insert(node_digest, (root_id, mast_forest.clone()));
 
         Ok((root_id, mast_forest))
     }
