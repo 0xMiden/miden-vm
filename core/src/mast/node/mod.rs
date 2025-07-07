@@ -339,7 +339,7 @@ impl fmt::Display for MastNodeDisplay<'_> {
 // ===============================================================================================
 
 /// A trait for extending the functionality of all [`MastNode`]s.
-pub trait MastNodeExt {
+pub trait MastNodeExt: Sync {
     // REQUIRED METHODS
     // -------------------------------------------------------------------------------------------
 

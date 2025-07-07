@@ -6,6 +6,7 @@ extern crate alloc;
 extern crate std;
 
 use alloc::{
+    collections::BTreeMap,
     format,
     string::{String, ToString},
     sync::Arc,
@@ -22,7 +23,7 @@ pub use processor::{
     AdviceInputs, AdviceProvider, ContextId, ExecutionError, ExecutionOptions, ExecutionTrace,
     Process, ProcessState, VmStateIterator,
 };
-use processor::{Program, fast::FastProcessor};
+use processor::{DefaultHost, EventError, Program, fast::FastProcessor};
 #[cfg(not(target_family = "wasm"))]
 use proptest::prelude::{Arbitrary, Strategy};
 use prover::utils::range;
@@ -52,8 +53,7 @@ pub mod serde {
 
 pub mod crypto;
 
-pub mod host;
-use host::TestHost;
+pub type TestHost = DefaultHost;
 
 #[cfg(not(target_family = "wasm"))]
 pub mod rand;
@@ -154,6 +154,9 @@ macro_rules! assert_assembler_diagnostic {
     }};
 }
 
+/// Alias for a free function or closure handling an `Event`.
+type HandlerFunc = fn(&mut ProcessState) -> Result<(), EventError>;
+
 /// This is a container for the data required to run tests, which allows for running several
 /// different types of tests.
 ///
@@ -175,6 +178,7 @@ pub struct Test {
     pub advice_inputs: AdviceInputs,
     pub in_debug_mode: bool,
     pub libraries: Vec<Library>,
+    pub handlers: BTreeMap<u32, HandlerFunc>,
     pub add_modules: Vec<(LibraryPath, String)>,
 }
 
@@ -186,7 +190,7 @@ impl Test {
     pub fn new(name: &str, source: &str, in_debug_mode: bool) -> Self {
         let source_manager = Arc::new(assembly::DefaultSourceManager::default());
         let source = source_manager.load(SourceLanguage::Masm, name.into(), source.to_string());
-        Test {
+        Self {
             source_manager,
             source,
             kernel_source: None,
@@ -194,6 +198,7 @@ impl Test {
             advice_inputs: AdviceInputs::default(),
             in_debug_mode,
             libraries: Vec::default(),
+            handlers: BTreeMap::default(),
             add_modules: Vec::default(),
         }
     }
@@ -201,6 +206,16 @@ impl Test {
     /// Add an extra module to link in during assembly
     pub fn add_module(&mut self, path: assembly::LibraryPath, source: impl ToString) {
         self.add_modules.push((path, source.to_string()));
+    }
+
+    /// Add a handler for a specifc event when running the `Host`.
+    ///
+    /// The `handler_func` can be either a closure or a free function with signature
+    /// `fn(&mut ProcessState) -> Result<(), EventError>`.
+    pub fn add_event_handler(&mut self, id: u32, handler_func: HandlerFunc) {
+        if self.handlers.insert(id, handler_func).is_some() {
+            panic!("handler with id {id} was already added")
+        }
     }
 
     // TEST METHODS
@@ -226,14 +241,7 @@ impl Test {
         expected_mem: &[u64],
     ) {
         // compile the program
-        let (program, kernel) = self.compile().expect("Failed to compile test source.");
-        let mut host = TestHost::default();
-        if let Some(kernel) = kernel {
-            host.load_mast_forest(kernel.mast_forest().clone()).unwrap();
-        }
-        for library in &self.libraries {
-            host.load_mast_forest(library.mast_forest().clone()).unwrap();
-        }
+        let (program, mut host) = self.get_program_and_host();
 
         // execute the test
         let mut process = Process::new(
@@ -459,6 +467,9 @@ impl Test {
         }
         for library in &self.libraries {
             host.load_mast_forest(library.mast_forest().clone()).unwrap();
+        }
+        for (id, handler_func) in &self.handlers {
+            host.load_handler(*id, *handler_func).unwrap();
         }
 
         (program, host)

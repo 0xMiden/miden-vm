@@ -1,5 +1,4 @@
-use alloc::{boxed::Box, sync::Arc};
-use core::error::Error;
+use alloc::sync::Arc;
 
 use miden_air::RowIndex;
 use miette::Diagnostic;
@@ -12,8 +11,11 @@ use vm_core::{
 };
 use winter_prover::ProverError;
 
-use super::system::{FMP_MAX, FMP_MIN};
-use crate::{MemoryError, host::advice::AdviceError};
+use crate::{
+    EventError, MemoryError,
+    host::advice::AdviceError,
+    system::{FMP_MAX, FMP_MIN},
+};
 
 // EXECUTION ERROR
 // ================================================================================================
@@ -72,8 +74,19 @@ pub enum ExecutionError {
         #[source_code]
         source_file: Option<Arc<SourceFile>>,
         #[source]
-        error: Box<dyn Error + Send + Sync + 'static>,
+        error: EventError,
     },
+    #[error("got unexpected event_id {id} which is not supported by the host")]
+    #[diagnostic()]
+    UnhandledEventId {
+        #[label]
+        label: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<SourceFile>>,
+        id: u32,
+    },
+    #[error("attempted to add event handler with previously inserted id: {id}")]
+    DuplicateEventHandler { id: u32 },
     #[error("assertion failed at clock cycle {clk} with error {}",
       match err_msg {
         Some(msg) => format!("message: {msg}"),
@@ -293,13 +306,16 @@ impl ExecutionError {
         Self::DynamicNodeNotFound { label, source_file, digest }
     }
 
-    pub fn event_error(
-        error: Box<dyn Error + Send + Sync + 'static>,
-        err_ctx: &impl ErrorContext,
-    ) -> Self {
+    pub fn event_error(error: EventError, err_ctx: &impl ErrorContext) -> Self {
         let (label, source_file) = err_ctx.label_and_source_file();
 
         Self::EventError { label, source_file, error }
+    }
+
+    pub fn unhandled_event_id_error(id: u32, err_ctx: &impl ErrorContext) -> Self {
+        let (label, source_file) = err_ctx.label_and_source_file();
+
+        Self::UnhandledEventId { label, source_file, id }
     }
 
     pub fn failed_assertion(
@@ -487,7 +503,7 @@ macro_rules! err_ctx {
 ///
 /// This trait contains the same methods as `ErrorContext` to provide a common
 /// interface for error context functionality.
-pub trait ErrorContext {
+pub trait ErrorContext: Sync {
     /// Returns the label and source file associated with the error context, if any.
     ///
     /// Note that `SourceSpan::UNKNOWN` will be returned to indicate an empty span.

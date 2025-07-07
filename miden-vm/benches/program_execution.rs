@@ -33,9 +33,6 @@ fn program_execution(c: &mut Criterion) {
                     },
                     Err(_) => (StackInputs::default(), AdviceInputs::default()),
                 };
-                let mut host = DefaultHost::default();
-                host.load_mast_forest(StdLibrary::default().as_ref().mast_forest().clone())
-                    .unwrap();
 
                 // the name of the file without the extension
                 let source = std::fs::read_to_string(entry.path()).unwrap();
@@ -53,7 +50,14 @@ fn program_execution(c: &mut Criterion) {
                         .assemble_program(&source)
                         .expect("Failed to compile test source.");
                     bench.iter_batched(
-                        || host.clone(),
+                        || {
+                            let mut host = DefaultHost::default();
+                            host.load_mast_forest(
+                                StdLibrary::default().as_ref().mast_forest().clone(),
+                            )
+                            .unwrap();
+                            host
+                        },
                         |mut host| {
                             execute(
                                 &program,

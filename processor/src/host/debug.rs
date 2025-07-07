@@ -4,8 +4,7 @@ use std::{print, println};
 use miden_air::RowIndex;
 use vm_core::{DebugOptions, Felt};
 
-use super::ProcessState;
-use crate::{AdviceProvider, MemoryAddress, system::ContextId};
+use crate::{AdviceProvider, MemoryAddress, ProcessState, system::ContextId};
 
 // DEBUG HANDLER
 // ================================================================================================

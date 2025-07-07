@@ -2,13 +2,14 @@
 
 extern crate alloc;
 
-use alloc::sync::Arc;
+use alloc::{sync::Arc, vec::Vec};
 
 use assembly::{
     Library,
     mast::MastForest,
     utils::{Deserializable, sync::LazyLock},
 };
+use vm_core::{Felt, Word};
 
 // STANDARD LIBRARY
 // ================================================================================================
@@ -54,10 +55,6 @@ impl Default for StdLibrary {
 // FALCON SIGNATURE
 // ================================================================================================
 
-/// Event ID for pushing a Falcon signature to the advice stack.
-/// This event is used for testing purposes only.
-pub const EVENT_FALCON_SIG_TO_STACK: u32 = 3419226139;
-
 /// Signs the provided message with the provided secret key and returns the resulting signature
 /// encoded in the format required by the rpo_faclcon512::verify procedure, or `None` if the secret
 /// key is malformed due to either incorrect length or failed decoding.
@@ -73,11 +70,8 @@ pub const EVENT_FALCON_SIG_TO_STACK: u32 = 3419226139;
 ///    Miden field.
 /// 5. The nonce represented as 8 field elements.
 #[cfg(feature = "std")]
-pub fn falcon_sign(
-    sk: &[vm_core::Felt],
-    msg: vm_core::Word,
-) -> Option<alloc::vec::Vec<vm_core::Felt>> {
-    use alloc::{vec, vec::Vec};
+pub fn falcon_sign(sk: &[Felt], msg: Word) -> Option<Vec<Felt>> {
+    use alloc::vec;
 
     use vm_core::{
         Felt,
@@ -142,10 +136,7 @@ pub fn falcon_sign(
 }
 
 #[cfg(not(feature = "std"))]
-pub fn falcon_sign(
-    _pk_sk: &[vm_core::Felt],
-    _msg: vm_core::Word,
-) -> Option<alloc::vec::Vec<vm_core::Felt>> {
+pub fn falcon_sign(_pk_sk: &[Felt], _msg: Word) -> Option<Vec<Felt>> {
     None
 }
 

@@ -1291,6 +1291,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "sha3",
+ "thiserror 2.0.12",
  "winter-air",
  "winter-fri",
 ]

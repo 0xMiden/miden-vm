@@ -53,8 +53,11 @@ use range::RangeChecker;
 
 mod host;
 pub use host::{
-    AsyncHost, BaseHost, DefaultHost, MastForestStore, MemMastForestStore, SyncHost,
+    AsyncHost, BaseHost, MastForestStore, MemMastForestStore, SyncHost,
     advice::{AdviceError, AdviceInputs, AdviceProvider},
+    default::{DefaultDebugHandler, DefaultHost},
+    handlers::{DebugHandler, EventError, EventHandler, EventHandlerRegistry},
+    library::HostLibrary,
 };
 
 mod chiplets;
