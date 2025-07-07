@@ -54,7 +54,7 @@ fn program_execution_fast(c: &mut Criterion) {
                     let stack_inputs: Vec<_> = stack_inputs.iter().rev().copied().collect();
                     bench.to_async(Runtime::new().unwrap()).iter_batched(
                         || {
-                            let processor = Fastmiden_processor::new_with_advice_inputs(
+                            let processor = FastProcessor::new_with_advice_inputs(
                                 &stack_inputs,
                                 advice_inputs.clone(),
                             );
