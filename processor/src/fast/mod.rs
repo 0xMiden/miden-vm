@@ -18,7 +18,6 @@ use vm_core::{
 use crate::{
     AdviceInputs, AdviceProvider, AsyncHost, ContextId, ErrorContext, ExecutionError, FMP_MIN,
     ProcessState, SYSCALL_FMP_MIN, add_error_ctx_to_external_error, chiplets::Ace, err_ctx,
-    utils::resolve_external_node_async,
 };
 
 mod memory;
@@ -146,7 +145,7 @@ pub struct FastProcessor {
 
     /// Mapping of digests of external procedure digests with their corresponding node ID and
     /// forest containing the procedure.
-    pub(crate) called_external_procedures: BTreeMap<Word, (MastNodeId, Arc<MastForest>)>,
+    pub(crate) loaded_forests_by_procedure: BTreeMap<Word, (MastNodeId, Arc<MastForest>)>,
 
     /// Whether to enable debug statements and tracing.
     in_debug_mode: bool,
@@ -219,7 +218,7 @@ impl FastProcessor {
             memory: Memory::new(),
             call_stack: Vec::new(),
             ace: Ace::default(),
-            called_external_procedures: BTreeMap::default(),
+            loaded_forests_by_procedure: BTreeMap::default(),
             in_debug_mode,
             source_manager,
         }
@@ -642,7 +641,7 @@ impl FastProcessor {
     ) -> Result<(), ExecutionError> {
         let mut process_state = self.state(0);
         let (root_id, mast_forest) =
-            resolve_external_node_async(&mut process_state, external_node, host).await?;
+            process_state.resolve_external_node_async(external_node, host).await?;
 
         self.execute_mast_node(root_id, &mast_forest, kernel, host).await
     }

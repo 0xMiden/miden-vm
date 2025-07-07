@@ -167,27 +167,21 @@ impl AdviceProvider {
     /// Returns an error if the key is not found in the primary map or in any of the available
     /// `MastForest`s.
     pub fn get_mapped_values(&mut self, key: &Word) -> Result<&[Felt], AdviceError> {
-        // Hot Path: Perform a single lookup.
-        if let Some(values) = self.map.get(key) {
-            // --- UNSAFE ---
-            // SAFETY: This is safe because this branch terminates immediately with a return.
-            // No mutation of `self` happens, so the returned reference cannot be
-            // invalidated by later operations in this function. We are manually
-            // telling the compiler that the aliasing it fears does not actually occur.
-            unsafe {
-                let pointer_to_values: *const [Felt] = values;
-                return Ok(&*pointer_to_values);
-            }
+        // Check if the key already exists in the map
+        if self.map.contains_key(key) {
+            // The hot branch (i.e. when the key is already in the map) requires two lookups
+            // into the map. This is required to satisfy the borrow checker.
+            // If this lookup becomes a bottleneck, an unsafe block can be used to
+            // launder the lifetime of the reference from `self.map.get(key)`.
+            return Ok(self.map.get(key).unwrap());
         }
 
-        // --- Cold Path ---
-        // This code only runs if the `if` block above did not.
+        // If not, try to find it in one of the pending forests.
         if let Some(mast_forest) =
             self.pending_forests.pop_if(|mf| mf.advice_map().contains_key(key))
         {
+            // Load all entries from the popped forest into the current map.
             self.merge_advice_map(mast_forest.advice_map())?;
-
-            // This final `get` is safe because we know the value has been merged into `self`
             return Ok(self.map.get(key).unwrap());
         }
 

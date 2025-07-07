@@ -48,8 +48,8 @@ impl AdviceMap {
     }
 
     /// Inserts a key value pair in the advice map and returns the inserted value.
-    pub fn insert(&mut self, key: Word, value: Vec<Felt>) -> Option<Arc<[Felt]>> {
-        self.0.insert(key, Arc::from(value))
+    pub fn insert(&mut self, key: Word, value: impl Into<Arc<[Felt]>>) -> Option<Arc<[Felt]>> {
+        self.0.insert(key, value.into())
     }
 
     /// Removes the value associated with the key and returns the removed element.
@@ -83,7 +83,7 @@ impl AdviceMap {
     /// an error is returned containing the existing entry along with the value that would replace
     /// it. The current map remains unchanged.
     pub fn merge(&mut self, other: &Self) -> Result<(), (MapEntry, Arc<[Felt]>)> {
-        if let Some(conflict) = self.find_overlapping_entry(other) {
+        if let Some(conflict) = self.find_conflicting_entry(other) {
             Err(conflict)
         } else {
             self.merge_new(other);
@@ -103,7 +103,7 @@ impl AdviceMap {
     /// # Returns
     /// - `Some` containing the conflicting key, its value from `self`, and the value from `other`.
     /// - `None` if there are no conflicting values.
-    pub fn find_overlapping_entry(&self, other: &Self) -> Option<(MapEntry, Arc<[Felt]>)> {
+    pub fn find_conflicting_entry(&self, other: &Self) -> Option<(MapEntry, Arc<[Felt]>)> {
         for (key, new_value) in other.iter() {
             if let Some(existing_value) = self.get_arc(key) {
                 if existing_value != new_value {
@@ -120,6 +120,12 @@ impl AdviceMap {
 impl From<BTreeMap<Word, Arc<[Felt]>>> for AdviceMap {
     fn from(value: BTreeMap<Word, Arc<[Felt]>>) -> Self {
         Self(value)
+    }
+}
+
+impl From<BTreeMap<Word, Vec<Felt>>> for AdviceMap {
+    fn from(value: BTreeMap<Word, Vec<Felt>>) -> Self {
+        value.into_iter().collect()
     }
 }
 

@@ -14,7 +14,6 @@ use miden_air::trace::{
     SYS_TRACE_WIDTH,
 };
 pub use miden_air::{ExecutionOptions, ExecutionOptionsError, RowIndex};
-use utils::resolve_external_node;
 pub use vm_core::{
     AssemblyOp, EMPTY_WORD, Felt, Kernel, ONE, Operation, Program, ProgramInfo, QuadExtension,
     StackInputs, StackOutputs, Word, ZERO,
@@ -28,7 +27,8 @@ pub use vm_core::{
 use vm_core::{
     Decorator, DecoratorIterator, FieldElement, WORD_SIZE,
     mast::{
-        BasicBlockNode, CallNode, DynNode, JoinNode, LoopNode, OP_GROUP_SIZE, OpBatch, SplitNode,
+        BasicBlockNode, CallNode, DynNode, ExternalNode, JoinNode, LoopNode, OP_GROUP_SIZE,
+        OpBatch, SplitNode,
     },
 };
 pub use winter_prover::matrix::ColMatrix;
@@ -75,7 +75,6 @@ mod tests;
 
 mod debug;
 pub use debug::{AsmOpInfo, VmState, VmStateIterator};
-
 // RE-EXPORTS
 // ================================================================================================
 
@@ -234,7 +233,7 @@ pub struct Process {
     max_cycles: u32,
     enable_tracing: bool,
     source_manager: Arc<dyn SourceManager>,
-    loaded_procedures: BTreeMap<Word, (MastNodeId, Arc<MastForest>)>,
+    loaded_forests_by_procedure: BTreeMap<Word, (MastNodeId, Arc<MastForest>)>,
 }
 
 #[cfg(any(test, feature = "testing"))]
@@ -248,7 +247,7 @@ pub struct Process {
     pub max_cycles: u32,
     pub enable_tracing: bool,
     pub source_manager: Arc<dyn SourceManager>,
-    pub loaded_procedures: BTreeMap<Word, (MastNodeId, Arc<MastForest>)>,
+    pub loaded_forests_by_procedure: BTreeMap<Word, (MastNodeId, Arc<MastForest>)>,
 }
 
 impl Process {
@@ -296,7 +295,7 @@ impl Process {
             max_cycles: execution_options.max_cycles(),
             enable_tracing: execution_options.enable_tracing(),
             source_manager,
-            loaded_procedures: BTreeMap::default(),
+            loaded_forests_by_procedure: BTreeMap::default(),
         }
     }
 
@@ -367,7 +366,7 @@ impl Process {
             MastNode::External(external_node) => {
                 let mut process_state = self.state();
                 let (root_id, mast_forest) =
-                    resolve_external_node(&mut process_state, external_node, host)?;
+                    process_state.resolve_external_node(external_node, host)?;
 
                 self.execute_mast_node(root_id, &mast_forest, host)?;
             },
@@ -761,7 +760,7 @@ impl Process {
             system: &self.system,
             stack: &self.stack,
             chiplets: &self.chiplets,
-            called_external_procedures: &self.loaded_procedures,
+            called_external_procedures: &self.loaded_forests_by_procedure,
         })
     }
 }
@@ -892,14 +891,84 @@ impl<'a> ProcessState<'a> {
     // HELPERS
     // --------------------------------------------------------------------------------------------
 
-    pub(crate) fn cached_external_procedure(
-        &self,
-        digest: &Word,
-    ) -> Option<(MastNodeId, Arc<MastForest>)> {
+    /// Resolves an external node reference to a procedure root using the `MastForest` store in the
+    /// provided host.
+    ///
+    /// This helper function is extracted to ensure that [`crate::Process`] and
+    /// [`crate::fast::FastProcessor`] resolve external nodes in the same way.
+    pub(crate) fn resolve_external_node(
+        &mut self,
+        external_node: &ExternalNode,
+        host: &impl SyncHost,
+    ) -> Result<(MastNodeId, Arc<MastForest>), ExecutionError> {
+        let node_digest = external_node.digest();
+
+        // Check the cache if this procedure has already been called.
+        if let Some((node_id, forest)) = self.cached_external_procedure(&node_digest) {
+            return Ok((node_id, forest));
+        }
+
+        let mast_forest = host
+            .get_mast_forest(&node_digest)
+            .ok_or(ExecutionError::no_mast_forest_with_procedure(node_digest, &()))?;
+
+        // We limit the parts of the program that can be called externally to procedure
+        // roots, even though MAST doesn't have that restriction.
+        let root_id = mast_forest
+            .find_procedure_root(node_digest)
+            .ok_or(ExecutionError::malfored_mast_forest_in_host(node_digest, &()))?;
+
+        // if the node that we got by looking up an external reference is also an External
+        // node, we are about to enter into an infinite loop - so, return an error
+        if mast_forest[root_id].is_external() {
+            return Err(ExecutionError::CircularExternalNode(node_digest));
+        }
+
+        self.advice_provider_mut().add_mast_forest(&mast_forest);
+
+        Ok((root_id, mast_forest))
+    }
+
+    /// Analogous to [`resolve_external_node`], but for asynchronous execution.
+    pub(crate) async fn resolve_external_node_async(
+        &mut self,
+        external_node: &ExternalNode,
+        host: &mut impl AsyncHost,
+    ) -> Result<(MastNodeId, Arc<MastForest>), ExecutionError> {
+        let node_digest = external_node.digest();
+
+        // Check the cache if this procedure has already been called.
+        if let Some((node_id, forest)) = self.cached_external_procedure(&node_digest) {
+            return Ok((node_id, forest));
+        }
+
+        let mast_forest = host
+            .get_mast_forest(&node_digest)
+            .await
+            .ok_or(ExecutionError::no_mast_forest_with_procedure(node_digest, &()))?;
+
+        // We limit the parts of the program that can be called externally to procedure
+        // roots, even though MAST doesn't have that restriction.
+        let root_id = mast_forest
+            .find_procedure_root(node_digest)
+            .ok_or(ExecutionError::malfored_mast_forest_in_host(node_digest, &()))?;
+
+        // if the node that we got by looking up an external reference is also an External
+        // node, we are about to enter into an infinite loop - so, return an error
+        if mast_forest[root_id].is_external() {
+            return Err(ExecutionError::CircularExternalNode(node_digest));
+        }
+
+        self.advice_provider_mut().add_mast_forest(&mast_forest);
+
+        Ok((root_id, mast_forest))
+    }
+
+    fn cached_external_procedure(&self, digest: &Word) -> Option<(MastNodeId, Arc<MastForest>)> {
         match self {
             ProcessState::Slow(state) => state.called_external_procedures.get(digest).cloned(),
             ProcessState::Fast(state) => {
-                state.processor.called_external_procedures.get(digest).cloned()
+                state.processor.loaded_forests_by_procedure.get(digest).cloned()
             },
         }
     }
