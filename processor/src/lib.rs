@@ -18,7 +18,6 @@ pub use miden_core::{
     AssemblyOp, EMPTY_WORD, Felt, Kernel, ONE, Operation, Program, ProgramInfo, QuadExtension,
     StackInputs, StackOutputs, Word, ZERO,
     crypto::merkle::SMT_DEPTH,
-    debuginfo::{DefaultSourceManager, SourceManager, SourceSpan},
     errors::InputError,
     mast::{MastForest, MastNode, MastNodeId},
     sys_events::SystemEvent,
@@ -30,6 +29,7 @@ use miden_core::{
         BasicBlockNode, CallNode, DynNode, JoinNode, LoopNode, OP_GROUP_SIZE, OpBatch, SplitNode,
     },
 };
+use miden_debuginfo::{DefaultSourceManager, SourceManager, SourceSpan};
 use utils::resolve_external_node;
 pub use winter_prover::matrix::ColMatrix;
 

@@ -1,5 +1,7 @@
+use miden_debuginfo::Span;
+
 use crate::{
-    DisplayHex, Span,
+    DisplayHex,
     ast::{Immediate, Instruction, InvocationTarget},
     prettier::{Document, PrettyPrint},
 };
@@ -401,8 +403,9 @@ fn inst_with_pretty_params<P: PrettyPrint>(inst: &'static str, params: &[P]) -> 
 #[cfg(test)]
 mod tests {
     use miden_core::crypto::hash::Rpo256;
+    use miden_debuginfo::Span;
 
-    use crate::{Felt, Span, ast::*};
+    use crate::{Felt, ast::*};
 
     #[test]
     fn test_instruction_display() {

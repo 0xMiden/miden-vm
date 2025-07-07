@@ -1,3 +1,11 @@
+#![no_std]
+
+#[macro_use]
+extern crate alloc;
+
+#[cfg(any(feature = "std", test))]
+extern crate std;
+
 mod location;
 mod selection;
 mod source_file;

@@ -1,14 +1,13 @@
 use alloc::string::String;
 use core::{num::IntErrorKind, ops::Range};
 
+use miden_debuginfo::{ByteOffset, SourceId, SourceSpan};
+
 use super::{
     BinEncodedValue, BinErrorKind, DocumentationType, HexErrorKind, IntValue, LiteralErrorKind,
     ParsingError, Scanner, Token, WordValue,
 };
-use crate::{
-    Felt,
-    diagnostics::{SourceId, SourceSpan, debuginfo::ByteOffset},
-};
+use crate::Felt;
 
 /// The value produced by the [Lexer] when iterated
 ///

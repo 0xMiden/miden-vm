@@ -1,10 +1,9 @@
 use alloc::{borrow::Cow, boxed::Box, sync::Arc, vec::Vec};
 use core::fmt;
 
-use super::{
-    Diagnostic, Label, LabeledSpan, Report, Severity, SourceCode,
-    debuginfo::{SourceFile, SourceSpan},
-};
+use miden_debuginfo::{SourceFile, SourceSpan};
+
+use super::{Diagnostic, Label, LabeledSpan, Report, Severity, SourceCode};
 
 // RELATED LABEL
 // ================================================================================================

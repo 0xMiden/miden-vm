@@ -11,11 +11,12 @@ use core::{
 use miden_core::utils::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
+use miden_debuginfo::{SourceSpan, Span, Spanned};
+use miden_utils_diagnostics::{IntoDiagnostic, Report, miette};
 
 use crate::{
-    LibraryNamespace, LibraryPath, SourceSpan, Span, Spanned,
+    LibraryNamespace, LibraryPath,
     ast::{CaseKindError, Ident, IdentError},
-    diagnostics::{IntoDiagnostic, Report, miette},
 };
 
 // QUALIFIED PROCEDURE NAME

@@ -1,7 +1,9 @@
 use alloc::{string::String, sync::Arc};
 
+use miden_debuginfo::{SourceSpan, Span, Spanned};
+
 use crate::{
-    Felt, SourceSpan, Span, Spanned,
+    Felt,
     ast::Ident,
     parser::{IntValue, WordValue},
     prettier,

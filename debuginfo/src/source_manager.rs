@@ -257,7 +257,7 @@ impl<T: ?Sized + SourceManager> SourceManagerExt for T {}
 // DEFAULT SOURCE MANAGER
 // ================================================================================================
 
-use crate::sync::RwLock;
+use miden_utils_sync::RwLock;
 
 #[derive(Debug, Default)]
 pub struct DefaultSourceManager(RwLock<DefaultSourceManagerImpl>);

@@ -4,11 +4,8 @@ extern crate alloc;
 
 use alloc::sync::Arc;
 
-use miden_assembly::{
-    Library,
-    mast::MastForest,
-    utils::{Deserializable, sync::LazyLock},
-};
+use miden_assembly::{Library, mast::MastForest, utils::Deserializable};
+use miden_utils_sync::LazyLock;
 
 // STANDARD LIBRARY
 // ================================================================================================

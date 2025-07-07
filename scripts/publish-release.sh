@@ -9,7 +9,8 @@
 # `main`, so that if any error occurs, we can fix it and re-run the script directly without having
 # to merge the fix into `next`, and then merge `next` into `main` again.
 
-cargo publish -p miden-core-diagnostics
+cargo publish -p miden-utils-sync
+cargo publish -p miden-utils-diagnostics
 cargo publish -p miden-core
 cargo publish -p miden-air
 cargo publish -p miden-assembly-syntax

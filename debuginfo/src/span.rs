@@ -5,11 +5,13 @@ use core::{
     ops::{Bound, Deref, DerefMut, Index, Range, RangeBounds},
 };
 
+use miden_crypto::utils::{
+    ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+};
 #[cfg(feature = "std")]
 use serde::{Deserialize, Serialize};
 
 use super::{ByteIndex, ByteOffset, SourceId};
-use crate::utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
 
 /// This trait should be implemented for any type that has an associated [SourceSpan].
 pub trait Spanned {

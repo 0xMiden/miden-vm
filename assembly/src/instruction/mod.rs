@@ -1,12 +1,10 @@
 use miden_assembly_syntax::{
-    Span,
     ast::Instruction,
+    debuginfo::{Span, Spanned},
     diagnostics::{RelatedLabel, Report},
     parser::IntValue,
 };
-use miden_core::{
-    Decorator, Felt, ONE, Operation, WORD_SIZE, ZERO, debuginfo::Spanned, mast::MastNodeId,
-};
+use miden_core::{Decorator, Felt, ONE, Operation, WORD_SIZE, ZERO, mast::MastNodeId};
 
 use crate::{Assembler, ProcedureContext, ast::InvokeKind, basic_block_builder::BasicBlockBuilder};
 

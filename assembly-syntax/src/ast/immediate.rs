@@ -1,7 +1,9 @@
 use alloc::sync::Arc;
 use core::fmt;
 
-use crate::{Felt, SourceSpan, Span, Spanned, ast::Ident};
+use miden_debuginfo::{SourceSpan, Span, Spanned};
+
+use crate::{Felt, ast::Ident};
 
 /// An 8-bit unsigned immediate
 pub type ImmU8 = Immediate<u8>;

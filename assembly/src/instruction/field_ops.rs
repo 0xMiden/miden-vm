@@ -1,6 +1,7 @@
 use miden_assembly_syntax::{
-    Felt, ParsingError, Span,
-    diagnostics::{RelatedError, RelatedLabel, Report, SourceSpan},
+    Felt, ParsingError,
+    debuginfo::{SourceSpan, Span},
+    diagnostics::{RelatedError, RelatedLabel, Report},
 };
 use miden_core::{FieldElement, Operation::*, sys_events::SystemEvent};
 

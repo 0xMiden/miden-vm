@@ -6,14 +6,12 @@ use alloc::{
     vec::Vec,
 };
 
+use miden_debuginfo::{SourceContent, SourceFile, SourceLanguage, SourceManager, Uri};
+
 use crate::{
     ast::{Module, ModuleKind},
-    diagnostics::{
-        IntoDiagnostic, NamedSource, Report, SourceCode, SourceContent, SourceFile, SourceLanguage,
-        SourceManager, Uri, WrapErr,
-    },
+    diagnostics::{IntoDiagnostic, NamedSource, Report, SourceCode, WrapErr, report},
     library::{LibraryNamespace, LibraryPath},
-    report,
 };
 
 // PARSE OPTIONS
@@ -360,7 +358,7 @@ impl Parse for &std::path::Path {
     ) -> Result<Box<Module>, Report> {
         use std::path::Component;
 
-        use miden_core::debuginfo::SourceManagerExt;
+        use miden_debuginfo::SourceManagerExt;
 
         use crate::{ast::Ident, library::PathError};
 

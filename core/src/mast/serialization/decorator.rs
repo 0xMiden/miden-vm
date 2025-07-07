@@ -1,5 +1,6 @@
 use alloc::vec::Vec;
 
+use miden_debuginfo::{Location, Uri};
 use num_derive::{FromPrimitive, ToPrimitive};
 use num_traits::{FromPrimitive, ToPrimitive};
 
@@ -9,7 +10,6 @@ use super::{
 };
 use crate::{
     AssemblyOp, DebugOptions, Decorator,
-    debuginfo::Uri,
     utils::{
         ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
     },
@@ -56,7 +56,7 @@ impl DecoratorInfo {
                     let uri = string_table.read_arc_str(str_index_in_table).map(Uri::from)?;
                     let start = data_reader.read_u32()?;
                     let end = data_reader.read_u32()?;
-                    Some(crate::debuginfo::Location {
+                    Some(Location {
                         uri,
                         start: start.into(),
                         end: end.into(),

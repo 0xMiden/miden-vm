@@ -1,6 +1,7 @@
 use miden_assembly_syntax::{
-    ParsingError, Span,
-    diagnostics::{RelatedLabel, Report, SourceSpan},
+    ParsingError,
+    debuginfo::{SourceSpan, Span},
+    diagnostics::{RelatedLabel, Report},
 };
 use miden_core::{
     Felt,

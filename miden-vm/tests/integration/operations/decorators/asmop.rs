@@ -1,4 +1,5 @@
-use miden_core::{AssemblyOp, Felt, Operation, debuginfo::Location};
+use miden_core::{AssemblyOp, Felt, Operation};
+use miden_debuginfo::Location;
 use miden_processor::{AsmOpInfo, RowIndex, VmStateIterator};
 use miden_test_utils::{assert_eq, build_debug_test};
 

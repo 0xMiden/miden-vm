@@ -110,16 +110,15 @@ macro_rules! build_test_by_mode {
         $crate::Test::new(&name, $source, $in_debug_mode)
     }};
     ($in_debug_mode:expr, $source:expr, $stack_inputs:expr) => {{
-        use ::miden_assembly::SourceManager;
+        use $crate::SourceManager;
 
         let stack_inputs: Vec<u64> = $stack_inputs.to_vec();
         let stack_inputs = $crate::StackInputs::try_from_ints(stack_inputs).unwrap();
         let advice_inputs = $crate::AdviceInputs::default();
         let name = format!("test{}", line!());
-        let source_manager =
-            ::alloc::sync::Arc::new(::miden_assembly::DefaultSourceManager::default());
+        let source_manager = ::alloc::sync::Arc::new($crate::DefaultSourceManager::default());
         let source = source_manager.load(
-            ::miden_assembly::diagnostics::SourceLanguage::Masm,
+            $crate::SourceLanguage::Masm,
             name.into(),
             ::alloc::string::String::from($source),
         );
@@ -136,7 +135,7 @@ macro_rules! build_test_by_mode {
         }
     }};
     ($in_debug_mode:expr, $source:expr, $stack_inputs:expr, $advice_stack:expr) => {{
-        use ::miden_assembly::SourceManager;
+        use $crate::SourceManager;
 
         let stack_inputs: Vec<u64> = $stack_inputs.to_vec();
         let stack_inputs = $crate::StackInputs::try_from_ints(stack_inputs).unwrap();
@@ -147,10 +146,9 @@ macro_rules! build_test_by_mode {
             .unwrap()
             .with_merkle_store(store);
         let name = format!("test{}", line!());
-        let source_manager =
-            ::alloc::sync::Arc::new(::miden_assembly::DefaultSourceManager::default());
+        let source_manager = ::alloc::sync::Arc::new($crate::DefaultSourceManager::default());
         let source = source_manager.load(
-            ::miden_assembly::diagnostics::SourceLanguage::Masm,
+            $crate::SourceLanguage::Masm,
             name.into(),
             ::alloc::string::String::from($source),
         );
@@ -173,7 +171,7 @@ macro_rules! build_test_by_mode {
         $advice_stack:expr,
         $advice_merkle_store:expr
     ) => {{
-        use ::miden_assembly::SourceManager;
+        use $crate::SourceManager;
 
         let stack_inputs: Vec<u64> = $stack_inputs.to_vec();
         let stack_inputs = $crate::StackInputs::try_from_ints(stack_inputs).unwrap();
@@ -183,10 +181,9 @@ macro_rules! build_test_by_mode {
             .unwrap()
             .with_merkle_store($advice_merkle_store);
         let name = format!("test{}", line!());
-        let source_manager =
-            ::alloc::sync::Arc::new(::miden_assembly::DefaultSourceManager::default());
+        let source_manager = ::alloc::sync::Arc::new($crate::DefaultSourceManager::default());
         let source = source_manager.load(
-            ::miden_assembly::diagnostics::SourceLanguage::Masm,
+            $crate::SourceLanguage::Masm,
             name.into(),
             ::alloc::string::String::from($source),
         );
@@ -210,7 +207,7 @@ macro_rules! build_test_by_mode {
         $advice_merkle_store:expr,
         $advice_map:expr
     ) => {{
-        use ::miden_assembly::SourceManager;
+        use $crate::SourceManager;
 
         let stack_inputs: Vec<u64> = $stack_inputs.to_vec();
         let stack_inputs = $crate::StackInputs::try_from_ints(stack_inputs).unwrap();
@@ -221,10 +218,9 @@ macro_rules! build_test_by_mode {
             .with_merkle_store($advice_merkle_store)
             .with_map($advice_map);
         let name = format!("test{}", line!());
-        let source_manager =
-            ::alloc::sync::Arc::new(::miden_assembly::DefaultSourceManager::default());
+        let source_manager = ::alloc::sync::Arc::new($crate::DefaultSourceManager::default());
         let source = source_manager.load(
-            ::miden_assembly::diagnostics::SourceLanguage::Masm,
+            $crate::SourceLanguage::Masm,
             name.into(),
             ::alloc::string::String::from($source),
         );

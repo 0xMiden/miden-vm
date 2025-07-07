@@ -1092,7 +1092,8 @@ dependencies = [
  "lalrpop-util",
  "log",
  "miden-core",
- "miden-core-diagnostics",
+ "miden-debuginfo",
+ "miden-utils-diagnostics",
  "pretty_assertions",
  "proptest",
  "proptest-derive",
@@ -1106,8 +1107,8 @@ dependencies = [
 name = "miden-core"
 version = "0.15.0"
 dependencies = [
- "miden-core-diagnostics",
  "miden-crypto",
+ "miden-debuginfo",
  "miden-formatting",
  "num-derive",
  "num-traits",
@@ -1116,26 +1117,6 @@ dependencies = [
  "winter-math",
  "winter-rand-utils",
  "winter-utils",
-]
-
-[[package]]
-name = "miden-core-diagnostics"
-version = "0.15.0"
-dependencies = [
- "lock_api",
- "loom",
- "memchr",
- "miden-crypto",
- "miden-formatting",
- "miden-miette",
- "parking_lot",
- "paste",
- "proptest",
- "serde",
- "serde_spanned",
- "smallvec",
- "thiserror 2.0.12",
- "tracing",
 ]
 
 [[package]]
@@ -1157,6 +1138,21 @@ dependencies = [
  "winter-crypto",
  "winter-math",
  "winter-utils",
+]
+
+[[package]]
+name = "miden-debuginfo"
+version = "0.15.0"
+dependencies = [
+ "memchr",
+ "miden-crypto",
+ "miden-formatting",
+ "miden-miette",
+ "miden-utils-sync",
+ "paste",
+ "serde",
+ "serde_spanned",
+ "thiserror 2.0.12",
 ]
 
 [[package]]
@@ -1240,8 +1236,9 @@ dependencies = [
  "miden-air",
  "miden-assembly",
  "miden-core",
- "miden-core-diagnostics",
+ "miden-debuginfo",
  "miden-test-utils",
+ "miden-utils-diagnostics",
  "pretty_assertions",
  "rstest",
  "thiserror 2.0.12",
@@ -1258,6 +1255,7 @@ version = "0.15.0"
 dependencies = [
  "elsa",
  "miden-air",
+ "miden-debuginfo",
  "miden-gpu",
  "miden-processor",
  "pollster",
@@ -1278,6 +1276,7 @@ dependencies = [
  "miden-core",
  "miden-processor",
  "miden-test-utils",
+ "miden-utils-sync",
  "num",
  "num-bigint",
  "pretty_assertions",
@@ -1310,6 +1309,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "miden-utils-diagnostics"
+version = "0.15.0"
+dependencies = [
+ "miden-crypto",
+ "miden-debuginfo",
+ "miden-miette",
+ "paste",
+ "tracing",
+]
+
+[[package]]
+name = "miden-utils-sync"
+version = "0.15.0"
+dependencies = [
+ "lock_api",
+ "loom",
+ "parking_lot",
+ "proptest",
+]
+
+[[package]]
 name = "miden-verifier"
 version = "0.15.0"
 dependencies = [
@@ -1332,6 +1352,7 @@ dependencies = [
  "hex",
  "miden-assembly",
  "miden-core",
+ "miden-debuginfo",
  "miden-mast-package",
  "miden-processor",
  "miden-prover",

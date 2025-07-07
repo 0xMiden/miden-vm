@@ -5,7 +5,7 @@ use core::{
     str::FromStr,
 };
 
-use crate::{SourceSpan, Span, Spanned};
+use miden_debuginfo::{SourceSpan, Span, Spanned};
 
 /// Represents the types of errors that can occur when parsing/validating an [Ident]
 #[derive(Debug, thiserror::Error)]

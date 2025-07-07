@@ -10,13 +10,14 @@ use alloc::{
 };
 
 use miden_core::{Word, crypto::hash::Rpo256};
+use miden_debuginfo::{SourceFile, Span, Spanned};
 
 use self::passes::{ConstEvalVisitor, VerifyInvokeTargets};
 pub use self::{
     context::AnalysisContext,
     errors::{SemanticAnalysisError, SyntaxError},
 };
-use crate::{LibraryPath, Span, Spanned, ast::*, diagnostics::SourceFile, parser::WordValue};
+use crate::{LibraryPath, ast::*, parser::WordValue};
 
 /// Constructs and validates a [Module], given the forms constituting the module body.
 ///

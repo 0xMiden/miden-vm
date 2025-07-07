@@ -60,6 +60,7 @@ serde = ["dep:serde", "dep:serde_json"]
 std = [
     "hex?/std",
     "miden-assembly/std",
+    "miden-debuginfo/std",
     "miden-processor/std",
     "miden-prover/std",
     "miden-verifier/std",
@@ -78,6 +79,7 @@ clap = { version = "4.4", features = ["derive"], optional = true }
 hex = { version = "0.4", optional = true }
 miden-assembly.workspace = true
 miden-core.workspace = true
+miden-debuginfo.workspace = true
 miden-processor.workspace = true
 miden-prover.workspace = true
 miden-mast-package.workspace = true

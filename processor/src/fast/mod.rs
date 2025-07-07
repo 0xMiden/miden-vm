@@ -6,7 +6,6 @@ use miden_air::RowIndex;
 use miden_core::{
     Decorator, DecoratorIterator, EMPTY_WORD, Felt, Kernel, ONE, Operation, Program, StackOutputs,
     WORD_SIZE, Word, ZERO,
-    debuginfo::{DefaultSourceManager, SourceManager},
     mast::{
         BasicBlockNode, CallNode, DynNode, ExternalNode, JoinNode, LoopNode, MastForest, MastNode,
         MastNodeId, OP_GROUP_SIZE, OpBatch, SplitNode,
@@ -14,6 +13,7 @@ use miden_core::{
     stack::MIN_STACK_DEPTH,
     utils::range,
 };
+use miden_debuginfo::{DefaultSourceManager, SourceManager};
 
 use crate::{
     AdviceInputs, AdviceProvider, AsyncHost, ContextId, ErrorContext, ExecutionError, FMP_MIN,

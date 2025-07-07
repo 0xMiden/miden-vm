@@ -27,12 +27,13 @@ path = "tests/main.rs"
 
 [features]
 default = ["std"]
-std = ["miden-assembly/std"]
+std = ["miden-assembly/std", "miden-utils-sync/std"]
 with-debug-info = []
 
 [dependencies]
 miden-assembly.workspace = true
 miden-core.workspace = true
+miden-utils-sync.workspace = true
 
 [dev-dependencies]
 blake3 = "1.8"

@@ -51,9 +51,10 @@
 //! modifications to specific nodes they care about.
 use core::ops::ControlFlow;
 
-use immediate::ErrorMsg;
+use miden_debuginfo::Span;
 
-use crate::{Felt, Span, ast::*, parser::IntValue};
+use super::immediate::ErrorMsg;
+use crate::{Felt, ast::*, parser::IntValue};
 
 /// Represents an immutable AST visitor, whose "early return" type is `T` (by default `()`).
 ///

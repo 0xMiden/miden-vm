@@ -4,14 +4,13 @@ use alloc::string::ToString;
 use miden_assembly::{
     Assembler, LibraryPath,
     ast::Module,
-    diagnostics::SourceLanguage,
     testing::{TestContext, assert_diagnostic_lines, regex, source_file},
 };
 use miden_core::{
     AdviceMap,
     crypto::merkle::{MerkleStore, MerkleTree},
-    debuginfo::{SourceContent, Uri},
 };
+use miden_debuginfo::{SourceContent, SourceLanguage, Uri};
 use miden_test_utils::{
     build_test, build_test_by_mode,
     crypto::{init_merkle_leaves, init_merkle_store},

@@ -1,10 +1,8 @@
 use alloc::{sync::Arc, vec::Vec};
 use core::fmt;
 
-use crate::{
-    SourceFile, SourceSpan,
-    diagnostics::{Diagnostic, miette},
-};
+use miden_debuginfo::{SourceFile, SourceSpan};
+use miden_utils_diagnostics::{Diagnostic, miette};
 
 /// The high-level error type for all semantic analysis errors.
 ///

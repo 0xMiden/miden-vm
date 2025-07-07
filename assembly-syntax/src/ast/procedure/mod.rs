@@ -7,6 +7,8 @@ mod resolver;
 
 use alloc::string::String;
 
+use miden_debuginfo::{SourceSpan, Span, Spanned};
+
 pub use self::{
     alias::{AliasTarget, ProcedureAlias},
     id::ProcedureIndex,
@@ -14,10 +16,7 @@ pub use self::{
     procedure::{Procedure, Visibility},
     resolver::{LocalNameResolver, ResolvedProcedure},
 };
-use crate::{
-    SourceSpan, Span, Spanned,
-    ast::{AttributeSet, Invoke},
-};
+use crate::ast::{AttributeSet, Invoke};
 
 // EXPORT
 // ================================================================================================

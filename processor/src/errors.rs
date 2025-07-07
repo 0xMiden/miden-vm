@@ -8,11 +8,8 @@ use miden_core::{
     stack::MIN_STACK_DEPTH,
     utils::to_hex,
 };
-use miden_core_diagnostics::{
-    Diagnostic,
-    debuginfo::{SourceFile, SourceManager, SourceSpan},
-    miette,
-};
+use miden_debuginfo::{SourceFile, SourceManager, SourceSpan};
+use miden_utils_diagnostics::{Diagnostic, miette};
 use winter_prover::ProverError;
 
 use super::system::{FMP_MAX, FMP_MIN};

@@ -1,7 +1,8 @@
 use alloc::string::String;
 
+use miden_debuginfo::{SourceSpan, Span, Spanned};
+
 use super::{AdviceMapEntry, Block, Constant, Export, Import};
-use crate::{SourceSpan, Span, Spanned};
 
 /// This type represents the top-level forms of a Miden Assembly module
 #[derive(Debug, PartialEq, Eq)]

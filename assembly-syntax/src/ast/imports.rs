@@ -1,6 +1,8 @@
 use core::fmt;
 
-use crate::{LibraryNamespace, LibraryPath, SourceSpan, Spanned, ast::Ident};
+use miden_debuginfo::{SourceSpan, Spanned};
+
+use crate::{LibraryNamespace, LibraryPath, ast::Ident};
 
 // IMPORT
 // ================================================================================================

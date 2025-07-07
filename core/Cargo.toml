@@ -21,21 +21,18 @@ doctest = false
 default = ["std"]
 std = [
     "miden-crypto/std",
+    "miden-debuginfo/std",
     "miden-formatting/std",
     "winter-math/std",
     "winter-utils/std",
     "thiserror/std",
 ]
-serde = [
-    "miden-core-diagnostics/serde",
-    "miden-crypto/serde",
-    "winter-math/serde",
-]
+serde = ["miden-crypto/serde", "miden-debuginfo/serde", "winter-math/serde"]
 
 [dependencies]
-miden-crypto = { version = "0.15", default-features = false }
+miden-crypto.workspace = true
+miden-debuginfo.workspace = true
 miden-formatting.workspace = true
-miden-core-diagnostics.workspace = true
 num-derive = { version = "0.4", default-features = false }
 num-traits = { version = "0.2", default-features = false }
 thiserror.workspace = true

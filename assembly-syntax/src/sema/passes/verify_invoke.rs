@@ -1,8 +1,10 @@
 use alloc::collections::BTreeSet;
 use core::ops::ControlFlow;
 
+use miden_debuginfo::Spanned;
+
 use crate::{
-    LibraryNamespace, LibraryPath, Spanned,
+    LibraryNamespace, LibraryPath,
     ast::*,
     sema::{AnalysisContext, SemanticAnalysisError},
 };

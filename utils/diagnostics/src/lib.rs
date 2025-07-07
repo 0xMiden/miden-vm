@@ -6,11 +6,9 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-pub mod debuginfo;
 mod label;
 mod related;
 pub mod reporting;
-pub mod sync;
 
 pub use miette::{
     self, Diagnostic, IntoDiagnostic, LabeledSpan, NamedSource, Report, Result, Severity,
@@ -22,12 +20,6 @@ pub use self::{
     label::Label,
     related::{RelatedError, RelatedLabel},
 };
-
-pub(crate) mod utils {
-    pub use miden_crypto::utils::{
-        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
-    };
-}
 
 #[macro_export]
 macro_rules! report {

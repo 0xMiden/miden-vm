@@ -7,16 +7,13 @@ use alloc::{
 };
 use core::{marker::PhantomData, num::NonZeroU32};
 
+use miden_debuginfo::{SourceFile, SourceSpan, Span, Spanned};
 use smallvec::smallvec;
 
-use crate::{
-    LibraryPath, LibraryNamespace, ast::*, diagnostics::SourceFile, SourceSpan,
-    Felt, FieldElement, StarkField, Word
-};
+use crate::{LibraryPath, LibraryNamespace, ast::*, Felt, FieldElement, StarkField, Word};
 use super::{
     BinEncodedValue, IntValue, Token, WordValue, ParseError, ParsingError,
-    LiteralErrorKind, HexErrorKind, Span, Spanned,
-    DocumentationType
+    LiteralErrorKind, HexErrorKind, DocumentationType
 };
 
 grammar<'input>(

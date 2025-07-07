@@ -12,11 +12,12 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_assembly::{
-    KernelLibrary, Library, Parse,
-    diagnostics::{SourceLanguage, reporting::PrintDiagnostic},
+use miden_assembly::{KernelLibrary, Library, Parse, diagnostics::reporting::PrintDiagnostic};
+pub use miden_assembly::{
+    LibraryPath,
+    debuginfo::{DefaultSourceManager, SourceFile, SourceLanguage, SourceManager},
+    diagnostics::Report,
 };
-pub use miden_assembly::{LibraryPath, SourceFile, SourceManager, diagnostics::Report};
 pub use miden_core::{
     EMPTY_WORD, Felt, FieldElement, ONE, StackInputs, StackOutputs, StarkField, WORD_SIZE, Word,
     ZERO,
@@ -117,8 +118,8 @@ macro_rules! expect_exec_error_matches {
     };
 }
 
-/// Like [assembly::testing::assert_diagnostic], but matches each non-empty line of the rendered
-/// output to a corresponding pattern.
+/// Like [miden_assembly::testing::assert_diagnostic], but matches each non-empty line of the
+/// rendered output to a corresponding pattern.
 ///
 /// So if the output has 3 lines, the second of which is empty, and you provide 2 patterns, the
 /// assertion passes if the first line matches the first pattern, and the third line matches the

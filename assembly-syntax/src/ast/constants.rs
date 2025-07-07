@@ -2,10 +2,11 @@ use alloc::{boxed::Box, string::String, sync::Arc};
 use core::fmt;
 
 use miden_core::FieldElement;
+use miden_debuginfo::{SourceSpan, Span, Spanned};
 
 use super::DocString;
 use crate::{
-    Felt, SourceSpan, Span, Spanned,
+    Felt,
     ast::Ident,
     parser::{ParsingError, WordValue},
 };

@@ -4,13 +4,14 @@ members = [
     "assembly",
     "assembly-syntax",
     "core",
-    "core-diagnostics",
+    "debuginfo",
     "miden-vm",
     "package",
     "processor",
     "prover",
     "stdlib",
     "test-utils",
+    "utils/*",
     "verifier",
 ]
 resolver = "2"
@@ -43,12 +44,14 @@ miden-air = { path = "./air", version = "0.15.0", default-features = false }
 miden-assembly = { path = "./assembly", version = "0.15.0", default-features = false }
 miden-assembly-syntax = { path = "./assembly-syntax", version = "0.15.0", default-features = false }
 miden-core = { path = "./core", version = "0.15.0", default-features = false }
-miden-core-diagnostics = { path = "./core-diagnostics", version = "0.15.0", default-features = false }
+miden-debuginfo = { path = "./debuginfo", version = "0.15.0", default-features = false }
 miden-mast-package = { path = "./package", version = "0.15.0", default-features = false }
 miden-processor = { path = "./processor", version = "0.15.0", default-features = false }
 miden-prover = { path = "./prover", version = "0.15.0", default-features = false }
 miden-stdlib = { path = "./stdlib", version = "0.15.0", default-features = false }
 miden-test-utils = { path = "./test-utils", version = "0.1.0" }
+miden-utils-diagnostics = { path = "./utils/diagnostics", version = "0.15.0", default-features = false }
+miden-utils-sync = { path = "./utils/sync", version = "0.15.0", default-features = false }
 miden-verifier = { path = "./verifier", version = "0.15.0", default-features = false }
 
 # Miden crates

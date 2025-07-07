@@ -1,7 +1,7 @@
 use alloc::string::String;
 use core::fmt;
 
-use crate::debuginfo::Location;
+use miden_debuginfo::Location;
 
 // ASSEMBLY OP
 // ================================================================================================

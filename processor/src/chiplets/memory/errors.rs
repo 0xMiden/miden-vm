@@ -1,10 +1,8 @@
 use alloc::sync::Arc;
 
-use miden_core::{
-    Felt,
-    debuginfo::{SourceFile, SourceSpan},
-};
-use miden_core_diagnostics::{Diagnostic, miette};
+use miden_core::Felt;
+use miden_debuginfo::{SourceFile, SourceSpan};
+use miden_utils_diagnostics::{Diagnostic, miette};
 
 use crate::{ContextId, ErrorContext};
 

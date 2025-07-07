@@ -5,15 +5,16 @@ use miden_core::{
     AdviceMap,
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
+use miden_debuginfo::{SourceFile, SourceSpan, Span, Spanned};
+use miden_utils_diagnostics::Report;
 
 use super::{
     DocString, Export, Import, LocalNameResolver, ProcedureIndex, ProcedureName,
     QualifiedProcedureName, ResolvedProcedure,
 };
 use crate::{
-    LibraryNamespace, LibraryPath, SourceSpan, Span, Spanned,
+    LibraryNamespace, LibraryPath,
     ast::{AliasTarget, Ident},
-    diagnostics::{Report, SourceFile},
     parser::ModuleParser,
     sema::SemanticAnalysisError,
 };

@@ -1,12 +1,12 @@
 use alloc::sync::Arc;
 
+use miden_assembly_syntax::debuginfo::{SourceManager, SourceSpan, Spanned};
 use miden_core::{Word, mast::MastNodeId};
 
 use super::GlobalProcedureIndex;
 use crate::{
     LibraryPath,
     ast::{ProcedureName, QualifiedProcedureName, Visibility},
-    diagnostics::{SourceManager, SourceSpan, Spanned},
 };
 
 // PROCEDURE CONTEXT

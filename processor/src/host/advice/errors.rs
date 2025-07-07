@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use miden_core_diagnostics::{Diagnostic, miette};
+use miden_utils_diagnostics::{Diagnostic, miette};
 
 use crate::{Felt, Word, crypto::MerkleError};
 

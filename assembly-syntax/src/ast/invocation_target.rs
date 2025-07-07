@@ -1,7 +1,9 @@
 use core::fmt;
 
+use miden_debuginfo::{SourceSpan, Span, Spanned};
+
 use crate::{
-    LibraryPath, SourceSpan, Span, Spanned, Word,
+    LibraryPath, Word,
     ast::{Ident, ProcedureName},
 };
 

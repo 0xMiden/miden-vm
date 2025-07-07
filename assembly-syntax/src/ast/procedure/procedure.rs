@@ -1,11 +1,10 @@
 use alloc::{collections::BTreeSet, string::String};
 use core::fmt;
 
+use miden_debuginfo::{SourceSpan, Span, Spanned};
+
 use super::ProcedureName;
-use crate::{
-    SourceSpan, Span, Spanned,
-    ast::{Attribute, AttributeSet, Block, DocString, Invoke},
-};
+use crate::ast::{Attribute, AttributeSet, Block, DocString, Invoke};
 
 // PROCEDURE VISIBILITY
 // ================================================================================================

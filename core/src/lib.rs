@@ -49,8 +49,6 @@ assertion failed: `(left matches right)`
     }
 }
 
-pub use miden_core_diagnostics::debuginfo;
-
 pub mod chiplets;
 pub mod errors;
 

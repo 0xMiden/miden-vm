@@ -1,14 +1,14 @@
 use alloc::{collections::BTreeMap, string::ToString, sync::Arc, vec::Vec};
 
 use miden_assembly_syntax::{
-    DefaultSourceManager, KernelLibrary, Library, LibraryNamespace, LibraryPath, Parse,
-    ParseOptions, SemanticAnalysisError, SourceManager, Spanned,
+    KernelLibrary, Library, LibraryNamespace, LibraryPath, Parse, ParseOptions,
+    SemanticAnalysisError,
     ast::{self, Export, InvocationTarget, InvokeKind, ModuleKind, QualifiedProcedureName},
+    debuginfo::{DefaultSourceManager, SourceManager, SourceSpan, Spanned},
     diagnostics::{RelatedLabel, Report},
 };
 use miden_core::{
     AssemblyOp, Decorator, Felt, Kernel, Operation, Program, WORD_SIZE, Word,
-    debuginfo::SourceSpan,
     mast::{DecoratorId, MastNodeId},
 };
 

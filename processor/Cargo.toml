@@ -20,7 +20,13 @@ doctest = false
 [features]
 concurrent = ["std", "winter-prover/concurrent"]
 default = ["std"]
-std = ["miden-core/std", "winter-prover/std", "thiserror/std"]
+std = [
+    "miden-core/std",
+    "miden-debuginfo/std",
+    "miden-utils-diagnostics/std",
+    "winter-prover/std",
+    "thiserror/std",
+]
 testing = ["miden-air/testing", "tokio"]
 # Removes proper error context from the error messages. Enable in production builds that need
 # maximal performance.
@@ -31,7 +37,8 @@ bus-debugger = ["testing", "miden-air/testing"]
 [dependencies]
 miden-air.workspace = true
 miden-core.workspace = true
-miden-core-diagnostics.workspace = true
+miden-debuginfo.workspace = true
+miden-utils-diagnostics.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
 # For `testing`

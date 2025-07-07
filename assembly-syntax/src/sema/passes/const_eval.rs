@@ -1,8 +1,10 @@
 use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
+use miden_debuginfo::{Span, Spanned};
+
 use crate::{
-    Felt, Span, Spanned,
+    Felt,
     ast::*,
     parser::IntValue,
     sema::{AnalysisContext, SemanticAnalysisError},

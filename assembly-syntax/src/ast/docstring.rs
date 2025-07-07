@@ -1,6 +1,8 @@
 use alloc::string::String;
 
-use crate::{Span, Spanned, prettier::PrettyPrint};
+use miden_debuginfo::{SourceSpan, Span, Spanned};
+
+use crate::prettier::PrettyPrint;
 
 /// Represents a documentation string in Miden Assembly
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,7 +38,7 @@ impl DocString {
 }
 
 impl Spanned for DocString {
-    fn span(&self) -> crate::SourceSpan {
+    fn span(&self) -> SourceSpan {
         self.0.span()
     }
 }

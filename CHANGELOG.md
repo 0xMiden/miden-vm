@@ -40,7 +40,9 @@
 - [BREAKING] Disallow usage of the field modulus as an immediate value ([#1938](https://github.com/0xMiden/miden-vm/pull/1938)).
 - Truncate nprime.masm output stack to prevent overflow during benchmarks ([#1879](https://github.com/0xMiden/miden-vm/issues/1879)).
 - Implement a new `adv.has_mapkey` decorator ([#1941](https://github.com/0xMiden/miden-vm/pull/1941)).
-- Moved implementation of `miden_core::debuginfo`, `miden_core::sync`, and `miden_assembly_syntax::diagnostics` into a new `miden-core-diagnostics` crate ([#1945](https://github.com/0xMiden/miden-vm/pull/1945))
+- Moved implementation of `miden_assembly_syntax::diagnostics` into a new `miden-utils-diagnostics` crate ([#1945](https://github.com/0xMiden/miden-vm/pull/1945))
+- Moved implementation of `miden_core::debuginfo` into a new `miden-debuginfo` crate ([#1945](https://github.com/0xMiden/miden-vm/pull/1945))
+- Moved implementation of `miden_core::sync` into a new `miden-utils-sync` crate ([#1945](https://github.com/0xMiden/miden-vm/pull/1945))
 
 #### Enhancements
 

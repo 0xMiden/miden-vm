@@ -7,6 +7,8 @@ extern crate alloc;
 extern crate std;
 
 pub use miden_core::{Felt, FieldElement, StarkField, Word, prettier, utils::DisplayHex};
+pub use miden_debuginfo as debuginfo;
+pub use miden_utils_diagnostics::{self as diagnostics, Report};
 
 pub mod ast;
 pub mod library;
@@ -14,22 +16,6 @@ mod parse;
 pub mod parser;
 mod sema;
 pub mod testing;
-
-pub mod diagnostics {
-    pub use miden_core_diagnostics::{
-        debuginfo::{
-            DefaultSourceManager, SourceContent, SourceFile, SourceId, SourceLanguage,
-            SourceManager, SourceSpan, Span, Spanned, Uri,
-        },
-        *,
-    };
-}
-
-pub use miden_core_diagnostics::{
-    Report,
-    debuginfo::{DefaultSourceManager, SourceFile, SourceManager, SourceSpan, Span, Spanned},
-    report,
-};
 
 #[doc(hidden)]
 pub use self::{

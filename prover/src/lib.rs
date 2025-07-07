@@ -10,10 +10,11 @@ use alloc::sync::Arc;
 use core::marker::PhantomData;
 
 use miden_air::{AuxRandElements, PartitionOptions, ProcessorAir, PublicInputs};
+use miden_debuginfo::SourceManager;
 #[cfg(all(feature = "metal", target_arch = "aarch64", target_os = "macos"))]
 use miden_gpu::HashFn;
 use miden_processor::{
-    ExecutionTrace, Program, SourceManager,
+    ExecutionTrace, Program,
     crypto::{
         Blake3_192, Blake3_256, ElementHasher, RandomCoin, Rpo256, RpoRandomCoin, Rpx256,
         RpxRandomCoin, WinterRandomCoin,

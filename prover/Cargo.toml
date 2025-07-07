@@ -18,10 +18,16 @@ default = ["std"]
 async = ["winter-maybe-async/async"]
 concurrent = ["std", "miden-processor/concurrent", "winter-prover/concurrent"]
 metal = ["dep:miden-gpu", "dep:elsa", "dep:pollster", "concurrent", "std"]
-std = ["miden-air/std", "miden-processor/std", "winter-prover/std"]
+std = [
+    "miden-air/std",
+    "miden-debuginfo/std",
+    "miden-processor/std",
+    "winter-prover/std",
+]
 
 [dependencies]
 miden-air.workspace = true
+miden-debuginfo.workspace = true
 miden-processor.workspace = true
 tracing.workspace = true
 winter-maybe-async = { version = "0.13", default-features = false }

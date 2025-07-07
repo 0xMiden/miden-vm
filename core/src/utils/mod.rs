@@ -6,7 +6,6 @@ use core::{
 
 // RE-EXPORTS
 // ================================================================================================
-pub use miden_core_diagnostics::sync;
 pub use miden_crypto::utils::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
     collections, uninit_vector,

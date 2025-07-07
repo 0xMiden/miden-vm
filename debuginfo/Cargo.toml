@@ -1,0 +1,37 @@
+[package]
+name = "miden-debuginfo"
+version = "0.15.0"
+description = "Core source-level debugging information types used throughout the Miden toolchain"
+documentation = "https://docs.rs/miden-debuginfo/0.15.0"
+readme = "README.md"
+categories = ["compilers", "no-std"]
+keywords = ["debugging", "debuginfo", "span"]
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+[features]
+default = ["std"]
+std = [
+    "memchr/std",
+    "miden-formatting/std",
+    "miden-utils-sync/std",
+    "serde/std",
+    "thiserror/std",
+]
+serde = ["dep:serde", "dep:serde_spanned", "serde_spanned?/serde"]
+
+[dependencies]
+memchr = { version = "2.7", default-features = false }
+miette = { package = "miden-miette", version = "8.0", default-features = false }
+miden-crypto.workspace = true
+miden-formatting.workspace = true
+miden-utils-sync.workspace = true
+paste = "1.0"
+serde = { workspace = true, optional = true }
+serde_spanned = { version = "0.6", optional = true, default-features = false }
+thiserror.workspace = true
