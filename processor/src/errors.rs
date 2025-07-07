@@ -75,9 +75,9 @@ pub enum ExecutionError {
         #[source]
         error: EventError,
     },
-    #[error("got unexpected event_id: {id}")]
+    #[error("got unexpected event_id {id} which is not supported by the host")]
     #[diagnostic()]
-    InvalidEventId {
+    UnhandledEventId {
         #[label]
         label: SourceSpan,
         #[source_code]
@@ -311,10 +311,10 @@ impl ExecutionError {
         Self::EventError { label, source_file, error }
     }
 
-    pub fn invalid_event_id_error(id: u32, err_ctx: &impl ErrorContext) -> Self {
+    pub fn unhandled_event_id_error(id: u32, err_ctx: &impl ErrorContext) -> Self {
         let (label, source_file) = err_ctx.label_and_source_file();
 
-        Self::InvalidEventId { label, source_file, id }
+        Self::UnhandledEventId { label, source_file, id }
     }
 
     pub fn failed_assertion(

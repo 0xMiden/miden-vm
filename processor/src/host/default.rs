@@ -45,8 +45,9 @@ impl<D: DebugHandler> DefaultHost<D> {
         Ok(())
     }
 
-    /// Loads a single [`EventHandler`] into this host. The handler can be either a closure or a
-    /// free function with signature
+    /// Loads a single [`EventHandler`] into this host.
+    ///
+    /// The handler can be either a closure or a free function with signature
     /// `fn(&mut ProcessState) -> Result<(), EventHandler>`
     pub fn load_handler(
         &mut self,
@@ -103,7 +104,7 @@ impl SyncHost for DefaultHost {
             return Ok(());
         }
 
-        Err(ExecutionError::invalid_event_id_error(event_id, err_ctx))
+        Err(ExecutionError::unhandled_event_id_error(event_id, err_ctx))
     }
 }
 

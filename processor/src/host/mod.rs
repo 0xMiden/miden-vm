@@ -28,7 +28,7 @@ pub use mast_forest_store::{MastForestStore, MemMastForestStore};
 ///
 /// There are three main categories of interactions between the VM and the host:
 /// 1. getting a library's MAST forest,
-/// 2. handling advice events (which can mutate the process' advice provider), and
+/// 2. handling VM events (which can mutate the process' advice provider), and
 /// 3. handling debug and trace events.
 pub trait BaseHost {
     // REQUIRED METHODS
@@ -61,7 +61,7 @@ pub trait BaseHost {
 /// There are four main categories of interactions between the VM and the host:
 /// 1. accessing the advice provider,
 /// 2. getting a library's MAST forest,
-/// 3. handling advice events (which can mutate the process' advice provider), and
+/// 3. handling VM events (which can mutate the process' advice provider), and
 /// 4. handling debug and trace events.
 pub trait SyncHost: BaseHost {
     // REQUIRED METHODS

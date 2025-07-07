@@ -107,6 +107,7 @@ impl EventHandlerRegistry {
     }
 
     /// Handles the event if the registry contains a handler with the same identifier.
+    ///
     /// Returns a bool indicating whether the event was handled. If the event was handled but
     /// returned an error, it is propagated to the caller.
     pub fn handle_event(
