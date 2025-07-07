@@ -145,7 +145,7 @@ pub struct FastProcessor {
 
     /// Mapping of digests of external procedure digests with their corresponding node ID and
     /// forest containing the procedure.
-    pub(crate) loaded_forests_by_procedure: BTreeMap<Word, (MastNodeId, Arc<MastForest>)>,
+    loaded_forests_by_procedure: BTreeMap<Word, (MastNodeId, Arc<MastForest>)>,
 
     /// Whether to enable debug statements and tracing.
     in_debug_mode: bool,
@@ -639,9 +639,7 @@ impl FastProcessor {
         kernel: &Kernel,
         host: &mut impl AsyncHost,
     ) -> Result<(), ExecutionError> {
-        let mut process_state = self.state(0);
-        let (root_id, mast_forest) =
-            process_state.resolve_external_node_async(external_node, host).await?;
+        let (root_id, mast_forest) = self.resolve_external_node_async(external_node, host).await?;
 
         self.execute_mast_node(root_id, &mast_forest, kernel, host).await
     }
@@ -968,6 +966,42 @@ impl FastProcessor {
         }
 
         Ok(())
+    }
+
+    /// Analogous to [`Process::resolve_external_node`](crate::Process::resolve_external_node), but
+    /// for asynchronous execution.
+    async fn resolve_external_node_async(
+        &mut self,
+        external_node: &ExternalNode,
+        host: &mut impl AsyncHost,
+    ) -> Result<(MastNodeId, Arc<MastForest>), ExecutionError> {
+        let node_digest = external_node.digest();
+
+        // Check the cache if this procedure has already been called.
+        if let Some((node_id, forest)) = self.loaded_forests_by_procedure.get(&node_digest) {
+            return Ok((*node_id, forest.clone()));
+        }
+
+        let mast_forest = host
+            .get_mast_forest(&node_digest)
+            .await
+            .ok_or(ExecutionError::no_mast_forest_with_procedure(node_digest, &()))?;
+
+        // We limit the parts of the program that can be called externally to procedure
+        // roots, even though MAST doesn't have that restriction.
+        let root_id = mast_forest
+            .find_procedure_root(node_digest)
+            .ok_or(ExecutionError::malfored_mast_forest_in_host(node_digest, &()))?;
+
+        // if the node that we got by looking up an external reference is also an External
+        // node, we are about to enter into an infinite loop - so, return an error
+        if mast_forest[root_id].is_external() {
+            return Err(ExecutionError::CircularExternalNode(node_digest));
+        }
+
+        self.advice.add_mast_forest(&mast_forest);
+
+        Ok((root_id, mast_forest))
     }
 
     // HELPERS
