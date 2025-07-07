@@ -6,10 +6,10 @@ use miden_air::{
     RowIndex,
     trace::{chiplets::ace::ACE_CHIPLET_NUM_COLS, main_trace::MainTrace},
 };
-use vm_core::{FieldElement, ZERO};
+use vm_core::{Felt, FieldElement, QuadFelt, ZERO};
 
 use crate::{
-    ContextId, ExecutionError, Felt, QuadFelt,
+    ContextId, ExecutionError,
     chiplets::memory::Memory,
     errors::{AceError, ErrorContext},
     trace::TraceFragment,

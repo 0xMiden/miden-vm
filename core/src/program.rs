@@ -3,13 +3,14 @@ use core::fmt;
 
 use math::FieldElement;
 use miden_crypto::{Felt, WORD_SIZE, Word};
-use winter_utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
 
 use super::Kernel;
 use crate::{
     AdviceMap,
     mast::{MastForest, MastNode, MastNodeId},
-    utils::ToElements,
+    utils::{
+        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, ToElements,
+    },
 };
 
 // PROGRAM

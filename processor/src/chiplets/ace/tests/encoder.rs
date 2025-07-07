@@ -1,15 +1,10 @@
-use std::prelude::rust_2024::Vec;
+use alloc::vec::Vec;
 
+use vm_core::{Felt, FieldElement, QuadFelt};
 use winter_prover::crypto::ElementHasher;
 
-use crate::{
-    Felt, QuadFelt,
-    chiplets::ace::{
-        instruction::{ID_BITS, MAX_ID, Op},
-        tests::circuit::{Circuit, CircuitLayout, Instruction, NodeID},
-    },
-    math::FieldElement,
-};
+use super::*;
+use crate::chiplets::ace::instruction::{ID_BITS, MAX_ID};
 
 #[derive(Debug)]
 pub enum EncodingError {

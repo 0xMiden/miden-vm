@@ -5,9 +5,8 @@ use processor::crypto::RpoRandomCoin;
 use test_utils::{
     MIN_STACK_DEPTH, VerifierError,
     crypto::{MerkleStore, RandomCoin, Rpo256},
-    math::{FieldElement, QuadExtension, ToElements},
 };
-use vm_core::{Felt, WORD_SIZE, Word};
+use vm_core::{Felt, FieldElement, QuadFelt, ToElements, WORD_SIZE, Word};
 use winter_air::{
     Air,
     proof::{Proof, merge_ood_evaluations},
@@ -16,8 +15,6 @@ use winter_fri::VerifierChannel as FriVerifierChannel;
 
 mod channel;
 use channel::VerifierChannel;
-
-pub type QuadExt = QuadExtension<Felt>;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct VerifierData {
@@ -89,7 +86,7 @@ pub fn generate_advice_inputs(
     // generate the auxiliary random elements
     let mut aux_trace_rand_elements = vec![];
     for commitment in trace_commitments.iter().skip(1) {
-        let rand_elements: Vec<QuadExt> = air
+        let rand_elements: Vec<QuadFelt> = air
             .get_aux_rand_elements(&mut public_coin)
             .map_err(|_| VerifierError::RandomCoinError)?
             .rand_elements()
@@ -100,16 +97,16 @@ pub fn generate_advice_inputs(
 
     let alpha = aux_trace_rand_elements[0][0].to_owned();
     let beta = aux_trace_rand_elements[0][2].to_owned();
-    advice_stack[aux_rand_insertion_index] = QuadExt::base_element(&beta, 0).as_int();
-    advice_stack[aux_rand_insertion_index + 1] = QuadExt::base_element(&beta, 1).as_int();
-    advice_stack[aux_rand_insertion_index + 2] = QuadExt::base_element(&alpha, 0).as_int();
-    advice_stack[aux_rand_insertion_index + 3] = QuadExt::base_element(&alpha, 1).as_int();
+    advice_stack[aux_rand_insertion_index] = QuadFelt::base_element(&beta, 0).as_int();
+    advice_stack[aux_rand_insertion_index + 1] = QuadFelt::base_element(&beta, 1).as_int();
+    advice_stack[aux_rand_insertion_index + 2] = QuadFelt::base_element(&alpha, 0).as_int();
+    advice_stack[aux_rand_insertion_index + 3] = QuadFelt::base_element(&alpha, 1).as_int();
 
     // 3 ----- constraint composition trace -------------------------------------------------------
 
     // build random coefficients for the composition polynomial. we don't need them but we have to
     // generate them in order to update the random coin
-    let _constraint_coeffs: winter_air::ConstraintCompositionCoefficients<QuadExt> = air
+    let _constraint_coeffs: winter_air::ConstraintCompositionCoefficients<QuadFelt> = air
         .get_constraint_composition_coefficients(&mut public_coin)
         .map_err(|_| VerifierError::RandomCoinError)?;
 
@@ -120,7 +117,7 @@ pub fn generate_advice_inputs(
     // 4 ----- OOD frames --------------------------------------------------------------
 
     // generate the the OOD point
-    let _z: QuadExt = public_coin.draw().unwrap();
+    let _z: QuadFelt = public_coin.draw().unwrap();
 
     // read the main and auxiliary segments' OOD frames and add them to advice tape
     let ood_trace_frame = channel.read_ood_trace_frame();
@@ -151,14 +148,14 @@ pub fn generate_advice_inputs(
 
     // reseed with FRI layer commitments
     let deep_coefficients = air
-        .get_deep_composition_coefficients::<QuadExt, RpoRandomCoin>(&mut public_coin)
+        .get_deep_composition_coefficients::<QuadFelt, RpoRandomCoin>(&mut public_coin)
         .map_err(|_| VerifierError::RandomCoinError)?;
 
     // since we are using Horner batching, the randomness will be located in the penultimate
     // position, the last position holds the constant `1`
     assert_eq!(
         deep_coefficients.constraints[deep_coefficients.constraints.len() - 1],
-        QuadExt::ONE
+        QuadFelt::ONE
     );
     let alpha_deep = deep_coefficients.constraints[deep_coefficients.constraints.len() - 2];
     advice_stack[alpha_deep_index] = alpha_deep.base_element(0).as_int();
@@ -167,7 +164,7 @@ pub fn generate_advice_inputs(
     let layer_commitments = fri_commitments_digests.clone();
     for commitment in layer_commitments.iter() {
         public_coin.reseed(*commitment);
-        let _alpha: QuadExt = public_coin.draw().expect("failed to draw random indices");
+        let _alpha: QuadFelt = public_coin.draw().expect("failed to draw random indices");
     }
 
     // 6 ----- trace and constraint queries -------------------------------------------------------
@@ -225,6 +222,6 @@ pub fn digest_to_int_vec(digest: &[Word]) -> Vec<u64> {
         .collect()
 }
 
-pub fn to_int_vec(ext_felts: &[QuadExt]) -> Vec<u64> {
-    QuadExt::slice_as_base_elements(ext_felts).iter().map(|e| e.as_int()).collect()
+pub fn to_int_vec(ext_felts: &[QuadFelt]) -> Vec<u64> {
+    QuadFelt::slice_as_base_elements(ext_felts).iter().map(|e| e.as_int()).collect()
 }

@@ -2,11 +2,11 @@ use alloc::{collections::BTreeMap, string::String, sync::Arc, vec::Vec};
 use core::cell::RefCell;
 
 use miden_crypto::hash::blake::{Blake3_256, Blake3Digest};
-use winter_utils::{
-    ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
-};
 
 use super::{StringDataOffset, StringIndex};
+use crate::utils::{
+    ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
+};
 
 pub struct StringTable {
     data: Vec<u8>,

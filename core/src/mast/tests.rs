@@ -4,9 +4,13 @@ use math::FieldElement;
 use miden_crypto::WORD_SIZE;
 use proptest::prelude::*;
 use rand_utils::prng_array;
-use winter_utils::{Deserializable, Serializable};
 
-use crate::{Felt, Kernel, ProgramInfo, Word, chiplets::hasher, mast::DynNode};
+use crate::{
+    Felt, Kernel, ProgramInfo, Word,
+    chiplets::hasher,
+    mast::DynNode,
+    utils::{Deserializable, Serializable},
+};
 
 #[test]
 fn dyn_hash_is_correct() {

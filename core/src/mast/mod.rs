@@ -15,9 +15,11 @@ pub use node::{
     BasicBlockNode, CallNode, DynNode, ExternalNode, JoinNode, LoopNode, MastNode, MastNodeExt,
     OP_BATCH_SIZE, OP_GROUP_SIZE, OpBatch, OperationOrDecorator, SplitNode,
 };
-use winter_utils::{ByteWriter, DeserializationError, Serializable};
 
-use crate::{AdviceMap, Decorator, DecoratorList, Felt, Operation, Word};
+use crate::{
+    AdviceMap, Decorator, DecoratorList, Felt, Operation, Word,
+    utils::{ByteWriter, DeserializationError, Serializable},
+};
 
 mod serialization;
 

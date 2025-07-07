@@ -10,10 +10,31 @@ fn bin_under_test() -> escargot::CargoRun {
         .features("executable internal")
         .current_release()
         .current_target()
+        // force verbose output (same as --verbose)
+        .env("CARGO_TERM_VERBOSE", "true")
+        // preserve ANSI colors in output
+        .env("CARGO_TERM_COLOR", "always")
         .run()
         .unwrap_or_else(|err| {
-            eprintln!("{err}");
-            panic!("failed to build `miden-vm`");
+            // Process the error string to add borders.
+            let formatted_err = err.to_string()
+                .lines()
+                // Add a "│" prefix to each line.
+                .map(|line| format!("│\t{line}"))
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            // Print the error message that provides context and a specific command.
+            panic!(
+                "\n\
+                Failed to build `miden-vm.\n\
+                Original cargo error:\n\
+                ┌──────────────────────────────────────────────────\n\
+                {formatted_err}\n\
+                └──────────────────────────────────────────────────\n\
+                To reproduce this failure manually, run the following command:\n\
+                $ cargo build -p miden-vm --no-default-features --features \"executable,internal\"\n\n"
+            );
         })
 }
 

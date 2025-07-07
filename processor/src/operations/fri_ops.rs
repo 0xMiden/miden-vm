@@ -1,6 +1,6 @@
-use vm_core::{ExtensionOf, FieldElement, ONE, StarkField, ZERO};
+use vm_core::{ExtensionOf, FieldElement, ONE, QuadFelt, StarkField, ZERO};
 
-use super::{super::QuadFelt, ExecutionError, Felt, Operation, Process};
+use super::{ExecutionError, Felt, Operation, Process};
 
 // CONSTANTS
 // ================================================================================================

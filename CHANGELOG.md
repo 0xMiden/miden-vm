@@ -37,6 +37,7 @@
 - [BREAKING] Move `AdviceProvider` from `Host` to `ProcessState` ([#1923](https://github.com/0xMiden/miden-vm/issues/1923)))
 - Remove decorator for interpolating polynomials over degree 2 extension field ([#1875](https://github.com/0xMiden/miden-vm/issues/1875)).
 - Remove MASM code for probabilistic NTT ([#1875](https://github.com/0xMiden/miden-vm/issues/1875)).
+- [BREAKING] Disallow usage of the field modulus as an immediate value ([#1938](https://github.com/0xMiden/miden-vm/pull/1938)).
 - Implement a new `adv.has_mapkey` decorator ([#1941](https://github.com/0xMiden/miden-vm/pull/1941)).
 
 #### Enhancements

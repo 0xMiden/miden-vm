@@ -98,8 +98,6 @@ pub mod crypto {
 // TYPE ALIASES
 // ================================================================================================
 
-type QuadFelt = QuadExtension<Felt>;
-
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct MemoryAddress(u32);
 
