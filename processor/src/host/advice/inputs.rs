@@ -1,4 +1,4 @@
-use alloc::vec::Vec;
+use alloc::{sync::Arc, vec::Vec};
 
 use vm_core::{
     AdviceMap, Felt, Word,
@@ -115,7 +115,7 @@ impl AdviceInputs {
     }
 
     /// Fetch a values set mapped by the given key.
-    pub fn mapped_values(&self, key: &Word) -> Option<&[Felt]> {
+    pub fn mapped_values(&self, key: &Word) -> Option<&Arc<[Felt]>> {
         self.map.get(key)
     }
 

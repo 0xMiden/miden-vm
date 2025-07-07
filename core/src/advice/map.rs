@@ -33,12 +33,7 @@ impl AdviceMap {
     }
 
     /// Returns the values associated with given key.
-    pub fn get(&self, key: &Word) -> Option<&[Felt]> {
-        self.0.get(key).map(|v| &**v)
-    }
-
-    /// Returns a pointer to the values associated with given key.
-    pub fn get_arc(&self, key: &Word) -> Option<&Arc<[Felt]>> {
+    pub fn get(&self, key: &Word) -> Option<&Arc<[Felt]>> {
         self.0.get(key)
     }
 
@@ -105,7 +100,7 @@ impl AdviceMap {
     /// - `None` if there are no conflicting values.
     pub fn find_conflicting_entry(&self, other: &Self) -> Option<(MapEntry, Arc<[Felt]>)> {
         for (key, new_value) in other.iter() {
-            if let Some(existing_value) = self.get_arc(key) {
+            if let Some(existing_value) = self.get(key) {
                 if existing_value != new_value {
                     // Found a conflict.
                     return Some(((*key, existing_value.clone()), new_value.clone()));
