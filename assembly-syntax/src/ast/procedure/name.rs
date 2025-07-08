@@ -78,6 +78,14 @@ impl TryFrom<&str> for QualifiedProcedureName {
     }
 }
 
+impl TryFrom<String> for QualifiedProcedureName {
+    type Error = Report;
+
+    fn try_from(name: String) -> Result<Self, Self::Error> {
+        Self::from_str(&name)
+    }
+}
+
 impl Eq for QualifiedProcedureName {}
 
 impl PartialEq for QualifiedProcedureName {

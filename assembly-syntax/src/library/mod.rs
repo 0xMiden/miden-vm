@@ -140,7 +140,7 @@ impl Library {
     }
 
     /// Returns the digest of the procedure with the specified name, or `None` if it was not found
-    /// in the Library.
+    /// in the library or its library path is malformed.
     pub fn get_procedure_root_by_name(
         &self,
         proc_name: impl TryInto<QualifiedProcedureName>,
