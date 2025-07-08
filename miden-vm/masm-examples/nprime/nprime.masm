@@ -1,3 +1,5 @@
+use.std::sys
+
 # append the current number to the prime list
 proc.append
     # initial state
@@ -175,4 +177,7 @@ begin
     # drop the counters
     drop
     drop
+
+    # Truncate stack to make constraints happy
+    exec.sys::truncate_stack
 end
