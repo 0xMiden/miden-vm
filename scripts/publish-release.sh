@@ -10,6 +10,7 @@
 # to merge the fix into `next`, and then merge `next` into `main` again.
 
 cargo publish -p miden-utils-sync
+cargo publish -p miden-debug-types
 cargo publish -p miden-utils-diagnostics
 cargo publish -p miden-core
 cargo publish -p miden-air
