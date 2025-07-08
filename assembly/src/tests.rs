@@ -496,27 +496,33 @@ fn get_proc_digest_by_name() -> Result<(), Report> {
         .assemble_library([testing_module])
         .context("failed to assemble library from testing module")?;
 
+    // get the vector of library procedure digests
     let library_procedure_digests = library
         .exports()
         .map(|proc_name| library.mast_forest()[library.get_export_node_id(proc_name)].digest())
         .collect::<Vec<Word>>();
 
-    let foo_name = QualifiedProcedureName::new(
-        LibraryPath::new("test::names").unwrap(),
-        ProcedureName::new("foo").unwrap(),
+    // valid procedure names
+    assert!(
+        library_procedure_digests.contains(
+            &library
+                .get_procedure_root_by_name("test::names::foo")
+                .expect("procedure with name 'foo' must exist in the test library")
+        )
     );
-    let bar_name = QualifiedProcedureName::new(
-        LibraryPath::new("test::names").unwrap(),
-        ProcedureName::new("bar").unwrap(),
-    );
-    let invalid_name = QualifiedProcedureName::new(
-        LibraryPath::new("test::names").unwrap(),
-        ProcedureName::new("baz").unwrap(),
+    assert!(
+        library_procedure_digests.contains(
+            &library
+                .get_procedure_root_by_name("test::names::bar")
+                .expect("procedure with name 'bar' must exist in the test library")
+        )
     );
 
-    assert_eq!(Some(library_procedure_digests[1]), library.get_procedure_root_by_name(foo_name));
-    assert_eq!(Some(library_procedure_digests[0]), library.get_procedure_root_by_name(bar_name));
-    assert_eq!(None, library.get_procedure_root_by_name(invalid_name));
+    // invalid procedure name
+    assert_eq!(None, library.get_procedure_root_by_name("test::names::baz"));
+
+    // invalid namespace
+    assert_eq!(None, library.get_procedure_root_by_name("invalid::namespace::foo"));
 
     Ok(())
 }

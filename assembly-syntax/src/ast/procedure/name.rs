@@ -70,6 +70,14 @@ impl FromStr for QualifiedProcedureName {
     }
 }
 
+impl TryFrom<&str> for QualifiedProcedureName {
+    type Error = Report;
+
+    fn try_from(name: &str) -> Result<Self, Self::Error> {
+        Self::from_str(name)
+    }
+}
+
 impl Eq for QualifiedProcedureName {}
 
 impl PartialEq for QualifiedProcedureName {
