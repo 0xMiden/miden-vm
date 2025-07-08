@@ -2,7 +2,6 @@ use std::{fs, path::Path};
 
 use assert_cmd::prelude::*;
 use predicates::prelude::*;
-extern crate escargot;
 
 fn bin_under_test() -> escargot::CargoRun {
     escargot::CargoBuild::new()
