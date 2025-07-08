@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use vm_core::{
-    Felt, FieldElement, WORD_SIZE, Word, ZERO,
+    Felt, FieldElement, QuadFelt, WORD_SIZE, Word, ZERO,
     crypto::{
         hash::Rpo256,
         merkle::{EmptySubtreeRoots, SMT_DEPTH, Smt},
@@ -9,7 +9,7 @@ use vm_core::{
     sys_events::SystemEvent,
 };
 
-use crate::{ExecutionError, MemoryError, ProcessState, QuadFelt, errors::ErrorContext};
+use crate::{ExecutionError, MemoryError, ProcessState, errors::ErrorContext};
 
 /// The offset of the domain value on the stack in the `hdword_to_map_with_domain` system event.
 pub const HDWORD_TO_MAP_WITH_DOMAIN_DOMAIN_OFFSET: usize = 8;

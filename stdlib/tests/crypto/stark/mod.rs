@@ -12,8 +12,8 @@ use rstest::rstest;
 use test_utils::{
     AdviceInputs, ProvingOptions, StackInputs, VerifierError, proptest::proptest, prove,
 };
-use verifier_recursive::{QuadExt, VerifierData, generate_advice_inputs};
-use vm_core::{Felt, FieldElement, WORD_SIZE, Word, ZERO};
+use verifier_recursive::{VerifierData, generate_advice_inputs};
+use vm_core::{Felt, FieldElement, QuadFelt, WORD_SIZE, Word, ZERO};
 
 mod verifier_recursive;
 
@@ -158,9 +158,9 @@ fn variable_length_public_inputs(#[case] num_kernel_proc_digests: usize) {
     // 5) Compute the expected randomness-reduced value of all the kernel procedures digests
 
     let beta =
-        QuadExt::new(Felt::new(auxiliary_rand_values[0]), Felt::new(auxiliary_rand_values[1]));
+        QuadFelt::new(Felt::new(auxiliary_rand_values[0]), Felt::new(auxiliary_rand_values[1]));
     let alpha =
-        QuadExt::new(Felt::new(auxiliary_rand_values[2]), Felt::new(auxiliary_rand_values[3]));
+        QuadFelt::new(Felt::new(auxiliary_rand_values[2]), Felt::new(auxiliary_rand_values[3]));
     let reduced_value = reduce_kernel_procedures_digests(&kernel_procedures_digests, alpha, beta);
     let [reduced_value_0, reduced_value_1] = reduced_value.to_base_elements();
 
@@ -285,23 +285,23 @@ fn generate_kernel_procedures_digests<R: Rng>(
 
 fn reduce_kernel_procedures_digests(
     kernel_procedures_digests: &[u64],
-    alpha: QuadExt,
-    beta: QuadExt,
-) -> QuadExt {
+    alpha: QuadFelt,
+    beta: QuadFelt,
+) -> QuadFelt {
     kernel_procedures_digests
         .chunks(2 * WORD_SIZE)
         .map(|digest| reduce_digest(digest, alpha, beta))
-        .fold(QuadExt::ONE, |acc, term| acc * term)
+        .fold(QuadFelt::ONE, |acc, term| acc * term)
 }
 
-fn reduce_digest(digest: &[u64], alpha: QuadExt, beta: QuadExt) -> QuadExt {
+fn reduce_digest(digest: &[u64], alpha: QuadFelt, beta: QuadFelt) -> QuadFelt {
     const KERNEL_OP_LABEL: Felt = Felt::new(48);
     alpha
         + KERNEL_OP_LABEL.into()
         + beta
-            * digest
-                .iter()
-                .fold(QuadExt::ZERO, |acc, coef| acc * beta + QuadExt::new(Felt::new(*coef), ZERO))
+            * digest.iter().fold(QuadFelt::ZERO, |acc, coef| {
+                acc * beta + QuadFelt::new(Felt::new(*coef), ZERO)
+            })
 }
 
 // CONSTANTS

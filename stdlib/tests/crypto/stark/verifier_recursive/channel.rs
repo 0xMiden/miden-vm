@@ -2,19 +2,16 @@ use alloc::vec::Vec;
 
 use miden_air::ProcessorAir;
 use test_utils::{
-    Felt, MerkleTreeVC, VerifierError,
+    MerkleTreeVC, VerifierError,
     crypto::{BatchMerkleProof, PartialMerkleTree, Rpo256},
     group_slice_elements,
-    math::{FieldElement, QuadExtension, StarkField},
 };
-use vm_core::Word;
+use vm_core::{Felt, FieldElement, QuadFelt, StarkField, Word};
 use winter_air::{
     Air,
     proof::{Proof, Queries, QuotientOodFrame, Table, TraceOodFrame},
 };
 use winter_fri::{VerifierChannel as FriVerifierChannel, folding::fold_positions};
-
-pub type QuadExt = QuadExtension<Felt>;
 
 type AdvMap = Vec<(Word, Vec<Felt>)>;
 
@@ -33,12 +30,12 @@ pub struct VerifierChannel {
     // FRI proof
     fri_roots: Option<Vec<Word>>,
     fri_layer_proofs: Vec<BatchMerkleProof<Rpo256>>,
-    fri_layer_queries: Vec<Vec<QuadExt>>,
-    fri_remainder: Option<Vec<QuadExt>>,
+    fri_layer_queries: Vec<Vec<QuadFelt>>,
+    fri_remainder: Option<Vec<QuadFelt>>,
     fri_num_partitions: usize,
     // out-of-domain frame
-    ood_trace_frame: Option<TraceOodFrame<QuadExt>>,
-    ood_constraint_evaluations: Option<QuotientOodFrame<QuadExt>>,
+    ood_trace_frame: Option<TraceOodFrame<QuadFelt>>,
+    ood_constraint_evaluations: Option<QuotientOodFrame<QuadFelt>>,
     // query proof-of-work
     pow_nonce: u64,
 }
@@ -86,7 +83,7 @@ impl VerifierChannel {
             .parse_remainder()
             .map_err(|err| VerifierError::ProofDeserializationError(err.to_string()))?;
         let (fri_layer_queries, fri_layer_proofs) = fri_proof
-            .parse_layers::<QuadExt, Rpo256, MerkleTreeVC<Rpo256>>(
+            .parse_layers::<QuadFelt, Rpo256, MerkleTreeVC<Rpo256>>(
                 lde_domain_size,
                 fri_options.folding_factor(),
             )
@@ -140,13 +137,13 @@ impl VerifierChannel {
     /// For computations requiring multiple trace segments, evaluations of auxiliary trace
     /// polynomials are also included as the second value of the returned tuple. Otherwise, the
     /// second value is None.
-    pub fn read_ood_trace_frame(&mut self) -> TraceOodFrame<QuadExt> {
+    pub fn read_ood_trace_frame(&mut self) -> TraceOodFrame<QuadFelt> {
         self.ood_trace_frame.take().expect("already read")
     }
 
     /// Returns evaluations of composition polynomial columns at z, where z is the out-of-domain
     /// point.
-    pub fn read_ood_constraint_evaluations(&mut self) -> QuotientOodFrame<QuadExt> {
+    pub fn read_ood_constraint_evaluations(&mut self) -> QuotientOodFrame<QuadFelt> {
         self.ood_constraint_evaluations.take().expect("already read")
     }
 
@@ -176,7 +173,7 @@ impl VerifierChannel {
             .as_ref()
             .unwrap()
             .rows()
-            .map(|a| QuadExt::slice_as_base_elements(a).to_vec())
+            .map(|a| QuadFelt::slice_as_base_elements(a).to_vec())
             .collect();
 
         let (main_trace_pmt, mut main_trace_adv_map) =
@@ -204,7 +201,7 @@ impl VerifierChannel {
         let queries = queries
             .evaluations
             .rows()
-            .map(|a| QuadExt::slice_as_base_elements(a).into())
+            .map(|a| QuadFelt::slice_as_base_elements(a).into())
             .collect();
         let (constraint_pmt, constraint_adv_map) =
             unbatch_to_partial_mt(positions.to_vec(), queries, proof);
@@ -237,9 +234,9 @@ impl VerifierChannel {
             let mut folded_positions = fold_positions(&positions, current_domain_size, N);
 
             let layer_proof = layer_proofs.remove(0);
-            let queries: Vec<_> = group_slice_elements::<QuadExt, N>(current_layer_queries)
+            let queries: Vec<_> = group_slice_elements::<QuadFelt, N>(current_layer_queries)
                 .iter()
-                .map(|query| QuadExt::slice_as_base_elements(query).to_vec())
+                .map(|query| QuadFelt::slice_as_base_elements(query).to_vec())
                 .collect();
 
             let (current_partial_merkle_tree, mut cur_adv_key_map) =
@@ -259,7 +256,7 @@ impl VerifierChannel {
 // FRI VERIFIER CHANNEL IMPLEMENTATION
 // ================================================================================================
 
-impl FriVerifierChannel<QuadExt> for VerifierChannel {
+impl FriVerifierChannel<QuadFelt> for VerifierChannel {
     type Hasher = Rpo256;
     type VectorCommitment = MerkleTreeVC<Self::Hasher>;
 
@@ -275,11 +272,11 @@ impl FriVerifierChannel<QuadExt> for VerifierChannel {
         self.fri_layer_proofs.remove(0)
     }
 
-    fn take_next_fri_layer_queries(&mut self) -> Vec<QuadExt> {
+    fn take_next_fri_layer_queries(&mut self) -> Vec<QuadFelt> {
         self.fri_layer_queries.remove(0)
     }
 
-    fn take_fri_remainder(&mut self) -> Vec<QuadExt> {
+    fn take_fri_remainder(&mut self) -> Vec<QuadFelt> {
         self.fri_remainder.take().expect("already read")
     }
 }
@@ -295,7 +292,7 @@ impl FriVerifierChannel<QuadExt> for VerifierChannel {
 struct TraceQueries {
     query_proofs: Vec<BatchMerkleProof<Rpo256>>,
     main_states: Table<Felt>,
-    aux_states: Option<Table<QuadExt>>,
+    aux_states: Option<Table<QuadFelt>>,
 }
 
 impl TraceQueries {
@@ -333,7 +330,7 @@ impl TraceQueries {
             let aux_segment_queries = queries.remove(0);
 
             let (segment_query_proof, segment_trace_states) = aux_segment_queries
-                .parse::<QuadExt, Rpo256, MerkleTreeVC<Rpo256>>(
+                .parse::<QuadFelt, Rpo256, MerkleTreeVC<Rpo256>>(
                     air.lde_domain_size(),
                     num_queries,
                     segment_width,
@@ -367,7 +364,7 @@ impl TraceQueries {
 /// * Merkle authentication paths for all queries.
 struct ConstraintQueries {
     query_proofs: BatchMerkleProof<Rpo256>,
-    evaluations: Table<QuadExt>,
+    evaluations: Table<QuadFelt>,
 }
 
 impl ConstraintQueries {
@@ -379,7 +376,7 @@ impl ConstraintQueries {
         num_queries: usize,
     ) -> Result<Self, VerifierError> {
         let (query_proofs, evaluations) = queries
-            .parse::<QuadExt, Rpo256, MerkleTreeVC<Rpo256>>(
+            .parse::<QuadFelt, Rpo256, MerkleTreeVC<Rpo256>>(
                 air.lde_domain_size(),
                 num_queries,
                 air.ce_blowup_factor(),

@@ -1,5 +1,5 @@
-use test_utils::{QuadFelt, rand::rand_value};
-use vm_core::{Felt, FieldElement, ONE, ZERO};
+use test_utils::rand::rand_value;
+use vm_core::{Felt, FieldElement, ONE, QuadFelt, ZERO};
 
 #[test]
 fn arithmetic_circuit_eval_and_execute() {
