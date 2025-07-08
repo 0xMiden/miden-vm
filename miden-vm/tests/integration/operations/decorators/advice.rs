@@ -255,6 +255,66 @@ fn advice_push_mapval() {
 }
 
 #[test]
+fn advice_has_mapkey() {
+    // --- test adv.has_mapkey: key is present --------------------------------
+    let source: &str = r#"
+    begin
+        # stack: [4, 3, 2, 1]
+
+        # push the flag on the advice stack whether the [1, 2, 3, 4] key is presented in the advice
+        # map
+        adv.has_mapkey
+
+        # move the the flag from the advice stack to the operand stack
+        adv_push.1
+
+        # check that the flag equals 1 -- the key is present in the map
+        dup assert.err="presence flag should be equal 1"
+
+        # truncate the stack
+        movup.5 drop
+    end"#;
+
+    let stack_inputs = [1, 2, 3, 4];
+    let adv_map = [(
+        Word::try_from(stack_inputs).unwrap(),
+        vec![Felt::new(8), Felt::new(7), Felt::new(6), Felt::new(5)],
+    )];
+
+    let test = build_test!(source, &stack_inputs, [], MerkleStore::default(), adv_map);
+    test.expect_stack(&[1, 4, 3, 2, 1]);
+
+    // --- test adv.has_mapkey: key is not present ----------------------------
+    let source: &str = r#"
+    begin
+        # stack: [4, 3, 2, 1]
+
+        # push the flag on the advice stack whether the [1, 2, 3, 4] key is presented in the advice
+        # map
+        adv.has_mapkey
+
+        # move the the flag from the advice stack to the operand stack
+        adv_push.1
+
+        # check that the flag equals 0 -- the key is not present in the map
+        dup assertz.err="presence flag should be equal 0"
+
+        # truncate the stack
+        movup.5 drop
+    end"#;
+
+    let stack_inputs = [1, 2, 3, 4];
+    let map_key = [5u64, 6, 7, 8];
+    let adv_map = [(
+        Word::try_from(map_key).unwrap(),
+        vec![Felt::new(9), Felt::new(10), Felt::new(11), Felt::new(12)],
+    )];
+
+    let test = build_test!(source, &stack_inputs, [], MerkleStore::default(), adv_map);
+    test.expect_stack(&[0, 4, 3, 2, 1]);
+}
+
+#[test]
 fn advice_insert_hdword() {
     // --- test hashing without domain ----------------------------------------
     let source: &str = "
