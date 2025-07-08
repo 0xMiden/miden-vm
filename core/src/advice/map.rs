@@ -37,7 +37,7 @@ impl AdviceMap {
         self.0.contains_key(key)
     }
 
-    /// Inserts a key value pair in the advice map and returns the inserted value.
+    /// Inserts a value, returning the previous value if the key was already set.
     pub fn insert(&mut self, key: Word, value: impl Into<Arc<[Felt]>>) -> Option<Arc<[Felt]>> {
         self.0.insert(key, value.into())
     }
@@ -93,7 +93,7 @@ impl AdviceMap {
     /// # Returns
     /// - `Some` containing the conflicting key, its value from `self`, and the value from `other`.
     /// - `None` if there are no conflicting values.
-    pub fn find_conflicting_entry(&self, other: &Self) -> Option<(MapEntry, Arc<[Felt]>)> {
+    fn find_conflicting_entry(&self, other: &Self) -> Option<(MapEntry, Arc<[Felt]>)> {
         for (key, new_value) in other.iter() {
             if let Some(existing_value) = self.get(key) {
                 if existing_value != new_value {

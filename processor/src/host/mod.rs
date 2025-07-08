@@ -107,6 +107,7 @@ impl SyncHost for DefaultHost {
     fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>> {
         self.store.get(node_digest)
     }
+
     fn on_event(
         &mut self,
         process: &mut ProcessState,

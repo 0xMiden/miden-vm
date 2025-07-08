@@ -75,6 +75,7 @@ mod tests;
 
 mod debug;
 pub use debug::{AsmOpInfo, VmState, VmStateIterator};
+
 // RE-EXPORTS
 // ================================================================================================
 
@@ -718,11 +719,10 @@ impl Process {
         Ok(())
     }
 
-    /// Resolves an external node reference to a procedure root using the `MastForest` store in the
-    /// provided host.
+    /// Resolves an external node reference to a procedure root using the [`MastForest`] store in
+    /// the provided host.
     ///
-    /// This helper function is extracted to ensure that [`crate::Process`] and
-    /// [`crate::fast::FastProcessor`] resolve external nodes in the same way.
+    /// The [`MastForest`] for the procedure is cached to avoid additional queries to the host.
     fn resolve_external_node(
         &mut self,
         external_node: &ExternalNode,
@@ -751,7 +751,17 @@ impl Process {
             return Err(ExecutionError::CircularExternalNode(node_digest));
         }
 
-        self.advice.add_mast_forest(&mast_forest);
+        // Merge the advice map of this forest into the advice provider.
+        // Note that the map may be merged multiple times if a different procedure from the same
+        // forest is called.
+        // We use `merge_advice_map_unchecked` since it only inserts new keys without comparing
+        // the values if they are already present.
+        // For now, only compiled libraries contain non-empty advice maps, so for most cases,
+        // this call will be cheap.
+        self.advice.merge_advice_map_unchecked(mast_forest.advice_map());
+
+        // Cache the root id and forest associated to this procedure to avoid repeated calls to
+        // the host. In the future we may want to cache the forest and its associated digest.
         self.loaded_forests_by_procedure
             .insert(node_digest, (root_id, mast_forest.clone()));
 

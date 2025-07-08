@@ -143,8 +143,8 @@ pub struct FastProcessor {
     /// return. It is a stack since calls can be nested.
     call_stack: Vec<ExecutionContextInfo>,
 
-    /// Mapping of digests of external procedure digests with their corresponding node ID and
-    /// forest containing the procedure.
+    /// Mapping of external procedure digests to their corresponding node ID and
+    /// forest it is part of.
     loaded_forests_by_procedure: BTreeMap<Word, (MastNodeId, Arc<MastForest>)>,
 
     /// Whether to enable debug statements and tracing.
@@ -999,7 +999,17 @@ impl FastProcessor {
             return Err(ExecutionError::CircularExternalNode(node_digest));
         }
 
-        self.advice.add_mast_forest(&mast_forest);
+        // Merge the advice map of this forest into the advice provider.
+        // Note that the map may be merged multiple times if a different procedure from the same
+        // forest is called.
+        // We use `merge_advice_map_unchecked` since it only inserts new keys without comparing
+        // the values if they are already present.
+        // For now, only compiled libraries contain non-empty advice maps, so for most cases,
+        // this call will be cheap.
+        self.advice.merge_advice_map_unchecked(mast_forest.advice_map());
+
+        // Cache the root id and forest associated to this procedure to avoid repeated calls to
+        // the host. In the future we may want to cache the forest and its associated digest.
         self.loaded_forests_by_procedure
             .insert(node_digest, (root_id, mast_forest.clone()));
 
