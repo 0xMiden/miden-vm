@@ -2,7 +2,7 @@ use miden_core::{
     Operation,
     mast::{MastForest, MastNode},
 };
-use miden_debuginfo::{SourceLanguage, SourceManager};
+use miden_debug_types::{SourceLanguage, SourceManager};
 use miden_processor::FMP_MIN;
 use miden_utils_testing::{MIN_STACK_DEPTH, StackInputs, Test, Word, build_op_test, build_test};
 

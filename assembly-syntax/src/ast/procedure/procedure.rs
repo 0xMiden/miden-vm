@@ -1,7 +1,7 @@
 use alloc::{collections::BTreeSet, string::String};
 use core::fmt;
 
-use miden_debuginfo::{SourceSpan, Span, Spanned};
+use miden_debug_types::{SourceSpan, Span, Spanned};
 
 use super::ProcedureName;
 use crate::ast::{Attribute, AttributeSet, Block, DocString, Invoke};

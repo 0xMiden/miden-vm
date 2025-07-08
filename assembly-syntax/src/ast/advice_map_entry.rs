@@ -1,6 +1,6 @@
 use alloc::{string::String, vec::Vec};
 
-use miden_debuginfo::{SourceSpan, Span};
+use miden_debug_types::{SourceSpan, Span};
 
 use super::DocString;
 use crate::{Felt, ast::Ident, parser::WordValue};

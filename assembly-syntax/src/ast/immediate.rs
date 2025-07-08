@@ -1,7 +1,7 @@
 use alloc::sync::Arc;
 use core::fmt;
 
-use miden_debuginfo::{SourceSpan, Span, Spanned};
+use miden_debug_types::{SourceSpan, Span, Spanned};
 
 use crate::{Felt, ast::Ident};
 

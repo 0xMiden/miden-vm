@@ -1,7 +1,7 @@
 use alloc::collections::BTreeSet;
 use core::ops::ControlFlow;
 
-use miden_debuginfo::Spanned;
+use miden_debug_types::Spanned;
 
 use crate::{
     LibraryNamespace, LibraryPath,

@@ -4,7 +4,7 @@ use alloc::{
 };
 use core::{fmt, ops::Range};
 
-use miden_debuginfo::{SourceId, SourceSpan};
+use miden_debug_types::{SourceId, SourceSpan};
 use miden_utils_diagnostics::{Diagnostic, miette};
 
 use super::ParseError;

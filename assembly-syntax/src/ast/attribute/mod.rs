@@ -3,7 +3,7 @@ mod set;
 
 use core::fmt;
 
-use miden_debuginfo::{SourceSpan, Spanned};
+use miden_debug_types::{SourceSpan, Spanned};
 
 pub use self::{
     meta::{BorrowedMeta, Meta, MetaExpr, MetaItem, MetaKeyValue, MetaList},

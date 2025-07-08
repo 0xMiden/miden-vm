@@ -226,7 +226,7 @@ fn serialize_deserialize_all_nodes() {
             (
                 0,
                 Decorator::AsmOp(AssemblyOp::new(
-                    Some(miden_debuginfo::Location {
+                    Some(miden_debug_types::Location {
                         uri: "test".into(),
                         start: 42.into(),
                         end: 43.into(),

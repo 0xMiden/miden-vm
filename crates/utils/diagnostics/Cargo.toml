@@ -16,10 +16,15 @@ exclude.workspace = true
 
 [features]
 default = ["std"]
-std = ["miette/fancy", "miette/std", "miden-crypto/std", "miden-debuginfo/std"]
+std = [
+    "miette/fancy",
+    "miette/std",
+    "miden-crypto/std",
+    "miden-debug-types/std",
+]
 
 [dependencies]
-miden-debuginfo.workspace = true
+miden-debug-types.workspace = true
 miette = { package = "miden-miette", version = "8.0", default-features = false, features = [
     "fancy-no-syscall",
     "derive",

@@ -10,7 +10,7 @@ use miden_core::{
     AdviceMap,
     crypto::merkle::{MerkleStore, MerkleTree},
 };
-use miden_debuginfo::{SourceContent, SourceLanguage, Uri};
+use miden_debug_types::{SourceContent, SourceLanguage, Uri};
 use miden_utils_testing::{
     build_test, build_test_by_mode,
     crypto::{init_merkle_leaves, init_merkle_store},

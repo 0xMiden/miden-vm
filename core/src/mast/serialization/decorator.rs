@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use miden_debuginfo::{Location, Uri};
+use miden_debug_types::{Location, Uri};
 use num_derive::{FromPrimitive, ToPrimitive};
 use num_traits::{FromPrimitive, ToPrimitive};
 

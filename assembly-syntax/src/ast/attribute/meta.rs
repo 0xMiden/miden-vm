@@ -5,7 +5,7 @@ mod list;
 use alloc::{collections::BTreeMap, string::String, sync::Arc, vec::Vec};
 use core::fmt;
 
-use miden_debuginfo::{SourceSpan, Span};
+use miden_debug_types::{SourceSpan, Span};
 
 pub use self::{expr::MetaExpr, kv::MetaKeyValue, list::MetaList};
 use crate::{

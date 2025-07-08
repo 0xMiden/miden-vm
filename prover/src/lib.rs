@@ -10,7 +10,7 @@ use alloc::sync::Arc;
 use core::marker::PhantomData;
 
 use miden_air::{AuxRandElements, PartitionOptions, ProcessorAir, PublicInputs};
-use miden_debuginfo::SourceManager;
+use miden_debug_types::SourceManager;
 #[cfg(all(feature = "metal", target_arch = "aarch64", target_os = "macos"))]
 use miden_gpu::HashFn;
 use miden_processor::{

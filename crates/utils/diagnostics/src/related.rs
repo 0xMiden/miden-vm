@@ -1,7 +1,7 @@
 use alloc::{borrow::Cow, boxed::Box, sync::Arc, vec::Vec};
 use core::fmt;
 
-use miden_debuginfo::{SourceFile, SourceSpan};
+use miden_debug_types::{SourceFile, SourceSpan};
 
 use super::{Diagnostic, Label, LabeledSpan, Report, Severity, SourceCode};
 

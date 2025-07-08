@@ -1,10 +1,10 @@
 /// Simple macro used in the grammar definition for constructing spans
 macro_rules! span {
     ($id:expr, $l:expr, $r:expr) => {
-        ::miden_debuginfo::SourceSpan::new($id, $l..$r)
+        ::miden_debug_types::SourceSpan::new($id, $l..$r)
     };
     ($id:expr, $i:expr) => {
-        ::miden_debuginfo::SourceSpan::at($id, $i)
+        ::miden_debug_types::SourceSpan::at($id, $i)
     };
 }
 
@@ -21,7 +21,7 @@ mod token;
 
 use alloc::{boxed::Box, collections::BTreeSet, string::ToString, sync::Arc, vec::Vec};
 
-use miden_debuginfo::{SourceFile, SourceLanguage, SourceManager, Uri};
+use miden_debug_types::{SourceFile, SourceLanguage, SourceManager, Uri};
 use miden_utils_diagnostics::Report;
 
 pub use self::{
@@ -107,7 +107,7 @@ impl ModuleParser {
     where
         P: AsRef<std::path::Path>,
     {
-        use miden_debuginfo::SourceManagerExt;
+        use miden_debug_types::SourceManagerExt;
         use miden_utils_diagnostics::{IntoDiagnostic, WrapErr};
 
         let path = path.as_ref();
@@ -125,7 +125,7 @@ impl ModuleParser {
         source: impl ToString,
         source_manager: &dyn SourceManager,
     ) -> Result<Box<ast::Module>, Report> {
-        use miden_debuginfo::SourceContent;
+        use miden_debug_types::SourceContent;
 
         let uri = Uri::from(name.path().into_owned().into_boxed_str());
         let content = SourceContent::new(
@@ -331,7 +331,7 @@ mod module_walker {
 #[cfg(test)]
 mod tests {
     use miden_core::assert_matches;
-    use miden_debuginfo::SourceId;
+    use miden_debug_types::SourceId;
 
     use super::*;
 

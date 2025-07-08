@@ -7,7 +7,7 @@ use alloc::{
 };
 use core::{marker::PhantomData, num::NonZeroU32};
 
-use miden_debuginfo::{SourceFile, SourceSpan, Span, Spanned};
+use miden_debug_types::{SourceFile, SourceSpan, Span, Spanned};
 use smallvec::smallvec;
 
 use crate::{LibraryPath, LibraryNamespace, ast::*, Felt, FieldElement, StarkField, Word};

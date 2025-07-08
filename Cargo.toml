@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "crates/debuginfo",
+    "crates/debug/*",
     "crates/utils/*",
     "air",
     "assembly",
@@ -43,7 +43,7 @@ miden-air = { path = "./air", version = "0.15.0", default-features = false }
 miden-assembly = { path = "./assembly", version = "0.15.0", default-features = false }
 miden-assembly-syntax = { path = "./assembly-syntax", version = "0.15.0", default-features = false }
 miden-core = { path = "./core", version = "0.15.0", default-features = false }
-miden-debuginfo = { path = "./crates/debuginfo", version = "0.15.0", default-features = false }
+miden-debug-types = { path = "./crates/debug/types", version = "0.15.0", default-features = false }
 miden-mast-package = { path = "./package", version = "0.15.0", default-features = false }
 miden-processor = { path = "./processor", version = "0.15.0", default-features = false }
 miden-prover = { path = "./prover", version = "0.15.0", default-features = false }

@@ -19,7 +19,7 @@ default = ["std"]
 std = [
     "aho-corasick/std",
     "miden-core/std",
-    "miden-debuginfo/std",
+    "miden-debug-types/std",
     "miden-utils-diagnostics/std",
     "thiserror/std",
 ]
@@ -33,7 +33,7 @@ env_logger = { version = "0.11", optional = true }
 lalrpop-util = { version = "0.22", default-features = false }
 log.workspace = true
 miden-core.workspace = true
-miden-debuginfo.workspace = true
+miden-debug-types.workspace = true
 miden-utils-diagnostics.workspace = true
 proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }

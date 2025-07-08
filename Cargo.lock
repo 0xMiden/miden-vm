@@ -1092,7 +1092,7 @@ dependencies = [
  "lalrpop-util",
  "log",
  "miden-core",
- "miden-debuginfo",
+ "miden-debug-types",
  "miden-utils-diagnostics",
  "pretty_assertions",
  "proptest",
@@ -1108,7 +1108,7 @@ name = "miden-core"
 version = "0.15.0"
 dependencies = [
  "miden-crypto",
- "miden-debuginfo",
+ "miden-debug-types",
  "miden-formatting",
  "num-derive",
  "num-traits",
@@ -1141,7 +1141,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "miden-debuginfo"
+name = "miden-debug-types"
 version = "0.15.0"
 dependencies = [
  "memchr",
@@ -1236,7 +1236,7 @@ dependencies = [
  "miden-air",
  "miden-assembly",
  "miden-core",
- "miden-debuginfo",
+ "miden-debug-types",
  "miden-test-utils",
  "miden-utils-diagnostics",
  "pretty_assertions",
@@ -1255,7 +1255,7 @@ version = "0.15.0"
 dependencies = [
  "elsa",
  "miden-air",
- "miden-debuginfo",
+ "miden-debug-types",
  "miden-gpu",
  "miden-processor",
  "pollster",
@@ -1313,7 +1313,7 @@ name = "miden-utils-diagnostics"
 version = "0.15.0"
 dependencies = [
  "miden-crypto",
- "miden-debuginfo",
+ "miden-debug-types",
  "miden-miette",
  "paste",
  "tracing",
@@ -1352,7 +1352,7 @@ dependencies = [
  "hex",
  "miden-assembly",
  "miden-core",
- "miden-debuginfo",
+ "miden-debug-types",
  "miden-mast-package",
  "miden-processor",
  "miden-prover",

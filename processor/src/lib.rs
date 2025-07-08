@@ -29,7 +29,7 @@ use miden_core::{
         BasicBlockNode, CallNode, DynNode, JoinNode, LoopNode, OP_GROUP_SIZE, OpBatch, SplitNode,
     },
 };
-use miden_debuginfo::{DefaultSourceManager, SourceManager, SourceSpan};
+use miden_debug_types::{DefaultSourceManager, SourceManager, SourceSpan};
 use utils::resolve_external_node;
 pub use winter_prover::matrix::ColMatrix;
 

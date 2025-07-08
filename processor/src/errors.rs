@@ -8,7 +8,7 @@ use miden_core::{
     stack::MIN_STACK_DEPTH,
     utils::to_hex,
 };
-use miden_debuginfo::{SourceFile, SourceManager, SourceSpan};
+use miden_debug_types::{SourceFile, SourceManager, SourceSpan};
 use miden_utils_diagnostics::{Diagnostic, miette};
 use winter_prover::ProverError;
 

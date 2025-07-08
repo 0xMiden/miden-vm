@@ -1,6 +1,6 @@
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 
-use miden_debuginfo::{DefaultSourceManager, SourceFile, SourceManager};
+use miden_debug_types::{DefaultSourceManager, SourceFile, SourceManager};
 use miden_utils_diagnostics::{
     Report,
     reporting::{ReportHandlerOpts, set_hook},

@@ -10,7 +10,7 @@ use alloc::{
 };
 
 use miden_core::{Word, crypto::hash::Rpo256};
-use miden_debuginfo::{SourceFile, Span, Spanned};
+use miden_debug_types::{SourceFile, Span, Spanned};
 
 use self::passes::{ConstEvalVisitor, VerifyInvokeTargets};
 pub use self::{

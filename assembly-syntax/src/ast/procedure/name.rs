@@ -11,7 +11,7 @@ use core::{
 use miden_core::utils::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
-use miden_debuginfo::{SourceSpan, Span, Spanned};
+use miden_debug_types::{SourceSpan, Span, Spanned};
 use miden_utils_diagnostics::{IntoDiagnostic, Report, miette};
 
 use crate::{

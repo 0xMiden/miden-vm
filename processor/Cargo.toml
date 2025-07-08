@@ -22,7 +22,7 @@ concurrent = ["std", "winter-prover/concurrent"]
 default = ["std"]
 std = [
     "miden-core/std",
-    "miden-debuginfo/std",
+    "miden-debug-types/std",
     "miden-utils-diagnostics/std",
     "winter-prover/std",
     "thiserror/std",
@@ -37,7 +37,7 @@ bus-debugger = ["testing", "miden-air/testing"]
 [dependencies]
 miden-air.workspace = true
 miden-core.workspace = true
-miden-debuginfo.workspace = true
+miden-debug-types.workspace = true
 miden-utils-diagnostics.workspace = true
 tracing.workspace = true
 thiserror.workspace = true

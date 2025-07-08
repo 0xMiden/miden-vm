@@ -1,8 +1,8 @@
 [package]
-name = "miden-debuginfo"
+name = "miden-debug-types"
 version = "0.15.0"
 description = "Core source-level debugging information types used throughout the Miden toolchain"
-documentation = "https://docs.rs/miden-debuginfo/0.15.0"
+documentation = "https://docs.rs/miden-debug-types/0.15.0"
 readme = "README.md"
 categories = ["compilers", "no-std"]
 keywords = ["debugging", "debuginfo", "span"]

@@ -5,7 +5,7 @@ use miden_core::{
     AdviceMap,
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
-use miden_debuginfo::{SourceFile, SourceSpan, Span, Spanned};
+use miden_debug_types::{SourceFile, SourceSpan, Span, Spanned};
 use miden_utils_diagnostics::Report;
 
 use super::{

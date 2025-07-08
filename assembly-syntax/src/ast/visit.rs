@@ -51,7 +51,7 @@
 //! modifications to specific nodes they care about.
 use core::ops::ControlFlow;
 
-use miden_debuginfo::Span;
+use miden_debug_types::Span;
 
 use super::immediate::ErrorMsg;
 use crate::{Felt, ast::*, parser::IntValue};

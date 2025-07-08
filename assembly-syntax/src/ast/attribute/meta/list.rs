@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use miden_debuginfo::{SourceSpan, Spanned};
+use miden_debug_types::{SourceSpan, Spanned};
 
 use super::MetaExpr;
 use crate::ast::Ident;

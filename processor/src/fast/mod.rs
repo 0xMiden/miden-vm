@@ -13,7 +13,7 @@ use miden_core::{
     stack::MIN_STACK_DEPTH,
     utils::range,
 };
-use miden_debuginfo::{DefaultSourceManager, SourceManager};
+use miden_debug_types::{DefaultSourceManager, SourceManager};
 
 use crate::{
     AdviceInputs, AdviceProvider, AsyncHost, ContextId, ErrorContext, ExecutionError, FMP_MIN,

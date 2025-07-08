@@ -6,7 +6,7 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_debuginfo::{SourceContent, SourceFile, SourceLanguage, SourceManager, Uri};
+use miden_debug_types::{SourceContent, SourceFile, SourceLanguage, SourceManager, Uri};
 
 use crate::{
     ast::{Module, ModuleKind},
@@ -358,7 +358,7 @@ impl Parse for &std::path::Path {
     ) -> Result<Box<Module>, Report> {
         use std::path::Component;
 
-        use miden_debuginfo::SourceManagerExt;
+        use miden_debug_types::SourceManagerExt;
 
         use crate::{ast::Ident, library::PathError};
 

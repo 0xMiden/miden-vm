@@ -2,7 +2,7 @@ use alloc::{boxed::Box, string::String, sync::Arc};
 use core::fmt;
 
 use miden_core::FieldElement;
-use miden_debuginfo::{SourceSpan, Span, Spanned};
+use miden_debug_types::{SourceSpan, Span, Spanned};
 
 use super::DocString;
 use crate::{

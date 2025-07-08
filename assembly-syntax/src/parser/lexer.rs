@@ -1,7 +1,7 @@
 use alloc::string::String;
 use core::{num::IntErrorKind, ops::Range};
 
-use miden_debuginfo::{ByteOffset, SourceId, SourceSpan};
+use miden_debug_types::{ByteOffset, SourceId, SourceSpan};
 
 use super::{
     BinEncodedValue, BinErrorKind, DocumentationType, HexErrorKind, IntValue, LiteralErrorKind,

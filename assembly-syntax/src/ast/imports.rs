@@ -1,6 +1,6 @@
 use core::fmt;
 
-use miden_debuginfo::{SourceSpan, Spanned};
+use miden_debug_types::{SourceSpan, Spanned};
 
 use crate::{LibraryNamespace, LibraryPath, ast::Ident};
 

@@ -7,7 +7,7 @@ mod resolver;
 
 use alloc::string::String;
 
-use miden_debuginfo::{SourceSpan, Span, Spanned};
+use miden_debug_types::{SourceSpan, Span, Spanned};
 
 pub use self::{
     alias::{AliasTarget, ProcedureAlias},

@@ -4,7 +4,7 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_debuginfo::{SourceFile, Span, Spanned};
+use miden_debug_types::{SourceFile, Span, Spanned};
 use miden_utils_diagnostics::{Diagnostic, Severity};
 
 use super::{SemanticAnalysisError, SyntaxError};

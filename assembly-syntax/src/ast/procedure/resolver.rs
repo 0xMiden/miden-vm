@@ -1,6 +1,6 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 
-use miden_debuginfo::{SourceSpan, Span, Spanned};
+use miden_debug_types::{SourceSpan, Span, Spanned};
 
 use super::{ProcedureIndex, ProcedureName, QualifiedProcedureName};
 use crate::{LibraryPath, Word, ast::Ident};

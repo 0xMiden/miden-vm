@@ -1,7 +1,7 @@
 use alloc::sync::Arc;
 
 use miden_assembly::{Assembler, LibraryPath, Report, ast::ModuleKind};
-use miden_debuginfo::{SourceLanguage, SourceManager};
+use miden_debug_types::{SourceLanguage, SourceManager};
 use miden_processor::ExecutionError;
 use miden_prover::Word;
 use miden_stdlib::StdLibrary;

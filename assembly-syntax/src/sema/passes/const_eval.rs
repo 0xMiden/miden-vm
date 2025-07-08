@@ -1,7 +1,7 @@
 use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
-use miden_debuginfo::{Span, Spanned};
+use miden_debug_types::{Span, Spanned};
 
 use crate::{
     Felt,

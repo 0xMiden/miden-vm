@@ -1,4 +1,4 @@
-use miden_debuginfo::Span;
+use miden_debug_types::Span;
 
 use crate::{
     DisplayHex,
@@ -403,7 +403,7 @@ fn inst_with_pretty_params<P: PrettyPrint>(inst: &'static str, params: &[P]) -> 
 #[cfg(test)]
 mod tests {
     use miden_core::crypto::hash::Rpo256;
-    use miden_debuginfo::Span;
+    use miden_debug_types::Span;
 
     use crate::{Felt, ast::*};
 
