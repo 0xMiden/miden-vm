@@ -6,13 +6,9 @@ use predicates::prelude::*;
 fn bin_under_test() -> escargot::CargoRun {
     escargot::CargoBuild::new()
         .bin("miden-vm")
-        .features("executable internal")
+        .features("executable")
         .current_release()
         .current_target()
-        // force verbose output (same as --verbose)
-        .env("CARGO_TERM_VERBOSE", "true")
-        // preserve ANSI colors in output
-        .env("CARGO_TERM_COLOR", "always")
         .run()
         .unwrap_or_else(|err| {
             // Process the error string to add borders.
