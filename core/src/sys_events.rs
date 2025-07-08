@@ -112,7 +112,7 @@ pub enum SystemEvent {
     ///
     /// Outputs:
     ///   Operand stack: [KEY, ...]
-    ///   Advice stack:  [has_key, ...]
+    ///   Advice stack:  [has_mapkey, ...]
     HasMapKey,
 
     /// Pushes the result of [u64] division (both the quotient and the remainder) onto the advice

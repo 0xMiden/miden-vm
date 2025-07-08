@@ -288,16 +288,11 @@ fn copy_map_value_to_adv_stack(
 ///
 /// Outputs:
 ///   Operand stack: [KEY, ...]
-///   Advice stack: [has_key, ...]
+///   Advice stack: [has_mapkey, ...]
 pub fn push_key_presence_flag(process: &mut ProcessState) -> Result<(), ExecutionError> {
-    let map_key = [
-        process.get_stack_item(3),
-        process.get_stack_item(2),
-        process.get_stack_item(1),
-        process.get_stack_item(0),
-    ];
+    let map_key = process.get_stack_word(0);
 
-    let presence_flag = process.advice_provider().map.contains_key(&map_key.into());
+    let presence_flag = process.advice_provider().map.contains_key(&map_key);
     process.advice_provider_mut().push_stack(Felt::from(presence_flag));
 
     Ok(())
