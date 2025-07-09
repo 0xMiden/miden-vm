@@ -296,12 +296,6 @@ impl AdviceProvider {
             }
         })
     }
-
-    /// Merges all entries from the given [`AdviceMap`] into the current advice map, skipping
-    /// any entries that are already present.
-    pub(crate) fn merge_advice_map_unchecked(&mut self, other: &AdviceMap) {
-        self.map.merge_new(other)
-    }
 }
 
 impl From<AdviceInputs> for AdviceProvider {

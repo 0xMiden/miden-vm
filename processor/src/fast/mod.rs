@@ -1,4 +1,4 @@
-use alloc::{boxed::Box, collections::BTreeMap, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::cmp::min;
 
 use memory::Memory;
@@ -143,10 +143,6 @@ pub struct FastProcessor {
     /// return. It is a stack since calls can be nested.
     call_stack: Vec<ExecutionContextInfo>,
 
-    /// Mapping of external procedure digests to their corresponding node ID and
-    /// forest it is part of.
-    loaded_forests_by_procedure: BTreeMap<Word, (MastNodeId, Arc<MastForest>)>,
-
     /// Whether to enable debug statements and tracing.
     in_debug_mode: bool,
 
@@ -218,7 +214,6 @@ impl FastProcessor {
             memory: Memory::new(),
             call_stack: Vec::new(),
             ace: Ace::default(),
-            loaded_forests_by_procedure: BTreeMap::default(),
             in_debug_mode,
             source_manager,
         }
@@ -977,11 +972,6 @@ impl FastProcessor {
     ) -> Result<(MastNodeId, Arc<MastForest>), ExecutionError> {
         let node_digest = external_node.digest();
 
-        // Check the cache if this procedure has already been called.
-        if let Some((node_id, forest)) = self.loaded_forests_by_procedure.get(&node_digest) {
-            return Ok((*node_id, forest.clone()));
-        }
-
         let mast_forest = host
             .get_mast_forest(&node_digest)
             .await
@@ -1002,16 +992,11 @@ impl FastProcessor {
         // Merge the advice map of this forest into the advice provider.
         // Note that the map may be merged multiple times if a different procedure from the same
         // forest is called.
-        // We use `merge_advice_map_unchecked` since it only inserts new keys without comparing
-        // the values if they are already present.
         // For now, only compiled libraries contain non-empty advice maps, so for most cases,
         // this call will be cheap.
-        self.advice.merge_advice_map_unchecked(mast_forest.advice_map());
-
-        // Cache the root id and forest associated to this procedure to avoid repeated calls to
-        // the host. In the future we may want to cache the forest and its associated digest.
-        self.loaded_forests_by_procedure
-            .insert(node_digest, (root_id, mast_forest.clone()));
+        self.advice
+            .merge_advice_map(mast_forest.advice_map())
+            .map_err(|err| ExecutionError::advice_error(err, self.clk, &()))?;
 
         Ok((root_id, mast_forest))
     }
