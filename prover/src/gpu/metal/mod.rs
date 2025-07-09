@@ -4,14 +4,14 @@
 
 use std::{boxed::Box, marker::PhantomData, time::Instant, vec::Vec};
 
-use air::{AuxRandElements, PartitionOptions};
 use elsa::FrozenVec;
+use miden_air::{AuxRandElements, PartitionOptions};
 use miden_gpu::{
     HashFn,
     metal::{RowHasher, build_merkle_tree, utils::page_aligned_uninit_vector},
 };
+use miden_processor::crypto::{ElementHasher, Hasher};
 use pollster::block_on;
-use processor::crypto::{ElementHasher, Hasher};
 use tracing::{Level, event};
 use winter_prover::{
     CompositionPoly, CompositionPolyTrace, ConstraintCommitment, ConstraintCompositionCoefficients,
@@ -702,7 +702,7 @@ where
     debug_assert_eq!(polys.num_rows(), twiddles.len() * 2);
     debug_assert_eq!(offsets.len() % polys.num_rows(), 0);
 
-    let num_segments = if polys.num_base_cols() % N == 0 {
+    let num_segments = if polys.num_base_cols().is_multiple_of(N) {
         polys.num_base_cols() / N
     } else {
         polys.num_base_cols() / N + 1

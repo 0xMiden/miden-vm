@@ -7,16 +7,13 @@ use alloc::{
 };
 use core::{marker::PhantomData, num::NonZeroU32};
 
+use miden_debug_types::{SourceFile, SourceSpan, Span, Spanned};
 use smallvec::smallvec;
 
-use crate::{
-    LibraryPath, LibraryNamespace, ast::*, diagnostics::SourceFile, SourceSpan,
-    Felt, FieldElement, StarkField, Word
-};
+use crate::{LibraryPath, LibraryNamespace, ast::*, Felt, FieldElement, StarkField, Word};
 use super::{
     BinEncodedValue, IntValue, Token, WordValue, ParseError, ParsingError,
-    LiteralErrorKind, HexErrorKind, Span, Spanned,
-    DocumentationType
+    LiteralErrorKind, HexErrorKind, DocumentationType
 };
 
 grammar<'input>(
@@ -111,6 +108,7 @@ extern {
         "gt" => Token::Gt,
         "gte" => Token::Gte,
         "hash" => Token::Hash,
+        "has_mapkey" => Token::HasMapkey,
         "hperm" => Token::Hperm,
         "hmerge" => Token::Hmerge,
         "if" => Token::If,
@@ -699,6 +697,7 @@ SystemEvent: Instruction = {
     "adv" "." "insert_mem" => Instruction::SysEvent(SystemEventNode::InsertMem),
     "adv" "." "push_mapval" => Instruction::SysEvent(SystemEventNode::PushMapVal),
     "adv" "." "push_mapvaln" => Instruction::SysEvent(SystemEventNode::PushMapValN),
+    "adv" "." "has_mapkey" => Instruction::SysEvent(SystemEventNode::HasMapKey),
     "adv" "." "push_mtnode" => Instruction::SysEvent(SystemEventNode::PushMtNode),
     "adv" "." "push_smtpeek" => Instruction::SysEvent(SystemEventNode::PushSmtPeek),
     "adv" "." "push_u64div" => Instruction::SysEvent(SystemEventNode::PushU64Div),

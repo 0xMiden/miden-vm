@@ -1,12 +1,13 @@
 use alloc::vec::Vec;
 
-use vm_core::{
+use miden_core::{
     Felt, FieldElement, QuadFelt, WORD_SIZE, Word, ZERO,
     crypto::{
         hash::Rpo256,
         merkle::{EmptySubtreeRoots, SMT_DEPTH, Smt},
     },
     sys_events::SystemEvent,
+    utils::collections::KvMap,
 };
 
 use crate::{ExecutionError, MemoryError, ProcessState, errors::ErrorContext};
@@ -27,6 +28,7 @@ pub fn handle_system_event(
         SystemEvent::MerkleNodeToStack => copy_merkle_node_to_adv_stack(process, err_ctx),
         SystemEvent::MapValueToStack => copy_map_value_to_adv_stack(process, false, err_ctx),
         SystemEvent::MapValueToStackN => copy_map_value_to_adv_stack(process, true, err_ctx),
+        SystemEvent::HasMapKey => push_key_presence_flag(process),
         SystemEvent::U64Div => push_u64_div_result(process, err_ctx),
         SystemEvent::FalconDiv => push_falcon_mod_result(process, err_ctx),
         SystemEvent::Ext2Inv => push_ext2_inv_result(process, err_ctx),
@@ -272,6 +274,26 @@ fn copy_map_value_to_adv_stack(
         .advice_provider_mut()
         .push_from_map(key.into(), include_len)
         .map_err(|err| ExecutionError::advice_error(err, process.clk(), err_ctx))?;
+
+    Ok(())
+}
+
+/// Checks whether the key placed at the top of the operand stack exists in the advice map and
+/// pushes the resulting flag onto the advice stack. If the advice map has the provided key, `1`
+/// will be pushed to the advice stack, `0` otherwise.
+///
+/// Inputs:
+///   Operand stack: [KEY, ...]
+///   Advice stack:  [...]
+///
+/// Outputs:
+///   Operand stack: [KEY, ...]
+///   Advice stack: [has_mapkey, ...]
+pub fn push_key_presence_flag(process: &mut ProcessState) -> Result<(), ExecutionError> {
+    let map_key = process.get_stack_word(0);
+
+    let presence_flag = process.advice_provider().map.contains_key(&map_key);
+    process.advice_provider_mut().push_stack(Felt::from(presence_flag));
 
     Ok(())
 }

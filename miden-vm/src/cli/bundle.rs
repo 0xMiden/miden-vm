@@ -1,11 +1,11 @@
 use std::path::PathBuf;
 
-use assembly::{
+use clap::Parser;
+use miden_assembly::{
     Assembler, Library, LibraryNamespace,
     diagnostics::{IntoDiagnostic, Report},
 };
-use clap::Parser;
-use stdlib::StdLibrary;
+use miden_stdlib::StdLibrary;
 
 #[derive(Debug, Clone, Parser)]
 #[command(

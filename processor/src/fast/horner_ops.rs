@@ -1,6 +1,6 @@
 use core::array;
 
-use vm_core::{Felt, QuadFelt};
+use miden_core::{Felt, QuadFelt};
 
 use super::FastProcessor;
 use crate::{ErrorContext, ExecutionError};

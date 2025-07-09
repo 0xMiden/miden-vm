@@ -1,20 +1,19 @@
 /// Tests in this file make sure that diagnostics presented to the user are as expected.
 use alloc::string::ToString;
 
-use assembly::{
+use miden_assembly::{
     Assembler, LibraryPath,
     ast::Module,
-    diagnostics::SourceLanguage,
     testing::{TestContext, assert_diagnostic_lines, regex, source_file},
 };
-use test_utils::{
-    build_test, build_test_by_mode,
-    crypto::{init_merkle_leaves, init_merkle_store},
-};
-use vm_core::{
+use miden_core::{
     AdviceMap,
     crypto::merkle::{MerkleStore, MerkleTree},
-    debuginfo::{SourceContent, Uri},
+};
+use miden_debug_types::{SourceContent, SourceLanguage, Uri};
+use miden_utils_testing::{
+    build_test, build_test_by_mode,
+    crypto::{init_merkle_leaves, init_merkle_store},
 };
 
 use super::*;
@@ -720,7 +719,7 @@ fn test_diagnostic_no_mast_forest_with_procedure() {
         let source_file = source_manager.load_from_raw_parts(uri.clone(), content);
         Module::parse(
             LibraryPath::new(module_name).unwrap(),
-            assembly::ast::ModuleKind::Library,
+            miden_assembly::ast::ModuleKind::Library,
             source_file,
         )
         .unwrap()

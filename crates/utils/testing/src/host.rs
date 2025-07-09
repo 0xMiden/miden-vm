@@ -1,8 +1,8 @@
 use alloc::sync::Arc;
 
-use processor::{AsyncHost, BaseHost, DefaultHost, ErrorContext, MastForest, ProcessState};
-use prover::{ExecutionError, SyncHost, Word};
-use stdlib::{EVENT_FALCON_SIG_TO_STACK, falcon_sign};
+use miden_processor::{AsyncHost, BaseHost, DefaultHost, ErrorContext, MastForest, ProcessState};
+use miden_prover::{ExecutionError, SyncHost, Word};
+use miden_stdlib::{EVENT_FALCON_SIG_TO_STACK, falcon_sign};
 
 #[derive(Default)]
 pub struct TestHost {

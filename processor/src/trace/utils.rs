@@ -3,7 +3,7 @@ use core::slice;
 
 use miden_air::{RowIndex, trace::main_trace::MainTrace};
 #[cfg(test)]
-use vm_core::{Operation, utils::ToElements};
+use miden_core::{Operation, utils::ToElements};
 
 use super::{Felt, FieldElement, NUM_RAND_ROWS};
 use crate::{chiplets::Chiplets, debug::BusDebugger, utils::uninit_vector};

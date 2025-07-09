@@ -1,4 +1,4 @@
-use vm_core::{mast::MastForest, stack::MIN_STACK_DEPTH};
+use miden_core::{mast::MastForest, stack::MIN_STACK_DEPTH};
 
 use super::{ExecutionError, Felt, FieldElement, Operation, Process, SyncHost};
 use crate::errors::ErrorContext;
@@ -201,7 +201,7 @@ impl Process {
 #[cfg(test)]
 pub mod testing {
     use miden_air::ExecutionOptions;
-    use vm_core::{StackInputs, mast::MastForest};
+    use miden_core::{StackInputs, mast::MastForest};
 
     use super::*;
     use crate::{AdviceInputs, DefaultHost};

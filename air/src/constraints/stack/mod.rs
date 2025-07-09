@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use vm_core::{StackOutputs, stack::MIN_STACK_DEPTH};
+use miden_core::{StackOutputs, stack::MIN_STACK_DEPTH};
 
 use super::super::{
     Assertion, CLK_COL_IDX, DECODER_TRACE_OFFSET, EvaluationFrame, FMP_COL_IDX, Felt, FieldElement,

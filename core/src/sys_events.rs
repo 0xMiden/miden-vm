@@ -13,6 +13,7 @@ mod constants {
     pub const EVENT_MERKLE_NODE_TO_STACK: u32         = 361943238;
     pub const EVENT_MAP_VALUE_TO_STACK: u32           = 574478993;
     pub const EVENT_MAP_VALUE_TO_STACK_N: u32         = 630847990;
+    pub const EVENT_HAS_MAP_KEY: u32                  = 652777600;
     pub const EVENT_U64_DIV: u32                      = 678156251;
     pub const EVENT_EXT2_INV: u32                     = 1251967401;
     pub const EVENT_SMT_PEEK: u32                     = 1889584556;
@@ -99,6 +100,20 @@ pub enum SystemEvent {
     ///   Advice stack: [num_values, values, ...]
     ///   Advice map: {KEY: values}
     MapValueToStackN,
+
+    /// Pushes a flag onto the advice stack whether advice map has an entry with specified key.
+    ///
+    /// If the advice map has the entry with the key equal to the key placed at the top of the
+    /// operand stack, `1` will be pushed to the advice stack and `0` otherwise.
+    ///
+    /// Inputs:
+    ///   Operand stack: [KEY, ...]
+    ///   Advice stack:  [...]
+    ///
+    /// Outputs:
+    ///   Operand stack: [KEY, ...]
+    ///   Advice stack:  [has_mapkey, ...]
+    HasMapKey,
 
     /// Pushes the result of [u64] division (both the quotient and the remainder) onto the advice
     /// stack.
@@ -284,6 +299,7 @@ impl SystemEvent {
             SystemEvent::MerkleNodeToStack => EVENT_MERKLE_NODE_TO_STACK,
             SystemEvent::MapValueToStack => EVENT_MAP_VALUE_TO_STACK,
             SystemEvent::MapValueToStackN => EVENT_MAP_VALUE_TO_STACK_N,
+            SystemEvent::HasMapKey => EVENT_HAS_MAP_KEY,
             SystemEvent::U64Div => EVENT_U64_DIV,
             SystemEvent::FalconDiv => EVENT_FALCON_DIV,
             SystemEvent::Ext2Inv => EVENT_EXT2_INV,
@@ -308,6 +324,7 @@ impl SystemEvent {
             EVENT_MERKLE_NODE_TO_STACK => Some(SystemEvent::MerkleNodeToStack),
             EVENT_MAP_VALUE_TO_STACK => Some(SystemEvent::MapValueToStack),
             EVENT_MAP_VALUE_TO_STACK_N => Some(SystemEvent::MapValueToStackN),
+            EVENT_HAS_MAP_KEY => Some(SystemEvent::HasMapKey),
             EVENT_U64_DIV => Some(SystemEvent::U64Div),
             EVENT_FALCON_DIV => Some(SystemEvent::FalconDiv),
             EVENT_EXT2_INV => Some(SystemEvent::Ext2Inv),
@@ -339,6 +356,7 @@ impl fmt::Display for SystemEvent {
             Self::MerkleNodeToStack => write!(f, "merkle_node_to_stack"),
             Self::MapValueToStack => write!(f, "map_value_to_stack"),
             Self::MapValueToStackN => write!(f, "map_value_to_stack_with_len"),
+            Self::HasMapKey => write!(f, "has_key_in_map"),
             Self::U64Div => write!(f, "div_u64"),
             Self::FalconDiv => write!(f, "falcon_div"),
             Self::Ext2Inv => write!(f, "ext2_inv"),

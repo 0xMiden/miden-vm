@@ -1,4 +1,4 @@
-use test_utils::build_op_test;
+use miden_utils_testing::build_op_test;
 
 mod field_ops;
 mod stack_manipualtion_ops;

@@ -12,31 +12,32 @@ use alloc::{
     vec::Vec,
 };
 
-use assembly::{
-    KernelLibrary, Library, Parse,
-    diagnostics::{SourceLanguage, reporting::PrintDiagnostic},
+use miden_assembly::{KernelLibrary, Library, Parse, diagnostics::reporting::PrintDiagnostic};
+pub use miden_assembly::{
+    LibraryPath,
+    debuginfo::{DefaultSourceManager, SourceFile, SourceLanguage, SourceManager},
+    diagnostics::Report,
 };
-pub use assembly::{LibraryPath, SourceFile, SourceManager, diagnostics::Report};
-pub use pretty_assertions::{assert_eq, assert_ne, assert_str_eq};
-pub use processor::{
-    AdviceInputs, AdviceProvider, ContextId, ExecutionError, ExecutionOptions, ExecutionTrace,
-    Process, ProcessState, VmStateIterator,
-};
-use processor::{Program, fast::FastProcessor};
-#[cfg(not(target_family = "wasm"))]
-use proptest::prelude::{Arbitrary, Strategy};
-use prover::utils::range;
-pub use prover::{MerkleTreeVC, ProvingOptions, prove};
-pub use test_case::test_case;
-pub use verifier::{AcceptableOptions, VerifierError, verify};
-pub use vm_core::{
+pub use miden_core::{
     EMPTY_WORD, Felt, FieldElement, ONE, StackInputs, StackOutputs, StarkField, WORD_SIZE, Word,
     ZERO,
     chiplets::hasher::{STATE_WIDTH, hash_elements},
     stack::MIN_STACK_DEPTH,
     utils::{IntoBytes, ToElements, collections, group_slice_elements},
 };
-use vm_core::{ProgramInfo, chiplets::hasher::apply_permutation};
+use miden_core::{ProgramInfo, chiplets::hasher::apply_permutation};
+pub use miden_processor::{
+    AdviceInputs, AdviceProvider, ContextId, ExecutionError, ExecutionOptions, ExecutionTrace,
+    Process, ProcessState, VmStateIterator,
+};
+use miden_processor::{Program, fast::FastProcessor};
+use miden_prover::utils::range;
+pub use miden_prover::{MerkleTreeVC, ProvingOptions, prove};
+pub use miden_verifier::{AcceptableOptions, VerifierError, verify};
+pub use pretty_assertions::{assert_eq, assert_ne, assert_str_eq};
+#[cfg(not(target_family = "wasm"))]
+use proptest::prelude::{Arbitrary, Strategy};
+pub use test_case::test_case;
 
 pub mod math {
     pub use winter_prover::math::{
@@ -45,7 +46,7 @@ pub mod math {
 }
 
 pub mod serde {
-    pub use vm_core::utils::{
+    pub use miden_core::utils::{
         ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
     };
 }
@@ -91,9 +92,9 @@ end
 macro_rules! expect_assembly_error {
     ($test:expr, $(|)? $( $pattern:pat_param )|+ $( if $guard: expr )? $(,)?) => {
         let error = $test.compile().expect_err("expected assembly to fail");
-        match error.downcast::<assembly::AssemblyError>() {
+        match error.downcast::<::miden_assembly::AssemblyError>() {
             Ok(error) => {
-                ::vm_core::assert_matches!(error, $( $pattern )|+ $( if $guard )?);
+                ::miden_core::assert_matches!(error, $( $pattern )|+ $( if $guard )?);
             }
             Err(report) => {
                 panic!(r#"
@@ -112,13 +113,13 @@ macro_rules! expect_exec_error_matches {
     ($test:expr, $(|)? $( $pattern:pat_param )|+ $( if $guard: expr )? $(,)?) => {
         match $test.execute() {
             Ok(_) => panic!("expected execution to fail @ {}:{}", file!(), line!()),
-            Err(error) => ::vm_core::assert_matches!(error, $( $pattern )|+ $( if $guard )?),
+            Err(error) => ::miden_core::assert_matches!(error, $( $pattern )|+ $( if $guard )?),
         }
     };
 }
 
-/// Like [assembly::testing::assert_diagnostic], but matches each non-empty line of the rendered
-/// output to a corresponding pattern.
+/// Like [miden_assembly::testing::assert_diagnostic], but matches each non-empty line of the
+/// rendered output to a corresponding pattern.
 ///
 /// So if the output has 3 lines, the second of which is empty, and you provide 2 patterns, the
 /// assertion passes if the first line matches the first pattern, and the third line matches the
@@ -127,8 +128,8 @@ macro_rules! expect_exec_error_matches {
 #[macro_export]
 macro_rules! assert_diagnostic_lines {
     ($diagnostic:expr, $($expected:expr),+) => {{
-        use assembly::testing::Pattern;
-        let actual = format!("{}", assembly::diagnostics::reporting::PrintDiagnostic::new_without_color($diagnostic));
+        use miden_assembly::testing::Pattern;
+        let actual = format!("{}", miden_assembly::diagnostics::reporting::PrintDiagnostic::new_without_color($diagnostic));
         let lines = actual.lines().filter(|l| !l.trim().is_empty()).zip([$(Pattern::from($expected)),*].into_iter());
         for (actual_line, expected) in lines {
             expected.assert_match_with_context(actual_line, &actual);
@@ -184,7 +185,7 @@ impl Test {
 
     /// Creates the simplest possible new test, with only a source string and no inputs.
     pub fn new(name: &str, source: &str, in_debug_mode: bool) -> Self {
-        let source_manager = Arc::new(assembly::DefaultSourceManager::default());
+        let source_manager = Arc::new(miden_assembly::DefaultSourceManager::default());
         let source = source_manager.load(SourceLanguage::Masm, name.into(), source.to_string());
         Test {
             source_manager,
@@ -199,7 +200,7 @@ impl Test {
     }
 
     /// Add an extra module to link in during assembly
-    pub fn add_module(&mut self, path: assembly::LibraryPath, source: impl ToString) {
+    pub fn add_module(&mut self, path: miden_assembly::LibraryPath, source: impl ToString) {
         self.add_modules.push((path, source.to_string()));
     }
 
@@ -291,7 +292,7 @@ impl Test {
     /// # Errors
     /// Returns an error if compilation of the program source or the kernel fails.
     pub fn compile(&self) -> Result<(Program, Option<KernelLibrary>), Report> {
-        use assembly::{Assembler, ParseOptions, ast::ModuleKind};
+        use miden_assembly::{Assembler, ParseOptions, ast::ModuleKind};
 
         let (assembler, kernel_lib) = if let Some(kernel) = self.kernel_source.clone() {
             let kernel_lib =
@@ -387,7 +388,7 @@ impl Test {
     pub fn prove_and_verify(&self, pub_inputs: Vec<u64>, test_fail: bool) {
         let (program, mut host) = self.get_program_and_host();
         let stack_inputs = StackInputs::try_from_ints(pub_inputs).unwrap();
-        let (mut stack_outputs, proof) = prover::prove(
+        let (mut stack_outputs, proof) = miden_prover::prove(
             &program,
             stack_inputs.clone(),
             self.advice_inputs.clone(),
@@ -402,9 +403,11 @@ impl Test {
         let program_info = ProgramInfo::from(program);
         if test_fail {
             stack_outputs.stack_mut()[0] += ONE;
-            assert!(verifier::verify(program_info, stack_inputs, stack_outputs, proof).is_err());
+            assert!(
+                miden_verifier::verify(program_info, stack_inputs, stack_outputs, proof).is_err()
+            );
         } else {
-            let result = verifier::verify(program_info, stack_inputs, stack_outputs, proof);
+            let result = miden_verifier::verify(program_info, stack_inputs, stack_outputs, proof);
             assert!(result.is_ok(), "error: {result:?}");
         }
     }

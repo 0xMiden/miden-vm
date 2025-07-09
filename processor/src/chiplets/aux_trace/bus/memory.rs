@@ -13,7 +13,7 @@ use miden_air::{
         main_trace::MainTrace,
     },
 };
-use vm_core::{Felt, FieldElement, ONE, ZERO};
+use miden_core::{Felt, FieldElement, ONE, ZERO};
 
 use crate::{
     chiplets::aux_trace::build_value,

@@ -1,6 +1,6 @@
 use core::ops::Range;
 
-use vm_core::{Felt, ONE, Operation, ZERO, utils::range};
+use miden_core::{Felt, ONE, Operation, ZERO, utils::range};
 
 use super::DECODER_AUX_TRACE_OFFSET;
 

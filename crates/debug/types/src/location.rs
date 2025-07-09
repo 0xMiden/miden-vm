@@ -1,5 +1,8 @@
 use core::{fmt, ops::Range};
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 use super::{
     ByteIndex, Uri,
     source_file::{ColumnNumber, LineNumber},
@@ -7,6 +10,7 @@ use super::{
 
 /// A [Location] represents file and span information for portability across source managers
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 pub struct Location {
     /// The path to the source file in which the relevant source code can be found
     pub uri: Uri,
@@ -35,6 +39,7 @@ impl Location {
 
 /// A [FileLineCol] represents traditional file/line/column information for use in rendering.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 pub struct FileLineCol {
     /// The path to the source file in which the relevant source code can be found
     pub uri: Uri,

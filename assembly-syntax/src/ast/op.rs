@@ -1,7 +1,8 @@
 use core::fmt;
 
+use miden_debug_types::{SourceSpan, Span, Spanned};
+
 use super::{Block, Instruction};
-use crate::{SourceSpan, Span, Spanned};
 
 /// Represents the Miden Assembly instruction set syntax
 ///

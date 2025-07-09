@@ -1,7 +1,7 @@
 use core::ops::Range;
 
 use chiplets::hasher::RATE_LEN;
-use vm_core::utils::range;
+use miden_core::utils::range;
 
 pub mod chiplets;
 pub mod decoder;

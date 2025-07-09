@@ -1,11 +1,11 @@
-use test_utils::{
+use miden_core::WORD_SIZE;
+use miden_utils_testing::{
     EMPTY_WORD, Felt, ONE, StarkField, Word, ZERO,
     crypto::{
         MerkleError, MerkleStore, MerkleTree, Mmr, NodeIndex, init_merkle_leaf, init_merkle_leaves,
     },
     felt_slice_to_ints, hash_elements,
 };
-use vm_core::WORD_SIZE;
 
 // TESTS
 // ================================================================================================
@@ -190,7 +190,7 @@ fn test_mmr_tree_with_one_element() -> Result<(), MerkleError> {
 
             push.1000 push.{pos} exec.mmr::get
 
-            swapw dropw 
+            swapw dropw
         end",
         num_leaves = leaves3.len(),
         pos = 0,

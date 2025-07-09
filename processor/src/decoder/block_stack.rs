@@ -74,12 +74,11 @@ impl BlockStack {
         let block = self.blocks.pop().expect("block stack is empty");
         // if the parent block is a JOIN block (i.e., we just finished executing a child of a JOIN
         // block) and if the first_child_executed hasn't been set to true yet, set it to true
-        if let Some(parent) = self.blocks.last_mut() {
-            if let BlockType::Join(first_child_executed) = parent.block_type {
-                if !first_child_executed {
-                    parent.block_type = BlockType::Join(true);
-                }
-            }
+        if let Some(parent) = self.blocks.last_mut()
+            && let BlockType::Join(first_child_executed) = parent.block_type
+            && !first_child_executed
+        {
+            parent.block_type = BlockType::Join(true);
         }
         block
     }

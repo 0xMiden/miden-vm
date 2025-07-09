@@ -4,8 +4,10 @@ use alloc::{
 };
 use core::{fmt, ops::Range};
 
-use super::{ParseError, SourceSpan};
-use crate::{SourceId, diagnostics::Diagnostic};
+use miden_debug_types::{SourceId, SourceSpan};
+use miden_utils_diagnostics::{Diagnostic, miette};
+
+use super::ParseError;
 
 // LITERAL ERROR KIND
 // ================================================================================================

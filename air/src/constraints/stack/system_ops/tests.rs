@@ -1,5 +1,5 @@
+use miden_core::{Felt, ONE, Operation, ZERO};
 use proptest::prelude::*;
-use vm_core::{Felt, ONE, Operation, ZERO};
 
 use super::{
     super::{CLK_COL_IDX, FMP_COL_IDX, STACK_TRACE_OFFSET},

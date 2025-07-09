@@ -1,7 +1,9 @@
 use alloc::vec::Vec;
 
+use miden_debug_types::{SourceSpan, Spanned};
+
 use super::MetaExpr;
-use crate::{SourceSpan, Spanned, ast::Ident};
+use crate::ast::Ident;
 
 /// Represents the metadata of a named list [crate::ast::Attribute], i.e. `@name(item0, .., itemN)`
 #[derive(Clone)]

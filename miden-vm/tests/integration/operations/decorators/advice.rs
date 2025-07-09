@@ -1,6 +1,6 @@
-use prover::Word;
-use test_utils::{TRUNCATE_STACK_PROC, build_test, crypto::MerkleStore, rand::rand_value};
-use vm_core::Felt;
+use miden_core::Felt;
+use miden_prover::Word;
+use miden_utils_testing::{TRUNCATE_STACK_PROC, build_test, crypto::MerkleStore, rand::rand_value};
 
 // ADVICE INJECTION
 // ================================================================================================
@@ -45,7 +45,7 @@ fn advice_push_u64div_repeat() {
     let source = format!(
         "
     {TRUNCATE_STACK_PROC}
-    
+
     begin
         repeat.7
             adv.push_u64div
@@ -88,13 +88,13 @@ fn advice_push_u64div_repeat() {
 fn advice_push_u64div_local_procedure() {
     // push a/b onto the advice stack and then move these values onto the operand stack.
     let source = "
-    proc.foo 
-        adv.push_u64div 
-        adv_push.4 
-    end 
-    
-    begin 
-        exec.foo 
+    proc.foo
+        adv.push_u64div
+        adv_push.4
+    end
+
+    begin
+        exec.foo
         movupw.2 dropw
     end";
 
@@ -125,14 +125,14 @@ fn advice_push_u64div_local_procedure() {
 #[test]
 fn advice_push_u64div_conditional_execution() {
     let source = "
-    begin 
-        eq 
-        if.true 
-            adv.push_u64div 
-            adv_push.4 
-        else 
-            padw 
-        end 
+    begin
+        eq
+        if.true
+            adv.push_u64div
+            adv_push.4
+        else
+            padw
+        end
 
         movupw.2 dropw
     end";
@@ -252,6 +252,66 @@ fn advice_push_mapval() {
 
     let test = build_test!(source, &stack_inputs, [], MerkleStore::default(), adv_map);
     test.expect_stack(&[15, 14, 13, 12, 11, 5]);
+}
+
+#[test]
+fn advice_has_mapkey() {
+    // --- test adv.has_mapkey: key is present --------------------------------
+    let source: &str = r#"
+    begin
+        # stack: [4, 3, 2, 1]
+
+        # push the flag on the advice stack whether the [1, 2, 3, 4] key is presented in the advice
+        # map
+        adv.has_mapkey
+
+        # move the the flag from the advice stack to the operand stack
+        adv_push.1
+
+        # check that the flag equals 1 -- the key is present in the map
+        dup assert.err="presence flag should be equal 1"
+
+        # truncate the stack
+        movup.5 drop
+    end"#;
+
+    let stack_inputs = [1, 2, 3, 4];
+    let adv_map = [(
+        Word::try_from(stack_inputs).unwrap(),
+        vec![Felt::new(8), Felt::new(7), Felt::new(6), Felt::new(5)],
+    )];
+
+    let test = build_test!(source, &stack_inputs, [], MerkleStore::default(), adv_map);
+    test.expect_stack(&[1, 4, 3, 2, 1]);
+
+    // --- test adv.has_mapkey: key is not present ----------------------------
+    let source: &str = r#"
+    begin
+        # stack: [4, 3, 2, 1]
+
+        # push the flag on the advice stack whether the [1, 2, 3, 4] key is presented in the advice
+        # map
+        adv.has_mapkey
+
+        # move the the flag from the advice stack to the operand stack
+        adv_push.1
+
+        # check that the flag equals 0 -- the key is not present in the map
+        dup assertz.err="presence flag should be equal 0"
+
+        # truncate the stack
+        movup.5 drop
+    end"#;
+
+    let stack_inputs = [1, 2, 3, 4];
+    let map_key = [5u64, 6, 7, 8];
+    let adv_map = [(
+        Word::try_from(map_key).unwrap(),
+        vec![Felt::new(9), Felt::new(10), Felt::new(11), Felt::new(12)],
+    )];
+
+    let test = build_test!(source, &stack_inputs, [], MerkleStore::default(), adv_map);
+    test.expect_stack(&[0, 4, 3, 2, 1]);
 }
 
 #[test]

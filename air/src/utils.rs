@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 use core::ops::Range;
 
-use vm_core::utils::range as create_range;
+use miden_core::utils::range as create_range;
 
 use super::FieldElement;
 
@@ -88,7 +88,7 @@ macro_rules! select_result_range {
 // ================================================================================================
 #[cfg(test)]
 mod tests {
-    use vm_core::utils::range as create_range;
+    use miden_core::utils::range as create_range;
 
     use super::TransitionConstraintRange;
 

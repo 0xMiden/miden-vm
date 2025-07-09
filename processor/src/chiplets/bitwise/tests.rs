@@ -4,8 +4,8 @@ use miden_air::trace::chiplets::bitwise::{
     A_COL_IDX, A_COL_RANGE, B_COL_IDX, B_COL_RANGE, BITWISE_AND, BITWISE_XOR, OP_CYCLE_LEN,
     OUTPUT_COL_IDX, PREV_OUTPUT_COL_IDX, TRACE_WIDTH,
 };
-use test_utils::rand::rand_value;
-use vm_core::ZERO;
+use miden_core::ZERO;
+use miden_utils_testing::rand::rand_value;
 
 use super::{Bitwise, Felt, TraceFragment};
 

@@ -1,10 +1,10 @@
 use alloc::sync::Arc;
 
-use assembly::{Assembler, DefaultSourceManager};
+use miden_assembly::{Assembler, DefaultSourceManager};
+use miden_core::{ONE, Program, assert_matches};
+use miden_processor::{AdviceError, AdviceInputs, ExecutionOptions, MastForest};
+use miden_prover::{StackInputs, Word};
 use miden_vm::DefaultHost;
-use processor::{AdviceError, AdviceInputs, ExecutionOptions, MastForest};
-use prover::{StackInputs, Word};
-use vm_core::{ONE, Program, assert_matches};
 
 #[test]
 fn advice_map_loaded_before_execution() {
@@ -19,9 +19,9 @@ fn advice_map_loaded_before_execution() {
     let program_without_advice_map: Program =
         Assembler::default().assemble_program(source).unwrap();
 
-    // Test `processor::execute` fails if no advice map provided with the program
+    // Test `miden_processor::execute` fails if no advice map provided with the program
     let mut host = DefaultHost::default();
-    match processor::execute(
+    match miden_processor::execute(
         &program_without_advice_map,
         StackInputs::default(),
         AdviceInputs::default(),
@@ -33,7 +33,7 @@ fn advice_map_loaded_before_execution() {
         Err(e) => {
             assert_matches!(
                 e,
-                prover::ExecutionError::AdviceError {
+                miden_prover::ExecutionError::AdviceError {
                     err: AdviceError::MapKeyNotFound { .. },
                     ..
                 }
@@ -41,7 +41,7 @@ fn advice_map_loaded_before_execution() {
         },
     }
 
-    // Test `processor::execute` works if advice map provided with the program
+    // Test `miden_processor::execute` works if advice map provided with the program
     let mast_forest: MastForest = (**program_without_advice_map.mast_forest()).clone();
 
     let key = Word::new([ONE, ONE, ONE, ONE]);
@@ -53,7 +53,7 @@ fn advice_map_loaded_before_execution() {
         Program::new(mast_forest.into(), program_without_advice_map.entrypoint());
 
     let mut host = DefaultHost::default();
-    processor::execute(
+    miden_processor::execute(
         &program_with_advice_map,
         StackInputs::default(),
         AdviceInputs::default(),

@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 use core::ops::Range;
 
 use miden_air::trace::chiplets::hasher::NUM_ROUNDS;
-use vm_core::chiplets::hasher::apply_round;
+use miden_core::chiplets::hasher::apply_round;
 
 use super::{Felt, HasherState, STATE_WIDTH, Selectors, TRACE_WIDTH, TraceFragment, ZERO};
 

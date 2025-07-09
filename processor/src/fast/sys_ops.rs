@@ -1,4 +1,4 @@
-use vm_core::{Felt, mast::MastForest, sys_events::SystemEvent};
+use miden_core::{Felt, mast::MastForest, sys_events::SystemEvent};
 
 use super::{ExecutionError, FastProcessor, ONE};
 use crate::{

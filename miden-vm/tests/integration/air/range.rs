@@ -1,4 +1,4 @@
-use test_utils::{build_op_test, build_test};
+use miden_utils_testing::{build_op_test, build_test};
 
 /// Range checks the result of 1 + 1. This results in 2 range checks, one for each 16-bit limb of
 /// the 32-bit result (2 and 0).

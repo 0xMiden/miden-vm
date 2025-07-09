@@ -2,18 +2,13 @@ use std::{fs, path::Path};
 
 use assert_cmd::prelude::*;
 use predicates::prelude::*;
-extern crate escargot;
 
 fn bin_under_test() -> escargot::CargoRun {
     escargot::CargoBuild::new()
         .bin("miden-vm")
-        .features("executable internal")
+        .features("executable")
         .current_release()
         .current_target()
-        // force verbose output (same as --verbose)
-        .env("CARGO_TERM_VERBOSE", "true")
-        // preserve ANSI colors in output
-        .env("CARGO_TERM_COLOR", "always")
         .run()
         .unwrap_or_else(|err| {
             // Process the error string to add borders.
@@ -63,8 +58,8 @@ fn cli_run() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-use assembly::Library;
-use vm_core::Decorator;
+use miden_assembly::Library;
+use miden_core::Decorator;
 
 #[test]
 fn cli_bundle_debug() {

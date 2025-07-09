@@ -50,7 +50,6 @@ assertion failed: `(left matches right)`
 }
 
 pub mod chiplets;
-pub mod debuginfo;
 pub mod errors;
 
 mod program;
@@ -90,7 +89,7 @@ pub mod crypto {
 
 pub mod mast;
 
-pub use math::{
+pub use winter_math::{
     ExtensionOf, FieldElement, StarkField, ToElements,
     fields::{QuadExtension, f64::BaseElement as Felt},
     polynom,

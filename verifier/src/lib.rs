@@ -7,20 +7,20 @@ extern crate std;
 
 use alloc::vec;
 
-use air::{HashFunction, ProcessorAir, ProvingOptions, PublicInputs};
-use vm_core::crypto::{
+use miden_air::{HashFunction, ProcessorAir, ProvingOptions, PublicInputs};
+use miden_core::crypto::{
     hash::{Blake3_192, Blake3_256, Rpo256, Rpx256},
     random::{RpoRandomCoin, RpxRandomCoin, WinterRandomCoin},
 };
 // EXPORTS
 // ================================================================================================
-pub use vm_core::{Kernel, ProgramInfo, StackInputs, StackOutputs, Word};
+pub use miden_core::{Kernel, ProgramInfo, StackInputs, StackOutputs, Word};
 pub use winter_verifier::{AcceptableOptions, VerifierError};
 use winter_verifier::{crypto::MerkleTree, verify as verify_proof};
 pub mod math {
-    pub use vm_core::{Felt, FieldElement, StarkField};
+    pub use miden_core::{Felt, FieldElement, StarkField};
 }
-pub use air::ExecutionProof;
+pub use miden_air::ExecutionProof;
 
 // VERIFIER
 // ================================================================================================

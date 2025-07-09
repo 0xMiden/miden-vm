@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
+use miden_processor::{AdviceInputs, MemoryAddress};
 use miden_vm::{DefaultHost, Program, StackInputs, VmState, VmStateIterator};
-use processor::{AdviceInputs, MemoryAddress};
 
 use super::DebugCommand;
 use crate::utils::print_mem_address;
@@ -12,7 +12,7 @@ pub struct DebugExecutor {
     vm_state: VmState,
     // TODO(pauls): Use this to render source-level diagnostics when program errors are encountered
     #[allow(unused)]
-    source_manager: Arc<dyn assembly::SourceManager>,
+    source_manager: Arc<dyn miden_assembly::SourceManager>,
 }
 
 impl DebugExecutor {
@@ -26,9 +26,9 @@ impl DebugExecutor {
         program: Program,
         stack_inputs: StackInputs,
         advice_inputs: AdviceInputs,
-        source_manager: Arc<dyn assembly::SourceManager>,
+        source_manager: Arc<dyn miden_assembly::SourceManager>,
     ) -> Result<Self, String> {
-        let mut vm_state_iter = processor::execute_iter(
+        let mut vm_state_iter = miden_processor::execute_iter(
             &program,
             stack_inputs,
             advice_inputs,

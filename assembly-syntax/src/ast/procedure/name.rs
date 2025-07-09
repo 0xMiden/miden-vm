@@ -11,11 +11,12 @@ use core::{
 use miden_core::utils::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
+use miden_debug_types::{SourceSpan, Span, Spanned};
+use miden_utils_diagnostics::{IntoDiagnostic, Report, miette};
 
 use crate::{
-    LibraryNamespace, LibraryPath, SourceSpan, Span, Spanned,
+    LibraryNamespace, LibraryPath,
     ast::{CaseKindError, Ident, IdentError},
-    diagnostics::{IntoDiagnostic, Report},
 };
 
 // QUALIFIED PROCEDURE NAME
@@ -67,6 +68,22 @@ impl FromStr for QualifiedProcedureName {
                 Ok(Self::new(path, name))
             },
         }
+    }
+}
+
+impl TryFrom<&str> for QualifiedProcedureName {
+    type Error = Report;
+
+    fn try_from(name: &str) -> Result<Self, Self::Error> {
+        Self::from_str(name)
+    }
+}
+
+impl TryFrom<String> for QualifiedProcedureName {
+    type Error = Report;
+
+    fn try_from(name: String) -> Result<Self, Self::Error> {
+        Self::from_str(&name)
     }
 }
 

@@ -61,10 +61,10 @@ impl AdviceMap {
     pub fn merge_advice_map(&mut self, other: &AdviceMap) -> Result<(), (MapEntry, Vec<Felt>)> {
         // Check if any values are already present and different from those we are merging.
         for (key, value) in other.iter() {
-            if let Some(existing) = self.get(key) {
-                if existing != value {
-                    return Err(((*key, existing.to_vec()), value.to_vec()));
-                }
+            if let Some(existing) = self.get(key)
+                && existing != value
+            {
+                return Err(((*key, existing.to_vec()), value.to_vec()));
             }
         }
 

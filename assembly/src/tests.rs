@@ -2,9 +2,11 @@ use alloc::{collections::BTreeSet, string::ToString, vec::Vec};
 use core::str::FromStr;
 use std::sync::{Arc, LazyLock};
 
+use miden_assembly_syntax::diagnostics::WrapErr;
 use miden_core::{
     Operation, Program, Word, assert_matches,
     mast::{MastNode, MastNodeId, error_code_from_msg},
+    sys_events::{EVENT_HAS_MAP_KEY, EVENT_MAP_VALUE_TO_STACK},
     utils::{Deserializable, Serializable},
 };
 use miden_mast_package::{MastArtifact, MastForest, Package, PackageManifest};
@@ -471,6 +473,57 @@ fn get_module_by_path() -> Result<(), Report> {
 
     let (_, foo_proc) = foo_module_info.procedures().next().unwrap();
     assert_eq!(foo_proc.name, ProcedureName::new("foo").unwrap());
+
+    Ok(())
+}
+
+#[test]
+fn get_proc_digest_by_name() -> Result<(), Report> {
+    let context = TestContext::new();
+
+    let testing_module_source = "
+        export.foo
+            push.1.2 add drop
+        end
+
+        export.bar
+            push.5.6 sub drop
+        end
+    ";
+    let testing_module = parse_module!(&context, "test::names", testing_module_source);
+
+    // create the bundle with locations
+    let library = Assembler::new(context.source_manager())
+        .assemble_library([testing_module])
+        .context("failed to assemble library from testing module")?;
+
+    // get the vector of library procedure digests
+    let library_procedure_digests = library
+        .exports()
+        .map(|proc_name| library.mast_forest()[library.get_export_node_id(proc_name)].digest())
+        .collect::<Vec<Word>>();
+
+    // valid procedure names
+    assert!(
+        library_procedure_digests.contains(
+            &library
+                .get_procedure_root_by_name("test::names::foo")
+                .expect("procedure with name 'foo' must exist in the test library")
+        )
+    );
+    assert!(
+        library_procedure_digests.contains(
+            &library
+                .get_procedure_root_by_name("test::names::bar")
+                .expect("procedure with name 'bar' must exist in the test library")
+        )
+    );
+
+    // invalid procedure name
+    assert_eq!(None, library.get_procedure_root_by_name("test::names::baz"));
+
+    // invalid namespace
+    assert_eq!(None, library.get_procedure_root_by_name("invalid::namespace::foo"));
 
     Ok(())
 }
@@ -2985,10 +3038,12 @@ begin push.A adv.push_mapval assert end"
     );
 
     let program = context.assemble(source)?;
-    let expected = "\
+    let expected = format!(
+        "\
 begin
-    basic_block push(2) push(2) push(2) push(2) emit(574478993) assert(0) end
-end";
+    basic_block push(2) push(2) push(2) push(2) emit({EVENT_MAP_VALUE_TO_STACK}) assert(0) end
+end"
+    );
     assert_str_eq!(format!("{program}"), expected);
     Ok(())
 }
@@ -3004,17 +3059,40 @@ begin push.A adv.push_mapval assert end"
     );
 
     let program = context.assemble(source)?;
-    let expected = "\
+    let expected = format!(
+        "\
 begin
     basic_block
         push(3846236276142386450)
         push(5034591595140902852)
         push(4565868838168209231)
         push(6740431856120851931)
-        emit(574478993)
+        emit({EVENT_MAP_VALUE_TO_STACK})
         assert(0)
     end
-end";
+end"
+    );
+    assert_str_eq!(format!("{program}"), expected);
+    Ok(())
+}
+
+#[test]
+fn test_adv_has_map_key() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        "\
+adv_map.A(0x0200000000000000020000000000000002000000000000000200000000000000)=[0x01]
+begin adv.has_mapkey assert end"
+    );
+
+    let program = context.assemble(source)?;
+    let expected = format!(
+        "\
+begin
+    basic_block emit({EVENT_HAS_MAP_KEY}) assert(0) end
+end"
+    );
     assert_str_eq!(format!("{program}"), expected);
     Ok(())
 }

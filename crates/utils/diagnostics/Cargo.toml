@@ -1,0 +1,29 @@
+[package]
+name = "miden-utils-diagnostics"
+version = "0.17.0"
+description = "Diagnostic infrastructure used in the Miden assembler and VM"
+documentation = "https://docs.rs/miden-utils-diagnostics/0.17.0"
+readme = "README.md"
+categories = ["compilers", "no-std"]
+keywords = ["diagnostic", "error", "span"]
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+[features]
+default = ["std"]
+std = ["miette/fancy", "miette/std", "miden-crypto/std", "miden-debug-types/std"]
+
+[dependencies]
+miden-debug-types.workspace = true
+miette = { package = "miden-miette", version = "8.0", default-features = false, features = [
+    "fancy-no-syscall",
+    "derive",
+] }
+miden-crypto.workspace = true
+paste = "1.0"
+tracing.workspace = true

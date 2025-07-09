@@ -1,6 +1,6 @@
 use alloc::{borrow::Borrow, string::ToString, sync::Arc, vec::Vec};
 
-use miden_assembly_syntax::{Span, ast::Instruction, diagnostics::Report};
+use miden_assembly_syntax::{ast::Instruction, debuginfo::Span, diagnostics::Report};
 use miden_core::{
     AssemblyOp, Decorator, DecoratorList, Felt, Operation,
     mast::{DecoratorId, MastNodeId},

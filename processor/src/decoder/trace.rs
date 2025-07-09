@@ -3,7 +3,7 @@ use core::ops::Range;
 
 #[cfg(test)]
 use miden_air::trace::decoder::NUM_USER_OP_HELPERS;
-use vm_core::utils::new_array_vec;
+use miden_core::utils::new_array_vec;
 
 use super::{
     super::utils::get_trace_len, DIGEST_LEN, Felt, MIN_TRACE_LEN, NUM_HASHER_COLUMNS,

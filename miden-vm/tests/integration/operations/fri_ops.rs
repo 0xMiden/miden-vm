@@ -1,4 +1,4 @@
-use test_utils::{
+use miden_utils_testing::{
     Felt, FieldElement, TRUNCATE_STACK_PROC, build_test, push_inputs, rand::rand_array,
 };
 
@@ -23,7 +23,7 @@ fn fri_ext2fold4() {
     let source = format!(
         "
         {TRUNCATE_STACK_PROC}
-        
+
         begin
             {inputs}
             fri_ext2fold4

@@ -1,4 +1,4 @@
-use test_utils::test_case;
+use miden_utils_testing::test_case;
 
 // Wrapper types introduced for parameterized testing
 struct FieldElement([u32; 8]);

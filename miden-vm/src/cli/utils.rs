@@ -1,16 +1,16 @@
 use std::{fs, path::Path, sync::Arc};
 
-use assembly::{
+use miden_assembly::{
     SourceManager,
     diagnostics::{IntoDiagnostic, Report, WrapErr},
 };
-use package::{MastArtifact, Package};
-use prover::utils::Deserializable;
+use miden_mast_package::{MastArtifact, Package};
+use miden_prover::utils::Deserializable;
 
 use crate::cli::data::{Debug, Libraries, ProgramFile};
 
 /// Returns a `Program` type from a `.masp` package file.
-pub fn get_masp_program(path: &Path) -> Result<vm_core::Program, Report> {
+pub fn get_masp_program(path: &Path) -> Result<miden_core::Program, Report> {
     let bytes = fs::read(path).into_diagnostic().wrap_err("Failed to read package file")?;
     // Use `read_from_bytes` provided by the Deserializable trait.
     let package = Package::read_from_bytes(&bytes)
@@ -30,7 +30,7 @@ pub fn get_masm_program(
     path: &Path,
     libraries: &Libraries,
     debug_on: bool,
-) -> Result<(vm_core::Program, Arc<dyn SourceManager>), Report> {
+) -> Result<(miden_core::Program, Arc<dyn SourceManager>), Report> {
     let debug_mode = if debug_on { Debug::On } else { Debug::Off };
     let program_file = ProgramFile::read(path)?;
     let program = program_file.compile(debug_mode, &libraries.libraries)?;

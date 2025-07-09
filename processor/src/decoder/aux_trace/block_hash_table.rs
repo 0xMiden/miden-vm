@@ -1,5 +1,5 @@
 use miden_air::RowIndex;
-use vm_core::{
+use miden_core::{
     OPCODE_CALL, OPCODE_DYN, OPCODE_DYNCALL, OPCODE_END, OPCODE_HALT, OPCODE_JOIN, OPCODE_LOOP,
     OPCODE_REPEAT, OPCODE_SPLIT, OPCODE_SYSCALL, Word, ZERO,
 };

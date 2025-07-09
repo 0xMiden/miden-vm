@@ -9,11 +9,12 @@ extern crate std;
 use alloc::sync::Arc;
 use core::marker::PhantomData;
 
-use air::{AuxRandElements, PartitionOptions, ProcessorAir, PublicInputs};
+use miden_air::{AuxRandElements, PartitionOptions, ProcessorAir, PublicInputs};
+use miden_debug_types::SourceManager;
 #[cfg(all(feature = "metal", target_arch = "aarch64", target_os = "macos"))]
 use miden_gpu::HashFn;
-use processor::{
-    ExecutionTrace, Program, SourceManager,
+use miden_processor::{
+    ExecutionTrace, Program,
     crypto::{
         Blake3_192, Blake3_256, ElementHasher, RandomCoin, Rpo256, RpoRandomCoin, Rpx256,
         RpxRandomCoin, WinterRandomCoin,
@@ -35,8 +36,10 @@ mod gpu;
 // EXPORTS
 // ================================================================================================
 
-pub use air::{DeserializationError, ExecutionProof, FieldExtension, HashFunction, ProvingOptions};
-pub use processor::{
+pub use miden_air::{
+    DeserializationError, ExecutionProof, FieldExtension, HashFunction, ProvingOptions,
+};
+pub use miden_processor::{
     AdviceInputs, AsyncHost, BaseHost, ExecutionError, InputError, StackInputs, StackOutputs,
     SyncHost, Word, crypto, math, utils,
 };
@@ -68,7 +71,7 @@ pub fn prove(
     // execute the program to create an execution trace
     #[cfg(feature = "std")]
     let now = Instant::now();
-    let trace = processor::execute(
+    let trace = miden_processor::execute(
         program,
         stack_inputs.clone(),
         advice_inputs,

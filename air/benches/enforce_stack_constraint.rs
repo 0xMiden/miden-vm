@@ -9,7 +9,7 @@ use miden_air::{
     },
     trace::STACK_TRACE_OFFSET,
 };
-use vm_core::{Operation, ZERO};
+use miden_core::{Operation, ZERO};
 
 fn enforce_stack_constraint(c: &mut Criterion) {
     let mut group = c.benchmark_group("enforce_stack_constraint");

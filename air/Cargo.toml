@@ -1,8 +1,8 @@
 [package]
 name = "miden-air"
-version = "0.15.0"
+version = "0.17.0"
 description = "Algebraic intermediate representation of Miden VM processor"
-documentation = "https://docs.rs/miden-air/0.15.0"
+documentation = "https://docs.rs/miden-air/0.17.0"
 readme = "README.md"
 categories = ["cryptography", "no-std"]
 keywords = ["air", "arithmetization", "crypto", "miden"]
@@ -27,16 +27,16 @@ harness = false
 
 [features]
 default = ["std"]
-std = ["vm-core/std", "winter-air/std", "thiserror/std"]
+std = ["miden-core/std", "winter-air/std", "thiserror/std"]
 testing = []
 
 [dependencies]
-thiserror = { workspace = true }
-vm-core = { package = "miden-core", path = "../core", version = "0.15", default-features = false }
-winter-air = { package = "winter-air", version = "0.13", default-features = false }
-winter-prover = { package = "winter-prover", version = "0.13", default-features = false }
+thiserror.workspace = true
+miden-core.workspace = true
+winter-air.workspace = true
+winter-prover.workspace = true
 
 [dev-dependencies]
 criterion = "0.6"
-proptest = "1.6"
-rand-utils = { package = "winter-rand-utils", version = "0.13" }
+proptest.workspace = true
+winter-rand-utils.workspace = true

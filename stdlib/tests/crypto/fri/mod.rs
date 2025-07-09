@@ -1,12 +1,12 @@
 use alloc::collections::BTreeMap;
 
-use test_utils::{Felt, StarkField, crypto::MerkleStore};
+use miden_utils_testing::{Felt, StarkField, crypto::MerkleStore};
 
 mod channel;
 
 pub(crate) mod verifier_fri_e2f4;
+use miden_core::Word;
 pub use verifier_fri_e2f4::*;
-use vm_core::Word;
 
 #[test]
 fn fri_fold4_ext2_remainder64() {
