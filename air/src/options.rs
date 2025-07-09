@@ -244,6 +244,12 @@ impl ExecutionOptions {
                     max_cycles_limit: Self::MAX_CYCLES,
                 });
             }
+            if max_cycles < MIN_TRACE_LEN as u32 {
+                return Err(ExecutionOptionsError::MaxCycleNumTooSmall {
+                    max_cycles,
+                    min_cycles_limit: MIN_TRACE_LEN,
+                });
+            }
             max_cycles
         } else {
             Self::MAX_CYCLES
