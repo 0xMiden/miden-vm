@@ -222,7 +222,7 @@ impl ExecutionOptions {
     // --------------------------------------------------------------------------------------------
 
     /// The maximum number of VM cycles a transaction is allowed to take.
-    pub const MAX_TX_EXECUTION_CYCLES: u32 = 1 << 30;
+    const MAX_TX_EXECUTION_CYCLES: u32 = 1 << 30;
 
     // CONSTRUCTOR
     // --------------------------------------------------------------------------------------------
