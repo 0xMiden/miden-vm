@@ -237,19 +237,18 @@ impl ExecutionOptions {
         enable_debugging: bool,
     ) -> Result<Self, ExecutionOptionsError> {
         // Validate max_cycles.
-        let max_cycles = max_cycles.unwrap_or(Self::MAX_CYCLES);
-        if max_cycles > Self::MAX_CYCLES {
-            return Err(ExecutionOptionsError::MaxCycleNumTooBig {
-                max_cycles,
-                max_cycles_limit: Self::MAX_CYCLES,
-            });
-        }
-        if max_cycles < MIN_TRACE_LEN as u32 {
-            return Err(ExecutionOptionsError::MaxCycleNumTooSmall {
-                max_cycles,
-                min_cycles_limit: MIN_TRACE_LEN,
-            });
-        }
+        let max_cycles = if let Some(max_cycles) = max_cycles {
+            if max_cycles > Self::MAX_CYCLES {
+                return Err(ExecutionOptionsError::MaxCycleNumTooBig {
+                    max_cycles,
+                    max_cycles_limit: Self::MAX_CYCLES,
+                });
+            } else {
+                max_cycles
+            }
+        } else {
+            Self::MAX_CYCLES
+        };
         if max_cycles < expected_cycles {
             return Err(ExecutionOptionsError::ExpectedCyclesTooBig {
                 max_cycles,
