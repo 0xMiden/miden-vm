@@ -141,6 +141,11 @@ impl AdviceProvider {
     // ADVICE MAP
     // --------------------------------------------------------------------------------------------
 
+    /// Returns true if the key has a corresponding value in the map.
+    pub fn contains_map_key(&self, key: &Word) -> bool {
+        self.map.contains_key(key)
+    }
+
     /// Returns a reference to the value(s) associated with the specified key in the advice map.
     ///
     /// # Details

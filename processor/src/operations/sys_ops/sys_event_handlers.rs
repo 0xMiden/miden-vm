@@ -7,7 +7,6 @@ use miden_core::{
         merkle::{EmptySubtreeRoots, SMT_DEPTH, Smt},
     },
     sys_events::SystemEvent,
-    utils::collections::KvMap,
 };
 
 use crate::{ExecutionError, MemoryError, ProcessState, errors::ErrorContext};
@@ -303,7 +302,7 @@ fn copy_map_value_to_adv_stack(
 pub fn push_key_presence_flag(process: &mut ProcessState) -> Result<(), ExecutionError> {
     let map_key = process.get_stack_word(0);
 
-    let presence_flag = process.advice_provider().map.contains_key(&map_key);
+    let presence_flag = process.advice_provider().contains_map_key(&map_key);
     process.advice_provider_mut().push_stack(Felt::from(presence_flag));
 
     Ok(())

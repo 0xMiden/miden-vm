@@ -30,6 +30,7 @@ use miden_core::{
         OpBatch, SplitNode,
     },
 };
+use miden_debug_types::{DefaultSourceManager, SourceManager, SourceSpan};
 pub use winter_prover::matrix::ColMatrix;
 
 pub mod fast;
@@ -74,7 +75,6 @@ mod tests;
 
 mod debug;
 pub use debug::{AsmOpInfo, VmState, VmStateIterator};
-
 // RE-EXPORTS
 // ================================================================================================
 
