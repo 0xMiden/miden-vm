@@ -209,7 +209,7 @@ pub struct ExecutionOptions {
 impl Default for ExecutionOptions {
     fn default() -> Self {
         ExecutionOptions {
-            max_cycles: u32::MAX,
+            max_cycles: Self::MAX_TX_EXECUTION_CYCLES,
             expected_cycles: MIN_TRACE_LEN as u32,
             enable_tracing: false,
             enable_debugging: false,
@@ -218,6 +218,12 @@ impl Default for ExecutionOptions {
 }
 
 impl ExecutionOptions {
+    // CONSTANTS
+    // --------------------------------------------------------------------------------------------
+
+    /// The maximum number of VM cycles a transaction is allowed to take.
+    pub const MAX_TX_EXECUTION_CYCLES: u32 = 1 << 30;
+
     // CONSTRUCTOR
     // --------------------------------------------------------------------------------------------
 
