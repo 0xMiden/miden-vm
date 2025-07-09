@@ -209,7 +209,7 @@ pub struct ExecutionOptions {
 impl Default for ExecutionOptions {
     fn default() -> Self {
         ExecutionOptions {
-            max_cycles: Self::MAX_TX_EXECUTION_CYCLES,
+            max_cycles: Self::MAX_CYCLES,
             expected_cycles: MIN_TRACE_LEN as u32,
             enable_tracing: false,
             enable_debugging: false,
@@ -222,21 +222,21 @@ impl ExecutionOptions {
     // --------------------------------------------------------------------------------------------
 
     /// The maximum number of VM cycles a transaction is allowed to take.
-    const MAX_TX_EXECUTION_CYCLES: u32 = 1 << 30;
+    const MAX_CYCLES: u32 = 1 << 29;
 
     // CONSTRUCTOR
     // --------------------------------------------------------------------------------------------
 
     /// Creates a new instance of [ExecutionOptions] from the specified parameters.
     ///
-    /// If the `max_cycles` is `None` the maximum number of cycles will be set to `u32::MAX`
+    /// If the `max_cycles` is `None` the maximum number of cycles will be set to 2^29.
     pub fn new(
         max_cycles: Option<u32>,
         expected_cycles: u32,
         enable_tracing: bool,
         enable_debugging: bool,
     ) -> Result<Self, ExecutionOptionsError> {
-        let max_cycles = max_cycles.unwrap_or(u32::MAX);
+        let max_cycles = max_cycles.unwrap_or(Self::MAX_CYCLES);
         if max_cycles < MIN_TRACE_LEN as u32 {
             return Err(ExecutionOptionsError::MaxCycleNumTooSmall(expected_cycles));
         }
