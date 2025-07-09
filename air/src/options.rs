@@ -4,6 +4,12 @@ use super::{
     ExecutionOptionsError, FieldExtension, HashFunction, WinterProofOptions, trace::MIN_TRACE_LEN,
 };
 
+// CONSTANTS
+// --------------------------------------------------------------------------------------------
+
+/// The maximum number of VM cycles a program is allowed to take.
+pub const MAX_CYCLES: u32 = 1 << 29;
+
 // PROVING OPTIONS
 // ================================================================================================
 
@@ -209,7 +215,7 @@ pub struct ExecutionOptions {
 impl Default for ExecutionOptions {
     fn default() -> Self {
         ExecutionOptions {
-            max_cycles: Self::MAX_CYCLES,
+            max_cycles: MAX_CYCLES,
             expected_cycles: MIN_TRACE_LEN as u32,
             enable_tracing: false,
             enable_debugging: false,
@@ -218,12 +224,6 @@ impl Default for ExecutionOptions {
 }
 
 impl ExecutionOptions {
-    // CONSTANTS
-    // --------------------------------------------------------------------------------------------
-
-    /// The maximum number of VM cycles a program is allowed to take.
-    pub const MAX_CYCLES: u32 = 1 << 29;
-
     // CONSTRUCTOR
     // --------------------------------------------------------------------------------------------
 
@@ -238,10 +238,10 @@ impl ExecutionOptions {
     ) -> Result<Self, ExecutionOptionsError> {
         // Validate max cycles.
         let max_cycles = if let Some(max_cycles) = max_cycles {
-            if max_cycles > Self::MAX_CYCLES {
+            if max_cycles > MAX_CYCLES {
                 return Err(ExecutionOptionsError::MaxCycleNumTooBig {
                     max_cycles,
-                    max_cycles_limit: Self::MAX_CYCLES,
+                    max_cycles_limit: MAX_CYCLES,
                 });
             }
             if max_cycles < MIN_TRACE_LEN as u32 {
@@ -252,7 +252,7 @@ impl ExecutionOptions {
             }
             max_cycles
         } else {
-            Self::MAX_CYCLES
+            MAX_CYCLES
         };
         // Validate expected cycles.
         if max_cycles < expected_cycles {
