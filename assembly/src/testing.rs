@@ -27,7 +27,7 @@ use crate::diagnostics::reporting::set_panic_hook;
 ///
 /// Some of the assertion macros defined above require a [TestContext], so be aware of that.
 pub struct TestContext {
-    source_manager: Arc<dyn SourceManager + Send + Sync>,
+    source_manager: Arc<dyn SourceManager>,
     assembler: Assembler,
 }
 
@@ -71,7 +71,7 @@ impl TestContext {
     }
 
     #[inline(always)]
-    pub fn source_manager(&self) -> Arc<dyn SourceManager + Send + Sync> {
+    pub fn source_manager(&self) -> Arc<dyn SourceManager> {
         self.source_manager.clone()
     }
 

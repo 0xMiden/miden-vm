@@ -28,7 +28,7 @@ pub use self::{
         ByteIndex, ByteOffset, ColumnIndex, ColumnNumber, LineIndex, LineNumber, SourceContent,
         SourceContentUpdateError, SourceFile, SourceFileRef, SourceLanguage,
     },
-    source_manager::{DefaultSourceManager, SourceId, SourceManager},
+    source_manager::{DefaultSourceManager, SourceId, SourceManager, SourceManagerSync},
     span::{SourceSpan, Span, Spanned},
 };
 

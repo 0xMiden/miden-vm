@@ -254,6 +254,16 @@ pub trait SourceManagerExt: SourceManager {
 #[cfg(feature = "std")]
 impl<T: ?Sized + SourceManager> SourceManagerExt for T {}
 
+/// [SourceManagerSync] is a marker trait for [SourceManager] implementations that are also Send +
+/// Sync, and is automatically implemented for any [SourceManager] that meets those requirements.
+///
+/// [SourceManager] is a supertrait of [SourceManagerSync], so you may use instances of the
+/// [SourceManagerSync] where the [SourceManager] is required, either implicitly or via explicit
+/// downcasting, e.g. `Arc<dyn SourceManagerSync> as Arc<dyn SourceManager>`.
+pub trait SourceManagerSync: SourceManager + Send + Sync {}
+
+impl<T: ?Sized + SourceManager + Send + Sync> SourceManagerSync for T {}
+
 // DEFAULT SOURCE MANAGER
 // ================================================================================================
 

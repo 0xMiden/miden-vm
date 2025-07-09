@@ -1,6 +1,6 @@
-use std::{collections::BTreeSet, path::PathBuf};
+use std::{collections::BTreeSet, path::PathBuf, sync::Arc};
 
-use miden_assembly::{Assembler, Library};
+use miden_assembly::{Assembler, DefaultSourceManager, Library};
 use miden_processor::{AdviceInputs, ContextId, MemoryAddress};
 use miden_stdlib::StdLibrary;
 use miden_vm::{DefaultHost, StackInputs, math::Felt};
@@ -311,7 +311,7 @@ fn execute(
         assembler.link_dynamic_library(library).map_err(|err| format!("{err}"))?;
     }
 
-    let source_manager = assembler.source_manager();
+    let source_manager = Arc::new(DefaultSourceManager::default());
     let program = assembler.assemble_program(program).map_err(|err| format!("{err}"))?;
 
     let stack_inputs = StackInputs::default();
