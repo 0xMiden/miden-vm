@@ -221,7 +221,7 @@ impl ExecutionOptions {
     // CONSTANTS
     // --------------------------------------------------------------------------------------------
 
-    /// The maximum number of VM cycles a transaction is allowed to take.
+    /// The maximum number of VM cycles a program is allowed to take.
     pub const MAX_CYCLES: u32 = 1 << 29;
 
     // CONSTRUCTOR
@@ -244,16 +244,16 @@ impl ExecutionOptions {
                     max_cycles_limit: Self::MAX_CYCLES,
                 });
             }
-            if max_cycles < expected_cycles {
-                return Err(ExecutionOptionsError::ExpectedCyclesTooBig {
-                    max_cycles,
-                    expected_cycles,
-                });
-            }
             max_cycles
         } else {
             Self::MAX_CYCLES
         };
+        if max_cycles < expected_cycles {
+            return Err(ExecutionOptionsError::ExpectedCyclesTooBig {
+                max_cycles,
+                expected_cycles,
+            });
+        }
         // Round up the expected number of cycles to the next power of two. If it is smaller than
         // MIN_TRACE_LEN -- pad expected number to it.
         let expected_cycles = expected_cycles.next_power_of_two().max(MIN_TRACE_LEN as u32);
