@@ -236,7 +236,7 @@ impl ExecutionOptions {
         enable_tracing: bool,
         enable_debugging: bool,
     ) -> Result<Self, ExecutionOptionsError> {
-        // Validate max_cycles.
+        // Validate max cycles.
         let max_cycles = if let Some(max_cycles) = max_cycles {
             if max_cycles > Self::MAX_CYCLES {
                 return Err(ExecutionOptionsError::MaxCycleNumTooBig {
@@ -254,6 +254,7 @@ impl ExecutionOptions {
         } else {
             Self::MAX_CYCLES
         };
+        // Validate expected cycles.
         if max_cycles < expected_cycles {
             return Err(ExecutionOptionsError::ExpectedCyclesTooBig {
                 max_cycles,
