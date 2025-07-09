@@ -1,7 +1,7 @@
 use std::{path::PathBuf, sync::Arc};
 
-use assembly::{DefaultSourceManager, SourceManager, diagnostics::Report};
 use clap::Parser;
+use miden_assembly::{DefaultSourceManager, SourceManager, diagnostics::Report};
 use miden_vm::internal::InputFile;
 use rustyline::{Config, DefaultEditor, EditMode, error::ReadlineError};
 

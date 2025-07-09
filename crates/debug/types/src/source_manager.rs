@@ -9,6 +9,8 @@ use super::*;
 /// A [SourceId] represents the index/identifier associated with a unique source file in a
 /// [SourceManager] implementation.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
 pub struct SourceId(u32);
 
 impl Default for SourceId {
@@ -109,10 +111,10 @@ pub trait SourceManager: Debug {
     ///
     /// The returned source file is guaranteed to be owned by this manager.
     fn copy_into(&self, file: &SourceFile) -> Arc<SourceFile> {
-        if let Ok(found) = self.get(file.id()) {
-            if core::ptr::addr_eq(Arc::as_ptr(&found), file) {
-                return found;
-            }
+        if let Ok(found) = self.get(file.id())
+            && core::ptr::addr_eq(Arc::as_ptr(&found), file)
+        {
+            return found;
         }
         self.load_from_raw_parts(file.uri().clone(), file.content().clone())
     }
@@ -255,7 +257,7 @@ impl<T: ?Sized + SourceManager> SourceManagerExt for T {}
 // DEFAULT SOURCE MANAGER
 // ================================================================================================
 
-use crate::utils::sync::RwLock;
+use miden_utils_sync::RwLock;
 
 #[derive(Debug, Default)]
 pub struct DefaultSourceManager(RwLock<DefaultSourceManagerImpl>);

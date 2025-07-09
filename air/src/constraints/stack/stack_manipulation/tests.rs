@@ -1,5 +1,5 @@
+use miden_core::{Felt, ONE, Operation, ZERO};
 use proptest::prelude::*;
-use vm_core::{Felt, ONE, Operation, ZERO};
 
 use super::{super::STACK_TRACE_OFFSET, EvaluationFrame, NUM_CONSTRAINTS, enforce_constraints};
 use crate::stack::op_flags::{OpFlags, generate_evaluation_frame};

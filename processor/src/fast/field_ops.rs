@@ -1,4 +1,4 @@
-use vm_core::{Felt, FieldElement, ONE, ZERO};
+use miden_core::{Felt, FieldElement, ONE, ZERO};
 
 use super::{ExecutionError, FastProcessor};
 use crate::{ErrorContext, operations::utils::assert_binary};

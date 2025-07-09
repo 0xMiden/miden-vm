@@ -1,8 +1,8 @@
 use std::time::Duration;
 
-use assembly::{Library, utils::Deserializable};
 use criterion::{Criterion, criterion_group, criterion_main};
-use stdlib::StdLibrary;
+use miden_assembly::{Library, utils::Deserializable};
+use miden_stdlib::StdLibrary;
 
 fn deserialize_std_lib(c: &mut Criterion) {
     let mut group = c.benchmark_group("deserialize_std_lib");

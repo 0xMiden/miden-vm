@@ -4,10 +4,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
-use serde_derive::Deserialize;
+use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
+use miden_core::{Felt, WORD_SIZE};
+use serde::Deserialize;
 pub use tracing::{Level, event, instrument};
-use vm_core::{Felt, WORD_SIZE};
 
 use crate::{
     AdviceInputs, StackInputs, Word, ZERO,

@@ -1,6 +1,6 @@
 use alloc::{sync::Arc, vec::Vec};
 
-use vm_core::{
+use miden_core::{
     AdviceMap, Felt, Word,
     crypto::merkle::{InnerNodeInfo, MerkleStore},
     errors::InputError,

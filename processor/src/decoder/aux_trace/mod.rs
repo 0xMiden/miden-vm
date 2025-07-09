@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use miden_air::trace::main_trace::MainTrace;
-use vm_core::FieldElement;
+use miden_core::FieldElement;
 
 use super::{Felt, ONE, ZERO};
 use crate::trace::AuxColumnBuilder;

@@ -9,10 +9,10 @@ help:
 BACKTRACE=RUST_BACKTRACE=1
 WARNINGS=RUSTDOCFLAGS="-D warnings"
 DEBUG_ASSERTIONS=RUSTFLAGS="-C debug-assertions"
-FEATURES_CONCURRENT_EXEC=--features concurrent,executable,diagnostics
+FEATURES_CONCURRENT_EXEC=--features concurrent,executable
 FEATURES_LOG_TREE=--features concurrent,executable,tracing-forest
 FEATURES_METAL_EXEC=--features concurrent,executable,metal,tracing-forest
-ALL_FEATURES_BUT_ASYNC=--features concurrent,executable,metal,testing,with-debug-info,internal,diagnostics
+ALL_FEATURES_BUT_ASYNC=--features concurrent,executable,metal,testing,with-debug-info,internal
 
 # -- linting --------------------------------------------------------------------------------------
 

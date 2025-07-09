@@ -1,7 +1,7 @@
 use alloc::sync::Arc;
 use core::future::Future;
 
-use vm_core::{DebugOptions, Felt, Word, mast::MastForest};
+use miden_core::{DebugOptions, Felt, Word, mast::MastForest};
 
 use crate::{ExecutionError, ProcessState, errors::ErrorContext};
 

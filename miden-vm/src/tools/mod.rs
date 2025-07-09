@@ -1,16 +1,16 @@
 use core::fmt;
 use std::{path::PathBuf, sync::Arc};
 
-use assembly::{
+use clap::Parser;
+use miden_assembly::{
     DefaultSourceManager, SourceManager,
     diagnostics::{Report, WrapErr},
 };
-use clap::Parser;
+use miden_core::Program;
+use miden_processor::{AsmOpInfo, TraceLenSummary};
+use miden_prover::AdviceInputs;
+use miden_stdlib::StdLibrary;
 use miden_vm::{DefaultHost, Operation, StackInputs, SyncHost, internal::InputFile};
-use processor::{AsmOpInfo, TraceLenSummary};
-use prover::AdviceInputs;
-use stdlib::StdLibrary;
-use vm_core::Program;
 
 use super::cli::data::Libraries;
 use crate::cli::utils::{get_masm_program, get_masp_program};
@@ -250,8 +250,13 @@ where
 {
     let mut execution_details = ExecutionDetails::default();
 
-    let vm_state_iterator =
-        processor::execute_iter(program, stack_inputs, advice_inputs, &mut host, source_manager);
+    let vm_state_iterator = miden_processor::execute_iter(
+        program,
+        stack_inputs,
+        advice_inputs,
+        &mut host,
+        source_manager,
+    );
     execution_details.set_trace_len_summary(vm_state_iterator.trace_len_summary());
 
     for state in vm_state_iterator {
@@ -319,9 +324,9 @@ impl AsmOpStats {
 
 #[cfg(test)]
 mod tests {
-    use assembly::DefaultSourceManager;
+    use miden_assembly::DefaultSourceManager;
+    use miden_processor::{ChipletsLengths, DefaultHost, TraceLenSummary};
     use miden_vm::Assembler;
-    use processor::{ChipletsLengths, DefaultHost, TraceLenSummary};
 
     use super::{AsmOpStats, ExecutionDetails, StackInputs, *};
 

@@ -1,4 +1,4 @@
-use vm_core::WORD_SIZE;
+use miden_core::WORD_SIZE;
 
 use super::{Felt, ONE, Range, ZERO, create_range};
 

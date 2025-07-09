@@ -1,9 +1,13 @@
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 use super::{ColumnIndex, LineIndex};
 
 /// A range in a text document expressed as (zero-based) start and end positions.
 ///
 /// This is comparable to a selection in an editor, therefore the end position is exclusive.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 pub struct Selection {
     pub start: Position,
     pub end: Position,
@@ -42,6 +46,7 @@ impl From<core::ops::Range<LineIndex>> for Selection {
 ///
 /// A position is between two characters like an insert cursor in a editor.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 pub struct Position {
     pub line: LineIndex,
     pub character: ColumnIndex,

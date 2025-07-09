@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use vm_core::{Felt, QuadFelt};
+use miden_core::{Felt, QuadFelt};
 
 use super::*;
 

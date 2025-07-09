@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
-use rand_utils::rand_value;
-use vm_core::{Felt, FieldElement, WORD_SIZE};
+use miden_core::{Felt, FieldElement, WORD_SIZE};
+use winter_rand_utils::rand_value;
 
 use super::{
     EvaluationFrame, MEMORY_CLK_COL_IDX, MEMORY_CTX_COL_IDX, MEMORY_D_INV_COL_IDX,

@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use vm_core::{ExtensionOf, ZERO};
+use miden_core::{ExtensionOf, ZERO};
 
 use crate::{
     Assertion, EvaluationFrame, Felt, FieldElement, TransitionConstraintDegree,

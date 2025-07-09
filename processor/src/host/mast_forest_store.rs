@@ -1,9 +1,9 @@
 use alloc::{collections::BTreeMap, sync::Arc};
 
-use vm_core::{Word, mast::MastForest};
+use miden_core::{Word, mast::MastForest};
 
 /// A set of [`MastForest`]s available to the prover that programs may refer to (by means of an
-/// [`vm_core::mast::ExternalNode`]).
+/// [`miden_core::mast::ExternalNode`]).
 ///
 /// For example, a program's kernel and standard library would most likely not be compiled directly
 /// with the program, and instead be provided separately to the prover. This has the benefit of

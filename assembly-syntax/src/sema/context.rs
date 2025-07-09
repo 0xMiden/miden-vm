@@ -4,12 +4,11 @@ use alloc::{
     vec::Vec,
 };
 
+use miden_debug_types::{SourceFile, Span, Spanned};
+use miden_utils_diagnostics::{Diagnostic, Severity};
+
 use super::{SemanticAnalysisError, SyntaxError};
-use crate::{
-    Felt, SourceFile, Span, Spanned,
-    ast::*,
-    diagnostics::{Diagnostic, Severity},
-};
+use crate::{Felt, ast::*};
 
 /// This maintains the state for semantic analysis of a single [Module].
 pub struct AnalysisContext {

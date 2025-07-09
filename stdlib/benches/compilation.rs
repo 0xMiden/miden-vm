@@ -1,7 +1,7 @@
 use std::{path::Path, time::Duration};
 
-use assembly::{Assembler, LibraryNamespace};
 use criterion::{Criterion, criterion_group, criterion_main};
+use miden_assembly::{Assembler, LibraryNamespace};
 
 fn stdlib_compilation(c: &mut Criterion) {
     let mut group = c.benchmark_group("compile_stdlib");

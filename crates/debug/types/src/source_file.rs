@@ -6,6 +6,9 @@ use alloc::{
 };
 use core::{fmt, num::NonZeroU32, ops::Range};
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 use super::{FileLineCol, Position, Selection, SourceId, SourceSpan, Uri};
 
 // SOURCE LANGUAGE
@@ -33,14 +36,18 @@ impl AsRef<str> for SourceLanguage {
 
 /// A [SourceFile] represents a single file stored in a [super::SourceManager]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 pub struct SourceFile {
     /// The unique identifier allocated for this [SourceFile] by its owning [super::SourceManager]
     id: SourceId,
     /// The file content
+    #[cfg_attr(
+        feature = "serde",
+        serde(deserialize_with = "SourceContent::deserialize_and_recompute_line_starts")
+    )]
     content: SourceContent,
 }
 
-#[cfg(feature = "diagnostics")]
 impl miette::SourceCode for SourceFile {
     fn read_span<'a>(
         &'a self,
@@ -314,7 +321,6 @@ impl AsRef<[u8]> for SourceFileRef {
     }
 }
 
-#[cfg(feature = "diagnostics")]
 impl From<&SourceFileRef> for miette::SourceSpan {
     fn from(source: &SourceFileRef) -> Self {
         source.span.into()
@@ -322,13 +328,11 @@ impl From<&SourceFileRef> for miette::SourceSpan {
 }
 
 /// Used to implement [miette::SpanContents] for [SourceFile] and [SourceFileRef]
-#[cfg(feature = "diagnostics")]
 struct ScopedSourceFileRef<'a> {
     file: &'a SourceFile,
     span: miette::SourceSpan,
 }
 
-#[cfg(feature = "diagnostics")]
 impl<'a> miette::SpanContents<'a> for ScopedSourceFileRef<'a> {
     #[inline]
     fn data(&self) -> &'a [u8] {
@@ -371,7 +375,6 @@ impl<'a> miette::SpanContents<'a> for ScopedSourceFileRef<'a> {
     }
 }
 
-#[cfg(feature = "diagnostics")]
 impl miette::SourceCode for SourceFileRef {
     #[inline]
     fn read_span<'a>(
@@ -393,6 +396,7 @@ impl miette::SourceCode for SourceFileRef {
 /// * The content of the file
 /// * The byte offsets of every line in the file, for use in looking up line/column information
 #[derive(Clone)]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 pub struct SourceContent {
     /// The language identifier for this source file
     language: Box<str>,
@@ -401,8 +405,10 @@ pub struct SourceContent {
     /// The underlying content of this file
     content: String,
     /// The byte offsets for each line in this file
+    #[cfg_attr(feature = "serde", serde(default, skip))]
     line_starts: Vec<ByteIndex>,
     /// The document version
+    #[cfg_attr(feature = "serde", serde(default))]
     version: i32,
 }
 
@@ -699,6 +705,18 @@ impl SourceContent {
     }
 }
 
+#[cfg(feature = "serde")]
+impl SourceContent {
+    fn deserialize_and_recompute_line_starts<'de, D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let mut content = SourceContent::deserialize(deserializer)?;
+        content.line_starts = compute_line_starts(&content.content, None);
+        Ok(content)
+    }
+}
+
 fn compute_line_starts(text: &str, text_offset: Option<u32>) -> Vec<ByteIndex> {
     let bytes = text.as_bytes();
     let initial_line_offset = match text_offset {
@@ -737,6 +755,8 @@ fn compute_line_starts(text: &str, text_offset: Option<u32>) -> Vec<ByteIndex> {
 
 /// An index representing the offset in bytes from the start of a source file
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
 pub struct ByteIndex(pub u32);
 
 impl ByteIndex {
@@ -892,6 +912,8 @@ macro_rules! declare_dual_number_and_index_type {
     ($index_name:ident, $number_name:ident, $description:literal) => {
         #[doc = concat!("A zero-indexed ", $description, " number")]
         #[derive(Default, Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+        #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
+        #[cfg_attr(feature = "serde", serde(transparent))]
         pub struct $index_name(pub u32);
 
         impl $index_name {
@@ -1013,6 +1035,8 @@ macro_rules! declare_dual_number_and_index_type {
 
         #[doc = concat!("A one-indexed ", $description, " number")]
         #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+        #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
+        #[cfg_attr(feature = "serde", serde(transparent))]
         pub struct $number_name(NonZeroU32);
 
         impl Default for $number_name {

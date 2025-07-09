@@ -1,4 +1,4 @@
-use processor::MemoryAddress;
+use miden_processor::MemoryAddress;
 
 /// debug commands supported by the debugger
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

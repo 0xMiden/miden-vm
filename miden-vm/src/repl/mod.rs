@@ -1,10 +1,10 @@
 use std::{collections::BTreeSet, path::PathBuf};
 
-use assembly::{Assembler, Library};
+use miden_assembly::{Assembler, Library};
+use miden_processor::{AdviceInputs, ContextId, MemoryAddress};
+use miden_stdlib::StdLibrary;
 use miden_vm::{DefaultHost, StackInputs, math::Felt};
-use processor::{AdviceInputs, ContextId, MemoryAddress};
 use rustyline::{DefaultEditor, error::ReadlineError};
-use stdlib::StdLibrary;
 
 use crate::utils::print_mem_address;
 
@@ -322,8 +322,13 @@ fn execute(
             .map_err(|err| format!("{err}"))?;
     }
 
-    let state_iter =
-        processor::execute_iter(&program, stack_inputs, advice_inputs, &mut host, source_manager);
+    let state_iter = miden_processor::execute_iter(
+        &program,
+        stack_inputs,
+        advice_inputs,
+        &mut host,
+        source_manager,
+    );
     let (system, _, stack, chiplets, err) = state_iter.into_parts();
     if let Some(err) = err {
         return Err(format!("{err}"));

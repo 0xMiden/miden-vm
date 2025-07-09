@@ -1,6 +1,6 @@
 use core::cmp::Ordering;
 
-use test_utils::{build_op_test, proptest::prelude::*, rand::rand_value};
+use miden_utils_testing::{build_op_test, proptest::prelude::*, rand::rand_value};
 
 // U32 OPERATIONS TESTS - MANUAL - COMPARISON OPERATIONS
 // ================================================================================================

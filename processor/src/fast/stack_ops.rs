@@ -1,4 +1,4 @@
-use vm_core::{WORD_SIZE, ZERO};
+use miden_core::{WORD_SIZE, ZERO};
 
 use super::FastProcessor;
 use crate::{ErrorContext, ExecutionError};

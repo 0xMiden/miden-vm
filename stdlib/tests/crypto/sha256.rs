@@ -1,8 +1,8 @@
-use sha2::{Digest, Sha256};
-use test_utils::{
+use miden_utils_testing::{
     Felt, IntoBytes, group_slice_elements, push_inputs,
     rand::{rand_array, rand_value, rand_vector},
 };
+use sha2::{Digest, Sha256};
 
 #[test]
 fn sha256_hash_memory() {
@@ -25,7 +25,7 @@ fn sha256_hash_memory() {
     use.std::crypto::hashes::sha256
 
     begin
-        # push inputs on the stack 
+        # push inputs on the stack
         {inputs}
 
         # mem.0 - input data address
@@ -49,8 +49,8 @@ fn sha256_hash_memory() {
         mem_load.1
         push.10000
         exec.sha256::hash_memory
-        
-        # truncate the stack 
+
+        # truncate the stack
         swapdw dropw dropw
     end",
         inputs = push_inputs(&ifelts)

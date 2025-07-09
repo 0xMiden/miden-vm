@@ -4,7 +4,7 @@ use miden_air::{
     RowIndex,
     trace::stack::{H0_COL_IDX, NUM_STACK_HELPER_COLS},
 };
-use vm_core::{FieldElement, stack::MIN_STACK_DEPTH};
+use miden_core::{FieldElement, stack::MIN_STACK_DEPTH};
 
 use super::{super::utils::get_trace_len, Felt, MAX_TOP_IDX, ONE, STACK_TRACE_WIDTH, ZERO};
 use crate::utils::math::batch_inversion;

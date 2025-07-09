@@ -1,13 +1,13 @@
 use std::{path::PathBuf, sync::Arc, time::Instant};
 
-use assembly::{
+use clap::Parser;
+use miden_assembly::{
     DefaultSourceManager, SourceManager,
     diagnostics::{Report, WrapErr},
 };
-use clap::Parser;
+use miden_processor::{DefaultHost, ExecutionOptions, ExecutionOptionsError};
+use miden_stdlib::StdLibrary;
 use miden_vm::{ProvingOptions, internal::InputFile};
-use processor::{DefaultHost, ExecutionOptions, ExecutionOptionsError};
-use stdlib::StdLibrary;
 
 use super::{
     data::{Libraries, OutputFile, ProofFile},
@@ -137,7 +137,7 @@ impl ProveCmd {
             self.get_proof_options().map_err(|err| Report::msg(format!("{err}")))?;
 
         // execute program and generate proof
-        let (stack_outputs, proof) = prover::prove(
+        let (stack_outputs, proof) = miden_prover::prove(
             &program,
             stack_inputs,
             advice_inputs,

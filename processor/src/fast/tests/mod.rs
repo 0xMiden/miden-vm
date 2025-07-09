@@ -1,9 +1,9 @@
 use alloc::{string::ToString, sync::Arc};
 
-use assembly::{Assembler, DefaultSourceManager};
 use miden_air::ExecutionOptions;
+use miden_assembly::{Assembler, DefaultSourceManager};
+use miden_core::{Kernel, StackInputs, assert_matches};
 use rstest::rstest;
-use vm_core::{Kernel, StackInputs, assert_matches};
 
 use super::*;
 use crate::{DefaultHost, Process, system::FMP_MAX};

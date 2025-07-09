@@ -1,5 +1,5 @@
 use proptest::prelude::*;
-use rand_utils::rand_value;
+use winter_rand_utils::rand_value;
 
 use super::{
     BITWISE_A_COL_IDX, BITWISE_A_COL_RANGE, BITWISE_B_COL_IDX, BITWISE_B_COL_RANGE,

@@ -1,6 +1,6 @@
 use std::ops::Add;
 
-use test_utils::{Felt, FieldElement, push_inputs, rand::rand_array};
+use miden_utils_testing::{Felt, FieldElement, push_inputs, rand::rand_array};
 
 use crate::math::ecgfp5::{base_field::Ext5, group::ECExt5};
 

@@ -1,7 +1,7 @@
 // CONSTANTS
 // ================================================================================================
 
-use vm_core::{ExtensionOf, Felt, FieldElement, ONE, QuadFelt, StarkField, ZERO};
+use miden_core::{ExtensionOf, Felt, FieldElement, ONE, QuadFelt, StarkField, ZERO};
 
 use super::FastProcessor;
 use crate::ExecutionError;

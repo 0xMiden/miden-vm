@@ -1,4 +1,4 @@
-use vm_core::{ONE, Operation, ZERO};
+use miden_core::{ONE, Operation, ZERO};
 
 use super::{ExecutionError, Felt, FieldElement, Process, utils::assert_binary};
 use crate::ErrorContext;
@@ -228,8 +228,8 @@ impl Process {
 
 #[cfg(test)]
 mod tests {
-    use test_utils::rand::rand_value;
-    use vm_core::{ONE, ZERO, mast::MastForest};
+    use miden_core::{ONE, ZERO, mast::MastForest};
+    use miden_utils_testing::rand::rand_value;
 
     use super::{
         super::{Felt, FieldElement, MIN_STACK_DEPTH, Operation},

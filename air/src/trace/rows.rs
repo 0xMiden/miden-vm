@@ -4,7 +4,7 @@ use core::{
     ops::{Add, AddAssign, Bound, Index, IndexMut, Mul, RangeBounds, Sub, SubAssign},
 };
 
-use vm_core::Felt;
+use miden_core::Felt;
 
 /// Represents the types of errors that can occur when converting from and into [`RowIndex`] and
 /// using its operations.

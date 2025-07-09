@@ -1,10 +1,10 @@
 /// Simple macro used in the grammar definition for constructing spans
 macro_rules! span {
     ($id:expr, $l:expr, $r:expr) => {
-        crate::SourceSpan::new($id, $l..$r)
+        ::miden_debug_types::SourceSpan::new($id, $l..$r)
     };
     ($id:expr, $i:expr) => {
-        crate::SourceSpan::at($id, $i)
+        ::miden_debug_types::SourceSpan::at($id, $i)
     };
 }
 
@@ -21,17 +21,16 @@ mod token;
 
 use alloc::{boxed::Box, collections::BTreeSet, string::ToString, sync::Arc, vec::Vec};
 
+use miden_debug_types::{SourceFile, SourceLanguage, SourceManager, Uri};
+use miden_utils_diagnostics::Report;
+
 pub use self::{
     error::{BinErrorKind, HexErrorKind, LiteralErrorKind, ParsingError},
     lexer::Lexer,
     scanner::Scanner,
     token::{BinEncodedValue, DocumentationType, IntValue, Token, WordValue},
 };
-use crate::{
-    LibraryPath, SourceManager, ast,
-    diagnostics::{Report, SourceFile, SourceLanguage, SourceSpan, Span, Spanned, Uri},
-    sema,
-};
+use crate::{LibraryPath, ast, sema};
 
 // TYPE ALIASES
 // ================================================================================================
@@ -108,9 +107,8 @@ impl ModuleParser {
     where
         P: AsRef<std::path::Path>,
     {
-        use miden_core::debuginfo::SourceManagerExt;
-
-        use crate::diagnostics::{IntoDiagnostic, WrapErr};
+        use miden_debug_types::SourceManagerExt;
+        use miden_utils_diagnostics::{IntoDiagnostic, WrapErr};
 
         let path = path.as_ref();
         let source_file = source_manager
@@ -127,7 +125,7 @@ impl ModuleParser {
         source: impl ToString,
         source_manager: &dyn SourceManager,
     ) -> Result<Box<ast::Module>, Report> {
-        use miden_core::debuginfo::SourceContent;
+        use miden_debug_types::SourceContent;
 
         let uri = Uri::from(name.path().into_owned().into_boxed_str());
         let content = SourceContent::new(
@@ -184,12 +182,8 @@ pub fn read_modules_from_dir(
 ) -> Result<impl Iterator<Item = Box<ast::Module>>, Report> {
     use std::collections::{BTreeMap, btree_map::Entry};
 
+    use miden_utils_diagnostics::{IntoDiagnostic, WrapErr, report};
     use module_walker::{ModuleEntry, WalkModules};
-
-    use crate::{
-        diagnostics::{IntoDiagnostic, WrapErr},
-        report,
-    };
 
     let dir = dir.as_ref();
     if !dir.is_dir() {
@@ -230,7 +224,6 @@ pub fn read_modules_from_dir(
 
 #[cfg(feature = "std")]
 mod module_walker {
-
     use std::{
         ffi::OsStr,
         fs::{self, DirEntry, FileType},
@@ -238,12 +231,9 @@ mod module_walker {
         path::{Path, PathBuf},
     };
 
-    use crate::{
-        LibraryNamespace, LibraryPath,
-        ast::Module,
-        diagnostics::{IntoDiagnostic, Report},
-        report,
-    };
+    use miden_utils_diagnostics::{IntoDiagnostic, Report, report};
+
+    use crate::{LibraryNamespace, LibraryPath, ast::Module};
 
     pub struct ModuleEntry {
         pub name: LibraryPath,
@@ -341,9 +331,9 @@ mod module_walker {
 #[cfg(test)]
 mod tests {
     use miden_core::assert_matches;
+    use miden_debug_types::SourceId;
 
     use super::*;
-    use crate::SourceId;
 
     // This test checks the lexer behavior with regard to tokenizing `exp(.u?[\d]+)?`
     #[test]

@@ -1,8 +1,8 @@
 [package]
 name = "miden-verifier"
-version = "0.15.0"
-description="Miden VM execution verifier"
-documentation = "https://docs.rs/miden-verifier/0.15.0"
+version = "0.17.0"
+description = "Miden VM execution verifier"
+documentation = "https://docs.rs/miden-verifier/0.17.0"
 readme = "README.md"
 categories = ["cryptography", "no-std"]
 keywords = ["miden", "stark", "verifier", "zkp"]
@@ -19,11 +19,11 @@ doctest = false
 
 [features]
 default = ["std"]
-std = ["air/std", "vm-core/std", "winter-verifier/std", "thiserror/std"]
+std = ["miden-air/std", "miden-core/std", "thiserror/std", "winter-verifier/std"]
 
 [dependencies]
-air = { package = "miden-air", path = "../air", version = "0.15", default-features = false }
-tracing = { version = "0.1", default-features = false, features = ["attributes"] }
-vm-core = { package = "miden-core", path = "../core", version = "0.15", default-features = false }
-winter-verifier = { package = "winter-verifier", version = "0.13", default-features = false }
-thiserror = { workspace = true }
+miden-air.workspace = true
+miden-core.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+winter-verifier.workspace = true

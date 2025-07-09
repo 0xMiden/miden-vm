@@ -1,6 +1,6 @@
 use std::{env, path::Path};
 
-use assembly::{
+use miden_assembly::{
     Assembler, Library, LibraryNamespace,
     diagnostics::{IntoDiagnostic, Result},
 };

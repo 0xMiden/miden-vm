@@ -264,7 +264,11 @@ impl MastForestBuilder {
 
         // build a binary tree of blocks joining them using JOIN blocks
         while node_ids.len() > 1 {
-            let last_mast_node_id = if node_ids.len() % 2 == 0 { None } else { node_ids.pop() };
+            let last_mast_node_id = if node_ids.len().is_multiple_of(2) {
+                None
+            } else {
+                node_ids.pop()
+            };
 
             let mut source_node_ids = Vec::new();
             core::mem::swap(&mut node_ids, &mut source_node_ids);

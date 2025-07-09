@@ -4,11 +4,8 @@ extern crate alloc;
 
 use alloc::sync::Arc;
 
-use assembly::{
-    Library,
-    mast::MastForest,
-    utils::{Deserializable, sync::LazyLock},
-};
+use miden_assembly::{Library, mast::MastForest, utils::Deserializable};
+use miden_utils_sync::LazyLock;
 
 // STANDARD LIBRARY
 // ================================================================================================
@@ -74,12 +71,12 @@ pub const EVENT_FALCON_SIG_TO_STACK: u32 = 3419226139;
 /// 5. The nonce represented as 8 field elements.
 #[cfg(feature = "std")]
 pub fn falcon_sign(
-    sk: &[vm_core::Felt],
-    msg: vm_core::Word,
-) -> Option<alloc::vec::Vec<vm_core::Felt>> {
+    sk: &[miden_core::Felt],
+    msg: miden_core::Word,
+) -> Option<alloc::vec::Vec<miden_core::Felt>> {
     use alloc::{vec, vec::Vec};
 
-    use vm_core::{
+    use miden_core::{
         Felt,
         crypto::{
             dsa::rpo_falcon512::{Polynomial, SecretKey},
@@ -143,9 +140,9 @@ pub fn falcon_sign(
 
 #[cfg(not(feature = "std"))]
 pub fn falcon_sign(
-    _pk_sk: &[vm_core::Felt],
-    _msg: vm_core::Word,
-) -> Option<alloc::vec::Vec<vm_core::Felt>> {
+    _pk_sk: &[miden_core::Felt],
+    _msg: miden_core::Word,
+) -> Option<alloc::vec::Vec<miden_core::Felt>> {
     None
 }
 
@@ -154,7 +151,7 @@ pub fn falcon_sign(
 
 #[cfg(test)]
 mod tests {
-    use assembly::LibraryPath;
+    use miden_assembly::LibraryPath;
 
     use super::*;
 

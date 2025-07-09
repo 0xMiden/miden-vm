@@ -1,6 +1,6 @@
-use prover::Word;
-use test_utils::{TRUNCATE_STACK_PROC, build_test, crypto::MerkleStore, rand::rand_value};
-use vm_core::Felt;
+use miden_core::Felt;
+use miden_prover::Word;
+use miden_utils_testing::{TRUNCATE_STACK_PROC, build_test, crypto::MerkleStore, rand::rand_value};
 
 // ADVICE INJECTION
 // ================================================================================================
@@ -45,7 +45,7 @@ fn advice_push_u64div_repeat() {
     let source = format!(
         "
     {TRUNCATE_STACK_PROC}
-    
+
     begin
         repeat.7
             adv.push_u64div
@@ -88,13 +88,13 @@ fn advice_push_u64div_repeat() {
 fn advice_push_u64div_local_procedure() {
     // push a/b onto the advice stack and then move these values onto the operand stack.
     let source = "
-    proc.foo 
-        adv.push_u64div 
-        adv_push.4 
-    end 
-    
-    begin 
-        exec.foo 
+    proc.foo
+        adv.push_u64div
+        adv_push.4
+    end
+
+    begin
+        exec.foo
         movupw.2 dropw
     end";
 
@@ -125,14 +125,14 @@ fn advice_push_u64div_local_procedure() {
 #[test]
 fn advice_push_u64div_conditional_execution() {
     let source = "
-    begin 
-        eq 
-        if.true 
-            adv.push_u64div 
-            adv_push.4 
-        else 
-            padw 
-        end 
+    begin
+        eq
+        if.true
+            adv.push_u64div
+            adv_push.4
+        else
+            padw
+        end
 
         movupw.2 dropw
     end";

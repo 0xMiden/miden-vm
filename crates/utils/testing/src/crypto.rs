@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 
 // RE-EXPORTS
 // ================================================================================================
-pub use vm_core::crypto::{
+pub use miden_core::crypto::{
     dsa::*,
     hash::Rpo256,
     merkle::{

@@ -1,4 +1,4 @@
-use vm_core::{
+use miden_core::{
     Felt, ZERO, chiplets::hasher::STATE_WIDTH, crypto::hash::Rpo256, mast::MastForest, utils::range,
 };
 

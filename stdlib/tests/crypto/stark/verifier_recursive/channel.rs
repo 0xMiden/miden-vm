@@ -1,12 +1,12 @@
 use alloc::vec::Vec;
 
 use miden_air::ProcessorAir;
-use test_utils::{
+use miden_core::{Felt, FieldElement, QuadFelt, StarkField, Word};
+use miden_utils_testing::{
     MerkleTreeVC, VerifierError,
     crypto::{BatchMerkleProof, PartialMerkleTree, Rpo256},
     group_slice_elements,
 };
-use vm_core::{Felt, FieldElement, QuadFelt, StarkField, Word};
 use winter_air::{
     Air,
     proof::{Proof, Queries, QuotientOodFrame, Table, TraceOodFrame},

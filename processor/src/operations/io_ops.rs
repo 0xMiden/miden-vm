@@ -1,4 +1,4 @@
-use vm_core::WORD_SIZE;
+use miden_core::WORD_SIZE;
 
 use super::{ExecutionError, Felt, Process};
 use crate::errors::ErrorContext;
@@ -290,7 +290,7 @@ impl Process {
 
 #[cfg(test)]
 mod tests {
-    use vm_core::{
+    use miden_core::{
         ONE, WORD_SIZE, Word, ZERO, assert_matches, mast::MastForest, utils::ToElements,
     };
 
