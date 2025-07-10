@@ -16,7 +16,7 @@ end
 #! Input: [C, B, A, ...]
 #! Output: [HASH, ...]
 #!
-#! Where :
+#! Where:
 #! - `A` is the capacity word that will be used by the hashing function.
 #! - `B` is the hash output.
 #!
@@ -40,7 +40,7 @@ end
 #! Input: [C, B, A, ...]
 #! Output: [B, C, B, A, ...]
 #!
-#! Where :
+#! Where:
 #! - `A` is the capacity word that will be used by the hashing function.
 #! - `B` is the hash output.
 #! - `C` is the rate word that will be used by the hashing function.
@@ -58,7 +58,7 @@ end
 #! Input: [C, B, A, start_addr, end_addr, ...]
 #! Output: [C', B', A', end_addr, end_addr ...]
 #!
-#! Where :
+#! Where:
 #! - `A` is the capacity word that will be used by the hashing function.
 #! - `B` is the hash output.
 #!
@@ -79,11 +79,13 @@ end
 #! Input: [start_addr, end_addr, ...]
 #! Output: [HASH, ...]
 #!
-#! Where :
+#! Where:
 #! - `HASH` is the cumulative hash of the provided memory values.
+#!
+#! Cycles: 37 + 3 * words, where `words` is the `start_addr - end_addr`
 export.hash_memory_double_words
   # enforce `start_addr ≤ end_addr`
-  dup.1 dup.1 u32assert2 
+  dup.1 dup.1 u32assert2
   u32gte assert.err="start address should be less or equal to the end address"
   # => [start_addr, end_addr, ...]
 
@@ -97,7 +99,7 @@ export.hash_memory_double_words
   exec.squeeze_digest
   # => [HASH, end_addr, end_addr, ...]
 
-  # drop start_addr/end_addr (4 cycles)
+  # drop start_addr and end_addr (4 cycles)
   movup.4 drop movup.4 drop
   # => [HASH]
 end
