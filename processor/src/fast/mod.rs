@@ -722,11 +722,6 @@ impl FastProcessor {
         let mut group_idx = 0;
         let mut next_group_idx = 1;
 
-        // round up the number of groups to be processed to the next power of two; we do this
-        // because the processor requires the number of groups to be either 1, 2, 4, or 8; if
-        // the actual number of groups is smaller, we'll pad the batch with NOOPs at the end
-        let num_batch_groups = batch.num_groups().next_power_of_two();
-
         // execute operations in the batch one by one
         for (op_idx_in_batch, op) in batch.ops().iter().enumerate() {
             while let Some(&decorator_id) =
@@ -785,13 +780,6 @@ impl FastProcessor {
                 op_idx_in_group += 1;
             }
         }
-
-        // make sure we execute the required number of operation groups; this would happen when the
-        // actual number of operation groups was not a power of two. In this processor, this
-        // corresponds to incrementing the clock by the number of empty op groups (i.e. 1 NOOP
-        // executed per missing op group).
-
-        self.clk += (num_batch_groups - group_idx) as u32;
 
         Ok(())
     }

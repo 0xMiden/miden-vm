@@ -79,7 +79,7 @@ pub(super) struct OpBatchAccumulator {
     op_idx: usize,
     /// index of the current group in the batch.
     group_idx: usize,
-    // Index of the next free group in the batch.
+    /// Index of the next free group in the batch.
     next_group_idx: usize,
 }
 
@@ -119,7 +119,7 @@ impl OpBatchAccumulator {
             if self.op_idx < GROUP_SIZE - 1 {
                 self.next_group_idx < BATCH_SIZE
             } else {
-                self.next_group_idx + 1 < BATCH_SIZE
+                self.next_group_idx < BATCH_SIZE - 1
             }
         } else {
             // check if there is space for the operation in the current group, or if there isn't,
@@ -159,19 +159,24 @@ impl OpBatchAccumulator {
     }
 
     /// Convert the accumulator into an [OpBatch].
+    /// If the number of groups is not 1,2,4 or 8, the batch is padded in groups containing a single
+    /// `Noop`.
     pub fn into_batch(mut self) -> OpBatch {
-        // make sure the last group gets added to the group array; we also check the op_idx to
-        // handle the case when a group contains a single NOOP operation.
-        if self.group != 0 || self.op_idx != 0 {
-            self.groups[self.group_idx] = Felt::new(self.group);
-            self.op_counts[self.group_idx] = self.op_idx;
+        self.finalize_op_group();
+
+        let num_groups = self.next_group_idx - 1;
+        let target_num_groups = num_groups.next_power_of_two();
+
+        for _ in num_groups..target_num_groups {
+            self.add_op(Operation::Noop);
+            self.finalize_op_group();
         }
 
         OpBatch {
             ops: self.ops,
             groups: self.groups,
             op_counts: self.op_counts,
-            num_groups: self.next_group_idx,
+            num_groups: self.next_group_idx - 1,
         }
     }
 
@@ -180,14 +185,18 @@ impl OpBatchAccumulator {
 
     /// Saves the current group into the group array, advances current and next group pointers,
     /// and resets group content.
-    pub(super) fn finalize_op_group(&mut self) {
-        self.groups[self.group_idx] = Felt::new(self.group);
-        self.op_counts[self.group_idx] = self.op_idx;
+    fn finalize_op_group(&mut self) {
+        if self.op_idx == 0 && self.group == 0 {
+            // we have just finalized and not done any progress
+        } else {
+            self.groups[self.group_idx] = Felt::new(self.group);
+            self.op_counts[self.group_idx] = self.op_idx;
 
-        self.group_idx = self.next_group_idx;
-        self.next_group_idx = self.group_idx + 1;
+            self.group_idx = self.next_group_idx;
+            self.next_group_idx += 1;
 
-        self.op_idx = 0;
-        self.group = 0;
+            self.op_idx = 0;
+            self.group = 0;
+        }
     }
 }

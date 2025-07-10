@@ -74,7 +74,7 @@ fn test_stack_underflow_and_overflow_bounds_failure() {
 
         // program 2: just enough dups to get 1 away from the stack buffer overflow error. Since we
         // can't drop the elements, we expect to end the program with a stack output overflow.
-        const NUM_DUPS_NO_OVERFLOW: usize = NUM_DUPS_NO_OVERFLOW_SWAPS_ALLOWED + 1;
+        const NUM_DUPS_NO_OVERFLOW: usize = NUM_DUPS_NO_OVERFLOW_SWAPS_ALLOWED + 1 - 2; // two padding Noop are inserted
 
         let ops = vec![Operation::Dup0; NUM_DUPS_NO_OVERFLOW];
         let program_output_overflow = simple_program_with_ops(ops);
@@ -83,7 +83,7 @@ fn test_stack_underflow_and_overflow_bounds_failure() {
 
         // program 3: just enough dups to get 1 away from the stack buffer overflow error. Since we
         // can't drop the elements, we expect to end the program with a stack output overflow.
-        const NUM_DUPS_WITH_OVERFLOW: usize = NUM_DUPS_NO_OVERFLOW + 1;
+        const NUM_DUPS_WITH_OVERFLOW: usize = NUM_DUPS_NO_OVERFLOW + 2;
 
         let ops = vec![Operation::Dup0; NUM_DUPS_WITH_OVERFLOW];
         let program_with_overflow = simple_program_with_ops(ops);

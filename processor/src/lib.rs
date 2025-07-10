@@ -670,20 +670,6 @@ impl Process {
             }
         }
 
-        // make sure we execute the required number of operation groups; this would happen when
-        // the actual number of operation groups was not a power of two
-        for group_idx in group_idx..num_batch_groups {
-            self.decoder.execute_user_op(Operation::Noop, 0);
-            self.execute_op(Operation::Noop, program, host)?;
-
-            // if we are not at the last group yet, set up the decoder for decoding the next
-            // operation groups. the groups were are processing are just NOOPs - so, the op group
-            // value is ZERO
-            if group_idx < num_batch_groups - 1 {
-                self.decoder.start_op_group(ZERO);
-            }
-        }
-
         Ok(())
     }
 

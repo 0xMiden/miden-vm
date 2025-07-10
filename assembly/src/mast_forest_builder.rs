@@ -8,8 +8,8 @@ use core::ops::{Index, IndexMut};
 use miden_core::{
     AdviceMap, Decorator, DecoratorList, Felt, Operation, Word,
     mast::{
-        DecoratorFingerprint, DecoratorId, MastForest, MastNode, MastNodeFingerprint, MastNodeId,
-        Remapping, SubtreeIterator,
+        BasicBlockNode, DecoratorFingerprint, DecoratorId, MastForest, MastNode,
+        MastNodeFingerprint, MastNodeId, Remapping, SubtreeIterator,
     },
 };
 
@@ -346,12 +346,7 @@ impl MastForestBuilder {
                 self.mast_forest.is_procedure_root(basic_block_id),
                 basic_block_node.num_op_batches(),
             ) {
-                for &(op_idx, decorator) in basic_block_node.decorators() {
-                    decorators.push((op_idx + operations.len(), decorator));
-                }
-                for batch in basic_block_node.op_batches() {
-                    operations.extend_from_slice(batch.ops());
-                }
+                merge_block(&mut operations, &mut decorators, &basic_block_node);
             } else {
                 // if we don't want to merge this block, we flush the buffer of operations into a
                 // new block, and add the un-merged block after it
@@ -376,6 +371,47 @@ impl MastForestBuilder {
         }
 
         Ok(merged_basic_blocks)
+    }
+}
+
+/// Appends to [operations] and [decorators] the content of [basic_block_node] except for Noops that
+/// don't have any decorator attached. For every skipped `Noop`, the decorators are shifted
+/// accordingly.
+fn merge_block(
+    operations: &mut Vec<Operation>,
+    decorators: &mut DecoratorList,
+    basic_block_node: &BasicBlockNode,
+) {
+    let offset = operations.len();
+    let mut skips = 0;
+    let mut max_dec_id = 0;
+    for (op_id, op) in basic_block_node.operations().enumerate() {
+        let decs: Vec<&DecoratorId> = basic_block_node
+            .decorators()
+            .iter()
+            .filter(|(id, _d)| *id == op_id)
+            .map(|(_, d)| d)
+            .collect();
+
+        if decs.is_empty() {
+            if matches!(op, Operation::Noop) {
+                skips += 1;
+            } else {
+                operations.push(*op);
+            }
+        } else {
+            max_dec_id = op_id;
+            for d in decs {
+                decorators.push((op_id + offset - skips, *d));
+            }
+            operations.push(*op);
+        }
+    }
+
+    for (op_id, dec) in basic_block_node.decorators().iter() {
+        if *op_id > max_dec_id {
+            decorators.push((op_id + offset - skips, *dec));
+        }
     }
 }
 

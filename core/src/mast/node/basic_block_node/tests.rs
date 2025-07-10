@@ -52,7 +52,8 @@ fn batch_ops() {
     assert_eq!([2_usize, 0, 0, 0, 0, 0, 0, 0], batch.op_counts);
     assert_eq!(hasher::hash_elements(&batch_groups), hash);
 
-    // --- one group with 7 immediate values --------------------------------------------------
+    // --- one batch of 8 groups, the first with 8 operations and the following 7 with immediate
+    // values ---
     let ops = vec![
         Operation::Push(ONE),
         Operation::Push(Felt::new(2)),
@@ -85,7 +86,9 @@ fn batch_ops() {
     assert_eq!([8_usize, 0, 0, 0, 0, 0, 0, 0], batch.op_counts);
     assert_eq!(hasher::hash_elements(&batch_groups), hash);
 
-    // --- two groups with 7 immediate values; the last push overflows to the second batch ----
+    // --- two batches, the first with 7 groups, one with 9 operations, 6 with immediate values; it
+    // needs to be padded with a 8th group with a Noop so that they are 8 groups in total. The
+    // last push overflows to the second batch ----
     let ops = vec![
         Operation::Add,
         Operation::Mul,
@@ -100,10 +103,10 @@ fn batch_ops() {
     ];
     let (batches, hash) = super::batch_and_hash_ops(ops.clone());
     assert_eq!(2, batches.len());
-
     let batch0 = &batches[0];
-    assert_eq!(ops[..9], batch0.ops);
-    assert_eq!(7, batch0.num_groups());
+    let expected_ops = append_noop(&ops[..9]);
+    assert_eq!(expected_ops, batch0.ops);
+    assert_eq!(8, batch0.num_groups());
 
     let batch0_groups = [
         build_group(&ops[..9]),
@@ -117,7 +120,7 @@ fn batch_ops() {
     ];
 
     assert_eq!(batch0_groups, batch0.groups);
-    assert_eq!([9_usize, 0, 0, 0, 0, 0, 0, 0], batch0.op_counts);
+    assert_eq!([9_usize, 0, 0, 0, 0, 0, 0, 1], batch0.op_counts);
 
     let batch1 = &batches[1];
     assert_eq!(vec![ops[9]], batch1.ops);
@@ -169,7 +172,10 @@ fn batch_ops() {
     assert_eq!(batch_groups, batch.groups);
     assert_eq!(hasher::hash_elements(&batch_groups), hash);
 
-    // --- push at the end of a group is moved into the next group ----------------------------
+    // --- 1 batch, 4 groups. First group has 8 operations, the second one operation (the push), the
+    // third an immediate value, the 4th is padding. Even if the first group has space for one more
+    // operation, given that it is a push at the end of a group, it is moved into the next group.
+    // ----------------------------
     let ops = vec![
         Operation::Add,
         Operation::Mul,
@@ -183,10 +189,10 @@ fn batch_ops() {
     ];
     let (batches, hash) = super::batch_and_hash_ops(ops.clone());
     assert_eq!(1, batches.len());
-
     let batch = &batches[0];
-    assert_eq!(ops, batch.ops);
-    assert_eq!(3, batch.num_groups());
+    let expected_ops = append_noop(&ops[..]);
+    assert_eq!(expected_ops, batch.ops);
+    assert_eq!(4, batch.num_groups());
 
     let batch_groups = [
         build_group(&ops[..8]),
@@ -200,7 +206,7 @@ fn batch_ops() {
     ];
 
     assert_eq!(batch_groups, batch.groups);
-    assert_eq!([8_usize, 1, 0, 0, 0, 0, 0, 0], batch.op_counts);
+    assert_eq!([8_usize, 1, 0, 1, 0, 0, 0, 0], batch.op_counts);
     assert_eq!(hasher::hash_elements(&batch_groups), hash);
 
     // --- push at the end of a group is moved into the next group ----------------------------
@@ -264,8 +270,9 @@ fn batch_ops() {
     assert_eq!(2, batches.len());
 
     let batch0 = &batches[0];
-    assert_eq!(ops[..17], batch0.ops);
-    assert_eq!(7, batch0.num_groups());
+    let expected_ops = append_noop(&ops[0..17]);
+    assert_eq!(expected_ops, batch0.ops);
+    assert_eq!(8, batch0.num_groups());
 
     let batch0_groups = [
         build_group(&ops[..9]),
@@ -279,7 +286,7 @@ fn batch_ops() {
     ];
 
     assert_eq!(batch0_groups, batch0.groups);
-    assert_eq!([9_usize, 0, 0, 0, 0, 0, 8, 0], batch0.op_counts);
+    assert_eq!([9_usize, 0, 0, 0, 0, 0, 8, 1], batch0.op_counts);
 
     let batch1 = &batches[1];
     assert_eq!(ops[17..], batch1.ops);
@@ -340,4 +347,10 @@ fn build_group(ops: &[Operation]) -> Felt {
         group |= (op.op_code() as u64) << (Operation::OP_BITS * i);
     }
     Felt::new(group)
+}
+
+fn append_noop(s: &[Operation]) -> Vec<Operation> {
+    let mut res = s.to_vec();
+    res.push(Operation::Noop);
+    res
 }
