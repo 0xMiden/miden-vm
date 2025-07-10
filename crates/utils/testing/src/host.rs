@@ -81,10 +81,11 @@ pub fn push_falcon_signature(
     let pub_key = process.get_stack_word(0);
     let msg = process.get_stack_word(1);
 
+    let clk = process.clk();
     let pk_sk = process
         .advice_provider()
         .get_mapped_values(&pub_key)
-        .map_err(|err| ExecutionError::advice_error(err, process.clk(), err_ctx))?;
+        .map_err(|err| ExecutionError::advice_error(err, clk, err_ctx))?;
 
     let result = falcon_sign(pk_sk, msg)
         .ok_or_else(|| ExecutionError::malformed_signature_key("RPO Falcon512", err_ctx))?;

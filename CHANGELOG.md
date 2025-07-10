@@ -9,8 +9,8 @@
 #### Changes
 
 - [BREAKING] Incremented MSRV to 1.88.
-
-#### Fixes
+- [BREAKING] Introduce `SourceManagerSync` trait, and remove `Assembler::source_manager()` method [#1966](https://github.com/0xMiden/miden-vm/issues/1966)
+- [BREAKING] Implement preliminary changes for lazy loading of external `MastForest` `AdviceMap`s ([#1949](https://github.com/0xMiden/miden-vm/issues/1949)).
 
 ## 0.16.0 (2025-07-08)
 
@@ -68,7 +68,7 @@
 - Moved implementation of `miden_assembly_syntax::diagnostics` into a new `miden-utils-diagnostics` crate ([#1945](https://github.com/0xMiden/miden-vm/pull/1945)).
 - Moved implementation of `miden_core::debuginfo` into a new `miden-debug-types` crate ([#1945](https://github.com/0xMiden/miden-vm/pull/1945)).
 - Moved implementation of `miden_core::sync` into a new `miden-utils-sync` crate ([#1945](https://github.com/0xMiden/miden-vm/pull/1945)).
-+- [BREAKING] Replaced `miden_assembly_syntax::Version` with `semver::Version` ([#1946](https://github.com/0xMiden/pull/1946))
+- [BREAKING] Replaced `miden_assembly_syntax::Version` with `semver::Version` ([#1946](https://github.com/0xMiden/pull/1946))
 
 #### Fixes
 

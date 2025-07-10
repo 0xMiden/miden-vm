@@ -584,11 +584,11 @@ impl MastForestBuilder {
     pub fn merge_advice_map(&mut self, other: &AdviceMap) -> Result<(), Report> {
         self.mast_forest
             .advice_map_mut()
-            .merge_advice_map(other)
+            .merge(other)
             .map_err(|((key, prev_values), new_values)| LinkerError::AdviceMapKeyAlreadyPresent {
                 key: key.into(),
-                prev_values,
-                new_values,
+                prev_values: prev_values.to_vec(),
+                new_values: new_values.to_vec(),
             })
             .into_diagnostic()
     }

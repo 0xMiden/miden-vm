@@ -169,7 +169,7 @@ macro_rules! assert_assembler_diagnostic {
 /// - Execution error test: check that running a program compiled from the given source causes an
 ///   ExecutionError which contains the specified substring.
 pub struct Test {
-    pub source_manager: Arc<dyn SourceManager + Send + Sync>,
+    pub source_manager: Arc<dyn SourceManager>,
     pub source: Arc<SourceFile>,
     pub kernel_source: Option<Arc<SourceFile>>,
     pub stack_inputs: StackInputs,
@@ -312,7 +312,7 @@ impl Test {
             .fold(assembler, |mut assembler, (path, source)| {
                 let module = source
                     .parse_with_options(
-                        &assembler.source_manager(),
+                        &self.source_manager,
                         ParseOptions::new(ModuleKind::Library, path.clone()).unwrap(),
                     )
                     .expect("invalid masm source code");

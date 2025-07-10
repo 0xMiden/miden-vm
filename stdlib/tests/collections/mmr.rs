@@ -522,7 +522,7 @@ fn test_mmr_pack() {
 
     let (process, _) = build_test!(source).execute_process().unwrap();
 
-    let advice_data = process.advice.map.get(&hash_u8).unwrap();
+    let advice_data = process.advice.get_mapped_values(&hash_u8).unwrap();
     assert_eq!(advice_data, &expect_data);
 }
 

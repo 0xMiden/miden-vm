@@ -1,4 +1,7 @@
-use alloc::{collections::BTreeMap, vec::Vec};
+use alloc::{
+    collections::{BTreeMap, btree_map::Entry},
+    vec::Vec,
+};
 
 use miden_core::{
     AdviceMap, Felt, Word,
@@ -36,9 +39,9 @@ type SimpleMerkleMap = BTreeMap<Word, StoreNode>;
 /// Advice data is store in-memory using [BTreeMap]s as its backing storage.
 #[derive(Debug, Clone, Default)]
 pub struct AdviceProvider {
-    pub stack: Vec<Felt>,
-    pub map: AdviceMap,
-    pub store: MerkleStore<SimpleMerkleMap>,
+    stack: Vec<Felt>,
+    map: AdviceMap,
+    store: MerkleStore<SimpleMerkleMap>,
 }
 
 impl AdviceProvider {
@@ -138,29 +141,46 @@ impl AdviceProvider {
     // ADVICE MAP
     // --------------------------------------------------------------------------------------------
 
+    /// Returns true if the key has a corresponding value in the map.
+    pub fn contains_map_key(&self, key: &Word) -> bool {
+        self.map.contains_key(key)
+    }
+
     /// Returns a reference to the value(s) associated with the specified key in the advice map.
+    ///
+    /// # Errors
+    /// Returns an error if the key is not found in the map.
     pub fn get_mapped_values(&self, key: &Word) -> Result<&[Felt], AdviceError> {
-        self.map.get(key).ok_or(AdviceError::MapKeyNotFound { key: *key })
+        if let Some(value) = self.map.get(key) {
+            Ok(value.as_ref())
+        } else {
+            Err(AdviceError::MapKeyNotFound { key: *key })
+        }
     }
 
     /// Inserts the provided value into the advice map under the specified key.
     ///
     /// The values in the advice map can be moved onto the advice stack by invoking
-    /// the [AdviceProvider::push_stack()] method.
+    /// the [AdviceProvider::push_from_map()] method.
     ///
     /// Returns an error if the specified key is already present in the advice map.
-    pub fn insert_into_map(&mut self, key: Word, values: Vec<Felt>) {
-        self.map.insert(key, values);
-    }
-
-    /// Merges all entries from the given [`AdviceMap`] into the current advice map.
-    ///
-    /// Returns an error if any new entry already exists with the same key but a different value
-    /// than the one currently stored. The current map remains unchanged.
-    pub fn merge_advice_map(&mut self, other: &AdviceMap) -> Result<(), AdviceError> {
-        self.map.merge_advice_map(other).map_err(|((key, prev_values), new_values)| {
-            AdviceError::MapKeyAlreadyPresent { key, prev_values, new_values }
-        })
+    pub fn insert_into_map(&mut self, key: Word, values: Vec<Felt>) -> Result<(), AdviceError> {
+        match self.map.entry(key) {
+            Entry::Vacant(entry) => {
+                entry.insert(values.into());
+            },
+            Entry::Occupied(entry) => {
+                let existing_values = entry.get().as_ref();
+                if existing_values != values {
+                    return Err(AdviceError::MapKeyAlreadyPresent {
+                        key,
+                        prev_values: existing_values.to_vec(),
+                        new_values: values,
+                    });
+                }
+            },
+        }
+        Ok(())
     }
 
     // MERKLE STORE
@@ -255,11 +275,28 @@ impl AdviceProvider {
     pub fn has_merkle_root(&self, root: Word) -> bool {
         self.store.get_node(root, NodeIndex::root()).is_ok()
     }
+
+    // HELPERS
+    // --------------------------------------------------------------------------------------------
+
+    /// Merges all entries from the given [`AdviceMap`] into the current advice map.
+    ///
+    /// Returns an error if any new entry already exists with the same key but a different value
+    /// than the one currently stored. The current map remains unchanged.
+    pub(crate) fn merge_advice_map(&mut self, other: &AdviceMap) -> Result<(), AdviceError> {
+        self.map.merge(other).map_err(|((key, prev_values), new_values)| {
+            AdviceError::MapKeyAlreadyPresent {
+                key,
+                prev_values: prev_values.to_vec(),
+                new_values: new_values.to_vec(),
+            }
+        })
+    }
 }
 
 impl From<AdviceInputs> for AdviceProvider {
     fn from(inputs: AdviceInputs) -> Self {
-        let (mut stack, map, store) = inputs.into_parts();
+        let AdviceInputs { mut stack, map, store } = inputs;
         stack.reverse();
         Self { stack, map, store }
     }
