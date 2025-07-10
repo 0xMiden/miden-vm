@@ -245,6 +245,7 @@ fn test_absorb_double_words_from_memory() {
 
 #[test]
 fn test_hash_memory_double_words() {
+    // test the standard case
     let double_words = "
     use.std::sys
     use.std::crypto::hashes::rpo
@@ -278,6 +279,29 @@ fn test_hash_memory_double_words() {
     ]).into_iter().map(|e| e.as_int()).collect();
 
     build_test!(double_words, &[]).expect_stack(&resulting_hash);
+
+    // test the corner case when the end pointer equals to the start pointer
+    let empty_double_words = r#"
+    use.std::sys
+    use.std::crypto::hashes::rpo
+
+    begin
+        push.1000.1000 # start and end addresses
+        # => [start_addr, end_addr]
+
+        exec.rpo::hash_memory_double_words
+        # => [HASH]
+
+        # assert that the resulting hash is equal to the empty word
+        dupw padw assert_eqw.err="resulting hash should be equal to the empty word"
+
+        # truncate stack
+        exec.sys::truncate_stack
+        # => [HASH]
+    end
+    "#;
+
+    build_test!(empty_double_words, &[]).expect_stack(&[0u64; 4]);
 }
 
 #[test]
