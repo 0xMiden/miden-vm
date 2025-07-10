@@ -1,5 +1,5 @@
 use alloc::vec::Vec;
-use std::mem;
+use core::mem;
 
 use miden_air::trace::{
     AUX_TRACE_RAND_ELEMENTS, AUX_TRACE_WIDTH, DECODER_TRACE_OFFSET, MIN_TRACE_LEN,
