@@ -1,10 +1,10 @@
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use alloc::{sync::Arc, vec::Vec};
 use core::cmp::min;
 
 use memory::Memory;
 use miden_air::RowIndex;
 use miden_core::{
-    Decorator, DecoratorIterator, EMPTY_WORD, Felt, Kernel, ONE, Operation, Program, StackOutputs,
+    Decorator, DecoratorIterator, EMPTY_WORD, Felt, ONE, Operation, Program, StackOutputs,
     WORD_SIZE, Word, ZERO,
     mast::{
         BasicBlockNode, CallNode, DynNode, ExternalNode, JoinNode, LoopNode, MastForest, MastNode,
@@ -17,7 +17,10 @@ use miden_debug_types::{DefaultSourceManager, SourceManager};
 
 use crate::{
     AdviceInputs, AdviceProvider, AsyncHost, ContextId, ErrorContext, ExecutionError, FMP_MIN,
-    ProcessState, SYSCALL_FMP_MIN, add_error_ctx_to_external_error, chiplets::Ace, err_ctx,
+    ProcessState, SYSCALL_FMP_MIN,
+    chiplets::Ace,
+    continuation_stack::{ContinuationStack, ProcessingStep, ProcessingStepPhase},
+    err_ctx,
 };
 
 mod memory;
@@ -320,17 +323,86 @@ impl FastProcessor {
         self.execute_impl(program, host).await
     }
 
-    /// Executes the given program and returns the stack outputs.
-    ///
-    /// This function is mainly split out of `execute()` for testing purposes so that we can access
-    /// the internal state of the `FastProcessor` after execution.
     async fn execute_impl(
         &mut self,
         program: &Program,
         host: &mut impl AsyncHost,
     ) -> Result<StackOutputs, ExecutionError> {
-        self.execute_mast_node(program.entrypoint(), program.mast_forest(), program.kernel(), host)
-            .await?;
+        let mut continuation_stack = ContinuationStack::new(program);
+
+        while let Some((current_forest, processing_step)) =
+            continuation_stack.pop_next_processing_step()
+        {
+            match processing_step {
+                ProcessingStep::Node((current_node_id, phase)) => {
+                    let current_node = current_forest.get_node_by_id(current_node_id).ok_or(
+                        ExecutionError::MastNodeNotFoundInForest { node_id: current_node_id },
+                    )?;
+
+                    match current_node {
+                        MastNode::Block(basic_block_node) => {
+                            self.execute_basic_block_node(basic_block_node, &current_forest, host)
+                                .await?
+                        },
+                        MastNode::Join(join_node) => self.execute_join_node(
+                            join_node,
+                            current_node_id,
+                            phase,
+                            &mut continuation_stack,
+                        )?,
+                        MastNode::Split(split_node) => self.execute_split_node(
+                            split_node,
+                            current_node_id,
+                            phase,
+                            &current_forest,
+                            &mut continuation_stack,
+                        )?,
+                        MastNode::Loop(loop_node) => self.execute_loop_node(
+                            loop_node,
+                            current_node_id,
+                            phase,
+                            &current_forest,
+                            &mut continuation_stack,
+                        )?,
+                        MastNode::Call(call_node) => self.execute_call_node(
+                            call_node,
+                            current_node_id,
+                            phase,
+                            program,
+                            &current_forest,
+                            &mut continuation_stack,
+                        )?,
+                        MastNode::Dyn(dyn_node) => {
+                            self.execute_dyn_node(
+                                dyn_node,
+                                current_node_id,
+                                phase,
+                                &current_forest,
+                                &mut continuation_stack,
+                                host,
+                            )
+                            .await?
+                        },
+                        MastNode::External(external_node) => {
+                            self.execute_external_node(external_node, &mut continuation_stack, host)
+                                .await?
+                        },
+                    }
+                },
+                ProcessingStep::PreDecorators(node_id) => {
+                    let node = current_forest.get_node_by_id(node_id).unwrap();
+                    for &decorator_id in node.before_enter() {
+                        self.execute_decorator(&current_forest[decorator_id], 0, host)?;
+                    }
+                },
+                ProcessingStep::PostDecorators(node_id) => {
+                    let node = current_forest.get_node_by_id(node_id).unwrap();
+                    for &decorator_id in node.after_exit() {
+                        self.execute_decorator(&current_forest[decorator_id], 0, host)?;
+                    }
+                },
+            }
+        }
 
         StackOutputs::new(
             self.stack[self.stack_bot_idx..self.stack_top_idx]
@@ -349,294 +421,315 @@ impl FastProcessor {
     // NODE EXECUTORS
     // --------------------------------------------------------------------------------------------
 
-    async fn execute_mast_node(
-        &mut self,
-        node_id: MastNodeId,
-        program: &MastForest,
-        kernel: &Kernel,
-        host: &mut impl AsyncHost,
-    ) -> Result<(), ExecutionError> {
-        let node = program
-            .get_node_by_id(node_id)
-            .ok_or(ExecutionError::MastNodeNotFoundInForest { node_id })?;
-
-        // Note: we only run this in case there are Trace events associated with the node. However,
-        // if there are assembly ops in the "before enter" list, we will cycle through them and
-        // ignore them, resulting in a drop of performance. We should remove this after trace events
-        // are removed from decorators - or if decorators are removed entirely.
-        //
-        // A similar reasoning applies to the "after exit" list.
-        for &decorator_id in node.before_enter() {
-            self.execute_decorator(&program[decorator_id], 0, host)?;
-        }
-
-        match node {
-            MastNode::Block(basic_block_node) => {
-                self.execute_basic_block_node(basic_block_node, program, host).await?
-            },
-            MastNode::Join(join_node) => {
-                Box::pin(self.execute_join_node(join_node, program, kernel, host)).await?
-            },
-            MastNode::Split(split_node) => {
-                Box::pin(self.execute_split_node(split_node, program, kernel, host)).await?
-            },
-            MastNode::Loop(loop_node) => {
-                Box::pin(self.execute_loop_node(loop_node, program, kernel, host)).await?
-            },
-            MastNode::Call(call_node) => {
-                let err_ctx = err_ctx!(program, call_node, self.source_manager.clone());
-                add_error_ctx_to_external_error(
-                    Box::pin(self.execute_call_node(call_node, program, kernel, host)).await,
-                    err_ctx,
-                )?
-            },
-            MastNode::Dyn(dyn_node) => {
-                let err_ctx = err_ctx!(program, dyn_node, self.source_manager.clone());
-                add_error_ctx_to_external_error(
-                    Box::pin(self.execute_dyn_node(dyn_node, program, kernel, host)).await,
-                    err_ctx,
-                )?
-            },
-            MastNode::External(external_node) => {
-                Box::pin(self.execute_external_node(external_node, kernel, host)).await?
-            },
-        }
-
-        for &decorator_id in node.after_exit() {
-            self.execute_decorator(&program[decorator_id], 0, host)?;
-        }
-
-        Ok(())
-    }
-
-    async fn execute_join_node(
+    /// Executes a Join node.
+    #[inline(always)]
+    fn execute_join_node(
         &mut self,
         join_node: &JoinNode,
-        program: &MastForest,
-        kernel: &Kernel,
-        host: &mut impl AsyncHost,
+        current_node_id: MastNodeId,
+        phase: ProcessingStepPhase,
+        continuation_stack: &mut ContinuationStack,
     ) -> Result<(), ExecutionError> {
-        // Corresponds to the row inserted for the JOIN operation added to the trace.
-        self.clk += 1_u32;
+        match phase {
+            ProcessingStepPhase::Start => {
+                // Corresponds to the row inserted for the JOIN operation added
+                // to the trace.
+                self.clk += 1_u32;
 
-        self.execute_mast_node(join_node.first(), program, kernel, host).await?;
-        self.execute_mast_node(join_node.second(), program, kernel, host).await?;
-
-        // Corresponds to the row inserted for the END operation added to the trace.
-        self.clk += 1_u32;
-
+                continuation_stack.push_node_in_phase(current_node_id, ProcessingStepPhase::Finish);
+                continuation_stack.push_node_with_decorators(join_node.second());
+                continuation_stack.push_node_with_decorators(join_node.first());
+            },
+            ProcessingStepPhase::Finish => {
+                // Corresponds to the row inserted for the END operation added
+                // to the trace.
+                self.clk += 1_u32;
+            },
+        }
         Ok(())
     }
 
-    async fn execute_split_node(
+    /// Executes a Split node.
+    #[inline(always)]
+    fn execute_split_node(
         &mut self,
         split_node: &SplitNode,
-        program: &MastForest,
-        kernel: &Kernel,
-        host: &mut impl AsyncHost,
+        current_node_id: MastNodeId,
+        phase: ProcessingStepPhase,
+        current_forest: &MastForest,
+        continuation_stack: &mut ContinuationStack,
     ) -> Result<(), ExecutionError> {
-        // Corresponds to the row inserted for the SPLIT operation added to the trace.
-        self.clk += 1_u32;
-
-        let condition = self.stack_get(0);
-
-        // drop the condition from the stack
-        self.decrement_stack_size();
-
-        // execute the appropriate branch
-        let ret = if condition == ONE {
-            self.execute_mast_node(split_node.on_true(), program, kernel, host).await
-        } else if condition == ZERO {
-            self.execute_mast_node(split_node.on_false(), program, kernel, host).await
-        } else {
-            let err_ctx = err_ctx!(program, split_node, self.source_manager.clone());
-            Err(ExecutionError::not_binary_value_if(condition, &err_ctx))
-        };
-
-        // Corresponds to the row inserted for the END operation added to the trace.
-        self.clk += 1_u32;
-
-        ret
-    }
-
-    async fn execute_loop_node(
-        &mut self,
-        loop_node: &LoopNode,
-        program: &MastForest,
-        kernel: &Kernel,
-        host: &mut impl AsyncHost,
-    ) -> Result<(), ExecutionError> {
-        // Corresponds to the row inserted for the LOOP operation added to the trace.
-        self.clk += 1_u32;
-
-        // The loop condition is checked after the loop body is executed.
-        let mut condition = self.stack_get(0);
-
-        // drop the condition from the stack
-        self.decrement_stack_size();
-
-        // execute the loop body as long as the condition is true
-        while condition == ONE {
-            self.execute_mast_node(loop_node.body(), program, kernel, host).await?;
-
-            // check the loop condition, and drop it from the stack
-            condition = self.stack_get(0);
-            self.decrement_stack_size();
-
-            // this clock increment is for the row inserted for the `REPEAT` node added to
-            // the trace on each iteration. It needs to be at the end of this loop (instead
-            // of at the beginning), otherwise we get an off-by-one error when comparing
-            // with [crate::Process].
-            if condition == ONE {
+        match phase {
+            ProcessingStepPhase::Start => {
+                // Corresponds to the row inserted for the SPLIT operation added
+                // to the trace.
                 self.clk += 1_u32;
-            }
+
+                let condition = self.stack_get(0);
+
+                // drop the condition from the stack
+                self.decrement_stack_size();
+
+                // execute the appropriate branch
+                if condition == ONE {
+                    continuation_stack
+                        .push_node_in_phase(current_node_id, ProcessingStepPhase::Finish);
+                    continuation_stack.push_node_with_decorators(split_node.on_true());
+                } else if condition == ZERO {
+                    continuation_stack
+                        .push_node_in_phase(current_node_id, ProcessingStepPhase::Finish);
+                    continuation_stack.push_node_with_decorators(split_node.on_false());
+                } else {
+                    let err_ctx = err_ctx!(current_forest, split_node, self.source_manager.clone());
+                    return Err(ExecutionError::not_binary_value_if(condition, &err_ctx));
+                };
+            },
+            ProcessingStepPhase::Finish => {
+                // Corresponds to the row inserted for the END operation added
+                // to the trace.
+                self.clk += 1_u32;
+            },
         }
-
-        // Corresponds to the row inserted for the END operation added to the trace.
-        self.clk += 1_u32;
-
-        if condition == ZERO {
-            Ok(())
-        } else {
-            let err_ctx = err_ctx!(program, loop_node, self.source_manager.clone());
-            Err(ExecutionError::not_binary_value_loop(condition, &err_ctx))
-        }
-    }
-
-    async fn execute_call_node(
-        &mut self,
-        call_node: &CallNode,
-        program: &MastForest,
-        kernel: &Kernel,
-        host: &mut impl AsyncHost,
-    ) -> Result<(), ExecutionError> {
-        let err_ctx = err_ctx!(program, call_node, self.source_manager.clone());
-
-        // Corresponds to the row inserted for the CALL or SYSCALL operation added to the trace.
-        self.clk += 1_u32;
-
-        // call or syscall are not allowed inside a syscall
-        if self.in_syscall {
-            let instruction = if call_node.is_syscall() { "syscall" } else { "call" };
-            return Err(ExecutionError::CallInSyscall(instruction));
-        }
-
-        let callee_hash = program
-            .get_node_by_id(call_node.callee())
-            .ok_or(ExecutionError::MastNodeNotFoundInForest { node_id: call_node.callee() })?
-            .digest();
-
-        self.save_context_and_truncate_stack();
-
-        if call_node.is_syscall() {
-            // check if the callee is in the kernel
-            if !kernel.contains_proc(callee_hash) {
-                return Err(ExecutionError::syscall_target_not_in_kernel(callee_hash, &err_ctx));
-            }
-
-            // set the system registers to the syscall context
-            self.ctx = ContextId::root();
-            self.fmp = SYSCALL_FMP_MIN.into();
-            self.in_syscall = true;
-        } else {
-            // set the system registers to the callee context
-            self.ctx = self.clk.into();
-            self.fmp = Felt::new(FMP_MIN);
-            self.caller_hash = callee_hash;
-        }
-
-        // Execute the callee.
-        self.execute_mast_node(call_node.callee(), program, kernel, host).await?;
-
-        // when returning from a function call or a syscall, restore the context of the
-        // system registers and the operand stack to what it was prior to
-        // the call.
-        self.restore_context(&err_ctx)?;
-
-        // Corresponds to the row inserted for the END operation added to the trace.
-        self.clk += 1_u32;
-
         Ok(())
     }
 
+    /// Executes a Loop node.
+    #[inline(always)]
+    fn execute_loop_node(
+        &mut self,
+        loop_node: &LoopNode,
+        current_node_id: MastNodeId,
+        phase: ProcessingStepPhase,
+        current_forest: &MastForest,
+        continuation_stack: &mut ContinuationStack,
+    ) -> Result<(), ExecutionError> {
+        match phase {
+            ProcessingStepPhase::Start => {
+                // Corresponds to the row inserted for the LOOP operation added
+                // to the trace.
+                self.clk += 1_u32;
+
+                let condition = self.stack_get(0);
+
+                // drop the condition from the stack
+                self.decrement_stack_size();
+
+                // execute the loop body as long as the condition is true
+                if condition == ONE {
+                    // Push the loop to check condition again after body
+                    // executes
+                    continuation_stack
+                        .push_node_in_phase(current_node_id, ProcessingStepPhase::Finish);
+                    continuation_stack.push_node_with_decorators(loop_node.body());
+                } else if condition == ZERO {
+                    // Exit the loop - add END row immediately since no body to
+                    // execute
+                    self.clk += 1_u32;
+                } else {
+                    let err_ctx = err_ctx!(current_forest, loop_node, self.source_manager.clone());
+                    return Err(ExecutionError::not_binary_value_loop(condition, &err_ctx));
+                }
+            },
+            ProcessingStepPhase::Finish => {
+                // This happens after loop body execution
+                // Check condition again to see if we should continue looping
+                let condition = self.stack_get(0);
+                self.decrement_stack_size();
+
+                if condition == ONE {
+                    // Add REPEAT row and continue looping
+                    self.clk += 1_u32;
+                    continuation_stack
+                        .push_node_in_phase(current_node_id, ProcessingStepPhase::Finish);
+                    continuation_stack.push_node_with_decorators(loop_node.body());
+                } else if condition == ZERO {
+                    // Exit the loop - add END row
+                    self.clk += 1_u32;
+                } else {
+                    let err_ctx = err_ctx!(current_forest, loop_node, self.source_manager.clone());
+                    return Err(ExecutionError::not_binary_value_loop(condition, &err_ctx));
+                }
+            },
+        }
+        Ok(())
+    }
+
+    /// Executes a Call node.
+    #[inline(always)]
+    fn execute_call_node(
+        &mut self,
+        call_node: &CallNode,
+        current_node_id: MastNodeId,
+        phase: ProcessingStepPhase,
+        program: &Program,
+        current_forest: &MastForest,
+        continuation_stack: &mut ContinuationStack,
+    ) -> Result<(), ExecutionError> {
+        match phase {
+            ProcessingStepPhase::Start => {
+                let err_ctx = err_ctx!(current_forest, call_node, self.source_manager.clone());
+
+                // Corresponds to the row inserted for the CALL or SYSCALL
+                // operation added to the trace.
+                self.clk += 1_u32;
+
+                // call or syscall are not allowed inside a syscall
+                if self.in_syscall {
+                    let instruction = if call_node.is_syscall() { "syscall" } else { "call" };
+                    return Err(ExecutionError::CallInSyscall(instruction));
+                }
+
+                let callee_hash = current_forest
+                    .get_node_by_id(call_node.callee())
+                    .ok_or(ExecutionError::MastNodeNotFoundInForest {
+                        node_id: call_node.callee(),
+                    })?
+                    .digest();
+
+                self.save_context_and_truncate_stack();
+
+                if call_node.is_syscall() {
+                    // check if the callee is in the kernel
+                    if !program.kernel().contains_proc(callee_hash) {
+                        return Err(ExecutionError::syscall_target_not_in_kernel(
+                            callee_hash,
+                            &err_ctx,
+                        ));
+                    }
+
+                    // set the system registers to the syscall context
+                    self.ctx = ContextId::root();
+                    self.fmp = SYSCALL_FMP_MIN.into();
+                    self.in_syscall = true;
+                } else {
+                    // set the system registers to the callee context
+                    self.ctx = self.clk.into();
+                    self.fmp = Felt::new(FMP_MIN);
+                    self.caller_hash = callee_hash;
+                }
+
+                // push the callee onto the continuation stack
+                continuation_stack.push_node_in_phase(current_node_id, ProcessingStepPhase::Finish);
+                continuation_stack.push_node_with_decorators(call_node.callee());
+            },
+            ProcessingStepPhase::Finish => {
+                let err_ctx = err_ctx!(current_forest, call_node, self.source_manager.clone());
+                // when returning from a function call or a syscall, restore the
+                // context of the
+                // system registers and the operand stack to what it was prior
+                // to the call.
+                self.restore_context(&err_ctx)?;
+
+                // Corresponds to the row inserted for the END operation added
+                // to the trace.
+                self.clk += 1_u32;
+            },
+        }
+        Ok(())
+    }
+
+    /// Executes a Dyn node.
+    #[inline(always)]
     async fn execute_dyn_node(
         &mut self,
         dyn_node: &DynNode,
-        program: &MastForest,
-        kernel: &Kernel,
+        current_node_id: MastNodeId,
+        phase: ProcessingStepPhase,
+        current_forest: &MastForest,
+        continuation_stack: &mut ContinuationStack,
         host: &mut impl AsyncHost,
     ) -> Result<(), ExecutionError> {
-        // Corresponds to the row inserted for the DYN or DYNCALL operation added to the trace.
-        self.clk += 1_u32;
+        match phase {
+            ProcessingStepPhase::Start => {
+                // Corresponds to the row inserted for the DYN or DYNCALL operation
+                // added to the trace.
+                self.clk += 1_u32;
 
-        // dyn calls are not allowed inside a syscall
-        if dyn_node.is_dyncall() && self.in_syscall {
-            return Err(ExecutionError::CallInSyscall("dyncall"));
-        }
+                // dyn calls are not allowed inside a syscall
+                if dyn_node.is_dyncall() && self.in_syscall {
+                    return Err(ExecutionError::CallInSyscall("dyncall"));
+                }
 
-        let err_ctx = err_ctx!(program, dyn_node, self.source_manager.clone());
+                let err_ctx = err_ctx!(current_forest, dyn_node, self.source_manager.clone());
 
-        // Retrieve callee hash from memory, using stack top as the memory address.
-        let callee_hash = {
-            let mem_addr = self.stack_get(0);
-            self.memory
-                .read_word(self.ctx, mem_addr, self.clk, &err_ctx)
-                .map_err(ExecutionError::MemoryError)?
-        };
+                // Retrieve callee hash from memory, using stack top as the memory
+                // address.
+                let callee_hash = {
+                    let mem_addr = self.stack_get(0);
+                    self.memory
+                        .read_word(self.ctx, mem_addr, self.clk, &err_ctx)
+                        .map_err(ExecutionError::MemoryError)?
+                };
 
-        // Drop the memory address from the stack. This needs to be done BEFORE saving the context,
-        // because the next instruction starts with a "shifted left" stack.
-        self.decrement_stack_size();
+                // Drop the memory address from the stack. This needs to be done
+                // BEFORE saving the context,
+                // because the next instruction starts with a "shifted left" stack.
+                self.decrement_stack_size();
 
-        // For dyncall, save the context and reset it.
-        if dyn_node.is_dyncall() {
-            self.save_context_and_truncate_stack();
-            self.ctx = self.clk.into();
-            self.fmp = Felt::new(FMP_MIN);
-            self.caller_hash = callee_hash;
-        };
+                // For dyncall, save the context and reset it.
+                if dyn_node.is_dyncall() {
+                    self.save_context_and_truncate_stack();
+                    self.ctx = self.clk.into();
+                    self.fmp = Felt::new(FMP_MIN);
+                    self.caller_hash = callee_hash;
+                };
 
-        // if the callee is not in the program's MAST forest, try to find a MAST forest for it in
-        // the host (corresponding to an external library loaded in the host); if none are
-        // found, return an error.
-        match program.find_procedure_root(callee_hash) {
-            Some(callee_id) => self.execute_mast_node(callee_id, program, kernel, host).await?,
-            None => {
-                let mast_forest = host
-                    .get_mast_forest(&callee_hash)
-                    .await
-                    .ok_or_else(|| ExecutionError::dynamic_node_not_found(callee_hash, &err_ctx))?;
+                // push callee node
+                continuation_stack.push_node_in_phase(current_node_id, ProcessingStepPhase::Finish);
 
-                // We limit the parts of the program that can be called externally to procedure
-                // roots, even though MAST doesn't have that restriction.
-                let root_id = mast_forest
-                    .find_procedure_root(callee_hash)
-                    .ok_or(ExecutionError::malfored_mast_forest_in_host(callee_hash, &err_ctx))?;
+                // if the callee is not in the program's MAST forest, try to find a
+                // MAST forest for it in
+                // the host (corresponding to an external library loaded in the
+                // host); if none are found, return
+                // an error.
+                match current_forest.find_procedure_root(callee_hash) {
+                    Some(callee_id) => {
+                        continuation_stack.push_node_with_decorators(callee_id);
+                    },
+                    None => {
+                        let mast_forest =
+                            host.get_mast_forest(&callee_hash).await.ok_or_else(|| {
+                                ExecutionError::dynamic_node_not_found(callee_hash, &err_ctx)
+                            })?;
 
-                self.execute_mast_node(root_id, &mast_forest, kernel, host).await?
+                        // We limit the parts of the program that can be called
+                        // externally to procedure
+                        // roots, even though MAST doesn't have that restriction.
+                        let root_id = mast_forest.find_procedure_root(callee_hash).ok_or(
+                            ExecutionError::malfored_mast_forest_in_host(callee_hash, &err_ctx),
+                        )?;
+
+                        continuation_stack.push_node_with_decorators(root_id);
+                    },
+                }
+            },
+            ProcessingStepPhase::Finish => {
+                let err_ctx = err_ctx!(current_forest, dyn_node, self.source_manager.clone());
+                // For dyncall, restore the context.
+                if dyn_node.is_dyncall() {
+                    self.restore_context(&err_ctx)?;
+                }
+
+                // Corresponds to the row inserted for the END operation added to
+                // the trace.
+                self.clk += 1_u32;
             },
         }
-
-        // For dyncall, restore the context.
-        if dyn_node.is_dyncall() {
-            self.restore_context(&err_ctx)?;
-        }
-
-        // Corresponds to the row inserted for the END operation added to the trace.
-        self.clk += 1_u32;
-
         Ok(())
     }
 
+    /// Executes an External node.
+    #[inline(always)]
     async fn execute_external_node(
         &mut self,
         external_node: &ExternalNode,
-        kernel: &Kernel,
+        continuation_stack: &mut ContinuationStack,
         host: &mut impl AsyncHost,
     ) -> Result<(), ExecutionError> {
-        let (root_id, mast_forest) = self.resolve_external_node(external_node, host).await?;
+        let (root_id, new_mast_forest) = self.resolve_external_node(external_node, host).await?;
 
-        self.execute_mast_node(root_id, &mast_forest, kernel, host).await
+        continuation_stack.push_new_forest(new_mast_forest, root_id);
+        Ok(())
     }
 
     // Note: when executing individual ops, we do not increment the clock by 1 at every iteration
