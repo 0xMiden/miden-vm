@@ -881,6 +881,12 @@ impl<'a> ProcessState<'a> {
     }
 }
 
+impl<'a> From<&'a mut Process> for ProcessState<'a> {
+    fn from(process: &'a mut Process) -> Self {
+        process.state()
+    }
+}
+
 // HELPERS
 // ================================================================================================
 
