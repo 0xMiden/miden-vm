@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.15.1 (2025-07-10)
+
+- Make `Process::state()` public and re-introduce `From<&Process> for ProcessState`.
+
 ## 0.16.0 (2025-07-08)
 
 #### Enhancements
