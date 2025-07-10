@@ -4,7 +4,7 @@ use core::fmt;
 
 pub use basic_block_node::{
     BATCH_SIZE as OP_BATCH_SIZE, BasicBlockNode, GROUP_SIZE as OP_GROUP_SIZE, OpBatch,
-    OperationOrDecorator,
+    OperationOrDecorator, read_batches_from, write_batches_into,
 };
 
 mod call_node;

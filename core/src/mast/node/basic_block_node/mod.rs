@@ -107,9 +107,8 @@ impl BasicBlockNode {
 
     /// Returns a new [`BasicBlockNode`] from values that are assumed to be correct.
     /// Should only be used when the source of the inputs is trusted (e.g. deserialization).
-    pub fn new_unsafe(operations: Vec<Operation>, decorators: DecoratorList, digest: Word) -> Self {
-        assert!(!operations.is_empty());
-        let op_batches = batch_ops(operations);
+    pub fn new_unsafe(op_batches: Vec<OpBatch>, decorators: DecoratorList, digest: Word) -> Self {
+        assert!(!op_batches.is_empty());
         Self { op_batches, digest, decorators }
     }
 
@@ -448,4 +447,69 @@ fn validate_decorators(operations: &[Operation], decorators: &DecoratorList) {
             "last op index in decorator list should be less than or equal to the number of ops"
         );
     }
+}
+
+use crate::utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
+
+/*
+  In principle a basic block can be serialized as a sequence of
+  operations. However, when we meet a Noop during deserialization, it
+  is unclear if it was inserted by the user or by the padding rules in
+  [batch_ops].
+  If it was introduced by the user it should be preserved and treated
+  like any other operation, for example it should be grouped together
+  with other operations in a group.
+  If it was introduced by padding then it should create its own group
+  or be the trailing operation of a group.
+
+  In order to distinguish these two cases, during serialization each
+  Noop is followed by an extra boolean flag.
+  During deserialization, if a Noop is coming from padding, it is not
+  inserted in the sequence of operations and it will be automatically
+  inserted again by the padding rules. If the Noop is not padding, it
+  is included in the sequence like any other operation.
+*/
+
+pub fn write_batches_into<W: ByteWriter>(batches: &[OpBatch], target: &mut W) {
+    let num_ops: usize = batches
+        .iter()
+        .flat_map(|b| b.op_counts())
+        .cloned()
+        .reduce(|x, y| x + y)
+        .unwrap();
+    target.write_u16(num_ops.try_into().unwrap());
+    for batch in batches {
+        for group in batch.ops_by_group() {
+            let group_len = group.len();
+            for op in group {
+                op.write_into(target);
+                if matches!(op, Operation::Noop) {
+                    if group_len == 1 {
+                        target.write_bool(true);
+                    } else {
+                        target.write_bool(false);
+                    }
+                }
+            }
+        }
+    }
+}
+
+pub fn read_batches_from<R: ByteReader>(
+    source: &mut R,
+) -> Result<Vec<OpBatch>, DeserializationError> {
+    let mut ops: Vec<Operation> = Vec::new();
+    let num_ops = source.read_u16()?;
+
+    for _ in 0..num_ops {
+        let op: Operation = Deserializable::read_from(source)?;
+        if matches!(op, Operation::Noop) {
+            let is_pad_group = source.read_bool()?;
+            if is_pad_group {
+                continue;
+            }
+        };
+        ops.push(op);
+    }
+    Ok(batch_ops(ops))
 }

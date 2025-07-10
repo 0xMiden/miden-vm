@@ -2,9 +2,8 @@ use alloc::vec::Vec;
 
 use super::NodeDataOffset;
 use crate::{
-    Operation,
-    mast::BasicBlockNode,
-    utils::{ByteReader, DeserializationError, Serializable, SliceReader},
+    mast::{BasicBlockNode, OpBatch},
+    utils::{DeserializationError, SliceReader},
 };
 
 // BASIC BLOCK DATA BUILDER
@@ -30,8 +29,7 @@ impl BasicBlockDataBuilder {
     pub fn encode_basic_block(&mut self, basic_block: &BasicBlockNode) -> NodeDataOffset {
         let ops_offset = self.node_data.len() as NodeDataOffset;
 
-        let operations: Vec<Operation> = basic_block.operations().copied().collect();
-        operations.write_into(&mut self.node_data);
+        crate::mast::node::write_batches_into(basic_block.op_batches(), &mut self.node_data);
 
         ops_offset
     }
@@ -61,10 +59,10 @@ impl BasicBlockDataDecoder<'_> {
     pub fn decode_operations(
         &self,
         ops_offset: NodeDataOffset,
-    ) -> Result<Vec<Operation>, DeserializationError> {
+    ) -> Result<Vec<OpBatch>, DeserializationError> {
         // Read ops
         let mut ops_data_reader = SliceReader::new(&self.node_data[ops_offset as usize..]);
-        let operations: Vec<Operation> = ops_data_reader.read()?;
+        let operations: Vec<OpBatch> = crate::mast::node::read_batches_from(&mut ops_data_reader)?;
 
         Ok(operations)
     }

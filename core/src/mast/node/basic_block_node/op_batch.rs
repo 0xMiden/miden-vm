@@ -27,6 +27,20 @@ impl OpBatch {
         &self.ops
     }
 
+    pub fn ops_by_group(&self) -> [Vec<&Operation>; BATCH_SIZE] {
+        let mut res = Vec::new();
+        let mut pos = 0;
+        for group_size in self.op_counts {
+            let mut group_ops = Vec::new();
+            for _ in 0..group_size {
+                group_ops.push(&self.ops[pos]);
+                pos += 1;
+            }
+            res.push(group_ops)
+        }
+        res.try_into().unwrap()
+    }
+
     /// Returns a list of operation groups contained in this batch.
     ///
     /// Each group is represented by a single field element.
