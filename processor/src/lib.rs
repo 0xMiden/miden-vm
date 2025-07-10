@@ -748,7 +748,7 @@ pub enum ProcessState<'a> {
 
 impl Process {
     #[inline(always)]
-    fn state(&mut self) -> ProcessState<'_> {
+    pub fn state(&mut self) -> ProcessState<'_> {
         ProcessState::Slow(SlowProcessState {
             advice: &mut self.advice,
             system: &self.system,
@@ -878,6 +878,12 @@ impl<'a> ProcessState<'a> {
             },
             ProcessState::Fast(state) => state.processor.memory.get_memory_state(ctx),
         }
+    }
+}
+
+impl<'a> From<&'a mut Process> for ProcessState<'a> {
+    fn from(process: &'a mut Process) -> Self {
+        process.state()
     }
 }
 
