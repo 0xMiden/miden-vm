@@ -45,7 +45,7 @@ pub use miden_core::{
     Felt, FieldElement, StarkField,
     utils::{DeserializationError, ToElements},
 };
-pub use options::{ExecutionOptions, MAX_CYCLES, ProvingOptions};
+pub use options::{ExecutionOptions, ProvingOptions};
 pub use proof::{ExecutionProof, HashFunction};
 use utils::TransitionConstraintRange;
 pub use winter_air::{AuxRandElements, FieldExtension, PartitionOptions};

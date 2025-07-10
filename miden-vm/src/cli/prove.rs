@@ -5,7 +5,7 @@ use miden_assembly::{
     DefaultSourceManager, SourceManager,
     diagnostics::{Report, WrapErr},
 };
-use miden_processor::{DefaultHost, ExecutionOptions, ExecutionOptionsError, MAX_CYCLES};
+use miden_processor::{DefaultHost, ExecutionOptions, ExecutionOptionsError};
 use miden_stdlib::StdLibrary;
 use miden_vm::{ProvingOptions, internal::InputFile};
 
@@ -34,7 +34,7 @@ pub struct ProveCmd {
     library_paths: Vec<PathBuf>,
 
     /// Maximum number of cycles a program is allowed to consume
-    #[arg(short = 'm', long = "max-cycles", default_value_t = MAX_CYCLES)]
+    #[arg(short = 'm', long = "max-cycles", default_value_t = ExecutionOptions::MAX_CYCLES)]
     max_cycles: u32,
 
     /// Number of outputs

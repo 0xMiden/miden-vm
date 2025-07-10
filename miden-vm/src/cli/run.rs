@@ -5,7 +5,7 @@ use miden_assembly::{
     DefaultSourceManager,
     diagnostics::{IntoDiagnostic, Report, WrapErr},
 };
-use miden_processor::{DefaultHost, ExecutionOptions, ExecutionTrace, MAX_CYCLES};
+use miden_processor::{DefaultHost, ExecutionOptions, ExecutionTrace};
 use miden_stdlib::StdLibrary;
 use miden_vm::internal::InputFile;
 use tracing::instrument;
@@ -35,7 +35,7 @@ pub struct RunCmd {
     library_paths: Vec<PathBuf>,
 
     /// Maximum number of cycles a program is allowed to consume
-    #[arg(short = 'm', long = "max-cycles", default_value_t = MAX_CYCLES)]
+    #[arg(short = 'm', long = "max-cycles", default_value_t = ExecutionOptions::MAX_CYCLES)]
     max_cycles: u32,
 
     /// Number of outputs
