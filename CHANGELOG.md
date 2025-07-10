@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.15.1 (2025-07-10)
+## 0.16.1 (2025-07-10)
 
 - Return `AdviceProvider` as part of the `ExecutionTrace`.
 
