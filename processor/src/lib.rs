@@ -748,7 +748,7 @@ pub enum ProcessState<'a> {
 
 impl Process {
     #[inline(always)]
-    fn state(&mut self) -> ProcessState<'_> {
+    pub fn state(&mut self) -> ProcessState<'_> {
         ProcessState::Slow(SlowProcessState {
             advice: &mut self.advice,
             system: &self.system,
