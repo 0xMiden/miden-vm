@@ -82,7 +82,7 @@ impl AdviceMap {
     }
 
     /// Merges entries from `other`, but only for keys not already present in `self`.
-    pub fn merge_new(&mut self, other: &Self) {
+    fn merge_new(&mut self, other: &Self) {
         for (key, value) in other.iter() {
             self.0.entry(*key).or_insert_with(|| value.clone());
         }

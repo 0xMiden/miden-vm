@@ -83,7 +83,7 @@ pub fn push_falcon_signature(
 
     let clk = process.clk();
     let pk_sk = process
-        .advice_provider_mut()
+        .advice_provider()
         .get_mapped_values(&pub_key)
         .map_err(|err| ExecutionError::advice_error(err, clk, err_ctx))?;
 

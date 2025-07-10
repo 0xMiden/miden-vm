@@ -148,13 +148,9 @@ impl AdviceProvider {
 
     /// Returns a reference to the value(s) associated with the specified key in the advice map.
     ///
-    /// # Details
-    /// This function is mutable since we will want this method to lazily load advice maps
-    /// from external [`MastForest`](crate::MastForest)s.
-    ///
     /// # Errors
     /// Returns an error if the key is not found in the map.
-    pub fn get_mapped_values(&mut self, key: &Word) -> Result<&[Felt], AdviceError> {
+    pub fn get_mapped_values(&self, key: &Word) -> Result<&[Felt], AdviceError> {
         if let Some(value) = self.map.get(key) {
             Ok(value.as_ref())
         } else {
@@ -165,7 +161,7 @@ impl AdviceProvider {
     /// Inserts the provided value into the advice map under the specified key.
     ///
     /// The values in the advice map can be moved onto the advice stack by invoking
-    /// the [AdviceProvider::push_stack()] method.
+    /// the [AdviceProvider::push_from_map()] method.
     ///
     /// Returns an error if the specified key is already present in the advice map.
     pub fn insert_into_map(&mut self, key: Word, values: Vec<Felt>) -> Result<(), AdviceError> {

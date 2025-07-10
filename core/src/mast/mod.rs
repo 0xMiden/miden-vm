@@ -457,7 +457,13 @@ impl MastForest {
     }
 
     /// Returns the [Word] representing the content hash of a subset of [`MastNodeId`]s.
-    pub fn nodes_digest<'a>(&self, node_ids: impl IntoIterator<Item = &'a MastNodeId>) -> Word {
+    ///
+    /// # Panics
+    /// This function panics if any `node_ids` is not a node of this forest.
+    pub fn compute_nodes_commitment<'a>(
+        &self,
+        node_ids: impl IntoIterator<Item = &'a MastNodeId>,
+    ) -> Word {
         let mut digests: Vec<Word> = node_ids.into_iter().map(|&id| self[id].digest()).collect();
         digests.sort_unstable_by_key(|word| LexicographicWord::from(*word));
         miden_crypto::hash::rpo::Rpo256::merge_many(&digests)

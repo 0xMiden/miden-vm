@@ -77,7 +77,7 @@ impl Library {
             }
         }
 
-        let digest = mast_forest.nodes_digest(exports.values());
+        let digest = mast_forest.compute_nodes_commitment(exports.values());
 
         Ok(Self { digest, exports, mast_forest })
     }
@@ -208,7 +208,7 @@ impl Deserializable for Library {
             exports.insert(proc_name, proc_node_id);
         }
 
-        let digest = mast_forest.nodes_digest(exports.values());
+        let digest = mast_forest.compute_nodes_commitment(exports.values());
 
         Ok(Self { digest, exports, mast_forest })
     }
