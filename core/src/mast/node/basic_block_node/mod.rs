@@ -422,6 +422,13 @@ fn batch_ops(ops: Vec<Operation>) -> Vec<OpBatch> {
         batches.push(batch);
     }
 
+    // If the block is empty, we insert a single batch with a Noop
+    if batches.is_empty() {
+        batch_acc = OpBatchAccumulator::new();
+        batch_acc.add_op(Operation::Noop);
+        batches.push(batch_acc.into_batch());
+    }
+
     batches
 }
 
