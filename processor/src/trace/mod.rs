@@ -1,4 +1,5 @@
 use alloc::vec::Vec;
+use std::mem;
 
 use miden_air::trace::{
     AUX_TRACE_RAND_ELEMENTS, AUX_TRACE_WIDTH, DECODER_TRACE_OFFSET, MIN_TRACE_LEN,
@@ -10,8 +11,9 @@ use miden_core::{ProgramInfo, StackInputs, StackOutputs, Word, ZERO, stack::MIN_
 use winter_prover::{EvaluationFrame, Trace, TraceInfo, crypto::RandomCoin};
 
 use super::{
-    ColMatrix, Felt, FieldElement, Process, chiplets::AuxTraceBuilder as ChipletsAuxTraceBuilder,
-    crypto::RpoRandomCoin, decoder::AuxTraceBuilder as DecoderAuxTraceBuilder,
+    AdviceProvider, ColMatrix, Felt, FieldElement, Process,
+    chiplets::AuxTraceBuilder as ChipletsAuxTraceBuilder, crypto::RpoRandomCoin,
+    decoder::AuxTraceBuilder as DecoderAuxTraceBuilder,
     range::AuxTraceBuilder as RangeCheckerAuxTraceBuilder,
     stack::AuxTraceBuilder as StackAuxTraceBuilder,
 };
@@ -56,6 +58,7 @@ pub struct ExecutionTrace {
     aux_trace_builders: AuxTraceBuilders,
     program_info: ProgramInfo,
     stack_outputs: StackOutputs,
+    advice: AdviceProvider,
     trace_len_summary: TraceLenSummary,
 }
 
@@ -69,7 +72,7 @@ impl ExecutionTrace {
     // CONSTRUCTOR
     // --------------------------------------------------------------------------------------------
     /// Builds an execution trace for the provided process.
-    pub fn new(process: Process, stack_outputs: StackOutputs) -> Self {
+    pub fn new(mut process: Process, stack_outputs: StackOutputs) -> Self {
         // use program hash to initialize random element generator; this generator will be used
         // to inject random values at the end of the trace; using program hash here is OK because
         // we are using random values only to stabilize constraint degrees, and not to achieve
@@ -80,6 +83,7 @@ impl ExecutionTrace {
         // create a new program info instance with the underlying kernel
         let kernel = process.kernel().clone();
         let program_info = ProgramInfo::new(program_hash, kernel);
+        let advice = mem::take(&mut process.advice);
         let (main_trace, aux_trace_builders, trace_len_summary) = finalize_trace(process, rng);
         let trace_info = TraceInfo::new_multi_segment(
             PADDED_TRACE_WIDTH,
@@ -96,6 +100,7 @@ impl ExecutionTrace {
             main_trace,
             program_info,
             stack_outputs,
+            advice,
             trace_len_summary,
         }
     }
@@ -155,6 +160,11 @@ impl ExecutionTrace {
     /// Returns a summary of the lengths of main, range and chiplet traces.
     pub fn trace_len_summary(&self) -> &TraceLenSummary {
         &self.trace_len_summary
+    }
+
+    /// Returns the final advice provider state.
+    pub fn advice_provider(&self) -> &AdviceProvider {
+        &self.advice
     }
 
     /// Returns the trace meta data.
