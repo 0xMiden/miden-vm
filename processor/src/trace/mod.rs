@@ -172,6 +172,11 @@ impl ExecutionTrace {
         &self.meta
     }
 
+    /// Destructures this execution trace into the process’s final stack and advice states.
+    pub fn into_outputs(self) -> (StackOutputs, AdviceProvider) {
+        (self.stack_outputs, self.advice)
+    }
+
     // HELPER METHODS
     // --------------------------------------------------------------------------------------------
 
