@@ -165,7 +165,7 @@ end
 
 #! Initializes the hasher state required for the `hash_memory_with_state` procedure.
 #!
-#! Depending on the provided pad_inputs flag, this procedure initializes the hasher state using
+#! Depending on the provided pad_inputs_flag, this procedure initializes the hasher state using
 #! different values for capacity element:
 #! - If pad_inputs_flag = 1 the capacity element is set to 0. This will essentially "pad" the
 #!   hashed values with zeroes to the next multiple of 8. 
