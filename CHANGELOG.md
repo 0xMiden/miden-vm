@@ -7,6 +7,7 @@
 #### Changes
 - [BREAKING] Introduce `SourceManagerSync` trait, and remove `Assembler::source_manager()` method [#1966](https://github.com/0xMiden/miden-vm/issues/1966)
 - [BREAKING] Implement preliminary changes for lazy loading of external `MastForest` `AdviceMap`s ([#1949](https://github.com/0xMiden/miden-vm/issues/1949)).
+- Fixed `ExecutionOptions::default()` to set `max_cycles` correctly to `1 << 29` [#1969](https://github.com/0xMiden/miden-vm/pull/1969).
 
 ## 0.16.0 (2025-07-08)
 
@@ -74,7 +75,6 @@
 - The special identifiers for kernel, executable, and anonymous namespaces were not valid MASM syntax (#1893).
 - `AdviceProvider`: replace `SimpleAdviceMap` with `AdviceMap` struct from `miden-core` & add `merge_advice_map` to `AdviceProvider` ([#1924](https://github.com/0xMiden/miden-vm/issues/1924) & [#1922](https://github.com/0xMiden/miden-vm/issues/1922)).
 - [BREAKING] Disallow usage of the field modulus as an immediate value ([#1938](https://github.com/0xMiden/miden-vm/pull/1938)).
-- Fixed `ExecutionOptions::default()` to set `max_cycles` correctly to `1 << 29` (#1963).
 
 ## 0.15.0 (2025-06-06)
 
