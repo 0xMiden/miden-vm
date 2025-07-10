@@ -7,6 +7,7 @@
 #### Changes
 - [BREAKING] Introduce `SourceManagerSync` trait, and remove `Assembler::source_manager()` method [#1966](https://github.com/0xMiden/miden-vm/issues/1966)
 - [BREAKING] Implement preliminary changes for lazy loading of external `MastForest` `AdviceMap`s ([#1949](https://github.com/0xMiden/miden-vm/issues/1949)).
+- [BREAKING] Change serialization of MastForest to account for padding `Noop` operations [#1974](https://github.com/0xMiden/miden-vm/pull/1974)
 
 ## 0.16.0 (2025-07-08)
 
