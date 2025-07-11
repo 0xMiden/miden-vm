@@ -33,6 +33,8 @@ use miden_core::{
 use miden_debug_types::{DefaultSourceManager, SourceManager, SourceSpan};
 pub use winter_prover::matrix::ColMatrix;
 
+pub(crate) mod continuation_stack;
+
 pub mod fast;
 use fast::FastProcessState;
 
