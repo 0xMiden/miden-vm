@@ -244,6 +244,67 @@ fn test_absorb_double_words_from_memory() {
 }
 
 #[test]
+fn test_hash_memory_double_words() {
+    // test the standard case
+    let double_words = "
+    use.std::sys
+    use.std::crypto::hashes::rpo
+
+    begin
+        # store four words (two double words) in memory
+        push.1.0.0.0.1000 mem_storew dropw
+        push.0.1.0.0.1004 mem_storew dropw
+        push.0.0.1.0.1008 mem_storew dropw
+        push.0.0.0.1.1012 mem_storew dropw
+
+        push.1016      # end address
+        push.1000      # start address
+        # => [start_addr, end_addr]
+
+        exec.rpo::hash_memory_double_words
+        # => [HASH]
+
+        # truncate stack
+        exec.sys::truncate_stack
+        # => [HASH]
+    end
+    ";
+
+    #[rustfmt::skip]
+    let resulting_hash: Vec<u64> = build_expected_hash(&[
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0, 1,
+    ]).into_iter().map(|e| e.as_int()).collect();
+
+    build_test!(double_words, &[]).expect_stack(&resulting_hash);
+
+    // test the corner case when the end pointer equals to the start pointer
+    let empty_double_words = r#"
+    use.std::sys
+    use.std::crypto::hashes::rpo
+
+    begin
+        push.1000.1000 # start and end addresses
+        # => [start_addr, end_addr]
+
+        exec.rpo::hash_memory_double_words
+        # => [HASH]
+
+        # assert that the resulting hash is equal to the empty word
+        dupw padw assert_eqw.err="resulting hash should be equal to the empty word"
+
+        # truncate stack
+        exec.sys::truncate_stack
+        # => [HASH]
+    end
+    "#;
+
+    build_test!(empty_double_words, &[]).expect_stack(&[0u64; 4]);
+}
+
+#[test]
 fn test_squeeze_digest() {
     let even_words = "
     use.std::crypto::hashes::rpo
@@ -279,6 +340,56 @@ fn test_squeeze_digest() {
     even_hash.push(1016);
 
     build_test!(even_words, &[]).expect_stack(&even_hash);
+}
+
+#[test]
+fn test_copy_digest() {
+    let copy_digest = r#"
+    use.std::sys
+    use.std::crypto::hashes::rpo
+
+    begin
+        push.1.0.0.0.1000 mem_storew dropw
+        push.0.1.0.0.1004 mem_storew dropw
+
+        push.1008      # end address
+        push.1000      # start address
+        padw padw padw # hasher state
+        exec.rpo::absorb_double_words_from_memory
+        # => [C, B, A, end_ptr, end_ptr]
+
+        # drop the pointers
+        movup.12 drop movup.12 drop
+        # => [C, B, A]
+
+        # copy the result of the permutation (second word, B)
+        exec.rpo::copy_digest
+        # => [B, C, B, A]
+
+        # assert that the copied word is equal to the second word in the hasher state
+        dupw.2 dupw.1 assert_eqw.err="copied word should be equal to the second word in the hasher state"
+        # => [B, C, B, A]
+
+        # truncate stack
+        exec.sys::truncate_stack
+    end
+    "#;
+
+    #[rustfmt::skip]
+    let mut resulting_stack: Vec<u64> = build_expected_perm(&[
+        0, 0, 0, 0, // capacity, no padding required
+        1, 0, 0, 0, // first word of the rate
+        0, 1, 0, 0, // second word of the rate
+    ]).into_iter().map(|e| e.as_int()).collect();
+
+    // push the permutation result on the top of the resulting stack
+    resulting_stack[4..8]
+        .to_vec()
+        .iter()
+        .rev()
+        .for_each(|hash_element| resulting_stack.insert(0, *hash_element));
+
+    build_test!(copy_digest, &[]).expect_stack(&resulting_stack);
 }
 
 #[test]

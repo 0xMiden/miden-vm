@@ -155,15 +155,8 @@ impl AdviceProvider {
     }
 
     /// Returns a reference to the value(s) associated with the specified key in the advice map.
-    ///
-    /// # Errors
-    /// Returns an error if the key is not found in the map.
-    pub fn get_mapped_values(&self, key: &Word) -> Result<&[Felt], AdviceError> {
-        if let Some(value) = self.map.get(key) {
-            Ok(value.as_ref())
-        } else {
-            Err(AdviceError::MapKeyNotFound { key: *key })
-        }
+    pub fn get_mapped_values(&self, key: &Word) -> Option<&[Felt]> {
+        self.map.get(key).map(|value| value.as_ref())
     }
 
     /// Inserts the provided value into the advice map under the specified key.

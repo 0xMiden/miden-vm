@@ -38,7 +38,7 @@ pub fn print_debug_info(process: &ProcessState, options: &DebugOptions) {
 /// Prints the number of stack items specified by `n` if it is provided, otherwise prints
 /// the whole stack.
 fn print_vm_stack(process: &ProcessState, n: Option<u8>) {
-    let stack = process.advice_provider().stack();
+    let stack = process.get_stack_state();
 
     // if n is empty, print the entire stack
     let num_items = if let Some(n) = n {
