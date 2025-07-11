@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.16.2 (2025-07-11)
+
+- [BREAKING] Revert `get_mapped_value` return signature [(#1981)](https://github.com/0xMiden/miden-vm/issues/1981).
+
 ## 0.16.1 (2025-07-10)
 
 - Make `Process::state()` public and re-introduce `From<&Process> for ProcessState`.
