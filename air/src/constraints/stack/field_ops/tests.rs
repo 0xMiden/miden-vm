@@ -1,8 +1,8 @@
 use core::ops::Neg;
 
+use miden_core::{Felt, FieldElement, ONE, Operation, ZERO};
 use proptest::prelude::*;
-use rand_utils::rand_value;
-use vm_core::{Felt, FieldElement, ONE, Operation, ZERO};
+use winter_rand_utils::rand_value;
 
 use super::{
     super::{DECODER_TRACE_OFFSET, STACK_TRACE_OFFSET},

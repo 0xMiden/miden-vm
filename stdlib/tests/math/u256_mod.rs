@@ -1,5 +1,5 @@
+use miden_utils_testing::rand::rand_vector;
 use num_bigint::BigUint;
-use test_utils::rand::rand_vector;
 
 // MULTIPLICATION
 // ================================================================================================

@@ -12,10 +12,11 @@ use core::{
 use miden_core::utils::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
+use miden_debug_types::Span;
 use smallvec::smallvec;
 
 use crate::{
-    LibraryNamespace, Span,
+    LibraryNamespace,
     ast::{Ident, IdentError},
 };
 

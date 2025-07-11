@@ -5,16 +5,17 @@ use std::{
     sync::Arc,
 };
 
-use assembly::{
-    Assembler, Library, LibraryNamespace, SourceManager,
+use miden_assembly::{
+    Assembler, Library, LibraryNamespace,
     ast::{Module, ModuleKind},
     diagnostics::{Report, WrapErr},
     report,
     utils::Deserializable,
 };
+use miden_debug_types::SourceManagerSync;
+use miden_stdlib::StdLibrary;
 use miden_vm::{ExecutionProof, Program, StackOutputs, Word, utils::SliceReader};
-use serde_derive::{Deserialize, Serialize};
-use stdlib::StdLibrary;
+use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
 // HELPERS
@@ -109,23 +110,23 @@ impl OutputFile {
 
 pub struct ProgramFile {
     ast: Box<Module>,
-    source_manager: Arc<dyn SourceManager + Send + Sync>,
+    source_manager: Arc<dyn SourceManagerSync>,
 }
 
 /// Helper methods to interact with masm program file.
 impl ProgramFile {
     /// Reads the masm file at the specified path and parses it into a [ProgramFile].
     pub fn read(path: impl AsRef<Path>) -> Result<Self, Report> {
-        let source_manager = Arc::new(assembly::DefaultSourceManager::default());
+        let source_manager = Arc::new(miden_assembly::DefaultSourceManager::default());
         Self::read_with(path, source_manager)
     }
 
     /// Reads the masm file at the specified path and parses it into a [ProgramFile], using the
-    /// provided [assembly::SourceManager] implementation.
+    /// provided [miden_assembly::SourceManager] implementation.
     #[instrument(name = "read_program_file", skip(source_manager), fields(path = %path.as_ref().display()))]
     pub fn read_with(
         path: impl AsRef<Path>,
-        source_manager: Arc<dyn SourceManager + Send + Sync>,
+        source_manager: Arc<dyn SourceManagerSync>,
     ) -> Result<Self, Report> {
         // parse the program into an AST
         let path = path.as_ref();
@@ -162,7 +163,7 @@ impl ProgramFile {
     }
 
     /// Returns the source manager for this program file.
-    pub fn source_manager(&self) -> &Arc<dyn SourceManager + Send + Sync> {
+    pub fn source_manager(&self) -> &Arc<dyn SourceManagerSync> {
         &self.source_manager
     }
 }

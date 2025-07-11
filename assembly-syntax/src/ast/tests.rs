@@ -1,10 +1,12 @@
 use alloc::{string::ToString, sync::Arc, vec::Vec};
 
+use miden_debug_types::{SourceSpan, Span};
+use miden_utils_diagnostics::Report;
 use pretty_assertions::assert_eq;
 
 use crate::{
-    Felt, LibraryNamespace, LibraryPath, Span, assert_diagnostic, assert_diagnostic_lines, ast::*,
-    diagnostics::Report, parser::WordValue, regex, source_file, testing::SyntaxTestContext,
+    Felt, LibraryNamespace, LibraryPath, assert_diagnostic, assert_diagnostic_lines, ast::*,
+    parser::WordValue, regex, source_file, testing::SyntaxTestContext,
 };
 
 macro_rules! id {
@@ -117,7 +119,7 @@ macro_rules! import {
         let path: crate::LibraryPath = $name.parse().expect("invalid import path");
         let name = path.last().parse().unwrap();
         Form::Import(Import {
-            span: crate::SourceSpan::default(),
+            span: SourceSpan::default(),
             name,
             path,
             uses: 0,

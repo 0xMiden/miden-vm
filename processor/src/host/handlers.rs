@@ -5,7 +5,7 @@ use alloc::{
 };
 use core::{error::Error, fmt, fmt::Debug};
 
-use vm_core::DebugOptions;
+use miden_core::DebugOptions;
 
 use crate::{ErrorContext, ExecutionError, ProcessState};
 

@@ -818,8 +818,8 @@ fn mast_forest_merge_advice_maps_merged() {
 
     let merged_advice_map = merged.advice_map();
     assert_eq!(merged_advice_map.len(), 2);
-    assert_eq!(merged_advice_map.get(&key_a).unwrap(), &value_a);
-    assert_eq!(merged_advice_map.get(&key_b).unwrap(), &value_b);
+    assert_eq!(merged_advice_map.get(&key_a).unwrap().as_ref(), value_a);
+    assert_eq!(merged_advice_map.get(&key_b).unwrap().as_ref(), value_b);
 }
 
 /// Tests that an error is returned when advice maps have a key collision.

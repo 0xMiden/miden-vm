@@ -1,3 +1,11 @@
+#![no_std]
+
+#[macro_use]
+extern crate alloc;
+
+#[cfg(any(feature = "std", test))]
+extern crate std;
+
 mod location;
 mod selection;
 mod source_file;
@@ -8,6 +16,8 @@ use alloc::{string::String, sync::Arc};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "serde")]
+pub use serde_spanned;
 
 #[cfg(feature = "std")]
 pub use self::source_manager::SourceManagerExt;
@@ -18,7 +28,7 @@ pub use self::{
         ByteIndex, ByteOffset, ColumnIndex, ColumnNumber, LineIndex, LineNumber, SourceContent,
         SourceContentUpdateError, SourceFile, SourceFileRef, SourceLanguage,
     },
-    source_manager::{DefaultSourceManager, SourceId, SourceManager},
+    source_manager::{DefaultSourceManager, SourceId, SourceManager, SourceManagerSync},
     span::{SourceSpan, Span, Spanned},
 };
 
@@ -58,7 +68,7 @@ impl Uri {
         }
     }
 
-    /// Returns the authority portion of this URI, if present.
+    /// Returns the scheme portion of this URI, if present.
     pub fn authority(&self) -> Option<&str> {
         let uri = self.0.as_ref();
         let (_, rest) = uri.split_once("//")?;

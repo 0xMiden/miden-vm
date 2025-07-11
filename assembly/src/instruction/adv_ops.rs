@@ -1,10 +1,11 @@
+use miden_assembly_syntax::{
+    debuginfo::SourceSpan,
+    diagnostics::{RelatedLabel, Report},
+};
 use miden_core::Operation;
 
 use super::BasicBlockBuilder;
-use crate::{
-    ADVICE_READ_LIMIT, ProcedureContext,
-    diagnostics::{RelatedLabel, Report, SourceSpan},
-};
+use crate::{ADVICE_READ_LIMIT, ProcedureContext};
 
 // NON-DETERMINISTIC (ADVICE) INPUTS
 // ================================================================================================

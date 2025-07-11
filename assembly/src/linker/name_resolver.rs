@@ -1,11 +1,12 @@
 use alloc::{borrow::Cow, collections::BTreeSet, vec::Vec};
 
 use miden_assembly_syntax::{
-    SourceSpan, Span, Spanned, Word,
+    Word,
     ast::{
         Ident, InvocationTarget, InvokeKind, ProcedureName, QualifiedProcedureName,
         ResolvedProcedure,
     },
+    debuginfo::{SourceSpan, Span, Spanned},
     diagnostics::RelatedLabel,
     library::{LibraryNamespace, LibraryPath},
 };

@@ -1,5 +1,3 @@
-pub mod sync;
-
 use alloc::vec::Vec;
 use core::{
     fmt::Debug,
@@ -19,7 +17,7 @@ pub use winter_utils::group_slice_elements;
 use crate::Felt;
 
 pub mod math {
-    pub use math::batch_inversion;
+    pub use winter_math::batch_inversion;
 }
 
 // TO ELEMENTS

@@ -1,13 +1,13 @@
 use core::{marker::PhantomData, mem};
 
-use processor::crypto::{Hasher, RandomCoin, WinterRandomCoin};
-use test_utils::{
+use miden_core::{EMPTY_WORD, Felt, FieldElement, QuadFelt, Word};
+use miden_processor::crypto::{Hasher, RandomCoin, WinterRandomCoin};
+use miden_utils_testing::{
     MerkleTreeVC, StarkField,
     crypto::{MerklePath, NodeIndex, PartialMerkleTree, Rpo256 as MidenHasher},
     group_slice_elements,
     math::fft,
 };
-use vm_core::{EMPTY_WORD, Felt, FieldElement, QuadFelt, Word};
 use winter_fri::{
     DefaultProverChannel, FriOptions, FriProof, FriProver, VerifierError, folding::fold_positions,
 };
@@ -205,7 +205,7 @@ impl FriVerifierFold4Ext2 {
             // make sure the degree can be reduced by the folding factor at all layers
             // but the remainder layer
             if depth != layer_commitments.len() - 1
-                && max_degree_plus_1 % options.folding_factor() != 0
+                && !max_degree_plus_1.is_multiple_of(options.folding_factor())
             {
                 return Err(VerifierError::DegreeTruncation(
                     max_degree_plus_1 - 1,

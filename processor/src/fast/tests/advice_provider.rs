@@ -1,7 +1,7 @@
 use alloc::collections::BTreeMap;
 
+use miden_core::Word;
 use pretty_assertions::assert_eq;
-use vm_core::Word;
 
 use super::*;
 use crate::{
@@ -13,7 +13,7 @@ fn test_advice_provider() {
     let kernel_source = "
         export.foo
             push.2323 mem_store.100 trace.11
-        end 
+        end
     ";
 
     let program_source = "
@@ -35,8 +35,8 @@ fn test_advice_provider() {
     # Tests different cases of batch sizes
     proc.basic_block
         # batch with 1 group
-        swap drop swap trace.1 
-        
+        swap drop swap trace.1
+
         call.noop
 
         # batch with 2 groups
@@ -60,7 +60,7 @@ fn test_advice_provider() {
         call.noop
 
         # basic block with >1 batches (where clk needs to be incremented in-between batches due to the inserted RESPAN)
-        push.0 push.1 push.2 push.3 push.4 push.5 push.6    trace.6 
+        push.0 push.1 push.2 push.3 push.4 push.5 push.6    trace.6
         drop drop drop drop drop drop drop drop drop        trace.7
     end
 
@@ -135,7 +135,7 @@ fn test_advice_provider() {
         exec.control_flow
 
         exec.truncate_stack
-        trace.22 
+        trace.22
     end
     ";
 

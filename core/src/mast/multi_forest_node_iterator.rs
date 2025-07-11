@@ -322,7 +322,7 @@ mod tests {
     use crate::{Operation, Word};
 
     fn random_digest() -> Word {
-        Word::new([rand_utils::rand_value(); 4])
+        Word::new([winter_rand_utils::rand_value(); 4])
     }
 
     #[test]

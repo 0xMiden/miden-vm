@@ -1,10 +1,11 @@
-use miden_core::{Felt, Operation::*, debuginfo::SourceSpan};
+use miden_assembly_syntax::{
+    debuginfo::{SourceSpan, Spanned},
+    diagnostics::{RelatedLabel, Report},
+};
+use miden_core::{Felt, Operation::*};
 
 use super::{BasicBlockBuilder, push_felt, push_u32_value};
-use crate::{
-    ProcedureContext,
-    diagnostics::{RelatedLabel, Report, Spanned},
-};
+use crate::ProcedureContext;
 
 // INSTRUCTION PARSERS
 // ================================================================================================

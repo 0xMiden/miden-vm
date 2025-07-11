@@ -1,8 +1,8 @@
 use alloc::vec::Vec;
 
-use air::{PartitionOptions, ProvingOptions, StarkField};
 use gpu::metal::{DIGEST_SIZE, MetalExecutionProver};
-use processor::{
+use miden_air::{PartitionOptions, ProvingOptions, StarkField};
+use miden_processor::{
     StackInputs, StackOutputs, Word,
     crypto::{Hasher, Rpo256, RpoRandomCoin, Rpx256},
     math::fft,

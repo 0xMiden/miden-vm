@@ -10,8 +10,21 @@ pub(crate) mod resolver;
 
 /// The name of a dependency
 #[derive(Debug, Clone, PartialEq, Eq, derive_more::From)]
-#[cfg_attr(feature = "arbitrary", derive(proptest_derive::Arbitrary))]
 pub struct DependencyName(String);
+
+#[cfg(feature = "arbitrary")]
+impl proptest::arbitrary::Arbitrary for DependencyName {
+    type Parameters = ();
+    type Strategy = proptest::prelude::BoxedStrategy<Self>;
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        use proptest::prelude::Strategy;
+
+        let chars = proptest::char::range('a', 'z');
+        proptest::collection::vec(chars, 4..32)
+            .prop_map(|chars| Self(String::from_iter(chars)))
+            .boxed()
+    }
+}
 
 impl Serializable for DependencyName {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {

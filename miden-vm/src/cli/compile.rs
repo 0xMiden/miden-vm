@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
-use assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
 use clap::Parser;
+use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
 
 use super::data::{Debug, Libraries, ProgramFile};
 

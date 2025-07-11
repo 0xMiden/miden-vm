@@ -1,8 +1,8 @@
 use alloc::vec::Vec;
 
-use rand_utils::rand_array;
-use vm_core::chiplets::hasher::apply_round;
+use miden_core::chiplets::hasher::apply_round;
 use winter_air::EvaluationFrame;
+use winter_rand_utils::rand_array;
 
 use super::{
     HASHER_NODE_INDEX_COL_IDX, HASHER_SELECTOR_COL_RANGE, HASHER_STATE_COL_RANGE, Hasher,

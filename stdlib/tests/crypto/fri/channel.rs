@@ -1,9 +1,9 @@
-use test_utils::{
+use miden_core::Word;
+use miden_utils_testing::{
     Felt, FieldElement, MerkleTreeVC,
     crypto::{BatchMerkleProof, ElementHasher, Hasher as HasherTrait, PartialMerkleTree},
     serde::DeserializationError,
 };
-use vm_core::Word;
 use winter_fri::{FriProof, VerifierError};
 
 pub trait UnBatch<E: FieldElement, H: ElementHasher> {

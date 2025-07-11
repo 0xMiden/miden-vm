@@ -1,14 +1,14 @@
 use alloc::{collections::BTreeMap, string::ToString, sync::Arc, vec::Vec};
 
 use miden_assembly_syntax::{
-    self as syntax, DefaultSourceManager, KernelLibrary, Library, LibraryNamespace, LibraryPath,
-    Parse, ParseOptions, SemanticAnalysisError, SourceManager, Spanned,
+    KernelLibrary, Library, LibraryNamespace, LibraryPath, Parse, ParseOptions,
+    SemanticAnalysisError,
     ast::{self, Export, InvocationTarget, InvokeKind, ModuleKind, QualifiedProcedureName},
+    debuginfo::{DefaultSourceManager, SourceManager, SourceSpan, Spanned},
     diagnostics::{RelatedLabel, Report},
 };
 use miden_core::{
     AssemblyOp, Decorator, Felt, Kernel, Operation, Program, WORD_SIZE, Word,
-    debuginfo::SourceSpan,
     mast::{DecoratorId, MastNodeId},
 };
 
@@ -73,7 +73,7 @@ use crate::{
 #[derive(Clone)]
 pub struct Assembler {
     /// The source manager to use for compilation and source location information
-    source_manager: Arc<dyn SourceManager + Send + Sync>,
+    source_manager: Arc<dyn SourceManager>,
     /// The linker instance used internally to link assembler inputs
     linker: Linker,
     /// Whether to treat warning diagnostics as errors
@@ -99,7 +99,7 @@ impl Default for Assembler {
 /// Constructors
 impl Assembler {
     /// Start building an [Assembler]
-    pub fn new(source_manager: Arc<dyn SourceManager + Send + Sync>) -> Self {
+    pub fn new(source_manager: Arc<dyn SourceManager>) -> Self {
         let linker = Linker::new(source_manager.clone());
         Self {
             source_manager,
@@ -110,10 +110,7 @@ impl Assembler {
     }
 
     /// Start building an [`Assembler`] with a kernel defined by the provided [KernelLibrary].
-    pub fn with_kernel(
-        source_manager: Arc<dyn SourceManager + Send + Sync>,
-        kernel_lib: KernelLibrary,
-    ) -> Self {
+    pub fn with_kernel(source_manager: Arc<dyn SourceManager>, kernel_lib: KernelLibrary) -> Self {
         let (kernel, kernel_module, _) = kernel_lib.into_parts();
         let linker = Linker::with_kernel(source_manager.clone(), kernel, kernel_module);
         Self {
@@ -204,7 +201,9 @@ impl Assembler {
         namespace: crate::LibraryNamespace,
         dir: impl AsRef<std::path::Path>,
     ) -> Result<(), Report> {
-        let modules = syntax::parser::read_modules_from_dir(namespace, dir, &self.source_manager)?;
+        use miden_assembly_syntax::parser;
+
+        let modules = parser::read_modules_from_dir(namespace, dir, &self.source_manager)?;
         self.linker.link_modules(modules)?;
         Ok(())
     }
@@ -317,11 +316,6 @@ impl Assembler {
         self.linker.kernel()
     }
 
-    /// Returns a link to the source manager used by this assembler.
-    pub fn source_manager(&self) -> Arc<dyn SourceManager + Send + Sync> {
-        self.source_manager.clone()
-    }
-
     #[cfg(any(test, feature = "testing"))]
     #[doc(hidden)]
     pub fn linker(&self) -> &Linker {
@@ -391,10 +385,12 @@ impl Assembler {
         path: impl AsRef<std::path::Path>,
         namespace: LibraryNamespace,
     ) -> Result<Library, Report> {
+        use miden_assembly_syntax::parser;
+
         let path = path.as_ref();
 
         let source_manager = self.source_manager.clone();
-        let modules = syntax::parser::read_modules_from_dir(namespace, path, &source_manager)?;
+        let modules = parser::read_modules_from_dir(namespace, path, &source_manager)?;
         self.assemble_library(modules)
     }
 

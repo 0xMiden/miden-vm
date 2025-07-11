@@ -1,6 +1,6 @@
 use std::ops::Mul;
 
-use test_utils::{push_inputs, rand::rand_value};
+use miden_utils_testing::{push_inputs, rand::rand_value};
 
 #[derive(Copy, Clone, Debug)]
 struct Scalar {

@@ -1,35 +1,33 @@
 use alloc::vec::Vec;
-use std::{print, println};
+use std::{cmp::min, println, string::ToString};
 
-use miden_air::RowIndex;
-use vm_core::{DebugOptions, Felt};
+use miden_core::{DebugOptions, Felt};
 
-use crate::{AdviceProvider, MemoryAddress, ProcessState, system::ContextId};
+use crate::{MemoryAddress, ProcessState};
 
 // DEBUG HANDLER
 // ================================================================================================
 
 /// Prints the info about the VM state specified by the provided options to stdout.
 pub fn print_debug_info(process: &ProcessState, options: &DebugOptions) {
-    let printer = Printer::new(process.clk(), process.ctx(), process.fmp());
-    match options {
+    match *options {
         DebugOptions::StackAll => {
-            printer.print_vm_stack(process, None);
+            print_vm_stack(process, None);
         },
         DebugOptions::StackTop(n) => {
-            printer.print_vm_stack(process, Some(*n as usize));
+            print_vm_stack(process, Some(n));
         },
         DebugOptions::MemAll => {
-            printer.print_mem_all(process);
+            print_mem_all(process);
         },
         DebugOptions::MemInterval(n, m) => {
-            printer.print_mem_interval(process, *n, *m);
+            print_mem_interval(process, n, m);
         },
         DebugOptions::LocalInterval(n, m, num_locals) => {
-            printer.print_local_interval(process, (*n as u32, *m as u32), *num_locals as u32);
+            print_local_interval(process, n, m, num_locals as u32);
         },
-        DebugOptions::AdvStackTop(length) => {
-            printer.print_vm_adv_stack(process.advice_provider(), *length as usize);
+        DebugOptions::AdvStackTop(n) => {
+            print_vm_adv_stack(process, n);
         },
     }
 }
@@ -37,138 +35,142 @@ pub fn print_debug_info(process: &ProcessState, options: &DebugOptions) {
 // HELPER FUNCTIONS
 // ================================================================================================
 
-struct Printer {
-    clk: RowIndex,
-    ctx: ContextId,
-    fmp: u32,
-}
+/// Prints the number of stack items specified by `n` if it is provided, otherwise prints
+/// the whole stack.
+fn print_vm_stack(process: &ProcessState, n: Option<u8>) {
+    let stack = process.advice_provider().stack();
 
-impl Printer {
-    fn new(clk: RowIndex, ctx: ContextId, fmp: u64) -> Self {
-        Self { clk, ctx, fmp: fmp as u32 }
-    }
+    // if n is empty, print the entire stack
+    let num_items = if let Some(n) = n {
+        min(stack.len(), n as usize)
+    } else {
+        stack.len()
+    };
 
-    /// Prints the number of stack items specified by `n` if it is provided, otherwise prints
-    /// the whole stack.
-    fn print_vm_stack(&self, process: &ProcessState, n: Option<usize>) {
-        let stack = process.get_stack_state();
+    let stack = &stack[..num_items];
 
-        // determine how many items to print out
-        let num_items = core::cmp::min(stack.len(), n.unwrap_or(stack.len()));
-
+    if let Some((last, front)) = stack.split_last() {
         // print all items except for the last one
-        println!("Stack state before step {}:", self.clk);
-        for (i, element) in stack.iter().take(num_items - 1).enumerate() {
+        println!("Stack state before step {}:", process.clk());
+        for (i, element) in front.iter().enumerate() {
             println!("├── {i:>2}: {element}");
         }
 
         // print the last item, and in case the stack has more items, print the total number of
         // un-printed items
         let i = num_items - 1;
-        if num_items == stack.len() {
-            println!("└── {i:>2}: {}\n", stack[i]);
-        } else {
-            println!("├── {i:>2}: {}", stack[i]);
-            println!("└── ({} more items)\n", stack.len() - num_items);
-        }
+        println!("└── {i:>2}: {last}\n");
+        println!("└── ({} more items)\n", stack.len() - num_items);
+    } else {
+        println!("Stack empty before step {}.", process.clk());
     }
+}
 
-    /// Prints length items from the top of the  advice stack. If length is 0 it returns the whole
-    /// stack.
-    fn print_vm_adv_stack(&self, advice_provider: &AdviceProvider, length: usize) {
-        let stack = advice_provider.peek_stack(length);
+/// Prints length items from the top of the  advice stack. If length is 0 it returns the whole
+/// stack.
+fn print_vm_adv_stack(process: &ProcessState, n: u16) {
+    let stack = process.advice_provider().stack();
 
-        // we may have less elements than requested
-        let num_items = stack.len();
-        if num_items == 0 {
-            println!("Advice Stack empty before step {}.", self.clk);
-            return;
-        };
+    // If n = 0 print the entire stack
+    let num_items = if n == 0 {
+        stack.len()
+    } else {
+        min(stack.len(), n as usize)
+    };
 
+    let stack = &stack[..num_items];
+
+    if let Some((last, front)) = stack.split_last() {
         // print all items except for the last one
-        println!("Advice Stack state before step {}:", self.clk);
-        for (i, element) in stack.iter().take(num_items - 1).enumerate() {
+        println!("Advice Stack state before step {}:", process.clk());
+        for (i, element) in front.iter().enumerate() {
             println!("├── {i:>2}: {element}");
         }
 
         let i = num_items - 1;
-        println!("└── {i:>2}: {}\n", stack[i]);
+        println!("└── {i:>2}: {last}\n");
+    } else {
+        println!("Advice Stack empty before step {}.", process.clk());
     }
+}
 
-    /// Prints the whole memory state at the cycle `clk` in context `ctx`.
-    fn print_mem_all(&self, process: &ProcessState) {
-        let mem = process.get_mem_state(self.ctx);
-        let element_width = mem
-            .iter()
-            .map(|(_addr, value)| element_printed_width(Some(*value)))
-            .max()
-            .unwrap_or(0) as usize;
+/// Prints the whole memory state at the cycle `clk` in context `ctx`.
+fn print_mem_all(process: &ProcessState) {
+    let mem = process.get_mem_state(process.ctx());
+    let element_width = mem
+        .iter()
+        .map(|(_addr, value)| element_printed_width(*value))
+        .max()
+        .unwrap_or(0);
 
-        println!("Memory state before step {} for the context {}:", self.clk, self.ctx);
+    println!("Memory state before step {} for the context {}:", process.clk(), process.ctx());
 
+    if let Some(((last_addr, last_value), front)) = mem.split_last() {
         // print the main part of the memory (wihtout the last value)
-        for (addr, value) in mem.iter().take(mem.len() - 1) {
+        for (addr, value) in front.iter() {
             print_mem_address(*addr, Some(*value), false, false, element_width);
         }
 
         // print the last memory value
-        if let Some((addr, value)) = mem.last() {
-            print_mem_address(*addr, Some(*value), true, false, element_width);
-        }
+        print_mem_address(*last_addr, Some(*last_value), true, false, element_width);
     }
+}
 
-    /// Prints memory values in the provided addresses interval.
-    fn print_mem_interval(&self, process: &ProcessState, n: u32, m: u32) {
-        let mut mem_interval = Vec::new();
-        for addr in n..m + 1 {
-            mem_interval.push((addr, process.get_mem_value(self.ctx, addr)));
-        }
+/// Prints memory values in the provided addresses interval.
+fn print_mem_interval(process: &ProcessState, n: u32, m: u32) {
+    let addr_range = n..m + 1;
+    let mem_interval: Vec<_> = addr_range
+        .map(|addr| (MemoryAddress(addr), process.get_mem_value(process.ctx(), addr)))
+        .collect();
 
-        if n == m {
-            println!(
-                "Memory state before step {} for the context {} at address {}:",
-                self.clk, self.ctx, n
-            )
-        } else {
-            println!(
-                "Memory state before step {} for the context {} in the interval [{}, {}]:",
-                self.clk, self.ctx, n, m
-            )
-        };
+    if n == m {
+        println!(
+            "Memory state before step {} for the context {} at address {}:",
+            process.clk(),
+            process.ctx(),
+            n
+        )
+    } else {
+        println!(
+            "Memory state before step {} for the context {} in the interval [{}, {}]:",
+            process.clk(),
+            process.ctx(),
+            n,
+            m
+        )
+    };
 
-        print_interval(mem_interval, false);
+    print_interval(mem_interval, false);
+}
+
+/// Prints locals in provided indexes interval.
+///
+/// The interval given is inclusive on *both* ends.
+fn print_local_interval(process: &ProcessState, start: u16, end: u16, num_locals: u32) {
+    let local_memory_offset = process.fmp() as u32 - num_locals;
+
+    // Account for a case where start is 0 and end is 2^16. In that case we should simply print
+    // all available locals.
+    let locals_range = if start == 0 && end == u16::MAX {
+        0..num_locals - 1
+    } else {
+        start as u32..end as u32
+    };
+
+    let locals: Vec<_> = locals_range
+        .map(|local_idx| {
+            let addr = local_memory_offset + local_idx;
+            let value = process.get_mem_value(process.ctx(), addr);
+            (MemoryAddress(local_idx), value)
+        })
+        .collect();
+
+    if start != end {
+        println!("State of procedure locals [{start}, {end}] before step {}:", process.clk());
+    } else {
+        println!("State of procedure local {start} before step {}:", process.clk());
     }
-
-    /// Prints locals in provided indexes interval.
-    ///
-    /// The interval given is inclusive on *both* ends.
-    fn print_local_interval(&self, process: &ProcessState, interval: (u32, u32), num_locals: u32) {
-        let local_memory_offset = self.fmp - num_locals;
-
-        let (start, end) = interval;
-        // Account for a case where start is 0 and end is 2^16. In that case we should simply print
-        // all available locals.
-        let (start, end) = if start == 0 && end == u16::MAX as u32 {
-            (0, num_locals - 1)
-        } else {
-            (start, end)
-        };
-
-        let locals: Vec<(u32, Option<Felt>)> = (start..=end)
-            .map(|local_idx| {
-                let addr = local_memory_offset + local_idx;
-                let value = process.get_mem_value(self.ctx, addr);
-                (local_idx, value)
-            })
-            .collect();
-
-        if start != end {
-            println!("State of procedure locals [{start}, {end}] before step {}:", self.clk);
-        } else {
-            println!("State of procedure local {start} before step {}:", self.clk);
-        }
-        print_interval(locals, true);
-    }
+    print_interval(locals, true);
 }
 
 // HELPER FUNCTIONS
@@ -178,21 +180,21 @@ impl Printer {
 ///
 /// If `is_local` is true, the output addresses are formatted as decimal values, otherwise as hex
 /// strings.
-fn print_interval(mem_interval: Vec<(u32, Option<Felt>)>, is_local: bool) {
+fn print_interval(mem_interval: Vec<(MemoryAddress, Option<Felt>)>, is_local: bool) {
     let element_width = mem_interval
         .iter()
-        .map(|(_addr, value)| element_printed_width(*value))
+        .filter_map(|(_addr, value)| value.map(element_printed_width))
         .max()
-        .unwrap_or(0) as usize;
+        .unwrap_or(0);
 
-    // print the main part of the memory (wihtout the last value)
-    for (addr, mem_value) in mem_interval.iter().take(mem_interval.len() - 1) {
-        print_mem_address((*addr).into(), *mem_value, false, is_local, element_width)
-    }
+    if let Some(((last_addr, last_value), front_elements)) = mem_interval.split_last() {
+        // print the main part of the memory (wihtout the last value)
+        for (addr, mem_value) in front_elements {
+            print_mem_address(*addr, *mem_value, false, is_local, element_width)
+        }
 
-    // print the last memory value
-    if let Some((addr, value)) = mem_interval.last() {
-        print_mem_address((*addr).into(), *value, true, is_local, element_width);
+        // print the last memory value
+        print_mem_address(*last_addr, *last_value, true, is_local, element_width);
     }
 }
 
@@ -205,42 +207,28 @@ fn print_mem_address(
     mem_value: Option<Felt>,
     is_last: bool,
     is_local: bool,
-    element_width: usize,
+    element_width: u32,
 ) {
-    if let Some(value) = mem_value {
-        if is_last {
-            if is_local {
-                print!("└── {addr:>5}: ");
-            } else {
-                print!("└── {addr:#010x}: ");
-            }
-            println!("{:>width$}\n", value.as_int(), width = element_width);
-        } else {
-            if is_local {
-                print!("├── {addr:>5}: ");
-            } else {
-                print!("├── {addr:#010x}: ");
-            }
-            println!("{:>width$}", value.as_int(), width = element_width);
-        }
-    } else if is_last {
-        if is_local {
-            println!("└── {addr:>5}: EMPTY\n");
-        } else {
-            println!("└── {addr:#010x}: EMPTY\n");
-        }
-    } else if is_local {
-        println!("├── {addr:>5}: EMPTY");
+    let value_string = if let Some(value) = mem_value {
+        format!("{:>width$}", value, width = element_width as usize)
     } else {
-        println!("├── {addr:#010x}: EMPTY");
+        "EMPTY".to_string()
+    };
+
+    let addr_string = if is_local {
+        format!("{addr:>5}")
+    } else {
+        format!("{addr:#010x}")
+    };
+
+    if is_last {
+        println!("└── {addr_string}: {value_string}");
+    } else {
+        println!("├── {addr_string}: {value_string}");
     }
 }
 
 /// Returns the number of digits required to print the provided element.
-fn element_printed_width(element: Option<Felt>) -> u32 {
-    if let Some(element) = element {
-        element.as_int().checked_ilog10().unwrap_or(1) + 1
-    } else {
-        0
-    }
+fn element_printed_width(element: Felt) -> u32 {
+    element.as_int().checked_ilog10().unwrap_or(1) + 1
 }

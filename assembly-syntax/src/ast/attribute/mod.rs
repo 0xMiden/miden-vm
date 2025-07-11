@@ -3,11 +3,13 @@ mod set;
 
 use core::fmt;
 
+use miden_debug_types::{SourceSpan, Spanned};
+
 pub use self::{
     meta::{BorrowedMeta, Meta, MetaExpr, MetaItem, MetaKeyValue, MetaList},
     set::{AttributeSet, AttributeSetEntry},
 };
-use crate::{SourceSpan, Spanned, ast::Ident, prettier};
+use crate::{ast::Ident, prettier};
 
 /// An [Attribute] represents some named metadata attached to a Miden Assembly procedure.
 ///

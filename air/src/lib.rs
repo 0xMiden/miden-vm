@@ -9,7 +9,7 @@ extern crate std;
 
 use alloc::vec::Vec;
 
-use vm_core::{
+use miden_core::{
     ExtensionOf, ONE, ProgramInfo, StackInputs, StackOutputs, ZERO,
     utils::{ByteReader, ByteWriter, Deserializable, Serializable},
 };
@@ -41,13 +41,13 @@ mod utils;
 // ================================================================================================
 
 pub use errors::ExecutionOptionsError;
-pub use options::{ExecutionOptions, ProvingOptions};
-pub use proof::{ExecutionProof, HashFunction};
-use utils::TransitionConstraintRange;
-pub use vm_core::{
+pub use miden_core::{
     Felt, FieldElement, StarkField,
     utils::{DeserializationError, ToElements},
 };
+pub use options::{ExecutionOptions, ProvingOptions};
+pub use proof::{ExecutionProof, HashFunction};
+use utils::TransitionConstraintRange;
 pub use winter_air::{AuxRandElements, FieldExtension, PartitionOptions};
 
 /// Selects whether to include all existing constraints or only the ones currently encoded in
@@ -323,7 +323,7 @@ impl PublicInputs {
     }
 }
 
-impl vm_core::ToElements<Felt> for PublicInputs {
+impl miden_core::ToElements<Felt> for PublicInputs {
     fn to_elements(&self) -> Vec<Felt> {
         let mut result = self.stack_inputs.to_vec();
         result.append(&mut self.stack_outputs.to_vec());

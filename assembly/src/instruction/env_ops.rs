@@ -1,5 +1,6 @@
 use miden_assembly_syntax::{
-    Felt, SourceSpan,
+    Felt,
+    debuginfo::SourceSpan,
     diagnostics::{RelatedLabel, Report},
 };
 use miden_core::Operation::*;

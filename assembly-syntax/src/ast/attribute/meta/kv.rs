@@ -1,8 +1,10 @@
 use alloc::collections::BTreeMap;
 use core::borrow::Borrow;
 
+use miden_debug_types::{SourceSpan, Spanned};
+
 use super::MetaExpr;
-use crate::{SourceSpan, Spanned, ast::Ident};
+use crate::ast::Ident;
 
 /// Represents the metadata of a key-value [crate::ast::Attribute], i.e. `@props(key = value)`
 #[derive(Clone)]

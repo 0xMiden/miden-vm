@@ -1,6 +1,9 @@
 use miden_core::errors::KernelError;
 
-use crate::{ast::QualifiedProcedureName, diagnostics::Diagnostic};
+use crate::{
+    ast::QualifiedProcedureName,
+    diagnostics::{Diagnostic, miette},
+};
 
 #[derive(Debug, thiserror::Error, Diagnostic)]
 pub enum LibraryError {

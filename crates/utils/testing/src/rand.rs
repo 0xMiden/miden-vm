@@ -1,4 +1,4 @@
-pub use rand_utils::*;
+pub use winter_rand_utils::*;
 
 use super::{Felt, WORD_SIZE, Word};
 

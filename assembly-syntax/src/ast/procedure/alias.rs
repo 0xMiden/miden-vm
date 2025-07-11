@@ -1,11 +1,12 @@
 use alloc::string::String;
 use core::fmt;
 
+use miden_debug_types::{SourceSpan, Span, Spanned};
+
 use super::{ProcedureName, QualifiedProcedureName};
 use crate::{
     Word,
     ast::{DocString, InvocationTarget},
-    diagnostics::{SourceSpan, Span, Spanned},
 };
 
 // PROCEDURE ALIAS

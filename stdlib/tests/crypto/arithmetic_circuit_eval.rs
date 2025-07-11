@@ -1,5 +1,5 @@
-use test_utils::rand::rand_value;
-use vm_core::{Felt, FieldElement, ONE, QuadFelt, ZERO};
+use miden_core::{Felt, FieldElement, ONE, QuadFelt, ZERO};
+use miden_utils_testing::rand::rand_value;
 
 #[test]
 fn arithmetic_circuit_eval_and_execute() {
@@ -10,7 +10,7 @@ fn arithmetic_circuit_eval_and_execute() {
         "
     const.NUM_READ_ROWS=4
     const.NUM_EVAL_ROWS=4
-    
+
     begin
        repeat.{num_repetitions}
             # Set up the stack for loading data from advice map
@@ -21,7 +21,7 @@ fn arithmetic_circuit_eval_and_execute() {
             repeat.2
                 adv_pipe
             end
-            
+
             # Set up the inputs to the arithmetic circuit evaluation op and execute it
             push.NUM_EVAL_ROWS push.NUM_READ_ROWS push.{pointer}
             arithmetic_circuit_eval
@@ -72,7 +72,7 @@ fn arithmetic_circuit_eval_and_execute() {
     let adv_stack = data.repeat(num_repetitions);
     let adv_stack: Vec<u64> = adv_stack.iter().map(|a| a.as_int()).collect();
 
-    let test = test_utils::build_test!(source, &[], &adv_stack);
+    let test = miden_utils_testing::build_test!(source, &[], &adv_stack);
     test.expect_stack(&[]);
     test.prove_and_verify(vec![], false)
 }

@@ -1,4 +1,4 @@
-use processor::MastForest;
+use miden_processor::MastForest;
 
 /// Tests that the stdlib merged with itself produces a forest that has the same procedure
 /// roots.

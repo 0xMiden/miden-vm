@@ -3,11 +3,11 @@ use alloc::vec::Vec;
 use miden_air::trace::{
     AUX_TRACE_RAND_ELEMENTS, chiplets::hasher::P1_COL_IDX, main_trace::MainTrace,
 };
-use rstest::rstest;
-use vm_core::{
+use miden_core::{
     FieldElement,
     crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},
 };
+use rstest::rstest;
 
 use super::{
     super::NUM_RAND_ROWS, AdviceInputs, Felt, ONE, Operation, Word, ZERO,

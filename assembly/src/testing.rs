@@ -3,6 +3,11 @@ use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use miden_assembly_syntax::{
     Library, LibraryPath, Parse, ParseOptions, Word,
     ast::{Form, Module, ModuleKind},
+    debuginfo::{DefaultSourceManager, SourceFile, SourceManager},
+    diagnostics::{
+        Report,
+        reporting::{ReportHandlerOpts, set_hook},
+    },
 };
 pub use miden_assembly_syntax::{
     assert_diagnostic, assert_diagnostic_lines, parse_module, parser, regex, source_file,
@@ -10,15 +15,9 @@ pub use miden_assembly_syntax::{
 };
 use miden_core::Program;
 
+use crate::assembler::Assembler;
 #[cfg(feature = "std")]
 use crate::diagnostics::reporting::set_panic_hook;
-use crate::{
-    assembler::Assembler,
-    diagnostics::{
-        DefaultSourceManager, Report, SourceFile, SourceManager,
-        reporting::{ReportHandlerOpts, set_hook},
-    },
-};
 
 /// A [TestContext] provides common functionality for all tests which interact with an [Assembler].
 ///
@@ -28,7 +27,7 @@ use crate::{
 ///
 /// Some of the assertion macros defined above require a [TestContext], so be aware of that.
 pub struct TestContext {
-    source_manager: Arc<dyn SourceManager + Send + Sync>,
+    source_manager: Arc<dyn SourceManager>,
     assembler: Assembler,
 }
 
@@ -72,7 +71,7 @@ impl TestContext {
     }
 
     #[inline(always)]
-    pub fn source_manager(&self) -> Arc<dyn SourceManager + Send + Sync> {
+    pub fn source_manager(&self) -> Arc<dyn SourceManager> {
         self.source_manager.clone()
     }
 

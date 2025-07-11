@@ -1,12 +1,10 @@
 use miden_assembly_syntax::{
-    Span,
     ast::Instruction,
+    debuginfo::{Span, Spanned},
     diagnostics::{RelatedLabel, Report},
     parser::IntValue,
 };
-use miden_core::{
-    Decorator, Felt, ONE, Operation, WORD_SIZE, ZERO, debuginfo::Spanned, mast::MastNodeId,
-};
+use miden_core::{Decorator, Felt, ONE, Operation, WORD_SIZE, ZERO, mast::MastNodeId};
 
 use crate::{Assembler, ProcedureContext, ast::InvokeKind, basic_block_builder::BasicBlockBuilder};
 
@@ -406,7 +404,7 @@ impl Assembler {
             )?,
             Instruction::LocLoadW(v) => {
                 let local_addr = v.expect_value();
-                if local_addr % WORD_SIZE as u16 != 0 {
+                if !local_addr.is_multiple_of(WORD_SIZE as u16) {
                     return Err(RelatedLabel::error("invalid local word index")
                         .with_help("the index to a local word must be a multiple of 4")
                         .with_labeled_span(v.span(), "this index is not word-aligned")
@@ -453,7 +451,7 @@ impl Assembler {
             )?,
             Instruction::LocStoreW(v) => {
                 let local_addr = v.expect_value();
-                if local_addr % WORD_SIZE as u16 != 0 {
+                if !local_addr.is_multiple_of(WORD_SIZE as u16) {
                     return Err(RelatedLabel::error("invalid local word index")
                         .with_help("the index to a local word must be a multiple of 4")
                         .with_labeled_span(v.span(), "this index is not word-aligned")

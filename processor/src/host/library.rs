@@ -1,6 +1,6 @@
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 
-use vm_core::mast::MastForest;
+use miden_core::mast::MastForest;
 
 use crate::EventHandler;
 

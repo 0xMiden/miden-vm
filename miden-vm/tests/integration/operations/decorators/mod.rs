@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
-use processor::{
+use miden_core::DebugOptions;
+use miden_processor::{
     AsyncHost, BaseHost, ErrorContext, ExecutionError, MastForest, ProcessState, SyncHost,
 };
-use prover::Word;
-use vm_core::DebugOptions;
+use miden_prover::Word;
 
 mod advice;
 mod asmop;

@@ -10,7 +10,7 @@ use miden_air::{
         V_2_0_IDX, V_2_1_IDX,
     },
 };
-use vm_core::{Felt, QuadFelt, WORD_SIZE, Word, ZERO};
+use miden_core::{Felt, QuadFelt, WORD_SIZE, Word, ZERO};
 
 use crate::{
     ContextId,

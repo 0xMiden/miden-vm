@@ -11,7 +11,7 @@ use miden_air::{
         },
     },
 };
-use vm_core::WORD_SIZE;
+use miden_core::WORD_SIZE;
 
 use super::{
     AUX_TRACE_RAND_ELEMENTS, CHIPLETS_BUS_AUX_TRACE_OFFSET, ExecutionTrace, Felt, FieldElement,

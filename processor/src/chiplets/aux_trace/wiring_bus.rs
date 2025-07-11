@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use miden_air::trace::main_trace::MainTrace;
-use vm_core::{Felt, FieldElement};
+use miden_core::{Felt, FieldElement};
 
 use crate::chiplets::ace::{AceHints, NUM_ACE_LOGUP_FRACTIONS_EVAL, NUM_ACE_LOGUP_FRACTIONS_READ};
 

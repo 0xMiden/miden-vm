@@ -1,6 +1,5 @@
 use alloc::vec::Vec;
 
-use assembly::SourceSpan;
 use miden_air::{
     RowIndex,
     trace::chiplets::memory::{
@@ -9,7 +8,8 @@ use miden_air::{
         MEMORY_WRITE, TRACE_WIDTH as MEMORY_TRACE_WIDTH,
     },
 };
-use vm_core::{WORD_SIZE, Word, assert_matches};
+use miden_assembly::SourceSpan;
+use miden_core::{WORD_SIZE, Word, assert_matches};
 
 use super::{
     super::ZERO,

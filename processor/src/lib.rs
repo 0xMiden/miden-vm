@@ -14,23 +14,23 @@ use miden_air::trace::{
     SYS_TRACE_WIDTH,
 };
 pub use miden_air::{ExecutionOptions, ExecutionOptionsError, RowIndex};
-use utils::resolve_external_node;
-pub use vm_core::{
+pub use miden_core::{
     AssemblyOp, EMPTY_WORD, Felt, Kernel, ONE, Operation, Program, ProgramInfo, QuadExtension,
     StackInputs, StackOutputs, Word, ZERO,
     crypto::merkle::SMT_DEPTH,
-    debuginfo::{DefaultSourceManager, SourceManager, SourceSpan},
     errors::InputError,
     mast::{MastForest, MastNode, MastNodeId},
     sys_events::SystemEvent,
     utils::{DeserializationError, collections::KvMap},
 };
-use vm_core::{
+use miden_core::{
     Decorator, DecoratorIterator, FieldElement, WORD_SIZE,
     mast::{
-        BasicBlockNode, CallNode, DynNode, JoinNode, LoopNode, OP_GROUP_SIZE, OpBatch, SplitNode,
+        BasicBlockNode, CallNode, DynNode, ExternalNode, JoinNode, LoopNode, OP_GROUP_SIZE,
+        OpBatch, SplitNode,
     },
 };
+use miden_debug_types::{DefaultSourceManager, SourceManager, SourceSpan};
 pub use winter_prover::matrix::ColMatrix;
 
 pub mod fast;
@@ -78,17 +78,16 @@ mod tests;
 
 mod debug;
 pub use debug::{AsmOpInfo, VmState, VmStateIterator};
-
 // RE-EXPORTS
 // ================================================================================================
 
 pub mod math {
-    pub use vm_core::{Felt, FieldElement, StarkField};
+    pub use miden_core::{Felt, FieldElement, StarkField};
     pub use winter_prover::math::fft;
 }
 
 pub mod crypto {
-    pub use vm_core::crypto::{
+    pub use miden_core::crypto::{
         hash::{Blake3_192, Blake3_256, ElementHasher, Hasher, Rpo256, Rpx256},
         merkle::{
             MerkleError, MerklePath, MerkleStore, MerkleTree, NodeIndex, PartialMerkleTree,
@@ -363,8 +362,7 @@ impl Process {
                 )?
             },
             MastNode::External(external_node) => {
-                let (root_id, mast_forest) =
-                    resolve_external_node(external_node, &mut self.advice, host)?;
+                let (root_id, mast_forest) = self.resolve_external_node(external_node, host)?;
 
                 self.execute_mast_node(root_id, &mast_forest, host)?;
             },
@@ -489,7 +487,7 @@ impl Process {
         self.end_call_node(call_node, program, host, &err_ctx)
     }
 
-    /// Executes the specified [vm_core::mast::DynNode].
+    /// Executes the specified [miden_core::mast::DynNode].
     ///
     /// The MAST root of the callee is assumed to be at the top of the stack, and the callee is
     /// expected to be either in the current `program` or in the host.
@@ -720,6 +718,45 @@ impl Process {
         Ok(())
     }
 
+    /// Resolves an external node reference to a procedure root using the [`MastForest`] store in
+    /// the provided host.
+    ///
+    /// The [`MastForest`] for the procedure is cached to avoid additional queries to the host.
+    fn resolve_external_node(
+        &mut self,
+        external_node: &ExternalNode,
+        host: &impl SyncHost,
+    ) -> Result<(MastNodeId, Arc<MastForest>), ExecutionError> {
+        let node_digest = external_node.digest();
+
+        let mast_forest = host
+            .get_mast_forest(&node_digest)
+            .ok_or(ExecutionError::no_mast_forest_with_procedure(node_digest, &()))?;
+
+        // We limit the parts of the program that can be called externally to procedure
+        // roots, even though MAST doesn't have that restriction.
+        let root_id = mast_forest
+            .find_procedure_root(node_digest)
+            .ok_or(ExecutionError::malfored_mast_forest_in_host(node_digest, &()))?;
+
+        // if the node that we got by looking up an external reference is also an External
+        // node, we are about to enter into an infinite loop - so, return an error
+        if mast_forest[root_id].is_external() {
+            return Err(ExecutionError::CircularExternalNode(node_digest));
+        }
+
+        // Merge the advice map of this forest into the advice provider.
+        // Note that the map may be merged multiple times if a different procedure from the same
+        // forest is called.
+        // For now, only compiled libraries contain non-empty advice maps, so for most cases,
+        // this call will be cheap.
+        self.advice
+            .merge_advice_map(mast_forest.advice_map())
+            .map_err(|err| ExecutionError::advice_error(err, self.system.clk(), &()))?;
+
+        Ok((root_id, mast_forest))
+    }
+
     // PUBLIC ACCESSORS
     // ================================================================================================
 
@@ -751,7 +788,7 @@ pub enum ProcessState<'a> {
 
 impl Process {
     #[inline(always)]
-    fn state(&mut self) -> ProcessState<'_> {
+    pub fn state(&mut self) -> ProcessState<'_> {
         ProcessState::Slow(SlowProcessState {
             advice: &mut self.advice,
             system: &self.system,
@@ -881,6 +918,12 @@ impl<'a> ProcessState<'a> {
             },
             ProcessState::Fast(state) => state.processor.memory.get_memory_state(ctx),
         }
+    }
+}
+
+impl<'a> From<&'a mut Process> for ProcessState<'a> {
+    fn from(process: &'a mut Process) -> Self {
+        process.state()
     }
 }
 

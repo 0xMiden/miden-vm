@@ -4,7 +4,7 @@ use miden_air::{
     RowIndex,
     trace::{chiplets::ace::ACE_INIT_LABEL, main_trace::MainTrace},
 };
-use vm_core::{Felt, FieldElement, ONE};
+use miden_core::{Felt, FieldElement, ONE};
 
 use crate::{
     chiplets::aux_trace::build_value,

@@ -1,14 +1,16 @@
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 
+use miden_debug_types::{DefaultSourceManager, SourceFile, SourceManager};
+use miden_utils_diagnostics::{
+    Report,
+    reporting::{ReportHandlerOpts, set_hook},
+};
+
 #[cfg(feature = "std")]
 use crate::diagnostics::reporting::set_panic_hook;
 use crate::{
     LibraryPath, Parse, ParseOptions,
     ast::{Form, Module, ModuleKind},
-    diagnostics::{
-        DefaultSourceManager, Report, SourceFile, SourceManager,
-        reporting::{ReportHandlerOpts, set_hook},
-    },
 };
 
 /// A [SyntaxTestContext] provides common functionality for all syntax-related tests
@@ -20,7 +22,7 @@ use crate::{
 /// Some of the assertion macros defined in this crate require a [SyntaxTestContext], so be aware of
 /// that.
 pub struct SyntaxTestContext {
-    source_manager: Arc<dyn SourceManager + Send + Sync>,
+    source_manager: Arc<dyn SourceManager>,
     warnings_as_errors: bool,
 }
 
@@ -64,7 +66,7 @@ impl SyntaxTestContext {
     }
 
     #[inline(always)]
-    pub fn source_manager(&self) -> Arc<dyn SourceManager + Send + Sync> {
+    pub fn source_manager(&self) -> Arc<dyn SourceManager> {
         self.source_manager.clone()
     }
 

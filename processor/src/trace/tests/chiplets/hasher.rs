@@ -17,7 +17,7 @@ use miden_air::{
         decoder::{NUM_OP_BITS, OP_BITS_OFFSET},
     },
 };
-use vm_core::{
+use miden_core::{
     Program, Word,
     chiplets::hasher::apply_permutation,
     crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},

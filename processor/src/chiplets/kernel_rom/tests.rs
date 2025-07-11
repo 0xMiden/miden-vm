@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use vm_core::WORD_SIZE;
+use miden_core::WORD_SIZE;
 
 use super::{Felt, Kernel, KernelRom, TRACE_WIDTH, TraceFragment};
 use crate::{ONE, ZERO};

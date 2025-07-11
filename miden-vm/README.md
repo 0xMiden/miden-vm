@@ -52,7 +52,7 @@ For example:
 ```rust
 use std::sync::Arc;
 use miden_vm::{assembly::DefaultSourceManager, AdviceInputs, Assembler, execute, execute_iter, DefaultHost, Program, StackInputs};
-use processor::ExecutionOptions;
+use miden_processor::ExecutionOptions;
 
 // instantiate default source manager
 let source_manager = Arc::new(DefaultSourceManager::default());
@@ -247,7 +247,7 @@ If you want to execute, prove, and verify programs on Miden VM, but don't want t
 
 ### Compiling Miden VM
 
-First, make sure you have Rust [installed](https://www.rust-lang.org/tools/install). The current version of Miden VM requires Rust version **1.86** or later.
+First, make sure you have Rust [installed](https://www.rust-lang.org/tools/install). The current version of Miden VM requires Rust version **1.88** or later.
 
 Then, to compile Miden VM into a binary, run the following `make` command:
 

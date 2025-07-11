@@ -1,9 +1,4 @@
-use alloc::{
-    collections::{BTreeMap, BTreeSet},
-    string::String,
-    sync::Arc,
-    vec::Vec,
-};
+use alloc::{collections::BTreeMap, string::String, sync::Arc, vec::Vec};
 
 use miden_core::{
     AdviceMap, Kernel, Word,
@@ -17,15 +12,14 @@ mod error;
 mod module;
 mod namespace;
 mod path;
-mod version;
 
 pub use module::{ModuleInfo, ProcedureInfo};
+pub use semver::{Error as VersionError, Version};
 
 pub use self::{
     error::LibraryError,
     namespace::{LibraryNamespace, LibraryNamespaceError},
     path::{LibraryPath, LibraryPathComponent, PathError},
-    version::{Version, VersionError},
 };
 
 // LIBRARY
@@ -83,7 +77,7 @@ impl Library {
             }
         }
 
-        let digest = compute_content_hash(&exports, &mast_forest);
+        let digest = mast_forest.compute_nodes_commitment(exports.values());
 
         Ok(Self { digest, exports, mast_forest })
     }
@@ -137,6 +131,20 @@ impl Library {
     /// Returns a reference to the inner [`MastForest`].
     pub fn mast_forest(&self) -> &Arc<MastForest> {
         &self.mast_forest
+    }
+
+    /// Returns the digest of the procedure with the specified name, or `None` if it was not found
+    /// in the library or its library path is malformed.
+    pub fn get_procedure_root_by_name(
+        &self,
+        proc_name: impl TryInto<QualifiedProcedureName>,
+    ) -> Option<Word> {
+        if let Ok(qualified_proc_name) = proc_name.try_into() {
+            let node_id = self.exports.get(&qualified_proc_name);
+            node_id.map(|id| self.mast_forest()[*id].digest())
+        } else {
+            None
+        }
     }
 }
 
@@ -200,21 +208,10 @@ impl Deserializable for Library {
             exports.insert(proc_name, proc_node_id);
         }
 
-        let digest = compute_content_hash(&exports, &mast_forest);
+        let digest = mast_forest.compute_nodes_commitment(exports.values());
 
         Ok(Self { digest, exports, mast_forest })
     }
-}
-
-fn compute_content_hash(
-    exports: &BTreeMap<QualifiedProcedureName, MastNodeId>,
-    mast_forest: &MastForest,
-) -> Word {
-    let digests = BTreeSet::from_iter(exports.values().map(|&id| mast_forest[id].digest()));
-    digests
-        .into_iter()
-        .reduce(|a, b| miden_core::crypto::hash::Rpo256::merge(&[a, b]))
-        .unwrap()
 }
 
 #[cfg(feature = "std")]

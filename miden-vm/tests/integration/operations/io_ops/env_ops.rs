@@ -1,10 +1,10 @@
-use assembly::{SourceManager, diagnostics::SourceLanguage};
-use processor::FMP_MIN;
-use test_utils::{MIN_STACK_DEPTH, StackInputs, Test, Word, build_op_test, build_test};
-use vm_core::{
+use miden_core::{
     Operation,
     mast::{MastForest, MastNode},
 };
+use miden_debug_types::{SourceLanguage, SourceManager};
+use miden_processor::FMP_MIN;
+use miden_utils_testing::{MIN_STACK_DEPTH, StackInputs, Test, Word, build_op_test, build_test};
 
 use super::TRUNCATE_STACK_PROC;
 

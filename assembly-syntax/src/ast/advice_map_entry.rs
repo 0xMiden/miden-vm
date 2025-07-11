@@ -1,7 +1,9 @@
 use alloc::{string::String, vec::Vec};
 
+use miden_debug_types::{SourceSpan, Span};
+
 use super::DocString;
-use crate::{Felt, SourceSpan, Span, ast::Ident, parser::WordValue};
+use crate::{Felt, ast::Ident, parser::WordValue};
 
 // Advice Map data that the host populates before the VM starts.
 // ============================================================

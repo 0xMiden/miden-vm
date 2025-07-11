@@ -1,7 +1,9 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 
+use miden_debug_types::{SourceSpan, Span, Spanned};
+
 use super::{ProcedureIndex, ProcedureName, QualifiedProcedureName};
-use crate::{LibraryPath, SourceSpan, Span, Spanned, Word, ast::Ident};
+use crate::{LibraryPath, Word, ast::Ident};
 
 // RESOLVED PROCEDURE
 // ================================================================================================

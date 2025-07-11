@@ -7,8 +7,10 @@ use core::{
 use miden_core::utils::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
+use miden_debug_types::Span;
+use miden_utils_diagnostics::{Diagnostic, miette};
 
-use crate::{LibraryPath, Span, ast::Ident, diagnostics::Diagnostic};
+use crate::{LibraryPath, ast::Ident};
 
 // LIBRARY NAMESPACE
 // ================================================================================================

@@ -1,14 +1,14 @@
 use alloc::sync::Arc;
 
 use miden_air::RowIndex;
-use miette::Diagnostic;
-use vm_core::{
+use miden_core::{
     Felt, QuadFelt, Word,
-    debuginfo::{SourceFile, SourceManager, SourceSpan},
     mast::{DecoratorId, MastForest, MastNodeExt, MastNodeId},
     stack::MIN_STACK_DEPTH,
     utils::to_hex,
 };
+use miden_debug_types::{SourceFile, SourceManager, SourceSpan};
+use miden_utils_diagnostics::{Diagnostic, miette};
 use winter_prover::ProverError;
 
 use crate::{

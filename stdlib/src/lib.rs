@@ -4,12 +4,9 @@ extern crate alloc;
 
 use alloc::{sync::Arc, vec::Vec};
 
-use assembly::{
-    Library,
-    mast::MastForest,
-    utils::{Deserializable, sync::LazyLock},
-};
-use vm_core::{Felt, Word};
+use miden_assembly::{Library, mast::MastForest, utils::Deserializable};
+use miden_core::{Felt, Word};
+use miden_utils_sync::LazyLock;
 
 // STANDARD LIBRARY
 // ================================================================================================
@@ -73,7 +70,7 @@ impl Default for StdLibrary {
 pub fn falcon_sign(sk: &[Felt], msg: Word) -> Option<Vec<Felt>> {
     use alloc::vec;
 
-    use vm_core::{
+    use miden_core::{
         Felt,
         crypto::{
             dsa::rpo_falcon512::{Polynomial, SecretKey},
@@ -145,7 +142,7 @@ pub fn falcon_sign(_pk_sk: &[Felt], _msg: Word) -> Option<Vec<Felt>> {
 
 #[cfg(test)]
 mod tests {
-    use assembly::LibraryPath;
+    use miden_assembly::LibraryPath;
 
     use super::*;
 

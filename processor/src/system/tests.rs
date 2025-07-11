@@ -1,4 +1,4 @@
-use vm_core::mast::MastForest;
+use miden_core::mast::MastForest;
 
 use crate::{AdviceInputs, DefaultHost, ExecutionOptions, Kernel, Operation, Process, StackInputs};
 

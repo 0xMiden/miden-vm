@@ -1,10 +1,10 @@
 use core::cmp;
 
-use processor::ExecutionError;
-use test_utils::{
+use miden_core::assert_matches;
+use miden_processor::ExecutionError;
+use miden_utils_testing::{
     Felt, U32_BOUND, ZERO, expect_exec_error_matches, proptest::prelude::*, rand::rand_value,
 };
-use vm_core::assert_matches;
 
 // ADDITION
 // ------------------------------------------------------------------------------------------------

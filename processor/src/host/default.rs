@@ -1,6 +1,6 @@
 use alloc::{boxed::Box, sync::Arc};
 
-use vm_core::{DebugOptions, Felt, Word, mast::MastForest};
+use miden_core::{DebugOptions, Felt, Word, mast::MastForest};
 
 use crate::{
     AsyncHost, BaseHost, DebugHandler, ErrorContext, EventHandler, EventHandlerRegistry,
