@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.17.0 (TBD)
+
+#### Enhancements
+
+- Implement `copy_digest` and `hash_memory_double_words` procedures in the `std::crypto::hashes::rpo` module ([#1971](https://github.com/0xMiden/miden-vm/pull/1971)).
+
+#### Changes
+
+- [BREAKING] Incremented MSRV to 1.88.
+- [BREAKING] Implement preliminary changes for lazy loading of external `MastForest` `AdviceMap`s ([#1949](https://github.com/0xMiden/miden-vm/issues/1949)).
+- [BREAKING] Introduce `SourceManagerSync` trait, and remove `Assembler::source_manager()` method [#1966](https://github.com/0xMiden/miden-vm/issues/1966).
+- Fixed `ExecutionOptions::default()` to set `max_cycles` correctly to `1 << 29` ([#1969](https://github.com/0xMiden/miden-vm/pull/1969)).
+- [BREAKING] Revert `get_mapped_value` return signature [(#1981)](https://github.com/0xMiden/miden-vm/issues/1981).
+
 ## 0.16.2 (2025-07-11)
 
 - Fix `debug::print_vm_stack` which was returning the advice stack instead of the system stack [(#1984)](https://github.com/0xMiden/miden-vm/issues/1984).
@@ -65,7 +79,7 @@
 - Moved implementation of `miden_assembly_syntax::diagnostics` into a new `miden-utils-diagnostics` crate ([#1945](https://github.com/0xMiden/miden-vm/pull/1945)).
 - Moved implementation of `miden_core::debuginfo` into a new `miden-debug-types` crate ([#1945](https://github.com/0xMiden/miden-vm/pull/1945)).
 - Moved implementation of `miden_core::sync` into a new `miden-utils-sync` crate ([#1945](https://github.com/0xMiden/miden-vm/pull/1945)).
-+- [BREAKING] Replaced `miden_assembly_syntax::Version` with `semver::Version` ([#1946](https://github.com/0xMiden/pull/1946))
+- [BREAKING] Replaced `miden_assembly_syntax::Version` with `semver::Version` ([#1946](https://github.com/0xMiden/pull/1946))
 
 #### Fixes
 

@@ -312,13 +312,13 @@ pub fn eval_circuit(
     // Ensure vars and instructions are word-aligned and non-empty. Note that variables are
     // quadratic extension field elements while instructions are encoded as base field elements.
     // Hence we can pack 2 variables and 4 instructions per word.
-    if num_vars % 2 != 0 || num_vars == 0 {
+    if !num_vars.is_multiple_of(2) || num_vars == 0 {
         return Err(ExecutionError::failed_arithmetic_evaluation(
             err_ctx,
             AceError::NumVarIsNotWordAlignedOrIsEmpty(num_vars),
         ));
     }
-    if num_eval % 4 != 0 || num_eval == 0 {
+    if !num_eval.is_multiple_of(4) || num_eval == 0 {
         return Err(ExecutionError::failed_arithmetic_evaluation(
             err_ctx,
             AceError::NumEvalIsNotWordAlignedOrIsEmpty(num_eval),

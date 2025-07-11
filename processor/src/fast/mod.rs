@@ -18,7 +18,6 @@ use miden_debug_types::{DefaultSourceManager, SourceManager};
 use crate::{
     AdviceInputs, AdviceProvider, AsyncHost, ContextId, ErrorContext, ExecutionError, FMP_MIN,
     ProcessState, SYSCALL_FMP_MIN, add_error_ctx_to_external_error, chiplets::Ace, err_ctx,
-    utils::resolve_external_node_async,
 };
 
 mod memory;
@@ -635,8 +634,7 @@ impl FastProcessor {
         kernel: &Kernel,
         host: &mut impl AsyncHost,
     ) -> Result<(), ExecutionError> {
-        let (root_id, mast_forest) =
-            resolve_external_node_async(external_node, &mut self.advice, host).await?;
+        let (root_id, mast_forest) = self.resolve_external_node(external_node, host).await?;
 
         self.execute_mast_node(root_id, &mast_forest, kernel, host).await
     }
@@ -963,6 +961,44 @@ impl FastProcessor {
         }
 
         Ok(())
+    }
+
+    /// Analogous to [`Process::resolve_external_node`](crate::Process::resolve_external_node), but
+    /// for asynchronous execution.
+    async fn resolve_external_node(
+        &mut self,
+        external_node: &ExternalNode,
+        host: &mut impl AsyncHost,
+    ) -> Result<(MastNodeId, Arc<MastForest>), ExecutionError> {
+        let node_digest = external_node.digest();
+
+        let mast_forest = host
+            .get_mast_forest(&node_digest)
+            .await
+            .ok_or(ExecutionError::no_mast_forest_with_procedure(node_digest, &()))?;
+
+        // We limit the parts of the program that can be called externally to procedure
+        // roots, even though MAST doesn't have that restriction.
+        let root_id = mast_forest
+            .find_procedure_root(node_digest)
+            .ok_or(ExecutionError::malfored_mast_forest_in_host(node_digest, &()))?;
+
+        // if the node that we got by looking up an external reference is also an External
+        // node, we are about to enter into an infinite loop - so, return an error
+        if mast_forest[root_id].is_external() {
+            return Err(ExecutionError::CircularExternalNode(node_digest));
+        }
+
+        // Merge the advice map of this forest into the advice provider.
+        // Note that the map may be merged multiple times if a different procedure from the same
+        // forest is called.
+        // For now, only compiled libraries contain non-empty advice maps, so for most cases,
+        // this call will be cheap.
+        self.advice
+            .merge_advice_map(mast_forest.advice_map())
+            .map_err(|err| ExecutionError::advice_error(err, self.clk, &()))?;
+
+        Ok((root_id, mast_forest))
     }
 
     // HELPERS

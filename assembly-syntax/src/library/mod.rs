@@ -1,9 +1,4 @@
-use alloc::{
-    collections::{BTreeMap, BTreeSet},
-    string::String,
-    sync::Arc,
-    vec::Vec,
-};
+use alloc::{collections::BTreeMap, string::String, sync::Arc, vec::Vec};
 
 use miden_core::{
     AdviceMap, Kernel, Word,
@@ -82,7 +77,7 @@ impl Library {
             }
         }
 
-        let digest = compute_content_hash(&exports, &mast_forest);
+        let digest = mast_forest.compute_nodes_commitment(exports.values());
 
         Ok(Self { digest, exports, mast_forest })
     }
@@ -213,21 +208,10 @@ impl Deserializable for Library {
             exports.insert(proc_name, proc_node_id);
         }
 
-        let digest = compute_content_hash(&exports, &mast_forest);
+        let digest = mast_forest.compute_nodes_commitment(exports.values());
 
         Ok(Self { digest, exports, mast_forest })
     }
-}
-
-fn compute_content_hash(
-    exports: &BTreeMap<QualifiedProcedureName, MastNodeId>,
-    mast_forest: &MastForest,
-) -> Word {
-    let digests = BTreeSet::from_iter(exports.values().map(|&id| mast_forest[id].digest()));
-    digests
-        .into_iter()
-        .reduce(|a, b| miden_core::crypto::hash::Rpo256::merge(&[a, b]))
-        .unwrap()
 }
 
 #[cfg(feature = "std")]

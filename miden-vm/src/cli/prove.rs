@@ -34,7 +34,7 @@ pub struct ProveCmd {
     library_paths: Vec<PathBuf>,
 
     /// Maximum number of cycles a program is allowed to consume
-    #[arg(short = 'm', long = "max-cycles", default_value = "4294967295")]
+    #[arg(short = 'm', long = "max-cycles", default_value_t = ExecutionOptions::MAX_CYCLES)]
     max_cycles: u32,
 
     /// Number of outputs

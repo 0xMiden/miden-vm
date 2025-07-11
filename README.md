@@ -3,7 +3,7 @@
 [![LICENSE](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/0xMiden/miden-vm/blob/main/LICENSE)
 [![Test](https://github.com/0xMiden/miden-vm/actions/workflows/test.yml/badge.svg)](https://github.com/0xMiden/miden-vm/actions/workflows/test.yml)
 [![Build](https://github.com/0xMiden/miden-vm/actions/workflows/build.yml/badge.svg)](https://github.com/0xMiden/miden-vm/actions/workflows/build.yml)
-[![RUST_VERSION](https://img.shields.io/badge/rustc-1.86+-lightgray.svg)](https://www.rust-lang.org/tools/install)
+[![RUST_VERSION](https://img.shields.io/badge/rustc-1.88+-lightgray.svg)](https://www.rust-lang.org/tools/install)
 [![Crates.io](https://img.shields.io/crates/v/miden-vm)](https://crates.io/crates/miden-vm)
 
 A STARK-based virtual machine.
@@ -22,7 +22,7 @@ Miden VM is a zero-knowledge virtual machine written in Rust. For any program ex
 
 ### Status and features
 
-Miden VM is currently on release v0.16. In this release, most of the core features of the VM have been stabilized, and most of the STARK proof generation has been implemented. While we expect to keep making changes to the VM internals, the external interfaces should remain relatively stable, and we will do our best to minimize the amount of breaking changes going forward.
+Miden VM is currently on release v0.17. In this release, most of the core features of the VM have been stabilized, and most of the STARK proof generation has been implemented. While we expect to keep making changes to the VM internals, the external interfaces should remain relatively stable, and we will do our best to minimize the amount of breaking changes going forward.
 
 The next version of the VM is being developed in the [next](https://github.com/0xMiden/miden-vm/tree/next) branch. There is also a documentation for the latest features and changes in the next branch [documentation next branch](https://0xMiden.github.io/miden-vm/intro/main.html).
 

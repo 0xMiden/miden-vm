@@ -1,6 +1,8 @@
 use alloc::sync::Arc;
 
-use miden_processor::{AsyncHost, BaseHost, DefaultHost, ErrorContext, MastForest, ProcessState};
+use miden_processor::{
+    AdviceError, AsyncHost, BaseHost, DefaultHost, ErrorContext, MastForest, ProcessState,
+};
 use miden_prover::{ExecutionError, SyncHost, Word};
 use miden_stdlib::{EVENT_FALCON_SIG_TO_STACK, falcon_sign};
 
@@ -81,10 +83,10 @@ pub fn push_falcon_signature(
     let pub_key = process.get_stack_word(0);
     let msg = process.get_stack_word(1);
 
-    let pk_sk = process
-        .advice_provider()
-        .get_mapped_values(&pub_key)
-        .map_err(|err| ExecutionError::advice_error(err, process.clk(), err_ctx))?;
+    let clk = process.clk();
+    let pk_sk = process.advice_provider().get_mapped_values(&pub_key).ok_or_else(|| {
+        ExecutionError::advice_error(AdviceError::MapKeyNotFound { key: pub_key }, clk, err_ctx)
+    })?;
 
     let result = falcon_sign(pk_sk, msg)
         .ok_or_else(|| ExecutionError::malformed_signature_key("RPO Falcon512", err_ctx))?;
