@@ -5,7 +5,7 @@ use alloc::{
 
 use miden_core::{
     AdviceMap, Felt, Word,
-    crypto::merkle::{MerklePath, MerkleStore, NodeIndex, StoreNode},
+    crypto::merkle::{InnerNodeInfo, MerklePath, MerkleStore, NodeIndex, StoreNode},
 };
 
 mod inputs;
@@ -136,6 +136,40 @@ impl AdviceProvider {
     /// Returns the current stack.
     pub fn stack(&self) -> &[Felt] {
         &self.stack
+    }
+
+    // PUBLIC MUTATORS
+    // --------------------------------------------------------------------------------------------
+
+    /// Extends the stack with the given elements.
+    pub fn extend_stack<I>(&mut self, iter: I)
+    where
+        I: IntoIterator<Item = Felt>,
+    {
+        self.stack.extend(iter);
+    }
+
+    /// Extends the map of values with the given argument, replacing previously inserted items.
+    pub fn extend_map<I>(&mut self, iter: I)
+    where
+        I: IntoIterator<Item = (Word, Vec<Felt>)>,
+    {
+        self.map.extend(iter);
+    }
+
+    /// Extends the [MerkleStore] with the given nodes.
+    pub fn extend_merkle_store<I>(&mut self, iter: I)
+    where
+        I: Iterator<Item = InnerNodeInfo>,
+    {
+        self.store.extend(iter);
+    }
+
+    /// Extends the contents of this instance with the contents of the other instance.
+    pub fn extend(&mut self, other: Self) {
+        self.stack.extend(other.stack);
+        self.map.extend(other.map);
+        self.store.extend(other.store.inner_nodes());
     }
 
     // ADVICE MAP
