@@ -20,14 +20,6 @@
 //! let digest = hash_elements(&elements);
 //! ```
 //!
-//! # Constants
-//! - `STATE_WIDTH`: The width of the sponge state (12 field elements).
-//! - `RATE_LEN`: The length of the rate portion of the state (8 field elements).
-//!
-//! # Types
-//! - `Felt`: Field element type used in the VM.
-//! - `Digest`: 256-bit digest (Word from miden_crypto).
-//!
 //! # About Rpo256
 //! Rpo256 is a hash function built on a sponge construction with the Rescue-XLIX permutation,
 //! optimized for use in zero-knowledge protocols and the Miden virtual machine.
