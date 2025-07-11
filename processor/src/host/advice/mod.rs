@@ -138,38 +138,12 @@ impl AdviceProvider {
         &self.stack
     }
 
-    // PUBLIC MUTATORS
-    // --------------------------------------------------------------------------------------------
-
     /// Extends the stack with the given elements.
     pub fn extend_stack<I>(&mut self, iter: I)
     where
         I: IntoIterator<Item = Felt>,
     {
         self.stack.extend(iter);
-    }
-
-    /// Extends the map of values with the given argument, replacing previously inserted items.
-    pub fn extend_map<I>(&mut self, iter: I)
-    where
-        I: IntoIterator<Item = (Word, Vec<Felt>)>,
-    {
-        self.map.extend(iter);
-    }
-
-    /// Extends the [MerkleStore] with the given nodes.
-    pub fn extend_merkle_store<I>(&mut self, iter: I)
-    where
-        I: Iterator<Item = InnerNodeInfo>,
-    {
-        self.store.extend(iter);
-    }
-
-    /// Extends the contents of this instance with the contents of the other instance.
-    pub fn extend(&mut self, other: Self) {
-        self.stack.extend(other.stack);
-        self.map.extend(other.map);
-        self.store.extend(other.store.inner_nodes());
     }
 
     // ADVICE MAP
@@ -215,6 +189,14 @@ impl AdviceProvider {
             },
         }
         Ok(())
+    }
+
+    /// Extends the map of values with the given argument, replacing previously inserted items.
+    pub fn extend_map<I>(&mut self, iter: I)
+    where
+        I: IntoIterator<Item = (Word, Vec<Felt>)>,
+    {
+        self.map.extend(iter);
     }
 
     // MERKLE STORE
@@ -310,6 +292,14 @@ impl AdviceProvider {
         self.store.get_node(root, NodeIndex::root()).is_ok()
     }
 
+    /// Extends the [MerkleStore] with the given nodes.
+    pub fn extend_merkle_store<I>(&mut self, iter: I)
+    where
+        I: Iterator<Item = InnerNodeInfo>,
+    {
+        self.store.extend(iter);
+    }
+
     // HELPERS
     // --------------------------------------------------------------------------------------------
 
@@ -325,6 +315,14 @@ impl AdviceProvider {
                 new_values: new_values.to_vec(),
             }
         })
+    }
+
+    /// Extends the contents of this instance with the contents of an `AdviceInputs`.
+    pub fn extend_from_inputs(&mut self, mut other: AdviceInputs) {
+        other.stack.reverse();
+        self.stack.extend(other.stack);
+        self.map.extend(other.map);
+        self.store.extend(other.store.inner_nodes());
     }
 }
 
