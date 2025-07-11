@@ -502,7 +502,7 @@ impl MastForestBuilder {
     /// * If dynamically-linked, then an external node is inserted, and its MastNodeId is returned
     pub fn ensure_external_link(&mut self, mast_root: Word) -> Result<MastNodeId, Report> {
         if let Some(root_id) = self.statically_linked_mast.find_procedure_root(mast_root) {
-            for old_id in SubtreeIterator::new(&root_id, &self.statically_linked_mast.clone()) {
+            for old_id in SubtreeIterator::new(&root_id, &self.statically_linked_mast) {
                 let node = self.statically_linked_mast[old_id]
                     .remap_children(&self.statically_linked_mast_remapping);
                 let new_id = self.ensure_node(node)?;
