@@ -1,5 +1,5 @@
 # Cryptographic hashes
-Namespace `std::crypto` contains modules for commonly used cryptographic hash functions.
+Namespace `std::crypto::hashes` contains modules for commonly used cryptographic hash functions.
 
 ## BLAKE3
 Module `std::crypto::hashes::blake3` contains procedures for computing hashes using [BLAKE3](https://blake3.io/) hash function. The input and output elements are assumed to contain one 32-bit value per element.
@@ -9,8 +9,16 @@ Module `std::crypto::hashes::blake3` contains procedures for computing hashes us
 | hash_1to1   | Computes BLAKE3 1-to-1 hash.<br/><br/>Input: 32-bytes stored in the first 8 elements of the stack (32 bits per element).<br /> <br/>Output: A 32-byte digest stored in the first 8 elements of stack (32 bits per element). |
 | hash_2to1   | Computes BLAKE3 2-to-1 hash.<br/><br/>Input: 64-bytes stored in the first 16 elements of the stack (32 bits per element).<br /> <br/>Output: A 32-byte digest stored in the first 8 elements of stack (32 bits per element) |
 
-## RPO
-Module `std::crypto::hashes::rpo` contains procedures for computing and managing hashes using [Rescue Prime Optimized](https://hackmd.io/@_sMN1pXvQa-zn8F4pegFbg/S1O2wJ8di) hash function.
+## SHA256
+Module `std::crypto::hashes::sha256` contains procedures for computing hashes using [SHA256](https://en.wikipedia.org/wiki/SHA-2) hash function. The input and output elements are assumed to contain one 32-bit value per element.
+
+| Procedure   | Description                                                                                                                                                                                                                  |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| hash_1to1   | Computes SHA256 1-to-1 hash.<br/><br/>Input: 32-bytes stored in the first 8 elements of the stack (32 bits per element).<br /> <br/>Output: A 32-byte digest stored in the first 8 elements of stack (32 bits per element).  |
+| hash_2to1   | Computes SHA256 2-to-1 hash.<br/><br/>Input: 64-bytes stored in the first 16 elements of the stack (32 bits per element).<br /> <br/>Output: A 32-byte digest stored in the first 8 elements of stack (32 bits per element). |
+
+## RPO256
+Module `std::crypto::hashes::rpo` contains procedures for computing and managing hashes using [Rescue Prime Optimized](https://docs.rs/miden-crypto/latest/miden_crypto/hash/rpo/struct.Rpo256.html) hash function.
 
 | Procedure                       | Description   |
 | ------------------------------- | ------------- |
@@ -22,11 +30,3 @@ Module `std::crypto::hashes::rpo` contains procedures for computing and managing
 | prepare_hasher_state            | Computes the hasher state required for the `hash_memory_with_state` procedure.<br /><br />Depending on the provided `pad_inputs_flag`, this procedure instantiates the hasher state using different values for capacity element:<br />- If `pad_inputs_flag` equals $1$ the capacity element will be assigned to $0$. This will essentially "pad" the hashing values with zeroes to the next multiple of $8$.<br />- If `pad_inputs_flag` equals $0$ the capacity element will be assigned to the remainder of the division of elements number by $8$ ($num\_elements\%8$).<br /><br />Inputs: `[ptr, num_elements, pad_inputs_flag]`<br />Outputs: `[C, B, A, ptr, end_pairs_addr, num_elements%8]` |
 | hash_memory_with_state          | Computes hash of `Felt` values starting at the specified memory address using the provided hasher state.<br /><br />This procedure divides the hashing process into two parts: hashing pairs of words using `absorb_double_words_from_memory` procedure and hashing the remaining values using the `hperm` instruction.<br /><br />Inputs: `[C, B, A, ptr, end_pairs_addr, num_elements%8]`<br />Outputs: `[HASH]`
 | hash_memory                     | Computes hash of `Felt` values starting at the specified memory address.<br /><br />This procedure divides the hashing process into two parts: hashing pairs of words using<br />`absorb_double_words_from_memory` procedure and hashing the remaining values using the `hperm`<br />instruction.<br /><br />Inputs: `[ptr, num_elements]`<br />Outputs: [`HASH]`<br />Cycles:<br />- If number of elements divides by $8$: 47 cycles + 3 * words<br />- Else: 180 cycles + 3 * words<br /><br />Panics if number of inputs equals $0$.<br /> |
-
-## SHA256
-Module `std::crypto::hashes::sha256` contains procedures for computing hashes using [SHA256](https://en.wikipedia.org/wiki/SHA-2) hash function. The input and output elements are assumed to contain one 32-bit value per element.
-
-| Procedure   | Description                                                                                                                                                                                                                  |
-| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| hash_1to1   | Computes SHA256 1-to-1 hash.<br/><br/>Input: 32-bytes stored in the first 8 elements of the stack (32 bits per element).<br /> <br/>Output: A 32-byte digest stored in the first 8 elements of stack (32 bits per element).  |
-| hash_2to1   | Computes SHA256 2-to-1 hash.<br/><br/>Input: 64-bytes stored in the first 16 elements of the stack (32 bits per element).<br /> <br/>Output: A 32-byte digest stored in the first 8 elements of stack (32 bits per element). |
