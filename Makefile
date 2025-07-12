@@ -13,6 +13,7 @@ FEATURES_CONCURRENT_EXEC=--features concurrent,executable
 FEATURES_LOG_TREE=--features concurrent,executable,tracing-forest
 FEATURES_METAL_EXEC=--features concurrent,executable,metal,tracing-forest
 ALL_FEATURES_BUT_ASYNC=--features concurrent,executable,metal,testing,with-debug-info,internal
+ALL_FEATURES_FOR_BENCH=--features concurrent,executable,metal,testing,with-debug-info,internal,no_err_ctx
 
 # -- linting --------------------------------------------------------------------------------------
 
@@ -83,7 +84,7 @@ test-package: ## Tests specific package: make test-package package=miden-vm
 
 .PHONY: check
 check: ## Checks all targets and features for errors without code generation
-	cargo check --all-targets ${ALL_FEATURES_BUT_ASYNC}
+	cargo check --all-targets ${ALL_FEATURES_FOR_BENCH}
 
 # --- building ------------------------------------------------------------------------------------
 
@@ -123,6 +124,10 @@ exec-info: ## Builds an executable with log tree enabled
 
 # --- benchmarking --------------------------------------------------------------------------------
 
+.PHONY: check-bench
+check-bench: ## Builds all benchmarks (incl. those needing no_err_ctx)
+	cargo check --benches ${ALL_FEATURES_FOR_BENCH}
+
 .PHONY: bench
 bench: ## Runs benchmarks
-	cargo bench --profile optimized --features internal
+	cargo bench --profile optimized ${ALL_FEATURES_FOR_BENCH}
