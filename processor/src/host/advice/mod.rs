@@ -5,7 +5,7 @@ use alloc::{
 
 use miden_core::{
     AdviceMap, Felt, Word,
-    crypto::merkle::{MerklePath, MerkleStore, NodeIndex, StoreNode},
+    crypto::merkle::{InnerNodeInfo, MerklePath, MerkleStore, NodeIndex, StoreNode},
 };
 
 mod inputs;
@@ -138,6 +138,16 @@ impl AdviceProvider {
         &self.stack
     }
 
+    /// Extends the stack with the given elements.
+    /// Elements are added to the top of the stack i.e. last element of this iterator is the first
+    /// element popped.
+    pub fn extend_stack<I>(&mut self, iter: I)
+    where
+        I: IntoIterator<Item = Felt>,
+    {
+        self.stack.extend(iter);
+    }
+
     // ADVICE MAP
     // --------------------------------------------------------------------------------------------
 
@@ -174,6 +184,20 @@ impl AdviceProvider {
             },
         }
         Ok(())
+    }
+
+    /// Merges all entries from the given [`AdviceMap`] into the current advice map.
+    ///
+    /// Returns an error if any new entry already exists with the same key but a different value
+    /// than the one currently stored. The current map remains unchanged.
+    pub fn extend_map(&mut self, other: &AdviceMap) -> Result<(), AdviceError> {
+        self.map.merge(other).map_err(|((key, prev_values), new_values)| {
+            AdviceError::MapKeyAlreadyPresent {
+                key,
+                prev_values: prev_values.to_vec(),
+                new_values: new_values.to_vec(),
+            }
+        })
     }
 
     // MERKLE STORE
@@ -269,21 +293,22 @@ impl AdviceProvider {
         self.store.get_node(root, NodeIndex::root()).is_ok()
     }
 
+    /// Extends the [MerkleStore] with the given nodes.
+    pub fn extend_merkle_store<I>(&mut self, iter: I)
+    where
+        I: Iterator<Item = InnerNodeInfo>,
+    {
+        self.store.extend(iter);
+    }
+
     // HELPERS
     // --------------------------------------------------------------------------------------------
 
-    /// Merges all entries from the given [`AdviceMap`] into the current advice map.
-    ///
-    /// Returns an error if any new entry already exists with the same key but a different value
-    /// than the one currently stored. The current map remains unchanged.
-    pub(crate) fn merge_advice_map(&mut self, other: &AdviceMap) -> Result<(), AdviceError> {
-        self.map.merge(other).map_err(|((key, prev_values), new_values)| {
-            AdviceError::MapKeyAlreadyPresent {
-                key,
-                prev_values: prev_values.to_vec(),
-                new_values: new_values.to_vec(),
-            }
-        })
+    /// Extends the contents of this instance with the contents of an `AdviceInputs`.
+    pub fn extend_from_inputs(&mut self, inputs: &AdviceInputs) -> Result<(), AdviceError> {
+        self.extend_stack(inputs.stack.iter().cloned().rev());
+        self.extend_merkle_store(inputs.store.inner_nodes());
+        self.extend_map(&inputs.map)
     }
 }
 
