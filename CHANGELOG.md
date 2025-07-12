@@ -5,6 +5,7 @@
 #### Enhancements
 
 - Implement `copy_digest` and `hash_memory_double_words` procedures in the `std::crypto::hashes::rpo` module ([#1971](https://github.com/0xMiden/miden-vm/pull/1971)).
+- Add `extend_` methods on AdviceProvider [#1982](https://github.com/0xMiden/miden-vm/pull/1982).
 
 #### Changes
 
@@ -17,7 +18,6 @@
 ## 0.16.2 (2025-07-11)
 
 - Fix `debug::print_vm_stack` which was returning the advice stack instead of the system stack [(#1984)](https://github.com/0xMiden/miden-vm/issues/1984).
-- Add `extend_` methods on AdviceProvider [#1982](https://github.com/0xMiden/miden-vm/pull/1982).
 
 ## 0.16.1 (2025-07-10)
 

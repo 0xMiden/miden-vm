@@ -995,7 +995,7 @@ impl FastProcessor {
         // For now, only compiled libraries contain non-empty advice maps, so for most cases,
         // this call will be cheap.
         self.advice
-            .merge_advice_map(mast_forest.advice_map())
+            .extend_map(mast_forest.advice_map())
             .map_err(|err| ExecutionError::advice_error(err, self.clk, &()))?;
 
         Ok((root_id, mast_forest))

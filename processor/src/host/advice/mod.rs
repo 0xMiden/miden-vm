@@ -184,12 +184,18 @@ impl AdviceProvider {
         Ok(())
     }
 
-    /// Extends the map of values with the given argument, replacing previously inserted items.
-    pub fn extend_map<I>(&mut self, iter: I)
-    where
-        I: IntoIterator<Item = (Word, Vec<Felt>)>,
-    {
-        self.map.extend(iter);
+    /// Merges all entries from the given [`AdviceMap`] into the current advice map.
+    ///
+    /// Returns an error if any new entry already exists with the same key but a different value
+    /// than the one currently stored. The current map remains unchanged.
+    pub fn extend_map(&mut self, other: &AdviceMap) -> Result<(), AdviceError> {
+        self.map.merge(other).map_err(|((key, prev_values), new_values)| {
+            AdviceError::MapKeyAlreadyPresent {
+                key,
+                prev_values: prev_values.to_vec(),
+                new_values: new_values.to_vec(),
+            }
+        })
     }
 
     // MERKLE STORE
@@ -296,26 +302,11 @@ impl AdviceProvider {
     // HELPERS
     // --------------------------------------------------------------------------------------------
 
-    /// Merges all entries from the given [`AdviceMap`] into the current advice map.
-    ///
-    /// Returns an error if any new entry already exists with the same key but a different value
-    /// than the one currently stored. The current map remains unchanged.
-    pub(crate) fn merge_advice_map(&mut self, other: &AdviceMap) -> Result<(), AdviceError> {
-        self.map.merge(other).map_err(|((key, prev_values), new_values)| {
-            AdviceError::MapKeyAlreadyPresent {
-                key,
-                prev_values: prev_values.to_vec(),
-                new_values: new_values.to_vec(),
-            }
-        })
-    }
-
     /// Extends the contents of this instance with the contents of an `AdviceInputs`.
-    pub fn extend_from_inputs(&mut self, mut other: AdviceInputs) {
-        other.stack.reverse();
-        self.stack.extend(other.stack);
-        self.map.extend(other.map);
-        self.store.extend(other.store.inner_nodes());
+    pub fn extend_from_inputs(&mut self, inputs: &AdviceInputs) -> Result<(), AdviceError> {
+        self.extend_stack(inputs.stack.iter().cloned().rev());
+        self.extend_merkle_store(inputs.store.inner_nodes());
+        self.extend_map(&inputs.map)
     }
 }
 
