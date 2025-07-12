@@ -693,6 +693,7 @@ impl Process {
         decorator: &Decorator,
         host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
+        tracing::trace!("executing decorator {decorator}");
         match decorator {
             Decorator::Debug(options) => {
                 if self.decoder.in_debug_mode() {

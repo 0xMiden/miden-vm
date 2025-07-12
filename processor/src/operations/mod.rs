@@ -40,6 +40,7 @@ impl Process {
     ///
     /// This method also takes an error context as an argument, which is used to construct helpful
     /// error messages in case of an error.
+    #[tracing::instrument(skip(self, program, host, err_ctx), name = "execute_op")]
     pub(super) fn execute_op_with_error_ctx(
         &mut self,
         op: Operation,
@@ -49,6 +50,10 @@ impl Process {
     ) -> Result<(), ExecutionError> {
         // make sure there is enough memory allocated to hold the execution trace
         self.ensure_trace_capacity();
+
+        if !matches!(op, Operation::Noop) {
+            tracing::trace!("executing operation '{op}'");
+        }
 
         // execute the operation
         match op {
