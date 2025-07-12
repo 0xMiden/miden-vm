@@ -266,3 +266,33 @@ The `HORNEREXT` makes one memory access request:
 $$
 u_{mem} = \alpha_0 + \alpha_1 \cdot op_{mem\_readword} + \alpha_2 \cdot ctx + \alpha_3 \cdot s_{13} + \alpha_4 \cdot clk + \alpha_{5} \cdot h_{0} + \alpha_{6} \cdot h_{1} + \alpha_{7} \cdot h_{3} + \alpha_{8} \cdot h_{4}
 $$
+
+## Hash, HPerm, HMerge: differences and details
+
+### Differences between operations
+- **hash**: 1-to-1 hashing, takes 4 elements (1 word), returns a 4-element digest. Uses RPO permutation with padding, capacity[0]=4.
+- **hperm**: Applies RPO permutation to 12 elements (8 rate + 4 capacity), returns all 12 elements (the full sponge state). Used for intermediate operations or manual sponge state management.
+- **hmerge**: 2-to-1 hashing, takes 8 elements (2 words), returns a 4-element digest. Used for merging two digests (each 4 elements).
+
+### Input requirements for hmerge
+`hmerge` is intended for merging two digests (each 4 elements). The result is only guaranteed to be correct if the inputs are actual digests.
+
+### Rate and Capacity
+- **Rate** — elements stack[4..12], used for data.
+- **Capacity** — elements stack[0..4], used for domain separation and security.
+- Initialization:
+  - If the data length is a multiple of 8, capacity[0]=0, others=0.
+  - If not a multiple of 8, capacity[0]=data length mod 8, others=0.
+  - For Merkle/merge operations, capacity is usually all zeros.
+
+### Extracting the digest after hperm
+To extract the digest after hperm, use the `squeeze_digest` procedure (see stdlib/asm/crypto/hashes/rpo.masm):
+- dropw — remove the first rate word,
+- swapw — move the required word to the top,
+- dropw — remove the capacity word.
+As a result, the digest (4 elements) remains at the top of the stack.
+
+### Rust equivalents
+- `hash` — `miden_crypto::hash::rpo::Rpo256::hash_elements`
+- `hmerge` — `miden_crypto::hash::rpo::Rpo256::merge`
+- `hperm` — `miden_crypto::hash::rpo::Rpo256::apply_permutation`

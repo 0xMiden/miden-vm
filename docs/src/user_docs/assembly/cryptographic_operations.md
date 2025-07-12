@@ -20,3 +20,33 @@ mtree_verify.err=123
 mtree_verify.err=MY_CONSTANT
 ```
 If the error code is omitted, the default value of $0$ is assumed.
+
+### Rescue Prime Optimized Hashing Operations
+
+#### Differences between `hash`, `hperm`, and `hmerge`
+- **hash**: 1-to-1 hashing (Rescue Prime Optimized), takes 4 elements (1 word), returns a 4-element digest. Used for hashing a single word.
+- **hperm**: Applies the RPO permutation to 12 stack elements (8 rate + 4 capacity), returns all 12 elements (the full sponge state). Used for intermediate operations or manual sponge state management.
+- **hmerge**: 2-to-1 hashing, takes 8 elements (2 words), returns a 4-element digest. Used for merging two digests, e.g., in Merkle trees.
+
+#### Can `hmerge` be used only for digests?
+`hmerge` is intended for merging two digests (each 4 elements). In the VM and in the Rust equivalent (`miden_crypto::hash::rpo::Rpo256::merge`), the inputs are expected to be digests. Using arbitrary data is possible, but correctness is only guaranteed for digests.
+
+#### What are Rate and Capacity, and how to initialize them
+- **Rate** — the first 8 elements of the sponge state (stack[4..12]), used for data to be hashed.
+- **Capacity** — the first 4 elements of the sponge state (stack[0..4]), used for domain separation and security.
+- Initialization:
+  - If the data length is a multiple of 8, the first capacity element = 0, others = 0.
+  - If not a multiple of 8, the first capacity element = data length mod 8, others = 0.
+  - For Merkle/merge operations, capacity is usually all zeros.
+
+#### How to get the final digest after `hperm`
+After applying `hperm`, the result (the full state) is at the top of the stack. To extract the digest (4 elements), use the `squeeze_digest` procedure:
+- `dropw` — remove the first rate word,
+- `swapw` — move the required word to the top,
+- `dropw` — remove the capacity word.
+As a result, the digest (4 elements) remains at the top of the stack.
+
+#### Rust equivalents
+- `hmerge` ↔️ `miden_crypto::hash::rpo::Rpo256::merge`
+- `hash` ↔️ `miden_crypto::hash::rpo::Rpo256::hash_elements`
+- `hperm` ↔️ `miden_crypto::hash::rpo::Rpo256::apply_permutation` (on the full state)
