@@ -1,0 +1,78 @@
+use.std::crypto::stark::constants
+
+#! Loads the portion of the query associated to the main segment of the execution trace.
+#!
+#! Input: [Y, Y, 0, 0, 0, 0, ptr, ...]
+#! Output: [Y, D, C, ptr, ...]
+export.load_main_segment_execution_trace
+    repeat.10
+        adv_pipe
+        horner_eval_base
+        hperm
+    end
+end
+
+#! Loads the portion of the query associated to the auxiliary segment of the execution trace.
+#!
+#! Input: [Y, Y, 0, 0, 0, 0, ptr, ...]
+#! Output: [Y, D, C, ptr, ...]
+export.load_aux_segment_execution_trace
+    repeat.2
+        adv_pipe
+        horner_eval_ext      
+        hperm
+    end
+end
+
+#! Loads the portion of the query associated to the constraints composition polynomials trace.
+#!
+#! Input: [Y, Y, 0, 0, 0, 0, ptr, ...]
+#! Output: [Y, D, C, ptr, ...]
+export.load_constraints_composition_polys_trace
+    repeat.2
+        adv_pipe
+        horner_eval_ext        
+        hperm
+    end
+end
+
+#! Handles the logic for processing the auxiliary segment of the execution trace, if such a trace exists.
+#! 
+#! Input: [Y, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr, ...]
+#! Output: [Y, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr, ...]
+export.process_aux_segment_execution_trace
+    ## 1) Load aux trace commitment and get leaf
+    exec.constants::aux_trace_com_ptr mem_loadw
+
+    ## 2) Get the leaf against the auxiliary trace commitment for the current query
+    dup.9
+    dup.9
+    mtree_get
+    exec.constants::tmp3 mem_storew
+    adv.push_mapval
+    #=> [L, R, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr, ...]
+
+    ## 3) Load the values of the auxiliary segment of the execution trace at the current query.
+    
+    ### a) Set up the stack
+    exec.constants::zero_word_ptr mem_loadw
+    swapw
+    padw
+    #=> [Y, Y, C, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr, ...]
+
+    ### b) Load the first 4 columns as a batch of 4 quadratic extension field elements.
+    exec.load_aux_segment_execution_trace
+    #=> [Y, D, C, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr, ...]
+
+    ## 4) Load the leaf value we got using `mtree_get` and compare it against the hash
+    ##    we just computed
+    exec.constants::tmp3 mem_loadw
+    movup.4
+    assert_eq
+    movup.3
+    assert_eq
+    movup.2
+    assert_eq
+    assert_eq
+    #=> [Y, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr, ...]
+end

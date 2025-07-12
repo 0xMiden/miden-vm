@@ -1,4 +1,5 @@
 use.std::crypto::stark::constants
+use.std::crypto::stark::helpers::deep_queries
 
 #! Loads the next query rows in the main, auxiliary and constraint composition polynomials traces
 #! and computes the values of the DEEP code word at the index corresponding to the query.
@@ -56,11 +57,7 @@ proc.load_query_row
     swapw
     padw
     #=> [Y, Y, 0, 0, 0, 0, ptr, y, y, y]
-    repeat.10
-        adv_pipe
-        horner_eval_base      
-        hperm
-    end
+    exec.deep_queries::load_main_segment_execution_trace
     #=> [Y, L, C, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr, ...]
  
     ## 5) Load the leaf value we got using `mtree_get` and compare it against the hash
@@ -78,43 +75,7 @@ proc.load_query_row
 
     # II) Process the auxiliary segment of the execution trace portion of the query
 
-    ## 1) Load aux trace commitment and get leaf
-    exec.constants::aux_trace_com_ptr mem_loadw
-
-    ## 2) Get the leaf against the auxiliary trace commitment for the current query
-    dup.9
-    dup.9
-    mtree_get
-    exec.constants::tmp3 mem_storew
-    adv.push_mapval
-    #=> [L, R, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr, ...]
-
-    ## 3) Load the values of the auxiliary segment of the execution trace at the current query.
-    
-    ### a) Set up the stack
-    exec.constants::zero_word_ptr mem_loadw
-    swapw
-    padw
-    #=> [Y, Y, C, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr, ...]
-
-    ### b) Load the first 4 columns as a batch of 4 quadratic extension field elements.
-    repeat.2
-        adv_pipe
-        horner_eval_ext      
-        hperm
-    end
-    #=> [Y, D, C, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr, ...]
-
-    ## 4) Load the leaf value we got using `mtree_get` and compare it against the hash
-    ##    we just computed
-    exec.constants::tmp3 mem_loadw
-    movup.4
-    assert_eq
-    movup.3
-    assert_eq
-    movup.2
-    assert_eq
-    assert_eq
+    exec.deep_queries::process_aux_segment_execution_trace
     #=> [Y, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr, ...]
 
     # III) Process the constraint trace portion of the query
@@ -134,11 +95,7 @@ proc.load_query_row
     ## 3) Load the 8columns as quadratic extension field elements in batches of 4. 
     padw
     swapw.2
-    repeat.2
-        adv_pipe
-        horner_eval_ext        
-        hperm
-    end
+    exec.deep_queries::load_constraints_composition_polys_trace
     #=> [Y, L, Y, ptr_x, ptr_alpha_inv, acc1, acc0, index, query_ptr, ...]
 
     ## 4) Load the leaf value we got using `mtree_get` and compare it against the hash

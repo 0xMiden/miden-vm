@@ -1,0 +1,8 @@
+
+export.process_row_ood_evaluations
+    repeat.24
+        adv_pipe
+        horner_eval_ext
+        hperm
+    end
+end

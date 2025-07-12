@@ -9,37 +9,9 @@ const.DOMAIN_OFFSET_INV=2635249152773512046
 # Number of random extension field coefficients related to the auxiliary trace (i.e. the alphas)
 const.NUM_AUX_TRACE_COEFS=2
 
-# Number of constraints, both boundary and transitional
-# Note: If the full set of all implemented constraints is used then this should be set to 226
-const.NUM_CONSTRAINTS=4
-
 # Blowup factor
 const.BLOWUP_FACTOR=8
 const.BLOWUP_FACTOR_LOG=3
-
-# Max cycle length for periodic columns
-const.MAX_CYCLE_LEN_LOG=3
-
-# Constraint evaluation circuit digest
-const.DIGEST_0=13839693060569330762
-const.DIGEST_1=2312826173762406067
-const.DIGEST_2=8866828852882360297
-const.DIGEST_3=18124346805341043858
-
-# Number of inputs to the constraint evaluation circuit
-const.NUM_INPUTS_CIRCUIT=232
-
-# Number of evaluation gates in the constraint evaluation circuit
-const.NUM_EVAL_GATES_CIRCUIT=88
-
-# Number of fixed length public inputs with padding (in field elements)
-# This is composed of the input/output operand stacks (16 * 2) and the program digest (4) and four
-# zeros for padding to the next multiple of 4. Note that, then, the fixed length public inputs
-# which are stored as extension field elements will be double-word aligned. 
-const.NUM_FIXED_LEN_PUBLIC_INPUTS=40
-
-# Op label for kernel procedures table messages
-const.KERNEL_OP_LABEL=48
 
 # MEMORY POINTERS
 # =================================================================================================
@@ -97,28 +69,28 @@ const.ALPHA_DEEP_ND_PTR=3223322656
 ### Address to store the fixed terms, across all queries, of the DEEP queries.
 const.OOD_FIXED_TERM_HORNER_EVALS_PTR=3223322660
 
-### Address storing a pointer to the number of public inputs (in field elements)
+### Address to the number of public inputs (in field elements)
 const.NUM_PUBLIC_INPUTS_PTR=3223322664
 
-### Address storing trace domain generator
-const.TRACE_DOMAIN_GENERATOR_PTR=3223322665
+### Address to trace domain generator
+const.TRACE_DOMAIN_GENERATOR_PTR=3223322668
 
-### Address storing a pointer to variable length public inputs
-const.VARIABLE_LEN_PUBLIC_INPUTS_ADDRESS_PTR=3223322666
+### Address to variable length public inputs
+const.VARIABLE_LEN_PUBLIC_INPUTS_ADDRESS_PTR=3223322672
 
-### Address storing a pointer to the public inputs
-const.PUBLIC_INPUTS_ADDRESS_PTR=3223322667
+### Address to the public inputs
+const.PUBLIC_INPUTS_ADDRESS_PTR=3223322676
 
 ### Addresses to store the state of RPO-based random coin
-const.C_PTR=3223322668
-const.R1_PTR=3223322672
-const.R2_PTR=3223322676
+const.C_PTR=3223322680
+const.R1_PTR=3223322684
+const.R2_PTR=3223322688
 
 ### Addresses used for storing temporary values
-const.TMP1=3223322680
-const.TMP2=3223322684
-const.TMP3=3223322688
-const.TMP4=3223322692
+const.TMP1=3223322692
+const.TMP2=3223322696
+const.TMP3=3223322700
+const.TMP4=3223322704
 
 ### Address to the word holding the non-deterministically loaded 2 random challenges, which will be
 ### checked for correctness once we receive the commitment to the auxiliary trace and are able to
@@ -191,7 +163,7 @@ const.FRI_COM_PTR=4294912800
 ## required is 80 + 16 + 16 = 112
 ##
 ## Starts at address 3238002688 = 2**31 + 2**30 + 2**24 and the memory region grows only forward.
-## Its size is determined by the sum of widths of all traces. 
+## Its size is determined mainly by the sum of widths of all traces. 
 const.CURRENT_TRACE_ROW_PTR=3238002688
 
 # ACCESSORS
@@ -213,43 +185,12 @@ export.get_num_aux_trace_coefs
     push.NUM_AUX_TRACE_COEFS
 end
 
-export.get_num_constraints
-    push.NUM_CONSTRAINTS
-end
-
 export.get_blowup_factor
     push.BLOWUP_FACTOR
 end
 
 export.get_blowup_factor_log
     push.BLOWUP_FACTOR_LOG
-end
-
-export.get_max_cycle_length_log
-    push.MAX_CYCLE_LEN_LOG
-end
-
-export.get_arithmetic_circuit_eval_digest
-    push.DIGEST_0
-    push.DIGEST_1
-    push.DIGEST_2
-    push.DIGEST_3
-end
-
-export.get_arithmetic_circuit_eval_number_inputs
-    push.NUM_INPUTS_CIRCUIT
-end
-
-export.get_arithmetic_circuit_eval_number_eval_gates
-    push.NUM_EVAL_GATES_CIRCUIT
-end
-
-export.get_num_fixed_len_public_inputs
-    push.NUM_FIXED_LEN_PUBLIC_INPUTS
-end
-
-export.kernel_proc_table_op_label
-    push.KERNEL_OP_LABEL
 end
 
 #! Store details about the LDE domain.

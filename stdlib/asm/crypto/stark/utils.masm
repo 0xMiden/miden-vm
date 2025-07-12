@@ -1,5 +1,6 @@
 use.std::crypto::stark::constants
 use.std::crypto::hashes::rpo
+use.std::crypto::stark::helpers::constraints_eval
 
 #! Compute the LDE domain generator from the log2 of its size.
 #!
@@ -72,7 +73,7 @@ export.set_up_auxiliary_inputs_ace
     # => [(z_1, z_0)^n, z_1, z_0, alpha1, alpha0, ...]
 
     exec.constants::get_trace_length_log
-    exec.constants::get_max_cycle_length_log
+    exec.constraints_eval::get_max_cycle_length_log
     sub
     # => [log(min_num_cycles), (z_1, z_0)^n, z_1, z_0, alpha1, alpha0, ...] where min_num_cycles = trace_len / max_cycle_len
 
@@ -134,25 +135,14 @@ export.constraint_evaluation_check
     # => [...]
 
     # 2) Load the circuit description from the advice tape and check that it matches the hardcoded digest.
-    exec.constants::get_arithmetic_circuit_eval_digest
-    adv.push_mapval
-    exec.constants::get_arithmetic_circuit_ptr
-    padw padw padw
-    repeat.12
-        adv_pipe
-        hperm
-    end
-    exec.rpo::squeeze_digest
-    movup.4 drop
-    assert_eqw
-    # => [...]
+    exec.constraints_eval::load_ace_circuit_description
 
     # 3) Set up the inputs to the "arithmetic_circuit_eval" op. Namely:
     #    1. a pointer to the inputs of the circuit in memory,
     #    2. the number of inputs to the circuit,
     #    3. the number of evaluation gates in the circuit.
-    exec.constants::get_arithmetic_circuit_eval_number_eval_gates
-    exec.constants::get_arithmetic_circuit_eval_number_inputs
+    exec.constraints_eval::get_arithmetic_circuit_eval_number_eval_gates
+    exec.constraints_eval::get_arithmetic_circuit_eval_number_inputs
     exec.constants::public_inputs_address_ptr mem_load
     # => [...]
 
