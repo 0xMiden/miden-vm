@@ -139,6 +139,8 @@ impl AdviceProvider {
     }
 
     /// Extends the stack with the given elements.
+    /// Elements are added to the top of the stack i.e. last element of this iterator is the first
+    /// element popped.
     pub fn extend_stack<I>(&mut self, iter: I)
     where
         I: IntoIterator<Item = Felt>,
