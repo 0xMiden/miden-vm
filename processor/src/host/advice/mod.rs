@@ -139,6 +139,7 @@ impl AdviceProvider {
     }
 
     /// Extends the stack with the given elements.
+    ///
     /// Elements are added to the top of the stack i.e. last element of this iterator is the first
     /// element popped.
     pub fn extend_stack<I>(&mut self, iter: I)
@@ -296,13 +297,10 @@ impl AdviceProvider {
     /// Extends the [MerkleStore] with the given nodes.
     pub fn extend_merkle_store<I>(&mut self, iter: I)
     where
-        I: Iterator<Item = InnerNodeInfo>,
+        I: IntoIterator<Item = InnerNodeInfo>,
     {
         self.store.extend(iter);
     }
-
-    // HELPERS
-    // --------------------------------------------------------------------------------------------
 
     /// Extends the contents of this instance with the contents of an `AdviceInputs`.
     pub fn extend_from_inputs(&mut self, inputs: &AdviceInputs) -> Result<(), AdviceError> {
