@@ -662,7 +662,7 @@ fn get_smt_leaf_preimage(
     let kv_pairs = process
         .advice_provider()
         .get_mapped_values(&node)
-        .map_err(|_| ExecutionError::smt_node_not_found(node, err_ctx))?;
+        .ok_or_else(|| ExecutionError::smt_node_not_found(node, err_ctx))?;
 
     if kv_pairs.len() % WORD_SIZE * 2 != 0 {
         return Err(ExecutionError::smt_node_preimage_not_valid(node, kv_pairs.len(), err_ctx));

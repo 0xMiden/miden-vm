@@ -317,7 +317,7 @@ impl Process {
         }
 
         self.advice
-            .merge_advice_map(program.mast_forest().advice_map())
+            .extend_map(program.mast_forest().advice_map())
             .map_err(|err| ExecutionError::advice_error(err, RowIndex::from(0), &()))?;
 
         self.execute_mast_node(program.entrypoint(), &program.mast_forest().clone(), host)?;
@@ -751,7 +751,7 @@ impl Process {
         // For now, only compiled libraries contain non-empty advice maps, so for most cases,
         // this call will be cheap.
         self.advice
-            .merge_advice_map(mast_forest.advice_map())
+            .extend_map(mast_forest.advice_map())
             .map_err(|err| ExecutionError::advice_error(err, self.system.clk(), &()))?;
 
         Ok((root_id, mast_forest))

@@ -67,7 +67,7 @@ pub fn push_falcon_signature(process: &mut ProcessState) -> Result<(), EventErro
     let pk_sk = process
         .advice_provider()
         .get_mapped_values(&pub_key)
-        .map_err(|_| FalconError::NoSecretKey { key: pub_key })?;
+        .ok_or(FalconError::NoSecretKey { key: pub_key })?;
 
     let result = falcon_sign(pk_sk, msg)
         .ok_or(FalconError::MalformedSignatureKey { key_type: "RPO Falcon512" })?;
