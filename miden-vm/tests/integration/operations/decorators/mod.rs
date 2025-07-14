@@ -57,12 +57,12 @@ impl AsyncHost for TestHost {
         None
     }
 
-    async fn on_event(
+    fn on_event(
         &mut self,
         _process: &mut ProcessState<'_>,
         event_id: u32,
-    ) -> Result<(), EventError> {
+    ) -> impl Future<Output = Result<(), EventError>> + Send {
         self.event_handler.push(event_id);
-        Ok(())
+        async move { Ok(()) }
     }
 }

@@ -8,6 +8,7 @@ use core::{error::Error, fmt, fmt::Debug};
 use miden_core::DebugOptions;
 
 use crate::{ExecutionError, ProcessState};
+
 // EVENT HANDLER TRAIT
 // ================================================================================================
 

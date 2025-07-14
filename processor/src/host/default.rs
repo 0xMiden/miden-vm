@@ -124,12 +124,13 @@ impl AsyncHost for DefaultHost {
         self.store.get(node_digest)
     }
 
-    async fn on_event(
+    fn on_event(
         &mut self,
         process: &mut ProcessState<'_>,
         event_id: u32,
-    ) -> Result<(), EventError> {
-        <Self as SyncHost>::on_event(self, process, event_id)
+    ) -> impl Future<Output = Result<(), EventError>> + Send {
+        let result = <Self as SyncHost>::on_event(self, process, event_id);
+        async move { result }
     }
 }
 

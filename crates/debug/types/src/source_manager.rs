@@ -99,7 +99,7 @@ impl SourceManagerError {
     }
 }
 
-pub trait SourceManager: Debug + Send + Sync {
+pub trait SourceManager: Debug {
     /// Returns true if `file` is managed by this source manager
     fn is_manager_of(&self, file: &SourceFile) -> bool {
         match self.get(file.id()) {
