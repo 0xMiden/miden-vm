@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use miden_core::DebugOptions;
 use miden_processor::{
-    AsyncHost, BaseHost, ErrorContext, ExecutionError, MastForest, ProcessState, SyncHost,
+    AsyncHost, BaseHost, EventError, ExecutionError, MastForest, ProcessState, SyncHost,
 };
 use miden_prover::Word;
 
@@ -45,12 +45,7 @@ impl SyncHost for TestHost {
         None
     }
 
-    fn on_event(
-        &mut self,
-        _process: &mut ProcessState,
-        event_id: u32,
-        _err_ctx: &impl ErrorContext,
-    ) -> Result<(), ExecutionError> {
+    fn on_event(&mut self, _process: &mut ProcessState, event_id: u32) -> Result<(), EventError> {
         self.event_handler.push(event_id);
         Ok(())
     }
@@ -66,8 +61,7 @@ impl AsyncHost for TestHost {
         &mut self,
         _process: &mut ProcessState<'_>,
         event_id: u32,
-        _err_ctx: &impl ErrorContext,
-    ) -> Result<(), ExecutionError> {
+    ) -> Result<(), EventError> {
         self.event_handler.push(event_id);
         Ok(())
     }

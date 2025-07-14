@@ -31,7 +31,7 @@ pub use miden_processor::{
     AdviceInputs, AdviceProvider, ContextId, ExecutionError, ExecutionOptions, ExecutionTrace,
     Process, ProcessState, VmStateIterator,
 };
-use miden_processor::{DefaultHost, EventError, Program, fast::FastProcessor};
+use miden_processor::{DefaultHost, HandlerError, Program, fast::FastProcessor};
 use miden_prover::utils::range;
 pub use miden_prover::{MerkleTreeVC, ProvingOptions, prove};
 pub use miden_verifier::{AcceptableOptions, VerifierError, verify};
@@ -156,7 +156,7 @@ macro_rules! assert_assembler_diagnostic {
 }
 
 /// Alias for a free function or closure handling an `Event`.
-type HandlerFunc = fn(&mut ProcessState) -> Result<(), EventError>;
+type HandlerFunc = fn(&mut ProcessState) -> Result<(), HandlerError>;
 
 /// This is a container for the data required to run tests, which allows for running several
 /// different types of tests.
@@ -212,7 +212,7 @@ impl Test {
     /// Add a handler for a specifc event when running the `Host`.
     ///
     /// The `handler_func` can be either a closure or a free function with signature
-    /// `fn(&mut ProcessState) -> Result<(), EventError>`.
+    /// `fn(&mut ProcessState) -> Result<(), HandlerError>`.
     pub fn add_event_handler(&mut self, id: u32, handler_func: HandlerFunc) {
         if self.handlers.insert(id, handler_func).is_some() {
             panic!("handler with id {id} was already added")

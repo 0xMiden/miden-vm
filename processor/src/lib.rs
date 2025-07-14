@@ -53,10 +53,10 @@ use range::RangeChecker;
 
 mod host;
 pub use host::{
-    AsyncHost, BaseHost, MastForestStore, MemMastForestStore, SyncHost,
+    AsyncHost, BaseHost, EventError, MastForestStore, MemMastForestStore, SyncHost,
     advice::{AdviceError, AdviceInputs, AdviceProvider},
     default::{DefaultDebugHandler, DefaultHost},
-    handlers::{DebugHandler, EventError, EventHandler, EventHandlerRegistry},
+    handlers::{DebugHandler, EventHandler, EventHandlerRegistry, HandlerError},
     library::HostLibrary,
 };
 

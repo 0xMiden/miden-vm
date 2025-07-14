@@ -12,11 +12,10 @@ use miden_utils_diagnostics::{Diagnostic, miette};
 use winter_prover::ProverError;
 
 use crate::{
-    EventError, MemoryError,
-    host::advice::AdviceError,
+    MemoryError,
+    host::{EventError, advice::AdviceError},
     system::{FMP_MAX, FMP_MIN},
 };
-
 // EXECUTION ERROR
 // ================================================================================================
 
@@ -75,15 +74,6 @@ pub enum ExecutionError {
         source_file: Option<Arc<SourceFile>>,
         #[source]
         error: EventError,
-    },
-    #[error("got unexpected event_id {id} which is not supported by the host")]
-    #[diagnostic()]
-    UnhandledEventId {
-        #[label]
-        label: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
-        id: u32,
     },
     #[error("attempted to add event handler with previously inserted id: {id}")]
     DuplicateEventHandler { id: u32 },
@@ -312,12 +302,6 @@ impl ExecutionError {
         Self::EventError { label, source_file, error }
     }
 
-    pub fn unhandled_event_id_error(id: u32, err_ctx: &impl ErrorContext) -> Self {
-        let (label, source_file) = err_ctx.label_and_source_file();
-
-        Self::UnhandledEventId { label, source_file, id }
-    }
-
     pub fn failed_assertion(
         clk: RowIndex,
         err_code: Felt,
@@ -503,7 +487,7 @@ macro_rules! err_ctx {
 ///
 /// This trait contains the same methods as `ErrorContext` to provide a common
 /// interface for error context functionality.
-pub trait ErrorContext: Sync {
+pub trait ErrorContext {
     /// Returns the label and source file associated with the error context, if any.
     ///
     /// Note that `SourceSpan::UNKNOWN` will be returned to indicate an empty span.

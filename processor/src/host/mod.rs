@@ -2,7 +2,7 @@ use alloc::sync::Arc;
 
 use miden_core::{DebugOptions, Felt, Word, mast::MastForest};
 
-use crate::{ExecutionError, ProcessState, errors::ErrorContext};
+use crate::{ExecutionError, HandlerError, ProcessState};
 
 pub(super) mod advice;
 
@@ -72,13 +72,8 @@ pub trait SyncHost: BaseHost {
     fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>>;
 
     /// Handles the event emitted from the VM.
-    fn on_event(
-        &mut self,
-        process: &mut ProcessState,
-        event_id: u32,
-        err_ctx: &impl ErrorContext,
-    ) -> Result<(), ExecutionError> {
-        let _ = (&process, event_id, err_ctx);
+    fn on_event(&mut self, process: &mut ProcessState, event_id: u32) -> Result<(), EventError> {
+        let _ = (&process, event_id);
         #[cfg(feature = "std")]
         std::println!(
             "Event with id {} emitted at step {} in context {}",
@@ -113,6 +108,17 @@ pub trait AsyncHost: BaseHost {
         &mut self,
         process: &mut ProcessState<'_>,
         event_id: u32,
-        err_ctx: &impl ErrorContext,
-    ) -> impl Future<Output = Result<(), ExecutionError>> + Send;
+    ) -> impl Future<Output = Result<(), EventError>> + Send;
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum EventError {
+    #[error("got unexpected event_id {id} which is not supported by the host")]
+    UnhandledEvent { id: u32 },
+    #[error("error during processing of event with id {id} in on_event handler")]
+    HandlerError {
+        id: u32,
+        #[source]
+        err: HandlerError,
+    },
 }

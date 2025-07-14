@@ -5,7 +5,8 @@ use pretty_assertions::assert_eq;
 
 use super::*;
 use crate::{
-    AsyncHost, BaseHost, MastForestStore, MemMastForestStore, MemoryAddress, ProcessState, SyncHost,
+    AsyncHost, BaseHost, EventError, MastForestStore, MemMastForestStore, MemoryAddress,
+    ProcessState, SyncHost,
 };
 
 #[test]
@@ -260,8 +261,7 @@ impl SyncHost for ConsistencyHost {
         &mut self,
         _process: &mut ProcessState<'_>,
         _event_id: u32,
-        _err_ctx: &impl ErrorContext,
-    ) -> Result<(), ExecutionError> {
+    ) -> Result<(), EventError> {
         Ok(())
     }
 }
@@ -275,8 +275,7 @@ impl AsyncHost for ConsistencyHost {
         &mut self,
         _process: &mut ProcessState<'_>,
         _event_id: u32,
-        _err_ctx: &impl ErrorContext,
-    ) -> Result<(), ExecutionError> {
+    ) -> Result<(), EventError> {
         Ok(())
     }
 }

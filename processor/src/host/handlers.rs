@@ -7,8 +7,7 @@ use core::{error::Error, fmt, fmt::Debug};
 
 use miden_core::DebugOptions;
 
-use crate::{ErrorContext, ExecutionError, ProcessState};
-
+use crate::{ExecutionError, ProcessState};
 // EVENT HANDLER TRAIT
 // ================================================================================================
 
@@ -19,16 +18,16 @@ use crate::{ErrorContext, ExecutionError, ProcessState};
 /// be stored in the process's advice provider.
 pub trait EventHandler: Send + Sync + 'static {
     /// Handles the event when triggered.
-    fn on_event(&self, process: &mut ProcessState) -> Result<(), EventError>;
+    fn on_event(&self, process: &mut ProcessState) -> Result<(), HandlerError>;
 }
 
 /// Default implementation for both free functions and closures with signature
-/// `fn(&mut ProcessState) -> Result<(), EventError>`
+/// `fn(&mut ProcessState) -> Result<(), HandlerError>`
 impl<F> EventHandler for F
 where
-    F: for<'a> Fn(&'a mut ProcessState) -> Result<(), EventError> + Send + Sync + 'static,
+    F: for<'a> Fn(&'a mut ProcessState) -> Result<(), HandlerError> + Send + Sync + 'static,
 {
-    fn on_event(&self, process: &mut ProcessState) -> Result<(), EventError> {
+    fn on_event(&self, process: &mut ProcessState) -> Result<(), HandlerError> {
         self(process)
     }
 }
@@ -48,14 +47,14 @@ where
 ///
 /// fn try_something() -> Result<(), MyError> { /* ... */ }
 ///
-/// fn my_handler(process: &mut ProcessState) -> Result<(), EventError> {
+/// fn my_handler(process: &mut ProcessState) -> Result<(), HandlerError> {
 ///     // ...
 ///     try_something()?;
 ///     // ...
 ///     Ok(())
 /// }
 /// ```
-pub type EventError = Box<dyn Error + Send + Sync + 'static>;
+pub type HandlerError = Box<dyn Error + Send + Sync + 'static>;
 
 // EVENT HANDLER REGISTRY
 // ================================================================================================
@@ -70,16 +69,19 @@ pub type EventError = Box<dyn Error + Send + Sync + 'static>;
 ///         &mut self,
 ///         process: &mut ProcessState,
 ///         event_id: u32,
-///         err_ctx: &impl ErrorContext,
-///     ) -> Result<(), ExecutionError> {
-///         if self.event_handlers.handle_event(event_id, process, err_ctx)? {
+///     ) -> Result<(), EventError> {
+///         if self
+///             .event_handlers
+///             .handle_event(event_id, process)
+///             .map_err(|err| EventError::HandlerError { id: event_id, err })?
+///         {
 ///             // the event was handled by the registered event handlers; just return
-///             return Ok(())
+///             return Ok(());
 ///         }
 ///         
-///         // implement custom error handling
+///         // implement custom event handling
 ///         
-///         Err(ExecutionError::invalid_event_id_error(event_id, err_ctx))
+///         Err(EventError::UnhandledEvent { id: event_id })
 ///     }
 /// }
 /// ```
@@ -110,16 +112,9 @@ impl EventHandlerRegistry {
     ///
     /// Returns a bool indicating whether the event was handled. If the event was handled but
     /// returned an error, it is propagated to the caller.
-    pub fn handle_event(
-        &self,
-        id: u32,
-        process: &mut ProcessState,
-        err_ctx: &impl ErrorContext,
-    ) -> Result<bool, ExecutionError> {
+    pub fn handle_event(&self, id: u32, process: &mut ProcessState) -> Result<bool, HandlerError> {
         if let Some(handler) = self.handlers.get(&id) {
-            handler
-                .on_event(process)
-                .map_err(|err| ExecutionError::event_error(err, err_ctx))?;
+            handler.on_event(process)?;
             return Ok(true);
         }
 

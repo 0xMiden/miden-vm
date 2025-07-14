@@ -3,10 +3,9 @@ use alloc::{boxed::Box, sync::Arc};
 use miden_core::{DebugOptions, Felt, Word, mast::MastForest};
 
 use crate::{
-    AsyncHost, BaseHost, DebugHandler, ErrorContext, EventHandler, EventHandlerRegistry,
-    ExecutionError, HostLibrary, MastForestStore, MemMastForestStore, ProcessState, SyncHost,
+    AsyncHost, BaseHost, DebugHandler, EventHandler, EventHandlerRegistry, ExecutionError,
+    HostLibrary, MastForestStore, MemMastForestStore, ProcessState, SyncHost, host::EventError,
 };
-
 // DEFAULT HOST IMPLEMENTATION
 // ================================================================================================
 
@@ -93,18 +92,17 @@ impl SyncHost for DefaultHost {
         self.store.get(node_digest)
     }
 
-    fn on_event(
-        &mut self,
-        process: &mut ProcessState,
-        event_id: u32,
-        err_ctx: &impl ErrorContext,
-    ) -> Result<(), ExecutionError> {
-        if self.event_handlers.handle_event(event_id, process, err_ctx)? {
+    fn on_event(&mut self, process: &mut ProcessState, event_id: u32) -> Result<(), EventError> {
+        if self
+            .event_handlers
+            .handle_event(event_id, process)
+            .map_err(|err| EventError::HandlerError { id: event_id, err })?
+        {
             // the event was handled by the registered event handlers; just return
             return Ok(());
         }
 
-        Err(ExecutionError::unhandled_event_id_error(event_id, err_ctx))
+        Err(EventError::UnhandledEvent { id: event_id })
     }
 }
 
@@ -117,9 +115,8 @@ impl AsyncHost for DefaultHost {
         &mut self,
         process: &mut ProcessState<'_>,
         event_id: u32,
-        err_ctx: &impl ErrorContext,
-    ) -> Result<(), ExecutionError> {
-        <Self as SyncHost>::on_event(self, process, event_id, err_ctx)
+    ) -> Result<(), EventError> {
+        <Self as SyncHost>::on_event(self, process, event_id)
     }
 }
 
