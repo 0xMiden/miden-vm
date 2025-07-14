@@ -6,6 +6,7 @@ use alloc::{sync::Arc, vec::Vec};
 
 use miden_assembly::{Library, mast::MastForest, utils::Deserializable};
 use miden_core::{Felt, Word};
+use miden_processor::MastForestSource;
 use miden_utils_sync::LazyLock;
 
 // STANDARD LIBRARY
@@ -14,6 +15,12 @@ use miden_utils_sync::LazyLock;
 /// TODO: add docs
 #[derive(Clone)]
 pub struct StdLibrary(Library);
+
+impl MastForestSource for StdLibrary {
+    fn mast_forest(&self) -> Arc<MastForest> {
+        self.0.mast_forest().clone()
+    }
+}
 
 impl AsRef<Library> for StdLibrary {
     fn as_ref(&self) -> &Library {

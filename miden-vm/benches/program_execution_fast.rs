@@ -51,11 +51,9 @@ fn program_execution_fast(c: &mut Criterion) {
                     let stack_inputs: Vec<_> = stack_inputs.iter().rev().copied().collect();
                     bench.to_async(Runtime::new().unwrap()).iter_batched(
                         || {
-                            let mut host = DefaultHost::default();
-                            host.load_mast_forest(
-                                StdLibrary::default().as_ref().mast_forest().clone(),
-                            )
-                            .unwrap();
+                            let host = DefaultHost::default()
+                                .with_mast_source(&StdLibrary::default())
+                                .unwrap();
 
                             let processor = FastProcessor::new_with_advice_inputs(
                                 &stack_inputs,

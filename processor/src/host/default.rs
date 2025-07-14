@@ -4,7 +4,8 @@ use miden_core::{DebugOptions, Felt, Word, mast::MastForest};
 
 use crate::{
     AsyncHost, BaseHost, DebugHandler, EventHandler, EventHandlerRegistry, ExecutionError,
-    HostLibrary, MastForestStore, MemMastForestStore, ProcessState, SyncHost, host::EventError,
+    MastForestSource, MastForestStore, MemMastForestStore, ProcessState, SyncHost,
+    host::EventError,
 };
 // DEFAULT HOST IMPLEMENTATION
 // ================================================================================================
@@ -30,18 +31,30 @@ impl Default for DefaultHost {
 impl<D: DebugHandler> DefaultHost<D> {
     /// Stores all procedure roots of a [`MastForest`] making them available during
     /// program execution.
-    pub fn load_mast_forest(&mut self, mast_forest: Arc<MastForest>) -> Result<(), ExecutionError> {
+    fn load_mast_forest(&mut self, mast_forest: Arc<MastForest>) -> Result<(), ExecutionError> {
         self.store.insert(mast_forest);
         Ok(())
     }
 
-    /// Load a library containing a [`MastForest`] and a list of event handlers.
-    pub fn load_library(&mut self, library: &impl HostLibrary) -> Result<(), ExecutionError> {
-        self.load_mast_forest(library.mast_forest())?;
-        for (id, handler) in library.event_handlers() {
+    /// Loads a source [`MastForest`] with its list of event handlers.
+    pub fn load_mast_source(
+        &mut self,
+        mast_source: &impl MastForestSource,
+    ) -> Result<(), ExecutionError> {
+        self.load_mast_forest(mast_source.mast_forest())?;
+        for (id, handler) in mast_source.event_handlers() {
             self.event_handlers.register(id, handler)?;
         }
         Ok(())
+    }
+
+    /// Adds a source [`MastForest`] with its list of event handlers to the host.
+    pub fn with_mast_source(
+        mut self,
+        mast_source: &impl MastForestSource,
+    ) -> Result<Self, ExecutionError> {
+        self.load_mast_source(mast_source)?;
+        Ok(self)
     }
 
     /// Loads a single [`EventHandler`] into this host.
