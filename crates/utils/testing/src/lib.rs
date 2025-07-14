@@ -490,7 +490,7 @@ impl Test {
         let stack_inputs: Vec<Felt> = self.stack_inputs.clone().into_iter().rev().collect();
         let advice_inputs: AdviceInputs = self.advice_inputs.clone();
         let fast_process = FastProcessor::new_with_advice_inputs(&stack_inputs, advice_inputs)
-            .with_source_manager(self.source_manager.clone());
+            .with_source_manager(Arc::clone(&self.source_manager));
         let fast_result = fast_process.execute_sync(&program, &mut host);
 
         match slow_result {

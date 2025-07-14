@@ -220,7 +220,7 @@ impl FastProcessor {
     }
 
     /// Set the internal source manager to an externally initialized one.
-    pub fn with_source_manager(mut self, source_manager: Arc<dyn SourceManager>) -> Self {
+    pub fn with_source_manager(mut self, source_manager: Arc<dyn SourceManager + 'static>) -> Self {
         self.source_manager = source_manager;
         self
     }
