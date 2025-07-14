@@ -111,11 +111,12 @@ pub trait AsyncHost: BaseHost {
     ) -> impl Future<Output = Result<(), EventError>> + Send;
 }
 
+/// An error returned by `Host::on_event`.
 #[derive(Debug, thiserror::Error)]
 pub enum EventError {
     #[error("got unexpected event_id {id} which is not supported by the host")]
     UnhandledEvent { id: u32 },
-    #[error("error during processing of event with id {id} in on_event handler")]
+    #[error("error during processing of event with id {id}")]
     HandlerError {
         id: u32,
         #[source]
