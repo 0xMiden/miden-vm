@@ -6,6 +6,7 @@
 
 - Implement `copy_digest` and `hash_memory_double_words` procedures in the `std::crypto::hashes::rpo` module ([#1971](https://github.com/0xMiden/miden-vm/pull/1971)).
 - Add `extend_` methods on AdviceProvider [#1982](https://github.com/0xMiden/miden-vm/pull/1982).
+- Extend trait bound requirements to `Send + Sync` for `SourceManager`
 
 #### Changes
 
