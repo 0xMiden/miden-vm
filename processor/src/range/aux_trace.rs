@@ -68,9 +68,9 @@ impl AuxTraceBuilder {
         // run batch inversion on the lookup values
         let divisors = get_divisors(&self.lookup_values, rand_elements[0]);
 
-        // allocate memory for the running sum column and set the initial value to ONE
+        // allocate memory for the running sum column and set the initial value to ZERO
         let mut b_range = unsafe { uninit_vector(main_trace.num_rows()) };
-        b_range[0] = E::ONE;
+        b_range[0] = E::ZERO;
 
         // keep track of the last updated row in the `b_range` running sum column. `b_range` is
         // filled with result values that are added to the next row after the operation's execution.
@@ -121,7 +121,7 @@ impl AuxTraceBuilder {
             b_range_idx = row_idx + 1;
 
             if multiplicity.as_int() != 0 {
-                // add the value in the range checker: multiplicity / (alpha - lookup)
+                // add the value in the range checker: multiplicity / (alpha + lookup)
                 let value = divisors.get(&(lookup.as_int() as u16)).expect("invalid lookup value");
                 b_range[b_range_idx] = b_range[row_idx] + value.mul_base(*multiplicity);
             } else {
@@ -138,11 +138,11 @@ impl AuxTraceBuilder {
         }
 
         // at this point, all range checks from user operations and the range checker should be
-        // matched - so, the last value must be ONE;
-        assert_eq!(b_range[b_range_idx], E::ONE);
+        // matched - so, the last value must be ZERO;
+        assert_eq!(b_range[b_range_idx], E::ZERO);
 
         if b_range_idx < b_range.len() - 1 {
-            b_range[(b_range_idx + 1)..].fill(E::ONE);
+            b_range[(b_range_idx + 1)..].fill(E::ZERO);
         }
 
         b_range
@@ -151,7 +151,7 @@ impl AuxTraceBuilder {
 
 /// Runs batch inversion on all range check lookup values and returns a map which maps each value
 /// to the divisor used for including it in the LogUp lookup. In other words, the map contains
-/// mappings of x to 1/(alpha - x).
+/// mappings of x to 1/(alpha + x).
 fn get_divisors<E: FieldElement<BaseField = Felt>>(
     lookup_values: &[u16],
     alpha: E,
@@ -164,7 +164,7 @@ fn get_divisors<E: FieldElement<BaseField = Felt>>(
     let mut acc = E::ONE;
     for (i, (value, inv_value)) in values.iter_mut().zip(inv_values.iter_mut()).enumerate() {
         *inv_value = acc;
-        *value = alpha - E::from(lookup_values[i]);
+        *value = alpha + E::from(lookup_values[i]);
         acc *= *value;
     }
 

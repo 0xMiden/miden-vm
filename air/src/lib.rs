@@ -7,10 +7,10 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-use alloc::vec::Vec;
+use alloc::{borrow::ToOwned, vec::Vec};
 
 use miden_core::{
-    ExtensionOf, ONE, ProgramInfo, StackInputs, StackOutputs, ZERO,
+    ExtensionOf, ONE, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
     utils::{ByteReader, ByteWriter, Deserializable, Serializable},
 };
 use winter_air::{
@@ -62,6 +62,8 @@ pub struct ProcessorAir {
     context: AirContext<Felt>,
     stack_inputs: StackInputs,
     stack_outputs: StackOutputs,
+    program_digest: Word,
+    kernel_digests: Vec<Word>,
     constraint_ranges: TransitionConstraintRange,
 }
 
@@ -84,7 +86,7 @@ impl Air for ProcessorAir {
 
         if IS_FULL_CONSTRAINT_SET {
             // --- stack constraints
-            // -------------------------------------------------------------------
+            // ---------------------------------------------------------------------
             let mut stack_degrees = stack::get_transition_constraint_degrees();
             main_degrees.append(&mut stack_degrees);
 
@@ -120,7 +122,7 @@ impl Air for ProcessorAir {
         let num_aux_assertions = if IS_FULL_CONSTRAINT_SET {
             stack::NUM_AUX_ASSERTIONS + range::NUM_AUX_ASSERTIONS
         } else {
-            1
+            3
         };
 
         // Create the context and set the number of transition constraint exemptions to two; this
@@ -140,6 +142,8 @@ impl Air for ProcessorAir {
             stack_inputs: pub_inputs.stack_inputs,
             stack_outputs: pub_inputs.stack_outputs,
             constraint_ranges,
+            program_digest: pub_inputs.program_info.program_hash().to_owned(),
+            kernel_digests: pub_inputs.program_info.kernel_procedures().to_owned(),
         }
     }
 
@@ -185,17 +189,24 @@ impl Air for ProcessorAir {
 
     fn get_aux_assertions<E: FieldElement<BaseField = Self::BaseField>>(
         &self,
-        _aux_rand_elements: &AuxRandElements<E>,
+        aux_rand_elements: &AuxRandElements<E>,
     ) -> Vec<Assertion<E>> {
         let mut result: Vec<Assertion<E>> = Vec::new();
+
+        // Add initial assertions for the range checker's auxiliary columns.
+        range::get_aux_assertions_first_step::<E>(&mut result);
+
+        // Add initial assertion for the chiplets' bus auxiliary column.
+        chiplets::get_aux_assertions_first_step::<E>(
+            &mut result,
+            &self.kernel_digests,
+            aux_rand_elements,
+        );
 
         // --- set assertions for the first step --------------------------------------------------
         if IS_FULL_CONSTRAINT_SET {
             // add initial assertions for the stack's auxiliary columns.
             stack::get_aux_assertions_first_step(&mut result);
-
-            // Add initial assertions for the range checker's auxiliary columns.
-            range::get_aux_assertions_first_step::<E>(&mut result);
 
             // --- set assertions for the last step
             // ---------------------------------------------------

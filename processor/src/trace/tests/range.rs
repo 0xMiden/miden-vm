@@ -25,15 +25,15 @@ fn b_range_trace_stack() {
 
     // --- Check the stack processor's range check lookups. ---------------------------------------
 
-    // Before any range checks are executed, the value in b_range should be one.
-    assert_eq!(ONE, b_range[0]);
-    assert_eq!(ONE, b_range[1]);
+    // Before any range checks are executed, the value in b_range should be zero.
+    assert_eq!(ZERO, b_range[0]);
+    assert_eq!(ZERO, b_range[1]);
 
     // The first range check lookup from the stack will happen when the add operation is executed,
     // at cycle 1. (The trace begins by executing `span`). It must be subtracted out of `b_range`.
-    // The range-checked values are 0, 256, 0, 0, so the values to subtract are 3/(alpha - 0) and
-    // 1/(alpha - 256).
-    let lookups = alpha.inv().mul_base(Felt::new(3)) + (alpha - Felt::new(256)).inv();
+    // The range-checked values are 0, 256, 0, 0, so the values to subtract are 3/(alpha + 0) and
+    // 1/(alpha + 256).
+    let lookups = alpha.inv().mul_base(Felt::new(3)) + (alpha + Felt::new(256)).inv();
     let mut expected = b_range[1] - lookups;
     assert_eq!(expected, b_range[2]);
 
@@ -56,13 +56,13 @@ fn b_range_trace_stack() {
     assert_eq!(expected, b_range[values_start + 3]);
     assert_eq!(expected, b_range[values_start + 4]);
     // Then we include 1 lookup of 256, so it should be multiplied by alpha + 256.
-    expected += (alpha - Felt::new(256)).inv();
+    expected += (alpha + Felt::new(256)).inv();
     assert_eq!(expected, b_range[values_start + 5]);
 
-    // --- Check the last value of the b_range column is one --------------------------------------
+    // --- Check the last value of the b_range column is zero --------------------------------------
 
     let last_row = b_range.len() - NUM_RAND_ROWS - 1;
-    assert_eq!(ONE, b_range[last_row]);
+    assert_eq!(ZERO, b_range[last_row]);
 }
 
 /// This test checks that range check lookups from memory operations are balanced by the
@@ -100,8 +100,8 @@ fn b_range_trace_mem() {
     let len_16bit = 40 + 1;
     let values_start = trace.length() - len_16bit - NUM_RAND_ROWS;
 
-    // The value should start at ONE and be unchanged until the memory processor section begins.
-    let mut expected = ONE;
+    // The value should start at ZERO and be unchanged until the memory processor section begins.
+    let mut expected = ZERO;
     for row in 0..memory_start {
         assert_eq!(expected, b_range[row]);
     }
@@ -116,10 +116,10 @@ fn b_range_trace_mem() {
     let (d0_load, d1_load) = (Felt::new(5), ZERO);
 
     // Include the lookups from the `MStoreW` operation at the next row.
-    expected -= (alpha - d0_store).inv() + (alpha - d1_store).inv();
+    expected -= (alpha + d0_store).inv() + (alpha + d1_store).inv();
     assert_eq!(expected, b_range[memory_start + 1]);
     // Include the lookup from the `MLoadW` operation at the next row.
-    expected -= (alpha - d0_load).inv() + (alpha - d1_load).inv();
+    expected -= (alpha + d0_load).inv() + (alpha + d1_load).inv();
     assert_eq!(expected, b_range[memory_start + 2]);
 
     // The value should be unchanged until the range checker's lookups are included.
@@ -134,19 +134,19 @@ fn b_range_trace_mem() {
     assert_eq!(expected, b_range[values_start + 1]);
 
     // We include 1 lookup of ONE in the next row.
-    expected += (alpha - d0_store).inv();
+    expected += (alpha + d0_store).inv();
     assert_eq!(expected, b_range[values_start + 2]);
 
     // We have one bridge row between 1 and 5 where the value does not change.
     assert_eq!(expected, b_range[values_start + 3]);
 
     // We include 1 lookup of 5 in the next row.
-    expected += (alpha - d0_load).inv();
+    expected += (alpha + d0_load).inv();
     assert_eq!(expected, b_range[values_start + 4]);
 
-    // --- The value should now be ONE for the rest of the trace. ---------------------------------
-    assert_eq!(expected, ONE);
+    // --- The value should now be ZERO for the rest of the trace. ---------------------------------
+    assert_eq!(expected, ZERO);
     for i in (values_start + 4)..(b_range.len() - NUM_RAND_ROWS) {
-        assert_eq!(ONE, b_range[i]);
+        assert_eq!(ZERO, b_range[i]);
     }
 }

@@ -11,7 +11,7 @@ const.NUM_AUX_TRACE_COEFS=2
 
 # Number of constraints, both boundary and transitional
 # Note: If the full set of all implemented constraints is used then this should be set to 226
-const.NUM_CONSTRAINTS=4
+const.NUM_CONSTRAINTS=6
 
 # Blowup factor
 const.BLOWUP_FACTOR=8
@@ -21,16 +21,16 @@ const.BLOWUP_FACTOR_LOG=3
 const.MAX_CYCLE_LEN_LOG=3
 
 # Constraint evaluation circuit digest
-const.DIGEST_0=13839693060569330762
-const.DIGEST_1=2312826173762406067
-const.DIGEST_2=8866828852882360297
-const.DIGEST_3=18124346805341043858
+const.DIGEST_0=9139186206676821480
+const.DIGEST_1=12763675724578443945
+const.DIGEST_2=7621207635344139731
+const.DIGEST_3=1122100627503939866
 
 # Number of inputs to the constraint evaluation circuit
-const.NUM_INPUTS_CIRCUIT=232
+const.NUM_INPUTS_CIRCUIT=244
 
 # Number of evaluation gates in the constraint evaluation circuit
-const.NUM_EVAL_GATES_CIRCUIT=88
+const.NUM_EVAL_GATES_CIRCUIT=108
 
 # Number of fixed length public inputs with padding (in field elements)
 # This is composed of the input/output operand stacks (16 * 2) and the program digest (4) and four
