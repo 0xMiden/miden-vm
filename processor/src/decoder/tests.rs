@@ -36,7 +36,7 @@ const INIT_ADDR: Felt = ONE;
 const FMP_MIN: Felt = Felt::new(crate::FMP_MIN);
 const SYSCALL_FMP_MIN: Felt = Felt::new(crate::SYSCALL_FMP_MIN as u64);
 
-const EMIT_EVENT_ID: u32 = 1;
+const EMIT_EVENT_ID: u32 = 42;
 
 // TYPE ALIASES
 // ================================================================================================
@@ -158,7 +158,6 @@ fn basic_block_small() {
 
 #[test]
 fn basic_block_small_with_emit() {
-    // TODO: We need to replace 1 with EMIT_EVENT_ID somewhere else
     let ops = vec![Operation::Push(ONE), Operation::Emit(EMIT_EVENT_ID), Operation::Add];
     let basic_block = BasicBlockNode::new(ops.clone(), None).unwrap();
     let program = {
@@ -191,8 +190,8 @@ fn basic_block_small_with_emit() {
         vec![
             basic_block.op_batches()[0].groups().to_vec(),
             vec![build_op_group(&ops[1..])],
-            // emit(1)
-            vec![build_op_group(&ops[2..]), ZERO, ONE],
+            // emit(EMIT_EVENT_ID)
+            vec![build_op_group(&ops[2..]), ZERO, EMIT_EVENT_ID.into()],
             vec![],
             vec![],
             program_hash.to_vec(), // last row should contain program hash
