@@ -1,5 +1,4 @@
-use alloc::{boxed::Box, sync::Arc};
-use std::prelude::rust_2015::Vec;
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 
 use miden_core::{DebugOptions, Felt, Word, mast::MastForest};
 
@@ -7,6 +6,7 @@ use crate::{
     AsyncHost, BaseHost, DebugHandler, EventHandler, EventHandlerRegistry, ExecutionError,
     MastForestStore, MemMastForestStore, ProcessState, SyncHost, host::EventError,
 };
+
 // DEFAULT HOST IMPLEMENTATION
 // ================================================================================================
 
