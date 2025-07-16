@@ -14,6 +14,7 @@
 - [BREAKING] Introduce `SourceManagerSync` trait, and remove `Assembler::source_manager()` method [#1966](https://github.com/0xMiden/miden-vm/issues/1966).
 - Fixed `ExecutionOptions::default()` to set `max_cycles` correctly to `1 << 29` ([#1969](https://github.com/0xMiden/miden-vm/pull/1969)).
 - [BREAKING] Revert `get_mapped_value` return signature [(#1981)](https://github.com/0xMiden/miden-vm/issues/1981).
+- Add `AdviceProvider::advice_map` accessor ([#1995](https://github.com/0xMiden/miden-vm/pull/1995)).
 
 ## 0.16.2 (2025-07-11)
 
