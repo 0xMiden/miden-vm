@@ -16,8 +16,8 @@ use miden_core::{
 use miden_debug_types::{DefaultSourceManager, SourceManager};
 
 use crate::{
-    AdviceInputs, AdviceProvider, AsyncHost, ContextId, ErrorContext, ExecutionError, FMP_MIN,
-    ProcessState, SYSCALL_FMP_MIN,
+    AdviceInputs, AdviceProvider, ContextId, ErrorContext, ExecutionError, FMP_MIN, ProcessState,
+    SYSCALL_FMP_MIN, SyncHost,
     chiplets::Ace,
     continuation_stack::{Continuation, ContinuationStack},
     err_ctx,
@@ -315,18 +315,18 @@ impl FastProcessor {
     // -------------------------------------------------------------------------------------------
 
     /// Executes the given program and returns the stack outputs.
-    pub async fn execute(
+    pub fn execute(
         mut self,
         program: &Program,
-        host: &mut impl AsyncHost,
+        host: &mut impl SyncHost,
     ) -> Result<StackOutputs, ExecutionError> {
-        self.execute_impl(program, host).await
+        self.execute_impl(program, host)
     }
 
-    async fn execute_impl(
+    fn execute_impl(
         &mut self,
         program: &Program,
-        host: &mut impl AsyncHost,
+        host: &mut impl SyncHost,
     ) -> Result<StackOutputs, ExecutionError> {
         let mut continuation_stack = ContinuationStack::new(program);
         let mut current_forest = program.mast_forest().clone();
@@ -336,15 +336,12 @@ impl FastProcessor {
                 Continuation::StartNode(node_id) => {
                     let node = current_forest.get_node_by_id(node_id).unwrap();
                     match node {
-                        MastNode::Block(basic_block_node) => {
-                            self.execute_basic_block_node(
-                                basic_block_node,
-                                node_id,
-                                &current_forest,
-                                host,
-                            )
-                            .await?
-                        },
+                        MastNode::Block(basic_block_node) => self.execute_basic_block_node(
+                            basic_block_node,
+                            node_id,
+                            &current_forest,
+                            host,
+                        )?,
                         MastNode::Join(join_node) => self.start_join_node(
                             join_node,
                             node_id,
@@ -374,24 +371,18 @@ impl FastProcessor {
                             &mut continuation_stack,
                             host,
                         )?,
-                        MastNode::Dyn(_dyn_node) => {
-                            self.start_dyn_node(
-                                node_id,
-                                &mut current_forest,
-                                &mut continuation_stack,
-                                host,
-                            )
-                            .await?
-                        },
-                        MastNode::External(_external_node) => {
-                            self.execute_external_node(
-                                node_id,
-                                &mut current_forest,
-                                &mut continuation_stack,
-                                host,
-                            )
-                            .await?
-                        },
+                        MastNode::Dyn(_dyn_node) => self.start_dyn_node(
+                            node_id,
+                            &mut current_forest,
+                            &mut continuation_stack,
+                            host,
+                        )?,
+                        MastNode::External(_external_node) => self.execute_external_node(
+                            node_id,
+                            &mut current_forest,
+                            &mut continuation_stack,
+                            host,
+                        )?,
                     }
                 },
                 Continuation::FinishJoin(node_id) => {
@@ -441,7 +432,7 @@ impl FastProcessor {
         node_id: MastNodeId,
         current_forest: &MastForest,
         continuation_stack: &mut ContinuationStack,
-        host: &mut impl AsyncHost,
+        host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
         // Execute decorators that should be executed before entering the node
         self.execute_before_enter_decorators(node_id, current_forest, host)?;
@@ -462,7 +453,7 @@ impl FastProcessor {
         &mut self,
         node_id: MastNodeId,
         current_forest: &MastForest,
-        host: &mut impl AsyncHost,
+        host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
         // Corresponds to the row inserted for the END operation added
         // to the trace.
@@ -479,7 +470,7 @@ impl FastProcessor {
         node_id: MastNodeId,
         current_forest: &MastForest,
         continuation_stack: &mut ContinuationStack,
-        host: &mut impl AsyncHost,
+        host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
         // Execute decorators that should be executed before entering the node
         self.execute_before_enter_decorators(node_id, current_forest, host)?;
@@ -512,7 +503,7 @@ impl FastProcessor {
         &mut self,
         node_id: MastNodeId,
         current_forest: &MastForest,
-        host: &mut impl AsyncHost,
+        host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
         // Corresponds to the row inserted for the END operation added
         // to the trace.
@@ -529,7 +520,7 @@ impl FastProcessor {
         current_node_id: MastNodeId,
         current_forest: &MastForest,
         continuation_stack: &mut ContinuationStack,
-        host: &mut impl AsyncHost,
+        host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
         // Execute decorators that should be executed before entering the node
         self.execute_before_enter_decorators(current_node_id, current_forest, host)?;
@@ -567,7 +558,7 @@ impl FastProcessor {
         current_node_id: MastNodeId,
         current_forest: &MastForest,
         continuation_stack: &mut ContinuationStack,
-        host: &mut impl AsyncHost,
+        host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
         // This happens after loop body execution
         // Check condition again to see if we should continue looping
@@ -601,7 +592,7 @@ impl FastProcessor {
         program: &Program,
         current_forest: &MastForest,
         continuation_stack: &mut ContinuationStack,
-        host: &mut impl AsyncHost,
+        host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
         // Execute decorators that should be executed before entering the node
         self.execute_before_enter_decorators(current_node_id, current_forest, host)?;
@@ -654,7 +645,7 @@ impl FastProcessor {
         &mut self,
         node_id: MastNodeId,
         current_forest: &MastForest,
-        host: &mut impl AsyncHost,
+        host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
         let call_node = current_forest[node_id].unwrap_call();
         let err_ctx = err_ctx!(current_forest, call_node, self.source_manager.clone());
@@ -673,12 +664,12 @@ impl FastProcessor {
 
     /// Executes the start phase of a Dyn node.
     #[inline(always)]
-    async fn start_dyn_node(
+    fn start_dyn_node(
         &mut self,
         current_node_id: MastNodeId,
         current_forest: &mut Arc<MastForest>,
         continuation_stack: &mut ContinuationStack,
-        host: &mut impl AsyncHost,
+        host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
         // Execute decorators that should be executed before entering the node
         self.execute_before_enter_decorators(current_node_id, current_forest, host)?;
@@ -728,14 +719,12 @@ impl FastProcessor {
                 continuation_stack.push_start_node(callee_id);
             },
             None => {
-                let (root_id, new_forest) = self
-                    .load_mast_forest(
-                        callee_hash,
-                        host,
-                        ExecutionError::dynamic_node_not_found,
-                        &err_ctx,
-                    )
-                    .await?;
+                let (root_id, new_forest) = self.load_mast_forest(
+                    callee_hash,
+                    host,
+                    ExecutionError::dynamic_node_not_found,
+                    &err_ctx,
+                )?;
 
                 // Push current forest to the continuation stack so that we can return to it
                 continuation_stack.push_enter_forest(current_forest.clone());
@@ -756,7 +745,7 @@ impl FastProcessor {
         &mut self,
         node_id: MastNodeId,
         current_forest: &MastForest,
-        host: &mut impl AsyncHost,
+        host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
         let dyn_node = current_forest[node_id].unwrap_dyn();
         let err_ctx = err_ctx!(current_forest, dyn_node, self.source_manager.clone());
@@ -774,18 +763,18 @@ impl FastProcessor {
 
     /// Executes an External node.
     #[inline(always)]
-    async fn execute_external_node(
+    fn execute_external_node(
         &mut self,
         node_id: MastNodeId,
         current_forest: &mut Arc<MastForest>,
         continuation_stack: &mut ContinuationStack,
-        host: &mut impl AsyncHost,
+        host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
         // Execute decorators that should be executed before entering the node
         self.execute_before_enter_decorators(node_id, current_forest, host)?;
 
         let external_node = current_forest[node_id].unwrap_external();
-        let (root_id, new_mast_forest) = self.resolve_external_node(external_node, host).await?;
+        let (root_id, new_mast_forest) = self.resolve_external_node(external_node, host)?;
 
         // Push current forest to the continuation stack so that we can return to it
         continuation_stack.push_enter_forest(current_forest.clone());
@@ -805,12 +794,12 @@ impl FastProcessor {
     // for performance reasons (~25% performance drop). Hence, `self.clk` cannot be used directly to
     // determine the number of operations executed in a program.
     #[inline(always)]
-    async fn execute_basic_block_node(
+    fn execute_basic_block_node(
         &mut self,
         basic_block_node: &BasicBlockNode,
         node_id: MastNodeId,
         program: &MastForest,
-        host: &mut impl AsyncHost,
+        host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
         // Execute decorators that should be executed before entering the node
         self.execute_before_enter_decorators(node_id, program, host)?;
@@ -831,8 +820,7 @@ impl FastProcessor {
                 batch_offset_in_block,
                 program,
                 host,
-            )
-            .await?;
+            )?;
             batch_offset_in_block += first_op_batch.ops().len();
         }
 
@@ -848,8 +836,7 @@ impl FastProcessor {
                 batch_offset_in_block,
                 program,
                 host,
-            )
-            .await?;
+            )?;
             batch_offset_in_block += op_batch.ops().len();
         }
 
@@ -874,14 +861,14 @@ impl FastProcessor {
     }
 
     #[inline(always)]
-    async fn execute_op_batch(
+    fn execute_op_batch(
         &mut self,
         basic_block: &BasicBlockNode,
         batch: &OpBatch,
         decorators: &mut DecoratorIterator<'_>,
         batch_offset_in_block: usize,
         program: &MastForest,
-        host: &mut impl AsyncHost,
+        host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
         let op_counts = batch.op_counts();
         let mut op_idx_in_group = 0;
@@ -916,7 +903,7 @@ impl FastProcessor {
             // performance improvement).
             match op {
                 Operation::Emit(event_id) => {
-                    self.op_emit(*event_id, op_idx_in_block, host, &err_ctx).await?
+                    self.op_emit(*event_id, op_idx_in_block, host, &err_ctx)?
                 },
                 _ => {
                     // if the operation is not an Emit, we execute it normally
@@ -967,7 +954,7 @@ impl FastProcessor {
         &mut self,
         node_id: MastNodeId,
         current_forest: &MastForest,
-        host: &mut impl AsyncHost,
+        host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
         let node = current_forest
             .get_node_by_id(node_id)
@@ -985,7 +972,7 @@ impl FastProcessor {
         &mut self,
         node_id: MastNodeId,
         current_forest: &MastForest,
-        host: &mut impl AsyncHost,
+        host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
         let node = current_forest
             .get_node_by_id(node_id)
@@ -1003,7 +990,7 @@ impl FastProcessor {
         &mut self,
         decorator: &Decorator,
         op_idx_in_batch: usize,
-        host: &mut impl AsyncHost,
+        host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
         match decorator {
             Decorator::Debug(options) => {
@@ -1034,7 +1021,7 @@ impl FastProcessor {
         operation: &Operation,
         op_idx: usize,
         program: &MastForest,
-        host: &mut impl AsyncHost,
+        host: &mut impl SyncHost,
         err_ctx: &impl ErrorContext,
     ) -> Result<(), ExecutionError> {
         if self.bounds_check_counter == 0 {
@@ -1168,10 +1155,10 @@ impl FastProcessor {
     // HELPERS
     // ----------------------------------------------------------------------------------------------
 
-    async fn load_mast_forest<E>(
+    fn load_mast_forest<E>(
         &mut self,
         node_digest: Word,
-        host: &mut impl AsyncHost,
+        host: &mut impl SyncHost,
         get_mast_forest_failed: impl Fn(Word, &E) -> ExecutionError,
         err_ctx: &E,
     ) -> Result<(MastNodeId, Arc<MastForest>), ExecutionError>
@@ -1180,7 +1167,6 @@ impl FastProcessor {
     {
         let mast_forest = host
             .get_mast_forest(&node_digest)
-            .await
             .ok_or_else(|| get_mast_forest_failed(node_digest, err_ctx))?;
 
         // We limit the parts of the program that can be called externally to procedure
@@ -1203,19 +1189,17 @@ impl FastProcessor {
 
     /// Analogous to [`Process::resolve_external_node`](crate::Process::resolve_external_node), but
     /// for asynchronous execution.
-    async fn resolve_external_node(
+    fn resolve_external_node(
         &mut self,
         external_node: &ExternalNode,
-        host: &mut impl AsyncHost,
+        host: &mut impl SyncHost,
     ) -> Result<(MastNodeId, Arc<MastForest>), ExecutionError> {
-        let (root_id, mast_forest) = self
-            .load_mast_forest(
-                external_node.digest(),
-                host,
-                ExecutionError::no_mast_forest_with_procedure,
-                &(),
-            )
-            .await?;
+        let (root_id, mast_forest) = self.load_mast_forest(
+            external_node.digest(),
+            host,
+            ExecutionError::no_mast_forest_with_procedure,
+            &(),
+        )?;
 
         // if the node that we got by looking up an external reference is also an External
         // node, we are about to enter into an infinite loop - so, return an error
@@ -1355,12 +1339,9 @@ impl FastProcessor {
     pub fn execute_sync(
         self,
         program: &Program,
-        host: &mut impl AsyncHost,
+        host: &mut impl SyncHost,
     ) -> Result<StackOutputs, ExecutionError> {
-        // Create a new Tokio runtime and block on the async execution
-        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
-
-        rt.block_on(self.execute(program, host))
+        self.execute(program, host)
     }
 
     /// Similar to [Self::execute_sync], but allows mutable access to the processor.
@@ -1368,12 +1349,9 @@ impl FastProcessor {
     pub fn execute_sync_mut(
         &mut self,
         program: &Program,
-        host: &mut impl AsyncHost,
+        host: &mut impl SyncHost,
     ) -> Result<StackOutputs, ExecutionError> {
-        // Create a new Tokio runtime and block on the async execution
-        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
-
-        rt.block_on(self.execute_impl(program, host))
+        self.execute_impl(program, host)
     }
 }
 

@@ -2,7 +2,7 @@ use miden_core::{Felt, mast::MastForest, sys_events::SystemEvent};
 
 use super::{ExecutionError, FastProcessor, ONE};
 use crate::{
-    AsyncHost, BaseHost, ErrorContext, FMP_MIN,
+    BaseHost, ErrorContext, FMP_MIN, SyncHost,
     operations::sys_ops::sys_event_handlers::handle_system_event, system::FMP_MAX,
 };
 
@@ -83,11 +83,11 @@ impl FastProcessor {
 
     /// Analogous to `Process::op_emit`.
     #[inline(always)]
-    pub async fn op_emit(
+    pub fn op_emit(
         &mut self,
         event_id: u32,
         op_idx: usize,
-        host: &mut impl AsyncHost,
+        host: &mut impl SyncHost,
         err_ctx: &impl ErrorContext,
     ) -> Result<(), ExecutionError> {
         let process = &mut self.state(op_idx);
@@ -96,7 +96,6 @@ impl FastProcessor {
             handle_system_event(process, system_event, err_ctx)
         } else {
             host.on_event(process, event_id)
-                .await
                 .map_err(|err| ExecutionError::event_error(err, event_id, err_ctx))
         }
     }
