@@ -109,6 +109,12 @@ impl EventHandlerRegistry {
         Ok(())
     }
 
+    /// Unregisters a handler with the given identifier, returning a flag whether a handler with
+    /// that identifier was previously registered.
+    pub fn unregister(&mut self, id: u32) -> bool {
+        self.handlers.remove(&id).is_some()
+    }
+
     /// Handles the event if the registry contains a handler with the same identifier.
     ///
     /// Returns a bool indicating whether the event was handled. If the event was handled but
