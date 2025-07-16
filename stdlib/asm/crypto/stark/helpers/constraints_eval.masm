@@ -1,0 +1,69 @@
+use.std::crypto::stark::constants
+use.std::crypto::hashes::rpo
+
+# CONSTANTS
+# =================================================================================================
+
+# Number of constraints, both boundary and transitional
+# Note: If the full set of all implemented constraints is used then this should be set to 226
+const.NUM_CONSTRAINTS=6
+
+# Constraint evaluation circuit digest
+const.DIGEST_0=9139186206676821480
+const.DIGEST_1=12763675724578443945
+const.DIGEST_2=7621207635344139731
+const.DIGEST_3=1122100627503939866
+
+# Number of inputs to the constraint evaluation circuit
+const.NUM_INPUTS_CIRCUIT=244
+
+# Number of evaluation gates in the constraint evaluation circuit
+const.NUM_EVAL_GATES_CIRCUIT=108
+
+# Max cycle length for periodic columns
+const.MAX_CYCLE_LEN_LOG=3
+
+# CONSTANTS GETTERS
+# =================================================================================================
+
+export.get_num_constraints
+    push.NUM_CONSTRAINTS
+end
+
+export.get_arithmetic_circuit_eval_digest
+    push.DIGEST_0
+    push.DIGEST_1
+    push.DIGEST_2
+    push.DIGEST_3
+end
+
+export.get_arithmetic_circuit_eval_number_inputs
+    push.NUM_INPUTS_CIRCUIT
+end
+
+export.get_arithmetic_circuit_eval_number_eval_gates
+    push.NUM_EVAL_GATES_CIRCUIT
+end
+
+export.get_max_cycle_length_log
+    push.MAX_CYCLE_LEN_LOG
+end
+
+# HELPER PROCEDURES
+# =================================================================================================
+
+#! Loads the description of the ACE circuit for the constraints evaluation check.
+export.load_ace_circuit_description
+    exec.get_arithmetic_circuit_eval_digest
+    adv.push_mapval
+    exec.constants::get_arithmetic_circuit_ptr
+    padw padw padw
+    repeat.14
+        adv_pipe
+        hperm
+    end
+    exec.rpo::squeeze_digest
+    movup.4 drop
+    assert_eqw
+    # => [...]
+end
