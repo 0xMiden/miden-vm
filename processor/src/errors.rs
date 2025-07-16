@@ -12,8 +12,8 @@ use miden_utils_diagnostics::{Diagnostic, miette};
 use winter_prover::ProverError;
 
 use crate::{
-    MemoryError,
-    host::{EventError, advice::AdviceError},
+    EventError, MemoryError,
+    host::advice::AdviceError,
     system::{FMP_MAX, FMP_MIN},
 };
 // EXECUTION ERROR
@@ -65,13 +65,14 @@ pub enum ExecutionError {
         source_file: Option<Arc<SourceFile>>,
         digest: Word,
     },
-    #[error("error during processing of event in on_event handler")]
+    #[error("error during processing of event with id {event_id} in on_event handler")]
     #[diagnostic()]
     EventError {
         #[label]
         label: SourceSpan,
         #[source_code]
         source_file: Option<Arc<SourceFile>>,
+        event_id: u32,
         #[source]
         error: EventError,
     },
@@ -296,10 +297,10 @@ impl ExecutionError {
         Self::DynamicNodeNotFound { label, source_file, digest }
     }
 
-    pub fn event_error(error: EventError, err_ctx: &impl ErrorContext) -> Self {
+    pub fn event_error(error: EventError, event_id: u32, err_ctx: &impl ErrorContext) -> Self {
         let (label, source_file) = err_ctx.label_and_source_file();
 
-        Self::EventError { label, source_file, error }
+        Self::EventError { label, source_file, event_id, error }
     }
 
     pub fn failed_assertion(

@@ -152,7 +152,7 @@ impl Process {
             handle_system_event(process, system_event, err_ctx)
         } else {
             host.on_event(process, event_id)
-                .map_err(|err| ExecutionError::event_error(err, err_ctx))
+                .map_err(|err| ExecutionError::event_error(err, event_id, err_ctx))
         }
     }
 }

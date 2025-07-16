@@ -2,7 +2,7 @@ use alloc::sync::Arc;
 
 use miden_core::{DebugOptions, Felt, Word, mast::MastForest};
 
-use crate::{ExecutionError, HandlerError, ProcessState};
+use crate::{EventError, ExecutionError, ProcessState};
 
 pub(super) mod advice;
 
@@ -109,17 +109,4 @@ pub trait AsyncHost: BaseHost {
         process: &mut ProcessState<'_>,
         event_id: u32,
     ) -> impl Future<Output = Result<(), EventError>> + Send;
-}
-
-/// An error returned by `Host::on_event`.
-#[derive(Debug, thiserror::Error)]
-pub enum EventError {
-    #[error("got unexpected event_id {id} which is not supported by the host")]
-    UnhandledEvent { id: u32 },
-    #[error("error during processing of event with id {id}")]
-    HandlerError {
-        id: u32,
-        #[source]
-        err: HandlerError,
-    },
 }

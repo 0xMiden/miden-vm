@@ -19,16 +19,16 @@ use crate::{ExecutionError, ProcessState};
 /// be stored in the process's advice provider.
 pub trait EventHandler: Send + Sync + 'static {
     /// Handles the event when triggered.
-    fn on_event(&self, process: &mut ProcessState) -> Result<(), HandlerError>;
+    fn on_event(&self, process: &mut ProcessState) -> Result<(), EventError>;
 }
 
 /// Default implementation for both free functions and closures with signature
 /// `fn(&mut ProcessState) -> Result<(), HandlerError>`
 impl<F> EventHandler for F
 where
-    F: for<'a> Fn(&'a mut ProcessState) -> Result<(), HandlerError> + Send + Sync + 'static,
+    F: for<'a> Fn(&'a mut ProcessState) -> Result<(), EventError> + Send + Sync + 'static,
 {
-    fn on_event(&self, process: &mut ProcessState) -> Result<(), HandlerError> {
+    fn on_event(&self, process: &mut ProcessState) -> Result<(), EventError> {
         self(process)
     }
 }
@@ -55,7 +55,7 @@ where
 ///     Ok(())
 /// }
 /// ```
-pub type HandlerError = Box<dyn Error + Send + Sync + 'static>;
+pub type EventError = Box<dyn Error + Send + Sync + 'static>;
 
 // EVENT HANDLER REGISTRY
 // ================================================================================================
@@ -113,7 +113,7 @@ impl EventHandlerRegistry {
     ///
     /// Returns a bool indicating whether the event was handled. If the event was handled but
     /// returned an error, it is propagated to the caller.
-    pub fn handle_event(&self, id: u32, process: &mut ProcessState) -> Result<bool, HandlerError> {
+    pub fn handle_event(&self, id: u32, process: &mut ProcessState) -> Result<bool, EventError> {
         if let Some(handler) = self.handlers.get(&id) {
             handler.on_event(process)?;
             return Ok(true);

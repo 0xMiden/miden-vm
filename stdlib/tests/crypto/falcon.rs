@@ -4,7 +4,7 @@ use miden_air::{Felt, ProvingOptions, RowIndex};
 use miden_assembly::{Assembler, DefaultSourceManager, utils::Serializable};
 use miden_core::{StarkField, ZERO};
 use miden_processor::{
-    AdviceInputs, ExecutionError, HandlerError, ProcessState, Program, ProgramInfo, StackInputs,
+    AdviceInputs, EventError, ExecutionError, ProcessState, Program, ProgramInfo, StackInputs,
     crypto::RpoRandomCoin,
 };
 use miden_stdlib::{StdLibrary, falcon_sign};
@@ -60,7 +60,7 @@ const EVENT_FALCON_SIG_TO_STACK: u32 = 3419226139;
 /// - SIGNATURE is the signature being verified.
 ///
 /// The advice provider is expected to contain the private key associated to the public key PK.
-pub fn push_falcon_signature(process: &mut ProcessState) -> Result<(), HandlerError> {
+pub fn push_falcon_signature(process: &mut ProcessState) -> Result<(), EventError> {
     let pub_key = process.get_stack_word(0);
     let msg = process.get_stack_word(1);
 

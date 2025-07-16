@@ -97,7 +97,7 @@ impl FastProcessor {
         } else {
             host.on_event(process, event_id)
                 .await
-                .map_err(|err| ExecutionError::event_error(err, err_ctx))
+                .map_err(|err| ExecutionError::event_error(err, event_id, err_ctx))
         }
     }
 }

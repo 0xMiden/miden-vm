@@ -7,6 +7,7 @@ use crate::{
     MastForestSource, MastForestStore, MemMastForestStore, ProcessState, SyncHost,
     host::EventError,
 };
+
 // DEFAULT HOST IMPLEMENTATION
 // ================================================================================================
 
@@ -106,16 +107,17 @@ impl SyncHost for DefaultHost {
     }
 
     fn on_event(&mut self, process: &mut ProcessState, event_id: u32) -> Result<(), EventError> {
-        if self
-            .event_handlers
-            .handle_event(event_id, process)
-            .map_err(|err| EventError::HandlerError { id: event_id, err })?
-        {
+        if self.event_handlers.handle_event(event_id, process)? {
             // the event was handled by the registered event handlers; just return
             return Ok(());
         }
 
-        Err(EventError::UnhandledEvent { id: event_id })
+        // EventError is a `Box` so we can define the error anonymously.
+        #[derive(Debug, thiserror::Error)]
+        #[error("no event handler was registered with given id")]
+        struct UnhandledEvent;
+
+        Err(UnhandledEvent.into())
     }
 }
 
