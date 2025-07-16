@@ -55,9 +55,8 @@ mod host;
 pub use host::{
     AsyncHost, BaseHost, MastForestStore, MemMastForestStore, SyncHost,
     advice::{AdviceError, AdviceInputs, AdviceProvider},
-    default::{DefaultDebugHandler, DefaultHost},
+    default::{DefaultDebugHandler, DefaultHost, HostLibrary},
     handlers::{DebugHandler, EventError, EventHandler, EventHandlerRegistry},
-    mast_source::MastForestSource,
 };
 
 mod chiplets;
@@ -78,6 +77,7 @@ mod tests;
 
 mod debug;
 pub use debug::{AsmOpInfo, VmState, VmStateIterator};
+
 // RE-EXPORTS
 // ================================================================================================
 

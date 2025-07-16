@@ -53,7 +53,7 @@ fn program_execution(c: &mut Criterion) {
                         .assemble_program(&source)
                         .expect("Failed to compile test source.");
                     bench.iter_batched(
-                        || DefaultHost::default().with_mast_source(&StdLibrary::default()).unwrap(),
+                        || DefaultHost::default().with_library(&StdLibrary::default()).unwrap(),
                         |mut host| {
                             execute(
                                 &program,

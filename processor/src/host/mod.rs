@@ -15,8 +15,6 @@ use default::DefaultDebugHandler;
 pub mod handlers;
 use handlers::DebugHandler;
 
-pub mod mast_source;
-
 mod mast_forest_store;
 pub use mast_forest_store::{MastForestStore, MemMastForestStore};
 

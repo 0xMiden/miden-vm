@@ -65,7 +65,7 @@ impl Analyze {
         // fetch the stack and program inputs from the arguments
         let stack_inputs = input_data.parse_stack_inputs().map_err(Report::msg)?;
         let advice_inputs = input_data.parse_advice_inputs().map_err(Report::msg)?;
-        let host = DefaultHost::default().with_mast_source(&StdLibrary::default())?;
+        let host = DefaultHost::default().with_library(&StdLibrary::default())?;
 
         let execution_details: ExecutionDetails =
             analyze(&program, stack_inputs, advice_inputs, host, source_manager)

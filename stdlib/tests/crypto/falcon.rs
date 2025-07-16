@@ -288,8 +288,7 @@ fn falcon_prove_verify() {
     let stack_inputs = StackInputs::try_from_ints(op_stack).expect("failed to create stack inputs");
     let advice_inputs = AdviceInputs::default().with_map(advice_map);
     let mut host = TestHost::default();
-    host.load_mast_source(&StdLibrary::default())
-        .expect("failed to load mast forest");
+    host.load_library(&StdLibrary::default()).expect("failed to load mast forest");
     host.load_handler(EVENT_FALCON_SIG_TO_STACK, push_falcon_signature).unwrap();
 
     let options = ProvingOptions::with_96_bit_security(false);

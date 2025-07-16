@@ -466,10 +466,10 @@ impl Test {
         let (program, kernel) = self.compile().expect("Failed to compile test source.");
         let mut host = TestHost::default();
         if let Some(kernel) = kernel {
-            host.load_mast_source(kernel.mast_forest()).unwrap();
+            host.load_library(kernel.mast_forest()).unwrap();
         }
         for library in &self.libraries {
-            host.load_mast_source(library.mast_forest()).unwrap();
+            host.load_library(library.mast_forest()).unwrap();
         }
         for (id, handler_func) in &self.handlers {
             host.load_handler(*id, *handler_func).unwrap();

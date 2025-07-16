@@ -1,13 +1,12 @@
 use alloc::{boxed::Box, sync::Arc};
+use std::prelude::rust_2015::Vec;
 
 use miden_core::{DebugOptions, Felt, Word, mast::MastForest};
 
 use crate::{
     AsyncHost, BaseHost, DebugHandler, EventHandler, EventHandlerRegistry, ExecutionError,
-    MastForestSource, MastForestStore, MemMastForestStore, ProcessState, SyncHost,
-    host::EventError,
+    MastForestStore, MemMastForestStore, ProcessState, SyncHost, host::EventError,
 };
-
 // DEFAULT HOST IMPLEMENTATION
 // ================================================================================================
 
@@ -30,31 +29,21 @@ impl Default for DefaultHost {
 }
 
 impl<D: DebugHandler> DefaultHost<D> {
-    /// Stores all procedure roots of a [`MastForest`] making them available during
-    /// program execution.
-    fn load_mast_forest(&mut self, mast_forest: Arc<MastForest>) -> Result<(), ExecutionError> {
-        self.store.insert(mast_forest);
-        Ok(())
-    }
+    /// Loads a [`HostLibrary`] containing a [`MastForest`] with its list of event handlers.
+    pub fn load_library(&mut self, library: impl Into<HostLibrary>) -> Result<(), ExecutionError> {
+        let library = library.into();
+        self.store.insert(library.mast_forest);
 
-    /// Loads a source [`MastForest`] with its list of event handlers.
-    pub fn load_mast_source(
-        &mut self,
-        mast_source: &impl MastForestSource,
-    ) -> Result<(), ExecutionError> {
-        self.load_mast_forest(mast_source.mast_forest())?;
-        for (id, handler) in mast_source.event_handlers() {
+        for (id, handler) in library.handlers {
             self.event_handlers.register(id, handler)?;
         }
         Ok(())
     }
 
-    /// Adds a source [`MastForest`] with its list of event handlers to the host.
-    pub fn with_mast_source(
-        mut self,
-        mast_source: &impl MastForestSource,
-    ) -> Result<Self, ExecutionError> {
-        self.load_mast_source(mast_source)?;
+    /// Adds a [`HostLibrary`] containing a [`MastForest`] with its list of event handlers.
+    /// to the host.
+    pub fn with_library(mut self, library: impl Into<HostLibrary>) -> Result<Self, ExecutionError> {
+        self.load_library(library)?;
         Ok(self)
     }
 
@@ -133,6 +122,34 @@ impl AsyncHost for DefaultHost {
     ) -> impl Future<Output = Result<(), EventError>> + Send {
         let result = <Self as SyncHost>::on_event(self, process, event_id);
         async move { result }
+    }
+}
+
+// HOST LIBRARY
+// ================================================================================================
+
+/// A rich library representing a [`MastForest`] which also exports
+/// a list of handlers for events it may call.
+#[derive(Default)]
+pub struct HostLibrary {
+    /// A `MastForest` with procedures exposed by this library.
+    pub mast_forest: Arc<MastForest>,
+    /// List of handlers along with an event id to call them with `emit`.
+    pub handlers: Vec<(u32, Box<dyn EventHandler>)>,
+}
+
+impl From<Arc<MastForest>> for HostLibrary {
+    fn from(mast_forest: Arc<MastForest>) -> Self {
+        Self { mast_forest, handlers: vec![] }
+    }
+}
+
+impl From<&Arc<MastForest>> for HostLibrary {
+    fn from(mast_forest: &Arc<MastForest>) -> Self {
+        Self {
+            mast_forest: mast_forest.clone(),
+            handlers: vec![],
+        }
     }
 }
 

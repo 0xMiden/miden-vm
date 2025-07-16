@@ -52,7 +52,7 @@ fn program_execution_fast(c: &mut Criterion) {
                     bench.to_async(Runtime::new().unwrap()).iter_batched(
                         || {
                             let host = DefaultHost::default()
-                                .with_mast_source(&StdLibrary::default())
+                                .with_library(&StdLibrary::default())
                                 .unwrap();
 
                             let processor = FastProcessor::new_with_advice_inputs(
