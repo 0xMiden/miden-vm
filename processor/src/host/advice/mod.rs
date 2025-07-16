@@ -152,6 +152,11 @@ impl AdviceProvider {
     // ADVICE MAP
     // --------------------------------------------------------------------------------------------
 
+    /// Returns a reference to the inner [`AdviceMap`].
+    pub fn advice_map(&self) -> &AdviceMap {
+        &self.map
+    }
+
     /// Returns true if the key has a corresponding value in the map.
     pub fn contains_map_key(&self, key: &Word) -> bool {
         self.map.contains_key(key)
