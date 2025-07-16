@@ -1,0 +1,49 @@
+# CONSTANTS
+# =================================================================================================
+
+# General constants
+const.FRI_REMAINDER_CODEWORD_MAX_SIZE_HALF=512
+const.FRI_REMAINDER_CODEWORD_MAX_SIZE=1024
+const.FRI_REMAINDER_CODEWORD_MAX_SIZE_HALF_LOG=9
+const.FRI_REMAINDER_CODEWORD_MAX_SIZE_LOG=10
+const.FRI_REMAINDER_POLY_MAX_DEGREE_PLUS_1_HALF=64
+const.FRI_REMAINDER_POLY_MAX_DEGREE_PLUS_1=128
+
+# CONSTANTS GETTERS
+# =================================================================================================
+
+export.get_fri_remainder_codeword_max_size_half
+    push.FRI_REMAINDER_CODEWORD_MAX_SIZE_HALF
+end
+
+export.get_fri_remainder_codeword_max_size 
+    push.FRI_REMAINDER_CODEWORD_MAX_SIZE
+end
+
+export.get_fri_remainder_codeword_max_size_half_log
+    push.FRI_REMAINDER_CODEWORD_MAX_SIZE_HALF_LOG
+end
+
+export.get_fri_remainder_codeword_max_size_log
+    push.FRI_REMAINDER_CODEWORD_MAX_SIZE_LOG
+end
+
+export.get_fri_remainder_poly_max_degree_plus_1_half
+    push.FRI_REMAINDER_POLY_MAX_DEGREE_PLUS_1_HALF
+end
+
+export.get_fri_remainder_poly_max_degree_plus_1
+    push.FRI_REMAINDER_POLY_MAX_DEGREE_PLUS_1
+end
+
+export.load_fri_remainder_poly_max_degree_plus_1_half
+    repeat.16
+        adv_pipe hperm
+    end
+end
+
+export.load_fri_remainder_poly_max_degree_plus_1
+    repeat.32
+        adv_pipe hperm
+    end
+end

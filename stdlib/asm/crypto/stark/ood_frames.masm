@@ -1,6 +1,7 @@
 use.std::crypto::stark::constants
 use.std::crypto::hashes::rpo
 use.std::crypto::stark::random_coin
+use.std::crypto::stark::helpers::ood_frames
 
 #! Loads the execution trace and the quotient trace evaluation frames.
 #! 
@@ -62,11 +63,7 @@ export.load_and_horner_eval_ood_frames
     # => [Y, ZERO, 0, 0, 0, 0, U, ...]
 
     ### b) Process the `current` OOD evaluations
-    repeat.24
-        adv_pipe
-        horner_eval_ext
-        hperm
-    end
+    exec.ood_frames::process_row_ood_evaluations
     # => [Y, Y, C, ood_frame_ptr, alpha_ptr, acc1, acc0, ...]
 
     ### c) Save -Q^z(alpha)
@@ -91,11 +88,7 @@ export.load_and_horner_eval_ood_frames
     ## 2) Load the `next` trace polynomials OOD evaluations.
     swapw.3
     # => [Y, Y, C, ood_frame_ptr, alpha_ptr, 0, 0, ...]
-    repeat.24
-        adv_pipe
-        horner_eval_ext
-        hperm
-    end
+    exec.ood_frames::process_row_ood_evaluations
     # => [Y, D, C, ood_frame_ptr, alpha_ptr, acc1, acc0, ...]
 
     ## 3) Reseed with the digest of the OOD evaluations
