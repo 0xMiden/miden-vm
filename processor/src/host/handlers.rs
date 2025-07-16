@@ -12,8 +12,8 @@ use crate::{ExecutionError, ProcessState};
 // EVENT HANDLER TRAIT
 // ================================================================================================
 
-/// An [`EventHandler`] defines a function that that can be called from the processor, which can
-/// read the current execution state and modify the advice.
+/// An [`EventHandler`] defines a function that that can be called from the processor which can
+/// read the VM state and modify the state of the advice provider.
 ///
 /// A struct implementing this trait can access its own state, but any output it produces must
 /// be stored in the process's advice provider.
