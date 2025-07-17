@@ -1,8 +1,7 @@
 use alloc::{sync::Arc, vec::Vec};
 
 use miden_core::{
-    Program,
-    mast::{MastForest, MastNodeId},
+    mast::{MastForest, MastNodeId}, Program
 };
 
 /// A hint for the initial size of the continuation stack.
@@ -26,6 +25,8 @@ pub enum Continuation {
     FinishCall(MastNodeId),
     /// Process the finish phase of a Dyn node.
     FinishDyn(MastNodeId),
+    /// Process the finish phase of an External node.
+    FinishExternal(MastNodeId),
     /// Enter a new MAST forest, where all subsequent `MastNodeId`s will be relative to this forest.
     ///
     /// When we encounter an `ExternalNode`, we enter the corresponding MAST forest directly, and
@@ -86,6 +87,10 @@ impl ContinuationStack {
     /// Pushes a dyn finish continuation onto the stack.
     pub fn push_finish_dyn(&mut self, node_id: MastNodeId) {
         self.stack.push(Continuation::FinishDyn(node_id));
+    }
+
+    pub fn push_finish_external(&mut self, node_id: MastNodeId) {
+        self.stack.push(Continuation::FinishExternal(node_id));
     }
 
     /// Pushes a continuation to start processing the given node.
