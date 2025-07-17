@@ -151,8 +151,16 @@ impl Process {
         if let Some(system_event) = SystemEvent::from_event_id(event_id) {
             handle_system_event(process, system_event, err_ctx)
         } else {
-            host.on_event(process, event_id)
-                .map_err(|err| ExecutionError::event_error(err, event_id, err_ctx))
+            let clk = process.clk();
+            let mutations = host
+                .on_event(&*process, event_id)
+                .map_err(|err| ExecutionError::event_error(err, event_id, err_ctx))?;
+            for mutation in mutations {
+                self.advice
+                    .apply_mutation(mutation)
+                    .map_err(|err| ExecutionError::advice_error(err, clk, err_ctx))?;
+            }
+            Ok(())
         }
     }
 }

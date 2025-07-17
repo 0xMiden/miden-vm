@@ -3,8 +3,8 @@ use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use miden_core::{DebugOptions, Felt, Word, mast::MastForest};
 
 use crate::{
-    AsyncHost, BaseHost, DebugHandler, EventHandler, EventHandlerRegistry, ExecutionError,
-    MastForestStore, MemMastForestStore, ProcessState, SyncHost, host::EventError,
+    AdviceMutation, AsyncHost, BaseHost, DebugHandler, EventHandler, EventHandlerRegistry,
+    ExecutionError, MastForestStore, MemMastForestStore, ProcessState, SyncHost, host::EventError,
 };
 
 // DEFAULT HOST IMPLEMENTATION
@@ -86,22 +86,18 @@ impl<D: DebugHandler> DefaultHost<D> {
 impl BaseHost for DefaultHost {
     fn on_debug(
         &mut self,
-        process: &mut ProcessState,
+        process: &ProcessState,
         options: &DebugOptions,
     ) -> Result<(), ExecutionError> {
         self.debug_handler.on_debug(process, options)
     }
 
-    fn on_trace(
-        &mut self,
-        process: &mut ProcessState,
-        trace_id: u32,
-    ) -> Result<(), ExecutionError> {
+    fn on_trace(&mut self, process: &ProcessState, trace_id: u32) -> Result<(), ExecutionError> {
         self.debug_handler.on_trace(process, trace_id)
     }
 
     /// Handles the failure of the assertion instruction.
-    fn on_assert_failed(&mut self, _process: &mut ProcessState, _err_code: Felt) {}
+    fn on_assert_failed(&mut self, _process: &ProcessState, _err_code: Felt) {}
 }
 
 impl SyncHost for DefaultHost {
@@ -109,10 +105,14 @@ impl SyncHost for DefaultHost {
         self.store.get(node_digest)
     }
 
-    fn on_event(&mut self, process: &mut ProcessState, event_id: u32) -> Result<(), EventError> {
-        if self.event_handlers.handle_event(event_id, process)? {
+    fn on_event(
+        &mut self,
+        process: &ProcessState,
+        event_id: u32,
+    ) -> Result<Vec<AdviceMutation>, EventError> {
+        if let Some(mutations) = self.event_handlers.handle_event(event_id, process)? {
             // the event was handled by the registered event handlers; just return
-            return Ok(());
+            return Ok(mutations);
         }
 
         // EventError is a `Box` so we can define the error anonymously.
@@ -131,9 +131,9 @@ impl AsyncHost for DefaultHost {
 
     fn on_event(
         &mut self,
-        process: &mut ProcessState<'_>,
+        process: &ProcessState<'_>,
         event_id: u32,
-    ) -> impl Future<Output = Result<(), EventError>> + Send {
+    ) -> impl Future<Output = Result<Vec<AdviceMutation>, EventError>> + Send {
         let result = <Self as SyncHost>::on_event(self, process, event_id);
         async move { result }
     }

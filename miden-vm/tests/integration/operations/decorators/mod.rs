@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use miden_core::DebugOptions;
 use miden_processor::{
-    AsyncHost, BaseHost, EventError, ExecutionError, MastForest, ProcessState, SyncHost,
+    AdviceMutation, AsyncHost, BaseHost, EventError, ExecutionError, MastForest, ProcessState,
+    SyncHost,
 };
 use miden_prover::Word;
 
@@ -22,18 +23,14 @@ pub struct TestHost {
 impl BaseHost for TestHost {
     fn on_debug(
         &mut self,
-        _process: &mut ProcessState,
+        _process: &ProcessState,
         options: &DebugOptions,
     ) -> Result<(), ExecutionError> {
         self.debug_handler.push(options.to_string());
         Ok(())
     }
 
-    fn on_trace(
-        &mut self,
-        _process: &mut ProcessState,
-        trace_id: u32,
-    ) -> Result<(), ExecutionError> {
+    fn on_trace(&mut self, _process: &ProcessState, trace_id: u32) -> Result<(), ExecutionError> {
         self.trace_handler.push(trace_id);
         Ok(())
     }
@@ -45,9 +42,13 @@ impl SyncHost for TestHost {
         None
     }
 
-    fn on_event(&mut self, _process: &mut ProcessState, event_id: u32) -> Result<(), EventError> {
+    fn on_event(
+        &mut self,
+        _process: &ProcessState,
+        event_id: u32,
+    ) -> Result<Vec<AdviceMutation>, EventError> {
         self.event_handler.push(event_id);
-        Ok(())
+        Ok(Vec::new())
     }
 }
 
@@ -59,10 +60,10 @@ impl AsyncHost for TestHost {
 
     fn on_event(
         &mut self,
-        _process: &mut ProcessState<'_>,
+        _process: &ProcessState<'_>,
         event_id: u32,
-    ) -> impl Future<Output = Result<(), EventError>> + Send {
+    ) -> impl Future<Output = Result<Vec<AdviceMutation>, EventError>> + Send {
         self.event_handler.push(event_id);
-        async move { Ok(()) }
+        async move { Ok(Vec::new()) }
     }
 }

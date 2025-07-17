@@ -14,6 +14,8 @@ pub use inputs::AdviceInputs;
 mod errors;
 pub use errors::AdviceError;
 
+use crate::host::AdviceMutation;
+
 // TYPE ALIASES
 // ================================================================================================
 
@@ -45,6 +47,51 @@ pub struct AdviceProvider {
 }
 
 impl AdviceProvider {
+    pub fn apply_mutation(&mut self, mutation: AdviceMutation) -> Result<(), AdviceError> {
+        match mutation {
+            AdviceMutation::PopStack => {
+                self.pop_stack()?;
+            },
+            AdviceMutation::PopStackWord => {
+                self.pop_stack_word()?;
+            },
+            AdviceMutation::PopStackDword => {
+                self.pop_stack_dword()?;
+            },
+            AdviceMutation::PushStack { value } => {
+                self.push_stack(value);
+            },
+            AdviceMutation::PushStackWord { word } => {
+                self.push_stack_word(&word);
+            },
+            AdviceMutation::PushFromMap { key, include_len } => {
+                self.push_from_map(key, include_len)?;
+            },
+            AdviceMutation::ExtendStack { iter } => {
+                self.extend_stack(iter);
+            },
+            AdviceMutation::InsertIntoMap { key, values } => {
+                self.insert_into_map(key, values)?;
+            },
+            AdviceMutation::ExtendMap { other } => {
+                self.extend_map(&other)?;
+            },
+            AdviceMutation::UpdateMerkleNode { root, depth, index, value } => {
+                self.update_merkle_node(root, &depth, &index, value)?;
+            },
+            AdviceMutation::MergeRoots { lhs, rhs } => {
+                self.merge_roots(lhs, rhs)?;
+            },
+            AdviceMutation::ExtendMerkleStore { iter } => {
+                self.extend_merkle_store(iter);
+            },
+            AdviceMutation::ExtendFromInputs { inputs } => {
+                self.extend_from_inputs(&inputs)?;
+            },
+        }
+        Ok(())
+    }
+
     // ADVICE STACK
     // --------------------------------------------------------------------------------------------
 
