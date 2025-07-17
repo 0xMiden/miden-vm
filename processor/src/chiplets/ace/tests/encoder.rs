@@ -1,7 +1,6 @@
 use alloc::vec::Vec;
 
 use miden_core::{Felt, FieldElement, QuadFelt};
-use winter_prover::crypto::ElementHasher;
 
 use super::*;
 use crate::chiplets::ace::instruction::{ID_BITS, MAX_ID};
@@ -36,11 +35,6 @@ impl EncodedCircuit {
 
     pub fn encoded_circuit(&self) -> &[Felt] {
         &self.encoded_circuit
-    }
-
-    /// Computes the hash of all circuit constants and instructions.
-    fn raw_circuit_hash<H: ElementHasher<BaseField = Felt>>(&self) -> H::Digest {
-        H::hash_elements(&self.encoded_circuit)
     }
 
     /// Returns the number of constants in the circuit.
