@@ -146,14 +146,14 @@ impl Process {
         self.stack.copy_state(0);
         self.decoder.set_user_op_helpers(Operation::Emit(event_id), &[event_id.into()]);
 
-        let process = &mut self.state();
+        let process = self.state();
         // If it's a system event, handle it directly. Otherwise, forward it to the host.
         if let Some(system_event) = SystemEvent::from_event_id(event_id) {
-            handle_system_event(process, system_event, err_ctx)
+            handle_system_event(&mut process, system_event, err_ctx)
         } else {
             let clk = process.clk();
             let mutations = host
-                .on_event(&*process, event_id)
+                .on_event(&process, event_id)
                 .map_err(|err| ExecutionError::event_error(err, event_id, err_ctx))?;
             for mutation in mutations {
                 self.advice
