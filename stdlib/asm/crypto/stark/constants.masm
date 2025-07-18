@@ -112,6 +112,18 @@ const.COMPOSITION_COEF_PTR=3223322712
 ### Address to the randomness used in computing the DEEP polynomial
 const.DEEP_RAND_CC_PTR=3223322716
 
+const.NUM_FIXED_LEN_PUBLIC_INPUTS_PTR=3223322720
+const.NUM_ACE_INPUTS_PTR=3223322721
+const.NUM_ACE_GATES_PTR=3223322722
+const.MAX_CYCLE_LEN_LOG_PTR=3223322723
+
+const.DYNAMIC_PROCEDURES_PTR=3223322728
+
+const.DYNAMIC_PROCEDURE_0_PTR=3223322728
+const.DYNAMIC_PROCEDURE_1_PTR=3223322732
+const.DYNAMIC_PROCEDURE_2_PTR=3223322736
+const.DYNAMIC_PROCEDURE_3_PTR=3223322740
+
 ## ACE related
 ## Starts at address 3225419776 = 2**31 + 2**30 + 2**22 and the memory region grows backward
 ## and forward and is of variable length in both directions.
@@ -429,3 +441,59 @@ end
 export.zeroize_stack_word
     exec.zero_word_ptr mem_loadw
 end
+
+# TODO(put in correct place)
+# =================================================================================================
+
+export.set_num_fixed_len_pi
+    push.NUM_FIXED_LEN_PUBLIC_INPUTS_PTR mem_store
+end
+
+export.get_num_fixed_len_pi
+    push.NUM_FIXED_LEN_PUBLIC_INPUTS_PTR mem_load
+end
+
+export.set_num_ace_inputs
+    push.NUM_ACE_INPUTS_PTR mem_store
+end
+
+export.set_num_ace_gates
+    push.NUM_ACE_GATES_PTR mem_store
+end
+
+export.set_max_cycle_len_log
+    push.MAX_CYCLE_LEN_LOG_PTR mem_store
+end
+
+export.get_num_ace_inputs
+    push.NUM_ACE_INPUTS_PTR mem_load
+end
+
+export.get_num_ace_gates
+    push.NUM_ACE_GATES_PTR mem_load
+end
+
+export.get_max_cycle_len_log
+    push.MAX_CYCLE_LEN_LOG_PTR mem_load
+end
+
+export.get_dynamic_procedures_ptr
+    push.DYNAMIC_PROCEDURES_PTR
+end
+
+export.get_dynamic_procedure_0_ptr
+    push.DYNAMIC_PROCEDURE_0_PTR
+end
+
+export.get_dynamic_procedure_1_ptr
+    push.DYNAMIC_PROCEDURE_1_PTR
+end
+
+export.get_dynamic_procedure_2_ptr
+    push.DYNAMIC_PROCEDURE_2_PTR
+end
+
+export.get_dynamic_procedure_3_ptr
+    push.DYNAMIC_PROCEDURE_3_PTR
+end
+

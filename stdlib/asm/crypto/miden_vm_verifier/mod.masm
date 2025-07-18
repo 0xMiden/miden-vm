@@ -1,0 +1,12 @@
+use.std::crypto::miden_vm_verifier::helper
+use.std::crypto::stark::verifier
+
+# Input: [log(trace_length), num_queries, grinding, ...]
+# Output: [log(trace_length), num_queries, grinding, num_constraints, trace_info, num_fixed_len_pi, num_ace_inputs, num_ace_gates, max_cycle_len_log, ROOT, ...]
+export.verify
+    exec.helper::prologue
+    # => [num_constraints, trace_info, num_fixed_len_pi, num_ace_inputs, num_ace_gates, max_cycle_len_log, ROOT, log(trace_length), num_queries, grinding, ...]
+
+    exec.verifier::verify
+    # => [...]
+end

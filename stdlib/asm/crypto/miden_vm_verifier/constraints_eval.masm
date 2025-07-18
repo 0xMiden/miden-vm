@@ -26,28 +26,23 @@ const.MAX_CYCLE_LEN_LOG=3
 # CONSTANTS GETTERS
 # =================================================================================================
 
-export.get_num_constraints
-    push.NUM_CONSTRAINTS
-end
-
-export.get_arithmetic_circuit_eval_digest
+proc.get_arithmetic_circuit_eval_digest
     push.DIGEST_0
     push.DIGEST_1
     push.DIGEST_2
     push.DIGEST_3
 end
 
-export.get_arithmetic_circuit_eval_number_inputs
+proc.get_arithmetic_circuit_constants
+    push.MAX_CYCLE_LEN_LOG
+    push.NUM_EVAL_GATES_CIRCUIT
     push.NUM_INPUTS_CIRCUIT
 end
 
-export.get_arithmetic_circuit_eval_number_eval_gates
-    push.NUM_EVAL_GATES_CIRCUIT
+proc.get_num_constraints
+    push.NUM_CONSTRAINTS
 end
 
-export.get_max_cycle_length_log
-    push.MAX_CYCLE_LEN_LOG
-end
 
 # HELPER PROCEDURES
 # =================================================================================================

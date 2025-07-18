@@ -1,7 +1,6 @@
 use.std::crypto::stark::constants
 use.std::crypto::hashes::rpo
 use.std::crypto::stark::random_coin
-use.std::crypto::stark::helpers::public_inputs
 
 
 #! Processes the public inputs.
@@ -86,7 +85,7 @@ export.load_public_inputs
     
     ## a) Compute the number of iterations.
     ##    We also check double-word alignment
-    exec.public_inputs::get_num_fixed_len_public_inputs
+    exec.constants::get_num_fixed_len_pi
     u32divmod.8
     assertz
     movdn.4
@@ -115,7 +114,7 @@ export.load_public_inputs
 
     ## a) Compute the number of base field elements in total in the variable length public inputs
     exec.constants::num_public_inputs_ptr mem_load
-    exec.public_inputs::get_num_fixed_len_public_inputs
+    exec.constants::get_num_fixed_len_pi
     sub
     # => [num_var_len_pi, R2, R1, C, ptr, ...]
 
@@ -188,13 +187,19 @@ proc.reduce_variable_length_public_inputs
     # stored temporarily and they will be over-written by, among other data, the result of reducing
     # the variable public inputs. 
 
-    exec.public_inputs::reduce_var_len_public_inputs_groups
+    #exec.public_inputs::reduce_var_len_public_inputs_groups
+    exec.reduce_var_len_public_inputs_groups
     # => [next_var_len_pub_inputs_ptr, var_len_pub_inputs_res_ptr, ...]
-    
+
     # 3) Clean up the stack.
     drop drop
     # => [...]
 end
+
+proc.reduce_var_len_public_inputs_groups
+    exec.constants::get_dynamic_procedure_3_ptr dynexec
+end
+
 
 #! Computes the address where the public inputs are to be stored and returns it.
 #!
@@ -234,7 +239,7 @@ proc.compute_and_store_public_inputs_address
     # We need to account for the fact that fixed-length public inputs are stored as extension field
     # elements. 
     dup
-    exec.public_inputs::get_num_fixed_len_public_inputs
+    exec.constants::get_num_fixed_len_pi
     mul.2
     sub
     # => [public_inputs_ptr, res_var_len_pi_reductions_ptr, ...]
