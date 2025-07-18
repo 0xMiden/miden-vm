@@ -613,7 +613,7 @@ fn parse_hex(span: SourceSpan, hex_digits: &str) -> Result<IntValue, ParsingErro
     use miden_core::{FieldElement, StarkField};
     match hex_digits.len() {
         // Felt
-        n if n <= 16 && n % 2 == 0 => {
+        n if n <= 16 && n.is_multiple_of(2) => {
             let value = u64::from_str_radix(hex_digits, 16).map_err(|error| {
                 ParsingError::InvalidLiteral {
                     span,
@@ -663,7 +663,7 @@ fn parse_hex(span: SourceSpan, hex_digits: &str) -> Result<IntValue, ParsingErro
         },
         // Invalid
         n if n > 64 => Err(ParsingError::InvalidHexLiteral { span, kind: HexErrorKind::TooLong }),
-        n if n % 2 != 0 && n < 64 => {
+        n if !n.is_multiple_of(2) && n < 64 => {
             Err(ParsingError::InvalidHexLiteral { span, kind: HexErrorKind::MissingDigits })
         },
         _ => Err(ParsingError::InvalidHexLiteral { span, kind: HexErrorKind::Invalid }),

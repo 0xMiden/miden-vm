@@ -1,5 +1,4 @@
-use alloc::{boxed::Box, sync::Arc};
-use core::error::Error;
+use alloc::sync::Arc;
 
 use miden_air::RowIndex;
 use miden_core::{
@@ -12,9 +11,11 @@ use miden_debug_types::{SourceFile, SourceManager, SourceSpan};
 use miden_utils_diagnostics::{Diagnostic, miette};
 use winter_prover::ProverError;
 
-use super::system::{FMP_MAX, FMP_MIN};
-use crate::{MemoryError, host::advice::AdviceError};
-
+use crate::{
+    EventError, MemoryError,
+    host::advice::AdviceError,
+    system::{FMP_MAX, FMP_MIN},
+};
 // EXECUTION ERROR
 // ================================================================================================
 
@@ -64,16 +65,19 @@ pub enum ExecutionError {
         source_file: Option<Arc<SourceFile>>,
         digest: Word,
     },
-    #[error("error during processing of event in on_event handler")]
+    #[error("error during processing of event with id {event_id} in on_event handler")]
     #[diagnostic()]
     EventError {
         #[label]
         label: SourceSpan,
         #[source_code]
         source_file: Option<Arc<SourceFile>>,
+        event_id: u32,
         #[source]
-        error: Box<dyn Error + Send + Sync + 'static>,
+        error: EventError,
     },
+    #[error("attempted to add event handler with previously inserted id: {id}")]
+    DuplicateEventHandler { id: u32 },
     #[error("assertion failed at clock cycle {clk} with error {}",
       match err_msg {
         Some(msg) => format!("message: {msg}"),
@@ -293,13 +297,10 @@ impl ExecutionError {
         Self::DynamicNodeNotFound { label, source_file, digest }
     }
 
-    pub fn event_error(
-        error: Box<dyn Error + Send + Sync + 'static>,
-        err_ctx: &impl ErrorContext,
-    ) -> Self {
+    pub fn event_error(error: EventError, event_id: u32, err_ctx: &impl ErrorContext) -> Self {
         let (label, source_file) = err_ctx.label_and_source_file();
 
-        Self::EventError { label, source_file, error }
+        Self::EventError { label, source_file, event_id, error }
     }
 
     pub fn failed_assertion(

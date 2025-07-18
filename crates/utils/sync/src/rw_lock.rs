@@ -179,15 +179,14 @@ unsafe impl RawRwLock for Spinlock {
             // Only shared locks have been acquired, attempt to acquire the exclusive bit,
             // which will prevent further shared locks from being acquired. It does not
             // in and of itself grant us exclusive access however.
-            if s & 1 == 0 {
-                if let Err(e) =
+            if s & 1 == 0
+                && let Err(e) =
                     self.state.compare_exchange(s, s + 1, Ordering::Relaxed, Ordering::Relaxed)
-                {
-                    // The lock state has changed before we could acquire the exclusive bit,
-                    // update our view of the lock state and try again
-                    s = e;
-                    continue;
-                }
+            {
+                // The lock state has changed before we could acquire the exclusive bit,
+                // update our view of the lock state and try again
+                s = e;
+                continue;
             }
 
             // We've acquired the exclusive bit, now we need to busy wait until all shared

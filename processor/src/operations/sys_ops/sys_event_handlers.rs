@@ -7,7 +7,6 @@ use miden_core::{
         merkle::{EmptySubtreeRoots, SMT_DEPTH, Smt},
     },
     sys_events::SystemEvent,
-    utils::collections::KvMap,
 };
 
 use crate::{ExecutionError, MemoryError, ProcessState, errors::ErrorContext};
@@ -38,13 +37,13 @@ pub fn handle_system_event(
         SystemEvent::U32Clo => push_leading_ones(process, err_ctx),
         SystemEvent::U32Cto => push_trailing_ones(process, err_ctx),
         SystemEvent::ILog2 => push_ilog2(process, err_ctx),
-        SystemEvent::MemToMap => insert_mem_values_into_adv_map(process),
-        SystemEvent::HdwordToMap => insert_hdword_into_adv_map(process, ZERO),
+        SystemEvent::MemToMap => insert_mem_values_into_adv_map(process, err_ctx),
+        SystemEvent::HdwordToMap => insert_hdword_into_adv_map(process, ZERO, err_ctx),
         SystemEvent::HdwordToMapWithDomain => {
             let domain = process.get_stack_item(HDWORD_TO_MAP_WITH_DOMAIN_DOMAIN_OFFSET);
-            insert_hdword_into_adv_map(process, domain)
+            insert_hdword_into_adv_map(process, domain, err_ctx)
         },
-        SystemEvent::HpermToMap => insert_hperm_into_adv_map(process),
+        SystemEvent::HpermToMap => insert_hperm_into_adv_map(process, err_ctx),
     }
 }
 
@@ -66,7 +65,10 @@ pub fn handle_system_event(
 /// - `start_addr` is greater than or equal to 2^32.
 /// - `end_addr` is greater than or equal to 2^32.
 /// - `start_addr` > `end_addr`.
-fn insert_mem_values_into_adv_map(process: &mut ProcessState) -> Result<(), ExecutionError> {
+fn insert_mem_values_into_adv_map(
+    process: &mut ProcessState,
+    err_ctx: &impl ErrorContext,
+) -> Result<(), ExecutionError> {
     let (start_addr, end_addr) =
         get_mem_addr_range(process, 4, 5).map_err(ExecutionError::MemoryError)?;
     let ctx = process.ctx();
@@ -78,9 +80,10 @@ fn insert_mem_values_into_adv_map(process: &mut ProcessState) -> Result<(), Exec
     }
 
     let key = process.get_stack_word(0);
-    process.advice_provider_mut().insert_into_map(key, values);
-
-    Ok(())
+    process
+        .advice_provider_mut()
+        .insert_into_map(key, values)
+        .map_err(|err| ExecutionError::advice_error(err, process.clk(), err_ctx))
 }
 
 /// Reads two word from the operand stack and inserts them into the advice map under the key
@@ -99,6 +102,7 @@ fn insert_mem_values_into_adv_map(process: &mut ProcessState) -> Result<(), Exec
 fn insert_hdword_into_adv_map(
     process: &mut ProcessState,
     domain: Felt,
+    err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
     // get the top two words from the stack and hash them to compute the key value
     let word0 = process.get_stack_word(0);
@@ -110,9 +114,11 @@ fn insert_hdword_into_adv_map(
     let mut values = Vec::with_capacity(2 * WORD_SIZE);
     values.extend_from_slice(&Into::<[Felt; WORD_SIZE]>::into(word1));
     values.extend_from_slice(&Into::<[Felt; WORD_SIZE]>::into(word0));
-    process.advice_provider_mut().insert_into_map(key, values);
 
-    Ok(())
+    process
+        .advice_provider_mut()
+        .insert_into_map(key, values)
+        .map_err(|err| ExecutionError::advice_error(err, process.clk(), err_ctx))
 }
 
 /// Reads three words from the operand stack and inserts the top two words into the advice map
@@ -128,7 +134,10 @@ fn insert_hdword_into_adv_map(
 ///
 /// Where KEY is computed by extracting the digest elements from hperm([C, A, B]). For example,
 /// if C is [0, d, 0, 0], KEY will be set as hash(A || B, d).
-fn insert_hperm_into_adv_map(process: &mut ProcessState) -> Result<(), ExecutionError> {
+fn insert_hperm_into_adv_map(
+    process: &mut ProcessState,
+    err_ctx: &impl ErrorContext,
+) -> Result<(), ExecutionError> {
     // read the state from the stack
     let mut state = [
         process.get_stack_item(11),
@@ -156,9 +165,10 @@ fn insert_hperm_into_adv_map(process: &mut ProcessState) -> Result<(), Execution
             .expect("failed to extract digest from state"),
     );
 
-    process.advice_provider_mut().insert_into_map(key, values);
-
-    Ok(())
+    process
+        .advice_provider_mut()
+        .insert_into_map(key, values)
+        .map_err(|err| ExecutionError::advice_error(err, process.clk(), err_ctx))
 }
 
 /// Creates a new Merkle tree in the advice provider by combining Merkle trees with the
@@ -292,7 +302,7 @@ fn copy_map_value_to_adv_stack(
 pub fn push_key_presence_flag(process: &mut ProcessState) -> Result<(), ExecutionError> {
     let map_key = process.get_stack_word(0);
 
-    let presence_flag = process.advice_provider().map.contains_key(&map_key);
+    let presence_flag = process.advice_provider().contains_map_key(&map_key);
     process.advice_provider_mut().push_stack(Felt::from(presence_flag));
 
     Ok(())
@@ -652,7 +662,7 @@ fn get_smt_leaf_preimage(
     let kv_pairs = process
         .advice_provider()
         .get_mapped_values(&node)
-        .map_err(|_| ExecutionError::smt_node_not_found(node, err_ctx))?;
+        .ok_or_else(|| ExecutionError::smt_node_not_found(node, err_ctx))?;
 
     if kv_pairs.len() % WORD_SIZE * 2 != 0 {
         return Err(ExecutionError::smt_node_preimage_not_valid(node, kv_pairs.len(), err_ctx));

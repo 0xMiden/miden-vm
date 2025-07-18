@@ -580,7 +580,7 @@ impl MainTrace {
     /// Returns `true` if the hasher chiplet flags indicate the initialization of verifying
     /// a Merkle path to an old node during Merkle root update procedure (MRUPDATE).
     pub fn f_mv(&self, i: RowIndex) -> bool {
-        (i.as_usize() % HASH_CYCLE_LEN == 0)
+        i.as_usize().is_multiple_of(HASH_CYCLE_LEN)
             && self.chiplet_selector_0(i) == ZERO
             && self.chiplet_selector_1(i) == ONE
             && self.chiplet_selector_2(i) == ONE
@@ -600,7 +600,7 @@ impl MainTrace {
     /// Returns `true` if the hasher chiplet flags indicate the initialization of verifying
     /// a Merkle path to a new node during Merkle root update procedure (MRUPDATE).
     pub fn f_mu(&self, i: RowIndex) -> bool {
-        (i.as_usize() % HASH_CYCLE_LEN == 0)
+        i.as_usize().is_multiple_of(HASH_CYCLE_LEN)
             && self.chiplet_selector_0(i) == ZERO
             && self.chiplet_selector_1(i) == ONE
             && self.chiplet_selector_2(i) == ONE
