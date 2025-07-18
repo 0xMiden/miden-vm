@@ -1,6 +1,9 @@
-use alloc::sync::Arc;
+use alloc::{sync::Arc, vec::Vec};
+use core::future::Future;
 
-use miden_core::{DebugOptions, Felt, Word, mast::MastForest};
+use miden_core::{
+    AdviceMap, DebugOptions, Felt, Word, crypto::merkle::InnerNodeInfo, mast::MastForest,
+};
 
 use crate::{EventError, ExecutionError, ProcessState};
 
@@ -17,6 +20,17 @@ use handlers::DebugHandler;
 
 mod mast_forest_store;
 pub use mast_forest_store::{MastForestStore, MemMastForestStore};
+
+// ADVICE MAP MUTATIONS
+// ================================================================================================
+
+/// Any possible way an event can modify the advice map
+#[derive(Debug, PartialEq, Eq)]
+pub enum AdviceMutation {
+    ExtendStack { iter: Vec<Felt> },
+    ExtendMap { other: AdviceMap },
+    ExtendMerkleStore { iter: Vec<InnerNodeInfo> },
+}
 
 // HOST TRAIT
 // ================================================================================================
@@ -51,7 +65,7 @@ pub trait BaseHost {
     }
 
     /// Handles the failure of the assertion instruction.
-    fn on_assert_failed(&mut self, _process: &mut ProcessState, _err_code: Felt) {}
+    fn on_assert_failed(&mut self, _process: &ProcessState, _err_code: Felt) {}
 }
 
 /// Defines an interface by which the VM can interact with the host.
@@ -70,17 +84,11 @@ pub trait SyncHost: BaseHost {
     fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>>;
 
     /// Handles the event emitted from the VM.
-    fn on_event(&mut self, process: &mut ProcessState, event_id: u32) -> Result<(), EventError> {
-        let _ = (&process, event_id);
-        #[cfg(feature = "std")]
-        std::println!(
-            "Event with id {} emitted at step {} in context {}",
-            event_id,
-            process.clk(),
-            process.ctx()
-        );
-        Ok(())
-    }
+    fn on_event(
+        &mut self,
+        process: &ProcessState,
+        event_id: u32,
+    ) -> Result<Vec<AdviceMutation>, EventError>;
 }
 
 // ASYNC HOST trait
@@ -101,10 +109,11 @@ pub trait AsyncHost: BaseHost {
         node_digest: &Word,
     ) -> impl Future<Output = Option<Arc<MastForest>>> + Send;
 
-    /// Handles the event emitted from the VM.
+    /// Handles the event emitted from the VM and provides advice mutations to be applied to
+    /// the advice provider.
     fn on_event(
         &mut self,
-        process: &mut ProcessState<'_>,
+        process: &ProcessState<'_>,
         event_id: u32,
-    ) -> impl Future<Output = Result<(), EventError>> + Send;
+    ) -> impl Future<Output = Result<Vec<AdviceMutation>, EventError>> + Send;
 }

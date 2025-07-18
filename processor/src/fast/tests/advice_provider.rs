@@ -5,8 +5,8 @@ use pretty_assertions::assert_eq;
 
 use super::*;
 use crate::{
-    AsyncHost, BaseHost, EventError, MastForestStore, MemMastForestStore, MemoryAddress,
-    ProcessState, SyncHost,
+    AdviceMutation, AsyncHost, BaseHost, EventError, MastForestStore, MemMastForestStore,
+    MemoryAddress, ProcessState, SyncHost,
 };
 
 #[test]
@@ -204,8 +204,8 @@ struct ProcessStateSnapshot {
     mem_state: Vec<(MemoryAddress, Felt)>,
 }
 
-impl From<&mut ProcessState<'_>> for ProcessStateSnapshot {
-    fn from(state: &mut ProcessState) -> Self {
+impl From<&ProcessState<'_>> for ProcessStateSnapshot {
+    fn from(state: &ProcessState) -> Self {
         ProcessStateSnapshot {
             clk: state.clk(),
             ctx: state.ctx(),
@@ -245,7 +245,7 @@ impl BaseHost for ConsistencyHost {
         process: &mut ProcessState,
         trace_id: u32,
     ) -> Result<(), ExecutionError> {
-        let snapshot = ProcessStateSnapshot::from(process);
+        let snapshot = ProcessStateSnapshot::from(&*process);
         self.snapshots.entry(trace_id).or_default().push(snapshot);
 
         Ok(())
@@ -259,10 +259,10 @@ impl SyncHost for ConsistencyHost {
 
     fn on_event(
         &mut self,
-        _process: &mut ProcessState<'_>,
+        _process: &ProcessState<'_>,
         _event_id: u32,
-    ) -> Result<(), EventError> {
-        Ok(())
+    ) -> Result<Vec<AdviceMutation>, EventError> {
+        Ok(Vec::new())
     }
 }
 
@@ -276,10 +276,10 @@ impl AsyncHost for ConsistencyHost {
     #[allow(clippy::manual_async_fn)]
     fn on_event(
         &mut self,
-        _process: &mut ProcessState<'_>,
+        _process: &ProcessState<'_>,
         _event_id: u32,
-    ) -> impl Future<Output = Result<(), EventError>> + Send {
+    ) -> impl Future<Output = Result<Vec<AdviceMutation>, EventError>> + Send {
         let _ = (_process, _event_id);
-        async move { Ok(()) }
+        async move { Ok(Vec::new()) }
     }
 }

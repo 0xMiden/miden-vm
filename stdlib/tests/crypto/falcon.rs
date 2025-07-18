@@ -4,8 +4,8 @@ use miden_air::{Felt, ProvingOptions, RowIndex};
 use miden_assembly::{Assembler, DefaultSourceManager, utils::Serializable};
 use miden_core::{StarkField, ZERO};
 use miden_processor::{
-    AdviceInputs, EventError, ExecutionError, ProcessState, Program, ProgramInfo, StackInputs,
-    crypto::RpoRandomCoin,
+    AdviceInputs, AdviceMutation, EventError, ExecutionError, ProcessState, Program, ProgramInfo,
+    StackInputs, crypto::RpoRandomCoin,
 };
 use miden_stdlib::{StdLibrary, falcon_sign};
 use miden_utils_testing::{
@@ -60,7 +60,7 @@ const EVENT_FALCON_SIG_TO_STACK: u32 = 3419226139;
 /// - SIGNATURE is the signature being verified.
 ///
 /// The advice provider is expected to contain the private key associated to the public key PK.
-pub fn push_falcon_signature(process: &mut ProcessState) -> Result<(), EventError> {
+pub fn push_falcon_signature(process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
     let pub_key = process.get_stack_word(0);
     let msg = process.get_stack_word(1);
 
@@ -69,13 +69,10 @@ pub fn push_falcon_signature(process: &mut ProcessState) -> Result<(), EventErro
         .get_mapped_values(&pub_key)
         .ok_or(FalconError::NoSecretKey { key: pub_key })?;
 
-    let result = falcon_sign(pk_sk, msg)
+    let signature_result = falcon_sign(pk_sk, msg)
         .ok_or(FalconError::MalformedSignatureKey { key_type: "RPO Falcon512" })?;
 
-    for r in result {
-        process.advice_provider_mut().push_stack(r);
-    }
-    Ok(())
+    Ok(vec![AdviceMutation::ExtendStack { iter: signature_result }])
 }
 
 // EVENT ERROR
