@@ -51,9 +51,9 @@ fn stark_verifier_e2f4(#[case] kernel: Option<&str>) {
 
     // Verify inside Miden VM
     let source = "
-        use.std::crypto::stark::verifier
+        use.std::crypto::miden_vm_verifier
         begin
-            exec.verifier::verify
+            exec.miden_vm_verifier::verify
         end
         ";
 
@@ -88,7 +88,7 @@ pub fn generate_recursive_verifier_data(
     let mut host = DefaultHost::default();
 
     let options =
-        ProvingOptions::new(27, 8, 16, FieldExtension::Quadratic, 4, 127, HashFunction::Rpo256);
+        ProvingOptions::new(27, 8, 0, FieldExtension::Quadratic, 4, 127, HashFunction::Rpo256);
 
     let (stack_outputs, proof) = prove(
         &program,
