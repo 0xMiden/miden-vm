@@ -1,7 +1,4 @@
-use alloc::{
-    collections::{BTreeMap, btree_map::Entry},
-    vec::Vec,
-};
+use alloc::{collections::BTreeMap, vec::Vec};
 
 use miden_core::{
     AdviceMap, Felt, Word,
@@ -153,43 +150,16 @@ impl AdviceProvider {
     // --------------------------------------------------------------------------------------------
 
     /// Returns a reference to the inner [`AdviceMap`].
-    pub fn advice_map(&self) -> &AdviceMap {
+    pub fn map(&self) -> &AdviceMap {
         &self.map
     }
 
-    /// Returns true if the key has a corresponding value in the map.
-    pub fn contains_map_key(&self, key: &Word) -> bool {
-        self.map.contains_key(key)
-    }
-
-    /// Returns a reference to the value(s) associated with the specified key in the advice map.
-    pub fn get_mapped_values(&self, key: &Word) -> Option<&[Felt]> {
-        self.map.get(key).map(|value| value.as_ref())
-    }
-
-    /// Inserts the provided value into the advice map under the specified key.
+    /// Returns a mutable reference to the inner [`AdviceMap`].
     ///
     /// The values in the advice map can be moved onto the advice stack by invoking
-    /// the [AdviceProvider::push_from_map()] method.
-    ///
-    /// Returns an error if the specified key is already present in the advice map.
-    pub fn insert_into_map(&mut self, key: Word, values: Vec<Felt>) -> Result<(), AdviceError> {
-        match self.map.entry(key) {
-            Entry::Vacant(entry) => {
-                entry.insert(values.into());
-            },
-            Entry::Occupied(entry) => {
-                let existing_values = entry.get().as_ref();
-                if existing_values != values {
-                    return Err(AdviceError::MapKeyAlreadyPresent {
-                        key,
-                        prev_values: existing_values.to_vec(),
-                        new_values: values,
-                    });
-                }
-            },
-        }
-        Ok(())
+    /// the [`AdviceProvider::push_from_map()`] method.
+    pub fn map_mut(&mut self) -> &mut AdviceMap {
+        &mut self.map
     }
 
     /// Merges all entries from the given [`AdviceMap`] into the current advice map.

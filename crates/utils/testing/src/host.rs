@@ -84,7 +84,7 @@ pub fn push_falcon_signature(
     let msg = process.get_stack_word(1);
 
     let clk = process.clk();
-    let pk_sk = process.advice_provider().get_mapped_values(&pub_key).ok_or_else(|| {
+    let pk_sk = process.advice_provider().map().get(&pub_key).ok_or_else(|| {
         ExecutionError::advice_error(AdviceError::MapKeyNotFound { key: pub_key }, clk, err_ctx)
     })?;
 

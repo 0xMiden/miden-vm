@@ -38,8 +38,23 @@ impl AdviceMap {
     }
 
     /// Inserts a value, returning the previous value if the key was already set.
+    ///
+    /// # Detail
+    /// If the existing value is equal to the one provided as input, the entry is left unchanged
+    /// and the input is dropped.
     pub fn insert(&mut self, key: Word, value: impl Into<Arc<[Felt]>>) -> Option<Arc<[Felt]>> {
-        self.0.insert(key, value.into())
+        let value = value.into();
+        match self.0.entry(key) {
+            Entry::Vacant(entry) => {
+                entry.insert(value);
+            },
+            Entry::Occupied(mut entry) => {
+                if entry.get() != &value {
+                    return Some(entry.insert(value));
+                }
+            },
+        }
+        None
     }
 
     /// Removes the value associated with the key and returns the removed element.
@@ -74,18 +89,13 @@ impl AdviceMap {
     /// it. The current map remains unchanged.
     pub fn merge(&mut self, other: &Self) -> Result<(), (MapEntry, Arc<[Felt]>)> {
         if let Some(conflict) = self.find_conflicting_entry(other) {
-            Err(conflict)
-        } else {
-            self.merge_new(other);
-            Ok(())
+            return Err(conflict);
         }
-    }
 
-    /// Merges entries from `other`, but only for keys not already present in `self`.
-    fn merge_new(&mut self, other: &Self) {
         for (key, value) in other.iter() {
             self.0.entry(*key).or_insert_with(|| value.clone());
         }
+        Ok(())
     }
 
     /// Finds the first key that exists in both `self` and `other` with different values.
