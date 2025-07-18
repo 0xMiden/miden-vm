@@ -1,5 +1,4 @@
 use.std::crypto::stark::constants
-use.std::crypto::stark::helpers::deep_queries
 
 #! Takes a query index and computes x := offset * domain_gen^index. It also computes the denominators
 #! (x - z) and (x - gz).
@@ -138,7 +137,7 @@ export.compute_deep_composition_polynomial_queries
         # the index of the query.
         #
         # Cycles: 280
-        exec.deep_queries::load_query_row
+        exec.load_query_row
         #=>[Y, X, index, query_ptr, query_end_ptr, W, query_ptr, ...]
 
         # II)
@@ -183,4 +182,8 @@ export.compute_deep_composition_polynomial_queries
         #=> [?, Y, query_ptr+1, query_end_ptr, ...]
     end
     dropw dropw drop drop drop
+end
+
+proc.load_query_row
+    exec.constants::get_dynamic_procedure_0_ptr dynexec
 end

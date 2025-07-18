@@ -51,18 +51,22 @@ export.verify
     #
     # Cycles: 45
     exec.utils::validate_inputs
-    # => [log(trace_length), num_queries, grinding, ...]
+    # => [log(trace_length), num_queries, grinding, num_constraints, trace_info, num_fixed_len_pi, num_ace_inputs, num_ace_gates, max_cycle_len_log, ROOT, ...]
 
     # Initialize the seed using proof context
     #
     # Cycles: 210
     exec.random_coin::init_seed
-    # => [C, ...]
+    # => [C, num_ace_inputs, num_ace_gates, max_cycle_len_log, ROOT, ...]
+
+    # Process dynamically executed procedures 
+    exec.utils::process_dynamic_portion
 
     # Load public inputs
     #
     # Cycles: ~ 500 + 70 * number_kernel_procedures
     exec.public_inputs::process_public_inputs
+    # => [num_ace_inputs, num_ace_gates, max_cycle_len_log, ROOT, ...]
 
     #==============================================================================================
     #       II) Generate the auxiliary trace random elements
