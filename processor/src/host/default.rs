@@ -86,13 +86,17 @@ impl<D: DebugHandler> DefaultHost<D> {
 impl BaseHost for DefaultHost {
     fn on_debug(
         &mut self,
-        process: &ProcessState,
+        process: &mut ProcessState,
         options: &DebugOptions,
     ) -> Result<(), ExecutionError> {
         self.debug_handler.on_debug(process, options)
     }
 
-    fn on_trace(&mut self, process: &ProcessState, trace_id: u32) -> Result<(), ExecutionError> {
+    fn on_trace(
+        &mut self,
+        process: &mut ProcessState,
+        trace_id: u32,
+    ) -> Result<(), ExecutionError> {
         self.debug_handler.on_trace(process, trace_id)
     }
 

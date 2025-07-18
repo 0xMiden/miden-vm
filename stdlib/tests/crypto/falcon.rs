@@ -69,12 +69,10 @@ pub fn push_falcon_signature(process: &ProcessState) -> Result<Vec<AdviceMutatio
         .get_mapped_values(&pub_key)
         .ok_or(FalconError::NoSecretKey { key: pub_key })?;
 
-    let result = falcon_sign(pk_sk, msg)
+    let signature_result = falcon_sign(pk_sk, msg)
         .ok_or(FalconError::MalformedSignatureKey { key_type: "RPO Falcon512" })?;
 
-    Ok(Vec::from_iter(
-        result.into_iter().map(|value| AdviceMutation::PushStack { value }),
-    ))
+    Ok(vec![AdviceMutation::ExtendStack { iter: signature_result }])
 }
 
 // EVENT ERROR

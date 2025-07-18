@@ -100,11 +100,9 @@ impl FastProcessor {
                 .on_event(&process, event_id)
                 .await
                 .map_err(|err| ExecutionError::event_error(err, event_id, err_ctx))?;
-            for mutation in mutations {
-                self.advice
-                    .apply_mutation(mutation)
-                    .map_err(|err| ExecutionError::advice_error(err, clk, err_ctx))?;
-            }
+            self.advice
+                .apply_mutations(mutations)
+                .map_err(|err| ExecutionError::advice_error(err, clk, err_ctx))?;
             Ok(())
         }
     }

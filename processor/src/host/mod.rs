@@ -5,7 +5,7 @@ use miden_core::{
     AdviceMap, DebugOptions, Felt, Word, crypto::merkle::InnerNodeInfo, mast::MastForest,
 };
 
-use crate::{AdviceInputs, EventError, ExecutionError, ProcessState};
+use crate::{EventError, ExecutionError, ProcessState};
 
 pub(super) mod advice;
 
@@ -27,45 +27,9 @@ pub use mast_forest_store::{MastForestStore, MemMastForestStore};
 /// Any possible way an event can modify the advice map
 #[derive(Debug, PartialEq, Eq)]
 pub enum AdviceMutation {
-    PopStack,
-    PopStackWord,
-    PopStackDword,
-    PushStack {
-        value: Felt,
-    },
-    PushStackWord {
-        word: Word,
-    },
-    PushFromMap {
-        key: Word,
-        include_len: bool,
-    },
-    ExtendStack {
-        iter: Vec<Felt>,
-    },
-    InsertIntoMap {
-        key: Word,
-        values: Vec<Felt>,
-    },
-    ExtendMap {
-        other: AdviceMap,
-    },
-    UpdateMerkleNode {
-        root: Word,
-        depth: Felt,
-        index: Felt,
-        value: Word,
-    },
-    MergeRoots {
-        lhs: Word,
-        rhs: Word,
-    },
-    ExtendMerkleStore {
-        iter: Vec<InnerNodeInfo>,
-    },
-    ExtendFromInputs {
-        inputs: AdviceInputs,
-    },
+    ExtendStack { iter: Vec<Felt> },
+    ExtendMap { other: AdviceMap },
+    ExtendMerkleStore { iter: Vec<InnerNodeInfo> },
 }
 
 // HOST TRAIT
@@ -85,14 +49,18 @@ pub trait BaseHost {
     /// Handles the debug request from the VM.
     fn on_debug(
         &mut self,
-        process: &ProcessState,
+        process: &mut ProcessState,
         options: &DebugOptions,
     ) -> Result<(), ExecutionError> {
         DefaultDebugHandler.on_debug(process, options)
     }
 
     /// Handles the trace emitted from the VM.
-    fn on_trace(&mut self, process: &ProcessState, trace_id: u32) -> Result<(), ExecutionError> {
+    fn on_trace(
+        &mut self,
+        process: &mut ProcessState,
+        trace_id: u32,
+    ) -> Result<(), ExecutionError> {
         DefaultDebugHandler.on_trace(process, trace_id)
     }
 

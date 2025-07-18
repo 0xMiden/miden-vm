@@ -240,8 +240,12 @@ impl ConsistencyHost {
 }
 
 impl BaseHost for ConsistencyHost {
-    fn on_trace(&mut self, process: &ProcessState, trace_id: u32) -> Result<(), ExecutionError> {
-        let snapshot = ProcessStateSnapshot::from(process);
+    fn on_trace(
+        &mut self,
+        process: &mut ProcessState,
+        trace_id: u32,
+    ) -> Result<(), ExecutionError> {
+        let snapshot = ProcessStateSnapshot::from(&*process);
         self.snapshots.entry(trace_id).or_default().push(snapshot);
 
         Ok(())

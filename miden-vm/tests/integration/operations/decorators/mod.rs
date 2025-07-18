@@ -23,14 +23,18 @@ pub struct TestHost {
 impl BaseHost for TestHost {
     fn on_debug(
         &mut self,
-        _process: &ProcessState,
+        _process: &mut ProcessState,
         options: &DebugOptions,
     ) -> Result<(), ExecutionError> {
         self.debug_handler.push(options.to_string());
         Ok(())
     }
 
-    fn on_trace(&mut self, _process: &ProcessState, trace_id: u32) -> Result<(), ExecutionError> {
+    fn on_trace(
+        &mut self,
+        _process: &mut ProcessState,
+        trace_id: u32,
+    ) -> Result<(), ExecutionError> {
         self.trace_handler.push(trace_id);
         Ok(())
     }

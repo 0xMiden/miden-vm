@@ -120,8 +120,10 @@ impl EventHandlerRegistry {
 
     /// Handles the event if the registry contains a handler with the same identifier.
     ///
-    /// Returns a bool indicating whether the event was handled. If the event was handled but
-    /// returned an error, it is propagated to the caller.
+    /// Returns an `Option<_>` indicating whether the event was handled, wrapping resulting
+    /// mutations if any. Returns `None` if the event was not handled, if the event was handled
+    /// successfully `Some(mutations)` is returned, and if the handler returns an error, it is
+    /// propagated to the caller.
     pub fn handle_event(
         &self,
         id: u32,
