@@ -501,7 +501,7 @@ impl FastProcessor {
             continuation_stack.push_start_node(split_node.on_false());
         } else {
             let err_ctx = err_ctx!(current_forest, split_node, self.source_manager.clone());
-            return Err(ExecutionError::not_binary_value_if(condition, &err_ctx));
+            return Err(ExecutionError::not_binary_value_if(condition));
         };
         Ok(())
     }
@@ -555,7 +555,7 @@ impl FastProcessor {
             self.clk += 1_u32;
         } else {
             let err_ctx = err_ctx!(current_forest, loop_node, self.source_manager.clone());
-            return Err(ExecutionError::not_binary_value_loop(condition, &err_ctx));
+            return Err(ExecutionError::not_binary_value_loop(condition));
         }
         Ok(())
     }
@@ -587,7 +587,7 @@ impl FastProcessor {
             self.execute_after_exit_decorators(current_node_id, current_forest, host)?;
         } else {
             let err_ctx = err_ctx!(current_forest, loop_node, self.source_manager.clone());
-            return Err(ExecutionError::not_binary_value_loop(condition, &err_ctx));
+            return Err(ExecutionError::not_binary_value_loop(condition));
         }
         Ok(())
     }
@@ -628,7 +628,7 @@ impl FastProcessor {
         if call_node.is_syscall() {
             // check if the callee is in the kernel
             if !program.kernel().contains_proc(callee_hash) {
-                return Err(ExecutionError::syscall_target_not_in_kernel(callee_hash, &err_ctx));
+                return Err(ExecutionError::syscall_target_not_in_kernel(callee_hash));
             }
 
             // set the system registers to the syscall context
@@ -700,9 +700,7 @@ impl FastProcessor {
         // address.
         let callee_hash = {
             let mem_addr = self.stack_get(0);
-            self.memory
-                .read_word(self.ctx, mem_addr, self.clk, &err_ctx)
-                .map_err(ExecutionError::MemoryError)?
+            self.memory.read_word(self.ctx, mem_addr).map_err(ExecutionError::MemoryError)?
         };
 
         // Drop the memory address from the stack. This needs to be done before saving the context.
@@ -729,12 +727,7 @@ impl FastProcessor {
             },
             None => {
                 let (root_id, new_forest) = self
-                    .load_mast_forest(
-                        callee_hash,
-                        host,
-                        ExecutionError::dynamic_node_not_found,
-                        &err_ctx,
-                    )
+                    .load_mast_forest(callee_hash, host, ExecutionError::dynamic_node_not_found)
                     .await?;
 
                 // Push current forest to the continuation stack so that we can return to it
@@ -811,7 +804,7 @@ impl FastProcessor {
         node_id: MastNodeId,
         program: &MastForest,
         host: &mut impl AsyncHost,
-    ) -> Result<(), ExecutionError> {
+    ) -> Result<(), WrappedExecutionError> {
         // Execute decorators that should be executed before entering the node
         self.execute_before_enter_decorators(node_id, program, host)?;
 
@@ -864,9 +857,13 @@ impl FastProcessor {
         // executed after SPAN block is closed to make sure the VM clock cycle advances beyond the
         // last clock cycle of the SPAN block ops.
         for &decorator_id in decorator_ids {
-            let decorator = program
-                .get_decorator_by_id(decorator_id)
-                .ok_or(ExecutionError::DecoratorNotFoundInForest { decorator_id })?;
+            let err_ctx = err_ctx!(program, basic_block_node, self.source_manager.clone(), 0);
+            let decorator = program.get_decorator_by_id(decorator_id).ok_or_else(|| {
+                WrappedExecutionError::new(ExecutionError::DecoratorNotFoundInForest {
+                    decorator_id,
+                })
+                .with_context(&err_ctx)
+            })?;
             self.execute_decorator(decorator, 0, host)?;
         }
 
@@ -882,7 +879,7 @@ impl FastProcessor {
         batch_offset_in_block: usize,
         program: &MastForest,
         host: &mut impl AsyncHost,
-    ) -> Result<(), ExecutionError> {
+    ) -> Result<(), WrappedExecutionError> {
         let op_counts = batch.op_counts();
         let mut op_idx_in_group = 0;
         let mut group_idx = 0;
@@ -898,9 +895,14 @@ impl FastProcessor {
             while let Some(&decorator_id) =
                 decorators.next_filtered(batch_offset_in_block + op_idx_in_batch)
             {
-                let decorator = program
-                    .get_decorator_by_id(decorator_id)
-                    .ok_or(ExecutionError::DecoratorNotFoundInForest { decorator_id })?;
+                let err_ctx =
+                    err_ctx!(program, basic_block, self.source_manager.clone(), op_idx_in_batch);
+                let decorator = program.get_decorator_by_id(decorator_id).ok_or_else(|| {
+                    WrappedExecutionError::new(ExecutionError::DecoratorNotFoundInForest {
+                        decorator_id,
+                    })
+                    .with_context(&err_ctx)
+                })?;
                 self.execute_decorator(decorator, op_idx_in_batch, host)?;
             }
 
@@ -916,11 +918,19 @@ impl FastProcessor {
             // performance improvement).
             match op {
                 Operation::Emit(event_id) => {
-                    self.op_emit(*event_id, op_idx_in_block, host, &err_ctx).await?
+                    self.op_emit(*event_id, op_idx_in_block, host).await.map_err(|err| {
+                        WrappedExecutionError::new(err)
+                            .with_context(&err_ctx)
+                            .with_clk(self.clk + op_idx_in_block)
+                    })?
                 },
                 _ => {
                     // if the operation is not an Emit, we execute it normally
-                    self.execute_op(op, op_idx_in_block, program, host, &err_ctx)?;
+                    self.execute_op(op, op_idx_in_block, program, host).map_err(|err| {
+                        WrappedExecutionError::new(err)
+                            .with_context(&err_ctx)
+                            .with_clk(self.clk + op_idx_in_block)
+                    })?;
                 },
             }
 
@@ -968,7 +978,7 @@ impl FastProcessor {
         node_id: MastNodeId,
         current_forest: &MastForest,
         host: &mut impl AsyncHost,
-    ) -> Result<(), ExecutionError> {
+    ) -> Result<(), WrappedExecutionError> {
         let node = current_forest
             .get_node_by_id(node_id)
             .expect("internal error: node id {node_id} not found in current forest");
@@ -986,7 +996,7 @@ impl FastProcessor {
         node_id: MastNodeId,
         current_forest: &MastForest,
         host: &mut impl AsyncHost,
-    ) -> Result<(), ExecutionError> {
+    ) -> Result<(), WrappedExecutionError> {
         let node = current_forest
             .get_node_by_id(node_id)
             .expect("internal error: node id {node_id} not found in current forest");
@@ -1004,12 +1014,13 @@ impl FastProcessor {
         decorator: &Decorator,
         op_idx_in_batch: usize,
         host: &mut impl AsyncHost,
-    ) -> Result<(), ExecutionError> {
+    ) -> Result<(), WrappedExecutionError> {
         match decorator {
             Decorator::Debug(options) => {
                 if self.in_debug_mode {
                     let process = &mut self.state(op_idx_in_batch);
-                    host.on_debug(process, options)?;
+                    host.on_debug(process, options)
+                        .map_err(|err| WrappedExecutionError::new(err))?;
                 }
             },
             Decorator::AsmOp(_assembly_op) => {
@@ -1017,7 +1028,7 @@ impl FastProcessor {
             },
             Decorator::Trace(id) => {
                 let process = &mut self.state(op_idx_in_batch);
-                host.on_trace(process, *id)?;
+                host.on_trace(process, *id).map_err(|err| WrappedExecutionError::new(err))?;
             },
         };
         Ok(())
@@ -1035,7 +1046,6 @@ impl FastProcessor {
         op_idx: usize,
         program: &MastForest,
         host: &mut impl AsyncHost,
-        err_ctx: &impl ErrorContext,
     ) -> Result<(), ExecutionError> {
         if self.bounds_check_counter == 0 {
             let err_str = if self.stack_top_idx - MIN_STACK_DEPTH == 0 {
@@ -1051,9 +1061,7 @@ impl FastProcessor {
             Operation::Noop => {
                 // do nothing
             },
-            Operation::Assert(err_code) => {
-                self.op_assert(*err_code, op_idx, host, program, err_ctx)?
-            },
+            Operation::Assert(err_code) => self.op_assert(*err_code, op_idx, host, program)?,
             Operation::FmpAdd => self.op_fmpadd(),
             Operation::FmpUpdate => self.op_fmpupdate()?,
             Operation::SDepth => self.op_sdepth(),
@@ -1082,11 +1090,11 @@ impl FastProcessor {
             Operation::Add => self.op_add()?,
             Operation::Neg => self.op_neg()?,
             Operation::Mul => self.op_mul()?,
-            Operation::Inv => self.op_inv(op_idx, err_ctx)?,
+            Operation::Inv => self.op_inv()?,
             Operation::Incr => self.op_incr()?,
-            Operation::And => self.op_and(err_ctx)?,
-            Operation::Or => self.op_or(err_ctx)?,
-            Operation::Not => self.op_not(err_ctx)?,
+            Operation::And => self.op_and()?,
+            Operation::Or => self.op_or()?,
+            Operation::Not => self.op_not()?,
             Operation::Eq => self.op_eq()?,
             Operation::Eqz => self.op_eqz()?,
             Operation::Expacc => self.op_expacc(),
@@ -1094,15 +1102,15 @@ impl FastProcessor {
 
             // ----- u32 operations ---------------------------------------------------------------
             Operation::U32split => self.op_u32split(),
-            Operation::U32add => self.op_u32add(err_ctx)?,
-            Operation::U32add3 => self.op_u32add3(err_ctx)?,
-            Operation::U32sub => self.op_u32sub(op_idx, err_ctx)?,
-            Operation::U32mul => self.op_u32mul(err_ctx)?,
-            Operation::U32madd => self.op_u32madd(err_ctx)?,
-            Operation::U32div => self.op_u32div(op_idx, err_ctx)?,
-            Operation::U32and => self.op_u32and(err_ctx)?,
-            Operation::U32xor => self.op_u32xor(err_ctx)?,
-            Operation::U32assert2(err_code) => self.op_u32assert2(*err_code, err_ctx)?,
+            Operation::U32add => self.op_u32add()?,
+            Operation::U32add3 => self.op_u32add3()?,
+            Operation::U32sub => self.op_u32sub(op_idx)?,
+            Operation::U32mul => self.op_u32mul()?,
+            Operation::U32madd => self.op_u32madd()?,
+            Operation::U32div => self.op_u32div()?,
+            Operation::U32and => self.op_u32and()?,
+            Operation::U32xor => self.op_u32xor()?,
+            Operation::U32assert2(err_code) => self.op_u32assert2(*err_code)?,
 
             // ----- stack manipulation -----------------------------------------------------------
             Operation::Pad => self.op_pad(),
@@ -1138,28 +1146,28 @@ impl FastProcessor {
             Operation::MovDn6 => self.rotate_right(7),
             Operation::MovDn7 => self.rotate_right(8),
             Operation::MovDn8 => self.rotate_right(9),
-            Operation::CSwap => self.op_cswap(err_ctx)?,
-            Operation::CSwapW => self.op_cswapw(err_ctx)?,
+            Operation::CSwap => self.op_cswap()?,
+            Operation::CSwapW => self.op_cswapw()?,
 
             // ----- input / output ---------------------------------------------------------------
             Operation::Push(element) => self.op_push(*element),
-            Operation::AdvPop => self.op_advpop(op_idx, err_ctx)?,
-            Operation::AdvPopW => self.op_advpopw(op_idx, err_ctx)?,
-            Operation::MLoadW => self.op_mloadw(op_idx, err_ctx)?,
-            Operation::MStoreW => self.op_mstorew(op_idx, err_ctx)?,
-            Operation::MLoad => self.op_mload(err_ctx)?,
-            Operation::MStore => self.op_mstore(err_ctx)?,
-            Operation::MStream => self.op_mstream(op_idx, err_ctx)?,
-            Operation::Pipe => self.op_pipe(op_idx, err_ctx)?,
+            Operation::AdvPop => self.op_advpop()?,
+            Operation::AdvPopW => self.op_advpopw()?,
+            Operation::MLoadW => self.op_mloadw()?,
+            Operation::MStoreW => self.op_mstorew()?,
+            Operation::MLoad => self.op_mload()?,
+            Operation::MStore => self.op_mstore()?,
+            Operation::MStream => self.op_mstream()?,
+            Operation::Pipe => self.op_pipe()?,
 
             // ----- cryptographic operations -----------------------------------------------------
             Operation::HPerm => self.op_hperm(),
-            Operation::MpVerify(err_code) => self.op_mpverify(*err_code, program, err_ctx)?,
-            Operation::MrUpdate => self.op_mrupdate(err_ctx)?,
+            Operation::MpVerify(err_code) => self.op_mpverify(*err_code, program)?,
+            Operation::MrUpdate => self.op_mrupdate()?,
             Operation::FriE2F4 => self.op_fri_ext2fold4()?,
-            Operation::HornerBase => self.op_horner_eval_base(op_idx, err_ctx)?,
-            Operation::HornerExt => self.op_horner_eval_ext(op_idx, err_ctx)?,
-            Operation::ArithmeticCircuitEval => self.arithmetic_circuit_eval(op_idx, err_ctx)?,
+            Operation::HornerBase => self.op_horner_eval_base()?,
+            Operation::HornerExt => self.op_horner_eval_ext()?,
+            Operation::ArithmeticCircuitEval => self.arithmetic_circuit_eval(op_idx)?,
         }
 
         Ok(())
@@ -1168,26 +1176,22 @@ impl FastProcessor {
     // HELPERS
     // ----------------------------------------------------------------------------------------------
 
-    async fn load_mast_forest<E>(
+    async fn load_mast_forest(
         &mut self,
         node_digest: Word,
         host: &mut impl AsyncHost,
-        get_mast_forest_failed: impl Fn(Word, &E) -> ExecutionError,
-        err_ctx: &E,
-    ) -> Result<(MastNodeId, Arc<MastForest>), ExecutionError>
-    where
-        E: ErrorContext,
-    {
+        get_mast_forest_failed: impl Fn(Word) -> ExecutionError,
+    ) -> Result<(MastNodeId, Arc<MastForest>), ExecutionError> {
         let mast_forest = host
             .get_mast_forest(&node_digest)
             .await
-            .ok_or_else(|| get_mast_forest_failed(node_digest, err_ctx))?;
+            .ok_or_else(|| get_mast_forest_failed(node_digest))?;
 
         // We limit the parts of the program that can be called externally to procedure
         // roots, even though MAST doesn't have that restriction.
         let root_id = mast_forest
             .find_procedure_root(node_digest)
-            .ok_or(ExecutionError::malfored_mast_forest_in_host(node_digest, err_ctx))?;
+            .ok_or(ExecutionError::malfored_mast_forest_in_host(node_digest))?;
 
         // Merge the advice map of this forest into the advice provider.
         // Note that the map may be merged multiple times if a different procedure from the same
@@ -1196,7 +1200,7 @@ impl FastProcessor {
         // this call will be cheap.
         self.advice
             .extend_map(mast_forest.advice_map())
-            .map_err(|err| ExecutionError::advice_error(err, self.clk, err_ctx))?;
+            .map_err(|err| ExecutionError::advice_error(err))?;
 
         Ok((root_id, mast_forest))
     }
@@ -1313,10 +1317,10 @@ impl FastProcessor {
     /// # Errors
     /// - Returns an error if the overflow stack is larger than the space available in the stack
     ///   buffer.
-    fn restore_context(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
+    fn restore_context(&mut self) -> Result<(), ExecutionError> {
         // when a call/dyncall/syscall node ends, stack depth must be exactly 16.
         if self.stack_size() > MIN_STACK_DEPTH {
-            return Err(ExecutionError::invalid_stack_depth_on_return(self.stack_size(), err_ctx));
+            return Err(ExecutionError::invalid_stack_depth_on_return(self.stack_size()));
         }
 
         let ctx_info = self

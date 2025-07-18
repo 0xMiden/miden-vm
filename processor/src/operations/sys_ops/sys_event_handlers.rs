@@ -9,7 +9,7 @@ use miden_core::{
     sys_events::SystemEvent,
 };
 
-use crate::{ExecutionError, MemoryError, ProcessState, errors::ErrorContext};
+use crate::{ExecutionError, MemoryError, ProcessState};
 
 /// The offset of the domain value on the stack in the `hdword_to_map_with_domain` system event.
 pub const HDWORD_TO_MAP_WITH_DOMAIN_DOMAIN_OFFSET: usize = 8;
@@ -20,30 +20,29 @@ const M: u64 = 12289;
 pub fn handle_system_event(
     process: &mut ProcessState,
     system_event: SystemEvent,
-    err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
     match system_event {
-        SystemEvent::MerkleNodeMerge => merge_merkle_nodes(process, err_ctx),
-        SystemEvent::MerkleNodeToStack => copy_merkle_node_to_adv_stack(process, err_ctx),
-        SystemEvent::MapValueToStack => copy_map_value_to_adv_stack(process, false, err_ctx),
-        SystemEvent::MapValueToStackN => copy_map_value_to_adv_stack(process, true, err_ctx),
+        SystemEvent::MerkleNodeMerge => merge_merkle_nodes(process),
+        SystemEvent::MerkleNodeToStack => copy_merkle_node_to_adv_stack(process),
+        SystemEvent::MapValueToStack => copy_map_value_to_adv_stack(process, false),
+        SystemEvent::MapValueToStackN => copy_map_value_to_adv_stack(process, true),
         SystemEvent::HasMapKey => push_key_presence_flag(process),
-        SystemEvent::U64Div => push_u64_div_result(process, err_ctx),
-        SystemEvent::FalconDiv => push_falcon_mod_result(process, err_ctx),
-        SystemEvent::Ext2Inv => push_ext2_inv_result(process, err_ctx),
-        SystemEvent::SmtPeek => push_smtpeek_result(process, err_ctx),
-        SystemEvent::U32Clz => push_leading_zeros(process, err_ctx),
-        SystemEvent::U32Ctz => push_trailing_zeros(process, err_ctx),
-        SystemEvent::U32Clo => push_leading_ones(process, err_ctx),
-        SystemEvent::U32Cto => push_trailing_ones(process, err_ctx),
-        SystemEvent::ILog2 => push_ilog2(process, err_ctx),
-        SystemEvent::MemToMap => insert_mem_values_into_adv_map(process, err_ctx),
-        SystemEvent::HdwordToMap => insert_hdword_into_adv_map(process, ZERO, err_ctx),
+        SystemEvent::U64Div => push_u64_div_result(process),
+        SystemEvent::FalconDiv => push_falcon_mod_result(process),
+        SystemEvent::Ext2Inv => push_ext2_inv_result(process),
+        SystemEvent::SmtPeek => push_smtpeek_result(process),
+        SystemEvent::U32Clz => push_leading_zeros(process),
+        SystemEvent::U32Ctz => push_trailing_zeros(process),
+        SystemEvent::U32Clo => push_leading_ones(process),
+        SystemEvent::U32Cto => push_trailing_ones(process),
+        SystemEvent::ILog2 => push_ilog2(process),
+        SystemEvent::MemToMap => insert_mem_values_into_adv_map(process),
+        SystemEvent::HdwordToMap => insert_hdword_into_adv_map(process, ZERO),
         SystemEvent::HdwordToMapWithDomain => {
             let domain = process.get_stack_item(HDWORD_TO_MAP_WITH_DOMAIN_DOMAIN_OFFSET);
-            insert_hdword_into_adv_map(process, domain, err_ctx)
+            insert_hdword_into_adv_map(process, domain)
         },
-        SystemEvent::HpermToMap => insert_hperm_into_adv_map(process, err_ctx),
+        SystemEvent::HpermToMap => insert_hperm_into_adv_map(process),
     }
 }
 
@@ -65,10 +64,7 @@ pub fn handle_system_event(
 /// - `start_addr` is greater than or equal to 2^32.
 /// - `end_addr` is greater than or equal to 2^32.
 /// - `start_addr` > `end_addr`.
-fn insert_mem_values_into_adv_map(
-    process: &mut ProcessState,
-    err_ctx: &impl ErrorContext,
-) -> Result<(), ExecutionError> {
+fn insert_mem_values_into_adv_map(process: &mut ProcessState) -> Result<(), ExecutionError> {
     let (start_addr, end_addr) =
         get_mem_addr_range(process, 4, 5).map_err(ExecutionError::MemoryError)?;
     let ctx = process.ctx();
@@ -83,7 +79,7 @@ fn insert_mem_values_into_adv_map(
     process
         .advice_provider_mut()
         .insert_into_map(key, values)
-        .map_err(|err| ExecutionError::advice_error(err, process.clk(), err_ctx))
+        .map_err(|err| ExecutionError::advice_error(err))
 }
 
 /// Reads two word from the operand stack and inserts them into the advice map under the key
@@ -102,7 +98,6 @@ fn insert_mem_values_into_adv_map(
 fn insert_hdword_into_adv_map(
     process: &mut ProcessState,
     domain: Felt,
-    err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
     // get the top two words from the stack and hash them to compute the key value
     let word0 = process.get_stack_word(0);
@@ -118,7 +113,7 @@ fn insert_hdword_into_adv_map(
     process
         .advice_provider_mut()
         .insert_into_map(key, values)
-        .map_err(|err| ExecutionError::advice_error(err, process.clk(), err_ctx))
+        .map_err(|err| ExecutionError::advice_error(err))
 }
 
 /// Reads three words from the operand stack and inserts the top two words into the advice map
@@ -134,10 +129,7 @@ fn insert_hdword_into_adv_map(
 ///
 /// Where KEY is computed by extracting the digest elements from hperm([C, A, B]). For example,
 /// if C is [0, d, 0, 0], KEY will be set as hash(A || B, d).
-fn insert_hperm_into_adv_map(
-    process: &mut ProcessState,
-    err_ctx: &impl ErrorContext,
-) -> Result<(), ExecutionError> {
+fn insert_hperm_into_adv_map(process: &mut ProcessState) -> Result<(), ExecutionError> {
     // read the state from the stack
     let mut state = [
         process.get_stack_item(11),
@@ -168,7 +160,7 @@ fn insert_hperm_into_adv_map(
     process
         .advice_provider_mut()
         .insert_into_map(key, values)
-        .map_err(|err| ExecutionError::advice_error(err, process.clk(), err_ctx))
+        .map_err(|err| ExecutionError::advice_error(err))
 }
 
 /// Creates a new Merkle tree in the advice provider by combining Merkle trees with the
@@ -186,10 +178,7 @@ fn insert_hperm_into_adv_map(
 /// provider (i.e., the input trees are not removed).
 ///
 /// It is not checked whether the provided roots exist as Merkle trees in the advide providers.
-fn merge_merkle_nodes(
-    process: &mut ProcessState,
-    err_ctx: &impl ErrorContext,
-) -> Result<(), ExecutionError> {
+fn merge_merkle_nodes(process: &mut ProcessState) -> Result<(), ExecutionError> {
     // fetch the arguments from the stack
     let lhs = process.get_stack_word(1);
     let rhs = process.get_stack_word(0);
@@ -198,7 +187,7 @@ fn merge_merkle_nodes(
     process
         .advice_provider_mut()
         .merge_roots(lhs, rhs)
-        .map_err(|err| ExecutionError::advice_error(err, process.clk(), err_ctx))?;
+        .map_err(|err| ExecutionError::advice_error(err))?;
 
     Ok(())
 }
@@ -222,10 +211,7 @@ fn merge_merkle_nodes(
 /// - The specified depth is either zero or greater than the depth of the Merkle tree identified by
 ///   the specified root.
 /// - Value of the node at the specified depth and index is not known to the advice provider.
-fn copy_merkle_node_to_adv_stack(
-    process: &mut ProcessState,
-    err_ctx: &impl ErrorContext,
-) -> Result<(), ExecutionError> {
+fn copy_merkle_node_to_adv_stack(process: &mut ProcessState) -> Result<(), ExecutionError> {
     let depth = process.get_stack_item(0);
     let index = process.get_stack_item(1);
     let root = [
@@ -238,7 +224,7 @@ fn copy_merkle_node_to_adv_stack(
     let node = process
         .advice_provider()
         .get_tree_node(root.into(), &depth, &index)
-        .map_err(|err| ExecutionError::advice_error(err, process.clk(), err_ctx))?;
+        .map_err(|err| ExecutionError::advice_error(err))?;
 
     process.advice_provider_mut().push_stack_word(&node);
 
@@ -272,7 +258,6 @@ fn copy_merkle_node_to_adv_stack(
 fn copy_map_value_to_adv_stack(
     process: &mut ProcessState,
     include_len: bool,
-    err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
     let key = [
         process.get_stack_item(3),
@@ -283,7 +268,7 @@ fn copy_map_value_to_adv_stack(
     process
         .advice_provider_mut()
         .push_from_map(key.into(), include_len)
-        .map_err(|err| ExecutionError::advice_error(err, process.clk(), err_ctx))?;
+        .map_err(|err| ExecutionError::advice_error(err))?;
 
     Ok(())
 }
@@ -326,26 +311,23 @@ pub fn push_key_presence_flag(process: &mut ProcessState) -> Result<(), Executio
 ///
 /// # Errors
 /// Returns an error if the divisor is ZERO.
-fn push_u64_div_result(
-    process: &mut ProcessState,
-    err_ctx: &impl ErrorContext,
-) -> Result<(), ExecutionError> {
+fn push_u64_div_result(process: &mut ProcessState) -> Result<(), ExecutionError> {
     let divisor = {
         let divisor_hi = process.get_stack_item(0).as_int();
         let divisor_lo = process.get_stack_item(1).as_int();
 
         // Ensure the divisor is a pair of u32 values
         if divisor_hi > u32::MAX.into() {
-            return Err(ExecutionError::not_u32_value(Felt::new(divisor_hi), ZERO, err_ctx));
+            return Err(ExecutionError::not_u32_value(Felt::new(divisor_hi), ZERO));
         }
         if divisor_lo > u32::MAX.into() {
-            return Err(ExecutionError::not_u32_value(Felt::new(divisor_lo), ZERO, err_ctx));
+            return Err(ExecutionError::not_u32_value(Felt::new(divisor_lo), ZERO));
         }
 
         let divisor = (divisor_hi << 32) + divisor_lo;
 
         if divisor == 0 {
-            return Err(ExecutionError::divide_by_zero(process.clk(), err_ctx));
+            return Err(ExecutionError::divide_by_zero());
         }
 
         divisor
@@ -357,10 +339,10 @@ fn push_u64_div_result(
 
         // Ensure the dividend is a pair of u32 values
         if dividend_hi > u32::MAX.into() {
-            return Err(ExecutionError::not_u32_value(Felt::new(dividend_hi), ZERO, err_ctx));
+            return Err(ExecutionError::not_u32_value(Felt::new(dividend_hi), ZERO));
         }
         if dividend_lo > u32::MAX.into() {
-            return Err(ExecutionError::not_u32_value(Felt::new(dividend_lo), ZERO, err_ctx));
+            return Err(ExecutionError::not_u32_value(Felt::new(dividend_lo), ZERO));
         }
 
         (dividend_hi << 32) + dividend_lo
@@ -397,17 +379,14 @@ fn push_u64_div_result(
 /// # Errors
 /// - Returns an error if the divisor is ZERO.
 /// - Returns an error if either a0 or a1 is not a u32.
-fn push_falcon_mod_result(
-    process: &mut ProcessState,
-    err_ctx: &impl ErrorContext,
-) -> Result<(), ExecutionError> {
+fn push_falcon_mod_result(process: &mut ProcessState) -> Result<(), ExecutionError> {
     let dividend_hi = process.get_stack_item(0).as_int();
     let dividend_lo = process.get_stack_item(1).as_int();
     if dividend_lo > u32::MAX as u64 {
-        return Err(ExecutionError::input_not_u32(process.clk(), dividend_lo, err_ctx));
+        return Err(ExecutionError::input_not_u32(dividend_lo));
     }
     if dividend_hi > u32::MAX as u64 {
-        return Err(ExecutionError::input_not_u32(process.clk(), dividend_hi, err_ctx));
+        return Err(ExecutionError::input_not_u32(dividend_hi));
     }
     let dividend = (dividend_hi << 32) + dividend_lo;
 
@@ -439,16 +418,13 @@ fn push_falcon_mod_result(
 ///
 /// # Errors
 /// Returns an error if the input is a zero element in the extension field.
-fn push_ext2_inv_result(
-    process: &mut ProcessState,
-    err_ctx: &impl ErrorContext,
-) -> Result<(), ExecutionError> {
+fn push_ext2_inv_result(process: &mut ProcessState) -> Result<(), ExecutionError> {
     let coef0 = process.get_stack_item(1);
     let coef1 = process.get_stack_item(0);
 
     let element = QuadFelt::new(coef0, coef1);
     if element == QuadFelt::ZERO {
-        return Err(ExecutionError::divide_by_zero(process.clk(), err_ctx));
+        return Err(ExecutionError::divide_by_zero());
     }
     let result = element.inv().to_base_elements();
 
@@ -466,11 +442,8 @@ fn push_ext2_inv_result(
 /// Outputs:
 ///   Operand stack: [n, ...]
 ///   Advice stack: [leading_zeros, ...]
-fn push_leading_zeros(
-    process: &mut ProcessState,
-    err_ctx: &impl ErrorContext,
-) -> Result<(), ExecutionError> {
-    push_transformed_stack_top(process, |stack_top| Felt::from(stack_top.leading_zeros()), err_ctx)
+fn push_leading_zeros(process: &mut ProcessState) -> Result<(), ExecutionError> {
+    push_transformed_stack_top(process, |stack_top| Felt::from(stack_top.leading_zeros()))
 }
 
 /// Pushes the number of the trailing zeros of the top stack element onto the advice stack.
@@ -482,11 +455,8 @@ fn push_leading_zeros(
 /// Outputs:
 ///   Operand stack: [n, ...]
 ///   Advice stack: [trailing_zeros, ...]
-fn push_trailing_zeros(
-    process: &mut ProcessState,
-    err_ctx: &impl ErrorContext,
-) -> Result<(), ExecutionError> {
-    push_transformed_stack_top(process, |stack_top| Felt::from(stack_top.trailing_zeros()), err_ctx)
+fn push_trailing_zeros(process: &mut ProcessState) -> Result<(), ExecutionError> {
+    push_transformed_stack_top(process, |stack_top| Felt::from(stack_top.trailing_zeros()))
 }
 
 /// Pushes the number of the leading ones of the top stack element onto the advice stack.
@@ -498,11 +468,8 @@ fn push_trailing_zeros(
 /// Outputs:
 ///   Operand stack: [n, ...]
 ///   Advice stack: [leading_ones, ...]
-fn push_leading_ones(
-    process: &mut ProcessState,
-    err_ctx: &impl ErrorContext,
-) -> Result<(), ExecutionError> {
-    push_transformed_stack_top(process, |stack_top| Felt::from(stack_top.leading_ones()), err_ctx)
+fn push_leading_ones(process: &mut ProcessState) -> Result<(), ExecutionError> {
+    push_transformed_stack_top(process, |stack_top| Felt::from(stack_top.leading_ones()))
 }
 
 /// Pushes the number of the trailing ones of the top stack element onto the advice stack.
@@ -514,11 +481,8 @@ fn push_leading_ones(
 /// Outputs:
 ///   Operand stack: [n, ...]
 ///   Advice stack: [trailing_ones, ...]
-fn push_trailing_ones(
-    process: &mut ProcessState,
-    err_ctx: &impl ErrorContext,
-) -> Result<(), ExecutionError> {
-    push_transformed_stack_top(process, |stack_top| Felt::from(stack_top.trailing_ones()), err_ctx)
+fn push_trailing_ones(process: &mut ProcessState) -> Result<(), ExecutionError> {
+    push_transformed_stack_top(process, |stack_top| Felt::from(stack_top.trailing_ones()))
 }
 
 /// Pushes the base 2 logarithm of the top stack element, rounded down.
@@ -532,13 +496,10 @@ fn push_trailing_ones(
 ///
 /// # Errors
 /// Returns an error if the logarithm argument (top stack element) equals ZERO.
-fn push_ilog2(
-    process: &mut ProcessState,
-    err_ctx: &impl ErrorContext,
-) -> Result<(), ExecutionError> {
+fn push_ilog2(process: &mut ProcessState) -> Result<(), ExecutionError> {
     let n = process.get_stack_item(0).as_int();
     if n == 0 {
-        return Err(ExecutionError::log_argument_zero(process.clk(), err_ctx));
+        return Err(ExecutionError::log_argument_zero());
     }
     let ilog2 = Felt::from(n.ilog2());
     process.advice_provider_mut().push_stack(ilog2);
@@ -565,10 +526,7 @@ fn push_ilog2(
 ///
 /// # Panics
 /// Will panic as unimplemented if the target depth is `64`.
-fn push_smtpeek_result(
-    process: &mut ProcessState,
-    err_ctx: &impl ErrorContext,
-) -> Result<(), ExecutionError> {
+fn push_smtpeek_result(process: &mut ProcessState) -> Result<(), ExecutionError> {
     let empty_leaf = EmptySubtreeRoots::entry(SMT_DEPTH, SMT_DEPTH);
     // fetch the arguments from the operand stack
     let key = process.get_stack_word(0);
@@ -579,14 +537,14 @@ fn push_smtpeek_result(
     let node = process
         .advice_provider()
         .get_tree_node(root, &Felt::new(SMT_DEPTH as u64), &key[3])
-        .map_err(|err| ExecutionError::advice_error(err, process.clk(), err_ctx))?;
+        .map_err(|err| ExecutionError::advice_error(err))?;
 
     if node == *empty_leaf {
         // if the node is a root of an empty subtree, then there is no value associated with
         // the specified key
         process.advice_provider_mut().push_stack_word(&Smt::EMPTY_VALUE);
     } else {
-        let leaf_preimage = get_smt_leaf_preimage(process, node, err_ctx)?;
+        let leaf_preimage = get_smt_leaf_preimage(process, node)?;
 
         for (key_in_leaf, value_in_leaf) in leaf_preimage {
             if key == key_in_leaf {
@@ -618,10 +576,10 @@ fn get_mem_addr_range(
     let end_addr = process.get_stack_item(end_idx).as_int();
 
     if start_addr > u32::MAX as u64 {
-        return Err(MemoryError::address_out_of_bounds(start_addr, &()));
+        return Err(MemoryError::AddressOutOfBounds(start_addr));
     }
     if end_addr > u32::MAX as u64 {
-        return Err(MemoryError::address_out_of_bounds(end_addr, &()));
+        return Err(MemoryError::AddressOutOfBounds(end_addr));
     }
 
     if start_addr > end_addr {
@@ -642,13 +600,12 @@ fn u64_to_u32_elements(value: u64) -> (Felt, Felt) {
 fn push_transformed_stack_top(
     process: &mut ProcessState,
     f: impl FnOnce(u32) -> Felt,
-    err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
     let stack_top = process.get_stack_item(0);
     let stack_top: u32 = stack_top
         .as_int()
         .try_into()
-        .map_err(|_| ExecutionError::not_u32_value(stack_top, ZERO, err_ctx))?;
+        .map_err(|_| ExecutionError::not_u32_value(stack_top, ZERO))?;
     let transformed_stack_top = f(stack_top);
     process.advice_provider_mut().push_stack(transformed_stack_top);
     Ok(())
@@ -657,15 +614,14 @@ fn push_transformed_stack_top(
 fn get_smt_leaf_preimage(
     process: &ProcessState,
     node: Word,
-    err_ctx: &impl ErrorContext,
 ) -> Result<Vec<(Word, Word)>, ExecutionError> {
     let kv_pairs = process
         .advice_provider()
         .get_mapped_values(&node)
-        .ok_or_else(|| ExecutionError::smt_node_not_found(node, err_ctx))?;
+        .ok_or_else(|| ExecutionError::smt_node_not_found(node))?;
 
     if kv_pairs.len() % WORD_SIZE * 2 != 0 {
-        return Err(ExecutionError::smt_node_preimage_not_valid(node, kv_pairs.len(), err_ctx));
+        return Err(ExecutionError::smt_node_preimage_not_valid(node, kv_pairs.len()));
     }
 
     Ok(kv_pairs

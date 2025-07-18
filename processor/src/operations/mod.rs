@@ -1,7 +1,6 @@
 use miden_core::{mast::MastForest, stack::MIN_STACK_DEPTH};
 
 use super::{ExecutionError, Felt, FieldElement, Operation, Process, SyncHost};
-use crate::errors::ErrorContext;
 
 mod circuit_eval;
 mod crypto_ops;
@@ -33,7 +32,7 @@ impl Process {
         program: &MastForest,
         host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
-        self.execute_op_with_error_ctx(op, program, host, &())
+        self.execute_op_with_error_ctx(op, program, host)
     }
 
     /// Executes the specified operation.
@@ -45,7 +44,6 @@ impl Process {
         op: Operation,
         program: &MastForest,
         host: &mut impl SyncHost,
-        err_ctx: &impl ErrorContext,
     ) -> Result<(), ExecutionError> {
         // make sure there is enough memory allocated to hold the execution trace
         self.ensure_trace_capacity();
@@ -54,7 +52,7 @@ impl Process {
         match op {
             // ----- system operations ------------------------------------------------------------
             Operation::Noop => self.stack.copy_state(0),
-            Operation::Assert(err_code) => self.op_assert(err_code, program, host, err_ctx)?,
+            Operation::Assert(err_code) => self.op_assert(err_code, program, host)?,
 
             Operation::FmpAdd => self.op_fmpadd()?,
             Operation::FmpUpdate => self.op_fmpupdate()?,
@@ -63,7 +61,7 @@ impl Process {
             Operation::Caller => self.op_caller()?,
 
             Operation::Clk => self.op_clk()?,
-            Operation::Emit(event_id) => self.op_emit(event_id, host, err_ctx)?,
+            Operation::Emit(event_id) => self.op_emit(event_id, host)?,
 
             // ----- flow control operations ------------------------------------------------------
             // control flow operations are never executed directly
@@ -84,12 +82,12 @@ impl Process {
             Operation::Add => self.op_add()?,
             Operation::Neg => self.op_neg()?,
             Operation::Mul => self.op_mul()?,
-            Operation::Inv => self.op_inv(err_ctx)?,
+            Operation::Inv => self.op_inv()?,
             Operation::Incr => self.op_incr()?,
 
-            Operation::And => self.op_and(err_ctx)?,
-            Operation::Or => self.op_or(err_ctx)?,
-            Operation::Not => self.op_not(err_ctx)?,
+            Operation::And => self.op_and()?,
+            Operation::Or => self.op_or()?,
+            Operation::Not => self.op_not()?,
 
             Operation::Eq => self.op_eq()?,
             Operation::Eqz => self.op_eqz()?,
@@ -101,16 +99,16 @@ impl Process {
 
             // ----- u32 operations ---------------------------------------------------------------
             Operation::U32split => self.op_u32split()?,
-            Operation::U32add => self.op_u32add(err_ctx)?,
-            Operation::U32add3 => self.op_u32add3(err_ctx)?,
-            Operation::U32sub => self.op_u32sub(err_ctx)?,
-            Operation::U32mul => self.op_u32mul(err_ctx)?,
-            Operation::U32madd => self.op_u32madd(err_ctx)?,
-            Operation::U32div => self.op_u32div(err_ctx)?,
+            Operation::U32add => self.op_u32add()?,
+            Operation::U32add3 => self.op_u32add3()?,
+            Operation::U32sub => self.op_u32sub()?,
+            Operation::U32mul => self.op_u32mul()?,
+            Operation::U32madd => self.op_u32madd()?,
+            Operation::U32div => self.op_u32div()?,
 
-            Operation::U32and => self.op_u32and(err_ctx)?,
-            Operation::U32xor => self.op_u32xor(err_ctx)?,
-            Operation::U32assert2(err_code) => self.op_u32assert2(err_code, err_ctx)?,
+            Operation::U32and => self.op_u32and()?,
+            Operation::U32xor => self.op_u32xor()?,
+            Operation::U32assert2(err_code) => self.op_u32assert2(err_code)?,
 
             // ----- stack manipulation -----------------------------------------------------------
             Operation::Pad => self.op_pad()?,
@@ -151,32 +149,32 @@ impl Process {
             Operation::MovDn7 => self.op_movdn(7)?,
             Operation::MovDn8 => self.op_movdn(8)?,
 
-            Operation::CSwap => self.op_cswap(err_ctx)?,
-            Operation::CSwapW => self.op_cswapw(err_ctx)?,
+            Operation::CSwap => self.op_cswap()?,
+            Operation::CSwapW => self.op_cswapw()?,
 
             // ----- input / output ---------------------------------------------------------------
             Operation::Push(value) => self.op_push(value)?,
 
-            Operation::AdvPop => self.op_advpop(err_ctx)?,
-            Operation::AdvPopW => self.op_advpopw(err_ctx)?,
+            Operation::AdvPop => self.op_advpop()?,
+            Operation::AdvPopW => self.op_advpopw()?,
 
-            Operation::MLoadW => self.op_mloadw(err_ctx)?,
-            Operation::MStoreW => self.op_mstorew(err_ctx)?,
+            Operation::MLoadW => self.op_mloadw()?,
+            Operation::MStoreW => self.op_mstorew()?,
 
-            Operation::MLoad => self.op_mload(err_ctx)?,
-            Operation::MStore => self.op_mstore(err_ctx)?,
+            Operation::MLoad => self.op_mload()?,
+            Operation::MStore => self.op_mstore()?,
 
-            Operation::MStream => self.op_mstream(err_ctx)?,
-            Operation::Pipe => self.op_pipe(err_ctx)?,
+            Operation::MStream => self.op_mstream()?,
+            Operation::Pipe => self.op_pipe()?,
 
             // ----- cryptographic operations -----------------------------------------------------
             Operation::HPerm => self.op_hperm()?,
-            Operation::MpVerify(err_code) => self.op_mpverify(err_code, program, err_ctx)?,
-            Operation::MrUpdate => self.op_mrupdate(err_ctx)?,
+            Operation::MpVerify(err_code) => self.op_mpverify(err_code, program)?,
+            Operation::MrUpdate => self.op_mrupdate()?,
             Operation::FriE2F4 => self.op_fri_ext2fold4()?,
-            Operation::HornerBase => self.op_horner_eval_base(err_ctx)?,
-            Operation::HornerExt => self.op_horner_eval_ext(err_ctx)?,
-            Operation::ArithmeticCircuitEval => self.arithmetic_circuit_eval(err_ctx)?,
+            Operation::HornerBase => self.op_horner_eval_base()?,
+            Operation::HornerExt => self.op_horner_eval_ext()?,
+            Operation::ArithmeticCircuitEval => self.arithmetic_circuit_eval()?,
         }
 
         self.advance_clock()?;

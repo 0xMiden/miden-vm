@@ -1,4 +1,13 @@
-use alloc::sync::Arc;
+use alloc::{
+    boxed::Box,
+    string::{String, ToString},
+    sync::Arc,
+};
+use core::{
+    error::Error,
+    fmt::{self, Display, Formatter},
+    ops::Deref,
+};
 
 use miden_air::RowIndex;
 use miden_core::{
@@ -8,7 +17,7 @@ use miden_core::{
     utils::to_hex,
 };
 use miden_debug_types::{SourceFile, SourceManager, SourceSpan};
-use miden_utils_diagnostics::{Diagnostic, miette};
+use miden_utils_diagnostics::{Diagnostic, LabeledSpan, Severity, SourceCode, miette};
 use winter_prover::ProverError;
 
 use crate::{
@@ -16,23 +25,130 @@ use crate::{
     host::advice::AdviceError,
     system::{FMP_MAX, FMP_MIN},
 };
+// EXEC ERROR TRAIT
+// ================================================================================================
+
+/// This trait defines the contract for any error that can be part of an ExecutionError.
+/// It's responsible for providing the specific text for its own label.
+pub trait ExecErrorTrait: Diagnostic + Send + Sync + 'static + Error {
+    fn custom_label(&self) -> Option<String> {
+        None
+    }
+}
+
+// WRAPPED EXECUTION ERROR
+// ================================================================================================
+
+/// A wrapper around an execution error that provides context information.
+#[derive(Debug)]
+pub struct WrappedExecutionError {
+    label: SourceSpan,
+    source_file: Option<Arc<SourceFile>>,
+    clk: Option<RowIndex>,
+    pub err: Box<dyn ExecErrorTrait>,
+}
+
+impl WrappedExecutionError {
+    pub fn new(err: impl Into<Box<dyn ExecErrorTrait>>) -> Self {
+        Self {
+            label: Default::default(),
+            source_file: None,
+            clk: None,
+            err: err.into(),
+        }
+    }
+
+    pub fn with_context(mut self, err_ctx: &impl ErrorContext) -> Self {
+        let (label, source_file) = err_ctx.label_and_source_file();
+        self.label = label;
+        self.source_file = source_file;
+        self
+    }
+
+    pub fn with_clk(mut self, clk: impl Into<RowIndex>) -> Self {
+        self.clk = Some(clk.into());
+        self
+    }
+}
+
+impl Display for WrappedExecutionError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        if let Some(clk) = self.clk {
+            write!(f, "execution error at clock cycle {clk}")
+        } else {
+            write!(f, "execution error")
+        }
+    }
+}
+
+// Manual `Error` implementation to correctly expose the source.
+impl Error for WrappedExecutionError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        Some(self.err.as_ref())
+    }
+}
+
+// Custom miette implementation, mainly to forward the label from the inner error.
+impl Diagnostic for WrappedExecutionError {
+    fn code<'a>(&'a self) -> Option<Box<dyn Display + 'a>> {
+        self.err.code()
+    }
+
+    fn severity(&self) -> Option<Severity> {
+        self.err.severity()
+    }
+
+    fn help<'a>(&'a self) -> Option<Box<dyn Display + 'a>> {
+        self.err.help()
+    }
+
+    fn url<'a>(&'a self) -> Option<Box<dyn Display + 'a>> {
+        self.err.url()
+    }
+
+    fn source_code(&self) -> Option<&dyn SourceCode> {
+        self.source_file.as_ref().map(|src| src.deref() as &dyn SourceCode)
+    }
+
+    /// Custom implementation allowing wrapped errors to define their own labels.
+    ///
+    /// This is necessary since the `#[label]` attribute can only be applied to the
+    /// `span` field, which is in the wrapper.
+    fn labels(&self) -> Option<Box<dyn Iterator<Item = LabeledSpan> + '_>> {
+        // Use the trait method to get the label text, no downcasting needed here.
+        self.err.custom_label().map(|text| {
+            let labeled_span = LabeledSpan::new_with_span(Some(text), self.label);
+            Box::new([labeled_span].into_iter()) as Box<dyn Iterator<Item = _>>
+        })
+    }
+
+    fn related<'a>(&'a self) -> Option<Box<dyn Iterator<Item = &'a dyn Diagnostic> + 'a>> {
+        self.err.related()
+    }
+
+    fn diagnostic_source(&self) -> Option<&(dyn Diagnostic)> {
+        self.err.diagnostic_source()
+    }
+}
+
+impl AsRef<dyn Diagnostic> for WrappedExecutionError {
+    fn as_ref(&self) -> &(dyn Diagnostic + 'static) {
+        self
+    }
+}
+
 // EXECUTION ERROR
 // ================================================================================================
 
 #[derive(Debug, thiserror::Error, Diagnostic)]
 pub enum ExecutionError {
-    #[error("advice provider error at clock cycle {clk}")]
+    #[error("advice provider error")]
     #[diagnostic()]
-    AdviceError {
-        #[label]
-        label: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
-        clk: RowIndex,
+    AdviceError(
         #[source]
         #[diagnostic_source]
-        err: AdviceError,
-    },
+        AdviceError,
+    ),
     /// This error is caught by the assembler, so we don't need diagnostics here.
     #[error("illegal use of instruction {0} while inside a syscall")]
     CallInSyscall(&'static str),
@@ -43,54 +159,29 @@ pub enum ExecutionError {
     CircularExternalNode(Word),
     #[error("exceeded the allowed number of max cycles {0}")]
     CycleLimitExceeded(u32),
-    #[error("decorator id {decorator_id} does not exist in MAST forest")]
-    DecoratorNotFoundInForest { decorator_id: DecoratorId },
-    #[error("division by zero at clock cycle {clk}")]
-    #[diagnostic()]
-    DivideByZero {
-        #[label]
-        label: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
-        clk: RowIndex,
-    },
+    #[error("decorator id {0} does not exist in MAST forest")]
+    DecoratorNotFoundInForest(DecoratorId),
+    #[error("division by zero")]
+    DivideByZero,
     #[error("failed to execute the dynamic code block provided by the stack with root {hex}; the block could not be found",
-      hex = .digest.to_hex()
+      hex = .0.to_hex()
     )]
-    #[diagnostic()]
-    DynamicNodeNotFound {
-        #[label]
-        label: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
-        digest: Word,
-    },
+    DynamicNodeNotFound(Word),
     #[error("error during processing of event with id {event_id} in on_event handler")]
-    #[diagnostic()]
     EventError {
-        #[label]
-        label: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
         event_id: u32,
         #[source]
         error: EventError,
     },
-    #[error("attempted to add event handler with previously inserted id: {id}")]
-    DuplicateEventHandler { id: u32 },
-    #[error("assertion failed at clock cycle {clk} with error {}",
+    #[error("attempted to add event handler with previously inserted id: {0}")]
+    DuplicateEventHandler(u32),
+    #[error("assertion failed with error {}",
       match err_msg {
         Some(msg) => format!("message: {msg}"),
         None => format!("code: {err_code}"),
       }
     )]
-    #[diagnostic()]
     FailedAssertion {
-        #[label]
-        label: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
-        clk: RowIndex,
         err_code: Felt,
         err_msg: Option<Arc<str>>,
     },
@@ -105,57 +196,23 @@ pub enum ExecutionError {
     #[error("degree-respecting projection is inconsistent: expected {0} but was {1}")]
     InvalidFriLayerFolding(QuadFelt, QuadFelt),
     #[error(
-        "when returning from a call or dyncall, stack depth must be {MIN_STACK_DEPTH}, but was {depth}"
+        "when returning from a call or dyncall, stack depth must be {MIN_STACK_DEPTH}, but was {0}"
     )]
-    #[diagnostic()]
-    InvalidStackDepthOnReturn {
-        #[label("when returning from this call site")]
-        label: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
-        depth: usize,
-    },
-    #[error("attempted to calculate integer logarithm with zero argument at clock cycle {clk}")]
-    #[diagnostic()]
-    LogArgumentZero {
-        #[label]
-        label: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
-        clk: RowIndex,
-    },
+    InvalidStackDepthOnReturn(usize),
+    #[error("attempted to calculate integer logarithm with zero argument")]
+    LogArgumentZero,
     #[error("malformed signature key: {key_type}")]
     #[diagnostic(help("the secret key associated with the provided public key is malformed"))]
-    MalformedSignatureKey {
-        #[label]
-        label: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
-        key_type: &'static str,
-    },
-    #[error(
-        "MAST forest in host indexed by procedure root {root_digest} doesn't contain that root"
-    )]
-    MalformedMastForestInHost {
-        #[label]
-        label: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
-        root_digest: Word,
-    },
+    MalformedSignatureKey { key_type: &'static str },
+    #[error("MAST forest in host indexed by procedure root {0} doesn't contain that root")]
+    MalformedMastForestInHost(Word),
     #[error("node id {node_id} does not exist in MAST forest")]
     MastNodeNotFoundInForest { node_id: MastNodeId },
     #[error(transparent)]
     #[diagnostic(transparent)]
     MemoryError(MemoryError),
-    #[error("no MAST forest contains the procedure with root digest {root_digest}")]
-    NoMastForestWithProcedure {
-        #[label]
-        label: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
-        root_digest: Word,
-    },
+    #[error("no MAST forest contains the procedure with root digest {0}")]
+    NoMastForestWithProcedure(Word),
     #[error("merkle path verification failed for value {value} at index {index} in the Merkle tree with root {root} (error {err})",
       value = to_hex(value.as_bytes()),
       root = to_hex(root.as_bytes()),
@@ -165,179 +222,83 @@ pub enum ExecutionError {
       }
     )]
     MerklePathVerificationFailed {
-        #[label]
-        label: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
         value: Word,
         index: Felt,
         root: Word,
         err_code: Felt,
         err_msg: Option<Arc<str>>,
     },
-    #[error("if statement expected a binary value on top of the stack, but got {value}")]
-    #[diagnostic()]
-    NotBinaryValueIf {
-        #[label]
-        label: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
-        value: Felt,
-    },
-    #[error("operation expected a binary value, but got {value}")]
-    #[diagnostic()]
-    NotBinaryValueOp {
-        #[label]
-        label: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
-        value: Felt,
-    },
-    #[error("loop condition must be a binary value, but got {value}")]
+    #[error("if statement expected a binary value on top of the stack, but got {0}")]
+    NotBinaryValueIf(Felt),
+    #[error("operation expected a binary value, but got {0}")]
+    NotBinaryValueOp(Felt),
+    #[error("loop condition must be a binary value, but got {0}")]
     #[diagnostic(help(
         "this could happen either when first entering the loop, or any subsequent iteration"
     ))]
-    NotBinaryValueLoop {
-        #[label]
-        label: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
-        value: Felt,
-    },
-    #[error("operation expected a u32 value, but got {value} (error code: {err_code})")]
-    NotU32Value {
-        #[label]
-        label: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
-        value: Felt,
-        err_code: Felt,
-    },
-    #[error(
-        "Operand stack input is {input} but it is expected to fit in a u32 at clock cycle {clk}"
-    )]
-    #[diagnostic()]
-    NotU32StackValue {
-        #[label]
-        label: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
-        clk: RowIndex,
-        input: u64,
-    },
+    NotBinaryValueLoop(Felt),
+    #[error("operation expected a u32 value, but got {value}")]
+    // #[error("operation expected a u32 value, but got {value} (error code: {err_code})")]
+    NotU32Value { value: Felt, err_code: Option<Felt> },
     #[error("stack should have at most {MIN_STACK_DEPTH} elements at the end of program execution, but had {} elements", MIN_STACK_DEPTH + .0)]
     OutputStackOverflow(usize),
     #[error("a program has already been executed in this process")]
     ProgramAlreadyExecuted,
     #[error("proof generation failed")]
     ProverError(#[source] ProverError),
-    #[error("smt node {node_hex} not found", node_hex = to_hex(node.as_bytes()))]
-    SmtNodeNotFound {
-        #[label]
-        label: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
-        node: Word,
-    },
+    #[error("smt node {node_hex} not found", node_hex = to_hex(.0.as_bytes()))]
+    SmtNodeNotFound(Word),
     #[error("expected pre-image length of node {node_hex} to be a multiple of 8 but was {preimage_len}",
       node_hex = to_hex(node.as_bytes()),
     )]
-    SmtNodePreImageNotValid {
-        #[label]
-        label: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
-        node: Word,
-        preimage_len: usize,
-    },
+    SmtNodePreImageNotValid { node: Word, preimage_len: usize },
     #[error("syscall failed: procedure with root {hex} was not found in the kernel",
-      hex = to_hex(proc_root.as_bytes())
+      hex = to_hex(.0.as_bytes())
     )]
-    SyscallTargetNotInKernel {
-        #[label]
-        label: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
-        proc_root: Word,
-    },
-    #[error("failed to execute arithmetic circuit evaluation operation: {error}")]
-    #[diagnostic()]
-    AceChipError {
-        #[label("this call failed")]
-        label: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
-        error: AceError,
-    },
+    SyscallTargetNotInKernel(Word),
+    #[error("failed to execute arithmetic circuit evaluation operation: {0}")]
+    AceChipError(AceError),
 }
 
 impl ExecutionError {
-    pub fn advice_error(
-        err: AdviceError,
-        clk: RowIndex,
-        err_ctx: &impl ErrorContext,
-    ) -> ExecutionError {
-        let (label, source_file) = err_ctx.label_and_source_file();
-        ExecutionError::AdviceError { label, source_file, err, clk }
+    pub fn advice_error(err: AdviceError) -> ExecutionError {
+        ExecutionError::AdviceError(err)
     }
 
-    pub fn divide_by_zero(clk: RowIndex, err_ctx: &impl ErrorContext) -> Self {
-        let (label, source_file) = err_ctx.label_and_source_file();
-        Self::DivideByZero { clk, label, source_file }
+    pub fn divide_by_zero() -> Self {
+        Self::DivideByZero
     }
 
-    pub fn input_not_u32(clk: RowIndex, input: u64, err_ctx: &impl ErrorContext) -> Self {
-        let (label, source_file) = err_ctx.label_and_source_file();
-        Self::NotU32StackValue { clk, input, label, source_file }
+    pub fn input_not_u32(value: u64) -> Self {
+        Self::NotU32Value { value: Felt::new(value), err_code: None }
     }
 
-    pub fn dynamic_node_not_found(digest: Word, err_ctx: &impl ErrorContext) -> Self {
-        let (label, source_file) = err_ctx.label_and_source_file();
-
-        Self::DynamicNodeNotFound { label, source_file, digest }
+    pub fn dynamic_node_not_found(digest: Word) -> Self {
+        Self::DynamicNodeNotFound(digest)
     }
 
-    pub fn event_error(error: EventError, event_id: u32, err_ctx: &impl ErrorContext) -> Self {
-        let (label, source_file) = err_ctx.label_and_source_file();
-
-        Self::EventError { label, source_file, event_id, error }
+    pub fn event_error(error: EventError, event_id: u32) -> Self {
+        Self::EventError { event_id, error }
     }
 
-    pub fn failed_assertion(
-        clk: RowIndex,
-        err_code: Felt,
-        err_msg: Option<Arc<str>>,
-        err_ctx: &impl ErrorContext,
-    ) -> Self {
-        let (label, source_file) = err_ctx.label_and_source_file();
-
-        Self::FailedAssertion {
-            label,
-            source_file,
-            clk,
-            err_code,
-            err_msg,
-        }
+    pub fn failed_assertion(err_code: Felt, err_msg: Option<Arc<str>>) -> Self {
+        Self::FailedAssertion { err_code, err_msg }
     }
 
-    pub fn invalid_stack_depth_on_return(depth: usize, err_ctx: &impl ErrorContext) -> Self {
-        let (label, source_file) = err_ctx.label_and_source_file();
-        Self::InvalidStackDepthOnReturn { label, source_file, depth }
+    pub fn invalid_stack_depth_on_return(depth: usize) -> Self {
+        Self::InvalidStackDepthOnReturn(depth)
     }
 
-    pub fn log_argument_zero(clk: RowIndex, err_ctx: &impl ErrorContext) -> Self {
-        let (label, source_file) = err_ctx.label_and_source_file();
-        Self::LogArgumentZero { label, source_file, clk }
+    pub fn log_argument_zero() -> Self {
+        Self::LogArgumentZero
     }
 
-    pub fn malfored_mast_forest_in_host(root_digest: Word, err_ctx: &impl ErrorContext) -> Self {
-        let (label, source_file) = err_ctx.label_and_source_file();
-        Self::MalformedMastForestInHost { label, source_file, root_digest }
+    pub fn malfored_mast_forest_in_host(root_digest: Word) -> Self {
+        Self::MalformedMastForestInHost(root_digest)
     }
 
-    pub fn malformed_signature_key(key_type: &'static str, err_ctx: &impl ErrorContext) -> Self {
-        let (label, source_file) = err_ctx.label_and_source_file();
-        Self::MalformedSignatureKey { label, source_file, key_type }
+    pub fn malformed_signature_key(key_type: &'static str) -> Self {
+        Self::MalformedSignatureKey { key_type }
     }
 
     pub fn merkle_path_verification_failed(
@@ -346,68 +307,68 @@ impl ExecutionError {
         root: Word,
         err_code: Felt,
         err_msg: Option<Arc<str>>,
-        err_ctx: &impl ErrorContext,
     ) -> Self {
-        let (label, source_file) = err_ctx.label_and_source_file();
+        Self::MerklePathVerificationFailed { value, index, root, err_code, err_msg }
+    }
 
-        Self::MerklePathVerificationFailed {
-            label,
-            source_file,
-            value,
-            index,
-            root,
-            err_code,
-            err_msg,
+    pub fn no_mast_forest_with_procedure(root_digest: Word) -> Self {
+        Self::NoMastForestWithProcedure(root_digest)
+    }
+
+    pub fn not_binary_value_if(value: Felt) -> Self {
+        Self::NotBinaryValueIf(value)
+    }
+
+    pub fn not_binary_value_op(value: Felt) -> Self {
+        Self::NotBinaryValueOp(value)
+    }
+
+    pub fn not_binary_value_loop(value: Felt) -> Self {
+        Self::NotBinaryValueLoop(value)
+    }
+
+    pub fn not_u32_value(value: Felt, err_code: Felt) -> Self {
+        Self::NotU32Value { value, err_code: Some(err_code) }
+    }
+
+    pub fn smt_node_not_found(node: Word) -> Self {
+        Self::SmtNodeNotFound(node)
+    }
+
+    pub fn smt_node_preimage_not_valid(node: Word, preimage_len: usize) -> Self {
+        Self::SmtNodePreImageNotValid { node, preimage_len }
+    }
+
+    pub fn syscall_target_not_in_kernel(proc_root: Word) -> Self {
+        Self::SyscallTargetNotInKernel(proc_root)
+    }
+
+    pub fn failed_arithmetic_evaluation(error: AceError) -> Self {
+        Self::AceChipError(error)
+    }
+}
+
+impl ExecErrorTrait for ExecutionError {
+    fn custom_label(&self) -> Option<String> {
+        match self {
+            Self::NotBinaryValueIf(value) => {
+                Some(format!("expected a binary value, but got {value}"))
+            },
+            Self::NotBinaryValueOp(value) => {
+                Some(format!("expected a binary value, but got {value}"))
+            },
+            Self::NotBinaryValueLoop(value) => {
+                Some(format!("expected a binary value, but got {value}"))
+            },
+            Self::NotU32Value { value, .. } => {
+                Some(format!("expected a u32 value, but got {value}"))
+            },
+            Self::InvalidStackDepthOnReturn { .. } => {
+                Some("when returning from this call site".to_string())
+            },
+            Self::AceChipError { .. } => Some("this call failed".to_string()),
+            _ => None,
         }
-    }
-
-    pub fn no_mast_forest_with_procedure(root_digest: Word, err_ctx: &impl ErrorContext) -> Self {
-        let (label, source_file) = err_ctx.label_and_source_file();
-        Self::NoMastForestWithProcedure { label, source_file, root_digest }
-    }
-
-    pub fn not_binary_value_if(value: Felt, err_ctx: &impl ErrorContext) -> Self {
-        let (label, source_file) = err_ctx.label_and_source_file();
-        Self::NotBinaryValueIf { label, source_file, value }
-    }
-
-    pub fn not_binary_value_op(value: Felt, err_ctx: &impl ErrorContext) -> Self {
-        let (label, source_file) = err_ctx.label_and_source_file();
-        Self::NotBinaryValueOp { label, source_file, value }
-    }
-
-    pub fn not_binary_value_loop(value: Felt, err_ctx: &impl ErrorContext) -> Self {
-        let (label, source_file) = err_ctx.label_and_source_file();
-        Self::NotBinaryValueLoop { label, source_file, value }
-    }
-
-    pub fn not_u32_value(value: Felt, err_code: Felt, err_ctx: &impl ErrorContext) -> Self {
-        let (label, source_file) = err_ctx.label_and_source_file();
-        Self::NotU32Value { label, source_file, value, err_code }
-    }
-
-    pub fn smt_node_not_found(node: Word, err_ctx: &impl ErrorContext) -> Self {
-        let (label, source_file) = err_ctx.label_and_source_file();
-        Self::SmtNodeNotFound { label, source_file, node }
-    }
-
-    pub fn smt_node_preimage_not_valid(
-        node: Word,
-        preimage_len: usize,
-        err_ctx: &impl ErrorContext,
-    ) -> Self {
-        let (label, source_file) = err_ctx.label_and_source_file();
-        Self::SmtNodePreImageNotValid { label, source_file, node, preimage_len }
-    }
-
-    pub fn syscall_target_not_in_kernel(proc_root: Word, err_ctx: &impl ErrorContext) -> Self {
-        let (label, source_file) = err_ctx.label_and_source_file();
-        Self::SyscallTargetNotInKernel { label, source_file, proc_root }
-    }
-
-    pub fn failed_arithmetic_evaluation(err_ctx: &impl ErrorContext, error: AceError) -> Self {
-        let (label, source_file) = err_ctx.label_and_source_file();
-        Self::AceChipError { label, source_file, error }
     }
 }
 
@@ -458,12 +419,7 @@ macro_rules! err_ctx {
         $crate::errors::ErrorContextImpl::new($mast_forest, $node, $source_manager)
     };
     ($mast_forest:expr, $node:expr, $source_manager:expr, $op_idx:expr) => {
-        $crate::errors::ErrorContextImpl::new_with_op_idx(
-            $mast_forest,
-            $node,
-            $source_manager,
-            $op_idx,
-        )
+        $crate::errors::ErrorContextImpl::new_with_op_idx($mast_forest, $node, $source_manager, $op_idx)
     };
 }
 

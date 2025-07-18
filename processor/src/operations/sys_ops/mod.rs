@@ -7,9 +7,7 @@ use super::{
     },
     ExecutionError, Process,
 };
-use crate::{
-    SyncHost, errors::ErrorContext, operations::sys_ops::sys_event_handlers::handle_system_event,
-};
+use crate::{SyncHost, operations::sys_ops::sys_event_handlers::handle_system_event};
 
 pub(crate) mod sys_event_handlers;
 
@@ -26,7 +24,6 @@ impl Process {
         err_code: Felt,
         program: &MastForest,
         host: &mut H,
-        err_ctx: &impl ErrorContext,
     ) -> Result<(), ExecutionError>
     where
         H: SyncHost,
@@ -35,12 +32,7 @@ impl Process {
             let process = &mut self.state();
             host.on_assert_failed(process, err_code);
             let err_msg = program.resolve_error_message(err_code);
-            return Err(ExecutionError::failed_assertion(
-                process.clk(),
-                err_code,
-                err_msg,
-                err_ctx,
-            ));
+            return Err(ExecutionError::failed_assertion(err_code, err_msg));
         }
         self.stack.shift_left(1);
         Ok(())
@@ -134,12 +126,7 @@ impl Process {
     // --------------------------------------------------------------------------------------------
 
     /// Forwards the emitted event id to the host.
-    pub(super) fn op_emit<H>(
-        &mut self,
-        event_id: u32,
-        host: &mut H,
-        err_ctx: &impl ErrorContext,
-    ) -> Result<(), ExecutionError>
+    pub(super) fn op_emit<H>(&mut self, event_id: u32, host: &mut H) -> Result<(), ExecutionError>
     where
         H: SyncHost,
     {
@@ -149,10 +136,10 @@ impl Process {
         let process = &mut self.state();
         // If it's a system event, handle it directly. Otherwise, forward it to the host.
         if let Some(system_event) = SystemEvent::from_event_id(event_id) {
-            handle_system_event(process, system_event, err_ctx)
+            handle_system_event(process, system_event)
         } else {
             host.on_event(process, event_id)
-                .map_err(|err| ExecutionError::event_error(err, event_id, err_ctx))
+                .map_err(|err| ExecutionError::event_error(err, event_id))
         }
     }
 }

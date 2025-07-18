@@ -192,7 +192,7 @@ impl MemorySegmentTrace {
                     // The same address is accessed more than once in the same clock cycle. This is
                     // an error, since this access is a write, and the only valid accesses are
                     // reads when in the same clock cycle.
-                    Err(MemoryError::IllegalMemoryAccess { ctx, addr, clk })
+                    Err(MemoryError::IllegalMemoryAccess { ctx, addr })
                 } else {
                     let word = {
                         let mut last_word = addr_trace.last().expect("empty address trace").word();
@@ -250,7 +250,7 @@ impl MemorySegmentTrace {
                     // The same address is accessed more than once in the same clock cycle. This is
                     // an error, since this access is a write, and the only valid accesses are
                     // reads when in the same clock cycle.
-                    Err(MemoryError::IllegalMemoryAccess { ctx, addr, clk })
+                    Err(MemoryError::IllegalMemoryAccess { ctx, addr })
                 } else {
                     addr_trace.push(access);
                     Ok(())
@@ -311,7 +311,7 @@ impl MemorySegmentTrace {
                     // The same address is accessed more than once in the same clock cycle. This is
                     // an error, since the previous access was a write, and the only valid accesses
                     // are reads when in the same clock cycle.
-                    Err(MemoryError::IllegalMemoryAccess { ctx, addr: word_addr, clk })
+                    Err(MemoryError::IllegalMemoryAccess { ctx, addr: word_addr })
                 } else {
                     let last_word = addr_trace.last().expect("empty address trace").word();
                     let access = MemorySegmentAccess::new(

@@ -21,7 +21,7 @@ use miden_core::{
 use super::{
     EMPTY_WORD, ExecutionError, Felt, MIN_TRACE_LEN, ONE, OpBatch, Operation, Process, Word, ZERO,
 };
-use crate::{SyncHost, errors::ErrorContext};
+use crate::SyncHost;
 
 mod trace;
 use trace::DecoderTrace;
@@ -283,12 +283,11 @@ impl Process {
         node: &CallNode,
         program: &MastForest,
         host: &mut H,
-        err_ctx: &impl ErrorContext,
     ) -> Result<(), ExecutionError> {
         // when a CALL block ends, stack depth must be exactly 16
         let stack_depth = self.stack.depth();
         if stack_depth > MIN_STACK_DEPTH {
-            return Err(ExecutionError::invalid_stack_depth_on_return(stack_depth, err_ctx));
+            return Err(ExecutionError::invalid_stack_depth_on_return(stack_depth));
         }
 
         // this appends a row with END operation to the decoder trace; the returned value contains
@@ -320,7 +319,6 @@ impl Process {
         dyn_node: &DynNode,
         program: &MastForest,
         host: &mut H,
-        err_ctx: &impl ErrorContext,
     ) -> Result<Word, ExecutionError> {
         debug_assert!(!dyn_node.is_dyncall());
 
@@ -330,7 +328,7 @@ impl Process {
         let callee_hash = self
             .chiplets
             .memory
-            .read_word(self.system.ctx(), mem_addr, self.system.clk(), err_ctx)
+            .read_word(self.system.ctx(), mem_addr, self.system.clk())
             .map_err(ExecutionError::MemoryError)?;
 
         let (addr, hashed_block) = self.chiplets.hasher.hash_control_block(
@@ -358,7 +356,6 @@ impl Process {
     pub(super) fn start_dyncall_node(
         &mut self,
         dyn_node: &DynNode,
-        err_ctx: &impl ErrorContext,
     ) -> Result<Word, ExecutionError> {
         debug_assert!(dyn_node.is_dyncall());
 
@@ -368,7 +365,7 @@ impl Process {
         let callee_hash = self
             .chiplets
             .memory
-            .read_word(self.system.ctx(), mem_addr, self.system.clk(), err_ctx)
+            .read_word(self.system.ctx(), mem_addr, self.system.clk())
             .map_err(ExecutionError::MemoryError)?;
 
         // Note: other functions end in "executing a Noop", which
@@ -429,12 +426,11 @@ impl Process {
         dyn_node: &DynNode,
         program: &MastForest,
         host: &mut H,
-        err_ctx: &impl ErrorContext,
     ) -> Result<(), ExecutionError> {
         // when a DYNCALL block ends, stack depth must be exactly 16
         let stack_depth = self.stack.depth();
         if stack_depth > MIN_STACK_DEPTH {
-            return Err(ExecutionError::invalid_stack_depth_on_return(stack_depth, err_ctx));
+            return Err(ExecutionError::invalid_stack_depth_on_return(stack_depth));
         }
 
         // this appends a row with END operation to the decoder trace. when the END operation is

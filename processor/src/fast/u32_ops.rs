@@ -1,7 +1,7 @@
 use miden_core::{Felt, ZERO};
 
 use super::FastProcessor;
-use crate::{ErrorContext, ExecutionError, utils::split_element};
+use crate::{ExecutionError, utils::split_element};
 
 impl FastProcessor {
     /// Analogous to `Process::op_u32split`.
@@ -16,8 +16,8 @@ impl FastProcessor {
     }
 
     /// Analogous to `Process::op_u32add`.
-    pub fn op_u32add(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
-        self.u32_pop2_applyfn_push_lowhigh(|a, b| a + b, err_ctx)
+    pub fn op_u32add(&mut self) -> Result<(), ExecutionError> {
+        self.u32_pop2_applyfn_push_lowhigh(|a, b| a + b)
     }
 
     /// Analogous to `Process::op_u32add3`.
@@ -27,7 +27,7 @@ impl FastProcessor {
     ///
     /// The size of the stack is decremented by 1.
     #[inline(always)]
-    pub fn op_u32add3(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
+    pub fn op_u32add3(&mut self) -> Result<(), ExecutionError> {
         let (sum_hi, sum_lo) = {
             let c = self.stack_get(0).as_int();
             let b = self.stack_get(1).as_int();
@@ -35,13 +35,13 @@ impl FastProcessor {
 
             // Check that a, b, and c are u32 values.
             if a > u32::MAX as u64 {
-                return Err(ExecutionError::not_u32_value(Felt::new(a), ZERO, err_ctx));
+                return Err(ExecutionError::not_u32_value(Felt::new(a), ZERO));
             }
             if b > u32::MAX as u64 {
-                return Err(ExecutionError::not_u32_value(Felt::new(b), ZERO, err_ctx));
+                return Err(ExecutionError::not_u32_value(Felt::new(b), ZERO));
             }
             if c > u32::MAX as u64 {
-                return Err(ExecutionError::not_u32_value(Felt::new(c), ZERO, err_ctx));
+                return Err(ExecutionError::not_u32_value(Felt::new(c), ZERO));
             }
             let result = Felt::new(a + b + c);
             split_element(result)
@@ -56,28 +56,20 @@ impl FastProcessor {
 
     /// Analogous to `Process::op_u32sub`.
     #[inline(always)]
-    pub fn op_u32sub(
-        &mut self,
-        op_idx: usize,
-        err_ctx: &impl ErrorContext,
-    ) -> Result<(), ExecutionError> {
+    pub fn op_u32sub(&mut self, op_idx: usize) -> Result<(), ExecutionError> {
         let op_idx = Felt::from(op_idx as u32);
-        self.u32_pop2_applyfn_push_results(
-            op_idx,
-            |first_old, second_old| {
-                let result = second_old.wrapping_sub(first_old);
-                let first_new = result >> 63;
-                let second_new = result & u32::MAX as u64;
+        self.u32_pop2_applyfn_push_results(op_idx, |first_old, second_old| {
+            let result = second_old.wrapping_sub(first_old);
+            let first_new = result >> 63;
+            let second_new = result & u32::MAX as u64;
 
-                Ok((first_new, second_new))
-            },
-            err_ctx,
-        )
+            Ok((first_new, second_new))
+        })
     }
 
     /// Analogous to `Process::op_u32mul`.
-    pub fn op_u32mul(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
-        self.u32_pop2_applyfn_push_lowhigh(|a, b| a * b, err_ctx)
+    pub fn op_u32mul(&mut self) -> Result<(), ExecutionError> {
+        self.u32_pop2_applyfn_push_lowhigh(|a, b| a * b)
     }
 
     /// Analogous to `Process::op_u32madd`.
@@ -86,7 +78,7 @@ impl FastProcessor {
     /// the result, splits the result into low and high 32-bit values, and pushes these values
     /// back onto the stack.
     #[inline(always)]
-    pub fn op_u32madd(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
+    pub fn op_u32madd(&mut self) -> Result<(), ExecutionError> {
         let (result_hi, result_lo) = {
             let b = self.stack_get(0).as_int();
             let a = self.stack_get(1).as_int();
@@ -94,13 +86,13 @@ impl FastProcessor {
 
             // Check that a, b, and c are u32 values.
             if b > u32::MAX as u64 {
-                return Err(ExecutionError::not_u32_value(Felt::new(a), ZERO, err_ctx));
+                return Err(ExecutionError::not_u32_value(Felt::new(a), ZERO));
             }
             if a > u32::MAX as u64 {
-                return Err(ExecutionError::not_u32_value(Felt::new(b), ZERO, err_ctx));
+                return Err(ExecutionError::not_u32_value(Felt::new(b), ZERO));
             }
             if c > u32::MAX as u64 {
-                return Err(ExecutionError::not_u32_value(Felt::new(c), ZERO, err_ctx));
+                return Err(ExecutionError::not_u32_value(Felt::new(c), ZERO));
             }
             let result = Felt::new(a * b + c);
             split_element(result)
@@ -115,50 +107,37 @@ impl FastProcessor {
 
     /// Analogous to `Process::op_u32div`.
     #[inline(always)]
-    pub fn op_u32div(
-        &mut self,
-        op_idx: usize,
-        err_ctx: &impl ErrorContext,
-    ) -> Result<(), ExecutionError> {
-        let clk = self.clk + op_idx;
-        self.u32_pop2_applyfn_push_results(
-            ZERO,
-            |first, second| {
-                if first == 0 {
-                    return Err(ExecutionError::divide_by_zero(clk, err_ctx));
-                }
+    pub fn op_u32div(&mut self) -> Result<(), ExecutionError> {
+        self.u32_pop2_applyfn_push_results(ZERO, |first, second| {
+            if first == 0 {
+                return Err(ExecutionError::divide_by_zero());
+            }
 
-                // a/b = n*q + r for some n>=0 and 0<=r<b
-                let q = second / first;
-                let r = second - q * first;
+            // a/b = n*q + r for some n>=0 and 0<=r<b
+            let q = second / first;
+            let r = second - q * first;
 
-                // r is placed on top of the stack, followed by q
-                Ok((r, q))
-            },
-            err_ctx,
-        )
+            // r is placed on top of the stack, followed by q
+            Ok((r, q))
+        })
     }
 
     /// Analogous to `Process::op_u32and`.
     #[inline(always)]
-    pub fn op_u32and(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
-        self.u32_pop2_applyfn_push(|a, b| a & b, err_ctx)
+    pub fn op_u32and(&mut self) -> Result<(), ExecutionError> {
+        self.u32_pop2_applyfn_push(|a, b| a & b)
     }
 
     /// Analogous to `Process::op_u32xor`.
     #[inline(always)]
-    pub fn op_u32xor(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
-        self.u32_pop2_applyfn_push(|a, b| a ^ b, err_ctx)
+    pub fn op_u32xor(&mut self) -> Result<(), ExecutionError> {
+        self.u32_pop2_applyfn_push(|a, b| a ^ b)
     }
 
     /// Analogous to `Process::op_u32assert2`.
     #[inline(always)]
-    pub fn op_u32assert2(
-        &mut self,
-        err_code: Felt,
-        err_ctx: &impl ErrorContext,
-    ) -> Result<(), ExecutionError> {
-        self.u32_pop2_applyfn_push_results(err_code, |first, second| Ok((first, second)), err_ctx)
+    pub fn op_u32assert2(&mut self, err_code: Felt) -> Result<(), ExecutionError> {
+        self.u32_pop2_applyfn_push_results(err_code, |first, second| Ok((first, second)))
     }
 
     // HELPERS
@@ -169,17 +148,16 @@ impl FastProcessor {
     fn u32_pop2_applyfn_push(
         &mut self,
         f: impl FnOnce(u64, u64) -> u64,
-        err_ctx: &impl ErrorContext,
     ) -> Result<(), ExecutionError> {
         let b = self.stack_get(0).as_int();
         let a = self.stack_get(1).as_int();
 
         // Check that a and b are u32 values.
         if b > u32::MAX as u64 {
-            return Err(ExecutionError::not_u32_value(Felt::new(b), ZERO, err_ctx));
+            return Err(ExecutionError::not_u32_value(Felt::new(b), ZERO));
         }
         if a > u32::MAX as u64 {
-            return Err(ExecutionError::not_u32_value(Felt::new(a), ZERO, err_ctx));
+            return Err(ExecutionError::not_u32_value(Felt::new(a), ZERO));
         }
 
         let result = f(a, b);
@@ -203,17 +181,16 @@ impl FastProcessor {
     fn u32_pop2_applyfn_push_lowhigh(
         &mut self,
         f: impl FnOnce(u64, u64) -> u64,
-        err_ctx: &impl ErrorContext,
     ) -> Result<(), ExecutionError> {
         let b = self.stack_get(0).as_int();
         let a = self.stack_get(1).as_int();
 
         // Check that a and b are u32 values.
         if a > u32::MAX as u64 {
-            return Err(ExecutionError::not_u32_value(Felt::new(a), ZERO, err_ctx));
+            return Err(ExecutionError::not_u32_value(Felt::new(a), ZERO));
         }
         if b > u32::MAX as u64 {
-            return Err(ExecutionError::not_u32_value(Felt::new(b), ZERO, err_ctx));
+            return Err(ExecutionError::not_u32_value(Felt::new(b), ZERO));
         }
 
         let result = Felt::new(f(a, b));
@@ -233,17 +210,16 @@ impl FastProcessor {
         &mut self,
         err_code: Felt,
         f: impl FnOnce(u64, u64) -> Result<(u64, u64), ExecutionError>,
-        err_ctx: &impl ErrorContext,
     ) -> Result<(), ExecutionError> {
         let first_old = self.stack_get(0).as_int();
         let second_old = self.stack_get(1).as_int();
 
         // Check that a and b are u32 values.
         if first_old > u32::MAX as u64 {
-            return Err(ExecutionError::not_u32_value(Felt::new(first_old), err_code, err_ctx));
+            return Err(ExecutionError::not_u32_value(Felt::new(first_old), err_code));
         }
         if second_old > u32::MAX as u64 {
-            return Err(ExecutionError::not_u32_value(Felt::new(second_old), err_code, err_ctx));
+            return Err(ExecutionError::not_u32_value(Felt::new(second_old), err_code));
         }
 
         let (first_new, second_new) = f(first_old, second_old)?;

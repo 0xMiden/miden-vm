@@ -104,7 +104,7 @@ impl EventHandlerRegistry {
     ) -> Result<(), ExecutionError> {
         match self.handlers.entry(id) {
             Entry::Vacant(e) => e.insert(handler),
-            Entry::Occupied(_) => return Err(ExecutionError::DuplicateEventHandler { id }),
+            Entry::Occupied(_) => return Err(ExecutionError::DuplicateEventHandler(id)),
         };
         Ok(())
     }

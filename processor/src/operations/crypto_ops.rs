@@ -1,7 +1,7 @@
 use miden_core::mast::MastForest;
 
 use super::{ExecutionError, Operation, Process};
-use crate::{ErrorContext, Felt};
+use crate::Felt;
 
 // CRYPTOGRAPHIC OPERATIONS
 // ================================================================================================
@@ -69,7 +69,6 @@ impl Process {
         &mut self,
         err_code: Felt,
         program: &MastForest,
-        err_ctx: &impl ErrorContext,
     ) -> Result<(), ExecutionError> {
         // read node value, depth, index and root value from the stack
         let node =
@@ -84,7 +83,7 @@ impl Process {
         let path = self
             .advice
             .get_merkle_path(root, &depth, &index)
-            .map_err(|err| ExecutionError::advice_error(err, self.system.clk(), err_ctx))?;
+            .map_err(|err| ExecutionError::advice_error(err))?;
 
         // use hasher to compute the Merkle root of the path
         let (addr, computed_root) = self.chiplets.hasher.build_merkle_root(node, &path, index);
@@ -98,7 +97,7 @@ impl Process {
             // then it means that `node` is not the value currently in the tree at `index`
             let err_msg = program.resolve_error_message(err_code);
             return Err(ExecutionError::merkle_path_verification_failed(
-                node, index, root, err_code, err_msg, err_ctx,
+                node, index, root, err_code, err_msg,
             ));
         }
 
@@ -140,10 +139,7 @@ impl Process {
     ///
     /// # Panics
     /// Panics if the computed old root does not match the input root provided via the stack.
-    pub(super) fn op_mrupdate(
-        &mut self,
-        err_ctx: &impl ErrorContext,
-    ) -> Result<(), ExecutionError> {
+    pub(super) fn op_mrupdate(&mut self) -> Result<(), ExecutionError> {
         // read old node value, depth, index, tree root and new node values from the stack
         let old_node =
             [self.stack.get(3), self.stack.get(2), self.stack.get(1), self.stack.get(0)].into();
@@ -161,7 +157,7 @@ impl Process {
         let (path, _) = self
             .advice
             .update_merkle_node(old_root, &depth, &index, new_node)
-            .map_err(|err| ExecutionError::advice_error(err, self.system.clk(), err_ctx))?;
+            .map_err(|err| ExecutionError::advice_error(err))?;
 
         assert_eq!(path.len(), depth.as_int() as usize);
 

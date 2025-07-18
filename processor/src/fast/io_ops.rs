@@ -1,5 +1,4 @@
 use super::{DOUBLE_WORD_SIZE, ExecutionError, FastProcessor, Felt, WORD_SIZE_FELT};
-use crate::ErrorContext;
 
 impl FastProcessor {
     /// Analogous to `Process::op_push`.
@@ -10,15 +9,8 @@ impl FastProcessor {
 
     /// Analogous to `Process::op_advpop`.
     #[inline(always)]
-    pub fn op_advpop(
-        &mut self,
-        op_idx: usize,
-        err_ctx: &impl ErrorContext,
-    ) -> Result<(), ExecutionError> {
-        let value = self
-            .advice
-            .pop_stack()
-            .map_err(|err| ExecutionError::advice_error(err, self.clk + op_idx, err_ctx))?;
+    pub fn op_advpop(&mut self) -> Result<(), ExecutionError> {
+        let value = self.advice.pop_stack().map_err(|err| ExecutionError::advice_error(err))?;
         self.increment_stack_size();
         self.stack_write(0, value);
         Ok(())
@@ -26,15 +18,8 @@ impl FastProcessor {
 
     /// Analogous to `Process::op_advpopw`.
     #[inline(always)]
-    pub fn op_advpopw(
-        &mut self,
-        op_idx: usize,
-        err_ctx: &impl ErrorContext,
-    ) -> Result<(), ExecutionError> {
-        let word = self
-            .advice
-            .pop_stack_word()
-            .map_err(|err| ExecutionError::advice_error(err, self.clk + op_idx, err_ctx))?;
+    pub fn op_advpopw(&mut self) -> Result<(), ExecutionError> {
+        let word = self.advice.pop_stack_word().map_err(|err| ExecutionError::advice_error(err))?;
         self.stack_write_word(0, &word);
 
         Ok(())
@@ -42,18 +27,11 @@ impl FastProcessor {
 
     /// Analogous to `Process::op_mloadw`.
     #[inline(always)]
-    pub fn op_mloadw(
-        &mut self,
-        op_idx: usize,
-        err_ctx: &impl ErrorContext,
-    ) -> Result<(), ExecutionError> {
+    pub fn op_mloadw(&mut self) -> Result<(), ExecutionError> {
         let addr = self.stack_get(0);
         self.decrement_stack_size();
 
-        let word = self
-            .memory
-            .read_word(self.ctx, addr, self.clk + op_idx, err_ctx)
-            .map_err(ExecutionError::MemoryError)?;
+        let word = self.memory.read_word(self.ctx, addr).map_err(ExecutionError::MemoryError)?;
         self.stack_write_word(0, &word);
 
         Ok(())
@@ -61,29 +39,23 @@ impl FastProcessor {
 
     /// Analogous to `Process::op_mstorew`.
     #[inline(always)]
-    pub fn op_mstorew(
-        &mut self,
-        op_idx: usize,
-        err_ctx: &impl ErrorContext,
-    ) -> Result<(), ExecutionError> {
+    pub fn op_mstorew(&mut self) -> Result<(), ExecutionError> {
         let addr = self.stack_get(0);
         let word = self.stack_get_word(1);
         self.decrement_stack_size();
 
         self.memory
-            .write_word(self.ctx, addr, self.clk + op_idx, word, err_ctx)
+            .write_word(self.ctx, addr, word)
             .map_err(ExecutionError::MemoryError)?;
         Ok(())
     }
 
     /// Analogous to `Process::op_mload`.
     #[inline(always)]
-    pub fn op_mload(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
+    pub fn op_mload(&mut self) -> Result<(), ExecutionError> {
         let element = {
             let addr = self.stack_get(0);
-            self.memory
-                .read_element(self.ctx, addr, err_ctx)
-                .map_err(ExecutionError::MemoryError)?
+            self.memory.read_element(self.ctx, addr).map_err(ExecutionError::MemoryError)?
         };
 
         self.stack_write(0, element);
@@ -93,13 +65,13 @@ impl FastProcessor {
 
     /// Analogous to `Process::op_mstore`.
     #[inline(always)]
-    pub fn op_mstore(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
+    pub fn op_mstore(&mut self) -> Result<(), ExecutionError> {
         let addr = self.stack_get(0);
         let value = self.stack_get(1);
         self.decrement_stack_size();
 
         self.memory
-            .write_element(self.ctx, addr, value, err_ctx)
+            .write_element(self.ctx, addr, value)
             .map_err(ExecutionError::MemoryError)?;
 
         Ok(())
@@ -107,11 +79,7 @@ impl FastProcessor {
 
     /// Analogous to `Process::op_mstream`.
     #[inline(always)]
-    pub fn op_mstream(
-        &mut self,
-        op_idx: usize,
-        err_ctx: &impl ErrorContext,
-    ) -> Result<(), ExecutionError> {
+    pub fn op_mstream(&mut self) -> Result<(), ExecutionError> {
         // The stack index where the memory address to load the words from is stored.
         const MEM_ADDR_STACK_IDX: usize = 12;
 
@@ -120,10 +88,10 @@ impl FastProcessor {
         let addr_second_word = addr_first_word + WORD_SIZE_FELT;
         let words = [
             self.memory
-                .read_word(self.ctx, addr_first_word, self.clk + op_idx, err_ctx)
+                .read_word(self.ctx, addr_first_word)
                 .map_err(ExecutionError::MemoryError)?,
             self.memory
-                .read_word(self.ctx, addr_second_word, self.clk + op_idx, err_ctx)
+                .read_word(self.ctx, addr_second_word)
                 .map_err(ExecutionError::MemoryError)?,
         ];
 
@@ -140,11 +108,7 @@ impl FastProcessor {
 
     /// Analogous to `Process::op_pipe`.
     #[inline(always)]
-    pub fn op_pipe(
-        &mut self,
-        op_idx: usize,
-        err_ctx: &impl ErrorContext,
-    ) -> Result<(), ExecutionError> {
+    pub fn op_pipe(&mut self) -> Result<(), ExecutionError> {
         // The stack index where the memory address to load the words from is stored.
         const MEM_ADDR_STACK_IDX: usize = 12;
 
@@ -152,17 +116,15 @@ impl FastProcessor {
         let addr_second_word = addr_first_word + WORD_SIZE_FELT;
 
         // pop two words from the advice stack
-        let words = self
-            .advice
-            .pop_stack_dword()
-            .map_err(|err| ExecutionError::advice_error(err, self.clk + op_idx, err_ctx))?;
+        let words =
+            self.advice.pop_stack_dword().map_err(|err| ExecutionError::advice_error(err))?;
 
         // write the words to memory
         self.memory
-            .write_word(self.ctx, addr_first_word, self.clk + op_idx, words[0], err_ctx)
+            .write_word(self.ctx, addr_first_word, words[0])
             .map_err(ExecutionError::MemoryError)?;
         self.memory
-            .write_word(self.ctx, addr_second_word, self.clk + op_idx, words[1], err_ctx)
+            .write_word(self.ctx, addr_second_word, words[1])
             .map_err(ExecutionError::MemoryError)?;
 
         // replace the elements on the stack with the word elements (in stack order)

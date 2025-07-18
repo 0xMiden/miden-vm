@@ -1,7 +1,7 @@
 use miden_core::{WORD_SIZE, ZERO};
 
 use super::FastProcessor;
-use crate::{ErrorContext, ExecutionError};
+use crate::ExecutionError;
 
 impl FastProcessor {
     /// Analogous to `Process::op_pad`.
@@ -98,7 +98,7 @@ impl FastProcessor {
     }
 
     /// Analogous to `Process::op_cswap`.
-    pub fn op_cswap(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
+    pub fn op_cswap(&mut self) -> Result<(), ExecutionError> {
         let condition = self.stack_get(0);
         self.decrement_stack_size();
 
@@ -110,7 +110,7 @@ impl FastProcessor {
                 self.stack_swap(0, 1);
             },
             _ => {
-                return Err(ExecutionError::not_binary_value_op(condition, err_ctx));
+                return Err(ExecutionError::not_binary_value_op(condition));
             },
         }
 
@@ -118,7 +118,7 @@ impl FastProcessor {
     }
 
     /// Analogous to `Process::op_cswapw`.
-    pub fn op_cswapw(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
+    pub fn op_cswapw(&mut self) -> Result<(), ExecutionError> {
         let condition = self.stack_get(0);
         self.decrement_stack_size();
 
@@ -133,7 +133,7 @@ impl FastProcessor {
                 self.stack_swap(3, 7);
             },
             _ => {
-                return Err(ExecutionError::not_binary_value_op(condition, err_ctx));
+                return Err(ExecutionError::not_binary_value_op(condition));
             },
         }
 

@@ -30,7 +30,7 @@ use miden_core::{
         OpBatch, SplitNode,
     },
 };
-use miden_debug_types::{DefaultSourceManager, SourceManager, SourceSpan};
+use miden_debug_types::{DefaultSourceManager, SourceManager};
 pub use winter_prover::matrix::ColMatrix;
 
 pub(crate) mod continuation_stack;
@@ -320,7 +320,7 @@ impl Process {
 
         self.advice
             .extend_map(program.mast_forest().advice_map())
-            .map_err(|err| ExecutionError::advice_error(err, RowIndex::from(0), &()))?;
+            .map_err(|err| ExecutionError::advice_error(err))?;
 
         self.execute_mast_node(program.entrypoint(), &program.mast_forest().clone(), host)?;
 
@@ -350,18 +350,20 @@ impl Process {
             MastNode::Split(node) => self.execute_split_node(node, program, host)?,
             MastNode::Loop(node) => self.execute_loop_node(node, program, host)?,
             MastNode::Call(node) => {
-                let err_ctx = err_ctx!(program, node, self.source_manager.clone());
-                add_error_ctx_to_external_error(
-                    self.execute_call_node(node, program, host),
-                    err_ctx,
-                )?
+                self.execute_call_node(node, program, host)?
+                // let err_ctx = err_ctx!(program, node, self.source_manager.clone());
+                // add_error_ctx_to_external_error(
+                //     self.execute_call_node(node, program, host),
+                //
+                // )?
             },
             MastNode::Dyn(node) => {
-                let err_ctx = err_ctx!(program, node, self.source_manager.clone());
-                add_error_ctx_to_external_error(
-                    self.execute_dyn_node(node, program, host),
-                    err_ctx,
-                )?
+                self.execute_dyn_node(node, program, host)?
+                // let err_ctx = err_ctx!(program, node, self.source_manager.clone());
+                // add_error_ctx_to_external_error(
+                //     self.execute_dyn_node(node, program, host),
+                //
+                // )?
             },
             MastNode::External(external_node) => {
                 let (root_id, mast_forest) = self.resolve_external_node(external_node, host)?;
@@ -412,7 +414,7 @@ impl Process {
             self.execute_mast_node(node.on_false(), program, host)?;
         } else {
             let err_ctx = err_ctx!(program, node, self.source_manager.clone());
-            return Err(ExecutionError::not_binary_value_if(condition, &err_ctx));
+            return Err(ExecutionError::not_binary_value_if(condition));
         }
 
         self.end_split_node(node, program, host)
@@ -445,7 +447,7 @@ impl Process {
 
             if self.stack.peek() != ZERO {
                 let err_ctx = err_ctx!(program, node, self.source_manager.clone());
-                return Err(ExecutionError::not_binary_value_loop(self.stack.peek(), &err_ctx));
+                return Err(ExecutionError::not_binary_value_loop(self.stack.peek()));
             }
 
             // end the LOOP block and drop the condition from the stack
@@ -456,7 +458,7 @@ impl Process {
             self.end_loop_node(node, false, program, host)
         } else {
             let err_ctx = err_ctx!(program, node, self.source_manager.clone());
-            Err(ExecutionError::not_binary_value_loop(condition, &err_ctx))
+            Err(ExecutionError::not_binary_value_loop(condition))
         }
     }
 
@@ -480,13 +482,13 @@ impl Process {
                 ExecutionError::MastNodeNotFoundInForest { node_id: call_node.callee() }
             })?;
             let err_ctx = err_ctx!(program, call_node, self.source_manager.clone());
-            self.chiplets.kernel_rom.access_proc(callee.digest(), &err_ctx)?;
+            self.chiplets.kernel_rom.access_proc(callee.digest())?;
         }
         let err_ctx = err_ctx!(program, call_node, self.source_manager.clone());
 
         self.start_call_node(call_node, program, host)?;
         self.execute_mast_node(call_node.callee(), program, host)?;
-        self.end_call_node(call_node, program, host, &err_ctx)
+        self.end_call_node(call_node, program, host)
     }
 
     /// Executes the specified [miden_core::mast::DynNode].
@@ -508,9 +510,9 @@ impl Process {
         let err_ctx = err_ctx!(program, node, self.source_manager.clone());
 
         let callee_hash = if node.is_dyncall() {
-            self.start_dyncall_node(node, &err_ctx)?
+            self.start_dyncall_node(node)?
         } else {
-            self.start_dyn_node(node, program, host, &err_ctx)?
+            self.start_dyn_node(node, program, host)?
         };
 
         // if the callee is not in the program's MAST forest, try to find a MAST forest for it in
@@ -521,13 +523,13 @@ impl Process {
             None => {
                 let mast_forest = host
                     .get_mast_forest(&callee_hash)
-                    .ok_or_else(|| ExecutionError::dynamic_node_not_found(callee_hash, &err_ctx))?;
+                    .ok_or_else(|| ExecutionError::dynamic_node_not_found(callee_hash))?;
 
                 // We limit the parts of the program that can be called externally to procedure
                 // roots, even though MAST doesn't have that restriction.
                 let root_id = mast_forest
                     .find_procedure_root(callee_hash)
-                    .ok_or(ExecutionError::malfored_mast_forest_in_host(callee_hash, &()))?;
+                    .ok_or(ExecutionError::malfored_mast_forest_in_host(callee_hash))?;
 
                 // Merge the advice map of this forest into the advice provider.
                 // Note that the map may be merged multiple times if a different procedure from the
@@ -536,14 +538,14 @@ impl Process {
                 // cases, this call will be cheap.
                 self.advice
                     .extend_map(mast_forest.advice_map())
-                    .map_err(|err| ExecutionError::advice_error(err, self.system.clk(), &()))?;
+                    .map_err(|err| ExecutionError::advice_error(err))?;
 
                 self.execute_mast_node(root_id, &mast_forest, host)?
             },
         }
 
         if node.is_dyncall() {
-            self.end_dyncall_node(node, program, host, &err_ctx)
+            self.end_dyncall_node(node, program, host)
         } else {
             self.end_dyn_node(node, program, host)
         }
@@ -599,7 +601,7 @@ impl Process {
         for &decorator_id in decorator_ids {
             let decorator = program
                 .get_decorator_by_id(decorator_id)
-                .ok_or(ExecutionError::DecoratorNotFoundInForest { decorator_id })?;
+                .ok_or(ExecutionError::DecoratorNotFoundInForest(decorator_id))?;
             self.execute_decorator(decorator, host)?;
         }
 
@@ -637,7 +639,7 @@ impl Process {
             while let Some(&decorator_id) = decorators.next_filtered(i + op_offset) {
                 let decorator = program
                     .get_decorator_by_id(decorator_id)
-                    .ok_or(ExecutionError::DecoratorNotFoundInForest { decorator_id })?;
+                    .ok_or(ExecutionError::DecoratorNotFoundInForest(decorator_id))?;
                 self.execute_decorator(decorator, host)?;
             }
 
@@ -645,7 +647,7 @@ impl Process {
             let err_ctx =
                 err_ctx!(program, basic_block, self.source_manager.clone(), i + op_offset);
             self.decoder.execute_user_op(op, op_idx);
-            self.execute_op_with_error_ctx(op, program, host, &err_ctx)?;
+            self.execute_op_with_error_ctx(op, program, host)?;
 
             // if the operation carries an immediate value, the value is stored at the next group
             // pointer; so, we advance the pointer to the following group
@@ -742,13 +744,13 @@ impl Process {
 
         let mast_forest = host
             .get_mast_forest(&node_digest)
-            .ok_or(ExecutionError::no_mast_forest_with_procedure(node_digest, &()))?;
+            .ok_or(ExecutionError::no_mast_forest_with_procedure(node_digest))?;
 
         // We limit the parts of the program that can be called externally to procedure
         // roots, even though MAST doesn't have that restriction.
         let root_id = mast_forest
             .find_procedure_root(node_digest)
-            .ok_or(ExecutionError::malfored_mast_forest_in_host(node_digest, &()))?;
+            .ok_or(ExecutionError::malfored_mast_forest_in_host(node_digest))?;
 
         // if the node that we got by looking up an external reference is also an External
         // node, we are about to enter into an infinite loop - so, return an error
@@ -763,7 +765,7 @@ impl Process {
         // this call will be cheap.
         self.advice
             .extend_map(mast_forest.advice_map())
-            .map_err(|err| ExecutionError::advice_error(err, self.system.clk(), &()))?;
+            .map_err(|err| ExecutionError::advice_error(err))?;
 
         Ok((root_id, mast_forest))
     }
@@ -910,9 +912,7 @@ impl<'a> ProcessState<'a> {
     pub fn get_mem_word(&self, ctx: ContextId, addr: u32) -> Result<Option<Word>, MemoryError> {
         match self {
             ProcessState::Slow(state) => state.chiplets.memory.get_word(ctx, addr),
-            ProcessState::Fast(state) => {
-                state.processor.memory.read_word_impl(ctx, addr, None, &())
-            },
+            ProcessState::Fast(state) => state.processor.memory.read_word_impl(ctx, addr),
         }
     }
 
@@ -941,34 +941,33 @@ impl<'a> From<&'a mut Process> for ProcessState<'a> {
 // HELPERS
 // ================================================================================================
 
-/// For errors generated from processing an `ExternalNode`, returns the same error except with
-/// proper error context.
-pub(crate) fn add_error_ctx_to_external_error(
-    result: Result<(), ExecutionError>,
-    err_ctx: impl ErrorContext,
-) -> Result<(), ExecutionError> {
-    match result {
-        Ok(_) => Ok(()),
-        // Add context information to any errors coming from executing an `ExternalNode`
-        Err(err) => match err {
-            ExecutionError::NoMastForestWithProcedure { label, source_file: _, root_digest }
-            | ExecutionError::MalformedMastForestInHost { label, source_file: _, root_digest } => {
-                if label == SourceSpan::UNKNOWN {
-                    let err_with_ctx =
-                        ExecutionError::no_mast_forest_with_procedure(root_digest, &err_ctx);
-                    Err(err_with_ctx)
-                } else {
-                    // If the source span was already populated, just return the error as-is. This
-                    // would occur when a call deeper down the call stack was responsible for the
-                    // error.
-                    Err(err)
-                }
-            },
-
-            _ => {
-                // do nothing
-                Err(err)
-            },
-        },
-    }
-}
+// /// For errors generated from processing an `ExternalNode`, returns the same error except with
+// /// proper error context.
+// pub(crate) fn add_error_ctx_to_external_error(
+//     result: Result<(), ExecutionError>,
+//     err_ctx: impl ErrorContext,
+// ) -> Result<(), ExecutionError> {
+//     match result {
+//         Ok(_) => Ok(()),
+//         // Add context information to any errors coming from executing an `ExternalNode`
+//         Err(err) => match err {
+//             ExecutionError::NoMastForestWithProcedure { label, source_file: _, root_digest }
+//             | ExecutionError::MalformedMastForestInHost { label, source_file: _, root_digest } =>
+// {                 if label == SourceSpan::UNKNOWN {
+//                     let err_with_ctx =
+// ExecutionError::no_mast_forest_with_procedure(root_digest);                     Err(err_with_ctx)
+//                 } else {
+//                     // If the source span was already populated, just return the error as-is.
+// This                     // would occur when a call deeper down the call stack was responsible
+// for the                     // error.
+//                     Err(err)
+//                 }
+//             },
+//
+//             _ => {
+//                 // do nothing
+//                 Err(err)
+//             },
+//         },
+//     }
+// }

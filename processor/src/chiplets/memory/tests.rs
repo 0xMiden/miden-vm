@@ -118,7 +118,7 @@ fn mem_read_word_unaligned() {
     let addr = ONE;
     let clk = 1.into();
     let ctx = ContextId::root();
-    let ret = mem.read_word(ctx, addr, clk, &());
+    let ret = mem.read_word(ctx, addr, clk);
 
     assert_matches!(
         ret,
@@ -140,7 +140,7 @@ fn mem_write() {
     // write a value into address 0; clk = 1
     let addr0 = 0_u32;
     let word1 = [ONE, ZERO, ZERO, ZERO].into();
-    mem.write_word(ContextId::root(), addr0.into(), 1.into(), word1, &()).unwrap();
+    mem.write_word(ContextId::root(), addr0.into(), 1.into(), word1).unwrap();
     assert_eq!(word1, mem.get_word(ContextId::root(), addr0).unwrap().unwrap());
     assert_eq!(1, mem.num_accessed_words());
     assert_eq!(1, mem.trace_len());
@@ -175,16 +175,14 @@ fn mem_write() {
     // write a word into address 4; clk = 5
     let addr4 = 4_u32;
     let word1234 = Word::from([1_u32, 2, 3, 4]);
-    mem.write_word(ContextId::root(), addr4.into(), 5.into(), word1234, &())
-        .unwrap();
+    mem.write_word(ContextId::root(), addr4.into(), 5.into(), word1234).unwrap();
     assert_eq!(word1234, mem.get_word(ContextId::root(), addr4).unwrap().unwrap());
     assert_eq!(2, mem.num_accessed_words());
     assert_eq!(5, mem.trace_len());
 
     // write a word into address 0; clk = 6
     let word5678 = Word::from([5_u32, 6, 7, 8]);
-    mem.write_word(ContextId::root(), addr0.into(), 6.into(), word5678, &())
-        .unwrap();
+    mem.write_word(ContextId::root(), addr0.into(), 6.into(), word5678).unwrap();
     assert_eq!(word5678, mem.get_word(ContextId::root(), addr0).unwrap().unwrap());
     assert_eq!(2, mem.num_accessed_words());
     assert_eq!(6, mem.trace_len());
@@ -268,7 +266,7 @@ fn mem_write_word_unaligned() {
     let word1 = [ONE, ZERO, ZERO, ZERO].into();
     let clk = 1.into();
     let ctx = ContextId::root();
-    let ret = mem.write_word(ctx, addr, clk, word1, &());
+    let ret = mem.write_word(ctx, addr, clk, word1);
 
     assert_matches!(
         ret,
@@ -443,11 +441,11 @@ fn mem_get_state_at() {
     // Write word starting at (ctx = 0, addr = 40) at clk = 1.
     // This means that mem[40..43] is set at the beginning of clk = 2
     let word1234 = Word::from([1_u32, 2, 3, 4]);
-    mem.write_word(ContextId::root(), addr_start.into(), 1.into(), word1234, &())
+    mem.write_word(ContextId::root(), addr_start.into(), 1.into(), word1234)
         .unwrap();
 
     let word4567 = Word::from([4_u32, 5, 6, 7]);
-    mem.write_word(ContextId::root(), addr_start.into(), 2.into(), word4567, &())
+    mem.write_word(ContextId::root(), addr_start.into(), 2.into(), word4567)
         .unwrap();
 
     // Check memory state at clk = 2

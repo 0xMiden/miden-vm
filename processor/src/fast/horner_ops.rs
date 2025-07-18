@@ -3,7 +3,7 @@ use core::array;
 use miden_core::{Felt, QuadFelt};
 
 use super::FastProcessor;
-use crate::{ErrorContext, ExecutionError};
+use crate::ExecutionError;
 
 // CONSTANTS
 // ================================================================================================
@@ -15,16 +15,12 @@ const ACC_LOW_INDEX: usize = 15;
 impl FastProcessor {
     /// Analogous to `Process::op_horner_eval_base`.
     #[inline(always)]
-    pub fn op_horner_eval_base(
-        &mut self,
-        op_idx: usize,
-        err_ctx: &impl ErrorContext,
-    ) -> Result<(), ExecutionError> {
+    pub fn op_horner_eval_base(&mut self) -> Result<(), ExecutionError> {
         // read the values of the coefficients, over the base field, from the stack
         let coeffs = self.get_coeffs_as_base_elements();
 
         // read the evaluation point alpha from memory
-        let alpha = self.get_evaluation_point(op_idx, err_ctx)?;
+        let alpha = self.get_evaluation_point()?;
 
         // compute the updated accumulator value
         let (acc_new1, acc_new0) = {
@@ -48,16 +44,12 @@ impl FastProcessor {
 
     /// Analogous to `Process::op_horner_eval_ext`.
     #[inline(always)]
-    pub fn op_horner_eval_ext(
-        &mut self,
-        op_idx: usize,
-        err_ctx: &impl ErrorContext,
-    ) -> Result<(), ExecutionError> {
+    pub fn op_horner_eval_ext(&mut self) -> Result<(), ExecutionError> {
         // read the values of the coefficients, over the base field, from the stack
         let coef = self.get_coeffs_as_quad_ext_elements();
 
         // read the evaluation point alpha from memory
-        let alpha = self.get_evaluation_point(op_idx, err_ctx)?;
+        let alpha = self.get_evaluation_point()?;
 
         // compute the updated accumulator value
         let (acc_new1, acc_new0) = {
@@ -101,17 +93,11 @@ impl FastProcessor {
     }
 
     /// Returns the evaluation point.
-    fn get_evaluation_point(
-        &mut self,
-        op_idx: usize,
-        err_ctx: &impl ErrorContext,
-    ) -> Result<QuadFelt, ExecutionError> {
+    fn get_evaluation_point(&mut self) -> Result<QuadFelt, ExecutionError> {
         let (alpha_0, alpha_1) = {
             let addr = self.stack_get(ALPHA_ADDR_INDEX);
-            let word = self
-                .memory
-                .read_word(self.ctx, addr, self.clk + op_idx, err_ctx)
-                .map_err(ExecutionError::MemoryError)?;
+            let word =
+                self.memory.read_word(self.ctx, addr).map_err(ExecutionError::MemoryError)?;
 
             (word[0], word[1])
         };
