@@ -1,14 +1,19 @@
 use alloc::sync::Arc;
-use core::future::Future;
 
 use miden_core::{DebugOptions, Felt, Word, mast::MastForest};
 
-use crate::{ExecutionError, ProcessState, errors::ErrorContext};
+use crate::{EventError, ExecutionError, ProcessState};
 
 pub(super) mod advice;
 
 #[cfg(feature = "std")]
 mod debug;
+
+pub mod default;
+use default::DefaultDebugHandler;
+
+pub mod handlers;
+use handlers::DebugHandler;
 
 mod mast_forest_store;
 pub use mast_forest_store::{MastForestStore, MemMastForestStore};
@@ -21,7 +26,7 @@ pub use mast_forest_store::{MastForestStore, MemMastForestStore};
 ///
 /// There are three main categories of interactions between the VM and the host:
 /// 1. getting a library's MAST forest,
-/// 2. handling advice events (which internally mutates the advice provider), and
+/// 2. handling VM events (which can mutate the process' advice provider), and
 /// 3. handling debug and trace events.
 pub trait BaseHost {
     // REQUIRED METHODS
@@ -33,10 +38,7 @@ pub trait BaseHost {
         process: &mut ProcessState,
         options: &DebugOptions,
     ) -> Result<(), ExecutionError> {
-        let _ = (&process, options);
-        #[cfg(feature = "std")]
-        debug::print_debug_info(process, options);
-        Ok(())
+        DefaultDebugHandler.on_debug(process, options)
     }
 
     /// Handles the trace emitted from the VM.
@@ -45,15 +47,7 @@ pub trait BaseHost {
         process: &mut ProcessState,
         trace_id: u32,
     ) -> Result<(), ExecutionError> {
-        let _ = (&process, trace_id);
-        #[cfg(feature = "std")]
-        std::println!(
-            "Trace with id {} emitted at step {} in context {}",
-            trace_id,
-            process.clk(),
-            process.ctx()
-        );
-        Ok(())
+        DefaultDebugHandler.on_trace(process, trace_id)
     }
 
     /// Handles the failure of the assertion instruction.
@@ -65,7 +59,7 @@ pub trait BaseHost {
 /// There are four main categories of interactions between the VM and the host:
 /// 1. accessing the advice provider,
 /// 2. getting a library's MAST forest,
-/// 3. handling advice events (which internally mutates the advice provider), and
+/// 3. handling VM events (which can mutate the process' advice provider), and
 /// 4. handling debug and trace events.
 pub trait SyncHost: BaseHost {
     // REQUIRED METHODS
@@ -76,45 +70,8 @@ pub trait SyncHost: BaseHost {
     fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>>;
 
     /// Handles the event emitted from the VM.
-    fn on_event(
-        &mut self,
-        process: &mut ProcessState,
-        event_id: u32,
-        err_ctx: &impl ErrorContext,
-    ) -> Result<(), ExecutionError>;
-}
-
-// DEFAULT HOST IMPLEMENTATION
-// ================================================================================================
-
-/// A default [BaseHost], [SyncHost] and [AsyncHost] implementation that provides the essential
-/// functionality required by the VM.
-#[derive(Debug, Clone, Default)]
-pub struct DefaultHost {
-    store: MemMastForestStore,
-}
-
-impl DefaultHost {
-    pub fn load_mast_forest(&mut self, mast_forest: Arc<MastForest>) -> Result<(), ExecutionError> {
-        self.store.insert(mast_forest);
-        Ok(())
-    }
-}
-
-impl BaseHost for DefaultHost {}
-
-impl SyncHost for DefaultHost {
-    fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>> {
-        self.store.get(node_digest)
-    }
-
-    fn on_event(
-        &mut self,
-        process: &mut ProcessState,
-        event_id: u32,
-        err_ctx: &impl ErrorContext,
-    ) -> Result<(), ExecutionError> {
-        let _ = (&process, event_id, err_ctx);
+    fn on_event(&mut self, process: &mut ProcessState, event_id: u32) -> Result<(), EventError> {
+        let _ = (&process, event_id);
         #[cfg(feature = "std")]
         std::println!(
             "Event with id {} emitted at step {} in context {}",
@@ -123,24 +80,6 @@ impl SyncHost for DefaultHost {
             process.ctx()
         );
         Ok(())
-    }
-}
-
-impl AsyncHost for DefaultHost {
-    async fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>> {
-        self.store.get(node_digest)
-    }
-
-    // Note: clippy complains about this not using the `async` keyword, but if we use `async`, it
-    // doesn't compile.
-    #[allow(clippy::manual_async_fn)]
-    fn on_event(
-        &mut self,
-        _process: &mut ProcessState<'_>,
-        _event_id: u32,
-        _err_ctx: &impl ErrorContext,
-    ) -> impl Future<Output = Result<(), ExecutionError>> + Send {
-        async { Ok(()) }
     }
 }
 
@@ -167,6 +106,5 @@ pub trait AsyncHost: BaseHost {
         &mut self,
         process: &mut ProcessState<'_>,
         event_id: u32,
-        err_ctx: &impl ErrorContext,
-    ) -> impl Future<Output = Result<(), ExecutionError>> + Send;
+    ) -> impl Future<Output = Result<(), EventError>> + Send;
 }

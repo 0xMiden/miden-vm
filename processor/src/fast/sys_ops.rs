@@ -95,7 +95,9 @@ impl FastProcessor {
         if let Some(system_event) = SystemEvent::from_event_id(event_id) {
             handle_system_event(process, system_event, err_ctx)
         } else {
-            host.on_event(process, event_id, err_ctx).await
+            host.on_event(process, event_id)
+                .await
+                .map_err(|err| ExecutionError::event_error(err, event_id, err_ctx))
         }
     }
 }

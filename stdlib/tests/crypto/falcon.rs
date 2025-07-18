@@ -4,17 +4,17 @@ use miden_air::{Felt, ProvingOptions, RowIndex};
 use miden_assembly::{Assembler, DefaultSourceManager, utils::Serializable};
 use miden_core::{StarkField, ZERO};
 use miden_processor::{
-    AdviceInputs, ExecutionError, Program, ProgramInfo, StackInputs, crypto::RpoRandomCoin,
+    AdviceInputs, EventError, ExecutionError, ProcessState, Program, ProgramInfo, StackInputs,
+    crypto::RpoRandomCoin,
 };
-use miden_stdlib::{EVENT_FALCON_SIG_TO_STACK, StdLibrary, falcon_sign};
+use miden_stdlib::{StdLibrary, falcon_sign};
 use miden_utils_testing::{
-    Word,
+    TestHost, Word,
     crypto::{
         MerkleStore, Rpo256,
         rpo_falcon512::{Polynomial, SecretKey},
     },
     expect_exec_error_matches,
-    host::TestHost,
     proptest::proptest,
     rand::rand_value,
 };
@@ -38,6 +38,57 @@ const PROBABILISTIC_PRODUCT_SOURCE: &str = "
         #=> [...]
     end
     ";
+
+/// Event ID for pushing a Falcon signature to the advice stack.
+/// This event is used for testing purposes only.
+const EVENT_FALCON_SIG_TO_STACK: u32 = 3419226139;
+
+/// Event handler which pushes values onto the advice stack which are required for verification
+/// of a DSA in Miden VM.
+///
+/// Inputs:
+///   Operand stack: [PK, MSG, ...]
+///   Advice stack: \[ SIGNATURE \]
+///
+/// Outputs:
+///   Operand stack: [PK, MSG, ...]
+///   Advice stack: [...]
+///
+/// Where:
+/// - PK is the digest of an expanded public.
+/// - MSG is the digest of the message to be signed.
+/// - SIGNATURE is the signature being verified.
+///
+/// The advice provider is expected to contain the private key associated to the public key PK.
+pub fn push_falcon_signature(process: &mut ProcessState) -> Result<(), EventError> {
+    let pub_key = process.get_stack_word(0);
+    let msg = process.get_stack_word(1);
+
+    let pk_sk = process
+        .advice_provider()
+        .map()
+        .get(&pub_key)
+        .ok_or(FalconError::NoSecretKey { key: pub_key })?;
+
+    let result = falcon_sign(pk_sk, msg)
+        .ok_or(FalconError::MalformedSignatureKey { key_type: "RPO Falcon512" })?;
+
+    for r in result {
+        process.advice_provider_mut().push_stack(r);
+    }
+    Ok(())
+}
+
+// EVENT ERROR
+// ================================================================================================
+
+#[derive(Debug, thiserror::Error)]
+pub enum FalconError {
+    #[error("public key {} not present in the event handler", .key.to_hex())]
+    NoSecretKey { key: Word },
+    #[error("malformed signature key: {key_type}")]
+    MalformedSignatureKey { key_type: &'static str },
+}
 
 #[test]
 fn test_falcon512_norm_sq() {
@@ -205,7 +256,8 @@ fn test_move_sig_to_adv_stack() {
     let adv_stack = vec![];
     let store = MerkleStore::new();
 
-    let test = build_test!(source, &op_stack, &adv_stack, store, advice_map.into_iter());
+    let mut test = build_test!(source, &op_stack, &adv_stack, store, advice_map.into_iter());
+    test.add_event_handler(EVENT_FALCON_SIG_TO_STACK, push_falcon_signature);
     test.expect_stack(&[])
 }
 
@@ -217,7 +269,8 @@ fn falcon_execution() {
     let message = rand_value::<Word>();
     let (source, op_stack, adv_stack, store, advice_map) = generate_test(sk, message);
 
-    let test = build_test!(&source, &op_stack, &adv_stack, store, advice_map.into_iter());
+    let mut test = build_test!(&source, &op_stack, &adv_stack, store, advice_map.into_iter());
+    test.add_event_handler(EVENT_FALCON_SIG_TO_STACK, push_falcon_signature);
     test.expect_stack(&[])
 }
 
@@ -236,8 +289,8 @@ fn falcon_prove_verify() {
     let stack_inputs = StackInputs::try_from_ints(op_stack).expect("failed to create stack inputs");
     let advice_inputs = AdviceInputs::default().with_map(advice_map);
     let mut host = TestHost::default();
-    host.load_mast_forest(StdLibrary::default().mast_forest().clone())
-        .expect("failed to load mast forest");
+    host.load_library(&StdLibrary::default()).expect("failed to load mast forest");
+    host.load_handler(EVENT_FALCON_SIG_TO_STACK, push_falcon_signature).unwrap();
 
     let options = ProvingOptions::with_96_bit_security(false);
     let (stack_outputs, proof) = miden_utils_testing::prove(

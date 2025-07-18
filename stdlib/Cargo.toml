@@ -33,7 +33,9 @@ with-debug-info = []
 [dependencies]
 miden-assembly.workspace = true
 miden-core.workspace = true
+miden-processor.workspace = true
 miden-utils-sync.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
 blake3 = "1.8"

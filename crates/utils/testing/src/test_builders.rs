@@ -130,8 +130,9 @@ macro_rules! build_test_by_mode {
             stack_inputs,
             advice_inputs,
             in_debug_mode: $in_debug_mode,
-            libraries: Vec::default(),
-            add_modules: Vec::default(),
+            libraries: ::alloc::vec::Vec::default(),
+            handlers: ::alloc::collections::BTreeMap::default(),
+            add_modules: ::alloc::vec::Vec::default(),
         }
     }};
     ($in_debug_mode:expr, $source:expr, $stack_inputs:expr, $advice_stack:expr) => {{
@@ -160,8 +161,9 @@ macro_rules! build_test_by_mode {
             stack_inputs,
             advice_inputs,
             in_debug_mode: $in_debug_mode,
-            libraries: Vec::default(),
-            add_modules: Vec::default(),
+            libraries: ::alloc::vec::Vec::default(),
+            handlers: ::alloc::collections::BTreeMap::default(),
+            add_modules: ::alloc::vec::Vec::default(),
         }
     }};
     (
@@ -195,8 +197,9 @@ macro_rules! build_test_by_mode {
             stack_inputs,
             advice_inputs,
             in_debug_mode: $in_debug_mode,
-            libraries: Vec::default(),
-            add_modules: Vec::default(),
+            libraries: ::alloc::vec::Vec::default(),
+            handlers: ::alloc::collections::BTreeMap::default(),
+            add_modules: ::alloc::vec::Vec::default(),
         }
     }};
     (
@@ -232,8 +235,9 @@ macro_rules! build_test_by_mode {
             stack_inputs,
             advice_inputs,
             in_debug_mode: $in_debug_mode,
-            libraries: Vec::default(),
-            add_modules: Vec::default(),
+            libraries: ::alloc::vec::Vec::default(),
+            handlers: ::alloc::collections::BTreeMap::default(),
+            add_modules: ::alloc::vec::Vec::default(),
         }
     }};
 }

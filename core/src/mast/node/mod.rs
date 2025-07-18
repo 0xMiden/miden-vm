@@ -143,6 +143,85 @@ impl MastNode {
         }
     }
 
+    /// Unwraps the inner basic block node if the [`MastNode`] wraps a [`BasicBlockNode`]; panics
+    /// otherwise.
+    ///
+    /// # Panics
+    /// Panics if the [`MastNode`] does not wrap a [`BasicBlockNode`].
+    pub fn unwrap_basic_block(&self) -> &BasicBlockNode {
+        match self {
+            Self::Block(basic_block_node) => basic_block_node,
+            other => unwrap_failed(other, "basic block"),
+        }
+    }
+
+    /// Unwraps the inner join node if the [`MastNode`] wraps a [`JoinNode`]; panics otherwise.
+    ///
+    /// # Panics
+    /// - if the [`MastNode`] does not wrap a [`JoinNode`].
+    pub fn unwrap_join(&self) -> &JoinNode {
+        match self {
+            Self::Join(join_node) => join_node,
+            other => unwrap_failed(other, "join"),
+        }
+    }
+
+    /// Unwraps the inner split node if the [`MastNode`] wraps a [`SplitNode`]; panics otherwise.
+    ///
+    /// # Panics
+    /// - if the [`MastNode`] does not wrap a [`SplitNode`].
+    pub fn unwrap_split(&self) -> &SplitNode {
+        match self {
+            Self::Split(split_node) => split_node,
+            other => unwrap_failed(other, "split"),
+        }
+    }
+
+    /// Unwraps the inner loop node if the [`MastNode`] wraps a [`LoopNode`]; panics otherwise.
+    ///
+    /// # Panics
+    /// - if the [`MastNode`] does not wrap a [`LoopNode`].
+    pub fn unwrap_loop(&self) -> &LoopNode {
+        match self {
+            Self::Loop(loop_node) => loop_node,
+            other => unwrap_failed(other, "loop"),
+        }
+    }
+
+    /// Unwraps the inner call node if the [`MastNode`] wraps a [`CallNode`]; panics otherwise.
+    ///
+    /// # Panics
+    /// - if the [`MastNode`] does not wrap a [`CallNode`].
+    pub fn unwrap_call(&self) -> &CallNode {
+        match self {
+            Self::Call(call_node) => call_node,
+            other => unwrap_failed(other, "call"),
+        }
+    }
+
+    /// Unwraps the inner dynamic node if the [`MastNode`] wraps a [`DynNode`]; panics otherwise.
+    ///
+    /// # Panics
+    /// - if the [`MastNode`] does not wrap a [`DynNode`].
+    pub fn unwrap_dyn(&self) -> &DynNode {
+        match self {
+            Self::Dyn(dyn_node) => dyn_node,
+            other => unwrap_failed(other, "dyn"),
+        }
+    }
+
+    /// Unwraps the inner external node if the [`MastNode`] wraps a [`ExternalNode`]; panics
+    /// otherwise.
+    ///
+    /// # Panics
+    /// - if the [`MastNode`] does not wrap a [`ExternalNode`].
+    pub fn unwrap_external(&self) -> &ExternalNode {
+        match self {
+            Self::External(external_node) => external_node,
+            other => unwrap_failed(other, "external"),
+        }
+    }
+
     /// Remap the node children to their new positions indicated by the given [`Remapping`].
     pub fn remap_children(&self, remapping: &Remapping) -> Self {
         use MastNode::*;
@@ -339,7 +418,7 @@ impl fmt::Display for MastNodeDisplay<'_> {
 // ===============================================================================================
 
 /// A trait for extending the functionality of all [`MastNode`]s.
-pub trait MastNodeExt {
+pub trait MastNodeExt: Send + Sync {
     // REQUIRED METHODS
     // -------------------------------------------------------------------------------------------
 
@@ -397,4 +476,25 @@ pub trait MastNodeExt {
 
         None
     }
+}
+
+// HELPERS
+// ===============================================================================================
+
+/// This function is analogous to the `unwrap_failed()` function used in the implementation of
+/// `core::result::Result` `unwrap_*()` methods.
+#[cold]
+#[inline(never)]
+#[track_caller]
+fn unwrap_failed(node: &MastNode, expected: &str) -> ! {
+    let actual = match node {
+        MastNode::Block(_) => "basic block",
+        MastNode::Join(_) => "join",
+        MastNode::Split(_) => "split",
+        MastNode::Loop(_) => "loop",
+        MastNode::Call(_) => "call",
+        MastNode::Dyn(_) => "dynamic",
+        MastNode::External(_) => "external",
+    };
+    panic!("tried to unwrap {expected} node, but got {actual}");
 }

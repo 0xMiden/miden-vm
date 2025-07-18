@@ -1,13 +1,13 @@
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use alloc::{sync::Arc, vec::Vec};
 use core::cmp::min;
 
 use memory::Memory;
 use miden_air::RowIndex;
 use miden_core::{
-    Decorator, DecoratorIterator, EMPTY_WORD, Felt, Kernel, ONE, Operation, Program, StackOutputs,
+    Decorator, DecoratorIterator, EMPTY_WORD, Felt, ONE, Operation, Program, StackOutputs,
     WORD_SIZE, Word, ZERO,
     mast::{
-        BasicBlockNode, CallNode, DynNode, ExternalNode, JoinNode, LoopNode, MastForest, MastNode,
+        BasicBlockNode, CallNode, ExternalNode, JoinNode, LoopNode, MastForest, MastNode,
         MastNodeId, OP_GROUP_SIZE, OpBatch, SplitNode,
     },
     stack::MIN_STACK_DEPTH,
@@ -17,7 +17,10 @@ use miden_debug_types::{DefaultSourceManager, SourceManager};
 
 use crate::{
     AdviceInputs, AdviceProvider, AsyncHost, ContextId, ErrorContext, ExecutionError, FMP_MIN,
-    ProcessState, SYSCALL_FMP_MIN, add_error_ctx_to_external_error, chiplets::Ace, err_ctx,
+    ProcessState, SYSCALL_FMP_MIN,
+    chiplets::Ace,
+    continuation_stack::{Continuation, ContinuationStack},
+    err_ctx,
 };
 
 mod memory;
@@ -320,17 +323,98 @@ impl FastProcessor {
         self.execute_impl(program, host).await
     }
 
-    /// Executes the given program and returns the stack outputs.
-    ///
-    /// This function is mainly split out of `execute()` for testing purposes so that we can access
-    /// the internal state of the `FastProcessor` after execution.
     async fn execute_impl(
         &mut self,
         program: &Program,
         host: &mut impl AsyncHost,
     ) -> Result<StackOutputs, ExecutionError> {
-        self.execute_mast_node(program.entrypoint(), program.mast_forest(), program.kernel(), host)
-            .await?;
+        let mut continuation_stack = ContinuationStack::new(program);
+        let mut current_forest = program.mast_forest().clone();
+
+        while let Some(processing_step) = continuation_stack.pop_continuation() {
+            match processing_step {
+                Continuation::StartNode(node_id) => {
+                    let node = current_forest.get_node_by_id(node_id).unwrap();
+                    match node {
+                        MastNode::Block(basic_block_node) => {
+                            self.execute_basic_block_node(
+                                basic_block_node,
+                                node_id,
+                                &current_forest,
+                                host,
+                            )
+                            .await?
+                        },
+                        MastNode::Join(join_node) => self.start_join_node(
+                            join_node,
+                            node_id,
+                            &current_forest,
+                            &mut continuation_stack,
+                            host,
+                        )?,
+                        MastNode::Split(split_node) => self.start_split_node(
+                            split_node,
+                            node_id,
+                            &current_forest,
+                            &mut continuation_stack,
+                            host,
+                        )?,
+                        MastNode::Loop(loop_node) => self.start_loop_node(
+                            loop_node,
+                            node_id,
+                            &current_forest,
+                            &mut continuation_stack,
+                            host,
+                        )?,
+                        MastNode::Call(call_node) => self.start_call_node(
+                            call_node,
+                            node_id,
+                            program,
+                            &current_forest,
+                            &mut continuation_stack,
+                            host,
+                        )?,
+                        MastNode::Dyn(_dyn_node) => {
+                            self.start_dyn_node(
+                                node_id,
+                                &mut current_forest,
+                                &mut continuation_stack,
+                                host,
+                            )
+                            .await?
+                        },
+                        MastNode::External(_external_node) => {
+                            self.execute_external_node(
+                                node_id,
+                                &mut current_forest,
+                                &mut continuation_stack,
+                                host,
+                            )
+                            .await?
+                        },
+                    }
+                },
+                Continuation::FinishJoin(node_id) => {
+                    self.finish_join_node(node_id, &current_forest, host)?
+                },
+                Continuation::FinishSplit(node_id) => {
+                    self.finish_split_node(node_id, &current_forest, host)?
+                },
+                Continuation::FinishLoop(node_id) => {
+                    self.finish_loop_node(node_id, &current_forest, &mut continuation_stack, host)?
+                },
+                Continuation::FinishCall(node_id) => {
+                    self.finish_call_node(node_id, &current_forest, host)?
+                },
+                Continuation::FinishDyn(node_id) => {
+                    self.finish_dyn_node(node_id, &current_forest, host)?
+                },
+                Continuation::EnterForest(previous_forest) => {
+                    // Restore the previous forest
+                    current_forest = previous_forest;
+                },
+            }
+        }
 
         StackOutputs::new(
             self.stack[self.stack_bot_idx..self.stack_top_idx]
@@ -349,93 +433,59 @@ impl FastProcessor {
     // NODE EXECUTORS
     // --------------------------------------------------------------------------------------------
 
-    async fn execute_mast_node(
-        &mut self,
-        node_id: MastNodeId,
-        program: &MastForest,
-        kernel: &Kernel,
-        host: &mut impl AsyncHost,
-    ) -> Result<(), ExecutionError> {
-        let node = program
-            .get_node_by_id(node_id)
-            .ok_or(ExecutionError::MastNodeNotFoundInForest { node_id })?;
-
-        // Note: we only run this in case there are Trace events associated with the node. However,
-        // if there are assembly ops in the "before enter" list, we will cycle through them and
-        // ignore them, resulting in a drop of performance. We should remove this after trace events
-        // are removed from decorators - or if decorators are removed entirely.
-        //
-        // A similar reasoning applies to the "after exit" list.
-        for &decorator_id in node.before_enter() {
-            self.execute_decorator(&program[decorator_id], 0, host)?;
-        }
-
-        match node {
-            MastNode::Block(basic_block_node) => {
-                self.execute_basic_block_node(basic_block_node, program, host).await?
-            },
-            MastNode::Join(join_node) => {
-                Box::pin(self.execute_join_node(join_node, program, kernel, host)).await?
-            },
-            MastNode::Split(split_node) => {
-                Box::pin(self.execute_split_node(split_node, program, kernel, host)).await?
-            },
-            MastNode::Loop(loop_node) => {
-                Box::pin(self.execute_loop_node(loop_node, program, kernel, host)).await?
-            },
-            MastNode::Call(call_node) => {
-                let err_ctx = err_ctx!(program, call_node, self.source_manager.clone());
-                add_error_ctx_to_external_error(
-                    Box::pin(self.execute_call_node(call_node, program, kernel, host)).await,
-                    err_ctx,
-                )?
-            },
-            MastNode::Dyn(dyn_node) => {
-                let err_ctx = err_ctx!(program, dyn_node, self.source_manager.clone());
-                add_error_ctx_to_external_error(
-                    Box::pin(self.execute_dyn_node(dyn_node, program, kernel, host)).await,
-                    err_ctx,
-                )?
-            },
-            MastNode::External(external_node) => {
-                Box::pin(self.execute_external_node(external_node, kernel, host)).await?
-            },
-        }
-
-        for &decorator_id in node.after_exit() {
-            self.execute_decorator(&program[decorator_id], 0, host)?;
-        }
-
-        Ok(())
-    }
-
-    async fn execute_join_node(
+    /// Executes the start phase of a Join node.
+    #[inline(always)]
+    fn start_join_node(
         &mut self,
         join_node: &JoinNode,
-        program: &MastForest,
-        kernel: &Kernel,
+        node_id: MastNodeId,
+        current_forest: &MastForest,
+        continuation_stack: &mut ContinuationStack,
         host: &mut impl AsyncHost,
     ) -> Result<(), ExecutionError> {
-        // Corresponds to the row inserted for the JOIN operation added to the trace.
+        // Execute decorators that should be executed before entering the node
+        self.execute_before_enter_decorators(node_id, current_forest, host)?;
+
+        // Corresponds to the row inserted for the JOIN operation added
+        // to the trace.
         self.clk += 1_u32;
 
-        self.execute_mast_node(join_node.first(), program, kernel, host).await?;
-        self.execute_mast_node(join_node.second(), program, kernel, host).await?;
-
-        // Corresponds to the row inserted for the END operation added to the trace.
-        self.clk += 1_u32;
-
+        continuation_stack.push_finish_join(node_id);
+        continuation_stack.push_start_node(join_node.second());
+        continuation_stack.push_start_node(join_node.first());
         Ok(())
     }
 
-    async fn execute_split_node(
+    /// Executes the finish phase of a Join node.
+    #[inline(always)]
+    fn finish_join_node(
         &mut self,
-        split_node: &SplitNode,
-        program: &MastForest,
-        kernel: &Kernel,
+        node_id: MastNodeId,
+        current_forest: &MastForest,
         host: &mut impl AsyncHost,
     ) -> Result<(), ExecutionError> {
-        // Corresponds to the row inserted for the SPLIT operation added to the trace.
+        // Corresponds to the row inserted for the END operation added
+        // to the trace.
+        self.clk += 1_u32;
+
+        self.execute_after_exit_decorators(node_id, current_forest, host)
+    }
+
+    /// Executes the start phase of a Split node.
+    #[inline(always)]
+    fn start_split_node(
+        &mut self,
+        split_node: &SplitNode,
+        node_id: MastNodeId,
+        current_forest: &MastForest,
+        continuation_stack: &mut ContinuationStack,
+        host: &mut impl AsyncHost,
+    ) -> Result<(), ExecutionError> {
+        // Execute decorators that should be executed before entering the node
+        self.execute_before_enter_decorators(node_id, current_forest, host)?;
+
+        // Corresponds to the row inserted for the SPLIT operation added
+        // to the trace.
         self.clk += 1_u32;
 
         let condition = self.stack_get(0);
@@ -444,75 +494,122 @@ impl FastProcessor {
         self.decrement_stack_size();
 
         // execute the appropriate branch
-        let ret = if condition == ONE {
-            self.execute_mast_node(split_node.on_true(), program, kernel, host).await
+        continuation_stack.push_finish_split(node_id);
+        if condition == ONE {
+            continuation_stack.push_start_node(split_node.on_true());
         } else if condition == ZERO {
-            self.execute_mast_node(split_node.on_false(), program, kernel, host).await
+            continuation_stack.push_start_node(split_node.on_false());
         } else {
-            let err_ctx = err_ctx!(program, split_node, self.source_manager.clone());
-            Err(ExecutionError::not_binary_value_if(condition, &err_ctx))
+            let err_ctx = err_ctx!(current_forest, split_node, self.source_manager.clone());
+            return Err(ExecutionError::not_binary_value_if(condition, &err_ctx));
         };
-
-        // Corresponds to the row inserted for the END operation added to the trace.
-        self.clk += 1_u32;
-
-        ret
+        Ok(())
     }
 
-    async fn execute_loop_node(
+    /// Executes the finish phase of a Split node.
+    #[inline(always)]
+    fn finish_split_node(
         &mut self,
-        loop_node: &LoopNode,
-        program: &MastForest,
-        kernel: &Kernel,
+        node_id: MastNodeId,
+        current_forest: &MastForest,
         host: &mut impl AsyncHost,
     ) -> Result<(), ExecutionError> {
-        // Corresponds to the row inserted for the LOOP operation added to the trace.
+        // Corresponds to the row inserted for the END operation added
+        // to the trace.
         self.clk += 1_u32;
 
-        // The loop condition is checked after the loop body is executed.
-        let mut condition = self.stack_get(0);
+        self.execute_after_exit_decorators(node_id, current_forest, host)
+    }
+
+    /// Executes the start phase of a Loop node.
+    #[inline(always)]
+    fn start_loop_node(
+        &mut self,
+        loop_node: &LoopNode,
+        current_node_id: MastNodeId,
+        current_forest: &MastForest,
+        continuation_stack: &mut ContinuationStack,
+        host: &mut impl AsyncHost,
+    ) -> Result<(), ExecutionError> {
+        // Execute decorators that should be executed before entering the node
+        self.execute_before_enter_decorators(current_node_id, current_forest, host)?;
+
+        // Corresponds to the row inserted for the LOOP operation added
+        // to the trace.
+        self.clk += 1_u32;
+
+        let condition = self.stack_get(0);
 
         // drop the condition from the stack
         self.decrement_stack_size();
 
         // execute the loop body as long as the condition is true
-        while condition == ONE {
-            self.execute_mast_node(loop_node.body(), program, kernel, host).await?;
-
-            // check the loop condition, and drop it from the stack
-            condition = self.stack_get(0);
-            self.decrement_stack_size();
-
-            // this clock increment is for the row inserted for the `REPEAT` node added to
-            // the trace on each iteration. It needs to be at the end of this loop (instead
-            // of at the beginning), otherwise we get an off-by-one error when comparing
-            // with [crate::Process].
-            if condition == ONE {
-                self.clk += 1_u32;
-            }
-        }
-
-        // Corresponds to the row inserted for the END operation added to the trace.
-        self.clk += 1_u32;
-
-        if condition == ZERO {
-            Ok(())
+        if condition == ONE {
+            // Push the loop to check condition again after body
+            // executes
+            continuation_stack.push_finish_loop(current_node_id);
+            continuation_stack.push_start_node(loop_node.body());
+        } else if condition == ZERO {
+            // Exit the loop - add END row immediately since no body to
+            // execute
+            self.clk += 1_u32;
         } else {
-            let err_ctx = err_ctx!(program, loop_node, self.source_manager.clone());
-            Err(ExecutionError::not_binary_value_loop(condition, &err_ctx))
+            let err_ctx = err_ctx!(current_forest, loop_node, self.source_manager.clone());
+            return Err(ExecutionError::not_binary_value_loop(condition, &err_ctx));
         }
+        Ok(())
     }
 
-    async fn execute_call_node(
+    /// Executes the finish phase of a Loop node.
+    #[inline(always)]
+    fn finish_loop_node(
         &mut self,
-        call_node: &CallNode,
-        program: &MastForest,
-        kernel: &Kernel,
+        current_node_id: MastNodeId,
+        current_forest: &MastForest,
+        continuation_stack: &mut ContinuationStack,
         host: &mut impl AsyncHost,
     ) -> Result<(), ExecutionError> {
-        let err_ctx = err_ctx!(program, call_node, self.source_manager.clone());
+        // This happens after loop body execution
+        // Check condition again to see if we should continue looping
+        let condition = self.stack_get(0);
+        self.decrement_stack_size();
 
-        // Corresponds to the row inserted for the CALL or SYSCALL operation added to the trace.
+        let loop_node = current_forest[current_node_id].unwrap_loop();
+        if condition == ONE {
+            // Add REPEAT row and continue looping
+            self.clk += 1_u32;
+            continuation_stack.push_finish_loop(current_node_id);
+            continuation_stack.push_start_node(loop_node.body());
+        } else if condition == ZERO {
+            // Exit the loop - add END row
+            self.clk += 1_u32;
+
+            self.execute_after_exit_decorators(current_node_id, current_forest, host)?;
+        } else {
+            let err_ctx = err_ctx!(current_forest, loop_node, self.source_manager.clone());
+            return Err(ExecutionError::not_binary_value_loop(condition, &err_ctx));
+        }
+        Ok(())
+    }
+
+    /// Executes the start phase of a Call node.
+    #[inline(always)]
+    fn start_call_node(
+        &mut self,
+        call_node: &CallNode,
+        current_node_id: MastNodeId,
+        program: &Program,
+        current_forest: &MastForest,
+        continuation_stack: &mut ContinuationStack,
+        host: &mut impl AsyncHost,
+    ) -> Result<(), ExecutionError> {
+        // Execute decorators that should be executed before entering the node
+        self.execute_before_enter_decorators(current_node_id, current_forest, host)?;
+
+        let err_ctx = err_ctx!(current_forest, call_node, self.source_manager.clone());
+
+        // Corresponds to the row inserted for the CALL or SYSCALL
+        // operation added to the trace.
         self.clk += 1_u32;
 
         // call or syscall are not allowed inside a syscall
@@ -521,7 +618,7 @@ impl FastProcessor {
             return Err(ExecutionError::CallInSyscall(instruction));
         }
 
-        let callee_hash = program
+        let callee_hash = current_forest
             .get_node_by_id(call_node.callee())
             .ok_or(ExecutionError::MastNodeNotFoundInForest { node_id: call_node.callee() })?
             .digest();
@@ -530,7 +627,7 @@ impl FastProcessor {
 
         if call_node.is_syscall() {
             // check if the callee is in the kernel
-            if !kernel.contains_proc(callee_hash) {
+            if !program.kernel().contains_proc(callee_hash) {
                 return Err(ExecutionError::syscall_target_not_in_kernel(callee_hash, &err_ctx));
             }
 
@@ -545,38 +642,62 @@ impl FastProcessor {
             self.caller_hash = callee_hash;
         }
 
-        // Execute the callee.
-        self.execute_mast_node(call_node.callee(), program, kernel, host).await?;
-
-        // when returning from a function call or a syscall, restore the context of the
-        // system registers and the operand stack to what it was prior to
-        // the call.
-        self.restore_context(&err_ctx)?;
-
-        // Corresponds to the row inserted for the END operation added to the trace.
-        self.clk += 1_u32;
-
+        // push the callee onto the continuation stack
+        continuation_stack.push_finish_call(current_node_id);
+        continuation_stack.push_start_node(call_node.callee());
         Ok(())
     }
 
-    async fn execute_dyn_node(
+    /// Executes the finish phase of a Call node.
+    #[inline(always)]
+    fn finish_call_node(
         &mut self,
-        dyn_node: &DynNode,
-        program: &MastForest,
-        kernel: &Kernel,
+        node_id: MastNodeId,
+        current_forest: &MastForest,
         host: &mut impl AsyncHost,
     ) -> Result<(), ExecutionError> {
-        // Corresponds to the row inserted for the DYN or DYNCALL operation added to the trace.
+        let call_node = current_forest[node_id].unwrap_call();
+        let err_ctx = err_ctx!(current_forest, call_node, self.source_manager.clone());
+        // when returning from a function call or a syscall, restore the
+        // context of the
+        // system registers and the operand stack to what it was prior
+        // to the call.
+        self.restore_context(&err_ctx)?;
+
+        // Corresponds to the row inserted for the END operation added
+        // to the trace.
         self.clk += 1_u32;
+
+        self.execute_after_exit_decorators(node_id, current_forest, host)
+    }
+
+    /// Executes the start phase of a Dyn node.
+    #[inline(always)]
+    async fn start_dyn_node(
+        &mut self,
+        current_node_id: MastNodeId,
+        current_forest: &mut Arc<MastForest>,
+        continuation_stack: &mut ContinuationStack,
+        host: &mut impl AsyncHost,
+    ) -> Result<(), ExecutionError> {
+        // Execute decorators that should be executed before entering the node
+        self.execute_before_enter_decorators(current_node_id, current_forest, host)?;
+
+        // Corresponds to the row inserted for the DYN or DYNCALL operation
+        // added to the trace.
+        self.clk += 1_u32;
+
+        let dyn_node = current_forest[current_node_id].unwrap_dyn();
 
         // dyn calls are not allowed inside a syscall
         if dyn_node.is_dyncall() && self.in_syscall {
             return Err(ExecutionError::CallInSyscall("dyncall"));
         }
 
-        let err_ctx = err_ctx!(program, dyn_node, self.source_manager.clone());
+        let err_ctx = err_ctx!(&current_forest, dyn_node, self.source_manager.clone());
 
-        // Retrieve callee hash from memory, using stack top as the memory address.
+        // Retrieve callee hash from memory, using stack top as the memory
+        // address.
         let callee_hash = {
             let mem_addr = self.stack_get(0);
             self.memory
@@ -584,8 +705,7 @@ impl FastProcessor {
                 .map_err(ExecutionError::MemoryError)?
         };
 
-        // Drop the memory address from the stack. This needs to be done BEFORE saving the context,
-        // because the next instruction starts with a "shifted left" stack.
+        // Drop the memory address from the stack. This needs to be done before saving the context.
         self.decrement_stack_size();
 
         // For dyncall, save the context and reset it.
@@ -596,47 +716,89 @@ impl FastProcessor {
             self.caller_hash = callee_hash;
         };
 
+        // Update continuation stack
+        // -----------------------------
+        continuation_stack.push_finish_dyn(current_node_id);
+
         // if the callee is not in the program's MAST forest, try to find a MAST forest for it in
-        // the host (corresponding to an external library loaded in the host); if none are
-        // found, return an error.
-        match program.find_procedure_root(callee_hash) {
-            Some(callee_id) => self.execute_mast_node(callee_id, program, kernel, host).await?,
+        // the host (corresponding to an external library loaded in the host); if none are found,
+        // return an error.
+        match current_forest.find_procedure_root(callee_hash) {
+            Some(callee_id) => {
+                continuation_stack.push_start_node(callee_id);
+            },
             None => {
-                let mast_forest = host
-                    .get_mast_forest(&callee_hash)
-                    .await
-                    .ok_or_else(|| ExecutionError::dynamic_node_not_found(callee_hash, &err_ctx))?;
+                let (root_id, new_forest) = self
+                    .load_mast_forest(
+                        callee_hash,
+                        host,
+                        ExecutionError::dynamic_node_not_found,
+                        &err_ctx,
+                    )
+                    .await?;
 
-                // We limit the parts of the program that can be called externally to procedure
-                // roots, even though MAST doesn't have that restriction.
-                let root_id = mast_forest
-                    .find_procedure_root(callee_hash)
-                    .ok_or(ExecutionError::malfored_mast_forest_in_host(callee_hash, &err_ctx))?;
+                // Push current forest to the continuation stack so that we can return to it
+                continuation_stack.push_enter_forest(current_forest.clone());
 
-                self.execute_mast_node(root_id, &mast_forest, kernel, host).await?
+                // Push the root node of the external MAST forest onto the continuation stack.
+                continuation_stack.push_start_node(root_id);
+
+                // Set the new MAST forest as current
+                *current_forest = new_forest;
             },
         }
+        Ok(())
+    }
 
+    /// Executes the finish phase of a Dyn node.
+    #[inline(always)]
+    fn finish_dyn_node(
+        &mut self,
+        node_id: MastNodeId,
+        current_forest: &MastForest,
+        host: &mut impl AsyncHost,
+    ) -> Result<(), ExecutionError> {
+        let dyn_node = current_forest[node_id].unwrap_dyn();
+        let err_ctx = err_ctx!(current_forest, dyn_node, self.source_manager.clone());
         // For dyncall, restore the context.
         if dyn_node.is_dyncall() {
             self.restore_context(&err_ctx)?;
         }
 
-        // Corresponds to the row inserted for the END operation added to the trace.
+        // Corresponds to the row inserted for the END operation added to
+        // the trace.
         self.clk += 1_u32;
 
-        Ok(())
+        self.execute_after_exit_decorators(node_id, current_forest, host)
     }
 
+    /// Executes an External node.
+    #[inline(always)]
     async fn execute_external_node(
         &mut self,
-        external_node: &ExternalNode,
-        kernel: &Kernel,
+        node_id: MastNodeId,
+        current_forest: &mut Arc<MastForest>,
+        continuation_stack: &mut ContinuationStack,
         host: &mut impl AsyncHost,
     ) -> Result<(), ExecutionError> {
-        let (root_id, mast_forest) = self.resolve_external_node(external_node, host).await?;
+        // Execute decorators that should be executed before entering the node
+        self.execute_before_enter_decorators(node_id, current_forest, host)?;
 
-        self.execute_mast_node(root_id, &mast_forest, kernel, host).await
+        let external_node = current_forest[node_id].unwrap_external();
+        let (root_id, new_mast_forest) = self.resolve_external_node(external_node, host).await?;
+
+        // Push current forest to the continuation stack so that we can return to it
+        continuation_stack.push_enter_forest(current_forest.clone());
+
+        // Push the root node of the external MAST forest onto the continuation stack.
+        continuation_stack.push_start_node(root_id);
+
+        self.execute_after_exit_decorators(node_id, current_forest, host)?;
+
+        // Update the current forest to the new MAST forest.
+        *current_forest = new_mast_forest;
+
+        Ok(())
     }
 
     // Note: when executing individual ops, we do not increment the clock by 1 at every iteration
@@ -646,9 +808,13 @@ impl FastProcessor {
     async fn execute_basic_block_node(
         &mut self,
         basic_block_node: &BasicBlockNode,
+        node_id: MastNodeId,
         program: &MastForest,
         host: &mut impl AsyncHost,
     ) -> Result<(), ExecutionError> {
+        // Execute decorators that should be executed before entering the node
+        self.execute_before_enter_decorators(node_id, program, host)?;
+
         // Corresponds to the row inserted for the SPAN operation added to the trace.
         self.clk += 1_u32;
 
@@ -704,7 +870,7 @@ impl FastProcessor {
             self.execute_decorator(decorator, 0, host)?;
         }
 
-        Ok(())
+        self.execute_after_exit_decorators(node_id, program, host)
     }
 
     #[inline(always)]
@@ -792,6 +958,42 @@ impl FastProcessor {
         // executed per missing op group).
 
         self.clk += (num_batch_groups - group_idx) as u32;
+
+        Ok(())
+    }
+
+    /// Executes the decorators that should be executed before entering a node.
+    fn execute_before_enter_decorators(
+        &mut self,
+        node_id: MastNodeId,
+        current_forest: &MastForest,
+        host: &mut impl AsyncHost,
+    ) -> Result<(), ExecutionError> {
+        let node = current_forest
+            .get_node_by_id(node_id)
+            .expect("internal error: node id {node_id} not found in current forest");
+
+        for &decorator_id in node.before_enter() {
+            self.execute_decorator(&current_forest[decorator_id], 0, host)?;
+        }
+
+        Ok(())
+    }
+
+    /// Executes the decorators that should be executed after exiting a node.
+    fn execute_after_exit_decorators(
+        &mut self,
+        node_id: MastNodeId,
+        current_forest: &MastForest,
+        host: &mut impl AsyncHost,
+    ) -> Result<(), ExecutionError> {
+        let node = current_forest
+            .get_node_by_id(node_id)
+            .expect("internal error: node id {node_id} not found in current forest");
+
+        for &decorator_id in node.after_exit() {
+            self.execute_decorator(&current_forest[decorator_id], 0, host)?;
+        }
 
         Ok(())
     }
@@ -963,31 +1165,29 @@ impl FastProcessor {
         Ok(())
     }
 
-    /// Analogous to [`Process::resolve_external_node`](crate::Process::resolve_external_node), but
-    /// for asynchronous execution.
-    async fn resolve_external_node(
-        &mut self,
-        external_node: &ExternalNode,
-        host: &mut impl AsyncHost,
-    ) -> Result<(MastNodeId, Arc<MastForest>), ExecutionError> {
-        let node_digest = external_node.digest();
+    // HELPERS
+    // ----------------------------------------------------------------------------------------------
 
+    async fn load_mast_forest<E>(
+        &mut self,
+        node_digest: Word,
+        host: &mut impl AsyncHost,
+        get_mast_forest_failed: impl Fn(Word, &E) -> ExecutionError,
+        err_ctx: &E,
+    ) -> Result<(MastNodeId, Arc<MastForest>), ExecutionError>
+    where
+        E: ErrorContext,
+    {
         let mast_forest = host
             .get_mast_forest(&node_digest)
             .await
-            .ok_or(ExecutionError::no_mast_forest_with_procedure(node_digest, &()))?;
+            .ok_or_else(|| get_mast_forest_failed(node_digest, err_ctx))?;
 
         // We limit the parts of the program that can be called externally to procedure
         // roots, even though MAST doesn't have that restriction.
         let root_id = mast_forest
             .find_procedure_root(node_digest)
-            .ok_or(ExecutionError::malfored_mast_forest_in_host(node_digest, &()))?;
-
-        // if the node that we got by looking up an external reference is also an External
-        // node, we are about to enter into an infinite loop - so, return an error
-        if mast_forest[root_id].is_external() {
-            return Err(ExecutionError::CircularExternalNode(node_digest));
-        }
+            .ok_or(ExecutionError::malfored_mast_forest_in_host(node_digest, err_ctx))?;
 
         // Merge the advice map of this forest into the advice provider.
         // Note that the map may be merged multiple times if a different procedure from the same
@@ -996,13 +1196,35 @@ impl FastProcessor {
         // this call will be cheap.
         self.advice
             .extend_map(mast_forest.advice_map())
-            .map_err(|err| ExecutionError::advice_error(err, self.clk, &()))?;
+            .map_err(|err| ExecutionError::advice_error(err, self.clk, err_ctx))?;
 
         Ok((root_id, mast_forest))
     }
 
-    // HELPERS
-    // ----------------------------------------------------------------------------------------------
+    /// Analogous to [`Process::resolve_external_node`](crate::Process::resolve_external_node), but
+    /// for asynchronous execution.
+    async fn resolve_external_node(
+        &mut self,
+        external_node: &ExternalNode,
+        host: &mut impl AsyncHost,
+    ) -> Result<(MastNodeId, Arc<MastForest>), ExecutionError> {
+        let (root_id, mast_forest) = self
+            .load_mast_forest(
+                external_node.digest(),
+                host,
+                ExecutionError::no_mast_forest_with_procedure,
+                &(),
+            )
+            .await?;
+
+        // if the node that we got by looking up an external reference is also an External
+        // node, we are about to enter into an infinite loop - so, return an error
+        if mast_forest[root_id].is_external() {
+            return Err(ExecutionError::CircularExternalNode(external_node.digest()));
+        }
+
+        Ok((root_id, mast_forest))
+    }
 
     /// Increments the stack top pointer by 1.
     ///
