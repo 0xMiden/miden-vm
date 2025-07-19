@@ -306,7 +306,7 @@ impl AdviceProvider {
     pub fn extend_from_inputs(&mut self, inputs: &AdviceInputs) -> Result<(), AdviceError> {
         self.extend_stack(inputs.stack().iter().cloned().rev());
         self.extend_merkle_store(inputs.merkle_store().inner_nodes());
-        self.extend_map(&inputs.map())
+        self.extend_map(inputs.map())
     }
 }
 
