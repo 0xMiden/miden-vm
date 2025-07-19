@@ -10,12 +10,13 @@
 #### Changes
 
 - [BREAKING] Incremented MSRV to 1.88.
-- [BREAKING] Implement preliminary changes for lazy loading of external `MastForest` `AdviceMap`s ([#1949](https://github.com/0xMiden/miden-vm/issues/1949)).
-- [BREAKING] Introduce `SourceManagerSync` trait, and remove `Assembler::source_manager()` method [#1966](https://github.com/0xMiden/miden-vm/issues/1966).
+- [BREAKING] Implemented preliminary changes for lazy loading of external `MastForest` `AdviceMap`s ([#1949](https://github.com/0xMiden/miden-vm/issues/1949)).
+- [BREAKING] Introduced `SourceManagerSync` trait, and remove `Assembler::source_manager()` method [#1966](https://github.com/0xMiden/miden-vm/issues/1966).
 - Fixed `ExecutionOptions::default()` to set `max_cycles` correctly to `1 << 29` ([#1969](https://github.com/0xMiden/miden-vm/pull/1969)).
-- [BREAKING] Revert `get_mapped_value` return signature [(#1981)](https://github.com/0xMiden/miden-vm/issues/1981).
-- [BREAKING] Implement custom Event handlers ([#1584](https://github.com/0xMiden/miden-vm/pull/1584)).
-- Convert `FastProcessor::execute()` from recursive to iterative execution ([#1989](https://github.com/0xMiden/miden-vm/issues/1989))
+- [BREAKING] Reverted `get_mapped_value` return signature [(#1981)](https://github.com/0xMiden/miden-vm/issues/1981).
+- [BREAKING] Implemented custom Event handlers ([#1584](https://github.com/0xMiden/miden-vm/pull/1584)).
+- Converted `FastProcessor::execute()` from recursive to iterative execution ([#1989](https://github.com/0xMiden/miden-vm/issues/1989)).
+- Added `AdviceInputs::map()` and `AdviceInputs::into_parts()` method ([#2009](https://github.com/0xMiden/miden-vm/pull/2009)).
 
 ## 0.16.3 (2025-07-18)
 
