@@ -1,4 +1,4 @@
-use alloc::{sync::Arc, vec::Vec};
+use alloc::vec::Vec;
 
 use miden_core::{
     AdviceMap, Felt, Word,
@@ -21,12 +21,11 @@ use miden_core::{
 /// 2. Key-mapped element lists which can be pushed onto the advice stack.
 /// 3. Merkle store, which is used to provide nondeterministic inputs for instructions that operates
 ///    with Merkle trees.
-#[cfg(not(feature = "testing"))]
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct AdviceInputs {
-    pub(super) stack: Vec<Felt>,
-    pub(super) map: AdviceMap,
-    pub(super) store: MerkleStore,
+    stack: Vec<Felt>,
+    map: AdviceMap,
+    store: MerkleStore,
 }
 
 impl AdviceInputs {
@@ -109,20 +108,29 @@ impl AdviceInputs {
     // PUBLIC ACCESSORS
     // --------------------------------------------------------------------------------------------
 
-    /// Returns a reference to the advice stack.
+    /// Returns a reference to the advice stack of this advice inputs.
     pub fn stack(&self) -> &[Felt] {
         &self.stack
     }
 
-    /// Fetch a values set mapped by the given key.
-    pub fn mapped_values(&self, key: &Word) -> Option<&Arc<[Felt]>> {
-        self.map.get(key)
+    /// Returns a reference to the [AdviceMap] of this advice inputs.
+    pub fn map(&self) -> &AdviceMap {
+        &self.map
     }
 
-    /// Returns the underlying [MerkleStore].
+    /// Returns the underlying [MerkleStore] of this advice inputs.
     pub const fn merkle_store(&self) -> &MerkleStore {
         &self.store
     }
+
+    // DESTRUCTORS
+    // --------------------------------------------------------------------------------------------
+
+    /// Returns the underlying components of these advice inputs (stack, map, store).
+    pub fn into_parts(self) -> (Vec<Felt>, AdviceMap, MerkleStore) {
+        (self.stack, self.map, self.store)
+    }
+
 }
 
 impl Serializable for AdviceInputs {
@@ -141,17 +149,6 @@ impl Deserializable for AdviceInputs {
         let store = MerkleStore::read_from(source)?;
         Ok(Self { stack, map, store })
     }
-}
-
-// TESTING
-// ================================================================================================
-
-#[cfg(feature = "testing")]
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct AdviceInputs {
-    pub stack: Vec<Felt>,
-    pub map: AdviceMap,
-    pub store: MerkleStore,
 }
 
 // TESTS

@@ -304,15 +304,15 @@ impl AdviceProvider {
 
     /// Extends the contents of this instance with the contents of an `AdviceInputs`.
     pub fn extend_from_inputs(&mut self, inputs: &AdviceInputs) -> Result<(), AdviceError> {
-        self.extend_stack(inputs.stack.iter().cloned().rev());
-        self.extend_merkle_store(inputs.store.inner_nodes());
-        self.extend_map(&inputs.map)
+        self.extend_stack(inputs.stack().iter().cloned().rev());
+        self.extend_merkle_store(inputs.merkle_store().inner_nodes());
+        self.extend_map(&inputs.map())
     }
 }
 
 impl From<AdviceInputs> for AdviceProvider {
     fn from(inputs: AdviceInputs) -> Self {
-        let AdviceInputs { mut stack, map, store } = inputs;
+        let ( mut stack, map, store ) = inputs.into_parts();
         stack.reverse();
         Self { stack, map, store }
     }
