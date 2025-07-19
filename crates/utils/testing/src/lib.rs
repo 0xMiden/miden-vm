@@ -534,6 +534,14 @@ impl Test {
 // HELPER FUNCTIONS
 // ================================================================================================
 
+/// Appends a Word to an operand stack Vec.
+pub fn append_word_to_vec(target: &mut Vec<u64>, word: Word) {
+    target.push(word[0].as_int());
+    target.push(word[1].as_int());
+    target.push(word[2].as_int());
+    target.push(word[3].as_int());
+}
+
 /// Converts a slice of Felts into a vector of u64 values.
 pub fn felt_slice_to_ints(values: &[Felt]) -> Vec<u64> {
     values.iter().map(|e| (*e).as_int()).collect()
