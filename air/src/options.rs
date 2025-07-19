@@ -50,8 +50,8 @@ impl ProvingOptions {
         16,
         FieldExtension::Quadratic,
         4,
-        7,
-        BatchingMethod::Horner,
+        127,
+        BatchingMethod::Algebraic,
         BatchingMethod::Horner,
     );
 
@@ -87,7 +87,7 @@ impl ProvingOptions {
             field_extension,
             fri_folding_factor,
             fri_remainder_max_degree,
-            BatchingMethod::Horner,
+            BatchingMethod::Algebraic,
             BatchingMethod::Horner,
         );
         let exec_options = ExecutionOptions::default();
