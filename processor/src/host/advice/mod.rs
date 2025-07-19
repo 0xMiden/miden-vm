@@ -312,7 +312,7 @@ impl AdviceProvider {
 
 impl From<AdviceInputs> for AdviceProvider {
     fn from(inputs: AdviceInputs) -> Self {
-        let ( mut stack, map, store ) = inputs.into_parts();
+        let (mut stack, map, store) = inputs.into_parts();
         stack.reverse();
         Self { stack, map, store }
     }

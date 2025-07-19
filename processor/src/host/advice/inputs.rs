@@ -130,7 +130,6 @@ impl AdviceInputs {
     pub fn into_parts(self) -> (Vec<Felt>, AdviceMap, MerkleStore) {
         (self.stack, self.map, self.store)
     }
-
 }
 
 impl Serializable for AdviceInputs {
