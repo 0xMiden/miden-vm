@@ -68,7 +68,7 @@ impl Uri {
         }
     }
 
-    /// Returns the scheme portion of this URI, if present.
+    /// Returns the authority portion of this URI, if present.
     pub fn authority(&self) -> Option<&str> {
         let uri = self.0.as_ref();
         let (_, rest) = uri.split_once("//")?;
@@ -120,9 +120,7 @@ impl AsRef<str> for Uri {
 impl From<&str> for Uri {
     #[inline]
     fn from(value: &str) -> Self {
-        use alloc::string::ToString;
-
-        value.to_string().into()
+        Self(value.into())
     }
 }
 
