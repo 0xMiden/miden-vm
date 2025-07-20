@@ -75,6 +75,7 @@ serde = { version = "1.0", default-features = false, features = [
     "rc",
 ] }
 serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
+serde-untagged = "0.1"
 smallvec = { version = "1.13", default-features = false, features = [
     "union",
     "const_generics",

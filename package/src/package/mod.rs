@@ -1,4 +1,5 @@
 mod manifest;
+mod section;
 mod serialization;
 
 use alloc::{format, string::String, sync::Arc, vec::Vec};
@@ -6,7 +7,10 @@ use alloc::{format, string::String, sync::Arc, vec::Vec};
 use miden_assembly_syntax::{Library, Report, ast::QualifiedProcedureName};
 use miden_core::{Program, Word};
 
-pub use self::manifest::{PackageExport, PackageManifest};
+pub use self::{
+    manifest::{PackageExport, PackageManifest},
+    section::{InvalidSectionIdError, Section, SectionId},
+};
 use crate::MastArtifact;
 
 // PACKAGE
@@ -22,9 +26,9 @@ pub struct Package {
     /// The package manifest, containing the set of exported procedures and their signatures,
     /// if known.
     pub manifest: PackageManifest,
-    /// Serialized `miden-objects::account::AccountComponentMetadata` for the account component
-    /// (name, descrioption, storage,) associated with this package, if any.
-    pub account_component_metadata_bytes: Option<Vec<u8>>,
+    /// The set of custom sections included with the package, e.g. debug information, account
+    /// metadata, etc.
+    pub sections: Vec<Section>,
 }
 
 impl Package {
@@ -98,7 +102,7 @@ impl Package {
                     self.manifest.get_exports_by_digest(&digest).cloned(),
                 )
                 .with_dependencies(self.manifest.dependencies().cloned()),
-                account_component_metadata_bytes: None,
+                sections: self.sections.clone(),
             })
         } else {
             Err(Report::msg(format!(
