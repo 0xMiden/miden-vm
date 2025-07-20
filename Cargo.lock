@@ -1097,6 +1097,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "miden-bite"
+version = "0.16.0"
+dependencies = [
+ "bumpalo",
+ "env_logger",
+ "indexmap",
+ "log",
+ "proptest",
+ "serde",
+ "smallvec",
+ "thiserror 2.0.12",
+]
+
+[[package]]
 name = "miden-core"
 version = "0.17.0"
 dependencies = [
