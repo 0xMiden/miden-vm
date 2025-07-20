@@ -3677,7 +3677,7 @@ prop_compose! {
 
         let manifest = PackageManifest::new(exports).with_dependencies(manifest.dependencies().cloned());
 
-        Package { name, mast, manifest, account_component_metadata_bytes: None }
+        Package { name, mast, manifest, sections: Default::default() }
     }
 }
 

@@ -1,6 +1,6 @@
 [package]
 name = "miden-bite"
-version = "0.16.0"
+version = "0.17.0"
 description = "BITE is Binary Interchange, Tiny Encoding - a compact binary file format"
 documentation = "https://docs.rs/miden-bite/0.16.0"
 readme = "README.md"
