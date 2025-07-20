@@ -34,7 +34,7 @@
 //!       - `name` (`String`)
 //!       - `digest` (`Word`)
 
-use alloc::{collections::BTreeMap, format, string::String, sync::Arc, vec::Vec};
+use alloc::{borrow::Cow, collections::BTreeMap, format, string::String, sync::Arc, vec::Vec};
 
 use miden_assembly_syntax::{
     Library,
@@ -46,7 +46,7 @@ use miden_core::{
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
-use crate::{Dependency, MastArtifact, Package, PackageExport, PackageManifest};
+use crate::{Dependency, MastArtifact, Package, PackageExport, PackageManifest, Section};
 
 // CONSTANTS
 // ================================================================================================
@@ -63,7 +63,7 @@ const MAGIC_LIBRARY: &[u8; 4] = b"LIB\0";
 /// The format version.
 ///
 /// If future modifications are made to this format, the version should be incremented by 1.
-const VERSION: [u8; 3] = [1, 0, 0];
+const VERSION: [u8; 3] = [2, 0, 0];
 
 // PACKAGE SERIALIZATION/DESERIALIZATION
 // ================================================================================================
@@ -83,8 +83,17 @@ impl Serializable for Package {
         // Write manifest
         self.manifest.write_into(target);
 
-        // Write optional account component metadata
-        self.account_component_metadata_bytes.write_into(target);
+        // Write custom sections
+        target.write_usize(self.sections.len());
+        for section in self.sections.iter() {
+            target.write_u8(section.id.tag());
+            if let SectionId::Custom(name) = &section.id {
+                target.write_usize(name.len());
+                target.write_bytes(name.as_bytes());
+            }
+            target.write_usize(section.data.len());
+            target.write_bytes(&section.data);
+        }
     }
 }
 
@@ -114,15 +123,27 @@ impl Deserializable for Package {
         // Read manifest
         let manifest = PackageManifest::read_from(source)?;
 
-        // Read optional account component metadata
-        let account_component_metadata_bytes: Option<Vec<u8>> = Deserializable::read_from(source)?;
+        // Read custom sections
+        let num_sections = source.read_usize()?;
+        let mut sections = Vec::with_capacity(num_sections);
+        for _ in 0..num_sections {
+            let id = source.read_u8()?;
+            let id = if id == SectionId::Custom(Cow::Borrowed("")).tag() {
+                let name_len = source.read_usize()?;
+                let name = source.read_string(name_len)?;
+                SectionId::Custom(name.into())
+            } else {
+                SectionId::try_from(id).map_err(|_| {
+                    DeserializationError::InvalidValue(format!("unknown custom section id: {id}"))
+                })?
+            };
 
-        Ok(Self {
-            name,
-            mast,
-            manifest,
-            account_component_metadata_bytes,
-        })
+            let len = source.read_usize()?;
+            let bytes = source.read_slice(len)?.to_vec();
+            sections.push(Section { id, data: Cow::Owned(bytes) });
+        }
+
+        Ok(Self { name, mast, manifest, sections })
     }
 }
 
