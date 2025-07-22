@@ -16,7 +16,7 @@
 - [BREAKING] Reverted `get_mapped_value` return signature [(#1981)](https://github.com/0xMiden/miden-vm/issues/1981).
 - [BREAKING] Implemented custom Event handlers ([#1584](https://github.com/0xMiden/miden-vm/pull/1584)).
 - Converted `FastProcessor::execute()` from recursive to iterative execution ([#1989](https://github.com/0xMiden/miden-vm/issues/1989)).
-- Added `AdviceInputs::map()` and `AdviceInputs::into_parts()` method ([#2009](https://github.com/0xMiden/miden-vm/pull/2009)).
+- [BREAKING] made `AdviceInputs` field public and removed redundant accessors ([#2009](https://github.com/0xMiden/miden-vm/pull/2009)).
 
 ## 0.16.3 (2025-07-18)
 

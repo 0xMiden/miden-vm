@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 
 use miden_core::{
     AdviceMap, Felt, Word,
-    crypto::merkle::{InnerNodeInfo, MerkleStore},
+    crypto::merkle::MerkleStore,
     errors::InputError,
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
@@ -23,9 +23,9 @@ use miden_core::{
 ///    with Merkle trees.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct AdviceInputs {
-    stack: Vec<Felt>,
-    map: AdviceMap,
-    store: MerkleStore,
+    pub stack: Vec<Felt>,
+    pub map: AdviceMap,
+    pub store: MerkleStore,
 }
 
 impl AdviceInputs {
@@ -74,61 +74,11 @@ impl AdviceInputs {
     // PUBLIC MUTATORS
     // --------------------------------------------------------------------------------------------
 
-    /// Extends the stack with the given elements.
-    pub fn extend_stack<I>(&mut self, iter: I)
-    where
-        I: IntoIterator<Item = Felt>,
-    {
-        self.stack.extend(iter);
-    }
-
-    /// Extends the map of values with the given argument, replacing previously inserted items.
-    pub fn extend_map<I>(&mut self, iter: I)
-    where
-        I: IntoIterator<Item = (Word, Vec<Felt>)>,
-    {
-        self.map.extend(iter);
-    }
-
-    /// Extends the [MerkleStore] with the given nodes.
-    pub fn extend_merkle_store<I>(&mut self, iter: I)
-    where
-        I: Iterator<Item = InnerNodeInfo>,
-    {
-        self.store.extend(iter);
-    }
-
     /// Extends the contents of this instance with the contents of the other instance.
     pub fn extend(&mut self, other: Self) {
         self.stack.extend(other.stack);
         self.map.extend(other.map);
         self.store.extend(other.store.inner_nodes());
-    }
-
-    // PUBLIC ACCESSORS
-    // --------------------------------------------------------------------------------------------
-
-    /// Returns a reference to the advice stack of this advice inputs.
-    pub fn stack(&self) -> &[Felt] {
-        &self.stack
-    }
-
-    /// Returns a reference to the [AdviceMap] of this advice inputs.
-    pub fn map(&self) -> &AdviceMap {
-        &self.map
-    }
-
-    /// Returns the underlying [MerkleStore] of this advice inputs.
-    pub const fn merkle_store(&self) -> &MerkleStore {
-        &self.store
-    }
-
-    // DESTRUCTORS
-    // --------------------------------------------------------------------------------------------
-
-    /// Returns the underlying components of these advice inputs (stack, map, store).
-    pub fn into_parts(self) -> (Vec<Felt>, AdviceMap, MerkleStore) {
-        (self.stack, self.map, self.store)
     }
 }
 
