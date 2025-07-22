@@ -7,6 +7,7 @@ use miden_air::{
         range::{M_COL_IDX, V_COL_IDX},
     },
 };
+use miden_core::ZERO;
 
 use super::{Felt, FieldElement, NUM_RAND_ROWS, uninit_vector};
 
@@ -120,7 +121,7 @@ impl AuxTraceBuilder {
         {
             b_range_idx = row_idx + 1;
 
-            if multiplicity.as_int() != 0 {
+            if *multiplicity != ZERO {
                 // add the value in the range checker: multiplicity / (alpha + lookup)
                 let value = divisors.get(&(lookup.as_int() as u16)).expect("invalid lookup value");
                 b_range[b_range_idx] = b_range[row_idx] + value.mul_base(*multiplicity);

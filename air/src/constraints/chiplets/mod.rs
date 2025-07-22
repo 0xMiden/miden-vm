@@ -261,14 +261,13 @@ where
     let alphas = aux_rand_elements.rand_elements();
     kernel_digests.iter().fold(E::ONE, |acc, digest: &Word| {
         let digest = digest.to_vec();
-        let cur = alphas[0]
-            + KERNEL_PROC_INIT_LABEL.into()
-            + alphas
-                .iter()
-                .skip(2)
-                .zip(digest.iter())
-                .map(|(alpha, coef)| alpha.mul_base(*coef))
-                .fold(E::ZERO, |acc, term| acc + term);
+        let affine_term = alphas[0] + KERNEL_PROC_INIT_LABEL.into();
+        let cur = alphas
+            .iter()
+            .skip(2)
+            .zip(digest.iter())
+            .map(|(alpha, coef)| alpha.mul_base(*coef))
+            .fold(affine_term, |acc, term| acc + term);
 
         acc * cur
     })
