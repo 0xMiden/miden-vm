@@ -12,7 +12,7 @@ const CONTINUATION_STACK_SIZE_HINT: usize = 64;
 ///
 /// This enum defines the different types of continuations that can be performed on MAST nodes
 /// during program execution.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Continuation {
     /// Start processing a node in the MAST forest.
     StartNode(MastNodeId),
@@ -39,7 +39,7 @@ pub enum Continuation {
 /// This allows the processor to execute a program iteratively in a loop rather than recursively
 /// traversing the nodes. It also allows the processor to pass the state of execution to another
 /// processor for further processing, which is useful for parallel execution of MAST forests.
-#[derive(Debug)]
+#[derive(Debug, Default, Clone)]
 pub struct ContinuationStack {
     stack: Vec<Continuation>,
 }

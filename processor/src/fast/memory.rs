@@ -3,7 +3,10 @@ use alloc::{collections::BTreeMap, vec::Vec};
 use miden_air::RowIndex;
 use miden_core::{EMPTY_WORD, Felt, WORD_SIZE, Word, ZERO};
 
-use crate::{ContextId, ErrorContext, MemoryAddress, MemoryError};
+use crate::{
+    ContextId, ErrorContext, MemoryAddress, MemoryError,
+    fast::trace_state_builder::CoreTraceStateBuilder,
+};
 
 /// The memory for the processor.
 ///
@@ -30,8 +33,14 @@ impl Memory {
         ctx: ContextId,
         addr: Felt,
         err_ctx: &impl ErrorContext,
+        trace_state_builder: &mut Option<CoreTraceStateBuilder>,
     ) -> Result<Felt, MemoryError> {
         let element = self.read_element_impl(ctx, clean_addr(addr, err_ctx)?).unwrap_or(ZERO);
+
+        if let Some(trace_state_builder) = trace_state_builder {
+            trace_state_builder.memory.record_element(element, addr);
+        }
+
         Ok(element)
     }
 
@@ -46,9 +55,14 @@ impl Memory {
         addr: Felt,
         clk: RowIndex,
         err_ctx: &impl ErrorContext,
+        trace_state_builder: &mut Option<CoreTraceStateBuilder>,
     ) -> Result<Word, MemoryError> {
         let addr = clean_addr(addr, err_ctx)?;
         let word = self.read_word_impl(ctx, addr, Some(clk), err_ctx)?.unwrap_or(EMPTY_WORD);
+
+        if let Some(trace_state_builder) = trace_state_builder {
+            trace_state_builder.memory.record_word(word, addr.into());
+        }
 
         Ok(word)
     }

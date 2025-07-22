@@ -21,6 +21,10 @@ impl FastProcessor {
         };
 
         self.stack[state_range].copy_from_slice(&hashed_state);
+
+        if let Some(trace_state_builder) = &mut self.trace_state_builder {
+            trace_state_builder.hasher.record_permute(hashed_state);
+        }
     }
 
     /// Analogous to `Process::op_mpverify`.
@@ -41,6 +45,10 @@ impl FastProcessor {
             .advice
             .get_merkle_path(root, &depth, &index)
             .map_err(|err| ExecutionError::advice_error(err, self.clk, err_ctx))?;
+
+        if let Some(trace_state_builder) = &mut self.trace_state_builder {
+            trace_state_builder.hasher.record_build_merkle_root(&path, root);
+        }
 
         // verify the path
         match path.verify(index.as_int(), node, &root) {
@@ -83,6 +91,10 @@ impl FastProcessor {
 
         // Replace the old node value with computed new root; everything else remains the same.
         self.stack_write_word(0, &new_root);
+
+        if let Some(trace_state_builder) = &mut self.trace_state_builder {
+            trace_state_builder.hasher.record_update_merkle_root(&path, old_root, new_root);
+        }
 
         Ok(())
     }
