@@ -10,6 +10,7 @@
 - Add constraints evaluation check to recursive verifier ([#1997](https://github.com/0xMiden/miden-vm/pull/1997)).
 - Add `AdviceProvider::into_parts()` method ([#2024](https://github.com/0xMiden/miden-vm/pull/2024)).
 - Move `fn with_source_manager` from `Process` to the `host` [#2019](https://github.com/0xMiden/miden-vm/pull/2019).
+- Move the `SourceManager` from the processor to the host [#2019](https://github.com/0xMiden/miden-vm/pull/2019).
 
 #### Changes
 
