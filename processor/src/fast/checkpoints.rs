@@ -27,14 +27,17 @@ pub enum NodeExecutionPhase {
         batch_index: usize,
         /// Index of the operation within the batch
         op_idx_in_batch: usize,
-        /// Whether a RESPAN operation needs to be added before executing this batch. When true,
-        /// `batch_index` refers to the batch to be executed *after* the RESPAN operation, and
-        /// `op_index_in_batch` MUST be set to 0.
-        needs_respan: bool,
     },
     /// Execute the START phase of a control flow node (JOIN, SPLIT, LOOP, etc.).
     /// This is used when beginning execution of a control flow construct.
     Start(MastNodeId),
+    /// Execute a RESPAN for the specified batch within the specified basic block.
+    Respan {
+        /// Node ID of the basic block being executed
+        node_id: MastNodeId,
+        /// Index of the operation batch within the basic block
+        batch_index: usize,
+    },
     /// Execute the REPEAT phase of a Loop node.
     LoopRepeat(MastNodeId),
     /// Execute the END phase of a control flow node (JOIN, SPLIT, LOOP, etc.).
@@ -124,7 +127,7 @@ impl StackState {
 
     /// Derives the stack depth (b0 helper column) from the overflow table
     pub fn stack_depth(&self) -> Felt {
-        Felt::new((MIN_STACK_DEPTH + self.overflow.total_num_elements()) as u64)
+        Felt::new((MIN_STACK_DEPTH + self.overflow.num_elements_in_current_ctx()) as u64)
     }
 
     /// Derives the overflow address (b1 helper column) from the overflow table
@@ -134,6 +137,11 @@ impl StackState {
 
     pub fn num_overflow_elements_in_current_ctx(&self) -> usize {
         self.overflow.num_elements_in_current_ctx()
+    }
+
+    pub fn advance_clock(&mut self) {
+        // Advance the overflow table clock to the next row
+        self.overflow.advance_clock();
     }
 
     pub fn push_overflow(&mut self, element: Felt) {
