@@ -62,13 +62,7 @@ proc.load_query_row
     ## 5) Load the leaf value we got using `mtree_get` and compare it against the hash
     ##    we just computed
     exec.constants::tmp3 mem_loadw
-    movup.4
-    assert_eq
-    movup.3
-    assert_eq
-    movup.2
-    assert_eq
-    assert_eq
+    assert_eqw
     #=> [Y, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr, ...]
 
 
@@ -100,13 +94,7 @@ proc.load_query_row
     ## 4) Load the leaf value we got using `mtree_get` and compare it against the hash
     ##    we just computed
     exec.constants::tmp3 mem_loadw
-    movup.4
-    assert_eq
-    movup.3
-    assert_eq
-    movup.2
-    assert_eq
-    assert_eq
+    assert_eqw
     #=> [Y, ptr_x, ptr_alpha_inv, acc1, acc0, index, query_ptr, ...]
 
     ## 5) Re-order the stack
@@ -121,7 +109,7 @@ end
 #!
 #! Input: [Y, Y, 0, 0, 0, 0, ptr, ...]
 #! Output: [Y, D, C, ptr, ...]
-export.load_main_segment_execution_trace
+proc.load_main_segment_execution_trace
     repeat.10
         adv_pipe
         horner_eval_base
@@ -133,7 +121,7 @@ end
 #!
 #! Input: [Y, Y, 0, 0, 0, 0, ptr, ...]
 #! Output: [Y, D, C, ptr, ...]
-export.load_aux_segment_execution_trace
+proc.load_aux_segment_execution_trace
     repeat.2
         adv_pipe
         horner_eval_ext      
@@ -145,7 +133,7 @@ end
 #!
 #! Input: [Y, Y, 0, 0, 0, 0, ptr, ...]
 #! Output: [Y, D, C, ptr, ...]
-export.load_constraints_composition_polys_trace
+proc.load_constraints_composition_polys_trace
     repeat.2
         adv_pipe
         horner_eval_ext        
@@ -157,7 +145,7 @@ end
 #! 
 #! Input: [Y, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr, ...]
 #! Output: [Y, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr, ...]
-export.process_aux_segment_execution_trace
+proc.process_aux_segment_execution_trace
     ## 1) Load aux trace commitment and get leaf
     exec.constants::aux_trace_com_ptr mem_loadw
 
@@ -184,12 +172,6 @@ export.process_aux_segment_execution_trace
     ## 4) Load the leaf value we got using `mtree_get` and compare it against the hash
     ##    we just computed
     exec.constants::tmp3 mem_loadw
-    movup.4
-    assert_eq
-    movup.3
-    assert_eq
-    movup.2
-    assert_eq
-    assert_eq
+    assert_eqw
     #=> [Y, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr, ...]
 end

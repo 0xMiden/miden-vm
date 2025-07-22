@@ -1,4 +1,11 @@
 #! Processes the out-of-domain (OOD) evaluations of all committed polynomials.
+#!
+#! Takes as input an RPO hasher state and a pointer, and loads from the advice provider the OOD
+#! evaluations and stores at memory region using pointer `ptr` while absorbing the evaluations
+#! into the hasher state.
+#!
+#! Input: [R2, R1, C, ptr, ...]
+#! Output: [R2, R1, C, ptr, ...]
 export.process_row_ood_evaluations
     repeat.24
         adv_pipe

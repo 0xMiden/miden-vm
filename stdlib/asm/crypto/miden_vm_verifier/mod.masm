@@ -1,10 +1,67 @@
-use.std::crypto::miden_vm_verifier::helper
+use.std::crypto::hashes::rpo
+
+use.std::crypto::miden_vm_verifier::deep_queries
+use.std::crypto::miden_vm_verifier::constraints_eval
+use.std::crypto::miden_vm_verifier::ood_frames
+use.std::crypto::miden_vm_verifier::public_inputs
+
 use.std::crypto::stark::verifier
 
+const.TRACE_INFO=0x50010810
+
+
 # Input: [log(trace_length), num_queries, grinding, ...]
-# Output: [log(trace_length), num_queries, grinding, num_constraints, trace_info, num_fixed_len_pi, num_ace_inputs, num_ace_gates, max_cycle_len_log, ROOT, ...]
-export.verify
-    exec.helper::prologue
+# Output: [...]
+export.verify.20
+    # 1) Build the commitment to all dynamic procedures
+    padw
+    procref.deep_queries::load_query_row
+    loc_storew.0
+
+    procref.constraints_eval::load_ace_circuit_description
+    loc_storew.4
+
+    hperm
+    dropw dropw
+
+    procref.ood_frames::process_row_ood_evaluations
+    loc_storew.8
+    procref.public_inputs::reduce_var_len_public_inputs_groups
+    loc_storew.12
+
+    hperm
+    exec.rpo::squeeze_digest
+
+    locaddr.16 movdn.4
+    locaddr.0 movdn.4
+    adv.insert_mem
+
+    movup.4 drop
+    movup.4 drop
+    # => [ROOT, log(trace_length), num_queries, grinding, ...]
+
+    # 2) Get constants
+
+    ## a) arithmetic circuit for constraints evaluation
+    exec.constraints_eval::get_arithmetic_circuit_constants
+    # => [num_ace_inputs, num_ace_gates, max_cycle_len_log, ROOT, log(trace_length), num_queries, grinding, ...]
+
+    ## b) Number of fixed length public inputs
+    exec.public_inputs::get_num_fixed_len_public_inputs
+    # => [num_fixed_len_pi, num_ace_inputs, num_ace_gates, max_cycle_len_log, ROOT, log(trace_length), num_queries, grinding, ...]
+
+    ## c) Trace info as one field element
+    push.TRACE_INFO
+    # => [trace_info, num_fixed_len_pi, num_ace_inputs, num_ace_gates, max_cycle_len_log, ROOT, log(trace_length), num_queries, grinding, ...]
+
+    ## d) Number of constraints
+    exec.constraints_eval::get_num_constraints
+    # => [num_constraints, trace_info, num_fixed_len_pi, num_ace_inputs, num_ace_gates, max_cycle_len_log, ROOT, log(trace_length), num_queries, grinding, ...]
+
+    # 3) Organize the stack and return
+    movup.12
+    movup.12
+    movup.12
     # => [num_constraints, trace_info, num_fixed_len_pi, num_ace_inputs, num_ace_gates, max_cycle_len_log, ROOT, log(trace_length), num_queries, grinding, ...]
 
     exec.verifier::verify
