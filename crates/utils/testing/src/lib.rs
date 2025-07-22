@@ -31,7 +31,7 @@ pub use miden_processor::{
     AdviceInputs, AdviceProvider, ContextId, ExecutionError, ExecutionOptions, ExecutionTrace,
     Process, ProcessState, VmStateIterator,
 };
-use miden_processor::{DefaultHost, EventError, Program, fast::FastProcessor};
+use miden_processor::{AdviceMutation, DefaultHost, EventError, Program, fast::FastProcessor};
 use miden_prover::utils::range;
 pub use miden_prover::{MerkleTreeVC, ProvingOptions, prove};
 pub use miden_verifier::{AcceptableOptions, VerifierError, verify};
@@ -156,7 +156,7 @@ macro_rules! assert_assembler_diagnostic {
 }
 
 /// Alias for a free function or closure handling an `Event`.
-type HandlerFunc = fn(&mut ProcessState) -> Result<(), EventError>;
+type HandlerFunc = fn(&ProcessState) -> Result<Vec<AdviceMutation>, EventError>;
 
 /// This is a container for the data required to run tests, which allows for running several
 /// different types of tests.
@@ -466,10 +466,10 @@ impl Test {
         let (program, kernel) = self.compile().expect("Failed to compile test source.");
         let mut host = TestHost::default();
         if let Some(kernel) = kernel {
-            host.load_library(kernel.mast_forest()).unwrap();
+            host.load_library(kernel.mast_forest().clone()).unwrap();
         }
         for library in &self.libraries {
-            host.load_library(library.mast_forest()).unwrap();
+            host.load_library(library.mast_forest().clone()).unwrap();
         }
         for (id, handler_func) in &self.handlers {
             host.load_handler(*id, *handler_func).unwrap();

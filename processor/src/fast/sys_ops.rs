@@ -90,14 +90,20 @@ impl FastProcessor {
         host: &mut impl AsyncHost,
         err_ctx: &impl ErrorContext,
     ) -> Result<(), ExecutionError> {
-        let process = &mut self.state(op_idx);
+        let mut process = self.state(op_idx);
         // If it's a system event, handle it directly. Otherwise, forward it to the host.
         if let Some(system_event) = SystemEvent::from_event_id(event_id) {
-            handle_system_event(process, system_event, err_ctx)
+            handle_system_event(&mut process, system_event, err_ctx)
         } else {
-            host.on_event(process, event_id)
+            let clk = process.clk();
+            let mutations = host
+                .on_event(&process, event_id)
                 .await
-                .map_err(|err| ExecutionError::event_error(err, event_id, err_ctx))
+                .map_err(|err| ExecutionError::event_error(err, event_id, err_ctx))?;
+            self.advice
+                .apply_mutations(mutations)
+                .map_err(|err| ExecutionError::advice_error(err, clk, err_ctx))?;
+            Ok(())
         }
     }
 }
