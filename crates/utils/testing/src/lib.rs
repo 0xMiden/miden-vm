@@ -13,7 +13,10 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_assembly::{KernelLibrary, Library, Parse, diagnostics::reporting::PrintDiagnostic};
+use miden_assembly::{
+    KernelLibrary, Library, Parse, debuginfo::SourceManagerSync,
+    diagnostics::reporting::PrintDiagnostic,
+};
 pub use miden_assembly::{
     LibraryPath,
     debuginfo::{DefaultSourceManager, SourceFile, SourceLanguage, SourceManager},
@@ -172,7 +175,7 @@ type HandlerFunc = fn(&ProcessState) -> Result<Vec<AdviceMutation>, EventError>;
 /// - Execution error test: check that running a program compiled from the given source causes an
 ///   ExecutionError which contains the specified substring.
 pub struct Test {
-    pub source_manager: Arc<dyn SourceManager>,
+    pub source_manager: Arc<dyn SourceManagerSync>,
     pub source: Arc<SourceFile>,
     pub kernel_source: Option<Arc<SourceFile>>,
     pub stack_inputs: StackInputs,
@@ -242,7 +245,9 @@ impl Test {
         expected_mem: &[u64],
     ) {
         // compile the program
-        let (program, mut host) = self.get_program_and_host();
+        let (program, host) = self.get_program_and_host();
+
+        let mut host = host.with_source_manager(self.source_manager.clone());
 
         // execute the test
         let mut process = Process::new(
@@ -250,8 +255,7 @@ impl Test {
             self.stack_inputs.clone(),
             self.advice_inputs.clone(),
             ExecutionOptions::default().with_debugging(self.in_debug_mode),
-        )
-        .with_source_manager(self.source_manager.clone());
+        );
         process.execute(&program, &mut host).unwrap();
 
         // validate the memory state
@@ -342,7 +346,9 @@ impl Test {
     /// outputs.
     #[track_caller]
     pub fn execute(&self) -> Result<ExecutionTrace, ExecutionError> {
-        let (program, mut host) = self.get_program_and_host();
+        let (program, host) = self.get_program_and_host();
+
+        let mut host = host.with_source_manager(self.source_manager.clone());
 
         // slow processor
         let mut process = Process::new(
@@ -350,8 +356,8 @@ impl Test {
             self.stack_inputs.clone(),
             self.advice_inputs.clone(),
             ExecutionOptions::default().with_debugging(self.in_debug_mode),
-        )
-        .with_source_manager(self.source_manager.clone());
+        );
+
         let slow_stack_result = process.execute(&program, &mut host);
 
         // compare fast and slow processors' stack outputs
@@ -371,15 +377,16 @@ impl Test {
     /// Compiles the test's source to a Program and executes it with the tests inputs. Returns the
     /// process once execution is finished.
     pub fn execute_process(&self) -> Result<(Process, TestHost), ExecutionError> {
-        let (program, mut host) = self.get_program_and_host();
+        let (program, host) = self.get_program_and_host();
+
+        let mut host = host.with_source_manager(self.source_manager.clone());
 
         let mut process = Process::new(
             program.kernel().clone(),
             self.stack_inputs.clone(),
             self.advice_inputs.clone(),
             ExecutionOptions::default().with_debugging(self.in_debug_mode),
-        )
-        .with_source_manager(self.source_manager.clone());
+        );
 
         let stack_result = process.execute(&program, &mut host);
         self.assert_result_with_fast_processor(&stack_result);
@@ -402,7 +409,6 @@ impl Test {
             self.advice_inputs.clone(),
             &mut host,
             ProvingOptions::default(),
-            self.source_manager.clone(),
         )
         .unwrap();
 
@@ -424,15 +430,16 @@ impl Test {
     /// VmStateIterator that allows us to iterate through each clock cycle and inspect the process
     /// state.
     pub fn execute_iter(&self) -> VmStateIterator {
-        let (program, mut host) = self.get_program_and_host();
+        let (program, host) = self.get_program_and_host();
+
+        let mut host = host.with_source_manager(self.source_manager.clone());
 
         let mut process = Process::new(
             program.kernel().clone(),
             self.stack_inputs.clone(),
             self.advice_inputs.clone(),
             ExecutionOptions::default().with_debugging(self.in_debug_mode),
-        )
-        .with_source_manager(self.source_manager.clone());
+        );
         let result = process.execute(&program, &mut host);
 
         self.assert_result_with_fast_processor(&result);

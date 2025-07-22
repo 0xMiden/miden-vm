@@ -548,7 +548,7 @@ fn procref() -> Result<(), Report> {
 
     // obtain procedures' MAST roots by compiling them as module
     let mast_roots: Vec<Word> = {
-        let source_manager = Arc::new(miden_assembly::DefaultSourceManager::default());
+        let source_manager = Arc::new(miden_debug_types::DefaultSourceManager::default());
         let module_path = "test::foo".parse::<LibraryPath>().unwrap();
         let mut parser = Module::parser(ModuleKind::Library);
         let module = parser.parse_str(module_path, module_source, &source_manager)?;

@@ -30,7 +30,7 @@ use miden_core::{
         OpBatch, SplitNode,
     },
 };
-use miden_debug_types::{DefaultSourceManager, SourceManager, SourceSpan};
+use miden_debug_types::SourceSpan;
 pub use winter_prover::matrix::ColMatrix;
 
 pub(crate) mod continuation_stack;
@@ -181,10 +181,8 @@ pub fn execute(
     advice_inputs: AdviceInputs,
     host: &mut impl SyncHost,
     options: ExecutionOptions,
-    source_manager: Arc<dyn SourceManager>,
 ) -> Result<ExecutionTrace, ExecutionError> {
-    let mut process = Process::new(program.kernel().clone(), stack_inputs, advice_inputs, options)
-        .with_source_manager(source_manager);
+    let mut process = Process::new(program.kernel().clone(), stack_inputs, advice_inputs, options);
     let stack_outputs = process.execute(program, host)?;
     let trace = ExecutionTrace::new(process, stack_outputs);
     assert_eq!(&program.hash(), trace.program_hash(), "inconsistent program hash");
@@ -198,10 +196,8 @@ pub fn execute_iter(
     stack_inputs: StackInputs,
     advice_inputs: AdviceInputs,
     host: &mut impl SyncHost,
-    source_manager: Arc<dyn SourceManager>,
 ) -> VmStateIterator {
-    let mut process = Process::new_debug(program.kernel().clone(), stack_inputs, advice_inputs)
-        .with_source_manager(source_manager);
+    let mut process = Process::new_debug(program.kernel().clone(), stack_inputs, advice_inputs);
     let result = process.execute(program, host);
     if result.is_ok() {
         assert_eq!(
@@ -235,7 +231,6 @@ pub struct Process {
     chiplets: Chiplets,
     max_cycles: u32,
     enable_tracing: bool,
-    source_manager: Arc<dyn SourceManager>,
 }
 
 #[cfg(any(test, feature = "testing"))]
@@ -248,7 +243,6 @@ pub struct Process {
     pub chiplets: Chiplets,
     pub max_cycles: u32,
     pub enable_tracing: bool,
-    pub source_manager: Arc<dyn SourceManager>,
 }
 
 impl Process {
@@ -285,7 +279,6 @@ impl Process {
         execution_options: ExecutionOptions,
     ) -> Self {
         let in_debug_mode = execution_options.enable_debugging();
-        let source_manager = Arc::new(DefaultSourceManager::default());
         Self {
             advice: advice_inputs.into(),
             system: System::new(execution_options.expected_cycles() as usize),
@@ -295,14 +288,7 @@ impl Process {
             chiplets: Chiplets::new(kernel),
             max_cycles: execution_options.max_cycles(),
             enable_tracing: execution_options.enable_tracing(),
-            source_manager,
         }
-    }
-
-    /// Set the internal source manager to an externally initialized one.
-    pub fn with_source_manager(mut self, source_manager: Arc<dyn SourceManager>) -> Self {
-        self.source_manager = source_manager;
-        self
     }
 
     // PROGRAM EXECUTOR
@@ -350,14 +336,14 @@ impl Process {
             MastNode::Split(node) => self.execute_split_node(node, program, host)?,
             MastNode::Loop(node) => self.execute_loop_node(node, program, host)?,
             MastNode::Call(node) => {
-                let err_ctx = err_ctx!(program, node, self.source_manager.clone());
+                let err_ctx = err_ctx!(program, node, host.source_manager());
                 add_error_ctx_to_external_error(
                     self.execute_call_node(node, program, host),
                     err_ctx,
                 )?
             },
             MastNode::Dyn(node) => {
-                let err_ctx = err_ctx!(program, node, self.source_manager.clone());
+                let err_ctx = err_ctx!(program, node, host.source_manager());
                 add_error_ctx_to_external_error(
                     self.execute_dyn_node(node, program, host),
                     err_ctx,
@@ -411,7 +397,7 @@ impl Process {
         } else if condition == ZERO {
             self.execute_mast_node(node.on_false(), program, host)?;
         } else {
-            let err_ctx = err_ctx!(program, node, self.source_manager.clone());
+            let err_ctx = err_ctx!(program, node, host.source_manager());
             return Err(ExecutionError::not_binary_value_if(condition, &err_ctx));
         }
 
@@ -444,7 +430,7 @@ impl Process {
             }
 
             if self.stack.peek() != ZERO {
-                let err_ctx = err_ctx!(program, node, self.source_manager.clone());
+                let err_ctx = err_ctx!(program, node, host.source_manager());
                 return Err(ExecutionError::not_binary_value_loop(self.stack.peek(), &err_ctx));
             }
 
@@ -455,7 +441,7 @@ impl Process {
             // already dropped when we started the LOOP block
             self.end_loop_node(node, false, program, host)
         } else {
-            let err_ctx = err_ctx!(program, node, self.source_manager.clone());
+            let err_ctx = err_ctx!(program, node, host.source_manager());
             Err(ExecutionError::not_binary_value_loop(condition, &err_ctx))
         }
     }
@@ -479,10 +465,10 @@ impl Process {
             let callee = program.get_node_by_id(call_node.callee()).ok_or_else(|| {
                 ExecutionError::MastNodeNotFoundInForest { node_id: call_node.callee() }
             })?;
-            let err_ctx = err_ctx!(program, call_node, self.source_manager.clone());
+            let err_ctx = err_ctx!(program, call_node, host.source_manager());
             self.chiplets.kernel_rom.access_proc(callee.digest(), &err_ctx)?;
         }
-        let err_ctx = err_ctx!(program, call_node, self.source_manager.clone());
+        let err_ctx = err_ctx!(program, call_node, host.source_manager());
 
         self.start_call_node(call_node, program, host)?;
         self.execute_mast_node(call_node.callee(), program, host)?;
@@ -505,7 +491,7 @@ impl Process {
             return Err(ExecutionError::CallInSyscall("dyncall"));
         }
 
-        let err_ctx = err_ctx!(program, node, self.source_manager.clone());
+        let err_ctx = err_ctx!(program, node, host.source_manager());
 
         let callee_hash = if node.is_dyncall() {
             self.start_dyncall_node(node, &err_ctx)?
@@ -642,8 +628,7 @@ impl Process {
             }
 
             // decode and execute the operation
-            let err_ctx =
-                err_ctx!(program, basic_block, self.source_manager.clone(), i + op_offset);
+            let err_ctx = err_ctx!(program, basic_block, host.source_manager(), i + op_offset);
             self.decoder.execute_user_op(op, op_idx);
             self.execute_op_with_error_ctx(op, program, host, &err_ctx)?;
 

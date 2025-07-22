@@ -1,6 +1,7 @@
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 
 use miden_core::{DebugOptions, Felt, Word, mast::MastForest};
+use miden_debug_types::{DefaultSourceManager, SourceManagerSync};
 
 use crate::{
     AdviceMutation, AsyncHost, BaseHost, DebugHandler, EventHandler, EventHandlerRegistry,
@@ -16,6 +17,7 @@ pub struct DefaultHost<D: DebugHandler = DefaultDebugHandler> {
     store: MemMastForestStore,
     event_handlers: EventHandlerRegistry,
     debug_handler: D,
+    source_manager: Arc<dyn SourceManagerSync>,
 }
 
 impl Default for DefaultHost {
@@ -24,11 +26,19 @@ impl Default for DefaultHost {
             store: MemMastForestStore::default(),
             event_handlers: EventHandlerRegistry::default(),
             debug_handler: DefaultDebugHandler,
+            source_manager: DefaultSourceManager::default_arc_dyn(),
         }
     }
 }
 
 impl<D: DebugHandler> DefaultHost<D> {
+    /// Use the given source manager implementation instead of the default one
+    /// [`DefaultSourceManager`].
+    pub fn with_source_manager(mut self, source_manager: Arc<dyn SourceManagerSync>) -> Self {
+        self.source_manager = Arc::new(source_manager) as Arc<dyn SourceManagerSync>;
+        self
+    }
+
     /// Loads a [`HostLibrary`] containing a [`MastForest`] with its list of event handlers.
     pub fn load_library(&mut self, library: impl Into<HostLibrary>) -> Result<(), ExecutionError> {
         let library = library.into();
@@ -79,11 +89,16 @@ impl<D: DebugHandler> DefaultHost<D> {
             store: self.store,
             event_handlers: self.event_handlers,
             debug_handler: handler,
+            source_manager: self.source_manager,
         }
     }
 }
 
 impl BaseHost for DefaultHost {
+    fn source_manager(&self) -> Arc<dyn SourceManagerSync> {
+        self.source_manager.clone()
+    }
+
     fn on_debug(
         &mut self,
         process: &mut ProcessState,

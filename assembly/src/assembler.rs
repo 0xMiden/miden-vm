@@ -4,7 +4,7 @@ use miden_assembly_syntax::{
     KernelLibrary, Library, LibraryNamespace, LibraryPath, Parse, ParseOptions,
     SemanticAnalysisError,
     ast::{self, Export, InvocationTarget, InvokeKind, ModuleKind, QualifiedProcedureName},
-    debuginfo::{DefaultSourceManager, SourceManager, SourceSpan, Spanned},
+    debuginfo::{DefaultSourceManager, SourceManager, SourceManagerSync, SourceSpan, Spanned},
     diagnostics::{RelatedLabel, Report},
 };
 use miden_core::{
@@ -73,7 +73,7 @@ use crate::{
 #[derive(Clone)]
 pub struct Assembler {
     /// The source manager to use for compilation and source location information
-    source_manager: Arc<dyn SourceManager>,
+    source_manager: Arc<dyn SourceManagerSync>,
     /// The linker instance used internally to link assembler inputs
     linker: Linker,
     /// Whether to treat warning diagnostics as errors
@@ -84,7 +84,7 @@ pub struct Assembler {
 
 impl Default for Assembler {
     fn default() -> Self {
-        let source_manager = Arc::new(DefaultSourceManager::default());
+        let source_manager = DefaultSourceManager::default_arc_dyn();
         let linker = Linker::new(source_manager.clone());
         Self {
             source_manager,
@@ -99,7 +99,7 @@ impl Default for Assembler {
 /// Constructors
 impl Assembler {
     /// Start building an [Assembler]
-    pub fn new(source_manager: Arc<dyn SourceManager>) -> Self {
+    pub fn new(source_manager: Arc<dyn SourceManagerSync>) -> Self {
         let linker = Linker::new(source_manager.clone());
         Self {
             source_manager,
@@ -110,7 +110,10 @@ impl Assembler {
     }
 
     /// Start building an [`Assembler`] with a kernel defined by the provided [KernelLibrary].
-    pub fn with_kernel(source_manager: Arc<dyn SourceManager>, kernel_lib: KernelLibrary) -> Self {
+    pub fn with_kernel(
+        source_manager: Arc<dyn SourceManagerSync>,
+        kernel_lib: KernelLibrary,
+    ) -> Self {
         let (kernel, kernel_module, _) = kernel_lib.into_parts();
         let linker = Linker::with_kernel(source_manager.clone(), kernel, kernel_module);
         Self {
@@ -137,6 +140,15 @@ impl Assembler {
     /// Sets the debug mode flag of the assembler
     pub fn set_debug_mode(&mut self, yes: bool) {
         self.in_debug_mode = yes;
+    }
+}
+
+// ------------------------------------------------------------------------------------------------
+/// Accessors
+impl Assembler {
+    /// Access to the inner [`SourceManager`] implementation.
+    pub fn source_manager(&self) -> Arc<dyn SourceManagerSync> {
+        self.source_manager.clone()
     }
 }
 

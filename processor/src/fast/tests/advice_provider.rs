@@ -1,6 +1,7 @@
 use alloc::collections::BTreeMap;
 
 use miden_core::Word;
+use miden_debug_types::SourceManagerSync;
 use pretty_assertions::assert_eq;
 
 use super::*;
@@ -228,18 +229,27 @@ struct ConsistencyHost {
     /// snapshots for example if it's used in a loop.
     snapshots: BTreeMap<u32, Vec<ProcessStateSnapshot>>,
     store: MemMastForestStore,
+    source_manager: Arc<dyn SourceManagerSync>,
 }
 
 impl ConsistencyHost {
     fn new(kernel_forest: Arc<MastForest>) -> Self {
         let mut store = MemMastForestStore::default();
         store.insert(kernel_forest.clone());
-
-        Self { snapshots: BTreeMap::new(), store }
+        let source_manager = DefaultSourceManager::default_arc_dyn();
+        Self {
+            snapshots: BTreeMap::new(),
+            store,
+            source_manager,
+        }
     }
 }
 
 impl BaseHost for ConsistencyHost {
+    fn source_manager(&self) -> Arc<dyn SourceManagerSync> {
+        self.source_manager.clone()
+    }
+
     fn on_trace(
         &mut self,
         process: &mut ProcessState,

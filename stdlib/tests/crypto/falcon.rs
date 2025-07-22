@@ -1,7 +1,7 @@
-use std::{sync::Arc, vec};
+use std::vec;
 
 use miden_air::{Felt, ProvingOptions, RowIndex};
-use miden_assembly::{Assembler, DefaultSourceManager, utils::Serializable};
+use miden_assembly::{Assembler, utils::Serializable};
 use miden_core::{StarkField, ZERO};
 use miden_processor::{
     AdviceInputs, AdviceMutation, EventError, ExecutionError, ProcessState, Program, ProgramInfo,
@@ -295,7 +295,6 @@ fn falcon_prove_verify() {
         advice_inputs,
         &mut host,
         options,
-        Arc::new(DefaultSourceManager::default()),
     )
     .expect("failed to generate proof");
 

@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use miden_core::DebugOptions;
+use miden_debug_types::{DefaultSourceManager, SourceManagerSync};
 use miden_processor::{
     AdviceMutation, AsyncHost, BaseHost, EventError, ExecutionError, MastForest, ProcessState,
     SyncHost,
@@ -18,9 +19,14 @@ pub struct TestHost {
     pub event_handler: Vec<u32>,
     pub trace_handler: Vec<u32>,
     pub debug_handler: Vec<String>,
+    pub source_manager: Arc<DefaultSourceManager>,
 }
 
 impl BaseHost for TestHost {
+    fn source_manager(&self) -> Arc<dyn SourceManagerSync> {
+        self.source_manager.clone()
+    }
+
     fn on_debug(
         &mut self,
         _process: &mut ProcessState,
