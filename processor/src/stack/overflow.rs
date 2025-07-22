@@ -81,7 +81,7 @@ impl OverflowStack {
 ///
 /// The overflow table keeps track of the current clock cycle, and hence `advance_clock()` must be
 /// called whenever the clock cycle is incremented globally.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct OverflowTable {
     overflow: Vec<OverflowStack>,
     clk: RowIndex,

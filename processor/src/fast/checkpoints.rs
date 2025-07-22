@@ -208,6 +208,7 @@ impl ExternalNodeReplay {
 /// addresses that they were recorded at. This works naturally since the fast processor has exactly
 /// the same access patterns as the main trace generators (which re-executes part of the program).
 /// The read methods include debug assertions to verify address consistency.
+#[derive(Debug)]
 pub struct MemoryReplay {
     pub elements_read: VecDeque<(Felt, Felt)>,
     pub words_read: VecDeque<(Felt, Word)>,
