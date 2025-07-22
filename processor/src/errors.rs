@@ -498,21 +498,17 @@ pub struct ErrorContextImpl {
 
 impl ErrorContextImpl {
     #[allow(dead_code)]
-    pub fn new<'a>(
-        mast_forest: &'a MastForest,
-        node: &'a impl MastNodeExt,
-        host: &'a impl BaseHost,
-    ) -> Self {
+    pub fn new(mast_forest: &MastForest, node: &impl MastNodeExt, host: &impl BaseHost) -> Self {
         let (label, source_file) =
             Self::precalc_label_and_source_file(None, mast_forest, node, host);
         Self { label, source_file }
     }
 
     #[allow(dead_code)]
-    pub fn new_with_op_idx<'a>(
-        mast_forest: &'a MastForest,
-        node: &'a impl MastNodeExt,
-        host: &'a impl BaseHost,
+    pub fn new_with_op_idx(
+        mast_forest: &MastForest,
+        node: &impl MastNodeExt,
+        host: &impl BaseHost,
         op_idx: usize,
     ) -> Self {
         let op_idx = op_idx.into();
@@ -521,11 +517,11 @@ impl ErrorContextImpl {
         Self { label, source_file }
     }
 
-    pub fn precalc_label_and_source_file<'a>(
+    pub fn precalc_label_and_source_file(
         op_idx: Option<usize>,
-        mast_forest: &'a MastForest,
-        node: &'a impl MastNodeExt,
-        host: &'a impl BaseHost,
+        mast_forest: &MastForest,
+        node: &impl MastNodeExt,
+        host: &impl BaseHost,
     ) -> (SourceSpan, Option<Arc<SourceFile>>) {
         node.get_assembly_op(mast_forest, op_idx)
             .and_then(|assembly_op| assembly_op.location())
