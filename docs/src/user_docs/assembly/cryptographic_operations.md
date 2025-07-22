@@ -79,9 +79,9 @@ exec.::std::crypto::hashes::rpo::squeeze_digest
 
 For more examples of how `hperm` instruction is used, please see `std::crypto::hashes::rpo` module in the standard library.
 
-#### `hash` and `merge` implementations
+#### `hash` and `hmerge` implementations
 
-Both `hash` and `merge` instructions are actually "macro-instructions" which are implemented using `hperm` (and other) instructions. At assembly time, these are "expanded" into the following sequences of operations:
+Both `hash` and `hmerge` instructions are actually "macro-instructions" which are implemented using `hperm` (and other) instructions. At assembly time, these are "expanded" into the following sequences of operations:
 
 - `hash`: `push.4.0.0.0 swapw push.0 dup.7 dup.7 dup.7 hperm dropw swapw dropw`.
-- `merge`: `padw swapw hperm dropw swapw dropw`.
+- `hmerge`: `padw swapw hperm dropw swapw dropw`.
