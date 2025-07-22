@@ -27,7 +27,7 @@ impl OverflowStackEntry {
 }
 
 /// Represents an overflow stack at a given context.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct OverflowStack {
     overflow: Vec<OverflowStackEntry>,
 }
@@ -81,7 +81,7 @@ impl OverflowStack {
 ///
 /// The overflow table keeps track of the current clock cycle, and hence `advance_clock()` must be
 /// called whenever the clock cycle is incremented globally.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct OverflowTable {
     overflow: Vec<OverflowStack>,
     clk: RowIndex,
@@ -271,6 +271,12 @@ impl OverflowTable {
     }
 }
 
+impl Default for OverflowTable {
+    fn default() -> Self {
+        Self::new(false)
+    }
+}
+
 /// Stores the history of the overflow table at every clock cycle, where only the relevant context
 /// is stored in the history for each clock cycle.
 ///
@@ -279,7 +285,7 @@ impl OverflowTable {
 /// - `pop` operation,
 /// - a new context is started,
 /// - a former context is restored.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct OverflowTableHistory {
     /// Stores the full state of the overflow table for every clock cycle at which there was a
     /// change.
