@@ -27,14 +27,17 @@ pub enum NodeExecutionPhase {
         batch_index: usize,
         /// Index of the operation within the batch
         op_idx_in_batch: usize,
-        /// Whether a RESPAN operation needs to be added before executing this batch. When true,
-        /// `batch_index` refers to the batch to be executed *after* the RESPAN operation, and
-        /// `op_index_in_batch` MUST be set to 0.
-        needs_respan: bool,
     },
     /// Execute the START phase of a control flow node (JOIN, SPLIT, LOOP, etc.).
     /// This is used when beginning execution of a control flow construct.
     Start(MastNodeId),
+    /// Execute a RESPAN for the specified batch within the specified basic block.
+    Respan {
+        /// Node ID of the basic block being executed
+        node_id: MastNodeId,
+        /// Index of the operation batch within the basic block
+        batch_index: usize,
+    },
     /// Execute the REPEAT phase of a Loop node.
     LoopRepeat(MastNodeId),
     /// Execute the END phase of a control flow node (JOIN, SPLIT, LOOP, etc.).
@@ -122,9 +125,17 @@ impl StackState {
         &mut self.stack_top
     }
 
+    /// Returns the value at the specified index in the stack top.
+    ///
+    /// # Panics
+    /// - if the index is greater than or equal to [MIN_STACK_DEPTH].
+    pub fn get(&self, index: usize) -> Felt {
+        self.stack_top[MIN_STACK_DEPTH - index - 1]
+    }
+
     /// Derives the stack depth (b0 helper column) from the overflow table
     pub fn stack_depth(&self) -> Felt {
-        Felt::new((MIN_STACK_DEPTH + self.overflow.total_num_elements()) as u64)
+        Felt::new((MIN_STACK_DEPTH + self.overflow.num_elements_in_current_ctx()) as u64)
     }
 
     /// Derives the overflow address (b1 helper column) from the overflow table
@@ -134,6 +145,11 @@ impl StackState {
 
     pub fn num_overflow_elements_in_current_ctx(&self) -> usize {
         self.overflow.num_elements_in_current_ctx()
+    }
+
+    pub fn advance_clock(&mut self) {
+        // Advance the overflow table clock to the next row
+        self.overflow.advance_clock();
     }
 
     pub fn push_overflow(&mut self, element: Felt) {
@@ -166,38 +182,8 @@ impl StackState {
         (current_depth, current_overflow_addr)
     }
 
-    pub fn shift_left_and_start_context(&mut self) -> (usize, Felt) {
-        const START_POSITION: usize = 1;
-
-        // Get the current state before any modifications
-        let current_depth = self.stack_depth().as_int() as usize;
-        let current_overflow_addr = self.overflow_addr();
-
-        // Perform the left shift operation
-        {
-            // Shift all elements left by one position (from start_position to the end)
-            for i in START_POSITION..MIN_STACK_DEPTH {
-                self.stack_top[i - 1] = self.stack_top[i];
-            }
-
-            // Handle the last element (index 15) based on overflow table state
-            let new_last_element = if current_depth > MIN_STACK_DEPTH {
-                // Pop an element from the overflow table to fill the last position
-                self.overflow.pop().expect(
-                    "Overflow table should have elements to pop when depth > MIN_STACK_DEPTH",
-                )
-            } else {
-                // When depth <= MIN_STACK_DEPTH, shift in a ZERO to prevent depth shrinking below
-                // minimum
-                ZERO
-            };
-            self.stack_top[MIN_STACK_DEPTH - 1] = new_last_element;
-        }
-
-        // Start a new context (this resets the overflow table)
-        self.overflow.start_context();
-
-        (current_depth, current_overflow_addr)
+    pub fn restore_context(&mut self) {
+        self.overflow.restore_context();
     }
 }
 
