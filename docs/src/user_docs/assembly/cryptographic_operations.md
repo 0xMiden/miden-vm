@@ -23,7 +23,7 @@ If the error code is omitted, the default value of $0$ is assumed.
 
 #### Differences between `hash`, `hperm`, and `hmerge`
 
-- **hash**: 1-to-1 hashing, takes 4 elements (1 word), applies the RPO permutation to it, and returns a 4-element digest.
+- **hash**: 1-to-1 hashing, takes 4 elements (1 word), applies the RPO permutation to it, and returns a 4-element digest. This is equivalent to invoking `miden_crypto::hash::rpo::Rpo256::hash_elements()` function with elements of a single word.
 - **hmerge**: 2-to-1 hashing, takes 8 elements (2 words), applies the RPO permutation to them, and returns a 4-element digest. This is frequently used to hash two digests (e.g., for Merkle trees), but could also be used to hash an arbitrary sequence of 8 elements. This is equivalent to `miden_crypto::hash::rpo::Rpo256::merge()` function.
 - **hperm**: Applies the RPO permutation to 12 stack elements (8 rate + 4 capacity), returns all 12 elements (the full sponge state). Used for intermediate operations or manual sponge state management. This is equivalent to `miden_crypto::hash::rpo::Rpo256::apply_permutation()` Rust function.
 
@@ -48,11 +48,17 @@ According to the RPO specifications, the capacity should be initialized as follo
 
 The above rule is convenient as when we need to hash the number of elements divisible by $8$, all capacity elements should be initialized to zeros.
 
-Once the capacity elements have been initialized, we need to put the data we'd like to hash onto the stack. As mentioned above, this is done by populating the `RATE` section of the sponge. The sponge can absorb exactly $8$ elements per permutation. Thus, if we have fewer than $8$ elements to absorb, we need to put our data onto the stack toward the "front" of the sponge (i.e., the deeper portion) and then pad the remaining elements with zeros. If we have more than $8$ to absorb, we'll need to iteratively load the rate portion of the sponge with $8$ elements, execute `hperm`, load the next $8$ elements, execute `hperm`, etc. - until all data has been absorbed.
+Once the capacity elements have been initialized, we need to put the data we'd like to hash onto the stack. As mentioned above, this is done by populating the `RATE` section of the sponge. The sponge can absorb exactly $8$ elements per permutation. Thus, if we have fewer than $8$ elements to absorb, we need to put our data onto the stack toward the "front" of the sponge (i.e., the deeper portion) and then pad the remaining elements with zeros. For example, if we wanted to hash 3 elements (e.g., `a`, `b`, `c`), we would arrange the stack as follows before executing the `hperm` instruction:
+
+```
+[[0, 0, 0, 0], [0, c, b, a], [0, 0, 0, 3]]
+```
+
+If we have more than $8$ elements to absorb, we need to iteratively load the rate portion of the sponge with $8$ elements, execute `hperm`, load the next $8$ elements, execute `hperm`, etc. - until all data has been absorbed.
 
 Once all the data has been absorbed, we can "squeeze" the resulting hash out of the sponge state by taking the first rate word (i.e., `RATE0`). To do this, we can use a convenience procedure from the standard library: `std::crypto::hashes::rpo::squeeze_digest`.
 
-For efficient hashing of long sequences of elements, `hperm` instruction can be paired up with `mem_stream` and `adv_pipe` instructions. For example, the following, will absorb 24 elements from memory and compute their hash:
+For efficient hashing of long sequences of elements, `hperm` instruction can be paired up with `mem_stream` or `adv_pipe` instructions. For example, the following, will absorb 24 elements from memory and compute their hash:
 
 ```
 # initialize the state of the sponge
@@ -72,3 +78,10 @@ exec.::std::crypto::hashes::rpo::squeeze_digest
 ```
 
 For more examples of how `hperm` instruction is used, please see `std::crypto::hashes::rpo` module in the standard library.
+
+#### `hash` and `merge` implementations
+
+Both `hash` and `merge` instructions are actually "macro-instructions" which are implemented using `hperm` (and other) instructions. At assembly time, these are "expanded" into the following sequences of operations:
+
+- `hash`: `push.4.0.0.0 swapw push.0 dup.7 dup.7 dup.7 hperm dropw swapw dropw`.
+- `merge`: `padw swapw hperm dropw swapw dropw`.
