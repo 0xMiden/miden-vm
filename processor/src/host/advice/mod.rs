@@ -302,11 +302,22 @@ impl AdviceProvider {
         self.store.extend(iter);
     }
 
+    // MUTATORS
+    // --------------------------------------------------------------------------------------------
+
     /// Extends the contents of this instance with the contents of an `AdviceInputs`.
     pub fn extend_from_inputs(&mut self, inputs: &AdviceInputs) -> Result<(), AdviceError> {
         self.extend_stack(inputs.stack.iter().cloned().rev());
         self.extend_merkle_store(inputs.store.inner_nodes());
         self.extend_map(&inputs.map)
+    }
+
+    /// Consumes `self` and return its parts (stack, map, store).
+    ///
+    /// Note that the order of the stack is such that the element at the top of the stack is at the
+    /// end of the returned vector.
+    pub fn into_parts(self) -> (Vec<Felt>, AdviceMap, MerkleStore) {
+        (self.stack, self.map, self.store)
     }
 }
 
