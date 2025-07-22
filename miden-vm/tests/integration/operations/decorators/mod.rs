@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use miden_core::DebugOptions;
-use miden_debug_types::{DefaultSourceManager, SourceManagerSync};
+use miden_debug_types::{DefaultSourceManager, Location, SourceFile, SourceManager, SourceSpan};
 use miden_processor::{
     AdviceMutation, AsyncHost, BaseHost, EventError, ExecutionError, MastForest, ProcessState,
     SyncHost,
@@ -23,8 +23,13 @@ pub struct TestHost {
 }
 
 impl BaseHost for TestHost {
-    fn source_manager(&self) -> Arc<dyn SourceManagerSync> {
-        self.source_manager.clone()
+    fn get_label_and_source_file(
+        &self,
+        location: &Location,
+    ) -> (SourceSpan, Option<Arc<SourceFile>>) {
+        let maybe_file = self.source_manager.get_by_uri(location.uri());
+        let span = self.source_manager.location_to_span(location.clone()).unwrap_or_default();
+        (span, maybe_file)
     }
 
     fn on_debug(

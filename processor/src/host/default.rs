@@ -1,7 +1,9 @@
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 
 use miden_core::{DebugOptions, Felt, Word, mast::MastForest};
-use miden_debug_types::{DefaultSourceManager, SourceManagerSync};
+use miden_debug_types::{
+    DefaultSourceManager, Location, SourceFile, SourceManagerSync, SourceSpan,
+};
 
 use crate::{
     AdviceMutation, AsyncHost, BaseHost, DebugHandler, EventHandler, EventHandlerRegistry,
@@ -95,8 +97,13 @@ impl<D: DebugHandler> DefaultHost<D> {
 }
 
 impl BaseHost for DefaultHost {
-    fn source_manager(&self) -> Arc<dyn SourceManagerSync> {
-        self.source_manager.clone()
+    fn get_label_and_source_file(
+        &self,
+        location: &Location,
+    ) -> (SourceSpan, Option<Arc<SourceFile>>) {
+        let maybe_file = self.source_manager.get_by_uri(location.uri());
+        let span = self.source_manager.location_to_span(location.clone()).unwrap_or_default();
+        (span, maybe_file)
     }
 
     fn on_debug(

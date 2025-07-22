@@ -4,7 +4,7 @@ use core::future::Future;
 use miden_core::{
     AdviceMap, DebugOptions, Felt, Word, crypto::merkle::InnerNodeInfo, mast::MastForest,
 };
-use miden_debug_types::SourceManagerSync;
+use miden_debug_types::{Location, SourceFile, SourceSpan};
 
 use crate::{EventError, ExecutionError, ProcessState};
 
@@ -47,7 +47,10 @@ pub trait BaseHost {
     // REQUIRED METHODS
     // --------------------------------------------------------------------------------------------
 
-    fn source_manager(&self) -> Arc<dyn SourceManagerSync>;
+    fn get_label_and_source_file(
+        &self,
+        location: &Location,
+    ) -> (SourceSpan, Option<Arc<SourceFile>>);
 
     /// Handles the debug request from the VM.
     fn on_debug(
