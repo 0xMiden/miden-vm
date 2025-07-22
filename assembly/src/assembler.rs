@@ -73,7 +73,7 @@ use crate::{
 #[derive(Clone)]
 pub struct Assembler {
     /// The source manager to use for compilation and source location information
-    source_manager: Arc<dyn SourceManagerSync>,
+    source_manager: Arc<dyn SourceManager>,
     /// The linker instance used internally to link assembler inputs
     linker: Linker,
     /// Whether to treat warning diagnostics as errors
@@ -99,7 +99,7 @@ impl Default for Assembler {
 /// Constructors
 impl Assembler {
     /// Start building an [Assembler]
-    pub fn new(source_manager: Arc<dyn SourceManagerSync>) -> Self {
+    pub fn new(source_manager: Arc<dyn SourceManager>) -> Self {
         let linker = Linker::new(source_manager.clone());
         Self {
             source_manager,
@@ -140,15 +140,6 @@ impl Assembler {
     /// Sets the debug mode flag of the assembler
     pub fn set_debug_mode(&mut self, yes: bool) {
         self.in_debug_mode = yes;
-    }
-}
-
-// ------------------------------------------------------------------------------------------------
-/// Accessors
-impl Assembler {
-    /// Access to the inner [`SourceManager`] implementation.
-    pub fn source_manager(&self) -> Arc<dyn SourceManagerSync> {
-        self.source_manager.clone()
     }
 }
 
