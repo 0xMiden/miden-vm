@@ -32,9 +32,10 @@ impl FastProcessor {
         let num_read = self.stack_get(1);
         let ptr = self.stack_get(0);
         let ctx = self.ctx;
+        let clk = self.clk;
         let circuit_evaluation =
             eval_circuit_fast_(ctx, ptr, self.clk, num_read, num_eval, &mut self.memory, err_ctx)?;
-        self.ace.add_circuit_evaluation(self.clk, circuit_evaluation);
+        self.ace.add_circuit_evaluation(clk, circuit_evaluation);
 
         Ok(())
     }
@@ -86,15 +87,22 @@ pub fn eval_circuit_fast_(
 
     let mut ptr = ptr;
     // perform READ operations
+    // Note: we don't pass in the trace_state_builder, because the parallel trace generation skips
+    // the circuit evaluation completely
     for _ in 0..num_read_rows {
-        let word = mem.read_word(ctx, ptr, clk, err_ctx).map_err(ExecutionError::MemoryError)?;
+        let word = mem
+            .read_word(ctx, ptr, clk, err_ctx, &mut None)
+            .map_err(ExecutionError::MemoryError)?;
         evaluation_context.do_read(ptr, word)?;
         ptr += PTR_OFFSET_WORD;
     }
     // perform EVAL operations
+    // Note: we don't pass in the trace_state_builder, because the parallel trace generation skips
+    // the circuit evaluation completely
     for _ in 0..num_eval_rows {
-        let instruction =
-            mem.read_element(ctx, ptr, err_ctx).map_err(ExecutionError::MemoryError)?;
+        let instruction = mem
+            .read_element(ctx, ptr, err_ctx, &mut None)
+            .map_err(ExecutionError::MemoryError)?;
         evaluation_context.do_eval(ptr, instruction, err_ctx)?;
         ptr += PTR_OFFSET_ELEM;
     }

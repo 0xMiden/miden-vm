@@ -5,6 +5,7 @@
 #### Enhancements
 
 - Added slicing for the word constants ([#2057](https://github.com/0xMiden/miden-vm/pull/2057)).
+- Added `FastProcessor::execute_for_trace()`, which outputs a series of checkpoints necessary to build the trace in parallel ([#2023](https://github.com/0xMiden/miden-vm/pull/2023))
 
 #### Changes
 
