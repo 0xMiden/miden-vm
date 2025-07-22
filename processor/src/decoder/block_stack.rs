@@ -7,7 +7,7 @@ use crate::system::ContextId;
 // ================================================================================================
 
 /// Keeps track of code blocks which are currently being executed by the VM.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct BlockStack {
     blocks: Vec<BlockInfo>,
 }
@@ -98,7 +98,7 @@ impl BlockStack {
 // ================================================================================================
 
 /// Contains basic information about a code block.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BlockInfo {
     pub addr: Felt,
     block_type: BlockType,
