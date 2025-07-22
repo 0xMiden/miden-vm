@@ -31,8 +31,8 @@ pub use miden_core::{
 };
 use miden_core::{ProgramInfo, chiplets::hasher::apply_permutation};
 pub use miden_processor::{
-    AdviceInputs, AdviceProvider, ContextId, ExecutionError, ExecutionOptions, ExecutionTrace,
-    Process, ProcessState, VmStateIterator,
+    AdviceInputs, AdviceProvider, BaseHost, ContextId, ExecutionError, ExecutionOptions,
+    ExecutionTrace, Process, ProcessState, VmStateIterator,
 };
 use miden_processor::{AdviceMutation, DefaultHost, EventError, Program, fast::FastProcessor};
 use miden_prover::utils::range;
@@ -246,7 +246,6 @@ impl Test {
     ) {
         // compile the program
         let (program, host) = self.get_program_and_host();
-
         let mut host = host.with_source_manager(self.source_manager.clone());
 
         // execute the test
@@ -347,7 +346,6 @@ impl Test {
     #[track_caller]
     pub fn execute(&self) -> Result<ExecutionTrace, ExecutionError> {
         let (program, host) = self.get_program_and_host();
-
         let mut host = host.with_source_manager(self.source_manager.clone());
 
         // slow processor
@@ -378,7 +376,6 @@ impl Test {
     /// process once execution is finished.
     pub fn execute_process(&self) -> Result<(Process, TestHost), ExecutionError> {
         let (program, host) = self.get_program_and_host();
-
         let mut host = host.with_source_manager(self.source_manager.clone());
 
         let mut process = Process::new(
@@ -431,7 +428,6 @@ impl Test {
     /// state.
     pub fn execute_iter(&self) -> VmStateIterator {
         let (program, host) = self.get_program_and_host();
-
         let mut host = host.with_source_manager(self.source_manager.clone());
 
         let mut process = Process::new(
@@ -504,11 +500,12 @@ impl Test {
         &self,
         slow_result: &Result<StackOutputs, ExecutionError>,
     ) {
-        let (program, mut host) = self.get_program_and_host();
+        let (program, host) = self.get_program_and_host();
+        let mut host = host.with_source_manager(self.source_manager.clone());
+
         let stack_inputs: Vec<Felt> = self.stack_inputs.clone().into_iter().rev().collect();
         let advice_inputs: AdviceInputs = self.advice_inputs.clone();
-        let fast_process = FastProcessor::new_with_advice_inputs(&stack_inputs, advice_inputs)
-            .with_source_manager(self.source_manager.clone());
+        let fast_process = FastProcessor::new_with_advice_inputs(&stack_inputs, advice_inputs);
         let fast_result = fast_process.execute_sync(&program, &mut host);
 
         match slow_result {

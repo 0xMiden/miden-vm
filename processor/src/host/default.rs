@@ -35,7 +35,7 @@ impl<D: DebugHandler> DefaultHost<D> {
     /// Use the given source manager implementation instead of the default one
     /// [`DefaultSourceManager`].
     pub fn with_source_manager(mut self, source_manager: Arc<dyn SourceManagerSync>) -> Self {
-        self.source_manager = Arc::new(source_manager) as Arc<dyn SourceManagerSync>;
+        self.source_manager = source_manager;
         self
     }
 

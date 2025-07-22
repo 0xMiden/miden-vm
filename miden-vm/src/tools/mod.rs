@@ -2,10 +2,7 @@ use core::fmt;
 use std::path::PathBuf;
 
 use clap::Parser;
-use miden_assembly::{
-    DefaultSourceManager,
-    diagnostics::{Report, WrapErr},
-};
+use miden_assembly::diagnostics::{Report, WrapErr};
 use miden_core::Program;
 use miden_processor::{AsmOpInfo, TraceLenSummary};
 use miden_prover::AdviceInputs;
@@ -49,12 +46,15 @@ impl Analyze {
             .unwrap_or("")
             .to_lowercase();
 
+        let host = DefaultHost::default().with_library(&StdLibrary::default())?;
         // Use a single match expression to load the program.
-        let (program, source_manager) = match ext.as_str() {
-            "masp" => {
-                (get_masp_program(&self.program_file)?, DefaultSourceManager::default_arc_dyn())
+        let (program, host) = match ext.as_str() {
+            "masp" => (get_masp_program(&self.program_file)?, host),
+            "masm" => {
+                let (program, source_manager) =
+                    get_masm_program(&self.program_file, &libraries, true)?;
+                (program, host.with_source_manager(source_manager))
             },
-            "masm" => get_masm_program(&self.program_file, &libraries, true)?,
             _ => return Err(Report::msg("The provided file must have a .masm or .masp extension")),
         };
 
@@ -64,9 +64,6 @@ impl Analyze {
         // fetch the stack and program inputs from the arguments
         let stack_inputs = input_data.parse_stack_inputs().map_err(Report::msg)?;
         let advice_inputs = input_data.parse_advice_inputs().map_err(Report::msg)?;
-        let host = DefaultHost::default()
-            .with_library(&StdLibrary::default())?
-            .with_source_manager(source_manager);
 
         let execution_details: ExecutionDetails =
             analyze(&program, stack_inputs, advice_inputs, host)
