@@ -1,10 +1,7 @@
-use std::{path::PathBuf, sync::Arc, time::Instant};
+use std::{path::PathBuf, time::Instant};
 
 use clap::Parser;
-use miden_assembly::{
-    DefaultSourceManager,
-    diagnostics::{IntoDiagnostic, Report, WrapErr},
-};
+use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
 use miden_processor::{DefaultHost, ExecutionOptions, ExecutionTrace};
 use miden_stdlib::StdLibrary;
 use miden_vm::internal::InputFile;
@@ -133,14 +130,9 @@ fn run_masp_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
     // use simplified input data reading
     let input_data = InputFile::read(&params.input_file, &params.program_file)?;
 
-    // Packages don't ship with sources, so we use a default source manager.
-    let source_manager = Arc::new(DefaultSourceManager::default());
-
     let stack_inputs = input_data.parse_stack_inputs().map_err(Report::msg)?;
     let advice_inputs = input_data.parse_advice_inputs().map_err(Report::msg)?;
-    let mut host = DefaultHost::default()
-        .with_library(&StdLibrary::default())?
-        .with_source_manager(source_manager);
+    let mut host = DefaultHost::default().with_library(&StdLibrary::default())?;
 
     let execution_options = ExecutionOptions::new(
         Some(params.max_cycles),

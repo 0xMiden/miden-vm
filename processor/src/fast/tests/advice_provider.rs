@@ -1,5 +1,6 @@
 use alloc::collections::BTreeMap;
 
+use miden_assembly::SourceManager;
 use miden_core::Word;
 use miden_debug_types::{Location, SourceFile, SourceManagerSync, SourceSpan};
 use pretty_assertions::assert_eq;
@@ -224,19 +225,19 @@ impl From<&ProcessState<'_>> for ProcessStateSnapshot {
 }
 
 #[derive(Debug)]
-struct ConsistencyHost {
+struct ConsistencyHost<S: SourceManager = DefaultSourceManager> {
     /// A map of trace ID to a list of snapshots. A single trace ID can be associated with multiple
     /// snapshots for example if it's used in a loop.
     snapshots: BTreeMap<u32, Vec<ProcessStateSnapshot>>,
     store: MemMastForestStore,
-    source_manager: Arc<dyn SourceManagerSync>,
+    source_manager: Arc<S>,
 }
 
 impl ConsistencyHost {
     fn new(kernel_forest: Arc<MastForest>) -> Self {
         let mut store = MemMastForestStore::default();
         store.insert(kernel_forest.clone());
-        let source_manager = DefaultSourceManager::default_arc_dyn();
+        let source_manager = Arc::new(DefaultSourceManager::default());
         Self {
             snapshots: BTreeMap::new(),
             store,
@@ -245,7 +246,10 @@ impl ConsistencyHost {
     }
 }
 
-impl BaseHost for ConsistencyHost {
+impl<S> BaseHost for ConsistencyHost<S>
+where
+    S: SourceManager,
+{
     fn get_label_and_source_file(
         &self,
         location: &Location,
@@ -267,7 +271,10 @@ impl BaseHost for ConsistencyHost {
     }
 }
 
-impl SyncHost for ConsistencyHost {
+impl<S> SyncHost for ConsistencyHost<S>
+where
+    S: SourceManager,
+{
     fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>> {
         self.store.get(node_digest)
     }
@@ -281,7 +288,10 @@ impl SyncHost for ConsistencyHost {
     }
 }
 
-impl AsyncHost for ConsistencyHost {
+impl<S> AsyncHost for ConsistencyHost<S>
+where
+    S: SourceManagerSync,
+{
     async fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>> {
         self.store.get(node_digest)
     }

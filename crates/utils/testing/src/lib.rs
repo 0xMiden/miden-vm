@@ -13,10 +13,7 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_assembly::{
-    KernelLibrary, Library, Parse, debuginfo::SourceManagerSync,
-    diagnostics::reporting::PrintDiagnostic,
-};
+use miden_assembly::{KernelLibrary, Library, Parse, diagnostics::reporting::PrintDiagnostic};
 pub use miden_assembly::{
     LibraryPath,
     debuginfo::{DefaultSourceManager, SourceFile, SourceLanguage, SourceManager},
@@ -34,7 +31,7 @@ pub use miden_processor::{
     AdviceInputs, AdviceProvider, BaseHost, ContextId, ExecutionError, ExecutionOptions,
     ExecutionTrace, Process, ProcessState, VmStateIterator,
 };
-use miden_processor::{AdviceMutation, DefaultHost, EventError, Program, fast::FastProcessor};
+use miden_processor::{AdviceMutation, DefaultDebugHandler, DefaultHost, EventError, Program, fast::FastProcessor};
 use miden_prover::utils::range;
 pub use miden_prover::{MerkleTreeVC, ProvingOptions, prove};
 pub use miden_verifier::{AcceptableOptions, VerifierError, verify};
@@ -57,7 +54,7 @@ pub mod serde {
 
 pub mod crypto;
 
-pub type TestHost = DefaultHost;
+pub type TestHost<D = DefaultDebugHandler, S = DefaultSourceManager> = DefaultHost<D, S>;
 
 #[cfg(not(target_family = "wasm"))]
 pub mod rand;
@@ -175,7 +172,7 @@ type HandlerFunc = fn(&ProcessState) -> Result<Vec<AdviceMutation>, EventError>;
 /// - Execution error test: check that running a program compiled from the given source causes an
 ///   ExecutionError which contains the specified substring.
 pub struct Test {
-    pub source_manager: Arc<dyn SourceManagerSync>,
+    pub source_manager: Arc<DefaultSourceManager>,
     pub source: Arc<SourceFile>,
     pub kernel_source: Option<Arc<SourceFile>>,
     pub stack_inputs: StackInputs,
@@ -192,7 +189,7 @@ impl Test {
 
     /// Creates the simplest possible new test, with only a source string and no inputs.
     pub fn new(name: &str, source: &str, in_debug_mode: bool) -> Self {
-        let source_manager = Arc::new(miden_assembly::DefaultSourceManager::default());
+        let source_manager = Arc::new(DefaultSourceManager::default());
         let source = source_manager.load(SourceLanguage::Masm, name.into(), source.to_string());
         Self {
             source_manager,
@@ -374,7 +371,11 @@ impl Test {
 
     /// Compiles the test's source to a Program and executes it with the tests inputs. Returns the
     /// process once execution is finished.
-    pub fn execute_process(&self) -> Result<(Process, TestHost), ExecutionError> {
+    #[allow(clippy::type_complexity)]
+    pub fn execute_process(
+        &self,
+    ) -> Result<(Process, TestHost<DefaultDebugHandler, DefaultSourceManager>), ExecutionError>
+    {
         let (program, host) = self.get_program_and_host();
         let mut host = host.with_source_manager(self.source_manager.clone());
 

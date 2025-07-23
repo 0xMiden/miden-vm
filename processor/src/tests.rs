@@ -10,7 +10,7 @@ use miden_core::{
     AdviceMap,
     crypto::merkle::{MerkleStore, MerkleTree},
 };
-use miden_debug_types::{SourceContent, SourceLanguage, Uri};
+use miden_debug_types::{SourceContent, SourceLanguage, SourceManager, Uri};
 use miden_utils_testing::{
     build_test, build_test_by_mode,
     crypto::{init_merkle_leaves, init_merkle_store},
@@ -705,7 +705,7 @@ fn test_diagnostic_merkle_store_lookup_failed() {
 
 #[test]
 fn test_diagnostic_no_mast_forest_with_procedure() {
-    let source_manager = DefaultSourceManager::default_arc_dyn();
+    let source_manager = Arc::new(DefaultSourceManager::default());
 
     let lib_module = {
         let module_name = "foo::bar";
@@ -945,7 +945,7 @@ fn test_diagnostic_not_u32_value() {
 
 #[test]
 fn test_diagnostic_syscall_target_not_in_kernel() {
-    let source_manager = DefaultSourceManager::default_arc_dyn();
+    let source_manager = Arc::new(DefaultSourceManager::default());
 
     let kernel_source = "
         export.dummy_proc

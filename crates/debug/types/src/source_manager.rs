@@ -278,13 +278,6 @@ impl Clone for DefaultSourceManager {
     }
 }
 
-impl DefaultSourceManager {
-    /// Shortcut for `Arc::new(DefaultSourceManager::default()) as Arc<dyn SourceManagerSync>`.
-    pub fn default_arc_dyn() -> Arc<dyn SourceManagerSync> {
-        Arc::new(Self::default())
-    }
-}
-
 #[derive(Debug, Default, Clone)]
 struct DefaultSourceManagerImpl {
     files: Vec<Arc<SourceFile>>,

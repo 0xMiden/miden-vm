@@ -1,5 +1,4 @@
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
-use miden_debug_types::DefaultSourceManager;
 use miden_processor::{AdviceInputs, ExecutionOptions, execute};
 use miden_stdlib::StdLibrary;
 use miden_vm::{Assembler, DefaultHost, StackInputs, internal::InputFile};
@@ -45,18 +44,12 @@ fn program_execution(c: &mut Criterion) {
                     assembler
                         .link_dynamic_library(StdLibrary::default())
                         .expect("failed to load stdlib");
-                    let source_manager = DefaultSourceManager::default_arc_dyn();
 
                     let program = assembler
                         .assemble_program(&source)
                         .expect("Failed to compile test source.");
                     bench.iter_batched(
-                        || {
-                            DefaultHost::default()
-                                .with_library(&StdLibrary::default())
-                                .unwrap()
-                                .with_source_manager(source_manager.clone())
-                        },
+                        || DefaultHost::default().with_library(&StdLibrary::default()).unwrap(),
                         |mut host| {
                             execute(
                                 &program,

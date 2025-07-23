@@ -3,7 +3,7 @@ use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use miden_assembly_syntax::{
     Library, LibraryPath, Parse, ParseOptions, Word,
     ast::{Form, Module, ModuleKind},
-    debuginfo::{DefaultSourceManager, SourceFile, SourceManagerSync},
+    debuginfo::{DefaultSourceManager, SourceFile, SourceManager},
     diagnostics::{
         Report,
         reporting::{ReportHandlerOpts, set_hook},
@@ -27,7 +27,7 @@ use crate::diagnostics::reporting::set_panic_hook;
 ///
 /// Some of the assertion macros defined above require a [TestContext], so be aware of that.
 pub struct TestContext {
-    source_manager: Arc<dyn SourceManagerSync>,
+    source_manager: Arc<dyn SourceManager>,
     assembler: Assembler,
 }
 
@@ -71,7 +71,7 @@ impl TestContext {
     }
 
     #[inline(always)]
-    pub fn source_manager(&self) -> Arc<dyn SourceManagerSync> {
+    pub fn source_manager(&self) -> Arc<dyn SourceManager> {
         self.source_manager.clone()
     }
 
