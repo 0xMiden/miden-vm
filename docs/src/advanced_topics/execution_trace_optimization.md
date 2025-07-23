@@ -36,7 +36,7 @@ Even when two programs run the same number of VM cycles, their proving time can 
    Each segment expands on its own. A pure arithmetic loop inflates only the stack segment, whereas repeated hashing inflates the chiplet segment.
 
 2. **Power‑of‑two padding**
-   After execution halts, the prover finds the largest trace segment length `L`, rounds it up to the next power of two `Lʹ = 2^ceil(log₂ L)`, and pads all rows with zeros until all trace segments reach `Lʹ`. The AIR expects a square trace matrix of this size.
+   After execution halts, the prover finds the largest trace segment length `L`, rounds it up to the next power of two `Lʹ = 2^ceil(log₂ L)`, and pads all rows with zeros until all trace segments reach `Lʹ`. The prover expects a square trace matrix of this size.
 
 3. **Cost driver**
    Proving time grows roughly with `Lʹ`, not with the raw cycle count. Programs that rely heavily on chiplets might have the same cycle count but significantly longer proving times due to trace segment growth. Opcodes that touch only the stack keep every segment short, yielding faster proofs. Opcodes that generate many chiplet or range‑checker rows can push `L` past a power‑of‑two boundary, doubling every segment's length after padding and markedly increasing proving time. Mixing opcode types unevenly can thus produce a cycle‑efficient program that is still proving‑expensive.
