@@ -1,5 +1,6 @@
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 
+use miden_assembly::SourceManager;
 use miden_core::{DebugOptions, Felt, Word, mast::MastForest};
 use miden_debug_types::{
     DefaultSourceManager, Location, SourceFile, SourceManagerSync, SourceSpan,
@@ -15,11 +16,14 @@ use crate::{
 
 /// A default Host implementation that provides the essential functionality required by the VM.
 #[derive(Debug)]
-pub struct DefaultHost<D: DebugHandler = DefaultDebugHandler> {
+pub struct DefaultHost<
+    D: DebugHandler = DefaultDebugHandler,
+    S: SourceManager = DefaultSourceManager,
+> {
     store: MemMastForestStore,
     event_handlers: EventHandlerRegistry,
     debug_handler: D,
-    source_manager: Arc<dyn SourceManagerSync>,
+    source_manager: E,
 }
 
 impl Default for DefaultHost {
@@ -28,15 +32,15 @@ impl Default for DefaultHost {
             store: MemMastForestStore::default(),
             event_handlers: EventHandlerRegistry::default(),
             debug_handler: DefaultDebugHandler,
-            source_manager: DefaultSourceManager::default_arc_dyn(),
+            source_manager: DefaultSourceManager::default(),
         }
     }
 }
 
-impl<D: DebugHandler> DefaultHost<D> {
+impl<D: DebugHandler, S: SourceManager> DefaultHost<D, S> {
     /// Use the given source manager implementation instead of the default one
     /// [`DefaultSourceManager`].
-    pub fn with_source_manager(mut self, source_manager: Arc<dyn SourceManagerSync>) -> Self {
+    pub fn with_source_manager(mut self, source_manager: S) -> Self {
         self.source_manager = source_manager;
         self
     }

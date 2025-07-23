@@ -517,7 +517,7 @@ impl ErrorContextImpl {
         Self { label, source_file }
     }
 
-    pub fn precalc_label_and_source_file(
+    fn precalc_label_and_source_file(
         op_idx: Option<usize>,
         mast_forest: &MastForest,
         node: &impl MastNodeExt,
