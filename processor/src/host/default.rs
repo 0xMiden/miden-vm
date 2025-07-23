@@ -23,7 +23,7 @@ pub struct DefaultHost<
     store: MemMastForestStore,
     event_handlers: EventHandlerRegistry,
     debug_handler: D,
-    source_manager: E,
+    source_manager: S,
 }
 
 impl Default for DefaultHost {
