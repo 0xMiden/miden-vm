@@ -47,6 +47,7 @@ pub trait BaseHost {
     // REQUIRED METHODS
     // --------------------------------------------------------------------------------------------
 
+    /// Obtain the [`SourceSpan`] and optional [`SourceFile`] for the provided location.
     fn get_label_and_source_file(
         &self,
         location: &Location,
