@@ -8,7 +8,7 @@ use miden_debug_types::{
 use crate::{
     AdviceMutation, AsyncHost, BaseHost, DebugHandler, EventHandler, EventHandlerRegistry,
     ExecutionError, MastForestStore, MemMastForestStore, ProcessState, SyncHost,
-    host::{EventError, SFuture},
+    host::{EventError, FutureAliasWrapper},
 };
 
 // DEFAULT HOST IMPLEMENTATION
@@ -178,7 +178,10 @@ where
     D: DebugHandler,
     S: SourceManagerSync,
 {
-    fn get_mast_forest(&self, node_digest: &Word) -> impl SFuture<Option<Arc<MastForest>>> {
+    fn get_mast_forest(
+        &self,
+        node_digest: &Word,
+    ) -> impl FutureAliasWrapper<Option<Arc<MastForest>>> {
         let val = self.store.get(node_digest);
         async move { val }
     }
@@ -187,7 +190,7 @@ where
         &mut self,
         process: &ProcessState<'_>,
         event_id: u32,
-    ) -> impl SFuture<Result<Vec<AdviceMutation>, EventError>> {
+    ) -> impl FutureAliasWrapper<Result<Vec<AdviceMutation>, EventError>> {
         let result = <Self as SyncHost>::on_event(self, process, event_id);
         async move { result }
     }
