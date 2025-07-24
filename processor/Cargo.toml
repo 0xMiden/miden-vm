@@ -33,6 +33,7 @@ testing = ["miden-air/testing", "tokio"]
 no_err_ctx = []
 # Like `testing`, but slows down the processor speed to make it easier to debug.
 bus-debugger = ["testing", "miden-air/testing"]
+syncbound = ["miden-debug-types/syncbound"]
 
 [dependencies]
 miden-air.workspace = true
