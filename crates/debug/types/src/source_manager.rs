@@ -260,9 +260,18 @@ impl<T: ?Sized + SourceManager> SourceManagerExt for T {}
 /// [SourceManager] is a supertrait of [SourceManagerSync], so you may use instances of the
 /// [SourceManagerSync] where the [SourceManager] is required, either implicitly or via explicit
 /// downcasting, e.g. `Arc<dyn SourceManagerSync> as Arc<dyn SourceManager>`.
+
+#[cfg(feature = "syncbound")]
 pub trait SourceManagerSync: SourceManager + Send + Sync {}
 
+#[cfg(feature = "syncbound")]
 impl<T: ?Sized + SourceManager + Send + Sync> SourceManagerSync for T {}
+
+#[cfg(not(feature = "syncbound"))]
+pub trait SourceManagerSync: SourceManager + Send {}
+
+#[cfg(not(feature = "syncbound"))]
+impl<T: ?Sized + SourceManager + Send> SourceManagerSync for T {}
 
 // DEFAULT SOURCE MANAGER
 // ================================================================================================
