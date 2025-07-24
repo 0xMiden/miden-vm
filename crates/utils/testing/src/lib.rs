@@ -31,7 +31,9 @@ pub use miden_processor::{
     AdviceInputs, AdviceProvider, BaseHost, ContextId, ExecutionError, ExecutionOptions,
     ExecutionTrace, Process, ProcessState, VmStateIterator,
 };
-use miden_processor::{AdviceMutation, DefaultDebugHandler, DefaultHost, EventError, Program, fast::FastProcessor};
+use miden_processor::{
+    AdviceMutation, DefaultDebugHandler, DefaultHost, EventError, Program, fast::FastProcessor,
+};
 use miden_prover::utils::range;
 pub use miden_prover::{MerkleTreeVC, ProvingOptions, prove};
 pub use miden_verifier::{AcceptableOptions, VerifierError, verify};
