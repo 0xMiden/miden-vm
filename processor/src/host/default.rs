@@ -187,7 +187,7 @@ where
         &mut self,
         process: &ProcessState<'_>,
         event_id: u32,
-    ) -> impl SFuture<Result<Vec<AdviceMutation>, EventError>> + Send {
+    ) -> impl SFuture<Result<Vec<AdviceMutation>, EventError>> {
         let result = <Self as SyncHost>::on_event(self, process, event_id);
         async move { result }
     }
