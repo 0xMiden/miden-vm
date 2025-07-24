@@ -5,6 +5,8 @@ use miden_core::{
     mast::{MastForest, MastNodeId},
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
+use midenc_hir_type::{FunctionType, Type};
+use smallvec::SmallVec;
 
 use crate::ast::QualifiedProcedureName;
 
@@ -22,6 +24,33 @@ pub use self::{
     path::{LibraryPath, LibraryPathComponent, PathError},
 };
 
+// LIBRARY EXPORT
+// ================================================================================================
+
+/// Metadata about a procedure exported by the interface of a [Library]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LibraryExport {
+    /// The id of the MAST root node of the exported procedure
+    pub node: MastNodeId,
+    /// The fully-qualified name of the exported procedure
+    pub name: QualifiedProcedureName,
+    /// The type signature of the exported procedure, if known
+    pub signature: Option<FunctionType>,
+}
+
+impl LibraryExport {
+    /// Create a new [LibraryExport] representing the export of `node` with `name`
+    pub fn new(node: MastNodeId, name: QualifiedProcedureName) -> Self {
+        Self { node, name, signature: None }
+    }
+
+    /// Specify the type signature and ABI of this export
+    pub fn with_signature(mut self, signature: FunctionType) -> Self {
+        self.signature = Some(signature);
+        self
+    }
+}
+
 // LIBRARY
 // ================================================================================================
 
@@ -34,7 +63,7 @@ pub struct Library {
     /// The content hash of this library, formed by hashing the roots of all exports in
     /// lexicographical order (by digest, not procedure name)
     digest: Word,
-    /// A map between procedure paths and the corresponding procedure roots in the MAST forest.
+    /// A map between procedure paths and the corresponding procedure metadata in the MAST forest.
     /// Multiple paths can map to the same root, and also, some roots may not be associated with
     /// any paths.
     ///
@@ -43,7 +72,7 @@ pub struct Library {
     /// contain. However, note that `MastNodeId` is also not a unique identifier for procedures; if
     /// the procedures have the same MAST root and decorators, they will have the same
     /// `MastNodeId`.
-    exports: BTreeMap<QualifiedProcedureName, MastNodeId>,
+    exports: BTreeMap<QualifiedProcedureName, LibraryExport>,
     /// The MAST forest underlying this library.
     mast_forest: Arc<MastForest>,
 }
@@ -66,18 +95,21 @@ impl Library {
     /// in the provided MAST forest.
     pub fn new(
         mast_forest: Arc<MastForest>,
-        exports: BTreeMap<QualifiedProcedureName, MastNodeId>,
+        exports: BTreeMap<QualifiedProcedureName, LibraryExport>,
     ) -> Result<Self, LibraryError> {
         if exports.is_empty() {
             return Err(LibraryError::NoExport);
         }
-        for (fqn, &proc_body_id) in exports.iter() {
-            if !mast_forest.is_procedure_root(proc_body_id) {
-                return Err(LibraryError::NoProcedureRootForExport { procedure_path: fqn.clone() });
+        for LibraryExport { name, node, .. } in exports.values() {
+            if !mast_forest.is_procedure_root(*node) {
+                return Err(LibraryError::NoProcedureRootForExport {
+                    procedure_path: name.clone(),
+                });
             }
         }
 
-        let digest = mast_forest.compute_nodes_commitment(exports.values());
+        let digest =
+            mast_forest.compute_nodes_commitment(exports.values().map(|export| &export.node));
 
         Ok(Self { digest, exports, mast_forest })
     }
@@ -102,9 +134,9 @@ impl Library {
         &self.digest
     }
 
-    /// Returns the fully qualified name of all procedures exported by the library.
-    pub fn exports(&self) -> impl Iterator<Item = &QualifiedProcedureName> {
-        self.exports.keys()
+    /// Returns the fully qualified name and metadata of all procedures exported by the library.
+    pub fn exports(&self) -> impl Iterator<Item = &LibraryExport> {
+        self.exports.values()
     }
 
     /// Returns the number of exports in this library.
@@ -117,14 +149,17 @@ impl Library {
     /// # Panics
     /// Panics if the specified procedure is not exported from this library.
     pub fn get_export_node_id(&self, proc_name: &QualifiedProcedureName) -> MastNodeId {
-        *self.exports.get(proc_name).expect("procedure not exported from the library")
+        self.exports
+            .get(proc_name)
+            .expect("procedure not exported from the library")
+            .node
     }
 
     /// Returns true if the specified exported procedure is re-exported from a dependency.
     pub fn is_reexport(&self, proc_name: &QualifiedProcedureName) -> bool {
         self.exports
             .get(proc_name)
-            .map(|&node_id| self.mast_forest[node_id].is_external())
+            .map(|export| self.mast_forest[export.node].is_external())
             .unwrap_or(false)
     }
 
@@ -140,8 +175,8 @@ impl Library {
         proc_name: impl TryInto<QualifiedProcedureName>,
     ) -> Option<Word> {
         if let Ok(qualified_proc_name) = proc_name.try_into() {
-            let node_id = self.exports.get(&qualified_proc_name);
-            node_id.map(|id| self.mast_forest()[*id].digest())
+            let export = self.exports.get(&qualified_proc_name);
+            export.map(|e| self.mast_forest()[e.node].digest())
         } else {
             None
         }
@@ -154,63 +189,32 @@ impl Library {
     pub fn module_infos(&self) -> impl Iterator<Item = ModuleInfo> {
         let mut modules_by_path: BTreeMap<LibraryPath, ModuleInfo> = BTreeMap::new();
 
-        for (proc_name, &proc_root_node_id) in self.exports.iter() {
+        for LibraryExport { node, name, signature } in self.exports.values() {
             modules_by_path
-                .entry(proc_name.module.clone())
+                .entry(name.module.clone())
                 .and_modify(|compiled_module| {
-                    let proc_digest = self.mast_forest[proc_root_node_id].digest();
-                    compiled_module.add_procedure(proc_name.name.clone(), proc_digest);
+                    let proc_digest = self.mast_forest[*node].digest();
+                    compiled_module.add_procedure(
+                        name.name.clone(),
+                        proc_digest,
+                        signature.clone().map(Arc::new),
+                    );
                 })
                 .or_insert_with(|| {
-                    let mut module_info = ModuleInfo::new(proc_name.module.clone());
+                    let mut module_info = ModuleInfo::new(name.module.clone());
 
-                    let proc_digest = self.mast_forest[proc_root_node_id].digest();
-                    module_info.add_procedure(proc_name.name.clone(), proc_digest);
+                    let proc_digest = self.mast_forest[*node].digest();
+                    module_info.add_procedure(
+                        name.name.clone(),
+                        proc_digest,
+                        signature.clone().map(Arc::new),
+                    );
 
                     module_info
                 });
         }
 
         modules_by_path.into_values()
-    }
-}
-
-impl Serializable for Library {
-    fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        let Self { digest: _, exports, mast_forest } = self;
-
-        mast_forest.write_into(target);
-
-        target.write_usize(exports.len());
-        for (proc_name, proc_node_id) in exports {
-            proc_name.module.write_into(target);
-            proc_name.name.write_into(target);
-            target.write_u32(proc_node_id.as_u32());
-        }
-    }
-}
-
-impl Deserializable for Library {
-    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let mast_forest = Arc::new(MastForest::read_from(source)?);
-
-        let num_exports = source.read_usize()?;
-        if num_exports == 0 {
-            return Err(DeserializationError::InvalidValue(String::from("No exported procedures")));
-        };
-        let mut exports = BTreeMap::new();
-        for _ in 0..num_exports {
-            let proc_module = source.read()?;
-            let proc_name = source.read()?;
-            let proc_name = QualifiedProcedureName::new(proc_module, proc_name);
-            let proc_node_id = MastNodeId::from_u32_safe(source.read_u32()?, &mast_forest)?;
-
-            exports.insert(proc_name, proc_node_id);
-        }
-
-        let digest = mast_forest.compute_nodes_commitment(exports.values());
-
-        Ok(Self { digest, exports, mast_forest })
     }
 }
 
@@ -315,17 +319,21 @@ impl TryFrom<Library> for KernelLibrary {
 
         let mut kernel_module = ModuleInfo::new(kernel_path.clone());
 
-        for (proc_path, &proc_node_id) in library.exports.iter() {
+        for export in library.exports.values() {
             // make sure all procedures are exported only from the kernel root
-            if proc_path.module != kernel_path {
+            if export.name.module != kernel_path {
                 return Err(LibraryError::InvalidKernelExport {
-                    procedure_path: proc_path.clone(),
+                    procedure_path: export.name.clone(),
                 });
             }
 
-            let proc_digest = library.mast_forest[proc_node_id].digest();
+            let proc_digest = library.mast_forest[export.node].digest();
             proc_digests.push(proc_digest);
-            kernel_module.add_procedure(proc_path.name.clone(), proc_digest);
+            kernel_module.add_procedure(
+                export.name.name.clone(),
+                proc_digest,
+                export.signature.clone().map(Arc::new),
+            );
         }
 
         let kernel = Kernel::new(&proc_digests).map_err(LibraryError::KernelConversion)?;
@@ -338,6 +346,71 @@ impl TryFrom<Library> for KernelLibrary {
     }
 }
 
+#[cfg(feature = "std")]
+impl KernelLibrary {
+    /// Write the library to a target file
+    pub fn write_to_file(&self, path: impl AsRef<std::path::Path>) -> std::io::Result<()> {
+        self.library.write_to_file(path)
+    }
+}
+
+// LIBRARY SERIALIZATION
+// ================================================================================================
+
+/// NOTE: Serialization of libraries is likely to be deprecated in a future release
+impl Serializable for Library {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        let Self { digest: _, exports, mast_forest } = self;
+
+        mast_forest.write_into(target);
+
+        target.write_usize(exports.len());
+        for LibraryExport { node, name, signature } in exports.values() {
+            name.module.write_into(target);
+            name.name.write_into(target);
+            target.write_u32(node.as_u32());
+            if let Some(sig) = signature {
+                target.write_bool(true);
+                FunctionTypeSerializer(sig).write_into(target);
+            } else {
+                target.write_bool(false);
+            }
+        }
+    }
+}
+
+/// NOTE: Serialization of libraries is likely to be deprecated in a future release
+impl Deserializable for Library {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let mast_forest = Arc::new(MastForest::read_from(source)?);
+
+        let num_exports = source.read_usize()?;
+        if num_exports == 0 {
+            return Err(DeserializationError::InvalidValue(String::from("No exported procedures")));
+        };
+        let mut exports = BTreeMap::new();
+        for _ in 0..num_exports {
+            let proc_module = source.read()?;
+            let proc_name = source.read()?;
+            let proc_name = QualifiedProcedureName::new(proc_module, proc_name);
+            let node = MastNodeId::from_u32_safe(source.read_u32()?, &mast_forest)?;
+            let signature = if source.read_bool()? {
+                Some(FunctionTypeDeserializer::read_from(source)?.0)
+            } else {
+                None
+            };
+            let export = LibraryExport { node, name: proc_name.clone(), signature };
+
+            exports.insert(proc_name, export);
+        }
+
+        let digest = mast_forest.compute_nodes_commitment(exports.values().map(|e| &e.node));
+
+        Ok(Self { digest, exports, mast_forest })
+    }
+}
+
+/// NOTE: Serialization of libraries is likely to be deprecated in a future release
 impl Serializable for KernelLibrary {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         let Self { kernel: _, kernel_info: _, library } = self;
@@ -346,6 +419,7 @@ impl Serializable for KernelLibrary {
     }
 }
 
+/// NOTE: Serialization of libraries is likely to be deprecated in a future release
 impl Deserializable for KernelLibrary {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let library = Library::read_from(source)?;
@@ -358,10 +432,235 @@ impl Deserializable for KernelLibrary {
     }
 }
 
-#[cfg(feature = "std")]
-impl KernelLibrary {
-    /// Write the library to a target file
-    pub fn write_to_file(&self, path: impl AsRef<std::path::Path>) -> std::io::Result<()> {
-        self.library.write_to_file(path)
+/// A wrapper type for [FunctionType] that provides serialization support via the winter-utils
+/// serializer.
+///
+/// This is a temporary implementation to allow type information to be serialized with libraries,
+/// but in a future release we'll either rely on the `serde` serialization for these types, or
+/// provide the serialization implementation in midenc-hir-type instead
+pub struct FunctionTypeSerializer<'a>(pub &'a FunctionType);
+
+impl Serializable for FunctionTypeSerializer<'_> {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        target.write_u8(self.0.abi as u8);
+        target.write_usize(self.0.params().len());
+        target.write_many(self.0.params().iter().map(TypeSerializer));
+        target.write_usize(self.0.results().len());
+        target.write_many(self.0.results().iter().map(TypeSerializer));
+    }
+}
+
+/// A wrapper type for [FunctionType] that provides deserialization support via the winter-utils
+/// serializer.
+///
+/// This is a temporary implementation to allow type information to be serialized with libraries,
+/// but in a future release we'll either rely on the `serde` serialization for these types, or
+/// provide the serialization implementation in midenc-hir-type instead
+pub struct FunctionTypeDeserializer(pub FunctionType);
+
+impl Deserializable for FunctionTypeDeserializer {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        use midenc_hir_type::CallConv;
+
+        let abi = match source.read_u8()? {
+            0 => CallConv::Fast,
+            1 => CallConv::SystemV,
+            2 => CallConv::Wasm,
+            3 => CallConv::CanonLift,
+            4 => CallConv::CanonLower,
+            5 => CallConv::Kernel,
+            invalid => {
+                return Err(DeserializationError::InvalidValue(format!(
+                    "invalid CallConv tag: {invalid}"
+                )));
+            },
+        };
+
+        let arity = source.read_usize()?;
+        let mut params = SmallVec::<[Type; 4]>::with_capacity(arity);
+        for _ in 0..arity {
+            let ty = TypeDeserializer::read_from(source)?.0;
+            params.push(ty);
+        }
+
+        let num_results = source.read_usize()?;
+        let mut results = SmallVec::<[Type; 1]>::with_capacity(num_results);
+        for _ in 0..num_results {
+            let ty = TypeDeserializer::read_from(source)?.0;
+            results.push(ty);
+        }
+
+        Ok(Self(FunctionType { abi, params, results }))
+    }
+}
+
+/// A wrapper type for [Type] that provides serialization support via the winter-utils serializer.
+///
+/// This is a temporary implementation to allow type information to be serialized with libraries,
+/// but in a future release we'll either rely on the `serde` serialization for these types, or
+/// provide the serialization implementation in midenc-hir-type instead
+pub struct TypeSerializer<'a>(pub &'a Type);
+
+impl Serializable for TypeSerializer<'_> {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        use midenc_hir_type::{AddressSpace, TypeRepr};
+
+        match self.0 {
+            Type::Unknown => target.write_u8(0),
+            Type::Never => target.write_u8(1),
+            Type::I1 => target.write_u8(2),
+            Type::I8 => target.write_u8(3),
+            Type::U8 => target.write_u8(4),
+            Type::I16 => target.write_u8(5),
+            Type::U16 => target.write_u8(6),
+            Type::I32 => target.write_u8(7),
+            Type::U32 => target.write_u8(8),
+            Type::I64 => target.write_u8(9),
+            Type::U64 => target.write_u8(10),
+            Type::I128 => target.write_u8(11),
+            Type::U128 => target.write_u8(12),
+            Type::U256 => target.write_u8(13),
+            Type::F64 => target.write_u8(14),
+            Type::Felt => target.write_u8(15),
+            Type::Ptr(ty) => {
+                target.write_u8(16);
+                match ty.addrspace {
+                    AddressSpace::Byte => target.write_u8(0),
+                    AddressSpace::Element => target.write_u8(1),
+                }
+                TypeSerializer(&ty.pointee).write_into(target);
+            },
+            Type::Struct(ty) => {
+                target.write_u8(17);
+                match ty.repr() {
+                    TypeRepr::Default => target.write_u8(0),
+                    TypeRepr::Align(align) => {
+                        target.write_u8(1);
+                        target.write_u16(align.get());
+                    },
+                    TypeRepr::Packed(align) => {
+                        target.write_u8(2);
+                        target.write_u16(align.get());
+                    },
+                    TypeRepr::Transparent => target.write_u8(3),
+                }
+                target.write_u8(ty.len() as u8);
+                for field in ty.fields() {
+                    TypeSerializer(&field.ty).write_into(target);
+                }
+            },
+            Type::Array(ty) => {
+                target.write_u8(18);
+                target.write_usize(ty.len);
+                TypeSerializer(&ty.ty).write_into(target);
+            },
+            Type::List(ty) => {
+                target.write_u8(19);
+                TypeSerializer(ty).write_into(target);
+            },
+            Type::Function(ty) => {
+                target.write_u8(20);
+                FunctionTypeSerializer(ty).write_into(target);
+            },
+        }
+    }
+}
+
+/// A wrapper type for [Type] that provides deserialization support via the winter-utils serializer.
+///
+/// This is a temporary implementation to allow type information to be serialized with libraries,
+/// but in a future release we'll either rely on the `serde` serialization for these types, or
+/// provide the serialization implementation in midenc-hir-type instead
+pub struct TypeDeserializer(pub Type);
+
+impl Deserializable for TypeDeserializer {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        use alloc::string::ToString;
+        use core::num::NonZeroU16;
+
+        use midenc_hir_type::{AddressSpace, ArrayType, PointerType, StructType, TypeRepr};
+
+        let ty = match source.read_u8()? {
+            0 => Type::Unknown,
+            1 => Type::Never,
+            2 => Type::I1,
+            3 => Type::I8,
+            4 => Type::U8,
+            5 => Type::I16,
+            6 => Type::U16,
+            7 => Type::I32,
+            8 => Type::U32,
+            9 => Type::I64,
+            10 => Type::U64,
+            11 => Type::I128,
+            12 => Type::U128,
+            13 => Type::U256,
+            14 => Type::F64,
+            15 => Type::Felt,
+            16 => {
+                let addrspace = match source.read_u8()? {
+                    0 => AddressSpace::Byte,
+                    1 => AddressSpace::Element,
+                    invalid => {
+                        return Err(DeserializationError::InvalidValue(format!(
+                            "invalid AddressSpace tag: {invalid}"
+                        )));
+                    },
+                };
+                let pointee = TypeDeserializer::read_from(source)?.0;
+                Type::Ptr(Arc::new(PointerType { addrspace, pointee }))
+            },
+            17 => {
+                let repr = match source.read_u8()? {
+                    0 => TypeRepr::Default,
+                    1 => {
+                        let align = NonZeroU16::new(source.read_u16()?).ok_or_else(|| {
+                            DeserializationError::InvalidValue(
+                                "invalid type repr: alignment must be a non-zero value".to_string(),
+                            )
+                        })?;
+                        TypeRepr::Align(align)
+                    },
+                    2 => {
+                        let align = NonZeroU16::new(source.read_u16()?).ok_or_else(|| {
+                            DeserializationError::InvalidValue(
+                                "invalid type repr: packed alignment must be a non-zero value"
+                                    .to_string(),
+                            )
+                        })?;
+                        TypeRepr::Packed(align)
+                    },
+                    3 => TypeRepr::Transparent,
+                    invalid => {
+                        return Err(DeserializationError::InvalidValue(format!(
+                            "invalid TypeRepr tag: {invalid}"
+                        )));
+                    },
+                };
+                let num_fields = source.read_u8()?;
+                let mut fields = SmallVec::<[Type; 4]>::with_capacity(num_fields as usize);
+                for _ in 0..num_fields {
+                    let ty = TypeDeserializer::read_from(source)?.0;
+                    fields.push(ty);
+                }
+                Type::Struct(Arc::new(StructType::new_with_repr(repr, fields)))
+            },
+            18 => {
+                let arity = source.read_usize()?;
+                let ty = TypeDeserializer::read_from(source)?.0;
+                Type::Array(Arc::new(ArrayType { ty, len: arity }))
+            },
+            19 => {
+                let ty = TypeDeserializer::read_from(source)?.0;
+                Type::List(Arc::new(ty))
+            },
+            20 => Type::Function(Arc::new(FunctionTypeDeserializer::read_from(source)?.0)),
+            invalid => {
+                return Err(DeserializationError::InvalidValue(format!(
+                    "invalid Type tag: {invalid}"
+                )));
+            },
+        };
+        Ok(Self(ty))
     }
 }

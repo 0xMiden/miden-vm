@@ -8,6 +8,7 @@ mod resolver;
 use alloc::string::String;
 
 use miden_debug_types::{SourceSpan, Span, Spanned};
+use midenc_hir_type::FunctionType;
 
 pub use self::{
     alias::{AliasTarget, ProcedureAlias},
@@ -73,6 +74,14 @@ impl Export {
         match self {
             Self::Procedure(proc) => proc.visibility(),
             Self::Alias(_) => Visibility::Public,
+        }
+    }
+
+    /// Returns a reference to the type signature of this procedure, if known.
+    pub fn signature(&self) -> Option<&FunctionType> {
+        match self {
+            Self::Procedure(proc) => proc.signature(),
+            Self::Alias(_) => None,
         }
     }
 

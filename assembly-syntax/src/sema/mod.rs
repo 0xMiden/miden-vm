@@ -54,6 +54,16 @@ pub fn analyze(
                     analyzer.error(SemanticAnalysisError::UnusedDocstring { span: unused.span() });
                 }
             },
+            Form::Type(ty) => {
+                if let Err(err) = module.define_type(ty.with_docs(docs.take())) {
+                    analyzer.error(err);
+                }
+            },
+            Form::Enum(ty) => {
+                if let Err(err) = module.define_enum(ty.with_docs(docs.take())) {
+                    analyzer.error(err);
+                }
+            },
             Form::Constant(constant) => {
                 analyzer.define_constant(constant.with_docs(docs.take()))?;
             },

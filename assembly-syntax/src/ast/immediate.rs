@@ -136,6 +136,16 @@ impl<T: PartialEq> PartialEq<T> for Immediate<T> {
     }
 }
 
+impl<T: core::hash::Hash> core::hash::Hash for Immediate<T> {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        core::mem::discriminant(self).hash(state);
+        match self {
+            Self::Value(v) => v.hash(state),
+            Self::Constant(name) => name.hash(state),
+        }
+    }
+}
+
 impl<T: fmt::Debug> fmt::Debug for Immediate<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
