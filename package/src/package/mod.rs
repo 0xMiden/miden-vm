@@ -1,7 +1,7 @@
 mod manifest;
 mod serialization;
 
-use alloc::{collections::BTreeSet, format, string::String, sync::Arc, vec::Vec};
+use alloc::{collections::BTreeMap, format, string::String, sync::Arc, vec::Vec};
 
 use miden_assembly_syntax::{Library, Report, ast::QualifiedProcedureName};
 use miden_core::{Program, Word};
@@ -88,13 +88,14 @@ impl Package {
                 )
             })?;
 
-            let exports = BTreeSet::from_iter(self.manifest.exports.iter().find_map(|export| {
-                if export.digest == digest {
-                    Some(export.clone())
-                } else {
-                    None
-                }
-            }));
+            let exports =
+                BTreeMap::from_iter(self.manifest.exports.iter().find_map(|(name, export)| {
+                    if export.digest == digest {
+                        Some((name.clone(), export.clone()))
+                    } else {
+                        None
+                    }
+                }));
 
             Ok(Self {
                 name: self.name.clone(),

@@ -15,6 +15,7 @@ use crate::{
 // ================================================================================================
 
 /// Represents a constant definition in Miden Assembly syntax, i.e. `const.FOO = 1 + 1`.
+#[derive(Clone)]
 pub struct Constant {
     /// The source span of the definition.
     pub span: SourceSpan,
@@ -230,6 +231,23 @@ impl PartialEq for ConstantExpr {
     }
 }
 
+impl core::hash::Hash for ConstantExpr {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        core::mem::discriminant(self).hash(state);
+        match self {
+            Self::Literal(value) => value.as_int().hash(state),
+            Self::String(value) => value.hash(state),
+            Self::Word(value) => value.hash(state),
+            Self::Var(value) => value.hash(state),
+            Self::BinaryOp { op, lhs, rhs, .. } => {
+                op.hash(state);
+                lhs.hash(state);
+                rhs.hash(state);
+            },
+        }
+    }
+}
+
 impl fmt::Debug for ConstantExpr {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
@@ -275,7 +293,7 @@ impl Spanned for ConstantExpr {
 // ================================================================================================
 
 /// Represents the set of binary arithmetic operators supported in Miden Assembly syntax.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum ConstantOp {
     Add,
     Sub,

@@ -25,13 +25,12 @@ impl Assembler {
         proc_ctx: &ProcedureContext,
         mast_forest_builder: &mut MastForestBuilder,
     ) -> Result<MastNodeId, Report> {
-        let invoked_proc_node_id =
-            self.resolve_target(kind, callee, proc_ctx, mast_forest_builder)?;
+        let resolved = self.resolve_target(kind, callee, proc_ctx, mast_forest_builder)?;
 
         match kind {
-            InvokeKind::ProcRef | InvokeKind::Exec => Ok(invoked_proc_node_id),
-            InvokeKind::Call => mast_forest_builder.ensure_call(invoked_proc_node_id),
-            InvokeKind::SysCall => mast_forest_builder.ensure_syscall(invoked_proc_node_id),
+            InvokeKind::ProcRef | InvokeKind::Exec => Ok(resolved.node),
+            InvokeKind::Call => mast_forest_builder.ensure_call(resolved.node),
+            InvokeKind::SysCall => mast_forest_builder.ensure_syscall(resolved.node),
         }
     }
 
@@ -62,7 +61,7 @@ impl Assembler {
         block_builder: &mut BasicBlockBuilder,
     ) -> Result<(), Report> {
         let mast_root = {
-            let proc_body_id = self.resolve_target(
+            let resolved = self.resolve_target(
                 InvokeKind::ProcRef,
                 callee,
                 proc_ctx,
@@ -72,7 +71,7 @@ impl Assembler {
             // `mast_forest_builder`
             block_builder
                 .mast_forest_builder()
-                .get_mast_node(proc_body_id)
+                .get_mast_node(resolved.node)
                 .unwrap()
                 .digest()
         };
