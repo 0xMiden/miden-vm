@@ -54,9 +54,6 @@ use std::sync::Arc;
 use miden_vm::{assembly::DefaultSourceManager, AdviceInputs, Assembler, execute, execute_iter, DefaultHost, Program, StackInputs};
 use miden_processor::ExecutionOptions;
 
-// instantiate default source manager
-let source_manager = Arc::new(DefaultSourceManager::default());
-
 // instantiate the assembler
 let mut assembler = Assembler::default();
 
@@ -76,7 +73,7 @@ let mut host = DefaultHost::default();
 let exec_options = ExecutionOptions::default();
 
 // execute the program with no inputs
-let trace = execute(&program, stack_inputs.clone(), advice_inputs.clone(), &mut host, exec_options, source_manager.clone()).unwrap();
+let trace = execute(&program, stack_inputs.clone(), advice_inputs.clone(), &mut host, exec_options).unwrap();
 
 // now, execute the same program in debug mode and iterate over VM states
 for vm_state in execute_iter(
@@ -84,7 +81,6 @@ for vm_state in execute_iter(
     stack_inputs,
     advice_inputs,
     &mut host,
-    source_manager
 ) {
     match vm_state {
         Ok(vm_state) => println!("{:?}", vm_state),
@@ -115,9 +111,6 @@ Here is a simple example of executing a program which pushes two numbers onto th
 use std::sync::Arc;
 use miden_vm::{assembly::DefaultSourceManager, AdviceInputs, Assembler, DefaultHost, ProvingOptions, Program, prove, StackInputs};
 
-// instantiate default source manager
-let source_manager = Arc::new(DefaultSourceManager::default());
-
 // instantiate the assembler
 let mut assembler = Assembler::default();
 
@@ -131,7 +124,6 @@ let (outputs, proof) = prove(
     AdviceInputs::default(),      // we don't need any initial advice inputs
     &mut DefaultHost::default(),  // we'll be using a default host
     ProvingOptions::default(),    // we'll be using default options
-    source_manager,
 )
 .unwrap();
 
@@ -228,7 +220,6 @@ let (outputs, proof) = miden_vm::prove(
     AdviceInputs::default(), // without initial advice inputs
     &mut host,
     ProvingOptions::default(), // use default proving options
-    Arc::new(DefaultSourceManager::default()), // use default source manager
 )
 .unwrap();
 
