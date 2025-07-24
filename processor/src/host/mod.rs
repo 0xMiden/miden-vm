@@ -111,10 +111,7 @@ pub trait AsyncHost: BaseHost {
 
     /// Returns MAST forest corresponding to the specified digest, or None if the MAST forest for
     /// this digest could not be found in this [AsyncHost].
-    fn get_mast_forest(
-        &self,
-        node_digest: &Word,
-    ) -> impl Future<Output = Option<Arc<MastForest>>> + Send;
+    fn get_mast_forest(&self, node_digest: &Word) -> impl SFuture<Option<Arc<MastForest>>>;
 
     /// Handles the event emitted from the VM and provides advice mutations to be applied to
     /// the advice provider.
@@ -122,5 +119,9 @@ pub trait AsyncHost: BaseHost {
         &mut self,
         process: &ProcessState<'_>,
         event_id: u32,
-    ) -> impl Future<Output = Result<Vec<AdviceMutation>, EventError>> + Send;
+    ) -> impl SFuture<Result<Vec<AdviceMutation>, EventError>>;
 }
+
+pub trait SFuture<O>: Future<Output = O> + Send {}
+
+impl<T, O> SFuture<O> for T where T: Future<Output = O> + Send {}
