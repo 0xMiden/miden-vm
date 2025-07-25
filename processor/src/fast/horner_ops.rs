@@ -110,7 +110,7 @@ impl FastProcessor {
             let addr = self.stack_get(ALPHA_ADDR_INDEX);
             let word = self
                 .memory
-                .read_word(self.ctx, addr, self.clk + op_idx, err_ctx)
+                .read_word(self.ctx, addr, self.clk + op_idx, err_ctx, &mut self.shims)
                 .map_err(ExecutionError::MemoryError)?;
 
             (word[0], word[1])

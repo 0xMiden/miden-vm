@@ -21,9 +21,12 @@ use crate::{
     chiplets::Ace,
     continuation_stack::{Continuation, ContinuationStack},
     err_ctx,
+    fast::{checkpoints::CoreTraceState, replay_shims::Shims},
 };
 
+pub mod checkpoints;
 mod memory;
+mod replay_shims;
 
 // Ops
 mod circuit_eval;
@@ -151,6 +154,9 @@ pub struct FastProcessor {
 
     /// The source manager (providing information about the location of each instruction).
     source_manager: Arc<dyn SourceManager>,
+
+    /// Shims used for tracing execution, if enabled.
+    shims: Option<Shims>,
 }
 
 impl FastProcessor {
@@ -219,6 +225,7 @@ impl FastProcessor {
             ace: Ace::default(),
             in_debug_mode,
             source_manager,
+            shims: None,
         }
     }
 
@@ -314,22 +321,39 @@ impl FastProcessor {
     // EXECUTE
     // -------------------------------------------------------------------------------------------
 
-    /// Executes the given program and returns the stack outputs.
+    /// Executes the given program and returns the stack outputs as well as the advice provider.
     pub async fn execute(
         mut self,
         program: &Program,
         host: &mut impl AsyncHost,
-    ) -> Result<StackOutputs, ExecutionError> {
-        self.execute_impl(program, host).await
+    ) -> Result<(StackOutputs, AdviceProvider), ExecutionError> {
+        let (stack_outputs, _) = self.execute_impl(program, host).await?;
+
+        Ok((stack_outputs, self.advice))
+    }
+
+    /// Executes the given program and returns the stack outputs, the advice provider, and
+    /// information for building the trace.
+    pub async fn execute_for_trace(
+        mut self,
+        program: &Program,
+        host: &mut impl AsyncHost,
+    ) -> Result<(StackOutputs, AdviceProvider, Vec<CoreTraceState>), ExecutionError> {
+        self.shims = Some(Shims::default());
+        let (stack_outputs, core_trace_states) = self.execute_impl(program, host).await?;
+
+        Ok((stack_outputs, self.advice, core_trace_states))
     }
 
     async fn execute_impl(
         &mut self,
         program: &Program,
         host: &mut impl AsyncHost,
-    ) -> Result<StackOutputs, ExecutionError> {
+    ) -> Result<(StackOutputs, Vec<CoreTraceState>), ExecutionError> {
         let mut continuation_stack = ContinuationStack::new(program);
         let mut current_forest = program.mast_forest().clone();
+
+        let core_trace_states = Vec::new();
 
         while let Some(processing_step) = continuation_stack.pop_continuation() {
             match processing_step {
@@ -337,6 +361,10 @@ impl FastProcessor {
                     let node = current_forest.get_node_by_id(node_id).unwrap();
                     match node {
                         MastNode::Block(basic_block_node) => {
+                            if let Some(ref mut shims) = self.shims {
+                                shims.hasher.record_hash_basic_block(basic_block_node);
+                            }
+
                             self.execute_basic_block_node(
                                 basic_block_node,
                                 node_id,
@@ -345,36 +373,64 @@ impl FastProcessor {
                             )
                             .await?
                         },
-                        MastNode::Join(join_node) => self.start_join_node(
-                            join_node,
-                            node_id,
-                            &current_forest,
-                            &mut continuation_stack,
-                            host,
-                        )?,
-                        MastNode::Split(split_node) => self.start_split_node(
-                            split_node,
-                            node_id,
-                            &current_forest,
-                            &mut continuation_stack,
-                            host,
-                        )?,
-                        MastNode::Loop(loop_node) => self.start_loop_node(
-                            loop_node,
-                            node_id,
-                            &current_forest,
-                            &mut continuation_stack,
-                            host,
-                        )?,
-                        MastNode::Call(call_node) => self.start_call_node(
-                            call_node,
-                            node_id,
-                            program,
-                            &current_forest,
-                            &mut continuation_stack,
-                            host,
-                        )?,
+                        MastNode::Join(join_node) => {
+                            if let Some(ref mut shims) = self.shims {
+                                shims.hasher.record_hash_control_block();
+                            }
+
+                            self.start_join_node(
+                                join_node,
+                                node_id,
+                                &current_forest,
+                                &mut continuation_stack,
+                                host,
+                            )?
+                        },
+                        MastNode::Split(split_node) => {
+                            if let Some(ref mut shims) = self.shims {
+                                shims.hasher.record_hash_control_block();
+                            }
+
+                            self.start_split_node(
+                                split_node,
+                                node_id,
+                                &current_forest,
+                                &mut continuation_stack,
+                                host,
+                            )?
+                        },
+                        MastNode::Loop(loop_node) => {
+                            if let Some(ref mut shims) = self.shims {
+                                shims.hasher.record_hash_control_block();
+                            }
+
+                            self.start_loop_node(
+                                loop_node,
+                                node_id,
+                                &current_forest,
+                                &mut continuation_stack,
+                                host,
+                            )?
+                        },
+                        MastNode::Call(call_node) => {
+                            if let Some(ref mut shims) = self.shims {
+                                shims.hasher.record_hash_control_block();
+                            }
+
+                            self.start_call_node(
+                                call_node,
+                                node_id,
+                                program,
+                                &current_forest,
+                                &mut continuation_stack,
+                                host,
+                            )?
+                        },
                         MastNode::Dyn(_dyn_node) => {
+                            if let Some(ref mut shims) = self.shims {
+                                shims.hasher.record_hash_control_block();
+                            }
+
                             self.start_dyn_node(
                                 node_id,
                                 &mut current_forest,
@@ -416,7 +472,7 @@ impl FastProcessor {
             }
         }
 
-        StackOutputs::new(
+        let stack_outputs = StackOutputs::new(
             self.stack[self.stack_bot_idx..self.stack_top_idx]
                 .iter()
                 .rev()
@@ -427,7 +483,9 @@ impl FastProcessor {
             ExecutionError::OutputStackOverflow(
                 self.stack_top_idx - self.stack_bot_idx - MIN_STACK_DEPTH,
             )
-        })
+        })?;
+
+        Ok((stack_outputs, core_trace_states))
     }
 
     // NODE EXECUTORS
@@ -701,7 +759,7 @@ impl FastProcessor {
         let callee_hash = {
             let mem_addr = self.stack_get(0);
             self.memory
-                .read_word(self.ctx, mem_addr, self.clk, &err_ctx)
+                .read_word(self.ctx, mem_addr, self.clk, &err_ctx, &mut self.shims)
                 .map_err(ExecutionError::MemoryError)?
         };
 
@@ -786,6 +844,10 @@ impl FastProcessor {
 
         let external_node = current_forest[node_id].unwrap_external();
         let (root_id, new_mast_forest) = self.resolve_external_node(external_node, host).await?;
+
+        if let Some(ref mut shims) = self.shims {
+            shims.external.record_resolution(root_id, new_mast_forest.clone());
+        }
 
         // Push current forest to the continuation stack so that we can return to it
         continuation_stack.push_enter_forest(current_forest.clone());
@@ -1231,6 +1293,19 @@ impl FastProcessor {
     /// The bottom of the stack is never affected by this operation.
     #[inline(always)]
     fn increment_stack_size(&mut self) {
+        {
+            // Get around the borrow checker by using a temporary variable.
+            let overflow_value = if self.shims.is_some() {
+                Some(self.stack_get(15))
+            } else {
+                None
+            };
+
+            if let Some(ref mut shims) = self.shims {
+                shims.overflow.push(overflow_value.unwrap());
+            }
+        }
+
         self.stack_top_idx += 1;
         self.update_bounds_check_counter();
     }
@@ -1241,6 +1316,10 @@ impl FastProcessor {
     /// than 16.
     #[inline(always)]
     fn decrement_stack_size(&mut self) {
+        if let Some(ref mut shims) = self.shims {
+            shims.overflow.pop();
+        }
+
         self.stack_top_idx -= 1;
         self.stack_bot_idx = min(self.stack_bot_idx, self.stack_top_idx - MIN_STACK_DEPTH);
         self.update_bounds_check_counter();
@@ -1303,6 +1382,10 @@ impl FastProcessor {
             fn_hash: self.caller_hash,
             fmp: self.fmp,
         });
+
+        if let Some(ref mut shims) = self.shims {
+            shims.overflow.start_context();
+        }
     }
 
     /// Restores the execution context to the state it was in before the last `call`, `syscall` or
@@ -1344,6 +1427,10 @@ impl FastProcessor {
         self.in_syscall = false;
         self.caller_hash = ctx_info.fn_hash;
 
+        if let Some(ref mut shims) = self.shims {
+            shims.overflow.restore_context();
+        }
+
         Ok(())
     }
 
@@ -1360,7 +1447,9 @@ impl FastProcessor {
         // Create a new Tokio runtime and block on the async execution
         let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
 
-        rt.block_on(self.execute(program, host))
+        let (stack_outputs, _advice) = rt.block_on(self.execute(program, host))?;
+
+        Ok(stack_outputs)
     }
 
     /// Similar to [Self::execute_sync], but allows mutable access to the processor.
@@ -1374,6 +1463,7 @@ impl FastProcessor {
         let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
 
         rt.block_on(self.execute_impl(program, host))
+            .map(|(stack_outputs, _)| stack_outputs)
     }
 }
 

@@ -1,7 +1,7 @@
 use miden_air::RowIndex;
 use miden_core::{Felt, FieldElement, QuadFelt};
 
-use super::{FastProcessor, memory::Memory};
+use super::{FastProcessor, memory::Memory, replay_shims::Shims};
 use crate::{
     ContextId, ExecutionError,
     chiplets::{CircuitEvaluation, MAX_NUM_ACE_WIRES, PTR_OFFSET_ELEM, PTR_OFFSET_WORD},
@@ -46,6 +46,7 @@ impl FastProcessor {
             &mut self.memory,
             op_idx,
             err_ctx,
+            &mut self.shims,
         )?;
         self.ace.add_circuit_evaluation(clk, circuit_evaluation);
 
@@ -64,6 +65,7 @@ pub fn eval_circuit_fast_(
     mem: &mut Memory,
     op_idx: usize,
     err_ctx: &impl ErrorContext,
+    shims: &mut Option<Shims>,
 ) -> Result<CircuitEvaluation, ExecutionError> {
     let num_vars = num_vars.as_int();
     let num_eval = num_eval.as_int();
@@ -103,15 +105,16 @@ pub fn eval_circuit_fast_(
     // perform READ operations
     for _ in 0..num_read_rows {
         let word = mem
-            .read_word(ctx, ptr, clk + op_idx, err_ctx)
+            .read_word(ctx, ptr, clk + op_idx, err_ctx, shims)
             .map_err(ExecutionError::MemoryError)?;
         evaluation_context.do_read(ptr, word)?;
         ptr += PTR_OFFSET_WORD;
     }
     // perform EVAL operations
     for _ in 0..num_eval_rows {
-        let instruction =
-            mem.read_element(ctx, ptr, err_ctx).map_err(ExecutionError::MemoryError)?;
+        let instruction = mem
+            .read_element(ctx, ptr, err_ctx, shims)
+            .map_err(ExecutionError::MemoryError)?;
         evaluation_context.do_eval(ptr, instruction, err_ctx)?;
         ptr += PTR_OFFSET_ELEM;
     }

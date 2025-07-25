@@ -81,7 +81,7 @@ impl OverflowStack {
 ///
 /// The overflow table keeps track of the current clock cycle, and hence `advance_clock()` must be
 /// called whenever the clock cycle is incremented globally.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct OverflowTable {
     overflow: Vec<OverflowStack>,
     clk: RowIndex,
@@ -138,6 +138,11 @@ impl OverflowTable {
     /// contexts.
     pub fn total_num_elements(&self) -> usize {
         self.overflow.iter().map(OverflowStack::num_elements).sum::<usize>()
+    }
+
+    /// Returns the number of elements in the overflow stack for the current context.
+    pub fn num_elements_in_current_ctx(&self) -> usize {
+        self.get_current_overflow_stack().num_elements()
     }
 
     // PUBLIC MUTATORS
