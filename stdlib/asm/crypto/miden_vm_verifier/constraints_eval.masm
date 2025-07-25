@@ -1,4 +1,5 @@
 use.std::crypto::stark::constants
+use.std::crypto::stark::utils
 use.std::crypto::hashes::rpo
 
 # Constraint evaluation circuit description
@@ -120,7 +121,6 @@ adv_map.DIGEST([9139186206676821480, 12763675724578443945, 7621207635344139731, 
 # =================================================================================================
 
 # Number of constraints, both boundary and transitional
-# Note: If the full set of all implemented constraints is used then this should be set to 226
 const.NUM_CONSTRAINTS=6
 
 # Number of inputs to the constraint evaluation circuit
@@ -135,19 +135,45 @@ const.MAX_CYCLE_LEN_LOG=3
 # CONSTANTS GETTERS
 # =================================================================================================
 
-proc.get_arithmetic_circuit_constants
-    push.MAX_CYCLE_LEN_LOG
-    push.NUM_EVAL_GATES_CIRCUIT
-    push.NUM_INPUTS_CIRCUIT
-end
-
 proc.get_num_constraints
     push.NUM_CONSTRAINTS
 end
 
-
 # HELPER PROCEDURES
 # =================================================================================================
+
+#! Executes the constraints evaluation logic based on arithmetic circuit evaluation.
+#!
+#! Input: [...]
+#! Output: [...]
+export.constraint_evaluation_check
+    # 1) Compute and store at the appropriate memory location the auxiliary inputs needed by
+    #    the arithmetic circuit.
+    push.MAX_CYCLE_LEN_LOG
+    exec.utils::set_up_auxiliary_inputs_ace
+    # => [...]
+
+    # 2) Load the circuit description from the advice tape and check that it matches the hardcoded digest.
+    exec.load_ace_circuit_description
+    # => [...]
+
+    # 3) Set up the inputs to the "arithmetic_circuit_eval" op. Namely:
+    #    1. a pointer to the inputs of the circuit in memory,
+    #    2. the number of inputs to the circuit,
+    #    3. the number of evaluation gates in the circuit.
+    push.NUM_EVAL_GATES_CIRCUIT
+    push.NUM_INPUTS_CIRCUIT
+    exec.constants::public_inputs_address_ptr mem_load
+    # => [...]
+
+    # 4) Perform the constraint evaluation check by checking that the circuit evaluates to zero, which
+    #    boils down to the "arithmetic_circuit_eval" returning.
+    arithmetic_circuit_eval
+
+    # 5) Clean up the stack.
+    drop drop drop
+    # => [...]
+end
 
 #! Loads the description of the ACE circuit for the constraints evaluation check.
 #!
