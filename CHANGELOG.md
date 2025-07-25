@@ -19,6 +19,7 @@
 - [BREAKING] Implemented custom Event handlers ([#1584](https://github.com/0xMiden/miden-vm/pull/1584)).
 - Converted `FastProcessor::execute()` from recursive to iterative execution ([#1989](https://github.com/0xMiden/miden-vm/issues/1989)).
 - [BREAKING] made `AdviceInputs` field public and removed redundant accessors ([#2009](https://github.com/0xMiden/miden-vm/pull/2009)).
+- Enhancement for all benchmarks (incl. `program_execution_fast`) are built and run in a new CI job with required feature flags [(#https://github.com/0xMiden/miden-vm/issues/1964)](https://github.com/0xMiden/miden-vm/issues/1964)
 
 ## 0.16.4 (2025-07-24)
 
@@ -27,7 +28,6 @@
 ## 0.16.3 (2025-07-18)
 
 - Add `new_dummy` method on `ExecutionProof` ([#2007](https://github.com/0xMiden/miden-vm/pull/2007)).
-- Enhancement for all benchmarks (incl. `program_execution_fast`) are built and run in a new CI job with required feature flags [(#https://github.com/0xMiden/miden-vm/issues/1964)](https://github.com/0xMiden/miden-vm/issues/1964)
 
 ## 0.16.2 (2025-07-11)
 
