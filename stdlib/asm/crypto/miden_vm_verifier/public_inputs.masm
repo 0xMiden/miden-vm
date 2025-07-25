@@ -19,10 +19,6 @@ export.get_num_fixed_len_public_inputs
     push.NUM_FIXED_LEN_PUBLIC_INPUTS
 end
 
-export.kernel_proc_table_op_label
-    push.KERNEL_OP_LABEL
-end
-
 # HELPER PROCEDURES
 # =================================================================================================
 
@@ -64,7 +60,7 @@ proc.reduce_kernel_digests
     #
     #   alpha + op_label * beta^0 + beta * (r_0 * beta^0 + r_1 * beta^1 + r_2 * beta^2 + r_3 * beta^3)
     swap
-    exec.kernel_proc_table_op_label
+    push.KERNEL_OP_LABEL
     add
     swap
     # => [alpha1, alpha0 + op_label, beta1, beta0, digests_ptr, ...]
