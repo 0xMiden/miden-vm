@@ -8,19 +8,11 @@ use.std::crypto::stark::public_inputs
 use.std::crypto::stark::constants
 use.std::crypto::stark::utils
 
-#!   Verify a STARK proof attesting to the correct execution of a program in the Miden VM.
+#!   Verifies a STARK proof.
+#!
 #!   The following simplifying assumptions are currently made:
 #!   - The blowup factor is set to 8.
 #!   - The maximal allowed degree of the remainder polynomial is 127.
-#!   - The public inputs are composed of the input and output stacks, of fixed size equal to 16, as
-#!     well as the program and the kernel procedures digests.
-#!   - There are two trace segments, main and auxiliary. It is assumed that the main trace segment
-#!     is 73 columns wide while the auxiliary trace segment is 8 columns wide. Note that we pad the main
-#!     trace to the next multiple of 8.
-#!   - The OOD evaluation frame is composed of two concatenated rows, current and next, each composed
-#!     of 73 elements representing the main trace portion and 8 elements for the auxiliary trace one.
-#!     Note that, due to the padding of the main trace columns, the number of OOD evaluations per row
-#!     is 80 for the main trace.
 #!   - To boost soundness, the protocol is run on a quadratic extension field and this means that
 #!     the OOD evaluation frame is composed of elements in a quadratic extension field i.e. tuples.
 #!     Similarly, elements of the auxiliary trace are quadratic extension field elements. The random
@@ -28,45 +20,33 @@ use.std::crypto::stark::utils
 #!   - The following procedure makes use of global memory address beyond 3 * 2^30 and these are
 #!     defined in `constants.masm`.
 #!
-#! Input: [log(trace_length), num_queries, grinding,  ...]
+#! Input: [D3, D2, D1, D0, log(trace_length), num_queries, grinding, num_constraints, trace_info, num_fixed_len_pi, ...]
 #! Output: [...]
-#!
-#! Cycles:
-#!  1- Remainder polynomial size 64:
-#!   2515 + num_queries * (512 + num_fri_layers * 83) + 108 * num_fri_layers + 10 * log(trace_length)
-#!  2- Remainder polynomial size 128:
-#!   2540 + num_queries * (541 + num_fri_layers * 83) + 108 * num_fri_layers + 10 * log(trace_length)
-#!
-#!  where num_fri_layers is computed as:
-#!
-#!  1- If log(trace_length) is even, then num_fri_layers = (log(trace_length) - 6) / 2, where 6 = log2(64),
-#!  2- If log(trace_length) is odd, then num_fri_layers = (log(trace_length) - 7) / 2, where 7 = log2(128).
 export.verify
 
     #==============================================================================================
     #       I)  Hash proof context and hash-&-load public inputs
     #==============================================================================================
 
+    # Store digests of dynamically executed procedures 
+    exec.utils::store_dynamically_executed_procedures
+    # => [log(trace_length), num_queries, grinding, num_constraints, trace_info, num_fixed_len_pi, ...]
+
     # Validate inputs
     #
     # Cycles: 45
     exec.utils::validate_inputs
-    # => [log(trace_length), num_queries, grinding, num_constraints, trace_info, num_fixed_len_pi, num_ace_inputs, num_ace_gates, max_cycle_len_log, ROOT, ...]
+    # => [log(trace_length), num_queries, grinding, num_constraints, trace_info, num_fixed_len_pi, ...]
 
     # Initialize the seed using proof context
     #
     # Cycles: 210
     exec.random_coin::init_seed
-    # => [C, num_ace_inputs, num_ace_gates, max_cycle_len_log, ROOT, ...]
-
-    # Process dynamically executed procedures 
-    exec.utils::process_dynamic_portion
+    # => [C, ...]
 
     # Load public inputs
-    #
-    # Cycles: ~ 500 + 70 * number_kernel_procedures
     exec.public_inputs::process_public_inputs
-    # => [num_ace_inputs, num_ace_gates, max_cycle_len_log, ROOT, ...]
+    # => [...]
 
     #==============================================================================================
     #       II) Generate the auxiliary trace random elements
@@ -200,14 +180,10 @@ export.verify
     exec.helper::compute_query_pointer
 
     # Draw random query indices
-    #
-    # Cycles: 92 + 32.5 * num_queries
     exec.random_coin::generate_list_indices
     # => [...]
 
     # Compute deep composition polynomial queries
-    #
-    # Cycles: 426 + num_queries * 373
     exec.deep_queries::compute_deep_composition_polynomial_queries
     # => [...]
 
