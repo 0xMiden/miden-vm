@@ -8,6 +8,8 @@
 - Add `extend_` methods on AdviceProvider [#1982](https://github.com/0xMiden/miden-vm/pull/1982).
 - Add constraints evaluation check to recursive verifier ([#1997](https://github.com/0xMiden/miden-vm/pull/1997)).
 - Add `AdviceProvider::into_parts()` method ([#2024](https://github.com/0xMiden/miden-vm/pull/2024)).
+- Add type information to procedures in the AST, `Library`, and `PackageExport`
+  types ([#2028](https://github.com/0xMiden/miden-vm/pull/2028))
 
 #### Changes
 
@@ -19,6 +21,12 @@
 - [BREAKING] Implemented custom Event handlers ([#1584](https://github.com/0xMiden/miden-vm/pull/1584)).
 - Converted `FastProcessor::execute()` from recursive to iterative execution ([#1989](https://github.com/0xMiden/miden-vm/issues/1989)).
 - [BREAKING] made `AdviceInputs` field public and removed redundant accessors ([#2009](https://github.com/0xMiden/miden-vm/pull/2009)).
+- [BREAKING] `Library::exports` now returns `(&QualifiedProcedureName, &LibraryExport)` rather than just `&QualifiedProcedureName`, to allow callers
+to extract more useful information. ([#2028](https://github.com/0xMiden/miden-vm/pull/2028))
+- [BREAKING] The serialized representation for `Package` was changed to include
+procedure type information. Older packages will not work with the new serialization code, and vice versa. The version of the binary format was incremented accordingly. ([#2028](https://github.com/0xMiden/miden-vm/pull/2028))
+- [BREAKING] Procedure-related metadata types in the `miden-assembly` crate in some cases now require an optional type signature argument. If that information is not available, you can simply pass `None` to retain current behavior. ([#2028](https://github.com/0xMiden/miden-vm/pull/2028))
+
 
 ## 0.16.4 (2025-07-24)
 

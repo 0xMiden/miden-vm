@@ -1,4 +1,6 @@
-use alloc::vec::Vec;
+use alloc::{sync::Arc, vec::Vec};
+
+use midenc_hir_type::FunctionType;
 
 use super::LibraryPath;
 use crate::{
@@ -22,8 +24,13 @@ impl ModuleInfo {
     }
 
     /// Adds a procedure to the module.
-    pub fn add_procedure(&mut self, name: ProcedureName, digest: Word) {
-        self.procedures.push(ProcedureInfo { name, digest });
+    pub fn add_procedure(
+        &mut self,
+        name: ProcedureName,
+        digest: Word,
+        signature: Option<Arc<FunctionType>>,
+    ) {
+        self.procedures.push(ProcedureInfo { name, digest, signature });
     }
 
     /// Returns the module's library path.
@@ -72,4 +79,5 @@ impl ModuleInfo {
 pub struct ProcedureInfo {
     pub name: ProcedureName,
     pub digest: Word,
+    pub signature: Option<Arc<FunctionType>>,
 }

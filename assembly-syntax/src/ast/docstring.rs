@@ -5,7 +5,7 @@ use miden_debug_types::{SourceSpan, Span, Spanned};
 use crate::prettier::PrettyPrint;
 
 /// Represents a documentation string in Miden Assembly
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DocString(Span<String>);
 
 impl DocString {

@@ -2,14 +2,17 @@ use alloc::{collections::BTreeSet, string::ToString, vec::Vec};
 use core::str::FromStr;
 use std::sync::{Arc, LazyLock};
 
-use miden_assembly_syntax::diagnostics::WrapErr;
+use miden_assembly_syntax::{
+    ast::types::{FunctionType, Type},
+    diagnostics::WrapErr,
+};
 use miden_core::{
     Operation, Program, Word, assert_matches,
     mast::{MastNode, MastNodeId, error_code_from_msg},
     sys_events::{EVENT_HAS_MAP_KEY, EVENT_MAP_VALUE_TO_STACK},
     utils::{Deserializable, Serializable},
 };
-use miden_mast_package::{MastArtifact, MastForest, Package, PackageManifest};
+use miden_mast_package::{MastArtifact, MastForest, Package, PackageExport, PackageManifest};
 use pretty_assertions::{assert_eq, assert_str_eq};
 use proptest::{
     prelude::*,
@@ -338,7 +341,7 @@ fn library_exports() -> Result<(), Report> {
 
     // make sure the library exports all exported procedures
     let expected_exports: BTreeSet<_> = [&foo2, &foo3, &bar1, &bar2, &bar3, &bar5].into();
-    let actual_exports: BTreeSet<_> = lib2.exports().collect();
+    let actual_exports: BTreeSet<_> = lib2.exports().map(|(name, _)| name).collect();
     assert_eq!(expected_exports, actual_exports);
 
     // make sure foo2, bar2, and bar3 map to the same MastNode
@@ -500,7 +503,7 @@ fn get_proc_digest_by_name() -> Result<(), Report> {
     // get the vector of library procedure digests
     let library_procedure_digests = library
         .exports()
-        .map(|proc_name| library.mast_forest()[library.get_export_node_id(proc_name)].digest())
+        .map(|(_, export)| library.mast_forest()[export.node].digest())
         .collect::<Vec<Word>>();
 
     // valid procedure names
@@ -3642,7 +3645,38 @@ fn test_assert_diagnostic_lines() {
 
 prop_compose! {
     fn any_package()(name in ".*", mast in any::<ArbitraryMastArtifact>(), manifest in any::<PackageManifest>()) -> Package {
-        Package { name, mast: mast.0, manifest, account_component_metadata_bytes: None }
+        let mast = mast.0;
+
+        // Ensure the manifest reflects exports of the actual MAST artifact
+        let mut manifest = manifest;
+        manifest.exports.clear();
+        match &mast {
+            MastArtifact::Library(lib) => {
+                for (name, export) in lib.exports() {
+                    let digest = lib.mast_forest()[export.node].digest();
+                    manifest.exports.insert(name.clone(), PackageExport {
+                        name: name.clone(),
+                        digest,
+                        signature: export.signature.clone(),
+                    });
+                }
+            }
+            MastArtifact::Executable(prog) => {
+                let main = QualifiedProcedureName {
+                    span: Default::default(),
+                    module: LibraryPath::new_from_components(LibraryNamespace::Exec, []),
+                    name: ProcedureName::main(),
+                };
+                let digest = prog.mast_forest()[prog.entrypoint()].digest();
+                manifest.exports.insert(main.clone(), PackageExport {
+                    name: main,
+                    digest,
+                    signature: None,
+                });
+            }
+        }
+
+        Package { name, mast, manifest, account_component_metadata_bytes: None }
     }
 }
 
@@ -3674,7 +3708,16 @@ fn build_library_example() -> Arc<Library> {
             mul
         end
     "#;
-    let foo = parse_module!(&context, "test::foo", foo);
+    let mut foo = parse_module!(&context, "test::foo", foo);
+    for proc in foo.procedures_mut() {
+        if let crate::ast::Export::Procedure(proc) = proc {
+            proc.set_signature(FunctionType::new(
+                crate::ast::types::CallConv::Fast,
+                [Type::Felt, Type::Felt],
+                [Type::Felt],
+            ));
+        }
+    }
 
     // declare bar module
     let bar = r#"
@@ -3719,7 +3762,9 @@ fn package_serialization_roundtrip() {
             prop_assert_eq!(package, deserialized);
             Ok(())
         })
-        .unwrap();
+        .unwrap_or_else(|err| {
+            panic!("{err}");
+        });
 }
 
 // MAST TESTS
