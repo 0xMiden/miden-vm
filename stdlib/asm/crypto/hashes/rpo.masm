@@ -16,7 +16,7 @@ end
 #! Input: [C, B, A, ...]
 #! Output: [HASH, ...]
 #!
-#! Where :
+#! Where:
 #! - `A` is the capacity word that will be used by the hashing function.
 #! - `B` is the hash output.
 #!
@@ -32,6 +32,24 @@ export.squeeze_digest
   dropw
 end
 
+#! Copies the result of hash permutation to the top of the stack.
+#!
+#! It is expected to have the hasher state at the top of the stack at the beginning of the procedure
+#! execution.
+#!
+#! Input: [C, B, A, ...]
+#! Output: [B, C, B, A, ...]
+#!
+#! Where:
+#! - `A` is the capacity word that will be used by the hashing function.
+#! - `B` is the hash output.
+#! - `C` is the rate word that will be used by the hashing function.
+#!
+#! Cycles: 4
+export.copy_digest
+  dupw.1
+end
+
 #! Hashes the memory `start_addr` to `end_addr` given an RPO state specified by 3 words.
 #!
 #! This requires that `end_addr = start_addr + 8n` where n = {0, 1, 2 ...}, otherwise the procedure 
@@ -40,7 +58,7 @@ end
 #! Input: [C, B, A, start_addr, end_addr, ...]
 #! Output: [C', B', A', end_addr, end_addr ...]
 #!
-#! Where :
+#! Where:
 #! - `A` is the capacity word that will be used by the hashing function.
 #! - `B` is the hash output.
 #!
@@ -51,6 +69,39 @@ export.absorb_double_words_from_memory
     mem_stream hperm # (2 cycles)
     dup.13 dup.13 neq  # (4 cycles )
   end
+end
+
+#! Hashes the pairs of words in the memory from `start_addr` to `end_addr`.
+#!
+#! This procedure requires that `end_addr = start_addr + 8n` where n = {0, 1, 2 ...} (i.e. we must
+#! always hash some number of double words), otherwise the procedure will enter an infinite loop. 
+#!
+#! Input: [start_addr, end_addr, ...]
+#! Output: [HASH, ...]
+#!
+#! Where:
+#! - `HASH` is the cumulative hash of the provided memory values.
+#!
+#! Cycles: 37 + 3 * words, where `words` is the `start_addr - end_addr`
+export.hash_memory_double_words
+  # enforce `start_addr ≤ end_addr`
+  dup.1 dup.1 u32assert2
+  u32gte assert.err="start address should be less or equal to the end address"
+  # => [start_addr, end_addr, ...]
+
+  # prepare hasher state
+  padw padw padw
+  # => [C, B, A, start_addr, end_addr, ...]
+
+  exec.absorb_double_words_from_memory
+  # => [C', B', A', end_addr, end_addr, ...]
+
+  exec.squeeze_digest
+  # => [HASH, end_addr, end_addr, ...]
+
+  # drop start_addr and end_addr (4 cycles)
+  movup.4 drop movup.4 drop
+  # => [HASH]
 end
 
 #! Hashes the memory `start_addr` to `end_addr`, handles odd number of elements.
@@ -114,7 +165,7 @@ end
 
 #! Initializes the hasher state required for the `hash_memory_with_state` procedure.
 #!
-#! Depending on the provided pad_inputs flag, this procedure initializes the hasher state using
+#! Depending on the provided pad_inputs_flag, this procedure initializes the hasher state using
 #! different values for capacity element:
 #! - If pad_inputs_flag = 1 the capacity element is set to 0. This will essentially "pad" the
 #!   hashed values with zeroes to the next multiple of 8. 

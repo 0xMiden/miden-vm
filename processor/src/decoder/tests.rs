@@ -23,7 +23,7 @@ use super::{
     },
     build_op_group,
 };
-use crate::{AdviceInputs, DefaultHost, ExecutionError};
+use crate::{AdviceInputs, DefaultHost, ExecutionError, ProcessState};
 
 // CONSTANTS
 // ================================================================================================
@@ -35,6 +35,8 @@ const EIGHT: Felt = Felt::new(8);
 const INIT_ADDR: Felt = ONE;
 const FMP_MIN: Felt = Felt::new(crate::FMP_MIN);
 const SYSCALL_FMP_MIN: Felt = Felt::new(crate::SYSCALL_FMP_MIN as u64);
+
+const EMIT_EVENT_ID: u32 = 42;
 
 // TYPE ALIASES
 // ================================================================================================
@@ -156,7 +158,7 @@ fn basic_block_small() {
 
 #[test]
 fn basic_block_small_with_emit() {
-    let ops = vec![Operation::Push(ONE), Operation::Emit(1), Operation::Add];
+    let ops = vec![Operation::Push(ONE), Operation::Emit(EMIT_EVENT_ID), Operation::Add];
     let basic_block = BasicBlockNode::new(ops.clone(), None).unwrap();
     let program = {
         let mut mast_forest = MastForest::new();
@@ -173,7 +175,7 @@ fn basic_block_small_with_emit() {
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
     check_op_decoding(&trace, 0, ZERO, Operation::Span, 4, 0, 0);
     check_op_decoding(&trace, 1, INIT_ADDR, Operation::Push(ONE), 3, 0, 1);
-    check_op_decoding(&trace, 2, INIT_ADDR, Operation::Emit(1), 2, 1, 1);
+    check_op_decoding(&trace, 2, INIT_ADDR, Operation::Emit(EMIT_EVENT_ID), 2, 1, 1);
     check_op_decoding(&trace, 3, INIT_ADDR, Operation::Add, 1, 2, 1);
     // starting new group: NOOP group is inserted by the processor to make sure number of groups
     // is a power of two
@@ -188,8 +190,8 @@ fn basic_block_small_with_emit() {
         vec![
             basic_block.op_batches()[0].groups().to_vec(),
             vec![build_op_group(&ops[1..])],
-            // emit(1)
-            vec![build_op_group(&ops[2..]), ZERO, ONE],
+            // emit(EMIT_EVENT_ID)
+            vec![build_op_group(&ops[2..]), ZERO, EMIT_EVENT_ID.into()],
             vec![],
             vec![],
             program_hash.to_vec(), // last row should contain program hash
@@ -1508,6 +1510,7 @@ fn set_user_op_helpers_many() {
 fn build_trace(stack_inputs: &[u64], program: &Program) -> (DecoderTrace, usize) {
     let stack_inputs = StackInputs::try_from_ints(stack_inputs.iter().copied()).unwrap();
     let mut host = DefaultHost::default();
+    host.load_handler(EMIT_EVENT_ID, |_: &mut ProcessState| Ok(())).unwrap();
     let mut process = Process::new(
         Kernel::default(),
         stack_inputs,

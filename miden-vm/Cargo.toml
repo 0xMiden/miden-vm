@@ -1,8 +1,8 @@
 [package]
 name = "miden-vm"
-version = "0.16.4"
+version = "0.17.0"
 description = "Miden virtual machine"
-documentation = "https://docs.rs/miden-vm/0.16.4"
+documentation = "https://docs.rs/miden-vm/0.17.0"
 readme = "README.md"
 categories = ["cryptography", "emulators", "no-std"]
 keywords = ["miden", "stark", "virtual-machine", "zkp"]

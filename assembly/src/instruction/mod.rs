@@ -404,7 +404,7 @@ impl Assembler {
             )?,
             Instruction::LocLoadW(v) => {
                 let local_addr = v.expect_value();
-                if local_addr % WORD_SIZE as u16 != 0 {
+                if !local_addr.is_multiple_of(WORD_SIZE as u16) {
                     return Err(RelatedLabel::error("invalid local word index")
                         .with_help("the index to a local word must be a multiple of 4")
                         .with_labeled_span(v.span(), "this index is not word-aligned")
@@ -451,7 +451,7 @@ impl Assembler {
             )?,
             Instruction::LocStoreW(v) => {
                 let local_addr = v.expect_value();
-                if local_addr % WORD_SIZE as u16 != 0 {
+                if !local_addr.is_multiple_of(WORD_SIZE as u16) {
                     return Err(RelatedLabel::error("invalid local word index")
                         .with_help("the index to a local word must be a multiple of 4")
                         .with_labeled_span(v.span(), "this index is not word-aligned")

@@ -1,8 +1,11 @@
-use alloc::{collections::BTreeMap, vec::Vec};
+use alloc::{
+    collections::{BTreeMap, btree_map::Entry},
+    vec::Vec,
+};
 
 use miden_core::{
     AdviceMap, Felt, Word,
-    crypto::merkle::{MerklePath, MerkleStore, NodeIndex, StoreNode},
+    crypto::merkle::{InnerNodeInfo, MerklePath, MerkleStore, NodeIndex, StoreNode},
 };
 
 mod inputs;
@@ -36,9 +39,9 @@ type SimpleMerkleMap = BTreeMap<Word, StoreNode>;
 /// Advice data is store in-memory using [BTreeMap]s as its backing storage.
 #[derive(Debug, Clone, Default)]
 pub struct AdviceProvider {
-    pub stack: Vec<Felt>,
-    pub map: AdviceMap,
-    pub store: MerkleStore<SimpleMerkleMap>,
+    stack: Vec<Felt>,
+    map: AdviceMap,
+    store: MerkleStore<SimpleMerkleMap>,
 }
 
 impl AdviceProvider {
@@ -135,31 +138,66 @@ impl AdviceProvider {
         &self.stack
     }
 
+    /// Extends the stack with the given elements.
+    ///
+    /// Elements are added to the top of the stack i.e. last element of this iterator is the first
+    /// element popped.
+    pub fn extend_stack<I>(&mut self, iter: I)
+    where
+        I: IntoIterator<Item = Felt>,
+    {
+        self.stack.extend(iter);
+    }
+
     // ADVICE MAP
     // --------------------------------------------------------------------------------------------
 
+    /// Returns true if the key has a corresponding value in the map.
+    pub fn contains_map_key(&self, key: &Word) -> bool {
+        self.map.contains_key(key)
+    }
+
     /// Returns a reference to the value(s) associated with the specified key in the advice map.
-    pub fn get_mapped_values(&self, key: &Word) -> Result<&[Felt], AdviceError> {
-        self.map.get(key).ok_or(AdviceError::MapKeyNotFound { key: *key })
+    pub fn get_mapped_values(&self, key: &Word) -> Option<&[Felt]> {
+        self.map.get(key).map(|value| value.as_ref())
     }
 
     /// Inserts the provided value into the advice map under the specified key.
     ///
     /// The values in the advice map can be moved onto the advice stack by invoking
-    /// the [AdviceProvider::push_stack()] method.
+    /// the [AdviceProvider::push_from_map()] method.
     ///
     /// Returns an error if the specified key is already present in the advice map.
-    pub fn insert_into_map(&mut self, key: Word, values: Vec<Felt>) {
-        self.map.insert(key, values);
+    pub fn insert_into_map(&mut self, key: Word, values: Vec<Felt>) -> Result<(), AdviceError> {
+        match self.map.entry(key) {
+            Entry::Vacant(entry) => {
+                entry.insert(values.into());
+            },
+            Entry::Occupied(entry) => {
+                let existing_values = entry.get().as_ref();
+                if existing_values != values {
+                    return Err(AdviceError::MapKeyAlreadyPresent {
+                        key,
+                        prev_values: existing_values.to_vec(),
+                        new_values: values,
+                    });
+                }
+            },
+        }
+        Ok(())
     }
 
     /// Merges all entries from the given [`AdviceMap`] into the current advice map.
     ///
     /// Returns an error if any new entry already exists with the same key but a different value
     /// than the one currently stored. The current map remains unchanged.
-    pub fn merge_advice_map(&mut self, other: &AdviceMap) -> Result<(), AdviceError> {
-        self.map.merge_advice_map(other).map_err(|((key, prev_values), new_values)| {
-            AdviceError::MapKeyAlreadyPresent { key, prev_values, new_values }
+    pub fn extend_map(&mut self, other: &AdviceMap) -> Result<(), AdviceError> {
+        self.map.merge(other).map_err(|((key, prev_values), new_values)| {
+            AdviceError::MapKeyAlreadyPresent {
+                key,
+                prev_values: prev_values.to_vec(),
+                new_values: new_values.to_vec(),
+            }
         })
     }
 
@@ -255,11 +293,37 @@ impl AdviceProvider {
     pub fn has_merkle_root(&self, root: Word) -> bool {
         self.store.get_node(root, NodeIndex::root()).is_ok()
     }
+
+    /// Extends the [MerkleStore] with the given nodes.
+    pub fn extend_merkle_store<I>(&mut self, iter: I)
+    where
+        I: IntoIterator<Item = InnerNodeInfo>,
+    {
+        self.store.extend(iter);
+    }
+
+    // MUTATORS
+    // --------------------------------------------------------------------------------------------
+
+    /// Extends the contents of this instance with the contents of an `AdviceInputs`.
+    pub fn extend_from_inputs(&mut self, inputs: &AdviceInputs) -> Result<(), AdviceError> {
+        self.extend_stack(inputs.stack.iter().cloned().rev());
+        self.extend_merkle_store(inputs.store.inner_nodes());
+        self.extend_map(&inputs.map)
+    }
+
+    /// Consumes `self` and return its parts (stack, map, store).
+    ///
+    /// Note that the order of the stack is such that the element at the top of the stack is at the
+    /// end of the returned vector.
+    pub fn into_parts(self) -> (Vec<Felt>, AdviceMap, MerkleStore) {
+        (self.stack, self.map, self.store)
+    }
 }
 
 impl From<AdviceInputs> for AdviceProvider {
     fn from(inputs: AdviceInputs) -> Self {
-        let (mut stack, map, store) = inputs.into_parts();
+        let AdviceInputs { mut stack, map, store } = inputs;
         stack.reverse();
         Self { stack, map, store }
     }

@@ -1,8 +1,8 @@
 [package]
 name = "miden-stdlib"
-version = "0.16.4"
+version = "0.17.0"
 description = "Miden VM standard library"
-documentation = "https://docs.rs/miden-stdlib/0.16.4"
+documentation = "https://docs.rs/miden-stdlib/0.17.0"
 readme = "README.md"
 categories = ["cryptography", "mathematics"]
 keywords = ["miden", "program", "stdlib"]
@@ -33,7 +33,9 @@ with-debug-info = []
 [dependencies]
 miden-assembly.workspace = true
 miden-core.workspace = true
+miden-processor.workspace = true
 miden-utils-sync.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
 blake3 = "1.8"

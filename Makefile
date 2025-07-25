@@ -123,6 +123,10 @@ exec-info: ## Builds an executable with log tree enabled
 
 # --- benchmarking --------------------------------------------------------------------------------
 
+.PHONY: check-bench
+check-bench: ## Builds all benchmarks (incl. those needing no_err_ctx)
+	cargo check --benches --features internal,no_err_ctx
+
 .PHONY: bench
 bench: ## Runs benchmarks
-	cargo bench --profile optimized --features internal
+	cargo bench --profile optimized --features internal,no_err_ctx

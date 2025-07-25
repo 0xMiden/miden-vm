@@ -132,8 +132,8 @@ fn cli_bundle_output() {
     fs::remove_file("test.masl").unwrap()
 }
 
-#[test]
 // First compile a library to a .masl file, then run a program that uses it.
+#[test]
 fn cli_run_with_lib() -> Result<(), Box<dyn std::error::Error>> {
     let mut cmd = bin_under_test().command();
     cmd.arg("bundle")

@@ -46,7 +46,7 @@ impl MemorySegmentTrace {
     /// # Errors
     /// - Returns an error if `addr` is not word aligned.
     pub fn get_word(&self, addr: u32) -> Result<Option<Word>, ()> {
-        if addr % WORD_SIZE as u32 != 0 {
+        if !addr.is_multiple_of(WORD_SIZE as u32) {
             return Err(());
         }
 
@@ -143,7 +143,7 @@ impl MemorySegmentTrace {
         word_addr: u32,
         clk: Felt,
     ) -> Result<Word, MemoryError> {
-        debug_assert!(word_addr % 4 == 0, "unaligned word access: {word_addr}");
+        debug_assert!(word_addr.is_multiple_of(4), "unaligned word access: {word_addr}");
 
         let (word_addr, _) = addr_to_word_addr_and_idx(word_addr);
         self.read_word_helper(ctx, word_addr, clk, MemoryAccessType::Word)
@@ -231,7 +231,7 @@ impl MemorySegmentTrace {
         clk: Felt,
         word: Word,
     ) -> Result<(), MemoryError> {
-        debug_assert!(addr % 4 == 0, "unaligned memory access: {addr}");
+        debug_assert!(addr.is_multiple_of(4), "unaligned memory access: {addr}");
 
         let (word_addr, _) = addr_to_word_addr_and_idx(addr);
 

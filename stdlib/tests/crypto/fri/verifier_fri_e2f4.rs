@@ -205,7 +205,7 @@ impl FriVerifierFold4Ext2 {
             // make sure the degree can be reduced by the folding factor at all layers
             // but the remainder layer
             if depth != layer_commitments.len() - 1
-                && max_degree_plus_1 % options.folding_factor() != 0
+                && !max_degree_plus_1.is_multiple_of(options.folding_factor())
             {
                 return Err(VerifierError::DegreeTruncation(
                     max_degree_plus_1 - 1,

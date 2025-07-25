@@ -111,10 +111,10 @@ pub trait SourceManager: Debug {
     ///
     /// The returned source file is guaranteed to be owned by this manager.
     fn copy_into(&self, file: &SourceFile) -> Arc<SourceFile> {
-        if let Ok(found) = self.get(file.id()) {
-            if core::ptr::addr_eq(Arc::as_ptr(&found), file) {
-                return found;
-            }
+        if let Ok(found) = self.get(file.id())
+            && core::ptr::addr_eq(Arc::as_ptr(&found), file)
+        {
+            return found;
         }
         self.load_from_raw_parts(file.uri().clone(), file.content().clone())
     }
@@ -253,6 +253,16 @@ pub trait SourceManagerExt: SourceManager {
 
 #[cfg(feature = "std")]
 impl<T: ?Sized + SourceManager> SourceManagerExt for T {}
+
+/// [SourceManagerSync] is a marker trait for [SourceManager] implementations that are also Send +
+/// Sync, and is automatically implemented for any [SourceManager] that meets those requirements.
+///
+/// [SourceManager] is a supertrait of [SourceManagerSync], so you may use instances of the
+/// [SourceManagerSync] where the [SourceManager] is required, either implicitly or via explicit
+/// downcasting, e.g. `Arc<dyn SourceManagerSync> as Arc<dyn SourceManager>`.
+pub trait SourceManagerSync: SourceManager + Send + Sync {}
+
+impl<T: ?Sized + SourceManager + Send + Sync> SourceManagerSync for T {}
 
 // DEFAULT SOURCE MANAGER
 // ================================================================================================
