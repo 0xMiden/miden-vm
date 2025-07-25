@@ -311,8 +311,10 @@ proc.reduce_kernel_digests
 
     drop
     exec.constants::tmp2 mem_load movdn.2
-    # => [prod_acc1, prod_acc0, digests_ptr, ...]
 
+    # since we are initializing the bus with "requests", we should invert the reduced result
+    ext2inv
+    # => [prod_acc1, prod_acc0, digests_ptr, ...]
 end
 
 #! Computes the address where the public inputs are to be stored and returns it.

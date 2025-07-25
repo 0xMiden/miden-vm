@@ -2,9 +2,11 @@
 
 extern crate alloc;
 
-use alloc::sync::Arc;
+use alloc::{sync::Arc, vec, vec::Vec};
 
 use miden_assembly::{Library, mast::MastForest, utils::Deserializable};
+use miden_core::{Felt, Word};
+use miden_processor::HostLibrary;
 use miden_utils_sync::LazyLock;
 
 // STANDARD LIBRARY
@@ -23,6 +25,15 @@ impl AsRef<Library> for StdLibrary {
 impl From<StdLibrary> for Library {
     fn from(value: StdLibrary) -> Self {
         value.0
+    }
+}
+
+impl From<&StdLibrary> for HostLibrary {
+    fn from(stdlib: &StdLibrary) -> Self {
+        Self {
+            mast_forest: stdlib.mast_forest().clone(),
+            handlers: vec![],
+        }
     }
 }
 
@@ -51,10 +62,6 @@ impl Default for StdLibrary {
 // FALCON SIGNATURE
 // ================================================================================================
 
-/// Event ID for pushing a Falcon signature to the advice stack.
-/// This event is used for testing purposes only.
-pub const EVENT_FALCON_SIG_TO_STACK: u32 = 3419226139;
-
 /// Signs the provided message with the provided secret key and returns the resulting signature
 /// encoded in the format required by the rpo_faclcon512::verify procedure, or `None` if the secret
 /// key is malformed due to either incorrect length or failed decoding.
@@ -70,11 +77,8 @@ pub const EVENT_FALCON_SIG_TO_STACK: u32 = 3419226139;
 ///    Miden field.
 /// 5. The nonce represented as 8 field elements.
 #[cfg(feature = "std")]
-pub fn falcon_sign(
-    sk: &[miden_core::Felt],
-    msg: miden_core::Word,
-) -> Option<alloc::vec::Vec<miden_core::Felt>> {
-    use alloc::{vec, vec::Vec};
+pub fn falcon_sign(sk: &[Felt], msg: Word) -> Option<Vec<Felt>> {
+    use alloc::vec;
 
     use miden_core::{
         Felt,
@@ -139,10 +143,7 @@ pub fn falcon_sign(
 }
 
 #[cfg(not(feature = "std"))]
-pub fn falcon_sign(
-    _pk_sk: &[miden_core::Felt],
-    _msg: miden_core::Word,
-) -> Option<alloc::vec::Vec<miden_core::Felt>> {
+pub fn falcon_sign(_pk_sk: &[Felt], _msg: Word) -> Option<Vec<Felt>> {
     None
 }
 

@@ -65,8 +65,8 @@ fn test_diagnostic_advice_map_key_already_present() {
     };
 
     let mut host = DefaultHost::default();
-    host.load_mast_forest(lib_1.mast_forest().clone()).unwrap();
-    host.load_mast_forest(lib_2.mast_forest().clone()).unwrap();
+    host.load_library(lib_1.mast_forest()).unwrap();
+    host.load_library(lib_2.mast_forest()).unwrap();
 
     let mut mast_forest = MastForest::new();
     let basic_block_id = mast_forest.add_block(vec![Operation::Noop], None).unwrap();

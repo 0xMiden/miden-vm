@@ -5,14 +5,28 @@
 #### Enhancements
 
 - Implement `copy_digest` and `hash_memory_double_words` procedures in the `std::crypto::hashes::rpo` module ([#1971](https://github.com/0xMiden/miden-vm/pull/1971)).
+- Add `extend_` methods on AdviceProvider [#1982](https://github.com/0xMiden/miden-vm/pull/1982).
+- Add constraints evaluation check to recursive verifier ([#1997](https://github.com/0xMiden/miden-vm/pull/1997)).
+- Add `AdviceProvider::into_parts()` method ([#2024](https://github.com/0xMiden/miden-vm/pull/2024)).
 
 #### Changes
 
 - [BREAKING] Incremented MSRV to 1.88.
-- [BREAKING] Implement preliminary changes for lazy loading of external `MastForest` `AdviceMap`s ([#1949](https://github.com/0xMiden/miden-vm/issues/1949)).
-- [BREAKING] Introduce `SourceManagerSync` trait, and remove `Assembler::source_manager()` method [#1966](https://github.com/0xMiden/miden-vm/issues/1966).
+- [BREAKING] Implemented preliminary changes for lazy loading of external `MastForest` `AdviceMap`s ([#1949](https://github.com/0xMiden/miden-vm/issues/1949)).
+- [BREAKING] Introduced `SourceManagerSync` trait, and remove `Assembler::source_manager()` method [#1966](https://github.com/0xMiden/miden-vm/issues/1966).
 - Fixed `ExecutionOptions::default()` to set `max_cycles` correctly to `1 << 29` ([#1969](https://github.com/0xMiden/miden-vm/pull/1969)).
-- [BREAKING] Revert `get_mapped_value` return signature [(#1981)](https://github.com/0xMiden/miden-vm/issues/1981).
+- [BREAKING] Reverted `get_mapped_value` return signature [(#1981)](https://github.com/0xMiden/miden-vm/issues/1981).
+- [BREAKING] Implemented custom Event handlers ([#1584](https://github.com/0xMiden/miden-vm/pull/1584)).
+- Converted `FastProcessor::execute()` from recursive to iterative execution ([#1989](https://github.com/0xMiden/miden-vm/issues/1989)).
+- [BREAKING] made `AdviceInputs` field public and removed redundant accessors ([#2009](https://github.com/0xMiden/miden-vm/pull/2009)).
+
+## 0.16.4 (2025-07-24)
+
+- Made `AdviceInputs` field public.
+
+## 0.16.3 (2025-07-18)
+
+- Add `new_dummy` method on `ExecutionProof` ([#2007](https://github.com/0xMiden/miden-vm/pull/2007)).
 - Enhancement for all benchmarks (incl. `program_execution_fast`) are built and run in a new CI job with required feature flags [(#https://github.com/0xMiden/miden-vm/issues/1964)](https://github.com/0xMiden/miden-vm/issues/1964)
 
 ## 0.16.2 (2025-07-11)

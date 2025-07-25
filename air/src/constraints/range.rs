@@ -50,17 +50,17 @@ pub fn get_assertions_last_step(result: &mut Vec<Assertion<Felt>>, step: usize) 
     result.push(Assertion::single(V_COL_IDX, step, Felt::new(65535)));
 }
 
-// --- AUXILIARY COLUMNS (FOR MULTISET CHECKS) ----------------------------------------------------
+// --- AUXILIARY COLUMNS (FOR LOGUP) --------------------------------------------------------------
 
 /// Returns the range checker's boundary assertions for auxiliary columns at the first step.
 pub fn get_aux_assertions_first_step<E: FieldElement>(result: &mut Vec<Assertion<E>>) {
     let step = 0;
-    result.push(Assertion::single(B_RANGE_COL_IDX, step, E::ONE));
+    result.push(Assertion::single(B_RANGE_COL_IDX, step, E::ZERO));
 }
 
 /// Returns the range checker's boundary assertions for auxiliary columns at the last step.
 pub fn get_aux_assertions_last_step<E: FieldElement>(result: &mut Vec<Assertion<E>>, step: usize) {
-    result.push(Assertion::single(B_RANGE_COL_IDX, step, E::ONE));
+    result.push(Assertion::single(B_RANGE_COL_IDX, step, E::ZERO));
 }
 
 // TRANSITION CONSTRAINTS
@@ -144,10 +144,10 @@ pub fn enforce_aux_constraints<F, E>(
 /// - mv0-mv1: memory value 0-1, the 2 values range-checked from the memory chiplet
 ///
 /// The constraint expression looks as follows:
-/// b' = b + rc_multiplicity / (alpha - rc_value)
-///        - flag_s / (alpha - sv0) - flag_s / (alpha - sv1)
-///        - flag_s / (alpha - sv2) - flag_s / (alpha - sv3)
-///        - flag_m / (alpha - mv0) - flag_m / (alpha - mv1)
+/// b' = b + rc_multiplicity / (alpha + rc_value)
+///        - flag_s / (alpha + sv0) - flag_s / (alpha + sv1)
+///        - flag_s / (alpha + sv2) - flag_s / (alpha + sv3)
+///        - flag_m / (alpha + mv0) - flag_m / (alpha + mv1)
 ///
 /// However, to enforce the constraint, all denominators are multiplied so that no divisions are
 /// included in the actual constraint expression.
@@ -169,7 +169,7 @@ fn enforce_b_range<E, F>(
     let sv1: E = main_frame.lookup_sv1(alpha);
     let sv2: E = main_frame.lookup_sv2(alpha);
     let sv3: E = main_frame.lookup_sv3(alpha);
-    let range_check: E = alpha - main_frame.v().into();
+    let range_check: E = alpha + main_frame.v().into();
     let memory_lookups: E = mv0.mul(mv1); // degree 2
     let stack_lookups: E = sv0.mul(sv1).mul(sv2).mul(sv3); // degree 4
     let lookups = range_check.mul(stack_lookups).mul(memory_lookups); // degree 7
@@ -196,8 +196,8 @@ fn enforce_b_range<E, F>(
     let m1_term = mflag_rc_stack.mul(mv0); // degree 9
 
     result[0] = are_equal(
-        b_next_term,
         b_term + rc_term - s0_term - s1_term - s2_term - s3_term - m0_term - m1_term,
+        b_next_term,
     );
 }
 

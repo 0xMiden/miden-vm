@@ -3,7 +3,11 @@ use alloc::vec::Vec;
 use super::super::{
     CHIPLETS_OFFSET, EvaluationFrame, Felt, FieldElement, TransitionConstraintDegree,
 };
-use crate::utils::{are_equal, binary_not, is_binary};
+use crate::{
+    Assertion, AuxRandElements, Word,
+    trace::{CHIPLETS_BUS_AUX_TRACE_OFFSET, chiplets::kernel_rom::KERNEL_PROC_INIT_LABEL},
+    utils::{are_equal, binary_not, is_binary},
+};
 
 mod bitwise;
 mod hasher;
@@ -29,6 +33,25 @@ pub fn get_periodic_column_values() -> Vec<Vec<Felt>> {
     let mut result = hasher::get_periodic_column_values();
     result.append(&mut bitwise::get_periodic_column_values());
     result
+}
+
+// CHIPLETS BOUNDARY CONSTRAINTS
+// ================================================================================================
+
+/// Adds chiplets' boundary assertions for auxiliary columns at the first step.
+pub fn get_aux_assertions_first_step<E>(
+    result: &mut Vec<Assertion<E>>,
+    kernel_digests: &[Word],
+    aux_rand_elements: &AuxRandElements<E>,
+) where
+    E: FieldElement<BaseField = Felt>,
+{
+    let reduced_kernel_digests = reduce_kernel_digests(kernel_digests, aux_rand_elements);
+    result.push(Assertion::single(
+        CHIPLETS_BUS_AUX_TRACE_OFFSET,
+        0,
+        reduced_kernel_digests.inv(),
+    ));
 }
 
 // CHIPLETS TRANSITION CONSTRAINTS
@@ -212,6 +235,7 @@ impl<E: FieldElement> EvaluationFrameExt<E> for &EvaluationFrame<E> {
 
 // EXTERNAL ACCESSORS
 // ================================================================================================
+
 /// Trait to allow other processors to easily access the chiplet values they need for constraint
 /// calculations.
 pub trait ChipletsFrameExt<E: FieldElement> {
@@ -224,4 +248,27 @@ impl<E: FieldElement> ChipletsFrameExt<E> for &EvaluationFrame<E> {
     fn chiplets_memory_flag(&self) -> E {
         self.memory_flag()
     }
+}
+
+// HELPERS
+// ================================================================================================
+
+/// Reduces kernel procedures digests using auxiliary randomness.
+fn reduce_kernel_digests<E>(kernel_digests: &[Word], aux_rand_elements: &AuxRandElements<E>) -> E
+where
+    E: FieldElement<BaseField = Felt>,
+{
+    let alphas = aux_rand_elements.rand_elements();
+    kernel_digests.iter().fold(E::ONE, |acc, digest: &Word| {
+        let digest = digest.to_vec();
+        let affine_term = alphas[0] + KERNEL_PROC_INIT_LABEL.into();
+        let cur = alphas
+            .iter()
+            .skip(2)
+            .zip(digest.iter())
+            .map(|(alpha, coef)| alpha.mul_base(*coef))
+            .fold(affine_term, |acc, term| acc + term);
+
+        acc * cur
+    })
 }

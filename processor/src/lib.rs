@@ -33,6 +33,8 @@ use miden_core::{
 use miden_debug_types::{DefaultSourceManager, SourceManager, SourceSpan};
 pub use winter_prover::matrix::ColMatrix;
 
+pub(crate) mod continuation_stack;
+
 pub mod fast;
 use fast::FastProcessState;
 
@@ -53,8 +55,10 @@ use range::RangeChecker;
 
 mod host;
 pub use host::{
-    AsyncHost, BaseHost, DefaultHost, MastForestStore, MemMastForestStore, SyncHost,
+    AsyncHost, BaseHost, MastForestStore, MemMastForestStore, SyncHost,
     advice::{AdviceError, AdviceInputs, AdviceProvider},
+    default::{DefaultDebugHandler, DefaultHost, HostLibrary},
+    handlers::{DebugHandler, EventError, EventHandler, EventHandlerRegistry},
 };
 
 mod chiplets;
@@ -75,6 +79,7 @@ mod tests;
 
 mod debug;
 pub use debug::{AsmOpInfo, VmState, VmStateIterator};
+
 // RE-EXPORTS
 // ================================================================================================
 
@@ -314,7 +319,7 @@ impl Process {
         }
 
         self.advice
-            .merge_advice_map(program.mast_forest().advice_map())
+            .extend_map(program.mast_forest().advice_map())
             .map_err(|err| ExecutionError::advice_error(err, RowIndex::from(0), &()))?;
 
         self.execute_mast_node(program.entrypoint(), &program.mast_forest().clone(), host)?;
@@ -523,6 +528,15 @@ impl Process {
                 let root_id = mast_forest
                     .find_procedure_root(callee_hash)
                     .ok_or(ExecutionError::malfored_mast_forest_in_host(callee_hash, &()))?;
+
+                // Merge the advice map of this forest into the advice provider.
+                // Note that the map may be merged multiple times if a different procedure from the
+                // same forest is called.
+                // For now, only compiled libraries contain non-empty advice maps, so for most
+                // cases, this call will be cheap.
+                self.advice
+                    .extend_map(mast_forest.advice_map())
+                    .map_err(|err| ExecutionError::advice_error(err, self.system.clk(), &()))?;
 
                 self.execute_mast_node(root_id, &mast_forest, host)?
             },
@@ -748,7 +762,7 @@ impl Process {
         // For now, only compiled libraries contain non-empty advice maps, so for most cases,
         // this call will be cheap.
         self.advice
-            .merge_advice_map(mast_forest.advice_map())
+            .extend_map(mast_forest.advice_map())
             .map_err(|err| ExecutionError::advice_error(err, self.system.clk(), &()))?;
 
         Ok((root_id, mast_forest))

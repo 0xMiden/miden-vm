@@ -27,34 +27,34 @@ where
 
     /// The value required for the first memory lookup when the memory chiplet requests range
     /// checks. The value returned is the denominator used for including the value into the LogUp
-    /// lookup: (alpha - d0). The value d0 which is being range-checked is the lower 16-bits of the
+    /// lookup: (alpha + d0). The value d0 which is being range-checked is the lower 16-bits of the
     /// delta value being tracked between two consecutive context IDs, addresses, or clock cycles in
     /// the current row.
     fn lookup_mv0(&self, alpha: E) -> E;
     /// The value required for the second memory lookup when the memory chiplet requests range
     /// checks. The value returned is the denominator used for including the value into the LogUp
-    /// lookup: (alpha - d1). The value d1 which is being range-checked is the upper 16-bits of the
+    /// lookup: (alpha + d1). The value d1 which is being range-checked is the upper 16-bits of the
     /// delta value being tracked between two consecutive context IDs, addresses, or clock cycles in
     /// the current row.
     fn lookup_mv1(&self, alpha: E) -> E;
     /// The value required for the first stack lookup when the stack requests range checks. The
     /// value returned is the denominator used for including the value into the LogUp lookup:
-    /// (alpha - h0). The value h0 which is being range checked by the stack operation is stored in
+    /// (alpha + h0). The value h0 which is being range checked by the stack operation is stored in
     /// the helper columns of the decoder section of the trace.
     fn lookup_sv0(&self, alpha: E) -> E;
     /// The value required for the second stack lookup when the stack requests range checks. The
     /// value returned is the denominator used for including the value into the LogUp lookup:
-    /// (alpha - h1). The value h1 which is being range checked by the stack operation is stored in
+    /// (alpha + h1). The value h1 which is being range checked by the stack operation is stored in
     /// the helper columns of the decoder section of the trace.
     fn lookup_sv1(&self, alpha: E) -> E;
     /// The value required for the third stack lookup when the stack requests range checks. The
     /// value returned is the denominator used for including the value into the LogUp lookup:
-    /// (alpha - h2). The value h2 which is being range checked by the stack operation is stored in
+    /// (alpha + h2). The value h2 which is being range checked by the stack operation is stored in
     /// the helper columns of the decoder section of the trace.
     fn lookup_sv2(&self, alpha: E) -> E;
     /// The value required for the fourth stack lookup when the stack requests range checks. The
     /// value returned is the denominator used for including the value into the LogUp lookup:
-    /// (alpha - h3). The value h3 which is being range checked by the stack operation is stored in
+    /// (alpha + h3). The value h3 which is being range checked by the stack operation is stored in
     /// the helper columns of the decoder section of the trace.
     fn lookup_sv3(&self, alpha: E) -> E;
 }
@@ -78,31 +78,31 @@ where
 
     #[inline(always)]
     fn lookup_mv0(&self, alpha: E) -> E {
-        alpha - self.current()[MEMORY_D0_COL_IDX].into()
+        alpha + self.current()[MEMORY_D0_COL_IDX].into()
     }
 
     #[inline(always)]
     fn lookup_mv1(&self, alpha: E) -> E {
-        alpha - self.current()[MEMORY_D1_COL_IDX].into()
+        alpha + self.current()[MEMORY_D1_COL_IDX].into()
     }
 
     #[inline(always)]
     fn lookup_sv0(&self, alpha: E) -> E {
-        alpha - self.current()[DECODER_USER_OP_HELPERS_OFFSET].into()
+        alpha + self.current()[DECODER_USER_OP_HELPERS_OFFSET].into()
     }
 
     #[inline(always)]
     fn lookup_sv1(&self, alpha: E) -> E {
-        alpha - self.current()[DECODER_USER_OP_HELPERS_OFFSET + 1].into()
+        alpha + self.current()[DECODER_USER_OP_HELPERS_OFFSET + 1].into()
     }
 
     #[inline(always)]
     fn lookup_sv2(&self, alpha: E) -> E {
-        alpha - self.current()[DECODER_USER_OP_HELPERS_OFFSET + 2].into()
+        alpha + self.current()[DECODER_USER_OP_HELPERS_OFFSET + 2].into()
     }
 
     #[inline(always)]
     fn lookup_sv3(&self, alpha: E) -> E {
-        alpha - self.current()[DECODER_USER_OP_HELPERS_OFFSET + 3].into()
+        alpha + self.current()[DECODER_USER_OP_HELPERS_OFFSET + 3].into()
     }
 }
