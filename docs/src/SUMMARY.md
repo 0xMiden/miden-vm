@@ -30,6 +30,7 @@
     - [std::math::u64](./user_docs/stdlib/math/u64.md)
     - [std::mem](./user_docs/stdlib/mem.md)
     - [std:sys](./user_docs/stdlib/sys.md)
+    - [std::word](./user_docs/stdlib/word.md)
 - [Design](./design/main.md)
   - [Programs](./design/programs.md)
   - [Program decoder](./design/decoder/main.md)
