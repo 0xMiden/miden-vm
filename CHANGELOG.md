@@ -8,6 +8,7 @@
 - Add `extend_` methods on AdviceProvider [#1982](https://github.com/0xMiden/miden-vm/pull/1982).
 - Add constraints evaluation check to recursive verifier ([#1997](https://github.com/0xMiden/miden-vm/pull/1997)).
 - Add `AdviceProvider::into_parts()` method ([#2024](https://github.com/0xMiden/miden-vm/pull/2024)).
+- Add `drop_stack` procedure in std::sys ([#2031](https://github.com/0xMiden/miden-vm/pull/2031))
 
 #### Changes
 
