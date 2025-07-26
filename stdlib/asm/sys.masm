@@ -26,3 +26,8 @@ export.truncate_stack.4
     loc_loadw.0
     # => [A, B, C, D, ...]
 end
+
+#! Clean the stack to remove the overflowing values.
+export.drop_stack
+    dropw dropw dropw dropw
+end
