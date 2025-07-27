@@ -30,7 +30,7 @@ use miden_core::{
         OpBatch, SplitNode,
     },
 };
-use miden_debug_types::SourceSpan;
+use miden_debug_types::{DefaultSourceManager, SourceManager, SourceSpan};
 pub use winter_prover::matrix::ColMatrix;
 
 pub(crate) mod continuation_stack;
@@ -55,7 +55,8 @@ use range::RangeChecker;
 
 mod host;
 pub use host::{
-    AdviceMutation, AsyncHost, BaseHost, MastForestStore, MemMastForestStore, SyncHost,
+    AdviceMutation, AsyncHost, BaseHost, FutureAliasWrapper, MastForestStore, MemMastForestStore,
+    SyncHost,
     advice::{AdviceError, AdviceInputs, AdviceProvider},
     default::{DefaultDebugHandler, DefaultHost, HostLibrary},
     handlers::{DebugHandler, EventError, EventHandler, EventHandlerRegistry},
@@ -70,7 +71,7 @@ use trace::TraceFragment;
 pub use trace::{ChipletsLengths, ExecutionTrace, NUM_RAND_ROWS, TraceLenSummary};
 
 mod errors;
-pub use errors::{ErrorContext, ExecutionError};
+pub use errors::{ErrorContext, ErrorContextImpl, ExecutionError};
 
 pub mod utils;
 
@@ -231,6 +232,7 @@ pub struct Process {
     chiplets: Chiplets,
     max_cycles: u32,
     enable_tracing: bool,
+    source_manager: Arc<dyn SourceManager>,
 }
 
 #[cfg(any(test, feature = "testing"))]
@@ -243,6 +245,7 @@ pub struct Process {
     pub chiplets: Chiplets,
     pub max_cycles: u32,
     pub enable_tracing: bool,
+    pub source_manager: Arc<dyn SourceManager>,
 }
 
 impl Process {
@@ -272,6 +275,11 @@ impl Process {
         )
     }
 
+    pub fn with_source_manager(mut self, source_manager: Arc<dyn SourceManager>) -> Self {
+        self.source_manager = source_manager;
+        self
+    }
+
     fn initialize(
         kernel: Kernel,
         stack: StackInputs,
@@ -288,6 +296,7 @@ impl Process {
             chiplets: Chiplets::new(kernel),
             max_cycles: execution_options.max_cycles(),
             enable_tracing: execution_options.enable_tracing(),
+            source_manager: Arc::new(DefaultSourceManager::default()),
         }
     }
 

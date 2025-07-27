@@ -72,7 +72,7 @@ pub fn push_falcon_signature(process: &ProcessState) -> Result<Vec<AdviceMutatio
     let signature_result = falcon_sign(pk_sk, msg)
         .ok_or(FalconError::MalformedSignatureKey { key_type: "RPO Falcon512" })?;
 
-    Ok(vec![AdviceMutation::ExtendStack { iter: signature_result }])
+    Ok(vec![AdviceMutation::extend_stack(signature_result)])
 }
 
 // EVENT ERROR

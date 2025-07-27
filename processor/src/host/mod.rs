@@ -28,11 +28,24 @@ pub use mast_forest_store::{MastForestStore, MemMastForestStore};
 /// Any possible way an event can modify the advice map
 #[derive(Debug, PartialEq, Eq)]
 pub enum AdviceMutation {
-    ExtendStack { iter: Vec<Felt> },
+    ExtendStack { values: Vec<Felt> },
     ExtendMap { other: AdviceMap },
-    ExtendMerkleStore { iter: Vec<InnerNodeInfo> },
+    ExtendMerkleStore { infos: Vec<InnerNodeInfo> },
 }
 
+impl AdviceMutation {
+    pub fn extend_stack(iter: impl IntoIterator<Item = Felt>) -> Self {
+        Self::ExtendStack { values: Vec::from_iter(iter) }
+    }
+
+    pub fn extend_map(other: AdviceMap) -> Self {
+        Self::ExtendMap { other }
+    }
+
+    pub fn extend_merkle_store(infos: impl IntoIterator<Item = InnerNodeInfo>) -> Self {
+        Self::ExtendMerkleStore { infos: Vec::from_iter(infos) }
+    }
+}
 // HOST TRAIT
 // ================================================================================================
 

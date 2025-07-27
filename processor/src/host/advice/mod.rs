@@ -41,9 +41,9 @@ type SimpleMerkleMap = BTreeMap<Word, StoreNode>;
 /// Advice data is store in-memory using [BTreeMap]s as its backing storage.
 #[derive(Debug, Clone, Default)]
 pub struct AdviceProvider {
-    stack: Vec<Felt>,
-    map: AdviceMap,
-    store: MerkleStore<SimpleMerkleMap>,
+    pub stack: Vec<Felt>,
+    pub map: AdviceMap,
+    pub store: MerkleStore<SimpleMerkleMap>,
 }
 
 impl AdviceProvider {
@@ -57,14 +57,14 @@ impl AdviceProvider {
 
     fn apply_mutation(&mut self, mutation: AdviceMutation) -> Result<(), AdviceError> {
         match mutation {
-            AdviceMutation::ExtendStack { iter } => {
-                self.extend_stack(iter);
+            AdviceMutation::ExtendStack { values } => {
+                self.extend_stack(values);
             },
             AdviceMutation::ExtendMap { other } => {
                 self.extend_map(&other)?;
             },
-            AdviceMutation::ExtendMerkleStore { iter } => {
-                self.extend_merkle_store(iter);
+            AdviceMutation::ExtendMerkleStore { infos } => {
+                self.extend_merkle_store(infos);
             },
         }
         Ok(())
