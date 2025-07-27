@@ -25,7 +25,6 @@ std = [
     "thiserror/std",
 ]
 serde = ["dep:serde", "dep:serde_spanned", "serde_spanned?/serde"]
-syncbound = []
 
 [dependencies]
 memchr = { version = "2.7", default-features = false }

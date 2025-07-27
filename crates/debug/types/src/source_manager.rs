@@ -261,16 +261,16 @@ impl<T: ?Sized + SourceManager> SourceManagerExt for T {}
 /// [SourceManagerSync] where the [SourceManager] is required, either implicitly or via explicit
 /// downcasting, e.g. `Arc<dyn SourceManagerSync> as Arc<dyn SourceManager>`.
 
-#[cfg(feature = "syncbound")]
+#[cfg(target_arch = "wasm32")]
 pub trait SourceManagerSync: SourceManager + Send + Sync {}
 
-#[cfg(feature = "syncbound")]
+#[cfg(target_arch = "wasm32")]
 impl<T: ?Sized + SourceManager + Send + Sync> SourceManagerSync for T {}
 
-#[cfg(not(feature = "syncbound"))]
+#[cfg(not(target_arch = "wasm32"))]
 pub trait SourceManagerSync: SourceManager + Send {}
 
-#[cfg(not(feature = "syncbound"))]
+#[cfg(not(target_arch = "wasm32"))]
 impl<T: ?Sized + SourceManager + Send> SourceManagerSync for T {}
 
 // DEFAULT SOURCE MANAGER
