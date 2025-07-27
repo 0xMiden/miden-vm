@@ -254,6 +254,8 @@ pub trait SourceManagerExt: SourceManager {
 #[cfg(feature = "std")]
 impl<T: ?Sized + SourceManager> SourceManagerExt for T {}
 
+// TODO rename to reflect the fact it's a "glue" trait that adapts per target, but only after
+// the `-base` has been validated to work with this approach.
 /// [SourceManagerSync] is a marker trait for [SourceManager] implementations that are also Send +
 /// Sync, and is automatically implemented for any [SourceManager] that meets those requirements.
 ///
