@@ -46,7 +46,7 @@ mod tests;
 /// For example, the blake3 benchmark went from 285 MHz to 250 MHz (~10% degradation). Perhaps a
 /// better solution would be to make this value much smaller (~1000), and then fallback to a `Vec`
 /// if the stack overflows.
-const STACK_BUFFER_SIZE: usize = 6650;
+const STACK_BUFFER_SIZE: usize = 6850;
 
 /// The initial position of the top of the stack in the stack buffer.
 ///
@@ -54,7 +54,7 @@ const STACK_BUFFER_SIZE: usize = 6650;
 /// the upper bound than the lower bound, since hitting the lower bound only occurs when you drop
 /// 0's that were generated automatically to keep the stack depth at 16. In practice, if this
 /// occurs, it is most likely a bug.
-const INITIAL_STACK_TOP_IDX: usize = 50;
+const INITIAL_STACK_TOP_IDX: usize = 250;
 
 /// WORD_SIZE, but as a `Felt`.
 const WORD_SIZE_FELT: Felt = Felt::new(4);
