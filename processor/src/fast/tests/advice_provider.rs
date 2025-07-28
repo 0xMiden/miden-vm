@@ -292,12 +292,8 @@ impl<S> AsyncHost for ConsistencyHost<S>
 where
     S: SourceManagerSync,
 {
-    fn get_mast_forest(
-        &self,
-        node_digest: &Word,
-    ) -> impl FutureAliasWrapper<Option<Arc<MastForest>>> {
-        let forest = self.store.get(node_digest);
-        async move { forest }
+    fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>> {
+        self.store.get(node_digest)
     }
 
     // Note: clippy complains about this not using the `async` keyword, but if we use `async`, it

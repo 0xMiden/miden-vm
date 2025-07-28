@@ -111,10 +111,7 @@ pub trait AsyncHost: BaseHost {
 
     /// Returns MAST forest corresponding to the specified digest, or None if the MAST forest for
     /// this digest could not be found in this [AsyncHost].
-    fn get_mast_forest(
-        &self,
-        node_digest: &Word,
-    ) -> impl FutureAliasWrapper<Option<Arc<MastForest>>>;
+    fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>>;
 
     /// Handles the event emitted from the VM and provides advice mutations to be applied to
     /// the advice provider.

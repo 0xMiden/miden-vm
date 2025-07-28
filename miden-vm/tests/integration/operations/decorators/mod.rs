@@ -68,7 +68,7 @@ impl SyncHost for TestHost {
 }
 
 impl AsyncHost for TestHost {
-    async fn get_mast_forest(&self, _node_digest: &Word) -> Option<Arc<MastForest>> {
+    fn get_mast_forest(&self, _node_digest: &Word) -> Option<Arc<MastForest>> {
         // Empty MAST forest store
         None
     }
