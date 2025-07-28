@@ -12,10 +12,11 @@ impl Process {
     ///       1. Inputs to the circuit which are elements in the quadratic extension field,
     ///       2. Constants of the circuit which are elements in the quadratic extension field,
     ///
-    ///    b. `Eval` section, which contains the encodings of the evaluation gates of the circuit.
+    ///    b. `Eval` section, which contains the encodings of the evaluation gates of the circuit,
+    ///       one field element per gate.
     ///    Each gate is encoded as a single base field element.
-    /// 2. the number of rows in the `READ` section,
-    /// 3. the number of rows in the `EVAL` section,
+    /// 2. the number of quadratic extension field elements read in the `READ` section,
+    /// 3. the number of field elements, one base field element per gate, in the `EVAL` section,
     ///
     /// Stack transition:
     /// [ptr, num_read_rows, num_eval_rows, ...] -> [ptr, num_read_rows, num_eval_rows, ...]
@@ -29,8 +30,8 @@ impl Process {
             ctx,
             ptr,
             clk,
-            num_read_rows,
-            num_eval_rows,
+            num_read,
+            num_eval,
             &mut self.chiplets.memory,
             err_ctx,
         )?;
