@@ -30,7 +30,7 @@ use miden_core::{
         OpBatch, SplitNode,
     },
 };
-use miden_debug_types::{DefaultSourceManager, SourceManager, SourceSpan};
+use miden_debug_types::SourceSpan;
 pub use winter_prover::matrix::ColMatrix;
 
 pub(crate) mod continuation_stack;
