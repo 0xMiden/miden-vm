@@ -13,8 +13,7 @@ impl Process {
     ///       2. Constants of the circuit which are elements in the quadratic extension field,
     ///
     ///    b. `Eval` section, which contains the encodings of the evaluation gates of the circuit,
-    ///       one field element per gate.
-    ///    Each gate is encoded as a single base field element.
+    ///    where each gate is encoded as a single base field element.
     /// 2. the number of quadratic extension field elements read in the `READ` section,
     /// 3. the number of field elements, one base field element per gate, in the `EVAL` section,
     ///
@@ -26,15 +25,8 @@ impl Process {
         let ptr = self.stack.get(0);
         let ctx = self.system.ctx();
         let clk = self.system.clk();
-        let circuit_evaluation = eval_circuit(
-            ctx,
-            ptr,
-            clk,
-            num_read,
-            num_eval,
-            &mut self.chiplets.memory,
-            err_ctx,
-        )?;
+        let circuit_evaluation =
+            eval_circuit(ctx, ptr, clk, num_read, num_eval, &mut self.chiplets.memory, err_ctx)?;
         self.chiplets.ace.add_circuit_evaluation(clk, circuit_evaluation);
 
         self.stack.copy_state(0);
