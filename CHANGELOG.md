@@ -42,6 +42,8 @@ to extract more useful information. ([#2028](https://github.com/0xMiden/miden-vm
 - [BREAKING] The serialized representation for `Package` was changed to include
 procedure type information. Older packages will not work with the new serialization code, and vice versa. The version of the binary format was incremented accordingly. ([#2028](https://github.com/0xMiden/miden-vm/pull/2028))
 - [BREAKING] Procedure-related metadata types in the `miden-assembly` crate in some cases now require an optional type signature argument. If that information is not available, you can simply pass `None` to retain current behavior. ([#2028](https://github.com/0xMiden/miden-vm/pull/2028))
+- [BREAKING] `FastProcessor::execute()` now also returns the `AdviceProvider` ([#2026](https://github.com/0xMiden/miden-vm/pull/2026))
+- Allow for 234 "spurious drops" before the fast processor underflows, up from 34 ([#2035](https://github.com/0xMiden/miden-vm/pull/2035)) 
 
 ## 0.16.4 (2025-07-24)
 
