@@ -20,7 +20,7 @@ The `miden-vm analyze` command provides detailed information about trace segment
 - Chiplet rows used
 - The resulting true number of cycles (maximum of the three)
 
-This tool helps identify which trace segments are driving the overall proving time for a given program.
+This tool helps identify which trace segments are driving the ultimate trace length, and hence overall proving time for a given program.
 
 ## Trace segment growth and proving performance
 
