@@ -293,8 +293,7 @@ where
     S: SourceManagerSync,
 {
     fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>> {
-        let val = self.store.get(node_digest);
-        val
+        self.store.get(node_digest)
     }
 
     // Note: clippy complains about this not using the `async` keyword, but if we use `async`, it
