@@ -8,7 +8,7 @@ use pretty_assertions::assert_eq;
 use super::*;
 use crate::{
     AdviceMutation, AsyncHost, BaseHost, EventError, MastForestStore, MemMastForestStore,
-    MemoryAddress, ProcessState, SyncHost, host::AsyncHostFuture,
+    MemoryAddress, ProcessState, SyncHost,
 };
 
 #[test]
@@ -292,9 +292,9 @@ impl<S> AsyncHost for ConsistencyHost<S>
 where
     S: SourceManagerSync,
 {
-    fn get_mast_forest(&self, node_digest: &Word) -> impl AsyncHostFuture<Option<Arc<MastForest>>> {
+    fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>> {
         let val = self.store.get(node_digest);
-        async move { val }
+        val
     }
 
     // Note: clippy complains about this not using the `async` keyword, but if we use `async`, it

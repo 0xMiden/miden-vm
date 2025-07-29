@@ -178,9 +178,9 @@ where
     D: DebugHandler,
     S: SourceManagerSync,
 {
-    fn get_mast_forest(&self, node_digest: &Word) -> impl AsyncHostFuture<Option<Arc<MastForest>>> {
+    fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>> {
         let val = self.store.get(node_digest);
-        async move { val }
+        val
     }
 
     fn on_event(
