@@ -124,10 +124,7 @@ pub trait AsyncHost: BaseHost {
 
     /// Returns MAST forest corresponding to the specified digest, or None if the MAST forest for
     /// this digest could not be found in this [AsyncHost].
-    fn get_mast_forest(
-        &self,
-        node_digest: &Word,
-    ) -> impl FutureAliasWrapper<Option<Arc<MastForest>>>;
+    fn get_mast_forest(&self, node_digest: &Word) -> impl AsyncHostFuture<Option<Arc<MastForest>>>;
 
     /// Handles the event emitted from the VM and provides advice mutations to be applied to
     /// the advice provider.
@@ -135,7 +132,7 @@ pub trait AsyncHost: BaseHost {
         &mut self,
         process: &ProcessState<'_>,
         event_id: u32,
-    ) -> impl FutureAliasWrapper<Result<Vec<AdviceMutation>, EventError>>;
+    ) -> impl AsyncHostFuture<Result<Vec<AdviceMutation>, EventError>>;
 }
 
 /// Alias for a `Future`
@@ -147,10 +144,10 @@ pub trait AsyncHost: BaseHost {
 pub trait FutureAliasWrapper<O>: Future<Output = O> {}
 
 #[cfg(target_arch = "wasm32")]
-impl<T, O> FutureAliasWrapper<O> for T where T: Future<Output = O> {}
+impl<T, O> AsyncHostFuture<O> for T where T: Future<Output = O> {}
 
 #[cfg(not(target_arch = "wasm32"))]
-pub trait FutureAliasWrapper<O>: Future<Output = O> + Send {}
+pub trait AsyncHostFuture<O>: Future<Output = O> + Send {}
 
 #[cfg(not(target_arch = "wasm32"))]
-impl<T, O> FutureAliasWrapper<O> for T where T: Future<Output = O> + Send {}
+impl<T, O> AsyncHostFuture<O> for T where T: Future<Output = O> + Send {}

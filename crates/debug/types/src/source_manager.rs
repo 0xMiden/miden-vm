@@ -262,18 +262,9 @@ impl<T: ?Sized + SourceManager> SourceManagerExt for T {}
 /// [SourceManager] is a supertrait of [SourceManagerSync], so you may use instances of the
 /// [SourceManagerSync] where the [SourceManager] is required, either implicitly or via explicit
 /// downcasting, e.g. `Arc<dyn SourceManagerSync> as Arc<dyn SourceManager>`.
-
-#[cfg(target_arch = "wasm32")]
 pub trait SourceManagerSync: SourceManager + Send + Sync {}
 
-#[cfg(target_arch = "wasm32")]
 impl<T: ?Sized + SourceManager + Send + Sync> SourceManagerSync for T {}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub trait SourceManagerSync: SourceManager + Send {}
-
-#[cfg(not(target_arch = "wasm32"))]
-impl<T: ?Sized + SourceManager + Send> SourceManagerSync for T {}
 
 // DEFAULT SOURCE MANAGER
 // ================================================================================================
