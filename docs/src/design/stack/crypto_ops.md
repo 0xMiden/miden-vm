@@ -291,7 +291,6 @@ where:
 - $ctx$ is the memory context from which the operation was initiated,
 - $clk$ is the clock cycle at which the operation was initiated,
 - $ptr$, $n_{read}$ and $n_{eval}$ are as above.
-- 
 
 Then, using the above value, we can describe the constraint for the chiplets' bus column as follows:
 
