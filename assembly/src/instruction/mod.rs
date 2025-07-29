@@ -491,8 +491,8 @@ impl Assembler {
             Instruction::FriExt2Fold4 => block_builder.push_op(FriE2F4),
             Instruction::HornerBase => block_builder.push_op(HornerBase),
             Instruction::HornerExt => block_builder.push_op(HornerExt),
-            Instruction::ArithmeticCircuitEval => {
-                block_builder.push_op(Operation::ArithmeticCircuitEval);
+            Instruction::CircuitEval => {
+                block_builder.push_op(Operation::CircuitEval);
             },
 
             // ----- exec/call instructions -------------------------------------------------------

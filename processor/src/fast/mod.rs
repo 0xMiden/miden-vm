@@ -1161,7 +1161,7 @@ impl FastProcessor {
             Operation::FriE2F4 => self.op_fri_ext2fold4()?,
             Operation::HornerBase => self.op_horner_eval_base(op_idx, err_ctx)?,
             Operation::HornerExt => self.op_horner_eval_ext(op_idx, err_ctx)?,
-            Operation::ArithmeticCircuitEval => self.arithmetic_circuit_eval(op_idx, err_ctx)?,
+            Operation::CircuitEval => self.circuit_eval(op_idx, err_ctx)?,
         }
 
         Ok(())
