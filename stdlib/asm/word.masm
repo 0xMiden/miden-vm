@@ -73,24 +73,25 @@ end
 #!
 #! Cycles: 121
 export.gt
+    # => [r_3, r_2, r_1, r_0, l_3, l_2, l_1, l_0]
     exec.arrange_words_adjacent
-    # => [2_3, 1_3, 2_2, 1_2, 2_1, 1_1, 2_0, 1_0]
+    # => [l_3, r_3, l_2, r_2, l_1, r_1, l_0, r_0]
 
     push.1.0
-    # => [is_lhs_less, continue, 2_3, 1_3, 2_2, 1_2, 2_1, 1_1, 2_0, 1_0]
+    # => [is_lhs_less, continue, l_3, r_3, l_2, r_2, l_1, r_1, l_0, r_0]
 
     repeat.4
         movup.3 movup.3
-        # => [2_x, 1_x, is_lhs_less, continue, <remaining_felts>]
+        # => [l_x, r_x, is_lhs_less, continue, <remaining_felts>]
 
-        # check 1_x == 2_x; if so, we continue
+        # check r_x == l_x; if so, we continue
         dup dup.2 eq
-        # => [is_felt_eq, 2_x, 1_x, is_lhs_less, continue, <remaining_felts>]
+        # => [is_felt_eq, l_x, r_x, is_lhs_less, continue, <remaining_felts>]
 
         movdn.3
-        # => [2_x, 1_x, is_lhs_less, is_felt_eq, continue, <remaining_felts>]
+        # => [l_x, r_x, is_lhs_less, is_felt_eq, continue, <remaining_felts>]
 
-        # check 1_x < 2_x
+        # check r_x < l_x
         lt
         # => [is_felt_lt, is_lhs_less, is_felt_eq, continue, <remaining_felts>]
 
@@ -138,23 +139,23 @@ end
 #! Cycles: 117
 export.lt
     exec.arrange_words_adjacent
-    # => [2_3, 1_3, 2_2, 1_2, 2_1, 1_1, 2_0, 1_0]
+    # => [l_3, r_3, l_2, r_2, l_1, r_1, l_0, r_0]
 
     push.1.0
-    # => [is_lhs_greater, continue, 2_3, 1_3, 2_2, 1_2, 2_1, 1_1, 2_0, 1_0]
+    # => [is_lhs_greater, continue, l_3, r_3, l_2, r_2, l_1, r_1, l_0, r_0]
 
     repeat.4
         movup.3 movup.3
-        # => [2_x, 1_x, is_lhs_greater, continue, <remaining_felts>]
+        # => [l_x, r_x, is_lhs_greater, continue, <remaining_felts>]
 
-        # check 1_x == 2_x; if so, we continue
+        # check r_x == l_x; if so, we continue
         dup dup.2 eq
-        # => [is_felt_eq, 2_x, 1_x, is_lhs_greater, continue, <remaining_felts>]
+        # => [is_felt_eq, l_x, r_x, is_lhs_greater, continue, <remaining_felts>]
 
         movdn.3
-        # => [2_x, 1_x, is_lhs_greater, is_felt_eq, continue, <remaining_felts>]
+        # => [l_x, r_x, is_lhs_greater, is_felt_eq, continue, <remaining_felts>]
 
-        # check 1_x > 2_x
+        # check r_x > l_x
         gt
         # => [is_felt_gt, is_lhs_greater, is_felt_eq, continue, <remaining_felts>]
 
