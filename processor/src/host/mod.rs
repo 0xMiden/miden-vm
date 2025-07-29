@@ -137,9 +137,9 @@ pub trait AsyncHost: BaseHost {
 
 /// Alias for a `Future`
 ///
-/// Depending on the the target being `wasm32-unknown-unknown` the
-/// trait bounds are _without_ `+ Send`, otherwise with `+ Send` to
-/// ensure functionality for mutli threaded executor.
+/// If feature `std` is enabled, we add `Send` to the required bounds,
+/// otherwise we do not. This impacts usability with a multithreaded
+/// executor.
 #[cfg(not(feature = "std"))]
 pub trait AsyncHostFuture<O>: Future<Output = O> {}
 
