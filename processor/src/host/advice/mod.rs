@@ -41,9 +41,9 @@ type SimpleMerkleMap = BTreeMap<Word, StoreNode>;
 /// Advice data is store in-memory using [BTreeMap]s as its backing storage.
 #[derive(Debug, Clone, Default)]
 pub struct AdviceProvider {
-    pub stack: Vec<Felt>,
-    pub map: AdviceMap,
-    pub store: MerkleStore<SimpleMerkleMap>,
+    stack: Vec<Felt>,
+    map: AdviceMap,
+    store: MerkleStore<SimpleMerkleMap>,
 }
 
 impl AdviceProvider {
