@@ -15,6 +15,8 @@
 - [BREAKING] `{AsyncHost,SyncHost}::on_event` now returns a list of `AdviceProvider` mutations ([#2003](https://github.com/0xMiden/miden-vm/pull/2003)).
 - Add constraints evaluation check to recursive verifier ([#1997](https://github.com/0xMiden/miden-vm/pull/1997)).
 - Add `AdviceProvider::into_parts()` method ([#2024](https://github.com/0xMiden/miden-vm/pull/2024)).
+- Add new stdlib module `std::word`, containing utilities for manipulating arrays of four fields (words) [#1928](https://github.com/0xMiden/miden-vm/issues/1928).
+- [BREAKING]: move `std::utils::is_empty_word` to `std::word::eqz`, as part of the new word module [#1928](https://github.com/0xMiden/miden-vm/issues/1928).
 
 #### Changes
 
