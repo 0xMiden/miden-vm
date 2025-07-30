@@ -267,9 +267,9 @@ $$
 u_{mem} = \alpha_0 + \alpha_1 \cdot op_{mem\_readword} + \alpha_2 \cdot ctx + \alpha_3 \cdot s_{13} + \alpha_4 \cdot clk + \alpha_{5} \cdot h_{0} + \alpha_{6} \cdot h_{1} + \alpha_{7} \cdot h_{3} + \alpha_{8} \cdot h_{4}
 $$
 
-## ARITHMETICCIRCUITEVAL
+## EVALCIRCUIT
 
-The `ARITHMETICCIRCUITEVAL` operation evaluates an arithmetic circuit, given its circuit description and a set of input values, using the [ACE](../chiplets/ace.md) chiplet and asserts that the evaluation is equal to zero.
+The `EVALCIRCUIT` operation evaluates an arithmetic circuit, given its circuit description and a set of input values, using the [ACE](../chiplets/ace.md) chiplet and asserts that the evaluation is equal to zero.
 
 The stack is expected to be arranged as follows (from the top):
 - A pointer to the circuit description with the [expected](../chiplets/ace.md#memory-layout) layout by the ACE chiplet.
@@ -278,7 +278,7 @@ The stack is expected to be arranged as follows (from the top):
 
 The diagram below illustrates this graphically.
 
-![arithmeticcircuiteval](../../assets/design/stack/crypto_ops/ARITHMETICCIRCUITEVAL.png)
+![arithmeticcircuiteval](../../assets/design/stack/crypto_ops/EVALCIRCUIT.png)
 
 Calling the operation has no effect on the stack or on helper registers. Instead, the operation makes a request to the `ACE` chiplet using the chiplets' bus. More precisely, let 
 
