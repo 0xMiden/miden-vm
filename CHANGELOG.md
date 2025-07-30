@@ -6,6 +6,8 @@
 
 - Implement `copy_digest` and `hash_memory_double_words` procedures in the `std::crypto::hashes::rpo` module ([#1971](https://github.com/0xMiden/miden-vm/pull/1971)).
 - Add `extend_` methods on AdviceProvider [#1982](https://github.com/0xMiden/miden-vm/pull/1982).
+- Add new stdlib module `std::word`, containing utilities for manipulating arrays of four fields (words) [#1996](https://github.com/0xMiden/miden-vm/pull/1996).
+- [BREAKING]: move `std::utils::is_empty_word` to `std::word::eqz`, as part of the new word module [#1996](https://github.com/0xMiden/miden-vm/pull/1996).
 - Add constraints evaluation check to recursive verifier ([#1997](https://github.com/0xMiden/miden-vm/pull/1997)).
 - Add `AdviceProvider::into_parts()` method ([#2024](https://github.com/0xMiden/miden-vm/pull/2024)).
 - Add `drop_stack_top` procedure in std::sys ([#2031](https://github.com/0xMiden/miden-vm/pull/2031))
@@ -25,6 +27,7 @@
 ## 0.16.4 (2025-07-24)
 
 - Made `AdviceInputs` field public.
+- [BREAKING] `FastProcessor::execute()` now also returns the `AdviceProvider` ([#2026](https://github.com/0xMiden/miden-vm/pull/2026))
 
 ## 0.16.3 (2025-07-18)
 

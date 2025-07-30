@@ -26,3 +26,4 @@ mod mast_forest_merge;
 mod math;
 mod mem;
 mod sys;
+mod word;

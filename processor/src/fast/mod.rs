@@ -314,13 +314,15 @@ impl FastProcessor {
     // EXECUTE
     // -------------------------------------------------------------------------------------------
 
-    /// Executes the given program and returns the stack outputs.
+    /// Executes the given program and returns the stack outputs as well as the advice provider.
     pub async fn execute(
         mut self,
         program: &Program,
         host: &mut impl AsyncHost,
-    ) -> Result<StackOutputs, ExecutionError> {
-        self.execute_impl(program, host).await
+    ) -> Result<(StackOutputs, AdviceProvider), ExecutionError> {
+        let stack_outputs = self.execute_impl(program, host).await?;
+
+        Ok((stack_outputs, self.advice))
     }
 
     async fn execute_impl(
@@ -1360,7 +1362,9 @@ impl FastProcessor {
         // Create a new Tokio runtime and block on the async execution
         let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
 
-        rt.block_on(self.execute(program, host))
+        let (stack_outputs, _advice) = rt.block_on(self.execute(program, host))?;
+
+        Ok(stack_outputs)
     }
 
     /// Similar to [Self::execute_sync], but allows mutable access to the processor.
