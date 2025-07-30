@@ -113,7 +113,7 @@ pub(super) mod opcode_constants {
     pub const OPCODE_EMIT: u8           = 0b0101_1010;
     pub const OPCODE_PUSH: u8           = 0b0101_1011;
     pub const OPCODE_DYNCALL: u8        = 0b0101_1100;
-    pub const OPCODE_CIRCUITEVAL: u8    = 0b0101_1101;
+    pub const OPCODE_EVALCIRCUIT: u8    = 0b0101_1101;
 
     pub const OPCODE_MRUPDATE: u8       = 0b0110_0000;
     pub const OPCODE_HORNERBASE: u8     = 0b0110_0100;
@@ -601,7 +601,7 @@ pub enum Operation {
 
     /// Evaluates an arithmetic circuit given a pointer to its description in memory, the number
     /// of arithmetic gates, and the sum of the input and constant gates.
-    CircuitEval = OPCODE_CIRCUITEVAL,
+    EvalCircuit = OPCODE_EVALCIRCUIT,
 }
 
 impl Operation {
@@ -782,7 +782,7 @@ impl fmt::Display for Operation {
             Self::FriE2F4 => write!(f, "frie2f4"),
             Self::HornerBase => write!(f, "horner_eval_base"),
             Self::HornerExt => write!(f, "horner_eval_ext"),
-            Self::CircuitEval => write!(f, "circuit_eval"),
+            Self::EvalCircuit => write!(f, "eval_circuit"),
         }
     }
 }
@@ -891,7 +891,7 @@ impl Serializable for Operation {
             | Operation::FriE2F4
             | Operation::HornerBase
             | Operation::HornerExt
-            | Operation::CircuitEval => (),
+            | Operation::EvalCircuit => (),
         }
     }
 }
@@ -989,7 +989,7 @@ impl Deserializable for Operation {
             OPCODE_DYNCALL => Self::Dyncall,
             OPCODE_HORNERBASE => Self::HornerBase,
             OPCODE_HORNEREXT => Self::HornerExt,
-            OPCODE_CIRCUITEVAL => Self::CircuitEval,
+            OPCODE_EVALCIRCUIT => Self::EvalCircuit,
 
             OPCODE_MRUPDATE => Self::MrUpdate,
             OPCODE_PUSH => Self::Push(Felt::read_from(source)?),

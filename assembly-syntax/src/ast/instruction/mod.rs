@@ -256,7 +256,7 @@ pub enum Instruction {
     FriExt2Fold4,
     HornerBase,
     HornerExt,
-    CircuitEval,
+    EvalCircuit,
 
     // ----- exec / call -------------------------------------------------------------------------
     Exec(InvocationTarget),
