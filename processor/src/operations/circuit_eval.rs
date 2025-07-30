@@ -18,10 +18,10 @@ impl Process {
     /// 3. the number of field elements, one base field element per gate, in the `EVAL` section,
     ///
     /// Stack transition:
-    /// [ptr, num_read_rows, num_eval_rows, ...] -> [ptr, num_read_rows, num_eval_rows, ...]
+    /// [ptr, num_read, num_eval, ...] -> [ptr, num_read, num_eval, ...]
     pub fn op_eval_circuit(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
-        let num_eval_rows = self.stack.get(2);
-        let num_read_rows = self.stack.get(1);
+        let num_eval = self.stack.get(2);
+        let num_read = self.stack.get(1);
         let ptr = self.stack.get(0);
         let ctx = self.system.ctx();
         let clk = self.system.clk();
