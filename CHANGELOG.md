@@ -13,10 +13,11 @@
 - Move the `SourceManager` from the processor to the host [#2019](https://github.com/0xMiden/miden-vm/pull/2019).
 - Add `AdviceProvider::into_parts()` method ([#2024](https://github.com/0xMiden/miden-vm/pull/2024)).
 - [BREAKING] `{AsyncHost,SyncHost}::on_event` now returns a list of `AdviceProvider` mutations ([#2003](https://github.com/0xMiden/miden-vm/pull/2003)).
+- Add new stdlib module `std::word`, containing utilities for manipulating arrays of four fields (words) [#1996](https://github.com/0xMiden/miden-vm/pull/1996).
+- [BREAKING]: move `std::utils::is_empty_word` to `std::word::eqz`, as part of the new word module [#1996](https://github.com/0xMiden/miden-vm/pull/1996).
 - Add constraints evaluation check to recursive verifier ([#1997](https://github.com/0xMiden/miden-vm/pull/1997)).
 - Add `AdviceProvider::into_parts()` method ([#2024](https://github.com/0xMiden/miden-vm/pull/2024)).
-- Add new stdlib module `std::word`, containing utilities for manipulating arrays of four fields (words) [#1928](https://github.com/0xMiden/miden-vm/issues/1928).
-- [BREAKING]: move `std::utils::is_empty_word` to `std::word::eqz`, as part of the new word module [#1928](https://github.com/0xMiden/miden-vm/issues/1928).
+- Add `drop_stack_top` procedure in std::sys ([#2031](https://github.com/0xMiden/miden-vm/pull/2031))
 
 #### Changes
 
