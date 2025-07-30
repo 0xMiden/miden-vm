@@ -6,11 +6,9 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-use alloc::sync::Arc;
 use core::marker::PhantomData;
 
 use miden_air::{AuxRandElements, PartitionOptions, ProcessorAir, PublicInputs};
-use miden_debug_types::SourceManager;
 #[cfg(all(feature = "metal", target_arch = "aarch64", target_os = "macos"))]
 use miden_gpu::HashFn;
 use miden_processor::{
@@ -66,7 +64,6 @@ pub fn prove(
     advice_inputs: AdviceInputs,
     host: &mut impl SyncHost,
     options: ProvingOptions,
-    source_manager: Arc<dyn SourceManager>,
 ) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
     // execute the program to create an execution trace
     #[cfg(feature = "std")]
@@ -77,7 +74,6 @@ pub fn prove(
         advice_inputs,
         host,
         *options.execution_options(),
-        source_manager,
     )?;
     #[cfg(feature = "std")]
     tracing::event!(

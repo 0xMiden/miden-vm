@@ -1,6 +1,4 @@
-use std::sync::Arc;
-
-use miden_assembly::{Assembler, DefaultSourceManager};
+use miden_assembly::Assembler;
 use miden_processor::{AdviceInputs, ExecutionOptions, Program};
 use miden_prover::StackInputs;
 
@@ -26,7 +24,6 @@ fn test_event_handling() {
         AdviceInputs::default(),
         &mut host,
         ExecutionOptions::default(),
-        Arc::new(DefaultSourceManager::default()),
     )
     .unwrap();
 
@@ -57,7 +54,6 @@ fn test_trace_handling() {
         AdviceInputs::default(),
         &mut host,
         ExecutionOptions::default(),
-        Arc::new(DefaultSourceManager::default()),
     )
     .unwrap();
     let expected = Vec::<u32>::new();
@@ -70,7 +66,6 @@ fn test_trace_handling() {
         AdviceInputs::default(),
         &mut host,
         ExecutionOptions::default().with_tracing(),
-        Arc::new(DefaultSourceManager::default()),
     )
     .unwrap();
     let expected = vec![1, 2];
@@ -97,7 +92,6 @@ fn test_debug_with_debugging() {
         AdviceInputs::default(),
         &mut host,
         ExecutionOptions::default().with_debugging(true),
-        Arc::new(DefaultSourceManager::default()),
     )
     .unwrap();
 
@@ -125,7 +119,6 @@ fn test_debug_without_debugging() {
         AdviceInputs::default(),
         &mut host,
         ExecutionOptions::default(),
-        Arc::new(DefaultSourceManager::default()),
     )
     .unwrap();
 
@@ -155,7 +148,6 @@ fn test_parsing_debug_advice_stack() {
         AdviceInputs::default(),
         &mut host,
         ExecutionOptions::default().with_debugging(true),
-        Arc::new(DefaultSourceManager::default()),
     )
     .unwrap();
 }

@@ -6,13 +6,12 @@ use std::{
 };
 
 use miden_assembly::{
-    Assembler, Library, LibraryNamespace,
+    Assembler, DefaultSourceManager, Library, LibraryNamespace, SourceManager,
     ast::{Module, ModuleKind},
     diagnostics::{Report, WrapErr},
     report,
     utils::Deserializable,
 };
-use miden_debug_types::SourceManagerSync;
 use miden_stdlib::StdLibrary;
 use miden_vm::{ExecutionProof, Program, StackOutputs, Word, utils::SliceReader};
 use serde::{Deserialize, Serialize};
@@ -108,26 +107,28 @@ impl OutputFile {
 // PROGRAM FILE
 // ================================================================================================
 
-pub struct ProgramFile {
+pub struct ProgramFile<S: SourceManager = DefaultSourceManager> {
     ast: Box<Module>,
-    source_manager: Arc<dyn SourceManagerSync>,
+    source_manager: Arc<S>,
 }
 
-/// Helper methods to interact with masm program file.
 impl ProgramFile {
     /// Reads the masm file at the specified path and parses it into a [ProgramFile].
     pub fn read(path: impl AsRef<Path>) -> Result<Self, Report> {
         let source_manager = Arc::new(miden_assembly::DefaultSourceManager::default());
         Self::read_with(path, source_manager)
     }
+}
 
+/// Helper methods to interact with masm program file.
+impl<S> ProgramFile<S>
+where
+    S: SourceManager + 'static,
+{
     /// Reads the masm file at the specified path and parses it into a [ProgramFile], using the
     /// provided [miden_assembly::SourceManager] implementation.
     #[instrument(name = "read_program_file", skip(source_manager), fields(path = %path.as_ref().display()))]
-    pub fn read_with(
-        path: impl AsRef<Path>,
-        source_manager: Arc<dyn SourceManagerSync>,
-    ) -> Result<Self, Report> {
+    pub fn read_with(path: impl AsRef<Path>, source_manager: Arc<S>) -> Result<Self, Report> {
         // parse the program into an AST
         let path = path.as_ref();
         let mut parser = Module::parser(ModuleKind::Executable);
@@ -163,7 +164,7 @@ impl ProgramFile {
     }
 
     /// Returns the source manager for this program file.
-    pub fn source_manager(&self) -> &Arc<dyn SourceManagerSync> {
+    pub fn source_manager(&self) -> &Arc<S> {
         &self.source_manager
     }
 }

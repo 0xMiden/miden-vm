@@ -1,7 +1,4 @@
-use std::sync::Arc;
-
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
-use miden_assembly::DefaultSourceManager;
 use miden_processor::{AdviceInputs, ExecutionOptions, execute};
 use miden_stdlib::StdLibrary;
 use miden_vm::{Assembler, DefaultHost, StackInputs, internal::InputFile};
@@ -47,7 +44,6 @@ fn program_execution(c: &mut Criterion) {
                     assembler
                         .link_dynamic_library(StdLibrary::default())
                         .expect("failed to load stdlib");
-                    let source_manager = Arc::new(DefaultSourceManager::default());
 
                     let program = assembler
                         .assemble_program(&source)
@@ -61,7 +57,6 @@ fn program_execution(c: &mut Criterion) {
                                 advice_inputs.clone(),
                                 &mut host,
                                 ExecutionOptions::default(),
-                                source_manager.clone(),
                             )
                             .unwrap()
                         },

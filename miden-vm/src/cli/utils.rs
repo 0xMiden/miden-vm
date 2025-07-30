@@ -1,7 +1,7 @@
 use std::{fs, path::Path, sync::Arc};
 
 use miden_assembly::{
-    SourceManager,
+    DefaultSourceManager,
     diagnostics::{IntoDiagnostic, Report, WrapErr},
 };
 use miden_mast_package::{MastArtifact, Package};
@@ -30,7 +30,7 @@ pub fn get_masm_program(
     path: &Path,
     libraries: &Libraries,
     debug_on: bool,
-) -> Result<(miden_core::Program, Arc<dyn SourceManager>), Report> {
+) -> Result<(miden_core::Program, Arc<DefaultSourceManager>), Report> {
     let debug_mode = if debug_on { Debug::On } else { Debug::Off };
     let program_file = ProgramFile::read(path)?;
     let program = program_file.compile(debug_mode, &libraries.libraries)?;

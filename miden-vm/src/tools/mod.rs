@@ -1,11 +1,8 @@
 use core::fmt;
-use std::{path::PathBuf, sync::Arc};
+use std::path::PathBuf;
 
 use clap::Parser;
-use miden_assembly::{
-    DefaultSourceManager, SourceManager,
-    diagnostics::{Report, WrapErr},
-};
+use miden_assembly::diagnostics::{Report, WrapErr};
 use miden_core::Program;
 use miden_processor::{AsmOpInfo, TraceLenSummary};
 use miden_prover::AdviceInputs;
@@ -49,13 +46,15 @@ impl Analyze {
             .unwrap_or("")
             .to_lowercase();
 
+        let host = DefaultHost::default().with_library(&StdLibrary::default())?;
         // Use a single match expression to load the program.
-        let (program, source_manager) = match ext.as_str() {
-            "masp" => (
-                get_masp_program(&self.program_file)?,
-                Arc::new(DefaultSourceManager::default()) as Arc<dyn SourceManager>,
-            ),
-            "masm" => get_masm_program(&self.program_file, &libraries, true)?,
+        let (program, host) = match ext.as_str() {
+            "masp" => (get_masp_program(&self.program_file)?, host),
+            "masm" => {
+                let (program, source_manager) =
+                    get_masm_program(&self.program_file, &libraries, true)?;
+                (program, host.with_source_manager(source_manager))
+            },
             _ => return Err(Report::msg("The provided file must have a .masm or .masp extension")),
         };
 
@@ -65,10 +64,9 @@ impl Analyze {
         // fetch the stack and program inputs from the arguments
         let stack_inputs = input_data.parse_stack_inputs().map_err(Report::msg)?;
         let advice_inputs = input_data.parse_advice_inputs().map_err(Report::msg)?;
-        let host = DefaultHost::default().with_library(&StdLibrary::default())?;
 
         let execution_details: ExecutionDetails =
-            analyze(&program, stack_inputs, advice_inputs, host, source_manager)
+            analyze(&program, stack_inputs, advice_inputs, host)
                 .expect("Could not retrieve execution details");
         let program_name = self
             .program_file
@@ -242,20 +240,14 @@ fn analyze<H>(
     stack_inputs: StackInputs,
     advice_inputs: AdviceInputs,
     mut host: H,
-    source_manager: Arc<dyn SourceManager>,
 ) -> Result<ExecutionDetails, Report>
 where
     H: SyncHost,
 {
     let mut execution_details = ExecutionDetails::default();
 
-    let vm_state_iterator = miden_processor::execute_iter(
-        program,
-        stack_inputs,
-        advice_inputs,
-        &mut host,
-        source_manager,
-    );
+    let vm_state_iterator =
+        miden_processor::execute_iter(program, stack_inputs, advice_inputs, &mut host);
     execution_details.set_trace_len_summary(vm_state_iterator.trace_len_summary());
 
     for state in vm_state_iterator {
@@ -323,7 +315,7 @@ impl AsmOpStats {
 
 #[cfg(test)]
 mod tests {
-    use miden_assembly::DefaultSourceManager;
+
     use miden_processor::{ChipletsLengths, DefaultHost, TraceLenSummary};
     use miden_vm::Assembler;
 
@@ -336,14 +328,8 @@ mod tests {
         let advice_inputs = AdviceInputs::default();
         let host = DefaultHost::default();
         let program = Assembler::default().with_debug_mode(true).assemble_program(source).unwrap();
-        let execution_details = super::analyze(
-            &program,
-            stack_inputs,
-            advice_inputs,
-            host,
-            Arc::new(DefaultSourceManager::default()),
-        )
-        .expect("analyze_test: Unexpected Error");
+        let execution_details = super::analyze(&program, stack_inputs, advice_inputs, host)
+            .expect("analyze_test: Unexpected Error");
         let expected_details = ExecutionDetails {
             total_noops: 0,
             asm_op_stats: vec![

@@ -1,7 +1,7 @@
 use std::{path::PathBuf, sync::Arc};
 
 use clap::Parser;
-use miden_assembly::{DefaultSourceManager, SourceManager, diagnostics::Report};
+use miden_assembly::{DefaultSourceManager, diagnostics::Report};
 use miden_vm::internal::InputFile;
 use rustyline::{Config, DefaultEditor, EditMode, error::ReadlineError};
 
@@ -54,10 +54,9 @@ impl DebugCmd {
 
         // Use a single match expression to load the program.
         let (program, source_manager) = match ext.as_str() {
-            "masp" => (
-                get_masp_program(&self.program_file)?,
-                Arc::new(DefaultSourceManager::default()) as Arc<dyn SourceManager>,
-            ),
+            "masp" => {
+                (get_masp_program(&self.program_file)?, Arc::new(DefaultSourceManager::default()))
+            },
             "masm" => get_masm_program(&self.program_file, &libraries, true)?,
             _ => return Err(Report::msg("The provided file must have a .masm or .masp extension")),
         };

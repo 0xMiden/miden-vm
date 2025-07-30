@@ -1,7 +1,7 @@
-use std::{array, sync::Arc};
+use std::array;
 
 use miden_air::{FieldExtension, HashFunction, PublicInputs};
-use miden_assembly::{Assembler, DefaultSourceManager};
+use miden_assembly::Assembler;
 use miden_core::{Felt, FieldElement, QuadFelt, WORD_SIZE, Word, ZERO};
 use miden_processor::{
     DefaultHost, Program, ProgramInfo,
@@ -90,15 +90,8 @@ pub fn generate_recursive_verifier_data(
     let options =
         ProvingOptions::new(27, 8, 16, FieldExtension::Quadratic, 4, 127, HashFunction::Rpo256);
 
-    let (stack_outputs, proof) = prove(
-        &program,
-        stack_inputs.clone(),
-        advice_inputs,
-        &mut host,
-        options,
-        Arc::new(DefaultSourceManager::default()),
-    )
-    .unwrap();
+    let (stack_outputs, proof) =
+        prove(&program, stack_inputs.clone(), advice_inputs, &mut host, options).unwrap();
 
     let program_info = ProgramInfo::from(program);
 

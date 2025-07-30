@@ -6,6 +6,13 @@
 
 - Implement `copy_digest` and `hash_memory_double_words` procedures in the `std::crypto::hashes::rpo` module ([#1971](https://github.com/0xMiden/miden-vm/pull/1971)).
 - Add `extend_` methods on AdviceProvider [#1982](https://github.com/0xMiden/miden-vm/pull/1982).
+- [BREAKING] `{AsyncHost,SyncHost}::on_event` now returns a list of `AdviceProvider` mutations ([#2003](https://github.com/0xMiden/miden-vm/pull/2003)).
+- Add constraints evaluation check to recursive verifier ([#1997](https://github.com/0xMiden/miden-vm/pull/1997)).
+- Add `AdviceProvider::into_parts()` method ([#2024](https://github.com/0xMiden/miden-vm/pull/2024)).
+- Move `fn with_source_manager` from `Process` to the `host` [#2019](https://github.com/0xMiden/miden-vm/pull/2019).
+- Move the `SourceManager` from the processor to the host [#2019](https://github.com/0xMiden/miden-vm/pull/2019).
+- Add `AdviceProvider::into_parts()` method ([#2024](https://github.com/0xMiden/miden-vm/pull/2024)).
+- [BREAKING] `{AsyncHost,SyncHost}::on_event` now returns a list of `AdviceProvider` mutations ([#2003](https://github.com/0xMiden/miden-vm/pull/2003)).
 - Add constraints evaluation check to recursive verifier ([#1997](https://github.com/0xMiden/miden-vm/pull/1997)).
 - Add `AdviceProvider::into_parts()` method ([#2024](https://github.com/0xMiden/miden-vm/pull/2024)).
 
@@ -20,11 +27,12 @@
 - Converted `FastProcessor::execute()` from recursive to iterative execution ([#1989](https://github.com/0xMiden/miden-vm/issues/1989)).
 - [BREAKING] made `AdviceInputs` field public and removed redundant accessors ([#2009](https://github.com/0xMiden/miden-vm/pull/2009)).
 - Enhancement for all benchmarks (incl. `program_execution_fast`) are built and run in a new CI job with required feature flags [(#https://github.com/0xMiden/miden-vm/issues/1964)](https://github.com/0xMiden/miden-vm/issues/1964)
+- [BREAKING] `FastProcessor::execute()` now also returns the `AdviceProvider` ([#2026](https://github.com/0xMiden/miden-vm/pull/2026))
+- Allow for 234 "spurious drops" before the fast processor underflows, up from 34 ([#2035](https://github.com/0xMiden/miden-vm/pull/2035)) 
 
 ## 0.16.4 (2025-07-24)
 
 - Made `AdviceInputs` field public.
-- [BREAKING] `FastProcessor::execute()` now also returns the `AdviceProvider` ([#2026](https://github.com/0xMiden/miden-vm/pull/2026))
 
 ## 0.16.3 (2025-07-18)
 

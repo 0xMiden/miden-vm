@@ -13,7 +13,6 @@ use miden_core::{
     stack::MIN_STACK_DEPTH,
     utils::range,
 };
-use miden_debug_types::{DefaultSourceManager, SourceManager};
 
 use crate::{
     AdviceInputs, AdviceProvider, AsyncHost, ContextId, ErrorContext, ExecutionError, FMP_MIN,
@@ -47,7 +46,7 @@ mod tests;
 /// For example, the blake3 benchmark went from 285 MHz to 250 MHz (~10% degradation). Perhaps a
 /// better solution would be to make this value much smaller (~1000), and then fallback to a `Vec`
 /// if the stack overflows.
-const STACK_BUFFER_SIZE: usize = 6650;
+const STACK_BUFFER_SIZE: usize = 6850;
 
 /// The initial position of the top of the stack in the stack buffer.
 ///
@@ -55,7 +54,7 @@ const STACK_BUFFER_SIZE: usize = 6650;
 /// the upper bound than the lower bound, since hitting the lower bound only occurs when you drop
 /// 0's that were generated automatically to keep the stack depth at 16. In practice, if this
 /// occurs, it is most likely a bug.
-const INITIAL_STACK_TOP_IDX: usize = 50;
+const INITIAL_STACK_TOP_IDX: usize = 250;
 
 /// WORD_SIZE, but as a `Felt`.
 const WORD_SIZE_FELT: Felt = Felt::new(4);
@@ -148,9 +147,6 @@ pub struct FastProcessor {
 
     /// Whether to enable debug statements and tracing.
     in_debug_mode: bool,
-
-    /// The source manager (providing information about the location of each instruction).
-    source_manager: Arc<dyn SourceManager>,
 }
 
 impl FastProcessor {
@@ -202,7 +198,6 @@ impl FastProcessor {
         let stack_bot_idx = stack_top_idx - MIN_STACK_DEPTH;
 
         let bounds_check_counter = stack_bot_idx;
-        let source_manager = Arc::new(DefaultSourceManager::default());
         Self {
             advice: advice_inputs.into(),
             stack,
@@ -218,14 +213,7 @@ impl FastProcessor {
             call_stack: Vec::new(),
             ace: Ace::default(),
             in_debug_mode,
-            source_manager,
         }
-    }
-
-    /// Set the internal source manager to an externally initialized one.
-    pub fn with_source_manager(mut self, source_manager: Arc<dyn SourceManager>) -> Self {
-        self.source_manager = source_manager;
-        self
     }
 
     // ACCESSORS
@@ -502,7 +490,7 @@ impl FastProcessor {
         } else if condition == ZERO {
             continuation_stack.push_start_node(split_node.on_false());
         } else {
-            let err_ctx = err_ctx!(current_forest, split_node, self.source_manager.clone());
+            let err_ctx = err_ctx!(current_forest, split_node, host);
             return Err(ExecutionError::not_binary_value_if(condition, &err_ctx));
         };
         Ok(())
@@ -556,7 +544,7 @@ impl FastProcessor {
             // execute
             self.clk += 1_u32;
         } else {
-            let err_ctx = err_ctx!(current_forest, loop_node, self.source_manager.clone());
+            let err_ctx = err_ctx!(current_forest, loop_node, host);
             return Err(ExecutionError::not_binary_value_loop(condition, &err_ctx));
         }
         Ok(())
@@ -588,7 +576,7 @@ impl FastProcessor {
 
             self.execute_after_exit_decorators(current_node_id, current_forest, host)?;
         } else {
-            let err_ctx = err_ctx!(current_forest, loop_node, self.source_manager.clone());
+            let err_ctx = err_ctx!(current_forest, loop_node, host);
             return Err(ExecutionError::not_binary_value_loop(condition, &err_ctx));
         }
         Ok(())
@@ -608,7 +596,7 @@ impl FastProcessor {
         // Execute decorators that should be executed before entering the node
         self.execute_before_enter_decorators(current_node_id, current_forest, host)?;
 
-        let err_ctx = err_ctx!(current_forest, call_node, self.source_manager.clone());
+        let err_ctx = err_ctx!(current_forest, call_node, host);
 
         // Corresponds to the row inserted for the CALL or SYSCALL
         // operation added to the trace.
@@ -659,7 +647,7 @@ impl FastProcessor {
         host: &mut impl AsyncHost,
     ) -> Result<(), ExecutionError> {
         let call_node = current_forest[node_id].unwrap_call();
-        let err_ctx = err_ctx!(current_forest, call_node, self.source_manager.clone());
+        let err_ctx = err_ctx!(current_forest, call_node, host);
         // when returning from a function call or a syscall, restore the
         // context of the
         // system registers and the operand stack to what it was prior
@@ -696,7 +684,7 @@ impl FastProcessor {
             return Err(ExecutionError::CallInSyscall("dyncall"));
         }
 
-        let err_ctx = err_ctx!(&current_forest, dyn_node, self.source_manager.clone());
+        let err_ctx = err_ctx!(&current_forest, dyn_node, host);
 
         // Retrieve callee hash from memory, using stack top as the memory
         // address.
@@ -761,7 +749,7 @@ impl FastProcessor {
         host: &mut impl AsyncHost,
     ) -> Result<(), ExecutionError> {
         let dyn_node = current_forest[node_id].unwrap_dyn();
-        let err_ctx = err_ctx!(current_forest, dyn_node, self.source_manager.clone());
+        let err_ctx = err_ctx!(current_forest, dyn_node, host);
         // For dyncall, restore the context.
         if dyn_node.is_dyncall() {
             self.restore_context(&err_ctx)?;
@@ -908,8 +896,7 @@ impl FastProcessor {
 
             // decode and execute the operation
             let op_idx_in_block = batch_offset_in_block + op_idx_in_batch;
-            let err_ctx =
-                err_ctx!(program, basic_block, self.source_manager.clone(), op_idx_in_block);
+            let err_ctx = err_ctx!(program, basic_block, host, op_idx_in_block);
 
             // Execute the operation.
             //
@@ -1182,7 +1169,6 @@ impl FastProcessor {
     {
         let mast_forest = host
             .get_mast_forest(&node_digest)
-            .await
             .ok_or_else(|| get_mast_forest_failed(node_digest, err_ctx))?;
 
         // We limit the parts of the program that can be called externally to procedure
