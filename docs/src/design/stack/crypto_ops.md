@@ -266,3 +266,34 @@ The `HORNEREXT` makes one memory access request:
 $$
 u_{mem} = \alpha_0 + \alpha_1 \cdot op_{mem\_readword} + \alpha_2 \cdot ctx + \alpha_3 \cdot s_{13} + \alpha_4 \cdot clk + \alpha_{5} \cdot h_{0} + \alpha_{6} \cdot h_{1} + \alpha_{7} \cdot h_{3} + \alpha_{8} \cdot h_{4}
 $$
+
+## EVALCIRCUIT
+
+The `EVALCIRCUIT` operation evaluates an arithmetic circuit, given its circuit description and a set of input values, using the [ACE](../chiplets/ace.md) chiplet and asserts that the evaluation is equal to zero.
+
+The stack is expected to be arranged as follows (from the top):
+- A pointer to the circuit description with the [expected](../chiplets/ace.md#memory-layout) layout by the ACE chiplet.
+- The number of quadratic extension field elements that are read during the `READ` [phase](../chiplets/ace.md#circuit-evaluation) of circuit evaluation.
+- The number of base field elements representing the encodings of instructions that make up the circuit being evaluated during the `EVAL` [phase](../chiplets/ace.md#circuit-evaluation) of circuit evaluation.
+
+The diagram below illustrates this graphically.
+
+![evalcircuit](../../assets/design/stack/crypto_ops/EVALCIRCUIT.png)
+
+Calling the operation has no effect on the stack or on helper registers. Instead, the operation makes a request to the `ACE` chiplet using the chiplets' bus. More precisely, let 
+
+$$
+v_{ace} = \alpha_0 + \mathsf{ACE\_LABEL}\cdot\alpha_1 + ctx \cdot\alpha_2 + ptr\cdot\alpha_3 + clk\cdot\alpha_4 + n_{read}\cdot\alpha_5 + n_{eval}\cdot\alpha_6.
+$$
+
+where:
+- $\mathsf{ACE\_LABEL}$ is the unique [operation labels](../chiplets/main.md#operation-labels) for initiating a circuit evaluation request to the ACE chiplet,
+- $ctx$ is the memory context from which the operation was initiated,
+- $clk$ is the clock cycle at which the operation was initiated,
+- $ptr$, $n_{read}$ and $n_{eval}$ are as above.
+
+Then, using the above value, we can describe the constraint for the chiplets' bus column as follows:
+
+>$$
+b_{chip}' \cdot v_{ace} = b_{chip} \text{ | degree} = 2
+$$
