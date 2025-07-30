@@ -1,7 +1,4 @@
 use.std::crypto::stark::constants
-use.std::crypto::hashes::rpo
-use.std::crypto::stark::random_coin
-
 
 #! Processes the public inputs.
 #! 
@@ -52,153 +49,9 @@ use.std::crypto::stark::random_coin
 #!
 #! Input: [C, ...]
 #! Output: [...]
-export.process_public_inputs
-    # 1) Compute the address where the public inputs will be stored and store it.
-    #    This also computes the address where the reduced variable-length public inputs will be stored.
-    exec.compute_and_store_public_inputs_address
-    # => [C, ...]
-
-    # 2) Load the public inputs.
-    #    This will also hash them so that we can absorb them in the transcript.
-    exec.load_public_inputs
-    # => [D, ...]
-
-    # 3) Absorb into the transcript
-    exec.random_coin::reseed
-    # => [...]
-
-    # 4) Reduce the variable-length public inputs using randomness.
-    exec.reduce_variable_length_public_inputs
-end
-
-#! Loads from the advice stack the public inputs and stores them in memory starting from address
-#! pointed to by `public_inputs_address_ptr`.
-#! Note that the public inputs are stored as extension field elements.
-#! In parallel, it computes the hash of the public inputs being loaded. The hashing starts with
-#! capacity registers of the hash function set to `C` resulting from hashing the proof context.
-#! The output D is the digest of the hashing of the public inputs.
-#!
-#! Input: [C, ...]
-#! Output: [D, ...]
-export.load_public_inputs
-    # 1) Load and hash the fixed length public inputs
-    
-    ## a) Compute the number of iterations.
-    ##    We also check double-word alignment
-    exec.constants::get_num_fixed_len_pi
-    u32divmod.8
-    assertz
-    movdn.4
-
-    ## b) Get the pointer to the region to hold the public inputs
-    exec.constants::public_inputs_address_ptr mem_load
-    movdn.4
-    padw padw
-
-    ## c) Iterate over the fixed length public inputs
-    dup.13
-    sub.1
-    swap.14
-    neq.0
-    while.true
-        exec.load_base_store_extension_double_word
-        hperm
-        dup.13
-        sub.1
-        swap.14
-        neq.0
-    end
-    movup.13 drop
- 
-    # 2) Load and hash the variable length public inputs
-
-    ## a) Compute the number of base field elements in total in the variable length public inputs
-    exec.constants::num_public_inputs_ptr mem_load
-    exec.constants::get_num_fixed_len_pi
-    sub
-    # => [num_var_len_pi, R2, R1, C, ptr, ...]
-
-    ## b) Compute the number of hash iteration needed to hash the variable length public inputs.
-    ##    We also check the double-word alignment.
-    u32divmod.8
-    # => [rem, num_iter, R2, R1, C, ptr, ...]
-    push.0 assert_eq
-    # => [num_iter, R2, R1, C, ptr, ...]
-    
-    ## c) Prepare the stack for hashing
-    movdn.13
-    # => [R2, R1, C, ptr, num_iter, ...]
-    dup.13 sub.1 swap.14
-    push.0 neq
-    # => [(num_iter == 0), R2, R1, C, ptr, num_iter - 1, ...]
-
-    ## d) Hash the variable length public inputs
-    while.true
-        adv_pipe
-        hperm
-        # => [R2, R1, C, ptr, num_iter, ...]
-        dup.13 sub.1 swap.14
-        push.0 neq
-    end
-    # => [R2, R1, C, ptr, num_iter, ...]
-
-    # 3) Return the final digest
-    exec.rpo::squeeze_digest
-    # => [D, ptr, num_iter, ...] where D = R1 the digest
-    movup.4 drop
-    movup.4 drop
-    # => [D, ...]
-end
-
-#! Reduces the variable-length public inputs using the auxiliary randomness.
-#!
-#! The procedure non-deterministically loads the auxiliary randomness from the advice tape and
-#! stores it at `aux_rand_nd_ptr` so that it can be later checked for correctness. After this,
-#! the procedure uses the auxiliary randomness in order to reduce the variable-length public
-#! inputs to a single element in the challenge field. The resulting values are then stored
-#! contiguously after the fixed-length public inputs.
-#!
-#! Currently, the only variable-length public inputs are the kernel procedure digests.
-#!
-#! Input: 
-#!      - Operand stack: [...]
-#!      - Advice stack: [beta0, beta1, alpha0, alpha1, var_len_pi_1_len, ..., var_len_pi_k_len, ...]
-#! Output: [D, ...]
-proc.reduce_variable_length_public_inputs
-    # 1) Load the auxiliary randomness i.e., alpha and beta
-    #    We store them as [beta0, beta1, alpha0, alpha1] since `horner_eval_ext` requires memory
-    #    word-alignment.
-    adv_push.4
-    exec.constants::aux_rand_nd_ptr mem_storew
-    # => [alpha1, alpha0, beta1, beta0, ...]
-    dropw
-    # => [...]
-
-    # 2) Get the pointer to the variable-length public inputs.
-    #    This is also the pointer to the first address at which we will store the results of
-    #    the reductions.
-    exec.constants::variable_length_public_inputs_address_ptr mem_load
-    dup
-    # => [next_var_len_pub_inputs_ptr, var_len_pub_inputs_res_ptr, ...] where
-    # `next_var_len_pub_inputs_ptr` points to the next chunk of variable public inputs to be reduced,
-    # and `var_len_pub_inputs_res_ptr` points to the next available memory location where the result
-    # of the reduction can be stored.
-    # Note that, as mentioned in the top of this module, the variable-length public inputs are only
-    # stored temporarily and they will be over-written by, among other data, the result of reducing
-    # the variable public inputs. 
-
-    exec.reduce_var_len_public_inputs_groups
-    # => [next_var_len_pub_inputs_ptr, var_len_pub_inputs_res_ptr, ...]
-
-    # 3) Clean up the stack.
-    drop drop
-    # => [...]
-end
-
-proc.reduce_var_len_public_inputs_groups
+proc.process_public_inputs
     exec.constants::get_dynamic_procedure_3_ptr dynexec
 end
-
 
 #! Computes the address where the public inputs are to be stored and returns it.
 #!
@@ -216,12 +69,12 @@ end
 #! the region storing, temporarily, the variable length public inputs that are to be reduced
 #! by the auxiliary randomness and, permanently, the results of the aforementioned reductions.
 #!
-#! Input: [...]
+#! Input: [num_var_len_pi_groups, num_fixed_len_pi, ...]
 #! Output: [...]
 proc.compute_and_store_public_inputs_address
     # 1) Get a pointer to where OOD evaluations are stored
     exec.constants::ood_evaluations_ptr
-    # => [ood_evals_ptr, ...]
+    # => [ood_evals_ptr, num_var_len_pi_groups, num_fixed_len_pi, ...]
 
     # 2) Compute the pointer to the reductions of the variable length public inputs
     #
@@ -229,16 +82,16 @@ proc.compute_and_store_public_inputs_address
     # public inputs groups. For each group we allocate 2 slots and we pad with zeros so that
     # things are word aligned. As of now, we only have one group.
     # We also need to account for the auxiliary randomness i.e., 4 base field elements.
-    sub.4       # 2 auxiliary random values
-    sub.4       # 1 variable length public input reduced value, with padding for word-alignment
-    # => [res_var_len_pi_reductions_ptr, ...]
+    sub.4               # 2 auxiliary random values
+    swap mul.4 sub      # subtract number of variable length public input groups, with padding for word-alignment
+    # => [res_var_len_pi_reductions_ptr, num_fixed_len_pi, ...]
 
     # 3) Compute the pointer to the public inputs
     #
     # We need to account for the fact that fixed-length public inputs are stored as extension field
     # elements. 
     dup
-    exec.constants::get_num_fixed_len_pi
+    movup.2
     mul.2
     sub
     # => [public_inputs_ptr, res_var_len_pi_reductions_ptr, ...]

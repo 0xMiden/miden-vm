@@ -17,8 +17,6 @@ use.std::crypto::stark::utils
 #!     the OOD evaluation frame is composed of elements in a quadratic extension field i.e. tuples.
 #!     Similarly, elements of the auxiliary trace are quadratic extension field elements. The random
 #!     values for computing random linear combinations are also in this extension field.
-#!   - The following procedure makes use of global memory address beyond 3 * 2^30 and these are
-#!     defined in `constants.masm`.
 #!
 #! Input: [D3, D2, D1, D0, log(trace_length), num_queries, grinding, num_constraints, trace_info, num_fixed_len_pi, ...]
 #! Output: [...]

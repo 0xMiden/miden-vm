@@ -120,7 +120,18 @@ fn variable_length_public_inputs(#[case] num_kernel_proc_digests: usize) {
     let num_queries = 27;
     let log_trace_len = 10;
     let grinding_bits = 16;
-    let initial_stack = vec![num_queries, log_trace_len, grinding_bits];
+    let num_constraints = 200;
+    let trace_info = 0x50010810;
+    let num_fixed_len_pi_padded = 40;
+    let mut initial_stack = vec![
+        log_trace_len,
+        num_queries,
+        grinding_bits,
+        num_constraints,
+        trace_info,
+        num_fixed_len_pi_padded,
+    ];
+    initial_stack.reverse();
 
     // Seeded random number generator for reproducibility
     let seed = [0_u8; 32];
@@ -173,7 +184,8 @@ fn variable_length_public_inputs(#[case] num_kernel_proc_digests: usize) {
         "
         use.std::crypto::stark::random_coin
         use.std::crypto::stark::constants
-        use.std::crypto::stark::public_inputs
+        use.std::crypto::miden_vm_verifier::public_inputs
+
         begin
             # 1) Initialize the FS transcript
             exec.random_coin::init_seed

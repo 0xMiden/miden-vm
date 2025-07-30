@@ -434,17 +434,6 @@ export.current_trace_row_ptr
     push.CURRENT_TRACE_ROW_PTR
 end
 
-# HELPER
-# =================================================================================================
-
-#! Overwrites the top stack word with zeros.
-export.zeroize_stack_word
-    exec.zero_word_ptr mem_loadw
-end
-
-# TODO(put in correct place)
-# =================================================================================================
-
 export.set_num_fixed_len_pi
     push.NUM_FIXED_LEN_PUBLIC_INPUTS_PTR mem_store
 end
@@ -497,3 +486,10 @@ export.get_dynamic_procedure_3_ptr
     push.DYNAMIC_PROCEDURE_3_PTR
 end
 
+# HELPER
+# =================================================================================================
+
+#! Overwrites the top stack word with zeros.
+export.zeroize_stack_word
+    exec.zero_word_ptr mem_loadw
+end
