@@ -85,7 +85,10 @@ Both `hash` and `hmerge` instructions are actually "macro-instructions" which ar
 
 - `hash`: `push.4.0.0.0 swapw push.0 dup.7 dup.7 dup.7 hperm dropw swapw dropw`.
 - `hmerge`: `padw swapw hperm dropw swapw dropw`.
+
 ### Circuits and polynomials
+
+The following instructions are designed mainly for use in recursive verification within the Miden VM, though they might be useful in other contexts e.g., polynomial evaluation.
 
 | Instruction                                | Stack_input                | Stack_output               | Notes                                                                                                                                                                                                                                                                                                                          |
 | ------------------------------------------ | -------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |

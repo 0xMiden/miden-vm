@@ -278,7 +278,7 @@ The stack is expected to be arranged as follows (from the top):
 
 The diagram below illustrates this graphically.
 
-![arithmeticcircuiteval](../../assets/design/stack/crypto_ops/EVALCIRCUIT.png)
+![evalcircuit](../../assets/design/stack/crypto_ops/EVALCIRCUIT.png)
 
 Calling the operation has no effect on the stack or on helper registers. Instead, the operation makes a request to the `ACE` chiplet using the chiplets' bus. More precisely, let 
 
