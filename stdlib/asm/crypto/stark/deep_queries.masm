@@ -83,6 +83,10 @@ proc.divide_and_add
     # => [eval1, eval0, Y, query_ptr, ...]
 end
 
+#! Compute the DEEP composition polynomial FRI queries.
+#!
+#! Input: [...]
+#! Output: [...]
 proc.compute_deep_composition_polynomial_queries
     exec.constants::get_dynamic_procedure_0_ptr dynexec
 end

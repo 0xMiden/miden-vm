@@ -187,7 +187,6 @@ proc.reduce_variable_length_public_inputs
     # stored temporarily and they will be over-written by, among other data, the result of reducing
     # the variable public inputs. 
 
-    #exec.public_inputs::reduce_var_len_public_inputs_groups
     exec.reduce_var_len_public_inputs_groups
     # => [next_var_len_pub_inputs_ptr, var_len_pub_inputs_res_ptr, ...]
 

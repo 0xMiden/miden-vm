@@ -245,8 +245,6 @@ proc.build_proof_context
     ## 4. number of auxiliary random values
     ## 5. trace length (this is already on the stack)
 
-    ## main segment width is 80 (0x50) and there are 1 (0x01) auxiliary segments
-    ## of width 8 (0x08) using 16 (0x10) random extension field elements
     movup.4
     swap
     ## field modulus bytes (2 field elements)

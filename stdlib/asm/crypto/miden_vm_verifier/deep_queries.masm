@@ -22,8 +22,6 @@ use.std::crypto::stark::deep_queries
 #!
 #! where:
 #! - Y is a "garbage" word.
-#!
-#! Cycles: 280
 proc.load_query_row
     # I) Process the main segment of the execution trace portion of the query
 
@@ -181,7 +179,6 @@ end
 #!
 #! Input: [...]
 #! Output: [...]
-#! Cycles: 386 + num_queries * 414
 export.compute_deep_composition_polynomial_queries
 
     exec.constants::get_fri_queries_address
