@@ -7,10 +7,10 @@ const.LEAF_DEPTH=64
 #! Inserts or removes a value associated with the given key. The leaf to which we're inserting is
 #! guaranteed to be empty.
 #!
-#! Inputs:  
+#! Inputs:
 #!   Operand stack: [V, K, R, ...]
 #!
-#! Outputs: 
+#! Outputs:
 #!   Operand stack: [V_old, R_new, ...]
 #!
 #! Cycles
@@ -34,7 +34,7 @@ proc.set_empty_leaf
         # (1 cycle)
         mtree_verify
         #=> [V (=ZERO), depth, K[3], R, K, ...]
-        
+
         # Prepare stack for return (X cycles)
         movup.4 drop movup.4 drop movupw.2 dropw
         #=> [V (=ZERO), R, ...]
@@ -73,7 +73,7 @@ end
 #! Inserts a value at the given key. The leaf to which we're inserting is
 #! guaranteed to hold a single key-value pair (provided on the advice stack).
 #!
-#! Inputs: 
+#! Inputs:
 #!   Operand stack: [V, K, R, ...]
 #!   Advice stack:  [K_in_leaf, V_in_leaf]
 #!
@@ -98,7 +98,7 @@ proc.insert_single_leaf
         # Leaf stays a "single" variant
 
         # (4 cycles)
-        dropw 
+        dropw
         # => [K, V_in_leaf, V, R]
 
         # Update advice map (3 cycles)
@@ -119,7 +119,7 @@ proc.insert_single_leaf
         mtree_set
         # => [NV_old, R_new, K, V_in_leaf]
 
-        # Confirm that claimed `V_in_leaf` from advice provider is correct by checking if 
+        # Confirm that claimed `V_in_leaf` from advice provider is correct by checking if
         # `[K, V_in_leaf]` hashes to `NV_old`
         # (33 cycles)
         movupw.2 dupw.3 hmerge assert_eqw
@@ -147,7 +147,7 @@ end
 #! Outputs:
 #!   Operand stack: [V_old, R_new, ...]
 #!
-#! Cycles: X 
+#! Cycles: X
 proc.remove_single_leaf
     # Push the leaf pre-image on stack
     # (0 cycles)
@@ -163,7 +163,7 @@ proc.remove_single_leaf
         # Keys match; we're removing the value associated with K
 
         # (4 cycles)
-        dropw 
+        dropw
         # => [K, V_in_leaf, V, R]
 
         # Update advice map (3 cycles)
@@ -179,16 +179,16 @@ proc.remove_single_leaf
 
         # (29 cycles)
         mtree_set
-        # => [NV_old, R_new, K, V_in_leaf, ...] 
+        # => [NV_old, R_new, K, V_in_leaf, ...]
 
         # Confirm that hmerge([K, V_in_leaf]) = NV_old
         # (33 cycles)
         movupw.2 dupw.3 hmerge assert_eqw
-        # => [R_new, V_in_leaf, ...] 
+        # => [R_new, V_in_leaf, ...]
 
         # Cleanup stack for return (1 cycle)
         swapw
-        # => [V_in_leaf, R_new, ...] 
+        # => [V_in_leaf, R_new, ...]
     else
         # Keys don't match; this is a no-op
         # We need to ensure that hash([K_in_leaf, V_in_leaf]) = NV;
@@ -240,13 +240,13 @@ proc.set_single_leaf
     # Check if we're inserting or removing a value
     # (X cycles)
     padw eqw
-    # => [V==ZERO, ZERO, V, K, R, ...] 
+    # => [V==ZERO, ZERO, V, K, R, ...]
     if.true
         # we're removing the value associated with K (if any)
 
         # (4 cycles)
-        dropw 
-        # => [V, K, R, ...] 
+        dropw
+        # => [V, K, R, ...]
 
         # (X cycles)
         exec.remove_single_leaf
@@ -255,8 +255,8 @@ proc.set_single_leaf
         # we're inserting the key/value pair
 
         # (4 cycles)
-        dropw 
-        # => [V, K, R, ...] 
+        dropw
+        # => [V, K, R, ...]
 
         # (X cycles)
         exec.insert_single_leaf
