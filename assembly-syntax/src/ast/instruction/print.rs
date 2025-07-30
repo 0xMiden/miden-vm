@@ -267,7 +267,7 @@ impl PrettyPrint for Instruction {
             Self::FriExt2Fold4 => const_text("fri_ext2fold4"),
             Self::HornerBase => const_text("horner_eval_base"),
             Self::HornerExt => const_text("horner_eval_ext"),
-            Self::ArithmeticCircuitEval => const_text("arithmetic_circuit_eval"),
+            Self::EvalCircuit => const_text("eval_circuit"),
 
             // ----- exec / call ------------------------------------------------------------------
             Self::Exec(InvocationTarget::MastRoot(root)) => flatten(

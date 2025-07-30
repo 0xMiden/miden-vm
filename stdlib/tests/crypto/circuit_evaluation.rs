@@ -2,7 +2,7 @@ use miden_core::{Felt, FieldElement, ONE, QuadFelt, ZERO};
 use miden_utils_testing::rand::rand_value;
 
 #[test]
-fn arithmetic_circuit_eval_and_execute() {
+fn circuit_evaluation_prove_verify() {
     let num_repetitions = 20;
     let pointer = 1 << 16;
 
@@ -24,7 +24,7 @@ fn arithmetic_circuit_eval_and_execute() {
 
             # Set up the inputs to the arithmetic circuit evaluation op and execute it
             push.NUM_EVAL_ROWS push.NUM_READ_ROWS push.{pointer}
-            arithmetic_circuit_eval
+            eval_circuit 
 
             # Clean up the stack
             drop drop drop

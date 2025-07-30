@@ -25,7 +25,7 @@ use miden_air::{
     },
 };
 use miden_core::{
-    Kernel, ONE, OPCODE_ACE, OPCODE_CALL, OPCODE_DYN, OPCODE_DYNCALL, OPCODE_END,
+    Kernel, ONE, OPCODE_CALL, OPCODE_DYN, OPCODE_DYNCALL, OPCODE_END, OPCODE_EVALCIRCUIT,
     OPCODE_HORNERBASE, OPCODE_HORNEREXT, OPCODE_HPERM, OPCODE_JOIN, OPCODE_LOOP, OPCODE_MLOAD,
     OPCODE_MLOADW, OPCODE_MPVERIFY, OPCODE_MRUPDATE, OPCODE_MSTORE, OPCODE_MSTOREW, OPCODE_MSTREAM,
     OPCODE_PIPE, OPCODE_RESPAN, OPCODE_SPAN, OPCODE_SPLIT, OPCODE_SYSCALL, OPCODE_U32AND,
@@ -132,7 +132,7 @@ where
             OPCODE_MPVERIFY => build_mpverify_request(main_trace, alphas, row, debugger),
             OPCODE_MRUPDATE => build_mrupdate_request(main_trace, alphas, row, debugger),
             OPCODE_PIPE => build_pipe_request(main_trace, alphas, row, debugger),
-            OPCODE_ACE => build_ace_chiplet_requests(main_trace, alphas, row, debugger),
+            OPCODE_EVALCIRCUIT => build_ace_chiplet_requests(main_trace, alphas, row, debugger),
             _ => E::ONE,
         }
     }

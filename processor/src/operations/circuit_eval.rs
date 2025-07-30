@@ -19,10 +19,7 @@ impl Process {
     ///
     /// Stack transition:
     /// [ptr, num_read_rows, num_eval_rows, ...] -> [ptr, num_read_rows, num_eval_rows, ...]
-    pub fn arithmetic_circuit_eval(
-        &mut self,
-        err_ctx: &impl ErrorContext,
-    ) -> Result<(), ExecutionError> {
+    pub fn op_eval_circuit(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
         let num_eval_rows = self.stack.get(2);
         let num_read_rows = self.stack.get(1);
         let ptr = self.stack.get(0);

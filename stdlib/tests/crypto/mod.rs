@@ -1,8 +1,8 @@
 #[cfg(feature = "std")]
 mod falcon;
 
-mod arithmetic_circuit_eval;
 mod blake3;
+mod circuit_evaluation;
 mod ecdsa_secp256k1;
 mod elgamal;
 mod fri;

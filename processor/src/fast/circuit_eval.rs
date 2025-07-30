@@ -27,7 +27,7 @@ impl FastProcessor {
     ///
     /// Stack transition:
     /// [ptr, num_read_rows, num_eval_rows, ...] -> [ptr, num_read_rows, num_eval_rows, ...]
-    pub fn arithmetic_circuit_eval(
+    pub fn op_eval_circuit(
         &mut self,
         op_idx: usize,
         err_ctx: &impl ErrorContext,
