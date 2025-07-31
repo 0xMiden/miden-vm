@@ -1,6 +1,9 @@
 use alloc::sync::Arc;
 
-use miden_assembly_syntax::debuginfo::{SourceManager, SourceSpan, Spanned};
+use miden_assembly_syntax::{
+    ast::types::FunctionType,
+    debuginfo::{SourceManager, SourceSpan, Spanned},
+};
 use miden_core::{Word, mast::MastNodeId};
 
 use super::GlobalProcedureIndex;
@@ -18,6 +21,7 @@ pub struct ProcedureContext {
     gid: GlobalProcedureIndex,
     span: SourceSpan,
     name: QualifiedProcedureName,
+    signature: Option<Arc<FunctionType>>,
     visibility: Visibility,
     is_kernel: bool,
     num_locals: u16,
@@ -30,6 +34,7 @@ impl ProcedureContext {
         gid: GlobalProcedureIndex,
         name: QualifiedProcedureName,
         visibility: Visibility,
+        signature: Option<FunctionType>,
         is_kernel: bool,
         source_manager: Arc<dyn SourceManager>,
     ) -> Self {
@@ -39,6 +44,7 @@ impl ProcedureContext {
             span: name.span(),
             name,
             visibility,
+            signature: signature.map(Arc::new),
             is_kernel,
             num_locals: 0,
         }
@@ -65,6 +71,14 @@ impl ProcedureContext {
 
     pub fn name(&self) -> &QualifiedProcedureName {
         &self.name
+    }
+
+    pub fn signature(&self) -> Option<Arc<FunctionType>> {
+        self.signature.clone()
+    }
+
+    pub fn set_signature(&mut self, signature: Option<Arc<FunctionType>>) {
+        self.signature = signature;
     }
 
     pub fn num_locals(&self) -> u16 {
@@ -103,8 +117,15 @@ impl ProcedureContext {
     /// forest under `mast_node_id` must have the digest equal to the `mast_root`.
     /// </div>
     pub fn into_procedure(self, mast_root: Word, mast_node_id: MastNodeId) -> Procedure {
-        Procedure::new(self.name, self.visibility, self.num_locals as u32, mast_root, mast_node_id)
-            .with_span(self.span)
+        Procedure::new(
+            self.name,
+            self.visibility,
+            self.signature,
+            self.num_locals as u32,
+            mast_root,
+            mast_node_id,
+        )
+        .with_span(self.span)
     }
 }
 
@@ -130,6 +151,7 @@ impl Spanned for ProcedureContext {
 pub struct Procedure {
     span: SourceSpan,
     path: QualifiedProcedureName,
+    signature: Option<Arc<FunctionType>>,
     visibility: Visibility,
     num_locals: u32,
     /// The MAST root of the procedure.
@@ -144,6 +166,7 @@ impl Procedure {
     fn new(
         path: QualifiedProcedureName,
         visibility: Visibility,
+        signature: Option<Arc<FunctionType>>,
         num_locals: u32,
         mast_root: Word,
         body_node_id: MastNodeId,
@@ -152,6 +175,7 @@ impl Procedure {
             span: SourceSpan::default(),
             path,
             visibility,
+            signature,
             num_locals,
             mast_root,
             body_node_id,
@@ -186,6 +210,11 @@ impl Procedure {
     /// Returns a reference to the fully-qualified module path of this procedure
     pub fn path(&self) -> &LibraryPath {
         &self.path.module
+    }
+
+    /// Returns a reference to the type signature of this procedure
+    pub fn signature(&self) -> Option<Arc<FunctionType>> {
+        self.signature.clone()
     }
 
     /// Returns the number of memory locals reserved by the procedure.

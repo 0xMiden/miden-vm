@@ -311,13 +311,15 @@ proc.reduce_kernel_digests
 
     drop
     exec.constants::tmp2 mem_load movdn.2
-    # => [prod_acc1, prod_acc0, digests_ptr, ...]
 
+    # since we are initializing the bus with "requests", we should invert the reduced result
+    ext2inv
+    # => [prod_acc1, prod_acc0, digests_ptr, ...]
 end
 
 #! Computes the address where the public inputs are to be stored and returns it.
 #!
-#! In order to be able to call `arithmetic_circuit_eval`, we need to layout the inputs to
+#! In order to be able to call `eval_circuit`, we need to layout the inputs to
 #! the constraint evaluation circuit in a contiguous region of memory (called `READ` section
 #! in the ACE chiplet documentation) right before the region of memory storing the circuit
 #! description (called `EVAL` section in the ACE chiplet documentation).

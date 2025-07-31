@@ -213,7 +213,7 @@ pub enum Token<'input> {
     Assertz,
     AssertEq,
     AssertEqw,
-    ArithmeticCircuitEval,
+    EvalCircuit,
     Begin,
     Breakpoint,
     Caller,
@@ -402,7 +402,7 @@ impl fmt::Display for Token<'_> {
             Token::Assertz => write!(f, "assertz"),
             Token::AssertEq => write!(f, "assert_eq"),
             Token::AssertEqw => write!(f, "assert_eqw"),
-            Token::ArithmeticCircuitEval => write!(f, "arithmetic_circuit_eval"),
+            Token::EvalCircuit => write!(f, "eval_circuit"),
             Token::Begin => write!(f, "begin"),
             Token::Breakpoint => write!(f, "breakpoint"),
             Token::Caller => write!(f, "caller"),
@@ -598,7 +598,7 @@ impl<'input> Token<'input> {
                 | Token::Assertz
                 | Token::AssertEq
                 | Token::AssertEqw
-                | Token::ArithmeticCircuitEval
+                | Token::EvalCircuit
                 | Token::Breakpoint
                 | Token::Caller
                 | Token::Call
@@ -726,7 +726,7 @@ impl<'input> Token<'input> {
         ("add", Token::Add),
         ("adv", Token::Adv),
         ("adv_map", Token::AdvMap),
-        ("arithmetic_circuit_eval", Token::ArithmeticCircuitEval),
+        ("eval_circuit", Token::EvalCircuit),
         ("insert_hdword", Token::InsertHdword),
         ("insert_hdword_d", Token::InsertHdwordWithDomain),
         ("insert_hperm", Token::InsertHperm),

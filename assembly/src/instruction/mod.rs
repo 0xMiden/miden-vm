@@ -404,7 +404,7 @@ impl Assembler {
             )?,
             Instruction::LocLoadW(v) => {
                 let local_addr = v.expect_value();
-                if local_addr % WORD_SIZE as u16 != 0 {
+                if !local_addr.is_multiple_of(WORD_SIZE as u16) {
                     return Err(RelatedLabel::error("invalid local word index")
                         .with_help("the index to a local word must be a multiple of 4")
                         .with_labeled_span(v.span(), "this index is not word-aligned")
@@ -451,7 +451,7 @@ impl Assembler {
             )?,
             Instruction::LocStoreW(v) => {
                 let local_addr = v.expect_value();
-                if local_addr % WORD_SIZE as u16 != 0 {
+                if !local_addr.is_multiple_of(WORD_SIZE as u16) {
                     return Err(RelatedLabel::error("invalid local word index")
                         .with_help("the index to a local word must be a multiple of 4")
                         .with_labeled_span(v.span(), "this index is not word-aligned")
@@ -491,8 +491,8 @@ impl Assembler {
             Instruction::FriExt2Fold4 => block_builder.push_op(FriE2F4),
             Instruction::HornerBase => block_builder.push_op(HornerBase),
             Instruction::HornerExt => block_builder.push_op(HornerExt),
-            Instruction::ArithmeticCircuitEval => {
-                block_builder.push_op(Operation::ArithmeticCircuitEval);
+            Instruction::EvalCircuit => {
+                block_builder.push_op(Operation::EvalCircuit);
             },
 
             // ----- exec/call instructions -------------------------------------------------------

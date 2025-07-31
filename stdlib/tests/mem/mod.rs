@@ -31,8 +31,7 @@ fn test_memcopy_words() {
     let program: Program =
         assembler.assemble_program(source).expect("Failed to compile test source.");
 
-    let mut host = DefaultHost::default();
-    host.load_mast_forest(stdlib.mast_forest().clone()).unwrap();
+    let mut host = DefaultHost::default().with_library(&stdlib).unwrap();
 
     let mut process = Process::new(
         program.kernel().clone(),

@@ -138,7 +138,7 @@ export.constraint_evaluation_check
     adv.push_mapval
     exec.constants::get_arithmetic_circuit_ptr
     padw padw padw
-    repeat.12
+    repeat.14
         adv_pipe
         hperm
     end
@@ -147,7 +147,7 @@ export.constraint_evaluation_check
     assert_eqw
     # => [...]
 
-    # 3) Set up the inputs to the "arithmetic_circuit_eval" op. Namely:
+    # 3) Set up the inputs to the "eval_circuit" op. Namely:
     #    1. a pointer to the inputs of the circuit in memory,
     #    2. the number of inputs to the circuit,
     #    3. the number of evaluation gates in the circuit.
@@ -157,8 +157,8 @@ export.constraint_evaluation_check
     # => [...]
 
     # 4) Perform the constraint evaluation check by checking that the circuit evaluates to zero, which
-    #    boils down to the "arithmetic_circuit_eval" returning.
-    # arithmetic_circuit_eval
+    #    boils down to the "eval_circuit" returning.
+    eval_circuit
 
     # 5) Clean up the stack.
     drop drop drop

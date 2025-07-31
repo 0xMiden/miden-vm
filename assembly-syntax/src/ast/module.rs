@@ -7,10 +7,11 @@ use miden_core::{
 };
 use miden_debug_types::{SourceFile, SourceSpan, Span, Spanned};
 use miden_utils_diagnostics::Report;
+use midenc_hir_type::FunctionType;
 
 use super::{
-    DocString, Export, Import, LocalNameResolver, ProcedureIndex, ProcedureName,
-    QualifiedProcedureName, ResolvedProcedure,
+    Constant, DocString, EnumType, Export, Import, LocalNameResolver, ProcedureIndex,
+    ProcedureName, QualifiedProcedureName, ResolvedProcedure, TypeAlias, TypeDecl, Variant,
 };
 use crate::{
     LibraryNamespace, LibraryPath,
@@ -122,6 +123,10 @@ pub struct Module {
     path: LibraryPath,
     /// The kind of module this represents.
     kind: ModuleKind,
+    /// The constants defined in the module body.
+    pub(crate) constants: Vec<Constant>,
+    /// The types defined in the module body.
+    pub(crate) types: Vec<TypeDecl>,
     /// The imports defined in the module body.
     pub(crate) imports: Vec<Import>,
     /// The procedures (defined or re-exported) in the module body.
@@ -155,6 +160,8 @@ impl Module {
             docs: None,
             path,
             kind,
+            constants: Default::default(),
+            types: Default::default(),
             imports: Default::default(),
             procedures: Default::default(),
             advice_map: Default::default(),
@@ -196,6 +203,70 @@ impl Module {
     /// Like [Module::with_span], but does not require ownership of the [Module].
     pub fn set_span(&mut self, span: SourceSpan) {
         self.span = span;
+    }
+
+    /// Defines a constant, raising an error if the constant conflicts with a previous definition
+    pub fn define_constant(&mut self, constant: Constant) -> Result<(), SemanticAnalysisError> {
+        for c in self.constants.iter() {
+            if c.name == constant.name {
+                return Err(SemanticAnalysisError::SymbolConflict {
+                    span: constant.span,
+                    prev_span: c.span,
+                });
+            }
+        }
+        self.constants.push(constant);
+        Ok(())
+    }
+
+    /// Defines a type alias, raising an error if the alias conflicts with a previous definition
+    pub fn define_type(&mut self, ty: TypeAlias) -> Result<(), SemanticAnalysisError> {
+        for t in self.types.iter() {
+            if t.name() == &ty.name {
+                return Err(SemanticAnalysisError::SymbolConflict {
+                    span: ty.span(),
+                    prev_span: t.span(),
+                });
+            }
+        }
+        self.types.push(ty.into());
+        Ok(())
+    }
+
+    /// Define a new enum type `ty`
+    ///
+    /// Returns `Err` if:
+    ///
+    /// * A type alias with the same name as the enum type is already defined
+    /// * Two or more variants of the given enum type have the same name
+    /// * A constant (including those implicitly defined by variants of other enums in this module)
+    ///   with the same name as any of the variants of the given enum type, is already defined
+    /// * The concrete type of the enumeration is not an integral type
+    pub fn define_enum(&mut self, ty: EnumType) -> Result<(), SemanticAnalysisError> {
+        if !ty.ty().is_integer() {
+            return Err(SemanticAnalysisError::InvalidEnumRepr { span: ty.span() });
+        }
+
+        if let Some(prev) = self.types.iter().find(|t| t.name() == ty.name()) {
+            return Err(SemanticAnalysisError::SymbolConflict {
+                span: ty.span(),
+                prev_span: prev.span(),
+            });
+        }
+
+        for variant in ty.variants() {
+            let Variant { span, docs, name, discriminant } = variant;
+            self.define_constant(Constant {
+                span: *span,
+                docs: docs.clone(),
+                name: name.clone(),
+                value: discriminant.clone(),
+            })?;
+        }
+
+        self.types.push(ty.into());
+
+        Ok(())
     }
 
     /// Defines a procedure, raising an error if the procedure is invalid, or conflicts with a
@@ -322,6 +393,26 @@ impl Module {
         &self.advice_map
     }
 
+    /// Get an iterator over the constants defined in this module.
+    pub fn constants(&self) -> core::slice::Iter<'_, Constant> {
+        self.constants.iter()
+    }
+
+    /// Same as [Module::constants], but returns mutable references.
+    pub fn constants_mut(&mut self) -> core::slice::IterMut<'_, Constant> {
+        self.constants.iter_mut()
+    }
+
+    /// Get an iterator over the types defined in this module.
+    pub fn types(&self) -> core::slice::Iter<'_, TypeDecl> {
+        self.types.iter()
+    }
+
+    /// Same as [Module::types], but returns mutable references.
+    pub fn types_mut(&mut self) -> core::slice::IterMut<'_, TypeDecl> {
+        self.types.iter_mut()
+    }
+
     /// Get an iterator over the procedures defined in this module.
     ///
     /// The entity returned is an [Export], which abstracts over locally-defined procedures and
@@ -353,6 +444,11 @@ impl Module {
 
             Some((proc_idx, fqn))
         })
+    }
+
+    /// Gets the type signature for the given [ProcedureIndex], if available.
+    pub fn procedure_signature(&self, id: ProcedureIndex) -> Option<&FunctionType> {
+        self.procedures[id.as_usize()].signature()
     }
 
     /// Get an iterator over the imports declared in this module.
@@ -488,6 +584,8 @@ impl PartialEq for Module {
         self.kind == other.kind
             && self.path == other.path
             && self.docs == other.docs
+            && self.constants == other.constants
+            && self.types == other.types
             && self.imports == other.imports
             && self.procedures == other.procedures
     }
@@ -500,6 +598,8 @@ impl fmt::Debug for Module {
             .field("docs", &self.docs)
             .field("path", &self.path)
             .field("kind", &self.kind)
+            .field("constants", &self.constants)
+            .field("types", &self.types)
             .field("imports", &self.imports)
             .field("procedures", &self.procedures)
             .finish()
@@ -541,6 +641,17 @@ impl crate::prettier::PrettyPrint for Module {
         }
 
         if !self.imports.is_empty() {
+            doc += nl();
+        }
+
+        for (i, constant) in self.constants.iter().enumerate() {
+            if i > 0 {
+                doc += nl();
+            }
+            doc += constant.render();
+        }
+
+        if !self.constants.is_empty() {
             doc += nl();
         }
 

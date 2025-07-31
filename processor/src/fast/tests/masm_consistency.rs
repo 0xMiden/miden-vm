@@ -244,7 +244,7 @@ fn test_masm_consistency(
 
     let mut host = DefaultHost::default();
     if let Some(kernel_lib) = &kernel_lib {
-        host.load_mast_forest(kernel_lib.mast_forest().clone()).unwrap();
+        host.load_library(kernel_lib.mast_forest()).unwrap();
     }
 
     // fast processor
@@ -324,7 +324,7 @@ fn test_masm_errors_consistency(
 
     let mut host = DefaultHost::default();
     if let Some(kernel_lib) = &kernel_lib {
-        host.load_mast_forest(kernel_lib.mast_forest().clone()).unwrap();
+        host.load_library(kernel_lib.mast_forest()).unwrap();
     }
 
     // fast processor

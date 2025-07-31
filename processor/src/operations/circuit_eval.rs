@@ -12,31 +12,21 @@ impl Process {
     ///       1. Inputs to the circuit which are elements in the quadratic extension field,
     ///       2. Constants of the circuit which are elements in the quadratic extension field,
     ///
-    ///    b. `Eval` section, which contains the encodings of the evaluation gates of the circuit.
-    ///    Each gate is encoded as a single base field element.
-    /// 2. the number of rows in the `READ` section,
-    /// 3. the number of rows in the `EVAL` section,
+    ///    b. `Eval` section, which contains the encodings of the evaluation gates of the circuit,
+    ///    where each gate is encoded as a single base field element.
+    /// 2. the number of quadratic extension field elements read in the `READ` section,
+    /// 3. the number of field elements, one base field element per gate, in the `EVAL` section,
     ///
     /// Stack transition:
-    /// [ptr, num_read_rows, num_eval_rows, ...] -> [ptr, num_read_rows, num_eval_rows, ...]
-    pub fn arithmetic_circuit_eval(
-        &mut self,
-        err_ctx: &impl ErrorContext,
-    ) -> Result<(), ExecutionError> {
-        let num_eval_rows = self.stack.get(2);
-        let num_read_rows = self.stack.get(1);
+    /// [ptr, num_read, num_eval, ...] -> [ptr, num_read, num_eval, ...]
+    pub fn op_eval_circuit(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
+        let num_eval = self.stack.get(2);
+        let num_read = self.stack.get(1);
         let ptr = self.stack.get(0);
         let ctx = self.system.ctx();
         let clk = self.system.clk();
-        let circuit_evaluation = eval_circuit(
-            ctx,
-            ptr,
-            clk,
-            num_read_rows,
-            num_eval_rows,
-            &mut self.chiplets.memory,
-            err_ctx,
-        )?;
+        let circuit_evaluation =
+            eval_circuit(ctx, ptr, clk, num_read, num_eval, &mut self.chiplets.memory, err_ctx)?;
         self.chiplets.ace.add_circuit_evaluation(clk, circuit_evaluation);
 
         self.stack.copy_state(0);

@@ -50,8 +50,8 @@ impl ProvingOptions {
         16,
         FieldExtension::Quadratic,
         4,
-        7,
-        BatchingMethod::Horner,
+        127,
+        BatchingMethod::Algebraic,
         BatchingMethod::Horner,
     );
 
@@ -87,7 +87,7 @@ impl ProvingOptions {
             field_extension,
             fri_folding_factor,
             fri_remainder_max_degree,
-            BatchingMethod::Horner,
+            BatchingMethod::Algebraic,
             BatchingMethod::Horner,
         );
         let exec_options = ExecutionOptions::default();
@@ -209,7 +209,7 @@ pub struct ExecutionOptions {
 impl Default for ExecutionOptions {
     fn default() -> Self {
         ExecutionOptions {
-            max_cycles: u32::MAX,
+            max_cycles: Self::MAX_CYCLES,
             expected_cycles: MIN_TRACE_LEN as u32,
             enable_tracing: false,
             enable_debugging: false,
@@ -218,29 +218,49 @@ impl Default for ExecutionOptions {
 }
 
 impl ExecutionOptions {
+    // CONSTANTS
+    // --------------------------------------------------------------------------------------------
+
+    /// The maximum number of VM cycles a program is allowed to take.
+    pub const MAX_CYCLES: u32 = 1 << 29;
+
     // CONSTRUCTOR
     // --------------------------------------------------------------------------------------------
 
     /// Creates a new instance of [ExecutionOptions] from the specified parameters.
     ///
-    /// If the `max_cycles` is `None` the maximum number of cycles will be set to `u32::MAX`
+    /// If the `max_cycles` is `None` the maximum number of cycles will be set to 2^29.
     pub fn new(
         max_cycles: Option<u32>,
         expected_cycles: u32,
         enable_tracing: bool,
         enable_debugging: bool,
     ) -> Result<Self, ExecutionOptionsError> {
-        let max_cycles = max_cycles.unwrap_or(u32::MAX);
-        if max_cycles < MIN_TRACE_LEN as u32 {
-            return Err(ExecutionOptionsError::MaxCycleNumTooSmall(expected_cycles));
-        }
+        // Validate max cycles.
+        let max_cycles = if let Some(max_cycles) = max_cycles {
+            if max_cycles > Self::MAX_CYCLES {
+                return Err(ExecutionOptionsError::MaxCycleNumTooBig {
+                    max_cycles,
+                    max_cycles_limit: Self::MAX_CYCLES,
+                });
+            }
+            if max_cycles < MIN_TRACE_LEN as u32 {
+                return Err(ExecutionOptionsError::MaxCycleNumTooSmall {
+                    max_cycles,
+                    min_cycles_limit: MIN_TRACE_LEN,
+                });
+            }
+            max_cycles
+        } else {
+            Self::MAX_CYCLES
+        };
+        // Validate expected cycles.
         if max_cycles < expected_cycles {
             return Err(ExecutionOptionsError::ExpectedCyclesTooBig {
                 max_cycles,
                 expected_cycles,
             });
         }
-
         // Round up the expected number of cycles to the next power of two. If it is smaller than
         // MIN_TRACE_LEN -- pad expected number to it.
         let expected_cycles = expected_cycles.next_power_of_two().max(MIN_TRACE_LEN as u32);

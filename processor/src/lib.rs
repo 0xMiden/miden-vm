@@ -26,12 +26,14 @@ pub use miden_core::{
 use miden_core::{
     Decorator, DecoratorIterator, FieldElement, WORD_SIZE,
     mast::{
-        BasicBlockNode, CallNode, DynNode, JoinNode, LoopNode, OP_GROUP_SIZE, OpBatch, SplitNode,
+        BasicBlockNode, CallNode, DynNode, ExternalNode, JoinNode, LoopNode, OP_GROUP_SIZE,
+        OpBatch, SplitNode,
     },
 };
 use miden_debug_types::{DefaultSourceManager, SourceManager, SourceSpan};
-use utils::resolve_external_node;
 pub use winter_prover::matrix::ColMatrix;
+
+pub(crate) mod continuation_stack;
 
 pub mod fast;
 use fast::FastProcessState;
@@ -53,8 +55,10 @@ use range::RangeChecker;
 
 mod host;
 pub use host::{
-    AsyncHost, BaseHost, DefaultHost, MastForestStore, MemMastForestStore, SyncHost,
+    AsyncHost, BaseHost, MastForestStore, MemMastForestStore, SyncHost,
     advice::{AdviceError, AdviceInputs, AdviceProvider},
+    default::{DefaultDebugHandler, DefaultHost, HostLibrary},
+    handlers::{DebugHandler, EventError, EventHandler, EventHandlerRegistry},
 };
 
 mod chiplets;
@@ -315,7 +319,7 @@ impl Process {
         }
 
         self.advice
-            .merge_advice_map(program.mast_forest().advice_map())
+            .extend_map(program.mast_forest().advice_map())
             .map_err(|err| ExecutionError::advice_error(err, RowIndex::from(0), &()))?;
 
         self.execute_mast_node(program.entrypoint(), &program.mast_forest().clone(), host)?;
@@ -360,8 +364,7 @@ impl Process {
                 )?
             },
             MastNode::External(external_node) => {
-                let (root_id, mast_forest) =
-                    resolve_external_node(external_node, &mut self.advice, host)?;
+                let (root_id, mast_forest) = self.resolve_external_node(external_node, host)?;
 
                 self.execute_mast_node(root_id, &mast_forest, host)?;
             },
@@ -525,6 +528,15 @@ impl Process {
                 let root_id = mast_forest
                     .find_procedure_root(callee_hash)
                     .ok_or(ExecutionError::malfored_mast_forest_in_host(callee_hash, &()))?;
+
+                // Merge the advice map of this forest into the advice provider.
+                // Note that the map may be merged multiple times if a different procedure from the
+                // same forest is called.
+                // For now, only compiled libraries contain non-empty advice maps, so for most
+                // cases, this call will be cheap.
+                self.advice
+                    .extend_map(mast_forest.advice_map())
+                    .map_err(|err| ExecutionError::advice_error(err, self.system.clk(), &()))?;
 
                 self.execute_mast_node(root_id, &mast_forest, host)?
             },
@@ -715,6 +727,45 @@ impl Process {
             },
         };
         Ok(())
+    }
+
+    /// Resolves an external node reference to a procedure root using the [`MastForest`] store in
+    /// the provided host.
+    ///
+    /// The [`MastForest`] for the procedure is cached to avoid additional queries to the host.
+    fn resolve_external_node(
+        &mut self,
+        external_node: &ExternalNode,
+        host: &impl SyncHost,
+    ) -> Result<(MastNodeId, Arc<MastForest>), ExecutionError> {
+        let node_digest = external_node.digest();
+
+        let mast_forest = host
+            .get_mast_forest(&node_digest)
+            .ok_or(ExecutionError::no_mast_forest_with_procedure(node_digest, &()))?;
+
+        // We limit the parts of the program that can be called externally to procedure
+        // roots, even though MAST doesn't have that restriction.
+        let root_id = mast_forest
+            .find_procedure_root(node_digest)
+            .ok_or(ExecutionError::malfored_mast_forest_in_host(node_digest, &()))?;
+
+        // if the node that we got by looking up an external reference is also an External
+        // node, we are about to enter into an infinite loop - so, return an error
+        if mast_forest[root_id].is_external() {
+            return Err(ExecutionError::CircularExternalNode(node_digest));
+        }
+
+        // Merge the advice map of this forest into the advice provider.
+        // Note that the map may be merged multiple times if a different procedure from the same
+        // forest is called.
+        // For now, only compiled libraries contain non-empty advice maps, so for most cases,
+        // this call will be cheap.
+        self.advice
+            .extend_map(mast_forest.advice_map())
+            .map_err(|err| ExecutionError::advice_error(err, self.system.clk(), &()))?;
+
+        Ok((root_id, mast_forest))
     }
 
     // PUBLIC ACCESSORS

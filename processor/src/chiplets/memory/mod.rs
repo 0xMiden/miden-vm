@@ -196,7 +196,7 @@ impl Memory {
             .as_int()
             .try_into()
             .map_err(|_| MemoryError::address_out_of_bounds(addr.as_int(), err_ctx))?;
-        if addr % WORD_SIZE as u32 != 0 {
+        if !addr.is_multiple_of(WORD_SIZE as u32) {
             return Err(MemoryError::unaligned_word_access(addr, ctx, clk.into(), err_ctx));
         }
 
@@ -243,7 +243,7 @@ impl Memory {
             .as_int()
             .try_into()
             .map_err(|_| MemoryError::address_out_of_bounds(addr.as_int(), err_ctx))?;
-        if addr % WORD_SIZE as u32 != 0 {
+        if !addr.is_multiple_of(WORD_SIZE as u32) {
             return Err(MemoryError::unaligned_word_access(addr, ctx, clk.into(), err_ctx));
         }
 

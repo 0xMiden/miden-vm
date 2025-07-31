@@ -20,20 +20,20 @@ impl FastProcessor {
     ///       1. Inputs to the circuit which are elements in the quadratic extension field,
     ///       2. Constants of the circuit which are elements in the quadratic extension field,
     ///
-    ///    b. `Eval` section, which contains the encodings of the evaluation gates of the circuit.
-    ///    Each gate is encoded as a single base field element.
-    /// 2. the number of rows in the `READ` section,
-    /// 3. the number of rows in the `EVAL` section,
+    ///    b. `Eval` section, which contains the encodings of the evaluation gates of the circuit,
+    ///    where each gate is encoded as a single base field element.
+    /// 2. the number of quadratic extension field elements read in the `READ` section,
+    /// 3. the number of field elements, one base field element per gate, in the `EVAL` section,
     ///
     /// Stack transition:
-    /// [ptr, num_read_rows, num_eval_rows, ...] -> [ptr, num_read_rows, num_eval_rows, ...]
-    pub fn arithmetic_circuit_eval(
+    /// [ptr, num_read, num_eval, ...] -> [ptr, num_read, num_eval, ...]
+    pub fn op_eval_circuit(
         &mut self,
         op_idx: usize,
         err_ctx: &impl ErrorContext,
     ) -> Result<(), ExecutionError> {
-        let num_eval_rows = self.stack_get(2);
-        let num_read_rows = self.stack_get(1);
+        let num_eval = self.stack_get(2);
+        let num_read = self.stack_get(1);
         let ptr = self.stack_get(0);
         let ctx = self.ctx;
         let clk = self.clk;
@@ -41,8 +41,8 @@ impl FastProcessor {
             ctx,
             ptr,
             clk,
-            num_read_rows,
-            num_eval_rows,
+            num_read,
+            num_eval,
             &mut self.memory,
             op_idx,
             err_ctx,
@@ -79,13 +79,13 @@ pub fn eval_circuit_fast_(
     // Ensure vars and instructions are word-aligned and non-empty. Note that variables are
     // quadratic extension field elements while instructions are encoded as base field elements.
     // Hence we can pack 2 variables and 4 instructions per word.
-    if num_vars % 2 != 0 || num_vars == 0 {
+    if !num_vars.is_multiple_of(2) || num_vars == 0 {
         return Err(ExecutionError::failed_arithmetic_evaluation(
             err_ctx,
             AceError::NumVarIsNotWordAlignedOrIsEmpty(num_vars),
         ));
     }
-    if num_eval % 4 != 0 || num_eval == 0 {
+    if !num_eval.is_multiple_of(4) || num_eval == 0 {
         return Err(ExecutionError::failed_arithmetic_evaluation(
             err_ctx,
             AceError::NumEvalIsNotWordAlignedOrIsEmpty(num_eval),

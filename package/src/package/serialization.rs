@@ -34,9 +34,13 @@
 //!       - `name` (`String`)
 //!       - `digest` (`Word`)
 
-use alloc::{collections::BTreeSet, format, string::String, sync::Arc, vec::Vec};
+use alloc::{collections::BTreeMap, format, string::String, sync::Arc, vec::Vec};
 
-use miden_assembly_syntax::{Library, ast::QualifiedProcedureName};
+use miden_assembly_syntax::{
+    Library,
+    ast::QualifiedProcedureName,
+    library::{FunctionTypeDeserializer, FunctionTypeSerializer},
+};
 use miden_core::{
     Program, Word,
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
@@ -59,7 +63,7 @@ const MAGIC_LIBRARY: &[u8; 4] = b"LIB\0";
 /// The format version.
 ///
 /// If future modifications are made to this format, the version should be incremented by 1.
-const VERSION: [u8; 3] = [0, 0, 0];
+const VERSION: [u8; 3] = [1, 0, 0];
 
 // PACKAGE SERIALIZATION/DESERIALIZATION
 // ================================================================================================
@@ -163,14 +167,14 @@ impl Deserializable for MastArtifact {
 impl Serializable for PackageManifest {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         // Write exports
-        target.write_usize(self.exports.len());
-        for export in &self.exports {
+        target.write_usize(self.num_exports());
+        for export in self.exports() {
             export.write_into(target);
         }
 
         // Write dependencies
-        target.write_usize(self.dependencies.len());
-        for dep in &self.dependencies {
+        target.write_usize(self.num_dependencies());
+        for dep in self.dependencies() {
             dep.write_into(target);
         }
     }
@@ -180,9 +184,10 @@ impl Deserializable for PackageManifest {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         // Read exports
         let exports_len = source.read_usize()?;
-        let mut exports = BTreeSet::new();
+        let mut exports = BTreeMap::new();
         for _ in 0..exports_len {
-            exports.insert(PackageExport::read_from(source)?);
+            let export = PackageExport::read_from(source)?;
+            exports.insert(export.name.clone(), export);
         }
 
         // Read dependencies
@@ -202,6 +207,15 @@ impl Serializable for PackageExport {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         self.name.write_into(target);
         self.digest.write_into(target);
+        match self.signature.as_ref() {
+            Some(sig) => {
+                target.write_bool(true);
+                FunctionTypeSerializer(sig).write_into(target);
+            },
+            None => {
+                target.write_bool(false);
+            },
+        }
     }
 }
 
@@ -209,6 +223,11 @@ impl Deserializable for PackageExport {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let name = QualifiedProcedureName::read_from(source)?;
         let digest = Word::read_from(source)?;
-        Ok(Self { name, digest })
+        let signature = if source.read_bool()? {
+            Some(FunctionTypeDeserializer::read_from(source)?.0)
+        } else {
+            None
+        };
+        Ok(Self { name, digest, signature })
     }
 }

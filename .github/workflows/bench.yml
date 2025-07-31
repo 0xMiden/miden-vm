@@ -1,0 +1,21 @@
+# Runs bench related jobs.
+
+name: bench
+
+on:
+  push:
+    branches: [main, next]
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+jobs:
+  bench:
+    name: Bench on ubuntu-latest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bench for all features
+        run: |
+          rustup update --no-self-update
+          make check-bench
+

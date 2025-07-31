@@ -1,8 +1,40 @@
 # Changelog
 
+## 0.17.0 (TBD)
+
+#### Enhancements
+
+- Implement `copy_digest` and `hash_memory_double_words` procedures in the `std::crypto::hashes::rpo` module ([#1971](https://github.com/0xMiden/miden-vm/pull/1971)).
+- Add `extend_` methods on AdviceProvider [#1982](https://github.com/0xMiden/miden-vm/pull/1982).
+- Add new stdlib module `std::word`, containing utilities for manipulating arrays of four fields (words) [#1996](https://github.com/0xMiden/miden-vm/pull/1996).
+- [BREAKING]: move `std::utils::is_empty_word` to `std::word::eqz`, as part of the new word module [#1996](https://github.com/0xMiden/miden-vm/pull/1996).
+- Add constraints evaluation check to recursive verifier ([#1997](https://github.com/0xMiden/miden-vm/pull/1997)).
+- Add `AdviceProvider::into_parts()` method ([#2024](https://github.com/0xMiden/miden-vm/pull/2024)).
+- Add `drop_stack_top` procedure in std::sys ([#2031](https://github.com/0xMiden/miden-vm/pull/2031))
+- Add type information to procedures in the AST, `Library`, and `PackageExport`
+  types ([#2028](https://github.com/0xMiden/miden-vm/pull/2028))
+
+#### Changes
+
+- [BREAKING] Incremented MSRV to 1.88.
+- [BREAKING] Implemented preliminary changes for lazy loading of external `MastForest` `AdviceMap`s ([#1949](https://github.com/0xMiden/miden-vm/issues/1949)).
+- [BREAKING] Introduced `SourceManagerSync` trait, and remove `Assembler::source_manager()` method [#1966](https://github.com/0xMiden/miden-vm/issues/1966).
+- Fixed `ExecutionOptions::default()` to set `max_cycles` correctly to `1 << 29` ([#1969](https://github.com/0xMiden/miden-vm/pull/1969)).
+- [BREAKING] Reverted `get_mapped_value` return signature [(#1981)](https://github.com/0xMiden/miden-vm/issues/1981).
+- [BREAKING] Implemented custom Event handlers ([#1584](https://github.com/0xMiden/miden-vm/pull/1584)).
+- Converted `FastProcessor::execute()` from recursive to iterative execution ([#1989](https://github.com/0xMiden/miden-vm/issues/1989)).
+- [BREAKING] made `AdviceInputs` field public and removed redundant accessors ([#2009](https://github.com/0xMiden/miden-vm/pull/2009)).
+- Enhancement for all benchmarks (incl. `program_execution_fast`) are built and run in a new CI job with required feature flags [(#https://github.com/0xMiden/miden-vm/issues/1964)](https://github.com/0xMiden/miden-vm/issues/1964)
+- [BREAKING] `Library::exports` now returns `(&QualifiedProcedureName, &LibraryExport)` rather than just `&QualifiedProcedureName`, to allow callers
+to extract more useful information. ([#2028](https://github.com/0xMiden/miden-vm/pull/2028))
+- [BREAKING] The serialized representation for `Package` was changed to include
+procedure type information. Older packages will not work with the new serialization code, and vice versa. The version of the binary format was incremented accordingly. ([#2028](https://github.com/0xMiden/miden-vm/pull/2028))
+- [BREAKING] Procedure-related metadata types in the `miden-assembly` crate in some cases now require an optional type signature argument. If that information is not available, you can simply pass `None` to retain current behavior. ([#2028](https://github.com/0xMiden/miden-vm/pull/2028))
+
 ## 0.16.4 (2025-07-24)
 
 - Made `AdviceInputs` field public.
+- [BREAKING] `FastProcessor::execute()` now also returns the `AdviceProvider` ([#2026](https://github.com/0xMiden/miden-vm/pull/2026))
 
 ## 0.16.3 (2025-07-18)
 
@@ -73,7 +105,7 @@
 - Moved implementation of `miden_assembly_syntax::diagnostics` into a new `miden-utils-diagnostics` crate ([#1945](https://github.com/0xMiden/miden-vm/pull/1945)).
 - Moved implementation of `miden_core::debuginfo` into a new `miden-debug-types` crate ([#1945](https://github.com/0xMiden/miden-vm/pull/1945)).
 - Moved implementation of `miden_core::sync` into a new `miden-utils-sync` crate ([#1945](https://github.com/0xMiden/miden-vm/pull/1945)).
-+- [BREAKING] Replaced `miden_assembly_syntax::Version` with `semver::Version` ([#1946](https://github.com/0xMiden/pull/1946))
+- [BREAKING] Replaced `miden_assembly_syntax::Version` with `semver::Version` ([#1946](https://github.com/0xMiden/pull/1946))
 
 #### Fixes
 

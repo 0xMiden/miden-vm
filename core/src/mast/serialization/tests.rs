@@ -103,7 +103,7 @@ fn confirm_operation_and_decorator_structure() {
         Operation::FriE2F4 => (),
         Operation::HornerBase => (),
         Operation::HornerExt => (),
-        Operation::ArithmeticCircuitEval => (),
+        Operation::EvalCircuit => (),
         Operation::Emit(_) => (),
     };
 

@@ -67,6 +67,12 @@ pub enum SemanticAnalysisError {
         #[label]
         span: SourceSpan,
     },
+    #[error("invalid enum type representation: underlying type must be an integral type")]
+    #[diagnostic()]
+    InvalidEnumRepr {
+        #[label]
+        span: SourceSpan,
+    },
     #[error("symbol conflict: found duplicate definitions of the same name")]
     #[diagnostic()]
     SymbolConflict {

@@ -26,3 +26,8 @@ export.truncate_stack.4
     loc_loadw.0
     # => [A, B, C, D, ...]
 end
+
+#! Drop 16 values from the stack.
+export.drop_stack_top
+    dropw dropw dropw dropw
+end

@@ -1,7 +1,7 @@
 mod manifest;
 mod serialization;
 
-use alloc::{collections::BTreeSet, format, string::String, sync::Arc, vec::Vec};
+use alloc::{format, string::String, sync::Arc, vec::Vec};
 
 use miden_assembly_syntax::{Library, Report, ast::QualifiedProcedureName};
 use miden_core::{Program, Word};
@@ -88,24 +88,16 @@ impl Package {
                 )
             })?;
 
-            let exports = BTreeSet::from_iter(self.manifest.exports.iter().find_map(|export| {
-                if export.digest == digest {
-                    Some(export.clone())
-                } else {
-                    None
-                }
-            }));
-
             Ok(Self {
                 name: self.name.clone(),
                 mast: MastArtifact::Executable(Arc::new(Program::new(
                     library.mast_forest().clone(),
                     node_id,
                 ))),
-                manifest: PackageManifest {
-                    exports,
-                    dependencies: self.manifest.dependencies.clone(),
-                },
+                manifest: PackageManifest::new(
+                    self.manifest.get_exports_by_digest(&digest).cloned(),
+                )
+                .with_dependencies(self.manifest.dependencies().cloned()),
                 account_component_metadata_bytes: None,
             })
         } else {

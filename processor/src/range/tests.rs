@@ -155,5 +155,5 @@ fn validate_bridge_rows(
 
 /// Checks if the delta between two values is 0 or a power of 3 and at most 3^7
 fn valid_delta(delta: u16) -> bool {
-    delta == 0 || (59049 % delta == 0 && delta <= 2187)
+    delta == 0 || (59049_u16.is_multiple_of(delta) && delta <= 2187)
 }

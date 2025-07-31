@@ -33,3 +33,4 @@ Currently, Miden standard library contains just a few modules, which are listed 
 | [std::math::u64](./math/u64.md) | Contains procedures for working with 64-bit unsigned integers. |
 | [std::mem](./mem.md)            | Contains procedures for working with random access memory. |
 | [std::sys](./sys.md)            | Contains system-level utility procedures. |
+| [std::word](./word.md)          | Contains utilities for working with words. |

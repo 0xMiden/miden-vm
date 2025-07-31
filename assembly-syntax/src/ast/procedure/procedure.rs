@@ -2,6 +2,7 @@ use alloc::{collections::BTreeSet, string::String};
 use core::fmt;
 
 use miden_debug_types::{SourceSpan, Span, Spanned};
+use midenc_hir_type::FunctionType;
 
 use super::ProcedureName;
 use crate::ast::{Attribute, AttributeSet, Block, DocString, Invoke};
@@ -60,6 +61,8 @@ pub struct Procedure {
     name: ProcedureName,
     /// The visibility of this procedure (i.e. whether it is exported or not)
     visibility: Visibility,
+    /// The type signature of this procedure, if known
+    ty: Option<FunctionType>,
     /// The number of locals to allocate for this procedure
     num_locals: u16,
     /// The body of the procedure
@@ -85,10 +88,17 @@ impl Procedure {
             attrs: Default::default(),
             name,
             visibility,
+            ty: None,
             num_locals,
             invoked: Default::default(),
             body,
         }
+    }
+
+    /// Specify the type signature of this procedure
+    pub fn with_signature(mut self, ty: FunctionType) -> Self {
+        self.ty = Some(ty);
+        self
     }
 
     /// Adds documentation to this procedure definition
@@ -106,14 +116,14 @@ impl Procedure {
         self
     }
 
-    /// Modifies the visibility of this procedure.
-    ///
-    /// This is made crate-local as the visibility of a procedure is virtually always determined
-    /// by the source code from which it was derived; the only exception being kernel modules,
-    /// where exported procedures take on syscall visibility once the module is identified as
-    /// a kernel.
-    pub(crate) fn set_visibility(&mut self, visibility: Visibility) {
+    /// Override the visibility of this procedure.
+    pub fn set_visibility(&mut self, visibility: Visibility) {
         self.visibility = visibility;
+    }
+
+    /// Override the type signature of this procedure.
+    pub fn set_signature(&mut self, signature: FunctionType) {
+        self.ty = Some(signature);
     }
 }
 
@@ -127,6 +137,11 @@ impl Procedure {
     /// Returns the visibility of this procedure
     pub fn visibility(&self) -> Visibility {
         self.visibility
+    }
+
+    /// Get the type signature of this procedure, if known
+    pub fn signature(&self) -> Option<&FunctionType> {
+        self.ty.as_ref()
     }
 
     /// Returns the number of locals allocated by this procedure.
@@ -278,6 +293,7 @@ impl fmt::Debug for Procedure {
             .field("name", &self.name)
             .field("visibility", &self.visibility)
             .field("num_locals", &self.num_locals)
+            .field("ty", &self.ty)
             .field("body", &self.body)
             .field("invoked", &self.invoked)
             .finish()
@@ -291,6 +307,7 @@ impl PartialEq for Procedure {
         self.name == other.name
             && self.visibility == other.visibility
             && self.num_locals == other.num_locals
+            && self.ty == other.ty
             && self.body == other.body
             && self.attrs == other.attrs
             && self.docs == other.docs

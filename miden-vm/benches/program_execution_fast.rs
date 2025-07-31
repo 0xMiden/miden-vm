@@ -34,9 +34,6 @@ fn program_execution_fast(c: &mut Criterion) {
                     },
                     Err(_) => (StackInputs::default(), AdviceInputs::default()),
                 };
-                let mut host = DefaultHost::default();
-                host.load_mast_forest(StdLibrary::default().as_ref().mast_forest().clone())
-                    .unwrap();
 
                 // the name of the file without the extension
                 let source = std::fs::read_to_string(entry.path()).unwrap();
@@ -54,11 +51,16 @@ fn program_execution_fast(c: &mut Criterion) {
                     let stack_inputs: Vec<_> = stack_inputs.iter().rev().copied().collect();
                     bench.to_async(Runtime::new().unwrap()).iter_batched(
                         || {
+                            let host = DefaultHost::default()
+                                .with_library(&StdLibrary::default())
+                                .unwrap();
+
                             let processor = FastProcessor::new_with_advice_inputs(
                                 &stack_inputs,
                                 advice_inputs.clone(),
                             );
-                            (host.clone(), program.clone(), processor)
+
+                            (host, program.clone(), processor)
                         },
                         |(mut host, program, processor)| async move {
                             processor.execute(&program, &mut host).await.unwrap();
