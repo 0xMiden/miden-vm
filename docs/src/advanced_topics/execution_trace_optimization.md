@@ -12,7 +12,7 @@ When we refer to "number of cycles" in most Miden VM documentation, we're specif
   - memory operations call the memory chiplet
   - syscalls call the kernel ROM chiplet
 
-The **true number of rows in the final trace** = `max(stack_rows, range_checker_rows, chiplet_rows)`
+The **true number of rows in the final trace** is precisely `max(stack_rows, range_checker_rows, chiplet_rows)`
 
 Note: The maximum gets rounded up to the next power of 2, and the other 2 sets of columns get padded up to this maximum.
 
