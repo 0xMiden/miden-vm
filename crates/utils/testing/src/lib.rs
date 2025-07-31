@@ -548,6 +548,12 @@ pub fn append_word_to_vec(target: &mut Vec<u64>, word: Word) {
     target.extend(word.iter().map(Felt::as_int));
 }
 
+/// Note that adding a word to the *beginning* of a Vec adds it to the *bottom* of the stack.
+pub fn prepend_word_to_vec(target: &mut Vec<u64>, word: Word) {
+    // Actual insertion happens when this iterator is dropped.
+    let _iterator = target.splice(0..0, word.iter().map(Felt::as_int));
+}
+
 /// Converts a slice of Felts into a vector of u64 values.
 pub fn felt_slice_to_ints(values: &[Felt]) -> Vec<u64> {
     values.iter().map(|e| (*e).as_int()).collect()

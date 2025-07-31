@@ -1,15 +1,9 @@
 use core::cmp::Ordering;
 
-use miden_core::{Felt, LexicographicWord, Word};
-use miden_utils_testing::rand;
+use miden_core::LexicographicWord;
+use miden_utils_testing::{prepend_word_to_vec as prepend_word, rand};
 use num::Integer;
 use rstest::rstest;
-
-/// Note that adding a word to the *beginning* of a Vec adds it to the *bottom* of the stack.
-fn prepend_word(stack: &mut Vec<u64>, word: Word) {
-    // Actual insertion happens when this iterator is dropped.
-    let _iterator = stack.splice(0..0, word.iter().map(Felt::as_int));
-}
 
 #[rstest]
 #[case::gt("gt", &[Ordering::Greater])]
