@@ -57,80 +57,81 @@ pub use winter_prover::{Proof, crypto::MerkleTree as MerkleTreeVC};
 /// # Errors
 /// Returns an error if program execution or STARK proof generation fails for any reason.
 #[instrument("prove_program", skip_all)]
-#[maybe_async]
-pub fn prove(
+pub async fn prove(
     program: &Program,
     stack_inputs: StackInputs,
     advice_inputs: AdviceInputs,
     host: &mut impl SyncHost,
     options: ProvingOptions,
-) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
+) -> impl Future<Output = Result<(StackOutputs, ExecutionProof), ExecutionError>> + Send {
     // execute the program to create an execution trace
     #[cfg(feature = "std")]
     let now = Instant::now();
-    let trace = miden_processor::execute(
-        program,
-        stack_inputs.clone(),
-        advice_inputs,
-        host,
-        *options.execution_options(),
-    )?;
-    #[cfg(feature = "std")]
-    tracing::event!(
-        tracing::Level::INFO,
-        "Generated execution trace of {} columns and {} steps ({}% padded) in {} ms",
-        trace.info().main_trace_width(),
-        trace.trace_len_summary().padded_trace_len(),
-        trace.trace_len_summary().padding_percentage(),
-        now.elapsed().as_millis()
-    );
+    async move {
+        let trace = miden_processor::execute(
+            program,
+            stack_inputs.clone(),
+            advice_inputs,
+            host,
+            *options.execution_options(),
+        )?;
+        #[cfg(feature = "std")]
+        tracing::event!(
+            tracing::Level::INFO,
+            "Generated execution trace of {} columns and {} steps ({}% padded) in {} ms",
+            trace.info().main_trace_width(),
+            trace.trace_len_summary().padded_trace_len(),
+            trace.trace_len_summary().padding_percentage(),
+            now.elapsed().as_millis()
+        );
 
-    let stack_outputs = trace.stack_outputs().clone();
-    let hash_fn = options.hash_fn();
+        let stack_outputs = trace.stack_outputs().clone();
+        let hash_fn = options.hash_fn();
 
-    // generate STARK proof
-    let proof = match hash_fn {
-        HashFunction::Blake3_192 => {
-            let prover = ExecutionProver::<Blake3_192, WinterRandomCoin<_>>::new(
-                options,
-                stack_inputs,
-                stack_outputs.clone(),
-            );
-            maybe_await!(prover.prove(trace))
-        },
-        HashFunction::Blake3_256 => {
-            let prover = ExecutionProver::<Blake3_256, WinterRandomCoin<_>>::new(
-                options,
-                stack_inputs,
-                stack_outputs.clone(),
-            );
-            maybe_await!(prover.prove(trace))
-        },
-        HashFunction::Rpo256 => {
-            let prover = ExecutionProver::<Rpo256, RpoRandomCoin>::new(
-                options,
-                stack_inputs,
-                stack_outputs.clone(),
-            );
-            #[cfg(all(feature = "metal", target_arch = "aarch64", target_os = "macos"))]
-            let prover = gpu::metal::MetalExecutionProver::new(prover, HashFn::Rpo256);
-            maybe_await!(prover.prove(trace))
-        },
-        HashFunction::Rpx256 => {
-            let prover = ExecutionProver::<Rpx256, RpxRandomCoin>::new(
-                options,
-                stack_inputs,
-                stack_outputs.clone(),
-            );
-            #[cfg(all(feature = "metal", target_arch = "aarch64", target_os = "macos"))]
-            let prover = gpu::metal::MetalExecutionProver::new(prover, HashFn::Rpx256);
-            maybe_await!(prover.prove(trace))
-        },
+        // generate STARK proof
+        let proof = match hash_fn {
+            HashFunction::Blake3_192 => {
+                let prover = ExecutionProver::<Blake3_192, WinterRandomCoin<_>>::new(
+                    options,
+                    stack_inputs,
+                    stack_outputs.clone(),
+                );
+                prover.prove(trace).await
+            },
+            HashFunction::Blake3_256 => {
+                let prover = ExecutionProver::<Blake3_256, WinterRandomCoin<_>>::new(
+                    options,
+                    stack_inputs,
+                    stack_outputs.clone(),
+                );
+                prover.prove(trace).await
+            },
+            HashFunction::Rpo256 => {
+                let prover = ExecutionProver::<Rpo256, RpoRandomCoin>::new(
+                    options,
+                    stack_inputs,
+                    stack_outputs.clone(),
+                );
+                #[cfg(all(feature = "metal", target_arch = "aarch64", target_os = "macos"))]
+                let prover = gpu::metal::MetalExecutionProver::new(prover, HashFn::Rpo256);
+                prover.prove(trace).await
+            },
+            HashFunction::Rpx256 => {
+                let prover = ExecutionProver::<Rpx256, RpxRandomCoin>::new(
+                    options,
+                    stack_inputs,
+                    stack_outputs.clone(),
+                );
+                #[cfg(all(feature = "metal", target_arch = "aarch64", target_os = "macos"))]
+                let prover = gpu::metal::MetalExecutionProver::new(prover, HashFn::Rpx256);
+                prover.prove(trace).await
+            },
+        }
+        .map_err(ExecutionError::ProverError)?;
+        let proof = ExecutionProof::new(proof, hash_fn);
+
+        Ok((stack_outputs, proof))
     }
-    .map_err(ExecutionError::ProverError)?;
-    let proof = ExecutionProof::new(proof, hash_fn);
-
-    Ok((stack_outputs, proof))
 }
 
 // PROVER
