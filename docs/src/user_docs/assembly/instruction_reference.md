@@ -321,4 +321,17 @@ Instructions for inspecting VM state during execution. These do not affect VM st
 - **Cycles:** 0 (does not consume VM cycles).
 - **Notes:**
     - Prints the specified part of the VM state.
-    - Ignored if assembler is not in debug mode. 
+    - Ignored if assembler is not in debug mode.
+
+### `emit`
+
+- **Syntax:** `emit.<event_id>`
+- **Stack Input:** `[...]`
+- **Stack Output:** `[...]`
+- **Cycles:** 5
+- **Notes:**
+    - Emits an event with the specified `event_id` to the host.
+    - Does not change the state of the operand stack.
+    - The `event_id` can be any 32-bit value specified either directly or via a [named constant](./code_organization.md#constants).
+    - Events allow programs to communicate contextual information to the host for triggering appropriate actions.
+    - Example: `emit.123` or `emit.EVENT_ID_1` 
