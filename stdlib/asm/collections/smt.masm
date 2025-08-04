@@ -446,7 +446,7 @@ end
 #! Cycles
 #!   Leaf empty: 48 cycles
 #!   Leaf single: 99 cycles
-#!   Leaf multiple: unimplemented
+#!   Leaf multiple: 184 cycles
 export.get
     # Prepare for `mtree_get`
     # (6 cycles)
