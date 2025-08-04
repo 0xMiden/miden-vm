@@ -50,7 +50,7 @@ use.std::crypto::stark::constants
 #! Input: [C, ...]
 #! Output: [...]
 proc.process_public_inputs
-    exec.constants::get_dynamic_procedure_3_ptr dynexec
+    exec.constants::get_procedure_digest_process_public_inputs_ptr dynexec
 end
 
 #! Computes the address where the public inputs are to be stored and returns it.

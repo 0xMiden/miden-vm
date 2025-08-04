@@ -129,8 +129,8 @@ end
 #!
 #! Input: [...]
 #! Output: [...]
-proc.constraint_evaluation_check
-    exec.constants::get_dynamic_procedure_1_ptr dynexec
+proc.execute_constraint_evaluation_check
+    exec.constants::get_procedure_digest_execute_constraint_evaluation_check_ptr dynexec
 end
 
 #! Stores digests of dynamically executed procedures.
@@ -138,9 +138,9 @@ end
 #! Input: [D3, D2, D1, D0, ...]
 #! Output: [C, ...]
 export.store_dynamically_executed_procedures
-    exec.constants::get_dynamic_procedure_3_ptr mem_storew dropw
-    exec.constants::get_dynamic_procedure_2_ptr mem_storew dropw
-    exec.constants::get_dynamic_procedure_1_ptr mem_storew dropw
-    exec.constants::get_dynamic_procedure_0_ptr mem_storew dropw
+    exec.constants::get_procedure_digest_process_public_inputs_ptr mem_storew dropw
+    exec.constants::get_procedure_digest_process_row_ood_evaluations_ptr mem_storew dropw
+    exec.constants::get_procedure_digest_execute_constraint_evaluation_check_ptr mem_storew dropw
+    exec.constants::get_procedure_digest_compute_deep_composition_polynomial_queries_ptr mem_storew dropw
     # => [...]
 end

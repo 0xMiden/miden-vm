@@ -107,5 +107,5 @@ export.load_and_horner_eval_ood_frames
 end
 
 proc.process_row_ood_evaluations
-    exec.constants::get_dynamic_procedure_2_ptr dynexec
+    exec.constants::get_procedure_digest_process_row_ood_evaluations_ptr dynexec
 end

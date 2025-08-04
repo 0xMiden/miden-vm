@@ -52,7 +52,7 @@ export.verify
 
     # 2) Load the digests of all dynamically invoked procedures
     procref.deep_queries::compute_deep_composition_polynomial_queries
-    procref.constraints_eval::constraint_evaluation_check
+    procref.constraints_eval::execute_constraint_evaluation_check
     procref.ood_frames::process_row_ood_evaluations
     procref.public_inputs::process_public_inputs
     # =>[D3, D2, D1, D0, log(trace_length), num_queries, grinding, num_constraints, trace_info, num_fixed_len_pi, ...]

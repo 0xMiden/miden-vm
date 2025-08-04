@@ -15,20 +15,8 @@ const.FRI_REMAINDER_POLY_MAX_DEGREE_PLUS_1=128
 # CONSTANTS GETTERS
 # =================================================================================================
 
-export.get_fri_remainder_codeword_max_size_half
-    push.FRI_REMAINDER_CODEWORD_MAX_SIZE_HALF
-end
-
 export.get_fri_remainder_codeword_max_size 
     push.FRI_REMAINDER_CODEWORD_MAX_SIZE
-end
-
-export.get_fri_remainder_codeword_max_size_half_log
-    push.FRI_REMAINDER_CODEWORD_MAX_SIZE_HALF_LOG
-end
-
-export.get_fri_remainder_codeword_max_size_log
-    push.FRI_REMAINDER_CODEWORD_MAX_SIZE_LOG
 end
 
 export.get_fri_remainder_poly_max_degree_plus_1_half
@@ -43,14 +31,14 @@ end
 # =================================================================================================
 
 #! Loads FRI remainder polynomial of degree strictly less than `(max_degree + 1) / 2`.
-export.load_fri_remainder_poly_max_degree_plus_1_half
+proc.load_fri_remainder_poly_max_degree_plus_1_half
     repeat.16
         adv_pipe hperm
     end
 end
 
 #! Loads FRI remainder polynomial of degree strictly less than `max_degree + 1`.
-export.load_fri_remainder_poly_max_degree_plus_1
+proc.load_fri_remainder_poly_max_degree_plus_1
     repeat.32
         adv_pipe hperm
     end
@@ -89,14 +77,14 @@ export.generate_fri_parameters
     dup
     is_odd
     if.true
-        exec.get_fri_remainder_codeword_max_size_half
+        push.FRI_REMAINDER_CODEWORD_MAX_SIZE_HALF
         swap
-        exec.get_fri_remainder_codeword_max_size_half_log sub
+        push.FRI_REMAINDER_CODEWORD_MAX_SIZE_HALF_LOG sub
         div.2
     else
-        exec.get_fri_remainder_codeword_max_size
+        push.FRI_REMAINDER_CODEWORD_MAX_SIZE
         swap
-        exec.get_fri_remainder_codeword_max_size_log sub
+        push.FRI_REMAINDER_CODEWORD_MAX_SIZE_LOG sub
         div.2
     end
     # => [num_fri_layers, remainder_size, lde_size, lde_size, log2(lde_size), domain_gen, 0, ...] (12 cycles)
@@ -225,7 +213,7 @@ export.load_and_verify_remainder
     #=> [remainder_poly_ptr, ...]
 
     exec.constants::get_remainder_poly_size
-    exec.get_fri_remainder_poly_max_degree_plus_1_half
+    push.FRI_REMAINDER_POLY_MAX_DEGREE_PLUS_1_HALF
 
     eq
     if.true

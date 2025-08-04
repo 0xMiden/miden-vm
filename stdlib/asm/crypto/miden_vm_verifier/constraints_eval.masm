@@ -3,7 +3,7 @@ use.std::crypto::stark::utils
 use.std::crypto::hashes::rpo
 
 # Constraint evaluation circuit description
-adv_map.DIGEST([9139186206676821480, 12763675724578443945, 7621207635344139731, 1122100627503939866])=[
+adv_map.CIRCUIT_COMMITMENT=[
     1,
     0,
     0,
@@ -142,11 +142,19 @@ end
 # HELPER PROCEDURES
 # =================================================================================================
 
-#! Executes the constraints evaluation logic based on arithmetic circuit evaluation.
+#! Executes the constraints evaluation check by evaluating and arithmetic circuit using
+#! the ACE chiplet.
+#!
+#! The circuit description is hardcoded into the verifier using its commitment, which is computed as
+#! the sequential hash of its description using RPO hasher. The circuit description, containing both
+#! constants and evaluation gates description, is stored at the contiguous memory region starting
+#! at `ACE_CIRCUIT_PTR`. The variable part of the circuit input is stored at the contiguous memory
+#! region starting at `pi_ptr`. The (variable) inputs to the circuit are layed out such that
+#! the aforementioned memory regions are together contiguous and the (variable) inputs section.
 #!
 #! Input: [...]
 #! Output: [...]
-export.constraint_evaluation_check
+export.execute_constraint_evaluation_check
     # 1) Compute and store at the appropriate memory location the auxiliary inputs needed by
     #    the arithmetic circuit.
     push.MAX_CYCLE_LEN_LOG
@@ -164,11 +172,12 @@ export.constraint_evaluation_check
     push.NUM_EVAL_GATES_CIRCUIT
     push.NUM_INPUTS_CIRCUIT
     exec.constants::public_inputs_address_ptr mem_load
-    # => [...]
+    # => [pi_ptr, n_read, n_eval, ...]
 
     # 4) Perform the constraint evaluation check by checking that the circuit evaluates to zero, which
     #    boils down to the "eval_circuit" returning.
     eval_circuit
+    # => [pi_ptr, n_read, n_eval, ...]
 
     # 5) Clean up the stack.
     drop drop drop
@@ -179,8 +188,8 @@ end
 #!
 #! Input: [...]
 #! Output: [...]
-export.load_ace_circuit_description
-    push.DIGEST
+proc.load_ace_circuit_description
+    push.CIRCUIT_COMMITMENT
     adv.push_mapval
     exec.constants::get_arithmetic_circuit_ptr
     padw padw padw
@@ -190,6 +199,6 @@ export.load_ace_circuit_description
     end
     exec.rpo::squeeze_digest
     movup.4 drop
-    assert_eqw
+    assert_eqw.err="loading failed of the circuit description for the constraints evaluation check"
     # => [...]
 end
