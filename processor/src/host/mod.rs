@@ -140,7 +140,7 @@ pub trait AsyncHost: BaseHost {
 /// If feature `std` is enabled, we add `Send` to the required bounds, otherwise we do not. This
 /// impacts usability with a multithreaded executor.
 #[cfg(not(feature = "std"))]
-pub trait AsyncHostFuture<O>: Future<Output = O> {}
+pub trait FutureMaybeSend<O>: Future<Output = O> {}
 
 #[cfg(not(feature = "std"))]
 impl<T, O> FutureMaybeSend<O> for T where T: Future<Output = O> {}
