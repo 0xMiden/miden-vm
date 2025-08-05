@@ -226,6 +226,12 @@ Locals are not 0-initialized. Max $2^{16}$ locals per procedure, $2^{30}$ total.
 | `loc_store.i`      | `[v, ... ]`        | `[ ... ]`    | 4-5       | `local[i] <- v`. Pops `v` to local memory at index `i`.                                                                                                                    |
 | `loc_storew.i`     | `[A, ... ]`        | `[A, ... ]`  | 3-4       | `local[i..i+3] <- A`. Stores word, top stack element at `local[i+3]`.                                                                                                      |
 
+### Event Output
+
+| Instruction | Stack Input | Stack Output | Cycles | Notes                                                                                                                                    |
+| ----------- | ----------- | ------------ | ------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `emit.<event_id>` | `[...]`     | `[...]`      | 5      | Emits an event with the specified `event_id` to the host. Does not change the state of the operand stack. The `event_id` can be any 32-bit value specified either directly or via a [named constant](./code_organization.md#constants). Events allow programs to communicate contextual information to the host for triggering appropriate actions. Example: `emit.123` or `emit.EVENT_ID_1` |
+
 ## Cryptographic Operations
 
 Common cryptographic operations, including hashing and Merkle tree manipulations using Rescue Prime Optimized.
@@ -321,17 +327,4 @@ Instructions for inspecting VM state during execution. These do not affect VM st
 - **Cycles:** 0 (does not consume VM cycles).
 - **Notes:**
     - Prints the specified part of the VM state.
-    - Ignored if assembler is not in debug mode.
-
-### `emit`
-
-- **Syntax:** `emit.<event_id>`
-- **Stack Input:** `[...]`
-- **Stack Output:** `[...]`
-- **Cycles:** 5
-- **Notes:**
-    - Emits an event with the specified `event_id` to the host.
-    - Does not change the state of the operand stack.
-    - The `event_id` can be any 32-bit value specified either directly or via a [named constant](./code_organization.md#constants).
-    - Events allow programs to communicate contextual information to the host for triggering appropriate actions.
-    - Example: `emit.123` or `emit.EVENT_ID_1` 
+    - Ignored if assembler is not in debug mode. 
