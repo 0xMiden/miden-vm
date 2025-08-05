@@ -8,7 +8,7 @@ use miden_debug_types::{
 use crate::{
     AdviceMutation, AsyncHost, BaseHost, DebugHandler, EventHandler, EventHandlerRegistry,
     ExecutionError, MastForestStore, MemMastForestStore, ProcessState, SyncHost,
-    host::{EventError, FutureMaybeSend},
+    host::{AsyncHostFuture, EventError},
 };
 
 // DEFAULT HOST IMPLEMENTATION
@@ -186,7 +186,7 @@ where
         &mut self,
         process: &ProcessState<'_>,
         event_id: u32,
-    ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>> {
+    ) -> impl AsyncHostFuture<Result<Vec<AdviceMutation>, EventError>> {
         let result = <Self as SyncHost>::on_event(self, process, event_id);
         async move { result }
     }
