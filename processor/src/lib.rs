@@ -55,7 +55,7 @@ use range::RangeChecker;
 
 mod host;
 pub use host::{
-    AdviceMutation, AsyncHost, AsyncHostFuture, BaseHost, MastForestStore, MemMastForestStore,
+    AdviceMutation, AsyncHost, BaseHost, FutureMaybeSend, MastForestStore, MemMastForestStore,
     SyncHost,
     advice::{AdviceError, AdviceInputs, AdviceProvider},
     default::{DefaultDebugHandler, DefaultHost, HostLibrary},
