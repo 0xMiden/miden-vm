@@ -132,7 +132,7 @@ pub trait AsyncHost: BaseHost {
         &mut self,
         process: &ProcessState<'_>,
         event_id: u32,
-    ) -> impl AsyncHostFuture<Result<Vec<AdviceMutation>, EventError>>;
+    ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>>;
 }
 
 /// Alias for a `Future`
@@ -143,10 +143,10 @@ pub trait AsyncHost: BaseHost {
 pub trait AsyncHostFuture<O>: Future<Output = O> {}
 
 #[cfg(not(feature = "std"))]
-impl<T, O> AsyncHostFuture<O> for T where T: Future<Output = O> {}
+impl<T, O> FutureMaybeSend<O> for T where T: Future<Output = O> {}
 
 #[cfg(feature = "std")]
-pub trait AsyncHostFuture<O>: Future<Output = O> + Send {}
+pub trait FutureMaybeSend<O>: Future<Output = O> + Send {}
 
 #[cfg(feature = "std")]
-impl<T, O> AsyncHostFuture<O> for T where T: Future<Output = O> + Send {}
+impl<T, O> FutureMaybeSend<O> for T where T: Future<Output = O> + Send {}
