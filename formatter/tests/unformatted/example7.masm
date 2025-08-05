@@ -1,0 +1,18 @@
+export.sqrt
+    repeat.5
+        dup.4
+    end
+
+    repeat.31
+        repeat.5
+            dup.4
+        end
+
+        exec.mul
+          end # this comment should not break things
+
+    repeat.5
+        dup.4
+    end
+
+end

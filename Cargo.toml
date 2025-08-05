@@ -6,6 +6,7 @@ members = [
     "assembly",
     "assembly-syntax",
     "core",
+    "formatter",
     "miden-vm",
     "package",
     "processor",

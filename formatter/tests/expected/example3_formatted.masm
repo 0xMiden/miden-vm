@@ -1,0 +1,33 @@
+# comment
+export.someLib::somefunction
+# comment
+
+# code comment
+export.function
+    # comment should be indented
+    debug.stack
+
+    if.true
+        while.true
+            # comment
+            add sub
+
+            dropw
+
+        end
+    end
+    exec.function::some_func
+    # comment
+end
+
+proc.timestamp
+    # comment should be indented
+    blockstamp
+
+    if.true
+        add
+    else
+        sub
+    end
+    # comment
+end
