@@ -226,12 +226,6 @@ Locals are not 0-initialized. Max $2^{16}$ locals per procedure, $2^{30}$ total.
 | `loc_store.i`      | `[v, ... ]`        | `[ ... ]`    | 4-5       | `local[i] <- v`. Pops `v` to local memory at index `i`.                                                                                                                    |
 | `loc_storew.i`     | `[A, ... ]`        | `[A, ... ]`  | 3-4       | `local[i..i+3] <- A`. Stores word, top stack element at `local[i+3]`.                                                                                                      |
 
-### Event Output
-
-| Instruction | Stack Input | Stack Output | Cycles | Notes                                                                                                                                    |
-| ----------- | ----------- | ------------ | ------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `emit.<event_id>` | `[...]`     | `[...]`      | 5      | Emits an event with the specified `event_id` to the host. Does not change the state of the operand stack. The `event_id` can be any 32-bit value specified either directly or via a [named constant](./code_organization.md#constants). Events allow programs to communicate contextual information to the host for triggering appropriate actions. Example: `emit.123` or `emit.EVENT_ID_1` |
-
 ## Cryptographic Operations
 
 Common cryptographic operations, including hashing and Merkle tree manipulations using Rescue Prime Optimized.
@@ -308,6 +302,15 @@ High-level constructs for controlling the execution flow.
     - Increments the cycle counter with no other effects.
     - Useful for empty blocks or explicitly advancing cycles.
     - Assembler automatically inserts `nop` for empty/elided branches in `if` statements.
+
+## Events
+
+Instructions for communicating with the host through events and tracing.
+
+| Instruction | Stack Input | Stack Output | Cycles | Notes                                                                                                                                    |
+| ----------- | ----------- | ------------ | ------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `emit.<event_id>` | `[...]`     | `[...]`      | 5      | Emits an event with the specified `event_id` to the host. Does not change the state of the operand stack. The `event_id` can be any 32-bit value specified either directly or via a [named constant](./code_organization.md#constants). Events allow programs to communicate contextual information to the host for triggering appropriate actions. Example: `emit.123` or `emit.EVENT_ID_1` |
+| `trace.<trace_id>` | `[...]`     | `[...]`      | 0      | Emits a trace with the specified `trace_id` to the host. Does not change the state of the operand stack. The `trace_id` can be any 32-bit value specified either directly or via a [named constant](./code_organization.md#constants). Only active when programs are run with tracing flag (`-t` or `--trace`), otherwise ignored. Example: `trace.123` or `trace.TRACE_ID_1` |
 
 ## Debugging Operations
 
