@@ -13,6 +13,7 @@
 - Add `drop_stack_top` procedure in std::sys ([#2031](https://github.com/0xMiden/miden-vm/pull/2031))
 - Add type information to procedures in the AST, `Library`, and `PackageExport`
   types ([#2028](https://github.com/0xMiden/miden-vm/pull/2028))
+- Added miden assembly formatter binary ([[#2049]](https://github.com/0xMiden/miden-vm/pull/2049)).
 
 #### Changes
 
