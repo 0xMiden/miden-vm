@@ -57,7 +57,6 @@ pub struct VerifierData {
 /// | q+1-r    | fri_commitments        | varies         | FRI layer commitment digests                          |
 /// | r+1-s    | fri_remainder_poly     | varies         | FRI remainder polynomial coefficients                 |
 /// | s+1      | pow_nonce              | 1              | Proof-of-work nonce                                   |
-///
 /// ```
 ///
 /// # Advice Merkle Store Content
