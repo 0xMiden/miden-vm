@@ -1874,7 +1874,7 @@ Term: ConstantExpr = {
             IntValue::U16(v) => ConstantExpr::Literal(Span::new(span!(source_file.id(), l, r), Felt::new(v as u64))),
             IntValue::U32(v) => ConstantExpr::Literal(Span::new(span!(source_file.id(), l, r), Felt::new(v as u64))),
             IntValue::Felt(v) => ConstantExpr::Literal(Span::new(span!(source_file.id(), l, r), v)),
-            IntValue::Word(t) => ConstantExpr::Word(Span::new(span!(source_file.id(), l, r),t))
+            IntValue::Word(v) => ConstantExpr::Word(Span::new(span!(source_file.id(), l, r), v))
         })
     },
 
