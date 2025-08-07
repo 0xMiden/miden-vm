@@ -224,18 +224,18 @@ begin
     push.SAMPLE_WORD[1..3]  # is equivalent to push.6.7
     push.SAMPLE_WORD[0]     # is equivalent to push.5
 
-    push.SAMPLE_VALUE[1..3] # will return an error: invalid slice constant
+    push.SAMPLE_VALUE[1..3] # returns an error: invalid slice constant
 end
 ```
 
-If a slice with an invalid range is used with a word constant, no value will be pushed on stack.
+If a slice with an invalid range is used with a word constant, an error will be returned.
 
 ```
 const.SAMPLE_WORD=[5,6,7,8]
 
 begin
-    push.SAMPLE_WORD[10..6] # do nothing
-    push.SAMPLE_WORD[5..7]  # do nothing
+    push.SAMPLE_WORD[10..6] # returns an error
+    push.SAMPLE_WORD[5..7]  # returns an error
 end
 ```
 
