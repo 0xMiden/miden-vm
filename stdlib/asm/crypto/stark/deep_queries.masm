@@ -200,5 +200,9 @@ end
 #! Input: [...]
 #! Output: [...]
 proc.compute_deep_composition_polynomial_queries
+    # Prepare the stack for the core procedure computing the queries
+    exec.prepare_stack_deep_queries_computation
+    # => [Y, query_ptr, query_end_ptr, W, query_ptr]
     exec.constants::get_procedure_digest_compute_deep_composition_polynomial_queries_ptr dynexec
+    # => [...]
 end

@@ -32,7 +32,7 @@ const.ERR_FAILED_TO_LOAD_CIRCUIT_DESCRIPTION="failed to load the circuit descrip
 # CONSTRAINT EVALUATION CHECKER
 # =================================================================================================
 
-#! Executes the constraints evaluation check by evaluating and arithmetic circuit using the ACE
+#! Executes the constraints evaluation check by evaluating an arithmetic circuit using the ACE
 #! chiplet.
 #!
 #! The circuit description is hardcoded into the verifier using its commitment, which is computed as
@@ -40,7 +40,7 @@ const.ERR_FAILED_TO_LOAD_CIRCUIT_DESCRIPTION="failed to load the circuit descrip
 #! constants and evaluation gates description, is stored at the contiguous memory region starting
 #! at `ACE_CIRCUIT_PTR`. The variable part of the circuit input is stored at the contiguous memory
 #! region starting at `pi_ptr`. The (variable) inputs to the circuit are laid out such that the
-#! aforementioned memory regions are together contiguous and the (variable) inputs section.
+#! aforementioned memory regions are together contiguous with the (variable) inputs section.
 #!
 #! Inputs:  []
 #! Outputs: []

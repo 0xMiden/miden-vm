@@ -1,15 +1,41 @@
 use.std::crypto::stark::constants
 use.std::crypto::stark::deep_queries
 
+# ERRORS
+# =================================================================================================
+
+const.LEAF_VALUE_MISMATCH="hash of leaf pre-image does not match leaf value from the Merkle tree"
+
+# MAIN PROCEDURE
+# =================================================================================================
+
 #! Computes the DEEP composition polynomial FRI queries.
 #!
-#! Inputs:  []
+#! This procedures iterates over all FRI query indices stored in memory at `query_ptr` in
+#! a word-aligned and overwrites each word with `[eval0, eval1, index, poe]` where:
+#!
+#! 1. `index` is the FRI query index,
+#! 2. `poe := g^index`, with `g` being the evaluation domain generator,
+#! 3. `eval := (eval0, eval1)` is the computed DEEP composition polynomial query.
+#!
+#! Inputs:  [Y, query_ptr, query_end_ptr, W, query_ptr]
 #! Outputs: []
+#!
+#! where:
+#!
+#! 1. `Y` is a garbage word,
+#! 2. `query_ptr` is a pointer to the memory region from where the query indices will be fetched
+#!    and to where the computed FRI queries will be stored in a word-aligned manner,
+#! 3. `query_end_ptr` is a memory pointer used to indicate the end of the memory region used in
+#!    storing the computed FRI queries,
+#! 4. `W` is the word `[q_z_0, q_z_1, q_gz_0, q_gz_1]` where `q_z = (q_z_0, q_z_1)` and
+#!    `q_gz = (q_gz_0, q_gz_1)` represent the constant terms across all FRI queries computations.
 export.compute_deep_composition_polynomial_queries
 
-    # Prepare the stack for the loop computing the queries
-    exec.deep_queries::prepare_stack_deep_queries_computation
-
+    # Iterate over all FRI query indices and compute their correspond DEEP query
+    # The following assumes the existence of at least one query to compute which is a necessary
+    # requirement to get any soundness from the protocol. This assumption is validate at
+    # the start of the verification procedure.
     push.1
     while.true
         # Load the (main, aux, constraint)-traces rows associated with the current query and get
@@ -20,6 +46,7 @@ export.compute_deep_composition_polynomial_queries
         # Compute the current query and store the result
         # We also re-arrange the stack for the next iteration of the loop
         exec.deep_queries::compute_deep_query
+        # =>  [has_more_queries, Y, query_ptr+1, query_end_ptr]
     end
 
     # Clean up the stack and return
@@ -53,6 +80,28 @@ end
 proc.load_query_row
     # --- Process the main segment of the execution trace portion of the query --------------------
 
+    exec.process_main_segment_execution_trace
+    #=> [Y, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr]
+
+    # --- Process the auxiliary segment of the execution trace portion of the query ---------------
+
+    exec.process_aux_segment_execution_trace
+    #=> [Y, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr]
+
+    # --- Process the constraints composition polys trace portion of the query --------------------
+
+    exec.process_constraints_composition_poly_trace
+    #=> [Y, q_x_at_alpha_1, q_x_at_alpha_0, q_x_at_alpha_1, q_x_at_alpha_0, index, query_ptr]
+end
+
+# MAIN TRACE SEGMENT PROCESSING
+# =================================================================================================
+
+#! Handles the logic for processing the main segment of the execution trace.
+#! 
+#! Inputs: [Y, query_ptr]
+#! Output: [Y, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr]
+proc.process_main_segment_execution_trace
     # Load the query index
     dup.4 mem_loadw
     #=> [index, depth, y, y, query_ptr] where y are "garbage" values here and throughout
@@ -87,48 +136,8 @@ proc.load_query_row
  
     # Load the leaf value we got using `mtree_get` and compare it against the hash we just computed
     exec.constants::tmp3 mem_loadw
-    assert_eqw
-    #=> [Y, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr]
-
-    # --- Process the auxiliary segment of the execution trace portion of the query ---------------
-
-    exec.process_aux_segment_execution_trace
-    #=> [Y, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr]
-
-    # --- Process the constraint trace portion of the query ---------------------------------------
-
-    # Load the commitment to the constraint trace
-    exec.constants::composition_poly_com_ptr mem_loadw
-    #=> [R, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr]
-
-    # Get the leaf against the commitment
-    dup.9 movup.9
-    mtree_get
-    exec.constants::tmp3 mem_storew
-    adv.push_mapval
-    #=>[L, R, ptr_x, ptr_alpha_inv, acc1, acc0, index, query_ptr]
-
-    # Load the 8 columns as quadratic extension field elements in batches of 4. 
-    padw
-    swapw.2
-    exec.load_constraints_composition_polys_trace
-    #=> [Y, L, Y, ptr_x, ptr_alpha_inv, acc1, acc0, index, query_ptr]
-
-    # Load the leaf value we got using `mtree_get` and compare it against the hash we just computed
-    exec.constants::tmp3 mem_loadw
-    assert_eqw
-    #=> [Y, ptr_x, ptr_alpha_inv, acc1, acc0, index, query_ptr]
-
-    # Re-order the stack
-    swapw
-    drop drop
-    dup.1 dup.1
-    swapw
-    #=> [Y, q_x_at_alpha_1, q_x_at_alpha_0, q_x_at_alpha_1, q_x_at_alpha_0, index, query_ptr]
+    assert_eqw.err=LEAF_VALUE_MISMATCH
 end
-
-# MAIN TRACE SEGMENT PROCESSING
-# =================================================================================================
 
 #! Loads the portion of the query associated to the main segment of the execution trace.
 #!
@@ -174,7 +183,7 @@ proc.process_aux_segment_execution_trace
 
     # Load the leaf value we got using `mtree_get` and compare it against the hash we just computed
     exec.constants::tmp3 mem_loadw
-    assert_eqw
+    assert_eqw.err=LEAF_VALUE_MISMATCH
     #=> [Y, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr]
 end
 
@@ -190,8 +199,42 @@ proc.load_aux_segment_execution_trace
     end
 end
 
-# CONSTRAINT POLY PROCESSING
+# CONSTRAINTS COMPOSITION POLYNOMIALS TRACE PROCESSING
 # =================================================================================================
+
+#! Handles the logic for processing the constraints composition polynomials trace.
+#! 
+#! Inputs: [Y, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr]
+#! Output: [Y, q_x_at_alpha_1, q_x_at_alpha_0, q_x_at_alpha_1, q_x_at_alpha_0, index, query_ptr]
+proc.process_constraints_composition_poly_trace
+    # Load the commitment to the constraint trace
+    exec.constants::composition_poly_com_ptr mem_loadw
+    #=> [R, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr]
+
+    # Get the leaf against the commitment
+    dup.9 movup.9
+    mtree_get
+    exec.constants::tmp3 mem_storew
+    adv.push_mapval
+    #=>[L, R, ptr_x, ptr_alpha_inv, acc1, acc0, index, query_ptr]
+
+    # Load the 8 columns as quadratic extension field elements in batches of 4. 
+    padw
+    swapw.2
+    exec.load_constraints_composition_polys_trace
+    #=> [Y, L, Y, ptr_x, ptr_alpha_inv, acc1, acc0, index, query_ptr]
+
+    # Load the leaf value we got using `mtree_get` and compare it against the hash we just computed
+    exec.constants::tmp3 mem_loadw
+    assert_eqw.err=LEAF_VALUE_MISMATCH
+    #=> [Y, ptr_x, ptr_alpha_inv, acc1, acc0, index, query_ptr]
+
+    # Re-order the stack
+    swapw
+    drop drop
+    dup.1 dup.1
+    swapw
+end
 
 #! Loads the portion of the query associated to the constraints composition polynomials trace.
 #!
