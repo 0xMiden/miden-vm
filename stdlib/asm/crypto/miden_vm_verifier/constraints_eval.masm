@@ -97,7 +97,6 @@ end
 # CONSTRAINT EVALUATION CIRCUIT DESCRIPTION
 # =================================================================================================
 
-
 adv_map.CIRCUIT_COMMITMENT=[
     1,
     0,
