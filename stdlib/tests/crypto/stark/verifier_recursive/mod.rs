@@ -48,11 +48,11 @@ pub struct VerifierData {
 /// | -------- | ---------------------- | -------------- | ----------------------------------------------------- |
 /// | 0        | variable_len_pi_size   | 1              | Size of variable length PI in Felt                    |
 /// | 1-n      | public_inputs_data     | varies         | Input/output stacks + Program digest + kernel digests |
-/// | n+1-n+4  | aux_randomness         | 4              | β = (β₀, β₁), ɑ = (ɑ₀, ɑ₁) (filled later)             |
+/// | n+1-n+4  | aux_randomness         | 4              | β = (β₀, β₁), ɑ = (ɑ₀, ɑ₁)                            |
 /// | n+5      | num_kernel_procedures  | 1              | Count of kernel procedure digests                     |
 /// | n+6-m    | trace_commitments      | 4 or 8         | Main/auxiliary trace segment commitments              |
 /// | m+1-p    | constraint_commitment  | 4              | Constraint composition commitment                     |
-/// | p+1-p+2  | alpha_deep_placeholder | 2              | Deep composition randomness (filled later)            |
+/// | p+1-p+2  | alpha_deep_placeholder | 2              | Deep composition randomness                           |
 /// | p+3-q    | ood_evaluations        | varies         | Out-of-domain trace and constraint evals              |
 /// | q+1-r    | fri_commitments        | varies         | FRI layer commitment digests                          |
 /// | r+1-s    | fri_remainder_poly     | varies         | FRI remainder polynomial coefficients                 |
@@ -73,12 +73,12 @@ pub struct VerifierData {
 /// # Advice Map Layout
 ///
 /// ```
-/// | Key (Word)                     | Value (Vec<Felt>)                   |
-/// | ------------------------------ | ----------------------------------- |
-/// | Query index                    | Main trace evaluations              |
-/// | Query index                    | Auxiliary trace evaluations         |
-/// | Query index                    | Constraint evaluations              |
-/// | FRI layer (folded) query index | FRI codeword evaluations on a coset |
+/// | Key (Word)                                               | Value (Vec<Felt>)                   |
+/// | -------------------------------------------------------- | ----------------------------------- |
+/// | Leaf hash of main trace segment tree at query index      | Main trace evaluations              |
+/// | Leaf hash of auxiliary trace segment tree at query index | Auxiliary trace evaluations         |
+/// | Leaf hash of constraint composition tree at query index  | Constraint evaluations              |
+/// | FRI layer evaluations at folded query index              | FRI codeword evaluations on a coset |
 /// ```
 pub fn generate_advice_inputs(
     proof: Proof,
