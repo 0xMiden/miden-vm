@@ -34,14 +34,15 @@ end
 #! This involves:
 #!
 #! 1. Loading from the advice stack the fixed-length public inputs and storing them in memory
-#! starting from the address pointed to by `public_inputs_address_ptr`.
+#!    starting from the address pointed to by `public_inputs_address_ptr`.
 #! 2. Loading from the advice stack the variable-length public inputs, storing them temporarily
-#! in memory, and then reducing them to an element in the challenge field using the auxiliary
-#! randomness. This reduced value is then used to impose a boundary condition on the relevant
-#! auxiliary column. 
+#!    in memory, and then reducing them to an element in the challenge field using the auxiliary
+#!    randomness. This reduced value is then used to impose a boundary condition on the relevant
+#!    auxiliary column. 
 #!
 #! Note that the fixed length public inputs are stored as extension field elements while
 #! the variable length ones are stored as base field elements.
+#!
 #! Note also that, while loading the above, we compute the hash of the public inputs. The hashing
 #! starts with capacity registers of the hash function set to `C` that is the result of hashing
 #! the proof context.
@@ -103,14 +104,16 @@ end
 
 #! Loads from the advice stack the public inputs and stores them in memory starting from address
 #! pointed to by `public_inputs_address_ptr`.
+#!
 #! Note that the public inputs are stored as extension field elements.
+#!
 #! In parallel, it computes the hash of the public inputs being loaded. The hashing starts with
 #! capacity registers of the hash function set to `C` resulting from hashing the proof context.
 #! The output D is the digest of the hashing of the public inputs.
 #!
-#! Input: [C, ...]
-#! Output: [D, ...]
-export.load_public_inputs
+#! Inputs:  [C, ...]
+#! Outputs: [D, ...]
+proc.load_public_inputs
     # 1) Load and hash the fixed length public inputs
     
     exec.constants::public_inputs_address_ptr mem_load
@@ -207,8 +210,8 @@ end
 
 #! Reduce each group of the variable-length public inputs and stores the result in memory.
 #!
-#! Input: [next_var_len_pub_inputs_ptr, var_len_pub_inputs_res_ptr, ...]
-#! Output:  [next_var_len_pub_inputs_ptr, var_len_pub_inputs_res_ptr, ...]
+#! Inputs:  [next_var_len_pub_inputs_ptr, var_len_pub_inputs_res_ptr]
+#! Outputs: [next_var_len_pub_inputs_ptr, var_len_pub_inputs_res_ptr]
 export.reduce_var_len_public_inputs_groups
     # 1) Reduce kernel procedure digests and store them.
     adv_push.1
@@ -219,8 +222,8 @@ end
 
 #! Reduces the kernel procedures digests using auxiliary randomness.
 #!
-#! Input: [num_ker_procedures, digests_ptr, ...]
-#! Output: [next_ptr, ...]
+#! Inputs:  [num_ker_procedures, digests_ptr]
+#! Outputs: [next_ptr]
 #!
 #! where `digests_ptr` is a pointer to the kernel procedures digests.
 proc.reduce_kernel_digests
@@ -311,6 +314,7 @@ proc.reduce_kernel_digests
         neq
     end
     # => [Y, Y, alpha1, alpha0 + op_label, beta1, beta0, digests_ptr, beta_ptr, 0, 0, term1', term0', ...]
+
     dropw dropw dropw
     # => [digests_ptr, beta_ptr, 0, 0, term1', term0', ...]
     dup exec.constants::tmp2 mem_store

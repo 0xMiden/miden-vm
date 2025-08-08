@@ -20,7 +20,6 @@ use.std::crypto::stark::verifier
 #! 2. `num_queries`, the number of FRI queries
 #! 3. `grinding`, the number of bits of grinding i.e., proof-of-work
 #!
-#!
 #! The following simplifying assumptions are currently made and hardcoded:
 #!
 #! - The blowup factor is set to 8.
