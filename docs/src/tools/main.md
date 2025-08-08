@@ -12,4 +12,4 @@ The following tools are available for interacting with Miden VM:
 The following resources are available to help you get started programming with Miden VM more quickly:
 
 * The [Miden VM examples repo](https://github.com/0xMiden/examples) contains examples of programs written in Miden Assembly.
-* Our [Scaffolded repo](https://github.com/0xMiden/zkhack-scaffold/) can be cloned for starting a new Rust project using Miden VM.
+* Our [Scaffolded repo](https://github.com/0xPolygonMiden/zkhack-scaffold) can be cloned for starting a new Rust project using Miden VM.
