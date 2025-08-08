@@ -290,6 +290,13 @@ pub enum ParsingError {
         #[label]
         span: SourceSpan,
     },
+    #[error("invalid word slice range")]
+    #[diagnostic()]
+    InvalidWordSliceRange {
+        #[label("range used for the word constant slice is malformed of empty")]
+        #[label]
+        span: SourceSpan,
+    },
 }
 
 impl ParsingError {

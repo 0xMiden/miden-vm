@@ -1352,20 +1352,13 @@ fn test_push_word_slice_invalid() -> TestResult {
     "
         )
     );
-    let program = context.assemble(source_invalid_range)?;
-
-    let expected = "\
-begin
-    basic_block noop end
-end";
-    assert_str_eq!(format!("{program}"), expected);
+    assert!(context.assemble(source_invalid_range).is_err());
 
     let source_invalid_constant_type = source_file!(
         &context,
         format!(
             "\
     const.SAMPLE_VALUE=6
-
     begin
         push.SAMPLE_VALUE[1..3]
     end
@@ -1373,6 +1366,7 @@ end";
         )
     );
     assert!(context.assemble(source_invalid_constant_type).is_err());
+
     Ok(())
 }
 

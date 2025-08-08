@@ -2,7 +2,6 @@ pub mod advice;
 pub mod debug;
 mod print;
 
-use alloc::vec::Vec;
 use core::ops::Range;
 
 pub use self::{advice::SystemEventNode, debug::DebugOptions};
@@ -213,10 +212,6 @@ pub enum Instruction {
     PushFelt(Felt),
     PushWord(WordValue),
     PushWordSlice(Immediate<IntValue>, Range<usize>),
-    PushU8List(Vec<u8>),
-    PushU16List(Vec<u16>),
-    PushU32List(Vec<u32>),
-    PushFeltList(Vec<Felt>),
     Locaddr(ImmU16),
     Sdepth,
     Caller,

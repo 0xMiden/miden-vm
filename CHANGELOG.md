@@ -2,6 +2,14 @@
 
 ## 0.18.0 (TBD)
 
+#### Enhancements
+
+- Added slicing for the word constants ([#2057](https://github.com/0xMiden/miden-vm/pull/2057)).
+
+#### Changes
+
+- Removed unused `PushU8List`, `PushU16List`, `PushU32List` and `PushFeltList` instructions ([#2057](https://github.com/0xMiden/miden-vm/pull/2057)).
+
 ## 0.17.0 (2025-08-06)
 
 #### Enhancements
@@ -14,7 +22,6 @@
 - Added `AdviceProvider::into_parts()` method ([#2024](https://github.com/0xMiden/miden-vm/pull/2024)).
 - Added type information to procedures in the AST, `Library`, and `PackageExport` types ([#2028](https://github.com/0xMiden/miden-vm/pull/2028)).
 - Added `drop_stack_top` procedure in `std::sys` ([#2031](https://github.com/0xMiden/miden-vm/pull/2031)).
-- Added slicing for the word constants ([#2057](https://github.com/0xMiden/miden-vm/pull/2057)).
 
 #### Changes
 

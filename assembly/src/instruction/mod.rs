@@ -358,10 +358,6 @@ impl Assembler {
             Instruction::PushWordSlice(imm, range) => {
                 env_ops::push_word_slice(imm, range, block_builder)?
             },
-            Instruction::PushU8List(imms) => env_ops::push_many(imms, block_builder),
-            Instruction::PushU16List(imms) => env_ops::push_many(imms, block_builder),
-            Instruction::PushU32List(imms) => env_ops::push_many(imms, block_builder),
-            Instruction::PushFeltList(imms) => env_ops::push_many(imms, block_builder),
             Instruction::Sdepth => block_builder.push_op(SDepth),
             Instruction::Caller => env_ops::caller(block_builder, proc_ctx, instruction.span())?,
             Instruction::Clk => block_builder.push_op(Clk),
