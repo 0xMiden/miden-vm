@@ -15,7 +15,7 @@ export.compute_deep_composition_polynomial_queries
         # Load the (main, aux, constraint)-traces rows associated with the current query and get
         # the index of the query.
         exec.load_query_row
-        #=> [Y, X, index, query_ptr, query_end_ptr, W, query_ptr, ...]
+        #=> [Y, X, index, query_ptr, query_end_ptr, W, query_ptr]
 
         # Compute the current query and store the result
         # We also re-arrange the stack for the next iteration of the loop
@@ -127,7 +127,7 @@ proc.load_query_row
     #=> [Y, q_x_at_alpha_1, q_x_at_alpha_0, q_x_at_alpha_1, q_x_at_alpha_0, index, query_ptr]
 end
 
-# AUX TACE SEGMENT PROCESSING
+# MAIN TRACE SEGMENT PROCESSING
 # =================================================================================================
 
 #! Loads the portion of the query associated to the main segment of the execution trace.
@@ -142,7 +142,7 @@ proc.load_main_segment_execution_trace
     end
 end
 
-# AUX TACE SEGMENT PROCESSING
+# AUX TRACE SEGMENT PROCESSING
 # =================================================================================================
 
 #! Handles the logic for processing the auxiliary segment of the execution trace, if such a trace
