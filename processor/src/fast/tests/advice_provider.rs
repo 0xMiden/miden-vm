@@ -1,12 +1,14 @@
 use alloc::collections::BTreeMap;
 
+use miden_assembly::SourceManager;
 use miden_core::Word;
+use miden_debug_types::{Location, SourceFile, SourceManagerSync, SourceSpan};
 use pretty_assertions::assert_eq;
 
 use super::*;
 use crate::{
-    AsyncHost, BaseHost, EventError, MastForestStore, MemMastForestStore, MemoryAddress,
-    ProcessState, SyncHost,
+    AdviceMutation, AsyncHost, BaseHost, EventError, MastForestStore, MemMastForestStore,
+    MemoryAddress, ProcessState, SyncHost,
 };
 
 #[test]
@@ -204,8 +206,8 @@ struct ProcessStateSnapshot {
     mem_state: Vec<(MemoryAddress, Felt)>,
 }
 
-impl From<&mut ProcessState<'_>> for ProcessStateSnapshot {
-    fn from(state: &mut ProcessState) -> Self {
+impl From<&ProcessState<'_>> for ProcessStateSnapshot {
+    fn from(state: &ProcessState) -> Self {
         ProcessStateSnapshot {
             clk: state.clk(),
             ctx: state.ctx(),
@@ -223,63 +225,82 @@ impl From<&mut ProcessState<'_>> for ProcessStateSnapshot {
 }
 
 #[derive(Debug)]
-struct ConsistencyHost {
+struct ConsistencyHost<S: SourceManager = DefaultSourceManager> {
     /// A map of trace ID to a list of snapshots. A single trace ID can be associated with multiple
     /// snapshots for example if it's used in a loop.
     snapshots: BTreeMap<u32, Vec<ProcessStateSnapshot>>,
     store: MemMastForestStore,
+    source_manager: Arc<S>,
 }
 
 impl ConsistencyHost {
     fn new(kernel_forest: Arc<MastForest>) -> Self {
         let mut store = MemMastForestStore::default();
         store.insert(kernel_forest.clone());
-
-        Self { snapshots: BTreeMap::new(), store }
+        let source_manager = Arc::new(DefaultSourceManager::default());
+        Self {
+            snapshots: BTreeMap::new(),
+            store,
+            source_manager,
+        }
     }
 }
 
-impl BaseHost for ConsistencyHost {
+impl<S> BaseHost for ConsistencyHost<S>
+where
+    S: SourceManager,
+{
+    fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>> {
+        self.store.get(node_digest)
+    }
+
+    fn get_label_and_source_file(
+        &self,
+        location: &Location,
+    ) -> (SourceSpan, Option<Arc<SourceFile>>) {
+        let maybe_file = self.source_manager.get_by_uri(location.uri());
+        let span = self.source_manager.location_to_span(location.clone()).unwrap_or_default();
+        (span, maybe_file)
+    }
+
     fn on_trace(
         &mut self,
         process: &mut ProcessState,
         trace_id: u32,
     ) -> Result<(), ExecutionError> {
-        let snapshot = ProcessStateSnapshot::from(process);
+        let snapshot = ProcessStateSnapshot::from(&*process);
         self.snapshots.entry(trace_id).or_default().push(snapshot);
 
         Ok(())
     }
 }
 
-impl SyncHost for ConsistencyHost {
-    fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>> {
-        self.store.get(node_digest)
-    }
-
+impl<S> SyncHost for ConsistencyHost<S>
+where
+    S: SourceManager,
+{
     fn on_event(
         &mut self,
-        _process: &mut ProcessState<'_>,
+        _process: &ProcessState<'_>,
         _event_id: u32,
-    ) -> Result<(), EventError> {
-        Ok(())
+    ) -> Result<Vec<AdviceMutation>, EventError> {
+        Ok(Vec::new())
     }
 }
 
-impl AsyncHost for ConsistencyHost {
-    async fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>> {
-        self.store.get(node_digest)
-    }
-
+impl<S> AsyncHost for ConsistencyHost<S>
+where
+    S: SourceManagerSync,
+{
     // Note: clippy complains about this not using the `async` keyword, but if we use `async`, it
     // doesn't compile.
     #[allow(clippy::manual_async_fn)]
     fn on_event(
         &mut self,
-        _process: &mut ProcessState<'_>,
+        _process: &ProcessState<'_>,
         _event_id: u32,
-    ) -> impl Future<Output = Result<(), EventError>> + Send {
+    ) -> impl Future<Output = Result<Vec<AdviceMutation>, EventError>> + Send {
         let _ = (_process, _event_id);
-        async move { Ok(()) }
+        async move { Ok(Vec::new()) }
     }
 }

@@ -25,14 +25,10 @@ impl FastProcessor {
 
     /// Analogous to `Process::op_inv`.
     #[inline(always)]
-    pub fn op_inv(
-        &mut self,
-        op_idx: usize,
-        err_ctx: &impl ErrorContext,
-    ) -> Result<(), ExecutionError> {
+    pub fn op_inv(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
         let top = self.stack_get_mut(0);
         if (*top) == ZERO {
-            return Err(ExecutionError::divide_by_zero(self.clk + op_idx, err_ctx));
+            return Err(ExecutionError::divide_by_zero(self.clk, err_ctx));
         }
         *top = top.inv();
         Ok(())

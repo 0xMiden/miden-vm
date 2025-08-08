@@ -14,6 +14,8 @@ pub use inputs::AdviceInputs;
 mod errors;
 pub use errors::AdviceError;
 
+use crate::host::AdviceMutation;
+
 // TYPE ALIASES
 // ================================================================================================
 
@@ -45,6 +47,29 @@ pub struct AdviceProvider {
 }
 
 impl AdviceProvider {
+    /// Apply the mutations given in order to the `AdviceProvider`.
+    pub fn apply_mutations(
+        &mut self,
+        mutations: impl IntoIterator<Item = AdviceMutation>,
+    ) -> Result<(), AdviceError> {
+        mutations.into_iter().try_for_each(|mutation| self.apply_mutation(mutation))
+    }
+
+    fn apply_mutation(&mut self, mutation: AdviceMutation) -> Result<(), AdviceError> {
+        match mutation {
+            AdviceMutation::ExtendStack { values } => {
+                self.extend_stack(values);
+            },
+            AdviceMutation::ExtendMap { other } => {
+                self.extend_map(&other)?;
+            },
+            AdviceMutation::ExtendMerkleStore { infos } => {
+                self.extend_merkle_store(infos);
+            },
+        }
+        Ok(())
+    }
+
     // ADVICE STACK
     // --------------------------------------------------------------------------------------------
 

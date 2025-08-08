@@ -13,7 +13,6 @@ use miden_core::{
     stack::MIN_STACK_DEPTH,
     utils::range,
 };
-use miden_debug_types::{DefaultSourceManager, SourceManager};
 
 use crate::{
     AdviceInputs, AdviceProvider, AsyncHost, ContextId, ErrorContext, ExecutionError, FMP_MIN,
@@ -47,7 +46,7 @@ mod tests;
 /// For example, the blake3 benchmark went from 285 MHz to 250 MHz (~10% degradation). Perhaps a
 /// better solution would be to make this value much smaller (~1000), and then fallback to a `Vec`
 /// if the stack overflows.
-const STACK_BUFFER_SIZE: usize = 6650;
+const STACK_BUFFER_SIZE: usize = 6850;
 
 /// The initial position of the top of the stack in the stack buffer.
 ///
@@ -55,7 +54,7 @@ const STACK_BUFFER_SIZE: usize = 6650;
 /// the upper bound than the lower bound, since hitting the lower bound only occurs when you drop
 /// 0's that were generated automatically to keep the stack depth at 16. In practice, if this
 /// occurs, it is most likely a bug.
-const INITIAL_STACK_TOP_IDX: usize = 50;
+const INITIAL_STACK_TOP_IDX: usize = 250;
 
 /// WORD_SIZE, but as a `Felt`.
 const WORD_SIZE_FELT: Felt = Felt::new(4);
@@ -94,12 +93,6 @@ const DOUBLE_WORD_SIZE: Felt = Felt::new(8);
 ///   by 1 for every row that `Process` adds to the main trace.
 ///     - It is important to do so because the clock cycle is used to determine the context ID for
 ///       new execution contexts when using `call` or `dyncall`.
-/// - When executing a basic block, the clock cycle is not incremented for every individual
-///   operation for performance reasons.
-///     - Rather, we use `clk + operation_index` to determine the clock cycle when needed.
-///     - However this performance improvement is slightly offset by the need to parse operation
-///       batches exactly the same as `Process`. We will be able to recover the performance loss by
-///       redesigning the `BasicBlockNode`.
 #[derive(Debug)]
 pub struct FastProcessor {
     /// The stack is stored in reverse order, so that the last element is at the top of the stack.
@@ -113,10 +106,6 @@ pub struct FastProcessor {
     bounds_check_counter: usize,
 
     /// The current clock cycle.
-    ///
-    /// However, when we are in a basic block, this corresponds to the clock cycle at which the
-    /// basic block was entered. Hence, given an operation, we need to add its index in the
-    /// block to this value to get the clock cycle.
     pub(super) clk: RowIndex,
 
     /// The current context ID.
@@ -148,9 +137,6 @@ pub struct FastProcessor {
 
     /// Whether to enable debug statements and tracing.
     in_debug_mode: bool,
-
-    /// The source manager (providing information about the location of each instruction).
-    source_manager: Arc<dyn SourceManager>,
 }
 
 impl FastProcessor {
@@ -202,7 +188,6 @@ impl FastProcessor {
         let stack_bot_idx = stack_top_idx - MIN_STACK_DEPTH;
 
         let bounds_check_counter = stack_bot_idx;
-        let source_manager = Arc::new(DefaultSourceManager::default());
         Self {
             advice: advice_inputs.into(),
             stack,
@@ -218,14 +203,7 @@ impl FastProcessor {
             call_stack: Vec::new(),
             ace: Ace::default(),
             in_debug_mode,
-            source_manager,
         }
-    }
-
-    /// Set the internal source manager to an externally initialized one.
-    pub fn with_source_manager(mut self, source_manager: Arc<dyn SourceManager>) -> Self {
-        self.source_manager = source_manager;
-        self
     }
 
     // ACCESSORS
@@ -502,7 +480,7 @@ impl FastProcessor {
         } else if condition == ZERO {
             continuation_stack.push_start_node(split_node.on_false());
         } else {
-            let err_ctx = err_ctx!(current_forest, split_node, self.source_manager.clone());
+            let err_ctx = err_ctx!(current_forest, split_node, host);
             return Err(ExecutionError::not_binary_value_if(condition, &err_ctx));
         };
         Ok(())
@@ -556,7 +534,7 @@ impl FastProcessor {
             // execute
             self.clk += 1_u32;
         } else {
-            let err_ctx = err_ctx!(current_forest, loop_node, self.source_manager.clone());
+            let err_ctx = err_ctx!(current_forest, loop_node, host);
             return Err(ExecutionError::not_binary_value_loop(condition, &err_ctx));
         }
         Ok(())
@@ -588,7 +566,7 @@ impl FastProcessor {
 
             self.execute_after_exit_decorators(current_node_id, current_forest, host)?;
         } else {
-            let err_ctx = err_ctx!(current_forest, loop_node, self.source_manager.clone());
+            let err_ctx = err_ctx!(current_forest, loop_node, host);
             return Err(ExecutionError::not_binary_value_loop(condition, &err_ctx));
         }
         Ok(())
@@ -608,7 +586,7 @@ impl FastProcessor {
         // Execute decorators that should be executed before entering the node
         self.execute_before_enter_decorators(current_node_id, current_forest, host)?;
 
-        let err_ctx = err_ctx!(current_forest, call_node, self.source_manager.clone());
+        let err_ctx = err_ctx!(current_forest, call_node, host);
 
         // Corresponds to the row inserted for the CALL or SYSCALL
         // operation added to the trace.
@@ -659,7 +637,7 @@ impl FastProcessor {
         host: &mut impl AsyncHost,
     ) -> Result<(), ExecutionError> {
         let call_node = current_forest[node_id].unwrap_call();
-        let err_ctx = err_ctx!(current_forest, call_node, self.source_manager.clone());
+        let err_ctx = err_ctx!(current_forest, call_node, host);
         // when returning from a function call or a syscall, restore the
         // context of the
         // system registers and the operand stack to what it was prior
@@ -696,7 +674,7 @@ impl FastProcessor {
             return Err(ExecutionError::CallInSyscall("dyncall"));
         }
 
-        let err_ctx = err_ctx!(&current_forest, dyn_node, self.source_manager.clone());
+        let err_ctx = err_ctx!(&current_forest, dyn_node, host);
 
         // Retrieve callee hash from memory, using stack top as the memory
         // address.
@@ -761,7 +739,7 @@ impl FastProcessor {
         host: &mut impl AsyncHost,
     ) -> Result<(), ExecutionError> {
         let dyn_node = current_forest[node_id].unwrap_dyn();
-        let err_ctx = err_ctx!(current_forest, dyn_node, self.source_manager.clone());
+        let err_ctx = err_ctx!(current_forest, dyn_node, host);
         // For dyncall, restore the context.
         if dyn_node.is_dyncall() {
             self.restore_context(&err_ctx)?;
@@ -855,9 +833,6 @@ impl FastProcessor {
             batch_offset_in_block += op_batch.ops().len();
         }
 
-        // update clock with all the operations that executed
-        self.clk += batch_offset_in_block as u32;
-
         // Corresponds to the row inserted for the END operation added to the trace.
         self.clk += 1_u32;
 
@@ -869,7 +844,7 @@ impl FastProcessor {
             let decorator = program
                 .get_decorator_by_id(decorator_id)
                 .ok_or(ExecutionError::DecoratorNotFoundInForest { decorator_id })?;
-            self.execute_decorator(decorator, 0, host)?;
+            self.execute_decorator(decorator, host)?;
         }
 
         self.execute_after_exit_decorators(node_id, program, host)
@@ -903,13 +878,12 @@ impl FastProcessor {
                 let decorator = program
                     .get_decorator_by_id(decorator_id)
                     .ok_or(ExecutionError::DecoratorNotFoundInForest { decorator_id })?;
-                self.execute_decorator(decorator, op_idx_in_batch, host)?;
+                self.execute_decorator(decorator, host)?;
             }
 
             // decode and execute the operation
             let op_idx_in_block = batch_offset_in_block + op_idx_in_batch;
-            let err_ctx =
-                err_ctx!(program, basic_block, self.source_manager.clone(), op_idx_in_block);
+            let err_ctx = err_ctx!(program, basic_block, host, op_idx_in_block);
 
             // Execute the operation.
             //
@@ -917,9 +891,7 @@ impl FastProcessor {
             // whereas all the other operations are synchronous (resulting in a significant
             // performance improvement).
             match op {
-                Operation::Emit(event_id) => {
-                    self.op_emit(*event_id, op_idx_in_block, host, &err_ctx).await?
-                },
+                Operation::Emit(event_id) => self.op_emit(*event_id, host, &err_ctx).await?,
                 _ => {
                     // if the operation is not an Emit, we execute it normally
                     self.execute_op(op, op_idx_in_block, program, host, &err_ctx)?;
@@ -952,6 +924,8 @@ impl FastProcessor {
             } else {
                 op_idx_in_group += 1;
             }
+
+            self.clk += 1_u32;
         }
 
         // make sure we execute the required number of operation groups; this would happen when the
@@ -976,7 +950,7 @@ impl FastProcessor {
             .expect("internal error: node id {node_id} not found in current forest");
 
         for &decorator_id in node.before_enter() {
-            self.execute_decorator(&current_forest[decorator_id], 0, host)?;
+            self.execute_decorator(&current_forest[decorator_id], host)?;
         }
 
         Ok(())
@@ -994,7 +968,7 @@ impl FastProcessor {
             .expect("internal error: node id {node_id} not found in current forest");
 
         for &decorator_id in node.after_exit() {
-            self.execute_decorator(&current_forest[decorator_id], 0, host)?;
+            self.execute_decorator(&current_forest[decorator_id], host)?;
         }
 
         Ok(())
@@ -1004,13 +978,12 @@ impl FastProcessor {
     fn execute_decorator(
         &mut self,
         decorator: &Decorator,
-        op_idx_in_batch: usize,
         host: &mut impl AsyncHost,
     ) -> Result<(), ExecutionError> {
         match decorator {
             Decorator::Debug(options) => {
                 if self.in_debug_mode {
-                    let process = &mut self.state(op_idx_in_batch);
+                    let process = &mut self.state();
                     host.on_debug(process, options)?;
                 }
             },
@@ -1018,7 +991,7 @@ impl FastProcessor {
                 // do nothing
             },
             Decorator::Trace(id) => {
-                let process = &mut self.state(op_idx_in_batch);
+                let process = &mut self.state();
                 host.on_trace(process, *id)?;
             },
         };
@@ -1053,14 +1026,12 @@ impl FastProcessor {
             Operation::Noop => {
                 // do nothing
             },
-            Operation::Assert(err_code) => {
-                self.op_assert(*err_code, op_idx, host, program, err_ctx)?
-            },
+            Operation::Assert(err_code) => self.op_assert(*err_code, host, program, err_ctx)?,
             Operation::FmpAdd => self.op_fmpadd(),
             Operation::FmpUpdate => self.op_fmpupdate()?,
             Operation::SDepth => self.op_sdepth(),
             Operation::Caller => self.op_caller()?,
-            Operation::Clk => self.op_clk(op_idx)?,
+            Operation::Clk => self.op_clk()?,
             Operation::Emit(_event_id) => {
                 panic!("emit instruction requires async, so is not supported by execute_op()")
             },
@@ -1084,7 +1055,7 @@ impl FastProcessor {
             Operation::Add => self.op_add()?,
             Operation::Neg => self.op_neg()?,
             Operation::Mul => self.op_mul()?,
-            Operation::Inv => self.op_inv(op_idx, err_ctx)?,
+            Operation::Inv => self.op_inv(err_ctx)?,
             Operation::Incr => self.op_incr()?,
             Operation::And => self.op_and(err_ctx)?,
             Operation::Or => self.op_or(err_ctx)?,
@@ -1101,7 +1072,7 @@ impl FastProcessor {
             Operation::U32sub => self.op_u32sub(op_idx, err_ctx)?,
             Operation::U32mul => self.op_u32mul(err_ctx)?,
             Operation::U32madd => self.op_u32madd(err_ctx)?,
-            Operation::U32div => self.op_u32div(op_idx, err_ctx)?,
+            Operation::U32div => self.op_u32div(err_ctx)?,
             Operation::U32and => self.op_u32and(err_ctx)?,
             Operation::U32xor => self.op_u32xor(err_ctx)?,
             Operation::U32assert2(err_code) => self.op_u32assert2(*err_code, err_ctx)?,
@@ -1145,23 +1116,23 @@ impl FastProcessor {
 
             // ----- input / output ---------------------------------------------------------------
             Operation::Push(element) => self.op_push(*element),
-            Operation::AdvPop => self.op_advpop(op_idx, err_ctx)?,
-            Operation::AdvPopW => self.op_advpopw(op_idx, err_ctx)?,
-            Operation::MLoadW => self.op_mloadw(op_idx, err_ctx)?,
-            Operation::MStoreW => self.op_mstorew(op_idx, err_ctx)?,
+            Operation::AdvPop => self.op_advpop(err_ctx)?,
+            Operation::AdvPopW => self.op_advpopw(err_ctx)?,
+            Operation::MLoadW => self.op_mloadw(err_ctx)?,
+            Operation::MStoreW => self.op_mstorew(err_ctx)?,
             Operation::MLoad => self.op_mload(err_ctx)?,
             Operation::MStore => self.op_mstore(err_ctx)?,
-            Operation::MStream => self.op_mstream(op_idx, err_ctx)?,
-            Operation::Pipe => self.op_pipe(op_idx, err_ctx)?,
+            Operation::MStream => self.op_mstream(err_ctx)?,
+            Operation::Pipe => self.op_pipe(err_ctx)?,
 
             // ----- cryptographic operations -----------------------------------------------------
             Operation::HPerm => self.op_hperm(),
             Operation::MpVerify(err_code) => self.op_mpverify(*err_code, program, err_ctx)?,
             Operation::MrUpdate => self.op_mrupdate(err_ctx)?,
             Operation::FriE2F4 => self.op_fri_ext2fold4()?,
-            Operation::HornerBase => self.op_horner_eval_base(op_idx, err_ctx)?,
-            Operation::HornerExt => self.op_horner_eval_ext(op_idx, err_ctx)?,
-            Operation::EvalCircuit => self.op_eval_circuit(op_idx, err_ctx)?,
+            Operation::HornerBase => self.op_horner_eval_base(err_ctx)?,
+            Operation::HornerExt => self.op_horner_eval_ext(err_ctx)?,
+            Operation::EvalCircuit => self.op_eval_circuit(err_ctx)?,
         }
 
         Ok(())
@@ -1182,7 +1153,6 @@ impl FastProcessor {
     {
         let mast_forest = host
             .get_mast_forest(&node_digest)
-            .await
             .ok_or_else(|| get_mast_forest_failed(node_digest, err_ctx))?;
 
         // We limit the parts of the program that can be called externally to procedure
@@ -1384,14 +1354,12 @@ impl FastProcessor {
 #[derive(Debug)]
 pub struct FastProcessState<'a> {
     pub(super) processor: &'a mut FastProcessor,
-    /// the index of the operation in its basic block
-    pub(super) op_idx: usize,
 }
 
 impl FastProcessor {
     #[inline(always)]
-    pub fn state(&mut self, op_idx: usize) -> ProcessState<'_> {
-        ProcessState::Fast(FastProcessState { processor: self, op_idx })
+    pub fn state(&mut self) -> ProcessState<'_> {
+        ProcessState::Fast(FastProcessState { processor: self })
     }
 }
 

@@ -303,6 +303,15 @@ High-level constructs for controlling the execution flow.
     - Useful for empty blocks or explicitly advancing cycles.
     - Assembler automatically inserts `nop` for empty/elided branches in `if` statements.
 
+## Events
+
+Instructions for communicating with the host through events and tracing.
+
+| Instruction | Stack Input | Stack Output | Cycles | Notes                                                                                                                                    |
+| ----------- | ----------- | ------------ | ------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `emit.<event_id>` | `[...]`     | `[...]`      | 5      | Emits an event with the specified `event_id` to the host. Does not change the state of the operand stack. The `event_id` can be any 32-bit value specified either directly or via a [named constant](./code_organization.md#constants). Events allow programs to communicate contextual information to the host for triggering appropriate actions. Example: `emit.123` or `emit.EVENT_ID_1` |
+| `trace.<trace_id>` | `[...]`     | `[...]`      | 0      | Emits a trace with the specified `trace_id` to the host. Does not change the state of the operand stack. The `trace_id` can be any 32-bit value specified either directly or via a [named constant](./code_organization.md#constants). Only active when programs are run with tracing flag (`-t` or `--trace`), otherwise ignored. Example: `trace.123` or `trace.TRACE_ID_1` |
+
 ## Debugging Operations
 
 Instructions for inspecting VM state during execution. These do not affect VM state or program hash and are only active when the assembler is in debug mode.

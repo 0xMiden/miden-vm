@@ -44,9 +44,9 @@ impl AnalysisContext {
         self.procedures.insert(name);
     }
 
-    /// Define a new constant `name`, bound to `value`
+    /// Define a new constant `constant`
     ///
-    /// Returns `Err` if the symbol is already defined
+    /// Returns `Err` if a constant with the same name is already defined
     pub fn define_constant(&mut self, mut constant: Constant) -> Result<(), SyntaxError> {
         // Handle symbol conflicts before eval to make sure we can catch self-referential
         // expressions.

@@ -1,15 +1,15 @@
-use std::{sync::Arc, vec};
+use std::vec;
 
 use miden_air::{Felt, ProvingOptions, RowIndex};
-use miden_assembly::{Assembler, DefaultSourceManager, utils::Serializable};
+use miden_assembly::{Assembler, utils::Serializable};
 use miden_core::{StarkField, ZERO};
 use miden_processor::{
-    AdviceInputs, EventError, ExecutionError, ProcessState, Program, ProgramInfo, StackInputs,
-    crypto::RpoRandomCoin,
+    AdviceInputs, AdviceMutation, DefaultHost, EventError, ExecutionError, ProcessState, Program,
+    ProgramInfo, StackInputs, crypto::RpoRandomCoin,
 };
 use miden_stdlib::{StdLibrary, falcon_sign};
 use miden_utils_testing::{
-    TestHost, Word,
+    Word,
     crypto::{
         MerkleStore, Rpo256,
         rpo_falcon512::{Polynomial, SecretKey},
@@ -60,7 +60,7 @@ const EVENT_FALCON_SIG_TO_STACK: u32 = 3419226139;
 /// - SIGNATURE is the signature being verified.
 ///
 /// The advice provider is expected to contain the private key associated to the public key PK.
-pub fn push_falcon_signature(process: &mut ProcessState) -> Result<(), EventError> {
+pub fn push_falcon_signature(process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
     let pub_key = process.get_stack_word(0);
     let msg = process.get_stack_word(1);
 
@@ -69,13 +69,10 @@ pub fn push_falcon_signature(process: &mut ProcessState) -> Result<(), EventErro
         .get_mapped_values(&pub_key)
         .ok_or(FalconError::NoSecretKey { key: pub_key })?;
 
-    let result = falcon_sign(pk_sk, msg)
+    let signature_result = falcon_sign(pk_sk, msg)
         .ok_or(FalconError::MalformedSignatureKey { key_type: "RPO Falcon512" })?;
 
-    for r in result {
-        process.advice_provider_mut().push_stack(r);
-    }
-    Ok(())
+    Ok(vec![AdviceMutation::extend_stack(signature_result)])
 }
 
 // EVENT ERROR
@@ -287,7 +284,7 @@ fn falcon_prove_verify() {
 
     let stack_inputs = StackInputs::try_from_ints(op_stack).expect("failed to create stack inputs");
     let advice_inputs = AdviceInputs::default().with_map(advice_map);
-    let mut host = TestHost::default();
+    let mut host = DefaultHost::default();
     host.load_library(&StdLibrary::default()).expect("failed to load mast forest");
     host.load_handler(EVENT_FALCON_SIG_TO_STACK, push_falcon_signature).unwrap();
 
@@ -298,7 +295,6 @@ fn falcon_prove_verify() {
         advice_inputs,
         &mut host,
         options,
-        Arc::new(DefaultSourceManager::default()),
     )
     .expect("failed to generate proof");
 

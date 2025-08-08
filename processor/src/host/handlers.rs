@@ -7,7 +7,7 @@ use core::{error::Error, fmt, fmt::Debug};
 
 use miden_core::DebugOptions;
 
-use crate::{ExecutionError, ProcessState};
+use crate::{AdviceMutation, ExecutionError, ProcessState};
 
 // EVENT HANDLER TRAIT
 // ================================================================================================
@@ -19,16 +19,19 @@ use crate::{ExecutionError, ProcessState};
 /// be stored in the process's advice provider.
 pub trait EventHandler: Send + Sync + 'static {
     /// Handles the event when triggered.
-    fn on_event(&self, process: &mut ProcessState) -> Result<(), EventError>;
+    fn on_event(&self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError>;
 }
 
 /// Default implementation for both free functions and closures with signature
-/// `fn(&mut ProcessState) -> Result<(), HandlerError>`
+/// `fn(&ProcessState) -> Result<(), HandlerError>`
 impl<F> EventHandler for F
 where
-    F: for<'a> Fn(&'a mut ProcessState) -> Result<(), EventError> + Send + Sync + 'static,
+    F: for<'a> Fn(&'a ProcessState) -> Result<Vec<AdviceMutation>, EventError>
+        + Send
+        + Sync
+        + 'static,
 {
-    fn on_event(&self, process: &mut ProcessState) -> Result<(), EventError> {
+    fn on_event(&self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
         self(process)
     }
 }
@@ -39,7 +42,7 @@ where
 /// A generic [`Error`] wrapper allowing handlers to return errors to the Host caller.
 ///
 /// Error handlers can define their own [`Error`] type which can be seamlessly converted
-/// into this type since it is a [`Box`].  
+/// into this type since it is a [`Box`].
 ///
 /// # Example
 ///
@@ -79,9 +82,9 @@ pub type EventError = Box<dyn Error + Send + Sync + 'static>;
 ///             // the event was handled by the registered event handlers; just return
 ///             return Ok(());
 ///         }
-///         
+///
 ///         // implement custom event handling
-///         
+///
 ///         Err(EventError::UnhandledEvent { id: event_id })
 ///     }
 /// }
@@ -117,15 +120,20 @@ impl EventHandlerRegistry {
 
     /// Handles the event if the registry contains a handler with the same identifier.
     ///
-    /// Returns a bool indicating whether the event was handled. If the event was handled but
-    /// returned an error, it is propagated to the caller.
-    pub fn handle_event(&self, id: u32, process: &mut ProcessState) -> Result<bool, EventError> {
+    /// Returns an `Option<_>` indicating whether the event was handled, wrapping resulting
+    /// mutations if any. Returns `None` if the event was not handled, if the event was handled
+    /// successfully `Some(mutations)` is returned, and if the handler returns an error, it is
+    /// propagated to the caller.
+    pub fn handle_event(
+        &self,
+        id: u32,
+        process: &ProcessState,
+    ) -> Result<Option<Vec<AdviceMutation>>, EventError> {
         if let Some(handler) = self.handlers.get(&id) {
-            handler.on_event(process)?;
-            return Ok(true);
+            return handler.on_event(process).map(Some);
         }
 
-        Ok(false)
+        Ok(None)
     }
 }
 
@@ -144,7 +152,7 @@ pub trait DebugHandler: Sync {
     /// This function is invoked when the `Debug` decorator is executed.
     fn on_debug(
         &mut self,
-        process: &mut ProcessState,
+        process: &ProcessState,
         options: &DebugOptions,
     ) -> Result<(), ExecutionError> {
         let _ = (&process, options);
@@ -154,11 +162,7 @@ pub trait DebugHandler: Sync {
     }
 
     /// This function is invoked when the `Trace` decorator is executed.
-    fn on_trace(
-        &mut self,
-        process: &mut ProcessState,
-        trace_id: u32,
-    ) -> Result<(), ExecutionError> {
+    fn on_trace(&mut self, process: &ProcessState, trace_id: u32) -> Result<(), ExecutionError> {
         let _ = (&process, trace_id);
         #[cfg(feature = "std")]
         std::println!(

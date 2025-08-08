@@ -33,7 +33,6 @@ impl DebugExecutor {
             stack_inputs,
             advice_inputs,
             &mut DefaultHost::default(),
-            source_manager.clone(),
         );
         let vm_state = vm_state_iter
             .next()

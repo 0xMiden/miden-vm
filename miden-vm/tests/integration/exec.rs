@@ -20,14 +20,14 @@ fn advice_map_loaded_before_execution() {
         Assembler::default().assemble_program(source).unwrap();
 
     // Test `miden_processor::execute` fails if no advice map provided with the program
-    let mut host = DefaultHost::default();
+    let mut host =
+        DefaultHost::default().with_source_manager(Arc::new(DefaultSourceManager::default()));
     match miden_processor::execute(
         &program_without_advice_map,
         StackInputs::default(),
         AdviceInputs::default(),
         &mut host,
         ExecutionOptions::default(),
-        Arc::new(DefaultSourceManager::default()),
     ) {
         Ok(_) => panic!("Expected error"),
         Err(e) => {
@@ -59,7 +59,6 @@ fn advice_map_loaded_before_execution() {
         AdviceInputs::default(),
         &mut host,
         ExecutionOptions::default(),
-        Arc::new(DefaultSourceManager::default()),
     )
     .unwrap();
 }

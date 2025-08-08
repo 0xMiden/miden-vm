@@ -1,10 +1,7 @@
-use std::{path::PathBuf, sync::Arc, time::Instant};
+use std::{path::PathBuf, time::Instant};
 
 use clap::Parser;
-use miden_assembly::{
-    DefaultSourceManager,
-    diagnostics::{IntoDiagnostic, Report, WrapErr},
-};
+use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
 use miden_processor::{DefaultHost, ExecutionOptions, ExecutionTrace};
 use miden_stdlib::StdLibrary;
 use miden_vm::internal::InputFile;
@@ -147,9 +144,6 @@ fn run_masp_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
 
     let program_hash: [u8; 32] = program.hash().into();
 
-    // Packages don't ship with sources, so we use a default source manager.
-    let source_manager = Arc::new(DefaultSourceManager::default());
-
     // execute program and generate outputs
     let trace = miden_processor::execute(
         &program,
@@ -157,7 +151,6 @@ fn run_masp_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
         advice_inputs,
         &mut host,
         execution_options,
-        source_manager,
     )
     .wrap_err("Failed to generate execution trace")?;
 
@@ -192,7 +185,7 @@ fn run_masm_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
     // fetch the stack and program inputs from the arguments
     let stack_inputs = input_data.parse_stack_inputs().map_err(Report::msg)?;
     let advice_inputs = input_data.parse_advice_inputs().map_err(Report::msg)?;
-    let mut host = DefaultHost::default();
+    let mut host = DefaultHost::default().with_source_manager(source_manager);
     host.load_library(&StdLibrary::default()).unwrap();
     for lib in libraries.libraries {
         host.load_library(lib.mast_forest()).unwrap();
@@ -206,7 +199,6 @@ fn run_masm_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
         advice_inputs,
         &mut host,
         execution_options,
-        source_manager,
     )
     .wrap_err("Failed to generate execution trace")?;
 

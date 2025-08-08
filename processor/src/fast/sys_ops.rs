@@ -12,13 +12,12 @@ impl FastProcessor {
     pub fn op_assert(
         &mut self,
         err_code: Felt,
-        op_idx: usize,
         host: &mut impl BaseHost,
         program: &MastForest,
         err_ctx: &impl ErrorContext,
     ) -> Result<(), ExecutionError> {
         if self.stack_get(0) != ONE {
-            let process = &mut self.state(op_idx);
+            let process = &mut self.state();
             host.on_assert_failed(process, err_code);
             let err_msg = program.resolve_error_message(err_code);
             return Err(ExecutionError::failed_assertion(
@@ -75,9 +74,9 @@ impl FastProcessor {
     }
 
     /// Analogous to `Process::op_clk`.
-    pub fn op_clk(&mut self, op_idx: usize) -> Result<(), ExecutionError> {
+    pub fn op_clk(&mut self) -> Result<(), ExecutionError> {
         self.increment_stack_size();
-        self.stack_write(0, (self.clk + op_idx).into());
+        self.stack_write(0, self.clk.into());
         Ok(())
     }
 
@@ -86,18 +85,23 @@ impl FastProcessor {
     pub async fn op_emit(
         &mut self,
         event_id: u32,
-        op_idx: usize,
         host: &mut impl AsyncHost,
         err_ctx: &impl ErrorContext,
     ) -> Result<(), ExecutionError> {
-        let process = &mut self.state(op_idx);
+        let mut process = self.state();
         // If it's a system event, handle it directly. Otherwise, forward it to the host.
         if let Some(system_event) = SystemEvent::from_event_id(event_id) {
-            handle_system_event(process, system_event, err_ctx)
+            handle_system_event(&mut process, system_event, err_ctx)
         } else {
-            host.on_event(process, event_id)
+            let clk = process.clk();
+            let mutations = host
+                .on_event(&process, event_id)
                 .await
-                .map_err(|err| ExecutionError::event_error(err, event_id, err_ctx))
+                .map_err(|err| ExecutionError::event_error(err, event_id, err_ctx))?;
+            self.advice
+                .apply_mutations(mutations)
+                .map_err(|err| ExecutionError::advice_error(err, clk, err_ctx))?;
+            Ok(())
         }
     }
 }

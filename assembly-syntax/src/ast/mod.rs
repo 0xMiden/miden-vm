@@ -16,6 +16,7 @@ mod op;
 mod procedure;
 #[cfg(test)]
 mod tests;
+mod r#type;
 pub mod visit;
 
 pub use self::{
@@ -36,6 +37,7 @@ pub use self::{
     module::{Module, ModuleKind},
     op::Op,
     procedure::*,
+    r#type::*,
     visit::{Visit, VisitMut},
 };
 

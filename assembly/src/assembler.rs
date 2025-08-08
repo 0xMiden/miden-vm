@@ -3,9 +3,13 @@ use alloc::{collections::BTreeMap, string::ToString, sync::Arc, vec::Vec};
 use miden_assembly_syntax::{
     KernelLibrary, Library, LibraryNamespace, LibraryPath, Parse, ParseOptions,
     SemanticAnalysisError,
-    ast::{self, Export, InvocationTarget, InvokeKind, ModuleKind, QualifiedProcedureName},
+    ast::{
+        self, Export, InvocationTarget, InvokeKind, ModuleKind, QualifiedProcedureName,
+        types::FunctionType,
+    },
     debuginfo::{DefaultSourceManager, SourceManager, SourceSpan, Spanned},
     diagnostics::{RelatedLabel, Report},
+    library::LibraryExport,
 };
 use miden_core::{
     AssemblyOp, Decorator, Felt, Kernel, Operation, Program, WORD_SIZE, Word,
@@ -466,11 +470,13 @@ impl Assembler {
                     let gid = module_idx + proc_idx;
                     self.compile_subgraph(gid, &mut mast_forest_builder)?;
 
-                    let proc_root_node_id = mast_forest_builder
+                    let node = mast_forest_builder
                         .get_procedure(gid)
                         .expect("compilation succeeded but root not found in cache")
                         .body_node_id();
-                    exports.insert(fqn, proc_root_node_id);
+                    let signature = ast_module.procedure_signature(proc_idx).cloned();
+                    let export = LibraryExport { node, name: fqn.clone(), signature };
+                    exports.insert(fqn, export);
                 }
             }
 
@@ -478,9 +484,9 @@ impl Assembler {
         };
 
         let (mast_forest, id_remappings) = mast_forest_builder.build();
-        for (_proc_name, node_id) in exports.iter_mut() {
-            if let Some(&new_node_id) = id_remappings.get(node_id) {
-                *node_id = new_node_id;
+        for (_proc_name, export) in exports.iter_mut() {
+            if let Some(&new_node_id) = id_remappings.get(&export.node) {
+                export.node = new_node_id;
             }
         }
 
@@ -611,6 +617,7 @@ impl Assembler {
                         procedure_gid,
                         name,
                         proc.visibility(),
+                        proc.signature().cloned(),
                         module.is_in_kernel(),
                         self.source_manager.clone(),
                     )
@@ -635,21 +642,26 @@ impl Assembler {
                         module: module.path().clone(),
                         name: proc_alias.name().clone(),
                     };
-                    let pctx = ProcedureContext::new(
+                    let mut pctx = ProcedureContext::new(
                         procedure_gid,
                         name,
                         ast::Visibility::Public,
+                        None,
                         module.is_in_kernel(),
                         self.source_manager.clone(),
                     )
                     .with_span(proc_alias.span());
 
-                    let proc_node_id = self.resolve_target(
-                        InvokeKind::ProcRef,
-                        &proc_alias.target().into(),
-                        &pctx,
-                        mast_forest_builder,
-                    )?;
+                    let ResolvedProcedure { node: proc_node_id, signature, .. } = self
+                        .resolve_target(
+                            InvokeKind::ProcRef,
+                            &proc_alias.target().into(),
+                            &pctx,
+                            mast_forest_builder,
+                        )?;
+
+                    pctx.set_signature(signature);
+
                     let proc_mast_root =
                         mast_forest_builder.get_mast_node(proc_node_id).unwrap().digest();
 
@@ -906,7 +918,7 @@ impl Assembler {
         target: &InvocationTarget,
         proc_ctx: &ProcedureContext,
         mast_forest_builder: &mut MastForestBuilder,
-    ) -> Result<MastNodeId, Report> {
+    ) -> Result<ResolvedProcedure, Report> {
         let caller = CallerInfo {
             span: target.span(),
             module: proc_ctx.id().module,
@@ -914,24 +926,33 @@ impl Assembler {
         };
         let resolved = self.linker.resolve_target(&caller, target)?;
         match resolved {
-            ResolvedTarget::Phantom(mast_root) => self.ensure_valid_procedure_mast_root(
-                kind,
-                target.span(),
-                mast_root,
-                mast_forest_builder,
-            ),
+            ResolvedTarget::Phantom(mast_root) => {
+                let node = self.ensure_valid_procedure_mast_root(
+                    kind,
+                    target.span(),
+                    mast_root,
+                    mast_forest_builder,
+                )?;
+                Ok(ResolvedProcedure { node, signature: None })
+            },
             ResolvedTarget::Exact { gid } | ResolvedTarget::Resolved { gid, .. } => {
                 match mast_forest_builder.get_procedure(gid) {
-                    Some(proc) => Ok(proc.body_node_id()),
+                    Some(proc) => Ok(ResolvedProcedure {
+                        node: proc.body_node_id(),
+                        signature: proc.signature(),
+                    }),
                     // We didn't find the procedure in our current MAST forest. We still need to
                     // check if it exists in one of a library dependency.
                     None => match self.linker.get_procedure_unsafe(gid) {
-                        ProcedureLink::Info(p) => self.ensure_valid_procedure_mast_root(
-                            kind,
-                            target.span(),
-                            p.digest,
-                            mast_forest_builder,
-                        ),
+                        ProcedureLink::Info(p) => {
+                            let node = self.ensure_valid_procedure_mast_root(
+                                kind,
+                                target.span(),
+                                p.digest,
+                                mast_forest_builder,
+                            )?;
+                            Ok(ResolvedProcedure { node, signature: p.signature.clone() })
+                        },
                         ProcedureLink::Ast(_) => panic!(
                             "AST procedure {gid:?} exists in the linker, but not in the MastForestBuilder"
                         ),
@@ -1014,4 +1035,9 @@ impl Assembler {
 pub(crate) struct BodyWrapper {
     pub prologue: Vec<Operation>,
     pub epilogue: Vec<Operation>,
+}
+
+pub(super) struct ResolvedProcedure {
+    pub node: MastNodeId,
+    pub signature: Option<Arc<FunctionType>>,
 }

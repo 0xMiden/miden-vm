@@ -53,4 +53,6 @@
   - [Lookup arguments](./design/lookups/main.md)
     - [Multiset checks](./design/lookups/multiset.md)
     - [LogUp](./design/lookups/logup.md)
+- [Advanced Topics](./advanced_topics/main.md)
+  - [Execution trace optimization](./advanced_topics/execution_trace_optimization.md)
 - [Background Material](./background.md)

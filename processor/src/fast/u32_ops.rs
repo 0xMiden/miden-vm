@@ -115,12 +115,8 @@ impl FastProcessor {
 
     /// Analogous to `Process::op_u32div`.
     #[inline(always)]
-    pub fn op_u32div(
-        &mut self,
-        op_idx: usize,
-        err_ctx: &impl ErrorContext,
-    ) -> Result<(), ExecutionError> {
-        let clk = self.clk + op_idx;
+    pub fn op_u32div(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
+        let clk = self.clk;
         self.u32_pop2_applyfn_push_results(
             ZERO,
             |first, second| {
