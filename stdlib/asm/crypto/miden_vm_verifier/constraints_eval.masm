@@ -1,8 +1,103 @@
+use.std::crypto::hashes::rpo
 use.std::crypto::stark::constants
 use.std::crypto::stark::utils
-use.std::crypto::hashes::rpo
 
-# Constraint evaluation circuit description
+# CONSTANTS
+# =================================================================================================
+
+# Number of constraints, both boundary and transitional
+const.NUM_CONSTRAINTS=6
+
+# Number of inputs to the constraint evaluation circuit
+const.NUM_INPUTS_CIRCUIT=244
+
+# Number of evaluation gates in the constraint evaluation circuit
+const.NUM_EVAL_GATES_CIRCUIT=108
+
+# Max cycle length for periodic columns
+const.MAX_CYCLE_LEN_LOG=3
+
+# --- constant getters --------------------------------------------------------
+
+proc.get_num_constraints
+    push.NUM_CONSTRAINTS
+end
+
+# ERRORS
+# =================================================================================================
+
+const.ERR_FAILED_TO_LOAD_CIRCUIT_DESCRIPTION="failed to load the circuit description for the constraints evaluation check"
+
+
+# CONSTRAINT EVALUATION CHECKER
+# =================================================================================================
+
+#! Executes the constraints evaluation check by evaluating and arithmetic circuit using the ACE
+#! chiplet.
+#!
+#! The circuit description is hardcoded into the verifier using its commitment, which is computed as
+#! the sequential hash of its description using RPO hasher. The circuit description, containing both
+#! constants and evaluation gates description, is stored at the contiguous memory region starting
+#! at `ACE_CIRCUIT_PTR`. The variable part of the circuit input is stored at the contiguous memory
+#! region starting at `pi_ptr`. The (variable) inputs to the circuit are laid out such that the
+#! aforementioned memory regions are together contiguous and the (variable) inputs section.
+#!
+#! Inputs:  []
+#! Outputs: []
+export.execute_constraint_evaluation_check
+    # Compute and store at the appropriate memory location the auxiliary inputs needed by
+    # the arithmetic circuit.
+    push.MAX_CYCLE_LEN_LOG
+    exec.utils::set_up_auxiliary_inputs_ace
+    # => []
+
+    # Load the circuit description from the advice tape and check that it matches the hardcoded digest
+    exec.load_ace_circuit_description
+    # => []
+
+    # Set up the inputs to the "eval_circuit" op. Namely:
+    # 1. a pointer to the inputs of the circuit in memory,
+    # 2. the number of inputs to the circuit,
+    # 3. the number of evaluation gates in the circuit.
+    push.NUM_EVAL_GATES_CIRCUIT
+    push.NUM_INPUTS_CIRCUIT
+    exec.constants::public_inputs_address_ptr mem_load
+    # => [pi_ptr, n_read, n_eval]
+
+    # Perform the constraint evaluation check by checking that the circuit evaluates to zero, which
+    # boils down to the "eval_circuit" returning.
+    eval_circuit
+    # => [pi_ptr, n_read, n_eval]
+
+    # Clean up the stack.
+    drop drop drop
+    # => []
+end
+
+#! Loads the description of the ACE circuit for the constraints evaluation check.
+#!
+#! Inputs:  []
+#! Outputs: []
+proc.load_ace_circuit_description
+    push.CIRCUIT_COMMITMENT
+    adv.push_mapval
+    exec.constants::get_arithmetic_circuit_ptr
+    padw padw padw
+    repeat.14
+        adv_pipe
+        hperm
+    end
+    exec.rpo::squeeze_digest
+    movup.4 drop
+    assert_eqw.err=ERR_FAILED_TO_LOAD_CIRCUIT_DESCRIPTION
+    # => []
+end
+
+
+# CONSTRAINT EVALUATION CIRCUIT DESCRIPTION
+# =================================================================================================
+
+
 adv_map.CIRCUIT_COMMITMENT=[
     1,
     0,
@@ -115,90 +210,5 @@ adv_map.CIRCUIT_COMMITMENT=[
     1152921508901814276,
     1152921507828072451,
     1152921506754330626,
-    1152921505680588801]
-
-# CONSTANTS
-# =================================================================================================
-
-# Number of constraints, both boundary and transitional
-const.NUM_CONSTRAINTS=6
-
-# Number of inputs to the constraint evaluation circuit
-const.NUM_INPUTS_CIRCUIT=244
-
-# Number of evaluation gates in the constraint evaluation circuit
-const.NUM_EVAL_GATES_CIRCUIT=108
-
-# Max cycle length for periodic columns
-const.MAX_CYCLE_LEN_LOG=3
-
-# CONSTANTS GETTERS
-# =================================================================================================
-
-proc.get_num_constraints
-    push.NUM_CONSTRAINTS
-end
-
-# HELPER PROCEDURES
-# =================================================================================================
-
-#! Executes the constraints evaluation check by evaluating and arithmetic circuit using
-#! the ACE chiplet.
-#!
-#! The circuit description is hardcoded into the verifier using its commitment, which is computed as
-#! the sequential hash of its description using RPO hasher. The circuit description, containing both
-#! constants and evaluation gates description, is stored at the contiguous memory region starting
-#! at `ACE_CIRCUIT_PTR`. The variable part of the circuit input is stored at the contiguous memory
-#! region starting at `pi_ptr`. The (variable) inputs to the circuit are layed out such that
-#! the aforementioned memory regions are together contiguous and the (variable) inputs section.
-#!
-#! Input: [...]
-#! Output: [...]
-export.execute_constraint_evaluation_check
-    # 1) Compute and store at the appropriate memory location the auxiliary inputs needed by
-    #    the arithmetic circuit.
-    push.MAX_CYCLE_LEN_LOG
-    exec.utils::set_up_auxiliary_inputs_ace
-    # => [...]
-
-    # 2) Load the circuit description from the advice tape and check that it matches the hardcoded digest.
-    exec.load_ace_circuit_description
-    # => [...]
-
-    # 3) Set up the inputs to the "eval_circuit" op. Namely:
-    #    1. a pointer to the inputs of the circuit in memory,
-    #    2. the number of inputs to the circuit,
-    #    3. the number of evaluation gates in the circuit.
-    push.NUM_EVAL_GATES_CIRCUIT
-    push.NUM_INPUTS_CIRCUIT
-    exec.constants::public_inputs_address_ptr mem_load
-    # => [pi_ptr, n_read, n_eval, ...]
-
-    # 4) Perform the constraint evaluation check by checking that the circuit evaluates to zero, which
-    #    boils down to the "eval_circuit" returning.
-    eval_circuit
-    # => [pi_ptr, n_read, n_eval, ...]
-
-    # 5) Clean up the stack.
-    drop drop drop
-    # => [...]
-end
-
-#! Loads the description of the ACE circuit for the constraints evaluation check.
-#!
-#! Input: [...]
-#! Output: [...]
-proc.load_ace_circuit_description
-    push.CIRCUIT_COMMITMENT
-    adv.push_mapval
-    exec.constants::get_arithmetic_circuit_ptr
-    padw padw padw
-    repeat.14
-        adv_pipe
-        hperm
-    end
-    exec.rpo::squeeze_digest
-    movup.4 drop
-    assert_eqw.err="loading failed of the circuit description for the constraints evaluation check"
-    # => [...]
-end
+    1152921505680588801
+]
