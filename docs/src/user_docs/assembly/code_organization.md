@@ -200,7 +200,7 @@ end
 
 #### Word constants
 
-Along with the regular value constants a word constants could be used. They could be declared as an array of four elements or as a long hex value, and then could be used in the `push` instructions referenced by their name. Notice that a word constant can not be used in a constant expression.
+Along with the regular value constants a _word_ constants could be used. They could be declared as an array of four elements or as a long hex value, and then could be used in the `push` instructions referenced by their name. Notice that a word constant can not be used in a constant expression.
 
 ```
 const.SAMPLE_WORD=[1,2,3,4]
@@ -214,7 +214,7 @@ end
 
 #### Word constant slices
 
-It is possible to get just some part of a word constant using a slice notation. This could be done by using a range in the square brackets right after a constant name. Attempt to get a slice from a constant which doesn't represent a word will return an error. 
+It is possible to get just some part of a word constant using slice notation. This could be done by specifying a range in square brackets right after the constant's name. Attempt to get slices from constants which don't represent words will result in errors. 
 
 ```
 const.SAMPLE_WORD=[5,6,7,8]
@@ -223,6 +223,8 @@ const.SAMPLE_VALUE=9
 begin
     push.SAMPLE_WORD[1..3]  # is equivalent to push.6.7
     push.SAMPLE_WORD[0]     # is equivalent to push.5
+
+    push.SAMPLE_WORD[2..2]  # do nothing
 
     push.SAMPLE_VALUE[1..3] # returns an error: invalid slice constant
 end

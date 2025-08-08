@@ -1324,6 +1324,7 @@ fn test_push_word_slice() -> TestResult {
     begin
         push.SAMPLE_WORD[1..3]
         push.SAMPLE_WORD[0]
+        push.SAMPLE_WORD[2..2]
     end
     "
     );

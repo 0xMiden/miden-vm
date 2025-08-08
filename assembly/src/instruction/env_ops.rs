@@ -50,7 +50,7 @@ where
 /// # Errors
 /// Returns an error if:
 /// - The provided [`IntValue`] is not a [`IntValue::Word`].
-/// - The provided range is malformed or empty.
+/// - The provided range is malformed.
 pub fn push_word_slice(
     imm: &Immediate<IntValue>,
     range: &Range<usize>,
