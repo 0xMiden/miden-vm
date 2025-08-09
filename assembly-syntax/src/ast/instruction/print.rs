@@ -218,12 +218,12 @@ impl PrettyPrint for Instruction {
             Self::PushFelt(value) => {
                 inst_with_felt_imm("push", &Immediate::Value(Span::unknown(*value)))
             },
-            Self::PushWord(value) => flatten(const_text("push") + const_text(".") + value.render()),
-            Self::PushU8List(values) => inst_with_pretty_params("push", values),
-            Self::PushU16List(values) => inst_with_pretty_params("push", values),
-            Self::PushU32List(values) => inst_with_pretty_params("push", values),
-            Self::PushFeltList(values) => inst_with_pretty_felt_params("push", values),
-
+            Self::PushWord(value) => flatten(const_text("push.") + value.render()),
+            Self::PushWordSlice(value, range) => flatten(
+                const_text("push.")
+                    + value.render()
+                    + text(format!("[{}..{}]", range.start, range.end)),
+            ),
             Self::Locaddr(value) => inst_with_imm("locaddr", value),
             Self::Sdepth => const_text("sdepth"),
             Self::Caller => const_text("caller"),
@@ -357,46 +357,6 @@ fn inst_with_felt_imm(name: &'static str, imm: &Immediate<crate::Felt>) -> Docum
     flatten(const_text(name) + const_text(".") + value)
 }
 
-fn inst_with_pretty_felt_params(inst: &'static str, params: &[crate::Felt]) -> Document {
-    use crate::prettier::*;
-
-    let single_line = text(inst)
-        + const_text(".")
-        + params
-            .iter()
-            .copied()
-            .map(display)
-            .reduce(|acc, doc| acc + const_text(".") + doc)
-            .unwrap_or_default();
-
-    let multi_line = params
-        .iter()
-        .copied()
-        .map(|v| text(inst) + const_text(".") + display(v))
-        .reduce(|acc, doc| acc + nl() + doc)
-        .unwrap_or_default();
-    single_line | multi_line
-}
-
-fn inst_with_pretty_params<P: PrettyPrint>(inst: &'static str, params: &[P]) -> Document {
-    use crate::prettier::*;
-
-    let single_line = text(inst)
-        + const_text(".")
-        + params
-            .iter()
-            .map(|p| p.render())
-            .reduce(|acc, doc| acc + const_text(".") + doc)
-            .unwrap_or_default();
-
-    let multi_line = params
-        .iter()
-        .map(|v| text(inst) + const_text(".") + v.render())
-        .reduce(|acc, doc| acc + nl() + doc)
-        .unwrap_or_default();
-    single_line | multi_line
-}
-
 // TESTS
 // ================================================================================================
 
@@ -420,12 +380,6 @@ mod tests {
 
         let instruction = format!("{}", Instruction::ExpBitLength(32));
         assert_eq!("exp.u32", instruction);
-
-        let instruction = format!(
-            "{}",
-            Instruction::PushFeltList(vec![Felt::new(3), Felt::new(4), Felt::new(8), Felt::new(9)])
-        );
-        assert_eq!("push.3.4.8.9", instruction);
 
         let digest = Rpo256::hash(b"std::math::u64::add");
         let target = InvocationTarget::MastRoot(Span::unknown(digest));

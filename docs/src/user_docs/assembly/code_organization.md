@@ -198,6 +198,49 @@ end
 
 ```
 
+#### Word constants
+
+Along with the regular value constants a _word_ constants could be used. They could be declared as an array of four elements or as a long hex value, and then could be used in the `push` instructions referenced by their name. Notice that a word constant can not be used in a constant expression.
+
+```
+const.SAMPLE_WORD=[1,2,3,4]
+const.SAMPLE_HEX_WORD=0x0200000000000000030000000000000004000000000000000500000000000000
+
+begin
+    push.SAMPLE_WORD       # is equivalent to push.1.2.3.4
+    push.SAMPLE_HEX_WORD.6 # is equivalent to push.2.3.4.5.6
+end
+```
+
+#### Word constant slices
+
+It is possible to get just some part of a word constant using slice notation. This could be done by specifying a range in square brackets right after the constant's name. Attempt to get slices from constants which don't represent words will result in errors. 
+
+```
+const.SAMPLE_WORD=[5,6,7,8]
+const.SAMPLE_VALUE=9
+
+begin
+    push.SAMPLE_WORD[1..3]  # is equivalent to push.6.7
+    push.SAMPLE_WORD[0]     # is equivalent to push.5
+
+    push.SAMPLE_WORD[2..2]  # do nothing
+
+    push.SAMPLE_VALUE[1..3] # returns an error: invalid slice constant
+end
+```
+
+If a slice with an invalid range is used with a word constant, an error will be returned.
+
+```
+const.SAMPLE_WORD=[5,6,7,8]
+
+begin
+    push.SAMPLE_WORD[10..6] # returns an error
+    push.SAMPLE_WORD[5..7]  # returns an error
+end
+```
+
 ### Comments
 Miden assembly allows annotating code with simple comments. There are two types of comments: single-line comments which start with a `#` (pound) character, and documentation comments which start with `#!` characters. For example:
 ```

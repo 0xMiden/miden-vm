@@ -308,7 +308,7 @@ where
         | MTreeVerifyWithError(code) => visitor.visit_immediate_error_message(code),
         AddImm(imm) | SubImm(imm) | MulImm(imm) | DivImm(imm) | ExpImm(imm) | EqImm(imm)
         | NeqImm(imm) => visitor.visit_immediate_felt(imm),
-        Push(imm) => visitor.visit_immediate_int_value(imm),
+        Push(imm) | PushWordSlice(imm, _) => visitor.visit_immediate_int_value(imm),
         U32WrappingAddImm(imm)
         | U32OverflowingAddImm(imm)
         | U32WrappingSubImm(imm)
@@ -347,11 +347,10 @@ where
         | MovUp13 | MovUp14 | MovUp15 | MovUpW2 | MovUpW3 | MovDn2 | MovDn3 | MovDn4 | MovDn5
         | MovDn6 | MovDn7 | MovDn8 | MovDn9 | MovDn10 | MovDn11 | MovDn12 | MovDn13 | MovDn14
         | MovDn15 | MovDnW2 | MovDnW3 | CSwap | CSwapW | CDrop | CDropW | PushU8(_)
-        | PushU16(_) | PushU32(_) | PushFelt(_) | PushWord(_) | PushU8List(_) | PushU16List(_)
-        | PushU32List(_) | PushFeltList(_) | Sdepth | Caller | Clk | MemLoad | MemLoadW
-        | MemStore | MemStoreW | MemStream | AdvPipe | AdvLoadW | Hash | HMerge | HPerm
-        | MTreeGet | MTreeSet | MTreeMerge | MTreeVerify | FriExt2Fold4 | DynExec | DynCall
-        | Breakpoint | HornerBase | HornerExt | EvalCircuit => ControlFlow::Continue(()),
+        | PushU16(_) | PushU32(_) | PushFelt(_) | PushWord(_) | Sdepth | Caller | Clk | MemLoad
+        | MemLoadW | MemStore | MemStoreW | MemStream | AdvPipe | AdvLoadW | Hash | HMerge
+        | HPerm | MTreeGet | MTreeSet | MTreeMerge | MTreeVerify | FriExt2Fold4 | DynExec
+        | DynCall | Breakpoint | HornerBase | HornerExt | EvalCircuit => ControlFlow::Continue(()),
     }
 }
 
@@ -740,7 +739,7 @@ where
         | MTreeVerifyWithError(code) => visitor.visit_mut_immediate_error_message(code),
         AddImm(imm) | SubImm(imm) | MulImm(imm) | DivImm(imm) | ExpImm(imm) | EqImm(imm)
         | NeqImm(imm) => visitor.visit_mut_immediate_felt(imm),
-        Push(imm) => visitor.visit_mut_immediate_hex(imm),
+        Push(imm) | PushWordSlice(imm, _) => visitor.visit_mut_immediate_hex(imm),
         U32WrappingAddImm(imm)
         | U32OverflowingAddImm(imm)
         | U32WrappingSubImm(imm)
@@ -779,11 +778,10 @@ where
         | MovUp13 | MovUp14 | MovUp15 | MovUpW2 | MovUpW3 | MovDn2 | MovDn3 | MovDn4 | MovDn5
         | MovDn6 | MovDn7 | MovDn8 | MovDn9 | MovDn10 | MovDn11 | MovDn12 | MovDn13 | MovDn14
         | MovDn15 | MovDnW2 | MovDnW3 | CSwap | CSwapW | CDrop | CDropW | PushU8(_)
-        | PushU16(_) | PushU32(_) | PushFelt(_) | PushWord(_) | PushU8List(_) | PushU16List(_)
-        | PushU32List(_) | PushFeltList(_) | Sdepth | Caller | Clk | MemLoad | MemLoadW
-        | MemStore | MemStoreW | MemStream | AdvPipe | AdvLoadW | Hash | HMerge | HPerm
-        | MTreeGet | MTreeSet | MTreeMerge | MTreeVerify | FriExt2Fold4 | DynExec | DynCall
-        | Breakpoint | HornerBase | HornerExt | EvalCircuit => ControlFlow::Continue(()),
+        | PushU16(_) | PushU32(_) | PushFelt(_) | PushWord(_) | Sdepth | Caller | Clk | MemLoad
+        | MemLoadW | MemStore | MemStoreW | MemStream | AdvPipe | AdvLoadW | Hash | HMerge
+        | HPerm | MTreeGet | MTreeSet | MTreeMerge | MTreeVerify | FriExt2Fold4 | DynExec
+        | DynCall | Breakpoint | HornerBase | HornerExt | EvalCircuit => ControlFlow::Continue(()),
     }
 }
 
