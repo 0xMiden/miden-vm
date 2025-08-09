@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.18.0 (TBD)
+
 ## 0.17.0 (2025-08-06)
 
 #### Enhancements

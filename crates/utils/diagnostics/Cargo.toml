@@ -1,8 +1,8 @@
 [package]
 name = "miden-utils-diagnostics"
-version = "0.17.0"
+version = "0.18.0"
 description = "Diagnostic infrastructure used in the Miden assembler and VM"
-documentation = "https://docs.rs/miden-utils-diagnostics/0.17.0"
+documentation = "https://docs.rs/miden-utils-diagnostics/0.18.0"
 readme = "README.md"
 categories = ["compilers", "no-std"]
 keywords = ["diagnostic", "error", "span"]
