@@ -34,6 +34,7 @@
 - [BREAKING] The serialized representation for `Package` was changed to include procedure type information. Older packages will not work with the new serialization code, and vice versa. The version of the binary format was incremented accordingly ([#2028](https://github.com/0xMiden/miden-vm/pull/2028)).
 - [BREAKING] Procedure-related metadata types in the `miden-assembly` crate in some cases now require an optional type signature argument. If that information is not available, you can simply pass `None` to retain current behavior ([#2028](https://github.com/0xMiden/miden-vm/pull/2028)).
 - Remove basic block clock cycle optimization from `FastProcessor` ([#2054](https://github.com/0xMiden/miden-vm/pull/2054)).
+- Added `FastProcessor::execute_for_trace()`, which outputs a series of checkpoints necessary to build the trace in parallel ([#2023](https://github.com/0xMiden/miden-vm/pull/2023))
 
 ## 0.16.4 (2025-07-24)
 
