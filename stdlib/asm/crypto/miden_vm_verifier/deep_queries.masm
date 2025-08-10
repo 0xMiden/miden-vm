@@ -46,7 +46,7 @@ export.compute_deep_composition_polynomial_queries
         # Compute the current query and store the result
         # We also re-arrange the stack for the next iteration of the loop
         exec.deep_queries::compute_deep_query
-        # =>  [has_more_queries, Y, query_ptr+1, query_end_ptr]
+        # => [has_more_queries, Y, query_ptr+1, query_end_ptr]
     end
 
     # Clean up the stack and return
@@ -143,6 +143,8 @@ end
 #!
 #! Inputs:  [Y, Y, 0, 0, 0, 0, ptr]
 #! Outputs: [Y, D, C, ptr]
+#!
+#! Cycles: 30
 proc.load_main_segment_execution_trace
     repeat.10
         adv_pipe
@@ -191,6 +193,8 @@ end
 #!
 #! Inputs:  [Y, Y, 0, 0, 0, 0, ptr]
 #! Outputs: [Y, D, C, ptr]
+#!
+#! Cycles: 6
 proc.load_aux_segment_execution_trace
     repeat.2
         adv_pipe
@@ -240,6 +244,8 @@ end
 #!
 #! Inputs:  [Y, Y, 0, 0, 0, 0, ptr]
 #! Outputs: [Y, D, C, ptr]
+#!
+#! Cycles: 6
 proc.load_constraints_composition_polys_trace
     repeat.2
         adv_pipe
