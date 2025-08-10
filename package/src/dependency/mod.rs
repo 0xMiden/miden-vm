@@ -54,14 +54,14 @@ pub struct Dependency {
 
 impl Serializable for Dependency {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        self.name.0.write_into(target);
+        self.name.write_into(target);
         self.digest.write_into(target);
     }
 }
 
 impl Deserializable for Dependency {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let name = DependencyName(String::read_from(source)?);
+        let name = DependencyName::read_from(source)?;
         let digest = Word::read_from(source)?;
         Ok(Self { name, digest })
     }
