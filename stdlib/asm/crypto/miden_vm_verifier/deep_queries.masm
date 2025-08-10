@@ -78,18 +78,15 @@ end
 #! where:
 #! - Y is a "garbage" word.
 proc.load_query_row
-    # --- Process the main segment of the execution trace portion of the query --------------------
-
+    # Process the main segment of the execution trace portion of the query
     exec.process_main_segment_execution_trace
     #=> [Y, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr]
 
-    # --- Process the auxiliary segment of the execution trace portion of the query ---------------
-
+    # Process the auxiliary segment of the execution trace portion of the query
     exec.process_aux_segment_execution_trace
     #=> [Y, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr]
 
-    # --- Process the constraints composition polys trace portion of the query --------------------
-
+    # Process the constraints composition polys trace portion of the query
     exec.process_constraints_composition_poly_trace
     #=> [Y, q_x_at_alpha_1, q_x_at_alpha_0, q_x_at_alpha_1, q_x_at_alpha_0, index, query_ptr]
 end
