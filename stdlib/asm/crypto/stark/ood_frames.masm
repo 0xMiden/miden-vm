@@ -21,6 +21,9 @@ use.std::crypto::stark::random_coin
 #! 3. T_i are the evaluations of columns in the main segment, auxiliary segment and constraint
 #!    composition at the the out-of-domain point gz.
 #! 4. alpha is the randomness used in order to build the DEEP polynomial.
+#!
+#! Inputs:  []
+#! Outputs: []
 export.load_and_horner_eval_ood_frames
     # --- Load the random challenge used in computing the DEEP polynomial -----
 
@@ -51,11 +54,9 @@ export.load_and_horner_eval_ood_frames
     # => [U, Y]
 
     ## 2) Process the fully aligned OOD `current` evaluations at z of the execution trace
-    ##    and constraints polynomials evaluations. 
-    ##    Since there are (80 + 8 + 8) * 2 = 24 * 8 base field elements, there are 24 fully
-    ##    double-word aligned batches.
-    ## Note: the first word is the capacity, where its first element is initialized with the number
-    ## of elements to hash MODULO 8.
+    ##    and constraints polynomials evaluations.
+    ##    Note that, by the assumption on the widths of committed traces, the capacity portion
+    ##    of the sponge state is always initialized to `[0, 0, 0, 0]`.
 
     ### a) Set up the hasher state
     padw padw     
