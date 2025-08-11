@@ -41,8 +41,7 @@ let program2 = assembler2.assemble_program(Path::new("../miden-vm/masm-examples/
     .unwrap();
 ```
 
-> [!NOTE]
-> The default assembler provides no kernel or standard libraries, you must
+> **Note:** The default assembler provides no kernel or standard libraries, you must
 > explicitly add those using the various builder methods of `Assembler`, as
 > described in the next section.
 
@@ -159,8 +158,7 @@ end
 ").unwrap();
 ```
 
-> [!NOTE]
-> An unqualified `syscall` target is assumed to be defined in the kernel module.
+> **Note:** An unqualified `syscall` target is assumed to be defined in the kernel module.
 > This is unlike the `exec` and `call` instructions, which require that callees
 > resolve to a local procedure; a procedure defined in an explicitly imported
 > module; or the hash of a MAST root corresponding to the compiled procedure.
