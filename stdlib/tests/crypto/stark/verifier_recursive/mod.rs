@@ -52,7 +52,7 @@ pub struct VerifierData {
 /// | n+5      | num_kernel_procedures  | 1              | Count of kernel procedure digests                     |
 /// | n+6-m    | trace_commitments      | 4 or 8         | Main/auxiliary trace segment commitments              |
 /// | m+1-p    | constraint_commitment  | 4              | Constraint composition commitment                     |
-/// | p+1-p+2  | alpha_deep_placeholder | 2              | Deep composition randomness                           |
+/// | p+1-p+2  | alpha_deep_randomness  | 2              | Deep composition randomness                           |
 /// | p+3-q    | ood_evaluations        | varies         | Out-of-domain trace and constraint evals              |
 /// | q+1-r    | fri_commitments        | varies         | FRI layer commitment digests                          |
 /// | r+1-s    | fri_remainder_poly     | varies         | FRI remainder polynomial coefficients                 |
