@@ -166,6 +166,17 @@ impl LibraryNamespace {
     pub fn to_ident(&self) -> Ident {
         Ident::from_raw_parts(Span::unknown(self.as_refcounted_str()))
     }
+
+    #[cfg(feature = "serde")]
+    const fn tag(&self) -> u8 {
+        // SAFETY: This is safe because we have given this enum a
+        // primitive representation with #[repr(u8)], with the first
+        // field of the underlying union-of-structs the discriminant
+        //
+        // See the section on "accessing the numeric value of the discriminant"
+        // here: https://doc.rust-lang.org/std/mem/fn.discriminant.html
+        unsafe { *(self as *const Self).cast::<u8>() }
+    }
 }
 
 impl core::ops::Deref for LibraryNamespace {
@@ -237,5 +248,103 @@ impl Deserializable for LibraryNamespace {
         let name =
             str::from_utf8(name).map_err(|e| DeserializationError::InvalidValue(e.to_string()))?;
         Self::new(name).map_err(|e| DeserializationError::InvalidValue(e.to_string()))
+    }
+}
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for LibraryNamespace {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        if serializer.is_human_readable() {
+            match self {
+                Self::Kernel => serializer.serialize_str(Self::KERNEL_PATH),
+                Self::Exec => serializer.serialize_str(Self::EXEC_PATH),
+                Self::Anon => serializer.serialize_str(Self::ANON_PATH),
+                Self::User(ns) => serializer.serialize_str(ns),
+            }
+        } else {
+            use serde::ser::SerializeTupleVariant;
+            let tag = self.tag() as u32;
+            match self {
+                Self::Kernel => {
+                    serializer.serialize_unit_variant("LibraryNamespace", tag, "Kernel")
+                },
+                Self::Exec => serializer.serialize_unit_variant("LibraryNamespace", tag, "Exec"),
+                Self::Anon => serializer.serialize_unit_variant("LibraryNamespace", tag, "Anon"),
+                Self::User(custom) => {
+                    let mut tuple =
+                        serializer.serialize_tuple_variant("LibraryNamespace", tag, "User", 1)?;
+                    tuple.serialize_field(&custom.as_ref())?;
+                    tuple.end()
+                },
+            }
+        }
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for LibraryNamespace {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::{SeqAccess, Unexpected};
+
+        if deserializer.is_human_readable() {
+            let name = <&'de str as serde::Deserialize>::deserialize(deserializer)?;
+            match name {
+                Self::KERNEL_PATH => Ok(Self::Kernel),
+                Self::EXEC_PATH => Ok(Self::Exec),
+                Self::ANON_PATH => Ok(Self::Anon),
+                other => Self::new(other).map_err(serde::de::Error::custom),
+            }
+        } else {
+            const KERNEL: u8 = LibraryNamespace::Kernel.tag();
+            const EXEC: u8 = LibraryNamespace::Exec.tag();
+            const ANON: u8 = LibraryNamespace::Anon.tag();
+            const USER: u8 = ANON + 1;
+
+            serde_untagged::UntaggedEnumVisitor::new()
+                .expecting("a valid section id")
+                .string(|s| Self::from_str(s).map_err(serde::de::Error::custom))
+                .u8(|tag| match tag {
+                    KERNEL => Ok(Self::Kernel),
+                    EXEC => Ok(Self::Exec),
+                    ANON => Ok(Self::Anon),
+                    USER => {
+                        Err(serde::de::Error::custom("expected a user-defined library namespace"))
+                    },
+                    other => Err(serde::de::Error::invalid_value(
+                        Unexpected::Unsigned(other as u64),
+                        &"a valid library namespace variant",
+                    )),
+                })
+                .seq(|mut seq| {
+                    let tag = seq.next_element::<u8>()?.ok_or_else(|| {
+                        serde::de::Error::invalid_length(0, &"a valid library namespace variant")
+                    })?;
+                    match tag {
+                        KERNEL => Ok(Self::Kernel),
+                        EXEC => Ok(Self::Exec),
+                        ANON => Ok(Self::Anon),
+                        USER => seq
+                            .next_element::<&str>()?
+                            .ok_or_else(|| {
+                                serde::de::Error::invalid_length(
+                                    1,
+                                    &"a user-defined library namespace",
+                                )
+                            })
+                            .and_then(|s| Self::new(s).map_err(serde::de::Error::custom)),
+                        other => Err(serde::de::Error::invalid_value(
+                            Unexpected::Unsigned(other as u64),
+                            &"a valid library namespace variant",
+                        )),
+                    }
+                })
+                .deserialize(deserializer)
+        }
     }
 }

@@ -7,6 +7,10 @@ use core::{
     fmt, mem,
     ops::{Index, IndexMut},
 };
+
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 mod node;
 pub use node::{
     BasicBlockNode, CallNode, DynNode, ExternalNode, JoinNode, LoopNode, MastNode,
@@ -43,6 +47,7 @@ mod tests;
 /// A [`MastForest`] does not have an entrypoint, and hence is not executable. A [`crate::Program`]
 /// can be built from a [`MastForest`] to specify an entrypoint.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct MastForest {
     /// All of the nodes local to the trees comprising the MAST forest.
     nodes: Vec<MastNode>,
@@ -565,6 +570,8 @@ impl IndexMut<DecoratorId> for MastForest {
 /// [`MastNodeId`] handles. Hence, [`MastNodeId`] equality must not be used to test for equality of
 /// the underlying [`MastNode`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
 pub struct MastNodeId(u32);
 
 /// Operations that mutate a MAST often produce this mapping between old and new NodeIds.
@@ -704,6 +711,8 @@ impl Iterator for SubtreeIterator<'_> {
 /// An opaque handle to a [`Decorator`] in some [`MastForest`]. It is the responsibility of the user
 /// to use a given [`DecoratorId`] with the corresponding [`MastForest`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
 pub struct DecoratorId(u32);
 
 impl DecoratorId {

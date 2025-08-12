@@ -3,6 +3,8 @@ use core::fmt;
 
 use miden_crypto::{Felt, Word};
 use miden_formatting::prettier::{Document, PrettyPrint, const_text, nl};
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 use super::{MastNodeErrorContext, MastNodeExt};
 use crate::{
@@ -15,9 +17,12 @@ use crate::{
 
 /// A Dyn node specifies that the node to be executed next is defined dynamically via the stack.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DynNode {
     is_dyncall: bool,
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Vec::is_empty"))]
     before_enter: Vec<DecoratorId>,
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Vec::is_empty"))]
     after_exit: Vec<DecoratorId>,
 }
 

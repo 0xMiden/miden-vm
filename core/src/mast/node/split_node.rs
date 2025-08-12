@@ -3,6 +3,8 @@ use core::fmt;
 
 use miden_crypto::{Felt, Word};
 use miden_formatting::prettier::PrettyPrint;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 use super::{MastNodeErrorContext, MastNodeExt};
 use crate::{
@@ -21,10 +23,13 @@ use crate::{
 /// the `on_true` child is executed. If the value is `0`, then the `on_false` child is executed. If
 /// the value is neither `0` nor `1`, the execution fails.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SplitNode {
     branches: [MastNodeId; 2],
     digest: Word,
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Vec::is_empty"))]
     before_enter: Vec<DecoratorId>,
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Vec::is_empty"))]
     after_exit: Vec<DecoratorId>,
 }
 

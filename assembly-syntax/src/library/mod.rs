@@ -6,6 +6,8 @@ use miden_core::{
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 use midenc_hir_type::{FunctionType, Type};
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 
 use crate::ast::QualifiedProcedureName;
@@ -29,12 +31,14 @@ pub use self::{
 
 /// Metadata about a procedure exported by the interface of a [Library]
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct LibraryExport {
     /// The id of the MAST root node of the exported procedure
     pub node: MastNodeId,
     /// The fully-qualified name of the exported procedure
     pub name: QualifiedProcedureName,
     /// The type signature of the exported procedure, if known
+    #[cfg_attr(feature = "serde", serde(default))]
     pub signature: Option<FunctionType>,
 }
 
@@ -280,8 +284,12 @@ impl Library {
 /// - There must be at least one exported procedure.
 /// - The number of exported procedures cannot exceed [Kernel::MAX_NUM_PROCEDURES] (i.e., 256).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
+#[cfg_attr(feature = "serde", serde(try_from = "Library"))]
 pub struct KernelLibrary {
+    #[cfg_attr(feature = "serde", serde(skip))]
     kernel: Kernel,
+    #[cfg_attr(feature = "serde", serde(skip))]
     kernel_info: ModuleInfo,
     library: Library,
 }
@@ -407,6 +415,116 @@ impl Deserializable for Library {
         let digest = mast_forest.compute_nodes_commitment(exports.values().map(|e| &e.node));
 
         Ok(Self { digest, exports, mast_forest })
+    }
+}
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for Library {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+
+        struct LibraryExports<'a>(&'a BTreeMap<QualifiedProcedureName, LibraryExport>);
+        impl serde::Serialize for LibraryExports<'_> {
+            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: serde::Serializer,
+            {
+                use serde::ser::SerializeSeq;
+                let mut serializer = serializer.serialize_seq(Some(self.0.len()))?;
+                for elem in self.0.values() {
+                    serializer.serialize_element(elem)?;
+                }
+                serializer.end()
+            }
+        }
+
+        let Self { digest: _, exports, mast_forest } = self;
+
+        let mut serializer = serializer.serialize_struct("Library", 2)?;
+        serializer.serialize_field("mast_forest", mast_forest)?;
+        serializer.serialize_field("exports", &LibraryExports(exports))?;
+        serializer.end()
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for Library {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Visitor;
+
+        #[derive(Deserialize)]
+        #[serde(field_identifier, rename_all = "snake_case")]
+        enum Field {
+            MastForest,
+            Exports,
+        }
+
+        struct LibraryVisitor;
+
+        impl<'de> Visitor<'de> for LibraryVisitor {
+            type Value = Library;
+
+            fn expecting(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
+                formatter.write_str("struct Library")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::SeqAccess<'de>,
+            {
+                let mast_forest = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
+                let exports: Vec<LibraryExport> = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(1, &self))?;
+                let exports =
+                    exports.into_iter().map(|export| (export.name.clone(), export)).collect();
+                Library::new(mast_forest, exports).map_err(serde::de::Error::custom)
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::MapAccess<'de>,
+            {
+                let mut mast_forest = None;
+                let mut exports = None;
+                while let Some(key) = map.next_key()? {
+                    match key {
+                        Field::MastForest => {
+                            if mast_forest.is_some() {
+                                return Err(serde::de::Error::duplicate_field("mast_forest"));
+                            }
+                            mast_forest = Some(map.next_value()?);
+                        },
+                        Field::Exports => {
+                            if exports.is_some() {
+                                return Err(serde::de::Error::duplicate_field("exports"));
+                            }
+                            let items: Vec<LibraryExport> = map.next_value()?;
+                            exports = Some(
+                                items
+                                    .into_iter()
+                                    .map(|export| (export.name.clone(), export))
+                                    .collect(),
+                            );
+                        },
+                    }
+                }
+                let mast_forest =
+                    mast_forest.ok_or_else(|| serde::de::Error::missing_field("mast_forest"))?;
+                let exports = exports.ok_or_else(|| serde::de::Error::missing_field("exports"))?;
+                Library::new(mast_forest, exports).map_err(serde::de::Error::custom)
+            }
+        }
+
+        deserializer.deserialize_struct("Library", &["mast_forest", "exports"], LibraryVisitor)
     }
 }
 
