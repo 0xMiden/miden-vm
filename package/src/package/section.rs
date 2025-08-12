@@ -1,4 +1,8 @@
-use alloc::{borrow::Cow, string::ToString};
+use alloc::{
+    borrow::{Cow, ToOwned},
+    format,
+    string::ToString,
+};
 use core::{fmt, str::FromStr};
 
 use miden_assembly_syntax::DisplayHex;
@@ -142,6 +146,79 @@ impl Section {
     }
 }
 
+impl miden_core::utils::Serializable for Section {
+    fn write_into<W: miden_core::utils::ByteWriter>(&self, target: &mut W) {
+        target.write_u8(self.id.tag());
+        match &self.id {
+            SectionId::DebugInfo | SectionId::AccountComponentMetadata => (),
+            SectionId::Custom(custom) => {
+                target.write_usize(custom.len());
+                target.write_bytes(custom.as_bytes());
+            },
+        }
+        target.write_usize(self.len());
+        target.write_bytes(&self.data);
+    }
+}
+
+impl miden_core::utils::Deserializable for Section {
+    fn read_from<R: miden_core::utils::ByteReader>(
+        source: &mut R,
+    ) -> Result<Self, miden_core::utils::DeserializationError> {
+        const DEBUG_INFO: u8 = SectionId::DebugInfo.tag();
+        const ACCOUNT_COMPONENT_METADATA: u8 = SectionId::AccountComponentMetadata.tag();
+        const CUSTOM: u8 = SectionId::Custom(Cow::Borrowed("")).tag();
+
+        let tag = source.read_u8()?;
+        let id = match tag {
+            DEBUG_INFO => SectionId::DebugInfo,
+            ACCOUNT_COMPONENT_METADATA => SectionId::AccountComponentMetadata,
+            CUSTOM => {
+                let len = source.read_usize()?;
+                let bytes = source.read_slice(len)?;
+                let name = core::str::from_utf8(bytes).map_err(|err| {
+                    miden_core::utils::DeserializationError::InvalidValue(format!(
+                        "invalid utf-8 in section name: {err}"
+                    ))
+                })?;
+                SectionId::Custom(Cow::Owned(name.to_owned()))
+            },
+            other => {
+                return Err(miden_core::utils::DeserializationError::InvalidValue(format!(
+                    "unknown section id: {other}"
+                )));
+            },
+        };
+
+        let len = source.read_usize()?;
+        let bytes = source.read_slice(len)?;
+        Ok(Section { id, data: Cow::Owned(bytes.to_owned()) })
+    }
+}
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for SectionId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeTupleVariant;
+        let tag = self.tag() as u32;
+        match self {
+            Self::DebugInfo => serializer.serialize_unit_variant("SectionId", tag, "DebugInfo"),
+            Self::AccountComponentMetadata => {
+                serializer.serialize_unit_variant("SectionId", tag, "AccountComponentMetadata")
+            },
+            Self::Custom(custom) => {
+                let mut tuple =
+                    serializer.serialize_tuple_variant("SectionId", tag, "Custom", 1)?;
+                tuple.serialize_field(&custom.as_ref())?;
+                tuple.end()
+            },
+        }
+    }
+}
+
 #[cfg(feature = "serde")]
 impl<'de> serde::Deserialize<'de> for SectionId {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -186,28 +263,5 @@ impl<'de> serde::Deserialize<'de> for SectionId {
                 }
             })
             .deserialize(deserializer)
-    }
-}
-
-#[cfg(feature = "serde")]
-impl serde::Serialize for SectionId {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        use serde::ser::SerializeTupleVariant;
-        let tag = self.tag() as u32;
-        match self {
-            Self::DebugInfo => serializer.serialize_unit_variant("SectionId", tag, "DebugInfo"),
-            Self::AccountComponentMetadata => {
-                serializer.serialize_unit_variant("SectionId", tag, "AccountComponentMetadata")
-            },
-            Self::Custom(custom) => {
-                let mut tuple =
-                    serializer.serialize_tuple_variant("SectionId", tag, "Custom", 1)?;
-                tuple.serialize_field(&custom.as_ref())?;
-                tuple.end()
-            },
-        }
     }
 }

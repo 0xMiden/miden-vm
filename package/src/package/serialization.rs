@@ -34,7 +34,7 @@
 //!       - `name` (`String`)
 //!       - `digest` (`Word`)
 
-use alloc::{borrow::Cow, collections::BTreeMap, format, string::String, sync::Arc, vec::Vec};
+use alloc::{collections::BTreeMap, format, string::String, sync::Arc, vec::Vec};
 
 use miden_assembly_syntax::{
     Library,
@@ -86,13 +86,7 @@ impl Serializable for Package {
         // Write custom sections
         target.write_usize(self.sections.len());
         for section in self.sections.iter() {
-            target.write_u8(section.id.tag());
-            if let SectionId::Custom(name) = &section.id {
-                target.write_usize(name.len());
-                target.write_bytes(name.as_bytes());
-            }
-            target.write_usize(section.data.len());
-            target.write_bytes(&section.data);
+            section.write_into(target);
         }
     }
 }
@@ -127,20 +121,8 @@ impl Deserializable for Package {
         let num_sections = source.read_usize()?;
         let mut sections = Vec::with_capacity(num_sections);
         for _ in 0..num_sections {
-            let id = source.read_u8()?;
-            let id = if id == SectionId::Custom(Cow::Borrowed("")).tag() {
-                let name_len = source.read_usize()?;
-                let name = source.read_string(name_len)?;
-                SectionId::Custom(name.into())
-            } else {
-                SectionId::try_from(id).map_err(|_| {
-                    DeserializationError::InvalidValue(format!("unknown custom section id: {id}"))
-                })?
-            };
-
-            let len = source.read_usize()?;
-            let bytes = source.read_slice(len)?.to_vec();
-            sections.push(Section { id, data: Cow::Owned(bytes) });
+            let section = Section::read_from(source)?;
+            sections.push(section);
         }
 
         Ok(Self { name, mast, manifest, sections })
@@ -184,6 +166,110 @@ impl Deserializable for MastArtifact {
 
 // PACKAGE MANIFEST SERIALIZATION/DESERIALIZATION
 // ================================================================================================
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for PackageManifest {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+
+        struct PackageExports<'a>(&'a BTreeMap<QualifiedProcedureName, PackageExport>);
+
+        impl serde::Serialize for PackageExports<'_> {
+            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: serde::Serializer,
+            {
+                use serde::ser::SerializeSeq;
+
+                let mut serializer = serializer.serialize_seq(Some(self.0.len()))?;
+                for value in self.0.values() {
+                    serializer.serialize_element(value)?;
+                }
+                serializer.end()
+            }
+        }
+
+        let mut serializer = serializer.serialize_struct("PackageManifest", 2)?;
+        serializer.serialize_field("exports", &PackageExports(&self.exports))?;
+        serializer.serialize_field("dependencies", &self.dependencies)?;
+        serializer.end()
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for PackageManifest {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        #[serde(field_identifier, rename_all = "lowercase")]
+        enum Field {
+            Exports,
+            Dependencies,
+        }
+
+        struct PackageManifestVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for PackageManifestVisitor {
+            type Value = PackageManifest;
+
+            fn expecting(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
+                formatter.write_str("struct PackageManifest")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::SeqAccess<'de>,
+            {
+                let exports = seq
+                    .next_element::<Vec<PackageExport>>()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
+                let dependencies = seq
+                    .next_element::<Vec<Dependency>>()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(1, &self))?;
+                Ok(PackageManifest::new(exports).with_dependencies(dependencies))
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::MapAccess<'de>,
+            {
+                let mut exports = None;
+                let mut dependencies = None;
+                while let Some(key) = map.next_key()? {
+                    match key {
+                        Field::Exports => {
+                            if exports.is_some() {
+                                return Err(serde::de::Error::duplicate_field("exports"));
+                            }
+                            exports = Some(map.next_value::<Vec<PackageExport>>()?);
+                        },
+                        Field::Dependencies => {
+                            if dependencies.is_some() {
+                                return Err(serde::de::Error::duplicate_field("dependencies"));
+                            }
+                            dependencies = Some(map.next_value::<Vec<Dependency>>()?);
+                        },
+                    }
+                }
+                let exports = exports.ok_or_else(|| serde::de::Error::missing_field("exports"))?;
+                let dependencies =
+                    dependencies.ok_or_else(|| serde::de::Error::missing_field("dependencies"))?;
+                Ok(PackageManifest::new(exports).with_dependencies(dependencies))
+            }
+        }
+
+        deserializer.deserialize_struct(
+            "PackageManifest",
+            &["exports", "dependencies"],
+            PackageManifestVisitor,
+        )
+    }
+}
 
 impl Serializable for PackageManifest {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {

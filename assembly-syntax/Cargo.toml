@@ -23,7 +23,14 @@ std = [
     "miden-utils-diagnostics/std",
     "thiserror/std",
 ]
-serde = ["miden-debug-types/serde", "midenc-hir-type/serde", "semver/serde"]
+serde = [
+    "dep:serde",
+    "dep:serde-untagged",
+    "miden-debug-types/serde",
+    "midenc-hir-type/serde",
+    "semver/serde",
+    "smallvec/serde",
+]
 arbitrary = ["dep:proptest", "dep:proptest-derive"]
 testing = ["arbitrary", "logging"]
 logging = ["dep:env_logger"]
@@ -44,6 +51,8 @@ regex = { version = "1.10", default-features = false, features = [
     "perf",
 ] }
 semver = { version = "1.0", default-features = false }
+serde = { workspace = true, optional = true }
+serde-untagged = { workspace = true, optional = true }
 smallvec.workspace = true
 thiserror.workspace = true
 

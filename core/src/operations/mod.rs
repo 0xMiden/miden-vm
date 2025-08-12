@@ -1,5 +1,8 @@
 use core::fmt;
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 mod decorators;
 pub use decorators::{AssemblyOp, DebugOptions, Decorator, DecoratorIterator, DecoratorList};
 use opcode_constants::*;
@@ -130,6 +133,7 @@ pub(super) mod opcode_constants {
 
 /// A set of native VM operations which take exactly one cycle to execute.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[repr(u8)]
 pub enum Operation {
     // ----- system operations -------------------------------------------------------------------

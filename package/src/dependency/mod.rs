@@ -3,6 +3,8 @@ use alloc::string::String;
 use miden_core::utils::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 use crate::Word;
 
@@ -10,6 +12,8 @@ pub(crate) mod resolver;
 
 /// The name of a dependency
 #[derive(Debug, Clone, PartialEq, Eq, derive_more::From)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
 pub struct DependencyName(String);
 
 #[cfg(feature = "arbitrary")]
@@ -42,6 +46,7 @@ impl Deserializable for DependencyName {
 /// A package dependency
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(proptest_derive::Arbitrary))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Dependency {
     /// The name of the dependency.
     /// Serves as a human-readable identifier for the dependency and a search hint for the resolver
