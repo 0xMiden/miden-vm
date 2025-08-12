@@ -3,6 +3,9 @@ use core::fmt;
 
 use miden_crypto::{Felt, Word};
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 use super::MastNodeExt;
 use crate::{
     OPCODE_JOIN,
@@ -17,10 +20,13 @@ use crate::{
 /// A Join node describe sequential execution. When the VM encounters a Join node, it executes the
 /// first child first and the second child second.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct JoinNode {
     children: [MastNodeId; 2],
     digest: Word,
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Vec::is_empty"))]
     before_enter: Vec<DecoratorId>,
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Vec::is_empty"))]
     after_exit: Vec<DecoratorId>,
 }
 

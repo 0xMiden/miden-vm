@@ -1102,6 +1102,8 @@ dependencies = [
  "regex",
  "rustc_version 0.4.1",
  "semver 1.0.26",
+ "serde",
+ "serde-untagged",
  "smallvec",
  "thiserror 2.0.12",
 ]
@@ -1130,6 +1132,7 @@ dependencies = [
  "num-derive",
  "num-traits",
  "proptest",
+ "serde",
  "thiserror 2.0.12",
  "winter-math",
  "winter-rand-utils",

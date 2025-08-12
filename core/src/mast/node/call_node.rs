@@ -7,6 +7,9 @@ use miden_formatting::{
     prettier::{Document, PrettyPrint, const_text, nl, text},
 };
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 use super::MastNodeExt;
 use crate::{
     OPCODE_CALL, OPCODE_SYSCALL,
@@ -24,11 +27,14 @@ use crate::{
 /// - A simple call: the callee is executed in the new user context.
 /// - A syscall: the callee is executed in the root context.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct CallNode {
     callee: MastNodeId,
     is_syscall: bool,
     digest: Word,
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Vec::is_empty"))]
     before_enter: Vec<DecoratorId>,
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Vec::is_empty"))]
     after_exit: Vec<DecoratorId>,
 }
 

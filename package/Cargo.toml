@@ -36,6 +36,7 @@ serde = [
     "dep:serde-untagged",
     "dep:miden-bite",
     "miden-assembly-syntax/serde",
+    "miden-core/serde",
 ]
 
 [dependencies]

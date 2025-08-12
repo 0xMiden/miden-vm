@@ -2,6 +2,9 @@ mod basic_block_node;
 use alloc::{boxed::Box, vec::Vec};
 use core::fmt;
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 pub use basic_block_node::{
     BATCH_SIZE as OP_BATCH_SIZE, BasicBlockNode, GROUP_SIZE as OP_GROUP_SIZE, OpBatch,
     OperationOrDecorator,
@@ -37,6 +40,7 @@ use crate::{
 // ================================================================================================
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum MastNode {
     Block(BasicBlockNode),
     Join(JoinNode),

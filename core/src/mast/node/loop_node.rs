@@ -4,6 +4,9 @@ use core::fmt;
 use miden_crypto::{Felt, Word};
 use miden_formatting::prettier::PrettyPrint;
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 use super::MastNodeExt;
 use crate::{
     OPCODE_LOOP,
@@ -21,10 +24,13 @@ use crate::{
 /// If the top of the stack is neither `0` nor `1` when the condition is checked, the execution
 /// fails.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct LoopNode {
     body: MastNodeId,
     digest: Word,
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Vec::is_empty"))]
     before_enter: Vec<DecoratorId>,
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Vec::is_empty"))]
     after_exit: Vec<DecoratorId>,
 }
 

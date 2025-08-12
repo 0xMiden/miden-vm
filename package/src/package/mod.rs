@@ -10,6 +10,9 @@ use alloc::{format, string::String, sync::Arc, vec::Vec};
 use miden_assembly_syntax::{Library, Report, ast::QualifiedProcedureName};
 use miden_core::{Program, Word};
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 use crate::MastArtifact;
 
 // PACKAGE
@@ -17,6 +20,7 @@ use crate::MastArtifact;
 
 /// A package containing a [Program]/[Library], and a manifest (exports and dependencies).
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Package {
     /// Name of the package
     pub name: String,
@@ -27,6 +31,7 @@ pub struct Package {
     pub manifest: PackageManifest,
     /// The set of custom sections included with the package, e.g. debug information, account
     /// metadata, etc.
+    #[cfg_attr(feature = "serde", serde(default))]
     pub sections: Vec<Section>,
 }
 
