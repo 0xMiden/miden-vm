@@ -5,9 +5,9 @@ use.miden::some_import
 #! A simple procedure that adds two numbers
 #!
 #! Stack: [a, b]
-# Output:
+#! Output: [a + b]
 
-export.complex_procedure
+export.add_two_numbers
     push.1
     push.2
     add

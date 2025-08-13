@@ -1,5 +1,7 @@
 # Test stack operations with stack comments
 
+
+# some comment
 export.test_stack_with_comments
     # Stack: []
     push.1 push.2 push.3
