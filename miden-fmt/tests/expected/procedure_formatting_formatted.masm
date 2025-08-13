@@ -6,7 +6,6 @@ use.miden::some_import
 #!
 #! Stack: [a, b]
 #! Output: [a + b]
-
 export.add_two_numbers
     push.1
     push.2
@@ -18,17 +17,28 @@ end
 #! Stack: [x, y, z]
 #! Output: [result]
 export.complex_procedure
-    # First, duplicate the top value
     dup.0
     # Then perform some operations
     push.10 mul
-    # Add the second value
+    # => []
+
+    if.true
+        add.1
+        # => [val]
+    else
+        sub.1
+        # => [val]
+    end
+    add
+    # => [val]
+
     movup.2 add
-    # Final calculation
-    swap sub
+    # => [val]
 end
 
-# Internal procedure (not exported)
+# Internal procedure
+#! Stack: [x, y, z]
+#! Output: [result]
 proc.internal_helper
     padw
     mem_loadw

@@ -45,7 +45,8 @@ fn is_comment(line: &str) -> bool {
 }
 
 fn is_stack_comment(line: &str) -> bool {
-    line.trim_start().starts_with("# =>")
+    let trimmed = line.trim_start();
+    trimmed.starts_with("# => [") || trimmed.starts_with("#! => [")
 }
 
 fn is_single_export_line(line: &str) -> bool {
@@ -54,6 +55,11 @@ fn is_single_export_line(line: &str) -> bool {
 
 fn is_use_statement(line: &str) -> bool {
     line.trim_start().starts_with("use.")
+}
+
+fn is_proc_or_export(line: &str) -> bool {
+    let trimmed = line.trim();
+    trimmed.starts_with("proc.") || trimmed.starts_with("export.")
 }
 
 #[derive(Debug, Clone)]
@@ -163,7 +169,7 @@ pub fn format_code(code: &str) -> String {
     // Process remaining lines (skip the import section)
     let remaining_lines = &lines[import_end_index..];
 
-    for line in remaining_lines {
+    for (i, line) in remaining_lines.iter().enumerate() {
         let trimmed_line = line.trim();
 
         if !trimmed_line.is_empty() {
@@ -209,6 +215,7 @@ pub fn format_code(code: &str) -> String {
             if last_line_was_stack_comment {
                 if let Some(word) = first_word
                     && word != "end"
+                    && word != "else"
                     && !last_line_was_empty
                 {
                     formatted_code.push('\n');
@@ -221,12 +228,35 @@ pub fn format_code(code: &str) -> String {
             {
                 match construct {
                     ConstructType::End => {
-                        if let Some(last_construct) = construct_stack.pop()
-                            && last_construct != ConstructType::End
-                            && indentation_level > 0
-                        {
-                            indentation_level -= 1;
+                        let was_proc_or_export_end =
+                            if let Some(last_construct) = construct_stack.pop() {
+                                let is_proc_or_export = matches!(
+                                    last_construct,
+                                    ConstructType::Proc | ConstructType::Export
+                                );
+                                if last_construct != ConstructType::End && indentation_level > 0 {
+                                    indentation_level -= 1;
+                                }
+                                is_proc_or_export
+                            } else {
+                                false
+                            };
+
+                        formatted_code.push_str(&INDENT.repeat(indentation_level));
+                        formatted_code.push_str(trimmed_line);
+                        formatted_code.push('\n');
+                        last_line_was_empty = false;
+
+                        // Add blank line after procedure/export end if there's more content
+                        if was_proc_or_export_end && i + 1 < remaining_lines.len() {
+                            let next_line = remaining_lines[i + 1].trim();
+                            if !next_line.is_empty() {
+                                formatted_code.push('\n');
+                                last_line_was_empty = true;
+                            }
                         }
+
+                        continue;
                     },
                     ConstructType::Else => {
                         if let Some(last_construct) = construct_stack.last()
@@ -267,8 +297,22 @@ pub fn format_code(code: &str) -> String {
             formatted_code.push('\n');
             last_line_was_empty = false;
         } else if !last_line_was_empty {
-            formatted_code.push('\n');
-            last_line_was_empty = true;
+            // Check if the next line is a proc or export declaration
+            // If so, and the previous line was a comment, don't add empty line
+            let should_skip_empty_line = if i + 1 < remaining_lines.len() {
+                let next_line = remaining_lines[i + 1].trim();
+                let prev_lines: Vec<&str> = formatted_code.lines().collect();
+                let prev_line = prev_lines.last().map(|l| l.trim()).unwrap_or("");
+
+                is_proc_or_export(next_line) && is_comment(prev_line)
+            } else {
+                false
+            };
+
+            if !should_skip_empty_line {
+                formatted_code.push('\n');
+                last_line_was_empty = true;
+            }
         }
     }
 
@@ -279,21 +323,32 @@ pub fn format_code(code: &str) -> String {
     formatted_code.push('\n');
 
     // Final pass: collapse any remaining multiple consecutive empty lines (3+ becomes 1)
+    // Also prevent blank lines between comments and proc/export declarations
     let lines: Vec<&str> = formatted_code.lines().collect();
     let mut final_output = String::new();
     let mut consecutive_empty_count = 0;
 
-    for line in lines {
+    for (i, line) in lines.iter().enumerate() {
         let is_empty = line.trim().is_empty();
 
         if is_empty {
             consecutive_empty_count += 1;
-            // Allow up to 1 empty line, collapse 2+ into 1
-            if consecutive_empty_count <= 1 {
+
+            // Check if this empty line is between a comment and proc/export
+            let should_skip_empty_line = if i > 0 && i + 1 < lines.len() {
+                let prev_line = lines[i - 1].trim();
+                let next_line = lines[i + 1].trim();
+                is_comment(prev_line) && is_proc_or_export(next_line)
+            } else {
+                false
+            };
+
+            // Allow up to 1 empty line, collapse 2+ into 1, but skip if between comment and proc/export
+            if consecutive_empty_count <= 1 && !should_skip_empty_line {
                 final_output.push_str(line);
                 final_output.push('\n');
             }
-            // Skip additional consecutive empty lines (2nd, 3rd, etc.)
+            // Skip additional consecutive empty lines (2nd, 3rd, etc.) or comment-proc gaps
         } else {
             final_output.push_str(line);
             final_output.push('\n');

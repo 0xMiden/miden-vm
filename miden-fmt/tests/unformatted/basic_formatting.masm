@@ -10,13 +10,10 @@ use.std::sys
 
 const.ERR_INVALID_INPUT=0x00020001
 const.MAX_ITEMS=100
-
-
-
 const.DEFAULT_VALUE=42
 
 # Basic procedure with simple formatting
 export.test_basic
     push.1
-    push.2 add  
-    end
+    push.2 add
+end

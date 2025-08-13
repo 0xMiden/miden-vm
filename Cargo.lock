@@ -636,17 +636,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "aa9a19cbb55df58761df49b23516a86d432839add4af60fc256da840f66ed35b"
 
 [[package]]
-name = "formatter"
-version = "0.17.0"
-dependencies = [
- "clap",
- "glob",
- "once_cell",
- "regex",
- "tempfile",
-]
-
-[[package]]
 name = "futures"
 version = "0.3.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1169,6 +1158,17 @@ dependencies = [
  "serde",
  "serde_spanned",
  "thiserror 2.0.12",
+]
+
+[[package]]
+name = "miden-fmt"
+version = "0.17.0"
+dependencies = [
+ "clap",
+ "glob",
+ "once_cell",
+ "regex",
+ "tempfile",
 ]
 
 [[package]]

@@ -17,7 +17,7 @@ fn test_format_simple() {
 #[test]
 fn test_format_with_indentation() {
     let input = "begin\n    proc\n    end\nend";
-    let expected_output = "begin\n    proc\n    end\nend\n";
+    let expected_output = "begin\n    proc\n    end\n\nend\n";
     assert_eq!(format_code(input), expected_output);
 }
 
