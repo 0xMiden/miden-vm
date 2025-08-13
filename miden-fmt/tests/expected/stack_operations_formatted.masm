@@ -1,0 +1,27 @@
+# Test stack operations with stack comments
+
+export.test_stack_with_comments
+    # Stack: []
+    push.1 push.2 push.3
+    # Stack: [3, 2, 1]
+    dup.0
+    # Stack: [3, 3, 2, 1]
+    swap
+    # Stack: [3, 3, 2, 1]
+    movup.2
+    # Stack: [2, 3, 3, 1]
+    add
+    # Stack: [5, 3, 1]
+end
+
+export.test_memory_with_comments
+    # Stack: []
+    padw
+    # Stack: [0, 0, 0, 0]
+    push.100
+    # Stack: [100, 0, 0, 0, 0]
+    mem_storew
+    # Stack: [100]
+    dropw
+    # Stack: []
+end

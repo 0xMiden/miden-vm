@@ -1,0 +1,65 @@
+# Test control flow formatting: if/else, while, repeat
+
+export.test_if_else
+    # Simple if-else
+    push.5 push.10 gt
+    if
+        push.1
+    else
+        push.0
+    end
+end
+
+export.test_nested_if
+    # Nested if statements
+    push.1
+    if
+        push.2
+        if
+            push.3
+        else
+            push.4
+            if
+                push.5
+            end
+        end
+    end
+end
+
+export.test_while_loop
+    # While loop formatting
+    push.0
+    while
+        push.1 add
+        dup.0 push.10 lt
+    end
+end
+
+export.test_repeat_loop
+    # Repeat loop formatting
+    push.0
+    repeat.5
+        push.1 add
+    end
+end
+
+export.test_complex_control_flow
+    # Complex nested control flow
+    push.1
+    if.true
+        push.0
+        while
+            push.1 add
+            dup.0 push.5 lt
+            if.true
+                repeat.2
+                    push.1 add
+                end
+            end
+        end
+    else
+        repeat.3
+            push.2 mul
+        end
+    end
+end

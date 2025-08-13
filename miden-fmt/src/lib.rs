@@ -1,0 +1,329 @@
+use std::{
+    fs::File,
+    io::{self, BufRead, BufReader, Write},
+    path::Path,
+};
+
+use once_cell::sync::Lazy;
+use regex::Regex;
+
+static SINGLE_LINE_EXPORT_REGEX: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"^export\..*(?:(?:::)|(?:->)).*$").unwrap());
+
+#[derive(Debug, PartialEq, Clone)]
+enum ConstructType {
+    Proc,
+    Export,
+    Begin,
+    End,
+    While,
+    Repeat,
+    If,
+    Else,
+}
+
+impl ConstructType {
+    fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "proc" => Some(Self::Proc),
+            "export" => Some(Self::Export),
+            "begin" => Some(Self::Begin),
+            "end" => Some(Self::End),
+            "while" => Some(Self::While),
+            "repeat" => Some(Self::Repeat),
+            "if" => Some(Self::If),
+            "else" => Some(Self::Else),
+            _ => None,
+        }
+    }
+}
+
+const INDENT: &str = "    ";
+
+fn is_comment(line: &str) -> bool {
+    line.trim_start().starts_with('#')
+}
+
+fn is_stack_comment(line: &str) -> bool {
+    line.trim_start().starts_with("# =>")
+}
+
+fn is_single_export_line(line: &str) -> bool {
+    SINGLE_LINE_EXPORT_REGEX.is_match(line)
+}
+
+fn is_use_statement(line: &str) -> bool {
+    line.trim_start().starts_with("use.")
+}
+
+#[derive(Debug, Clone)]
+enum LineType {
+    Import(String),
+    Comment(String),
+    Empty,
+    Other(String),
+}
+
+fn classify_line(line: &str) -> LineType {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        LineType::Empty
+    } else if is_use_statement(trimmed) {
+        LineType::Import(trimmed.to_string())
+    } else if is_comment(trimmed) {
+        LineType::Comment(trimmed.to_string())
+    } else {
+        LineType::Other(trimmed.to_string())
+    }
+}
+
+fn process_import_section(lines: &[&str]) -> (Vec<String>, usize) {
+    let mut result = Vec::new();
+    let mut current_import_group = Vec::new();
+    let mut end_index = 0;
+
+    for (i, line) in lines.iter().enumerate() {
+        let line_type = classify_line(line);
+
+        match line_type {
+            LineType::Import(import) => {
+                current_import_group.push(import);
+                end_index = i + 1;
+            },
+            LineType::Comment(comment) => {
+                // If we have imports in the current group, sort and add them
+                if !current_import_group.is_empty() {
+                    current_import_group.sort();
+                    result.extend(current_import_group.drain(..));
+                    // Add empty line after imports before comment
+                    result.push(String::new());
+                }
+                // Add the comment
+                result.push(comment);
+                end_index = i + 1;
+            },
+            LineType::Empty => {
+                // Empty lines are preserved in their position, but avoid multiple consecutive empty lines
+                if !result.is_empty() && !result.last().map_or(false, |s| s.is_empty()) {
+                    result.push(String::new());
+                    end_index = i + 1;
+                }
+            },
+            LineType::Other(content) => {
+                // Stop processing when we hit const or other non-import content
+                if content.starts_with("const.") {
+                    break;
+                }
+                // If we have imports in the current group, sort and add them
+                if !current_import_group.is_empty() {
+                    current_import_group.sort();
+                    result.extend(current_import_group.drain(..));
+                }
+                break;
+            },
+        }
+    }
+
+    // Handle any remaining imports in the current group
+    if !current_import_group.is_empty() {
+        current_import_group.sort();
+        result.extend(current_import_group);
+    }
+
+    (result, end_index)
+}
+
+pub fn format_code(code: &str) -> String {
+    let lines: Vec<&str> = code.lines().collect();
+
+    // Extract and sort imports
+    let (sorted_imports, import_end_index) = process_import_section(&lines);
+
+    let mut formatted_code = String::new();
+    let mut indentation_level = 0;
+    let mut construct_stack = Vec::new();
+    let mut last_line_was_empty = false;
+    let mut last_was_export_line = false;
+    let mut last_line_was_stack_comment = false;
+
+    // Add sorted imports first
+    for import in sorted_imports {
+        formatted_code.push_str(&import);
+        formatted_code.push('\n');
+    }
+
+    // Add empty line after imports if there were any and the next line exists
+    if import_end_index > 0 && import_end_index < lines.len() {
+        // Always add empty line after imports, unless the next line is already empty
+        if !lines[import_end_index].trim().is_empty() {
+            formatted_code.push('\n');
+        }
+    }
+
+    // Process remaining lines (skip the import section)
+    let remaining_lines = &lines[import_end_index..];
+
+    for line in remaining_lines {
+        let trimmed_line = line.trim();
+
+        if !trimmed_line.is_empty() {
+            if is_comment(trimmed_line) {
+                last_line_was_stack_comment = is_stack_comment(trimmed_line);
+
+                if last_was_export_line {
+                    formatted_code.push_str(trimmed_line);
+                } else {
+                    if let Some(prev_line) = formatted_code.lines().last() {
+                        let prev_indent_level =
+                            prev_line.chars().take_while(|&c| c == ' ').count() / 4;
+                        if prev_line.trim_start().starts_with("export") {
+                            formatted_code.push_str(&INDENT.repeat(prev_indent_level + 1));
+                        } else {
+                            formatted_code.push_str(&INDENT.repeat(indentation_level));
+                        }
+                    } else {
+                        formatted_code.push_str(&INDENT.repeat(indentation_level));
+                    }
+                    formatted_code.push_str(trimmed_line);
+                }
+                formatted_code.push('\n');
+                last_line_was_empty = false;
+                continue;
+            }
+
+            if is_single_export_line(trimmed_line) {
+                formatted_code.push_str(trimmed_line);
+                formatted_code.push('\n');
+                last_line_was_empty = false;
+                last_was_export_line = true;
+                continue;
+            }
+
+            last_was_export_line = false;
+
+            // Remove inline comment for keyword extraction.
+            let code_without_comment = trimmed_line.split('#').next().unwrap().trim();
+            let first_word = code_without_comment.split('.').next();
+
+            // Special handling for stack comment newline
+            if last_line_was_stack_comment {
+                if let Some(word) = first_word
+                    && word != "end"
+                    && !last_line_was_empty
+                {
+                    formatted_code.push('\n');
+                }
+                last_line_was_stack_comment = false;
+            }
+
+            if let Some(word) = first_word
+                && let Some(construct) = ConstructType::from_str(word)
+            {
+                match construct {
+                    ConstructType::End => {
+                        if let Some(last_construct) = construct_stack.pop()
+                            && last_construct != ConstructType::End
+                            && indentation_level > 0
+                        {
+                            indentation_level -= 1;
+                        }
+                    },
+                    ConstructType::Else => {
+                        if let Some(last_construct) = construct_stack.last()
+                            && *last_construct == ConstructType::If
+                            && indentation_level > 0
+                        {
+                            indentation_level -= 1;
+                        }
+                    },
+                    _ => {
+                        construct_stack.push(construct.clone());
+                    },
+                }
+
+                formatted_code.push_str(&INDENT.repeat(indentation_level));
+                formatted_code.push_str(trimmed_line);
+                formatted_code.push('\n');
+                last_line_was_empty = false;
+
+                match construct {
+                    ConstructType::Begin
+                    | ConstructType::If
+                    | ConstructType::Proc
+                    | ConstructType::Export
+                    | ConstructType::Repeat
+                    | ConstructType::While
+                    | ConstructType::Else => {
+                        indentation_level += 1;
+                    },
+                    _ => {},
+                }
+
+                continue;
+            }
+
+            formatted_code.push_str(&INDENT.repeat(indentation_level));
+            formatted_code.push_str(trimmed_line);
+            formatted_code.push('\n');
+            last_line_was_empty = false;
+        } else if !last_line_was_empty {
+            formatted_code.push('\n');
+            last_line_was_empty = true;
+        }
+    }
+
+    // Ensure the output ends with exactly one newline.
+    while formatted_code.ends_with('\n') {
+        formatted_code.pop();
+    }
+    formatted_code.push('\n');
+
+    // Final pass: collapse any remaining multiple consecutive empty lines (3+ becomes 1)
+    let lines: Vec<&str> = formatted_code.lines().collect();
+    let mut final_output = String::new();
+    let mut consecutive_empty_count = 0;
+
+    for line in lines {
+        let is_empty = line.trim().is_empty();
+
+        if is_empty {
+            consecutive_empty_count += 1;
+            // Allow up to 1 empty line, collapse 2+ into 1
+            if consecutive_empty_count <= 1 {
+                final_output.push_str(line);
+                final_output.push('\n');
+            }
+            // Skip additional consecutive empty lines (2nd, 3rd, etc.)
+        } else {
+            final_output.push_str(line);
+            final_output.push('\n');
+            consecutive_empty_count = 0;
+        }
+    }
+
+    // Ensure the final output ends with exactly one newline
+    while final_output.ends_with('\n') {
+        final_output.pop();
+    }
+    final_output.push('\n');
+
+    final_output
+}
+
+pub fn format_file(file_path: &Path) -> io::Result<()> {
+    let file = File::open(file_path)?;
+    let mut input_code = String::new();
+
+    let reader = BufReader::new(file);
+    for line in reader.lines() {
+        input_code.push_str(&line?);
+        input_code.push('\n');
+    }
+
+    let formatted_code = format_code(&input_code);
+
+    let mut file = File::create(file_path)?;
+    file.write_all(formatted_code.as_bytes())?;
+
+    Ok(())
+}

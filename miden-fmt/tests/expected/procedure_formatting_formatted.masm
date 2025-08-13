@@ -1,0 +1,36 @@
+# Test procedure formatting: indentation, spacing, documentation
+
+use.miden::some_import
+
+#! A simple procedure that adds two numbers
+#!
+#! Stack: [a, b]
+# Output:
+
+export.complex_procedure
+    push.1
+    push.2
+    add
+end
+
+#! A more complex procedure with nested operations
+#!
+#! Stack: [x, y, z]
+#! Output: [result]
+export.complex_procedure
+    # First, duplicate the top value
+    dup.0
+    # Then perform some operations
+    push.10 mul
+    # Add the second value
+    movup.2 add
+    # Final calculation
+    swap sub
+end
+
+# Internal procedure (not exported)
+proc.internal_helper
+    padw
+    mem_loadw
+    dropw
+end
