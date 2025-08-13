@@ -62,6 +62,11 @@ fn is_proc_or_export(line: &str) -> bool {
     trimmed.starts_with("proc.") || trimmed.starts_with("export.")
 }
 
+fn is_section_separator_comment(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    (trimmed.starts_with("# ====") || trimmed.starts_with("#! ====")) && trimmed.contains("====")
+}
+
 #[derive(Debug, Clone)]
 enum LineType {
     Import(String),
@@ -338,7 +343,10 @@ pub fn format_code(code: &str) -> String {
             let should_skip_empty_line = if i > 0 && i + 1 < lines.len() {
                 let prev_line = lines[i - 1].trim();
                 let next_line = lines[i + 1].trim();
-                is_comment(prev_line) && is_proc_or_export(next_line)
+                // Skip empty lines between regular comments and proc/export, but preserve them after section separators
+                is_comment(prev_line)
+                    && is_proc_or_export(next_line)
+                    && !is_section_separator_comment(prev_line)
             } else {
                 false
             };
