@@ -9,7 +9,7 @@ use miden_assembly_syntax::{
 use miden_core::{
     Operation, Program, Word, assert_matches,
     mast::{MastNode, MastNodeId, error_code_from_msg},
-    sys_events::{EVENT_HAS_MAP_KEY, EVENT_MAP_VALUE_TO_STACK},
+    sys_events::SystemEvent,
     utils::{Deserializable, Serializable},
 };
 use miden_mast_package::{MastArtifact, MastForest, Package, PackageExport, PackageManifest};
@@ -3041,10 +3041,18 @@ begin push.A adv.push_mapval assert end"
     );
 
     let program = context.assemble(source)?;
+    let expected_event_id = SystemEvent::MapValueToStack.felt_id().as_int();
     let expected = format!(
         "\
 begin
-    basic_block push(2) push(2) push(2) push(2) emit({EVENT_MAP_VALUE_TO_STACK}) assert(0) end
+    basic_block
+        push(2)
+        push(2)
+        push(2)
+        push(2)
+        emit({expected_event_id})
+        assert(0)
+    end
 end"
     );
     assert_str_eq!(format!("{program}"), expected);
@@ -3062,6 +3070,7 @@ begin push.A adv.push_mapval assert end"
     );
 
     let program = context.assemble(source)?;
+    let expected_event_id = SystemEvent::MapValueToStack.felt_id().as_int();
     let expected = format!(
         "\
 begin
@@ -3070,7 +3079,7 @@ begin
         push(5034591595140902852)
         push(4565868838168209231)
         push(6740431856120851931)
-        emit({EVENT_MAP_VALUE_TO_STACK})
+        emit({expected_event_id})
         assert(0)
     end
 end"
@@ -3090,10 +3099,11 @@ begin adv.has_mapkey assert end"
     );
 
     let program = context.assemble(source)?;
+    let expected_event_id = SystemEvent::HasMapKey.felt_id().as_int();
     let expected = format!(
         "\
 begin
-    basic_block emit({EVENT_HAS_MAP_KEY}) assert(0) end
+    basic_block emit({expected_event_id}) assert(0) end
 end"
     );
     assert_str_eq!(format!("{program}"), expected);

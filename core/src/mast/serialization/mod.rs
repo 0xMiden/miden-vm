@@ -24,6 +24,9 @@
 //! (error_codes map section)
 //! - Error codes map (BTreeMap<u64, String>)
 //!
+//! (event table section)
+//! - Event table (EventTable)
+//!
 //! (decorator data section)
 //! - Decorator data
 //! - String table
@@ -50,7 +53,7 @@ use string_table::StringTable;
 
 use super::{DecoratorId, MastForest, MastNode, MastNodeId};
 use crate::{
-    AdviceMap,
+    AdviceMap, EventTable,
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
@@ -163,6 +166,9 @@ impl Serializable for MastForest {
             self.error_codes.iter().map(|(k, v)| (*k, v.to_string())).collect();
         error_codes.write_into(target);
 
+        // Write event table
+        self.event_table.write_into(target);
+
         // write all decorator data below
 
         let mut decorator_data_builder = DecoratorDataBuilder::new();
@@ -211,6 +217,8 @@ impl Deserializable for MastForest {
         let error_codes: BTreeMap<u64, String> = Deserializable::read_from(source)?;
         let error_codes: BTreeMap<u64, Arc<str>> =
             error_codes.into_iter().map(|(k, v)| (k, Arc::from(v))).collect();
+
+        let event_table = EventTable::read_from(source)?;
 
         // Reading Decorators
         let decorator_data: Vec<u8> = Deserializable::read_from(source)?;
@@ -291,6 +299,7 @@ impl Deserializable for MastForest {
         }
 
         mast_forest.error_codes = error_codes;
+        mast_forest.event_table = event_table;
 
         Ok(mast_forest)
     }

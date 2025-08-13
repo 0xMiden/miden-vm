@@ -845,3 +845,39 @@ fn mast_forest_merge_advice_maps_collision() {
     let err = MastForest::merge([&forest_a, &forest_b]).unwrap_err();
     assert_matches!(err, MastForestError::AdviceMapKeyCollisionOnMerge(_));
 }
+
+/// Tests successful merging of event tables without collisions.
+#[test]
+fn mast_forest_merge_event_tables_success() {
+    use crate::{EventId, events::EventSource};
+
+    let mut forest_a = MastForest::new();
+    let id_foo = forest_a.add_node(block_foo()).unwrap();
+    let id_call_a = forest_a.add_call(id_foo).unwrap();
+    forest_a.make_root(id_call_a);
+
+    // Add events to forest_a
+    let event_a1 = EventId::new(EventSource::User(0), "test", "EVENT_A1").unwrap();
+    let event_a2 = EventId::new(EventSource::User(1), "test", "EVENT_A2").unwrap();
+    forest_a.event_table_mut().register(event_a1.clone()).unwrap();
+    forest_a.event_table_mut().register(event_a2.clone()).unwrap();
+
+    let mut forest_b = MastForest::new();  
+    let id_bar = forest_b.add_node(block_bar()).unwrap();
+    let id_call_b = forest_b.add_call(id_bar).unwrap();
+    forest_b.make_root(id_call_b);
+
+    // Add events to forest_b (including one duplicate and one new)
+    let event_b1 = EventId::new(EventSource::User(2), "test", "EVENT_B1").unwrap();
+    forest_b.event_table_mut().register(event_a1.clone()).unwrap(); // duplicate - should be fine
+    forest_b.event_table_mut().register(event_b1.clone()).unwrap();
+
+    // Merge should succeed
+    let (merged_forest, _root_map) = MastForest::merge([&forest_a, &forest_b]).unwrap();
+
+    // Verify that all events are present in the merged EventTable
+    assert_eq!(merged_forest.event_table().len(), 3); // a1, a2, b1
+    assert!(merged_forest.event_table().contains_event(&event_a1));
+    assert!(merged_forest.event_table().contains_event(&event_a2));
+    assert!(merged_forest.event_table().contains_event(&event_b1));
+}

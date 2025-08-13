@@ -10,6 +10,50 @@ use crate::{
     ast::{InvocationTarget, immediate::*},
     parser::{IntValue, WordValue},
 };
+use alloc::string::String;
+use core::fmt;
+
+// EVENT VALUE
+// ================================================================================================
+
+/// Represents an event value that can be either a numeric ID or a string-based event identifier.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum EventValue {
+    /// A numeric event ID (legacy format)
+    Id(ImmU32),
+    /// A string-based event identifier (new format)
+    Name(Immediate<String>),
+}
+
+impl EventValue {
+    /// Returns true if this is a numeric event ID
+    pub fn is_id(&self) -> bool {
+        matches!(self, Self::Id(_))
+    }
+
+    /// Returns true if this is a string-based event name
+    pub fn is_name(&self) -> bool {
+        matches!(self, Self::Name(_))
+    }
+}
+
+impl fmt::Display for EventValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Id(id) => write!(f, "{}", id),
+            Self::Name(name) => match name {
+                Immediate::Value(s) => write!(f, "\"{}\"", s.inner()),
+                Immediate::Constant(ident) => write!(f, "{}", ident),
+            },
+        }
+    }
+}
+
+impl crate::prettier::PrettyPrint for EventValue {
+    fn render(&self) -> crate::prettier::Document {
+        crate::prettier::display(self)
+    }
+}
 
 // INSTRUCTION
 // ================================================================================================
@@ -271,7 +315,7 @@ pub enum Instruction {
     Debug(DebugOptions),
 
     // ----- event decorators --------------------------------------------------------------------
-    Emit(ImmU32),
+    Emit(EventValue),
     Trace(ImmU32),
 }
 

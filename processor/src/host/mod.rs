@@ -107,7 +107,7 @@ pub trait SyncHost: BaseHost {
     fn on_event(
         &mut self,
         process: &ProcessState,
-        event_id: u32,
+        event_id: Felt,
     ) -> Result<Vec<AdviceMutation>, EventError>;
 }
 
@@ -127,7 +127,7 @@ pub trait AsyncHost: BaseHost {
     fn on_event(
         &mut self,
         process: &ProcessState<'_>,
-        event_id: u32,
+        event_id: Felt,
     ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>>;
 }
 

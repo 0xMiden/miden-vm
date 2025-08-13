@@ -5,7 +5,7 @@ use alloc::{
 };
 use core::{error::Error, fmt, fmt::Debug};
 
-use miden_core::DebugOptions;
+use miden_core::{DebugOptions, Felt};
 
 use crate::{AdviceMutation, ExecutionError, ProcessState};
 
@@ -91,7 +91,7 @@ pub type EventError = Box<dyn Error + Send + Sync + 'static>;
 /// ```
 #[derive(Default)]
 pub struct EventHandlerRegistry {
-    handlers: BTreeMap<u32, Box<dyn EventHandler>>,
+    handlers: BTreeMap<u64, Box<dyn EventHandler>>,
 }
 
 impl EventHandlerRegistry {
@@ -102,10 +102,11 @@ impl EventHandlerRegistry {
     /// Registers a boxed [`EventHandler`] with a given identifier.
     pub fn register(
         &mut self,
-        id: u32,
+        id: Felt,
         handler: Box<dyn EventHandler>,
     ) -> Result<(), ExecutionError> {
-        match self.handlers.entry(id) {
+        let key = id.as_int();
+        match self.handlers.entry(key) {
             Entry::Vacant(e) => e.insert(handler),
             Entry::Occupied(_) => return Err(ExecutionError::DuplicateEventHandler { id }),
         };
@@ -114,8 +115,8 @@ impl EventHandlerRegistry {
 
     /// Unregisters a handler with the given identifier, returning a flag whether a handler with
     /// that identifier was previously registered.
-    pub fn unregister(&mut self, id: u32) -> bool {
-        self.handlers.remove(&id).is_some()
+    pub fn unregister(&mut self, id: Felt) -> bool {
+        self.handlers.remove(&id.as_int()).is_some()
     }
 
     /// Handles the event if the registry contains a handler with the same identifier.
@@ -126,10 +127,10 @@ impl EventHandlerRegistry {
     /// propagated to the caller.
     pub fn handle_event(
         &self,
-        id: u32,
+        id: Felt,
         process: &ProcessState,
     ) -> Result<Option<Vec<AdviceMutation>>, EventError> {
-        if let Some(handler) = self.handlers.get(&id) {
+        if let Some(handler) = self.handlers.get(&id.as_int()) {
             return handler.on_event(process).map(Some);
         }
 

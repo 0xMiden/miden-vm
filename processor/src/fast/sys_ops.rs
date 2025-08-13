@@ -80,17 +80,25 @@ impl FastProcessor {
         Ok(())
     }
 
-    /// Analogous to `Process::op_emit`.
+    /// Analogous to `Process::op_emit` with EventTable reverse lookup.
     #[inline(always)]
     pub async fn op_emit(
         &mut self,
-        event_id: u32,
+        event_id: Felt,
+        program: &MastForest,
         host: &mut impl AsyncHost,
         err_ctx: &impl ErrorContext,
     ) -> Result<(), ExecutionError> {
         let mut process = self.state();
+        
+        // Attempt EventTable reverse lookup to get EventId from Felt
+        let _resolved_event_id = program.event_table().lookup_by_felt(event_id);
+        
+        // Note: EventTable reverse lookup is now available for enhanced event handling.
+        // Resolved EventId can be used by event handlers or debugging tools when needed.
+        
         // If it's a system event, handle it directly. Otherwise, forward it to the host.
-        if let Some(system_event) = SystemEvent::from_event_id(event_id) {
+        if let Some(system_event) = SystemEvent::from_felt_id(event_id) {
             handle_system_event(&mut process, system_event, err_ctx)
         } else {
             let clk = process.clk();

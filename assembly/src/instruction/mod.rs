@@ -1,10 +1,14 @@
 use miden_assembly_syntax::{
-    ast::Instruction,
+    ast::{Instruction, EventValue, Immediate},
     debuginfo::{Span, Spanned},
     diagnostics::{RelatedLabel, Report},
     parser::IntValue,
 };
-use miden_core::{Decorator, Felt, ONE, Operation, WORD_SIZE, ZERO, mast::MastNodeId};
+use miden_core::{
+    Decorator, Felt, ONE, Operation, WORD_SIZE, ZERO, 
+    events::EventId,
+    mast::MastNodeId,
+};
 
 use crate::{Assembler, ProcedureContext, ast::InvokeKind, basic_block_builder::BasicBlockBuilder};
 
@@ -547,8 +551,42 @@ impl Assembler {
             },
 
             // ----- emit instruction -------------------------------------------------------------
-            Instruction::Emit(event_id) => {
-                block_builder.push_op(Operation::Emit(event_id.expect_value()));
+            Instruction::Emit(event_value) => {
+                let felt_id = match event_value {
+                    EventValue::Id(id) => {
+                        // Legacy numeric event ID - convert directly to Felt
+                        Felt::from(id.expect_value())
+                    },
+                    EventValue::Name(name) => {
+                        // String-based event name - parse and register in EventTable
+                        let event_name = match name {
+                            Immediate::Value(s) => s.inner().clone(),
+                            Immediate::Constant(_) => {
+                                return Err(Report::new(RelatedLabel::error(
+                                    "event names cannot be constants yet"
+                                ).with_labeled_span(
+                                    instruction.span(),
+                                    "string event identifiers must be literals for now"
+                                )));
+                            }
+                        };
+                        
+                        // Parse the event name to create an EventId
+                        let event_id = event_name.parse::<EventId>().map_err(|err| {
+                            Report::new(RelatedLabel::error(
+                                format!("invalid event identifier: {}", err)
+                            ).with_labeled_span(
+                                instruction.span(),
+                                "event identifier must be in format 'source/namespace::EVENT_NAME'"
+                            ))
+                        })?;
+                        
+                        // Register the event in the EventTable and get the Felt
+                        block_builder.register_event(event_id)?
+                    },
+                };
+                
+                block_builder.push_op(Operation::Emit(felt_id));
             },
 
             // ----- trace instruction ------------------------------------------------------------

@@ -1,7 +1,7 @@
 use alloc::collections::BTreeMap;
 
 use miden_assembly::SourceManager;
-use miden_core::Word;
+use miden_core::{Felt, Word};
 use miden_debug_types::{Location, SourceFile, SourceManagerSync, SourceSpan};
 use pretty_assertions::assert_eq;
 
@@ -282,7 +282,7 @@ where
     fn on_event(
         &mut self,
         _process: &ProcessState<'_>,
-        _event_id: u32,
+        _event_id: Felt,
     ) -> Result<Vec<AdviceMutation>, EventError> {
         Ok(Vec::new())
     }
@@ -298,7 +298,7 @@ where
     fn on_event(
         &mut self,
         _process: &ProcessState<'_>,
-        _event_id: u32,
+        _event_id: Felt,
     ) -> impl Future<Output = Result<Vec<AdviceMutation>, EventError>> + Send {
         let _ = (_process, _event_id);
         async move { Ok(Vec::new()) }

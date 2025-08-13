@@ -1,8 +1,9 @@
 use alloc::{borrow::Borrow, string::ToString, sync::Arc, vec::Vec};
 
-use miden_assembly_syntax::{ast::Instruction, debuginfo::Span, diagnostics::Report};
+use miden_assembly_syntax::{ast::Instruction, debuginfo::Span, diagnostics::{Report, RelatedLabel}};
 use miden_core::{
     AssemblyOp, Decorator, DecoratorList, Felt, Operation,
+    events::EventId,
     mast::{DecoratorId, MastNodeId},
     sys_events::SystemEvent,
 };
@@ -98,7 +99,7 @@ impl BasicBlockBuilder<'_> {
     /// Converts the system event into its corresponding event ID, and adds an `Emit` operation
     /// to the list of basic block operations.
     pub fn push_system_event(&mut self, sys_event: SystemEvent) {
-        self.push_op(Operation::Emit(sys_event.into_event_id()))
+        self.push_op(Operation::Emit(sys_event.felt_id()))
     }
 }
 
@@ -246,5 +247,12 @@ impl BasicBlockBuilder<'_> {
     /// corresponding error code as a Felt.
     pub fn register_error(&mut self, msg: Arc<str>) -> Felt {
         self.mast_forest_builder.register_error(msg)
+    }
+    
+    /// Registers an EventId in the MAST Forest event table and returns the
+    /// corresponding Felt representation.
+    pub fn register_event(&mut self, event_id: EventId) -> Result<Felt, Report> {
+        self.mast_forest_builder.register_event(event_id)
+            .map_err(|err| Report::new(RelatedLabel::error(format!("event registration failed: {}", err))))
     }
 }

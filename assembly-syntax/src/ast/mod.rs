@@ -32,7 +32,7 @@ pub use self::{
     ident::{CaseKindError, Ident, IdentError},
     immediate::{ErrorMsg, ImmFelt, ImmU8, ImmU16, ImmU32, Immediate},
     imports::Import,
-    instruction::{DebugOptions, Instruction, SystemEventNode},
+    instruction::{DebugOptions, EventValue, Instruction, SystemEventNode},
     invocation_target::{InvocationTarget, Invoke, InvokeKind},
     module::{Module, ModuleKind},
     op::Op,

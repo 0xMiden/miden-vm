@@ -217,7 +217,7 @@ fn serialize_deserialize_all_nodes() {
             Operation::FriE2F4,
             Operation::HornerBase,
             Operation::HornerExt,
-            Operation::Emit(42),
+            Operation::emit_u32(42),
         ];
 
         let num_operations = operations.len();

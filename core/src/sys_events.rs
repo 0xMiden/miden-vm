@@ -1,5 +1,7 @@
 use core::fmt;
 
+use crate::{EventId, EventSource, EventTable, Felt};
+
 // SYSTEM EVENTS
 // ================================================================================================
 
@@ -293,6 +295,44 @@ pub enum SystemEvent {
 }
 
 impl SystemEvent {
+    /// Returns the structured EventId for this system event.
+    /// 
+    /// All system events belong to the "miden-vm" source with the "system" namespace.
+    pub fn event_id(&self) -> EventId {
+        let name = match self {
+            SystemEvent::MerkleNodeMerge => "MERKLE_NODE_MERGE",
+            SystemEvent::MerkleNodeToStack => "MERKLE_NODE_TO_STACK",
+            SystemEvent::MapValueToStack => "MAP_VALUE_TO_STACK",
+            SystemEvent::MapValueToStackN => "MAP_VALUE_TO_STACK_N",
+            SystemEvent::HasMapKey => "HAS_MAP_KEY",
+            SystemEvent::U64Div => "U64_DIV",
+            SystemEvent::FalconDiv => "FALCON_DIV",
+            SystemEvent::Ext2Inv => "EXT2_INV",
+            SystemEvent::SmtPeek => "SMT_PEEK",
+            SystemEvent::U32Clz => "U32_CLZ",
+            SystemEvent::U32Ctz => "U32_CTZ",
+            SystemEvent::U32Clo => "U32_CLO",
+            SystemEvent::U32Cto => "U32_CTO",
+            SystemEvent::ILog2 => "ILOG2",
+            SystemEvent::MemToMap => "MEM_TO_MAP",
+            SystemEvent::HdwordToMap => "HDWORD_TO_MAP",
+            SystemEvent::HdwordToMapWithDomain => "HDWORD_TO_MAP_WITH_DOMAIN",
+            SystemEvent::HpermToMap => "HPERM_TO_MAP",
+        };
+        
+        EventId::new(EventSource::System, "system", name)
+            .expect("System event names should always be valid")
+    }
+
+    /// Returns the Felt representation of this system event.
+    pub fn felt_id(&self) -> Felt {
+        self.event_id().felt_id()
+    }
+
+    /// Returns the legacy u32 event ID for backward compatibility.
+    /// 
+    /// # Deprecated
+    /// This method is deprecated. Use `felt_id()` or `event_id()` instead.
     pub fn into_event_id(self) -> u32 {
         match self {
             SystemEvent::MerkleNodeMerge => EVENT_MERKLE_NODE_MERGE,
@@ -341,6 +381,66 @@ impl SystemEvent {
             _ => None,
         }
     }
+
+    /// Returns a system event from a Felt ID using the new EventId system.
+    /// 
+    /// This method tries to find a SystemEvent whose EventId maps to the given Felt.
+    pub fn from_felt_id(felt: Felt) -> Option<Self> {
+        // Try each system event to see if its Felt ID matches
+        for &event in ALL_SYSTEM_EVENTS {
+            if event.felt_id() == felt {
+                return Some(event);
+            }
+        }
+        None
+    }
+
+    /// Returns all system events.
+    pub const fn all() -> &'static [SystemEvent] {
+        ALL_SYSTEM_EVENTS
+    }
+
+    /// Creates an Operation::Emit for this system event.
+    pub fn to_emit_operation(&self) -> crate::Operation {
+        crate::Operation::emit_event(self.event_id())
+    }
+}
+
+/// Array containing all system events for iteration.
+const ALL_SYSTEM_EVENTS: &[SystemEvent] = &[
+    SystemEvent::MerkleNodeMerge,
+    SystemEvent::MerkleNodeToStack,
+    SystemEvent::MapValueToStack,
+    SystemEvent::MapValueToStackN,
+    SystemEvent::HasMapKey,
+    SystemEvent::U64Div,
+    SystemEvent::FalconDiv,
+    SystemEvent::Ext2Inv,
+    SystemEvent::SmtPeek,
+    SystemEvent::U32Clz,
+    SystemEvent::U32Ctz,
+    SystemEvent::U32Clo,
+    SystemEvent::U32Cto,
+    SystemEvent::ILog2,
+    SystemEvent::MemToMap,
+    SystemEvent::HdwordToMap,
+    SystemEvent::HdwordToMapWithDomain,
+    SystemEvent::HpermToMap,
+];
+
+/// Creates an EventTable containing all system events.
+/// 
+/// This table enables reverse lookup of system event names from their Felt IDs.
+pub fn create_system_event_table() -> EventTable {
+    let mut table = EventTable::new();
+    
+    for &event in ALL_SYSTEM_EVENTS {
+        let event_id = event.event_id();
+        table.register(event_id)
+            .expect("System events should not have ID collisions");
+    }
+    
+    table
 }
 
 impl crate::prettier::PrettyPrint for SystemEvent {

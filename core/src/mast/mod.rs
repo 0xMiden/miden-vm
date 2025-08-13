@@ -14,8 +14,9 @@ pub use node::{
 };
 
 use crate::{
-    AdviceMap, Decorator, DecoratorList, Felt, LexicographicWord, Operation, Word,
+    AdviceMap, Decorator, DecoratorList, EventTable, Felt, LexicographicWord, Operation, Word,
     crypto::hash::{Blake3_256, Blake3Digest, Digest, Hasher},
+    events::EventTableError,
     utils::{ByteWriter, DeserializationError, Serializable},
 };
 
@@ -59,6 +60,10 @@ pub struct MastForest {
     /// codes, so they are stored in order to provide a useful message to the user in case a error
     /// code is triggered.
     error_codes: BTreeMap<u64, Arc<str>>,
+
+    /// Event table for bidirectional lookup between event IDs and their Felt representations.
+    /// This enables reverse lookup of event names from Felt values emitted during execution.
+    event_table: EventTable,
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -491,6 +496,16 @@ impl MastForest {
         &mut self.advice_map
     }
 
+    /// Returns a reference to the event table of this MAST forest.
+    pub fn event_table(&self) -> &EventTable {
+        &self.event_table
+    }
+
+    /// Returns a mutable reference to the event table of this MAST forest.
+    pub fn event_table_mut(&mut self) -> &mut EventTable {
+        &mut self.event_table
+    }
+
     /// Registers an error message in the MAST Forest and returns the corresponding error code as a
     /// Felt.
     pub fn register_error(&mut self, msg: Arc<str>) -> Felt {
@@ -793,4 +808,6 @@ pub enum MastForestError {
     ChildFingerprintMissing(MastNodeId),
     #[error("advice map key {0} already exists when merging forests")]
     AdviceMapKeyCollisionOnMerge(Word),
+    #[error("event table collision on merge: {0}")]
+    EventTableCollisionOnMerge(EventTableError),
 }

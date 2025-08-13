@@ -121,10 +121,17 @@ pub use operations::{
     opcode_constants::*,
 };
 
+pub mod events;
+pub use events::{
+    EventId, EventIdError, EventSource, EventTable, EventTableError, 
+    EventCollision, CollisionResolution,
+};
+
 pub mod stack;
 pub use stack::{StackInputs, StackOutputs};
 
 pub mod sys_events;
+pub use sys_events::create_system_event_table;
 
 mod advice;
 pub use advice::map::AdviceMap;

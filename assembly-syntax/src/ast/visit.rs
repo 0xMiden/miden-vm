@@ -104,6 +104,9 @@ pub trait Visit<T = ()> {
     fn visit_system_event(&mut self, sys_event: Span<&SystemEventNode>) -> ControlFlow<T> {
         visit_system_event(self, sys_event)
     }
+    fn visit_event_value(&mut self, event_value: Span<&EventValue>) -> ControlFlow<T> {
+        visit_event_value(self, event_value)
+    }
     fn visit_debug_options(&mut self, options: Span<&DebugOptions>) -> ControlFlow<T> {
         visit_debug_options(self, options)
     }
@@ -322,8 +325,8 @@ where
         | MemLoadWImm(imm)
         | MemStoreImm(imm)
         | MemStoreWImm(imm)
-        | Emit(imm)
         | Trace(imm) => visitor.visit_immediate_u32(imm),
+        Emit(event_value) => visitor.visit_event_value(Span::new(span, event_value)),
         SysEvent(sys_event) => visitor.visit_system_event(Span::new(span, sys_event)),
         Exec(target) => visitor.visit_exec(target),
         Call(target) => visitor.visit_call(target),
@@ -360,6 +363,19 @@ where
     V: ?Sized + Visit<T>,
 {
     ControlFlow::Continue(())
+}
+
+pub fn visit_event_value<V, T>(visitor: &mut V, event_value: Span<&EventValue>) -> ControlFlow<T>
+where
+    V: ?Sized + Visit<T>,
+{
+    match event_value.inner() {
+        EventValue::Id(imm) => visitor.visit_immediate_u32(imm),
+        EventValue::Name(_imm) => {
+            // For now, we don't need to traverse into the string immediate
+            ControlFlow::Continue(())
+        },
+    }
 }
 
 pub fn visit_debug_options<V, T>(visitor: &mut V, options: Span<&DebugOptions>) -> ControlFlow<T>
@@ -532,6 +548,9 @@ pub trait VisitMut<T = ()> {
     }
     fn visit_mut_system_event(&mut self, sys_event: Span<&mut SystemEventNode>) -> ControlFlow<T> {
         visit_mut_system_event(self, sys_event)
+    }
+    fn visit_mut_event_value(&mut self, event_value: Span<&mut EventValue>) -> ControlFlow<T> {
+        visit_mut_event_value(self, event_value)
     }
     fn visit_mut_debug_options(&mut self, options: Span<&mut DebugOptions>) -> ControlFlow<T> {
         visit_mut_debug_options(self, options)
@@ -754,8 +773,8 @@ where
         | MemLoadWImm(imm)
         | MemStoreImm(imm)
         | MemStoreWImm(imm)
-        | Emit(imm)
         | Trace(imm) => visitor.visit_mut_immediate_u32(imm),
+        Emit(event_value) => visitor.visit_mut_event_value(Span::new(span, event_value)),
         SysEvent(sys_event) => visitor.visit_mut_system_event(Span::new(span, sys_event)),
         Exec(target) => visitor.visit_mut_exec(target),
         Call(target) => visitor.visit_mut_call(target),
@@ -795,6 +814,22 @@ where
     V: ?Sized + VisitMut<T>,
 {
     ControlFlow::Continue(())
+}
+
+pub fn visit_mut_event_value<V, T>(
+    visitor: &mut V,
+    event_value: Span<&mut EventValue>,
+) -> ControlFlow<T>
+where
+    V: ?Sized + VisitMut<T>,
+{
+    match event_value.into_inner() {
+        EventValue::Id(imm) => visitor.visit_mut_immediate_u32(imm),
+        EventValue::Name(_imm) => {
+            // For now, we don't need to traverse into the string immediate  
+            ControlFlow::Continue(())
+        },
+    }
 }
 
 pub fn visit_mut_debug_options<V, T>(

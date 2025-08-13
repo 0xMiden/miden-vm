@@ -104,6 +104,9 @@ impl MastForestMerger {
         for other_forest in forests.iter() {
             self.merge_error_codes(other_forest)?;
         }
+        for other_forest in forests.iter() {
+            self.merge_event_tables(other_forest)?;
+        }
 
         let iterator = MultiMastForestNodeIter::new(forests.clone());
         for item in iterator {
@@ -175,6 +178,13 @@ impl MastForestMerger {
             .advice_map
             .merge(&other_forest.advice_map)
             .map_err(|((key, _prev), _new)| MastForestError::AdviceMapKeyCollisionOnMerge(key))
+    }
+
+    fn merge_event_tables(&mut self, other_forest: &MastForest) -> Result<(), MastForestError> {
+        self.mast_forest
+            .event_table
+            .merge(other_forest.event_table.clone())
+            .map_err(MastForestError::EventTableCollisionOnMerge)
     }
 
     fn merge_error_codes(&mut self, other_forest: &MastForest) -> Result<(), MastForestError> {

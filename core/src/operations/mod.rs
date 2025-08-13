@@ -161,15 +161,15 @@ pub enum Operation {
     /// instruction.
     Clk = OPCODE_CLK,
 
-    /// Emits an event id (`u32` value) to the host.
+    /// Emits an event to the host.
     ///
-    /// We interpret the event id as follows:
-    /// - 16 most significant bits identify the event source,
-    /// - 16 least significant bits identify the actual event.
+    /// The event is identified by a Felt value that uniquely represents the event.
+    /// This Felt is typically derived from a structured EventId (e.g., "miden-vm/memory::MAP_VALUE") 
+    /// via Blake3 hashing, but can also be a legacy u32 value for backward compatibility.
     ///
     /// Similar to Noop, this operation does not change the state of user stack. The immediate
     /// value affects the program MAST root computation.
-    Emit(u32) = OPCODE_EMIT,
+    Emit(Felt) = OPCODE_EMIT,
 
     // ----- flow control operations -------------------------------------------------------------
     /// Marks the beginning of a join block.
@@ -622,7 +622,7 @@ impl Operation {
     pub fn imm_value(&self) -> Option<Felt> {
         match *self {
             Self::Push(imm) => Some(imm),
-            Self::Emit(imm) => Some(imm.into()),
+            Self::Emit(imm) => Some(imm),
             _ => None,
         }
     }
@@ -644,6 +644,31 @@ impl Operation {
                 | Self::Call
                 | Self::SysCall
         )
+    }
+
+    // EMIT OPERATION HELPERS
+    // --------------------------------------------------------------------------------------------
+
+    /// Creates a new Emit operation from an EventId.
+    /// 
+    /// The EventId is hashed to produce a Felt value that uniquely identifies the event.
+    pub fn emit_event(event_id: crate::EventId) -> Self {
+        Self::Emit(event_id.felt_id())
+    }
+
+    /// Creates a new Emit operation from a Felt value.
+    /// 
+    /// This is useful for backward compatibility or when working directly with Felt event IDs.
+    pub fn emit_felt(felt: Felt) -> Self {
+        Self::Emit(felt)
+    }
+
+    /// Creates a new Emit operation from a legacy u32 event ID.
+    /// 
+    /// # Deprecated
+    /// This method is provided for backward compatibility. New code should use `emit_event()`.
+    pub fn emit_u32(event_id: u32) -> Self {
+        Self::Emit(Felt::new(event_id as u64))
     }
 }
 
@@ -799,7 +824,7 @@ impl Serializable for Operation {
                 err_code.write_into(target);
             },
             Operation::Push(value) => value.as_int().write_into(target),
-            Operation::Emit(value) => value.write_into(target),
+            Operation::Emit(value) => value.as_int().write_into(target),
 
             // Note: we explicitly write out all the operations so that whenever we make a
             // modification to the `Operation` enum, we get a compile error here. This
@@ -994,9 +1019,8 @@ impl Deserializable for Operation {
             OPCODE_MRUPDATE => Self::MrUpdate,
             OPCODE_PUSH => Self::Push(Felt::read_from(source)?),
             OPCODE_EMIT => {
-                let value = source.read_u32()?;
-
-                Self::Emit(value)
+                let value = source.read_u64()?;
+                Self::Emit(Felt::new(value))
             },
             OPCODE_SYSCALL => Self::SysCall,
             OPCODE_CALL => Self::Call,

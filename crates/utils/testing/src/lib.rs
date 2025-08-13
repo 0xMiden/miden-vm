@@ -470,7 +470,7 @@ impl Test {
             host.load_library(library.mast_forest().clone()).unwrap();
         }
         for (id, handler_func) in &self.handlers {
-            host.load_handler(*id, *handler_func).unwrap();
+            host.load_handler((*id).into(), *handler_func).unwrap();
         }
 
         (program, host)

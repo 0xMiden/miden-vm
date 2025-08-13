@@ -1,0 +1,53 @@
+# Enhanced Event System Demo
+#
+# This example demonstrates the enhanced EventId system with hierarchical naming,
+# collision detection, and reverse lookup capabilities.
+
+# Define some constants for legacy events
+const.LEGACY_START=1000
+const.LEGACY_PROCESS=1001
+const.LEGACY_END=1002
+
+begin
+    # =========================================================================
+    # Legacy Event System Demo
+    # =========================================================================
+    
+    # Emit legacy numeric events (backward compatible)
+    emit.LEGACY_START    # Named constant
+    emit.42              # Direct numeric value
+    emit.LEGACY_PROCESS  # Another named constant
+
+    # Push some data for processing
+    push.10 push.20 add
+
+    # =========================================================================
+    # Enhanced EventId System Demo (Future Syntax)
+    # =========================================================================
+    
+    # Note: Enhanced EventId emission syntax may vary by assembler implementation
+    # These examples show the conceptual approach
+    
+    # System events (miden-vm namespace)
+    # emit."miden-vm/system::EXECUTION_STARTED"
+    
+    # User application events with hierarchical organization
+    # emit."user-0/math::ADDITION_PERFORMED" 
+    # emit."user-0/validation::INPUT_VALIDATED"
+    # emit."user-0/processing::COMPUTATION_COMPLETE"
+    
+    # Library events (hypothetical crypto library)
+    # emit."lib-5/crypto::HASH_COMPUTED"
+    # emit."lib-5/signature::VERIFICATION_SUCCESS"
+    
+    # Standard library events
+    # emit."miden-stdlib/collections::MERKLE_UPDATE"
+    # emit."miden-stdlib/math::OVERFLOW_DETECTED"
+
+    # Finish with legacy events
+    emit.LEGACY_END
+    
+    # Example of trace events (work with both systems)
+    trace.2000           # Legacy trace
+    # trace."user-0/debug::EXECUTION_TRACE"  # Enhanced trace (future)
+end
