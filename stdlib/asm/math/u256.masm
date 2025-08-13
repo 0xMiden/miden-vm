@@ -200,7 +200,6 @@ export.eq_unsafe
 end
 
 # ===== MULTIPLICATION ============================================================================
-
 proc.mulstep
     movdn.2
     u32overflowing_madd

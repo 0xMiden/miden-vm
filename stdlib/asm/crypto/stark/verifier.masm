@@ -1,11 +1,10 @@
 use.std::crypto::fri::frie2f4
 use.std::crypto::fri::helper
-
+use.std::crypto::stark::constants
 use.std::crypto::stark::deep_queries
-use.std::crypto::stark::random_coin
 use.std::crypto::stark::ood_frames
 use.std::crypto::stark::public_inputs
-use.std::crypto::stark::constants
+use.std::crypto::stark::random_coin
 use.std::crypto::stark::utils
 
 #!   Verify a STARK proof attesting to the correct execution of a program in the Miden VM.
@@ -75,6 +74,7 @@ export.verify
     adv_loadw
     exec.constants::main_trace_com_ptr mem_storew
     # => [main_trace_commitment, ...]
+
     exec.random_coin::reseed
     # => [...]
 

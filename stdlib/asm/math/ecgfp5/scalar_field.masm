@@ -273,7 +273,7 @@ export.mont_mul.32
     u32wrapping_mul
     u32wrapping_mul.91978719 # more about this literal constant
     loc_store.16              # https://github.com/itzmeanjan/miden/blob/e7038e45865a7032a0629346921a77010e82862d/miden/tests/integration/stdlib/math/ext5_scalar.rs#L46-L54
-                             # cached f
+    # cached f
 
     push.0.0.0.0
     loc_loadw.4

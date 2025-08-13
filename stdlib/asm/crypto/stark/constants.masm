@@ -2,6 +2,7 @@
 # =================================================================================================
 
 # General constants
+
 const.ROOT_UNITY=7277203076849721926
 const.DOMAIN_OFFSET=7
 const.DOMAIN_OFFSET_INV=2635249152773512046
@@ -35,7 +36,7 @@ const.NUM_EVAL_GATES_CIRCUIT=108
 # Number of fixed length public inputs with padding (in field elements)
 # This is composed of the input/output operand stacks (16 * 2) and the program digest (4) and four
 # zeros for padding to the next multiple of 4. Note that, then, the fixed length public inputs
-# which are stored as extension field elements will be double-word aligned. 
+# which are stored as extension field elements will be double-word aligned.
 const.NUM_FIXED_LEN_PUBLIC_INPUTS=40
 
 # Op label for kernel procedures table messages
@@ -191,12 +192,11 @@ const.FRI_COM_PTR=4294912800
 ## required is 80 + 16 + 16 = 112
 ##
 ## Starts at address 3238002688 = 2**31 + 2**30 + 2**24 and the memory region grows only forward.
-## Its size is determined by the sum of widths of all traces. 
+## Its size is determined by the sum of widths of all traces.
 const.CURRENT_TRACE_ROW_PTR=3238002688
 
 # ACCESSORS
 # =================================================================================================
-
 export.get_root_unity
     push.ROOT_UNITY
 end
@@ -275,7 +275,7 @@ export.get_lde_domain_generator
 end
 
 export.set_lde_domain_log_size
-    push.LDE_DOMAIN_LOG_SIZE_PTR mem_store 
+    push.LDE_DOMAIN_LOG_SIZE_PTR mem_store
 end
 
 export.get_lde_domain_log_size

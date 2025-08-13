@@ -1,10 +1,9 @@
-use.std::crypto::stark::constants
 use.std::crypto::hashes::rpo
+use.std::crypto::stark::constants
 use.std::crypto::stark::random_coin
 
-
 #! Processes the public inputs.
-#! 
+#!
 #! This involves:
 #!
 #! 1. Loading from the advice stack the fixed-length public inputs and storing them in memory
@@ -12,7 +11,7 @@ use.std::crypto::stark::random_coin
 #! 2. Loading from the advice stack the variable-length public inputs, storing them temporarily
 #! in memory, and then reducing them to an element in the challenge field using the auxiliary
 #! randomness. This reduced value is then used to impose a boundary condition on the relevant
-#! auxiliary column. 
+#! auxiliary column.
 #!
 #! Note that the fixed length public inputs are stored as extension field elements while
 #! the variable length ones are stored as base field elements.
@@ -89,7 +88,7 @@ export.load_public_inputs
         exec.load_base_store_extension_double_word
         hperm
     end
- 
+
     # 2) Load and hash the variable length public inputs
 
     ## a) Compute the number of base field elements in total in the variable length public inputs
@@ -102,12 +101,14 @@ export.load_public_inputs
     ##    We also check the double-word alignment.
     u32divmod.8
     # => [rem, num_iter, R2, R1, C, ptr, ...]
+
     push.0 assert_eq
     # => [num_iter, R2, R1, C, ptr, ...]
-    
+
     ## c) Prepare the stack for hashing
     movdn.13
     # => [R2, R1, C, ptr, num_iter, ...]
+
     dup.13 sub.1 swap.14
     push.0 neq
     # => [(num_iter == 0), R2, R1, C, ptr, num_iter - 1, ...]
@@ -117,6 +118,7 @@ export.load_public_inputs
         adv_pipe
         hperm
         # => [R2, R1, C, ptr, num_iter, ...]
+
         dup.13 sub.1 swap.14
         push.0 neq
     end
@@ -125,6 +127,7 @@ export.load_public_inputs
     # 3) Return the final digest
     exec.rpo::squeeze_digest
     # => [D, ptr, num_iter, ...] where D = R1 the digest
+
     movup.4 drop
     movup.4 drop
     # => [D, ...]
@@ -140,7 +143,7 @@ end
 #!
 #! Currently, the only variable-length public inputs are the kernel procedure digests.
 #!
-#! Input: 
+#! Input:
 #!      - Operand stack: [...]
 #!      - Advice stack: [beta0, beta1, alpha0, alpha1, var_len_pi_1_len, ..., var_len_pi_k_len, ...]
 #! Output: [D, ...]
@@ -151,6 +154,7 @@ proc.reduce_variable_length_public_inputs
     adv_push.4
     exec.constants::aux_rand_nd_ptr mem_storew
     # => [alpha1, alpha0, beta1, beta0, ...]
+
     dropw
     # => [...]
 
@@ -165,13 +169,14 @@ proc.reduce_variable_length_public_inputs
     # of the reduction can be stored.
     # Note that, as mentioned in the top of this module, the variable-length public inputs are only
     # stored temporarily and they will be over-written by, among other data, the result of reducing
-    # the variable public inputs. 
+    # the variable public inputs.
 
     # 3) Reduce the variable-length public inputs.
     #    These include:
     #    a) Kernel procedure digests.
     adv_push.1
     # => [num_ker_procedures, next_var_len_pub_inputs_ptr, var_len_pub_inputs_res_ptr, ...]
+
     exec.reduce_kernel_digests
     # => [res1, res0, next_var_len_pub_inputs_ptr, var_len_pub_inputs_res_ptr, ...]
 
@@ -179,11 +184,12 @@ proc.reduce_variable_length_public_inputs
     #    This is stored in a word-aligned manner with zero padding if needed.
     push.0.0
     # => [0, 0, res1, res0, next_var_len_pub_inputs_ptr, var_len_pub_inputs_res_ptr, ...]
+
     dup.5 add.4 swap.6
     mem_storew
     dropw
     # => [next_var_len_pub_inputs_ptr, var_len_pub_inputs_res_ptr, ...]
-    
+
     # 5) Clean up the stack.
     drop drop
     # => [...]
@@ -256,16 +262,17 @@ proc.reduce_kernel_digests
 
         movup.7 movup.7
         # => [acc1, acc0, alpha1, alpha0 + op_label, beta1, beta0, digests_ptr, beta_ptr, Y, Y, ...]
-        
+
         dup.5 dup.5
         # => [beta1, beta0, acc1, acc0, alpha1, alpha0 + op_label, beta1, beta0, digests_ptr, beta_ptr, Y, Y, ...]
+
         ext2mul
         # => [tmp1', tmp0', alpha1, alpha0 + op_label, beta1, beta0, digests_ptr, beta_ptr, Y, Y, ...]
 
         dup.3 dup.3
         ext2add
         # => [term1', term0', alpha1, alpha0 + op_label, beta1, beta0, digests_ptr, beta_ptr, Y, Y, ...]
-  
+
         movdn.15
         movdn.15
         # => [alpha1, alpha0 + op_label, beta1, beta0, digests_ptr, beta_ptr, Y, Y, term1', term0', ...]
@@ -273,20 +280,22 @@ proc.reduce_kernel_digests
         push.0 movdn.6
         push.0 movdn.6
         # => [alpha1, alpha0 + op_label, beta1, beta0, digests_ptr, beta_ptr, 0, 0, Y, Y, term1', term0', ...]
- 
+
         swapdw
         # => [Y, Y, alpha1, alpha0 + op_label, beta1, beta0, digests_ptr, beta_ptr, 0, 0, term1', term0', ...]
 
         exec.constants::tmp1 mem_loadw sub.1
         exec.constants::tmp1 mem_storew
- 
+
         dup
         push.0
         neq
     end
     # => [Y, Y, alpha1, alpha0 + op_label, beta1, beta0, digests_ptr, beta_ptr, 0, 0, term1', term0', ...]
+
     dropw dropw dropw
     # => [digests_ptr, beta_ptr, 0, 0, term1', term0', ...]
+
     dup exec.constants::tmp2 mem_store
     exec.constants::tmp1 mem_loadw drop drop drop
 
@@ -300,8 +309,10 @@ proc.reduce_kernel_digests
     while.true
         sub.1 movdn.4
         # => [acc1, acc0, term1_1, term1_0, n - 1, ..., termn_1, termn_0, ...]
+
         ext2mul
         # => [acc1', acc0', n - 1, ..., termn_1, termn_0, ...]
+
         movup.2
         dup
         push.0
@@ -353,7 +364,7 @@ proc.compute_and_store_public_inputs_address
     # 3) Compute the pointer to the public inputs
     #
     # We need to account for the fact that fixed-length public inputs are stored as extension field
-    # elements. 
+    # elements.
     dup
     exec.constants::get_num_fixed_len_public_inputs
     mul.2
@@ -371,7 +382,7 @@ end
 #! Input: [Y, Y, C, ptr, ...]
 #! Output: [A1, A0, C, ptr + 16, ..]
 proc.load_base_store_extension_double_word
-    # 1) Load the first 4 base elements from the advice stack and save them temporarily 
+    # 1) Load the first 4 base elements from the advice stack and save them temporarily
     adv_loadw
     exec.constants::tmp1 mem_storew
 
@@ -379,10 +390,13 @@ proc.load_base_store_extension_double_word
     swapw
     exec.constants::zeroize_stack_word
     # => [0, 0, 0, 0, a3, a2, a1, a0, C, ptr, ...]
+
     movdn.6
     # => [0, 0, 0, a3, a2, a1, 0, a0, C, ptr, ...]
+
     movdn.4
     # => [0, 0, a3, a2, 0, a1, 0, a0, C, ptr, ...]
+
     movdn.2
     # => [0, a3, 0, a2, 0, a1, 0, a0, C, ptr, ...]
 
@@ -401,10 +415,10 @@ proc.load_base_store_extension_double_word
     dup.12 add.4
     mem_storew
 
-    
     # 6) Represent the second 4 base field elements as elements in the quadratic extension field
     exec.constants::zeroize_stack_word
     # => [0, 0, 0, 0, a7, a6, a5, a4, C, ptr, ...]
+
     movdn.6
     movdn.4
     movdn.2

@@ -1587,7 +1587,6 @@ export.hash_memory.48
     # Note: (len /16) * 4 is *not* the same as (len / 4), due to the division being a division + floor operation
     loc_load.0 loc_load.4 u32assert u32div.16 u32assert2 mul.4 u32overflowing_add assertz loc_store.24
 
-
     # loc.7 (number of remaining 512-bit blocks to consume): padded_length / 64
     loc_load.8 u32assert u32div.64 loc_store.28
 

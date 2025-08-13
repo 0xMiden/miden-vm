@@ -484,7 +484,6 @@ export.shl
     exec.wrapping_mul
 end
 
-
 #! Performs right shift of one unsigned 64-bit integer using the pow2 operation.
 #! The input value to be shifted is assumed to be represented using 32 bit limbs.
 #! The shift value should be in the range [0, 64), otherwise it will result in an

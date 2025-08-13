@@ -46,6 +46,7 @@ export.mod_12289
     movup.2
     push.M
     # => [M, qhi, overflow, M * qlo % 2^32, a_hi, a_lo, ...]
+
     u32overflowing_madd
     # => [t1, t0, M * qlo % 32, a_hi, a_lo, ...] where t = t1 * 2^32 + t0 and t = M * qhi + overflow
     # Note by the bound on x - r = q * M, we are guaranteed that t1 = 0
@@ -57,6 +58,7 @@ export.mod_12289
     dup
     u32overflowing_sub.M
     # => [underflow_bit, r - M, r, res_hi, res_lo, a_hi, a_lo, ...]
+
     assert drop
     # => [r, res_hi, res_lo, a_hi, a_lo, ...]
 
@@ -68,9 +70,10 @@ export.mod_12289
     movup.3
     u32overflowing_add
     # => [flag, final_res_hi, final_res_lo, r, a_hi, a_lo, ...] flag should be 0 by the bound on inputs
+
     drop
     # => [final_res_hi, final_res_lo, r, a_hi, a_lo, ...]
-    
+
     movup.3
     assert_eq
     movup.2
@@ -124,7 +127,6 @@ export.hash_to_point.8
     dropw
 end
 
-
 # PROBABILISTIC POLYNOMIAL MULTIPLICATION IN Z_Q[x]
 # =============================================================================================
 
@@ -137,7 +139,7 @@ end
 #! After that, it loads the claimed polynomial `h * s2` in Z_Q[x] where Q is the Miden VM prime
 #! from the advice stack and lays it right after `s2`.
 #! The hash of `h`, `s2` and the claimed product is also computed and the first two field elements
-#! of the digest (i.e., the Fiat-Shamir challenge) are used in order to check that 
+#! of the digest (i.e., the Fiat-Shamir challenge) are used in order to check that
 #! pi == h * s2 in Z_Q[x] by evaluating both sides at the random point. Note that since we need
 #! to hash the polynomials before computing their evaluations, the procedure receives
 #! the evaluation point non-deterministically so that it can perform the evaluations while hashing
@@ -151,14 +153,14 @@ end
 #!   Operand stack: []
 #!   Advice stack:  []
 #!
-#! Cycles: 6780 
+#! Cycles: 6780
 export.load_h_s2_and_product.8
     # We will store in local addresses:
     # 1. 0..4 the public key,
     # 2. 4..8 the inverse of the evaluation point tau as [tau_inv0, tau_inv1, tau0, tau1].
-    
+
     # 1) Set up the stack for loading the coefficients of the polynomials, evaluating and hashing them
-    
+
     ## a) Set up the accumulator for `horner_eval_base` and the memory pointers
     push.0.0
     locaddr.4
@@ -177,13 +179,13 @@ export.load_h_s2_and_product.8
     ## d) Load the evaluation point tau from the advice tape, compute its inverse and save both
     ## Note that we will evaluate the polynomials at `tau_inv = tau^{-1}` as we are loading the coefficients
     ## in the normal order i.e., not in reversed order required for Horner evaluation.
-    ## This means that the equality we will be checking is 
+    ## This means that the equality we will be checking is
     ## pi(tau_inv) * tau^1023 == h(tau_inv) * tau^511 * s2(tau_inv) * tau^511
     ##
     ## which simplifies to
     ##
     ## pi(tau_inv) * tau == h(tau_inv) * s2(tau_inv)
-    adv_push.2 
+    adv_push.2
     dup.1 dup.1 ext2inv
     movup.3 movup.3
     loc_storew.4
@@ -222,7 +224,7 @@ export.load_h_s2_and_product.8
     # => [C, ptr, tau_inv_ptr, h(tau)_1, h(tau)_0, ...]
 
     # 4) Load s2 and evaluate at tau_inv
-    
+
     ## a) Reset the accumulator, update the pointers and set up the state of the hasher
     push.0 movdn.6
     push.0 movdn.6
@@ -255,7 +257,6 @@ export.load_h_s2_and_product.8
     end
     # => [Y, Y, C, ptr, tau_inv_ptr, s2(tau)_1, s2(tau)_0, h(tau)_1, h(tau)_0, ...]
 
-
     # 5) Load claimed h * s2 in Z_Q[x]
 
     ## a) Reset the accumulator, update the pointers and set up the state of the hasher
@@ -285,7 +286,7 @@ export.load_h_s2_and_product.8
     dup.4 assert_eq
     drop drop
     # => [tau1, tau0, ptr, tau_inv_ptr, pi(tau)_1, pi(tau)_0, s2(tau)_1, s2(tau)_0, h(tau)_1, h(tau)_0, ...]
-    
+
     # 7) Assert the equality pi(tau_inv) * tau == h(tau_inv) * s2(tau_inv)
 
     ## a) Compute the left hand side of the equation
@@ -300,12 +301,11 @@ export.load_h_s2_and_product.8
     # => [RHS1, RHS0, LHS1, LHS0, ...]
 
     ## c) Assert equality
-    movup.2     
+    movup.2
     assert_eq
     assert_eq
     # => [...]
 end
-
 
 # SQUARE NORM OF Z_M[x]/(phi) POLYNOMIALS
 # =============================================================================================
@@ -352,7 +352,7 @@ end
 
 #! Given a tuple (u, w, v), we want to compute (v - (u + (- w % M) % M) % M), where:
 #!
-#! 1. v is a field element given by its u32 decomposition i.e., (c_lo, c_hi) such that 
+#! 1. v is a field element given by its u32 decomposition i.e., (c_lo, c_hi) such that
 #!    v = c_hi * 2**32 + c_lo
 #! 2. w is a field element representing the (i+512)-th coefficient of the product polynomial
 #!    pi (i.e., h * s2). We are guaranteed that w is at most 512 * (M-1)^2.
@@ -365,12 +365,12 @@ end
 #! 2. The coefficients of the product polynomial, u and w, are strictly less than J := 512 * M^2.
 #! 3. The coefficients of c are at most M - 1.
 #!
-#! This means that we can substitute (v - (u + (- w % M) % M) % M) with  v + w + J - u 
+#! This means that we can substitute (v - (u + (- w % M) % M) % M) with  v + w + J - u
 #! (note J % M = 0) without risking Q-underflow but we can still overflow.
 #! For this reason, we use the u32 decomposition of v and perform the addition of
 #! v and w + J - u as u64. Note that |w + J - u| <= 1024 * (M - 1)^2
 #! and hence there is the possibility of an overflow when we add v and w + J - u as u64.
-#! When there is an overflow, we add 10952, which is equal to 2^32 % M, to the upper u32 limb of 
+#! When there is an overflow, we add 10952, which is equal to 2^32 % M, to the upper u32 limb of
 #! the result of (v + (w + J - u)). Note that since |w + J - u| <= 1024 * (M-1)^2 < 2^38, and
 #! 10952 < M, we are guaranteed that this final u32 addition to the upper limb will not overflow.
 #!
@@ -389,11 +389,11 @@ export.diff_mod_M
     # 2) u32split first u64
     u32split
     #=> [tmp_hi, tmp_lo, c_hi, c_lo, ...]
-  
+
     # 3) Add the two u64-s
     exec.u64::overflowing_add
     #=> [flag, res_hi, res_lo, ..]
-    
+
     # 4) Handle potential overflow in the u64 addition
     push.10952 # 2^32 mod M
     push.0
@@ -554,17 +554,21 @@ export.compute_s2_norm_sq
         exec.norm_sq
         swap
         # => [c2, norm_sq(c3), c1, c0, s2_ptr, ...]
+
         exec.norm_sq
         add
         swap
         # => [c1, norm_sq(c2) + norm_sq(c3), c0, s2_ptr, ...]
+
         exec.norm_sq
         add
         swap
         # => [c0, norm_sq(c1) + norm_sq(c2) + norm_sq(c3), s2_ptr, ...]
+
         exec.norm_sq
         add
         # => [norm_sq(c0) + norm_sq(c1) + norm_sq(c2) + norm_sq(c3), s2_ptr, ...]
+
         swap
         add.4
         # => [s2_ptr + 1, norm_sq(c0) + norm_sq(c1) + norm_sq(c2) + norm_sq(c3), ...]
@@ -576,12 +580,11 @@ export.compute_s2_norm_sq
     end
 end
 
-
 # FALCON SIGNATURE VERIFICATION ALGORITHM
 # =============================================================================================
 
 #! Verifies a signature against a public key and a message. The procedure gets as inputs the hash
-#! of the public key and the hash of the message via the operand stack. The signature is expected 
+#! of the public key and the hash of the message via the operand stack. The signature is expected
 #! to be present on the advice stack.
 #!
 #! The signature is valid if and only if the procedure returns.

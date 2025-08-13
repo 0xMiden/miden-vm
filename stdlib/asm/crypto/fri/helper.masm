@@ -1,5 +1,5 @@
-use.std::crypto::stark::random_coin
 use.std::crypto::stark::constants
+use.std::crypto::stark::random_coin
 
 #! Compute the number of FRI layers given log2 of the size of LDE domain. It also computes the
 #! LDE domain generator and, from it, the trace generator and store these for later use.
@@ -47,7 +47,7 @@ end
 #! Cycles: 21 + 83 * num_fri_layers
 export.load_fri_layer_commitments
     # We need to store the current FRI layer LDE domain size and its logarithm.
-    padw exec.constants::get_lde_domain_info_word 
+    padw exec.constants::get_lde_domain_info_word
     exec.constants::tmp1 mem_storew
     # => [Y, ...] where `Y` is as "garbage" word
 
@@ -113,6 +113,7 @@ export.load_fri_layer_commitments
         neq
     end
     # => [Y, Y, ...]
+
     dropw
     dropw
     #=> [...]
@@ -178,7 +179,7 @@ export.load_and_verify_remainder
         movup.2
         assert_eq
         assert_eq
-        
+
     else
         # Remainder polynomial degree less than 128
         push.0.0.0.0
@@ -201,7 +202,7 @@ export.load_and_verify_remainder
         movup.2
         assert_eq
         assert_eq
-        
+
     end
     dropw dropw
     #=> [...]

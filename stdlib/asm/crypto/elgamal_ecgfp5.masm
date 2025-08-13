@@ -18,7 +18,6 @@ export.encrypt_ca.32
     exec.group::gen_mul
 end
 
-
 #! Given public key, point H generated in gen_privatekey as coordinates (X,Y) on stack
 #! and message M, elliptic curve points (a,b) also as coordinates (X,Y) on stack
 #! and random scalar r on stack

@@ -44,6 +44,7 @@ export.testz
     end
     and and and
 end
+
 # -------------------------------------------------------------------------------------------------
 
 #! Returns true if LHS is strictly greater than RHS, false otherwise.
@@ -74,6 +75,7 @@ end
 #! Cycles: 121
 export.gt
     # => [r_3, r_2, r_1, r_0, l_3, l_2, l_1, l_0]
+
     exec.arrange_words_adjacent
     # => [l_3, r_3, l_2, r_2, l_1, r_1, l_0, r_0]
 

@@ -11,10 +11,13 @@ use.std::crypto::stark::constants
 export.preprocess.16
     adv_push.1
     # => [num_queries, g, ...]
+
     exec.constants::fri_com_ptr
     # => [layer_ptr, num_queries, g, ...]
+
     dup.1 mul.4 sub
     # => [query_ptr, num_queries, g, ...]
+
     dup exec.constants::set_fri_queries_address
     swap
     sub.1
@@ -165,14 +168,15 @@ export.verify_query_layer.12
     # prepare for next iteration (10 cycles)
     swapdw
     # => [x, x, layer_ptr + 8, poe^4, f_pos, ne1, ne0, rem_ptr, x, x, x, x, x, x, x, x, ...]
+
     dup.2     # [layer_ptr+8, x, x, layer_ptr+8, poe^4, f_pos, ne1, ne0, rem_ptr, ]
     movdn.7   # [x, x, layer_ptr+8, poe^4, f_pos, ne1, ne0, layer_ptr+8, rem_ptr, ...]
-    drop      
+    drop
     drop      # [layer_ptr+8, poe^4, f_pos, ne1, ne0, layer_ptr+8, rem_ptr, ...]
     dup       # [layer_ptr+8, layer_ptr+8, poe^4, f_pos, ne1, ne0, layer_ptr+8, rem_ptr, ...]
     dup.7     # [rem_ptr, layer_ptr+8, layer_ptr+8, poe^4, f_pos, ne1, ne0, layer_ptr+8, rem_ptr, ...]
     dup.1     # [layer_ptr+8, rem_ptr, layer_ptr+8, layer_ptr+8, poe^4, f_pos, ne1, ne0, layer_ptr+8, rem_ptr, ...]
-    neq       
+    neq
     # => [is_not_last_layer, layer_ptr+8, layer_ptr+8, poe^4, f_pos, ne1, ne0, layer_ptr+8, rem_ptr, x, x, x, x, x, x, x, x, ...]
 end
 
@@ -233,6 +237,7 @@ export.verify_query_64
 
     swapdw
     # => [ne1, ne0, rem_ptr, rem_ptr, P, x, x, x, x, x, x, x, x, ...]
+
     movup.6 assert_eq
     movup.5 assert_eq
     # => [X, x, x, x, x, x, x, x, x, ...]
@@ -291,15 +296,16 @@ export.verify_query_128
         mem_stream
         horner_eval_ext
     end
-    
+
     # => [x, x, x, x, x, x, x, x, ne1, ne0, rem_ptr, rem_ptr, P, ...]
+
     swapdw
     # => [ne1, ne0, rem_ptr, rem_ptr, P, x, x, x, x, x, x, x, x, ...]
+
     movup.6 assert_eq
     movup.5 assert_eq
     # => [X, x, x, x, x, x, x, x, x, ...]
 end
-
 
 #! Verifies a FRI proof where the proof was generated over the quadratic extension of the base
 #! field and layer folding was performed using folding factor 4 when the degree of the remainder
@@ -346,7 +352,7 @@ proc.verify_64.4
 
     # Save a word containing a fresh accumulator for Horner evaluating the remainder polynomial,
     # a pointer to the evaluation point and a pointer to the location of the polynomial.
-    push.0.0 
+    push.0.0
     exec.constants::tmp2 exec.constants::get_remainder_poly_address
     exec.constants::tmp1 mem_storew
     movup.4
@@ -362,13 +368,16 @@ proc.verify_64.4
 
         # prepare for next iteration (18 cycles)
         # => [x, x, x, x, x, x, x, x, x, x, x, x, g, ...]
+
         dropw drop
         # => [x, x, x, x, x, x, x, g, ...]
+
         loc_loadw.0   # load [query_ptr, layer_ptr, rem_ptr, g]
         add.4
         loc_storew.0  # store [query_ptr + 4, layer_ptr, rem_ptr, g]
         swapw
         # => [x, x, x, x, query_ptr + 4, layer_ptr, rem_ptr, g, ...]
+
         dup.5
         dup.5
         neq
@@ -424,11 +433,11 @@ proc.verify_128.4
 
     # Save a word containing a fresh accumulator for Horner evaluating the remainder polynomial,
     # a pointer to the evaluation point and a pointer to the location of the polynomial.
-    push.0.0 
+    push.0.0
     exec.constants::tmp2 exec.constants::get_remainder_poly_address
     exec.constants::tmp1 mem_storew
     movup.4
-    
+
     while.true
         # load [e0, e1, p, poe] from memory i.e. next query data (7 cycles)
         movup.4
@@ -440,13 +449,16 @@ proc.verify_128.4
 
         # prepare for next iteration (18 cycles)
         # => [x, x, x, x, x, x, x, x, x, x, x, x, g, ...]
+
         dropw drop
         # => [x, x, x, x, x, x, x, g, ...]
+
         loc_loadw.0   # load [query_ptr, layer_ptr, rem_ptr, g]
         add.4
         loc_storew.0  # store [query_ptr + 4, layer_ptr, rem_ptr, g]
         swapw
         # => [x, x, x, x, query_ptr + 4, layer_ptr, rem_ptr, g, ...]
+
         dup.5
         dup.5
         neq
@@ -463,7 +475,7 @@ end
 #! Input:  [...]
 #! Output: [...]
 #!
-#! Cycles: 
+#! Cycles:
 #!
 #!  Polynomial degree less than 64: 24 + num_queries * (107 + num_layers * 83)
 #!  Polynomial degree less than 128: 24 + num_queries * (140 + num_layers * 83)
@@ -485,7 +497,6 @@ export.verify
     exec.constants::get_fri_queries_address
     # => [query_ptr, fri_layer_ptr, remainder_poly_ptr, g, ...]
 
-    
     exec.constants::get_remainder_poly_size
     push.64
     eq
