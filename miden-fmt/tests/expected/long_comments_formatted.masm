@@ -1,0 +1,13 @@
+# This is a very long comment that should be wrapped because it exceeds the 100
+# character limit and contains multiple words that can be broken at appropriate
+# boundaries
+export.test_procedure
+    # Another very long comment inside a procedure that should also be wrapped when
+    # it exceeds the maximum line length of 100 characters
+    push.1
+    # => [1]
+
+    #! This is a documentation comment that is also very long and should be wrapped
+    #! properly while maintaining the documentation comment prefix
+    add
+end

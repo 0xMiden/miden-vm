@@ -4,148 +4,21 @@ use std::{
     path::Path,
 };
 
-use once_cell::sync::Lazy;
-use regex::Regex;
+mod constants;
+mod types;
+mod utils;
 
-static SINGLE_LINE_EXPORT_REGEX: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"^export\..*(?:(?:::)|(?:->)).*$").unwrap());
-
-#[derive(Debug, PartialEq, Clone)]
-enum ConstructType {
-    Proc,
-    Export,
-    Begin,
-    End,
-    While,
-    Repeat,
-    If,
-    Else,
-}
-
-impl ConstructType {
-    fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "proc" => Some(Self::Proc),
-            "export" => Some(Self::Export),
-            "begin" => Some(Self::Begin),
-            "end" => Some(Self::End),
-            "while" => Some(Self::While),
-            "repeat" => Some(Self::Repeat),
-            "if" => Some(Self::If),
-            "else" => Some(Self::Else),
-            _ => None,
-        }
-    }
-}
-
-const INDENT: &str = "    ";
-
-fn is_comment(line: &str) -> bool {
-    line.trim_start().starts_with('#')
-}
-
-fn is_stack_comment(line: &str) -> bool {
-    let trimmed = line.trim_start();
-    trimmed.starts_with("# => [") || trimmed.starts_with("#! => [")
-}
-
-fn is_single_export_line(line: &str) -> bool {
-    SINGLE_LINE_EXPORT_REGEX.is_match(line)
-}
-
-fn is_use_statement(line: &str) -> bool {
-    line.trim_start().starts_with("use.")
-}
-
-fn is_proc_or_export(line: &str) -> bool {
-    let trimmed = line.trim();
-    trimmed.starts_with("proc.") || trimmed.starts_with("export.")
-}
-
-fn is_section_separator_comment(line: &str) -> bool {
-    let trimmed = line.trim_start();
-    (trimmed.starts_with("# ====") || trimmed.starts_with("#! ====")) && trimmed.contains("====")
-}
-
-#[derive(Debug, Clone)]
-enum LineType {
-    Import(String),
-    Comment(String),
-    Empty,
-    Other(String),
-}
-
-fn classify_line(line: &str) -> LineType {
-    let trimmed = line.trim();
-    if trimmed.is_empty() {
-        LineType::Empty
-    } else if is_use_statement(trimmed) {
-        LineType::Import(trimmed.to_string())
-    } else if is_comment(trimmed) {
-        LineType::Comment(trimmed.to_string())
-    } else {
-        LineType::Other(trimmed.to_string())
-    }
-}
-
-fn process_import_section(lines: &[&str]) -> (Vec<String>, usize) {
-    let mut result = Vec::new();
-    let mut current_import_group = Vec::new();
-    let mut end_index = 0;
-
-    for (i, line) in lines.iter().enumerate() {
-        let line_type = classify_line(line);
-
-        match line_type {
-            LineType::Import(import) => {
-                current_import_group.push(import);
-                end_index = i + 1;
-            },
-            LineType::Comment(comment) => {
-                // If we have imports in the current group, sort and add them
-                if !current_import_group.is_empty() {
-                    current_import_group.sort();
-                    result.extend(current_import_group.drain(..));
-                    // Add empty line after imports before comment
-                    result.push(String::new());
-                }
-                // Add the comment
-                result.push(comment);
-                end_index = i + 1;
-            },
-            LineType::Empty => {
-                // Empty lines are preserved in their position, but avoid multiple consecutive empty lines
-                if !result.is_empty() && !result.last().map_or(false, |s| s.is_empty()) {
-                    result.push(String::new());
-                    end_index = i + 1;
-                }
-            },
-            LineType::Other(content) => {
-                // Stop processing when we hit const or other non-import content
-                if content.starts_with("const.") {
-                    break;
-                }
-                // If we have imports in the current group, sort and add them
-                if !current_import_group.is_empty() {
-                    current_import_group.sort();
-                    result.extend(current_import_group.drain(..));
-                }
-                break;
-            },
-        }
-    }
-
-    // Handle any remaining imports in the current group
-    if !current_import_group.is_empty() {
-        current_import_group.sort();
-        result.extend(current_import_group);
-    }
-
-    (result, end_index)
-}
+use constants::{DEFAULT_MAX_COMMENT_LENGTH, INDENT};
+use types::ConstructType;
+use utils::{
+    is_comment, is_proc_or_export, is_section_separator_comment, is_single_export_line,
+    is_stack_comment, preprocess_long_comments, process_import_section,
+};
 
 pub fn format_code(code: &str) -> String {
-    let lines: Vec<&str> = code.lines().collect();
+    // First pass: preprocess long comments
+    let preprocessed_code = preprocess_long_comments(code, DEFAULT_MAX_COMMENT_LENGTH);
+    let lines: Vec<&str> = preprocessed_code.lines().collect();
 
     // Extract and sort imports
     let (sorted_imports, import_end_index) = process_import_section(&lines);
@@ -181,13 +54,13 @@ pub fn format_code(code: &str) -> String {
         if !trimmed_line.is_empty() {
             if is_comment(trimmed_line) {
                 let current_is_stack_comment = is_stack_comment(trimmed_line);
-                
+
                 // Add blank line between stack comment and regular comment
-                if last_line_was_stack_comment && !current_is_stack_comment && !last_line_was_empty {
+                if last_line_was_stack_comment && !current_is_stack_comment && !last_line_was_empty
+                {
                     formatted_code.push('\n');
-                    last_line_was_empty = true;
                 }
-                
+
                 last_line_was_stack_comment = current_is_stack_comment;
 
                 if last_was_export_line {
