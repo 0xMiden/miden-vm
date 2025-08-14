@@ -2,7 +2,7 @@ use alloc::{sync::Arc, vec::Vec};
 use core::future::Future;
 
 use miden_core::{
-    AdviceMap, DebugOptions, Felt, Word, crypto::merkle::InnerNodeInfo, mast::MastForest,
+    AdviceMap, DebugOptions, Felt, ReducedEventID, Word, crypto::merkle::InnerNodeInfo, mast::MastForest,
 };
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 
@@ -107,7 +107,7 @@ pub trait SyncHost: BaseHost {
     fn on_event(
         &mut self,
         process: &ProcessState,
-        event_id: Felt,
+        reduced_event_id: ReducedEventID,
     ) -> Result<Vec<AdviceMutation>, EventError>;
 }
 
@@ -127,7 +127,7 @@ pub trait AsyncHost: BaseHost {
     fn on_event(
         &mut self,
         process: &ProcessState<'_>,
-        event_id: Felt,
+        reduced_event_id: ReducedEventID,
     ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>>;
 }
 

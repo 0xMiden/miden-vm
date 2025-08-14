@@ -19,27 +19,15 @@ use core::fmt;
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum EventValue {
     /// A numeric event ID (legacy format)
-    Id(ImmU32),
+    Legacy(ImmU32),
     /// A string-based event identifier (new format)
     Name(Immediate<Arc<str>>),
-}
-
-impl EventValue {
-    /// Returns true if this is a numeric event ID
-    pub fn is_id(&self) -> bool {
-        matches!(self, Self::Id(_))
-    }
-
-    /// Returns true if this is a string-based event name
-    pub fn is_name(&self) -> bool {
-        matches!(self, Self::Name(_))
-    }
 }
 
 impl fmt::Display for EventValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Id(id) => write!(f, "{}", id),
+            Self::Legacy(id) => write!(f, "{}", id),
             Self::Name(name) => match name {
                 Immediate::Value(s) => write!(f, "\"{}\"", s.inner()),
                 Immediate::Constant(ident) => write!(f, "{}", ident),

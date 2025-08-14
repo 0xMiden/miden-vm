@@ -142,10 +142,9 @@ fn degree_4_op_flags() {
 /// Composite flag unit tests.
 #[test]
 fn composite_flags() {
-
-    let test_event = ReducedEventID::from_u32(42);
     // ------ no change 0 ---------------------------------------------------------------------
 
+    let test_event = ReducedEventID::from_u32(42);
     let op_no_change_0 =
         [Operation::MpVerify(ZERO), Operation::Span, Operation::Halt, Operation::Emit(test_event)];
     for op in op_no_change_0 {

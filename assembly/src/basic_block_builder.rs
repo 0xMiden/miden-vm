@@ -1,12 +1,7 @@
 use alloc::{borrow::Borrow, string::ToString, sync::Arc, vec::Vec};
 
 use miden_assembly_syntax::{ast::Instruction, debuginfo::Span, diagnostics::{Report, RelatedLabel}};
-use miden_core::{
-    AssemblyOp, Decorator, DecoratorList, Felt, Operation, ReducedEventID,
-    events::EventId,
-    mast::{DecoratorId, MastNodeId},
-    sys_events::SystemEvent,
-};
+use miden_core::{AssemblyOp, Decorator, DecoratorList, Felt, Operation, events::EventId, mast::{DecoratorId, MastNodeId}, sys_events::SystemEvent, ReducedEventID};
 
 use crate::{ProcedureContext, assembler::BodyWrapper, mast_forest_builder::MastForestBuilder};
 
@@ -99,7 +94,7 @@ impl BasicBlockBuilder<'_> {
     /// Converts the system event into its corresponding event ID, and adds an `Emit` operation
     /// to the list of basic block operations.
     pub fn push_system_event(&mut self, sys_event: SystemEvent) {
-        self.push_op(Operation::Emit(ReducedEventID::new(sys_event.felt_id())))
+        self.push_op(Operation::Emit(sys_event.reduced_id()))
     }
 }
 
@@ -251,7 +246,7 @@ impl BasicBlockBuilder<'_> {
     
     /// Registers an EventId in the MAST Forest event table and returns the
     /// corresponding Felt representation.
-    pub fn register_event(&mut self, event_id: EventId) -> Result<Felt, Report> {
+    pub fn register_event(&mut self, event_id: EventId) -> Result<ReducedEventID, Report> {
         self.mast_forest_builder.register_event(event_id)
             .map_err(|err| Report::new(RelatedLabel::error(format!("event registration failed: {}", err))))
     }

@@ -552,10 +552,10 @@ impl Assembler {
 
             // ----- emit instruction -------------------------------------------------------------
             Instruction::Emit(event_value) => {
-                let felt_id = match event_value {
-                    EventValue::Id(id) => {
+                let reduced_id = match event_value {
+                    EventValue::Legacy(id) => {
                         // Legacy numeric event ID - convert directly to Felt
-                        Felt::from(id.expect_value())
+                        ReducedEventID::from(id.expect_value())
                     },
                     EventValue::Name(name) => {
                         // String-based event name - parse and register in EventTable
@@ -586,7 +586,7 @@ impl Assembler {
                     },
                 };
                 
-                block_builder.push_op(Operation::Emit(ReducedEventID::new(felt_id)));
+                block_builder.push_op(Operation::Emit(reduced_id));
             },
 
             // ----- trace instruction ------------------------------------------------------------

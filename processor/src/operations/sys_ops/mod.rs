@@ -133,11 +133,10 @@ impl Process {
     // EVENTS
     // --------------------------------------------------------------------------------------------
 
-    /// Forwards the emitted event id to the host with EventTable reverse lookup.
+    /// Forwards the emitted event id to the host.
     pub(super) fn op_emit<H>(
         &mut self,
         reduced_event_id: ReducedEventID,
-        program: &MastForest,
         host: &mut H,
         err_ctx: &impl ErrorContext,
     ) -> Result<(), ExecutionError>
@@ -150,20 +149,14 @@ impl Process {
 
         let mut process = self.state();
         
-        // Attempt EventTable reverse lookup to get EventId from ReducedEventID
-        let _resolved_event_id = program.event_table().lookup_by_reduced_id(reduced_event_id);
-        
-        // Note: EventTable reverse lookup is now available for enhanced event handling.
-        // Resolved EventId can be used by event handlers or debugging tools when needed.
-        
         // If it's a system event, handle it directly. Otherwise, forward it to the host.
-        if let Some(system_event) = SystemEvent::from_felt_id(event_felt) {
+        if let Some(system_event) = SystemEvent::from_reduced_id(reduced_event_id) {
             handle_system_event(&mut process, system_event, err_ctx)
         } else {
             let clk = process.clk();
             let mutations = host
-                .on_event(&process, event_felt)
-                .map_err(|err| ExecutionError::event_error(err, event_felt, err_ctx))?;
+                .on_event(&process, reduced_event_id)
+                .map_err(|err| ExecutionError::event_error(err, reduced_event_id, err_ctx))?;
             self.advice
                 .apply_mutations(mutations)
                 .map_err(|err| ExecutionError::advice_error(err, clk, err_ctx))?;

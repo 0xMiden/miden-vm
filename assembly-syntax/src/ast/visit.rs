@@ -370,7 +370,7 @@ where
     V: ?Sized + Visit<T>,
 {
     match event_value.inner() {
-        EventValue::Id(imm) => visitor.visit_immediate_u32(imm),
+        EventValue::Legacy(imm) => visitor.visit_immediate_u32(imm),
         EventValue::Name(_imm) => {
             // For now, we don't need to traverse into the string immediate
             ControlFlow::Continue(())
@@ -824,7 +824,7 @@ where
     V: ?Sized + VisitMut<T>,
 {
     match event_value.into_inner() {
-        EventValue::Id(imm) => visitor.visit_mut_immediate_u32(imm),
+        EventValue::Legacy(imm) => visitor.visit_mut_immediate_u32(imm),
         EventValue::Name(_imm) => {
             // For now, we don't need to traverse into the string immediate  
             ControlFlow::Continue(())

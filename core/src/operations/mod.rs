@@ -164,8 +164,9 @@ pub enum Operation {
     /// Emits an event to the host.
     ///
     /// The event is identified by a ReducedEventID that uniquely represents the event.
-    /// The ReducedEventID can be derived from a structured EventId (e.g., "miden-vm/memory::MAP_VALUE") 
-    /// via Blake3 hashing, or created from a legacy u32 value for backward compatibility.
+    /// The ReducedEventID can be derived from a structured EventId (e.g.,
+    /// "miden-vm/memory::MAP_VALUE") via Blake3 hashing, or created from a legacy u32 value for
+    /// backward compatibility.
     ///
     /// Similar to Noop, this operation does not change the state of user stack. The immediate
     /// value affects the program MAST root computation.
@@ -645,24 +646,6 @@ impl Operation {
                 | Self::SysCall
         )
     }
-
-    // EMIT OPERATION HELPERS
-    // --------------------------------------------------------------------------------------------
-
-    // /// Creates a new Emit operation from an EventId.
-    // ///
-    // /// The EventId is converted to a ReducedEventID that uniquely identifies the event.
-    // pub fn emit_event(event_id: crate::EventId) -> Self {
-    //     Self::Emit(event_id.reduced_id())
-    // }
-    //
-    // /// Creates a new Emit operation from a legacy u32 event ID.
-    // ///
-    // /// # Deprecated
-    // /// This method is provided for backward compatibility. New code should use `emit_event()`.
-    // pub fn emit_u32(event_id: u32) -> Self {
-    //     Self::Emit(ReducedEventID::from_u32(event_id))
-    // }
 }
 
 impl crate::prettier::PrettyPrint for Operation {
@@ -817,7 +800,7 @@ impl Serializable for Operation {
                 err_code.write_into(target);
             },
             Operation::Push(value) => value.as_int().write_into(target),
-            Operation::Emit(value) => value.as_u64().write_into(target),
+            Operation::Emit(value) => value.as_felt().write_into(target),
 
             // Note: we explicitly write out all the operations so that whenever we make a
             // modification to the `Operation` enum, we get a compile error here. This
@@ -1012,8 +995,8 @@ impl Deserializable for Operation {
             OPCODE_MRUPDATE => Self::MrUpdate,
             OPCODE_PUSH => Self::Push(Felt::read_from(source)?),
             OPCODE_EMIT => {
-                let value = source.read_u64()?;
-                Self::Emit(ReducedEventID::new(Felt::new(value)))
+                let reduced_event_id = ReducedEventID::new(Felt::read_from(source)?);
+                Self::Emit(reduced_event_id)
             },
             OPCODE_SYSCALL => Self::SysCall,
             OPCODE_CALL => Self::Call,

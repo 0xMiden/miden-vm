@@ -5,7 +5,7 @@ use alloc::{
 };
 use core::{error::Error, fmt, fmt::Debug};
 
-use miden_core::{DebugOptions, Felt};
+use miden_core::{DebugOptions, Felt, ReducedEventID};
 
 use crate::{AdviceMutation, ExecutionError, ProcessState};
 
@@ -108,7 +108,9 @@ impl EventHandlerRegistry {
         let key = id.as_int();
         match self.handlers.entry(key) {
             Entry::Vacant(e) => e.insert(handler),
-            Entry::Occupied(_) => return Err(ExecutionError::DuplicateEventHandler { id }),
+            Entry::Occupied(_) => return Err(ExecutionError::DuplicateEventHandler { 
+                reduced_event_id: ReducedEventID::new(id) 
+            }),
         };
         Ok(())
     }

@@ -1,4 +1,4 @@
-use alloc::collections::BTreeMap;
+use alloc::{collections::BTreeMap, vec::Vec};
 use core::fmt;
 
 use super::{EventId, ReducedEventID};
@@ -19,8 +19,9 @@ pub struct EventTable {
     /// Forward lookup: EventId -> ReducedEventID
     event_to_reduced: BTreeMap<EventId, ReducedEventID>,
     
-    /// Reverse lookup: ReducedEventID -> EventId  
-    reduced_to_event: BTreeMap<ReducedEventID, EventId>,
+    /// Reverse lookup: ReducedEventID -> EventId
+    /// None indicates a legacy u32 event ID without a structured EventId
+    reduced_to_event: BTreeMap<ReducedEventID, Option<EventId>>,
 }
 
 impl EventTable {
@@ -44,55 +45,61 @@ impl EventTable {
         }
 
         // Check for collision with a different EventId (fail-fast)
-        if let Some(existing_event) = self.reduced_to_event.get(&reduced_id) {
-            if existing_event != &event_id {
-                return Err(EventTableError::Collision {
-                    reduced_id,
-                    existing: existing_event.clone(),
-                    conflicting: event_id,
-                });
+        if let Some(existing_event_opt) = self.reduced_to_event.get(&reduced_id) {
+            match existing_event_opt {
+                Some(existing_event) if existing_event != &event_id => {
+                    return Err(EventTableError::Collision {
+                        reduced_id,
+                        existing: existing_event.clone(),
+                        conflicting: event_id,
+                    });
+                }
+                None => {
+                    // Legacy event exists at this ReducedEventID - collision with structured event
+                    return Err(EventTableError::LegacyCollision {
+                        reduced_id,
+                        conflicting: event_id,
+                    });
+                }
+                Some(_) => {
+                    // Same EventId already registered, fall through to return existing
+                }
             }
         }
 
         // No collision - register the mapping
         self.event_to_reduced.insert(event_id.clone(), reduced_id);
-        self.reduced_to_event.insert(reduced_id, event_id);
+        self.reduced_to_event.insert(reduced_id, Some(event_id));
 
         Ok(reduced_id)
     }
 
-    /// Registers an EventId from a legacy u32 event ID.
+    /// Registers a legacy u32 event ID without a structured EventId.
     /// 
-    /// This creates a ReducedEventID directly from the u32 for backward compatibility.
-    pub fn register_u32(&mut self, event_id: EventId, legacy_id: u32) -> Result<ReducedEventID, EventTableError> {
+    /// This is used for legacy numeric event IDs that don't have full structured names.
+    pub fn register_legacy(&mut self, legacy_id: u32) -> Result<ReducedEventID, EventTableError> {
         let reduced_id = ReducedEventID::from_u32(legacy_id);
 
-        // Check if this exact EventId is already registered
-        if let Some(existing_reduced) = self.event_to_reduced.get(&event_id) {
-            if *existing_reduced != reduced_id {
-                return Err(EventTableError::InconsistentLegacyMapping {
-                    event_id: event_id.clone(),
-                    expected: reduced_id,
-                    existing: *existing_reduced,
-                });
-            }
-            return Ok(*existing_reduced);
-        }
-
-        // Check for collision with a different EventId (fail-fast)
-        if let Some(existing_event) = self.reduced_to_event.get(&reduced_id) {
-            if existing_event != &event_id {
-                return Err(EventTableError::Collision {
-                    reduced_id,
-                    existing: existing_event.clone(),
-                    conflicting: event_id,
-                });
+        // Check if this ReducedEventID is already registered
+        if let Some(existing_event_opt) = self.reduced_to_event.get(&reduced_id) {
+            match existing_event_opt {
+                None => {
+                    // Already registered as legacy - return existing
+                    return Ok(reduced_id);
+                }
+                Some(existing_event) => {
+                    // Collision with structured EventId
+                    return Err(EventTableError::StructuredCollision {
+                        reduced_id,
+                        legacy_id,
+                        existing: existing_event.clone(),
+                    });
+                }
             }
         }
 
-        // Register the legacy mapping
-        self.event_to_reduced.insert(event_id.clone(), reduced_id);
-        self.reduced_to_event.insert(reduced_id, event_id);
+        // No collision - register the legacy mapping
+        self.reduced_to_event.insert(reduced_id, None);
 
         Ok(reduced_id)
     }
@@ -103,14 +110,21 @@ impl EventTable {
     }
 
     /// Looks up the EventId from its ReducedEventID.
+    /// Returns None if the ReducedEventID is not registered or is a legacy event.
     pub fn lookup_by_reduced_id(&self, reduced_id: ReducedEventID) -> Option<&EventId> {
-        self.reduced_to_event.get(&reduced_id)
+        self.reduced_to_event.get(&reduced_id)?.as_ref()
     }
 
     /// Looks up the EventId from a Felt (for backward compatibility).
+    /// Returns None if the Felt is not registered or is a legacy event.
     pub fn lookup_by_felt(&self, felt: Felt) -> Option<&EventId> {
         let reduced_id = ReducedEventID::new(felt);
-        self.reduced_to_event.get(&reduced_id)
+        self.reduced_to_event.get(&reduced_id)?.as_ref()
+    }
+
+    /// Checks if a ReducedEventID is registered as a legacy event.
+    pub fn is_legacy(&self, reduced_id: ReducedEventID) -> bool {
+        matches!(self.reduced_to_event.get(&reduced_id), Some(None))
     }
 
     /// Returns true if the EventId is registered.
@@ -149,6 +163,22 @@ impl EventTable {
         self.reduced_to_event.keys().copied()
     }
 
+    /// Returns a list of legacy u32 event IDs that the host should handle.
+    /// These are the numeric event IDs without structured EventId names.
+    pub fn legacy_event_ids(&self) -> Vec<u32> {
+        self.reduced_to_event
+            .iter()
+            .filter_map(|(reduced_id, event_opt)| {
+                if event_opt.is_none() {
+                    // This is a legacy event - extract the u32
+                    Some(reduced_id.as_u64() as u32)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
     /// Merges another EventTable into this one.
     /// 
     /// Returns an error immediately if any collisions are detected (fail-fast approach).
@@ -165,13 +195,24 @@ impl EventTable {
     pub fn validate(&self) -> Result<(), EventTableError> {
         // Check that forward and reverse mappings are consistent
         for (event, &reduced_id) in &self.event_to_reduced {
-            if let Some(reverse_event) = self.reduced_to_event.get(&reduced_id) {
-                if reverse_event != event {
-                    return Err(EventTableError::InconsistentMapping {
-                        event: event.clone(),
-                        reduced_id,
-                        reverse_event: reverse_event.clone(),
-                    });
+            if let Some(reverse_event_opt) = self.reduced_to_event.get(&reduced_id) {
+                match reverse_event_opt {
+                    Some(reverse_event) if reverse_event != event => {
+                        return Err(EventTableError::InconsistentMapping {
+                            event: event.clone(),
+                            reduced_id,
+                            reverse_event: reverse_event.clone(),
+                        });
+                    }
+                    None => {
+                        return Err(EventTableError::EventMappedToLegacy {
+                            event: event.clone(),
+                            reduced_id,
+                        });
+                    }
+                    Some(_) => {
+                        // Consistent mapping
+                    }
                 }
             } else {
                 return Err(EventTableError::MissingReverseMapping {
@@ -182,21 +223,24 @@ impl EventTable {
         }
 
         // Check reverse mappings
-        for (&reduced_id, event) in &self.reduced_to_event {
-            if let Some(&forward_reduced_id) = self.event_to_reduced.get(event) {
-                if forward_reduced_id != reduced_id {
-                    return Err(EventTableError::InconsistentMapping {
+        for (&reduced_id, event_opt) in &self.reduced_to_event {
+            if let Some(event) = event_opt {
+                if let Some(&forward_reduced_id) = self.event_to_reduced.get(event) {
+                    if forward_reduced_id != reduced_id {
+                        return Err(EventTableError::InconsistentMapping {
+                            event: event.clone(),
+                            reduced_id,
+                            reverse_event: event.clone(),
+                        });
+                    }
+                } else {
+                    return Err(EventTableError::MissingForwardMapping {
                         event: event.clone(),
                         reduced_id,
-                        reverse_event: event.clone(),
                     });
                 }
-            } else {
-                return Err(EventTableError::MissingForwardMapping {
-                    event: event.clone(),
-                    reduced_id,
-                });
             }
+            // Legacy events (None) don't need forward mapping validation
         }
 
         Ok(())
@@ -216,11 +260,23 @@ pub enum EventTableError {
         conflicting: EventId,
     },
     
-    /// Legacy mapping conflicts with computed mapping
-    InconsistentLegacyMapping {
-        event_id: EventId,
-        expected: ReducedEventID,
-        existing: ReducedEventID,
+    /// Structured EventId collides with existing legacy event
+    LegacyCollision {
+        reduced_id: ReducedEventID,
+        conflicting: EventId,
+    },
+    
+    /// Legacy u32 ID collides with existing structured EventId
+    StructuredCollision {
+        reduced_id: ReducedEventID,
+        legacy_id: u32,
+        existing: EventId,
+    },
+    
+    /// EventId mapped to a ReducedEventID that's registered as legacy
+    EventMappedToLegacy {
+        event: EventId,
+        reduced_id: ReducedEventID,
     },
     
     /// Forward and reverse mappings are inconsistent
@@ -250,9 +306,17 @@ impl fmt::Display for EventTableError {
                 write!(f, "Event collision: EventIds '{}' and '{}' both map to ReducedEventID {}", 
                        existing, conflicting, reduced_id)
             },
-            EventTableError::InconsistentLegacyMapping { event_id, expected, existing } => {
-                write!(f, "Inconsistent legacy mapping: event '{}' expected ReducedEventID {}, \
-                          but already has {}", event_id, expected, existing)
+            EventTableError::LegacyCollision { reduced_id, conflicting } => {
+                write!(f, "Legacy collision: EventId '{}' collides with existing legacy event at ReducedEventID {}", 
+                       conflicting, reduced_id)
+            },
+            EventTableError::StructuredCollision { reduced_id, legacy_id, existing } => {
+                write!(f, "Structured collision: Legacy ID {} collides with existing EventId '{}' at ReducedEventID {}", 
+                       legacy_id, existing, reduced_id)
+            },
+            EventTableError::EventMappedToLegacy { event, reduced_id } => {
+                write!(f, "EventId '{}' mapped to ReducedEventID {} which is registered as legacy", 
+                       event, reduced_id)
             },
             EventTableError::InconsistentMapping { event, reduced_id, reverse_event } => {
                 write!(f, "Inconsistent mapping: event '{}' maps to ReducedEventID {}, \
@@ -277,13 +341,23 @@ impl core::error::Error for EventTableError {}
 
 impl Serializable for EventTable {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        // Write the number of entries
-        target.write_usize(self.event_to_reduced.len());
+        // Write the total number of entries (structured + legacy)
+        target.write_usize(self.reduced_to_event.len());
         
-        // Write each (EventId, ReducedEventID) pair
-        for (event_id, &reduced_id) in &self.event_to_reduced {
-            event_id.write_into(target);
+        // Write each entry from the reverse mapping
+        for (&reduced_id, event_opt) in &self.reduced_to_event {
             reduced_id.write_into(target);
+            match event_opt {
+                Some(event_id) => {
+                    // Write flag indicating structured event (1) followed by EventId
+                    target.write_u8(1);
+                    event_id.write_into(target);
+                }
+                None => {
+                    // Write flag indicating legacy event (0)
+                    target.write_u8(0);
+                }
+            }
         }
     }
 }
@@ -295,14 +369,29 @@ impl Deserializable for EventTable {
         // Read the number of entries
         let num_entries = source.read_usize()?;
         
-        // Read each (EventId, ReducedEventID) pair and register them
+        // Read each entry
         for _ in 0..num_entries {
-            let event_id = EventId::read_from(source)?;
             let reduced_id = ReducedEventID::read_from(source)?;
+            let event_type_flag = source.read_u8()?;
             
-            // Directly insert without re-hashing since we trust the serialized data
-            table.event_to_reduced.insert(event_id.clone(), reduced_id);
-            table.reduced_to_event.insert(reduced_id, event_id);
+            match event_type_flag {
+                1 => {
+                    // Structured event
+                    let event_id = EventId::read_from(source)?;
+                    // Directly insert without re-hashing since we trust the serialized data
+                    table.event_to_reduced.insert(event_id.clone(), reduced_id);
+                    table.reduced_to_event.insert(reduced_id, Some(event_id));
+                }
+                0 => {
+                    // Legacy event
+                    table.reduced_to_event.insert(reduced_id, None);
+                }
+                _ => {
+                    return Err(DeserializationError::InvalidValue(format!(
+                        "Invalid event type flag: {}", event_type_flag
+                    )));
+                }
+            }
         }
         
         Ok(table)
@@ -397,16 +486,46 @@ mod tests {
     fn test_legacy_u32_registration() {
         let mut table = EventTable::new();
         
-        let event = EventId::new(EventSource::System, "test", "EVENT").unwrap();
         let legacy_id = 12345u32;
         
-        // Register with legacy ID
-        let reduced_id = table.register_u32(event.clone(), legacy_id).unwrap();
+        // Register legacy event
+        let reduced_id = table.register_legacy(legacy_id).unwrap();
         assert_eq!(reduced_id, ReducedEventID::from_u32(legacy_id));
         
-        // Verify lookup works
-        assert_eq!(table.lookup_by_event(&event), Some(reduced_id));
-        assert_eq!(table.lookup_by_reduced_id(reduced_id), Some(&event));
+        // Verify lookup behavior for legacy events
+        assert_eq!(table.lookup_by_reduced_id(reduced_id), None); // Legacy events return None
+        assert!(table.is_legacy(reduced_id));
+        assert!(table.contains_reduced_id(reduced_id));
+        
+        // Verify legacy_event_ids() returns the registered ID
+        let legacy_ids = table.legacy_event_ids();
+        assert_eq!(legacy_ids, vec![legacy_id]);
+    }
+
+    #[test]
+    fn test_legacy_structured_collision() {
+        let mut table = EventTable::new();
+        
+        // Test basic collision detection structure without depending on hash collisions
+        let legacy_id = 12345u32;
+        
+        // First register legacy event
+        let reduced_id = table.register_legacy(legacy_id).unwrap();
+        assert!(table.is_legacy(reduced_id));
+        
+        // Verify that duplicate legacy registration works
+        let reduced_id2 = table.register_legacy(legacy_id).unwrap();
+        assert_eq!(reduced_id, reduced_id2);
+        
+        // Test that we can register different legacy IDs
+        let legacy_id3 = 54321u32;
+        let reduced_id3 = table.register_legacy(legacy_id3).unwrap();
+        assert_ne!(reduced_id, reduced_id3);
+        
+        // Verify legacy_event_ids returns both IDs
+        let mut legacy_ids = table.legacy_event_ids();
+        legacy_ids.sort();
+        assert_eq!(legacy_ids, vec![12345, 54321]);
     }
 
     #[test]

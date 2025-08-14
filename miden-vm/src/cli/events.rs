@@ -5,6 +5,8 @@ use miden_assembly::diagnostics::Report;
 use miden_core::{
     events::{EventId, EventSource},
     sys_events::SystemEvent,
+    ReducedEventID,
+    Felt,
 };
 
 use crate::cli::data::{Debug, Libraries, ProgramFile};
@@ -172,17 +174,17 @@ impl ListEvents {
         program.compile(Debug::Off, &libraries.libraries)
     }
 
-    fn print_table(&self, events: &[(&EventId, miden_core::Felt)]) {
+    fn print_table(&self, events: &[(&EventId, ReducedEventID)]) {
         println!("┌─────────────────┬──────────────────────────────────────────────┬─────────────────┐");
         println!("│ Source          │ Event Name                                   │ Felt Value      │");  
         println!("├─────────────────┼──────────────────────────────────────────────┼─────────────────┤");
 
-        for (event_id, felt) in events {
+        for (event_id, reduced_id) in events {
             let source = format!("{:?}", event_id.source());
             let name = format!("{}::{}", event_id.namespace(), event_id.name());
             
             if self.show_felt {
-                println!("│ {:15} │ {:44} │ {:15} │", source, name, felt);
+                println!("│ {:15} │ {:44} │ {:15} │", source, name, reduced_id.as_felt());
             } else {
                 println!("│ {:15} │ {:44} │ {:15} │", source, name, "-");
             }
@@ -192,14 +194,14 @@ impl ListEvents {
         println!("Total events: {}", events.len());
     }
 
-    fn print_json(&self, events: &[(&EventId, miden_core::Felt)]) {
-        let json_events: Vec<_> = events.iter().map(|(event_id, felt)| {
+    fn print_json(&self, events: &[(&EventId, ReducedEventID)]) {
+        let json_events: Vec<_> = events.iter().map(|(event_id, reduced_id)| {
             serde_json::json!({
                 "source": format!("{:?}", event_id.source()),
                 "namespace": event_id.namespace(),
                 "name": event_id.name(),
                 "full_name": event_id.to_string(),
-                "felt": if self.show_felt { Some(felt.to_string()) } else { None }
+                "felt": if self.show_felt { Some(reduced_id.as_felt().to_string()) } else { None }
             })
         }).collect();
 
@@ -211,21 +213,21 @@ impl ListEvents {
         println!("{}", serde_json::to_string_pretty(&output).unwrap());
     }
 
-    fn print_csv(&self, events: &[(&EventId, miden_core::Felt)]) {
+    fn print_csv(&self, events: &[(&EventId, ReducedEventID)]) {
         if self.show_felt {
             println!("source,namespace,name,full_name,felt");
         } else {
             println!("source,namespace,name,full_name");
         }
 
-        for (event_id, felt) in events {
+        for (event_id, reduced_id) in events {
             let source = format!("{:?}", event_id.source());
             let namespace = event_id.namespace();
             let name = event_id.name();
             let full_name = event_id.to_string();
 
             if self.show_felt {
-                println!("{},{},{},{},{}", source, namespace, name, full_name, felt);
+                println!("{},{},{},{},{}", source, namespace, name, full_name, reduced_id.as_felt());
             } else {
                 println!("{},{},{},{}", source, namespace, name, full_name);
             }
@@ -239,19 +241,11 @@ impl ValidateEvents {
         let event_table = program.mast_forest().event_table();
         
         let mut warnings = 0;
-        let mut errors = 0;
+        let errors = 0;
 
-        // Check for collisions recorded in EventTable
-        let collisions = event_table.collisions();
-        if !collisions.is_empty() {
-            errors += collisions.len();
-            println!("❌ Found {} event collisions:", collisions.len());
-            for collision in collisions {
-                println!("  • Events {:?} collide on Felt: {}", 
-                    collision.events, collision.felt);
-                println!("    Resolution: {:?}", collision.resolution);
-            }
-        }
+        // Note: EventTable now uses fail-fast collision detection during registration,
+        // so any collisions would have prevented compilation. If we reach here,
+        // there are no collisions.
 
         // Validate naming conventions
         let events: Vec<_> = event_table.iter().collect();
@@ -306,7 +300,7 @@ impl EventInfo {
         if let Ok(event_id) = self.event_query.parse::<EventId>() {
             self.show_event_id_info(&event_id, event_table)?;
         } else if let Ok(felt_val) = self.event_query.parse::<u64>() {
-            let felt = miden_core::Felt::new(felt_val);
+            let felt = Felt::new(felt_val);
             self.show_felt_info(felt, event_table)?;
         } else {
             return Err(Report::msg(format!(
@@ -332,14 +326,14 @@ impl EventInfo {
         println!("Namespace: {}", event_id.namespace());
         println!("Name: {}", event_id.name());
 
-        if let Some(felt) = event_table.lookup_by_event(event_id) {
-            println!("Felt Value: {}", felt);
-            println!("Felt (hex): 0x{:016x}", felt.as_int());
+        if let Some(reduced_id) = event_table.lookup_by_event(event_id) {
+            println!("Felt Value: {}", reduced_id.as_felt());
+            println!("Felt (hex): 0x{:016x}", reduced_id.as_u64());
             
-            // Check if this Felt has any other EventIds mapped to it
-            if let Some(resolved_event) = event_table.lookup_by_felt(felt) {
+            // Check if this ReducedEventID has any other EventIds mapped to it
+            if let Some(resolved_event) = event_table.lookup_by_reduced_id(reduced_id) {
                 if resolved_event != event_id {
-                    println!("⚠️  Collision detected: Felt {} also maps to {}", felt, resolved_event);
+                    println!("⚠️  Collision detected: ReducedEventID {} also maps to {}", reduced_id, resolved_event);
                 }
             }
         } else {
@@ -350,7 +344,7 @@ impl EventInfo {
         Ok(())
     }
 
-    fn show_felt_info(&self, felt: miden_core::Felt, event_table: &miden_core::EventTable) -> Result<(), Report> {
+    fn show_felt_info(&self, felt: Felt, event_table: &miden_core::EventTable) -> Result<(), Report> {
         println!("🔍 Felt Reverse Lookup");
         println!("━━━━━━━━━━━━━━━━━━━━━━");
         println!("Felt Value: {}", felt);
@@ -366,7 +360,7 @@ impl EventInfo {
             println!("ℹ️  This might be a legacy u32 event or system event");
             
             // Check if it's a system event
-            if let Some(system_event) = SystemEvent::from_felt_id(felt) {
+            if let Some(system_event) = SystemEvent::from_reduced_id(ReducedEventID::new(felt)) {
                 println!("✅ This is a system event: {:?}", system_event);
             }
         }
@@ -435,18 +429,8 @@ impl GenerateDocs {
             content.push_str("\n");
         }
 
-        // Add collisions section if any
-        let collisions = event_table.collisions();
-        if !collisions.is_empty() {
-            content.push_str("## ⚠️ Event Collisions\n\n");
-            for collision in collisions {
-                content.push_str(&format!(
-                    "- **Events {:?}** collide on Felt value `{}`\n",
-                    collision.events,
-                    collision.felt
-                ));
-            }
-        }
+        // Note: EventTable now uses fail-fast collision detection,
+        // so no collisions exist if compilation succeeded.
 
         content
     }
@@ -496,13 +480,7 @@ impl GenerateDocs {
             "program": "program",
             "events": events,
             "total": events.len(),
-            "collisions": event_table.collisions().iter().map(|c| {
-                serde_json::json!({
-                    "events": c.events.iter().map(|e| e.to_string()).collect::<Vec<_>>(),
-                    "felt": c.felt.to_string(),
-                    "resolution": format!("{:?}", c.resolution)
-                })
-            }).collect::<Vec<_>>()
+            "collisions": [] // No collisions with fail-fast approach
         });
 
         serde_json::to_string_pretty(&output).unwrap()

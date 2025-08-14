@@ -1,6 +1,6 @@
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 
-use miden_core::{DebugOptions, Felt, Word, mast::MastForest};
+use miden_core::{DebugOptions, Felt, ReducedEventID, Word, mast::MastForest};
 use miden_debug_types::{
     DefaultSourceManager, Location, SourceFile, SourceManager, SourceManagerSync, SourceSpan,
 };
@@ -157,9 +157,12 @@ where
     fn on_event(
         &mut self,
         process: &ProcessState,
-        event_id: Felt,
+        reduced_event_id: ReducedEventID,
     ) -> Result<Vec<AdviceMutation>, EventError> {
-        if let Some(mutations) = self.event_handlers.handle_event(event_id, process)? {
+        // Convert ReducedEventID back to Felt for compatibility with existing handlers
+        let event_felt = reduced_event_id.as_felt();
+        
+        if let Some(mutations) = self.event_handlers.handle_event(event_felt, process)? {
             // the event was handled by the registered event handlers; just return
             return Ok(mutations);
         }
@@ -181,9 +184,9 @@ where
     fn on_event(
         &mut self,
         process: &ProcessState<'_>,
-        event_id: Felt,
+        reduced_event_id: ReducedEventID,
     ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>> {
-        let result = <Self as SyncHost>::on_event(self, process, event_id);
+        let result = <Self as SyncHost>::on_event(self, process, reduced_event_id);
         async move { result }
     }
 }

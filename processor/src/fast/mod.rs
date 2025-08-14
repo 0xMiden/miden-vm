@@ -891,7 +891,7 @@ impl FastProcessor {
             // whereas all the other operations are synchronous (resulting in a significant
             // performance improvement).
             match op {
-                Operation::Emit(event_id) => self.op_emit(*event_id, program, host, &err_ctx).await?,
+                Operation::Emit(event_id) => self.op_emit(*event_id, host, &err_ctx).await?,
                 _ => {
                     // if the operation is not an Emit, we execute it normally
                     self.execute_op(op, op_idx_in_block, program, host, &err_ctx)?;

@@ -61,7 +61,7 @@ impl PartialOrd for ReducedEventID {
 
 impl core::fmt::Display for ReducedEventID {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "ReducedEventID({})", self.0)
+        write!(f, "{}", self.0)
     }
 }
 

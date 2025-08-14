@@ -771,7 +771,7 @@ Debug: Instruction = {
             Instruction::Debug(DebugOptions::AdvStackTop(0.into())),
         }
     },
-    "emit" <id:Imm<U32>> => Instruction::Emit(EventValue::Id(id)),
+    "emit" <id:Imm<U32>> => Instruction::Emit(EventValue::Legacy(id)),
     "emit" <l:@L> <name:string> <r:@R> => {
         let event_name: Arc<str> = name.to_string().into();
         let span = span!(source_file.id(), l, r);

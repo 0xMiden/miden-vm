@@ -1,6 +1,6 @@
 use core::fmt;
 
-use crate::{EventId, EventSource, EventTable, Felt};
+use crate::{EventId, EventSource, ReducedEventID};
 
 // SYSTEM EVENTS
 // ================================================================================================
@@ -324,9 +324,9 @@ impl SystemEvent {
             .expect("System event names should always be valid")
     }
 
-    /// Returns the Felt representation of this system event.
-    pub fn felt_id(&self) -> Felt {
-        self.event_id().felt_id()
+    /// Returns the ReducedEventID for this system event.
+    pub fn reduced_id(&self) -> ReducedEventID {
+        self.event_id().reduced_id()
     }
 
     /// Returns the legacy u32 event ID for backward compatibility.
@@ -382,13 +382,13 @@ impl SystemEvent {
         }
     }
 
-    /// Returns a system event from a Felt ID using the new EventId system.
+    /// Returns a system event from a ReducedEventID.
     /// 
-    /// This method tries to find a SystemEvent whose EventId maps to the given Felt.
-    pub fn from_felt_id(felt: Felt) -> Option<Self> {
-        // Try each system event to see if its Felt ID matches
+    /// This method tries to find a SystemEvent whose ReducedEventID matches the given one.
+    pub fn from_reduced_id(reduced_id: ReducedEventID) -> Option<Self> {
+        // Try each system event to see if its ReducedEventID matches
         for &event in ALL_SYSTEM_EVENTS {
-            if event.felt_id() == felt {
+            if event.reduced_id() == reduced_id {
                 return Some(event);
             }
         }
@@ -402,7 +402,7 @@ impl SystemEvent {
 
     /// Creates an Operation::Emit for this system event.
     pub fn to_emit_operation(&self) -> crate::Operation {
-        crate::Operation::Emit(self.event_id().into())
+        crate::Operation::Emit(self.reduced_id())
     }
 }
 
@@ -428,20 +428,6 @@ const ALL_SYSTEM_EVENTS: &[SystemEvent] = &[
     SystemEvent::HpermToMap,
 ];
 
-/// Creates an EventTable containing all system events.
-/// 
-/// This table enables reverse lookup of system event names from their Felt IDs.
-pub fn create_system_event_table() -> EventTable {
-    let mut table = EventTable::new();
-    
-    for &event in ALL_SYSTEM_EVENTS {
-        let event_id = event.event_id();
-        table.register(event_id)
-            .expect("System events should not have ID collisions");
-    }
-    
-    table
-}
 
 impl crate::prettier::PrettyPrint for SystemEvent {
     fn render(&self) -> crate::prettier::Document {
