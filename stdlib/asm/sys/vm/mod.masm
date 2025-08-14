@@ -1,9 +1,9 @@
 use.std::crypto::hashes::rpo
 
-use.std::crypto::miden_vm_verifier::deep_queries
-use.std::crypto::miden_vm_verifier::constraints_eval
-use.std::crypto::miden_vm_verifier::ood_frames
-use.std::crypto::miden_vm_verifier::public_inputs
+use.std::sys::vm::deep_queries
+use.std::sys::vm::constraints_eval
+use.std::sys::vm::ood_frames
+use.std::sys::vm::public_inputs
 
 use.std::crypto::stark::verifier
 
@@ -36,7 +36,7 @@ const.TRACE_INFO=0x50010810
 #!
 #!  1- If log(trace_length) is even, then num_fri_layers = (log(trace_length) - 6) / 2, where 6 = log2(64),
 #!  2- If log(trace_length) is odd, then num_fri_layers = (log(trace_length) - 7) / 2, where 7 = log2(128).
-export.verify
+export.verify_proof
     # --- Get constants -------------------------------------------------------
 
     # Number of fixed length public inputs

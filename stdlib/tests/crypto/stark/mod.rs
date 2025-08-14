@@ -29,7 +29,6 @@ fn stark_verifier_e2f4(#[case] kernel: Option<&str>) {
     let example_source = "begin
             repeat.320
                 swap dup.1 add
-                
             end
             u32split drop
         end";
@@ -51,9 +50,9 @@ fn stark_verifier_e2f4(#[case] kernel: Option<&str>) {
 
     // Verify inside Miden VM
     let source = "
-        use.std::crypto::miden_vm_verifier
+        use.std::sys::vm
         begin
-            exec.miden_vm_verifier::verify
+            exec.vm::verify_proof
         end
         ";
 
@@ -177,7 +176,7 @@ fn variable_length_public_inputs(#[case] num_kernel_proc_digests: usize) {
         "
         use.std::crypto::stark::random_coin
         use.std::crypto::stark::constants
-        use.std::crypto::miden_vm_verifier::public_inputs
+        use.std::sys::vm::public_inputs
 
         begin
             # 1) Initialize the FS transcript
