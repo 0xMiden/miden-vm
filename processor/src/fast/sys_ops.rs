@@ -84,21 +84,21 @@ impl FastProcessor {
     #[inline(always)]
     pub async fn op_emit(
         &mut self,
-        reduced_event_id: ReducedEventID,
+        event_id: ReducedEventID,
         host: &mut impl AsyncHost,
         err_ctx: &impl ErrorContext,
     ) -> Result<(), ExecutionError> {
         let mut process = self.state();
         
         // If it's a system event, handle it directly. Otherwise, forward it to the host.
-        if let Some(system_event) = SystemEvent::from_reduced_id(reduced_event_id) {
+        if let Some(system_event) = SystemEvent::from_reduced_id(event_id) {
             handle_system_event(&mut process, system_event, err_ctx)
         } else {
             let clk = process.clk();
             let mutations = host
-                .on_event(&process, reduced_event_id)
+                .on_event(&process, event_id)
                 .await
-                .map_err(|err| ExecutionError::event_error(err, reduced_event_id, err_ctx))?;
+                .map_err(|err| ExecutionError::event_error(err, event_id, err_ctx))?;
             self.advice
                 .apply_mutations(mutations)
                 .map_err(|err| ExecutionError::advice_error(err, clk, err_ctx))?;

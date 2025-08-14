@@ -157,10 +157,10 @@ where
     fn on_event(
         &mut self,
         process: &ProcessState,
-        reduced_event_id: ReducedEventID,
+        event_id: ReducedEventID,
     ) -> Result<Vec<AdviceMutation>, EventError> {
         // Convert ReducedEventID back to Felt for compatibility with existing handlers
-        let event_felt = reduced_event_id.as_felt();
+        let event_felt = event_id.as_felt();
         
         if let Some(mutations) = self.event_handlers.handle_event(event_felt, process)? {
             // the event was handled by the registered event handlers; just return
