@@ -1,5 +1,4 @@
-use crate::constants::SINGLE_LINE_EXPORT_REGEX;
-use crate::types::LineType;
+use crate::{constants::SINGLE_LINE_EXPORT_REGEX, types::LineType};
 
 pub fn is_comment(line: &str) -> bool {
     line.trim_start().starts_with('#')
@@ -137,7 +136,7 @@ pub fn process_import_section(lines: &[&str]) -> (Vec<String>, usize) {
                 // If we have imports in the current group, sort and add them
                 if !current_import_group.is_empty() {
                     current_import_group.sort();
-                    result.extend(current_import_group.drain(..));
+                    result.append(&mut current_import_group);
                     // Add empty line after imports before comment
                     result.push(String::new());
                 }
@@ -146,8 +145,9 @@ pub fn process_import_section(lines: &[&str]) -> (Vec<String>, usize) {
                 end_index = i + 1;
             },
             LineType::Empty => {
-                // Empty lines are preserved in their position, but avoid multiple consecutive empty lines
-                if !result.is_empty() && !result.last().map_or(false, |s| s.is_empty()) {
+                // Empty lines are preserved in their position, but avoid multiple consecutive empty
+                // lines
+                if !result.is_empty() && !result.last().is_some_and(|s| s.is_empty()) {
                     result.push(String::new());
                     end_index = i + 1;
                 }
@@ -160,7 +160,7 @@ pub fn process_import_section(lines: &[&str]) -> (Vec<String>, usize) {
                 // If we have imports in the current group, sort and add them
                 if !current_import_group.is_empty() {
                     current_import_group.sort();
-                    result.extend(current_import_group.drain(..));
+                    result.append(&mut current_import_group);
                 }
                 break;
             },

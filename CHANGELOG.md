@@ -37,7 +37,6 @@
 - [BREAKING] Procedure-related metadata types in the `miden-assembly` crate in some cases now require an optional type signature argument. If that information is not available, you can simply pass `None` to retain current behavior ([#2028](https://github.com/0xMiden/miden-vm/pull/2028)).
 - Remove basic block clock cycle optimization from `FastProcessor` ([#2054](https://github.com/0xMiden/miden-vm/pull/2054)).
 
-
 ## 0.16.4 (2025-07-24)
 
 - Made `AdviceInputs` field public.

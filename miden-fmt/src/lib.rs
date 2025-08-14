@@ -151,11 +151,12 @@ pub fn format_code(code: &str) -> String {
                                 let next_code_without_comment =
                                     next_line.split('#').next().unwrap().trim();
                                 let next_first_word = next_code_without_comment.split('.').next();
-                                if let Some(next_word) = next_first_word {
-                                    if next_word != "end" && next_word != "else" {
-                                        formatted_code.push('\n');
-                                        last_line_was_empty = true;
-                                    }
+                                if let Some(next_word) = next_first_word
+                                    && next_word != "end"
+                                    && next_word != "else"
+                                {
+                                    formatted_code.push('\n');
+                                    last_line_was_empty = true;
                                 }
                             }
                         }
@@ -243,7 +244,8 @@ pub fn format_code(code: &str) -> String {
             let should_skip_empty_line = if i > 0 && i + 1 < lines.len() {
                 let prev_line = lines[i - 1].trim();
                 let next_line = lines[i + 1].trim();
-                // Skip empty lines between regular comments and proc/export/const, but preserve them after section separators
+                // Skip empty lines between regular comments and proc/export/const, but preserve
+                // them after section separators
                 is_comment(prev_line)
                     && (is_proc_or_export(next_line) || next_line.starts_with("const."))
                     && !is_section_separator_comment(prev_line)
@@ -251,7 +253,8 @@ pub fn format_code(code: &str) -> String {
                 false
             };
 
-            // Allow up to 1 empty line, collapse 2+ into 1, but skip if between comment and proc/export
+            // Allow up to 1 empty line, collapse 2+ into 1, but skip if between comment and
+            // proc/export
             if consecutive_empty_count <= 1 && !should_skip_empty_line {
                 final_output.push_str(line);
                 final_output.push('\n');
