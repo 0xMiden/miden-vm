@@ -1,7 +1,6 @@
 # Test procedure formatting: indentation, spacing, documentation
 
 use.miden::some_import
-
 #! A simple procedure that adds two numbers
 #!
 #! Stack: [a, b]
@@ -21,22 +20,14 @@ dup.0
 push.10 mul
 # => []
 if.true
-    add.1
-    # => [val]
+add.1
+# => [val]
 else
-    sub.1
-    # => [val]
+sub.1
+# => [val]
 end
 add
 # => [val]
 movup.2 add
 # => [val]
-end
-# Internal procedure
-#! Stack: [x, y, z]
-#! Output: [result]
-proc.internal_helper
-padw
-mem_loadw
-dropw
 end

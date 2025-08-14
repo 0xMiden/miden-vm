@@ -261,6 +261,23 @@ pub fn format_code(code: &str) -> String {
                                 last_line_was_empty = true;
                             }
                         }
+                        // Add blank line after any "end" statement if followed by non-"end" opcode
+                        // and not a stack comment, and not "else"
+                        else if !was_proc_or_export_end && i + 1 < remaining_lines.len() {
+                            let next_line = remaining_lines[i + 1].trim();
+                            if !next_line.is_empty() && !is_stack_comment(next_line) {
+                                // Check if the next line is another "end" statement or "else"
+                                let next_code_without_comment =
+                                    next_line.split('#').next().unwrap().trim();
+                                let next_first_word = next_code_without_comment.split('.').next();
+                                if let Some(next_word) = next_first_word {
+                                    if next_word != "end" && next_word != "else" {
+                                        formatted_code.push('\n');
+                                        last_line_was_empty = true;
+                                    }
+                                }
+                            }
+                        }
 
                         continue;
                     },

@@ -36,12 +36,3 @@ export.complex_procedure
     movup.2 add
     # => [val]
 end
-
-# Internal procedure
-#! Stack: [x, y, z]
-#! Output: [result]
-proc.internal_helper
-    padw
-    mem_loadw
-    dropw
-end
