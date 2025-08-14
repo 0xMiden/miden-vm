@@ -1,10 +1,7 @@
-use std::{path::PathBuf, sync::Arc, time::Instant};
+use std::{path::PathBuf, time::Instant};
 
 use clap::Parser;
-use miden_assembly::{
-    DefaultSourceManager, SourceManager,
-    diagnostics::{Report, WrapErr},
-};
+use miden_assembly::diagnostics::{Report, WrapErr};
 use miden_processor::{DefaultHost, ExecutionOptions, ExecutionOptionsError};
 use miden_stdlib::StdLibrary;
 use miden_vm::{ProvingOptions, internal::InputFile};
@@ -114,12 +111,16 @@ impl ProveCmd {
             .to_lowercase();
 
         let input_data = InputFile::read(&self.input_file, &self.program_file)?;
-        let (program, source_manager) = match ext.as_str() {
-            "masp" => (
-                get_masp_program(&self.program_file)?,
-                Arc::new(DefaultSourceManager::default()) as Arc<dyn SourceManager>,
-            ),
-            "masm" => get_masm_program(&self.program_file, &libraries, !self.release)?,
+
+        let host = DefaultHost::default().with_library(&StdLibrary::default())?;
+        // Use a single match expression to load the program.
+        let (program, mut host) = match ext.as_str() {
+            "masp" => (get_masp_program(&self.program_file)?, host),
+            "masm" => {
+                let (program, source_manager) =
+                    get_masm_program(&self.program_file, &libraries, true)?;
+                (program, host.with_source_manager(source_manager))
+            },
             _ => return Err(Report::msg("The provided file must have a .masm or .masp extension")),
         };
 
@@ -130,21 +131,14 @@ impl ProveCmd {
         // fetch the stack and program inputs from the arguments
         let stack_inputs = input_data.parse_stack_inputs().map_err(Report::msg)?;
         let advice_inputs = input_data.parse_advice_inputs().map_err(Report::msg)?;
-        let mut host = DefaultHost::default().with_library(&StdLibrary::default())?;
 
         let proving_options =
             self.get_proof_options().map_err(|err| Report::msg(format!("{err}")))?;
 
         // execute program and generate proof
-        let (stack_outputs, proof) = miden_prover::prove(
-            &program,
-            stack_inputs,
-            advice_inputs,
-            &mut host,
-            proving_options,
-            source_manager,
-        )
-        .wrap_err("Failed to prove program")?;
+        let (stack_outputs, proof) =
+            miden_prover::prove(&program, stack_inputs, advice_inputs, &mut host, proving_options)
+                .wrap_err("Failed to prove program")?;
 
         println!("Program proved in {} ms", now.elapsed().as_millis());
 

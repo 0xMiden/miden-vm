@@ -17,14 +17,13 @@ impl FastProcessor {
     #[inline(always)]
     pub fn op_horner_eval_base(
         &mut self,
-        op_idx: usize,
         err_ctx: &impl ErrorContext,
     ) -> Result<(), ExecutionError> {
         // read the values of the coefficients, over the base field, from the stack
         let coeffs = self.get_coeffs_as_base_elements();
 
         // read the evaluation point alpha from memory
-        let alpha = self.get_evaluation_point(op_idx, err_ctx)?;
+        let alpha = self.get_evaluation_point(err_ctx)?;
 
         // compute the updated accumulator value
         let (acc_new1, acc_new0) = {
@@ -50,14 +49,13 @@ impl FastProcessor {
     #[inline(always)]
     pub fn op_horner_eval_ext(
         &mut self,
-        op_idx: usize,
         err_ctx: &impl ErrorContext,
     ) -> Result<(), ExecutionError> {
         // read the values of the coefficients, over the base field, from the stack
         let coef = self.get_coeffs_as_quad_ext_elements();
 
         // read the evaluation point alpha from memory
-        let alpha = self.get_evaluation_point(op_idx, err_ctx)?;
+        let alpha = self.get_evaluation_point(err_ctx)?;
 
         // compute the updated accumulator value
         let (acc_new1, acc_new0) = {
@@ -103,14 +101,13 @@ impl FastProcessor {
     /// Returns the evaluation point.
     fn get_evaluation_point(
         &mut self,
-        op_idx: usize,
         err_ctx: &impl ErrorContext,
     ) -> Result<QuadFelt, ExecutionError> {
         let (alpha_0, alpha_1) = {
             let addr = self.stack_get(ALPHA_ADDR_INDEX);
             let word = self
                 .memory
-                .read_word(self.ctx, addr, self.clk + op_idx, err_ctx)
+                .read_word(self.ctx, addr, self.clk, err_ctx)
                 .map_err(ExecutionError::MemoryError)?;
 
             (word[0], word[1])

@@ -262,7 +262,7 @@ impl Process {
 
 #[cfg(test)]
 mod tests {
-    use std::vec::Vec;
+    use alloc::vec::Vec;
 
     use miden_core::{Felt, Operation, QuadFelt, StackInputs, ZERO, mast::MastForest};
     use miden_utils_testing::{build_test, rand::rand_array};

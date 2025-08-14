@@ -2,7 +2,7 @@
 use alloc::string::ToString;
 
 use miden_assembly::{
-    Assembler, LibraryPath,
+    Assembler, DefaultSourceManager, LibraryPath,
     ast::Module,
     testing::{TestContext, assert_diagnostic_lines, regex, source_file},
 };
@@ -10,7 +10,7 @@ use miden_core::{
     AdviceMap,
     crypto::merkle::{MerkleStore, MerkleTree},
 };
-use miden_debug_types::{SourceContent, SourceLanguage, Uri};
+use miden_debug_types::{SourceContent, SourceLanguage, SourceManager, Uri};
 use miden_utils_testing::{
     build_test, build_test_by_mode,
     crypto::{init_merkle_leaves, init_merkle_store},
@@ -745,14 +745,15 @@ fn test_diagnostic_no_mast_forest_with_procedure() {
         .assemble_program(program_source)
         .unwrap();
 
+    let mut host = DefaultHost::default().with_source_manager(source_manager);
+
     let mut process = Process::new(
         Kernel::default(),
         StackInputs::default(),
         AdviceInputs::default(),
         ExecutionOptions::default().with_debugging(true),
-    )
-    .with_source_manager(source_manager.clone());
-    let err = process.execute(&program, &mut DefaultHost::default()).unwrap_err();
+    );
+    let err = process.execute(&program, &mut host).unwrap_err();
     assert_diagnostic_lines!(
         err,
         "no MAST forest contains the procedure with root digest 0x1b0a6d4b3976737badf180f3df558f45e06e6d1803ea5ad3b95fa7428caccd02",
@@ -968,15 +969,16 @@ fn test_diagnostic_syscall_target_not_in_kernel() {
         .assemble_program(program_source)
         .unwrap();
 
+    let mut host = DefaultHost::default().with_source_manager(source_manager);
+
     // Note: we do not provide the kernel to trigger the error
     let mut process = Process::new(
         Kernel::default(),
         StackInputs::default(),
         AdviceInputs::default(),
         ExecutionOptions::default().with_debugging(true),
-    )
-    .with_source_manager(source_manager.clone());
-    let err = process.execute(&program, &mut DefaultHost::default()).unwrap_err();
+    );
+    let err = process.execute(&program, &mut host).unwrap_err();
     assert_diagnostic_lines!(
         err,
         "syscall failed: procedure with root d754f5422c74afd0b094889be6b288f9ffd2cc630e3c44d412b1408b2be3b99c was not found in the kernel",

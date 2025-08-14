@@ -1,6 +1,6 @@
-use std::{collections::BTreeSet, path::PathBuf, sync::Arc};
+use std::{collections::BTreeSet, path::PathBuf};
 
-use miden_assembly::{Assembler, DefaultSourceManager, Library};
+use miden_assembly::{Assembler, Library};
 use miden_processor::{AdviceInputs, ContextId, MemoryAddress};
 use miden_stdlib::StdLibrary;
 use miden_vm::{DefaultHost, StackInputs, math::Felt};
@@ -311,7 +311,6 @@ fn execute(
         assembler.link_dynamic_library(library).map_err(|err| format!("{err}"))?;
     }
 
-    let source_manager = Arc::new(DefaultSourceManager::default());
     let program = assembler.assemble_program(program).map_err(|err| format!("{err}"))?;
 
     let stack_inputs = StackInputs::default();
@@ -321,13 +320,8 @@ fn execute(
         host.load_library(library.mast_forest()).map_err(|err| format!("{err}"))?;
     }
 
-    let state_iter = miden_processor::execute_iter(
-        &program,
-        stack_inputs,
-        advice_inputs,
-        &mut host,
-        source_manager,
-    );
+    let state_iter =
+        miden_processor::execute_iter(&program, stack_inputs, advice_inputs, &mut host);
     let (system, _, stack, chiplets, err) = state_iter.into_parts();
     if let Some(err) = err {
         return Err(format!("{err}"));

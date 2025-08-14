@@ -27,27 +27,14 @@ impl FastProcessor {
     ///
     /// Stack transition:
     /// [ptr, num_read, num_eval, ...] -> [ptr, num_read, num_eval, ...]
-    pub fn op_eval_circuit(
-        &mut self,
-        op_idx: usize,
-        err_ctx: &impl ErrorContext,
-    ) -> Result<(), ExecutionError> {
+    pub fn op_eval_circuit(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
         let num_eval = self.stack_get(2);
         let num_read = self.stack_get(1);
         let ptr = self.stack_get(0);
         let ctx = self.ctx;
-        let clk = self.clk;
-        let circuit_evaluation = eval_circuit_fast_(
-            ctx,
-            ptr,
-            clk,
-            num_read,
-            num_eval,
-            &mut self.memory,
-            op_idx,
-            err_ctx,
-        )?;
-        self.ace.add_circuit_evaluation(clk, circuit_evaluation);
+        let circuit_evaluation =
+            eval_circuit_fast_(ctx, ptr, self.clk, num_read, num_eval, &mut self.memory, err_ctx)?;
+        self.ace.add_circuit_evaluation(self.clk, circuit_evaluation);
 
         Ok(())
     }
@@ -62,7 +49,6 @@ pub fn eval_circuit_fast_(
     num_vars: Felt,
     num_eval: Felt,
     mem: &mut Memory,
-    op_idx: usize,
     err_ctx: &impl ErrorContext,
 ) -> Result<CircuitEvaluation, ExecutionError> {
     let num_vars = num_vars.as_int();
@@ -96,15 +82,12 @@ pub fn eval_circuit_fast_(
     let num_read_rows = num_vars as u32 / 2;
     let num_eval_rows = num_eval as u32;
 
-    let mut evaluation_context =
-        CircuitEvaluation::new(ctx, clk + op_idx, num_read_rows, num_eval_rows);
+    let mut evaluation_context = CircuitEvaluation::new(ctx, clk, num_read_rows, num_eval_rows);
 
     let mut ptr = ptr;
     // perform READ operations
     for _ in 0..num_read_rows {
-        let word = mem
-            .read_word(ctx, ptr, clk + op_idx, err_ctx)
-            .map_err(ExecutionError::MemoryError)?;
+        let word = mem.read_word(ctx, ptr, clk, err_ctx).map_err(ExecutionError::MemoryError)?;
         evaluation_context.do_read(ptr, word)?;
         ptr += PTR_OFFSET_WORD;
     }
