@@ -13,6 +13,7 @@ use crate::{
     Felt,
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
+use super::ReducedEventID;
 
 // EVENT SOURCE
 // ================================================================================================
@@ -181,6 +182,11 @@ impl EventId {
         Felt::new(value)
     }
 
+    /// Returns the reduced form of this EventId for internal storage and handler mapping.
+    pub fn reduced_id(&self) -> ReducedEventID {
+        ReducedEventID::new(self.felt_id())
+    }
+
     /// Returns the legacy source_id for backward compatibility.
     pub fn source_id(&self) -> u32 {
         self.source.source_id()
@@ -224,6 +230,21 @@ impl EventId {
         }
         
         Ok(())
+    }
+}
+
+// CONVERSION TRAITS
+// ================================================================================================
+
+impl From<&EventId> for ReducedEventID {
+    fn from(event_id: &EventId) -> Self {
+        event_id.reduced_id()
+    }
+}
+
+impl From<EventId> for ReducedEventID {
+    fn from(event_id: EventId) -> Self {
+        event_id.reduced_id()
     }
 }
 
@@ -483,5 +504,38 @@ mod tests {
         let event_id = event.event_id();
         let expected = (event.felt_id().as_int() & 0xFFFF) as u16;
         assert_eq!(event_id, expected);
+    }
+
+    #[test]
+    fn test_reduced_event_id_conversion() {
+        let event = EventId::new(EventSource::User(42), "app", "MY_EVENT").unwrap();
+        
+        // Test direct method call
+        let reduced1 = event.reduced_id();
+        assert_eq!(reduced1.as_felt(), event.felt_id());
+        
+        // Test From trait implementations
+        let reduced2: ReducedEventID = (&event).into();
+        let reduced3: ReducedEventID = event.clone().into();
+        
+        assert_eq!(reduced1, reduced2);
+        assert_eq!(reduced1, reduced3);
+        assert_eq!(reduced2, reduced3);
+        
+        // Verify the underlying Felt is the same
+        assert_eq!(reduced1.as_u64(), event.felt_id().as_int());
+    }
+
+    #[test]
+    fn test_reduced_event_id_deterministic() {
+        let event1 = EventId::new(EventSource::System, "memory", "MAP_VALUE").unwrap();
+        let event2 = EventId::new(EventSource::System, "memory", "MAP_VALUE").unwrap();
+        
+        // Same EventId should produce same ReducedEventID
+        assert_eq!(event1.reduced_id(), event2.reduced_id());
+        
+        // Different EventIds should produce different ReducedEventIDs
+        let event3 = EventId::new(EventSource::System, "memory", "UNMAP_VALUE").unwrap();
+        assert_ne!(event1.reduced_id(), event3.reduced_id());
     }
 }

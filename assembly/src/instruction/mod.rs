@@ -5,7 +5,7 @@ use miden_assembly_syntax::{
     parser::IntValue,
 };
 use miden_core::{
-    Decorator, Felt, ONE, Operation, WORD_SIZE, ZERO, 
+    Decorator, Felt, ONE, Operation, ReducedEventID, WORD_SIZE, ZERO, 
     events::EventId,
     mast::MastNodeId,
 };
@@ -586,7 +586,7 @@ impl Assembler {
                     },
                 };
                 
-                block_builder.push_op(Operation::Emit(felt_id));
+                block_builder.push_op(Operation::Emit(ReducedEventID::new(felt_id)));
             },
 
             // ----- trace instruction ------------------------------------------------------------

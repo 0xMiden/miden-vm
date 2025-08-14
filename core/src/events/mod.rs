@@ -4,13 +4,15 @@
 // ================================================================================================
 
 pub use event_id::{EventId, EventIdError, EventSource};
-pub use event_table::{EventTable, EventTableError, EventCollision, CollisionResolution};
+pub use event_table::{EventTable, EventTableError};
+pub use reduced_id::ReducedEventID;
 
 // MODULES
 // ================================================================================================
 
 mod event_id;
 mod event_table;
+mod reduced_id;
 
 // TESTS
 // ================================================================================================
@@ -30,24 +32,24 @@ mod tests {
         let user_event = EventId::new(EventSource::User(42), "app", "CUSTOM_EVENT").unwrap();
         
         // Register events
-        let felt1 = table.register(system_event.clone()).unwrap();
-        let felt2 = table.register(stdlib_event.clone()).unwrap();
-        let felt3 = table.register(user_event.clone()).unwrap();
+        let reduced1 = table.register(system_event.clone()).unwrap();
+        let reduced2 = table.register(stdlib_event.clone()).unwrap();
+        let reduced3 = table.register(user_event.clone()).unwrap();
         
         // Verify lookups work
-        assert_eq!(table.lookup_by_felt(felt1), Some(&system_event));
-        assert_eq!(table.lookup_by_felt(felt2), Some(&stdlib_event));
-        assert_eq!(table.lookup_by_felt(felt3), Some(&user_event));
+        assert_eq!(table.lookup_by_felt(reduced1.as_felt()), Some(&system_event));
+        assert_eq!(table.lookup_by_felt(reduced2.as_felt()), Some(&stdlib_event));
+        assert_eq!(table.lookup_by_felt(reduced3.as_felt()), Some(&user_event));
         
         // Verify event IDs are deterministic
-        assert_eq!(system_event.felt_id(), felt1);
-        assert_eq!(stdlib_event.felt_id(), felt2);
-        assert_eq!(user_event.felt_id(), felt3);
+        assert_eq!(system_event.reduced_id(), reduced1);
+        assert_eq!(stdlib_event.reduced_id(), reduced2);
+        assert_eq!(user_event.reduced_id(), reduced3);
         
-        // Verify different events produce different Felt IDs
-        assert_ne!(felt1, felt2);
-        assert_ne!(felt2, felt3);
-        assert_ne!(felt1, felt3);
+        // Verify different events produce different reduced IDs
+        assert_ne!(reduced1, reduced2);
+        assert_ne!(reduced2, reduced3);
+        assert_ne!(reduced1, reduced3);
     }
 
     #[test]

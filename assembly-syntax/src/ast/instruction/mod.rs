@@ -2,7 +2,7 @@ pub mod advice;
 pub mod debug;
 mod print;
 
-use alloc::vec::Vec;
+use alloc::{sync::Arc, vec::Vec};
 
 pub use self::{advice::SystemEventNode, debug::DebugOptions};
 use crate::{
@@ -10,7 +10,6 @@ use crate::{
     ast::{InvocationTarget, immediate::*},
     parser::{IntValue, WordValue},
 };
-use alloc::string::String;
 use core::fmt;
 
 // EVENT VALUE
@@ -22,7 +21,7 @@ pub enum EventValue {
     /// A numeric event ID (legacy format)
     Id(ImmU32),
     /// A string-based event identifier (new format)
-    Name(Immediate<String>),
+    Name(Immediate<Arc<str>>),
 }
 
 impl EventValue {

@@ -5,7 +5,7 @@ pub use decorators::{AssemblyOp, DebugOptions, Decorator, DecoratorIterator, Dec
 use opcode_constants::*;
 
 use crate::{
-    Felt,
+    Felt, ReducedEventID,
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
@@ -163,13 +163,13 @@ pub enum Operation {
 
     /// Emits an event to the host.
     ///
-    /// The event is identified by a Felt value that uniquely represents the event.
-    /// This Felt is typically derived from a structured EventId (e.g., "miden-vm/memory::MAP_VALUE") 
-    /// via Blake3 hashing, but can also be a legacy u32 value for backward compatibility.
+    /// The event is identified by a ReducedEventID that uniquely represents the event.
+    /// The ReducedEventID can be derived from a structured EventId (e.g., "miden-vm/memory::MAP_VALUE") 
+    /// via Blake3 hashing, or created from a legacy u32 value for backward compatibility.
     ///
     /// Similar to Noop, this operation does not change the state of user stack. The immediate
     /// value affects the program MAST root computation.
-    Emit(Felt) = OPCODE_EMIT,
+    Emit(ReducedEventID) = OPCODE_EMIT,
 
     // ----- flow control operations -------------------------------------------------------------
     /// Marks the beginning of a join block.
@@ -622,7 +622,7 @@ impl Operation {
     pub fn imm_value(&self) -> Option<Felt> {
         match *self {
             Self::Push(imm) => Some(imm),
-            Self::Emit(imm) => Some(imm),
+            Self::Emit(reduced_id) => Some(reduced_id.as_felt()),
             _ => None,
         }
     }
@@ -651,16 +651,9 @@ impl Operation {
 
     /// Creates a new Emit operation from an EventId.
     /// 
-    /// The EventId is hashed to produce a Felt value that uniquely identifies the event.
+    /// The EventId is converted to a ReducedEventID that uniquely identifies the event.
     pub fn emit_event(event_id: crate::EventId) -> Self {
-        Self::Emit(event_id.felt_id())
-    }
-
-    /// Creates a new Emit operation from a Felt value.
-    /// 
-    /// This is useful for backward compatibility or when working directly with Felt event IDs.
-    pub fn emit_felt(felt: Felt) -> Self {
-        Self::Emit(felt)
+        Self::Emit(event_id.reduced_id())
     }
 
     /// Creates a new Emit operation from a legacy u32 event ID.
@@ -668,7 +661,7 @@ impl Operation {
     /// # Deprecated
     /// This method is provided for backward compatibility. New code should use `emit_event()`.
     pub fn emit_u32(event_id: u32) -> Self {
-        Self::Emit(Felt::new(event_id as u64))
+        Self::Emit(ReducedEventID::from_u32(event_id))
     }
 }
 
@@ -824,7 +817,7 @@ impl Serializable for Operation {
                 err_code.write_into(target);
             },
             Operation::Push(value) => value.as_int().write_into(target),
-            Operation::Emit(value) => value.as_int().write_into(target),
+            Operation::Emit(value) => value.as_u64().write_into(target),
 
             // Note: we explicitly write out all the operations so that whenever we make a
             // modification to the `Operation` enum, we get a compile error here. This
@@ -1020,7 +1013,7 @@ impl Deserializable for Operation {
             OPCODE_PUSH => Self::Push(Felt::read_from(source)?),
             OPCODE_EMIT => {
                 let value = source.read_u64()?;
-                Self::Emit(Felt::new(value))
+                Self::Emit(ReducedEventID::new(Felt::new(value)))
             },
             OPCODE_SYSCALL => Self::SysCall,
             OPCODE_CALL => Self::Call,

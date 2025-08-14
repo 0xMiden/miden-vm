@@ -124,7 +124,7 @@ pub use operations::{
 pub mod events;
 pub use events::{
     EventId, EventIdError, EventSource, EventTable, EventTableError, 
-    EventCollision, CollisionResolution,
+    ReducedEventID,
 };
 
 pub mod stack;

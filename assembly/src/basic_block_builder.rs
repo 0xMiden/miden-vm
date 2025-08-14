@@ -2,7 +2,7 @@ use alloc::{borrow::Borrow, string::ToString, sync::Arc, vec::Vec};
 
 use miden_assembly_syntax::{ast::Instruction, debuginfo::Span, diagnostics::{Report, RelatedLabel}};
 use miden_core::{
-    AssemblyOp, Decorator, DecoratorList, Felt, Operation,
+    AssemblyOp, Decorator, DecoratorList, Felt, Operation, ReducedEventID,
     events::EventId,
     mast::{DecoratorId, MastNodeId},
     sys_events::SystemEvent,
@@ -99,7 +99,7 @@ impl BasicBlockBuilder<'_> {
     /// Converts the system event into its corresponding event ID, and adds an `Emit` operation
     /// to the list of basic block operations.
     pub fn push_system_event(&mut self, sys_event: SystemEvent) {
-        self.push_op(Operation::Emit(sys_event.felt_id()))
+        self.push_op(Operation::Emit(ReducedEventID::new(sys_event.felt_id())))
     }
 }
 

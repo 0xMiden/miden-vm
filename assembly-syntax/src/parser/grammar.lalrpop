@@ -773,7 +773,7 @@ Debug: Instruction = {
     },
     "emit" <id:Imm<U32>> => Instruction::Emit(EventValue::Id(id)),
     "emit" <l:@L> <name:string> <r:@R> => {
-        let event_name = name.to_string();
+        let event_name: Arc<str> = name.to_string().into();
         let span = span!(source_file.id(), l, r);
         Instruction::Emit(EventValue::Name(Immediate::Value(Span::new(span, event_name))))
     },

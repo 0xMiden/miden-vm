@@ -548,7 +548,8 @@ impl MastForestBuilder {
     
     /// Registers an EventId in the event table and returns the corresponding Felt representation.
     pub fn register_event(&mut self, event_id: EventId) -> Result<Felt, EventTableError> {
-        self.mast_forest.event_table_mut().register(event_id)
+        let reduced_id = self.mast_forest.event_table_mut().register(event_id)?;
+        Ok(reduced_id.as_felt())
     }
 }
 

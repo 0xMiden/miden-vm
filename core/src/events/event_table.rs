@@ -1,11 +1,7 @@
-use alloc::{
-    collections::BTreeMap,
-    string::ToString,
-    vec::Vec,
-};
+use alloc::collections::BTreeMap;
 use core::fmt;
 
-use super::EventId;
+use super::{EventId, ReducedEventID};
 use crate::{
     Felt,
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
@@ -14,340 +10,196 @@ use crate::{
 // EVENT TABLE
 // ================================================================================================
 
-/// A bidirectional mapping between EventId and Felt representations with collision detection.
+/// A bidirectional mapping between EventId and ReducedEventID with fail-fast collision handling.
 /// 
-/// The EventTable is essential for reverse lookup capabilities, allowing the VM to map
-/// from Felt event IDs back to human-readable event names. It also detects and handles
-/// hash collisions that could occur when multiple EventIds map to the same Felt.
+/// The EventTable provides reverse lookup capabilities, allowing the VM to map from ReducedEventID 
+/// back to human-readable event names. Collisions cause immediate errors rather than complex resolution.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct EventTable {
-    /// Forward lookup: EventId -> Felt
-    event_to_felt: BTreeMap<EventId, Felt>,
+    /// Forward lookup: EventId -> ReducedEventID
+    event_to_reduced: BTreeMap<EventId, ReducedEventID>,
     
-    /// Reverse lookup: Felt -> EventId  
-    felt_to_event: BTreeMap<u64, EventId>,
-    
-    /// Collision tracking and resolution
-    collisions: Vec<EventCollision>,
+    /// Reverse lookup: ReducedEventID -> EventId  
+    reduced_to_event: BTreeMap<ReducedEventID, EventId>,
 }
 
 impl EventTable {
     /// Creates a new empty event table.
     pub fn new() -> Self {
         Self {
-            event_to_felt: BTreeMap::new(),
-            felt_to_event: BTreeMap::new(),
-            collisions: Vec::new(),
+            event_to_reduced: BTreeMap::new(),
+            reduced_to_event: BTreeMap::new(),
         }
     }
 
-    /// Registers an EventId in the table, computing its Felt representation.
+    /// Registers an EventId in the table, computing its ReducedEventID.
     /// 
-    /// Returns an error if there's a collision that cannot be resolved.
-    pub fn register(&mut self, event_id: EventId) -> Result<Felt, EventTableError> {
-        let felt_id = event_id.felt_id();
-        let felt_key = felt_id.as_int();
+    /// Returns an error immediately if there's a collision (fail-fast approach).
+    pub fn register(&mut self, event_id: EventId) -> Result<ReducedEventID, EventTableError> {
+        let reduced_id = event_id.reduced_id();
 
         // Check if this exact EventId is already registered
-        if let Some(existing_felt) = self.event_to_felt.get(&event_id) {
-            return Ok(*existing_felt);
+        if let Some(existing_reduced) = self.event_to_reduced.get(&event_id) {
+            return Ok(*existing_reduced);
         }
 
-        // Check for collision with a different EventId
-        if let Some(existing_event) = self.felt_to_event.get(&felt_key) {
+        // Check for collision with a different EventId (fail-fast)
+        if let Some(existing_event) = self.reduced_to_event.get(&reduced_id) {
             if existing_event != &event_id {
-                // We have a collision - record it
-                let collision = EventCollision {
-                    felt: felt_id,
-                    events: vec![existing_event.clone(), event_id.clone()],
-                    resolution: CollisionResolution::Error,
-                };
-                
-                return Err(EventTableError::Collision(collision));
+                return Err(EventTableError::Collision {
+                    reduced_id,
+                    existing: existing_event.clone(),
+                    conflicting: event_id,
+                });
             }
         }
 
         // No collision - register the mapping
-        self.event_to_felt.insert(event_id.clone(), felt_id);
-        self.felt_to_event.insert(felt_key, event_id);
+        self.event_to_reduced.insert(event_id.clone(), reduced_id);
+        self.reduced_to_event.insert(reduced_id, event_id);
 
-        Ok(felt_id)
+        Ok(reduced_id)
     }
 
-    /// Registers an EventId with explicit collision resolution.
-    pub fn register_with_resolution(
-        &mut self,
-        event_id: EventId,
-        resolution: CollisionResolution,
-    ) -> Result<Felt, EventTableError> {
-        match self.register(event_id.clone()) {
-            Ok(felt) => Ok(felt),
-            Err(EventTableError::Collision(mut collision)) => {
-                // Apply the resolution strategy
-                match resolution {
-                    CollisionResolution::Error => Err(EventTableError::Collision(collision)),
-                    CollisionResolution::Rename(new_event_id) => {
-                        // Try to register the renamed event
-                        let new_felt = self.register(new_event_id.clone())?;
-                        
-                        // Update collision record
-                        collision.resolution = CollisionResolution::Rename(new_event_id);
-                        self.collisions.push(collision);
-                        
-                        Ok(new_felt)
-                    },
-                    CollisionResolution::Manual(ref mapping) => {
-                        // Use the manually specified Felt
-                        if let Some(&manual_felt) = mapping.get(&event_id) {
-                            // Verify the manual Felt doesn't conflict
-                            let manual_key = manual_felt.as_int();
-                            if let Some(existing) = self.felt_to_event.get(&manual_key) {
-                                if existing != &event_id {
-                                    return Err(EventTableError::ManualMappingConflict {
-                                        felt: manual_felt,
-                                        existing: existing.clone(),
-                                        requested: event_id,
-                                    });
-                                }
-                            }
-                            
-                            // Register with manual mapping
-                            self.event_to_felt.insert(event_id.clone(), manual_felt);
-                            self.felt_to_event.insert(manual_key, event_id);
-                            
-                            collision.resolution = resolution;
-                            self.collisions.push(collision);
-                            
-                            Ok(manual_felt)
-                        } else {
-                            Err(EventTableError::ManualMappingMissing(event_id))
-                        }
-                    },
-                }
-            },
-            Err(other_error) => Err(other_error),
+    /// Registers an EventId from a legacy u32 event ID.
+    /// 
+    /// This creates a ReducedEventID directly from the u32 for backward compatibility.
+    pub fn register_u32(&mut self, event_id: EventId, legacy_id: u32) -> Result<ReducedEventID, EventTableError> {
+        let reduced_id = ReducedEventID::from_u32(legacy_id);
+
+        // Check if this exact EventId is already registered
+        if let Some(existing_reduced) = self.event_to_reduced.get(&event_id) {
+            if *existing_reduced != reduced_id {
+                return Err(EventTableError::InconsistentLegacyMapping {
+                    event_id: event_id.clone(),
+                    expected: reduced_id,
+                    existing: *existing_reduced,
+                });
+            }
+            return Ok(*existing_reduced);
         }
+
+        // Check for collision with a different EventId (fail-fast)
+        if let Some(existing_event) = self.reduced_to_event.get(&reduced_id) {
+            if existing_event != &event_id {
+                return Err(EventTableError::Collision {
+                    reduced_id,
+                    existing: existing_event.clone(),
+                    conflicting: event_id,
+                });
+            }
+        }
+
+        // Register the legacy mapping
+        self.event_to_reduced.insert(event_id.clone(), reduced_id);
+        self.reduced_to_event.insert(reduced_id, event_id);
+
+        Ok(reduced_id)
     }
 
-    /// Looks up the Felt representation of an EventId.
-    pub fn lookup_by_event(&self, event_id: &EventId) -> Option<Felt> {
-        self.event_to_felt.get(event_id).copied()
+    /// Looks up the ReducedEventID for an EventId.
+    pub fn lookup_by_event(&self, event_id: &EventId) -> Option<ReducedEventID> {
+        self.event_to_reduced.get(event_id).copied()
     }
 
-    /// Looks up the EventId from its Felt representation.
+    /// Looks up the EventId from its ReducedEventID.
+    pub fn lookup_by_reduced_id(&self, reduced_id: ReducedEventID) -> Option<&EventId> {
+        self.reduced_to_event.get(&reduced_id)
+    }
+
+    /// Looks up the EventId from a Felt (for backward compatibility).
     pub fn lookup_by_felt(&self, felt: Felt) -> Option<&EventId> {
-        self.felt_to_event.get(&felt.as_int())
+        let reduced_id = ReducedEventID::new(felt);
+        self.reduced_to_event.get(&reduced_id)
     }
 
     /// Returns true if the EventId is registered.
     pub fn contains_event(&self, event_id: &EventId) -> bool {
-        self.event_to_felt.contains_key(event_id)
+        self.event_to_reduced.contains_key(event_id)
     }
 
-    /// Returns true if the Felt is registered.
+    /// Returns true if the ReducedEventID is registered.
+    pub fn contains_reduced_id(&self, reduced_id: ReducedEventID) -> bool {
+        self.reduced_to_event.contains_key(&reduced_id)
+    }
+
+    /// Returns true if the Felt is registered (backward compatibility).
     pub fn contains_felt(&self, felt: Felt) -> bool {
-        self.felt_to_event.contains_key(&felt.as_int())
+        let reduced_id = ReducedEventID::new(felt);
+        self.reduced_to_event.contains_key(&reduced_id)
     }
 
     /// Returns the number of registered events.
     pub fn len(&self) -> usize {
-        self.event_to_felt.len()
+        self.event_to_reduced.len()
     }
 
     /// Returns true if the table is empty.
     pub fn is_empty(&self) -> bool {
-        self.event_to_felt.is_empty()
+        self.event_to_reduced.is_empty()
     }
 
     /// Returns an iterator over all registered events.
-    pub fn iter(&self) -> impl Iterator<Item = (&EventId, Felt)> {
-        self.event_to_felt.iter().map(|(event, &felt)| (event, felt))
+    pub fn iter(&self) -> impl Iterator<Item = (&EventId, ReducedEventID)> {
+        self.event_to_reduced.iter().map(|(event, &reduced)| (event, reduced))
     }
 
-    /// Returns all recorded collisions.
-    pub fn collisions(&self) -> &[EventCollision] {
-        &self.collisions
+    /// Returns an iterator over all reduced event IDs.
+    pub fn reduced_ids(&self) -> impl Iterator<Item = ReducedEventID> + '_ {
+        self.reduced_to_event.keys().copied()
     }
 
     /// Merges another EventTable into this one.
     /// 
-    /// Returns an error if any unresolvable collisions are detected.
+    /// Returns an error immediately if any collisions are detected (fail-fast approach).
     pub fn merge(&mut self, other: EventTable) -> Result<(), EventTableError> {
-        for (event_id, _) in other.event_to_felt {
+        for (event_id, _) in other.event_to_reduced {
             self.register(event_id)?;
         }
-        
-        // Merge collision records
-        self.collisions.extend(other.collisions);
         
         Ok(())
     }
 
-    /// Merges another EventTable with collision resolution strategy.
-    pub fn merge_with_resolution(
-        &mut self,
-        other: EventTable,
-        default_resolution: CollisionResolution,
-    ) -> Result<(), EventTableError> {
-        for (event_id, _) in other.event_to_felt {
-            self.register_with_resolution(event_id, default_resolution.clone())?;
-        }
-        
-        // Merge collision records
-        self.collisions.extend(other.collisions);
-        
-        Ok(())
-    }
 
     /// Validates the table for consistency.
     pub fn validate(&self) -> Result<(), EventTableError> {
         // Check that forward and reverse mappings are consistent
-        for (event, &felt) in &self.event_to_felt {
-            let felt_key = felt.as_int();
-            if let Some(reverse_event) = self.felt_to_event.get(&felt_key) {
+        for (event, &reduced_id) in &self.event_to_reduced {
+            if let Some(reverse_event) = self.reduced_to_event.get(&reduced_id) {
                 if reverse_event != event {
                     return Err(EventTableError::InconsistentMapping {
                         event: event.clone(),
-                        felt,
+                        reduced_id,
                         reverse_event: reverse_event.clone(),
                     });
                 }
             } else {
                 return Err(EventTableError::MissingReverseMapping {
                     event: event.clone(),
-                    felt,
+                    reduced_id,
                 });
             }
         }
 
         // Check reverse mappings
-        for (&felt_key, event) in &self.felt_to_event {
-            let felt = Felt::new(felt_key);
-            if let Some(&forward_felt) = self.event_to_felt.get(event) {
-                if forward_felt != felt {
+        for (&reduced_id, event) in &self.reduced_to_event {
+            if let Some(&forward_reduced_id) = self.event_to_reduced.get(event) {
+                if forward_reduced_id != reduced_id {
                     return Err(EventTableError::InconsistentMapping {
                         event: event.clone(),
-                        felt,
+                        reduced_id,
                         reverse_event: event.clone(),
                     });
                 }
             } else {
                 return Err(EventTableError::MissingForwardMapping {
                     event: event.clone(),
-                    felt,
+                    reduced_id,
                 });
             }
         }
 
         Ok(())
-    }
-}
-
-// EVENT COLLISION
-// ================================================================================================
-
-/// Represents a collision between multiple EventIds that map to the same Felt.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EventCollision {
-    /// The Felt value that multiple events map to
-    pub felt: Felt,
-    
-    /// The conflicting events
-    pub events: Vec<EventId>,
-    
-    /// How the collision was resolved
-    pub resolution: CollisionResolution,
-}
-
-/// Strategies for resolving event ID collisions.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CollisionResolution {
-    /// Fail with an error (default behavior)
-    Error,
-    
-    /// Rename one of the colliding events
-    Rename(EventId),
-    
-    /// Use manually specified Felt mappings
-    Manual(BTreeMap<EventId, Felt>),
-}
-
-impl Serializable for EventCollision {
-    fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        self.felt.write_into(target);
-        
-        target.write_usize(self.events.len());
-        for event in &self.events {
-            event.write_into(target);
-        }
-        
-        self.resolution.write_into(target);
-    }
-}
-
-impl Deserializable for EventCollision {
-    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let felt = Felt::read_from(source)?;
-        
-        let num_events = source.read_usize()?;
-        let mut events = Vec::with_capacity(num_events);
-        for _ in 0..num_events {
-            events.push(EventId::read_from(source)?);
-        }
-        
-        let resolution = CollisionResolution::read_from(source)?;
-        
-        Ok(EventCollision {
-            felt,
-            events,
-            resolution,
-        })
-    }
-}
-
-impl Serializable for CollisionResolution {
-    fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        match self {
-            CollisionResolution::Error => {
-                target.write_u8(0);
-            }
-            CollisionResolution::Rename(event_id) => {
-                target.write_u8(1);
-                event_id.write_into(target);
-            }
-            CollisionResolution::Manual(mappings) => {
-                target.write_u8(2);
-                target.write_usize(mappings.len());
-                for (event_id, felt) in mappings {
-                    event_id.write_into(target);
-                    felt.write_into(target);
-                }
-            }
-        }
-    }
-}
-
-impl Deserializable for CollisionResolution {
-    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let variant = source.read_u8()?;
-        match variant {
-            0 => Ok(CollisionResolution::Error),
-            1 => {
-                let event_id = EventId::read_from(source)?;
-                Ok(CollisionResolution::Rename(event_id))
-            }
-            2 => {
-                let num_mappings = source.read_usize()?;
-                let mut mappings = BTreeMap::new();
-                for _ in 0..num_mappings {
-                    let event_id = EventId::read_from(source)?;
-                    let felt = Felt::read_from(source)?;
-                    mappings.insert(event_id, felt);
-                }
-                Ok(CollisionResolution::Manual(mappings))
-            }
-            _ => Err(DeserializationError::InvalidValue("invalid CollisionResolution variant".to_string())),
-        }
     }
 }
 
@@ -357,71 +209,62 @@ impl Deserializable for CollisionResolution {
 /// Errors that can occur when working with EventTables.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EventTableError {
-    /// Multiple EventIds map to the same Felt
-    Collision(EventCollision),
-    
-    /// Manual mapping conflicts with existing registration
-    ManualMappingConflict {
-        felt: Felt,
+    /// Multiple EventIds map to the same ReducedEventID (fail-fast collision)
+    Collision {
+        reduced_id: ReducedEventID,
         existing: EventId,
-        requested: EventId,
+        conflicting: EventId,
     },
     
-    /// Manual mapping doesn't specify a Felt for the EventId
-    ManualMappingMissing(EventId),
+    /// Legacy mapping conflicts with computed mapping
+    InconsistentLegacyMapping {
+        event_id: EventId,
+        expected: ReducedEventID,
+        existing: ReducedEventID,
+    },
     
     /// Forward and reverse mappings are inconsistent
     InconsistentMapping {
         event: EventId,
-        felt: Felt,
+        reduced_id: ReducedEventID,
         reverse_event: EventId,
     },
     
     /// Missing reverse mapping for an event
     MissingReverseMapping {
         event: EventId,
-        felt: Felt,
+        reduced_id: ReducedEventID,
     },
     
-    /// Missing forward mapping for a Felt
+    /// Missing forward mapping for a ReducedEventID
     MissingForwardMapping {
         event: EventId,
-        felt: Felt,
+        reduced_id: ReducedEventID,
     },
 }
 
 impl fmt::Display for EventTableError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            EventTableError::Collision(collision) => {
-                write!(f, "Event collision: {} events map to Felt {}: ", 
-                       collision.events.len(), collision.felt)?;
-                for (i, event) in collision.events.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, ", ")?;
-                    }
-                    write!(f, "'{}'", event)?;
-                }
-                Ok(())
+            EventTableError::Collision { reduced_id, existing, conflicting } => {
+                write!(f, "Event collision: EventIds '{}' and '{}' both map to ReducedEventID {}", 
+                       existing, conflicting, reduced_id)
             },
-            EventTableError::ManualMappingConflict { felt, existing, requested } => {
-                write!(f, "Manual mapping conflict: Felt {} is already mapped to '{}', \
-                          cannot map to '{}'", felt, existing, requested)
+            EventTableError::InconsistentLegacyMapping { event_id, expected, existing } => {
+                write!(f, "Inconsistent legacy mapping: event '{}' expected ReducedEventID {}, \
+                          but already has {}", event_id, expected, existing)
             },
-            EventTableError::ManualMappingMissing(event) => {
-                write!(f, "Manual mapping missing for event '{}'", event)
+            EventTableError::InconsistentMapping { event, reduced_id, reverse_event } => {
+                write!(f, "Inconsistent mapping: event '{}' maps to ReducedEventID {}, \
+                          but ReducedEventID maps back to '{}'", event, reduced_id, reverse_event)
             },
-            EventTableError::InconsistentMapping { event, felt, reverse_event } => {
-                write!(f, "Inconsistent mapping: event '{}' maps to Felt {}, \
-                          but Felt maps back to '{}'", event, felt, reverse_event)
+            EventTableError::MissingReverseMapping { event, reduced_id } => {
+                write!(f, "Missing reverse mapping: event '{}' maps to ReducedEventID {}, \
+                          but no reverse mapping exists", event, reduced_id)
             },
-            EventTableError::MissingReverseMapping { event, felt } => {
-                write!(f, "Missing reverse mapping: event '{}' maps to Felt {}, \
-                          but no reverse mapping exists", event, felt)
-            },
-            EventTableError::MissingForwardMapping { event, felt } => {
-                write!(f, "Missing forward mapping: Felt {} maps to event '{}', \
-                          but no forward mapping exists", felt, event)
+            EventTableError::MissingForwardMapping { event, reduced_id } => {
+                write!(f, "Missing forward mapping: ReducedEventID {} maps to event '{}', \
+                          but no forward mapping exists", reduced_id, event)
             },
         }
     }
@@ -435,18 +278,12 @@ impl core::error::Error for EventTableError {}
 impl Serializable for EventTable {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         // Write the number of entries
-        target.write_usize(self.event_to_felt.len());
+        target.write_usize(self.event_to_reduced.len());
         
-        // Write each (EventId, Felt) pair
-        for (event_id, &felt) in &self.event_to_felt {
+        // Write each (EventId, ReducedEventID) pair
+        for (event_id, &reduced_id) in &self.event_to_reduced {
             event_id.write_into(target);
-            felt.write_into(target);
-        }
-        
-        // Write collision information
-        target.write_usize(self.collisions.len());
-        for collision in &self.collisions {
-            collision.write_into(target);
+            reduced_id.write_into(target);
         }
     }
 }
@@ -458,21 +295,14 @@ impl Deserializable for EventTable {
         // Read the number of entries
         let num_entries = source.read_usize()?;
         
-        // Read each (EventId, Felt) pair and register them
+        // Read each (EventId, ReducedEventID) pair and register them
         for _ in 0..num_entries {
             let event_id = EventId::read_from(source)?;
-            let felt = Felt::read_from(source)?;
+            let reduced_id = ReducedEventID::read_from(source)?;
             
             // Directly insert without re-hashing since we trust the serialized data
-            table.event_to_felt.insert(event_id.clone(), felt);
-            table.felt_to_event.insert(felt.as_int(), event_id);
-        }
-        
-        // Read collision information
-        let num_collisions = source.read_usize()?;
-        for _ in 0..num_collisions {
-            let collision = EventCollision::read_from(source)?;
-            table.collisions.push(collision);
+            table.event_to_reduced.insert(event_id.clone(), reduced_id);
+            table.reduced_to_event.insert(reduced_id, event_id);
         }
         
         Ok(table)
@@ -486,6 +316,7 @@ impl Deserializable for EventTable {
 mod tests {
     use super::*;
     use crate::events::{EventId, EventSource};
+    use alloc::vec::Vec;
 
     #[test]
     fn test_event_table_basic_operations() {
@@ -495,18 +326,21 @@ mod tests {
         let event2 = EventId::new(EventSource::Stdlib, "crypto", "FALCON_SIG_VERIFY").unwrap();
         
         // Register events
-        let felt1 = table.register(event1.clone()).unwrap();
-        let felt2 = table.register(event2.clone()).unwrap();
+        let reduced1 = table.register(event1.clone()).unwrap();
+        let reduced2 = table.register(event2.clone()).unwrap();
         
         // Test lookups
-        assert_eq!(table.lookup_by_event(&event1), Some(felt1));
-        assert_eq!(table.lookup_by_event(&event2), Some(felt2));
-        assert_eq!(table.lookup_by_felt(felt1), Some(&event1));
-        assert_eq!(table.lookup_by_felt(felt2), Some(&event2));
+        assert_eq!(table.lookup_by_event(&event1), Some(reduced1));
+        assert_eq!(table.lookup_by_event(&event2), Some(reduced2));
+        assert_eq!(table.lookup_by_reduced_id(reduced1), Some(&event1));
+        assert_eq!(table.lookup_by_reduced_id(reduced2), Some(&event2));
+        assert_eq!(table.lookup_by_felt(reduced1.as_felt()), Some(&event1));
+        assert_eq!(table.lookup_by_felt(reduced2.as_felt()), Some(&event2));
         
         // Test contains
         assert!(table.contains_event(&event1));
-        assert!(table.contains_felt(felt1));
+        assert!(table.contains_reduced_id(reduced1));
+        assert!(table.contains_felt(reduced1.as_felt()));
         assert!(!table.contains_felt(Felt::new(99999)));
         
         // Test length
@@ -521,11 +355,11 @@ mod tests {
         let event = EventId::new(EventSource::System, "memory", "MAP_VALUE").unwrap();
         
         // Register same event twice
-        let felt1 = table.register(event.clone()).unwrap();
-        let felt2 = table.register(event).unwrap();
+        let reduced1 = table.register(event.clone()).unwrap();
+        let reduced2 = table.register(event).unwrap();
         
-        // Should return same Felt
-        assert_eq!(felt1, felt2);
+        // Should return same ReducedEventID
+        assert_eq!(reduced1, reduced2);
         assert_eq!(table.len(), 1); // Should not duplicate
     }
 
@@ -560,17 +394,19 @@ mod tests {
     }
 
     #[test]
-    fn test_collision_detection() {
-        // This test would require crafting EventIds that produce the same Felt,
-        // which is computationally difficult with Blake3. In practice, we'd
-        // use mock implementations for testing collision scenarios.
-        
+    fn test_legacy_u32_registration() {
         let mut table = EventTable::new();
-        let event = EventId::new(EventSource::System, "test", "EVENT").unwrap();
-        table.register(event).unwrap();
         
-        // For now, just verify the collision detection framework exists
-        assert!(table.collisions().is_empty());
+        let event = EventId::new(EventSource::System, "test", "EVENT").unwrap();
+        let legacy_id = 12345u32;
+        
+        // Register with legacy ID
+        let reduced_id = table.register_u32(event.clone(), legacy_id).unwrap();
+        assert_eq!(reduced_id, ReducedEventID::from_u32(legacy_id));
+        
+        // Verify lookup works
+        assert_eq!(table.lookup_by_event(&event), Some(reduced_id));
+        assert_eq!(table.lookup_by_reduced_id(reduced_id), Some(&event));
     }
 
     #[test]
@@ -580,14 +416,14 @@ mod tests {
         let event1 = EventId::new(EventSource::System, "memory", "MAP_VALUE").unwrap();
         let event2 = EventId::new(EventSource::Stdlib, "crypto", "FALCON_SIG").unwrap();
         
-        let felt1 = table.register(event1.clone()).unwrap();
-        let felt2 = table.register(event2.clone()).unwrap();
+        let reduced1 = table.register(event1.clone()).unwrap();
+        let reduced2 = table.register(event2.clone()).unwrap();
         
         let entries: Vec<_> = table.iter().collect();
         assert_eq!(entries.len(), 2);
         
         // Verify both entries are present (order may vary due to BTreeMap)
-        assert!(entries.contains(&(&event1, felt1)));
-        assert!(entries.contains(&(&event2, felt2)));
+        assert!(entries.contains(&(&event1, reduced1)));
+        assert!(entries.contains(&(&event2, reduced2)));
     }
 }

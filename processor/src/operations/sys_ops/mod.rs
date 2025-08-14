@@ -1,4 +1,4 @@
-use miden_core::{Felt, Operation, mast::MastForest, sys_events::SystemEvent};
+use miden_core::{Felt, Operation, ReducedEventID, mast::MastForest, sys_events::SystemEvent};
 
 use super::{
     super::{
@@ -136,7 +136,7 @@ impl Process {
     /// Forwards the emitted event id to the host with EventTable reverse lookup.
     pub(super) fn op_emit<H>(
         &mut self,
-        event_id: Felt,
+        reduced_event_id: ReducedEventID,
         program: &MastForest,
         host: &mut H,
         err_ctx: &impl ErrorContext,
@@ -145,24 +145,25 @@ impl Process {
         H: SyncHost,
     {
         self.stack.copy_state(0);
-        self.decoder.set_user_op_helpers(Operation::Emit(event_id), &[event_id]);
+        let event_felt = reduced_event_id.as_felt();
+        self.decoder.set_user_op_helpers(Operation::Emit(reduced_event_id), &[event_felt]);
 
         let mut process = self.state();
         
-        // Attempt EventTable reverse lookup to get EventId from Felt
-        let _resolved_event_id = program.event_table().lookup_by_felt(event_id);
+        // Attempt EventTable reverse lookup to get EventId from ReducedEventID
+        let _resolved_event_id = program.event_table().lookup_by_reduced_id(reduced_event_id);
         
         // Note: EventTable reverse lookup is now available for enhanced event handling.
         // Resolved EventId can be used by event handlers or debugging tools when needed.
         
         // If it's a system event, handle it directly. Otherwise, forward it to the host.
-        if let Some(system_event) = SystemEvent::from_felt_id(event_id) {
+        if let Some(system_event) = SystemEvent::from_felt_id(event_felt) {
             handle_system_event(&mut process, system_event, err_ctx)
         } else {
             let clk = process.clk();
             let mutations = host
-                .on_event(&process, event_id)
-                .map_err(|err| ExecutionError::event_error(err, event_id, err_ctx))?;
+                .on_event(&process, event_felt)
+                .map_err(|err| ExecutionError::event_error(err, event_felt, err_ctx))?;
             self.advice
                 .apply_mutations(mutations)
                 .map_err(|err| ExecutionError::advice_error(err, clk, err_ctx))?;
