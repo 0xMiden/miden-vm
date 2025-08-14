@@ -1,4 +1,4 @@
-use miden_core::{ONE, Operation, ZERO, ReducedEventID};
+use miden_core::{ONE, Operation, ReducedEventID, ZERO};
 
 use super::{
     DECODER_TRACE_OFFSET, DEGREE_4_OPCODE_ENDS, DEGREE_4_OPCODE_STARTS, DEGREE_6_OPCODE_ENDS,
@@ -145,8 +145,12 @@ fn composite_flags() {
     // ------ no change 0 ---------------------------------------------------------------------
 
     let test_event = ReducedEventID::from_u32(42);
-    let op_no_change_0 =
-        [Operation::MpVerify(ZERO), Operation::Span, Operation::Halt, Operation::Emit(test_event)];
+    let op_no_change_0 = [
+        Operation::MpVerify(ZERO),
+        Operation::Span,
+        Operation::Halt,
+        Operation::Emit(test_event),
+    ];
     for op in op_no_change_0 {
         // frame initialised with an op operation.
         let frame = generate_evaluation_frame(op.op_code().into());

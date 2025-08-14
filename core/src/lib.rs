@@ -122,10 +122,7 @@ pub use operations::{
 };
 
 pub mod events;
-pub use events::{
-    EventId, EventIdError, EventTable, 
-    ReducedEventID,
-};
+pub use events::{EventId, EventIdError, EventTable, ReducedEventID};
 
 pub mod stack;
 pub use stack::{StackInputs, StackOutputs};

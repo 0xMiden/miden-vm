@@ -849,8 +849,9 @@ fn mast_forest_merge_advice_maps_collision() {
 /// Tests successful merging of event tables without collisions.
 #[test]
 fn mast_forest_merge_event_tables_success() {
-    use crate::EventId;
     use alloc::string::ToString;
+
+    use crate::EventId;
 
     let mut forest_a = MastForest::new();
     let id_foo = forest_a.add_node(block_foo()).unwrap();
@@ -863,7 +864,7 @@ fn mast_forest_merge_event_tables_success() {
     forest_a.event_table_mut().register(event_a1.clone());
     forest_a.event_table_mut().register(event_a2.clone());
 
-    let mut forest_b = MastForest::new();  
+    let mut forest_b = MastForest::new();
     let id_bar = forest_b.add_node(block_bar()).unwrap();
     let id_call_b = forest_b.add_call(id_bar).unwrap();
     forest_b.make_root(id_call_b);

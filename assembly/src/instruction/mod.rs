@@ -1,12 +1,11 @@
 use miden_assembly_syntax::{
-    ast::{Instruction, EventValue, Immediate},
+    ast::{EventValue, Immediate, Instruction},
     debuginfo::{Span, Spanned},
     diagnostics::{RelatedLabel, Report},
     parser::IntValue,
 };
 use miden_core::{
-    Decorator, Felt, ONE, Operation, ReducedEventID, WORD_SIZE, ZERO, 
-    events::EventId,
+    Decorator, Felt, ONE, Operation, ReducedEventID, WORD_SIZE, ZERO, events::EventId,
     mast::MastNodeId,
 };
 
@@ -562,30 +561,32 @@ impl Assembler {
                         let event_name = match name {
                             Immediate::Value(s) => s.inner().clone(),
                             Immediate::Constant(_) => {
-                                return Err(Report::new(RelatedLabel::error(
-                                    "event names cannot be constants yet"
-                                ).with_labeled_span(
-                                    instruction.span(),
-                                    "string event identifiers must be literals for now"
-                                )));
-                            }
+                                return Err(Report::new(
+                                    RelatedLabel::error("event names cannot be constants yet")
+                                        .with_labeled_span(
+                                            instruction.span(),
+                                            "string event identifiers must be literals for now",
+                                        ),
+                                ));
+                            },
                         };
-                        
+
                         // Parse the event name to create an EventId
                         let event_id = event_name.parse::<EventId>().map_err(|err| {
-                            Report::new(RelatedLabel::error(
-                                format!("invalid event identifier: {}", err)
-                            ).with_labeled_span(
-                                instruction.span(),
-                                "event identifier must be in format 'library::event_name'"
-                            ))
+                            Report::new(
+                                RelatedLabel::error(format!("invalid event identifier: {}", err))
+                                    .with_labeled_span(
+                                        instruction.span(),
+                                        "event identifier must be in format 'library::event_name'",
+                                    ),
+                            )
                         })?;
-                        
+
                         // Register the event in the EventTable and get the ReducedEventID
                         block_builder.register_event(event_id)
                     },
                 };
-                
+
                 block_builder.push_op(Operation::Emit(reduced_id));
             },
 

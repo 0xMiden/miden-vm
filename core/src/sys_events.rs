@@ -1,13 +1,13 @@
 use core::fmt;
 
-use crate::ReducedEventID;
-
 // SYSTEM EVENTS
 // ================================================================================================
 
 // Randomly generated constant values for the VM's system events. All values were sampled
 // between 0 and 2^32.
 pub use constants::*;
+
+use crate::ReducedEventID;
 
 #[rustfmt::skip]
 mod constants {
@@ -298,7 +298,6 @@ pub enum SystemEvent {
 }
 
 impl SystemEvent {
-
     /// Returns the ReducedEventID for this system event.
     pub fn reduced_id(&self) -> ReducedEventID {
         // Use the legacy constant values directly - these are the actual values used
@@ -325,10 +324,8 @@ impl SystemEvent {
         ReducedEventID::from_u32(legacy_id)
     }
 
-
-
     /// Returns a system event from a ReducedEventID.
-    /// 
+    ///
     /// This method tries to find a SystemEvent whose ReducedEventID matches the given one.
     pub fn from_reduced_id(reduced_id: ReducedEventID) -> Option<Self> {
         // Search through all system events to find a matching ReducedEventID
@@ -339,8 +336,6 @@ impl SystemEvent {
         }
         None
     }
-
-
 }
 
 /// Array containing all system events for iteration.
@@ -364,7 +359,6 @@ const ALL_SYSTEM_EVENTS: &[SystemEvent] = &[
     SystemEvent::HdwordToMapWithDomain,
     SystemEvent::HpermToMap,
 ];
-
 
 impl crate::prettier::PrettyPrint for SystemEvent {
     fn render(&self) -> crate::prettier::Document {

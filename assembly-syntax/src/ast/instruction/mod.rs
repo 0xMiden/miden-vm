@@ -3,6 +3,7 @@ pub mod debug;
 mod print;
 
 use alloc::{sync::Arc, vec::Vec};
+use core::fmt;
 
 pub use self::{advice::SystemEventNode, debug::DebugOptions};
 use crate::{
@@ -10,7 +11,6 @@ use crate::{
     ast::{InvocationTarget, immediate::*},
     parser::{IntValue, WordValue},
 };
-use core::fmt;
 
 // EVENT VALUE
 // ================================================================================================

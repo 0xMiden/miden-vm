@@ -826,7 +826,7 @@ where
     match event_value.into_inner() {
         EventValue::Legacy(imm) => visitor.visit_mut_immediate_u32(imm),
         EventValue::Name(_imm) => {
-            // For now, we don't need to traverse into the string immediate  
+            // For now, we don't need to traverse into the string immediate
             ControlFlow::Continue(())
         },
     }
