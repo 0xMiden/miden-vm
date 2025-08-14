@@ -180,7 +180,15 @@ pub fn format_code(code: &str) -> String {
 
         if !trimmed_line.is_empty() {
             if is_comment(trimmed_line) {
-                last_line_was_stack_comment = is_stack_comment(trimmed_line);
+                let current_is_stack_comment = is_stack_comment(trimmed_line);
+                
+                // Add blank line between stack comment and regular comment
+                if last_line_was_stack_comment && !current_is_stack_comment && !last_line_was_empty {
+                    formatted_code.push('\n');
+                    last_line_was_empty = true;
+                }
+                
+                last_line_was_stack_comment = current_is_stack_comment;
 
                 if last_was_export_line {
                     formatted_code.push_str(trimmed_line);

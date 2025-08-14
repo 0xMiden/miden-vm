@@ -6,6 +6,7 @@ dup.0
 # => [3, 3, 2, 1]
 swap
 # => [3, 3, 2, 1]
+# some random comment
 movup.2
 # => [2, 3, 3, 1]
 add
@@ -15,10 +16,9 @@ export.test_memory_with_comments
 # => []
 padw
 # => [0, 0, 0, 0]
-push.100
-# => [100, 0, 0, 0, 0]
-mem_storew
-# => [100]
-dropw
-# => []
+dup.0
+# => [3, 3, 2, 1]
+# swap the values
+swap
+# => [3, 3, 2, 1]
 end
