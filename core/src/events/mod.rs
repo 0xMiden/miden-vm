@@ -29,9 +29,9 @@ mod tests {
         let mut table = EventTable::new();
 
         // Create events using the new library::event API
-        let system_event = EventId::system("MAP_VALUE_TO_STACK".to_string());
-        let library_event = EventId::new("crypto-lib".to_string(), "SIGN".to_string()).unwrap();
-        let another_event = EventId::new("dex-lib".to_string(), "SWAP".to_string()).unwrap();
+        let system_event = EventId::system("map_value_to_stack".to_string());
+        let library_event = EventId::new("crypto_lib".to_string(), "sign".to_string()).unwrap();
+        let another_event = EventId::new("dex_lib".to_string(), "swap".to_string()).unwrap();
 
         // Register events
         let reduced1 = table.register(system_event.clone());
@@ -56,27 +56,27 @@ mod tests {
 
     #[test]
     fn test_display_format() {
-        let system_event = EventId::system("TEST_EVENT".to_string());
-        let library_event = EventId::new("my-lib".to_string(), "EVENT1".to_string()).unwrap();
+        let system_event = EventId::system("test_event".to_string());
+        let library_event = EventId::new("my_lib".to_string(), "event_one".to_string()).unwrap();
         let another_event =
-            EventId::new("different-lib".to_string(), "EVENT2".to_string()).unwrap();
+            EventId::new("different_lib".to_string(), "event_two".to_string()).unwrap();
 
-        assert_eq!(format!("{system_event}"), "system::TEST_EVENT");
-        assert_eq!(format!("{library_event}"), "my-lib::EVENT1");
-        assert_eq!(format!("{another_event}"), "different-lib::EVENT2");
+        assert_eq!(format!("{system_event}"), "system::test_event");
+        assert_eq!(format!("{library_event}"), "my_lib::event_one");
+        assert_eq!(format!("{another_event}"), "different_lib::event_two");
     }
 
     #[test]
     fn test_no_namespace_collisions() {
         // This test demonstrates the fix for the main issue with the old design
-        let lib1_event = EventId::new("crypto-lib".to_string(), "SIGN".to_string()).unwrap();
-        let lib2_event = EventId::new("different-crypto".to_string(), "SIGN".to_string()).unwrap();
+        let lib1_event = EventId::new("crypto_lib".to_string(), "sign".to_string()).unwrap();
+        let lib2_event = EventId::new("different_crypto".to_string(), "sign".to_string()).unwrap();
 
         // Different libraries with same event name should have different reduced IDs
         assert_ne!(lib1_event.reduced_id(), lib2_event.reduced_id());
 
         // But identical library::event should have same reduced ID
-        let duplicate = EventId::new("crypto-lib".to_string(), "SIGN".to_string()).unwrap();
+        let duplicate = EventId::new("crypto_lib".to_string(), "sign".to_string()).unwrap();
         assert_eq!(lib1_event.reduced_id(), duplicate.reduced_id());
     }
 }

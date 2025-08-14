@@ -6,15 +6,18 @@ use crate::utils::{ByteReader, ByteWriter, Deserializable, DeserializationError,
 // SIMPLIFIED EVENT TABLE
 // ================================================================================================
 
-/// A simplified bidirectional mapping between EventId and ReducedEventID.
+/// A mapping for structured EventIds to their ReducedEventID representations.
 ///
 /// This table ONLY handles structured EventIds. Legacy u32 events are handled
 /// directly via ReducedEventID::from_u32() and don't need storage.
+/// 
+/// The table supports optional reverse lookup for debugging purposes, but the
+/// reverse mapping may not be maintained in size-optimized MAST forests.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct EventTable {
     /// Forward lookup: EventId -> ReducedEventID (for structured events only)
     forward: BTreeMap<EventId, ReducedEventID>,
-    /// Reverse lookup: ReducedEventID -> EventId (for structured events only)  
+    /// Optional reverse lookup: ReducedEventID -> EventId (for debugging only)  
     reverse: BTreeMap<ReducedEventID, EventId>,
 }
 
@@ -51,33 +54,17 @@ impl EventTable {
     }
 
     /// Looks up the structured EventId from its ReducedEventID.
-    /// Returns None if the ReducedEventID corresponds to a legacy event or is not registered.
+    /// 
+    /// Returns None if:
+    /// - The ReducedEventID corresponds to a legacy event
+    /// - The event is not registered in this table
+    /// - The reverse mapping was stripped for size optimization
     pub fn lookup_by_reduced_id(&self, reduced_id: ReducedEventID) -> Option<&EventId> {
         self.reverse.get(&reduced_id)
     }
 
-    /// Returns true if the structured EventId is registered.
-    pub fn contains_event(&self, event_id: &EventId) -> bool {
-        self.forward.contains_key(event_id)
-    }
-
-    /// Returns the number of registered structured events.
-    pub fn len(&self) -> usize {
-        self.forward.len()
-    }
-
-    /// Returns true if the table is empty.
-    pub fn is_empty(&self) -> bool {
-        self.forward.is_empty()
-    }
-
-    /// Returns an iterator over all registered structured events.
-    pub fn iter(&self) -> impl Iterator<Item = (&EventId, ReducedEventID)> {
-        self.forward.iter().map(|(event, &reduced)| (event, reduced))
-    }
-
     /// Merges another EventTable into this one.
-    ///
+    /// 
     /// Uses last-write-wins for any duplicate EventIds.
     pub fn merge(&mut self, other: EventTable) {
         for (event_id, reduced_id) in other.forward {
@@ -85,6 +72,7 @@ impl EventTable {
             self.reverse.insert(reduced_id, event_id);
         }
     }
+
 }
 
 // SERIALIZATION
@@ -133,13 +121,32 @@ mod tests {
 
     use super::*;
     use crate::events::EventId;
+    
+    // Test-only methods for EventTable
+    impl EventTable {
+        pub fn len(&self) -> usize {
+            self.forward.len()
+        }
+        
+        pub fn is_empty(&self) -> bool {
+            self.forward.is_empty()
+        }
+        
+        pub fn contains_event(&self, event_id: &EventId) -> bool {
+            self.forward.contains_key(event_id)
+        }
+        
+        pub fn iter(&self) -> impl Iterator<Item = (&EventId, ReducedEventID)> {
+            self.forward.iter().map(|(event, &reduced)| (event, reduced))
+        }
+    }
 
     #[test]
     fn test_basic_registration() {
         let mut table = EventTable::new();
 
-        let event1 = EventId::system("MAP_VALUE".to_string());
-        let event2 = EventId::system("HASH".to_string());
+        let event1 = EventId::system("map_value".to_string());
+        let event2 = EventId::system("hash".to_string());
 
         // Register events
         let reduced1 = table.register(event1.clone());
@@ -160,7 +167,7 @@ mod tests {
     fn test_duplicate_registration() {
         let mut table = EventTable::new();
 
-        let event = EventId::system("MAP_VALUE".to_string());
+        let event = EventId::system("map_value".to_string());
 
         // Register same event twice
         let reduced1 = table.register(event.clone());
@@ -176,8 +183,8 @@ mod tests {
         let mut table1 = EventTable::new();
         let mut table2 = EventTable::new();
 
-        let event1 = EventId::system("MAP_VALUE".to_string());
-        let event2 = EventId::new("crypto-lib".to_string(), "HASH".to_string()).unwrap();
+        let event1 = EventId::system("map_value".to_string());
+        let event2 = EventId::new("crypto_lib".to_string(), "hash".to_string()).unwrap();
 
         table1.register(event1.clone());
         table2.register(event2.clone());
@@ -193,8 +200,8 @@ mod tests {
     fn test_iteration() {
         let mut table = EventTable::new();
 
-        let event1 = EventId::system("MAP_VALUE".to_string());
-        let event2 = EventId::new("crypto-lib".to_string(), "HASH".to_string()).unwrap();
+        let event1 = EventId::system("map_value".to_string());
+        let event2 = EventId::new("crypto_lib".to_string(), "hash".to_string()).unwrap();
 
         let reduced1 = table.register(event1.clone());
         let reduced2 = table.register(event2.clone());

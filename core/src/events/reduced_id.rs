@@ -5,10 +5,10 @@ use crate::{
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
-/// A reduced event identifier that wraps a Felt value for efficient storage and ordering.
+/// A reduced event identifier that wraps a Felt value for clear type distinction.
 ///
 /// This is the canonical form used internally for event identification and handler mapping.
-/// It provides efficient ordering and maintains compatibility with both legacy u32 events
+/// It provides ordering and maintains compatibility with both legacy u32 events
 /// and enhanced EventId strings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ReducedEventID(Felt);
@@ -29,10 +29,6 @@ impl ReducedEventID {
         self.0
     }
 
-    /// Get as u64 for internal use.
-    pub const fn as_u64(self) -> u64 {
-        self.0.as_int()
-    }
 }
 
 impl From<u32> for ReducedEventID {
@@ -89,6 +85,13 @@ mod tests {
 
     use super::*;
     use crate::utils::SliceReader;
+    
+    // Test-only methods for ReducedEventID
+    impl ReducedEventID {
+        pub fn as_u64(self) -> u64 {
+            self.0.as_int()
+        }
+    }
 
     #[test]
     fn test_reduced_event_id_creation() {
