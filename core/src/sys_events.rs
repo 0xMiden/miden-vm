@@ -31,6 +31,9 @@ mod constants {
     pub const EVENT_FALCON_DIV: u32                   = 3419226155;
 }
 
+// For now, let's just improve the existing implementation to be more efficient
+// by avoiding repeated calls to .reduced_id() in the loop
+
 /// Defines a set of actions which can be initiated from the VM to inject new data into the advice
 /// provider.
 ///
@@ -329,64 +332,13 @@ impl SystemEvent {
         self.event_id().reduced_id()
     }
 
-    /// Returns the legacy u32 event ID for backward compatibility.
-    /// 
-    /// # Deprecated
-    /// This method is deprecated. Use `felt_id()` or `event_id()` instead.
-    pub fn into_event_id(self) -> u32 {
-        match self {
-            SystemEvent::MerkleNodeMerge => EVENT_MERKLE_NODE_MERGE,
-            SystemEvent::MerkleNodeToStack => EVENT_MERKLE_NODE_TO_STACK,
-            SystemEvent::MapValueToStack => EVENT_MAP_VALUE_TO_STACK,
-            SystemEvent::MapValueToStackN => EVENT_MAP_VALUE_TO_STACK_N,
-            SystemEvent::HasMapKey => EVENT_HAS_MAP_KEY,
-            SystemEvent::U64Div => EVENT_U64_DIV,
-            SystemEvent::FalconDiv => EVENT_FALCON_DIV,
-            SystemEvent::Ext2Inv => EVENT_EXT2_INV,
-            SystemEvent::SmtPeek => EVENT_SMT_PEEK,
-            SystemEvent::U32Clz => EVENT_U32_CLZ,
-            SystemEvent::U32Ctz => EVENT_U32_CTZ,
-            SystemEvent::U32Clo => EVENT_U32_CLO,
-            SystemEvent::U32Cto => EVENT_U32_CTO,
-            SystemEvent::ILog2 => EVENT_ILOG2,
-            SystemEvent::MemToMap => EVENT_MEM_TO_MAP,
-            SystemEvent::HdwordToMap => EVENT_HDWORD_TO_MAP,
-            SystemEvent::HdwordToMapWithDomain => EVENT_HDWORD_TO_MAP_WITH_DOMAIN,
-            SystemEvent::HpermToMap => EVENT_HPERM_TO_MAP,
-        }
-    }
 
-    /// Returns a system event corresponding to the specified event ID, or `None` if the event
-    /// ID is not recognized.
-    pub fn from_event_id(event_id: u32) -> Option<Self> {
-        match event_id {
-            EVENT_MERKLE_NODE_MERGE => Some(SystemEvent::MerkleNodeMerge),
-            EVENT_MERKLE_NODE_TO_STACK => Some(SystemEvent::MerkleNodeToStack),
-            EVENT_MAP_VALUE_TO_STACK => Some(SystemEvent::MapValueToStack),
-            EVENT_MAP_VALUE_TO_STACK_N => Some(SystemEvent::MapValueToStackN),
-            EVENT_HAS_MAP_KEY => Some(SystemEvent::HasMapKey),
-            EVENT_U64_DIV => Some(SystemEvent::U64Div),
-            EVENT_FALCON_DIV => Some(SystemEvent::FalconDiv),
-            EVENT_EXT2_INV => Some(SystemEvent::Ext2Inv),
-            EVENT_SMT_PEEK => Some(SystemEvent::SmtPeek),
-            EVENT_U32_CLZ => Some(SystemEvent::U32Clz),
-            EVENT_U32_CTZ => Some(SystemEvent::U32Ctz),
-            EVENT_U32_CLO => Some(SystemEvent::U32Clo),
-            EVENT_U32_CTO => Some(SystemEvent::U32Cto),
-            EVENT_ILOG2 => Some(SystemEvent::ILog2),
-            EVENT_MEM_TO_MAP => Some(SystemEvent::MemToMap),
-            EVENT_HDWORD_TO_MAP => Some(SystemEvent::HdwordToMap),
-            EVENT_HDWORD_TO_MAP_WITH_DOMAIN => Some(SystemEvent::HdwordToMapWithDomain),
-            EVENT_HPERM_TO_MAP => Some(SystemEvent::HpermToMap),
-            _ => None,
-        }
-    }
 
     /// Returns a system event from a ReducedEventID.
     /// 
     /// This method tries to find a SystemEvent whose ReducedEventID matches the given one.
     pub fn from_reduced_id(reduced_id: ReducedEventID) -> Option<Self> {
-        // Try each system event to see if its ReducedEventID matches
+        // Search through all system events to find a matching ReducedEventID
         for &event in ALL_SYSTEM_EVENTS {
             if event.reduced_id() == reduced_id {
                 return Some(event);
@@ -395,15 +347,7 @@ impl SystemEvent {
         None
     }
 
-    /// Returns all system events.
-    pub const fn all() -> &'static [SystemEvent] {
-        ALL_SYSTEM_EVENTS
-    }
 
-    /// Creates an Operation::Emit for this system event.
-    pub fn to_emit_operation(&self) -> crate::Operation {
-        crate::Operation::Emit(self.reduced_id())
-    }
 }
 
 /// Array containing all system events for iteration.

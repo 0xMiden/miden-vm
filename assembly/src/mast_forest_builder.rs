@@ -7,7 +7,7 @@ use core::ops::{Index, IndexMut};
 
 use miden_core::{
     AdviceMap, Decorator, DecoratorList, Felt, Operation, ReducedEventID, Word,
-    events::{EventId, EventTableError},
+    events::EventId,
     mast::{
         DecoratorFingerprint, DecoratorId, MastForest, MastNode, MastNodeFingerprint, MastNodeId,
         Remapping, SubtreeIterator,
@@ -546,8 +546,8 @@ impl MastForestBuilder {
         self.mast_forest.register_error(msg)
     }
 
-    /// Registers an EventId in the event table and returns the corresponding Felt representation.
-    pub fn register_event(&mut self, event_id: EventId) -> Result<ReducedEventID, EventTableError> {
+    /// Registers an EventId in the event table and returns the corresponding ReducedEventID.
+    pub fn register_event(&mut self, event_id: EventId) -> ReducedEventID {
         self.mast_forest.event_table_mut().register(event_id)
     }
 }

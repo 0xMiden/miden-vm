@@ -4,7 +4,7 @@
 // ================================================================================================
 
 pub use event_id::{EventId, EventIdError, EventSource};
-pub use event_table::{EventTable, EventTableError};
+pub use event_table::EventTable;
 pub use reduced_id::ReducedEventID;
 
 // MODULES
@@ -32,14 +32,14 @@ mod tests {
         let user_event = EventId::new(EventSource::User(42), "app", "CUSTOM_EVENT").unwrap();
         
         // Register events
-        let reduced1 = table.register(system_event.clone()).unwrap();
-        let reduced2 = table.register(stdlib_event.clone()).unwrap();
-        let reduced3 = table.register(user_event.clone()).unwrap();
+        let reduced1 = table.register(system_event.clone());
+        let reduced2 = table.register(stdlib_event.clone());
+        let reduced3 = table.register(user_event.clone());
         
         // Verify lookups work
-        assert_eq!(table.lookup_by_felt(reduced1.as_felt()), Some(&system_event));
-        assert_eq!(table.lookup_by_felt(reduced2.as_felt()), Some(&stdlib_event));
-        assert_eq!(table.lookup_by_felt(reduced3.as_felt()), Some(&user_event));
+        assert_eq!(table.lookup_by_reduced_id(reduced1), Some(&system_event));
+        assert_eq!(table.lookup_by_reduced_id(reduced2), Some(&stdlib_event));
+        assert_eq!(table.lookup_by_reduced_id(reduced3), Some(&user_event));
         
         // Verify event IDs are deterministic
         assert_eq!(system_event.reduced_id(), reduced1);

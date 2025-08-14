@@ -581,8 +581,8 @@ impl Assembler {
                             ))
                         })?;
                         
-                        // Register the event in the EventTable and get the Felt
-                        block_builder.register_event(event_id)?
+                        // Register the event in the EventTable and get the ReducedEventID
+                        block_builder.register_event(event_id)
                     },
                 };
                 

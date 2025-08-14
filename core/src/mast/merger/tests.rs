@@ -859,8 +859,8 @@ fn mast_forest_merge_event_tables_success() {
     // Add events to forest_a
     let event_a1 = EventId::new(EventSource::User(0), "test", "EVENT_A1").unwrap();
     let event_a2 = EventId::new(EventSource::User(1), "test", "EVENT_A2").unwrap();
-    forest_a.event_table_mut().register(event_a1.clone()).unwrap();
-    forest_a.event_table_mut().register(event_a2.clone()).unwrap();
+    forest_a.event_table_mut().register(event_a1.clone());
+    forest_a.event_table_mut().register(event_a2.clone());
 
     let mut forest_b = MastForest::new();  
     let id_bar = forest_b.add_node(block_bar()).unwrap();
@@ -869,8 +869,8 @@ fn mast_forest_merge_event_tables_success() {
 
     // Add events to forest_b (including one duplicate and one new)
     let event_b1 = EventId::new(EventSource::User(2), "test", "EVENT_B1").unwrap();
-    forest_b.event_table_mut().register(event_a1.clone()).unwrap(); // duplicate - should be fine
-    forest_b.event_table_mut().register(event_b1.clone()).unwrap();
+    forest_b.event_table_mut().register(event_a1.clone()); // duplicate - should be fine
+    forest_b.event_table_mut().register(event_b1.clone());
 
     // Merge should succeed
     let (merged_forest, _root_map) = MastForest::merge([&forest_a, &forest_b]).unwrap();

@@ -16,7 +16,6 @@ pub use node::{
 use crate::{
     AdviceMap, Decorator, DecoratorList, EventTable, Felt, LexicographicWord, Operation, Word,
     crypto::hash::{Blake3_256, Blake3Digest, Digest, Hasher},
-    events::EventTableError,
     utils::{ByteWriter, DeserializationError, Serializable},
 };
 
@@ -808,6 +807,4 @@ pub enum MastForestError {
     ChildFingerprintMissing(MastNodeId),
     #[error("advice map key {0} already exists when merging forests")]
     AdviceMapKeyCollisionOnMerge(Word),
-    #[error("event table collision on merge: {0}")]
-    EventTableCollisionOnMerge(EventTableError),
 }

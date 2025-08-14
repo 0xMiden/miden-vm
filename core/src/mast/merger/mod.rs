@@ -183,8 +183,8 @@ impl MastForestMerger {
     fn merge_event_tables(&mut self, other_forest: &MastForest) -> Result<(), MastForestError> {
         self.mast_forest
             .event_table
-            .merge(other_forest.event_table.clone())
-            .map_err(MastForestError::EventTableCollisionOnMerge)
+            .merge(other_forest.event_table.clone());
+        Ok(())
     }
 
     fn merge_error_codes(&mut self, other_forest: &MastForest) -> Result<(), MastForestError> {
