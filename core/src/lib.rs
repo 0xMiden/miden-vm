@@ -123,7 +123,7 @@ pub use operations::{
 
 pub mod events;
 pub use events::{
-    EventId, EventIdError, EventSource, EventTable, 
+    EventId, EventIdError, EventTable, 
     ReducedEventID,
 };
 

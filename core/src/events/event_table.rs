@@ -130,15 +130,15 @@ impl Deserializable for EventTable {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::{EventId, EventSource};
-    use alloc::vec::Vec;
+    use crate::events::EventId;
+    use alloc::{string::ToString, vec::Vec};
 
     #[test]
     fn test_basic_registration() {
         let mut table = EventTable::new();
         
-        let event1 = EventId::new(EventSource::System, "memory", "MAP_VALUE").unwrap();
-        let event2 = EventId::new(EventSource::Stdlib, "crypto", "HASH").unwrap();
+        let event1 = EventId::system("MAP_VALUE".to_string());
+        let event2 = EventId::system("HASH".to_string());
         
         // Register events
         let reduced1 = table.register(event1.clone());
@@ -159,7 +159,7 @@ mod tests {
     fn test_duplicate_registration() {
         let mut table = EventTable::new();
         
-        let event = EventId::new(EventSource::System, "memory", "MAP_VALUE").unwrap();
+        let event = EventId::system("MAP_VALUE".to_string());
         
         // Register same event twice
         let reduced1 = table.register(event.clone());
@@ -175,8 +175,8 @@ mod tests {
         let mut table1 = EventTable::new();
         let mut table2 = EventTable::new();
         
-        let event1 = EventId::new(EventSource::System, "memory", "MAP_VALUE").unwrap();
-        let event2 = EventId::new(EventSource::Stdlib, "crypto", "HASH").unwrap();
+        let event1 = EventId::system("MAP_VALUE".to_string());
+        let event2 = EventId::new("crypto-lib".to_string(), "HASH".to_string()).unwrap();
         
         table1.register(event1.clone());
         table2.register(event2.clone());
@@ -192,8 +192,8 @@ mod tests {
     fn test_iteration() {
         let mut table = EventTable::new();
         
-        let event1 = EventId::new(EventSource::System, "memory", "MAP_VALUE").unwrap();
-        let event2 = EventId::new(EventSource::Stdlib, "crypto", "HASH").unwrap();
+        let event1 = EventId::system("MAP_VALUE".to_string());
+        let event2 = EventId::new("crypto-lib".to_string(), "HASH".to_string()).unwrap();
         
         let reduced1 = table.register(event1.clone());
         let reduced2 = table.register(event2.clone());

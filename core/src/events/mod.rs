@@ -3,7 +3,7 @@
 // RE-EXPORTS
 // ================================================================================================
 
-pub use event_id::{EventId, EventIdError, EventSource};
+pub use event_id::{EventId, EventIdError};
 pub use event_table::EventTable;
 pub use reduced_id::ReducedEventID;
 
@@ -20,31 +20,32 @@ mod reduced_id;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::string::ToString;
 
     #[test]
     fn test_event_system_integration() {
-        // Test the complete event system workflow
+        // Test the complete event system workflow with library::event API
         let mut table = EventTable::new();
         
-        // Create events from different sources
-        let system_event = EventId::new(EventSource::System, "memory", "MAP_VALUE_TO_STACK").unwrap();
-        let stdlib_event = EventId::new(EventSource::Stdlib, "crypto", "FALCON_SIG_VERIFY").unwrap();
-        let user_event = EventId::new(EventSource::User(42), "app", "CUSTOM_EVENT").unwrap();
+        // Create events using the new library::event API
+        let system_event = EventId::system("MAP_VALUE_TO_STACK".to_string());
+        let library_event = EventId::new("crypto-lib".to_string(), "SIGN".to_string()).unwrap();
+        let another_event = EventId::new("dex-lib".to_string(), "SWAP".to_string()).unwrap();
         
         // Register events
         let reduced1 = table.register(system_event.clone());
-        let reduced2 = table.register(stdlib_event.clone());
-        let reduced3 = table.register(user_event.clone());
+        let reduced2 = table.register(library_event.clone());
+        let reduced3 = table.register(another_event.clone());
         
         // Verify lookups work
         assert_eq!(table.lookup_by_reduced_id(reduced1), Some(&system_event));
-        assert_eq!(table.lookup_by_reduced_id(reduced2), Some(&stdlib_event));
-        assert_eq!(table.lookup_by_reduced_id(reduced3), Some(&user_event));
+        assert_eq!(table.lookup_by_reduced_id(reduced2), Some(&library_event));
+        assert_eq!(table.lookup_by_reduced_id(reduced3), Some(&another_event));
         
-        // Verify event IDs are deterministic
+        // Verify event IDs are deterministic (Blake3 hashing)
         assert_eq!(system_event.reduced_id(), reduced1);
-        assert_eq!(stdlib_event.reduced_id(), reduced2);
-        assert_eq!(user_event.reduced_id(), reduced3);
+        assert_eq!(library_event.reduced_id(), reduced2);
+        assert_eq!(another_event.reduced_id(), reduced3);
         
         // Verify different events produce different reduced IDs
         assert_ne!(reduced1, reduced2);
@@ -53,25 +54,27 @@ mod tests {
     }
 
     #[test]
-    fn test_canonical_string_format() {
-        let event = EventId::new(EventSource::Stdlib, "crypto", "FALCON_SIG_VERIFY").unwrap();
-        assert_eq!(event.canonical_string(), "miden-stdlib/crypto::FALCON_SIG_VERIFY");
+    fn test_display_format() {
+        let system_event = EventId::system("TEST_EVENT".to_string());
+        let library_event = EventId::new("my-lib".to_string(), "EVENT1".to_string()).unwrap();
+        let another_event = EventId::new("different-lib".to_string(), "EVENT2".to_string()).unwrap();
         
-        let system_event = EventId::new(EventSource::System, "memory", "MAP_VALUE").unwrap();
-        assert_eq!(system_event.canonical_string(), "miden-vm/memory::MAP_VALUE");
-        
-        let user_event = EventId::new(EventSource::User(123), "app", "MY_EVENT").unwrap();
-        assert_eq!(user_event.canonical_string(), "user-123/app::MY_EVENT");
+        assert_eq!(format!("{}", system_event), "system::TEST_EVENT");
+        assert_eq!(format!("{}", library_event), "my-lib::EVENT1");
+        assert_eq!(format!("{}", another_event), "different-lib::EVENT2");
     }
 
     #[test]
-    fn test_parsing_canonical_strings() {
-        let parsed: EventId = "miden-stdlib/crypto::FALCON_SIG_VERIFY".parse().unwrap();
-        let expected = EventId::new(EventSource::Stdlib, "crypto", "FALCON_SIG_VERIFY").unwrap();
-        assert_eq!(parsed, expected);
+    fn test_no_namespace_collisions() {
+        // This test demonstrates the fix for the main issue with the old design
+        let lib1_event = EventId::new("crypto-lib".to_string(), "SIGN".to_string()).unwrap();
+        let lib2_event = EventId::new("different-crypto".to_string(), "SIGN".to_string()).unwrap();
         
-        let parsed2: EventId = "user-42/app::CUSTOM_EVENT".parse().unwrap();
-        let expected2 = EventId::new(EventSource::User(42), "app", "CUSTOM_EVENT").unwrap();
-        assert_eq!(parsed2, expected2);
+        // Different libraries with same event name should have different reduced IDs
+        assert_ne!(lib1_event.reduced_id(), lib2_event.reduced_id());
+        
+        // But identical library::event should have same reduced ID
+        let duplicate = EventId::new("crypto-lib".to_string(), "SIGN".to_string()).unwrap();
+        assert_eq!(lib1_event.reduced_id(), duplicate.reduced_id());
     }
 }

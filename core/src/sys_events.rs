@@ -1,6 +1,6 @@
 use core::fmt;
 
-use crate::{EventId, EventSource, ReducedEventID};
+use crate::ReducedEventID;
 
 // SYSTEM EVENTS
 // ================================================================================================
@@ -298,38 +298,31 @@ pub enum SystemEvent {
 }
 
 impl SystemEvent {
-    /// Returns the structured EventId for this system event.
-    /// 
-    /// All system events belong to the "miden-vm" source with the "system" namespace.
-    pub fn event_id(&self) -> EventId {
-        let name = match self {
-            SystemEvent::MerkleNodeMerge => "MERKLE_NODE_MERGE",
-            SystemEvent::MerkleNodeToStack => "MERKLE_NODE_TO_STACK",
-            SystemEvent::MapValueToStack => "MAP_VALUE_TO_STACK",
-            SystemEvent::MapValueToStackN => "MAP_VALUE_TO_STACK_N",
-            SystemEvent::HasMapKey => "HAS_MAP_KEY",
-            SystemEvent::U64Div => "U64_DIV",
-            SystemEvent::FalconDiv => "FALCON_DIV",
-            SystemEvent::Ext2Inv => "EXT2_INV",
-            SystemEvent::SmtPeek => "SMT_PEEK",
-            SystemEvent::U32Clz => "U32_CLZ",
-            SystemEvent::U32Ctz => "U32_CTZ",
-            SystemEvent::U32Clo => "U32_CLO",
-            SystemEvent::U32Cto => "U32_CTO",
-            SystemEvent::ILog2 => "ILOG2",
-            SystemEvent::MemToMap => "MEM_TO_MAP",
-            SystemEvent::HdwordToMap => "HDWORD_TO_MAP",
-            SystemEvent::HdwordToMapWithDomain => "HDWORD_TO_MAP_WITH_DOMAIN",
-            SystemEvent::HpermToMap => "HPERM_TO_MAP",
-        };
-        
-        EventId::new(EventSource::System, "system", name)
-            .expect("System event names should always be valid")
-    }
 
     /// Returns the ReducedEventID for this system event.
     pub fn reduced_id(&self) -> ReducedEventID {
-        self.event_id().reduced_id()
+        // Use the legacy constant values directly - these are the actual values used
+        let legacy_id = match self {
+            SystemEvent::MerkleNodeMerge => EVENT_MERKLE_NODE_MERGE,
+            SystemEvent::MerkleNodeToStack => EVENT_MERKLE_NODE_TO_STACK,
+            SystemEvent::MapValueToStack => EVENT_MAP_VALUE_TO_STACK,
+            SystemEvent::MapValueToStackN => EVENT_MAP_VALUE_TO_STACK_N,
+            SystemEvent::HasMapKey => EVENT_HAS_MAP_KEY,
+            SystemEvent::U64Div => EVENT_U64_DIV,
+            SystemEvent::FalconDiv => EVENT_FALCON_DIV,
+            SystemEvent::Ext2Inv => EVENT_EXT2_INV,
+            SystemEvent::SmtPeek => EVENT_SMT_PEEK,
+            SystemEvent::U32Clz => EVENT_U32_CLZ,
+            SystemEvent::U32Ctz => EVENT_U32_CTZ,
+            SystemEvent::U32Clo => EVENT_U32_CLO,
+            SystemEvent::U32Cto => EVENT_U32_CTO,
+            SystemEvent::ILog2 => EVENT_ILOG2,
+            SystemEvent::MemToMap => EVENT_MEM_TO_MAP,
+            SystemEvent::HdwordToMap => EVENT_HDWORD_TO_MAP,
+            SystemEvent::HdwordToMapWithDomain => EVENT_HDWORD_TO_MAP_WITH_DOMAIN,
+            SystemEvent::HpermToMap => EVENT_HPERM_TO_MAP,
+        };
+        ReducedEventID::from_u32(legacy_id)
     }
 
 

@@ -577,7 +577,7 @@ impl Assembler {
                                 format!("invalid event identifier: {}", err)
                             ).with_labeled_span(
                                 instruction.span(),
-                                "event identifier must be in format 'source/namespace::EVENT_NAME'"
+                                "event identifier must be in format 'library::event_name'"
                             ))
                         })?;
                         

@@ -165,7 +165,7 @@ pub enum Operation {
     ///
     /// The event is identified by a ReducedEventID that uniquely represents the event.
     /// The ReducedEventID can be derived from a structured EventId (e.g.,
-    /// "miden-vm/memory::MAP_VALUE") via Blake3 hashing, or created from a legacy u32 value for
+    /// "miden-vm::MAP_VALUE") via Blake3 hashing, or created from a legacy u32 value for
     /// backward compatibility.
     ///
     /// Similar to Noop, this operation does not change the state of user stack. The immediate
@@ -800,7 +800,7 @@ impl Serializable for Operation {
                 err_code.write_into(target);
             },
             Operation::Push(value) => value.as_int().write_into(target),
-            Operation::Emit(value) => value.as_felt().write_into(target),
+            Operation::Emit(value) => value.write_into(target),
 
             // Note: we explicitly write out all the operations so that whenever we make a
             // modification to the `Operation` enum, we get a compile error here. This

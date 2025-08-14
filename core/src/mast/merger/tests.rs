@@ -849,7 +849,8 @@ fn mast_forest_merge_advice_maps_collision() {
 /// Tests successful merging of event tables without collisions.
 #[test]
 fn mast_forest_merge_event_tables_success() {
-    use crate::{EventId, events::EventSource};
+    use crate::EventId;
+    use alloc::string::ToString;
 
     let mut forest_a = MastForest::new();
     let id_foo = forest_a.add_node(block_foo()).unwrap();
@@ -857,8 +858,8 @@ fn mast_forest_merge_event_tables_success() {
     forest_a.make_root(id_call_a);
 
     // Add events to forest_a
-    let event_a1 = EventId::new(EventSource::User(0), "test", "EVENT_A1").unwrap();
-    let event_a2 = EventId::new(EventSource::User(1), "test", "EVENT_A2").unwrap();
+    let event_a1 = EventId::new("legacy-user-0".to_string(), "EVENT_A1".to_string()).unwrap();
+    let event_a2 = EventId::new("legacy-user-1".to_string(), "EVENT_A2".to_string()).unwrap();
     forest_a.event_table_mut().register(event_a1.clone());
     forest_a.event_table_mut().register(event_a2.clone());
 
@@ -868,7 +869,7 @@ fn mast_forest_merge_event_tables_success() {
     forest_b.make_root(id_call_b);
 
     // Add events to forest_b (including one duplicate and one new)
-    let event_b1 = EventId::new(EventSource::User(2), "test", "EVENT_B1").unwrap();
+    let event_b1 = EventId::new("legacy-user-2".to_string(), "EVENT_B1".to_string()).unwrap();
     forest_b.event_table_mut().register(event_a1.clone()); // duplicate - should be fine
     forest_b.event_table_mut().register(event_b1.clone());
 
