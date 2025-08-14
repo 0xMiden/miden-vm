@@ -282,7 +282,7 @@ where
     fn on_event(
         &mut self,
         _process: &ProcessState<'_>,
-        _reduced_event_id: ReducedEventID,
+        _event_id: ReducedEventID,
     ) -> Result<Vec<AdviceMutation>, EventError> {
         Ok(Vec::new())
     }
@@ -298,9 +298,9 @@ where
     fn on_event(
         &mut self,
         _process: &ProcessState<'_>,
-        _reduced_event_id: ReducedEventID,
+        _event_id: ReducedEventID,
     ) -> impl Future<Output = Result<Vec<AdviceMutation>, EventError>> + Send {
-        let _ = (_process, _reduced_event_id);
+        let _ = (_process, _event_id);
         async move { Ok(Vec::new()) }
     }
 }

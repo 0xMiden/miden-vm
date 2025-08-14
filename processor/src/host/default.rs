@@ -80,7 +80,7 @@ where
     /// `fn(&mut ProcessState) -> Result<(), EventHandler>`
     pub fn load_handler(
         &mut self,
-        id: Felt,
+        id: ReducedEventID,
         handler: impl EventHandler,
     ) -> Result<(), ExecutionError> {
         self.event_handlers.register(id, Box::new(handler))
@@ -88,13 +88,13 @@ where
 
     /// Unload a handler with the given id, returning a flag indicating whether a handler
     /// was previously registered with this id.
-    pub fn unload_handler(&mut self, id: Felt) -> bool {
+    pub fn unload_handler(&mut self, id: ReducedEventID) -> bool {
         self.event_handlers.unregister(id)
     }
 
     /// Replaces a handler with the given id, returning a flag indicating whether a handler
     /// was previously registered with this id.
-    pub fn replace_handler(&mut self, id: Felt, handler: impl EventHandler) -> bool {
+    pub fn replace_handler(&mut self, id: ReducedEventID, handler: impl EventHandler) -> bool {
         let existed = self.event_handlers.unregister(id);
         self.load_handler(id, handler).unwrap();
         existed
@@ -159,10 +159,7 @@ where
         process: &ProcessState,
         event_id: ReducedEventID,
     ) -> Result<Vec<AdviceMutation>, EventError> {
-        // Convert ReducedEventID back to Felt for compatibility with existing handlers
-        let event_felt = event_id.as_felt();
-        
-        if let Some(mutations) = self.event_handlers.handle_event(event_felt, process)? {
+        if let Some(mutations) = self.event_handlers.handle_event(event_id, process)? {
             // the event was handled by the registered event handlers; just return
             return Ok(mutations);
         }
@@ -184,9 +181,9 @@ where
     fn on_event(
         &mut self,
         process: &ProcessState<'_>,
-        reduced_event_id: ReducedEventID,
+        event_id: ReducedEventID,
     ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>> {
-        let result = <Self as SyncHost>::on_event(self, process, reduced_event_id);
+        let result = <Self as SyncHost>::on_event(self, process, event_id);
         async move { result }
     }
 }
@@ -201,7 +198,7 @@ pub struct HostLibrary {
     /// A `MastForest` with procedures exposed by this library.
     pub mast_forest: Arc<MastForest>,
     /// List of handlers along with an event id to call them with `emit`.
-    pub handlers: Vec<(Felt, Box<dyn EventHandler>)>,
+    pub handlers: Vec<(ReducedEventID, Box<dyn EventHandler>)>,
 }
 
 impl From<Arc<MastForest>> for HostLibrary {

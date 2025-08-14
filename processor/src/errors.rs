@@ -65,19 +65,19 @@ pub enum ExecutionError {
         source_file: Option<Arc<SourceFile>>,
         digest: Word,
     },
-    #[error("error during processing of event with id {reduced_event_id} in on_event handler")]
+    #[error("error during processing of event with id {event_id} in on_event handler")]
     #[diagnostic()]
     EventError {
         #[label]
         label: SourceSpan,
         #[source_code]
         source_file: Option<Arc<SourceFile>>,
-        reduced_event_id: ReducedEventID,
+        event_id: ReducedEventID,
         #[source]
         error: EventError,
     },
-    #[error("attempted to add event handler with previously inserted id: {reduced_event_id}")]
-    DuplicateEventHandler { reduced_event_id: ReducedEventID },
+    #[error("attempted to add event handler with previously inserted id: {event_id}")]
+    DuplicateEventHandler { event_id: ReducedEventID },
     #[error("assertion failed at clock cycle {clk} with error {}",
       match err_msg {
         Some(msg) => format!("message: {msg}"),
@@ -297,10 +297,10 @@ impl ExecutionError {
         Self::DynamicNodeNotFound { label, source_file, digest }
     }
 
-    pub fn event_error(error: EventError, reduced_event_id: ReducedEventID, err_ctx: &impl ErrorContext) -> Self {
+    pub fn event_error(error: EventError, event_id: ReducedEventID, err_ctx: &impl ErrorContext) -> Self {
         let (label, source_file) = err_ctx.label_and_source_file();
 
-        Self::EventError { label, source_file, reduced_event_id, error }
+        Self::EventError { label, source_file, event_id, error }
     }
 
     pub fn failed_assertion(

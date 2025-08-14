@@ -60,9 +60,9 @@ impl SyncHost for TestHost {
     fn on_event(
         &mut self,
         _process: &ProcessState,
-        reduced_event_id: ReducedEventID,
+        event_id: ReducedEventID,
     ) -> Result<Vec<AdviceMutation>, EventError> {
-        self.event_handler.push(reduced_event_id.as_felt().as_int() as u32);
+        self.event_handler.push(event_id.as_felt().as_int() as u32);
         Ok(Vec::new())
     }
 }
@@ -71,9 +71,9 @@ impl AsyncHost for TestHost {
     fn on_event(
         &mut self,
         _process: &ProcessState<'_>,
-        reduced_event_id: ReducedEventID,
+        event_id: ReducedEventID,
     ) -> impl Future<Output = Result<Vec<AdviceMutation>, EventError>> + Send {
-        self.event_handler.push(reduced_event_id.as_felt().as_int() as u32);
+        self.event_handler.push(event_id.as_felt().as_int() as u32);
         async move { Ok(Vec::new()) }
     }
 }
