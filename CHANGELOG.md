@@ -2,6 +2,8 @@
 
 ## 0.18.0 (TBD)
 
+- Added miden assembly formatter binary ([[#2049]](https://github.com/0xMiden/miden-vm/pull/2049)).
+
 ## 0.17.0 (2025-08-06)
 
 #### Enhancements

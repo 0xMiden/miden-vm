@@ -1,0 +1,38 @@
+# Test control flow formatting: if/else, while, repeat
+
+# comment
+export.test_if_else
+    push.5 push.10 gt
+    if.true
+        push.1
+        # => [1]
+    else
+        push.0
+        # => [0]
+    end
+end
+
+export.test_complex_control_flow
+    # Complex nested control flow
+    push.1
+    if.true
+        push.0
+        while
+            push.1 add
+            dup.0 push.5 lt
+            # => [val]
+
+            if.true
+                repeat.2
+                    push.1 add
+                    # => [val]
+                end
+                # => [val]
+            end
+        end
+    else
+        repeat.3
+            push.2 mul
+        end
+    end
+end

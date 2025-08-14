@@ -1,0 +1,24 @@
+export.test_stack_with_comments
+# => []
+push.1 push.2 push.3
+# => [3, 2, 1]
+dup.0
+# => [3, 3, 2, 1]
+swap
+# => [3, 3, 2, 1]
+# some random comment
+movup.2
+# => [2, 3, 3, 1]
+add
+# => [5, 3, 1]
+end
+export.test_memory_with_comments
+# => []
+padw
+# => [0, 0, 0, 0]
+dup.0
+# => [3, 3, 2, 1]
+# swap the values
+swap
+# => [3, 3, 2, 1]
+end
