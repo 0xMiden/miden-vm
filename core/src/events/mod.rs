@@ -61,9 +61,9 @@ mod tests {
         let another_event =
             EventId::new("different-lib".to_string(), "EVENT2".to_string()).unwrap();
 
-        assert_eq!(format!("{}", system_event), "system::TEST_EVENT");
-        assert_eq!(format!("{}", library_event), "my-lib::EVENT1");
-        assert_eq!(format!("{}", another_event), "different-lib::EVENT2");
+        assert_eq!(format!("{system_event}"), "system::TEST_EVENT");
+        assert_eq!(format!("{library_event}"), "my-lib::EVENT1");
+        assert_eq!(format!("{another_event}"), "different-lib::EVENT2");
     }
 
     #[test]

@@ -329,12 +329,7 @@ impl SystemEvent {
     /// This method tries to find a SystemEvent whose ReducedEventID matches the given one.
     pub fn from_reduced_id(reduced_id: ReducedEventID) -> Option<Self> {
         // Search through all system events to find a matching ReducedEventID
-        for &event in ALL_SYSTEM_EVENTS {
-            if event.reduced_id() == reduced_id {
-                return Some(event);
-            }
-        }
-        None
+        ALL_SYSTEM_EVENTS.iter().find(|&&event| event.reduced_id() == reduced_id).copied()
     }
 }
 

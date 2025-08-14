@@ -574,7 +574,7 @@ impl Assembler {
                         // Parse the event name to create an EventId
                         let event_id = event_name.parse::<EventId>().map_err(|err| {
                             Report::new(
-                                RelatedLabel::error(format!("invalid event identifier: {}", err))
+                                RelatedLabel::error(format!("invalid event identifier: {err}"))
                                     .with_labeled_span(
                                         instruction.span(),
                                         "event identifier must be in format 'library::event_name'",

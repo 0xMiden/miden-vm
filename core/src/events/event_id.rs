@@ -69,7 +69,7 @@ impl EventId {
 
     /// Returns the reduced form using Blake3 hash of "library::event".
     pub fn reduced_id(&self) -> ReducedEventID {
-        let canonical = format!("{}", self);
+        let canonical = format!("{self}");
         let hash = Blake3_256::hash(canonical.as_bytes());
 
         // Take first 8 bytes as little-endian u64
@@ -189,9 +189,9 @@ mod tests {
         let another_lib = EventId::new("dex-lib".to_string(), "SWAP".to_string()).unwrap();
 
         // Test Display format
-        assert_eq!(format!("{}", system_event), "system::MAP_VALUE_TO_STACK");
-        assert_eq!(format!("{}", library_event), "my-crypto-lib::SIGN");
-        assert_eq!(format!("{}", another_lib), "dex-lib::SWAP");
+        assert_eq!(format!("{system_event}"), "system::MAP_VALUE_TO_STACK");
+        assert_eq!(format!("{library_event}"), "my-crypto-lib::SIGN");
+        assert_eq!(format!("{another_lib}"), "dex-lib::SWAP");
 
         // Test accessors
         assert_eq!(system_event.library(), "system");

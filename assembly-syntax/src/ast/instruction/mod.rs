@@ -27,10 +27,10 @@ pub enum EventValue {
 impl fmt::Display for EventValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Legacy(id) => write!(f, "{}", id),
+            Self::Legacy(id) => write!(f, "{id}"),
             Self::Name(name) => match name {
                 Immediate::Value(s) => write!(f, "\"{}\"", s.inner()),
-                Immediate::Constant(ident) => write!(f, "{}", ident),
+                Immediate::Constant(ident) => write!(f, "{ident}"),
             },
         }
     }
