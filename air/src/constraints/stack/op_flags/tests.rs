@@ -1,4 +1,4 @@
-use miden_core::{ONE, Operation, ZERO};
+use miden_core::{ONE, Operation, ZERO, ReducedEventID};
 
 use super::{
     DECODER_TRACE_OFFSET, DEGREE_4_OPCODE_ENDS, DEGREE_4_OPCODE_STARTS, DEGREE_6_OPCODE_ENDS,
@@ -142,10 +142,12 @@ fn degree_4_op_flags() {
 /// Composite flag unit tests.
 #[test]
 fn composite_flags() {
+
+    let test_event = ReducedEventID::from_u32(42);
     // ------ no change 0 ---------------------------------------------------------------------
 
     let op_no_change_0 =
-        [Operation::MpVerify(ZERO), Operation::Span, Operation::Halt, Operation::emit_u32(42)];
+        [Operation::MpVerify(ZERO), Operation::Span, Operation::Halt, Operation::Emit(test_event)];
     for op in op_no_change_0 {
         // frame initialised with an op operation.
         let frame = generate_evaluation_frame(op.op_code().into());
@@ -169,7 +171,7 @@ fn composite_flags() {
         assert_eq!(op_flags.left_shift(), ZERO);
         assert_eq!(op_flags.top_binary(), ZERO);
 
-        if op == Operation::MpVerify(ZERO) || op == Operation::emit_u32(42) {
+        if op == Operation::MpVerify(ZERO) || op == Operation::Emit(test_event) {
             assert_eq!(op_flags.control_flow(), ZERO);
         } else if op == Operation::Span || op == Operation::Halt {
             assert_eq!(op_flags.control_flow(), ONE);

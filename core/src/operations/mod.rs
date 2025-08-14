@@ -649,20 +649,20 @@ impl Operation {
     // EMIT OPERATION HELPERS
     // --------------------------------------------------------------------------------------------
 
-    /// Creates a new Emit operation from an EventId.
-    /// 
-    /// The EventId is converted to a ReducedEventID that uniquely identifies the event.
-    pub fn emit_event(event_id: crate::EventId) -> Self {
-        Self::Emit(event_id.reduced_id())
-    }
-
-    /// Creates a new Emit operation from a legacy u32 event ID.
-    /// 
-    /// # Deprecated
-    /// This method is provided for backward compatibility. New code should use `emit_event()`.
-    pub fn emit_u32(event_id: u32) -> Self {
-        Self::Emit(ReducedEventID::from_u32(event_id))
-    }
+    // /// Creates a new Emit operation from an EventId.
+    // ///
+    // /// The EventId is converted to a ReducedEventID that uniquely identifies the event.
+    // pub fn emit_event(event_id: crate::EventId) -> Self {
+    //     Self::Emit(event_id.reduced_id())
+    // }
+    //
+    // /// Creates a new Emit operation from a legacy u32 event ID.
+    // ///
+    // /// # Deprecated
+    // /// This method is provided for backward compatibility. New code should use `emit_event()`.
+    // pub fn emit_u32(event_id: u32) -> Self {
+    //     Self::Emit(ReducedEventID::from_u32(event_id))
+    // }
 }
 
 impl crate::prettier::PrettyPrint for Operation {

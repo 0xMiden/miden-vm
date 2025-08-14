@@ -158,7 +158,7 @@ fn basic_block_small() {
 
 #[test]
 fn basic_block_small_with_emit() {
-    let ops = vec![Operation::Push(ONE), Operation::emit_u32(EMIT_EVENT_ID), Operation::Add];
+    let ops = vec![Operation::Push(ONE), Operation::Emit(EMIT_EVENT_ID.into()), Operation::Add];
     let basic_block = BasicBlockNode::new(ops.clone(), None).unwrap();
     let program = {
         let mut mast_forest = MastForest::new();
@@ -175,7 +175,7 @@ fn basic_block_small_with_emit() {
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
     check_op_decoding(&trace, 0, ZERO, Operation::Span, 4, 0, 0);
     check_op_decoding(&trace, 1, INIT_ADDR, Operation::Push(ONE), 3, 0, 1);
-    check_op_decoding(&trace, 2, INIT_ADDR, Operation::emit_u32(EMIT_EVENT_ID), 2, 1, 1);
+    check_op_decoding(&trace, 2, INIT_ADDR, Operation::Emit(EMIT_EVENT_ID.into()), 2, 1, 1);
     check_op_decoding(&trace, 3, INIT_ADDR, Operation::Add, 1, 2, 1);
     // starting new group: NOOP group is inserted by the processor to make sure number of groups
     // is a power of two

@@ -402,7 +402,7 @@ impl SystemEvent {
 
     /// Creates an Operation::Emit for this system event.
     pub fn to_emit_operation(&self) -> crate::Operation {
-        crate::Operation::emit_event(self.event_id())
+        crate::Operation::Emit(self.event_id().into())
     }
 }
 
