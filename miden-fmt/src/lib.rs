@@ -166,7 +166,8 @@ pub fn format_code(code: &str) -> String {
     // Add empty line after imports if there were any and the next line exists
     if import_end_index > 0 && import_end_index < lines.len() {
         // Always add empty line after imports, unless the next line is already empty
-        if !lines[import_end_index].trim().is_empty() {
+        let next_line = lines[import_end_index].trim();
+        if !next_line.is_empty() {
             formatted_code.push('\n');
         }
     }
@@ -301,20 +302,21 @@ pub fn format_code(code: &str) -> String {
             formatted_code.push_str(trimmed_line);
             formatted_code.push('\n');
             last_line_was_empty = false;
-        } else if !last_line_was_empty {
-            // Check if the next line is a proc or export declaration
-            // If so, and the previous line was a comment, don't add empty line
-            let should_skip_empty_line = if i + 1 < remaining_lines.len() {
+        } else {
+            // This is an empty line in the input
+            // Check if we should skip adding it (e.g., between comment and const)
+            let should_skip_empty_line = if i + 1 < remaining_lines.len() && !last_line_was_empty {
                 let next_line = remaining_lines[i + 1].trim();
                 let prev_lines: Vec<&str> = formatted_code.lines().collect();
                 let prev_line = prev_lines.last().map(|l| l.trim()).unwrap_or("");
 
-                is_proc_or_export(next_line) && is_comment(prev_line)
+                // Skip empty line if previous line is a comment and next line is a const
+                is_comment(prev_line) && next_line.starts_with("const.")
             } else {
                 false
             };
 
-            if !should_skip_empty_line {
+            if !should_skip_empty_line && !last_line_was_empty {
                 formatted_code.push('\n');
                 last_line_was_empty = true;
             }
@@ -339,13 +341,13 @@ pub fn format_code(code: &str) -> String {
         if is_empty {
             consecutive_empty_count += 1;
 
-            // Check if this empty line is between a comment and proc/export
+            // Check if this empty line is between a comment and proc/export/const
             let should_skip_empty_line = if i > 0 && i + 1 < lines.len() {
                 let prev_line = lines[i - 1].trim();
                 let next_line = lines[i + 1].trim();
-                // Skip empty lines between regular comments and proc/export, but preserve them after section separators
+                // Skip empty lines between regular comments and proc/export/const, but preserve them after section separators
                 is_comment(prev_line)
-                    && is_proc_or_export(next_line)
+                    && (is_proc_or_export(next_line) || next_line.starts_with("const."))
                     && !is_section_separator_comment(prev_line)
             } else {
                 false

@@ -1,6 +1,0 @@
-#! Output: [a + b]
-
-export.add_two_numbers
-push.1
-add
-end
