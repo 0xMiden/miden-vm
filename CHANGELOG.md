@@ -17,8 +17,9 @@
 - [BREAKING] Implemented custom Event handlers ([#1584](https://github.com/0xMiden/miden-vm/pull/1584)).
 - Implemented `copy_digest` and `hash_memory_double_words` procedures in the `std::crypto::hashes::rpo` module ([#1971](https://github.com/0xMiden/miden-vm/pull/1971)).
 - Added `extend_` methods on AdviceProvider [#1982](https://github.com/0xMiden/miden-vm/pull/1982).
-- Added new stdlib module `std::word`, containing utilities for manipulating arrays of four fields (words) [#1996](https://github.com/0xMiden/miden-vm/pull/1996).
+- Added new stdlib module `std::word`, containing utilities for manipulating arrays of four fields (words) ([#1996](https://github.com/0xMiden/miden-vm/pull/1996)).
 - Added constraints evaluation check to recursive verifier ([#1997](https://github.com/0xMiden/miden-vm/pull/1997)).
+- Make recursive verifier in `stdlib` reusable through dynamic procedure execution ([#2008](https://github.com/0xMiden/miden-vm/pull/2008)).
 - Added `AdviceProvider::into_parts()` method ([#2024](https://github.com/0xMiden/miden-vm/pull/2024)).
 - Added type information to procedures in the AST, `Library`, and `PackageExport` types ([#2028](https://github.com/0xMiden/miden-vm/pull/2028)).
 - Added `drop_stack_top` procedure in `std::sys` ([#2031](https://github.com/0xMiden/miden-vm/pull/2031)).

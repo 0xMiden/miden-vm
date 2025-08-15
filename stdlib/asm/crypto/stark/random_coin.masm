@@ -3,6 +3,7 @@
 use.std::crypto::stark::constants
 use.std::crypto::stark::utils
 
+
 #! Helper procedure to compute addition of two words component-wise.
 #! Input: [b3, b2, b1, b0, a3, a2, a1, a0]
 #! Output: [c3, c2, c1, c0]
@@ -124,7 +125,7 @@ end
 #! equal to 8.
 #! The ouput of this procedure is the capacity portion of the state after applying `hperm`.
 #!
-#! Input: [log(trace_length), num_queries, grinding, ...]
+#! Input: [log(trace_length), num_queries, grinding, num_constraints, trace_info, num_fixed_len_pi, ...]
 #! Output: [C, ...]
 #! Cycles: 210
 export.init_seed
@@ -144,7 +145,7 @@ export.init_seed
     exec.constants::r1_ptr mem_storew
     exec.constants::r2_ptr mem_storew
     dropw
-    #=> [log(trace_length), num_queries, grinding, ...]
+    #=> [log(trace_length), num_queries, grinding, num_constraints, trace_info, num_fixed_len_pi, ...]
 
     # Create the initial seed for randomness generation from proof context
 
@@ -152,89 +153,65 @@ export.init_seed
     dup
     pow2
     u32split assertz
-    #=> [trace_length, log(trace_length), num_queries, grinding, ...]
+    #=> [trace_length, log(trace_length), num_queries, grinding, num_constraints, trace_info, num_fixed_len_pi, ...]
 
     ## Save the trace length and its log to memory
     dup.0 exec.constants::set_trace_length
-    #=> [trace_length, log(trace_length), num_queries, grinding, ...]
+    #=> [trace_length, log(trace_length), num_queries, grinding, num_constraints, trace_info, num_fixed_len_pi, ...]
 
     ## Compute log size of LDE domain
     swap
     exec.constants::get_blowup_factor_log
     add
-    #=> [log(lde_size), trace_length, num_queries, grinding, ...]
+    #=> [log(lde_size), trace_length, num_queries, grinding, num_constraints, trace_info, num_fixed_len_pi, ...]
 
     ## Compute size of LDE domain
     dup
     pow2
-    #=> [lde_size, log(lde_size), trace_length, num_queries, grinding, ...]
+    #=> [lde_size, log(lde_size), trace_length, num_queries, grinding, num_constraints, trace_info, num_fixed_len_pi, ...]
 
     # Compute lde_domain generator
     dup.1
     exec.utils::compute_lde_generator
     movdn.2
-    #=> [lde_size, log(lde_size), lde_g, trace_length, num_queries, grinding]
+    #=> [lde_size, log(lde_size), lde_g, trace_length, num_queries, grinding, num_constraints, trace_info, num_fixed_len_pi, ...]
 
     push.0
     movdn.3
-    #=> [lde_size, log(lde_size), lde_g, 0, trace_length, num_queries, grinding]
+    #=> [lde_size, log(lde_size), lde_g, 0, trace_length, num_queries, grinding, num_constraints, trace_info, num_fixed_len_pi, ...]
 
     # Save `[0, lde_g, log(lde_size), lde_size]`
     exec.constants::set_lde_domain_info_word
-    #=> [lde_size, log(lde_size), lde_g, 0, trace_length, num_queries, grinding]
+    #=> [lde_size, log(lde_size), lde_g, 0, trace_length, num_queries, grinding, num_constraints, trace_info, num_fixed_len_pi, ...]
 
     # clean stack
     drop drop
-    #=> [lde_g, 0, trace_length, num_queries, grinding]
+    #=> [lde_g, 0, trace_length, num_queries, grinding, num_constraints, trace_info, num_fixed_len_pi, ...]
 
     # Compute trace generator `trace_g` = `lde_g^blowup_factor`
     repeat.3
         dup mul
     end
-    #=> [trace_g, 0, trace_length, num_queries, grinding]
+    #=> [trace_g, 0, trace_length, num_queries, grinding, num_constraints, trace_info, num_fixed_len_pi, ...]
 
     # Save `trace_g` to memory
     exec.constants::set_trace_domain_generator
-    #=> [0, trace_length, num_queries, grinding]
+    #=> [0, trace_length, num_queries, grinding, num_constraints, trace_info, num_fixed_len_pi, ...]
 
     # clean stack
     drop
-    #=> [trace_length, num_queries, grinding]
+    #=> [trace_length, num_queries, grinding, num_constraints, trace_info, num_fixed_len_pi, ...]
 
     # Construct the proof context
-
-    ## trace layout info, which is the concatenation as u8-s of:
-    ## 1. main segment width
-    ## 2. num auxiliary segments, which always 1
-    ## 3. auxiliary segment width
-    ## 4. number of auxiliary random values
-    ## 5. trace length (this is already on the stack)
-
-    ## main segment width is 80 (0x50) and there are 1 (0x01) auxiliary segments
-    ## of width 8 (0x08) using 16 (0x10) random extension field elements
-    push.0x50010810
-    swap
-    ## field modulus bytes (2 field elements)
-    push.0x01 # lower half of the modulus
-    push.0xffffffff # upper half of the modulus
-    ## field extension and FRI parameters
-    ## field extension degree || FRI folding factor || FRI remainder polynomial max degree || blowup factor
-    push.0x02047f08
-    # => [proof_options, modulus1, modulus0, trace_length, trace_info, num_queries, grinding, ...]
-
-    movup.6
-    movup.6
-    # => [num_queries, grinding, proof_options, modulus1, modulus0, trace_length, trace_info, ...]
-
-    exec.constants::get_num_constraints
-    movdn.3
-    # => [num_queries, grinding, proof_options, num_constraints, modulus1, modulus0, trace_length, trace_info, ...]
+    exec.build_proof_context
+    # => [num_queries, grinding, proof_options, num_constraints, modulus1, modulus0, trace_length, trace_info, num_fixed_len_pi, ...]
 
     # We get the number of the variable length public inputs section non-deterministically so that
     # we can initialize the capacity portion of the sponge state. The total number of public inputs
     # is easily derived using an addition.
-    adv_push.1
-    exec.constants::get_num_fixed_len_public_inputs add
+    movup.8
+    # => [num_fixed_len_pi, num_queries, grinding, proof_options, num_constraints, modulus1, modulus0, trace_length, trace_info, ...]
+    adv_push.1 add
     dup exec.constants::num_public_inputs_ptr mem_store
     u32divmod.8
     # => [rem, quo, num_queries, grinding, proof_options, num_constraints, modulus1, modulus0, trace_length, trace_info, ...]
@@ -249,6 +226,36 @@ export.init_seed
     dropw
     dropw
     # => [C, ...]
+end
+
+#! Builds the proof context.
+#!
+#! Input: [trace_length, num_queries, grinding, num_constraints, trace_info, ...]
+#! Output:  [num_queries, grinding, proof_options, num_constraints, modulus1, modulus0, trace_length, trace_info, ...]
+proc.build_proof_context
+    ## trace layout info, which is the concatenation as u8-s of:
+    ## 1. main segment width
+    ## 2. num auxiliary segments, which always 1
+    ## 3. auxiliary segment width
+    ## 4. number of auxiliary random values
+    ## 5. trace length (this is already on the stack)
+
+    movup.4
+    swap
+    ## field modulus bytes (2 field elements)
+    push.0x01 # lower half of the modulus
+    push.0xffffffff # upper half of the modulus
+    ## field extension and FRI parameters
+    ## field extension degree || FRI folding factor || FRI remainder polynomial max degree || blowup factor
+    push.0x02047f08
+    # => [proof_options, modulus1, modulus0, trace_length, trace_info, num_queries, grinding, num_constraints, ...]
+    movup.6
+    movup.6
+    # => [num_queries, grinding, proof_options, modulus1, modulus0, trace_length, trace_info, num_constraints, ...]
+
+    movup.7
+    movdn.3
+    # => [num_queries, grinding, proof_options, num_constraints, modulus1, modulus0, trace_length, trace_info, ...]
 end
 
 #! Reseed the random coin with `DATA`

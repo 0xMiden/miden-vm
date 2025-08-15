@@ -9,28 +9,9 @@ const.DOMAIN_OFFSET_INV=2635249152773512046
 # Number of random extension field coefficients related to the auxiliary trace (i.e. the alphas)
 const.NUM_AUX_TRACE_COEFS=2
 
-# Number of constraints, both boundary and transitional
-# Note: If the full set of all implemented constraints is used then this should be set to 226
-const.NUM_CONSTRAINTS=6
-
 # Blowup factor
 const.BLOWUP_FACTOR=8
 const.BLOWUP_FACTOR_LOG=3
-
-# Max cycle length for periodic columns
-const.MAX_CYCLE_LEN_LOG=3
-
-# Constraint evaluation circuit digest
-const.DIGEST_0=9139186206676821480
-const.DIGEST_1=12763675724578443945
-const.DIGEST_2=7621207635344139731
-const.DIGEST_3=1122100627503939866
-
-# Number of inputs to the constraint evaluation circuit
-const.NUM_INPUTS_CIRCUIT=244
-
-# Number of evaluation gates in the constraint evaluation circuit
-const.NUM_EVAL_GATES_CIRCUIT=108
 
 # Number of fixed length public inputs with padding (in field elements)
 # This is composed of the input/output operand stacks (16 * 2) and the program digest (4) and four
@@ -131,6 +112,18 @@ const.COMPOSITION_COEF_PTR=3223322712
 ### Address to the randomness used in computing the DEEP polynomial
 const.DEEP_RAND_CC_PTR=3223322716
 
+### Addresses to store parameters needed for calls to ACE chiplet
+const.NUM_FIXED_LEN_PUBLIC_INPUTS_PTR=3223322720
+const.NUM_ACE_INPUTS_PTR=3223322721
+const.NUM_ACE_GATES_PTR=3223322722
+const.MAX_CYCLE_LEN_LOG_PTR=3223322723
+
+### Addresses of the digests of dynamically executed procedures 
+const.DYNAMIC_PROCEDURE_0_PTR=3223322728
+const.DYNAMIC_PROCEDURE_1_PTR=3223322732
+const.DYNAMIC_PROCEDURE_2_PTR=3223322736
+const.DYNAMIC_PROCEDURE_3_PTR=3223322740
+
 ## ACE related
 ## Starts at address 3225419776 = 2**31 + 2**30 + 2**22 and the memory region grows backward
 ## and forward and is of variable length in both directions.
@@ -213,43 +206,12 @@ export.get_num_aux_trace_coefs
     push.NUM_AUX_TRACE_COEFS
 end
 
-export.get_num_constraints
-    push.NUM_CONSTRAINTS
-end
-
 export.get_blowup_factor
     push.BLOWUP_FACTOR
 end
 
 export.get_blowup_factor_log
     push.BLOWUP_FACTOR_LOG
-end
-
-export.get_max_cycle_length_log
-    push.MAX_CYCLE_LEN_LOG
-end
-
-export.get_arithmetic_circuit_eval_digest
-    push.DIGEST_0
-    push.DIGEST_1
-    push.DIGEST_2
-    push.DIGEST_3
-end
-
-export.get_arithmetic_circuit_eval_number_inputs
-    push.NUM_INPUTS_CIRCUIT
-end
-
-export.get_arithmetic_circuit_eval_number_eval_gates
-    push.NUM_EVAL_GATES_CIRCUIT
-end
-
-export.get_num_fixed_len_public_inputs
-    push.NUM_FIXED_LEN_PUBLIC_INPUTS
-end
-
-export.kernel_proc_table_op_label
-    push.KERNEL_OP_LABEL
 end
 
 #! Store details about the LDE domain.
@@ -470,6 +432,22 @@ end
 
 export.current_trace_row_ptr
     push.CURRENT_TRACE_ROW_PTR
+end
+
+export.get_procedure_digest_compute_deep_composition_polynomial_queries_ptr
+    push.DYNAMIC_PROCEDURE_0_PTR
+end
+
+export.get_procedure_digest_execute_constraint_evaluation_check_ptr
+    push.DYNAMIC_PROCEDURE_1_PTR
+end
+
+export.get_procedure_digest_process_row_ood_evaluations_ptr
+    push.DYNAMIC_PROCEDURE_2_PTR
+end
+
+export.get_procedure_digest_process_public_inputs_ptr
+    push.DYNAMIC_PROCEDURE_3_PTR
 end
 
 # HELPER
