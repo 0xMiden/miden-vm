@@ -22,8 +22,8 @@ use crate::{
 /// - `event`: String for the specific event (e.g., "sign")
 /// - "system" is reserved for VM system events
 ///
-/// The machine-usable EventID is derived from Blake3 hash of "library::event" 
-/// for deterministic, collision-resistant generation. Note that collision 
+/// The machine-usable EventID is derived from Blake3 hash of "library::event"
+/// for deterministic, collision-resistant generation. Note that collision
 /// resistance is limited due to 64-bit reduction from the full Blake3 hash.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct EventName {
@@ -34,30 +34,42 @@ pub struct EventName {
 impl EventName {
     /// Create a new event name with library and event names.
     /// Takes String parameters to avoid clones.
-    pub fn new(library: String, event: String) -> Result<Self, EventNameError> {
+    pub fn new(
+        library: impl Into<String>,
+        event: impl Into<String>,
+    ) -> Result<Self, EventNameError> {
+        let library = library.into();
+        let event = event.into();
         if library.is_empty() {
             return Err(EventNameError("library name cannot be empty"));
         }
         if event.is_empty() {
             return Err(EventNameError("event name cannot be empty"));
         }
-        
+
         // Validate library name: only lowercase letters and underscores
         if !library.chars().all(|c| c.is_ascii_lowercase() || c == '_') {
-            return Err(EventNameError("library name must contain only lowercase letters (a-z) and underscores"));
+            return Err(EventNameError(
+                "library name must contain only lowercase letters (a-z) and underscores",
+            ));
         }
-        
+
         // Validate event name: only lowercase letters and underscores
         if !event.chars().all(|c| c.is_ascii_lowercase() || c == '_') {
-            return Err(EventNameError("event name must contain only lowercase letters (a-z) and underscores"));
+            return Err(EventNameError(
+                "event name must contain only lowercase letters (a-z) and underscores",
+            ));
         }
 
         Ok(Self { library, event })
     }
 
     /// Create a system event (uses reserved "system" library name).
-    pub fn system(event: String) -> Self {
-        Self { library: "system".to_string(), event }
+    pub fn system(event: impl Into<String>) -> Self {
+        Self {
+            library: "system".into(),
+            event: event.into(),
+        }
     }
 
     /// Get the library name.
@@ -75,7 +87,6 @@ impl EventName {
         self.library == "system"
     }
 
-
     /// Returns the machine-usable EventID using Blake3 hash of "library::event".
     pub fn id(&self) -> EventID {
         // Build the canonical "library::event" string bytes directly to avoid allocation
@@ -83,7 +94,7 @@ impl EventName {
         canonical_bytes.extend_from_slice(self.library.as_bytes());
         canonical_bytes.extend_from_slice(b"::");
         canonical_bytes.extend_from_slice(self.event.as_bytes());
-        
+
         let hash = Blake3_256::hash(&canonical_bytes);
 
         // Take first 8 bytes as little-endian u64
@@ -198,9 +209,9 @@ mod tests {
     #[test]
     fn test_event_name_creation() {
         // Test new library::event API
-        let system_event = EventName::system("map_value_to_stack".to_string());
-        let library_event = EventName::new("my_crypto_lib".to_string(), "sign".to_string()).unwrap();
-        let another_lib = EventName::new("dex_lib".to_string(), "swap".to_string()).unwrap();
+        let system_event = EventName::system("map_value_to_stack");
+        let library_event = EventName::new("my_crypto_lib", "sign").unwrap();
+        let another_lib = EventName::new("dex_lib", "swap").unwrap();
 
         // Test Display format
         assert_eq!(format!("{system_event}"), "system::map_value_to_stack");
@@ -216,9 +227,9 @@ mod tests {
 
     #[test]
     fn test_id_generation() {
-        let system_event = EventName::system("test_event".to_string());
-        let lib_event = EventName::new("lib_a".to_string(), "event_one".to_string()).unwrap();
-        let another_lib = EventName::new("lib_b".to_string(), "event_one".to_string()).unwrap();
+        let system_event = EventName::system("test_event");
+        let lib_event = EventName::new("lib_a", "event_one").unwrap();
+        let another_lib = EventName::new("lib_b", "event_one").unwrap();
 
         let id1 = system_event.id();
         let id2 = lib_event.id();
@@ -243,14 +254,14 @@ mod tests {
     #[test]
     fn test_no_namespace_collisions() {
         // This was the main problem with the old design - now solved with library names
-        let lib1_event = EventName::new("crypto_lib".to_string(), "sign".to_string()).unwrap();
-        let lib2_event = EventName::new("different_lib".to_string(), "sign".to_string()).unwrap();
+        let lib1_event = EventName::new("crypto_lib", "sign").unwrap();
+        let lib2_event = EventName::new("different_lib", "sign").unwrap();
 
         // Different libraries with same event name should have different IDs
         assert_ne!(lib1_event.id(), lib2_event.id());
 
         // But same library + event should be identical
-        let duplicate = EventName::new("crypto_lib".to_string(), "sign".to_string()).unwrap();
+        let duplicate = EventName::new("crypto_lib", "sign").unwrap();
         assert_eq!(lib1_event.id(), duplicate.id());
     }
 
@@ -258,12 +269,12 @@ mod tests {
     fn test_parsing() {
         // Test parsing "library::event" format
         let parsed: EventName = "my_crypto_lib::sign".parse().unwrap();
-        let expected = EventName::new("my_crypto_lib".to_string(), "sign".to_string()).unwrap();
+        let expected = EventName::new("my_crypto_lib", "sign").unwrap();
         assert_eq!(parsed, expected);
 
         // Test system events
         let system_parsed: EventName = "system::map_value".parse().unwrap();
-        let system_expected = EventName::system("map_value".to_string());
+        let system_expected = EventName::system("map_value");
         assert_eq!(system_parsed, system_expected);
 
         // Test error cases
@@ -274,20 +285,20 @@ mod tests {
 
     #[test]
     fn test_system_event_validation() {
-        let system_event = EventName::system("test".to_string());
+        let system_event = EventName::system("test");
         assert!(system_event.is_system());
 
-        let library_event = EventName::new("my_lib".to_string(), "event".to_string()).unwrap();
+        let library_event = EventName::new("my_lib", "event").unwrap();
         assert!(!library_event.is_system());
     }
 
     #[test]
     fn test_validation() {
         // Empty library should error
-        assert!(EventName::new("".to_string(), "event".to_string()).is_err());
+        assert!(EventName::new("", "event").is_err());
 
         // Empty event should error
-        assert!(EventName::new("library".to_string(), "".to_string()).is_err());
+        assert!(EventName::new("library", "").is_err());
     }
 
     #[test]

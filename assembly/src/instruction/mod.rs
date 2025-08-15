@@ -5,8 +5,7 @@ use miden_assembly_syntax::{
     parser::IntValue,
 };
 use miden_core::{
-    Decorator, Felt, ONE, Operation, EventID, WORD_SIZE, ZERO, events::EventName,
-    mast::MastNodeId,
+    Decorator, EventID, Felt, ONE, Operation, WORD_SIZE, ZERO, events::EventName, mast::MastNodeId,
 };
 
 use crate::{Assembler, ProcedureContext, ast::InvokeKind, basic_block_builder::BasicBlockBuilder};
@@ -574,8 +573,10 @@ impl Assembler {
                         // Parse the event name to create an EventId
                         let event_name = event_name.parse::<EventName>().map_err(|err| {
                             Report::new(
-                                RelatedLabel::error(format!("{err}"))
-                                    .with_labeled_span(instruction.span(), "invalid event identifier"),
+                                RelatedLabel::error(format!("{err}")).with_labeled_span(
+                                    instruction.span(),
+                                    "invalid event identifier",
+                                ),
                             )
                         })?;
 

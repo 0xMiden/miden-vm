@@ -1,4 +1,4 @@
-use miden_core::{Felt, Operation, EventID, mast::MastForest, sys_events::SystemEvent};
+use miden_core::{EventID, Felt, Operation, mast::MastForest, sys_events::SystemEvent};
 
 use super::{
     super::{
@@ -144,13 +144,13 @@ impl Process {
         H: SyncHost,
     {
         self.stack.copy_state(0);
-        let event_felt = event_id.as_felt();
-        self.decoder.set_user_op_helpers(Operation::Emit(event_id), &[event_felt]);
+        self.decoder
+            .set_user_op_helpers(Operation::Emit(event_id), &[event_id.as_felt()]);
 
         let mut process = self.state();
 
         // If it's a system event, handle it directly. Otherwise, forward it to the host.
-        if let Some(system_event) = SystemEvent::from_reduced_id(event_id) {
+        if let Some(system_event) = SystemEvent::from_event_id(event_id) {
             handle_system_event(&mut process, system_event, err_ctx)
         } else {
             let clk = process.clk();

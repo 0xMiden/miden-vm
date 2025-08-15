@@ -299,7 +299,7 @@ pub enum SystemEvent {
 
 impl SystemEvent {
     /// Returns the EventID for this system event.
-    pub fn reduced_id(&self) -> EventID {
+    pub fn as_event_id(&self) -> EventID {
         // Use the legacy constant values directly - these are the actual values used
         let legacy_id = match self {
             SystemEvent::MerkleNodeMerge => EVENT_MERKLE_NODE_MERGE,
@@ -327,9 +327,12 @@ impl SystemEvent {
     /// Returns a system event from a EventID.
     ///
     /// This method tries to find a SystemEvent whose EventID matches the given one.
-    pub fn from_reduced_id(reduced_id: EventID) -> Option<Self> {
+    pub fn from_event_id(event_id: EventID) -> Option<Self> {
         // Search through all system events to find a matching EventID
-        ALL_SYSTEM_EVENTS.iter().find(|&&event| event.reduced_id() == reduced_id).copied()
+        ALL_SYSTEM_EVENTS
+            .iter()
+            .find(|&&event| event.as_event_id() == event_id)
+            .copied()
     }
 }
 

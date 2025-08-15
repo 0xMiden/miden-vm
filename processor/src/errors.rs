@@ -2,7 +2,7 @@ use alloc::sync::Arc;
 
 use miden_air::RowIndex;
 use miden_core::{
-    Felt, QuadFelt, EventID, Word,
+    EventID, Felt, QuadFelt, Word,
     mast::{DecoratorId, MastForest, MastNodeExt, MastNodeId},
     stack::MIN_STACK_DEPTH,
     utils::to_hex,
@@ -297,11 +297,7 @@ impl ExecutionError {
         Self::DynamicNodeNotFound { label, source_file, digest }
     }
 
-    pub fn event_error(
-        error: EventError,
-        event_id: EventID,
-        err_ctx: &impl ErrorContext,
-    ) -> Self {
+    pub fn event_error(error: EventError, event_id: EventID, err_ctx: &impl ErrorContext) -> Self {
         let (label, source_file) = err_ctx.label_and_source_file();
 
         Self::EventError { label, source_file, event_id, error }

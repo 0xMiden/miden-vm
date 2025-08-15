@@ -6,7 +6,7 @@ use alloc::{
 use core::ops::{Index, IndexMut};
 
 use miden_core::{
-    AdviceMap, Decorator, DecoratorList, Felt, Operation, EventID, Word,
+    AdviceMap, Decorator, DecoratorList, EventID, Felt, Operation, Word,
     events::EventName,
     mast::{
         DecoratorFingerprint, DecoratorId, MastForest, MastNode, MastNodeFingerprint, MastNodeId,

@@ -3041,7 +3041,7 @@ begin push.A adv.push_mapval assert end"
     );
 
     let program = context.assemble(source)?;
-    let expected_event_id = SystemEvent::MapValueToStack.reduced_id();
+    let expected_event_id = SystemEvent::MapValueToStack.as_event_id();
     let expected = format!(
         "\
 begin
@@ -3070,7 +3070,7 @@ begin push.A adv.push_mapval assert end"
     );
 
     let program = context.assemble(source)?;
-    let expected_event_id = SystemEvent::MapValueToStack.reduced_id();
+    let expected_event_id = SystemEvent::MapValueToStack.as_event_id();
     let expected = format!(
         "\
 begin
@@ -3099,7 +3099,7 @@ begin adv.has_mapkey assert end"
     );
 
     let program = context.assemble(source)?;
-    let expected_event_id = SystemEvent::HasMapKey.reduced_id();
+    let expected_event_id = SystemEvent::HasMapKey.as_event_id();
     let expected = format!(
         "\
 begin

@@ -16,7 +16,7 @@ mod events;
 // ================================================================================================
 #[derive(Debug, Clone, Default)]
 pub struct TestHost {
-    pub event_handler: Vec<u32>,
+    pub event_handler: Vec<EventID>,
     pub trace_handler: Vec<u32>,
     pub debug_handler: Vec<String>,
     pub source_manager: Arc<DefaultSourceManager>,
@@ -62,7 +62,7 @@ impl SyncHost for TestHost {
         _process: &ProcessState,
         event_id: EventID,
     ) -> Result<Vec<AdviceMutation>, EventError> {
-        self.event_handler.push(event_id.as_felt().as_int() as u32);
+        self.event_handler.push(event_id);
         Ok(Vec::new())
     }
 }
@@ -73,7 +73,7 @@ impl AsyncHost for TestHost {
         _process: &ProcessState<'_>,
         event_id: EventID,
     ) -> impl Future<Output = Result<Vec<AdviceMutation>, EventError>> + Send {
-        self.event_handler.push(event_id.as_felt().as_int() as u32);
+        self.event_handler.push(event_id);
         async move { Ok(Vec::new()) }
     }
 }

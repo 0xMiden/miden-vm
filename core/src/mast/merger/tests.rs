@@ -849,8 +849,6 @@ fn mast_forest_merge_advice_maps_collision() {
 /// Tests successful merging of event tables without collisions.
 #[test]
 fn mast_forest_merge_event_tables_success() {
-    use alloc::string::ToString;
-
     use crate::EventName;
 
     let mut forest_a = MastForest::new();
@@ -859,8 +857,8 @@ fn mast_forest_merge_event_tables_success() {
     forest_a.make_root(id_call_a);
 
     // Add events to forest_a
-    let event_a1 = EventName::new("legacy_user_zero".to_string(), "event_a_one".to_string()).unwrap();
-    let event_a2 = EventName::new("legacy_user_one".to_string(), "event_a_two".to_string()).unwrap();
+    let event_a1 = EventName::new("legacy_user_zero", "event_a_one").unwrap();
+    let event_a2 = EventName::new("legacy_user_one", "event_a_two").unwrap();
     forest_a.event_table_mut().register(event_a1.clone());
     forest_a.event_table_mut().register(event_a2.clone());
 
@@ -870,7 +868,7 @@ fn mast_forest_merge_event_tables_success() {
     forest_b.make_root(id_call_b);
 
     // Add events to forest_b (including one duplicate and one new)
-    let event_b1 = EventName::new("legacy_user_two".to_string(), "event_b_one".to_string()).unwrap();
+    let event_b1 = EventName::new("legacy_user_two", "event_b_one").unwrap();
     forest_b.event_table_mut().register(event_a1.clone()); // duplicate - should be fine
     forest_b.event_table_mut().register(event_b1.clone());
 
@@ -878,8 +876,9 @@ fn mast_forest_merge_event_tables_success() {
     let (merged_forest, _root_map) = MastForest::merge([&forest_a, &forest_b]).unwrap();
 
     // Verify that all events are present in the merged EventTable
-    // Note: Forward lookup removed - now test reverse lookup since EventTable only stores EventID → EventName
-    // These tests verify the merge functionality works by checking reverse lookups using computed IDs
+    // Note: Forward lookup removed - now test reverse lookup since EventTable only stores EventID →
+    // EventName These tests verify the merge functionality works by checking reverse lookups
+    // using computed IDs
     assert_eq!(merged_forest.event_table().lookup_by_event_id(event_a1.id()), Some(&event_a1));
     assert_eq!(merged_forest.event_table().lookup_by_event_id(event_a2.id()), Some(&event_a2));
     assert_eq!(merged_forest.event_table().lookup_by_event_id(event_b1.id()), Some(&event_b1));

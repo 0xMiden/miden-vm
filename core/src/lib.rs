@@ -122,7 +122,7 @@ pub use operations::{
 };
 
 pub mod events;
-pub use events::{EventName, EventNameError, EventTable, EventID};
+pub use events::{EventID, EventName, EventNameError, EventTable};
 
 pub mod stack;
 pub use stack::{StackInputs, StackOutputs};

@@ -1,4 +1,5 @@
 use miden_assembly::Assembler;
+use miden_core::{EventID, EventName};
 use miden_processor::{AdviceInputs, ExecutionOptions, Program};
 use miden_prover::StackInputs;
 
@@ -12,6 +13,7 @@ fn test_event_handling() {
         emit.1
         push.2
         emit.2
+        emit.system::testing
         swapw dropw
     end";
 
@@ -28,7 +30,11 @@ fn test_event_handling() {
     .unwrap();
 
     // make sure events were handled correctly
-    let expected = vec![1, 2];
+    let expected = vec![
+        EventID::from_u32(1),
+        EventID::from_u32(2),
+        EventName::new("system", "testing").unwrap().into(),
+    ];
     assert_eq!(host.event_handler, expected);
 }
 

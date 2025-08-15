@@ -28,7 +28,6 @@ impl EventID {
     pub const fn as_felt(&self) -> Felt {
         self.0
     }
-
 }
 
 impl From<u32> for EventID {
@@ -85,7 +84,7 @@ mod tests {
 
     use super::*;
     use crate::utils::SliceReader;
-    
+
     // Test-only methods for EventID
     impl EventID {
         pub fn as_u64(self) -> u64 {

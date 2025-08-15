@@ -1,6 +1,6 @@
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 
-use miden_core::{DebugOptions, Felt, EventID, Word, mast::MastForest};
+use miden_core::{DebugOptions, EventID, Felt, Word, mast::MastForest};
 use miden_debug_types::{
     DefaultSourceManager, Location, SourceFile, SourceManager, SourceManagerSync, SourceSpan,
 };

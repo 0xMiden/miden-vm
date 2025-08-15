@@ -1,7 +1,7 @@
 use alloc::collections::BTreeMap;
 
 use miden_assembly::SourceManager;
-use miden_core::{Felt, EventID, Word};
+use miden_core::{EventID, Felt, Word};
 use miden_debug_types::{Location, SourceFile, SourceManagerSync, SourceSpan};
 use pretty_assertions::assert_eq;
 

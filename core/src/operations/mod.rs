@@ -5,7 +5,7 @@ pub use decorators::{AssemblyOp, DebugOptions, Decorator, DecoratorIterator, Dec
 use opcode_constants::*;
 
 use crate::{
-    Felt, EventID,
+    EventID, Felt,
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
