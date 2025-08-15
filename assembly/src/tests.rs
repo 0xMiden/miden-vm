@@ -8,6 +8,7 @@ use miden_assembly_syntax::{
 };
 use miden_core::{
     Operation, Program, Word, assert_matches,
+    crypto::hash::Blake3_256,
     mast::{MastNode, MastNodeId, error_code_from_msg},
     sys_events::{EVENT_HAS_MAP_KEY, EVENT_MAP_VALUE_TO_STACK},
     utils::{Deserializable, Serializable},
@@ -1310,6 +1311,45 @@ fn const_conversion_failed_to_u32() -> TestResult {
         "5 |     end",
         "  `----"
     );
+    Ok(())
+}
+
+#[test]
+fn const_word_from_string() -> TestResult {
+    let context = TestContext::default();
+    let sample_source_string = "lorem ipsum";
+
+    let source = source_file!(
+        &context,
+        format!(
+            r#"
+    const.SAMPLE_WORD=to_word("{sample_source_string}")
+
+    begin
+        push.SAMPLE_WORD
+    end
+    "#
+        )
+    );
+    let program = context.assemble(source)?;
+
+    let expected_hash_bytes: [u8; 32] = Blake3_256::hash(sample_source_string.as_bytes()).into();
+    let expected_hash = Word::try_from(expected_hash_bytes)
+        .expect("conversion of the Blake3_256 hash into the Word has failed");
+
+    let expected = format!(
+        "\
+begin
+    basic_block
+        push({})
+        push({})
+        push({})
+        push({})
+    end
+end",
+        expected_hash[0], expected_hash[1], expected_hash[2], expected_hash[3]
+    );
+    assert_str_eq!(format!("{program}"), expected);
     Ok(())
 }
 

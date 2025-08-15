@@ -8,6 +8,7 @@ use alloc::{
 use core::{marker::PhantomData, num::NonZeroU32, ops::Range};
 
 use miden_debug_types::{SourceFile, SourceSpan, Span, Spanned};
+use miden_core::ZERO;
 use smallvec::smallvec;
 
 use crate::{LibraryPath, LibraryNamespace, ast::*, Felt, FieldElement, StarkField, Word};
@@ -203,6 +204,7 @@ extern {
         "u32xor" => Token::U32Xor,
         "while" => Token::While,
         "xor" => Token::Xor,
+        "to_word" => Token::ToWord,
         EOF => Token::Eof,
         bare_ident => Token::Ident(<&'input str>),
         bin_value => Token::BinValue(<BinEncodedValue>),
@@ -1816,6 +1818,11 @@ Opcode: &'static str = {
 // ================================================================================================
 
 ConstantExpr: ConstantExpr = {
+    <l:@L> "to_word" "(" <value:string> ")" <r:@R> => {
+        let span = span!(source_file.id(), l, r);
+        ConstantExpr::HashWord(Ident::from_raw_parts(Span::new(span, value.into())), WordValue([ZERO; 4]))
+    },
+
     <l:@L> <x:ConstantExpr> "+" <y:ConstantExpr100> <r:@R> =>? {
         let expr = ConstantExpr::BinaryOp {  span: span!(source_file.id(), l, r), op: ConstantOp::Add, lhs: Box::new(x), rhs: Box::new(y) };
         expr.try_fold().map_err(|error| ParseError::User { error })

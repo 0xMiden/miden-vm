@@ -5,6 +5,7 @@
 #### Enhancements
 
 - Added slicing for the word constants ([#2057](https://github.com/0xMiden/miden-vm/pull/2057)).
+- Added ability to declare word-sized constants from strings ([#2073](https://github.com/0xMiden/miden-vm/pull/2073)).
 
 #### Changes
 

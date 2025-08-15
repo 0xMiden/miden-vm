@@ -100,6 +100,7 @@ pub enum ConstantExpr {
     },
     String(Ident),
     Word(Span<WordValue>),
+    HashWord(Ident, WordValue),
 }
 
 impl ConstantExpr {
@@ -130,7 +131,11 @@ impl ConstantExpr {
     /// Returns an error if an invalid expression is found while folding, such as division by zero.
     pub fn try_fold(self) -> Result<Self, ParsingError> {
         match self {
-            Self::String(_) | Self::Literal(_) | Self::Var(_) | Self::Word(_) => Ok(self),
+            Self::String(_)
+            | Self::Literal(_)
+            | Self::Var(_)
+            | Self::Word(_)
+            | Self::HashWord(..) => Ok(self),
             Self::BinaryOp { span, op, lhs, rhs } => {
                 if rhs.is_literal() {
                     let rhs = Self::into_inner(rhs).try_fold()?;
@@ -202,7 +207,7 @@ impl ConstantExpr {
 
     fn is_literal(&self) -> bool {
         match self {
-            Self::Literal(_) | Self::String(_) | Self::Word(_) => true,
+            Self::Literal(_) | Self::String(_) | Self::Word(_) | Self::HashWord(..) => true,
             Self::Var(_) => false,
             Self::BinaryOp { lhs, rhs, .. } => lhs.is_literal() && rhs.is_literal(),
         }
@@ -222,6 +227,7 @@ impl PartialEq for ConstantExpr {
         match (self, other) {
             (Self::Literal(l), Self::Literal(y)) => l == y,
             (Self::Var(l), Self::Var(y)) => l == y,
+            (Self::HashWord(l_s, l_h), Self::HashWord(r_s, r_h)) => l_s == r_s && l_h == r_h,
             (
                 Self::BinaryOp { op: lop, lhs: llhs, rhs: lrhs, .. },
                 Self::BinaryOp { op: rop, lhs: rlhs, rhs: rrhs, .. },
@@ -239,6 +245,10 @@ impl core::hash::Hash for ConstantExpr {
             Self::String(value) => value.hash(state),
             Self::Word(value) => value.hash(state),
             Self::Var(value) => value.hash(state),
+            Self::HashWord(string, hash) => {
+                string.hash(state);
+                hash.hash(state);
+            },
             Self::BinaryOp { op, lhs, rhs, .. } => {
                 op.hash(state);
                 lhs.hash(state);
@@ -254,6 +264,7 @@ impl fmt::Debug for ConstantExpr {
             Self::Literal(lit) => fmt::Debug::fmt(&**lit, f),
             Self::Word(w) => fmt::Debug::fmt(&**w, f),
             Self::Var(name) | Self::String(name) => fmt::Debug::fmt(&**name, f),
+            Self::HashWord(str, hash) => fmt::Debug::fmt(&(str, hash), f),
             Self::BinaryOp { op, lhs, rhs, .. } => {
                 f.debug_tuple(op.name()).field(lhs).field(rhs).finish()
             },
@@ -269,6 +280,9 @@ impl crate::prettier::PrettyPrint for ConstantExpr {
             Self::Literal(literal) => display(literal),
             Self::Word(spanned) => spanned.render(),
             Self::Var(ident) | Self::String(ident) => display(ident),
+            Self::HashWord(str, hash) => {
+                flatten(display(str) + const_text("(") + display(hash) + const_text(")"))
+            },
             Self::BinaryOp { op, lhs, rhs, .. } => {
                 let single_line = lhs.render() + display(op) + rhs.render();
                 let multi_line = lhs.render() + nl() + (display(op)) + rhs.render();
@@ -283,6 +297,7 @@ impl Spanned for ConstantExpr {
         match self {
             Self::Literal(spanned) => spanned.span(),
             Self::Word(spanned) => spanned.span(),
+            Self::HashWord(spanned, _) => spanned.span(),
             Self::Var(spanned) | Self::String(spanned) => spanned.span(),
             Self::BinaryOp { span, .. } => *span,
         }

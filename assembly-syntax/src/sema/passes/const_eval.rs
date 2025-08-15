@@ -111,6 +111,9 @@ impl VisitMut for ConstEvalVisitor<'_> {
                     Ok(ConstantExpr::Word(value)) => {
                         *imm = Immediate::Value(Span::new(span, IntValue::Word(*value.inner())));
                     },
+                    Ok(ConstantExpr::HashWord(_, hash_word)) => {
+                        *imm = Immediate::Value(Span::new(span, IntValue::Word(*hash_word)));
+                    },
                     Err(error) => {
                         self.analyzer.error(error);
                     },

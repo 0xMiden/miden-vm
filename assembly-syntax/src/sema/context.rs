@@ -4,11 +4,12 @@ use alloc::{
     vec::Vec,
 };
 
+use miden_core::{Word, crypto::hash::Blake3_256};
 use miden_debug_types::{SourceFile, Span, Spanned};
 use miden_utils_diagnostics::{Diagnostic, Severity};
 
 use super::{SemanticAnalysisError, SyntaxError};
-use crate::{Felt, ast::*};
+use crate::{Felt, ast::*, parser::WordValue};
 
 /// This maintains the state for semantic analysis of a single [Module].
 pub struct AnalysisContext {
@@ -76,9 +77,17 @@ impl AnalysisContext {
 
     fn const_eval(&self, value: &ConstantExpr) -> Result<ConstantExpr, SemanticAnalysisError> {
         match value {
-            ConstantExpr::Literal(_) | ConstantExpr::String(_) => Ok((*value).clone()),
-            ConstantExpr::Word(_) => Ok((*value).clone()),
+            ConstantExpr::Literal(_) | ConstantExpr::String(_) | ConstantExpr::Word(_) => {
+                Ok((*value).clone())
+            },
             ConstantExpr::Var(name) => self.get_constant(name).cloned(),
+            ConstantExpr::HashWord(string, _) => {
+                let digest_bytes: [u8; 32] = Blake3_256::hash(string.as_bytes()).into();
+                let hash_word = Word::try_from(digest_bytes)
+                    .expect("conversion of the Blake3_256 hash into the Word has failed");
+
+                Ok(ConstantExpr::HashWord(string.clone(), WordValue(*hash_word)))
+            },
             ConstantExpr::BinaryOp { op, lhs, rhs, .. } => {
                 let rhs = self.const_eval(rhs)?.expect_literal();
                 let lhs = self.const_eval(lhs)?.expect_literal();
