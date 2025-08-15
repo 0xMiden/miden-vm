@@ -5,7 +5,7 @@ pub use decorators::{AssemblyOp, DebugOptions, Decorator, DecoratorIterator, Dec
 use opcode_constants::*;
 
 use crate::{
-    Felt, ReducedEventID,
+    Felt, EventID,
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
@@ -163,14 +163,14 @@ pub enum Operation {
 
     /// Emits an event to the host.
     ///
-    /// The event is identified by a ReducedEventID that uniquely represents the event.
-    /// The ReducedEventID can be derived from a structured EventId (e.g.,
+    /// The event is identified by a EventID that uniquely represents the event.
+    /// The EventID can be derived from a structured EventId (e.g.,
     /// "miden-vm::MAP_VALUE") via Blake3 hashing, or created from a legacy u32 value for
     /// backward compatibility.
     ///
     /// Similar to Noop, this operation does not change the state of user stack. The immediate
     /// value affects the program MAST root computation.
-    Emit(ReducedEventID) = OPCODE_EMIT,
+    Emit(EventID) = OPCODE_EMIT,
 
     // ----- flow control operations -------------------------------------------------------------
     /// Marks the beginning of a join block.
@@ -995,7 +995,7 @@ impl Deserializable for Operation {
             OPCODE_MRUPDATE => Self::MrUpdate,
             OPCODE_PUSH => Self::Push(Felt::read_from(source)?),
             OPCODE_EMIT => {
-                let reduced_event_id = ReducedEventID::new(Felt::read_from(source)?);
+                let reduced_event_id = EventID::new(Felt::read_from(source)?);
                 Self::Emit(reduced_event_id)
             },
             OPCODE_SYSCALL => Self::SysCall,

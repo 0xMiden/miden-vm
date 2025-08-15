@@ -1,4 +1,4 @@
-use miden_core::{Felt, ReducedEventID, mast::MastForest, sys_events::SystemEvent};
+use miden_core::{Felt, EventID, mast::MastForest, sys_events::SystemEvent};
 
 use super::{ExecutionError, FastProcessor, ONE};
 use crate::{
@@ -84,7 +84,7 @@ impl FastProcessor {
     #[inline(always)]
     pub async fn op_emit(
         &mut self,
-        event_id: ReducedEventID,
+        event_id: EventID,
         host: &mut impl AsyncHost,
         err_ctx: &impl ErrorContext,
     ) -> Result<(), ExecutionError> {

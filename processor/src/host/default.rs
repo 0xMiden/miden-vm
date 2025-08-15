@@ -1,6 +1,6 @@
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 
-use miden_core::{DebugOptions, Felt, ReducedEventID, Word, mast::MastForest};
+use miden_core::{DebugOptions, Felt, EventID, Word, mast::MastForest};
 use miden_debug_types::{
     DefaultSourceManager, Location, SourceFile, SourceManager, SourceManagerSync, SourceSpan,
 };
@@ -80,7 +80,7 @@ where
     /// `fn(&mut ProcessState) -> Result<(), EventHandler>`
     pub fn load_handler(
         &mut self,
-        id: ReducedEventID,
+        id: EventID,
         handler: impl EventHandler,
     ) -> Result<(), ExecutionError> {
         self.event_handlers.register(id, Box::new(handler))
@@ -88,13 +88,13 @@ where
 
     /// Unload a handler with the given id, returning a flag indicating whether a handler
     /// was previously registered with this id.
-    pub fn unload_handler(&mut self, id: ReducedEventID) -> bool {
+    pub fn unload_handler(&mut self, id: EventID) -> bool {
         self.event_handlers.unregister(id)
     }
 
     /// Replaces a handler with the given id, returning a flag indicating whether a handler
     /// was previously registered with this id.
-    pub fn replace_handler(&mut self, id: ReducedEventID, handler: impl EventHandler) -> bool {
+    pub fn replace_handler(&mut self, id: EventID, handler: impl EventHandler) -> bool {
         let existed = self.event_handlers.unregister(id);
         self.load_handler(id, handler).unwrap();
         existed
@@ -157,7 +157,7 @@ where
     fn on_event(
         &mut self,
         process: &ProcessState,
-        event_id: ReducedEventID,
+        event_id: EventID,
     ) -> Result<Vec<AdviceMutation>, EventError> {
         if let Some(mutations) = self.event_handlers.handle_event(event_id, process)? {
             // the event was handled by the registered event handlers; just return
@@ -181,7 +181,7 @@ where
     fn on_event(
         &mut self,
         process: &ProcessState<'_>,
-        event_id: ReducedEventID,
+        event_id: EventID,
     ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>> {
         let result = <Self as SyncHost>::on_event(self, process, event_id);
         async move { result }
@@ -198,7 +198,7 @@ pub struct HostLibrary {
     /// A `MastForest` with procedures exposed by this library.
     pub mast_forest: Arc<MastForest>,
     /// List of handlers along with an event id to call them with `emit`.
-    pub handlers: Vec<(ReducedEventID, Box<dyn EventHandler>)>,
+    pub handlers: Vec<(EventID, Box<dyn EventHandler>)>,
 }
 
 impl From<Arc<MastForest>> for HostLibrary {

@@ -1,6 +1,6 @@
 use std::{future::Future, sync::Arc};
 
-use miden_core::{DebugOptions, ReducedEventID};
+use miden_core::{DebugOptions, EventID};
 use miden_debug_types::{DefaultSourceManager, Location, SourceFile, SourceManager, SourceSpan};
 use miden_processor::{
     AdviceMutation, AsyncHost, BaseHost, EventError, ExecutionError, MastForest, ProcessState,
@@ -60,7 +60,7 @@ impl SyncHost for TestHost {
     fn on_event(
         &mut self,
         _process: &ProcessState,
-        event_id: ReducedEventID,
+        event_id: EventID,
     ) -> Result<Vec<AdviceMutation>, EventError> {
         self.event_handler.push(event_id.as_felt().as_int() as u32);
         Ok(Vec::new())
@@ -71,7 +71,7 @@ impl AsyncHost for TestHost {
     fn on_event(
         &mut self,
         _process: &ProcessState<'_>,
-        event_id: ReducedEventID,
+        event_id: EventID,
     ) -> impl Future<Output = Result<Vec<AdviceMutation>, EventError>> + Send {
         self.event_handler.push(event_id.as_felt().as_int() as u32);
         async move { Ok(Vec::new()) }

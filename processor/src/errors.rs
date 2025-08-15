@@ -2,7 +2,7 @@ use alloc::sync::Arc;
 
 use miden_air::RowIndex;
 use miden_core::{
-    Felt, QuadFelt, ReducedEventID, Word,
+    Felt, QuadFelt, EventID, Word,
     mast::{DecoratorId, MastForest, MastNodeExt, MastNodeId},
     stack::MIN_STACK_DEPTH,
     utils::to_hex,
@@ -72,12 +72,12 @@ pub enum ExecutionError {
         label: SourceSpan,
         #[source_code]
         source_file: Option<Arc<SourceFile>>,
-        event_id: ReducedEventID,
+        event_id: EventID,
         #[source]
         error: EventError,
     },
     #[error("attempted to add event handler with previously inserted id: {event_id}")]
-    DuplicateEventHandler { event_id: ReducedEventID },
+    DuplicateEventHandler { event_id: EventID },
     #[error("assertion failed at clock cycle {clk} with error {}",
       match err_msg {
         Some(msg) => format!("message: {msg}"),
@@ -299,7 +299,7 @@ impl ExecutionError {
 
     pub fn event_error(
         error: EventError,
-        event_id: ReducedEventID,
+        event_id: EventID,
         err_ctx: &impl ErrorContext,
     ) -> Self {
         let (label, source_file) = err_ctx.label_and_source_file();

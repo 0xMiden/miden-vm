@@ -2,8 +2,8 @@ use alloc::{borrow::Borrow, string::ToString, sync::Arc, vec::Vec};
 
 use miden_assembly_syntax::{ast::Instruction, debuginfo::Span, diagnostics::Report};
 use miden_core::{
-    AssemblyOp, Decorator, DecoratorList, Felt, Operation, ReducedEventID,
-    events::EventId,
+    AssemblyOp, Decorator, DecoratorList, Felt, Operation, EventID,
+    events::EventName,
     mast::{DecoratorId, MastNodeId},
     sys_events::SystemEvent,
 };
@@ -249,9 +249,9 @@ impl BasicBlockBuilder<'_> {
         self.mast_forest_builder.register_error(msg)
     }
 
-    /// Registers an EventId in the MAST Forest event table and returns the
-    /// corresponding ReducedEventID.
-    pub fn register_event(&mut self, event_id: EventId) -> ReducedEventID {
-        self.mast_forest_builder.register_event(event_id)
+    /// Registers an EventName in the MAST Forest event table and returns the
+    /// corresponding EventID.
+    pub fn register_event(&mut self, event_name: EventName) -> EventID {
+        self.mast_forest_builder.register_event(event_name)
     }
 }

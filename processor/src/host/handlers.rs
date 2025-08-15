@@ -5,7 +5,7 @@ use alloc::{
 };
 use core::{error::Error, fmt, fmt::Debug};
 
-use miden_core::{DebugOptions, ReducedEventID};
+use miden_core::{DebugOptions, EventID};
 
 use crate::{AdviceMutation, ExecutionError, ProcessState};
 
@@ -91,7 +91,7 @@ pub type EventError = Box<dyn Error + Send + Sync + 'static>;
 /// ```
 #[derive(Default)]
 pub struct EventHandlerRegistry {
-    handlers: BTreeMap<ReducedEventID, Box<dyn EventHandler>>,
+    handlers: BTreeMap<EventID, Box<dyn EventHandler>>,
 }
 
 impl EventHandlerRegistry {
@@ -102,7 +102,7 @@ impl EventHandlerRegistry {
     /// Registers a boxed [`EventHandler`] with a given identifier.
     pub fn register(
         &mut self,
-        id: ReducedEventID,
+        id: EventID,
         handler: Box<dyn EventHandler>,
     ) -> Result<(), ExecutionError> {
         match self.handlers.entry(id) {
@@ -116,7 +116,7 @@ impl EventHandlerRegistry {
 
     /// Unregisters a handler with the given identifier, returning a flag whether a handler with
     /// that identifier was previously registered.
-    pub fn unregister(&mut self, id: ReducedEventID) -> bool {
+    pub fn unregister(&mut self, id: EventID) -> bool {
         self.handlers.remove(&id).is_some()
     }
 
@@ -128,7 +128,7 @@ impl EventHandlerRegistry {
     /// propagated to the caller.
     pub fn handle_event(
         &self,
-        id: ReducedEventID,
+        id: EventID,
         process: &ProcessState,
     ) -> Result<Option<Vec<AdviceMutation>>, EventError> {
         if let Some(handler) = self.handlers.get(&id) {

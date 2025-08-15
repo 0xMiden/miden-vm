@@ -1,4 +1,4 @@
-use miden_core::{ONE, Operation, ReducedEventID, ZERO};
+use miden_core::{ONE, Operation, EventID, ZERO};
 
 use super::{
     DECODER_TRACE_OFFSET, DEGREE_4_OPCODE_ENDS, DEGREE_4_OPCODE_STARTS, DEGREE_6_OPCODE_ENDS,
@@ -144,7 +144,7 @@ fn degree_4_op_flags() {
 fn composite_flags() {
     // ------ no change 0 ---------------------------------------------------------------------
 
-    let test_event = ReducedEventID::from_u32(42);
+    let test_event = EventID::from_u32(42);
     let op_no_change_0 = [
         Operation::MpVerify(ZERO),
         Operation::Span,

@@ -1,4 +1,4 @@
-use miden_core::{Felt, Operation, ReducedEventID, mast::MastForest, sys_events::SystemEvent};
+use miden_core::{Felt, Operation, EventID, mast::MastForest, sys_events::SystemEvent};
 
 use super::{
     super::{
@@ -136,7 +136,7 @@ impl Process {
     /// Forwards the emitted event id to the host.
     pub(super) fn op_emit<H>(
         &mut self,
-        event_id: ReducedEventID,
+        event_id: EventID,
         host: &mut H,
         err_ctx: &impl ErrorContext,
     ) -> Result<(), ExecutionError>

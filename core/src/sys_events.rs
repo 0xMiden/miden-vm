@@ -7,7 +7,7 @@ use core::fmt;
 // between 0 and 2^32.
 pub use constants::*;
 
-use crate::ReducedEventID;
+use crate::EventID;
 
 #[rustfmt::skip]
 mod constants {
@@ -298,8 +298,8 @@ pub enum SystemEvent {
 }
 
 impl SystemEvent {
-    /// Returns the ReducedEventID for this system event.
-    pub fn reduced_id(&self) -> ReducedEventID {
+    /// Returns the EventID for this system event.
+    pub fn reduced_id(&self) -> EventID {
         // Use the legacy constant values directly - these are the actual values used
         let legacy_id = match self {
             SystemEvent::MerkleNodeMerge => EVENT_MERKLE_NODE_MERGE,
@@ -321,14 +321,14 @@ impl SystemEvent {
             SystemEvent::HdwordToMapWithDomain => EVENT_HDWORD_TO_MAP_WITH_DOMAIN,
             SystemEvent::HpermToMap => EVENT_HPERM_TO_MAP,
         };
-        ReducedEventID::from_u32(legacy_id)
+        EventID::from_u32(legacy_id)
     }
 
-    /// Returns a system event from a ReducedEventID.
+    /// Returns a system event from a EventID.
     ///
-    /// This method tries to find a SystemEvent whose ReducedEventID matches the given one.
-    pub fn from_reduced_id(reduced_id: ReducedEventID) -> Option<Self> {
-        // Search through all system events to find a matching ReducedEventID
+    /// This method tries to find a SystemEvent whose EventID matches the given one.
+    pub fn from_reduced_id(reduced_id: EventID) -> Option<Self> {
+        // Search through all system events to find a matching EventID
         ALL_SYSTEM_EVENTS.iter().find(|&&event| event.reduced_id() == reduced_id).copied()
     }
 }

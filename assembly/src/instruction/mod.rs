@@ -5,7 +5,7 @@ use miden_assembly_syntax::{
     parser::IntValue,
 };
 use miden_core::{
-    Decorator, Felt, ONE, Operation, ReducedEventID, WORD_SIZE, ZERO, events::EventId,
+    Decorator, Felt, ONE, Operation, EventID, WORD_SIZE, ZERO, events::EventName,
     mast::MastNodeId,
 };
 
@@ -554,7 +554,7 @@ impl Assembler {
                 let reduced_id = match event_value {
                     EventValue::Legacy(id) => {
                         // Legacy numeric event ID - convert directly to Felt
-                        ReducedEventID::from(id.expect_value())
+                        EventID::from(id.expect_value())
                     },
                     EventValue::Name(name) => {
                         // String-based event name - parse and register in EventTable
@@ -572,15 +572,15 @@ impl Assembler {
                         };
 
                         // Parse the event name to create an EventId
-                        let event_id = event_name.parse::<EventId>().map_err(|err| {
+                        let event_name = event_name.parse::<EventName>().map_err(|err| {
                             Report::new(
                                 RelatedLabel::error(format!("{err}"))
                                     .with_labeled_span(instruction.span(), "invalid event identifier"),
                             )
                         })?;
 
-                        // Register the event in the EventTable and get the ReducedEventID
-                        block_builder.register_event(event_id)
+                        // Register the event in the EventTable and get the EventID
+                        block_builder.register_event(event_name)
                     },
                 };
 
