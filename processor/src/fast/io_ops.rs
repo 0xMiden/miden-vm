@@ -11,22 +11,37 @@ impl FastProcessor {
     /// Analogous to `Process::op_advpop`.
     #[inline(always)]
     pub fn op_advpop(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
-        let value = self
-            .advice
-            .pop_stack()
-            .map_err(|err| ExecutionError::advice_error(err, self.clk, err_ctx))?;
+        let value = {
+            let value = self
+                .advice
+                .pop_stack()
+                .map_err(|err| ExecutionError::advice_error(err, self.clk, err_ctx))?;
+            if let Some(trace_state_builder) = &mut self.trace_state_builder {
+                trace_state_builder.advice.record_pop_stack(value);
+            }
+            value
+        };
+
         self.increment_stack_size();
         self.stack_write(0, value);
+
         Ok(())
     }
 
     /// Analogous to `Process::op_advpopw`.
     #[inline(always)]
     pub fn op_advpopw(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
-        let word = self
-            .advice
-            .pop_stack_word()
-            .map_err(|err| ExecutionError::advice_error(err, self.clk, err_ctx))?;
+        let word = {
+            let word = self
+                .advice
+                .pop_stack_word()
+                .map_err(|err| ExecutionError::advice_error(err, self.clk, err_ctx))?;
+            if let Some(trace_state_builder) = &mut self.trace_state_builder {
+                trace_state_builder.advice.record_pop_stack_word(word);
+            }
+            word
+        };
+
         self.stack_write_word(0, &word);
 
         Ok(())
@@ -40,7 +55,7 @@ impl FastProcessor {
 
         let word = self
             .memory
-            .read_word(self.ctx, addr, self.clk, err_ctx)
+            .read_word(self.ctx, addr, self.clk, err_ctx, &mut self.trace_state_builder)
             .map_err(ExecutionError::MemoryError)?;
         self.stack_write_word(0, &word);
 
@@ -66,7 +81,7 @@ impl FastProcessor {
         let element = {
             let addr = self.stack_get(0);
             self.memory
-                .read_element(self.ctx, addr, err_ctx)
+                .read_element(self.ctx, addr, err_ctx, &mut self.trace_state_builder)
                 .map_err(ExecutionError::MemoryError)?
         };
 
@@ -100,10 +115,22 @@ impl FastProcessor {
         let addr_second_word = addr_first_word + WORD_SIZE_FELT;
         let words = [
             self.memory
-                .read_word(self.ctx, addr_first_word, self.clk, err_ctx)
+                .read_word(
+                    self.ctx,
+                    addr_first_word,
+                    self.clk,
+                    err_ctx,
+                    &mut self.trace_state_builder,
+                )
                 .map_err(ExecutionError::MemoryError)?,
             self.memory
-                .read_word(self.ctx, addr_second_word, self.clk, err_ctx)
+                .read_word(
+                    self.ctx,
+                    addr_second_word,
+                    self.clk,
+                    err_ctx,
+                    &mut self.trace_state_builder,
+                )
                 .map_err(ExecutionError::MemoryError)?,
         ];
 
@@ -132,6 +159,10 @@ impl FastProcessor {
             .advice
             .pop_stack_dword()
             .map_err(|err| ExecutionError::advice_error(err, self.clk, err_ctx))?;
+
+        if let Some(trace_state_builder) = &mut self.trace_state_builder {
+            trace_state_builder.advice.record_pop_stack_dword(words);
+        }
 
         // write the words to memory
         self.memory
