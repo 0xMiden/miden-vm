@@ -1,6 +1,8 @@
 # Constant value for the depth at which leaves sit
 const.LEAF_DEPTH=64
 
+use.std::crypto::hashes::rpo
+
 # SET
 # =================================================================================================
 
@@ -131,9 +133,128 @@ proc.insert_single_leaf
         # => [V_in_leaf, R_new]
     else
         # Leaf becomes a Multiple kv-pair case
-        # TODO (fail for now)
-        push.1 assertz
+        # => [K_in_leaf, K, V_in_leaf, V, R]
+
+        exec.single_to_multi_leaf
+        # => [V_old, R_new]
     end
+end
+
+#! Inputs:
+#!   Operand stack: [K0, V0, K1, V1, ...]
+#!
+#! Outputs:
+#!   Operand stack: [K_lt, V_lt, K_gt, V_gt, ...]
+proc.sort_double_pair.1
+    # => [K0, V0, K1, V1]
+    dupw.2 # => [K1, K0, V0, K1, V1]
+    dupw.1 # => [K0, K1, K0, V0, K1, V1]
+    exec.is_key_less
+    # => [K0 < K1, K0, V0, K1, V1]
+
+    loc_store.0 # lhs_less
+    # => [K0, V0, K1, V1]
+
+    movupw.2 # K1
+    # => [K1, K0, V0, V1]
+
+    loc_load.0 cswapw
+    # => [K_lt, K_gt, V0, V1]
+
+    movupw.2 # V0
+    # => [V0, K_lt, K_gt, V1]
+    movupw.3 # V1
+    # => [V1, V0, K_lt, K_gt]
+    loc_load.0 cswapw
+    # => [V_lt, V_gt, K_lt, K_gt]
+
+    swapw.3
+    # => [K_gt, V_gt, K_lt, V_lt]
+    movupw.3
+    # => [V_lt, K_gt, V_gt, K_lt]
+    movupw.3
+    # => [K_lt, V_lt, K_gt, V_gt]
+end
+
+#! Inputs:
+#!   Operand stack: [K_in_leaf, K, V_in_leaf, V, R]
+proc.single_to_multi_leaf.20
+    # LOCALS:
+    #      0: key_index
+    #   1..3: empty
+    #   4..7: K_lt[3..0]
+    #  8..11: V_lt[3..0]
+    # 12..15: K_gt[3..0]
+    # 16..20: V_gt[3..0]
+
+    # We need 4 words' worth of contiguous, addressable memory for `rpo::hash_memory_words`.
+    # With `locaddr`, we can use our local memory for that.
+
+    # => [K_in_leaf, K, V_in_leaf, V, R]
+
+    # Store the key's index. We'll need it later.
+    dup.0 loc_store.0
+    # => [K_in_leaf, K, V_in_leaf, V, R]
+    # Locals: [K_in_leaf[3]]
+
+    movupw.2 # => [V_in_leaf, K_in_leaf, K, V, R]
+    swapw # => [K_in_leaf, V_in_leaf, K, V, R]
+    exec.sort_double_pair
+    # => [K_lt, V_lt, K_gt, V_gt, R]
+
+    loc_storew.4 dropw
+    # => [V_lt, K_gt, V_gt, R]
+    loc_storew.8 dropw
+    # => [K_gt, V_gt, R]
+    loc_storew.12 dropw
+    # => [V_gt, R]
+    loc_storew.16 dropw
+    # => [R]
+
+    # We need a "one past the end" address, and `locaddr.20` doesn't assemble.
+    locaddr.19 add.1
+    # => [end_addr, R]
+    locaddr.4
+    # => [start_addr, end_addr, R]
+
+    exec.rpo::hash_memory_words
+    # => [NV, R]
+    # The node value is the key for the advice map.
+
+    # `hash_memory_words` pads the stack a bit. Let's fix up the stack hygiene.
+    movupw.3 dropw
+
+    # Update the advice map.
+    # => [NV, ...]
+    locaddr.4
+    # => [start_addr, NV, ...]
+    movdn.4
+    # => [NV, start_addr, ...]
+    locaddr.19 add.1
+    # => [end_addr, NV, start_addr, ...]
+    movdn.5
+    # => [NV, start_addr, end_addr]
+    adv.insert_mem
+    # => [NV, start_addr, end_addr]
+    movup.4 drop movup.4 drop
+    # => [NV]
+
+    swapw
+    # => [R, NV]
+
+    # Hey remember how we stored that index for later?
+    loc_load.0
+    # => [i, R, NV]
+    push.LEAF_DEPTH
+    # => [d, i, R, NV]
+
+    mtree_set
+    # => [NV_old, R_new]
+
+    # By nature, if an insertion transforms a single-leaf to a multi-leaf, then the old value at
+    # this key is an empty word.
+    padw swapw dropw
+    # => [Z, R_new]
 end
 
 #! Removes the provided key/value pair from the leaf. The leaf to which we're inserting is
@@ -221,6 +342,144 @@ proc.remove_single_leaf
         padw
         # => [ZERO, R]
     end
+end
+
+# COMPARISON OPERATIONS
+# -------------------------------------------------------------------------------------------------
+
+#! Returns true if KEY1 is strictly greater than KEY2, false otherwise.
+#!
+#! The implementation avoids branching for performance reasons.
+#!
+#! For reference, this is equivalent to the following Rust function:
+#!
+#! fn is_key_greater(key1: Word, key2: Word) -> bool {
+#!     let mut result = false;
+#!     let mut cont = true;
+#!
+#!     for i in (0..4).rev() {
+#!         let gt = key1[i].as_int() > key2[i].as_int();
+#!         let eq = key1[i].as_int() == key2[i].as_int();
+#!         result |= gt & cont;
+#!         cont &= eq;
+#!     }
+#!
+#!     result
+#! }
+#!
+#! Inputs:  [KEY1, KEY2]
+#! Outputs: [is_key_greater]
+proc.is_key_greater
+    exec.arrange_words_adjacent
+    # => [2_3, 1_3, 2_2, 1_2, 2_1, 1_1, 2_0, 1_0]
+
+    push.1.0
+    # => [is_key_greater, continue, 2_3, 1_3, 2_2, 1_2, 2_1, 1_1, 2_0, 1_0]
+
+    repeat.4
+        movup.3 movup.3
+        # => [2_x, 1_x, is_key_greater, continue, <remaining_felts>]
+
+        # check 1_x == 2_x; if so, we continue
+        dup dup.2 eq
+        # => [is_felt_eq, 2_x, 1_x, is_key_greater, continue, <remaining_felts>]
+
+        movdn.3
+        # => [2_x, 1_x, is_key_greater, is_felt_eq, continue, <remaining_felts>]
+
+        # check 1_x > 2_x
+        gt
+        # => [is_felt_gt, is_key_greater, is_felt_eq, continue, <remaining_felts>]
+
+        dup.3 and
+        # => [is_felt_gt_if_continue, is_key_greater, is_felt_eq, continue, <remaining_felts>]
+
+        or movdn.2
+        # => [is_felt_eq, continue, is_key_greater, <remaining_felts>]
+
+        # keeps continue at 1 if the felts are equal
+        # sets continue to 0 if the felts are not equal
+        and
+        # => [continue, is_key_greater, <remaining_felts>]
+
+        swap
+        # => [is_key_greater, continue, <remaining_felts>]
+    end
+    # => [is_key_greater, continue]
+
+    swap drop
+    # => [is_key_greater]
+end
+
+#! Returns true if KEY1 is strictly less than KEY2, false otherwise.
+#!
+#! The implementation avoids branching for performance reasons.
+#!
+#! From an implementation standpoint this is exactly the same as `is_key_greater` except it uses
+#! `lt` rather than `gt`. See its docs for details.
+#!
+#! Inputs:  [KEY1, KEY2]
+#! Outputs: [is_key1_lt_key2]
+proc.is_key_less
+    exec.arrange_words_adjacent
+    # => [2_3, 1_3, 2_2, 1_2, 2_1, 1_1, 2_0, 1_0]
+
+    push.1.0
+    # => [is_key_less, continue, 2_3, 1_3, 2_2, 1_2, 2_1, 1_1, 2_0, 1_0]
+
+    repeat.4
+        movup.3 movup.3
+        # => [2_x, 1_x, is_key_less, continue, <remaining_felts>]
+
+        # check 1_x == 2_x; if so, we continue
+        dup dup.2 eq
+        # => [is_felt_eq, 2_x, 1_x, is_key_less, continue, <remaining_felts>]
+
+        movdn.3
+        # => [2_x, 1_x, is_key_less, is_felt_eq, continue, <remaining_felts>]
+
+        # check 1_x < 2_x
+        lt
+        # => [is_felt_lt, is_key_less, is_felt_eq, continue, <remaining_felts>]
+
+        dup.3 and
+        # => [is_felt_lt_if_continue, is_key_less, is_felt_eq, continue, <remaining_felts>]
+
+        or movdn.2
+        # => [is_felt_eq, continue, is_key_less, <remaining_felts>]
+
+        # keeps continue at 1 if the felts are equal
+        # sets continue to 0 if the felts are not equal
+        and
+        # => [continue, is_key_less, <remaining_felts>]
+
+        swap
+        # => [is_key_less, continue, <remaining_felts>]
+    end
+    # => [is_key_less, continue]
+
+    swap drop
+    # => [is_key_less]
+end
+
+#! Arranges the given words such that the corresponding elements are next to each other.
+#!
+#! Inputs:  [KEY1, KEY2]
+#! Outputs: [key2_3, key1_3, key2_2, key1_2, key2_1, key1_1, key2_0, key1_0]
+proc.arrange_words_adjacent
+    # => [1_3, 1_2, 1_1, 1_0, 2_3, 2_2, 2_1, 2_0]
+
+    movup.3 movup.7
+    # => [2_0, 1_0, 1_3, 1_2, 1_1, 2_3, 2_2, 2_1]
+
+    movup.4 movup.7
+    # => [2_1, 1_1, 2_0, 1_0, 1_3, 1_2, 2_3, 2_2]
+
+    movup.5 movup.7
+    # => [2_2, 1_2, 2_1, 1_1, 2_0, 1_0, 1_3, 2_3]
+
+    movup.6 movup.7
+    # => [2_3, 1_3, 2_2, 1_2, 2_1, 1_1, 2_0, 1_0]
 end
 
 #! Inserts or removes a value associated with the given key. The leaf to which we're inserting is
@@ -353,6 +612,82 @@ end
 # GET
 # =================================================================================================
 
+
+#! Inputs:
+#!   Operand stack: [pair_count, K, R]
+#!   Advice stack:  [V1, K2, V2, K2, ...]
+proc.get_multi_leaf_value
+    dup movdn.9
+    # => [pair_count, K, R, pair_count]
+
+    gt.0
+    # => [has_more, K, R, pair_count]
+    # The loop should always run at least once, or this procedure's invariants are invalid.
+    assert.err="unreachable: get_multi_leaf_value called with 0 pairs"
+    push.1
+    while.true
+        # => [K, R, pair_count]
+
+        # Get the next pair from the advice stack.
+        adv_push.8
+        # => [V', K', K, R, pair_count]
+
+        # Get the pair's key so we can compare it against the caller-provided key.
+
+        movupw.2 movupw.2
+        # => [K', K, V', R, pair_count]
+
+        eqw
+        # => [key_eq, K', K, V', R, pair_count]
+
+        movdn.4 dropw
+        # => [key_eq, K, V', R, pair_count]
+
+        if.true
+            # => [K, V', R, pair_count]
+
+            # We've found the right pair. Cleanup our stack, and prepare stack outputs.
+
+            # We no longer need the original key.
+            dropw # => [V', R, pair_count]
+
+            push.0
+            # => [has_more_pairs = 0, V', R, pair_count]
+        else
+            # => [V', K, R, pair_count]
+
+            # Discard the pair-value from the advice provider, and prepare the stack
+            # for the next loop condition.
+            swapw dropw
+            # => [K, R, pair_count]
+
+            # Decrement pair_count.
+            movup.8 sub.1 movdn.8
+            # => [K, R, pair_count]
+
+            # Prepare stack for the next loop condition.
+            dup.8 gt.0
+
+            # => [has_more_pairs, K, R, pair_count]
+        end
+    end
+
+    # While loop over.
+    # => [?, R, pair_count]
+
+    # Check pair_count. It will tell us the meaining of the first stack word.
+    movup.8 eq.0
+    if.true
+        # => [K, R]
+
+        # Value not found for this key.
+        padw swapw dropw
+    else
+        # => [V, R]
+        nop
+    end
+end
+
 #! Returns the value located under the specified key in the Sparse Merkle Tree defined by the
 #! specified root.
 #!
@@ -431,9 +766,19 @@ export.get
             hmerge assert_eqw
             # => [V, R]
         else
-            # Multiple kv-pair case
-            # TODO (fail for now)
-            push.1 assertz
+            # => [leaf_size, NV, K, R]
+
+            # We don't care about the node's hash anymore.
+            movdn.12 dropw
+            # => [K, R, leaf_size]
+
+            # Each pair is 8 fields.
+            movup.8 div.8
+            # => [pair_count, K, R]
+
+            exec.get_multi_leaf_value
+
+            # => [V, R]
         end
     end
 end
