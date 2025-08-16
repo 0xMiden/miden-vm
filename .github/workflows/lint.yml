@@ -13,7 +13,7 @@ jobs:
     name: clippy nightly on ubuntu-latest
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Clippy
         run: |
           rustup update --no-self-update nightly
@@ -24,7 +24,7 @@ jobs:
     name: rustfmt check nightly on ubuntu-latest
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Rustfmt
         run: |
           rustup update --no-self-update nightly
@@ -35,7 +35,7 @@ jobs:
     name: doc stable on ubuntu-latest
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Build docs
         run: |
           rustup update --no-self-update
