@@ -1,5 +1,5 @@
-use.std::crypto::stark::constants
 use.std::crypto::hashes::rpo
+use.std::crypto::stark::constants
 
 #! Compute the LDE domain generator from the log2 of its size.
 #!
@@ -83,8 +83,10 @@ export.set_up_auxiliary_inputs_ace
     while.true
         dup.1 dup.1
         # => [z_1, z_0, z_1, z_0, k, (z_1, z_0)^n, z_1, z_0, alpha1, alpha0, ...] where k = min_num_cycles
+
         ext2mul
         # => [z_exp_1, z_exp_0, k, (z_1, z_0)^n, z_1, z_0, alpha1, alpha0, ...] where k = min_num_cycles
+
         dup.2 sub.1 swap.3
         push.1 neq
     end
@@ -95,6 +97,7 @@ export.set_up_auxiliary_inputs_ace
     exec.constants::get_trace_domain_generator
     inv
     # => [g^-1, z_k_1, z_k_0, (z_1, z_0)^n, z_1, z_0, alpha1, alpha0, ...] where k = min_num_cycles
+
     movdn.2
     push.0
     movdn.2
