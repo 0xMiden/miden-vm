@@ -355,6 +355,7 @@ impl Assembler {
             Instruction::PushU32(imm) => env_ops::push_one(*imm, block_builder),
             Instruction::PushFelt(imm) => env_ops::push_one(*imm, block_builder),
             Instruction::PushWord(imms) => env_ops::push_many(&imms.0, block_builder),
+            Instruction::PushFeltList(imms) => env_ops::push_many(imms, block_builder),
             Instruction::Sdepth => block_builder.push_op(SDepth),
             Instruction::Caller => env_ops::caller(block_builder, proc_ctx, instruction.span())?,
             Instruction::Clk => block_builder.push_op(Clk),
