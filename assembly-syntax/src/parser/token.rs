@@ -296,6 +296,7 @@ pub enum Token<'input> {
     Procref,
     Push,
     Repeat,
+    Range,
     Sdepth,
     Stack,
     Sub,
@@ -552,6 +553,7 @@ impl fmt::Display for Token<'_> {
             Token::Rparen => write!(f, ")"),
             Token::Rbracket => write!(f, "]"),
             Token::Rstab => write!(f, "->"),
+            Token::Range => write!(f, ".."),
             Token::DocComment(DocumentationType::Module(_)) => f.write_str("module doc"),
             Token::DocComment(DocumentationType::Form(_)) => f.write_str("doc comment"),
             Token::HexValue(_) => f.write_str("hex-encoded value"),
@@ -966,6 +968,7 @@ impl<'input> Token<'input> {
                     ")" => Some(Token::Rparen),
                     "]" => Some(Token::Rbracket),
                     "->" => Some(Token::Rstab),
+                    ".." => Some(Token::Range),
                     "end of file" => Some(Token::Eof),
                     "module doc" => {
                         Some(Token::DocComment(DocumentationType::Module(String::new())))

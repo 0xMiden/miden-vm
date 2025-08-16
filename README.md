@@ -22,7 +22,7 @@ Miden VM is a zero-knowledge virtual machine written in Rust. For any program ex
 
 ### Status and features
 
-Miden VM is currently on release v0.17. In this release, most of the core features of the VM have been stabilized, and most of the STARK proof generation has been implemented. While we expect to keep making changes to the VM internals, the external interfaces should remain relatively stable, and we will do our best to minimize the amount of breaking changes going forward.
+Miden VM is currently on release v0.18. In this release, most of the core features of the VM have been stabilized, and most of the STARK proof generation has been implemented. While we expect to keep making changes to the VM internals, the external interfaces should remain relatively stable, and we will do our best to minimize the amount of breaking changes going forward.
 
 The next version of the VM is being developed in the [next](https://github.com/0xMiden/miden-vm/tree/next) branch. There is also a documentation for the latest features and changes in the next branch [documentation next branch](https://0xMiden.github.io/miden-vm/intro/main.html).
 
