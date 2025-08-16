@@ -2,8 +2,6 @@ pub mod advice;
 pub mod debug;
 mod print;
 
-use alloc::vec::Vec;
-
 pub use self::{advice::SystemEventNode, debug::DebugOptions};
 use crate::{
     Felt,
@@ -211,10 +209,6 @@ pub enum Instruction {
     PushU32(u32),
     PushFelt(Felt),
     PushWord(WordValue),
-    PushU8List(Vec<u8>),
-    PushU16List(Vec<u16>),
-    PushU32List(Vec<u32>),
-    PushFeltList(Vec<Felt>),
     Locaddr(ImmU16),
     Sdepth,
     Caller,

@@ -2,6 +2,10 @@
 
 ## 0.18.0 (TBD)
 
+#### Changes
+
+- Removed unused `PushU8List`, `PushU16List`, `PushU32List`, and `PushFeltList` assembly instructions. These instructions were only defined in the AST but never used in the actual codebase. Multiple values can be pushed using the existing `push.n.m.p.q` syntax or the `push.[n,m,p,q]` syntax ([#2053](https://github.com/0xMiden/miden-vm/issues/2053)).
+
 ## 0.17.0 (2025-08-06)
 
 #### Enhancements
