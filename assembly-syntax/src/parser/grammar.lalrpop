@@ -805,7 +805,7 @@ FoldableInstWithFeltImmediate: SmallOpsVec = {
             Some(imm) => {
                 match imm {
                     Immediate::Constant(name) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Constant(name)))), Op::Inst(Span::new(span, Instruction::Lt))],
-                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::PushFelt(value.into_inner()))), Op::Inst(Span::new(span, Instruction::Lt))],
+                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::Felt(value.into_inner())))))), Op::Inst(Span::new(span, Instruction::Lt))],
                 }
             }
             None => smallvec![Op::Inst(Span::new(span, Instruction::Lt))],
@@ -817,7 +817,7 @@ FoldableInstWithFeltImmediate: SmallOpsVec = {
             Some(imm) => {
                 match imm {
                     Immediate::Constant(name) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Constant(name)))), Op::Inst(Span::new(span, Instruction::Lte))],
-                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::PushFelt(value.into_inner()))), Op::Inst(Span::new(span, Instruction::Lte))],
+                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::Felt(value.into_inner())))))), Op::Inst(Span::new(span, Instruction::Lte))],
                 }
             }
             None => smallvec![Op::Inst(Span::new(span, Instruction::Lte))],
@@ -829,7 +829,7 @@ FoldableInstWithFeltImmediate: SmallOpsVec = {
             Some(imm) => {
                 match imm {
                     Immediate::Constant(name) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Constant(name)))), Op::Inst(Span::new(span, Instruction::Gt))],
-                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::PushFelt(value.into_inner()))), Op::Inst(Span::new(span, Instruction::Gt))],
+                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::Felt(value.into_inner())))))), Op::Inst(Span::new(span, Instruction::Gt))],
                 }
             }
             None => smallvec![Op::Inst(Span::new(span, Instruction::Gt))],
@@ -841,7 +841,7 @@ FoldableInstWithFeltImmediate: SmallOpsVec = {
             Some(imm) => {
                 match imm {
                     Immediate::Constant(name) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Constant(name)))), Op::Inst(Span::new(span, Instruction::Gte))],
-                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::PushFelt(value.into_inner()))), Op::Inst(Span::new(span, Instruction::Gte))],
+                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::Felt(value.into_inner())))))), Op::Inst(Span::new(span, Instruction::Gte))],
                 }
             }
             None => smallvec![Op::Inst(Span::new(span, Instruction::Gte))],
@@ -867,7 +867,7 @@ FoldableInstWithFeltImmediate: SmallOpsVec = {
     <l:@L> "mul" <imm:MaybeImm<Felt>> <r:@R> => {
         let span = span!(source_file.id(), l, r);
         match imm {
-            Some(imm) if imm == Felt::ZERO => smallvec![Op::Inst(Span::new(span, Instruction::Drop)), Op::Inst(Span::new(span, Instruction::PushU8(0)))],
+            Some(imm) if imm == Felt::ZERO => smallvec![Op::Inst(Span::new(span, Instruction::Drop)), Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U8(0))))))],
             Some(imm) if imm == Felt::ONE => smallvec![],
             Some(imm) => smallvec![Op::Inst(Span::new(span, Instruction::MulImm(imm)))],
             None => smallvec![Op::Inst(Span::new(span, Instruction::Mul))],
@@ -914,11 +914,11 @@ FoldableInstWithU32Immediate: SmallOpsVec = {
     <l:@L> "u32and" <imm:MaybeImm<U32>> <r:@R> => {
         let span = span!(source_file.id(), l, r);
         match imm {
-            Some(imm) if imm == 0 => smallvec![Op::Inst(Span::new(span, Instruction::Drop)), Op::Inst(Span::new(span, Instruction::PushU8(0)))],
+            Some(imm) if imm == 0 => smallvec![Op::Inst(Span::new(span, Instruction::Drop)), Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U8(0))))))],
             Some(imm) => {
                 match imm {
                     Immediate::Constant(name) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Constant(name)))), Op::Inst(Span::new(span, Instruction::U32And))],
-                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::PushU32(value.into_inner()))), Op::Inst(Span::new(span, Instruction::U32And))],
+                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U32(value.into_inner())))))), Op::Inst(Span::new(span, Instruction::U32And))],
                 }
             }
             None => smallvec![Op::Inst(Span::new(span, Instruction::U32And))],
@@ -931,7 +931,7 @@ FoldableInstWithU32Immediate: SmallOpsVec = {
             Some(imm) => {
                 match imm {
                     Immediate::Constant(name) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Constant(name)))), Op::Inst(Span::new(span, Instruction::U32Or))],
-                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::PushU32(value.into_inner()))), Op::Inst(Span::new(span, Instruction::U32Or))],
+                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U32(value.into_inner())))))), Op::Inst(Span::new(span, Instruction::U32Or))],
                 }
             }
             None => smallvec![Op::Inst(Span::new(span, Instruction::U32Or))],
@@ -944,7 +944,7 @@ FoldableInstWithU32Immediate: SmallOpsVec = {
             Some(imm) => {
                 match imm {
                     Immediate::Constant(name) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Constant(name)))), Op::Inst(Span::new(span, Instruction::U32Xor))],
-                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::PushU32(value.into_inner()))), Op::Inst(Span::new(span, Instruction::U32Xor))],
+                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U32(value.into_inner())))))), Op::Inst(Span::new(span, Instruction::U32Xor))],
                 }
             }
             None => smallvec![Op::Inst(Span::new(span, Instruction::U32Xor))],
@@ -956,7 +956,7 @@ FoldableInstWithU32Immediate: SmallOpsVec = {
             Some(imm) => {
                 match imm {
                     Immediate::Constant(name) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Constant(name)))), Op::Inst(Span::new(span, Instruction::U32Not))],
-                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::PushU32(value.into_inner()))), Op::Inst(Span::new(span, Instruction::U32Not))],
+                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U32(value.into_inner())))))), Op::Inst(Span::new(span, Instruction::U32Not))],
                 }
             }
             None => smallvec![Op::Inst(Span::new(span, Instruction::U32Not))],
@@ -981,7 +981,7 @@ FoldableInstWithU32Immediate: SmallOpsVec = {
     <l:@L> "u32wrapping_mul" <imm:MaybeImm<U32>> <r:@R> => {
         let span = span!(source_file.id(), l, r);
         match imm {
-            Some(imm) if imm == 0 => smallvec![Op::Inst(Span::new(span, Instruction::Drop)), Op::Inst(Span::new(span, Instruction::PushU8(0)))],
+            Some(imm) if imm == 0 => smallvec![Op::Inst(Span::new(span, Instruction::Drop)), Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U8(0))))))],
             Some(imm) if imm == 1 => smallvec![],
             Some(imm) => smallvec![Op::Inst(Span::new(span, Instruction::U32WrappingMulImm(imm)))],
             None => smallvec![Op::Inst(Span::new(span, Instruction::U32WrappingMul))],
@@ -1046,7 +1046,7 @@ FoldableInstWithU32Immediate: SmallOpsVec = {
             Some(imm) => {
                 match imm {
                     Immediate::Constant(name) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Constant(name)))), Op::Inst(Span::new(span, Instruction::U32Lt))],
-                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::PushU32(value.into_inner()))), Op::Inst(Span::new(span, Instruction::U32Lt))],
+                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U32(value.into_inner())))))), Op::Inst(Span::new(span, Instruction::U32Lt))],
                 }
             }
             None => smallvec![Op::Inst(Span::new(span, Instruction::U32Lt))],
@@ -1058,7 +1058,7 @@ FoldableInstWithU32Immediate: SmallOpsVec = {
             Some(imm) => {
                 match imm {
                     Immediate::Constant(name) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Constant(name)))), Op::Inst(Span::new(span, Instruction::U32Lte))],
-                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::PushU32(value.into_inner()))), Op::Inst(Span::new(span, Instruction::U32Lte))],
+                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U32(value.into_inner())))))), Op::Inst(Span::new(span, Instruction::U32Lte))],
                 }
             }
             None => smallvec![Op::Inst(Span::new(span, Instruction::U32Lte))],
@@ -1070,7 +1070,7 @@ FoldableInstWithU32Immediate: SmallOpsVec = {
             Some(imm) => {
                 match imm {
                     Immediate::Constant(name) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Constant(name)))), Op::Inst(Span::new(span, Instruction::U32Gt))],
-                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::PushU32(value.into_inner()))), Op::Inst(Span::new(span, Instruction::U32Gt))],
+                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U32(value.into_inner())))))), Op::Inst(Span::new(span, Instruction::U32Gt))],
                 }
             }
             None => smallvec![Op::Inst(Span::new(span, Instruction::U32Gt))],
@@ -1082,7 +1082,7 @@ FoldableInstWithU32Immediate: SmallOpsVec = {
             Some(imm) => {
                 match imm {
                     Immediate::Constant(name) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Constant(name)))), Op::Inst(Span::new(span, Instruction::U32Gte))],
-                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::PushU32(value.into_inner()))), Op::Inst(Span::new(span, Instruction::U32Gte))],
+                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U32(value.into_inner())))))), Op::Inst(Span::new(span, Instruction::U32Gte))],
                 }
             }
             None => smallvec![Op::Inst(Span::new(span, Instruction::U32Gte))],
@@ -1094,7 +1094,7 @@ FoldableInstWithU32Immediate: SmallOpsVec = {
             Some(imm) => {
                 match imm {
                     Immediate::Constant(name) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Constant(name)))), Op::Inst(Span::new(span, Instruction::U32Min))],
-                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::PushU32(value.into_inner()))), Op::Inst(Span::new(span, Instruction::U32Min))],
+                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U32(value.into_inner())))))), Op::Inst(Span::new(span, Instruction::U32Min))],
                 }
             }
             None => smallvec![Op::Inst(Span::new(span, Instruction::U32Min))],
@@ -1106,7 +1106,7 @@ FoldableInstWithU32Immediate: SmallOpsVec = {
             Some(imm) => {
                 match imm {
                     Immediate::Constant(name) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Constant(name)))), Op::Inst(Span::new(span, Instruction::U32Max))],
-                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::PushU32(value.into_inner()))), Op::Inst(Span::new(span, Instruction::U32Max))],
+                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U32(value.into_inner())))))), Op::Inst(Span::new(span, Instruction::U32Max))],
                 }
             }
             None => smallvec![Op::Inst(Span::new(span, Instruction::U32Max))],
@@ -1290,15 +1290,7 @@ Push: SmallOpsVec = {
             };
             Op::Inst(Span::new(span, match imm {
                 Immediate::Constant(name) => Instruction::Push(Immediate::Constant(name)),
-                Immediate::Value(value) => {
-                    match value.into_inner() {
-                        IntValue::U8(v) => Instruction::PushU8(v),
-                        IntValue::U16(v) => Instruction::PushU16(v),
-                        IntValue::U32(v) => Instruction::PushU32(v),
-                        IntValue::Felt(v) => Instruction::PushFelt(v),
-                        IntValue::Word(v) => Instruction::PushWord(v),
-                    }
-                }
+                Immediate::Value(value) => Instruction::Push(Immediate::Value(value))
             }))
         }).collect::<SmallOpsVec>();
         if ops.len() > 16 {

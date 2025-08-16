@@ -1,5 +1,3 @@
-use miden_debug_types::Span;
-
 use crate::{
     DisplayHex,
     ast::{Immediate, Instruction, InvocationTarget},
@@ -212,13 +210,6 @@ impl PrettyPrint for Instruction {
 
             // ----- input / output operations ----------------------------------------------------
             Self::Push(value) => inst_with_imm("push", value),
-            Self::PushU8(value) => inst_with_imm("push", value),
-            Self::PushU16(value) => inst_with_imm("push", value),
-            Self::PushU32(value) => inst_with_imm("push", value),
-            Self::PushFelt(value) => {
-                inst_with_felt_imm("push", &Immediate::Value(Span::unknown(*value)))
-            },
-            Self::PushWord(value) => flatten(const_text("push") + const_text(".") + value.render()),
             Self::PushSlice(value, range) => flatten(
                 const_text("push.")
                     + value.render()
@@ -412,6 +403,13 @@ mod tests {
             Instruction::PushFeltList(vec![Felt::new(3), Felt::new(4), Felt::new(8), Felt::new(9)])
         );
         assert_eq!("push.3.4.8.9", instruction);
+        let instruction = format!(
+            "{}",
+            Instruction::Push(Immediate::Value(miden_debug_types::Span::unknown(
+                crate::parser::IntValue::U8(3)
+            )))
+        );
+        assert_eq!("push.3", instruction);
 
         let digest = Rpo256::hash(b"std::math::u64::add");
         let target = InvocationTarget::MastRoot(Span::unknown(digest));

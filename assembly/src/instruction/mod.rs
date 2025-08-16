@@ -350,11 +350,6 @@ impl Assembler {
                 IntValue::Felt(v) => env_ops::push_one(v, block_builder),
                 IntValue::Word(v) => env_ops::push_many(&v.0, block_builder),
             },
-            Instruction::PushU8(imm) => env_ops::push_one(*imm, block_builder),
-            Instruction::PushU16(imm) => env_ops::push_one(*imm, block_builder),
-            Instruction::PushU32(imm) => env_ops::push_one(*imm, block_builder),
-            Instruction::PushFelt(imm) => env_ops::push_one(*imm, block_builder),
-            Instruction::PushWord(imms) => env_ops::push_many(&imms.0, block_builder),
             Instruction::PushSlice(imm, range) => {
                 env_ops::push_word_slice(imm, range, block_builder)?
             },

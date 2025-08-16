@@ -346,13 +346,11 @@ where
         | MovUp4 | MovUp5 | MovUp6 | MovUp7 | MovUp8 | MovUp9 | MovUp10 | MovUp11 | MovUp12
         | MovUp13 | MovUp14 | MovUp15 | MovUpW2 | MovUpW3 | MovDn2 | MovDn3 | MovDn4 | MovDn5
         | MovDn6 | MovDn7 | MovDn8 | MovDn9 | MovDn10 | MovDn11 | MovDn12 | MovDn13 | MovDn14
-        | MovDn15 | MovDnW2 | MovDnW3 | CSwap | CSwapW | CDrop | CDropW | PushU8(_)
-        | PushU16(_) | PushU32(_) | PushFelt(_) | PushWord(_) | PushFeltList(_) | Sdepth
-        | Caller | Clk | MemLoad | MemLoadW | MemStore | MemStoreW | MemStream | AdvPipe
-        | AdvLoadW | Hash | HMerge | HPerm | MTreeGet | MTreeSet | MTreeMerge | MTreeVerify
-        | FriExt2Fold4 | DynExec | DynCall | Breakpoint | HornerBase | HornerExt | EvalCircuit => {
-            ControlFlow::Continue(())
-        },
+        | MovDn15 | MovDnW2 | MovDnW3 | CSwap | CSwapW | CDrop | CDropW | PushFeltList(_)
+        | Sdepth | Caller | Clk | MemLoad | MemLoadW | MemStore | MemStoreW | MemStream
+        | AdvPipe | AdvLoadW | Hash | HMerge | HPerm | MTreeGet | MTreeSet | MTreeMerge
+        | MTreeVerify | FriExt2Fold4 | DynExec | DynCall | Breakpoint | HornerBase | HornerExt
+        | EvalCircuit => ControlFlow::Continue(()),
     }
 }
 
@@ -779,13 +777,11 @@ where
         | MovUp4 | MovUp5 | MovUp6 | MovUp7 | MovUp8 | MovUp9 | MovUp10 | MovUp11 | MovUp12
         | MovUp13 | MovUp14 | MovUp15 | MovUpW2 | MovUpW3 | MovDn2 | MovDn3 | MovDn4 | MovDn5
         | MovDn6 | MovDn7 | MovDn8 | MovDn9 | MovDn10 | MovDn11 | MovDn12 | MovDn13 | MovDn14
-        | MovDn15 | MovDnW2 | MovDnW3 | CSwap | CSwapW | CDrop | CDropW | PushU8(_)
-        | PushU16(_) | PushU32(_) | PushFelt(_) | PushWord(_) | PushFeltList(_) | Sdepth
-        | Caller | Clk | MemLoad | MemLoadW | MemStore | MemStoreW | MemStream | AdvPipe
-        | AdvLoadW | Hash | HMerge | HPerm | MTreeGet | MTreeSet | MTreeMerge | MTreeVerify
-        | FriExt2Fold4 | DynExec | DynCall | Breakpoint | HornerBase | HornerExt | EvalCircuit => {
-            ControlFlow::Continue(())
-        },
+        | MovDn15 | MovDnW2 | MovDnW3 | CSwap | CSwapW | CDrop | CDropW | PushFeltList(_)
+        | Sdepth | Caller | Clk | MemLoad | MemLoadW | MemStore | MemStoreW | MemStream
+        | AdvPipe | AdvLoadW | Hash | HMerge | HPerm | MTreeGet | MTreeSet | MTreeMerge
+        | MTreeVerify | FriExt2Fold4 | DynExec | DynCall | Breakpoint | HornerBase | HornerExt
+        | EvalCircuit => ControlFlow::Continue(()),
     }
 }
 
