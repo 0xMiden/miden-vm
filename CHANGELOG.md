@@ -2,6 +2,10 @@
 
 ## 0.18.0 (TBD)
 
+#### Enhancements
+
+- Added slicing for the word constants ([#2057](https://github.com/0xMiden/miden-vm/pull/2057)).- 
+
 #### Changes
 
 - Removed unused `PushU8List`, `PushU16List`, and `PushU32List` assembly instructions. These instructions were only defined in the AST but never used in the actual codebase. Multiple values can be pushed using the existing `push.n.m.p.q` syntax or the `push.[n,m,p,q]` syntax ([#2053](https://github.com/0xMiden/miden-vm/issues/2053)).

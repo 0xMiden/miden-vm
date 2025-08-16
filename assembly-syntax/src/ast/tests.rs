@@ -1137,7 +1137,7 @@ fn assert_parsing_line_invalid_op() {
         "   :                      `-- found a identifier here",
         "29 |         end",
         "   `----",
-        r#" help: expected ".", or primitive opcode (e.g. "add"), or "end", or control flow opcode (e.g. "if.true")"#
+        r#" help: expected ".", or "[", or primitive opcode (e.g. "add"), or "end", or control flow opcode (e.g. "if.true")"#
     );
 }
 

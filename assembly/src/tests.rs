@@ -1313,6 +1313,104 @@ fn const_conversion_failed_to_u32() -> TestResult {
     Ok(())
 }
 
+#[test]
+fn test_push_word_slice() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        "\
+    const.SAMPLE_WORD=[2, 3, 4, 5]
+    const.SAMPLE_HEX_WORD=0x0600000000000000070000000000000008000000000000000900000000000000
+
+    begin
+        push.SAMPLE_WORD[1..3]
+        push.SAMPLE_WORD[0]
+        push.[10, 11, 12, 13][1..3]
+
+        push.SAMPLE_HEX_WORD[2..4]
+        push.0x0600000000000000070000000000000008000000000000000900000000000000[0..2]
+    end
+    "
+    );
+    let program = context.assemble(source)?;
+
+    let expected = "\
+begin
+    basic_block
+        push(3)
+        push(4)
+        push(2)
+        push(11)
+        push(12)
+        push(8)
+        push(9)
+        push(6)
+        push(7)
+    end
+end";
+    assert_str_eq!(format!("{program}"), expected);
+    Ok(())
+}
+
+#[test]
+fn test_push_word_slice_invalid() -> TestResult {
+    let context = TestContext::default();
+    let source_invalid_range = source_file!(
+        &context,
+        format!(
+            "\
+    const.SAMPLE_WORD=[2, 3, 4, 5]
+
+    begin
+        push.SAMPLE_WORD[6..3]
+    end
+    "
+        )
+    );
+    assert!(context.assemble(source_invalid_range).is_err());
+
+    let source_empty_range = source_file!(
+        &context,
+        format!(
+            "\
+    const.SAMPLE_WORD=[2, 3, 4, 5]
+
+    begin
+        push.SAMPLE_WORD[2..2]
+    end
+    "
+        )
+    );
+    assert!(context.assemble(source_empty_range).is_err());
+
+    let source_invalid_constant_type = source_file!(
+        &context,
+        format!(
+            "\
+    const.SAMPLE_VALUE=6
+    begin
+        push.SAMPLE_VALUE[1..3]
+    end
+    "
+        )
+    );
+    assert!(context.assemble(source_invalid_constant_type).is_err());
+
+    let source_invalid_constant_type = source_file!(
+        &context,
+        format!(
+            "\
+    begin
+        push.5[0..2]
+    end
+    "
+        )
+    );
+    assert!(context.assemble(source_invalid_constant_type).is_err());
+
+    Ok(())
+}
+
 // DECORATORS
 // ================================================================================================
 

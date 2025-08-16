@@ -279,7 +279,10 @@ impl<'input> Lexer<'input> {
                 ':' => pop2!(self, Token::ColonColon),
                 _ => Err(ParsingError::InvalidToken { span: self.span() }),
             },
-            '.' => pop!(self, Token::Dot),
+            '.' => match self.peek() {
+                '.' => pop2!(self, Token::Range),
+                _ => pop!(self, Token::Dot),
+            },
             ',' => pop!(self, Token::Comma),
             '=' => pop!(self, Token::Equal),
             '(' => pop!(self, Token::Lparen),

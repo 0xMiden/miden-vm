@@ -5,7 +5,7 @@ use alloc::{
     sync::Arc,
     vec::Vec,
 };
-use core::{marker::PhantomData, num::NonZeroU32};
+use core::{marker::PhantomData, num::NonZeroU32, ops::Range};
 
 use miden_debug_types::{SourceFile, SourceSpan, Span, Spanned};
 use smallvec::smallvec;
@@ -46,6 +46,7 @@ extern {
         "@" => Token::At,
         "[" => Token::Lbracket,
         "]" => Token::Rbracket,
+        ".." => Token::Range,
         "add" => Token::Add,
         "adv" => Token::Adv,
         "adv_map" => Token::AdvMap,
@@ -1258,6 +1259,26 @@ InstWithBitSizeImmediate: Instruction = {
 }
 
 Push: SmallOpsVec = {
+    <l:@L> "push" "." <imm_value:IntOrHexImm> "[" <i:uint> "]" <r:@R> => {
+        smallvec![Op::Inst(Span::new(
+            span!(source_file.id(), l, r),
+            Instruction::PushSlice(
+                imm_value,
+                Range { start: i as usize, end: i as usize + 1 }
+            )
+        ))]
+    },
+
+    <l:@L> "push" "." <imm_value:IntOrHexImm> "[" <l_range:uint> ".." <r_range:uint> "]" <r:@R> => {
+        smallvec![Op::Inst(Span::new(
+            span!(source_file.id(), l, r),
+            Instruction::PushSlice(
+                imm_value,
+                Range { start: l_range as usize, end: r_range as usize }
+            )
+        ))]
+    },
+
     <l:@L> "push" "." <values:DotDelimited<IntOrHexImm>> <r:@R> =>? {
         let ops = values.into_iter().enumerate().map(|(i, imm)| {
             let span = imm.span();
@@ -1854,7 +1875,7 @@ Term: ConstantExpr = {
             IntValue::U16(v) => ConstantExpr::Literal(Span::new(span!(source_file.id(), l, r), Felt::new(v as u64))),
             IntValue::U32(v) => ConstantExpr::Literal(Span::new(span!(source_file.id(), l, r), Felt::new(v as u64))),
             IntValue::Felt(v) => ConstantExpr::Literal(Span::new(span!(source_file.id(), l, r), v)),
-            IntValue::Word(t) => ConstantExpr::Word(Span::new(span!(source_file.id(), l, r),t))
+            IntValue::Word(v) => ConstantExpr::Word(Span::new(span!(source_file.id(), l, r), v))
         })
     },
 

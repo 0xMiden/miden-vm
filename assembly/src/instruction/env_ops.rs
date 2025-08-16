@@ -1,7 +1,11 @@
+use core::ops::Range;
+
 use miden_assembly_syntax::{
     Felt,
-    debuginfo::SourceSpan,
+    ast::Immediate,
+    debuginfo::{SourceSpan, Spanned},
     diagnostics::{RelatedLabel, Report},
+    parser::{IntValue, ParsingError},
 };
 use miden_core::Operation::*;
 
@@ -11,7 +15,7 @@ use crate::ProcedureContext;
 // CONSTANT INPUTS
 // ================================================================================================
 
-/// Appends `PUSH` operation to the span block to push provided constant value onto the stack.
+/// Appends `PUSH` operation to the basic block to push provided constant value onto the stack.
 ///
 /// In cases when the immediate value is 0, `PUSH` operation is replaced with `PAD`. Also, in cases
 /// when immediate value is 1, `PUSH` operation is replaced with `PAD INCR` because in most cases
@@ -23,7 +27,7 @@ where
     push_felt(block_builder, imm.into());
 }
 
-/// Appends `PUSH` operations to the span block to push two or more provided constant values onto
+/// Appends `PUSH` operations to the basic block to push two or more provided constant values onto
 /// the stack, up to a maximum of 16 values.
 ///
 /// In cases when the immediate value is 0, `PUSH` operation is replaced with `PAD`. Also, in cases
@@ -34,6 +38,47 @@ where
     T: Into<Felt> + Copy,
 {
     imms.iter().for_each(|imm| push_felt(block_builder, (*imm).into()));
+}
+
+/// Appends `PUSH` operations to the basic block using the [Felt]s obtained from the Word value
+/// using the provided range.
+///
+/// In cases when the immediate value is 0, `PUSH` operation is replaced with `PAD`. Also, in cases
+/// when immediate value is 1, `PUSH` operation is replaced with `PAD INCR` because in most cases
+/// this will be more efficient than doing a `PUSH`.
+///
+/// # Errors
+/// Returns an error if:
+/// - The provided [`IntValue`] is not a [`IntValue::Word`].
+/// - The provided range is malformed.
+pub fn push_word_slice(
+    imm: &Immediate<IntValue>,
+    range: &Range<usize>,
+    block_builder: &mut BasicBlockBuilder,
+) -> Result<(), Report> {
+    if let IntValue::Word(v) = imm.expect_value() {
+        match v.0.get(range.clone()) {
+            // invalid range case (i.e. [8..5])
+            None => {
+                return Err(Report::new(ParsingError::InvalidRange {
+                    span: imm.span(),
+                    range: range.clone(),
+                }));
+            },
+            // empty range case (i.e. [2..2])
+            Some([]) => {
+                return Err(Report::new(ParsingError::EmptySlice {
+                    span: imm.span(),
+                    range: range.clone(),
+                }));
+            },
+            Some(values) => push_many(values, block_builder),
+        }
+    } else {
+        return Err(Report::new(ParsingError::InvalidSliceConstant { span: imm.span() }));
+    }
+
+    Ok(())
 }
 
 // ENVIRONMENT INPUTS
