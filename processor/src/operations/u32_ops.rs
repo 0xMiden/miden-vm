@@ -1,3 +1,5 @@
+use alloc::vec::Vec;
+
 use super::{
     super::utils::{split_element, split_u32_into_u16},
     ExecutionError, Felt, FieldElement, Operation, Process,
@@ -46,8 +48,24 @@ impl Process {
         err_code: Felt,
         err_ctx: &impl ErrorContext,
     ) -> Result<(), ExecutionError> {
-        let b = require_u32_operand!(self.stack, 0, err_code, err_ctx);
-        let a = require_u32_operand!(self.stack, 1, err_code, err_ctx);
+        let b = self.stack.get(0);
+        let a = self.stack.get(1);
+
+        let mut invalid_values = Vec::new();
+
+        // Check first value (b at stack[0])
+        if b.as_int() > U32_MAX {
+            invalid_values.push(b);
+        }
+
+        // Check second value (a at stack[1])
+        if a.as_int() > U32_MAX {
+            invalid_values.push(a);
+        }
+
+        if !invalid_values.is_empty() {
+            return Err(ExecutionError::not_u32_values(invalid_values, err_code, err_ctx));
+        }
 
         self.add_range_checks(Operation::U32assert2(err_code), a, b, false);
 
@@ -250,7 +268,7 @@ mod tests {
         super::{Felt, Operation},
         Process, split_u32_into_u16,
     };
-    use crate::{DefaultHost, StackInputs, ZERO};
+    use crate::{DefaultHost, ExecutionError, StackInputs, ZERO};
 
     // CASTING OPERATIONS
     // --------------------------------------------------------------------------------------------
@@ -301,6 +319,74 @@ mod tests {
         process.execute_op(Operation::U32assert2(ZERO), program, &mut host).unwrap();
         let expected = build_expected(&[a, b, c, d]);
         assert_eq!(expected, process.stack.trace_state());
+    }
+
+    #[test]
+    fn op_u32assert2_both_invalid() {
+        let mut host = DefaultHost::default();
+        let program = &MastForest::default();
+
+        // Both values > u32::MAX (4294967296 = 2^32, 4294967297 = 2^32 + 1)
+        let stack = StackInputs::try_from_ints([4294967297u64, 4294967296u64]).unwrap();
+        let mut process = Process::new_dummy_with_decoder_helpers(stack);
+
+        let result =
+            process.execute_op(Operation::U32assert2(Felt::from(123u32)), program, &mut host);
+        assert!(result.is_err());
+
+        if let Err(ExecutionError::NotU32Values { values, err_code, .. }) = result {
+            assert_eq!(err_code, Felt::from(123u32));
+            assert_eq!(values.len(), 2);
+            // Values are collected in stack order: stack[0] (top) first, then stack[1]
+            assert_eq!(values[0].as_int(), 4294967296u64); // stack[0] = top value
+            assert_eq!(values[1].as_int(), 4294967297u64); // stack[1] = second value
+        } else {
+            panic!("Expected NotU32Values error");
+        }
+    }
+
+    #[test]
+    fn op_u32assert2_second_invalid() {
+        let mut host = DefaultHost::default();
+        let program = &MastForest::default();
+
+        // First value valid, second invalid
+        let stack = StackInputs::try_from_ints([4294967297u64, 1000u64]).unwrap();
+        let mut process = Process::new_dummy_with_decoder_helpers(stack);
+
+        let result =
+            process.execute_op(Operation::U32assert2(Felt::from(456u32)), program, &mut host);
+        assert!(result.is_err());
+
+        if let Err(ExecutionError::NotU32Values { values, err_code, .. }) = result {
+            assert_eq!(err_code, Felt::from(456u32));
+            assert_eq!(values.len(), 1);
+            assert_eq!(values[0].as_int(), 4294967297u64);
+        } else {
+            panic!("Expected NotU32Values error");
+        }
+    }
+
+    #[test]
+    fn op_u32assert2_first_invalid() {
+        let mut host = DefaultHost::default();
+        let program = &MastForest::default();
+
+        // First value invalid, second valid
+        let stack = StackInputs::try_from_ints([2000u64, 4294967296u64]).unwrap();
+        let mut process = Process::new_dummy_with_decoder_helpers(stack);
+
+        let result =
+            process.execute_op(Operation::U32assert2(Felt::from(789u32)), program, &mut host);
+        assert!(result.is_err());
+
+        if let Err(ExecutionError::NotU32Values { values, err_code, .. }) = result {
+            assert_eq!(err_code, Felt::from(789u32));
+            assert_eq!(values.len(), 1);
+            assert_eq!(values[0].as_int(), 4294967296u64);
+        } else {
+            panic!("Expected NotU32Values error");
+        }
     }
 
     // ARITHMETIC OPERATIONS

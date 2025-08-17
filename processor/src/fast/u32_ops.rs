@@ -1,3 +1,5 @@
+use alloc::vec::Vec;
+
 use miden_core::{Felt, ZERO};
 
 use super::FastProcessor;
@@ -234,12 +236,18 @@ impl FastProcessor {
         let first_old = self.stack_get(0).as_int();
         let second_old = self.stack_get(1).as_int();
 
-        // Check that a and b are u32 values.
+        // Collect all invalid u32 values before returning an error
+        let mut invalid_values = Vec::new();
+
         if first_old > u32::MAX as u64 {
-            return Err(ExecutionError::not_u32_value(Felt::new(first_old), err_code, err_ctx));
+            invalid_values.push(Felt::new(first_old));
         }
         if second_old > u32::MAX as u64 {
-            return Err(ExecutionError::not_u32_value(Felt::new(second_old), err_code, err_ctx));
+            invalid_values.push(Felt::new(second_old));
+        }
+
+        if !invalid_values.is_empty() {
+            return Err(ExecutionError::not_u32_values(invalid_values, err_code, err_ctx));
         }
 
         let (first_new, second_new) = f(first_old, second_old)?;
