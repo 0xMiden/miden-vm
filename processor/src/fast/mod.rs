@@ -1151,8 +1151,8 @@ impl FastProcessor {
     where
         E: ErrorContext,
     {
-        let mast_forest = host
-            .get_mast_forest(&node_digest)
+        let mast_forest = AsyncHost::get_mast_forest(host, &node_digest)
+            .await
             .ok_or_else(|| get_mast_forest_failed(node_digest, err_ctx))?;
 
         // We limit the parts of the program that can be called externally to procedure
