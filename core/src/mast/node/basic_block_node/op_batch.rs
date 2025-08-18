@@ -65,7 +65,7 @@ pub(super) struct OpBatchAccumulator {
     op_idx: usize,
     /// index of the current group in the batch.
     group_idx: usize,
-    // Index of the next free group in the batch.
+    /// Index of the next free group in the batch.
     next_group_idx: usize,
 }
 

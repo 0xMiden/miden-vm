@@ -1,3 +1,4 @@
+mod csr_tests;
 use proptest::prelude::*;
 
 use super::*;
@@ -457,7 +458,8 @@ proptest! {
     /// - Operations are correctly distributed across batches and groups.
     #[test]
     fn test_batch_creation_invariants(ops in op_sequence_strategy(50)) {
-        let (batches, _) = super::batch_and_hash_ops(ops.clone());
+        let ops_len = ops.len();
+        let (batches, _) = super::batch_and_hash_ops(ops);
 
         // A basic block contains one or more batches
         assert!(!batches.is_empty(), "There should be at least one batch");
@@ -474,7 +476,7 @@ proptest! {
         }
 
         // Note: total_ops_from_batches should be >= ops.len() because NOOPs may be added
-        assert!(total_ops_from_batches >= ops.len(), "Total operations from batches should be >= input operations");
+        assert!(total_ops_from_batches >= ops_len, "Total operations from batches should be >= input operations");
 
         // Verify that operation counts in each batch don't exceed group limits
         for batch in &batches {
@@ -531,15 +533,13 @@ proptest! {
             current_group_ops = 0; // Reset for each batch
         }
     }
-}
 
-proptest! {
     /// Test NOOP insertion rules:
     /// - NOOPs are used to fill a group or batch when necessary
     /// - Groups should be filled to exactly 9 operations when finalized
     #[test]
     fn test_noop_insertion(ops in op_sequence_strategy(25)) {
-        let (batches, _) = super::batch_and_hash_ops(ops.clone());
+        let (batches, _) = super::batch_and_hash_ops(ops);
 
         let mut op_idx = 0;
 

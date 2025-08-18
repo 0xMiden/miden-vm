@@ -10,6 +10,11 @@ use crate::{
     mast::{DecoratorId, MastForest, MastForestError},
 };
 
+// TODO(huitseeker): clean up elements that are not used in this module
+// once #1776/#1815 is fixed.
+#[allow(dead_code)]
+pub(crate) mod csr;
+
 mod op_batch;
 pub use op_batch::OpBatch;
 use op_batch::OpBatchAccumulator;
