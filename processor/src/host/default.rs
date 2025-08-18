@@ -178,6 +178,14 @@ where
     D: DebugHandler,
     S: SourceManagerSync,
 {
+    fn get_mast_forest(
+        &self, 
+        node_digest: &Word
+    ) -> impl FutureMaybeSend<Option<Arc<MastForest>>> {
+        let result = <Self as BaseHost>::get_mast_forest(self, node_digest);
+        async move { result }
+    }
+
     fn on_event(
         &mut self,
         process: &ProcessState<'_>,
