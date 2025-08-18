@@ -7,8 +7,8 @@ use pretty_assertions::assert_eq;
 
 use super::*;
 use crate::{
-    AdviceMutation, AsyncHost, BaseHost, EventError, MastForestStore, MemMastForestStore,
-    MemoryAddress, ProcessState, SyncHost,
+    AdviceMutation, AsyncHost, BaseHost, EventError, FutureMaybeSend, MastForestStore,
+    MemMastForestStore, MemoryAddress, ProcessState, SyncHost,
 };
 
 #[test]
@@ -292,6 +292,14 @@ impl<S> AsyncHost for ConsistencyHost<S>
 where
     S: SourceManagerSync,
 {
+    #[allow(clippy::manual_async_fn)]
+    fn get_mast_forest(
+        &self, 
+        node_digest: &Word
+    ) -> impl FutureMaybeSend<Option<Arc<MastForest>>> {
+        let result = <Self as BaseHost>::get_mast_forest(self, node_digest);
+        async move { result }
+    }
     // Note: clippy complains about this not using the `async` keyword, but if we use `async`, it
     // doesn't compile.
     #[allow(clippy::manual_async_fn)]
@@ -299,7 +307,7 @@ where
         &mut self,
         _process: &ProcessState<'_>,
         _event_id: u32,
-    ) -> impl Future<Output = Result<Vec<AdviceMutation>, EventError>> + Send {
+    ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>> {
         let _ = (_process, _event_id);
         async move { Ok(Vec::new()) }
     }

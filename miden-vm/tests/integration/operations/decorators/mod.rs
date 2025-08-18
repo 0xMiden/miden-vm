@@ -3,8 +3,8 @@ use std::sync::Arc;
 use miden_core::DebugOptions;
 use miden_debug_types::{DefaultSourceManager, Location, SourceFile, SourceManager, SourceSpan};
 use miden_processor::{
-    AdviceMutation, AsyncHost, BaseHost, EventError, ExecutionError, MastForest, ProcessState,
-    SyncHost,
+    AdviceMutation, AsyncHost, BaseHost, EventError, ExecutionError, FutureMaybeSend, MastForest,
+    ProcessState, SyncHost,
 };
 use miden_prover::Word;
 
@@ -68,11 +68,19 @@ impl SyncHost for TestHost {
 }
 
 impl AsyncHost for TestHost {
+    #[allow(clippy::manual_async_fn)]
+    fn get_mast_forest(
+        &self,
+        _node_digest: &Word,
+    ) -> impl FutureMaybeSend<Option<Arc<MastForest>>> {
+        async move { None }
+    }
+    #[allow(clippy::manual_async_fn)]
     fn on_event(
         &mut self,
         _process: &ProcessState<'_>,
         event_id: u32,
-    ) -> impl Future<Output = Result<Vec<AdviceMutation>, EventError>> + Send {
+    ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>> {
         self.event_handler.push(event_id);
         async move { Ok(Vec::new()) }
     }
