@@ -1,5 +1,105 @@
+use proptest::prelude::*;
+
 use super::*;
 use crate::{Decorator, ONE, mast::MastForest};
+
+// Helper function to generate random felt values
+fn any_felt() -> impl Strategy<Value = Felt> {
+    any::<u64>().prop_map(Felt::new)
+}
+
+// Strategy for operations without immediate values (non-control flow)
+fn op_no_imm_strategy() -> impl Strategy<Value = Operation> {
+    prop_oneof![
+        Just(Operation::Add),
+        Just(Operation::Mul),
+        Just(Operation::Neg),
+        Just(Operation::Inv),
+        Just(Operation::Incr),
+        Just(Operation::And),
+        Just(Operation::Or),
+        Just(Operation::Not),
+        Just(Operation::Eq),
+        Just(Operation::Eqz),
+        Just(Operation::Drop),
+        Just(Operation::Pad),
+        Just(Operation::Swap),
+        Just(Operation::SwapW),
+        Just(Operation::SwapW2),
+        Just(Operation::SwapW3),
+        Just(Operation::SwapDW),
+        Just(Operation::MovUp2),
+        Just(Operation::MovUp3),
+        Just(Operation::MovUp4),
+        Just(Operation::MovUp5),
+        Just(Operation::MovUp6),
+        Just(Operation::MovUp7),
+        Just(Operation::MovUp8),
+        Just(Operation::MovDn2),
+        Just(Operation::MovDn3),
+        Just(Operation::MovDn4),
+        Just(Operation::MovDn5),
+        Just(Operation::MovDn6),
+        Just(Operation::MovDn7),
+        Just(Operation::MovDn8),
+        Just(Operation::CSwap),
+        Just(Operation::CSwapW),
+        Just(Operation::Dup0),
+        Just(Operation::Dup1),
+        Just(Operation::Dup2),
+        Just(Operation::Dup3),
+        Just(Operation::Dup4),
+        Just(Operation::Dup5),
+        Just(Operation::Dup6),
+        Just(Operation::Dup7),
+        Just(Operation::Dup9),
+        Just(Operation::Dup11),
+        Just(Operation::Dup13),
+        Just(Operation::Dup15),
+        Just(Operation::MLoad),
+        Just(Operation::MStore),
+        Just(Operation::MLoadW),
+        Just(Operation::MStoreW),
+        Just(Operation::MStream),
+        Just(Operation::Pipe),
+        Just(Operation::AdvPop),
+        Just(Operation::AdvPopW),
+        Just(Operation::U32split),
+        Just(Operation::U32add),
+        Just(Operation::U32sub),
+        Just(Operation::U32mul),
+        Just(Operation::U32div),
+        Just(Operation::U32and),
+        Just(Operation::U32xor),
+        Just(Operation::U32add3),
+        Just(Operation::U32madd),
+        Just(Operation::FmpAdd),
+        Just(Operation::FmpUpdate),
+        Just(Operation::SDepth),
+        Just(Operation::Caller),
+        Just(Operation::Clk),
+        Just(Operation::Emit),
+        Just(Operation::Ext2Mul),
+        Just(Operation::Expacc),
+        Just(Operation::HPerm),
+        // Note: We exclude Assert here because it has an immediate value (error code)
+    ]
+}
+
+// Strategy for operations with immediate values
+fn op_with_imm_strategy() -> impl Strategy<Value = Operation> {
+    prop_oneof![any_felt().prop_map(Operation::Push)]
+}
+
+// Strategy for all non-control flow operations
+fn op_non_control_strategy() -> impl Strategy<Value = Operation> {
+    prop_oneof![op_no_imm_strategy(), op_with_imm_strategy(),]
+}
+
+// Strategy for sequences of operations
+pub(super) fn op_non_control_sequence_strategy(max_length: usize) -> impl Strategy<Value = Vec<Operation>> {
+    prop::collection::vec(op_non_control_strategy(), 1..=max_length)
+}
 
 #[test]
 fn batch_ops() {
@@ -340,4 +440,84 @@ fn build_group(ops: &[Operation]) -> Felt {
         group |= (op.op_code() as u64) << (Operation::OP_BITS * i);
     }
     Felt::new(group)
+}
+
+// PROPTESTS FOR BATCH CREATION INVARIANTS
+// ================================================================================================
+
+proptest! {
+    /// Test that batch creation follows the basic rules:
+    /// - A basic block contains one or more batches.
+    /// - A batch contains at most 8 groups.
+    /// - NOOPs (implicit for now) are used to fill groups when necessary (empty group, finishing in immediate op)
+    /// - Operations are correctly distributed across batches and groups.
+    #[test]
+    fn test_batch_creation_invariants(ops in op_non_control_sequence_strategy(50)) {
+        let (batches, _) = super::batch_and_hash_ops(ops.clone());
+
+        // A basic block contains one or more batches
+        assert!(!batches.is_empty(), "There should be at least one batch");
+
+        // A batch contains at most 8 groups, and groups are a power of two
+        for batch in &batches {
+            assert!(batch.num_groups <= BATCH_SIZE);
+        }
+
+        // The total number of operations should be preserved (NOOPs are added implicitly but not counted in ops.len())
+        let total_ops_from_batches: usize = batches.iter().map(|batch| batch.ops.len()).sum();
+        assert!(total_ops_from_batches == ops.len(), "Total operations from batches should be == input operations");
+
+        // Verify that operation counts in each batch don't exceed group limits
+        for batch in &batches {
+            for (i, &count) in batch.op_counts.iter().enumerate() {
+                if count > 0 {
+                    assert!(count <= GROUP_SIZE,
+                        "Group {} in batch has {} operations, which exceeds the maximum of {}",
+                        i, count, GROUP_SIZE);
+                }
+            }
+        }
+    }
+
+    /// Test that operations with immediate values are placed correctly
+    /// - An operation with an immediate value cannot be the last operation in a group
+    /// - Immediate values use the next available group in the batch
+    /// - If no groups available, both operation and immediate move to next batch
+    #[test]
+    fn test_immediate_value_placement(ops in op_non_control_sequence_strategy(50)) {
+        let (batches, _) = super::batch_and_hash_ops(ops.clone());
+
+        for batch in batches {
+            let mut op_idx_in_group = 0;
+            let mut group_idx = 0;
+            let mut next_group_idx = 1;
+            // interpret operations in the batch one by one
+            for op in batch.ops() {
+                let has_imm = op.imm_value().is_some();
+                if has_imm {
+                    // immediate values follow the op, their op count is zero
+                    assert_eq!(batch.op_counts[next_group_idx], 0, "invalid immediate op count convention");
+                    next_group_idx += 1;
+                }
+                // end of group logic
+                if op_idx_in_group + 1 == batch.op_counts[group_idx] {
+                    // if we are at the end of the group, first check if the operation carries an
+                    // immediate value
+                    if has_imm {
+                        // an operation with an immediate value cannot be the last operation in a group
+                        // so, we need room to execute a NOOP after it. 
+                        assert!(op_idx_in_group < GROUP_SIZE - 1, "invalid op index");
+                    }
+                
+                    // then, move to the next group and reset operation index
+                    group_idx = next_group_idx;
+                    next_group_idx += 1;
+                    op_idx_in_group = 0;
+                } else {
+                    // if we are not at the end of the group, just increment the operation index
+                    op_idx_in_group += 1;
+                }
+            }
+        }
+    }
 }

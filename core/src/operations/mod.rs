@@ -624,6 +624,8 @@ impl Operation {
     }
 
     /// Returns an immediate value carried by this operation.
+    // Proptest generators for operations in crate::mast::node::basic_block_node::tests discriminate
+    // on this flag, please update them when you modify the semantics of this method.
     pub fn imm_value(&self) -> Option<Felt> {
         match *self {
             Self::Push(imm) => Some(imm),
