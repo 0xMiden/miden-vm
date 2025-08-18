@@ -41,4 +41,5 @@ winter-utils.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
+proptest-derive = { version = "0.3", default-features = false }
 winter-rand-utils.workspace = true
