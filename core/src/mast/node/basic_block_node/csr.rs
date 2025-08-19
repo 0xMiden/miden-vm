@@ -1,60 +1,152 @@
 use alloc::vec::Vec;
 use core::ops::Index;
 
-/// CSR format sparse matrix, We follow the names used by scipy.
-/// Detailed explanation here: <https://stackoverflow.com/questions/52299420/scipy-csr-matrix-understand-indptr>
+use num_traits::Euclid;
+use thiserror::Error;
+
+/// Compressed Sparse Row (CSR) format sparse matrix with the constraint that each row
+/// has an initial dense prefix followed by a zero suffix. This optimization assumes
+/// non-zero elements are stored contiguously at the start of each row.
+///
+/// Uses scipy-style naming convention:
+/// - `data`: Non-zero values in row-major order
+/// - `indptr`: Row pointers indicating where each row starts in `data`
+/// - `cols`: Number of columns in the matrix
+///
+/// This format is optimized for matrices where non-zero elements appear
+/// contiguously in the first columns of each row.
+// To represent an OpBatch, should be used with # cols = GROUP_SIZE, # rows = BATCH_SIZE
 #[derive(Debug)]
-pub struct SparseMatrix<F: Copy + Default> {
-    /// all non-zero values in the matrix
+pub struct SparseMatrix<F: Default> {
+    /// Non-zero values in row-major order
     pub data: Vec<F>,
-    /// column indices
-    pub indices: Vec<usize>,
-    /// row information
+    /// Row pointers: `indptr[i]` is the starting index of row `i` in `data`,
+    /// and `indptr[i+1]` is the ending index (exclusive). Row `i`'s data spans
+    /// `data[indptr[i]..indptr[i+1]]`.
+    // should be serialized as [u8; BATCH_SIZE + 1] since the max value is 72
     pub indptr: Vec<usize>,
-    /// number of columns
+    /// Number of columns in the matrix
     pub cols: usize,
-    /// default value for sparse elements (required for Index trait)
-    pub default: F,
+    #[doc(hidden)]
+    /// A copy of F::default (for the Index trait)
+    _default: F,
 }
 
-impl<F: Copy + Default + PartialEq> SparseMatrix<F> {
-    /// 0x0 empty matrix
+#[derive(Error, Debug)]
+pub enum SparseMatrixError {
+    #[error("Cannot insert at row {0}, row is full.")]
+    FullRow(usize),
+}
+
+impl<F: Default> SparseMatrix<F> {
+    /// Creates a new empty 0x0 matrix
     pub fn empty() -> Self {
         Self {
             data: vec![],
-            indices: vec![],
             indptr: vec![0],
             cols: 0,
-            default: F::default(),
+            _default: F::default(),
         }
     }
 
-    /// Add a new empty row to the matrix
+    pub fn new(data: Vec<F>, indptr: Vec<usize>, cols: usize) -> Self {
+        Self {
+            data,
+            indptr,
+            cols,
+            _default: F::default(),
+        }
+    }
+
+    /// Adds a new empty row to the matrix
     fn add_row(&mut self) {
         let current_len = self.data.len();
         self.indptr.push(current_len);
     }
 
-    /// number of non-zero entries
+    /// Returns the number of non-zero entries
     pub fn len(&self) -> usize {
         *self.indptr.last().unwrap()
     }
 
-    /// empty matrix
+    /// Returns `true` if the matrix is empty
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
+    /// Returns the number of rows in the matrix
     pub fn num_rows(&self) -> usize {
         self.indptr.len() - 1
     }
 
+    /// Returns the number of columns in the matrix
     pub fn num_cols(&self) -> usize {
         self.cols
     }
+}
 
-    /// returns a custom iterator over non-zero values
-    pub fn iter(&self) -> NonZeroIter<'_, F> {
+impl<F: Default + Copy> SparseMatrix<F> {
+    /// Returns the element at `(row, col)`, or `F::default()` if the element is zero
+    ///
+    /// For a given row, elements with `col < row_dense_len` are stored in `data`,
+    /// while elements with `col >= row_dense_len` implicitly return the default value.
+    pub fn get(&self, row: usize, col: usize) -> F {
+        let row_start = self.indptr[row];
+        let row_end = self.indptr[row + 1];
+        let row_dense_len = row_end - row_start;
+
+        if col >= row_dense_len {
+            // lookup in the zero suffix
+            F::default()
+        } else {
+            self.data[row_start + col]
+        }
+    }
+}
+impl<F: Default + PartialEq + Copy> SparseMatrix<F> {
+    /// Inserts a value at the dense end of a specified row
+    ///
+    /// Returns the column index where the element was inserted, or `SparseMatrixError::FullRow`
+    /// if the row has no more space for non-zero elements.
+    ///
+    /// Zero values are not stored in the matrix but still consume a column position.
+    pub fn insert(&mut self, row: usize, value: F) -> Result<usize, SparseMatrixError> {
+        // Ensure we have enough rows
+        while self.num_rows() <= row {
+            self.add_row();
+        }
+
+        let row_start = self.indptr[row];
+        let row_end = self.indptr[row + 1];
+        let row_dense_len = row_end - row_start;
+
+        if row_dense_len == self.num_cols() {
+            return Err(SparseMatrixError::FullRow(row));
+        }
+        // Add new element if not zero
+        if value != F::default() {
+            self.insert_element_at(row, row_end, value);
+        }
+        Ok(row_dense_len)
+    }
+
+    // Inserts a non-zero element at the specified absolute position in the data vector
+    fn insert_element_at(&mut self, row: usize, abs_pos: usize, value: F) {
+        // check we insert in the correct row, or extend it
+        debug_assert!(self.indptr[row] <= abs_pos);
+        debug_assert!(self.indptr[row + 1] >= abs_pos);
+
+        // Insert into data and indices
+        self.data.insert(abs_pos, value);
+
+        // Update indptr for all subsequent rows
+        for i in (row + 1)..self.indptr.len() {
+            self.indptr[i] += 1;
+        }
+    }
+
+    /// Returns an iterator over non-zero elements as `(row, col, value)` tuples
+    pub fn iter_nonzero(&self) -> NonZeroIter<'_, F> {
         NonZeroIter {
             matrix: self,
             row: 0,
@@ -63,108 +155,15 @@ impl<F: Copy + Default + PartialEq> SparseMatrix<F> {
         }
     }
 
-    /// Get the element at (row, col), returning F::default() if not found
-    pub fn get(&self, row: usize, col: usize) -> F {
-        let row_start = self.indptr[row];
-        let row_end = self.indptr[row + 1];
-
-        // Handle empty rows
-        if row_start == row_end {
-            return F::default();
-        }
-
-        // Binary search for the column index
-        let slice = &self.indices[row_start..row_end];
-        match slice.binary_search(&col) {
-            Ok(pos) => self.data[row_start + pos],
-            Err(_) => F::default(),
-        }
-    }
-
-    /// Set the element at (row, col) - returns the old value or None if was zero
-    pub fn set(&mut self, row: usize, col: usize, value: F) -> Option<F> {
-        // Ensure we have enough rows
-        while self.num_rows() <= row {
-            self.add_row();
-        }
-
-        let row_start = self.indptr[row];
-        let row_end = self.indptr[row + 1];
-
-        // Handle empty rows
-        if row_start == row_end {
-            // Element not found, need to insert
-            if value != F::default() {
-                self.insert_element_at(row, row_start, col, value);
-            }
-            return None;
-        }
-
-        // Binary search for the column index
-        let slice = &self.indices[row_start..row_end];
-        match slice.binary_search(&col) {
-            Ok(pos) => {
-                let abs_pos = row_start + pos;
-                let old_value = self.data[abs_pos];
-                // If setting to zero, remove the element
-                if value == F::default() {
-                    self.remove_element_at(row, abs_pos);
-                    Some(old_value)
-                } else {
-                    self.data[abs_pos] = value;
-                    Some(old_value)
-                }
-            },
-            Err(insert_pos) => {
-                // Add new element if not zero
-                if value != F::default() {
-                    self.insert_element_at(row, row_start + insert_pos, col, value);
-                    None
-                } else {
-                    None
-                }
-            },
-        }
-    }
-
-    /// Remove an element at the specified absolute position
-    fn remove_element_at(&mut self, row: usize, abs_pos: usize) {
-        // Remove from data and indices
-        self.data.remove(abs_pos);
-        self.indices.remove(abs_pos);
-
-        // Update indptr for all subsequent rows
-        for i in (row + 1)..self.indptr.len() {
-            self.indptr[i] -= 1;
-        }
-    }
-
-    /// Insert a new element at the specified absolute position
-    fn insert_element_at(&mut self, row: usize, abs_pos: usize, col: usize, value: F) {
-        // Insert into data and indices
-        self.data.insert(abs_pos, value);
-        self.indices.insert(abs_pos, col);
-
-        // Update indptr for all subsequent rows
-        for i in (row + 1)..self.indptr.len() {
-            self.indptr[i] += 1;
-        }
-    }
-
-    /// Iterator over all matrix elements (including zeros) in row-major order
+    /// Returns an iterator over all matrix elements (including zeros) in row-major order
     pub fn iter_dense(&self) -> DenseIter<'_, F> {
         DenseIter::new(self)
-    }
-
-    /// Iterator over non-zero elements with (row, col, value)
-    pub fn iter_nonzero(&self) -> NonZeroIter<'_, F> {
-        self.iter()
     }
 }
 
 /// Iterator for dense matrix elements (including zeros) in row-major order
 #[derive(Debug)]
-pub struct DenseIter<'a, F: Copy + Default + PartialEq> {
+pub struct DenseIter<'a, F: Default> {
     matrix: &'a SparseMatrix<F>,
     row: usize,
     col: usize,
@@ -177,18 +176,18 @@ impl<'a, F: Default> DenseIter<'a, F> {
     fn new(matrix: &'a SparseMatrix<F>) -> Self {
         let row_start = if matrix.num_rows() > 0 { matrix.indptr[0] } else { 0 };
         let row_end = if matrix.num_rows() > 0 { matrix.indptr[1] } else { 0 };
-        DenseIter { 
-            matrix, 
-            row: 0, 
-            col: 0, 
-            row_start, 
-            row_end, 
-            current_idx: row_start 
+        DenseIter {
+            matrix,
+            row: 0,
+            col: 0,
+            row_start,
+            row_end,
+            current_idx: row_start,
         }
     }
 }
 
-impl<'a, F: Copy + Default + PartialEq> Iterator for DenseIter<'a, F> {
+impl<'a, F: Copy + Default> Iterator for DenseIter<'a, F> {
     type Item = F;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -197,24 +196,11 @@ impl<'a, F: Copy + Default + PartialEq> Iterator for DenseIter<'a, F> {
         }
 
         let value = if self.current_idx < self.row_end {
-            let actual_col = self.matrix.indices[self.current_idx];
-            
-            if actual_col == self.col {
-                // Found the element we're looking for
-                let result = self.matrix.data[self.current_idx];
-                self.current_idx += 1;
-                self.col += 1;
-                result
-            } else if actual_col > self.col {
-                // No element at this column position, return default
-                self.col += 1;
-                F::default()
-            } else {
-                // This shouldn't happen due to CSR ordering - indices should be sorted
-                self.current_idx += 1;
-                self.col += 1;
-                F::default()
-            }
+            // Found the element we're looking for
+            let result = self.matrix.data[self.current_idx];
+            self.current_idx += 1;
+            self.col += 1;
+            result
         } else {
             // No more elements in this row, return default
             self.col += 1;
@@ -225,7 +211,7 @@ impl<'a, F: Copy + Default + PartialEq> Iterator for DenseIter<'a, F> {
         if self.col >= self.matrix.num_cols() {
             self.col = 0;
             self.row += 1;
-            
+
             // Update row pointers for the new row
             if self.row < self.matrix.num_rows() {
                 self.row_start = self.matrix.indptr[self.row];
@@ -238,7 +224,7 @@ impl<'a, F: Copy + Default + PartialEq> Iterator for DenseIter<'a, F> {
     }
 }
 
-/// Iterator for sparse matrix (non-zero elements with row/column indices)
+/// Iterator for sparse matrix (non-zero elements with row/column indices, i.e. COO format)
 #[derive(Debug)]
 pub struct NonZeroIter<'a, F: Default> {
     matrix: &'a SparseMatrix<F>,
@@ -254,10 +240,10 @@ impl<'a, F: Copy + Default> Iterator for NonZeroIter<'a, F> {
         if self.i >= self.nnz {
             return None;
         }
-
         let row = self.row;
-        let col = self.matrix.indices[self.i];
         let val = self.matrix.data[self.i];
+        let row_start = self.matrix.indptr[self.row];
+        let col = self.i - row_start;
 
         self.i += 1;
 
@@ -270,41 +256,33 @@ impl<'a, F: Copy + Default> Iterator for NonZeroIter<'a, F> {
     }
 }
 
-impl<F: Copy + Default + PartialEq> std::ops::Index<usize> for SparseMatrix<F> {
+impl<F: Default + PartialEq> Index<usize> for SparseMatrix<F> {
     type Output = F;
 
     fn index(&self, index: usize) -> &Self::Output {
         // Calculate row and col from the linear index (row-major order)
         let rows = self.num_rows();
         let cols = self.num_cols();
-        
+
         if rows == 0 || cols == 0 {
-            return &self.default;
+            return &self._default;
         }
-        
-        let row = index / cols;
-        let col = index % cols;
-        
+        let (row, col) = index.div_rem_euclid(&cols);
+
         // Handle case where index is out of bounds
         if row >= rows {
-            return &self.default;
+            return &self._default;
         }
-        
+
         // Get the element at (row, col), returning default if not found
         // Use the same logic as the get method but more efficient for single access
         let row_start = self.indptr[row];
         let row_end = self.indptr[row + 1];
 
-        // Handle empty rows
-        if row_start == row_end {
-            return &self.default;
+        if col >= row_end - row_start {
+            return &self._default;
         }
 
-        // Binary search for the column index
-        let slice = &self.indices[row_start..row_end];
-        match slice.binary_search(&col) {
-            Ok(pos) => &self.data[row_start + pos],
-            Err(_) => &self.default,
-        }
+        &self.data[row_start + col]
     }
 }
