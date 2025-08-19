@@ -144,8 +144,7 @@ fn degree_4_op_flags() {
 fn composite_flags() {
     // ------ no change 0 ---------------------------------------------------------------------
 
-    let op_no_change_0 =
-        [Operation::MpVerify(ZERO), Operation::Span, Operation::Halt];
+    let op_no_change_0 = [Operation::MpVerify(ZERO), Operation::Span, Operation::Halt];
     for op in op_no_change_0 {
         // frame initialised with an op operation.
         let frame = generate_evaluation_frame(op.op_code().into());

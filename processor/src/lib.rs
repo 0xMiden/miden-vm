@@ -879,8 +879,7 @@ impl<'a> ProcessState<'a> {
             ProcessState::Slow(state) => {
                 let stack = self.get_stack_state();
                 let word_offset = state.offset + word_idx * 4;
-                let mut word =
-                    stack[word_offset..word_offset + 4].to_vec();
+                let mut word = stack[word_offset..word_offset + 4].to_vec();
                 word.reverse();
                 let word: [Felt; 4] = word.try_into().unwrap();
                 word.into()

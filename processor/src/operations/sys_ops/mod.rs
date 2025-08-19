@@ -144,9 +144,9 @@ impl Process {
     {
         let event_id = self.stack.peek().as_int() as u32;
         self.stack.shift_left(1);
-        
+
         let mut process = self.state_with_offset(1);
-        
+
         // If it's a system event, handle it directly. Otherwise, forward it to the host.
         if let Some(system_event) = SystemEvent::from_event_id(event_id) {
             handle_system_event(&mut process, system_event, err_ctx)
