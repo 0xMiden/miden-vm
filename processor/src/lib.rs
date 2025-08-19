@@ -79,7 +79,7 @@ pub mod utils;
 mod tests;
 
 mod debug;
-pub use debug::{AsmOpInfo, VmState, VmStateIterator};
+pub use debug::{AsmOpInfo, TraceDebugger, VmState};
 
 // RE-EXPORTS
 // ================================================================================================
@@ -190,14 +190,14 @@ pub fn execute(
     Ok(trace)
 }
 
-/// Returns an iterator which allows callers to step through the execution and inspect VM state at
+/// Returns a debugger which allows callers to step through the execution and inspect VM state at
 /// each execution step.
-pub fn execute_iter(
+pub fn execute_debugger(
     program: &Program,
     stack_inputs: StackInputs,
     advice_inputs: AdviceInputs,
     host: &mut impl SyncHost,
-) -> VmStateIterator {
+) -> TraceDebugger {
     let mut process = Process::new_debug(program.kernel().clone(), stack_inputs, advice_inputs);
     let result = process.execute(program, host);
     if result.is_ok() {
@@ -207,7 +207,7 @@ pub fn execute_iter(
             "inconsistent program hash"
         );
     }
-    VmStateIterator::new(process, result)
+    TraceDebugger::new(process, result)
 }
 
 // PROCESS

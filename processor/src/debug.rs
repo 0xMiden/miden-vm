@@ -46,11 +46,11 @@ impl fmt::Display for VmState {
     }
 }
 
-/// Iterator that iterates through vm state at each step of the execution.
+/// Debugger that allows stepping through vm state at each step of the execution.
 ///
 /// This allows debugging or replaying ability to view various process state at each clock cycle. If
 /// the execution returned an error, it returns that error on the clock cycle it stopped.
-pub struct VmStateIterator {
+pub struct TraceDebugger {
     chiplets: Chiplets,
     decoder: Decoder,
     stack: Stack,
@@ -62,7 +62,7 @@ pub struct VmStateIterator {
     trace_len_summary: TraceLenSummary,
 }
 
-impl VmStateIterator {
+impl TraceDebugger {
     pub fn new(process: Process, result: Result<StackOutputs, ExecutionError>) -> Self {
         let (system, decoder, stack, mut range, chiplets) = process.into_parts();
         let trace_len_summary = Self::build_trace_len_summary(&system, &mut range, &chiplets);
@@ -195,12 +195,9 @@ impl VmStateIterator {
 
         TraceLenSummary::new(clk.into(), range_table_len, ChipletsLengths::new(chiplets))
     }
-}
 
-impl Iterator for VmStateIterator {
-    type Item = Result<VmState, ExecutionError>;
-
-    fn next(&mut self) -> Option<Self::Item> {
+    /// Steps one cycle forward and returns the vm state at the current position.
+    pub fn step_forward(&mut self) -> Option<Result<VmState, ExecutionError>> {
         if self.clk > self.system.clk() {
             match &self.error {
                 Some(_) => {
