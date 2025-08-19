@@ -1234,6 +1234,7 @@ dependencies = [
  "miden-debug-types",
  "miden-test-utils",
  "miden-utils-diagnostics",
+ "paste",
  "pretty_assertions",
  "rstest",
  "thiserror 2.0.12",
