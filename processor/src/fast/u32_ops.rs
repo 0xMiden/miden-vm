@@ -35,15 +35,21 @@ impl FastProcessor {
             let b = self.stack_get(1).as_int();
             let a = self.stack_get(2).as_int();
 
-            // Check that a, b, and c are u32 values.
+            // Collect all invalid u32 values before returning an error
+            let mut invalid_values = Vec::new();
+
             if a > u32::MAX as u64 {
-                return Err(ExecutionError::not_u32_value(Felt::new(a), ZERO, err_ctx));
+                invalid_values.push(Felt::new(a));
             }
             if b > u32::MAX as u64 {
-                return Err(ExecutionError::not_u32_value(Felt::new(b), ZERO, err_ctx));
+                invalid_values.push(Felt::new(b));
             }
             if c > u32::MAX as u64 {
-                return Err(ExecutionError::not_u32_value(Felt::new(c), ZERO, err_ctx));
+                invalid_values.push(Felt::new(c));
+            }
+
+            if !invalid_values.is_empty() {
+                return Err(ExecutionError::not_u32_values(invalid_values, ZERO, err_ctx));
             }
             let result = Felt::new(a + b + c);
             split_element(result)
@@ -95,14 +101,20 @@ impl FastProcessor {
             let c = self.stack_get(2).as_int();
 
             // Check that a, b, and c are u32 values.
+            // Collect all invalid u32 values before returning an error
+            let mut invalid_values = Vec::new();
+
             if b > u32::MAX as u64 {
-                return Err(ExecutionError::not_u32_value(Felt::new(a), ZERO, err_ctx));
+                invalid_values.push(Felt::new(b));
             }
             if a > u32::MAX as u64 {
-                return Err(ExecutionError::not_u32_value(Felt::new(b), ZERO, err_ctx));
+                invalid_values.push(Felt::new(a));
             }
             if c > u32::MAX as u64 {
-                return Err(ExecutionError::not_u32_value(Felt::new(c), ZERO, err_ctx));
+                invalid_values.push(Felt::new(c));
+            }
+            if !invalid_values.is_empty() {
+                return Err(ExecutionError::not_u32_values(invalid_values, ZERO, err_ctx));
             }
             let result = Felt::new(a * b + c);
             split_element(result)
@@ -173,11 +185,17 @@ impl FastProcessor {
         let a = self.stack_get(1).as_int();
 
         // Check that a and b are u32 values.
+        // Collect all invalid u32 values before returning an error
+        let mut invalid_values = Vec::new();
+
         if b > u32::MAX as u64 {
-            return Err(ExecutionError::not_u32_value(Felt::new(b), ZERO, err_ctx));
+            invalid_values.push(Felt::new(b));
         }
         if a > u32::MAX as u64 {
-            return Err(ExecutionError::not_u32_value(Felt::new(a), ZERO, err_ctx));
+            invalid_values.push(Felt::new(a))
+        }
+        if !invalid_values.is_empty() {
+            return Err(ExecutionError::not_u32_values(invalid_values, ZERO, err_ctx));
         }
 
         let result = f(a, b);
@@ -206,12 +224,18 @@ impl FastProcessor {
         let b = self.stack_get(0).as_int();
         let a = self.stack_get(1).as_int();
 
-        // Check that a and b are u32 values.
+        // Collect all invalid u32 values before returning an error
+        let mut invalid_values = Vec::new();
+
         if a > u32::MAX as u64 {
-            return Err(ExecutionError::not_u32_value(Felt::new(a), ZERO, err_ctx));
+            invalid_values.push(Felt::new(a));
         }
         if b > u32::MAX as u64 {
-            return Err(ExecutionError::not_u32_value(Felt::new(b), ZERO, err_ctx));
+            invalid_values.push(Felt::new(b));
+        }
+
+        if !invalid_values.is_empty() {
+            return Err(ExecutionError::not_u32_values(invalid_values, ZERO, err_ctx));
         }
 
         let result = Felt::new(f(a, b));
