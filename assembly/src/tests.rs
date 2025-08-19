@@ -3142,7 +3142,15 @@ begin push.A adv.push_mapval assert end"
     let expected = format!(
         "\
 begin
-    basic_block push(2) push(2) push(2) push(2) emit({EVENT_MAP_VALUE_TO_STACK}) assert(0) end
+    basic_block
+        push(2)
+        push(2)
+        push(2)
+        push(2)
+        push({EVENT_MAP_VALUE_TO_STACK})
+        emit
+        assert(0)
+    end
 end"
     );
     assert_str_eq!(format!("{program}"), expected);
@@ -3168,7 +3176,8 @@ begin
         push(5034591595140902852)
         push(4565868838168209231)
         push(6740431856120851931)
-        emit({EVENT_MAP_VALUE_TO_STACK})
+        push({EVENT_MAP_VALUE_TO_STACK})
+        emit
         assert(0)
     end
 end"
@@ -3191,7 +3200,7 @@ begin adv.has_mapkey assert end"
     let expected = format!(
         "\
 begin
-    basic_block emit({EVENT_HAS_MAP_KEY}) assert(0) end
+    basic_block push({EVENT_HAS_MAP_KEY}) emit assert(0) end
 end"
     );
     assert_str_eq!(format!("{program}"), expected);

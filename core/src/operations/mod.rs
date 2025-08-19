@@ -169,7 +169,7 @@ pub enum Operation {
     ///
     /// Similar to Noop, this operation does not change the state of user stack. The immediate
     /// value affects the program MAST root computation.
-    Emit(u32) = OPCODE_EMIT,
+    Emit = OPCODE_EMIT,
 
     // ----- flow control operations -------------------------------------------------------------
     /// Marks the beginning of a join block.
@@ -622,7 +622,6 @@ impl Operation {
     pub fn imm_value(&self) -> Option<Felt> {
         match *self {
             Self::Push(imm) => Some(imm),
-            Self::Emit(imm) => Some(imm.into()),
             _ => None,
         }
     }
@@ -771,7 +770,7 @@ impl fmt::Display for Operation {
             Self::MStream => write!(f, "mstream"),
             Self::Pipe => write!(f, "pipe"),
 
-            Self::Emit(value) => write!(f, "emit({value})"),
+            Self::Emit => write!(f, "emit"),
 
             // ----- cryptographic operations -----------------------------------------------------
             Self::HPerm => write!(f, "hperm"),
@@ -799,7 +798,6 @@ impl Serializable for Operation {
                 err_code.write_into(target);
             },
             Operation::Push(value) => value.as_int().write_into(target),
-            Operation::Emit(value) => value.write_into(target),
 
             // Note: we explicitly write out all the operations so that whenever we make a
             // modification to the `Operation` enum, we get a compile error here. This
@@ -810,6 +808,7 @@ impl Serializable for Operation {
             | Operation::SDepth
             | Operation::Caller
             | Operation::Clk
+            | Operation::Emit
             | Operation::Join
             | Operation::Split
             | Operation::Loop
@@ -993,11 +992,7 @@ impl Deserializable for Operation {
 
             OPCODE_MRUPDATE => Self::MrUpdate,
             OPCODE_PUSH => Self::Push(Felt::read_from(source)?),
-            OPCODE_EMIT => {
-                let value = source.read_u32()?;
-
-                Self::Emit(value)
-            },
+            OPCODE_EMIT => Self::Emit,
             OPCODE_SYSCALL => Self::SysCall,
             OPCODE_CALL => Self::Call,
             OPCODE_END => Self::End,

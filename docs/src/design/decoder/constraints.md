@@ -10,21 +10,21 @@ We assume that the VM exposes a flag per operation which is set to $1$ when the 
 
 AIR constraints for the decoder involve operations listed in the table below. For each operation we also provide the degree of the corresponding flag and the effect that the operation has on the operand stack (however, in this section we do not cover the constraints needed to enforce the correct transition of the operand stack).
 
-| Operation | Flag          | Degree | Effect on stack                                                                                  |
-| --------- | :-----------: | :----: | ------------------------------------------------------------------------------------------------ |
-| `JOIN`    | $f_{join}$    | 5      | Stack remains unchanged.                                                                         |
-| `SPLIT`   | $f_{split}$   | 5      | Top stack element is dropped.                                                                    |
-| `LOOP`    | $f_{loop}$    | 5      | Top stack element is dropped.                                                                    |
-| `REPEAT`  | $f_{repeat}$  | 4      | Top stack element is dropped.                                                                    |
-| `SPAN`    | $f_{span}$    | 5      | Stack remains unchanged.                                                                         |
-| `RESPAN`  | $f_{respan}$  | 4      | Stack remains unchanged.                                                                         |
-| `DYN`     | $f_{dyn}$     | 5      | Stack remains unchanged.                                                                         |
-| `CALL`    | $f_{call}$    | 4      | Stack remains unchanged.                                                                         |
-| `SYSCALL` | $f_{syscall}$ | 4      | Stack remains unchanged.                                                                         |
-| `END`     | $f_{end}$     | 4      | When exiting a loop block, top stack element is dropped; otherwise, the stack remains unchanged. |
-| `HALT`    | $f_{halt}$    | 4      | Stack remains unchanged.                                                                         |
-| `PUSH`    | $f_{push}$    | 5      | An immediate value is pushed onto the stack.                                                     |
-| `EMIT`    | $f_{emit}$    | 5      | Stack remains unchanged.                                                                         |
+| Operation |     Flag      | Degree | Effect on stack                                                                                  |
+|-----------|:-------------:|:------:|--------------------------------------------------------------------------------------------------|
+| `JOIN`    |  $f_{join}$   |   5    | Stack remains unchanged.                                                                         |
+| `SPLIT`   |  $f_{split}$  |   5    | Top stack element is dropped.                                                                    |
+| `LOOP`    |  $f_{loop}$   |   5    | Top stack element is dropped.                                                                    |
+| `REPEAT`  | $f_{repeat}$  |   4    | Top stack element is dropped.                                                                    |
+| `SPAN`    |  $f_{span}$   |   5    | Stack remains unchanged.                                                                         |
+| `RESPAN`  | $f_{respan}$  |   4    | Stack remains unchanged.                                                                         |
+| `DYN`     |   $f_{dyn}$   |   5    | Stack remains unchanged.                                                                         |
+| `CALL`    |  $f_{call}$   |   4    | Stack remains unchanged.                                                                         |
+| `SYSCALL` | $f_{syscall}$ |   4    | Stack remains unchanged.                                                                         |
+| `END`     |   $f_{end}$   |   4    | When exiting a loop block, top stack element is dropped; otherwise, the stack remains unchanged. |
+| `HALT`    |  $f_{halt}$   |   4    | Stack remains unchanged.                                                                         |
+| `PUSH`    |  $f_{push}$   |   5    | An immediate value is pushed onto the stack.                                                     |
+| `EMIT`    |  $f_{emit}$   |   5    | Top stack element is dropped.                                                                    |
 
 We also use the [control flow flag](../stack/op_constraints.md#control-flow-flag) $f_{ctrl}$ exposed by the VM, which is set when any one of the above control flow operations is being executed. It has degree $5$.
 

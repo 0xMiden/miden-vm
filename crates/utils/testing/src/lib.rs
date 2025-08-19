@@ -512,7 +512,7 @@ impl Test {
                 );
             },
             Err(slow_err) => {
-                assert!(fast_result.is_err(), "expected error, but got success");
+                assert!(fast_result.is_err(), "expected error, but got success. slow error: {slow_err}");
                 let fast_err = fast_result.unwrap_err();
 
                 // assert that diagnostics match

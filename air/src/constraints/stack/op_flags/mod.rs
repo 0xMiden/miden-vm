@@ -292,7 +292,6 @@ impl<E: FieldElement> OpFlags<E> {
             + degree5_op_flags[1] // MPVERIFY
             + degree5_op_flags[6] // SPAN
             + degree5_op_flags[7] // JOIN
-            + degree5_op_flags[10] // EMIT
             + degree4_op_flags[6] // RESPAN
             + degree4_op_flags[7] // HALT
             + degree4_op_flags[3] // CALL
@@ -350,6 +349,7 @@ impl<E: FieldElement> OpFlags<E> {
             + split_loop_flag
             + shift_left_on_end
             + degree5_op_flags[8] // DYN
+            + degree5_op_flags[10] // EMIT
             + degree5_op_flags[12]; // DYNCALL
 
         left_shift_flags[2] = left_shift_flags[1] + left_change_1_flag;
@@ -408,6 +408,7 @@ impl<E: FieldElement> OpFlags<E> {
             + split_loop_flag
             + degree4_op_flags[5]
             + shift_left_on_end
+            + degree5_op_flags[10] // EMIT
             + degree5_op_flags[8]; // DYN
 
         // Flag if the current operation being executed is a control flow operation.

@@ -1,4 +1,4 @@
-use miden_core::{Felt, Operation, mast::MastForest, sys_events::SystemEvent};
+use miden_core::{Felt, mast::MastForest, sys_events::SystemEvent};
 
 use super::{
     super::{
@@ -136,17 +136,17 @@ impl Process {
     /// Forwards the emitted event id to the host.
     pub(super) fn op_emit<H>(
         &mut self,
-        event_id: u32,
         host: &mut H,
         err_ctx: &impl ErrorContext,
     ) -> Result<(), ExecutionError>
     where
         H: SyncHost,
     {
-        self.stack.copy_state(0);
-        self.decoder.set_user_op_helpers(Operation::Emit(event_id), &[event_id.into()]);
-
-        let mut process = self.state();
+        let event_id = self.stack.peek().as_int() as u32;
+        self.stack.shift_left(1);
+        
+        let mut process = self.state_with_offset(1);
+        
         // If it's a system event, handle it directly. Otherwise, forward it to the host.
         if let Some(system_event) = SystemEvent::from_event_id(event_id) {
             handle_system_event(&mut process, system_event, err_ctx)

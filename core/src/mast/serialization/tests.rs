@@ -104,7 +104,7 @@ fn confirm_operation_and_decorator_structure() {
         Operation::HornerBase => (),
         Operation::HornerExt => (),
         Operation::EvalCircuit => (),
-        Operation::Emit(_) => (),
+        Operation::Emit => (),
     };
 
     match Decorator::Trace(0) {
@@ -217,7 +217,7 @@ fn serialize_deserialize_all_nodes() {
             Operation::FriE2F4,
             Operation::HornerBase,
             Operation::HornerExt,
-            Operation::Emit(42),
+            Operation::Emit,
         ];
 
         let num_operations = operations.len();

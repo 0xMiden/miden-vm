@@ -11,15 +11,14 @@ s'_i - s_i = 0 \ \text{ for } i \in [0, 16) \text { | degree} = 1
 $$
 
 ## EMIT
-Similarly to `NOOP`, the `EMIT` operation advances the cycle counter but does not change the state of the operand stack (i.e., the depth of the stack and the values on the stack remain the same).
+The `EMIT` operation pops an element off the stack and emits it as an event. The event ID is taken from the top of the stack.
 
-The `EMIT` operation does not impose any constraints besides the ones needed to ensure that the entire state of the stack is copied over. This constraint looks like so:
+![emit](../../assets/design/stack/stack_ops/DROP.png)
 
->$$
-s'_i - s_i = 0 \ \text{ for } i \in [0, 16) \text { | degree} = 1
-$$
+The `EMIT` operation shifts the stack by $1$ element to the left, similar to the `DROP` operation, but also emits the popped value as an event ID. The degree of left shift constraints is $1$.
 
-Additionally, the prover puts `EMIT`'s immediate value in the first user op helper register non-deterministically. The [Op Group Table](../decoder/main.md#op-group-table) is responsible for ensuring that the prover sets the appropriate value.
+The effect of this operation on the rest of the stack is:
+* **Left shift** starting from position $1$.
 
 ## ASSERT
 The `ASSERT` operation pops an element off the stack and checks if the popped element is equal to $1$. If the element is not equal to $1$, program execution fails.
