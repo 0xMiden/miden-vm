@@ -8,7 +8,7 @@ use core::{
 // ================================================================================================
 pub use miden_crypto::utils::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
-    collections, uninit_vector,
+    uninit_vector,
 };
 #[cfg(feature = "std")]
 pub use winter_utils::ReadAdapter;

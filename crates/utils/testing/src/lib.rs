@@ -24,7 +24,7 @@ pub use miden_core::{
     ZERO,
     chiplets::hasher::{STATE_WIDTH, hash_elements},
     stack::MIN_STACK_DEPTH,
-    utils::{IntoBytes, ToElements, collections, group_slice_elements},
+    utils::{IntoBytes, ToElements, group_slice_elements},
 };
 use miden_core::{ProgramInfo, chiplets::hasher::apply_permutation};
 pub use miden_processor::{

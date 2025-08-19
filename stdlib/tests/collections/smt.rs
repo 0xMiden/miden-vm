@@ -271,7 +271,7 @@ fn prepare_insert_or_set(
 
     // build a Merkle store for the test before the tree is updated, and then update the tree
     let (store, advice_map) = build_advice_inputs(smt);
-    let old_value = smt.insert(key, value);
+    let old_value = smt.insert(key, value).unwrap();
     // after insert or set, the stack should be [OLD_VALUE, ROOT, ...]
     let expected_output = build_expected_stack(old_value, smt.root());
 

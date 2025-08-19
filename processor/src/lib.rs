@@ -21,7 +21,7 @@ pub use miden_core::{
     errors::InputError,
     mast::{MastForest, MastNode, MastNodeId},
     sys_events::SystemEvent,
-    utils::{DeserializationError, collections::KvMap},
+    utils::DeserializationError,
 };
 use miden_core::{
     Decorator, DecoratorIterator, FieldElement, WORD_SIZE,
