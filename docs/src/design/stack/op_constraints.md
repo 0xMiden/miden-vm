@@ -300,7 +300,7 @@ $$
 The immediate value flag $f_{imm}$ is set to 1 when an operation has an immediate value, and 0 otherwise:
 
 $$
-f_{imm} = f_{push} + f_{emit} \text{ | degree} = 4
+f_{imm} = f_{push} \text{ | degree} = 3
 $$
 
 Note that the `ASSERT`, `MPVERIFY` and other operations have immediate values too. However, these immediate values are not included in the MAST digest, and hence are not considered for the $f_{imm}$ flag.
