@@ -60,10 +60,6 @@ pub trait BaseHost {
     // REQUIRED METHODS
     // --------------------------------------------------------------------------------------------
 
-    /// Returns MAST forest corresponding to the specified digest, or None if the MAST forest for
-    /// this digest could not be found in this host.
-    fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>>;
-
     /// Returns the [`SourceSpan`] and optional [`SourceFile`] for the provided location.
     fn get_label_and_source_file(
         &self,
@@ -102,6 +98,10 @@ pub trait BaseHost {
 pub trait SyncHost: BaseHost {
     // REQUIRED METHODS
     // --------------------------------------------------------------------------------------------
+
+    /// Returns MAST forest corresponding to the specified digest, or None if the MAST forest for
+    /// this digest could not be found in this host.
+    fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>>;
 
     /// Handles the event emitted from the VM.
     fn on_event(
