@@ -57,7 +57,15 @@ const IS_FULL_CONSTRAINT_SET: bool = false;
 // PROCESSOR AIR
 // ================================================================================================
 
-/// TODO: add docs
+/// AIR (Algebraic Intermediate Representation) for the Miden VM processor.
+///
+/// This struct defines the algebraic constraints that ensure the correctness of Miden VM
+/// program execution. It implements the Winterfell AIR trait and provides the framework
+/// for generating and verifying STARK proofs of program execution.
+///
+/// The processor AIR consists of multiple constraint domains: system constraints (basic VM
+/// state transitions), stack constraints (operand stack operations), range checker constraints
+/// (field element validation), and chiplet constraints (specialized computation units).
 pub struct ProcessorAir {
     context: AirContext<Felt>,
     stack_inputs: StackInputs,
