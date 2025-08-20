@@ -1,4 +1,8 @@
-//! TODO: add docs
+//! Hash chiplet interface for Miden VM.
+//!
+//! This module provides pass-through functions for hash-related computations, delegating to the
+//! underlying Rpo256 hash function. All operations are designed to work with the VM's chiplet
+//! architecture for efficient execution and trace generation.
 use miden_crypto::Word as Digest;
 
 use super::Felt;
