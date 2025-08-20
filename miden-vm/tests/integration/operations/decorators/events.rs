@@ -9,9 +9,9 @@ fn test_event_handling() {
     let source = "\
     begin
         push.1
-        emit.1
+        emit.event(1)
         push.2
-        emit.2
+        emit.event(2)
         swapw dropw
     end";
 

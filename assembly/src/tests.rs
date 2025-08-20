@@ -4031,11 +4031,11 @@ fn emit_instruction_digest() {
 
     let program_source = r#"
         proc.foo
-            emit.1
+            emit.event(1)
         end
 
         proc.bar
-            emit.2
+            emit.event(2)
         end
 
         begin
@@ -4064,10 +4064,10 @@ fn emit_instruction_digest() {
 fn emit_syntax_equivalence() {
     let context = TestContext::new();
 
-    // First program uses emit.42
+    // First program uses emit.event(42)
     let program1_source = r#"
         begin
-            emit.42
+            emit.event(42)
         end
     "#;
 
@@ -4079,19 +4079,31 @@ fn emit_syntax_equivalence() {
         end
     "#;
 
+    // Third program uses emit.CONST_EVENT
+    let program3_source = r#"
+        const.EVENT_ID=event(42)
+        begin
+            emit.EVENT_ID
+        end
+    "#;
+
     let program1 = context.assemble(program1_source).unwrap();
     let program2 = context.assemble(program2_source).unwrap();
+    let program3 = context.assemble(program3_source).unwrap();
 
     // Get the MAST forest digests for both programs
     let digest1 = program1.hash();
     let digest2 = program2.hash();
+    let digest3 = program3.hash();
 
     // Both programs should have identical MAST representations
-    assert_eq!(digest1, digest2, "MAST digests differ between emit.42 and push.42 emit");
+    assert_eq!(digest1, digest2, "MAST digests differ between emit.event(42) and push.42 emit");
+    assert_eq!(digest1, digest3, "MAST digests differ between emit.event(42) and push.EVENT_ID");
 
     // Verify the procedure count is 1 (just the entrypoint) for both programs
     assert_eq!(program1.num_procedures(), 1);
     assert_eq!(program2.num_procedures(), 1);
+    assert_eq!(program3.num_procedures(), 1);
 }
 
 /// Since `foo` and `bar` have the same body, we only expect them to be added once to the program.

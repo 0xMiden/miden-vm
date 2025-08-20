@@ -82,7 +82,7 @@ fn assert_eq_fail() {
 
 #[test]
 fn emit() {
-    let mut test = build_op_test!("emit.42", &[0, 0, 0, 0]);
+    let mut test = build_op_test!("emit.event(42)", &[0, 0, 0, 0]);
     test.add_event_handler(42, |_| Ok(Vec::new()));
     test.prove_and_verify(vec![], false);
 }

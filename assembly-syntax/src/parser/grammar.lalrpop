@@ -773,7 +773,7 @@ Debug: Instruction = {
             Instruction::Debug(DebugOptions::AdvStackTop(0.into())),
         }
     },
-    "emit" <id:MaybeImm<U32>> => {
+    "emit" <id:MaybeConstant<U32>> => {
         match id {
             Some(id) => Instruction::EmitEvent(id),
             None => Instruction::Emit,
@@ -1337,6 +1337,13 @@ ImmValue<T>: Immediate<T> = {
 #[inline]
 MaybeImm<T>: Option<Immediate<T>> = {
     <Imm<T>> => Some(<>),
+    => None
+}
+
+/// Parses an (optional) constant reference only (no literals allowed)
+#[inline]
+MaybeConstant<T>: Option<Immediate<T>> = {
+    "." <ConstantName> => Some(Immediate::Constant(<>)),
     => None
 }
 
