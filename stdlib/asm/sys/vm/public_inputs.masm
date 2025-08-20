@@ -199,25 +199,14 @@ proc.reduce_variable_length_public_inputs
     # of the reduction can be stored.
     # Note that, as mentioned in the top of this module, the variable-length public inputs are only
     # stored temporarily and they will be over-written by, among other data, the result of reducing
-    # the variable public inputs. 
-    exec.reduce_var_len_public_inputs_groups
+    # the variable public inputs.
+    
+    adv_push.1 exec.reduce_kernel_digests
     # => [next_var_len_pub_inputs_ptr, var_len_pub_inputs_res_ptr, ...]
 
     # 3) Clean up the stack.
     drop drop
     # => [...]
-end
-
-#! Reduce each group of the variable-length public inputs and stores the result in memory.
-#!
-#! Inputs:  [next_var_len_pub_inputs_ptr, var_len_pub_inputs_res_ptr]
-#! Outputs: [next_var_len_pub_inputs_ptr, var_len_pub_inputs_res_ptr]
-export.reduce_var_len_public_inputs_groups
-    # 1) Reduce kernel procedure digests and store them.
-    adv_push.1
-    # => [num_ker_procedures, next_var_len_pub_inputs_ptr, var_len_pub_inputs_res_ptr, ...]
-    exec.reduce_kernel_digests
-    # => [next_var_len_pub_inputs_ptr, var_len_pub_inputs_res_ptr, ...]
 end
 
 #! Reduces the kernel procedures digests using auxiliary randomness.
