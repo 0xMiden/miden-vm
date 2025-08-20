@@ -12,6 +12,7 @@ use thiserror::Error;
 /// - `data`: Non-zero values in row-major order
 /// - `indptr`: Row pointers indicating where each row starts in `data`
 /// - `cols`: Number of columns in the matrix
+/// - `clobbering_mode`: Whether to ignore insertion of F::default() values
 ///
 /// This format is optimized for matrices where non-zero elements appear
 /// contiguously in the first columns of each row.
@@ -27,6 +28,9 @@ pub struct SparseMatrix<F: Default> {
     pub indptr: Vec<usize>,
     /// Number of columns in the matrix
     pub cols: usize,
+    /// If true, insertion of F::default() values is ignored. If false, all values
+    /// are inserted regardless of whether they are the default value.
+    pub clobbering_mode: bool,
     #[doc(hidden)]
     /// A copy of F::default (for the Index trait)
     _default: F,
@@ -39,21 +43,40 @@ pub enum SparseMatrixError {
 }
 
 impl<F: Default> SparseMatrix<F> {
-    /// Creates a new empty 0x0 matrix
-    pub fn empty() -> Self {
+    /// Creates a new empty 0x0 matrix with specified clobbering mode
+    pub fn empty(clobbering_mode: bool) -> Self {
         Self {
             data: vec![],
             indptr: vec![0],
             cols: 0,
+            clobbering_mode,
             _default: F::default(),
         }
     }
 
-    pub fn new(data: Vec<F>, indptr: Vec<usize>, cols: usize) -> Self {
+    /// Creates a new matrix with specified clobbering mode
+    pub fn new(data: Vec<F>, indptr: Vec<usize>, cols: usize, clobbering_mode: bool) -> Self {
         Self {
             data,
             indptr,
             cols,
+            clobbering_mode,
+            _default: F::default(),
+        }
+    }
+
+    /// Creates a new matrix with specified clobbering mode
+    pub fn with_clobbering_mode(
+        data: Vec<F>,
+        indptr: Vec<usize>,
+        cols: usize,
+        clobbering_mode: bool,
+    ) -> Self {
+        Self {
+            data,
+            indptr,
+            cols,
+            clobbering_mode,
             _default: F::default(),
         }
     }
@@ -123,8 +146,8 @@ impl<F: Default + PartialEq + Copy> SparseMatrix<F> {
         if row_dense_len == self.num_cols() {
             return Err(SparseMatrixError::FullRow(row));
         }
-        // Add new element if not zero
-        if value != F::default() {
+        // Add new element if not zero or if clobbering mode is disabled
+        if value != F::default() || !self.clobbering_mode {
             self.insert_element_at(row, row_end, value);
         }
         Ok(row_dense_len)
