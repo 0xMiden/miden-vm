@@ -442,9 +442,9 @@ In the beginning of a span block (i.e., when `SPAN` operation is executed), the 
 The rules for decrementing values in the $gc$ column are as follows:
 * The count cannot be decremented by more than $1$ in a single row.
 * When an operation group is fully executed (which happens when $h_0 = 0$ inside a span block), the count is decremented by $1$.
-* When `SPAN`, `RESPAN`, `EMIT` or `PUSH` operations are executed, the count is decremented by $1$.
+* When `SPAN`, `RESPAN`, or `PUSH` operations are executed, the count is decremented by $1$.
 
-Note that these rules imply that the `EMIT` and `PUSH` operations cannot be the last operation in an operation group (otherwise the count would have to be decremented by $2$).
+Note that these rules imply that the `PUSH` operation (or any operation with an immediate value) cannot be the last operation in an operation group (otherwise the count would have to be decremented by $2$).
 
 To simplify the description of the constraints, we will define the following variable:
 
@@ -628,10 +628,10 @@ Where $i \in [1, 8)$. Thus, $v_1$ defines row value for group in $h_1$, $v_2$ de
 We compute the value of the row to be removed from the op group table as follows:
 
 $$
-u = \alpha_0 + \alpha_1 \cdot a + \alpha_2 \cdot gc + \alpha_3 \cdot ((h_0' \cdot 2^7 + op') \cdot (1 - f_{imm}) + s_0' \cdot f_{push} + h_2 \cdot f_{emit}) \text{ | degree} = 6
+u = \alpha_0 + \alpha_1 \cdot a + \alpha_2 \cdot gc + \alpha_3 \cdot ((h_0' \cdot 2^7 + op') \cdot (1 - f_{imm}) + s_0' \cdot f_{push}) \text{ | degree} = 6
 $$
 
-In the above, the value of the group is computed as $(h_0' \cdot 2^7 + op') \cdot (1 - f_{push}) + s_0' \cdot f_{push} + h_2 \cdot f_{emit}$. This basically says that when we execute a `PUSH` or `EMIT` operation we need to remove the immediate value from the table. For `PUSH`, this value is at the top of the stack (column $s_0$) in the next row; for `EMIT`, it is found in $h_2$. However, when we are executing neither a `PUSH` nor `EMIT` operation, the value to be removed is an op group value which is a combination of values in $h_0$ and `op_bits` columns (also in the next row). Note also that value for batch address comes from the current value in the block address column ($a$), and the group position comes from the current value of the group count column ($gc$).
+In the above, the value of the group is computed as $(h_0' \cdot 2^7 + op') \cdot (1 - f_{imm}) + s_0' \cdot f_{push}$. This basically says that when we execute a `PUSH` operation we need to remove the immediate value from the table. This value is at the top of the stack (column $s_0$) in the next row. However, when we are not executing a `PUSH` operation, the value to be removed is an op group value which is a combination of values in $h_0$ and `op_bits` columns (also in the next row). Note also that value for batch address comes from the current value in the block address column ($a$), and the group position comes from the current value of the group count column ($gc$).
 
 We also define a flag which is set to $1$ when a group needs to be removed from the op group table.
 

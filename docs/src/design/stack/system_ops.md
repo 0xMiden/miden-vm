@@ -11,14 +11,9 @@ s'_i - s_i = 0 \ \text{ for } i \in [0, 16) \text { | degree} = 1
 $$
 
 ## EMIT
-The `EMIT` operation pops an element off the stack and emits it as an event. The event ID is taken from the top of the stack.
+The `EMIT` operation pops an element off the stack and emits it as an event. The event ID is taken from the top of the stack and dropped before executing the event.
 
-![emit](../../assets/design/stack/stack_ops/DROP.png)
-
-The `EMIT` operation shifts the stack by $1$ element to the left, similar to the `DROP` operation, but also emits the popped value as an event ID. The degree of left shift constraints is $1$.
-
-The effect of this operation on the rest of the stack is:
-* **Left shift** starting from position $1$.
+This operations therefore has the same semantics as the [`DROP`](./stack_ops.md#drop) operation for the stack.
 
 ## ASSERT
 The `ASSERT` operation pops an element off the stack and checks if the popped element is equal to $1$. If the element is not equal to $1$, program execution fails.
