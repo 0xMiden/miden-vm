@@ -29,7 +29,7 @@ pub use miden_core::{
 use miden_core::{ProgramInfo, chiplets::hasher::apply_permutation};
 pub use miden_processor::{
     AdviceInputs, AdviceProvider, BaseHost, ContextId, ExecutionError, ExecutionOptions,
-    ExecutionTrace, Process, ProcessState, VmStateIterator,
+    ExecutionTrace, Process, ProcessState, TraceDebugger,
 };
 use miden_processor::{AdviceMutation, DefaultHost, EventError, Program, fast::FastProcessor};
 use miden_prover::utils::range;
@@ -419,9 +419,9 @@ impl Test {
     }
 
     /// Compiles the test's source to a Program and executes it with the tests inputs. Returns a
-    /// VmStateIterator that allows us to iterate through each clock cycle and inspect the process
+    /// TraceDebugger that allows us to iterate through each clock cycle and inspect the process
     /// state.
-    pub fn execute_iter(&self) -> VmStateIterator {
+    pub fn execute_iter(&self) -> TraceDebugger {
         let (program, host) = self.get_program_and_host();
         let mut host = host.with_source_manager(self.source_manager.clone());
 
@@ -442,7 +442,7 @@ impl Test {
                 "inconsistent program hash"
             );
         }
-        VmStateIterator::new(process, result)
+        TraceDebugger::new(process, result)
     }
 
     /// Returns the last state of the stack after executing a test.

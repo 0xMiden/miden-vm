@@ -1,6 +1,6 @@
 use miden_core::{AssemblyOp, Felt, Operation};
 use miden_debug_types::Location;
-use miden_processor::{AsmOpInfo, RowIndex, VmStateIterator};
+use miden_processor::{AsmOpInfo, RowIndex, TraceDebugger};
 use miden_utils_testing::{assert_eq, build_debug_test};
 
 #[test]
@@ -1193,14 +1193,15 @@ fn asmop_conditional_execution_test() {
 }
 
 /// This is a helper function to build a vector of [VmStatePartial] from a specified
-/// [VmStateIterator].
-fn build_vm_state(vm_state_iterator: VmStateIterator) -> Vec<VmStatePartial> {
+/// [TraceDebugger].
+fn build_vm_state(vm_state_iterator: TraceDebugger) -> Vec<VmStatePartial> {
     let mut vm_state = Vec::new();
-    for state in vm_state_iterator {
+    while let Some(state) = debugger.step_forward() {
+        let state = state.unwrap();
         vm_state.push(VmStatePartial {
-            clk: state.as_ref().unwrap().clk,
-            asmop: state.as_ref().unwrap().asmop.clone(),
-            op: state.as_ref().unwrap().op,
+            clk: state.clk,
+            asmop: state.asmop.clone(),
+            op: state.op,
         });
     }
     vm_state

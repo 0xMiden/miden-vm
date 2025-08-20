@@ -17,7 +17,7 @@ fn test_exec_iter() {
     });
     let test = build_debug_test!(source, &init_stack);
     let path = test.source.uri();
-    let traces = test.execute_iter();
+    let mut debugger = test.execute_iter();
     let fmp = Felt::new(2u64.pow(30));
     let next_fmp = fmp + ONE;
     // TODO: double check this value
@@ -379,7 +379,8 @@ fn test_exec_iter() {
             memory: vec![(1u32.into(), 13_u32.into()), ((2u32.pow(30) + 1).into(), 17_u32.into())],
         },
     ];
-    for (expected, t) in expected_states.iter().zip(traces) {
+    for expected in expected_states.iter() {
+        let t = debugger.step_forward().expect("missing state");
         let state = t.as_ref().unwrap();
         assert_eq!(*expected, *state);
     }
