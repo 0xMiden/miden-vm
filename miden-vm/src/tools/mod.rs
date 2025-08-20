@@ -246,11 +246,11 @@ where
 {
     let mut execution_details = ExecutionDetails::default();
 
-    let vm_state_iterator =
-        miden_processor::execute_iter(program, stack_inputs, advice_inputs, &mut host);
-    execution_details.set_trace_len_summary(vm_state_iterator.trace_len_summary());
+    let mut debugger =
+        miden_processor::execute_debugger(program, stack_inputs, advice_inputs, &mut host);
+    execution_details.set_trace_len_summary(debugger.trace_len_summary());
 
-    for state in vm_state_iterator {
+    while let Some(state) = debugger.step_forward() {
         let vm_state = state.wrap_err("execution error")?;
         if matches!(vm_state.op, Some(Operation::Noop)) {
             execution_details.incr_noop_count();

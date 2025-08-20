@@ -320,9 +320,9 @@ fn execute(
         host.load_library(library.mast_forest()).map_err(|err| format!("{err}"))?;
     }
 
-    let state_iter =
-        miden_processor::execute_iter(&program, stack_inputs, advice_inputs, &mut host);
-    let (system, _, stack, chiplets, err) = state_iter.into_parts();
+    let debugger =
+        miden_processor::execute_debugger(&program, stack_inputs, advice_inputs, &mut host);
+    let (system, _, stack, chiplets, err) = debugger.into_parts();
     if let Some(err) = err {
         return Err(format!("{err}"));
     }

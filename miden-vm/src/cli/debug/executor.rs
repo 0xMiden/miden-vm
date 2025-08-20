@@ -1,14 +1,14 @@
 use std::sync::Arc;
 
 use miden_processor::{AdviceInputs, MemoryAddress};
-use miden_vm::{DefaultHost, Program, StackInputs, VmState, VmStateIterator};
+use miden_vm::{DefaultHost, Program, StackInputs, VmState};
 
 use super::DebugCommand;
 use crate::utils::print_mem_address;
 
 /// Holds debugger state and iterator used for debugging.
 pub struct DebugExecutor {
-    vm_state_iter: VmStateIterator,
+    debugger: miden_processor::TraceDebugger,
     vm_state: VmState,
     // TODO(pauls): Use this to render source-level diagnostics when program errors are encountered
     #[allow(unused)]
@@ -28,21 +28,18 @@ impl DebugExecutor {
         advice_inputs: AdviceInputs,
         source_manager: Arc<dyn miden_assembly::SourceManager>,
     ) -> Result<Self, String> {
-        let mut vm_state_iter = miden_processor::execute_iter(
+        let mut debugger = miden_processor::execute_debugger(
             &program,
             stack_inputs,
             advice_inputs,
             &mut DefaultHost::default(),
         );
-        let vm_state = vm_state_iter
-            .next()
-            .ok_or(
-                "Failed to instantiate DebugExecutor - `VmStateIterator` is not yielding!"
-                    .to_string(),
-            )?
+        let vm_state = debugger
+            .step_forward()
+            .ok_or("Failed to instantiate DebugExecutor - debugger is not yielding!".to_string())?
             .expect("initial state of vm must be healthy!");
 
-        Ok(Self { vm_state_iter, vm_state, source_manager })
+        Ok(Self { debugger, vm_state, source_manager })
     }
 
     // MODIFIERS
@@ -75,14 +72,14 @@ impl DebugExecutor {
                 self.print_vm_state();
             },
             DebugCommand::Rewind => {
-                while let Some(new_vm_state) = self.vm_state_iter.back() {
+                while let Some(new_vm_state) = self.debugger.back() {
                     self.vm_state = new_vm_state;
                 }
                 self.print_vm_state();
             },
             DebugCommand::Back(cycles) => {
                 for _cycle in 0..cycles {
-                    match self.vm_state_iter.back() {
+                    match self.debugger.back() {
                         Some(new_vm_state) => {
                             self.vm_state = new_vm_state;
                             if self.should_break() {
@@ -108,7 +105,7 @@ impl DebugExecutor {
 
     /// iterates to the next clock cycle.
     fn next_vm_state(&mut self) -> Option<VmState> {
-        match self.vm_state_iter.next() {
+        match self.debugger.step_forward() {
             Some(next_vm_state_result) => match next_vm_state_result {
                 Ok(vm_state) => Some(vm_state),
                 Err(err) => {
