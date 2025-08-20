@@ -3684,6 +3684,7 @@ fn test_program_serde_simple() {
 fn test_program_serde_with_decorators() {
     let source = "
     const.DEFAULT_CONST=100
+    const.DEFAULT_EVENT=event(200)
 
     proc.foo
         push.1.2 add
@@ -3691,7 +3692,7 @@ fn test_program_serde_with_decorators() {
     end
 
     begin
-        emit.DEFAULT_CONST
+        emit.DEFAULT_EVENT
 
         exec.foo
 

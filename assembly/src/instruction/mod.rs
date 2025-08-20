@@ -545,7 +545,7 @@ impl Assembler {
             Instruction::Emit => {
                 block_builder.push_op(Operation::Emit);
             },
-            Instruction::EmitImm(event_id) => {
+            Instruction::EmitEvent(event_id) => {
                 let event_id_value = event_id.expect_value();
                 block_builder.push_ops([Operation::Push(event_id_value.into()), Operation::Emit]);
             },

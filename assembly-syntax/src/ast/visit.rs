@@ -322,7 +322,7 @@ where
         | MemLoadWImm(imm)
         | MemStoreImm(imm)
         | MemStoreWImm(imm)
-        | EmitImm(imm)
+        | EmitEvent(imm)
         | Trace(imm) => visitor.visit_immediate_u32(imm),
         SysEvent(sys_event) => visitor.visit_system_event(Span::new(span, sys_event)),
         Exec(target) => visitor.visit_exec(target),
@@ -571,6 +571,9 @@ pub trait VisitMut<T = ()> {
     fn visit_mut_immediate_error_message(&mut self, code: &mut ErrorMsg) -> ControlFlow<T> {
         visit_mut_immediate_error_message(self, code)
     }
+    fn visit_mut_emit_event(&mut self, imm: &mut Immediate<u32>) -> ControlFlow<T> {
+        visit_mut_emit_event(self, imm)
+    }
 }
 
 impl<V, T> VisitMut<T> for &mut V
@@ -639,6 +642,9 @@ where
     }
     fn visit_mut_immediate_error_message(&mut self, code: &mut ErrorMsg) -> ControlFlow<T> {
         (**self).visit_mut_immediate_error_message(code)
+    }
+    fn visit_mut_emit_event(&mut self, imm: &mut Immediate<u32>) -> ControlFlow<T> {
+        (**self).visit_mut_emit_event(imm)
     }
 }
 
@@ -753,8 +759,8 @@ where
         | MemLoadWImm(imm)
         | MemStoreImm(imm)
         | MemStoreWImm(imm)
-        | EmitImm(imm)
         | Trace(imm) => visitor.visit_mut_immediate_u32(imm),
+        EmitEvent(imm) => visitor.visit_mut_emit_event(imm),
         SysEvent(sys_event) => visitor.visit_mut_system_event(Span::new(span, sys_event)),
         Exec(target) => visitor.visit_mut_exec(target),
         Call(target) => visitor.visit_mut_call(target),
@@ -926,4 +932,12 @@ where
     V: ?Sized + VisitMut<T>,
 {
     ControlFlow::Continue(())
+}
+
+#[inline(always)]
+pub fn visit_mut_emit_event<V, T>(visitor: &mut V, imm: &mut Immediate<u32>) -> ControlFlow<T>
+where
+    V: ?Sized + VisitMut<T>,
+{
+    visitor.visit_mut_immediate_u32(imm)
 }

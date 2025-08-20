@@ -100,6 +100,8 @@ pub enum ConstantExpr {
     },
     String(Ident),
     Word(Span<WordValue>),
+    /// An event constant with a u32 value.
+    Event(Ident, u32),
 }
 
 impl ConstantExpr {
@@ -122,6 +124,14 @@ impl ConstantExpr {
         }
     }
 
+    /// Unwrap an event value from this expression or panic.
+    pub fn expect_event(&self) -> u32 {
+        match self {
+            Self::Event(_, value) => *value,
+            other => panic!("expected constant expression to be an event, got {other:#?}"),
+        }
+    }
+
     /// Attempt to fold to a single value.
     ///
     /// This will only succeed if the expression has no references to other constants.
@@ -130,7 +140,9 @@ impl ConstantExpr {
     /// Returns an error if an invalid expression is found while folding, such as division by zero.
     pub fn try_fold(self) -> Result<Self, ParsingError> {
         match self {
-            Self::String(_) | Self::Literal(_) | Self::Var(_) | Self::Word(_) => Ok(self),
+            Self::String(_) | Self::Literal(_) | Self::Var(_) | Self::Word(_) | Self::Event(..) => {
+                Ok(self)
+            },
             Self::BinaryOp { span, op, lhs, rhs } => {
                 if rhs.is_literal() {
                     let rhs = Self::into_inner(rhs).try_fold()?;
@@ -202,7 +214,7 @@ impl ConstantExpr {
 
     fn is_literal(&self) -> bool {
         match self {
-            Self::Literal(_) | Self::String(_) | Self::Word(_) => true,
+            Self::Literal(_) | Self::String(_) | Self::Word(_) | Self::Event(..) => true,
             Self::Var(_) => false,
             Self::BinaryOp { lhs, rhs, .. } => lhs.is_literal() && rhs.is_literal(),
         }
@@ -222,6 +234,7 @@ impl PartialEq for ConstantExpr {
         match (self, other) {
             (Self::Literal(l), Self::Literal(y)) => l == y,
             (Self::Var(l), Self::Var(y)) => l == y,
+            (Self::Event(_l_ident, l_val), Self::Event(_r_ident, r_val)) => l_val == r_val,
             (
                 Self::BinaryOp { op: lop, lhs: llhs, rhs: lrhs, .. },
                 Self::BinaryOp { op: rop, lhs: rlhs, rhs: rrhs, .. },
@@ -239,6 +252,10 @@ impl core::hash::Hash for ConstantExpr {
             Self::String(value) => value.hash(state),
             Self::Word(value) => value.hash(state),
             Self::Var(value) => value.hash(state),
+            Self::Event(ident, value) => {
+                ident.hash(state);
+                value.hash(state);
+            },
             Self::BinaryOp { op, lhs, rhs, .. } => {
                 op.hash(state);
                 lhs.hash(state);
@@ -254,6 +271,7 @@ impl fmt::Debug for ConstantExpr {
             Self::Literal(lit) => fmt::Debug::fmt(&**lit, f),
             Self::Word(w) => fmt::Debug::fmt(&**w, f),
             Self::Var(name) | Self::String(name) => fmt::Debug::fmt(&**name, f),
+            Self::Event(ident, value) => fmt::Debug::fmt(&(ident, value), f),
             Self::BinaryOp { op, lhs, rhs, .. } => {
                 f.debug_tuple(op.name()).field(lhs).field(rhs).finish()
             },
@@ -269,6 +287,9 @@ impl crate::prettier::PrettyPrint for ConstantExpr {
             Self::Literal(literal) => display(literal),
             Self::Word(spanned) => spanned.render(),
             Self::Var(ident) | Self::String(ident) => display(ident),
+            Self::Event(_ident, value) => {
+                flatten(const_text("event") + const_text("(") + display(value) + const_text(")"))
+            },
             Self::BinaryOp { op, lhs, rhs, .. } => {
                 let single_line = lhs.render() + display(op) + rhs.render();
                 let multi_line = lhs.render() + nl() + (display(op)) + rhs.render();
@@ -284,6 +305,7 @@ impl Spanned for ConstantExpr {
             Self::Literal(spanned) => spanned.span(),
             Self::Word(spanned) => spanned.span(),
             Self::Var(spanned) | Self::String(spanned) => spanned.span(),
+            Self::Event(spanned, _) => spanned.span(),
             Self::BinaryOp { span, .. } => *span,
         }
     }

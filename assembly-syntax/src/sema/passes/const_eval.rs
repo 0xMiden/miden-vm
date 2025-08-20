@@ -39,6 +39,17 @@ impl ConstEvalVisitor<'_> {
                             self.analyzer.error(SemanticAnalysisError::ImmediateOverflow { span });
                         },
                     },
+                    Ok(ConstantExpr::Event(_, event_value)) => {
+                        match T::try_from(*event_value as u64) {
+                            Ok(value) => {
+                                *imm = Immediate::Value(Span::new(span, value));
+                            },
+                            Err(_) => {
+                                self.analyzer
+                                    .error(SemanticAnalysisError::ImmediateOverflow { span });
+                            },
+                        }
+                    },
                     Err(error) => {
                         self.analyzer.error(error);
                     },
@@ -48,9 +59,45 @@ impl ConstEvalVisitor<'_> {
             },
         }
     }
+
+    /// Special method for evaluating event constants that validates they are event constants
+    fn eval_event_const<T>(&mut self, imm: &mut Immediate<T>) -> ControlFlow<()>
+    where
+        T: TryFrom<u64>,
+    {
+        match imm {
+            Immediate::Value(_) => ControlFlow::Continue(()),
+            Immediate::Constant(name) => {
+                let span = name.span();
+                match self.analyzer.get_constant(name) {
+                    Ok(ConstantExpr::Event(_, event_value)) => {
+                        match T::try_from(*event_value as u64) {
+                            Ok(value) => {
+                                *imm = Immediate::Value(Span::new(span, value));
+                            },
+                            Err(_) => {
+                                self.analyzer
+                                    .error(SemanticAnalysisError::ImmediateOverflow { span });
+                            },
+                        }
+                    },
+                    Ok(_) => {
+                        self.analyzer.error(SemanticAnalysisError::InvalidEventConstant { span });
+                    },
+                    Err(error) => {
+                        self.analyzer.error(error);
+                    },
+                }
+                ControlFlow::Continue(())
+            },
+        }
+    }
 }
 
 impl VisitMut for ConstEvalVisitor<'_> {
+    fn visit_mut_emit_event(&mut self, imm: &mut Immediate<u32>) -> ControlFlow<()> {
+        self.eval_event_const(imm)
+    }
     fn visit_mut_immediate_u8(&mut self, imm: &mut Immediate<u8>) -> ControlFlow<()> {
         self.eval_const(imm)
     }
