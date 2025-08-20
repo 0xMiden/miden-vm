@@ -47,7 +47,7 @@ impl Assembler {
                 // statements, loops, etc. However, `exec` instructions are compiled away and not
                 // added to the trace, so we should ignore them. Theoretically, we
                 // could probably add them anyways, but it currently breaks the
-                // `VmStateIterator`.
+                // `TraceDebugger`.
                 if !matches!(instruction.inner(), &Instruction::Exec(_)) {
                     let asm_op_id = maybe_asm_op_id.expect("no asmop decorator");
 

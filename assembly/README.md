@@ -169,7 +169,7 @@ end
 
 ### Debug Mode
 
-The assembler can be instantiated in debug mode. Compiling a program with such an assembler retains source mappings between assembly instructions and VM operations. Thus, when such a program is executed using the `execute_iter()` function of the [processor](../processor), it is possible to correlate each
+The assembler can be instantiated in debug mode. Compiling a program with such an assembler retains source mappings between assembly instructions and VM operations. Thus, when such a program is executed using the debugger via the `execute_debugger()` function of the [processor](../processor), it is possible to correlate each
 instruction with the source code that it is derived from. You can do this as
 shown below:
 

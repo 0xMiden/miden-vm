@@ -1194,7 +1194,7 @@ fn asmop_conditional_execution_test() {
 
 /// This is a helper function to build a vector of [VmStatePartial] from a specified
 /// [TraceDebugger].
-fn build_vm_state(vm_state_iterator: TraceDebugger) -> Vec<VmStatePartial> {
+fn build_vm_state(mut debugger: TraceDebugger) -> Vec<VmStatePartial> {
     let mut vm_state = Vec::new();
     while let Some(state) = debugger.step_forward() {
         let state = state.unwrap();
