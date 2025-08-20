@@ -4086,11 +4086,7 @@ fn emit_syntax_equivalence() {
     let digest2 = program2.hash();
 
     // Both programs should have identical MAST representations
-    assert_eq!(
-        digest1,
-        digest2,
-        "MAST digests differ between emit.42 and push.42 emit"
-    );
+    assert_eq!(digest1, digest2, "MAST digests differ between emit.42 and push.42 emit");
 
     // Verify the procedure count is 1 (just the entrypoint) for both programs
     assert_eq!(program1.num_procedures(), 1);
