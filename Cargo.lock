@@ -588,6 +588,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "expect-test"
+version = "1.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "63af43ff4431e848fb47472a920f14fa71c24de13255a5692e93d4e90302acb0"
+dependencies = [
+ "dissimilar",
+ "once_cell",
+]
+
+[[package]]
 name = "fixedbitset"
 version = "0.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1063,6 +1073,7 @@ name = "miden-assembly"
 version = "0.18.0"
 dependencies = [
  "env_logger",
+ "expect-test",
  "log",
  "miden-assembly-syntax",
  "miden-core",

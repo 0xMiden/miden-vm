@@ -2,6 +2,7 @@ use alloc::{collections::BTreeSet, string::ToString, vec::Vec};
 use core::str::FromStr;
 use std::sync::{Arc, LazyLock};
 
+use expect_test::expect;
 use miden_assembly_syntax::{
     ast::types::{FunctionType, Type},
     diagnostics::WrapErr,
@@ -13,7 +14,7 @@ use miden_core::{
     utils::{Deserializable, Serializable},
 };
 use miden_mast_package::{MastArtifact, MastForest, Package, PackageExport, PackageManifest};
-use pretty_assertions::{assert_eq, assert_str_eq};
+use pretty_assertions::assert_eq;
 use proptest::{
     prelude::*,
     test_runner::{Config, TestRunner},
@@ -29,6 +30,19 @@ use crate::{
 };
 
 type TestResult = Result<(), Report>;
+
+// Note: where possible, prefer expect_test to pretty_assertions for snapshot testing.
+//
+// - For tests against expected values that can't be expressed as a string literal, we still use
+//   pretty-assertions' assert_eq for backward compatibility.
+// - For new tests using string literals, or when you need auto-updating snapshots, use expect!:
+//
+// Example:
+// let expected = expect![["expected output"]];
+// expected.assert_eq(&actual_output);
+//
+// To update snapshots automatically:
+// cargo test UPDATE_EXPECT=1
 
 macro_rules! assert_assembler_diagnostic {
     ($context:ident, $source:expr, $($expected:literal),+) => {{
@@ -54,27 +68,24 @@ fn simple_instructions() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "begin push.0 assertz end");
     let program = context.assemble(source)?;
-    let expected = "\
-begin
+    let expected = expect![["begin
     basic_block pad eqz assert(0) end
-end";
-    assert_str_eq!(format!("{program}"), expected);
+end"]];
+    expected.assert_eq(&format!("{}", program));
 
     let source = source_file!(&context, "begin push.10 push.50 push.2 u32wrapping_madd end");
     let program = context.assemble(source)?;
-    let expected = "\
-begin
+    let expected = expect![["begin
     basic_block push(10) push(50) push(2) u32madd drop end
-end";
-    assert_str_eq!(format!("{program}"), expected);
+end"]];
+    expected.assert_eq(&format!("{}", program));
 
     let source = source_file!(&context, "begin push.10 push.50 push.2 u32wrapping_add3 end");
     let program = context.assemble(source)?;
-    let expected = "\
-begin
+    let expected = expect![["begin
     basic_block push(10) push(50) push(2) u32add3 drop end
-end";
-    assert_str_eq!(format!("{program}"), expected);
+end"]];
+    expected.assert_eq(&format!("{}", program));
     Ok(())
 }
 
@@ -85,8 +96,8 @@ fn empty_program() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "begin end");
     let program = context.assemble(source)?;
-    let expected = "begin basic_block noop end end";
-    assert_eq!(expected, format!("{}", program));
+    let expected = expect![["begin basic_block noop end end"]];
+    expected.assert_eq(&format!("{}", program));
     Ok(())
 }
 
@@ -113,15 +124,14 @@ fn empty_if_true_then_branch() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "begin if.true nop end end");
     let program = context.assemble(source)?;
-    let expected = "\
-begin
+    let expected = expect![["begin
     if.true
         basic_block noop end
     else
         basic_block noop end
     end
-end";
-    assert_str_eq!(format!("{}", program), expected);
+end"]];
+    expected.assert_eq(&format!("{}", program));
     Ok(())
 }
 
@@ -132,13 +142,13 @@ fn empty_while() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "begin while.true end end");
     let program = context.assemble(source)?;
-    let expected = "\
+    let expected = expect![["\
 begin
     while.true
         basic_block noop end
     end
-end";
-    assert_str_eq!(format!("{}", program), expected);
+end"]];
+    expected.assert_eq(&format!("{}", program));
     Ok(())
 }
 
@@ -149,11 +159,11 @@ fn empty_repeat() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "begin repeat.5 end end");
     let program = context.assemble(source)?;
-    let expected = "\
+    let expected = expect![["\
 begin
     basic_block noop noop noop noop noop end
-end";
-    assert_str_eq!(format!("{}", program), expected);
+end"]];
+    expected.assert_eq(&format!("{}", program));
     Ok(())
 }
 
@@ -164,11 +174,11 @@ fn repeat_basic_blocks_merged() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "begin mul repeat.5 add end end");
     let program = context.assemble(source)?;
-    let expected = "\
+    let expected = expect![["\
 begin
     basic_block mul add add add add add end
-end";
-    assert_str_eq!(format!("{}", program), expected);
+end"]];
+    expected.assert_eq(&format!("{}", program));
 
     // Also ensure that dead code elimination works properly
     assert_eq!(program.mast_forest().num_nodes(), 1);
@@ -180,11 +190,11 @@ fn single_basic_block() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "begin push.1 push.2 add end");
     let program = context.assemble(source)?;
-    let expected = "\
+    let expected = expect![["\
 begin
     basic_block pad incr push(2) add end
-end";
-    assert_str_eq!(format!("{program}"), expected);
+end"]];
+    expected.assert_eq(&format!("{}", program));
     Ok(())
 }
 
@@ -195,7 +205,7 @@ fn basic_block_and_simple_if_true() -> TestResult {
     // if with else
     let source = source_file!(&context, "begin push.2 push.3 if.true add else mul end end");
     let program = context.assemble(source)?;
-    let expected = "\
+    let expected = expect![["\
 begin
     join
         basic_block push(2) push(3) end
@@ -205,13 +215,13 @@ begin
             basic_block mul end
         end
     end
-end";
-    assert_str_eq!(format!("{program}"), expected);
+end"]];
+    expected.assert_eq(&format!("{}", program));
 
     // if without else
     let source = source_file!(&context, "begin push.2 push.3 if.true add end end");
     let program = context.assemble(source)?;
-    let expected = "\
+    let expected = expect![["\
 begin
     join
         basic_block push(2) push(3) end
@@ -221,8 +231,8 @@ begin
             basic_block noop end
         end
     end
-end";
-    assert_str_eq!(format!("{program}"), expected);
+end"]];
+    expected.assert_eq(&format!("{}", program));
     Ok(())
 }
 
@@ -233,7 +243,7 @@ fn basic_block_and_simple_if_false() -> TestResult {
     // if with else
     let source = source_file!(&context, "begin push.2 push.3 if.false add else mul end end");
     let program = context.assemble(source)?;
-    let expected = "\
+    let expected = expect![["\
 begin
     join
         basic_block push(2) push(3) end
@@ -243,13 +253,13 @@ begin
             basic_block add end
         end
     end
-end";
-    assert_str_eq!(format!("{program}"), expected);
+end"]];
+    expected.assert_eq(&format!("{}", program));
 
     // if without else
     let source = source_file!(&context, "begin push.2 push.3 if.false add end end");
     let program = context.assemble(source)?;
-    let expected = "\
+    let expected = expect![["\
 begin
     join
         basic_block push(2) push(3) end
@@ -259,8 +269,8 @@ begin
             basic_block add end
         end
     end
-end";
-    assert_str_eq!(format!("{program}"), expected);
+end"]];
+    expected.assert_eq(&format!("{}", program));
     Ok(())
 }
 
@@ -754,12 +764,12 @@ fn simple_constant() -> TestResult {
         push.TEST_CONSTANT
     end"
     );
-    let expected = "\
+    let expected = expect![["\
 begin
     basic_block push(7) end
-end";
+end"]];
     let program = context.assemble(source)?;
-    assert_str_eq!(format!("{program}"), expected);
+    expected.assert_eq(&format!("{}", program));
     Ok(())
 }
 
@@ -774,12 +784,12 @@ fn multiple_constants_push() -> TestResult {
     push.CONSTANT_1.64.CONSTANT_2.72 \
     end"
     );
-    let expected = "\
+    let expected = expect![["\
 begin
     basic_block push(21) push(64) push(44) push(72) end
-end";
+end"]];
     let program = context.assemble(source)?;
-    assert_str_eq!(format!("{program}"), expected);
+    expected.assert_eq(&format!("{}", program));
     Ok(())
 }
 
@@ -794,12 +804,12 @@ fn constant_numeric_expression() -> TestResult {
     end \
     "
     );
-    let expected = "\
+    let expected = expect![["\
 begin
     basic_block push(26) end
-end";
+end"]];
     let program = context.assemble(source)?;
-    assert_str_eq!(format!("{program}"), expected);
+    expected.assert_eq(&format!("{}", program));
     Ok(())
 }
 
@@ -816,12 +826,12 @@ fn constant_alphanumeric_expression() -> TestResult {
     end \
     "
     );
-    let expected = "\
+    let expected = expect![["\
 begin
     basic_block push(21) end
-end";
+end"]];
     let program = context.assemble(source)?;
-    assert_str_eq!(format!("{program}"), expected);
+    expected.assert_eq(&format!("{}", program));
     Ok(())
 }
 
@@ -836,12 +846,12 @@ fn constant_hexadecimal_value() -> TestResult {
     end \
     "
     );
-    let expected = "\
+    let expected = expect![["\
 begin
     basic_block push(255) end
-end";
+end"]];
     let program = context.assemble(source)?;
-    assert_str_eq!(format!("{program}"), expected);
+    expected.assert_eq(&format!("{}", program));
     Ok(())
 }
 
@@ -856,12 +866,12 @@ fn constant_field_division() -> TestResult {
     end \
     "
     );
-    let expected = "\
+    let expected = expect![["\
 begin
     basic_block push(2) end
-end";
+end"]];
     let program = context.assemble(source)?;
-    assert_str_eq!(format!("{program}"), expected);
+    expected.assert_eq(&format!("{}", program));
     Ok(())
 }
 
@@ -1235,7 +1245,7 @@ fn mem_operations_with_constants() -> TestResult {
         )
     );
     let expected_program = context.assemble(expected)?;
-    assert_str_eq!(expected_program.to_string(), program.to_string());
+    assert_eq!(expected_program.to_string(), program.to_string());
     Ok(())
 }
 
@@ -1334,7 +1344,7 @@ fn test_push_word_slice() -> TestResult {
     );
     let program = context.assemble(source)?;
 
-    let expected = "\
+    let expected = expect![["\
 begin
     basic_block
         push(3)
@@ -1347,8 +1357,8 @@ begin
         push(6)
         push(7)
     end
-end";
-    assert_str_eq!(format!("{program}"), expected);
+end"]];
+    expected.assert_eq(&format!("{}", program));
     Ok(())
 }
 
@@ -1428,12 +1438,12 @@ fn decorators_basic_block() -> TestResult {
         trace.2
     end"
     );
-    let expected = "\
+    let expected = expect![["\
 begin
     basic_block trace(0) add trace(1) mul trace(2) end
-end";
+end"]];
     let program = context.assemble(source)?;
-    assert_str_eq!(expected, format!("{program}"));
+    expected.assert_eq(&format!("{}", program));
     Ok(())
 }
 
@@ -1451,12 +1461,12 @@ fn decorators_repeat_one_basic_block() -> TestResult {
         trace.2
     end"
     );
-    let expected = "\
+    let expected = expect![["\
 begin
     basic_block trace(0) add add trace(1) mul mul trace(2) end
-end";
+end"]];
     let program = context.assemble(source)?;
-    assert_str_eq!(expected, format!("{program}"));
+    expected.assert_eq(&format!("{}", program));
     Ok(())
 }
 
@@ -1479,7 +1489,7 @@ fn decorators_repeat_split() -> TestResult {
         trace.5
     end"
     );
-    let expected = "\
+    let expected = expect![["\
 begin
     join
         trace(0)
@@ -1497,9 +1507,9 @@ begin
         trace(4)
     end
     trace(5)
-end";
+end"]];
     let program = context.assemble(source)?;
-    assert_str_eq!(expected, format!("{program}"));
+    expected.assert_eq(&format!("{}", program));
     Ok(())
 }
 
@@ -1515,14 +1525,14 @@ fn decorators_call() -> TestResult {
         trace.2
     end"
     );
-    let expected = "\
+    let expected = expect![["\
 begin
     trace(0) trace(1)
     call.0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef
     trace(2)
-end";
+end"]];
     let program = context.assemble(source)?;
-    assert_str_eq!(expected, format!("{program}"));
+    expected.assert_eq(&format!("{}", program));
     Ok(())
 }
 
@@ -1539,12 +1549,12 @@ fn decorators_dyn() -> TestResult {
         trace.1
     end"
     );
-    let expected = "\
+    let expected = expect![["\
 begin
     trace(0) dyn trace(1)
-end";
+end"]];
     let program = context.assemble(source)?;
-    assert_str_eq!(expected, format!("{program}"));
+    expected.assert_eq(&format!("{}", program));
 
     // multi line
     let context = TestContext::default();
@@ -1557,14 +1567,14 @@ end";
         trace.5 trace.6 trace.7 trace.8 trace.9
     end"
     );
-    let expected = "\
+    let expected = expect![["\
 begin
     trace(0) trace(1) trace(2) trace(3) trace(4)
     dyn
     trace(5) trace(6) trace(7) trace(8) trace(9)
-end";
+end"]];
     let program = context.assemble(source)?;
-    assert_str_eq!(expected, format!("{program}"));
+    expected.assert_eq(&format!("{}", program));
     Ok(())
 }
 
@@ -1591,16 +1601,16 @@ fn decorators_external() -> TestResult {
     end"
     );
 
-    let expected = "\
+    let expected = expect![["\
 begin
     trace(0)
     external.0xe776df8dc02329acc43a09fe8e510b44a87dfd876e375ad383891470ece4f6de
     trace(1)
-end";
+end"]];
     let program = Assembler::new(context.source_manager())
         .with_dynamic_library(lib)?
         .assemble_program(program_source)?;
-    assert_str_eq!(expected, format!("{program}"));
+    expected.assert_eq(&format!("{}", program));
 
     Ok(())
 }
@@ -1627,7 +1637,7 @@ fn decorators_join_and_split() -> TestResult {
         trace.11
     end"
     );
-    let expected = "\
+    let expected = expect![["\
 begin
     join
         trace(0) trace(1)
@@ -1644,9 +1654,9 @@ begin
         end
     end
     trace(11)
-end";
+end"]];
     let program = context.assemble(source)?;
-    assert_str_eq!(expected, format!("{program}"));
+    expected.assert_eq(&format!("{}", program));
     Ok(())
 }
 
@@ -1684,7 +1694,7 @@ begin
     end
 end"
     );
-    assert_str_eq!(format!("{program}"), expected);
+    assert_eq!(expected, format!("{}", program));
     Ok(())
 }
 
@@ -1722,7 +1732,7 @@ begin
     end
 end"
     );
-    assert_str_eq!(format!("{program}"), expected);
+    assert_eq!(expected, format!("{}", program));
     Ok(())
 }
 
@@ -1760,7 +1770,7 @@ begin
     end
 end"
     );
-    assert_str_eq!(format!("{program}"), expected);
+    assert_eq!(expected, format!("{}", program));
     Ok(())
 }
 
@@ -1825,7 +1835,7 @@ begin
     end
 end"
     );
-    assert_str_eq!(format!("{program}"), expected);
+    assert_eq!(expected, format!("{}", program));
     Ok(())
 }
 
@@ -1866,7 +1876,7 @@ begin
     end
 end"
     );
-    assert_str_eq!(format!("{program}"), expected);
+    assert_eq!(expected, format!("{}", program));
     Ok(())
 }
 
@@ -1901,7 +1911,7 @@ begin
     end
 end"
     );
-    assert_str_eq!(format!("{program}"), expected);
+    assert_eq!(expected, format!("{}", program));
     Ok(())
 }
 
@@ -1951,7 +1961,7 @@ begin
     end
 end"
     );
-    assert_str_eq!(format!("{program}"), expected);
+    assert_eq!(expected, format!("{}", program));
     Ok(())
 }
 
@@ -2080,7 +2090,7 @@ begin
 end"
     );
 
-    assert_str_eq!(expected, format!("{program}"));
+    assert_eq!(expected, format!("{}", program));
     Ok(())
 }
 
@@ -2102,15 +2112,15 @@ fn mtree_verify_with_code() -> TestResult {
 
     let program = context.assemble(source)?;
 
-    let expected = "\
+    let expected = expect![["\
 begin
     basic_block
         mpverify(0)
         mpverify(13948122101519563734)
         mpverify(17575088163785490049)
     end
-end";
-    assert_str_eq!(format!("{program}"), expected);
+end"]];
+    expected.assert_eq(&format!("{}", program));
     Ok(())
 }
 
@@ -2135,7 +2145,7 @@ fn nested_control_blocks() -> TestResult {
         end"
     );
     let program = context.assemble(source)?;
-    let expected = "\
+    let expected = expect![["\
 begin
     join
         join
@@ -2160,8 +2170,8 @@ begin
         end
         basic_block push(3) add end
     end
-end";
-    assert_str_eq!(expected, format!("{program}"));
+end"]];
+    expected.assert_eq(&format!("{}", program));
     Ok(())
 }
 
@@ -2228,11 +2238,11 @@ fn program_with_one_procedure() -> TestResult {
         "proc.foo push.3 push.7 mul end begin push.2 push.3 add exec.foo end"
     );
     let program = context.assemble(source)?;
-    let expected = "\
+    let expected = expect![["\
 begin
     basic_block push(2) push(3) add push(3) push(7) mul end
-end";
-    assert_str_eq!(format!("{program}"), expected);
+end"]];
+    expected.assert_eq(&format!("{}", program));
     Ok(())
 }
 
@@ -2247,7 +2257,7 @@ fn program_with_nested_procedure() -> TestResult {
         begin push.2 push.4 add exec.foo push.11 exec.bar sub end"
     );
     let program = context.assemble(source)?;
-    let expected = "\
+    let expected = expect![["\
 begin
     basic_block
         push(2)
@@ -2265,8 +2275,8 @@ begin
         neg
         add
     end
-end";
-    assert_str_eq!(format!("{program}"), expected);
+end"]];
+    expected.assert_eq(&format!("{}", program));
     Ok(())
 }
 
@@ -2289,7 +2299,7 @@ fn program_with_proc_locals() -> TestResult {
     );
     let program = context.assemble(source)?;
     // Note: 18446744069414584317 == -4 (mod 2^64 - 2^32 + 1)
-    let expected = "\
+    let expected = expect![["\
 begin
     basic_block
         push(10)
@@ -2309,8 +2319,8 @@ begin
         push(18446744069414584317)
         fmpupdate
     end
-end";
-    assert_str_eq!(format!("{program}"), expected);
+end"]];
+    expected.assert_eq(&format!("{}", program));
     Ok(())
 }
 
@@ -2383,11 +2393,11 @@ fn program_with_dynamic_code_execution() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "begin dynexec end");
     let program = context.assemble(source)?;
-    let expected = "\
+    let expected = expect![["\
 begin
     dyn
-end";
-    assert_str_eq!(format!("{program}"), expected);
+end"]];
+    expected.assert_eq(&format!("{}", program));
     Ok(())
 }
 
@@ -2396,11 +2406,11 @@ fn program_with_dynamic_code_execution_in_new_context() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "begin dyncall end");
     let program = context.assemble(source)?;
-    let expected = "\
+    let expected = expect![["\
 begin
     dyncall
-end";
-    assert_str_eq!(format!("{program}"), expected);
+end"]];
+    expected.assert_eq(&format!("{}", program));
     Ok(())
 }
 
@@ -2516,7 +2526,7 @@ fn program_with_one_import_and_hex_call() -> TestResult {
     );
     let program = context.assemble(source)?;
 
-    let expected = "\
+    let expected = expect![["\
 begin
     join
         join
@@ -2525,8 +2535,8 @@ begin
         end
         call.0x20234ee941e53a15886e733cc8e041198c6e90d2a16ea18ce1030e8c3596dd38
     end
-end";
-    assert_str_eq!(format!("{program}"), expected);
+end"]];
+    expected.assert_eq(&format!("{}", program));
     Ok(())
 }
 
@@ -2653,7 +2663,7 @@ fn program_with_reexported_proc_in_same_library() -> TestResult {
         )
     );
     let program = context.assemble(source)?;
-    let expected = "\
+    let expected = expect![["\
 begin
     join
         join
@@ -2662,8 +2672,8 @@ begin
         end
         external.0xcb08c107c81c582788cbf63c99f6b455e11b33bb98ca05fe1cfa17c087dfa8f1
     end
-end";
-    assert_str_eq!(format!("{program}"), expected);
+end"]];
+    expected.assert_eq(&format!("{}", program));
     Ok(())
 }
 
@@ -2728,7 +2738,7 @@ fn program_with_reexported_custom_alias_in_same_library() -> TestResult {
         )
     );
     let program = context.assemble(source)?;
-    let expected = "\
+    let expected = expect![["\
 begin
     join
         join
@@ -2737,8 +2747,8 @@ begin
         end
         external.0xcb08c107c81c582788cbf63c99f6b455e11b33bb98ca05fe1cfa17c087dfa8f1
     end
-end";
-    assert_str_eq!(format!("{program}"), expected);
+end"]];
+    expected.assert_eq(&format!("{}", program));
     Ok(())
 }
 
@@ -2801,7 +2811,7 @@ fn program_with_reexported_proc_in_another_library() -> TestResult {
     );
     let program = context.assemble(source)?;
 
-    let expected = "\
+    let expected = expect![["\
 begin
     join
         join
@@ -2810,8 +2820,8 @@ begin
         end
         external.0xcb08c107c81c582788cbf63c99f6b455e11b33bb98ca05fe1cfa17c087dfa8f1
     end
-end";
-    assert_str_eq!(format!("{program}"), expected);
+end"]];
+    expected.assert_eq(&format!("{}", program));
 
     // We also want to assert that exports from the referenced module do not leak
     let mut context = TestContext::default();
@@ -2881,14 +2891,14 @@ fn module_alias() -> TestResult {
     );
 
     let program = context.assemble(source)?;
-    let expected = "\
+    let expected = expect![["\
 begin
     join
         basic_block pad incr pad push(2) pad end
         external.0x3cff5b58a573dc9d25fd3c57130cc57e5b1b381dc58b5ae3594b390c59835e63
     end
-end";
-    assert_str_eq!(format!("{program}"), expected);
+end"]];
+    expected.assert_eq(&format!("{}", program));
 
     // --- invalid module alias -----------------------------------------------
     let source = source_file!(
@@ -3024,11 +3034,11 @@ fn comment_simple() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "begin # simple comment \n push.1 push.2 add end");
     let program = context.assemble(source)?;
-    let expected = "\
+    let expected = expect![["\
 begin
     basic_block pad incr push(2) add end
-end";
-    assert_str_eq!(format!("{program}"), expected);
+end"]];
+    expected.assert_eq(&format!("{}", program));
     Ok(())
 }
 
@@ -3052,7 +3062,7 @@ fn comment_in_nested_control_blocks() -> TestResult {
         end"
     );
     let program = context.assemble(source)?;
-    let expected = "\
+    let expected = expect![["\
 begin
     join
         join
@@ -3077,8 +3087,8 @@ begin
         end
         basic_block push(3) add end
     end
-end";
-    assert_str_eq!(expected, format!("{program}"));
+end"]];
+    expected.assert_eq(&format!("{}", program));
     Ok(())
 }
 
@@ -3087,11 +3097,11 @@ fn comment_before_program() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, " # starting comment \n begin push.1 push.2 add end");
     let program = context.assemble(source)?;
-    let expected = "\
+    let expected = expect![["\
 begin
     basic_block pad incr push(2) add end
-end";
-    assert_str_eq!(format!("{program}"), expected);
+end"]];
+    expected.assert_eq(&format!("{}", program));
     Ok(())
 }
 
@@ -3100,11 +3110,11 @@ fn comment_after_program() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "begin push.1 push.2 add end # closing comment");
     let program = context.assemble(source)?;
-    let expected = "\
+    let expected = expect![["\
 begin
     basic_block pad incr push(2) add end
-end";
-    assert_str_eq!(format!("{program}"), expected);
+end"]];
+    expected.assert_eq(&format!("{}", program));
     Ok(())
 }
 
@@ -3120,11 +3130,11 @@ begin
 end"
     );
     let program = context.assemble(source)?;
-    let expected = "\
+    let expected = expect![["\
 begin
     basic_block push(2) push(3) push(4) push(5) end
-end";
-    assert_str_eq!(format!("{program}"), expected);
+end"]];
+    expected.assert_eq(&format!("{}", program));
     Ok(())
 }
 
@@ -3145,7 +3155,7 @@ begin
     basic_block push(2) push(2) push(2) push(2) emit({EVENT_MAP_VALUE_TO_STACK}) assert(0) end
 end"
     );
-    assert_str_eq!(format!("{program}"), expected);
+    assert_eq!(expected, format!("{}", program));
     Ok(())
 }
 
@@ -3173,7 +3183,7 @@ begin
     end
 end"
     );
-    assert_str_eq!(format!("{program}"), expected);
+    assert_eq!(expected, format!("{}", program));
     Ok(())
 }
 
@@ -3194,7 +3204,7 @@ begin
     basic_block emit({EVENT_HAS_MAP_KEY}) assert(0) end
 end"
     );
-    assert_str_eq!(format!("{program}"), expected);
+    assert_eq!(expected, format!("{}", program));
     Ok(())
 }
 
