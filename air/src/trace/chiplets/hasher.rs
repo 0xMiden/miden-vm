@@ -1,4 +1,8 @@
-//! TODO: add docs
+//! Hasher chiplet execution trace definitions.
+//!
+//! This module defines constants and types for the hasher chiplet's execution trace.
+//! The hasher trace consists of 16 columns: 3 selector columns, 12 state columns 
+//! (4 capacity + 8 rate), and 1 index column for Merkle operations.
 
 use core::ops::Range;
 
