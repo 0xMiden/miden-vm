@@ -891,10 +891,21 @@ impl FastProcessor {
             // whereas all the other operations are synchronous (resulting in a significant
             // performance improvement).
             match op {
-                Operation::Emit => self.op_emit(host, &err_ctx).await?,
+                Operation::Emit => {
+                    let event_id = self.stack_get(0).as_int() as u32;
+
+                    // The event ID is removed from the stack before calling handlers via op_emit.
+                    // For consistency with SlowProcessor, we also increment the clock cycle before
+                    // executing the emit operation.
+                    self.decrement_stack_size();
+                    self.clk += 1_u32;
+
+                    self.op_emit(event_id, host, &err_ctx).await?
+                },
                 _ => {
                     // if the operation is not an Emit, we execute it normally
                     self.execute_op(op, op_idx_in_block, program, host, &err_ctx)?;
+                    self.clk += 1_u32;
                 },
             }
 
@@ -924,8 +935,6 @@ impl FastProcessor {
             } else {
                 op_idx_in_group += 1;
             }
-
-            self.clk += 1_u32;
         }
 
         // make sure we execute the required number of operation groups; this would happen when the

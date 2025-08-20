@@ -772,7 +772,6 @@ pub struct SlowProcessState<'a> {
     system: &'a System,
     stack: &'a Stack,
     chiplets: &'a Chiplets,
-    offset: usize,
 }
 
 // PROCESS STATE
@@ -792,18 +791,6 @@ impl Process {
             system: &self.system,
             stack: &self.stack,
             chiplets: &self.chiplets,
-            offset: 0,
-        })
-    }
-
-    #[inline(always)]
-    pub fn state_with_offset(&mut self, offset: usize) -> ProcessState<'_> {
-        ProcessState::Slow(SlowProcessState {
-            advice: &mut self.advice,
-            system: &self.system,
-            stack: &self.stack,
-            chiplets: &self.chiplets,
-            offset,
         })
     }
 }
@@ -858,7 +845,7 @@ impl<'a> ProcessState<'a> {
     #[inline(always)]
     pub fn get_stack_item(&self, pos: usize) -> Felt {
         match self {
-            ProcessState::Slow(state) => self.get_stack_state()[state.offset + pos],
+            ProcessState::Slow(state) => state.stack.get(pos),
             ProcessState::Fast(state) => state.processor.stack_get(pos),
         }
     }
@@ -876,14 +863,7 @@ impl<'a> ProcessState<'a> {
     #[inline(always)]
     pub fn get_stack_word(&self, word_idx: usize) -> Word {
         match self {
-            ProcessState::Slow(state) => {
-                let stack = self.get_stack_state();
-                let word_offset = state.offset + word_idx * 4;
-                let mut word = stack[word_offset..word_offset + 4].to_vec();
-                word.reverse();
-                let word: [Felt; 4] = word.try_into().unwrap();
-                word.into()
-            },
+            ProcessState::Slow(state) => state.stack.get_word(word_idx),
             ProcessState::Fast(state) => state.processor.stack_get_word(word_idx * WORD_SIZE),
         }
     }
@@ -893,7 +873,7 @@ impl<'a> ProcessState<'a> {
     #[inline(always)]
     pub fn get_stack_state(&self) -> Vec<Felt> {
         match self {
-            ProcessState::Slow(state) => state.stack.get_state_at(self.clk()),
+            ProcessState::Slow(state) => state.stack.get_state_at(state.system.clk()),
             ProcessState::Fast(state) => state.processor.stack().iter().rev().copied().collect(),
         }
     }
