@@ -7,6 +7,9 @@ use.std::sys::vm::public_inputs
 
 use.std::crypto::stark::verifier
 
+# Indicates the existence of auxiliary trace segment.
+const.IS_AUX_TRACE=1
+
 # Main segment width is 80 (0x50) and there are 1 (0x01) auxiliary segments
 # of width 8 (0x08) using 16 (0x10) random extension field elements
 const.TRACE_INFO=0x50010810
@@ -39,17 +42,21 @@ const.TRACE_INFO=0x50010810
 export.verify_proof
     # --- Get constants -------------------------------------------------------
 
+    # Flag indicating the existence of auxiliary trace
+    push.IS_AUX_TRACE movdn.3
+    # => [log(trace_length), num_queries, grinding, is_aux_trace]
+
     # Number of fixed length public inputs
     exec.public_inputs::get_num_fixed_len_public_inputs movdn.3
-    # => [log(trace_length), num_queries, grinding, num_fixed_len_pi]
+    # => [log(trace_length), num_queries, grinding, num_fixed_len_pi, is_aux_trace]
 
     # Trace info as one field element
     push.TRACE_INFO movdn.3
-    # => [log(trace_length), num_queries, grinding, trace_info, num_fixed_len_pi]
+    # => [log(trace_length), num_queries, grinding, trace_info, num_fixed_len_pi, is_aux_trace]
 
     # Number of constraints
     exec.constraints_eval::get_num_constraints movdn.3
-    # => [log(trace_length), num_queries, grinding, num_constraints, trace_info, num_fixed_len_pi]
+    # => [log(trace_length), num_queries, grinding, num_constraints, trace_info, num_fixed_len_pi, is_aux_trace]
 
     # --- Load the digests of all dynamically invoked procedures --------------
 
@@ -57,7 +64,7 @@ export.verify_proof
     procref.constraints_eval::execute_constraint_evaluation_check
     procref.ood_frames::process_row_ood_evaluations
     procref.public_inputs::process_public_inputs
-    # =>[D3, D2, D1, D0, log(trace_length), num_queries, grinding, num_constraints, trace_info, num_fixed_len_pi]
+    # =>[D3, D2, D1, D0, log(trace_length), num_queries, grinding, num_constraints, trace_info, num_fixed_len_pi, is_aux_trace]
 
     # --- Call the core verification procedure from `stdlib` ------------------
 
