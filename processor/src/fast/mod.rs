@@ -1817,7 +1817,7 @@ impl FastProcessor {
                 }
             };
 
-            self.trace_state_builder.as_mut().unwrap().extract_new_state(
+            self.trace_state_builder.as_mut().unwrap().capture_trace_state(
                 SystemState {
                     clk: self.clk,
                     ctx: self.ctx,

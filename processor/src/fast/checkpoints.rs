@@ -105,7 +105,7 @@ pub struct DecoderState {
 pub struct StackState {
     /// Top 16 stack slots (s0 to s15)
     /// These represent the top elements of the stack that are directly accessible
-    stack_top: [Felt; MIN_STACK_DEPTH], // 16 columns
+    pub stack_top: [Felt; MIN_STACK_DEPTH], // 16 columns
 
     /// Current stack depth, initialized by FastProcessor when extracting core trace state
     /// and updated by push_overflow() and pop_overflow() methods
@@ -134,14 +134,6 @@ impl StackState {
         }
     }
 
-    pub fn stack_top(&self) -> &[Felt; MIN_STACK_DEPTH] {
-        &self.stack_top
-    }
-
-    pub fn stack_top_mut(&mut self) -> &mut [Felt; MIN_STACK_DEPTH] {
-        &mut self.stack_top
-    }
-
     /// Returns the value at the specified index in the stack top.
     ///
     /// # Panics
@@ -151,8 +143,8 @@ impl StackState {
     }
 
     /// Returns the stack depth (b0 helper column)
-    pub fn stack_depth(&self) -> Felt {
-        Felt::new(self.stack_depth as u64)
+    pub fn stack_depth(&self) -> usize {
+        self.stack_depth
     }
 
     /// Returns the overflow address (b1 helper column) using the stack overflow replay
@@ -192,8 +184,8 @@ impl StackState {
     ///
     /// It is expected that this values gets later inverted via batch inversion.
     pub fn overflow_helper(&self) -> Felt {
-        let denominator = self.stack_depth().as_int() - MIN_STACK_DEPTH as u64;
-        Felt::new(denominator)
+        let denominator = self.stack_depth() - MIN_STACK_DEPTH;
+        Felt::new(denominator as u64)
     }
 
     pub fn start_context(&mut self) -> (usize, Felt) {
@@ -400,27 +392,13 @@ impl ExternalNodeReplay {
 /// addresses that they were recorded at. This works naturally since the fast processor has exactly
 /// the same access patterns as the main trace generators (which re-executes part of the program).
 /// The read methods include debug assertions to verify address consistency.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct MemoryReplay {
     elements_read: VecDeque<(Felt, Felt)>,
     words_read: VecDeque<(Felt, Word)>,
 }
 
-impl Default for MemoryReplay {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl MemoryReplay {
-    /// Creates a new MemoryReplay with empty read vectors
-    pub fn new() -> Self {
-        Self {
-            elements_read: VecDeque::new(),
-            words_read: VecDeque::new(),
-        }
-    }
-
     // MUTATIONS (populated by the fast processor)
     // --------------------------------------------------------------------------------
 
@@ -462,7 +440,7 @@ impl MemoryReplay {
 /// that return the pre-recorded results. This works naturally since the fast processor has exactly
 /// the same access patterns as the main trace generators (which re-executes part of the program).
 /// The read methods include debug assertions to verify parameter consistency.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct AdviceReplay {
     // Stack operations
     stack_pops: VecDeque<Felt>,
@@ -470,22 +448,7 @@ pub struct AdviceReplay {
     stack_dword_pops: VecDeque<[Word; 2]>,
 }
 
-impl Default for AdviceReplay {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl AdviceReplay {
-    /// Creates a new AdviceReplay with empty operation vectors
-    pub fn new() -> Self {
-        Self {
-            stack_pops: VecDeque::new(),
-            stack_word_pops: VecDeque::new(),
-            stack_dword_pops: VecDeque::new(),
-        }
-    }
-
     // MUTATIONS (populated by the fast processor)
     // --------------------------------------------------------------------------------
 
@@ -532,7 +495,7 @@ impl AdviceReplay {
 /// This is used to simulate hasher operations in parallel trace generation without needing
 /// to actually perform hash computations. All hasher operations are recorded during fast
 /// execution and then replayed during parallel trace generation.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct HasherReplay {
     /// Recorded hasher addresses from operations like hash_control_block, hash_basic_block, etc.
     pub block_addresses: VecDeque<Felt>,
@@ -550,22 +513,7 @@ pub struct HasherReplay {
     pub mrupdate_operations: VecDeque<(Felt, Word, Word)>,
 }
 
-impl Default for HasherReplay {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl HasherReplay {
-    pub fn new() -> Self {
-        Self {
-            block_addresses: VecDeque::new(),
-            permutation_operations: VecDeque::new(),
-            build_merkle_root_operations: VecDeque::new(),
-            mrupdate_operations: VecDeque::new(),
-        }
-    }
-
     // MUTATIONS (populated by the fast processor)
     // --------------------------------------------------------------------------------
 

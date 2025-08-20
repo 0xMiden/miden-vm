@@ -59,7 +59,7 @@ impl CoreTraceStateBuilder {
     /// The replay data is cleared after extraction, since each trace state is expected to be empty
     /// at the beginning of a new trace fragment. The overflow table and block stack are not cleared
     /// however, since they track the state of the computation since the beginning.
-    pub fn extract_new_state(
+    pub fn capture_trace_state(
         &mut self,
         system_state: SystemState,
         decoder_state: DecoderState,
