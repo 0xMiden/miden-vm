@@ -114,7 +114,7 @@ fn batch_ops() {
     assert_eq!(1, batches.len());
 
     let batch = &batches[0];
-    assert_eq!(ops, batch.ops);
+    assert_eq!(ops, batch.ops.data);
     assert_eq!(1, batch.num_groups());
 
     let mut batch_groups = [ZERO; BATCH_SIZE];
@@ -130,7 +130,7 @@ fn batch_ops() {
     assert_eq!(1, batches.len());
 
     let batch = &batches[0];
-    assert_eq!(ops, batch.ops);
+    assert_eq!(ops, batch.ops.data);
     assert_eq!(1, batch.num_groups());
 
     let mut batch_groups = [ZERO; BATCH_SIZE];
@@ -146,7 +146,7 @@ fn batch_ops() {
     assert_eq!(1, batches.len());
 
     let batch = &batches[0];
-    assert_eq!(ops, batch.ops);
+    assert_eq!(ops, batch.ops.data);
     assert_eq!(2, batch.num_groups());
 
     let mut batch_groups = [ZERO; BATCH_SIZE];
@@ -172,7 +172,7 @@ fn batch_ops() {
     assert_eq!(1, batches.len());
 
     let batch = &batches[0];
-    assert_eq!(ops, batch.ops);
+    assert_eq!(ops, batch.ops.data);
     assert_eq!(8, batch.num_groups());
 
     let batch_groups = [
@@ -207,7 +207,7 @@ fn batch_ops() {
     assert_eq!(2, batches.len());
 
     let batch0 = &batches[0];
-    assert_eq!(ops[..9], batch0.ops);
+    assert_eq!(ops[..9], batch0.ops.data);
     assert_eq!(7, batch0.num_groups());
 
     let batch0_groups = [
@@ -225,7 +225,7 @@ fn batch_ops() {
     assert_eq!([9_usize, 0, 0, 0, 0, 0, 0, 0], batch0.op_counts);
 
     let batch1 = &batches[1];
-    assert_eq!(vec![ops[9]], batch1.ops);
+    assert_eq!(vec![ops[9]], batch1.ops.data);
     assert_eq!(2, batch1.num_groups());
 
     let mut batch1_groups = [ZERO; BATCH_SIZE];
@@ -256,7 +256,7 @@ fn batch_ops() {
     assert_eq!(1, batches.len());
 
     let batch = &batches[0];
-    assert_eq!(ops, batch.ops);
+    assert_eq!(ops, batch.ops.data);
     assert_eq!(4, batch.num_groups());
 
     let batch_groups = [
@@ -290,7 +290,7 @@ fn batch_ops() {
     assert_eq!(1, batches.len());
 
     let batch = &batches[0];
-    assert_eq!(ops, batch.ops);
+    assert_eq!(ops, batch.ops.data);
     assert_eq!(3, batch.num_groups());
 
     let batch_groups = [
@@ -324,7 +324,7 @@ fn batch_ops() {
     assert_eq!(1, batches.len());
 
     let batch = &batches[0];
-    assert_eq!(ops, batch.ops);
+    assert_eq!(ops, batch.ops.data);
     assert_eq!(4, batch.num_groups());
 
     let batch_groups = [
@@ -369,7 +369,7 @@ fn batch_ops() {
     assert_eq!(2, batches.len());
 
     let batch0 = &batches[0];
-    assert_eq!(ops[..17], batch0.ops);
+    assert_eq!(ops[..17], batch0.ops.data);
     assert_eq!(7, batch0.num_groups());
 
     let batch0_groups = [
@@ -387,7 +387,7 @@ fn batch_ops() {
     assert_eq!([9_usize, 0, 0, 0, 0, 0, 8, 0], batch0.op_counts);
 
     let batch1 = &batches[1];
-    assert_eq!(ops[17..], batch1.ops);
+    assert_eq!(ops[17..], batch1.ops.data);
     assert_eq!(2, batch1.num_groups());
 
     let batch1_groups = [build_group(&ops[17..]), Felt::new(6), ZERO, ZERO, ZERO, ZERO, ZERO, ZERO];
@@ -433,7 +433,11 @@ fn operation_or_decorator_iterator() {
     // after last operation
     assert_eq!(iterator.next(), Some(OperationOrDecorator::Decorator(&DecoratorId(3))));
     assert_eq!(iterator.next(), Some(OperationOrDecorator::Decorator(&DecoratorId(4))));
-    assert_eq!(iterator.next(), None);
+    assert_eq!(iterator.next(), Some(OperationOrDecorator::Operation(&Operation::Noop)));
+    assert_eq!(iterator.next(), Some(OperationOrDecorator::Operation(&Operation::Noop)));
+    assert_eq!(iterator.next(), Some(OperationOrDecorator::Operation(&Operation::Noop)));
+    assert_eq!(iterator.next(), Some(OperationOrDecorator::Operation(&Operation::Noop)));
+    assert_eq!(iterator.next(), Some(OperationOrDecorator::Operation(&Operation::Noop)));
 }
 
 // TEST HELPERS

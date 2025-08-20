@@ -129,11 +129,12 @@ pub(super) mod opcode_constants {
 // ================================================================================================
 
 /// A set of native VM operations which take exactly one cycle to execute.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Default)]
 #[repr(u8)]
 pub enum Operation {
     // ----- system operations -------------------------------------------------------------------
     /// Advances cycle counter, but does not change the state of user stack.
+    #[default]
     Noop = OPCODE_NOOP,
 
     /// Pops the stack; if the popped value is not 1, execution fails.

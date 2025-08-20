@@ -17,7 +17,7 @@ use thiserror::Error;
 /// This format is optimized for matrices where non-zero elements appear
 /// contiguously in the first columns of each row.
 // To represent an OpBatch, should be used with # cols = GROUP_SIZE, # rows = BATCH_SIZE
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SparseMatrix<F: Default> {
     /// Non-zero values in row-major order
     pub data: Vec<F>,
@@ -82,7 +82,7 @@ impl<F: Default> SparseMatrix<F> {
     }
 
     /// Adds a new empty row to the matrix
-    fn add_row(&mut self) {
+    pub(crate) fn add_row(&mut self) {
         let current_len = self.data.len();
         self.indptr.push(current_len);
     }

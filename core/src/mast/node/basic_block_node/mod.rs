@@ -347,8 +347,8 @@ impl<'a> OperationOrDecoratorIterator<'a> {
         Self {
             node,
             batch_index: 0,
-            op_index_in_batch: 0,
             op_index: 0,
+            op_index_in_batch: 0,
             decorator_list_next_index: 0,
         }
     }
@@ -369,7 +369,8 @@ impl<'a> Iterator for OperationOrDecoratorIterator<'a> {
 
         // If no decorator needs to be executed, then execute the operation
         if let Some(batch) = self.node.op_batches.get(self.batch_index) {
-            if let Some(operation) = batch.ops.get(self.op_index_in_batch) {
+            if self.op_index_in_batch < batch.ops.num_rows() * batch.ops.num_cols() {
+                let operation = &batch.ops[self.op_index_in_batch];
                 self.op_index_in_batch += 1;
                 self.op_index += 1;
 

@@ -1,6 +1,5 @@
-use alloc::vec::Vec;
-
 use super::{BATCH_SIZE, Felt, GROUP_SIZE, Operation, ZERO};
+use crate::mast::node::basic_block_node::csr::SparseMatrix;
 
 // OPERATION BATCH
 // ================================================================================================
@@ -11,7 +10,7 @@ use super::{BATCH_SIZE, Felt, GROUP_SIZE, Operation, ZERO};
 /// operations or a single immediate value.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OpBatch {
-    pub(super) ops: Vec<Operation>,
+    pub(super) ops: SparseMatrix<Operation>,
     pub(super) groups: [Felt; BATCH_SIZE],
     pub(super) op_counts: [usize; BATCH_SIZE],
     pub(super) num_groups: usize,
@@ -24,7 +23,7 @@ impl OpBatch {
     /// of operations in the batch may be larger than the number of operations reported by this
     /// method.
     pub fn ops(&self) -> &[Operation] {
-        &self.ops
+        &self.ops.data
     }
 
     /// Returns a list of operation groups contained in this batch.
@@ -53,7 +52,7 @@ impl OpBatch {
 /// An accumulator used in construction of operation batches.
 pub(super) struct OpBatchAccumulator {
     /// A list of operations in this batch, including decorators.
-    ops: Vec<Operation>,
+    ops: SparseMatrix<Operation>,
     /// Values of operation groups, including immediate values.
     groups: [Felt; BATCH_SIZE],
     /// Number of non-decorator operations in each operation group. Operation count for groups
@@ -73,7 +72,9 @@ impl OpBatchAccumulator {
     /// Returns a blank [OpBatchAccumulator].
     pub fn new() -> Self {
         Self {
-            ops: Vec::new(),
+            // By default, we use SparseMatrix in clobbering_mode == false, meaning we let the user
+            // insert Operation::Noop if they so wish.
+            ops: SparseMatrix::new(vec![], vec![0], GROUP_SIZE, false),
             groups: [ZERO; BATCH_SIZE],
             op_counts: [0; BATCH_SIZE],
             group: 0,
@@ -140,7 +141,8 @@ impl OpBatchAccumulator {
         // add the opcode to the group and increment the op index pointer
         let opcode = op.op_code() as u64;
         self.group |= opcode << (Operation::OP_BITS * self.op_idx);
-        self.ops.push(op);
+        let col_idx = self.ops.insert(self.group_idx, op).unwrap();
+        debug_assert_eq!(col_idx, self.op_idx);
         self.op_idx += 1;
     }
 
@@ -172,6 +174,11 @@ impl OpBatchAccumulator {
 
         self.group_idx = self.next_group_idx;
         self.next_group_idx = self.group_idx + 1;
+
+        let target_rows = self.ops.num_rows().next_power_of_two();
+        while self.ops.num_rows() < target_rows {
+            self.ops.add_row();
+        }
 
         self.op_idx = 0;
         self.group = 0;
