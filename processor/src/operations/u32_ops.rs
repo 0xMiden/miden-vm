@@ -60,24 +60,7 @@ impl Process {
         err_code: Felt,
         err_ctx: &impl ErrorContext,
     ) -> Result<(), ExecutionError> {
-        let b = self.stack.get(0);
-        let a = self.stack.get(1);
-
-        let mut invalid_values = Vec::new();
-
-        // Check first value (b at stack[0])
-        if b.as_int() > U32_MAX {
-            invalid_values.push(b);
-        }
-
-        // Check second value (a at stack[1])
-        if a.as_int() > U32_MAX {
-            invalid_values.push(a);
-        }
-
-        if !invalid_values.is_empty() {
-            return Err(ExecutionError::not_u32_values(invalid_values, err_code, err_ctx));
-        }
+        let (b, a) = require_u32_operands!(self.stack, [0, 1], err_code, err_ctx);
 
         self.add_range_checks(Operation::U32assert2(err_code), a, b, false);
 
