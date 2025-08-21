@@ -25,6 +25,7 @@ logging = ["dep:env_logger"]
 
 [dependencies]
 env_logger = { version = "0.11", optional = true }
+insta = "1.43.1"
 log.workspace = true
 miden-assembly-syntax.workspace = true
 miden-core.workspace = true

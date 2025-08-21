@@ -1,0 +1,29 @@
+---
+source: assembly/src/tests.rs
+expression: program
+---
+begin
+    join
+        join
+            basic_block pad incr push(2) end
+            if.true
+                join
+                    basic_block add end
+                    while.true
+                        basic_block push(7) push(11) add end
+                    end
+                end
+            else
+                join
+                    basic_block mul push(8) push(8) end
+                    if.true
+                        basic_block mul end
+                    else
+                        basic_block noop end
+                    end
+                end
+            end
+        end
+        basic_block push(3) add end
+    end
+end

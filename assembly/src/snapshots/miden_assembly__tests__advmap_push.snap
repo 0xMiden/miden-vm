@@ -1,0 +1,7 @@
+---
+source: assembly/src/tests.rs
+expression: program
+---
+begin
+    basic_block push(2) push(2) push(2) push(2) emit(574478993) assert(0) end
+end

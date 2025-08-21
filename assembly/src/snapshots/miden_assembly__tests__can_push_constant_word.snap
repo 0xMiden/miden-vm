@@ -1,0 +1,7 @@
+---
+source: assembly/src/tests.rs
+expression: program
+---
+begin
+    basic_block push(2) push(3) push(4) push(5) end
+end
