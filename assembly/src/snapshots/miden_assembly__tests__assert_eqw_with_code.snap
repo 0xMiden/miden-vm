@@ -37,5 +37,8 @@ begin
         assert(15491226248792286710)
         eq
         assert(15491226248792286710)
+        noop
+        noop
+        noop
     end
 end

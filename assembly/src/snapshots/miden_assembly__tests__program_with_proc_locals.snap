@@ -13,12 +13,68 @@ begin
         fmpadd
         mstore
         drop
+        noop
+        noop
+        noop
+        noop
+        noop
+        noop
+        noop
+        noop
+        noop
+        noop
+        noop
+        noop
+        noop
+        noop
+        noop
+        noop
+        noop
+        noop
+        noop
+        noop
+        noop
+        noop
+        noop
+        noop
+        noop
+        noop
+        noop
+        noop
+        noop
+        noop
+        noop
+        noop
+        noop
+        noop
+        noop
+        noop
+        noop
+        noop
+        noop
+        noop
+        noop
+        noop
+        noop
+        noop
+        noop
         add
         push(18446744069414584317)
         fmpadd
         mload
         mul
+        noop
+        noop
+        noop
+        noop
         push(18446744069414584317)
         fmpupdate
+        noop
+        noop
+        noop
+        noop
+        noop
+        noop
+        noop
     end
 end

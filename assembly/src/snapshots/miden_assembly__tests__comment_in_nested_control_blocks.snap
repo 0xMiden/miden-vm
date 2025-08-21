@@ -5,25 +5,65 @@ expression: program
 begin
     join
         join
-            basic_block pad incr push(2) end
+            basic_block pad incr push(2) noop noop noop noop noop noop end
             if.true
                 join
-                    basic_block add end
+                    basic_block add noop noop noop noop noop noop noop noop end
                     while.true
-                        basic_block push(7) push(11) add end
+                        basic_block
+                            push(7)
+                            push(11)
+                            add
+                            noop
+                            noop
+                            noop
+                            noop
+                            noop
+                            noop
+                        end
                     end
                 end
             else
                 join
-                    basic_block mul push(8) push(8) end
+                    basic_block
+                        mul
+                        push(8)
+                        push(8)
+                        noop
+                        noop
+                        noop
+                        noop
+                        noop
+                        noop
+                    end
                     if.true
-                        basic_block mul end
+                        basic_block
+                            mul
+                            noop
+                            noop
+                            noop
+                            noop
+                            noop
+                            noop
+                            noop
+                            noop
+                        end
                     else
-                        basic_block noop end
+                        basic_block
+                            noop
+                            noop
+                            noop
+                            noop
+                            noop
+                            noop
+                            noop
+                            noop
+                            noop
+                        end
                     end
                 end
             end
         end
-        basic_block push(3) add end
+        basic_block push(3) add noop noop noop noop noop noop noop end
     end
 end

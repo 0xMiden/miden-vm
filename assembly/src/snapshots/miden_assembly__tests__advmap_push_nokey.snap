@@ -10,5 +10,8 @@ begin
         push(6740431856120851931)
         emit(574478993)
         assert(0)
+        noop
+        noop
+        noop
     end
 end

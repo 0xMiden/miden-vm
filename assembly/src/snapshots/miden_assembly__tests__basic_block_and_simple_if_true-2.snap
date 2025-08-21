@@ -4,11 +4,11 @@ expression: program
 ---
 begin
     join
-        basic_block push(2) push(3) end
+        basic_block push(2) push(3) noop noop noop noop noop noop noop end
         if.true
-            basic_block add end
+            basic_block add noop noop noop noop noop noop noop noop end
         else
-            basic_block noop end
+            basic_block noop noop noop noop noop noop noop noop noop end
         end
     end
 end

@@ -3,5 +3,5 @@ source: assembly/src/tests.rs
 expression: program
 ---
 begin
-    basic_block push(10) push(50) push(2) u32madd drop end
+    basic_block push(10) push(50) push(2) u32madd drop noop noop noop noop end
 end

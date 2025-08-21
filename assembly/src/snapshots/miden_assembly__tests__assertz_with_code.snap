@@ -10,5 +10,8 @@ begin
         assert(15491226248792286710)
         eqz
         assert(15491226248792286710)
+        noop
+        noop
+        noop
     end
 end
