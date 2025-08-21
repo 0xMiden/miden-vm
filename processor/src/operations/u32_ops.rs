@@ -29,7 +29,7 @@ macro_rules! require_u32_operands {
                 return Err(ExecutionError::not_u32_values(invalid_values, $errno, $err_ctx));
             }
             // Return tuple of operands based on indices
-            ($([<_operand_ $idx>]),*)
+            ($([<_operand_ $idx>].as_int()),*)
         }
     }};
 }
@@ -62,7 +62,7 @@ impl Process {
     ) -> Result<(), ExecutionError> {
         let (b, a) = require_u32_operands!(self.stack, [0, 1], err_code, err_ctx);
 
-        self.add_range_checks(Operation::U32assert2(err_code), a, b, false);
+        self.add_range_checks(Operation::U32assert2(err_code), Felt::new(a), Felt::new(b), false);
 
         self.stack.copy_state(0);
         Ok(())
@@ -75,8 +75,6 @@ impl Process {
     /// values, and pushes these values back onto the stack.
     pub(super) fn op_u32add(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
         let (b, a) = require_u32_operands!(self.stack, [0, 1], err_ctx);
-        let b = b.as_int();
-        let a = a.as_int();
 
         let result = Felt::new(a + b);
         let (hi, lo) = split_element(result);
@@ -92,9 +90,6 @@ impl Process {
     /// values, and pushes these values back onto the stack.
     pub(super) fn op_u32add3(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
         let (c, b, a) = require_u32_operands!(self.stack, [0, 1, 2], err_ctx);
-        let c = c.as_int();
-        let b = b.as_int();
-        let a = a.as_int();
         let result = Felt::new(a + b + c);
         let (hi, lo) = split_element(result);
 
@@ -111,8 +106,6 @@ impl Process {
     /// stack.
     pub(super) fn op_u32sub(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
         let (b, a) = require_u32_operands!(self.stack, [0, 1], err_ctx);
-        let b = b.as_int();
-        let a = a.as_int();
         let result = a.wrapping_sub(b);
         let d = Felt::new(result >> 63);
         let c = Felt::new(result & U32_MAX);
@@ -132,8 +125,6 @@ impl Process {
     /// 32-bit values, and pushes these values back onto the stack.
     pub(super) fn op_u32mul(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
         let (b, a) = require_u32_operands!(self.stack, [0, 1], err_ctx);
-        let b = b.as_int();
-        let a = a.as_int();
         let result = Felt::new(a * b);
         let (hi, lo) = split_element(result);
 
@@ -150,9 +141,6 @@ impl Process {
     /// back onto the stack.
     pub(super) fn op_u32madd(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
         let (b, a, c) = require_u32_operands!(self.stack, [0, 1, 2], err_ctx);
-        let b = b.as_int();
-        let a = a.as_int();
-        let c = c.as_int();
         let result = Felt::new(a * b + c);
         let (hi, lo) = split_element(result);
 
@@ -171,8 +159,6 @@ impl Process {
     /// Returns an error if the divisor is ZERO.
     pub(super) fn op_u32div(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
         let (b, a) = require_u32_operands!(self.stack, [0, 1], err_ctx);
-        let b = b.as_int();
-        let a = a.as_int();
 
         if b == 0 {
             return Err(ExecutionError::divide_by_zero(self.system.clk(), err_ctx));
@@ -200,7 +186,7 @@ impl Process {
     /// onto the stack.
     pub(super) fn op_u32and(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
         let (b, a) = require_u32_operands!(self.stack, [0, 1], err_ctx);
-        let result = self.chiplets.bitwise.u32and(a, b, err_ctx)?;
+        let result = self.chiplets.bitwise.u32and(Felt::new(a), Felt::new(b), err_ctx)?;
 
         self.stack.set(0, result);
         self.stack.shift_left(2);
@@ -212,7 +198,7 @@ impl Process {
     /// the stack.
     pub(super) fn op_u32xor(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
         let (b, a) = require_u32_operands!(self.stack, [0, 1], err_ctx);
-        let result = self.chiplets.bitwise.u32xor(a, b, err_ctx)?;
+        let result = self.chiplets.bitwise.u32xor(Felt::new(a), Felt::new(b), err_ctx)?;
 
         self.stack.set(0, result);
         self.stack.shift_left(2);
