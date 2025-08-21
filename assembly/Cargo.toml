@@ -25,7 +25,6 @@ logging = ["dep:env_logger"]
 
 [dependencies]
 env_logger = { version = "0.11", optional = true }
-insta = "1.43.1"
 log.workspace = true
 miden-assembly-syntax.workspace = true
 miden-core.workspace = true
@@ -36,6 +35,5 @@ thiserror.workspace = true
 [dev-dependencies]
 miden-mast-package = { workspace = true, features = ["arbitrary"] }
 miden-stdlib.workspace = true
-expect-test = "1.5"
-pretty_assertions = "1.4"
+insta = "1.43.1"
 proptest = { workspace = true, features = ["std"] }

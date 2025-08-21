@@ -8,11 +8,10 @@ use miden_assembly_syntax::{
 };
 use miden_core::{
     Operation, Program, Word, assert_matches,
-    mast::{MastNode, MastNodeId, error_code_from_msg},
+    mast::{MastNode, MastNodeId},
     utils::{Deserializable, Serializable},
 };
 use miden_mast_package::{MastArtifact, MastForest, Package, PackageExport, PackageManifest};
-use pretty_assertions::assert_eq;
 use proptest::{
     prelude::*,
     test_runner::{Config, TestRunner},
@@ -1495,19 +1494,8 @@ fn assert_with_code() -> TestResult {
         )
     );
     let program = context.assemble(source)?;
-    let err_code = error_code_from_msg(err_msg);
 
-    let expected = format!(
-        "\
-begin
-    basic_block
-        assert(0)
-        assert({err_code})
-        assert({err_code})
-    end
-end"
-    );
-    assert_eq!(expected, format!("{}", program));
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -1530,22 +1518,8 @@ fn assertz_with_code() -> TestResult {
         )
     );
     let program = context.assemble(source)?;
-    let err_code = error_code_from_msg(err_msg);
 
-    let expected = format!(
-        "\
-begin
-    basic_block
-        eqz
-        assert(0)
-        eqz
-        assert({err_code})
-        eqz
-        assert({err_code})
-    end
-end"
-    );
-    assert_eq!(expected, format!("{}", program));
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -1568,22 +1542,8 @@ fn assert_eq_with_code() -> TestResult {
         )
     );
     let program = context.assemble(source)?;
-    let err_code = error_code_from_msg(err_msg);
 
-    let expected = format!(
-        "\
-begin
-    basic_block
-        eq
-        assert(0)
-        eq
-        assert({err_code})
-        eq
-        assert({err_code})
-    end
-end"
-    );
-    assert_eq!(expected, format!("{}", program));
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -1606,49 +1566,8 @@ fn assert_eqw_with_code() -> TestResult {
         )
     );
     let program = context.assemble(source)?;
-    let err_code = error_code_from_msg(err_msg);
 
-    let expected = format!(
-        "\
-begin
-    basic_block
-        movup4
-        eq
-        assert(0)
-        movup3
-        eq
-        assert(0)
-        movup2
-        eq
-        assert(0)
-        eq
-        assert(0)
-        movup4
-        eq
-        assert({err_code})
-        movup3
-        eq
-        assert({err_code})
-        movup2
-        eq
-        assert({err_code})
-        eq
-        assert({err_code})
-        movup4
-        eq
-        assert({err_code})
-        movup3
-        eq
-        assert({err_code})
-        movup2
-        eq
-        assert({err_code})
-        eq
-        assert({err_code})
-    end
-end"
-    );
-    assert_eq!(expected, format!("{}", program));
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -1671,25 +1590,8 @@ fn u32assert_with_code() -> TestResult {
         )
     );
     let program = context.assemble(source)?;
-    let err_code = error_code_from_msg(err_msg);
 
-    let expected = format!(
-        "\
-begin
-    basic_block
-        pad
-        u32assert2(0)
-        drop
-        pad
-        u32assert2({err_code})
-        drop
-        pad
-        u32assert2({err_code})
-        drop
-    end
-end"
-    );
-    assert_eq!(expected, format!("{}", program));
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -1712,19 +1614,8 @@ fn u32assert2_with_code() -> TestResult {
         )
     );
     let program = context.assemble(source)?;
-    let err_code = error_code_from_msg(err_msg);
 
-    let expected = format!(
-        "\
-begin
-    basic_block
-        u32assert2(0)
-        u32assert2({err_code})
-        u32assert2({err_code})
-    end
-end"
-    );
-    assert_eq!(expected, format!("{}", program));
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -1747,34 +1638,8 @@ fn u32assertw_with_code() -> TestResult {
         )
     );
     let program = context.assemble(source)?;
-    let err_code = error_code_from_msg(err_msg);
 
-    let expected = format!(
-        "\
-begin
-    basic_block
-        u32assert2(0)
-        movup3
-        movup3
-        u32assert2(0)
-        movup3
-        movup3
-        u32assert2({err_code})
-        movup3
-        movup3
-        u32assert2({err_code})
-        movup3
-        movup3
-        u32assert2({err_code})
-        movup3
-        movup3
-        u32assert2({err_code})
-        movup3
-        movup3
-    end
-end"
-    );
-    assert_eq!(expected, format!("{}", program));
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -1848,62 +1713,7 @@ fn asserts_and_mpverify_with_code_in_duplicate_procedure() -> TestResult {
     "
     );
     let program = context.assemble(source)?;
-    let code1 = error_code_from_msg("1");
-    let code2 = error_code_from_msg("2");
-
-    let expected = format!(
-        "\
-begin
-    basic_block
-        pad
-        u32assert2({code1})
-        drop
-        pad
-        u32assert2({code2})
-        drop
-        pad
-        u32assert2({code1})
-        drop
-        pad
-        u32assert2({code2})
-        drop
-        pad
-        u32assert2({code2})
-        drop
-        pad
-        u32assert2({code1})
-        drop
-        assert({code1})
-        assert({code2})
-        assert({code1})
-        assert({code2})
-        assert({code2})
-        assert({code1})
-        assert({code1})
-        pad
-        u32assert2({code1})
-        drop
-        assert({code2})
-        pad
-        u32assert2({code2})
-        drop
-        pad
-        u32assert2({code1})
-        drop
-        assert({code1})
-        pad
-        u32assert2({code2})
-        drop
-        assert({code2})
-        mpverify({code1})
-        mpverify({code2})
-        mpverify({code2})
-        mpverify({code1})
-    end
-end"
-    );
-
-    assert_eq!(expected, format!("{}", program));
+    insta::assert_snapshot!(program);
     Ok(())
 }
 

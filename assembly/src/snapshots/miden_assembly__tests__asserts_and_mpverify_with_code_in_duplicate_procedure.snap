@@ -1,0 +1,52 @@
+---
+source: assembly/src/tests.rs
+expression: program
+---
+begin
+    basic_block
+        pad
+        u32assert2(13948122101519563734)
+        drop
+        pad
+        u32assert2(17575088163785490049)
+        drop
+        pad
+        u32assert2(13948122101519563734)
+        drop
+        pad
+        u32assert2(17575088163785490049)
+        drop
+        pad
+        u32assert2(17575088163785490049)
+        drop
+        pad
+        u32assert2(13948122101519563734)
+        drop
+        assert(13948122101519563734)
+        assert(17575088163785490049)
+        assert(13948122101519563734)
+        assert(17575088163785490049)
+        assert(17575088163785490049)
+        assert(13948122101519563734)
+        assert(13948122101519563734)
+        pad
+        u32assert2(13948122101519563734)
+        drop
+        assert(17575088163785490049)
+        pad
+        u32assert2(17575088163785490049)
+        drop
+        pad
+        u32assert2(13948122101519563734)
+        drop
+        assert(13948122101519563734)
+        pad
+        u32assert2(17575088163785490049)
+        drop
+        assert(17575088163785490049)
+        mpverify(13948122101519563734)
+        mpverify(17575088163785490049)
+        mpverify(17575088163785490049)
+        mpverify(13948122101519563734)
+    end
+end

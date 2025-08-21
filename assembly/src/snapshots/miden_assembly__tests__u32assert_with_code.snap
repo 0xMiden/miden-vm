@@ -1,0 +1,17 @@
+---
+source: assembly/src/tests.rs
+expression: program
+---
+begin
+    basic_block
+        pad
+        u32assert2(0)
+        drop
+        pad
+        u32assert2(15491226248792286710)
+        drop
+        pad
+        u32assert2(15491226248792286710)
+        drop
+    end
+end
