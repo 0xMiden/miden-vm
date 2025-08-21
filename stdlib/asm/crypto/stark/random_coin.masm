@@ -284,7 +284,6 @@ export.reseed
     # => [...] (18 cycles)
 end
 
-
 # COEFFICIENT GENERATION
 # =============================================================================================
 
@@ -326,6 +325,7 @@ export.generate_constraint_composition_coefficients
     exec.constants::composition_coef_ptr
     padw exec.constants::r1_ptr mem_loadw
     # => [y, y, alpha1, alpha0, compos_coef_ptr, ...] where y is a "garbage" value
+
     movup.4 mem_storew dropw
     #=> [...]
 end
@@ -341,6 +341,7 @@ end
 export.generate_deep_composition_random_coefficients
     padw exec.constants::r1_ptr mem_loadw
     # => [y, y, alpha1, alpha0, ...] where y is a "garbage" value
+
     push.0.0
     exec.constants::deep_rand_alpha_nd_ptr mem_loadw
     drop drop
@@ -354,7 +355,6 @@ export.generate_deep_composition_random_coefficients
     dropw
     #=> [...]
 end
-
 
 # OOD POINT GENERATION
 # =============================================================================================
@@ -395,7 +395,6 @@ export.generate_z_zN
     exec.constants::z_ptr mem_storew
     dropw
 end
-
 
 # INDEX GENERATION
 # =============================================================================================
@@ -552,7 +551,6 @@ export.generate_list_indices
     exec.generate_three_integers
     #=> [R1, query_ptr+12, mask, depth, num_queries, ...]
 
-
     # Load the second half of the rate portion of the state of the random coin.
     exec.constants::r2_ptr mem_loadw
     #=> [R2, query_ptr+12, mask, depth, num_queries, ...]
@@ -570,13 +568,14 @@ export.generate_list_indices
     exec.constants::r2_ptr mem_storew
     dropw
     # => [R1, C]
+
     exec.constants::r1_ptr mem_storew
     swapw
     # => [C, R1]
+
     exec.constants::c_ptr mem_storew
     dropw
     #=> [R1, query_ptr+26, mask, depth, num_queries, ...]
-
 
     # Use `num_queries` to iterate.
 
@@ -651,7 +650,7 @@ export.generate_list_indices
 
     neq.0
     while.true
-    #=> [R2, R1, query_ptr, mask, depth, num_queries, ...]
+        #=> [R2, R1, query_ptr, mask, depth, num_queries, ...]
         movup.7
         u32split swap       # [r0_lo, r0_hi, R2, r3, r2, r1, ptr, mask, depth, num_queries, ...]
         dup.10              # [mask, r0_lo, r0_hi, R2, r3, r2, r1, ptr, mask, depth, num_queries, ...]
@@ -671,7 +670,6 @@ export.generate_list_indices
 
     dropw dropw  dropw drop
 end
-
 
 # PROOF-OF-WORK CHECK
 # =============================================================================================

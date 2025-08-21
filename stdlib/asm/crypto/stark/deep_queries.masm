@@ -58,11 +58,11 @@ proc.load_query_row
     #=> [Y, Y, 0, 0, 0, 0, ptr, y, y, y]
     repeat.10
         adv_pipe
-        horner_eval_base      
+        horner_eval_base
         hperm
     end
     #=> [Y, L, C, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr, ...]
- 
+
     ## 5) Load the leaf value we got using `mtree_get` and compare it against the hash
     ##    we just computed
     exec.constants::tmp3 mem_loadw
@@ -74,7 +74,6 @@ proc.load_query_row
     assert_eq
     assert_eq
     #=> [Y, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr, ...]
-
 
     # II) Process the auxiliary segment of the execution trace portion of the query
 
@@ -90,7 +89,7 @@ proc.load_query_row
     #=> [L, R, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr, ...]
 
     ## 3) Load the values of the auxiliary segment of the execution trace at the current query.
-    
+
     ### a) Set up the stack
     exec.constants::zero_word_ptr mem_loadw
     swapw
@@ -100,7 +99,7 @@ proc.load_query_row
     ### b) Load the first 4 columns as a batch of 4 quadratic extension field elements.
     repeat.2
         adv_pipe
-        horner_eval_ext      
+        horner_eval_ext
         hperm
     end
     #=> [Y, D, C, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr, ...]
@@ -131,12 +130,12 @@ proc.load_query_row
     adv.push_mapval
     #=>[L, R, ptr_x, ptr_alpha_inv, acc1, acc0, index, query_ptr, ...]
 
-    ## 3) Load the 8columns as quadratic extension field elements in batches of 4. 
+    ## 3) Load the 8columns as quadratic extension field elements in batches of 4.
     padw
     swapw.2
     repeat.2
         adv_pipe
-        horner_eval_ext        
+        horner_eval_ext
         hperm
     end
     #=> [Y, L, Y, ptr_x, ptr_alpha_inv, acc1, acc0, index, query_ptr, ...]
@@ -165,7 +164,7 @@ end
 #! (x - z) and (x - gz).
 #!
 #! Input: [Y, Y, index, ...]
-#! Output: [Z, Y, x, index, ...]  
+#! Output: [Z, Y, x, index, ...]
 #!
 #! where:
 #! - Z := [-gz1, x -gz0, -z1, x - z0]
@@ -261,6 +260,7 @@ export.compute_deep_composition_polynomial_queries
     # Get pointer to help test for the last query to be processed
     exec.constants::fri_com_ptr
     # => [query_end_ptr, W, query_ptr, ...]
+
     dup.5
     # => [query_ptr, query_end_ptr, W, query_ptr, ...]
 
@@ -275,15 +275,20 @@ export.compute_deep_composition_polynomial_queries
     # We do it here as this computation is common to all queries.
     exec.constants::z_ptr mem_loadw
     # => [zN_1, zN_0, z1, z0, query_ptr, query_end_ptr, W, query_ptr, ...]
+
     drop drop
-    neg swap neg  
+    neg swap neg
     # => [-z0, -z1, query_ptr, query_end_ptr, W, query_ptr, ...]
+
     dup.1 exec.constants::get_trace_domain_generator mul
     # => [-gz1, -z0, -z1, query_ptr, query_end_ptr, W, query_ptr, ...]
+
     swap
     # => [-z0, -gz1, -z1, query_ptr, query_end_ptr, W, query_ptr, ...]
+
     dup exec.constants::get_trace_domain_generator mul
     # => [-gz0, -z0, -gz1, -z1, query_ptr, query_end_ptr, W, query_ptr, ...]
+
     swap
     # => [-z0, -gz0, -gz1, -z1, query_ptr, query_end_ptr, W, query_ptr, ...]
     # Save to temporary location `tmp1` for later use when computing the denominators
