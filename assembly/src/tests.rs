@@ -3142,7 +3142,15 @@ begin push.A adv.push_mapval assert end"
     let expected = format!(
         "\
 begin
-    basic_block push(2) push(2) push(2) push(2) emit({EVENT_MAP_VALUE_TO_STACK}) assert(0) end
+    basic_block
+        push(2)
+        push(2)
+        push(2)
+        push(2)
+        push({EVENT_MAP_VALUE_TO_STACK})
+        emit
+        assert(0)
+    end
 end"
     );
     assert_str_eq!(format!("{program}"), expected);
@@ -3168,7 +3176,8 @@ begin
         push(5034591595140902852)
         push(4565868838168209231)
         push(6740431856120851931)
-        emit({EVENT_MAP_VALUE_TO_STACK})
+        push({EVENT_MAP_VALUE_TO_STACK})
+        emit
         assert(0)
     end
 end"
@@ -3191,7 +3200,7 @@ begin adv.has_mapkey assert end"
     let expected = format!(
         "\
 begin
-    basic_block emit({EVENT_HAS_MAP_KEY}) assert(0) end
+    basic_block push({EVENT_HAS_MAP_KEY}) emit assert(0) end
 end"
     );
     assert_str_eq!(format!("{program}"), expected);
@@ -3675,6 +3684,7 @@ fn test_program_serde_simple() {
 fn test_program_serde_with_decorators() {
     let source = "
     const.DEFAULT_CONST=100
+    const.DEFAULT_EVENT=event(200)
 
     proc.foo
         push.1.2 add
@@ -3682,7 +3692,7 @@ fn test_program_serde_with_decorators() {
     end
 
     begin
-        emit.DEFAULT_CONST
+        emit.DEFAULT_EVENT
 
         exec.foo
 
@@ -4021,11 +4031,11 @@ fn emit_instruction_digest() {
 
     let program_source = r#"
         proc.foo
-            emit.1
+            emit.event(1)
         end
 
         proc.bar
-            emit.2
+            emit.event(2)
         end
 
         begin
@@ -4046,6 +4056,54 @@ fn emit_instruction_digest() {
     assert_ne!(procedure_digests[0], procedure_digests[1]);
     assert_ne!(procedure_digests[0], procedure_digests[2]);
     assert_ne!(procedure_digests[1], procedure_digests[2]);
+}
+
+/// Tests that emitting events with immediate values has the same MAST representation
+/// regardless of whether using emit.value or push.value emit syntax
+#[test]
+fn emit_syntax_equivalence() {
+    let context = TestContext::new();
+
+    // First program uses emit.event(42)
+    let program1_source = r#"
+        begin
+            emit.event(42)
+        end
+    "#;
+
+    // Second program uses push.42 emit
+    let program2_source = r#"
+        begin
+            push.42
+            emit
+        end
+    "#;
+
+    // Third program uses emit.CONST_EVENT
+    let program3_source = r#"
+        const.EVENT_ID=event(42)
+        begin
+            emit.EVENT_ID
+        end
+    "#;
+
+    let program1 = context.assemble(program1_source).unwrap();
+    let program2 = context.assemble(program2_source).unwrap();
+    let program3 = context.assemble(program3_source).unwrap();
+
+    // Get the MAST forest digests for both programs
+    let digest1 = program1.hash();
+    let digest2 = program2.hash();
+    let digest3 = program3.hash();
+
+    // Both programs should have identical MAST representations
+    assert_eq!(digest1, digest2, "MAST digests differ between emit.event(42) and push.42 emit");
+    assert_eq!(digest1, digest3, "MAST digests differ between emit.event(42) and push.EVENT_ID");
+
+    // Verify the procedure count is 1 (just the entrypoint) for both programs
+    assert_eq!(program1.num_procedures(), 1);
+    assert_eq!(program2.num_procedures(), 1);
+    assert_eq!(program3.num_procedures(), 1);
 }
 
 /// Since `foo` and `bar` have the same body, we only expect them to be added once to the program.

@@ -63,7 +63,7 @@ impl Process {
             Operation::Caller => self.op_caller()?,
 
             Operation::Clk => self.op_clk()?,
-            Operation::Emit(event_id) => self.op_emit(event_id, host, err_ctx)?,
+            Operation::Emit => self.op_emit(host, err_ctx)?,
 
             // ----- flow control operations ------------------------------------------------------
             // control flow operations are never executed directly

@@ -200,6 +200,14 @@ pub enum SemanticAnalysisError {
         #[label]
         span: SourceSpan,
     },
+    #[error("invalid constant for emit instruction")]
+    #[diagnostic(help(
+        "emit instructions can only use constants defined with event() syntax, or use emit.event(value) for immediate values"
+    ))]
+    InvalidEventConstant {
+        #[label("this constant is not an event constant")]
+        span: SourceSpan,
+    },
     #[error("advmap key already defined")]
     AdvMapKeyAlreadyDefined {
         #[label]

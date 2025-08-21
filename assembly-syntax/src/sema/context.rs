@@ -78,6 +78,7 @@ impl AnalysisContext {
         match value {
             ConstantExpr::Literal(_) | ConstantExpr::String(_) => Ok((*value).clone()),
             ConstantExpr::Word(_) => Ok((*value).clone()),
+            ConstantExpr::Event(..) => Ok((*value).clone()),
             ConstantExpr::Var(name) => self.get_constant(name).cloned(),
             ConstantExpr::BinaryOp { op, lhs, rhs, .. } => {
                 let rhs = self.const_eval(rhs)?.expect_literal();

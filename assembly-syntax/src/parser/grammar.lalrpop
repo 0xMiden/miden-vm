@@ -91,6 +91,7 @@ extern {
         "else" => Token::Else,
         "emit" => Token::Emit,
         "end" => Token::End,
+        "event" => Token::Event,
         "eq" => Token::Eq,
         "eqw" => Token::Eqw,
         "ext2add" => Token::Ext2Add,
@@ -772,7 +773,23 @@ Debug: Instruction = {
             Instruction::Debug(DebugOptions::AdvStackTop(0.into())),
         }
     },
-    "emit" <id:Imm<U32>> => Instruction::Emit(id),
+    "emit" <id:MaybeConstant<U32>> => {
+        match id {
+            Some(id) => Instruction::EmitEvent(id),
+            None => Instruction::Emit,
+        }
+    },
+
+    <l:@L> "emit" "." "event" "(" <value:uint> ")" <r:@R> =>? {
+        let value_u32 = value.try_into()
+            .map_err(|_| ParseError::User { 
+                error: ParsingError::ImmediateOutOfRange { 
+                    span: span!(source_file.id(), l, r),
+                    range: 0..u32::MAX as usize
+                } 
+            })?;
+        Ok(Instruction::EmitEvent(Immediate::Value(Span::new(span!(source_file.id(), l, r), value_u32))))
+    },
     "trace" <id:Imm<U32>> => Instruction::Trace(id),
 }
 
@@ -1323,6 +1340,13 @@ MaybeImm<T>: Option<Immediate<T>> = {
     => None
 }
 
+/// Parses an (optional) constant reference only (no literals allowed)
+#[inline]
+MaybeConstant<T>: Option<Immediate<T>> = {
+    "." <ConstantName> => Some(Immediate::Constant(<>)),
+    => None
+}
+
 /// Parses an (optional) `.<T>`
 #[inline]
 MaybeParam<T>: Option<T> = {
@@ -1702,6 +1726,7 @@ Opcode: &'static str = {
     "else" => "else",
     "emit" => "emit",
     "end" => "end",
+    "event" => "event",
     "eq" => "eq",
     "eqw" => "eqw",
     "ext2add" => "ext2add",
@@ -1872,6 +1897,19 @@ Term: ConstantExpr = {
     },
 
     <l:@L> <t:QuotedString> <r:@R> => ConstantExpr::String(t),
+
+    <l:@L> "event" "(" <value:uint> ")" <r:@R> =>? {
+        let value_u32 = value.try_into()
+            .map_err(|_| ParseError::User { 
+                error: ParsingError::ImmediateOutOfRange { 
+                    span: span!(source_file.id(), l, r),
+                    range: 0..u32::MAX as usize
+                } 
+            })?;
+        // Use a placeholder identifier that will be set properly when the constant is defined
+        let placeholder_ident = Ident::from_raw_parts(Span::new(span!(source_file.id(), l, r), Arc::<str>::from("")));
+        Ok(ConstantExpr::Event(placeholder_ident, value_u32))
+    },
 
     <ConstantName> => ConstantExpr::Var(<>),
 }

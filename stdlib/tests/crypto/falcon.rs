@@ -205,7 +205,7 @@ fn test_falcon512_probabilistic_product_failure() {
     expect_exec_error_matches!(
         test,
         ExecutionError::FailedAssertion{clk, err_code, err_msg, label: _, source_file: _ }
-        if clk == RowIndex::from(3182) && err_code == ZERO && err_msg.is_none()
+        if clk == RowIndex::from(3183) && err_code == ZERO && err_msg.is_none()
     );
 }
 
@@ -314,7 +314,7 @@ fn generate_test(
     use.std::crypto::dsa::rpo_falcon512
 
     begin
-        emit.{EVENT_FALCON_SIG_TO_STACK}
+        emit.event({EVENT_FALCON_SIG_TO_STACK})
         exec.rpo_falcon512::verify
     end
     "
