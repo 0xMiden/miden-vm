@@ -63,17 +63,7 @@ impl Process {
             Operation::Caller => self.op_caller()?,
 
             Operation::Clk => self.op_clk()?,
-            Operation::Emit => {
-                // Get the event ID from the top of the stack and drop it before executing emit.
-                let event_id = self.stack.peek().as_int() as u32;
-                self.op_drop()?;
-                // We manually advice the clock *before* calling the operation since the stack is
-                // shifted in the next clock cycle.
-                self.advance_clock()?;
-                // We return here to avoid advancing the clock a second time after
-                // this match statement.
-                return self.op_emit(event_id, host, err_ctx);
-            },
+            Operation::Emit => self.op_emit(host, err_ctx)?,
 
             // ----- flow control operations ------------------------------------------------------
             // control flow operations are never executed directly
