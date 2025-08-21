@@ -172,6 +172,39 @@ impl Stack {
         .into()
     }
 
+    /// Returns the value at the specified position on the stack, including overflow items.
+    ///
+    /// This method can access items beyond the top 16 positions by reading from the overflow table.
+    /// Position 0 is the top of the stack, positions 0-15 are in the trace, and positions 16+ are
+    /// in the overflow table.
+    pub fn get_with_overflow(&self, pos: usize) -> Felt {
+        if pos < MIN_STACK_DEPTH {
+            // Item is in the trace (top 16 positions)
+            self.trace.get_stack_value_at(self.clk, pos)
+        } else {
+            // Item is in the overflow table
+            // Calculate the index within the overflow table
+            let overflow_index = pos - MIN_STACK_DEPTH;
+            self.overflow.get_element_at(overflow_index).unwrap_or(ZERO)
+        }
+    }
+
+    /// Returns a word from the stack at the specified word index, including overflow items.
+    ///
+    /// This method can access words that span into the overflow table.
+    /// Word 0 is defined by stack positions 0-3, word 1 by positions 4-7, etc.
+    /// The words are created in reverse order (top element at the last position).
+    pub fn get_word_with_overflow(&self, word_idx: usize, offset: usize) -> Word {
+        let offset = offset + word_idx * WORD_SIZE;
+        [
+            self.get_with_overflow(offset + 3),
+            self.get_with_overflow(offset + 2),
+            self.get_with_overflow(offset + 1),
+            self.get_with_overflow(offset),
+        ]
+        .into()
+    }
+
     /// Sets the value at the specified position on the stack at the next clock cycle.
     pub fn set(&mut self, pos: usize, value: Felt) {
         debug_assert!(pos < MIN_STACK_DEPTH, "stack underflow");

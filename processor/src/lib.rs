@@ -772,6 +772,7 @@ pub struct SlowProcessState<'a> {
     system: &'a System,
     stack: &'a Stack,
     chiplets: &'a Chiplets,
+    stack_offset: usize,
 }
 
 // PROCESS STATE
@@ -791,6 +792,18 @@ impl Process {
             system: &self.system,
             stack: &self.stack,
             chiplets: &self.chiplets,
+            stack_offset: 0,
+        })
+    }
+
+    #[inline(always)]
+    pub fn state_with_stack_offset(&mut self, offset: usize) -> ProcessState<'_> {
+        ProcessState::Slow(SlowProcessState {
+            advice: &mut self.advice,
+            system: &self.system,
+            stack: &self.stack,
+            chiplets: &self.chiplets,
+            stack_offset: offset,
         })
     }
 }
@@ -845,7 +858,7 @@ impl<'a> ProcessState<'a> {
     #[inline(always)]
     pub fn get_stack_item(&self, pos: usize) -> Felt {
         match self {
-            ProcessState::Slow(state) => state.stack.get(pos),
+            ProcessState::Slow(state) => state.stack.get_with_overflow(state.stack_offset + pos),
             ProcessState::Fast(state) => state.processor.stack_get(pos),
         }
     }
@@ -863,7 +876,9 @@ impl<'a> ProcessState<'a> {
     #[inline(always)]
     pub fn get_stack_word(&self, word_idx: usize) -> Word {
         match self {
-            ProcessState::Slow(state) => state.stack.get_word(word_idx),
+            ProcessState::Slow(state) => {
+                state.stack.get_word_with_overflow(word_idx, state.stack_offset)
+            },
             ProcessState::Fast(state) => state.processor.stack_get_word(word_idx * WORD_SIZE),
         }
     }
@@ -873,7 +888,13 @@ impl<'a> ProcessState<'a> {
     #[inline(always)]
     pub fn get_stack_state(&self) -> Vec<Felt> {
         match self {
-            ProcessState::Slow(state) => state.stack.get_state_at(state.system.clk()),
+            ProcessState::Slow(state) => {
+                let mut stack = state.stack.get_state_at(self.clk());
+                if state.stack_offset > 0 {
+                    stack.drain(0..state.stack_offset);
+                }
+                stack
+            },
             ProcessState::Fast(state) => state.processor.stack().iter().rev().copied().collect(),
         }
     }
