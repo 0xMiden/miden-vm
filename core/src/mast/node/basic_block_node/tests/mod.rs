@@ -493,9 +493,7 @@ proptest! {
             }
         }
     }
-}
 
-proptest! {
     /// Test that operations with immediate values are placed correctly
     /// - An operation with an immediate value cannot be the last operation in a group
     /// - Immediate values use the next available group in the batch
@@ -545,49 +543,44 @@ proptest! {
     fn test_noop_insertion(ops in op_sequence_strategy(25)) {
         let (batches, _) = super::batch_and_hash_ops(ops);
 
-        let mut op_idx = 0;
-
         for batch in &batches {
-            let mut group_ops = Vec::new();
-            let mut _expected_noops = 0;
+            let group_ops = batch.op_counts;
 
-            for _group_idx in 0..BATCH_SIZE {
-                if op_idx >= ops.len() && group_ops.is_empty() {
-                    break;
-                }
-
-                if !group_ops.is_empty() {
+            for group_idx in 0..BATCH_SIZE {
+                if group_ops.iter().sum::<usize>() != 0 {
                     // This group has operations, check if it needs NOOPs
-                    let ops_in_group = group_ops.len();
-                    if ops_in_group < GROUP_SIZE {
-                        _expected_noops += GROUP_SIZE - ops_in_group;
+                    let ops_in_group = group_ops[group_idx];
+                    // Test dense iteration
+                    assert!(batch.ops.iter_dense().skip(group_idx * GROUP_SIZE).take(GROUP_SIZE).skip(ops_in_group).all(|op| op == Operation::Noop));
+                    // Test index
+                    for i in group_idx * GROUP_SIZE + ops_in_group .. (group_idx + 1) * GROUP_SIZE {
+                        assert_eq!(batch.ops[i], Operation::Noop);
                     }
-
-                    // Reset for next group
-                    group_ops.clear();
-                }
-
-                // Collect operations for this group
-                while op_idx < ops.len() && group_ops.len() < GROUP_SIZE {
-                    let op = &ops[op_idx];
-
-                    // Check if this operation would be the last in the group and has an immediate value
-                    if group_ops.len() == GROUP_SIZE - 1 && op.imm_value().is_some() {
-                        // This should cause the group to be finalized and a new group started
-                        break;
-                    }
-
-                    group_ops.push(*op);
-                    op_idx += 1;
                 }
             }
+        }
+    }
 
-            // The batch should contain the expected operations plus any NOOPs that were inserted
-            // We can't directly count NOOPs since they're not in the original ops list,
-            // but we can verify the structure is correct
-            for &count in &batch.op_counts {
-                assert!(count <= GROUP_SIZE,
-                    "Group operation count should not exceed 9");
+    /// Test NOOP insertion <-> group semantics : can we reconstruct the group Felts based on dense iteration?
+    #[test]
+    fn test_groups_ops_coherence(ops in op_sequence_strategy(25)) {
+        let (batches, _) = super::batch_and_hash_ops(ops.clone());
+        for batch in batches {
+            // for now we pad to the next power of two! check if this batch is relevant by checking if it has
+            // any ops
+            if *batch.op_counts.iter().min().unwrap() > 0 {
+                let groups_from_batch = batch.groups;
+                // Reconstructing the groups from the dense iterations, without anything noop-specific
+                let ops_vec = batch.ops.iter_dense().collect::<Vec<_>>();
+                let groups = ops_vec.chunks_exact(GROUP_SIZE).map(|op_group| {
+                    let group_bytes = op_group.iter().map(|op| op.op_code() as u64).collect::<Vec<_>>();
+                    let mut group_u64 = 0;
+                    for (op_idx, opcode) in group_bytes.into_iter().enumerate() {
+                        group_u64 |= opcode << (Operation::OP_BITS * op_idx);
+                    }
+                    Felt::new(group_u64)
+                }).collect::<Vec<_>>();
+                assert_eq!(groups_from_batch.to_vec(), groups)
             }
         }
     }
