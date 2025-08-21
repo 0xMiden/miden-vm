@@ -502,10 +502,6 @@ impl FastProcessor {
         continuation_stack.push_start_node(join_node.second());
         continuation_stack.push_start_node(join_node.first());
 
-        // Corresponds to the row inserted for the JOIN operation added
-        // to the trace.
-        self.increment_clk();
-
         // In tracing mode, record the control block on the block stack
         if let Some(ref mut trace_state_builder) = self.trace_state_builder {
             let block_addr = trace_state_builder.hasher.record_hash_control_block();
@@ -513,6 +509,10 @@ impl FastProcessor {
                 trace_state_builder.block_stack.push(block_addr, BlockType::Join(false), None);
             trace_state_builder.block_stack_replay.record_node_start(parent_addr);
         }
+
+        // Corresponds to the row inserted for the JOIN operation added
+        // to the trace.
+        self.increment_clk();
 
         Ok(())
     }
@@ -525,14 +525,14 @@ impl FastProcessor {
         current_forest: &Arc<MastForest>,
         host: &mut impl AsyncHost,
     ) -> Result<(), ExecutionError> {
-        // Corresponds to the row inserted for the END operation added
-        // to the trace.
-        self.increment_clk();
-
         if let Some(ref mut trace_state_builder) = self.trace_state_builder {
             let block_info = trace_state_builder.block_stack.pop();
             trace_state_builder.record_node_end(&block_info);
         }
+
+        // Corresponds to the row inserted for the END operation added
+        // to the trace.
+        self.increment_clk();
 
         self.execute_after_exit_decorators(node_id, current_forest, host)
     }
@@ -572,10 +572,6 @@ impl FastProcessor {
             return Err(ExecutionError::not_binary_value_if(condition, &err_ctx));
         };
 
-        // Corresponds to the row inserted for the SPLIT operation added
-        // to the trace.
-        self.increment_clk();
-
         // In tracing mode, record the control block on the block stack
         if let Some(ref mut trace_state_builder) = self.trace_state_builder {
             let block_addr = trace_state_builder.hasher.record_hash_control_block();
@@ -583,6 +579,10 @@ impl FastProcessor {
                 trace_state_builder.block_stack.push(block_addr, BlockType::Split, None);
             trace_state_builder.block_stack_replay.record_node_start(parent_addr);
         }
+
+        // Corresponds to the row inserted for the SPLIT operation added
+        // to the trace.
+        self.increment_clk();
 
         Ok(())
     }
@@ -595,14 +595,14 @@ impl FastProcessor {
         current_forest: &Arc<MastForest>,
         host: &mut impl AsyncHost,
     ) -> Result<(), ExecutionError> {
-        // Corresponds to the row inserted for the END operation added
-        // to the trace.
-        self.increment_clk();
-
         if let Some(ref mut trace_state_builder) = self.trace_state_builder {
             let block_info = trace_state_builder.block_stack.pop();
             trace_state_builder.record_node_end(&block_info);
         }
+
+        // Corresponds to the row inserted for the END operation added
+        // to the trace.
+        self.increment_clk();
 
         self.execute_after_exit_decorators(node_id, current_forest, host)
     }
@@ -638,10 +638,6 @@ impl FastProcessor {
             continuation_stack.push_finish_loop(current_node_id);
             continuation_stack.push_start_node(loop_node.body());
 
-            // Corresponds to the row inserted for the LOOP operation added
-            // to the trace.
-            self.increment_clk();
-
             // In tracing mode, record the control block on the block stack
             if let Some(ref mut trace_state_builder) = self.trace_state_builder {
                 let block_addr = trace_state_builder.hasher.record_hash_control_block();
@@ -653,6 +649,10 @@ impl FastProcessor {
                 );
                 trace_state_builder.block_stack_replay.record_node_start(parent_addr);
             }
+
+            // Corresponds to the row inserted for the LOOP operation added
+            // to the trace.
+            self.increment_clk();
         } else if condition == ZERO {
             // Start and exit the loop immediately - corresponding to adding a LOOP and END row
             // immediately since there is no body to execute.
@@ -678,13 +678,13 @@ impl FastProcessor {
                 current_forest,
             );
 
-            // Increment the clock, corresponding to the END operation
-            self.increment_clk();
-
             if let Some(ref mut trace_state_builder) = self.trace_state_builder {
                 let block_info = trace_state_builder.block_stack.pop();
                 trace_state_builder.record_node_end(&block_info);
             }
+
+            // Increment the clock, corresponding to the END operation added to the trace.
+            self.increment_clk();
         } else {
             let err_ctx = err_ctx!(current_forest, loop_node, host);
             return Err(ExecutionError::not_binary_value_loop(condition, &err_ctx));
@@ -720,6 +720,7 @@ impl FastProcessor {
             continuation_stack.push_finish_loop(current_node_id);
             continuation_stack.push_start_node(loop_node.body());
 
+            // Corresponds to the REPEAT operation added to the trace.
             self.increment_clk();
         } else if condition == ZERO {
             // Exit the loop - add END row
@@ -735,8 +736,9 @@ impl FastProcessor {
                 trace_state_builder.record_node_end(&block_info);
             }
 
-            self.execute_after_exit_decorators(current_node_id, current_forest, host)?;
+            // Corresponds to the END operation added to the trace.
             self.increment_clk();
+            self.execute_after_exit_decorators(current_node_id, current_forest, host)?;
         } else {
             let err_ctx = err_ctx!(current_forest, loop_node, host);
             return Err(ExecutionError::not_binary_value_loop(condition, &err_ctx));
@@ -836,6 +838,7 @@ impl FastProcessor {
         continuation_stack.push_finish_call(current_node_id);
         continuation_stack.push_start_node(call_node.callee());
 
+        // Corresponds to the CALL or SYSCALL operation added to the trace.
         self.increment_clk();
 
         Ok(())
@@ -857,10 +860,6 @@ impl FastProcessor {
         // to the call.
         self.restore_context(&err_ctx)?;
 
-        // Corresponds to the row inserted for the END operation added
-        // to the trace.
-        self.increment_clk();
-
         if let Some(ref mut trace_state_builder) = self.trace_state_builder {
             let block_info = trace_state_builder.block_stack.pop();
             trace_state_builder.record_node_end(&block_info);
@@ -873,6 +872,8 @@ impl FastProcessor {
             });
         }
 
+        // Corresponds to the row inserted for the END operation added to the trace.
+        self.increment_clk();
         self.execute_after_exit_decorators(node_id, current_forest, host)
     }
 
@@ -1031,10 +1032,6 @@ impl FastProcessor {
             self.restore_context(&err_ctx)?;
         }
 
-        // Corresponds to the row inserted for the END operation added to
-        // the trace.
-        self.increment_clk();
-
         if let Some(ref mut trace_state_builder) = self.trace_state_builder {
             let block_info = trace_state_builder.block_stack.pop();
             trace_state_builder.record_node_end(&block_info);
@@ -1049,6 +1046,9 @@ impl FastProcessor {
             }
         }
 
+        // Corresponds to the row inserted for the END operation added to
+        // the trace.
+        self.increment_clk();
         self.execute_after_exit_decorators(node_id, current_forest, host)
     }
 
@@ -1157,6 +1157,7 @@ impl FastProcessor {
                     trace_state_builder.block_stack.peek_mut().addr += HASH_CYCLE_LEN;
                 }
 
+                // Corresponds to the RESPAN operation added to the trace.
                 self.increment_clk();
             }
 
@@ -1176,12 +1177,18 @@ impl FastProcessor {
             batch_offset_in_block += op_batch.ops().len();
         }
 
-        // Corresponds to the row inserted for the END operation added to the trace.
         self.check_extract_trace_state(
             NodeExecutionPhase::End(node_id),
             continuation_stack,
             current_forest,
         );
+
+        if let Some(ref mut trace_state_builder) = self.trace_state_builder {
+            let block_info = trace_state_builder.block_stack.pop();
+            trace_state_builder.record_node_end(&block_info);
+        }
+
+        // Corresponds to the row inserted for the END operation added to the trace.
         self.increment_clk();
 
         // execute any decorators which have not been executed during span ops execution; this can
@@ -1193,11 +1200,6 @@ impl FastProcessor {
                 .get_decorator_by_id(decorator_id)
                 .ok_or(ExecutionError::DecoratorNotFoundInForest { decorator_id })?;
             self.execute_decorator(decorator, host)?;
-        }
-
-        if let Some(ref mut trace_state_builder) = self.trace_state_builder {
-            let block_info = trace_state_builder.block_stack.pop();
-            trace_state_builder.record_node_end(&block_info);
         }
 
         self.execute_after_exit_decorators(node_id, program, host)
