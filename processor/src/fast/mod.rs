@@ -510,7 +510,7 @@ impl FastProcessor {
         self.check_extract_trace_state(
             NodeExecutionPhase::End(node_id),
             continuation_stack,
-            &current_forest,
+            current_forest,
         );
 
         if let Some(ref mut trace_state_builder) = self.trace_state_builder {
@@ -587,7 +587,7 @@ impl FastProcessor {
         self.check_extract_trace_state(
             NodeExecutionPhase::End(node_id),
             continuation_stack,
-            &current_forest,
+            current_forest,
         );
         if let Some(ref mut trace_state_builder) = self.trace_state_builder {
             let block_info = trace_state_builder.block_stack.pop();
@@ -851,7 +851,7 @@ impl FastProcessor {
         self.check_extract_trace_state(
             NodeExecutionPhase::End(node_id),
             continuation_stack,
-            &current_forest,
+            current_forest,
         );
 
         let call_node = current_forest[node_id].unwrap_call();
@@ -1033,7 +1033,7 @@ impl FastProcessor {
         self.check_extract_trace_state(
             NodeExecutionPhase::End(node_id),
             continuation_stack,
-            &current_forest,
+            current_forest,
         );
 
         let dyn_node = current_forest[node_id].unwrap_dyn();
