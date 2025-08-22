@@ -304,3 +304,13 @@ f_{imm} = f_{push} + f_{emit} \text{ | degree} = 4
 $$
 
 Note that the `ASSERT`, `MPVERIFY` and other operations have immediate values too. However, these immediate values are not included in the MAST digest, and hence are not considered for the $f_{imm}$ flag.
+
+!!! note
+
+    The `EMIT` operation must remain in the high-degree bucket. Although it could
+    theoretically fit into a lower-degree group, it is part of the immediate
+    value flag (`f_imm`). This flag is constrained by the group count column at
+    degree 7. Because of this dependency, both `PUSH` and `EMIT` together form
+    degree 4, and moving `EMIT` would break the group count constraints. Thus,
+    `EMIT` cannot be reassigned to a lower-degree bucket and must remain
+    high-degree.
