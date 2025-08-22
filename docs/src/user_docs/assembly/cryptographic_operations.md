@@ -101,9 +101,9 @@ The following instructions are designed mainly for use in recursive verification
 
 The following instructions are used during the FRI protocol as part of recursive verification within the Miden VM.
 
-| Instruction                      | Stack_input                                                               | Stack_output                                                                        | Notes                                                                                       |
-| -------------------------------- | ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| fri_ext2fold4<br>- *(1 cycle)*   | [v7, ..., v0, f_pos, d_seg, poe, e1, e0, a1, a0, layer_ptr, rem_ptr, ...] | [x, x, x, x, x, x, x, x, x, x, layer_ptr + 8, poe^4, f_pos, ne1, ne0, rem_ptr, ...] | Performs one step of FRI folding with folding factor 4 in the quadratic extension field |
+| Instruction                    | Stack_input                                                               | Stack_output                                                                        | Notes                                                                                   |
+| ------------------------------ | ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| fri_ext2fold4<br>- *(1 cycle)* | [v7, ..., v0, f_pos, d_seg, poe, e1, e0, a1, a0, layer_ptr, rem_ptr, ...] | [x, x, x, x, x, x, x, x, x, x, layer_ptr + 8, poe^4, f_pos, ne1, ne0, rem_ptr, ...] | Performs one step of FRI folding with folding factor 4 in the quadratic extension field |
 
  In more details:
 - $q_0 = (v_0, v_1)$, $q_1 = (v_2, v_3)$, $q_2 = (v_4, v_5)$, $q_3 = (v_6, v_7)$ are the query points to be folded,
