@@ -5,7 +5,7 @@ use crate::mast::node::basic_block_node::csr::{SparseMatrix, SparseMatrixError};
 #[test]
 fn test_empty_matrix() {
     // Verify that an empty matrix has zero dimensions and is marked as empty
-    let matrix = SparseMatrix::<i32>::empty(true);
+    let matrix = SparseMatrix::<i32, 0>::empty(true);
     assert_eq!(matrix.num_rows(), 0);
     assert_eq!(matrix.num_cols(), 0);
     assert!(matrix.is_empty());
@@ -17,7 +17,7 @@ fn test_matrix_creation() {
     // Verify that a matrix created with data has correct dimensions and contains all elements
     let data = vec![1, 2, 3, 4];
     let indptr = vec![0, 2, 4]; // 2 rows, with 2 elements each
-    let matrix = SparseMatrix::new(data, indptr, 4, true);
+    let matrix = SparseMatrix::<_, 4>::new(data, indptr, true);
 
     assert_eq!(matrix.num_rows(), 2);
     assert_eq!(matrix.num_cols(), 4);
@@ -30,7 +30,7 @@ fn test_get_existing_element() {
     // Verify that existing elements can be retrieved correctly
     let data = vec![1, 2, 3, 4];
     let indptr = vec![0, 2, 4];
-    let matrix = SparseMatrix::new(data, indptr, 4, true);
+    let matrix = SparseMatrix::<_, 4>::new(data, indptr, true);
 
     assert_eq!(matrix.get(0, 0), 1);
     assert_eq!(matrix.get(0, 1), 2);
@@ -43,7 +43,7 @@ fn test_get_missing_element() {
     // Verify that missing elements return the default value (0 for i32)
     let data = vec![1, 2, 3, 4];
     let indptr = vec![0, 2, 4];
-    let matrix = SparseMatrix::new(data, indptr, 4, true);
+    let matrix = SparseMatrix::<_, 4>::new(data, indptr, true);
 
     assert_eq!(matrix.get(0, 2), 0);
     assert_eq!(matrix.get(0, 3), 0);
@@ -55,7 +55,7 @@ fn test_insert() {
     // Verify that insertions work correctly and update data/indptr appropriately
     let data = vec![1, 2, 3, 4];
     let indptr = vec![0, 2, 4];
-    let mut matrix = SparseMatrix::new(data, indptr, 4, true);
+    let mut matrix = SparseMatrix::<_, 4>::new(data, indptr, true);
 
     assert_eq!(matrix.insert(0, 5).unwrap(), 2);
     assert_eq!(matrix.data, vec![1, 2, 5, 3, 4]);
@@ -71,7 +71,7 @@ fn test_insert_full() {
     // Verify that inserting into a full row returns the appropriate error
     let data = vec![1, 2, 3, 4];
     let indptr = vec![0, 4];
-    let mut matrix = SparseMatrix::new(data, indptr, 4, true);
+    let mut matrix = SparseMatrix::<_, 4>::new(data, indptr, true);
 
     assert_matches!(matrix.insert(0, 5).unwrap_err(), SparseMatrixError::FullRow(0));
 }
@@ -81,7 +81,7 @@ fn test_iter_nonzero() {
     // Verify that the non-zero iterator returns all elements in row-major order
     let data = vec![1, 2, 3, 4];
     let indptr = vec![0, 2, 4];
-    let matrix = SparseMatrix::new(data, indptr, 4, true);
+    let matrix = SparseMatrix::<_, 4>::new(data, indptr, true);
 
     let mut iter = matrix.iter_nonzero();
     assert_eq!(iter.next(), Some((0, 0, 1)));
@@ -96,7 +96,7 @@ fn test_iter_dense() {
     // Verify that the dense iterator returns all elements including zeros in row-major order
     let data = vec![1, 2, 3, 4];
     let indptr = vec![0, 2, 4];
-    let matrix = SparseMatrix::new(data, indptr, 4, true);
+    let matrix = SparseMatrix::<_, 4>::new(data, indptr, true);
 
     let mut iter = matrix.iter_dense();
     assert_eq!(iter.next(), Some(1)); // row 0, col 0
@@ -124,7 +124,7 @@ fn test_sparse_matrix_with_non_default_zero() {
 
     let data = vec![TestStruct(1), TestStruct(2)];
     let indptr = vec![0, 2]; // 1 row only
-    let matrix = SparseMatrix::new(data, indptr, 2, true);
+    let matrix = SparseMatrix::<_, 2>::new(data, indptr, true);
 
     assert_eq!(matrix.num_rows(), 1);
     assert_eq!(matrix.get(0, 0), TestStruct(1));
@@ -134,8 +134,7 @@ fn test_sparse_matrix_with_non_default_zero() {
 #[test]
 fn test_sparse_matrix_large() {
     // Verify that larger matrices work correctly with sparse insertion and iteration
-    let mut matrix = SparseMatrix::<i32>::empty(true);
-    matrix.cols = 10;
+    let mut matrix = SparseMatrix::<i32, 10>::empty(true);
     matrix.indptr = vec![0; 11]; // 10 rows + 1
 
     // Insert elements at various rows
@@ -181,7 +180,7 @@ fn test_index_trait() {
     // Verify that Index trait implementation matches dense iteration in row-major order
     let data = vec![1, 2, 3, 4];
     let indptr = vec![0, 2, 4];
-    let matrix = SparseMatrix::new(data, indptr, 4, true);
+    let matrix = SparseMatrix::<_, 4>::new(data, indptr, true);
 
     let dense_elements: Vec<_> = matrix.iter_dense().collect();
 
@@ -218,7 +217,7 @@ fn test_index_trait_non_default() {
 
     let data = vec![TestStruct(1), TestStruct(2)];
     let indptr = vec![0, 2];
-    let matrix = SparseMatrix::new(data, indptr, 2, true);
+    let matrix = SparseMatrix::<_, 2>::new(data, indptr, true);
 
     assert_eq!(matrix[0], TestStruct(1)); // row 0, col 0
     assert_eq!(matrix[1], TestStruct(2)); // row 0, col 1
@@ -229,8 +228,7 @@ fn test_index_trait_non_default() {
 #[test]
 fn test_clobbering_mode_simple() {
     // Simple test to understand current behavior
-    let mut matrix = SparseMatrix::<i32>::empty(true);
-    matrix.cols = 3;
+    let mut matrix = SparseMatrix::<i32, 3>::empty(true);
 
     assert_eq!(matrix.insert(0, 1).unwrap(), 0); // Insert value 1
     assert_eq!(matrix.data, vec![1]);
@@ -245,8 +243,7 @@ fn test_clobbering_mode_simple() {
 #[test]
 fn test_clobbering_mode_default() {
     // Verify that clobbering mode defaults to true (default behavior)
-    let mut matrix = SparseMatrix::<i32>::empty(true);
-    matrix.cols = 4;
+    let mut matrix = SparseMatrix::<i32, 4>::empty(true);
 
     // Insert non-default values
     assert_eq!(matrix.insert(0, 1).unwrap(), 0); // Insert at col 0
@@ -269,7 +266,7 @@ fn test_clobbering_mode_enabled() {
     // Verify that clobbering mode true ignores default values
     let data = vec![1, 2];
     let indptr = vec![0, 2];
-    let mut matrix = SparseMatrix::with_clobbering_mode(data, indptr, 4, true);
+    let mut matrix = SparseMatrix::<_, 4>::new(data, indptr, true);
 
     // Inserting default values should be ignored
     assert_eq!(matrix.insert(0, 0).unwrap(), 2); // Try to insert default at col 2 (ignored)
@@ -284,7 +281,7 @@ fn test_clobbering_mode_disabled() {
     // Verify that clobbering mode false stores default values
     let data = vec![1, 2];
     let indptr = vec![0, 2];
-    let mut matrix = SparseMatrix::with_clobbering_mode(data, indptr, 6, false);
+    let mut matrix = SparseMatrix::<_, 6>::new(data, indptr, false);
 
     // Inserting default values should be stored
     assert_eq!(matrix.insert(0, 0).unwrap(), 2); // Insert default at col 2
@@ -305,12 +302,12 @@ fn test_clobbering_mode_dense_iterator() {
     let indptr = vec![0, 1];
 
     // With clobbering mode enabled
-    let matrix_enabled = SparseMatrix::with_clobbering_mode(data.clone(), indptr.clone(), 4, true);
+    let matrix_enabled = SparseMatrix::<_, 4>::new(data.clone(), indptr.clone(), true);
     let elements_enabled: Vec<_> = matrix_enabled.iter_dense().collect();
     assert_eq!(elements_enabled, vec![1, 0, 0, 0]); // Default values not stored
 
     // With clobbering mode disabled
-    let mut matrix_disabled = SparseMatrix::with_clobbering_mode(data, indptr, 4, false);
+    let mut matrix_disabled = SparseMatrix::<_, 4>::new(data, indptr, false);
     matrix_disabled.insert(0, 0).unwrap(); // Insert default value
     let elements_disabled: Vec<_> = matrix_disabled.iter_dense().collect();
     assert_eq!(elements_disabled, vec![1, 0, 0, 0]); // Default value stored in data
@@ -331,7 +328,7 @@ fn test_clobbering_mode_non_default_types() {
     // With clobbering mode enabled (default)
     let data = vec![TestStruct(1)];
     let indptr = vec![0, 1];
-    let mut matrix_enabled = SparseMatrix::with_clobbering_mode(data, indptr, 3, true);
+    let mut matrix_enabled = SparseMatrix::<_, 3>::new(data, indptr, true);
 
     assert_eq!(matrix_enabled.insert(0, TestStruct(-999)).unwrap(), 1); // Should be ignored
     assert_eq!(matrix_enabled.data, vec![TestStruct(1)]); // No default added
@@ -339,7 +336,7 @@ fn test_clobbering_mode_non_default_types() {
     // With clobbering mode disabled
     let data = vec![TestStruct(1)];
     let indptr = vec![0, 1];
-    let mut matrix_disabled = SparseMatrix::with_clobbering_mode(data, indptr, 3, false);
+    let mut matrix_disabled = SparseMatrix::<_, 3>::new(data, indptr, false);
 
     assert_eq!(matrix_disabled.insert(0, TestStruct(-999)).unwrap(), 1); // Should be stored
     assert_eq!(matrix_disabled.data, vec![TestStruct(1), TestStruct(-999)]); // Default added

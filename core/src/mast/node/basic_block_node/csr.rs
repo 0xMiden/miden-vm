@@ -18,22 +18,20 @@ use thiserror::Error;
 /// contiguously in the first columns of each row.
 // To represent an OpBatch, should be used with # cols = GROUP_SIZE, # rows = BATCH_SIZE
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SparseMatrix<F: Default> {
+pub struct SparseMatrix<F: Default, const COLS: usize> {
     /// Non-zero values in row-major order
     pub data: Vec<F>,
+    #[doc(hidden)]
+    /// A copy of F::default (for the Index trait)
+    _default: F,
     /// Row pointers: `indptr[i]` is the starting index of row `i` in `data`,
     /// and `indptr[i+1]` is the ending index (exclusive). Row `i`'s data spans
     /// `data[indptr[i]..indptr[i+1]]`.
     // should be serialized as [u8; BATCH_SIZE + 1] since the max value is 72
     pub indptr: Vec<usize>,
-    /// Number of columns in the matrix
-    pub cols: usize,
     /// If true, insertion of F::default() values is ignored. If false, all values
     /// are inserted regardless of whether they are the default value.
     pub clobbering_mode: bool,
-    #[doc(hidden)]
-    /// A copy of F::default (for the Index trait)
-    _default: F,
 }
 
 #[derive(Error, Debug)]
@@ -42,40 +40,22 @@ pub enum SparseMatrixError {
     FullRow(usize),
 }
 
-impl<F: Default> SparseMatrix<F> {
+impl<F: Default, const COLS: usize> SparseMatrix<F, COLS> {
     /// Creates a new empty 0x0 matrix with specified clobbering mode
     pub fn empty(clobbering_mode: bool) -> Self {
         Self {
             data: vec![],
             indptr: vec![0],
-            cols: 0,
             clobbering_mode,
             _default: F::default(),
         }
     }
 
     /// Creates a new matrix with specified clobbering mode
-    pub fn new(data: Vec<F>, indptr: Vec<usize>, cols: usize, clobbering_mode: bool) -> Self {
+    pub fn new(data: Vec<F>, indptr: Vec<usize>, clobbering_mode: bool) -> Self {
         Self {
             data,
             indptr,
-            cols,
-            clobbering_mode,
-            _default: F::default(),
-        }
-    }
-
-    /// Creates a new matrix with specified clobbering mode
-    pub fn with_clobbering_mode(
-        data: Vec<F>,
-        indptr: Vec<usize>,
-        cols: usize,
-        clobbering_mode: bool,
-    ) -> Self {
-        Self {
-            data,
-            indptr,
-            cols,
             clobbering_mode,
             _default: F::default(),
         }
@@ -103,12 +83,12 @@ impl<F: Default> SparseMatrix<F> {
     }
 
     /// Returns the number of columns in the matrix
-    pub fn num_cols(&self) -> usize {
-        self.cols
+    pub const fn num_cols(&self) -> usize {
+        COLS
     }
 }
 
-impl<F: Default + Copy> SparseMatrix<F> {
+impl<F: Default + Copy, const COLS: usize> SparseMatrix<F, COLS> {
     /// Returns the element at `(row, col)`, or `F::default()` if the element is zero
     ///
     /// For a given row, elements with `col < row_dense_len` are stored in `data`,
@@ -126,7 +106,7 @@ impl<F: Default + Copy> SparseMatrix<F> {
         }
     }
 }
-impl<F: Default + PartialEq + Copy> SparseMatrix<F> {
+impl<F: Default + PartialEq + Copy, const COLS: usize> SparseMatrix<F, COLS> {
     /// Inserts a value at the dense end of a specified row
     ///
     /// Returns the column index where the element was inserted, or `SparseMatrixError::FullRow`
@@ -154,6 +134,7 @@ impl<F: Default + PartialEq + Copy> SparseMatrix<F> {
     }
 
     // Inserts a non-zero element at the specified absolute position in the data vector
+    #[inline]
     fn insert_element_at(&mut self, row: usize, abs_pos: usize, value: F) {
         // check we insert in the correct row, or extend it
         debug_assert!(self.indptr[row] <= abs_pos);
@@ -169,7 +150,7 @@ impl<F: Default + PartialEq + Copy> SparseMatrix<F> {
     }
 
     /// Returns an iterator over non-zero elements as `(row, col, value)` tuples
-    pub fn iter_nonzero(&self) -> NonZeroIter<'_, F> {
+    pub fn iter_nonzero(&self) -> NonZeroIter<'_, F, COLS> {
         NonZeroIter {
             matrix: self,
             row: 0,
@@ -179,15 +160,15 @@ impl<F: Default + PartialEq + Copy> SparseMatrix<F> {
     }
 
     /// Returns an iterator over all matrix elements (including zeros) in row-major order
-    pub fn iter_dense(&self) -> DenseIter<'_, F> {
+    pub fn iter_dense(&self) -> DenseIter<'_, F, COLS> {
         DenseIter::new(self)
     }
 }
 
 /// Iterator for dense matrix elements (including zeros) in row-major order
 #[derive(Debug)]
-pub struct DenseIter<'a, F: Default> {
-    matrix: &'a SparseMatrix<F>,
+pub struct DenseIter<'a, F: Default, const COLS: usize> {
+    matrix: &'a SparseMatrix<F, COLS>,
     row: usize,
     col: usize,
     row_start: usize,
@@ -195,8 +176,8 @@ pub struct DenseIter<'a, F: Default> {
     current_idx: usize,
 }
 
-impl<'a, F: Default> DenseIter<'a, F> {
-    fn new(matrix: &'a SparseMatrix<F>) -> Self {
+impl<'a, F: Default, const COLS: usize> DenseIter<'a, F, COLS> {
+    fn new(matrix: &'a SparseMatrix<F, COLS>) -> Self {
         let row_start = if matrix.num_rows() > 0 { matrix.indptr[0] } else { 0 };
         let row_end = if matrix.num_rows() > 0 { matrix.indptr[1] } else { 0 };
         DenseIter {
@@ -210,7 +191,7 @@ impl<'a, F: Default> DenseIter<'a, F> {
     }
 }
 
-impl<'a, F: Copy + Default> Iterator for DenseIter<'a, F> {
+impl<'a, F: Copy + Default, const COLS: usize> Iterator for DenseIter<'a, F, COLS> {
     type Item = F;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -249,14 +230,14 @@ impl<'a, F: Copy + Default> Iterator for DenseIter<'a, F> {
 
 /// Iterator for sparse matrix (non-zero elements with row/column indices, i.e. COO format)
 #[derive(Debug)]
-pub struct NonZeroIter<'a, F: Default> {
-    matrix: &'a SparseMatrix<F>,
+pub struct NonZeroIter<'a, F: Default, const COLS: usize> {
+    matrix: &'a SparseMatrix<F, COLS>,
     row: usize,
     i: usize,
     nnz: usize,
 }
 
-impl<'a, F: Copy + Default> Iterator for NonZeroIter<'a, F> {
+impl<'a, F: Copy + Default, const COLS: usize> Iterator for NonZeroIter<'a, F, COLS> {
     type Item = (usize, usize, F);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -279,7 +260,7 @@ impl<'a, F: Copy + Default> Iterator for NonZeroIter<'a, F> {
     }
 }
 
-impl<F: Default + PartialEq> Index<usize> for SparseMatrix<F> {
+impl<F: Default, const COLS: usize> Index<usize> for SparseMatrix<F, COLS> {
     type Output = F;
 
     fn index(&self, index: usize) -> &Self::Output {

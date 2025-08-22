@@ -10,7 +10,7 @@ use crate::mast::node::basic_block_node::csr::SparseMatrix;
 /// operations or a single immediate value.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OpBatch {
-    pub(super) ops: SparseMatrix<Operation>,
+    pub(super) ops: SparseMatrix<Operation, GROUP_SIZE>,
     pub(super) groups: [Felt; BATCH_SIZE],
     pub(super) op_counts: [usize; BATCH_SIZE],
     pub(super) num_groups: usize,
@@ -52,7 +52,7 @@ impl OpBatch {
 /// An accumulator used in construction of operation batches.
 pub(super) struct OpBatchAccumulator {
     /// A list of operations in this batch, including decorators.
-    ops: SparseMatrix<Operation>,
+    ops: SparseMatrix<Operation, GROUP_SIZE>,
     /// Values of operation groups, including immediate values.
     groups: [Felt; BATCH_SIZE],
     /// Number of non-decorator operations in each operation group. Operation count for groups
@@ -74,7 +74,7 @@ impl OpBatchAccumulator {
         Self {
             // By default, we use SparseMatrix in clobbering_mode == false, meaning we let the user
             // insert Operation::Noop if they so wish.
-            ops: SparseMatrix::new(vec![], vec![0], GROUP_SIZE, false),
+            ops: SparseMatrix::new(vec![], vec![0], false),
             groups: [ZERO; BATCH_SIZE],
             op_counts: [0; BATCH_SIZE],
             group: 0,
