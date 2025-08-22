@@ -105,24 +105,21 @@ The following instructions are used during the FRI protocol as part of recursive
 | -------------------------------- | ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
 | fri_ext2fold4 <br> - *(1 cycle)* | [v7, ..., v0, f_pos, d_seg, poe, e1, e0, a1, a0, layer_ptr, rem_ptr, ...] | [x, x, x, x, x, x, x, x, x, x, layer_ptr + 8, poe^4, f_pos, ne1, ne0, rem_ptr, ...] | Performs one step of FRI folding with folding factor 4 in the quadratic extension field[^1] |
 
-[^1]: In more details:
-- $q_0 = (v_0, v_1)$, $q_1 = (v_2, v_3)$, $q_2 = (v_4, v_5)$, $q_3 = (v_6, v_7)$ are the query points to be folded,
-- $f\_pos$ is the query position in the folded domain, i.e., it is $pos \mod n$, where $pos$ is the position in the source domain, and $n$ is size of the folded domain,
-- $d\_seg := \lfloor \frac{pos}{n} \rfloor$, which can be either $0$, $1$, $2$, or $3$,
-- $poe := g^{pos}$ where $g$ is current domain generator,
-- $e := (e_0, e_1)$ is the result of the previous layer folding,
-- $\alpha := (a_0, a_1)$ is the folding challenge,
-- `layer_ptr` is memory address of the layer currently being folded,
-- `rem_ptr` is memory address of the stored remainder polynomial used to define the condition to break the folding loop,
-
-
-At the high-level, the operation does the following:
-
-- Computes the domain value $x$ based on values of $poe$ and $d\_seg$.
-- Using $x$ and $\alpha$, folds the query values $q_0, ..., q_3$ into a single value $ne$.
-- Compares the previously folded value $e$ to the appropriate value of $q_0, ..., q_3$ to verify that the folding of the previous layer was done correctly.
-- Computes the new value of $poe$ as $poe' = poe^4$ (this is done in two steps to keep the constraint degree low).
-- Increments the layer address pointer by $8$.
-- Shifts the stack by $1$ to the left. This moves an element from the stack overflow table (i.e., `rem_ptr`) into the last position on the stack top.
-
-Note that the top 10 output stack elements can be considered as garbage values.
+[^1]:
+    In more details:
+        - $q_0 = (v_0, v_1)$, $q_1 = (v_2, v_3)$, $q_2 = (v_4, v_5)$, $q_3 = (v_6, v_7)$ are the query points to be folded,
+        - $f\_pos$ is the query position in the folded domain, i.e., it is $pos \mod n$, where $pos$ is the position in the source domain, and $n$ is size of the folded domain,
+        - $d\_seg := \lfloor \frac{pos}{n} \rfloor$, which can be either $0$, $1$, $2$, or $3$,
+        - $poe := g^{pos}$ where $g$ is current domain generator,
+        - $e := (e_0, e_1)$ is the result of the previous layer folding,
+        - $\alpha := (a_0, a_1)$ is the folding challenge,
+        - `layer_ptr` is memory address of the layer currently being folded,
+        - `rem_ptr` is memory address of the stored remainder polynomial used to define the condition to break the folding loop,
+    At the high-level, the operation does the following:
+        - Computes the domain value $x$ based on values of $poe$ and $d\_seg$.
+        - Using $x$ and $\alpha$, folds the query values $q_0, ..., q_3$ into a single value $ne$.
+        - Compares the previously folded value $e$ to the appropriate value of $q_0, ..., q_3$ to verify that the folding of the previous layer was done correctly.
+        - Computes the new value of $poe$ as $poe' = poe^4$ (this is done in two steps to keep the constraint degree low).
+        - Increments the layer address pointer by $8$.
+        - Shifts the stack by $1$ to the left. This moves an element from the stack overflow table (i.e., `rem_ptr`) into the last position on the stack top.
+    Note that the top 10 output stack elements can be considered as garbage values.
