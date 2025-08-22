@@ -5,6 +5,7 @@
 #### Enhancements
 
 - Added slicing for the word constants ([#2057](https://github.com/0xMiden/miden-vm/pull/2057)).
+- Added documentation explaining why `EMIT` must remain a high-degree opcode (#[2093](https://github.com/0xMiden/miden-vm/pull/2093)).
 
 #### Changes
 
