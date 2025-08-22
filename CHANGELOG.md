@@ -5,6 +5,7 @@
 #### Enhancements
 
 - Added slicing for the word constants ([#2057](https://github.com/0xMiden/miden-vm/pull/2057)).
+- Adds sparse representation for the operation batches ([#1815](https://github.com/0xMiden/miden-vm/issues/1815))
 
 #### Changes
 
