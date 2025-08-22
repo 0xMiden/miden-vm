@@ -88,19 +88,20 @@ pub struct SystemState {
     pub fn_hash: Word,
 }
 
+/// The subset of the decoder state required to build the trace.
 #[derive(Debug)]
 pub struct DecoderState {
+    /// The value of the [miden_air::trace::decoder::ADDR_COL_IDX] column
     pub current_addr: Felt,
+    /// The address of the current MAST node's parent.
     pub parent_addr: Felt,
 }
 
-/// A checkpoint represents all the information for one row of the Stack trace.
-///
-/// This struct captures the complete state of the stack at a specific clock cycle,
-/// allowing for reconstruction of the stack trace during concurrent execution.
-/// The stack trace consists of 19 columns total: 16 stack columns + 3 helper columns.
-/// The helper columns (stack_depth, overflow_addr, and overflow_helper) are computed
-/// from the stack_depth and overflow replay data.
+/// This struct captures the state of the top 16 elements of the stack at a specific clock cycle;
+/// that is, those elements that are written directly into the trace. The stack trace consists of 19
+/// columns total: 16 stack columns + 3 helper columns. The helper columns (stack_depth,
+/// overflow_addr, and overflow_helper) are computed from the stack_depth and last_overflow_addr
+/// fields.
 #[derive(Debug)]
 pub struct StackState {
     /// Top 16 stack slots (s0 to s15)
@@ -215,8 +216,10 @@ impl StackState {
 pub struct BlockStackReplay {
     /// The parent address - needed for each node start operation (JOIN, SPLIT, etc).
     node_start: VecDeque<Felt>,
-    /// The data needed recover the state on an END operation.
+    /// The data needed to recover the state on an END operation.
     node_end: VecDeque<NodeEndData>,
+    /// Extra data needed to recover the state on an END operation specifically for
+    /// CALL/SYSCALL/DYNCALL nodes (which start/end a new execution context).
     execution_contexts: VecDeque<ExecutionContextSystemInfo>,
 }
 
@@ -342,6 +345,8 @@ pub struct NodeEndData {
     pub prev_parent_addr: Felt,
 }
 
+/// Data required to recover the state of an execution context when restoring it during an END
+/// operation.
 #[derive(Debug)]
 pub struct ExecutionContextSystemInfo {
     pub parent_ctx: ContextId,
@@ -584,7 +589,17 @@ impl HasherReplay {
 pub struct StackOverflowReplay {
     /// Recorded overflow values and overflow addresses from pop_overflow operations. Each entry
     /// represents a value that was popped from the overflow stack, and the overflow address of the
-    /// at the top of the overflow stack *after* the pop operation.
+    /// entry at the top of the overflow stack *after* the pop operation.
+    ///
+    /// For example, given the following table:
+    ///
+    /// | Overflow Value | Overflow Address |
+    /// |----------------|------------------|
+    /// |      8         |         14       |
+    /// |      2         |         16       |
+    /// |      7         |         18       |
+    ///
+    /// a `pop_overflow()` operation would return (popped_value, prev_addr) = (7, 16).
     overflow_values: VecDeque<(Felt, Felt)>,
 
     /// Recorded (stack depth, overflow address) returned when restoring a context
@@ -609,9 +624,10 @@ impl StackOverflowReplay {
     // MUTATORS
     // --------------------------------------------------------------------------------
 
-    /// Records the value returned by a pop_overflow operation, along as the overflow address stored
-    /// in the overflow table *after* the pop. That is, `new_overflow_addr` represents the clock
-    /// cycle at which the value *before* `value` was added to the overflow table.
+    /// Records the value returned by a pop_overflow operation, along with the overflow address
+    /// stored in the overflow table *after* the pop. That is, `new_overflow_addr` represents the
+    /// clock cycle at which the value *before* `value` was added to the overflow table. See the
+    /// docstring for the `overflow_values` field for more information.
     ///
     /// This *must* only be called if there is an actual value in the overflow table to pop; that
     /// is, don't call if the stack depth is 16.

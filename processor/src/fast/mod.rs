@@ -153,7 +153,7 @@ pub struct FastProcessor {
     /// Whether to enable debug statements and tracing.
     in_debug_mode: bool,
 
-    /// Shims used for tracing execution, if enabled.
+    /// Builder of [CoreTraceState]s, used for generating corresponding trace fragments.
     trace_state_builder: Option<CoreTraceStateBuilder>,
 }
 
@@ -340,7 +340,9 @@ impl FastProcessor {
         Ok((
             stack_outputs,
             self.advice,
-            self.trace_state_builder.unwrap().into_core_trace_states(),
+            self.trace_state_builder
+                .expect("Trace state builder expected to be initialized when executing for trace")
+                .into_core_trace_states(),
         ))
     }
 
@@ -420,40 +422,19 @@ impl FastProcessor {
                     }
                 },
                 Continuation::FinishJoin(node_id) => {
-                    self.check_extract_trace_state(
-                        NodeExecutionPhase::End(node_id),
-                        &mut continuation_stack,
-                        &current_forest,
-                    );
-
-                    self.finish_join_node(node_id, &current_forest, host)?
+                    self.finish_join_node(node_id, &current_forest, &mut continuation_stack, host)?
                 },
                 Continuation::FinishSplit(node_id) => {
-                    self.check_extract_trace_state(
-                        NodeExecutionPhase::End(node_id),
-                        &mut continuation_stack,
-                        &current_forest,
-                    );
-                    self.finish_split_node(node_id, &current_forest, host)?
+                    self.finish_split_node(node_id, &current_forest, &mut continuation_stack, host)?
                 },
                 Continuation::FinishLoop(node_id) => {
                     self.finish_loop_node(node_id, &current_forest, &mut continuation_stack, host)?
                 },
                 Continuation::FinishCall(node_id) => {
-                    self.check_extract_trace_state(
-                        NodeExecutionPhase::End(node_id),
-                        &mut continuation_stack,
-                        &current_forest,
-                    );
-                    self.finish_call_node(node_id, &current_forest, host)?
+                    self.finish_call_node(node_id, &current_forest, &mut continuation_stack, host)?
                 },
                 Continuation::FinishDyn(node_id) => {
-                    self.check_extract_trace_state(
-                        NodeExecutionPhase::End(node_id),
-                        &mut continuation_stack,
-                        &current_forest,
-                    );
-                    self.finish_dyn_node(node_id, &current_forest, host)?
+                    self.finish_dyn_node(node_id, &current_forest, &mut continuation_stack, host)?
                 },
                 Continuation::EnterForest(previous_forest) => {
                     // Restore the previous forest
@@ -523,8 +504,15 @@ impl FastProcessor {
         &mut self,
         node_id: MastNodeId,
         current_forest: &Arc<MastForest>,
+        continuation_stack: &mut ContinuationStack,
         host: &mut impl AsyncHost,
     ) -> Result<(), ExecutionError> {
+        self.check_extract_trace_state(
+            NodeExecutionPhase::End(node_id),
+            continuation_stack,
+            &current_forest,
+        );
+
         if let Some(ref mut trace_state_builder) = self.trace_state_builder {
             let block_info = trace_state_builder.block_stack.pop();
             trace_state_builder.record_node_end(&block_info);
@@ -593,8 +581,14 @@ impl FastProcessor {
         &mut self,
         node_id: MastNodeId,
         current_forest: &Arc<MastForest>,
+        continuation_stack: &mut ContinuationStack,
         host: &mut impl AsyncHost,
     ) -> Result<(), ExecutionError> {
+        self.check_extract_trace_state(
+            NodeExecutionPhase::End(node_id),
+            continuation_stack,
+            &current_forest,
+        );
         if let Some(ref mut trace_state_builder) = self.trace_state_builder {
             let block_info = trace_state_builder.block_stack.pop();
             trace_state_builder.record_node_end(&block_info);
@@ -780,7 +774,7 @@ impl FastProcessor {
                 .trace_state_builder
                 .as_ref()
                 .unwrap()
-                .overflow
+                .overflow_table
                 .last_update_clk_in_current_ctx();
             let ctx_info = block_stack::ExecutionContextInfo::new(
                 self.ctx,
@@ -827,7 +821,8 @@ impl FastProcessor {
             self.fmp = SYSCALL_FMP_MIN.into();
             self.in_syscall = true;
         } else {
-            // set the system registers to the callee context
+            // set the system registers to the callee context. The value for the new context is
+            // defined to be the value of the clock cycle for the following operation.
             self.ctx = (self.clk + 1).into();
             self.fmp = Felt::new(FMP_MIN);
             self.caller_hash = callee_hash;
@@ -850,8 +845,15 @@ impl FastProcessor {
         &mut self,
         node_id: MastNodeId,
         current_forest: &Arc<MastForest>,
+        continuation_stack: &mut ContinuationStack,
         host: &mut impl AsyncHost,
     ) -> Result<(), ExecutionError> {
+        self.check_extract_trace_state(
+            NodeExecutionPhase::End(node_id),
+            continuation_stack,
+            &current_forest,
+        );
+
         let call_node = current_forest[node_id].unwrap_call();
         let err_ctx = err_ctx!(current_forest, call_node, host);
         // when returning from a function call or a syscall, restore the
@@ -906,7 +908,7 @@ impl FastProcessor {
                     .trace_state_builder
                     .as_ref()
                     .unwrap()
-                    .overflow
+                    .overflow_table
                     .last_update_clk_in_current_ctx();
                 // Note: the stack depth to record is the `current_stack_depth - 1` due to the
                 // semantics of DYNCALL. That is, the top of the stack contains the memory address
@@ -973,6 +975,8 @@ impl FastProcessor {
         // For dyncall, save the context and reset it.
         if dyn_node.is_dyncall() {
             self.save_context_and_truncate_stack();
+            // The value for the new context is defined to be the value of the clock cycle for the
+            // following operation.
             self.ctx = (self.clk + 1).into();
             self.fmp = Felt::new(FMP_MIN);
             self.caller_hash = callee_hash;
@@ -1023,8 +1027,15 @@ impl FastProcessor {
         &mut self,
         node_id: MastNodeId,
         current_forest: &Arc<MastForest>,
+        continuation_stack: &mut ContinuationStack,
         host: &mut impl AsyncHost,
     ) -> Result<(), ExecutionError> {
+        self.check_extract_trace_state(
+            NodeExecutionPhase::End(node_id),
+            continuation_stack,
+            &current_forest,
+        );
+
         let dyn_node = current_forest[node_id].unwrap_dyn();
         let err_ctx = err_ctx!(current_forest, dyn_node, host);
         // For dyncall, restore the context.
@@ -1572,7 +1583,7 @@ impl FastProcessor {
         self.clk += 1_u32;
 
         if let Some(ref mut trace_state_builder) = self.trace_state_builder {
-            trace_state_builder.overflow.advance_clock();
+            trace_state_builder.overflow_table.advance_clock();
         }
     }
 
@@ -1648,7 +1659,7 @@ impl FastProcessor {
             };
 
             if let Some(ref mut trace_state_builder) = self.trace_state_builder {
-                trace_state_builder.overflow.push(overflow_value.unwrap());
+                trace_state_builder.overflow_table.push(overflow_value.unwrap());
             }
         }
 
@@ -1664,11 +1675,11 @@ impl FastProcessor {
     fn decrement_stack_size(&mut self) {
         if let Some(ref mut trace_state_builder) = self.trace_state_builder {
             // Record the popped value for replay, if present
-            if let Some(popped_value) = trace_state_builder.overflow.pop() {
+            if let Some(popped_value) = trace_state_builder.overflow_table.pop() {
                 let new_overflow_addr =
-                    trace_state_builder.overflow.last_update_clk_in_current_ctx();
+                    trace_state_builder.overflow_table.last_update_clk_in_current_ctx();
                 trace_state_builder
-                    .stack_overflow
+                    .overflow_replay
                     .record_pop_overflow(popped_value, new_overflow_addr);
             }
         }
@@ -1737,7 +1748,7 @@ impl FastProcessor {
         });
 
         if let Some(ref mut trace_state_builder) = self.trace_state_builder {
-            trace_state_builder.overflow.start_context();
+            trace_state_builder.overflow_table.start_context();
         }
     }
 
@@ -1781,10 +1792,10 @@ impl FastProcessor {
         self.caller_hash = ctx_info.fn_hash;
 
         if let Some(ref mut trace_state_builder) = self.trace_state_builder {
-            trace_state_builder.overflow.restore_context();
-            trace_state_builder.stack_overflow.record_restore_context_overflow_addr(
-                MIN_STACK_DEPTH + trace_state_builder.overflow.num_elements_in_current_ctx(),
-                trace_state_builder.overflow.last_update_clk_in_current_ctx(),
+            trace_state_builder.overflow_table.restore_context();
+            trace_state_builder.overflow_replay.record_restore_context_overflow_addr(
+                MIN_STACK_DEPTH + trace_state_builder.overflow_table.num_elements_in_current_ctx(),
+                trace_state_builder.overflow_table.last_update_clk_in_current_ctx(),
             );
         }
 
@@ -1819,7 +1830,7 @@ impl FastProcessor {
                 }
             };
 
-            self.trace_state_builder.as_mut().unwrap().capture_trace_state(
+            self.trace_state_builder.as_mut().unwrap().start_new_trace_state(
                 SystemState {
                     clk: self.clk,
                     ctx: self.ctx,

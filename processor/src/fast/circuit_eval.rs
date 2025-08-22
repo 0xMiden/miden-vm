@@ -32,10 +32,9 @@ impl FastProcessor {
         let num_read = self.stack_get(1);
         let ptr = self.stack_get(0);
         let ctx = self.ctx;
-        let clk = self.clk;
         let circuit_evaluation =
             eval_circuit_fast_(ctx, ptr, self.clk, num_read, num_eval, &mut self.memory, err_ctx)?;
-        self.ace.add_circuit_evaluation(clk, circuit_evaluation);
+        self.ace.add_circuit_evaluation(self.clk, circuit_evaluation);
 
         Ok(())
     }
