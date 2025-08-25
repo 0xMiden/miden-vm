@@ -609,7 +609,7 @@ impl Process {
         program: &MastForest,
         host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
-        let op_counts = batch.op_counts();
+        let end_indices = batch.end_indices();
         let mut op_idx = 0;
         let mut group_idx = 0;
         let mut next_group_idx = 1;
@@ -641,7 +641,7 @@ impl Process {
             }
 
             // determine if we've executed all non-decorator operations in a group
-            if op_idx == op_counts[group_idx] - 1 {
+            if i + 1 == end_indices[group_idx] {
                 // if we are at the end of the group, first check if the operation carries an
                 // immediate value
                 if has_imm {

@@ -67,13 +67,6 @@ impl OpBatch {
         })
     }
 
-    /// Returns the number of non-decorator operations for each operation group.
-    ///
-    /// Number of operations for groups containing immediate values is set to 0.
-    pub fn op_counts(&self) -> &[usize; BATCH_SIZE] {
-        &self.op_counts
-    }
-
     /// Returns the end indexes of each group.
     pub fn end_indices(&self) -> &[usize; BATCH_SIZE] {
         // SAFETY:
