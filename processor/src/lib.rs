@@ -772,7 +772,6 @@ pub struct SlowProcessState<'a> {
     system: &'a System,
     stack: &'a Stack,
     chiplets: &'a Chiplets,
-    stack_offset: usize,
 }
 
 // PROCESS STATE
@@ -792,18 +791,6 @@ impl Process {
             system: &self.system,
             stack: &self.stack,
             chiplets: &self.chiplets,
-            stack_offset: 0,
-        })
-    }
-
-    #[inline(always)]
-    pub fn state_with_stack_offset(&mut self, offset: usize) -> ProcessState<'_> {
-        ProcessState::Slow(SlowProcessState {
-            advice: &mut self.advice,
-            system: &self.system,
-            stack: &self.stack,
-            chiplets: &self.chiplets,
-            stack_offset: offset,
         })
     }
 }
@@ -877,7 +864,7 @@ impl<'a> ProcessState<'a> {
     pub fn get_stack_word(&self, start_idx: usize) -> Word {
         match self {
             ProcessState::Slow(state) => {
-                state.stack.get_word_with_overflow(start_idx, state.stack_offset)
+                state.stack.get_word_with_overflow(start_idx)
             },
             ProcessState::Fast(state) => state.processor.stack_get_word(start_idx),
         }

@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use miden_air::RowIndex;
-use miden_core::{Word, WORD_SIZE, stack::MIN_STACK_DEPTH};
+use miden_core::{Word, stack::MIN_STACK_DEPTH};
 
 use super::{
     ExecutionError, Felt, FieldElement, ONE, STACK_TRACE_WIDTH, StackInputs, StackOutputs, ZERO,
@@ -187,8 +187,7 @@ impl Stack {
     /// This method can access words that span into the overflow table.
     /// Word 0 is defined by stack positions 0-3, word 1 by positions 4-7, etc.
     /// The words are created in reverse order (top element at the last position).
-    pub fn get_word_with_overflow(&self, start_idx: usize, offset: usize) -> Word {
-        let start_idx = start_idx + offset;
+    pub fn get_word_with_overflow(&self, start_idx: usize) -> Word {
         [
             self.get_with_overflow(start_idx + 3),
             self.get_with_overflow(start_idx + 2),

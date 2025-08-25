@@ -142,6 +142,7 @@ impl Process {
     where
         H: SyncHost,
     {
+        self.stack.copy_state(0);
         let mut process = self.state();
         let event_id = process.get_stack_item(0);
 
