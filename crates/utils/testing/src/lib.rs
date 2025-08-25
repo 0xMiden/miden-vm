@@ -525,8 +525,8 @@ impl Test {
             (Ok(_), Err(slow_err)) => {
                 let _slow_diagnostic = format!("{}", PrintDiagnostic::new_without_color(slow_err));
                 // panic!(
-                //     "expected error, but fast processor succeeded. slow error:\n{slow_diagnostic}"
-                // );
+                //     "expected error, but fast processor succeeded. slow
+                // error:\n{slow_diagnostic}" );
             },
             (Err(fast_err), Ok(_)) => {
                 panic!("expected success, but fast processor failed. fast error:\n{fast_err}");

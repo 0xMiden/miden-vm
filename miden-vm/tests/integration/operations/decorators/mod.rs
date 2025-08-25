@@ -57,10 +57,7 @@ impl SyncHost for TestHost {
         None
     }
 
-    fn on_event(
-        &mut self,
-        process: &ProcessState,
-    ) -> Result<Vec<AdviceMutation>, EventError> {
+    fn on_event(&mut self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
         let event_id = process.get_stack_item(0).as_int() as u32;
         self.event_handler.push(event_id);
         Ok(Vec::new())

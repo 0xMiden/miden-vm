@@ -6,6 +6,7 @@ use core::fmt;
 // Randomly generated constant values for the VM's system events. All values were sampled
 // between 0 and 2^32.
 pub use constants::*;
+
 use crate::Felt;
 
 #[rustfmt::skip]
@@ -320,7 +321,7 @@ impl SystemEvent {
     /// Returns a system event corresponding to the specified event ID, or `None` if the event
     /// ID is not recognized.
     pub fn from_event_id(event_id: Felt) -> Option<Self> {
-        let event_id: u32 = event_id.as_int().try_into().ok()?; 
+        let event_id: u32 = event_id.as_int().try_into().ok()?;
         match event_id {
             EVENT_MERKLE_NODE_MERGE => Some(SystemEvent::MerkleNodeMerge),
             EVENT_MERKLE_NODE_TO_STACK => Some(SystemEvent::MerkleNodeToStack),

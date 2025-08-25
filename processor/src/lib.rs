@@ -16,7 +16,7 @@ use miden_air::trace::{
 pub use miden_air::{ExecutionOptions, ExecutionOptionsError, RowIndex};
 pub use miden_core::{
     AssemblyOp, EMPTY_WORD, Felt, Kernel, ONE, Operation, Program, ProgramInfo, QuadExtension,
-    StackInputs, StackOutputs, Word, WORD_SIZE, ZERO,
+    StackInputs, StackOutputs, WORD_SIZE, Word, ZERO,
     crypto::merkle::SMT_DEPTH,
     errors::InputError,
     mast::{MastForest, MastNode, MastNodeId},
@@ -863,9 +863,7 @@ impl<'a> ProcessState<'a> {
     #[inline(always)]
     pub fn get_stack_word(&self, start_idx: usize) -> Word {
         match self {
-            ProcessState::Slow(state) => {
-                state.stack.get_word_with_overflow(start_idx)
-            },
+            ProcessState::Slow(state) => state.stack.get_word_with_overflow(start_idx),
             ProcessState::Fast(state) => state.processor.stack_get_word(start_idx),
         }
     }

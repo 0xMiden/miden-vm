@@ -104,10 +104,7 @@ pub trait SyncHost: BaseHost {
     fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>>;
 
     /// Handles the event emitted from the VM.
-    fn on_event(
-        &mut self,
-        process: &ProcessState,
-    ) -> Result<Vec<AdviceMutation>, EventError>;
+    fn on_event(&mut self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError>;
 }
 
 // ASYNC HOST trait

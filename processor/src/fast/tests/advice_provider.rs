@@ -279,10 +279,7 @@ where
         self.store.get(node_digest)
     }
 
-    fn on_event(
-        &mut self,
-        _process: &ProcessState<'_>,
-    ) -> Result<Vec<AdviceMutation>, EventError> {
+    fn on_event(&mut self, _process: &ProcessState<'_>) -> Result<Vec<AdviceMutation>, EventError> {
         Ok(Vec::new())
     }
 }
