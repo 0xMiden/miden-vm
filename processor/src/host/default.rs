@@ -156,7 +156,7 @@ where
 
     fn on_event(&mut self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
         let event_id = process.get_stack_item(0).as_int() as u32;
-        if let Some(mutations) = self.event_handlers.handle_event(event_id, &process)? {
+        if let Some(mutations) = self.event_handlers.handle_event(event_id, process)? {
             // the event was handled by the registered event handlers; just return
             return Ok(mutations);
         }
