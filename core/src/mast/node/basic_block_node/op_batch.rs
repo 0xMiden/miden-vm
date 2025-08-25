@@ -13,17 +13,32 @@ use super::{BATCH_SIZE, Felt, GROUP_SIZE, Operation, ZERO};
 pub struct OpBatch {
     /// A list of operations in this batch, including decorators.
     pub(super) ops: Vec<Operation>,
+    /// An array of indexes in the ops array, marking the beginning and end of each group.
+    ///
+    /// The array maintains the invariant that the i-th group (i <= BATCH_SIZE-1) is at
+    /// `self.ops[self.indptr[i]..self.indptr[i+1]]`.
+    ///
+    /// By convention, the groups containing immediate values have a zero-length slice of the ops
+    /// array.
+    pub(super) indptr: [usize; Self::BATCH_SIZE_PLUS_ONE],
     /// Values of operation groups, including immediate values.
     pub(super) groups: [Felt; BATCH_SIZE],
     /// Number of non-decorator operations in each operation group. Operation count for groups
     /// with immediate values is set to 0.
     pub(super) op_counts: [usize; BATCH_SIZE],
     /// Number of non-decorator groups in this batch.
-    /// The arrays above are meaningful in their [0..self.num_groups] prefix.
+    /// The arrays above are meaningful in their [0..self.num_groups] prefix
+    /// (or [0..self.num_groups + 1] in the case of the indptr array).
     pub(super) num_groups: usize,
 }
 
 impl OpBatch {
+    /// The size of the indptr array, made to maintain its invariant:
+    ///
+    /// The OpBatch's indptr array maintains the invariant that the i-th group (i <= BATCH_SIZE-1)
+    /// is at `self.ops[self.indptr[i]..self.indptr[i+1]]`.
+    const BATCH_SIZE_PLUS_ONE: usize = BATCH_SIZE + 1;
+
     /// Returns a list of operations contained in this batch.
     ///
     /// Note: the processor will insert NOOP operations to fill out the groups, so the true number
@@ -38,6 +53,18 @@ impl OpBatch {
     /// Each group is represented by a single field element.
     pub fn groups(&self) -> &[Felt; BATCH_SIZE] {
         &self.groups
+    }
+
+    /// Returns sequences of operations for each group in this batch
+    ///
+    /// By convention, groups carrying immediate values are empty in this representation
+    #[cfg(test)]
+    #[doc(hidden)]
+    pub(super) fn group_chunks(&self) -> impl Iterator<Item = &[Operation]> {
+        self.indptr[..=self.num_groups].windows(2).map(|slice| match slice {
+            [start, end] => &self.ops[*start..*end],
+            _ => unreachable!("windows invariant violated"),
+        })
     }
 
     /// Returns the number of non-decorator operations for each operation group.
@@ -60,6 +87,10 @@ impl OpBatch {
 pub(super) struct OpBatchAccumulator {
     /// A list of operations in this batch, including decorators.
     ops: Vec<Operation>,
+    /// An array of indexes in the ops array, marking the beginning and end of each group.
+    /// The array maintains the invariant that the i-th group (i <= BATCH_SIZE-1) is at
+    /// `self.ops[self.indptr[i]..self.indptr[i+1]]`.
+    indptr: [usize; OpBatch::BATCH_SIZE_PLUS_ONE],
     /// Values of operation groups, including immediate values.
     groups: [Felt; BATCH_SIZE],
     /// Number of non-decorator operations in each operation group. Operation count for groups
@@ -76,10 +107,15 @@ pub(super) struct OpBatchAccumulator {
 }
 
 impl OpBatchAccumulator {
+    // an impossible index into the ops vec (which max size if BATCH_SIZE * GROUP_SIZE)
+    #[doc(hidden)]
+    const INVALID_IDX: usize = BATCH_SIZE * GROUP_SIZE + 1;
+
     /// Returns a blank [OpBatchAccumulator].
     pub fn new() -> Self {
         Self {
             ops: Vec::new(),
+            indptr: [0; OpBatch::BATCH_SIZE_PLUS_ONE],
             groups: [ZERO; BATCH_SIZE],
             op_counts: [0; BATCH_SIZE],
             group: 0,
@@ -140,6 +176,9 @@ impl OpBatchAccumulator {
 
             // save the immediate value at the next group index and advance the next group pointer
             self.groups[self.next_group_idx] = imm;
+            // we're adding an immediate value without advancing the group, it will need further
+            // correction once we know where this group finishes
+            self.indptr[self.next_group_idx] = Self::INVALID_IDX;
             self.next_group_idx += 1;
         }
 
@@ -158,9 +197,11 @@ impl OpBatchAccumulator {
             self.groups[self.group_idx] = Felt::new(self.group);
             self.op_counts[self.group_idx] = self.op_idx;
         }
+        self.finalize_indptr();
 
         OpBatch {
             ops: self.ops,
+            indptr: self.indptr,
             groups: self.groups,
             op_counts: self.op_counts,
             num_groups: self.next_group_idx,
@@ -175,12 +216,29 @@ impl OpBatchAccumulator {
     pub(super) fn finalize_op_group(&mut self) {
         self.groups[self.group_idx] = Felt::new(self.group);
         self.op_counts[self.group_idx] = self.op_idx;
+        self.finalize_indptr();
 
         self.group_idx = self.next_group_idx;
         self.next_group_idx = self.group_idx + 1;
 
         self.op_idx = 0;
         self.group = 0;
+    }
+
+    /// Saves the start index of the upcoming group (at self.next_group_idx), corrects any groups created
+    /// through immediate values.
+    fn finalize_indptr(&mut self){
+        // we are finalizing a group, we now know the start of the upcoming group
+        self.indptr[self.next_group_idx] = self.ops.len();
+        // we also need to correct the start indexes of groups carrying immediate values, if any,
+        let mut uninit_group_idx = self.next_group_idx - 1;
+        while uninit_group_idx >= self.group_idx
+            && self.indptr[uninit_group_idx] == Self::INVALID_IDX
+        {
+            // This guarantees the range (within ops) spanned by an immediate value is 0
+            self.indptr[uninit_group_idx] = self.ops.len();
+            uninit_group_idx -= 1;
+        }
     }
 }
 
