@@ -13,7 +13,8 @@
 - Removed dedicated `PushU8`, `PushU16`, `PushU32`, `PushFelt`, and `PushWord` assembly instructions. These have been replaced with the generic `Push<Immediate>` instruction which supports all the same functionality through the `IntValue` enum (U8, U16, U32, Felt, Word) ([#2066](https://github.com/0xMiden/miden-vm/issues/2066)).
 - [BREAKING] Update miden-crypto dependency to v0.16 (#[2079](https://github.com/0xMiden/miden-vm/pull/2079))
 - Made `get_mast_forest()` async again for `AsyncHost` now that basic conditional async support is in place ([#2060](https://github.com/0xMiden/miden-vm/issues/2060)).
-- Improved error message of binary operations on U32 values to report both erroneous operands, if applicable. ([#1327](https://github.com/0xMiden/miden-vm/issues/1327))
+- Improved error message of binary operations on U32 values to report both erroneous operands, if applicable. ([#1327](https://github.com/0xMiden/miden-vm/issues/1327)).
+- [BREAKING] `emit` no longer takes an immediate and instead gets the event ID from the stack (#[2068](https://github.com/0xMiden/miden-vm/issues/2068)).
 
 ## 0.17.0 (2025-08-06)
 

@@ -3,5 +3,5 @@ source: assembly/src/tests.rs
 expression: program
 ---
 begin
-    basic_block emit(652777600) assert(0) end
+    basic_block push(652777600) emit drop assert(0) end
 end

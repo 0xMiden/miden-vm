@@ -16,7 +16,7 @@ use miden_air::trace::{
 pub use miden_air::{ExecutionOptions, ExecutionOptionsError, RowIndex};
 pub use miden_core::{
     AssemblyOp, EMPTY_WORD, Felt, Kernel, ONE, Operation, Program, ProgramInfo, QuadExtension,
-    StackInputs, StackOutputs, Word, ZERO,
+    StackInputs, StackOutputs, WORD_SIZE, Word, ZERO,
     crypto::merkle::SMT_DEPTH,
     errors::InputError,
     mast::{MastForest, MastNode, MastNodeId},
@@ -24,7 +24,7 @@ pub use miden_core::{
     utils::DeserializationError,
 };
 use miden_core::{
-    Decorator, DecoratorIterator, FieldElement, WORD_SIZE,
+    Decorator, DecoratorIterator, FieldElement,
     mast::{
         BasicBlockNode, CallNode, DynNode, ExternalNode, JoinNode, LoopNode, OP_GROUP_SIZE,
         OpBatch, SplitNode,
@@ -845,7 +845,7 @@ impl<'a> ProcessState<'a> {
     #[inline(always)]
     pub fn get_stack_item(&self, pos: usize) -> Felt {
         match self {
-            ProcessState::Slow(state) => state.stack.get(pos),
+            ProcessState::Slow(state) => state.stack.get_with_overflow(pos),
             ProcessState::Fast(state) => state.processor.stack_get(pos),
         }
     }
@@ -861,10 +861,10 @@ impl<'a> ProcessState<'a> {
     ///
     /// Creating a word does not change the state of the stack.
     #[inline(always)]
-    pub fn get_stack_word(&self, word_idx: usize) -> Word {
+    pub fn get_stack_word(&self, start_idx: usize) -> Word {
         match self {
-            ProcessState::Slow(state) => state.stack.get_word(word_idx),
-            ProcessState::Fast(state) => state.processor.stack_get_word(word_idx * WORD_SIZE),
+            ProcessState::Slow(state) => state.stack.get_word_with_overflow(start_idx),
+            ProcessState::Fast(state) => state.processor.stack_get_word(start_idx),
         }
     }
 

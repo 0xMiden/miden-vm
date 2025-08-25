@@ -773,7 +773,12 @@ Debug: Instruction = {
             Instruction::Debug(DebugOptions::AdvStackTop(0.into())),
         }
     },
-    "emit" <id:Imm<U32>> => Instruction::Emit(id),
+    "emit" <id:MaybeImm<U32>> => {
+        match id {
+            Some(id) => Instruction::EmitImm(id),
+            None => Instruction::Emit,
+        }
+    },
     "trace" <id:Imm<U32>> => Instruction::Trace(id),
 }
 

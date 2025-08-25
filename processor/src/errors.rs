@@ -72,7 +72,7 @@ pub enum ExecutionError {
         label: SourceSpan,
         #[source_code]
         source_file: Option<Arc<SourceFile>>,
-        event_id: u32,
+        event_id: Felt,
         #[source]
         error: EventError,
     },
@@ -297,7 +297,7 @@ impl ExecutionError {
         Self::DynamicNodeNotFound { label, source_file, digest }
     }
 
-    pub fn event_error(error: EventError, event_id: u32, err_ctx: &impl ErrorContext) -> Self {
+    pub fn event_error(error: EventError, event_id: Felt, err_ctx: &impl ErrorContext) -> Self {
         let (label, source_file) = err_ctx.label_and_source_file();
 
         Self::EventError { label, source_file, event_id, error }

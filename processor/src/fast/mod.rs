@@ -244,7 +244,11 @@ impl FastProcessor {
     /// - etc.
     #[inline(always)]
     pub fn stack_get_word(&self, start_idx: usize) -> Word {
-        debug_assert!(start_idx < MIN_STACK_DEPTH);
+        // Ensure we have enough elements to form a complete word
+        debug_assert!(
+            start_idx + WORD_SIZE <= self.stack_depth() as usize,
+            "Not enough elements on stack to read word starting at index {start_idx}"
+        );
 
         let word_start_idx = self.stack_top_idx - start_idx - 4;
         let result: [Felt; WORD_SIZE] =
@@ -891,7 +895,7 @@ impl FastProcessor {
             // whereas all the other operations are synchronous (resulting in a significant
             // performance improvement).
             match op {
-                Operation::Emit(event_id) => self.op_emit(*event_id, host, &err_ctx).await?,
+                Operation::Emit => self.op_emit(host, &err_ctx).await?,
                 _ => {
                     // if the operation is not an Emit, we execute it normally
                     self.execute_op(op, op_idx_in_block, program, host, &err_ctx)?;
@@ -1032,7 +1036,7 @@ impl FastProcessor {
             Operation::SDepth => self.op_sdepth(),
             Operation::Caller => self.op_caller()?,
             Operation::Clk => self.op_clk()?,
-            Operation::Emit(_event_id) => {
+            Operation::Emit => {
                 panic!("emit instruction requires async, so is not supported by execute_op()")
             },
 

@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use miden_air::RowIndex;
-use miden_core::{WORD_SIZE, Word, stack::MIN_STACK_DEPTH};
+use miden_core::{Word, stack::MIN_STACK_DEPTH};
 
 use super::{
     ExecutionError, Felt, FieldElement, ONE, STACK_TRACE_WIDTH, StackInputs, StackOutputs, ZERO,
@@ -161,13 +161,38 @@ impl Stack {
     /// stack will be at the last position in the word.
     ///
     /// Creating a word does not change the state of the stack.
-    pub fn get_word(&self, word_idx: usize) -> Word {
-        let offset = word_idx * WORD_SIZE;
+    pub fn get_word(&self, idx: usize) -> Word {
+        [self.get(idx + 3), self.get(idx + 2), self.get(idx + 1), self.get(idx)].into()
+    }
+
+    /// Returns the value at the specified position on the stack, including overflow items.
+    ///
+    /// This method can access items beyond the top 16 positions by reading from the overflow table.
+    /// Position 0 is the top of the stack, positions 0-15 are in the trace, and positions 16+ are
+    /// in the overflow table.
+    pub fn get_with_overflow(&self, pos: usize) -> Felt {
+        if pos < MIN_STACK_DEPTH {
+            // Item is in the trace (top 16 positions)
+            self.trace.get_stack_value_at(self.clk, pos)
+        } else {
+            // Item is in the overflow table
+            // Calculate the index within the overflow table
+            let overflow_index = pos - MIN_STACK_DEPTH;
+            self.overflow.get_element_at(overflow_index).unwrap_or(ZERO)
+        }
+    }
+
+    /// Returns a word from the stack at the specified word index, including overflow items.
+    ///
+    /// This method can access words that span into the overflow table.
+    /// Word 0 is defined by stack positions 0-3, word 1 by positions 4-7, etc.
+    /// The words are created in reverse order (top element at the last position).
+    pub fn get_word_with_overflow(&self, start_idx: usize) -> Word {
         [
-            self.get(offset + 3),
-            self.get(offset + 2),
-            self.get(offset + 1),
-            self.get(offset),
+            self.get_with_overflow(start_idx + 3),
+            self.get_with_overflow(start_idx + 2),
+            self.get_with_overflow(start_idx + 1),
+            self.get_with_overflow(start_idx),
         ]
         .into()
     }
