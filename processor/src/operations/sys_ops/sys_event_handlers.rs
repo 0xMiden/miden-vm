@@ -52,11 +52,10 @@ pub fn handle_system_event(
 /// the key `KEY` located at the top of the stack.
 ///
 /// Inputs:
-///   Operand stack: [KEY, start_addr, end_addr, ...]
+///   Operand stack: [event_id, KEY, start_addr, end_addr, ...]
 ///   Advice map: {...}
 ///
 /// Outputs:
-///   Operand stack: [KEY, start_addr, end_addr, ...]
 ///   Advice map: {KEY: values}
 ///
 /// Where `values` are the elements located in memory[start_addr..end_addr].
@@ -91,11 +90,10 @@ fn insert_mem_values_into_adv_map(
 /// defined by the hash of these words.
 ///
 /// Inputs:
-///   Operand stack: [B, A, ...]
+///   Operand stack: [event_id, B, A, ...]
 ///   Advice map: {...}
 ///
 /// Outputs:
-///   Operand stack: [B, A, ...]
 ///   Advice map: {KEY: [a0, a1, a2, a3, b0, b1, b2, b3]}
 ///
 /// Where KEY is computed as hash(A || B, domain), where domain is provided via the immediate
@@ -126,11 +124,10 @@ fn insert_hdword_into_adv_map(
 /// under the key defined by applying an RPO permutation to all three words.
 ///
 /// Inputs:
-///   Operand stack: [B, A, C, ...]
+///   Operand stack: [event_id, B, A, C, ...]
 ///   Advice map: {...}
 ///
 /// Outputs:
-///   Operand stack: [B, A, C, ...]
 ///   Advice map: {KEY: [a0, a1, a2, a3, b0, b1, b2, b3]}
 ///
 /// Where KEY is computed by extracting the digest elements from hperm([C, A, B]). For example,
@@ -176,11 +173,10 @@ fn insert_hperm_into_adv_map(
 /// specified roots. The root of the new tree is defined as `Hash(LEFT_ROOT, RIGHT_ROOT)`.
 ///
 /// Inputs:
-///   Operand stack: [RIGHT_ROOT, LEFT_ROOT, ...]
+///   Operand stack: [event_id, RIGHT_ROOT, LEFT_ROOT, ...]
 ///   Merkle store: {RIGHT_ROOT, LEFT_ROOT}
 ///
 /// Outputs:
-///   Operand stack: [RIGHT_ROOT, LEFT_ROOT, ...]
 ///   Merkle store: {RIGHT_ROOT, LEFT_ROOT, hash(LEFT_ROOT, RIGHT_ROOT)}
 ///
 /// After the operation, both the original trees and the new tree remains in the advice
@@ -208,12 +204,11 @@ fn merge_merkle_nodes(
 /// onto the advice stack.
 ///
 /// Inputs:
-///   Operand stack: [depth, index, TREE_ROOT, ...]
+///   Operand stack: [event_id, event_id, depth, index, TREE_ROOT, ...]
 ///   Advice stack: [...]
 ///   Merkle store: {TREE_ROOT<-NODE}
 ///
 /// Outputs:
-///   Operand stack: [depth, index, TREE_ROOT, ...]
 ///   Advice stack: [NODE, ...]
 ///   Merkle store: {TREE_ROOT<-NODE}
 ///
@@ -229,16 +224,11 @@ fn copy_merkle_node_to_adv_stack(
 ) -> Result<(), ExecutionError> {
     let depth = process.get_stack_item(1);
     let index = process.get_stack_item(2);
-    let root = [
-        process.get_stack_item(6),
-        process.get_stack_item(5),
-        process.get_stack_item(4),
-        process.get_stack_item(3),
-    ];
+    let root = process.get_stack_word(3);
 
     let node = process
         .advice_provider()
-        .get_tree_node(root.into(), &depth, &index)
+        .get_tree_node(root, &depth, &index)
         .map_err(|err| ExecutionError::advice_error(err, process.clk(), err_ctx))?;
 
     process.advice_provider_mut().push_stack_word(&node);
@@ -251,39 +241,26 @@ fn copy_merkle_node_to_adv_stack(
 /// true, the number of elements in the value is also pushed onto the advice stack.
 ///
 /// Inputs:
-///   Operand stack: [..., KEY, ...]
+///   Operand stack: [event_id, KEY, ...]
 ///   Advice stack: [...]
 ///   Advice map: {KEY: values}
 ///
 /// Outputs:
-///   Operand stack: [..., KEY, ...]
 ///   Advice stack: [values_len?, values, ...]
 ///   Advice map: {KEY: values}
 ///
-/// The `key_offset` value specifies the location of the `KEY` on the stack. For example,
-/// offset value of 0 indicates that the top word on the stack should be used as the key, the
-/// offset value of 4, indicates that the second word on the stack should be used as the key
-/// etc.
-///
-/// The valid values of `key_offset` are 0 through 12 (inclusive).
 ///
 /// # Errors
-/// Returns an error if the required key was not found in the key-value map or if stack offset
-/// is greater than 12.
+/// Returns an error if the required key was not found in the key-value map.
 fn copy_map_value_to_adv_stack(
     process: &mut ProcessState,
     include_len: bool,
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
-    let key = [
-        process.get_stack_item(4),
-        process.get_stack_item(3),
-        process.get_stack_item(2),
-        process.get_stack_item(1),
-    ];
+    let key = process.get_stack_word(1);
     process
         .advice_provider_mut()
-        .push_from_map(key.into(), include_len)
+        .push_from_map(key, include_len)
         .map_err(|err| ExecutionError::advice_error(err, process.clk(), err_ctx))?;
 
     Ok(())
@@ -294,11 +271,10 @@ fn copy_map_value_to_adv_stack(
 /// will be pushed to the advice stack, `0` otherwise.
 ///
 /// Inputs:
-///   Operand stack: [KEY, ...]
+///   Operand stack: [event_id, KEY, ...]
 ///   Advice stack:  [...]
 ///
 /// Outputs:
-///   Operand stack: [KEY, ...]
 ///   Advice stack: [has_mapkey, ...]
 pub fn push_key_presence_flag(process: &mut ProcessState) -> Result<(), ExecutionError> {
     let map_key = process.get_stack_word(1);
@@ -313,11 +289,10 @@ pub fn push_key_presence_flag(process: &mut ProcessState) -> Result<(), Executio
 /// stack.
 ///
 /// Inputs:
-///   Operand stack: [b1, b0, a1, a0, ...]
+///   Operand stack: [event_id, b1, b0, a1, a0, ...]
 ///   Advice stack: [...]
 ///
 /// Outputs:
-///   Operand stack: [b1, b0, a1, a0, ...]
 ///   Advice stack: [q0, q1, r0, r1, ...]
 ///
 /// Where (a0, a1) and (b0, b1) are the 32-bit limbs of the dividend and the divisor
@@ -384,11 +359,10 @@ fn push_u64_div_result(
 /// prime (M = 12289) onto the advice stack.
 ///
 /// Inputs:
-///   Operand stack: [a1, a0, ...]
+///   Operand stack: [event_id, a1, a0, ...]
 ///   Advice stack: [...]
 ///
 /// Outputs:
-///   Operand stack: [a1, a0, ...]
 ///   Advice stack: [q1, q0, r, ...]
 ///
 /// where (a0, a1) are the 32-bit limbs of the dividend (with a0 representing the 32 least
@@ -428,11 +402,10 @@ fn push_falcon_mod_result(
 /// computes its multiplicative inverse and push the result onto the advice stack.
 ///
 /// Inputs:
-///   Operand stack: [a1, a0, ...]
+///   Operand stack: [event_id, a1, a0, ...]
 ///   Advice stack: [...]
 ///
 /// Outputs:
-///   Operand stack: [a1, a0, ...]
 ///   Advice stack: [b0, b1...]
 ///
 /// Where (b0, b1) is the multiplicative inverse of the extension field element (a0, a1) at the
@@ -461,11 +434,10 @@ fn push_ext2_inv_result(
 /// Pushes the number of the leading zeros of the top stack element onto the advice stack.
 ///
 /// Inputs:
-///   Operand stack: [n, ...]
+///   Operand stack: [event_id, n, ...]
 ///   Advice stack: [...]
 ///
 /// Outputs:
-///   Operand stack: [n, ...]
 ///   Advice stack: [leading_zeros, ...]
 fn push_leading_zeros(
     process: &mut ProcessState,
@@ -477,11 +449,10 @@ fn push_leading_zeros(
 /// Pushes the number of the trailing zeros of the top stack element onto the advice stack.
 ///
 /// Inputs:
-///   Operand stack: [n, ...]
+///   Operand stack: [event_id, n, ...]
 ///   Advice stack: [...]
 ///
 /// Outputs:
-///   Operand stack: [n, ...]
 ///   Advice stack: [trailing_zeros, ...]
 fn push_trailing_zeros(
     process: &mut ProcessState,
@@ -493,11 +464,10 @@ fn push_trailing_zeros(
 /// Pushes the number of the leading ones of the top stack element onto the advice stack.
 ///
 /// Inputs:
-///   Operand stack: [n, ...]
+///   Operand stack: [event_id, n, ...]
 ///   Advice stack: [...]
 ///
 /// Outputs:
-///   Operand stack: [n, ...]
 ///   Advice stack: [leading_ones, ...]
 fn push_leading_ones(
     process: &mut ProcessState,
@@ -509,11 +479,10 @@ fn push_leading_ones(
 /// Pushes the number of the trailing ones of the top stack element onto the advice stack.
 ///
 /// Inputs:
-///   Operand stack: [n, ...]
+///   Operand stack: [event_id, n, ...]
 ///   Advice stack: [...]
 ///
 /// Outputs:
-///   Operand stack: [n, ...]
 ///   Advice stack: [trailing_ones, ...]
 fn push_trailing_ones(
     process: &mut ProcessState,
@@ -524,11 +493,10 @@ fn push_trailing_ones(
 
 /// Pushes the base 2 logarithm of the top stack element, rounded down.
 /// Inputs:
-///   Operand stack: [n, ...]
+///   Operand stack: [event_id, n, ...]
 ///   Advice stack: [...]
 ///
 /// Outputs:
-///   Operand stack: [n, ...]
 ///   Advice stack: [ilog2(n), ...]
 ///
 /// # Errors
@@ -554,11 +522,10 @@ fn push_ilog2(
 /// the advice stack.
 ///
 /// Inputs:
-///   Operand stack: [KEY, ROOT, ...]
+///   Operand stack: [event_id, KEY, ROOT, ...]
 ///   Advice stack: [...]
 ///
 /// Outputs:
-///   Operand stack: [KEY, ROOT, ...]
 ///   Advice stack: [VALUE, ...]
 ///
 /// # Errors

@@ -47,11 +47,10 @@ const EVENT_FALCON_SIG_TO_STACK: u32 = 3419226139;
 /// of a DSA in Miden VM.
 ///
 /// Inputs:
-///   Operand stack: [PK, MSG, ...]
+///   Operand stack: [event_id, PK, MSG, ...]
 ///   Advice stack: \[ SIGNATURE \]
 ///
 /// Outputs:
-///   Operand stack: [PK, MSG, ...]
 ///   Advice stack: [...]
 ///
 /// Where:

@@ -300,7 +300,6 @@ where
         &mut self,
         _process: &ProcessState<'_>,
     ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>> {
-        let _ = _process;
         async move { Ok(Vec::new()) }
     }
 }

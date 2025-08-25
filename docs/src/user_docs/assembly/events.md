@@ -5,10 +5,10 @@ Miden assembly supports the concept of events. Events are a simple data structur
 An event can be emitted via the `emit.<event_id>` assembly instruction where `<event_id>` can be any 32-bit value specified either directly or via a [named constant](./code_organization.md#constants). Alternatively, the `emit` instruction can be used without an immediate value - in this case it will use the value from the top of the stack as the event ID. For example:
 
 ```
-emit.EVENT_ID_1     # emit event with immediate value
+emit.EVENT_ID_1     # emit event with immediate value defined by the constant EVENT_ID
 emit.2              # emit event with immediate value 2
-emit                # emit event using value from top of stack
-push.2 emit         # emit event using the ID at the top of the stack
+emit                # emit event using value from top of stack. the stack remains unchanged
+push.2 emit drop    # emit event using the ID at the top of the stack. equivalent to emit.2 
 ```
 
 ## Tracing
