@@ -99,7 +99,7 @@ impl BasicBlockBuilder<'_> {
     /// to the list of basic block operations.
     pub fn push_system_event(&mut self, sys_event: SystemEvent) {
         let event_id = sys_event.into_event_id();
-        self.push_ops([Operation::Push(Felt::from(event_id)), Operation::Emit]);
+        self.push_ops([Operation::Push(Felt::from(event_id)), Operation::Emit, Operation::Drop]);
     }
 }
 

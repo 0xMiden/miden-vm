@@ -154,12 +154,9 @@ where
         self.store.get(node_digest)
     }
 
-    fn on_event(
-        &mut self,
-        process: &ProcessState,
-        event_id: u32,
-    ) -> Result<Vec<AdviceMutation>, EventError> {
-        if let Some(mutations) = self.event_handlers.handle_event(event_id, process)? {
+    fn on_event(&mut self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
+        let event_id = process.get_stack_item(0).as_int() as u32;
+        if let Some(mutations) = self.event_handlers.handle_event(event_id, &process)? {
             // the event was handled by the registered event handlers; just return
             return Ok(mutations);
         }
@@ -186,9 +183,8 @@ where
     fn on_event(
         &mut self,
         process: &ProcessState<'_>,
-        event_id: u32,
     ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>> {
-        let result = <Self as SyncHost>::on_event(self, process, event_id);
+        let result = <Self as SyncHost>::on_event(self, process);
         async move { result }
     }
 }

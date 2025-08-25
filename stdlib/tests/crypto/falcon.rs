@@ -61,8 +61,8 @@ const EVENT_FALCON_SIG_TO_STACK: u32 = 3419226139;
 ///
 /// The advice provider is expected to contain the private key associated to the public key PK.
 pub fn push_falcon_signature(process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
-    let pub_key = process.get_stack_word(0);
-    let msg = process.get_stack_word(1);
+    let pub_key = process.get_stack_word(1);
+    let msg = process.get_stack_word(5);
 
     let pk_sk = process
         .advice_provider()
@@ -205,7 +205,7 @@ fn test_falcon512_probabilistic_product_failure() {
     expect_exec_error_matches!(
         test,
         ExecutionError::FailedAssertion{clk, err_code, err_msg, label: _, source_file: _ }
-        if clk == RowIndex::from(3183) && err_code == ZERO && err_msg.is_none()
+        if clk == RowIndex::from(3184) && err_code == ZERO && err_msg.is_none()
     );
 }
 

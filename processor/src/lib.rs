@@ -16,7 +16,7 @@ use miden_air::trace::{
 pub use miden_air::{ExecutionOptions, ExecutionOptionsError, RowIndex};
 pub use miden_core::{
     AssemblyOp, EMPTY_WORD, Felt, Kernel, ONE, Operation, Program, ProgramInfo, QuadExtension,
-    StackInputs, StackOutputs, Word, ZERO,
+    StackInputs, StackOutputs, Word, WORD_SIZE, ZERO,
     crypto::merkle::SMT_DEPTH,
     errors::InputError,
     mast::{MastForest, MastNode, MastNodeId},
@@ -24,7 +24,7 @@ pub use miden_core::{
     utils::DeserializationError,
 };
 use miden_core::{
-    Decorator, DecoratorIterator, FieldElement, WORD_SIZE,
+    Decorator, DecoratorIterator, FieldElement,
     mast::{
         BasicBlockNode, CallNode, DynNode, ExternalNode, JoinNode, LoopNode, OP_GROUP_SIZE,
         OpBatch, SplitNode,
@@ -858,7 +858,7 @@ impl<'a> ProcessState<'a> {
     #[inline(always)]
     pub fn get_stack_item(&self, pos: usize) -> Felt {
         match self {
-            ProcessState::Slow(state) => state.stack.get_with_overflow(state.stack_offset + pos),
+            ProcessState::Slow(state) => state.stack.get_with_overflow(pos),
             ProcessState::Fast(state) => state.processor.stack_get(pos),
         }
     }
@@ -874,12 +874,12 @@ impl<'a> ProcessState<'a> {
     ///
     /// Creating a word does not change the state of the stack.
     #[inline(always)]
-    pub fn get_stack_word(&self, word_idx: usize) -> Word {
+    pub fn get_stack_word(&self, start_idx: usize) -> Word {
         match self {
             ProcessState::Slow(state) => {
-                state.stack.get_word_with_overflow(word_idx, state.stack_offset)
+                state.stack.get_word_with_overflow(start_idx, state.stack_offset)
             },
-            ProcessState::Fast(state) => state.processor.stack_get_word(word_idx * WORD_SIZE),
+            ProcessState::Fast(state) => state.processor.stack_get_word(start_idx),
         }
     }
 
@@ -888,13 +888,7 @@ impl<'a> ProcessState<'a> {
     #[inline(always)]
     pub fn get_stack_state(&self) -> Vec<Felt> {
         match self {
-            ProcessState::Slow(state) => {
-                let mut stack = state.stack.get_state_at(self.clk());
-                if state.stack_offset > 0 {
-                    stack.drain(0..state.stack_offset);
-                }
-                stack
-            },
+            ProcessState::Slow(state) => state.stack.get_state_at(state.system.clk()),
             ProcessState::Fast(state) => state.processor.stack().iter().rev().copied().collect(),
         }
     }

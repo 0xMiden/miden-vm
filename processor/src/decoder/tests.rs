@@ -162,6 +162,7 @@ fn basic_block_small_with_emit() {
         Operation::Push(ONE),
         Operation::Push(EMIT_EVENT_ID.into()),
         Operation::Emit,
+        Operation::Drop,
         Operation::Add,
     ];
     let basic_block = BasicBlockNode::new(ops.clone(), None).unwrap();

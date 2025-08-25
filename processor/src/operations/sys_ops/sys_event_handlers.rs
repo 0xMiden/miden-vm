@@ -12,7 +12,8 @@ use miden_core::{
 use crate::{ExecutionError, MemoryError, ProcessState, errors::ErrorContext};
 
 /// The offset of the domain value on the stack in the `hdword_to_map_with_domain` system event.
-pub const HDWORD_TO_MAP_WITH_DOMAIN_DOMAIN_OFFSET: usize = 8;
+/// TODO: Mention we add 1 to account for event ID at the top
+pub const HDWORD_TO_MAP_WITH_DOMAIN_DOMAIN_OFFSET: usize = 9;
 
 /// Falcon signature prime.
 const M: u64 = 12289;
@@ -70,7 +71,7 @@ fn insert_mem_values_into_adv_map(
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
     let (start_addr, end_addr) =
-        get_mem_addr_range(process, 4, 5).map_err(ExecutionError::MemoryError)?;
+        get_mem_addr_range(process, 5, 6).map_err(ExecutionError::MemoryError)?;
     let ctx = process.ctx();
 
     let mut values = Vec::with_capacity(((end_addr - start_addr) as usize) * WORD_SIZE);
@@ -79,7 +80,7 @@ fn insert_mem_values_into_adv_map(
         values.push(mem_value);
     }
 
-    let key = process.get_stack_word(0);
+    let key = process.get_stack_word(1);
     process
         .advice_provider_mut()
         .insert_into_map(key, values)
@@ -105,8 +106,8 @@ fn insert_hdword_into_adv_map(
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
     // get the top two words from the stack and hash them to compute the key value
-    let word0 = process.get_stack_word(0);
-    let word1 = process.get_stack_word(1);
+    let word0 = process.get_stack_word(1);
+    let word1 = process.get_stack_word(5);
     let key = Rpo256::merge_in_domain(&[word1, word0], domain);
 
     // build a vector of values from the two word and insert it into the advice map under the
@@ -140,6 +141,7 @@ fn insert_hperm_into_adv_map(
 ) -> Result<(), ExecutionError> {
     // read the state from the stack
     let mut state = [
+        process.get_stack_item(12),
         process.get_stack_item(11),
         process.get_stack_item(10),
         process.get_stack_item(9),
@@ -151,7 +153,6 @@ fn insert_hperm_into_adv_map(
         process.get_stack_item(3),
         process.get_stack_item(2),
         process.get_stack_item(1),
-        process.get_stack_item(0),
     ];
 
     // get the values to be inserted into the advice map from the state
@@ -191,8 +192,8 @@ fn merge_merkle_nodes(
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
     // fetch the arguments from the stack
-    let lhs = process.get_stack_word(1);
-    let rhs = process.get_stack_word(0);
+    let lhs = process.get_stack_word(5);
+    let rhs = process.get_stack_word(1);
 
     // perform the merge
     process
@@ -226,13 +227,13 @@ fn copy_merkle_node_to_adv_stack(
     process: &mut ProcessState,
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
-    let depth = process.get_stack_item(0);
-    let index = process.get_stack_item(1);
+    let depth = process.get_stack_item(1);
+    let index = process.get_stack_item(2);
     let root = [
+        process.get_stack_item(6),
         process.get_stack_item(5),
         process.get_stack_item(4),
         process.get_stack_item(3),
-        process.get_stack_item(2),
     ];
 
     let node = process
@@ -275,10 +276,10 @@ fn copy_map_value_to_adv_stack(
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
     let key = [
+        process.get_stack_item(4),
         process.get_stack_item(3),
         process.get_stack_item(2),
         process.get_stack_item(1),
-        process.get_stack_item(0),
     ];
     process
         .advice_provider_mut()
@@ -300,7 +301,7 @@ fn copy_map_value_to_adv_stack(
 ///   Operand stack: [KEY, ...]
 ///   Advice stack: [has_mapkey, ...]
 pub fn push_key_presence_flag(process: &mut ProcessState) -> Result<(), ExecutionError> {
-    let map_key = process.get_stack_word(0);
+    let map_key = process.get_stack_word(1);
 
     let presence_flag = process.advice_provider().contains_map_key(&map_key);
     process.advice_provider_mut().push_stack(Felt::from(presence_flag));
@@ -331,8 +332,8 @@ fn push_u64_div_result(
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
     let divisor = {
-        let divisor_hi = process.get_stack_item(0).as_int();
-        let divisor_lo = process.get_stack_item(1).as_int();
+        let divisor_hi = process.get_stack_item(1).as_int();
+        let divisor_lo = process.get_stack_item(2).as_int();
 
         // Ensure the divisor is a pair of u32 values
         if divisor_hi > u32::MAX.into() {
@@ -352,8 +353,8 @@ fn push_u64_div_result(
     };
 
     let dividend = {
-        let dividend_hi = process.get_stack_item(2).as_int();
-        let dividend_lo = process.get_stack_item(3).as_int();
+        let dividend_hi = process.get_stack_item(3).as_int();
+        let dividend_lo = process.get_stack_item(4).as_int();
 
         // Ensure the dividend is a pair of u32 values
         if dividend_hi > u32::MAX.into() {
@@ -401,8 +402,8 @@ fn push_falcon_mod_result(
     process: &mut ProcessState,
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
-    let dividend_hi = process.get_stack_item(0).as_int();
-    let dividend_lo = process.get_stack_item(1).as_int();
+    let dividend_hi = process.get_stack_item(1).as_int();
+    let dividend_lo = process.get_stack_item(2).as_int();
     if dividend_lo > u32::MAX as u64 {
         return Err(ExecutionError::input_not_u32(process.clk(), dividend_lo, err_ctx));
     }
@@ -443,8 +444,8 @@ fn push_ext2_inv_result(
     process: &mut ProcessState,
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
-    let coef0 = process.get_stack_item(1);
-    let coef1 = process.get_stack_item(0);
+    let coef0 = process.get_stack_item(2);
+    let coef1 = process.get_stack_item(1);
 
     let element = QuadFelt::new(coef0, coef1);
     if element == QuadFelt::ZERO {
@@ -536,7 +537,7 @@ fn push_ilog2(
     process: &mut ProcessState,
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
-    let n = process.get_stack_item(0).as_int();
+    let n = process.get_stack_item(1).as_int();
     if n == 0 {
         return Err(ExecutionError::log_argument_zero(process.clk(), err_ctx));
     }
@@ -571,8 +572,8 @@ fn push_smtpeek_result(
 ) -> Result<(), ExecutionError> {
     let empty_leaf = EmptySubtreeRoots::entry(SMT_DEPTH, SMT_DEPTH);
     // fetch the arguments from the operand stack
-    let key = process.get_stack_word(0);
-    let root = process.get_stack_word(1);
+    let key = process.get_stack_word(1);
+    let root = process.get_stack_word(5);
 
     // get the node from the SMT for the specified key; this node can be either a leaf node,
     // or a root of an empty subtree at the returned depth
@@ -644,7 +645,7 @@ fn push_transformed_stack_top(
     f: impl FnOnce(u32) -> Felt,
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
-    let stack_top = process.get_stack_item(0);
+    let stack_top = process.get_stack_item(1);
     let stack_top: u32 = stack_top
         .as_int()
         .try_into()

@@ -144,7 +144,8 @@ fn degree_4_op_flags() {
 fn composite_flags() {
     // ------ no change 0 ---------------------------------------------------------------------
 
-    let op_no_change_0 = [Operation::MpVerify(ZERO), Operation::Span, Operation::Halt];
+    let op_no_change_0 =
+        [Operation::MpVerify(ZERO), Operation::Span, Operation::Halt, Operation::Emit];
     for op in op_no_change_0 {
         // frame initialised with an op operation.
         let frame = generate_evaluation_frame(op.op_code().into());
@@ -168,7 +169,7 @@ fn composite_flags() {
         assert_eq!(op_flags.left_shift(), ZERO);
         assert_eq!(op_flags.top_binary(), ZERO);
 
-        if op == Operation::MpVerify(ZERO) {
+        if op == Operation::MpVerify(ZERO) || op == Operation::Emit {
             assert_eq!(op_flags.control_flow(), ZERO);
         } else if op == Operation::Span || op == Operation::Halt {
             assert_eq!(op_flags.control_flow(), ONE);
@@ -536,32 +537,6 @@ fn composite_flags() {
 
     assert_eq!(op_flags.right_shift(), ZERO);
     assert_eq!(op_flags.left_shift(), ZERO);
-    assert_eq!(op_flags.control_flow(), ZERO);
-    assert_eq!(op_flags.top_binary(), ZERO);
-
-    // ------ EMIT operation ----------------------------------------------------------------------
-
-    let op = Operation::Emit;
-    // frame initialised with an op operation.
-    let frame = generate_evaluation_frame(op.op_code().into());
-
-    // All the operation flags are generated for the given frame.
-    let op_flags = OpFlags::new(&frame);
-
-    for i in 0..16 {
-        assert_eq!(op_flags.no_shift_at(i), ZERO);
-    }
-
-    for i in 1..16 {
-        assert_eq!(op_flags.left_shift_at(i), ONE);
-    }
-
-    for i in 0..15 {
-        assert_eq!(op_flags.right_shift_at(i), ZERO);
-    }
-
-    assert_eq!(op_flags.right_shift(), ZERO);
-    assert_eq!(op_flags.left_shift(), ONE);
     assert_eq!(op_flags.control_flow(), ZERO);
     assert_eq!(op_flags.top_binary(), ZERO);
 

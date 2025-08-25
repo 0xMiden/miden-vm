@@ -244,23 +244,16 @@ impl FastProcessor {
     /// - etc.
     #[inline(always)]
     pub fn stack_get_word(&self, start_idx: usize) -> Word {
-        // Calculate the actual starting position considering the word index
-        let actual_start = start_idx;
-
         // Ensure we have enough elements to form a complete word
         debug_assert!(
-            actual_start + WORD_SIZE <= self.stack_depth() as usize,
+            start_idx + WORD_SIZE <= self.stack_depth() as usize,
             "Not enough elements on stack to read word starting at index {start_idx}"
         );
 
-        // Word is constructed in "stack order" - top element goes to last position
-        [
-            self.stack_get(actual_start + 3), // Bottom element of word
-            self.stack_get(actual_start + 2),
-            self.stack_get(actual_start + 1),
-            self.stack_get(actual_start), // Top element of word
-        ]
-        .into()
+        let word_start_idx = self.stack_top_idx - start_idx - 4;
+        let result: [Felt; WORD_SIZE] =
+            self.stack[range(word_start_idx, WORD_SIZE)].try_into().unwrap();
+        result.into()
     }
 
     /// Returns the number of elements on the stack in the current context.

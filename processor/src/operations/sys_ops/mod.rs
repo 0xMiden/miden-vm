@@ -142,10 +142,8 @@ impl Process {
     where
         H: SyncHost,
     {
-        let event_id = self.stack.peek().as_int() as u32;
-        self.stack.shift_left(1);
-
-        let mut process = self.state_with_stack_offset(1);
+        let mut process = self.state();
+        let event_id = process.get_stack_item(0);
 
         // If it's a system event, handle it directly. Otherwise, forward it to the host.
         if let Some(system_event) = SystemEvent::from_event_id(event_id) {
@@ -153,7 +151,7 @@ impl Process {
         } else {
             let clk = process.clk();
             let mutations = host
-                .on_event(&process, event_id)
+                .on_event(&process)
                 .map_err(|err| ExecutionError::event_error(err, event_id, err_ctx))?;
             self.advice
                 .apply_mutations(mutations)

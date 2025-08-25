@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use miden_air::RowIndex;
-use miden_core::{WORD_SIZE, Word, stack::MIN_STACK_DEPTH};
+use miden_core::{Word, WORD_SIZE, stack::MIN_STACK_DEPTH};
 
 use super::{
     ExecutionError, Felt, FieldElement, ONE, STACK_TRACE_WIDTH, StackInputs, StackOutputs, ZERO,
@@ -161,15 +161,8 @@ impl Stack {
     /// stack will be at the last position in the word.
     ///
     /// Creating a word does not change the state of the stack.
-    pub fn get_word(&self, word_idx: usize) -> Word {
-        let offset = word_idx * WORD_SIZE;
-        [
-            self.get(offset + 3),
-            self.get(offset + 2),
-            self.get(offset + 1),
-            self.get(offset),
-        ]
-        .into()
+    pub fn get_word(&self, idx: usize) -> Word {
+        [self.get(idx + 3), self.get(idx + 2), self.get(idx + 1), self.get(idx)].into()
     }
 
     /// Returns the value at the specified position on the stack, including overflow items.
@@ -194,13 +187,13 @@ impl Stack {
     /// This method can access words that span into the overflow table.
     /// Word 0 is defined by stack positions 0-3, word 1 by positions 4-7, etc.
     /// The words are created in reverse order (top element at the last position).
-    pub fn get_word_with_overflow(&self, word_idx: usize, offset: usize) -> Word {
-        let offset = offset + word_idx * WORD_SIZE;
+    pub fn get_word_with_overflow(&self, start_idx: usize, offset: usize) -> Word {
+        let start_idx = start_idx + offset;
         [
-            self.get_with_overflow(offset + 3),
-            self.get_with_overflow(offset + 2),
-            self.get_with_overflow(offset + 1),
-            self.get_with_overflow(offset),
+            self.get_with_overflow(start_idx + 3),
+            self.get_with_overflow(start_idx + 2),
+            self.get_with_overflow(start_idx + 1),
+            self.get_with_overflow(start_idx),
         ]
         .into()
     }
