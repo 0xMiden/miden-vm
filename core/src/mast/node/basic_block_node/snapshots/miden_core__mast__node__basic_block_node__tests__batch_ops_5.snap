@@ -27,6 +27,17 @@ expression: batches
             ),
             Add,
         ],
+        indptr: [
+            0,
+            9,
+            9,
+            9,
+            9,
+            9,
+            9,
+            9,
+            0,
+        ],
         groups: [
             2501590016639553954,
             1,
@@ -54,6 +65,17 @@ expression: batches
             Push(
                 7,
             ),
+        ],
+        indptr: [
+            0,
+            1,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
         ],
         groups: [
             91,

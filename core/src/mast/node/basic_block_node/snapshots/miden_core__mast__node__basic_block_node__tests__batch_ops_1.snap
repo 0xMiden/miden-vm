@@ -7,6 +7,17 @@ expression: batches
         ops: [
             Add,
         ],
+        indptr: [
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+        ],
         groups: [
             34,
             0,

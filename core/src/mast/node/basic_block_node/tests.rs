@@ -113,6 +113,7 @@ fn batch_ops_1() {
     let ops = vec![Operation::Add];
     let (batches, hash) = super::batch_and_hash_ops(ops.clone());
     insta::assert_debug_snapshot!(batches);
+    insta::assert_debug_snapshot!(build_group_chunks(&batches).collect::<Vec<_>>());
 
     let mut batch_groups = [ZERO; BATCH_SIZE];
     batch_groups[0] = build_group(&ops);
@@ -126,6 +127,7 @@ fn batch_ops_2() {
     let ops = vec![Operation::Add, Operation::Mul];
     let (batches, hash) = super::batch_and_hash_ops(ops.clone());
     insta::assert_debug_snapshot!(batches);
+    insta::assert_debug_snapshot!(build_group_chunks(&batches).collect::<Vec<_>>());
 
     let mut batch_groups = [ZERO; BATCH_SIZE];
     batch_groups[0] = build_group(&ops);
@@ -139,6 +141,7 @@ fn batch_ops_3() {
     let ops = vec![Operation::Add, Operation::Push(Felt::new(12345678))];
     let (batches, hash) = super::batch_and_hash_ops(ops.clone());
     insta::assert_debug_snapshot!(batches);
+    insta::assert_debug_snapshot!(build_group_chunks(&batches).collect::<Vec<_>>());
 
     let mut batch_groups = [ZERO; BATCH_SIZE];
     batch_groups[0] = build_group(&ops);
@@ -162,6 +165,7 @@ fn batch_ops_4() {
     ];
     let (batches, hash) = super::batch_and_hash_ops(ops.clone());
     insta::assert_debug_snapshot!(batches);
+    insta::assert_debug_snapshot!(build_group_chunks(&batches).collect::<Vec<_>>());
 
     let batch_groups = [
         build_group(&ops),
@@ -194,6 +198,7 @@ fn batch_ops_5() {
     ];
     let (batches, hash) = super::batch_and_hash_ops(ops.clone());
     insta::assert_debug_snapshot!(batches);
+    insta::assert_debug_snapshot!(build_group_chunks(&batches).collect::<Vec<_>>());
 
     let batch0_groups = [
         build_group(&ops[..9]),
@@ -231,6 +236,7 @@ fn batch_ops_6() {
 
     let (batches, hash) = super::batch_and_hash_ops(ops.clone());
     insta::assert_debug_snapshot!(batches);
+    insta::assert_debug_snapshot!(build_group_chunks(&batches).collect::<Vec<_>>());
 
     let batch_groups = [
         build_group(&ops[..9]),
@@ -262,6 +268,7 @@ fn batch_ops_7() {
     ];
     let (batches, hash) = super::batch_and_hash_ops(ops.clone());
     insta::assert_debug_snapshot!(batches);
+    insta::assert_debug_snapshot!(build_group_chunks(&batches).collect::<Vec<_>>());
 
     let batch_groups = [
         build_group(&ops[..8]),
@@ -293,6 +300,7 @@ fn batch_ops_8() {
     ];
     let (batches, hash) = super::batch_and_hash_ops(ops.clone());
     insta::assert_debug_snapshot!(batches);
+    insta::assert_debug_snapshot!(build_group_chunks(&batches).collect::<Vec<_>>());
 
     let batch_groups = [
         build_group(&ops[..8]),
@@ -335,6 +343,7 @@ fn batch_ops_9() {
 
     let (batches, hash) = super::batch_and_hash_ops(ops.clone());
     insta::assert_debug_snapshot!(batches);
+    insta::assert_debug_snapshot!(build_group_chunks(&batches).collect::<Vec<_>>());
 
     let batch0_groups = [
         build_group(&ops[..9]),
@@ -400,6 +409,10 @@ fn build_group(ops: &[Operation]) -> Felt {
         group |= (op.op_code() as u64) << (Operation::OP_BITS * i);
     }
     Felt::new(group)
+}
+
+fn build_group_chunks(batches: &[OpBatch]) -> impl Iterator<Item = &[Operation]> {
+    batches.iter().flat_map(|opbatch| opbatch.group_chunks())
 }
 
 // PROPTESTS FOR BATCH CREATION INVARIANTS
