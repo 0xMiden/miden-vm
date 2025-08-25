@@ -23,9 +23,6 @@ pub struct OpBatch {
     pub(super) indptr: [usize; Self::BATCH_SIZE_PLUS_ONE],
     /// Values of operation groups, including immediate values.
     pub(super) groups: [Felt; BATCH_SIZE],
-    /// Number of non-decorator operations in each operation group. Operation count for groups
-    /// with immediate values is set to 0.
-    pub(super) op_counts: [usize; BATCH_SIZE],
     /// Number of non-decorator groups in this batch.
     /// The arrays above are meaningful in their [0..self.num_groups] prefix
     /// (or [0..self.num_groups + 1] in the case of the indptr array).
@@ -96,9 +93,6 @@ pub(super) struct OpBatchAccumulator {
     indptr: [usize; OpBatch::BATCH_SIZE_PLUS_ONE],
     /// Values of operation groups, including immediate values.
     groups: [Felt; BATCH_SIZE],
-    /// Number of non-decorator operations in each operation group. Operation count for groups
-    /// with immediate values is set to 0.
-    op_counts: [usize; BATCH_SIZE],
     /// Value of the currently active op group.
     group: u64,
     /// Index of the next opcode in the current group.
@@ -120,7 +114,6 @@ impl OpBatchAccumulator {
             ops: Vec::new(),
             indptr: [0; OpBatch::BATCH_SIZE_PLUS_ONE],
             groups: [ZERO; BATCH_SIZE],
-            op_counts: [0; BATCH_SIZE],
             group: 0,
             op_idx: 0,
             group_idx: 0,
@@ -198,7 +191,6 @@ impl OpBatchAccumulator {
         // handle the case when a group contains a single NOOP operation.
         if self.group != 0 || self.op_idx != 0 {
             self.groups[self.group_idx] = Felt::new(self.group);
-            self.op_counts[self.group_idx] = self.op_idx;
         }
         self.finalize_indptr();
 
@@ -206,7 +198,6 @@ impl OpBatchAccumulator {
             ops: self.ops,
             indptr: self.indptr,
             groups: self.groups,
-            op_counts: self.op_counts,
             num_groups: self.next_group_idx,
         }
     }
@@ -218,7 +209,6 @@ impl OpBatchAccumulator {
     /// and resets group content.
     pub(super) fn finalize_op_group(&mut self) {
         self.groups[self.group_idx] = Felt::new(self.group);
-        self.op_counts[self.group_idx] = self.op_idx;
         self.finalize_indptr();
 
         self.group_idx = self.next_group_idx;
@@ -228,9 +218,10 @@ impl OpBatchAccumulator {
         self.group = 0;
     }
 
-    /// Saves the start index of the upcoming group (at self.next_group_idx), corrects any groups created
-    /// through immediate values.
-    fn finalize_indptr(&mut self){
+    /// Saves the start index of the upcoming group (at self.next_group_idx), corrects any groups
+    /// created through immediate values.
+    #[inline]
+    fn finalize_indptr(&mut self) {
         // we are finalizing a group, we now know the start of the upcoming group
         self.indptr[self.next_group_idx] = self.ops.len();
         // we also need to correct the start indexes of groups carrying immediate values, if any,
@@ -275,8 +266,8 @@ mod accumulator_tests {
                 let init_op_idx = acc.op_idx;
                 let init_group_idx = acc.group_idx;
                 let init_next_group_idx = acc.next_group_idx;
+                let init_indptr = acc.indptr;
                 let init_ops = acc.ops.clone();
-                let init_op_counts = acc.op_counts;
                 let init_groups = acc.groups;
                 let init_group = acc.group;
                 if acc.can_accept_op(op){
@@ -287,8 +278,8 @@ mod accumulator_tests {
                     assert_eq!(*acc.ops.last().unwrap(), op);
                     // we never edit older ops, older op counts, or older groups
                     assert_eq!(acc.ops[..init_len], init_ops);
-                    assert_eq!(init_op_counts[..init_group_idx], acc.op_counts[..init_group_idx]);
                     assert_eq!(init_groups[..init_group_idx], acc.groups[..init_group_idx]);
+                    assert_eq!(init_indptr[..init_group_idx+1], acc.indptr[..init_group_idx+1]);
                     // the group value has changed in all cases
                     assert_ne!(acc.group, init_group);
                     // we bump the group iff it's full, or we're adding an immediate at the penultimate position
@@ -297,15 +288,16 @@ mod accumulator_tests {
                         // we only change the groups array for an immediate in case the group isn't full
                         if op.imm_value().is_none() {
                             assert_eq!(init_groups, acc.groups);
+                            assert_eq!(init_indptr, acc.indptr);
                         }
-                        // no change in group -> no change in op counts
-                        assert_eq!(acc.op_counts, init_op_counts);
                     } else {
                         assert_eq!(acc.group_idx, init_next_group_idx);
                         assert!(init_op_idx == GROUP_SIZE || op.imm_value().is_some() && init_op_idx + 1 == GROUP_SIZE);
                         // we update the groups array at finalization at least (and possibly for an imemdiate)
                         assert_ne!(init_groups, acc.groups);
-                        assert_eq!(acc.op_counts[init_group_idx], init_op_idx);
+                        assert_ne!(init_indptr, acc.indptr);
+                        // we are now in a group which starts at the just-inserted op
+                        assert_eq!(acc.indptr[acc.group_idx], acc.ops.len() - 1);
                     }
                     // we bump the next group iff the op has an immediate or the group is full
                     if acc.next_group_idx == init_next_group_idx {
@@ -321,24 +313,6 @@ mod accumulator_tests {
                     }
 
                 }
-            }
-        }
-
-        // Test correspondence between indptr and op_counts (on decorator-free representation)
-        #[test]
-        fn test_indptr_op_counts(ops in op_non_control_sequence_strategy(30)) {
-            let mut acc = OpBatchAccumulator::new();
-            for op in ops {
-                if acc.can_accept_op(op){
-                    acc.add_op(op);
-                }
-            }
-            let batch = acc.into_batch();
-            let mut pos = 0;
-            for group_idx in 0..batch.num_groups{
-                assert_eq!(batch.indptr[group_idx], pos);
-                assert_eq!(batch.indptr[group_idx + 1], pos + batch.op_counts[group_idx]);
-                pos += batch.op_counts[group_idx];
             }
         }
     }

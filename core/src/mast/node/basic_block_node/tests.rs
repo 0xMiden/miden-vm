@@ -438,12 +438,11 @@ proptest! {
 
         // Verify that operation counts in each batch don't exceed group limits
         for batch in &batches {
-            for (i, &count) in batch.op_counts.iter().enumerate() {
-                if count > 0 {
-                    assert!(count <= GROUP_SIZE,
-                        "Group {} in batch has {} operations, which exceeds the maximum of {}",
-                        i, count, GROUP_SIZE);
-                }
+            for chunk in batch.group_chunks() {
+                    let count = chunk.len();
+                    assert!(chunk.len() <= GROUP_SIZE,
+                        "Group {:?} in batch has {} operations, which exceeds the maximum of {}",
+                        chunk, count, GROUP_SIZE);
             }
         }
     }
@@ -461,15 +460,15 @@ proptest! {
             let mut group_idx = 0;
             let mut next_group_idx = 1;
             // interpret operations in the batch one by one
-            for op in batch.ops() {
+            for (op_idx_in_batch, op) in batch.ops().iter().enumerate() {
                 let has_imm = op.imm_value().is_some();
                 if has_imm {
                     // immediate values follow the op, their op count is zero
-                    assert_eq!(batch.op_counts[next_group_idx], 0, "invalid immediate op count convention");
+                    assert_eq!(batch.indptr[next_group_idx+1] - batch.indptr[next_group_idx], 0, "invalid immediate op count convention");
                     next_group_idx += 1;
                 }
                 // end of group logic
-                if op_idx_in_group + 1 == batch.op_counts[group_idx] {
+                if op_idx_in_batch + 1 == batch.indptr[group_idx + 1] {
                     // if we are at the end of the group, first check if the operation carries an
                     // immediate value
                     if has_imm {

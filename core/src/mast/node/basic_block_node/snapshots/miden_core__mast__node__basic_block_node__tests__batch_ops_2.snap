@@ -29,16 +29,6 @@ expression: batches
             0,
             0,
         ],
-        op_counts: [
-            2,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-        ],
         num_groups: 1,
     },
 ]
