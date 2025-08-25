@@ -59,8 +59,11 @@ miden-formatting = { version = "0.1", default-features = false }
 midenc-hir-type = { version = "0.1", default-features = false }
 
 # Third-party crates
-log = "0.4"
-paste = "1.0"
+insta = { version = "1.43", default-features = false, features = [
+    "colors",
+] }
+log = { version = "0.4", default-features = false }
+paste = { version = "1.0", default-feature = false }
 proptest = { version = "1.7", default-features = false, features = [
     "no_std",
     "alloc",

@@ -11,9 +11,15 @@ use super::{BATCH_SIZE, Felt, GROUP_SIZE, Operation, ZERO};
 /// operations or a single immediate value.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OpBatch {
+    /// A list of operations in this batch, including decorators.
     pub(super) ops: Vec<Operation>,
+    /// Values of operation groups, including immediate values.
     pub(super) groups: [Felt; BATCH_SIZE],
+    /// Number of non-decorator operations in each operation group. Operation count for groups
+    /// with immediate values is set to 0.
     pub(super) op_counts: [usize; BATCH_SIZE],
+    /// Number of non-decorator groups in this batch.
+    /// The arrays above are meaningful in their [0..self.num_groups] prefix.
     pub(super) num_groups: usize,
 }
 
@@ -181,80 +187,80 @@ impl OpBatchAccumulator {
 #[cfg(test)]
 mod accumulator_tests {
     use proptest::prelude::*;
-    use crate::mast::node::basic_block_node::tests::op_non_control_sequence_strategy;
+
     use super::*;
+    use crate::mast::node::basic_block_node::tests::op_non_control_sequence_strategy;
 
-    proptest!{
-    #[test]
-    fn test_can_accept_ops(ops in op_non_control_sequence_strategy(25)){
-        let acc = OpBatchAccumulator::new();
-        for op in ops {
-            let has_imm = op.imm_value().is_some();
-            let need_extra_group = has_imm && acc.op_idx >= GROUP_SIZE - 1;
+    proptest! {
+        #[test]
+        fn test_can_accept_ops(ops in op_non_control_sequence_strategy(50)){
+            let acc = OpBatchAccumulator::new();
+            for op in ops {
+                let has_imm = op.imm_value().is_some();
+                let need_extra_group = has_imm && acc.op_idx >= GROUP_SIZE - 1;
 
-            let can_accept = (!has_imm && acc.op_idx < GROUP_SIZE)
-                || acc.next_group_idx + usize::from(need_extra_group) < BATCH_SIZE;
+                let can_accept = (!has_imm && acc.op_idx < GROUP_SIZE)
+                    || acc.next_group_idx + usize::from(need_extra_group) < BATCH_SIZE;
 
-            assert_eq!(acc.can_accept_op(op), can_accept);
+                assert_eq!(acc.can_accept_op(op), can_accept);
+            }
         }
-    }
 
-    #[test]
-    fn test_add_op(ops in op_non_control_sequence_strategy(30)){
-        let mut acc = OpBatchAccumulator::new();
-        for op in ops {
-            let init_len = acc.ops.len();
-            let init_op_idx = acc.op_idx;
-            let init_group_idx = acc.group_idx;
-            let init_next_group_idx = acc.next_group_idx;
-            let init_ops = acc.ops.clone();
-            let init_op_counts = acc.op_counts.clone();
-            let init_groups = acc.groups.clone();
-            let init_group = acc.group.clone();
-            if acc.can_accept_op(op){
-                acc.add_op(op);
-                // the op was stored
-                assert_eq!(acc.ops.len(), init_len + 1);
-                // .. at the end of ops
-                assert_eq!(*acc.ops.last().unwrap(), op);
-                // we never edit older ops, older op counts, or older groups
-                assert_eq!(acc.ops[..init_len], init_ops);
-                assert_eq!(init_op_counts[..init_group_idx], acc.op_counts[..init_group_idx]);
-                assert_eq!(init_groups[..init_group_idx], acc.groups[..init_group_idx]);
-                // the group value has changed in all cases
-                assert_ne!(acc.group, init_group);
-                // we bump the group iff it's full, or we're adding an immediate at the penultimate position
-                if acc.group_idx == init_group_idx {
-                    assert!(init_op_idx < GROUP_SIZE);
-                    // we only change the groups array for an immediate in case the group isn't full
-                    if op.imm_value().is_none() {
-                        assert_eq!(init_groups, acc.groups);
+        #[test]
+        fn test_add_op(ops in op_non_control_sequence_strategy(50)){
+            let mut acc = OpBatchAccumulator::new();
+            for op in ops {
+                let init_len = acc.ops.len();
+                let init_op_idx = acc.op_idx;
+                let init_group_idx = acc.group_idx;
+                let init_next_group_idx = acc.next_group_idx;
+                let init_ops = acc.ops.clone();
+                let init_op_counts = acc.op_counts;
+                let init_groups = acc.groups;
+                let init_group = acc.group;
+                if acc.can_accept_op(op){
+                    acc.add_op(op);
+                    // the op was stored
+                    assert_eq!(acc.ops.len(), init_len + 1);
+                    // .. at the end of ops
+                    assert_eq!(*acc.ops.last().unwrap(), op);
+                    // we never edit older ops, older op counts, or older groups
+                    assert_eq!(acc.ops[..init_len], init_ops);
+                    assert_eq!(init_op_counts[..init_group_idx], acc.op_counts[..init_group_idx]);
+                    assert_eq!(init_groups[..init_group_idx], acc.groups[..init_group_idx]);
+                    // the group value has changed in all cases
+                    assert_ne!(acc.group, init_group);
+                    // we bump the group iff it's full, or we're adding an immediate at the penultimate position
+                    if acc.group_idx == init_group_idx {
+                        assert!(init_op_idx < GROUP_SIZE);
+                        // we only change the groups array for an immediate in case the group isn't full
+                        if op.imm_value().is_none() {
+                            assert_eq!(init_groups, acc.groups);
+                        }
+                        // no change in group -> no change in op counts
+                        assert_eq!(acc.op_counts, init_op_counts);
+                    } else {
+                        assert_eq!(acc.group_idx, init_next_group_idx);
+                        assert!(init_op_idx == GROUP_SIZE || op.imm_value().is_some() && init_op_idx + 1 == GROUP_SIZE);
+                        // we update the groups array at finalization at least (and possibly for an imemdiate)
+                        assert_ne!(init_groups, acc.groups);
+                        assert_eq!(acc.op_counts[init_group_idx], init_op_idx);
                     }
-                    // no change in group -> no change in op counts
-                    assert_eq!(acc.op_counts, init_op_counts);
-                } else {
-                    assert_eq!(acc.group_idx, init_next_group_idx);
-                    assert!(init_op_idx == GROUP_SIZE || op.imm_value().is_some() && init_op_idx + 1 == GROUP_SIZE);
-                    // we update the groups array at finalization at least (and possibly for an imemdiate)
-                    assert_ne!(init_groups, acc.groups);
-                    assert_eq!(acc.op_counts[init_group_idx], init_op_idx);
-                }
-                // we bump the next group iff the op has an immediate or the group is full
-                if acc.next_group_idx == init_next_group_idx {
-                    assert!(init_op_idx < GROUP_SIZE && op.imm_value().is_none());
-                } else {
-                    // when we add an immediate to a full or next-to-full group,
-                    // we overflow it (finalization) and store its immediate value
-                    // which bumps the next_group_idx by 2
-                    if acc.next_group_idx > init_next_group_idx + 1 {
-                        assert!(op.imm_value().is_some());
-                        assert!(init_op_idx >=  GROUP_SIZE - 1);
+                    // we bump the next group iff the op has an immediate or the group is full
+                    if acc.next_group_idx == init_next_group_idx {
+                        assert!(init_op_idx < GROUP_SIZE && op.imm_value().is_none());
+                    } else {
+                        // when we add an immediate to a full or next-to-full group,
+                        // we overflow it (finalization) and store its immediate value
+                        // which bumps the next_group_idx by 2
+                        if acc.next_group_idx > init_next_group_idx + 1 {
+                            assert!(op.imm_value().is_some());
+                            assert!(init_op_idx >=  GROUP_SIZE - 1);
+                        }
                     }
-                }
 
+                }
             }
         }
     }
-}
-
 }
