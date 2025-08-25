@@ -186,6 +186,12 @@ impl BasicBlockNode {
         self.op_batches.iter().flat_map(|batch| batch.ops())
     }
 
+    /// Returns an iterator over the un-padded operations in the order in which they
+    /// appear in the program.
+    pub fn raw_operations(&self) -> impl Iterator<Item = &Operation> {
+        self.op_batches.iter().flat_map(|batch| batch.raw_ops())
+    }
+
     /// Returns the total number of operations and decorators in this basic block.
     pub fn num_operations_and_decorators(&self) -> u32 {
         let num_ops: usize = self.num_operations() as usize;

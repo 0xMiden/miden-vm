@@ -12,5 +12,7 @@ begin
         emit
         drop
         assert(0)
+        noop
+        noop
     end
 end

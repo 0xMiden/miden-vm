@@ -14,12 +14,14 @@ expression: "build_group_chunks(&batches).collect::<Vec<_>>()"
         Push(
             1,
         ),
+        Noop,
     ],
     [],
     [
         Push(
             2,
         ),
+        Noop,
     ],
     [],
 ]
