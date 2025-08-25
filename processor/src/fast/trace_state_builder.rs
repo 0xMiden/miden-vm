@@ -201,7 +201,7 @@ impl HasherChipletShim {
     pub fn record_hash_control_block(&mut self) -> Felt {
         let block_addr = self.addr.into();
 
-        self.replay.block_addresses.push_back(block_addr);
+        self.replay.record_block_address(block_addr);
         self.addr += NUM_HASHER_ROWS_PER_PERMUTATION;
 
         block_addr
@@ -211,7 +211,7 @@ impl HasherChipletShim {
     pub fn record_hash_basic_block(&mut self, basic_block_node: &BasicBlockNode) -> Felt {
         let block_addr = self.addr.into();
 
-        self.replay.block_addresses.push_back(block_addr);
+        self.replay.record_block_address(block_addr);
         self.addr += NUM_HASHER_ROWS_PER_PERMUTATION * basic_block_node.num_op_batches() as u32;
 
         block_addr

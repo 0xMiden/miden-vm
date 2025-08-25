@@ -493,7 +493,6 @@ impl AdviceReplay {
     }
 }
 
-// TODO(plafer): move HasherChipletShim in here and make fields private
 /// Implements a shim for the hasher chiplet, in which all hasher operations during a given
 /// fragment are pre-recorded by the fast processor.
 ///
@@ -503,19 +502,19 @@ impl AdviceReplay {
 #[derive(Debug, Default)]
 pub struct HasherReplay {
     /// Recorded hasher addresses from operations like hash_control_block, hash_basic_block, etc.
-    pub block_addresses: VecDeque<Felt>,
+    block_addresses: VecDeque<Felt>,
 
     /// Recorded hasher operations from permutation operations (HPerm)
     /// Each entry contains (address, output_state)
-    pub permutation_operations: VecDeque<(Felt, [Felt; 12])>,
+    permutation_operations: VecDeque<(Felt, [Felt; 12])>,
 
     /// Recorded hasher operations from Merkle path verification operations
     /// Each entry contains (address, computed_root)
-    pub build_merkle_root_operations: VecDeque<(Felt, Word)>,
+    build_merkle_root_operations: VecDeque<(Felt, Word)>,
 
     /// Recorded hasher operations from Merkle root update operations
     /// Each entry contains (address, old_root, new_root)
-    pub mrupdate_operations: VecDeque<(Felt, Word, Word)>,
+    mrupdate_operations: VecDeque<(Felt, Word, Word)>,
 }
 
 impl HasherReplay {
