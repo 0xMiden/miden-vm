@@ -594,7 +594,7 @@ impl Process {
     }
 
     /// Executes all operations in an [OpBatch]. This also ensures that all alignment rules are
-    /// satisfied by executing NOOPs as needed. Specifically:
+    /// satisfied by executing NOOPs as needed. Specifically:   
     /// - If an operation group ends with an operation carrying an immediate value, a NOOP is
     ///   executed after it.
     /// - If the number of groups in a batch is not a power of 2, NOOPs are executed (one per group)

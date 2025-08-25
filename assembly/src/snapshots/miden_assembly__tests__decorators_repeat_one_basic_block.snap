@@ -1,0 +1,7 @@
+---
+source: assembly/src/tests.rs
+expression: program
+---
+begin
+    basic_block trace(0) add add trace(1) mul mul trace(2) end
+end

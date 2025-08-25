@@ -103,7 +103,10 @@ fn u32assert_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::NotU32Value{ value, err_code, label: _, source_file: _ } if value == Felt::new(equal) && err_code == ZERO
+        ExecutionError::NotU32Values{ values, err_code, label: _, source_file: _ } if
+            values.len() == 1 &&
+            values[0] == Felt::new(equal) &&
+            err_code == ZERO
     );
 
     // --- test when a > 2^32 ---------------------------------------------------------------------
@@ -111,7 +114,10 @@ fn u32assert_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::NotU32Value{ value, err_code, label: _, source_file: _ } if value == Felt::new(larger) && err_code == ZERO
+        ExecutionError::NotU32Values{ values, err_code, label: _, source_file: _ } if
+            values.len() == 1 &&
+            values[0] == Felt::new(larger) &&
+            err_code == ZERO
     );
 }
 
@@ -136,33 +142,43 @@ fn u32assert2_fail() {
 
     // vars to test
     // -------- Case 1: a > 2^32 and b > 2^32 ---------------------------------------------------
-    let value_a = (1_u64 << 32) + 1;
-    let value_b = value_a + 2;
+    let value_a = (1_u64 << 32) + 1; // 4294967297
+    let value_b = value_a + 2; // 4294967299
     let test = build_op_test!(asm_op, &[value_a, value_b]);
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::NotU32Value{ value, err_code, label: _, source_file: _ } if value == Felt::new(value_b) && err_code == ZERO
+        ExecutionError::NotU32Values{ values, err_code, label: _, source_file: _ } if
+            values.len() == 2 &&
+            values[0] == Felt::new(value_b) &&
+            values[1] == Felt::new(value_a) &&
+            err_code == ZERO
     );
 
     // -------- Case 2: a > 2^32 and b < 2^32 ---------------------------------------------------
-    let value_a = (1_u64 << 32) + 1;
-    let value_b = 1_u64;
+    let value_a = (1_u64 << 32) + 1; // 4294967297
+    let value_b = 1_u64; // 1 (valid)
     let test = build_op_test!(asm_op, &[value_a, value_b]);
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::NotU32Value{ value, err_code, label: _, source_file: _ } if value == Felt::new(value_a) && err_code == ZERO
+        ExecutionError::NotU32Values{ values, err_code, label: _, source_file: _ } if
+            values.len() == 1 &&
+            values[0] == Felt::new(value_a) &&
+            err_code == ZERO
     );
 
     // --------- Case 3: a < 2^32 and b > 2^32 --------------------------------------------------
-    let value_b = (1_u64 << 32) + 1;
-    let value_a = 1_u64;
+    let value_b = (1_u64 << 32) + 1; // 4294967297
+    let value_a = 1_u64; // 1 (valid)
     let test = build_op_test!(asm_op, &[value_a, value_b]);
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::NotU32Value{ value, err_code, label: _, source_file: _ } if value == Felt::new(value_b) && err_code == ZERO
+        ExecutionError::NotU32Values{ values, err_code, label: _, source_file: _ } if
+            values.len() == 1 &&
+            values[0] == Felt::new(value_b) &&
+            err_code == ZERO
     );
 }
 
@@ -184,11 +200,16 @@ fn u32assertw_fail() {
     test_inputs_out_of_bounds(asm_op, WORD_SIZE);
 
     // --- all elements out of range --------------------------------------------------------------
+    // Note: u32assertw is implemented using two u32assert2 operations, so it will only check the
+    // first 2 values before failing. This is why we expect only 2 values in the error.
     let test = build_op_test!(asm_op, &[U32_BOUND; WORD_SIZE]);
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::NotU32Value{ value, err_code, label: _, source_file: _ } if value == Felt::new(U32_BOUND) && err_code == ZERO
+        ExecutionError::NotU32Values{ values, err_code, label: _, source_file: _ } if
+            values.len() == 2 &&
+            values.iter().all(|v| *v == Felt::new(U32_BOUND)) &&
+            err_code == ZERO
     );
 }
 

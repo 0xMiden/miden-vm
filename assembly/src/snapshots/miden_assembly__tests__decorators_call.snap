@@ -1,0 +1,9 @@
+---
+source: assembly/src/tests.rs
+expression: program
+---
+begin
+    trace(0) trace(1)
+    call.0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef
+    trace(2)
+end

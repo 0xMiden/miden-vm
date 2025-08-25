@@ -60,6 +60,7 @@ midenc-hir-type = { version = "0.1", default-features = false }
 
 # Third-party crates
 log = "0.4"
+paste = "1.0"
 proptest = { version = "1.7", default-features = false, features = [
     "no_std",
     "alloc",

@@ -13,6 +13,7 @@
 - [BREAKING] Update miden-crypto dependency to v0.16 (#[2079](https://github.com/0xMiden/miden-vm/pull/2079))
 - [BREAKING] `emit` no longer takes an immediate and instead gets the event ID from the stack (#[2068](https://github.com/0xMiden/miden-vm/issues/2068)).
 - Made `get_mast_forest()` async again for `AsyncHost` now that basic conditional async support is in place ([#2060](https://github.com/0xMiden/miden-vm/issues/2060)).
+- Improved error message of binary operations on U32 values to report both erroneous operands, if applicable. ([#1327](https://github.com/0xMiden/miden-vm/issues/1327))
 
 ## 0.17.0 (2025-08-06)
 
