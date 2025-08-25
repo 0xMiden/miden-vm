@@ -54,16 +54,6 @@ expression: batches
             19853993742733730,
             0,
         ],
-        op_counts: [
-            9,
-            0,
-            0,
-            0,
-            0,
-            0,
-            8,
-            0,
-        ],
         num_groups: 7,
     },
     OpBatch {
@@ -87,16 +77,6 @@ expression: batches
         groups: [
             6235,
             6,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-        ],
-        op_counts: [
-            2,
-            0,
             0,
             0,
             0,
