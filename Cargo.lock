@@ -1130,6 +1130,7 @@ dependencies = [
 name = "miden-core"
 version = "0.18.0"
 dependencies = [
+ "insta",
  "miden-crypto",
  "miden-debug-types",
  "miden-formatting",
