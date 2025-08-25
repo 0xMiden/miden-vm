@@ -22,16 +22,16 @@ use crate::{
     decoder::block_stack::{self, BlockType},
     err_ctx,
     fast::{
-        checkpoints::{
-            CoreTraceState, DecoderState, ExecutionContextSystemInfo, NodeExecutionPhase,
+        trace_state::{
+            CoreTraceState, DecoderState, ExecutionContextSystemInfo, NodeExecutionState,
             SystemState,
         },
         trace_state_builder::CoreTraceStateBuilder,
     },
 };
 
-pub mod checkpoints;
 mod memory;
+pub mod trace_state;
 mod trace_state_builder;
 
 // Ops
@@ -75,6 +75,8 @@ const DOUBLE_WORD_SIZE: Felt = Felt::new(8);
 /// The number of rows per core trace fragment.
 pub const NUM_ROWS_PER_CORE_FRAGMENT: usize = 1024;
 
+/// The number of rows in the execution trace required to compute a permutation of Rescue Prime
+/// Optimized.
 const HASH_CYCLE_LEN: Felt = Felt::new(miden_air::trace::chiplets::hasher::HASH_CYCLE_LEN as u64);
 
 /// A fast processor which doesn't generate any trace.
@@ -460,7 +462,7 @@ impl FastProcessor {
     // NODE EXECUTORS
     // --------------------------------------------------------------------------------------------
 
-    /// Executes the start phase of a Join node.
+    /// Executes a Join node from the start.
     #[inline(always)]
     fn start_join_node(
         &mut self,
@@ -471,7 +473,7 @@ impl FastProcessor {
         host: &mut impl AsyncHost,
     ) -> Result<(), ExecutionError> {
         self.check_extract_trace_state(
-            NodeExecutionPhase::Start(node_id),
+            NodeExecutionState::Start(node_id),
             continuation_stack,
             current_forest,
         );
@@ -508,7 +510,7 @@ impl FastProcessor {
         host: &mut impl AsyncHost,
     ) -> Result<(), ExecutionError> {
         self.check_extract_trace_state(
-            NodeExecutionPhase::End(node_id),
+            NodeExecutionState::End(node_id),
             continuation_stack,
             current_forest,
         );
@@ -525,7 +527,7 @@ impl FastProcessor {
         self.execute_after_exit_decorators(node_id, current_forest, host)
     }
 
-    /// Executes the start phase of a Split node.
+    /// Executes a Split node from the start.
     #[inline(always)]
     fn start_split_node(
         &mut self,
@@ -536,7 +538,7 @@ impl FastProcessor {
         host: &mut impl AsyncHost,
     ) -> Result<(), ExecutionError> {
         self.check_extract_trace_state(
-            NodeExecutionPhase::Start(node_id),
+            NodeExecutionState::Start(node_id),
             continuation_stack,
             current_forest,
         );
@@ -585,7 +587,7 @@ impl FastProcessor {
         host: &mut impl AsyncHost,
     ) -> Result<(), ExecutionError> {
         self.check_extract_trace_state(
-            NodeExecutionPhase::End(node_id),
+            NodeExecutionState::End(node_id),
             continuation_stack,
             current_forest,
         );
@@ -601,7 +603,7 @@ impl FastProcessor {
         self.execute_after_exit_decorators(node_id, current_forest, host)
     }
 
-    /// Executes the start phase of a Loop node.
+    /// Executes a Loop node from the start.
     #[inline(always)]
     fn start_loop_node(
         &mut self,
@@ -612,7 +614,7 @@ impl FastProcessor {
         host: &mut impl AsyncHost,
     ) -> Result<(), ExecutionError> {
         self.check_extract_trace_state(
-            NodeExecutionPhase::Start(current_node_id),
+            NodeExecutionState::Start(current_node_id),
             continuation_stack,
             current_forest,
         );
@@ -667,7 +669,7 @@ impl FastProcessor {
             self.increment_clk();
 
             self.check_extract_trace_state(
-                NodeExecutionPhase::End(current_node_id),
+                NodeExecutionState::End(current_node_id),
                 continuation_stack,
                 current_forest,
             );
@@ -703,7 +705,7 @@ impl FastProcessor {
         if condition == ONE {
             // Add REPEAT row and continue looping
             self.check_extract_trace_state(
-                NodeExecutionPhase::LoopRepeat(current_node_id),
+                NodeExecutionState::LoopRepeat(current_node_id),
                 continuation_stack,
                 current_forest,
             );
@@ -719,7 +721,7 @@ impl FastProcessor {
         } else if condition == ZERO {
             // Exit the loop - add END row
             self.check_extract_trace_state(
-                NodeExecutionPhase::End(current_node_id),
+                NodeExecutionState::End(current_node_id),
                 continuation_stack,
                 current_forest,
             );
@@ -740,7 +742,7 @@ impl FastProcessor {
         Ok(())
     }
 
-    /// Executes the start phase of a Call node.
+    /// Executes a Call node from the start.
     #[inline(always)]
     fn start_call_node(
         &mut self,
@@ -752,7 +754,7 @@ impl FastProcessor {
         host: &mut impl AsyncHost,
     ) -> Result<(), ExecutionError> {
         self.check_extract_trace_state(
-            NodeExecutionPhase::Start(current_node_id),
+            NodeExecutionState::Start(current_node_id),
             continuation_stack,
             current_forest,
         );
@@ -849,7 +851,7 @@ impl FastProcessor {
         host: &mut impl AsyncHost,
     ) -> Result<(), ExecutionError> {
         self.check_extract_trace_state(
-            NodeExecutionPhase::End(node_id),
+            NodeExecutionState::End(node_id),
             continuation_stack,
             current_forest,
         );
@@ -879,7 +881,7 @@ impl FastProcessor {
         self.execute_after_exit_decorators(node_id, current_forest, host)
     }
 
-    /// Executes the start phase of a Dyn node.
+    /// Executes a Dyn node from the start.
     #[inline(always)]
     async fn start_dyn_node(
         &mut self,
@@ -890,7 +892,7 @@ impl FastProcessor {
         host: &mut impl AsyncHost,
     ) -> Result<(), ExecutionError> {
         self.check_extract_trace_state(
-            NodeExecutionPhase::Start(current_node_id),
+            NodeExecutionState::Start(current_node_id),
             continuation_stack,
             current_forest,
         );
@@ -1031,7 +1033,7 @@ impl FastProcessor {
         host: &mut impl AsyncHost,
     ) -> Result<(), ExecutionError> {
         self.check_extract_trace_state(
-            NodeExecutionPhase::End(node_id),
+            NodeExecutionState::End(node_id),
             continuation_stack,
             current_forest,
         );
@@ -1110,7 +1112,7 @@ impl FastProcessor {
         current_forest: &Arc<MastForest>,
     ) -> Result<(), ExecutionError> {
         self.check_extract_trace_state(
-            NodeExecutionPhase::Start(node_id),
+            NodeExecutionState::Start(node_id),
             continuation_stack,
             current_forest,
         );
@@ -1156,7 +1158,7 @@ impl FastProcessor {
             // RESPAN
             {
                 self.check_extract_trace_state(
-                    NodeExecutionPhase::Respan {
+                    NodeExecutionState::Respan {
                         node_id,
                         batch_index: batch_index_minus_1 + 1,
                     },
@@ -1189,7 +1191,7 @@ impl FastProcessor {
         }
 
         self.check_extract_trace_state(
-            NodeExecutionPhase::End(node_id),
+            NodeExecutionState::End(node_id),
             continuation_stack,
             current_forest,
         );
@@ -1261,7 +1263,7 @@ impl FastProcessor {
             // if in trace mode, check if we need to record a trace state before executing the
             // operation
             self.check_extract_trace_state(
-                NodeExecutionPhase::BasicBlock {
+                NodeExecutionState::BasicBlock {
                     node_id,
                     batch_index,
                     op_idx_in_batch: op_idx_in_batch_without_noops + num_noops_inserted_in_batch,
@@ -1317,7 +1319,7 @@ impl FastProcessor {
 
                     // If in tracing mode, check if we need to record a trace state.
                     self.check_extract_trace_state(
-                        NodeExecutionPhase::BasicBlock {
+                        NodeExecutionState::BasicBlock {
                             node_id,
                             batch_index,
                             op_idx_in_batch: op_idx_in_batch_without_noops
@@ -1352,7 +1354,7 @@ impl FastProcessor {
 
             for noop_idx in 0..num_noops_to_execute {
                 self.check_extract_trace_state(
-                    NodeExecutionPhase::BasicBlock {
+                    NodeExecutionState::BasicBlock {
                         node_id,
                         batch_index,
                         op_idx_in_batch: num_ops_in_batch + noop_idx,
@@ -1575,9 +1577,7 @@ impl FastProcessor {
     // HELPERS
     // ----------------------------------------------------------------------------------------------
 
-    /// Increments the clock by 1 for a given node execution phase.
-    ///
-    /// The `phase` parameter is associated with the current clock cycle *before* the increment.
+    /// Increments the clock by 1.
     #[inline(always)]
     fn increment_clk(&mut self) {
         self.clk += 1_u32;
@@ -1808,7 +1808,7 @@ impl FastProcessor {
     /// to the processor state.
     fn check_extract_trace_state(
         &mut self,
-        phase: NodeExecutionPhase,
+        execution_state: NodeExecutionState,
         continuation_stack: &mut ContinuationStack,
         current_forest: &Arc<MastForest>,
     ) {
@@ -1841,7 +1841,7 @@ impl FastProcessor {
                 decoder_state,
                 stack_top,
                 continuation_stack.clone(),
-                phase,
+                execution_state,
                 current_forest.clone(),
             );
         }

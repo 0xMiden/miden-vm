@@ -10,9 +10,9 @@ use miden_core::{
 use crate::{
     continuation_stack::ContinuationStack,
     decoder::block_stack::{BlockInfo, BlockStack},
-    fast::checkpoints::{
+    fast::trace_state::{
         AdviceReplay, BlockStackReplay, CoreTraceState, DecoderState, ExecutionContextSystemInfo,
-        ExternalNodeReplay, HasherReplay, MemoryReplay, NodeExecutionPhase, NodeFlags,
+        ExternalNodeReplay, HasherReplay, MemoryReplay, NodeExecutionState, NodeFlags,
         StackOverflowReplay, StackState, SystemState,
     },
     stack::OverflowTable,
@@ -25,7 +25,7 @@ struct StateSnapshot {
     decoder_state: DecoderState,
     stack: StackState,
     continuation_stack: ContinuationStack,
-    exec_phase: NodeExecutionPhase,
+    execution_state: NodeExecutionState,
     initial_mast_forest: Arc<MastForest>,
 }
 
@@ -77,7 +77,7 @@ impl CoreTraceStateBuilder {
         decoder_state: DecoderState,
         stack_top: [Felt; MIN_STACK_DEPTH],
         continuation_stack: ContinuationStack,
-        exec_phase: NodeExecutionPhase,
+        execution_state: NodeExecutionState,
         initial_mast_forest: Arc<MastForest>,
     ) {
         // If there is an ongoing snapshot, finish it
@@ -93,7 +93,7 @@ impl CoreTraceStateBuilder {
             decoder_state,
             stack: StackState::new(stack_top, stack_depth, last_overflow_addr),
             continuation_stack,
-            exec_phase,
+            execution_state,
             initial_mast_forest,
         });
     }
@@ -163,7 +163,7 @@ impl CoreTraceStateBuilder {
                 memory: memory_replay,
                 advice: advice_replay,
                 external_node_replay: external_replay,
-                exec_phase: snapshot.exec_phase,
+                execution_state: snapshot.execution_state,
                 initial_mast_forest: snapshot.initial_mast_forest,
             };
 

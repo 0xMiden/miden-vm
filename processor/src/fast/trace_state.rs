@@ -9,39 +9,6 @@ use miden_core::{
 
 use crate::{ContextId, continuation_stack::ContinuationStack};
 
-// NODE EXECUTION PHASE
-// ================================================================================================
-
-/// Specifies the execution phase when starting fragment generation.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum NodeExecutionPhase {
-    /// Resume execution within a basic block at a specific batch and operation index.
-    /// This is used when continuing execution mid-way through a basic block.
-    BasicBlock {
-        /// Node ID of the basic block being executed
-        node_id: MastNodeId,
-        /// Index of the operation batch within the basic block
-        batch_index: usize,
-        /// Index of the operation within the batch
-        op_idx_in_batch: usize,
-    },
-    /// Execute the START phase of a control flow node (JOIN, SPLIT, LOOP, etc.).
-    /// This is used when beginning execution of a control flow construct.
-    Start(MastNodeId),
-    /// Execute a RESPAN for the specified batch within the specified basic block.
-    Respan {
-        /// Node ID of the basic block being executed
-        node_id: MastNodeId,
-        /// Index of the operation batch within the basic block
-        batch_index: usize,
-    },
-    /// Execute the REPEAT phase of a Loop node.
-    LoopRepeat(MastNodeId),
-    /// Execute the END phase of a control flow node (JOIN, SPLIT, LOOP, etc.).
-    /// This is used when completing execution of a control flow construct.
-    End(MastNodeId),
-}
-
 // CORE TRACE STATE
 // ================================================================================================
 
@@ -59,9 +26,12 @@ pub struct CoreTraceState {
     pub hasher: HasherReplay,
     pub external_node_replay: ExternalNodeReplay,
     pub traversal: ContinuationStack,
-    pub exec_phase: NodeExecutionPhase,
+    pub execution_state: NodeExecutionState,
     pub initial_mast_forest: Arc<MastForest>,
 }
+
+// SYSTEM STATE
+// ================================================================================================
 
 /// The `SystemState` represents all the information needed to build one row of the System trace.
 ///
@@ -88,6 +58,9 @@ pub struct SystemState {
     pub fn_hash: Word,
 }
 
+// DECODER STATE
+// ================================================================================================
+
 /// The subset of the decoder state required to build the trace.
 #[derive(Debug)]
 pub struct DecoderState {
@@ -96,6 +69,9 @@ pub struct DecoderState {
     /// The address of the current MAST node's parent.
     pub parent_addr: Felt,
 }
+
+// STACK STATE
+// ================================================================================================
 
 /// This struct captures the state of the top 16 elements of the stack at a specific clock cycle;
 /// that is, those elements that are written directly into the trace. The stack trace consists of 19
@@ -210,6 +186,9 @@ impl StackState {
         self.last_overflow_addr = last_overflow_addr;
     }
 }
+
+// BLOCK STACK REPLAY
+// ================================================================================================
 
 /// Replay data for the block stack.
 #[derive(Debug, Default)]
@@ -354,6 +333,9 @@ pub struct ExecutionContextSystemInfo {
     pub parent_fmp: Felt,
 }
 
+// EXTERNAL NODE REPLAY
+// ================================================================================================
+
 #[derive(Debug)]
 pub struct ExternalNodeReplay {
     external_node_resolutions: VecDeque<(MastNodeId, Arc<MastForest>)>,
@@ -385,6 +367,9 @@ impl ExternalNodeReplay {
             .expect("No external node resolutions recorded")
     }
 }
+
+// MEMORY REPLAY
+// ================================================================================================
 
 /// Implements a shim for the memory chiplet, in which all elements read from memory during a given
 /// fragment are recorded by the fast processor, and replayed by the main trace fragment generators.
@@ -433,6 +418,9 @@ impl MemoryReplay {
         word
     }
 }
+
+// ADVICE REPLAY
+// ================================================================================================
 
 /// Implements a shim for the advice provider, in which all advice provider operations during a
 /// given fragment are pre-recorded by the fast processor.
@@ -492,6 +480,9 @@ impl AdviceReplay {
             .expect("No stack dword pop operations recorded")
     }
 }
+
+// HASHER REPLAY
+// ================================================================================================
 
 /// Implements a shim for the hasher chiplet, in which all hasher operations during a given
 /// fragment are pre-recorded by the fast processor.
@@ -571,6 +562,9 @@ impl HasherReplay {
         self.mrupdate_operations.pop_front().expect("No mrupdate operations recorded")
     }
 }
+
+// STACK OVERFLOW REPLAY
+// ================================================================================================
 
 /// Implements a shim for stack overflow operations, in which all overflow values and addresses
 /// during a given fragment are pre-recorded by the fast processor and replayed by the main trace
@@ -659,4 +653,45 @@ impl StackOverflowReplay {
             .pop_front()
             .expect("No overflow address operations recorded")
     }
+}
+
+// NODE EXECUTION STATE
+// ================================================================================================
+
+/// Specifies the execution state of a node when starting fragment generation.
+///
+/// Each MAST node has at least 2 different states associated with it: processing the START and END
+/// nodes (e.g. JOIN and END in the case of [miden_core::mast::JoinNode]). Some have more; for
+/// example, [miden_core::mast::BasicBlockNode] has SPAN and END, in addition to one state for each
+/// operation in the basic block. Since a trace fragment can begin at any clock cycle (determined by
+/// [super::NUM_ROWS_PER_CORE_FRAGMENT]), specifying which MAST node we're executing is
+/// insufficient; we also have to specify *at what point* during the execution of this node we are
+/// at. This is the information that this type is meant to encode.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NodeExecutionState {
+    /// Resume execution within a basic block at a specific batch and operation index.
+    /// This is used when continuing execution mid-way through a basic block.
+    BasicBlock {
+        /// Node ID of the basic block being executed
+        node_id: MastNodeId,
+        /// Index of the operation batch within the basic block
+        batch_index: usize,
+        /// Index of the operation within the batch
+        op_idx_in_batch: usize,
+    },
+    /// Execute a control flow node (JOIN, SPLIT, LOOP, etc.) from the start. This is used when
+    /// beginning execution of a control flow construct.
+    Start(MastNodeId),
+    /// Execute a RESPAN for the specified batch within the specified basic block.
+    Respan {
+        /// Node ID of the basic block being executed
+        node_id: MastNodeId,
+        /// Index of the operation batch within the basic block
+        batch_index: usize,
+    },
+    /// Execute a Loop node, starting at a REPEAT operation.
+    LoopRepeat(MastNodeId),
+    /// Execute the END phase of a control flow node (JOIN, SPLIT, LOOP, etc.).
+    /// This is used when completing execution of a control flow construct.
+    End(MastNodeId),
 }
