@@ -20,6 +20,7 @@
 - [BREAKING] Host `on_event` methods no longer receive `event_id` parameter; event ID must be read from stack position 0 (#[2068](https://github.com/0xMiden/miden-vm/issues/2068)).
 - [BREAKING] `get_stack_word` uses element-aligned indexing instead of word-aligned indexing (#[2068](https://github.com/0xMiden/miden-vm/issues/2068)).
 - [BREAKING] Implement support for `event("event_name")` in MASM (#[2068](https://github.com/0xMiden/miden-vm/issues/2068)).
+- Improved representation of `OPbatches` to include padding Noop by default, simplifying fast iteration over program instructions in the processor ([#1815](https://github.com/0xMiden/miden-vm/issues/1815)).
 
 ## 0.17.0 (2025-08-06)
 
