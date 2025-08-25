@@ -74,6 +74,16 @@ impl OpBatch {
         &self.op_counts
     }
 
+    /// Returns the end indexes of each group.
+    pub fn end_indices(&self) -> &[usize; BATCH_SIZE] {
+        // SAFETY:
+        // - indptr is an array of length BATCH_SIZE+1, so elements 1..=BATCH_SIZE form exactly
+        //   BATCH_SIZE contiguous `usize`s.
+        // - `as_ptr().add(1)` is in-bounds and properly aligned.
+        // - We immediately reborrow as an immutable reference tied to `&self`.
+        unsafe { &*(self.indptr.as_ptr().add(1) as *const [usize; BATCH_SIZE]) }
+    }
+
     /// Returns the number of groups in this batch.
     pub fn num_groups(&self) -> usize {
         self.num_groups
@@ -318,6 +328,24 @@ mod accumulator_tests {
                     }
 
                 }
+            }
+        }
+
+        // Test correspondence between indptr and op_counts (on decorator-free representation)
+        #[test]
+        fn test_indptr_op_counts(ops in op_non_control_sequence_strategy(30)) {
+            let mut acc = OpBatchAccumulator::new();
+            for op in ops {
+                if acc.can_accept_op(op){
+                    acc.add_op(op);
+                }
+            }
+            let batch = acc.into_batch();
+            let mut pos = 0;
+            for group_idx in 0..batch.num_groups{
+                assert_eq!(batch.indptr[group_idx], pos);
+                assert_eq!(batch.indptr[group_idx + 1], pos + batch.op_counts[group_idx]);
+                pos += batch.op_counts[group_idx];
             }
         }
     }
