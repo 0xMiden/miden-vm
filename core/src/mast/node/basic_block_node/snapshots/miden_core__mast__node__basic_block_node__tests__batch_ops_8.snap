@@ -15,20 +15,31 @@ expression: batches
             Push(
                 1,
             ),
+            Noop,
             Push(
                 2,
             ),
         ],
         indptr: [
             0,
-            8,
-            8,
             9,
             9,
+            10,
+            10,
             0,
             0,
             0,
             0,
+        ],
+        padding: [
+            true,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
         ],
         groups: [
             51383589178741154,

@@ -17,6 +17,8 @@ expression: "build_group_chunks(&batches).collect::<Vec<_>>()"
         Push(
             11,
         ),
+        Noop,
     ],
+    [],
     [],
 ]

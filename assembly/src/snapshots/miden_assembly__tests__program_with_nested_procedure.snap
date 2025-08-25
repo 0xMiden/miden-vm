@@ -12,6 +12,7 @@ begin
         mul
         push(11)
         push(5)
+        noop
         push(3)
         push(7)
         mul

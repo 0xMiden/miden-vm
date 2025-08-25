@@ -17,6 +17,8 @@ pub struct OpBatch {
     /// The array maintains the invariant that the i-th group (i <= BATCH_SIZE-1) is at
     /// `self.ops[self.indptr[i]..self.indptr[i+1]]`.
     pub(super) indptr: [usize; Self::BATCH_SIZE_PLUS_ONE],
+    /// An array of bits representing whether a group had undergone padding
+    pub(super) padding: [bool; BATCH_SIZE],
     /// Values of operation groups, including immediate values.
     pub(super) groups: [Felt; BATCH_SIZE],
     /// Number of non-decorator groups in this batch.
@@ -30,12 +32,23 @@ impl OpBatch {
     const BATCH_SIZE_PLUS_ONE: usize = BATCH_SIZE + 1;
 
     /// Returns a list of operations contained in this batch.
+    pub fn ops(&self) -> &[Operation] {
+        &self.ops
+    }
+
+    /// Returns a list of operations contained in this batch, without any decorators.
     ///
     /// Note: the processor will insert NOOP operations to fill out the groups, so the true number
     /// of operations in the batch may be larger than the number of operations reported by this
     /// method.
-    pub fn ops(&self) -> &[Operation] {
-        &self.ops
+    pub fn raw_ops(&self) -> impl Iterator<Item = &Operation> {
+        assert!(self.num_groups == 0 || self.indptr[self.num_groups] != 0, "{:?}", self);
+        (0..self.num_groups).flat_map(|group_idx| {
+            let padded = self.padding[group_idx];
+            let start_idx = self.indptr[group_idx];
+            let end_idx = self.indptr[group_idx + 1] - usize::from(padded);
+            self.ops[start_idx..end_idx].iter()
+        })
     }
 
     /// Returns a list of operation groups contained in this batch.
@@ -84,6 +97,9 @@ pub(super) struct OpBatchAccumulator {
     /// The array maintains the invariant that the i-th group (i <= BATCH_SIZE-1) is at
     /// `self.ops[self.indptr[i]..self.indptr[i+1]]`.
     indptr: [usize; OpBatch::BATCH_SIZE_PLUS_ONE],
+    /// An array of bits representing whether a group had undergone padding with a
+    /// decorator noop at the end of the group.
+    padding: [bool; BATCH_SIZE],
     /// Values of operation groups, including immediate values.
     groups: [Felt; BATCH_SIZE],
     /// Value of the currently active op group.
@@ -106,6 +122,7 @@ impl OpBatchAccumulator {
         Self {
             ops: Vec::new(),
             indptr: [0; OpBatch::BATCH_SIZE_PLUS_ONE],
+            padding: [false; BATCH_SIZE],
             groups: [ZERO; BATCH_SIZE],
             group: 0,
             op_idx: 0,
@@ -172,14 +189,18 @@ impl OpBatchAccumulator {
         }
 
         // add the opcode to the group and increment the op index pointer
-        let opcode = op.op_code() as u64;
-        self.group |= opcode << (Operation::OP_BITS * self.op_idx);
-        self.ops.push(op);
-        self.op_idx += 1;
+        self.push_op(op);
     }
 
     /// Convert the accumulator into an [OpBatch].
     pub fn into_batch(mut self) -> OpBatch {
+        // Pad to a power of two
+        let num_groups = self.next_group_idx;
+        let target_num_groups = num_groups.next_power_of_two();
+        for _ in num_groups..target_num_groups {
+            self.finalize_op_group();
+        }
+
         // make sure the last group gets added to the group array; we also check the op_idx to
         // handle the case when a group contains a single NOOP operation.
         if self.group != 0 || self.op_idx != 0 {
@@ -190,6 +211,7 @@ impl OpBatchAccumulator {
         OpBatch {
             ops: self.ops,
             indptr: self.indptr,
+            padding: self.padding,
             groups: self.groups,
             num_groups: self.next_group_idx,
         }
@@ -201,6 +223,16 @@ impl OpBatchAccumulator {
     /// Saves the current group into the group array, advances current and next group pointers,
     /// and resets group content.
     pub(super) fn finalize_op_group(&mut self) {
+        // we pad if we are looking at an empty group, or one finishing in an op carrying an
+        // immediate
+        if self.op_idx == 0 || self.ops.last().is_some_and(|op| op.imm_value().is_some()) {
+            debug_assert!(
+                self.op_idx < GROUP_SIZE,
+                "invariant violated: an immediate can't end a group"
+            );
+            self.push_op(Operation::Noop);
+            self.padding[self.group_idx] = true;
+        }
         self.groups[self.group_idx] = Felt::new(self.group);
         self.finalize_indptr();
 
@@ -224,6 +256,15 @@ impl OpBatchAccumulator {
             self.indptr[uninit_group_idx] = self.ops.len();
             uninit_group_idx -= 1;
         }
+    }
+
+    /// Add the opcode to the group and increment the op index pointer
+    #[inline]
+    fn push_op(&mut self, op: Operation) {
+        let opcode = op.op_code() as u64;
+        self.group |= opcode << (Operation::OP_BITS * self.op_idx);
+        self.ops.push(op);
+        self.op_idx += 1;
     }
 }
 
@@ -263,8 +304,10 @@ mod accumulator_tests {
                 let init_group = acc.group;
                 if acc.can_accept_op(op){
                     acc.add_op(op);
-                    // the op was stored
-                    assert_eq!(acc.ops.len(), init_len + 1);
+                    // the op was stored, perhaps with padding
+                    assert!(acc.ops.len() > init_len);
+                    // we pad by almost one per batch
+                    assert!(acc.ops.len() <= init_len + 2);
                     // .. at the end of ops
                     assert_eq!(*acc.ops.last().unwrap(), op);
                     // we never edit older ops, older op counts, or older groups

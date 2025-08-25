@@ -437,9 +437,11 @@ proptest! {
             assert_eq!(batch.num_groups.next_power_of_two(), batch.num_groups);
         }
 
-        // The total number of operations should be preserved (NOOPs are added implicitly but not counted in ops.len())
-        let total_ops_from_batches: usize = batches.iter().map(|batch| batch.ops.len()).sum();
-        assert!(total_ops_from_batches == ops.len(), "Total operations from batches should be == input operations");
+        // The total number of operations should be preserved, modulo padding
+        let total_ops_from_batches: usize = batches.iter().map(|batch| {
+            batch.ops.len() - batch.padding.iter().filter(|b| **b).count()
+        }).sum();
+        assert_eq!(total_ops_from_batches, ops.len(), "Total operations from batches should be == input operations");
 
         // Verify that operation counts in each batch don't exceed group limits
         for batch in &batches {
