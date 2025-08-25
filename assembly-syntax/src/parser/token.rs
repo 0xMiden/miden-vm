@@ -296,6 +296,7 @@ pub enum Token<'input> {
     Procref,
     Push,
     Repeat,
+    Range,
     Sdepth,
     Stack,
     Sub,
@@ -346,6 +347,7 @@ pub enum Token<'input> {
     U32WrappingSub,
     U32Xor,
     While,
+    Word,
     Xor,
     At,
     Bang,
@@ -535,6 +537,7 @@ impl fmt::Display for Token<'_> {
             Token::U32WrappingSub => write!(f, "u32wrapping_sub"),
             Token::U32Xor => write!(f, "u32xor"),
             Token::While => write!(f, "while"),
+            Token::Word => write!(f, "word"),
             Token::Xor => write!(f, "xor"),
             Token::At => write!(f, "@"),
             Token::Bang => write!(f, "!"),
@@ -552,6 +555,7 @@ impl fmt::Display for Token<'_> {
             Token::Rparen => write!(f, ")"),
             Token::Rbracket => write!(f, "]"),
             Token::Rstab => write!(f, "->"),
+            Token::Range => write!(f, ".."),
             Token::DocComment(DocumentationType::Module(_)) => f.write_str("module doc"),
             Token::DocComment(DocumentationType::Form(_)) => f.write_str("doc comment"),
             Token::HexValue(_) => f.write_str("hex-encoded value"),
@@ -880,6 +884,7 @@ impl<'input> Token<'input> {
         ("u32wrapping_sub", Token::U32WrappingSub),
         ("u32xor", Token::U32Xor),
         ("while", Token::While),
+        ("word", Token::Word),
         ("xor", Token::Xor),
     ];
 
@@ -966,6 +971,7 @@ impl<'input> Token<'input> {
                     ")" => Some(Token::Rparen),
                     "]" => Some(Token::Rbracket),
                     "->" => Some(Token::Rstab),
+                    ".." => Some(Token::Range),
                     "end of file" => Some(Token::Eof),
                     "module doc" => {
                         Some(Token::DocComment(DocumentationType::Module(String::new())))

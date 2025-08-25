@@ -228,7 +228,7 @@ fn test_move_sig_to_adv_stack() {
     end
     ";
 
-    let public_key = secret_key.public_key().into();
+    let public_key = secret_key.public_key().to_commitment();
     let secret_key_bytes = secret_key.to_bytes();
 
     let advice_map: Vec<(Word, Vec<Felt>)> = {
@@ -320,7 +320,7 @@ fn generate_test(
     "
     );
 
-    let pk: Word = sk.public_key().into();
+    let pk: Word = sk.public_key().to_commitment();
     let sk_bytes = sk.to_bytes();
 
     let to_adv_map = sk_bytes.iter().map(|a| Felt::new(*a as u64)).collect::<Vec<Felt>>();

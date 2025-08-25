@@ -116,10 +116,6 @@ where
     D: DebugHandler,
     S: SourceManager,
 {
-    fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>> {
-        self.store.get(node_digest)
-    }
-
     fn get_label_and_source_file(
         &self,
         location: &Location,
@@ -154,6 +150,10 @@ where
     D: DebugHandler,
     S: SourceManager,
 {
+    fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>> {
+        self.store.get(node_digest)
+    }
+
     fn on_event(
         &mut self,
         process: &ProcessState,
@@ -178,6 +178,11 @@ where
     D: DebugHandler,
     S: SourceManagerSync,
 {
+    fn get_mast_forest(&self, node_digest: &Word) -> impl FutureMaybeSend<Option<Arc<MastForest>>> {
+        let result = <Self as SyncHost>::get_mast_forest(self, node_digest);
+        async move { result }
+    }
+
     fn on_event(
         &mut self,
         process: &ProcessState<'_>,

@@ -894,7 +894,7 @@ fn test_diagnostic_not_binary_value_binary_ops() {
     );
 }
 
-// NotU32Value
+// NotU32Values
 // -------------------------------------------------------------------------------------------------
 
 #[test]
@@ -910,7 +910,7 @@ fn test_diagnostic_not_u32_value() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "operation expected a u32 value, but got 4294967296",
+        "operation expected u32 values, but got values: [4294967296]",
         regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
         " 3 |             u32and trace.2",
@@ -930,7 +930,7 @@ fn test_diagnostic_not_u32_value() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "operation expected a u32 value, but got 4294967296",
+        "operation expected u32 values, but got values: [4294967296]",
         regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
         " 3 |             u32overflowing_add3 trace.2",
