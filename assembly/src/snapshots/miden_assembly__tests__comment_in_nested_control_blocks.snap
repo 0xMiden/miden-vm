@@ -15,7 +15,7 @@ begin
                 end
             else
                 join
-                    basic_block mul push(8) push(8) end
+                    basic_block mul push(8) push(8) noop end
                     if.true
                         basic_block mul end
                     else

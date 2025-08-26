@@ -5,7 +5,7 @@ expression: program
 begin
     join
         join
-            basic_block push(2) push(3) end
+            basic_block push(2) push(3) noop end
             if.true
                 join
                     basic_block add end
@@ -15,7 +15,7 @@ begin
                 end
             else
                 join
-                    basic_block mul push(8) push(8) end
+                    basic_block mul push(8) push(8) noop end
                     if.true
                         basic_block mul end
                     else

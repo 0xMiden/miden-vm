@@ -350,7 +350,7 @@ impl MastForestBuilder {
                     decorators.push((op_idx + operations.len(), decorator));
                 }
                 for batch in basic_block_node.op_batches() {
-                    operations.extend_from_slice(batch.ops());
+                    operations.extend(batch.raw_ops());
                 }
             } else {
                 // if we don't want to merge this block, we flush the buffer of operations into a
