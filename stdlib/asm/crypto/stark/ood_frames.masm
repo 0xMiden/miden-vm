@@ -22,6 +22,8 @@ use.std::crypto::stark::random_coin
 #!    composition at the the out-of-domain point gz.
 #! 4. alpha is the randomness used in order to build the DEEP polynomial.
 #!
+#! Q^z(alpha) and Q^gz(alpha) is then stored, as a word, at OOD_FIXED_TERM_HORNER_EVALS_PTR
+#!
 #! Inputs:  []
 #! Outputs: []
 export.load_and_horner_eval_ood_frames
@@ -31,6 +33,8 @@ export.load_and_horner_eval_ood_frames
     # queries. Although this challenge is generated only after all the OOD evaluations are received
     # by the verifier, we use non-determinism to generate it before doing so. This is done so that
     # we can hash, memory store and Horner evaluate in parallel.
+    # The check for the correctness of the use of this non-determinism is checked in
+    # `std::crypto::stark::random_coin::generate_deep_composition_random_coefficients`
     
     ## Load the random challenge non-deterministically
     adv_push.2

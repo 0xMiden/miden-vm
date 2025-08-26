@@ -121,7 +121,7 @@ proc.process_main_segment_execution_trace
     #=>[LEAF_VALUE, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr]
 
     # Load the values of the main segment of the execution trace at the current query. We also
-    # compute their hashing and the value of their random linear combination using powers of a
+    # compute their hash and the value of their random linear combination using powers of a
     # single random value alpha.
 
     # Load the 80 columns in 10 batches of 8 base field elements

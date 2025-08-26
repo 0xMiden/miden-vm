@@ -136,7 +136,7 @@ end
 #! Stores digests of dynamically executed procedures.
 #!
 #! Input: [D3, D2, D1, D0, ...]
-#! Output: [C, ...]
+#! Output: [...]
 export.store_dynamically_executed_procedures
     exec.constants::get_procedure_digest_process_public_inputs_ptr mem_storew dropw
     exec.constants::get_procedure_digest_process_row_ood_evaluations_ptr mem_storew dropw
