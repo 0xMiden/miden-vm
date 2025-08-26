@@ -103,12 +103,12 @@ pub trait SyncHost: BaseHost {
     /// this digest could not be found in this host.
     fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>>;
 
-    /// Handles the event emitted from the VM.
-    fn on_event(
-        &mut self,
-        process: &ProcessState,
-        event_id: u32,
-    ) -> Result<Vec<AdviceMutation>, EventError>;
+    /// Invoked when the VM encounters an `EMIT` operation.
+    ///
+    /// The event ID is available at the top of the stack (position 0) when this handler is called.
+    /// This allows the handler to access both the event ID and any additional context data that
+    /// may have been pushed onto the stack prior to the emit operation.
+    fn on_event(&mut self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError>;
 }
 
 // ASYNC HOST trait
@@ -128,10 +128,13 @@ pub trait AsyncHost: BaseHost {
 
     /// Handles the event emitted from the VM and provides advice mutations to be applied to
     /// the advice provider.
+    ///
+    /// The event ID is available at the top of the stack (position 0) when this handler is called.
+    /// This allows the handler to access both the event ID and any additional context data that
+    /// may have been pushed onto the stack prior to the emit operation.
     fn on_event(
         &mut self,
         process: &ProcessState<'_>,
-        event_id: u32,
     ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>>;
 }
 

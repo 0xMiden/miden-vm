@@ -215,9 +215,9 @@ impl From<&ProcessState<'_>> for ProcessStateSnapshot {
             stack_state: state.get_stack_state(),
             stack_words: [
                 state.get_stack_word(0),
-                state.get_stack_word(1),
-                state.get_stack_word(2),
-                state.get_stack_word(3),
+                state.get_stack_word(4),
+                state.get_stack_word(8),
+                state.get_stack_word(12),
             ],
             mem_state: state.get_mem_state(state.ctx()),
         }
@@ -279,11 +279,7 @@ where
         self.store.get(node_digest)
     }
 
-    fn on_event(
-        &mut self,
-        _process: &ProcessState<'_>,
-        _event_id: u32,
-    ) -> Result<Vec<AdviceMutation>, EventError> {
+    fn on_event(&mut self, _process: &ProcessState<'_>) -> Result<Vec<AdviceMutation>, EventError> {
         Ok(Vec::new())
     }
 }
@@ -303,9 +299,7 @@ where
     fn on_event(
         &mut self,
         _process: &ProcessState<'_>,
-        _event_id: u32,
     ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>> {
-        let _ = (_process, _event_id);
         async move { Ok(Vec::new()) }
     }
 }

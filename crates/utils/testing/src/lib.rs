@@ -503,18 +503,14 @@ impl Test {
         let fast_process = FastProcessor::new_with_advice_inputs(&stack_inputs, advice_inputs);
         let fast_result = fast_process.execute_sync(&program, &mut host);
 
-        match slow_result {
-            Ok(slow_stack_outputs) => {
-                let fast_stack_outputs = fast_result.unwrap();
+        match (fast_result, slow_result) {
+            (Ok(fast_stack_outputs), Ok(slow_stack_outputs)) => {
                 assert_eq!(
                     slow_stack_outputs, &fast_stack_outputs,
                     "stack outputs do not match between slow and fast processors"
                 );
             },
-            Err(slow_err) => {
-                assert!(fast_result.is_err(), "expected error, but got success");
-                let fast_err = fast_result.unwrap_err();
-
+            (Err(fast_err), Err(slow_err)) => {
                 // assert that diagnostics match
                 let slow_diagnostic = format!("{}", PrintDiagnostic::new_without_color(slow_err));
                 let fast_diagnostic = format!("{}", PrintDiagnostic::new_without_color(fast_err));
@@ -525,6 +521,15 @@ impl Test {
                     "diagnostics do not match between slow and fast processors:\nSlow: {}\nFast: {}",
                     slow_diagnostic, fast_diagnostic
                 );
+            },
+            (Ok(_), Err(slow_err)) => {
+                let slow_diagnostic = format!("{}", PrintDiagnostic::new_without_color(slow_err));
+                panic!(
+                    "expected error, but fast processor succeeded. slow error:\n{slow_diagnostic}"
+                );
+            },
+            (Err(fast_err), Ok(_)) => {
+                panic!("expected success, but fast processor failed. fast error:\n{fast_err}");
             },
         }
     }

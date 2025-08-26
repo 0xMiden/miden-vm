@@ -16,7 +16,7 @@ use miden_air::trace::{
 pub use miden_air::{ExecutionOptions, ExecutionOptionsError, RowIndex};
 pub use miden_core::{
     AssemblyOp, EMPTY_WORD, Felt, Kernel, ONE, Operation, Program, ProgramInfo, QuadExtension,
-    StackInputs, StackOutputs, Word, ZERO,
+    StackInputs, StackOutputs, WORD_SIZE, Word, ZERO,
     crypto::merkle::SMT_DEPTH,
     errors::InputError,
     mast::{MastForest, MastNode, MastNodeId},
@@ -24,7 +24,7 @@ pub use miden_core::{
     utils::DeserializationError,
 };
 use miden_core::{
-    Decorator, DecoratorIterator, FieldElement, WORD_SIZE,
+    Decorator, DecoratorIterator, FieldElement,
     mast::{
         BasicBlockNode, CallNode, DynNode, ExternalNode, JoinNode, LoopNode, OP_GROUP_SIZE,
         OpBatch, SplitNode,
@@ -842,6 +842,8 @@ impl<'a> ProcessState<'a> {
     }
 
     /// Returns the value located at the specified position on the stack at the current clock cycle.
+    ///
+    /// This method can access elements beyond the top 16 positions by using the overflow table.
     #[inline(always)]
     pub fn get_stack_item(&self, pos: usize) -> Felt {
         match self {
@@ -850,21 +852,23 @@ impl<'a> ProcessState<'a> {
         }
     }
 
-    /// Returns a word located at the specified word index on the stack.
+    /// Returns a word starting at the specified element index on the stack.
     ///
-    /// Specifically, word 0 is defined by the first 4 elements of the stack, word 1 is defined
-    /// by the next 4 elements etc. Since the top of the stack contains 4 word, the highest valid
-    /// word index is 3.
+    /// The word is formed by taking 4 consecutive elements starting from the specified index.
+    /// For example, start_idx=0 creates a word from stack elements 0-3, start_idx=1 creates
+    /// a word from elements 1-4, etc.
     ///
-    /// The words are created in reverse order. For example, for word 0 the top element of the
-    /// stack will be at the last position in the word.
+    /// The words are created in reverse order. For a word starting at index N, stack element
+    /// N+3 will be at position 0 of the word, N+2 at position 1, N+1 at position 2, and N
+    /// at position 3.
     ///
+    /// This method can access elements beyond the top 16 positions by using the overflow table.
     /// Creating a word does not change the state of the stack.
     #[inline(always)]
-    pub fn get_stack_word(&self, word_idx: usize) -> Word {
+    pub fn get_stack_word(&self, start_idx: usize) -> Word {
         match self {
-            ProcessState::Slow(state) => state.stack.get_word(word_idx),
-            ProcessState::Fast(state) => state.processor.stack_get_word(word_idx * WORD_SIZE),
+            ProcessState::Slow(state) => state.stack.get_word(start_idx),
+            ProcessState::Fast(state) => state.processor.stack_get_word(start_idx),
         }
     }
 

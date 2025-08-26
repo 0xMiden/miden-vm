@@ -178,7 +178,7 @@ Putting these operations into a group with flag degree $6$ is important for two 
 This group contains operations which require constraints with degree up to $3$. All $7$ operation bits are used for these flags. The extra $e_0$ column is used for degree reduction of the three high-degree bits.
 
 | Operation     | Opcode value | Binary encoding |            Operation group             | Flag degree |
-| ------------- | :----------: | :-------------: | :------------------------------------: | :---------: |
+|---------------|:------------:|:---------------:|:--------------------------------------:|:-----------:|
 | `HPERM`       |     $80$     |   `101_0000`    |     [Crypto ops](./crypto_ops.md)      |     $5$     |
 | `MPVERIFY`    |     $81$     |   `101_0001`    |     [Crypto ops](./crypto_ops.md)      |     $5$     |
 | `PIPE`        |     $82$     |   `101_0010`    |         [I/O ops](./io_ops.md)         |     $5$     |
@@ -300,7 +300,7 @@ $$
 The immediate value flag $f_{imm}$ is set to 1 when an operation has an immediate value, and 0 otherwise:
 
 $$
-f_{imm} = f_{push} + f_{emit} \text{ | degree} = 4
+f_{imm} = f_{push} \text{ | degree} = 5
 $$
 
 Note that the `ASSERT`, `MPVERIFY` and other operations have immediate values too. However, these immediate values are not included in the MAST digest, and hence are not considered for the $f_{imm}$ flag.

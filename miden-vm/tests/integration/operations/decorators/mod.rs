@@ -57,11 +57,8 @@ impl SyncHost for TestHost {
         None
     }
 
-    fn on_event(
-        &mut self,
-        _process: &ProcessState,
-        event_id: u32,
-    ) -> Result<Vec<AdviceMutation>, EventError> {
+    fn on_event(&mut self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
+        let event_id = process.get_stack_item(0).as_int().try_into().unwrap();
         self.event_handler.push(event_id);
         Ok(Vec::new())
     }
@@ -78,9 +75,9 @@ impl AsyncHost for TestHost {
     #[allow(clippy::manual_async_fn)]
     fn on_event(
         &mut self,
-        _process: &ProcessState<'_>,
-        event_id: u32,
+        process: &ProcessState<'_>,
     ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>> {
+        let event_id = process.get_stack_item(0).as_int().try_into().unwrap();
         self.event_handler.push(event_id);
         async move { Ok(Vec::new()) }
     }
