@@ -203,6 +203,7 @@ extern {
         "u32xor" => Token::U32Xor,
         "while" => Token::While,
         "xor" => Token::Xor,
+        "word" => Token::Word,
         EOF => Token::Eof,
         bare_ident => Token::Ident(<&'input str>),
         bin_value => Token::BinValue(<BinEncodedValue>),
@@ -1578,6 +1579,16 @@ MaybeQualifiedProcedurePath: InvocationTarget = {
 
 #[inline]
 BareIdent: Ident = {
+    <l:@L> "word" <r:@R> => {
+        let name = interned.get("word").cloned().unwrap_or_else(|| {
+            let name = Arc::<str>::from("word".to_string().into_boxed_str());
+            interned.insert(name.clone());
+            name
+        });
+        let span = span!(source_file.id(), l, r);
+        Ident::from_raw_parts(Span::new(span, name))
+    },
+
     <l:@L> <name:bare_ident> <r:@R> =>? {
         let name = interned.get(name).cloned().unwrap_or_else(|| {
             let name = Arc::<str>::from(name.to_string().into_boxed_str());
@@ -1813,6 +1824,11 @@ Opcode: &'static str = {
 // ================================================================================================
 
 ConstantExpr: ConstantExpr = {
+    <l:@L> "word" "(" <value:string> ")" <r:@R> => {
+        let span = span!(source_file.id(), l, r);
+        ConstantExpr::Hash(HashKind::Word, Ident::from_raw_parts(Span::new(span, value.into())))
+    },
+
     <l:@L> <x:ConstantExpr> "+" <y:ConstantExpr100> <r:@R> =>? {
         let expr = ConstantExpr::BinaryOp {  span: span!(source_file.id(), l, r), op: ConstantOp::Add, lhs: Box::new(x), rhs: Box::new(y) };
         expr.try_fold().map_err(|error| ParseError::User { error })
@@ -1868,10 +1884,10 @@ Term: ConstantExpr = {
 
     <l:@L> <value:IntValue> <r:@R> =>? {
         Ok(match value {
-            IntValue::U8(v) => ConstantExpr::Literal(Span::new(span!(source_file.id(), l, r), Felt::new(v as u64))),
-            IntValue::U16(v) => ConstantExpr::Literal(Span::new(span!(source_file.id(), l, r), Felt::new(v as u64))),
-            IntValue::U32(v) => ConstantExpr::Literal(Span::new(span!(source_file.id(), l, r), Felt::new(v as u64))),
-            IntValue::Felt(v) => ConstantExpr::Literal(Span::new(span!(source_file.id(), l, r), v)),
+            IntValue::U8(v) => ConstantExpr::Felt(Span::new(span!(source_file.id(), l, r), Felt::new(v as u64))),
+            IntValue::U16(v) => ConstantExpr::Felt(Span::new(span!(source_file.id(), l, r), Felt::new(v as u64))),
+            IntValue::U32(v) => ConstantExpr::Felt(Span::new(span!(source_file.id(), l, r), Felt::new(v as u64))),
+            IntValue::Felt(v) => ConstantExpr::Felt(Span::new(span!(source_file.id(), l, r), v)),
             IntValue::Word(v) => ConstantExpr::Word(Span::new(span!(source_file.id(), l, r), v))
         })
     },

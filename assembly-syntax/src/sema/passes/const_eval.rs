@@ -1,12 +1,13 @@
 use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
+use miden_core::utils::hash_string_to_word;
 use miden_debug_types::{Span, Spanned};
 
 use crate::{
     Felt,
     ast::*,
-    parser::IntValue,
+    parser::{IntValue, WordValue},
     sema::{AnalysisContext, SemanticAnalysisError},
 };
 
@@ -31,7 +32,7 @@ impl ConstEvalVisitor<'_> {
             Immediate::Constant(name) => {
                 let span = name.span();
                 match self.analyzer.get_constant(name) {
-                    Ok(ConstantExpr::Literal(value)) => match T::try_from(value.as_int()) {
+                    Ok(ConstantExpr::Felt(value)) => match T::try_from(value.as_int()) {
                         Ok(value) => {
                             *imm = Immediate::Value(Span::new(span, value));
                         },
@@ -86,7 +87,7 @@ impl VisitMut for ConstEvalVisitor<'_> {
             Immediate::Constant(name) => {
                 let span = name.span();
                 match self.analyzer.get_constant(name) {
-                    Ok(ConstantExpr::Literal(value)) => {
+                    Ok(ConstantExpr::Felt(value)) => {
                         *imm = Immediate::Value(Span::new(span, *value.inner()));
                     },
                     Err(error) => {
@@ -105,11 +106,20 @@ impl VisitMut for ConstEvalVisitor<'_> {
             Immediate::Constant(name) => {
                 let span = name.span();
                 match self.analyzer.get_constant(name) {
-                    Ok(ConstantExpr::Literal(value)) => {
+                    Ok(ConstantExpr::Felt(value)) => {
                         *imm = Immediate::Value(Span::new(span, IntValue::Felt(*value.inner())));
                     },
                     Ok(ConstantExpr::Word(value)) => {
                         *imm = Immediate::Value(Span::new(span, IntValue::Word(*value.inner())));
+                    },
+                    Ok(ConstantExpr::Hash(hash_kind, string)) => match hash_kind {
+                        HashKind::Word => {
+                            let hash_word = hash_string_to_word(string.as_str());
+                            *imm = Immediate::Value(Span::new(
+                                span,
+                                IntValue::Word(WordValue(*hash_word)),
+                            ));
+                        },
                     },
                     Err(error) => {
                         self.analyzer.error(error);

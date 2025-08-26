@@ -9,7 +9,7 @@ use miden_assembly_syntax::{
 use miden_core::{
     Operation, Program, Word, assert_matches,
     mast::{MastNode, MastNodeId},
-    utils::{Deserializable, Serializable},
+    utils::{Deserializable, Serializable, hash_string_to_word},
 };
 use miden_mast_package::{MastArtifact, MastForest, Package, PackageExport, PackageManifest};
 use proptest::{
@@ -1213,6 +1213,44 @@ fn const_conversion_failed_to_u32() -> TestResult {
         "5 |     end",
         "  `----"
     );
+    Ok(())
+}
+
+#[test]
+fn const_word_from_string() -> TestResult {
+    let context = TestContext::default();
+    let sample_source_string = "lorem ipsum";
+    let expected_hash = hash_string_to_word(sample_source_string);
+
+    let source = source_file!(
+        &context,
+        format!(
+            r#"
+    const.SAMPLE_WORD=word("{sample_source_string}")
+
+    begin
+        push.SAMPLE_WORD
+    end
+    "#
+        )
+    );
+    let program = context.assemble(source)?;
+
+    let expected_program = format!(
+        "\
+begin
+    basic_block
+        push({})
+        push({})
+        push({})
+        push({})
+    end
+end",
+        expected_hash[0], expected_hash[1], expected_hash[2], expected_hash[3]
+    );
+
+    assert_eq!(expected_program, program.to_string());
+
     Ok(())
 }
 
