@@ -120,3 +120,9 @@ impl<'a> Iterator for DecoratorIterator<'a> {
         }
     }
 }
+
+impl<'a> ExactSizeIterator for DecoratorIterator<'a> {
+    fn len(&self) -> usize {
+        self.decorators.len() - self.idx
+    }
+}

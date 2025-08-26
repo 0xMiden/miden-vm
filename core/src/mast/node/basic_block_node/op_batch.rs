@@ -69,6 +69,20 @@ impl OpBatch {
         &self.groups
     }
 
+    /// Returns a list of indexes in the ops array, marking the beginning and end of each group.
+    ///
+    /// The array maintains the invariant that the i-th group (i <= BATCH_SIZE-1) is at
+    /// `self.ops[self.indptr[i]..self.indptr[i+1]]`.
+    pub fn indptr(&self) -> &[usize; Self::BATCH_SIZE_PLUS_ONE] {
+        &self.indptr
+    }
+
+    /// Returns a list of flags marking whether each group of the batch contains a final padding
+    /// Noop
+    pub fn padding(&self) -> &[bool; BATCH_SIZE] {
+        &self.padding
+    }
+
     /// Returns sequences of operations for each group in this batch
     ///
     /// By convention, groups carrying immediate values are empty in this representation
