@@ -129,10 +129,10 @@ impl EventHandlerRegistry {
         id: Felt,
         process: &ProcessState,
     ) -> Result<Option<Vec<AdviceMutation>>, EventError> {
-        if let Ok(id) = id.as_int().try_into() {
-            if let Some(handler) = self.handlers.get(&id) {
-                return handler.on_event(process).map(Some);
-            }
+        if let Ok(id) = id.as_int().try_into()
+            && let Some(handler) = self.handlers.get(&id)
+        {
+            return handler.on_event(process).map(Some);
         }
 
         Ok(None)
