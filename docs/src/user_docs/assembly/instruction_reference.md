@@ -194,12 +194,13 @@ Instructions for moving data between the stack and other sources like program co
 
 *Insert into Advice Map:*
 
-| Instruction         | Stack Input        | Stack Output      | Notes                                                                                                                      |
-| ------------------- | ------------------ | ----------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `adv.insert_mem`    | `[K, a, b, ... ]`  | `[K, a, b, ... ]` | `advice_map[K] <- mem[a..b]`.                                                                                              |
-| `adv.insert_hdword` | `[B, A, ... ]`     | `[B, A, ... ]`    | `K <- hash(A \|\| B, domain=0)`. `advice_map[K] <- [A,B]`.                                                                  |
-| `adv.insert_hdword_d` | `[B, A, d, ... ]`| `[B, A, d, ... ]` | `K <- hash(A \|\| B, domain=d)`. `advice_map[K] <- [A,B]`.                                                                  |
-| `adv.insert_hperm`  | `[B, A, C, ...]`   | `[B, A, C, ...]`  | `K <- permute(C,A,B).digest`. `advice_map[K] <- [A,B]`.                                                                   |
+| Instruction           | Stack Input          | Stack Output         | Notes                                                                                    |
+| --------------------- | -------------------- | -------------------- | ---------------------------------------------------------------------------------------- |
+| `adv.insert_mem`      | `[K, a, b, ... ]`    | `[K, a, b, ... ]`    | `advice_map[K] <- mem[a..b]`.                                                            |
+| `adv.insert_hdword`   | `[B, A, ... ]`       | `[B, A, ... ]`       | `K <- hash(A \|\| B, domain=0)`. `advice_map[K] <- [A,B]`.                               |
+| `adv.insert_hdword_d` | `[B, A, d, ... ]`    | `[B, A, d, ... ]`    | `K <- hash(A \|\| B, domain=d)`. `advice_map[K] <- [A,B]`.                               |
+| `adv.insert_hqword`   | `[D, C, B, A, ... ]` | `[D, C, B, A, ... ]` | `K <- hash(hash(hash(A \|\| B) \|\| C) \|\| D), domain=0`. `advice_map[K] <- [A,B,C,D]`. |
+| `adv.insert_hperm`    | `[B, A, C, ...]`     | `[B, A, C, ...]`     | `K <- permute(C,A,B).digest`. `advice_map[K] <- [A,B]`.                                  |
 
 ### Random Access Memory
 

@@ -52,6 +52,7 @@ extern {
         "adv_map" => Token::AdvMap,
         "insert_hdword" => Token::InsertHdword,
         "insert_hdword_d" => Token::InsertHdwordWithDomain,
+        "insert_hqword" => Token::InsertHqword,
         "insert_hperm" => Token::InsertHperm,
         "insert_mem" => Token::InsertMem,
         "adv_loadw" => Token::AdvLoadw,
@@ -695,6 +696,7 @@ Inst: Instruction = {
 SystemEvent: Instruction = {
     "adv" "." "insert_hdword" => Instruction::SysEvent(SystemEventNode::InsertHdword),
     "adv" "." "insert_hdword_d" => Instruction::SysEvent(SystemEventNode::InsertHdwordWithDomain),
+    "adv" "." "insert_hqword" => Instruction::SysEvent(SystemEventNode::InsertHqword),
     "adv" "." "insert_hperm" => Instruction::SysEvent(SystemEventNode::InsertHperm),
     "adv" "." "insert_mem" => Instruction::SysEvent(SystemEventNode::InsertMem),
     "adv" "." "push_mapval" => Instruction::SysEvent(SystemEventNode::PushMapVal),

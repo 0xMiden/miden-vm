@@ -34,6 +34,7 @@ pub use miden_processor::{
 use miden_processor::{AdviceMutation, DefaultHost, EventError, Program, fast::FastProcessor};
 use miden_prover::utils::range;
 pub use miden_prover::{MerkleTreeVC, ProvingOptions, prove};
+use miden_stdlib::StdLibrary;
 pub use miden_verifier::{AcceptableOptions, VerifierError, verify};
 pub use pretty_assertions::{assert_eq, assert_ne, assert_str_eq};
 #[cfg(not(target_family = "wasm"))]
@@ -325,7 +326,9 @@ impl Test {
                 assembler.compile_and_statically_link(module).expect("failed to link module");
                 assembler
             })
-            .with_debug_mode(self.in_debug_mode);
+            .with_debug_mode(self.in_debug_mode)
+            .with_static_library(StdLibrary::default())
+            .unwrap();
         for library in &self.libraries {
             assembler.link_dynamic_library(library).unwrap();
         }

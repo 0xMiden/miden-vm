@@ -22,6 +22,7 @@ pub enum SystemEventNode {
     InsertMem,
     InsertHdword,
     InsertHdwordWithDomain,
+    InsertHqword,
     InsertHperm,
 }
 
@@ -39,6 +40,7 @@ impl From<&SystemEventNode> for SystemEvent {
             InsertMem => Self::MemToMap,
             InsertHdword => Self::HdwordToMap,
             InsertHdwordWithDomain => Self::HdwordToMapWithDomain,
+            InsertHqword => Self::HqwordToMap,
             InsertHperm => Self::HpermToMap,
         }
     }
@@ -63,6 +65,7 @@ impl fmt::Display for SystemEventNode {
             Self::InsertMem => write!(f, "insert_mem"),
             Self::InsertHdword => write!(f, "insert_hdword"),
             Self::InsertHdwordWithDomain => write!(f, "insert_hdword_d"),
+            Self::InsertHqword => write!(f, "insert_hqword"),
             Self::InsertHperm => writeln!(f, "insert_hperm"),
         }
     }
