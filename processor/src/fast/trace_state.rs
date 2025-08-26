@@ -393,12 +393,12 @@ impl MemoryReplay {
     // --------------------------------------------------------------------------------
 
     /// Records a read element from memory
-    pub fn record_element(&mut self, element: Felt, addr: Felt) {
+    pub fn record_read_element(&mut self, element: Felt, addr: Felt) {
         self.elements_read.push_back((addr, element));
     }
 
     /// Records a read word from memory
-    pub fn record_word(&mut self, word: Word, addr: Felt) {
+    pub fn record_read_word(&mut self, word: Word, addr: Felt) {
         self.words_read.push_back((addr, word));
     }
 
@@ -658,7 +658,7 @@ impl StackOverflowReplay {
 // NODE EXECUTION STATE
 // ================================================================================================
 
-/// Specifies the execution state of a node when starting fragment generation.
+/// Specifies the execution state of a node.
 ///
 /// Each MAST node has at least 2 different states associated with it: processing the START and END
 /// nodes (e.g. JOIN and END in the case of [miden_core::mast::JoinNode]). Some have more; for

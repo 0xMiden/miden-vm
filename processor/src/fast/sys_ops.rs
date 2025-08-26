@@ -1,6 +1,6 @@
 use miden_core::{Felt, mast::MastForest, sys_events::SystemEvent};
 
-use super::{ExecutionError, FastProcessor, ONE};
+use super::{ExecutionError, FastProcessor, ONE, tracer::Tracer};
 use crate::{
     AsyncHost, BaseHost, ErrorContext, FMP_MIN,
     operations::sys_ops::sys_event_handlers::handle_system_event, system::FMP_MAX,
@@ -15,6 +15,7 @@ impl FastProcessor {
         host: &mut impl BaseHost,
         program: &MastForest,
         err_ctx: &impl ErrorContext,
+        tracer: &mut impl Tracer,
     ) -> Result<(), ExecutionError> {
         if self.stack_get(0) != ONE {
             let process = &mut self.state();
@@ -27,7 +28,7 @@ impl FastProcessor {
                 err_ctx,
             ));
         }
-        self.decrement_stack_size();
+        self.decrement_stack_size(tracer);
         Ok(())
     }
 
@@ -40,7 +41,7 @@ impl FastProcessor {
     }
 
     /// Analogous to `Process::op_fmpupdate`.
-    pub fn op_fmpupdate(&mut self) -> Result<(), ExecutionError> {
+    pub fn op_fmpupdate(&mut self, tracer: &mut impl Tracer) -> Result<(), ExecutionError> {
         let top = self.stack_get(0);
 
         let new_fmp = self.fmp + top;
@@ -50,14 +51,14 @@ impl FastProcessor {
         }
 
         self.fmp = new_fmp;
-        self.decrement_stack_size();
+        self.decrement_stack_size(tracer);
         Ok(())
     }
 
     /// Analogous to `Process::op_sdepth`.
-    pub fn op_sdepth(&mut self) {
+    pub fn op_sdepth(&mut self, tracer: &mut impl Tracer) {
         let depth = self.stack_depth();
-        self.increment_stack_size();
+        self.increment_stack_size(tracer);
         self.stack_write(0, depth.into());
     }
 
@@ -74,8 +75,8 @@ impl FastProcessor {
     }
 
     /// Analogous to `Process::op_clk`.
-    pub fn op_clk(&mut self) -> Result<(), ExecutionError> {
-        self.increment_stack_size();
+    pub fn op_clk(&mut self, tracer: &mut impl Tracer) -> Result<(), ExecutionError> {
+        self.increment_stack_size(tracer);
         self.stack_write(0, self.clk.into());
         Ok(())
     }

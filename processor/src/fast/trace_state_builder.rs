@@ -3,20 +3,28 @@ use alloc::{sync::Arc, vec::Vec};
 use miden_core::{
     Felt, ONE, Word, ZERO,
     crypto::merkle::MerklePath,
-    mast::{BasicBlockNode, MastForest},
+    mast::{BasicBlockNode, MastForest, MastNode, MastNodeId},
     stack::MIN_STACK_DEPTH,
 };
 
 use crate::{
     continuation_stack::ContinuationStack,
-    decoder::block_stack::{BlockInfo, BlockStack},
-    fast::trace_state::{
-        AdviceReplay, BlockStackReplay, CoreTraceState, DecoderState, ExecutionContextSystemInfo,
-        ExternalNodeReplay, HasherReplay, MemoryReplay, NodeExecutionState, NodeFlags,
-        StackOverflowReplay, StackState, SystemState,
+    decoder::block_stack::{BlockInfo, BlockStack, BlockType, ExecutionContextInfo},
+    fast::{
+        FastProcessor, NUM_ROWS_PER_CORE_FRAGMENT,
+        trace_state::{
+            AdviceReplay, BlockStackReplay, CoreTraceState, DecoderState,
+            ExecutionContextSystemInfo, ExternalNodeReplay, HasherReplay, MemoryReplay,
+            NodeExecutionState, NodeFlags, StackOverflowReplay, StackState, SystemState,
+        },
+        tracer::Tracer,
     },
     stack::OverflowTable,
 };
+
+/// The number of rows in the execution trace required to compute a permutation of Rescue Prime
+/// Optimized.
+const HASH_CYCLE_LEN: Felt = Felt::new(miden_air::trace::chiplets::hasher::HASH_CYCLE_LEN as u64);
 
 /// Execution state snapshot, used to record the state at the start of a trace fragment.
 #[derive(Debug)]
@@ -64,6 +72,18 @@ pub struct CoreTraceStateBuilder {
 }
 
 impl CoreTraceStateBuilder {
+    /// Convert the `CoreTraceStateBuilder` into the list of `CoreTraceState` built during
+    /// execution.
+    pub fn into_core_trace_states(mut self) -> Vec<CoreTraceState> {
+        // If there is an ongoing trace state being built, finish it
+        self.finish_current_trace_state();
+
+        self.core_trace_states
+    }
+
+    // HELPERS
+    // -------------------------------------------------------------------------------------------
+
     /// Captures the internal state into a new [CoreTraceState] (stored internally), resets the
     /// internal replay state of the builder, and records a new state snapshot, marking the
     /// beginning of the next trace state.
@@ -71,35 +91,121 @@ impl CoreTraceStateBuilder {
     /// This must be called at the beginning of a new trace fragment, before executing the first
     /// operation. Internal replay fields are expected to be accessed during execution of this new
     /// fragment to record data to be replayed by the trace fragment generators.
-    pub fn start_new_trace_state(
+    fn start_new_trace_state(
         &mut self,
         system_state: SystemState,
-        decoder_state: DecoderState,
         stack_top: [Felt; MIN_STACK_DEPTH],
         continuation_stack: ContinuationStack,
         execution_state: NodeExecutionState,
-        initial_mast_forest: Arc<MastForest>,
+        current_forest: Arc<MastForest>,
     ) {
         // If there is an ongoing snapshot, finish it
         self.finish_current_trace_state();
 
-        // Calculate stack depth: 16 (min stack depth) + overflow elements
-        let stack_depth = MIN_STACK_DEPTH + self.overflow_table.num_elements_in_current_ctx();
-        let last_overflow_addr = self.overflow_table.last_update_clk_in_current_ctx();
-
         // Start a new snapshot
-        self.state_snapshot = Some(StateSnapshot {
-            system: system_state,
-            decoder_state,
-            stack: StackState::new(stack_top, stack_depth, last_overflow_addr),
-            continuation_stack,
-            execution_state,
-            initial_mast_forest,
-        });
+        self.state_snapshot = {
+            let decoder_state = {
+                if self.block_stack.is_empty() {
+                    DecoderState { current_addr: ZERO, parent_addr: ZERO }
+                } else {
+                    let block_info = self.block_stack.peek();
+
+                    DecoderState {
+                        current_addr: block_info.addr,
+                        parent_addr: block_info.parent_addr,
+                    }
+                }
+            };
+            let stack = {
+                let stack_depth =
+                    MIN_STACK_DEPTH + self.overflow_table.num_elements_in_current_ctx();
+                let last_overflow_addr = self.overflow_table.last_update_clk_in_current_ctx();
+                StackState::new(stack_top, stack_depth, last_overflow_addr)
+            };
+
+            Some(StateSnapshot {
+                system: system_state,
+                decoder_state,
+                stack,
+                continuation_stack,
+                execution_state,
+                initial_mast_forest: current_forest,
+            })
+        };
+    }
+
+    fn record_control_node_start(&mut self, mast_node: &MastNode, processor: &FastProcessor) {
+        let (ctx_info, block_type) = match mast_node {
+            MastNode::Join(_) => (None, BlockType::Join(false)),
+            MastNode::Split(_) => (None, BlockType::Split),
+            MastNode::Loop(_) => {
+                let loop_entered = {
+                    let condition = processor.stack_get(0);
+                    condition == ONE
+                };
+
+                (None, BlockType::Loop(loop_entered))
+            },
+            MastNode::Call(call_node) => {
+                let exec_ctx = {
+                    let overflow_addr = self.overflow_table.last_update_clk_in_current_ctx();
+                    ExecutionContextInfo::new(
+                        processor.ctx,
+                        processor.caller_hash,
+                        processor.fmp,
+                        processor.stack_depth(),
+                        overflow_addr,
+                    )
+                };
+                let block_type = if call_node.is_syscall() {
+                    BlockType::SysCall
+                } else {
+                    BlockType::Call
+                };
+
+                (Some(exec_ctx), block_type)
+            },
+            MastNode::Dyn(dyn_node) => {
+                if dyn_node.is_dyncall() {
+                    let exec_ctx = {
+                        let overflow_addr = self.overflow_table.last_update_clk_in_current_ctx();
+                        // Note: the stack depth to record is the `current_stack_depth - 1` due to
+                        // the semantics of DYNCALL. That is, the top of the
+                        // stack contains the memory address to where the
+                        // address to dynamically call is located. Then, the
+                        // DYNCALL operation performs a drop, and
+                        // records the stack depth after the drop as the beginning of
+                        // the new context. For more information, look at the docs for how the
+                        // constraints are designed; it's a bit tricky but it works.
+                        let stack_depth_after_drop = processor.stack_depth() - 1;
+                        ExecutionContextInfo::new(
+                            processor.ctx,
+                            processor.caller_hash,
+                            processor.fmp,
+                            stack_depth_after_drop,
+                            overflow_addr,
+                        )
+                    };
+                    (Some(exec_ctx), BlockType::Dyncall)
+                } else {
+                    (None, BlockType::Dyn)
+                }
+            },
+            MastNode::Block(_) => panic!(
+                "`CoreTraceStateBuilder::record_basic_block_start()` must be called instead for basic blocks"
+            ),
+            MastNode::External(_) => panic!(
+                "External nodes are guaranteed to be resolved before record_control_node_start is called"
+            ),
+        };
+
+        let block_addr = self.hasher.record_hash_control_block();
+        let parent_addr = self.block_stack.push(block_addr, block_type, ctx_info);
+        self.block_stack_replay.record_node_start(parent_addr);
     }
 
     /// Records the block address and flags for an END operation based on the block being popped.
-    pub fn record_node_end(&mut self, block_info: &BlockInfo) {
+    fn record_node_end(&mut self, block_info: &BlockInfo) {
         let flags = NodeFlags::new(
             block_info.is_loop_body() == ONE,
             block_info.is_entered_loop() == ONE,
@@ -121,17 +227,8 @@ impl CoreTraceStateBuilder {
     }
 
     /// Records the execution context system info for CALL/SYSCALL/DYNCALL operations.
-    pub fn record_execution_context(&mut self, ctx_info: ExecutionContextSystemInfo) {
+    fn record_execution_context(&mut self, ctx_info: ExecutionContextSystemInfo) {
         self.block_stack_replay.record_execution_context(ctx_info);
-    }
-
-    /// Convert the `CoreTraceStateBuilder` into the list of `CoreTraceState` built during
-    /// execution.
-    pub fn into_core_trace_states(mut self) -> Vec<CoreTraceState> {
-        // If there is an ongoing trace state being built, finish it
-        self.finish_current_trace_state();
-
-        self.core_trace_states
     }
 
     /// Records the current core trace state, if any.
@@ -169,6 +266,154 @@ impl CoreTraceStateBuilder {
 
             self.core_trace_states.push(trace_state);
         }
+    }
+}
+
+impl Tracer for CoreTraceStateBuilder {
+    /// When sufficiently many clock cycles have elapsed, starts a new trace state. Also updates the
+    /// internal block stack.
+    fn start_clock_cycle(
+        &mut self,
+        processor: &FastProcessor,
+        execution_state: NodeExecutionState,
+        continuation_stack: &mut ContinuationStack,
+        current_forest: &Arc<MastForest>,
+    ) {
+        // check if we need to start a new trace state
+        if processor.clk.as_usize().is_multiple_of(NUM_ROWS_PER_CORE_FRAGMENT) {
+            self.start_new_trace_state(
+                SystemState {
+                    clk: processor.clk,
+                    ctx: processor.ctx,
+                    fmp: processor.fmp,
+                    in_syscall: processor.in_syscall,
+                    fn_hash: processor.caller_hash,
+                },
+                processor
+                    .stack_top()
+                    .try_into()
+                    .expect("stack_top expected to be MIN_STACK_DEPTH elements"),
+                continuation_stack.clone(),
+                execution_state.clone(),
+                current_forest.clone(),
+            );
+        }
+
+        // Update block stack
+        match &execution_state {
+            NodeExecutionState::BasicBlock {
+                node_id: _,
+                batch_index: _,
+                op_idx_in_batch: _,
+            } => {
+                // do nothing, since operations in a basic block don't update the block stack
+            },
+            NodeExecutionState::Start(mast_node_id) => match &current_forest[*mast_node_id] {
+                MastNode::Join(_)
+                | MastNode::Split(_)
+                | MastNode::Loop(_)
+                | MastNode::Dyn(_)
+                | MastNode::Call(_) => {
+                    self.record_control_node_start(&current_forest[*mast_node_id], processor);
+                },
+                MastNode::Block(basic_block_node) => {
+                    let block_addr = self.hasher.record_hash_basic_block(basic_block_node);
+                    let parent_addr = self.block_stack.push(block_addr, BlockType::Span, None);
+                    self.block_stack_replay.record_node_start(parent_addr);
+                },
+                MastNode::External(_) => unreachable!(
+                    "start_clock_cycle is guaranteed not to be called on external nodes"
+                ),
+            },
+            NodeExecutionState::Respan { node_id: _, batch_index: _ } => {
+                self.block_stack.peek_mut().addr += HASH_CYCLE_LEN;
+            },
+            NodeExecutionState::LoopRepeat(_) => {
+                // do nothing, REPEAT doesn't affect the block stack
+            },
+            NodeExecutionState::End(_) => {
+                let block_info = self.block_stack.pop();
+                self.record_node_end(&block_info);
+
+                if let Some(ctx_info) = block_info.ctx_info {
+                    self.record_execution_context(ExecutionContextSystemInfo {
+                        parent_ctx: ctx_info.parent_ctx,
+                        parent_fn_hash: ctx_info.parent_fn_hash,
+                        parent_fmp: ctx_info.parent_fmp,
+                    });
+                }
+            },
+        }
+    }
+
+    fn record_external_node_resolution(&mut self, node_id: MastNodeId, forest: &Arc<MastForest>) {
+        self.external.record_resolution(node_id, forest.clone());
+    }
+
+    fn record_hasher_permute(&mut self, hashed_state: [Felt; 12]) {
+        self.hasher.record_permute(hashed_state);
+    }
+
+    fn record_hasher_build_merkle_root(&mut self, path: &MerklePath, root: Word) {
+        self.hasher.record_build_merkle_root(path, root);
+    }
+
+    fn record_hasher_update_merkle_root(
+        &mut self,
+        path: &MerklePath,
+        old_root: Word,
+        new_root: Word,
+    ) {
+        self.hasher.record_update_merkle_root(path, old_root, new_root);
+    }
+
+    fn record_memory_read_element(&mut self, element: Felt, addr: Felt) {
+        self.memory.record_read_element(element, addr);
+    }
+
+    fn record_memory_read_word(&mut self, word: Word, addr: Felt) {
+        self.memory.record_read_word(word, addr);
+    }
+
+    fn record_advice_pop_stack(&mut self, value: Felt) {
+        self.advice.record_pop_stack(value);
+    }
+
+    fn record_advice_pop_stack_word(&mut self, word: Word) {
+        self.advice.record_pop_stack_word(word);
+    }
+
+    fn record_advice_pop_stack_dword(&mut self, words: [Word; 2]) {
+        self.advice.record_pop_stack_dword(words);
+    }
+
+    fn increment_clk(&mut self) {
+        self.overflow_table.advance_clock();
+    }
+
+    fn increment_stack_size(&mut self, processor: &FastProcessor) {
+        let new_overflow_value = processor.stack_get(15);
+        self.overflow_table.push(new_overflow_value);
+    }
+
+    fn decrement_stack_size(&mut self) {
+        // Record the popped value for replay, if present
+        if let Some(popped_value) = self.overflow_table.pop() {
+            let new_overflow_addr = self.overflow_table.last_update_clk_in_current_ctx();
+            self.overflow_replay.record_pop_overflow(popped_value, new_overflow_addr);
+        }
+    }
+
+    fn start_context(&mut self) {
+        self.overflow_table.start_context();
+    }
+
+    fn restore_context(&mut self) {
+        self.overflow_table.restore_context();
+        self.overflow_replay.record_restore_context_overflow_addr(
+            MIN_STACK_DEPTH + self.overflow_table.num_elements_in_current_ctx(),
+            self.overflow_table.last_update_clk_in_current_ctx(),
+        );
     }
 }
 
