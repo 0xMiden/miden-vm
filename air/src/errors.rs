@@ -11,4 +11,8 @@ pub enum ExecutionOptionsError {
     MaxCycleNumTooSmall { max_cycles: u32, min_cycles_limit: usize },
     #[error("maximum number of cycles {max_cycles} must be less than {max_cycles_limit}")]
     MaxCycleNumTooBig { max_cycles: u32, max_cycles_limit: u32 },
+    #[error(
+        "invalid hash function '{hash_function}'. Valid options are: blake3-192, blake3-256, rpo, rpx, poseidon2"
+    )]
+    InvalidHashFunction { hash_function: std::string::String },
 }

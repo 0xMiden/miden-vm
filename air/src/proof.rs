@@ -1,4 +1,4 @@
-use alloc::vec::Vec;
+use alloc::{string::ToString, vec::Vec};
 
 use miden_core::{
     crypto::hash::{Blake3_192, Blake3_256, Hasher, Poseidon2, Rpo256, Rpx256},
@@ -136,6 +136,23 @@ impl TryFrom<u8> for HashFunction {
             _ => Err(DeserializationError::InvalidValue(format!(
                 "the hash function representation {repr} is not valid!"
             ))),
+        }
+    }
+}
+
+impl TryFrom<&str> for HashFunction {
+    type Error = super::ExecutionOptionsError;
+
+    fn try_from(hash_fn_str: &str) -> Result<Self, Self::Error> {
+        match hash_fn_str {
+            "blake3-192" => Ok(Self::Blake3_192),
+            "blake3-256" => Ok(Self::Blake3_256),
+            "rpo" => Ok(Self::Rpo256),
+            "rpx" => Ok(Self::Rpx256),
+            "poseidon2" => Ok(Self::Poseidon2),
+            _ => Err(super::ExecutionOptionsError::InvalidHashFunction {
+                hash_function: hash_fn_str.to_string(),
+            }),
         }
     }
 }
