@@ -9,14 +9,14 @@ use miden_assembly_syntax::{
 use miden_core::{
     Operation, Program, Word, assert_matches,
     mast::{MastNode, MastNodeId},
-    utils::{Deserializable, Serializable, hash_string_to_word},
+    utils::{Deserializable, Serializable, hash_string_to_word, string_to_event_id},
 };
 use miden_mast_package::{MastArtifact, MastForest, Package, PackageExport, PackageManifest};
 use proptest::{
     prelude::*,
     test_runner::{Config, TestRunner},
 };
-use miden_core::utils::string_to_event_id;
+
 use crate::{
     Assembler, Library, LibraryNamespace, LibraryPath, ModuleParser,
     ast::{Ident, Module, ModuleKind, ProcedureName, QualifiedProcedureName},

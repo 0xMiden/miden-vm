@@ -1,5 +1,6 @@
 use alloc::sync::Arc;
 use core::ops::ControlFlow;
+
 use miden_core::utils::{hash_string_to_word, string_to_event_id};
 use miden_debug_types::{Span, Spanned};
 
