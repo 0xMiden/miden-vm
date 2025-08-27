@@ -161,7 +161,7 @@ pub enum Operation {
     /// instruction.
     Clk = OPCODE_CLK,
 
-    /// Emits an event identifier to the host.
+    /// Emits an event to the host.
     ///
     /// Semantics:
     /// - Reads the event id from the top of the stack (as a `Felt`) without consuming it; the

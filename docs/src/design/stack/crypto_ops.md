@@ -141,7 +141,7 @@ At the high-level, the operation does the following:
 - Using $x$ and $\alpha$, folds the query values $q_0, ..., q_3$ into a single value $r$.
 - Compares the previously folded value $pe$ to the appropriate value of $q_0, ..., q_3$ to verify that the folding of the previous layer was done correctly.
 - Computes the new value of $poe$ as $poe' = poe^4$ (this is done in two steps to keep the constraint degree low).
-- Increments the layer address pointer by $2$.
+- Increments the layer address pointer by $8$.
 - Shifts the stack by $1$ to the left. This moves an element from the stack overflow table into the last position on the stack top.
 
 To keep the degree of the constraints low, a number of intermediate values are used. Specifically, the operation relies on all $6$ helper registers, and also uses the first $10$ elements of the stack at the next state for degree reduction purposes. Thus, once the operation has been executed, the top $10$ elements of the stack can be considered to be "garbage".

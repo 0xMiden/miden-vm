@@ -3638,6 +3638,7 @@ fn emit_syntax_equivalence() {
     let program2 = context.assemble(program2_source).unwrap();
     let program3 = context.assemble(program3_source).unwrap();
 
+
     // Get the MAST forest digests for both programs
     let digest1 = program1.hash();
     let digest2 = program2.hash();
