@@ -169,9 +169,9 @@ pub enum Operation {
     /// - User-defined events are conventionally derived from strings via
     ///   `hash_string_to_word(name)[0]` (Blake3-based) and may be emitted via immediate forms in
     ///   assembly (`emit.event("...")` or `emit.CONST` where `CONST=event("...")`).
-    /// - System events are still identified by specific 32-bit codes; the VM attempts to
-    ///   interpret the stack `Felt` as `u32` to dispatch known system events, and otherwise
-    ///   forwards the event to the host.
+    /// - System events are still identified by specific 32-bit codes; the VM attempts to interpret
+    ///   the stack `Felt` as `u32` to dispatch known system events, and otherwise forwards the
+    ///   event to the host.
     ///
     /// This operation does not change the state of the user stack aside from reading the value.
     Emit = OPCODE_EMIT,

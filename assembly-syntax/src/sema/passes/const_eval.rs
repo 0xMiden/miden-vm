@@ -164,8 +164,7 @@ impl VisitMut for ConstEvalVisitor<'_> {
                             //   const.EVT = event("my::evt")
                             //   push.EVT                # pushes the Felt event id
                             let word = hash_string_to_word(string.as_str());
-                            *imm =
-                                Immediate::Value(Span::new(span, IntValue::Felt(word[0])));
+                            *imm = Immediate::Value(Span::new(span, IntValue::Felt(word[0])));
                         },
                     },
                     Err(error) => {
