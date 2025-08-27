@@ -3519,6 +3519,43 @@ fn emit_instruction_digest() {
     assert_ne!(procedure_digests[1], procedure_digests[2]);
 }
 
+/// Tests that emitting events with immediate values has the same MAST representation
+/// regardless of whether using emit.value or push.value emit syntax
+#[test]
+fn emit_syntax_equivalence() {
+    let context = TestContext::new();
+
+    // First program uses emit.42
+    let program1_source = r#"
+        begin
+            emit.42
+        end
+    "#;
+
+    // Second program uses push.42 emit drop
+    let program2_source = r#"
+        begin
+            push.42
+            emit
+            drop
+        end
+    "#;
+
+    let program1 = context.assemble(program1_source).unwrap();
+    let program2 = context.assemble(program2_source).unwrap();
+
+    // Get the MAST forest digests for both programs
+    let digest1 = program1.hash();
+    let digest2 = program2.hash();
+
+    // Both programs should have identical MAST representations
+    assert_eq!(digest1, digest2, "MAST digests differ between emit.42 and push.42 emit drop");
+
+    // Verify the procedure count is 1 (just the entrypoint) for both programs
+    assert_eq!(program1.num_procedures(), 1);
+    assert_eq!(program2.num_procedures(), 1);
+}
+
 /// Since `foo` and `bar` have the same body, we only expect them to be added once to the program.
 #[test]
 fn duplicate_procedure() {
