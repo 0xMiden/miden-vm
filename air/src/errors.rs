@@ -1,3 +1,5 @@
+use alloc::string::String;
+
 // EXECUTION OPTIONS ERROR
 // ================================================================================================
 
@@ -14,5 +16,5 @@ pub enum ExecutionOptionsError {
     #[error(
         "invalid hash function '{hash_function}'. Valid options are: blake3-192, blake3-256, rpo, rpx, poseidon2"
     )]
-    InvalidHashFunction { hash_function: std::string::String },
+    InvalidHashFunction { hash_function: String },
 }
