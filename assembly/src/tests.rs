@@ -3146,6 +3146,7 @@ fn test_program_serde_simple() {
 fn test_program_serde_with_decorators() {
     let source = "
     const.DEFAULT_CONST=100
+    const.EVENT_CONST=event(\"serde::evt\")
 
     proc.foo
         push.1.2 add
@@ -3153,7 +3154,7 @@ fn test_program_serde_with_decorators() {
     end
 
     begin
-        emit.DEFAULT_CONST
+        emit.EVENT_CONST
 
         exec.foo
 
@@ -3201,6 +3202,48 @@ fn vendoring() -> TestResult {
     };
     assert!(lib == expected_lib);
     Ok(())
+}
+
+// EMIT EVENT SYNTAX VALIDATION
+// ================================================================================================
+
+#[test]
+fn emit_u32_immediate_is_rejected() {
+    let context = TestContext::new();
+    let program_source = r#"
+        begin
+            emit.32
+        end
+    "#;
+    context
+        .assemble(program_source)
+        .expect_err(r#"emit.<u32> should be rejected; only event("...") is allowed"#);
+}
+
+#[test]
+fn emit_const_must_be_event_hash() {
+    let context = TestContext::new();
+    // CONST defined as plain number should not be accepted by emit.CONST
+    let program_source = r#"
+        const.BAD=100
+        begin
+            emit.BAD
+        end
+    "#;
+    context
+        .assemble(program_source)
+        .expect_err(r#"emit.CONST should require const defined via event("...")"#);
+
+    // CONST defined via word("...") should also be rejected by emit.CONST
+    let program_source = r#"
+        const.BADW=word("foo")
+        begin
+            emit.BADW
+        end
+    "#;
+    context
+        .assemble(program_source)
+        .expect_err(r#"emit.CONST should require const defined via event("...")"#);
 }
 
 #[test]
@@ -3491,12 +3534,15 @@ fn emit_instruction_digest() {
     let context = TestContext::new();
 
     let program_source = r#"
+        const.EVT1=event("evt::one")
+        const.EVT2=event("evt::two")
+
         proc.foo
-            emit.1
+            emit.EVT1
         end
 
         proc.bar
-            emit.2
+            emit.EVT2
         end
 
         begin
@@ -3525,17 +3571,26 @@ fn emit_instruction_digest() {
 fn emit_syntax_equivalence() {
     let context = TestContext::new();
 
-    // First program uses emit.42
+    // First program uses a constant
     let program1_source = r#"
+        const.EVT=event("evt::equiv")
         begin
-            emit.42
+            emit.EVT
         end
     "#;
 
-    // Second program uses push.42 emit drop
+    // Second program uses inline emit.event("...")
     let program2_source = r#"
         begin
-            push.42
+            emit.event("evt::equiv")
+        end
+    "#;
+
+    // Third program uses manual emit with constant event name
+    let program3_source = r#"
+        const.EVT=event("evt::equiv")
+        begin
+            push.EVT
             emit
             drop
         end
@@ -3543,17 +3598,21 @@ fn emit_syntax_equivalence() {
 
     let program1 = context.assemble(program1_source).unwrap();
     let program2 = context.assemble(program2_source).unwrap();
+    let program3 = context.assemble(program3_source).unwrap();
 
     // Get the MAST forest digests for both programs
     let digest1 = program1.hash();
     let digest2 = program2.hash();
+    let digest3 = program3.hash();
 
     // Both programs should have identical MAST representations
-    assert_eq!(digest1, digest2, "MAST digests differ between emit.42 and push.42 emit drop");
+    assert_eq!(digest1, digest2, "MAST digests differ between programs 1 and 2");
+    assert_eq!(digest1, digest3, "MAST digests differ between programs 1 and 3");
 
     // Verify the procedure count is 1 (just the entrypoint) for both programs
     assert_eq!(program1.num_procedures(), 1);
     assert_eq!(program2.num_procedures(), 1);
+    assert_eq!(program3.num_procedures(), 1);
 }
 
 /// Since `foo` and `bar` have the same body, we only expect them to be added once to the program.

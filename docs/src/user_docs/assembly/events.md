@@ -2,16 +2,23 @@
 
 Events interrupt VM execution for one cycle and hand control to the host. The host can read VM state and modify the advice provider. From the VM's perspective, `emit` has identical semantics to `noop` - the operand stack and registers remain unchanged.
 
-By convention, programs place a 32-bit `event_id` at the top of the stack before executing `emit`. The VM doesn't enforce this - the host reads and interprets the event ID.
+Event identifiers are field elements. Use a stable mapping: `event_id = blake3("<name>") mod p`, where `p` is the Goldilocks prime. The VM doesn’t enforce structure for stack-provided IDs, but immediate forms restrict inputs to this mapping.
 
 ### Event Instructions
 
 - **`emit`** - Interrupts execution, hands control to host (1 cycle)
-- **`emit.<event_id>`** - Expands to `push.<event_id> emit drop` (3 cycles)
+- **`emit.<event_id>`** - Expands to `push.<event_id> emit drop` (3 cycles). Immediate IDs must come from `event("...")` constants or inline `event("...")`.
 
 ```miden
-emit.42                    # Immediate form
-push.42 emit drop          # Equivalent manual sequence
+# Using a constant
+const.MY_EVENT=event("transfer::initiated")
+emit.MY_EVENT
+
+# Inline form
+emit.event("transfer::initiated")
+
+# Equivalent manual stack form (any Felt – not validated):
+push.<felt> emit drop
 ```
 
 ### Event Types

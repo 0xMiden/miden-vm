@@ -348,6 +348,7 @@ pub enum Token<'input> {
     U32Xor,
     While,
     Word,
+    Event,
     Xor,
     At,
     Bang,
@@ -538,6 +539,7 @@ impl fmt::Display for Token<'_> {
             Token::U32Xor => write!(f, "u32xor"),
             Token::While => write!(f, "while"),
             Token::Word => write!(f, "word"),
+            Token::Event => write!(f, "event"),
             Token::Xor => write!(f, "xor"),
             Token::At => write!(f, "@"),
             Token::Bang => write!(f, "!"),
@@ -885,6 +887,7 @@ impl<'input> Token<'input> {
         ("u32xor", Token::U32Xor),
         ("while", Token::While),
         ("word", Token::Word),
+        ("event", Token::Event),
         ("xor", Token::Xor),
     ];
 

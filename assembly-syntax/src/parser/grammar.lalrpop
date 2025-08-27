@@ -204,6 +204,7 @@ extern {
         "while" => Token::While,
         "xor" => Token::Xor,
         "word" => Token::Word,
+        "event" => Token::Event,
         EOF => Token::Eof,
         bare_ident => Token::Ident(<&'input str>),
         bin_value => Token::BinValue(<BinEncodedValue>),
@@ -773,11 +774,15 @@ Debug: Instruction = {
             Instruction::Debug(DebugOptions::AdvStackTop(0.into())),
         }
     },
-    "emit" <id:MaybeImm<U32>> => {
-        match id {
-            Some(id) => Instruction::EmitImm(id),
-            None => Instruction::Emit,
-        }
+    "emit" => Instruction::Emit,
+    // emit.EVENT_CONST  where EVENT_CONST is defined via const.EVENT_CONST=event("...")
+    "emit" "." <name:ConstantName> => Instruction::EmitImm(Immediate::Constant(name)),
+    // emit.event("...") inline hashing
+    <l:@L> "emit" "." "event" "(" <s:string> ")" <r:@R> => {
+        use miden_core::utils::hash_string_to_word;
+        let word = hash_string_to_word(s);
+        let felt = word[0];
+        Instruction::EmitImm(Immediate::Value(Span::new(span!(source_file.id(), l, r), felt)))
     },
     "trace" <id:Imm<U32>> => Instruction::Trace(id),
 }
@@ -1827,6 +1832,11 @@ ConstantExpr: ConstantExpr = {
     <l:@L> "word" "(" <value:string> ")" <r:@R> => {
         let span = span!(source_file.id(), l, r);
         ConstantExpr::Hash(HashKind::Word, Ident::from_raw_parts(Span::new(span, value.into())))
+    },
+
+    <l:@L> "event" "(" <value:string> ")" <r:@R> => {
+        let span = span!(source_file.id(), l, r);
+        ConstantExpr::Hash(HashKind::Event, Ident::from_raw_parts(Span::new(span, value.into())))
     },
 
     <l:@L> <x:ConstantExpr> "+" <y:ConstantExpr100> <r:@R> =>? {

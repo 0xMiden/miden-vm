@@ -18,6 +18,7 @@
 - [BREAKING] `Operation::Emit` no longer contains a `u32` parameter, affecting pattern matching and serialization (#[2068](https://github.com/0xMiden/miden-vm/issues/2068)).
 - [BREAKING] Host `on_event` methods no longer receive `event_id` parameter; event ID must be read from stack position 0 (#[2068](https://github.com/0xMiden/miden-vm/issues/2068)).
 - [BREAKING] `get_stack_word` uses element-aligned indexing instead of word-aligned indexing (#[2068](https://github.com/0xMiden/miden-vm/issues/2068)).
+- [BREAKING] Implement support for `event("event_name")` in MASM (#[2068](https://github.com/0xMiden/miden-vm/issues/2068)).
 
 ## 0.17.0 (2025-08-06)
 

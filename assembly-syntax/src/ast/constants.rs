@@ -351,12 +351,15 @@ impl fmt::Display for ConstantOp {
 pub enum HashKind {
     /// Reduce a string to a word using Blake3 hash function
     Word,
+    /// Reduce a string to a felt using Blake3 hash function (via 64-bit reduction)
+    Event,
 }
 
 impl fmt::Display for HashKind {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Word => f.write_str("word"),
+            Self::Event => f.write_str("event"),
         }
     }
 }

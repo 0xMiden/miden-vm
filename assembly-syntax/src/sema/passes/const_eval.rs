@@ -52,6 +52,34 @@ impl ConstEvalVisitor<'_> {
 }
 
 impl VisitMut for ConstEvalVisitor<'_> {
+    fn visit_mut_inst(&mut self, inst: &mut Span<Instruction>) -> ControlFlow<()> {
+        use crate::ast::Instruction;
+        if let Instruction::EmitImm(Immediate::Constant(name)) = &**inst {
+            let span = name.span();
+            match self.analyzer.get_constant(name) {
+                Ok(ConstantExpr::Hash(HashKind::Event, _)) => {
+                    // CHANGE: allow `emit.EVENT` when `EVENT` was defined via
+                    //   const.EVENT = event("...")
+                    // NOTE: This function only validates the kind; the actual resolution to a Felt
+                    // happens below in `visit_mut_immediate_felt` just like other Felt immediates.
+                    // Enabled syntax:
+                    //   const.EVT = event("my::evt")
+                    //   emit.EVT
+                },
+                Ok(_) => {
+                    // CHANGE: disallow `emit.CONST` unless CONST is defined via `event("...")`.
+                    // Examples which now error:
+                    //   const.BAD = 42
+                    //   emit.BAD
+                    //   const.W = word("foo")
+                    //   emit.W
+                    self.analyzer.error(SemanticAnalysisError::InvalidConstant { span });
+                },
+                Err(error) => self.analyzer.error(error),
+            }
+        }
+        crate::ast::visit::visit_mut_inst(self, inst)
+    }
     fn visit_mut_immediate_u8(&mut self, imm: &mut Immediate<u8>) -> ControlFlow<()> {
         self.eval_const(imm)
     }
@@ -90,6 +118,14 @@ impl VisitMut for ConstEvalVisitor<'_> {
                     Ok(ConstantExpr::Felt(value)) => {
                         *imm = Immediate::Value(Span::new(span, *value.inner()));
                     },
+                    Ok(ConstantExpr::Hash(HashKind::Event, string)) => {
+                        // CHANGE: resolve `event("...")` to a Felt when a Felt immediate is
+                        // expected (e.g. enables `emit.EVENT`):
+                        //   const.EVT = event("my::evt")
+                        //   emit.EVT
+                        let word = hash_string_to_word(string.as_str());
+                        *imm = Immediate::Value(Span::new(span, word[0]));
+                    },
                     Err(error) => {
                         self.analyzer.error(error);
                     },
@@ -114,11 +150,22 @@ impl VisitMut for ConstEvalVisitor<'_> {
                     },
                     Ok(ConstantExpr::Hash(hash_kind, string)) => match hash_kind {
                         HashKind::Word => {
+                            // Existing behavior for `const.W = word("...")`:
+                            //   push.W    # pushes a Word
                             let hash_word = hash_string_to_word(string.as_str());
                             *imm = Immediate::Value(Span::new(
                                 span,
                                 IntValue::Word(WordValue(*hash_word)),
                             ));
+                        },
+                        HashKind::Event => {
+                            // CHANGE: allow `const.EVT = event("...")` with IntValue contexts by
+                            // reducing to a Felt via word()[0]. Enables:
+                            //   const.EVT = event("my::evt")
+                            //   push.EVT                # pushes the Felt event id
+                            let word = hash_string_to_word(string.as_str());
+                            *imm =
+                                Immediate::Value(Span::new(span, IntValue::Felt(word[0])));
                         },
                     },
                     Err(error) => {

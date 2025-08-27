@@ -390,7 +390,7 @@ end
             "\
 begin
     push.1
-    emit.1
+    emit.event(\"abc\")
 end
 ",
         );
@@ -401,7 +401,10 @@ end
         assert_matches!(lexer.next(), Some(Ok(Token::Int(1))));
         assert_matches!(lexer.next(), Some(Ok(Token::Emit)));
         assert_matches!(lexer.next(), Some(Ok(Token::Dot)));
-        assert_matches!(lexer.next(), Some(Ok(Token::Int(1))));
+        assert_matches!(lexer.next(), Some(Ok(Token::Event)));
+        assert_matches!(lexer.next(), Some(Ok(Token::Lparen)));
+        assert_matches!(lexer.next(), Some(Ok(Token::QuotedIdent("abc"))));
+        assert_matches!(lexer.next(), Some(Ok(Token::Rparen)));
         assert_matches!(lexer.next(), Some(Ok(Token::End)));
         assert_matches!(lexer.next(), Some(Ok(Token::Eof)));
     }

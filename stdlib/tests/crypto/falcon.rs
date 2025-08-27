@@ -313,7 +313,9 @@ fn generate_test(
     use.std::crypto::dsa::rpo_falcon512
 
     begin
-        emit.{EVENT_FALCON_SIG_TO_STACK}
+        push.{EVENT_FALCON_SIG_TO_STACK}
+        emit
+        drop
         exec.rpo_falcon512::verify
     end
     "
