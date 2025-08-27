@@ -58,6 +58,18 @@ pub fn hash_string_to_word<'a>(value: impl Into<&'a str>) -> Word {
     .into()
 }
 
+// TO EVENT UD
+// ================================================================================================
+
+/// Computes the canonical event identifier for the given `name`.
+///
+/// The event id is the first `Felt` of the `Word` produced by hashing `name` with BLAKE3.
+#[inline]
+pub fn string_to_event_id<'a>(name: impl Into<&'a str>) -> Felt {
+    let word = hash_string_to_word(name.into());
+    word[0]
+}
+
 // INTO BYTES
 // ================================================================================================
 

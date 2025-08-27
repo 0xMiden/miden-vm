@@ -16,7 +16,7 @@ use proptest::{
     prelude::*,
     test_runner::{Config, TestRunner},
 };
-
+use miden_core::utils::string_to_event_id;
 use crate::{
     Assembler, Library, LibraryNamespace, LibraryPath, ModuleParser,
     ast::{Ident, Module, ModuleKind, ProcedureName, QualifiedProcedureName},
@@ -1250,6 +1250,44 @@ end",
     );
 
     assert_eq!(expected_program, program.to_string());
+
+    Ok(())
+}
+
+/// Check that the event ID conversion during compilation is consistent with
+/// string_to_event_id.
+#[test]
+fn const_event_from_string() -> TestResult {
+    let context = TestContext::default();
+    let sample_event_name = "test::constant";
+    let expected_felt = string_to_event_id(sample_event_name);
+
+    let source1 = source_file!(
+        &context,
+        format!(
+            r#"
+    begin
+        emit.event("{sample_event_name}")
+    end
+    "#
+        )
+    );
+    let source2 = source_file!(
+        &context,
+        format!(
+            r#"
+    begin
+        push.{expected_felt}
+        emit
+        drop
+    end
+    "#
+        )
+    );
+
+    let program1 = context.assemble(source1)?;
+    let program2 = context.assemble(source2)?;
+    assert_eq!(program1.hash(), program2.hash());
 
     Ok(())
 }

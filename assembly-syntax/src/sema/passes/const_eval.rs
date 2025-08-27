@@ -1,7 +1,6 @@
 use alloc::sync::Arc;
 use core::ops::ControlFlow;
-
-use miden_core::utils::hash_string_to_word;
+use miden_core::utils::{hash_string_to_word, string_to_event_id};
 use miden_debug_types::{Span, Spanned};
 
 use crate::{
@@ -123,8 +122,8 @@ impl VisitMut for ConstEvalVisitor<'_> {
                         // expected (e.g. enables `emit.EVENT`):
                         //   const.EVT = event("my::evt")
                         //   emit.EVT
-                        let word = hash_string_to_word(string.as_str());
-                        *imm = Immediate::Value(Span::new(span, word[0]));
+                        let event_id = string_to_event_id(string.as_str());
+                        *imm = Immediate::Value(Span::new(span, event_id));
                     },
                     Err(error) => {
                         self.analyzer.error(error);
@@ -163,8 +162,8 @@ impl VisitMut for ConstEvalVisitor<'_> {
                             // reducing to a Felt via word()[0]. Enables:
                             //   const.EVT = event("my::evt")
                             //   push.EVT                # pushes the Felt event id
-                            let word = hash_string_to_word(string.as_str());
-                            *imm = Immediate::Value(Span::new(span, IntValue::Felt(word[0])));
+                            let event_id = string_to_event_id(string.as_str());
+                            *imm = Immediate::Value(Span::new(span, IntValue::Felt(event_id)));
                         },
                     },
                     Err(error) => {

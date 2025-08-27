@@ -779,10 +779,8 @@ Debug: Instruction = {
     "emit" "." <name:ConstantName> => Instruction::EmitImm(Immediate::Constant(name)),
     // emit.event("...") inline hashing
     <l:@L> "emit" "." "event" "(" <s:string> ")" <r:@R> => {
-        use miden_core::utils::hash_string_to_word;
-        let word = hash_string_to_word(s);
-        let felt = word[0];
-        Instruction::EmitImm(Immediate::Value(Span::new(span!(source_file.id(), l, r), felt)))
+        let event_id = miden_core::utils::string_to_event_id(s);
+        Instruction::EmitImm(Immediate::Value(Span::new(span!(source_file.id(), l, r), event_id)))
     },
     "trace" <id:Imm<U32>> => Instruction::Trace(id),
 }
