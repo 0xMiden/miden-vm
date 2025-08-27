@@ -125,11 +125,10 @@ fn insert_hdword_into_adv_map(
 /// defined by the hash of these words.
 ///
 /// Inputs:
-///   Operand stack: [D, C, B, A, ...]
+///   Operand stack: [event_id, D, C, B, A, ...]
 ///   Advice map: {...}
 ///
 /// Outputs:
-///   Operand stack: [D, C, B, A, ...]
 ///   Advice map: {KEY: [A', B', C', D'])}
 ///
 /// Where:
@@ -141,10 +140,10 @@ fn insert_hqword_into_adv_map(
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
     // get the top four words from the stack and hash them to compute the key value
-    let word0 = process.get_stack_word(0);
-    let word1 = process.get_stack_word(1);
-    let word2 = process.get_stack_word(2);
-    let word3 = process.get_stack_word(3);
+    let word0 = process.get_stack_word(1);
+    let word1 = process.get_stack_word(5);
+    let word2 = process.get_stack_word(9);
+    let word3 = process.get_stack_word(13);
     let key = Rpo256::hash_elements(&[*word3, *word2, *word1, *word0].concat());
 
     // build a vector of values from the two word and insert it into the advice map under the
