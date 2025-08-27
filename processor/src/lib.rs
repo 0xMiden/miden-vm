@@ -91,7 +91,7 @@ pub mod math {
 
 pub mod crypto {
     pub use miden_core::crypto::{
-        hash::{Blake3_192, Blake3_256, ElementHasher, Hasher, Rpo256, Rpx256},
+        hash::{Blake3_192, Blake3_256, ElementHasher, Hasher, Poseidon2, Rpo256, Rpx256},
         merkle::{
             MerkleError, MerklePath, MerkleStore, MerkleTree, NodeIndex, PartialMerkleTree,
             SimpleSmt,

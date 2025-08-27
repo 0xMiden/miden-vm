@@ -73,6 +73,7 @@ pub mod crypto {
             blake::{Blake3_160, Blake3_192, Blake3_256, Blake3Digest},
             rpo::Rpo256,
             rpx::Rpx256,
+            poseidon2::Poseidon2,
         };
     }
 
