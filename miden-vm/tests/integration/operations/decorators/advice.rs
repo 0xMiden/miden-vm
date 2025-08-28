@@ -367,3 +367,55 @@ fn advice_insert_hdword() {
     let test = build_test!(source, &stack_inputs);
     test.expect_stack(&[1, 2, 3, 4, 5, 6, 7, 8]);
 }
+
+#[test]
+fn advice_insert_hqword() {
+    let source: &str = "
+    use.std::sys
+
+    begin
+        # stack: [11, 12, 13, 14, 21, 22, 23, 24, 31, 32, 33, 34, 41, 42, 43, 44]
+
+        # hash and insert top four words into the advice map
+        adv.insert_hqword
+
+        # manually compute the hash of the four words
+
+        swapdw
+        # => [31, 32, 33, 34, 41, 42, 43, 44, 11, 12, 13, 14, 21, 22, 23, 24]
+
+        # pad capacity element of the hasher
+        padw movdnw.2
+        # => [31, 32, 33, 34, 41, 42, 43, 44, CAPACITY, 11, 12, 13, 14, 21, 22, 23, 24]
+
+        hperm
+        # => [RATE, RATE, PERM, 11, 12, 13, 14, 21, 22, 23, 24]
+
+        # drop rate words
+        dropw dropw
+        # => [PERM, 11, 12, 13, 14, 21, 22, 23, 24]
+
+        movdnw.2
+        # => [11, 12, 13, 14, 21, 22, 23, 24, PERM]
+
+        hperm
+        # => [RATE, RATE, PERM]
+
+        # get the resulting hash
+        dropw swapw dropw
+        # => [KEY]
+
+        # load the advice stack with values from the advice map and drop the key
+        adv.push_mapval
+        dropw
+
+        # move the values from the advice stack to the operand stack
+        adv_push.16
+
+        # truncate the stack
+        exec.sys::truncate_stack
+    end";
+    let stack_inputs = [44, 43, 42, 41, 34, 33, 32, 31, 24, 23, 22, 21, 14, 13, 12, 11];
+    let test = build_test!(source, &stack_inputs);
+    test.expect_stack(&[11, 12, 13, 14, 21, 22, 23, 24, 31, 32, 33, 34, 41, 42, 43, 44]);
+}

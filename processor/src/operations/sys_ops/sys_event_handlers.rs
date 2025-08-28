@@ -44,6 +44,7 @@ pub fn handle_system_event(
             let domain = process.get_stack_item(HDWORD_TO_MAP_WITH_DOMAIN_DOMAIN_OFFSET);
             insert_hdword_into_adv_map(process, domain, err_ctx)
         },
+        SystemEvent::HqwordToMap => insert_hqword_into_adv_map(process, err_ctx),
         SystemEvent::HpermToMap => insert_hperm_into_adv_map(process, err_ctx),
     }
 }
@@ -86,7 +87,7 @@ fn insert_mem_values_into_adv_map(
         .map_err(|err| ExecutionError::advice_error(err, process.clk(), err_ctx))
 }
 
-/// Reads two word from the operand stack and inserts them into the advice map under the key
+/// Reads two words from the operand stack and inserts them into the advice map under the key
 /// defined by the hash of these words.
 ///
 /// Inputs:
@@ -111,6 +112,45 @@ fn insert_hdword_into_adv_map(
     // build a vector of values from the two word and insert it into the advice map under the
     // computed key
     let mut values = Vec::with_capacity(2 * WORD_SIZE);
+    values.extend_from_slice(&Into::<[Felt; WORD_SIZE]>::into(word1));
+    values.extend_from_slice(&Into::<[Felt; WORD_SIZE]>::into(word0));
+
+    process
+        .advice_provider_mut()
+        .insert_into_map(key, values)
+        .map_err(|err| ExecutionError::advice_error(err, process.clk(), err_ctx))
+}
+
+/// Reads four words from the operand stack and inserts them into the advice map under the key
+/// defined by the hash of these words.
+///
+/// Inputs:
+///   Operand stack: [event_id, D, C, B, A, ...]
+///   Advice map: {...}
+///
+/// Outputs:
+///   Advice map: {KEY: [A', B', C', D'])}
+///
+/// Where:
+/// - KEY is the hash computed as hash(hash(hash(A || B) || C) || D) with domain=0.
+/// - A' (and other words with `'`) is the A word with the reversed element order: A = [a3, a2, a1,
+///   a0], A' = [a0, a1, a2, a3].
+fn insert_hqword_into_adv_map(
+    process: &mut ProcessState,
+    err_ctx: &impl ErrorContext,
+) -> Result<(), ExecutionError> {
+    // get the top four words from the stack and hash them to compute the key value
+    let word0 = process.get_stack_word(1);
+    let word1 = process.get_stack_word(5);
+    let word2 = process.get_stack_word(9);
+    let word3 = process.get_stack_word(13);
+    let key = Rpo256::hash_elements(&[*word3, *word2, *word1, *word0].concat());
+
+    // build a vector of values from the two word and insert it into the advice map under the
+    // computed key
+    let mut values = Vec::with_capacity(4 * WORD_SIZE);
+    values.extend_from_slice(&Into::<[Felt; WORD_SIZE]>::into(word3));
+    values.extend_from_slice(&Into::<[Felt; WORD_SIZE]>::into(word2));
     values.extend_from_slice(&Into::<[Felt; WORD_SIZE]>::into(word1));
     values.extend_from_slice(&Into::<[Felt; WORD_SIZE]>::into(word0));
 
