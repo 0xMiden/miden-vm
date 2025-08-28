@@ -1298,6 +1298,7 @@ dependencies = [
  "miden-air",
  "miden-assembly",
  "miden-core",
+ "miden-crypto",
  "miden-processor",
  "miden-test-utils",
  "miden-utils-sync",

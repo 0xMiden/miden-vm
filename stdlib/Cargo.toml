@@ -33,6 +33,7 @@ with-debug-info = []
 [dependencies]
 miden-assembly.workspace = true
 miden-core.workspace = true
+miden-crypto.workspace = true
 miden-processor.workspace = true
 miden-utils-sync.workspace = true
 thiserror.workspace = true
