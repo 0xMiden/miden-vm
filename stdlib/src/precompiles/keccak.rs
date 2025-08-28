@@ -1,33 +1,66 @@
-use alloc::{sync::Arc, vec, vec::Vec};
+use alloc::{vec, vec::Vec};
 
 use miden_core::{AdviceMap, Felt};
-use miden_crypto::{Word, hash::rpo::Rpo256};
-use miden_processor::{AdviceMutation, ProcessState};
+use miden_crypto::hash::rpo::Rpo256;
+use miden_processor::{AdviceMutation, EventError, ProcessState};
 
 use crate::precompiles::read_memory;
 
 pub const KECCAK_EVENT_ID: &str = "miden_stdlib::hash::keccak";
 
-pub fn push_keccak(process: &ProcessState) -> Result<Vec<AdviceMutation>, ()> {
-    // start at 1 since 0 holds the event id "
-    let ptr = process.get_stack_item(1).as_int();
-    let len = process.get_stack_item(2).as_int();
+// KECCAK EVENT ERROR
+// ================================================================================================
 
-    // Attempt to collect the field elements between `prt` and `ptr+len`.
-    let witness = read_memory(process, ptr, len)?;
+#[derive(Debug, thiserror::Error)]
+pub enum KeccakError {
+    #[error("failed to read memory at ptr {ptr}, len {len}")]
+    MemoryReadFailed { ptr: u64, len: u64 },
+    #[error("invalid byte value in memory: {value}")]
+    InvalidByteValue { value: u64 },
+}
+
+/// Event handler which pushes keccak256 hash to the advice stack.
+///
+/// This handler is used to defer expensive keccak computation to the native verifier.
+/// The verifier will re-execute the keccak operation and verify the result.
+///
+/// Inputs:
+///   Operand stack: [event_id, ptr, len, ...]
+///   Memory: bytes at [ptr, ptr+len)
+///
+/// Outputs:
+///   Advice stack: [hash_bytes...] (32 bytes as individual Felts)
+///   Advice map: commitment -> preimage mapping for prover recovery
+///
+/// Where:
+/// - ptr is the memory address where the input bytes start
+/// - len is the number of bytes to hash
+/// - hash_bytes are the 32 bytes of the keccak256 hash
+pub fn push_keccak(process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
+    // start at 1 since 0 holds the event id
+    // Note: stack layout after emit is [event_id, len, ptr, ...]
+    let len = process.get_stack_item(1).as_int();
+    let ptr = process.get_stack_item(2).as_int();
+
+    // Attempt to collect the field elements between `ptr` and `ptr+len`.
+    let witness =
+        read_memory(process, ptr, len).map_err(|_| KeccakError::MemoryReadFailed { ptr, len })?;
 
     // Try to convert to bytes
     let preimage = witness
         .iter()
-        .map(|felt| u8::try_from(felt.as_int()))
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|_| ())?;
+        .map(|felt| {
+            u8::try_from(felt.as_int())
+                .map_err(|_| KeccakError::InvalidByteValue { value: felt.as_int() })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
     // Resulting Keccak hash of the preimage
     let keccak_hash = miden_crypto::hash::keccak::Keccak256::hash(&preimage);
     let advice_stack_extension =
         AdviceMutation::extend_stack(keccak_hash.iter().map(|byte| Felt::from(*byte)));
 
-    // Commiment to precompile call
+    // Commitment to precompile call
     // Rpo(
     //     Rpo(preimage),
     //     Rpo(Keccak(preimage))
@@ -38,38 +71,8 @@ pub fn push_keccak(process: &ProcessState) -> Result<Vec<AdviceMutation>, ()> {
     ]);
 
     // store the calldata in the advice map to be recovered later on by the prover
-    let entry: (Word, Arc<Felt>) = (calldata_commitment, witness.into());
+    let entry = (calldata_commitment, witness);
     let advice_map_extension = AdviceMutation::extend_map(AdviceMap::from_iter([entry]));
 
     Ok(vec![advice_stack_extension, advice_map_extension])
-}
-
-pub fn call_keccak(process: &ProcessState) {
-    // input stack
-    let ptr_in;
-    let len;
-    let prt_out;
-
-    let witness_sponge;
-    // stream data from ptr, and absorb into sponge, 2 words at a time
-    // finalize absorb
-    let witness_commitment = witness_sponge.finalize; // Rpo(preimage)
-
-    // emit event calling this precompile which pushes the
-    // stack [ptr, len]
-    emit.event("miden_stdlib::hash::keccak");
-    // advice: [kecack_hash] as bytes
-
-    let hash_commitment;
-    // stream kecack_hash from advice, and write to memory at ptr out, while absorbing into hash_commitment sponge
-
-    // now merge both witness_commitment and hash_commitment
-    // and get call_data commitment
-    let call_data_commitment = rpo_merge(witness_commitment, hash_commitment);
-    
-    // for now, let's assume there is an event "system::record_precompile"
-    // stack: [ event("miden_stdlib::hash::keccak"), call_data_commitment]
-    emit.event("system::record_precompile")
-
-    // output stack can be whatever, 
 }

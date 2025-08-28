@@ -1,6 +1,6 @@
 #![no_std]
 
-mod precompiles;
+pub mod precompiles;
 
 extern crate alloc;
 
