@@ -82,16 +82,16 @@ impl ProveCmd {
         Ok(match self.security.as_str() {
             "96bits" => {
                 if self.recursive {
-                    ProvingOptions::with_96_bit_security_recursive()
+                    ProvingOptions::with_96_bit_security_recursion_friendly()
                 } else {
-                    ProvingOptions::with_96_bit_security_non_recursive(hash_fn)
+                    ProvingOptions::with_96_bit_security(hash_fn)
                 }
             },
             "128bits" => {
                 if self.recursive {
-                    ProvingOptions::with_128_bit_security_recursive()
+                    ProvingOptions::with_128_bit_security_recursion_friendly()
                 } else {
-                    ProvingOptions::with_128_bit_security_non_recursive(hash_fn)
+                    ProvingOptions::with_128_bit_security(hash_fn)
                 }
             },
             other => panic!("{other} is not a valid security setting"),

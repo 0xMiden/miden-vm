@@ -287,8 +287,7 @@ fn falcon_prove_verify() {
     host.load_library(&StdLibrary::default()).expect("failed to load mast forest");
     host.load_handler(EVENT_FALCON_SIG_TO_STACK, push_falcon_signature).unwrap();
 
-    let options =
-        ProvingOptions::with_96_bit_security_non_recursive(miden_air::HashFunction::Blake3_192);
+    let options = ProvingOptions::with_96_bit_security(miden_air::HashFunction::Blake3_192);
     let (stack_outputs, proof) = miden_utils_testing::prove(
         &program,
         stack_inputs.clone(),
