@@ -410,10 +410,10 @@ fn advice_insert_hqword() {
         dropw
 
         # move the values from the advice stack to the operand stack
-        adv_push.16
-
-        # truncate the stack
-        exec.sys::truncate_stack
+        repeat.4
+            movupw.3
+            adv_loadw
+        end
     end";
     let stack_inputs = [44, 43, 42, 41, 34, 33, 32, 31, 24, 23, 22, 21, 14, 13, 12, 11];
     let test = build_test!(source, &stack_inputs);
