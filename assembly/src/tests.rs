@@ -1259,7 +1259,7 @@ end",
 #[test]
 fn const_event_from_string() -> TestResult {
     let context = TestContext::default();
-    let sample_event_name = "test::constant";
+    let sample_event_name = "miden::test::constant";
     let expected_felt = string_to_event_id(sample_event_name);
 
     let source1 = source_file!(
@@ -3572,8 +3572,8 @@ fn emit_instruction_digest() {
     let context = TestContext::new();
 
     let program_source = r#"
-        const.EVT1=event("evt::one")
-        const.EVT2=event("evt::two")
+        const.EVT1=event("miden::test::event_one")
+        const.EVT2=event("miden::test::event_two")
 
         proc.foo
             emit.EVT1
@@ -3611,7 +3611,7 @@ fn emit_syntax_equivalence() {
 
     // First program uses a constant
     let program1_source = r#"
-        const.EVT=event("evt::equiv")
+        const.EVT=event("miden::test::equiv")
         begin
             emit.EVT
         end
@@ -3620,13 +3620,13 @@ fn emit_syntax_equivalence() {
     // Second program uses inline emit.event("...")
     let program2_source = r#"
         begin
-            emit.event("evt::equiv")
+            emit.event("miden::test::equiv")
         end
     "#;
 
     // Third program uses manual emit with constant event name
     let program3_source = r#"
-        const.EVT=event("evt::equiv")
+        const.EVT=event("miden::test::equiv")
         begin
             push.EVT
             emit
@@ -3637,7 +3637,6 @@ fn emit_syntax_equivalence() {
     let program1 = context.assemble(program1_source).unwrap();
     let program2 = context.assemble(program2_source).unwrap();
     let program3 = context.assemble(program3_source).unwrap();
-
 
     // Get the MAST forest digests for both programs
     let digest1 = program1.hash();

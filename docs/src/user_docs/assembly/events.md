@@ -2,7 +2,9 @@
 
 Events interrupt VM execution for one cycle and hand control to the host. The host can read VM state and modify the advice provider. From the VM's perspective, `emit` has identical semantics to `noop` - the operand stack and registers remain unchanged.
 
-Event identifiers are field elements. Use a stable mapping: `event_id = blake3("<name>") mod p`, where `p` is the Goldilocks prime. The VM doesn’t enforce structure for stack-provided IDs, but immediate forms restrict inputs to this mapping.
+Event identifiers are field elements. Use a stable mapping: first 64 bits of `blake3("<name>")` as little-endian u64, mod p. The VM doesn't enforce structure for stack-provided IDs, but immediate forms restrict inputs to this mapping.
+
+Event names should be as unique as possible to avoid collisions with other libraries. Use a hierarchical naming convention like `project_name::library_name::event_name`. Generic names may cause conflicts in multi-library environments.
 
 ### Event Instructions
 
@@ -11,11 +13,11 @@ Event identifiers are field elements. Use a stable mapping: `event_id = blake3("
 
 ```miden
 # Using a constant
-const.MY_EVENT=event("transfer::initiated")
+const.MY_EVENT=event("miden::transfer::initiated")
 emit.MY_EVENT
 
 # Inline form
-emit.event("transfer::initiated")
+emit.event("miden::transfer::initiated")
 
 # Equivalent manual stack form (any Felt – not validated):
 push.<felt> emit drop

@@ -63,7 +63,7 @@ impl VisitMut for ConstEvalVisitor<'_> {
                     // NOTE: This function only validates the kind; the actual resolution to a Felt
                     // happens below in `visit_mut_immediate_felt` just like other Felt immediates.
                     // Enabled syntax:
-                    //   const.EVT = event("my::evt")
+                    //   const.EVT = event("...")
                     //   emit.EVT
                 },
                 Ok(_) => {
@@ -121,7 +121,7 @@ impl VisitMut for ConstEvalVisitor<'_> {
                     Ok(ConstantExpr::Hash(HashKind::Event, string)) => {
                         // CHANGE: resolve `event("...")` to a Felt when a Felt immediate is
                         // expected (e.g. enables `emit.EVENT`):
-                        //   const.EVT = event("my::evt")
+                        //   const.EVT = event("...")
                         //   emit.EVT
                         let event_id = string_to_event_id(string.as_str());
                         *imm = Immediate::Value(Span::new(span, event_id));
@@ -161,7 +161,7 @@ impl VisitMut for ConstEvalVisitor<'_> {
                         HashKind::Event => {
                             // CHANGE: allow `const.EVT = event("...")` with IntValue contexts by
                             // reducing to a Felt via word()[0]. Enables:
-                            //   const.EVT = event("my::evt")
+                            //   const.EVT = event("...")
                             //   push.EVT                # pushes the Felt event id
                             let event_id = string_to_event_id(string.as_str());
                             *imm = Immediate::Value(Span::new(span, IntValue::Felt(event_id)));
