@@ -18,12 +18,34 @@ bench = false
 doctest = false
 
 [features]
-default = []
-arbitrary = ["dep:proptest-derive", "dep:proptest", "miden-assembly-syntax/arbitrary"]
+default = ["std", "serde"]
+arbitrary = [
+    "dep:proptest-derive",
+    "dep:proptest",
+    "miden-assembly-syntax/arbitrary",
+]
+std = [
+    "miden-assembly-syntax/std",
+    "miden-bite?/std",
+    "miden-core/std",
+    "serde/std",
+    "thiserror/std",
+]
+serde = [
+    "dep:serde",
+    "dep:serde-untagged",
+    "dep:miden-bite",
+    "miden-assembly-syntax/serde",
+    "miden-core/serde",
+]
 
 [dependencies]
 derive_more = { version = "2.0", features = ["from"] }
 miden-assembly-syntax.workspace = true
+miden-bite = { workspace = true, optional = true }
 miden-core.workspace = true
 proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+serde-untagged = { workspace = true, optional = true }
+thiserror.workspace = true

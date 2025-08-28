@@ -13,6 +13,8 @@ use miden_core::utils::{
 };
 use miden_debug_types::{SourceSpan, Span, Spanned};
 use miden_utils_diagnostics::{IntoDiagnostic, Report, miette};
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 use crate::{
     LibraryNamespace, LibraryPath,
@@ -157,6 +159,103 @@ impl Deserializable for QualifiedProcedureName {
     }
 }
 
+#[cfg(feature = "serde")]
+impl serde::Serialize for QualifiedProcedureName {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        if serializer.is_human_readable() {
+            let name = format!("{}", self);
+            serializer.serialize_str(&name)
+        } else {
+            use serde::ser::SerializeStruct;
+
+            let mut builder = serializer.serialize_struct("QualifiedProcedureName", 2)?;
+            builder.serialize_field("module", &self.module)?;
+            builder.serialize_field("name", &self.name)?;
+            builder.end()
+        }
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for QualifiedProcedureName {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Visitor;
+
+        if deserializer.is_human_readable() {
+            let name = <&'de str as serde::Deserialize>::deserialize(deserializer)?;
+            return Self::from_str(name).map_err(serde::de::Error::custom);
+        }
+
+        #[derive(Deserialize)]
+        #[serde(field_identifier, rename_all = "lowercase")]
+        enum Field {
+            Module,
+            Name,
+        }
+
+        struct QualifiedProcedureNameVisitor;
+        impl<'de> Visitor<'de> for QualifiedProcedureNameVisitor {
+            type Value = QualifiedProcedureName;
+
+            fn expecting(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
+                formatter.write_str("struct QualifiedProcedureName")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::SeqAccess<'de>,
+            {
+                let module = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
+                let name = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(1, &self))?;
+                Ok(QualifiedProcedureName::new(module, name))
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::MapAccess<'de>,
+            {
+                let mut module = None;
+                let mut name = None;
+                while let Some(key) = map.next_key()? {
+                    match key {
+                        Field::Module => {
+                            if module.is_some() {
+                                return Err(serde::de::Error::duplicate_field("module"));
+                            }
+                            module = Some(map.next_value()?);
+                        },
+                        Field::Name => {
+                            if name.is_some() {
+                                return Err(serde::de::Error::duplicate_field("name"));
+                            }
+                            name = Some(map.next_value()?);
+                        },
+                    }
+                }
+                let module = module.ok_or_else(|| serde::de::Error::missing_field("module"))?;
+                let name = name.ok_or_else(|| serde::de::Error::missing_field("name"))?;
+                Ok(QualifiedProcedureName::new(module, name))
+            }
+        }
+
+        deserializer.deserialize_struct(
+            "QualifiedProcedureName",
+            &["module", "name"],
+            QualifiedProcedureNameVisitor,
+        )
+    }
+}
+
 // PROCEDURE NAME
 // ================================================================================================
 
@@ -196,6 +295,8 @@ impl Deserializable for QualifiedProcedureName {
 /// end
 /// ```
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
 pub struct ProcedureName(Ident);
 
 impl ProcedureName {

@@ -46,7 +46,7 @@ use miden_core::{
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
-use crate::{Dependency, MastArtifact, Package, PackageExport, PackageManifest};
+use crate::{Dependency, MastArtifact, Package, PackageExport, PackageManifest, Section};
 
 // CONSTANTS
 // ================================================================================================
@@ -63,7 +63,7 @@ const MAGIC_LIBRARY: &[u8; 4] = b"LIB\0";
 /// The format version.
 ///
 /// If future modifications are made to this format, the version should be incremented by 1.
-const VERSION: [u8; 3] = [1, 0, 0];
+const VERSION: [u8; 3] = [2, 0, 0];
 
 // PACKAGE SERIALIZATION/DESERIALIZATION
 // ================================================================================================
@@ -83,8 +83,11 @@ impl Serializable for Package {
         // Write manifest
         self.manifest.write_into(target);
 
-        // Write optional account component metadata
-        self.account_component_metadata_bytes.write_into(target);
+        // Write custom sections
+        target.write_usize(self.sections.len());
+        for section in self.sections.iter() {
+            section.write_into(target);
+        }
     }
 }
 
@@ -114,15 +117,15 @@ impl Deserializable for Package {
         // Read manifest
         let manifest = PackageManifest::read_from(source)?;
 
-        // Read optional account component metadata
-        let account_component_metadata_bytes: Option<Vec<u8>> = Deserializable::read_from(source)?;
+        // Read custom sections
+        let num_sections = source.read_usize()?;
+        let mut sections = Vec::with_capacity(num_sections);
+        for _ in 0..num_sections {
+            let section = Section::read_from(source)?;
+            sections.push(section);
+        }
 
-        Ok(Self {
-            name,
-            mast,
-            manifest,
-            account_component_metadata_bytes,
-        })
+        Ok(Self { name, mast, manifest, sections })
     }
 }
 
@@ -163,6 +166,110 @@ impl Deserializable for MastArtifact {
 
 // PACKAGE MANIFEST SERIALIZATION/DESERIALIZATION
 // ================================================================================================
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for PackageManifest {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+
+        struct PackageExports<'a>(&'a BTreeMap<QualifiedProcedureName, PackageExport>);
+
+        impl serde::Serialize for PackageExports<'_> {
+            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: serde::Serializer,
+            {
+                use serde::ser::SerializeSeq;
+
+                let mut serializer = serializer.serialize_seq(Some(self.0.len()))?;
+                for value in self.0.values() {
+                    serializer.serialize_element(value)?;
+                }
+                serializer.end()
+            }
+        }
+
+        let mut serializer = serializer.serialize_struct("PackageManifest", 2)?;
+        serializer.serialize_field("exports", &PackageExports(&self.exports))?;
+        serializer.serialize_field("dependencies", &self.dependencies)?;
+        serializer.end()
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for PackageManifest {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        #[serde(field_identifier, rename_all = "lowercase")]
+        enum Field {
+            Exports,
+            Dependencies,
+        }
+
+        struct PackageManifestVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for PackageManifestVisitor {
+            type Value = PackageManifest;
+
+            fn expecting(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
+                formatter.write_str("struct PackageManifest")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::SeqAccess<'de>,
+            {
+                let exports = seq
+                    .next_element::<Vec<PackageExport>>()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
+                let dependencies = seq
+                    .next_element::<Vec<Dependency>>()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(1, &self))?;
+                Ok(PackageManifest::new(exports).with_dependencies(dependencies))
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::MapAccess<'de>,
+            {
+                let mut exports = None;
+                let mut dependencies = None;
+                while let Some(key) = map.next_key()? {
+                    match key {
+                        Field::Exports => {
+                            if exports.is_some() {
+                                return Err(serde::de::Error::duplicate_field("exports"));
+                            }
+                            exports = Some(map.next_value::<Vec<PackageExport>>()?);
+                        },
+                        Field::Dependencies => {
+                            if dependencies.is_some() {
+                                return Err(serde::de::Error::duplicate_field("dependencies"));
+                            }
+                            dependencies = Some(map.next_value::<Vec<Dependency>>()?);
+                        },
+                    }
+                }
+                let exports = exports.ok_or_else(|| serde::de::Error::missing_field("exports"))?;
+                let dependencies =
+                    dependencies.ok_or_else(|| serde::de::Error::missing_field("dependencies"))?;
+                Ok(PackageManifest::new(exports).with_dependencies(dependencies))
+            }
+        }
+
+        deserializer.deserialize_struct(
+            "PackageManifest",
+            &["exports", "dependencies"],
+            PackageManifestVisitor,
+        )
+    }
+}
 
 impl Serializable for PackageManifest {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {

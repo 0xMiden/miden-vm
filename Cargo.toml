@@ -40,6 +40,7 @@ overflow-checks = true
 [workspace.dependencies]
 # Workspace crates
 miden-air = { path = "./air", version = "0.18", default-features = false }
+miden-bite = { path = "./crates/utils/bite", version = "0.18", default-features = false }
 miden-assembly = { path = "./assembly", version = "0.18", default-features = false }
 miden-assembly-syntax = { path = "./assembly-syntax", version = "0.18", default-features = false }
 miden-core = { path = "./core", version = "0.18", default-features = false }
@@ -59,6 +60,7 @@ miden-formatting = { version = "0.1", default-features = false }
 midenc-hir-type = { version = "0.1", default-features = false }
 
 # Third-party crates
+env_logger = "0.11"
 log = "0.4"
 paste = "1.0"
 proptest = { version = "1.7", default-features = false, features = [
@@ -72,6 +74,7 @@ serde = { version = "1.0", default-features = false, features = [
     "rc",
 ] }
 serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
+serde-untagged = "0.1"
 smallvec = { version = "1.13", default-features = false, features = [
     "union",
     "const_generics",
