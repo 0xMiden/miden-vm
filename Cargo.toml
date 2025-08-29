@@ -63,7 +63,7 @@ insta = { version = "1.43", default-features = false, features = [
     "colors",
 ] }
 log = { version = "0.4", default-features = false }
-paste = { version = "1.0", default-feature = false }
+paste = { version = "1.0", default-features = false }
 proptest = { version = "1.7", default-features = false, features = [
     "no_std",
     "alloc",
