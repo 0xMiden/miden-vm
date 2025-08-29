@@ -7,7 +7,7 @@ use crate::system::ContextId;
 // ================================================================================================
 
 /// Keeps track of code blocks which are currently being executed by the VM.
-#[derive(Default)]
+#[derive(Debug, Default, Clone)]
 pub struct BlockStack {
     blocks: Vec<BlockInfo>,
 }
@@ -83,6 +83,11 @@ impl BlockStack {
         block
     }
 
+    /// Returns true if the block stack is empty.
+    pub fn is_empty(&self) -> bool {
+        self.blocks.is_empty()
+    }
+
     /// Returns a reference to a block at the top of the stack.
     pub fn peek(&self) -> &BlockInfo {
         self.blocks.last().expect("block stack is empty")
@@ -98,7 +103,7 @@ impl BlockStack {
 // ================================================================================================
 
 /// Contains basic information about a code block.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BlockInfo {
     pub addr: Felt,
     block_type: BlockType,
