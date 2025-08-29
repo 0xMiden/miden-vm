@@ -13,7 +13,7 @@ pub use keccak::{KECCAK_EVENT_ID, push_keccak};
 fn read_memory(process: &ProcessState, ptr: u64, len: u64) -> Result<Vec<Felt>, ()> {
     let ptr: u32 = ptr.try_into().map_err(|_| ())?;
     if !ptr.is_multiple_of(4) {
-        return Err(())
+        return Err(());
     }
 
     let len: u32 = len.try_into().map_err(|_| ())?;
@@ -22,7 +22,5 @@ fn read_memory(process: &ProcessState, ptr: u64, len: u64) -> Result<Vec<Felt>, 
 
     let ctx = process.ctx();
 
-    (ptr..end)
-        .map(|addr| process.get_mem_value(ctx, addr).ok_or(()))
-        .collect()
+    (ptr..end).map(|addr| process.get_mem_value(ctx, addr).ok_or(())).collect()
 }
