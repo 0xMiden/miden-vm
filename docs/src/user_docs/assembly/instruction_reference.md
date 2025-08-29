@@ -194,12 +194,13 @@ Instructions for moving data between the stack and other sources like program co
 
 *Insert into Advice Map:*
 
-| Instruction         | Stack Input        | Stack Output      | Notes                                                                                                                      |
-| ------------------- | ------------------ | ----------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `adv.insert_mem`    | `[K, a, b, ... ]`  | `[K, a, b, ... ]` | `advice_map[K] <- mem[a..b]`.                                                                                              |
-| `adv.insert_hdword` | `[B, A, ... ]`     | `[B, A, ... ]`    | `K <- hash(A \|\| B, domain=0)`. `advice_map[K] <- [A,B]`.                                                                  |
-| `adv.insert_hdword_d` | `[B, A, d, ... ]`| `[B, A, d, ... ]` | `K <- hash(A \|\| B, domain=d)`. `advice_map[K] <- [A,B]`.                                                                  |
-| `adv.insert_hperm`  | `[B, A, C, ...]`   | `[B, A, C, ...]`  | `K <- permute(C,A,B).digest`. `advice_map[K] <- [A,B]`.                                                                   |
+| Instruction           | Stack Input          | Stack Output         | Notes                                                                                    |
+| --------------------- | -------------------- | -------------------- | ---------------------------------------------------------------------------------------- |
+| `adv.insert_mem`      | `[K, a, b, ... ]`    | `[K, a, b, ... ]`    | `advice_map[K] <- mem[a..b]`.                                                            |
+| `adv.insert_hdword`   | `[B, A, ... ]`       | `[B, A, ... ]`       | `K <- hash(A \|\| B, domain=0)`. `advice_map[K] <- [A,B]`.                               |
+| `adv.insert_hdword_d` | `[B, A, d, ... ]`    | `[B, A, d, ... ]`    | `K <- hash(A \|\| B, domain=d)`. `advice_map[K] <- [A,B]`.                               |
+| `adv.insert_hqword`   | `[D, C, B, A, ... ]` | `[D, C, B, A, ... ]` | `K <- hash(hash(hash(A \|\| B) \|\| C) \|\| D), domain=0`. `advice_map[K] <- [A,B,C,D]`. |
+| `adv.insert_hperm`    | `[B, A, C, ...]`     | `[B, A, C, ...]`     | `K <- permute(C,A,B).digest`. `advice_map[K] <- [A,B]`.                                  |
 
 ### Random Access Memory
 
@@ -307,10 +308,11 @@ High-level constructs for controlling the execution flow.
 
 Instructions for communicating with the host through events and tracing.
 
-| Instruction | Stack Input | Stack Output | Cycles | Notes                                                                                                                                    |
-| ----------- | ----------- | ------------ | ------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `emit.<event_id>` | `[...]`     | `[...]`      | 5      | Emits an event with the specified `event_id` to the host. Does not change the state of the operand stack. The `event_id` can be any 32-bit value specified either directly or via a [named constant](./code_organization.md#constants). Events allow programs to communicate contextual information to the host for triggering appropriate actions. Example: `emit.123` or `emit.EVENT_ID_1` |
-| `trace.<trace_id>` | `[...]`     | `[...]`      | 0      | Emits a trace with the specified `trace_id` to the host. Does not change the state of the operand stack. The `trace_id` can be any 32-bit value specified either directly or via a [named constant](./code_organization.md#constants). Only active when programs are run with tracing flag (`-t` or `--trace`), otherwise ignored. Example: `trace.123` or `trace.TRACE_ID_1` |
+| Instruction        | Stack Input       | Stack Output      | Cycles | Notes                                                                                                                                                                                                                                                                                                                                                                                                                           |
+|--------------------|-------------------|-------------------|--------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `emit.<event_id>`  | `[...]`           | `[...]`           | 3      | Emits an event with the specified `event_id` to the host. The net effect on the operand stack is no change (internally expands to `push.<event_id> emit drop`). Immediate `event_id` must be defined via `const.ID=event("...")` or inlined as `emit.event("...")`. Events allow programs to communicate contextual information to the host for triggering appropriate actions. Example: `emit.event("foo")` or `emit.MY_EVENT` |
+| `emit`             | `[event_id, ...]` | `[event_id, ...]` | 1      | Emits an event using the `event_id` from the top of the stack. The stack remains unchanged as the event_id is read without consuming it. This instruction reads the event ID from the stack but does not modify the stack depth. Example: with `push.123` on stack, `emit` reads the event ID 123 and executes the corresponding event handler.                                                                                 |
+| `trace.<trace_id>` | `[...]`           | `[...]`           | 0      | Emits a trace with the specified `trace_id` to the host. Does not change the state of the operand stack. The `trace_id` can be any 32-bit value specified either directly or via a [named constant](./code_organization.md#constants). Only active when programs are run with tracing flag (`-t` or `--trace`), otherwise ignored. Example: `trace.123` or `trace.TRACE_ID_1`                                                   |
 
 ## Debugging Operations
 

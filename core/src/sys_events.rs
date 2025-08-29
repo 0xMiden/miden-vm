@@ -7,6 +7,8 @@ use core::fmt;
 // between 0 and 2^32.
 pub use constants::*;
 
+use crate::Felt;
+
 #[rustfmt::skip]
 mod constants {
     pub const EVENT_MERKLE_NODE_MERGE: u32            = 276124218;
@@ -25,6 +27,7 @@ mod constants {
     pub const EVENT_MEM_TO_MAP: u32                   = 2389394361;
     pub const EVENT_HDWORD_TO_MAP: u32                = 2391452729;
     pub const EVENT_HDWORD_TO_MAP_WITH_DOMAIN: u32    = 2822590340;
+    pub const EVENT_HQWORD_TO_MAP: u32                = 2913039991;
     pub const EVENT_HPERM_TO_MAP: u32                 = 3297060969;
     pub const EVENT_FALCON_DIV: u32                   = 3419226155;
 }
@@ -262,7 +265,7 @@ pub enum SystemEvent {
     /// Where KEY is computed as hash(A || B, domain=0)
     HdwordToMap,
 
-    /// Reads two word from the operand stack and inserts them into the advice map under the key
+    /// Reads two words from the operand stack and inserts them into the advice map under the key
     /// defined by the hash of these words (using `d` as the domain).
     ///
     /// Inputs:
@@ -275,6 +278,23 @@ pub enum SystemEvent {
     ///
     /// Where KEY is computed as hash(A || B, d).
     HdwordToMapWithDomain,
+
+    /// Reads four words from the operand stack and inserts them into the advice map under the key
+    /// defined by the hash of these words.
+    ///
+    /// Inputs:
+    ///   Operand stack: [D, C, B, A, ...]
+    ///   Advice map: {...}
+    ///
+    /// Outputs:
+    ///   Operand stack: [D, C, B, A, ...]
+    ///   Advice map: {KEY: [A', B', C', D'])}
+    ///
+    /// Where:
+    /// - KEY is the hash computed as hash(hash(hash(A || B) || C) || D) with domain=0.
+    /// - A' (and other words with `'`) is the A word with the reversed element order: A = [a3, a2,
+    ///   a1, a0], A' = [a0, a1, a2, a3].
+    HqwordToMap,
 
     /// Reads three words from the operand stack and inserts the top two words into the advice map
     /// under the key defined by applying an RPO permutation to all three words.
@@ -312,13 +332,15 @@ impl SystemEvent {
             SystemEvent::MemToMap => EVENT_MEM_TO_MAP,
             SystemEvent::HdwordToMap => EVENT_HDWORD_TO_MAP,
             SystemEvent::HdwordToMapWithDomain => EVENT_HDWORD_TO_MAP_WITH_DOMAIN,
+            SystemEvent::HqwordToMap => EVENT_HQWORD_TO_MAP,
             SystemEvent::HpermToMap => EVENT_HPERM_TO_MAP,
         }
     }
 
     /// Returns a system event corresponding to the specified event ID, or `None` if the event
     /// ID is not recognized.
-    pub fn from_event_id(event_id: u32) -> Option<Self> {
+    pub fn from_event_id(event_id: Felt) -> Option<Self> {
+        let event_id: u32 = event_id.as_int().try_into().ok()?;
         match event_id {
             EVENT_MERKLE_NODE_MERGE => Some(SystemEvent::MerkleNodeMerge),
             EVENT_MERKLE_NODE_TO_STACK => Some(SystemEvent::MerkleNodeToStack),
@@ -337,6 +359,7 @@ impl SystemEvent {
             EVENT_MEM_TO_MAP => Some(SystemEvent::MemToMap),
             EVENT_HDWORD_TO_MAP => Some(SystemEvent::HdwordToMap),
             EVENT_HDWORD_TO_MAP_WITH_DOMAIN => Some(SystemEvent::HdwordToMapWithDomain),
+            EVENT_HQWORD_TO_MAP => Some(SystemEvent::HqwordToMap),
             EVENT_HPERM_TO_MAP => Some(SystemEvent::HpermToMap),
             _ => None,
         }
@@ -369,6 +392,7 @@ impl fmt::Display for SystemEvent {
             Self::MemToMap => write!(f, "mem_to_map"),
             Self::HdwordToMap => write!(f, "hdword_to_map"),
             Self::HdwordToMapWithDomain => write!(f, "hdword_to_map_with_domain"),
+            Self::HqwordToMap => write!(f, "hqword_to_map"),
             Self::HpermToMap => write!(f, "hperm_to_map"),
         }
     }

@@ -1,0 +1,7 @@
+---
+source: assembly/src/tests.rs
+expression: program
+---
+begin
+    dyncall
+end

@@ -1,5 +1,5 @@
 use alloc::vec::Vec;
-use core::{fmt, mem};
+use core::{fmt, mem, ops::Index};
 
 use miden_crypto::{Felt, Word, ZERO};
 use miden_formatting::prettier::PrettyPrint;
@@ -99,10 +99,31 @@ impl BasicBlockNode {
 
         // Validate decorators list (only in debug mode).
         #[cfg(debug_assertions)]
-        validate_decorators(&operations, &decorators);
+        validate_decorators(operations.len(), &decorators);
 
         let (op_batches, digest) = batch_and_hash_ops(operations);
-        Ok(Self { op_batches, digest, decorators })
+        // the prior line may have inserted some padding Noops in the op_batches
+        // the decorator mapping should still point to the correct operation when that happens
+        let reflowed_decorators = BasicBlockNode::adjust_decorators(decorators, &op_batches);
+
+        Ok(Self {
+            op_batches,
+            digest,
+            decorators: reflowed_decorators,
+        })
+    }
+
+    // Takes a `DecoratorList` which operation indexes are defined against un-padded operations, and
+    // adjusts those indexes to point into the padded `&[OpBatches]` passed as argument.
+    //
+    // IOW this makes its `decorators` padding-aware, or equivalently "adds" the padding to these
+    // decorators
+    fn adjust_decorators(decorators: DecoratorList, op_batches: &[OpBatch]) -> DecoratorList {
+        let padding_offsets = DecoratorPaddingOffsets::new(op_batches);
+        decorators
+            .into_iter()
+            .map(|(op_idx, dec_id)| (op_idx + padding_offsets[op_idx], dec_id))
+            .collect()
     }
 
     /// Returns a new [`BasicBlockNode`] from values that are assumed to be correct.
@@ -181,9 +202,22 @@ impl BasicBlockNode {
         DecoratorIterator::new(&self.decorators)
     }
 
+    /// Returns an iterator which allows us to iterate through the decorator list of
+    /// this basic block node with op indexes aligned to the "raw" (un-padded)) op
+    /// batches of the basic block node
+    pub fn raw_decorator_iter(&self) -> RawDecoratorIterator<'_> {
+        RawDecoratorIterator::new(&self.decorators, &self.op_batches)
+    }
+
     /// Returns an iterator over the operations in the order in which they appear in the program.
     pub fn operations(&self) -> impl Iterator<Item = &Operation> {
         self.op_batches.iter().flat_map(|batch| batch.ops())
+    }
+
+    /// Returns an iterator over the un-padded operations in the order in which they
+    /// appear in the program.
+    pub fn raw_operations(&self) -> impl Iterator<Item = &Operation> {
+        self.op_batches.iter().flat_map(|batch| batch.raw_ops())
     }
 
     /// Returns the total number of operations and decorators in this basic block.
@@ -311,6 +345,57 @@ impl fmt::Display for BasicBlockNodePrettyPrint<'_> {
     }
 }
 
+// RAW DECORATOR ITERATION
+// ================================================================================================
+
+/// Iterator used to iterate through the decorator list of a span block
+/// while executing operation batches of a span block.
+///
+/// This lets the caller iterate through a Decorator list with indexes that match the
+/// raw (unpadded) representation of a basic block.
+///
+/// IOW this makes its `BasicBlockNode::raw_decorators` padding-unaware, or equivalently
+/// "removes" the padding of these decorators
+pub struct RawDecoratorIterator<'a> {
+    decorators: &'a DecoratorList,
+    // cumulative padding offsets per group
+    padding_offsets: DecoratorPaddingOffsets,
+    // index of the current decorator in the decoratorlist
+    idx: usize,
+}
+
+impl<'a> RawDecoratorIterator<'a> {
+    /// Returns a new instance of raw decorator iterator instantiated with the provided decorator
+    /// list, tied to the provided op_batches list
+    fn new(decorators: &'a DecoratorList, op_batches: &'a [OpBatch]) -> Self {
+        // Decorators have been validated at the creation of BlockNode because this constructor
+        // is private. Consider using `validate_decorators`` if that changes.
+        let padding_offsets = DecoratorPaddingOffsets::new(op_batches);
+        Self { decorators, padding_offsets, idx: 0 }
+    }
+}
+
+impl<'a> Iterator for RawDecoratorIterator<'a> {
+    type Item = (usize, &'a DecoratorId);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.idx < self.decorators.len() {
+            let (this_op_idx, this_dec) = &self.decorators[self.idx];
+            self.idx += 1;
+
+            Some((this_op_idx - self.padding_offsets[*this_op_idx], this_dec))
+        } else {
+            None
+        }
+    }
+}
+
+impl<'a> ExactSizeIterator for RawDecoratorIterator<'a> {
+    fn len(&self) -> usize {
+        self.decorators.len() - self.idx
+    }
+}
+
 // OPERATION OR DECORATOR
 // ================================================================================================
 
@@ -384,6 +469,83 @@ impl<'a> Iterator for OperationOrDecoratorIterator<'a> {
 // HELPER FUNCTIONS
 // ================================================================================================
 
+/// Checks if a given decorators list is valid (only checked in debug mode)
+/// - Assert the decorator list is in ascending order.
+/// - Assert the last op index in decorator list is less than or equal to the number of operations.
+#[cfg(debug_assertions)]
+pub(crate) fn validate_decorators(operations_len: usize, decorators: &DecoratorList) {
+    if !decorators.is_empty() {
+        // check if decorator list is sorted
+        for i in 0..(decorators.len() - 1) {
+            debug_assert!(decorators[i + 1].0 >= decorators[i].0, "unsorted decorators list");
+        }
+        // assert the last index in decorator list is less than operations vector length
+        debug_assert!(
+            operations_len >= decorators.last().expect("empty decorators list").0,
+            "last op index in decorator list should be less than or equal to the number of ops"
+        );
+    }
+}
+
+// Indexes into an operations-long sequence of decorators. Should not be user-facing.
+//
+// a [`DecoratorList`] is a sequence of (op_idx, decorator_id) tuples such that the op_idx
+// can extend up to and including the length of the operations list it is meant to index into.
+// This is historical behavior meant to allow executing a decorator at the end of a basic block.
+#[doc(hidden)]
+struct DecoratorPaddingOffsets(Vec<usize>);
+
+impl DecoratorPaddingOffsets {
+    // Takes a sequence of op_batches including padding and returns a vector of the same length as
+    // the input sequence of operation, where each element counts the number of padding noops
+    // encountered since the start of the sequence.
+    #[must_use]
+    #[doc(hidden)]
+    fn new(op_batches: &[OpBatch]) -> Self {
+        // we build a sequence of per-op padding flags (0 if *not* a padding op, 1 if so)
+        let paddings = op_batches.iter().flat_map(|batch| {
+            (0..batch.num_groups()).flat_map(|group_idx| {
+                let group_len = batch.indptr()[group_idx + 1] - batch.indptr()[group_idx];
+                let padding = batch.padding()[group_idx];
+                if group_len == 0 {
+                    vec![]
+                } else {
+                    let mut v = vec![0usize; group_len];
+                    *v.last_mut().unwrap() = usize::from(padding);
+                    v
+                }
+            })
+        });
+        // incremental sum of all padding flags over the ops
+        let padding_offsets = paddings
+            .scan(0, |state, x| {
+                *state += x;
+                Some(*state)
+            })
+            .collect::<Vec<_>>();
+        Self(padding_offsets)
+    }
+}
+
+#[doc(hidden)]
+impl Index<usize> for DecoratorPaddingOffsets {
+    type Output = usize;
+
+    // Some decorators have an operation index equal to the length of the
+    // operations array, to ensure they are executed at the end of the block
+    // (since the semantics of the decorator index is that it must be executed
+    // before the operation index it points to). The following applies the max
+    // padding offset to them and preserves the invariant that their index is
+    // the new operation list's length.
+    fn index(&self, index: usize) -> &Self::Output {
+        if index == self.0.len() {
+            &self.0[index - 1]
+        } else {
+            &self.0[index]
+        }
+    }
+}
+
 /// Groups the provided operations into batches and computes the hash of the block.
 fn batch_and_hash_ops(ops: Vec<Operation>) -> (Vec<OpBatch>, Word) {
     // Group the operations into batches.
@@ -423,22 +585,4 @@ fn batch_ops(ops: Vec<Operation>) -> Vec<OpBatch> {
     }
 
     batches
-}
-
-/// Checks if a given decorators list is valid (only checked in debug mode)
-/// - Assert the decorator list is in ascending order.
-/// - Assert the last op index in decorator list is less than or equal to the number of operations.
-#[cfg(debug_assertions)]
-fn validate_decorators(operations: &[Operation], decorators: &DecoratorList) {
-    if !decorators.is_empty() {
-        // check if decorator list is sorted
-        for i in 0..(decorators.len() - 1) {
-            debug_assert!(decorators[i + 1].0 >= decorators[i].0, "unsorted decorators list");
-        }
-        // assert the last index in decorator list is less than operations vector length
-        debug_assert!(
-            operations.len() >= decorators.last().expect("empty decorators list").0,
-            "last op index in decorator list should be less than or equal to the number of ops"
-        );
-    }
 }

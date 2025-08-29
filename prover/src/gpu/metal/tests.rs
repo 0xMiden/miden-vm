@@ -244,13 +244,13 @@ where
 {
     if use_rpx {
         ExecutionProver::new(
-            ProvingOptions::with_128_bit_security_rpx(),
+            ProvingOptions::with_128_bit_security(HashFunction::Rpx256),
             StackInputs::default(),
             StackOutputs::default(),
         )
     } else {
         ExecutionProver::new(
-            ProvingOptions::with_128_bit_security(true),
+            ProvingOptions::with_128_bit_security(HashFunction::Rpo256),
             StackInputs::default(),
             StackOutputs::default(),
         )

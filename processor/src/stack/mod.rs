@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use miden_air::RowIndex;
-use miden_core::{WORD_SIZE, Word, stack::MIN_STACK_DEPTH};
+use miden_core::{Word, stack::MIN_STACK_DEPTH};
 
 use super::{
     ExecutionError, Felt, FieldElement, ONE, STACK_TRACE_WIDTH, StackInputs, StackOutputs, ZERO,
@@ -145,29 +145,42 @@ impl Stack {
     // TRACE ACCESSORS AND MUTATORS
     // --------------------------------------------------------------------------------------------
 
-    /// Returns the value located at the specified position on the stack at the current clock cycle.
+    /// Returns the value at the specified position on the stack, including overflow items.
+    ///
+    /// This method can access items beyond the top 16 positions by reading from the overflow table.
+    /// Position 0 is the top of the stack, positions 0-15 are in the trace, and positions 16+ are
+    /// in the overflow table.
     pub fn get(&self, pos: usize) -> Felt {
-        debug_assert!(pos < MIN_STACK_DEPTH, "stack underflow");
-        self.trace.get_stack_value_at(self.clk, pos)
+        if pos < MIN_STACK_DEPTH {
+            // Item is in the trace (top 16 positions)
+            self.trace.get_stack_value_at(self.clk, pos)
+        } else {
+            // Item is in the overflow table
+            // Calculate the index within the overflow table
+            let overflow_index = pos - MIN_STACK_DEPTH;
+            self.overflow.get_element_at(overflow_index).unwrap_or(ZERO)
+        }
     }
 
-    /// Returns a word located at the specified word index on the stack.
+    /// Returns a word starting at the specified element index on the stack, including overflow
+    /// items.
     ///
-    /// Specifically, word 0 is defined by the first 4 elements of the stack, word 1 is defined
-    /// by the next 4 elements etc. Since the top of the stack contains 4 word, the highest valid
-    /// word index is 3.
+    /// The word is formed by taking 4 consecutive elements starting from the specified index.
+    /// For example, start_idx=0 creates a word from stack elements 0-3, start_idx=1 creates
+    /// a word from elements 1-4, etc.
     ///
-    /// The words are created in reverse order. For example, for word 0 the top element of the
-    /// stack will be at the last position in the word.
+    /// The words are created in reverse order. For a word starting at index N, stack element
+    /// N+3 will be at position 0 of the word, N+2 at position 1, N+1 at position 2, and N
+    /// at position 3.
     ///
+    /// This method can access words that span into the overflow table.
     /// Creating a word does not change the state of the stack.
-    pub fn get_word(&self, word_idx: usize) -> Word {
-        let offset = word_idx * WORD_SIZE;
+    pub fn get_word(&self, start_idx: usize) -> Word {
         [
-            self.get(offset + 3),
-            self.get(offset + 2),
-            self.get(offset + 1),
-            self.get(offset),
+            self.get(start_idx + 3),
+            self.get(start_idx + 2),
+            self.get(start_idx + 1),
+            self.get(start_idx),
         ]
         .into()
     }

@@ -1,7 +1,36 @@
+use alloc::vec::Vec;
+
 use miden_core::{Felt, ZERO};
+use paste::paste;
 
 use super::FastProcessor;
 use crate::{ErrorContext, ExecutionError, utils::split_element};
+
+const U32_MAX: u64 = u32::MAX as u64;
+
+macro_rules! require_u32_operands {
+    ($processor:expr, [$($idx:expr),*], $err_ctx:expr) => {
+        require_u32_operands!($processor, [$($idx),*], ZERO, $err_ctx)
+    };
+    ($processor:expr, [$($idx:expr),*], $errno:expr, $err_ctx:expr) => {{
+        let mut invalid_values = Vec::new();
+
+        paste!{
+            $(
+                let [<operand_ $idx>] = $processor.stack_get($idx);
+                if [<operand_ $idx>].as_int() > U32_MAX {
+                    invalid_values.push([<operand_ $idx>]);
+                }
+            )*
+
+            if !invalid_values.is_empty() {
+                return Err(ExecutionError::not_u32_values(invalid_values, $errno, $err_ctx));
+            }
+            // Return tuple of operands based on indices
+            ($([<operand_ $idx>].as_int()),*)
+        }
+    }};
+}
 
 impl FastProcessor {
     /// Analogous to `Process::op_u32split`.
@@ -28,24 +57,10 @@ impl FastProcessor {
     /// The size of the stack is decremented by 1.
     #[inline(always)]
     pub fn op_u32add3(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
-        let (sum_hi, sum_lo) = {
-            let c = self.stack_get(0).as_int();
-            let b = self.stack_get(1).as_int();
-            let a = self.stack_get(2).as_int();
+        let (c, b, a) = require_u32_operands!(self, [0, 1, 2], err_ctx);
 
-            // Check that a, b, and c are u32 values.
-            if a > u32::MAX as u64 {
-                return Err(ExecutionError::not_u32_value(Felt::new(a), ZERO, err_ctx));
-            }
-            if b > u32::MAX as u64 {
-                return Err(ExecutionError::not_u32_value(Felt::new(b), ZERO, err_ctx));
-            }
-            if c > u32::MAX as u64 {
-                return Err(ExecutionError::not_u32_value(Felt::new(c), ZERO, err_ctx));
-            }
-            let result = Felt::new(a + b + c);
-            split_element(result)
-        };
+        let result = Felt::new(a + b + c);
+        let (sum_hi, sum_lo) = split_element(result);
 
         // write the high 32 bits to the new top of the stack, and low 32 bits after
         self.decrement_stack_size();
@@ -87,24 +102,10 @@ impl FastProcessor {
     /// back onto the stack.
     #[inline(always)]
     pub fn op_u32madd(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
-        let (result_hi, result_lo) = {
-            let b = self.stack_get(0).as_int();
-            let a = self.stack_get(1).as_int();
-            let c = self.stack_get(2).as_int();
+        let (b, a, c) = require_u32_operands!(self, [0, 1, 2], err_ctx);
 
-            // Check that a, b, and c are u32 values.
-            if b > u32::MAX as u64 {
-                return Err(ExecutionError::not_u32_value(Felt::new(a), ZERO, err_ctx));
-            }
-            if a > u32::MAX as u64 {
-                return Err(ExecutionError::not_u32_value(Felt::new(b), ZERO, err_ctx));
-            }
-            if c > u32::MAX as u64 {
-                return Err(ExecutionError::not_u32_value(Felt::new(c), ZERO, err_ctx));
-            }
-            let result = Felt::new(a * b + c);
-            split_element(result)
-        };
+        let result = Felt::new(a * b + c);
+        let (result_hi, result_lo) = split_element(result);
 
         // write the high 32 bits to the new top of the stack, and low 32 bits after
         self.decrement_stack_size();
@@ -167,16 +168,7 @@ impl FastProcessor {
         f: impl FnOnce(u64, u64) -> u64,
         err_ctx: &impl ErrorContext,
     ) -> Result<(), ExecutionError> {
-        let b = self.stack_get(0).as_int();
-        let a = self.stack_get(1).as_int();
-
-        // Check that a and b are u32 values.
-        if b > u32::MAX as u64 {
-            return Err(ExecutionError::not_u32_value(Felt::new(b), ZERO, err_ctx));
-        }
-        if a > u32::MAX as u64 {
-            return Err(ExecutionError::not_u32_value(Felt::new(a), ZERO, err_ctx));
-        }
+        let (b, a) = require_u32_operands!(self, [0, 1], err_ctx);
 
         let result = f(a, b);
         self.decrement_stack_size();
@@ -201,16 +193,7 @@ impl FastProcessor {
         f: impl FnOnce(u64, u64) -> u64,
         err_ctx: &impl ErrorContext,
     ) -> Result<(), ExecutionError> {
-        let b = self.stack_get(0).as_int();
-        let a = self.stack_get(1).as_int();
-
-        // Check that a and b are u32 values.
-        if a > u32::MAX as u64 {
-            return Err(ExecutionError::not_u32_value(Felt::new(a), ZERO, err_ctx));
-        }
-        if b > u32::MAX as u64 {
-            return Err(ExecutionError::not_u32_value(Felt::new(b), ZERO, err_ctx));
-        }
+        let (b, a) = require_u32_operands!(self, [0, 1], err_ctx);
 
         let result = Felt::new(f(a, b));
         let (hi, lo) = split_element(result);
@@ -231,16 +214,7 @@ impl FastProcessor {
         f: impl FnOnce(u64, u64) -> Result<(u64, u64), ExecutionError>,
         err_ctx: &impl ErrorContext,
     ) -> Result<(), ExecutionError> {
-        let first_old = self.stack_get(0).as_int();
-        let second_old = self.stack_get(1).as_int();
-
-        // Check that a and b are u32 values.
-        if first_old > u32::MAX as u64 {
-            return Err(ExecutionError::not_u32_value(Felt::new(first_old), err_code, err_ctx));
-        }
-        if second_old > u32::MAX as u64 {
-            return Err(ExecutionError::not_u32_value(Felt::new(second_old), err_code, err_ctx));
-        }
+        let (first_old, second_old) = require_u32_operands!(self, [0, 1], err_code, err_ctx);
 
         let (first_new, second_new) = f(first_old, second_old)?;
 

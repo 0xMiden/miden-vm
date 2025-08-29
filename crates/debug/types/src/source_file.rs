@@ -165,9 +165,10 @@ impl SourceFile {
 
     /// Returns a subset of the underlying content as a string slice.
     ///
-    /// The bounds of the given span are character indices, _not_ byte indices.
+    /// The bounds of the given span are byte indices, _not_ character indices.
     ///
-    /// Returns `None` if the given span is out of bounds
+    /// Returns `None` if the given span is out of bounds, or if the bounds do not
+    /// fall on valid UTF-8 character boundaries.
     #[inline(always)]
     pub fn source_slice(&self, span: impl Into<Range<usize>>) -> Option<&str> {
         self.content.source_slice(span)
@@ -552,9 +553,10 @@ impl SourceContent {
 
     /// Returns a subset of the underlying content as a string slice.
     ///
-    /// The bounds of the given span are character indices, _not_ byte indices.
+    /// The bounds of the given span are byte indices, _not_ character indices.
     ///
-    /// Returns `None` if the given span is out of bounds
+    /// Returns `None` if the given span is out of bounds, or if the bounds do not
+    /// fall on valid UTF-8 character boundaries.
     #[inline(always)]
     pub fn source_slice(&self, span: impl Into<Range<usize>>) -> Option<&str> {
         self.as_str().get(span.into())
@@ -672,7 +674,7 @@ impl SourceContent {
                     .to_usize();
                 let end = self
                     .line_column_to_offset(range.end.line, range.end.character)
-                    .ok_or(SourceContentUpdateError::InvalidSelectionEnd(range.start))?
+                    .ok_or(SourceContentUpdateError::InvalidSelectionEnd(range.end))?
                     .to_usize();
                 assert!(start <= end, "start of range must be less than end, got {start}..{end}",);
                 self.content.replace_range(start..end, &text);

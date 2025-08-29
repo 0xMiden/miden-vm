@@ -82,7 +82,8 @@ fn assert_eq_fail() {
 
 #[test]
 fn emit() {
-    let mut test = build_op_test!("emit.42", &[0, 0, 0, 0]);
+    // Use stack-provided event id form to avoid immediate parsing constraints
+    let mut test = build_op_test!("push.42 emit drop", &[0, 0, 0, 0]);
     test.add_event_handler(42, |_| Ok(Vec::new()));
     test.prove_and_verify(vec![], false);
 }

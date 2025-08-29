@@ -7,8 +7,8 @@ use pretty_assertions::assert_eq;
 
 use super::*;
 use crate::{
-    AdviceMutation, AsyncHost, BaseHost, EventError, MastForestStore, MemMastForestStore,
-    MemoryAddress, ProcessState, SyncHost,
+    AdviceMutation, AsyncHost, BaseHost, EventError, FutureMaybeSend, MastForestStore,
+    MemMastForestStore, MemoryAddress, ProcessState, SyncHost,
 };
 
 #[test]
@@ -215,9 +215,9 @@ impl From<&ProcessState<'_>> for ProcessStateSnapshot {
             stack_state: state.get_stack_state(),
             stack_words: [
                 state.get_stack_word(0),
-                state.get_stack_word(1),
-                state.get_stack_word(2),
-                state.get_stack_word(3),
+                state.get_stack_word(4),
+                state.get_stack_word(8),
+                state.get_stack_word(12),
             ],
             mem_state: state.get_mem_state(state.ctx()),
         }
@@ -250,10 +250,6 @@ impl<S> BaseHost for ConsistencyHost<S>
 where
     S: SourceManager,
 {
-    fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>> {
-        self.store.get(node_digest)
-    }
-
     fn get_label_and_source_file(
         &self,
         location: &Location,
@@ -279,11 +275,11 @@ impl<S> SyncHost for ConsistencyHost<S>
 where
     S: SourceManager,
 {
-    fn on_event(
-        &mut self,
-        _process: &ProcessState<'_>,
-        _event_id: u32,
-    ) -> Result<Vec<AdviceMutation>, EventError> {
+    fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>> {
+        self.store.get(node_digest)
+    }
+
+    fn on_event(&mut self, _process: &ProcessState<'_>) -> Result<Vec<AdviceMutation>, EventError> {
         Ok(Vec::new())
     }
 }
@@ -292,15 +288,18 @@ impl<S> AsyncHost for ConsistencyHost<S>
 where
     S: SourceManagerSync,
 {
+    #[allow(clippy::manual_async_fn)]
+    fn get_mast_forest(&self, node_digest: &Word) -> impl FutureMaybeSend<Option<Arc<MastForest>>> {
+        let result = <Self as SyncHost>::get_mast_forest(self, node_digest);
+        async move { result }
+    }
     // Note: clippy complains about this not using the `async` keyword, but if we use `async`, it
     // doesn't compile.
     #[allow(clippy::manual_async_fn)]
     fn on_event(
         &mut self,
         _process: &ProcessState<'_>,
-        _event_id: u32,
-    ) -> impl Future<Output = Result<Vec<AdviceMutation>, EventError>> + Send {
-        let _ = (_process, _event_id);
+    ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>> {
         async move { Ok(Vec::new()) }
     }
 }

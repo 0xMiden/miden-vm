@@ -1,11 +1,8 @@
-use alloc::{
-    collections::{BTreeMap, btree_map::Entry},
-    vec::Vec,
-};
+use alloc::{collections::btree_map::Entry, vec::Vec};
 
 use miden_core::{
     AdviceMap, Felt, Word,
-    crypto::merkle::{InnerNodeInfo, MerklePath, MerkleStore, NodeIndex, StoreNode},
+    crypto::merkle::{InnerNodeInfo, MerklePath, MerkleStore, NodeIndex},
 };
 
 mod inputs;
@@ -15,11 +12,6 @@ mod errors;
 pub use errors::AdviceError;
 
 use crate::host::AdviceMutation;
-
-// TYPE ALIASES
-// ================================================================================================
-
-type SimpleMerkleMap = BTreeMap<Word, StoreNode>;
 
 // ADVICE PROVIDER
 // ================================================================================================
@@ -38,12 +30,13 @@ type SimpleMerkleMap = BTreeMap<Word, StoreNode>;
 ///    Merkle paths from the store, as well as mutate it by updating or merging nodes contained in
 ///    the store.
 ///
-/// Advice data is store in-memory using [BTreeMap]s as its backing storage.
+/// Advice data is store in-memory using [alloc::collections::btree_map::BTreeMap]s as its backing
+/// storage.
 #[derive(Debug, Clone, Default)]
 pub struct AdviceProvider {
     stack: Vec<Felt>,
     map: AdviceMap,
-    store: MerkleStore<SimpleMerkleMap>,
+    store: MerkleStore,
 }
 
 impl AdviceProvider {

@@ -1,0 +1,13 @@
+---
+source: assembly/src/tests.rs
+expression: program
+---
+begin
+    join
+        join
+            basic_block push(4) push(3) noop noop end
+            external.0xc2545da99d3a1f3f38d957c7893c44d78998d8ea8b11aba7e22c8c2b2a213dae
+        end
+        call.0x20234ee941e53a15886e733cc8e041198c6e90d2a16ea18ce1030e8c3596dd38
+    end
+end

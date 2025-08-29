@@ -26,7 +26,7 @@ pub use self::{
         MetaKeyValue, MetaList,
     },
     block::Block,
-    constants::{Constant, ConstantExpr, ConstantOp},
+    constants::{Constant, ConstantExpr, ConstantOp, HashKind},
     docstring::DocString,
     form::Form,
     ident::{CaseKindError, Ident, IdentError},

@@ -76,12 +76,14 @@ impl AnalysisContext {
 
     fn const_eval(&self, value: &ConstantExpr) -> Result<ConstantExpr, SemanticAnalysisError> {
         match value {
-            ConstantExpr::Literal(_) | ConstantExpr::String(_) => Ok((*value).clone()),
-            ConstantExpr::Word(_) => Ok((*value).clone()),
+            ConstantExpr::Felt(_)
+            | ConstantExpr::String(_)
+            | ConstantExpr::Word(_)
+            | ConstantExpr::Hash(..) => Ok((*value).clone()),
             ConstantExpr::Var(name) => self.get_constant(name).cloned(),
             ConstantExpr::BinaryOp { op, lhs, rhs, .. } => {
-                let rhs = self.const_eval(rhs)?.expect_literal();
-                let lhs = self.const_eval(lhs)?.expect_literal();
+                let rhs = self.const_eval(rhs)?.expect_felt();
+                let lhs = self.const_eval(lhs)?.expect_felt();
                 let felt = match op {
                     ConstantOp::Add => lhs + rhs,
                     ConstantOp::Sub => lhs - rhs,
@@ -89,7 +91,7 @@ impl AnalysisContext {
                     ConstantOp::Div => lhs / rhs,
                     ConstantOp::IntDiv => Felt::new(lhs.as_int() / rhs.as_int()),
                 };
-                Ok(ConstantExpr::Literal(Span::unknown(felt)))
+                Ok(ConstantExpr::Felt(Span::unknown(felt)))
             },
         }
     }
