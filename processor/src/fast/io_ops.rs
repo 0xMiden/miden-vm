@@ -1,28 +1,32 @@
-use super::{DOUBLE_WORD_SIZE, ExecutionError, FastProcessor, Felt, WORD_SIZE_FELT};
+use super::{
+    DOUBLE_WORD_SIZE, ExecutionError, FastProcessor, Felt, WORD_SIZE_FELT, tracer::Tracer,
+};
 use crate::ErrorContext;
 
 impl FastProcessor {
     /// Analogous to `Process::op_push`.
-    pub fn op_push(&mut self, element: Felt) {
-        self.increment_stack_size();
+    pub fn op_push(&mut self, element: Felt, tracer: &mut impl Tracer) {
+        self.increment_stack_size(tracer);
         self.stack_write(0, element);
     }
 
     /// Analogous to `Process::op_advpop`.
     #[inline(always)]
-    pub fn op_advpop(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
+    pub fn op_advpop(
+        &mut self,
+        err_ctx: &impl ErrorContext,
+        tracer: &mut impl Tracer,
+    ) -> Result<(), ExecutionError> {
         let value = {
             let value = self
                 .advice
                 .pop_stack()
                 .map_err(|err| ExecutionError::advice_error(err, self.clk, err_ctx))?;
-            if let Some(trace_state_builder) = &mut self.trace_state_builder {
-                trace_state_builder.advice.record_pop_stack(value);
-            }
+            tracer.record_advice_pop_stack(value);
             value
         };
 
-        self.increment_stack_size();
+        self.increment_stack_size(tracer);
         self.stack_write(0, value);
 
         Ok(())
@@ -30,15 +34,17 @@ impl FastProcessor {
 
     /// Analogous to `Process::op_advpopw`.
     #[inline(always)]
-    pub fn op_advpopw(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
+    pub fn op_advpopw(
+        &mut self,
+        err_ctx: &impl ErrorContext,
+        tracer: &mut impl Tracer,
+    ) -> Result<(), ExecutionError> {
         let word = {
             let word = self
                 .advice
                 .pop_stack_word()
                 .map_err(|err| ExecutionError::advice_error(err, self.clk, err_ctx))?;
-            if let Some(trace_state_builder) = &mut self.trace_state_builder {
-                trace_state_builder.advice.record_pop_stack_word(word);
-            }
+            tracer.record_advice_pop_stack_word(word);
             word
         };
 
@@ -49,13 +55,17 @@ impl FastProcessor {
 
     /// Analogous to `Process::op_mloadw`.
     #[inline(always)]
-    pub fn op_mloadw(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
+    pub fn op_mloadw(
+        &mut self,
+        err_ctx: &impl ErrorContext,
+        tracer: &mut impl Tracer,
+    ) -> Result<(), ExecutionError> {
         let addr = self.stack_get(0);
-        self.decrement_stack_size();
+        self.decrement_stack_size(tracer);
 
         let word = self
             .memory
-            .read_word(self.ctx, addr, self.clk, err_ctx, &mut self.trace_state_builder)
+            .read_word(self.ctx, addr, self.clk, err_ctx, tracer)
             .map_err(ExecutionError::MemoryError)?;
         self.stack_write_word(0, &word);
 
@@ -64,10 +74,14 @@ impl FastProcessor {
 
     /// Analogous to `Process::op_mstorew`.
     #[inline(always)]
-    pub fn op_mstorew(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
+    pub fn op_mstorew(
+        &mut self,
+        err_ctx: &impl ErrorContext,
+        tracer: &mut impl Tracer,
+    ) -> Result<(), ExecutionError> {
         let addr = self.stack_get(0);
         let word = self.stack_get_word(1);
-        self.decrement_stack_size();
+        self.decrement_stack_size(tracer);
 
         self.memory
             .write_word(self.ctx, addr, self.clk, word, err_ctx)
@@ -77,11 +91,15 @@ impl FastProcessor {
 
     /// Analogous to `Process::op_mload`.
     #[inline(always)]
-    pub fn op_mload(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
+    pub fn op_mload(
+        &mut self,
+        err_ctx: &impl ErrorContext,
+        tracer: &mut impl Tracer,
+    ) -> Result<(), ExecutionError> {
         let element = {
             let addr = self.stack_get(0);
             self.memory
-                .read_element(self.ctx, addr, err_ctx, &mut self.trace_state_builder)
+                .read_element(self.ctx, addr, err_ctx, tracer)
                 .map_err(ExecutionError::MemoryError)?
         };
 
@@ -92,10 +110,14 @@ impl FastProcessor {
 
     /// Analogous to `Process::op_mstore`.
     #[inline(always)]
-    pub fn op_mstore(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
+    pub fn op_mstore(
+        &mut self,
+        err_ctx: &impl ErrorContext,
+        tracer: &mut impl Tracer,
+    ) -> Result<(), ExecutionError> {
         let addr = self.stack_get(0);
         let value = self.stack_get(1);
-        self.decrement_stack_size();
+        self.decrement_stack_size(tracer);
 
         self.memory
             .write_element(self.ctx, addr, value, err_ctx)
@@ -106,7 +128,11 @@ impl FastProcessor {
 
     /// Analogous to `Process::op_mstream`.
     #[inline(always)]
-    pub fn op_mstream(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
+    pub fn op_mstream(
+        &mut self,
+        err_ctx: &impl ErrorContext,
+        tracer: &mut impl Tracer,
+    ) -> Result<(), ExecutionError> {
         // The stack index where the memory address to load the words from is stored.
         const MEM_ADDR_STACK_IDX: usize = 12;
 
@@ -115,22 +141,10 @@ impl FastProcessor {
         let addr_second_word = addr_first_word + WORD_SIZE_FELT;
         let words = [
             self.memory
-                .read_word(
-                    self.ctx,
-                    addr_first_word,
-                    self.clk,
-                    err_ctx,
-                    &mut self.trace_state_builder,
-                )
+                .read_word(self.ctx, addr_first_word, self.clk, err_ctx, tracer)
                 .map_err(ExecutionError::MemoryError)?,
             self.memory
-                .read_word(
-                    self.ctx,
-                    addr_second_word,
-                    self.clk,
-                    err_ctx,
-                    &mut self.trace_state_builder,
-                )
+                .read_word(self.ctx, addr_second_word, self.clk, err_ctx, tracer)
                 .map_err(ExecutionError::MemoryError)?,
         ];
 
@@ -147,7 +161,11 @@ impl FastProcessor {
 
     /// Analogous to `Process::op_pipe`.
     #[inline(always)]
-    pub fn op_pipe(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
+    pub fn op_pipe(
+        &mut self,
+        err_ctx: &impl ErrorContext,
+        tracer: &mut impl Tracer,
+    ) -> Result<(), ExecutionError> {
         // The stack index where the memory address to load the words from is stored.
         const MEM_ADDR_STACK_IDX: usize = 12;
 
@@ -160,9 +178,7 @@ impl FastProcessor {
             .pop_stack_dword()
             .map_err(|err| ExecutionError::advice_error(err, self.clk, err_ctx))?;
 
-        if let Some(trace_state_builder) = &mut self.trace_state_builder {
-            trace_state_builder.advice.record_pop_stack_dword(words);
-        }
+        tracer.record_advice_pop_stack_dword(words);
 
         // write the words to memory
         self.memory

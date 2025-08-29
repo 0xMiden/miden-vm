@@ -8,6 +8,7 @@
 - Added ability to declare word-sized constants from strings ([#2073](https://github.com/0xMiden/miden-vm/pull/2073)).
 - Added new `adv.insert_hqword` instruction ([#2097](https://github.com/0xMiden/miden-vm/pull/2097)).
 - Added `FastProcessor::execute_for_trace()`, which outputs a series of checkpoints necessary to build the trace in parallel ([#2023](https://github.com/0xMiden/miden-vm/pull/2023))
+- Introduce `Tracer` trait to allow different ways of tracing program execution, including no tracing ([#2101](https://github.com/0xMiden/miden-vm/pull/2101))
 
 #### Changes
 

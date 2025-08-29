@@ -101,7 +101,7 @@ fn test_mstorew_success() {
 
     // Ensure that the memory was correctly modified
     assert_eq!(
-        processor.memory.read_word(ctx, addr, clk, &(), &mut None).unwrap(),
+        processor.memory.read_word(ctx, addr, clk, &(), &mut NoopTracer).unwrap(),
         word_to_store.into()
     );
 }
@@ -124,7 +124,10 @@ fn test_mstore_success(#[case] addr: u32, #[case] value_to_store: u32) {
 
     // Ensure that the memory was correctly modified
     let word_addr = addr - (addr % WORD_SIZE as u32);
-    let word = processor.memory.read_word(ctx, word_addr.into(), clk, &(), &mut None).unwrap();
+    let word = processor
+        .memory
+        .read_word(ctx, word_addr.into(), clk, &(), &mut NoopTracer)
+        .unwrap();
     assert_eq!(word[addr as usize % WORD_SIZE], value_to_store);
 }
 
