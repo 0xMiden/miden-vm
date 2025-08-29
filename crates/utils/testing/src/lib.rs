@@ -177,7 +177,7 @@ pub struct Test {
     pub advice_inputs: AdviceInputs,
     pub in_debug_mode: bool,
     pub libraries: Vec<Library>,
-    pub handlers: BTreeMap<u32, HandlerFunc>,
+    pub handlers: BTreeMap<u64, HandlerFunc>,
     pub add_modules: Vec<(LibraryPath, String)>,
 }
 
@@ -211,8 +211,8 @@ impl Test {
     ///
     /// The `handler_func` can be either a closure or a free function with signature
     /// `fn(&mut ProcessState) -> Result<(), EventError>`.
-    pub fn add_event_handler(&mut self, id: u32, handler_func: HandlerFunc) {
-        if self.handlers.insert(id, handler_func).is_some() {
+    pub fn add_event_handler(&mut self, id: Felt, handler_func: HandlerFunc) {
+        if self.handlers.insert(id.as_int(), handler_func).is_some() {
             panic!("handler with id {id} was already added")
         }
     }
@@ -470,7 +470,7 @@ impl Test {
             host.load_library(library.mast_forest().clone()).unwrap();
         }
         for (id, handler_func) in &self.handlers {
-            host.load_handler(*id, *handler_func).unwrap();
+            host.load_handler(Felt::new(*id), *handler_func).unwrap();
         }
 
         (program, host)

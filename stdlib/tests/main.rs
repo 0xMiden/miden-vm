@@ -25,5 +25,6 @@ mod crypto;
 mod mast_forest_merge;
 mod math;
 mod mem;
+mod precompiles;
 mod sys;
 mod word;

@@ -1,5 +1,7 @@
 #![no_std]
 
+pub mod precompiles;
+
 extern crate alloc;
 
 use alloc::{sync::Arc, vec, vec::Vec};
