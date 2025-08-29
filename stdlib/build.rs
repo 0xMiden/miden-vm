@@ -1,13 +1,12 @@
 use std::{
     env, fs,
     io::{self, Write},
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 use miden_assembly::{
-    Assembler, Library, LibraryNamespace, LibraryPath,
-    ast::{Module, ModuleKind},
-    debuginfo::{DefaultSourceManager, SourceFile, SourceId, SourceLanguage, Uri},
+    Assembler, Library, LibraryNamespace, LibraryPath, Parse, ParseOptions, ast::ModuleKind,
+    debuginfo::DefaultSourceManager,
 };
 
 // CONSTANTS
@@ -67,24 +66,24 @@ pub fn build_stdlib_docs(asm_dir: &Path, output_dir: &str) -> io::Result<()> {
     // Find all .masm files recursively
     let modules = find_masm_modules(asm_dir, asm_dir)?;
 
-    // Create a source manager for parsing
-    let source_manager = DefaultSourceManager::default();
-
-    // Render the modules into markdown using AST parsing
-    for (label, source) in modules {
+    // Render the modules into markdown
+    for (label, file_path) in modules {
         let relative_path = markdown_file_name(&label);
-        let file_path = Path::new(output_dir).join(relative_path);
+        let output_file_path = Path::new(output_dir).join(relative_path);
 
         // Create directories if needed
-        if let Some(parent) = file_path.parent() {
+        if let Some(parent) = output_file_path.parent() {
             fs::create_dir_all(parent)?;
         }
 
-        let mut f =
-            fs::OpenOptions::new().write(true).create(true).truncate(true).open(file_path)?;
+        let mut f = fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(output_file_path)?;
 
         // Parse module using AST-based approach
-        let (module_docs, procedures) = parse_module_with_ast(&label, &source, &source_manager)?;
+        let (module_docs, procedures) = parse_module_with_ast(&label, &file_path)?;
 
         // Write module docs
         if let Some(docs) = module_docs {
@@ -106,7 +105,7 @@ pub fn build_stdlib_docs(asm_dir: &Path, output_dir: &str) -> io::Result<()> {
 }
 
 /// Find all .masm files recursively
-fn find_masm_modules(base_dir: &Path, current_dir: &Path) -> io::Result<Vec<(String, String)>> {
+fn find_masm_modules(base_dir: &Path, current_dir: &Path) -> io::Result<Vec<(String, PathBuf)>> {
     let mut modules = Vec::new();
 
     if let Ok(entries) = fs::read_dir(current_dir) {
@@ -126,9 +125,8 @@ fn find_masm_modules(base_dir: &Path, current_dir: &Path) -> io::Result<Vec<(Str
                         .join("::");
 
                     let label = format!("std::{}", module_path);
-                    let source = fs::read_to_string(&path)?;
 
-                    modules.push((label, source));
+                    modules.push((label, path));
                 }
             } else if path.is_dir() {
                 // Recursively scan subdirectories
@@ -144,28 +142,18 @@ fn find_masm_modules(base_dir: &Path, current_dir: &Path) -> io::Result<Vec<(Str
 type DocPayload = (Option<String>, Vec<(String, Option<String>)>);
 
 /// Parse MASM source using AST-parsing
-fn parse_module_with_ast(
-    label: &str,
-    source: &str,
-    _source_manager: &DefaultSourceManager,
-) -> io::Result<DocPayload> {
-    // Create source file directly from string
-    let source_file = SourceFile::new(
-        SourceId::new(1), // Simple ID for build script context
-        SourceLanguage::Masm,
-        Uri::from(label),
-        source.to_string(),
-    );
-
-    // Create library path from module label
-    let library_path = LibraryPath::new(label)
-        .map_err(|e| io::Error::other(format!("Invalid library path: {}", e)))?;
-
-    // Parse the module using AST
-    let module = Module::parse(library_path, ModuleKind::Library, source_file.into())
-        .map_err(|e| io::Error::other(e.to_string()));
-
-    let module = module?;
+fn parse_module_with_ast(label: &str, file_path: &Path) -> io::Result<DocPayload> {
+    let path = LibraryPath::new(label).map_err(|e| io::Error::other(e.to_string()))?;
+    let module = file_path
+        .parse_with_options(
+            &DefaultSourceManager::default(),
+            ParseOptions {
+                kind: ModuleKind::Library,
+                warnings_as_errors: false,
+                path: Some(path),
+            },
+        )
+        .map_err(|e| io::Error::other(e.to_string()))?;
 
     // Extract module documentation
     let module_docs = module.docs().map(|d| d.to_string());
@@ -184,6 +172,8 @@ fn parse_module_with_ast(
 // PRE-PROCESSING
 // ================================================================================================
 
+/// Read and parse the contents from `./asm` into a `LibraryContents` struct, serializing it into
+/// `assets` folder under `std` namespace.
 fn main() -> io::Result<()> {
     // re-build the `[OUT_DIR]/assets/std.masl` file iff something in the `./asm` directory
     // or its builder changed:

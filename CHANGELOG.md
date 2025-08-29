@@ -8,6 +8,7 @@
 - Added ability to declare word-sized constants from strings ([#2073](https://github.com/0xMiden/miden-vm/pull/2073)).
 - Added new `adv.insert_hqword` instruction ([#2097](https://github.com/0xMiden/miden-vm/pull/2097)).
 - Added option to use Poseidon2 in proving ([#2098](https://github.com/0xMiden/miden-vm/pull/2098)).
+- Reinstate the build of the stdlib's documentation ([#1432](https://github.com/0xmiden/miden-vm/issues/1432)).
 
 #### Changes
 
