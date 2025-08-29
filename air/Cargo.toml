@@ -1,8 +1,8 @@
 [package]
 name = "miden-air"
-version = "0.17.0"
+version = "0.17.1"
 description = "Algebraic intermediate representation of Miden VM processor"
-documentation = "https://docs.rs/miden-air/0.17.0"
+documentation = "https://docs.rs/miden-air/0.17.1"
 readme = "README.md"
 categories = ["cryptography", "no-std"]
 keywords = ["air", "arithmetization", "crypto", "miden"]

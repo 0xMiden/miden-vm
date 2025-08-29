@@ -1047,7 +1047,7 @@ dependencies = [
 
 [[package]]
 name = "miden-air"
-version = "0.17.0"
+version = "0.17.1"
 dependencies = [
  "criterion",
  "miden-core",
@@ -1060,7 +1060,7 @@ dependencies = [
 
 [[package]]
 name = "miden-assembly"
-version = "0.17.0"
+version = "0.17.1"
 dependencies = [
  "env_logger",
  "log",
@@ -1075,7 +1075,7 @@ dependencies = [
 
 [[package]]
 name = "miden-assembly-syntax"
-version = "0.17.0"
+version = "0.17.1"
 dependencies = [
  "aho-corasick",
  "env_logger",
@@ -1098,7 +1098,7 @@ dependencies = [
 
 [[package]]
 name = "miden-core"
-version = "0.17.0"
+version = "0.17.1"
 dependencies = [
  "miden-crypto",
  "miden-debug-types",
@@ -1135,7 +1135,7 @@ dependencies = [
 
 [[package]]
 name = "miden-debug-types"
-version = "0.17.0"
+version = "0.17.1"
 dependencies = [
  "memchr",
  "miden-crypto",
@@ -1170,7 +1170,7 @@ dependencies = [
 
 [[package]]
 name = "miden-mast-package"
-version = "0.17.0"
+version = "0.17.1"
 dependencies = [
  "derive_more",
  "miden-assembly-syntax",
@@ -1223,7 +1223,7 @@ dependencies = [
 
 [[package]]
 name = "miden-processor"
-version = "0.17.0"
+version = "0.17.1"
 dependencies = [
  "logtest",
  "miden-air",
@@ -1244,7 +1244,7 @@ dependencies = [
 
 [[package]]
 name = "miden-prover"
-version = "0.17.0"
+version = "0.17.1"
 dependencies = [
  "elsa",
  "miden-air",
@@ -1259,7 +1259,7 @@ dependencies = [
 
 [[package]]
 name = "miden-stdlib"
-version = "0.17.0"
+version = "0.17.1"
 dependencies = [
  "blake3",
  "criterion",
@@ -1304,7 +1304,7 @@ dependencies = [
 
 [[package]]
 name = "miden-utils-diagnostics"
-version = "0.17.0"
+version = "0.17.1"
 dependencies = [
  "miden-crypto",
  "miden-debug-types",
@@ -1315,7 +1315,7 @@ dependencies = [
 
 [[package]]
 name = "miden-utils-sync"
-version = "0.17.0"
+version = "0.17.1"
 dependencies = [
  "lock_api",
  "loom",
@@ -1325,7 +1325,7 @@ dependencies = [
 
 [[package]]
 name = "miden-verifier"
-version = "0.17.0"
+version = "0.17.1"
 dependencies = [
  "miden-air",
  "miden-core",
@@ -1336,7 +1336,7 @@ dependencies = [
 
 [[package]]
 name = "miden-vm"
-version = "0.17.0"
+version = "0.17.1"
 dependencies = [
  "assert_cmd",
  "blake3",

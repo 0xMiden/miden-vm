@@ -350,6 +350,7 @@ impl MastNode {
     }
 }
 
+//-------------------------------------------------------------------------------------------------
 /// Mutators
 impl MastNode {
     /// Sets the list of decorators to be executed before this node.
@@ -375,6 +376,18 @@ impl MastNode {
             MastNode::Call(node) => node.append_after_exit(decorator_ids),
             MastNode::Dyn(node) => node.append_after_exit(decorator_ids),
             MastNode::External(node) => node.append_after_exit(decorator_ids),
+        }
+    }
+
+    pub fn remove_decorators(&mut self) {
+        match self {
+            MastNode::Block(node) => node.remove_decorators(),
+            MastNode::Join(node) => node.remove_decorators(),
+            MastNode::Split(node) => node.remove_decorators(),
+            MastNode::Loop(node) => node.remove_decorators(),
+            MastNode::Call(node) => node.remove_decorators(),
+            MastNode::Dyn(node) => node.remove_decorators(),
+            MastNode::External(node) => node.remove_decorators(),
         }
     }
 }

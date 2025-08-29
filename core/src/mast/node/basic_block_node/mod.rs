@@ -203,6 +203,7 @@ impl BasicBlockNode {
     }
 }
 
+//-------------------------------------------------------------------------------------------------
 /// Mutators
 impl BasicBlockNode {
     /// Sets the provided list of decorators to be executed before all existing decorators.
@@ -226,6 +227,11 @@ impl BasicBlockNode {
     /// with the given ['DecoratorList'].
     pub fn set_decorators(&mut self, decorator_list: DecoratorList) {
         self.decorators = decorator_list;
+    }
+
+    /// Removes all decorators from this node.
+    pub fn remove_decorators(&mut self) {
+        self.decorators.truncate(0);
     }
 }
 
