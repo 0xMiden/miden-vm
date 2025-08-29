@@ -212,6 +212,14 @@ impl MastForest {
         self[node_id].append_after_exit(decorator_ids)
     }
 
+    /// Removes all decorators from this MAST forest.
+    pub fn strip_decorators(&mut self) {
+        for node in self.nodes.iter_mut() {
+            node.remove_decorators();
+        }
+        self.decorators.truncate(0);
+    }
+
     /// Merges all `forests` into a new [`MastForest`].
     ///
     /// Merging two forests means combining all their constituent parts, i.e. [`MastNode`]s,
