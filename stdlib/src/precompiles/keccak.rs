@@ -26,7 +26,7 @@ pub enum KeccakError {
 ///
 /// Inputs:
 ///   Operand stack: [event_id, ptr, len, ...]
-///   Memory: bytes at [ptr, ptr+len)
+///   Memory: bytes at [ptr, len)
 ///
 /// Outputs:
 ///   Advice stack: [hash_bytes...] (32 bytes as individual Felts)
@@ -38,9 +38,9 @@ pub enum KeccakError {
 /// - hash_bytes are the 32 bytes of the keccak256 hash
 pub fn push_keccak(process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
     // start at 1 since 0 holds the event id
-    // Note: stack layout after emit is [event_id, len, ptr, ...]
-    let len = process.get_stack_item(1).as_int();
-    let ptr = process.get_stack_item(2).as_int();
+    // Note: stack layout after emit is [event_id, ptr, len, ...]
+    let ptr = process.get_stack_item(1).as_int();
+    let len = process.get_stack_item(2).as_int();
 
     // Attempt to collect the field elements between `ptr` and `ptr+len`.
     let witness =
@@ -57,8 +57,7 @@ pub fn push_keccak(process: &ProcessState) -> Result<Vec<AdviceMutation>, EventE
 
     // Resulting Keccak hash of the preimage
     let keccak_hash = miden_crypto::hash::keccak::Keccak256::hash(&preimage);
-    let advice_stack_extension =
-        AdviceMutation::extend_stack(keccak_hash.iter().map(|byte| Felt::from(*byte)));
+    let mut keccak_hash_felt: Vec<_> = keccak_hash.iter().copied().map(Felt::from).collect();
 
     // Commitment to precompile call
     // Rpo(
@@ -66,13 +65,16 @@ pub fn push_keccak(process: &ProcessState) -> Result<Vec<AdviceMutation>, EventE
     //     Rpo(Keccak(preimage))
     // )
     let calldata_commitment = Rpo256::merge(&[
-        Rpo256::hash_elements(&witness), // Commitment to pre-image
-        Rpo256::hash(&keccak_hash),      // Commitment to hash
+        Rpo256::hash_elements(&witness),          // Commitment to pre-image
+        Rpo256::hash_elements(&keccak_hash_felt), // Commitment to hash
     ]);
 
     // store the calldata in the advice map to be recovered later on by the prover
+    // reverse hash
+    keccak_hash_felt.reverse();
+    let advice_stack_extension =
+        AdviceMutation::extend_stack(keccak_hash_felt);
     let entry = (calldata_commitment, witness);
     let advice_map_extension = AdviceMutation::extend_map(AdviceMap::from_iter([entry]));
-
     Ok(vec![advice_stack_extension, advice_map_extension])
 }

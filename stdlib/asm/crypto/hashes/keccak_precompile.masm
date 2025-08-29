@@ -1,0 +1,51 @@
+#! Keccak256 precompile wrapper using event handling for efficient computation.
+#!
+#! This module provides a wrapper function around the keccak precompile event handler,
+#! allowing efficient keccak256 computation by deferring to the native verifier.
+
+use.std::mem
+use.std::crypto::hashes::rpo
+
+#! Compute keccak256 hash using precompile event handler.
+#!
+#! This function takes a memory slice as input and computes its keccak256 hash,
+#! writing the result to the specified output location.
+#!
+#! Expected stack state:
+#! [ptr_in, len, ptr_out, ...]
+#!
+#! Final stack state:
+#! [...]
+#!
+#! Where:
+#! - ptr_in:  memory address where input bytes start
+#! - len:     number of bytes to hash
+#! - ptr_out: memory address where to write the 32-byte hash
+export.keccak256_precompile
+    # Emit keccak precompile event
+    # This will push the 32-byte hash to the advice stack
+    # => [ptr_in, len, ptr_out, ...]
+    emit.event("miden_stdlib::hash::keccak")
+
+    exec.rpo::hash_memory
+    # => [RPO(input), ptr_out, ...]
+    movup.4
+    # => [ptr_out, RPO(input), ...]
+
+    # Load the hash from the advice stack, and simultaneously
+    # - Write it to memory at address `ptr_out`
+    # - Compute its RPO hash
+    exec.rpo::init_no_padding
+    # => [R0, R1, C, ptr_out, RPO(input), ...]
+    repeat.4
+        adv_pipe
+        hperm
+    end
+    exec.rpo::squeeze_digest
+    # => [H(hash), ptr_out, RPO(input), ...]
+    movup.4 drop
+    # => [H(hash), H(input), ...]
+
+    hmerge
+    # => RPO( [RPO(input), RPO(hash)] )
+end
