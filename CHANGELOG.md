@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.17.1 (2025-08-29)
+
+- added `MastForest::strip_decorators()` ([#2108](https://github.com/0xMiden/miden-vm/pull/2108)).
+
 ## 0.17.0 (2025-08-06)
 
 #### Enhancements

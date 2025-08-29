@@ -1,8 +1,8 @@
 [package]
 name = "miden-assembly-syntax"
-version = "0.17.0"
+version = "0.17.1"
 description = "Parsing and semantic analysis of the Miden Assembly language"
-documentation = "https://docs.rs/miden-assembly-syntax/0.17.0"
+documentation = "https://docs.rs/miden-assembly-syntax/0.17.1"
 readme = "README.md"
 categories = ["compilers", "no-std"]
 keywords = ["assembly", "language", "syntax", "miden"]

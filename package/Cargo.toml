@@ -1,8 +1,8 @@
 [package]
 name = "miden-mast-package"
-version = "0.17.0"
+version = "0.17.1"
 description = "Package containing a compiled Miden MAST artifact with declared dependencies and exports"
-documentation = "https://docs.rs/miden-mast-package/0.17.0"
+documentation = "https://docs.rs/miden-mast-package/0.17.1"
 readme = "README.md"
 categories = ["compilers", "no-std"]
 keywords = ["package", "language", "miden"]
