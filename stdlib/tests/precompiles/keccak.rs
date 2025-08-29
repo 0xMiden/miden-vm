@@ -1,7 +1,28 @@
-use miden_core::{Felt, utils::string_to_event_id};
+use miden_core::{Felt, FieldElement, utils::string_to_event_id};
 use miden_crypto::hash::{keccak::Keccak256, rpo::Rpo256};
 use miden_processor::{AdviceMutation, EventError, ProcessState};
 use miden_stdlib::precompiles::{KECCAK_EVENT_ID, push_keccak};
+
+// Test constants
+// ================================================================================================
+
+/// Memory address for storing test input data
+const INPUT_MEMORY_ADDR: u32 = 100;
+
+/// Memory address for storing keccak hash output
+const OUTPUT_MEMORY_ADDR: u32 = 200;
+
+/// Event ID for debug/validation events
+const DEBUG_EVENT_ID: &str = "miden::debug";
+
+/// Event ID for memory validation
+const MEMORY_CHECK_EVENT_ID: &str = "miden::memory_check";
+
+/// Event ID for system precompile recording
+const SYSTEM_RECORD_EVENT_ID: &str = "system::record_precompile";
+
+/// Expected hash output length in bytes
+const KECCAK_HASH_SIZE: u64 = 32;
 
 #[test]
 fn test_keccak_event_handler_directly() {
@@ -9,23 +30,28 @@ fn test_keccak_event_handler_directly() {
     let event_keccak_precompile = string_to_event_id(KECCAK_EVENT_ID);
 
     // Simple program that sets up memory and calls our event
-    let source = r#"
+    let source = format!(
+        r#"
+        const.INPUT_ADDR={INPUT_MEMORY_ADDR}
+        const.INPUT_LEN=4
+        
         begin
-            # Write the 4 stack input elements to memory
-            push.100
+            # Write the 4 stack input elements to memory at INPUT_ADDR
+            push.INPUT_ADDR
             mem_storew
             dropw
             
             # Set up stack for event: [ptr, len]
-            push.4       # len (4 bytes for "test")
-            push.100     # ptr (where "test" is stored)
+            push.INPUT_LEN     # len (4 bytes)
+            push.INPUT_ADDR    # ptr (where data is stored)
 
-            emit.event("miden_stdlib::hash::keccak")
+            emit.event("{KECCAK_EVENT_ID}")
 
             drop drop
-            emit.event("miden::debug")
+            emit.event("{DEBUG_EVENT_ID}")
         end
-    "#;
+    "#
+    );
 
     const PREIMAGE: [u8; 4] = [1, 2, 3, 4];
 
@@ -34,7 +60,7 @@ fn test_keccak_event_handler_directly() {
     test.add_event_handler(event_keccak_precompile, push_keccak);
 
     // Use a custom handler to ensure the advice stack contains the expected hash.
-    let event_check_state = string_to_event_id("miden::debug");
+    let event_check_state = string_to_event_id(DEBUG_EVENT_ID);
     let check_advice = |process: &ProcessState| {
         let hash: Vec<u8> = process
             .advice_provider()
@@ -49,7 +75,9 @@ fn test_keccak_event_handler_directly() {
         assert_eq!(
             hash_rev.as_slice(),
             expected_hash.as_ref(),
-            "Advice stack should contain keccak hash"
+            "Advice stack should contain keccak hash but got {} bytes, expected {} bytes",
+            hash_rev.len(),
+            KECCAK_HASH_SIZE
         );
 
         let expected_hash_felt: Vec<Felt> = expected_hash.iter().copied().map(Felt::from).collect();
@@ -70,11 +98,18 @@ fn test_keccak_event_handler_directly() {
         let advice_map_entry = process.advice_provider().get_mapped_values(&calldata_commitment);
         assert!(
             advice_map_entry.is_some(),
-            "Advice map should contain witness under commitment key"
+            "Advice map should contain witness under commitment key: {}",
+            calldata_commitment
         );
 
         let stored_witness = advice_map_entry.unwrap();
-        assert_eq!(stored_witness, witness, "Stored witness should match original preimage");
+        assert_eq!(
+            stored_witness,
+            witness,
+            "Stored witness should match original preimage: expected {} felts, got {} felts",
+            witness.len(),
+            stored_witness.len()
+        );
         Ok(vec![])
     };
     test.add_event_handler(event_check_state, check_advice);
@@ -85,81 +120,132 @@ fn test_keccak_event_handler_directly() {
 #[test]
 fn test_keccak_precompile_masm_wrapper() {
     // Test the full MASM wrapper function that calls the event handler
-    // and writes the hash to output memory
+    // and outputs the commitment to the calldata on the stack
 
     let event_keccak_precompile = string_to_event_id(KECCAK_EVENT_ID);
-    let event_system_record = string_to_event_id("system::record_precompile");
-    let event_memory_check = string_to_event_id("miden::memory_check");
+    let event_system_record = string_to_event_id(SYSTEM_RECORD_EVENT_ID);
+    let event_memory_check = string_to_event_id(MEMORY_CHECK_EVENT_ID);
 
-    let source = r#"
+    const PREIMAGE: [u8; 5] = [5, 6, 7, 8, 9];
+    const PREIMAGE_LEN: usize = PREIMAGE.len();
+
+    let source = format!(
+        r#"
         use.std::crypto::hashes::keccak_precompile
         use.std::sys
+        
+        const.INPUT_ADDR={INPUT_MEMORY_ADDR}
+        const.OUTPUT_ADDR={OUTPUT_MEMORY_ADDR}
+        const.INPUT_LEN={PREIMAGE_LEN}
 
         begin
-            # Write test data [5, 6, 7, 8] to memory address 100
-            push.100
+            # Write test data [5, 6, 7, 8] to memory at INPUT_ADDR
+            push.INPUT_ADDR
             mem_storew
             dropw
             
-            # Call keccak wrapper: keccak256_precompile(ptr_in=100, len=4, ptr_out=200)
-            push.200    # ptr_out - where to write 32-byte hash
-            push.4      # len - 4 bytes to hash
-            push.100    # ptr_in - where input data is stored
+            # Call keccak wrapper: keccak256_precompile(ptr_in, len, ptr_out)
+            # This will output the commitment to the calldata on the stack
+            push.OUTPUT_ADDR    # ptr_out - where to write 32-byte hash
+            push.INPUT_LEN      # len - 4 bytes to hash
+            push.INPUT_ADDR     # ptr_in - where input data is stored
 
             exec.keccak_precompile::keccak256_precompile
-            debug.stack
-            # Emit event to check the hash was written correctly to memory at ptr_out=200
-            push.200    # ptr where hash should be written
-            emit.event("miden::memory_check")
+            
+            # Emit event to validate the hash was written correctly to memory
+            push.OUTPUT_ADDR    # ptr where hash should be written
+            emit.event("{MEMORY_CHECK_EVENT_ID}")
 
             exec.sys::truncate_stack
         end
-    "#;
-
-    const PREIMAGE: [u8; 4] = [5, 6, 7, 8];
+    "#
+    );
 
     // Memory validation handler - checks that hash was written correctly to output memory
     fn check_memory_handler(process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
+
         let ptr_out = process.get_stack_item(1).as_int(); // ptr_out from stack
 
-        println!("stack: {:?}", process.get_stack_state());
-        // println!("advice: {:?}", process.advice_provider());
-        // Read 32 bytes from memory starting at ptr_out
+        // Validate the output address matches our constant
+        assert_eq!(
+            ptr_out, OUTPUT_MEMORY_ADDR as u64,
+            "Output address should be {} but got {}",
+            OUTPUT_MEMORY_ADDR, ptr_out
+        );
+
+        // Read the hash bytes from memory starting at ptr_out
         let mut actual_hash = Vec::new();
         let ctx = process.ctx();
-        for addr in ptr_out..ptr_out + 32 {
-            let memory_value = process.get_mem_value(ctx, addr as u32).unwrap();
+        for addr in ptr_out..ptr_out + KECCAK_HASH_SIZE {
+            let memory_value = process
+                .get_mem_value(ctx, addr as u32)
+                .ok_or_else(|| format!("Failed to read memory at address {}", addr))?;
             actual_hash.push(memory_value.as_int() as u8);
         }
 
         // Compare with expected keccak hash
         let expected_hash = Keccak256::hash(&PREIMAGE);
         assert_eq!(
+            actual_hash.len(),
+            KECCAK_HASH_SIZE as usize,
+            "Expected {} hash bytes, got {}",
+            KECCAK_HASH_SIZE,
+            actual_hash.len()
+        );
+        assert_eq!(
             actual_hash.as_slice(),
             expected_hash.as_ref(),
-            "Hash not written correctly to memory at address {ptr_out} (expected bytes in reverse order)",
+            "Hash not written correctly to memory at address {}",
+            ptr_out
         );
 
+        // Validate that the commitment exists in the advice map
         let commitment = process.get_stack_word(2);
-        process.advice_provider().get_mapped_values(&commitment).unwrap();
+        let witness = process
+            .advice_provider()
+            .get_mapped_values(&commitment)
+            .ok_or("Commitment should exist in advice map")?;
+
+        assert_eq!(
+            witness.len(),
+            PREIMAGE.len(),
+            "Witness should have {} elements, got {}",
+            PREIMAGE.len(),
+            witness.len()
+        );
+
+        let witness_bytes: Vec<_> = witness.iter().map(|felt| felt.as_int() as u8).collect();
+        assert_eq!(
+            &witness_bytes, &PREIMAGE,
+            "Witness stored in advice map does not match. expected:\n{:?}\ngot:\n{:?}",
+            PREIMAGE, witness_bytes
+        );
+
         Ok(vec![])
     }
 
-    // Mock system recording handler - should receive precompile call data
+    // System recording handler - validates precompile call data structure
     fn system_record_handler(process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
         // Should receive: [event_id, precompile_type, commitment_word0, commitment_word1,
         //                  commitment_word2, commitment_word3, ...]
         let precompile_type = process.get_stack_item(1).as_int();
-        let _commitment_word = [
+        let commitment_word = [
             process.get_stack_item(2),
             process.get_stack_item(3),
             process.get_stack_item(4),
             process.get_stack_item(5),
         ];
 
-        // Basic validation that we received some commitment data
-        assert_ne!(precompile_type, 0, "System record should receive precompile type");
-        // Note: Full commitment validation would be more complex
+        // Validate that we received proper precompile type
+        assert_ne!(
+            precompile_type, 0,
+            "System record should receive non-zero precompile type, got {}",
+            precompile_type
+        );
+
+        // Validate that commitment data is present (non-zero)
+        let commitment_is_zero = commitment_word.iter().all(|&felt| felt == FieldElement::ZERO);
+        assert!(!commitment_is_zero, "System record should receive non-zero commitment data");
 
         Ok(vec![])
     }

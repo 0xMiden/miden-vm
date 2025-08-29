@@ -1,7 +1,7 @@
 use alloc::{vec, vec::Vec};
 
 use miden_core::{AdviceMap, Felt};
-use miden_crypto::hash::rpo::Rpo256;
+use miden_crypto::hash::{keccak::Keccak256, rpo::Rpo256};
 use miden_processor::{AdviceMutation, EventError, ProcessState};
 
 use crate::precompiles::read_memory;
@@ -56,7 +56,7 @@ pub fn push_keccak(process: &ProcessState) -> Result<Vec<AdviceMutation>, EventE
         .collect::<Result<Vec<_>, _>>()?;
 
     // Resulting Keccak hash of the preimage
-    let keccak_hash = miden_crypto::hash::keccak::Keccak256::hash(&preimage);
+    let keccak_hash = Keccak256::hash(&preimage);
     let mut keccak_hash_felt: Vec<_> = keccak_hash.iter().copied().map(Felt::from).collect();
 
     // Commitment to precompile call
@@ -72,8 +72,7 @@ pub fn push_keccak(process: &ProcessState) -> Result<Vec<AdviceMutation>, EventE
     // store the calldata in the advice map to be recovered later on by the prover
     // reverse hash
     keccak_hash_felt.reverse();
-    let advice_stack_extension =
-        AdviceMutation::extend_stack(keccak_hash_felt);
+    let advice_stack_extension = AdviceMutation::extend_stack(keccak_hash_felt);
     let entry = (calldata_commitment, witness);
     let advice_map_extension = AdviceMutation::extend_map(AdviceMap::from_iter([entry]));
     Ok(vec![advice_stack_extension, advice_map_extension])
