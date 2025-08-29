@@ -1,17 +1,19 @@
 use miden_core::{Felt, FieldElement, ONE, ZERO};
 
 use super::{ExecutionError, FastProcessor};
-use crate::{ErrorContext, operations::utils::assert_binary};
+use crate::{ErrorContext, fast::tracer::Tracer, operations::utils::assert_binary};
 
 const TWO: Felt = Felt::new(2);
 
 impl FastProcessor {
     /// Analogous to `Process::op_add`.
-    pub fn op_add(&mut self) -> Result<(), ExecutionError> {
-        self.pop2_applyfn_push(|a, b| Ok(a + b))
+    #[inline(always)]
+    pub fn op_add(&mut self, tracer: &mut impl Tracer) -> Result<(), ExecutionError> {
+        self.pop2_applyfn_push(|a, b| Ok(a + b), tracer)
     }
 
     /// Analogous to `Process::op_neg`.
+    #[inline(always)]
     pub fn op_neg(&mut self) -> Result<(), ExecutionError> {
         let element = self.stack_get(0);
         self.stack_write(0, -element);
@@ -19,8 +21,9 @@ impl FastProcessor {
     }
 
     /// Analogous to `Process::op_mul`.
-    pub fn op_mul(&mut self) -> Result<(), ExecutionError> {
-        self.pop2_applyfn_push(|a, b| Ok(a * b))
+    #[inline(always)]
+    pub fn op_mul(&mut self, tracer: &mut impl Tracer) -> Result<(), ExecutionError> {
+        self.pop2_applyfn_push(|a, b| Ok(a * b), tracer)
     }
 
     /// Analogous to `Process::op_inv`.
@@ -35,6 +38,7 @@ impl FastProcessor {
     }
 
     /// Analogous to `Process::op_inc`.
+    #[inline(always)]
     pub fn op_incr(&mut self) -> Result<(), ExecutionError> {
         *self.stack_get_mut(0) += ONE;
         Ok(())
@@ -42,24 +46,38 @@ impl FastProcessor {
 
     /// Analogous to `Process::op_and`.
     #[inline(always)]
-    pub fn op_and(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
-        self.pop2_applyfn_push(|a, b| {
-            assert_binary(b, err_ctx)?;
-            assert_binary(a, err_ctx)?;
+    pub fn op_and(
+        &mut self,
+        tracer: &mut impl Tracer,
+        err_ctx: &impl ErrorContext,
+    ) -> Result<(), ExecutionError> {
+        self.pop2_applyfn_push(
+            |a, b| {
+                assert_binary(b, err_ctx)?;
+                assert_binary(a, err_ctx)?;
 
-            if a == ONE && b == ONE { Ok(ONE) } else { Ok(ZERO) }
-        })
+                if a == ONE && b == ONE { Ok(ONE) } else { Ok(ZERO) }
+            },
+            tracer,
+        )
     }
 
     /// Analogous to `Process::op_or`.
     #[inline(always)]
-    pub fn op_or(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
-        self.pop2_applyfn_push(|a, b| {
-            assert_binary(b, err_ctx)?;
-            assert_binary(a, err_ctx)?;
+    pub fn op_or(
+        &mut self,
+        tracer: &mut impl Tracer,
+        err_ctx: &impl ErrorContext,
+    ) -> Result<(), ExecutionError> {
+        self.pop2_applyfn_push(
+            |a, b| {
+                assert_binary(b, err_ctx)?;
+                assert_binary(a, err_ctx)?;
 
-            if a == ONE || b == ONE { Ok(ONE) } else { Ok(ZERO) }
-        })
+                if a == ONE || b == ONE { Ok(ONE) } else { Ok(ZERO) }
+            },
+            tracer,
+        )
     }
 
     /// Analogous to `Process::op_not`.
@@ -77,11 +95,13 @@ impl FastProcessor {
     }
 
     /// Analogous to `Process::op_eq`.
-    pub fn op_eq(&mut self) -> Result<(), ExecutionError> {
-        self.pop2_applyfn_push(|a, b| if a == b { Ok(ONE) } else { Ok(ZERO) })
+    #[inline(always)]
+    pub fn op_eq(&mut self, tracer: &mut impl Tracer) -> Result<(), ExecutionError> {
+        self.pop2_applyfn_push(|a, b| if a == b { Ok(ONE) } else { Ok(ZERO) }, tracer)
     }
 
     /// Analogous to `Process::op_eqz`.
+    #[inline(always)]
     pub fn op_eqz(&mut self) -> Result<(), ExecutionError> {
         let top = self.stack_get_mut(0);
         if (*top) == ZERO {
@@ -93,6 +113,7 @@ impl FastProcessor {
     }
 
     /// Analogous to `Process::op_expacc`.
+    #[inline(always)]
     pub fn op_expacc(&mut self) {
         let old_base = self.stack_get(1);
         let old_acc = self.stack_get(2);
@@ -123,6 +144,7 @@ impl FastProcessor {
     /// where c0 = b0 * a0 - 2 * b1 * a1 and c1 = (b0 + b1) * (a1 + a0) - b0 * a0. It pushes 0 to
     /// the first and second positions on the stack, c1 and c2 to the third and fourth positions,
     /// and leaves the rest of the stack unchanged.
+    #[inline(always)]
     pub fn op_ext2mul(&mut self) {
         let [a0, a1, b0, b1] = self.stack_get_word(0).into();
 
@@ -144,11 +166,12 @@ impl FastProcessor {
     fn pop2_applyfn_push(
         &mut self,
         f: impl FnOnce(Felt, Felt) -> Result<Felt, ExecutionError>,
+        tracer: &mut impl Tracer,
     ) -> Result<(), ExecutionError> {
         let b = self.stack_get(0);
         let a = self.stack_get(1);
 
-        self.decrement_stack_size();
+        self.decrement_stack_size(tracer);
         self.stack_write(0, f(a, b)?);
 
         Ok(())
