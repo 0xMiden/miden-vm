@@ -28,7 +28,7 @@ pub use self::{
     error::{BinErrorKind, HexErrorKind, LiteralErrorKind, ParsingError},
     lexer::Lexer,
     scanner::Scanner,
-    token::{BinEncodedValue, DocumentationType, IntValue, Token, WordValue},
+    token::{BinEncodedValue, DocumentationType, IntValue, PushValue, Token, WordValue},
 };
 use crate::{LibraryPath, ast, sema};
 

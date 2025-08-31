@@ -570,8 +570,7 @@ impl<'input> Lexer<'input> {
         let end = span.end();
         let digit_start = start.to_u32() + 2;
         let span = SourceSpan::new(span.source_id(), start..end);
-        let value = parse_hex(span, self.slice_span(digit_start..end.to_u32()))?;
-        Ok(Token::HexValue(value))
+        parse_hex(span, self.slice_span(digit_start..end.to_u32()))
     }
 
     fn lex_bin(&mut self) -> Result<Token<'input>, ParsingError> {
@@ -612,7 +611,10 @@ impl<'input> Iterator for Lexer<'input> {
 // HELPER FUNCTIONS
 // ================================================================================================
 
-fn parse_hex(span: SourceSpan, hex_digits: &str) -> Result<IntValue, ParsingError> {
+fn parse_hex<'input>(
+    span: SourceSpan,
+    hex_digits: &'input str,
+) -> Result<Token<'input>, ParsingError> {
     use miden_core::{FieldElement, StarkField};
     match hex_digits.len() {
         // Felt
@@ -632,7 +634,7 @@ fn parse_hex(span: SourceSpan, hex_digits: &str) -> Result<IntValue, ParsingErro
                     kind: LiteralErrorKind::FeltOverflow,
                 });
             }
-            Ok(shrink_u64_hex(value))
+            Ok(Token::HexValue(shrink_u64_hex(value)))
         },
         // Word
         64 => {
@@ -662,7 +664,7 @@ fn parse_hex(span: SourceSpan, hex_digits: &str) -> Result<IntValue, ParsingErro
                 }
                 *element = Felt::new(value);
             }
-            Ok(IntValue::Word(WordValue(word)))
+            Ok(Token::HexWord(WordValue(word)))
         },
         // Invalid
         n if n > 64 => Err(ParsingError::InvalidHexLiteral { span, kind: HexErrorKind::TooLong }),
@@ -695,7 +697,7 @@ fn is_ascii_binary(c: char) -> bool {
 }
 
 #[inline]
-fn shrink_u64_hex(n: u64) -> IntValue {
+pub fn shrink_u64_hex(n: u64) -> IntValue {
     if n <= (u8::MAX as u64) {
         IntValue::U8(n as u8)
     } else if n <= (u16::MAX as u64) {
