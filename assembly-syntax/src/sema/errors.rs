@@ -74,6 +74,21 @@ pub enum SemanticAnalysisError {
         #[label]
         span: SourceSpan,
     },
+    #[error("invalid enum discriminant: value is not a valid instance of the {repr} type")]
+    #[diagnostic()]
+    InvalidEnumDiscriminant {
+        #[label]
+        span: SourceSpan,
+        repr: crate::ast::types::Type,
+    },
+    #[error("invalid enum discriminant: value conflicts with another variant of the same enum")]
+    #[diagnostic()]
+    EnumDiscriminantConflict {
+        #[label("this discriminant value conflicts with a previous variant")]
+        span: SourceSpan,
+        #[label("discriminant previously observed here")]
+        prev: SourceSpan,
+    },
     #[error("symbol conflict: found duplicate definitions of the same name")]
     #[diagnostic()]
     SymbolConflict {

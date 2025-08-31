@@ -10,7 +10,7 @@ use core::{marker::PhantomData, num::NonZeroU32, ops::Range};
 use miden_debug_types::{SourceFile, SourceSpan, Span, Spanned};
 use smallvec::smallvec;
 
-use crate::{LibraryPath, LibraryNamespace, ast::*, Felt, FieldElement, StarkField, Word};
+use crate::{LibraryPath, LibraryNamespace, ast::{*, types::Type}, Felt, FieldElement, StarkField, Word};
 use super::{
     BinEncodedValue, IntValue, PushValue, Token, WordValue, ParseError, ParsingError,
     LiteralErrorKind, DocumentationType
@@ -19,6 +19,7 @@ use super::{
 grammar<'input>(
     source_file: &Arc<SourceFile>,
     interned: &mut BTreeSet<Arc<str>>,
+    felt_type: &Arc<types::ArrayType>,
     _marker: PhantomData<&'input str>
 );
 
@@ -40,10 +41,14 @@ extern {
         "->" => Token::Rstab,
         "/" => Token::Slash,
         "//" => Token::SlashSlash,
+        ";" => Token::Semicolon,
+        ":" => Token::Colon,
         "::" => Token::ColonColon,
         "=" => Token::Equal,
         "." => Token::Dot,
         "@" => Token::At,
+        "{" => Token::Lbrace,
+        "}" => Token::Rbrace,
         "[" => Token::Lbracket,
         "]" => Token::Rbracket,
         ".." => Token::Range,
@@ -89,6 +94,7 @@ extern {
         "else" => Token::Else,
         "emit" => Token::Emit,
         "end" => Token::End,
+        "enum" => Token::Enum,
         "eq" => Token::Eq,
         "eqw" => Token::Eqw,
         "ext2add" => Token::Ext2Add,
@@ -99,10 +105,13 @@ extern {
         "ext2sub" => Token::Ext2Sub,
         "err" => Token::Err,
         "exec" => Token::Exec,
+        "event" => Token::Event,
         "exp" => Token::Exp,
         "exp.u" => Token::ExpU,
         "export" => Token::Export,
         "false" => Token::False,
+        "felt" => Token::Felt,
+        "fn" => Token::Fn,
         "fri_ext2fold4" => Token::FriExt2Fold4,
         "gt" => Token::Gt,
         "gte" => Token::Gte,
@@ -110,6 +119,12 @@ extern {
         "has_mapkey" => Token::HasMapkey,
         "hperm" => Token::Hperm,
         "hmerge" => Token::Hmerge,
+        "i1" => Token::I1,
+        "i8" => Token::I8,
+        "i16" => Token::I16,
+        "i32" => Token::I32,
+        "i64" => Token::I64,
+        "i128" => Token::I128,
         "if" => Token::If,
         "ilog2" => Token::ILog2,
         "inv" => Token::Inv,
@@ -150,6 +165,7 @@ extern {
         "pow2" => Token::Pow2,
         "proc" => Token::Proc,
         "procref" => Token::Procref,
+        "pub" => Token::Pub,
         "push" => Token::Push,
         "horner_eval_base" => Token::HornerBase,
         "horner_eval_ext" => Token::HornerExt,
@@ -158,6 +174,7 @@ extern {
         "reversedw" => Token::Reversedw,
         "sdepth" => Token::Sdepth,
         "stack" => Token::Stack,
+        "struct" => Token::Struct,
         "sub" => Token::Sub,
         "swap" => Token::Swap,
         "swapw" => Token::Swapw,
@@ -165,7 +182,11 @@ extern {
         "syscall" => Token::Syscall,
         "trace" => Token::Trace,
         "true" => Token::True,
+        "type" => Token::Type,
         "use" => Token::Use,
+        "u8" => Token::U8,
+        "u16" => Token::U16,
+        "u32" => Token::U32,
         "u32and" => Token::U32And,
         "u32assert" => Token::U32Assert,
         "u32assert2" => Token::U32Assert2,
@@ -205,10 +226,11 @@ extern {
         "u32wrapping_mul" => Token::U32WrappingMul,
         "u32wrapping_sub" => Token::U32WrappingSub,
         "u32xor" => Token::U32Xor,
+        "u64" => Token::U64,
+        "u128" => Token::U128,
         "while" => Token::While,
-        "xor" => Token::Xor,
         "word" => Token::Word,
-        "event" => Token::Event,
+        "xor" => Token::Xor,
         EOF => Token::Eof,
         bare_ident => Token::Ident(<&'input str>),
         bin_value => Token::BinValue(<BinEncodedValue>),
@@ -230,6 +252,24 @@ CommaDelimited<T>: Vec<T> = {
     <mut v:(<T> ",")*> <e:T> => {
         v.push(e);
         v
+    }
+};
+
+// comma-delimited with at least one element, with optional trailing comma
+#[inline]
+CommaDelimitedAllowTrailing<T>: Vec<T> = {
+    <mut v:(<T> ",")+> <e:T?> => {
+        if let Some(e) = e {
+            v.push(e);
+        }
+        v
+    },
+
+    <e:T?> => {
+        match e {
+            Some(e) => vec![e],
+            None => vec![],
+        }
     }
 };
 
@@ -261,6 +301,7 @@ pub Forms: Vec<Form> = {
 
 Form: Form = {
     Doc,
+    TypeDecl,
     Import,
     Const,
     AdvMap,
@@ -281,8 +322,165 @@ Doc: Form = {
     }
 }
 
+TypeDecl: Form = {
+    <l:@L> "type" <name:TypeName> "=" <ty:TypeExpr> <r:@R> => {
+        let span = span!(source_file.id(), l, r);
+        Form::Type(TypeAlias::new(name, ty).with_span(span))
+    },
+
+    <l:@L> "enum" <name:TypeName> ":" <repr:IntType> "{" <variants:CommaDelimitedAllowTrailing<EnumVariant>> "}" <r:@R> => {
+        let span = span!(source_file.id(), l, r);
+        let mut vs = Vec::with_capacity(variants.len());
+        let mut next = ConstantExpr::Int(Span::new(span, IntValue::U8(0)));
+        for (span, name, discriminant) in variants {
+            match discriminant {
+                Some(discriminant) => {
+                    match discriminant {
+                        ConstantExpr::Int(value) => {
+                            vs.push(Variant::new(name.clone(), ConstantExpr::Int(value)).with_span(span));
+                            next = ConstantExpr::BinaryOp {
+                                span,
+                                op: ConstantOp::Add,
+                                lhs: Box::new(ConstantExpr::Var(name)),
+                                rhs: Box::new(ConstantExpr::Int(Span::new(span, IntValue::U8(1)))),
+                            };
+                        }
+                        expr => {
+                            vs.push(Variant::new(name.clone(), expr).with_span(span));
+                            next = ConstantExpr::BinaryOp {
+                                span,
+                                op: ConstantOp::Add,
+                                lhs: Box::new(ConstantExpr::Var(name)),
+                                rhs: Box::new(ConstantExpr::Int(Span::new(span, IntValue::U8(1)))),
+                            };
+                        }
+                    }
+                }
+                None => {
+                    let discriminant = core::mem::replace(&mut next, ConstantExpr::BinaryOp {
+                        span,
+                        op: ConstantOp::Add,
+                        lhs: Box::new(ConstantExpr::Var(name.clone())),
+                        rhs: Box::new(ConstantExpr::Int(Span::new(span, IntValue::U8(1)))),
+                    });
+                    vs.push(Variant::new(name, discriminant).with_span(span));
+                }
+            }
+        }
+        Form::Enum(EnumType::new(name, repr, vs).with_span(span))
+    }
+}
+
+EnumVariant: (SourceSpan, Ident, Option<ConstantExpr>) = {
+    <l:@L> <name:ConstantName> <discriminant:("=" <ConstantArithmeticExpr>)?> <r:@R> => {
+        let span = span!(source_file.id(), l, r);
+        (span, name, discriminant)
+    }
+}
+
+TypeExpr: TypeExpr = {
+    <l:@L> <t:PrimitiveType> <r:@R> => TypeExpr::Primitive(Span::new(span!(source_file.id(), l, r), t)),
+    <l:@L> "*" <pointee:TypeExpr> <r:@R> => TypeExpr::Ptr(Span::new(span!(source_file.id(), l, r), Box::new(pointee))),
+    <ArrayType> => TypeExpr::Array(<>),
+    <StructType> => TypeExpr::Struct(<>),
+    <TypeName> => TypeExpr::Ref(<>),
+}
+
+ArrayType: ArrayType = {
+    <l:@L> "[" <elem:TypeExpr> ";" <arity:uint> "]" <r:@R> =>? {
+        let span = span!(source_file.id(), l, r);
+        let arity = usize::try_from(arity)
+            .map_err(|error| ParseError::User {
+                error: ParsingError::ImmediateOutOfRange {
+                    span, range: 0..(u32::MAX as usize)
+                }
+            })?;
+        Ok(ArrayType {
+            span,
+            elem: Box::new(elem),
+            arity,
+        })
+    }
+}
+
+StructType: StructType = {
+    <l:@L> "struct" "{" <fields:CommaDelimitedAllowTrailing<StructField>> "}" <r:@R> => {
+        let span = span!(source_file.id(), l, r);
+        StructType {
+            span,
+            fields,
+        }
+    },
+}
+
+StructField: StructField = {
+    <l:@L> <name:BareIdent> ":" <ty:TypeExpr> <r:@R> => {
+        let span = span!(source_file.id(), l, r);
+        StructField {
+            span,
+            name,
+            ty,
+        }
+    }
+}
+
+FunctionType: FunctionType = {
+    <l:@L> "(" <args:CommaDelimitedAllowTrailing<FunctionParamType>> ")" <results:("->" <FunctionResultType>)?> <r:@R> => {
+        let span = span!(source_file.id(), l, r);
+        FunctionType::new(types::CallConv::Fast, args, results.unwrap_or_default()).with_span(span)
+    }
+}
+
+FunctionParamType: TypeExpr = {
+    <l:@L> <_param:bare_ident> ":" <t:TypeExpr> <r:@R> => t,
+}
+
+FunctionResultType: Vec<TypeExpr> = {
+    "(" <CommaDelimitedAllowTrailing<TypeExpr>> ")" => <>,
+    <TypeExpr> => vec![<>],
+}
+
+#[inline]
+PrimitiveType: Type = {
+    IntType,
+    "word" => Type::Array(Arc::clone(felt_type)),
+}
+
+#[inline]
+IntType: Type = {
+    "i1" => Type::I1,
+    "i8" => Type::I8,
+    "i16" => Type::I16,
+    "i32" => Type::I32,
+    "i64" => Type::I64,
+    "i128" => Type::I128,
+    "u8" => Type::U8,
+    "u16" => Type::U16,
+    "u32" => Type::U32,
+    "u64" => Type::U64,
+    "u128" => Type::U128,
+    "felt" => Type::Felt,
+}
+
+#[inline]
+TypeName: Ident = {
+    <l:@L> <name:bare_ident> <r:@R> =>? {
+        let name = interned.get(name).cloned().unwrap_or_else(|| {
+            let name = Arc::<str>::from(name.to_string().into_boxed_str());
+            interned.insert(name.clone());
+            name
+        });
+        let span = span!(source_file.id(), l, r);
+        Ident::validate(&name)
+            .map_err(|error| ParseError::User {
+                error: ParsingError::InvalidIdentifier { error, span },
+            })?;
+        Ok(Ident::from_raw_parts(Span::new(span, name)))
+    },
+}
+
 Import: Form = {
-    <l:@L> "use" "." <path:MaybeQualifiedPath> <alias:("->" <BareIdent>)?> <r:@R> =>? {
+    <l:@L> "use" "."? <path:MaybeQualifiedPath> <alias:("->" <BareIdent>)?> <r:@R> =>? {
         let span = span!(source_file.id(), l, r);
         if path.num_components() == 1 {
             return Err(ParseError::User {
@@ -295,7 +493,7 @@ Import: Form = {
 }
 
 Const: Form = {
-    <l:@L> "const" "." <name:ConstantName> "=" <value:ConstantExpr> <r:@R> => {
+    <l:@L> "const" "."? <name:ConstantName> "=" <value:ConstantExpr> <r:@R> => {
         Form::Constant(Constant::new(
             span!(source_file.id(), l, r),
             name,
@@ -312,7 +510,7 @@ MaybeAdvMapKey: Option<Span<WordValue>> = {
 }
 
 AdvMap: Form = {
-    <l:@L> "adv_map" "." <name:ConstantName> <key:MaybeAdvMapKey> "=" "[" <value:CommaDelimited<Felt>> "]" <r:@R> => {
+    <l:@L> "adv_map" "."? <name:ConstantName> <key:MaybeAdvMapKey> "=" "[" <value:CommaDelimited<Felt>> "]" <r:@R> => {
         Form::AdviceMapEntry(AdviceMapEntry::new(
             span!(source_file.id(), l, r),
             name,
@@ -332,6 +530,7 @@ Proc: Form = {
     <annotations:Annotation*> <mut proc:ProcedureDef> =>? {
         use alloc::collections::btree_map::Entry;
         let attributes = proc.attributes_mut();
+        let mut cc = None;
         for attr in annotations {
             match attr {
                 Attribute::KeyValue(kv) => {
@@ -367,6 +566,45 @@ Proc: Form = {
                         }
                     }
                 }
+                Attribute::List(list) if list.name() == "callconv" && list.len() == 1 => {
+                    match attributes.entry(list.id()) {
+                        AttributeSetEntry::Vacant(entry) => {
+                            let valid_cc = match &list.as_slice()[0] {
+                                MetaExpr::Ident(cc) => match cc.as_str() {
+                                    "fast" => Some(types::CallConv::Fast),
+                                    "C" => Some(types::CallConv::SystemV),
+                                    "wasm" => Some(types::CallConv::Wasm),
+                                    "canon-lift" => Some(types::CallConv::CanonLift),
+                                    "canon-lower" => Some(types::CallConv::CanonLower),
+                                    _ => None,
+                                },
+                                MetaExpr::String(cc) => match cc.as_str() {
+                                    "fast" => Some(types::CallConv::Fast),
+                                    "C" => Some(types::CallConv::SystemV),
+                                    "wasm" => Some(types::CallConv::Wasm),
+                                    "canon-lift" => Some(types::CallConv::CanonLift),
+                                    "canon-lower" => Some(types::CallConv::CanonLower),
+                                    _ => None,
+                                },
+                                _ => None,
+                            };
+                            if valid_cc.is_some() {
+                                cc = valid_cc;
+                                entry.insert(Attribute::List(list));
+                            } else {
+                                return Err(ParseError::User {
+                                    error: ParsingError::UnrecognizedCallConv { span: list.span() },
+                                });
+                            }
+                        }
+                        AttributeSetEntry::Occupied(entry) => {
+                            let prev_attr = entry.get();
+                            return Err(ParseError::User {
+                                error: ParsingError::AttributeConflict { span: list.span(), prev: prev_attr.span() },
+                            });
+                        }
+                    }
+                }
                 attr => {
                     match attributes.entry(attr.id()) {
                         AttributeSetEntry::Vacant(entry) => {
@@ -382,6 +620,15 @@ Proc: Form = {
                 }
             }
         }
+
+        if let Some(cc) = cc {
+            // Strip the 'callconv' attribute now that it is no longer needed
+            attributes.remove("callconv");
+            if let Some(signature) = proc.signature_mut() {
+                signature.cc = cc;
+            }
+        }
+
         Ok(Form::Procedure(Export::Procedure(proc)))
     },
     AliasDef => Form::Procedure(Export::Alias(<>)),
@@ -389,7 +636,7 @@ Proc: Form = {
 
 #[inline]
 ProcedureDef: Procedure = {
-    <l:@L> <visibility:Visibility> "." <name:ProcedureName> <num_locals:MaybeParam<U16>> <body:Block> "end" <r:@R> =>? {
+    <l:@L> <visibility:Visibility> "."? <name:ProcedureName> <num_locals:MaybeParam<U16>> <ty:FunctionType?> <body:Block> "end" <r:@R> =>? {
         let num_locals = num_locals.unwrap_or(0);
         let procedure = Procedure::new(
             span!(source_file.id(), l, r),
@@ -398,13 +645,17 @@ ProcedureDef: Procedure = {
             num_locals,
             body
         );
-        Ok(procedure)
+        Ok(if let Some(ty) = ty {
+            procedure.with_signature(ty)
+        } else {
+            procedure
+        })
     },
 }
 
 #[inline]
 AliasDef: ProcedureAlias = {
-    <l:@L> "export" "." <name:MaybeQualifiedProcedurePath> <alias:("->" <ProcedureName>)?> <r:@R> =>? {
+    <l:@L> <_pub:PubVisibility> "."? <name:MaybeQualifiedProcedurePath> <alias:("->" <ProcedureName>)?> <r:@R> =>? {
         let span = span!(source_file.id(), l, r);
         let alias = match name {
             InvocationTarget::ProcedureName(_) =>  return Err(ParseError::User {
@@ -451,6 +702,14 @@ AliasDef: ProcedureAlias = {
 Visibility: Visibility = {
     "proc" => Visibility::Private,
     "export" => Visibility::Public,
+    "pub" "."? "fn" => Visibility::Public,
+    "fn" => Visibility::Private,
+}
+
+#[inline]
+PubVisibility: Visibility = {
+    "export" => Visibility::Public,
+    "pub" "."? "fn" => Visibility::Public,
 }
 
 // ANNOTATIONS
@@ -1606,16 +1865,6 @@ MaybeQualifiedProcedurePath: InvocationTarget = {
 
 #[inline]
 BareIdent: Ident = {
-    <l:@L> "word" <r:@R> => {
-        let name = interned.get("word").cloned().unwrap_or_else(|| {
-            let name = Arc::<str>::from("word".to_string().into_boxed_str());
-            interned.insert(name.clone());
-            name
-        });
-        let span = span!(source_file.id(), l, r);
-        Ident::from_raw_parts(Span::new(span, name))
-    },
-
     <l:@L> <name:bare_ident> <r:@R> =>? {
         let name = interned.get(name).cloned().unwrap_or_else(|| {
             let name = Arc::<str>::from(name.to_string().into_boxed_str());
@@ -1631,6 +1880,8 @@ BareIdent: Ident = {
     },
 
     OpcodeName,
+
+    TypeId,
 }
 
 MaybeQualifiedPath: Span<LibraryPath> = {
@@ -1853,6 +2104,33 @@ Opcode: &'static str = {
     "xor" => "xor",
 }
 
+TypeId: Ident = {
+    <l:@L> <name:TypeIdStr> <r:@R> => {
+        let name = interned.get(name).cloned().unwrap_or_else(|| {
+            let name = Arc::<str>::from(name.to_string().into_boxed_str());
+            interned.insert(name.clone());
+            name
+        });
+        Ident::from_raw_parts(Span::new(span!(source_file.id(), l, r), name))
+    }
+}
+
+TypeIdStr: &'static str = {
+    "word" => "word",
+    "i1" => "i1",
+    "u8" => "u8",
+    "i8" => "i8",
+    "u16" => "u16",
+    "i16" => "i16",
+    "u32" => "u32",
+    "i32" => "i32",
+    "u64" => "u64",
+    "i64" => "i64",
+    "u128" => "u128",
+    "i128" => "i128",
+    "felt" => "felt",
+}
+
 // CONSTANT EXPRESSIONS
 // ================================================================================================
 
@@ -1880,6 +2158,20 @@ ConstantExpr: ConstantExpr = {
     ConstantExpr100,
 }
 
+ConstantArithmeticExpr: ConstantExpr = {
+    <l:@L> <x:ConstantArithmeticExpr> "+" <y:ConstantArithmeticExpr100> <r:@R> =>? {
+        let expr = ConstantExpr::BinaryOp {  span: span!(source_file.id(), l, r), op: ConstantOp::Add, lhs: Box::new(x), rhs: Box::new(y) };
+        expr.try_fold().map_err(|error| ParseError::User { error })
+    },
+
+    <l:@L> <x:ConstantArithmeticExpr> "-" <y:ConstantArithmeticExpr100> <r:@R> =>? {
+        let expr = ConstantExpr::BinaryOp { span: span!(source_file.id(), l, r), op: ConstantOp::Sub, lhs: Box::new(x), rhs: Box::new(y) };
+        expr.try_fold().map_err(|error| ParseError::User { error })
+    },
+
+    ConstantArithmeticExpr100,
+}
+
 ConstantExpr100: ConstantExpr = {
     <l:@L> <x:ConstantExpr100> "*" <y:Term> <r:@R> =>? {
         let expr = ConstantExpr::BinaryOp { span: span!(source_file.id(), l, r), op: ConstantOp::Mul, lhs: Box::new(x), rhs: Box::new(y) };
@@ -1897,6 +2189,25 @@ ConstantExpr100: ConstantExpr = {
     },
 
     Term
+}
+
+ConstantArithmeticExpr100: ConstantExpr = {
+    <l:@L> <x:ConstantArithmeticExpr100> "*" <y:NumericTerm> <r:@R> =>? {
+        let expr = ConstantExpr::BinaryOp { span: span!(source_file.id(), l, r), op: ConstantOp::Mul, lhs: Box::new(x), rhs: Box::new(y) };
+        expr.try_fold().map_err(|error| ParseError::User { error })
+    },
+
+    <l:@L> <x:ConstantArithmeticExpr100> "/" <y:NumericTerm> <r:@R> =>? {
+        let expr = ConstantExpr::BinaryOp { span: span!(source_file.id(), l, r), op: ConstantOp::Div, lhs: Box::new(x), rhs: Box::new(y) };
+        expr.try_fold().map_err(|error| ParseError::User { error })
+    },
+
+    <l:@L> <x:ConstantArithmeticExpr100> "//" <y:NumericTerm> <r:@R> =>? {
+        let expr = ConstantExpr::BinaryOp { span: span!(source_file.id(), l, r), op: ConstantOp::IntDiv, lhs: Box::new(x), rhs: Box::new(y) };
+        expr.try_fold().map_err(|error| ParseError::User { error })
+    },
+
+    NumericTerm
 }
 
 #[inline]
@@ -1929,6 +2240,16 @@ Term: ConstantExpr = {
     },
 
     <QuotedString> => ConstantExpr::String(<>),
+
+    <ConstantName> => ConstantExpr::Var(<>),
+}
+
+NumericTerm: ConstantExpr = {
+    "(" <ConstantArithmeticExpr> ")",
+
+    <l:@L> <value:IntValue> <r:@R> => {
+        ConstantExpr::Int(Span::new(span!(source_file.id(), l, r), value))
+    },
 
     <ConstantName> => ConstantExpr::Var(<>),
 }

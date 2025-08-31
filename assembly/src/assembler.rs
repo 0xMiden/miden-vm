@@ -474,8 +474,12 @@ impl Assembler {
                         .get_procedure(gid)
                         .expect("compilation succeeded but root not found in cache")
                         .body_node_id();
-                    let signature = ast_module.procedure_signature(proc_idx).cloned();
-                    let export = LibraryExport { node, name: fqn.clone(), signature };
+                    let signature = self.linker.resolve_signature(gid)?;
+                    let export = LibraryExport {
+                        node,
+                        name: fqn.clone(),
+                        signature: signature.map(Arc::unwrap_or_clone),
+                    };
                     exports.insert(fqn, export);
                 }
             }
@@ -613,11 +617,12 @@ impl Assembler {
                         module: module.path().clone(),
                         name: proc.name().clone(),
                     };
+                    let signature = self.linker.resolve_signature(procedure_gid)?;
                     let pctx = ProcedureContext::new(
                         procedure_gid,
                         name,
                         proc.visibility(),
-                        proc.signature().cloned(),
+                        signature,
                         module.is_in_kernel(),
                         self.source_manager.clone(),
                     )

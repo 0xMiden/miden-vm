@@ -8,7 +8,6 @@ mod resolver;
 use alloc::string::String;
 
 use miden_debug_types::{SourceSpan, Span, Spanned};
-use midenc_hir_type::FunctionType;
 
 pub use self::{
     alias::{AliasTarget, ProcedureAlias},
@@ -17,7 +16,7 @@ pub use self::{
     procedure::{Procedure, Visibility},
     resolver::{LocalNameResolver, ResolvedProcedure},
 };
-use crate::ast::{AttributeSet, Invoke};
+use crate::ast::{AttributeSet, FunctionType, Invoke};
 
 // EXPORT
 // ================================================================================================

@@ -34,7 +34,7 @@ impl ProcedureContext {
         gid: GlobalProcedureIndex,
         name: QualifiedProcedureName,
         visibility: Visibility,
-        signature: Option<FunctionType>,
+        signature: Option<Arc<FunctionType>>,
         is_kernel: bool,
         source_manager: Arc<dyn SourceManager>,
     ) -> Self {
@@ -44,7 +44,7 @@ impl ProcedureContext {
             span: name.span(),
             name,
             visibility,
-            signature: signature.map(Arc::new),
+            signature,
             is_kernel,
             num_locals: 0,
         }

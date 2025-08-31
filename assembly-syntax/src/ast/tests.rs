@@ -6,7 +6,7 @@ use pretty_assertions::assert_eq;
 
 use crate::{
     Felt, LibraryNamespace, LibraryPath, assert_diagnostic, assert_diagnostic_lines,
-    ast::*,
+    ast::{types::Type, *},
     parser::{IntValue, WordValue},
     regex, source_file,
     testing::SyntaxTestContext,
@@ -14,6 +14,10 @@ use crate::{
 
 macro_rules! id {
     ($name:ident) => {
+        Ident::new(stringify!($name)).unwrap()
+    };
+
+    ($name:ty) => {
         Ident::new(stringify!($name)).unwrap()
     };
 }
@@ -117,6 +121,102 @@ macro_rules! while_true {
     };
 }
 
+macro_rules! type_alias {
+    ($alias:ident, $ty:expr) => {
+        Form::Type(TypeAlias::new(id!($alias), $ty.into()))
+    };
+
+    ($alias:ty, $ty:expr) => {
+        Form::Type(TypeAlias::new(id!($alias), $ty.into()))
+    };
+}
+
+macro_rules! type_ref {
+    ($alias:ident) => {
+        TypeExpr::Ref(id!($alias))
+    };
+
+    ($alias:ty) => {
+        TypeExpr::Ref(id!($alias))
+    };
+}
+
+macro_rules! struct_ty {
+    ($($field_name:ident : $field_ty:expr),+) => {
+        TypeExpr::Struct(StructType::new([
+            $(
+                StructField {
+                    span: SourceSpan::UNKNOWN,
+                    name: id!($field_name),
+                    ty: $field_ty.into(),
+                }
+            ),*
+        ]))
+    }
+}
+
+macro_rules! array_ty {
+    ($element_ty:expr, $arity:literal) => {
+        TypeExpr::Array(ArrayType::new($element_ty.into(), $arity))
+    };
+}
+
+macro_rules! function_ty {
+    ($($arg_ty:expr),* => $($result_ty:expr),*) => {
+        FunctionType::new(types::CallConv::Fast, vec![$($arg_ty),*], vec![$($result_ty),*])
+    }
+}
+
+macro_rules! enum_ty {
+    ($name:ident, $ty:expr, $($variant:expr),+) => {
+        Form::Enum(EnumType::new(id!($name), $ty.into(), [$($variant),*]))
+    };
+
+    ($name:ty, $ty:expr, $($variant:expr),+) => {
+        Form::Enum(EnumType::new(id!($name), $ty.into(), [$($variant),*]))
+    };
+}
+
+macro_rules! variant {
+    ($name:ident, $discriminant:expr) => {
+        Variant::new(id!($name), $discriminant.into())
+    };
+}
+
+macro_rules! const_int {
+    ($value:literal) => {
+        ConstantExpr::Int(Span::unknown(IntValue::from($value)))
+    };
+}
+
+macro_rules! const_ref {
+    ($name:ident) => {
+        ConstantExpr::Var(id!($name))
+    };
+}
+
+macro_rules! const_mul {
+    ($lhs:expr, $rhs:expr) => {
+        ConstantExpr::BinaryOp {
+            span: SourceSpan::UNKNOWN,
+            op: ConstantOp::Mul,
+            lhs: alloc::boxed::Box::new($lhs),
+            rhs: alloc::boxed::Box::new($rhs),
+        }
+    };
+}
+
+macro_rules! const_add {
+    ($lhs:expr, $rhs:expr) => {
+        ConstantExpr::BinaryOp {
+            span: SourceSpan::UNKNOWN,
+            op: ConstantOp::Add,
+            lhs: alloc::boxed::Box::new($lhs),
+            rhs: alloc::boxed::Box::new($rhs),
+        }
+    };
+}
+
 macro_rules! import {
     ($name:literal) => {{
         let path: crate::LibraryPath = $name.parse().expect("invalid import path");
@@ -213,6 +313,35 @@ macro_rules! export {
                 $num_locals,
                 $body,
             )
+            .with_docs(Some(Span::unknown($docs.to_string()))),
+        ))
+    };
+}
+
+macro_rules! typed_export {
+    ($name:ident, $num_locals:literal, $signature:expr, $body:expr) => {
+        Form::Procedure(Export::Procedure(
+            Procedure::new(
+                Default::default(),
+                Visibility::Public,
+                stringify!($name).parse().expect("invalid procedure name"),
+                $num_locals,
+                $body,
+            )
+            .with_signature($signature),
+        ))
+    };
+
+    ($docs:expr, $name:ident, $num_locals:literal, $signature:expr, $body:expr) => {
+        Form::Procedure(Export::Procedure(
+            Procedure::new(
+                Default::default(),
+                Visibility::Public,
+                stringify!($name).parse().expect("invalid procedure name"),
+                $num_locals,
+                $body,
+            )
+            .with_signature($signature)
             .with_docs(Some(Span::unknown($docs.to_string()))),
         ))
     };
@@ -1060,7 +1189,7 @@ fn test_ast_parsing_module_docs_fail() {
         "4 |         loc_load.0",
         "5 |     end",
         "  `----",
-        r#" help: expected primitive opcode (e.g. "add"), or control flow opcode (e.g. "if.true")"#
+        r#" help: expected "(", or primitive opcode (e.g. "add"), or control flow opcode (e.g. "if.true")"#
     );
 }
 
@@ -1162,7 +1291,7 @@ fn assert_parsing_line_invalid_op() {
         "   :                      `-- found a identifier here",
         "29 |         end",
         "   `----",
-        r#" help: expected ".", or "[", or primitive opcode (e.g. "add"), or "end", or control flow opcode (e.g. "if.true")"#
+        r#" help: expected ".", or primitive opcode (e.g. "add"), or "end", or control flow opcode (e.g. "if.true")"#
     );
 }
 
@@ -1187,7 +1316,7 @@ fn assert_parsing_line_unexpected_token() {
         "  :     ^|^",
         "  :      `-- found a mul here",
         "  `----",
-        r#" help: expected "@", or "adv_map", or "begin", or "const", or "export", or "proc", or "use", or end of file, or doc comment"#
+        r#" help: expected "@", or "adv_map", or "begin", or "const", or "enum", or "export", or "fn", or "proc", or "pub", or "type", or "use", or end of file, or doc comment"#
     );
 }
 
@@ -1392,4 +1521,110 @@ end"#
         "  `----",
         r#" help: this constant does not resolve to a value of the right type"#
     );
+}
+
+// TYPES
+// ================================================================================================
+
+#[test]
+fn test_type_declarations() -> Result<(), Report> {
+    let context = SyntaxTestContext::new();
+    let source = source_file!(
+        &context,
+        r#"
+type t = felt
+type Int8 = u8
+type Int64 = struct { hi: u32, lo: u32 }
+type Int128 = struct { hi: Int64, lo: Int64 }
+type Hash = [u8; 32]
+"#
+    );
+
+    let forms = module!(
+        type_alias!(t, Type::Felt),
+        type_alias!(Int8, Type::U8),
+        type_alias!(Int64, struct_ty!(hi: Type::U32, lo: Type::U32)),
+        type_alias!(Int128, struct_ty!(hi: type_ref!(Int64), lo: type_ref!(Int64))),
+        type_alias!(Hash, array_ty!(Type::U8, 32))
+    );
+    assert_eq!(context.parse_forms(source)?, forms);
+    Ok(())
+}
+
+#[test]
+fn test_enum_declarations() -> Result<(), Report> {
+    let context = SyntaxTestContext::new();
+    let source = source_file!(
+        &context,
+        r#"
+enum Tag : u8 {
+    A,
+    B = 2,
+    C = B * 2,
+    D,
+}
+"#
+    );
+
+    let forms = module!(enum_ty!(
+        Tag,
+        Type::U8,
+        variant!(A, const_int!(0u8)),
+        variant!(B, const_int!(2u8)),
+        variant!(C, const_mul!(const_ref!(B), const_int!(2u8))),
+        variant!(D, const_add!(const_ref!(C), const_int!(1u8)))
+    ));
+    assert_eq!(context.parse_forms(source)?, forms);
+    Ok(())
+}
+
+#[test]
+fn test_type_signatures() -> Result<(), Report> {
+    let context = SyntaxTestContext::new();
+    let source = source_file!(
+        &context,
+        r#"
+use std::math::u64
+
+type Int64 = struct { hi: u32, lo: u32 }
+
+pub fn add(a: Int64, b: Int64) -> Int64
+    exec.u64::wrapping_mul
+end
+
+enum Bool : i1 {
+    FALSE,
+    TRUE,
+}
+
+pub fn is_number(a: Int64) -> Bool
+    push.TRUE
+end
+"#
+    );
+
+    let forms = module!(
+        import!("std::math::u64"),
+        type_alias!(Int64, struct_ty!(hi: Type::U32, lo: Type::U32)),
+        typed_export!(
+            add,
+            0,
+            function_ty!(type_ref!(Int64), type_ref!(Int64) => type_ref!(Int64)),
+            block!(exec!(u64::wrapping_mul))
+        ),
+        enum_ty!(
+            Bool,
+            Type::I1,
+            variant!(FALSE, const_int!(0u8)),
+            variant!(TRUE, const_add!(const_ref!(FALSE), const_int!(1u8)))
+        ),
+        typed_export!(
+            is_number,
+            0,
+            function_ty!(type_ref!(Int64) => type_ref!(Bool)),
+            block!(inst!(Push(Immediate::Constant(id!(TRUE)))))
+        )
+    );
+    assert_eq!(context.parse_forms(source)?, forms);
+    Ok(())
 }
