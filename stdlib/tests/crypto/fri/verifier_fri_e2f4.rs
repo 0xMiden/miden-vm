@@ -250,7 +250,7 @@ impl FriVerifierFold4Ext2 {
         // 1 ----- verify the recursive components of the FRI proof -------------------------------
         let positions = positions.to_vec();
         let evaluations = evaluations.to_vec();
-        let mut final_pos_eval: Vec<(usize, QuadFelt)> = vec![];
+        let mut final_pos_eval: Vec<(usize, QuadFelt)> = Vec::with_capacity(positions.len());
         let advice_provider =
             channel.unbatch::<4, 3>(&positions, self.domain_size(), self.layer_commitments.clone());
 
