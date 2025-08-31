@@ -656,7 +656,7 @@ impl Assembler {
                         .resolve_target(
                             InvokeKind::ProcRef,
                             &proc_alias.target().into(),
-                            &pctx,
+                            procedure_gid,
                             mast_forest_builder,
                         )?;
 
@@ -916,12 +916,12 @@ impl Assembler {
         &self,
         kind: InvokeKind,
         target: &InvocationTarget,
-        proc_ctx: &ProcedureContext,
+        caller_id: GlobalProcedureIndex,
         mast_forest_builder: &mut MastForestBuilder,
     ) -> Result<ResolvedProcedure, Report> {
         let caller = CallerInfo {
             span: target.span(),
-            module: proc_ctx.id().module,
+            module: caller_id.module,
             kind,
         };
         let resolved = self.linker.resolve_target(&caller, target)?;
