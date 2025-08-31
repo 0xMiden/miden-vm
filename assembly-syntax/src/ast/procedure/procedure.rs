@@ -2,10 +2,9 @@ use alloc::{collections::BTreeSet, string::String};
 use core::fmt;
 
 use miden_debug_types::{SourceSpan, Span, Spanned};
-use midenc_hir_type::FunctionType;
 
 use super::ProcedureName;
-use crate::ast::{Attribute, AttributeSet, Block, DocString, Invoke};
+use crate::ast::{Attribute, AttributeSet, Block, DocString, FunctionType, Invoke};
 
 // PROCEDURE VISIBILITY
 // ================================================================================================
@@ -142,6 +141,11 @@ impl Procedure {
     /// Get the type signature of this procedure, if known
     pub fn signature(&self) -> Option<&FunctionType> {
         self.ty.as_ref()
+    }
+
+    /// Get the type signature of this procedure mutably, if known
+    pub fn signature_mut(&mut self) -> Option<&mut FunctionType> {
+        self.ty.as_mut()
     }
 
     /// Returns the number of locals allocated by this procedure.

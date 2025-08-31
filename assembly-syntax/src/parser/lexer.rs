@@ -277,8 +277,9 @@ impl<'input> Lexer<'input> {
             '!' => pop!(self, Token::Bang),
             ':' => match self.peek() {
                 ':' => pop2!(self, Token::ColonColon),
-                _ => Err(ParsingError::InvalidToken { span: self.span() }),
+                _ => pop!(self, Token::Colon),
             },
+            ';' => pop!(self, Token::Semicolon),
             '.' => match self.peek() {
                 '.' => pop2!(self, Token::Range),
                 _ => pop!(self, Token::Dot),
@@ -286,8 +287,10 @@ impl<'input> Lexer<'input> {
             ',' => pop!(self, Token::Comma),
             '=' => pop!(self, Token::Equal),
             '(' => pop!(self, Token::Lparen),
+            '{' => pop!(self, Token::Lbrace),
             '[' => pop!(self, Token::Lbracket),
             ')' => pop!(self, Token::Rparen),
+            '}' => pop!(self, Token::Rbrace),
             ']' => pop!(self, Token::Rbracket),
             '-' => match self.peek() {
                 '>' => pop2!(self, Token::Rstab),
@@ -317,7 +320,7 @@ impl<'input> Lexer<'input> {
             },
             '1'..='9' => self.lex_number(),
             'a'..='z' => self.lex_keyword_or_ident(),
-            'A'..='Z' => self.lex_const_identifier(),
+            'A'..='Z' => self.lex_identifier(),
             '_' => match self.peek() {
                 c if c.is_ascii_alphanumeric() => self.lex_identifier(),
                 _ => Err(ParsingError::InvalidToken { span: self.span() }),
@@ -469,17 +472,26 @@ impl<'input> Lexer<'input> {
 
     fn lex_identifier(&mut self) -> Result<Token<'input>, ParsingError> {
         let c = self.pop();
-        debug_assert!(c.is_ascii_lowercase() || c == '_');
+        debug_assert!(c.is_ascii_alphabetic() || c == '_');
+
+        let mut is_constant_ident = c.is_ascii_uppercase() || c == '_';
 
         loop {
             match self.read() {
                 '_' | '0'..='9' => self.skip(),
-                c if c.is_ascii_lowercase() => self.skip(),
+                c if c.is_ascii_alphabetic() => {
+                    is_constant_ident &= c.is_ascii_uppercase();
+                    self.skip();
+                },
                 _ => break,
             }
         }
 
-        Ok(Token::Ident(self.slice()))
+        if is_constant_ident {
+            Ok(Token::ConstantIdent(self.slice()))
+        } else {
+            Ok(Token::Ident(self.slice()))
+        }
     }
 
     fn lex_special_identifier(&mut self) -> Result<Token<'input>, ParsingError> {
@@ -502,21 +514,6 @@ impl<'input> Lexer<'input> {
                 Err(ParsingError::InvalidToken { span })
             },
         }
-    }
-
-    fn lex_const_identifier(&mut self) -> Result<Token<'input>, ParsingError> {
-        let c = self.pop();
-        debug_assert!(c.is_ascii_uppercase() || c == '_');
-
-        loop {
-            match self.read() {
-                '_' | '0'..='9' => self.skip(),
-                c if c.is_ascii_uppercase() => self.skip(),
-                _ => break,
-            }
-        }
-
-        Ok(Token::ConstantIdent(self.slice()))
     }
 
     fn lex_number(&mut self) -> Result<Token<'input>, ParsingError> {

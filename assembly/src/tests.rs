@@ -2,10 +2,7 @@ use alloc::{collections::BTreeSet, string::ToString, vec::Vec};
 use core::str::FromStr;
 use std::sync::{Arc, LazyLock};
 
-use miden_assembly_syntax::{
-    ast::types::{FunctionType, Type},
-    diagnostics::WrapErr,
-};
+use miden_assembly_syntax::diagnostics::WrapErr;
 use miden_core::{
     Operation, Program, Word, assert_matches,
     mast::{MastNode, MastNodeId},
@@ -906,8 +903,9 @@ fn constant_must_be_valid_felt() -> TestResult {
         "  :                    ^^^|^^^",
         "  :                       `-- found a constant identifier here",
         "  `----",
-        " help: expected \"*\", or \"+\", or \"-\", or \"/\", or \"//\", or \"@\", or \"adv_map\", or \"begin\", or \"const\", \
-or \"export\", or \"proc\", or \"use\", or end of file, or doc comment"
+        " help: expected \"*\", or \"+\", or \"-\", or \"/\", or \"//\", or \"@\", or \"adv_map\", or \"begin\", or \"const\", or \"enum\", \
+or \"export\", or \"fn\", or \"proc\", or \"pub\", or \"type\", or \"use\", or end of file, or",
+        "       doc comment"
     );
     Ok(())
 }
@@ -2475,7 +2473,7 @@ fn module_alias() -> TestResult {
         "  :                                      `-- found a -> here",
         "3 |",
         "  `----",
-        r#" help: expected "@", or "adv_map", or "begin", or "const", or "export", or "proc", or "use", or end of file, or doc comment"#
+        r#" help: expected "@", or "adv_map", or "begin", or "const", or "enum", or "export", or "fn", or "proc", or "pub", or "type", or "use", or end of file, or doc comment"#
     );
 
     // --- duplicate module import --------------------------------------------
@@ -2705,7 +2703,7 @@ fn invalid_empty_program() {
         "unexpected end of file",
         regex!(r#",-\[test[\d]+:1:1\]"#),
         "`----",
-        r#" help: expected "@", or "adv_map", or "begin", or "const", or "export", or "proc", or "use", or doc comment"#
+        r#" help: expected "@", or "adv_map", or "begin", or "const", or "enum", or "export", or "fn", or "proc", or "pub", or "type", or "use", or doc comment"#
     );
 
     assert_assembler_diagnostic!(
@@ -2714,7 +2712,7 @@ fn invalid_empty_program() {
         "unexpected end of file",
         regex!(r#",-\[test[\d]+:1:1\]"#),
         "  `----",
-        r#" help: expected "@", or "adv_map", or "begin", or "const", or "export", or "proc", or "use", or doc comment"#
+        r#" help: expected "@", or "adv_map", or "begin", or "const", or "enum", or "export", or "fn", or "proc", or "pub", or "type", or "use", or doc comment"#
     );
 }
 
@@ -2730,7 +2728,7 @@ fn invalid_program_unrecognized_token() {
         "  : ^^|^",
         "  :   `-- found a identifier here",
         "  `----",
-        r#" help: expected "@", or "adv_map", or "begin", or "const", or "export", or "proc", or "use", or doc comment"#
+        r#" help: expected "@", or "adv_map", or "begin", or "const", or "enum", or "export", or "fn", or "proc", or "pub", or "type", or "use", or doc comment"#
     );
 }
 
@@ -2760,7 +2758,7 @@ fn invalid_program_invalid_top_level_token() {
         "  :               ^|^",
         "  :                `-- found a mul here",
         "  `----",
-        r#" help: expected "@", or "adv_map", or "begin", or "const", or "export", or "proc", or "use", or end of file, or doc comment"#
+        r#" help: expected "@", or "adv_map", or "begin", or "const", or "enum", or "export", or "fn", or "proc", or "pub", or "type", or "use", or end of file, or doc comment"#
     );
 }
 
@@ -3338,30 +3336,21 @@ fn build_library_example() -> Arc<Library> {
     let context = TestContext::new();
     // declare foo module
     let foo = r#"
-        export.foo
+        pub fn foo(a: felt, b: felt) -> felt
             add
         end
-        export.foo_mul
+        pub fn foo_mul(a: felt, b: felt) -> felt
             mul
         end
     "#;
-    let mut foo = parse_module!(&context, "test::foo", foo);
-    for proc in foo.procedures_mut() {
-        if let crate::ast::Export::Procedure(proc) = proc {
-            proc.set_signature(FunctionType::new(
-                crate::ast::types::CallConv::Fast,
-                [Type::Felt, Type::Felt],
-                [Type::Felt],
-            ));
-        }
-    }
+    let foo = parse_module!(&context, "test::foo", foo);
 
     // declare bar module
     let bar = r#"
-        export.bar
+        pub fn.bar
             mtree_get
         end
-        export.bar_mul
+        pub fn bar_mul
             mul
         end
     "#;
