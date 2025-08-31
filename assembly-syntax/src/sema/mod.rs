@@ -119,6 +119,9 @@ pub fn analyze(
         analyzer.error(SemanticAnalysisError::UnusedDocstring { span: unused.span() });
     }
 
+    // Simplify all constant declarations
+    analyzer.simplify_constants();
+
     if matches!(kind, ModuleKind::Executable) && !module.has_entrypoint() {
         analyzer.error(SemanticAnalysisError::MissingEntrypoint);
     }

@@ -5,7 +5,7 @@ use miden_assembly_syntax::{
     ast::Immediate,
     debuginfo::{SourceSpan, Spanned},
     diagnostics::{RelatedLabel, Report},
-    parser::{IntValue, ParsingError},
+    parser::{ParsingError, WordValue},
 };
 use miden_core::Operation::*;
 
@@ -52,30 +52,27 @@ where
 /// - The provided [`IntValue`] is not a [`IntValue::Word`].
 /// - The provided range is malformed.
 pub fn push_word_slice(
-    imm: &Immediate<IntValue>,
+    imm: &Immediate<WordValue>,
     range: &Range<usize>,
     block_builder: &mut BasicBlockBuilder,
 ) -> Result<(), Report> {
-    if let IntValue::Word(v) = imm.expect_value() {
-        match v.0.get(range.clone()) {
-            // invalid range case (i.e. [8..5])
-            None => {
-                return Err(Report::new(ParsingError::InvalidRange {
-                    span: imm.span(),
-                    range: range.clone(),
-                }));
-            },
-            // empty range case (i.e. [2..2])
-            Some([]) => {
-                return Err(Report::new(ParsingError::EmptySlice {
-                    span: imm.span(),
-                    range: range.clone(),
-                }));
-            },
-            Some(values) => push_many(values, block_builder),
-        }
-    } else {
-        return Err(Report::new(ParsingError::InvalidSliceConstant { span: imm.span() }));
+    let v = imm.expect_value();
+    match v.0.get(range.clone()) {
+        // invalid range case (i.e. [8..5])
+        None => {
+            return Err(Report::new(ParsingError::InvalidRange {
+                span: imm.span(),
+                range: range.clone(),
+            }));
+        },
+        // empty range case (i.e. [2..2])
+        Some([]) => {
+            return Err(Report::new(ParsingError::EmptySlice {
+                span: imm.span(),
+                range: range.clone(),
+            }));
+        },
+        Some(values) => push_many(values, block_builder),
     }
 
     Ok(())

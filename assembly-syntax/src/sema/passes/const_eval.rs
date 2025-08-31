@@ -7,7 +7,7 @@ use miden_debug_types::{Span, Spanned};
 use crate::{
     Felt,
     ast::*,
-    parser::{IntValue, WordValue},
+    parser::{IntValue, PushValue, WordValue},
     sema::{AnalysisContext, SemanticAnalysisError},
 };
 
@@ -32,7 +32,7 @@ impl ConstEvalVisitor<'_> {
             Immediate::Constant(name) => {
                 let span = name.span();
                 match self.analyzer.get_constant(name) {
-                    Ok(ConstantExpr::Felt(value)) => match T::try_from(value.as_int()) {
+                    Ok(ConstantExpr::Int(value)) => match T::try_from(value.as_int()) {
                         Ok(value) => {
                             *imm = Immediate::Value(Span::new(span, value));
                         },
@@ -115,8 +115,8 @@ impl VisitMut for ConstEvalVisitor<'_> {
             Immediate::Constant(name) => {
                 let span = name.span();
                 match self.analyzer.get_constant(name) {
-                    Ok(ConstantExpr::Felt(value)) => {
-                        *imm = Immediate::Value(Span::new(span, *value.inner()));
+                    Ok(ConstantExpr::Int(value)) => {
+                        *imm = Immediate::Value(Span::new(span, Felt::new(value.inner().as_int())));
                     },
                     Ok(ConstantExpr::Hash(HashKind::Event, string)) => {
                         // CHANGE: resolve `event("...")` to a Felt when a Felt immediate is
@@ -136,17 +136,20 @@ impl VisitMut for ConstEvalVisitor<'_> {
         }
     }
 
-    fn visit_mut_immediate_hex(&mut self, imm: &mut Immediate<IntValue>) -> ControlFlow<()> {
+    fn visit_mut_immediate_push_value(
+        &mut self,
+        imm: &mut Immediate<PushValue>,
+    ) -> ControlFlow<()> {
         match imm {
             Immediate::Value(_) => ControlFlow::Continue(()),
             Immediate::Constant(name) => {
                 let span = name.span();
                 match self.analyzer.get_constant(name) {
-                    Ok(ConstantExpr::Felt(value)) => {
-                        *imm = Immediate::Value(Span::new(span, IntValue::Felt(*value.inner())));
+                    Ok(ConstantExpr::Int(value)) => {
+                        *imm = Immediate::Value(Span::new(span, PushValue::Int(*value.inner())));
                     },
                     Ok(ConstantExpr::Word(value)) => {
-                        *imm = Immediate::Value(Span::new(span, IntValue::Word(*value.inner())));
+                        *imm = Immediate::Value(Span::new(span, PushValue::Word(*value.inner())));
                     },
                     Ok(ConstantExpr::Hash(hash_kind, string)) => match hash_kind {
                         HashKind::Word => {
@@ -155,7 +158,7 @@ impl VisitMut for ConstEvalVisitor<'_> {
                             let hash_word = hash_string_to_word(string.as_str());
                             *imm = Immediate::Value(Span::new(
                                 span,
-                                IntValue::Word(WordValue(*hash_word)),
+                                PushValue::Word(WordValue(*hash_word)),
                             ));
                         },
                         HashKind::Event => {
@@ -164,8 +167,37 @@ impl VisitMut for ConstEvalVisitor<'_> {
                             //   const.EVT = event("...")
                             //   push.EVT                # pushes the Felt event id
                             let event_id = EventId::from_name(string.as_str()).as_felt();
-                            *imm = Immediate::Value(Span::new(span, IntValue::Felt(event_id)));
+                            *imm =
+                                Immediate::Value(Span::new(span, IntValue::Felt(event_id).into()));
                         },
+                    },
+                    Err(error) => {
+                        self.analyzer.error(error);
+                    },
+                    _ => self.analyzer.error(SemanticAnalysisError::InvalidConstant { span }),
+                }
+                ControlFlow::Continue(())
+            },
+        }
+    }
+
+    fn visit_mut_immediate_word_value(
+        &mut self,
+        imm: &mut Immediate<WordValue>,
+    ) -> ControlFlow<()> {
+        match imm {
+            Immediate::Value(_) => ControlFlow::Continue(()),
+            Immediate::Constant(name) => {
+                let span = name.span();
+                match self.analyzer.get_constant(name) {
+                    Ok(ConstantExpr::Word(value)) => {
+                        *imm = Immediate::Value(Span::new(span, *value.inner()));
+                    },
+                    Ok(ConstantExpr::Hash(HashKind::Word, string)) => {
+                        // Existing behavior for `const.W = word("...")`:
+                        //   push.W    # pushes a Word
+                        let hash_word = hash_string_to_word(string.as_str());
+                        *imm = Immediate::Value(Span::new(span, WordValue(*hash_word)));
                     },
                     Err(error) => {
                         self.analyzer.error(error);

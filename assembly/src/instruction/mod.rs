@@ -2,7 +2,7 @@ use miden_assembly_syntax::{
     ast::Instruction,
     debuginfo::{Span, Spanned},
     diagnostics::{RelatedLabel, Report},
-    parser::IntValue,
+    parser::{IntValue, PushValue},
 };
 use miden_core::{Decorator, Felt, ONE, Operation, WORD_SIZE, ZERO, mast::MastNodeId};
 
@@ -350,11 +350,13 @@ impl Assembler {
 
             // ----- input / output instructions --------------------------------------------------
             Instruction::Push(imm) => match (*imm).expect_value() {
-                IntValue::U8(v) => env_ops::push_one(v, block_builder),
-                IntValue::U16(v) => env_ops::push_one(v, block_builder),
-                IntValue::U32(v) => env_ops::push_one(v, block_builder),
-                IntValue::Felt(v) => env_ops::push_one(v, block_builder),
-                IntValue::Word(v) => env_ops::push_many(&v.0, block_builder),
+                PushValue::Int(value) => match value {
+                    IntValue::U8(v) => env_ops::push_one(v, block_builder),
+                    IntValue::U16(v) => env_ops::push_one(v, block_builder),
+                    IntValue::U32(v) => env_ops::push_one(v, block_builder),
+                    IntValue::Felt(v) => env_ops::push_one(v, block_builder),
+                },
+                PushValue::Word(v) => env_ops::push_many(&v.0, block_builder),
             },
             Instruction::PushSlice(imm, range) => {
                 env_ops::push_word_slice(imm, range, block_builder)?
@@ -538,7 +540,7 @@ impl Assembler {
                     .invoke(
                         InvokeKind::Exec,
                         callee,
-                        proc_ctx,
+                        proc_ctx.id(),
                         block_builder.mast_forest_builder_mut(),
                     )
                     .map(Into::into);
@@ -548,7 +550,7 @@ impl Assembler {
                     .invoke(
                         InvokeKind::Call,
                         callee,
-                        proc_ctx,
+                        proc_ctx.id(),
                         block_builder.mast_forest_builder_mut(),
                     )
                     .map(Into::into);
@@ -558,14 +560,14 @@ impl Assembler {
                     .invoke(
                         InvokeKind::SysCall,
                         callee,
-                        proc_ctx,
+                        proc_ctx.id(),
                         block_builder.mast_forest_builder_mut(),
                     )
                     .map(Into::into);
             },
             Instruction::DynExec => return self.dynexec(block_builder.mast_forest_builder_mut()),
             Instruction::DynCall => return self.dyncall(block_builder.mast_forest_builder_mut()),
-            Instruction::ProcRef(callee) => self.procref(callee, proc_ctx, block_builder)?,
+            Instruction::ProcRef(callee) => self.procref(callee, proc_ctx.id(), block_builder)?,
 
             // ----- debug decorators -------------------------------------------------------------
             Instruction::Breakpoint => {

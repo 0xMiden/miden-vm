@@ -16,6 +16,8 @@ pub enum MetaExpr {
     Ident(Ident),
     /// A decimal or hexadecimal integer value
     Int(Span<IntValue>),
+    /// A word-sized value
+    Word(Span<WordValue>),
     /// A quoted string or identifier
     String(Ident),
 }
@@ -26,7 +28,8 @@ impl prettier::PrettyPrint for MetaExpr {
 
         match self {
             Self::Ident(id) => text(id),
-            Self::Int(value) => text(value),
+            Self::Int(value) => value.inner().render(),
+            Self::Word(value) => display(value),
             Self::String(id) => text(format!("\"{}\"", id.as_str().escape_default())),
         }
     }
@@ -79,7 +82,7 @@ impl From<Felt> for MetaExpr {
 
 impl From<WordValue> for MetaExpr {
     fn from(value: WordValue) -> Self {
-        Self::Int(Span::new(SourceSpan::UNKNOWN, IntValue::Word(value)))
+        Self::Word(Span::new(SourceSpan::UNKNOWN, value))
     }
 }
 
@@ -88,6 +91,7 @@ impl Spanned for MetaExpr {
         match self {
             Self::Ident(spanned) | Self::String(spanned) => spanned.span(),
             Self::Int(spanned) => spanned.span(),
+            Self::Word(spanned) => spanned.span(),
         }
     }
 }

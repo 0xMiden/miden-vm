@@ -201,6 +201,14 @@ pub enum SemanticAnalysisError {
         #[label]
         span: SourceSpan,
     },
+    #[error("constant evaluation terminated due to infinite recursion")]
+    #[diagnostic(help("dependencies between constants must form an acyclic graph"))]
+    ConstEvalCycle {
+        #[label("occurs while evaluating this expression")]
+        start: SourceSpan,
+        #[label("cycle occurs because we attempt to eval this constant recursively")]
+        detected: SourceSpan,
+    },
     #[error("advmap key already defined")]
     AdvMapKeyAlreadyDefined {
         #[label]

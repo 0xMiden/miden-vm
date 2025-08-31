@@ -33,6 +33,66 @@ impl core::ops::Deref for DocumentationType {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PushValue {
+    Int(IntValue),
+    Word(WordValue),
+}
+
+impl From<u8> for PushValue {
+    fn from(value: u8) -> Self {
+        Self::Int(value.into())
+    }
+}
+
+impl From<u16> for PushValue {
+    fn from(value: u16) -> Self {
+        Self::Int(value.into())
+    }
+}
+
+impl From<u32> for PushValue {
+    fn from(value: u32) -> Self {
+        Self::Int(value.into())
+    }
+}
+
+impl From<Felt> for PushValue {
+    fn from(value: Felt) -> Self {
+        Self::Int(value.into())
+    }
+}
+
+impl From<IntValue> for PushValue {
+    fn from(value: IntValue) -> Self {
+        Self::Int(value)
+    }
+}
+
+impl From<WordValue> for PushValue {
+    fn from(value: WordValue) -> Self {
+        Self::Word(value)
+    }
+}
+
+impl fmt::Display for PushValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Int(value) => fmt::Display::fmt(value, f),
+            Self::Word(value) => fmt::Display::fmt(value, f),
+        }
+    }
+}
+
+impl crate::prettier::PrettyPrint for PushValue {
+    fn render(&self) -> crate::prettier::Document {
+        match self {
+            Self::Int(value) => value.render(),
+            Self::Word(value) => value.render(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WordValue(pub [Felt; 4]);
 
 impl fmt::Display for WordValue {
@@ -102,9 +162,86 @@ pub enum IntValue {
     U32(u32),
     /// A single field element, 8 bytes, encoded as 16 hex digits
     Felt(Felt),
-    /// A set of 4 field elements, 32 bytes, encoded as a contiguous string of 64 hex digits
-    Word(WordValue),
 }
+
+impl From<u8> for IntValue {
+    fn from(value: u8) -> Self {
+        Self::U8(value)
+    }
+}
+
+impl From<u16> for IntValue {
+    fn from(value: u16) -> Self {
+        Self::U16(value)
+    }
+}
+
+impl From<u32> for IntValue {
+    fn from(value: u32) -> Self {
+        Self::U32(value)
+    }
+}
+
+impl From<Felt> for IntValue {
+    fn from(value: Felt) -> Self {
+        Self::Felt(value)
+    }
+}
+
+impl IntValue {
+    pub fn as_int(&self) -> u64 {
+        match self {
+            Self::U8(value) => *value as u64,
+            Self::U16(value) => *value as u64,
+            Self::U32(value) => *value as u64,
+            Self::Felt(value) => value.as_int(),
+        }
+    }
+}
+
+impl core::ops::Add<IntValue> for IntValue {
+    type Output = IntValue;
+
+    fn add(self, rhs: IntValue) -> Self::Output {
+        super::lexer::shrink_u64_hex(self.as_int() + rhs.as_int())
+    }
+}
+
+impl core::ops::Sub<IntValue> for IntValue {
+    type Output = IntValue;
+
+    fn sub(self, rhs: IntValue) -> Self::Output {
+        super::lexer::shrink_u64_hex(self.as_int() - rhs.as_int())
+    }
+}
+
+impl core::ops::Mul<IntValue> for IntValue {
+    type Output = IntValue;
+
+    fn mul(self, rhs: IntValue) -> Self::Output {
+        super::lexer::shrink_u64_hex(self.as_int() * rhs.as_int())
+    }
+}
+
+impl core::ops::Div<IntValue> for IntValue {
+    type Output = IntValue;
+
+    fn div(self, rhs: IntValue) -> Self::Output {
+        super::lexer::shrink_u64_hex(self.as_int() / rhs.as_int())
+    }
+}
+
+impl PartialEq<Felt> for IntValue {
+    fn eq(&self, other: &Felt) -> bool {
+        match self {
+            Self::U8(lhs) => (*lhs as u64) == other.as_int(),
+            Self::U16(lhs) => (*lhs as u64) == other.as_int(),
+            Self::U32(lhs) => (*lhs as u64) == other.as_int(),
+            Self::Felt(lhs) => lhs == other,
+        }
+    }
+}
+
 impl fmt::Display for IntValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -112,7 +249,6 @@ impl fmt::Display for IntValue {
             Self::U16(value) => write!(f, "{value}"),
             Self::U32(value) => write!(f, "{value:#04x}"),
             Self::Felt(value) => write!(f, "{:#08x}", &value.as_int().to_be()),
-            Self::Word(value) => write!(f, "{value}"),
         }
     }
 }
@@ -124,7 +260,6 @@ impl crate::prettier::PrettyPrint for IntValue {
             Self::U16(v) => v.render(),
             Self::U32(v) => v.render(),
             Self::Felt(v) => u64::from(*v).render(),
-            Self::Word(v) => v.render(),
         }
     }
 }
@@ -134,6 +269,7 @@ impl PartialOrd for IntValue {
         Some(self.cmp(other))
     }
 }
+
 impl Ord for IntValue {
     fn cmp(&self, other: &Self) -> core::cmp::Ordering {
         use core::cmp::Ordering;
@@ -148,9 +284,6 @@ impl Ord for IntValue {
             (Self::U32(_), _) => Ordering::Less,
             (Self::Felt(_), Self::U8(_) | Self::U16(_) | Self::U32(_)) => Ordering::Greater,
             (Self::Felt(l), Self::Felt(r)) => l.as_int().cmp(&r.as_int()),
-            (Self::Felt(_), _) => Ordering::Less,
-            (Self::Word(l), Self::Word(r)) => l.cmp(r),
-            (Self::Word(_), _) => Ordering::Greater,
         }
     }
 }
@@ -163,7 +296,6 @@ impl core::hash::Hash for IntValue {
             Self::U16(value) => value.hash(state),
             Self::U32(value) => value.hash(state),
             Self::Felt(value) => value.as_int().hash(state),
-            Self::Word(value) => value.hash(state),
         }
     }
 }
@@ -370,6 +502,7 @@ pub enum Token<'input> {
     Rstab,
     DocComment(DocumentationType),
     HexValue(IntValue),
+    HexWord(WordValue),
     BinValue(BinEncodedValue),
     Int(u64),
     Ident(&'input str),
@@ -565,6 +698,7 @@ impl fmt::Display for Token<'_> {
             Token::DocComment(DocumentationType::Module(_)) => f.write_str("module doc"),
             Token::DocComment(DocumentationType::Form(_)) => f.write_str("doc comment"),
             Token::HexValue(_) => f.write_str("hex-encoded value"),
+            Token::HexWord(_) => f.write_str("hex-encoded word"),
             Token::BinValue(_) => f.write_str("bin-encoded value"),
             Token::Int(_) => f.write_str("integer"),
             Token::Ident(_) => f.write_str("identifier"),
@@ -992,6 +1126,7 @@ impl<'input> Token<'input> {
                     },
                     "comment" => Some(Token::Comment),
                     "hex-encoded value" => Some(Token::HexValue(IntValue::U8(0))),
+                    "hex-encoded word" => Some(Token::HexWord(WordValue([Felt::ZERO; 4]))),
                     "bin-encoded value" => Some(Token::BinValue(BinEncodedValue::U8(0))),
                     "integer" => Some(Token::Int(0)),
                     "identifier" => Some(Token::Ident("")),

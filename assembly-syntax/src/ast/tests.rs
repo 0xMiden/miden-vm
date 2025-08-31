@@ -320,7 +320,7 @@ fn test_ast_parsing_program_simple() -> Result<(), Report> {
 
     let source = source_file!(&context, "begin push.0 assertz add.1 end");
     let forms = module!(begin!(
-        inst!(Push(Immediate::Value(Span::unknown(IntValue::U8(0))))),
+        inst!(Push(Immediate::Value(Span::unknown(IntValue::U8(0).into())))),
         inst!(Assertz),
         inst!(Incr)
     ));
@@ -349,30 +349,25 @@ fn test_ast_parsing_program_push() -> Result<(), Report> {
     end"#
     );
     let forms = module!(begin!(
-        inst!(Push(Immediate::Value(Span::unknown(IntValue::U8(10))))),
-        inst!(Push(Immediate::Value(Span::unknown(IntValue::U16(500))))),
-        inst!(Push(Immediate::Value(Span::unknown(IntValue::U32(70000))))),
-        inst!(Push(Immediate::Value(Span::unknown(IntValue::Felt(Felt::new(5000000000_u64)))))),
-        inst!(Push(Immediate::Value(Span::unknown(IntValue::Felt(Felt::new(5000000000_u64)))))),
-        inst!(Push(Immediate::Value(Span::unknown(IntValue::Felt(Felt::new(7000000000_u64)))))),
-        inst!(Push(Immediate::Value(Span::unknown(IntValue::Felt(Felt::new(9000000000_u64)))))),
-        inst!(Push(Immediate::Value(Span::unknown(IntValue::Felt(Felt::new(
-            11000000000_u64
-        )))))),
-        inst!(Push(Immediate::Value(Span::unknown(IntValue::U8(5))))),
-        inst!(Push(Immediate::Value(Span::unknown(IntValue::U8(7))))),
-        inst!(Push(Immediate::Value(Span::unknown(IntValue::U16(500))))),
-        inst!(Push(Immediate::Value(Span::unknown(IntValue::U16(700))))),
-        inst!(Push(Immediate::Value(Span::unknown(IntValue::U32(70000))))),
-        inst!(Push(Immediate::Value(Span::unknown(IntValue::U32(90000))))),
-        inst!(Push(Immediate::Value(Span::unknown(IntValue::Felt(Felt::new(5000000000_u64)))))),
-        inst!(Push(Immediate::Value(Span::unknown(IntValue::Felt(Felt::new(7000000000_u64)))))),
-        inst!(Push(Immediate::Value(Span::unknown(IntValue::Word(WordValue([
-            Felt::new(0),
-            Felt::new(1),
-            Felt::new(2),
-            Felt::new(3)
-        ]))))))
+        inst!(Push(Immediate::Value(Span::unknown(10u8.into())))),
+        inst!(Push(Immediate::Value(Span::unknown(500u16.into())))),
+        inst!(Push(Immediate::Value(Span::unknown(70000u32.into())))),
+        inst!(Push(Immediate::Value(Span::unknown(Felt::new(5000000000_u64).into())))),
+        inst!(Push(Immediate::Value(Span::unknown(Felt::new(5000000000_u64).into())))),
+        inst!(Push(Immediate::Value(Span::unknown(Felt::new(7000000000_u64).into())))),
+        inst!(Push(Immediate::Value(Span::unknown(Felt::new(9000000000_u64).into())))),
+        inst!(Push(Immediate::Value(Span::unknown(Felt::new(11000000000_u64).into())))),
+        inst!(Push(Immediate::Value(Span::unknown(5u8.into())))),
+        inst!(Push(Immediate::Value(Span::unknown(7u8.into())))),
+        inst!(Push(Immediate::Value(Span::unknown(500u16.into())))),
+        inst!(Push(Immediate::Value(Span::unknown(700u16.into())))),
+        inst!(Push(Immediate::Value(Span::unknown(70000u32.into())))),
+        inst!(Push(Immediate::Value(Span::unknown(90000u32.into())))),
+        inst!(Push(Immediate::Value(Span::unknown(Felt::new(5000000000_u64).into())))),
+        inst!(Push(Immediate::Value(Span::unknown(Felt::new(7000000000_u64).into())))),
+        inst!(Push(Immediate::Value(Span::unknown(
+            WordValue([Felt::new(0), Felt::new(1), Felt::new(2), Felt::new(3)]).into()
+        ))))
     ));
 
     assert_eq!(context.parse_forms(source)?, forms);
@@ -413,7 +408,7 @@ fn test_ast_parsing_program_u32() -> Result<(), Report> {
     end"#
     );
     let forms = module!(begin!(
-        inst!(Push(Immediate::Value(Span::unknown(IntValue::U8(3))))),
+        inst!(Push(Immediate::Value(Span::unknown(3u8.into())))),
         inst!(U32WrappingAddImm(5u32.into())),
         inst!(U32OverflowingAddImm(5u32.into())),
         inst!(U32WrappingSubImm(1u32.into())),
@@ -505,10 +500,8 @@ fn test_ast_parsing_bitwise_counters() -> Result<(), Report> {
 fn test_ast_parsing_ilog2() -> Result<(), Report> {
     let context = SyntaxTestContext::new();
     let source = source_file!(&context, "begin push.8 ilog2 end");
-    let forms = module!(begin!(
-        inst!(Push(Immediate::Value(Span::unknown(IntValue::U8(8))))),
-        inst!(ILog2)
-    ));
+    let forms =
+        module!(begin!(inst!(Push(Immediate::Value(Span::unknown(8u8.into())))), inst!(ILog2)));
 
     assert_eq!(context.parse_forms(source)?, forms);
     Ok(())
@@ -557,18 +550,18 @@ fn test_ast_parsing_module_nested_if() -> Result<(), Report> {
         foo,
         0,
         block!(
-            inst!(Push(Immediate::Value(Span::unknown(IntValue::U8(1))))),
+            inst!(Push(Immediate::Value(Span::unknown(1u8.into())))),
             if_true!(
                 block!(
-                    inst!(Push(Immediate::Value(Span::unknown(IntValue::U8(0))))),
-                    inst!(Push(Immediate::Value(Span::unknown(IntValue::U8(1))))),
+                    inst!(Push(Immediate::Value(Span::unknown(0u8.into())))),
+                    inst!(Push(Immediate::Value(Span::unknown(1u8.into())))),
                     if_true!(
                         block!(
-                            inst!(Push(Immediate::Value(Span::unknown(IntValue::U8(0))))),
+                            inst!(Push(Immediate::Value(Span::unknown(0u8.into())))),
                             inst!(Sub)
                         ),
                         block!(
-                            inst!(Push(Immediate::Value(Span::unknown(IntValue::U8(1))))),
+                            inst!(Push(Immediate::Value(Span::unknown(1u8.into())))),
                             inst!(Sub)
                         )
                     )
@@ -607,17 +600,17 @@ fn test_ast_parsing_module_sequential_if() -> Result<(), Report> {
         foo,
         0,
         block!(
-            inst!(Push(Immediate::Value(Span::unknown(IntValue::U8(1))))),
+            inst!(Push(Immediate::Value(Span::unknown(1u8.into())))),
             if_true!(
                 block!(
-                    inst!(Push(Immediate::Value(Span::unknown(IntValue::U8(5))))),
-                    inst!(Push(Immediate::Value(Span::unknown(IntValue::U8(1)))))
+                    inst!(Push(Immediate::Value(Span::unknown(5u8.into())))),
+                    inst!(Push(Immediate::Value(Span::unknown(1u8.into()))))
                 ),
                 block!(inst!(Nop))
             ),
             if_true!(
-                block!(inst!(Push(Immediate::Value(Span::unknown(IntValue::U8(0))))), inst!(Sub)),
-                block!(inst!(Push(Immediate::Value(Span::unknown(IntValue::U8(1))))), inst!(Sub))
+                block!(inst!(Push(Immediate::Value(Span::unknown(0u8.into())))), inst!(Sub)),
+                block!(inst!(Push(Immediate::Value(Span::unknown(1u8.into())))), inst!(Sub))
             )
         )
     ));
@@ -647,7 +640,7 @@ fn test_ast_parsing_while_if_body() {
     );
 
     let forms = module!(begin!(
-        inst!(Push(Immediate::Value(Span::unknown(IntValue::U8(1))))),
+        inst!(Push(Immediate::Value(Span::unknown(1u8.into())))),
         while_true!(block!(inst!(Mul))),
         inst!(Add),
         if_true!(block!(inst!(Div)), block!(inst!(Nop))),
@@ -898,7 +891,7 @@ end"
         export!(
             baz,
             3,
-            block!(inst!(PadW), inst!(Push(Immediate::Value(Span::unknown(IntValue::U8(0))))))
+            block!(inst!(PadW), inst!(Push(Immediate::Value(Span::unknown(0u8.into())))))
         )
     );
 
@@ -1326,7 +1319,7 @@ fn test_words_roundtrip_formatting() {
 const.A=0x0200000000000000030000000000000004000000000000000500000000000000
 const.B=[2,3,4,5]
 begin
-    push.0x0200000000000000030000000000000004000000000000000500000000000000.6
+    push.0x0200000000000000030000000000000004000000000000000500000000000000
     push.A.6
     push.B.6
     push.2.3.4.5
@@ -1342,13 +1335,12 @@ end
         ModuleKind::Executable,
         source,
     )
-    .unwrap_or_else(|err| panic!("{err}"));
+    .unwrap();
 
     let formatted = module.to_string();
     let expected = "\
 begin
     push.[2,3,4,5]
-    push.6
     push.[2,3,4,5]
     push.6
     push.[2,3,4,5]

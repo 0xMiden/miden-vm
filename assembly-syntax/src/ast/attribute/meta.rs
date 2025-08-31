@@ -8,11 +8,7 @@ use core::fmt;
 use miden_debug_types::{SourceSpan, Span};
 
 pub use self::{expr::MetaExpr, kv::MetaKeyValue, list::MetaList};
-use crate::{
-    Felt,
-    ast::Ident,
-    parser::{IntValue, WordValue},
-};
+use crate::{Felt, ast::Ident, parser::WordValue};
 
 /// Represents the metadata provided as arguments to an attribute.
 #[derive(Clone, PartialEq, Eq)]
@@ -179,49 +175,43 @@ impl From<Ident> for MetaItem {
 
 impl From<&str> for MetaItem {
     fn from(value: &str) -> Self {
-        Self::Expr(MetaExpr::String(Ident::from_raw_parts(Span::new(
-            SourceSpan::UNKNOWN,
-            Arc::from(value),
-        ))))
+        Self::Expr(MetaExpr::from(value))
     }
 }
 
 impl From<String> for MetaItem {
     fn from(value: String) -> Self {
-        Self::Expr(MetaExpr::String(Ident::from_raw_parts(Span::new(
-            SourceSpan::UNKNOWN,
-            Arc::from(value.into_boxed_str()),
-        ))))
+        Self::Expr(MetaExpr::from(value))
     }
 }
 
 impl From<u8> for MetaItem {
     fn from(value: u8) -> Self {
-        Self::Expr(MetaExpr::Int(Span::new(SourceSpan::UNKNOWN, IntValue::U8(value))))
+        Self::Expr(MetaExpr::from(value))
     }
 }
 
 impl From<u16> for MetaItem {
     fn from(value: u16) -> Self {
-        Self::Expr(MetaExpr::Int(Span::new(SourceSpan::UNKNOWN, IntValue::U16(value))))
+        Self::Expr(MetaExpr::from(value))
     }
 }
 
 impl From<u32> for MetaItem {
     fn from(value: u32) -> Self {
-        Self::Expr(MetaExpr::Int(Span::new(SourceSpan::UNKNOWN, IntValue::U32(value))))
+        Self::Expr(MetaExpr::from(value))
     }
 }
 
 impl From<Felt> for MetaItem {
     fn from(value: Felt) -> Self {
-        Self::Expr(MetaExpr::Int(Span::new(SourceSpan::UNKNOWN, IntValue::Felt(value))))
+        Self::Expr(MetaExpr::from(value))
     }
 }
 
 impl From<WordValue> for MetaItem {
     fn from(value: WordValue) -> Self {
-        Self::Expr(MetaExpr::Int(Span::new(SourceSpan::UNKNOWN, IntValue::Word(value))))
+        Self::Expr(MetaExpr::from(value))
     }
 }
 
