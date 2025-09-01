@@ -5,22 +5,22 @@ use miden_processor::ProcessState;
 
 pub mod keccak;
 
-// Re-export commonly used items
-pub use keccak::{KECCAK_EVENT_ID, push_keccak};
-
 // # HELPERS
+// =================================================================================================
 
-fn read_memory(process: &ProcessState, ptr: u64, len: u64) -> Result<Vec<Felt>, ()> {
-    let ptr: u32 = ptr.try_into().map_err(|_| ())?;
-    if !ptr.is_multiple_of(4) {
-        return Err(());
-    }
+/// Reads a contiguous region of memory from the VM process state.
+///
+/// This function returns `None` if the provided range is invalid or if it references an
+/// uninitialized address.
+fn read_memory(process: &ProcessState, ptr: u64, len: u64) -> Option<Vec<Felt>> {
+    // Convert inputs to u32 and check for overflow
+    let start_addr: u32 = ptr.try_into().ok()?;
+    let len: u32 = len.try_into().ok()?;
+    let end_addr = start_addr.checked_add(len)?;
 
-    let len: u32 = len.try_into().map_err(|_| ())?;
-
-    let end = ptr.checked_add(len).ok_or(())?;
-
+    // Read each memory location in the range [start_addr, end_addr) and collect into a vector
     let ctx = process.ctx();
-
-    (ptr..end).map(|addr| process.get_mem_value(ctx, addr).ok_or(())).collect()
+    (start_addr..end_addr)
+        .map(|address| process.get_mem_value(ctx, address))
+        .collect()
 }
