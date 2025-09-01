@@ -1,6 +1,6 @@
 use alloc::{vec, vec::Vec};
 
-use miden_core::{AdviceMap, Felt};
+use miden_core::{AdviceMap, Felt, crypto::hash::Digest};
 use miden_crypto::hash::{keccak::Keccak256, rpo::Rpo256};
 use miden_processor::{AdviceMutation, EventError, ProcessState};
 
@@ -15,8 +15,8 @@ pub const KECCAK_EVENT_ID: &str = "miden_stdlib::hash::keccak";
 pub enum KeccakError {
     #[error("failed to read memory at ptr {ptr}, len {len}")]
     MemoryReadFailed { ptr: u64, len: u64 },
-    #[error("invalid byte value in memory: {value}")]
-    InvalidByteValue { value: u64 },
+    #[error("invalid byte at index {byte_index} with value: {value}")]
+    InvalidByteValue { value: u64, byte_index: usize },
 }
 
 /// Event handler which pushes keccak256 hash to the advice stack.
@@ -49,31 +49,34 @@ pub fn push_keccak(process: &ProcessState) -> Result<Vec<AdviceMutation>, EventE
     // Try to convert to bytes
     let preimage = witness
         .iter()
-        .map(|felt| {
-            u8::try_from(felt.as_int())
-                .map_err(|_| KeccakError::InvalidByteValue { value: felt.as_int() })
+        .enumerate()
+        .map(|(idx, felt)| {
+            u8::try_from(felt.as_int()).map_err(|_| KeccakError::InvalidByteValue {
+                value: felt.as_int(),
+                byte_index: idx,
+            })
         })
         .collect::<Result<Vec<_>, _>>()?;
 
     // Resulting Keccak hash of the preimage
-    let keccak_hash = Keccak256::hash(&preimage);
-    let mut keccak_hash_felt: Vec<_> = keccak_hash.iter().copied().map(Felt::from).collect();
+    let keccak_hash = Keccak256::hash(&preimage).as_bytes();
+    let mut keccak_hash_felt = keccak_hash.map(Felt::from);
 
     // Commitment to precompile call
-    // Rpo(
-    //     Rpo(preimage),
-    //     Rpo(Keccak(preimage))
-    // )
+    // Rpo( Rpo(preimage), Rpo(Keccak(preimage)) )
     let calldata_commitment = Rpo256::merge(&[
         Rpo256::hash_elements(&witness),          // Commitment to pre-image
         Rpo256::hash_elements(&keccak_hash_felt), // Commitment to hash
     ]);
 
-    // store the calldata in the advice map to be recovered later on by the prover
-    // reverse hash
+    // Reverse the keccak hash before extending the advice stack, so that
+    // the first popped element is the first byte of the hash.
     keccak_hash_felt.reverse();
     let advice_stack_extension = AdviceMutation::extend_stack(keccak_hash_felt);
+
+    // store the calldata in the advice map to be recovered later on by the prover
     let entry = (calldata_commitment, witness);
     let advice_map_extension = AdviceMutation::extend_map(AdviceMap::from_iter([entry]));
+
     Ok(vec![advice_stack_extension, advice_map_extension])
 }

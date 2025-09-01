@@ -1,4 +1,4 @@
-use miden_core::{Felt, utils::string_to_event_id};
+use miden_core::{Felt, crypto::hash::Digest, utils::string_to_event_id};
 use miden_crypto::hash::{keccak::Keccak256, rpo::Rpo256};
 use miden_processor::{AdviceMutation, EventError, ProcessState};
 use miden_stdlib::precompiles::keccak::KECCAK_EVENT_ID;
@@ -23,24 +23,20 @@ const KECCAK_HASH_SIZE: u32 = 32;
 
 #[test]
 fn test_keccak_event_handler_directly() {
-    // // Compute event ID at runtime
-    // let event_keccak_precompile = string_to_event_id(KECCAK_EVENT_ID);
-
-    // Simple program that sets up memory and calls our event
+    // Simple program that pushes preimage directly and calls our event
+    const PREIMAGE: [u8; 4] = [1, 2, 3, 4];
     let source = format!(
         r#"
-        const.INPUT_ADDR={INPUT_MEMORY_ADDR}
-        const.INPUT_LEN=4
-        
         begin
-            # Write the 4 stack input elements to memory at INPUT_ADDR
-            push.INPUT_ADDR
+            push.{PREIMAGE:?}
+            
+            # Write the 4 bytes to memory at INPUT_ADDR
+            push.{INPUT_MEMORY_ADDR}
             mem_storew
             dropw
             
-            # Set up stack for event: [ptr, len]
-            push.INPUT_LEN     # len (4 bytes)
-            push.INPUT_ADDR    # ptr (where data is stored)
+            # Set up stack for event: [ptr, len=4]
+            push.4.{INPUT_MEMORY_ADDR}
 
             emit.event("{KECCAK_EVENT_ID}")
 
@@ -50,9 +46,7 @@ fn test_keccak_event_handler_directly() {
     "#
     );
 
-    const PREIMAGE: [u8; 4] = [1, 2, 3, 4];
-    let stack_inputs = PREIMAGE.map(u64::from);
-    let mut test = build_debug_test!(source, &stack_inputs);
+    let mut test = build_debug_test!(source, &[]);
 
     // Comprehensive handler to validate the keccak event handler functionality
     test.add_event_handler(string_to_event_id(DEBUG_EVENT_ID), |process: &ProcessState| {
@@ -76,17 +70,17 @@ fn test_keccak_event_handler_directly() {
             .collect();
 
         // Hash is stored in reverse order on advice stack
-        let expected_hash = Keccak256::hash(&PREIMAGE);
+        let expected_hash = Keccak256::hash(&PREIMAGE).as_bytes();
 
         assert_eq!(
             hash_from_advice.as_slice(),
-            expected_hash.as_ref(),
+            &expected_hash,
             "advice stack should contain correct keccak hash",
         );
 
         // 3. CHECK ADVICE MAP: Verify commitment->witness mapping exists
-        let expected_hash_felt: Vec<Felt> = expected_hash.iter().copied().map(Felt::from).collect();
-        let witness: Vec<Felt> = PREIMAGE.iter().copied().map(Felt::from).collect();
+        let expected_hash_felt = expected_hash.map(Felt::from);
+        let witness = PREIMAGE.map(Felt::from);
 
         // Calculate the expected commitment key (same logic as in event handler)
         let calldata_commitment = Rpo256::merge(&[
@@ -200,8 +194,14 @@ fn test_keccak_precompile_masm_wrapper() {
     }
 
     // check multiple sizes of preimages
-    let preimages: Vec<Vec<u8>> =
-        vec![vec![0], vec![0, 1], vec![0; 32], (0..32).collect(), (0..255).collect()];
+    let preimages: Vec<Vec<u8>> = vec![
+        vec![0],
+        vec![0, 1],
+        vec![0; 32],
+        (0..32).collect(),
+        (0..255).collect(),
+        (34..1234).map(|x| (x % 254) as u8).collect(),
+    ];
 
     for preimage in preimages {
         // Setup stack: [ptr_in, len, ptr_out] and advice: preimage[..]

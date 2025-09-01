@@ -29,15 +29,15 @@ const.KECCAK_HASH_SIZE=32
 #! [commitment, ...]
 #!
 #! Where:
-#! - ptr_in:    memory address where input bytes start
-#! - len:       number of bytes to hash
-#! - ptr_out:   memory address where to write the 32-byte hash
+#! - ptr_in:     memory address where input bytes start
+#! - len:        number of bytes to hash
+#! - ptr_out:    memory address where to write the 32-byte hash
 #! - commitment: RPO hash of [RPO(input), RPO(keccak256(input))]
 export.keccak256_precompile
     # Emit keccak precompile event - this triggers the event handler which:
     # 1. Reads input bytes from memory [ptr_in, ptr_in+len)
     # 2. Computes keccak256 hash
-    # 3. Pushes hash bytes to advice stack (reversed for MASM compatibility)
+    # 3. Pushes hash bytes to advice stack
     # 4. Stores commitment in advice map for prover recovery
     # => [ptr_in, len, ptr_out, ...]
     emit.event("miden_stdlib::hash::keccak")
@@ -54,9 +54,9 @@ export.keccak256_precompile
     # - Simultaneously compute RPO hash of the keccak hash
     exec.rpo::init_no_padding
     # => [R0, R1, C, ptr_out, RPO(input), ...]
-    repeat.4  # Process 4 double-words (32 bytes total)
-        adv_pipe  # Load 2 words from advice + apply hperm
-        hperm     # Apply Rescue Prime Optimized permutation
+    repeat.4      # Process 4 double-words (32 bytes total)
+        adv_pipe  # Load 2 words from advice and write them to the output region
+        hperm     # Absorb into running hash
     end
     exec.rpo::squeeze_digest
     # => [RPO(keccak_hash), ptr_out, RPO(input), ...]
@@ -64,7 +64,7 @@ export.keccak256_precompile
     # => [RPO(keccak_hash), RPO(input), ...]
 
     # Merge the two RPO hashes to create the final commitment
-    # This commitment proves the relationship between input and output
+    # This commitment serves as fingerprint of the precompile computation.
     hmerge
     # => [commitment, ...] where commitment = RPO([RPO(input), RPO(keccak_hash)])
 end
