@@ -1,6 +1,7 @@
 use alloc::{
     boxed::Box,
     collections::{BTreeMap, btree_map::Entry},
+    sync::Arc,
     vec::Vec,
 };
 use core::{error::Error, fmt, fmt::Debug};
@@ -33,6 +34,15 @@ where
 {
     fn on_event(&self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
         self(process)
+    }
+}
+
+/// A handler which ignores the process state and leaves the `AdviceProvide` unchanged.
+pub struct TrivialEventHandler;
+
+impl EventHandler for TrivialEventHandler {
+    fn on_event(&self, _process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
+        Ok(Vec::new())
     }
 }
 
@@ -91,7 +101,7 @@ pub type EventError = Box<dyn Error + Send + Sync + 'static>;
 /// ```
 #[derive(Default)]
 pub struct EventHandlerRegistry {
-    handlers: BTreeMap<u64, Box<dyn EventHandler>>,
+    handlers: BTreeMap<u64, Arc<dyn EventHandler>>,
 }
 
 impl EventHandlerRegistry {
@@ -99,11 +109,11 @@ impl EventHandlerRegistry {
         Self { handlers: BTreeMap::new() }
     }
 
-    /// Registers a boxed [`EventHandler`] with a given identifier.
+    /// Registers an [`EventHandler`] with a given identifier.
     pub fn register(
         &mut self,
         id: Felt,
-        handler: Box<dyn EventHandler>,
+        handler: Arc<dyn EventHandler>,
     ) -> Result<(), ExecutionError> {
         match self.handlers.entry(id.as_int()) {
             Entry::Vacant(e) => e.insert(handler),

@@ -44,7 +44,7 @@ pub fn push_keccak(process: &ProcessState) -> Result<Vec<AdviceMutation>, EventE
 
     // Attempt to collect the field elements between `ptr` and `ptr+len`.
     let witness =
-        read_memory(process, ptr, len).map_err(|_| KeccakError::MemoryReadFailed { ptr, len })?;
+        read_memory(process, ptr, len).ok_or(KeccakError::MemoryReadFailed { ptr, len })?;
 
     // Try to convert to bytes
     let preimage = witness

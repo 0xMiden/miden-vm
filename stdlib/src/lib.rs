@@ -7,9 +7,11 @@ extern crate alloc;
 use alloc::{sync::Arc, vec, vec::Vec};
 
 use miden_assembly::{Library, mast::MastForest, utils::Deserializable};
-use miden_core::{Felt, Word};
-use miden_processor::HostLibrary;
+use miden_core::{Felt, Word, utils::string_to_event_id};
+use miden_processor::{EventHandler, HostLibrary};
 use miden_utils_sync::LazyLock;
+
+use crate::precompiles::keccak::{KECCAK_EVENT_ID, push_keccak};
 
 // STANDARD LIBRARY
 // ================================================================================================
@@ -34,7 +36,7 @@ impl From<&StdLibrary> for HostLibrary {
     fn from(stdlib: &StdLibrary) -> Self {
         Self {
             mast_forest: stdlib.mast_forest().clone(),
-            handlers: vec![],
+            handlers: vec![(string_to_event_id(KECCAK_EVENT_ID), Arc::new(push_keccak))],
         }
     }
 }
@@ -47,6 +49,16 @@ impl StdLibrary {
     /// Returns a reference to the [MastForest] underlying the Miden standard library.
     pub fn mast_forest(&self) -> &Arc<MastForest> {
         self.0.mast_forest()
+    }
+
+    /// Returns a reference to the underlying [`Library`].
+    pub fn library(&self) -> &Library {
+        &self.0
+    }
+
+    /// List of all `EventHandlers` required to run all of the standard library.
+    pub fn handlers(&self) -> Vec<(Felt, Arc<dyn EventHandler>)> {
+        vec![(string_to_event_id(KECCAK_EVENT_ID), Arc::new(push_keccak))]
     }
 }
 

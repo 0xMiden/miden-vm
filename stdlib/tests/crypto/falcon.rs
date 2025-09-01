@@ -1,4 +1,4 @@
-use std::vec;
+use std::{sync::Arc, vec};
 
 use miden_air::{Felt, ProvingOptions, RowIndex};
 use miden_assembly::{Assembler, utils::Serializable};
@@ -285,7 +285,8 @@ fn falcon_prove_verify() {
     let advice_inputs = AdviceInputs::default().with_map(advice_map);
     let mut host = DefaultHost::default();
     host.load_library(&StdLibrary::default()).expect("failed to load mast forest");
-    host.load_handler(EVENT_FALCON_SIG_TO_STACK, push_falcon_signature).unwrap();
+    host.load_handler(EVENT_FALCON_SIG_TO_STACK, Arc::new(push_falcon_signature))
+        .unwrap();
 
     let options = ProvingOptions::with_96_bit_security(false);
     let (stack_outputs, proof) = miden_utils_testing::prove(

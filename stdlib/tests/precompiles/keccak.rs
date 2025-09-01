@@ -1,7 +1,7 @@
 use miden_core::{Felt, utils::string_to_event_id};
 use miden_crypto::hash::{keccak::Keccak256, rpo::Rpo256};
 use miden_processor::{AdviceMutation, EventError, ProcessState};
-use miden_stdlib::precompiles::{KECCAK_EVENT_ID, push_keccak};
+use miden_stdlib::precompiles::keccak::KECCAK_EVENT_ID;
 
 // Test constants
 // ================================================================================================
@@ -23,8 +23,8 @@ const KECCAK_HASH_SIZE: u32 = 32;
 
 #[test]
 fn test_keccak_event_handler_directly() {
-    // Compute event ID at runtime
-    let event_keccak_precompile = string_to_event_id(KECCAK_EVENT_ID);
+    // // Compute event ID at runtime
+    // let event_keccak_precompile = string_to_event_id(KECCAK_EVENT_ID);
 
     // Simple program that sets up memory and calls our event
     let source = format!(
@@ -51,14 +51,11 @@ fn test_keccak_event_handler_directly() {
     );
 
     const PREIMAGE: [u8; 4] = [1, 2, 3, 4];
-
     let stack_inputs = PREIMAGE.map(u64::from);
     let mut test = build_debug_test!(source, &stack_inputs);
-    test.add_event_handler(event_keccak_precompile, push_keccak);
 
     // Comprehensive handler to validate the keccak event handler functionality
-    let event_check_state = string_to_event_id(DEBUG_EVENT_ID);
-    let check_advice = |process: &ProcessState| {
+    test.add_event_handler(string_to_event_id(DEBUG_EVENT_ID), |process: &ProcessState| {
         // 1. CHECK MEMORY: Verify ptr_in contains PREIMAGE
         let ctx = process.ctx();
         let memory_data: Vec<Felt> = (INPUT_MEMORY_ADDR..INPUT_MEMORY_ADDR + PREIMAGE.len() as u32)
@@ -101,7 +98,7 @@ fn test_keccak_event_handler_directly() {
         let advice_map_witness = process
             .advice_provider()
             .get_mapped_values(&calldata_commitment)
-            .expect("no entry stored with call data commmitment as key");
+            .expect("no entry stored with call data commitment as key");
 
         assert_eq!(
             advice_map_witness, witness,
@@ -109,17 +106,13 @@ fn test_keccak_event_handler_directly() {
         );
 
         Ok(vec![])
-    };
-    test.add_event_handler(event_check_state, check_advice);
+    });
 
     test.execute().unwrap();
 }
 
 #[test]
 fn test_keccak_precompile_masm_wrapper() {
-    let event_keccak_precompile = string_to_event_id(KECCAK_EVENT_ID);
-    let event_memory_check = string_to_event_id(MEMORY_CHECK_EVENT_ID);
-
     let source = format!(
         r#"
         use.std::crypto::hashes::keccak_precompile
@@ -217,10 +210,7 @@ fn test_keccak_precompile_masm_wrapper() {
         let advice_inputs: Vec<_> = preimage.iter().copied().map(u64::from).collect();
 
         let mut test = build_debug_test!(source.clone(), &stack_inputs, &advice_inputs);
-
-        // Add all event handlers
-        test.add_event_handler(event_keccak_precompile, push_keccak);
-        test.add_event_handler(event_memory_check, check_memory_handler);
+        test.add_event_handler(string_to_event_id(MEMORY_CHECK_EVENT_ID), check_memory_handler);
 
         test.execute().unwrap();
     }

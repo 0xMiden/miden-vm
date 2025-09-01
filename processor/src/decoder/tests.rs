@@ -1,4 +1,5 @@
 use alloc::vec::Vec;
+use std::sync::Arc;
 
 use miden_air::trace::{
     CTX_COL_IDX, DECODER_TRACE_RANGE, DECODER_TRACE_WIDTH, FMP_COL_IDX, FN_HASH_RANGE,
@@ -23,7 +24,7 @@ use super::{
     },
     build_op_group,
 };
-use crate::{AdviceInputs, DefaultHost, ExecutionError, ProcessState};
+use crate::{AdviceInputs, DefaultHost, ExecutionError, TrivialEventHandler};
 
 // CONSTANTS
 // ================================================================================================
@@ -1519,7 +1520,7 @@ fn set_user_op_helpers_many() {
 fn build_trace(stack_inputs: &[u64], program: &Program) -> (DecoderTrace, usize) {
     let stack_inputs = StackInputs::try_from_ints(stack_inputs.iter().copied()).unwrap();
     let mut host = DefaultHost::default();
-    host.load_handler(EMIT_EVENT_ID, |_: &ProcessState| Ok(Vec::new())).unwrap();
+    host.load_handler(EMIT_EVENT_ID, Arc::new(TrivialEventHandler)).unwrap();
     let mut process = Process::new(
         Kernel::default(),
         stack_inputs,
