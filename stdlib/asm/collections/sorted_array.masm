@@ -1,0 +1,114 @@
+use.std::word
+
+# ===== ARRAY UTILITIES ============================================================================
+
+#! Finds a key in a sorted array of words.
+#!
+#! Input:  [KEY, start_ptr, end_ptr]
+#! Output: [is_key_found, key_ptr, start_ptr, end_ptr]
+export.find_word
+    # check if empty array (3 cycles)
+    dup.5 dup.5 eq
+    #=> [is_empty, KEY, start_ptr, end_ptr]
+
+    # (10 cycles)
+    if.true
+        dropw dup push.0
+        #=> [is_key_found = 0, key_ptr = end_ptr, start_ptr, end_ptr]
+    else
+        # call lowerboundw (4 cycles)
+        adv.push_lowerboundw
+        adv_push.1
+        #=> [maybe_key_ptr, KEY, start_ptr, end_ptr]  @59 cycles
+
+        # check if pointing to start_ptr (3 cycles)
+        dup dup.6 eq
+        if.true
+            # load the underlaying value (8 cycles)
+            dup movdn.5 padw movup.4 mem_loadw
+            #=> [MAYBE_KEY, KEY, maybe_key_ptr, start_ptr, end_ptr]
+
+            # check if it matches the requested KEY
+            eqw movdn.4 dropw
+            #=> [is_key_found, KEY, maybe_key_ptr, start_ptr, end_ptr]
+
+            if.true
+                # done, found KEY, add success flag (5 cycles)
+                dropw push.1
+                #=> [is_key_found = 1, key_ptr, start_ptr, end_ptr]
+            else
+                # load the underlaying value (8 cycles)
+                dup.4 padw movup.4 mem_loadw
+                #=> [DEREF, KEY, maybe_key_ptr, start_ptr, end_ptr]
+
+                exec.word::lt
+                assert.err="push_lowerboundw unexpected value"
+                push.0
+            end
+        else
+            # check if pointing to end_ptr (3 cycles)
+            dup dup.7 eq
+            if.true
+                dup movdn.5 sub.4 padw movup.4 mem_loadw
+                #=> [LAST_WORD, KEY, maybe_key_ptr, start_ptr, end_ptr]
+
+                exec.word::gt
+                assert.err="push_lowerboundw unexpected value"
+                push.0
+
+                # load the previous value (8 cycles)
+                # dup sub.4 movdn.5 padw movup.4 mem_loadw
+                #=> [MAYBE_KEY, KEY, maybe_key_ptr, start_ptr, end_ptr]
+            else
+                dup dup.6 u32gt assert.err="maybe_key_ptr < start_ptr"
+                dup dup.7 u32lt assert.err="maybe_key_ptr > end_ptr"
+
+                # TODO: should check alignment for double-word scenarios
+                
+                # load the underlaying value (8 cycles)
+                dup movdn.5 padw movup.4 mem_loadw
+                #=> [MAYBE_KEY, KEY, maybe_key_ptr, start_ptr, end_ptr]
+
+                # check if it matches the requested KEY
+                eqw movdn.4 dropw
+                #=> [is_key_found, KEY, maybe_key_ptr, start_ptr, end_ptr]
+
+                if.true
+                    # done, found KEY, add success flag (5 cycles)
+                    dropw push.1
+                    #=> [is_key_found = 1, key_ptr, start_ptr, end_ptr]
+                else
+                    # load the underlaying value (8 cycles)
+                    dup.4 padw movup.4 mem_loadw
+                    #=> [DEREF, KEY, maybe_key_ptr, start_ptr, end_ptr]
+
+                    dupw.1 exec.word::gt
+                    assert.err="push_lowerboundw unexpected value"
+
+                    # load the previous word
+                    dup.4 sub.4 padw movup.4 mem_loadw
+
+                    exec.word::gt
+                    assert.err="push_lowerboundw unexpected value"
+
+                    push.0
+                end
+            end
+        end
+    end
+    # # call lowerboundw
+    # adv.push_lowerboundw
+    # adv_push.1
+    # #=> [maybe_key_ptr, KEY, start_ptr, end_ptr]
+
+    # # assert(maybe_key_ptr >= start_ptr)
+    # dup dup.6 u32gte assert.err="maybe_key_ptr < start_ptr"
+
+    # # assert(maybe_key_ptr <= end_ptr)
+    # dup dup.7 u32lte assert.err="maybe_key_ptr > end_ptr"
+
+
+    # #=> [start_ptr, maybe_key_ptr, KEY, start_ptr, end_ptr]
+end
+
+
