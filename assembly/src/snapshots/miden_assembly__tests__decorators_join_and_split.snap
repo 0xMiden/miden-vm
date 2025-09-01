@@ -12,9 +12,9 @@ begin
         end
         trace(6)
         if.true
-            basic_block trace(7) push(42) trace(8) end
+            basic_block trace(7) push(42) noop trace(8) end
         else
-            basic_block trace(9) push(22) trace(10) end
+            basic_block trace(9) push(22) noop trace(10) end
         end
     end
     trace(11)

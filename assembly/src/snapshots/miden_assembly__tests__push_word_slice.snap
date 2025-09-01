@@ -11,7 +11,10 @@ begin
         push(12)
         push(8)
         push(9)
+        noop
         push(6)
         push(7)
+        noop
+        noop
     end
 end

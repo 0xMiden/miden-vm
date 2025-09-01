@@ -8,7 +8,7 @@ use miden_core::{
     WORD_SIZE, Word, ZERO,
     mast::{
         BasicBlockNode, CallNode, ExternalNode, JoinNode, LoopNode, MastForest, MastNode,
-        MastNodeId, OP_GROUP_SIZE, OpBatch, SplitNode,
+        MastNodeId, OpBatch, SplitNode,
     },
     stack::MIN_STACK_DEPTH,
     utils::range,
@@ -864,15 +864,9 @@ impl FastProcessor {
         program: &MastForest,
         host: &mut impl AsyncHost,
     ) -> Result<(), ExecutionError> {
-        let op_counts = batch.op_counts();
-        let mut op_idx_in_group = 0;
+        let end_indices = batch.end_indices();
         let mut group_idx = 0;
         let mut next_group_idx = 1;
-
-        // round up the number of groups to be processed to the next power of two; we do this
-        // because the processor requires the number of groups to be either 1, 2, 4, or 8; if
-        // the actual number of groups is smaller, we'll pad the batch with NOOPs at the end
-        let num_batch_groups = batch.num_groups().next_power_of_two();
 
         // execute operations in the batch one by one
         for (op_idx_in_batch, op) in batch.ops().iter().enumerate() {
@@ -910,34 +904,13 @@ impl FastProcessor {
             }
 
             // determine if we've executed all non-decorator operations in a group
-            if op_idx_in_group == op_counts[group_idx] - 1 {
-                // if we are at the end of the group, first check if the operation carries an
-                // immediate value
-                if has_imm {
-                    // an operation with an immediate value cannot be the last operation in a group
-                    // so, we need execute a NOOP after it. In this processor, we increment the
-                    // clock to account for the NOOP.
-                    debug_assert!(op_idx_in_group < OP_GROUP_SIZE - 1, "invalid op index");
-                    self.clk += 1_u32;
-                }
-
+            if op_idx_in_batch + 1 == end_indices[group_idx] {
                 // then, move to the next group and reset operation index
                 group_idx = next_group_idx;
                 next_group_idx += 1;
-                op_idx_in_group = 0;
-            } else {
-                op_idx_in_group += 1;
             }
-
             self.clk += 1_u32;
         }
-
-        // make sure we execute the required number of operation groups; this would happen when the
-        // actual number of operation groups was not a power of two. In this processor, this
-        // corresponds to incrementing the clock by the number of empty op groups (i.e. 1 NOOP
-        // executed per missing op group).
-
-        self.clk += (num_batch_groups - group_idx) as u32;
 
         Ok(())
     }

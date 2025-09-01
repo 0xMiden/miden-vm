@@ -26,8 +26,7 @@ pub use miden_core::{
 use miden_core::{
     Decorator, DecoratorIterator, FieldElement,
     mast::{
-        BasicBlockNode, CallNode, DynNode, ExternalNode, JoinNode, LoopNode, OP_GROUP_SIZE,
-        OpBatch, SplitNode,
+        BasicBlockNode, CallNode, DynNode, ExternalNode, JoinNode, LoopNode, OpBatch, SplitNode,
     },
 };
 use miden_debug_types::SourceSpan;
@@ -91,7 +90,7 @@ pub mod math {
 
 pub mod crypto {
     pub use miden_core::crypto::{
-        hash::{Blake3_192, Blake3_256, ElementHasher, Hasher, Rpo256, Rpx256},
+        hash::{Blake3_192, Blake3_256, ElementHasher, Hasher, Poseidon2, Rpo256, Rpx256},
         merkle::{
             MerkleError, MerklePath, MerkleStore, MerkleTree, NodeIndex, PartialMerkleTree,
             SimpleSmt,
@@ -609,7 +608,7 @@ impl Process {
         program: &MastForest,
         host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
-        let op_counts = batch.op_counts();
+        let end_indices = batch.end_indices();
         let mut op_idx = 0;
         let mut group_idx = 0;
         let mut next_group_idx = 1;
@@ -641,20 +640,8 @@ impl Process {
             }
 
             // determine if we've executed all non-decorator operations in a group
-            if op_idx == op_counts[group_idx] - 1 {
-                // if we are at the end of the group, first check if the operation carries an
-                // immediate value
-                if has_imm {
-                    // an operation with an immediate value cannot be the last operation in a group
-                    // so, we need execute a NOOP after it. the assert also makes sure that there
-                    // is enough room in the group to execute a NOOP (if there isn't, there is a
-                    // bug somewhere in the assembler)
-                    debug_assert!(op_idx < OP_GROUP_SIZE - 1, "invalid op index");
-                    self.decoder.execute_user_op(Operation::Noop, op_idx + 1);
-                    self.execute_op(Operation::Noop, program, host)?;
-                }
-
-                // then, move to the next group and reset operation index
+            if i + 1 == end_indices[group_idx] {
+                // move to the next group and reset operation index
                 group_idx = next_group_idx;
                 next_group_idx += 1;
                 op_idx = 0;
@@ -667,20 +654,6 @@ impl Process {
             } else {
                 // if we are not at the end of the group, just increment the operation index
                 op_idx += 1;
-            }
-        }
-
-        // make sure we execute the required number of operation groups; this would happen when
-        // the actual number of operation groups was not a power of two
-        for group_idx in group_idx..num_batch_groups {
-            self.decoder.execute_user_op(Operation::Noop, 0);
-            self.execute_op(Operation::Noop, program, host)?;
-
-            // if we are not at the last group yet, set up the decoder for decoding the next
-            // operation groups. the groups were are processing are just NOOPs - so, the op group
-            // value is ZERO
-            if group_idx < num_batch_groups - 1 {
-                self.decoder.start_op_group(ZERO);
             }
         }
 

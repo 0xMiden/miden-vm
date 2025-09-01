@@ -104,6 +104,7 @@ impl DynNode {
     }
 }
 
+//-------------------------------------------------------------------------------------------------
 /// Mutators
 impl DynNode {
     /// Sets the list of decorators to be executed before this node.
@@ -114,6 +115,12 @@ impl DynNode {
     /// Sets the list of decorators to be executed after this node.
     pub fn append_after_exit(&mut self, decorator_ids: &[DecoratorId]) {
         self.after_exit.extend_from_slice(decorator_ids);
+    }
+
+    /// Removes all decorators from this node.
+    pub fn remove_decorators(&mut self) {
+        self.before_enter.truncate(0);
+        self.after_exit.truncate(0);
     }
 }
 

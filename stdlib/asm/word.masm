@@ -1,3 +1,5 @@
+# ===== WORD FUNCTIONS ==========================================================================
+
 #! Reverses order of the first four elements on the stack
 #!
 #! Inputs:  [a, b, c, d, ...]

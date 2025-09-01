@@ -6,15 +6,15 @@ begin
     join
         trace(0)
         if.true
-            basic_block trace(1) push(42) trace(2) end
+            basic_block trace(1) push(42) noop trace(2) end
         else
-            basic_block trace(3) push(22) trace(3) end
+            basic_block trace(3) push(22) noop trace(3) end
         end
         trace(4)
         if.true
-            basic_block trace(1) push(42) trace(2) end
+            basic_block trace(1) push(42) noop trace(2) end
         else
-            basic_block trace(3) push(22) trace(3) end
+            basic_block trace(3) push(22) noop trace(3) end
         end
         trace(4)
     end

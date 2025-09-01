@@ -1,7 +1,7 @@
-use alloc::vec::Vec;
+use alloc::{string::ToString, vec::Vec};
 
 use miden_core::{
-    crypto::hash::{Blake3_192, Blake3_256, Hasher, Rpo256, Rpx256},
+    crypto::hash::{Blake3_192, Blake3_256, Hasher, Poseidon2, Rpo256, Rpx256},
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 use winter_air::proof::Proof;
@@ -49,6 +49,7 @@ impl ExecutionProof {
             HashFunction::Blake3_256 => self.proof.conjectured_security::<Blake3_256>(),
             HashFunction::Rpo256 => self.proof.conjectured_security::<Rpo256>(),
             HashFunction::Rpx256 => self.proof.conjectured_security::<Rpx256>(),
+            HashFunction::Poseidon2 => self.proof.conjectured_security::<Poseidon2>(),
         };
         conjectured_security.bits()
     }
@@ -99,6 +100,8 @@ pub enum HashFunction {
     Rpo256 = 0x02,
     /// RPX hash function with 256-bit output.
     Rpx256 = 0x03,
+    /// Poseidon2 hash function with 256-bit output.
+    Poseidon2 = 0x04,
 }
 
 impl Default for HashFunction {
@@ -115,6 +118,7 @@ impl HashFunction {
             HashFunction::Blake3_256 => Blake3_256::COLLISION_RESISTANCE,
             HashFunction::Rpo256 => Rpo256::COLLISION_RESISTANCE,
             HashFunction::Rpx256 => Rpx256::COLLISION_RESISTANCE,
+            HashFunction::Poseidon2 => Poseidon2::COLLISION_RESISTANCE,
         }
     }
 }
@@ -128,9 +132,27 @@ impl TryFrom<u8> for HashFunction {
             0x01 => Ok(Self::Blake3_256),
             0x02 => Ok(Self::Rpo256),
             0x03 => Ok(Self::Rpx256),
+            0x04 => Ok(Self::Poseidon2),
             _ => Err(DeserializationError::InvalidValue(format!(
                 "the hash function representation {repr} is not valid!"
             ))),
+        }
+    }
+}
+
+impl TryFrom<&str> for HashFunction {
+    type Error = super::ExecutionOptionsError;
+
+    fn try_from(hash_fn_str: &str) -> Result<Self, Self::Error> {
+        match hash_fn_str {
+            "blake3-192" => Ok(Self::Blake3_192),
+            "blake3-256" => Ok(Self::Blake3_256),
+            "rpo" => Ok(Self::Rpo256),
+            "rpx" => Ok(Self::Rpx256),
+            "poseidon2" => Ok(Self::Poseidon2),
+            _ => Err(super::ExecutionOptionsError::InvalidHashFunction {
+                hash_function: hash_fn_str.to_string(),
+            }),
         }
     }
 }

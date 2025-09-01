@@ -5,17 +5,17 @@ expression: program
 begin
     join
         join
-            basic_block push(2) push(3) end
+            basic_block push(2) push(3) noop noop end
             if.true
                 join
                     basic_block add end
                     while.true
-                        basic_block push(7) push(11) add end
+                        basic_block push(7) push(11) add noop end
                     end
                 end
             else
                 join
-                    basic_block mul push(8) push(8) end
+                    basic_block mul push(8) push(8) noop noop end
                     if.true
                         basic_block mul end
                     else
