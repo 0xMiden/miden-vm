@@ -435,7 +435,7 @@ fn advice_push_lowerbound_first_element() {
         push.5.5.5.5 mem_storew.116 dropw
 
         push.120 push.100 push.[1,1,1,1]
-        adv.push_lowerbound
+        adv.push_lowerboundw
         adv_push.1
         
         exec.truncate_stack
@@ -460,7 +460,7 @@ fn advice_push_lowerbound_last_element() {
         push.5.5.5.5 mem_storew.116 dropw
 
         push.120 push.100 push.[5,5,5,5]
-        adv.push_lowerbound
+        adv.push_lowerboundw
         adv_push.1
         exec.truncate_stack
     end"
@@ -483,7 +483,7 @@ fn advice_push_lowerbound_multiple_instances() {
         push.3.3.3.3 mem_storew.112 dropw
 
         push.116 push.100 push.[2,2,2,2]
-        adv.push_lowerbound
+        adv.push_lowerboundw
         adv_push.1
         exec.truncate_stack
     end"
@@ -502,7 +502,7 @@ fn advice_push_lowerbound_empty_array() {
     begin
         # no stores; empty range
         push.100 push.100 push.[3,3,3,3]
-        adv.push_lowerbound
+        adv.push_lowerboundw
         adv_push.1
         exec.truncate_stack
     end"
@@ -524,7 +524,7 @@ fn advice_push_lowerbound_key_smaller_than_all() {
         push.4.4.4.4 mem_storew.108 dropw
 
         push.112 push.100 push.[1,1,1,1]
-        adv.push_lowerbound
+        adv.push_lowerboundw
         adv_push.1
 
         exec.truncate_stack
@@ -547,7 +547,7 @@ fn advice_push_lowerbound_key_greater_than_all() {
         push.4.4.4.4 mem_storew.108 dropw
 
         push.112 push.100 push.[9,9,9,9]
-        adv.push_lowerbound
+        adv.push_lowerboundw
         adv_push.1
 
         exec.truncate_stack
@@ -556,4 +556,27 @@ fn advice_push_lowerbound_key_greater_than_all() {
 
     let test = build_test!(source, &[]);
     test.expect_stack(&[112, 9, 9, 9, 9, 100, 112]);
+}
+
+#[test]
+fn advice_push_lowerbound_key_missing() {
+    let source: String = format!(
+        "
+    {TRUNCATE_STACK_PROC}
+
+    begin
+        push.2.2.2.2 mem_storew.100 dropw
+        push.3.3.3.3 mem_storew.104 dropw
+        push.4.4.4.4 mem_storew.108 dropw
+
+        push.112 push.100 push.[2,3,2,3]
+        adv.push_lowerboundw
+        adv_push.1
+
+        exec.truncate_stack
+    end"
+    );
+
+    let test = build_test!(source, &[]);
+    test.expect_stack(&[104, 3, 2, 3, 2, 100, 112]);
 }

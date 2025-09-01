@@ -63,7 +63,8 @@ extern {
         "push_mapvaln" => Token::PushMapvaln,
         "push_mtnode" => Token::PushMtnode,
         "push_smtpeek" => Token::PushSmtpeek,
-        "push_lowerbound" => Token::PushLowerBound,
+        "push_lowerboundw" => Token::PushLowerBoundW,
+        "push_lowerbounddw" => Token::PushLowerBoundDW,
         "push_u64div" => Token::PushU64Div,
         "push_falcon_div" => Token::PushFalconDiv,
         "and" => Token::And,
@@ -708,7 +709,8 @@ SystemEvent: Instruction = {
     "adv" "." "push_smtpeek" => Instruction::SysEvent(SystemEventNode::PushSmtPeek),
     "adv" "." "push_u64div" => Instruction::SysEvent(SystemEventNode::PushU64Div),
     "adv" "." "push_falcon_div" => Instruction::SysEvent(SystemEventNode::PushFalconDiv),
-    "adv" "." "push_lowerbound" => Instruction::SysEvent(SystemEventNode::PushLowerBound),
+    "adv" "." "push_lowerboundw" => Instruction::SysEvent(SystemEventNode::PushLowerBoundW),
+    "adv" "." "push_lowerbounddw" => Instruction::SysEvent(SystemEventNode::PushLowerBoundDW),
 }
 
 #[inline]

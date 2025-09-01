@@ -30,7 +30,8 @@ mod constants {
     pub const EVENT_HQWORD_TO_MAP: u32                = 2913039991;
     pub const EVENT_HPERM_TO_MAP: u32                 = 3297060969;
     pub const EVENT_FALCON_DIV: u32                   = 3419226155;
-    pub const EVENT_LOWER_BOUND: u32                  = 3157298401;
+    pub const EVENT_LOWER_BOUND_W: u32                = 3157298401;
+    pub const EVENT_LOWER_BOUND_DW: u32               = 1234567890;
 }
 
 /// Defines a set of actions which can be initiated from the VM to inject new data into the advice
@@ -193,7 +194,21 @@ pub enum SystemEvent {
     /// Outputs:
     ///   Operand stack: [KEY, start_ptr, end_ptr, ...]
     ///   Advice stack: [key_ptr, ...]
-    LowerBound,
+    LowerBoundW,
+
+    /// Pushes onto the advice stack the first memory pointer in the range [start_ptr, end_ptr)
+    /// such that the double-word (two consecutive words) at that pointer is greater than or equal
+    /// to the specified key `K = [K0, K1]` (two words). The memory range is assumed to be sorted
+    /// lexicographically by double-words.
+    ///
+    /// Inputs:
+    ///   Operand stack: [K0, K1, start_ptr, end_ptr, ...]
+    ///   Advice stack: [...]
+    ///
+    /// Outputs:
+    ///   Operand stack: [K0, K1, start_ptr, end_ptr, ...]
+    ///   Advice stack: [key_ptr, ...]
+    LowerBoundDW,
 
     /// Pushes the number of the leading zeros of the top stack element onto the advice stack.
     ///
@@ -348,7 +363,8 @@ impl SystemEvent {
             SystemEvent::HdwordToMapWithDomain => EVENT_HDWORD_TO_MAP_WITH_DOMAIN,
             SystemEvent::HqwordToMap => EVENT_HQWORD_TO_MAP,
             SystemEvent::HpermToMap => EVENT_HPERM_TO_MAP,
-            SystemEvent::LowerBound => EVENT_LOWER_BOUND,
+            SystemEvent::LowerBoundW => EVENT_LOWER_BOUND_W,
+            SystemEvent::LowerBoundDW => EVENT_LOWER_BOUND_DW,
         }
     }
 
@@ -376,7 +392,8 @@ impl SystemEvent {
             EVENT_HDWORD_TO_MAP_WITH_DOMAIN => Some(SystemEvent::HdwordToMapWithDomain),
             EVENT_HQWORD_TO_MAP => Some(SystemEvent::HqwordToMap),
             EVENT_HPERM_TO_MAP => Some(SystemEvent::HpermToMap),
-            EVENT_LOWER_BOUND => Some(SystemEvent::LowerBound),
+            EVENT_LOWER_BOUND_W => Some(SystemEvent::LowerBoundW),
+            EVENT_LOWER_BOUND_DW => Some(SystemEvent::LowerBoundDW),
             _ => None,
         }
     }
@@ -410,7 +427,8 @@ impl fmt::Display for SystemEvent {
             Self::HdwordToMapWithDomain => write!(f, "hdword_to_map_with_domain"),
             Self::HqwordToMap => write!(f, "hqword_to_map"),
             Self::HpermToMap => write!(f, "hperm_to_map"),
-            Self::LowerBound => write!(f, "lower_bound"),
+            Self::LowerBoundW => write!(f, "lower_bound_w"),
+            Self::LowerBoundDW => write!(f, "lower_bound_dw"),
         }
     }
 }

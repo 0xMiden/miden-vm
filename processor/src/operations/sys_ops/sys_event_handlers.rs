@@ -33,7 +33,8 @@ pub fn handle_system_event(
         SystemEvent::FalconDiv => push_falcon_mod_result(process, err_ctx),
         SystemEvent::Ext2Inv => push_ext2_inv_result(process, err_ctx),
         SystemEvent::SmtPeek => push_smtpeek_result(process, err_ctx),
-        SystemEvent::LowerBound => push_lowerbound_result(process, err_ctx),
+        SystemEvent::LowerBoundW => push_lowerboundw_result(process, err_ctx),
+        SystemEvent::LowerBoundDW => push_lowerbounddw_result(process, err_ctx),
         SystemEvent::U32Clz => push_leading_zeros(process, err_ctx),
         SystemEvent::U32Ctz => push_trailing_zeros(process, err_ctx),
         SystemEvent::U32Clo => push_leading_ones(process, err_ctx),
@@ -623,7 +624,7 @@ fn push_smtpeek_result(
 /// Outputs:
 ///   Operand stack: [KEY, start_ptr, end_ptr, ...]
 ///   Advice stack: [key_ptr, ...]
-fn push_lowerbound_result(
+fn push_lowerboundw_result(
     process: &mut ProcessState,
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
@@ -691,6 +692,106 @@ fn push_lowerbound_result(
     }
 
     // lo is the first address where word >= key, or hi if none; push pointer
+    process.advice_provider_mut().push_stack(Felt::from(lo));
+    Ok(())
+}
+
+/// Pushes onto the advice stack the first pointer in [start_ptr, end_ptr) such that
+/// mem[ptr..ptr+8) interpreted as two consecutive words is >= KEY=(K0,K1) lexicographically. If
+/// all double-words are < KEY, returns end_ptr.
+///
+/// Inputs:
+///   Operand stack: [K0, K1, start_ptr, end_ptr, ...]
+///   Advice stack: [...]
+///
+/// Outputs:
+///   Operand stack: [K0, K1, start_ptr, end_ptr, ...]
+///   Advice stack: [key_ptr, ...]
+fn push_lowerbounddw_result(
+    process: &mut ProcessState,
+    err_ctx: &impl ErrorContext,
+) -> Result<(), ExecutionError> {
+    // Read inputs from the stack
+    let key0 = process.get_stack_word(1);
+    let key1 = process.get_stack_word(5);
+    let (start_addr, end_addr) =
+        get_mem_addr_range(process, 9, 10).map_err(ExecutionError::MemoryError)?;
+
+    // Validate that addresses are word-aligned (multiple of 4)
+    if start_addr % 4 != 0 {
+        return Err(ExecutionError::MemoryError(MemoryError::unaligned_word_access(
+            start_addr,
+            process.ctx(),
+            Felt::from(process.clk()),
+            err_ctx,
+        )));
+    }
+    if end_addr % 4 != 0 {
+        return Err(ExecutionError::MemoryError(MemoryError::unaligned_word_access(
+            end_addr,
+            process.ctx(),
+            Felt::from(process.clk()),
+            err_ctx,
+        )));
+    }
+
+    // Search over double-words; ensure even number of words range
+    let mut lo = start_addr;
+    let hi = end_addr;
+    if lo >= hi {
+        process.advice_provider_mut().push_stack(Felt::from(end_addr));
+        return Ok(());
+    }
+
+    // count of words in range
+    let mut words = (hi - lo) / 4;
+    // floor to even count to form pairs
+    words -= words % 2;
+
+    while words > 0 {
+        let pairs = words / 2;
+        let half_pairs = pairs / 2;
+        let mid_pair_idx = half_pairs; // index in pairs
+        let mid_addr = lo + mid_pair_idx * 8; // 2 words per pair => 8 bytes offset
+
+        // Read two words at mid_addr and mid_addr+4
+        let mid_w0 = process
+            .get_mem_word(process.ctx(), mid_addr)
+            .map_err(ExecutionError::MemoryError)?
+            .unwrap_or([ZERO, ZERO, ZERO, ZERO].into());
+        let mid_w1 = process
+            .get_mem_word(process.ctx(), mid_addr + 4)
+            .map_err(ExecutionError::MemoryError)?
+            .unwrap_or([ZERO, ZERO, ZERO, ZERO].into());
+
+        // Compare (mid_w0, mid_w1) with (key0, key1) lexicographically
+        let cmp = {
+            let [a0, a1, a2, a3]: [Felt; 4] = mid_w0.into();
+            let [b0, b1, b2, b3]: [Felt; 4] = mid_w1.into();
+            let [k0, k1, k2, k3]: [Felt; 4] = key0.into();
+            let [l0, l1, l2, l3]: [Felt; 4] = key1.into();
+            let left = (
+                a0.as_int(), a1.as_int(), a2.as_int(), a3.as_int(),
+                b0.as_int(), b1.as_int(), b2.as_int(), b3.as_int(),
+            );
+            let right = (
+                k0.as_int(), k1.as_int(), k2.as_int(), k3.as_int(),
+                l0.as_int(), l1.as_int(), l2.as_int(), l3.as_int(),
+            );
+            left.cmp(&right)
+        };
+
+        if cmp == core::cmp::Ordering::Less {
+            // Move right of mid pair
+            lo = mid_addr + 8;
+            words -= (half_pairs * 2) + 2;
+        } else {
+            // mid >= key, keep left side including mid pair
+            words = half_pairs * 2;
+        }
+    }
+
+    // lo is the first address where pair >= key, or hi if none; push pointer
     process.advice_provider_mut().push_stack(Felt::from(lo));
     Ok(())
 }
