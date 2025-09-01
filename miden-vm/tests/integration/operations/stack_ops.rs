@@ -688,3 +688,79 @@ proptest! {
     }
 
 }
+
+#[test]
+fn test_push_stack_many() {
+    use miden_vm::AdviceProvider;
+    use miden_vm::Word;
+    use miden_core::Felt;
+
+    // Create an advice provider
+    let mut advice = AdviceProvider::default();
+
+    // Define a list of values (Word = [Felt; 4])
+    let values: Vec<Word> = vec![
+        [Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)].into(),
+        [Felt::new(5), Felt::new(6), Felt::new(7), Felt::new(8)].into(),
+        [Felt::new(9), Felt::new(10), Felt::new(11), Felt::new(12)].into(),
+    ];
+
+    let mut felts: Vec<Felt> = Vec::new();
+    for w in &values {
+        felts.extend_from_slice(&w.as_ref());
+    }
+
+    advice.push_stack_many(&felts).unwrap();
+
+    assert_eq!(
+        advice.pop_stack().unwrap(),
+        Felt::new(12)
+    );
+    assert_eq!(
+        advice.pop_stack().unwrap(),
+        Felt::new(11)
+    );
+    assert_eq!(
+        advice.pop_stack().unwrap(),
+        Felt::new(10)
+    );
+    assert_eq!(
+        advice.pop_stack().unwrap(),
+        Felt::new(9)
+    );
+    assert_eq!(
+        advice.pop_stack().unwrap(),
+        Felt::new(8)
+    );
+    assert_eq!(
+        advice.pop_stack().unwrap(),
+        Felt::new(7)
+    );
+    assert_eq!(
+        advice.pop_stack().unwrap(),
+        Felt::new(6)
+    );
+    assert_eq!(
+        advice.pop_stack().unwrap(),
+        Felt::new(5)
+    );
+    assert_eq!(
+        advice.pop_stack().unwrap(),
+        Felt::new(4)
+    );
+    assert_eq!(
+        advice.pop_stack().unwrap(),
+        Felt::new(3)
+    );
+    assert_eq!(
+        advice.pop_stack().unwrap(),
+        Felt::new(2)
+    );
+    assert_eq!(
+        advice.pop_stack().unwrap(),
+        Felt::new(1)
+    );
+
+    // Stack should now be empty
+    assert!(advice.pop_stack().is_err());
+}
