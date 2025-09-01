@@ -30,8 +30,8 @@ mod constants {
     pub const EVENT_HQWORD_TO_MAP: u32                = 2913039991;
     pub const EVENT_HPERM_TO_MAP: u32                 = 3297060969;
     pub const EVENT_FALCON_DIV: u32                   = 3419226155;
-    pub const EVENT_LOWER_BOUND_W: u32                = 3157298401;
-    pub const EVENT_LOWER_BOUND_DW: u32               = 1234567890;
+    pub const EVENT_LOWER_BOUND_W: u32                = 3453664521;
+    pub const EVENT_LOWER_BOUND_DW: u32               = 3466243107;
 }
 
 /// Defines a set of actions which can be initiated from the VM to inject new data into the advice
