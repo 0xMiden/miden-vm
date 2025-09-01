@@ -36,7 +36,7 @@ impl From<&StdLibrary> for HostLibrary {
     fn from(stdlib: &StdLibrary) -> Self {
         Self {
             mast_forest: stdlib.mast_forest().clone(),
-            handlers: vec![(string_to_event_id(KECCAK_EVENT_ID), Arc::new(push_keccak))],
+            handlers: stdlib.handlers(),
         }
     }
 }
