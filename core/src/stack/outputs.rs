@@ -138,9 +138,9 @@ impl Deserializable for StackOutputs {
 
         let elements = source.read_many::<Felt>(num_elements.into())?;
 
-        StackOutputs::new(elements).map_err(|_| {
+        StackOutputs::new(elements).map_err(|err| {
             DeserializationError::InvalidValue(format!(
-                "number of stack elements should not be greater than {MIN_STACK_DEPTH}, but {num_elements} was found",
+                "failed to create stack outputs: {err}",
             ))
         })
     }
