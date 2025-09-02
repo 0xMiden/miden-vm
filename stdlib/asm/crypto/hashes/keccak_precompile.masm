@@ -9,6 +9,8 @@ use.std::crypto::hashes::rpo
 # Constants
 # ================================================================================================
 
+const.KECCAK_EVENT=event("miden_stdlib::hash::keccak")
+
 #! Compute keccak256 hash using precompile event handler.
 #!
 #! This function takes a memory slice as input, computes its keccak256 hash using the
@@ -19,49 +21,38 @@ use.std::crypto::hashes::rpo
 #! used for proof verification and precompile call validation.
 #!
 #! Expected stack state:
-#! [ptr_in, len, ptr_out, ...]
+#! [ptr, len, ...]
 #!
 #! Final stack state:
-#! [commitment, ...]
+#! [commitment, keccak_hi, keccak_lo, ...]
 #!
 #! Where:
-#! - ptr_in:     memory address where input bytes start
-#! - len:        number of bytes to hash
-#! - ptr_out:    memory address where to write the 32-byte hash (as 8 u32s)
-#! - commitment: RPO hash of [RPO(input), RPO(keccak256(input))]
+#! - ptr:             memory address where input bytes start
+#! - len:             number of bytes to hash
+#! - commitment:      RPO hash of [RPO(input), RPO(keccak256(input))]
+#! - keccak_{hi, lo}: words todo
 export.keccak256_precompile
     # Emit keccak precompile event - this triggers the event handler which:
-    # 1. Reads input bytes from memory [ptr_in, ptr_in+len)
+    # 1. Reads input bytes from memory
     # 2. Computes keccak256 hash
     # 3. Pushes hash as 8 u32 values to advice stack
     # 4. Stores commitment in advice map for prover recovery
-    # => [ptr_in, len, ptr_out, ...]
-    emit.event("miden_stdlib::hash::keccak")
+    # => [ptr, len, ...]
+    emit.KECCAK_EVENT
 
-    # Compute RPO hash of the input memory range
+    # Compute RPO hash of the hash input stored in the memory range [ptr, ptr + len)
     exec.rpo::hash_memory
-    # => [RPO(input), ptr_out, ...]
-    movup.4
-    # => [ptr_out, RPO(input), ...]
+    # => [RPO(input), ...]
 
-    # Process the keccak hash from advice stack:
-    # - Load 8 u32 values from advice stack using adv_pipe
-    # - Write each word to memory at ptr_out
-    # - Simultaneously compute RPO hash of the keccak hash
-    exec.rpo::init_no_padding
-    # => [R0, R1, C, ptr_out, RPO(input), ...]
-
-    # Load 2 words (8 u32s) from advice and write them to the output region
-    # and absorb them in running digest
-    adv_pipe hperm
-
-    exec.rpo::squeeze_digest
-    # => [RPO(keccak_hash), ptr_out, RPO(input), ...]
-    movup.4 drop
-    # => [RPO(keccak_hash), RPO(input), ...]
-
-    # Merge the two RPO hashes to create the final commitment
-    # This commitment serves as fingerprint of the precompile computation.
+    # Load hash from advice
+    padw adv_loadw
+    padw adv_loadw
+    # => [keccak_hi, keccak_lo, RPO(input), ...]
+    dupw.1 dupw.1 hmerge
+    # => [RPO(keccak), keccak_hi, keccak_lo, RPO(input), ...]
+    movupw.3 swapw
+    # => [RPO(keccak), RPO(input), keccak_hi, keccak_lo, ...]
     hmerge
-    # => [commitment, ...] where commitment = RPO([RPO(input), RPO(keccak_hash)])
+    # => [commitment, keccak_hi, keccak_lo]
+    #    where commitment = RPO([RPO(input), RPO(keccak)])
 end

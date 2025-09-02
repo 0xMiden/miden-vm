@@ -1,3 +1,5 @@
+use std::array;
+
 use miden_core::{Felt, crypto::hash::Digest, utils::string_to_event_id};
 use miden_crypto::hash::{keccak::Keccak256, rpo::Rpo256};
 use miden_processor::{AdviceMutation, EventError, ProcessState};
@@ -9,20 +11,11 @@ use miden_stdlib::handlers::keccak::{KECCAK_EVENT_ID, pack_digest_u32};
 /// Memory address for storing test input data
 const INPUT_MEMORY_ADDR: u32 = 128; // Word-aligned for memory operations
 
-/// Memory address for storing keccak hash output
-const OUTPUT_MEMORY_ADDR: u32 = 32; // Word-aligned for memory operations
-
 /// Event ID for debug/validation events
 const DEBUG_EVENT_ID: &str = "miden::debug";
 
 /// Event ID for memory validation
 const MEMORY_CHECK_EVENT_ID: &str = "miden::memory_check";
-
-/// Expected hash output length in bytes
-const KECCAK_HASH_SIZE: usize = 32;
-
-/// Expected hash output length in bytes
-const KECCAK_PACKED_HASH_SIZE: usize = KECCAK_HASH_SIZE / size_of::<u32>();
 
 #[test]
 fn test_keccak_event_handler_directly() {
@@ -110,36 +103,34 @@ fn test_keccak_precompile_masm_wrapper() {
         use.std::crypto::hashes::keccak_precompile
         use.std::sys
 
+        # => [ptr, len]
+        #    Advice: [b_1, ..., b_len]
         begin
-            # start:
-            # Stack: [ptr_in, n, ptr_out]
-            # Advice: [b_1, ..., b_n]
-
-            # Compute ptr_end = ptr_in + n
+            # Compute ptr_end = ptr + len
             dup.1 dup.1 add dup.1
-            # Stack: [ptr_curr, ptr_end, ptr_in, n, ptr_out]
+            # => [ptr_curr, ptr_end, ptr, len]
 
             dup.1 dup.1 neq
-            # Stack: [ptr_end != ptr_in, ptr_curr, ptr_end, ptr_in, n, ptr_out]
+            # Stack: [ptr_end != ptr_in, ptr_curr, ptr_end, ptr, len]
 
-            while.true                  # [ptr_curr, ptr_end,    ptr_in,     n, ptr_out]
-                adv_push.1              # [byte,     ptr_curr,   ptr_end,    ...]
-                dup.1                   # [ptr_curr, bytes,      ptr_curr,   ptr_end, ...]
-                mem_store               # [ptr_curr, ptr_end,    ...]
-                add.1 dup.1 dup.1 neq   # [(ptr_end!=ptr_next),  ptr_next, ptr_end, ..]
-            end
+            # write the top n elements from the advice stack
+            # to the memory region [ptr..ptr+len)
+            while.true                  # [ptr_curr, ptr_end,   ptr,      len    ]
+                adv_push.1              # [byte,     ptr_curr,  ptr_end,  ...    ]
+                dup.1                   # [ptr_curr, bytes,     ptr_curr, ptr_end, ...]
+                mem_store               # [ptr_curr, ptr_end,   ...]
+                add.1 dup.1 dup.1 neq   # [(ptr_end!=ptr_next), ptr_next, ptr_end, ..]
+            end                         # [ptr_end,  ptr_end,   ptr,      len    ]
             drop drop
-            dup.2 dup.2 dup.2
-            # Stack: [ptr_in, n, ptr_out, ptr_in, n, ptr_out]
-            # mem[ptr_in..ptr_in+n] = [b_1, ..., b_n]
+            # => [ptr, len]
 
-            # Call keccak wrapper: keccak256_precompile(ptr_in, len, ptr_out)
+            # Save the arguments for the testing handler
+            dup.1 dup.1
+            # => [ptr, len, ptr, len]
             exec.keccak_precompile::keccak256_precompile
-            # stack: [C, ptr_in, n, ptr_out]
+            # => [C, keccak_hi, keccak_lo, ptr, len]
             
-            # Emit event to validate the hash was written correctly to memory
-            swapw
-            # stack: [ptr_in, n, ptr_out, 0, C]
+            # Emit event to validate the resulting hash on the stack
             emit.event("{MEMORY_CHECK_EVENT_ID}")
 
             exec.sys::truncate_stack
@@ -149,17 +140,17 @@ fn test_keccak_precompile_masm_wrapper() {
 
     // Memory validation handler - checks that hash was written correctly to output memory
     fn check_memory_handler(process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
-        let [ptr_in, len, ptr_out] = [1, 2, 3].map(|i| process.get_stack_item(i).as_int() as u32);
-
-        // Validate the output address matches our constant
-        assert_eq!(ptr_out, OUTPUT_MEMORY_ADDR, "output pointers should be equal");
+        // [event_id, C, keccak_hi, keccak_lo, ptr, len, ...]
+        let commitment = process.get_stack_word(1);
+        let hash_stack_felt: [Felt; 8] = array::from_fn(|i| process.get_stack_item(12 - i));
+        let ptr = process.get_stack_item(13).as_int() as u32;
+        let len = process.get_stack_item(14).as_int() as u32;
 
         assert!(process.advice_provider().stack().is_empty(), "advice stack non-empty");
 
         let ctx = process.ctx();
-        let input_felt: Vec<Felt> = (ptr_in..ptr_in + len)
-            .map(|addr| process.get_mem_value(ctx, addr).unwrap())
-            .collect();
+        let input_felt: Vec<Felt> =
+            (ptr..ptr + len).map(|addr| process.get_mem_value(ctx, addr).unwrap()).collect();
         let input_u8: Vec<u8> = input_felt.iter().map(|felt| felt.as_int() as u8).collect();
         let input_commitment = Rpo256::hash_elements(&input_felt);
 
@@ -168,18 +159,13 @@ fn test_keccak_precompile_masm_wrapper() {
             let hash_u8: [u8; 32] = Keccak256::hash(&input_u8).as_bytes();
             let hash_felt: [Felt; 8] = pack_digest_u32(hash_u8).map(Felt::from);
 
-            // get the digest computed by the handler from memory
-            let hash_felt_mem = (ptr_out..ptr_out + KECCAK_PACKED_HASH_SIZE as u32)
-                .map(|addr| process.get_mem_value(ctx, addr).unwrap())
-                .collect::<Vec<_>>();
             // ensure the digests match
-            assert_eq!(&hash_felt_mem, &hash_felt, "output hash does not match");
+            assert_eq!(&hash_stack_felt, &hash_felt, "output hash does not match");
             // commit to digest
             Rpo256::hash_elements(&hash_felt)
         };
 
         // RPO( [RPO(input), RPO(keccak(input)) ]
-        let commitment = process.get_stack_word(5);
         let expected_commitment = Rpo256::merge(&[input_commitment, hash_commitment]);
 
         assert_eq!(commitment, expected_commitment, "invalid commitment on stack");
@@ -198,9 +184,8 @@ fn test_keccak_precompile_masm_wrapper() {
     ];
 
     for preimage in preimages {
-        // Setup stack: [ptr_in, len, ptr_out] and advice: preimage[..]
-        let stack_inputs =
-            [OUTPUT_MEMORY_ADDR as u64, preimage.len() as u64, INPUT_MEMORY_ADDR as u64];
+        // Setup stack: [ptr_in, len] and advice: preimage[..]
+        let stack_inputs = [preimage.len() as u64, INPUT_MEMORY_ADDR as u64];
         let advice_inputs: Vec<_> = preimage.into_iter().map(u64::from).collect();
 
         let mut test = build_debug_test!(source.clone(), &stack_inputs, &advice_inputs);
