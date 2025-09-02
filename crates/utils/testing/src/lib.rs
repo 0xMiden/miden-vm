@@ -472,7 +472,7 @@ impl Test {
             host.load_library(library.mast_forest()).unwrap();
         }
         for (id, handler) in &self.handlers {
-            host.load_handler(Felt::new(*id), handler.clone()).unwrap();
+            host.register_handler(Felt::new(*id), handler.clone()).unwrap();
         }
 
         (program, host)

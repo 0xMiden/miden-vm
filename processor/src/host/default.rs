@@ -74,11 +74,11 @@ where
         Ok(self)
     }
 
-    /// Loads a single [`EventHandler`] into this host.
+    /// Registers a single [`EventHandler`] into this host.
     ///
     /// The handler can be either a closure or a free function with signature
     /// `fn(&mut ProcessState) -> Result<(), EventHandler>`
-    pub fn load_handler(
+    pub fn register_handler(
         &mut self,
         id: Felt,
         handler: Arc<dyn EventHandler>,
@@ -86,9 +86,9 @@ where
         self.event_handlers.register(id, handler)
     }
 
-    /// Unload a handler with the given id, returning a flag indicating whether a handler
+    /// Un-registers a handler with the given id, returning a flag indicating whether a handler
     /// was previously registered with this id.
-    pub fn unload_handler(&mut self, id: Felt) -> bool {
+    pub fn unregister_handler(&mut self, id: Felt) -> bool {
         self.event_handlers.unregister(id)
     }
 
@@ -96,7 +96,7 @@ where
     /// was previously registered with this id.
     pub fn replace_handler(&mut self, id: Felt, handler: Arc<dyn EventHandler>) -> bool {
         let existed = self.event_handlers.unregister(id);
-        self.load_handler(id, handler).unwrap();
+        self.register_handler(id, handler).unwrap();
         existed
     }
 

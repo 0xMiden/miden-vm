@@ -285,7 +285,7 @@ fn falcon_prove_verify() {
     let advice_inputs = AdviceInputs::default().with_map(advice_map);
     let mut host = DefaultHost::default();
     host.load_library(&StdLibrary::default()).expect("failed to load mast forest");
-    host.load_handler(EVENT_FALCON_SIG_TO_STACK, Arc::new(push_falcon_signature))
+    host.register_handler(EVENT_FALCON_SIG_TO_STACK, Arc::new(push_falcon_signature))
         .unwrap();
 
     let options = ProvingOptions::with_96_bit_security(miden_air::HashFunction::Blake3_192);
