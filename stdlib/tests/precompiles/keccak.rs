@@ -1,7 +1,7 @@
 use miden_core::{Felt, crypto::hash::Digest, utils::string_to_event_id};
 use miden_crypto::hash::{keccak::Keccak256, rpo::Rpo256};
 use miden_processor::{AdviceMutation, EventError, ProcessState};
-use miden_stdlib::precompiles::keccak::KECCAK_EVENT_ID;
+use miden_stdlib::handlers::keccak::KECCAK_EVENT_ID;
 
 // Test constants
 // ================================================================================================

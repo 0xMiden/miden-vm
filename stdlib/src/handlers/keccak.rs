@@ -4,7 +4,7 @@ use miden_core::{AdviceMap, Felt, crypto::hash::Digest};
 use miden_crypto::hash::{keccak::Keccak256, rpo::Rpo256};
 use miden_processor::{AdviceMutation, EventError, ProcessState};
 
-use crate::precompiles::read_memory;
+use crate::handlers::read_memory;
 
 pub const KECCAK_EVENT_ID: &str = "miden_stdlib::hash::keccak";
 

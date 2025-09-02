@@ -1,6 +1,6 @@
 #![no_std]
 
-pub mod precompiles;
+pub mod handlers;
 
 extern crate alloc;
 
@@ -11,7 +11,7 @@ use miden_core::{Felt, Word, utils::string_to_event_id};
 use miden_processor::{EventHandler, HostLibrary};
 use miden_utils_sync::LazyLock;
 
-use crate::precompiles::keccak::{KECCAK_EVENT_ID, push_keccak};
+use crate::handlers::keccak::{KECCAK_EVENT_ID, push_keccak};
 
 // STANDARD LIBRARY
 // ================================================================================================
