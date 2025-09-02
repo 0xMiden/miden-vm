@@ -38,6 +38,7 @@ expression: "build_group_chunks(&batches).collect::<Vec<_>>()"
         Mul,
         Add,
         Mul,
+        Noop,
     ],
     [
         Noop,

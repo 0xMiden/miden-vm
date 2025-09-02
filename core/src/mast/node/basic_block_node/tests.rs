@@ -251,6 +251,7 @@ fn batch_ops_6() {
 #[test]
 fn batch_ops_7() {
     // --- push at the end of a group is moved into the next group ----------------------------
+    // 0: [add mul add add add mul mul add noop] [push] [11] [noop]
     let ops = vec![
         Operation::Add,
         Operation::Mul,
@@ -315,7 +316,16 @@ fn batch_ops_8() {
 #[test]
 fn batch_ops_9() {
     // --- push at the end of the 7th group overflows to the next batch -----------------------
+
+    // batch 0
+    // 0: [add mul push push push push push add mul] [1] [2] [3] [4] [5]
+    // 6: [add mul add mul add mul add mul noop] [noop]
+    // 
+    // batch 1
+    // 0: [push pad] [6]
+
     let ops = vec![
+        // batch 0, group 0
         Operation::Add,
         Operation::Mul,
         Operation::Push(ONE),
@@ -325,6 +335,7 @@ fn batch_ops_9() {
         Operation::Push(Felt::new(5)),
         Operation::Add,
         Operation::Mul,
+        // batch 0, group 6
         Operation::Add,
         Operation::Mul,
         Operation::Add,
@@ -333,6 +344,7 @@ fn batch_ops_9() {
         Operation::Mul,
         Operation::Add,
         Operation::Mul,
+        // batch 1, group 0
         Operation::Push(Felt::new(6)),
         Operation::Pad,
     ];

@@ -33,6 +33,7 @@ expression: batches
             Add,
             Mul,
             Noop,
+            Noop,
         ],
         indptr: [
             0,
@@ -42,8 +43,8 @@ expression: batches
             9,
             9,
             9,
-            17,
             18,
+            19,
         ],
         padding: [
             false,
@@ -52,7 +53,7 @@ expression: batches
             false,
             false,
             false,
-            false,
+            true,
             true,
         ],
         groups: [
