@@ -9,10 +9,6 @@ use.std::crypto::hashes::rpo
 # Constants
 # ================================================================================================
 
-
-#! Size of keccak256 hash output in bytes
-const.KECCAK_HASH_SIZE=32
-
 #! Compute keccak256 hash using precompile event handler.
 #!
 #! This function takes a memory slice as input, computes its keccak256 hash using the
@@ -31,13 +27,13 @@ const.KECCAK_HASH_SIZE=32
 #! Where:
 #! - ptr_in:     memory address where input bytes start
 #! - len:        number of bytes to hash
-#! - ptr_out:    memory address where to write the 32-byte hash
+#! - ptr_out:    memory address where to write the 32-byte hash (as 8 u32s)
 #! - commitment: RPO hash of [RPO(input), RPO(keccak256(input))]
 export.keccak256_precompile
     # Emit keccak precompile event - this triggers the event handler which:
     # 1. Reads input bytes from memory [ptr_in, ptr_in+len)
     # 2. Computes keccak256 hash
-    # 3. Pushes hash bytes to advice stack
+    # 3. Pushes hash as 8 u32 values to advice stack
     # 4. Stores commitment in advice map for prover recovery
     # => [ptr_in, len, ptr_out, ...]
     emit.event("miden_stdlib::hash::keccak")
@@ -49,15 +45,16 @@ export.keccak256_precompile
     # => [ptr_out, RPO(input), ...]
 
     # Process the keccak hash from advice stack:
-    # - Load KECCAK_HASH_SIZE bytes from advice stack using adv_pipe
+    # - Load 8 u32 values from advice stack using adv_pipe
     # - Write each word to memory at ptr_out
     # - Simultaneously compute RPO hash of the keccak hash
     exec.rpo::init_no_padding
     # => [R0, R1, C, ptr_out, RPO(input), ...]
-    repeat.4      # Process 4 double-words (32 bytes total)
-        adv_pipe  # Load 2 words from advice and write them to the output region
-        hperm     # Absorb into running hash
-    end
+
+    # Load 2 words (8 u32s) from advice and write them to the output region
+    # and absorb them in running digest
+    adv_pipe hperm
+
     exec.rpo::squeeze_digest
     # => [RPO(keccak_hash), ptr_out, RPO(input), ...]
     movup.4 drop
