@@ -40,6 +40,10 @@ export.keccak256_precompile
     # => [ptr, len, ...]
     emit.KECCAK_EVENT
 
+    # compute len_u32 = (len+3)/4, i.e. the number of u32 elements to read from memory
+    swap add.3 u32shr.2 swap
+    # => [ptr, len_u32, ...]
+
     # Compute RPO hash of the hash input stored in the memory range [ptr, ptr + len)
     exec.rpo::hash_memory
     # => [RPO(input), ...]

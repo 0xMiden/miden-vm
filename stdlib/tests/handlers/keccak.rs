@@ -133,6 +133,7 @@ fn test_keccak_precompile_masm_wrapper() {
             # Emit event to validate the resulting hash on the stack
             emit.event("{MEMORY_CHECK_EVENT_ID}")
 
+            debug.stack
             exec.sys::truncate_stack
         end
     "#
@@ -144,17 +145,27 @@ fn test_keccak_precompile_masm_wrapper() {
         let commitment = process.get_stack_word(1);
         let hash_stack_felt: [Felt; 8] = array::from_fn(|i| process.get_stack_item(12 - i));
         let ptr = process.get_stack_item(13).as_int() as u32;
-        let len = process.get_stack_item(14).as_int() as u32;
+        let len = process.get_stack_item(14).as_int() as usize;
+        let len_u32 = len.div_ceil(4) as u32;
 
         assert!(process.advice_provider().stack().is_empty(), "advice stack non-empty");
 
         let ctx = process.ctx();
-        let input_felt: Vec<Felt> =
-            (ptr..ptr + len).map(|addr| process.get_mem_value(ctx, addr).unwrap()).collect();
-        let input_u8: Vec<u8> = input_felt.iter().map(|felt| felt.as_int() as u8).collect();
+        let input_felt: Vec<Felt> = (ptr..ptr + len_u32)
+            .map(|addr| process.get_mem_value(ctx, addr).unwrap())
+            .collect();
         let input_commitment = Rpo256::hash_elements(&input_felt);
 
         let hash_commitment = {
+            // unpack the inputs from u32 to -> [u8; 4]
+            let input_u32: Vec<u32> = input_felt.iter().map(|felt| felt.as_int() as u32).collect();
+            let mut input_u8: Vec<u8> =
+                input_u32.iter().copied().flat_map(|value| value.to_le_bytes()).collect();
+            for to_drop in &input_u8[len..] {
+                assert_eq!(*to_drop, 0, "padding bytes should be zero");
+            }
+            input_u8.truncate(len);
+
             // compute expected keccak digest
             let hash_u8: [u8; 32] = Keccak256::hash(&input_u8).as_bytes();
             let hash_felt: [Felt; 8] = pack_digest_u32(hash_u8).map(Felt::from);
@@ -170,17 +181,20 @@ fn test_keccak_precompile_masm_wrapper() {
 
         assert_eq!(commitment, expected_commitment, "invalid commitment on stack");
 
+        let input_advice = process.advice_provider().get_mapped_values(&commitment).unwrap();
+        assert_eq!(input_advice, input_felt);
+
         Ok(vec![])
     }
 
     // check multiple sizes of preimages
-    let preimages: Vec<Vec<u8>> = vec![
+    let preimages: Vec<Vec<u32>> = vec![
         vec![0],
         vec![0, 1],
         vec![0; 32],
         (0..32).collect(),
         (0..255).collect(),
-        (34..1234).map(|x| (x % 254) as u8).collect(),
+        (34..1234).map(|x| (x % 254) as u32).collect(),
     ];
 
     for preimage in preimages {

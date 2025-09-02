@@ -39,31 +39,40 @@ pub enum KeccakError {
 /// - hash_u32 are 8 u32 values representing the 32-byte keccak256 hash in little-endian order
 pub fn push_keccak(process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
     // start at 1 since 0 holds the event id
-    // Note: stack layout after emit is [event_id, ptr, len, ptr_out, ...]
+    // Note: stack layout after emit is [event_id, ptr, len, ...]
     let ptr = process.get_stack_item(1).as_int();
     let len = process.get_stack_item(2).as_int();
 
-    // Attempt to collect the field elements between `ptr` and `ptr+len`.
+    // each field element encodes 4 bytes
+    let len_u32 = len.div_ceil(4);
+
+    // Attempt to collect the field elements between `ptr` and `ptr + len_u32`.
     let input_felt =
-        read_memory(process, ptr, len).ok_or(KeccakError::MemoryReadFailed { ptr, len })?;
+        read_memory(process, ptr, len_u32).ok_or(KeccakError::MemoryReadFailed { ptr, len })?;
 
     // Convert each Felt to u8 (each memory location contains a single byte)
-    let input_u8: Vec<u8> = input_felt
+    let input_u32: Vec<u32> = input_felt
         .iter()
         .enumerate()
         .map(|(index, felt)| {
             let value = felt.as_int();
-            u8::try_from(value).map_err(|_| KeccakError::InvalidValue { value, index })
+            u32::try_from(value).map_err(|_| KeccakError::InvalidValue { value, index })
         })
         .collect::<Result<_, _>>()?;
 
+    // Unpack u32 into 4 u8 limbs, checking if the overflow bytes are zero.
+    let mut input_u8: Vec<u8> = input_u32.into_iter().flat_map(u32::to_le_bytes).collect();
+    for (index, &to_drop) in input_u8[len as usize..].iter().enumerate() {
+        if to_drop != 0 {
+            return Err(KeccakError::InvalidValue { index, value: to_drop as u64 })?;
+        }
+    }
+    input_u8.truncate(len as usize);
+
     // Resulting Keccak hash of the preimage
-    let hash_u8: [u8; 32] = Keccak256::hash(&input_u8).as_bytes();
-
     // Pack the 32-byte hash into 8 u32 values using little-endian byte order
-    let hash_u32: [u32; 8] = pack_digest_u32(hash_u8);
-
-    let hash_felt = hash_u32.map(Felt::from);
+    let hash_u8: [u8; 32] = Keccak256::hash(&input_u8).as_bytes();
+    let hash_felt: [Felt; 8] = pack_digest_u32(hash_u8).map(Felt::from);
 
     // Commitment to precompile call
     // Rpo( Rpo(input), Rpo(Keccak(input)) )
