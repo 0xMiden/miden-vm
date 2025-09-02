@@ -24,7 +24,7 @@ use super::{
     },
     build_op_group,
 };
-use crate::{AdviceInputs, DefaultHost, ExecutionError, TrivialEventHandler};
+use crate::{AdviceInputs, DefaultHost, ExecutionError, NoopEventHandler};
 
 // CONSTANTS
 // ================================================================================================
@@ -1520,7 +1520,7 @@ fn set_user_op_helpers_many() {
 fn build_trace(stack_inputs: &[u64], program: &Program) -> (DecoderTrace, usize) {
     let stack_inputs = StackInputs::try_from_ints(stack_inputs.iter().copied()).unwrap();
     let mut host = DefaultHost::default();
-    host.load_handler(EMIT_EVENT_ID, Arc::new(TrivialEventHandler)).unwrap();
+    host.load_handler(EMIT_EVENT_ID, Arc::new(NoopEventHandler)).unwrap();
     let mut process = Process::new(
         Kernel::default(),
         stack_inputs,

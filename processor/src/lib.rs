@@ -58,7 +58,7 @@ pub use host::{
     SyncHost,
     advice::{AdviceError, AdviceInputs, AdviceProvider},
     default::{DefaultDebugHandler, DefaultHost, HostLibrary},
-    handlers::{DebugHandler, EventError, EventHandler, EventHandlerRegistry, TrivialEventHandler},
+    handlers::{DebugHandler, EventError, EventHandler, EventHandlerRegistry, NoopEventHandler},
 };
 
 mod chiplets;

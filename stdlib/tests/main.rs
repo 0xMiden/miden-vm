@@ -28,9 +28,9 @@ macro_rules! build_debug_test {
 
 mod collections;
 mod crypto;
+mod handlers;
 mod mast_forest_merge;
 mod math;
 mod mem;
-mod handlers;
 mod sys;
 mod word;

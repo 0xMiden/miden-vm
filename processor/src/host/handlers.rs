@@ -37,10 +37,10 @@ where
     }
 }
 
-/// A handler which ignores the process state and leaves the `AdviceProvide` unchanged.
-pub struct TrivialEventHandler;
+/// A handler which ignores the process state and leaves the `AdviceProvider` unchanged.
+pub struct NoopEventHandler;
 
-impl EventHandler for TrivialEventHandler {
+impl EventHandler for NoopEventHandler {
     fn on_event(&self, _process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
         Ok(Vec::new())
     }
