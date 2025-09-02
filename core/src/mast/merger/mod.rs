@@ -339,7 +339,8 @@ impl MastForestMerger {
     // HELPERS
     // ================================================================================================
 
-    /// Returns a slice of nodes in the merged forest which have the given `mast_root`.
+    /// Returns the ID of the node in the merged forest that matches the given
+    /// fingerprint, if any.
     fn lookup_node_by_fingerprint(&self, fingerprint: &MastNodeFingerprint) -> Option<MastNodeId> {
         self.node_id_by_hash.get(fingerprint).copied()
     }
