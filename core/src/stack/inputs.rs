@@ -105,9 +105,9 @@ impl Deserializable for StackInputs {
         let mut elements = source.read_many::<Felt>(num_elements.into())?;
         elements.reverse();
 
-        StackInputs::new(elements).map_err(|_| {
+        StackInputs::new(elements).map_err(|err| {
             DeserializationError::InvalidValue(format!(
-                "number of stack elements should not be greater than {MIN_STACK_DEPTH}, but {num_elements} was found",
+                "failed to create stack inputs: {err}",
             ))
         })
     }
