@@ -1,0 +1,7 @@
+---
+source: assembly/src/tests.rs
+expression: program
+---
+begin
+    trace(0) dyn trace(1)
+end

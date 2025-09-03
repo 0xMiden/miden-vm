@@ -39,6 +39,7 @@ miden-air.workspace = true
 miden-core.workspace = true
 miden-debug-types.workspace = true
 miden-utils-diagnostics.workspace = true
+paste.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
 # For `testing`

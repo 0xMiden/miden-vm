@@ -40,5 +40,6 @@ winter-math.workspace = true
 winter-utils.workspace = true
 
 [dev-dependencies]
+insta.workspace = true
 proptest.workspace = true
 winter-rand-utils.workspace = true

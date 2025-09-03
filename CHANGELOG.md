@@ -2,6 +2,32 @@
 
 ## 0.18.0 (TBD)
 
+#### Enhancements
+
+- Added slicing for the word constants ([#2057](https://github.com/0xMiden/miden-vm/pull/2057)).
+- Added ability to declare word-sized constants from strings ([#2073](https://github.com/0xMiden/miden-vm/pull/2073)).
+- Added new `adv.insert_hqword` instruction ([#2097](https://github.com/0xMiden/miden-vm/pull/2097)).
+- Added option to use Poseidon2 in proving ([#2098](https://github.com/0xMiden/miden-vm/pull/2098)).
+- Reinstate the build of the stdlib's documentation ([#1432](https://github.com/0xmiden/miden-vm/issues/1432)).
+
+#### Changes
+
+- Removed unused `PushU8List`, `PushU16List`, `PushU32List` and `PushFeltList` instructions ([#2057](https://github.com/0xMiden/miden-vm/pull/2057)).
+- Removed dedicated `PushU8`, `PushU16`, `PushU32`, `PushFelt`, and `PushWord` assembly instructions. These have been replaced with the generic `Push<Immediate>` instruction which supports all the same functionality through the `IntValue` enum (U8, U16, U32, Felt, Word) ([#2066](https://github.com/0xMiden/miden-vm/issues/2066)).
+- [BREAKING] Update miden-crypto dependency to v0.16 (#[2079](https://github.com/0xMiden/miden-vm/pull/2079))
+- Made `get_mast_forest()` async again for `AsyncHost` now that basic conditional async support is in place ([#2060](https://github.com/0xMiden/miden-vm/issues/2060)).
+- Improved error message of binary operations on U32 values to report both erroneous operands, if applicable. ([#1327](https://github.com/0xMiden/miden-vm/issues/1327)).
+- [BREAKING] `emit` no longer takes an immediate and instead gets the event ID from the stack (#[2068](https://github.com/0xMiden/miden-vm/issues/2068)).
+- [BREAKING] `Operation::Emit` no longer contains a `u32` parameter, affecting pattern matching and serialization (#[2068](https://github.com/0xMiden/miden-vm/issues/2068)).
+- [BREAKING] Host `on_event` methods no longer receive `event_id` parameter; event ID must be read from stack position 0 (#[2068](https://github.com/0xMiden/miden-vm/issues/2068)).
+- [BREAKING] `get_stack_word` uses element-aligned indexing instead of word-aligned indexing (#[2068](https://github.com/0xMiden/miden-vm/issues/2068)).
+- [BREAKING] Implement support for `event("event_name")` in MASM (#[2068](https://github.com/0xMiden/miden-vm/issues/2068)).
+- Improved representation of `OPbatches` to include padding Noop by default, simplifying fast iteration over program instructions in the processor ([#1815](https://github.com/0xMiden/miden-vm/issues/1815)).
+
+## 0.17.1 (2025-08-29)
+
+- added `MastForest::strip_decorators()` ([#2108](https://github.com/0xMiden/miden-vm/pull/2108)).
+
 ## 0.17.0 (2025-08-06)
 
 #### Enhancements

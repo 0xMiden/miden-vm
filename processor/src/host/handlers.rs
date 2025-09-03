@@ -7,7 +7,7 @@ use core::{error::Error, fmt, fmt::Debug};
 
 use miden_core::DebugOptions;
 
-use crate::{AdviceMutation, ExecutionError, ProcessState};
+use crate::{AdviceMutation, ExecutionError, Felt, ProcessState};
 
 // EVENT HANDLER TRAIT
 // ================================================================================================
@@ -126,10 +126,12 @@ impl EventHandlerRegistry {
     /// propagated to the caller.
     pub fn handle_event(
         &self,
-        id: u32,
+        id: Felt,
         process: &ProcessState,
     ) -> Result<Option<Vec<AdviceMutation>>, EventError> {
-        if let Some(handler) = self.handlers.get(&id) {
+        if let Ok(id) = id.as_int().try_into()
+            && let Some(handler) = self.handlers.get(&id)
+        {
             return handler.on_event(process).map(Some);
         }
 

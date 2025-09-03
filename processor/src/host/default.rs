@@ -116,10 +116,6 @@ where
     D: DebugHandler,
     S: SourceManager,
 {
-    fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>> {
-        self.store.get(node_digest)
-    }
-
     fn get_label_and_source_file(
         &self,
         location: &Location,
@@ -154,11 +150,12 @@ where
     D: DebugHandler,
     S: SourceManager,
 {
-    fn on_event(
-        &mut self,
-        process: &ProcessState,
-        event_id: u32,
-    ) -> Result<Vec<AdviceMutation>, EventError> {
+    fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>> {
+        self.store.get(node_digest)
+    }
+
+    fn on_event(&mut self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
+        let event_id = process.get_stack_item(0);
         if let Some(mutations) = self.event_handlers.handle_event(event_id, process)? {
             // the event was handled by the registered event handlers; just return
             return Ok(mutations);
@@ -178,12 +175,16 @@ where
     D: DebugHandler,
     S: SourceManagerSync,
 {
+    fn get_mast_forest(&self, node_digest: &Word) -> impl FutureMaybeSend<Option<Arc<MastForest>>> {
+        let result = <Self as SyncHost>::get_mast_forest(self, node_digest);
+        async move { result }
+    }
+
     fn on_event(
         &mut self,
         process: &ProcessState<'_>,
-        event_id: u32,
     ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>> {
-        let result = <Self as SyncHost>::on_event(self, process, event_id);
+        let result = <Self as SyncHost>::on_event(self, process);
         async move { result }
     }
 }

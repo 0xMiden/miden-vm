@@ -450,10 +450,10 @@ fn ensure_div_doesnt_crash() {
         Ok(_) => panic!("expected an error"),
         Err(err) => assert_matches!(
             err,
-            ExecutionError::NotU32Value {
+            ExecutionError::NotU32Values {
                 label: _,
                 source_file: _,
-                value: _,
+                values: _,
                 err_code: _
             }
         ),
@@ -470,10 +470,10 @@ fn ensure_div_doesnt_crash() {
         Ok(_) => panic!("expected an error"),
         Err(err) => assert_matches!(
             err,
-            ExecutionError::NotU32Value {
+            ExecutionError::NotU32Values {
                 label: _,
                 source_file: _,
-                value: _,
+                values: _,
                 err_code: _
             }
         ),
@@ -575,7 +575,11 @@ fn checked_and_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::NotU32Value{ value, err_code, label: _, source_file: _ } if value == Felt::new(a0) && err_code == ZERO
+        ExecutionError::NotU32Values{ values, err_code, label: _, source_file: _ } if
+            values.len() == 2 &&
+            values.contains(&Felt::new(a0)) &&
+            values.contains(&Felt::new(b0)) &&
+            err_code == ZERO
     );
 }
 
@@ -617,7 +621,11 @@ fn checked_or_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::NotU32Value{ value, err_code, label: _, source_file: _ } if value == Felt::new(a0) && err_code == ZERO
+        ExecutionError::NotU32Values{ values, err_code, label: _, source_file: _ } if
+            values.len() == 2 &&
+            values.contains(&Felt::new(a0)) &&
+            values.contains(&Felt::new(b0)) &&
+            err_code == ZERO
     );
 }
 
@@ -659,7 +667,11 @@ fn checked_xor_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::NotU32Value{ value, err_code, label: _, source_file: _ } if value == Felt::new(a0) && err_code == ZERO
+        ExecutionError::NotU32Values{ values, err_code, label: _, source_file: _ } if
+            values.len() == 2 &&
+            values.contains(&Felt::new(a0)) &&
+            values.contains(&Felt::new(b0)) &&
+            err_code == ZERO
     );
 }
 

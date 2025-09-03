@@ -1,4 +1,4 @@
-use alloc::sync::Arc;
+use alloc::{sync::Arc, vec::Vec};
 
 use miden_air::RowIndex;
 use miden_core::{
@@ -72,7 +72,7 @@ pub enum ExecutionError {
         label: SourceSpan,
         #[source_code]
         source_file: Option<Arc<SourceFile>>,
-        event_id: u32,
+        event_id: Felt,
         #[source]
         error: EventError,
     },
@@ -204,13 +204,13 @@ pub enum ExecutionError {
         source_file: Option<Arc<SourceFile>>,
         value: Felt,
     },
-    #[error("operation expected a u32 value, but got {value} (error code: {err_code})")]
-    NotU32Value {
+    #[error("operation expected u32 values, but got values: {values:?} (error code: {err_code})")]
+    NotU32Values {
         #[label]
         label: SourceSpan,
         #[source_code]
         source_file: Option<Arc<SourceFile>>,
-        value: Felt,
+        values: Vec<Felt>,
         err_code: Felt,
     },
     #[error(
@@ -297,7 +297,7 @@ impl ExecutionError {
         Self::DynamicNodeNotFound { label, source_file, digest }
     }
 
-    pub fn event_error(error: EventError, event_id: u32, err_ctx: &impl ErrorContext) -> Self {
+    pub fn event_error(error: EventError, event_id: Felt, err_ctx: &impl ErrorContext) -> Self {
         let (label, source_file) = err_ctx.label_and_source_file();
 
         Self::EventError { label, source_file, event_id, error }
@@ -383,7 +383,17 @@ impl ExecutionError {
 
     pub fn not_u32_value(value: Felt, err_code: Felt, err_ctx: &impl ErrorContext) -> Self {
         let (label, source_file) = err_ctx.label_and_source_file();
-        Self::NotU32Value { label, source_file, value, err_code }
+        Self::NotU32Values {
+            label,
+            source_file,
+            values: vec![value],
+            err_code,
+        }
+    }
+
+    pub fn not_u32_values(values: Vec<Felt>, err_code: Felt, err_ctx: &impl ErrorContext) -> Self {
+        let (label, source_file) = err_ctx.label_and_source_file();
+        Self::NotU32Values { label, source_file, values, err_code }
     }
 
     pub fn smt_node_not_found(node: Word, err_ctx: &impl ErrorContext) -> Self {

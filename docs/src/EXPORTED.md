@@ -21,6 +21,7 @@
       - [Cryptographic Operations](./user_docs/assembly/cryptographic_operations.md)
       - [Events](./user_docs/assembly/events.md)
       - [Debugging](./user_docs/assembly/debugging.md)
+      - [Instruction Reference](./user_docs/assembly/instruction_reference.md)
     - [Miden Standard Library](./user_docs/stdlib/main.md)
       - [std::collections](./user_docs/stdlib/collections.md)
       - [std::crypto::dsa](./user_docs/stdlib/crypto/dsa.md)

@@ -58,6 +58,7 @@ System events fall into two categories: (1) events which push new data onto the 
 | adv.insert_mem                               | [K, a, b, ... ]            | [K, a, b, ... ]            | Reads words $data \leftarrow mem[a] .. mem[b]$ from memory, and save the data into $advice\_map[K] \leftarrow data$. |
 | adv.insert_hdword                            | [B, A, ... ]               | [B, A, ... ]               | Reads top two words from the stack, computes a key as $K \leftarrow hash(A \|\| B, domain=0)$, and saves the data into $advice\_map[K] \leftarrow [A, B]$. |
 | adv.insert_hdword_d                          | [B, A, d, ... ]            | [B, A, d, ... ]            | Reads top two words from the stack, computes a key as $K \leftarrow hash(A \|\| B, domain=d)$, and saves the data into $advice\_map[K] \leftarrow [A, B]$. $d$ is the domain value, where changing the domain changes the resulting hash given the same `A` and `B`. |
+| adv.insert_hqword                            | [D, C, B, A, ... ]         | [D, C, B, A, ... ]         | Reads top four words from the stack, computes a key as cumulative hash of these words $K \leftarrow hash(hash(hash(A \|\| B) \|\| C) \|\| D)$ in $domain=0$, and saves the data into $advice\_map[K] \leftarrow [A, B, C, D]$. |
 | adv.insert_hperm                             | [B, A, C, ...]             | [B, A, C, ...]             | Reads top three words from the stack, computes a key as $K \leftarrow permute(C, A, B).digest$, and saves data into $advice\_map[K] \leftarrow [A, B]$. |
 
 ### Random access memory

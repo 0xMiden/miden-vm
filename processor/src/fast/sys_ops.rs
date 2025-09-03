@@ -84,18 +84,18 @@ impl FastProcessor {
     #[inline(always)]
     pub async fn op_emit(
         &mut self,
-        event_id: u32,
         host: &mut impl AsyncHost,
         err_ctx: &impl ErrorContext,
     ) -> Result<(), ExecutionError> {
         let mut process = self.state();
+        let event_id = process.get_stack_item(0);
         // If it's a system event, handle it directly. Otherwise, forward it to the host.
         if let Some(system_event) = SystemEvent::from_event_id(event_id) {
             handle_system_event(&mut process, system_event, err_ctx)
         } else {
             let clk = process.clk();
             let mutations = host
-                .on_event(&process, event_id)
+                .on_event(&process)
                 .await
                 .map_err(|err| ExecutionError::event_error(err, event_id, err_ctx))?;
             self.advice

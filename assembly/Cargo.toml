@@ -34,5 +34,6 @@ thiserror.workspace = true
 
 [dev-dependencies]
 miden-mast-package = { workspace = true, features = ["arbitrary"] }
-pretty_assertions = "1.4"
+miden-stdlib.workspace = true
+insta.workspace = true
 proptest = { workspace = true, features = ["std"] }

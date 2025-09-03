@@ -60,10 +60,6 @@ pub trait BaseHost {
     // REQUIRED METHODS
     // --------------------------------------------------------------------------------------------
 
-    /// Returns MAST forest corresponding to the specified digest, or None if the MAST forest for
-    /// this digest could not be found in this host.
-    fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>>;
-
     /// Returns the [`SourceSpan`] and optional [`SourceFile`] for the provided location.
     fn get_label_and_source_file(
         &self,
@@ -103,12 +99,16 @@ pub trait SyncHost: BaseHost {
     // REQUIRED METHODS
     // --------------------------------------------------------------------------------------------
 
-    /// Handles the event emitted from the VM.
-    fn on_event(
-        &mut self,
-        process: &ProcessState,
-        event_id: u32,
-    ) -> Result<Vec<AdviceMutation>, EventError>;
+    /// Returns MAST forest corresponding to the specified digest, or None if the MAST forest for
+    /// this digest could not be found in this host.
+    fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>>;
+
+    /// Invoked when the VM encounters an `EMIT` operation.
+    ///
+    /// The event ID is available at the top of the stack (position 0) when this handler is called.
+    /// This allows the handler to access both the event ID and any additional context data that
+    /// may have been pushed onto the stack prior to the emit operation.
+    fn on_event(&mut self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError>;
 }
 
 // ASYNC HOST trait
@@ -122,12 +122,19 @@ pub trait AsyncHost: BaseHost {
     // Note: we don't use the `async` keyword in this method, since we need to specify the `+ Send`
     // bound to the returned Future, and `async` doesn't allow us to do that.
 
+    /// Returns MAST forest corresponding to the specified digest, or None if the MAST forest for
+    /// this digest could not be found in this host.
+    fn get_mast_forest(&self, node_digest: &Word) -> impl FutureMaybeSend<Option<Arc<MastForest>>>;
+
     /// Handles the event emitted from the VM and provides advice mutations to be applied to
     /// the advice provider.
+    ///
+    /// The event ID is available at the top of the stack (position 0) when this handler is called.
+    /// This allows the handler to access both the event ID and any additional context data that
+    /// may have been pushed onto the stack prior to the emit operation.
     fn on_event(
         &mut self,
         process: &ProcessState<'_>,
-        event_id: u32,
     ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>>;
 }
 

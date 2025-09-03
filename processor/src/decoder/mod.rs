@@ -10,6 +10,8 @@ use miden_air::{
         },
     },
 };
+#[cfg(test)]
+use miden_core::mast::OP_GROUP_SIZE;
 use miden_core::{
     AssemblyOp,
     mast::{
@@ -949,7 +951,7 @@ pub fn build_op_group(ops: &[Operation]) -> Felt {
         group |= (op.op_code() as u64) << (Operation::OP_BITS * i);
         i += 1;
     }
-    assert!(i <= super::OP_GROUP_SIZE, "too many ops");
+    assert!(i <= OP_GROUP_SIZE, "too many ops");
     Felt::new(group)
 }
 

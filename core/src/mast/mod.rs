@@ -15,8 +15,8 @@ pub use node::{
 
 use crate::{
     AdviceMap, Decorator, DecoratorList, Felt, LexicographicWord, Operation, Word,
-    crypto::hash::{Blake3_256, Blake3Digest, Digest, Hasher},
-    utils::{ByteWriter, DeserializationError, Serializable},
+    crypto::hash::Hasher,
+    utils::{ByteWriter, DeserializationError, Serializable, hash_string_to_word},
 };
 
 mod serialization;
@@ -210,6 +210,14 @@ impl MastForest {
 
     pub fn append_after_exit(&mut self, node_id: MastNodeId, decorator_ids: &[DecoratorId]) {
         self[node_id].append_after_exit(decorator_ids)
+    }
+
+    /// Removes all decorators from this MAST forest.
+    pub fn strip_decorators(&mut self) {
+        for node in self.nodes.iter_mut() {
+            node.remove_decorators();
+        }
+        self.decorators.truncate(0);
     }
 
     /// Merges all `forests` into a new [`MastForest`].
@@ -761,14 +769,11 @@ impl Serializable for DecoratorId {
     }
 }
 
-/// Derives an error code from an error message by hashing the message and
-/// interpreting the first 64 bits as a Felt.
+/// Derives an error code from an error message by hashing the message and returning the 0th element
+/// of the resulting [`Word`].
 pub fn error_code_from_msg(msg: impl AsRef<str>) -> Felt {
-    let digest: Blake3Digest<32> = Blake3_256::hash(msg.as_ref().as_bytes());
-    let mut digest_bytes: [u8; 8] = [0; 8];
-    digest_bytes.copy_from_slice(&digest.as_bytes()[0..8]);
-    let code = u64::from_le_bytes(digest_bytes);
-    Felt::new(code)
+    // hash the message and return 0th felt of the resulting Word
+    hash_string_to_word(msg.as_ref())[0]
 }
 
 // MAST FOREST ERROR

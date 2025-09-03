@@ -23,19 +23,25 @@ much like the Rust compiler.
 ```rust
 use std::path::Path;
 use miden_assembly::Assembler;
+use miden_assembly_syntax::debuginfo::DefaultSourceManager;
+use std::sync::Arc;
 
 // Instantiate a default, empty assembler
-let assembler = Assembler::default();
+let assembler = Assembler::new(Arc::new(DefaultSourceManager::default()));
 
 // Emit a program which pushes values 3 and 5 onto the stack and adds them
-let program = assembler.assemble_program("begin push.3 push.5 add end").unwrap();
+let program1 = assembler.assemble_program("begin push.3 push.5 add end")
+    .unwrap();
+
+// Note: assemble_program() takes ownership of the assembler, so create a new one for the next program
+let assembler2 = Assembler::new(Arc::new(DefaultSourceManager::default()));
 
 // Emit a program from some source code on disk (requires the `std` feature)
-let program = assembler.assemble_program(&Path::new("./example.masm")).unwrap();
+let program2 = assembler2.assemble_program(Path::new("../miden-vm/masm-examples/fib/fib.masm"))
+    .unwrap();
 ```
 
-> [!NOTE]
-> The default assembler provides no kernel or standard libraries, you must
+> **Note:** The default assembler provides no kernel or standard libraries, you must
 > explicitly add those using the various builder methods of `Assembler`, as
 > described in the next section.
 
@@ -45,7 +51,7 @@ As noted above, the default assembler is instantiated with nothing in it but
 the source code you provide. If you want to support more complex programs, you
 will want to factor code into libraries and modules, and then link all of them
 together at once. This can be achieved using a set of builder methods of the
-`Assembler` struct, e.g. `with_kernel_from_module`, `with_library`, etc.
+`Assembler` struct, e.g. `with_dynamic_library`, `with_kernel`, etc.
 
 We'll look at a few of these in more detail below. See the module documentation
 for the full set of APIs and how to use them.
@@ -59,7 +65,7 @@ to a common namespace, and which are packaged together. The
 
 To call code in this library from your program entrypoint, you must add the
 library to the instance of the assembler you will compile the program with,
-using the `with_library` or `with_libraries` methods.
+using the `with_dynamic_library` or `link_dynamic_library` methods.
 
 To be a bit more precise, a library can be anything that implements the `Library`
 trait, allowing for some flexibility in how they are managed. The standard library
@@ -67,10 +73,13 @@ referenced above implements this trait, so if we wanted to make use of the Miden
 standard library in our own program, we would add it like so:
 
 ```rust
-use miden_assembly::Assembler;
-
-let assembler = Assembler::default()
-    .with_library(&miden_stdlib::StdLibrary::default())
+# use miden_assembly::Assembler;
+# use miden_assembly_syntax::debuginfo::DefaultSourceManager;
+# use miden_stdlib::StdLibrary;
+# use std::sync::Arc;
+#
+let assembler = Assembler::new(Arc::new(DefaultSourceManager::default()))
+    .with_dynamic_library(&StdLibrary::default())
     .unwrap();
 ```
 
@@ -78,7 +87,7 @@ The resulting assembler can now compile code that invokes any of the
 standard library procedures by importing them from the namespace of
 the library, as shown next:
 
-```
+```masm
 use.std::math::u64
 
 begin
@@ -108,26 +117,48 @@ You can provide a kernel in one of two ways: a precompiled `Kernel` struct,
 or by compiling a kernel module from source, as shown below:
 
 ```rust
-use miden_assembly::Assembler;
+# use miden_assembly::Assembler;
+# use miden_assembly_syntax::debuginfo::DefaultSourceManager;
+# use std::sync::Arc;
+#
+# // Create a source manager
+# let source_manager = Arc::new(DefaultSourceManager::default());
 
-let assembler = Assembler::default()
-    .with_kernel_from_module("export.foo add end")
+// First, assemble the kernel library
+let kernel_lib = Assembler::new(source_manager.clone())
+    .assemble_kernel("export.foo add end")
     .unwrap();
+
+// Create assembler with the kernel
+let assembler = Assembler::with_kernel(source_manager, kernel_lib);
 ```
 
 Programs compiled by this assembler will be able to make calls to the
 `foo` procedure by executing the `syscall` instruction, like so:
 
 ```rust
-assembler.assemble_program("
+# use miden_assembly::Assembler;
+# use miden_assembly_syntax::debuginfo::DefaultSourceManager;
+# use std::sync::Arc;
+#
+# // Create a source manager
+# let source_manager = Arc::new(DefaultSourceManager::default());
+
+// First, assemble the kernel library
+let kernel_lib = Assembler::new(source_manager.clone())
+    .assemble_kernel("export.foo add end")
+    .unwrap();
+
+// Create assembler with the kernel and assemble program
+let program = Assembler::with_kernel(source_manager, kernel_lib)
+    .assemble_program("
 begin
     syscall.foo
 end
 ").unwrap();
 ```
 
-> [!NOTE]
-> An unqualified `syscall` target is assumed to be defined in the kernel module.
+> **Note:** An unqualified `syscall` target is assumed to be defined in the kernel module.
 > This is unlike the `exec` and `call` instructions, which require that callees
 > resolve to a local procedure; a procedure defined in an explicitly imported
 > module; or the hash of a MAST root corresponding to the compiled procedure.
@@ -143,10 +174,12 @@ instruction with the source code that it is derived from. You can do this as
 shown below:
 
 ```rust
-use miden_assembly::Assembler;
-
+# use miden_assembly::Assembler;
+# use miden_assembly_syntax::debuginfo::DefaultSourceManager;
+# use std::sync::Arc;
+#
 // Instantiate the assembler in debug mode
-let assembler = Assembler::default().with_debug_mode(true);
+let assembler = Assembler::new(Arc::new(DefaultSourceManager::default())).with_debug_mode(true);
 ```
 
 ## Putting it all together
@@ -156,25 +189,34 @@ together, let's look at one last example:
 
 ```rust
 use miden_assembly::Assembler;
+use miden_assembly_syntax::debuginfo::DefaultSourceManager;
 use miden_stdlib::StdLibrary;
+use std::sync::Arc;
 
 // Source code of the kernel module
 let kernel = "export.foo add end";
 
+// Create a source manager
+let source_manager = Arc::new(DefaultSourceManager::default());
+
+// First, assemble the kernel library
+let kernel_lib = Assembler::new(source_manager.clone())
+    .assemble_kernel(kernel)
+    .unwrap();
+
 // Instantiate the assembler with multiple options at once
-let assembler = Assembler::default()
+let assembler = Assembler::with_kernel(source_manager, kernel_lib)
     .with_debug_mode(true)
-    .with_library(&StdLibrary::default())
-    .and_then(|a| a.with_kernel_from_module(kernel))
+    .with_dynamic_library(&StdLibrary::default())
     .unwrap();
 
 // Assemble our program
-assembler.assemble_program("
+let program = assembler.assemble_program("
 begin
     push.1.2
     syscall.foo
 end
-");
+").unwrap();
 ```
 
 ## License
