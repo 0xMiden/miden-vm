@@ -18,22 +18,22 @@ const DEBUG_EVENT_ID: &str = "miden::debug";
 const MEMORY_CHECK_EVENT_ID: &str = "miden::memory_check";
 
 #[test]
-fn test_keccak_event_handler_directly() {
+fn test_keccak_handler() {
     // Simple program that pushes preimage directly and calls our event
-    const INPUT: [u8; 4] = [1, 2, 3, 4];
+    const INPUT_U32: [u32; 4] = [1, 2, 3, u32::MAX];
 
     let source = format!(
         r#"
         begin
-            push.{INPUT:?}
+            push.{INPUT_U32:?}
             
-            # Write the 4 bytes to memory at INPUT_ADDR
+            # Write the 4 u32 values to memory at INPUT_ADDR
             push.{INPUT_MEMORY_ADDR}
             mem_storew
             dropw
             
-            # Set up stack for event: [ptr, len=4]
-            push.4.{INPUT_MEMORY_ADDR}
+            # Set up stack for event: [ptr, len=16]
+            push.16.{INPUT_MEMORY_ADDR}
 
             emit.event("{KECCAK_EVENT_ID}")
 
@@ -47,23 +47,26 @@ fn test_keccak_event_handler_directly() {
 
     // Comprehensive handler to validate the keccak event handler functionality
     test.add_event_handler(string_to_event_id(DEBUG_EVENT_ID), |process: &ProcessState| {
-        // 1. CHECK MEMORY: Verify ptr_in contains PREIMAGE
+        // 1. CHECK MEMORY: Verify ptr_in contains INPUT_U32
         let ctx = process.ctx();
-        let memory_felt: Vec<Felt> = (INPUT_MEMORY_ADDR..INPUT_MEMORY_ADDR + INPUT.len() as u32)
+        let memory_felt: Vec<Felt> = (INPUT_MEMORY_ADDR
+            ..INPUT_MEMORY_ADDR + INPUT_U32.len() as u32)
             .map(|addr| process.get_mem_value(ctx, addr).unwrap())
             .collect();
 
-        let memory_u8: Vec<u8> = memory_felt.iter().map(|felt| felt.as_int() as u8).collect();
+        let input_felt: [Felt; 4] = INPUT_U32.map(Felt::from);
+        assert_eq!(memory_felt, input_felt, "preimage stored in memory is not equal to input");
 
-        assert_eq!(memory_u8, INPUT, "preimage stored in memory is not equal to PREIMAGE");
-
-        // 2. CHECK ADVICE STACK: Verify advice contains keccak hash as 8 u32 values (stored in
-        //    reverse)
+        // 2. CHECK ADVICE STACK: Verify advice contains keccak hash as 8 u32 values
+        //    (stored in reverse)
         let hash_advice: Vec<Felt> =
             process.advice_provider().stack().iter().copied().rev().collect();
 
-        let hash_u8: [u8; 32] = Keccak256::hash(&INPUT).as_bytes();
-        let hash_expected: [Felt; 8] = pack_digest_u32(hash_u8).map(Felt::from);
+        let hash_expected: [Felt; 8] = {
+            let input_u8: Vec<u8> = INPUT_U32.into_iter().flat_map(u32::to_le_bytes).collect();
+            let hash_u8: [u8; 32] = Keccak256::hash(&input_u8).as_bytes();
+            pack_digest_u32(hash_u8).map(Felt::from)
+        };
 
         assert_eq!(
             &hash_advice, &hash_expected,
@@ -71,7 +74,6 @@ fn test_keccak_event_handler_directly() {
         );
 
         // 3. CHECK ADVICE MAP: Verify commitment->witness mapping exists
-        let input_felt = INPUT.map(Felt::from);
 
         // Calculate the expected commitment key (same logic as in event handler)
         let calldata_commitment = Rpo256::merge(&[
@@ -97,7 +99,7 @@ fn test_keccak_event_handler_directly() {
 }
 
 #[test]
-fn test_keccak_precompile_masm_wrapper() {
+fn test_keccak_masm_wrapper() {
     let source = format!(
         r#"
         use.std::crypto::hashes::keccak_precompile
@@ -133,7 +135,6 @@ fn test_keccak_precompile_masm_wrapper() {
             # Emit event to validate the resulting hash on the stack
             emit.event("{MEMORY_CHECK_EVENT_ID}")
 
-            debug.stack
             exec.sys::truncate_stack
         end
     "#
@@ -143,6 +144,7 @@ fn test_keccak_precompile_masm_wrapper() {
     fn check_memory_handler(process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
         // [event_id, C, keccak_hi, keccak_lo, ptr, len, ...]
         let commitment = process.get_stack_word(1);
+        // keccak hash stored in reverse order at indices [5..11]
         let hash_stack_felt: [Felt; 8] = array::from_fn(|i| process.get_stack_item(12 - i));
         let ptr = process.get_stack_item(13).as_int() as u32;
         let len = process.get_stack_item(14).as_int() as usize;
