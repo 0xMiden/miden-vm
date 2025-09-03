@@ -712,10 +712,9 @@ fn push_lowerbounddw_result(
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
     // Read inputs from the stack
-    let key0 = process.get_stack_word(1);
-    let key1 = process.get_stack_word(5);
+    let key = process.get_stack_word(1);
     let (start_addr, end_addr) =
-        get_mem_addr_range(process, 9, 10).map_err(ExecutionError::MemoryError)?;
+        get_mem_addr_range(process, 5, 6).map_err(ExecutionError::MemoryError)?;
 
     // Validate that addresses are word-aligned (multiple of 4)
     if start_addr % 4 != 0 {
@@ -734,64 +733,57 @@ fn push_lowerbounddw_result(
             err_ctx,
         )));
     }
+    // Validate that addresses are word-aligned (multiple of 4)
+    if start_addr % 8 != end_addr % 8 {
+        return Err(ExecutionError::MemoryError(MemoryError::unaligned_word_access(
+            end_addr,
+            process.ctx(),
+            Felt::from(process.clk()),
+            err_ctx,
+        )));
+    }
 
-    // Search over double-words; ensure even number of words range
+    // Binary search over word-aligned addresses in [start_addr, end_addr)
     let mut lo = start_addr;
     let hi = end_addr;
+
+    // If range is empty, result is end_ptr
     if lo >= hi {
         process.advice_provider_mut().push_stack(Felt::from(end_addr));
         return Ok(());
     }
 
-    // count of words in range
-    let mut words = (hi - lo) / 4;
-    // floor to even count to form pairs
-    words -= words % 2;
+    let mut len = (hi - lo) / 8; // count of key-value pairs
 
-    while words > 0 {
-        let pairs = words / 2;
-        let half_pairs = pairs / 2;
-        let mid_pair_idx = half_pairs; // index in pairs
-        let mid_addr = lo + mid_pair_idx * 8; // 2 words per pair => 8 bytes offset
-
-        // Read two words at mid_addr and mid_addr+4
-        let mid_w0 = process
+    while len > 0 {
+        let half = len / 2;
+        let mid_addr = lo + half * 8;
+        // Read word at mid_addr
+        let mid_word = process
             .get_mem_word(process.ctx(), mid_addr)
             .map_err(ExecutionError::MemoryError)?
             .unwrap_or([ZERO, ZERO, ZERO, ZERO].into());
-        let mid_w1 = process
-            .get_mem_word(process.ctx(), mid_addr + 4)
-            .map_err(ExecutionError::MemoryError)?
-            .unwrap_or([ZERO, ZERO, ZERO, ZERO].into());
 
-        // Compare (mid_w0, mid_w1) with (key0, key1) lexicographically
+        // Compare mid_word with key lexicographically
         let cmp = {
-            let [a0, a1, a2, a3]: [Felt; 4] = mid_w0.into();
-            let [b0, b1, b2, b3]: [Felt; 4] = mid_w1.into();
-            let [k0, k1, k2, k3]: [Felt; 4] = key0.into();
-            let [l0, l1, l2, l3]: [Felt; 4] = key1.into();
-            let left = (
-                a0.as_int(), a1.as_int(), a2.as_int(), a3.as_int(),
-                b0.as_int(), b1.as_int(), b2.as_int(), b3.as_int(),
-            );
-            let right = (
-                k0.as_int(), k1.as_int(), k2.as_int(), k3.as_int(),
-                l0.as_int(), l1.as_int(), l2.as_int(), l3.as_int(),
-            );
-            left.cmp(&right)
+            let [l0, l1, l2, l3]: [Felt; 4] = mid_word.into();
+            let [r0, r1, r2, r3]: [Felt; 4] = key.into();
+            let mid_tuple = (l0.as_int(), l1.as_int(), l2.as_int(), l3.as_int());
+            let key_tuple = (r0.as_int(), r1.as_int(), r2.as_int(), r3.as_int());
+            mid_tuple.cmp(&key_tuple)
         };
 
         if cmp == core::cmp::Ordering::Less {
-            // Move right of mid pair
+            // Move right of mid
             lo = mid_addr + 8;
-            words -= (half_pairs * 2) + 2;
+            len -= half + 1;
         } else {
-            // mid >= key, keep left side including mid pair
-            words = half_pairs * 2;
+            // mid >= key, keep left side including mid
+            len = half;
         }
     }
 
-    // lo is the first address where pair >= key, or hi if none; push pointer
+    // lo is the first address where word >= key, or hi if none; push pointer
     process.advice_provider_mut().push_stack(Felt::from(lo));
     Ok(())
 }

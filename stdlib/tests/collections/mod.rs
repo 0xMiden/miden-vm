@@ -4,5 +4,6 @@ use miden_utils_testing::{
 };
 
 mod sorted_array;
+mod sorted_map;
 mod mmr;
 mod smt;

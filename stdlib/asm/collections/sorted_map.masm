@@ -2,22 +2,21 @@ use.std::word
 
 # ===== ARRAY UTILITIES ============================================================================
 
-#! Finds a key in a sorted array of words.
+#! Finds a key in a sorted array of (key, value) word tuples.
 #!
 #! Input:  [KEY, start_ptr, end_ptr]
 #! Output: [is_key_found, key_ptr, start_ptr, end_ptr]
-export.find_word
+export.find_key
     # check if empty array (3 cycles)
     dup.5 dup.5 eq
     #=> [is_empty, KEY, start_ptr, end_ptr]
 
-    # (10 cycles)
     if.true
         dropw dup push.0
         #=> [is_key_found = 0, key_ptr = end_ptr, start_ptr, end_ptr]
     else
         # call lowerboundw (4 cycles)
-        adv.push_lowerboundw
+        adv.push_lowerbounddw
         adv_push.1
         #=> [maybe_key_ptr, KEY, start_ptr, end_ptr]  @59 cycles
 
@@ -62,6 +61,9 @@ export.find_word
             else
                 dup dup.6 u32gt assert.err="maybe_key_ptr < start_ptr"
                 dup dup.7 u32lt assert.err="maybe_key_ptr > end_ptr"
+
+                # check alignment for double-word scenarios
+                dup dup.6 sub u32mod.8 assertz.err="key_ptr must be double-word aligned with start_ptr"
                 
                 # load the underlaying value (8 cycles)
                 dup movdn.5 padw movup.4 mem_loadw
@@ -84,7 +86,7 @@ export.find_word
                     assert.err="push_lowerboundw unexpected value"
 
                     # load the previous word
-                    dup.4 sub.4 padw movup.4 mem_loadw
+                    dup.4 sub.8 padw movup.4 mem_loadw
 
                     exec.word::gt
                     assert.err="push_lowerboundw unexpected value"
