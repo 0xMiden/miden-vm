@@ -5,7 +5,7 @@ use miden_processor::ProcessState;
 
 pub mod keccak;
 
-// # HELPERS
+// HELPERS
 // =================================================================================================
 
 /// Reads a contiguous word-aligned region of memory from the VM process state.
