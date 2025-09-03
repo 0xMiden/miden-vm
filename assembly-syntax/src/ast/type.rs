@@ -500,11 +500,7 @@ impl Variant {
     /// time this is called. If the discriminant has not been fully folded, then an error will be
     /// returned.
     pub fn assert_instance_of(&self, ty: &Type) -> Result<(), crate::SemanticAnalysisError> {
-        use miden_core::StarkField;
-
-        use crate::SemanticAnalysisError;
-
-        const P: u64 = miden_core::Felt::MODULUS;
+        use crate::{FIELD_MODULUS, SemanticAnalysisError};
 
         let value = match &self.discriminant {
             ConstantExpr::Int(value) => value.as_int(),
@@ -543,7 +539,7 @@ impl Variant {
                 })
             },
             Type::I32 | Type::U32 => Ok(()),
-            Type::I64 | Type::U64 if value >= P => {
+            Type::I64 | Type::U64 if value >= FIELD_MODULUS => {
                 Err(SemanticAnalysisError::InvalidEnumDiscriminant {
                     span: self.discriminant.span(),
                     repr: ty.clone(),

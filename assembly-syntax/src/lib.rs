@@ -29,3 +29,6 @@ pub use self::{
     parse::{Parse, ParseOptions},
     sema::SemanticAnalysisError,
 };
+
+/// The modulus of the Miden field as a raw u64 integer
+pub(crate) const FIELD_MODULUS: u64 = miden_core::Felt::MODULUS;
