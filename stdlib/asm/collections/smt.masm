@@ -1,3 +1,6 @@
+use.std::mem
+use.std::sys
+
 # Constant value for the depth at which leaves sit
 const.LEAF_DEPTH=64
 
@@ -353,79 +356,124 @@ end
 # GET
 # =================================================================================================
 
+# Inputs: [PADDING, ptr]
+# Outputs: [WORD, next_ptr]
+proc.mem_loadw_and_inc
+    dup.4
+    # => [ptr, WORD, ptr]
+    mem_loadw
+    # => [WORD, ptr]
+    movup.4
+    # => [ptr, WORD]
+    add.4
+    # => [ptr_next, WORD]
+    movdn.4
+    # => [WORD, ptr_next]
+end
 
 #! Inputs:
-#!   Operand stack: [pair_count, K, R]
+#!   Operand stack: [pair_count, NV, K, R]
 #!   Advice stack:  [V1, K2, V2, K2, ...]
-proc.get_multi_leaf_value
-    dup movdn.9
-    # => [pair_count, K, R, pair_count]
+proc.get_multi_leaf_value.8
 
-    gt.0
-    # => [has_more, K, R, pair_count]
-    # The loop should always run at least once, or this procedure's invariants are invalid.
-    assert.err="unreachable: get_multi_leaf_value called with 0 pairs"
-    push.1
+    # => [leaf_size, NV, K, R]
+
+    div.4
+    # => [num_words, NV, K, R]
+
+    # Keep track of `num_words`
+    loc_store.4
+    # => [NV, K, R]
+
+    # We use the node value (i.e., its hash) as the commitment COM.
+    # => [COM, K, R]
+
+    # FIXME: is there any particular value I should use for the pointer?
+    push.0xA0
+    # => [ptr, COM, K, R]
+
+    loc_load.4
+    # => [num_words, ptr, COM, K, R]
+
+    # XXX: replace with a procedure optimized for word-pairs
+    exec.mem::pipe_preimage_to_memory
+    # => [ptr_end, K, R]
+
+    # Consistency check: (ptr_end - ptr) / 4 == num_words
+    sub.0xA0 div.4
+    loc_load.4
+    assert_eq.err="pipe_preimage_to_memory copied more or less than expected"
+
+    # Keep track of `K`, since we'll be comparing against it.
+    # Don't drop it though. We can reuse that stack space for better stack hygeine.
+    loc_storew.0 swapw
+    # => [R, X]
+
+    # Memory => [K1, V1, Kn, Vn, ...]
+
+    push.0xA0
+    # => [ptr, R, X]
+
+    # XXX: replace loop with new VM instruction.
+
+    # Find the one that matches the requested key.
+    loc_load.4 div.2 # => [loop_count, ptr, R, X]
+    dup loc_store.4
+    gt.0 # => [continue, ptr, R, X]
+
     while.true
-        # => [K, R, pair_count]
+        # => [ptr_0, R, X]
 
-        # Get the next pair from the advice stack.
-        adv_push.8
-        # => [V', K', K, R, pair_count]
+        movup.8 movup.8 movup.8 movup.8
+        # => [X, ptr_0, R]
 
-        # Get the pair's key so we can compare it against the caller-provided key.
+        exec.mem_loadw_and_inc
+        # => [K_n, ptr_1, R]
 
-        movupw.2 movupw.2
-        # => [K', K, V', R, pair_count]
+        padw loc_loadw.0
+        # => [K, K_n, ptr_1, R]
 
         eqw
-        # => [key_eq, K', K, V', R, pair_count]
-
-        movdn.4 dropw
-        # => [key_eq, K, V', R, pair_count]
+        # => [K == K_n, K, K_n, ptr_1, R]
 
         if.true
-            # => [K, V', R, pair_count]
+            # => [K, K_n, ptr_1, R]
 
-            # We've found the right pair. Cleanup our stack, and prepare stack outputs.
+            # Get `V` and end the loop.
+            movup.8
+            # [ptr_1, K, K_n, R]
+            mem_loadw
+            # [V_n, K_n, R]
 
-            # We no longer need the original key.
-            dropw # => [V', R, pair_count]
-
-            push.0
-            # => [has_more_pairs = 0, V', R, pair_count]
-        else
-            # => [V', K, R, pair_count]
-
-            # Discard the pair-value from the advice provider, and prepare the stack
-            # for the next loop condition.
             swapw dropw
-            # => [K, R, pair_count]
+            # => [V_n, R]
+            push.0
+            # => [continue = 0, V_n, R]
+        else
+            # => [K, K_n, ptr_1, R]
 
-            # Decrement pair_count.
-            movup.8 sub.1 movdn.8
-            # => [K, R, pair_count]
+            # Set the next pointer and continue the loop if we should.
+            # We only care about the single local at index `4`, but loadw will
+            # overwrite the stack instead of growing it, and we don't need the
+            # top word.
+            loc_loadw.4
+            # => [x, x, x, loop_count, K_n, ptr_1, R]
 
-            # Prepare stack for the next loop condition.
-            dup.8 gt.0
+            movup.3 sub.1 movdn.3
+            # => [x, x, x, loop_count', K_n, ptr_1, R]
 
-            # => [has_more_pairs, K, R, pair_count]
+            loc_storew.4 drop drop drop
+            # => [loop_count', K_n, ptr_1, R]
+
+            gt.0
+            # => [continue, K_n, ptr_1, R]
+
+            movdn.4 dropw
+
+
+            swap add.4 swap
+            # => [continue, ptr_1, R]
         end
-    end
-
-    # While loop over.
-    # => [?, R, pair_count]
-
-    # Check pair_count. It will tell us the meaining of the first stack word.
-    movup.8 eq.0
-    if.true
-        # => [K, R]
-
-        # Value not found for this key.
-        padw swapw dropw
-    else
-        # => [V, R]
-        nop
     end
 end
 
@@ -508,14 +556,6 @@ export.get
             # => [V, R]
         else
             # => [leaf_size, NV, K, R]
-
-            # We don't care about the node's hash anymore.
-            movdn.12 dropw
-            # => [K, R, leaf_size]
-
-            # Each pair is 8 fields.
-            movup.8 div.8
-            # => [pair_count, K, R]
 
             exec.get_multi_leaf_value
 
