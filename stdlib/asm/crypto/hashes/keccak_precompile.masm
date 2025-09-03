@@ -1,7 +1,12 @@
 #! Keccak256 precompile wrapper using event handling for efficient computation.
 #!
-#! This module provides a wrapper function around the keccak precompile event handler,
-#! allowing efficient keccak256 computation by deferring to the native verifier.
+#! This module provides a wrapper function around the Keccak256 precompile event handler,
+#! allowing efficient Keccak256 computation by deferring expensive operations to external
+#! verification.
+#!
+#! Deferred hash computation can either be verified by a native verifier when providing 
+#! preimages as part of the STARK proof, or by creating a STARK proof which verifies these
+#! hashes and this proof is then recursively verified by the VM.
 
 use.std::mem
 use.std::crypto::hashes::rpo
@@ -11,26 +16,23 @@ use.std::crypto::hashes::rpo
 
 const.KECCAK_EVENT=event("miden_stdlib::hash::keccak")
 
-#! Compute keccak256 hash using precompile event handler.
+# PROCEDURES
+# ================================================================================================
+
+#! Computes Keccak256 hash of memory data using precompile event handler (internal wrapper).
 #!
-#! This function takes a memory slice as input, computes its keccak256 hash using the
-#! precompile event handler, writes the hash to the specified output location, and
-#! returns a cryptographic commitment to the precompile call on the stack.
+#! Hashes a memory region containing u32 elements, where the byte length may not align with
+#! word boundaries. Any unused bytes in the last u32 element must be zero. Returns both the 
+#! Keccak256 digest and a commitment RPO([RPO(input), RPO(hash)]) for tracking deferred computations.
 #!
-#! The commitment is computed as RPO([RPO(input), RPO(keccak256(input))]) and can be
-#! used for proof verification and precompile call validation.
-#!
-#! Expected stack state:
-#! [ptr, len, ...]
-#!
-#! Final stack state:
-#! [commitment, keccak_hi, keccak_lo, ...]
+#! Input: [ptr, len, ...]
+#! Output: [commitment, keccak_hi, keccak_lo, ...]
 #!
 #! Where:
-#! - ptr:             memory address where input bytes start
-#! - len:             number of bytes to hash
-#! - commitment:      RPO hash of [RPO(input), RPO(keccak256(input))]
-#! - keccak_{hi, lo}: words todo
+#! - ptr: word-aligned memory address of u32 data (must be divisible by 4)
+#! - len: number of bytes to hash
+#! - commitment: RPO hash for tracking deferred computations
+#! - keccak_hi, keccak_lo: Keccak256 digest as 8 u32s (2 words, high limb on top)
 export.keccak256_precompile
     # Emit keccak precompile event - this triggers the event handler which:
     # 1. Reads input bytes from memory
@@ -40,7 +42,7 @@ export.keccak256_precompile
     # => [ptr, len, ...]
     emit.KECCAK_EVENT
 
-    # compute len_u32 = (len+3)/4, i.e. the number of u32 elements to read from memory
+    # Compute len_u32 = (len+3)/4, i.e. the number of u32 elements to read from memory
     swap add.3 u32shr.2 swap
     # => [ptr, len_u32, ...]
 
@@ -48,14 +50,17 @@ export.keccak256_precompile
     exec.rpo::hash_memory
     # => [RPO(input), ...]
 
-    # Load hash from advice
+    # Load hash from advice stack
     padw adv_loadw
     padw adv_loadw
     # => [keccak_hi, keccak_lo, RPO(input), ...]
+    
     dupw.1 dupw.1 hmerge
     # => [RPO(keccak), keccak_hi, keccak_lo, RPO(input), ...]
+    
     movupw.3 swapw
     # => [RPO(keccak), RPO(input), keccak_hi, keccak_lo, ...]
+    
     hmerge
     # => [commitment, keccak_hi, keccak_lo]
     #    where commitment = RPO([RPO(input), RPO(keccak)])
