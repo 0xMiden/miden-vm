@@ -1362,6 +1362,61 @@ fn test_push_word_slice_invalid() -> TestResult {
     Ok(())
 }
 
+#[test]
+fn test_push_stack_many_masm() -> TestResult {
+    let context = TestContext::default();
+
+    let source = source_file!(
+        &context,
+        "\
+    const.MY_VALUES=[2,3,5,7]
+
+    begin
+        # Push all values individually via slice
+        push.MY_VALUES[0..4]
+    end
+    "
+    );
+
+    let program = context.assemble(source)?;
+    insta::assert_snapshot!(program);
+    Ok(())
+}
+
+#[test]
+fn test_push_stack_many_invalid_slice() -> TestResult {
+    let context = TestContext::default();
+
+    // Invalid range: start > end
+    let source = source_file!(
+        &context,
+        "\
+    const.MY_VALUES=[2,3,5,7]
+
+    begin
+        push.MY_VALUES[4..2]
+    end
+    "
+    );
+    assert!(context.assemble(source).is_err());
+
+    // Empty slice: start == end
+    let source = source_file!(
+        &context,
+        "\
+    const.MY_VALUES=[2,3,5,7]
+
+    begin
+        push.MY_VALUES[2..2]
+    end
+    "
+    );
+    assert!(context.assemble(source).is_err());
+
+    Ok(())
+}
+
+
 // DECORATORS
 // ================================================================================================
 
