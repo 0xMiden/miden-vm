@@ -27,6 +27,7 @@
 - [BREAKING] Implement support for `event("event_name")` in MASM (#[2068](https://github.com/0xMiden/miden-vm/issues/2068)).
 - Improved representation of `OPbatches` to include padding Noop by default, simplifying fast iteration over program instructions in the processor ([#1815](https://github.com/0xMiden/miden-vm/issues/1815)).
 - Rename `program_execution` benchmark to `program_execution_for_trace`, and benchmark `FastProcessor::execute_for_trace()` instead of `Process::execute()` (#[2131](https://github.com/0xMiden/miden-vm/pull/2131))
+- Refactored `MastNode` to eliminate boilerplate dispatch code ([#2127](https://github.com/0xMiden/miden-vm/pull/2127)).
 
 ## 0.17.1 (2025-08-29)
 
