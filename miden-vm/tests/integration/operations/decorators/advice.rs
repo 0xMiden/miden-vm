@@ -580,3 +580,32 @@ fn advice_push_lowerbound_key_missing() {
     let test = build_test!(source, &[]);
     test.expect_stack(&[104, 3, 2, 3, 2, 100, 112]);
 }
+
+#[test]
+fn advice_push_lowerbound_map() {
+    let source: String = format!(
+        "
+    {TRUNCATE_STACK_PROC}
+
+    begin
+        push.2.2.2.2 mem_storew.100 dropw
+        push.5.5.5.5 mem_storew.104 dropw
+
+        push.4.4.4.4 mem_storew.108 dropw
+        push.3.3.3.3 mem_storew.112 dropw
+
+        push.6.6.6.6 mem_storew.116 dropw
+        push.1.1.1.1 mem_storew.120 dropw
+
+        push.124 push.100 push.[4,4,4,4]
+
+        adv.push_map_lowerbound
+        adv_push.1
+
+        exec.truncate_stack
+    end"
+    );
+
+    let test = build_test!(source, &[]);
+    test.expect_stack(&[108, 4, 4, 4, 4, 100, 124]);
+}

@@ -426,8 +426,8 @@ impl fmt::Display for SystemEvent {
             Self::HdwordToMapWithDomain => write!(f, "hdword_to_map_with_domain"),
             Self::HqwordToMap => write!(f, "hqword_to_map"),
             Self::HpermToMap => write!(f, "hperm_to_map"),
-            Self::ArrayLowerBound => write!(f, "lower_bound_w"),
-            Self::MapLowerBound => write!(f, "lower_bound_dw"),
+            Self::ArrayLowerBound => write!(f, "array_lower_bound"),
+            Self::MapLowerBound => write!(f, "map_lower_bound"),
         }
     }
 }
