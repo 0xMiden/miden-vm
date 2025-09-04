@@ -237,4 +237,22 @@ impl MastNodeTrait for LoopNode {
     fn to_pretty_print<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn PrettyPrint + 'a> {
         Box::new(LoopNode::to_pretty_print(self, mast_forest))
     }
+
+    fn remap_children(&self, remapping: &Remapping) -> Self {
+        let mut node = self.clone();
+        node.body = node.body.remap(remapping);
+        node
+    }
+
+    fn has_children(&self) -> bool {
+        true
+    }
+
+    fn append_children_to(&self, target: &mut Vec<MastNodeId>) {
+        target.push(self.body());
+    }
+
+    fn domain(&self) -> Felt {
+        Self::DOMAIN
+    }
 }

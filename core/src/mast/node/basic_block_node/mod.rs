@@ -7,7 +7,7 @@ use miden_formatting::prettier::PrettyPrint;
 use crate::{
     DecoratorIterator, DecoratorList, Operation,
     chiplets::hasher,
-    mast::{DecoratorId, MastForest, MastForestError},
+    mast::{DecoratorId, MastForest, MastForestError, MastNodeId, Remapping},
 };
 
 mod op_batch;
@@ -153,11 +153,6 @@ impl BasicBlockNode {
 // ------------------------------------------------------------------------------------------------
 /// Public accessors
 impl BasicBlockNode {
-    /// Returns a commitment to this basic block.
-    pub fn digest(&self) -> Word {
-        self.digest
-    }
-
     /// Returns a reference to the operation batches in this basic block.
     pub fn op_batches(&self) -> &[OpBatch] {
         &self.op_batches
@@ -295,8 +290,9 @@ impl BasicBlockNode {
 // ================================================================================================
 
 impl MastNodeTrait for BasicBlockNode {
+    /// Returns a commitment to this basic block.
     fn digest(&self) -> Word {
-        self.digest()
+        self.digest
     }
 
     fn before_enter(&self) -> &[DecoratorId] {
@@ -325,6 +321,22 @@ impl MastNodeTrait for BasicBlockNode {
 
     fn to_pretty_print<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn PrettyPrint + 'a> {
         Box::new(BasicBlockNode::to_pretty_print(self, mast_forest))
+    }
+
+    fn remap_children(&self, _remapping: &Remapping) -> Self {
+        self.clone()
+    }
+
+    fn has_children(&self) -> bool {
+        false
+    }
+
+    fn append_children_to(&self, _target: &mut Vec<MastNodeId>) {
+        // No children for basic blocks
+    }
+
+    fn domain(&self) -> Felt {
+        Self::DOMAIN
     }
 }
 

@@ -22,7 +22,7 @@ pub use join_node::JoinNode;
 
 mod split_node;
 use miden_crypto::{Felt, Word};
-use miden_formatting::prettier::{Document, PrettyPrint};
+use miden_formatting::prettier::PrettyPrint;
 pub use split_node::SplitNode;
 
 mod loop_node;
@@ -59,6 +59,18 @@ pub trait MastNodeTrait {
 
     /// Returns a pretty printer for this node.
     fn to_pretty_print<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn PrettyPrint + 'a>;
+
+    /// Remap the node children to their new positions indicated by the given [`Remapping`].
+    fn remap_children(&self, remapping: &Remapping) -> Self;
+
+    /// Returns true if the this node has children.
+    fn has_children(&self) -> bool;
+
+    /// Appends the NodeIds of the children of this node, if any, to the vector.
+    fn append_children_to(&self, target: &mut Vec<MastNodeId>);
+
+    /// Returns the domain of this node.
+    fn domain(&self) -> Felt;
 }
 
 // MAST NODE
@@ -249,90 +261,6 @@ impl MastNode {
             Self::External(external_node) => external_node,
             other => unwrap_failed(other, "external"),
         }
-    }
-
-    /// Remap the node children to their new positions indicated by the given [`Remapping`].
-    pub fn remap_children(&self, remapping: &Remapping) -> Self {
-        use MastNode::*;
-        match self {
-            Join(join_node) => Join(join_node.remap_children(remapping)),
-            Split(split_node) => Split(split_node.remap_children(remapping)),
-            Loop(loop_node) => Loop(loop_node.remap_children(remapping)),
-            Call(call_node) => Call(call_node.remap_children(remapping)),
-            Block(_) | Dyn(_) | External(_) => self.clone(),
-        }
-    }
-
-    /// Returns true if the this node has children.
-    pub fn has_children(&self) -> bool {
-        match &self {
-            MastNode::Join(_) | MastNode::Split(_) | MastNode::Loop(_) | MastNode::Call(_) => true,
-            MastNode::Block(_) | MastNode::Dyn(_) | MastNode::External(_) => false,
-        }
-    }
-
-    /// Appends the NodeIds of the children of this node, if any, to the vector.
-    pub fn append_children_to(&self, target: &mut Vec<MastNodeId>) {
-        match &self {
-            MastNode::Join(join_node) => {
-                target.push(join_node.first());
-                target.push(join_node.second())
-            },
-            MastNode::Split(split_node) => {
-                target.push(split_node.on_true());
-                target.push(split_node.on_false())
-            },
-            MastNode::Loop(loop_node) => target.push(loop_node.body()),
-            MastNode::Call(call_node) => target.push(call_node.callee()),
-            MastNode::Block(_) | MastNode::Dyn(_) | MastNode::External(_) => (),
-        }
-    }
-
-    pub fn domain(&self) -> Felt {
-        match self {
-            MastNode::Block(_) => BasicBlockNode::DOMAIN,
-            MastNode::Join(_) => JoinNode::DOMAIN,
-            MastNode::Split(_) => SplitNode::DOMAIN,
-            MastNode::Loop(_) => LoopNode::DOMAIN,
-            MastNode::Call(call_node) => call_node.domain(),
-            MastNode::Dyn(dyn_node) => dyn_node.domain(),
-            MastNode::External(_) => panic!("Can't fetch domain for an `External` node."),
-        }
-    }
-}
-
-// PRETTY PRINTING
-// ================================================================================================
-
-struct MastNodePrettyPrint<'a> {
-    node_pretty_print: Box<dyn PrettyPrint + 'a>,
-}
-
-impl<'a> MastNodePrettyPrint<'a> {
-    pub fn new(node_pretty_print: Box<dyn PrettyPrint + 'a>) -> Self {
-        Self { node_pretty_print }
-    }
-}
-
-impl PrettyPrint for MastNodePrettyPrint<'_> {
-    fn render(&self) -> Document {
-        self.node_pretty_print.render()
-    }
-}
-
-struct MastNodeDisplay<'a> {
-    node_display: Box<dyn fmt::Display + 'a>,
-}
-
-impl<'a> MastNodeDisplay<'a> {
-    pub fn new(node: impl fmt::Display + 'a) -> Self {
-        Self { node_display: Box::new(node) }
-    }
-}
-
-impl fmt::Display for MastNodeDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.node_display.fmt(f)
     }
 }
 

@@ -7,7 +7,7 @@ use miden_formatting::prettier::{Document, PrettyPrint, const_text, nl};
 use super::{MastNodeExt, MastNodeTrait};
 use crate::{
     OPCODE_DYN, OPCODE_DYNCALL,
-    mast::{DecoratorId, MastForest},
+    mast::{DecoratorId, MastForest, MastNodeId, Remapping},
 };
 
 // DYN NODE
@@ -62,45 +62,6 @@ impl DynNode {
         } else {
             Self::DYN_DOMAIN
         }
-    }
-
-    /// Returns a commitment to a Dyn node.
-    ///
-    /// The commitment is computed by hashing two empty words ([ZERO; 4]) in the domain defined
-    /// by [Self::DYN_DOMAIN] or [Self::DYNCALL_DOMAIN], i.e.:
-    ///
-    /// ```
-    /// # use miden_core::mast::DynNode;
-    /// # use miden_crypto::{Word, hash::rpo::Rpo256 as Hasher};
-    /// Hasher::merge_in_domain(&[Word::default(), Word::default()], DynNode::DYN_DOMAIN);
-    /// Hasher::merge_in_domain(&[Word::default(), Word::default()], DynNode::DYNCALL_DOMAIN);
-    /// ```
-    pub fn digest(&self) -> Word {
-        if self.is_dyncall {
-            Word::new([
-                Felt::new(8751004906421739448),
-                Felt::new(13469709002495534233),
-                Felt::new(12584249374630430826),
-                Felt::new(7624899870831503004),
-            ])
-        } else {
-            Word::new([
-                Felt::new(8115106948140260551),
-                Felt::new(13491227816952616836),
-                Felt::new(15015806788322198710),
-                Felt::new(16575543461540527115),
-            ])
-        }
-    }
-
-    /// Returns the decorators to be executed before this node is executed.
-    pub fn before_enter(&self) -> &[DecoratorId] {
-        &self.before_enter
-    }
-
-    /// Returns the decorators to be executed after this node is executed.
-    pub fn after_exit(&self) -> &[DecoratorId] {
-        &self.after_exit
     }
 }
 
@@ -218,16 +179,43 @@ impl fmt::Display for DynNodePrettyPrint<'_> {
 // ================================================================================================
 
 impl MastNodeTrait for DynNode {
+    /// Returns a commitment to a Dyn node.
+    ///
+    /// The commitment is computed by hashing two empty words ([ZERO; 4]) in the domain defined
+    /// by [Self::DYN_DOMAIN] or [Self::DYNCALL_DOMAIN], i.e.:
+    ///
+    /// ```
+    /// # use miden_core::mast::DynNode;
+    /// # use miden_crypto::{Word, hash::rpo::Rpo256 as Hasher};
+    /// Hasher::merge_in_domain(&[Word::default(), Word::default()], DynNode::DYN_DOMAIN);
+    /// Hasher::merge_in_domain(&[Word::default(), Word::default()], DynNode::DYNCALL_DOMAIN);
+    /// ```
     fn digest(&self) -> Word {
-        self.digest()
+        if self.is_dyncall {
+            Word::new([
+                Felt::new(8751004906421739448),
+                Felt::new(13469709002495534233),
+                Felt::new(12584249374630430826),
+                Felt::new(7624899870831503004),
+            ])
+        } else {
+            Word::new([
+                Felt::new(8115106948140260551),
+                Felt::new(13491227816952616836),
+                Felt::new(15015806788322198710),
+                Felt::new(16575543461540527115),
+            ])
+        }
     }
 
+    /// Returns the decorators to be executed before this node is executed.
     fn before_enter(&self) -> &[DecoratorId] {
-        self.before_enter()
+        &self.before_enter
     }
 
+    /// Returns the decorators to be executed after this node is executed.
     fn after_exit(&self) -> &[DecoratorId] {
-        self.after_exit()
+        &self.after_exit
     }
 
     fn append_before_enter(&mut self, decorator_ids: &[DecoratorId]) {
@@ -248,6 +236,22 @@ impl MastNodeTrait for DynNode {
 
     fn to_pretty_print<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn PrettyPrint + 'a> {
         Box::new(DynNode::to_pretty_print(self, mast_forest))
+    }
+
+    fn remap_children(&self, _remapping: &Remapping) -> Self {
+        self.clone()
+    }
+
+    fn has_children(&self) -> bool {
+        false
+    }
+
+    fn append_children_to(&self, _target: &mut Vec<MastNodeId>) {
+        // No children for dyn nodes
+    }
+
+    fn domain(&self) -> Felt {
+        self.domain()
     }
 }
 

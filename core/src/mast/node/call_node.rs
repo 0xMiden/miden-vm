@@ -296,16 +296,36 @@ impl fmt::Display for CallNodePrettyPrint<'_> {
 // ================================================================================================
 
 impl MastNodeTrait for CallNode {
+    /// Returns a commitment to this Call node.
+    ///
+    /// The commitment is computed as a hash of the callee and an empty word ([ZERO; 4]) in the
+    /// domain defined by either [Self::CALL_DOMAIN] or [Self::SYSCALL_DOMAIN], depending on
+    /// whether the node represents a simple call or a syscall - i.e.,:
+    /// ```
+    /// # use miden_core::mast::CallNode;
+    /// # use miden_crypto::{Word, hash::rpo::Rpo256 as Hasher};
+    /// # let callee_digest = Word::default();
+    /// Hasher::merge_in_domain(&[callee_digest, Word::default()], CallNode::CALL_DOMAIN);
+    /// ```
+    /// or
+    /// ```
+    /// # use miden_core::mast::CallNode;
+    /// # use miden_crypto::{Word, hash::rpo::Rpo256 as Hasher};
+    /// # let callee_digest = Word::default();
+    /// Hasher::merge_in_domain(&[callee_digest, Word::default()], CallNode::SYSCALL_DOMAIN);
+    /// ```
     fn digest(&self) -> Word {
-        self.digest()
+        self.digest
     }
 
+    /// Returns the decorators to be executed before this node is executed.
     fn before_enter(&self) -> &[DecoratorId] {
-        self.before_enter()
+        &self.before_enter
     }
 
+    /// Returns the decorators to be executed after this node is executed.
     fn after_exit(&self) -> &[DecoratorId] {
-        self.after_exit()
+        &self.after_exit
     }
 
     fn append_before_enter(&mut self, decorator_ids: &[DecoratorId]) {
@@ -326,5 +346,23 @@ impl MastNodeTrait for CallNode {
 
     fn to_pretty_print<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn PrettyPrint + 'a> {
         Box::new(CallNode::to_pretty_print(self, mast_forest))
+    }
+
+    fn remap_children(&self, remapping: &Remapping) -> Self {
+        let mut node = self.clone();
+        node.callee = node.callee.remap(remapping);
+        node
+    }
+
+    fn has_children(&self) -> bool {
+        true
+    }
+
+    fn append_children_to(&self, target: &mut Vec<MastNodeId>) {
+        target.push(self.callee());
+    }
+
+    fn domain(&self) -> Felt {
+        self.domain()
     }
 }

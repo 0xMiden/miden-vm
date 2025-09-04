@@ -227,16 +227,29 @@ impl fmt::Display for JoinNodePrettyPrint<'_> {
 // ================================================================================================
 
 impl MastNodeTrait for JoinNode {
+    /// Returns a commitment to this Join node.
+    ///
+    /// The commitment is computed as a hash of the `first` and `second` child node in the domain
+    /// defined by [Self::DOMAIN] - i.e.,:
+    /// ```
+    /// # use miden_core::mast::JoinNode;
+    /// # use miden_crypto::{Word, hash::rpo::Rpo256 as Hasher};
+    /// # let first_child_digest = Word::default();
+    /// # let second_child_digest = Word::default();
+    /// Hasher::merge_in_domain(&[first_child_digest, second_child_digest], JoinNode::DOMAIN);
+    /// ```
     fn digest(&self) -> Word {
-        self.digest()
+        self.digest
     }
 
+    /// Returns the decorators to be executed before this node is executed.
     fn before_enter(&self) -> &[DecoratorId] {
-        self.before_enter()
+        &self.before_enter
     }
 
+    /// Returns the decorators to be executed after this node is executed.
     fn after_exit(&self) -> &[DecoratorId] {
-        self.after_exit()
+        &self.after_exit
     }
 
     fn append_before_enter(&mut self, decorator_ids: &[DecoratorId]) {
@@ -257,5 +270,25 @@ impl MastNodeTrait for JoinNode {
 
     fn to_pretty_print<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn PrettyPrint + 'a> {
         Box::new(JoinNode::to_pretty_print(self, mast_forest))
+    }
+
+    fn remap_children(&self, remapping: &Remapping) -> Self {
+        let mut node = self.clone();
+        node.children[0] = node.children[0].remap(remapping);
+        node.children[1] = node.children[1].remap(remapping);
+        node
+    }
+
+    fn has_children(&self) -> bool {
+        true
+    }
+
+    fn append_children_to(&self, target: &mut Vec<MastNodeId>) {
+        target.push(self.first());
+        target.push(self.second());
+    }
+
+    fn domain(&self) -> Felt {
+        Self::DOMAIN
     }
 }

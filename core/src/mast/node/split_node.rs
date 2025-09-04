@@ -253,4 +253,24 @@ impl MastNodeTrait for SplitNode {
     fn to_pretty_print<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn PrettyPrint + 'a> {
         Box::new(SplitNode::to_pretty_print(self, mast_forest))
     }
+
+    fn remap_children(&self, remapping: &Remapping) -> Self {
+        let mut node = self.clone();
+        node.branches[0] = node.branches[0].remap(remapping);
+        node.branches[1] = node.branches[1].remap(remapping);
+        node
+    }
+
+    fn has_children(&self) -> bool {
+        true
+    }
+
+    fn append_children_to(&self, target: &mut Vec<MastNodeId>) {
+        target.push(self.on_true());
+        target.push(self.on_false());
+    }
+
+    fn domain(&self) -> Felt {
+        Self::DOMAIN
+    }
 }
