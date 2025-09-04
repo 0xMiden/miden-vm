@@ -306,6 +306,12 @@ pub enum ParsingError {
         span: SourceSpan,
         range: Range<usize>,
     },
+    #[error("unrecognized calling convention")]
+    #[diagnostic(help("expected one of: 'fast', 'C', 'wasm', 'canon-lift', or 'canon-lower'"))]
+    UnrecognizedCallConv {
+        #[label]
+        span: SourceSpan,
+    },
 }
 
 impl ParsingError {

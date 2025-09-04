@@ -11,6 +11,7 @@
 - Reinstate the build of the stdlib's documentation ([#1432](https://github.com/0xmiden/miden-vm/issues/1432)).
 - Added `FastProcessor::execute_for_trace()`, which outputs a series of checkpoints necessary to build the trace in parallel ([#2023](https://github.com/0xMiden/miden-vm/pull/2023))
 - Introduce `Tracer` trait to allow different ways of tracing program execution, including no tracing ([#2101](https://github.com/0xMiden/miden-vm/pull/2101))
++- Introduce syntax for expressing type information in MASM ([#2120](https://github.com/0xMiden/miden-vm/pull/2120))
 
 #### Changes
 
@@ -25,6 +26,9 @@
 - [BREAKING] `get_stack_word` uses element-aligned indexing instead of word-aligned indexing (#[2068](https://github.com/0xMiden/miden-vm/issues/2068)).
 - [BREAKING] Implement support for `event("event_name")` in MASM (#[2068](https://github.com/0xMiden/miden-vm/issues/2068)).
 - Improved representation of `OPbatches` to include padding Noop by default, simplifying fast iteration over program instructions in the processor ([#1815](https://github.com/0xMiden/miden-vm/issues/1815)).
+- Support references between constants without requiring them to be declared in a specific order ([#2120](https://github.com/0xMiden/miden-vm/pull/2120))
+- Introduce new `pub fn` and `fn` syntax for procedure declarations to replace `export` and `proc` syntax. This change is backwards-compatible. ([#2120](https://github.com/0xMiden/miden-vm/pull/2120))
+- [BREAKING] Reject the use of word literals in conjunction with dot-delimited `push` syntax ([#2120](https://github.com/0xMiden/miden-vm/pull/2120))
 
 ## 0.17.1 (2025-08-29)
 
