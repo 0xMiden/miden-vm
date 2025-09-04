@@ -30,8 +30,8 @@ mod constants {
     pub const EVENT_HQWORD_TO_MAP: u32                = 2913039991;
     pub const EVENT_HPERM_TO_MAP: u32                 = 3297060969;
     pub const EVENT_FALCON_DIV: u32                   = 3419226155;
-    pub const EVENT_LOWER_BOUND_W: u32                = 3453664521;
-    pub const EVENT_LOWER_BOUND_DW: u32               = 3466243107;
+    pub const EVENT_ARRAY_LOWER_BOUND: u32            = 3453664521;
+    pub const EVENT_MAP_LOWER_BOUND: u32              = 3466243107;
 }
 
 /// Defines a set of actions which can be initiated from the VM to inject new data into the advice
@@ -184,7 +184,7 @@ pub enum SystemEvent {
     SmtPeek,
 
     /// Pushes onto the advice stack the first memory pointer in the range [start_ptr, end_ptr)
-    /// such that the word at that pointer is greater than or equal to the specified key `K`.
+    /// such that the word at that pointer is greater than or equal to the specified key `KEY`.
     /// The memory range is assumed to be sorted lexicographically by word.
     ///
     /// Inputs:
@@ -197,16 +197,15 @@ pub enum SystemEvent {
     ArrayLowerBound,
 
     /// Pushes onto the advice stack the first memory pointer in the range [start_ptr, end_ptr)
-    /// such that the double-word (two consecutive words) at that pointer is greater than or equal
-    /// to the specified key `K = [K0, K1]` (two words). The memory range is assumed to be sorted
-    /// lexicographically by double-words.
+    /// such that the word at that pointer is greater than or equal to the specified key `KEY`.
+    /// The memory range is assumed to be a sorted array of (key, value) word pairs.
     ///
     /// Inputs:
-    ///   Operand stack: [K0, K1, start_ptr, end_ptr, ...]
+    ///   Operand stack: [KEY, start_ptr, end_ptr, ...]
     ///   Advice stack: [...]
     ///
     /// Outputs:
-    ///   Operand stack: [K0, K1, start_ptr, end_ptr, ...]
+    ///   Operand stack: [KEY, start_ptr, end_ptr, ...]
     ///   Advice stack: [key_ptr, ...]
     MapLowerBound,
 
@@ -363,8 +362,8 @@ impl SystemEvent {
             SystemEvent::HdwordToMapWithDomain => EVENT_HDWORD_TO_MAP_WITH_DOMAIN,
             SystemEvent::HqwordToMap => EVENT_HQWORD_TO_MAP,
             SystemEvent::HpermToMap => EVENT_HPERM_TO_MAP,
-            SystemEvent::ArrayLowerBound => EVENT_LOWER_BOUND_W,
-            SystemEvent::MapLowerBound => EVENT_LOWER_BOUND_DW,
+            SystemEvent::ArrayLowerBound => EVENT_ARRAY_LOWER_BOUND,
+            SystemEvent::MapLowerBound => EVENT_MAP_LOWER_BOUND,
         }
     }
 
@@ -392,8 +391,8 @@ impl SystemEvent {
             EVENT_HDWORD_TO_MAP_WITH_DOMAIN => Some(SystemEvent::HdwordToMapWithDomain),
             EVENT_HQWORD_TO_MAP => Some(SystemEvent::HqwordToMap),
             EVENT_HPERM_TO_MAP => Some(SystemEvent::HpermToMap),
-            EVENT_LOWER_BOUND_W => Some(SystemEvent::ArrayLowerBound),
-            EVENT_LOWER_BOUND_DW => Some(SystemEvent::MapLowerBound),
+            EVENT_ARRAY_LOWER_BOUND => Some(SystemEvent::ArrayLowerBound),
+            EVENT_MAP_LOWER_BOUND => Some(SystemEvent::MapLowerBound),
             _ => None,
         }
     }
