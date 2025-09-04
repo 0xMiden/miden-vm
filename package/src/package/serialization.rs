@@ -34,7 +34,13 @@
 //!       - `name` (`String`)
 //!       - `digest` (`Word`)
 
-use alloc::{collections::BTreeMap, format, string::String, sync::Arc, vec::Vec};
+use alloc::{
+    collections::BTreeMap,
+    format,
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
+};
 
 use miden_assembly_syntax::{
     Library,
@@ -77,6 +83,12 @@ impl Serializable for Package {
         // Write package name
         self.name.write_into(target);
 
+        // Write package version
+        self.version.as_ref().map(|v| v.to_string()).write_into(target);
+
+        // Write package description
+        self.description.write_into(target);
+
         // Write MAST artifact
         self.mast.write_into(target);
 
@@ -111,6 +123,19 @@ impl Deserializable for Package {
         // Read package name
         let name = String::read_from(source)?;
 
+        // Read package version
+        let version = Option::<String>::read_from(source)?;
+        let version = match version {
+            Some(version) => Some(
+                crate::Version::parse(&version)
+                    .map_err(|err| DeserializationError::InvalidValue(err.to_string()))?,
+            ),
+            None => None,
+        };
+
+        // Read package description
+        let description = Option::<String>::read_from(source)?;
+
         // Read MAST artifact
         let mast = MastArtifact::read_from(source)?;
 
@@ -125,7 +150,14 @@ impl Deserializable for Package {
             sections.push(section);
         }
 
-        Ok(Self { name, mast, manifest, sections })
+        Ok(Self {
+            name,
+            version,
+            description,
+            mast,
+            manifest,
+            sections,
+        })
     }
 }
 

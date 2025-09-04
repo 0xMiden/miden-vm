@@ -26,5 +26,8 @@ pub use self::{
             ResolvedDependency,
         },
     },
-    package::{InvalidSectionIdError, Package, PackageExport, PackageManifest, Section, SectionId},
+    package::{
+        InvalidSectionIdError, Package, PackageExport, PackageManifest, Section, SectionId,
+        Version, VersionError,
+    },
 };

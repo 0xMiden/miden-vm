@@ -5,6 +5,7 @@ mod serialization;
 use alloc::{format, string::String, sync::Arc, vec::Vec};
 
 use miden_assembly_syntax::{Library, Report, ast::QualifiedProcedureName};
+pub use miden_assembly_syntax::{Version, VersionError};
 use miden_core::{Program, Word};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -24,6 +25,12 @@ use crate::MastArtifact;
 pub struct Package {
     /// Name of the package
     pub name: String,
+    /// An optional semantic version for the package
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub version: Option<Version>,
+    /// An optional description of the package
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub description: Option<String>,
     /// The MAST artifact ([Program] or [Library]) of the package
     pub mast: MastArtifact,
     /// The package manifest, containing the set of exported procedures and their signatures,
@@ -98,6 +105,8 @@ impl Package {
 
             Ok(Self {
                 name: self.name.clone(),
+                version: self.version.clone(),
+                description: self.description.clone(),
                 mast: MastArtifact::Executable(Arc::new(Program::new(
                     library.mast_forest().clone(),
                     node_id,
