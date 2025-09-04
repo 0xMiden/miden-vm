@@ -17,7 +17,7 @@ export.find_word
         #=> [is_key_found = 0, key_ptr = end_ptr, start_ptr, end_ptr]
     else
         # call lowerboundw (4 cycles)
-        adv.push_lowerboundw
+        adv.push_array_lowerbound
         adv_push.1
         #=> [maybe_key_ptr, KEY, start_ptr, end_ptr]  @59 cycles
 
@@ -42,7 +42,7 @@ export.find_word
                 #=> [DEREF, KEY, maybe_key_ptr, start_ptr, end_ptr]
 
                 exec.word::lt
-                assert.err="push_lowerboundw unexpected value"
+                assert.err="push_array_lowerbound unexpected value"
                 push.0
             end
         else
@@ -53,7 +53,7 @@ export.find_word
                 #=> [LAST_WORD, KEY, maybe_key_ptr, start_ptr, end_ptr]
 
                 exec.word::gt
-                assert.err="push_lowerboundw unexpected value"
+                assert.err="push_array_lowerbound unexpected value"
                 push.0
 
                 # load the previous value (8 cycles)
@@ -81,13 +81,13 @@ export.find_word
                     #=> [DEREF, KEY, maybe_key_ptr, start_ptr, end_ptr]
 
                     dupw.1 exec.word::gt
-                    assert.err="push_lowerboundw unexpected value"
+                    assert.err="push_array_lowerbound unexpected value"
 
                     # load the previous word
                     dup.4 sub.4 padw movup.4 mem_loadw
 
                     exec.word::gt
-                    assert.err="push_lowerboundw unexpected value"
+                    assert.err="push_array_lowerbound unexpected value"
 
                     push.0
                 end

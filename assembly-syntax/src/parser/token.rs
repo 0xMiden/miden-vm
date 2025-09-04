@@ -205,8 +205,8 @@ pub enum Token<'input> {
     PushMapvaln,
     PushMtnode,
     PushSmtpeek,
-    PushLowerBoundW,
-    PushLowerBoundDW,
+    PushArrayLowerBound,
+    PushMapLowerBound,
     PushSmtset,
     PushSmtget,
     PushU64Div,
@@ -400,8 +400,8 @@ impl fmt::Display for Token<'_> {
             Token::PushMapvaln => write!(f, "push_mapvaln"),
             Token::PushMtnode => write!(f, "push_mtnode"),
             Token::PushSmtpeek => write!(f, "push_smtpeek"),
-            Token::PushLowerBoundW => write!(f, "push_lowerboundw"),
-            Token::PushLowerBoundDW => write!(f, "push_lowerbounddw"),
+            Token::PushArrayLowerBound => write!(f, "push_array_lowerbound"),
+            Token::PushMapLowerBound => write!(f, "push_map_lowerbound"),
             Token::PushSmtset => write!(f, "push_smtset"),
             Token::PushSmtget => write!(f, "push_smtget"),
             Token::PushU64Div => write!(f, "push_u64div"),
@@ -602,8 +602,8 @@ impl<'input> Token<'input> {
                 | Token::PushMapvaln
                 | Token::PushMtnode
                 | Token::PushSmtpeek
-                | Token::PushLowerBoundW
-                | Token::PushLowerBoundDW
+                | Token::PushArrayLowerBound
+                | Token::PushMapLowerBound
                 | Token::PushSmtset
                 | Token::PushSmtget
                 | Token::PushU64Div
@@ -755,8 +755,8 @@ impl<'input> Token<'input> {
         ("push_mapvaln", Token::PushMapvaln),
         ("push_mtnode", Token::PushMtnode),
         ("push_smtpeek", Token::PushSmtpeek),
-        ("push_lowerboundw", Token::PushLowerBoundW),
-        ("push_lowerbounddw", Token::PushLowerBoundDW),
+        ("push_array_lowerbound", Token::PushArrayLowerBound),
+        ("push_map_lowerbound", Token::PushMapLowerBound),
         ("push_smtset", Token::PushSmtset),
         ("push_smtget", Token::PushSmtget),
         ("push_u64div", Token::PushU64Div),

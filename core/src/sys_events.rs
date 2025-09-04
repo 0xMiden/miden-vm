@@ -194,7 +194,7 @@ pub enum SystemEvent {
     /// Outputs:
     ///   Operand stack: [KEY, start_ptr, end_ptr, ...]
     ///   Advice stack: [key_ptr, ...]
-    LowerBoundW,
+    ArrayLowerBound,
 
     /// Pushes onto the advice stack the first memory pointer in the range [start_ptr, end_ptr)
     /// such that the double-word (two consecutive words) at that pointer is greater than or equal
@@ -208,7 +208,7 @@ pub enum SystemEvent {
     /// Outputs:
     ///   Operand stack: [K0, K1, start_ptr, end_ptr, ...]
     ///   Advice stack: [key_ptr, ...]
-    LowerBoundDW,
+    MapLowerBound,
 
     /// Pushes the number of the leading zeros of the top stack element onto the advice stack.
     ///
@@ -363,8 +363,8 @@ impl SystemEvent {
             SystemEvent::HdwordToMapWithDomain => EVENT_HDWORD_TO_MAP_WITH_DOMAIN,
             SystemEvent::HqwordToMap => EVENT_HQWORD_TO_MAP,
             SystemEvent::HpermToMap => EVENT_HPERM_TO_MAP,
-            SystemEvent::LowerBoundW => EVENT_LOWER_BOUND_W,
-            SystemEvent::LowerBoundDW => EVENT_LOWER_BOUND_DW,
+            SystemEvent::ArrayLowerBound => EVENT_LOWER_BOUND_W,
+            SystemEvent::MapLowerBound => EVENT_LOWER_BOUND_DW,
         }
     }
 
@@ -392,8 +392,8 @@ impl SystemEvent {
             EVENT_HDWORD_TO_MAP_WITH_DOMAIN => Some(SystemEvent::HdwordToMapWithDomain),
             EVENT_HQWORD_TO_MAP => Some(SystemEvent::HqwordToMap),
             EVENT_HPERM_TO_MAP => Some(SystemEvent::HpermToMap),
-            EVENT_LOWER_BOUND_W => Some(SystemEvent::LowerBoundW),
-            EVENT_LOWER_BOUND_DW => Some(SystemEvent::LowerBoundDW),
+            EVENT_LOWER_BOUND_W => Some(SystemEvent::ArrayLowerBound),
+            EVENT_LOWER_BOUND_DW => Some(SystemEvent::MapLowerBound),
             _ => None,
         }
     }
@@ -427,8 +427,8 @@ impl fmt::Display for SystemEvent {
             Self::HdwordToMapWithDomain => write!(f, "hdword_to_map_with_domain"),
             Self::HqwordToMap => write!(f, "hqword_to_map"),
             Self::HpermToMap => write!(f, "hperm_to_map"),
-            Self::LowerBoundW => write!(f, "lower_bound_w"),
-            Self::LowerBoundDW => write!(f, "lower_bound_dw"),
+            Self::ArrayLowerBound => write!(f, "lower_bound_w"),
+            Self::MapLowerBound => write!(f, "lower_bound_dw"),
         }
     }
 }
