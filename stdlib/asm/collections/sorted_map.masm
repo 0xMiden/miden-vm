@@ -15,7 +15,7 @@ export.find_key
         dropw dup push.0
         #=> [is_key_found = 0, key_ptr = end_ptr, start_ptr, end_ptr]
     else
-        # call lowerboundw (4 cycles)
+        # call map_lowerbound to get a pointer to KEY (4 cycles)
         adv.push_map_lowerbound
         adv_push.1
         #=> [maybe_key_ptr, KEY, start_ptr, end_ptr]  @59 cycles
@@ -23,7 +23,7 @@ export.find_key
         # check if pointing to start_ptr (3 cycles)
         dup dup.6 eq
         if.true
-            # load the underlaying value (8 cycles)
+            # dereference maybe_key_ptr (8 cycles)
             dup movdn.5 padw movup.4 mem_loadw
             #=> [MAYBE_KEY, KEY, maybe_key_ptr, start_ptr, end_ptr]
 
@@ -36,36 +36,38 @@ export.find_key
                 dropw push.1
                 #=> [is_key_found = 1, key_ptr, start_ptr, end_ptr]
             else
-                # load the underlaying value (8 cycles)
+                # dereference maybe_key_ptr (8 cycles)
                 dup.4 padw movup.4 mem_loadw
                 #=> [DEREF, KEY, maybe_key_ptr, start_ptr, end_ptr]
 
+                # there was no match, the first array element must be larger than KEY
                 exec.word::lt
-                assert.err="push_array_lowerbound unexpected value"
+                assert.err="push_array_lowerbound invariant: start_ptr not greater than KEY"
+                
                 push.0
             end
         else
             # check if pointing to end_ptr (3 cycles)
             dup dup.7 eq
             if.true
+                # fetch the last key in the map (exists, map not empty)
                 dup movdn.5 sub.4 padw movup.4 mem_loadw
                 #=> [LAST_WORD, KEY, maybe_key_ptr, start_ptr, end_ptr]
 
+                # there was no match, the last map key must be smaller than KEY
                 exec.word::gt
-                assert.err="push_array_lowerbound unexpected value"
-                push.0
+                assert.err="push_array_lowerbound invariant: last element not smaller than KEY"
 
-                # load the previous value (8 cycles)
-                # dup sub.4 movdn.5 padw movup.4 mem_loadw
-                #=> [MAYBE_KEY, KEY, maybe_key_ptr, start_ptr, end_ptr]
+                push.0
             else
+                # make sure maybe_str_ptr within array bounds
                 dup dup.6 u32gt assert.err="maybe_key_ptr < start_ptr"
                 dup dup.7 u32lt assert.err="maybe_key_ptr > end_ptr"
 
-                # check alignment for double-word scenarios
+                # make sure maybe_str_ptr is pointing to a key, not value
                 dup dup.6 sub u32mod.8 assertz.err="key_ptr must be double-word aligned with start_ptr"
                 
-                # load the underlaying value (8 cycles)
+                # dereference maybe_key_ptr (8 cycles)
                 dup movdn.5 padw movup.4 mem_loadw
                 #=> [MAYBE_KEY, KEY, maybe_key_ptr, start_ptr, end_ptr]
 
@@ -78,18 +80,18 @@ export.find_key
                     dropw push.1
                     #=> [is_key_found = 1, key_ptr, start_ptr, end_ptr]
                 else
-                    # load the underlaying value (8 cycles)
+                    # dereference maybe_key_ptr (8 cycles)
                     dup.4 padw movup.4 mem_loadw
                     #=> [DEREF, KEY, maybe_key_ptr, start_ptr, end_ptr]
 
+                    # there was no match, the dereferenced key must be larger than KEY
                     dupw.1 exec.word::gt
-                    assert.err="push_array_lowerbound unexpected value"
+                    assert.err="push_array_lowerbound invariant: *ptr not larger than KEY"
 
-                    # load the previous word
+                    # there was no match, the previous key must be smaller than KEY
                     dup.4 sub.8 padw movup.4 mem_loadw
-
                     exec.word::gt
-                    assert.err="push_array_lowerbound unexpected value"
+                    assert.err="push_array_lowerbound invariant: previous not smaller than KEY"
 
                     push.0
                 end

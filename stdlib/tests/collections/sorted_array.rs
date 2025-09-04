@@ -20,7 +20,5 @@ fn test_array_find_sorted_word() {
         end
     ");
     let test = build_test!(source, &[]);
-    let result = test.get_last_stack_state().as_int_vec();
-    std::println!("result: {:?}", result);
-    //test.expect_stack(&[0, 0, 0, 0, 0, 0, 0]);
+    test.expect_stack(&[1, 104, 100, 112, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
 }

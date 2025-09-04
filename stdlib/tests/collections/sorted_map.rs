@@ -18,7 +18,7 @@ fn test_array_find_sorted_word() {
             push.6.6.6.6 mem_storew.116 dropw
             push.1.1.1.1 mem_storew.120 dropw
 
-            push.124 push.100 push.[3,3,3,3]
+            push.124 push.100 push.[4,4,4,4]
 
             exec.sorted_map::find_key
             exec.truncate_stack
@@ -26,7 +26,5 @@ fn test_array_find_sorted_word() {
     ");
 
     let test = build_test!(source, &[]);
-    let result = test.get_last_stack_state().as_int_vec();
-    std::println!("result: {:?}", result);
-    //test.expect_stack(&[0, 0, 0, 0, 0, 0, 0]);
+    test.expect_stack(&[1, 108, 100, 124, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
 }
