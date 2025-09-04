@@ -235,6 +235,7 @@ fn test_pipe_preimage_to_memory_invalid_preimage() {
     let res = build_test!(three_words, operand_stack, &advice_stack).execute();
     assert!(res.is_err());
 }
+
 #[test]
 fn test_pipe_double_words_preimage_to_memory() {
     let mem_addr = 1000;
@@ -256,7 +257,7 @@ fn test_pipe_double_words_preimage_to_memory() {
     let mut advice_stack = felt_slice_to_ints(&build_expected_hash(data));
     advice_stack.reverse();
     advice_stack.extend(data);
-    build_debug_test!(four_words, operand_stack, &advice_stack).expect_stack_and_memory(
+    build_test!(four_words, operand_stack, &advice_stack).expect_stack_and_memory(
         &[mem_addr + (4u64 * 4u64)],
         mem_addr as u32,
         data,
@@ -283,7 +284,7 @@ fn test_pipe_double_words_preimage_to_memory_invalid_preimage() {
     advice_stack.reverse();
     advice_stack[0] += 1; // corrupt the expected hash
     advice_stack.extend(data);
-    let execution_result = build_debug_test!(four_words, operand_stack, &advice_stack).execute();
+    let execution_result = build_test!(four_words, operand_stack, &advice_stack).execute();
     assert_matches!(execution_result, Err(ExecutionError::FailedAssertion { .. }));
 }
 
@@ -306,7 +307,7 @@ fn test_pipe_double_words_preimage_to_memory_invalid_count() {
     let mut advice_stack = felt_slice_to_ints(&build_expected_hash(data));
     advice_stack.reverse();
     advice_stack.extend(data);
-    let execution_result = build_debug_test!(three_words, operand_stack, &advice_stack).execute();
+    let execution_result = build_test!(three_words, operand_stack, &advice_stack).execute();
     assert_matches!(execution_result, Err(ExecutionError::FailedAssertion { .. }));
 }
 
