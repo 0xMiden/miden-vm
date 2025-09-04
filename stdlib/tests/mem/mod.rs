@@ -310,4 +310,3 @@ fn test_pipe_double_words_preimage_to_memory_invalid_count() {
     let execution_result = build_test!(three_words, operand_stack, &advice_stack).execute();
     assert_matches!(execution_result, Err(ExecutionError::FailedAssertion { .. }));
 }
-

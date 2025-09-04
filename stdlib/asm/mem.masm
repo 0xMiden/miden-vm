@@ -215,4 +215,3 @@ export.pipe_double_words_preimage_to_memory
 
   assert_eqw.err="pipe_double_words_preimage_to_memory: COM does not match"
 end
-
