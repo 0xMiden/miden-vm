@@ -179,3 +179,40 @@ export.pipe_preimage_to_memory.0
   assert_eqw
   # => [write_ptr', ...]
 end
+
+#! Moves an even number of words from the advice stack to memory and asserts it matches the commitment.
+#!
+#! Input: [num_words, write_ptr, COM, ...]
+#! Output: [write_ptr', ...]
+# Possible other name: pipe_pairs_preimage_to_memory
+export.pipe_double_words_preimage_to_memory
+  # => [num_words, write_ptr, COM, ...]
+  dup is_odd assertz.err="pipe_double_words_preimage_to_memory: num_words must be even"
+
+  # => [num_words, write_ptr, COM, ...]
+
+  # Compute end_ptr
+  mul.4
+  # => [num_fields, write_ptr, COM, ...]
+  dup.1 add
+  # => [end_ptr, write_ptr, COM, ...]
+  swap
+  # => [write_ptr, end_ptr, COM, ...]
+
+  # Setup the initial hasher state, which starts with a capacity word `A`.
+  # For us, the capacity word is entirely empty.
+  padw padw padw
+  # => [C, B, A, write_ptr, end_ptr, COM, ...]
+
+  exec.pipe_double_words_to_memory
+  # => [C, B, A, write_ptr', COM, ...]
+
+  exec.rpo::squeeze_digest
+  # => [B, write_ptr', COM, ...]
+
+  # Move write_ptr out of the way so we can assert the commitment.
+  movup.4 movdn.8
+
+  assert_eqw.err="pipe_double_words_preimage_to_memory: COM does not match"
+end
+
