@@ -376,8 +376,6 @@ end
 #!   Advice stack:  [V1, K2, V2, K2, ...]
 proc.get_multi_leaf_value.8
 
-    # => [leaf_size, NV, K, R]
-
     div.4
     # => [num_words, NV, K, R]
 
@@ -395,8 +393,7 @@ proc.get_multi_leaf_value.8
     loc_load.4
     # => [num_words, ptr, COM, K, R]
 
-    # XXX: replace with a procedure optimized for word-pairs
-    exec.mem::pipe_preimage_to_memory
+    exec.mem::pipe_double_words_preimage_to_memory
     # => [ptr_end, K, R]
 
     # Consistency check: (ptr_end - ptr) / 4 == num_words
