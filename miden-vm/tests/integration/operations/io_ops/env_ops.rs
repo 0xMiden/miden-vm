@@ -1,6 +1,6 @@
 use miden_core::{
     Operation,
-    mast::{MastForest, MastNode},
+    mast::{MastForest, MastNode, MastNodeTrait},
 };
 use miden_debug_types::{SourceLanguage, SourceManager};
 use miden_processor::FMP_MIN;

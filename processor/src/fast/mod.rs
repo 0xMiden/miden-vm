@@ -5,7 +5,7 @@ use memory::Memory;
 use miden_air::RowIndex;
 use miden_core::{
     Decorator, EMPTY_WORD, Felt, Program, StackOutputs, WORD_SIZE, Word, ZERO,
-    mast::{MastForest, MastNode, MastNodeId},
+    mast::{MastForest, MastNode, MastNodeId, MastNodeTrait},
     stack::MIN_STACK_DEPTH,
     utils::range,
 };

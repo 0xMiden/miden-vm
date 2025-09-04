@@ -1,4 +1,4 @@
-use alloc::vec::Vec;
+use alloc::{boxed::Box, vec::Vec};
 use core::{fmt, mem, ops::Index};
 
 use miden_crypto::{Felt, Word, ZERO};
@@ -14,7 +14,7 @@ mod op_batch;
 pub use op_batch::OpBatch;
 use op_batch::OpBatchAccumulator;
 
-use super::MastNodeExt;
+use super::{MastNodeExt, MastNodeTrait};
 
 #[cfg(test)]
 mod tests;
@@ -288,6 +288,43 @@ impl BasicBlockNode {
         mast_forest: &'a MastForest,
     ) -> impl PrettyPrint + 'a {
         BasicBlockNodePrettyPrint { block_node: self, mast_forest }
+    }
+}
+
+// MAST NODE TRAIT IMPLEMENTATION
+// ================================================================================================
+
+impl MastNodeTrait for BasicBlockNode {
+    fn digest(&self) -> Word {
+        self.digest()
+    }
+
+    fn before_enter(&self) -> &[DecoratorId] {
+        &[]
+    }
+
+    fn after_exit(&self) -> &[DecoratorId] {
+        &[]
+    }
+
+    fn append_before_enter(&mut self, decorator_ids: &[DecoratorId]) {
+        self.prepend_decorators(decorator_ids);
+    }
+
+    fn append_after_exit(&mut self, decorator_ids: &[DecoratorId]) {
+        self.append_decorators(decorator_ids);
+    }
+
+    fn remove_decorators(&mut self) {
+        self.remove_decorators();
+    }
+
+    fn to_display<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn fmt::Display + 'a> {
+        Box::new(BasicBlockNode::to_display(self, mast_forest))
+    }
+
+    fn to_pretty_print<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn PrettyPrint + 'a> {
+        Box::new(BasicBlockNode::to_pretty_print(self, mast_forest))
     }
 }
 

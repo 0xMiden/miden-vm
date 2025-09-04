@@ -1,10 +1,10 @@
-use alloc::vec::Vec;
+use alloc::{boxed::Box, vec::Vec};
 use core::fmt;
 
 use miden_crypto::{Felt, Word};
 use miden_formatting::prettier::PrettyPrint;
 
-use super::MastNodeExt;
+use super::{MastNodeExt, MastNodeTrait};
 use crate::{
     OPCODE_LOOP,
     chiplets::hasher,
@@ -199,5 +199,42 @@ impl fmt::Display for LoopNodePrettyPrint<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use crate::prettier::PrettyPrint;
         self.pretty_print(f)
+    }
+}
+
+// MAST NODE TRAIT IMPLEMENTATION
+// ================================================================================================
+
+impl MastNodeTrait for LoopNode {
+    fn digest(&self) -> Word {
+        self.digest()
+    }
+
+    fn before_enter(&self) -> &[DecoratorId] {
+        self.before_enter()
+    }
+
+    fn after_exit(&self) -> &[DecoratorId] {
+        self.after_exit()
+    }
+
+    fn append_before_enter(&mut self, decorator_ids: &[DecoratorId]) {
+        self.append_before_enter(decorator_ids);
+    }
+
+    fn append_after_exit(&mut self, decorator_ids: &[DecoratorId]) {
+        self.append_after_exit(decorator_ids);
+    }
+
+    fn remove_decorators(&mut self) {
+        self.remove_decorators();
+    }
+
+    fn to_display<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn fmt::Display + 'a> {
+        Box::new(LoopNode::to_display(self, mast_forest))
+    }
+
+    fn to_pretty_print<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn PrettyPrint + 'a> {
+        Box::new(LoopNode::to_pretty_print(self, mast_forest))
     }
 }

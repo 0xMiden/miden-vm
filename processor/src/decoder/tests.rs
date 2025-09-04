@@ -12,7 +12,7 @@ use miden_air::trace::{
 };
 use miden_core::{
     EMPTY_WORD, ONE, Program, WORD_SIZE, ZERO, assert_matches,
-    mast::{BasicBlockNode, MastForest, MastNode, MastNodeId, OP_BATCH_SIZE},
+    mast::{BasicBlockNode, MastForest, MastNode, MastNodeId, MastNodeTrait, OP_BATCH_SIZE},
 };
 use miden_utils_testing::rand::rand_value;
 use rstest::rstest;

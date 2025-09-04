@@ -1,10 +1,10 @@
-use alloc::vec::Vec;
+use alloc::{boxed::Box, vec::Vec};
 use core::fmt;
 
 use miden_crypto::{Felt, Word};
 use miden_formatting::prettier::{Document, PrettyPrint, const_text, nl};
 
-use super::MastNodeExt;
+use super::{MastNodeExt, MastNodeTrait};
 use crate::{
     OPCODE_DYN, OPCODE_DYNCALL,
     mast::{DecoratorId, MastForest},
@@ -214,8 +214,42 @@ impl fmt::Display for DynNodePrettyPrint<'_> {
     }
 }
 
-// TESTS
+// MAST NODE TRAIT IMPLEMENTATION
 // ================================================================================================
+
+impl MastNodeTrait for DynNode {
+    fn digest(&self) -> Word {
+        self.digest()
+    }
+
+    fn before_enter(&self) -> &[DecoratorId] {
+        self.before_enter()
+    }
+
+    fn after_exit(&self) -> &[DecoratorId] {
+        self.after_exit()
+    }
+
+    fn append_before_enter(&mut self, decorator_ids: &[DecoratorId]) {
+        self.append_before_enter(decorator_ids);
+    }
+
+    fn append_after_exit(&mut self, decorator_ids: &[DecoratorId]) {
+        self.append_after_exit(decorator_ids);
+    }
+
+    fn remove_decorators(&mut self) {
+        self.remove_decorators();
+    }
+
+    fn to_display<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn fmt::Display + 'a> {
+        Box::new(DynNode::to_display(self, mast_forest))
+    }
+
+    fn to_pretty_print<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn PrettyPrint + 'a> {
+        Box::new(DynNode::to_pretty_print(self, mast_forest))
+    }
+}
 
 #[cfg(test)]
 mod tests {

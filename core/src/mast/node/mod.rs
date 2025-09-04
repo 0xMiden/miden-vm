@@ -6,6 +6,7 @@ pub use basic_block_node::{
     BATCH_SIZE as OP_BATCH_SIZE, BasicBlockNode, GROUP_SIZE as OP_GROUP_SIZE, OpBatch,
     OperationOrDecorator,
 };
+use enum_dispatch::enum_dispatch;
 
 mod call_node;
 pub use call_node::CallNode;
@@ -33,9 +34,37 @@ use crate::{
     mast::{MastForest, MastNodeId, Remapping},
 };
 
+#[enum_dispatch]
+pub trait MastNodeTrait {
+    /// Returns a commitment/hash of the node.
+    fn digest(&self) -> Word;
+
+    /// Returns the decorators to be executed before this node is executed.
+    fn before_enter(&self) -> &[DecoratorId];
+
+    /// Returns the decorators to be executed after this node is executed.
+    fn after_exit(&self) -> &[DecoratorId];
+
+    /// Sets the list of decorators to be executed before this node.
+    fn append_before_enter(&mut self, decorator_ids: &[DecoratorId]);
+
+    /// Sets the list of decorators to be executed after this node.
+    fn append_after_exit(&mut self, decorator_ids: &[DecoratorId]);
+
+    /// Removes all decorators from this node.
+    fn remove_decorators(&mut self);
+
+    /// Returns a display formatter for this node.
+    fn to_display<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn fmt::Display + 'a>;
+
+    /// Returns a pretty printer for this node.
+    fn to_pretty_print<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn PrettyPrint + 'a>;
+}
+
 // MAST NODE
 // ================================================================================================
 
+#[enum_dispatch(MastNodeTrait)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MastNode {
     Block(BasicBlockNode),
@@ -259,32 +288,6 @@ impl MastNode {
         }
     }
 
-    pub fn to_pretty_print<'a>(&'a self, mast_forest: &'a MastForest) -> impl PrettyPrint + 'a {
-        match self {
-            MastNode::Block(basic_block_node) => {
-                MastNodePrettyPrint::new(Box::new(basic_block_node.to_pretty_print(mast_forest)))
-            },
-            MastNode::Join(join_node) => {
-                MastNodePrettyPrint::new(Box::new(join_node.to_pretty_print(mast_forest)))
-            },
-            MastNode::Split(split_node) => {
-                MastNodePrettyPrint::new(Box::new(split_node.to_pretty_print(mast_forest)))
-            },
-            MastNode::Loop(loop_node) => {
-                MastNodePrettyPrint::new(Box::new(loop_node.to_pretty_print(mast_forest)))
-            },
-            MastNode::Call(call_node) => {
-                MastNodePrettyPrint::new(Box::new(call_node.to_pretty_print(mast_forest)))
-            },
-            MastNode::Dyn(dyn_node) => {
-                MastNodePrettyPrint::new(Box::new(dyn_node.to_pretty_print(mast_forest)))
-            },
-            MastNode::External(external_node) => {
-                MastNodePrettyPrint::new(Box::new(external_node.to_pretty_print(mast_forest)))
-            },
-        }
-    }
-
     pub fn domain(&self) -> Felt {
         match self {
             MastNode::Block(_) => BasicBlockNode::DOMAIN,
@@ -294,100 +297,6 @@ impl MastNode {
             MastNode::Call(call_node) => call_node.domain(),
             MastNode::Dyn(dyn_node) => dyn_node.domain(),
             MastNode::External(_) => panic!("Can't fetch domain for an `External` node."),
-        }
-    }
-
-    pub fn digest(&self) -> Word {
-        match self {
-            MastNode::Block(node) => node.digest(),
-            MastNode::Join(node) => node.digest(),
-            MastNode::Split(node) => node.digest(),
-            MastNode::Loop(node) => node.digest(),
-            MastNode::Call(node) => node.digest(),
-            MastNode::Dyn(node) => node.digest(),
-            MastNode::External(node) => node.digest(),
-        }
-    }
-
-    pub fn to_display<'a>(&'a self, mast_forest: &'a MastForest) -> impl fmt::Display + 'a {
-        match self {
-            MastNode::Block(node) => MastNodeDisplay::new(node.to_display(mast_forest)),
-            MastNode::Join(node) => MastNodeDisplay::new(node.to_display(mast_forest)),
-            MastNode::Split(node) => MastNodeDisplay::new(node.to_display(mast_forest)),
-            MastNode::Loop(node) => MastNodeDisplay::new(node.to_display(mast_forest)),
-            MastNode::Call(node) => MastNodeDisplay::new(node.to_display(mast_forest)),
-            MastNode::Dyn(node) => MastNodeDisplay::new(node.to_display(mast_forest)),
-            MastNode::External(node) => MastNodeDisplay::new(node.to_display(mast_forest)),
-        }
-    }
-
-    /// Returns the decorators to be executed before this node is executed.
-    pub fn before_enter(&self) -> &[DecoratorId] {
-        use MastNode::*;
-        match self {
-            Block(_) => &[],
-            Join(node) => node.before_enter(),
-            Split(node) => node.before_enter(),
-            Loop(node) => node.before_enter(),
-            Call(node) => node.before_enter(),
-            Dyn(node) => node.before_enter(),
-            External(node) => node.before_enter(),
-        }
-    }
-
-    /// Returns the decorators to be executed after this node is executed.
-    pub fn after_exit(&self) -> &[DecoratorId] {
-        use MastNode::*;
-        match self {
-            Block(_) => &[],
-            Join(node) => node.after_exit(),
-            Split(node) => node.after_exit(),
-            Loop(node) => node.after_exit(),
-            Call(node) => node.after_exit(),
-            Dyn(node) => node.after_exit(),
-            External(node) => node.after_exit(),
-        }
-    }
-}
-
-//-------------------------------------------------------------------------------------------------
-/// Mutators
-impl MastNode {
-    /// Sets the list of decorators to be executed before this node.
-    pub fn append_before_enter(&mut self, decorator_ids: &[DecoratorId]) {
-        match self {
-            MastNode::Block(node) => node.prepend_decorators(decorator_ids),
-            MastNode::Join(node) => node.append_before_enter(decorator_ids),
-            MastNode::Split(node) => node.append_before_enter(decorator_ids),
-            MastNode::Loop(node) => node.append_before_enter(decorator_ids),
-            MastNode::Call(node) => node.append_before_enter(decorator_ids),
-            MastNode::Dyn(node) => node.append_before_enter(decorator_ids),
-            MastNode::External(node) => node.append_before_enter(decorator_ids),
-        }
-    }
-
-    /// Sets the list of decorators to be executed after this node.
-    pub fn append_after_exit(&mut self, decorator_ids: &[DecoratorId]) {
-        match self {
-            MastNode::Block(node) => node.append_decorators(decorator_ids),
-            MastNode::Join(node) => node.append_after_exit(decorator_ids),
-            MastNode::Split(node) => node.append_after_exit(decorator_ids),
-            MastNode::Loop(node) => node.append_after_exit(decorator_ids),
-            MastNode::Call(node) => node.append_after_exit(decorator_ids),
-            MastNode::Dyn(node) => node.append_after_exit(decorator_ids),
-            MastNode::External(node) => node.append_after_exit(decorator_ids),
-        }
-    }
-
-    pub fn remove_decorators(&mut self) {
-        match self {
-            MastNode::Block(node) => node.remove_decorators(),
-            MastNode::Join(node) => node.remove_decorators(),
-            MastNode::Split(node) => node.remove_decorators(),
-            MastNode::Loop(node) => node.remove_decorators(),
-            MastNode::Call(node) => node.remove_decorators(),
-            MastNode::Dyn(node) => node.remove_decorators(),
-            MastNode::External(node) => node.remove_decorators(),
         }
     }
 }
