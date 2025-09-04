@@ -1,40 +1,30 @@
 //! The serialization format of `Package` is as follows:
 //!
-//! (Metadata)
-//! - `MAGIC_PACKAGE`
-//! - `VERSION`
+//! #### Header
+//! - `MAGIC_PACKAGE`, a 4-byte tag, followed by a NUL-byte, i.e. `b"\0"`
+//! - `VERSION`, a 3-byte semantic version number, 1 byte for each component, i.e. MAJ.MIN.PATCH
 //!
-//! (Package Name)
+//! #### Metadata
 //! - `name` (`String`)
+//! - `version` (optional, [`miden_assembly_syntax::Version`] serialized as a `String`)
+//! - `description` (optional, `String`)
 //!
-//! (MAST Artifact)
-//! - `mast` (`MastArtifact`)
+//! #### Code
+//! - `mast` (see [`crate::MastArtifact`])
 //!
-//!   The serialization format of `MastArtifact` is:
-//!   - `tag` (`[u8; 4]`)
-//!     - `MAGIC_PROGRAM` if the artifact is a `Program`
-//!     - `MAGIC_LIBRARY` if the artifact is a `Library`
-//!   - If `Program`:
-//!     - `program` (`Program`)
-//!   - If `Library`:
-//!     - `library` (`Library`)
+//! #### Manifest
+//! - `manifest` (see [`crate::PackageManifest`])
 //!
-//! (Package Manifest)
-//! - `manifest` (`PackageManifest`)
-//!
-//!   The serialization format of `PackageManifest` is:
-//!   - `exports_len` (`usize`)
-//!   - For each export:
-//!     - `export` (`PackageExport`)
-//!       - `name` (`QualifiedProcedureName`)
-//!       - `digest` (`Word`)
-//!   - `dependencies_len` (`usize`)
-//!   - For each dependency:
-//!     - `dependency` (`Dependency`)
-//!       - `name` (`String`)
-//!       - `digest` (`Word`)
+//! #### Custom Sections
+//! - `sections` (a vector of zero or more [`crate::Section`])
 
-use alloc::{collections::BTreeMap, format, string::String, sync::Arc, vec::Vec};
+use alloc::{
+    collections::BTreeMap,
+    format,
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
+};
 
 use miden_assembly_syntax::{
     Library,
@@ -77,6 +67,12 @@ impl Serializable for Package {
         // Write package name
         self.name.write_into(target);
 
+        // Write package version
+        self.version.as_ref().map(|v| v.to_string()).write_into(target);
+
+        // Write package description
+        self.description.write_into(target);
+
         // Write MAST artifact
         self.mast.write_into(target);
 
@@ -111,6 +107,19 @@ impl Deserializable for Package {
         // Read package name
         let name = String::read_from(source)?;
 
+        // Read package version
+        let version = Option::<String>::read_from(source)?;
+        let version = match version {
+            Some(version) => Some(
+                crate::Version::parse(&version)
+                    .map_err(|err| DeserializationError::InvalidValue(err.to_string()))?,
+            ),
+            None => None,
+        };
+
+        // Read package description
+        let description = Option::<String>::read_from(source)?;
+
         // Read MAST artifact
         let mast = MastArtifact::read_from(source)?;
 
@@ -125,7 +134,14 @@ impl Deserializable for Package {
             sections.push(section);
         }
 
-        Ok(Self { name, mast, manifest, sections })
+        Ok(Self {
+            name,
+            version,
+            description,
+            mast,
+            manifest,
+            sections,
+        })
     }
 }
 
