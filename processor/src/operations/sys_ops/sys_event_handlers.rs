@@ -669,7 +669,7 @@ fn push_lowerbound_result(
             Felt::from(process.clk()),
             err_ctx,
         )));
-    }    
+    }
 
     // Binary search over word-aligned addresses in [start_addr, end_addr)
     let mut lo = start_addr;

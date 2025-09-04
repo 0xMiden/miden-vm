@@ -23,7 +23,8 @@ fn test_array_find_sorted_word() {
             exec.sorted_map::find_key
             exec.truncate_stack
         end
-    ");
+    "
+    );
 
     let test = build_test!(source, &[]);
     test.expect_stack(&[1, 108, 100, 124, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
