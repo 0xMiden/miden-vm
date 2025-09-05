@@ -116,8 +116,7 @@ fn packed_felts_to_bytes(input_felt: &[Felt], len_bytes: usize) -> Result<Vec<u8
         return Err(KeccakError::InvalidInputLength {
             actual: input_felt.len(),
             expected: expected_len,
-        }
-        .into());
+        });
     }
 
     // Allocate buffer with 4-byte alignment
@@ -136,9 +135,7 @@ fn packed_felts_to_bytes(input_felt: &[Felt], len_bytes: usize) -> Result<Vec<u8
     // Verify zero-padding in final u32
     for (index, &to_drop) in bytes[len_bytes..].iter().enumerate() {
         if to_drop != 0 {
-            return Err(
-                KeccakError::InvalidPadding { value: to_drop, index: len_bytes + index }.into()
-            );
+            return Err(KeccakError::InvalidPadding { value: to_drop, index: len_bytes + index });
         }
     }
 
