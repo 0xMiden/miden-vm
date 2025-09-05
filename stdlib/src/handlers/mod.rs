@@ -13,7 +13,7 @@ pub mod keccak;
 /// This function returns `None` if the provided range is invalid or if it references an
 /// uninitialized address.
 fn read_memory(process: &ProcessState, ptr: u64, len: u64) -> Option<Vec<Felt>> {
-    // Convert inputs to u32 and check for overflow + alignement.
+    // Convert inputs to u32 and check for overflow + alignment.
     let start_addr: u32 = ptr.try_into().ok()?;
     if !start_addr.is_multiple_of(4) {
         return None;
