@@ -46,6 +46,7 @@ miden-core = { path = "./core", version = "0.18", default-features = false }
 miden-debug-types = { path = "./crates/debug/types", version = "0.18", default-features = false }
 miden-mast-package = { path = "./package", version = "0.18", default-features = false }
 miden-processor = { path = "./processor", version = "0.18", default-features = false }
+miden-serde-test-macros = { path = "./crates/utils/serde-test-macros", version = "0.1.0", default-features = false }
 miden-prover = { path = "./prover", version = "0.18", default-features = false }
 miden-stdlib = { path = "./stdlib", version = "0.18", default-features = false }
 miden-utils-diagnostics = { path = "./crates/utils/diagnostics", version = "0.18", default-features = false }
@@ -59,6 +60,8 @@ miden-formatting = { version = "0.1", default-features = false }
 midenc-hir-type = { version = "0.1", default-features = false }
 
 # Third-party crates
+# used in miden-serde-test macros, should be replaced with miden-bite
+bincode = { version = "1.3" }
 insta = { version = "1.43", default-features = false, features = [
     "colors",
 ] }

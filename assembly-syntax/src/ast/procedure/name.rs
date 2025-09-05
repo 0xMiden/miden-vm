@@ -31,6 +31,10 @@ use crate::{
 /// to an imported
 #[derive(Clone)]
 #[cfg_attr(feature = "arbitrary", derive(proptest_derive::Arbitrary))]
+#[cfg_attr(
+    all(feature = "serde", feature = "arbitrary"),
+    miden_serde_test_macros::serde_test
+)]
 pub struct QualifiedProcedureName {
     /// The source span associated with this identifier.
     #[cfg_attr(feature = "arbitrary", proptest(value = "SourceSpan::default()"))]
@@ -297,6 +301,10 @@ impl<'de> serde::Deserialize<'de> for QualifiedProcedureName {
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
+#[cfg_attr(
+    all(feature = "serde", feature = "arbitrary"),
+    miden_serde_test_macros::serde_test
+)]
 pub struct ProcedureName(Ident);
 
 impl ProcedureName {
@@ -517,25 +525,4 @@ impl proptest::prelude::Arbitrary for ProcedureName {
     }
 
     type Strategy = proptest::prelude::BoxedStrategy<Self>;
-}
-
-// TESTS
-// ================================================================================================
-
-/// Tests
-#[cfg(test)]
-mod tests {
-    use miden_core::utils::{Deserializable, Serializable};
-    use proptest::prelude::*;
-
-    use super::ProcedureName;
-
-    proptest! {
-        #[test]
-        fn procedure_name_serialization_roundtrip(path in any::<ProcedureName>()) {
-            let bytes = path.to_bytes();
-            let deserialized = ProcedureName::read_from_bytes(&bytes).unwrap();
-            assert_eq!(path, deserialized);
-        }
-    }
 }

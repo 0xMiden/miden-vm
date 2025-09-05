@@ -22,6 +22,7 @@ std = [
     "miden-debug-types/std",
     "miden-utils-diagnostics/std",
     "thiserror/std",
+    "proptest/std",
 ]
 serde = [
     "dep:serde",
@@ -31,7 +32,7 @@ serde = [
     "semver/serde",
     "smallvec/serde",
 ]
-arbitrary = ["dep:proptest", "dep:proptest-derive"]
+arbitrary = ["dep:proptest", "dep:proptest-derive", "miden-core/arbitrary"]
 testing = ["arbitrary", "logging"]
 logging = ["dep:env_logger"]
 
@@ -44,6 +45,7 @@ miden-core.workspace = true
 miden-debug-types.workspace = true
 miden-utils-diagnostics.workspace = true
 midenc-hir-type.workspace = true
+miden-serde-test-macros = { workspace = true }
 proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }
 regex = { version = "1.10", default-features = false, features = [
@@ -57,6 +59,7 @@ smallvec.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+bincode.workspace = true
 env_logger = "0.11"
 proptest.workspace = true
 pretty_assertions = "1.4"
