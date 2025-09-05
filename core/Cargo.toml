@@ -33,20 +33,26 @@ serde = [
     "miden-debug-types/serde",
     "winter-math/serde",
 ]
+arbitrary = ["dep:proptest", "dep:proptest-derive"]
+testing = ["arbitrary" ]
 
 [dependencies]
 enum_dispatch = { version =  "0.3" }
 miden-crypto.workspace = true
 miden-debug-types.workspace = true
 miden-formatting.workspace = true
+miden-serde-test-macros = { workspace = true }
 num-derive = { version = "0.4", default-features = false }
 num-traits = { version = "0.2", default-features = false }
-serde = { workspace = true, optional = true }
+proptest = { workspace = true, optional = true }
+proptest-derive = { workspace = true, optional = true }
+serde = { workspace = true, optional = true, features = ["derive"] }
 thiserror.workspace = true
 winter-math.workspace = true
 winter-utils.workspace = true
 
 [dev-dependencies]
+bincode.workspace = true
 insta.workspace = true
 proptest.workspace = true
 winter-rand-utils.workspace = true

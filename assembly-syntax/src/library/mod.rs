@@ -6,6 +6,8 @@ use miden_core::{
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 use midenc_hir_type::{FunctionType, Type};
+#[cfg(feature = "arbitrary")]
+use proptest::prelude::*;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
@@ -32,6 +34,10 @@ pub use self::{
 /// Metadata about a procedure exported by the interface of a [Library]
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(
+    all(feature = "serde", feature = "arbitrary"),
+    miden_serde_test_macros::serde_test
+)]
 pub struct LibraryExport {
     /// The id of the MAST root node of the exported procedure
     pub node: MastNodeId,
@@ -55,6 +61,26 @@ impl LibraryExport {
     }
 }
 
+// TODO: include an arbitrary Signature here (for serde roundtrip tests)
+#[cfg(feature = "arbitrary")]
+impl Arbitrary for LibraryExport {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        let nid = any::<MastNodeId>();
+        let name = any::<QualifiedProcedureName>();
+        (nid, name)
+            .prop_map(|(nodeid, procname)| LibraryExport {
+                node: nodeid,
+                name: procname,
+                signature: None,
+            })
+            .boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
+}
+
 // LIBRARY
 // ================================================================================================
 
@@ -63,6 +89,10 @@ impl LibraryExport {
 /// A library exports a set of one or more procedures. Currently, all exported procedures belong
 /// to the same top-level namespace.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    all(feature = "serde", feature = "arbitrary"),
+    miden_serde_test_macros::serde_test
+)]
 pub struct Library {
     /// The content hash of this library, formed by hashing the roots of all exports in
     /// lexicographical order (by digest, not procedure name)
@@ -781,4 +811,25 @@ impl Deserializable for TypeDeserializer {
         };
         Ok(Self(ty))
     }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl proptest::prelude::Arbitrary for Library {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        use proptest::prelude::*;
+        prop::collection::btree_map(any::<QualifiedProcedureName>(), any::<LibraryExport>(), 1..5)
+            .prop_flat_map(|exports| {
+                let mast_forest = Arc::new(MastForest::default());
+                (Just(mast_forest), Just(exports))
+            })
+            .prop_map(|(mast_forest, exports)| {
+                let digest = Word::default(); // For simplicity in tests
+                Library { digest, exports, mast_forest }
+            })
+            .boxed()
+    }
+
+    type Strategy = proptest::prelude::BoxedStrategy<Self>;
 }
