@@ -30,26 +30,12 @@ inherits = "release"
 codegen-units = 1
 lto = true
 
-# Test profile with full debug information for detailed debugging of test failures.
-# Use via `make test-PACKAGE` commands for investigating specific test failures.
-# Provides rich stack traces, source locations, and variable names in panics.
 [profile.test-dev]
 inherits = "dev"
 opt-level = 1
 debug = true
 debug-assertions = true
 overflow-checks = true
-
-# Fast test profile optimized for test execution speed over compilation speed.
-# Use via `make test-fast` for rapid iterative development feedback.
-# Prioritizes faster test runs at the cost of slightly slower compilation.
-[profile.test-fast]
-inherits = "test"
-opt-level = 2          # Higher optimization for faster test execution
-debug = false          # No debug symbols for smaller binaries
-debug-assertions = true
-overflow-checks = true
-lto = "thin"           # Thin LTO for better optimization without full LTO cost
 
 [workspace.dependencies]
 # Workspace crates
