@@ -105,14 +105,10 @@ impl Preimage {
             );
 
             let calldata_commitment = self.calldata_commitment();
-            let witness = process.advice_provider().get_mapped_values(&calldata_commitment).expect(
-                format!(
-                    "witness was not found in advice map with key {calldata_commitment:?}\n\
-                    advice provider:\n{:?}",
-                    process.advice_provider(),
-                )
-                .as_str(),
-            );
+            let witness = process
+                .advice_provider()
+                .get_mapped_values(&calldata_commitment)
+                .expect("witness was not found in advice map with key {calldata_commitment:?}");
             let witness_expected: Vec<Felt> = {
                 let len_bytes = self.0.len() as u64;
 
