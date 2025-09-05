@@ -1,5 +1,8 @@
 use alloc::vec::Vec;
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 use super::{BATCH_SIZE, Felt, GROUP_SIZE, Operation, ZERO};
 
 // OPERATION BATCH
@@ -10,6 +13,7 @@ use super::{BATCH_SIZE, Felt, GROUP_SIZE, Operation, ZERO};
 /// An operation batch consists of up to 8 operation groups, with each group containing up to 9
 /// operations or a single immediate value.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct OpBatch {
     /// A list of operations in this batch, including padding noops.
     pub(super) ops: Vec<Operation>,

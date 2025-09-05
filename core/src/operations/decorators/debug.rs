@@ -1,5 +1,8 @@
 use core::fmt;
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 // DEBUG OPTIONS
 // ================================================================================================
 
@@ -8,6 +11,7 @@ use core::fmt;
 /// These options define the debug info which gets printed out when the Debug decorator is
 /// executed.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum DebugOptions {
     /// Print out the entire contents of the stack for the current execution context.
     StackAll,

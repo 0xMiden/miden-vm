@@ -1,12 +1,19 @@
 mod manifest;
+mod section;
 mod serialization;
 
 use alloc::{format, string::String, sync::Arc, vec::Vec};
 
 use miden_assembly_syntax::{Library, Report, ast::QualifiedProcedureName};
+pub use miden_assembly_syntax::{Version, VersionError};
 use miden_core::{Program, Word};
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
-pub use self::manifest::{PackageExport, PackageManifest};
+pub use self::{
+    manifest::{PackageExport, PackageManifest},
+    section::{InvalidSectionIdError, Section, SectionId},
+};
 use crate::MastArtifact;
 
 // PACKAGE
@@ -14,17 +21,25 @@ use crate::MastArtifact;
 
 /// A package containing a [Program]/[Library], and a manifest (exports and dependencies).
 #[derive(Debug, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Package {
     /// Name of the package
     pub name: String,
+    /// An optional semantic version for the package
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub version: Option<Version>,
+    /// An optional description of the package
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub description: Option<String>,
     /// The MAST artifact ([Program] or [Library]) of the package
     pub mast: MastArtifact,
     /// The package manifest, containing the set of exported procedures and their signatures,
     /// if known.
     pub manifest: PackageManifest,
-    /// Serialized `miden-objects::account::AccountComponentMetadata` for the account component
-    /// (name, descrioption, storage,) associated with this package, if any.
-    pub account_component_metadata_bytes: Option<Vec<u8>>,
+    /// The set of custom sections included with the package, e.g. debug information, account
+    /// metadata, etc.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub sections: Vec<Section>,
 }
 
 impl Package {
@@ -90,6 +105,8 @@ impl Package {
 
             Ok(Self {
                 name: self.name.clone(),
+                version: self.version.clone(),
+                description: self.description.clone(),
                 mast: MastArtifact::Executable(Arc::new(Program::new(
                     library.mast_forest().clone(),
                     node_id,
@@ -98,7 +115,7 @@ impl Package {
                     self.manifest.get_exports_by_digest(&digest).cloned(),
                 )
                 .with_dependencies(self.manifest.dependencies().cloned()),
-                account_component_metadata_bytes: None,
+                sections: self.sections.clone(),
             })
         } else {
             Err(Report::msg(format!(

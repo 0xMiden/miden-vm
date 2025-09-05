@@ -3,6 +3,8 @@ use core::{fmt, mem, ops::Index};
 
 use miden_crypto::{Felt, Word, ZERO};
 use miden_formatting::prettier::PrettyPrint;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 use crate::{
     DecoratorIterator, DecoratorList, Operation,
@@ -61,6 +63,7 @@ pub const BATCH_SIZE: usize = 8;
 /// Where `batches` is the concatenation of each `batch` in the basic block, and each batch is 8
 /// field elements (512 bits).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct BasicBlockNode {
     /// The primitive operations contained in this basic block.
     ///
@@ -69,6 +72,7 @@ pub struct BasicBlockNode {
     /// Multiple batches are used for blocks consisting of more than 72 operations.
     op_batches: Vec<OpBatch>,
     digest: Word,
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Vec::is_empty"))]
     decorators: DecoratorList,
 }
 

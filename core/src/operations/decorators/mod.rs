@@ -3,6 +3,8 @@ use core::fmt;
 
 use miden_crypto::hash::blake::Blake3_256;
 use num_traits::ToBytes;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 mod assembly_op;
 pub use assembly_op::AssemblyOp;
@@ -23,6 +25,7 @@ use crate::mast::{DecoratorFingerprint, DecoratorId};
 /// Executing decorators does not advance the VM clock. As such, many decorators can be executed in
 /// a single VM cycle.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Decorator {
     /// Adds information about the assembly instruction at a particular index (only applicable in
     /// debug mode).
