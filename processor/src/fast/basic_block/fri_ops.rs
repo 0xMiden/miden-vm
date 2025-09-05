@@ -4,7 +4,7 @@
 use miden_core::{ExtensionOf, Felt, FieldElement, ONE, QuadFelt, StarkField, ZERO};
 
 use super::FastProcessor;
-use crate::ExecutionError;
+use crate::{ExecutionError, fast::tracer::Tracer};
 
 const EIGHT: Felt = Felt::new(8);
 const TWO_INV: Felt = Felt::new(9223372034707292161);
@@ -20,7 +20,8 @@ const TAU3_INV: Felt = Felt::new(281474976710656); // tau^{-3}
 
 impl FastProcessor {
     /// Analogous to `Process::op_fri_ext2fold4`.
-    pub fn op_fri_ext2fold4(&mut self) -> Result<(), ExecutionError> {
+    #[inline(always)]
+    pub fn op_fri_ext2fold4(&mut self, tracer: &mut impl Tracer) -> Result<(), ExecutionError> {
         // --- read all relevant variables from the stack ---------------------
         let query_values = self.get_query_values();
         let folded_pos = self.stack_get(8);
@@ -70,7 +71,7 @@ impl FastProcessor {
         let poe2 = poe.square();
         let poe4 = poe2.square();
 
-        self.decrement_stack_size();
+        self.decrement_stack_size(tracer);
 
         self.stack_write(0, tmp0[1]);
         self.stack_write(1, tmp0[0]);
@@ -93,6 +94,7 @@ impl FastProcessor {
 
     /// Returns 4 query values in the source domain. These values are to be folded into a single
     /// value in the folded domain.
+    #[inline(always)]
     fn get_query_values(&self) -> [QuadFelt; 4] {
         let [v4, v5, v6, v7] = self.stack_get_word(0).into();
         let [v0, v1, v2, v3] = self.stack_get_word(4).into();
@@ -110,6 +112,7 @@ impl FastProcessor {
 // ================================================================================================
 
 /// Determines tau factor (needed to compute x value) for the specified domain segment.
+#[inline(always)]
 fn get_tau_factor(domain_segment: usize) -> Felt {
     match domain_segment {
         0 => ONE,
@@ -121,6 +124,7 @@ fn get_tau_factor(domain_segment: usize) -> Felt {
 }
 
 /// Determines a set of binary flags needed to describe the specified domain segment.
+#[inline(always)]
 fn get_domain_segment_flags(domain_segment: usize) -> [Felt; 4] {
     match domain_segment {
         0 => [ONE, ZERO, ZERO, ZERO],
@@ -132,6 +136,7 @@ fn get_domain_segment_flags(domain_segment: usize) -> [Felt; 4] {
 }
 
 /// Computes 2 evaluation points needed for [fold4] function.
+#[inline(always)]
 fn compute_evaluation_points(alpha: QuadFelt, x_inv: Felt) -> (QuadFelt, QuadFelt) {
     let ev = alpha.mul_base(x_inv);
     let es = ev.square();
@@ -142,6 +147,7 @@ fn compute_evaluation_points(alpha: QuadFelt, x_inv: Felt) -> (QuadFelt, QuadFel
 /// verifier challenge alpha as follows:
 /// - ev = alpha / x
 /// - es = (alpha / x)^2
+#[inline(always)]
 fn fold4(values: [QuadFelt; 4], ev: QuadFelt, es: QuadFelt) -> (QuadFelt, QuadFelt, QuadFelt) {
     let tmp0 = fold2(values[0], values[2], ev);
     let tmp1 = fold2(values[1], values[3], ev.mul_base(TAU_INV));
@@ -151,6 +157,7 @@ fn fold4(values: [QuadFelt; 4], ev: QuadFelt, es: QuadFelt) -> (QuadFelt, QuadFe
 
 /// Performs folding by a factor of 2. ep is a value computed based on x and verifier challenge
 /// alpha.
+#[inline(always)]
 fn fold2(f_x: QuadFelt, f_neg_x: QuadFelt, ep: QuadFelt) -> QuadFelt {
     (f_x + f_neg_x + ((f_x - f_neg_x) * ep)).mul_base(TWO_INV)
 }

@@ -2,7 +2,7 @@ use alloc::{string::ToString, sync::Arc};
 
 use miden_air::ExecutionOptions;
 use miden_assembly::{Assembler, DefaultSourceManager};
-use miden_core::{Kernel, StackInputs, assert_matches};
+use miden_core::{Kernel, ONE, Operation, StackInputs, assert_matches};
 use rstest::rstest;
 
 use super::*;

@@ -1,166 +1,5 @@
 use.std::crypto::stark::constants
 
-#! Loads the next query rows in the main, auxiliary and constraint composition polynomials traces
-#! and computes the values of the DEEP code word at the index corresponding to the query.
-#!
-#! It takes a pointer to the current random query index and returns that index, together with
-#! the value
-#!
-#! Q^x(alpha) = (q_x_at_alpha_0, q_x_at_alpha_1) = \sum_{i=0}^{n+m+l} T_i * alpha^i
-#!
-#! where:
-#!
-#! 1. n, m and l are the widths of the main segment, auxiliary segment and constraint composition
-#!    traces, respectively.
-#! 2. T_i are the values of columns in the main segment, auxiliary segment and constraint composition
-#!    traces, for the query.
-#! 3. alpha is the randomness used in order to build the DEEP polynomial.
-#!
-#! Input: [Y, query_ptr, ...]
-#! Output: [Y, q_x_at_alpha_1, q_x_at_alpha_0, q_x_at_alpha_1, q_x_at_alpha_0, index, query_ptr, ...]
-#!
-#! where:
-#! - Y is a "garbage" word.
-#!
-#! Cycles: 280
-proc.load_query_row
-    # I) Process the main segment of the execution trace portion of the query
-
-    ## 1) Load the query index
-    dup.4
-    mem_loadw
-    #=> [index, depth, y, y, query_ptr, ...] where y are "garbage" values here and throughout
-
-    ## 2) Get commitment to main segment of the execution trace
-    movdn.3 movdn.2
-    push.0.0
-    exec.constants::main_trace_com_ptr mem_loadw
-    #=>[R, depth, index, query_ptr, ...]
-
-    ## 3) Use the commitment to get the leaf and save it
-    dup.5 dup.5
-    mtree_get
-    exec.constants::tmp3 mem_storew
-    adv.push_mapval
-    #=>[V, R, depth, index, query_ptr, ...]
-    exec.constants::tmp2 mem_loadw
-    swapw
-    #=>[V, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr, ...]
-
-    ## 4) Load the values of the main segment of the execution trace at the current query. We also
-    ##    compute their hashing and the value of their random linear combination using powers of
-    ##    a single random value alpha.
-
-    ### Load the 80 columns in 10 batches of 8 base field elements
-    padw
-    swapw
-    padw
-    #=> [Y, Y, 0, 0, 0, 0, ptr, y, y, y]
-    repeat.10
-        adv_pipe
-        horner_eval_base      
-        hperm
-    end
-    #=> [Y, L, C, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr, ...]
- 
-    ## 5) Load the leaf value we got using `mtree_get` and compare it against the hash
-    ##    we just computed
-    exec.constants::tmp3 mem_loadw
-    movup.4
-    assert_eq
-    movup.3
-    assert_eq
-    movup.2
-    assert_eq
-    assert_eq
-    #=> [Y, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr, ...]
-
-
-    # II) Process the auxiliary segment of the execution trace portion of the query
-
-    ## 1) Load aux trace commitment and get leaf
-    exec.constants::aux_trace_com_ptr mem_loadw
-
-    ## 2) Get the leaf against the auxiliary trace commitment for the current query
-    dup.9
-    dup.9
-    mtree_get
-    exec.constants::tmp3 mem_storew
-    adv.push_mapval
-    #=> [L, R, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr, ...]
-
-    ## 3) Load the values of the auxiliary segment of the execution trace at the current query.
-    
-    ### a) Set up the stack
-    exec.constants::zero_word_ptr mem_loadw
-    swapw
-    padw
-    #=> [Y, Y, C, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr, ...]
-
-    ### b) Load the first 4 columns as a batch of 4 quadratic extension field elements.
-    repeat.2
-        adv_pipe
-        horner_eval_ext      
-        hperm
-    end
-    #=> [Y, D, C, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr, ...]
-
-    ## 4) Load the leaf value we got using `mtree_get` and compare it against the hash
-    ##    we just computed
-    exec.constants::tmp3 mem_loadw
-    movup.4
-    assert_eq
-    movup.3
-    assert_eq
-    movup.2
-    assert_eq
-    assert_eq
-    #=> [Y, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr, ...]
-
-    # III) Process the constraint trace portion of the query
-
-    ## 1) Load the commitment to the constraint trace
-    exec.constants::composition_poly_com_ptr mem_loadw
-    #=> [R, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr, ...]
-
-    ## 2) Get the leaf against the commitment
-    dup.9
-    movup.9
-    mtree_get
-    exec.constants::tmp3 mem_storew
-    adv.push_mapval
-    #=>[L, R, ptr_x, ptr_alpha_inv, acc1, acc0, index, query_ptr, ...]
-
-    ## 3) Load the 8columns as quadratic extension field elements in batches of 4. 
-    padw
-    swapw.2
-    repeat.2
-        adv_pipe
-        horner_eval_ext        
-        hperm
-    end
-    #=> [Y, L, Y, ptr_x, ptr_alpha_inv, acc1, acc0, index, query_ptr, ...]
-
-    ## 4) Load the leaf value we got using `mtree_get` and compare it against the hash
-    ##    we just computed
-    exec.constants::tmp3 mem_loadw
-    movup.4
-    assert_eq
-    movup.3
-    assert_eq
-    movup.2
-    assert_eq
-    assert_eq
-    #=> [Y, ptr_x, ptr_alpha_inv, acc1, acc0, index, query_ptr, ...]
-
-    ## 5) Re-order the stack
-    swapw
-    drop drop
-    dup.1 dup.1
-    swapw
-    #=> [Y, q_x_at_alpha_1, q_x_at_alpha_0, q_x_at_alpha_1, q_x_at_alpha_0, index, query_ptr, ...]
-end
-
 #! Takes a query index and computes x := offset * domain_gen^index. It also computes the denominators
 #! (x - z) and (x - gz).
 #!
@@ -244,13 +83,23 @@ proc.divide_and_add
     # => [eval1, eval0, Y, query_ptr, ...]
 end
 
-#! Compute the DEEP composition polynomial FRI queries.
+#! Prepares the stack for the computation of the DEEP composition polynomial FRI queries.
+#!
+#! It also performs some pre-computations that are common to all queries as an optimization.
 #!
 #! Input: [...]
-#! Output: [...]
-#! Cycles: 386 + num_queries * 414
-export.compute_deep_composition_polynomial_queries
-
+#! Output: [Y, query_ptr, query_end_ptr, W, query_ptr, ...]
+#!
+#! where:
+#!
+#! 1. `Y` is a garbage word,
+#! 2. `query_ptr` is a pointer to the memory region from where the query indices will be fetched
+#!    and to where the computed FRI queries will be stored in a word-aligned manner,
+#! 3. `query_end_ptr` is a memory pointer used to indicate the end of the memory region used in
+#!    storing the computed FRI queries,
+#! 4. `W` is the word `[q_z_0, q_z_1, q_gz_0, q_gz_1]` where `q_z = (q_z_0, q_z_1)` and
+#!    `q_gz = (q_gz_0, q_gz_1)` represent the constant terms across all FRI queries computations.
+export.prepare_stack_deep_queries_computation
     exec.constants::get_fri_queries_address
     # => [query_ptr, ...]
 
@@ -288,37 +137,40 @@ export.compute_deep_composition_polynomial_queries
     # => [-z0, -gz0, -gz1, -z1, query_ptr, query_end_ptr, W, query_ptr, ...]
     # Save to temporary location `tmp1` for later use when computing the denominators
     exec.constants::tmp1 mem_storew
-    # => [Y, query_ptr, query_end_ptr, W, query_ptr, ...]                   # (Cycles: 28)
+    # => [Y, query_ptr, query_end_ptr, W, query_ptr, ...]
+end
 
-    push.1
-    while.true
-        # I)
-        #
-        # Load the (main, aux, constraint)-traces rows associated with the current query and get
-        # the index of the query.
-        #
-        # Cycles: 280
-        exec.load_query_row
-        #=>[Y, X, index, query_ptr, query_end_ptr, W, query_ptr, ...]
-
-        # II)
-        #
-        # Compute x := offset * domain_gen^index and denominators (x - z) and (x - gz)
+#! Compute the DEEP composition polynomial FRI query at `index`.
+#!
+#! Input: [Y, X, index, query_ptr, query_end_ptr, W, query_ptr, ...]
+#! Output: [?, Y, query_ptr+1, query_end_ptr, ...]
+#!
+#! where:
+#! 1. `Y` is a garbage word,
+#! 2. `X` is `[q_x_at_alpha_0, q_x_at_alpha_1, q_x_at_alpha_0, q_x_at_alpha_1]` where 
+#!    `q_x = (q_x_0, q_x_1)` is the variable part of the query,
+#! 3. `index` is the query index in the FRI domain,
+#! 4. `query_ptr` is a pointer to the memory region from where the query indices will be fetched
+#!    and to where the computed FRI queries will be stored in a word-aligned manner,
+#! 5. `query_end_ptr` is a memory pointer used to indicate the end of the memory region used in
+#!    storing the computed FRI queries,
+#! 6. `W` is the word `[q_z_0, q_z_1, q_gz_0, q_gz_1]` where `q_z = (q_z_0, q_z_1)` and
+#!    `q_gz = (q_gz_0, q_gz_1)` represent the constant terms across all FRI queries computations.
+#! 7. `?` is a binary flag indicating if there are further queries to process.
+export.compute_deep_query
+        # 1) Compute x := offset * domain_gen^index and denominators (x - z) and (x - gz)
         #
         # Cycles: 58
         exec.compute_denominators
         #=> [Z, X, x, index, query_ptr, query_end_ptr, W, query_ptr, ...] where Z := [-gz1, x - gz0, -z1, x - z0]
 
-        # III)
-        # Compute final result
+        # 2) Compute final result
         #
         # Cycles: 62
         exec.divide_and_add
         #=> [eval1, eval0, x, index, query_ptr, query_end_ptr, W, query_ptr, ...]
 
-        # IV)
-        #
-        # Store [poe, index, eval_1, eval_0] where poe := g^index = x / offset and prepare stack
+        # 3) Store [poe, index, eval_1, eval_0] where poe := g^index = x / offset and prepare stack
         # for next iteration.
 
         ## a) Compute poe
@@ -341,6 +193,16 @@ export.compute_deep_composition_polynomial_queries
         dup.5 dup.5
         neq
         #=> [?, Y, query_ptr+1, query_end_ptr, ...]
-    end
-    dropw dropw drop drop drop
+end
+
+#! Computes the DEEP composition polynomial FRI queries.
+#!
+#! Input: [...]
+#! Output: [...]
+proc.compute_deep_composition_polynomial_queries
+    # Prepare the stack for the core procedure computing the queries
+    exec.prepare_stack_deep_queries_computation
+    # => [Y, query_ptr, query_end_ptr, W, query_ptr]
+    exec.constants::get_procedure_digest_compute_deep_composition_polynomial_queries_ptr dynexec
+    # => [...]
 end
