@@ -11,17 +11,37 @@ const.KECCAK_STACK_EVENT=event("miden_stdlib::hash::keccak::merge_stack")
 # PROCEDURES
 # ================================================================================================
 
-#! Computes Keccak256 hash of memory data via deferred computation.
+#! Computes Keccak256 hash of memory data.
 #!
 #! Input: [ptr, len_bytes, ...]
-#! Output: [commitment, keccak_lo, keccak_hi, ...]
+#! Output: [keccak_lo, keccak_hi, ...]
+#!
+#! Where:
+#! - ptr: starting memory address (must be word-aligned)  
+#! - len_bytes: number of bytes to hash
+#! - keccak_lo, keccak_hi: 256-bit digest as two words
+export.hash_mem
+    exec.hash_mem_impl
+    # => [commitment, keccak_lo, keccak_hi, ...]
+    
+    dropw
+    # => [keccak_lo, keccak_hi, ...]
+end
+
+#! Internal implementation of memory-based Keccak256 computation via deferred computation.
+#!
+#! Emits event to populate advice stack with digest, computes commitment for tracking
+#! deferred computations, and stores witness in advice map for later proof generation.
+#!
+#! Input: [ptr, len_bytes, ...]
+#! Output: [commitment, keccak_lo, keccak_hi, ...]  
 #!
 #! Where:
 #! - ptr: starting memory address (must be word-aligned)
 #! - len_bytes: number of bytes to hash
-#! - commitment: returned for future kernel tracking of deferred computations
+#! - commitment: RPO(RPO(input) || RPO(hash)) for kernel tracking
 #! - keccak_lo, keccak_hi: 256-bit digest as two words
-export.hash_mem
+export.hash_mem_impl
     emit.KECCAK_MEM_EVENT
     # => [ptr, len_bytes, ...]
 
@@ -39,13 +59,32 @@ end
 #! Merges two 256-bit digests via Keccak256 hash.
 #!
 #! Input: [digest_left_lo, digest_left_hi, digest_right_lo, digest_right_hi, ...]
-#! Output: [commitment, keccak_lo, keccak_hi, ...]
+#! Output: [keccak_lo, keccak_hi, ...]
 #!
 #! Where:
 #! - digest_left_lo/hi, digest_right_lo/hi: two digests to merge (as four words)
-#! - commitment: returned for future kernel tracking of deferred computations
 #! - keccak_lo, keccak_hi: Keccak256(left || right) as two words
 export.merge_stack
+    exec.merge_stack_impl
+    # => [commitment, keccak_lo, keccak_hi, ...]
+    
+    dropw
+    # => [keccak_lo, keccak_hi, ...]
+end
+
+#! Internal implementation of digest merging via deferred Keccak256 computation.
+#!
+#! Emits event to populate advice stack with digest, computes commitment for tracking
+#! deferred computations, and stores witness in advice map for later proof generation.
+#!
+#! Input: [digest_left_lo, digest_left_hi, digest_right_lo, digest_right_hi, ...]
+#! Output: [commitment, keccak_lo, keccak_hi, ...]
+#!
+#! Where:
+#! - digest_left_lo/hi, digest_right_lo/hi: two digests to merge (as four words)  
+#! - commitment: RPO(RPO(input) || RPO(hash)) for kernel tracking
+#! - keccak_lo, keccak_hi: Keccak256(left || right) as two words
+export.merge_stack_impl
     emit.KECCAK_STACK_EVENT
 
     # compute RPO hash of input digests

@@ -230,7 +230,7 @@ fn test_keccak_hash_mem_wrapper_with_input(input_u8: &[u8]) {
                 push.{len_bytes}.{INPUT_MEMORY_ADDR}
                 # => [ptr, len_bytes, ...]
 
-                exec.keccak_precompile::hash_mem
+                exec.keccak_precompile::hash_mem_impl
                 # => [commitment, keccak_lo, keccak_hi, ...]
 
                 emit.event("{DEBUG_EVENT_ID}")
@@ -287,7 +287,7 @@ fn test_keccak_merge_stack_wrapper_with_input(input_u8: &[u8]) {
                 {stack_stores_source}
                 # => [digest_left_lo, digest_left_hi, digest_right_lo, digest_right_hi, ...]
 
-                exec.keccak_precompile::merge_stack
+                exec.keccak_precompile::merge_stack_impl
                 # => [commitment, keccak_lo, keccak_hi, ...]
 
                 emit.event("{DEBUG_EVENT_ID}")
