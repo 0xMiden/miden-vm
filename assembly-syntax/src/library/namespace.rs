@@ -37,6 +37,10 @@ pub enum LibraryNamespaceError {
 /// Represents the root component of a library path, akin to a Rust crate name
 #[derive(Default, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u8)]
+#[cfg_attr(
+    all(feature = "serde", feature = "arbitrary"),
+    miden_serde_test_macros::serde_test
+)]
 pub enum LibraryNamespace {
     /// A reserved namespace for kernel modules
     Kernel = 0,
@@ -347,4 +351,24 @@ impl<'de> serde::Deserialize<'de> for LibraryNamespace {
                 .deserialize(deserializer)
         }
     }
+}
+
+#[cfg(all(feature = "std", any(test, feature = "arbitrary")))]
+impl proptest::prelude::Arbitrary for LibraryNamespace {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        use proptest::prelude::*;
+        prop_oneof![
+            Just(LibraryNamespace::Kernel),
+            Just(LibraryNamespace::Exec),
+            Just(LibraryNamespace::Anon),
+            prop::string::string_regex(r"[a-z][a-z0-9_]*")
+                .unwrap()
+                .prop_map(|s| { LibraryNamespace::User(Arc::from(s)) }),
+        ]
+        .boxed()
+    }
+
+    type Strategy = proptest::prelude::BoxedStrategy<Self>;
 }
