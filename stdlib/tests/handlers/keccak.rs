@@ -1,196 +1,304 @@
-use std::array;
+//! Tests for Keccak256 precompile event handlers.
+//!
+//! Verifies that:
+//! - Raw event handlers correctly compute Keccak256 and populate advice provider
+//! - MASM wrappers correctly return commitment and digest on stack
+//! - Both memory and digest merge operations work correctly
+//! - Various input sizes and edge cases are handled properly
 
-use miden_core::{
-    Felt,
-    crypto::hash::Digest,
-    utils::{range, string_to_event_id},
+use miden_core::{Felt, utils::string_to_event_id};
+use miden_crypto::{
+    Word,
+    hash::{keccak::Keccak256, rpo::Rpo256},
 };
-use miden_crypto::hash::{keccak::Keccak256, rpo::Rpo256};
-use miden_processor::{AdviceMutation, EventError, ProcessState};
-use miden_stdlib::handlers::keccak::{KECCAK_EVENT_ID, pack_digest_u32};
+use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessState};
+use miden_stdlib::handlers::keccak::{
+    KECCAK_HASH_MEM_EVENT_ID, KECCAK_MERGE_STACK_EVENT_ID, KeccakFeltDigest,
+};
 
 // Test constants
 // ================================================================================================
 
 const INPUT_MEMORY_ADDR: u32 = 128;
 const DEBUG_EVENT_ID: &str = "miden::debug";
-const MEMORY_CHECK_EVENT_ID: &str = "miden::memory_check";
+
+/// Test helper for Keccak256 precompile operations.
+///
+/// Wraps a byte array and provides utilities for:
+/// - Converting bytes to u32/felt representations
+/// - Computing expected Keccak256 digests and commitments
+/// - Generating MASM code for memory/stack operations
+/// - Creating event handlers for test validation
+#[derive(Debug, Eq, PartialEq)]
+struct Preimage(Vec<u8>);
+
+impl Preimage {
+    /// Converts bytes to packed u32 values (4 bytes per u32, last chunk padded with zeros).
+    fn as_packed_u32(&self) -> impl Iterator<Item = u32> {
+        let pack_bytes = |bytes: &[u8]| -> u32 {
+            let mut out = [0u8; 4];
+            for (i, byte) in bytes.iter().enumerate() {
+                out[i] = *byte;
+            }
+            u32::from_le_bytes(out)
+        };
+
+        self.0.chunks(4).map(pack_bytes)
+    }
+
+    /// Converts packed u32 values to field elements.
+    fn as_felt(&self) -> impl Iterator<Item = Felt> {
+        self.as_packed_u32().map(Felt::from)
+    }
+
+    /// Computes RPO(input_felts) for commitment calculation.
+    fn input_commitment(&self) -> Word {
+        let preimage_felt: Vec<Felt> = self.as_felt().collect();
+        Rpo256::hash_elements(&preimage_felt)
+    }
+
+    /// Computes the expected Keccak256 digest.
+    fn digest(&self) -> KeccakFeltDigest {
+        let hash_u8 = Keccak256::hash(&self.0);
+        KeccakFeltDigest::from_bytes(&hash_u8)
+    }
+
+    /// Computes the expected commitment: RPO(RPO(input) || RPO(hash)).
+    fn calldata_commitment(&self) -> Word {
+        Rpo256::merge(&[self.input_commitment(), self.digest().to_commitment()])
+    }
+
+    /// Generates MASM code to store packed u32 values into memory.
+    fn masm_memory_store_source(&self) -> String {
+        self.as_packed_u32()
+            .enumerate()
+            .map(|(i, value)| {
+                format!("push.{} push.{} mem_store", value, INPUT_MEMORY_ADDR + i as u32)
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    /// Generates MASM code to push two digests onto the stack for merge testing.
+    /// Requires exactly 64 bytes: first 32 bytes = left digest, last 32 bytes = right digest.
+    fn masm_stack_store_source(&self) -> String {
+        assert_eq!(self.0.len(), 64, "merge requires exactly 64 bytes (two digests)");
+        let (digest_l_lo, digest_l_hi) = KeccakFeltDigest::from_bytes(&self.0[0..32]).to_words();
+        let (digest_r_lo, digest_r_hi) = KeccakFeltDigest::from_bytes(&self.0[32..64]).to_words();
+        let words = [digest_l_lo, digest_l_hi, digest_r_lo, digest_r_hi];
+        words
+            .into_iter()
+            .rev()
+            .map(|word| format!("push.{:?}", word.as_ref()))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    /// Verifies that raw event handlers correctly populate advice provider.
+    fn handler_test(self) -> impl EventHandler {
+        move |process: &ProcessState| -> Result<Vec<AdviceMutation>, EventError> {
+            let digest = self.digest();
+            assert_eq!(
+                &digest.to_stack(),
+                process.advice_provider().stack(),
+                "digest not found in advice stack"
+            );
+
+            let calldata_commitment = self.calldata_commitment();
+            let witness = process.advice_provider().get_mapped_values(&calldata_commitment).expect(
+                format!(
+                    "witness was not found in advice map with key {calldata_commitment:?}\n\
+                    advice provider:\n{:?}",
+                    process.advice_provider(),
+                )
+                .as_str(),
+            );
+            let witness_expected: Vec<Felt> = {
+                let len_bytes = self.0.len() as u64;
+
+                [Felt::new(len_bytes)].into_iter().chain(self.as_felt()).collect()
+            };
+            assert_eq!(witness, witness_expected, "witness in advice map does not match preimage");
+
+            Ok(vec![])
+        }
+    }
+
+    /// Verifies that MASM wrappers correctly return commitment and digest on stack.
+    fn wrapper_test(self) -> impl EventHandler {
+        move |process: &ProcessState| -> Result<Vec<AdviceMutation>, EventError> {
+            // Expected stack after wrapper: [event_id, commitment, digest_lo, digest_hi, ...]
+            let calldata_commitment = process.get_stack_word(1);
+            let digest_lo = process.get_stack_word(5);
+            let digest_hi = process.get_stack_word(9);
+            let digest = KeccakFeltDigest::from_words(digest_lo, digest_hi);
+
+            // Verify the digest matches our reference computation
+            assert_eq!(digest, self.digest(), "output digest does not match");
+
+            // Verify the calldata commitment matches our reference computation
+            assert_eq!(
+                calldata_commitment,
+                self.calldata_commitment(),
+                "calldata_commitment does not match"
+            );
+
+            Ok(vec![])
+        }
+    }
+}
+
+// TESTS
+// ================================================================================================
 
 #[test]
-fn test_keccak_handler() {
-    const INPUT_U32: [u32; 4] = [1, 2, 3, u32::MAX];
+fn test_keccak_handlers() {
+    // Test various input sizes including edge cases
+    let inputs: Vec<Vec<u8>> = vec![
+        //empty
+        vec![],
+        // different byte packing
+        vec![1],
+        vec![1, 2],
+        vec![1, 2, 3],
+        vec![1, 2, 3, 4],
+        // longer inputs with non-aligned sizes
+        (0..31).collect(),
+        (0..32).collect(),
+        (0..33).collect(),
+        // large-ish inputs
+        (0..64).collect(),
+        (0..128).collect(),
+    ];
+
+    for input in &inputs {
+        test_keccak_hash_mem_handler_with_input(input);
+        test_keccak_hash_mem_wrapper_with_input(input);
+    }
+
+    let input_digests: Vec<u8> = (0..64).collect();
+    test_keccak_merge_stack_handler_with_input(&input_digests);
+    test_keccak_merge_stack_wrapper_with_input(&input_digests);
+}
+
+fn test_keccak_hash_mem_handler_with_input(input_u8: &[u8]) {
+    let len_bytes = input_u8.len();
+    let preimage = Preimage(input_u8.to_vec());
+
+    let memory_stores_source = preimage.masm_memory_store_source();
 
     let source = format!(
         r#"
-        begin
-            push.{INPUT_U32:?}
-            
-            # Write the 4 u32 values to memory at INPUT_ADDR
-            push.{INPUT_MEMORY_ADDR}
-            mem_storew
-            dropw
-            
-            # Set up stack for event: [ptr, len=16]
-            push.16.{INPUT_MEMORY_ADDR}
+            begin
+                # Store packed u32 values in memory
+                {memory_stores_source}
 
-            emit.event("{KECCAK_EVENT_ID}")
+                # Push handler inputs
+                push.{len_bytes}.{INPUT_MEMORY_ADDR}
+                # => [ptr, len_bytes, ...]
 
-            drop drop
-            emit.event("{DEBUG_EVENT_ID}")
-        end
-    "#
+                emit.event("{KECCAK_HASH_MEM_EVENT_ID}")
+                drop drop
+
+                emit.event("{DEBUG_EVENT_ID}")
+            end
+            "#,
     );
 
     let mut test = build_debug_test!(source, &[]);
 
-    // Validate keccak event handler functionality
-    test.add_event_handler(string_to_event_id(DEBUG_EVENT_ID), |process: &ProcessState| {
-        let ctx = process.ctx();
-        let memory_range = range(INPUT_MEMORY_ADDR as usize, INPUT_U32.len());
-        let memory_felt: Vec<Felt> = memory_range
-            .map(|addr| process.get_mem_value(ctx, addr as u32).unwrap())
-            .collect();
-
-        let input_felt: [Felt; 4] = INPUT_U32.map(Felt::from);
-        assert_eq!(memory_felt, input_felt, "preimage stored in memory is not equal to input");
-
-        // Verify advice stack contains keccak hash (reversed for stack order)
-        let hash_advice: Vec<Felt> =
-            process.advice_provider().stack().iter().copied().rev().collect();
-
-        let hash_expected: [Felt; 8] = {
-            let input_u8: Vec<u8> = INPUT_U32.into_iter().flat_map(u32::to_le_bytes).collect();
-            let hash_u8: [u8; 32] = Keccak256::hash(&input_u8).as_bytes();
-            pack_digest_u32(hash_u8).map(Felt::from)
-        };
-
-        assert_eq!(
-            &hash_advice, &hash_expected,
-            "advice stack should contain correct keccak hash as u32 values",
-        );
-
-        // Verify commitment->input mapping in advice map
-        let calldata_commitment = Rpo256::merge(&[
-            Rpo256::hash_elements(&input_felt),    // Commitment to preimage
-            Rpo256::hash_elements(&hash_expected), // Commitment to hash
-        ]);
-
-        let input_advice_map = process
-            .advice_provider()
-            .get_mapped_values(&calldata_commitment)
-            .expect("no entry stored with call data commitment as key");
-
-        assert_eq!(
-            input_advice_map, input_felt,
-            "stored witness in advice map should match original preimage",
-        );
-
-        Ok(vec![])
-    });
-
+    test.add_event_handler(string_to_event_id(DEBUG_EVENT_ID), preimage.handler_test());
     test.execute().unwrap();
 }
 
-#[test]
-fn test_keccak_masm_wrapper() {
+fn test_keccak_hash_mem_wrapper_with_input(input_u8: &[u8]) {
+    let len_bytes = input_u8.len();
+    let preimage = Preimage(input_u8.to_vec());
+
+    let memory_stores_source = preimage.masm_memory_store_source();
+
     let source = format!(
         r#"
-        use.std::crypto::hashes::keccak_precompile
-        use.std::sys
+            use.std::sys
+            use.std::crypto::hashes::keccak_precompile
 
-        # => [ptr, len]
-        #    Advice: [b_1, ..., b_len]
-        begin
-            # Compute ptr_end = ptr + len
-            dup.1 dup.1 add dup.1
-            # => [ptr_curr, ptr_end, ptr, len]
+            begin
+                # Store packed u32 values in memory
+                {memory_stores_source}
 
-            dup.1 dup.1 neq
-            # Stack: [ptr_end != ptr_in, ptr_curr, ptr_end, ptr, len]
+                # Push wrapper inputs
+                push.{len_bytes}.{INPUT_MEMORY_ADDR}
+                # => [ptr, len_bytes, ...]
 
-            # write the top n elements from the advice stack
-            # to the memory region [ptr..ptr+len)
-            while.true                  # [ptr_curr, ptr_end,   ptr,      len    ]
-                adv_push.1              # [byte,     ptr_curr,  ptr_end,  ...    ]
-                dup.1                   # [ptr_curr, bytes,     ptr_curr, ptr_end, ...]
-                mem_store               # [ptr_curr, ptr_end,   ...]
-                add.1 dup.1 dup.1 neq   # [(ptr_end!=ptr_next), ptr_next, ptr_end, ..]
-            end                         # [ptr_end,  ptr_end,   ptr,      len    ]
-            drop drop
-            # => [ptr, len]
+                exec.keccak_precompile::hash_mem
+                # => [commitment, keccak_lo, keccak_hi, ...]
 
-            # Save the arguments for the testing handler
-            dup.1 dup.1
-            # => [ptr, len, ptr, len]
-            exec.keccak_precompile::keccak256_precompile
-            # => [C, keccak_hi, keccak_lo, ptr, len]
-            
-            # Emit event to validate the resulting hash on the stack
-            emit.event("{MEMORY_CHECK_EVENT_ID}")
-
-            exec.sys::truncate_stack
-        end
-    "#
+                emit.event("{DEBUG_EVENT_ID}")
+                exec.sys::truncate_stack
+            end
+            "#,
     );
 
-    fn check_memory_handler(process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
-        // [event_id, C, keccak_hi, keccak_lo, ptr, len, ...]
-        let commitment = process.get_stack_word(1);
-        // keccak hash stored in reverse order at indices [5..11]
-        let hash_stack_felt: [Felt; 8] = array::from_fn(|i| process.get_stack_item(12 - i));
-        let ptr = process.get_stack_item(13).as_int() as u32;
-        let len = process.get_stack_item(14).as_int() as usize;
-        let len_u32 = len.div_ceil(4) as u32;
+    let mut test = build_debug_test!(source, &[]);
 
-        assert!(process.advice_provider().stack().is_empty());
+    test.add_event_handler(string_to_event_id(DEBUG_EVENT_ID), preimage.wrapper_test());
+    test.execute().unwrap();
+}
 
-        let ctx = process.ctx();
-        let input_felt: Vec<Felt> = (ptr..ptr + len_u32)
-            .map(|addr| process.get_mem_value(ctx, addr).unwrap())
-            .collect();
-        let input_commitment = Rpo256::hash_elements(&input_felt);
+fn test_keccak_merge_stack_handler_with_input(input_u8: &[u8]) {
+    let preimage = Preimage(input_u8.to_vec());
 
-        let hash_commitment = {
-            let input_u32: Vec<u32> = input_felt.iter().map(|felt| felt.as_int() as u32).collect();
-            let mut input_u8: Vec<u8> =
-                input_u32.iter().copied().flat_map(|value| value.to_le_bytes()).collect();
-            for to_drop in &input_u8[len..] {
-                assert_eq!(*to_drop, 0, "padding bytes should be zero");
-            }
-            input_u8.truncate(len);
+    let stack_stores_source = preimage.masm_stack_store_source();
 
-            let hash_u8: [u8; 32] = Keccak256::hash(&input_u8).as_bytes();
-            let hash_felt: [Felt; 8] = pack_digest_u32(hash_u8).map(Felt::from);
+    let source = format!(
+        r#"
+            use.std::sys
+            begin
+                # Push two digests to stack
+                {stack_stores_source}
+                # => [digest_left_lo, digest_left_hi, digest_right_lo, digest_right_hi, ...]
 
-            assert_eq!(&hash_stack_felt, &hash_felt);
-            Rpo256::hash_elements(&hash_felt)
-        };
+                emit.event("{KECCAK_MERGE_STACK_EVENT_ID}")
 
-        let expected_commitment = Rpo256::merge(&[input_commitment, hash_commitment]);
-        assert_eq!(commitment, expected_commitment);
+                emit.event("{DEBUG_EVENT_ID}")
+                exec.sys::truncate_stack
+            end
+            "#,
+    );
 
-        let input_advice = process.advice_provider().get_mapped_values(&commitment).unwrap();
-        assert_eq!(input_advice, input_felt);
+    let mut test = build_debug_test!(source, &[]);
 
-        Ok(vec![])
-    }
+    test.add_event_handler(string_to_event_id(DEBUG_EVENT_ID), preimage.handler_test());
+    test.execute().unwrap();
+}
 
-    let preimages: Vec<Vec<u32>> = vec![
-        vec![0],
-        vec![0, 1],
-        vec![0; 32],
-        (0..32).collect(),
-        (0..255).collect(),
-        (34..1234).map(|x| (x % 254) as u32).collect(),
-    ];
+fn test_keccak_merge_stack_wrapper_with_input(input_u8: &[u8]) {
+    let preimage = Preimage(input_u8.to_vec());
 
-    for preimage in preimages {
-        let stack_inputs = [preimage.len() as u64, INPUT_MEMORY_ADDR as u64];
-        let advice_inputs: Vec<_> = preimage.into_iter().map(u64::from).collect();
+    let stack_stores_source = preimage.masm_stack_store_source();
 
-        let mut test = build_debug_test!(source.clone(), &stack_inputs, &advice_inputs);
-        test.add_event_handler(string_to_event_id(MEMORY_CHECK_EVENT_ID), check_memory_handler);
+    let source = format!(
+        r#"
+            use.std::sys
+            use.std::crypto::hashes::keccak_precompile
 
-        test.execute().unwrap();
-    }
+            begin
+                # Push two digests to stack
+                {stack_stores_source}
+                # => [digest_left_lo, digest_left_hi, digest_right_lo, digest_right_hi, ...]
+
+                exec.keccak_precompile::merge_stack
+                # => [commitment, keccak_lo, keccak_hi, ...]
+
+                emit.event("{DEBUG_EVENT_ID}")
+
+                exec.sys::truncate_stack
+            end
+            "#,
+    );
+
+    let mut test = build_debug_test!(source, &[]);
+
+    test.add_event_handler(string_to_event_id(DEBUG_EVENT_ID), preimage.wrapper_test());
+    test.execute().unwrap();
 }

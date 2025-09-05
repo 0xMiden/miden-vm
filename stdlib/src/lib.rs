@@ -11,7 +11,10 @@ use miden_core::{Felt, Word, utils::string_to_event_id};
 use miden_processor::{EventHandler, HostLibrary};
 use miden_utils_sync::LazyLock;
 
-use crate::handlers::keccak::{KECCAK_EVENT_ID, push_keccak};
+use crate::handlers::keccak::{
+    KECCAK_HASH_MEM_EVENT_ID, KECCAK_MERGE_STACK_EVENT_ID, handle_keccak_hash_mem,
+    handle_keccak_merge_stack,
+};
 
 // STANDARD LIBRARY
 // ================================================================================================
@@ -58,7 +61,13 @@ impl StdLibrary {
 
     /// List of all `EventHandlers` required to run all of the standard library.
     pub fn handlers(&self) -> Vec<(Felt, Arc<dyn EventHandler>)> {
-        vec![(string_to_event_id(KECCAK_EVENT_ID), Arc::new(push_keccak))]
+        vec![
+            (string_to_event_id(KECCAK_HASH_MEM_EVENT_ID), Arc::new(handle_keccak_hash_mem)),
+            (
+                string_to_event_id(KECCAK_MERGE_STACK_EVENT_ID),
+                Arc::new(handle_keccak_merge_stack),
+            ),
+        ]
     }
 }
 
