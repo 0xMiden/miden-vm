@@ -1,0 +1,31 @@
+[package]
+name = "miden-bite"
+version = "0.18.0"
+description = "BITE is Binary Interchange, Tiny Encoding - a compact binary file format"
+documentation = "https://docs.rs/miden-bite/0.16.0"
+readme = "README.md"
+categories = ["no-std"]
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+[features]
+default = ["std"]
+std = ["indexmap/std", "serde/std", "thiserror/std"]
+
+[dependencies]
+bumpalo = { version = "3.19", default-features = false }
+log.workspace = true
+indexmap = { version = "2.10", default-features = false }
+rustc-hash = { version = "2.1", default-features = false }
+serde.workspace = true
+smallvec.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+env_logger.workspace = true
+proptest.workspace = true
