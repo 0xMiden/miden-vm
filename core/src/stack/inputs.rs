@@ -106,9 +106,7 @@ impl Deserializable for StackInputs {
         elements.reverse();
 
         StackInputs::new(elements).map_err(|err| {
-            DeserializationError::InvalidValue(format!(
-                "failed to create stack inputs: {err}",
-            ))
+            DeserializationError::InvalidValue(format!("failed to create stack inputs: {err}",))
         })
     }
 }

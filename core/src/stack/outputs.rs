@@ -139,9 +139,7 @@ impl Deserializable for StackOutputs {
         let elements = source.read_many::<Felt>(num_elements.into())?;
 
         StackOutputs::new(elements).map_err(|err| {
-            DeserializationError::InvalidValue(format!(
-                "failed to create stack outputs: {err}",
-            ))
+            DeserializationError::InvalidValue(format!("failed to create stack outputs: {err}",))
         })
     }
 }
