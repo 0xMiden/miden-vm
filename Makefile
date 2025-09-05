@@ -64,20 +64,52 @@ test-docs: ## Run documentation tests
 	cargo test --doc $(ALL_FEATURES_BUT_ASYNC)
 
 .PHONY: test-fast
-test-fast: ## Runs all tests with the debug profile
-	$(DEBUG_ASSERTIONS) cargo nextest run --features testing
+test-fast: ## Runs all tests quickly for rapid iterative development feedback
+	$(DEBUG_ASSERTIONS) cargo nextest run --cargo-profile test-fast --features testing,no_err_ctx
 
 .PHONY: test-skip-proptests
 test-skip-proptests: ## Runs all tests, except property-based tests
-	$(DEBUG_ASSERTIONS) cargo nextest run --features testing -E 'not test(#*proptest)'
+	$(DEBUG_ASSERTIONS) cargo nextest run --cargo-profile test-fast  --features testing -E 'not test(#*proptest)'
 
 .PHONY: test-loom
 test-loom: ## Runs all loom-based tests
-	RUSTFLAGS="--cfg loom" cargo nextest run --cargo-profile test-release --features testing -E 'test(#*loom)'
+	RUSTFLAGS="--cfg loom" cargo nextest run --features testing -E 'test(#*loom)'
 
-.PHONY: test-package
-test-package: ## Tests specific package: make test-package package=miden-vm
-	$(DEBUG_ASSERTIONS) cargo nextest run --cargo-profile test-release --features testing -p $(package)
+.PHONY: test-air
+test-air: ## Tests miden-air package with detailed debug info. Usage: make test-air [test=<pattern>]
+	$(DEBUG_ASSERTIONS) cargo nextest run --cargo-profile test-dev --features testing -p miden-air $(if $(test),$(test),)
+
+.PHONY: test-assembly
+test-assembly: ## Tests miden-assembly package with detailed debug info. Usage: make test-assembly [test=<pattern>]
+	$(DEBUG_ASSERTIONS) cargo nextest run --cargo-profile test-dev --features testing -p miden-assembly $(if $(test),$(test),)
+
+.PHONY: test-assembly-syntax
+test-assembly-syntax: ## Tests miden-assembly-syntax package with detailed debug info. Usage: make test-assembly-syntax [test=<pattern>]
+	$(DEBUG_ASSERTIONS) cargo nextest run --cargo-profile test-dev --features testing -p miden-assembly-syntax $(if $(test),$(test),)
+
+.PHONY: test-core
+test-core: ## Tests miden-core package with detailed debug info. Usage: make test-core [test=<pattern>]
+	$(DEBUG_ASSERTIONS) cargo nextest run --cargo-profile test-dev -p miden-core $(if $(test),$(test),)
+
+.PHONY: test-miden-vm
+test-miden-vm: ## Tests miden-vm package with detailed debug info. Usage: make test-miden-vm [test=<pattern>]
+	$(DEBUG_ASSERTIONS) cargo nextest run --cargo-profile test-dev --features concurrent,executable,metal,internal -p miden-vm $(if $(test),$(test),)
+
+.PHONY: test-processor
+test-processor: ## Tests miden-processor package with detailed debug info. Usage: make test-processor [test=<pattern>]
+	$(DEBUG_ASSERTIONS) cargo nextest run --cargo-profile test-dev --features concurrent,testing -p miden-processor $(if $(test),$(test),)
+
+.PHONY: test-prover
+test-prover: ## Tests miden-prover package with detailed debug info. Usage: make test-prover [test=<pattern>]
+	$(DEBUG_ASSERTIONS) cargo nextest run --cargo-profile test-dev --features concurrent,metal -p miden-prover $(if $(test),$(test),)
+
+.PHONY: test-stdlib
+test-stdlib: ## Tests miden-stdlib package with detailed debug info. Usage: make test-stdlib [test=<pattern>]
+	$(DEBUG_ASSERTIONS) cargo nextest run --cargo-profile test-dev --features with-debug-info -p miden-stdlib $(if $(test),$(test),)
+
+.PHONY: test-verifier
+test-verifier: ## Tests miden-verifier package with detailed debug info. Usage: make test-verifier [test=<pattern>]
+	$(DEBUG_ASSERTIONS) cargo nextest run --cargo-profile test-dev -p miden-verifier $(if $(test),$(test),)
 
 # --- checking ------------------------------------------------------------------------------------
 
