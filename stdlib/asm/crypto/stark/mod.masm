@@ -1,27 +1,34 @@
 use.std::crypto::stark::verifier
 
-#!   Verify a STARK proof attesting to the correct execution of a program in the Miden VM.
-#!   The following simplifying assumptions are currently made:
-#!   - The blowup is set to 8.
-#!   - The maximal allowed degree of the remainder polynomial is 7.
-#!   - The public inputs are composed of the input and output stacks, of fixed size equal to 16.
-#!   - There are two trace segments, main and auxiliary. It is assumed that the main trace segment
-#!   is 70 columns wide while the auxiliary trace segment is 7 columns wide.
-#!   - The OOD evaluation frame is composed of two interleaved rows, current and next, each composed
-#!    of 70 elements representing the main trace portion and 7 elements for the auxiliary trace one.
-#!   - To boost soundness, the protocol is run on a quadratic extension field and this means that
-#!    the OOD evaluation frame is composed of elements in a quadratic extension field i.e. tuples.
-#!    Similarly, elements of the auxiliary trace are quadratic extension field elements. The random
-#!    values for computing random linear combinations are also in this extension field.
-#!   - The following procedure makes use of global memory address beyond 3 * 2^30 and these are
-#!    defined in `constants.masm`.
+#! Verifies a STARK proof.
 #!
-#! Input: [log(trace_length), num_queries, log(blowup), grinding, ...]
-#! Output: [...]
+#! The purpose of the following verifier is to serve as a generic core around which a specific
+#! verifier can be built. It expects the following parameters on the stack from the caller:
 #!
-#! Cycles:
-#!  1- Remainder codeword size 32:
-#!   5013 + num_queries * (40 + num_fri_layers * 76 + 26 + 445) + 83 * num_fri_layers + 10 * log(trace_length) + 1633
-#!  2- Remainder codeword size 64:
-#!   5013 + num_queries * (40 + num_fri_layers * 76 + 26 + 445) + 83 * num_fri_layers + 10 * log(trace_length) + 3109
+#! 1. `[D0, D1, D2, D3]` which are respectively the digests for dynamic execution of procedures
+#!   i. `compute_deep_composition_polynomial_queries`
+#!   ii. `execute_constraint_evaluation_check`
+#!   iii. `process_row_ood_evaluations`
+#!   iv. `process_public_inputs`
+#! 2. `num_constraints` which is the number of constraints in the AIR
+#! 3. `trace_info` which is a field element encoding the layout of the AIR
+#! 4. `num_fixed_len_pi` is the number of fixed length public inputs of the AIR
+#!
+#! In addition to the above parameters, the verifier expects the following auxiliary proof parameters:
+#!
+#! 1. `log(trace_length)`, the logarithm base 2 of the trace length
+#! 2. `num_queries`, the number of FRI queries
+#! 3. `grinding`, the number of bits of grinding i.e., proof-of-work
+#!
+#! The following simplifying assumptions are currently made and hardcoded:
+#!
+#! - The blowup factor is set to 8.
+#! - The maximal allowed degree of the remainder polynomial is 127.
+#! - To boost soundness, the protocol is run on a quadratic extension field and this means that
+#!   the OOD evaluation frame is composed of elements in a quadratic extension field i.e. tuples.
+#!   Similarly, elements of the auxiliary trace are quadratic extension field elements. The random
+#!   values for computing random linear combinations are also in this extension field.
+#!
+#! Inputs:  [D3, D2, D1, D0, log(trace_length), num_queries, grinding, num_constraints, trace_info, num_fixed_len_pi]
+#! Outputs: []
 export.verifier::verify

@@ -1,4 +1,5 @@
 use.std::crypto::stark::constants
+use.std::crypto::fri::helper
 
 #! Stores the layer commitments C followed by [d_size, t_depth, a1, a0] and [poe, p, e1, e0] where:
 #! 1) d_size is the domain size divided by 4 of the domain corresponding to C.
@@ -225,10 +226,7 @@ export.verify_query_64
     swapw swapdw
     # => [x, x, x, x, x, x, x, x, ne1, ne0, rem_ptr, rem_ptr, P, ...]
 
-    repeat.16
-        mem_stream
-        horner_eval_ext
-    end
+    exec.helper::evaluate_fri_remainder_poly_max_degree_plus_1_half
     # => [x, x, x, x, x, x, x, x, ne1, ne0, rem_ptr, rem_ptr, P, ...]
 
     swapdw
@@ -287,11 +285,7 @@ export.verify_query_128
     swapw swapdw
     # => [x, x, x, x, x, x, x, x, ne1, ne0, rem_ptr, rem_ptr, P, ...]
 
-    repeat.32
-        mem_stream
-        horner_eval_ext
-    end
-    
+    exec.helper::evaluate_fri_remainder_poly_max_degree_plus_1    
     # => [x, x, x, x, x, x, x, x, ne1, ne0, rem_ptr, rem_ptr, P, ...]
     swapdw
     # => [ne1, ne0, rem_ptr, rem_ptr, P, x, x, x, x, x, x, x, x, ...]
@@ -487,7 +481,7 @@ export.verify
 
     
     exec.constants::get_remainder_poly_size
-    push.64
+    exec.helper::get_fri_remainder_poly_max_degree_plus_1_half
     eq
 
     if.true

@@ -1,6 +1,65 @@
 use.std::crypto::stark::random_coin
 use.std::crypto::stark::constants
 
+# CONSTANTS
+# =================================================================================================
+
+# General constants
+const.FRI_REMAINDER_CODEWORD_MAX_SIZE_HALF=512
+const.FRI_REMAINDER_CODEWORD_MAX_SIZE=1024
+const.FRI_REMAINDER_CODEWORD_MAX_SIZE_HALF_LOG=9
+const.FRI_REMAINDER_CODEWORD_MAX_SIZE_LOG=10
+const.FRI_REMAINDER_POLY_MAX_DEGREE_PLUS_1_HALF=64
+const.FRI_REMAINDER_POLY_MAX_DEGREE_PLUS_1=128
+
+# CONSTANTS GETTERS
+# =================================================================================================
+
+export.get_fri_remainder_codeword_max_size 
+    push.FRI_REMAINDER_CODEWORD_MAX_SIZE
+end
+
+export.get_fri_remainder_poly_max_degree_plus_1_half
+    push.FRI_REMAINDER_POLY_MAX_DEGREE_PLUS_1_HALF
+end
+
+export.get_fri_remainder_poly_max_degree_plus_1
+    push.FRI_REMAINDER_POLY_MAX_DEGREE_PLUS_1
+end
+
+# HELPERS 
+# =================================================================================================
+
+#! Loads FRI remainder polynomial of degree strictly less than `(max_degree + 1) / 2`.
+proc.load_fri_remainder_poly_max_degree_plus_1_half
+    repeat.16
+        adv_pipe hperm
+    end
+end
+
+#! Loads FRI remainder polynomial of degree strictly less than `max_degree + 1`.
+proc.load_fri_remainder_poly_max_degree_plus_1
+    repeat.32
+        adv_pipe hperm
+    end
+end
+
+#! Evaluates FRI remainder polynomial of degree strictly less than `(max_degree + 1) / 2`.
+export.evaluate_fri_remainder_poly_max_degree_plus_1_half
+    repeat.16
+        mem_stream
+        horner_eval_ext
+    end
+end
+
+#! Evaluates FRI remainder polynomial of degree strictly less than `max_degree + 1`.
+export.evaluate_fri_remainder_poly_max_degree_plus_1
+    repeat.32
+        mem_stream
+        horner_eval_ext
+    end
+end
+
 #! Compute the number of FRI layers given log2 of the size of LDE domain. It also computes the
 #! LDE domain generator and, from it, the trace generator and store these for later use.
 #!
@@ -18,14 +77,14 @@ export.generate_fri_parameters
     dup
     is_odd
     if.true
-        push.512
+        push.FRI_REMAINDER_CODEWORD_MAX_SIZE_HALF
         swap
-        sub.9
+        push.FRI_REMAINDER_CODEWORD_MAX_SIZE_HALF_LOG sub
         div.2
     else
-        push.1024
+        push.FRI_REMAINDER_CODEWORD_MAX_SIZE
         swap
-        sub.10
+        push.FRI_REMAINDER_CODEWORD_MAX_SIZE_LOG sub
         div.2
     end
     # => [num_fri_layers, remainder_size, lde_size, lde_size, log2(lde_size), domain_gen, 0, ...] (12 cycles)
@@ -154,7 +213,7 @@ export.load_and_verify_remainder
     #=> [remainder_poly_ptr, ...]
 
     exec.constants::get_remainder_poly_size
-    push.64
+    push.FRI_REMAINDER_POLY_MAX_DEGREE_PLUS_1_HALF
 
     eq
     if.true
@@ -165,9 +224,7 @@ export.load_and_verify_remainder
         # => [Y, Y, 0, 0, 0, 0 remainder_poly_ptr, remainder_size, y, y]
 
         # adv_load remainder polynomial
-        repeat.16
-            adv_pipe hperm
-        end
+        exec.load_fri_remainder_poly_max_degree_plus_1_half
 
         # Compare Remainder_poly_com with the read commitment
         exec.constants::tmp1 mem_loadw
@@ -187,9 +244,7 @@ export.load_and_verify_remainder
         # => [Y, Y, 0, 0, 0, 0 remainder_poly_ptr, remainder_size, y, y]
 
         # adv_load remainder polynomial
-        repeat.32
-            adv_pipe hperm
-        end
+        exec.load_fri_remainder_poly_max_degree_plus_1
         # => [Y, Remainder_poly_com, Y, remainder_poly_ptr, remainder_size, y, y]
 
         # Compare Remainder_poly_com with the read commitment

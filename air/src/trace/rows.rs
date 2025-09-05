@@ -19,7 +19,7 @@ pub enum RowIndexError {
 // ================================================================================================
 
 /// A newtype wrapper around a usize value representing a step in the execution trace.
-#[derive(Debug, Copy, Clone, Eq, Ord, PartialOrd)]
+#[derive(Debug, Default, Copy, Clone, Eq, Ord, PartialOrd)]
 pub struct RowIndex(u32);
 
 impl RowIndex {

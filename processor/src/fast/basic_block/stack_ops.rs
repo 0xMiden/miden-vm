@@ -1,12 +1,14 @@
 use miden_core::{WORD_SIZE, ZERO};
 
-use super::FastProcessor;
-use crate::{ErrorContext, ExecutionError};
+use crate::{
+    ErrorContext, ExecutionError,
+    fast::{FastProcessor, Tracer},
+};
 
 impl FastProcessor {
     /// Analogous to `Process::op_pad`.
-    pub fn op_pad(&mut self) {
-        self.increment_stack_size();
+    pub fn op_pad(&mut self, tracer: &mut impl Tracer) {
+        self.increment_stack_size(tracer);
         self.stack_write(0, ZERO);
     }
 
@@ -76,9 +78,9 @@ impl FastProcessor {
     ///
     /// The size of the stack is incremented by 1.
     #[inline(always)]
-    pub fn dup_nth(&mut self, n: usize) {
+    pub fn dup_nth(&mut self, n: usize, tracer: &mut impl Tracer) {
         let to_dup = self.stack_get(n);
-        self.increment_stack_size();
+        self.increment_stack_size(tracer);
         self.stack_write(0, to_dup);
     }
 
@@ -98,9 +100,13 @@ impl FastProcessor {
     }
 
     /// Analogous to `Process::op_cswap`.
-    pub fn op_cswap(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
+    pub fn op_cswap(
+        &mut self,
+        err_ctx: &impl ErrorContext,
+        tracer: &mut impl Tracer,
+    ) -> Result<(), ExecutionError> {
         let condition = self.stack_get(0);
-        self.decrement_stack_size();
+        self.decrement_stack_size(tracer);
 
         match condition.as_int() {
             0 => {
@@ -118,9 +124,13 @@ impl FastProcessor {
     }
 
     /// Analogous to `Process::op_cswapw`.
-    pub fn op_cswapw(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
+    pub fn op_cswapw(
+        &mut self,
+        err_ctx: &impl ErrorContext,
+        tracer: &mut impl Tracer,
+    ) -> Result<(), ExecutionError> {
         let condition = self.stack_get(0);
-        self.decrement_stack_size();
+        self.decrement_stack_size(tracer);
 
         match condition.as_int() {
             0 => {

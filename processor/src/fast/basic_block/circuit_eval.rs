@@ -1,11 +1,11 @@
 use miden_air::RowIndex;
 use miden_core::{Felt, FieldElement, QuadFelt};
 
-use super::{FastProcessor, memory::Memory};
 use crate::{
     ContextId, ExecutionError,
     chiplets::{CircuitEvaluation, MAX_NUM_ACE_WIRES, PTR_OFFSET_ELEM, PTR_OFFSET_WORD},
     errors::{AceError, ErrorContext},
+    fast::{FastProcessor, memory::Memory, tracer::NoopTracer},
 };
 
 impl FastProcessor {
@@ -86,15 +86,22 @@ pub fn eval_circuit_fast_(
 
     let mut ptr = ptr;
     // perform READ operations
+    // Note: we pass in a `NoopTracer`, because the parallel trace generation skips the circuit
+    // evaluation completely
     for _ in 0..num_read_rows {
-        let word = mem.read_word(ctx, ptr, clk, err_ctx).map_err(ExecutionError::MemoryError)?;
+        let word = mem
+            .read_word(ctx, ptr, clk, err_ctx, &mut NoopTracer)
+            .map_err(ExecutionError::MemoryError)?;
         evaluation_context.do_read(ptr, word)?;
         ptr += PTR_OFFSET_WORD;
     }
     // perform EVAL operations
+    // Note: we pass in a `NoopTracer`, because the parallel trace generation skips the circuit
+    // evaluation completely
     for _ in 0..num_eval_rows {
-        let instruction =
-            mem.read_element(ctx, ptr, err_ctx).map_err(ExecutionError::MemoryError)?;
+        let instruction = mem
+            .read_element(ctx, ptr, err_ctx, &mut NoopTracer)
+            .map_err(ExecutionError::MemoryError)?;
         evaluation_context.do_eval(ptr, instruction, err_ctx)?;
         ptr += PTR_OFFSET_ELEM;
     }

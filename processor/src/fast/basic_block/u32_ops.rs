@@ -3,8 +3,11 @@ use alloc::vec::Vec;
 use miden_core::{Felt, ZERO};
 use paste::paste;
 
-use super::FastProcessor;
-use crate::{ErrorContext, ExecutionError, utils::split_element};
+use crate::{
+    ErrorContext, ExecutionError,
+    fast::{FastProcessor, Tracer},
+    utils::split_element,
+};
 
 const U32_MAX: u64 = u32::MAX as u64;
 
@@ -35,11 +38,11 @@ macro_rules! require_u32_operands {
 impl FastProcessor {
     /// Analogous to `Process::op_u32split`.
     #[inline(always)]
-    pub fn op_u32split(&mut self) {
+    pub fn op_u32split(&mut self, tracer: &mut impl Tracer) {
         let top = self.stack_get(0);
         let (hi, lo) = split_element(top);
 
-        self.increment_stack_size();
+        self.increment_stack_size(tracer);
         self.stack_write(0, hi);
         self.stack_write(1, lo);
     }
@@ -56,14 +59,18 @@ impl FastProcessor {
     ///
     /// The size of the stack is decremented by 1.
     #[inline(always)]
-    pub fn op_u32add3(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
+    pub fn op_u32add3(
+        &mut self,
+        err_ctx: &impl ErrorContext,
+        tracer: &mut impl Tracer,
+    ) -> Result<(), ExecutionError> {
         let (c, b, a) = require_u32_operands!(self, [0, 1, 2], err_ctx);
 
         let result = Felt::new(a + b + c);
         let (sum_hi, sum_lo) = split_element(result);
 
         // write the high 32 bits to the new top of the stack, and low 32 bits after
-        self.decrement_stack_size();
+        self.decrement_stack_size(tracer);
         self.stack_write(0, sum_hi);
         self.stack_write(1, sum_lo);
         Ok(())
@@ -75,6 +82,7 @@ impl FastProcessor {
         &mut self,
         op_idx: usize,
         err_ctx: &impl ErrorContext,
+        tracer: &mut impl Tracer,
     ) -> Result<(), ExecutionError> {
         let op_idx = Felt::from(op_idx as u32);
         self.u32_pop2_applyfn_push_results(
@@ -87,6 +95,7 @@ impl FastProcessor {
                 Ok((first_new, second_new))
             },
             err_ctx,
+            tracer,
         )
     }
 
@@ -101,14 +110,18 @@ impl FastProcessor {
     /// the result, splits the result into low and high 32-bit values, and pushes these values
     /// back onto the stack.
     #[inline(always)]
-    pub fn op_u32madd(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
+    pub fn op_u32madd(
+        &mut self,
+        err_ctx: &impl ErrorContext,
+        tracer: &mut impl Tracer,
+    ) -> Result<(), ExecutionError> {
         let (b, a, c) = require_u32_operands!(self, [0, 1, 2], err_ctx);
 
         let result = Felt::new(a * b + c);
         let (result_hi, result_lo) = split_element(result);
 
         // write the high 32 bits to the new top of the stack, and low 32 bits after
-        self.decrement_stack_size();
+        self.decrement_stack_size(tracer);
         self.stack_write(0, result_hi);
         self.stack_write(1, result_lo);
         Ok(())
@@ -116,7 +129,11 @@ impl FastProcessor {
 
     /// Analogous to `Process::op_u32div`.
     #[inline(always)]
-    pub fn op_u32div(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
+    pub fn op_u32div(
+        &mut self,
+        err_ctx: &impl ErrorContext,
+        tracer: &mut impl Tracer,
+    ) -> Result<(), ExecutionError> {
         let clk = self.clk;
         self.u32_pop2_applyfn_push_results(
             ZERO,
@@ -133,19 +150,28 @@ impl FastProcessor {
                 Ok((r, q))
             },
             err_ctx,
+            tracer,
         )
     }
 
     /// Analogous to `Process::op_u32and`.
     #[inline(always)]
-    pub fn op_u32and(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
-        self.u32_pop2_applyfn_push(|a, b| a & b, err_ctx)
+    pub fn op_u32and(
+        &mut self,
+        err_ctx: &impl ErrorContext,
+        tracer: &mut impl Tracer,
+    ) -> Result<(), ExecutionError> {
+        self.u32_pop2_applyfn_push(|a, b| a & b, err_ctx, tracer)
     }
 
     /// Analogous to `Process::op_u32xor`.
     #[inline(always)]
-    pub fn op_u32xor(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
-        self.u32_pop2_applyfn_push(|a, b| a ^ b, err_ctx)
+    pub fn op_u32xor(
+        &mut self,
+        err_ctx: &impl ErrorContext,
+        tracer: &mut impl Tracer,
+    ) -> Result<(), ExecutionError> {
+        self.u32_pop2_applyfn_push(|a, b| a ^ b, err_ctx, tracer)
     }
 
     /// Analogous to `Process::op_u32assert2`.
@@ -154,8 +180,14 @@ impl FastProcessor {
         &mut self,
         err_code: Felt,
         err_ctx: &impl ErrorContext,
+        tracer: &mut impl Tracer,
     ) -> Result<(), ExecutionError> {
-        self.u32_pop2_applyfn_push_results(err_code, |first, second| Ok((first, second)), err_ctx)
+        self.u32_pop2_applyfn_push_results(
+            err_code,
+            |first, second| Ok((first, second)),
+            err_ctx,
+            tracer,
+        )
     }
 
     // HELPERS
@@ -167,11 +199,12 @@ impl FastProcessor {
         &mut self,
         f: impl FnOnce(u64, u64) -> u64,
         err_ctx: &impl ErrorContext,
+        tracer: &mut impl Tracer,
     ) -> Result<(), ExecutionError> {
         let (b, a) = require_u32_operands!(self, [0, 1], err_ctx);
 
         let result = f(a, b);
-        self.decrement_stack_size();
+        self.decrement_stack_size(tracer);
         self.stack_write(0, Felt::new(result));
 
         Ok(())
@@ -213,6 +246,7 @@ impl FastProcessor {
         err_code: Felt,
         f: impl FnOnce(u64, u64) -> Result<(u64, u64), ExecutionError>,
         err_ctx: &impl ErrorContext,
+        _tracer: &mut impl Tracer,
     ) -> Result<(), ExecutionError> {
         let (first_old, second_old) = require_u32_operands!(self, [0, 1], err_code, err_ctx);
 

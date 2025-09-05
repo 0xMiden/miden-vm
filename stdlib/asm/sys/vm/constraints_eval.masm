@@ -1,0 +1,213 @@
+use.std::crypto::hashes::rpo
+use.std::crypto::stark::constants
+use.std::crypto::stark::utils
+
+# CONSTANTS
+# =================================================================================================
+
+# Number of constraints, both boundary and transitional
+const.NUM_CONSTRAINTS=6
+
+# Number of inputs to the constraint evaluation circuit
+const.NUM_INPUTS_CIRCUIT=244
+
+# Number of evaluation gates in the constraint evaluation circuit
+const.NUM_EVAL_GATES_CIRCUIT=108
+
+# Max cycle length for periodic columns
+const.MAX_CYCLE_LEN_LOG=3
+
+# --- constant getters --------------------------------------------------------
+
+proc.get_num_constraints
+    push.NUM_CONSTRAINTS
+end
+
+# ERRORS
+# =================================================================================================
+
+const.ERR_FAILED_TO_LOAD_CIRCUIT_DESCRIPTION="failed to load the circuit description for the constraints evaluation check"
+
+
+# CONSTRAINT EVALUATION CHECKER
+# =================================================================================================
+
+#! Executes the constraints evaluation check by evaluating an arithmetic circuit using the ACE
+#! chiplet.
+#!
+#! The circuit description is hardcoded into the verifier using its commitment, which is computed as
+#! the sequential hash of its description using RPO hasher. The circuit description, containing both
+#! constants and evaluation gates description, is stored at the contiguous memory region starting
+#! at `ACE_CIRCUIT_PTR`. The variable part of the circuit input is stored at the contiguous memory
+#! region starting at `pi_ptr`. The (variable) inputs to the circuit are laid out such that the
+#! aforementioned memory regions are together contiguous with the (variable) inputs section.
+#!
+#! Inputs:  []
+#! Outputs: []
+export.execute_constraint_evaluation_check
+    # Compute and store at the appropriate memory location the auxiliary inputs needed by
+    # the arithmetic circuit.
+    push.MAX_CYCLE_LEN_LOG
+    exec.utils::set_up_auxiliary_inputs_ace
+    # => []
+
+    # Load the circuit description from the advice tape and check that it matches the hardcoded digest
+    exec.load_ace_circuit_description
+    # => []
+
+    # Set up the inputs to the "eval_circuit" op. Namely:
+    # 1. a pointer to the inputs of the circuit in memory,
+    # 2. the number of inputs to the circuit,
+    # 3. the number of evaluation gates in the circuit.
+    push.NUM_EVAL_GATES_CIRCUIT
+    push.NUM_INPUTS_CIRCUIT
+    exec.constants::public_inputs_address_ptr mem_load
+    # => [pi_ptr, n_read, n_eval]
+
+    # Perform the constraint evaluation check by checking that the circuit evaluates to zero, which
+    # boils down to the "eval_circuit" returning.
+    eval_circuit
+    # => [pi_ptr, n_read, n_eval]
+
+    # Clean up the stack.
+    drop drop drop
+    # => []
+end
+
+#! Loads the description of the ACE circuit for the constraints evaluation check.
+#!
+#! Inputs:  []
+#! Outputs: []
+proc.load_ace_circuit_description
+    push.CIRCUIT_COMMITMENT
+    adv.push_mapval
+    exec.constants::get_arithmetic_circuit_ptr
+    padw padw padw
+    repeat.14
+        adv_pipe
+        hperm
+    end
+    exec.rpo::squeeze_digest
+    movup.4 drop
+    assert_eqw.err=ERR_FAILED_TO_LOAD_CIRCUIT_DESCRIPTION
+    # => []
+end
+
+
+# CONSTRAINT EVALUATION CIRCUIT DESCRIPTION
+# =================================================================================================
+
+adv_map.CIRCUIT_COMMITMENT=[
+    1,
+    0,
+    0,
+    0,
+    2305843126251553075,
+    114890375379,
+    2305843283017859381,
+    2305843266911732021,
+    1152921616275996777,
+    2305843265837990197,
+    1152921614128513127,
+    2305843319525081397,
+    1152921611981029477,
+    2305843318451339573,
+    1152921609833545827,
+    2305843317377597749,
+    1152921607686062177,
+    2305843316303855925,
+    1152921605538578527,
+    1152921604464836831,
+    1152921614128513128,
+    1152921602317353060,
+    1152921601243611234,
+    1152921600169869408,
+    1152921599096127582,
+    1152921598022385920,
+    2305843101555490908,
+    1152921604464836735,
+    1152921614128513129,
+    1152921593727418468,
+    1152921592653676642,
+    1152921591579934816,
+    1152921590506192990,
+    1152921776263528702,
+    270582939757,
+    1152921587284967502,
+    1152921586211225679,
+    1152921611981029479,
+    1152921584063742050,
+    1152921582990000224,
+    1152921581916258398,
+    1152921580842516556,
+    2305843084375621707,
+    1152921609833545829,
+    1152921577621291104,
+    1152921576547549278,
+    315680096365,
+    1152921574400065828,
+    314606354541,
+    1152921572252581952,
+    1152921571178840130,
+    2305843074711945285,
+    1152921607686062179,
+    1152921567957614686,
+    1152921566883872830,
+    2305843070416977980,
+    1152921605538578529,
+    1152921563662647358,
+    2305843067195752504,
+    1152921571178840159,
+    2305843065048268853,
+    2305843063974527060,
+    53687091285,
+    333933707485,
+    117037858930,
+    118111600754,
+    120259084402,
+    117037858929,
+    1152921557220196467,
+    2305843055384592490,
+    1152921553998970927,
+    1152921548630261805,
+    1152921547556519982,
+    1152921546482778154,
+    1152921628087156851,
+    1152921544335294771,
+    1152921544335294579,
+    1152921542187811039,
+    2305843045720916004,
+    1152921542187810931,
+    1152921538966585392,
+    2305843042499690529,
+    1152921551851487278,
+    1152921535745359902,
+    2305843039278465062,
+    1152921538966585459,
+    1152921532524134623,
+    1152921551851487279,
+    1152921530376650777,
+    2305843033909755931,
+    1152921625939673300,
+    2305843031762272469,
+    1152921526081683569,
+    2305843029614788822,
+    1152921523934199921,
+    2305843027467305175,
+    1152921521786716273,
+    2305843025319821528,
+    1152921519639232625,
+    2305843023172337881,
+    1152921517491748977,
+    2305843021024854234,
+    1152921515344265329,
+    2305843018877370587,
+    1152921548630261804,
+    1152921512123039752,
+    6442450966,
+    1152921509975556101,
+    1152921508901814276,
+    1152921507828072451,
+    1152921506754330626,
+    1152921505680588801
+]

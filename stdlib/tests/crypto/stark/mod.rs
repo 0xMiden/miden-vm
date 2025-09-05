@@ -5,7 +5,7 @@ use miden_assembly::Assembler;
 use miden_core::{Felt, FieldElement, QuadFelt, WORD_SIZE, Word, ZERO};
 use miden_processor::{
     DefaultHost, Program, ProgramInfo,
-    crypto::{RandomCoin, Rpo256, RpoRandomCoin},
+    crypto::{RandomCoin, RpoRandomCoin},
 };
 use miden_utils_testing::{
     AdviceInputs, ProvingOptions, StackInputs, VerifierError, proptest::proptest, prove,
@@ -18,21 +18,20 @@ use verifier_recursive::{VerifierData, generate_advice_inputs};
 mod verifier_recursive;
 
 // Note: Changes to Miden VM may cause this test to fail when some of the assumptions documented
-// in `stdlib/asm/crypto/stark/verifier.masm` are violated.
+// in `stdlib/asm/sys/vm/mod.masm` are violated.
 #[rstest]
 #[case(None)]
 #[case(Some(KERNEL_EVEN_NUM_PROC))]
 #[case(Some(KERNEL_ODD_NUM_PROC))]
 fn stark_verifier_e2f4(#[case] kernel: Option<&str>) {
     // An example MASM program to be verified inside Miden VM.
-
     let example_source = "begin
             repeat.320
                 swap dup.1 add
-                
             end
             u32split drop
         end";
+
     let mut stack_inputs = vec![0_u64; 16];
     stack_inputs[15] = 0;
     stack_inputs[14] = 1;
@@ -41,19 +40,14 @@ fn stark_verifier_e2f4(#[case] kernel: Option<&str>) {
         initial_stack,
         advice_stack: tape,
         store,
-        mut advice_map,
+        advice_map,
     } = generate_recursive_verifier_data(example_source, stack_inputs, kernel).unwrap();
-
-    let circuit: Vec<Felt> = CONSTRAINT_EVALUATION_CIRCUIT.iter().map(|a| Felt::new(*a)).collect();
-    let circuit_digest = Rpo256::hash_elements(&circuit);
-
-    advice_map.push((circuit_digest, circuit));
 
     // Verify inside Miden VM
     let source = "
-        use.std::crypto::stark::verifier
+        use.std::sys::vm
         begin
-            exec.verifier::verify
+            exec.vm::verify_proof
         end
         ";
 
@@ -88,7 +82,7 @@ pub fn generate_recursive_verifier_data(
     let mut host = DefaultHost::default();
 
     let options =
-        ProvingOptions::new(27, 8, 16, FieldExtension::Quadratic, 4, 127, HashFunction::Rpo256);
+        ProvingOptions::new(27, 8, 0, FieldExtension::Quadratic, 4, 127, HashFunction::Rpo256);
 
     let (stack_outputs, proof) =
         prove(&program, stack_inputs.clone(), advice_inputs, &mut host, options).unwrap();
@@ -113,7 +107,18 @@ fn variable_length_public_inputs(#[case] num_kernel_proc_digests: usize) {
     let num_queries = 27;
     let log_trace_len = 10;
     let grinding_bits = 16;
-    let initial_stack = vec![num_queries, log_trace_len, grinding_bits];
+    let num_constraints = 200;
+    let trace_info = 0x50010810;
+    let num_fixed_len_pi_padded = 40;
+    let mut initial_stack = vec![
+        log_trace_len,
+        num_queries,
+        grinding_bits,
+        num_constraints,
+        trace_info,
+        num_fixed_len_pi_padded,
+    ];
+    initial_stack.reverse();
 
     // Seeded random number generator for reproducibility
     let seed = [0_u8; 32];
@@ -166,7 +171,8 @@ fn variable_length_public_inputs(#[case] num_kernel_proc_digests: usize) {
         "
         use.std::crypto::stark::random_coin
         use.std::crypto::stark::constants
-        use.std::crypto::stark::public_inputs
+        use.std::sys::vm::public_inputs
+
         begin
             # 1) Initialize the FS transcript
             exec.random_coin::init_seed
@@ -379,120 +385,3 @@ const TEST_RANDOM_INDICES_GENERATION: &str = r#"
             drop
         end
         "#;
-
-/// This is an output of the ACE codegen in AirScript and encodes the circuit for executing
-/// the constraint evaluation check i.e., DEEP-ALI.
-const CONSTRAINT_EVALUATION_CIRCUIT: [u64; 112] = [
-    1,
-    0,
-    0,
-    0,
-    2305843126251553075,
-    114890375379,
-    2305843283017859381,
-    2305843266911732021,
-    1152921616275996777,
-    2305843265837990197,
-    1152921614128513127,
-    2305843319525081397,
-    1152921611981029477,
-    2305843318451339573,
-    1152921609833545827,
-    2305843317377597749,
-    1152921607686062177,
-    2305843316303855925,
-    1152921605538578527,
-    1152921604464836831,
-    1152921614128513128,
-    1152921602317353060,
-    1152921601243611234,
-    1152921600169869408,
-    1152921599096127582,
-    1152921598022385920,
-    2305843101555490908,
-    1152921604464836735,
-    1152921614128513129,
-    1152921593727418468,
-    1152921592653676642,
-    1152921591579934816,
-    1152921590506192990,
-    1152921776263528702,
-    270582939757,
-    1152921587284967502,
-    1152921586211225679,
-    1152921611981029479,
-    1152921584063742050,
-    1152921582990000224,
-    1152921581916258398,
-    1152921580842516556,
-    2305843084375621707,
-    1152921609833545829,
-    1152921577621291104,
-    1152921576547549278,
-    315680096365,
-    1152921574400065828,
-    314606354541,
-    1152921572252581952,
-    1152921571178840130,
-    2305843074711945285,
-    1152921607686062179,
-    1152921567957614686,
-    1152921566883872830,
-    2305843070416977980,
-    1152921605538578529,
-    1152921563662647358,
-    2305843067195752504,
-    1152921571178840159,
-    2305843065048268853,
-    2305843063974527060,
-    53687091285,
-    333933707485,
-    117037858930,
-    118111600754,
-    120259084402,
-    117037858929,
-    1152921557220196467,
-    2305843055384592490,
-    1152921553998970927,
-    1152921548630261805,
-    1152921547556519982,
-    1152921546482778154,
-    1152921628087156851,
-    1152921544335294771,
-    1152921544335294579,
-    1152921542187811039,
-    2305843045720916004,
-    1152921542187810931,
-    1152921538966585392,
-    2305843042499690529,
-    1152921551851487278,
-    1152921535745359902,
-    2305843039278465062,
-    1152921538966585459,
-    1152921532524134623,
-    1152921551851487279,
-    1152921530376650777,
-    2305843033909755931,
-    1152921625939673300,
-    2305843031762272469,
-    1152921526081683569,
-    2305843029614788822,
-    1152921523934199921,
-    2305843027467305175,
-    1152921521786716273,
-    2305843025319821528,
-    1152921519639232625,
-    2305843023172337881,
-    1152921517491748977,
-    2305843021024854234,
-    1152921515344265329,
-    2305843018877370587,
-    1152921548630261804,
-    1152921512123039752,
-    6442450966,
-    1152921509975556101,
-    1152921508901814276,
-    1152921507828072451,
-    1152921506754330626,
-    1152921505680588801,
-];
