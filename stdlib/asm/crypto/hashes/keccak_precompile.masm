@@ -32,19 +32,7 @@ export.hash_mem
     exec.rpo::hash_memory
     # => [RPO(input), ...]
 
-    # load digest from advice stack
-    padw adv_loadw
-    padw adv_loadw
-    # => [keccak_lo, keccak_hi, RPO(input), ...]
-    
-    # compute commitment = RPO(RPO(input) || RPO(keccak))
-    dupw.1 dupw.1 swapw hmerge
-    # => [RPO(keccak), keccak_lo, keccak_hi, RPO(input), ...]
-    
-    movupw.3 swapw
-    # => [RPO(keccak), RPO(input), keccak_lo, keccak_hi, ...]
-    
-    hmerge
+    exec.build_commitment_from_digest
     # => [commitment, keccak_lo, keccak_hi]
 end
 
@@ -73,16 +61,27 @@ export.merge_stack
     hperm exec.rpo::squeeze_digest
     # => [RPO(digests), ...]
 
+    exec.build_commitment_from_digest
+    # => [commitment, keccak_lo, keccak_hi]
+end
+
+#! Common helper that builds commitment from RPO(input) and advice stack digest.
+#!
+#! Input: [RPO(input), ...]
+#! Output: [commitment, keccak_lo, keccak_hi, ...]
+#!
+#! Where commitment = RPO(RPO(input) || RPO(keccak))
+proc.build_commitment_from_digest
     # load digest from advice stack
     padw adv_loadw
     padw adv_loadw
     # => [keccak_lo, keccak_hi, RPO(input), ...]
-    
+
     # compute commitment = RPO(RPO(input) || RPO(keccak))
     dupw.1 dupw.1 swapw hmerge
     # => [RPO(keccak), keccak_lo, keccak_hi, RPO(input), ...]
-    
-    movupw.3 swapw  
+
+    movupw.3 swapw
     # => [RPO(keccak), RPO(input), keccak_lo, keccak_hi, ...]
 
     hmerge
