@@ -4,7 +4,7 @@ use core::fmt;
 use miden_crypto::{Felt, Word};
 use miden_formatting::prettier::PrettyPrint;
 
-use super::{MastNodeExt, MastNodeTrait};
+use super::{MastNodeErrorContext, MastNodeExt};
 use crate::{
     OPCODE_SPLIT,
     chiplets::hasher,
@@ -138,7 +138,7 @@ impl SplitNode {
     }
 }
 
-impl MastNodeExt for SplitNode {
+impl MastNodeErrorContext for SplitNode {
     fn decorators(&self) -> impl Iterator<Item = (usize, DecoratorId)> {
         self.before_enter.iter().chain(&self.after_exit).copied().enumerate()
     }
@@ -221,7 +221,7 @@ impl fmt::Display for SplitNodePrettyPrint<'_> {
 // MAST NODE TRAIT IMPLEMENTATION
 // ================================================================================================
 
-impl MastNodeTrait for SplitNode {
+impl MastNodeExt for SplitNode {
     fn digest(&self) -> Word {
         self.digest()
     }

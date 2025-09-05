@@ -7,7 +7,7 @@ use miden_formatting::{
     prettier::{Document, PrettyPrint, const_text, nl, text},
 };
 
-use super::{MastNodeExt, MastNodeTrait};
+use super::{MastNodeErrorContext, MastNodeExt};
 use crate::{
     OPCODE_CALL, OPCODE_SYSCALL,
     chiplets::hasher,
@@ -194,7 +194,7 @@ impl CallNode {
     }
 }
 
-impl MastNodeExt for CallNode {
+impl MastNodeErrorContext for CallNode {
     fn decorators(&self) -> impl Iterator<Item = (usize, DecoratorId)> {
         self.before_enter.iter().chain(&self.after_exit).copied().enumerate()
     }
@@ -295,7 +295,7 @@ impl fmt::Display for CallNodePrettyPrint<'_> {
 // MAST NODE TRAIT IMPLEMENTATION
 // ================================================================================================
 
-impl MastNodeTrait for CallNode {
+impl MastNodeExt for CallNode {
     /// Returns a commitment to this Call node.
     ///
     /// The commitment is computed as a hash of the callee and an empty word ([ZERO; 4]) in the

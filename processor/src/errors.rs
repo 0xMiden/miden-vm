@@ -3,7 +3,7 @@ use alloc::{sync::Arc, vec::Vec};
 use miden_air::RowIndex;
 use miden_core::{
     Felt, QuadFelt, Word,
-    mast::{DecoratorId, MastForest, MastNodeExt, MastNodeId},
+    mast::{DecoratorId, MastForest, MastNodeErrorContext, MastNodeId},
     stack::MIN_STACK_DEPTH,
     utils::to_hex,
 };
@@ -508,7 +508,11 @@ pub struct ErrorContextImpl {
 
 impl ErrorContextImpl {
     #[allow(dead_code)]
-    pub fn new(mast_forest: &MastForest, node: &impl MastNodeExt, host: &impl BaseHost) -> Self {
+    pub fn new(
+        mast_forest: &MastForest,
+        node: &impl MastNodeErrorContext,
+        host: &impl BaseHost,
+    ) -> Self {
         let (label, source_file) =
             Self::precalc_label_and_source_file(None, mast_forest, node, host);
         Self { label, source_file }
@@ -517,7 +521,7 @@ impl ErrorContextImpl {
     #[allow(dead_code)]
     pub fn new_with_op_idx(
         mast_forest: &MastForest,
-        node: &impl MastNodeExt,
+        node: &impl MastNodeErrorContext,
         host: &impl BaseHost,
         op_idx: usize,
     ) -> Self {
@@ -530,7 +534,7 @@ impl ErrorContextImpl {
     fn precalc_label_and_source_file(
         op_idx: Option<usize>,
         mast_forest: &MastForest,
-        node: &impl MastNodeExt,
+        node: &impl MastNodeErrorContext,
         host: &impl BaseHost,
     ) -> (SourceSpan, Option<Arc<SourceFile>>) {
         node.get_assembly_op(mast_forest, op_idx)

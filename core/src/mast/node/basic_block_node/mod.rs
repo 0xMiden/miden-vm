@@ -14,7 +14,7 @@ mod op_batch;
 pub use op_batch::OpBatch;
 use op_batch::OpBatchAccumulator;
 
-use super::{MastNodeExt, MastNodeTrait};
+use super::{MastNodeErrorContext, MastNodeExt};
 
 #[cfg(test)]
 mod tests;
@@ -264,7 +264,7 @@ impl BasicBlockNode {
     }
 }
 
-impl MastNodeExt for BasicBlockNode {
+impl MastNodeErrorContext for BasicBlockNode {
     fn decorators(&self) -> impl Iterator<Item = (usize, DecoratorId)> {
         self.decorators.iter().copied()
     }
@@ -289,7 +289,7 @@ impl BasicBlockNode {
 // MAST NODE TRAIT IMPLEMENTATION
 // ================================================================================================
 
-impl MastNodeTrait for BasicBlockNode {
+impl MastNodeExt for BasicBlockNode {
     /// Returns a commitment to this basic block.
     fn digest(&self) -> Word {
         self.digest

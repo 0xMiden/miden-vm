@@ -4,7 +4,7 @@ use core::fmt;
 use miden_crypto::{Felt, Word};
 use miden_formatting::prettier::PrettyPrint;
 
-use super::{MastNodeExt, MastNodeTrait};
+use super::{MastNodeErrorContext, MastNodeExt};
 use crate::{
     OPCODE_LOOP,
     chiplets::hasher,
@@ -124,7 +124,7 @@ impl LoopNode {
     }
 }
 
-impl MastNodeExt for LoopNode {
+impl MastNodeErrorContext for LoopNode {
     fn decorators(&self) -> impl Iterator<Item = (usize, DecoratorId)> {
         self.before_enter.iter().chain(&self.after_exit).copied().enumerate()
     }
@@ -205,7 +205,7 @@ impl fmt::Display for LoopNodePrettyPrint<'_> {
 // MAST NODE TRAIT IMPLEMENTATION
 // ================================================================================================
 
-impl MastNodeTrait for LoopNode {
+impl MastNodeExt for LoopNode {
     fn digest(&self) -> Word {
         self.digest()
     }

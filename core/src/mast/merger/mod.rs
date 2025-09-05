@@ -4,7 +4,7 @@ use miden_crypto::hash::blake::Blake3Digest;
 
 use crate::mast::{
     DecoratorId, MastForest, MastForestError, MastNode, MastNodeFingerprint, MastNodeId,
-    MultiMastForestIteratorItem, MultiMastForestNodeIter, node::MastNodeTrait,
+    MultiMastForestIteratorItem, MultiMastForestNodeIter, node::MastNodeExt,
 };
 
 #[cfg(test)]

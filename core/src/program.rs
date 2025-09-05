@@ -8,7 +8,7 @@ use winter_utils::{ByteReader, ByteWriter, Deserializable, DeserializationError,
 use super::Kernel;
 use crate::{
     AdviceMap,
-    mast::{MastForest, MastNode, MastNodeId, MastNodeTrait},
+    mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
     utils::ToElements,
 };
 

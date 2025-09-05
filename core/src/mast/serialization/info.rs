@@ -4,7 +4,7 @@ use super::{NodeDataOffset, basic_blocks::BasicBlockDataDecoder};
 use crate::{
     mast::{
         BasicBlockNode, CallNode, JoinNode, LoopNode, MastNode, MastNodeId, SplitNode, Word,
-        node::MastNodeTrait,
+        node::MastNodeExt,
     },
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };

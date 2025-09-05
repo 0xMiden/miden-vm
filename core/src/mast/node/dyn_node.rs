@@ -4,7 +4,7 @@ use core::fmt;
 use miden_crypto::{Felt, Word};
 use miden_formatting::prettier::{Document, PrettyPrint, const_text, nl};
 
-use super::{MastNodeExt, MastNodeTrait};
+use super::{MastNodeErrorContext, MastNodeExt};
 use crate::{
     OPCODE_DYN, OPCODE_DYNCALL,
     mast::{DecoratorId, MastForest, MastNodeId, Remapping},
@@ -85,7 +85,7 @@ impl DynNode {
     }
 }
 
-impl MastNodeExt for DynNode {
+impl MastNodeErrorContext for DynNode {
     fn decorators(&self) -> impl Iterator<Item = (usize, DecoratorId)> {
         self.before_enter.iter().chain(&self.after_exit).copied().enumerate()
     }
@@ -178,7 +178,7 @@ impl fmt::Display for DynNodePrettyPrint<'_> {
 // MAST NODE TRAIT IMPLEMENTATION
 // ================================================================================================
 
-impl MastNodeTrait for DynNode {
+impl MastNodeExt for DynNode {
     /// Returns a commitment to a Dyn node.
     ///
     /// The commitment is computed by hashing two empty words ([ZERO; 4]) in the domain defined

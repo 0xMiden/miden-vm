@@ -51,7 +51,7 @@ use string_table::StringTable;
 use super::{DecoratorId, MastForest, MastNode, MastNodeId};
 use crate::{
     AdviceMap,
-    mast::node::MastNodeTrait,
+    mast::node::MastNodeExt,
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 

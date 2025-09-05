@@ -3,7 +3,7 @@ use core::fmt;
 
 use miden_crypto::{Felt, Word};
 
-use super::{MastNodeExt, MastNodeTrait};
+use super::{MastNodeErrorContext, MastNodeExt};
 use crate::{
     OPCODE_JOIN,
     chiplets::hasher,
@@ -136,7 +136,7 @@ impl JoinNode {
     }
 }
 
-impl MastNodeExt for JoinNode {
+impl MastNodeErrorContext for JoinNode {
     fn decorators(&self) -> impl Iterator<Item = (usize, DecoratorId)> {
         self.before_enter.iter().chain(&self.after_exit).copied().enumerate()
     }
@@ -226,7 +226,7 @@ impl fmt::Display for JoinNodePrettyPrint<'_> {
 // MAST NODE TRAIT IMPLEMENTATION
 // ================================================================================================
 
-impl MastNodeTrait for JoinNode {
+impl MastNodeExt for JoinNode {
     /// Returns a commitment to this Join node.
     ///
     /// The commitment is computed as a hash of the `first` and `second` child node in the domain

@@ -5,7 +5,7 @@ use miden_assembly_syntax::{
 };
 use miden_core::{
     Operation,
-    mast::{MastNodeId, MastNodeTrait},
+    mast::{MastNodeExt, MastNodeId},
 };
 use smallvec::SmallVec;
 

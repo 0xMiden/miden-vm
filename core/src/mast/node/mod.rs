@@ -35,7 +35,7 @@ use crate::{
 };
 
 #[enum_dispatch]
-pub trait MastNodeTrait {
+pub trait MastNodeExt {
     /// Returns a commitment/hash of the node.
     fn digest(&self) -> Word;
 
@@ -76,7 +76,7 @@ pub trait MastNodeTrait {
 // MAST NODE
 // ================================================================================================
 
-#[enum_dispatch(MastNodeTrait)]
+#[enum_dispatch(MastNodeExt)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MastNode {
     Block(BasicBlockNode),
@@ -268,7 +268,7 @@ impl MastNode {
 // ===============================================================================================
 
 /// A trait for extending the functionality of all [`MastNode`]s.
-pub trait MastNodeExt: Send + Sync {
+pub trait MastNodeErrorContext: Send + Sync {
     // REQUIRED METHODS
     // -------------------------------------------------------------------------------------------
 

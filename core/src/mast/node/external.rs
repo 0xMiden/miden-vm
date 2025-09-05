@@ -7,7 +7,7 @@ use miden_formatting::{
     prettier::{Document, PrettyPrint, const_text, nl, text},
 };
 
-use super::{MastNodeExt, MastNodeTrait};
+use super::{MastNodeErrorContext, MastNodeExt};
 use crate::mast::{DecoratorId, MastForest, MastNodeId, Remapping};
 
 // EXTERNAL NODE
@@ -59,7 +59,7 @@ impl ExternalNode {
     }
 }
 
-impl MastNodeExt for ExternalNode {
+impl MastNodeErrorContext for ExternalNode {
     fn decorators(&self) -> impl Iterator<Item = (usize, DecoratorId)> {
         self.before_enter.iter().chain(&self.after_exit).copied().enumerate()
     }
@@ -151,7 +151,7 @@ impl fmt::Display for ExternalNodePrettyPrint<'_> {
 // MAST NODE TRAIT IMPLEMENTATION
 // ================================================================================================
 
-impl MastNodeTrait for ExternalNode {
+impl MastNodeExt for ExternalNode {
     /// Returns the commitment to the MAST node referenced by this external node.
     ///
     /// The hash of an external node is the hash of the procedure it represents, such that an
