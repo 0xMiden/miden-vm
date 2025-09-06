@@ -1,4 +1,4 @@
-use alloc::vec::Vec;
+use alloc::{boxed::Box, vec::Vec};
 use core::fmt;
 
 use miden_crypto::{Felt, Word};
@@ -7,7 +7,7 @@ use miden_formatting::{
     prettier::{Document, PrettyPrint, const_text, nl, text},
 };
 
-use super::MastNodeExt;
+use super::{MastNodeErrorContext, MastNodeExt};
 use crate::{
     OPCODE_CALL, OPCODE_SYSCALL,
     chiplets::hasher,
@@ -194,7 +194,7 @@ impl CallNode {
     }
 }
 
-impl MastNodeExt for CallNode {
+impl MastNodeErrorContext for CallNode {
     fn decorators(&self) -> impl Iterator<Item = (usize, DecoratorId)> {
         self.before_enter.iter().chain(&self.after_exit).copied().enumerate()
     }
@@ -289,5 +289,80 @@ impl fmt::Display for CallNodePrettyPrint<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use crate::prettier::PrettyPrint;
         self.pretty_print(f)
+    }
+}
+
+// MAST NODE TRAIT IMPLEMENTATION
+// ================================================================================================
+
+impl MastNodeExt for CallNode {
+    /// Returns a commitment to this Call node.
+    ///
+    /// The commitment is computed as a hash of the callee and an empty word ([ZERO; 4]) in the
+    /// domain defined by either [Self::CALL_DOMAIN] or [Self::SYSCALL_DOMAIN], depending on
+    /// whether the node represents a simple call or a syscall - i.e.,:
+    /// ```
+    /// # use miden_core::mast::CallNode;
+    /// # use miden_crypto::{Word, hash::rpo::Rpo256 as Hasher};
+    /// # let callee_digest = Word::default();
+    /// Hasher::merge_in_domain(&[callee_digest, Word::default()], CallNode::CALL_DOMAIN);
+    /// ```
+    /// or
+    /// ```
+    /// # use miden_core::mast::CallNode;
+    /// # use miden_crypto::{Word, hash::rpo::Rpo256 as Hasher};
+    /// # let callee_digest = Word::default();
+    /// Hasher::merge_in_domain(&[callee_digest, Word::default()], CallNode::SYSCALL_DOMAIN);
+    /// ```
+    fn digest(&self) -> Word {
+        self.digest
+    }
+
+    /// Returns the decorators to be executed before this node is executed.
+    fn before_enter(&self) -> &[DecoratorId] {
+        &self.before_enter
+    }
+
+    /// Returns the decorators to be executed after this node is executed.
+    fn after_exit(&self) -> &[DecoratorId] {
+        &self.after_exit
+    }
+
+    fn append_before_enter(&mut self, decorator_ids: &[DecoratorId]) {
+        self.append_before_enter(decorator_ids);
+    }
+
+    fn append_after_exit(&mut self, decorator_ids: &[DecoratorId]) {
+        self.append_after_exit(decorator_ids);
+    }
+
+    fn remove_decorators(&mut self) {
+        self.remove_decorators();
+    }
+
+    fn to_display<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn fmt::Display + 'a> {
+        Box::new(CallNode::to_display(self, mast_forest))
+    }
+
+    fn to_pretty_print<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn PrettyPrint + 'a> {
+        Box::new(CallNode::to_pretty_print(self, mast_forest))
+    }
+
+    fn remap_children(&self, remapping: &Remapping) -> Self {
+        let mut node = self.clone();
+        node.callee = node.callee.remap(remapping);
+        node
+    }
+
+    fn has_children(&self) -> bool {
+        true
+    }
+
+    fn append_children_to(&self, target: &mut Vec<MastNodeId>) {
+        target.push(self.callee());
+    }
+
+    fn domain(&self) -> Felt {
+        self.domain()
     }
 }

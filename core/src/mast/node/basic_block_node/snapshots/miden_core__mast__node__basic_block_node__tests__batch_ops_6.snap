@@ -1,0 +1,56 @@
+---
+source: core/src/mast/node/basic_block_node/tests.rs
+expression: batches
+---
+[
+    OpBatch {
+        ops: [
+            Add,
+            Mul,
+            Add,
+            Push(
+                7,
+            ),
+            Add,
+            Add,
+            Push(
+                11,
+            ),
+            Mul,
+            Mul,
+            Add,
+        ],
+        indptr: [
+            0,
+            9,
+            9,
+            9,
+            10,
+            0,
+            0,
+            0,
+            0,
+        ],
+        padding: [
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+        ],
+        groups: [
+            2542120439479046562,
+            7,
+            11,
+            34,
+            0,
+            0,
+            0,
+            0,
+        ],
+        num_groups: 4,
+    },
+]

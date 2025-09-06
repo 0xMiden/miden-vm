@@ -4,7 +4,7 @@ use miden_air::trace::{
 };
 use miden_core::{
     FieldElement, ONE, Operation, Program, Word, ZERO,
-    mast::{MastForest, MastNode},
+    mast::{MastForest, MastNode, MastNodeExt},
 };
 use miden_utils_testing::rand::rand_array;
 

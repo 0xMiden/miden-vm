@@ -1,4 +1,4 @@
-use miden_core::mast::{MastForest, MastForestRootMap};
+use miden_core::mast::{MastForest, MastForestRootMap, MastNodeExt};
 
 use crate::{
     Assembler,

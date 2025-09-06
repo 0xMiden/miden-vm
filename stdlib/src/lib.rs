@@ -114,7 +114,7 @@ pub fn falcon_sign(sk: &[Felt], msg: Word) -> Option<Vec<Felt>> {
 
     // We also need in the VM the expanded key corresponding to the public key the was provided
     // via the operand stack
-    let h = sk.compute_pub_key_poly().0;
+    let h = sk.public_key();
 
     // Lastly, for the probabilistic product routine that is part of the verification procedure,
     // we need to compute the product of the expanded key and the signature polynomial in

@@ -7,7 +7,7 @@ use miden_crypto::hash::{
 
 use crate::{
     Operation, Word,
-    mast::{DecoratorId, MastForest, MastForestError, MastNode, MastNodeId},
+    mast::{DecoratorId, MastForest, MastForestError, MastNode, MastNodeId, node::MastNodeExt},
 };
 
 // MAST NODE EQUALITY

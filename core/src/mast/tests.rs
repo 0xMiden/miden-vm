@@ -8,7 +8,7 @@ use winter_rand_utils::prng_array;
 use crate::{
     Felt, Kernel, ProgramInfo, Word,
     chiplets::hasher,
-    mast::DynNode,
+    mast::{DynNode, MastNodeExt},
     utils::{Deserializable, Serializable},
 };
 

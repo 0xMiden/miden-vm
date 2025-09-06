@@ -1,13 +1,13 @@
-use alloc::vec::Vec;
+use alloc::{boxed::Box, vec::Vec};
 use core::fmt;
 
 use miden_crypto::{Felt, Word};
 use miden_formatting::prettier::{Document, PrettyPrint, const_text, nl};
 
-use super::MastNodeExt;
+use super::{MastNodeErrorContext, MastNodeExt};
 use crate::{
     OPCODE_DYN, OPCODE_DYNCALL,
-    mast::{DecoratorId, MastForest},
+    mast::{DecoratorId, MastForest, MastNodeId, Remapping},
 };
 
 // DYN NODE
@@ -63,45 +63,6 @@ impl DynNode {
             Self::DYN_DOMAIN
         }
     }
-
-    /// Returns a commitment to a Dyn node.
-    ///
-    /// The commitment is computed by hashing two empty words ([ZERO; 4]) in the domain defined
-    /// by [Self::DYN_DOMAIN] or [Self::DYNCALL_DOMAIN], i.e.:
-    ///
-    /// ```
-    /// # use miden_core::mast::DynNode;
-    /// # use miden_crypto::{Word, hash::rpo::Rpo256 as Hasher};
-    /// Hasher::merge_in_domain(&[Word::default(), Word::default()], DynNode::DYN_DOMAIN);
-    /// Hasher::merge_in_domain(&[Word::default(), Word::default()], DynNode::DYNCALL_DOMAIN);
-    /// ```
-    pub fn digest(&self) -> Word {
-        if self.is_dyncall {
-            Word::new([
-                Felt::new(8751004906421739448),
-                Felt::new(13469709002495534233),
-                Felt::new(12584249374630430826),
-                Felt::new(7624899870831503004),
-            ])
-        } else {
-            Word::new([
-                Felt::new(8115106948140260551),
-                Felt::new(13491227816952616836),
-                Felt::new(15015806788322198710),
-                Felt::new(16575543461540527115),
-            ])
-        }
-    }
-
-    /// Returns the decorators to be executed before this node is executed.
-    pub fn before_enter(&self) -> &[DecoratorId] {
-        &self.before_enter
-    }
-
-    /// Returns the decorators to be executed after this node is executed.
-    pub fn after_exit(&self) -> &[DecoratorId] {
-        &self.after_exit
-    }
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -124,7 +85,7 @@ impl DynNode {
     }
 }
 
-impl MastNodeExt for DynNode {
+impl MastNodeErrorContext for DynNode {
     fn decorators(&self) -> impl Iterator<Item = (usize, DecoratorId)> {
         self.before_enter.iter().chain(&self.after_exit).copied().enumerate()
     }
@@ -214,8 +175,85 @@ impl fmt::Display for DynNodePrettyPrint<'_> {
     }
 }
 
-// TESTS
+// MAST NODE TRAIT IMPLEMENTATION
 // ================================================================================================
+
+impl MastNodeExt for DynNode {
+    /// Returns a commitment to a Dyn node.
+    ///
+    /// The commitment is computed by hashing two empty words ([ZERO; 4]) in the domain defined
+    /// by [Self::DYN_DOMAIN] or [Self::DYNCALL_DOMAIN], i.e.:
+    ///
+    /// ```
+    /// # use miden_core::mast::DynNode;
+    /// # use miden_crypto::{Word, hash::rpo::Rpo256 as Hasher};
+    /// Hasher::merge_in_domain(&[Word::default(), Word::default()], DynNode::DYN_DOMAIN);
+    /// Hasher::merge_in_domain(&[Word::default(), Word::default()], DynNode::DYNCALL_DOMAIN);
+    /// ```
+    fn digest(&self) -> Word {
+        if self.is_dyncall {
+            Word::new([
+                Felt::new(8751004906421739448),
+                Felt::new(13469709002495534233),
+                Felt::new(12584249374630430826),
+                Felt::new(7624899870831503004),
+            ])
+        } else {
+            Word::new([
+                Felt::new(8115106948140260551),
+                Felt::new(13491227816952616836),
+                Felt::new(15015806788322198710),
+                Felt::new(16575543461540527115),
+            ])
+        }
+    }
+
+    /// Returns the decorators to be executed before this node is executed.
+    fn before_enter(&self) -> &[DecoratorId] {
+        &self.before_enter
+    }
+
+    /// Returns the decorators to be executed after this node is executed.
+    fn after_exit(&self) -> &[DecoratorId] {
+        &self.after_exit
+    }
+
+    fn append_before_enter(&mut self, decorator_ids: &[DecoratorId]) {
+        self.append_before_enter(decorator_ids);
+    }
+
+    fn append_after_exit(&mut self, decorator_ids: &[DecoratorId]) {
+        self.append_after_exit(decorator_ids);
+    }
+
+    fn remove_decorators(&mut self) {
+        self.remove_decorators();
+    }
+
+    fn to_display<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn fmt::Display + 'a> {
+        Box::new(DynNode::to_display(self, mast_forest))
+    }
+
+    fn to_pretty_print<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn PrettyPrint + 'a> {
+        Box::new(DynNode::to_pretty_print(self, mast_forest))
+    }
+
+    fn remap_children(&self, _remapping: &Remapping) -> Self {
+        self.clone()
+    }
+
+    fn has_children(&self) -> bool {
+        false
+    }
+
+    fn append_children_to(&self, _target: &mut Vec<MastNodeId>) {
+        // No children for dyn nodes
+    }
+
+    fn domain(&self) -> Felt {
+        self.domain()
+    }
+}
 
 #[cfg(test)]
 mod tests {

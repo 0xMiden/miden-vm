@@ -2,7 +2,7 @@ use alloc::{collections::BTreeMap, string::String, sync::Arc, vec::Vec};
 
 use miden_core::{
     AdviceMap, Kernel, Word,
-    mast::{MastForest, MastNodeId},
+    mast::{MastForest, MastNodeExt, MastNodeId},
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 use midenc_hir_type::{FunctionType, Type};
