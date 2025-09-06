@@ -1,4 +1,5 @@
 use alloc::vec::Vec;
+use std::sync::Arc;
 
 use miden_air::trace::{
     CTX_COL_IDX, DECODER_TRACE_RANGE, DECODER_TRACE_WIDTH, FMP_COL_IDX, FN_HASH_RANGE,
@@ -23,7 +24,7 @@ use super::{
     },
     build_op_group,
 };
-use crate::{AdviceInputs, DefaultHost, ExecutionError, ProcessState};
+use crate::{AdviceInputs, DefaultHost, ExecutionError, NoopEventHandler};
 
 // CONSTANTS
 // ================================================================================================
@@ -36,7 +37,7 @@ const INIT_ADDR: Felt = ONE;
 const FMP_MIN: Felt = Felt::new(crate::FMP_MIN);
 const SYSCALL_FMP_MIN: Felt = Felt::new(crate::SYSCALL_FMP_MIN as u64);
 
-const EMIT_EVENT_ID: u32 = 42;
+const EMIT_EVENT_ID: Felt = Felt::new(42);
 
 // TYPE ALIASES
 // ================================================================================================
@@ -160,7 +161,7 @@ fn basic_block_small() {
 fn basic_block_small_with_emit() {
     let ops = vec![
         Operation::Push(ONE),
-        Operation::Push(EMIT_EVENT_ID.into()),
+        Operation::Push(EMIT_EVENT_ID),
         Operation::Emit,
         Operation::Drop,
         Operation::Add,
@@ -181,7 +182,7 @@ fn basic_block_small_with_emit() {
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
     check_op_decoding(&trace, 0, ZERO, Operation::Span, 4, 0, 0);
     check_op_decoding(&trace, 1, INIT_ADDR, Operation::Push(ONE), 3, 0, 1);
-    check_op_decoding(&trace, 2, INIT_ADDR, Operation::Push(EMIT_EVENT_ID.into()), 2, 1, 1);
+    check_op_decoding(&trace, 2, INIT_ADDR, Operation::Push(EMIT_EVENT_ID), 2, 1, 1);
     check_op_decoding(&trace, 3, INIT_ADDR, Operation::Emit, 1, 2, 1);
     check_op_decoding(&trace, 4, INIT_ADDR, Operation::Drop, 1, 3, 1);
     check_op_decoding(&trace, 5, INIT_ADDR, Operation::Add, 1, 4, 1);
@@ -1519,7 +1520,7 @@ fn set_user_op_helpers_many() {
 fn build_trace(stack_inputs: &[u64], program: &Program) -> (DecoderTrace, usize) {
     let stack_inputs = StackInputs::try_from_ints(stack_inputs.iter().copied()).unwrap();
     let mut host = DefaultHost::default();
-    host.load_handler(EMIT_EVENT_ID, |_: &ProcessState| Ok(Vec::new())).unwrap();
+    host.register_handler(EMIT_EVENT_ID, Arc::new(NoopEventHandler)).unwrap();
     let mut process = Process::new(
         Kernel::default(),
         stack_inputs,

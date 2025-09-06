@@ -397,7 +397,7 @@ fn dynexec_with_procref() {
     end";
 
     let mut test = build_test!(program_source, &[]);
-    test.libraries = vec![StdLibrary::default().into()];
+    test.libraries.push(StdLibrary::default().library().clone());
     test.add_module(
         "external::module".parse().unwrap(),
         "\
@@ -450,7 +450,7 @@ fn simple_dyncall() {
     // As ints:
     //   [6751154577850596602, 235765701633049111, 16334162752640292120, 7786442719091086500]
 
-    let test = Test {
+    let mut test = Test {
         stack_inputs: StackInputs::try_from_ints([
             3,
             // put the hash of foo on the stack
@@ -465,6 +465,7 @@ fn simple_dyncall() {
         libraries: vec![StdLibrary::default().into()],
         ..Test::new(&format!("test{}", line!()), program_source, false)
     };
+    test.add_event_handlers(StdLibrary::default().handlers());
 
     test.expect_stack(&[6]);
 
@@ -579,8 +580,10 @@ fn procref() -> Result<(), Report> {
         exec.sys::truncate_stack
     end";
 
+    let stdlib = StdLibrary::default();
     let mut test = build_test!(source, &[]);
-    test.libraries = vec![StdLibrary::default().into()];
+    test.libraries.push(stdlib.library().clone());
+    test.add_event_handlers(stdlib.handlers());
 
     test.expect_stack(&[
         mast_roots[0][3].as_int(),

@@ -1,4 +1,4 @@
-use std::vec;
+use std::{sync::Arc, vec};
 
 use miden_air::{Felt, ProvingOptions, RowIndex};
 use miden_assembly::{Assembler, utils::Serializable};
@@ -41,7 +41,7 @@ const PROBABILISTIC_PRODUCT_SOURCE: &str = "
 
 /// Event ID for pushing a Falcon signature to the advice stack.
 /// This event is used for testing purposes only.
-const EVENT_FALCON_SIG_TO_STACK: u32 = 3419226139;
+const EVENT_FALCON_SIG_TO_STACK: Felt = Felt::new(3419226139);
 
 /// Event handler which pushes values onto the advice stack which are required for verification
 /// of a DSA in Miden VM.
@@ -285,7 +285,8 @@ fn falcon_prove_verify() {
     let advice_inputs = AdviceInputs::default().with_map(advice_map);
     let mut host = DefaultHost::default();
     host.load_library(&StdLibrary::default()).expect("failed to load mast forest");
-    host.load_handler(EVENT_FALCON_SIG_TO_STACK, push_falcon_signature).unwrap();
+    host.register_handler(EVENT_FALCON_SIG_TO_STACK, Arc::new(push_falcon_signature))
+        .unwrap();
 
     let options = ProvingOptions::with_96_bit_security(miden_air::HashFunction::Blake3_192);
     let (stack_outputs, proof) = miden_utils_testing::prove(
