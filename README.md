@@ -1,6 +1,7 @@
 # Miden Virtual Machine
 
 [![LICENSE](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/0xMiden/miden-vm/blob/main/LICENSE-MIT)
+[![LICENSE](https://img.shields.io/badge/license-APACHE-blue.svg)](https://github.com/0xMiden/miden-vm/blob/main/LICENSE-APACHE)
 [![Test](https://github.com/0xMiden/miden-vm/actions/workflows/test.yml/badge.svg)](https://github.com/0xMiden/miden-vm/actions/workflows/test.yml)
 [![Build](https://github.com/0xMiden/miden-vm/actions/workflows/build.yml/badge.svg)](https://github.com/0xMiden/miden-vm/actions/workflows/build.yml)
 [![RUST_VERSION](https://img.shields.io/badge/rustc-1.88+-lightgray.svg)](https://www.rust-lang.org/tools/install)
@@ -17,7 +18,7 @@ A STARK-based virtual machine.
 Miden VM is a zero-knowledge virtual machine written in Rust. For any program executed on Miden VM, a STARK-based proof of execution is automatically generated. This proof can then be used by anyone to verify that the program was executed correctly without the need for re-executing the program or even knowing the contents of the program.
 
 - If you'd like to learn more about how Miden VM works, check out the [documentation](https://0xMiden.github.io/miden-vm/).
-- If you'd like to start using Miden VM, check out the [miden](miden) crate.
+- If you'd like to start using Miden VM, check out the [miden-vm](./miden-vm) crate.
 - If you'd like to learn more about STARKs, check out the [references](#references) section.
 
 ### Status and features
