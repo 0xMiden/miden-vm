@@ -1278,6 +1278,7 @@ dependencies = [
  "miden-utils-diagnostics",
  "paste",
  "pretty_assertions",
+ "rayon",
  "rstest",
  "thiserror 2.0.16",
  "tokio",
