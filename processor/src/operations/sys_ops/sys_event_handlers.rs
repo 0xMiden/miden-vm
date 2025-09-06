@@ -33,6 +33,8 @@ pub fn handle_system_event(
         SystemEvent::FalconDiv => push_falcon_mod_result(process, err_ctx),
         SystemEvent::Ext2Inv => push_ext2_inv_result(process, err_ctx),
         SystemEvent::SmtPeek => push_smtpeek_result(process, err_ctx),
+        SystemEvent::ArrayLowerBound => push_lowerbound_result(process, 4, err_ctx),
+        SystemEvent::MapLowerBound => push_lowerbound_result(process, 8, err_ctx),
         SystemEvent::U32Clz => push_leading_zeros(process, err_ctx),
         SystemEvent::U32Ctz => push_trailing_zeros(process, err_ctx),
         SystemEvent::U32Clo => push_leading_ones(process, err_ctx),
@@ -609,6 +611,108 @@ fn push_smtpeek_result(
         // associated with `key`
         process.advice_provider_mut().push_stack_word(&Smt::EMPTY_VALUE);
     }
+    Ok(())
+}
+
+/// Pushes onto the advice stack the first pointer in [start_ptr, end_ptr) such that
+/// mem[word_ptr] >= KEY in lexicographic order of words. If all words are < KEY, returns end_ptr.
+/// Supports sorted arrays (stride = 4) and sorted maps (stride = 8).
+///
+/// Inputs:
+///   Operand stack: [KEY, start_ptr, end_ptr, ...]
+///   Advice stack: [...]
+///
+/// Outputs:
+///   Operand stack: [KEY, start_ptr, end_ptr, ...]
+///   Advice stack: [key_ptr, ...]
+fn push_lowerbound_result(
+    process: &mut ProcessState,
+    stride: u32,
+    err_ctx: &impl ErrorContext,
+) -> Result<(), ExecutionError> {
+    assert_eq!(stride % 4, 0);
+
+    // Read inputs from the stack
+    let key = process.get_stack_word(1);
+    let (start_addr, end_addr) =
+        get_mem_addr_range(process, 5, 6).map_err(ExecutionError::MemoryError)?;
+
+    // Validate addresses are word-aligned (multiple of 4)
+    if start_addr % 4 != 0 {
+        return Err(ExecutionError::MemoryError(MemoryError::unaligned_word_access(
+            start_addr,
+            process.ctx(),
+            Felt::from(process.clk()),
+            err_ctx,
+        )));
+    }
+    if end_addr % 4 != 0 {
+        return Err(ExecutionError::MemoryError(MemoryError::unaligned_word_access(
+            end_addr,
+            process.ctx(),
+            Felt::from(process.clk()),
+            err_ctx,
+        )));
+    }
+
+    // Validate address range is valid
+    if start_addr > end_addr {
+        return Err(ExecutionError::MemoryError(MemoryError::InvalidMemoryRange {
+            start_addr: start_addr as u64,
+            end_addr: end_addr as u64,
+        }));
+    }
+    if (end_addr - start_addr) % stride != 0 {
+        return Err(ExecutionError::MemoryError(MemoryError::unaligned_word_access(
+            end_addr,
+            process.ctx(),
+            Felt::from(process.clk()),
+            err_ctx,
+        )));
+    }
+
+    // Binary search over word-aligned addresses in [start_addr, end_addr)
+    let mut lo = start_addr;
+    let hi = end_addr;
+
+    // If range is empty, result is end_ptr
+    if lo >= hi {
+        process.advice_provider_mut().push_stack(Felt::from(end_addr));
+        return Ok(());
+    }
+
+    let mut len = (hi - lo) / stride; // count of elements
+
+    while len > 0 {
+        let half = len / 2;
+        let mid_addr = lo + half * stride;
+        // Read word at mid_addr
+        let mid_word = process
+            .get_mem_word(process.ctx(), mid_addr)
+            .map_err(ExecutionError::MemoryError)?
+            .unwrap_or([ZERO, ZERO, ZERO, ZERO].into());
+
+        // Compare mid_word with key lexicographically
+        let cmp = {
+            let [l0, l1, l2, l3]: [Felt; 4] = mid_word.into();
+            let [r0, r1, r2, r3]: [Felt; 4] = key.into();
+            let mid_tuple = (l0.as_int(), l1.as_int(), l2.as_int(), l3.as_int());
+            let key_tuple = (r0.as_int(), r1.as_int(), r2.as_int(), r3.as_int());
+            mid_tuple.cmp(&key_tuple)
+        };
+
+        if cmp == core::cmp::Ordering::Less {
+            // Move right of mid
+            lo = mid_addr + stride;
+            len -= half + 1;
+        } else {
+            // mid >= key, keep left side including mid
+            len = half;
+        }
+    }
+
+    // lo is the first address where word >= key, or hi if none; push pointer
+    process.advice_provider_mut().push_stack(Felt::from(lo));
     Ok(())
 }
 

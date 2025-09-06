@@ -419,3 +419,193 @@ fn advice_insert_hqword() {
     let test = build_test!(source, &stack_inputs);
     test.expect_stack(&[11, 12, 13, 14, 21, 22, 23, 24, 31, 32, 33, 34, 41, 42, 43, 44]);
 }
+
+#[test]
+fn advice_push_lowerbound_first_element() {
+    // Store words [1,1,1,1]..[5,5,5,5] at 100..120 and search for key [1,1,1,1]
+    let source: String = format!(
+        "
+    {TRUNCATE_STACK_PROC}
+
+    begin
+        push.1.1.1.1 mem_storew.100 dropw
+        push.2.2.2.2 mem_storew.104 dropw
+        push.3.3.3.3 mem_storew.108 dropw
+        push.4.4.4.4 mem_storew.112 dropw
+        push.5.5.5.5 mem_storew.116 dropw
+
+        push.120 push.100 push.[1,1,1,1]
+        adv.push_array_lowerbound
+        adv_push.1
+        
+        exec.truncate_stack
+    end"
+    );
+
+    let test = build_test!(source, &[]);
+    test.expect_stack(&[100, 1, 1, 1, 1, 100, 120]);
+}
+
+#[test]
+fn advice_push_lowerbound_last_element() {
+    let source: String = format!(
+        "
+    {TRUNCATE_STACK_PROC}
+
+    begin
+        push.1.1.1.1 mem_storew.100 dropw
+        push.2.2.2.2 mem_storew.104 dropw
+        push.3.3.3.3 mem_storew.108 dropw
+        push.4.4.4.4 mem_storew.112 dropw
+        push.5.5.5.5 mem_storew.116 dropw
+
+        push.120 push.100 push.[5,5,5,5]
+        adv.push_array_lowerbound
+        adv_push.1
+        exec.truncate_stack
+    end"
+    );
+
+    let test = build_test!(source, &[]);
+    test.expect_stack(&[116, 5, 5, 5, 5, 100, 120]);
+}
+
+#[test]
+fn advice_push_lowerbound_multiple_instances() {
+    let source: String = format!(
+        "
+    {TRUNCATE_STACK_PROC}
+
+    begin
+        push.1.1.1.1 mem_storew.100 dropw
+        push.2.2.2.2 mem_storew.104 dropw
+        push.2.2.2.2 mem_storew.108 dropw
+        push.3.3.3.3 mem_storew.112 dropw
+
+        push.116 push.100 push.[2,2,2,2]
+        adv.push_array_lowerbound
+        adv_push.1
+        exec.truncate_stack
+    end"
+    );
+
+    let test = build_test!(source, &[]);
+    test.expect_stack(&[104, 2, 2, 2, 2, 100, 116]);
+}
+
+#[test]
+fn advice_push_lowerbound_empty_array() {
+    let source: String = format!(
+        "
+    {TRUNCATE_STACK_PROC}
+
+    begin
+        # no stores; empty range
+        push.100 push.100 push.[3,3,3,3]
+        adv.push_array_lowerbound
+        adv_push.1
+        exec.truncate_stack
+    end"
+    );
+
+    let test = build_test!(source, &[]);
+    test.expect_stack(&[100, 3, 3, 3, 3, 100, 100]);
+}
+
+#[test]
+fn advice_push_lowerbound_key_smaller_than_all() {
+    let source: String = format!(
+        "
+    {TRUNCATE_STACK_PROC}
+
+    begin
+        push.2.2.2.2 mem_storew.100 dropw
+        push.3.3.3.3 mem_storew.104 dropw
+        push.4.4.4.4 mem_storew.108 dropw
+
+        push.112 push.100 push.[1,1,1,1]
+        adv.push_array_lowerbound
+        adv_push.1
+
+        exec.truncate_stack
+    end"
+    );
+
+    let test = build_test!(source, &[]);
+    test.expect_stack(&[100, 1, 1, 1, 1, 100, 112]);
+}
+
+#[test]
+fn advice_push_lowerbound_key_greater_than_all() {
+    let source: String = format!(
+        "
+    {TRUNCATE_STACK_PROC}
+
+    begin
+        push.2.2.2.2 mem_storew.100 dropw
+        push.3.3.3.3 mem_storew.104 dropw
+        push.4.4.4.4 mem_storew.108 dropw
+
+        push.112 push.100 push.[9,9,9,9]
+        adv.push_array_lowerbound
+        adv_push.1
+
+        exec.truncate_stack
+    end"
+    );
+
+    let test = build_test!(source, &[]);
+    test.expect_stack(&[112, 9, 9, 9, 9, 100, 112]);
+}
+
+#[test]
+fn advice_push_lowerbound_key_missing() {
+    let source: String = format!(
+        "
+    {TRUNCATE_STACK_PROC}
+
+    begin
+        push.2.2.2.2 mem_storew.100 dropw
+        push.3.3.3.3 mem_storew.104 dropw
+        push.4.4.4.4 mem_storew.108 dropw
+
+        push.112 push.100 push.[2,3,2,3]
+        adv.push_array_lowerbound
+        adv_push.1
+
+        exec.truncate_stack
+    end"
+    );
+
+    let test = build_test!(source, &[]);
+    test.expect_stack(&[104, 3, 2, 3, 2, 100, 112]);
+}
+
+#[test]
+fn advice_push_lowerbound_map() {
+    let source: String = format!(
+        "
+    {TRUNCATE_STACK_PROC}
+
+    begin
+        push.2.2.2.2 mem_storew.100 dropw
+        push.5.5.5.5 mem_storew.104 dropw
+
+        push.4.4.4.4 mem_storew.108 dropw
+        push.3.3.3.3 mem_storew.112 dropw
+
+        push.6.6.6.6 mem_storew.116 dropw
+        push.1.1.1.1 mem_storew.120 dropw
+
+        push.124 push.100 push.[4,4,4,4]
+
+        adv.push_map_lowerbound
+        adv_push.1
+
+        exec.truncate_stack
+    end"
+    );
+
+    let test = build_test!(source, &[]);
+    test.expect_stack(&[108, 4, 4, 4, 4, 100, 124]);
+}

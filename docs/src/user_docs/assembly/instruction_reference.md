@@ -191,6 +191,8 @@ Instructions for moving data between the stack and other sources like program co
 | `adv.push_mtnode`    | `[d, i, R, ... ]`          | `[d, i, R, ... ]`          | Pushes Merkle tree node (root `R`, depth `d`, index `i`) from Merkle store to advice stack.                                           |
 | `adv.push_u64div`    | `[b1, b0, a1, a0, ...]`    | `[b1, b0, a1, a0, ...]`    | Pushes quotient and remainder of u64 division `a/b` (represented by 32-bit limbs) to advice stack.                                   |
 | `adv.push_smtpeek`   | `[K, R, ...]`              | `[K, R, ...]`              | Pushes value for key `K` in Sparse Merkle Tree with root `R` to advice stack.                                                          |
+| `adv.push_array_lowerbound` | `[K, start_ptr, end_ptr, ...]` | `[K, start_ptr, end_ptr, ...]` | Pushes to advice stack the pointer `key_ptr` in `[start_ptr,end_ptr)` such that `mem[key_ptr] >= K` and previous word `< K`. If all words `< K`, returns `end_ptr`. Assumes the range is word-aligned and sorted lexicographically by word. |
+| `adv.push_map_lowerbound` | `[K0, K1, start_ptr, end_ptr, ...]` | `[K0, K1, start_ptr, end_ptr, ...]` | Pushes to advice stack the pointer `key_ptr` in `[start_ptr,end_ptr)` such that `mem[key_ptr] >= K` and previous word `< K`. If all words `< K`, returns `end_ptr`. The memory range is assumed to be a sorted array of (key, value) word pairs. |
 
 *Insert into Advice Map:*
 
