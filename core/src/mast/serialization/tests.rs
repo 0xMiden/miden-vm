@@ -314,9 +314,9 @@ fn mast_forest_serialize_deserialize_with_child_ids_exceeding_parent_id() {
     let mut forest = MastForest::new();
     let deco0 = forest.add_decorator(Decorator::Trace(0)).unwrap();
     let deco1 = forest.add_decorator(Decorator::Trace(1)).unwrap();
-    let zero = forest.add_block(vec![Operation::U32div], None).unwrap();
-    let first = forest.add_block(vec![Operation::U32add], Some(vec![(0, deco0)])).unwrap();
-    let second = forest.add_block(vec![Operation::U32and], Some(vec![(1, deco1)])).unwrap();
+    let zero = forest.add_block(vec![Operation::U32div], Vec::new()).unwrap();
+    let first = forest.add_block(vec![Operation::U32add], vec![(0, deco0)]).unwrap();
+    let second = forest.add_block(vec![Operation::U32and], vec![(1, deco1)]).unwrap();
     forest.add_join(first, second).unwrap();
 
     // Move the Join node before its child nodes and remove the temporary zero node.
@@ -330,9 +330,9 @@ fn mast_forest_serialize_deserialize_with_child_ids_exceeding_parent_id() {
 #[test]
 fn mast_forest_serialize_deserialize_with_overflowing_ids_fails() {
     let mut overflow_forest = MastForest::new();
-    let id0 = overflow_forest.add_block(vec![Operation::Eqz], None).unwrap();
-    overflow_forest.add_block(vec![Operation::Eqz], None).unwrap();
-    let id2 = overflow_forest.add_block(vec![Operation::Eqz], None).unwrap();
+    let id0 = overflow_forest.add_block(vec![Operation::Eqz], Vec::new()).unwrap();
+    overflow_forest.add_block(vec![Operation::Eqz], Vec::new()).unwrap();
+    let id2 = overflow_forest.add_block(vec![Operation::Eqz], Vec::new()).unwrap();
     let id_join = overflow_forest.add_join(id0, id2).unwrap();
 
     let join_node = overflow_forest[id_join].clone();
@@ -341,9 +341,7 @@ fn mast_forest_serialize_deserialize_with_overflowing_ids_fails() {
     let mut forest = MastForest::new();
     let deco0 = forest.add_decorator(Decorator::Trace(0)).unwrap();
     let deco1 = forest.add_decorator(Decorator::Trace(1)).unwrap();
-    forest
-        .add_block(vec![Operation::U32add], Some(vec![(0, deco0), (1, deco1)]))
-        .unwrap();
+    forest.add_block(vec![Operation::U32add], vec![(0, deco0), (1, deco1)]).unwrap();
     forest.add_node(join_node).unwrap();
 
     assert_matches!(
@@ -356,16 +354,16 @@ fn mast_forest_serialize_deserialize_with_overflowing_ids_fails() {
 fn mast_forest_invalid_node_id() {
     // Hydrate a forest smaller than the second
     let mut forest = MastForest::new();
-    let first = forest.add_block(vec![Operation::U32div], None).unwrap();
-    let second = forest.add_block(vec![Operation::U32div], None).unwrap();
+    let first = forest.add_block(vec![Operation::U32div], Vec::new()).unwrap();
+    let second = forest.add_block(vec![Operation::U32div], Vec::new()).unwrap();
 
     // Hydrate a forest larger than the first to get an overflow MastNodeId
     let mut overflow_forest = MastForest::new();
 
-    overflow_forest.add_block(vec![Operation::U32div], None).unwrap();
-    overflow_forest.add_block(vec![Operation::U32div], None).unwrap();
-    overflow_forest.add_block(vec![Operation::U32div], None).unwrap();
-    let overflow = overflow_forest.add_block(vec![Operation::U32div], None).unwrap();
+    overflow_forest.add_block(vec![Operation::U32div], Vec::new()).unwrap();
+    overflow_forest.add_block(vec![Operation::U32div], Vec::new()).unwrap();
+    overflow_forest.add_block(vec![Operation::U32div], Vec::new()).unwrap();
+    let overflow = overflow_forest.add_block(vec![Operation::U32div], Vec::new()).unwrap();
 
     // Attempt to join with invalid ids
     let join = forest.add_join(overflow, second);
@@ -396,8 +394,8 @@ fn mast_forest_serialize_deserialize_advice_map() {
     let mut forest = MastForest::new();
     let deco0 = forest.add_decorator(Decorator::Trace(0)).unwrap();
     let deco1 = forest.add_decorator(Decorator::Trace(1)).unwrap();
-    let first = forest.add_block(vec![Operation::U32add], Some(vec![(0, deco0)])).unwrap();
-    let second = forest.add_block(vec![Operation::U32and], Some(vec![(1, deco1)])).unwrap();
+    let first = forest.add_block(vec![Operation::U32add], vec![(0, deco0)]).unwrap();
+    let second = forest.add_block(vec![Operation::U32and], vec![(1, deco1)]).unwrap();
     forest.add_join(first, second).unwrap();
 
     let key = Word::new([ONE, ONE, ONE, ONE]);

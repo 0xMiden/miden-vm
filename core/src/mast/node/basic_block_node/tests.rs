@@ -525,7 +525,7 @@ proptest! {
         (ops, decs) in decorator_list_strategy(20)
     ) {
         // Create a basic block with the generated operations and decorators
-        let block = BasicBlockNode::new(ops.clone(), Some(decs.clone())).unwrap();
+        let block = BasicBlockNode::new(ops.clone(), decs.clone()).unwrap();
 
         // Collect the decorators using raw_decorator_iter()
         let collected_decorators: Vec<(usize, &DecoratorId)> = block.raw_decorator_iter().collect();

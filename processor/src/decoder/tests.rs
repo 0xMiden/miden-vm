@@ -54,7 +54,7 @@ type DecoderTrace = [Vec<Felt>; DECODER_TRACE_WIDTH];
 #[test]
 fn basic_block_one_group() {
     let ops = vec![Operation::Pad, Operation::Add, Operation::Mul];
-    let basic_block = BasicBlockNode::new(ops.clone(), None).unwrap();
+    let basic_block = BasicBlockNode::new(ops.clone(), Vec::new()).unwrap();
     let program = {
         let mut mast_forest = MastForest::new();
 
@@ -107,7 +107,7 @@ fn basic_block_small() {
         Operation::Swap,
         Operation::Drop,
     ];
-    let basic_block = BasicBlockNode::new(ops.clone(), None).unwrap();
+    let basic_block = BasicBlockNode::new(ops.clone(), Vec::new()).unwrap();
     let program = {
         let mut mast_forest = MastForest::new();
 
@@ -169,7 +169,7 @@ fn basic_block_small_with_emit() {
         Operation::Drop,
         Operation::Add,
     ];
-    let basic_block = BasicBlockNode::new(ops.clone(), None).unwrap();
+    let basic_block = BasicBlockNode::new(ops.clone(), Vec::new()).unwrap();
     let program = {
         let mut mast_forest = MastForest::new();
 
@@ -239,7 +239,7 @@ fn basic_block() {
         Operation::Swap,
         Operation::Drop,
     ];
-    let basic_block = BasicBlockNode::new(ops.clone(), None).unwrap();
+    let basic_block = BasicBlockNode::new(ops.clone(), Vec::new()).unwrap();
     let program = {
         let mut mast_forest = MastForest::new();
 
@@ -346,7 +346,7 @@ fn span_block_with_respan() {
         Operation::Drop,
         Operation::Drop,
     ];
-    let basic_block = BasicBlockNode::new(ops.clone(), None).unwrap();
+    let basic_block = BasicBlockNode::new(ops.clone(), Vec::new()).unwrap();
     let program = {
         let mut mast_forest = MastForest::new();
 
@@ -435,8 +435,8 @@ fn span_block_with_respan() {
 
 #[test]
 fn join_node() {
-    let basic_block1 = BasicBlockNode::new(vec![Operation::Mul], None).unwrap();
-    let basic_block2 = BasicBlockNode::new(vec![Operation::Add], None).unwrap();
+    let basic_block1 = BasicBlockNode::new(vec![Operation::Mul], Vec::new()).unwrap();
+    let basic_block2 = BasicBlockNode::new(vec![Operation::Add], Vec::new()).unwrap();
     let program = {
         let mut mast_forest = MastForest::new();
 
@@ -501,8 +501,8 @@ fn join_node() {
 
 #[test]
 fn split_node_true() {
-    let basic_block1 = BasicBlockNode::new(vec![Operation::Mul], None).unwrap();
-    let basic_block2 = BasicBlockNode::new(vec![Operation::Add], None).unwrap();
+    let basic_block1 = BasicBlockNode::new(vec![Operation::Mul], Vec::new()).unwrap();
+    let basic_block2 = BasicBlockNode::new(vec![Operation::Add], Vec::new()).unwrap();
     let program = {
         let mut mast_forest = MastForest::new();
 
@@ -554,8 +554,8 @@ fn split_node_true() {
 
 #[test]
 fn split_node_false() {
-    let basic_block1 = BasicBlockNode::new(vec![Operation::Mul], None).unwrap();
-    let basic_block2 = BasicBlockNode::new(vec![Operation::Add], None).unwrap();
+    let basic_block1 = BasicBlockNode::new(vec![Operation::Mul], Vec::new()).unwrap();
+    let basic_block2 = BasicBlockNode::new(vec![Operation::Add], Vec::new()).unwrap();
     let program = {
         let mut mast_forest = MastForest::new();
 
@@ -610,7 +610,7 @@ fn split_node_false() {
 
 #[test]
 fn loop_node() {
-    let loop_body = BasicBlockNode::new(vec![Operation::Pad, Operation::Drop], None).unwrap();
+    let loop_body = BasicBlockNode::new(vec![Operation::Pad, Operation::Drop], Vec::new()).unwrap();
     let program = {
         let mut mast_forest = MastForest::new();
 
@@ -662,7 +662,7 @@ fn loop_node() {
 
 #[test]
 fn loop_node_skip() {
-    let loop_body = BasicBlockNode::new(vec![Operation::Pad, Operation::Drop], None).unwrap();
+    let loop_body = BasicBlockNode::new(vec![Operation::Pad, Operation::Drop], Vec::new()).unwrap();
     let program = {
         let mut mast_forest = MastForest::new();
 
@@ -704,7 +704,7 @@ fn loop_node_skip() {
 
 #[test]
 fn loop_node_repeat() {
-    let loop_body = BasicBlockNode::new(vec![Operation::Pad, Operation::Drop], None).unwrap();
+    let loop_body = BasicBlockNode::new(vec![Operation::Pad, Operation::Drop], Vec::new()).unwrap();
     let program = {
         let mut mast_forest = MastForest::new();
 
@@ -798,15 +798,15 @@ fn call_block() {
         Operation::Push(TWO),
         Operation::FmpUpdate,
         Operation::Pad,
-    ], None).unwrap();
+    ], Vec::new()).unwrap();
     let first_basic_block_id = mast_forest.add_node(first_basic_block.clone()).unwrap();
 
     let foo_root_node = BasicBlockNode::new(vec![
         Operation::Push(ONE), Operation::FmpUpdate
-    ], None).unwrap();
+    ], Vec::new()).unwrap();
     let foo_root_node_id = mast_forest.add_node(foo_root_node.clone()).unwrap();
 
-    let last_basic_block = BasicBlockNode::new(vec![Operation::FmpAdd, Operation::Swap, Operation::Drop], None).unwrap();
+    let last_basic_block = BasicBlockNode::new(vec![Operation::FmpAdd, Operation::Swap, Operation::Drop], Vec::new()).unwrap();
     let last_basic_block_id = mast_forest.add_node(last_basic_block.clone()).unwrap();
 
     let foo_call_node = CallNode::new(foo_root_node_id, &mast_forest).unwrap();
@@ -1014,13 +1014,13 @@ fn syscall_block() {
     let mut mast_forest = MastForest::new();
 
     // build foo procedure body
-    let foo_root = BasicBlockNode::new(vec![Operation::Push(THREE), Operation::FmpUpdate], None).unwrap();
+    let foo_root = BasicBlockNode::new(vec![Operation::Push(THREE), Operation::FmpUpdate], Vec::new()).unwrap();
     let foo_root_id = mast_forest.add_node(foo_root.clone()).unwrap();
     mast_forest.make_root(foo_root_id);
     let kernel = Kernel::new(&[foo_root.digest()]).unwrap();
 
     // build bar procedure body
-    let bar_basic_block = BasicBlockNode::new(vec![Operation::Push(TWO), Operation::FmpUpdate], None).unwrap();
+    let bar_basic_block = BasicBlockNode::new(vec![Operation::Push(TWO), Operation::FmpUpdate], Vec::new()).unwrap();
     let bar_basic_block_id = mast_forest.add_node(bar_basic_block.clone()).unwrap();
 
     let foo_call_node = CallNode::new_syscall(foo_root_id, &mast_forest).unwrap();
@@ -1035,10 +1035,10 @@ fn syscall_block() {
         Operation::Push(ONE),
         Operation::FmpUpdate,
         Operation::Pad,
-    ], None).unwrap();
+    ], Vec::new()).unwrap();
     let first_basic_block_id = mast_forest.add_node(first_basic_block.clone()).unwrap();
 
-    let last_basic_block = BasicBlockNode::new(vec![Operation::FmpAdd, Operation::Swap, Operation::Drop], None).unwrap();
+    let last_basic_block = BasicBlockNode::new(vec![Operation::FmpAdd, Operation::Swap, Operation::Drop], Vec::new()).unwrap();
     let last_basic_block_id = mast_forest.add_node(last_basic_block.clone()).unwrap();
 
     let bar_call_node = CallNode::new(bar_root_node_id, &mast_forest).unwrap();
@@ -1319,14 +1319,14 @@ fn dyn_block() {
     let mut mast_forest = MastForest::new();
 
     let foo_root_node =
-        BasicBlockNode::new(vec![Operation::Push(ONE), Operation::Add], None).unwrap();
+        BasicBlockNode::new(vec![Operation::Push(ONE), Operation::Add], Vec::new()).unwrap();
     let foo_root_node_id = mast_forest.add_node(foo_root_node.clone()).unwrap();
     mast_forest.make_root(foo_root_node_id);
 
-    let mstorew_node = BasicBlockNode::new(vec![Operation::MStoreW], None).unwrap();
+    let mstorew_node = BasicBlockNode::new(vec![Operation::MStoreW], Vec::new()).unwrap();
     let mstorew_node_id = mast_forest.add_node(mstorew_node.clone()).unwrap();
 
-    let push_node = BasicBlockNode::new(vec![PUSH_40_OP], None).unwrap();
+    let push_node = BasicBlockNode::new(vec![PUSH_40_OP], Vec::new()).unwrap();
     let push_node_id = mast_forest.add_node(push_node.clone()).unwrap();
 
     let join_node = JoinNode::new([mstorew_node_id, push_node_id], &mast_forest).unwrap();
@@ -1455,7 +1455,7 @@ fn calls_in_syscall(#[case] op: Operation) {
         let mut mast_forest = MastForest::new();
 
         // add dummy block
-        mast_forest.add_block(vec![Operation::Add], None).unwrap();
+        mast_forest.add_block(vec![Operation::Add], Vec::new()).unwrap();
 
         let node: MastNode = match op {
             Operation::Dyncall => DynNode::new_dyncall().into(),
@@ -1491,7 +1491,7 @@ fn set_user_op_helpers_many() {
     let program = {
         let mut mast_forest = MastForest::new();
 
-        let basic_block_id = mast_forest.add_block(vec![Operation::U32div], None).unwrap();
+        let basic_block_id = mast_forest.add_block(vec![Operation::U32div], Vec::new()).unwrap();
         mast_forest.make_root(basic_block_id);
 
         Program::new(mast_forest.into(), basic_block_id)

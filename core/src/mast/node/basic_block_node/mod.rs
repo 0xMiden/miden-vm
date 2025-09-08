@@ -92,14 +92,11 @@ impl BasicBlockNode {
     /// - `operations` vector is empty.
     pub fn new(
         operations: Vec<Operation>,
-        decorators: Option<DecoratorList>,
+        decorators: DecoratorList,
     ) -> Result<Self, MastForestError> {
         if operations.is_empty() {
             return Err(MastForestError::EmptyBasicBlock);
         }
-
-        // None is equivalent to an empty list of decorators moving forward.
-        let decorators = decorators.unwrap_or_default();
 
         // Validate decorators list (only in debug mode).
         #[cfg(debug_assertions)]
@@ -150,7 +147,7 @@ impl BasicBlockNode {
             decorator_list.push((idx, mast_forest.add_decorator(decorator)?));
         }
 
-        Self::new(operations, Some(decorator_list))
+        Self::new(operations, decorator_list)
     }
 }
 
