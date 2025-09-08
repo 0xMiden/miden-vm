@@ -181,9 +181,9 @@ impl BasicBlockBuilder<'_> {
         if !self.ops.is_empty() {
             let ops = self.ops.drain(..).collect();
             let decorators = if !self.decorators.is_empty() {
-                Some(self.decorators.drain(..).collect())
+                self.decorators.drain(..).collect()
             } else {
-                None
+                Vec::new()
             };
 
             let basic_block_node_id = self.mast_forest_builder.ensure_block(ops, decorators)?;

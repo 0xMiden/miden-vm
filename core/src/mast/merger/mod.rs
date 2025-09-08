@@ -327,15 +327,13 @@ impl MastForestMerger {
                     basic_block_node.operations().copied().collect(),
                     // Operation Indices of decorators stay the same while decorator IDs need to be
                     // mapped.
-                    Some(
-                        basic_block_node
-                            .decorators()
-                            .map(|(idx, decorator_id)| match map_decorator_id(&decorator_id) {
-                                Ok(mapped_decorator) => Ok((idx, mapped_decorator)),
-                                Err(err) => Err(err),
-                            })
-                            .collect::<Result<Vec<_>, _>>()?,
-                    ),
+                    basic_block_node
+                        .decorators()
+                        .map(|(idx, decorator_id)| match map_decorator_id(&decorator_id) {
+                            Ok(mapped_decorator) => Ok((idx, mapped_decorator)),
+                            Err(err) => Err(err),
+                        })
+                        .collect::<Result<Vec<_>, _>>()?,
                 )
                 .expect("previously valid BasicBlockNode should still be valid")
                 .into()

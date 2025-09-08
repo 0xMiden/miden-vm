@@ -112,7 +112,7 @@ impl MastForest {
     pub fn add_block(
         &mut self,
         operations: Vec<Operation>,
-        decorators: Option<DecoratorList>,
+        decorators: DecoratorList,
     ) -> Result<MastNodeId, MastForestError> {
         let block = BasicBlockNode::new(operations, decorators)?;
         self.add_node(block)
