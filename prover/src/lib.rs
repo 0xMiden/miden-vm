@@ -12,7 +12,7 @@ use prove::{prove_blake, prove_rpo};
 use std::{println, vec, vec::Vec};
 use tracing::instrument;
 
-use air::{ProcessorAir, PublicInputs, trace::TRACE_WIDTH};
+use air::{trace::{range::V_COL_IDX, TRACE_WIDTH}, ProcessorAir, PublicInputs};
 use miden_crypto::hash::rpo::RpoPermutation256;
 #[cfg(all(feature = "metal", target_arch = "aarch64", target_os = "macos"))]
 use miden_gpu::HashFn;
@@ -171,12 +171,8 @@ where
             type Config = StarkConfig<Pcs, Challenge, Challenger>;
             let config = Config::new(pcs, challenger);
 
-            //let prover = ExecutionProver::<Config>::new(config.clone(), public_inputs);
-            //prover.are_inputs_valid(&trace);
-            //prover.are_outputs_valid(&trace);
-
             let proof = prove_rpo(config, trace);
-            //let proof = bincode::serialize(&proof).unwrap();
+
             ExecutionProof::new(proof, hash_fn)
         },
         HashFunction::Blake3_256 | HashFunction::Blake3_192 => {
@@ -214,10 +210,8 @@ where
 
             let config = Config::new(pcs, challenger);
 
-            //let prover = ExecutionProver::<Config>::new(config, public_inputs);
-
             let proof = prove_blake(config, trace);
-            //let proof = bincode::serialize(&proof).unwrap();
+            
             ExecutionProof::new(proof, hash_fn)
         },
 

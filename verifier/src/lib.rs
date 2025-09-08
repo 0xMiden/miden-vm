@@ -5,6 +5,8 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
+use std::println;
+
 use alloc::vec;
 
 use air::{Felt, HashFunction, ProcessorAir, PublicInputs};
@@ -82,6 +84,7 @@ pub fn verify(
 
     match hash_fn {
         HashFunction::Blake3_192 | HashFunction::Blake3_256 => {
+            println!("blake verifying");
             type H = Blake3;
             type FieldHash<H> = SerializingHasher64<H>;
             type Compress<H> = CompressionFunctionFromHasher<H, 2, 32>;

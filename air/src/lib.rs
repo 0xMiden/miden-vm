@@ -7,15 +7,14 @@ extern crate alloc;
 extern crate std;
 
 use core::borrow::{Borrow, BorrowMut};
+use std::println;
 
 use p3_air::AirBuilderWithPublicValues;
 pub use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::Matrix;
 //use serde::{Deserialize, Serialize}; TODO(Al)
-use vm_core::{
-    ProgramInfo, StackInputs, StackOutputs,
-};
+use vm_core::{ProgramInfo, StackInputs, StackOutputs};
 use winter_air::ProofOptions as WinterProofOptions;
 
 mod constraints;
@@ -339,22 +338,39 @@ impl<AB: AirBuilderWithPublicValues> Air<AB> for ProcessorAir {
 
         let clk_cur = local.clk;
         let clk_nxt = next.clk;
-      /*
-        let final_stack = local.stack;
+        /*
+               let final_stack = local.stack;
 
-        let pis = builder.public_values();
-        let output_stack = pis[16];
+               let pis = builder.public_values();
+               let output_stack = pis[16];
 
-        let mut when_first_row = builder.when_first_row();
+               let mut when_first_row = builder.when_first_row();
 
-        when_first_row.assert_eq(final_stack[0],  output_stack);
- */
+               when_first_row.assert_eq(final_stack[0],  output_stack);
+        */
         let mut when_transition = builder.when_transition();
 
         when_transition
-            .when_transition_window(2)
+            
             .assert_zero(clk_nxt - (clk_cur + AB::Expr::ONE));
+
+        let change_v = next.range[1] - local.range[1];
+        when_transition.assert_zero(
+            (change_v.clone() - AB::Expr::ONE)
+                * (change_v.clone() - AB::Expr::from_i128(3))
+                * (change_v.clone() - AB::Expr::from_i128(9))
+                * (change_v.clone() - AB::Expr::from_i128(27))
+                * (change_v.clone() - AB::Expr::from_i128(81))
+                * (change_v.clone() - AB::Expr::from_i128(243))
+                * (change_v.clone() - AB::Expr::from_i128(729))
+                * (change_v.clone() - AB::Expr::from_i128(2187)),
+        ); 
+        
+
     }
+
+   
+
 }
 
 #[derive(Debug)]
