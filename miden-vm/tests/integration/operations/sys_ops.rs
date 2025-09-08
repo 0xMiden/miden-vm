@@ -1,4 +1,4 @@
-use miden_core::{Felt, mast};
+use miden_core::{EventID, Felt, mast};
 use miden_processor::{ExecutionError, NoopEventHandler, RowIndex, ZERO};
 use miden_utils_testing::{build_op_test, expect_exec_error_matches};
 
@@ -84,6 +84,6 @@ fn assert_eq_fail() {
 fn emit() {
     // Use stack-provided event id form to avoid immediate parsing constraints
     let mut test = build_op_test!("push.42 emit drop", &[0, 0, 0, 0]);
-    test.add_event_handler(Felt::new(42), NoopEventHandler);
+    test.add_event_handler(EventID::from_u64(42), NoopEventHandler);
     test.prove_and_verify(vec![], false);
 }

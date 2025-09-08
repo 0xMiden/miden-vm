@@ -7,7 +7,7 @@ extern crate alloc;
 use alloc::{sync::Arc, vec, vec::Vec};
 
 use miden_assembly::{Library, mast::MastForest, utils::Deserializable};
-use miden_core::{Felt, Word};
+use miden_core::{EventID, Felt, Word};
 use miden_processor::{EventHandler, HostLibrary};
 use miden_utils_sync::LazyLock;
 
@@ -57,7 +57,7 @@ impl StdLibrary {
     }
 
     /// List of all `EventHandlers` required to run all of the standard library.
-    pub fn handlers(&self) -> Vec<(Felt, Arc<dyn EventHandler>)> {
+    pub fn handlers(&self) -> Vec<(EventID, Arc<dyn EventHandler>)> {
         vec![(KECCAK_HASH_MEMORY_EVENT_ID, Arc::new(handle_keccak_hash_memory))]
     }
 }

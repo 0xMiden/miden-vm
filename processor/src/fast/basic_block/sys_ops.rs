@@ -1,4 +1,4 @@
-use miden_core::{Felt, ONE, mast::MastForest, sys_events::SystemEvent};
+use miden_core::{EventID, Felt, ONE, mast::MastForest, sys_events::SystemEvent};
 
 use crate::{
     AsyncHost, BaseHost, ErrorContext, ExecutionError, FMP_MIN,
@@ -90,7 +90,7 @@ impl FastProcessor {
         err_ctx: &impl ErrorContext,
     ) -> Result<(), ExecutionError> {
         let mut process = self.state();
-        let event_id = process.get_stack_item(0);
+        let event_id = EventID::from_felt(process.get_stack_item(0));
         // If it's a system event, handle it directly. Otherwise, forward it to the host.
         if let Some(system_event) = SystemEvent::from_event_id(event_id) {
             handle_system_event(&mut process, system_event, err_ctx)

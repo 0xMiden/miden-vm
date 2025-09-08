@@ -2,7 +2,7 @@ use alloc::{sync::Arc, vec::Vec};
 
 use miden_air::RowIndex;
 use miden_core::{
-    Felt, QuadFelt, Word,
+    EventID, Felt, QuadFelt, Word,
     mast::{DecoratorId, MastForest, MastNodeErrorContext, MastNodeId},
     stack::MIN_STACK_DEPTH,
     utils::to_hex,
@@ -65,19 +65,19 @@ pub enum ExecutionError {
         source_file: Option<Arc<SourceFile>>,
         digest: Word,
     },
-    #[error("error during processing of event with id {event_id} in on_event handler")]
+    #[error("error during processing of event with id {event_id:?} in on_event handler")]
     #[diagnostic()]
     EventError {
         #[label]
         label: SourceSpan,
         #[source_code]
         source_file: Option<Arc<SourceFile>>,
-        event_id: Felt,
+        event_id: EventID,
         #[source]
         error: EventError,
     },
-    #[error("attempted to add event handler with previously inserted id: {id}")]
-    DuplicateEventHandler { id: Felt },
+    #[error("attempted to add event handler with previously inserted id: {id:?}")]
+    DuplicateEventHandler { id: EventID },
     #[error("assertion failed at clock cycle {clk} with error {}",
       match err_msg {
         Some(msg) => format!("message: {msg}"),
@@ -297,7 +297,7 @@ impl ExecutionError {
         Self::DynamicNodeNotFound { label, source_file, digest }
     }
 
-    pub fn event_error(error: EventError, event_id: Felt, err_ctx: &impl ErrorContext) -> Self {
+    pub fn event_error(error: EventError, event_id: EventID, err_ctx: &impl ErrorContext) -> Self {
         let (label, source_file) = err_ctx.label_and_source_file();
 
         Self::EventError { label, source_file, event_id, error }

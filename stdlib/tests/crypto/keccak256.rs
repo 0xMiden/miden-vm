@@ -6,7 +6,7 @@
 //! - Both memory and digest merge operations work correctly
 //! - Various input sizes and edge cases are handled properly
 
-use miden_core::{Felt, utils::string_to_event_id};
+use miden_core::{EventID, Felt};
 use miden_crypto::{
     WORD_SIZE, Word,
     hash::{keccak::Keccak256, rpo::Rpo256},
@@ -18,7 +18,7 @@ use miden_stdlib::handlers::keccak::{KECCAK_HASH_MEMORY_EVENT_NAME, KeccakFeltDi
 // ================================================================================================
 
 const INPUT_MEMORY_ADDR: u32 = 128;
-const DEBUG_EVENT_ID: &str = "miden::debug";
+const DEBUG_EVENT_NAME: &str = "miden::debug";
 
 // TESTS
 // ================================================================================================
@@ -69,14 +69,14 @@ fn test_keccak_handler(input_u8: &[u8]) {
                 emit.event("{KECCAK_HASH_MEMORY_EVENT_NAME}")
                 drop drop
 
-                emit.event("{DEBUG_EVENT_ID}")
+                emit.event("{DEBUG_EVENT_NAME}")
             end
             "#,
     );
 
     let mut test = build_debug_test!(source, &[]);
 
-    test.add_event_handler(string_to_event_id(DEBUG_EVENT_ID), preimage.handler_test());
+    test.add_event_handler(EventID::from_name(DEBUG_EVENT_NAME), preimage.handler_test());
     test.execute().unwrap();
 }
 
@@ -109,6 +109,7 @@ fn test_keccak_hash_memory_impl(input_u8: &[u8]) {
 
     let test = build_debug_test!(source, &[]);
 
+    test.execute().unwrap();
     let output = test.execute().unwrap();
     let stack = output.stack_outputs();
     let commitment = stack.get_stack_word(0).unwrap();

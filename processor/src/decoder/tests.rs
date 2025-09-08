@@ -12,7 +12,7 @@ use miden_air::trace::{
     },
 };
 use miden_core::{
-    EMPTY_WORD, ONE, Program, WORD_SIZE, ZERO, assert_matches,
+    EMPTY_WORD, EventID, ONE, Program, WORD_SIZE, ZERO, assert_matches,
     mast::{BasicBlockNode, MastForest, MastNode, MastNodeExt, MastNodeId, OP_BATCH_SIZE},
 };
 use miden_utils_testing::rand::rand_value;
@@ -1520,7 +1520,8 @@ fn set_user_op_helpers_many() {
 fn build_trace(stack_inputs: &[u64], program: &Program) -> (DecoderTrace, usize) {
     let stack_inputs = StackInputs::try_from_ints(stack_inputs.iter().copied()).unwrap();
     let mut host = DefaultHost::default();
-    host.register_handler(EMIT_EVENT_ID, Arc::new(NoopEventHandler)).unwrap();
+    host.register_handler(EventID::from_felt(EMIT_EVENT_ID), Arc::new(NoopEventHandler))
+        .unwrap();
     let mut process = Process::new(
         Kernel::default(),
         stack_inputs,

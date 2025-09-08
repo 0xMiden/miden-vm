@@ -125,6 +125,9 @@ pub use operations::{
 pub mod stack;
 pub use stack::{StackInputs, StackOutputs};
 
+mod event_id;
+pub use event_id::EventID;
+
 pub mod sys_events;
 
 mod advice;

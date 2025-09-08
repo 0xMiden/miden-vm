@@ -2,7 +2,7 @@ use std::{sync::Arc, vec};
 
 use miden_air::{Felt, ProvingOptions, RowIndex};
 use miden_assembly::{Assembler, utils::Serializable};
-use miden_core::{StarkField, ZERO};
+use miden_core::{EventID, StarkField, ZERO};
 use miden_processor::{
     AdviceInputs, AdviceMutation, DefaultHost, EventError, ExecutionError, ProcessState, Program,
     ProgramInfo, StackInputs, crypto::RpoRandomCoin,
@@ -41,7 +41,7 @@ const PROBABILISTIC_PRODUCT_SOURCE: &str = "
 
 /// Event ID for pushing a Falcon signature to the advice stack.
 /// This event is used for testing purposes only.
-const EVENT_FALCON_SIG_TO_STACK: Felt = Felt::new(3419226139);
+const EVENT_FALCON_SIG_TO_STACK: EventID = EventID::from_u64(3419226139);
 
 /// Event handler which pushes values onto the advice stack which are required for verification
 /// of a DSA in Miden VM.

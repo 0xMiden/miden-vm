@@ -6,9 +6,9 @@ use alloc::{
 };
 use core::{error::Error, fmt, fmt::Debug};
 
-use miden_core::DebugOptions;
+use miden_core::{DebugOptions, EventID};
 
-use crate::{AdviceMutation, ExecutionError, Felt, ProcessState};
+use crate::{AdviceMutation, ExecutionError, ProcessState};
 
 // EVENT HANDLER TRAIT
 // ================================================================================================
@@ -101,7 +101,7 @@ pub type EventError = Box<dyn Error + Send + Sync + 'static>;
 /// ```
 #[derive(Default)]
 pub struct EventHandlerRegistry {
-    handlers: BTreeMap<u64, Arc<dyn EventHandler>>,
+    handlers: BTreeMap<EventID, Arc<dyn EventHandler>>,
 }
 
 impl EventHandlerRegistry {
@@ -112,10 +112,10 @@ impl EventHandlerRegistry {
     /// Registers an [`EventHandler`] with a given identifier.
     pub fn register(
         &mut self,
-        id: Felt,
+        id: EventID,
         handler: Arc<dyn EventHandler>,
     ) -> Result<(), ExecutionError> {
-        match self.handlers.entry(id.as_int()) {
+        match self.handlers.entry(id) {
             Entry::Vacant(e) => e.insert(handler),
             Entry::Occupied(_) => return Err(ExecutionError::DuplicateEventHandler { id }),
         };
@@ -124,8 +124,8 @@ impl EventHandlerRegistry {
 
     /// Unregisters a handler with the given identifier, returning a flag whether a handler with
     /// that identifier was previously registered.
-    pub fn unregister(&mut self, id: Felt) -> bool {
-        self.handlers.remove(&id.as_int()).is_some()
+    pub fn unregister(&mut self, id: EventID) -> bool {
+        self.handlers.remove(&id).is_some()
     }
 
     /// Handles the event if the registry contains a handler with the same identifier.
@@ -136,10 +136,10 @@ impl EventHandlerRegistry {
     /// propagated to the caller.
     pub fn handle_event(
         &self,
-        id: Felt,
+        id: EventID,
         process: &ProcessState,
     ) -> Result<Option<Vec<AdviceMutation>>, EventError> {
-        if let Some(handler) = self.handlers.get(&id.as_int()) {
+        if let Some(handler) = self.handlers.get(&id) {
             return handler.on_event(process).map(Some);
         }
 
