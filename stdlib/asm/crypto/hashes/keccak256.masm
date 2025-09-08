@@ -19,7 +19,7 @@ const.KECCAK_HASH_MEMORY_EVENT=event("miden_stdlib::hash::keccak::hash_memory")
 #! - len_bytes: number of bytes to hash
 #! - KECCAK_LO/HI: 256-bit output digest as two 128-bit words (8 field elements).
 #!   Each word contains 4 32-bit values packing 4 bytes in little-endian order.
-#!   On the stack we have [W_LO, W_HI] = [w_0, ..., w_7] in little-endian order.
+#!   On the stack we have [W_LO, W_HI] = [[w_3, ..., w_0], [w_7, ..., w_4]].
 #!
 #! The memory is expected to contain len_u32 values with each element packing 4 bytes in
 #! little-endian order. If len_bytes is not divisible by 4, the last word's upper bytes are zero.
@@ -42,7 +42,7 @@ end
 #! - ptr_tmp: temporary memory (writes to [ptr_tmp..ptr_tmp+8))
 #! - INPUT_LO/HI and KECCAK_LO/HI are 256-bit values encoded as 2 128-bit words (8 field elements).
 #!   Each word contains 4 32-bit values packing 4 bytes in little-endian order.
-#!   On the stack we have [W_LO, W_HI] = [w_0, ..., w_7] in little-endian order.
+#!   On the stack we have [W_LO, W_HI] = [[w_3, ..., w_0], [w_7, ..., w_4]].
 export.hash_1to1
     # => [ptr, INPUT_LO, INPUT_HI]
 
@@ -70,7 +70,7 @@ end
 #! - INPUT_L_LO/HI, INPUT_R_LO/HI, and KECCAK_LO/HI are 256-bit values encoded as
 #!   2 128-bit words (8 field elements).
 #!   Each word contains 4 32-bit values packing 4 bytes in little-endian order.
-#!   On the stack we have [W_LO, W_HI] = [w_0, ..., w_7] in little-endian order.
+#!   On the stack we have [W_LO, W_HI] = [[w_3, ..., w_0], [w_7, ..., w_4]].
 export.hash_2to1
     # => [ptr, INPUT_L_LO, INPUT_L_HI, INPUT_R_LO, INPUT_R_HI]
     
@@ -109,7 +109,7 @@ end
 #! - COMM: commitment word = RPO(RPO(input) || RPO(hash)) for kernel tracking
 #! - KECCAK_LO/HI: 256-bit digest as two 128-bit words
 #!   Each word contains 4 32-bit values packing 4 bytes in little-endian order.
-#!   On the stack we have [W_LO, W_HI] = [w_0, ..., w_7] in little-endian order.
+#!   On the stack we have [W_LO, W_HI] = [[w_3, ..., w_0], [w_7, ..., w_4]].
 export.hash_memory_impl
     emit.KECCAK_HASH_MEMORY_EVENT
     # => [ptr, len_bytes, ...]
