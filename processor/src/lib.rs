@@ -19,7 +19,7 @@ pub use miden_core::{
     StackInputs, StackOutputs, WORD_SIZE, Word, ZERO,
     crypto::merkle::SMT_DEPTH,
     errors::InputError,
-    mast::{MastForest, MastNode, MastNodeId},
+    mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
     sys_events::SystemEvent,
     utils::DeserializationError,
 };

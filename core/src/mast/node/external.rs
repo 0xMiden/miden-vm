@@ -1,14 +1,14 @@
-use alloc::vec::Vec;
+use alloc::{boxed::Box, vec::Vec};
 use core::fmt;
 
-use miden_crypto::Word;
+use miden_crypto::{Felt, Word};
 use miden_formatting::{
     hex::ToHex,
     prettier::{Document, PrettyPrint, const_text, nl, text},
 };
 
-use super::MastNodeExt;
-use crate::mast::{DecoratorId, MastForest};
+use super::{MastNodeErrorContext, MastNodeExt};
+use crate::mast::{DecoratorId, MastForest, MastNodeId, Remapping};
 
 // EXTERNAL NODE
 // ================================================================================================
@@ -39,23 +39,6 @@ impl ExternalNode {
     }
 }
 
-impl ExternalNode {
-    /// Returns the commitment to the MAST node referenced by this external node.
-    pub fn digest(&self) -> Word {
-        self.digest
-    }
-
-    /// Returns the decorators to be executed before this node is executed.
-    pub fn before_enter(&self) -> &[DecoratorId] {
-        &self.before_enter
-    }
-
-    /// Returns the decorators to be executed after this node is executed.
-    pub fn after_exit(&self) -> &[DecoratorId] {
-        &self.after_exit
-    }
-}
-
 //-------------------------------------------------------------------------------------------------
 /// Mutators
 impl ExternalNode {
@@ -76,7 +59,7 @@ impl ExternalNode {
     }
 }
 
-impl MastNodeExt for ExternalNode {
+impl MastNodeErrorContext for ExternalNode {
     fn decorators(&self) -> impl Iterator<Item = (usize, DecoratorId)> {
         self.before_enter.iter().chain(&self.after_exit).copied().enumerate()
     }
@@ -162,5 +145,65 @@ impl fmt::Display for ExternalNodePrettyPrint<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use crate::prettier::PrettyPrint;
         self.pretty_print(f)
+    }
+}
+
+// MAST NODE TRAIT IMPLEMENTATION
+// ================================================================================================
+
+impl MastNodeExt for ExternalNode {
+    /// Returns the commitment to the MAST node referenced by this external node.
+    ///
+    /// The hash of an external node is the hash of the procedure it represents, such that an
+    /// external node can be swapped with the actual subtree that it represents without changing
+    /// the MAST root.
+    fn digest(&self) -> Word {
+        self.digest
+    }
+
+    /// Returns the decorators to be executed before this node is executed.
+    fn before_enter(&self) -> &[DecoratorId] {
+        &self.before_enter
+    }
+
+    /// Returns the decorators to be executed after this node is executed.
+    fn after_exit(&self) -> &[DecoratorId] {
+        &self.after_exit
+    }
+
+    fn append_before_enter(&mut self, decorator_ids: &[DecoratorId]) {
+        self.append_before_enter(decorator_ids);
+    }
+
+    fn append_after_exit(&mut self, decorator_ids: &[DecoratorId]) {
+        self.append_after_exit(decorator_ids);
+    }
+
+    fn remove_decorators(&mut self) {
+        self.remove_decorators();
+    }
+
+    fn to_display<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn fmt::Display + 'a> {
+        Box::new(ExternalNode::to_display(self, mast_forest))
+    }
+
+    fn to_pretty_print<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn PrettyPrint + 'a> {
+        Box::new(ExternalNode::to_pretty_print(self, mast_forest))
+    }
+
+    fn remap_children(&self, _remapping: &Remapping) -> Self {
+        self.clone()
+    }
+
+    fn has_children(&self) -> bool {
+        false
+    }
+
+    fn append_children_to(&self, _target: &mut Vec<MastNodeId>) {
+        // No children for external nodes
+    }
+
+    fn domain(&self) -> Felt {
+        panic!("Can't fetch domain for an `External` node.")
     }
 }

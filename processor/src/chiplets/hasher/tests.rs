@@ -7,7 +7,7 @@ use miden_core::{
     ONE, Operation, ZERO,
     chiplets::hasher,
     crypto::merkle::{MerkleTree, NodeIndex},
-    mast::{MastForest, MastNode},
+    mast::{MastForest, MastNode, MastNodeExt},
 };
 use miden_utils_testing::rand::rand_array;
 

@@ -3,7 +3,7 @@ use alloc::{sync::Arc, vec::Vec};
 use miden_air::Felt;
 use miden_core::{
     Program, ZERO,
-    mast::{CallNode, MastForest, MastNodeId},
+    mast::{CallNode, MastForest, MastNodeExt, MastNodeId},
     stack::MIN_STACK_DEPTH,
     utils::range,
 };

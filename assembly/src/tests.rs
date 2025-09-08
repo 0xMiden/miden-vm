@@ -8,7 +8,7 @@ use miden_assembly_syntax::{
 };
 use miden_core::{
     Operation, Program, Word, assert_matches,
-    mast::{MastNode, MastNodeId},
+    mast::{MastNode, MastNodeExt, MastNodeId},
     utils::{Deserializable, Serializable, string_to_event_id},
 };
 use miden_mast_package::{MastArtifact, MastForest, Package, PackageExport, PackageManifest};

@@ -2,7 +2,10 @@ use alloc::vec::Vec;
 
 use super::{NodeDataOffset, basic_blocks::BasicBlockDataDecoder};
 use crate::{
-    mast::{BasicBlockNode, CallNode, JoinNode, LoopNode, MastNode, MastNodeId, SplitNode, Word},
+    mast::{
+        BasicBlockNode, CallNode, JoinNode, LoopNode, MastNode, MastNodeId, SplitNode, Word,
+        node::MastNodeExt,
+    },
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 

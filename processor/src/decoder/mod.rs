@@ -15,7 +15,8 @@ use miden_core::mast::OP_GROUP_SIZE;
 use miden_core::{
     AssemblyOp,
     mast::{
-        BasicBlockNode, CallNode, DynNode, JoinNode, LoopNode, MastForest, OP_BATCH_SIZE, SplitNode,
+        BasicBlockNode, CallNode, DynNode, JoinNode, LoopNode, MastForest, MastNodeExt,
+        OP_BATCH_SIZE, SplitNode,
     },
     stack::MIN_STACK_DEPTH,
 };

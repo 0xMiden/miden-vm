@@ -1,6 +1,6 @@
 use alloc::sync::Arc;
 
-use miden_core::mast::{ExternalNode, MastForest, MastNodeId};
+use miden_core::mast::{ExternalNode, MastForest, MastNodeExt, MastNodeId};
 
 use crate::{
     AsyncHost, ExecutionError,
