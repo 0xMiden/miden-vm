@@ -102,16 +102,22 @@ fn test_keccak_hash_memory_impl(input_u8: &[u8]) {
                 exec.keccak256::hash_memory_impl
                 # => [COMM, KECCAK_LO, KECCAK_HI]
 
-                emit.event("{DEBUG_EVENT_ID}")
                 exec.sys::truncate_stack
             end
             "#,
     );
 
-    let mut test = build_debug_test!(source, &[]);
+    let test = build_debug_test!(source, &[]);
 
-    test.add_event_handler(string_to_event_id(DEBUG_EVENT_ID), preimage.hash_memory_impl_test());
-    test.execute().unwrap();
+    let output = test.execute().unwrap();
+    let stack = output.stack_outputs();
+    let commitment = stack.get_stack_word(0).unwrap();
+    assert_eq!(commitment, preimage.calldata_commitment(), "calldata_commitment does not match");
+
+    let keccak_lo = stack.get_stack_word(4);
+    let keccak_hi = stack.get_stack_word(8);
+    let digest = KeccakFeltDigest::from_words(keccak_lo.unwrap(), keccak_hi.unwrap());
+    assert_eq!(digest, preimage.digest(), "output digest does not match");
 }
 
 fn test_keccak_hash_memory(input_u8: &[u8]) {
@@ -301,29 +307,6 @@ impl Preimage {
                 [Felt::new(len_bytes)].into_iter().chain(self.as_felt()).collect()
             };
             assert_eq!(witness, witness_expected, "witness in advice map does not match preimage");
-
-            Ok(vec![])
-        }
-    }
-
-    /// Handler for checking the correctness of `hash_memory_impl`
-    fn hash_memory_impl_test(self) -> impl EventHandler {
-        move |process: &ProcessState| -> Result<Vec<AdviceMutation>, EventError> {
-            // Expected stack after wrapper: [event_id, COMM, KECCAK_LO, KECCAK_HI, ...]
-            let calldata_commitment = process.get_stack_word(1);
-            let digest_lo = process.get_stack_word(5);
-            let digest_hi = process.get_stack_word(9);
-            let digest = KeccakFeltDigest::from_words(digest_lo, digest_hi);
-
-            // Verify the digest matches our reference computation
-            assert_eq!(digest, self.digest(), "output digest does not match");
-
-            // Verify the calldata commitment matches our reference computation
-            assert_eq!(
-                calldata_commitment,
-                self.calldata_commitment(),
-                "calldata_commitment does not match"
-            );
 
             Ok(vec![])
         }
