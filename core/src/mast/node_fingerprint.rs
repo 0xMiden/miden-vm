@@ -58,6 +58,9 @@ impl MastNodeFingerprint {
                 let mut bytes_to_hash = Vec::new();
 
                 for &(idx, decorator_id) in node.decorators() {
+                    let idx: u32 = idx
+                        .try_into()
+                        .expect("there are more than 2^{32}-1 operations in basic block");
                     bytes_to_hash.extend(idx.to_le_bytes());
                     bytes_to_hash.extend(forest[decorator_id].fingerprint().as_bytes());
                 }
