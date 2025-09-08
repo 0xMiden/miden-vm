@@ -136,16 +136,14 @@ fn test_keccak_hash_memory(input_u8: &[u8]) {
                 exec.keccak256::hash_memory
                 # => [KECCAK_LO, KECCAK_HI]
 
-                emit.event("{DEBUG_EVENT_ID}")
                 exec.sys::truncate_stack
             end
             "#,
     );
 
-    let mut test = build_debug_test!(source, &[]);
-
-    test.add_event_handler(string_to_event_id(DEBUG_EVENT_ID), preimage.wrapper_test());
-    test.execute().unwrap();
+    let test = build_debug_test!(source, &[]);
+    let digest = preimage.digest().to_stack().map(|felt| felt.as_int());
+    test.expect_stack(&digest);
 }
 
 #[test]
@@ -169,16 +167,14 @@ fn test_keccak_hash_1to1() {
                 exec.keccak256::hash_1to1
                 # => [KECCAK_LO, KECCAK_HI]
 
-                emit.event("{DEBUG_EVENT_ID}")
                 exec.sys::truncate_stack
             end
             "#,
     );
 
-    let mut test = build_debug_test!(source, &[]);
-
-    test.add_event_handler(string_to_event_id(DEBUG_EVENT_ID), preimage.wrapper_test());
-    test.execute().unwrap();
+    let test = build_debug_test!(source, &[]);
+    let digest = preimage.digest().to_stack().map(|felt| felt.as_int());
+    test.expect_stack(&digest);
 }
 
 #[test]
@@ -202,16 +198,14 @@ fn test_keccak_hash_2to1() {
                 exec.keccak256::hash_2to1
                 # => [KECCAK_LO, KECCAK_HI]
 
-                emit.event("{DEBUG_EVENT_ID}")
                 exec.sys::truncate_stack
             end
             "#,
     );
 
-    let mut test = build_debug_test!(source, &[]);
-
-    test.add_event_handler(string_to_event_id(DEBUG_EVENT_ID), preimage.wrapper_test());
-    test.execute().unwrap();
+    let test = build_debug_test!(source, &[]);
+    let digest = preimage.digest().to_stack().map(|felt| felt.as_int());
+    test.expect_stack(&digest);
 }
 
 // DEBUG HANDLER
@@ -330,24 +324,6 @@ impl Preimage {
                 self.calldata_commitment(),
                 "calldata_commitment does not match"
             );
-
-            Ok(vec![])
-        }
-    }
-
-    /// Handler for verifying the correctness of wrappers around `hash_memory_impl`:
-    /// - `hash_memory`
-    /// - `hash_1to1`
-    /// - `hash_2to1`
-    fn wrapper_test(self) -> impl EventHandler {
-        move |process: &ProcessState| -> Result<Vec<AdviceMutation>, EventError> {
-            // Expected stack after wrapper: [event_id, KECCAK_LO, KECCAK_HI, ...]
-            let keccak_lo = process.get_stack_word(1);
-            let keccak_hi = process.get_stack_word(5);
-            let digest = KeccakFeltDigest::from_words(keccak_lo, keccak_hi);
-
-            // Verify the digest matches our reference computation
-            assert_eq!(digest, self.digest(), "output digest does not match");
 
             Ok(vec![])
         }
