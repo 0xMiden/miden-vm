@@ -772,6 +772,7 @@ fn loop_node_repeat() {
 
 #[test]
 #[rustfmt::skip]
+#[allow(clippy::needless_range_loop)]
 fn call_block() {
     // build a program which looks like this:
     //
@@ -983,6 +984,7 @@ fn call_block() {
 
 #[test]
 #[rustfmt::skip]
+#[allow(clippy::needless_range_loop)]
 fn syscall_block() {
     // build a program which looks like this:
     //
