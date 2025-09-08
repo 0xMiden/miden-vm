@@ -99,9 +99,16 @@ impl<'a> DecoratorIterator<'a> {
     /// otherwise, None is returned.
     #[inline(always)]
     pub fn next_filtered(&mut self, pos: usize) -> Option<&DecoratorId> {
-        if self.idx < self.decorators.len() && self.decorators[self.idx].0 == pos {
+        // Check bounds first to avoid potential panic
+        if self.idx >= self.decorators.len() {
+            return None;
+        }
+
+        // Check if the current decorator's position matches the requested position
+        if self.decorators[self.idx].0 == pos {
+            let decorator_id = &self.decorators[self.idx].1;
             self.idx += 1;
-            Some(&self.decorators[self.idx - 1].1)
+            Some(decorator_id)
         } else {
             None
         }
@@ -112,12 +119,14 @@ impl<'a> Iterator for DecoratorIterator<'a> {
     type Item = &'a DecoratorId;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.idx < self.decorators.len() {
-            self.idx += 1;
-            Some(&self.decorators[self.idx - 1].1)
-        } else {
-            None
+        // Check bounds first to avoid potential panic
+        if self.idx >= self.decorators.len() {
+            return None;
         }
+
+        let decorator_id = &self.decorators[self.idx].1;
+        self.idx += 1;
+        Some(decorator_id)
     }
 }
 
