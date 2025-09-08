@@ -8,19 +8,214 @@
 
 use miden_core::{Felt, utils::string_to_event_id};
 use miden_crypto::{
-    Word,
+    WORD_SIZE, Word,
     hash::{keccak::Keccak256, rpo::Rpo256},
 };
 use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessState};
-use miden_stdlib::handlers::keccak::{
-    KECCAK_HASH_MEM_EVENT_ID, KECCAK_MERGE_STACK_EVENT_ID, KeccakFeltDigest,
-};
+use miden_stdlib::handlers::keccak::{KECCAK_HASH_MEMORY_EVENT_NAME, KeccakFeltDigest};
 
 // Test constants
 // ================================================================================================
 
 const INPUT_MEMORY_ADDR: u32 = 128;
 const DEBUG_EVENT_ID: &str = "miden::debug";
+
+// TESTS
+// ================================================================================================
+
+#[test]
+fn test_keccak_handlers() {
+    // Test various input sizes including edge cases
+    let hash_memory_inputs: Vec<Vec<u8>> = vec![
+        //empty
+        vec![],
+        // different byte packing
+        vec![1],
+        vec![1, 2],
+        vec![1, 2, 3],
+        vec![1, 2, 3, 4],
+        // longer inputs with non-aligned sizes
+        (0..31).collect(),
+        (0..32).collect(),
+        (0..33).collect(),
+        // large-ish inputs
+        (0..64).collect(),
+        (0..128).collect(),
+    ];
+
+    for input in &hash_memory_inputs {
+        test_keccak_handler(input);
+        test_keccak_hash_memory_impl(input);
+        test_keccak_hash_memory(input);
+    }
+}
+
+fn test_keccak_handler(input_u8: &[u8]) {
+    let len_bytes = input_u8.len();
+    let preimage = Preimage(input_u8.to_vec());
+
+    let memory_stores_source = preimage.masm_memory_store_source();
+
+    let source = format!(
+        r#"
+            begin
+                # Store packed u32 values in memory
+                {memory_stores_source}
+
+                # Push handler inputs
+                push.{len_bytes}.{INPUT_MEMORY_ADDR}
+                # => [ptr, len_bytes, ...]
+
+                emit.event("{KECCAK_HASH_MEMORY_EVENT_NAME}")
+                drop drop
+
+                emit.event("{DEBUG_EVENT_ID}")
+            end
+            "#,
+    );
+
+    let mut test = build_debug_test!(source, &[]);
+
+    test.add_event_handler(string_to_event_id(DEBUG_EVENT_ID), preimage.handler_test());
+    test.execute().unwrap();
+}
+
+fn test_keccak_hash_memory_impl(input_u8: &[u8]) {
+    let len_bytes = input_u8.len();
+    let preimage = Preimage(input_u8.to_vec());
+
+    let memory_stores_source = preimage.masm_memory_store_source();
+
+    let source = format!(
+        r#"
+            use.std::sys
+            use.std::crypto::hashes::keccak256
+
+            begin
+                # Store packed u32 values in memory
+                {memory_stores_source}
+
+                # Push wrapper inputs
+                push.{len_bytes}.{INPUT_MEMORY_ADDR}
+                # => [ptr, len_bytes]
+
+                exec.keccak256::hash_memory_impl
+                # => [COMM, KECCAK_LO, KECCAK_HI]
+
+                emit.event("{DEBUG_EVENT_ID}")
+                exec.sys::truncate_stack
+            end
+            "#,
+    );
+
+    let mut test = build_debug_test!(source, &[]);
+
+    test.add_event_handler(string_to_event_id(DEBUG_EVENT_ID), preimage.hash_memory_impl_test());
+    test.execute().unwrap();
+}
+
+fn test_keccak_hash_memory(input_u8: &[u8]) {
+    let len_bytes = input_u8.len();
+    let preimage = Preimage(input_u8.to_vec());
+
+    let memory_stores_source = preimage.masm_memory_store_source();
+
+    let source = format!(
+        r#"
+            use.std::sys
+            use.std::crypto::hashes::keccak256
+
+            begin
+                # Store packed u32 values in memory
+                {memory_stores_source}
+
+                # Push wrapper inputs
+                push.{len_bytes}.{INPUT_MEMORY_ADDR}
+                # => [ptr, len_bytes]
+
+                exec.keccak256::hash_memory
+                # => [KECCAK_LO, KECCAK_HI]
+
+                emit.event("{DEBUG_EVENT_ID}")
+                exec.sys::truncate_stack
+            end
+            "#,
+    );
+
+    let mut test = build_debug_test!(source, &[]);
+
+    test.add_event_handler(string_to_event_id(DEBUG_EVENT_ID), preimage.wrapper_test());
+    test.execute().unwrap();
+}
+
+#[test]
+fn test_keccak_hash_1to1() {
+    let input_u8: Vec<u8> = (0..32).collect();
+    let preimage = Preimage(input_u8);
+
+    let stack_stores_source = preimage.masm_stack_store_source();
+
+    let source = format!(
+        r#"
+            use.std::sys
+            use.std::crypto::hashes::keccak256
+
+            begin
+                # Push input to stack as words with temporary memory pointer
+                {stack_stores_source}
+                push.{INPUT_MEMORY_ADDR}
+                # => [ptr, INPUT_LO, INPUT_HI]
+
+                exec.keccak256::hash_1to1
+                # => [KECCAK_LO, KECCAK_HI]
+
+                emit.event("{DEBUG_EVENT_ID}")
+                exec.sys::truncate_stack
+            end
+            "#,
+    );
+
+    let mut test = build_debug_test!(source, &[]);
+
+    test.add_event_handler(string_to_event_id(DEBUG_EVENT_ID), preimage.wrapper_test());
+    test.execute().unwrap();
+}
+
+#[test]
+fn test_keccak_hash_2to1() {
+    let input_u8: Vec<u8> = (0..64).collect();
+    let preimage = Preimage(input_u8);
+
+    let stack_stores_source = preimage.masm_stack_store_source();
+
+    let source = format!(
+        r#"
+            use.std::sys
+            use.std::crypto::hashes::keccak256
+
+            begin
+                # Push input to stack as words with temporary memory pointer
+                {stack_stores_source}
+                push.{INPUT_MEMORY_ADDR}
+                # => [ptr, INPUT_L_LO, INPUT_L_HI, INPUT_R_LO, INPUT_R_HI]
+
+                exec.keccak256::hash_2to1
+                # => [KECCAK_LO, KECCAK_HI]
+
+                emit.event("{DEBUG_EVENT_ID}")
+                exec.sys::truncate_stack
+            end
+            "#,
+    );
+
+    let mut test = build_debug_test!(source, &[]);
+
+    test.add_event_handler(string_to_event_id(DEBUG_EVENT_ID), preimage.wrapper_test());
+    test.execute().unwrap();
+}
+
+// DEBUG HANDLER
+// ================================================================================================
 
 /// Test helper for Keccak256 precompile operations.
 ///
@@ -79,22 +274,19 @@ impl Preimage {
             .join(" ")
     }
 
-    /// Generates MASM code to push two digests onto the stack for merge testing.
-    /// Requires exactly 64 bytes: first 32 bytes = left digest, last 32 bytes = right digest.
+    /// Generates MASM code to push the input represented as words to the stack
     fn masm_stack_store_source(&self) -> String {
-        assert_eq!(self.0.len(), 64, "merge requires exactly 64 bytes (two digests)");
-        let (digest_l_lo, digest_l_hi) = KeccakFeltDigest::from_bytes(&self.0[0..32]).to_words();
-        let (digest_r_lo, digest_r_hi) = KeccakFeltDigest::from_bytes(&self.0[32..64]).to_words();
-        let words = [digest_l_lo, digest_l_hi, digest_r_lo, digest_r_hi];
-        words
-            .into_iter()
+        let input_u32: Vec<u32> = self.as_packed_u32().collect();
+        assert_eq!(input_u32.len() % WORD_SIZE, 0, "input must be word-aligned");
+        input_u32
+            .chunks_exact(WORD_SIZE)
             .rev()
-            .map(|word| format!("push.{:?}", word.as_ref()))
+            .map(|word| format!("push.{:?}", word))
             .collect::<Vec<_>>()
             .join(" ")
     }
 
-    /// Verifies that raw event handlers correctly populate advice provider.
+    /// Handler for verifying the correctness of the keccak handler.
     fn handler_test(self) -> impl EventHandler {
         move |process: &ProcessState| -> Result<Vec<AdviceMutation>, EventError> {
             let digest = self.digest();
@@ -120,10 +312,10 @@ impl Preimage {
         }
     }
 
-    /// Verifies that MASM wrappers correctly return commitment and digest on stack.
-    fn wrapper_test(self) -> impl EventHandler {
+    /// Handler for checking the correctness of `hash_memory_impl`
+    fn hash_memory_impl_test(self) -> impl EventHandler {
         move |process: &ProcessState| -> Result<Vec<AdviceMutation>, EventError> {
-            // Expected stack after wrapper: [event_id, commitment, digest_lo, digest_hi, ...]
+            // Expected stack after wrapper: [event_id, COMM, KECCAK_LO, KECCAK_HI, ...]
             let calldata_commitment = process.get_stack_word(1);
             let digest_lo = process.get_stack_word(5);
             let digest_hi = process.get_stack_word(9);
@@ -142,159 +334,22 @@ impl Preimage {
             Ok(vec![])
         }
     }
-}
 
-// TESTS
-// ================================================================================================
+    /// Handler for verifying the correctness of wrappers around `hash_memory_impl`:
+    /// - `hash_memory`
+    /// - `hash_1to1`
+    /// - `hash_2to1`
+    fn wrapper_test(self) -> impl EventHandler {
+        move |process: &ProcessState| -> Result<Vec<AdviceMutation>, EventError> {
+            // Expected stack after wrapper: [event_id, KECCAK_LO, KECCAK_HI, ...]
+            let keccak_lo = process.get_stack_word(1);
+            let keccak_hi = process.get_stack_word(5);
+            let digest = KeccakFeltDigest::from_words(keccak_lo, keccak_hi);
 
-#[test]
-fn test_keccak_handlers() {
-    // Test various input sizes including edge cases
-    let inputs: Vec<Vec<u8>> = vec![
-        //empty
-        vec![],
-        // different byte packing
-        vec![1],
-        vec![1, 2],
-        vec![1, 2, 3],
-        vec![1, 2, 3, 4],
-        // longer inputs with non-aligned sizes
-        (0..31).collect(),
-        (0..32).collect(),
-        (0..33).collect(),
-        // large-ish inputs
-        (0..64).collect(),
-        (0..128).collect(),
-    ];
+            // Verify the digest matches our reference computation
+            assert_eq!(digest, self.digest(), "output digest does not match");
 
-    for input in &inputs {
-        test_keccak_hash_mem_handler_with_input(input);
-        test_keccak_hash_mem_wrapper_with_input(input);
+            Ok(vec![])
+        }
     }
-
-    let input_digests: Vec<u8> = (0..64).collect();
-    test_keccak_merge_stack_handler_with_input(&input_digests);
-    test_keccak_merge_stack_wrapper_with_input(&input_digests);
-}
-
-fn test_keccak_hash_mem_handler_with_input(input_u8: &[u8]) {
-    let len_bytes = input_u8.len();
-    let preimage = Preimage(input_u8.to_vec());
-
-    let memory_stores_source = preimage.masm_memory_store_source();
-
-    let source = format!(
-        r#"
-            begin
-                # Store packed u32 values in memory
-                {memory_stores_source}
-
-                # Push handler inputs
-                push.{len_bytes}.{INPUT_MEMORY_ADDR}
-                # => [ptr, len_bytes, ...]
-
-                emit.event("{KECCAK_HASH_MEM_EVENT_ID}")
-                drop drop
-
-                emit.event("{DEBUG_EVENT_ID}")
-            end
-            "#,
-    );
-
-    let mut test = build_debug_test!(source, &[]);
-
-    test.add_event_handler(string_to_event_id(DEBUG_EVENT_ID), preimage.handler_test());
-    test.execute().unwrap();
-}
-
-fn test_keccak_hash_mem_wrapper_with_input(input_u8: &[u8]) {
-    let len_bytes = input_u8.len();
-    let preimage = Preimage(input_u8.to_vec());
-
-    let memory_stores_source = preimage.masm_memory_store_source();
-
-    let source = format!(
-        r#"
-            use.std::sys
-            use.std::crypto::hashes::keccak256
-
-            begin
-                # Store packed u32 values in memory
-                {memory_stores_source}
-
-                # Push wrapper inputs
-                push.{len_bytes}.{INPUT_MEMORY_ADDR}
-                # => [ptr, len_bytes, ...]
-
-                exec.keccak256::hash_mem_impl
-                # => [commitment, keccak_lo, keccak_hi, ...]
-
-                emit.event("{DEBUG_EVENT_ID}")
-                exec.sys::truncate_stack
-            end
-            "#,
-    );
-
-    let mut test = build_debug_test!(source, &[]);
-
-    test.add_event_handler(string_to_event_id(DEBUG_EVENT_ID), preimage.wrapper_test());
-    test.execute().unwrap();
-}
-
-fn test_keccak_merge_stack_handler_with_input(input_u8: &[u8]) {
-    let preimage = Preimage(input_u8.to_vec());
-
-    let stack_stores_source = preimage.masm_stack_store_source();
-
-    let source = format!(
-        r#"
-            use.std::sys
-            begin
-                # Push two digests to stack
-                {stack_stores_source}
-                # => [digest_left_lo, digest_left_hi, digest_right_lo, digest_right_hi, ...]
-
-                emit.event("{KECCAK_MERGE_STACK_EVENT_ID}")
-
-                emit.event("{DEBUG_EVENT_ID}")
-                exec.sys::truncate_stack
-            end
-            "#,
-    );
-
-    let mut test = build_debug_test!(source, &[]);
-
-    test.add_event_handler(string_to_event_id(DEBUG_EVENT_ID), preimage.handler_test());
-    test.execute().unwrap();
-}
-
-fn test_keccak_merge_stack_wrapper_with_input(input_u8: &[u8]) {
-    let preimage = Preimage(input_u8.to_vec());
-
-    let stack_stores_source = preimage.masm_stack_store_source();
-
-    let source = format!(
-        r#"
-            use.std::sys
-            use.std::crypto::hashes::keccak256
-
-            begin
-                # Push two digests to stack
-                {stack_stores_source}
-                # => [digest_left_lo, digest_left_hi, digest_right_lo, digest_right_hi, ...]
-
-                exec.keccak256::merge_stack_impl
-                # => [commitment, keccak_lo, keccak_hi, ...]
-
-                emit.event("{DEBUG_EVENT_ID}")
-
-                exec.sys::truncate_stack
-            end
-            "#,
-    );
-
-    let mut test = build_debug_test!(source, &[]);
-
-    test.add_event_handler(string_to_event_id(DEBUG_EVENT_ID), preimage.wrapper_test());
-    test.execute().unwrap();
 }

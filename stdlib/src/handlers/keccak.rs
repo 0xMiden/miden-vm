@@ -11,9 +11,17 @@
 //!
 //! ### Digest Representation
 //! A Keccak256 digest (256 bits) is represented as [`KeccakFeltDigest`]: 8 field elements,
-//! each containing a u32 value in little-endian order. In the VM, digests are stored as
-//! two words to enable efficient memory operations. Each word is encoded in little-endian order
-//! (reversed in the VM stack).
+//! each containing a u32 value in little-endian order.
+//!
+//! #### Example Encoding
+//! For a 32-byte digest, the encoding process is:
+//! 1. **Bytes to u32s**: `[b0,b1,...,b31]` → `[h0,h1,h2,h3,h4,h5,h6,h7]` where each `hi` is a
+//!    little-endian u32 (e.g., `h0 = u32::from_le_bytes([b0,b1,b2,b3])`)
+//! 2. **Group into words**: `KECCAK_LO = [h0,h1,h2,h3]`, `KECCAK_HI = [h4,h5,h6,h7]`
+//! 3. **Stack representation**: `[[h3,h2,h1,h0], [h7,h6,h5,h4]]` (each word reversed for LIFO)
+//!
+//! This representation allows direct memory writes without element reordering: when written to
+//! memory using `mem_storew`, the bytes maintain correct little-endian order.
 //!
 //! ### Byte Packing
 //! Input bytes are packed into field elements as u32 values:
@@ -29,12 +37,11 @@ use miden_core::{AdviceMap, Felt, FieldElement, Word, crypto::hash::Digest};
 use miden_crypto::hash::{keccak::Keccak256, rpo::Rpo256};
 use miden_processor::{AdviceMutation, EventError, ProcessState};
 
-use crate::handlers::read_memory;
-
-/// Event ID for memory-based Keccak256 computation
-pub const KECCAK_HASH_MEM_EVENT_ID: &str = "miden_stdlib::hash::keccak::hash_mem";
-/// Event ID for stack-based Keccak256 merge computation
-pub const KECCAK_MERGE_STACK_EVENT_ID: &str = "miden_stdlib::hash::keccak::merge_stack";
+/// Event name for the Keccak256 handler.
+pub const KECCAK_HASH_MEMORY_EVENT_NAME: &str = "miden_stdlib::hash::keccak::hash_memory";
+/// Event ID for the Keccak256 handler, derived from
+/// `string_to_event_id(KECCAK_HASH_MEMORY_EVENT_NAME)`.
+pub const KECCAK_HASH_MEMORY_EVENT_ID: Felt = Felt::new(5005056617811169331);
 
 /// Keccak256 event handler that reads data from memory.
 ///
@@ -43,52 +50,20 @@ pub const KECCAK_MERGE_STACK_EVENT_ID: &str = "miden_stdlib::hash::keccak::merge
 ///
 /// Stack: [event_id, ptr, len_bytes, ...]
 /// Where ptr must be word-aligned (divisible by 4)
-pub fn handle_keccak_hash_mem(process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
+pub fn handle_keccak_hash_memory(
+    process: &ProcessState,
+) -> Result<Vec<AdviceMutation>, EventError> {
     // Stack: [event_id, ptr, len_bytes, ...]
     let ptr = process.get_stack_item(1).as_int();
     let len_bytes = process.get_stack_item(2).as_int();
 
-    if len_bytes > u32::MAX as u64 {
-        return Err(KeccakError::MemoryReadFailed { ptr, len: len_bytes }.into());
-    }
-
     // Read packed u32 values from memory
-    let len_u32 = len_bytes.div_ceil(4);
-    let input_felt = read_memory(process, ptr, len_u32)
+    let witness_felt = read_witness(process, ptr, len_bytes)
         .ok_or(KeccakError::MemoryReadFailed { ptr, len: len_bytes })?;
+    let input_felt = &witness_felt[1..];
 
-    compute_keccak_with_commitment(input_felt, len_bytes as usize)
-}
-
-/// Keccak256 event handler that merges two digests.
-///
-/// - Input: Reads two 256-bit digests from stack as four words
-/// - Output: Returns Keccak256(left || right) via advice stack, stores witness in advice map
-///
-/// Stack: [event_id, digest_left_lo, digest_left_hi, digest_right_lo, digest_right_hi, ...]
-pub fn handle_keccak_merge_stack(
-    process: &ProcessState,
-) -> Result<Vec<AdviceMutation>, EventError> {
-    // Stack contains two KeccakFeltDigest values as four words
-    let input: Vec<Felt> = [
-        process.get_stack_word(1),  // digest_left_lo (word 1)
-        process.get_stack_word(5),  // digest_left_hi (word 2)
-        process.get_stack_word(9),  // digest_right_lo (word 3)
-        process.get_stack_word(13), // digest_right_hi (word 4)
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
-
-    compute_keccak_with_commitment(input, 64)
-}
-
-/// Common helper that computes hash and returns it via advice mutations.
-fn compute_keccak_with_commitment(
-    mut input_felt: Vec<Felt>,
-    len_bytes: usize,
-) -> Result<Vec<AdviceMutation>, EventError> {
-    let input_u8 = packed_felts_to_bytes(&input_felt, len_bytes)?;
+    // Recover the input represented as bytes
+    let input_u8 = packed_felts_to_bytes(&input_felt, len_bytes as usize)?;
     let hash_u8: [u8; 32] = Keccak256::hash(&input_u8).as_bytes();
     let digest = KeccakFeltDigest::from_bytes(&hash_u8);
 
@@ -96,29 +71,58 @@ fn compute_keccak_with_commitment(
     let calldata_commitment =
         Rpo256::merge(&[Rpo256::hash_elements(&input_felt), digest.to_commitment()]);
 
-    // Store witness: [len_bytes, ...input_felts]
-    input_felt.insert(0, Felt::new(len_bytes as u64));
-    let advice_map_entry = (calldata_commitment, input_felt);
-
     let advice_stack_extension = AdviceMutation::extend_stack(digest.to_stack());
+
+    let advice_map_entry = (calldata_commitment, witness_felt);
     let advice_map_extension = AdviceMutation::extend_map(AdviceMap::from_iter([advice_map_entry]));
 
     Ok(vec![advice_stack_extension, advice_map_extension])
+}
+
+// HELPERS
+// =================================================================================================
+
+/// Constructs a witness vector for deferred Keccak computation proof.
+///
+/// Returns a vector containing `[len_bytes, input_u32[..]]` where:
+/// - `len_bytes` is the input length in bytes
+/// - `input_u32` is the array of u32 values read from memory of length `len_u32 = ⌈len_bytes/4⌉`
+///
+/// # Preconditions
+/// - `ptr` must be word-aligned (multiple of 4)
+/// - The memory range `[ptr, ptr + len_u32)` is valid
+/// - All read values have been initialized
+///
+/// The function returns `None` if any of the above conditions are not satisfied.
+fn read_witness(process: &ProcessState, ptr: u64, len_bytes: u64) -> Option<Vec<Felt>> {
+    // Convert inputs to u32 and check for overflow + alignment.
+    let start_addr: u32 = ptr.try_into().ok()?;
+    if !start_addr.is_multiple_of(4) {
+        return None;
+    }
+
+    // number of packed u32 values we will actually read
+    let len_packed: u32 = len_bytes.div_ceil(4).try_into().ok()?;
+    let end_addr = start_addr.checked_add(len_packed)?;
+
+    // The witness is prepended with the length of the input in bytes, allowing the original
+    // byte input to be recovered unambiguously.
+    let mut witness = Vec::with_capacity(1 + len_packed as usize);
+    witness.push(Felt::new(len_bytes));
+
+    // Read each memory location in the range [start_addr, end_addr) and append to the witness.
+    let ctx = process.ctx();
+    for addr in start_addr..end_addr {
+        let value = process.get_mem_value(ctx, addr)?;
+        witness.push(value);
+    }
+    Some(witness)
 }
 
 /// Converts packed field elements to bytes following the byte packing format (see module docs).
 ///
 /// Validates input length, u32 bounds, and zero-padding requirements.
 fn packed_felts_to_bytes(input_felt: &[Felt], len_bytes: usize) -> Result<Vec<u8>, KeccakError> {
-    // Validate expected number of field elements
-    let expected_len = len_bytes.div_ceil(4);
-    if input_felt.len() != expected_len {
-        return Err(KeccakError::InvalidInputLength {
-            actual: input_felt.len(),
-            expected: expected_len,
-        });
-    }
-
     // Allocate buffer with 4-byte alignment
     let mut bytes = vec![0u8; len_bytes.next_multiple_of(4)];
 
@@ -171,8 +175,16 @@ impl KeccakFeltDigest {
         Rpo256::hash_elements(&self.0)
     }
 
-    /// Converts to stack order (LIFO):
-    /// `[0,1,2,3,4,5,6,7] → [3,2,1,0,7,6,5,4]`.
+    /// Converts to stack order for VM operations.
+    ///
+    /// The digest `[h0,h1,h2,h3,h4,h5,h6,h7]` is reorganized as:
+    /// - `KECCAK_LO`: `[h0,h1,h2,h3]` → `[h3,h2,h1,h0]` (reversed for stack)
+    /// - `KECCAK_HI`: `[h4,h5,h6,h7]` → `[h7,h6,h5,h4]` (reversed for stack)
+    ///
+    /// Stack layout: `[[h3,h2,h1,h0], [h7,h6,h5,h4]]`
+    ///
+    /// This reversal per word (not the entire digest) ensures that `mem_storew`
+    /// operations preserve correct little-endian byte order in memory.
     pub fn to_stack(&self) -> [Felt; 8] {
         const fn reverse(limbs: &mut [Felt]) {
             limbs.swap(3, 0);
@@ -219,4 +231,17 @@ pub enum KeccakError {
     /// Non-zero padding bytes found in unused portion of final u32.
     #[error("non-zero padding byte {value:#x} at position {index}")]
     InvalidPadding { value: u8, index: usize },
+}
+
+#[cfg(test)]
+mod tests {
+    use miden_core::utils::string_to_event_id;
+
+    use crate::handlers::keccak::{KECCAK_HASH_MEMORY_EVENT_ID, KECCAK_HASH_MEMORY_EVENT_NAME};
+
+    #[test]
+    fn test_event_id() {
+        let expected_event_id = string_to_event_id(KECCAK_HASH_MEMORY_EVENT_NAME);
+        assert_eq!(KECCAK_HASH_MEMORY_EVENT_ID, expected_event_id);
+    }
 }

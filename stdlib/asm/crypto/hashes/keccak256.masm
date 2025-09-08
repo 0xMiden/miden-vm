@@ -4,28 +4,96 @@ use.std::crypto::hashes::rpo
 # Constants
 # ================================================================================================
 
-const.KECCAK_MEM_EVENT=event("miden_stdlib::hash::keccak::hash_mem")
-const.KECCAK_STACK_EVENT=event("miden_stdlib::hash::keccak::merge_stack")
+const.KECCAK_HASH_MEMORY_EVENT=event("miden_stdlib::hash::keccak::hash_memory")
 
 # PROCEDURES
 # ================================================================================================
 
-#! Computes Keccak256 hash of memory data.
+#! Computes Keccak256 hash of data stored in memory.
 #!
 #! Input: [ptr, len_bytes, ...]
-#! Output: [keccak_lo, keccak_hi, ...]
+#! Output: [KECCAK_LO, KECCAK_HI, ...]
 #!
 #! Where:
-#! - ptr: starting memory address (must be word-aligned)
+#! - ptr: word-aligned memory address containing len_u32=⌈len_bytes/4⌉ field elements
 #! - len_bytes: number of bytes to hash
-#! - keccak_lo, keccak_hi: 256-bit digest as two words
-export.hash_mem
-    exec.hash_mem_impl
-    # => [commitment, keccak_lo, keccak_hi, ...]
+#! - KECCAK_LO/HI: 256-bit output digest as two 128-bit words (8 field elements).
+#!   Each word contains 4 32-bit values packing 4 bytes in little-endian order.
+#!   On the stack we have [W_LO, W_HI] = [w_0, ..., w_7] in little-endian order.
+#!
+#! The memory is expected to contain len_u32 values with each element packing 4 bytes in
+#! little-endian order. If len_bytes is not divisible by 4, the last word's upper bytes are zero.
+export.hash_memory
+    exec.hash_memory_impl
+    # => [COMM, KECCAK_LO, KECCAK_HI, ...]
 
     dropw
-    # => [keccak_lo, keccak_hi, ...]
+    # => [KECCAK_LO, KECCAK_HI, ...]
 end
+
+#! Computes Keccak256 hash of a single 256-bit input.
+#!
+#! Input: [ptr_tmp, INPUT_LO, INPUT_HI, ...]
+#! Output: [KECCAK_LO, KECCAK_HI, ...]
+#!
+#! Computes: Keccak256(INPUT_LO || INPUT_HI)
+#!
+#! Where:
+#! - ptr_tmp: temporary memory (writes to [ptr_tmp..ptr_tmp+8))
+#! - INPUT_LO/HI and KECCAK_LO/HI are 256-bit values encoded as 2 128-bit words (8 field elements).
+#!   Each word contains 4 32-bit values packing 4 bytes in little-endian order.
+#!   On the stack we have [W_LO, W_HI] = [w_0, ..., w_7] in little-endian order.
+export.hash_1to1
+    # => [ptr, INPUT_LO, INPUT_HI]
+
+    dup movdn.5 mem_storew dropw add.4
+    # => [ptr+4, INPUT_HI]
+
+    dup movdn.5 mem_storew dropw
+    # => [ptr+4]
+
+    sub.4 push.32 swap
+    # => [ptr, 32]
+
+    exec.hash_memory
+end
+
+#! Merges two 256-bit digests via Keccak256 hash.
+#!
+#! Input: [ptr_tmp, INPUT_L_LO, INPUT_L_HI, INPUT_R_LO, INPUT_R_HI, ...]
+#! Output: [KECCAK_LO, KECCAK_HI, ...]
+#!
+#! Computes: Keccak256(INPUT_L_LO || INPUT_L_HI || INPUT_R_LO || INPUT_R_HI) where each chunk is 128 bits
+#!
+#! Where:
+#! - ptr_tmp: temporary memory (writes to [ptr_tmp..ptr_tmp+16))
+#! - INPUT_L_LO/HI, INPUT_R_LO/HI, and KECCAK_LO/HI are 256-bit values encoded as
+#!   2 128-bit words (8 field elements).
+#!   Each word contains 4 32-bit values packing 4 bytes in little-endian order.
+#!   On the stack we have [W_LO, W_HI] = [w_0, ..., w_7] in little-endian order.
+export.hash_2to1
+    # => [ptr, INPUT_L_LO, INPUT_L_HI, INPUT_R_LO, INPUT_R_HI]
+    
+    dup movdn.5 mem_storew dropw add.4
+    # => [ptr+4, INPUT_L_HI, INPUT_R_LO, INPUT_R_HI]
+
+    dup movdn.5 mem_storew dropw add.4
+    # => [ptr+8, INPUT_R_LO, INPUT_R_HI]
+    
+    dup movdn.5 mem_storew dropw add.4
+    # => [ptr+12, INPUT_R_HI]
+    
+    dup movdn.5 mem_storew dropw
+    # => [ptr+12]
+    
+    sub.12 push.64 swap
+    # => [ptr, 64]
+
+    exec.hash_memory
+end
+
+# INTERNAL PROCEDURES
+# ================================================================================================
 
 #! Internal implementation of memory-based Keccak256 computation via deferred computation.
 #!
@@ -33,15 +101,17 @@ end
 #! deferred computations, and stores witness in advice map for later proof generation.
 #!
 #! Input: [ptr, len_bytes, ...]
-#! Output: [commitment, keccak_lo, keccak_hi, ...]
+#! Output: [COMM, KECCAK_LO, KECCAK_HI, ...]
 #!
 #! Where:
-#! - ptr: starting memory address (must be word-aligned)
+#! - ptr: word-aligned memory address containing ⌈len_bytes/4⌉ field elements
 #! - len_bytes: number of bytes to hash
-#! - commitment: RPO(RPO(input) || RPO(hash)) for kernel tracking
-#! - keccak_lo, keccak_hi: 256-bit digest as two words
-export.hash_mem_impl
-    emit.KECCAK_MEM_EVENT
+#! - COMM: commitment word = RPO(RPO(input) || RPO(hash)) for kernel tracking
+#! - KECCAK_LO/HI: 256-bit digest as two 128-bit words
+#!   Each word contains 4 32-bit values packing 4 bytes in little-endian order.
+#!   On the stack we have [W_LO, W_HI] = [w_0, ..., w_7] in little-endian order.
+export.hash_memory_impl
+    emit.KECCAK_HASH_MEMORY_EVENT
     # => [ptr, len_bytes, ...]
 
     # compute len_u32 = ceil(len_bytes / 4)
@@ -52,76 +122,28 @@ export.hash_mem_impl
     # => [RPO(input), ...]
 
     exec.build_commitment_from_digest
-    # => [commitment, keccak_lo, keccak_hi]
+    # => [COMM, KECCAK_LO, KECCAK_HI]
 end
 
-#! Merges two 256-bit digests via Keccak256 hash.
-#!
-#! Input: [digest_left_lo, digest_left_hi, digest_right_lo, digest_right_hi, ...]
-#! Output: [keccak_lo, keccak_hi, ...]
-#!
-#! Where:
-#! - digest_left_lo/hi, digest_right_lo/hi: two digests to merge (as four words)
-#! - keccak_lo, keccak_hi: Keccak256(left || right) as two words
-export.merge_stack
-    exec.merge_stack_impl
-    # => [commitment, keccak_lo, keccak_hi, ...]
-
-    dropw
-    # => [keccak_lo, keccak_hi, ...]
-end
-
-#! Internal implementation of digest merging via deferred Keccak256 computation.
-#!
-#! Emits event to populate advice stack with digest, computes commitment for tracking
-#! deferred computations, and stores witness in advice map for later proof generation.
-#!
-#! Input: [digest_left_lo, digest_left_hi, digest_right_lo, digest_right_hi, ...]
-#! Output: [commitment, keccak_lo, keccak_hi, ...]
-#!
-#! Where:
-#! - digest_left_lo/hi, digest_right_lo/hi: two digests to merge (as four words)
-#! - commitment: RPO(RPO(input) || RPO(hash)) for kernel tracking
-#! - keccak_lo, keccak_hi: Keccak256(left || right) as two words
-export.merge_stack_impl
-    emit.KECCAK_STACK_EVENT
-
-    # compute RPO hash of input digests
-    padw swapw.2
-    # => [digest_left_hi, digest_left_lo, 0, digest_right_lo, digest_right_hi, ...]
-
-    hperm dropw dropw
-    # => [capacity_left, digest_right_lo, digest_right_hi, ...]
-
-    swapw.2
-    # => [digest_right_hi, digest_right_lo, capacity_left, ...]
-
-    hperm exec.rpo::squeeze_digest
-    # => [RPO(digests), ...]
-
-    exec.build_commitment_from_digest
-    # => [commitment, keccak_lo, keccak_hi]
-end
-
-#! Common helper that builds commitment from RPO(input) and advice stack digest.
+#! Builds commitment from RPO(input) and advice stack digest.
 #!
 #! Input: [RPO(input), ...]
-#! Output: [commitment, keccak_lo, keccak_hi, ...]
+#! Output: [COMM, KECCAK_LO, KECCAK_HI, ...]
 #!
-#! Where commitment = RPO(RPO(input) || RPO(keccak))
+#! Where COMM = RPO(RPO(input) || RPO(keccak))
 proc.build_commitment_from_digest
     # load digest from advice stack
     padw adv_loadw
     padw adv_loadw
-    # => [keccak_lo, keccak_hi, RPO(input), ...]
+    # => [KECCAK_LO, KECCAK_HI, RPO(input), ...]
 
-    # compute commitment = RPO(RPO(input) || RPO(keccak))
+    # compute COMM = RPO(RPO(input) || RPO(keccak))
     dupw.1 dupw.1 swapw hmerge
-    # => [RPO(keccak), keccak_lo, keccak_hi, RPO(input), ...]
+    # => [RPO(keccak), KECCAK_LO, KECCAK_HI, RPO(input), ...]
 
     movupw.3 swapw
-    # => [RPO(keccak), RPO(input), keccak_lo, keccak_hi, ...]
+    # => [RPO(keccak), RPO(input), KECCAK_LO, KECCAK_HI, ...]
 
     hmerge
-    # => [commitment, keccak_lo, keccak_hi]
+    # => [COMM, KECCAK_LO, KECCAK_HI]
 end
