@@ -14,7 +14,7 @@ use miden_crypto::{
     hash::{keccak::Keccak256, rpo::Rpo256},
 };
 use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessState};
-use miden_stdlib::handlers::keccak::{KECCAK_HASH_MEMORY_EVENT_NAME, KeccakFeltDigest};
+use miden_stdlib::handlers::keccak256::{KECCAK_HASH_MEMORY_EVENT_NAME, KeccakFeltDigest};
 
 // Test constants
 // ================================================================================================
@@ -116,8 +116,8 @@ fn test_keccak_hash_memory_impl(input_u8: &[u8]) {
     let commitment = stack.get_stack_word(0).unwrap();
     assert_eq!(commitment, preimage.calldata_commitment(), "calldata_commitment does not match");
 
-    let digest_stack: [Felt; 8] = array::from_fn(|i| stack.get_stack_item(4 + i).unwrap());
-    assert_eq!(digest_stack, preimage.digest().to_stack(), "output digest does not match");
+    let digest: [Felt; 8] = array::from_fn(|i| stack.get_stack_item(4 + i).unwrap());
+    assert_eq!(digest, preimage.digest().inner(), "output digest does not match");
 }
 
 fn test_keccak_hash_memory(input_u8: &[u8]) {
@@ -148,7 +148,7 @@ fn test_keccak_hash_memory(input_u8: &[u8]) {
     );
 
     let test = build_debug_test!(source, &[]);
-    let digest = preimage.digest().to_stack().map(|felt| felt.as_int());
+    let digest = preimage.digest().inner().map(|felt| felt.as_int());
     test.expect_stack(&digest);
 }
 
@@ -178,7 +178,7 @@ fn test_keccak_hash_1to1() {
     );
 
     let test = build_debug_test!(source, &[]);
-    let digest = preimage.digest().to_stack().map(|felt| felt.as_int());
+    let digest = preimage.digest().inner().map(|felt| felt.as_int());
     test.expect_stack(&digest);
 }
 
@@ -208,7 +208,7 @@ fn test_keccak_hash_2to1() {
     );
 
     let test = build_debug_test!(source, &[]);
-    let digest = preimage.digest().to_stack().map(|felt| felt.as_int());
+    let digest = preimage.digest().inner().map(|felt| felt.as_int());
     test.expect_stack(&digest);
 }
 
@@ -289,7 +289,7 @@ impl Preimage {
         move |process: &ProcessState| -> Result<Vec<AdviceMutation>, EventError> {
             let digest = self.digest();
             assert_eq!(
-                &digest.to_stack(),
+                &digest.inner(),
                 process.advice_provider().stack(),
                 "digest not found in advice stack"
             );

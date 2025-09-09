@@ -11,7 +11,7 @@ use miden_core::{EventID, Felt, Word};
 use miden_processor::{EventHandler, HostLibrary};
 use miden_utils_sync::LazyLock;
 
-use crate::handlers::keccak::{KECCAK_HASH_MEMORY_EVENT_ID, handle_keccak_hash_memory};
+use crate::handlers::keccak256::{KECCAK_HASH_MEMORY_EVENT_ID, handle_keccak_hash_memory};
 
 // STANDARD LIBRARY
 // ================================================================================================
