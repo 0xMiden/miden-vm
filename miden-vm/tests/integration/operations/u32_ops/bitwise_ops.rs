@@ -558,7 +558,7 @@ fn u32ctz() {
     let asm_op = "u32ctz";
     build_op_test!(asm_op, &[0]).expect_stack(&[32]);
     build_op_test!(asm_op, &[1]).expect_stack(&[0]);
-    // bit representaion of the 14688 is 00000000000000000011100101100000
+    // bit representation of the 14688 is 00000000000000000011100101100000
     build_op_test!(asm_op, &[14688]).expect_stack(&[5]);
     build_op_test!(asm_op, &[4294967295]).expect_stack(&[0]);
 }
