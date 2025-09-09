@@ -29,6 +29,7 @@
 - Rename `program_execution` benchmark to `program_execution_for_trace`, and benchmark `FastProcessor::execute_for_trace()` instead of `Process::execute()` (#[2131](https://github.com/0xMiden/miden-vm/pull/2131))
 - [BREAKING] Initial support for Keccak precompile ([#2103](https://github.com/0xMiden/miden-vm/pull/2103))
 - Refactored `MastNode` to eliminate boilerplate dispatch code ([#2127](https://github.com/0xMiden/miden-vm/pull/2127)).
+- Added `multicall` support for the CLI ([#1141](https://github.com/0xMiden/miden-vm/pull/2081))
 
 ## 0.17.1 (2025-08-29)
 
