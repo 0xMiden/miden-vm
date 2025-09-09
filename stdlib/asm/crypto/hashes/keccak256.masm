@@ -94,7 +94,7 @@ end
 #! Where:
 #! - ptr: word-aligned memory address containing INPUT_U32[len_u32] where len_u32=⌈len_bytes/4⌉
 #! - len_bytes: number of bytes to hash
-#! - COMM: Rpo256(Rpo256(INPUT_U32[..]) || Rpo256(DIGEST_U32[..])) for kernel tracking
+#! - COMM: Rpo256(Rpo256(INPUT_U32[..]) || Rpo256(DIGEST_U32[..].reversed())) for kernel tracking
 #! - DIGEST_U32[8] = [d_0, ..., d_7] = Keccak256(INPUT_U8[len_bytes])
 export.hash_memory_impl
     emit.KECCAK_HASH_MEMORY_EVENT
@@ -111,7 +111,7 @@ export.hash_memory_impl
     adv_push.8
     # => [DIGEST_U32[8], COMM_INPUT, ...]
 
-    # Compute COMM_DIGEST = Rpo256(DIGEST_U32[8])
+    # Compute COMM_DIGEST = Rpo256(DIGEST_U32[8].reversed())
     dupw.1 dupw.1 hmerge
     # => [COMM_DIGEST, DIGEST_U32[8], COMM_INPUT, ...]
 

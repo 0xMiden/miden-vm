@@ -36,8 +36,8 @@ pub const KECCAK_HASH_MEMORY_EVENT_ID: Felt = Felt::new(871406259734432837);
 /// - **Stack**: `[event_id, ptr, len_bytes, ...]` where `ptr` must be word-aligned (divisible by 4)
 ///
 /// ## Output Format
-/// - **Advice Stack**: Extended with digest in reverse order `[h_7, ..., h_0]` so the least
-///   significant u32 (h_0) is at the top of the stack
+/// - **Advice Stack**: Extended with digest `[h_0, ..., h_7]` so the least significant u32 (h_0) is
+///   at the top of the stack
 /// - **Advice Map**: Contains witness vector `[len_bytes, input_u32[..]]` for proof generation
 /// - **Commitment**: `Rpo256(Rpo256(input) || Rpo256(digest))` for kernel tracking of deferred
 ///   computations
@@ -62,9 +62,9 @@ pub fn handle_keccak_hash_memory(
     let calldata_commitment =
         Rpo256::merge(&[Rpo256::hash_elements(input_felt), digest.to_commitment()]);
 
-    // Extend the stack with the digest in reverse order [h_7, ..., h_0] so that
-    // the least significant u32 (h_0) is at the top of the stack
-    let advice_stack_extension = AdviceMutation::extend_stack(digest.to_stack());
+    // Extend the stack with the digest [h_0, ..., h_7] so it can be popped in the right order,
+    // i.e. with h_0 at the top.
+    let advice_stack_extension = AdviceMutation::extend_stack(digest.0);
 
     let advice_map_entry = (calldata_commitment, witness_felt);
     let advice_map_extension = AdviceMutation::extend_map(AdviceMap::from_iter([advice_map_entry]));
@@ -147,8 +147,8 @@ fn packed_felts_to_bytes(input_felt: &[Felt], len_bytes: usize) -> Result<Vec<u8
 /// Keccak256 digest representation in the Miden VM.
 ///
 /// Represents a 256-bit Keccak digest as 8 field elements, each containing a u32 value
-/// packed in little-endian order: `[h0, h1, h2, h3, h4, h5, h6, h7]` where
-/// `h0 = u32::from_le_bytes([b0, b1, b2, b3])` and so on.
+/// packed in little-endian order: `[d_0, ..., d_7]` where
+/// `d_0 = u32::from_le_bytes([b_0, b_1, b_2, b_3])` and so on.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct KeccakFeltDigest([Felt; 8]);
 
@@ -163,19 +163,20 @@ impl KeccakFeltDigest {
         Self(packed.map(Felt::from))
     }
 
-    /// Creates an RPO hash commitment of the digest.
+    /// Creates an commitment of the digest using Rpo256.
+    ///
+    /// When the digest is popped from the advice stack, it appears as
+    /// `[d_0, ..., d_7]` on the operand stack. In masm, the `hmerge` operation computes
+    /// `Rpo256([d_7, ..., d_0])`, so we reverse the order here to match that behavior.
     pub fn to_commitment(&self) -> Word {
-        Rpo256::hash_elements(&self.0)
+        let mut rev = self.0;
+        rev.reverse();
+        Rpo256::hash_elements(&rev)
     }
 
-    /// Converts to stack order for VM operations.
-    ///
-    /// The digest `[h0,h1,h2,h3,h4,h5,h6,h7]` is reversed to `[h7,h6,h5,h4,h3,h2,h1,h0]`
-    /// for stack operations, ensuring the least significant u32 (h0) is at the top.
-    pub fn to_stack(&self) -> [Felt; 8] {
-        let mut out = self.0;
-        out.reverse();
-        out
+    /// Returns this digest as an array of [`Felt`]s as `[d_0, ..., d_7]`.
+    pub fn inner(&self) -> [Felt; 8] {
+        self.0
     }
 }
 
