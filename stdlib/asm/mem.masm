@@ -65,17 +65,17 @@ end
 #!     - C,B are the rate portion of the state
 #! - The value `words = end_ptr - write_ptr` must be positive and a multiple of 8
 #!
-#! Cycles: 10 + 9 * word_pairs
+#! Cycles: 9 + 6 * word_pairs
 export.pipe_double_words_to_memory.0
-  dup.13 dup.13 neq # (4 cycles)
+  dup.13 dup.13 neq # (3 cycles)
 
-  # loop until write_ptr reaches end_ptr (9 cycles per iteration + 1)
+  # loop until write_ptr reaches end_ptr (6 cycles per iteration + 1)
   # LOOP: [b, C, B, A, write_ptr, end_ptr, ...]
   while.true
     adv_pipe hperm # (2 cycles)
     # => [C', B', A', write_ptr', end_ptr, ...]
 
-    dup.13 dup.13 neq # (4 cycles)
+    dup.13 dup.13 neq # (3 cycles)
     # LOOP: [b, C', B', A', write_ptr', end_ptr, ...]
   end
 
