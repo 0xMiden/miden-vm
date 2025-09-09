@@ -24,7 +24,7 @@ fn sdepth() {
     test.expect_stack(&[MIN_STACK_DEPTH as u64, 10, 8, 6, 4, 2]);
 
     // --- overflowed stack -----------------------------------------------------------------------
-    // push 2 values to increase the lenth of the stack beyond 16
+    // push 2 values to increase the length of the stack beyond 16
     let source = format!(
         "
     {TRUNCATE_STACK_PROC}
