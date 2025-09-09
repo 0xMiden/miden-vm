@@ -63,13 +63,13 @@ pub fn handle_keccak_hash_memory(
     let input_felt = &witness_felt[1..];
 
     // Recover the input represented as bytes
-    let input_u8 = packed_felts_to_bytes(&input_felt, len_bytes as usize)?;
+    let input_u8 = packed_felts_to_bytes(input_felt, len_bytes as usize)?;
     let hash_u8: [u8; 32] = Keccak256::hash(&input_u8).as_bytes();
     let digest = KeccakFeltDigest::from_bytes(&hash_u8);
 
     // Create commitment for deferred computation tracking
     let calldata_commitment =
-        Rpo256::merge(&[Rpo256::hash_elements(&input_felt), digest.to_commitment()]);
+        Rpo256::merge(&[Rpo256::hash_elements(input_felt), digest.to_commitment()]);
 
     let advice_stack_extension = AdviceMutation::extend_stack(digest.to_stack());
 
