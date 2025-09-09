@@ -1,39 +1,16 @@
 //! Keccak256 precompile event handlers for the Miden VM.
 //!
-//! Event handlers compute Keccak256 hashes and:
-//! - Return the hash to the VM via the advice stack
-//! - Store witness data (byte length + input felts) in the advice map for later proof generation
+//! Event handlers compute Keccak256 hashes and provide them to the VM via the advice stack,
+//! while storing witness data for later proof generation.
 //!
-//! The MASM wrappers return a commitment for future kernel tracking of deferred computations,
-//! as well as the actual digest, encoded as two words.
-//!
-//! ## Key Concepts
-//!
-//! ### Digest Representation
-//! A Keccak256 digest (256 bits) is represented as [`KeccakFeltDigest`]: 8 field elements,
-//! each containing a u32 value in little-endian order.
-//!
-//! #### Example Encoding
-//! For a 32-byte digest, the encoding process is:
-//! 1. **Bytes to u32s**: `[b0,b1,...,b31]` → `[h0,h1,h2,h3,h4,h5,h6,h7]` where each `hi` is a
-//!    little-endian u32 (e.g., `h0 = u32::from_le_bytes([b0,b1,b2,b3])`)
-//! 2. **Group into words**: `KECCAK_LO = [h0,h1,h2,h3]`, `KECCAK_HI = [h4,h5,h6,h7]`
-//! 3. **Stack representation**: `[[h3,h2,h1,h0], [h7,h6,h5,h4]]` (each word reversed for LIFO)
-//!
-//! This representation allows direct memory writes without element reordering: when written to
-//! memory using `mem_storew`, the bytes maintain correct little-endian order.
-//!
-//! ### Byte Packing
-//! Input bytes are packed into field elements as u32 values:
-//! - Each field element holds 4 bytes (one u32) in little-endian format
-//! - Number of field elements = ceil(len_bytes / 4)
-//! - Unused bytes in the final u32 must be zero
-//! - Byte length is stored in witness since packing loses this information
+//! ## Digest Representation
+//! A Keccak256 digest (256 bits) is represented as 8 field elements `[h0, ..., h7]`,
+//! each containing a u32 value where `hi = u32::from_le_bytes([b_{4i}, ..., b_{4i+3}])`.
 
 use alloc::{vec, vec::Vec};
 use core::array;
 
-use miden_core::{AdviceMap, Felt, FieldElement, Word, crypto::hash::Digest};
+use miden_core::{AdviceMap, Felt, Word, crypto::hash::Digest};
 use miden_crypto::hash::{keccak::Keccak256, rpo::Rpo256};
 use miden_processor::{AdviceMutation, EventError, ProcessState};
 
@@ -45,11 +22,25 @@ pub const KECCAK_HASH_MEMORY_EVENT_ID: Felt = Felt::new(5005056617811169331);
 
 /// Keccak256 event handler that reads data from memory.
 ///
-/// - Input: Reads packed bytes from memory starting at word-aligned `ptr`
-/// - Output: Returns hash via advice stack, stores witness in advice map
+/// Computes Keccak256 hash of data stored in memory and provides the result via the advice stack.
+/// Also stores witness data (byte length + input elements) in the advice map for later proof
+/// generation.
 ///
-/// Stack: [event_id, ptr, len_bytes, ...]
-/// Where ptr must be word-aligned (divisible by 4)
+/// ## Input Format
+/// - **Memory Layout**: Input bytes are packed into field elements as u32 values:
+///   - Each field element holds 4 bytes in little-endian format
+///   - Number of field elements = `ceil(len_bytes / 4)`
+///   - Unused bytes in the final u32 must be zero
+///   - Memory layout from `ptr` to `ptr+len_u32` contains inputs from least to most significant
+///     element
+/// - **Stack**: `[event_id, ptr, len_bytes, ...]` where `ptr` must be word-aligned (divisible by 4)
+///
+/// ## Output Format
+/// - **Advice Stack**: Extended with digest in reverse order `[h_7, ..., h_0]` so the least
+///   significant u32 (h_0) is at the top of the stack
+/// - **Advice Map**: Contains witness vector `[len_bytes, input_u32[..]]` for proof generation
+/// - **Commitment**: `Rpo256(Rpo256(input) || Rpo256(digest))` for kernel tracking of deferred
+///   computations
 pub fn handle_keccak_hash_memory(
     process: &ProcessState,
 ) -> Result<Vec<AdviceMutation>, EventError> {
@@ -71,6 +62,8 @@ pub fn handle_keccak_hash_memory(
     let calldata_commitment =
         Rpo256::merge(&[Rpo256::hash_elements(input_felt), digest.to_commitment()]);
 
+    // Extend the stack with the digest in reverse order [h_7, ..., h_0] so that
+    // the least significant u32 (h_0) is at the top of the stack
     let advice_stack_extension = AdviceMutation::extend_stack(digest.to_stack());
 
     let advice_map_entry = (calldata_commitment, witness_felt);
@@ -83,6 +76,9 @@ pub fn handle_keccak_hash_memory(
 // =================================================================================================
 
 /// Constructs a witness vector for deferred Keccak computation proof.
+///
+/// The memory layout from ptr to `ptr+len_u32` contains inputs from least to most significant
+/// element.
 ///
 /// Returns a vector containing `[len_bytes, input_u32[..]]` where:
 /// - `len_bytes` is the input length in bytes
@@ -119,7 +115,8 @@ fn read_witness(process: &ProcessState, ptr: u64, len_bytes: u64) -> Option<Vec<
     Some(witness)
 }
 
-/// Converts packed field elements to bytes following the byte packing format (see module docs).
+/// Converts packed field elements to bytes following the byte packing format expected by
+/// [`handle_keccak_hash_memory`].
 ///
 /// Validates input length, u32 bounds, and zero-padding requirements.
 fn packed_felts_to_bytes(input_felt: &[Felt], len_bytes: usize) -> Result<Vec<u8>, KeccakError> {
@@ -147,7 +144,11 @@ fn packed_felts_to_bytes(input_felt: &[Felt], len_bytes: usize) -> Result<Vec<u8
     Ok(bytes)
 }
 
-/// Keccak256 digest representation in the Miden VM (see module docs for layout details).
+/// Keccak256 digest representation in the Miden VM.
+///
+/// Represents a 256-bit Keccak digest as 8 field elements, each containing a u32 value
+/// packed in little-endian order: `[h0, h1, h2, h3, h4, h5, h6, h7]` where
+/// `h0 = u32::from_le_bytes([b0, b1, b2, b3])` and so on.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct KeccakFeltDigest([Felt; 8]);
 
@@ -162,14 +163,6 @@ impl KeccakFeltDigest {
         Self(packed.map(Felt::from))
     }
 
-    /// Creates a digest from two VM words.
-    pub fn from_words(lo: Word, hi: Word) -> Self {
-        let mut out = [Felt::ZERO; 8];
-        out[0..4].copy_from_slice(lo.as_slice());
-        out[4..8].copy_from_slice(hi.as_slice());
-        Self(out)
-    }
-
     /// Creates an RPO hash commitment of the digest.
     pub fn to_commitment(&self) -> Word {
         Rpo256::hash_elements(&self.0)
@@ -177,36 +170,12 @@ impl KeccakFeltDigest {
 
     /// Converts to stack order for VM operations.
     ///
-    /// The digest `[h0,h1,h2,h3,h4,h5,h6,h7]` is reorganized as:
-    /// - `KECCAK_LO`: `[h0,h1,h2,h3]` → `[h3,h2,h1,h0]` (reversed for stack)
-    /// - `KECCAK_HI`: `[h4,h5,h6,h7]` → `[h7,h6,h5,h4]` (reversed for stack)
-    ///
-    /// Stack layout: `[[h3,h2,h1,h0], [h7,h6,h5,h4]]`
-    ///
-    /// This reversal per word (not the entire digest) ensures that `mem_storew`
-    /// operations preserve correct little-endian byte order in memory.
+    /// The digest `[h0,h1,h2,h3,h4,h5,h6,h7]` is reversed to `[h7,h6,h5,h4,h3,h2,h1,h0]`
+    /// for stack operations, ensuring the least significant u32 (h0) is at the top.
     pub fn to_stack(&self) -> [Felt; 8] {
-        const fn reverse(limbs: &mut [Felt]) {
-            limbs.swap(3, 0);
-            limbs.swap(2, 1);
-        }
-
         let mut out = self.0;
-        reverse(&mut out[0..4]); // Reverse low word
-        reverse(&mut out[4..8]); // Reverse high word
+        out.reverse();
         out
-    }
-
-    /// Returns the internal field element representation.
-    pub fn to_felts(&self) -> [Felt; 8] {
-        self.0
-    }
-
-    /// Converts to two Miden words for memory operations.
-    pub fn to_words(&self) -> (Word, Word) {
-        let lo = Word::try_from(&self.0[0..4]).unwrap();
-        let hi = Word::try_from(&self.0[4..8]).unwrap();
-        (lo, hi)
     }
 }
 
