@@ -184,34 +184,37 @@ end
 #!
 #! Input: [num_words, write_ptr, COM, ...]
 #! Output: [write_ptr', ...]
+#!
+#! Cycles: 56 + 3 * num_words / 2
 # Possible other name: pipe_pairs_preimage_to_memory
 export.pipe_double_words_preimage_to_memory
-  # => [num_words, write_ptr, COM, ...]
+  # Assert precondition (8 cycles).
+  # TODO: how precious are those cycles? Should we remove this assert?
   dup is_odd assertz.err="pipe_double_words_preimage_to_memory: num_words must be even"
-
   # => [num_words, write_ptr, COM, ...]
 
-  # Compute end_ptr
-  mul.4
-  # => [num_fields, write_ptr, COM, ...]
-  dup.1 add
-  # => [end_ptr, write_ptr, COM, ...]
-  swap
+  # Compute and move end_ptr (5 cycles)
+  mul.4 dup.1 add swap
   # => [write_ptr, end_ptr, COM, ...]
 
   # Setup the initial hasher state, which starts with a capacity word `A`.
   # For us, the capacity word is entirely empty.
+  # (12 cycles).
   padw padw padw
   # => [C, B, A, write_ptr, end_ptr, COM, ...]
 
+  # Cycles: 9 + 3 * num_words
+  # (e.g., 25 cycles for 4 words)
   exec.pipe_double_words_to_memory
   # => [C, B, A, write_ptr', COM, ...]
 
+  # Leave just the digest on the stack (9 cycles).
   exec.rpo::squeeze_digest
   # => [B, write_ptr', COM, ...]
 
-  # Move write_ptr out of the way so we can assert the commitment.
+  # Move write_ptr out of the way so we can assert the commitment (2 cycles).
   movup.4 movdn.8
 
+  # Assert the commitment (11 cycles).
   assert_eqw.err="pipe_double_words_preimage_to_memory: COM does not match"
 end
