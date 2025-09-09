@@ -20,7 +20,7 @@ pub struct AttributeSet {
     /// * We expect attributes to be relatively rare, with no more than a handful on the same item
     ///   at any given time.
     /// * A vector is much more space and time efficient to search for small numbers of items
-    /// * We can acheive map-like semantics without O(N) complexity by keeping the vector sorted by
+    /// * We can achieve map-like semantics without O(N) complexity by keeping the vector sorted by
     ///   the attribute name, and using binary search to search it. This gives us O(1) best-case
     ///   performance, and O(log N) in the worst case.
     attrs: Vec<Attribute>,
