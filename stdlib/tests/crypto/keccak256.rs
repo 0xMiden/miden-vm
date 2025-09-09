@@ -167,8 +167,7 @@ fn test_keccak_hash_1to1() {
             begin
                 # Push input to stack as words with temporary memory pointer
                 {stack_stores_source}
-                push.{INPUT_MEMORY_ADDR}
-                # => [ptr, INPUT_LO, INPUT_HI]
+                # => [INPUT_LO, INPUT_HI]
 
                 exec.keccak256::hash_1to1
                 # => [KECCAK_LO, KECCAK_HI]
@@ -198,8 +197,7 @@ fn test_keccak_hash_2to1() {
             begin
                 # Push input to stack as words with temporary memory pointer
                 {stack_stores_source}
-                push.{INPUT_MEMORY_ADDR}
-                # => [ptr, INPUT_L_LO, INPUT_L_HI, INPUT_R_LO, INPUT_R_HI]
+                # => [INPUT_L_LO, INPUT_L_HI, INPUT_R_LO, INPUT_R_HI]
 
                 exec.keccak256::hash_2to1
                 # => [KECCAK_LO, KECCAK_HI]

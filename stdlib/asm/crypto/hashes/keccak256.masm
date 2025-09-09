@@ -33,17 +33,18 @@ end
 
 #! Computes Keccak256 hash of a single 256-bit input.
 #!
-#! Input: [ptr_tmp, INPUT_LO, INPUT_HI, ...]
+#! Input: [INPUT_LO, INPUT_HI, ...]
 #! Output: [KECCAK_LO, KECCAK_HI, ...]
 #!
 #! Computes: Keccak256(INPUT_LO || INPUT_HI)
 #!
 #! Where:
-#! - ptr_tmp: temporary memory (writes to [ptr_tmp..ptr_tmp+8))
 #! - INPUT_LO/HI and KECCAK_LO/HI are 256-bit values encoded as 2 128-bit words (8 field elements).
 #!   Each word contains 4 32-bit values packing 4 bytes in little-endian order.
 #!   On the stack we have [W_LO, W_HI] = [[w_3, ..., w_0], [w_7, ..., w_4]].
-export.hash_1to1
+export.hash_1to1.8
+    # Get temporary pointer to store the 8 input field elements in memory
+    locaddr.0
     # => [ptr, INPUT_LO, INPUT_HI]
 
     dup movdn.5 mem_storew dropw add.4
@@ -60,18 +61,19 @@ end
 
 #! Merges two 256-bit digests via Keccak256 hash.
 #!
-#! Input: [ptr_tmp, INPUT_L_LO, INPUT_L_HI, INPUT_R_LO, INPUT_R_HI, ...]
+#! Input: [INPUT_L_LO, INPUT_L_HI, INPUT_R_LO, INPUT_R_HI, ...]
 #! Output: [KECCAK_LO, KECCAK_HI, ...]
 #!
 #! Computes: Keccak256(INPUT_L_LO || INPUT_L_HI || INPUT_R_LO || INPUT_R_HI) where each chunk is 128 bits
 #!
 #! Where:
-#! - ptr_tmp: temporary memory (writes to [ptr_tmp..ptr_tmp+16))
 #! - INPUT_L_LO/HI, INPUT_R_LO/HI, and KECCAK_LO/HI are 256-bit values encoded as
 #!   2 128-bit words (8 field elements).
 #!   Each word contains 4 32-bit values packing 4 bytes in little-endian order.
 #!   On the stack we have [W_LO, W_HI] = [[w_3, ..., w_0], [w_7, ..., w_4]].
-export.hash_2to1
+export.hash_2to1.16
+    # Get temporary pointer to store the 16 input field elements in memory
+    locaddr.0
     # => [ptr, INPUT_L_LO, INPUT_L_HI, INPUT_R_LO, INPUT_R_HI]
     
     dup movdn.5 mem_storew dropw add.4
