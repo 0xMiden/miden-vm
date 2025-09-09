@@ -207,7 +207,7 @@ impl Test {
         self.add_modules.push((path, source.to_string()));
     }
 
-    /// Add a handler for a specifc event when running the `Host`.
+    /// Add a handler for a specific event when running the `Host`.
     ///
     /// The `handler_func` can be either a closure or a free function with signature
     /// `fn(&mut ProcessState) -> Result<(), EventError>`.
