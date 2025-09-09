@@ -6,9 +6,11 @@
 //! - Both memory and digest merge operations work correctly
 //! - Various input sizes and edge cases are handled properly
 
+use core::array;
+
 use miden_core::{EventID, Felt};
 use miden_crypto::{
-    WORD_SIZE, Word,
+    Word,
     hash::{keccak::Keccak256, rpo::Rpo256},
 };
 use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessState};
@@ -100,7 +102,7 @@ fn test_keccak_hash_memory_impl(input_u8: &[u8]) {
                 # => [ptr, len_bytes]
 
                 exec.keccak256::hash_memory_impl
-                # => [COMM, KECCAK_LO, KECCAK_HI]
+                # => [COMM, DIGEST_U32[8]]
 
                 exec.sys::truncate_stack
             end
@@ -109,16 +111,13 @@ fn test_keccak_hash_memory_impl(input_u8: &[u8]) {
 
     let test = build_debug_test!(source, &[]);
 
-    test.execute().unwrap();
     let output = test.execute().unwrap();
     let stack = output.stack_outputs();
     let commitment = stack.get_stack_word(0).unwrap();
     assert_eq!(commitment, preimage.calldata_commitment(), "calldata_commitment does not match");
 
-    let keccak_lo = stack.get_stack_word(4);
-    let keccak_hi = stack.get_stack_word(8);
-    let digest = KeccakFeltDigest::from_words(keccak_lo.unwrap(), keccak_hi.unwrap());
-    assert_eq!(digest, preimage.digest(), "output digest does not match");
+    let digest_stack: [Felt; 8] = array::from_fn(|i| stack.get_stack_item(4 + i).unwrap());
+    assert_eq!(digest_stack, preimage.digest().to_stack(), "output digest does not match");
 }
 
 fn test_keccak_hash_memory(input_u8: &[u8]) {
@@ -141,7 +140,7 @@ fn test_keccak_hash_memory(input_u8: &[u8]) {
                 # => [ptr, len_bytes]
 
                 exec.keccak256::hash_memory
-                # => [KECCAK_LO, KECCAK_HI]
+                # => [DIGEST_U32[8]]
 
                 exec.sys::truncate_stack
             end
@@ -168,11 +167,10 @@ fn test_keccak_hash_1to1() {
             begin
                 # Push input to stack as words with temporary memory pointer
                 {stack_stores_source}
-                push.{INPUT_MEMORY_ADDR}
-                # => [ptr, INPUT_LO, INPUT_HI]
+                # => [INPUT_LO, INPUT_HI]
 
                 exec.keccak256::hash_1to1
-                # => [KECCAK_LO, KECCAK_HI]
+                # => [DIGEST_U32[8]]
 
                 exec.sys::truncate_stack
             end
@@ -199,11 +197,10 @@ fn test_keccak_hash_2to1() {
             begin
                 # Push input to stack as words with temporary memory pointer
                 {stack_stores_source}
-                push.{INPUT_MEMORY_ADDR}
-                # => [ptr, INPUT_L_LO, INPUT_L_HI, INPUT_R_LO, INPUT_R_HI]
+                # => [INPUT_L_U32[8], INPUT_R_U32[8]]
 
                 exec.keccak256::hash_2to1
-                # => [KECCAK_LO, KECCAK_HI]
+                # => [DIGEST_U32[8]]
 
                 exec.sys::truncate_stack
             end
@@ -275,14 +272,14 @@ impl Preimage {
             .join(" ")
     }
 
-    /// Generates MASM code to push the input represented as words to the stack
+    /// Generates MASM code to push the input represented as u32 values to the stack
     fn masm_stack_store_source(&self) -> String {
         let input_u32: Vec<u32> = self.as_packed_u32().collect();
-        assert_eq!(input_u32.len() % WORD_SIZE, 0, "input must be word-aligned");
+        // Push elements in reverse order so that the first element ends up at the top
         input_u32
-            .chunks_exact(WORD_SIZE)
+            .into_iter()
             .rev()
-            .map(|word| format!("push.{:?}", word))
+            .map(|value| format!("push.{}", value))
             .collect::<Vec<_>>()
             .join(" ")
     }
