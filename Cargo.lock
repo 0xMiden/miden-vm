@@ -159,15 +159,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bincode"
-version = "1.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1f45e9417d87227c7a56d22e471c6206462cba514c7590c09aff4cf6d1ddcad"
-dependencies = [
- "serde",
-]
-
-[[package]]
 name = "bit-set"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1138,7 +1129,6 @@ name = "miden-assembly-syntax"
 version = "0.18.0"
 dependencies = [
  "aho-corasick",
- "bincode",
  "env_logger",
  "lalrpop",
  "lalrpop-util",
@@ -1156,6 +1146,7 @@ dependencies = [
  "semver 1.0.26",
  "serde",
  "serde-untagged",
+ "serde_json",
  "smallvec",
  "thiserror 2.0.16",
 ]
@@ -1164,7 +1155,6 @@ dependencies = [
 name = "miden-core"
 version = "0.18.0"
 dependencies = [
- "bincode",
  "enum_dispatch",
  "insta",
  "miden-crypto",
@@ -1176,6 +1166,7 @@ dependencies = [
  "proptest",
  "proptest-derive",
  "serde",
+ "serde_json",
  "thiserror 2.0.16",
  "winter-math",
  "winter-rand-utils",
@@ -1336,7 +1327,6 @@ dependencies = [
 name = "miden-serde-test-macros"
 version = "0.1.0"
 dependencies = [
- "bincode",
  "proc-macro2",
  "proptest",
  "proptest-derive",

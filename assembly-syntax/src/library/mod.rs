@@ -821,12 +821,67 @@ impl proptest::prelude::Arbitrary for Library {
         use proptest::prelude::*;
         prop::collection::btree_map(any::<QualifiedProcedureName>(), any::<LibraryExport>(), 1..5)
             .prop_flat_map(|exports| {
-                let mast_forest = Arc::new(MastForest::default());
-                (Just(mast_forest), Just(exports))
+                // Create a MastForest with actual nodes for the exports
+                let mut mast_forest = MastForest::new();
+                let mut nodes = Vec::new();
+
+                // Create a simple node for each export
+                for (_, export) in exports.iter() {
+                    use miden_core::Operation;
+
+                    let node_id =
+                        mast_forest.add_block(vec![Operation::Add, Operation::Mul], None).unwrap();
+                    nodes.push((export.node, node_id));
+                }
+
+                (Just(mast_forest), Just(nodes), Just(exports))
             })
-            .prop_map(|(mast_forest, exports)| {
-                let digest = Word::default(); // For simplicity in tests
-                Library { digest, exports, mast_forest }
+            .prop_map(|(mut mast_forest, nodes, exports)| {
+                // Replace the export node IDs with the actual node IDs we created
+                let mut adjusted_exports = BTreeMap::new();
+                let mut export_pairs = Vec::new();
+
+                for (proc_name, mut export) in exports {
+                    // Find the corresponding node we created
+                    if let Some(&(_, actual_node_id)) =
+                        nodes.iter().find(|(original_id, _)| *original_id == export.node)
+                    {
+                        export.node = actual_node_id;
+                    } else {
+                        // If we can't find the node (shouldn't happen), use the first node we
+                        // created
+                        if let Some(&(_, first_node_id)) = nodes.first() {
+                            export.node = first_node_id;
+                        } else {
+                            // This should never happen since we create nodes for each export
+                            panic!("No nodes created for exports");
+                        }
+                    }
+
+                    export_pairs.push((proc_name, export));
+                }
+
+                // Sort the exports by procedure name to ensure deterministic order
+                export_pairs.sort_by_key(|(proc_name, _)| proc_name.clone());
+
+                for (proc_name, export) in export_pairs {
+                    // Add the node to the forest roots if it's not already there
+                    mast_forest.make_root(export.node);
+                    adjusted_exports.insert(proc_name, export);
+                }
+
+                // Recompute the digest - sort node IDs to ensure deterministic order
+                let mut node_ids: Vec<_> =
+                    adjusted_exports.values().map(|export| export.node).collect();
+                node_ids.sort_by_key(|id| id.as_u32());
+                let digest = mast_forest.compute_nodes_commitment(&node_ids);
+
+                let mast_forest = Arc::new(mast_forest);
+                Library {
+                    digest,
+                    exports: adjusted_exports,
+                    mast_forest,
+                }
             })
             .boxed()
     }

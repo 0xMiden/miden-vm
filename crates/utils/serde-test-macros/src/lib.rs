@@ -88,8 +88,8 @@ pub fn serde_test(args: TokenStream, input: TokenStream) -> TokenStream {
                 proptest::proptest!{
                     #[test]
                     fn #test_name(obj in proptest::prelude::any::#ty()) {
-                        let buf = bincode::serialize(&obj).unwrap();
-                        assert_eq!(obj, bincode::deserialize::#ty(&buf).unwrap());
+                        let buf = serde_json::to_vec(&obj).unwrap();
+                        proptest::prop_assert_eq!(obj, serde_json::from_slice::#ty(&buf).unwrap());
                     }
                 }
             }
