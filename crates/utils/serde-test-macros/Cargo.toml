@@ -25,4 +25,3 @@ proptest-derive.workspace = true
 [dev-dependencies]
 proptest = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
-bincode = "1.3"
