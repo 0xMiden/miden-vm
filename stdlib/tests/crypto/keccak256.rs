@@ -14,7 +14,7 @@ use miden_crypto::{
     hash::{keccak::Keccak256, rpo::Rpo256},
 };
 use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessState};
-use miden_stdlib::handlers::keccak::{KECCAK_HASH_MEMORY_EVENT_NAME, KeccakFeltDigest};
+use miden_stdlib::handlers::keccak256::{KECCAK_HASH_MEMORY_EVENT_NAME, KeccakFeltDigest};
 
 // Test constants
 // ================================================================================================

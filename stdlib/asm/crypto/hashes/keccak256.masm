@@ -15,7 +15,7 @@ use.std::crypto::hashes::rpo
 # Constants
 # ================================================================================================
 
-const.KECCAK_HASH_MEMORY_EVENT=event("miden_stdlib::hash::keccak::hash_memory")
+const.KECCAK_HASH_MEMORY_EVENT=event("miden_stdlib::hash::keccak256::hash_memory")
 
 # PROCEDURES
 # ================================================================================================
@@ -34,6 +34,7 @@ export.hash_memory
     exec.hash_memory_impl
     # => [COMM, DIGEST_U32[8], ...]
 
+    # This will be replaced by a syscall to a procedure which logs the call to the precompile
     dropw
     # => [DIGEST_U32[8], ...]
 end
@@ -47,11 +48,13 @@ end
 #! - DIGEST_U32[8] = [d_0, ..., d_7] = Keccak256(INPUT_U8[32])
 #! - INPUT_U32[8] = [i_0, ..., i_7] = [INPUT_LO, INPUT_HI] ~ INPUT_U8[32] with u32 packing
 export.hash_1to1.8
+    # Store [INPUT_LO, INPUT_HI] in local memory
     exec.word::reverse loc_storew.0 dropw
     exec.word::reverse loc_storew.4 dropw
 
     push.32 locaddr.0
     # => [ptr, 32]
+
     exec.hash_memory
 end
 
@@ -65,6 +68,7 @@ end
 #! - INPUT_R_U32[8] = [r_0, ..., r_7] = [INPUT_R_LO, INPUT_R_HI] ~ INPUT_R_U8[32]
 #! - DIGEST_U32[8] = [d_0, ..., d_7] = Keccak256(INPUT_L_U8[32] || INPUT_R_U8[32])
 export.hash_2to1.16
+    # Store [INPUT_L_LO, INPUT_L_HI, INPUT_R_LO, INPUT_R_HI] in local memory
     exec.word::reverse loc_storew.0 dropw
     exec.word::reverse loc_storew.4 dropw
     exec.word::reverse loc_storew.8 dropw
@@ -96,30 +100,15 @@ export.hash_memory_impl
     emit.KECCAK_HASH_MEMORY_EVENT
     # => [ptr, len_bytes, ...]
 
-    # compute len_u32 = ceil(len_bytes / 4)
+    # Compute len_u32 = ceil(len_bytes / 4)
     swap add.3 u32shr.2 swap
     # => [ptr, len_u32, ...]
 
     exec.rpo::hash_memory
     # => [COMM_INPUT, ...]
 
-    exec.build_commitment_from_digest
-    # => [COMM, DIGEST_U32[8]]
-end
-
-#! Builds commitment from Rpo256(INPUT_U32[..]) and advice stack digest.
-#!
-#! Input: [COMM_INPUT, ...]
-#! Output: [COMM, DIGEST_U32[8], ...]
-#!
-#! Where
-#! - COMM_INPUT = Rpo256(INPUT_U32[..])
-#! - COMM_DIGEST = Rpo256(DIGEST_U32[8])
-#! - COMM = Rpo256(COMM_INPUT || COMM_DIGEST)
-proc.build_commitment_from_digest
-    # load digest from advice stack
-    padw adv_loadw
-    padw adv_loadw
+    # Load digest from advice stack
+    adv_push.8
     # => [DIGEST_U32[8], COMM_INPUT, ...]
 
     # Compute COMM_DIGEST = Rpo256(DIGEST_U32[8])
