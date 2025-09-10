@@ -1,8 +1,6 @@
 use core::fmt::{Display, Formatter};
 
-use miden_crypto::hash::blake::Blake3_256;
-
-use crate::Felt;
+use crate::{Felt, utils::hash_string_to_word};
 
 /// A type-safe wrapper around a [`Felt`] that represents an event identifier.
 ///
@@ -22,13 +20,15 @@ impl EventId {
     /// 3. Interpreting these bytes as a little-endian u64
     /// 4. Reducing modulo the field prime to create a valid Felt
     ///
+    /// Note that this is the same procedure performed by [`hash_string_to_word`], where we take
+    /// the first element of the resulting [`Word`](crate::Word).
+    ///
     /// This ensures that identical event names always produce the same event ID, while
     /// providing good distribution properties to minimize collisions between different names.
     pub fn from_name(name: impl AsRef<str>) -> Self {
-        let digest_bytes: [u8; 32] = Blake3_256::hash(name.as_ref().as_bytes()).into();
-        let event_bytes: [u8; 8] = digest_bytes[0..8].try_into().unwrap();
+        let digest_word = hash_string_to_word(name.as_ref());
 
-        Self(Felt::new(u64::from_le_bytes(event_bytes)))
+        Self(digest_word[0])
     }
 
     /// Creates a new event ID from a [`Felt`].
@@ -42,7 +42,7 @@ impl EventId {
     }
 
     /// Returns the underlying [`Felt`] value.
-    pub fn as_felt(&self) -> Felt {
+    pub const fn as_felt(&self) -> Felt {
         self.0
     }
 }
