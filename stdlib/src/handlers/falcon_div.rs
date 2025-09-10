@@ -8,6 +8,8 @@ use alloc::{vec, vec::Vec};
 use miden_core::{EventId, Felt, ZERO};
 use miden_processor::{AdviceMutation, EventError, ProcessState};
 
+use crate::handlers::u64_to_u32_elements;
+
 /// Falcon signature prime.
 const M: u64 = 12289;
 
@@ -67,16 +69,6 @@ pub fn handle_falcon_div(process: &ProcessState) -> Result<Vec<AdviceMutation>, 
     // The values are pushed in the order: r_lo, q_lo, q_hi
     let mutation = AdviceMutation::extend_stack([r_lo, q_lo, q_hi]);
     Ok(vec![mutation])
-}
-
-// HELPER FUNCTIONS
-// ================================================================================================
-
-/// Converts a u64 value into two u32 elements (high and low parts).
-fn u64_to_u32_elements(value: u64) -> (Felt, Felt) {
-    let hi = Felt::from((value >> 32) as u32);
-    let lo = Felt::from(value as u32);
-    (hi, lo)
 }
 
 // ERROR TYPES

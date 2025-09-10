@@ -8,6 +8,8 @@ use alloc::{vec, vec::Vec};
 use miden_core::{EventId, Felt};
 use miden_processor::{AdviceMutation, EventError, ProcessState};
 
+use crate::handlers::u64_to_u32_elements;
+
 /// Event ID for the U64_DIV handler, derived from the constant EVENT_U64_DIV.
 pub const U64_DIV_EVENT_ID: EventId = EventId::from_u64(11320526962293815303);
 pub const U64_DIV_EVENT_NAME: &str = "miden_stdlib::math::u64::u64_div";
@@ -95,16 +97,6 @@ pub fn handle_u64_div(process: &ProcessState) -> Result<Vec<AdviceMutation>, Eve
     // r_hi, r_lo, q_hi, q_lo
     let mutation = AdviceMutation::extend_stack([r_hi, r_lo, q_hi, q_lo]);
     Ok(vec![mutation])
-}
-
-// HELPER FUNCTIONS
-// ================================================================================================
-
-/// Converts a u64 value into two u32 elements (high and low parts).
-fn u64_to_u32_elements(value: u64) -> (Felt, Felt) {
-    let hi = Felt::from((value >> 32) as u32);
-    let lo = Felt::from(value as u32);
-    (hi, lo)
 }
 
 // ERROR TYPES
