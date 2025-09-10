@@ -1,3 +1,5 @@
+use miden_stdlib::handlers::smt_peek::SMT_PEEK_EVENT_NAME;
+
 use super::*;
 
 // TEST DATA
@@ -142,7 +144,8 @@ fn test_smt_set_empty_value_to_empty_leaf() {
 fn test_set_advice_map_empty_key() {
     let mut smt = Smt::new();
 
-    let source = "
+    let source = format!(
+        r#"
     use.std::collections::smt
     # Stack: [V, K, R]
     begin
@@ -159,7 +162,7 @@ fn test_set_advice_map_empty_key() {
         # => [K, R_new, V]
 
         # Fetch what was stored on advice map and clean stack
-        adv.push_smtpeek dropw dropw
+        emit.event("{SMT_PEEK_EVENT_NAME}") dropw dropw
         # => [V]
 
         # Push advice map values on stack
@@ -170,14 +173,17 @@ fn test_set_advice_map_empty_key() {
         assert_eqw
         # => [K]
     end
-    ";
+    "#
+    );
 
     let key = Word::new([41_u32.into(), 42_u32.into(), 43_u32.into(), 44_u32.into()]);
     let value: [Felt; 4] = [42323_u32.into(); 4];
     let (init_stack, _, store, advice_map) = prepare_insert_or_set(key, value.into(), &mut smt);
 
     // assert is checked in MASM
-    build_test!(source, &init_stack, &[], store, advice_map).execute().unwrap();
+    build_debug_test!(source, &init_stack, &[], store, advice_map)
+        .execute()
+        .unwrap();
 }
 
 /// Tests that the advice map is properly updated after a `set` on a key that has existing value
@@ -185,7 +191,8 @@ fn test_set_advice_map_empty_key() {
 fn test_set_advice_map_single_key() {
     let mut smt = Smt::with_entries(LEAVES).unwrap();
 
-    let source = "
+    let source = format!(
+        r#"
     use.std::collections::smt
     # Stack: [V, K, R]
     begin
@@ -202,7 +209,7 @@ fn test_set_advice_map_single_key() {
         # => [K, R_new, V]
 
         # Fetch what was stored on advice map and clean stack
-        adv.push_smtpeek dropw dropw
+        emit.event("{SMT_PEEK_EVENT_NAME}") dropw dropw
         # => [V]
 
         # Push advice map values on stack
@@ -213,7 +220,8 @@ fn test_set_advice_map_single_key() {
         assert_eqw
         # => [K]
     end
-    ";
+    "#
+    );
 
     let key = LEAVES[0].0;
     let value: [Felt; 4] = [Felt::from(42323_u32); 4];

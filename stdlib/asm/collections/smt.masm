@@ -290,7 +290,7 @@ end
 #!   Leaf multiple
 #!     unimplemented
 export.set
-    # Prepare stack for SMT_PEEK_EVENT
+    # Prepare stack for adv.push_mtnode
     # (X cycles)
     movupw.2 dup.8 push.LEAF_DEPTH
     # => [depth, leaf_index, R, V, K]
@@ -298,7 +298,7 @@ export.set
     # Push MT node on advice stack, cleanup operand stack, and then
     # push MT node on operand stack (NV)
     # (X cycles)
-    emit.SMT_PEEK_EVENT drop drop movdnw.2 adv_push.4
+    adv.push_mtnode drop drop movdnw.2 adv_push.4
     # => [NV, V, K, R]
 
     # (X cycles)

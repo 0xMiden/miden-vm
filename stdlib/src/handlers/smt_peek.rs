@@ -68,7 +68,7 @@ pub fn handle_smt_peek(process: &ProcessState) -> Result<Vec<AdviceMutation>, Ev
     if node == *empty_leaf {
         // if the node is a root of an empty subtree, then there is no value associated with
         // the specified key
-        let mutation = AdviceMutation::extend_stack(Smt::EMPTY_VALUE);
+        let mutation = AdviceMutation::extend_stack(Smt::EMPTY_VALUE.into_iter().rev());
         Ok(vec![mutation])
     } else {
         let leaf_preimage = get_smt_leaf_preimage(process, node)?;
@@ -76,14 +76,14 @@ pub fn handle_smt_peek(process: &ProcessState) -> Result<Vec<AdviceMutation>, Ev
         for (key_in_leaf, value_in_leaf) in leaf_preimage {
             if key == key_in_leaf {
                 // Found key - push value associated with key, and return
-                let mutation = AdviceMutation::extend_stack(value_in_leaf);
+                let mutation = AdviceMutation::extend_stack(value_in_leaf.into_iter().rev());
                 return Ok(vec![mutation]);
             }
         }
 
         // if we can't find any key in the leaf that matches `key`, it means no value is
         // associated with `key`
-        let mutation = AdviceMutation::extend_stack(Smt::EMPTY_VALUE);
+        let mutation = AdviceMutation::extend_stack(Smt::EMPTY_VALUE.into_iter().rev());
         Ok(vec![mutation])
     }
 }

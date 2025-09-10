@@ -2,6 +2,7 @@ use core::cmp;
 
 use miden_core::assert_matches;
 use miden_processor::ExecutionError;
+use miden_stdlib::handlers::u64_div::U64DivError;
 use miden_utils_testing::{
     Felt, U32_BOUND, ZERO, expect_exec_error_matches, proptest::prelude::*, rand::rand_value,
 };
@@ -448,15 +449,17 @@ fn ensure_div_doesnt_crash() {
     let err = test.execute();
     match err {
         Ok(_) => panic!("expected an error"),
-        Err(err) => assert_matches!(
-            err,
-            ExecutionError::NotU32Values {
-                label: _,
-                source_file: _,
-                values: _,
-                err_code: _
-            }
-        ),
+        Err(ExecutionError::EventError { error, .. }) => {
+            let u64_div_error = error.downcast_ref::<U64DivError>().expect("Expected U64DivError");
+            assert_matches!(
+                u64_div_error,
+                U64DivError::NotU32Value {
+                    value: 4294967296,
+                    position: "divisor_lo"
+                }
+            );
+        },
+        Err(err) => panic!("Unexpected error type: {:?}", err),
     }
 
     // 2. dividend limbs not u32
@@ -468,15 +471,17 @@ fn ensure_div_doesnt_crash() {
     let err = test.execute();
     match err {
         Ok(_) => panic!("expected an error"),
-        Err(err) => assert_matches!(
-            err,
-            ExecutionError::NotU32Values {
-                label: _,
-                source_file: _,
-                values: _,
-                err_code: _
-            }
-        ),
+        Err(ExecutionError::EventError { error, .. }) => {
+            let u64_div_error = error.downcast_ref::<U64DivError>().expect("Expected U64DivError");
+            assert_matches!(
+                u64_div_error,
+                U64DivError::NotU32Value {
+                    value: 4294967296,
+                    position: "dividend_lo"
+                }
+            );
+        },
+        Err(err) => panic!("Unexpected error type: {:?}", err),
     }
 }
 
