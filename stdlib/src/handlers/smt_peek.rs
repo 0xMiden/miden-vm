@@ -99,7 +99,7 @@ fn get_smt_leaf_preimage(
     let kv_pairs = process
         .advice_provider()
         .get_mapped_values(&node)
-        .ok_or_else(|| SmtPeekError::SmtNodeNotFound { node })?;
+        .ok_or(SmtPeekError::SmtNodeNotFound { node })?;
 
     if kv_pairs.len() % (WORD_SIZE * 2) != 0 {
         return Err(SmtPeekError::InvalidSmtNodePreimage { node, preimage_len: kv_pairs.len() });

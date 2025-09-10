@@ -26,7 +26,7 @@ pub const U64_DIV_EVENT_NAME: &str = "miden_stdlib::math::u64::u64_div";
 /// respectively (with a0 representing the 32 lest significant bits and a1 representing the
 /// 32 most significant bits). Similarly, (q0, q1) and (r0, r1) represent the quotient and
 /// the remainder respectively.
-
+/// ---
 /// U64_DIV system event handler.
 ///
 /// Pushes the result of [u64] division (both the quotient and the remainder) onto the advice
