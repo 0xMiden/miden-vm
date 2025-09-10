@@ -820,14 +820,18 @@ impl proptest::prelude::Arbitrary for Library {
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         use proptest::prelude::*;
         prop::collection::btree_map(any::<QualifiedProcedureName>(), any::<LibraryExport>(), 1..5)
-            .prop_flat_map(|exports| {
+            .prop_flat_map(|mut exports| {
                 // Create a MastForest with actual nodes for the exports
                 let mut mast_forest = MastForest::new();
                 let mut nodes = Vec::new();
 
                 // Create a simple node for each export
-                for (_, export) in exports.iter() {
+                for (export_name, export) in exports.iter_mut() {
                     use miden_core::Operation;
+
+                    // Ensure the export name matches the exported procedure, as the Arbitrary
+                    // impl will generate different paths for each
+                    export.name = export_name.clone();
 
                     let node_id =
                         mast_forest.add_block(vec![Operation::Add, Operation::Mul], None).unwrap();
@@ -839,7 +843,6 @@ impl proptest::prelude::Arbitrary for Library {
             .prop_map(|(mut mast_forest, nodes, exports)| {
                 // Replace the export node IDs with the actual node IDs we created
                 let mut adjusted_exports = BTreeMap::new();
-                let mut export_pairs = Vec::new();
 
                 for (proc_name, mut export) in exports {
                     // Find the corresponding node we created
@@ -858,22 +861,18 @@ impl proptest::prelude::Arbitrary for Library {
                         }
                     }
 
-                    export_pairs.push((proc_name, export));
-                }
-
-                // Sort the exports by procedure name to ensure deterministic order
-                export_pairs.sort_by_key(|(proc_name, _)| proc_name.clone());
-
-                for (proc_name, export) in export_pairs {
-                    // Add the node to the forest roots if it's not already there
-                    mast_forest.make_root(export.node);
                     adjusted_exports.insert(proc_name, export);
                 }
 
-                // Recompute the digest - sort node IDs to ensure deterministic order
-                let mut node_ids: Vec<_> =
-                    adjusted_exports.values().map(|export| export.node).collect();
-                node_ids.sort_by_key(|id| id.as_u32());
+                let mut node_ids = Vec::with_capacity(adjusted_exports.len());
+                for export in adjusted_exports.values() {
+                    // Add the node to the forest roots if it's not already there
+                    mast_forest.make_root(export.node);
+                    // Collect the node id for recomputing the digest
+                    node_ids.push(export.node);
+                }
+
+                // Recompute the digest
                 let digest = mast_forest.compute_nodes_commitment(&node_ids);
 
                 let mast_forest = Arc::new(mast_forest);
