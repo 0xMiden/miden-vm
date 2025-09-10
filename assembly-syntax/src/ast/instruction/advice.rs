@@ -12,9 +12,6 @@ use miden_core::sys_events::SystemEvent;
 /// - Insert new data into the advice map.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum SystemEventNode {
-    PushU64Div,
-    PushFalconDiv,
-    PushSmtPeek,
     PushMapVal,
     PushMapValN,
     HasMapKey,
@@ -30,9 +27,6 @@ impl From<&SystemEventNode> for SystemEvent {
     fn from(value: &SystemEventNode) -> Self {
         use SystemEventNode::*;
         match value {
-            PushU64Div => Self::U64Div,
-            PushFalconDiv => Self::FalconDiv,
-            PushSmtPeek => Self::SmtPeek,
             PushMapVal => Self::MapValueToStack,
             PushMapValN => Self::MapValueToStackN,
             HasMapKey => Self::HasMapKey,
@@ -55,9 +49,6 @@ impl crate::prettier::PrettyPrint for SystemEventNode {
 impl fmt::Display for SystemEventNode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::PushU64Div => write!(f, "push_u64div"),
-            Self::PushFalconDiv => write!(f, "push_falcon_div"),
-            Self::PushSmtPeek => write!(f, "push_smtpeek"),
             Self::PushMapVal => write!(f, "push_mapval"),
             Self::PushMapValN => write!(f, "push_mapvaln"),
             Self::HasMapKey => write!(f, "has_mapkey"),

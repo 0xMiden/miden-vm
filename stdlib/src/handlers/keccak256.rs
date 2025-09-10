@@ -205,9 +205,7 @@ pub enum KeccakError {
 
 #[cfg(test)]
 mod tests {
-    use miden_core::EventID;
-
-    use crate::handlers::keccak256::{KECCAK_HASH_MEMORY_EVENT_ID, KECCAK_HASH_MEMORY_EVENT_NAME};
+    use super::*;
 
     #[test]
     fn test_event_id() {
