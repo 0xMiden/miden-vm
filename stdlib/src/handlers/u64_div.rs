@@ -11,22 +11,7 @@ use miden_processor::{AdviceMutation, EventError, ProcessState};
 /// Event ID for the U64_DIV handler, derived from the constant EVENT_U64_DIV.
 pub const U64_DIV_EVENT_ID: EventId = EventId::from_u64(11320526962293815303);
 pub const U64_DIV_EVENT_NAME: &str = "miden_stdlib::math::u64::u64_div";
-/// Pushes the result of [u64] division (both the quotient and the remainder) onto the advice
-/// stack.
-///
-/// Inputs:
-///   Operand stack: [b1, b0, a1, a0, ...]
-///   Advice stack: [...]
-///
-/// Outputs:
-///   Operand stack: [b1, b0, a1, a0, ...]
-///   Advice stack: [q0, q1, r0, r1, ...]
-///
-/// Where (a0, a1) and (b0, b1) are the 32-bit limbs of the dividend and the divisor
-/// respectively (with a0 representing the 32 lest significant bits and a1 representing the
-/// 32 most significant bits). Similarly, (q0, q1) and (r0, r1) represent the quotient and
-/// the remainder respectively.
-/// ---
+
 /// U64_DIV system event handler.
 ///
 /// Pushes the result of [u64] division (both the quotient and the remainder) onto the advice

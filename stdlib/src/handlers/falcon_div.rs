@@ -15,21 +15,6 @@ const M: u64 = 12289;
 pub const FALCON_DIV_EVENT_ID: EventId = EventId::from_u64(13788873273678049590);
 pub const FALCON_DIV_EVENT_NAME: &str = "miden_stdlib::crypto::dsa::rpo_falcon512::falcon_div";
 
-/// Pushes the result of divison (both the quotient and the remainder) of a [u64] by the Falcon
-/// prime (M = 12289) onto the advice stack.
-///
-/// Inputs:
-///   Operand stack: [a1, a0, ...]
-///   Advice stack: [...]
-///
-/// Outputs:
-///   Operand stack: [a1, a0, ...]
-///   Advice stack: [q0, q1, r, ...]
-///
-/// Where (a0, a1) are the 32-bit limbs of the dividend (with a0 representing the 32 least
-/// significant bits and a1 representing the 32 most significant bits).
-/// Similarly, (q0, q1) represent the quotient and r the remainder.
-/// -------
 /// FALCON_DIV system event handler.
 ///
 /// Pushes the result of divison (both the quotient and the remainder) of a [u64] by the Falcon

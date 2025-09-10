@@ -16,20 +16,6 @@ use miden_processor::{AdviceMutation, EventError, ProcessState};
 pub const SMT_PEEK_EVENT_ID: EventId = EventId::from_u64(2792915964933121433);
 pub const SMT_PEEK_EVENT_NAME: &str = "miden_stdlib::collections::smt::smt_peek_event";
 
-/// Pushes onto the advice stack the value associated with the specified key in a Sparse
-/// Merkle Tree defined by the specified root.
-///
-/// If no value was previously associated with the specified key, [ZERO; 4] is pushed onto
-/// the advice stack.
-///
-/// Inputs:
-///   Operand stack: [KEY, ROOT, ...]
-///   Advice stack: [...]
-///
-/// Outputs:
-///   Operand stack: [KEY, ROOT, ...]
-///   Advice stack: [VALUE, ...]
-/// ----
 /// SMT_PEEK system event handler.
 ///
 /// Pushes onto the advice stack the value associated with the specified key in a Sparse

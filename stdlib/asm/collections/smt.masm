@@ -1,6 +1,5 @@
 # Constant value for the depth at which leaves sit
 const.LEAF_DEPTH=64
-const.SMT_PEEK_EVENT=event("miden_stdlib::collections::smt::smt_peek_event")
 
 # SET
 # =================================================================================================

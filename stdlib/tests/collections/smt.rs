@@ -192,7 +192,7 @@ fn test_set_advice_map_single_key() {
     let mut smt = Smt::with_entries(LEAVES).unwrap();
 
     let source = format!(
-        r#"
+        "
     use.std::collections::smt
     # Stack: [V, K, R]
     begin
@@ -209,7 +209,7 @@ fn test_set_advice_map_single_key() {
         # => [K, R_new, V]
 
         # Fetch what was stored on advice map and clean stack
-        emit.event("{SMT_PEEK_EVENT_NAME}") dropw dropw
+        emit.event(\"{SMT_PEEK_EVENT_NAME}\") dropw dropw
         # => [V]
 
         # Push advice map values on stack
@@ -219,8 +219,7 @@ fn test_set_advice_map_single_key() {
         # Check for equality of V's
         assert_eqw
         # => [K]
-    end
-    "#
+    end"
     );
 
     let key = LEAVES[0].0;

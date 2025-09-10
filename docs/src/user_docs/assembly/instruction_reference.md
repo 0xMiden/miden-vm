@@ -189,7 +189,6 @@ Instructions for moving data between the stack and other sources like program co
 | `adv.push_mapval`    | `[K, ... ]`                | `[K, ... ]`                | Pushes values from `advice_map[K]` to advice stack.                                                                                     |
 | `adv.push_mapvaln`   | `[K, ... ]`                | `[K, ... ]`                | Pushes `[n, ele1, ele2, ...]` from `advice_map[K]` to advice stack, where `n` is element count.                                        |
 | `adv.push_mtnode`    | `[d, i, R, ... ]`          | `[d, i, R, ... ]`          | Pushes Merkle tree node (root `R`, depth `d`, index `i`) from Merkle store to advice stack.                                           |
-| `adv.push_smtpeek`   | `[K, R, ...]`              | `[K, R, ...]`              | Pushes value for key `K` in Sparse Merkle Tree with root `R` to advice stack.                                                          |
 
 *Insert into Advice Map:*
 
