@@ -204,8 +204,6 @@ pub enum Token<'input> {
     PushMapval,
     PushMapvaln,
     PushMtnode,
-    PushSmtset,
-    PushSmtget,
     And,
     Assert,
     Assertz,
@@ -394,8 +392,6 @@ impl fmt::Display for Token<'_> {
             Token::PushMapval => write!(f, "push_mapval"),
             Token::PushMapvaln => write!(f, "push_mapvaln"),
             Token::PushMtnode => write!(f, "push_mtnode"),
-            Token::PushSmtset => write!(f, "push_smtset"),
-            Token::PushSmtget => write!(f, "push_smtget"),
             Token::And => write!(f, "and"),
             Token::Assert => write!(f, "assert"),
             Token::Assertz => write!(f, "assertz"),
@@ -591,8 +587,6 @@ impl<'input> Token<'input> {
                 | Token::PushMapval
                 | Token::PushMapvaln
                 | Token::PushMtnode
-                | Token::PushSmtset
-                | Token::PushSmtget
                 | Token::And
                 | Token::Assert
                 | Token::Assertz
@@ -739,8 +733,6 @@ impl<'input> Token<'input> {
         ("push_mapval", Token::PushMapval),
         ("push_mapvaln", Token::PushMapvaln),
         ("push_mtnode", Token::PushMtnode),
-        ("push_smtset", Token::PushSmtset),
-        ("push_smtget", Token::PushSmtget),
         ("and", Token::And),
         ("assert", Token::Assert),
         ("assertz", Token::Assertz),
