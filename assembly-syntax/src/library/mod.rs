@@ -314,7 +314,7 @@ impl Library {
 /// - There must be at least one exported procedure.
 /// - The number of exported procedures cannot exceed [Kernel::MAX_NUM_PROCEDURES] (i.e., 256).
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize))]
+#[cfg_attr(feature = "serde", derive(Deserialize))]
 #[cfg_attr(feature = "serde", serde(try_from = "Library"))]
 pub struct KernelLibrary {
     #[cfg_attr(feature = "serde", serde(skip))]
@@ -322,6 +322,16 @@ pub struct KernelLibrary {
     #[cfg_attr(feature = "serde", serde(skip))]
     kernel_info: ModuleInfo,
     library: Library,
+}
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for KernelLibrary {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        Library::serialize(&self.library, serializer)
+    }
 }
 
 impl AsRef<Library> for KernelLibrary {
