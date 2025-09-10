@@ -9,7 +9,7 @@ use super::{MastNodeErrorContext, MastNodeExt};
 use crate::{
     OPCODE_JOIN,
     chiplets::hasher,
-    mast::{DecoratorId, MastForest, MastForestError, MastNodeId, Remapping},
+    mast::{DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId, Remapping},
     prettier::PrettyPrint,
 };
 
@@ -90,7 +90,7 @@ impl JoinNode {
 }
 
 impl MastNodeErrorContext for JoinNode {
-    fn decorators(&self) -> impl Iterator<Item = (usize, DecoratorId)> {
+    fn decorators(&self) -> impl Iterator<Item = DecoratedOpLink> {
         self.before_enter.iter().chain(&self.after_exit).copied().enumerate()
     }
 }

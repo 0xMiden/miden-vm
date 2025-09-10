@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     DecoratorIdIterator, DecoratorList, Operation,
     chiplets::hasher,
-    mast::{DecoratorId, MastForest, MastForestError, MastNodeId, Remapping},
+    mast::{DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId, Remapping},
 };
 
 mod op_batch;
@@ -193,8 +193,8 @@ impl BasicBlockNode {
     /// Returns an iterator which allows us to iterate through the decorator list of
     /// this basic block node with op indexes aligned to the "raw" (un-padded)) op
     /// batches of the basic block node
-    pub fn raw_decorator_iter(&self) -> RawDecoratorIdIterator<'_> {
-        RawDecoratorIdIterator::new(&self.decorators, &self.op_batches)
+    pub fn raw_decorator_iter(&self) -> RawDecoratorOpLinkIterator<'_> {
+        RawDecoratorOpLinkIterator::new(&self.decorators, &self.op_batches)
     }
 
     /// Returns an iterator over the operations in the order in which they appear in the program.
@@ -236,7 +236,7 @@ impl BasicBlockNode {
 }
 
 impl MastNodeErrorContext for BasicBlockNode {
-    fn decorators(&self) -> impl Iterator<Item = (usize, DecoratorId)> {
+    fn decorators(&self) -> impl Iterator<Item = DecoratedOpLink> {
         self.decorators.iter().copied()
     }
 }
@@ -392,7 +392,7 @@ impl fmt::Display for BasicBlockNodePrettyPrint<'_> {
 ///
 /// IOW this makes its `BasicBlockNode::raw_decorators` padding-unaware, or equivalently
 /// "removes" the padding of these decorators
-pub struct RawDecoratorIdIterator<'a> {
+pub struct RawDecoratorOpLinkIterator<'a> {
     decorators: &'a DecoratorList, // [(adjusted_idx, DecoratorId)]
     padding_offsets: DecoratorPaddingOffsets, // indexable: padding_offsets[i]
     idx: usize,                    // position in decorators
@@ -401,7 +401,7 @@ pub struct RawDecoratorIdIterator<'a> {
 
 /// Returns a new instance of raw decorator iterator instantiated with the provided decorator
 /// list, tied to the provided op_batches list
-impl<'a> RawDecoratorIdIterator<'a> {
+impl<'a> RawDecoratorOpLinkIterator<'a> {
     // Decorators have been validated at the creation of BlockNode because this constructor
     // is private. Consider using `validate_decorators` if that changes.
     pub fn new(decorators: &'a DecoratorList, op_batches: &'a [OpBatch]) -> Self {
@@ -420,7 +420,7 @@ impl<'a> RawDecoratorIdIterator<'a> {
     }
 }
 
-impl<'a> Iterator for RawDecoratorIdIterator<'a> {
+impl<'a> Iterator for RawDecoratorOpLinkIterator<'a> {
     type Item = (usize, &'a DecoratorId);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -444,7 +444,7 @@ impl<'a> Iterator for RawDecoratorIdIterator<'a> {
     }
 }
 
-impl<'a> ExactSizeIterator for RawDecoratorIdIterator<'a> {
+impl<'a> ExactSizeIterator for RawDecoratorOpLinkIterator<'a> {
     fn len(&self) -> usize {
         self.decorators.len() - self.idx
     }

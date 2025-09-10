@@ -210,7 +210,7 @@ pub trait MastNodeErrorContext: Send + Sync {
     ///
     /// The index is only meaningful for [`BasicBlockNode`]s, where it corresponds to the index of
     /// the operation in the basic block to which the decorator is attached.
-    fn decorators(&self) -> impl Iterator<Item = (usize, DecoratorId)>;
+    fn decorators(&self) -> impl Iterator<Item = DecoratedOpLink>;
 
     // PROVIDED METHODS
     // -------------------------------------------------------------------------------------------
@@ -261,6 +261,10 @@ pub trait MastNodeErrorContext: Send + Sync {
         None
     }
 }
+
+// Links an operation index in a block to a decoratorid, to be executed right before this
+// operation's position
+pub type DecoratedOpLink = (usize, DecoratorId);
 
 // HELPERS
 // ===============================================================================================

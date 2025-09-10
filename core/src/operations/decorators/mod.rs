@@ -12,7 +12,7 @@ pub use assembly_op::AssemblyOp;
 mod debug;
 pub use debug::DebugOptions;
 
-use crate::mast::{DecoratorFingerprint, DecoratorId};
+use crate::mast::{DecoratedOpLink, DecoratorFingerprint, DecoratorId};
 
 // DECORATORS
 // ================================================================================================
@@ -83,7 +83,7 @@ impl fmt::Display for Decorator {
 ///
 /// Note: for `AssemblyOp` decorators, when an instruction compiles down to multiple operations,
 /// only the first operation is associated with the assembly op.
-pub type DecoratorList = Vec<(usize, DecoratorId)>;
+pub type DecoratorList = Vec<DecoratedOpLink>;
 
 /// Iterator used to iterate through the decorator list of a span block
 /// while executing operation batches of a span block.
