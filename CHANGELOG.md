@@ -35,6 +35,7 @@
 - Made `miden-prover`'s metal prover async-compatible. ([#2133](https://github.com/0xMiden/miden-vm/pull/2133)).
 - Abstract away the fast processor's operation execution into a new `Processor` trait ([#2141](https://github.com/0xMiden/miden-vm/pull/2141))
 - [BREAKING] Implemented custom section support in package format, and removed `account_component_metadata` field ([#2071](https://github.com/0xMiden/miden-vm/pull/2071))
+- [BREAKING] Move `u64_div`, `falcon_div` and `smtpeek` system events to stdlib ([#1582](https://github.com/0xMiden/miden-vm/issues/1582))
 
 ## 0.17.1 (2025-08-29)
 
