@@ -48,7 +48,7 @@ use alloc::{
 use decorator::{DecoratorDataBuilder, DecoratorInfo};
 use string_table::StringTable;
 
-use super::{DecoratorId, MastForest, MastNode, MastNodeErrorContext, MastNodeId};
+use super::{DecoratedOpLink, DecoratorId, MastForest, MastNode, MastNodeErrorContext, MastNodeId};
 use crate::{
     AdviceMap,
     mast::node::MastNodeExt,
@@ -109,7 +109,7 @@ impl Serializable for MastForest {
         let mut before_enter_decorators: Vec<(usize, Vec<DecoratorId>)> = Vec::new();
         let mut after_exit_decorators: Vec<(usize, Vec<DecoratorId>)> = Vec::new();
 
-        let mut basic_block_decorators: Vec<(usize, Vec<(usize, DecoratorId)>)> = Vec::new();
+        let mut basic_block_decorators: Vec<(usize, Vec<DecoratedOpLink>)> = Vec::new();
 
         // magic & version
         target.write_bytes(MAGIC);
@@ -332,7 +332,7 @@ fn read_block_decorators<R: ByteReader>(
         let node_id: usize = source.read()?;
 
         let decorator_vec_len: usize = source.read()?;
-        let mut inner_vec: Vec<(usize, DecoratorId)> = Vec::with_capacity(decorator_vec_len);
+        let mut inner_vec: Vec<DecoratedOpLink> = Vec::with_capacity(decorator_vec_len);
         for _ in 0..decorator_vec_len {
             let op_id: usize = source.read()?;
             let decorator_id = DecoratorId::from_u32_safe(source.read()?, mast_forest)?;
