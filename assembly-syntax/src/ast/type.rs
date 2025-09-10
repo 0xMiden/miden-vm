@@ -2,7 +2,7 @@ use alloc::{boxed::Box, string::String, vec::Vec};
 
 use miden_debug_types::{SourceSpan, Span, Spanned};
 pub use midenc_hir_type as types;
-use midenc_hir_type::Type;
+use midenc_hir_type::{Type, TypeRepr};
 
 use super::{ConstantExpr, DocString, Ident};
 
@@ -205,6 +205,7 @@ impl ArrayType {
 #[derive(Debug, Clone)]
 pub struct StructType {
     pub span: SourceSpan,
+    pub repr: Span<TypeRepr>,
     pub fields: Vec<StructField>,
 }
 
@@ -212,12 +213,13 @@ impl Eq for StructType {}
 
 impl PartialEq for StructType {
     fn eq(&self, other: &Self) -> bool {
-        self.fields == other.fields
+        self.repr == other.repr && self.fields == other.fields
     }
 }
 
 impl core::hash::Hash for StructType {
     fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        self.repr.hash(state);
         self.fields.hash(state);
     }
 }
@@ -232,8 +234,16 @@ impl StructType {
     pub fn new(fields: impl IntoIterator<Item = StructField>) -> Self {
         Self {
             span: SourceSpan::UNKNOWN,
+            repr: Span::unknown(TypeRepr::Default),
             fields: fields.into_iter().collect(),
         }
+    }
+
+    /// Override the default struct representation
+    #[inline]
+    pub fn with_repr(mut self, repr: Span<TypeRepr>) -> Self {
+        self.repr = repr;
+        self
     }
 
     /// Override the default source span

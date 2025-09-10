@@ -280,21 +280,18 @@ pub enum ParsingError {
         #[label(
             "an Advice Map key must be a word, either in 64-character hex format or in array-like format `[f0,f1,f2,f3]`"
         )]
-        #[label]
         span: SourceSpan,
     },
     #[error("invalid slice constant")]
     #[diagnostic()]
     InvalidSliceConstant {
         #[label("slices are only supported over word-sized constants")]
-        #[label]
         span: SourceSpan,
     },
     #[error("invalid slice: expected valid range")]
     #[diagnostic()]
     InvalidRange {
         #[label("range used for the word constant slice is malformed: `{range:?}`")]
-        #[label]
         span: SourceSpan,
         range: Range<usize>,
     },
@@ -302,7 +299,6 @@ pub enum ParsingError {
     #[diagnostic()]
     EmptySlice {
         #[label("range used for the word constant slice is empty: `{range:?}`")]
-        #[label]
         span: SourceSpan,
         range: Range<usize>,
     },
@@ -311,6 +307,19 @@ pub enum ParsingError {
     UnrecognizedCallConv {
         #[label]
         span: SourceSpan,
+    },
+    #[error("invalid struct annotation")]
+    #[diagnostic(help("expected one of: '@packed', '@transparent', '@bigendian', or '@align(N)'"))]
+    InvalidStructAnnotation {
+        #[label]
+        span: SourceSpan,
+    },
+    #[error("invalid struct representation")]
+    #[diagnostic()]
+    InvalidStructRepr {
+        #[label("{message}")]
+        span: SourceSpan,
+        message: String,
     },
 }
 

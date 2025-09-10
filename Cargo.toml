@@ -57,7 +57,7 @@ miden-verifier = { path = "./verifier", version = "0.18", default-features = fal
 # Miden crates
 miden-crypto = { version = "0.17", default-features = false }
 miden-formatting = { version = "0.1", default-features = false }
-midenc-hir-type = { version = "0.1", default-features = false }
+midenc-hir-type = { version = "0.4", default-features = false }
 
 # Third-party crates
 insta = { version = "1.43", default-features = false, features = [

@@ -404,12 +404,89 @@ ArrayType: ArrayType = {
 }
 
 StructType: StructType = {
-    <l:@L> "struct" "{" <fields:CommaDelimitedAllowTrailing<StructField>> "}" <r:@R> => {
+    <l:@L> "struct" <repr:Annotation?> "{" <fields:CommaDelimitedAllowTrailing<StructField>> "}" <r:@R> =>? {
+        use crate::ast::types::TypeRepr;
+
         let span = span!(source_file.id(), l, r);
-        StructType {
+
+        // Expecting one of:
+        //
+        // * @packed
+        // * @transparent
+        // * @bigendian
+        // * @align(ALIGN)
+        let repr = match repr {
+            None => Span::new(span, TypeRepr::Default),
+            Some(repr) => match repr {
+                Attribute::Marker(ref id) => match id.as_str() {
+                    "packed" => Span::new(id.span(), TypeRepr::packed(1)),
+                    "transparent" => Span::new(id.span(), TypeRepr::Transparent),
+                    "bigendian" => Span::new(id.span(), TypeRepr::BigEndian),
+                    "align" => return Err(ParseError::User {
+                        error: ParsingError::InvalidStructRepr {
+                            span: repr.span(),
+                            message: "you must specify an alignment here, e.g. 'align(16)'".to_string(),
+                        }
+                    }),
+                    _ => return Err(ParseError::User {
+                        error: ParsingError::InvalidStructAnnotation {
+                            span: id.span(),
+                        }
+                    }),
+                },
+                Attribute::List(meta) => match meta.name.as_str() {
+                    "align" => {
+                        if meta.len() != 1 {
+                            return Err(ParseError::User {
+                                error: ParsingError::InvalidStructRepr {
+                                    span: meta.span(),
+                                    message: "expected a single element in this meta list, e.g. 'align(16)'".to_string(),
+                                }
+                            });
+                        }
+                        match &meta.items[0] {
+                            MetaExpr::Int(align) => {
+                                let raw_align = align.as_int();
+                                if raw_align < 1 || raw_align > (u16::MAX as u64) {
+                                    return Err(ParseError::User {
+                                        error: ParsingError::InvalidStructRepr {
+                                            span: align.span(),
+                                            message: "invalid alignment, expected a value in the range 1..=65535".to_string(),
+                                        }
+                                    });
+                                }
+                                Span::new(meta.span(), TypeRepr::align(raw_align as u16))
+                            }
+                            expr => {
+                                return Err(ParseError::User {
+                                    error: ParsingError::InvalidStructRepr {
+                                        span: expr.span(),
+                                        message: "invalid alignment expresssion, expected an integer".to_string(),
+                                    }
+                                });
+                            }
+                        }
+                    },
+                    _ => return Err(ParseError::User {
+                        error: ParsingError::InvalidStructAnnotation {
+                            span: meta.span(),
+                        }
+                    }),
+                }
+                Attribute::KeyValue(meta) => {
+                    return Err(ParseError::User {
+                        error: ParsingError::InvalidStructAnnotation {
+                            span: meta.span(),
+                        }
+                    });
+                }
+            },
+        };
+        Ok(StructType {
             span,
+            repr,
             fields,
-        }
+        })
     },
 }
 
