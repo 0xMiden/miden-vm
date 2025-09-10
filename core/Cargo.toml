@@ -27,15 +27,28 @@ std = [
     "winter-math/std",
     "winter-utils/std",
 ]
-serde = ["miden-crypto/serde", "miden-debug-types/serde", "winter-math/serde"]
+serde = [
+    "dep:serde",
+    "dep:serde_json",
+    "miden-crypto/serde",
+    "miden-debug-types/serde",
+    "winter-math/serde",
+]
+arbitrary = ["dep:proptest", "dep:proptest-derive"]
+testing = ["arbitrary" ]
 
 [dependencies]
+enum_dispatch = { version =  "0.3" }
 miden-crypto.workspace = true
 miden-debug-types.workspace = true
 miden-formatting.workspace = true
+miden-serde-test-macros = { workspace = true }
 num-derive = { version = "0.4", default-features = false }
 num-traits = { version = "0.2", default-features = false }
-enum_dispatch = { version =  "0.3" }
+proptest = { workspace = true, optional = true }
+proptest-derive = { workspace = true, optional = true }
+serde = { workspace = true, optional = true, features = ["derive"] }
+serde_json = { workspace = true, optional = true }
 thiserror.workspace = true
 winter-math.workspace = true
 winter-utils.workspace = true

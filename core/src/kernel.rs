@@ -1,6 +1,8 @@
 use alloc::vec::Vec;
 
 use miden_crypto::Word;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 use crate::{
     errors::KernelError,
@@ -15,6 +17,8 @@ use crate::{
 /// The internally-stored list always has a consistent order, regardless of the order of procedure
 /// list used to instantiate a kernel.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
 pub struct Kernel(Vec<Word>);
 
 impl Kernel {

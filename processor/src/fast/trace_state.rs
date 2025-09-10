@@ -1,13 +1,19 @@
 use alloc::{collections::VecDeque, sync::Arc};
 
-use miden_air::RowIndex;
+use miden_air::{RowIndex, trace::chiplets::hasher::HasherState};
 use miden_core::{
     Felt, ONE, Word, ZERO,
+    crypto::merkle::MerklePath,
     mast::{MastForest, MastNodeId},
     stack::MIN_STACK_DEPTH,
 };
 
-use crate::{ContextId, continuation_stack::ContinuationStack, fast::FastProcessor};
+use crate::{
+    AdviceError, ContextId, ErrorContext, ExecutionError,
+    continuation_stack::ContinuationStack,
+    fast::FastProcessor,
+    processor::{AdviceProviderInterface, HasherInterface, MemoryInterface},
+};
 
 // TRACE FRAGMENT CONTEXT
 // ================================================================================================
@@ -484,6 +490,48 @@ impl MemoryReplay {
     }
 }
 
+impl MemoryInterface for MemoryReplay {
+    fn read_element(
+        &mut self,
+        _ctx: ContextId,
+        addr: Felt,
+        _err_ctx: &impl ErrorContext,
+    ) -> Result<Felt, crate::MemoryError> {
+        Ok(self.replay_read_element(addr))
+    }
+
+    fn read_word(
+        &mut self,
+        _ctx: ContextId,
+        addr: Felt,
+        _clk: RowIndex,
+        _err_ctx: &impl ErrorContext,
+    ) -> Result<Word, crate::MemoryError> {
+        Ok(self.replay_read_word(addr))
+    }
+
+    fn write_element(
+        &mut self,
+        _ctx: ContextId,
+        _addr: Felt,
+        _element: Felt,
+        _err_ctx: &impl ErrorContext,
+    ) -> Result<(), crate::MemoryError> {
+        Ok(())
+    }
+
+    fn write_word(
+        &mut self,
+        _ctx: ContextId,
+        _addr: Felt,
+        _clk: RowIndex,
+        _word: Word,
+        _err_ctx: &impl ErrorContext,
+    ) -> Result<(), crate::MemoryError> {
+        Ok(())
+    }
+}
+
 // ADVICE REPLAY
 // ================================================================================================
 
@@ -543,6 +591,41 @@ impl AdviceReplay {
         self.stack_dword_pops
             .pop_front()
             .expect("No stack dword pop operations recorded")
+    }
+}
+
+impl AdviceProviderInterface for AdviceReplay {
+    fn pop_stack(&mut self) -> Result<Felt, AdviceError> {
+        Ok(self.replay_pop_stack())
+    }
+
+    fn pop_stack_word(&mut self) -> Result<Word, AdviceError> {
+        Ok(self.replay_pop_stack_word())
+    }
+
+    fn pop_stack_dword(&mut self) -> Result<[Word; 2], AdviceError> {
+        Ok(self.replay_pop_stack_dword())
+    }
+
+    /// Returns an empty Merkle path, as Merkle paths are ignored in parallel trace generation.
+    fn get_merkle_path(
+        &self,
+        _root: Word,
+        _depth: &Felt,
+        _index: &Felt,
+    ) -> Result<Option<MerklePath>, AdviceError> {
+        Ok(None)
+    }
+
+    /// Returns an empty Merkle path and root, as they are ignored in parallel trace generation.
+    fn update_merkle_node(
+        &mut self,
+        _root: Word,
+        _depth: &Felt,
+        _index: &Felt,
+        _value: Word,
+    ) -> Result<Option<MerklePath>, AdviceError> {
+        Ok(None)
     }
 }
 
@@ -628,6 +711,48 @@ impl HasherReplay {
     /// Replays a Merkle root update, returning the pre-recorded address, old root, and new root
     pub fn replay_update_merkle_root(&mut self) -> (Felt, Word, Word) {
         self.mrupdate_operations.pop_front().expect("No mrupdate operations recorded")
+    }
+}
+
+impl HasherInterface for HasherReplay {
+    fn permute(&mut self, _state: HasherState) -> (Felt, HasherState) {
+        self.replay_permute()
+    }
+
+    fn verify_merkle_root(
+        &mut self,
+        claimed_root: Word,
+        _value: Word,
+        _path: Option<&MerklePath>,
+        _index: Felt,
+        on_err: impl FnOnce() -> ExecutionError,
+    ) -> Result<Felt, ExecutionError> {
+        let (addr, computed_root) = self.replay_build_merkle_root();
+        if claimed_root == computed_root {
+            Ok(addr)
+        } else {
+            // If the hasher doesn't compute the same root (using the same path),
+            // then it means that `node` is not the value currently in the tree at `index`
+            Err(on_err())
+        }
+    }
+
+    fn update_merkle_root(
+        &mut self,
+        claimed_old_root: Word,
+        _old_value: Word,
+        _new_value: Word,
+        _path: Option<&MerklePath>,
+        _index: Felt,
+        on_err: impl FnOnce() -> ExecutionError,
+    ) -> Result<(Felt, Word), ExecutionError> {
+        let (address, old_root, new_root) = self.replay_update_merkle_root();
+
+        if claimed_old_root == old_root {
+            Ok((address, new_root))
+        } else {
+            Err(on_err())
+        }
     }
 }
 

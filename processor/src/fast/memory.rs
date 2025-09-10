@@ -3,7 +3,7 @@ use alloc::{collections::BTreeMap, vec::Vec};
 use miden_air::RowIndex;
 use miden_core::{EMPTY_WORD, Felt, WORD_SIZE, Word, ZERO};
 
-use crate::{ContextId, ErrorContext, MemoryAddress, MemoryError, fast::tracer::Tracer};
+use crate::{ContextId, ErrorContext, MemoryAddress, MemoryError, processor::MemoryInterface};
 
 /// The memory for the processor.
 ///
@@ -30,11 +30,8 @@ impl Memory {
         ctx: ContextId,
         addr: Felt,
         err_ctx: &impl ErrorContext,
-        tracer: &mut impl Tracer,
     ) -> Result<Felt, MemoryError> {
         let element = self.read_element_impl(ctx, clean_addr(addr, err_ctx)?).unwrap_or(ZERO);
-
-        tracer.record_memory_read_element(element, addr);
 
         Ok(element)
     }
@@ -50,12 +47,9 @@ impl Memory {
         addr: Felt,
         clk: RowIndex,
         err_ctx: &impl ErrorContext,
-        tracer: &mut impl Tracer,
     ) -> Result<Word, MemoryError> {
         let addr = clean_addr(addr, err_ctx)?;
         let word = self.read_word_impl(ctx, addr, Some(clk), err_ctx)?.unwrap_or(EMPTY_WORD);
-
-        tracer.record_memory_read_word(word, addr.into());
 
         Ok(word)
     }
@@ -213,4 +207,46 @@ fn enforce_word_aligned_addr(
     }
 
     Ok(addr)
+}
+
+impl MemoryInterface for Memory {
+    fn read_element(
+        &mut self,
+        ctx: ContextId,
+        addr: Felt,
+        err_ctx: &impl ErrorContext,
+    ) -> Result<Felt, MemoryError> {
+        self.read_element(ctx, addr, err_ctx)
+    }
+
+    fn read_word(
+        &mut self,
+        ctx: ContextId,
+        addr: Felt,
+        clk: RowIndex,
+        err_ctx: &impl ErrorContext,
+    ) -> Result<Word, MemoryError> {
+        Self::read_word(self, ctx, addr, clk, err_ctx)
+    }
+
+    fn write_element(
+        &mut self,
+        ctx: ContextId,
+        addr: Felt,
+        element: Felt,
+        err_ctx: &impl ErrorContext,
+    ) -> Result<(), MemoryError> {
+        self.write_element(ctx, addr, element, err_ctx)
+    }
+
+    fn write_word(
+        &mut self,
+        ctx: ContextId,
+        addr: Felt,
+        clk: RowIndex,
+        word: Word,
+        err_ctx: &impl ErrorContext,
+    ) -> Result<(), MemoryError> {
+        self.write_word(ctx, addr, clk, word, err_ctx)
+    }
 }

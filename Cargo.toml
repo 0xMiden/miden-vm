@@ -46,6 +46,7 @@ miden-core = { path = "./core", version = "0.18", default-features = false }
 miden-debug-types = { path = "./crates/debug/types", version = "0.18", default-features = false }
 miden-mast-package = { path = "./package", version = "0.18", default-features = false }
 miden-processor = { path = "./processor", version = "0.18", default-features = false }
+miden-serde-test-macros = { path = "./crates/utils/serde-test-macros", version = "0.1.0", default-features = false }
 miden-prover = { path = "./prover", version = "0.18", default-features = false }
 miden-stdlib = { path = "./stdlib", version = "0.18", default-features = false }
 miden-utils-diagnostics = { path = "./crates/utils/diagnostics", version = "0.18", default-features = false }
@@ -75,6 +76,7 @@ serde = { version = "1.0", default-features = false, features = [
     "rc",
 ] }
 serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
+serde-untagged = "0.1"
 smallvec = { version = "1.13", default-features = false, features = [
     "union",
     "const_generics",

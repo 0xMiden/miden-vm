@@ -22,9 +22,18 @@ std = [
     "miden-debug-types/std",
     "miden-utils-diagnostics/std",
     "thiserror/std",
+    "proptest/std",
 ]
-serde = ["miden-debug-types/serde", "midenc-hir-type/serde", "semver/serde"]
-arbitrary = ["dep:proptest", "dep:proptest-derive"]
+serde = [
+    "dep:serde",
+    "dep:serde-untagged",
+    "miden-debug-types/serde",
+    "midenc-hir-type/serde",
+    "semver/serde",
+    "smallvec/serde",
+    "dep:serde_json",
+]
+arbitrary = ["dep:proptest", "dep:proptest-derive", "miden-core/arbitrary"]
 testing = ["arbitrary", "logging"]
 logging = ["dep:env_logger"]
 
@@ -35,15 +44,19 @@ lalrpop-util = { version = "0.22", default-features = false }
 log.workspace = true
 miden-core.workspace = true
 miden-debug-types.workspace = true
+miden-serde-test-macros = { workspace = true }
 miden-utils-diagnostics.workspace = true
 midenc-hir-type.workspace = true
 proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
 regex = { version = "1.10", default-features = false, features = [
     "unicode",
     "perf",
 ] }
 semver = { version = "1.0", default-features = false }
+serde = { workspace = true, optional = true }
+serde-untagged = { workspace = true, optional = true }
 smallvec.workspace = true
 thiserror.workspace = true
 
