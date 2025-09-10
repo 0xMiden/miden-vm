@@ -10,9 +10,9 @@ use crate::Felt;
 /// This newtype provides type safety and ensures that event IDs are not accidentally confused
 /// with other [`Felt`] values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct EventID(Felt);
+pub struct EventId(Felt);
 
-impl EventID {
+impl EventId {
     /// Computes the canonical event identifier for the given `name`.
     ///
     /// This function provides a stable, deterministic mapping from human-readable event names
@@ -47,19 +47,19 @@ impl EventID {
     }
 }
 
-impl PartialOrd for EventID {
+impl PartialOrd for EventId {
     fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Ord for EventID {
+impl Ord for EventId {
     fn cmp(&self, other: &Self) -> core::cmp::Ordering {
         self.0.inner().cmp(&other.0.inner())
     }
 }
 
-impl Display for EventID {
+impl Display for EventId {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         core::fmt::Display::fmt(&self.0, f)
     }

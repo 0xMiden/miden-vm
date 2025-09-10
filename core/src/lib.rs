@@ -126,7 +126,7 @@ pub mod stack;
 pub use stack::{StackInputs, StackOutputs};
 
 mod event_id;
-pub use event_id::EventID;
+pub use event_id::EventId;
 
 pub mod sys_events;
 

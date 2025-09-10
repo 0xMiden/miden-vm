@@ -8,7 +8,7 @@
 
 use core::array;
 
-use miden_core::{EventID, Felt};
+use miden_core::{EventId, Felt};
 use miden_crypto::{
     Word,
     hash::{keccak::Keccak256, rpo::Rpo256},
@@ -78,7 +78,7 @@ fn test_keccak_handler(input_u8: &[u8]) {
 
     let mut test = build_debug_test!(source, &[]);
 
-    test.add_event_handler(EventID::from_name(DEBUG_EVENT_NAME), preimage.handler_test());
+    test.add_event_handler(EventId::from_name(DEBUG_EVENT_NAME), preimage.handler_test());
     test.execute().unwrap();
 }
 

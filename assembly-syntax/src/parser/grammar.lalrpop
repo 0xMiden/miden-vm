@@ -781,7 +781,7 @@ Debug: Instruction = {
     "emit" "." <name:ConstantName> => Instruction::EmitImm(Immediate::Constant(name)),
     // emit.event("...") inline hashing
     <l:@L> "emit" "." "event" "(" <s:string> ")" <r:@R> => {
-        let event_id = miden_core::EventID::from_name(s).as_felt();
+        let event_id = miden_core::EventId::from_name(s).as_felt();
         Instruction::EmitImm(Immediate::Value(Span::new(span!(source_file.id(), l, r), event_id)))
     },
     "trace" <id:Imm<U32>> => Instruction::Trace(id),
