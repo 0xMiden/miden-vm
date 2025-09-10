@@ -5,16 +5,15 @@
 
 use alloc::{vec, vec::Vec};
 
-use miden_core::{Felt, EventID, ZERO};
+use miden_core::{EventId, Felt, ZERO};
 use miden_processor::{AdviceMutation, EventError, ProcessState};
 
 /// Falcon signature prime.
 const M: u64 = 12289;
 
 /// Event ID for the FALCON_DIV handler, derived from the constant EVENT_FALCON_DIV.
-pub const FALCON_DIV_EVENT_ID: EventID = EventID::from_u64(13788873273678049590);
+pub const FALCON_DIV_EVENT_ID: EventId = EventId::from_u64(13788873273678049590);
 pub const FALCON_DIV_EVENT_NAME: &str = "miden_stdlib::crypto::dsa::rpo_falcon512::falcon_div";
-
 
 /// Pushes the result of divison (both the quotient and the remainder) of a [u64] by the Falcon
 /// prime (M = 12289) onto the advice stack.
@@ -112,7 +111,7 @@ mod tests {
 
     #[test]
     fn test_event_id() {
-        let expected_event_id = EventID::from_name(FALCON_DIV_EVENT_NAME);
+        let expected_event_id = EventId::from_name(FALCON_DIV_EVENT_NAME);
         assert_eq!(FALCON_DIV_EVENT_ID, expected_event_id);
     }
 }

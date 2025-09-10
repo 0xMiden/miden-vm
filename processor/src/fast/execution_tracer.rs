@@ -78,7 +78,7 @@ pub struct ExecutionTracer {
 impl ExecutionTracer {
     /// Convert the `ExecutionTracer` into the list of `TraceFragmentContext` built during
     /// execution.
-    pub fn into_core_trace_states(mut self) -> Vec<TraceFragmentContext> {
+    pub fn into_fragment_contexts(mut self) -> Vec<TraceFragmentContext> {
         // If there is an ongoing trace state being built, finish it
         self.finish_current_fragment_context();
 
@@ -350,16 +350,18 @@ impl Tracer for ExecutionTracer {
         self.hasher.record_permute(hashed_state);
     }
 
-    fn record_hasher_build_merkle_root(&mut self, path: &MerklePath, root: Word) {
+    fn record_hasher_build_merkle_root(&mut self, path: Option<&MerklePath>, root: Word) {
+        let path = path.expect("execution tracer expects a valid Merkle path");
         self.hasher.record_build_merkle_root(path, root);
     }
 
     fn record_hasher_update_merkle_root(
         &mut self,
-        path: &MerklePath,
+        path: Option<&MerklePath>,
         old_root: Word,
         new_root: Word,
     ) {
+        let path = path.expect("execution tracer expects a valid Merkle path");
         self.hasher.record_update_merkle_root(path, old_root, new_root);
     }
 

@@ -41,12 +41,18 @@ pub trait Tracer {
     fn record_hasher_permute(&mut self, hashed_state: [Felt; 12]);
 
     /// Records the result of a call to `Hasher::build_merkle_root()`.
-    fn record_hasher_build_merkle_root(&mut self, path: &MerklePath, root: Word);
+    ///
+    /// The `path` is an `Option` to support environments where the `Hasher` is not present, such as
+    /// in the context of parallel trace generation.
+    fn record_hasher_build_merkle_root(&mut self, path: Option<&MerklePath>, root: Word);
 
     /// Records the result of a call to `Hasher::update_merkle_root()`.
+    ///
+    /// The `path` is an `Option` to support environments where the `Hasher` is not present, such as
+    /// in the context of parallel trace generation.
     fn record_hasher_update_merkle_root(
         &mut self,
-        path: &MerklePath,
+        path: Option<&MerklePath>,
         old_root: Word,
         new_root: Word,
     );
@@ -122,14 +128,14 @@ impl Tracer for NoopTracer {
     }
 
     #[inline(always)]
-    fn record_hasher_build_merkle_root(&mut self, _path: &MerklePath, _root: Word) {
+    fn record_hasher_build_merkle_root(&mut self, _path: Option<&MerklePath>, _root: Word) {
         // do nothing
     }
 
     #[inline(always)]
     fn record_hasher_update_merkle_root(
         &mut self,
-        _path: &MerklePath,
+        _path: Option<&MerklePath>,
         _old_root: Word,
         _new_root: Word,
     ) {

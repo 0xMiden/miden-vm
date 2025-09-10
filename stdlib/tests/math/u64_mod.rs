@@ -538,26 +538,26 @@ fn unchecked_divmod() {
 // fn advice_push_u64div() {
 //     // push a/b onto the advice stack and then move these values onto the operand stack.
 //     let source = "begin adv.push_u64div adv_push.4 movupw.2 dropw end";
-// 
+//
 //     // get two random 64-bit integers and split them into 32-bit limbs
 //     let a = rand_value::<u64>();
 //     let a_hi = a >> 32;
 //     let a_lo = a as u32 as u64;
-// 
+//
 //     let b = rand_value::<u64>();
 //     let b_hi = b >> 32;
 //     let b_lo = b as u32 as u64;
-// 
+//
 //     // compute expected quotient
 //     let q = a / b;
 //     let q_hi = q >> 32;
 //     let q_lo = q as u32 as u64;
-// 
+//
 //     // compute expected remainder
 //     let r = a % b;
 //     let r_hi = r >> 32;
 //     let r_lo = r as u32 as u64;
-// 
+//
 //     let test = build_test!(source, &[a_lo, a_hi, b_lo, b_hi]);
 //     let expected = [r_hi, r_lo, q_hi, q_lo, b_hi, b_lo, a_hi, a_lo];
 //     test.expect_stack(&expected);
@@ -574,7 +574,7 @@ fn unchecked_divmod() {
 //     let source = format!(
 //         "
 //     {TRUNCATE_STACK_PROC}
-// 
+//
 //     begin
 //         repeat.7
 //             adv.push_u64div
@@ -584,21 +584,21 @@ fn unchecked_divmod() {
 //             push.0
 //         end
 //         drop drop
-// 
+//
 //         exec.truncate_stack
 //     end"
 //     );
-// 
+//
 //     let mut a = 256;
 //     let a_hi = 0;
 //     let a_lo = a;
-// 
+//
 //     let b = 2;
 //     let b_hi = 0;
 //     let b_lo = b;
-// 
+//
 //     let mut expected = vec![a_lo, a_hi];
-// 
+//
 //     for _ in 0..7 {
 //         let q = a / b;
 //         let q_hi = 0;
@@ -606,9 +606,9 @@ fn unchecked_divmod() {
 //         expected.extend_from_slice(&[q_lo, q_hi]);
 //         a = q;
 //     }
-// 
+//
 //     expected.reverse();
-// 
+//
 //     let test = build_test!(source, &[a_lo, a_hi, b_lo, b_hi]);
 //     test.expect_stack(&expected);
 // }
@@ -621,31 +621,31 @@ fn unchecked_divmod() {
 //         adv.push_u64div
 //         adv_push.4
 //     end
-// 
+//
 //     begin
 //         exec.foo
 //         movupw.2 dropw
 //     end";
-// 
+//
 //     // get two random 64-bit integers and split them into 32-bit limbs
 //     let a = rand_value::<u64>();
 //     let a_hi = a >> 32;
 //     let a_lo = a as u32 as u64;
-// 
+//
 //     let b = rand_value::<u64>();
 //     let b_hi = b >> 32;
 //     let b_lo = b as u32 as u64;
-// 
+//
 //     // compute expected quotient
 //     let q = a / b;
 //     let q_hi = q >> 32;
 //     let q_lo = q as u32 as u64;
-// 
+//
 //     // compute expected remainder
 //     let r = a % b;
 //     let r_hi = r >> 32;
 //     let r_lo = r as u32 as u64;
-// 
+//
 //     let test = build_test!(source, &[a_lo, a_hi, b_lo, b_hi]);
 //     let expected = [r_hi, r_lo, q_hi, q_lo, b_hi, b_lo, a_hi, a_lo];
 //     test.expect_stack(&expected);
@@ -662,14 +662,14 @@ fn unchecked_divmod() {
 //         else
 //             padw
 //         end
-// 
+//
 //         movupw.2 dropw
 //     end";
-// 
+//
 //     // if branch
 //     let test = build_test!(source, &[8, 0, 4, 0, 1, 1]);
 //     test.expect_stack(&[0, 0, 0, 2, 0, 4, 0, 8]);
-// 
+//
 //     // else branch
 //     let test = build_test!(source, &[8, 0, 4, 0, 1, 0]);
 //     test.expect_stack(&[0, 0, 0, 0, 0, 4, 0, 8]);

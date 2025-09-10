@@ -32,6 +32,7 @@ pub struct SyntaxError {
 #[derive(Debug, thiserror::Error, Diagnostic)]
 #[error("one or more warnings were emitted")]
 #[diagnostic(help("see below for details"))]
+#[cfg_attr(not(feature = "std"), allow(unused))]
 pub struct SyntaxWarning {
     #[source_code]
     pub source_file: Arc<SourceFile>,

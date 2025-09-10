@@ -10,7 +10,7 @@
 use alloc::{vec, vec::Vec};
 use core::array;
 
-use miden_core::{AdviceMap, EventID, Felt, Word, crypto::hash::Digest};
+use miden_core::{AdviceMap, EventId, Felt, Word, crypto::hash::Digest};
 use miden_crypto::hash::{keccak::Keccak256, rpo::Rpo256};
 use miden_processor::{AdviceMutation, EventError, ProcessState};
 
@@ -18,7 +18,7 @@ use miden_processor::{AdviceMutation, EventError, ProcessState};
 pub const KECCAK_HASH_MEMORY_EVENT_NAME: &str = "miden_stdlib::hash::keccak256::hash_memory";
 /// Event ID for the Keccak256 handler, derived from
 /// `string_to_event_id(KECCAK_HASH_MEMORY_EVENT_NAME)`.
-pub const KECCAK_HASH_MEMORY_EVENT_ID: EventID = EventID::from_u64(871406259734432837);
+pub const KECCAK_HASH_MEMORY_EVENT_ID: EventId = EventId::from_u64(871406259734432837);
 
 /// Keccak256 event handler that reads data from memory.
 ///
@@ -209,7 +209,7 @@ mod tests {
 
     #[test]
     fn test_event_id() {
-        let expected_event_id = EventID::from_name(KECCAK_HASH_MEMORY_EVENT_NAME);
+        let expected_event_id = EventId::from_name(KECCAK_HASH_MEMORY_EVENT_NAME);
         assert_eq!(KECCAK_HASH_MEMORY_EVENT_ID, expected_event_id);
     }
 }

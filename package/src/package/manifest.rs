@@ -3,6 +3,8 @@ use core::fmt;
 
 use miden_assembly_syntax::ast::{QualifiedProcedureName, types::FunctionType};
 use miden_core::{Word, utils::DisplayHex};
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 use crate::Dependency;
 
@@ -80,6 +82,7 @@ impl PackageManifest {
 /// MASM type attributes are implemented).
 #[derive(Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(proptest_derive::Arbitrary))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct PackageExport {
     /// The fully-qualified name of the procedure exported by this package
     pub name: QualifiedProcedureName,
@@ -88,6 +91,7 @@ pub struct PackageExport {
     pub digest: Word,
     /// The type signature of the exported procedure
     #[cfg_attr(feature = "arbitrary", proptest(value = "None"))]
+    #[cfg_attr(feature = "serde", serde(default))]
     pub signature: Option<FunctionType>,
 }
 

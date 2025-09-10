@@ -36,6 +36,7 @@ pub(crate) mod continuation_stack;
 
 pub mod fast;
 use fast::FastProcessState;
+pub(crate) mod processor;
 
 mod operations;
 
@@ -754,6 +755,9 @@ pub struct SlowProcessState<'a> {
 pub enum ProcessState<'a> {
     Slow(SlowProcessState<'a>),
     Fast(FastProcessState<'a>),
+    /// A process state that does nothing. Calling any of its methods results in a panic. It is
+    /// expected to be used in conjunction with the `NoopHost`.
+    Noop(()),
 }
 
 impl Process {
@@ -775,6 +779,7 @@ impl<'a> ProcessState<'a> {
         match self {
             ProcessState::Slow(state) => state.advice,
             ProcessState::Fast(state) => &state.processor.advice,
+            ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
         }
     }
 
@@ -784,6 +789,7 @@ impl<'a> ProcessState<'a> {
         match self {
             ProcessState::Slow(state) => state.advice,
             ProcessState::Fast(state) => &mut state.processor.advice,
+            ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
         }
     }
 
@@ -793,6 +799,7 @@ impl<'a> ProcessState<'a> {
         match self {
             ProcessState::Slow(state) => state.system.clk(),
             ProcessState::Fast(state) => state.processor.clk,
+            ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
         }
     }
 
@@ -802,6 +809,7 @@ impl<'a> ProcessState<'a> {
         match self {
             ProcessState::Slow(state) => state.system.ctx(),
             ProcessState::Fast(state) => state.processor.ctx,
+            ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
         }
     }
 
@@ -811,6 +819,7 @@ impl<'a> ProcessState<'a> {
         match self {
             ProcessState::Slow(state) => state.system.fmp().as_int(),
             ProcessState::Fast(state) => state.processor.fmp.as_int(),
+            ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
         }
     }
 
@@ -822,6 +831,7 @@ impl<'a> ProcessState<'a> {
         match self {
             ProcessState::Slow(state) => state.stack.get(pos),
             ProcessState::Fast(state) => state.processor.stack_get(pos),
+            ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
         }
     }
 
@@ -842,6 +852,7 @@ impl<'a> ProcessState<'a> {
         match self {
             ProcessState::Slow(state) => state.stack.get_word(start_idx),
             ProcessState::Fast(state) => state.processor.stack_get_word(start_idx),
+            ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
         }
     }
 
@@ -852,6 +863,7 @@ impl<'a> ProcessState<'a> {
         match self {
             ProcessState::Slow(state) => state.stack.get_state_at(state.system.clk()),
             ProcessState::Fast(state) => state.processor.stack().iter().rev().copied().collect(),
+            ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
         }
     }
 
@@ -862,6 +874,7 @@ impl<'a> ProcessState<'a> {
         match self {
             ProcessState::Slow(state) => state.chiplets.memory.get_value(ctx, addr),
             ProcessState::Fast(state) => state.processor.memory.read_element_impl(ctx, addr),
+            ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
         }
     }
 
@@ -876,6 +889,7 @@ impl<'a> ProcessState<'a> {
             ProcessState::Fast(state) => {
                 state.processor.memory.read_word_impl(ctx, addr, None, &())
             },
+            ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
         }
     }
 
@@ -891,6 +905,7 @@ impl<'a> ProcessState<'a> {
                 state.chiplets.memory.get_state_at(ctx, state.system.clk())
             },
             ProcessState::Fast(state) => state.processor.memory.get_memory_state(ctx),
+            ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
         }
     }
 }

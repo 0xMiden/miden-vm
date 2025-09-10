@@ -5,11 +5,11 @@
 
 use alloc::{vec, vec::Vec};
 
-use miden_core::{EventID, Felt};
+use miden_core::{EventId, Felt};
 use miden_processor::{AdviceMutation, EventError, ProcessState};
 
 /// Event ID for the U64_DIV handler, derived from the constant EVENT_U64_DIV.
-pub const U64_DIV_EVENT_ID: EventID = EventID::from_u64(11320526962293815303);
+pub const U64_DIV_EVENT_ID: EventId = EventId::from_u64(11320526962293815303);
 pub const U64_DIV_EVENT_NAME: &str = "miden_stdlib::math::u64::u64_div";
 /// Pushes the result of [u64] division (both the quotient and the remainder) onto the advice
 /// stack.
@@ -143,7 +143,7 @@ mod tests {
 
     #[test]
     fn test_event_id() {
-        let expected_event_id = EventID::from_name(U64_DIV_EVENT_NAME);
+        let expected_event_id = EventId::from_name(U64_DIV_EVENT_NAME);
         assert_eq!(U64_DIV_EVENT_ID, expected_event_id);
     }
 }

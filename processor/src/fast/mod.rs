@@ -2,9 +2,9 @@ use alloc::{sync::Arc, vec::Vec};
 use core::cmp::min;
 
 use memory::Memory;
-use miden_air::RowIndex;
+use miden_air::{Felt, RowIndex};
 use miden_core::{
-    Decorator, EMPTY_WORD, Felt, Program, StackOutputs, WORD_SIZE, Word, ZERO,
+    Decorator, EMPTY_WORD, Program, StackOutputs, WORD_SIZE, Word, ZERO,
     mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
     stack::MIN_STACK_DEPTH,
     utils::range,
@@ -15,16 +15,15 @@ use crate::{
     ProcessState,
     chiplets::Ace,
     continuation_stack::{Continuation, ContinuationStack},
-    fast::{
-        execution_tracer::ExecutionTracer, trace_state::TraceFragmentContext, tracer::NoopTracer,
-    },
+    fast::{execution_tracer::ExecutionTracer, trace_state::TraceFragmentContext},
 };
 
 mod execution_tracer;
 mod memory;
+mod operation;
 pub mod trace_state;
 mod tracer;
-pub use tracer::Tracer;
+pub use tracer::{NoopTracer, Tracer};
 
 mod basic_block;
 mod call_and_dyn;
@@ -221,6 +220,11 @@ impl FastProcessor {
         &self.stack[self.stack_top_idx - MIN_STACK_DEPTH..self.stack_top_idx]
     }
 
+    /// Returns a mutable reference to the top 16 elements of the stack.
+    pub fn stack_top_mut(&mut self) -> &mut [Felt] {
+        &mut self.stack[self.stack_top_idx - MIN_STACK_DEPTH..self.stack_top_idx]
+    }
+
     /// Returns the element on the stack at index `idx`.
     #[inline(always)]
     pub fn stack_get(&self, idx: usize) -> Felt {
@@ -319,9 +323,9 @@ impl FastProcessor {
         host: &mut impl AsyncHost,
     ) -> Result<(ExecutionOutput, Vec<TraceFragmentContext>), ExecutionError> {
         let mut tracer = ExecutionTracer::default();
-        let execution_outputs = self.execute_with_tracer(program, host, &mut tracer).await?;
+        let execution_output = self.execute_with_tracer(program, host, &mut tracer).await?;
 
-        Ok((execution_outputs, tracer.into_core_trace_states()))
+        Ok((execution_output, tracer.into_fragment_contexts()))
     }
 
     /// Executes the given program with the provided tracer and returns the stack outputs, and the

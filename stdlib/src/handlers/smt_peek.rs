@@ -7,13 +7,13 @@
 use alloc::{format, string::String, vec, vec::Vec};
 
 use miden_core::{
-    EventID, Felt, WORD_SIZE, Word,
+    EventId, Felt, WORD_SIZE, Word,
     crypto::merkle::{EmptySubtreeRoots, SMT_DEPTH, Smt},
 };
 use miden_processor::{AdviceMutation, EventError, ProcessState};
 
 /// Event ID for the SMT_PEEK handler, derived from the constant EVENT_SMT_PEEK.
-pub const SMT_PEEK_EVENT_ID: EventID = EventID::from_u64(2792915964933121433);
+pub const SMT_PEEK_EVENT_ID: EventId = EventId::from_u64(2792915964933121433);
 pub const SMT_PEEK_EVENT_NAME: &str = "miden_stdlib::collections::smt::smt_peek_event";
 
 /// Pushes onto the advice stack the value associated with the specified key in a Sparse
@@ -141,7 +141,7 @@ mod tests {
 
     #[test]
     fn test_event_id() {
-        let expected_event_id = EventID::from_name(SMT_PEEK_EVENT_NAME);
+        let expected_event_id = EventId::from_name(SMT_PEEK_EVENT_NAME);
         assert_eq!(SMT_PEEK_EVENT_ID, expected_event_id);
     }
 }

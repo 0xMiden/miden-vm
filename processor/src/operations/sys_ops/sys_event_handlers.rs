@@ -1,8 +1,7 @@
 use alloc::vec::Vec;
 
 use miden_core::{
-    Felt, FieldElement, QuadFelt, WORD_SIZE, Word, ZERO,
-    crypto::hash::Rpo256,
+    Felt, FieldElement, QuadFelt, WORD_SIZE, Word, ZERO, crypto::hash::Rpo256,
     sys_events::SystemEvent,
 };
 
@@ -11,7 +10,6 @@ use crate::{ExecutionError, MemoryError, ProcessState, errors::ErrorContext};
 /// The offset of the domain value on the stack in the `hdword_to_map_with_domain` system event.
 /// Offset accounts for the event ID at position 0 on the stack.
 pub const HDWORD_TO_MAP_WITH_DOMAIN_DOMAIN_OFFSET: usize = 9;
-
 
 pub fn handle_system_event(
     process: &mut ProcessState,
@@ -317,8 +315,6 @@ pub fn push_key_presence_flag(process: &mut ProcessState) -> Result<(), Executio
     Ok(())
 }
 
-
-
 /// Given an element in a quadratic extension field on the top of the stack (i.e., a0, b1),
 /// computes its multiplicative inverse and push the result onto the advice stack.
 ///
@@ -436,7 +432,6 @@ fn push_ilog2(
     Ok(())
 }
 
-
 // HELPER METHODS
 // --------------------------------------------------------------------------------------------
 
@@ -464,7 +459,6 @@ fn get_mem_addr_range(
     Ok((start_addr as u32, end_addr as u32))
 }
 
-
 /// Gets the top stack element, applies a provided function to it and pushes it to the advice
 /// provider.
 fn push_transformed_stack_top(
@@ -481,4 +475,3 @@ fn push_transformed_stack_top(
     process.advice_provider_mut().push_stack(transformed_stack_top);
     Ok(())
 }
-

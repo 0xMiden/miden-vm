@@ -27,7 +27,7 @@ pub use miden_core::{
     stack::MIN_STACK_DEPTH,
     utils::{IntoBytes, ToElements, group_slice_elements},
 };
-use miden_core::{EventID, ProgramInfo, chiplets::hasher::apply_permutation};
+use miden_core::{EventId, ProgramInfo, chiplets::hasher::apply_permutation};
 pub use miden_processor::{
     AdviceInputs, AdviceProvider, BaseHost, ContextId, ExecutionError, ExecutionOptions,
     ExecutionTrace, Process, ProcessState, VmStateIterator,
@@ -175,7 +175,7 @@ pub struct Test {
     pub advice_inputs: AdviceInputs,
     pub in_debug_mode: bool,
     pub libraries: Vec<Library>,
-    pub handlers: BTreeMap<EventID, Arc<dyn EventHandler>>,
+    pub handlers: BTreeMap<EventId, Arc<dyn EventHandler>>,
     pub add_modules: Vec<(LibraryPath, String)>,
 }
 
@@ -206,12 +206,12 @@ impl Test {
     }
 
     /// Add a handler for a specific event when running the `Host`.
-    pub fn add_event_handler(&mut self, id: EventID, handler: impl EventHandler) {
+    pub fn add_event_handler(&mut self, id: EventId, handler: impl EventHandler) {
         self.add_event_handlers(vec![(id, Arc::new(handler))]);
     }
 
     /// Add a handler for a specific event when running the `Host`.
-    pub fn add_event_handlers(&mut self, handlers: Vec<(EventID, Arc<dyn EventHandler>)>) {
+    pub fn add_event_handlers(&mut self, handlers: Vec<(EventId, Arc<dyn EventHandler>)>) {
         for (id, handler) in handlers {
             if self.handlers.insert(id, handler).is_some() {
                 panic!("handler with id {id} was already added")

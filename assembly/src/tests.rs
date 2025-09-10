@@ -7,7 +7,7 @@ use miden_assembly_syntax::{
     diagnostics::WrapErr,
 };
 use miden_core::{
-    EventID, Operation, Program, Word, assert_matches,
+    EventId, Operation, Program, Word, assert_matches,
     mast::{MastNode, MastNodeExt, MastNodeId},
     utils::{Deserializable, Serializable},
 };
@@ -1246,7 +1246,7 @@ fn const_word_from_string() -> TestResult {
 fn const_event_from_string() -> TestResult {
     let context = TestContext::default();
     let sample_event_name = "miden::test::constant";
-    let expected_felt = EventID::from_name(sample_event_name);
+    let expected_felt = EventId::from_name(sample_event_name);
 
     let source1 = source_file!(
         &context,
@@ -3313,7 +3313,7 @@ prop_compose! {
 
         let manifest = PackageManifest::new(exports).with_dependencies(manifest.dependencies().cloned());
 
-        Package { name, mast, manifest, account_component_metadata_bytes: None }
+        Package { name, version: None, description: None, mast, manifest, sections: Default::default() }
     }
 }
 

@@ -7,6 +7,8 @@ pub use basic_block_node::{
     OperationOrDecorator,
 };
 use enum_dispatch::enum_dispatch;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 mod call_node;
 pub use call_node::CallNode;
@@ -78,6 +80,7 @@ pub trait MastNodeExt {
 
 #[enum_dispatch(MastNodeExt)]
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum MastNode {
     Block(BasicBlockNode),
     Join(JoinNode),

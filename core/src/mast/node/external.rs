@@ -6,6 +6,8 @@ use miden_formatting::{
     hex::ToHex,
     prettier::{Document, PrettyPrint, const_text, nl, text},
 };
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 use super::{MastNodeErrorContext, MastNodeExt};
 use crate::mast::{DecoratorId, MastForest, MastNodeId, Remapping};
@@ -22,9 +24,12 @@ use crate::mast::{DecoratorId, MastForest, MastNodeId, Remapping};
 /// The hash of an external node is the hash of the procedure it represents, such that an external
 /// node can be swapped with the actual subtree that it represents without changing the MAST root.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ExternalNode {
     digest: Word,
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Vec::is_empty"))]
     before_enter: Vec<DecoratorId>,
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Vec::is_empty"))]
     after_exit: Vec<DecoratorId>,
 }
 

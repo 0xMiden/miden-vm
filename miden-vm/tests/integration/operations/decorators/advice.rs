@@ -5,8 +5,6 @@ use miden_utils_testing::{build_test, crypto::MerkleStore};
 // ADVICE INJECTION
 // ================================================================================================
 
-
-
 #[test]
 fn advice_insert_mem() {
     let source = "begin

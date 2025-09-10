@@ -7,7 +7,7 @@ use core::fmt;
 // between 0 and 2^32.
 pub use constants::*;
 
-use crate::EventID;
+use crate::EventId;
 
 #[rustfmt::skip]
 mod constants {
@@ -285,7 +285,7 @@ impl SystemEvent {
 
     /// Returns a system event corresponding to the specified event ID, or `None` if the event
     /// ID is not recognized.
-    pub fn from_event_id(event_id: EventID) -> Option<Self> {
+    pub fn from_event_id(event_id: EventId) -> Option<Self> {
         let event_id: u32 = event_id.as_felt().as_int().try_into().ok()?;
         match event_id {
             EVENT_MERKLE_NODE_MERGE => Some(SystemEvent::MerkleNodeMerge),

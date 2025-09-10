@@ -148,9 +148,13 @@ impl FastProcessor {
         // address.
         let callee_hash = {
             let mem_addr = self.stack_get(0);
-            self.memory
-                .read_word(self.ctx, mem_addr, self.clk, &err_ctx, tracer)
-                .map_err(ExecutionError::MemoryError)?
+            let word = self
+                .memory
+                .read_word(self.ctx, mem_addr, self.clk, &err_ctx)
+                .map_err(ExecutionError::MemoryError)?;
+            tracer.record_memory_read_word(word, mem_addr);
+
+            word
         };
 
         // Drop the memory address from the stack. This needs to be done before saving the context.
