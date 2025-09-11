@@ -2,7 +2,7 @@
 use alloc::vec::Vec;
 use core::ops::{Deref, Range};
 
-use vm_core::{utils::range, Felt, PrimeCharacteristicRing, Word, ONE, ZERO};
+use vm_core::{Felt, ONE, PrimeCharacteristicRing, Word, ZERO, utils::range};
 
 use super::{
     CHIPLETS_OFFSET, CLK_COL_IDX, CTX_COL_IDX, DECODER_TRACE_OFFSET, FMP_COL_IDX, FN_HASH_OFFSET,
@@ -33,11 +33,11 @@ const DECODER_HASHER_RANGE: Range<usize> =
 // ================================================================================================
 
 pub struct ColMatrix<E> {
-    columns: Vec<Vec<E>>
+    columns: Vec<Vec<E>>,
 }
 
 impl<E: Clone + Copy> ColMatrix<E> {
-        // CONSTRUCTOR
+    // CONSTRUCTOR
     // --------------------------------------------------------------------------------------------
     /// Returns a new [Matrix] instantiated with the data from the specified columns.
     ///
@@ -79,13 +79,13 @@ impl<E: Clone + Copy> ColMatrix<E> {
         self.columns[col_idx][row_idx].clone()
     }
 
-        /// Returns a reference to the column at the specified index.
-        pub fn get_column(&self, col_idx: usize) -> &[E] {
-            &self.columns[col_idx]
-        }
+    /// Returns a reference to the column at the specified index.
+    pub fn get_column(&self, col_idx: usize) -> &[E] {
+        &self.columns[col_idx]
+    }
 
-     /// Returns a reference to the column at the specified index.
-     pub fn get_column_mut(&mut self, col_idx: usize) -> &mut [E] {
+    /// Returns a reference to the column at the specified index.
+    pub fn get_column_mut(&mut self, col_idx: usize) -> &mut [E] {
         &mut self.columns[col_idx]
     }
 
@@ -128,7 +128,6 @@ impl<E: Clone + Copy> ColMatrix<E> {
         assert!(index < self.num_cols(), "column index out of range");
         self.columns.remove(index)
     }
-
 }
 pub struct MainTrace {
     columns: ColMatrix<Felt>,
@@ -303,12 +302,12 @@ impl MainTrace {
         let col_b6 = self.columns.get_column(DECODER_TRACE_OFFSET + 7);
         let [b0, b1, b2, b3, b4, b5, b6] =
             [col_b0[i], col_b1[i], col_b2[i], col_b3[i], col_b4[i], col_b5[i], col_b6[i]];
-        b0 + b1*Felt::from_u64(2)
-            + b2*Felt::from_u64(4)
-            + b3*Felt::from_u64(8)
-            + b4*Felt::from_u64(16)
-            + b5*Felt::from_u64(32)
-            + b6*Felt::from_u64(64)
+        b0 + b1 * Felt::from_u64(2)
+            + b2 * Felt::from_u64(4)
+            + b3 * Felt::from_u64(8)
+            + b4 * Felt::from_u64(16)
+            + b5 * Felt::from_u64(32)
+            + b6 * Felt::from_u64(64)
     }
 
     /// Returns an iterator of [`RowIndex`] values over the row indices of this trace.
@@ -384,7 +383,7 @@ impl MainTrace {
     pub fn is_non_empty_overflow(&self, i: RowIndex) -> bool {
         let b0 = self.columns.get_column(STACK_TRACE_OFFSET + B0_COL_IDX)[i];
         let h0 = self.columns.get_column(STACK_TRACE_OFFSET + H0_COL_IDX)[i];
-        (b0 - Felt::from_u64(16)) * h0 == ONE
+        ONE == (b0 - Felt::from_u64(16)) * h0
     }
 
     // CHIPLETS COLUMNS

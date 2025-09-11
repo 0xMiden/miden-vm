@@ -1,74 +1,46 @@
 // Blake-specific prover implementation
 
-use super::types::{Proof, Commitments, OpenedValues};
-use super::utils::{to_row_major, to_row_major_aux, quotient_values};
+use super::types::{Commitments, OpenedValues, Proof};
+use super::utils::{quotient_values, to_row_major, to_row_major_aux};
 use air::Felt;
-use processor::ExecutionTrace;
+use air::ProcessorAir;
 use miden_crypto::BinomialExtensionField;
 use p3_blake3::Blake3;
 use p3_challenger::HashChallenger;
 use p3_challenger::SerializingChallenger64;
+use p3_challenger::*;
+use p3_commit::PolynomialSpace;
 use p3_commit::{ExtensionMmcs, Pcs};
 use p3_dft::Radix2DitParallel;
-use p3_fri::TwoAdicFriPcs;
+use p3_field::PrimeCharacteristicRing;
+use p3_field::coset::TwoAdicMultiplicativeCoset;
+use p3_fri::{FriConfig, TwoAdicFriPcs};
+use p3_matrix::Matrix;
+use p3_matrix::bitrev::BitReversalPerm;
 use p3_matrix::dense::DenseMatrix;
 use p3_matrix::row_index_mapped::RowIndexMappedView;
-use p3_matrix::bitrev::BitReversalPerm;
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_symmetric::{CompressionFunctionFromHasher, SerializingHasher64};
+use p3_uni_stark::StarkGenericConfig;
 use p3_uni_stark::{StarkConfig, SymbolicExpression, get_symbolic_constraints};
-use p3_field::coset::TwoAdicMultiplicativeCoset;
 use p3_util::{log2_ceil_usize, log2_strict_usize};
-use air::ProcessorAir;
-use tracing::info_span;
+use processor::ExecutionTrace;
 use std::vec;
 use std::vec::Vec;
-use p3_matrix::Matrix;
-use p3_uni_stark::StarkGenericConfig;
-use p3_field::PrimeCharacteristicRing;
-use p3_commit::PolynomialSpace;
-use p3_challenger::*;
+use tracing::info_span;
 
-type StarkConfigBlake = StarkConfig<
-    TwoAdicFriPcs<
-        Felt,
-        Radix2DitParallel<Felt>,
-        MerkleTreeMmcs<
-            Felt,
-            u8,
-            SerializingHasher64<Blake3>,
-            CompressionFunctionFromHasher<Blake3, 2, 32>,
-            32,
-        >,
-        ExtensionMmcs<
-            Felt,
-            BinomialExtensionField<Felt, 2>,
-            MerkleTreeMmcs<
-                Felt,
-                u8,
-                SerializingHasher64<Blake3>,
-                CompressionFunctionFromHasher<Blake3, 2, 32>,
-                32,
-            >,
-        >,
-    >,
-    BinomialExtensionField<Felt, 2>,
-    SerializingChallenger64<Felt, HashChallenger<u8, Blake3, 32>>,
->;
+type Challenge = BinomialExtensionField<Felt, 2>;
+type H = Blake3;
+type FieldHash<H> = SerializingHasher64<H>;
+type Compress<H> = CompressionFunctionFromHasher<H, 2, 32>;
+type ValMmcs<H> = MerkleTreeMmcs<Felt, u8, FieldHash<H>, Compress<H>, 32>;
+type ChallengeMmcs<H> = ExtensionMmcs<Felt, Challenge, ValMmcs<H>>;
+type FriPcs = TwoAdicFriPcs<Felt, Dft, ValMmcs<H>, ChallengeMmcs<H>>;
+type Dft = Radix2DitParallel<Felt>;
+type Challenger<H> = SerializingChallenger64<Felt, HashChallenger<u8, H, 32>>;
+type StarkConfigBlake = StarkConfig<FriPcs, Challenge, Challenger<H>>;
 
-pub fn prove_blake(config: StarkConfigBlake, trace: ExecutionTrace) -> Vec<u8> {
-    type Challenge = BinomialExtensionField<Felt, 2>;
-
-    type H = Blake3;
-    type FieldHash<H> = SerializingHasher64<H>;
-    type Compress<H> = CompressionFunctionFromHasher<H, 2, 32>;
-    type ValMmcs<H> = MerkleTreeMmcs<Felt, u8, FieldHash<H>, Compress<H>, 32>;
-    type ChallengeMmcs<H> = ExtensionMmcs<Felt, Challenge, ValMmcs<H>>;
-    type FriPcs = TwoAdicFriPcs<Felt, Dft, ValMmcs<H>, ChallengeMmcs<H>>;
-    type Dft = Radix2DitParallel<Felt>;
-
-    type Challenger<H> = SerializingChallenger64<Felt, HashChallenger<u8, H, 32>>;
-
+pub fn prove_blake(trace: ExecutionTrace) -> Vec<u8> {
     let air = ProcessorAir {};
     let public_values: Vec<Felt> = vec![];
     let trace_row_major = to_row_major(&trace);
@@ -87,12 +59,11 @@ pub fn prove_blake(config: StarkConfigBlake, trace: ExecutionTrace) -> Vec<u8> {
     let log_quotient_degree = log2_ceil_usize(constraint_degree - 1);
     let quotient_degree = 1 << log_quotient_degree;
 
+    let config = generate_blake_config();
     let mut challenger = config.initialise_challenger();
     let pcs = config.pcs();
     let trace_domain: TwoAdicMultiplicativeCoset<Felt> =
-        <FriPcs as Pcs<Challenge, Challenger<H>>>::natural_domain_for_degree(
-            &pcs, degree,
-        );
+        <FriPcs as Pcs<Challenge, Challenger<H>>>::natural_domain_for_degree(&pcs, degree);
 
     let (trace_commit, trace_data) = info_span!("commit to main trace data").in_scope(|| {
         <FriPcs as Pcs<Challenge, Challenger<H>>>::commit(
@@ -109,21 +80,19 @@ pub fn prove_blake(config: StarkConfigBlake, trace: ExecutionTrace) -> Vec<u8> {
     let alphas: [Challenge; 16] =
         core::array::from_fn(|_| challenger.sample_algebra_element::<Challenge>());
 
-    let aux_trace = info_span!("build aux trace").in_scope(|| {
-        trace.build_aux_trace(&alphas)
-    });
+    let aux_trace = info_span!("build aux trace").in_scope(|| trace.build_aux_trace(&alphas));
 
     let aux_row_major = to_row_major_aux(&aux_trace.unwrap());
 
-    let aux_row_major = info_span!("flatten auxiliary trace").in_scope(|| {
-        aux_row_major.flatten_to_base()
-    });
-    let (aux_trace_commit, aux_trace_data) = info_span!("commit to auxiliary trace data").in_scope(|| {
-        <FriPcs as Pcs<Challenge, Challenger<H>>>::commit(
-            &pcs,
-            vec![(trace_domain, aux_row_major)],
-        )
-    });
+    let aux_row_major =
+        info_span!("flatten auxiliary trace").in_scope(|| aux_row_major.flatten_to_base());
+    let (aux_trace_commit, aux_trace_data) =
+        info_span!("commit to auxiliary trace data").in_scope(|| {
+            <FriPcs as Pcs<Challenge, Challenger<H>>>::commit(
+                &pcs,
+                vec![(trace_domain, aux_row_major)],
+            )
+        });
 
     challenger.observe(aux_trace_commit.clone());
 
@@ -161,9 +130,8 @@ pub fn prove_blake(config: StarkConfigBlake, trace: ExecutionTrace) -> Vec<u8> {
         constraint_count,
     );
 
-    let quotient_flat = info_span!("flatten quotient data").in_scope(|| {
-        p3_matrix::dense::RowMajorMatrix::new_col(quotient_values).flatten_to_base()
-    });
+    let quotient_flat = info_span!("flatten quotient data")
+        .in_scope(|| p3_matrix::dense::RowMajorMatrix::new_col(quotient_values).flatten_to_base());
     let quotient_chunks = quotient_domain.split_evals(quotient_degree, quotient_flat);
     let qc_domains = quotient_domain.split_domains(quotient_degree);
 
@@ -190,10 +158,7 @@ pub fn prove_blake(config: StarkConfigBlake, trace: ExecutionTrace) -> Vec<u8> {
             vec![
                 (&trace_data, vec![vec![zeta, zeta_next]]),
                 (&aux_trace_data, vec![vec![zeta, zeta_next]]),
-                (
-                    &quotient_data,
-                    (0..quotient_degree).map(|_| vec![zeta]).collect(),
-                ),
+                (&quotient_data, (0..quotient_degree).map(|_| vec![zeta]).collect()),
             ],
             &mut challenger,
         )
@@ -219,4 +184,28 @@ pub fn prove_blake(config: StarkConfigBlake, trace: ExecutionTrace) -> Vec<u8> {
     };
 
     bincode::serialize(&proof).unwrap()
+}
+
+pub fn generate_blake_config() -> StarkConfigBlake {
+    let field_hash = FieldHash::new(H {});
+    let compress = Compress::new(H {});
+
+    let val_mmcs = ValMmcs::new(field_hash, compress);
+    let challenge_mmcs = ChallengeMmcs::new(val_mmcs.clone());
+
+    let dft = Dft::default();
+
+    let fri_config = FriConfig {
+        log_blowup: 3,
+        log_final_poly_len: 7,
+        num_queries: 27,
+        proof_of_work_bits: 16,
+        mmcs: challenge_mmcs,
+    };
+
+    let pcs = FriPcs::new(dft, val_mmcs, fri_config);
+
+    let challenger = Challenger::from_hasher(vec![], H {});
+
+    StarkConfigBlake::new(pcs, challenger)
 }

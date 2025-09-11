@@ -7,25 +7,16 @@ extern crate alloc;
 extern crate std;
 
 use core::marker::PhantomData;
-use p3_blake3::Blake3;
 use std::{println, vec, vec::Vec};
 use tracing::instrument;
 
-use air::{trace::{range::V_COL_IDX, TRACE_WIDTH}, ProcessorAir, PublicInputs};
-use miden_crypto::hash::rpo::RpoPermutation256;
+use air::{ProcessorAir, PublicInputs, trace::TRACE_WIDTH};
 #[cfg(all(feature = "metal", target_arch = "aarch64", target_os = "macos"))]
 use miden_gpu::HashFn;
-use p3_challenger::{DuplexChallenger, HashChallenger, SerializingChallenger64};
-use p3_commit::{ExtensionMmcs, PolynomialSpace};
-use p3_dft::Radix2DitParallel;
-use p3_field::{Field, extension::BinomialExtensionField};
-use p3_fri::{FriConfig, TwoAdicFriPcs};
+
+use p3_field::extension::BinomialExtensionField;
 use p3_matrix::dense::RowMajorMatrix;
-use p3_merkle_tree::MerkleTreeMmcs;
-use p3_symmetric::{
-    CompressionFunctionFromHasher, PaddingFreeSponge, SerializingHasher64, TruncatedPermutation,
-};
-use p3_uni_stark::{ StarkConfig, StarkGenericConfig, prove as prove_uni_stark};
+use p3_uni_stark::StarkGenericConfig;
 use processor::{ExecutionTrace, Program, ZERO, math::Felt};
 
 #[cfg(feature = "std")]
@@ -131,86 +122,14 @@ where
     let proof = match hash_fn {
         HashFunction::Rpo256 => {
             println!("rpo proving");
-
-            type Perm = RpoPermutation256;
-
-            type MyHash = PaddingFreeSponge<Perm, 12, 8, 4>;
-            let hash = MyHash::new(Perm {});
-
-            type MyCompress = TruncatedPermutation<Perm, 2, 4, 12>;
-            let compress = MyCompress::new(Perm {});
-
-            type Challenger = DuplexChallenger<Val, Perm, 12, 8>;
-            let challenger = Challenger::new(Perm {});
-
-            type ValMmcs = MerkleTreeMmcs<
-                <Val as Field>::Packing,
-                <Val as Field>::Packing,
-                MyHash,
-                MyCompress,
-                4,
-            >;
-            let val_mmcs = ValMmcs::new(hash, compress);
-
-            type ChallengeMmcs = ExtensionMmcs<Val, Challenge, ValMmcs>;
-            let challenge_mmcs = ChallengeMmcs::new(val_mmcs.clone());
-
-            type Dft = Radix2DitParallel<Val>;
-            let dft = Dft::default();
-
-            let fri_config = FriConfig {
-                log_blowup: 3,
-                log_final_poly_len: 7,
-                num_queries: 27,
-                proof_of_work_bits: 16,
-                mmcs: challenge_mmcs,
-            };
-            type Pcs = TwoAdicFriPcs<Val, Dft, ValMmcs, ChallengeMmcs>;
-            let pcs = Pcs::new(dft, val_mmcs, fri_config);
-            type Config = StarkConfig<Pcs, Challenge, Challenger>;
-            let config = Config::new(pcs, challenger);
-
-            let proof = prove_rpo(config, trace);
+            let proof = prove_rpo(trace);
 
             ExecutionProof::new(proof, hash_fn)
         },
         HashFunction::Blake3_256 | HashFunction::Blake3_192 => {
             println!("blake proving");
-            type H = Blake3;
-            type FieldHash<H> = SerializingHasher64<H>;
-            type Compress<H> = CompressionFunctionFromHasher<H, 2, 32>;
-            type ValMmcs<H> = MerkleTreeMmcs<Val, u8, FieldHash<H>, Compress<H>, 32>;
-            type ChallengeMmcs<H> = ExtensionMmcs<Val, Challenge, ValMmcs<H>>;
-            type Pcs = TwoAdicFriPcs<Val, Dft, ValMmcs<H>, ChallengeMmcs<H>>;
-            type Dft = Radix2DitParallel<Val>;
+            let proof = prove_blake(trace);
 
-            type Challenger<H> = SerializingChallenger64<Val, HashChallenger<u8, H, 32>>;
-            type Config = StarkConfig<Pcs, Challenge, Challenger<H>>;
-
-            let field_hash = FieldHash::new(H {});
-            let compress = Compress::new(H {});
-
-            let val_mmcs = ValMmcs::new(field_hash, compress);
-            let challenge_mmcs = ChallengeMmcs::new(val_mmcs.clone());
-
-            let dft = Dft::default();
-
-            let fri_config = FriConfig {
-                log_blowup: 3,
-                log_final_poly_len: 7,
-                num_queries: 27,
-                proof_of_work_bits: 16,
-                mmcs: challenge_mmcs,
-            };
-
-            let pcs = Pcs::new(dft, val_mmcs, fri_config);
-
-            let challenger = Challenger::from_hasher(vec![], H {});
-
-            let config = Config::new(pcs, challenger);
-
-            let proof = prove_blake(config, trace);
-            
             ExecutionProof::new(proof, hash_fn)
         },
 
@@ -239,8 +158,8 @@ fn to_row_major(trace: &ExecutionTrace) -> RowMajorMatrix<Felt> {
 
 // Prover-related proof data types (Proof, Commitments, OpenedValues) will live here
 
-use serde::{Deserialize, Serialize};
 use p3_commit::Pcs;
+use serde::{Deserialize, Serialize};
 
 use crate::prove::{prove_blake, prove_rpo};
 

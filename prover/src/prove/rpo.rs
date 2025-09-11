@@ -1,81 +1,43 @@
 // RPO-specific prover implementation
-use super::types::{Proof, Commitments, OpenedValues};
-use super::utils::{to_row_major, to_row_major_aux, quotient_values};
+
+use super::types::{Commitments, OpenedValues, Proof};
+use super::utils::{quotient_values, to_row_major, to_row_major_aux};
 use air::Felt;
-use p3_field::PrimeCharacteristicRing;
-use processor::ExecutionTrace;
+use air::ProcessorAir;
 use miden_crypto::{BinomialExtensionField, hash::rpo::RpoPermutation256};
 use p3_challenger::{CanObserve, CanSample, DuplexChallenger, FieldChallenger};
 use p3_commit::{ExtensionMmcs, Pcs};
 use p3_dft::Radix2DitParallel;
-use p3_fri::TwoAdicFriPcs;
+use p3_field::{Field, PrimeCharacteristicRing};
+use p3_field::coset::TwoAdicMultiplicativeCoset;
+use p3_fri::{FriConfig, TwoAdicFriPcs};
+use p3_matrix::bitrev::BitReversalPerm;
 use p3_matrix::dense::DenseMatrix;
 use p3_matrix::row_index_mapped::RowIndexMappedView;
-use p3_matrix::bitrev::BitReversalPerm;
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_symmetric::{PaddingFreeSponge, TruncatedPermutation};
 use p3_uni_stark::{StarkConfig, StarkGenericConfig, SymbolicExpression, get_symbolic_constraints};
-use p3_field::coset::TwoAdicMultiplicativeCoset;
 use p3_util::{log2_ceil_usize, log2_strict_usize};
-use air::ProcessorAir;
+use processor::ExecutionTrace;
 
-use tracing::info_span;
-use std::{vec, vec::Vec};
 use core::array;
-use p3_matrix::Matrix;
 use p3_commit::PolynomialSpace;
-type StarkConfigRpo = StarkConfig<
-    TwoAdicFriPcs<
-        Felt,
-        Radix2DitParallel<Felt>,
-        MerkleTreeMmcs<
-            Felt,
-            Felt,
-            PaddingFreeSponge<RpoPermutation256, 12, 8, 4>,
-            TruncatedPermutation<RpoPermutation256, 2, 4, 12>,
-            4,
-        >,
-        ExtensionMmcs<
-            Felt,
-            BinomialExtensionField<Felt, 2>,
-            MerkleTreeMmcs<
-                Felt,
-                Felt,
-                PaddingFreeSponge<RpoPermutation256, 12, 8, 4>,
-                TruncatedPermutation<RpoPermutation256, 2, 4, 12>,
-                4,
-            >,
-        >,
-    >,
-    BinomialExtensionField<Felt, 2>,
-    DuplexChallenger<Felt, RpoPermutation256, 12, 8>,
->;
+use p3_matrix::Matrix;
+use std::{vec, vec::Vec};
+use tracing::info_span;
 
-pub fn prove_rpo(config: StarkConfigRpo, trace: ExecutionTrace) -> Vec<u8> {
-    type Challenge = BinomialExtensionField<Felt, 2>;
-    type Challenger = DuplexChallenger<Felt, RpoPermutation256, 12, 8>;
-    type FriPcs = TwoAdicFriPcs<
-        Felt,
-        Radix2DitParallel<Felt>,
-        MerkleTreeMmcs<
-            Felt,
-            Felt,
-            PaddingFreeSponge<RpoPermutation256, 12, 8, 4>,
-            TruncatedPermutation<RpoPermutation256, 2, 4, 12>,
-            4,
-        >,
-        ExtensionMmcs<
-            Felt,
-            BinomialExtensionField<Felt, 2>,
-            MerkleTreeMmcs<
-                Felt,
-                Felt,
-                PaddingFreeSponge<RpoPermutation256, 12, 8, 4>,
-                TruncatedPermutation<RpoPermutation256, 2, 4, 12>,
-                4,
-            >,
-        >,
-    >;
+type Challenge = BinomialExtensionField<Felt, 2>;
+type P = RpoPermutation256;
+type FieldHash = PaddingFreeSponge<P, 12, 8, 4>;
+type Compress = TruncatedPermutation<P, 2, 4, 12>;
+type ValMmcs = MerkleTreeMmcs<<Felt as Field>::Packing, <Felt as Field>::Packing, FieldHash, Compress, 4>;
+type ChallengeMmcs = ExtensionMmcs<Felt, Challenge, ValMmcs>;
+type FriPcs = TwoAdicFriPcs<Felt, Dft, ValMmcs, ChallengeMmcs>;
+type Dft = Radix2DitParallel<Felt>;
+type Challenger = DuplexChallenger<Felt, P, 12, 8>;
+type StarkConfigRpo = StarkConfig<FriPcs, Challenge, Challenger>;
+
+pub fn prove_rpo(trace: ExecutionTrace) -> Vec<u8> {
 
     let air = ProcessorAir {};
     let public_values: Vec<Felt> = vec![];
@@ -95,16 +57,14 @@ pub fn prove_rpo(config: StarkConfigRpo, trace: ExecutionTrace) -> Vec<u8> {
     let log_quotient_degree = log2_ceil_usize(constraint_degree - 1);
     let quotient_degree = 1 << log_quotient_degree;
 
+    let config = generate_rpo_config();
     let mut challenger = config.initialise_challenger();
     let pcs = config.pcs();
     let trace_domain: TwoAdicMultiplicativeCoset<Felt> =
         <FriPcs as Pcs<Challenge, Challenger>>::natural_domain_for_degree(&pcs, degree);
 
     let (trace_commit, trace_data) = info_span!("commit to trace data").in_scope(|| {
-        <FriPcs as Pcs<Challenge, Challenger>>::commit(
-            &pcs,
-            vec![(trace_domain, trace_row_major)],
-        )
+        <FriPcs as Pcs<Challenge, Challenger>>::commit(&pcs, vec![(trace_domain, trace_row_major)])
     });
 
     challenger.observe(Felt::from_u8(log_degree as u8));
@@ -118,10 +78,7 @@ pub fn prove_rpo(config: StarkConfigRpo, trace: ExecutionTrace) -> Vec<u8> {
     let aux_row_major = to_row_major_aux(&aux_trace.unwrap()).flatten_to_base();
 
     let (aux_trace_commit, aux_trace_data) = info_span!("commit to trace data").in_scope(|| {
-        <FriPcs as Pcs<Challenge, Challenger>>::commit(
-            &pcs,
-            vec![(trace_domain, aux_row_major)],
-        )
+        <FriPcs as Pcs<Challenge, Challenger>>::commit(&pcs, vec![(trace_domain, aux_row_major)])
     });
 
     challenger.observe(aux_trace_commit.clone());
@@ -137,13 +94,12 @@ pub fn prove_rpo(config: StarkConfigRpo, trace: ExecutionTrace) -> Vec<u8> {
             quotient_domain,
         );
 
-    let _aux_on_quotient_domain =
-        <FriPcs as Pcs<Challenge, Challenger>>::get_evaluations_on_domain(
-            pcs,
-            &aux_trace_data,
-            0,
-            quotient_domain,
-        );
+    let _aux_on_quotient_domain = <FriPcs as Pcs<Challenge, Challenger>>::get_evaluations_on_domain(
+        pcs,
+        &aux_trace_data,
+        0,
+        quotient_domain,
+    );
     let alpha: Challenge = challenger.sample_algebra_element();
 
     let quotient_values = quotient_values::<
@@ -160,7 +116,8 @@ pub fn prove_rpo(config: StarkConfigRpo, trace: ExecutionTrace) -> Vec<u8> {
         constraint_count,
     );
 
-    let quotient_flat = p3_matrix::dense::RowMajorMatrix::new_col(quotient_values).flatten_to_base();
+    let quotient_flat =
+        p3_matrix::dense::RowMajorMatrix::new_col(quotient_values).flatten_to_base();
     let quotient_chunks = quotient_domain.split_evals(quotient_degree, quotient_flat);
     let qc_domains = quotient_domain.split_domains(quotient_degree);
 
@@ -187,10 +144,7 @@ pub fn prove_rpo(config: StarkConfigRpo, trace: ExecutionTrace) -> Vec<u8> {
             vec![
                 (&trace_data, vec![vec![zeta, zeta_next]]),
                 (&aux_trace_data, vec![vec![zeta, zeta_next]]),
-                (
-                    &quotient_data,
-                    (0..quotient_degree).map(|_| vec![zeta]).collect(),
-                ),
+                (&quotient_data, (0..quotient_degree).map(|_| vec![zeta]).collect()),
             ],
             &mut challenger,
         )
@@ -214,6 +168,30 @@ pub fn prove_rpo(config: StarkConfigRpo, trace: ExecutionTrace) -> Vec<u8> {
         opening_proof,
         degree_bits: log_degree,
     };
-    
+
     bincode::serialize(&proof).unwrap()
+}
+
+pub fn generate_rpo_config() -> StarkConfigRpo {
+    let field_hash = FieldHash::new(P {});
+    let compress = Compress::new(P {});
+
+    let val_mmcs = ValMmcs::new(field_hash, compress);
+    let challenge_mmcs = ChallengeMmcs::new(val_mmcs.clone());
+
+    let dft = Dft::default();
+
+    let fri_config = FriConfig {
+        log_blowup: 3,
+        log_final_poly_len: 7,
+        num_queries: 27,
+        proof_of_work_bits: 16,
+        mmcs: challenge_mmcs,
+    };
+
+    let pcs = FriPcs::new(dft, val_mmcs, fri_config);
+
+    let challenger = Challenger::new(P {});
+
+    StarkConfigRpo::new(pcs, challenger)
 }
