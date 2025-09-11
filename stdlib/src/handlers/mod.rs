@@ -1,4 +1,4 @@
-use miden_air::Felt;
+use miden_core::Felt;
 
 pub mod falcon_div;
 pub mod keccak256;
