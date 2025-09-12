@@ -180,7 +180,7 @@ Instructions for moving data between the stack and other sources like program co
 | `adv_loadw`      | `[0,0,0,0, ...]`   | `[A, ...]`       | 1      | Pops word `A` (4 elements) from advice stack, overwrites top word of operand stack. Fails if advice stack has `< 4` values.                                       |
 | `adv_pipe`       | `[C,B,A,a,...]`    | `[E,D,A,a',...]` | 1      | Pops 2 words `[D,E]` from advice stack. Overwrites top 2 words of operand stack. Writes `[D,E]` to memory at `a` and `a+1`. `a' <- a+2`. Fails if advice stack has `< 8` values. |
 
-#### Injecting into Advice Provider (System Events - 0 cycles)
+#### Injecting into Advice Provider (System Events - 3 cycles)
 
 *Push to Advice Stack:*
 
@@ -189,8 +189,6 @@ Instructions for moving data between the stack and other sources like program co
 | `adv.push_mapval`    | `[K, ... ]`                | `[K, ... ]`                | Pushes values from `advice_map[K]` to advice stack.                                                                                     |
 | `adv.push_mapvaln`   | `[K, ... ]`                | `[K, ... ]`                | Pushes `[n, ele1, ele2, ...]` from `advice_map[K]` to advice stack, where `n` is element count.                                        |
 | `adv.push_mtnode`    | `[d, i, R, ... ]`          | `[d, i, R, ... ]`          | Pushes Merkle tree node (root `R`, depth `d`, index `i`) from Merkle store to advice stack.                                           |
-| `adv.push_u64div`    | `[b1, b0, a1, a0, ...]`    | `[b1, b0, a1, a0, ...]`    | Pushes quotient and remainder of u64 division `a/b` (represented by 32-bit limbs) to advice stack.                                   |
-| `adv.push_smtpeek`   | `[K, R, ...]`              | `[K, R, ...]`              | Pushes value for key `K` in Sparse Merkle Tree with root `R` to advice stack.                                                          |
 
 *Insert into Advice Map:*
 

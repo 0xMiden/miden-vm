@@ -14,11 +14,11 @@ use miden_core::{AdviceMap, EventId, Felt, Word, crypto::hash::Digest};
 use miden_crypto::hash::{keccak::Keccak256, rpo::Rpo256};
 use miden_processor::{AdviceMutation, EventError, ProcessState};
 
-/// Event name for the Keccak256 handler.
-pub const KECCAK_HASH_MEMORY_EVENT_NAME: &str = "miden_stdlib::hash::keccak256::hash_memory";
-/// Event ID for the Keccak256 handler, derived from
-/// `string_to_event_id(KECCAK_HASH_MEMORY_EVENT_NAME)`.
-pub const KECCAK_HASH_MEMORY_EVENT_ID: EventId = EventId::from_u64(871406259734432837);
+/// Qualified event name for the `hash_memory` event.
+pub const KECCAK_HASH_MEMORY_EVENT_NAME: &str = "stdlib::hash::keccak256::hash_memory";
+/// Constant Event ID for the `hash_memory` event, derived via
+/// `EventId::from_name(SMT_PEEK_EVENT_NAME)`
+pub const KECCAK_HASH_MEMORY_EVENT_ID: EventId = EventId::from_u64(5779517439479051634);
 
 /// Keccak256 event handler that reads data from memory.
 ///
@@ -205,9 +205,7 @@ pub enum KeccakError {
 
 #[cfg(test)]
 mod tests {
-    use miden_core::EventId;
-
-    use crate::handlers::keccak256::{KECCAK_HASH_MEMORY_EVENT_ID, KECCAK_HASH_MEMORY_EVENT_NAME};
+    use super::*;
 
     #[test]
     fn test_event_id() {

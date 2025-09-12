@@ -485,12 +485,8 @@ fn test_ast_parsing_adv_injection() -> Result<(), Report> {
     use super::SystemEventNode::*;
 
     let context = SyntaxTestContext::new();
-    let source = source_file!(&context, "begin adv.push_u64div adv.push_mapval adv.insert_mem end");
-    let forms = module!(begin!(
-        inst!(SysEvent(PushU64Div)),
-        inst!(SysEvent(PushMapVal)),
-        inst!(SysEvent(InsertMem))
-    ));
+    let source = source_file!(&context, "begin adv.push_mapval adv.insert_mem end");
+    let forms = module!(begin!(inst!(SysEvent(PushMapVal)), inst!(SysEvent(InsertMem))));
     assert_eq!(context.parse_forms(source)?, forms);
     Ok(())
 }

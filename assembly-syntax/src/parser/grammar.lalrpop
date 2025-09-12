@@ -62,9 +62,6 @@ extern {
         "push_mapval" => Token::PushMapval,
         "push_mapvaln" => Token::PushMapvaln,
         "push_mtnode" => Token::PushMtnode,
-        "push_smtpeek" => Token::PushSmtpeek,
-        "push_u64div" => Token::PushU64Div,
-        "push_falcon_div" => Token::PushFalconDiv,
         "and" => Token::And,
         "eval_circuit" => Token::EvalCircuit,
         "assert" => Token::Assert,
@@ -704,9 +701,6 @@ SystemEvent: Instruction = {
     "adv" "." "push_mapvaln" => Instruction::SysEvent(SystemEventNode::PushMapValN),
     "adv" "." "has_mapkey" => Instruction::SysEvent(SystemEventNode::HasMapKey),
     "adv" "." "push_mtnode" => Instruction::SysEvent(SystemEventNode::PushMtNode),
-    "adv" "." "push_smtpeek" => Instruction::SysEvent(SystemEventNode::PushSmtPeek),
-    "adv" "." "push_u64div" => Instruction::SysEvent(SystemEventNode::PushU64Div),
-    "adv" "." "push_falcon_div" => Instruction::SysEvent(SystemEventNode::PushFalconDiv),
 }
 
 #[inline]

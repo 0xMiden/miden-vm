@@ -15,7 +15,7 @@ use.std::crypto::hashes::rpo
 # Constants
 # ================================================================================================
 
-const.KECCAK_HASH_MEMORY_EVENT=event("miden_stdlib::hash::keccak256::hash_memory")
+const.KECCAK_HASH_MEMORY_EVENT=event("stdlib::hash::keccak256::hash_memory")
 
 # PROCEDURES
 # ================================================================================================

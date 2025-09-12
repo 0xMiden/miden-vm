@@ -2,8 +2,10 @@ use core::cmp;
 
 use miden_core::assert_matches;
 use miden_processor::ExecutionError;
+use miden_stdlib::handlers::u64_div::{U64_DIV_EVENT_NAME, U64DivError};
 use miden_utils_testing::{
-    Felt, U32_BOUND, ZERO, expect_exec_error_matches, proptest::prelude::*, rand::rand_value,
+    Felt, TRUNCATE_STACK_PROC, U32_BOUND, ZERO, expect_exec_error_matches, proptest::prelude::*,
+    rand::rand_value,
 };
 
 // ADDITION
@@ -404,6 +406,152 @@ fn unchecked_eqz() {
 // ------------------------------------------------------------------------------------------------
 
 #[test]
+fn advice_push_u64div() {
+    // push a/b onto the advice stack and then move these values onto the operand stack.
+    let source =
+        format!("begin emit.event(\"{U64_DIV_EVENT_NAME}\") adv_push.4 movupw.2 dropw end");
+
+    // get two random 64-bit integers and split them into 32-bit limbs
+    let a = rand_value::<u64>();
+    let a_hi = a >> 32;
+    let a_lo = a as u32 as u64;
+
+    let b = rand_value::<u64>();
+    let b_hi = b >> 32;
+    let b_lo = b as u32 as u64;
+
+    // compute expected quotient
+    let q = a / b;
+    let q_hi = q >> 32;
+    let q_lo = q as u32 as u64;
+
+    // compute expected remainder
+    let r = a % b;
+    let r_hi = r >> 32;
+    let r_lo = r as u32 as u64;
+
+    let test = build_test!(source, &[a_lo, a_hi, b_lo, b_hi]);
+    let expected = [r_hi, r_lo, q_hi, q_lo, b_hi, b_lo, a_hi, a_lo];
+    test.expect_stack(&expected);
+}
+
+#[test]
+fn advice_push_u64div_repeat() {
+    // This procedure repeats the following steps 7 times:
+    // - pushes quotient and remainder to advice stack
+    // - drops divisor (top 2 elements of the stack representing 32 bit limbs of divisor)
+    // - reads quotient from advice stack to the stack
+    // - push 2_u64 to the stack divided into 2 32 bit limbs
+    // Finally the first 2 elements of the stack are removed
+    let source = format!(
+        "
+    {TRUNCATE_STACK_PROC}
+
+    begin
+        repeat.7
+            emit.event(\"{U64_DIV_EVENT_NAME}\")
+            drop drop
+            adv_push.2
+            push.2
+            push.0
+        end
+        drop drop
+
+        exec.truncate_stack
+    end"
+    );
+
+    let mut a = 256;
+    let a_hi = 0;
+    let a_lo = a;
+
+    let b = 2;
+    let b_hi = 0;
+    let b_lo = b;
+
+    let mut expected = vec![a_lo, a_hi];
+
+    for _ in 0..7 {
+        let q = a / b;
+        let q_hi = 0;
+        let q_lo = q;
+        expected.extend_from_slice(&[q_lo, q_hi]);
+        a = q;
+    }
+
+    expected.reverse();
+
+    let test = build_test!(source, &[a_lo, a_hi, b_lo, b_hi]);
+    test.expect_stack(&expected);
+}
+
+#[test]
+fn advice_push_u64div_local_procedure() {
+    // push a/b onto the advice stack and then move these values onto the operand stack.
+    let source = format!(
+        "
+    proc.foo
+        emit.event(\"{U64_DIV_EVENT_NAME}\")
+        adv_push.4
+    end
+
+    begin
+        exec.foo
+        movupw.2 dropw
+    end"
+    );
+
+    // get two random 64-bit integers and split them into 32-bit limbs
+    let a = rand_value::<u64>();
+    let a_hi = a >> 32;
+    let a_lo = a as u32 as u64;
+
+    let b = rand_value::<u64>();
+    let b_hi = b >> 32;
+    let b_lo = b as u32 as u64;
+
+    // compute expected quotient
+    let q = a / b;
+    let q_hi = q >> 32;
+    let q_lo = q as u32 as u64;
+
+    // compute expected remainder
+    let r = a % b;
+    let r_hi = r >> 32;
+    let r_lo = r as u32 as u64;
+
+    let test = build_test!(source, &[a_lo, a_hi, b_lo, b_hi]);
+    let expected = [r_hi, r_lo, q_hi, q_lo, b_hi, b_lo, a_hi, a_lo];
+    test.expect_stack(&expected);
+}
+
+#[test]
+fn advice_push_u64div_conditional_execution() {
+    let source = format!(
+        "
+    begin
+        eq
+        if.true
+            emit.event(\"{U64_DIV_EVENT_NAME}\")
+            adv_push.4
+        else
+            padw
+        end
+
+        movupw.2 dropw
+    end"
+    );
+
+    // if branch
+    let test = build_test!(&source, &[8, 0, 4, 0, 1, 1]);
+    test.expect_stack(&[0, 0, 0, 2, 0, 4, 0, 8]);
+
+    // else branch
+    let test = build_test!(&source, &[8, 0, 4, 0, 1, 0]);
+    test.expect_stack(&[0, 0, 0, 0, 0, 4, 0, 8]);
+}
+
+#[test]
 fn unchecked_div() {
     let a: u64 = rand_value();
     let b: u64 = rand_value();
@@ -448,15 +596,17 @@ fn ensure_div_doesnt_crash() {
     let err = test.execute();
     match err {
         Ok(_) => panic!("expected an error"),
-        Err(err) => assert_matches!(
-            err,
-            ExecutionError::NotU32Values {
-                label: _,
-                source_file: _,
-                values: _,
-                err_code: _
-            }
-        ),
+        Err(ExecutionError::EventError { error, .. }) => {
+            let u64_div_error = error.downcast_ref::<U64DivError>().expect("Expected U64DivError");
+            assert_matches!(
+                u64_div_error,
+                U64DivError::NotU32Value {
+                    value: 4294967296,
+                    position: "divisor_lo"
+                }
+            );
+        },
+        Err(err) => panic!("Unexpected error type: {:?}", err),
     }
 
     // 2. dividend limbs not u32
@@ -468,15 +618,17 @@ fn ensure_div_doesnt_crash() {
     let err = test.execute();
     match err {
         Ok(_) => panic!("expected an error"),
-        Err(err) => assert_matches!(
-            err,
-            ExecutionError::NotU32Values {
-                label: _,
-                source_file: _,
-                values: _,
-                err_code: _
-            }
-        ),
+        Err(ExecutionError::EventError { error, .. }) => {
+            let u64_div_error = error.downcast_ref::<U64DivError>().expect("Expected U64DivError");
+            assert_matches!(
+                u64_div_error,
+                U64DivError::NotU32Value {
+                    value: 4294967296,
+                    position: "dividend_lo"
+                }
+            );
+        },
+        Err(err) => panic!("Unexpected error type: {:?}", err),
     }
 }
 

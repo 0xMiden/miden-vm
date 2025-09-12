@@ -11,7 +11,12 @@ use miden_core::{EventId, Felt, Word};
 use miden_processor::{EventHandler, HostLibrary};
 use miden_utils_sync::LazyLock;
 
-use crate::handlers::keccak256::{KECCAK_HASH_MEMORY_EVENT_ID, handle_keccak_hash_memory};
+use crate::handlers::{
+    falcon_div::{FALCON_DIV_EVENT_ID, handle_falcon_div},
+    keccak256::{KECCAK_HASH_MEMORY_EVENT_ID, handle_keccak_hash_memory},
+    smt_peek::{SMT_PEEK_EVENT_ID, handle_smt_peek},
+    u64_div::{U64_DIV_EVENT_ID, handle_u64_div},
+};
 
 // STANDARD LIBRARY
 // ================================================================================================
@@ -58,7 +63,12 @@ impl StdLibrary {
 
     /// List of all `EventHandlers` required to run all of the standard library.
     pub fn handlers(&self) -> Vec<(EventId, Arc<dyn EventHandler>)> {
-        vec![(KECCAK_HASH_MEMORY_EVENT_ID, Arc::new(handle_keccak_hash_memory))]
+        vec![
+            (KECCAK_HASH_MEMORY_EVENT_ID, Arc::new(handle_keccak_hash_memory)),
+            (SMT_PEEK_EVENT_ID, Arc::new(handle_smt_peek)),
+            (U64_DIV_EVENT_ID, Arc::new(handle_u64_div)),
+            (FALCON_DIV_EVENT_ID, Arc::new(handle_falcon_div)),
+        ]
     }
 }
 
