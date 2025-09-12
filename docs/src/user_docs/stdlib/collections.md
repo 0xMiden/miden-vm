@@ -38,7 +38,7 @@ The following procedures are available to read data from and make updates to a S
 The SMT peek event retrieves values from a Sparse Merkle Tree by directly accessing the advice provider without modifying the tree state.
 
 ```
-emit.event("miden_stdlib::collections::smt::smt_peek_event")
+emit.event("stdlib::collections::smt::smt_peek")
 ```
 
 **Inputs**: `[KEY, ROOT, ...]` on operand stack  

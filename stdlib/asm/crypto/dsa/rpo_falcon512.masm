@@ -11,7 +11,7 @@ const.M_DOUBLE=24578
 const.M_SQUARE=151019521
 const.SQUARE_NORM_BOUND=34034726
 const.MEMORY_POINTER_OFFSET_OF_HASH_TO_POINT_POLY_FROM_PRODUCT_POLY=1024
-const.FALCON_DIV_EVENT=event("miden_stdlib::crypto::dsa::rpo_falcon512::falcon_div")
+const.FALCON_DIV_EVENT=event("stdlib::crypto::dsa::rpo_falcon512::falcon_div")
 
 # MODULAR REDUCTION FALCON PRIME
 # =============================================================================================

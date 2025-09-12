@@ -10,9 +10,11 @@ use miden_processor::{AdviceMutation, EventError, ProcessState};
 
 use crate::handlers::u64_to_u32_elements;
 
-/// Event ID for the U64_DIV handler, derived from the constant EVENT_U64_DIV.
-pub const U64_DIV_EVENT_ID: EventId = EventId::from_u64(11320526962293815303);
-pub const U64_DIV_EVENT_NAME: &str = "miden_stdlib::math::u64::u64_div";
+/// Qualified event name for the `u64_div` event.
+pub const U64_DIV_EVENT_NAME: &str = "stdlib::math::u64::u64_div";
+/// Constant Event ID for the `u64_div` event, derived via
+/// `EventId::from_name(U64_DIV_EVENT_NAME)`.
+pub const U64_DIV_EVENT_ID: EventId = EventId::from_u64(16308489928383702680);
 
 /// U64_DIV system event handler.
 ///

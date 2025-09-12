@@ -258,7 +258,7 @@ end
 
 # ===== DIVISION ==================================================================================
 
-const.U64_DIV_EVENT=event("miden_stdlib::math::u64::u64_div")
+const.U64_DIV_EVENT=event("stdlib::math::u64::u64_div")
 
 #! Performs division of two unsigned 64 bit integers discarding the remainder.
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.

@@ -13,9 +13,11 @@ use crate::handlers::u64_to_u32_elements;
 /// Falcon signature prime.
 const M: u64 = 12289;
 
-/// Event ID for the FALCON_DIV handler, derived from the constant EVENT_FALCON_DIV.
-pub const FALCON_DIV_EVENT_ID: EventId = EventId::from_u64(13788873273678049590);
-pub const FALCON_DIV_EVENT_NAME: &str = "miden_stdlib::crypto::dsa::rpo_falcon512::falcon_div";
+/// Qualified event name for the `falcon_div` event.
+pub const FALCON_DIV_EVENT_NAME: &str = "stdlib::crypto::dsa::rpo_falcon512::falcon_div";
+/// Constant Event ID for the `falcon_div` event, derived via
+/// `EventId::from_name(FALCON_DIV_EVENT_NAME)`.
+pub const FALCON_DIV_EVENT_ID: EventId = EventId::from_u64(9834516640389212175);
 
 /// FALCON_DIV system event handler.
 ///

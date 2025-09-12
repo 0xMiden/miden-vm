@@ -12,9 +12,11 @@ use miden_core::{
 };
 use miden_processor::{AdviceMutation, EventError, ProcessState};
 
-/// Event ID for the SMT_PEEK handler, derived from the constant EVENT_SMT_PEEK.
-pub const SMT_PEEK_EVENT_ID: EventId = EventId::from_u64(2792915964933121433);
-pub const SMT_PEEK_EVENT_NAME: &str = "miden_stdlib::collections::smt::smt_peek_event";
+/// Qualified event name for the `smt_peek` event.
+pub const SMT_PEEK_EVENT_NAME: &str = "stdlib::collections::smt::smt_peek";
+/// Constant Event ID for the `smt_peek` event, derived via
+/// `EventId::from_name(SMT_PEEK_EVENT_NAME)`.
+pub const SMT_PEEK_EVENT_ID: EventId = EventId::from_u64(3580205917336794987);
 
 /// SMT_PEEK system event handler.
 ///
