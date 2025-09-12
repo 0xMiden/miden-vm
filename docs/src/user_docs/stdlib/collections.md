@@ -32,18 +32,3 @@ The following procedures are available to read data from and make updates to a S
 | ----------- | ------------- |
 | get         | Returns the value located under the specified key in the Sparse Merkle Tree defined by the specified root.<br /><br />If no values had been previously inserted under the specified key, an empty word is returned.<br /><br />Inputs: `[KEY, ROOT, ...]`<br />Outputs: `[VALUE, ROOT, ...]`<br /><br />Fails if the tree with the specified root does not exist in the VM's advice provider. |
 | set         | Inserts the specified value under the specified key in a Sparse Merkle Tree defined by the specified root. If the insert is successful, the old value located under the specified key is returned via the stack.<br /><br />If `VALUE` is an empty word, the new state of the tree is guaranteed to be equivalent to the state as if the updated value was never inserted.<br /><br />Inputs: `[VALUE, KEY, ROOT, ...]`<br />Outputs: `[OLD_VALUE, NEW_ROOT, ...]`<br /><br />Fails if the tree with the specified root does not exits in the VM's advice provider. |
-
-### SMT Peek Event
-
-The SMT peek event retrieves values from a Sparse Merkle Tree by directly accessing the advice provider without modifying the tree state.
-
-```
-emit.event("stdlib::collections::smt::smt_peek")
-```
-
-**Inputs**: `[KEY, ROOT, ...]` on operand stack  
-**Effect**: Pushes to advice stack the 4-element value associated with KEY, or `[ZERO; 4]` if KEY doesn't exist
-
-Fails if the specified root doesn't exist in the advice provider. Retrieve pushed value with `adv_push.4`.
-
-**Note**: Returns unverified data directly from the advice provider.
