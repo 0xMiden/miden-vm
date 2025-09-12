@@ -108,7 +108,7 @@ impl StackOutputs {
 }
 
 impl Deref for StackOutputs {
-    type Target = [Felt; 16];
+    type Target = [Felt; MIN_STACK_DEPTH];
 
     fn deref(&self) -> &Self::Target {
         &self.elements
