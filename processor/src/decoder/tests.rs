@@ -14,8 +14,8 @@ use miden_air::trace::{
 use miden_core::{
     EMPTY_WORD, EventId, ONE, Program, WORD_SIZE, ZERO, assert_matches,
     mast::{
-        BasicBlockNode, CallNode, DynNode, JoinNode, MastForest, MastNode, MastNodeExt,
-        MastNodeId, OP_BATCH_SIZE,
+        BasicBlockNode, CallNode, DynNode, JoinNode, MastForest, MastNode, MastNodeExt, MastNodeId,
+        OP_BATCH_SIZE,
     },
 };
 use miden_utils_testing::rand::rand_value;
