@@ -9,7 +9,7 @@ use alloc::vec;
 
 use miden_air::{HashFunction, ProcessorAir, ProvingOptions, PublicInputs};
 use miden_core::crypto::{
-    hash::{Blake3_192, Blake3_256, Poseidon2, Rpo256, Rpx256},
+    hash::{Blake3_192, Blake3_256, Keccak256, Poseidon2, Rpo256, Rpx256},
     random::{RpoRandomCoin, RpxRandomCoin, WinterRandomCoin},
 };
 // EXPORTS
@@ -103,6 +103,15 @@ pub fn verify(
                 ProvingOptions::REGULAR_128_BITS,
             ]);
             verify_proof::<ProcessorAir, Poseidon2, WinterRandomCoin<_>, MerkleTree<_>>(
+                proof, pub_inputs, &opts,
+            )
+        },
+        HashFunction::Keccak256 => {
+            let opts = AcceptableOptions::OptionSet(vec![
+                ProvingOptions::RECURSIVE_96_BITS,
+                ProvingOptions::REGULAR_128_BITS,
+            ]);
+            verify_proof::<ProcessorAir, Keccak256, WinterRandomCoin<_>, MerkleTree<_>>(
                 proof, pub_inputs, &opts,
             )
         },

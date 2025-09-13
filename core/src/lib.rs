@@ -71,6 +71,7 @@ pub mod crypto {
         pub use miden_crypto::hash::{
             Digest, ElementHasher, Hasher,
             blake::{Blake3_160, Blake3_192, Blake3_256, Blake3Digest},
+            keccak::Keccak256,
             poseidon2::Poseidon2,
             rpo::Rpo256,
             rpx::Rpx256,

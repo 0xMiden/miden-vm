@@ -47,7 +47,7 @@ pub struct ProveCmd {
     proof_file: Option<PathBuf>,
 
     /// Specifies the hash function to be used
-    /// Valid options: blake3-192, blake3-256, rpo, rpx, poseidon2
+    /// Valid options: blake3-192, blake3-256, rpo, rpx, poseidon2, keccak256
     #[arg(long = "hasher", default_value = "blake3-192")]
     hasher: String,
 

@@ -1,7 +1,7 @@
 use alloc::{string::ToString, vec::Vec};
 
 use miden_core::{
-    crypto::hash::{Blake3_192, Blake3_256, Hasher, Poseidon2, Rpo256, Rpx256},
+    crypto::hash::{Blake3_192, Blake3_256, Hasher, Keccak256, Poseidon2, Rpo256, Rpx256},
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 use winter_air::proof::Proof;
@@ -50,6 +50,7 @@ impl ExecutionProof {
             HashFunction::Rpo256 => self.proof.conjectured_security::<Rpo256>(),
             HashFunction::Rpx256 => self.proof.conjectured_security::<Rpx256>(),
             HashFunction::Poseidon2 => self.proof.conjectured_security::<Poseidon2>(),
+            HashFunction::Keccak256 => self.proof.conjectured_security::<Keccak256>(),
         };
         conjectured_security.bits()
     }
@@ -102,6 +103,7 @@ pub enum HashFunction {
     Rpx256 = 0x03,
     /// Poseidon2 hash function with 256-bit output.
     Poseidon2 = 0x04,
+    Keccak256 = 0x05,
 }
 
 impl HashFunction {
@@ -113,6 +115,7 @@ impl HashFunction {
             HashFunction::Rpo256 => Rpo256::COLLISION_RESISTANCE,
             HashFunction::Rpx256 => Rpx256::COLLISION_RESISTANCE,
             HashFunction::Poseidon2 => Poseidon2::COLLISION_RESISTANCE,
+            HashFunction::Keccak256 => Keccak256::COLLISION_RESISTANCE,
         }
     }
 }
@@ -127,6 +130,7 @@ impl TryFrom<u8> for HashFunction {
             0x02 => Ok(Self::Rpo256),
             0x03 => Ok(Self::Rpx256),
             0x04 => Ok(Self::Poseidon2),
+            0x05 => Ok(Self::Keccak256),
             _ => Err(DeserializationError::InvalidValue(format!(
                 "the hash function representation {repr} is not valid!"
             ))),
@@ -144,6 +148,7 @@ impl TryFrom<&str> for HashFunction {
             "rpo" => Ok(Self::Rpo256),
             "rpx" => Ok(Self::Rpx256),
             "poseidon2" => Ok(Self::Poseidon2),
+            "keccak256" => Ok(Self::Keccak256),
             _ => Err(super::ExecutionOptionsError::InvalidHashFunction {
                 hash_function: hash_fn_str.to_string(),
             }),

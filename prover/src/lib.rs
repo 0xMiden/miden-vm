@@ -14,8 +14,8 @@ use miden_gpu::HashFn;
 use miden_processor::{
     ExecutionTrace, Program,
     crypto::{
-        Blake3_192, Blake3_256, ElementHasher, Poseidon2, RandomCoin, Rpo256, RpoRandomCoin,
-        Rpx256, RpxRandomCoin, WinterRandomCoin,
+        Blake3_192, Blake3_256, ElementHasher, Keccak256, Poseidon2, RandomCoin, Rpo256,
+        RpoRandomCoin, Rpx256, RpxRandomCoin, WinterRandomCoin,
     },
     math::{Felt, FieldElement},
 };
@@ -128,6 +128,14 @@ pub fn prove(
         },
         HashFunction::Poseidon2 => {
             let prover = ExecutionProver::<Poseidon2, WinterRandomCoin<_>>::new(
+                options,
+                stack_inputs,
+                stack_outputs.clone(),
+            );
+            maybe_await!(prover.prove(trace))
+        },
+        HashFunction::Keccak256 => {
+            let prover = ExecutionProver::<Keccak256, WinterRandomCoin<_>>::new(
                 options,
                 stack_inputs,
                 stack_outputs.clone(),
