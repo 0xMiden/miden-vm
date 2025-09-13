@@ -24,7 +24,7 @@ pub use miden_core::{
     utils::DeserializationError,
 };
 use miden_core::{
-    Decorator, DecoratorIterator, FieldElement,
+    Decorator, DecoratorIdIterator, FieldElement,
     mast::{
         BasicBlockNode, CallNode, DynNode, ExternalNode, JoinNode, LoopNode, OpBatch, SplitNode,
     },
@@ -604,7 +604,7 @@ impl Process {
         &mut self,
         basic_block: &BasicBlockNode,
         batch: &OpBatch,
-        decorators: &mut DecoratorIterator,
+        decorators: &mut DecoratorIdIterator,
         op_offset: usize,
         program: &MastForest,
         host: &mut impl SyncHost,

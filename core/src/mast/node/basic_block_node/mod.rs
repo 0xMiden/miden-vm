@@ -7,7 +7,7 @@ use miden_formatting::prettier::PrettyPrint;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    DecoratorIterator, DecoratorList, Operation,
+    DecoratorIdIterator, DecoratorList, Operation,
     chiplets::hasher,
     mast::{DecoratorId, MastForest, MastForestError, MastNodeId, Remapping},
 };
@@ -195,17 +195,17 @@ impl BasicBlockNode {
         &self.decorators
     }
 
-    /// Returns a [`DecoratorIterator`] which allows us to iterate through the decorator list of
+    /// Returns a [`DecoratorIdIterator`] which allows us to iterate through the decorator list of
     /// this basic block node while executing operation batches of this basic block node.
-    pub fn decorator_iter(&self) -> DecoratorIterator<'_> {
-        DecoratorIterator::new(&self.decorators)
+    pub fn decorator_iter(&self) -> DecoratorIdIterator<'_> {
+        DecoratorIdIterator::new(&self.decorators)
     }
 
     /// Returns an iterator which allows us to iterate through the decorator list of
     /// this basic block node with op indexes aligned to the "raw" (un-padded)) op
     /// batches of the basic block node
-    pub fn raw_decorator_iter(&self) -> RawDecoratorIterator<'_> {
-        RawDecoratorIterator::new(&self.decorators, &self.op_batches)
+    pub fn raw_decorator_iter(&self) -> RawDecoratorIdIterator<'_> {
+        RawDecoratorIdIterator::new(&self.decorators, &self.op_batches)
     }
 
     /// Returns an iterator over the operations in the order in which they appear in the program.
@@ -415,7 +415,7 @@ impl fmt::Display for BasicBlockNodePrettyPrint<'_> {
 ///
 /// IOW this makes its `BasicBlockNode::raw_decorators` padding-unaware, or equivalently
 /// "removes" the padding of these decorators
-pub struct RawDecoratorIterator<'a> {
+pub struct RawDecoratorIdIterator<'a> {
     decorators: &'a DecoratorList,
     // cumulative padding offsets per group
     padding_offsets: DecoratorPaddingOffsets,
@@ -423,7 +423,7 @@ pub struct RawDecoratorIterator<'a> {
     idx: usize,
 }
 
-impl<'a> RawDecoratorIterator<'a> {
+impl<'a> RawDecoratorIdIterator<'a> {
     /// Returns a new instance of raw decorator iterator instantiated with the provided decorator
     /// list, tied to the provided op_batches list
     fn new(decorators: &'a DecoratorList, op_batches: &'a [OpBatch]) -> Self {
@@ -434,7 +434,7 @@ impl<'a> RawDecoratorIterator<'a> {
     }
 }
 
-impl<'a> Iterator for RawDecoratorIterator<'a> {
+impl<'a> Iterator for RawDecoratorIdIterator<'a> {
     type Item = (usize, &'a DecoratorId);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -449,7 +449,7 @@ impl<'a> Iterator for RawDecoratorIterator<'a> {
     }
 }
 
-impl<'a> ExactSizeIterator for RawDecoratorIterator<'a> {
+impl<'a> ExactSizeIterator for RawDecoratorIdIterator<'a> {
     fn len(&self) -> usize {
         self.decorators.len() - self.idx
     }
