@@ -187,14 +187,6 @@ impl BasicBlockNode {
         num_ops.try_into().expect("basic block contains more than 2^32 operations")
     }
 
-    /// Returns a list of decorators in this basic block node.
-    ///
-    /// Each decorator is accompanied by the operation index specifying the operation prior to
-    /// which the decorator should be executed.
-    pub fn decorators(&self) -> &DecoratorList {
-        &self.decorators
-    }
-
     /// Returns a [`DecoratorIdIterator`] which allows us to iterate through the decorator list of
     /// this basic block node while executing operation batches of this basic block node.
     pub fn decorator_iter(&self) -> DecoratorIdIterator<'_> {

@@ -618,7 +618,7 @@ fn should_merge(is_procedure: bool, num_op_batches: usize) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use miden_core::Operation;
+    use miden_core::{Operation, mast::MastNodeErrorContext};
 
     use super::*;
 
@@ -698,13 +698,13 @@ mod tests {
 
         // Check each decorator in the merged block
         let decorators = merged_block.decorators();
-        assert_eq!(decorators.len(), 5); // 3 from block1 + 2 from block2
+        assert_eq!(merged_block.decorators().count(), 5); // 3 from block1 + 2 from block2
 
         // Create a map to track which trace values we've found
         let mut found_traces = std::collections::HashSet::new();
 
         // Check each decorator
-        for &(op_idx, decorator_id) in decorators {
+        for (op_idx, decorator_id) in decorators {
             let decorator = &builder.mast_forest[decorator_id];
 
             match decorator {

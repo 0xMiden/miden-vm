@@ -3,8 +3,8 @@ use alloc::{collections::BTreeMap, vec::Vec};
 use miden_crypto::hash::blake::Blake3Digest;
 
 use crate::mast::{
-    DecoratorId, MastForest, MastForestError, MastNode, MastNodeFingerprint, MastNodeId,
-    MultiMastForestIteratorItem, MultiMastForestNodeIter, node::MastNodeExt,
+    DecoratorId, MastForest, MastForestError, MastNode, MastNodeErrorContext, MastNodeFingerprint,
+    MastNodeId, MultiMastForestIteratorItem, MultiMastForestNodeIter, node::MastNodeExt,
 };
 
 #[cfg(test)]
@@ -312,9 +312,8 @@ impl MastForestMerger {
                     Some(
                         basic_block_node
                             .decorators()
-                            .iter()
-                            .map(|(idx, decorator_id)| match map_decorator_id(decorator_id) {
-                                Ok(mapped_decorator) => Ok((*idx, mapped_decorator)),
+                            .map(|(idx, decorator_id)| match map_decorator_id(&decorator_id) {
+                                Ok(mapped_decorator) => Ok((idx, mapped_decorator)),
                                 Err(err) => Err(err),
                             })
                             .collect::<Result<Vec<_>, _>>()?,
