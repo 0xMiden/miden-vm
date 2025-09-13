@@ -10,7 +10,7 @@ use p3_commit::{ExtensionMmcs, Pcs};
 use p3_dft::Radix2DitParallel;
 use p3_field::{Field, PrimeCharacteristicRing};
 use p3_field::coset::TwoAdicMultiplicativeCoset;
-use p3_fri::{FriConfig, TwoAdicFriPcs};
+use p3_fri::{FriParameters, TwoAdicFriPcs};
 use p3_matrix::bitrev::BitReversalPerm;
 use p3_matrix::dense::DenseMatrix;
 use p3_matrix::row_index_mapped::RowIndexMappedView;
@@ -125,7 +125,7 @@ pub fn prove_rpo(trace: ExecutionTrace) -> Vec<u8> {
         info_span!("commit to quotient poly chunks").in_scope(|| {
             <FriPcs as Pcs<Challenge, Challenger>>::commit(
                 pcs,
-                qc_domains.into_iter().zip(quotient_chunks.into_iter()).collect(),
+                qc_domains.into_iter().zip(quotient_chunks.into_iter()) ,
             )
         });
     challenger.observe(quotient_commit.clone());
@@ -181,7 +181,7 @@ pub fn generate_rpo_config() -> StarkConfigRpo {
 
     let dft = Dft::default();
 
-    let fri_config = FriConfig {
+    let fri_config = FriParameters {
         log_blowup: 3,
         log_final_poly_len: 7,
         num_queries: 27,

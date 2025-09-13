@@ -14,13 +14,13 @@ use p3_commit::{ExtensionMmcs, Pcs};
 use p3_dft::Radix2DitParallel;
 use p3_field::PrimeCharacteristicRing;
 use p3_field::coset::TwoAdicMultiplicativeCoset;
-use p3_fri::{FriConfig, TwoAdicFriPcs};
+use p3_fri::{FriParameters, TwoAdicFriPcs};
 use p3_matrix::Matrix;
 use p3_matrix::bitrev::BitReversalPerm;
 use p3_matrix::dense::DenseMatrix;
 use p3_matrix::row_index_mapped::RowIndexMappedView;
 use p3_merkle_tree::MerkleTreeMmcs;
-use p3_symmetric::{CompressionFunctionFromHasher, SerializingHasher64};
+use p3_symmetric::{CompressionFunctionFromHasher, SerializingHasher};
 use p3_uni_stark::StarkGenericConfig;
 use p3_uni_stark::{StarkConfig, SymbolicExpression, get_symbolic_constraints};
 use p3_util::{log2_ceil_usize, log2_strict_usize};
@@ -31,9 +31,10 @@ use tracing::info_span;
 
 type Challenge = BinomialExtensionField<Felt, 2>;
 type H = Blake3;
-type FieldHash<H> = SerializingHasher64<H>;
+
+ type FieldHash = SerializingHasher<H>; 
 type Compress<H> = CompressionFunctionFromHasher<H, 2, 32>;
-type ValMmcs<H> = MerkleTreeMmcs<Felt, u8, FieldHash<H>, Compress<H>, 32>;
+type ValMmcs<H> = MerkleTreeMmcs<Felt, u8, FieldHash, Compress<H>, 32>;
 type ChallengeMmcs<H> = ExtensionMmcs<Felt, Challenge, ValMmcs<H>>;
 type FriPcs = TwoAdicFriPcs<Felt, Dft, ValMmcs<H>, ChallengeMmcs<H>>;
 type Dft = Radix2DitParallel<Felt>;
@@ -139,7 +140,7 @@ pub fn prove_blake(trace: ExecutionTrace) -> Vec<u8> {
         info_span!("commit to quotient poly chunks").in_scope(|| {
             <FriPcs as Pcs<Challenge, Challenger<H>>>::commit(
                 pcs,
-                qc_domains.into_iter().zip(quotient_chunks.into_iter()).collect(),
+                qc_domains.into_iter().zip(quotient_chunks.into_iter()),
             )
         });
     challenger.observe(quotient_commit.clone());
@@ -195,7 +196,7 @@ pub fn generate_blake_config() -> StarkConfigBlake {
 
     let dft = Dft::default();
 
-    let fri_config = FriConfig {
+    let fri_config = FriParameters {
         log_blowup: 3,
         log_final_poly_len: 7,
         num_queries: 27,

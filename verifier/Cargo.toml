@@ -27,19 +27,19 @@ tracing = { version = "0.1", default-features = false, features = ["attributes"]
 vm-core = { package = "miden-core", path = "../core", version = "0.14", default-features = false }
 winter-verifier = { package = "winter-verifier", version = "0.12", default-features = false }
 thiserror = { workspace = true }
-p3-matrix = { git = "https://github.com/Plonky3/Plonky3.git", rev = "6364190aa350d3b65d3c5e01dec916b322043573" }
-p3-uni-stark = { git = "https://github.com/Plonky3/Plonky3.git", rev = "6364190aa350d3b65d3c5e01dec916b322043573" }
-p3-field = { git = "https://github.com/Plonky3/Plonky3.git", rev = "6364190aa350d3b65d3c5e01dec916b322043573" }
-p3-merkle-tree = { git = "https://github.com/Plonky3/Plonky3.git", rev = "6364190aa350d3b65d3c5e01dec916b322043573" }
-p3-commit = { git = "https://github.com/Plonky3/Plonky3.git", rev = "6364190aa350d3b65d3c5e01dec916b322043573" }
-p3-fri = { git = "https://github.com/Plonky3/Plonky3.git", rev = "6364190aa350d3b65d3c5e01dec916b322043573" }
-p3-dft = { git = "https://github.com/Plonky3/Plonky3.git", rev = "6364190aa350d3b65d3c5e01dec916b322043573" }
-p3-poseidon2 = { git = "https://github.com/Plonky3/Plonky3.git", rev = "6364190aa350d3b65d3c5e01dec916b322043573" }
-p3-challenger = { git = "https://github.com/Plonky3/Plonky3.git", rev = "6364190aa350d3b65d3c5e01dec916b322043573" }
-p3-goldilocks = { git = "https://github.com/Plonky3/Plonky3.git", rev = "6364190aa350d3b65d3c5e01dec916b322043573" }
-p3-symmetric = { git = "https://github.com/Plonky3/Plonky3.git", rev = "6364190aa350d3b65d3c5e01dec916b322043573" }
-p3-util = { git = "https://github.com/Plonky3/Plonky3.git", rev = "6364190aa350d3b65d3c5e01dec916b322043573" }
-p3-blake3 = { git = "https://github.com/Plonky3/Plonky3.git", rev = "6364190aa350d3b65d3c5e01dec916b322043573" }
+p3-matrix = { version = "0.3.0" }
+p3-uni-stark = { version = "0.3.0" }
+p3-field = { version = "0.3.0" }
+p3-merkle-tree = { version = "0.3.0" }
+p3-commit = { version = "0.3.0" }
+p3-fri = { version = "0.3.0" }
+p3-dft = { version = "0.3.0" }
+p3-poseidon2 = { version = "0.3.0" }
+p3-challenger = { version = "0.3.0" }
+p3-goldilocks = { version = "0.3.0" }
+p3-symmetric = { version = "0.3.0" }
+p3-util = { version = "0.3.0" }
+p3-blake3 = { version = "0.3.0" }
 
 serde = { version = "1.0", features = ["derive"]}
 bincode = "1.3"

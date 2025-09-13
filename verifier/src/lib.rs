@@ -15,10 +15,10 @@ use p3_challenger::{DuplexChallenger, HashChallenger, SerializingChallenger64};
 use p3_commit::ExtensionMmcs;
 use p3_dft::Radix2DitParallel;
 use p3_field::{Field, extension::BinomialExtensionField};
-use p3_fri::{FriConfig, TwoAdicFriPcs};
+use p3_fri::{FriParameters, TwoAdicFriPcs};
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_symmetric::{
-    CompressionFunctionFromHasher, PaddingFreeSponge, SerializingHasher64, TruncatedPermutation,
+    CompressionFunctionFromHasher, PaddingFreeSponge, SerializingHasher, TruncatedPermutation
 };
 use p3_uni_stark::{Proof, StarkConfig, verify as verify_proof};
 use vm_core::RpoPermutation256;
@@ -86,9 +86,9 @@ pub fn verify(
         HashFunction::Blake3_192 | HashFunction::Blake3_256 => {
             println!("blake verifying");
             type H = Blake3;
-            type FieldHash<H> = SerializingHasher64<H>;
+            type FieldHash = SerializingHasher<H>;
             type Compress<H> = CompressionFunctionFromHasher<H, 2, 32>;
-            type ValMmcs<H> = MerkleTreeMmcs<Val, u8, FieldHash<H>, Compress<H>, 32>;
+            type ValMmcs<H> = MerkleTreeMmcs<Val, u8, FieldHash, Compress<H>, 32>;
             type ChallengeMmcs<H> = ExtensionMmcs<Val, Challenge, ValMmcs<H>>;
             type Pcs = TwoAdicFriPcs<Val, Dft, ValMmcs<H>, ChallengeMmcs<H>>;
             type Dft = Radix2DitParallel<Val>;
@@ -104,7 +104,7 @@ pub fn verify(
 
             let dft = Dft::default();
 
-            let fri_config = FriConfig {
+            let fri_config = FriParameters {
                 log_blowup: 3,
                 log_final_poly_len: 7,
                 num_queries: 27,
@@ -148,7 +148,7 @@ pub fn verify(
             type Dft = Radix2DitParallel<Val>;
             let dft = Dft::default();
 
-            let fri_config = FriConfig {
+            let fri_config = FriParameters {
                 log_blowup: 3,
                 log_final_poly_len: 7,
                 num_queries: 27,

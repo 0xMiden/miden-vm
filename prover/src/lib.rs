@@ -147,7 +147,7 @@ where
 fn to_row_major(trace: &ExecutionTrace) -> RowMajorMatrix<Felt> {
     let mut result: RowMajorMatrix<Felt> =
         RowMajorMatrix::new(vec![ZERO; TRACE_WIDTH * trace.get_trace_len()], TRACE_WIDTH);
-    result.par_rows_mut().enumerate().for_each(|(row_idx, row)| {
+    result.rows_mut().enumerate().for_each(|(row_idx, row)| {
         for col_idx in 0..TRACE_WIDTH {
             row[col_idx] = trace.main_trace.get(col_idx, row_idx)
         }

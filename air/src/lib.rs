@@ -332,7 +332,7 @@ impl<F> BaseAir<F> for ProcessorAir {
 impl<AB: AirBuilderWithPublicValues> Air<AB> for ProcessorAir {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let (local, next) = (main.row_slice(0), main.row_slice(1));
+        let (local, next) = (main.row_slice(0).unwrap(), main.row_slice(1).unwrap());
         let local: &MainTraceCols<AB::Var> = (*local).borrow();
         let next: &MainTraceCols<AB::Var> = (*next).borrow();
 
