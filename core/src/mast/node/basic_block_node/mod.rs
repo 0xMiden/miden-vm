@@ -239,32 +239,10 @@ impl BasicBlockNode {
 //-------------------------------------------------------------------------------------------------
 /// Mutators
 impl BasicBlockNode {
-    /// Sets the provided list of decorators to be executed before all existing decorators.
-    pub fn prepend_decorators(&mut self, decorator_ids: &[DecoratorId]) {
-        let mut new_decorators: DecoratorList =
-            decorator_ids.iter().map(|decorator_id| (0, *decorator_id)).collect();
-        new_decorators.extend(mem::take(&mut self.decorators));
-
-        self.decorators = new_decorators;
-    }
-
-    /// Sets the provided list of decorators to be executed after all existing decorators.
-    pub fn append_decorators(&mut self, decorator_ids: &[DecoratorId]) {
-        let after_last_op_idx = self.num_operations() as usize;
-
-        self.decorators
-            .extend(decorator_ids.iter().map(|&decorator_id| (after_last_op_idx, decorator_id)));
-    }
-
     /// Used to initialize decorators for the [`BasicBlockNode`]. Replaces the existing decorators
     /// with the given ['DecoratorList'].
     pub fn set_decorators(&mut self, decorator_list: DecoratorList) {
         self.decorators = decorator_list;
-    }
-
-    /// Removes all decorators from this node.
-    pub fn remove_decorators(&mut self) {
-        self.decorators.truncate(0);
     }
 }
 
@@ -307,16 +285,26 @@ impl MastNodeExt for BasicBlockNode {
         &[]
     }
 
+    /// Sets the provided list of decorators to be executed before all existing decorators.
     fn append_before_enter(&mut self, decorator_ids: &[DecoratorId]) {
-        self.prepend_decorators(decorator_ids);
+        let mut new_decorators: DecoratorList =
+            decorator_ids.iter().map(|decorator_id| (0, *decorator_id)).collect();
+        new_decorators.extend(mem::take(&mut self.decorators));
+
+        self.decorators = new_decorators;
     }
 
+    /// Sets the provided list of decorators to be executed after all existing decorators.
     fn append_after_exit(&mut self, decorator_ids: &[DecoratorId]) {
-        self.append_decorators(decorator_ids);
+        let after_last_op_idx = self.num_operations() as usize;
+
+        self.decorators
+            .extend(decorator_ids.iter().map(|&decorator_id| (after_last_op_idx, decorator_id)));
     }
 
+    /// Removes all decorators from this node.
     fn remove_decorators(&mut self) {
-        self.remove_decorators();
+        self.decorators.truncate(0);
     }
 
     fn to_display<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn fmt::Display + 'a> {
