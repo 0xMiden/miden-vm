@@ -528,15 +528,9 @@ proptest! {
         let block = BasicBlockNode::new(ops.clone(), decs.clone()).unwrap();
 
         // Collect the decorators using raw_decorator_iter()
-        let collected_decorators: Vec<(usize, &DecoratorId)> = block.raw_decorator_iter().collect();
-
-        // Convert to owned DecoratorId for comparison
-        let collected_owned: Vec<(usize, DecoratorId)> = collected_decorators
-            .into_iter()
-            .map(|(idx, &decorator_id)| (idx, decorator_id))
-            .collect();
+        let collected_decorators: Vec<(usize, DecoratorId)> = block.raw_decorator_iter().collect();
 
         // The collected decorators should match the original decorators
-        prop_assert_eq!(collected_owned, decs);
+        prop_assert_eq!(collected_decorators, decs);
     }
 }

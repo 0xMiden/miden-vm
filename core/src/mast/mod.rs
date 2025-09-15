@@ -13,9 +13,9 @@ use serde::{Deserialize, Serialize};
 
 mod node;
 pub use node::{
-    BasicBlockNode, CallNode, DecoratedOpLink, DynNode, ExternalNode, JoinNode, LoopNode, MastNode,
-    MastNodeErrorContext, MastNodeExt, OP_BATCH_SIZE, OP_GROUP_SIZE, OpBatch, OperationOrDecorator,
-    SplitNode,
+    BasicBlockNode, CallNode, DecoratedOpLink, DecoratorOpLinkIterator, DynNode, ExternalNode,
+    JoinNode, LoopNode, MastNode, MastNodeErrorContext, MastNodeExt, OP_BATCH_SIZE, OP_GROUP_SIZE,
+    OpBatch, OperationOrDecorator, SplitNode,
 };
 
 use crate::{
