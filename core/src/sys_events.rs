@@ -237,17 +237,36 @@ pub enum SystemEvent {
     HpermToMap,
 }
 
-impl From<SystemEvent> for EventId {
-    fn from(system_event: SystemEvent) -> Self {
-        EventId::from_u64(system_event as u32 as u64)
-    }
-}
+const LAST_EVENT: SystemEvent = SystemEvent::HpermToMap;
 
 impl TryFrom<EventId> for SystemEvent {
     type Error = u64;
 
     fn try_from(event_id: EventId) -> Result<Self, Self::Error> {
         let event_id = event_id.as_felt().as_int();
+
+        // This dummy match statement ensures a compile-time error is raised when this function
+        // has not been updated after adding a new SystemEvent variant.
+        // Make sure the match statement below is also updated.
+        match LAST_EVENT {
+            SystemEvent::MerkleNodeMerge
+            | SystemEvent::MerkleNodeToStack
+            | SystemEvent::MapValueToStack
+            | SystemEvent::MapValueToStackN
+            | SystemEvent::HasMapKey
+            | SystemEvent::Ext2Inv
+            | SystemEvent::U32Clz
+            | SystemEvent::U32Ctz
+            | SystemEvent::U32Clo
+            | SystemEvent::U32Cto
+            | SystemEvent::ILog2
+            | SystemEvent::MemToMap
+            | SystemEvent::HdwordToMap
+            | SystemEvent::HdwordToMapWithDomain
+            | SystemEvent::HqwordToMap
+            | SystemEvent::HpermToMap => {},
+        };
+
         match event_id {
             0 => Ok(SystemEvent::MerkleNodeMerge),
             1 => Ok(SystemEvent::MerkleNodeToStack),
@@ -267,6 +286,12 @@ impl TryFrom<EventId> for SystemEvent {
             15 => Ok(SystemEvent::HpermToMap),
             other => Err(other),
         }
+    }
+}
+
+impl From<SystemEvent> for EventId {
+    fn from(system_event: SystemEvent) -> Self {
+        EventId::from_u64(system_event as u32 as u64)
     }
 }
 
@@ -296,5 +321,26 @@ impl fmt::Display for SystemEvent {
             Self::HqwordToMap => write!(f, "hqword_to_map"),
             Self::HpermToMap => write!(f, "hperm_to_map"),
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_try_from() {
+        let last_event_id = LAST_EVENT as u64;
+
+        // Check that the event IDs are contiguous
+        for id in 0..=last_event_id {
+            let event_id = EventId::from_u64(id);
+            let event = SystemEvent::try_from(event_id).unwrap();
+            assert_eq!(id, event as u64)
+        }
+
+        // Creating from an the next index results in an error.
+        let invalid_event_id = EventId::from_u64(last_event_id + 1);
+        SystemEvent::try_from(invalid_event_id).unwrap_err();
     }
 }
