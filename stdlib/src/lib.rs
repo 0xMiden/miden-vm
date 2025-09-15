@@ -15,6 +15,10 @@ use crate::handlers::{
     falcon_div::{FALCON_DIV_EVENT_ID, handle_falcon_div},
     keccak256::{KECCAK_HASH_MEMORY_EVENT_ID, handle_keccak_hash_memory},
     smt_peek::{SMT_PEEK_EVENT_ID, handle_smt_peek},
+    sorted_array::{
+        LOWERBOUND_ARRAY_EVENT_ID, LOWERBOUND_KEY_VALUE_EVENT_ID, handle_lowerbound_array,
+        handle_lowerbound_key_value,
+    },
     u64_div::{U64_DIV_EVENT_ID, handle_u64_div},
 };
 
@@ -68,6 +72,8 @@ impl StdLibrary {
             (SMT_PEEK_EVENT_ID, Arc::new(handle_smt_peek)),
             (U64_DIV_EVENT_ID, Arc::new(handle_u64_div)),
             (FALCON_DIV_EVENT_ID, Arc::new(handle_falcon_div)),
+            (LOWERBOUND_ARRAY_EVENT_ID, Arc::new(handle_lowerbound_array)),
+            (LOWERBOUND_KEY_VALUE_EVENT_ID, Arc::new(handle_lowerbound_key_value)),
         ]
     }
 }

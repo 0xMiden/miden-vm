@@ -12,6 +12,7 @@
 - Added `FastProcessor::execute_for_trace()`, which outputs a series of checkpoints necessary to build the trace in parallel ([#2023](https://github.com/0xMiden/miden-vm/pull/2023))
 - Introduce `Tracer` trait to allow different ways of tracing program execution, including no tracing ([#2101](https://github.com/0xMiden/miden-vm/pull/2101))
 - `FastProcessor::execute_*()` methods now also return the state of the memory in a new `ExecutionOutput` struct ([#2028](https://github.com/0xMiden/miden-vm/pull/2128))
+- Added non-deterministic lookup for sorted arrays to stdlib ([#2114](https://github.com/0xMiden/miden-vm/pull/2114)).
 
 #### Changes
 
