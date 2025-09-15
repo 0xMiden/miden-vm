@@ -267,7 +267,10 @@ pub fn start_repl(library_paths: &Vec<PathBuf>, use_stdlib: bool) {
                     };
                 } else if line == "!stack" {
                     should_print_stack = true;
-                } else if line.starts_with("!use") {
+                } else if line.trim() == "!use"
+                    || (line.trim().starts_with("!use ")
+                        && line.trim().split_whitespace().count() == 2)
+                {
                     handle_use_command(line, &provided_libraries, &mut imported_modules);
                 } else {
                     rl.add_history_entry(line.clone()).expect("Failed to add a history entry");
