@@ -10,7 +10,7 @@
 use alloc::{vec, vec::Vec};
 use core::array;
 
-use miden_core::{AdviceMap, EventId, Felt, Word, crypto::hash::Digest};
+use miden_core::{EventId, Felt, Word, crypto::hash::Digest};
 use miden_crypto::hash::{keccak::Keccak256, rpo::Rpo256};
 use miden_processor::{AdviceMutation, EventError, ProcessState};
 
@@ -58,18 +58,15 @@ pub fn handle_keccak_hash_memory(
     let hash_u8: [u8; 32] = Keccak256::hash(&input_u8).as_bytes();
     let digest = KeccakFeltDigest::from_bytes(&hash_u8);
 
-    // Create commitment for deferred computation tracking
-    let calldata_commitment =
-        Rpo256::merge(&[Rpo256::hash_elements(input_felt), digest.to_commitment()]);
-
     // Extend the stack with the digest [h_0, ..., h_7] so it can be popped in the right order,
     // i.e. with h_0 at the top.
     let advice_stack_extension = AdviceMutation::extend_stack(digest.0);
 
-    let advice_map_entry = (calldata_commitment, witness_felt);
-    let advice_map_extension = AdviceMutation::extend_map(AdviceMap::from_iter([advice_map_entry]));
+    // Store the witness data in deferred storage for later proof generation
+    let deferred_extension =
+        AdviceMutation::extend_deferred(vec![(KECCAK_HASH_MEMORY_EVENT_ID, witness_felt)]);
 
-    Ok(vec![advice_stack_extension, advice_map_extension])
+    Ok(vec![advice_stack_extension, deferred_extension])
 }
 
 // HELPERS

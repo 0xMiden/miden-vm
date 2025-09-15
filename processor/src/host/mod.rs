@@ -2,7 +2,7 @@ use alloc::{sync::Arc, vec::Vec};
 use core::future::Future;
 
 use miden_core::{
-    AdviceMap, DebugOptions, Felt, Word, crypto::merkle::InnerNodeInfo, mast::MastForest,
+    AdviceMap, DebugOptions, EventId, Felt, Word, crypto::merkle::InnerNodeInfo, mast::MastForest,
 };
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 
@@ -25,12 +25,13 @@ pub use mast_forest_store::{MastForestStore, MemMastForestStore};
 // ADVICE MAP MUTATIONS
 // ================================================================================================
 
-/// Any possible way an event can modify the advice map
+/// Any possible way an event can modify the advice provider
 #[derive(Debug, PartialEq, Eq)]
 pub enum AdviceMutation {
     ExtendStack { values: Vec<Felt> },
     ExtendMap { other: AdviceMap },
     ExtendMerkleStore { infos: Vec<InnerNodeInfo> },
+    ExtendDeferred { data: Vec<(EventId, Vec<Felt>)> },
 }
 
 impl AdviceMutation {
@@ -44,6 +45,10 @@ impl AdviceMutation {
 
     pub fn extend_merkle_store(infos: impl IntoIterator<Item = InnerNodeInfo>) -> Self {
         Self::ExtendMerkleStore { infos: Vec::from_iter(infos) }
+    }
+
+    pub fn extend_deferred(data: Vec<(EventId, Vec<Felt>)>) -> Self {
+        Self::ExtendDeferred { data }
     }
 }
 // HOST TRAIT

@@ -1,7 +1,7 @@
 use alloc::{collections::btree_map::Entry, vec::Vec};
 
 use miden_core::{
-    AdviceMap, Felt, Word,
+    AdviceMap, EventId, Felt, Word,
     crypto::merkle::{InnerNodeInfo, MerklePath, MerkleStore, NodeIndex},
 };
 
@@ -37,6 +37,7 @@ pub struct AdviceProvider {
     stack: Vec<Felt>,
     map: AdviceMap,
     store: MerkleStore,
+    deferred: Vec<(EventId, Vec<Felt>)>,
 }
 
 impl AdviceProvider {
@@ -58,6 +59,9 @@ impl AdviceProvider {
             },
             AdviceMutation::ExtendMerkleStore { infos } => {
                 self.extend_merkle_store(infos);
+            },
+            AdviceMutation::ExtendDeferred { data } => {
+                self.extend_deferred(data);
             },
         }
         Ok(())
@@ -320,6 +324,22 @@ impl AdviceProvider {
         self.store.extend(iter);
     }
 
+    // DEFERRED DATA
+    // --------------------------------------------------------------------------------------------
+
+    /// Returns a reference to the deferred data.
+    pub fn deferred(&self) -> &[(EventId, Vec<Felt>)] {
+        &self.deferred
+    }
+
+    /// Extends the deferred data with the given entries.
+    pub fn extend_deferred<I>(&mut self, iter: I)
+    where
+        I: IntoIterator<Item = (EventId, Vec<Felt>)>,
+    {
+        self.deferred.extend(iter);
+    }
+
     // MUTATORS
     // --------------------------------------------------------------------------------------------
 
@@ -330,12 +350,13 @@ impl AdviceProvider {
         self.extend_map(&inputs.map)
     }
 
-    /// Consumes `self` and return its parts (stack, map, store).
+    /// Consumes `self` and return its parts (stack, map, store, deferred).
     ///
     /// Note that the order of the stack is such that the element at the top of the stack is at the
     /// end of the returned vector.
-    pub fn into_parts(self) -> (Vec<Felt>, AdviceMap, MerkleStore) {
-        (self.stack, self.map, self.store)
+    #[allow(clippy::type_complexity)]
+    pub fn into_parts(self) -> (Vec<Felt>, AdviceMap, MerkleStore, Vec<(EventId, Vec<Felt>)>) {
+        (self.stack, self.map, self.store, self.deferred)
     }
 }
 
@@ -343,7 +364,7 @@ impl From<AdviceInputs> for AdviceProvider {
     fn from(inputs: AdviceInputs) -> Self {
         let AdviceInputs { mut stack, map, store } = inputs;
         stack.reverse();
-        Self { stack, map, store }
+        Self { stack, map, store, deferred: Vec::new() }
     }
 }
 
