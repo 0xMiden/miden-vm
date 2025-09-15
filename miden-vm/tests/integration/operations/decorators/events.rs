@@ -8,10 +8,10 @@ use super::TestHost;
 fn test_event_handling() {
     let source = "\
     begin
-        push.1000
+        push.1
         emit
         drop
-        push.2000
+        push.2
         emit
         drop
         swapw dropw
@@ -30,7 +30,7 @@ fn test_event_handling() {
     .unwrap();
 
     // make sure events were handled correctly
-    let expected = vec![1000, 2000];
+    let expected = vec![1, 2];
     assert_eq!(host.event_handler, expected);
 }
 
