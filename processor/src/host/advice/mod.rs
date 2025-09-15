@@ -29,6 +29,11 @@ use crate::{host::AdviceMutation, processor::AdviceProviderInterface};
 /// 3. Merkle store, which contains structured data reducible to Merkle paths. The VM can request
 ///    Merkle paths from the store, as well as mutate it by updating or merging nodes contained in
 ///    the store.
+/// 4. Deferred data, which is a log of precompile calls made during execution. Each entry contains
+///    an event ID and the associated call data. This information tracks the order of precompile
+///    operations and is used for later proof generation, either by including the calldata directly
+///    in VM proofs for manual verification or by generating recursive proofs for the deferred
+///    computations.
 ///
 /// Advice data is store in-memory using [alloc::collections::btree_map::BTreeMap]s as its backing
 /// storage.
