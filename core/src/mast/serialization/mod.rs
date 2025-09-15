@@ -48,7 +48,7 @@ use alloc::{
 use decorator::{DecoratorDataBuilder, DecoratorInfo};
 use string_table::StringTable;
 
-use super::{DecoratedOpLink, DecoratorId, MastForest, MastNode, MastNodeErrorContext, MastNodeId};
+use super::{DecoratedOpLink, DecoratorId, MastForest, MastNode, MastNodeId};
 use crate::{
     AdviceMap,
     mast::node::MastNodeExt,
@@ -140,8 +140,10 @@ impl Serializable for MastForest {
                 let ops_offset = if let MastNode::Block(basic_block) = mast_node {
                     let ops_offset = basic_block_data_builder.encode_basic_block(basic_block);
 
-                    basic_block_decorators
-                        .push((mast_node_id, basic_block.decorators().collect::<Vec<_>>()));
+                    basic_block_decorators.push((
+                        mast_node_id,
+                        basic_block.indexed_decorator_iter().collect::<Vec<_>>(),
+                    ));
 
                     ops_offset
                 } else {

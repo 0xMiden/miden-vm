@@ -3,7 +3,7 @@ use miden_crypto::{Felt, ONE, Word};
 use super::*;
 use crate::{
     Decorator, Operation,
-    mast::{BasicBlockNode, MastNode},
+    mast::{BasicBlockNode, MastNodeErrorContext},
 };
 
 fn block_foo() -> MastNode {

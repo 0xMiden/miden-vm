@@ -3,8 +3,8 @@ use alloc::{boxed::Box, vec::Vec};
 use core::fmt;
 
 pub use basic_block_node::{
-    BATCH_SIZE as OP_BATCH_SIZE, BasicBlockNode, GROUP_SIZE as OP_GROUP_SIZE, OpBatch,
-    OperationOrDecorator,
+    BATCH_SIZE as OP_BATCH_SIZE, BasicBlockNode, DecoratorOpLinkIterator,
+    GROUP_SIZE as OP_GROUP_SIZE, OpBatch, OperationOrDecorator,
 };
 use enum_dispatch::enum_dispatch;
 #[cfg(feature = "serde")]

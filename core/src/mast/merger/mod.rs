@@ -4,8 +4,8 @@ use miden_crypto::hash::blake::Blake3Digest;
 
 use crate::mast::{
     BasicBlockNode, CallNode, DecoratorId, DynNode, ExternalNode, JoinNode, LoopNode, MastForest,
-    MastForestError, MastNode, MastNodeErrorContext, MastNodeFingerprint, MastNodeId,
-    MultiMastForestIteratorItem, MultiMastForestNodeIter, SplitNode, node::MastNodeExt,
+    MastForestError, MastNode, MastNodeFingerprint, MastNodeId, MultiMastForestIteratorItem,
+    MultiMastForestNodeIter, SplitNode, node::MastNodeExt,
 };
 
 #[cfg(test)]
@@ -328,7 +328,7 @@ impl MastForestMerger {
                     // Operation Indices of decorators stay the same while decorator IDs need to be
                     // mapped.
                     basic_block_node
-                        .decorators()
+                        .indexed_decorator_iter()
                         .map(|(idx, decorator_id)| match map_decorator_id(&decorator_id) {
                             Ok(mapped_decorator) => Ok((idx, mapped_decorator)),
                             Err(err) => Err(err),
@@ -342,9 +342,9 @@ impl MastForestMerger {
             MastNode::External(external_node) => ExternalNode::new(external_node.digest()).into(),
         };
 
-        // Decorators must be handled specially for basic block nodes.
-        // For other node types we can handle it centrally.
-        if !mapped_node.is_basic_block() {
+        // Decorators must be handled specially for the op-indexed ones of basic block nodes above.
+        // For before_enter/after_exit node types we can handle it centrally.
+        {
             mapped_node.append_before_enter(&map_decorators(node.before_enter())?);
             mapped_node.append_after_exit(&map_decorators(node.after_exit())?);
         }
