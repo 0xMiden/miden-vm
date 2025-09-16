@@ -3,7 +3,11 @@ use alloc::string::ToString;
 use miden_crypto::{Felt, ONE, Word};
 
 use super::*;
-use crate::{AssemblyOp, DebugOptions, Decorator, mast::MastForestError, operations::Operation};
+use crate::{
+    AssemblyOp, DebugOptions, Decorator,
+    mast::{BasicBlockNode, MastForestError, MastNodeExt, node::MastNodeErrorContext},
+    operations::Operation,
+};
 
 /// If this test fails to compile, it means that `Operation` or `Decorator` was changed. Make sure
 /// that all tests in this file are updated accordingly. For example, if a new `Operation` variant
@@ -405,4 +409,78 @@ fn mast_forest_serialize_deserialize_advice_map() {
 
     let parsed = MastForest::read_from_bytes(&forest.to_bytes()).unwrap();
     assert_eq!(forest.advice_map, parsed.advice_map);
+}
+
+/// Test that BasicBlockNode serialization doesn't duplicate before_enter/after_exit decorators.
+///
+/// This test verifies that the serialization process correctly uses `indexed_decorator_iter()`
+/// instead of `decorators()` to avoid duplicating before_enter and after_exit decorators, which
+/// are serialized separately in the `before_enter_decorators` and `after_exit_decorators` lists.
+#[test]
+fn mast_forest_basic_block_serialization_no_decorator_duplication() {
+    let mut forest = MastForest::new();
+
+    // Create decorators
+    let before_enter_deco = forest.add_decorator(Decorator::Trace(1)).unwrap();
+    let op_deco = forest.add_decorator(Decorator::Trace(2)).unwrap();
+    let after_exit_deco = forest.add_decorator(Decorator::Trace(3)).unwrap();
+
+    // Create a basic block with all types of decorators
+    let operations = vec![Operation::Add, Operation::Mul];
+    let mut block = BasicBlockNode::new(operations, vec![(0, op_deco)]).unwrap();
+    block.append_before_enter(&[before_enter_deco]);
+    block.append_after_exit(&[after_exit_deco]);
+
+    // Add the block to the forest
+    let block_id = forest.add_node(block).unwrap();
+    forest.make_root(block_id);
+
+    // Serialize and deserialize the forest
+    let serialized = forest.to_bytes();
+    let deserialized = MastForest::read_from_bytes(&serialized).unwrap();
+
+    // Get the deserialized block
+    let deserialized_root_id = deserialized.procedure_roots()[0];
+    let deserialized_block =
+        if let crate::mast::MastNode::Block(block) = &deserialized[deserialized_root_id] {
+            block
+        } else {
+            panic!("Expected a block node");
+        };
+
+    // Verify that each decorator appears exactly once in the deserialized structure
+    assert_eq!(
+        deserialized_block.before_enter(),
+        &[before_enter_deco],
+        "before_enter decorator should appear exactly once"
+    );
+    assert_eq!(
+        deserialized_block.after_exit(),
+        &[after_exit_deco],
+        "after_exit decorator should appear exactly once"
+    );
+
+    // Verify that the op-indexed decorator is only in the indexed decorator list
+    let indexed_decorators: Vec<_> = deserialized_block.indexed_decorator_iter().collect();
+    assert_eq!(indexed_decorators.len(), 1, "Should have exactly one op-indexed decorator");
+    assert_eq!(indexed_decorators[0].1, op_deco, "Op-indexed decorator should be preserved");
+
+    // Verify that before_enter and after_exit decorators are NOT in the indexed decorator list
+    assert!(
+        !indexed_decorators.iter().any(|&(_, id)| id == before_enter_deco),
+        "before_enter decorator should not be duplicated in indexed decorators"
+    );
+    assert!(
+        !indexed_decorators.iter().any(|&(_, id)| id == after_exit_deco),
+        "after_exit decorator should not be duplicated in indexed decorators"
+    );
+
+    // Verify that all decorators() method returns all decorators (this is the full iterator)
+    let all_decorators: Vec<_> = deserialized_block.decorators().collect();
+    assert_eq!(all_decorators.len(), 3, "decorators() should return all 3 decorators");
+
+    // Verify the order: before_enter, op-indexed, after_exit
+    assert_eq!(all_decorators[0].1, before_enter_deco, "First decorator should be before_enter");
+    assert_eq!(all_decorators[1].1, op_deco, "Second decorator should be op-indexed");
+    assert_eq!(all_decorators[2].1, after_exit_deco, "Third decorator should be after_exit");
 }
