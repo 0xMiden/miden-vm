@@ -59,28 +59,28 @@ fn assert_child_id_lt_parent_id(forest: &MastForest) -> Result<(), &str> {
     for (mast_node_id, node) in forest.nodes().iter().enumerate() {
         match node {
             MastNode::Join(join_node) => {
-                if !join_node.first().as_usize() < mast_node_id {
+                if join_node.first().as_usize() >= mast_node_id {
                     return Err("join node first child id is not < parent id");
                 };
-                if !join_node.second().as_usize() < mast_node_id {
+                if join_node.second().as_usize() >= mast_node_id {
                     return Err("join node second child id is not < parent id");
                 }
             },
             MastNode::Split(split_node) => {
-                if !split_node.on_true().as_usize() < mast_node_id {
+                if split_node.on_true().as_usize() >= mast_node_id {
                     return Err("split node on true id is not < parent id");
                 }
-                if !split_node.on_false().as_usize() < mast_node_id {
+                if split_node.on_false().as_usize() >= mast_node_id {
                     return Err("split node on false id is not < parent id");
                 }
             },
             MastNode::Loop(loop_node) => {
-                if !loop_node.body().as_usize() < mast_node_id {
+                if loop_node.body().as_usize() >= mast_node_id {
                     return Err("loop node body id is not < parent id");
                 }
             },
             MastNode::Call(call_node) => {
-                if !call_node.callee().as_usize() < mast_node_id {
+                if call_node.callee().as_usize() >= mast_node_id {
                     return Err("call node callee id is not < parent id");
                 }
             },
