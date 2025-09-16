@@ -34,7 +34,7 @@ ALL_FEATURES_BUT_ASYNC=--features concurrent,executable,metal,testing,with-debug
 
 # Workspace-wide test features
 WORKSPACE_TEST_FEATURES  := concurrent,testing,executable
-FAST_TEST_FEATURES       := testing,no_err_ctx
+FAST_TEST_FEATURES       := concurrent,testing,metal,no_err_ctx
 
 # Feature sets for executable builds
 FEATURES_CONCURRENT_EXEC := --features concurrent,executable
@@ -47,7 +47,7 @@ FEATURES_assembly        := testing
 FEATURES_assembly-syntax := testing
 FEATURES_core            :=
 FEATURES_miden-vm        := concurrent,executable,metal,internal
-FEATURES_processor       := concurrent,testing
+FEATURES_processor       := concurrent,testing,bus-debugger
 FEATURES_prover          := concurrent,metal
 FEATURES_stdlib          := with-debug-info
 FEATURES_verifier        :=
@@ -93,7 +93,7 @@ book: ## Builds the book & serves documentation site
 #   make core-test CARGO_PROFILE=test-dev FEATURES="testing,no_err_ctx"
 #   make core-test CRATE=miden-processor FEATURES=testing EXPR="-E 'not test(#*proptest)'"
 
-NEXTEST_PROFILE ?= ci
+NEXTEST_PROFILE ?= default
 CARGO_PROFILE   ?= test-dev
 CRATE           ?=
 FEATURES        ?=
@@ -137,11 +137,11 @@ test-%: ## Tests a specific crate; accepts 'test=' to pass a selector or nextest
 
 .PHONY: test-build
 test-build: ## Build the test binaries for the workspace (no run)
-	$(MAKE) core-test-build FEATURES="$(WORKSPACE_TEST_FEATURES)"
+	$(MAKE) core-test-build NEXTEST_PROFILE=ci FEATURES="$(WORKSPACE_TEST_FEATURES)"
 
 .PHONY: test
 test: ## Run all tests for the workspace
-	$(MAKE) core-test FEATURES="$(WORKSPACE_TEST_FEATURES)"
+	$(MAKE) core-test NEXTEST_PROFILE=ci FEATURES="$(WORKSPACE_TEST_FEATURES)"
 
 .PHONY: test-docs
 test-docs: ## Run documentation tests (cargo test - nextest doesn't support doctests)
@@ -164,7 +164,8 @@ test-skip-proptests: ## Runs all tests, except property-based tests
 .PHONY: test-loom
 test-loom: ## Runs all loom-based tests
 	RUSTFLAGS="--cfg loom" $(MAKE) core-test \
-		FEATURES=testing \
+		CRATE=miden-utils-sync \
+		FEATURES= \
 		EXPR="-E 'test(#*loom)'"
 
 # --- checking ------------------------------------------------------------------------------------
