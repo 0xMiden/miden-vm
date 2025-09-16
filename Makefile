@@ -9,25 +9,48 @@
 help:
 	@printf "\nTargets:\n\n"
 	@awk 'BEGIN {FS = ":.*##"; OFS = ""} /^[a-zA-Z0-9_.-]+:.*?##/ { printf "  \033[36m%-24s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
+	@printf "\nCrate Testing:\n"
+	@printf "  make test-air                    # Test air crate\n"
+	@printf "  make test-assembly               # Test assembly crate\n"
+	@printf "  make test-assembly-syntax        # Test assembly-syntax crate\n"
+	@printf "  make test-core                   # Test core crate\n"
+	@printf "  make test-miden-vm               # Test miden-vm crate\n"
+	@printf "  make test-processor              # Test processor crate\n"
+	@printf "  make test-prover                 # Test prover crate\n"
+	@printf "  make test-stdlib                 # Test stdlib crate\n"
+	@printf "  make test-verifier               # Test verifier crate\n"
 	@printf "\nExamples:\n"
-	@printf "  make core-test CRATE=miden-air FEATURES=testing\n"
-	@printf "  make test-fast\n"
-	@printf "  make test-skip-proptests\n"
-	@printf "  make test-air test=\"-E '\''package(miden-air) & test(#*foo)'\''\"\n\n"
+	@printf "  make test-air test=\"some_test\"   # Test specific function\n"
+	@printf "  make test-fast                   # Fast tests (no proptests/CLI)\n"
+	@printf "  make test-skip-proptests         # All tests except proptests\n\n"
 
 
 # -- environment toggles -------------------------------------------------------
 BACKTRACE          = RUST_BACKTRACE=1
 WARNINGS           = RUSTDOCFLAGS="-D warnings"
-DEBUG_ASSERTIONS   = RUSTFLAGS="-C debug-assertions"
 
-# -- doc help ------------------------------------------------------------------
+# -- feature configuration -----------------------------------------------------
 ALL_FEATURES_BUT_ASYNC=--features concurrent,executable,metal,testing,with-debug-info,internal
+
+# Workspace-wide test features
+WORKSPACE_TEST_FEATURES  := concurrent,testing,executable
+FAST_TEST_FEATURES       := testing,no_err_ctx
 
 # Feature sets for executable builds
 FEATURES_CONCURRENT_EXEC := --features concurrent,executable
-FEATURES_METAL_EXEC := --features concurrent,executable,metal,tracing-forest
-FEATURES_LOG_TREE := --features concurrent,executable,tracing-forest
+FEATURES_METAL_EXEC      := --features concurrent,executable,metal,tracing-forest
+FEATURES_LOG_TREE        := --features concurrent,executable,tracing-forest
+
+# Per-crate default features
+FEATURES_air             := testing
+FEATURES_assembly        := testing
+FEATURES_assembly-syntax := testing
+FEATURES_core            :=
+FEATURES_miden-vm        := concurrent,executable,metal,internal
+FEATURES_processor       := concurrent,testing
+FEATURES_prover          := concurrent,metal
+FEATURES_stdlib          := with-debug-info
+FEATURES_verifier        :=
 
 # -- linting --------------------------------------------------------------------------------------
 
@@ -65,12 +88,11 @@ book: ## Builds the book & serves documentation site
 	mdbook serve --open docs
 
 # -- core knobs (overridable from CLI or by caller targets) --------------------
-# Examples:
+# Advanced usage (most users should use pattern rules like 'make test-air'):
 #   make core-test CRATE=miden-air FEATURES=testing
-#   make core-test CARGO_PROFILE=test-fast FEATURES="testing,no_err_ctx"
+#   make core-test CARGO_PROFILE=test-dev FEATURES="testing,no_err_ctx"
 #   make core-test CRATE=miden-processor FEATURES=testing EXPR="-E 'not test(#*proptest)'"
 
-# Use test-dev profile consistently (like origin/main)
 NEXTEST_PROFILE ?= ci
 CARGO_PROFILE   ?= test-dev
 CRATE           ?=
@@ -100,40 +122,43 @@ core-test-build:
 	$(MAKE) core-test EXTRA="--no-run"
 
 # -- pattern rule: `make test-<crate> [test=...]` ------------------------------
-# Usage:
-#   make test-air
-#   make test-air test="'my::mod::some_test'"
+# Primary method for testing individual crates (automatically uses correct features):
+#   make test-air                              # Test air crate with default features
+#   make test-processor                        # Test processor crate with default features
+#   make test-air test="'my::mod::some_test'"  # Test specific function in air crate
 .PHONY: test-%
 test-%: ## Tests a specific crate; accepts 'test=' to pass a selector or nextest expr
-	$(DEBUG_ASSERTIONS) $(MAKE) core-test \
+	$(MAKE) core-test \
 		CRATE=miden-$* \
 		FEATURES=$(FEATURES_$*) \
 		EXPR=$(if $(test),$(test),)
 
-# -- top-level convenience targets ---------------------------------------------
+# -- workspace-wide tests ------------------------------------------------------
 
 .PHONY: test-build
 test-build: ## Build the test binaries for the workspace (no run)
-	$(MAKE) core-test-build FEATURES="concurrent,testing,executable"
+	$(MAKE) core-test-build FEATURES="$(WORKSPACE_TEST_FEATURES)"
 
 .PHONY: test
 test: ## Run all tests for the workspace
-	$(MAKE) core-test FEATURES="concurrent,testing,executable"
+	$(MAKE) core-test FEATURES="$(WORKSPACE_TEST_FEATURES)"
 
 .PHONY: test-docs
 test-docs: ## Run documentation tests (cargo test - nextest doesn't support doctests)
 	cargo test --doc $(ALL_FEATURES_BUT_ASYNC)
 
+# -- filtered test runs --------------------------------------------------------
+
 .PHONY: test-fast
 test-fast: ## Runs fast tests (excludes all CLI tests and proptests)
-	$(DEBUG_ASSERTIONS) $(MAKE) core-test \
-		FEATURES="testing,no_err_ctx" \
+	$(MAKE) core-test \
+		FEATURES="$(FAST_TEST_FEATURES)" \
 		EXPR="-E 'not test(#*proptest) and not test(cli_)'"
 
 .PHONY: test-skip-proptests
 test-skip-proptests: ## Runs all tests, except property-based tests
-	$(DEBUG_ASSERTIONS) $(MAKE) core-test \
-		FEATURES=testing \
+	$(MAKE) core-test \
+		FEATURES="$(WORKSPACE_TEST_FEATURES)" \
 		EXPR="-E 'not test(#*proptest)'"
 
 .PHONY: test-loom
@@ -141,39 +166,6 @@ test-loom: ## Runs all loom-based tests
 	RUSTFLAGS="--cfg loom" $(MAKE) core-test \
 		FEATURES=testing \
 		EXPR="-E 'test(#*loom)'"
-
-# -- per-crate default features ------------------------------------------------
-FEATURES_air             := testing
-FEATURES_assembly        := testing
-FEATURES_assembly-syntax := testing
-FEATURES_core            :=
-FEATURES_miden-vm        := concurrent,executable,metal,internal
-FEATURES_processor       := concurrent,testing
-FEATURES_prover          := concurrent,metal
-FEATURES_stdlib          := with-debug-info
-FEATURES_verifier        :=
-
-# -- compatibility aliases (optional; pattern rule already covers them) --------
-.PHONY: test-air test-assembly test-assembly-syntax test-core test-miden-vm test-processor test-prover test-stdlib test-verifier
-test-air: ## Tests miden-air package
-	$(DEBUG_ASSERTIONS) $(MAKE) core-test CRATE=miden-air              FEATURES="$(FEATURES_air)"               EXPR=$(if $(test),$(test),)
-test-assembly: ## Tests miden-assembly package
-	$(DEBUG_ASSERTIONS) $(MAKE) core-test CRATE=miden-assembly         FEATURES="$(FEATURES_assembly)"          EXPR=$(if $(test),$(test),)
-test-assembly-syntax: ## Tests miden-assembly-syntax package
-	$(DEBUG_ASSERTIONS) $(MAKE) core-test CRATE=miden-assembly-syntax  FEATURES="$(FEATURES_assembly-syntax)"   EXPR=$(if $(test),$(test),)
-test-core: ## Tests miden-core package
-	$(DEBUG_ASSERTIONS) $(MAKE) core-test CRATE=miden-core             FEATURES="$(FEATURES_core)"              EXPR=$(if $(test),$(test),)
-test-miden-vm: ## Tests miden-vm package
-	$(DEBUG_ASSERTIONS) $(MAKE) core-test CRATE=miden-vm               FEATURES="$(FEATURES_miden-vm)"           EXPR=$(if $(test),$(test),)
-test-processor: ## Tests miden-processor package
-	$(DEBUG_ASSERTIONS) $(MAKE) core-test CRATE=miden-processor        FEATURES="$(FEATURES_processor)"         EXPR=$(if $(test),$(test),)
-test-prover: ## Tests miden-prover package
-	$(DEBUG_ASSERTIONS) $(MAKE) core-test CRATE=miden-prover           FEATURES="$(FEATURES_prover)"            EXPR=$(if $(test),$(test),)
-test-stdlib: ## Tests miden-stdlib package
-	$(DEBUG_ASSERTIONS) $(MAKE) core-test CRATE=miden-stdlib           FEATURES="$(FEATURES_stdlib)"            EXPR=$(if $(test),$(test),)
-test-verifier: ## Tests miden-verifier package
-	$(DEBUG_ASSERTIONS) $(MAKE) core-test CRATE=miden-verifier         FEATURES="$(FEATURES_verifier)"          EXPR=$(if $(test),$(test),)
-
 
 # --- checking ------------------------------------------------------------------------------------
 
