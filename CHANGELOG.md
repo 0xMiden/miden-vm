@@ -2,6 +2,10 @@
 
 ## 0.19.0 (TBD)
 
+#### Enhancements
+
+- Added `before_enter` and `after_exit` decorator lists to `BasicBlockNode`.([#2167](https://github.com/0xMiden/miden-vm/pull/2167))
+
 #### Changes
 
 - [BREAKING] Incremented MSRV to 1.90.
