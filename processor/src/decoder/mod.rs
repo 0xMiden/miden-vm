@@ -5,7 +5,7 @@ use miden_air::{
     trace::{
         chiplets::hasher::DIGEST_LEN,
         decoder::{
-            NUM_HASHER_COLUMNS, NUM_OP_BATCH_FLAGS, NUM_OP_BITS, NUM_OP_BITS_EXTRA_COLS,
+            NUM_SHARED_COLUMNS, NUM_OP_BATCH_FLAGS, NUM_OP_BITS, NUM_OP_BITS_EXTRA_COLS,
             OP_BATCH_1_GROUPS, OP_BATCH_2_GROUPS, OP_BATCH_4_GROUPS, OP_BATCH_8_GROUPS,
         },
     },
@@ -526,7 +526,7 @@ impl Process {
 ///   because hasher addresses are guaranteed to be unique.
 /// * op_bits columns b0 through b6 are used to encode an operation to be executed by the VM. Each
 ///   of these columns contains a single binary value, which together form a single opcode.
-/// * Hasher state columns h0 through h7. These are multi purpose columns used as follows:
+/// * Shared columns h0 through h7. These are multi purpose columns used as follows:
 ///   - When starting decoding of a new code block (e.g., via JOIN, SPLIT, LOOP, SPAN operations)
 ///     these columns are used for providing inputs for the current block's hash computations.
 ///   - When finishing decoding of a code block (i.e., via END operation), these columns are used to
