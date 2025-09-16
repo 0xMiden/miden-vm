@@ -200,8 +200,9 @@ impl fmt::Display for ExecutionDetails {
         let asm_op_stats = self.asm_op_stats();
 
         // calculate the total length of pading for the `AsmOp` column
-        let padding =
-            asm_op_stats.iter().try_fold(20, |max, value| Ok(value.op().len().max(max)))?;
+        let padding = asm_op_stats
+            .iter()
+            .try_fold(20, |max, value| Ok::<usize, std::fmt::Error>(value.op().len().max(max)))?;
 
         writeln!(
             f,
