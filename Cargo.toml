@@ -39,8 +39,10 @@ incremental = true
 
 [profile.ci]
 inherits = "dev"
-opt-level = 2          # Faster test execution in CI
-debug = false          # No debug symbols needed in CI
+opt-level = 1          # Same as test-dev for consistent performance
+debug = true           # Keep debug symbols like test-dev (minimal impact)
+debug-assertions = true
+overflow-checks = true
 lto = "off"            # Skip LTO for faster compilation
 incremental = false    # CI builds from scratch anyway
 
