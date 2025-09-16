@@ -604,10 +604,42 @@ impl FastProcessor {
     /// than 16.
     #[inline(always)]
     fn decrement_stack_size(&mut self, tracer: &mut impl Tracer) {
-        tracer.decrement_stack_size();
+        if self.stack_top_idx == MIN_STACK_DEPTH {
+            // We no longer have any room in the stack buffer to decrement the stack size (which
+            // would cause the `stack_bot_idx` to go below 0). We therefore reset the stack to its
+            // original position.
+            self.reset_stack_in_buffer(INITIAL_STACK_TOP_IDX);
+        }
 
         self.stack_top_idx -= 1;
         self.stack_bot_idx = min(self.stack_bot_idx, self.stack_top_idx - MIN_STACK_DEPTH);
+
+        tracer.decrement_stack_size();
+    }
+
+    /// Resets the stack in the buffer to a new position, preserving the top 16 elements of the
+    /// stack.
+    ///
+    /// # Preconditions
+    /// - The stack is expected to have exactly 16 elements.
+    #[inline(always)]
+    fn reset_stack_in_buffer(&mut self, new_stack_top_idx: usize) {
+        debug_assert_eq!(self.stack_depth(), MIN_STACK_DEPTH as u32);
+
+        let new_stack_bot_idx = new_stack_top_idx - MIN_STACK_DEPTH;
+
+        // Copy stack to its new position
+        self.stack
+            .copy_within(self.stack_bot_idx..self.stack_top_idx, new_stack_bot_idx);
+
+        // Zero out stack below the new new_stack_bot_idx, since this is where overflow values
+        // come from, and are guaranteed to be ZERO. We don't need to zero out above
+        // `stack_top_idx`, since values there are never read before being written.
+        self.stack[0..new_stack_bot_idx].fill(ZERO);
+
+        // Update indices.
+        self.stack_bot_idx = new_stack_bot_idx;
+        self.stack_top_idx = new_stack_top_idx;
     }
 
     // TESTING
