@@ -26,14 +26,14 @@ help:
 
 
 # -- environment toggles -------------------------------------------------------
-BACKTRACE          = RUST_BACKTRACE=1
-WARNINGS           = RUSTDOCFLAGS="-D warnings"
+BACKTRACE                := RUST_BACKTRACE=1
+WARNINGS                 := RUSTDOCFLAGS="-D warnings"
 
 # -- feature configuration -----------------------------------------------------
-ALL_FEATURES_BUT_ASYNC=--features concurrent,executable,metal,testing,with-debug-info,internal
+ALL_FEATURES_BUT_ASYNC   := --features concurrent,executable,metal,testing,with-debug-info,internal
 
 # Workspace-wide test features
-WORKSPACE_TEST_FEATURES  := concurrent,testing,executable
+WORKSPACE_TEST_FEATURES  := concurrent,testing,metal,executable
 FAST_TEST_FEATURES       := concurrent,testing,metal,no_err_ctx
 
 # Feature sets for executable builds
