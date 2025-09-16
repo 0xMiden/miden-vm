@@ -336,6 +336,7 @@ impl Assembler {
             Instruction::MovDn15 => block_builder.push_ops([MovDn8, SwapDW, MovDn7, SwapDW]),
             Instruction::MovDnW2 => block_builder.push_ops([SwapW2, SwapW]),
             Instruction::MovDnW3 => block_builder.push_ops([SwapW3, SwapW2, SwapW]),
+            Instruction::Reversew => block_builder.push_ops([MovDn3, MovUp2]),
 
             Instruction::CSwap => block_builder.push_op(CSwap),
             Instruction::CSwapW => block_builder.push_op(CSwapW),

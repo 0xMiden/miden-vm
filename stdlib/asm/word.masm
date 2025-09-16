@@ -2,6 +2,8 @@
 
 #! Reverses order of the first four elements on the stack
 #!
+#! Note: This functionality is also available as the `reversew` instruction
+#!
 #! Inputs:  [a, b, c, d, ...]
 #! Outputs: [d, c, b, a, ...]
 #!

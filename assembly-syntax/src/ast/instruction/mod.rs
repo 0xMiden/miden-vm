@@ -200,6 +200,7 @@ pub enum Instruction {
     MovDn15,
     MovDnW2,
     MovDnW3,
+    Reversew,
     CSwap,
     CSwapW,
     CDrop,

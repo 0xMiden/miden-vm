@@ -203,6 +203,7 @@ impl PrettyPrint for Instruction {
             Self::MovDn15 => const_text("movdn.15"),
             Self::MovDnW2 => const_text("movdnw.2"),
             Self::MovDnW3 => const_text("movdnw.3"),
+            Self::Reversew => const_text("reversew"),
             Self::CSwap => const_text("cswap"),
             Self::CSwapW => const_text("cswapw"),
             Self::CDrop => const_text("cdrop"),
