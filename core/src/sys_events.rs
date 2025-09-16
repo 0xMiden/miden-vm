@@ -13,7 +13,7 @@ use crate::EventId;
 /// All actions, except for `MerkleNodeMerge`, `Ext2Inv` and `UpdateMerkleNode` can be invoked
 /// directly from Miden assembly via dedicated instructions.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-#[repr(u32)]
+#[repr(u8)]
 pub enum SystemEvent {
     // MERKLE STORE EVENTS
     // --------------------------------------------------------------------------------------------
@@ -240,10 +240,6 @@ pub enum SystemEvent {
 /// Last variant of the `SystemEvent` enum, used to derive the number of cases.
 const LAST_EVENT: SystemEvent = SystemEvent::HpermToMap;
 
-/// Offset used when mapping SystemEvent IDs to `EventId` to avoid collisions with user-defined
-/// event IDs.
-const ID_OFFSET: u32 = 1 << 31;
-
 impl TryFrom<EventId> for SystemEvent {
     type Error = u64;
 
@@ -272,8 +268,7 @@ impl TryFrom<EventId> for SystemEvent {
             | SystemEvent::HpermToMap => {},
         };
 
-        let normalized_id = event_id.checked_sub(ID_OFFSET as u64).ok_or(event_id)?;
-        match normalized_id {
+        match event_id {
             0 => Ok(SystemEvent::MerkleNodeMerge),
             1 => Ok(SystemEvent::MerkleNodeToStack),
             2 => Ok(SystemEvent::MapValueToStack),
@@ -297,8 +292,7 @@ impl TryFrom<EventId> for SystemEvent {
 
 impl From<SystemEvent> for EventId {
     fn from(system_event: SystemEvent) -> Self {
-        let offset_id = ID_OFFSET + system_event as u32;
-        EventId::from_u64(offset_id as u64)
+        Self::from_u64(system_event as u64)
     }
 }
 
@@ -337,18 +331,18 @@ mod test {
 
     #[test]
     fn test_try_from() {
-        let last_event_id = LAST_EVENT as u32;
+        let last_event_id = LAST_EVENT as u8;
 
         // Check that the event IDs are contiguous
         for id in 0..=last_event_id {
-            let offset_id = ID_OFFSET + id;
-            let event_id = EventId::from_u64(offset_id as u64);
+            let event_id = EventId::from_u64(id as u64);
+            assert!(event_id.is_reserved());
             let event = SystemEvent::try_from(event_id).unwrap();
-            assert_eq!(id, event as u32)
+            assert_eq!(id, event as u8)
         }
 
         // Creating from an the next index results in an error.
-        let invalid_event_id = EventId::from_u64((ID_OFFSET + last_event_id + 1) as u64);
+        let invalid_event_id = EventId::from_u64((last_event_id + 1) as u64);
         SystemEvent::try_from(invalid_event_id).unwrap_err();
     }
 }

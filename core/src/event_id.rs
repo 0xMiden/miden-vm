@@ -7,6 +7,9 @@ use crate::{Felt, utils::hash_string_to_word};
 /// Event IDs are used to identify events that can be emitted by the VM or handled by the host.
 /// This newtype provides type safety and ensures that event IDs are not accidentally confused
 /// with other [`Felt`] values.
+///
+/// While not enforced by this type, the values 0..256 are reserved for
+/// [`SystemEvent`](crate::sys_events::SystemEvent)s.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EventId(Felt);
 
@@ -44,6 +47,13 @@ impl EventId {
     /// Returns the underlying [`Felt`] value.
     pub const fn as_felt(&self) -> Felt {
         self.0
+    }
+
+    /// Returns `true` if this event ID is reserved for a
+    /// [`SystemEvent`](crate::sys_events::SystemEvent).
+    pub const fn is_reserved(&self) -> bool {
+        let value = self.0.as_int();
+        value <= u8::MAX as u64
     }
 }
 
