@@ -4,8 +4,11 @@ extern crate alloc;
 #[macro_export]
 macro_rules! build_test {
     ($($params:tt)+) => {{
+        let stdlib = miden_stdlib::StdLibrary::default();
         let mut test = miden_utils_testing::build_test_by_mode!(false, $($params)+);
-        test.libraries = vec![miden_stdlib::StdLibrary::default().into()];
+        test.libraries.push(stdlib.library().clone());
+        test.add_event_handlers(stdlib.handlers());
+
         test
     }}
 }
@@ -14,8 +17,11 @@ macro_rules! build_test {
 #[macro_export]
 macro_rules! build_debug_test {
     ($($params:tt)+) => {{
+        let stdlib = miden_stdlib::StdLibrary::default();
         let mut test = miden_utils_testing::build_test_by_mode!(true, $($params)+);
-        test.libraries = vec![miden_stdlib::StdLibrary::default().into()];
+        test.libraries.push(stdlib.library().clone());
+        test.add_event_handlers(stdlib.handlers());
+
         test
     }}
 }

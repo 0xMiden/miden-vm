@@ -1,13 +1,14 @@
 use alloc::{
     boxed::Box,
     collections::{BTreeMap, btree_map::Entry},
+    sync::Arc,
     vec::Vec,
 };
 use core::{error::Error, fmt, fmt::Debug};
 
-use miden_core::DebugOptions;
+use miden_core::{DebugOptions, EventId};
 
-use crate::{AdviceMutation, ExecutionError, Felt, ProcessState};
+use crate::{AdviceMutation, ExecutionError, ProcessState};
 
 // EVENT HANDLER TRAIT
 // ================================================================================================
@@ -33,6 +34,15 @@ where
 {
     fn on_event(&self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
         self(process)
+    }
+}
+
+/// A handler which ignores the process state and leaves the `AdviceProvider` unchanged.
+pub struct NoopEventHandler;
+
+impl EventHandler for NoopEventHandler {
+    fn on_event(&self, _process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
+        Ok(Vec::new())
     }
 }
 
@@ -91,7 +101,7 @@ pub type EventError = Box<dyn Error + Send + Sync + 'static>;
 /// ```
 #[derive(Default)]
 pub struct EventHandlerRegistry {
-    handlers: BTreeMap<u32, Box<dyn EventHandler>>,
+    handlers: BTreeMap<EventId, Arc<dyn EventHandler>>,
 }
 
 impl EventHandlerRegistry {
@@ -99,11 +109,11 @@ impl EventHandlerRegistry {
         Self { handlers: BTreeMap::new() }
     }
 
-    /// Registers a boxed [`EventHandler`] with a given identifier.
+    /// Registers an [`EventHandler`] with a given identifier.
     pub fn register(
         &mut self,
-        id: u32,
-        handler: Box<dyn EventHandler>,
+        id: EventId,
+        handler: Arc<dyn EventHandler>,
     ) -> Result<(), ExecutionError> {
         match self.handlers.entry(id) {
             Entry::Vacant(e) => e.insert(handler),
@@ -114,7 +124,7 @@ impl EventHandlerRegistry {
 
     /// Unregisters a handler with the given identifier, returning a flag whether a handler with
     /// that identifier was previously registered.
-    pub fn unregister(&mut self, id: u32) -> bool {
+    pub fn unregister(&mut self, id: EventId) -> bool {
         self.handlers.remove(&id).is_some()
     }
 
@@ -126,12 +136,10 @@ impl EventHandlerRegistry {
     /// propagated to the caller.
     pub fn handle_event(
         &self,
-        id: Felt,
+        id: EventId,
         process: &ProcessState,
     ) -> Result<Option<Vec<AdviceMutation>>, EventError> {
-        if let Ok(id) = id.as_int().try_into()
-            && let Some(handler) = self.handlers.get(&id)
-        {
+        if let Some(handler) = self.handlers.get(&id) {
             return handler.on_event(process).map(Some);
         }
 

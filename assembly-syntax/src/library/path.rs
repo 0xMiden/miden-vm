@@ -13,6 +13,8 @@ use miden_core::utils::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
 use miden_debug_types::Span;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 use smallvec::smallvec;
 
 use crate::{
@@ -123,6 +125,7 @@ pub struct LibraryPath {
 /// The data of a [LibraryPath] is allocated on the heap to make a [LibraryPath] the size of a
 /// pointer, rather than the size of 4 pointers. This makes them cheap to clone and move around.
 #[derive(Default, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 struct LibraryPathInner {
     /// The namespace of this library path
     ns: LibraryNamespace,
@@ -510,6 +513,37 @@ impl Deserializable for LibraryPath {
         let path =
             str::from_utf8(path).map_err(|e| DeserializationError::InvalidValue(e.to_string()))?;
         Self::new(path).map_err(|e| DeserializationError::InvalidValue(e.to_string()))
+    }
+}
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for LibraryPath {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        if serializer.is_human_readable() {
+            let name = format!("{}", self);
+            serializer.serialize_str(&name)
+        } else {
+            self.inner.serialize(serializer)
+        }
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for LibraryPath {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        if deserializer.is_human_readable() {
+            let name = <&'de str as serde::Deserialize>::deserialize(deserializer)?;
+            Self::new(name).map_err(serde::de::Error::custom)
+        } else {
+            let inner = <Arc<LibraryPathInner> as serde::Deserialize>::deserialize(deserializer)?;
+            Ok(Self { inner })
+        }
     }
 }
 

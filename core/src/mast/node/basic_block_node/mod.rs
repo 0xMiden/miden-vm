@@ -1,20 +1,22 @@
-use alloc::vec::Vec;
+use alloc::{boxed::Box, vec::Vec};
 use core::{fmt, mem, ops::Index};
 
 use miden_crypto::{Felt, Word, ZERO};
 use miden_formatting::prettier::PrettyPrint;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 use crate::{
     DecoratorIterator, DecoratorList, Operation,
     chiplets::hasher,
-    mast::{DecoratorId, MastForest, MastForestError},
+    mast::{DecoratorId, MastForest, MastForestError, MastNodeId, Remapping},
 };
 
 mod op_batch;
 pub use op_batch::OpBatch;
 use op_batch::OpBatchAccumulator;
 
-use super::MastNodeExt;
+use super::{MastNodeErrorContext, MastNodeExt};
 
 #[cfg(test)]
 mod tests;
@@ -61,6 +63,7 @@ pub const BATCH_SIZE: usize = 8;
 /// Where `batches` is the concatenation of each `batch` in the basic block, and each batch is 8
 /// field elements (512 bits).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct BasicBlockNode {
     /// The primitive operations contained in this basic block.
     ///
@@ -69,6 +72,7 @@ pub struct BasicBlockNode {
     /// Multiple batches are used for blocks consisting of more than 72 operations.
     op_batches: Vec<OpBatch>,
     digest: Word,
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Vec::is_empty"))]
     decorators: DecoratorList,
 }
 
@@ -153,11 +157,6 @@ impl BasicBlockNode {
 // ------------------------------------------------------------------------------------------------
 /// Public accessors
 impl BasicBlockNode {
-    /// Returns a commitment to this basic block.
-    pub fn digest(&self) -> Word {
-        self.digest
-    }
-
     /// Returns a reference to the operation batches in this basic block.
     pub fn op_batches(&self) -> &[OpBatch] {
         &self.op_batches
@@ -269,7 +268,7 @@ impl BasicBlockNode {
     }
 }
 
-impl MastNodeExt for BasicBlockNode {
+impl MastNodeErrorContext for BasicBlockNode {
     fn decorators(&self) -> impl Iterator<Item = (usize, DecoratorId)> {
         self.decorators.iter().copied()
     }
@@ -288,6 +287,60 @@ impl BasicBlockNode {
         mast_forest: &'a MastForest,
     ) -> impl PrettyPrint + 'a {
         BasicBlockNodePrettyPrint { block_node: self, mast_forest }
+    }
+}
+
+// MAST NODE TRAIT IMPLEMENTATION
+// ================================================================================================
+
+impl MastNodeExt for BasicBlockNode {
+    /// Returns a commitment to this basic block.
+    fn digest(&self) -> Word {
+        self.digest
+    }
+
+    fn before_enter(&self) -> &[DecoratorId] {
+        &[]
+    }
+
+    fn after_exit(&self) -> &[DecoratorId] {
+        &[]
+    }
+
+    fn append_before_enter(&mut self, decorator_ids: &[DecoratorId]) {
+        self.prepend_decorators(decorator_ids);
+    }
+
+    fn append_after_exit(&mut self, decorator_ids: &[DecoratorId]) {
+        self.append_decorators(decorator_ids);
+    }
+
+    fn remove_decorators(&mut self) {
+        self.remove_decorators();
+    }
+
+    fn to_display<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn fmt::Display + 'a> {
+        Box::new(BasicBlockNode::to_display(self, mast_forest))
+    }
+
+    fn to_pretty_print<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn PrettyPrint + 'a> {
+        Box::new(BasicBlockNode::to_pretty_print(self, mast_forest))
+    }
+
+    fn remap_children(&self, _remapping: &Remapping) -> Self {
+        self.clone()
+    }
+
+    fn has_children(&self) -> bool {
+        false
+    }
+
+    fn append_children_to(&self, _target: &mut Vec<MastNodeId>) {
+        // No children for basic blocks
+    }
+
+    fn domain(&self) -> Felt {
+        Self::DOMAIN
     }
 }
 

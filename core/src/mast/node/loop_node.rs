@@ -1,10 +1,12 @@
-use alloc::vec::Vec;
+use alloc::{boxed::Box, vec::Vec};
 use core::fmt;
 
 use miden_crypto::{Felt, Word};
 use miden_formatting::prettier::PrettyPrint;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
-use super::MastNodeExt;
+use super::{MastNodeErrorContext, MastNodeExt};
 use crate::{
     OPCODE_LOOP,
     chiplets::hasher,
@@ -21,10 +23,13 @@ use crate::{
 /// If the top of the stack is neither `0` nor `1` when the condition is checked, the execution
 /// fails.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct LoopNode {
     body: MastNodeId,
     digest: Word,
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Vec::is_empty"))]
     before_enter: Vec<DecoratorId>,
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Vec::is_empty"))]
     after_exit: Vec<DecoratorId>,
 }
 
@@ -124,7 +129,7 @@ impl LoopNode {
     }
 }
 
-impl MastNodeExt for LoopNode {
+impl MastNodeErrorContext for LoopNode {
     fn decorators(&self) -> impl Iterator<Item = (usize, DecoratorId)> {
         self.before_enter.iter().chain(&self.after_exit).copied().enumerate()
     }
@@ -199,5 +204,60 @@ impl fmt::Display for LoopNodePrettyPrint<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use crate::prettier::PrettyPrint;
         self.pretty_print(f)
+    }
+}
+
+// MAST NODE TRAIT IMPLEMENTATION
+// ================================================================================================
+
+impl MastNodeExt for LoopNode {
+    fn digest(&self) -> Word {
+        self.digest()
+    }
+
+    fn before_enter(&self) -> &[DecoratorId] {
+        self.before_enter()
+    }
+
+    fn after_exit(&self) -> &[DecoratorId] {
+        self.after_exit()
+    }
+
+    fn append_before_enter(&mut self, decorator_ids: &[DecoratorId]) {
+        self.append_before_enter(decorator_ids);
+    }
+
+    fn append_after_exit(&mut self, decorator_ids: &[DecoratorId]) {
+        self.append_after_exit(decorator_ids);
+    }
+
+    fn remove_decorators(&mut self) {
+        self.remove_decorators();
+    }
+
+    fn to_display<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn fmt::Display + 'a> {
+        Box::new(LoopNode::to_display(self, mast_forest))
+    }
+
+    fn to_pretty_print<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn PrettyPrint + 'a> {
+        Box::new(LoopNode::to_pretty_print(self, mast_forest))
+    }
+
+    fn remap_children(&self, remapping: &Remapping) -> Self {
+        let mut node = self.clone();
+        node.body = node.body.remap(remapping);
+        node
+    }
+
+    fn has_children(&self) -> bool {
+        true
+    }
+
+    fn append_children_to(&self, target: &mut Vec<MastNodeId>) {
+        target.push(self.body());
+    }
+
+    fn domain(&self) -> Felt {
+        Self::DOMAIN
     }
 }

@@ -199,6 +199,27 @@ impl FromStr for Ident {
     }
 }
 
+#[cfg(feature = "serde")]
+impl serde::Serialize for Ident {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for Ident {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let name = <&'de str as serde::Deserialize>::deserialize(deserializer)?;
+        Self::new(name).map_err(serde::de::Error::custom)
+    }
+}
+
 #[cfg(feature = "arbitrary")]
 pub(crate) mod testing {
     use alloc::string::String;

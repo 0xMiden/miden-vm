@@ -8,8 +8,8 @@ use core::ops::{Index, IndexMut};
 use miden_core::{
     AdviceMap, Decorator, DecoratorList, Felt, Operation, Word,
     mast::{
-        DecoratorFingerprint, DecoratorId, MastForest, MastNode, MastNodeFingerprint, MastNodeId,
-        Remapping, SubtreeIterator,
+        DecoratorFingerprint, DecoratorId, MastForest, MastNode, MastNodeExt, MastNodeFingerprint,
+        MastNodeId, Remapping, SubtreeIterator,
     },
 };
 

@@ -1,5 +1,8 @@
 use core::fmt;
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 mod decorators;
 pub use decorators::{AssemblyOp, DebugOptions, Decorator, DecoratorIterator, DecoratorList};
 use opcode_constants::*;
@@ -56,6 +59,7 @@ pub(super) mod opcode_constants {
     pub const OPCODE_SWAPW2: u8         = 0b0001_1100;
     pub const OPCODE_SWAPW3: u8         = 0b0001_1101;
     pub const OPCODE_SWAPDW: u8         = 0b0001_1110;
+    pub const OPCODE_EMIT: u8           = 0b0001_1111;
 
     pub const OPCODE_ASSERT: u8         = 0b0010_0000;
     pub const OPCODE_EQ: u8             = 0b0010_0001;
@@ -110,7 +114,6 @@ pub(super) mod opcode_constants {
     pub const OPCODE_JOIN: u8           = 0b0101_0111;
     pub const OPCODE_DYN: u8            = 0b0101_1000;
     pub const OPCODE_HORNEREXT: u8      = 0b0101_1001;
-    pub const OPCODE_EMIT: u8           = 0b0101_1010;
     pub const OPCODE_PUSH: u8           = 0b0101_1011;
     pub const OPCODE_DYNCALL: u8        = 0b0101_1100;
     pub const OPCODE_EVALCIRCUIT: u8    = 0b0101_1101;
@@ -130,6 +133,7 @@ pub(super) mod opcode_constants {
 
 /// A set of native VM operations which take exactly one cycle to execute.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[repr(u8)]
 pub enum Operation {
     // ----- system operations -------------------------------------------------------------------
@@ -815,7 +819,6 @@ impl Serializable for Operation {
             | Operation::SDepth
             | Operation::Caller
             | Operation::Clk
-            | Operation::Emit
             | Operation::Join
             | Operation::Split
             | Operation::Loop
@@ -868,6 +871,7 @@ impl Serializable for Operation {
             | Operation::SwapW2
             | Operation::SwapW3
             | Operation::SwapDW
+            | Operation::Emit
             | Operation::MovUp2
             | Operation::MovUp3
             | Operation::MovUp4
@@ -939,6 +943,7 @@ impl Deserializable for Operation {
             OPCODE_SWAPW2 => Self::SwapW2,
             OPCODE_SWAPW3 => Self::SwapW3,
             OPCODE_SWAPDW => Self::SwapDW,
+            OPCODE_EMIT => Self::Emit,
 
             OPCODE_ASSERT => Self::Assert(Felt::read_from(source)?),
             OPCODE_EQ => Self::Eq,
@@ -999,7 +1004,6 @@ impl Deserializable for Operation {
 
             OPCODE_MRUPDATE => Self::MrUpdate,
             OPCODE_PUSH => Self::Push(Felt::read_from(source)?),
-            OPCODE_EMIT => Self::Emit,
             OPCODE_SYSCALL => Self::SysCall,
             OPCODE_CALL => Self::Call,
             OPCODE_END => Self::End,

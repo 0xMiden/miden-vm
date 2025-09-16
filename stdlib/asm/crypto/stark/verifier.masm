@@ -8,64 +8,66 @@ use.std::crypto::stark::public_inputs
 use.std::crypto::stark::constants
 use.std::crypto::stark::utils
 
-#!   Verify a STARK proof attesting to the correct execution of a program in the Miden VM.
-#!   The following simplifying assumptions are currently made:
-#!   - The blowup factor is set to 8.
-#!   - The maximal allowed degree of the remainder polynomial is 127.
-#!   - The public inputs are composed of the input and output stacks, of fixed size equal to 16, as
-#!     well as the program and the kernel procedures digests.
-#!   - There are two trace segments, main and auxiliary. It is assumed that the main trace segment
-#!     is 73 columns wide while the auxiliary trace segment is 8 columns wide. Note that we pad the main
-#!     trace to the next multiple of 8.
-#!   - The OOD evaluation frame is composed of two concatenated rows, current and next, each composed
-#!     of 73 elements representing the main trace portion and 8 elements for the auxiliary trace one.
-#!     Note that, due to the padding of the main trace columns, the number of OOD evaluations per row
-#!     is 80 for the main trace.
-#!   - To boost soundness, the protocol is run on a quadratic extension field and this means that
-#!     the OOD evaluation frame is composed of elements in a quadratic extension field i.e. tuples.
-#!     Similarly, elements of the auxiliary trace are quadratic extension field elements. The random
-#!     values for computing random linear combinations are also in this extension field.
-#!   - The following procedure makes use of global memory address beyond 3 * 2^30 and these are
-#!     defined in `constants.masm`.
+#! Verifies a STARK proof.
 #!
-#! Input: [log(trace_length), num_queries, grinding,  ...]
-#! Output: [...]
+#! The purpose of the following verifier is to serve as a generic core around which a specific
+#! verifier can be built. It expects the following parameters on the stack from the caller:
 #!
-#! Cycles:
-#!  1- Remainder polynomial size 64:
-#!   2515 + num_queries * (512 + num_fri_layers * 83) + 108 * num_fri_layers + 10 * log(trace_length)
-#!  2- Remainder polynomial size 128:
-#!   2540 + num_queries * (541 + num_fri_layers * 83) + 108 * num_fri_layers + 10 * log(trace_length)
+#! 1. `[D0, D1, D2, D3]` which are respectively the digests for dynamic execution of procedures
+#!   i. `compute_deep_composition_polynomial_queries`
+#!   ii. `execute_constraint_evaluation_check`
+#!   iii. `process_row_ood_evaluations`
+#!   iv. `process_public_inputs`
+#! 2. `num_constraints` which is the number of constraints in the AIR
+#! 3. `trace_info` which is a field element encoding the layout of the AIR
+#! 4. `num_fixed_len_pi` is the number of fixed length public inputs of the AIR
+#! 5. `is_aux_trace` flag indicating the existence of an auxiliary segment in this AIR
 #!
-#!  where num_fri_layers is computed as:
+#! In addition to the above parameters, the verifier expects the following auxiliary proof parameters:
 #!
-#!  1- If log(trace_length) is even, then num_fri_layers = (log(trace_length) - 6) / 2, where 6 = log2(64),
-#!  2- If log(trace_length) is odd, then num_fri_layers = (log(trace_length) - 7) / 2, where 7 = log2(128).
+#! 1. `log(trace_length)`, the logarithm base 2 of the trace length
+#! 2. `num_queries`, the number of FRI queries
+#! 3. `grinding`, the number of bits of grinding i.e., proof-of-work
+#!
+#! The following simplifying assumptions are currently made and hardcoded:
+#!
+#! - The blowup factor is set to 8.
+#! - The maximal allowed degree of the remainder polynomial is 127.
+#! - To boost soundness, the protocol is run on a quadratic extension field and this means that
+#!   the OOD evaluation frame is composed of elements in a quadratic extension field i.e. tuples.
+#!   Similarly, elements of the auxiliary trace are quadratic extension field elements. The random
+#!   values for computing random linear combinations are also in this extension field.
+#!
+#! Inputs:  [D3, D2, D1, D0, log(trace_length), num_queries, grinding, num_constraints, trace_info, num_fixed_len_pi, is_aux_trace]
+#! Outputs: []
 export.verify
 
     #==============================================================================================
     #       I)  Hash proof context and hash-&-load public inputs
     #==============================================================================================
 
+    # Store digests of dynamically executed procedures 
+    exec.utils::store_dynamically_executed_procedures
+    # => [log(trace_length), num_queries, grinding, num_constraints, trace_info, num_fixed_len_pi, is_aux_trace, ...]
+
     # Validate inputs
     #
     # Cycles: 45
     exec.utils::validate_inputs
-    # => [log(trace_length), num_queries, grinding, ...]
+    # => [log(trace_length), num_queries, grinding, num_constraints, trace_info, num_fixed_len_pi, is_aux_trace, ...]
 
     # Initialize the seed using proof context
     #
     # Cycles: 210
     exec.random_coin::init_seed
-    # => [C, ...]
+    # => [C, is_aux_trace, ...]
 
     # Load public inputs
-    #
-    # Cycles: ~ 500 + 70 * number_kernel_procedures
     exec.public_inputs::process_public_inputs
+    # => [is_aux_trace, ...]
 
     #==============================================================================================
-    #       II) Generate the auxiliary trace random elements
+    #       II) Generate the auxiliary trace random elements if auxiliary segment exists
     #==============================================================================================
 
     # Load main trace commitment and re-seed with it
@@ -74,24 +76,28 @@ export.verify
     padw
     adv_loadw
     exec.constants::main_trace_com_ptr mem_storew
-    # => [main_trace_commitment, ...]
+    # => [main_trace_commitment, is_aux_trace, ...]
     exec.random_coin::reseed
-    # => [...]
+    # => [is_aux_trace, ...]
 
-    # Draw random ExtFelt for the auxiliary trace
-    #
-    # Cycles: 12
-    exec.random_coin::generate_aux_randomness
-    # => [...]
+    # If auxiliary segment exists, generate auxiliary randomness and reseed with commitment
+    # to auxiliary segment
+    if.true
+        # Draw random ExtFelt for the auxiliary trace
+        #
+        # Cycles: 12
+        exec.random_coin::generate_aux_randomness
+        # => [...]
 
-    # Reseed with auxiliary trace commitment
-    #
-    # Cycles: 64
-    padw
-    adv_loadw
-    exec.constants::aux_trace_com_ptr mem_storew
-    exec.random_coin::reseed
-    # => [...]
+        # Reseed with auxiliary trace commitment
+        #
+        # Cycles: 64
+        padw
+        adv_loadw
+        exec.constants::aux_trace_com_ptr mem_storew
+        exec.random_coin::reseed
+        # => [...]
+    end
 
     #==============================================================================================
     #       III) Draw constraint composition coefficients
@@ -128,7 +134,7 @@ export.verify
     #       VI) Constraint evaluation check
     #==============================================================================================
 
-    exec.utils::constraint_evaluation_check
+    exec.utils::execute_constraint_evaluation_check
 
     #==============================================================================================
     #       VII) FRI
@@ -196,14 +202,10 @@ export.verify
     exec.helper::compute_query_pointer
 
     # Draw random query indices
-    #
-    # Cycles: 92 + 32.5 * num_queries
     exec.random_coin::generate_list_indices
     # => [...]
 
     # Compute deep composition polynomial queries
-    #
-    # Cycles: 426 + num_queries * 373
     exec.deep_queries::compute_deep_composition_polynomial_queries
     # => [...]
 

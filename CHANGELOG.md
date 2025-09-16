@@ -9,6 +9,9 @@
 - Added new `adv.insert_hqword` instruction ([#2097](https://github.com/0xMiden/miden-vm/pull/2097)).
 - Added option to use Poseidon2 in proving ([#2098](https://github.com/0xMiden/miden-vm/pull/2098)).
 - Reinstate the build of the stdlib's documentation ([#1432](https://github.com/0xmiden/miden-vm/issues/1432)).
+- Added `FastProcessor::execute_for_trace()`, which outputs a series of checkpoints necessary to build the trace in parallel ([#2023](https://github.com/0xMiden/miden-vm/pull/2023))
+- Introduce `Tracer` trait to allow different ways of tracing program execution, including no tracing ([#2101](https://github.com/0xMiden/miden-vm/pull/2101))
+- `FastProcessor::execute_*()` methods now also return the state of the memory in a new `ExecutionOutput` struct ([#2028](https://github.com/0xMiden/miden-vm/pull/2128))
 
 #### Changes
 
@@ -23,6 +26,17 @@
 - [BREAKING] `get_stack_word` uses element-aligned indexing instead of word-aligned indexing (#[2068](https://github.com/0xMiden/miden-vm/issues/2068)).
 - [BREAKING] Implement support for `event("event_name")` in MASM (#[2068](https://github.com/0xMiden/miden-vm/issues/2068)).
 - Improved representation of `OPbatches` to include padding Noop by default, simplifying fast iteration over program instructions in the processor ([#1815](https://github.com/0xMiden/miden-vm/issues/1815)).
+- Changed multiple broken links across the repository ([#2110](https://github.com/0xMiden/miden-vm/pull/2110)).
+- Rename `program_execution` benchmark to `program_execution_for_trace`, and benchmark `FastProcessor::execute_for_trace()` instead of `Process::execute()` (#[2131](https://github.com/0xMiden/miden-vm/pull/2131))
+- [BREAKING] Initial support for Keccak precompile ([#2103](https://github.com/0xMiden/miden-vm/pull/2103))
+- Refactored `MastNode` to eliminate boilerplate dispatch code ([#2127](https://github.com/0xMiden/miden-vm/pull/2127)).
+- [BREAKING] Introduce `EventId` type ([#2137](https://github.com/0xMiden/miden-vm/issues/2137)).
+- Added `multicall` support for the CLI ([#1141](https://github.com/0xMiden/miden-vm/pull/2081))
+- Made `miden-prover`'s metal prover async-compatible. ([#2133](https://github.com/0xMiden/miden-vm/pull/2133)).
+- Abstract away the fast processor's operation execution into a new `Processor` trait ([#2141](https://github.com/0xMiden/miden-vm/pull/2141))
+- [BREAKING] Implemented custom section support in package format, and removed `account_component_metadata` field ([#2071](https://github.com/0xMiden/miden-vm/pull/2071))
+- Move `EMIT` flag to degree 5 bucket ([#2043](https://github.com/0xMiden/miden-vm/issues/2043)).
+- [BREAKING] Move `u64_div`, `falcon_div` and `smtpeek` system events to stdlib ([#1582](https://github.com/0xMiden/miden-vm/issues/1582))
 
 ## 0.17.1 (2025-08-29)
 
@@ -35,8 +49,9 @@
 - [BREAKING] Implemented custom Event handlers ([#1584](https://github.com/0xMiden/miden-vm/pull/1584)).
 - Implemented `copy_digest` and `hash_memory_double_words` procedures in the `std::crypto::hashes::rpo` module ([#1971](https://github.com/0xMiden/miden-vm/pull/1971)).
 - Added `extend_` methods on AdviceProvider [#1982](https://github.com/0xMiden/miden-vm/pull/1982).
-- Added new stdlib module `std::word`, containing utilities for manipulating arrays of four fields (words) [#1996](https://github.com/0xMiden/miden-vm/pull/1996).
+- Added new stdlib module `std::word`, containing utilities for manipulating arrays of four fields (words) ([#1996](https://github.com/0xMiden/miden-vm/pull/1996)).
 - Added constraints evaluation check to recursive verifier ([#1997](https://github.com/0xMiden/miden-vm/pull/1997)).
+- Make recursive verifier in `stdlib` reusable through dynamic procedure execution ([#2008](https://github.com/0xMiden/miden-vm/pull/2008)).
 - Added `AdviceProvider::into_parts()` method ([#2024](https://github.com/0xMiden/miden-vm/pull/2024)).
 - Added type information to procedures in the AST, `Library`, and `PackageExport` types ([#2028](https://github.com/0xMiden/miden-vm/pull/2028)).
 - Added `drop_stack_top` procedure in `std::sys` ([#2031](https://github.com/0xMiden/miden-vm/pull/2031)).
@@ -138,6 +153,7 @@
 
 #### Fixes
 
+- Fixed `SourceContent::update` splice logic to prevent panics on single-line edits and respect exclusive end semantics for multi-line edits ([#XXXX](https://github.com/0xMiden/miden-vm/pull/2146)).
 - Truncated nprime.masm output stack to prevent overflow during benchmarks ([#1879](https://github.com/0xMiden/miden-vm/issues/1879)).
 - Modules can now be provided in any order to the `Assembler`, see #1669 (#1881).
 - Addressed bug which caused references to re-exported procedures whose definition internally referred to an aliased module import, to produce an "undefined module" error, see #1451 (#1892).

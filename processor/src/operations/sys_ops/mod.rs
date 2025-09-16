@@ -1,4 +1,4 @@
-use miden_core::{Felt, mast::MastForest, sys_events::SystemEvent};
+use miden_core::{EventId, Felt, mast::MastForest, sys_events::SystemEvent};
 
 use super::{
     super::{
@@ -146,7 +146,7 @@ impl Process {
         self.stack.copy_state(0);
 
         let mut process = self.state();
-        let event_id = process.get_stack_item(0);
+        let event_id = EventId::from_felt(process.get_stack_item(0));
 
         // If it's a system event, handle it directly. Otherwise, forward it to the host.
         if let Some(system_event) = SystemEvent::from_event_id(event_id) {

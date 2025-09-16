@@ -2,8 +2,8 @@ use alloc::{sync::Arc, vec::Vec};
 
 use miden_air::RowIndex;
 use miden_core::{
-    Felt, QuadFelt, Word,
-    mast::{DecoratorId, MastForest, MastNodeExt, MastNodeId},
+    EventId, Felt, QuadFelt, Word,
+    mast::{DecoratorId, MastForest, MastNodeErrorContext, MastNodeId},
     stack::MIN_STACK_DEPTH,
     utils::to_hex,
 };
@@ -65,19 +65,19 @@ pub enum ExecutionError {
         source_file: Option<Arc<SourceFile>>,
         digest: Word,
     },
-    #[error("error during processing of event with id {event_id} in on_event handler")]
+    #[error("error during processing of event with id {event_id:?} in on_event handler")]
     #[diagnostic()]
     EventError {
         #[label]
         label: SourceSpan,
         #[source_code]
         source_file: Option<Arc<SourceFile>>,
-        event_id: Felt,
+        event_id: EventId,
         #[source]
         error: EventError,
     },
-    #[error("attempted to add event handler with previously inserted id: {id}")]
-    DuplicateEventHandler { id: u32 },
+    #[error("attempted to add event handler with previously inserted id: {id:?}")]
+    DuplicateEventHandler { id: EventId },
     #[error("assertion failed at clock cycle {clk} with error {}",
       match err_msg {
         Some(msg) => format!("message: {msg}"),
@@ -297,7 +297,7 @@ impl ExecutionError {
         Self::DynamicNodeNotFound { label, source_file, digest }
     }
 
-    pub fn event_error(error: EventError, event_id: Felt, err_ctx: &impl ErrorContext) -> Self {
+    pub fn event_error(error: EventError, event_id: EventId, err_ctx: &impl ErrorContext) -> Self {
         let (label, source_file) = err_ctx.label_and_source_file();
 
         Self::EventError { label, source_file, event_id, error }
@@ -508,7 +508,11 @@ pub struct ErrorContextImpl {
 
 impl ErrorContextImpl {
     #[allow(dead_code)]
-    pub fn new(mast_forest: &MastForest, node: &impl MastNodeExt, host: &impl BaseHost) -> Self {
+    pub fn new(
+        mast_forest: &MastForest,
+        node: &impl MastNodeErrorContext,
+        host: &impl BaseHost,
+    ) -> Self {
         let (label, source_file) =
             Self::precalc_label_and_source_file(None, mast_forest, node, host);
         Self { label, source_file }
@@ -517,7 +521,7 @@ impl ErrorContextImpl {
     #[allow(dead_code)]
     pub fn new_with_op_idx(
         mast_forest: &MastForest,
-        node: &impl MastNodeExt,
+        node: &impl MastNodeErrorContext,
         host: &impl BaseHost,
         op_idx: usize,
     ) -> Self {
@@ -530,7 +534,7 @@ impl ErrorContextImpl {
     fn precalc_label_and_source_file(
         op_idx: Option<usize>,
         mast_forest: &MastForest,
-        node: &impl MastNodeExt,
+        node: &impl MastNodeErrorContext,
         host: &impl BaseHost,
     ) -> (SourceSpan, Option<Arc<SourceFile>>) {
         node.get_assembly_op(mast_forest, op_idx)

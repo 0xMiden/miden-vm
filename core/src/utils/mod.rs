@@ -58,27 +58,6 @@ pub fn hash_string_to_word<'a>(value: impl Into<&'a str>) -> Word {
     .into()
 }
 
-// TO EVENT UD
-// ================================================================================================
-
-/// Computes the canonical event identifier for the given `name`.
-///
-/// This function provides a stable, deterministic mapping from human-readable event names
-/// to field elements that can be used as event identifiers in the VM. The mapping works by:
-/// 1. Computing the BLAKE3 hash of the event name (produces 32 bytes)
-/// 2. Taking the first 8 bytes of the hash
-/// 3. Interpreting these bytes as a little-endian u64
-/// 4. Reducing modulo the field prime to create a valid Felt
-///
-/// This ensures that identical event names always produce the same event ID, while
-/// providing good distribution properties to minimize collisions between different names.
-#[inline]
-pub fn string_to_event_id<'a>(name: impl Into<&'a str>) -> Felt {
-    let digest_bytes: [u8; 32] = Blake3_256::hash(name.into().as_bytes()).into();
-    let event_bytes: [u8; 8] = digest_bytes[0..8].try_into().unwrap();
-    Felt::new(u64::from_le_bytes(event_bytes))
-}
-
 // INTO BYTES
 // ================================================================================================
 
