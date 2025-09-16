@@ -691,12 +691,11 @@ proptest! {
     fn reversew_proptest(test_values in prop::collection::vec(any::<u64>(), MIN_STACK_DEPTH)) {
         let asm_op = "reversew";
         let mut expected_values = test_values.clone();
+        // reversew reverses the order of the top 4 elements (a word)
+        // The top 4 elements are at the end of test_values (indices len-4 to len-1)
+        let len = expected_values.len();
+        expected_values[(len-4)..len].reverse();
         expected_values.reverse();
-        // reversew reverses the order of the first 4 elements (a word)
-        // [a, b, c, d, ...] becomes [d, c, b, a, ...]
-        if expected_values.len() >= 4 {
-            expected_values[0..4].reverse();
-        }
         build_op_test!(asm_op, &test_values).prop_expect_stack(&expected_values)?;
     }
 
