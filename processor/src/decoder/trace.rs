@@ -6,7 +6,7 @@ use miden_air::trace::decoder::NUM_USER_OP_HELPERS;
 use miden_core::utils::new_array_vec;
 
 use super::{
-    super::utils::get_trace_len, DIGEST_LEN, Felt, MIN_TRACE_LEN, NUM_HASHER_COLUMNS,
+    super::utils::get_trace_len, DIGEST_LEN, Felt, MIN_TRACE_LEN, NUM_SHARED_COLUMNS,
     NUM_OP_BATCH_FLAGS, NUM_OP_BITS, NUM_OP_BITS_EXTRA_COLS, ONE, OP_BATCH_1_GROUPS,
     OP_BATCH_2_GROUPS, OP_BATCH_4_GROUPS, OP_BATCH_8_GROUPS, OP_BATCH_SIZE, Operation, Word, ZERO,
     get_num_groups_in_next_batch,
@@ -15,9 +15,9 @@ use super::{
 // CONSTANTS
 // ================================================================================================
 
-/// The range of columns in the decoder's `hasher_trace` which is available for use as helper
+/// The range of columns in the decoder's `shared_columns_trace` which is available for use as helper
 /// registers during user operations.
-pub const USER_OP_HELPERS: Range<usize> = Range { start: 2, end: NUM_HASHER_COLUMNS };
+pub const USER_OP_HELPERS: Range<usize> = Range { start: 2, end: NUM_SHARED_COLUMNS };
 
 // DECODER TRACE
 // ================================================================================================
@@ -27,7 +27,7 @@ pub const USER_OP_HELPERS: Range<usize> = Range { start: 2, end: NUM_HASHER_COLU
 /// The trace currently consists of 24 columns grouped logically as follows:
 /// - 1 column for code block ID / related hasher table row address.
 /// - 7 columns for the binary representation of an opcode.
-/// - 8 columns used for providing inputs to, and reading results from the hasher, but also used for
+/// - 8 shared columns used for providing inputs to, and reading results from the hasher, but also used for
 ///   other purposes when inside a SPAN block.
 /// - 1 column for the flag indicating whether we are in a SPAN block or not.
 /// - 1 column to keep track of the number of operation groups left to decode in the current SPAN
@@ -39,7 +39,7 @@ pub const USER_OP_HELPERS: Range<usize> = Range { start: 2, end: NUM_HASHER_COLU
 pub struct DecoderTrace {
     addr_trace: Vec<Felt>,
     op_bits_trace: [Vec<Felt>; NUM_OP_BITS],
-    hasher_trace: [Vec<Felt>; NUM_HASHER_COLUMNS],
+    shared_columns_trace: [Vec<Felt>; NUM_SHARED_COLUMNS],
     in_span_trace: Vec<Felt>,
     group_count_trace: Vec<Felt>,
     op_idx_trace: Vec<Felt>,
@@ -55,7 +55,7 @@ impl DecoderTrace {
         Self {
             addr_trace: Vec::with_capacity(MIN_TRACE_LEN),
             op_bits_trace: new_array_vec(MIN_TRACE_LEN),
-            hasher_trace: new_array_vec(MIN_TRACE_LEN),
+            shared_columns_trace: new_array_vec(MIN_TRACE_LEN),
             group_count_trace: Vec::with_capacity(MIN_TRACE_LEN),
             in_span_trace: Vec::with_capacity(MIN_TRACE_LEN),
             op_idx_trace: Vec::with_capacity(MIN_TRACE_LEN),
@@ -72,11 +72,11 @@ impl DecoderTrace {
         self.addr_trace.len()
     }
 
-    /// Returns the contents of the first 4 registers of the hasher state at the last row.
+    /// Returns the contents of the first 4 registers of the shared columns at the last row.
     pub fn program_hash(&self) -> [Felt; DIGEST_LEN] {
         let mut result = [ZERO; DIGEST_LEN];
         for (i, element) in result.iter_mut().enumerate() {
-            *element = self.last_hasher_value(i);
+            *element = self.last_shared_column_value(i);
         }
         result
     }
@@ -93,11 +93,11 @@ impl DecoderTrace {
     ///   child, rather than the parent.
     /// - Set op_bits to opcode of the specified block (e.g., JOIN, SPLIT, LOOP, CALL, SYSCALL, DYN,
     ///   DYNCALL).
-    /// - Set the first half of the hasher state to the h1 parameter. For JOIN and SPLIT blocks this
+    /// - Set the first half of the shared columns to the h1 parameter. For JOIN and SPLIT blocks this
     ///   will contain the hash of the left child; for LOOP block this will contain hash of the
     ///   loop's body, for CALL, SYSCALL, DYN and DYNCALL blocks this will contain hash of the
     ///   called function.
-    /// - Set the second half of the hasher state to the h2 parameter. For JOIN and SPLIT blocks
+    /// - Set the second half of the shared columns to the h2 parameter. For JOIN and SPLIT blocks
     ///   this will contain hash of the right child.
     /// - Set is_span to ZERO.
     /// - Set op group count register to the ZERO.
@@ -107,15 +107,15 @@ impl DecoderTrace {
         self.addr_trace.push(parent_addr);
         self.append_opcode(op);
 
-        self.hasher_trace[0].push(h1[0]);
-        self.hasher_trace[1].push(h1[1]);
-        self.hasher_trace[2].push(h1[2]);
-        self.hasher_trace[3].push(h1[3]);
+        self.shared_columns_trace[0].push(h1[0]);
+        self.shared_columns_trace[1].push(h1[1]);
+        self.shared_columns_trace[2].push(h1[2]);
+        self.shared_columns_trace[3].push(h1[3]);
 
-        self.hasher_trace[4].push(h2[0]);
-        self.hasher_trace[5].push(h2[1]);
-        self.hasher_trace[6].push(h2[2]);
-        self.hasher_trace[7].push(h2[3]);
+        self.shared_columns_trace[4].push(h2[0]);
+        self.shared_columns_trace[5].push(h2[1]);
+        self.shared_columns_trace[6].push(h2[2]);
+        self.shared_columns_trace[7].push(h2[3]);
 
         self.in_span_trace.push(ZERO);
         self.group_count_trace.push(ZERO);
@@ -132,8 +132,8 @@ impl DecoderTrace {
     /// When a control block is ending, we do the following:
     /// - Set the block address to the specified address.
     /// - Set op_bits to END opcode.
-    /// - Put the provided block hash into the first 4 elements of the hasher state.
-    /// - Set the remaining 4 elements of the hasher state to [is_loop_body, is_loop, is_call,
+    /// - Put the provided block hash into the first 4 elements of the shared columns.
+    /// - Set the remaining 4 elements of the shared columns to [is_loop_body, is_loop, is_call,
     ///   is_syscall].
     /// - Set in_span to ZERO.
     /// - Copy over op group count from the previous row. This group count must be ZERO.
@@ -156,15 +156,15 @@ impl DecoderTrace {
         self.addr_trace.push(block_addr);
         self.append_opcode(Operation::End);
 
-        self.hasher_trace[0].push(block_hash[0]);
-        self.hasher_trace[1].push(block_hash[1]);
-        self.hasher_trace[2].push(block_hash[2]);
-        self.hasher_trace[3].push(block_hash[3]);
+        self.shared_columns_trace[0].push(block_hash[0]);
+        self.shared_columns_trace[1].push(block_hash[1]);
+        self.shared_columns_trace[2].push(block_hash[2]);
+        self.shared_columns_trace[3].push(block_hash[3]);
 
-        self.hasher_trace[4].push(is_loop_body);
-        self.hasher_trace[5].push(is_loop);
-        self.hasher_trace[6].push(is_call);
-        self.hasher_trace[7].push(is_syscall);
+        self.shared_columns_trace[4].push(is_loop_body);
+        self.shared_columns_trace[5].push(is_loop);
+        self.shared_columns_trace[6].push(is_call);
+        self.shared_columns_trace[7].push(is_syscall);
 
         self.in_span_trace.push(ZERO);
 
@@ -184,8 +184,8 @@ impl DecoderTrace {
     /// When we start a new loop iteration, we do the following:
     /// - Set the block address to the address of the loop block.
     /// - Set op_bits to REPEAT opcode.
-    /// - Copy over the hasher state from the previous row. Technically, we need to copy over only
-    ///   the first 5 elements of the hasher state, but it is easier to copy over the whole row.
+    /// - Copy over the shared columns from the previous row. Technically, we need to copy over only
+    ///   the first 5 elements of the shared columns, but it is easier to copy over the whole row.
     /// - Set in_span to ZERO.
     /// - Set op group count register to the ZERO.
     /// - Set operation index register to ZERO.
@@ -194,8 +194,8 @@ impl DecoderTrace {
         self.addr_trace.push(loop_addr);
         self.append_opcode(Operation::Repeat);
 
-        let last_row = get_trace_len(&self.hasher_trace) - 1;
-        for column in self.hasher_trace.iter_mut() {
+        let last_row = get_trace_len(&self.shared_columns_trace) - 1;
+        for column in self.shared_columns_trace.iter_mut() {
             column.push(column[last_row]);
         }
 
@@ -215,7 +215,7 @@ impl DecoderTrace {
     ///   address from the previous row because in a SPLIT block, the second child follows the first
     ///   child, rather than the parent.
     /// - Set op_bits to SPAN opcode.
-    /// - Set hasher state to op groups of the first op batch of the SPAN.
+    /// - Set shared columns to op groups of the first op batch of the SPAN.
     /// - Set is_span to ZERO. is_span will be set to one in the following row.
     /// - Set op group count to the total number of op groups in the SPAN.
     /// - Set operation index register to ZERO.
@@ -229,7 +229,7 @@ impl DecoderTrace {
         self.addr_trace.push(parent_addr);
         self.append_opcode(Operation::Span);
         for (i, &op_group) in first_op_batch.iter().enumerate() {
-            self.hasher_trace[i].push(op_group);
+            self.shared_columns_trace[i].push(op_group);
         }
 
         self.in_span_trace.push(ZERO);
@@ -248,7 +248,7 @@ impl DecoderTrace {
     /// - Copy over the block address from the previous row. The SPAN address will be updated in the
     ///   following row.
     /// - Set op_bits to RESPAN opcode.
-    /// - Set hasher state to op groups of the next op batch of the SPAN.
+    /// - Set shared columns to op groups of the next op batch of the SPAN.
     /// - Set in_span to ZERO.
     /// - Copy over op group count from the previous row.
     /// - Set operation index register to ZERO.
@@ -257,7 +257,7 @@ impl DecoderTrace {
         self.addr_trace.push(self.last_addr());
         self.append_opcode(Operation::Respan);
         for (i, &op_group) in op_batch.iter().enumerate() {
-            self.hasher_trace[i].push(op_group);
+            self.shared_columns_trace[i].push(op_group);
         }
 
         let group_count = self.last_group_count();
@@ -276,10 +276,10 @@ impl DecoderTrace {
     /// When we execute a user operation in a SPAN block, we do the following:
     /// - Set the address of the row to the address of the span block.
     /// - Set op_bits to the opcode of the executed operation.
-    /// - Set the first hasher state register to the aggregation of remaining operations to be
+    /// - Set the first shared column register to the aggregation of remaining operations to be
     ///   executed in the current operation group.
-    /// - Set the second hasher state register to the address of the SPAN's parent block.
-    /// - Set the remaining hasher state registers to ZEROs.
+    /// - Set the second shared column register to the address of the SPAN's parent block.
+    /// - Set the remaining shared column registers to ZEROs.
     /// - Set is_span to ONE.
     /// - Set the number of groups remaining to be processed. This number of groups changes if in
     ///   the previous row an operation with an immediate value was executed or if this operation is
@@ -298,13 +298,13 @@ impl DecoderTrace {
         self.addr_trace.push(basic_block_addr);
         self.append_opcode(op);
 
-        self.hasher_trace[0].push(group_ops_left);
-        self.hasher_trace[1].push(parent_addr);
+        self.shared_columns_trace[0].push(group_ops_left);
+        self.shared_columns_trace[1].push(parent_addr);
 
         // Note: use `Decoder::set_user_op_helpers()` when processing an instruction to set any of
         // these values to something other than 0
         for idx in USER_OP_HELPERS {
-            self.hasher_trace[idx].push(ZERO);
+            self.shared_columns_trace[idx].push(ZERO);
         }
 
         self.in_span_trace.push(ONE);
@@ -321,9 +321,9 @@ impl DecoderTrace {
     /// When the SPAN block is ending, we do the following:
     /// - Copy over the block address from the previous row.
     /// - Set op_bits to END opcode.
-    /// - Put the hash of the span block into the first 4 registers of the hasher state.
+    /// - Put the hash of the span block into the first 4 registers of the shared columns.
     /// - Put a flag indicating whether the SPAN block was a body of a loop into the 5th register of
-    ///   the hasher state.
+    ///   the shared columns.
     /// - Set in_span to ZERO to indicate that the span block is completed.
     /// - Copy over op group count from the previous row. This group count must be ZERO.
     /// - Set operation index register to ZERO.
@@ -334,17 +334,17 @@ impl DecoderTrace {
         self.addr_trace.push(self.last_addr());
         self.append_opcode(Operation::End);
 
-        self.hasher_trace[0].push(span_hash[0]);
-        self.hasher_trace[1].push(span_hash[1]);
-        self.hasher_trace[2].push(span_hash[2]);
-        self.hasher_trace[3].push(span_hash[3]);
+        self.shared_columns_trace[0].push(span_hash[0]);
+        self.shared_columns_trace[1].push(span_hash[1]);
+        self.shared_columns_trace[2].push(span_hash[2]);
+        self.shared_columns_trace[3].push(span_hash[3]);
 
         // we don't need to set is_loop, is_call, and is_syscall here because we know that this
         // is a SPAN block
-        self.hasher_trace[4].push(is_loop_body);
-        self.hasher_trace[5].push(ZERO);
-        self.hasher_trace[6].push(ZERO);
-        self.hasher_trace[7].push(ZERO);
+        self.shared_columns_trace[4].push(is_loop_body);
+        self.shared_columns_trace[5].push(ZERO);
+        self.shared_columns_trace[6].push(ZERO);
+        self.shared_columns_trace[7].push(ZERO);
 
         self.in_span_trace.push(ZERO);
 
@@ -368,7 +368,7 @@ impl DecoderTrace {
     /// by inserting ZEROs into the unfilled rows of most columns. The only exceptions are:
     /// - The op_bits columns, where the unfilled rows are filled with the opcode of the HALT
     ///   operation.
-    /// - The first 4 columns of the hasher state, where the unfilled rows are filled with the
+    /// - The first 4 columns of the shared columns, where the unfilled rows are filled with the
     ///   values from the last filled row. This is done so that the hash of the program is
     ///   propagated to the last row.
     pub fn into_vec(mut self, trace_len: usize, num_rand_rows: usize) -> Vec<Vec<Felt>> {
@@ -391,12 +391,12 @@ impl DecoderTrace {
             trace.push(column);
         }
 
-        // for unfilled rows of hasher state columns, copy over values from the last row for the
+        // for unfilled rows of shared columns, copy over values from the last row for the
         // first 4 columns, and pad the other 4 columns with ZEROs
-        for (i, mut column) in self.hasher_trace.into_iter().enumerate() {
+        for (i, mut column) in self.shared_columns_trace.into_iter().enumerate() {
             debug_assert_eq!(own_len, column.len());
             if i < 4 {
-                let last_value = *column.last().expect("no last hasher trace value");
+                let last_value = *column.last().expect("no last shared column trace value");
                 column.resize(trace_len, last_value);
             } else {
                 column.resize(trace_len, ZERO);
@@ -460,17 +460,17 @@ impl DecoderTrace {
         *self.group_count_trace.last().expect("no group count")
     }
 
-    /// Returns the last value in the specified hasher column.
-    fn last_hasher_value(&self, idx: usize) -> Felt {
-        debug_assert!(idx < NUM_HASHER_COLUMNS, "invalid hasher register index");
-        *self.hasher_trace[idx].last().expect("no last hasher value")
+    /// Returns the last value in the specified shared column.
+    fn last_shared_column_value(&self, idx: usize) -> Felt {
+        debug_assert!(idx < NUM_SHARED_COLUMNS, "invalid shared column register index");
+        *self.shared_columns_trace[idx].last().expect("no last shared column value")
     }
 
     /// Returns a reference to the last value in the helper register at the specified index.
     fn last_helper_mut(&mut self, idx: usize) -> &mut Felt {
         debug_assert!(idx < USER_OP_HELPERS.len(), "invalid helper register index");
 
-        self.hasher_trace[USER_OP_HELPERS.start + idx]
+        self.shared_columns_trace[USER_OP_HELPERS.start + idx]
             .last_mut()
             .expect("no last helper value")
     }
@@ -495,7 +495,7 @@ impl DecoderTrace {
     /// Add all provided values to the helper registers in the order provided, starting from the
     /// first hasher register that is available for user operation helper values.
     ///
-    /// The specified USER_OP_HELPERS in the `hasher_trace` are used as helper registers, since they
+    /// The specified USER_OP_HELPERS in the `shared_columns_trace` are used as helper registers, since they
     /// are not required for hashing during execution of user operations.
     pub fn set_user_op_helpers(&mut self, values: &[Felt]) {
         assert!(values.len() <= USER_OP_HELPERS.len(), "too many values for helper columns");
@@ -516,7 +516,7 @@ impl DecoderTrace {
             column.push(ZERO);
         }
         self.in_span_trace.push(ZERO);
-        for column in self.hasher_trace.iter_mut() {
+        for column in self.shared_columns_trace.iter_mut() {
             column.push(ZERO);
         }
         self.group_count_trace.push(ZERO);
@@ -528,7 +528,7 @@ impl DecoderTrace {
     pub fn get_user_op_helpers(&self) -> [Felt; NUM_USER_OP_HELPERS] {
         let mut result = [ZERO; NUM_USER_OP_HELPERS];
         for (idx, helper) in result.iter_mut().enumerate() {
-            *helper = *self.hasher_trace[USER_OP_HELPERS.start + idx]
+            *helper = *self.shared_columns_trace[USER_OP_HELPERS.start + idx]
                 .last()
                 .expect("no last helper value");
         }
