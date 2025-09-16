@@ -19,26 +19,34 @@ pub const NUM_OP_BITS: usize = Operation::OP_BITS;
 /// Location of operation bits columns in the decoder trace.
 pub const OP_BITS_RANGE: Range<usize> = range(OP_BITS_OFFSET, NUM_OP_BITS);
 
-// TODO: probably rename "hasher state" to something like "shared columns".
+/// Index at which shared columns start in the decoder trace.
+pub const SHARED_COLUMNS_OFFSET: usize = OP_BITS_RANGE.end;
 
-/// Index at which hasher state columns start in the decoder trace.
-pub const HASHER_STATE_OFFSET: usize = OP_BITS_RANGE.end;
-
-/// Number of hasher columns in the decoder trace.
-pub const NUM_HASHER_COLUMNS: usize = 8;
+/// Number of shared columns in the decoder trace.
+pub const NUM_SHARED_COLUMNS: usize = 8;
 
 /// Number of helper registers available to user ops.
 pub const NUM_USER_OP_HELPERS: usize = 6;
 
 /// Index at which helper registers available to user ops start.
 /// The first two helper registers are used by the decoder itself.
-pub const USER_OP_HELPERS_OFFSET: usize = HASHER_STATE_OFFSET + 2;
+pub const USER_OP_HELPERS_OFFSET: usize = SHARED_COLUMNS_OFFSET + 2;
 
-/// Location of hasher columns in the decoder trace.
-pub const HASHER_STATE_RANGE: Range<usize> = range(HASHER_STATE_OFFSET, NUM_HASHER_COLUMNS);
+/// Location of shared columns in the decoder trace.
+pub const SHARED_COLUMNS_RANGE: Range<usize> = range(SHARED_COLUMNS_OFFSET, NUM_SHARED_COLUMNS);
+
+// Backward compatibility aliases
+#[deprecated(note = "Use SHARED_COLUMNS_OFFSET instead")]
+pub const HASHER_STATE_OFFSET: usize = SHARED_COLUMNS_OFFSET;
+
+#[deprecated(note = "Use NUM_SHARED_COLUMNS instead")]
+pub const NUM_HASHER_COLUMNS: usize = NUM_SHARED_COLUMNS;
+
+#[deprecated(note = "Use SHARED_COLUMNS_RANGE instead")]
+pub const HASHER_STATE_RANGE: Range<usize> = SHARED_COLUMNS_RANGE;
 
 /// Index of the in_span column in the decoder trace.
-pub const IN_SPAN_COL_IDX: usize = HASHER_STATE_RANGE.end;
+pub const IN_SPAN_COL_IDX: usize = SHARED_COLUMNS_RANGE.end;
 
 /// Index of the operation group count column in the decoder trace.
 pub const GROUP_COUNT_COL_IDX: usize = IN_SPAN_COL_IDX + 1;
@@ -78,16 +86,16 @@ pub const OP_BITS_EXTRA_COLS_RANGE: Range<usize> =
     range(OP_BITS_EXTRA_COLS_OFFSET, NUM_OP_BITS_EXTRA_COLS);
 
 /// Index of a flag column which indicates whether an ending block is a body of a loop.
-pub const IS_LOOP_BODY_FLAG_COL_IDX: usize = HASHER_STATE_RANGE.start + 4;
+pub const IS_LOOP_BODY_FLAG_COL_IDX: usize = SHARED_COLUMNS_RANGE.start + 4;
 
 /// Index of a flag column which indicates whether an ending block is a LOOP block.
-pub const IS_LOOP_FLAG_COL_IDX: usize = HASHER_STATE_RANGE.start + 5;
+pub const IS_LOOP_FLAG_COL_IDX: usize = SHARED_COLUMNS_RANGE.start + 5;
 
 /// Index of a flag column which indicates whether an ending block is a CALL or DYNCALL block.
-pub const IS_CALL_FLAG_COL_IDX: usize = HASHER_STATE_RANGE.start + 6;
+pub const IS_CALL_FLAG_COL_IDX: usize = SHARED_COLUMNS_RANGE.start + 6;
 
 /// Index of a flag column which indicates whether an ending block is a SYSCALL block.
-pub const IS_SYSCALL_FLAG_COL_IDX: usize = HASHER_STATE_RANGE.start + 7;
+pub const IS_SYSCALL_FLAG_COL_IDX: usize = SHARED_COLUMNS_RANGE.start + 7;
 
 // --- Column accessors in the auxiliary columns --------------------------------------------------
 
@@ -102,5 +110,6 @@ pub const P3_COL_IDX: usize = DECODER_AUX_TRACE_OFFSET + 2;
 
 // --- GLOBALLY-INDEXED DECODER COLUMN ACCESSORS --------------------------------------------------
 pub const DECODER_OP_BITS_OFFSET: usize = super::DECODER_TRACE_OFFSET + OP_BITS_OFFSET;
+pub const DECODER_SHARED_COLUMNS_OFFSET: usize = super::DECODER_TRACE_OFFSET + SHARED_COLUMNS_OFFSET;
 pub const DECODER_USER_OP_HELPERS_OFFSET: usize =
     super::DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET;
