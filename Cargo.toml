@@ -30,21 +30,12 @@ inherits = "release"
 codegen-units = 1
 lto = true
 
-[profile.dev]
-opt-level = 1          # Reasonable optimization for faster test execution
-lto = "thin"           # Thin LTO for better performance without full LTO cost
-debug-assertions = true
-overflow-checks = true
-incremental = true
-
-[profile.ci]
+[profile.test-dev]
 inherits = "dev"
-opt-level = 1          # Same as test-dev for consistent performance
-debug = true           # Keep debug symbols like test-dev (minimal impact)
+opt-level = 1
+debug = true
 debug-assertions = true
 overflow-checks = true
-lto = "off"            # Skip LTO for faster compilation
-incremental = false    # CI builds from scratch anyway
 
 [workspace.dependencies]
 # Workspace crates

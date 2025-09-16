@@ -70,14 +70,9 @@ book: ## Builds the book & serves documentation site
 #   make core-test CARGO_PROFILE=test-fast FEATURES="testing,no_err_ctx"
 #   make core-test CRATE=miden-processor FEATURES=testing EXPR="-E 'not test(#*proptest)'"
 
-# Auto-detect CI environment for optimized profiles
-ifdef CI
-    NEXTEST_PROFILE ?= ci
-    CARGO_PROFILE   ?= ci
-else
-    NEXTEST_PROFILE ?= default
-    CARGO_PROFILE   ?= dev
-endif
+# Use test-dev profile consistently (like origin/main)
+NEXTEST_PROFILE ?= ci
+CARGO_PROFILE   ?= test-dev
 CRATE           ?=
 FEATURES        ?=
 # Filter expression/selector passed through to nextest, e.g.:
