@@ -1,18 +1,33 @@
+# ------------------------------------------------------------------------------
+# Makefile
+# ------------------------------------------------------------------------------
+
 .DEFAULT_GOAL := help
 
+# -- help ----------------------------------------------------------------------
 .PHONY: help
 help:
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'
+	@printf "\nTargets:\n\n"
+	@awk 'BEGIN {FS = ":.*##"; OFS = ""} /^[a-zA-Z0-9_.-]+:.*?##/ { printf "  \033[36m%-24s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
+	@printf "\nExamples:\n"
+	@printf "  make core-test CRATE=miden-air FEATURES=testing\n"
+	@printf "  make test-fast\n"
+	@printf "  make test-skip-proptests\n"
+	@printf "  make test-air test=\"-E '\''package(miden-air) & test(#*foo)'\''\"\n\n"
 
-# -- variables --------------------------------------------------------------------------------------
 
-BACKTRACE=RUST_BACKTRACE=1
-WARNINGS=RUSTDOCFLAGS="-D warnings"
-DEBUG_ASSERTIONS=RUSTFLAGS="-C debug-assertions"
-FEATURES_CONCURRENT_EXEC=--features concurrent,executable
-FEATURES_LOG_TREE=--features concurrent,executable,tracing-forest
-FEATURES_METAL_EXEC=--features concurrent,executable,metal,tracing-forest
+# -- environment toggles -------------------------------------------------------
+BACKTRACE          = RUST_BACKTRACE=1
+WARNINGS           = RUSTDOCFLAGS="-D warnings"
+DEBUG_ASSERTIONS   = RUSTFLAGS="-C debug-assertions"
+
+# -- doc help ------------------------------------------------------------------
 ALL_FEATURES_BUT_ASYNC=--features concurrent,executable,metal,testing,with-debug-info,internal
+
+# Feature sets for executable builds
+FEATURES_CONCURRENT_EXEC := --features concurrent,executable
+FEATURES_METAL_EXEC := --features concurrent,executable,metal,tracing-forest
+FEATURES_LOG_TREE := --features concurrent,executable,tracing-forest
 
 # -- linting --------------------------------------------------------------------------------------
 
@@ -49,67 +64,121 @@ doc: ## Generates & checks documentation
 book: ## Builds the book & serves documentation site
 	mdbook serve --open docs
 
-# --- testing -------------------------------------------------------------------------------------
+# -- core knobs (overridable from CLI or by caller targets) --------------------
+# Examples:
+#   make core-test CRATE=miden-air FEATURES=testing
+#   make core-test CARGO_PROFILE=test-fast FEATURES="testing,no_err_ctx"
+#   make core-test CRATE=miden-processor FEATURES=testing EXPR="-E 'not test(#*proptest)'"
+
+# Auto-detect CI environment for optimized profiles
+ifdef CI
+    NEXTEST_PROFILE ?= ci
+    CARGO_PROFILE   ?= ci
+else
+    NEXTEST_PROFILE ?= default
+    CARGO_PROFILE   ?= dev
+endif
+CRATE           ?=
+FEATURES        ?=
+# Filter expression/selector passed through to nextest, e.g.:
+#   -E 'not test(#*proptest)'   or   'my::module::test_name'
+EXPR            ?=
+# Extra args to nextest (e.g., --no-run)
+EXTRA           ?=
+
+define _CARGO_NEXTEST
+	$(BACKTRACE) cargo nextest run \
+		--profile $(NEXTEST_PROFILE) \
+		--cargo-profile $(CARGO_PROFILE) \
+		$(if $(FEATURES),--features $(FEATURES),) \
+		$(if $(CRATE),-p $(CRATE),) \
+		$(EXTRA) $(EXPR)
+endef
+
+.PHONY: core-test core-test-build
+## Core: run tests with overridable CRATE/FEATURES/PROFILES/EXPR/EXTRA
+core-test:
+	$(_CARGO_NEXTEST)
+
+## Core: build test binaries only (no run)
+core-test-build:
+	$(MAKE) core-test EXTRA="--no-run"
+
+# -- pattern rule: `make test-<crate> [test=...]` ------------------------------
+# Usage:
+#   make test-air
+#   make test-air test="'my::mod::some_test'"
+.PHONY: test-%
+test-%: ## Tests a specific crate; accepts 'test=' to pass a selector or nextest expr
+	$(DEBUG_ASSERTIONS) $(MAKE) core-test \
+		CRATE=miden-$* \
+		FEATURES=$(FEATURES_$*) \
+		EXPR=$(if $(test),$(test),)
+
+# -- top-level convenience targets ---------------------------------------------
 
 .PHONY: test-build
-test-build: ## Build the test binary
-	cargo nextest run --profile ci --cargo-profile test-dev --features concurrent,testing,executable --no-run
+test-build: ## Build the test binaries for the workspace (no run)
+	$(MAKE) core-test-build FEATURES="concurrent,testing,executable"
 
 .PHONY: test
-test: ## Run all tests
-	$(BACKTRACE) cargo nextest run --profile ci --cargo-profile test-dev --features concurrent,testing,executable
+test: ## Run all tests for the workspace
+	$(MAKE) core-test FEATURES="concurrent,testing,executable"
 
 .PHONY: test-docs
-test-docs: ## Run documentation tests
+test-docs: ## Run documentation tests (cargo test - nextest doesn't support doctests)
 	cargo test --doc $(ALL_FEATURES_BUT_ASYNC)
 
 .PHONY: test-fast
-test-fast: ## Runs all tests quickly for rapid iterative development feedback
-	$(DEBUG_ASSERTIONS) cargo nextest run --cargo-profile test-fast --features testing,no_err_ctx
+test-fast: ## Runs fast tests (excludes all CLI tests and proptests)
+	$(DEBUG_ASSERTIONS) $(MAKE) core-test \
+		FEATURES="testing,no_err_ctx" \
+		EXPR="-E 'not test(#*proptest) and not test(cli_)'"
 
 .PHONY: test-skip-proptests
 test-skip-proptests: ## Runs all tests, except property-based tests
-	$(DEBUG_ASSERTIONS) cargo nextest run --cargo-profile test-fast  --features testing -E 'not test(#*proptest)'
+	$(DEBUG_ASSERTIONS) $(MAKE) core-test \
+		FEATURES=testing \
+		EXPR="-E 'not test(#*proptest)'"
 
 .PHONY: test-loom
 test-loom: ## Runs all loom-based tests
-	RUSTFLAGS="--cfg loom" cargo nextest run --features testing -E 'test(#*loom)'
+	RUSTFLAGS="--cfg loom" $(MAKE) core-test \
+		FEATURES=testing \
+		EXPR="-E 'test(#*loom)'"
 
-.PHONY: test-air
-test-air: ## Tests miden-air package with detailed debug info. Usage: make test-air [test=<pattern>]
-	$(DEBUG_ASSERTIONS) cargo nextest run --cargo-profile test-dev --features testing -p miden-air $(if $(test),$(test),)
+# -- per-crate default features ------------------------------------------------
+FEATURES_air             := testing
+FEATURES_assembly        := testing
+FEATURES_assembly-syntax := testing
+FEATURES_core            :=
+FEATURES_miden-vm        := concurrent,executable,metal,internal
+FEATURES_processor       := concurrent,testing
+FEATURES_prover          := concurrent,metal
+FEATURES_stdlib          := with-debug-info
+FEATURES_verifier        :=
 
-.PHONY: test-assembly
-test-assembly: ## Tests miden-assembly package with detailed debug info. Usage: make test-assembly [test=<pattern>]
-	$(DEBUG_ASSERTIONS) cargo nextest run --cargo-profile test-dev --features testing -p miden-assembly $(if $(test),$(test),)
+# -- compatibility aliases (optional; pattern rule already covers them) --------
+.PHONY: test-air test-assembly test-assembly-syntax test-core test-miden-vm test-processor test-prover test-stdlib test-verifier
+test-air: ## Tests miden-air package
+	$(DEBUG_ASSERTIONS) $(MAKE) core-test CRATE=miden-air              FEATURES="$(FEATURES_air)"               EXPR=$(if $(test),$(test),)
+test-assembly: ## Tests miden-assembly package
+	$(DEBUG_ASSERTIONS) $(MAKE) core-test CRATE=miden-assembly         FEATURES="$(FEATURES_assembly)"          EXPR=$(if $(test),$(test),)
+test-assembly-syntax: ## Tests miden-assembly-syntax package
+	$(DEBUG_ASSERTIONS) $(MAKE) core-test CRATE=miden-assembly-syntax  FEATURES="$(FEATURES_assembly-syntax)"   EXPR=$(if $(test),$(test),)
+test-core: ## Tests miden-core package
+	$(DEBUG_ASSERTIONS) $(MAKE) core-test CRATE=miden-core             FEATURES="$(FEATURES_core)"              EXPR=$(if $(test),$(test),)
+test-miden-vm: ## Tests miden-vm package
+	$(DEBUG_ASSERTIONS) $(MAKE) core-test CRATE=miden-vm               FEATURES="$(FEATURES_miden-vm)"           EXPR=$(if $(test),$(test),)
+test-processor: ## Tests miden-processor package
+	$(DEBUG_ASSERTIONS) $(MAKE) core-test CRATE=miden-processor        FEATURES="$(FEATURES_processor)"         EXPR=$(if $(test),$(test),)
+test-prover: ## Tests miden-prover package
+	$(DEBUG_ASSERTIONS) $(MAKE) core-test CRATE=miden-prover           FEATURES="$(FEATURES_prover)"            EXPR=$(if $(test),$(test),)
+test-stdlib: ## Tests miden-stdlib package
+	$(DEBUG_ASSERTIONS) $(MAKE) core-test CRATE=miden-stdlib           FEATURES="$(FEATURES_stdlib)"            EXPR=$(if $(test),$(test),)
+test-verifier: ## Tests miden-verifier package
+	$(DEBUG_ASSERTIONS) $(MAKE) core-test CRATE=miden-verifier         FEATURES="$(FEATURES_verifier)"          EXPR=$(if $(test),$(test),)
 
-.PHONY: test-assembly-syntax
-test-assembly-syntax: ## Tests miden-assembly-syntax package with detailed debug info. Usage: make test-assembly-syntax [test=<pattern>]
-	$(DEBUG_ASSERTIONS) cargo nextest run --cargo-profile test-dev --features testing -p miden-assembly-syntax $(if $(test),$(test),)
-
-.PHONY: test-core
-test-core: ## Tests miden-core package with detailed debug info. Usage: make test-core [test=<pattern>]
-	$(DEBUG_ASSERTIONS) cargo nextest run --cargo-profile test-dev -p miden-core $(if $(test),$(test),)
-
-.PHONY: test-miden-vm
-test-miden-vm: ## Tests miden-vm package with detailed debug info. Usage: make test-miden-vm [test=<pattern>]
-	$(DEBUG_ASSERTIONS) cargo nextest run --cargo-profile test-dev --features concurrent,executable,metal,internal -p miden-vm $(if $(test),$(test),)
-
-.PHONY: test-processor
-test-processor: ## Tests miden-processor package with detailed debug info. Usage: make test-processor [test=<pattern>]
-	$(DEBUG_ASSERTIONS) cargo nextest run --cargo-profile test-dev --features concurrent,testing -p miden-processor $(if $(test),$(test),)
-
-.PHONY: test-prover
-test-prover: ## Tests miden-prover package with detailed debug info. Usage: make test-prover [test=<pattern>]
-	$(DEBUG_ASSERTIONS) cargo nextest run --cargo-profile test-dev --features concurrent,metal -p miden-prover $(if $(test),$(test),)
-
-.PHONY: test-stdlib
-test-stdlib: ## Tests miden-stdlib package with detailed debug info. Usage: make test-stdlib [test=<pattern>]
-	$(DEBUG_ASSERTIONS) cargo nextest run --cargo-profile test-dev --features with-debug-info -p miden-stdlib $(if $(test),$(test),)
-
-.PHONY: test-verifier
-test-verifier: ## Tests miden-verifier package with detailed debug info. Usage: make test-verifier [test=<pattern>]
-	$(DEBUG_ASSERTIONS) cargo nextest run --cargo-profile test-dev -p miden-verifier $(if $(test),$(test),)
 
 # --- checking ------------------------------------------------------------------------------------
 
