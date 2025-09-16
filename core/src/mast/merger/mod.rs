@@ -41,6 +41,19 @@ impl MastForestMerger {
         forests: impl IntoIterator<Item = &'forest MastForest>,
     ) -> Result<(MastForest, MastForestRootMap), MastForestError> {
         let forests = forests.into_iter().collect::<Vec<_>>();
+
+        // Handle identity case: merging a single forest should return that forest unchanged
+        // This fixes issue #1644 where single-forest merges were changing node digests due to ID
+        // remapping
+        if forests.len() == 1 {
+            let forest = forests[0];
+            let mut root_map = BTreeMap::new();
+            for root in forest.procedure_roots() {
+                root_map.insert(*root, *root);
+            }
+            return Ok((forest.clone(), MastForestRootMap { root_maps: vec![root_map] }));
+        }
+
         let decorator_id_mappings = Vec::with_capacity(forests.len());
         let node_id_mappings = vec![MastForestNodeIdMap::new(); forests.len()];
 
