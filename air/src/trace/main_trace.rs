@@ -20,9 +20,9 @@ use super::{
         hasher::{DIGEST_LEN, HASH_CYCLE_LEN, STATE_WIDTH},
     },
     decoder::{
-        GROUP_COUNT_COL_IDX, HASHER_STATE_OFFSET, IN_SPAN_COL_IDX, IS_CALL_FLAG_COL_IDX,
+        GROUP_COUNT_COL_IDX, SHARED_COLUMNS_OFFSET, IN_SPAN_COL_IDX, IS_CALL_FLAG_COL_IDX,
         IS_LOOP_BODY_FLAG_COL_IDX, IS_LOOP_FLAG_COL_IDX, IS_SYSCALL_FLAG_COL_IDX,
-        NUM_HASHER_COLUMNS, NUM_OP_BATCH_FLAGS, OP_BATCH_FLAGS_OFFSET, OP_BITS_EXTRA_COLS_OFFSET,
+        NUM_SHARED_COLUMNS, NUM_OP_BATCH_FLAGS, OP_BATCH_FLAGS_OFFSET, OP_BITS_EXTRA_COLS_OFFSET,
         USER_OP_HELPERS_OFFSET,
     },
     stack::{B0_COL_IDX, B1_COL_IDX, H0_COL_IDX},
@@ -32,8 +32,8 @@ use crate::RowIndex;
 // CONSTANTS
 // ================================================================================================
 
-const DECODER_HASHER_RANGE: Range<usize> =
-    range(DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET, NUM_HASHER_COLUMNS);
+const DECODER_SHARED_COLUMNS_RANGE: Range<usize> =
+    range(DECODER_TRACE_OFFSET + SHARED_COLUMNS_OFFSET, NUM_SHARED_COLUMNS);
 
 // HELPER STRUCT AND METHODS
 // ================================================================================================
@@ -109,41 +109,62 @@ impl MainTrace {
         self.columns.get_column(DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + i)[row]
     }
 
-    /// Returns the hasher state at row i.
-    pub fn decoder_hasher_state(&self, i: RowIndex) -> [Felt; NUM_HASHER_COLUMNS] {
-        let mut state = [ZERO; NUM_HASHER_COLUMNS];
-        for (idx, col_idx) in DECODER_HASHER_RANGE.enumerate() {
+    /// Returns the shared columns state at row i.
+    pub fn decoder_shared_columns(&self, i: RowIndex) -> [Felt; NUM_SHARED_COLUMNS] {
+        let mut state = [ZERO; NUM_SHARED_COLUMNS];
+        for (idx, col_idx) in DECODER_SHARED_COLUMNS_RANGE.enumerate() {
             let column = self.columns.get_column(col_idx);
             state[idx] = column[i];
         }
         state
     }
 
-    /// Returns the first half of the hasher state at row i.
-    pub fn decoder_hasher_state_first_half(&self, i: RowIndex) -> Word {
+    /// Returns the first half of the shared columns at row i.
+    pub fn decoder_shared_columns_first_half(&self, i: RowIndex) -> Word {
         let mut state = [ZERO; DIGEST_LEN];
         for (col, s) in state.iter_mut().enumerate() {
-            *s = self.columns.get_column(DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + col)[i];
+            *s = self.columns.get_column(DECODER_TRACE_OFFSET + SHARED_COLUMNS_OFFSET + col)[i];
         }
         state.into()
     }
 
-    /// Returns the second half of the hasher state at row i.
-    pub fn decoder_hasher_state_second_half(&self, i: RowIndex) -> Word {
+    /// Returns the second half of the shared columns at row i.
+    pub fn decoder_shared_columns_second_half(&self, i: RowIndex) -> Word {
         const SECOND_WORD_OFFSET: usize = 4;
         let mut state = [ZERO; DIGEST_LEN];
         for (col, s) in state.iter_mut().enumerate() {
             *s = self
                 .columns
-                .get_column(DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + SECOND_WORD_OFFSET + col)
+                .get_column(DECODER_TRACE_OFFSET + SHARED_COLUMNS_OFFSET + SECOND_WORD_OFFSET + col)
                 [i];
         }
         state.into()
     }
 
-    /// Returns a specific element from the hasher state at row i.
+    /// Returns a specific element from the shared columns at row i.
+    pub fn decoder_shared_columns_element(&self, element: usize, i: RowIndex) -> Felt {
+        self.columns.get_column(DECODER_TRACE_OFFSET + SHARED_COLUMNS_OFFSET + element)[i]
+    }
+
+    // Backward compatibility aliases
+    #[deprecated(note = "Use decoder_shared_columns instead")]
+    pub fn decoder_hasher_state(&self, i: RowIndex) -> [Felt; NUM_SHARED_COLUMNS] {
+        self.decoder_shared_columns(i)
+    }
+
+    #[deprecated(note = "Use decoder_shared_columns_first_half instead")]
+    pub fn decoder_hasher_state_first_half(&self, i: RowIndex) -> Word {
+        self.decoder_shared_columns_first_half(i)
+    }
+
+    #[deprecated(note = "Use decoder_shared_columns_second_half instead")]
+    pub fn decoder_hasher_state_second_half(&self, i: RowIndex) -> Word {
+        self.decoder_shared_columns_second_half(i)
+    }
+
+    #[deprecated(note = "Use decoder_shared_columns_element instead")]
     pub fn decoder_hasher_state_element(&self, element: usize, i: RowIndex) -> Felt {
-        self.columns.get_column(DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + element)[i]
+        self.decoder_shared_columns_element(element, i)
     }
 
     /// Returns the current function hash (i.e., root) at row i.
