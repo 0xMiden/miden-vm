@@ -9,7 +9,7 @@ extern crate std;
 use core::borrow::{Borrow, BorrowMut};
 use std::println;
 
-use p3_air::AirBuilderWithPublicValues;
+use p3_air::{AirBuilderWithPublicValues, PermutationAirBuilder};
 pub use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::Matrix;
@@ -31,6 +31,7 @@ mod options;
 mod proof;
 
 mod air_builder;
+use air_builder::TraceTableAirBuilder;
 
 mod utils;
 // RE-EXPORTS
@@ -353,7 +354,7 @@ impl<AB: AirBuilderWithPublicValues> Air<AB> for ProcessorAir {
         when_transition
             
             .assert_zero(clk_nxt - (clk_cur + AB::Expr::ONE));
-/* 
+ 
         let change_v = next.range[1] - local.range[1];
         when_transition.assert_zero(
             (change_v.clone() - AB::Expr::ONE)
@@ -364,13 +365,9 @@ impl<AB: AirBuilderWithPublicValues> Air<AB> for ProcessorAir {
                 * (change_v.clone() - AB::Expr::from_i128(243))
                 * (change_v.clone() - AB::Expr::from_i128(729))
                 * (change_v.clone() - AB::Expr::from_i128(2187)),
-        ); 
-   */     
+        );    
 
     }
-
-   
-
 }
 
 #[derive(Debug)]
@@ -417,3 +414,4 @@ impl<T> BorrowMut<MainTraceCols<T>> for [T] {
         &mut shorts[0]
     }
 }
+

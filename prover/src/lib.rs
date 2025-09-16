@@ -132,7 +132,12 @@ where
 
             ExecutionProof::new(proof, hash_fn)
         },
+        HashFunction::Keccak => {
+            println!("kecak proving");
+            let proof = prove_keccak(trace);
 
+            ExecutionProof::new(proof, hash_fn)
+        },
         HashFunction::Rpx256 => {
             unimplemented!()
         },
@@ -161,7 +166,7 @@ fn to_row_major(trace: &ExecutionTrace) -> RowMajorMatrix<Felt> {
 use p3_commit::Pcs;
 use serde::{Deserialize, Serialize};
 
-use crate::prove::{prove_blake, prove_rpo};
+use crate::prove::{prove_blake, prove_keccak, prove_rpo};
 
 type Com<SC> = <<SC as StarkGenericConfig>::Pcs as Pcs<
     <SC as StarkGenericConfig>::Challenge,

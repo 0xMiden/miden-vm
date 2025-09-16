@@ -84,89 +84,90 @@ pub fn verify(
 
     match hash_fn {
         HashFunction::Blake3_192 | HashFunction::Blake3_256 => {
-            println!("blake verifying");
-            type H = Blake3;
-            type FieldHash = SerializingHasher<H>;
-            type Compress<H> = CompressionFunctionFromHasher<H, 2, 32>;
-            type ValMmcs<H> = MerkleTreeMmcs<Val, u8, FieldHash, Compress<H>, 32>;
-            type ChallengeMmcs<H> = ExtensionMmcs<Val, Challenge, ValMmcs<H>>;
-            type Pcs = TwoAdicFriPcs<Val, Dft, ValMmcs<H>, ChallengeMmcs<H>>;
-            type Dft = Radix2DitParallel<Val>;
-
-            type Challenger<H> = SerializingChallenger64<Val, HashChallenger<u8, H, 32>>;
-            type Config = StarkConfig<Pcs, Challenge, Challenger<H>>;
-
-            let field_hash = FieldHash::new(H {});
-            let compress = Compress::new(H {});
-
-            let val_mmcs = ValMmcs::new(field_hash, compress);
-            let challenge_mmcs = ChallengeMmcs::new(val_mmcs.clone());
-
-            let dft = Dft::default();
-
-            let fri_config = FriParameters {
-                log_blowup: 3,
-                log_final_poly_len: 7,
-                num_queries: 27,
-                proof_of_work_bits: 16,
-                mmcs: challenge_mmcs,
-            };
-
-            let pcs = Pcs::new(dft, val_mmcs, fri_config);
-
-            let challenger = Challenger::from_hasher(vec![], H {});
-
-            let config = Config::new(pcs, challenger);
-
-            let proof: Proof<Config> = bincode::deserialize(&proof).unwrap();
-            verify_proof(&config, &processor_air, &proof, &vec![])
-        },
+                        println!("blake verifying");
+                        type H = Blake3;
+                        type FieldHash = SerializingHasher<H>;
+                        type Compress<H> = CompressionFunctionFromHasher<H, 2, 32>;
+                        type ValMmcs<H> = MerkleTreeMmcs<Val, u8, FieldHash, Compress<H>, 32>;
+                        type ChallengeMmcs<H> = ExtensionMmcs<Val, Challenge, ValMmcs<H>>;
+                        type Pcs = TwoAdicFriPcs<Val, Dft, ValMmcs<H>, ChallengeMmcs<H>>;
+                        type Dft = Radix2DitParallel<Val>;
+        
+                        type Challenger<H> = SerializingChallenger64<Val, HashChallenger<u8, H, 32>>;
+                        type Config = StarkConfig<Pcs, Challenge, Challenger<H>>;
+        
+                        let field_hash = FieldHash::new(H {});
+                        let compress = Compress::new(H {});
+        
+                        let val_mmcs = ValMmcs::new(field_hash, compress);
+                        let challenge_mmcs = ChallengeMmcs::new(val_mmcs.clone());
+        
+                        let dft = Dft::default();
+        
+                        let fri_config = FriParameters {
+                            log_blowup: 3,
+                            log_final_poly_len: 7,
+                            num_queries: 27,
+                            proof_of_work_bits: 16,
+                            mmcs: challenge_mmcs,
+                        };
+        
+                        let pcs = Pcs::new(dft, val_mmcs, fri_config);
+        
+                        let challenger = Challenger::from_hasher(vec![], H {});
+        
+                        let config = Config::new(pcs, challenger);
+        
+                        let proof: Proof<Config> = bincode::deserialize(&proof).unwrap();
+                        verify_proof(&config, &processor_air, &proof, &vec![])
+            },
         HashFunction::Rpo256 => {
-            type Perm = RpoPermutation256;
+                type Perm = RpoPermutation256;
 
-            type MyHash = PaddingFreeSponge<Perm, 12, 8, 4>;
-            let hash = MyHash::new(Perm {});
+                type MyHash = PaddingFreeSponge<Perm, 12, 8, 4>;
+                let hash = MyHash::new(Perm {});
 
-            type MyCompress = TruncatedPermutation<Perm, 2, 4, 12>;
-            let compress = MyCompress::new(Perm {});
+                type MyCompress = TruncatedPermutation<Perm, 2, 4, 12>;
+                let compress = MyCompress::new(Perm {});
 
-            type Challenger = DuplexChallenger<Val, Perm, 12, 8>;
-            let challenger = Challenger::new(Perm {});
+                type Challenger = DuplexChallenger<Val, Perm, 12, 8>;
+                let challenger = Challenger::new(Perm {});
 
-            type ValMmcs = MerkleTreeMmcs<
-                <Val as Field>::Packing,
-                <Val as Field>::Packing,
-                MyHash,
-                MyCompress,
-                4,
-            >;
-            let val_mmcs = ValMmcs::new(hash, compress);
+                type ValMmcs = MerkleTreeMmcs<
+                    <Val as Field>::Packing,
+                    <Val as Field>::Packing,
+                    MyHash,
+                    MyCompress,
+                    4,
+                >;
+                let val_mmcs = ValMmcs::new(hash, compress);
 
-            type ChallengeMmcs = ExtensionMmcs<Val, Challenge, ValMmcs>;
-            let challenge_mmcs = ChallengeMmcs::new(val_mmcs.clone());
+                type ChallengeMmcs = ExtensionMmcs<Val, Challenge, ValMmcs>;
+                let challenge_mmcs = ChallengeMmcs::new(val_mmcs.clone());
 
-            type Dft = Radix2DitParallel<Val>;
-            let dft = Dft::default();
+                type Dft = Radix2DitParallel<Val>;
+                let dft = Dft::default();
 
-            let fri_config = FriParameters {
-                log_blowup: 3,
-                log_final_poly_len: 7,
-                num_queries: 27,
-                proof_of_work_bits: 16,
-                mmcs: challenge_mmcs,
-            };
+                let fri_config = FriParameters {
+                    log_blowup: 3,
+                    log_final_poly_len: 7,
+                    num_queries: 27,
+                    proof_of_work_bits: 16,
+                    mmcs: challenge_mmcs,
+                };
             
-            type Pcs = TwoAdicFriPcs<Val, Dft, ValMmcs, ChallengeMmcs>;
-            let pcs = Pcs::new(dft, val_mmcs, fri_config);
-            type Config = StarkConfig<Pcs, Challenge, Challenger>;
-            let config = Config::new(pcs, challenger);
+                type Pcs = TwoAdicFriPcs<Val, Dft, ValMmcs, ChallengeMmcs>;
+                let pcs = Pcs::new(dft, val_mmcs, fri_config);
+                type Config = StarkConfig<Pcs, Challenge, Challenger>;
+                let config = Config::new(pcs, challenger);
 
-            let proof: Proof<Config> = bincode::deserialize(&proof).unwrap();
-            verify_proof(&config, &processor_air, &proof, &vec![])
-        },
+                let proof: Proof<Config> = bincode::deserialize(&proof).unwrap();
+                verify_proof(&config, &processor_air, &proof, &vec![])
+            },
         HashFunction::Rpx256 => {
-            todo!()
-        },
+                todo!()
+            },
+HashFunction::Keccak => todo!(),
     }
     .map_err(|_source| VerificationError::ProgramVerificationError(program_hash))?;
 

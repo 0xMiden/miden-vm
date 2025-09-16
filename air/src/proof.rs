@@ -107,6 +107,8 @@ pub enum HashFunction {
     Rpo256 = 0x02,
     /// RPX hash function with 256-bit output.
     Rpx256 = 0x03,
+        /// Keccak hash function with 256-bit output.
+        Keccak = 0x04,
 }
 
 impl Default for HashFunction {
@@ -123,6 +125,7 @@ impl HashFunction {
             HashFunction::Blake3_256 => Blake3_256::COLLISION_RESISTANCE,
             HashFunction::Rpo256 => Rpo256::COLLISION_RESISTANCE,
             HashFunction::Rpx256 => Rpx256::COLLISION_RESISTANCE,
+            HashFunction::Keccak => 128,
         }
     }
 }
@@ -136,6 +139,7 @@ impl TryFrom<u8> for HashFunction {
             0x01 => Ok(Self::Blake3_256),
             0x02 => Ok(Self::Rpo256),
             0x03 => Ok(Self::Rpx256),
+            0x04 => Ok(Self::Keccak),
             _ => Err(DeserializationError::InvalidValue(format!(
                 "the hash function representation {repr} is not valid!"
             ))),

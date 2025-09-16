@@ -39,6 +39,8 @@ p3-goldilocks = { version = "0.3.0" }
 p3-symmetric = { version = "0.3.0" }
 p3-util = { version = "0.3.0", features = ["parallel"] }
 p3-blake3 = { version = "0.3.0" }
+p3-keccak = "0.3.0"
+p3-maybe-rayon = "0.3.0"
 
 serde = { version = "1.0", features = ["derive"]}
 bincode = "1.3"

@@ -14,6 +14,8 @@ use tracing::debug_span;
 use std::vec::Vec;
 use std::vec;
 use p3_commit::PolynomialSpace;
+use p3_maybe_rayon::prelude::*;
+
 
 #[instrument("naive transposition", skip_all)]
 pub fn to_row_major(trace: &ExecutionTrace) -> RowMajorMatrix<Felt> {
@@ -81,9 +83,9 @@ where
         .collect();
 
     (0..quotient_size)
-        .into_iter()
+        .into_par_iter()
         .step_by(PackedVal::<SC>::WIDTH)
-        .flat_map(|i_start| {
+        .flat_map_iter(|i_start| {
             let i_range = i_start..i_start + PackedVal::<SC>::WIDTH;
 
             let is_first_row = *PackedVal::<SC>::from_slice(&sels.is_first_row[i_range.clone()]);

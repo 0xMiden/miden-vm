@@ -110,7 +110,7 @@ impl ProvingOptions {
             Self {
                 exec_options: ExecutionOptions::default(),
                 proof_options: Self::REGULAR_96_BITS,
-                hash_fn: HashFunction::Blake3_192,
+                hash_fn: HashFunction::Blake3_256,
             }
         }
     }
