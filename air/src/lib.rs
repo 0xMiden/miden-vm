@@ -29,6 +29,7 @@ use trace::*;
 mod errors;
 mod options;
 mod proof;
+pub use proof::{Proof, Commitments, OpenedValues};
 
 mod air_builder;
 use air_builder::TraceTableAirBuilder;
@@ -330,7 +331,7 @@ impl<F> BaseAir<F> for ProcessorAir {
     }
 }
 
-impl<AB: AirBuilderWithPublicValues> Air<AB> for ProcessorAir {
+impl<AB: AirBuilderWithPublicValues + PermutationAirBuilder> Air<AB> for ProcessorAir {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
         let (local, next) = (main.row_slice(0).unwrap(), main.row_slice(1).unwrap());

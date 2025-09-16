@@ -895,6 +895,15 @@ dependencies = [
 
 [[package]]
 name = "itertools"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba291022dbbd398a455acf126c1e341954079855bc60dfdda641363bd6922569"
+dependencies = [
+ "either",
+]
+
+[[package]]
+name = "itertools"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285"
@@ -1093,6 +1102,7 @@ dependencies = [
  "criterion",
  "miden-core",
  "p3-air",
+ "p3-commit",
  "p3-field",
  "p3-matrix",
  "p3-uni-stark",
@@ -1268,6 +1278,7 @@ dependencies = [
  "miden-crypto",
  "miden-gpu",
  "miden-processor",
+ "p3-air",
  "p3-blake3",
  "p3-challenger",
  "p3-commit",
@@ -1337,8 +1348,10 @@ name = "miden-verifier"
 version = "0.14.0"
 dependencies = [
  "bincode",
+ "itertools 0.12.1",
  "miden-air",
  "miden-core",
+ "p3-air",
  "p3-blake3",
  "p3-challenger",
  "p3-commit",

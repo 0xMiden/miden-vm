@@ -6,7 +6,7 @@ use processor::{ExecutionTrace, ZERO};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_field::ExtensionField;
 use tracing::instrument;
-use p3_uni_stark::{Domain, PackedChallenge, ProverConstraintFolder, StarkGenericConfig, Val, PackedVal};
+use p3_uni_stark::{Domain, PackedChallenge, StarkGenericConfig, Val, PackedVal};
 use p3_matrix::Matrix;
 use p3_util::log2_strict_usize;
 use p3_field::{PackedValue, BasedVectorSpace, PrimeCharacteristicRing};
@@ -15,6 +15,8 @@ use std::vec::Vec;
 use std::vec;
 use p3_commit::PolynomialSpace;
 use p3_maybe_rayon::prelude::*;
+
+use crate::prove::ProverConstraintFolder;
 
 
 #[instrument("naive transposition", skip_all)]

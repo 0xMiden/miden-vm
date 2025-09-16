@@ -9,7 +9,7 @@ use std::println;
 
 use alloc::vec;
 
-use air::{Felt, HashFunction, ProcessorAir, PublicInputs};
+use air::{Felt, HashFunction, ProcessorAir, Proof, PublicInputs};
 use p3_blake3::Blake3;
 use p3_challenger::{DuplexChallenger, HashChallenger, SerializingChallenger64};
 use p3_commit::ExtensionMmcs;
@@ -20,8 +20,11 @@ use p3_merkle_tree::MerkleTreeMmcs;
 use p3_symmetric::{
     CompressionFunctionFromHasher, PaddingFreeSponge, SerializingHasher, TruncatedPermutation
 };
-use p3_uni_stark::{Proof, StarkConfig, verify as verify_proof};
+use p3_uni_stark::{StarkConfig};
 use vm_core::RpoPermutation256;
+
+mod verify;
+use verify::verify as verify_proof;
 
 // EXPORTS
 // ================================================================================================

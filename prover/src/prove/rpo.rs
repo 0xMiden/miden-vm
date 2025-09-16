@@ -45,6 +45,9 @@ pub fn prove_rpo(trace: ExecutionTrace) -> Vec<u8> {
     let degree = trace_row_major.height();
     let log_degree = log2_strict_usize(degree);
 
+    let constraint_degree = 8;
+    let constraint_count = 2;
+    /*
     let symbolic_constraints =
         get_symbolic_constraints::<Felt, ProcessorAir>(&air, 0, public_values.len());
 
@@ -54,6 +57,8 @@ pub fn prove_rpo(trace: ExecutionTrace) -> Vec<u8> {
         .map(SymbolicExpression::degree_multiple)
         .max()
         .unwrap_or(0);
+
+     */
     let log_quotient_degree = log2_ceil_usize(constraint_degree - 1);
     let quotient_degree = 1 << log_quotient_degree;
 

@@ -1,8 +1,7 @@
 // Blake-specific prover implementation
 
-use super::types::{Commitments, OpenedValues, Proof};
 use super::utils::{quotient_values, to_row_major, to_row_major_aux};
-use air::Felt;
+use air::{Commitments, Felt, OpenedValues, Proof};
 use air::ProcessorAir;
 use miden_crypto::BinomialExtensionField;
 use p3_blake3::Blake3;
@@ -22,10 +21,10 @@ use p3_matrix::row_index_mapped::RowIndexMappedView;
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_symmetric::{CompressionFunctionFromHasher, SerializingHasher};
 use p3_uni_stark::StarkGenericConfig;
-use p3_uni_stark::{StarkConfig, SymbolicExpression, get_symbolic_constraints};
+use p3_uni_stark::StarkConfig;
 use p3_util::{log2_ceil_usize, log2_strict_usize};
 use processor::ExecutionTrace;
-use std::vec;
+use std::{println, vec};
 use std::vec::Vec;
 use tracing::info_span;
 
@@ -47,7 +46,7 @@ pub fn prove_blake(trace: ExecutionTrace) -> Vec<u8> {
     let trace_row_major = to_row_major(&trace);
     let degree = trace_row_major.height();
     let log_degree = log2_strict_usize(degree);
-
+/*
     let symbolic_constraints =
         get_symbolic_constraints::<Felt, ProcessorAir>(&air, 0, public_values.len());
 
@@ -57,8 +56,15 @@ pub fn prove_blake(trace: ExecutionTrace) -> Vec<u8> {
         .map(SymbolicExpression::degree_multiple)
         .max()
         .unwrap_or(0);
+ */
+
+ let constraint_degree = 8;
+ let constraint_count = 2;
+
     let log_quotient_degree = log2_ceil_usize(constraint_degree - 1);
     let quotient_degree = 1 << log_quotient_degree;
+println!("constraints degree {:?}", constraint_degree);
+println!("constraints count {:?}", constraint_count);
 
     let config = generate_blake_config();
     let mut challenger = config.initialise_challenger();
