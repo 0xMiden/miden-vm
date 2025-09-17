@@ -2,6 +2,9 @@
 
 name: bench
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main, next]
