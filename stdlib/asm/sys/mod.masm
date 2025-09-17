@@ -1,0 +1,35 @@
+# ===== SYSTEM PROCEDURES ==========================================================================
+
+#! Removes elements deep in the stack until the depth of the stack is exactly 16. The elements
+#! are removed in such a way that the top 16 elements of the stack remain unchanged. If the stack
+#! would otherwise contain more than 16 elements at the end of execution, then adding a call to this
+#! function at the end will reduce the size of the public inputs that are shared with the verifier.
+#!
+#! Input: Stack with 16 or more elements.
+#! Output: Stack with only the original top 16 elements.
+#!
+#! Cycles: 17 + 11 * overflow_words, where `overflow_words` is the number of words needed to drop.
+export.truncate_stack.4
+    # save the first word to memory and bring elements to be dropped to the top of the stack
+    loc_storew.0 dropw movupw.3
+    # => [X, B, C, D, ...]
+
+    # until stack depth greater than 16, keep dropping extra elements
+    sdepth neq.16
+    while.true
+        dropw movupw.3
+        # => [X, B, C, D, ...]
+
+        sdepth neq.16
+    end
+    # => [X, B, C, D, ...]
+
+    # bring the previously saved word back onto the stack
+    loc_loadw.0
+    # => [A, B, C, D, ...]
+end
+
+#! Drop 16 values from the stack.
+export.drop_stack_top
+    dropw dropw dropw dropw
+end

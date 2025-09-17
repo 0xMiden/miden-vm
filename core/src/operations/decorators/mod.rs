@@ -3,6 +3,8 @@ use core::fmt;
 
 use miden_crypto::hash::blake::Blake3_256;
 use num_traits::ToBytes;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 mod assembly_op;
 pub use assembly_op::AssemblyOp;
@@ -23,6 +25,7 @@ use crate::mast::{DecoratorFingerprint, DecoratorId};
 /// Executing decorators does not advance the VM clock. As such, many decorators can be executed in
 /// a single VM cycle.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Decorator {
     /// Adds information about the assembly instruction at a particular index (only applicable in
     /// debug mode).
@@ -84,12 +87,12 @@ pub type DecoratorList = Vec<(usize, DecoratorId)>;
 
 /// Iterator used to iterate through the decorator list of a span block
 /// while executing operation batches of a span block.
-pub struct DecoratorIterator<'a> {
+pub struct DecoratorIdIterator<'a> {
     decorators: &'a DecoratorList,
     idx: usize,
 }
 
-impl<'a> DecoratorIterator<'a> {
+impl<'a> DecoratorIdIterator<'a> {
     /// Returns a new instance of decorator iterator instantiated with the provided decorator list.
     pub fn new(decorators: &'a DecoratorList) -> Self {
         Self { decorators, idx: 0 }
@@ -108,7 +111,7 @@ impl<'a> DecoratorIterator<'a> {
     }
 }
 
-impl<'a> Iterator for DecoratorIterator<'a> {
+impl<'a> Iterator for DecoratorIdIterator<'a> {
     type Item = &'a DecoratorId;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -118,5 +121,11 @@ impl<'a> Iterator for DecoratorIterator<'a> {
         } else {
             None
         }
+    }
+}
+
+impl<'a> ExactSizeIterator for DecoratorIdIterator<'a> {
+    fn len(&self) -> usize {
+        self.decorators.len() - self.idx
     }
 }

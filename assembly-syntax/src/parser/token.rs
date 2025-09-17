@@ -194,6 +194,7 @@ pub enum Token<'input> {
     AdvMap,
     InsertHdword,
     InsertHdwordWithDomain,
+    InsertHqword,
     InsertHperm,
     InsertMem,
     AdvLoadw,
@@ -203,11 +204,6 @@ pub enum Token<'input> {
     PushMapval,
     PushMapvaln,
     PushMtnode,
-    PushSmtpeek,
-    PushSmtset,
-    PushSmtget,
-    PushU64Div,
-    PushFalconDiv,
     And,
     Assert,
     Assertz,
@@ -296,6 +292,7 @@ pub enum Token<'input> {
     Procref,
     Push,
     Repeat,
+    Range,
     Sdepth,
     Stack,
     Sub,
@@ -346,6 +343,8 @@ pub enum Token<'input> {
     U32WrappingSub,
     U32Xor,
     While,
+    Word,
+    Event,
     Xor,
     At,
     Bang,
@@ -384,6 +383,7 @@ impl fmt::Display for Token<'_> {
             Token::AdvStack => write!(f, "adv_stack"),
             Token::InsertHdword => write!(f, "insert_hdword"),
             Token::InsertHdwordWithDomain => write!(f, "insert_hdword_d"),
+            Token::InsertHqword => write!(f, "insert_hqword"),
             Token::InsertHperm => write!(f, "insert_hperm"),
             Token::InsertMem => write!(f, "insert_mem"),
             Token::AdvLoadw => write!(f, "adv_loadw"),
@@ -392,11 +392,6 @@ impl fmt::Display for Token<'_> {
             Token::PushMapval => write!(f, "push_mapval"),
             Token::PushMapvaln => write!(f, "push_mapvaln"),
             Token::PushMtnode => write!(f, "push_mtnode"),
-            Token::PushSmtpeek => write!(f, "push_smtpeek"),
-            Token::PushSmtset => write!(f, "push_smtset"),
-            Token::PushSmtget => write!(f, "push_smtget"),
-            Token::PushU64Div => write!(f, "push_u64div"),
-            Token::PushFalconDiv => write!(f, "push_falcon_div"),
             Token::And => write!(f, "and"),
             Token::Assert => write!(f, "assert"),
             Token::Assertz => write!(f, "assertz"),
@@ -535,6 +530,8 @@ impl fmt::Display for Token<'_> {
             Token::U32WrappingSub => write!(f, "u32wrapping_sub"),
             Token::U32Xor => write!(f, "u32xor"),
             Token::While => write!(f, "while"),
+            Token::Word => write!(f, "word"),
+            Token::Event => write!(f, "event"),
             Token::Xor => write!(f, "xor"),
             Token::At => write!(f, "@"),
             Token::Bang => write!(f, "!"),
@@ -552,6 +549,7 @@ impl fmt::Display for Token<'_> {
             Token::Rparen => write!(f, ")"),
             Token::Rbracket => write!(f, "]"),
             Token::Rstab => write!(f, "->"),
+            Token::Range => write!(f, ".."),
             Token::DocComment(DocumentationType::Module(_)) => f.write_str("module doc"),
             Token::DocComment(DocumentationType::Form(_)) => f.write_str("doc comment"),
             Token::HexValue(_) => f.write_str("hex-encoded value"),
@@ -579,6 +577,7 @@ impl<'input> Token<'input> {
                 | Token::Adv
                 | Token::InsertHdword
                 | Token::InsertHdwordWithDomain
+                | Token::InsertHqword
                 | Token::InsertHperm
                 | Token::InsertMem
                 | Token::AdvLoadw
@@ -588,11 +587,6 @@ impl<'input> Token<'input> {
                 | Token::PushMapval
                 | Token::PushMapvaln
                 | Token::PushMtnode
-                | Token::PushSmtpeek
-                | Token::PushSmtset
-                | Token::PushSmtget
-                | Token::PushU64Div
-                | Token::PushFalconDiv
                 | Token::And
                 | Token::Assert
                 | Token::Assertz
@@ -729,6 +723,7 @@ impl<'input> Token<'input> {
         ("eval_circuit", Token::EvalCircuit),
         ("insert_hdword", Token::InsertHdword),
         ("insert_hdword_d", Token::InsertHdwordWithDomain),
+        ("insert_hqword", Token::InsertHqword),
         ("insert_hperm", Token::InsertHperm),
         ("insert_mem", Token::InsertMem),
         ("adv_loadw", Token::AdvLoadw),
@@ -738,11 +733,6 @@ impl<'input> Token<'input> {
         ("push_mapval", Token::PushMapval),
         ("push_mapvaln", Token::PushMapvaln),
         ("push_mtnode", Token::PushMtnode),
-        ("push_smtpeek", Token::PushSmtpeek),
-        ("push_smtset", Token::PushSmtset),
-        ("push_smtget", Token::PushSmtget),
-        ("push_u64div", Token::PushU64Div),
-        ("push_falcon_div", Token::PushFalconDiv),
         ("and", Token::And),
         ("assert", Token::Assert),
         ("assertz", Token::Assertz),
@@ -880,6 +870,8 @@ impl<'input> Token<'input> {
         ("u32wrapping_sub", Token::U32WrappingSub),
         ("u32xor", Token::U32Xor),
         ("while", Token::While),
+        ("word", Token::Word),
+        ("event", Token::Event),
         ("xor", Token::Xor),
     ];
 
@@ -966,6 +958,7 @@ impl<'input> Token<'input> {
                     ")" => Some(Token::Rparen),
                     "]" => Some(Token::Rbracket),
                     "->" => Some(Token::Rstab),
+                    ".." => Some(Token::Range),
                     "end of file" => Some(Token::Eof),
                     "module doc" => {
                         Some(Token::DocComment(DocumentationType::Module(String::new())))

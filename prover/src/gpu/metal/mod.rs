@@ -13,6 +13,7 @@ use miden_gpu::{
 use miden_processor::crypto::{ElementHasher, Hasher};
 use pollster::block_on;
 use tracing::{Level, event};
+use winter_maybe_async::{maybe_async, maybe_await};
 use winter_prover::{
     CompositionPoly, CompositionPolyTrace, ConstraintCommitment, ConstraintCompositionCoefficients,
     DefaultConstraintEvaluator, EvaluationFrame, Prover, StarkDomain, TraceInfo, TraceLde,
@@ -29,7 +30,7 @@ use crate::{
     math::fft,
 };
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "async")))]
 mod tests;
 
 // CONSTANTS
@@ -92,6 +93,7 @@ where
         self.execution_prover.options()
     }
 
+    #[maybe_async]
     fn build_aux_trace<E: FieldElement<BaseField = Self::BaseField>>(
         &self,
         trace: &Self::Trace,
@@ -100,6 +102,7 @@ where
         trace.build_aux_trace(aux_rand_elements.rand_elements()).unwrap()
     }
 
+    #[maybe_async]
     fn new_trace_lde<E: FieldElement<BaseField = Felt>>(
         &self,
         trace_info: &TraceInfo,
@@ -110,16 +113,21 @@ where
         MetalTraceLde::new(trace_info, main_trace, domain, self.metal_hash_fn)
     }
 
+    #[maybe_async]
     fn new_evaluator<'a, E: FieldElement<BaseField = Felt>>(
         &self,
         air: &'a ProcessorAir,
         aux_rand_elements: Option<AuxRandElements<E>>,
         composition_coefficients: ConstraintCompositionCoefficients<E>,
     ) -> Self::ConstraintEvaluator<'a, E> {
-        self.execution_prover
-            .new_evaluator(air, aux_rand_elements, composition_coefficients)
+        maybe_await!(self.execution_prover.new_evaluator(
+            air,
+            aux_rand_elements,
+            composition_coefficients
+        ))
     }
 
+    #[maybe_async]
     fn build_constraint_commitment<E: FieldElement<BaseField = Felt>>(
         &self,
         composition_poly_trace: CompositionPolyTrace<E>,

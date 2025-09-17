@@ -13,7 +13,7 @@ use miden_assembly_syntax::{
 };
 use miden_core::{
     AssemblyOp, Decorator, Felt, Kernel, Operation, Program, WORD_SIZE, Word,
-    mast::{DecoratorId, MastNodeId},
+    mast::{DecoratorId, MastNodeExt, MastNodeId},
 };
 
 use crate::{

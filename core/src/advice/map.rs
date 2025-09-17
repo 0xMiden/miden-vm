@@ -7,6 +7,9 @@ use alloc::{
     vec::Vec,
 };
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 use crate::{
     Felt, Word,
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
@@ -21,6 +24,8 @@ use crate::{
 /// associated with a given key onto the advice stack using `adv.push_mapval` instruction. The VM
 /// can also insert new values into the advice map during execution.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
 pub struct AdviceMap(BTreeMap<Word, Arc<[Felt]>>);
 
 /// Pair representing a key-value entry in an [`AdviceMap`]

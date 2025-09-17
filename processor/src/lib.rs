@@ -16,18 +16,17 @@ use miden_air::trace::{
 pub use miden_air::{ExecutionOptions, ExecutionOptionsError, RowIndex};
 pub use miden_core::{
     AssemblyOp, EMPTY_WORD, Felt, Kernel, ONE, Operation, Program, ProgramInfo, QuadExtension,
-    StackInputs, StackOutputs, Word, ZERO,
+    StackInputs, StackOutputs, WORD_SIZE, Word, ZERO,
     crypto::merkle::SMT_DEPTH,
     errors::InputError,
-    mast::{MastForest, MastNode, MastNodeId},
+    mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
     sys_events::SystemEvent,
-    utils::{DeserializationError, collections::KvMap},
+    utils::DeserializationError,
 };
 use miden_core::{
-    Decorator, DecoratorIterator, FieldElement, WORD_SIZE,
+    Decorator, DecoratorIdIterator, FieldElement,
     mast::{
-        BasicBlockNode, CallNode, DynNode, ExternalNode, JoinNode, LoopNode, OP_GROUP_SIZE,
-        OpBatch, SplitNode,
+        BasicBlockNode, CallNode, DynNode, ExternalNode, JoinNode, LoopNode, OpBatch, SplitNode,
     },
 };
 use miden_debug_types::SourceSpan;
@@ -37,6 +36,7 @@ pub(crate) mod continuation_stack;
 
 pub mod fast;
 use fast::FastProcessState;
+pub(crate) mod processor;
 
 mod operations;
 
@@ -44,7 +44,7 @@ mod system;
 use system::System;
 pub use system::{ContextId, FMP_MIN, SYSCALL_FMP_MIN};
 
-mod decoder;
+pub(crate) mod decoder;
 use decoder::Decoder;
 
 mod stack;
@@ -59,7 +59,7 @@ pub use host::{
     SyncHost,
     advice::{AdviceError, AdviceInputs, AdviceProvider},
     default::{DefaultDebugHandler, DefaultHost, HostLibrary},
-    handlers::{DebugHandler, EventError, EventHandler, EventHandlerRegistry},
+    handlers::{DebugHandler, EventError, EventHandler, EventHandlerRegistry, NoopEventHandler},
 };
 
 mod chiplets;
@@ -75,7 +75,7 @@ pub use errors::{ErrorContext, ErrorContextImpl, ExecutionError};
 
 pub mod utils;
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "no_err_ctx")))]
 mod tests;
 
 mod debug;
@@ -91,7 +91,7 @@ pub mod math {
 
 pub mod crypto {
     pub use miden_core::crypto::{
-        hash::{Blake3_192, Blake3_256, ElementHasher, Hasher, Rpo256, Rpx256},
+        hash::{Blake3_192, Blake3_256, ElementHasher, Hasher, Poseidon2, Rpo256, Rpx256},
         merkle::{
             MerkleError, MerklePath, MerkleStore, MerkleTree, NodeIndex, PartialMerkleTree,
             SimpleSmt,
@@ -594,7 +594,7 @@ impl Process {
     }
 
     /// Executes all operations in an [OpBatch]. This also ensures that all alignment rules are
-    /// satisfied by executing NOOPs as needed. Specifically:
+    /// satisfied by executing NOOPs as needed. Specifically:   
     /// - If an operation group ends with an operation carrying an immediate value, a NOOP is
     ///   executed after it.
     /// - If the number of groups in a batch is not a power of 2, NOOPs are executed (one per group)
@@ -604,12 +604,12 @@ impl Process {
         &mut self,
         basic_block: &BasicBlockNode,
         batch: &OpBatch,
-        decorators: &mut DecoratorIterator,
+        decorators: &mut DecoratorIdIterator,
         op_offset: usize,
         program: &MastForest,
         host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
-        let op_counts = batch.op_counts();
+        let end_indices = batch.end_indices();
         let mut op_idx = 0;
         let mut group_idx = 0;
         let mut next_group_idx = 1;
@@ -641,20 +641,8 @@ impl Process {
             }
 
             // determine if we've executed all non-decorator operations in a group
-            if op_idx == op_counts[group_idx] - 1 {
-                // if we are at the end of the group, first check if the operation carries an
-                // immediate value
-                if has_imm {
-                    // an operation with an immediate value cannot be the last operation in a group
-                    // so, we need execute a NOOP after it. the assert also makes sure that there
-                    // is enough room in the group to execute a NOOP (if there isn't, there is a
-                    // bug somewhere in the assembler)
-                    debug_assert!(op_idx < OP_GROUP_SIZE - 1, "invalid op index");
-                    self.decoder.execute_user_op(Operation::Noop, op_idx + 1);
-                    self.execute_op(Operation::Noop, program, host)?;
-                }
-
-                // then, move to the next group and reset operation index
+            if i + 1 == end_indices[group_idx] {
+                // move to the next group and reset operation index
                 group_idx = next_group_idx;
                 next_group_idx += 1;
                 op_idx = 0;
@@ -667,20 +655,6 @@ impl Process {
             } else {
                 // if we are not at the end of the group, just increment the operation index
                 op_idx += 1;
-            }
-        }
-
-        // make sure we execute the required number of operation groups; this would happen when
-        // the actual number of operation groups was not a power of two
-        for group_idx in group_idx..num_batch_groups {
-            self.decoder.execute_user_op(Operation::Noop, 0);
-            self.execute_op(Operation::Noop, program, host)?;
-
-            // if we are not at the last group yet, set up the decoder for decoding the next
-            // operation groups. the groups were are processing are just NOOPs - so, the op group
-            // value is ZERO
-            if group_idx < num_batch_groups - 1 {
-                self.decoder.start_op_group(ZERO);
             }
         }
 
@@ -781,6 +755,9 @@ pub struct SlowProcessState<'a> {
 pub enum ProcessState<'a> {
     Slow(SlowProcessState<'a>),
     Fast(FastProcessState<'a>),
+    /// A process state that does nothing. Calling any of its methods results in a panic. It is
+    /// expected to be used in conjunction with the `NoopHost`.
+    Noop(()),
 }
 
 impl Process {
@@ -802,6 +779,7 @@ impl<'a> ProcessState<'a> {
         match self {
             ProcessState::Slow(state) => state.advice,
             ProcessState::Fast(state) => &state.processor.advice,
+            ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
         }
     }
 
@@ -811,6 +789,7 @@ impl<'a> ProcessState<'a> {
         match self {
             ProcessState::Slow(state) => state.advice,
             ProcessState::Fast(state) => &mut state.processor.advice,
+            ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
         }
     }
 
@@ -820,6 +799,7 @@ impl<'a> ProcessState<'a> {
         match self {
             ProcessState::Slow(state) => state.system.clk(),
             ProcessState::Fast(state) => state.processor.clk,
+            ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
         }
     }
 
@@ -829,6 +809,7 @@ impl<'a> ProcessState<'a> {
         match self {
             ProcessState::Slow(state) => state.system.ctx(),
             ProcessState::Fast(state) => state.processor.ctx,
+            ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
         }
     }
 
@@ -838,33 +819,40 @@ impl<'a> ProcessState<'a> {
         match self {
             ProcessState::Slow(state) => state.system.fmp().as_int(),
             ProcessState::Fast(state) => state.processor.fmp.as_int(),
+            ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
         }
     }
 
     /// Returns the value located at the specified position on the stack at the current clock cycle.
+    ///
+    /// This method can access elements beyond the top 16 positions by using the overflow table.
     #[inline(always)]
     pub fn get_stack_item(&self, pos: usize) -> Felt {
         match self {
             ProcessState::Slow(state) => state.stack.get(pos),
             ProcessState::Fast(state) => state.processor.stack_get(pos),
+            ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
         }
     }
 
-    /// Returns a word located at the specified word index on the stack.
+    /// Returns a word starting at the specified element index on the stack.
     ///
-    /// Specifically, word 0 is defined by the first 4 elements of the stack, word 1 is defined
-    /// by the next 4 elements etc. Since the top of the stack contains 4 word, the highest valid
-    /// word index is 3.
+    /// The word is formed by taking 4 consecutive elements starting from the specified index.
+    /// For example, start_idx=0 creates a word from stack elements 0-3, start_idx=1 creates
+    /// a word from elements 1-4, etc.
     ///
-    /// The words are created in reverse order. For example, for word 0 the top element of the
-    /// stack will be at the last position in the word.
+    /// The words are created in reverse order. For a word starting at index N, stack element
+    /// N+3 will be at position 0 of the word, N+2 at position 1, N+1 at position 2, and N
+    /// at position 3.
     ///
+    /// This method can access elements beyond the top 16 positions by using the overflow table.
     /// Creating a word does not change the state of the stack.
     #[inline(always)]
-    pub fn get_stack_word(&self, word_idx: usize) -> Word {
+    pub fn get_stack_word(&self, start_idx: usize) -> Word {
         match self {
-            ProcessState::Slow(state) => state.stack.get_word(word_idx),
-            ProcessState::Fast(state) => state.processor.stack_get_word(word_idx * WORD_SIZE),
+            ProcessState::Slow(state) => state.stack.get_word(start_idx),
+            ProcessState::Fast(state) => state.processor.stack_get_word(start_idx),
+            ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
         }
     }
 
@@ -875,6 +863,7 @@ impl<'a> ProcessState<'a> {
         match self {
             ProcessState::Slow(state) => state.stack.get_state_at(state.system.clk()),
             ProcessState::Fast(state) => state.processor.stack().iter().rev().copied().collect(),
+            ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
         }
     }
 
@@ -885,6 +874,7 @@ impl<'a> ProcessState<'a> {
         match self {
             ProcessState::Slow(state) => state.chiplets.memory.get_value(ctx, addr),
             ProcessState::Fast(state) => state.processor.memory.read_element_impl(ctx, addr),
+            ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
         }
     }
 
@@ -899,6 +889,7 @@ impl<'a> ProcessState<'a> {
             ProcessState::Fast(state) => {
                 state.processor.memory.read_word_impl(ctx, addr, None, &())
             },
+            ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
         }
     }
 
@@ -914,6 +905,7 @@ impl<'a> ProcessState<'a> {
                 state.chiplets.memory.get_state_at(ctx, state.system.clk())
             },
             ProcessState::Fast(state) => state.processor.memory.get_memory_state(ctx),
+            ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
         }
     }
 }

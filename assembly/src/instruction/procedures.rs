@@ -3,7 +3,10 @@ use miden_assembly_syntax::{
     ast::{InvocationTarget, InvokeKind},
     diagnostics::Report,
 };
-use miden_core::{Operation, mast::MastNodeId};
+use miden_core::{
+    Operation,
+    mast::{MastNodeExt, MastNodeId},
+};
 use smallvec::SmallVec;
 
 use crate::{

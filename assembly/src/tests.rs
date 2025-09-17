@@ -7,13 +7,11 @@ use miden_assembly_syntax::{
     diagnostics::WrapErr,
 };
 use miden_core::{
-    Operation, Program, Word, assert_matches,
-    mast::{MastNode, MastNodeId, error_code_from_msg},
-    sys_events::{EVENT_HAS_MAP_KEY, EVENT_MAP_VALUE_TO_STACK},
+    EventId, Operation, Program, Word, assert_matches,
+    mast::{MastNodeExt, MastNodeId},
     utils::{Deserializable, Serializable},
 };
 use miden_mast_package::{MastArtifact, MastForest, Package, PackageExport, PackageManifest};
-use pretty_assertions::{assert_eq, assert_str_eq};
 use proptest::{
     prelude::*,
     test_runner::{Config, TestRunner},
@@ -29,6 +27,18 @@ use crate::{
 };
 
 type TestResult = Result<(), Report>;
+
+// Note: where possible, prefer insta to pretty_assertions for snapshot testing.
+//
+// - For tests against expected values that can't be expressed as a string literal, we still use
+//   pretty-assertions' assert_eq for backward compatibility.
+// - For new tests using string literals, or when you need auto-updating snapshots, use [insta](https://insta.rs/):
+//
+// Example:
+// insta::assert_snapshot!(actual_output)
+//
+// To update snapshots on a per-test basis automatically:
+// cargo insta review (after `cargo install cargo-insta`)
 
 macro_rules! assert_assembler_diagnostic {
     ($context:ident, $source:expr, $($expected:literal),+) => {{
@@ -54,27 +64,15 @@ fn simple_instructions() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "begin push.0 assertz end");
     let program = context.assemble(source)?;
-    let expected = "\
-begin
-    basic_block pad eqz assert(0) end
-end";
-    assert_str_eq!(format!("{program}"), expected);
+    insta::assert_snapshot!(program);
 
     let source = source_file!(&context, "begin push.10 push.50 push.2 u32wrapping_madd end");
     let program = context.assemble(source)?;
-    let expected = "\
-begin
-    basic_block push(10) push(50) push(2) u32madd drop end
-end";
-    assert_str_eq!(format!("{program}"), expected);
+    insta::assert_snapshot!(program);
 
     let source = source_file!(&context, "begin push.10 push.50 push.2 u32wrapping_add3 end");
     let program = context.assemble(source)?;
-    let expected = "\
-begin
-    basic_block push(10) push(50) push(2) u32add3 drop end
-end";
-    assert_str_eq!(format!("{program}"), expected);
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -85,8 +83,7 @@ fn empty_program() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "begin end");
     let program = context.assemble(source)?;
-    let expected = "begin basic_block noop end end";
-    assert_eq!(expected, format!("{}", program));
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -113,15 +110,7 @@ fn empty_if_true_then_branch() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "begin if.true nop end end");
     let program = context.assemble(source)?;
-    let expected = "\
-begin
-    if.true
-        basic_block noop end
-    else
-        basic_block noop end
-    end
-end";
-    assert_str_eq!(format!("{}", program), expected);
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -132,13 +121,7 @@ fn empty_while() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "begin while.true end end");
     let program = context.assemble(source)?;
-    let expected = "\
-begin
-    while.true
-        basic_block noop end
-    end
-end";
-    assert_str_eq!(format!("{}", program), expected);
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -149,11 +132,7 @@ fn empty_repeat() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "begin repeat.5 end end");
     let program = context.assemble(source)?;
-    let expected = "\
-begin
-    basic_block noop noop noop noop noop end
-end";
-    assert_str_eq!(format!("{}", program), expected);
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -164,11 +143,7 @@ fn repeat_basic_blocks_merged() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "begin mul repeat.5 add end end");
     let program = context.assemble(source)?;
-    let expected = "\
-begin
-    basic_block mul add add add add add end
-end";
-    assert_str_eq!(format!("{}", program), expected);
+    insta::assert_snapshot!(program);
 
     // Also ensure that dead code elimination works properly
     assert_eq!(program.mast_forest().num_nodes(), 1);
@@ -180,11 +155,7 @@ fn single_basic_block() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "begin push.1 push.2 add end");
     let program = context.assemble(source)?;
-    let expected = "\
-begin
-    basic_block pad incr push(2) add end
-end";
-    assert_str_eq!(format!("{program}"), expected);
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -195,34 +166,12 @@ fn basic_block_and_simple_if_true() -> TestResult {
     // if with else
     let source = source_file!(&context, "begin push.2 push.3 if.true add else mul end end");
     let program = context.assemble(source)?;
-    let expected = "\
-begin
-    join
-        basic_block push(2) push(3) end
-        if.true
-            basic_block add end
-        else
-            basic_block mul end
-        end
-    end
-end";
-    assert_str_eq!(format!("{program}"), expected);
+    insta::assert_snapshot!(program);
 
     // if without else
     let source = source_file!(&context, "begin push.2 push.3 if.true add end end");
     let program = context.assemble(source)?;
-    let expected = "\
-begin
-    join
-        basic_block push(2) push(3) end
-        if.true
-            basic_block add end
-        else
-            basic_block noop end
-        end
-    end
-end";
-    assert_str_eq!(format!("{program}"), expected);
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -233,34 +182,12 @@ fn basic_block_and_simple_if_false() -> TestResult {
     // if with else
     let source = source_file!(&context, "begin push.2 push.3 if.false add else mul end end");
     let program = context.assemble(source)?;
-    let expected = "\
-begin
-    join
-        basic_block push(2) push(3) end
-        if.true
-            basic_block mul end
-        else
-            basic_block add end
-        end
-    end
-end";
-    assert_str_eq!(format!("{program}"), expected);
+    insta::assert_snapshot!(program);
 
     // if without else
     let source = source_file!(&context, "begin push.2 push.3 if.false add end end");
     let program = context.assemble(source)?;
-    let expected = "\
-begin
-    join
-        basic_block push(2) push(3) end
-        if.true
-            basic_block noop end
-        else
-            basic_block add end
-        end
-    end
-end";
-    assert_str_eq!(format!("{program}"), expected);
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -754,12 +681,8 @@ fn simple_constant() -> TestResult {
         push.TEST_CONSTANT
     end"
     );
-    let expected = "\
-begin
-    basic_block push(7) end
-end";
     let program = context.assemble(source)?;
-    assert_str_eq!(format!("{program}"), expected);
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -774,12 +697,8 @@ fn multiple_constants_push() -> TestResult {
     push.CONSTANT_1.64.CONSTANT_2.72 \
     end"
     );
-    let expected = "\
-begin
-    basic_block push(21) push(64) push(44) push(72) end
-end";
     let program = context.assemble(source)?;
-    assert_str_eq!(format!("{program}"), expected);
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -794,12 +713,8 @@ fn constant_numeric_expression() -> TestResult {
     end \
     "
     );
-    let expected = "\
-begin
-    basic_block push(26) end
-end";
     let program = context.assemble(source)?;
-    assert_str_eq!(format!("{program}"), expected);
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -816,12 +731,8 @@ fn constant_alphanumeric_expression() -> TestResult {
     end \
     "
     );
-    let expected = "\
-begin
-    basic_block push(21) end
-end";
     let program = context.assemble(source)?;
-    assert_str_eq!(format!("{program}"), expected);
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -836,12 +747,8 @@ fn constant_hexadecimal_value() -> TestResult {
     end \
     "
     );
-    let expected = "\
-begin
-    basic_block push(255) end
-end";
     let program = context.assemble(source)?;
-    assert_str_eq!(format!("{program}"), expected);
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -856,12 +763,8 @@ fn constant_field_division() -> TestResult {
     end \
     "
     );
-    let expected = "\
-begin
-    basic_block push(2) end
-end";
     let program = context.assemble(source)?;
-    assert_str_eq!(format!("{program}"), expected);
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -1235,7 +1138,7 @@ fn mem_operations_with_constants() -> TestResult {
         )
     );
     let expected_program = context.assemble(expected)?;
-    assert_str_eq!(expected_program.to_string(), program.to_string());
+    assert_eq!(expected_program.to_string(), program.to_string());
     Ok(())
 }
 
@@ -1313,6 +1216,152 @@ fn const_conversion_failed_to_u32() -> TestResult {
     Ok(())
 }
 
+#[test]
+fn const_word_from_string() -> TestResult {
+    let context = TestContext::default();
+    let sample_source_string = "lorem ipsum";
+
+    let source = source_file!(
+        &context,
+        format!(
+            r#"
+    const.SAMPLE_WORD=word("{sample_source_string}")
+
+    begin
+        push.SAMPLE_WORD
+    end
+    "#
+        )
+    );
+    let program = context.assemble(source)?;
+
+    insta::assert_snapshot!(program);
+
+    Ok(())
+}
+
+/// Check that the event ID conversion during compilation is consistent with
+/// string_to_event_id.
+#[test]
+fn const_event_from_string() -> TestResult {
+    let context = TestContext::default();
+    let sample_event_name = "miden::test::constant";
+    let expected_felt = EventId::from_name(sample_event_name);
+
+    let source1 = source_file!(
+        &context,
+        format!(
+            r#"
+    begin
+        emit.event("{sample_event_name}")
+    end
+    "#
+        )
+    );
+    let source2 = source_file!(
+        &context,
+        format!(
+            r#"
+    begin
+        push.{expected_felt}
+        emit
+        drop
+    end
+    "#
+        )
+    );
+
+    let program1 = context.assemble(source1)?;
+    let program2 = context.assemble(source2)?;
+    assert_eq!(program1.hash(), program2.hash());
+
+    Ok(())
+}
+
+#[test]
+fn test_push_word_slice() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        "\
+    const.SAMPLE_WORD=[2, 3, 4, 5]
+    const.SAMPLE_HEX_WORD=0x0600000000000000070000000000000008000000000000000900000000000000
+
+    begin
+        push.SAMPLE_WORD[1..3]
+        push.SAMPLE_WORD[0]
+        push.[10, 11, 12, 13][1..3]
+
+        push.SAMPLE_HEX_WORD[2..4]
+        push.0x0600000000000000070000000000000008000000000000000900000000000000[0..2]
+    end
+    "
+    );
+    let program = context.assemble(source)?;
+
+    insta::assert_snapshot!(program);
+    Ok(())
+}
+
+#[test]
+fn test_push_word_slice_invalid() -> TestResult {
+    let context = TestContext::default();
+    let source_invalid_range = source_file!(
+        &context,
+        format!(
+            "\
+    const.SAMPLE_WORD=[2, 3, 4, 5]
+
+    begin
+        push.SAMPLE_WORD[6..3]
+    end
+    "
+        )
+    );
+    assert!(context.assemble(source_invalid_range).is_err());
+
+    let source_empty_range = source_file!(
+        &context,
+        format!(
+            "\
+    const.SAMPLE_WORD=[2, 3, 4, 5]
+
+    begin
+        push.SAMPLE_WORD[2..2]
+    end
+    "
+        )
+    );
+    assert!(context.assemble(source_empty_range).is_err());
+
+    let source_invalid_constant_type = source_file!(
+        &context,
+        format!(
+            "\
+    const.SAMPLE_VALUE=6
+    begin
+        push.SAMPLE_VALUE[1..3]
+    end
+    "
+        )
+    );
+    assert!(context.assemble(source_invalid_constant_type).is_err());
+
+    let source_invalid_constant_type = source_file!(
+        &context,
+        format!(
+            "\
+    begin
+        push.5[0..2]
+    end
+    "
+        )
+    );
+    assert!(context.assemble(source_invalid_constant_type).is_err());
+
+    Ok(())
+}
+
 // DECORATORS
 // ================================================================================================
 
@@ -1330,12 +1379,8 @@ fn decorators_basic_block() -> TestResult {
         trace.2
     end"
     );
-    let expected = "\
-begin
-    basic_block trace(0) add trace(1) mul trace(2) end
-end";
     let program = context.assemble(source)?;
-    assert_str_eq!(expected, format!("{program}"));
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -1353,12 +1398,8 @@ fn decorators_repeat_one_basic_block() -> TestResult {
         trace.2
     end"
     );
-    let expected = "\
-begin
-    basic_block trace(0) add add trace(1) mul mul trace(2) end
-end";
     let program = context.assemble(source)?;
-    assert_str_eq!(expected, format!("{program}"));
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -1381,27 +1422,8 @@ fn decorators_repeat_split() -> TestResult {
         trace.5
     end"
     );
-    let expected = "\
-begin
-    join
-        trace(0)
-        if.true
-            basic_block trace(1) push(42) trace(2) end
-        else
-            basic_block trace(3) push(22) trace(3) end
-        end
-        trace(4)
-        if.true
-            basic_block trace(1) push(42) trace(2) end
-        else
-            basic_block trace(3) push(22) trace(3) end
-        end
-        trace(4)
-    end
-    trace(5)
-end";
     let program = context.assemble(source)?;
-    assert_str_eq!(expected, format!("{program}"));
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -1417,14 +1439,8 @@ fn decorators_call() -> TestResult {
         trace.2
     end"
     );
-    let expected = "\
-begin
-    trace(0) trace(1)
-    call.0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef
-    trace(2)
-end";
     let program = context.assemble(source)?;
-    assert_str_eq!(expected, format!("{program}"));
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -1441,12 +1457,8 @@ fn decorators_dyn() -> TestResult {
         trace.1
     end"
     );
-    let expected = "\
-begin
-    trace(0) dyn trace(1)
-end";
     let program = context.assemble(source)?;
-    assert_str_eq!(expected, format!("{program}"));
+    insta::assert_snapshot!(program);
 
     // multi line
     let context = TestContext::default();
@@ -1459,14 +1471,8 @@ end";
         trace.5 trace.6 trace.7 trace.8 trace.9
     end"
     );
-    let expected = "\
-begin
-    trace(0) trace(1) trace(2) trace(3) trace(4)
-    dyn
-    trace(5) trace(6) trace(7) trace(8) trace(9)
-end";
     let program = context.assemble(source)?;
-    assert_str_eq!(expected, format!("{program}"));
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -1493,16 +1499,10 @@ fn decorators_external() -> TestResult {
     end"
     );
 
-    let expected = "\
-begin
-    trace(0)
-    external.0xe776df8dc02329acc43a09fe8e510b44a87dfd876e375ad383891470ece4f6de
-    trace(1)
-end";
     let program = Assembler::new(context.source_manager())
         .with_dynamic_library(lib)?
         .assemble_program(program_source)?;
-    assert_str_eq!(expected, format!("{program}"));
+    insta::assert_snapshot!(program);
 
     Ok(())
 }
@@ -1529,26 +1529,8 @@ fn decorators_join_and_split() -> TestResult {
         trace.11
     end"
     );
-    let expected = "\
-begin
-    join
-        trace(0) trace(1)
-        if.true
-            basic_block trace(2) add trace(3) end
-        else
-            basic_block trace(4) mul trace(5) end
-        end
-        trace(6)
-        if.true
-            basic_block trace(7) push(42) trace(8) end
-        else
-            basic_block trace(9) push(22) trace(10) end
-        end
-    end
-    trace(11)
-end";
     let program = context.assemble(source)?;
-    assert_str_eq!(expected, format!("{program}"));
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -1574,19 +1556,8 @@ fn assert_with_code() -> TestResult {
         )
     );
     let program = context.assemble(source)?;
-    let err_code = error_code_from_msg(err_msg);
 
-    let expected = format!(
-        "\
-begin
-    basic_block
-        assert(0)
-        assert({err_code})
-        assert({err_code})
-    end
-end"
-    );
-    assert_str_eq!(format!("{program}"), expected);
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -1609,22 +1580,8 @@ fn assertz_with_code() -> TestResult {
         )
     );
     let program = context.assemble(source)?;
-    let err_code = error_code_from_msg(err_msg);
 
-    let expected = format!(
-        "\
-begin
-    basic_block
-        eqz
-        assert(0)
-        eqz
-        assert({err_code})
-        eqz
-        assert({err_code})
-    end
-end"
-    );
-    assert_str_eq!(format!("{program}"), expected);
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -1647,22 +1604,8 @@ fn assert_eq_with_code() -> TestResult {
         )
     );
     let program = context.assemble(source)?;
-    let err_code = error_code_from_msg(err_msg);
 
-    let expected = format!(
-        "\
-begin
-    basic_block
-        eq
-        assert(0)
-        eq
-        assert({err_code})
-        eq
-        assert({err_code})
-    end
-end"
-    );
-    assert_str_eq!(format!("{program}"), expected);
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -1685,49 +1628,8 @@ fn assert_eqw_with_code() -> TestResult {
         )
     );
     let program = context.assemble(source)?;
-    let err_code = error_code_from_msg(err_msg);
 
-    let expected = format!(
-        "\
-begin
-    basic_block
-        movup4
-        eq
-        assert(0)
-        movup3
-        eq
-        assert(0)
-        movup2
-        eq
-        assert(0)
-        eq
-        assert(0)
-        movup4
-        eq
-        assert({err_code})
-        movup3
-        eq
-        assert({err_code})
-        movup2
-        eq
-        assert({err_code})
-        eq
-        assert({err_code})
-        movup4
-        eq
-        assert({err_code})
-        movup3
-        eq
-        assert({err_code})
-        movup2
-        eq
-        assert({err_code})
-        eq
-        assert({err_code})
-    end
-end"
-    );
-    assert_str_eq!(format!("{program}"), expected);
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -1750,25 +1652,8 @@ fn u32assert_with_code() -> TestResult {
         )
     );
     let program = context.assemble(source)?;
-    let err_code = error_code_from_msg(err_msg);
 
-    let expected = format!(
-        "\
-begin
-    basic_block
-        pad
-        u32assert2(0)
-        drop
-        pad
-        u32assert2({err_code})
-        drop
-        pad
-        u32assert2({err_code})
-        drop
-    end
-end"
-    );
-    assert_str_eq!(format!("{program}"), expected);
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -1791,19 +1676,8 @@ fn u32assert2_with_code() -> TestResult {
         )
     );
     let program = context.assemble(source)?;
-    let err_code = error_code_from_msg(err_msg);
 
-    let expected = format!(
-        "\
-begin
-    basic_block
-        u32assert2(0)
-        u32assert2({err_code})
-        u32assert2({err_code})
-    end
-end"
-    );
-    assert_str_eq!(format!("{program}"), expected);
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -1826,34 +1700,8 @@ fn u32assertw_with_code() -> TestResult {
         )
     );
     let program = context.assemble(source)?;
-    let err_code = error_code_from_msg(err_msg);
 
-    let expected = format!(
-        "\
-begin
-    basic_block
-        u32assert2(0)
-        movup3
-        movup3
-        u32assert2(0)
-        movup3
-        movup3
-        u32assert2({err_code})
-        movup3
-        movup3
-        u32assert2({err_code})
-        movup3
-        movup3
-        u32assert2({err_code})
-        movup3
-        movup3
-        u32assert2({err_code})
-        movup3
-        movup3
-    end
-end"
-    );
-    assert_str_eq!(format!("{program}"), expected);
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -1927,62 +1775,7 @@ fn asserts_and_mpverify_with_code_in_duplicate_procedure() -> TestResult {
     "
     );
     let program = context.assemble(source)?;
-    let code1 = error_code_from_msg("1");
-    let code2 = error_code_from_msg("2");
-
-    let expected = format!(
-        "\
-begin
-    basic_block
-        pad
-        u32assert2({code1})
-        drop
-        pad
-        u32assert2({code2})
-        drop
-        pad
-        u32assert2({code1})
-        drop
-        pad
-        u32assert2({code2})
-        drop
-        pad
-        u32assert2({code2})
-        drop
-        pad
-        u32assert2({code1})
-        drop
-        assert({code1})
-        assert({code2})
-        assert({code1})
-        assert({code2})
-        assert({code2})
-        assert({code1})
-        assert({code1})
-        pad
-        u32assert2({code1})
-        drop
-        assert({code2})
-        pad
-        u32assert2({code2})
-        drop
-        pad
-        u32assert2({code1})
-        drop
-        assert({code1})
-        pad
-        u32assert2({code2})
-        drop
-        assert({code2})
-        mpverify({code1})
-        mpverify({code2})
-        mpverify({code2})
-        mpverify({code1})
-    end
-end"
-    );
-
-    assert_str_eq!(expected, format!("{program}"));
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -2004,15 +1797,7 @@ fn mtree_verify_with_code() -> TestResult {
 
     let program = context.assemble(source)?;
 
-    let expected = "\
-begin
-    basic_block
-        mpverify(0)
-        mpverify(13948122101519563734)
-        mpverify(17575088163785490049)
-    end
-end";
-    assert_str_eq!(format!("{program}"), expected);
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -2037,33 +1822,7 @@ fn nested_control_blocks() -> TestResult {
         end"
     );
     let program = context.assemble(source)?;
-    let expected = "\
-begin
-    join
-        join
-            basic_block push(2) push(3) end
-            if.true
-                join
-                    basic_block add end
-                    while.true
-                        basic_block push(7) push(11) add end
-                    end
-                end
-            else
-                join
-                    basic_block mul push(8) push(8) end
-                    if.true
-                        basic_block mul end
-                    else
-                        basic_block noop end
-                    end
-                end
-            end
-        end
-        basic_block push(3) add end
-    end
-end";
-    assert_str_eq!(expected, format!("{program}"));
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -2108,10 +1867,7 @@ fn ensure_correct_procedure_selection_on_collision() -> TestResult {
 
     let (exec_f_node_id, exec_g_node_id) = {
         let split_node_id = program.entrypoint();
-        let split_node = match &program.mast_forest()[split_node_id] {
-            MastNode::Split(split_node) => split_node,
-            _ => panic!("expected split node"),
-        };
+        let split_node = &program.mast_forest()[split_node_id].unwrap_split();
 
         (split_node.on_true(), split_node.on_false())
     };
@@ -2130,11 +1886,7 @@ fn program_with_one_procedure() -> TestResult {
         "proc.foo push.3 push.7 mul end begin push.2 push.3 add exec.foo end"
     );
     let program = context.assemble(source)?;
-    let expected = "\
-begin
-    basic_block push(2) push(3) add push(3) push(7) mul end
-end";
-    assert_str_eq!(format!("{program}"), expected);
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -2149,26 +1901,7 @@ fn program_with_nested_procedure() -> TestResult {
         begin push.2 push.4 add exec.foo push.11 exec.bar sub end"
     );
     let program = context.assemble(source)?;
-    let expected = "\
-begin
-    basic_block
-        push(2)
-        push(4)
-        add
-        push(3)
-        push(7)
-        mul
-        push(11)
-        push(5)
-        push(3)
-        push(7)
-        mul
-        add
-        neg
-        add
-    end
-end";
-    assert_str_eq!(format!("{program}"), expected);
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -2191,28 +1924,7 @@ fn program_with_proc_locals() -> TestResult {
     );
     let program = context.assemble(source)?;
     // Note: 18446744069414584317 == -4 (mod 2^64 - 2^32 + 1)
-    let expected = "\
-begin
-    basic_block
-        push(10)
-        push(9)
-        push(8)
-        push(4)
-        fmpupdate
-        push(18446744069414584317)
-        fmpadd
-        mstore
-        drop
-        add
-        push(18446744069414584317)
-        fmpadd
-        mload
-        mul
-        push(18446744069414584317)
-        fmpupdate
-    end
-end";
-    assert_str_eq!(format!("{program}"), expected);
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -2285,11 +1997,7 @@ fn program_with_dynamic_code_execution() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "begin dynexec end");
     let program = context.assemble(source)?;
-    let expected = "\
-begin
-    dyn
-end";
-    assert_str_eq!(format!("{program}"), expected);
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -2298,11 +2006,7 @@ fn program_with_dynamic_code_execution_in_new_context() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "begin dyncall end");
     let program = context.assemble(source)?;
-    let expected = "\
-begin
-    dyncall
-end";
-    assert_str_eq!(format!("{program}"), expected);
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -2418,17 +2122,7 @@ fn program_with_one_import_and_hex_call() -> TestResult {
     );
     let program = context.assemble(source)?;
 
-    let expected = "\
-begin
-    join
-        join
-            basic_block push(4) push(3) end
-            external.0xc2545da99d3a1f3f38d957c7893c44d78998d8ea8b11aba7e22c8c2b2a213dae
-        end
-        call.0x20234ee941e53a15886e733cc8e041198c6e90d2a16ea18ce1030e8c3596dd38
-    end
-end";
-    assert_str_eq!(format!("{program}"), expected);
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -2555,17 +2249,7 @@ fn program_with_reexported_proc_in_same_library() -> TestResult {
         )
     );
     let program = context.assemble(source)?;
-    let expected = "\
-begin
-    join
-        join
-            basic_block push(4) push(3) end
-            external.0xb9691da1d9b4b364aca0a0990e9f04c446a2faa622c8dd0d8831527dbec61393
-        end
-        external.0xcb08c107c81c582788cbf63c99f6b455e11b33bb98ca05fe1cfa17c087dfa8f1
-    end
-end";
-    assert_str_eq!(format!("{program}"), expected);
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -2630,17 +2314,7 @@ fn program_with_reexported_custom_alias_in_same_library() -> TestResult {
         )
     );
     let program = context.assemble(source)?;
-    let expected = "\
-begin
-    join
-        join
-            basic_block push(4) push(3) end
-            external.0xb9691da1d9b4b364aca0a0990e9f04c446a2faa622c8dd0d8831527dbec61393
-        end
-        external.0xcb08c107c81c582788cbf63c99f6b455e11b33bb98ca05fe1cfa17c087dfa8f1
-    end
-end";
-    assert_str_eq!(format!("{program}"), expected);
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -2703,17 +2377,7 @@ fn program_with_reexported_proc_in_another_library() -> TestResult {
     );
     let program = context.assemble(source)?;
 
-    let expected = "\
-begin
-    join
-        join
-            basic_block push(4) push(3) end
-            external.0xb9691da1d9b4b364aca0a0990e9f04c446a2faa622c8dd0d8831527dbec61393
-        end
-        external.0xcb08c107c81c582788cbf63c99f6b455e11b33bb98ca05fe1cfa17c087dfa8f1
-    end
-end";
-    assert_str_eq!(format!("{program}"), expected);
+    insta::assert_snapshot!(program);
 
     // We also want to assert that exports from the referenced module do not leak
     let mut context = TestContext::default();
@@ -2783,14 +2447,7 @@ fn module_alias() -> TestResult {
     );
 
     let program = context.assemble(source)?;
-    let expected = "\
-begin
-    join
-        basic_block pad incr pad push(2) pad end
-        external.0x3cff5b58a573dc9d25fd3c57130cc57e5b1b381dc58b5ae3594b390c59835e63
-    end
-end";
-    assert_str_eq!(format!("{program}"), expected);
+    insta::assert_snapshot!(program);
 
     // --- invalid module alias -----------------------------------------------
     let source = source_file!(
@@ -2926,11 +2583,7 @@ fn comment_simple() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "begin # simple comment \n push.1 push.2 add end");
     let program = context.assemble(source)?;
-    let expected = "\
-begin
-    basic_block pad incr push(2) add end
-end";
-    assert_str_eq!(format!("{program}"), expected);
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -2954,33 +2607,7 @@ fn comment_in_nested_control_blocks() -> TestResult {
         end"
     );
     let program = context.assemble(source)?;
-    let expected = "\
-begin
-    join
-        join
-            basic_block pad incr push(2) end
-            if.true
-                join
-                    basic_block add end
-                    while.true
-                        basic_block push(7) push(11) add end
-                    end
-                end
-            else
-                join
-                    basic_block mul push(8) push(8) end
-                    if.true
-                        basic_block mul end
-                    else
-                        basic_block noop end
-                    end
-                end
-            end
-        end
-        basic_block push(3) add end
-    end
-end";
-    assert_str_eq!(expected, format!("{program}"));
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -2989,11 +2616,7 @@ fn comment_before_program() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, " # starting comment \n begin push.1 push.2 add end");
     let program = context.assemble(source)?;
-    let expected = "\
-begin
-    basic_block pad incr push(2) add end
-end";
-    assert_str_eq!(format!("{program}"), expected);
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -3002,11 +2625,7 @@ fn comment_after_program() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(&context, "begin push.1 push.2 add end # closing comment");
     let program = context.assemble(source)?;
-    let expected = "\
-begin
-    basic_block pad incr push(2) add end
-end";
-    assert_str_eq!(format!("{program}"), expected);
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -3022,11 +2641,7 @@ begin
 end"
     );
     let program = context.assemble(source)?;
-    let expected = "\
-begin
-    basic_block push(2) push(3) push(4) push(5) end
-end";
-    assert_str_eq!(format!("{program}"), expected);
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -3041,13 +2656,7 @@ begin push.A adv.push_mapval assert end"
     );
 
     let program = context.assemble(source)?;
-    let expected = format!(
-        "\
-begin
-    basic_block push(2) push(2) push(2) push(2) emit({EVENT_MAP_VALUE_TO_STACK}) assert(0) end
-end"
-    );
-    assert_str_eq!(format!("{program}"), expected);
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -3062,20 +2671,7 @@ begin push.A adv.push_mapval assert end"
     );
 
     let program = context.assemble(source)?;
-    let expected = format!(
-        "\
-begin
-    basic_block
-        push(3846236276142386450)
-        push(5034591595140902852)
-        push(4565868838168209231)
-        push(6740431856120851931)
-        emit({EVENT_MAP_VALUE_TO_STACK})
-        assert(0)
-    end
-end"
-    );
-    assert_str_eq!(format!("{program}"), expected);
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -3090,13 +2686,7 @@ begin adv.has_mapkey assert end"
     );
 
     let program = context.assemble(source)?;
-    let expected = format!(
-        "\
-begin
-    basic_block emit({EVENT_HAS_MAP_KEY}) assert(0) end
-end"
-    );
-    assert_str_eq!(format!("{program}"), expected);
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -3577,6 +3167,7 @@ fn test_program_serde_simple() {
 fn test_program_serde_with_decorators() {
     let source = "
     const.DEFAULT_CONST=100
+    const.EVENT_CONST=event(\"serde::evt\")
 
     proc.foo
         push.1.2 add
@@ -3584,7 +3175,7 @@ fn test_program_serde_with_decorators() {
     end
 
     begin
-        emit.DEFAULT_CONST
+        emit.EVENT_CONST
 
         exec.foo
 
@@ -3634,6 +3225,48 @@ fn vendoring() -> TestResult {
     Ok(())
 }
 
+// EMIT EVENT SYNTAX VALIDATION
+// ================================================================================================
+
+#[test]
+fn emit_u32_immediate_is_rejected() {
+    let context = TestContext::new();
+    let program_source = r#"
+        begin
+            emit.32
+        end
+    "#;
+    context
+        .assemble(program_source)
+        .expect_err(r#"emit.<u32> should be rejected; only event("...") is allowed"#);
+}
+
+#[test]
+fn emit_const_must_be_event_hash() {
+    let context = TestContext::new();
+    // CONST defined as plain number should not be accepted by emit.CONST
+    let program_source = r#"
+        const.BAD=100
+        begin
+            emit.BAD
+        end
+    "#;
+    context
+        .assemble(program_source)
+        .expect_err(r#"emit.CONST should require const defined via event("...")"#);
+
+    // CONST defined via word("...") should also be rejected by emit.CONST
+    let program_source = r#"
+        const.BADW=word("foo")
+        begin
+            emit.BADW
+        end
+    "#;
+    context
+        .assemble(program_source)
+        .expect_err(r#"emit.CONST should require const defined via event("...")"#);
+}
+
 #[test]
 #[should_panic]
 fn test_assert_diagnostic_lines() {
@@ -3677,7 +3310,7 @@ prop_compose! {
 
         let manifest = PackageManifest::new(exports).with_dependencies(manifest.dependencies().cloned());
 
-        Package { name, mast, manifest, account_component_metadata_bytes: None }
+        Package { name, version: None, description: None, mast, manifest, sections: Default::default() }
     }
 }
 
@@ -3922,12 +3555,15 @@ fn emit_instruction_digest() {
     let context = TestContext::new();
 
     let program_source = r#"
+        const.EVT1=event("miden::test::event_one")
+        const.EVT2=event("miden::test::event_two")
+
         proc.foo
-            emit.1
+            emit.EVT1
         end
 
         proc.bar
-            emit.2
+            emit.EVT2
         end
 
         begin
@@ -3948,6 +3584,56 @@ fn emit_instruction_digest() {
     assert_ne!(procedure_digests[0], procedure_digests[1]);
     assert_ne!(procedure_digests[0], procedure_digests[2]);
     assert_ne!(procedure_digests[1], procedure_digests[2]);
+}
+
+/// Tests that emitting events with immediate values has the same MAST representation
+/// regardless of whether using emit.value or push.value emit syntax
+#[test]
+fn emit_syntax_equivalence() {
+    let context = TestContext::new();
+
+    // First program uses a constant
+    let program1_source = r#"
+        const.EVT=event("miden::test::equiv")
+        begin
+            emit.EVT
+        end
+    "#;
+
+    // Second program uses inline emit.event("...")
+    let program2_source = r#"
+        begin
+            emit.event("miden::test::equiv")
+        end
+    "#;
+
+    // Third program uses manual emit with constant event name
+    let program3_source = r#"
+        const.EVT=event("miden::test::equiv")
+        begin
+            push.EVT
+            emit
+            drop
+        end
+    "#;
+
+    let program1 = context.assemble(program1_source).unwrap();
+    let program2 = context.assemble(program2_source).unwrap();
+    let program3 = context.assemble(program3_source).unwrap();
+
+    // Get the MAST forest digests for both programs
+    let digest1 = program1.hash();
+    let digest2 = program2.hash();
+    let digest3 = program3.hash();
+
+    // Both programs should have identical MAST representations
+    assert_eq!(digest1, digest2, "MAST digests differ between programs 1 and 2");
+    assert_eq!(digest1, digest3, "MAST digests differ between programs 1 and 3");
+
+    // Verify the procedure count is 1 (just the entrypoint) for both programs
+    assert_eq!(program1.num_procedures(), 1);
+    assert_eq!(program2.num_procedures(), 1);
+    assert_eq!(program3.num_procedures(), 1);
 }
 
 /// Since `foo` and `bar` have the same body, we only expect them to be added once to the program.
@@ -4000,10 +3686,7 @@ fn distinguish_grandchildren_correctly() {
 
     let program = context.assemble(program_source).unwrap();
 
-    let join_node = match &program.mast_forest()[program.entrypoint()] {
-        MastNode::Join(node) => node,
-        _ => panic!("expected join node"),
-    };
+    let join_node = &program.mast_forest()[program.entrypoint()].unwrap_join();
 
     // Make sure that both `if.true` blocks compile down to a different MAST node.
     assert_ne!(join_node.first(), join_node.second());

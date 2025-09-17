@@ -62,17 +62,19 @@ end
 #!    among all the cycles of periodic columns.
 #! 5) g^{-1} where g is the trace domain generator.
 #!
-#! Input: [...]
+#! The only input to this procedure is the log2 of the max cycle length across all periodic columns.
+#!
+#! Input: [max_cycle_len_log, ...]
 #! Output: [...]
 export.set_up_auxiliary_inputs_ace
     padw exec.constants::composition_coef_ptr mem_loadw
 
     # z and z^N
     push.0.0 exec.constants::z_ptr mem_loadw
-    # => [(z_1, z_0)^n, z_1, z_0, alpha1, alpha0, ...]
+    # => [(z_1, z_0)^n, z_1, z_0, alpha1, alpha0, max_cycle_len_log, ...]
 
     exec.constants::get_trace_length_log
-    exec.constants::get_max_cycle_length_log
+    movup.7
     sub
     # => [log(min_num_cycles), (z_1, z_0)^n, z_1, z_0, alpha1, alpha0, ...] where min_num_cycles = trace_len / max_cycle_len
 
@@ -123,44 +125,22 @@ export.set_up_auxiliary_inputs_ace
     # => [...]
 end
 
-#! Executes the constraints evaluation logic based on arithmetic circuit evaluation.
+#! Executes the constraints evalution check.
 #!
 #! Input: [...]
 #! Output: [...]
-export.constraint_evaluation_check
-    # 1) Compute and store at the appropriate memory location the auxiliary inputs needed by
-    #    the arithmetic circuit.
-    exec.set_up_auxiliary_inputs_ace
-    # => [...]
+proc.execute_constraint_evaluation_check
+    exec.constants::get_procedure_digest_execute_constraint_evaluation_check_ptr dynexec
+end
 
-    # 2) Load the circuit description from the advice tape and check that it matches the hardcoded digest.
-    exec.constants::get_arithmetic_circuit_eval_digest
-    adv.push_mapval
-    exec.constants::get_arithmetic_circuit_ptr
-    padw padw padw
-    repeat.14
-        adv_pipe
-        hperm
-    end
-    exec.rpo::squeeze_digest
-    movup.4 drop
-    assert_eqw
-    # => [...]
-
-    # 3) Set up the inputs to the "eval_circuit" op. Namely:
-    #    1. a pointer to the inputs of the circuit in memory,
-    #    2. the number of inputs to the circuit,
-    #    3. the number of evaluation gates in the circuit.
-    exec.constants::get_arithmetic_circuit_eval_number_eval_gates
-    exec.constants::get_arithmetic_circuit_eval_number_inputs
-    exec.constants::public_inputs_address_ptr mem_load
-    # => [...]
-
-    # 4) Perform the constraint evaluation check by checking that the circuit evaluates to zero, which
-    #    boils down to the "eval_circuit" returning.
-    eval_circuit
-
-    # 5) Clean up the stack.
-    drop drop drop
+#! Stores digests of dynamically executed procedures.
+#!
+#! Input: [D3, D2, D1, D0, ...]
+#! Output: [...]
+export.store_dynamically_executed_procedures
+    exec.constants::get_procedure_digest_process_public_inputs_ptr mem_storew dropw
+    exec.constants::get_procedure_digest_process_row_ood_evaluations_ptr mem_storew dropw
+    exec.constants::get_procedure_digest_execute_constraint_evaluation_check_ptr mem_storew dropw
+    exec.constants::get_procedure_digest_compute_deep_composition_polynomial_queries_ptr mem_storew dropw
     # => [...]
 end

@@ -1,11 +1,8 @@
-use alloc::{
-    collections::{BTreeMap, btree_map::Entry},
-    vec::Vec,
-};
+use alloc::{collections::btree_map::Entry, vec::Vec};
 
 use miden_core::{
     AdviceMap, Felt, Word,
-    crypto::merkle::{InnerNodeInfo, MerklePath, MerkleStore, NodeIndex, StoreNode},
+    crypto::merkle::{InnerNodeInfo, MerklePath, MerkleStore, NodeIndex},
 };
 
 mod inputs;
@@ -14,12 +11,7 @@ pub use inputs::AdviceInputs;
 mod errors;
 pub use errors::AdviceError;
 
-use crate::host::AdviceMutation;
-
-// TYPE ALIASES
-// ================================================================================================
-
-type SimpleMerkleMap = BTreeMap<Word, StoreNode>;
+use crate::{host::AdviceMutation, processor::AdviceProviderInterface};
 
 // ADVICE PROVIDER
 // ================================================================================================
@@ -44,7 +36,7 @@ type SimpleMerkleMap = BTreeMap<Word, StoreNode>;
 pub struct AdviceProvider {
     stack: Vec<Felt>,
     map: AdviceMap,
-    store: MerkleStore<SimpleMerkleMap>,
+    store: MerkleStore,
 }
 
 impl AdviceProvider {
@@ -352,5 +344,43 @@ impl From<AdviceInputs> for AdviceProvider {
         let AdviceInputs { mut stack, map, store } = inputs;
         stack.reverse();
         Self { stack, map, store }
+    }
+}
+
+impl AdviceProviderInterface for AdviceProvider {
+    #[inline(always)]
+    fn pop_stack(&mut self) -> Result<Felt, AdviceError> {
+        self.pop_stack()
+    }
+
+    #[inline(always)]
+    fn pop_stack_word(&mut self) -> Result<Word, AdviceError> {
+        self.pop_stack_word()
+    }
+
+    #[inline(always)]
+    fn pop_stack_dword(&mut self) -> Result<[Word; 2], AdviceError> {
+        self.pop_stack_dword()
+    }
+
+    #[inline(always)]
+    fn get_merkle_path(
+        &self,
+        root: Word,
+        depth: &Felt,
+        index: &Felt,
+    ) -> Result<Option<MerklePath>, AdviceError> {
+        self.get_merkle_path(root, depth, index).map(Some)
+    }
+
+    #[inline(always)]
+    fn update_merkle_node(
+        &mut self,
+        root: Word,
+        depth: &Felt,
+        index: &Felt,
+        value: Word,
+    ) -> Result<Option<MerklePath>, AdviceError> {
+        self.update_merkle_node(root, depth, index, value).map(|(path, _)| Some(path))
     }
 }

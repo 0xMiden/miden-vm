@@ -1,8 +1,8 @@
-use std::vec;
+use std::{sync::Arc, vec};
 
 use miden_air::{Felt, ProvingOptions, RowIndex};
 use miden_assembly::{Assembler, utils::Serializable};
-use miden_core::{StarkField, ZERO};
+use miden_core::{EventId, StarkField, ZERO};
 use miden_processor::{
     AdviceInputs, AdviceMutation, DefaultHost, EventError, ExecutionError, ProcessState, Program,
     ProgramInfo, StackInputs, crypto::RpoRandomCoin,
@@ -41,17 +41,16 @@ const PROBABILISTIC_PRODUCT_SOURCE: &str = "
 
 /// Event ID for pushing a Falcon signature to the advice stack.
 /// This event is used for testing purposes only.
-const EVENT_FALCON_SIG_TO_STACK: u32 = 3419226139;
+const EVENT_FALCON_SIG_TO_STACK: EventId = EventId::from_u64(3419226139);
 
 /// Event handler which pushes values onto the advice stack which are required for verification
 /// of a DSA in Miden VM.
 ///
 /// Inputs:
-///   Operand stack: [PK, MSG, ...]
+///   Operand stack: [event_id, PK, MSG, ...]
 ///   Advice stack: \[ SIGNATURE \]
 ///
 /// Outputs:
-///   Operand stack: [PK, MSG, ...]
 ///   Advice stack: [...]
 ///
 /// Where:
@@ -61,8 +60,8 @@ const EVENT_FALCON_SIG_TO_STACK: u32 = 3419226139;
 ///
 /// The advice provider is expected to contain the private key associated to the public key PK.
 pub fn push_falcon_signature(process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
-    let pub_key = process.get_stack_word(0);
-    let msg = process.get_stack_word(1);
+    let pub_key = process.get_stack_word(1);
+    let msg = process.get_stack_word(5);
 
     let pk_sk = process
         .advice_provider()
@@ -205,7 +204,7 @@ fn test_falcon512_probabilistic_product_failure() {
     expect_exec_error_matches!(
         test,
         ExecutionError::FailedAssertion{clk, err_code, err_msg, label: _, source_file: _ }
-        if clk == RowIndex::from(3182) && err_code == ZERO && err_msg.is_none()
+        if clk == RowIndex::from(3184) && err_code == ZERO && err_msg.is_none()
     );
 }
 
@@ -228,7 +227,7 @@ fn test_move_sig_to_adv_stack() {
     end
     ";
 
-    let public_key = secret_key.public_key().into();
+    let public_key = secret_key.public_key().to_commitment();
     let secret_key_bytes = secret_key.to_bytes();
 
     let advice_map: Vec<(Word, Vec<Felt>)> = {
@@ -286,9 +285,10 @@ fn falcon_prove_verify() {
     let advice_inputs = AdviceInputs::default().with_map(advice_map);
     let mut host = DefaultHost::default();
     host.load_library(&StdLibrary::default()).expect("failed to load mast forest");
-    host.load_handler(EVENT_FALCON_SIG_TO_STACK, push_falcon_signature).unwrap();
+    host.register_handler(EVENT_FALCON_SIG_TO_STACK, Arc::new(push_falcon_signature))
+        .unwrap();
 
-    let options = ProvingOptions::with_96_bit_security(false);
+    let options = ProvingOptions::with_96_bit_security(miden_air::HashFunction::Blake3_192);
     let (stack_outputs, proof) = miden_utils_testing::prove(
         &program,
         stack_inputs.clone(),
@@ -314,13 +314,15 @@ fn generate_test(
     use.std::crypto::dsa::rpo_falcon512
 
     begin
-        emit.{EVENT_FALCON_SIG_TO_STACK}
+        push.{EVENT_FALCON_SIG_TO_STACK}
+        emit
+        drop
         exec.rpo_falcon512::verify
     end
     "
     );
 
-    let pk: Word = sk.public_key().into();
+    let pk: Word = sk.public_key().to_commitment();
     let sk_bytes = sk.to_bytes();
 
     let to_adv_map = sk_bytes.iter().map(|a| Felt::new(*a as u64)).collect::<Vec<Felt>>();

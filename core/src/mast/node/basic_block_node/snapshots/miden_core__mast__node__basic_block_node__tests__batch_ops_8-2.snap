@@ -1,0 +1,27 @@
+---
+source: core/src/mast/node/basic_block_node/tests.rs
+expression: "build_group_chunks(&batches).collect::<Vec<_>>()"
+---
+[
+    [
+        Add,
+        Mul,
+        Add,
+        Add,
+        Add,
+        Mul,
+        Mul,
+        Push(
+            1,
+        ),
+        Noop,
+    ],
+    [],
+    [
+        Push(
+            2,
+        ),
+        Noop,
+    ],
+    [],
+]

@@ -2,13 +2,15 @@ use alloc::{sync::Arc, vec::Vec};
 use core::fmt;
 
 use miden_crypto::{Felt, WORD_SIZE, Word};
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 use winter_math::FieldElement;
 use winter_utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
 
 use super::Kernel;
 use crate::{
     AdviceMap,
-    mast::{MastForest, MastNode, MastNodeId},
+    mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
     utils::ToElements,
 };
 
@@ -21,6 +23,7 @@ use crate::{
 /// execution begins, and a definition of the kernel against which the program must be executed
 /// (the kernel can be an empty kernel).
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Program {
     mast_forest: Arc<MastForest>,
     /// The "entrypoint" is the node where execution of the program begins.

@@ -10,10 +10,13 @@ use miden_air::{
         },
     },
 };
+#[cfg(test)]
+use miden_core::mast::OP_GROUP_SIZE;
 use miden_core::{
     AssemblyOp,
     mast::{
-        BasicBlockNode, CallNode, DynNode, JoinNode, LoopNode, MastForest, OP_BATCH_SIZE, SplitNode,
+        BasicBlockNode, CallNode, DynNode, JoinNode, LoopNode, MastForest, MastNodeExt,
+        OP_BATCH_SIZE, SplitNode,
     },
     stack::MIN_STACK_DEPTH,
 };
@@ -31,7 +34,7 @@ pub use aux_trace::AuxTraceBuilder;
 #[cfg(test)]
 pub use aux_trace::BlockHashTableRow;
 
-mod block_stack;
+pub mod block_stack;
 use block_stack::{BlockStack, BlockType, ExecutionContextInfo};
 #[cfg(test)]
 use miden_air::trace::decoder::NUM_USER_OP_HELPERS;
@@ -911,9 +914,9 @@ impl Default for Decoder {
 ///   operation to be executed located at the least significant position.
 /// - Number of operation groups left to be executed in the entire SPAN block.
 #[derive(Default)]
-struct SpanContext {
-    group_ops_left: Felt,
-    num_groups_left: Felt,
+pub(crate) struct SpanContext {
+    pub group_ops_left: Felt,
+    pub num_groups_left: Felt,
 }
 
 // HELPER FUNCTIONS
@@ -949,7 +952,7 @@ pub fn build_op_group(ops: &[Operation]) -> Felt {
         group |= (op.op_code() as u64) << (Operation::OP_BITS * i);
         i += 1;
     }
-    assert!(i <= super::OP_GROUP_SIZE, "too many ops");
+    assert!(i <= OP_GROUP_SIZE, "too many ops");
     Felt::new(group)
 }
 

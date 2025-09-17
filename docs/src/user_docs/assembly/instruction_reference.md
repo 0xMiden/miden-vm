@@ -180,7 +180,7 @@ Instructions for moving data between the stack and other sources like program co
 | `adv_loadw`      | `[0,0,0,0, ...]`   | `[A, ...]`       | 1      | Pops word `A` (4 elements) from advice stack, overwrites top word of operand stack. Fails if advice stack has `< 4` values.                                       |
 | `adv_pipe`       | `[C,B,A,a,...]`    | `[E,D,A,a',...]` | 1      | Pops 2 words `[D,E]` from advice stack. Overwrites top 2 words of operand stack. Writes `[D,E]` to memory at `a` and `a+1`. `a' <- a+2`. Fails if advice stack has `< 8` values. |
 
-#### Injecting into Advice Provider (System Events - 0 cycles)
+#### Injecting into Advice Provider (System Events - 3 cycles)
 
 *Push to Advice Stack:*
 
@@ -189,17 +189,16 @@ Instructions for moving data between the stack and other sources like program co
 | `adv.push_mapval`    | `[K, ... ]`                | `[K, ... ]`                | Pushes values from `advice_map[K]` to advice stack.                                                                                     |
 | `adv.push_mapvaln`   | `[K, ... ]`                | `[K, ... ]`                | Pushes `[n, ele1, ele2, ...]` from `advice_map[K]` to advice stack, where `n` is element count.                                        |
 | `adv.push_mtnode`    | `[d, i, R, ... ]`          | `[d, i, R, ... ]`          | Pushes Merkle tree node (root `R`, depth `d`, index `i`) from Merkle store to advice stack.                                           |
-| `adv.push_u64div`    | `[b1, b0, a1, a0, ...]`    | `[b1, b0, a1, a0, ...]`    | Pushes quotient and remainder of u64 division `a/b` (represented by 32-bit limbs) to advice stack.                                   |
-| `adv.push_smtpeek`   | `[K, R, ...]`              | `[K, R, ...]`              | Pushes value for key `K` in Sparse Merkle Tree with root `R` to advice stack.                                                          |
 
 *Insert into Advice Map:*
 
-| Instruction         | Stack Input        | Stack Output      | Notes                                                                                                                      |
-| ------------------- | ------------------ | ----------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `adv.insert_mem`    | `[K, a, b, ... ]`  | `[K, a, b, ... ]` | `advice_map[K] <- mem[a..b]`.                                                                                              |
-| `adv.insert_hdword` | `[B, A, ... ]`     | `[B, A, ... ]`    | `K <- hash(A \|\| B, domain=0)`. `advice_map[K] <- [A,B]`.                                                                  |
-| `adv.insert_hdword_d` | `[B, A, d, ... ]`| `[B, A, d, ... ]` | `K <- hash(A \|\| B, domain=d)`. `advice_map[K] <- [A,B]`.                                                                  |
-| `adv.insert_hperm`  | `[B, A, C, ...]`   | `[B, A, C, ...]`  | `K <- permute(C,A,B).digest`. `advice_map[K] <- [A,B]`.                                                                   |
+| Instruction           | Stack Input          | Stack Output         | Notes                                                                                    |
+| --------------------- | -------------------- | -------------------- | ---------------------------------------------------------------------------------------- |
+| `adv.insert_mem`      | `[K, a, b, ... ]`    | `[K, a, b, ... ]`    | `advice_map[K] <- mem[a..b]`.                                                            |
+| `adv.insert_hdword`   | `[B, A, ... ]`       | `[B, A, ... ]`       | `K <- hash(A \|\| B, domain=0)`. `advice_map[K] <- [A,B]`.                               |
+| `adv.insert_hdword_d` | `[B, A, d, ... ]`    | `[B, A, d, ... ]`    | `K <- hash(A \|\| B, domain=d)`. `advice_map[K] <- [A,B]`.                               |
+| `adv.insert_hqword`   | `[D, C, B, A, ... ]` | `[D, C, B, A, ... ]` | `K <- hash(hash(hash(A \|\| B) \|\| C) \|\| D), domain=0`. `advice_map[K] <- [A,B,C,D]`. |
+| `adv.insert_hperm`    | `[B, A, C, ...]`     | `[B, A, C, ...]`     | `K <- permute(C,A,B).digest`. `advice_map[K] <- [A,B]`.                                  |
 
 ### Random Access Memory
 
@@ -307,10 +306,11 @@ High-level constructs for controlling the execution flow.
 
 Instructions for communicating with the host through events and tracing.
 
-| Instruction | Stack Input | Stack Output | Cycles | Notes                                                                                                                                    |
-| ----------- | ----------- | ------------ | ------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `emit.<event_id>` | `[...]`     | `[...]`      | 5      | Emits an event with the specified `event_id` to the host. Does not change the state of the operand stack. The `event_id` can be any 32-bit value specified either directly or via a [named constant](./code_organization.md#constants). Events allow programs to communicate contextual information to the host for triggering appropriate actions. Example: `emit.123` or `emit.EVENT_ID_1` |
-| `trace.<trace_id>` | `[...]`     | `[...]`      | 0      | Emits a trace with the specified `trace_id` to the host. Does not change the state of the operand stack. The `trace_id` can be any 32-bit value specified either directly or via a [named constant](./code_organization.md#constants). Only active when programs are run with tracing flag (`-t` or `--trace`), otherwise ignored. Example: `trace.123` or `trace.TRACE_ID_1` |
+| Instruction        | Stack Input       | Stack Output      | Cycles | Notes                                                                                                                                                                                                                                                                                                                                                                                                                           |
+|--------------------|-------------------|-------------------|--------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `emit.<event_id>`  | `[...]`           | `[...]`           | 3      | Emits an event with the specified `event_id` to the host. The net effect on the operand stack is no change (internally expands to `push.<event_id> emit drop`). Immediate `event_id` must be defined via `const.ID=event("...")` or inlined as `emit.event("...")`. Events allow programs to communicate contextual information to the host for triggering appropriate actions. Example: `emit.event("foo")` or `emit.MY_EVENT` |
+| `emit`             | `[event_id, ...]` | `[event_id, ...]` | 1      | Emits an event using the `event_id` from the top of the stack. The stack remains unchanged as the event_id is read without consuming it. This instruction reads the event ID from the stack but does not modify the stack depth. Example: with `push.123` on stack, `emit` reads the event ID 123 and executes the corresponding event handler.                                                                                 |
+| `trace.<trace_id>` | `[...]`           | `[...]`           | 0      | Emits a trace with the specified `trace_id` to the host. Does not change the state of the operand stack. The `trace_id` can be any 32-bit value specified either directly or via a [named constant](./code_organization.md#constants). Only active when programs are run with tracing flag (`-t` or `--trace`), otherwise ignored. Example: `trace.123` or `trace.TRACE_ID_1`                                                   |
 
 ## Debugging Operations
 

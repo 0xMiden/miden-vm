@@ -5,8 +5,11 @@ use miden_utils_diagnostics::Report;
 use pretty_assertions::assert_eq;
 
 use crate::{
-    Felt, LibraryNamespace, LibraryPath, assert_diagnostic, assert_diagnostic_lines, ast::*,
-    parser::WordValue, regex, source_file, testing::SyntaxTestContext,
+    Felt, LibraryNamespace, LibraryPath, assert_diagnostic, assert_diagnostic_lines,
+    ast::*,
+    parser::{IntValue, WordValue},
+    regex, source_file,
+    testing::SyntaxTestContext,
 };
 
 macro_rules! id {
@@ -316,7 +319,11 @@ fn test_ast_parsing_program_simple() -> Result<(), Report> {
     let context = SyntaxTestContext::new();
 
     let source = source_file!(&context, "begin push.0 assertz add.1 end");
-    let forms = module!(begin!(inst!(PushU8(0)), inst!(Assertz), inst!(Incr)));
+    let forms = module!(begin!(
+        inst!(Push(Immediate::Value(Span::unknown(IntValue::U8(0))))),
+        inst!(Assertz),
+        inst!(Incr)
+    ));
 
     assert_eq!(context.parse_forms(source)?, forms);
 
@@ -342,23 +349,30 @@ fn test_ast_parsing_program_push() -> Result<(), Report> {
     end"#
     );
     let forms = module!(begin!(
-        inst!(PushU8(10)),
-        inst!(PushU16(500)),
-        inst!(PushU32(70000)),
-        inst!(PushFelt(Felt::new(5000000000_u64))),
-        inst!(PushFelt(Felt::new(5000000000_u64))),
-        inst!(PushFelt(Felt::new(7000000000_u64))),
-        inst!(PushFelt(Felt::new(9000000000_u64))),
-        inst!(PushFelt(Felt::new(11000000000_u64))),
-        inst!(PushU8(5)),
-        inst!(PushU8(7)),
-        inst!(PushU16(500)),
-        inst!(PushU16(700)),
-        inst!(PushU32(70000)),
-        inst!(PushU32(90000)),
-        inst!(PushFelt(Felt::new(5000000000_u64))),
-        inst!(PushFelt(Felt::new(7000000000_u64))),
-        inst!(PushWord(WordValue([Felt::new(0), Felt::new(1), Felt::new(2), Felt::new(3)])))
+        inst!(Push(Immediate::Value(Span::unknown(IntValue::U8(10))))),
+        inst!(Push(Immediate::Value(Span::unknown(IntValue::U16(500))))),
+        inst!(Push(Immediate::Value(Span::unknown(IntValue::U32(70000))))),
+        inst!(Push(Immediate::Value(Span::unknown(IntValue::Felt(Felt::new(5000000000_u64)))))),
+        inst!(Push(Immediate::Value(Span::unknown(IntValue::Felt(Felt::new(5000000000_u64)))))),
+        inst!(Push(Immediate::Value(Span::unknown(IntValue::Felt(Felt::new(7000000000_u64)))))),
+        inst!(Push(Immediate::Value(Span::unknown(IntValue::Felt(Felt::new(9000000000_u64)))))),
+        inst!(Push(Immediate::Value(Span::unknown(IntValue::Felt(Felt::new(
+            11000000000_u64
+        )))))),
+        inst!(Push(Immediate::Value(Span::unknown(IntValue::U8(5))))),
+        inst!(Push(Immediate::Value(Span::unknown(IntValue::U8(7))))),
+        inst!(Push(Immediate::Value(Span::unknown(IntValue::U16(500))))),
+        inst!(Push(Immediate::Value(Span::unknown(IntValue::U16(700))))),
+        inst!(Push(Immediate::Value(Span::unknown(IntValue::U32(70000))))),
+        inst!(Push(Immediate::Value(Span::unknown(IntValue::U32(90000))))),
+        inst!(Push(Immediate::Value(Span::unknown(IntValue::Felt(Felt::new(5000000000_u64)))))),
+        inst!(Push(Immediate::Value(Span::unknown(IntValue::Felt(Felt::new(7000000000_u64)))))),
+        inst!(Push(Immediate::Value(Span::unknown(IntValue::Word(WordValue([
+            Felt::new(0),
+            Felt::new(1),
+            Felt::new(2),
+            Felt::new(3)
+        ]))))))
     ));
 
     assert_eq!(context.parse_forms(source)?, forms);
@@ -399,7 +413,7 @@ fn test_ast_parsing_program_u32() -> Result<(), Report> {
     end"#
     );
     let forms = module!(begin!(
-        inst!(PushU8(3)),
+        inst!(Push(Immediate::Value(Span::unknown(IntValue::U8(3))))),
         inst!(U32WrappingAddImm(5u32.into())),
         inst!(U32OverflowingAddImm(5u32.into())),
         inst!(U32WrappingSubImm(1u32.into())),
@@ -471,12 +485,8 @@ fn test_ast_parsing_adv_injection() -> Result<(), Report> {
     use super::SystemEventNode::*;
 
     let context = SyntaxTestContext::new();
-    let source = source_file!(&context, "begin adv.push_u64div adv.push_mapval adv.insert_mem end");
-    let forms = module!(begin!(
-        inst!(SysEvent(PushU64Div)),
-        inst!(SysEvent(PushMapVal)),
-        inst!(SysEvent(InsertMem))
-    ));
+    let source = source_file!(&context, "begin adv.push_mapval adv.insert_mem end");
+    let forms = module!(begin!(inst!(SysEvent(PushMapVal)), inst!(SysEvent(InsertMem))));
     assert_eq!(context.parse_forms(source)?, forms);
     Ok(())
 }
@@ -495,7 +505,10 @@ fn test_ast_parsing_bitwise_counters() -> Result<(), Report> {
 fn test_ast_parsing_ilog2() -> Result<(), Report> {
     let context = SyntaxTestContext::new();
     let source = source_file!(&context, "begin push.8 ilog2 end");
-    let forms = module!(begin!(inst!(PushU8(8)), inst!(ILog2)));
+    let forms = module!(begin!(
+        inst!(Push(Immediate::Value(Span::unknown(IntValue::U8(8))))),
+        inst!(ILog2)
+    ));
 
     assert_eq!(context.parse_forms(source)?, forms);
     Ok(())
@@ -544,14 +557,20 @@ fn test_ast_parsing_module_nested_if() -> Result<(), Report> {
         foo,
         0,
         block!(
-            inst!(PushU8(1)),
+            inst!(Push(Immediate::Value(Span::unknown(IntValue::U8(1))))),
             if_true!(
                 block!(
-                    inst!(PushU8(0)),
-                    inst!(PushU8(1)),
+                    inst!(Push(Immediate::Value(Span::unknown(IntValue::U8(0))))),
+                    inst!(Push(Immediate::Value(Span::unknown(IntValue::U8(1))))),
                     if_true!(
-                        block!(inst!(PushU8(0)), inst!(Sub)),
-                        block!(inst!(PushU8(1)), inst!(Sub))
+                        block!(
+                            inst!(Push(Immediate::Value(Span::unknown(IntValue::U8(0))))),
+                            inst!(Sub)
+                        ),
+                        block!(
+                            inst!(Push(Immediate::Value(Span::unknown(IntValue::U8(1))))),
+                            inst!(Sub)
+                        )
                     )
                 ),
                 block!(inst!(Nop))
@@ -588,9 +607,18 @@ fn test_ast_parsing_module_sequential_if() -> Result<(), Report> {
         foo,
         0,
         block!(
-            inst!(PushU8(1)),
-            if_true!(block!(inst!(PushU8(5)), inst!(PushU8(1))), block!(inst!(Nop))),
-            if_true!(block!(inst!(PushU8(0)), inst!(Sub)), block!(inst!(PushU8(1)), inst!(Sub)))
+            inst!(Push(Immediate::Value(Span::unknown(IntValue::U8(1))))),
+            if_true!(
+                block!(
+                    inst!(Push(Immediate::Value(Span::unknown(IntValue::U8(5))))),
+                    inst!(Push(Immediate::Value(Span::unknown(IntValue::U8(1)))))
+                ),
+                block!(inst!(Nop))
+            ),
+            if_true!(
+                block!(inst!(Push(Immediate::Value(Span::unknown(IntValue::U8(0))))), inst!(Sub)),
+                block!(inst!(Push(Immediate::Value(Span::unknown(IntValue::U8(1))))), inst!(Sub))
+            )
         )
     ));
 
@@ -619,7 +647,7 @@ fn test_ast_parsing_while_if_body() {
     );
 
     let forms = module!(begin!(
-        inst!(PushU8(1)),
+        inst!(Push(Immediate::Value(Span::unknown(IntValue::U8(1))))),
         while_true!(block!(inst!(Mul))),
         inst!(Add),
         if_true!(block!(inst!(Div)), block!(inst!(Nop))),
@@ -867,7 +895,11 @@ end"
         doc!(BAR_DOC),
         proc!(bar, 2, block!(inst!(PadW))),
         doc!(BAZ_DOC),
-        export!(baz, 3, block!(inst!(PadW), inst!(PushU8(0))))
+        export!(
+            baz,
+            3,
+            block!(inst!(PadW), inst!(Push(Immediate::Value(Span::unknown(IntValue::U8(0))))))
+        )
     );
 
     let actual_forms = context.parse_forms(source.clone()).unwrap();
@@ -1137,7 +1169,7 @@ fn assert_parsing_line_invalid_op() {
         "   :                      `-- found a identifier here",
         "29 |         end",
         "   `----",
-        r#" help: expected ".", or primitive opcode (e.g. "add"), or "end", or control flow opcode (e.g. "if.true")"#
+        r#" help: expected ".", or "[", or primitive opcode (e.g. "add"), or "end", or control flow opcode (e.g. "if.true")"#
     );
 }
 

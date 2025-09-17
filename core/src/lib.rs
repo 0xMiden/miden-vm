@@ -61,9 +61,9 @@ pub use miden_crypto::{EMPTY_WORD, ONE, WORD_SIZE, Word, ZERO, word::Lexicograph
 pub mod crypto {
     pub mod merkle {
         pub use miden_crypto::merkle::{
-            DefaultMerkleStore, EmptySubtreeRoots, InnerNodeInfo, LeafIndex, MerkleError,
-            MerklePath, MerkleStore, MerkleTree, Mmr, MmrPeaks, NodeIndex, PartialMerkleTree,
-            RecordingMerkleStore, SMT_DEPTH, SimpleSmt, Smt, SmtProof, SmtProofError, StoreNode,
+            EmptySubtreeRoots, InnerNodeInfo, LeafIndex, MerkleError, MerklePath, MerkleStore,
+            MerkleTree, Mmr, MmrPeaks, NodeIndex, PartialMerkleTree, SMT_DEPTH, SimpleSmt, Smt,
+            SmtProof, SmtProofError, StoreNode,
         };
     }
 
@@ -71,6 +71,7 @@ pub mod crypto {
         pub use miden_crypto::hash::{
             Digest, ElementHasher, Hasher,
             blake::{Blake3_160, Blake3_192, Blake3_256, Blake3Digest},
+            poseidon2::Poseidon2,
             rpo::Rpo256,
             rpx::Rpx256,
         };
@@ -117,12 +118,15 @@ pub mod prettier {
 
 mod operations;
 pub use operations::{
-    AssemblyOp, DebugOptions, Decorator, DecoratorIterator, DecoratorList, Operation,
+    AssemblyOp, DebugOptions, Decorator, DecoratorIdIterator, DecoratorList, Operation,
     opcode_constants::*,
 };
 
 pub mod stack;
 pub use stack::{StackInputs, StackOutputs};
+
+mod event_id;
+pub use event_id::EventId;
 
 pub mod sys_events;
 

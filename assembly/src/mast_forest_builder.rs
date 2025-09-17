@@ -8,8 +8,9 @@ use core::ops::{Index, IndexMut};
 use miden_core::{
     AdviceMap, Decorator, DecoratorList, Felt, Operation, Word,
     mast::{
-        DecoratorFingerprint, DecoratorId, MastForest, MastNode, MastNodeFingerprint, MastNodeId,
-        Remapping, SubtreeIterator,
+        BasicBlockNode, CallNode, DecoratorFingerprint, DecoratorId, DynNode, ExternalNode,
+        JoinNode, LoopNode, MastForest, MastNode, MastNodeExt, MastNodeFingerprint, MastNodeId,
+        Remapping, SplitNode, SubtreeIterator,
     },
 };
 
@@ -346,11 +347,11 @@ impl MastForestBuilder {
                 self.mast_forest.is_procedure_root(basic_block_id),
                 basic_block_node.num_op_batches(),
             ) {
-                for &(op_idx, decorator) in basic_block_node.decorators() {
-                    decorators.push((op_idx + operations.len(), decorator));
+                for (op_idx, decorator) in basic_block_node.raw_decorator_iter() {
+                    decorators.push((op_idx + operations.len(), *decorator));
                 }
                 for batch in basic_block_node.op_batches() {
-                    operations.extend_from_slice(batch.ops());
+                    operations.extend(batch.raw_ops());
                 }
             } else {
                 // if we don't want to merge this block, we flush the buffer of operations into a
@@ -406,7 +407,8 @@ impl MastForestBuilder {
     /// Note that only one copy of nodes that have the same MAST root and decorators is added to the
     /// MAST forest; two nodes that have the same MAST root and decorators will have the same
     /// [`MastNodeId`].
-    pub fn ensure_node(&mut self, node: MastNode) -> Result<MastNodeId, Report> {
+    pub fn ensure_node(&mut self, node: impl Into<MastNode>) -> Result<MastNodeId, Report> {
+        let node: MastNode = node.into();
         let node_fingerprint = self.fingerprint_for_node(&node);
 
         if let Some(node_id) = self.node_id_by_fingerprint.get(&node_fingerprint) {
@@ -431,7 +433,7 @@ impl MastForestBuilder {
         operations: Vec<Operation>,
         decorators: Option<DecoratorList>,
     ) -> Result<MastNodeId, Report> {
-        let block = MastNode::new_basic_block(operations, decorators)
+        let block = BasicBlockNode::new(operations, decorators)
             .into_diagnostic()
             .wrap_err("assembler failed to add new basic block node")?;
         self.ensure_node(block)
@@ -443,7 +445,7 @@ impl MastForestBuilder {
         left_child: MastNodeId,
         right_child: MastNodeId,
     ) -> Result<MastNodeId, Report> {
-        let join = MastNode::new_join(left_child, right_child, &self.mast_forest)
+        let join = JoinNode::new([left_child, right_child], &self.mast_forest)
             .into_diagnostic()
             .wrap_err("assembler failed to add new join node")?;
         self.ensure_node(join)
@@ -455,7 +457,7 @@ impl MastForestBuilder {
         if_branch: MastNodeId,
         else_branch: MastNodeId,
     ) -> Result<MastNodeId, Report> {
-        let split = MastNode::new_split(if_branch, else_branch, &self.mast_forest)
+        let split = SplitNode::new([if_branch, else_branch], &self.mast_forest)
             .into_diagnostic()
             .wrap_err("assembler failed to add new split node")?;
         self.ensure_node(split)
@@ -463,7 +465,7 @@ impl MastForestBuilder {
 
     /// Adds a loop node to the forest, and returns the [`MastNodeId`] associated with it.
     pub fn ensure_loop(&mut self, body: MastNodeId) -> Result<MastNodeId, Report> {
-        let loop_node = MastNode::new_loop(body, &self.mast_forest)
+        let loop_node = LoopNode::new(body, &self.mast_forest)
             .into_diagnostic()
             .wrap_err("assembler failed to add new loop node")?;
         self.ensure_node(loop_node)
@@ -471,7 +473,7 @@ impl MastForestBuilder {
 
     /// Adds a call node to the forest, and returns the [`MastNodeId`] associated with it.
     pub fn ensure_call(&mut self, callee: MastNodeId) -> Result<MastNodeId, Report> {
-        let call = MastNode::new_call(callee, &self.mast_forest)
+        let call = CallNode::new(callee, &self.mast_forest)
             .into_diagnostic()
             .wrap_err("assembler failed to add new call node")?;
         self.ensure_node(call)
@@ -479,7 +481,7 @@ impl MastForestBuilder {
 
     /// Adds a syscall node to the forest, and returns the [`MastNodeId`] associated with it.
     pub fn ensure_syscall(&mut self, callee: MastNodeId) -> Result<MastNodeId, Report> {
-        let syscall = MastNode::new_syscall(callee, &self.mast_forest)
+        let syscall = CallNode::new_syscall(callee, &self.mast_forest)
             .into_diagnostic()
             .wrap_err("assembler failed to add new syscall node")?;
         self.ensure_node(syscall)
@@ -487,12 +489,12 @@ impl MastForestBuilder {
 
     /// Adds a dyn node to the forest, and returns the [`MastNodeId`] associated with it.
     pub fn ensure_dyn(&mut self) -> Result<MastNodeId, Report> {
-        self.ensure_node(MastNode::new_dyn())
+        self.ensure_node(DynNode::new_dyn())
     }
 
     /// Adds a dyncall node to the forest, and returns the [`MastNodeId`] associated with it.
     pub fn ensure_dyncall(&mut self) -> Result<MastNodeId, Report> {
-        self.ensure_node(MastNode::new_dyncall())
+        self.ensure_node(DynNode::new_dyncall())
     }
 
     /// Adds a node corresponding to the given MAST root, according to how it is linked.
@@ -510,7 +512,7 @@ impl MastForestBuilder {
             }
             Ok(root_id.remap(&self.statically_linked_mast_remapping))
         } else {
-            self.ensure_node(MastNode::new_external(mast_root))
+            self.ensure_node(ExternalNode::new(mast_root))
         }
     }
 
@@ -613,5 +615,195 @@ fn should_merge(is_procedure: bool, num_op_batches: usize) -> bool {
         num_op_batches < PROCEDURE_INLINING_THRESHOLD
     } else {
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use miden_core::{Operation, mast::MastNodeErrorContext};
+
+    use super::*;
+
+    #[test]
+    fn test_merge_basic_blocks_preserves_decorator_links_with_padding() {
+        let mut builder = MastForestBuilder::new(&[]).unwrap();
+
+        // We need to create a benchmark with a removed Noop operation *in the middle* of the batch
+        // (not at the end). That's because across batches, decorators are re-indexed (shifted) by
+        // the amount of concrete operations in the previous batch in the sequence, and that
+        // re-indexing remains valid whether or not *final* padding is elided.
+
+        // Create first block with operations that will cause padding (ending with Push)
+        // Block1: [Push(1), Drop, Drop, Drop, Drop, Drop, Drop, Push(2), Push(3)]
+        // This will result in padding after Push(2) because Push operations get padded
+        let block1_ops = vec![
+            Operation::Push(Felt::new(1)),
+            Operation::Drop,
+            Operation::Drop,
+            Operation::Drop,
+            Operation::Drop,
+            Operation::Drop,
+            Operation::Drop,
+            Operation::Push(Felt::new(2)),
+            Operation::Push(Felt::new(3)),
+        ]; // [push drop drop drop drop drop drop push noop] [1] [2] [push noop] [3] [noop] [noop] [noop]
+        let block1_raw_ops_len = block1_ops.len();
+
+        // Add decorators for each operation in block1
+        let block1_decorator1 = builder.ensure_decorator(Decorator::Trace(1)).unwrap();
+        let block1_decorator2 = builder.ensure_decorator(Decorator::Trace(2)).unwrap();
+        let block1_decorator3 = builder.ensure_decorator(Decorator::Trace(3)).unwrap();
+        let block1_decorators = vec![
+            (0, block1_decorator1), // Decorator for Push(1)
+            (7, block1_decorator2), // Decorator for Push(2)
+            (9, block1_decorator3), // Decorator for Push(3)
+        ];
+
+        let block1_id = builder.ensure_block(block1_ops.clone(), Some(block1_decorators)).unwrap();
+
+        // Sanity check the test itself makes sense
+        let block1 = builder.mast_forest[block1_id].get_basic_block().unwrap().clone();
+        assert!(block1.operations().count() > block1_raw_ops_len); // this indeed generates padding, and thus a potential off-by-one
+        assert_eq!(block1.raw_operations().count(), block1_raw_ops_len); // merging, which uses raw_ops, will elide padding
+
+        // Create second block with operations
+        // Block2: [Push(4), Mul]
+        let block2_ops = vec![Operation::Push(Felt::new(4)), Operation::Mul];
+
+        // Add decorators for each operation in block2
+        let block2_decorator1 = builder.ensure_decorator(Decorator::Trace(4)).unwrap();
+        let block2_decorator2 = builder.ensure_decorator(Decorator::Trace(5)).unwrap();
+        let block2_decorators = vec![
+            (0, block2_decorator1), // Decorator for Push(4)
+            (1, block2_decorator2), // Decorator for Mul
+        ]; // [push mul] [3]
+
+        let block2_id = builder.ensure_block(block2_ops.clone(), Some(block2_decorators)).unwrap();
+
+        // Merge the blocks
+        let merged_blocks = builder.merge_basic_blocks(&[block1_id, block2_id]).unwrap();
+
+        // There should be one merged block
+        assert_eq!(merged_blocks.len(), 1);
+        let merged_block_id = merged_blocks[0];
+
+        // Get the merged block
+        let merged_block = builder.mast_forest[merged_block_id].get_basic_block().unwrap().clone();
+
+        // Merged block: two groups
+        // [push drop drop drop drop drop drop push noop] [1] [2] [push push mul] [3] [4] [noop]
+        // [noop]
+
+        // Build mapping: original operation index -> decorator trace value
+        // For block1: operation 0 -> Trace(1), operation 7 -> Trace(2), operation 9 -> Trace(3)
+        // For block2: operation 0 -> Trace(4), operation 1 -> Trace(5)
+
+        // Check each decorator in the merged block
+        let decorators = merged_block.decorators();
+        assert_eq!(merged_block.decorators().count(), 5); // 3 from block1 + 2 from block2
+
+        // Create a map to track which trace values we've found
+        let mut found_traces = std::collections::HashSet::new();
+
+        // Check each decorator
+        for (op_idx, decorator_id) in decorators {
+            let decorator = &builder.mast_forest[decorator_id];
+
+            match decorator {
+                Decorator::Trace(trace_value) => {
+                    // Record that we found this trace
+                    found_traces.insert(*trace_value);
+
+                    // Verify that the decorator points to the expected operation type
+                    // Get the raw operations to check what's at this index
+                    let merged_ops: Vec<Operation> = merged_block.operations().cloned().collect();
+
+                    if op_idx < merged_ops.len() {
+                        match op_idx {
+                            0 => {
+                                // Should be Push(1) from block1
+                                match &merged_ops[op_idx] {
+                                    Operation::Push(x) if *x == Felt::new(1) => {
+                                        assert_eq!(
+                                            *trace_value, 1,
+                                            "Decorator for Push(1) should have trace value 1"
+                                        );
+                                    },
+                                    _ => panic!("Expected Push operation at index 0"),
+                                }
+                            },
+                            7 => {
+                                // Should be Push(2) from block1
+                                match &merged_ops[op_idx] {
+                                    Operation::Push(x) if *x == Felt::new(2) => {
+                                        assert_eq!(
+                                            *trace_value, 2,
+                                            "Decorator for Push(2) should have trace value 2"
+                                        );
+                                    },
+                                    _ => panic!("Expected Push operation at index 7"),
+                                }
+                            },
+                            9 => {
+                                // Should be Push(3) from block1
+                                match &merged_ops[op_idx] {
+                                    Operation::Push(x) if *x == Felt::new(3) => {
+                                        assert_eq!(
+                                            *trace_value, 3,
+                                            "Decorator for Push(3) should have trace value 3"
+                                        );
+                                    },
+                                    _ => panic!("Expected Push operation at index 9"),
+                                }
+                            },
+                            10 => {
+                                // Should be Push(34) from block2
+                                match &merged_ops[op_idx] {
+                                    Operation::Push(x) if *x == Felt::new(4) => {
+                                        assert_eq!(
+                                            *trace_value, 4,
+                                            "Decorator for Push(4) should have trace value 4"
+                                        );
+                                    },
+                                    _ => panic!("Expected Push operation at index 10"),
+                                }
+                            },
+                            11 => {
+                                // Should be Mul from block2
+                                match &merged_ops[op_idx] {
+                                    Operation::Mul => {
+                                        assert_eq!(
+                                            *trace_value, 5,
+                                            "Decorator for Mul should have trace value 5"
+                                        );
+                                    },
+                                    _ => panic!("Expected Mul operation at index 11"),
+                                }
+                            },
+                            _ => panic!(
+                                "Unexpected operation index {} for {:?} pointing at {:?}",
+                                op_idx, trace_value, merged_ops[op_idx]
+                            ),
+                        }
+                    } else {
+                        panic!("Operation index {} is out of bounds", op_idx);
+                    }
+                },
+                _ => panic!("Expected Trace decorator"),
+            }
+        }
+
+        // Verify we found all expected trace values
+        let expected_traces = [1, 2, 3, 4, 5];
+        for expected_trace in expected_traces {
+            assert!(
+                found_traces.contains(&expected_trace),
+                "Missing trace value: {}",
+                expected_trace
+            );
+        }
+
+        // Verify we found exactly 5 trace values
+        assert_eq!(found_traces.len(), 5, "Should have found exactly 5 trace values");
     }
 }

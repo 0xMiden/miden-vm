@@ -2,7 +2,10 @@ use alloc::vec::Vec;
 
 use super::{NodeDataOffset, basic_blocks::BasicBlockDataDecoder};
 use crate::{
-    mast::{BasicBlockNode, CallNode, JoinNode, LoopNode, MastNode, MastNodeId, SplitNode, Word},
+    mast::{
+        BasicBlockNode, CallNode, DynNode, ExternalNode, JoinNode, LoopNode, MastNode, MastNodeId,
+        SplitNode, Word, node::MastNodeExt,
+    },
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
@@ -76,9 +79,9 @@ impl MastNodeInfo {
                 let syscall = CallNode::new_syscall_unsafe(callee_id, self.digest);
                 Ok(MastNode::Call(syscall))
             },
-            MastNodeType::Dyn => Ok(MastNode::new_dyn()),
-            MastNodeType::Dyncall => Ok(MastNode::new_dyncall()),
-            MastNodeType::External => Ok(MastNode::new_external(self.digest)),
+            MastNodeType::Dyn => Ok(MastNode::Dyn(DynNode::new_dyn())),
+            MastNodeType::Dyncall => Ok(MastNode::Dyn(DynNode::new_dyncall())),
+            MastNodeType::External => Ok(MastNode::External(ExternalNode::new(self.digest))),
         }
     }
 }

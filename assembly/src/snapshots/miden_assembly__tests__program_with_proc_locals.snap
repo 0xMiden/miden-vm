@@ -1,0 +1,24 @@
+---
+source: assembly/src/tests.rs
+expression: program
+---
+begin
+    basic_block
+        push(10)
+        push(9)
+        push(8)
+        push(4)
+        fmpupdate
+        push(18446744069414584317)
+        fmpadd
+        mstore
+        drop
+        add
+        push(18446744069414584317)
+        fmpadd
+        mload
+        mul
+        push(18446744069414584317)
+        fmpupdate
+    end
+end

@@ -165,9 +165,10 @@ impl SourceFile {
 
     /// Returns a subset of the underlying content as a string slice.
     ///
-    /// The bounds of the given span are character indices, _not_ byte indices.
+    /// The bounds of the given span are byte indices, _not_ character indices.
     ///
-    /// Returns `None` if the given span is out of bounds
+    /// Returns `None` if the given span is out of bounds, or if the bounds do not
+    /// fall on valid UTF-8 character boundaries.
     #[inline(always)]
     pub fn source_slice(&self, span: impl Into<Range<usize>>) -> Option<&str> {
         self.content.source_slice(span)
@@ -552,9 +553,10 @@ impl SourceContent {
 
     /// Returns a subset of the underlying content as a string slice.
     ///
-    /// The bounds of the given span are character indices, _not_ byte indices.
+    /// The bounds of the given span are byte indices, _not_ character indices.
     ///
-    /// Returns `None` if the given span is out of bounds
+    /// Returns `None` if the given span is out of bounds, or if the bounds do not
+    /// fall on valid UTF-8 character boundaries.
     #[inline(always)]
     pub fn source_slice(&self, span: impl Into<Range<usize>>) -> Option<&str> {
         self.as_str().get(span.into())
@@ -672,7 +674,7 @@ impl SourceContent {
                     .to_usize();
                 let end = self
                     .line_column_to_offset(range.end.line, range.end.character)
-                    .ok_or(SourceContentUpdateError::InvalidSelectionEnd(range.start))?
+                    .ok_or(SourceContentUpdateError::InvalidSelectionEnd(range.end))?
                     .to_usize();
                 assert!(start <= end, "start of range must be less than end, got {start}..{end}",);
                 self.content.replace_range(start..end, &text);
@@ -680,9 +682,39 @@ impl SourceContent {
                 let added_line_starts = compute_line_starts(&text, Some(start as u32));
                 let num_added = added_line_starts.len();
                 let splice_start = range.start.line.to_usize() + 1;
-                let splice_end =
-                    core::cmp::min(range.end.line.to_usize(), self.line_starts.len() - 1);
-                self.line_starts.splice(splice_start..=splice_end, added_line_starts);
+                // Determine deletion range in line_starts to respect Selection semantics.
+                // For multi-line edits, remove line starts from (start.line + 1) up to end.line
+                // inclusive, since all intervening newlines are removed by the
+                // replacement, regardless of end.character.
+                enum Deletion {
+                    Empty,
+                    Inclusive(usize), // inclusive end index
+                }
+                let deletion = if range.start.line == range.end.line {
+                    Deletion::Empty
+                } else {
+                    let mut end_line_for_splice = range.end.line.to_usize();
+                    if !self.line_starts.is_empty() {
+                        let max_idx = self.line_starts.len() - 1;
+                        if end_line_for_splice > max_idx {
+                            end_line_for_splice = max_idx;
+                        }
+                    }
+                    if end_line_for_splice >= splice_start {
+                        Deletion::Inclusive(end_line_for_splice)
+                    } else {
+                        Deletion::Empty
+                    }
+                };
+
+                match deletion {
+                    Deletion::Empty => {
+                        self.line_starts.splice(splice_start..splice_start, added_line_starts);
+                    },
+                    Deletion::Inclusive(end_idx) => {
+                        self.line_starts.splice(splice_start..=end_idx, added_line_starts);
+                    },
+                }
 
                 let diff =
                     (text.len() as i32).saturating_sub_unsigned((end as u32) - (start as u32));

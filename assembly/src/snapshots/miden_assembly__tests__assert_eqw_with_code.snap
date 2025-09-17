@@ -1,0 +1,41 @@
+---
+source: assembly/src/tests.rs
+expression: program
+---
+begin
+    basic_block
+        movup4
+        eq
+        assert(0)
+        movup3
+        eq
+        assert(0)
+        movup2
+        eq
+        assert(0)
+        eq
+        assert(0)
+        movup4
+        eq
+        assert(15491226248792286710)
+        movup3
+        eq
+        assert(15491226248792286710)
+        movup2
+        eq
+        assert(15491226248792286710)
+        eq
+        assert(15491226248792286710)
+        movup4
+        eq
+        assert(15491226248792286710)
+        movup3
+        eq
+        assert(15491226248792286710)
+        movup2
+        eq
+        assert(15491226248792286710)
+        eq
+        assert(15491226248792286710)
+    end
+end

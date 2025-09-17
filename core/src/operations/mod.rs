@@ -1,7 +1,10 @@
 use core::fmt;
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 mod decorators;
-pub use decorators::{AssemblyOp, DebugOptions, Decorator, DecoratorIterator, DecoratorList};
+pub use decorators::{AssemblyOp, DebugOptions, Decorator, DecoratorIdIterator, DecoratorList};
 use opcode_constants::*;
 
 use crate::{
@@ -56,6 +59,7 @@ pub(super) mod opcode_constants {
     pub const OPCODE_SWAPW2: u8         = 0b0001_1100;
     pub const OPCODE_SWAPW3: u8         = 0b0001_1101;
     pub const OPCODE_SWAPDW: u8         = 0b0001_1110;
+    pub const OPCODE_EMIT: u8           = 0b0001_1111;
 
     pub const OPCODE_ASSERT: u8         = 0b0010_0000;
     pub const OPCODE_EQ: u8             = 0b0010_0001;
@@ -110,7 +114,6 @@ pub(super) mod opcode_constants {
     pub const OPCODE_JOIN: u8           = 0b0101_0111;
     pub const OPCODE_DYN: u8            = 0b0101_1000;
     pub const OPCODE_HORNEREXT: u8      = 0b0101_1001;
-    pub const OPCODE_EMIT: u8           = 0b0101_1010;
     pub const OPCODE_PUSH: u8           = 0b0101_1011;
     pub const OPCODE_DYNCALL: u8        = 0b0101_1100;
     pub const OPCODE_EVALCIRCUIT: u8    = 0b0101_1101;
@@ -130,6 +133,7 @@ pub(super) mod opcode_constants {
 
 /// A set of native VM operations which take exactly one cycle to execute.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[repr(u8)]
 pub enum Operation {
     // ----- system operations -------------------------------------------------------------------
@@ -161,15 +165,20 @@ pub enum Operation {
     /// instruction.
     Clk = OPCODE_CLK,
 
-    /// Emits an event id (`u32` value) to the host.
+    /// Emits an event to the host.
     ///
-    /// We interpret the event id as follows:
-    /// - 16 most significant bits identify the event source,
-    /// - 16 least significant bits identify the actual event.
+    /// Semantics:
+    /// - Reads the event id from the top of the stack (as a `Felt`) without consuming it; the
+    ///   caller is responsible for pushing and later dropping the id.
+    /// - User-defined events are conventionally derived from strings via
+    ///   `hash_string_to_word(name)[0]` (Blake3-based) and may be emitted via immediate forms in
+    ///   assembly (`emit.event("...")` or `emit.CONST` where `CONST=event("...")`).
+    /// - System events are still identified by specific 32-bit codes; the VM attempts to interpret
+    ///   the stack `Felt` as `u32` to dispatch known system events, and otherwise forwards the
+    ///   event to the host.
     ///
-    /// Similar to Noop, this operation does not change the state of user stack. The immediate
-    /// value affects the program MAST root computation.
-    Emit(u32) = OPCODE_EMIT,
+    /// This operation does not change the state of the user stack aside from reading the value.
+    Emit = OPCODE_EMIT,
 
     // ----- flow control operations -------------------------------------------------------------
     /// Marks the beginning of a join block.
@@ -619,10 +628,11 @@ impl Operation {
     }
 
     /// Returns an immediate value carried by this operation.
+    // Proptest generators for operations in crate::mast::node::basic_block_node::tests discriminate
+    // on this flag, please update them when you modify the semantics of this method.
     pub fn imm_value(&self) -> Option<Felt> {
         match *self {
             Self::Push(imm) => Some(imm),
-            Self::Emit(imm) => Some(imm.into()),
             _ => None,
         }
     }
@@ -771,7 +781,7 @@ impl fmt::Display for Operation {
             Self::MStream => write!(f, "mstream"),
             Self::Pipe => write!(f, "pipe"),
 
-            Self::Emit(value) => write!(f, "emit({value})"),
+            Self::Emit => write!(f, "emit"),
 
             // ----- cryptographic operations -----------------------------------------------------
             Self::HPerm => write!(f, "hperm"),
@@ -799,7 +809,6 @@ impl Serializable for Operation {
                 err_code.write_into(target);
             },
             Operation::Push(value) => value.as_int().write_into(target),
-            Operation::Emit(value) => value.write_into(target),
 
             // Note: we explicitly write out all the operations so that whenever we make a
             // modification to the `Operation` enum, we get a compile error here. This
@@ -862,6 +871,7 @@ impl Serializable for Operation {
             | Operation::SwapW2
             | Operation::SwapW3
             | Operation::SwapDW
+            | Operation::Emit
             | Operation::MovUp2
             | Operation::MovUp3
             | Operation::MovUp4
@@ -933,6 +943,7 @@ impl Deserializable for Operation {
             OPCODE_SWAPW2 => Self::SwapW2,
             OPCODE_SWAPW3 => Self::SwapW3,
             OPCODE_SWAPDW => Self::SwapDW,
+            OPCODE_EMIT => Self::Emit,
 
             OPCODE_ASSERT => Self::Assert(Felt::read_from(source)?),
             OPCODE_EQ => Self::Eq,
@@ -993,11 +1004,6 @@ impl Deserializable for Operation {
 
             OPCODE_MRUPDATE => Self::MrUpdate,
             OPCODE_PUSH => Self::Push(Felt::read_from(source)?),
-            OPCODE_EMIT => {
-                let value = source.read_u32()?;
-
-                Self::Emit(value)
-            },
             OPCODE_SYSCALL => Self::SysCall,
             OPCODE_CALL => Self::Call,
             OPCODE_END => Self::End,
