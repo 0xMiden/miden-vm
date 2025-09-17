@@ -45,6 +45,9 @@ mod system;
 use system::System;
 pub use system::{ContextId, FMP_MIN, SYSCALL_FMP_MIN};
 
+#[cfg(test)]
+mod test_utils;
+
 pub(crate) mod decoder;
 use decoder::Decoder;
 
