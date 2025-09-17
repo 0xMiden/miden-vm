@@ -10,7 +10,7 @@ use crate::{
     AsyncHost, ErrorContext, ExecutionError,
     continuation_stack::ContinuationStack,
     err_ctx,
-    fast::{FastProcessor, STACK_BUFFER_SIZE, Tracer, trace_state::NodeExecutionState},
+    fast::{FastProcessor, Tracer, trace_state::NodeExecutionState},
     operations::sys_ops::sys_event_handlers::handle_system_event,
     processor::Processor,
 };
@@ -167,13 +167,9 @@ impl FastProcessor {
             // whereas all the other operations are synchronous (resulting in a significant
             // performance improvement).
             {
-                if self.stack_bot_idx == 0 || self.stack_top_idx == STACK_BUFFER_SIZE {
-                    let err_str = if self.stack_bot_idx == 0 {
-                        "stack underflow"
-                    } else {
-                        "stack overflow"
-                    };
-                    return Err(ExecutionError::FailedToExecuteProgram(err_str));
+                if self.stack_bot_idx == 0 {
+                    // Note: stack overflow is checked when incrementing the stack size.
+                    return Err(ExecutionError::FailedToExecuteProgram("stack underflow"));
                 }
 
                 let err_ctx = err_ctx!(program, basic_block, host, op_idx_in_block);
