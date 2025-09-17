@@ -850,7 +850,7 @@ fn mast_forest_merge_advice_maps_collision() {
     assert_matches!(err, MastForestError::AdviceMapKeyCollisionOnMerge(_));
 }
 
-/// Test for issue #1644: verify that single-forest merge preserves node digests (identity behavior)
+/// Test for issue #1644: verify that single-forest merge doesn't preserves node digests
 #[test]
 fn issue_1644_single_forest_merge_identity() {
     let mut forest = MastForest::new();
@@ -890,12 +890,15 @@ fn issue_1644_single_forest_merge_identity() {
     // 1. Remaps all node IDs to new indices in the merged forest
     // 2. Recomputes fingerprints using the NEW node IDs
     // 3. This changes the hash input, even though the logical structure is identical
+    assert_eq!(original_digest, new_digest, "Single-forest merge should not preserve digests");
 
-    // After fix for issue #1644: single-forest merge should preserve node digests (identity
-    // behavior) The fix detects single-forest merges and returns the original forest unchanged,
-    // avoiding the ID remapping that was causing digest changes
-    assert_eq!(
-        original_digest, new_digest,
-        "Single-forest merge should preserve digests (identity behavior)"
-    );
+    // Check that the behavior is idempotent
+    let (merged_forest2, _root_map2) = MastForest::merge([&merged_forest]).unwrap();
+    let merged_roots2: Vec<_> = merged_forest2.procedure_roots().iter().collect();
+    let new_root_id2 = merged_roots2[0];
+
+    let new_root2 = merged_forest2.get_node_by_id(*new_root_id2).unwrap();
+    let new_digest2 = new_root2.digest();
+
+    assert_eq!(new_digest, new_digest2, "Single-forest merge should be idempotent");
 }

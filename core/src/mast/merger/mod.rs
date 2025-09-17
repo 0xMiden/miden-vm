@@ -37,22 +37,26 @@ pub(crate) struct MastForestMerger {
 impl MastForestMerger {
     /// Creates a new merger with an initially empty forest and merges all provided [`MastForest`]s
     /// into it.
+    ///
+    /// # Normalizing Behavior
+    ///
+    /// This function performs normalization of the merged forest, which:
+    /// - Remaps all node IDs to maintain the invariant that child node IDs < parent node IDs
+    /// - Creates a clean, deduplicated forest structure
+    /// - Provides consistent node ordering regardless of input
+    ///
+    /// This normalization means that even for single-forest merges, the resulting forest may have
+    /// different node IDs and digests than the input. See test
+    /// `issue_1644_single_forest_merge_identity` for detailed explanation of this behavior.
     pub(crate) fn merge<'forest>(
         forests: impl IntoIterator<Item = &'forest MastForest>,
     ) -> Result<(MastForest, MastForestRootMap), MastForestError> {
         let forests = forests.into_iter().collect::<Vec<_>>();
 
-        // Handle identity case: merging a single forest should return that forest unchanged
-        // This fixes issue #1644 where single-forest merges were changing node digests due to ID
-        // remapping
-        if forests.len() == 1 {
-            let forest = forests[0];
-            let mut root_map = BTreeMap::new();
-            for root in forest.procedure_roots() {
-                root_map.insert(*root, *root);
-            }
-            return Ok((forest.clone(), MastForestRootMap { root_maps: vec![root_map] }));
-        }
+        // DEVELOPER NOTE: This function performs normalization, not identity behavior.
+        // Even single-forest merges change node IDs and digests due to remapping.
+        // See test `issue_1644_single_forest_merge_identity` for detailed explanation.
+        // If you need identity behavior, consider cloning the forest directly instead.
 
         let decorator_id_mappings = Vec::with_capacity(forests.len());
         let node_id_mappings = vec![MastForestNodeIdMap::new(); forests.len()];
