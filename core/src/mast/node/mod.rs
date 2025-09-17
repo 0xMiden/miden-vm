@@ -30,9 +30,9 @@ pub use split_node::SplitNode;
 mod loop_node;
 pub use loop_node::LoopNode;
 
-use super::{DecoratorId, MastForestError};
+use super::DecoratorId;
 use crate::{
-    AssemblyOp, Decorator, DecoratorList, Operation,
+    AssemblyOp, Decorator,
     mast::{MastForest, MastNodeId, Remapping},
 };
 
@@ -89,75 +89,6 @@ pub enum MastNode {
     Call(CallNode),
     Dyn(DynNode),
     External(ExternalNode),
-}
-
-// ------------------------------------------------------------------------------------------------
-/// Constructors
-impl MastNode {
-    pub fn new_basic_block(
-        operations: Vec<Operation>,
-        decorators: Option<DecoratorList>,
-    ) -> Result<Self, MastForestError> {
-        let block = BasicBlockNode::new(operations, decorators)?;
-        Ok(Self::Block(block))
-    }
-
-    pub fn new_join(
-        left_child: MastNodeId,
-        right_child: MastNodeId,
-        mast_forest: &MastForest,
-    ) -> Result<Self, MastForestError> {
-        let join = JoinNode::new([left_child, right_child], mast_forest)?;
-        Ok(Self::Join(join))
-    }
-
-    pub fn new_split(
-        if_branch: MastNodeId,
-        else_branch: MastNodeId,
-        mast_forest: &MastForest,
-    ) -> Result<Self, MastForestError> {
-        let split = SplitNode::new([if_branch, else_branch], mast_forest)?;
-        Ok(Self::Split(split))
-    }
-
-    pub fn new_loop(body: MastNodeId, mast_forest: &MastForest) -> Result<Self, MastForestError> {
-        let loop_node = LoopNode::new(body, mast_forest)?;
-        Ok(Self::Loop(loop_node))
-    }
-
-    pub fn new_call(callee: MastNodeId, mast_forest: &MastForest) -> Result<Self, MastForestError> {
-        let call = CallNode::new(callee, mast_forest)?;
-        Ok(Self::Call(call))
-    }
-
-    pub fn new_syscall(
-        callee: MastNodeId,
-        mast_forest: &MastForest,
-    ) -> Result<Self, MastForestError> {
-        let syscall = CallNode::new_syscall(callee, mast_forest)?;
-        Ok(Self::Call(syscall))
-    }
-
-    pub fn new_dyn() -> Self {
-        Self::Dyn(DynNode::new_dyn())
-    }
-    pub fn new_dyncall() -> Self {
-        Self::Dyn(DynNode::new_dyncall())
-    }
-
-    pub fn new_external(mast_root: Word) -> Self {
-        Self::External(ExternalNode::new(mast_root))
-    }
-
-    #[cfg(test)]
-    pub fn new_basic_block_with_raw_decorators(
-        operations: Vec<Operation>,
-        decorators: Vec<(usize, crate::Decorator)>,
-        mast_forest: &mut MastForest,
-    ) -> Result<Self, MastForestError> {
-        let block = BasicBlockNode::new_with_raw_decorators(operations, decorators, mast_forest)?;
-        Ok(Self::Block(block))
-    }
 }
 
 // ------------------------------------------------------------------------------------------------

@@ -6,6 +6,9 @@ on:
   pull_request:
     types: [opened, reopened, synchronize]
 
+permissions:
+  contents: read
+
 jobs:
   test:
     name: test on ubuntu-latest
@@ -35,3 +38,33 @@ jobs:
         run: rustup update --no-self-update
       - name: Run doc-tests
         run: make test-docs
+
+  check-stdlib-docs:
+    name: check stdlib docs
+    runs-on: ubuntu-latest
+    needs: [test, doc-tests]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
+      - name: Install rust
+        run: rustup update --no-self-update
+      - name: Build stdlib (generates docs)
+        run: cargo build -p miden-stdlib
+      - name: Check for uncommitted changes in stdlib/docs
+        run: |
+          if [ -n "$(git status --porcelain stdlib/docs)" ]; then
+            echo "ERROR: Found uncommitted changes in stdlib/docs/"
+            echo "This indicates that documentation was regenerated during the build but not committed."
+            echo "Please commit the generated documentation changes before merging."
+            echo ""
+            echo "Uncommitted changes:"
+            git status stdlib/docs
+            echo ""
+            echo "Diff:"
+            git diff stdlib/docs
+            exit 1
+          else
+            echo "No uncommitted changes in stdlib/docs/ - OK"
+          fi

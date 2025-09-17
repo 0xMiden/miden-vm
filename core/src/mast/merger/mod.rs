@@ -3,8 +3,9 @@ use alloc::{collections::BTreeMap, vec::Vec};
 use miden_crypto::hash::blake::Blake3Digest;
 
 use crate::mast::{
-    DecoratorId, MastForest, MastForestError, MastNode, MastNodeFingerprint, MastNodeId,
-    MultiMastForestIteratorItem, MultiMastForestNodeIter, node::MastNodeExt,
+    BasicBlockNode, CallNode, DecoratorId, DynNode, ExternalNode, JoinNode, LoopNode, MastForest,
+    MastForestError, MastNode, MastNodeErrorContext, MastNodeFingerprint, MastNodeId,
+    MultiMastForestIteratorItem, MultiMastForestNodeIter, SplitNode, node::MastNodeExt,
 };
 
 #[cfg(test)]
@@ -278,52 +279,56 @@ impl MastForestMerger {
 
         // Due to DFS postorder iteration all children of node's should have been inserted before
         // their parents which is why we can `expect` the constructor calls here.
-        let mut mapped_node = match node {
+        let mut mapped_node: MastNode = match node {
             MastNode::Join(join_node) => {
                 let first = map_node_id(join_node.first());
                 let second = map_node_id(join_node.second());
 
-                MastNode::new_join(first, second, &self.mast_forest)
+                JoinNode::new([first, second], &self.mast_forest)
                     .expect("JoinNode children should have been mapped to a lower index")
+                    .into()
             },
             MastNode::Split(split_node) => {
                 let if_branch = map_node_id(split_node.on_true());
                 let else_branch = map_node_id(split_node.on_false());
 
-                MastNode::new_split(if_branch, else_branch, &self.mast_forest)
+                SplitNode::new([if_branch, else_branch], &self.mast_forest)
                     .expect("SplitNode children should have been mapped to a lower index")
+                    .into()
             },
             MastNode::Loop(loop_node) => {
                 let body = map_node_id(loop_node.body());
-                MastNode::new_loop(body, &self.mast_forest)
+                LoopNode::new(body, &self.mast_forest)
                     .expect("LoopNode children should have been mapped to a lower index")
+                    .into()
             },
             MastNode::Call(call_node) => {
                 let callee = map_node_id(call_node.callee());
-                MastNode::new_call(callee, &self.mast_forest)
+                CallNode::new(callee, &self.mast_forest)
                     .expect("CallNode children should have been mapped to a lower index")
+                    .into()
             },
             // Other nodes are simply copied.
             MastNode::Block(basic_block_node) => {
-                MastNode::new_basic_block(
+                BasicBlockNode::new(
                     basic_block_node.operations().copied().collect(),
                     // Operation Indices of decorators stay the same while decorator IDs need to be
                     // mapped.
                     Some(
                         basic_block_node
                             .decorators()
-                            .iter()
-                            .map(|(idx, decorator_id)| match map_decorator_id(decorator_id) {
-                                Ok(mapped_decorator) => Ok((*idx, mapped_decorator)),
+                            .map(|(idx, decorator_id)| match map_decorator_id(&decorator_id) {
+                                Ok(mapped_decorator) => Ok((idx, mapped_decorator)),
                                 Err(err) => Err(err),
                             })
                             .collect::<Result<Vec<_>, _>>()?,
                     ),
                 )
                 .expect("previously valid BasicBlockNode should still be valid")
+                .into()
             },
-            MastNode::Dyn(_) => MastNode::new_dyn(),
-            MastNode::External(external_node) => MastNode::new_external(external_node.digest()),
+            MastNode::Dyn(_) => DynNode::new_dyn().into(),
+            MastNode::External(external_node) => ExternalNode::new(external_node.digest()).into(),
         };
 
         // Decorators must be handled specially for basic block nodes.

@@ -1,7 +1,7 @@
 use alloc::sync::Arc;
 
 use miden_core::{
-    DecoratorIterator, EventId, Operation,
+    DecoratorIdIterator, EventId, Operation,
     mast::{BasicBlockNode, MastForest, MastNodeId, OpBatch},
     stack::MIN_STACK_DEPTH,
     sys_events::SystemEvent,
@@ -131,7 +131,7 @@ impl FastProcessor {
         node_id: MastNodeId,
         batch: &OpBatch,
         batch_index: usize,
-        decorators: &mut DecoratorIterator<'_>,
+        decorators: &mut DecoratorIdIterator<'_>,
         batch_offset_in_block: usize,
         program: &MastForest,
         host: &mut impl AsyncHost,

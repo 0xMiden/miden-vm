@@ -828,7 +828,6 @@ fn checked_xor_fail() {
 }
 
 #[test]
-#[ignore]
 fn unchecked_shl() {
     let source = "
         use.std::math::u64
