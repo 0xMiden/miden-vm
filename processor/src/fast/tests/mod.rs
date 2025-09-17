@@ -11,6 +11,7 @@ use crate::{DefaultHost, Process, system::FMP_MAX};
 
 mod advice_provider;
 mod all_ops;
+mod fast_decorator_execution_tests;
 mod masm_consistency;
 mod memory;
 
