@@ -3,7 +3,6 @@ use alloc::sync::Arc;
 use miden_core::{
     DecoratorIdIterator, EventId, Operation,
     mast::{BasicBlockNode, MastForest, MastNodeId, OpBatch},
-    stack::MIN_STACK_DEPTH,
     sys_events::SystemEvent,
 };
 
@@ -11,7 +10,7 @@ use crate::{
     AsyncHost, ErrorContext, ExecutionError,
     continuation_stack::ContinuationStack,
     err_ctx,
-    fast::{FastProcessor, Tracer, trace_state::NodeExecutionState},
+    fast::{FastProcessor, STACK_BUFFER_SIZE, Tracer, trace_state::NodeExecutionState},
     operations::sys_ops::sys_event_handlers::handle_system_event,
     processor::Processor,
 };
@@ -168,8 +167,8 @@ impl FastProcessor {
             // whereas all the other operations are synchronous (resulting in a significant
             // performance improvement).
             {
-                if self.bounds_check_counter == 0 {
-                    let err_str = if self.stack_top_idx - MIN_STACK_DEPTH == 0 {
+                if self.stack_bot_idx == 0 || self.stack_top_idx == STACK_BUFFER_SIZE {
+                    let err_str = if self.stack_bot_idx == 0 {
                         "stack underflow"
                     } else {
                         "stack overflow"
