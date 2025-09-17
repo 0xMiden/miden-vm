@@ -7,6 +7,8 @@ use core::fmt;
 // between 0 and 2^32.
 pub use constants::*;
 
+use crate::EventId;
+
 #[rustfmt::skip]
 mod constants {
     pub const EVENT_MERKLE_NODE_MERGE: u32            = 276124218;
@@ -14,9 +16,7 @@ mod constants {
     pub const EVENT_MAP_VALUE_TO_STACK: u32           = 574478993;
     pub const EVENT_MAP_VALUE_TO_STACK_N: u32         = 630847990;
     pub const EVENT_HAS_MAP_KEY: u32                  = 652777600;
-    pub const EVENT_U64_DIV: u32                      = 678156251;
     pub const EVENT_EXT2_INV: u32                     = 1251967401;
-    pub const EVENT_SMT_PEEK: u32                     = 1889584556;
     pub const EVENT_U32_CLZ: u32                      = 1951932030;
     pub const EVENT_U32_CTZ: u32                      = 2008979519;
     pub const EVENT_U32_CLO: u32                      = 2032895094;
@@ -25,8 +25,8 @@ mod constants {
     pub const EVENT_MEM_TO_MAP: u32                   = 2389394361;
     pub const EVENT_HDWORD_TO_MAP: u32                = 2391452729;
     pub const EVENT_HDWORD_TO_MAP_WITH_DOMAIN: u32    = 2822590340;
+    pub const EVENT_HQWORD_TO_MAP: u32                = 2913039991;
     pub const EVENT_HPERM_TO_MAP: u32                 = 3297060969;
-    pub const EVENT_FALCON_DIV: u32                   = 3419226155;
 }
 
 /// Defines a set of actions which can be initiated from the VM to inject new data into the advice
@@ -115,39 +115,6 @@ pub enum SystemEvent {
     ///   Advice stack:  [has_mapkey, ...]
     HasMapKey,
 
-    /// Pushes the result of [u64] division (both the quotient and the remainder) onto the advice
-    /// stack.
-    ///
-    /// Inputs:
-    ///   Operand stack: [b1, b0, a1, a0, ...]
-    ///   Advice stack: [...]
-    ///
-    /// Outputs:
-    ///   Operand stack: [b1, b0, a1, a0, ...]
-    ///   Advice stack: [q0, q1, r0, r1, ...]
-    ///
-    /// Where (a0, a1) and (b0, b1) are the 32-bit limbs of the dividend and the divisor
-    /// respectively (with a0 representing the 32 lest significant bits and a1 representing the
-    /// 32 most significant bits). Similarly, (q0, q1) and (r0, r1) represent the quotient and
-    /// the remainder respectively.
-    U64Div,
-
-    /// Pushes the result of divison (both the quotient and the remainder) of a [u64] by the Falcon
-    /// prime (M = 12289) onto the advice stack.
-    ///
-    /// Inputs:
-    ///   Operand stack: [a1, a0, ...]
-    ///   Advice stack: [...]
-    ///
-    /// Outputs:
-    ///   Operand stack: [a1, a0, ...]
-    ///   Advice stack: [q0, q1, r, ...]
-    ///
-    /// Where (a0, a1) are the 32-bit limbs of the dividend (with a0 representing the 32 least
-    /// significant bits and a1 representing the 32 most significant bits).
-    /// Similarly, (q0, q1) represent the quotient and r the remainder.
-    FalconDiv,
-
     /// Given an element in a quadratic extension field on the top of the stack (i.e., a0, b1),
     /// computes its multiplicative inverse and push the result onto the advice stack.
     ///
@@ -162,21 +129,6 @@ pub enum SystemEvent {
     /// Where (b0, b1) is the multiplicative inverse of the extension field element (a0, a1) at the
     /// top of the stack.
     Ext2Inv,
-
-    /// Pushes onto the advice stack the value associated with the specified key in a Sparse
-    /// Merkle Tree defined by the specified root.
-    ///
-    /// If no value was previously associated with the specified key, [ZERO; 4] is pushed onto
-    /// the advice stack.
-    ///
-    /// Inputs:
-    ///   Operand stack: [KEY, ROOT, ...]
-    ///   Advice stack: [...]
-    ///
-    /// Outputs:
-    ///   Operand stack: [KEY, ROOT, ...]
-    ///   Advice stack: [VALUE, ...]
-    SmtPeek,
 
     /// Pushes the number of the leading zeros of the top stack element onto the advice stack.
     ///
@@ -262,7 +214,7 @@ pub enum SystemEvent {
     /// Where KEY is computed as hash(A || B, domain=0)
     HdwordToMap,
 
-    /// Reads two word from the operand stack and inserts them into the advice map under the key
+    /// Reads two words from the operand stack and inserts them into the advice map under the key
     /// defined by the hash of these words (using `d` as the domain).
     ///
     /// Inputs:
@@ -275,6 +227,23 @@ pub enum SystemEvent {
     ///
     /// Where KEY is computed as hash(A || B, d).
     HdwordToMapWithDomain,
+
+    /// Reads four words from the operand stack and inserts them into the advice map under the key
+    /// defined by the hash of these words.
+    ///
+    /// Inputs:
+    ///   Operand stack: [D, C, B, A, ...]
+    ///   Advice map: {...}
+    ///
+    /// Outputs:
+    ///   Operand stack: [D, C, B, A, ...]
+    ///   Advice map: {KEY: [A', B', C', D'])}
+    ///
+    /// Where:
+    /// - KEY is the hash computed as hash(hash(hash(A || B) || C) || D) with domain=0.
+    /// - A' (and other words with `'`) is the A word with the reversed element order: A = [a3, a2,
+    ///   a1, a0], A' = [a0, a1, a2, a3].
+    HqwordToMap,
 
     /// Reads three words from the operand stack and inserts the top two words into the advice map
     /// under the key defined by applying an RPO permutation to all three words.
@@ -300,10 +269,7 @@ impl SystemEvent {
             SystemEvent::MapValueToStack => EVENT_MAP_VALUE_TO_STACK,
             SystemEvent::MapValueToStackN => EVENT_MAP_VALUE_TO_STACK_N,
             SystemEvent::HasMapKey => EVENT_HAS_MAP_KEY,
-            SystemEvent::U64Div => EVENT_U64_DIV,
-            SystemEvent::FalconDiv => EVENT_FALCON_DIV,
             SystemEvent::Ext2Inv => EVENT_EXT2_INV,
-            SystemEvent::SmtPeek => EVENT_SMT_PEEK,
             SystemEvent::U32Clz => EVENT_U32_CLZ,
             SystemEvent::U32Ctz => EVENT_U32_CTZ,
             SystemEvent::U32Clo => EVENT_U32_CLO,
@@ -312,23 +278,22 @@ impl SystemEvent {
             SystemEvent::MemToMap => EVENT_MEM_TO_MAP,
             SystemEvent::HdwordToMap => EVENT_HDWORD_TO_MAP,
             SystemEvent::HdwordToMapWithDomain => EVENT_HDWORD_TO_MAP_WITH_DOMAIN,
+            SystemEvent::HqwordToMap => EVENT_HQWORD_TO_MAP,
             SystemEvent::HpermToMap => EVENT_HPERM_TO_MAP,
         }
     }
 
     /// Returns a system event corresponding to the specified event ID, or `None` if the event
     /// ID is not recognized.
-    pub fn from_event_id(event_id: u32) -> Option<Self> {
+    pub fn from_event_id(event_id: EventId) -> Option<Self> {
+        let event_id: u32 = event_id.as_felt().as_int().try_into().ok()?;
         match event_id {
             EVENT_MERKLE_NODE_MERGE => Some(SystemEvent::MerkleNodeMerge),
             EVENT_MERKLE_NODE_TO_STACK => Some(SystemEvent::MerkleNodeToStack),
             EVENT_MAP_VALUE_TO_STACK => Some(SystemEvent::MapValueToStack),
             EVENT_MAP_VALUE_TO_STACK_N => Some(SystemEvent::MapValueToStackN),
             EVENT_HAS_MAP_KEY => Some(SystemEvent::HasMapKey),
-            EVENT_U64_DIV => Some(SystemEvent::U64Div),
-            EVENT_FALCON_DIV => Some(SystemEvent::FalconDiv),
             EVENT_EXT2_INV => Some(SystemEvent::Ext2Inv),
-            EVENT_SMT_PEEK => Some(SystemEvent::SmtPeek),
             EVENT_U32_CLZ => Some(SystemEvent::U32Clz),
             EVENT_U32_CTZ => Some(SystemEvent::U32Ctz),
             EVENT_U32_CLO => Some(SystemEvent::U32Clo),
@@ -337,6 +302,7 @@ impl SystemEvent {
             EVENT_MEM_TO_MAP => Some(SystemEvent::MemToMap),
             EVENT_HDWORD_TO_MAP => Some(SystemEvent::HdwordToMap),
             EVENT_HDWORD_TO_MAP_WITH_DOMAIN => Some(SystemEvent::HdwordToMapWithDomain),
+            EVENT_HQWORD_TO_MAP => Some(SystemEvent::HqwordToMap),
             EVENT_HPERM_TO_MAP => Some(SystemEvent::HpermToMap),
             _ => None,
         }
@@ -357,10 +323,7 @@ impl fmt::Display for SystemEvent {
             Self::MapValueToStack => write!(f, "map_value_to_stack"),
             Self::MapValueToStackN => write!(f, "map_value_to_stack_with_len"),
             Self::HasMapKey => write!(f, "has_key_in_map"),
-            Self::U64Div => write!(f, "div_u64"),
-            Self::FalconDiv => write!(f, "falcon_div"),
             Self::Ext2Inv => write!(f, "ext2_inv"),
-            Self::SmtPeek => write!(f, "smt_peek"),
             Self::U32Clz => write!(f, "u32clz"),
             Self::U32Ctz => write!(f, "u32ctz"),
             Self::U32Clo => write!(f, "u32clo"),
@@ -369,6 +332,7 @@ impl fmt::Display for SystemEvent {
             Self::MemToMap => write!(f, "mem_to_map"),
             Self::HdwordToMap => write!(f, "hdword_to_map"),
             Self::HdwordToMapWithDomain => write!(f, "hdword_to_map_with_domain"),
+            Self::HqwordToMap => write!(f, "hqword_to_map"),
             Self::HpermToMap => write!(f, "hperm_to_map"),
         }
     }

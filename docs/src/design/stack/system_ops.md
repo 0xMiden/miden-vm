@@ -11,15 +11,9 @@ s'_i - s_i = 0 \ \text{ for } i \in [0, 16) \text { | degree} = 1
 $$
 
 ## EMIT
-Similarly to `NOOP`, the `EMIT` operation advances the cycle counter but does not change the state of the operand stack (i.e., the depth of the stack and the values on the stack remain the same).
+The `EMIT` operation interrupts execution for a single cycle and hands control to the host. During this interruption, the host can read the current state of the execution and modify the advice provider as it sees fit. From the VM's perspective, this operation has exactly the same semantics as [`NOOP`](#noop) - the operand stack remains completely unchanged.
 
-The `EMIT` operation does not impose any constraints besides the ones needed to ensure that the entire state of the stack is copied over. This constraint looks like so:
-
->$$
-s'_i - s_i = 0 \ \text{ for } i \in [0, 16) \text { | degree} = 1
-$$
-
-Additionally, the prover puts `EMIT`'s immediate value in the first user op helper register non-deterministically. The [Op Group Table](../decoder/main.md#op-group-table) is responsible for ensuring that the prover sets the appropriate value.
+By convention, the top element of the stack is used to encode an event ID (see the [events documentation](../../user_docs/assembly/events.md) for details on event structure and usage). The host can use this event ID to determine what actions to take during the execution interruption.
 
 ## ASSERT
 The `ASSERT` operation pops an element off the stack and checks if the popped element is equal to $1$. If the element is not equal to $1$, program execution fails.

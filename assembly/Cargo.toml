@@ -1,8 +1,8 @@
 [package]
 name = "miden-assembly"
-version = "0.17.1"
+version = "0.18.0"
 description = "Miden VM assembly language"
-documentation = "https://docs.rs/miden-assembly/0.17.1"
+documentation = "https://docs.rs/miden-assembly/0.18.0"
 readme = "README.md"
 categories = ["compilers", "no-std"]
 keywords = ["assembler", "assembly", "language", "miden"]
@@ -34,5 +34,6 @@ thiserror.workspace = true
 
 [dev-dependencies]
 miden-mast-package = { workspace = true, features = ["arbitrary"] }
-pretty_assertions = "1.4"
+miden-stdlib.workspace = true
+insta.workspace = true
 proptest = { workspace = true, features = ["std"] }

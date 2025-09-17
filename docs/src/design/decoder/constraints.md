@@ -11,20 +11,20 @@ We assume that the VM exposes a flag per operation which is set to $1$ when the 
 AIR constraints for the decoder involve operations listed in the table below. For each operation we also provide the degree of the corresponding flag and the effect that the operation has on the operand stack (however, in this section we do not cover the constraints needed to enforce the correct transition of the operand stack).
 
 | Operation | Flag          | Degree | Effect on stack                                                                                  |
-| --------- | :-----------: | :----: | ------------------------------------------------------------------------------------------------ |
-| `JOIN`    | $f_{join}$    | 5      | Stack remains unchanged.                                                                         |
-| `SPLIT`   | $f_{split}$   | 5      | Top stack element is dropped.                                                                    |
-| `LOOP`    | $f_{loop}$    | 5      | Top stack element is dropped.                                                                    |
-| `REPEAT`  | $f_{repeat}$  | 4      | Top stack element is dropped.                                                                    |
-| `SPAN`    | $f_{span}$    | 5      | Stack remains unchanged.                                                                         |
-| `RESPAN`  | $f_{respan}$  | 4      | Stack remains unchanged.                                                                         |
-| `DYN`     | $f_{dyn}$     | 5      | Stack remains unchanged.                                                                         |
-| `CALL`    | $f_{call}$    | 4      | Stack remains unchanged.                                                                         |
-| `SYSCALL` | $f_{syscall}$ | 4      | Stack remains unchanged.                                                                         |
-| `END`     | $f_{end}$     | 4      | When exiting a loop block, top stack element is dropped; otherwise, the stack remains unchanged. |
-| `HALT`    | $f_{halt}$    | 4      | Stack remains unchanged.                                                                         |
-| `PUSH`    | $f_{push}$    | 5      | An immediate value is pushed onto the stack.                                                     |
-| `EMIT`    | $f_{emit}$    | 5      | Stack remains unchanged.                                                                         |
+| --------- | :-----------: |:------:| ------------------------------------------------------------------------------------------------ |
+| `JOIN`    | $f_{join}$    |   5    | Stack remains unchanged.                                                                         |
+| `SPLIT`   | $f_{split}$   |   5    | Top stack element is dropped.                                                                    |
+| `LOOP`    | $f_{loop}$    |   5    | Top stack element is dropped.                                                                    |
+| `REPEAT`  | $f_{repeat}$  |   4    | Top stack element is dropped.                                                                    |
+| `SPAN`    | $f_{span}$    |   5    | Stack remains unchanged.                                                                         |
+| `RESPAN`  | $f_{respan}$  |   4    | Stack remains unchanged.                                                                         |
+| `DYN`     | $f_{dyn}$     |   5    | Stack remains unchanged.                                                                         |
+| `CALL`    | $f_{call}$    |   4    | Stack remains unchanged.                                                                         |
+| `SYSCALL` | $f_{syscall}$ |   4    | Stack remains unchanged.                                                                         |
+| `END`     | $f_{end}$     |   4    | When exiting a loop block, top stack element is dropped; otherwise, the stack remains unchanged. |
+| `HALT`    | $f_{halt}$    |   4    | Stack remains unchanged.                                                                         |
+| `PUSH`    | $f_{push}$    |   5    | An immediate value is pushed onto the stack.                                                     |
+| `EMIT`    | $f_{emit}$    |   7    | Stack remains unchanged.                                                                         |
 
 We also use the [control flow flag](../stack/op_constraints.md#control-flow-flag) $f_{ctrl}$ exposed by the VM, which is set when any one of the above control flow operations is being executed. It has degree $5$.
 
@@ -442,9 +442,9 @@ In the beginning of a span block (i.e., when `SPAN` operation is executed), the 
 The rules for decrementing values in the $gc$ column are as follows:
 * The count cannot be decremented by more than $1$ in a single row.
 * When an operation group is fully executed (which happens when $h_0 = 0$ inside a span block), the count is decremented by $1$.
-* When `SPAN`, `RESPAN`, `EMIT` or `PUSH` operations are executed, the count is decremented by $1$.
+* When `SPAN`, `RESPAN`, or `PUSH` operations are executed, the count is decremented by $1$.
 
-Note that these rules imply that the `EMIT` and `PUSH` operations cannot be the last operation in an operation group (otherwise the count would have to be decremented by $2$).
+Note that these rules imply that the `PUSH` operation (or any operation with an immediate value) cannot be the last operation in an operation group (otherwise the count would have to be decremented by $2$).
 
 To simplify the description of the constraints, we will define the following variable:
 
@@ -463,7 +463,7 @@ $$
 When group count is decremented inside a *span* block, either $h_0$ must be $0$ (we consumed all operations in a group) or we must be executing an operation with an immediate value:
 
 > $$
-sp \cdot \Delta gc \cdot (1 - f_{imm})\cdot h_0 = 0 \text{ | degree} = 7
+sp \cdot \Delta gc \cdot (1 - f_{imm})\cdot h_0 = 0 \text{ | degree} = 8
 $$
 
 Notice that the above constraint does not preclude $f_{imm} = 1$ and $h_0 = 0$ from being true at the same time. If this happens, op group decoding constraints (described [here](#op-group-decoding-constraints)) will force that the operation following the operation with an immediate value is a `NOOP`.
@@ -628,10 +628,10 @@ Where $i \in [1, 8)$. Thus, $v_1$ defines row value for group in $h_1$, $v_2$ de
 We compute the value of the row to be removed from the op group table as follows:
 
 $$
-u = \alpha_0 + \alpha_1 \cdot a + \alpha_2 \cdot gc + \alpha_3 \cdot ((h_0' \cdot 2^7 + op') \cdot (1 - f_{imm}) + s_0' \cdot f_{push} + h_2 \cdot f_{emit}) \text{ | degree} = 6
+u = \alpha_0 + \alpha_1 \cdot a + \alpha_2 \cdot gc + \alpha_3 \cdot ((h_0' \cdot 2^7 + op') \cdot (1 - f_{imm}) + s_0' \cdot f_{push}) \text{ | degree} = 7
 $$
 
-In the above, the value of the group is computed as $(h_0' \cdot 2^7 + op') \cdot (1 - f_{push}) + s_0' \cdot f_{push} + h_2 \cdot f_{emit}$. This basically says that when we execute a `PUSH` or `EMIT` operation we need to remove the immediate value from the table. For `PUSH`, this value is at the top of the stack (column $s_0$) in the next row; for `EMIT`, it is found in $h_2$. However, when we are executing neither a `PUSH` nor `EMIT` operation, the value to be removed is an op group value which is a combination of values in $h_0$ and `op_bits` columns (also in the next row). Note also that value for batch address comes from the current value in the block address column ($a$), and the group position comes from the current value of the group count column ($gc$).
+In the above, the value of the group is computed as $(h_0' \cdot 2^7 + op') \cdot (1 - f_{imm}) + s_0' \cdot f_{push}$. This basically says that when we execute a `PUSH` operation we need to remove the immediate value from the table. This value is at the top of the stack (column $s_0$) in the next row. However, when we are not executing a `PUSH` operation, the value to be removed is an op group value which is a combination of values in $h_0$ and `op_bits` columns (also in the next row). Note also that value for batch address comes from the current value in the block address column ($a$), and the group position comes from the current value of the group count column ($gc$).
 
 We also define a flag which is set to $1$ when a group needs to be removed from the op group table.
 

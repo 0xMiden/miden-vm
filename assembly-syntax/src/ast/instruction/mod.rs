@@ -3,12 +3,13 @@ pub mod debug;
 mod print;
 
 use alloc::vec::Vec;
+use core::ops::Range;
 
 pub use self::{advice::SystemEventNode, debug::DebugOptions};
 use crate::{
     Felt,
     ast::{InvocationTarget, immediate::*},
-    parser::{IntValue, WordValue},
+    parser::IntValue,
 };
 
 // INSTRUCTION
@@ -206,14 +207,7 @@ pub enum Instruction {
 
     // ----- input / output operations -----------------------------------------------------------
     Push(Immediate<IntValue>),
-    PushU8(u8),
-    PushU16(u16),
-    PushU32(u32),
-    PushFelt(Felt),
-    PushWord(WordValue),
-    PushU8List(Vec<u8>),
-    PushU16List(Vec<u16>),
-    PushU32List(Vec<u32>),
+    PushSlice(Immediate<IntValue>, Range<usize>),
     PushFeltList(Vec<Felt>),
     Locaddr(ImmU16),
     Sdepth,
@@ -271,7 +265,8 @@ pub enum Instruction {
     Debug(DebugOptions),
 
     // ----- event decorators --------------------------------------------------------------------
-    Emit(ImmU32),
+    Emit,
+    EmitImm(ImmFelt),
     Trace(ImmU32),
 }
 

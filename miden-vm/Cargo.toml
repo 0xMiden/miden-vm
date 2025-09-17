@@ -1,8 +1,8 @@
 [package]
 name = "miden-vm"
-version = "0.17.1"
+version = "0.18.0"
 description = "Miden virtual machine"
-documentation = "https://docs.rs/miden-vm/0.17.1"
+documentation = "https://docs.rs/miden-vm/0.18.0"
 readme = "README.md"
 categories = ["cryptography", "emulators", "no-std"]
 keywords = ["miden", "stark", "virtual-machine", "zkp"]
@@ -26,8 +26,8 @@ bench = false
 doctest = false
 
 [[bench]]
-name = "program_execution"
-required-features = ["internal"]
+name = "program_execution_for_trace"
+required-features = ["internal", "no_err_ctx"]
 harness = false
 
 [[bench]]

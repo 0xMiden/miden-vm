@@ -7,16 +7,21 @@ use core::{
     fmt, mem,
     ops::{Index, IndexMut},
 };
+
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 mod node;
 pub use node::{
-    BasicBlockNode, CallNode, DynNode, ExternalNode, JoinNode, LoopNode, MastNode, MastNodeExt,
-    OP_BATCH_SIZE, OP_GROUP_SIZE, OpBatch, OperationOrDecorator, SplitNode,
+    BasicBlockNode, CallNode, DynNode, ExternalNode, JoinNode, LoopNode, MastNode,
+    MastNodeErrorContext, MastNodeExt, OP_BATCH_SIZE, OP_GROUP_SIZE, OpBatch, OperationOrDecorator,
+    SplitNode,
 };
 
 use crate::{
     AdviceMap, Decorator, DecoratorList, Felt, LexicographicWord, Operation, Word,
-    crypto::hash::{Blake3_256, Blake3Digest, Digest, Hasher},
-    utils::{ByteWriter, DeserializationError, Serializable},
+    crypto::hash::Hasher,
+    utils::{ByteWriter, DeserializationError, Serializable, hash_string_to_word},
 };
 
 mod serialization;
@@ -42,6 +47,7 @@ mod tests;
 /// A [`MastForest`] does not have an entrypoint, and hence is not executable. A [`crate::Program`]
 /// can be built from a [`MastForest`] to specify an entrypoint.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct MastForest {
     /// All of the nodes local to the trees comprising the MAST forest.
     nodes: Vec<MastNode>,
@@ -91,13 +97,13 @@ impl MastForest {
     /// Adds a node to the forest, and returns the associated [`MastNodeId`].
     ///
     /// Adding two duplicate nodes will result in two distinct returned [`MastNodeId`]s.
-    pub fn add_node(&mut self, node: MastNode) -> Result<MastNodeId, MastForestError> {
+    pub fn add_node(&mut self, node: impl Into<MastNode>) -> Result<MastNodeId, MastForestError> {
         if self.nodes.len() == Self::MAX_NODES {
             return Err(MastForestError::TooManyNodes);
         }
 
         let new_node_id = MastNodeId(self.nodes.len() as u32);
-        self.nodes.push(node);
+        self.nodes.push(node.into());
 
         Ok(new_node_id)
     }
@@ -108,7 +114,7 @@ impl MastForest {
         operations: Vec<Operation>,
         decorators: Option<DecoratorList>,
     ) -> Result<MastNodeId, MastForestError> {
-        let block = MastNode::new_basic_block(operations, decorators)?;
+        let block = BasicBlockNode::new(operations, decorators)?;
         self.add_node(block)
     }
 
@@ -118,7 +124,7 @@ impl MastForest {
         left_child: MastNodeId,
         right_child: MastNodeId,
     ) -> Result<MastNodeId, MastForestError> {
-        let join = MastNode::new_join(left_child, right_child, self)?;
+        let join = JoinNode::new([left_child, right_child], self)?;
         self.add_node(join)
     }
 
@@ -128,41 +134,41 @@ impl MastForest {
         if_branch: MastNodeId,
         else_branch: MastNodeId,
     ) -> Result<MastNodeId, MastForestError> {
-        let split = MastNode::new_split(if_branch, else_branch, self)?;
+        let split = SplitNode::new([if_branch, else_branch], self)?;
         self.add_node(split)
     }
 
     /// Adds a loop node to the forest, and returns the [`MastNodeId`] associated with it.
     pub fn add_loop(&mut self, body: MastNodeId) -> Result<MastNodeId, MastForestError> {
-        let loop_node = MastNode::new_loop(body, self)?;
+        let loop_node = LoopNode::new(body, self)?;
         self.add_node(loop_node)
     }
 
     /// Adds a call node to the forest, and returns the [`MastNodeId`] associated with it.
     pub fn add_call(&mut self, callee: MastNodeId) -> Result<MastNodeId, MastForestError> {
-        let call = MastNode::new_call(callee, self)?;
+        let call = CallNode::new(callee, self)?;
         self.add_node(call)
     }
 
     /// Adds a syscall node to the forest, and returns the [`MastNodeId`] associated with it.
     pub fn add_syscall(&mut self, callee: MastNodeId) -> Result<MastNodeId, MastForestError> {
-        let syscall = MastNode::new_syscall(callee, self)?;
+        let syscall = CallNode::new_syscall(callee, self)?;
         self.add_node(syscall)
     }
 
     /// Adds a dyn node to the forest, and returns the [`MastNodeId`] associated with it.
     pub fn add_dyn(&mut self) -> Result<MastNodeId, MastForestError> {
-        self.add_node(MastNode::new_dyn())
+        self.add_node(DynNode::new_dyn())
     }
 
     /// Adds a dyncall node to the forest, and returns the [`MastNodeId`] associated with it.
     pub fn add_dyncall(&mut self) -> Result<MastNodeId, MastForestError> {
-        self.add_node(MastNode::new_dyncall())
+        self.add_node(DynNode::new_dyncall())
     }
 
     /// Adds an external node to the forest, and returns the [`MastNodeId`] associated with it.
     pub fn add_external(&mut self, mast_root: Word) -> Result<MastNodeId, MastForestError> {
-        self.add_node(MastNode::new_external(mast_root))
+        self.add_node(ExternalNode::new(mast_root))
     }
 
     /// Marks the given [`MastNodeId`] as being the root of a procedure.
@@ -285,7 +291,7 @@ impl MastForest {
         operations: Vec<Operation>,
         decorators: Vec<(usize, Decorator)>,
     ) -> Result<MastNodeId, MastForestError> {
-        let block = MastNode::new_basic_block_with_raw_decorators(operations, decorators, self)?;
+        let block = BasicBlockNode::new_with_raw_decorators(operations, decorators, self)?;
         self.add_node(block)
     }
 }
@@ -564,6 +570,12 @@ impl IndexMut<DecoratorId> for MastForest {
 /// [`MastNodeId`] handles. Hence, [`MastNodeId`] equality must not be used to test for equality of
 /// the underlying [`MastNode`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
+#[cfg_attr(
+    all(feature = "serde", feature = "arbitrary"),
+    miden_serde_test_macros::serde_test
+)]
 pub struct MastNodeId(u32);
 
 /// Operations that mutate a MAST often produce this mapping between old and new NodeIds.
@@ -665,6 +677,18 @@ impl fmt::Display for MastNodeId {
     }
 }
 
+#[cfg(any(test, feature = "arbitrary"))]
+impl proptest::prelude::Arbitrary for MastNodeId {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        use proptest::prelude::*;
+        any::<u32>().prop_map(MastNodeId).boxed()
+    }
+
+    type Strategy = proptest::prelude::BoxedStrategy<Self>;
+}
+
 // ITERATOR
 
 /// Iterates over all the nodes a root depends on, in pre-order. The iteration can include other
@@ -703,6 +727,8 @@ impl Iterator for SubtreeIterator<'_> {
 /// An opaque handle to a [`Decorator`] in some [`MastForest`]. It is the responsibility of the user
 /// to use a given [`DecoratorId`] with the corresponding [`MastForest`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
 pub struct DecoratorId(u32);
 
 impl DecoratorId {
@@ -769,14 +795,11 @@ impl Serializable for DecoratorId {
     }
 }
 
-/// Derives an error code from an error message by hashing the message and
-/// interpreting the first 64 bits as a Felt.
+/// Derives an error code from an error message by hashing the message and returning the 0th element
+/// of the resulting [`Word`].
 pub fn error_code_from_msg(msg: impl AsRef<str>) -> Felt {
-    let digest: Blake3Digest<32> = Blake3_256::hash(msg.as_ref().as_bytes());
-    let mut digest_bytes: [u8; 8] = [0; 8];
-    digest_bytes.copy_from_slice(&digest.as_bytes()[0..8]);
-    let code = u64::from_le_bytes(digest_bytes);
-    Felt::new(code)
+    // hash the message and return 0th felt of the resulting Word
+    hash_string_to_word(msg.as_ref())[0]
 }
 
 // MAST FOREST ERROR

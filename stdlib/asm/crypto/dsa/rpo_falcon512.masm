@@ -11,6 +11,7 @@ const.M_DOUBLE=24578
 const.M_SQUARE=151019521
 const.SQUARE_NORM_BOUND=34034726
 const.MEMORY_POINTER_OFFSET_OF_HASH_TO_POINT_POLY_FROM_PRODUCT_POLY=1024
+const.FALCON_DIV_EVENT=event("stdlib::crypto::dsa::rpo_falcon512::falcon_div")
 
 # MODULAR REDUCTION FALCON PRIME
 # =============================================================================================
@@ -31,7 +32,7 @@ const.MEMORY_POINTER_OFFSET_OF_HASH_TO_POINT_POLY_FROM_PRODUCT_POLY=1024
 #!
 #! Cycles: 27
 export.mod_12289
-    adv.push_falcon_div
+    emit.FALCON_DIV_EVENT
     # the advice stack contains now [qhi, qlo, r, ...] where q = qhi * 2^32 + qlo is quotient
     # and r is remainder
 

@@ -1,0 +1,9 @@
+---
+source: assembly/src/tests.rs
+expression: program
+---
+begin
+    trace(0)
+    external.0xe776df8dc02329acc43a09fe8e510b44a87dfd876e375ad383891470ece4f6de
+    trace(1)
+end

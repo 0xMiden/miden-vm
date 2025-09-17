@@ -1,13 +1,22 @@
 #![no_std]
 
+pub mod handlers;
+
 extern crate alloc;
 
 use alloc::{sync::Arc, vec, vec::Vec};
 
 use miden_assembly::{Library, mast::MastForest, utils::Deserializable};
-use miden_core::{Felt, Word};
-use miden_processor::HostLibrary;
+use miden_core::{EventId, Felt, Word};
+use miden_processor::{EventHandler, HostLibrary};
 use miden_utils_sync::LazyLock;
+
+use crate::handlers::{
+    falcon_div::{FALCON_DIV_EVENT_ID, handle_falcon_div},
+    keccak256::{KECCAK_HASH_MEMORY_EVENT_ID, handle_keccak_hash_memory},
+    smt_peek::{SMT_PEEK_EVENT_ID, handle_smt_peek},
+    u64_div::{U64_DIV_EVENT_ID, handle_u64_div},
+};
 
 // STANDARD LIBRARY
 // ================================================================================================
@@ -32,7 +41,7 @@ impl From<&StdLibrary> for HostLibrary {
     fn from(stdlib: &StdLibrary) -> Self {
         Self {
             mast_forest: stdlib.mast_forest().clone(),
-            handlers: vec![],
+            handlers: stdlib.handlers(),
         }
     }
 }
@@ -45,6 +54,21 @@ impl StdLibrary {
     /// Returns a reference to the [MastForest] underlying the Miden standard library.
     pub fn mast_forest(&self) -> &Arc<MastForest> {
         self.0.mast_forest()
+    }
+
+    /// Returns a reference to the underlying [`Library`].
+    pub fn library(&self) -> &Library {
+        &self.0
+    }
+
+    /// List of all `EventHandlers` required to run all of the standard library.
+    pub fn handlers(&self) -> Vec<(EventId, Arc<dyn EventHandler>)> {
+        vec![
+            (KECCAK_HASH_MEMORY_EVENT_ID, Arc::new(handle_keccak_hash_memory)),
+            (SMT_PEEK_EVENT_ID, Arc::new(handle_smt_peek)),
+            (U64_DIV_EVENT_ID, Arc::new(handle_u64_div)),
+            (FALCON_DIV_EVENT_ID, Arc::new(handle_falcon_div)),
+        ]
     }
 }
 
@@ -114,7 +138,7 @@ pub fn falcon_sign(sk: &[Felt], msg: Word) -> Option<Vec<Felt>> {
 
     // We also need in the VM the expanded key corresponding to the public key the was provided
     // via the operand stack
-    let h = sk.compute_pub_key_poly().0;
+    let h = sk.public_key();
 
     // Lastly, for the probabilistic product routine that is part of the verification procedure,
     // we need to compute the product of the expanded key and the signature polynomial in

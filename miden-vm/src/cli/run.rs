@@ -186,9 +186,13 @@ fn run_masm_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
     let stack_inputs = input_data.parse_stack_inputs().map_err(Report::msg)?;
     let advice_inputs = input_data.parse_advice_inputs().map_err(Report::msg)?;
     let mut host = DefaultHost::default().with_source_manager(source_manager);
-    host.load_library(&StdLibrary::default()).unwrap();
+    host.load_library(&StdLibrary::default())
+        .into_diagnostic()
+        .wrap_err("Failed to load stdlib")?;
     for lib in libraries.libraries {
-        host.load_library(lib.mast_forest()).unwrap();
+        host.load_library(lib.mast_forest())
+            .into_diagnostic()
+            .wrap_err("Failed to load library")?;
     }
 
     let program_hash: [u8; 32] = program.hash().into();

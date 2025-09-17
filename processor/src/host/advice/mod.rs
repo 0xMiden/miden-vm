@@ -1,11 +1,8 @@
-use alloc::{
-    collections::{BTreeMap, btree_map::Entry},
-    vec::Vec,
-};
+use alloc::{collections::btree_map::Entry, vec::Vec};
 
 use miden_core::{
     AdviceMap, Felt, Word,
-    crypto::merkle::{InnerNodeInfo, MerklePath, MerkleStore, NodeIndex, StoreNode},
+    crypto::merkle::{InnerNodeInfo, MerklePath, MerkleStore, NodeIndex},
 };
 
 mod inputs;
@@ -14,19 +11,14 @@ pub use inputs::AdviceInputs;
 mod errors;
 pub use errors::AdviceError;
 
-use crate::host::AdviceMutation;
-
-// TYPE ALIASES
-// ================================================================================================
-
-type SimpleMerkleMap = BTreeMap<Word, StoreNode>;
+use crate::{host::AdviceMutation, processor::AdviceProviderInterface};
 
 // ADVICE PROVIDER
 // ================================================================================================
 
-/// An advice provider is a component through which the host can interact with the advice provider.
-/// The host can request nondeterministic inputs from the advice provider (i.e., result of a
-/// computation performed outside of the VM), as well as insert new data into the advice provider.
+/// An advice provider is a component through which the VM can request nondeterministic inputs from
+/// the host (i.e., result of a computation performed outside of the VM), as well as insert new data
+/// into the advice provider to be recovered by the host after the program has finished executing.
 ///
 /// An advice provider consists of the following components:
 /// 1. Advice stack, which is a LIFO data structure. The processor can move the elements from the
@@ -38,12 +30,13 @@ type SimpleMerkleMap = BTreeMap<Word, StoreNode>;
 ///    Merkle paths from the store, as well as mutate it by updating or merging nodes contained in
 ///    the store.
 ///
-/// Advice data is store in-memory using [BTreeMap]s as its backing storage.
+/// Advice data is store in-memory using [`BTreeMap`](alloc::collections::btree_map::BTreeMap)s as
+/// its backing storage.
 #[derive(Debug, Clone, Default)]
 pub struct AdviceProvider {
     stack: Vec<Felt>,
     map: AdviceMap,
-    store: MerkleStore<SimpleMerkleMap>,
+    store: MerkleStore,
 }
 
 impl AdviceProvider {
@@ -351,5 +344,43 @@ impl From<AdviceInputs> for AdviceProvider {
         let AdviceInputs { mut stack, map, store } = inputs;
         stack.reverse();
         Self { stack, map, store }
+    }
+}
+
+impl AdviceProviderInterface for AdviceProvider {
+    #[inline(always)]
+    fn pop_stack(&mut self) -> Result<Felt, AdviceError> {
+        self.pop_stack()
+    }
+
+    #[inline(always)]
+    fn pop_stack_word(&mut self) -> Result<Word, AdviceError> {
+        self.pop_stack_word()
+    }
+
+    #[inline(always)]
+    fn pop_stack_dword(&mut self) -> Result<[Word; 2], AdviceError> {
+        self.pop_stack_dword()
+    }
+
+    #[inline(always)]
+    fn get_merkle_path(
+        &self,
+        root: Word,
+        depth: &Felt,
+        index: &Felt,
+    ) -> Result<Option<MerklePath>, AdviceError> {
+        self.get_merkle_path(root, depth, index).map(Some)
+    }
+
+    #[inline(always)]
+    fn update_merkle_node(
+        &mut self,
+        root: Word,
+        depth: &Felt,
+        index: &Felt,
+        value: Word,
+    ) -> Result<Option<MerklePath>, AdviceError> {
+        self.update_merkle_node(root, depth, index, value).map(|(path, _)| Some(path))
     }
 }

@@ -258,16 +258,18 @@ end
 
 # ===== DIVISION ==================================================================================
 
+const.U64_DIV_EVENT=event("stdlib::math::u64::u64_div")
+
 #! Performs division of two unsigned 64 bit integers discarding the remainder.
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition looks as follows:
 #! [b_hi, b_lo, a_hi, a_lo, ...] -> [c_hi, c_lo, ...], where c = a // b
 #! This takes 54 cycles.
 export.div
-    adv.push_u64div     # push the quotient and the remainder onto the advice stack
+    emit.U64_DIV_EVENT  # push the quotient and the remainder onto the advice stack
 
     adv_push.2          # pop the quotient from the advice stack and assert it consists of
-    u32assert2         # 32-bit limbs
+    u32assert2          # 32-bit limbs
 
     dup.3               # multiply quotient by the divisor and make sure the resulting value
     dup.2               # fits into 2 32-bit limbs
@@ -289,7 +291,7 @@ export.div
     assert
 
     adv_push.2          # pop the remainder from the advice stack and assert it consists of
-    u32assert2         # 32-bit limbs
+    u32assert2          # 32-bit limbs
 
     movup.7             # make sure the divisor is greater than the remainder. this also consumes
     movup.7             # the divisor
@@ -321,10 +323,10 @@ end
 #! [b_hi, b_lo, a_hi, a_lo, ...] -> [c_hi, c_lo, ...], where c = a % b
 #! This takes 54 cycles.
 export.mod
-    adv.push_u64div     # push the quotient and the remainder onto the advice stack
+    emit.U64_DIV_EVENT  # push the quotient and the remainder onto the advice stack
 
     adv_push.2          # pop the quotient from the advice stack and assert it consists of
-    u32assert2         # 32-bit limbs
+    u32assert2          # 32-bit limbs
 
     dup.3               # multiply quotient by the divisor and make sure the resulting value
     dup.2               # fits into 2 32-bit limbs
@@ -346,7 +348,7 @@ export.mod
     assert
 
     adv_push.2          # pop the quotient from the advice stack and assert it consists of
-    u32assert2         # 32-bit limbs
+    u32assert2          # 32-bit limbs
 
     movup.5             # make sure the divisor is greater than the remainder. this also consumes
     movup.5             # the divisor
@@ -378,10 +380,10 @@ end
 #! [b_hi, b_lo, a_hi, a_lo, ...] -> [r_hi, r_lo, q_hi, q_lo ...], where r = a % b, q = a / b
 #! This takes 54 cycles.
 export.divmod
-    adv.push_u64div     # push the quotient and the remainder onto the advice stack
+    emit.U64_DIV_EVENT  # push the quotient and the remainder onto the advice stack
 
     adv_push.2          # pop the quotient from the advice stack and assert it consists of
-    u32assert2         # 32-bit limbs
+    u32assert2          # 32-bit limbs
 
     dup.3               # multiply quotient by the divisor and make sure the resulting value
     dup.2               # fits into 2 32-bit limbs
@@ -403,7 +405,7 @@ export.divmod
     assert
 
     adv_push.2          # pop the quotient from the advice stack and assert it consists of
-    u32assert2         # 32-bit limbs
+    u32assert2          # 32-bit limbs
 
     movup.7             # make sure the divisor is greater than the remainder. this also consumes
     movup.7             # the divisor

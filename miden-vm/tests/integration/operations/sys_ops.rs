@@ -1,5 +1,5 @@
-use miden_core::mast;
-use miden_processor::{ExecutionError, RowIndex, ZERO};
+use miden_core::{EventId, mast};
+use miden_processor::{ExecutionError, NoopEventHandler, RowIndex, ZERO};
 use miden_utils_testing::{build_op_test, expect_exec_error_matches};
 
 // SYSTEM OPS ASSERTIONS - MANUAL TESTS
@@ -82,7 +82,8 @@ fn assert_eq_fail() {
 
 #[test]
 fn emit() {
-    let mut test = build_op_test!("emit.42", &[0, 0, 0, 0]);
-    test.add_event_handler(42, |_| Ok(Vec::new()));
+    // Use stack-provided event id form to avoid immediate parsing constraints
+    let mut test = build_op_test!("push.42 emit drop", &[0, 0, 0, 0]);
+    test.add_event_handler(EventId::from_u64(42), NoopEventHandler);
     test.prove_and_verify(vec![], false);
 }

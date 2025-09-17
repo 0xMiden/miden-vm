@@ -10,6 +10,7 @@ use alloc::{
     format,
     string::{String, ToString},
     sync::Arc,
+    vec,
     vec::Vec,
 };
 
@@ -24,14 +25,14 @@ pub use miden_core::{
     ZERO,
     chiplets::hasher::{STATE_WIDTH, hash_elements},
     stack::MIN_STACK_DEPTH,
-    utils::{IntoBytes, ToElements, collections, group_slice_elements},
+    utils::{IntoBytes, ToElements, group_slice_elements},
 };
-use miden_core::{ProgramInfo, chiplets::hasher::apply_permutation};
+use miden_core::{EventId, ProgramInfo, chiplets::hasher::apply_permutation};
 pub use miden_processor::{
     AdviceInputs, AdviceProvider, BaseHost, ContextId, ExecutionError, ExecutionOptions,
     ExecutionTrace, Process, ProcessState, VmStateIterator,
 };
-use miden_processor::{AdviceMutation, DefaultHost, EventError, Program, fast::FastProcessor};
+use miden_processor::{DefaultHost, EventHandler, Program, fast::FastProcessor};
 use miden_prover::utils::range;
 pub use miden_prover::{MerkleTreeVC, ProvingOptions, prove};
 pub use miden_verifier::{AcceptableOptions, VerifierError, verify};
@@ -153,9 +154,6 @@ macro_rules! assert_assembler_diagnostic {
     }};
 }
 
-/// Alias for a free function or closure handling an `Event`.
-type HandlerFunc = fn(&ProcessState) -> Result<Vec<AdviceMutation>, EventError>;
-
 /// This is a container for the data required to run tests, which allows for running several
 /// different types of tests.
 ///
@@ -177,7 +175,7 @@ pub struct Test {
     pub advice_inputs: AdviceInputs,
     pub in_debug_mode: bool,
     pub libraries: Vec<Library>,
-    pub handlers: BTreeMap<u32, HandlerFunc>,
+    pub handlers: BTreeMap<EventId, Arc<dyn EventHandler>>,
     pub add_modules: Vec<(LibraryPath, String)>,
 }
 
@@ -207,13 +205,17 @@ impl Test {
         self.add_modules.push((path, source.to_string()));
     }
 
-    /// Add a handler for a specifc event when running the `Host`.
-    ///
-    /// The `handler_func` can be either a closure or a free function with signature
-    /// `fn(&mut ProcessState) -> Result<(), EventError>`.
-    pub fn add_event_handler(&mut self, id: u32, handler_func: HandlerFunc) {
-        if self.handlers.insert(id, handler_func).is_some() {
-            panic!("handler with id {id} was already added")
+    /// Add a handler for a specific event when running the `Host`.
+    pub fn add_event_handler(&mut self, id: EventId, handler: impl EventHandler) {
+        self.add_event_handlers(vec![(id, Arc::new(handler))]);
+    }
+
+    /// Add a handler for a specific event when running the `Host`.
+    pub fn add_event_handlers(&mut self, handlers: Vec<(EventId, Arc<dyn EventHandler>)>) {
+        for (id, handler) in handlers {
+            if self.handlers.insert(id, handler).is_some() {
+                panic!("handler with id {id} was already added")
+            }
         }
     }
 
@@ -464,13 +466,13 @@ impl Test {
         let (program, kernel) = self.compile().expect("Failed to compile test source.");
         let mut host = DefaultHost::default();
         if let Some(kernel) = kernel {
-            host.load_library(kernel.mast_forest().clone()).unwrap();
+            host.load_library(kernel.mast_forest()).unwrap();
         }
         for library in &self.libraries {
-            host.load_library(library.mast_forest().clone()).unwrap();
+            host.load_library(library.mast_forest()).unwrap();
         }
-        for (id, handler_func) in &self.handlers {
-            host.load_handler(*id, *handler_func).unwrap();
+        for (id, handler) in &self.handlers {
+            host.register_handler(*id, handler.clone()).unwrap();
         }
 
         (program, host)
@@ -503,18 +505,14 @@ impl Test {
         let fast_process = FastProcessor::new_with_advice_inputs(&stack_inputs, advice_inputs);
         let fast_result = fast_process.execute_sync(&program, &mut host);
 
-        match slow_result {
-            Ok(slow_stack_outputs) => {
-                let fast_stack_outputs = fast_result.unwrap();
+        match (fast_result, slow_result) {
+            (Ok(fast_stack_outputs), Ok(slow_stack_outputs)) => {
                 assert_eq!(
                     slow_stack_outputs, &fast_stack_outputs,
                     "stack outputs do not match between slow and fast processors"
                 );
             },
-            Err(slow_err) => {
-                assert!(fast_result.is_err(), "expected error, but got success");
-                let fast_err = fast_result.unwrap_err();
-
+            (Err(fast_err), Err(slow_err)) => {
                 // assert that diagnostics match
                 let slow_diagnostic = format!("{}", PrintDiagnostic::new_without_color(slow_err));
                 let fast_diagnostic = format!("{}", PrintDiagnostic::new_without_color(fast_err));
@@ -525,6 +523,15 @@ impl Test {
                     "diagnostics do not match between slow and fast processors:\nSlow: {}\nFast: {}",
                     slow_diagnostic, fast_diagnostic
                 );
+            },
+            (Ok(_), Err(slow_err)) => {
+                let slow_diagnostic = format!("{}", PrintDiagnostic::new_without_color(slow_err));
+                panic!(
+                    "expected error, but fast processor succeeded. slow error:\n{slow_diagnostic}"
+                );
+            },
+            (Err(fast_err), Ok(_)) => {
+                panic!("expected success, but fast processor failed. fast error:\n{fast_err}");
             },
         }
     }
