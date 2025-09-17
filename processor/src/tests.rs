@@ -1,3 +1,4 @@
+use alloc::collections::BTreeMap;
 /// Tests in this file make sure that diagnostics presented to the user are as expected.
 use alloc::string::ToString;
 
@@ -7,7 +8,7 @@ use miden_assembly::{
     testing::{TestContext, assert_diagnostic_lines, regex, source_file},
 };
 use miden_core::{
-    AdviceMap, Felt, Word,
+    AdviceMap, Word,
     crypto::merkle::{MerkleStore, MerkleTree},
 };
 use miden_debug_types::{SourceContent, SourceLanguage, SourceManager, Uri};
@@ -23,24 +24,20 @@ use super::*;
 
 #[test]
 fn test_advice_map_inline() {
-    use miden_utils_testing::crypto::MerkleStore;
-    use alloc::collections::BTreeMap;
-
     let source = "\
-adv_map.A=[2,5]
+adv_map.A=[0x01]
 
 begin
   push.A
   adv.push_mapval
-  adv_push.1
-  push.2
-  assert_eq
   dropw
+  adv_push.1
+  push.1
+  assert_eq
 end";
 
-    let advice_map = BTreeMap::from([(Word::new([Felt::new(2), Felt::new(0), Felt::new(0), Felt::new(0)]), vec![Felt::new(2), Felt::new(5)])]);
-    let merkle_store = MerkleStore::new();
-    let build_test = build_test!(source, &[], [], merkle_store, advice_map);
+    // Test framework now automatically loads advice map from program's MAST forest
+    let build_test = build_test!(source, &[], [], MerkleStore::new(), BTreeMap::new());
     build_test.execute().unwrap();
 }
 

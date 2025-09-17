@@ -14,6 +14,7 @@ use alloc::{
     vec::Vec,
 };
 
+use miden_air::RowIndex;
 use miden_assembly::{KernelLibrary, Library, Parse, diagnostics::reporting::PrintDiagnostic};
 pub use miden_assembly::{
     LibraryPath,
@@ -28,11 +29,11 @@ pub use miden_core::{
     utils::{IntoBytes, ToElements, group_slice_elements},
 };
 use miden_core::{EventId, ProgramInfo, chiplets::hasher::apply_permutation};
+use miden_processor::{AdviceError, DefaultHost, EventHandler, Program, fast::FastProcessor};
 pub use miden_processor::{
     AdviceInputs, AdviceProvider, BaseHost, ContextId, ExecutionError, ExecutionOptions,
     ExecutionTrace, Process, ProcessState, VmStateIterator,
 };
-use miden_processor::{DefaultHost, EventHandler, Program, fast::FastProcessor};
 use miden_prover::utils::range;
 pub use miden_prover::{MerkleTreeVC, ProvingOptions, prove};
 pub use miden_verifier::{AcceptableOptions, VerifierError, verify};
@@ -113,6 +114,21 @@ macro_rules! expect_exec_error_matches {
         match $test.execute() {
             Ok(_) => panic!("expected execution to fail @ {}:{}", file!(), line!()),
             Err(error) => ::miden_core::assert_matches!(error, $( $pattern )|+ $( if $guard )?),
+        }
+    };
+}
+
+/// Merges the program advice map with the given inputs, and error-check
+macro_rules! merge_advice_map {
+    ($program:expr, $inputs:expr) => {
+        let advice_map_result = $program.mast_forest().advice_map();
+        if let Err((existing_entry, new_value)) = $inputs.map.merge(advice_map_result) {
+            let err = AdviceError::MapKeyAlreadyPresent {
+                key: existing_entry.0,
+                prev_values: existing_entry.1.iter().copied().collect(),
+                new_values: new_value.iter().copied().collect(),
+            };
+            return Err(ExecutionError::advice_error(err, RowIndex::from(0), &()));
         }
     };
 }
@@ -348,11 +364,15 @@ impl Test {
         let (program, host) = self.get_program_and_host();
         let mut host = host.with_source_manager(self.source_manager.clone());
 
+        // Create a copy of advice inputs and extend them with the program's advice map
+        let mut advice_inputs = self.advice_inputs.clone();
+        merge_advice_map!(program, advice_inputs);
+
         // slow processor
         let mut process = Process::new(
             program.kernel().clone(),
             self.stack_inputs.clone(),
-            self.advice_inputs.clone(),
+            advice_inputs,
             ExecutionOptions::default().with_debugging(self.in_debug_mode),
         );
 
@@ -378,10 +398,14 @@ impl Test {
         let (program, host) = self.get_program_and_host();
         let mut host = host.with_source_manager(self.source_manager.clone());
 
+        // Create a copy of advice inputs and extend them with the program's advice map
+        let mut advice_inputs = self.advice_inputs.clone();
+        merge_advice_map!(program, advice_inputs);
+
         let mut process = Process::new(
             program.kernel().clone(),
             self.stack_inputs.clone(),
-            self.advice_inputs.clone(),
+            advice_inputs,
             ExecutionOptions::default().with_debugging(self.in_debug_mode),
         );
 
@@ -430,10 +454,31 @@ impl Test {
         let (program, host) = self.get_program_and_host();
         let mut host = host.with_source_manager(self.source_manager.clone());
 
+        // Create a copy of advice inputs and extend them with the program's advice map
+        let mut advice_inputs = self.advice_inputs.clone();
+        if let Err((existing_entry, new_value)) =
+            advice_inputs.map.merge(program.mast_forest().advice_map())
+        {
+            let err = AdviceError::MapKeyAlreadyPresent {
+                key: existing_entry.0,
+                prev_values: existing_entry.1.iter().copied().collect(),
+                new_values: new_value.iter().copied().collect(),
+            };
+            let result = Err(ExecutionError::advice_error(err, RowIndex::from(0), &()));
+            self.assert_result_with_fast_processor(&result);
+            let process = Process::new(
+                program.kernel().clone(),
+                self.stack_inputs.clone(),
+                advice_inputs,
+                ExecutionOptions::default().with_debugging(self.in_debug_mode),
+            );
+            return VmStateIterator::new(process, result);
+        }
+
         let mut process = Process::new(
             program.kernel().clone(),
             self.stack_inputs.clone(),
-            self.advice_inputs.clone(),
+            advice_inputs,
             ExecutionOptions::default().with_debugging(self.in_debug_mode),
         );
         let result = process.execute(&program, &mut host);
@@ -504,7 +549,40 @@ impl Test {
         let mut host = host.with_source_manager(self.source_manager.clone());
 
         let stack_inputs: Vec<Felt> = self.stack_inputs.clone().into_iter().rev().collect();
-        let advice_inputs: AdviceInputs = self.advice_inputs.clone();
+        let mut advice_inputs: AdviceInputs = self.advice_inputs.clone();
+
+        // Merge the program's advice map into the advice inputs for the fast processor
+        if let Err((existing_entry, new_value)) =
+            advice_inputs.map.merge(program.mast_forest().advice_map())
+        {
+            let err = AdviceError::MapKeyAlreadyPresent {
+                key: existing_entry.0,
+                prev_values: existing_entry.1.iter().copied().collect(),
+                new_values: new_value.iter().copied().collect(),
+            };
+            let fast_error = ExecutionError::advice_error(err, RowIndex::from(0), &());
+            // Both processors should fail with the same advice map error
+            match slow_result {
+                Err(slow_err) => {
+                    // Check if both are advice errors at the same clock cycle
+                    match (&slow_err, &fast_error) {
+                        (
+                            ExecutionError::AdviceError { clk: slow_clk, .. },
+                            ExecutionError::AdviceError { clk: fast_clk, .. },
+                        ) => {
+                            assert_eq!(
+                                slow_clk, fast_clk,
+                                "processors should fail at same clock cycle"
+                            );
+                        },
+                        _ => panic!("processors should produce same error type"),
+                    }
+                },
+                _ => panic!("processors should produce same error type"),
+            }
+            return;
+        }
+
         let fast_process = FastProcessor::new_with_advice_inputs(&stack_inputs, advice_inputs);
         let fast_result = fast_process.execute_sync(&program, &mut host);
 
