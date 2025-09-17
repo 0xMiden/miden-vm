@@ -60,8 +60,8 @@ impl crate::prettier::PrettyPrint for Constant {
             .map(|docstring| docstring.render())
             .unwrap_or(Document::Empty);
 
-        doc += flatten(const_text("const") + const_text(".") + display(&self.name));
-        doc += const_text("=");
+        doc += flatten(const_text("const") + const_text(" ") + display(&self.name));
+        doc += const_text(" = ");
 
         doc + self.value.render()
     }

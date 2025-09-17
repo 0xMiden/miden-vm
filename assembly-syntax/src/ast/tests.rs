@@ -1341,12 +1341,12 @@ fn test_roundtrip_formatting() {
 #! constant doc
 #!
 #! with spaces
-const.DEFAULT_CONST=100
+const DEFAULT_CONST = 100
 
 #! Perform `a + b`, `n` times
 #!
 #! with spaces
-proc.add_n_times # [n, b, a]
+fn add_n_times # [n, b, a]
     dup.0
     push.0
     u32gt
@@ -1399,7 +1399,7 @@ end
 #! Perform `a + b`, `n` times
 #!
 #! with spaces
-proc.add_n_times
+fn add_n_times
     dup.0
     push.0
     u32gt

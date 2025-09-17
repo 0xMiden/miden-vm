@@ -54,6 +54,15 @@ impl From<EnumType> for TypeDecl {
     }
 }
 
+impl crate::prettier::PrettyPrint for TypeDecl {
+    fn render(&self) -> crate::prettier::Document {
+        match self {
+            Self::Alias(ty) => ty.render(),
+            Self::Enum(ty) => ty.render(),
+        }
+    }
+}
+
 /// A procedure type signature
 #[derive(Debug, Clone)]
 pub struct FunctionType {
@@ -100,6 +109,44 @@ impl FunctionType {
     pub fn with_span(mut self, span: SourceSpan) -> Self {
         self.span = span;
         self
+    }
+}
+
+impl crate::prettier::PrettyPrint for FunctionType {
+    fn render(&self) -> crate::prettier::Document {
+        use crate::prettier::*;
+
+        let singleline_args = self
+            .args
+            .iter()
+            .map(|arg| arg.render())
+            .reduce(|acc, arg| acc + const_text(", ") + arg)
+            .unwrap_or(Document::Empty);
+        let multiline_args = indent(
+            4,
+            nl() + self
+                .args
+                .iter()
+                .map(|arg| arg.render())
+                .reduce(|acc, arg| acc + const_text(",") + nl() + arg)
+                .unwrap_or(Document::Empty),
+        ) + nl();
+        let args = singleline_args | multiline_args;
+        let args = const_text("(") + args + const_text(")");
+
+        match self.results.len() {
+            0 => args,
+            1 => args + const_text(" -> ") + self.results[0].render(),
+            _ => {
+                let results = self
+                    .results
+                    .iter()
+                    .map(|r| r.render())
+                    .reduce(|acc, r| acc + const_text(", ") + r)
+                    .unwrap_or(Document::Empty);
+                args + const_text(" -> ") + const_text("(") + results + const_text(")")
+            },
+        }
     }
 }
 
@@ -157,6 +204,20 @@ impl Spanned for TypeExpr {
     }
 }
 
+impl crate::prettier::PrettyPrint for TypeExpr {
+    fn render(&self) -> crate::prettier::Document {
+        use crate::prettier::*;
+
+        match self {
+            Self::Primitive(ty) => display(ty),
+            Self::Ptr(ty) => const_text("*") + ty.render(),
+            Self::Array(ty) => ty.render(),
+            Self::Struct(ty) => ty.render(),
+            Self::Ref(ty) => display(ty),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ArrayType {
     pub span: SourceSpan,
@@ -199,6 +260,18 @@ impl ArrayType {
     pub fn with_span(mut self, span: SourceSpan) -> Self {
         self.span = span;
         self
+    }
+}
+
+impl crate::prettier::PrettyPrint for ArrayType {
+    fn render(&self) -> crate::prettier::Document {
+        use crate::prettier::*;
+
+        const_text("[")
+            + self.elem.render()
+            + const_text("; ")
+            + display(self.arity)
+            + const_text("]")
     }
 }
 
@@ -254,6 +327,39 @@ impl StructType {
     }
 }
 
+impl crate::prettier::PrettyPrint for StructType {
+    fn render(&self) -> crate::prettier::Document {
+        use crate::prettier::*;
+
+        let repr = match &*self.repr {
+            TypeRepr::Default => Document::Empty,
+            TypeRepr::BigEndian => const_text("@bigendian "),
+            repr @ (TypeRepr::Align(_) | TypeRepr::Packed(_) | TypeRepr::Transparent) => {
+                text(format!("@{repr} "))
+            },
+        };
+
+        let singleline_body = self
+            .fields
+            .iter()
+            .map(|field| field.render())
+            .reduce(|acc, field| acc + const_text(", ") + field)
+            .unwrap_or(Document::Empty);
+        let multiline_body = indent(
+            4,
+            nl() + self
+                .fields
+                .iter()
+                .map(|field| field.render())
+                .reduce(|acc, field| acc + const_text(",") + nl() + field)
+                .unwrap_or(Document::Empty),
+        ) + nl();
+        let body = singleline_body | multiline_body;
+
+        repr + const_text("struct") + const_text(" { ") + body + const_text(" }")
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct StructField {
     pub span: SourceSpan,
@@ -279,6 +385,14 @@ impl core::hash::Hash for StructField {
 impl Spanned for StructField {
     fn span(&self) -> SourceSpan {
         self.span
+    }
+}
+
+impl crate::prettier::PrettyPrint for StructField {
+    fn render(&self) -> crate::prettier::Document {
+        use crate::prettier::*;
+
+        display(&self.name) + const_text(": ") + self.ty.render()
     }
 }
 
@@ -344,6 +458,24 @@ impl core::hash::Hash for TypeAlias {
 impl Spanned for TypeAlias {
     fn span(&self) -> SourceSpan {
         self.span
+    }
+}
+
+impl crate::prettier::PrettyPrint for TypeAlias {
+    fn render(&self) -> crate::prettier::Document {
+        use crate::prettier::*;
+
+        let doc = self
+            .docs
+            .as_ref()
+            .map(|docstring| docstring.render())
+            .unwrap_or(Document::Empty);
+
+        doc + const_text("type")
+            + const_text(" ")
+            + display(&self.name)
+            + const_text(" = ")
+            + self.ty.render()
     }
 }
 
@@ -465,6 +597,35 @@ impl core::hash::Hash for EnumType {
     }
 }
 
+impl crate::prettier::PrettyPrint for EnumType {
+    fn render(&self) -> crate::prettier::Document {
+        use crate::prettier::*;
+
+        let doc = self
+            .docs
+            .as_ref()
+            .map(|docstring| docstring.render())
+            .unwrap_or(Document::Empty);
+
+        let variants = self
+            .variants
+            .iter()
+            .map(|v| v.render())
+            .reduce(|acc, v| acc + const_text(",") + nl() + v)
+            .unwrap_or(Document::Empty);
+
+        doc + const_text("enum")
+            + const_text(" ")
+            + display(&self.name)
+            + const_text(" : ")
+            + self.ty.render()
+            + const_text(" {")
+            + nl()
+            + variants
+            + const_text("}")
+    }
+}
+
 /// A variant of an [EnumType].
 ///
 /// See the [EnumType] docs for more information.
@@ -582,5 +743,19 @@ impl core::hash::Hash for Variant {
         docs.hash(state);
         name.hash(state);
         discriminant.hash(state);
+    }
+}
+
+impl crate::prettier::PrettyPrint for Variant {
+    fn render(&self) -> crate::prettier::Document {
+        use crate::prettier::*;
+
+        let doc = self
+            .docs
+            .as_ref()
+            .map(|docstring| docstring.render())
+            .unwrap_or(Document::Empty);
+
+        doc + display(&self.name) + const_text(" = ") + self.discriminant.render()
     }
 }
