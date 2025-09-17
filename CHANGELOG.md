@@ -13,6 +13,7 @@
 - Introduce `Tracer` trait to allow different ways of tracing program execution, including no tracing ([#2101](https://github.com/0xMiden/miden-vm/pull/2101))
 - `FastProcessor::execute_*()` methods now also return the state of the memory in a new `ExecutionOutput` struct ([#2028](https://github.com/0xMiden/miden-vm/pull/2128))
 - Added `reversew` and `reversedw` instructions for reversing the order of elements in a word and double word on the stack ([#2125](https://github.com/0xMiden/miden-vm/issues/2125))
+- Added endianness-aware memory instructions: `mem_loadw_be`, `mem_loadw_le`, `mem_storew_be`, and `mem_storew_le` for explicit control over word element ordering in memory operations ([#2125](https://github.com/0xMiden/miden-vm/issues/2125))
 
 #### Changes
 

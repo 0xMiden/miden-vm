@@ -269,8 +269,12 @@ pub enum Token<'input> {
     Mem,
     MemLoad,
     MemLoadw,
+    MemLoadwLe,
+    MemLoadwBe,
     MemStore,
     MemStorew,
+    MemStorewLe,
+    MemStorewBe,
     MemStream,
     Movdn,
     Movdnw,
@@ -457,8 +461,12 @@ impl fmt::Display for Token<'_> {
             Token::Mem => write!(f, "mem"),
             Token::MemLoad => write!(f, "mem_load"),
             Token::MemLoadw => write!(f, "mem_loadw"),
+            Token::MemLoadwLe => write!(f, "mem_loadw_le"),
+            Token::MemLoadwBe => write!(f, "mem_loadw_be"),
             Token::MemStore => write!(f, "mem_store"),
             Token::MemStorew => write!(f, "mem_storew"),
+            Token::MemStorewLe => write!(f, "mem_storew_le"),
+            Token::MemStorewBe => write!(f, "mem_storew_be"),
             Token::MemStream => write!(f, "mem_stream"),
             Token::Movdn => write!(f, "movdn"),
             Token::Movdnw => write!(f, "movdnw"),
@@ -647,8 +655,12 @@ impl<'input> Token<'input> {
                 | Token::Mem
                 | Token::MemLoad
                 | Token::MemLoadw
+                | Token::MemLoadwLe
+                | Token::MemLoadwBe
                 | Token::MemStore
                 | Token::MemStorew
+                | Token::MemStorewLe
+                | Token::MemStorewBe
                 | Token::MemStream
                 | Token::Movdn
                 | Token::Movdnw
@@ -669,6 +681,8 @@ impl<'input> Token<'input> {
                 | Token::Procref
                 | Token::Push
                 | Token::Repeat
+                | Token::Reversew
+                | Token::Reversedw
                 | Token::Sdepth
                 | Token::Stack
                 | Token::Sub
@@ -799,8 +813,12 @@ impl<'input> Token<'input> {
         ("mem", Token::Mem),
         ("mem_load", Token::MemLoad),
         ("mem_loadw", Token::MemLoadw),
+        ("mem_loadw_le", Token::MemLoadwLe),
+        ("mem_loadw_be", Token::MemLoadwBe),
         ("mem_store", Token::MemStore),
         ("mem_storew", Token::MemStorew),
+        ("mem_storew_le", Token::MemStorewLe),
+        ("mem_storew_be", Token::MemStorewBe),
         ("mem_stream", Token::MemStream),
         ("movdn", Token::Movdn),
         ("movdnw", Token::Movdnw),
