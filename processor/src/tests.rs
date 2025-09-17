@@ -7,7 +7,7 @@ use miden_assembly::{
     testing::{TestContext, assert_diagnostic_lines, regex, source_file},
 };
 use miden_core::{
-    AdviceMap,
+    AdviceMap, Felt, Word,
     crypto::merkle::{MerkleStore, MerkleTree},
 };
 use miden_debug_types::{SourceContent, SourceLanguage, SourceManager, Uri};
@@ -21,11 +21,13 @@ use super::*;
 // AdviceMap inlined in the script
 // ------------------------------------------------------------------------------------------------
 
-#[ignore] // tracked by https://github.com/0xMiden/miden-vm/issues/1886
 #[test]
 fn test_advice_map_inline() {
+    use miden_utils_testing::crypto::MerkleStore;
+    use alloc::collections::BTreeMap;
+
     let source = "\
-adv_map.A=2
+adv_map.A=[2,5]
 
 begin
   push.A
@@ -36,7 +38,9 @@ begin
   dropw
 end";
 
-    let build_test = build_test!(source);
+    let advice_map = BTreeMap::from([(Word::new([Felt::new(2), Felt::new(0), Felt::new(0), Felt::new(0)]), vec![Felt::new(2), Felt::new(5)])]);
+    let merkle_store = MerkleStore::new();
+    let build_test = build_test!(source, &[], [], merkle_store, advice_map);
     build_test.execute().unwrap();
 }
 
