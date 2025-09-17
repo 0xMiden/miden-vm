@@ -73,59 +73,9 @@ impl LoopNode {
 }
 
 impl LoopNode {
-    /// Returns a commitment to this Loop node.
-    ///
-    /// The commitment is computed as a hash of the loop body and an empty word ([ZERO; 4]) in
-    /// the domain defined by [Self::DOMAIN] - i..e,:
-    /// ```
-    /// # use miden_core::mast::LoopNode;
-    /// # use miden_crypto::{Word, hash::rpo::Rpo256 as Hasher};
-    /// # let body_digest = Word::default();
-    /// Hasher::merge_in_domain(&[body_digest, Word::default()], LoopNode::DOMAIN);
-    /// ```
-    pub fn digest(&self) -> Word {
-        self.digest
-    }
-
     /// Returns the ID of the node presenting the body of the loop.
     pub fn body(&self) -> MastNodeId {
         self.body
-    }
-
-    /// Returns the decorators to be executed before this node is executed.
-    pub fn before_enter(&self) -> &[DecoratorId] {
-        &self.before_enter
-    }
-
-    /// Returns the decorators to be executed after this node is executed.
-    pub fn after_exit(&self) -> &[DecoratorId] {
-        &self.after_exit
-    }
-}
-
-//-------------------------------------------------------------------------------------------------
-/// Mutators
-impl LoopNode {
-    pub fn remap_children(&self, remapping: &Remapping) -> Self {
-        let mut node = self.clone();
-        node.body = node.body.remap(remapping);
-        node
-    }
-
-    /// Sets the list of decorators to be executed before this node.
-    pub fn append_before_enter(&mut self, decorator_ids: &[DecoratorId]) {
-        self.before_enter.extend_from_slice(decorator_ids);
-    }
-
-    /// Sets the list of decorators to be executed after this node.
-    pub fn append_after_exit(&mut self, decorator_ids: &[DecoratorId]) {
-        self.after_exit.extend_from_slice(decorator_ids);
-    }
-
-    /// Removes all decorators from this node.
-    pub fn remove_decorators(&mut self) {
-        self.before_enter.truncate(0);
-        self.after_exit.truncate(0);
     }
 }
 
@@ -211,28 +161,43 @@ impl fmt::Display for LoopNodePrettyPrint<'_> {
 // ================================================================================================
 
 impl MastNodeExt for LoopNode {
+    /// Returns a commitment to this Loop node.
+    ///
+    /// The commitment is computed as a hash of the loop body and an empty word ([ZERO; 4]) in
+    /// the domain defined by [Self::DOMAIN] - i..e,:
+    /// ```
+    /// # use miden_core::mast::LoopNode;
+    /// # use miden_crypto::{Word, hash::rpo::Rpo256 as Hasher};
+    /// # let body_digest = Word::default();
+    /// Hasher::merge_in_domain(&[body_digest, Word::default()], LoopNode::DOMAIN);
+    /// ```
     fn digest(&self) -> Word {
-        self.digest()
+        self.digest
     }
 
+    /// Returns the decorators to be executed before this node is executed.
     fn before_enter(&self) -> &[DecoratorId] {
-        self.before_enter()
+        &self.before_enter
     }
 
+    /// Returns the decorators to be executed after this node is executed.
     fn after_exit(&self) -> &[DecoratorId] {
-        self.after_exit()
+        &self.after_exit
     }
-
+    /// Sets the list of decorators to be executed before this node.
     fn append_before_enter(&mut self, decorator_ids: &[DecoratorId]) {
-        self.append_before_enter(decorator_ids);
+        self.before_enter.extend_from_slice(decorator_ids);
     }
 
+    /// Sets the list of decorators to be executed after this node.
     fn append_after_exit(&mut self, decorator_ids: &[DecoratorId]) {
-        self.append_after_exit(decorator_ids);
+        self.after_exit.extend_from_slice(decorator_ids);
     }
 
+    /// Removes all decorators from this node.
     fn remove_decorators(&mut self) {
-        self.remove_decorators();
+        self.before_enter.truncate(0);
+        self.after_exit.truncate(0);
     }
 
     fn to_display<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn fmt::Display + 'a> {

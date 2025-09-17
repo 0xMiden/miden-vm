@@ -13,7 +13,10 @@ use miden_air::trace::{
 };
 use miden_core::{
     EMPTY_WORD, EventId, ONE, Program, WORD_SIZE, ZERO, assert_matches,
-    mast::{BasicBlockNode, MastForest, MastNode, MastNodeExt, MastNodeId, OP_BATCH_SIZE},
+    mast::{
+        BasicBlockNode, CallNode, DynNode, JoinNode, MastForest, MastNode, MastNodeExt, MastNodeId,
+        OP_BATCH_SIZE,
+    },
 };
 use miden_utils_testing::rand::rand_value;
 use rstest::rstest;
@@ -432,8 +435,8 @@ fn span_block_with_respan() {
 
 #[test]
 fn join_node() {
-    let basic_block1 = MastNode::new_basic_block(vec![Operation::Mul], None).unwrap();
-    let basic_block2 = MastNode::new_basic_block(vec![Operation::Add], None).unwrap();
+    let basic_block1 = BasicBlockNode::new(vec![Operation::Mul], None).unwrap();
+    let basic_block2 = BasicBlockNode::new(vec![Operation::Add], None).unwrap();
     let program = {
         let mut mast_forest = MastForest::new();
 
@@ -498,8 +501,8 @@ fn join_node() {
 
 #[test]
 fn split_node_true() {
-    let basic_block1 = MastNode::new_basic_block(vec![Operation::Mul], None).unwrap();
-    let basic_block2 = MastNode::new_basic_block(vec![Operation::Add], None).unwrap();
+    let basic_block1 = BasicBlockNode::new(vec![Operation::Mul], None).unwrap();
+    let basic_block2 = BasicBlockNode::new(vec![Operation::Add], None).unwrap();
     let program = {
         let mut mast_forest = MastForest::new();
 
@@ -551,8 +554,8 @@ fn split_node_true() {
 
 #[test]
 fn split_node_false() {
-    let basic_block1 = MastNode::new_basic_block(vec![Operation::Mul], None).unwrap();
-    let basic_block2 = MastNode::new_basic_block(vec![Operation::Add], None).unwrap();
+    let basic_block1 = BasicBlockNode::new(vec![Operation::Mul], None).unwrap();
+    let basic_block2 = BasicBlockNode::new(vec![Operation::Add], None).unwrap();
     let program = {
         let mut mast_forest = MastForest::new();
 
@@ -607,7 +610,7 @@ fn split_node_false() {
 
 #[test]
 fn loop_node() {
-    let loop_body = MastNode::new_basic_block(vec![Operation::Pad, Operation::Drop], None).unwrap();
+    let loop_body = BasicBlockNode::new(vec![Operation::Pad, Operation::Drop], None).unwrap();
     let program = {
         let mut mast_forest = MastForest::new();
 
@@ -659,7 +662,7 @@ fn loop_node() {
 
 #[test]
 fn loop_node_skip() {
-    let loop_body = MastNode::new_basic_block(vec![Operation::Pad, Operation::Drop], None).unwrap();
+    let loop_body = BasicBlockNode::new(vec![Operation::Pad, Operation::Drop], None).unwrap();
     let program = {
         let mut mast_forest = MastForest::new();
 
@@ -701,7 +704,7 @@ fn loop_node_skip() {
 
 #[test]
 fn loop_node_repeat() {
-    let loop_body = MastNode::new_basic_block(vec![Operation::Pad, Operation::Drop], None).unwrap();
+    let loop_body = BasicBlockNode::new(vec![Operation::Pad, Operation::Drop], None).unwrap();
     let program = {
         let mut mast_forest = MastForest::new();
 
@@ -791,25 +794,25 @@ fn call_block() {
 
     let mut mast_forest = MastForest::new();
 
-    let first_basic_block = MastNode::new_basic_block(vec![
+    let first_basic_block = BasicBlockNode::new(vec![
         Operation::Push(TWO),
         Operation::FmpUpdate,
         Operation::Pad,
     ], None).unwrap();
     let first_basic_block_id = mast_forest.add_node(first_basic_block.clone()).unwrap();
 
-    let foo_root_node = MastNode::new_basic_block(vec![
+    let foo_root_node = BasicBlockNode::new(vec![
         Operation::Push(ONE), Operation::FmpUpdate
     ], None).unwrap();
     let foo_root_node_id = mast_forest.add_node(foo_root_node.clone()).unwrap();
 
-    let last_basic_block = MastNode::new_basic_block(vec![Operation::FmpAdd, Operation::Swap, Operation::Drop], None).unwrap();
+    let last_basic_block = BasicBlockNode::new(vec![Operation::FmpAdd, Operation::Swap, Operation::Drop], None).unwrap();
     let last_basic_block_id = mast_forest.add_node(last_basic_block.clone()).unwrap();
 
-    let foo_call_node = MastNode::new_call(foo_root_node_id, &mast_forest).unwrap();
+    let foo_call_node = CallNode::new(foo_root_node_id, &mast_forest).unwrap();
     let foo_call_node_id = mast_forest.add_node(foo_call_node.clone()).unwrap();
 
-    let join1_node = MastNode::new_join(first_basic_block_id, foo_call_node_id, &mast_forest).unwrap();
+    let join1_node = JoinNode::new([first_basic_block_id, foo_call_node_id], &mast_forest).unwrap();
     let join1_node_id = mast_forest.add_node(join1_node.clone()).unwrap();
 
     let program_root_id = mast_forest.add_join(join1_node_id, last_basic_block_id).unwrap();
@@ -1011,40 +1014,40 @@ fn syscall_block() {
     let mut mast_forest = MastForest::new();
 
     // build foo procedure body
-    let foo_root = MastNode::new_basic_block(vec![Operation::Push(THREE), Operation::FmpUpdate], None).unwrap();
+    let foo_root = BasicBlockNode::new(vec![Operation::Push(THREE), Operation::FmpUpdate], None).unwrap();
     let foo_root_id = mast_forest.add_node(foo_root.clone()).unwrap();
     mast_forest.make_root(foo_root_id);
     let kernel = Kernel::new(&[foo_root.digest()]).unwrap();
 
     // build bar procedure body
-    let bar_basic_block = MastNode::new_basic_block(vec![Operation::Push(TWO), Operation::FmpUpdate], None).unwrap();
+    let bar_basic_block = BasicBlockNode::new(vec![Operation::Push(TWO), Operation::FmpUpdate], None).unwrap();
     let bar_basic_block_id = mast_forest.add_node(bar_basic_block.clone()).unwrap();
 
-    let foo_call_node = MastNode::new_syscall(foo_root_id, &mast_forest).unwrap();
+    let foo_call_node = CallNode::new_syscall(foo_root_id, &mast_forest).unwrap();
     let foo_call_node_id = mast_forest.add_node(foo_call_node.clone()).unwrap();
 
-    let bar_root_node = MastNode::new_join(bar_basic_block_id, foo_call_node_id, &mast_forest).unwrap();
+    let bar_root_node = JoinNode::new([bar_basic_block_id, foo_call_node_id], &mast_forest).unwrap();
     let bar_root_node_id = mast_forest.add_node(bar_root_node.clone()).unwrap();
     mast_forest.make_root(bar_root_node_id);
 
     // build the program
-    let first_basic_block = MastNode::new_basic_block(vec![
+    let first_basic_block = BasicBlockNode::new(vec![
         Operation::Push(ONE),
         Operation::FmpUpdate,
         Operation::Pad,
     ], None).unwrap();
     let first_basic_block_id = mast_forest.add_node(first_basic_block.clone()).unwrap();
 
-    let last_basic_block = MastNode::new_basic_block(vec![Operation::FmpAdd, Operation::Swap, Operation::Drop], None).unwrap();
+    let last_basic_block = BasicBlockNode::new(vec![Operation::FmpAdd, Operation::Swap, Operation::Drop], None).unwrap();
     let last_basic_block_id = mast_forest.add_node(last_basic_block.clone()).unwrap();
 
-    let bar_call_node = MastNode::new_call(bar_root_node_id, &mast_forest).unwrap();
+    let bar_call_node = CallNode::new(bar_root_node_id, &mast_forest).unwrap();
     let bar_call_node_id = mast_forest.add_node(bar_call_node.clone()).unwrap();
 
-    let inner_join_node = MastNode::new_join(first_basic_block_id, bar_call_node_id, &mast_forest).unwrap();
+    let inner_join_node = JoinNode::new([first_basic_block_id, bar_call_node_id], &mast_forest).unwrap();
     let inner_join_node_id = mast_forest.add_node(inner_join_node.clone()).unwrap();
 
-    let program_root_node = MastNode::new_join(inner_join_node_id, last_basic_block_id, &mast_forest).unwrap();
+    let program_root_node = JoinNode::new([inner_join_node_id, last_basic_block_id], &mast_forest).unwrap();
     let program_root_node_id = mast_forest.add_node(program_root_node.clone()).unwrap();
     mast_forest.make_root(program_root_node_id);
 
@@ -1316,24 +1319,24 @@ fn dyn_block() {
     let mut mast_forest = MastForest::new();
 
     let foo_root_node =
-        MastNode::new_basic_block(vec![Operation::Push(ONE), Operation::Add], None).unwrap();
+        BasicBlockNode::new(vec![Operation::Push(ONE), Operation::Add], None).unwrap();
     let foo_root_node_id = mast_forest.add_node(foo_root_node.clone()).unwrap();
     mast_forest.make_root(foo_root_node_id);
 
-    let mstorew_node = MastNode::new_basic_block(vec![Operation::MStoreW], None).unwrap();
+    let mstorew_node = BasicBlockNode::new(vec![Operation::MStoreW], None).unwrap();
     let mstorew_node_id = mast_forest.add_node(mstorew_node.clone()).unwrap();
 
-    let push_node = MastNode::new_basic_block(vec![PUSH_40_OP], None).unwrap();
+    let push_node = BasicBlockNode::new(vec![PUSH_40_OP], None).unwrap();
     let push_node_id = mast_forest.add_node(push_node.clone()).unwrap();
 
-    let join_node = MastNode::new_join(mstorew_node_id, push_node_id, &mast_forest).unwrap();
+    let join_node = JoinNode::new([mstorew_node_id, push_node_id], &mast_forest).unwrap();
     let join_node_id = mast_forest.add_node(join_node.clone()).unwrap();
 
     // This dyn will point to foo.
-    let dyn_node = MastNode::new_dyn();
+    let dyn_node = DynNode::new_dyn();
     let dyn_node_id = mast_forest.add_node(dyn_node.clone()).unwrap();
 
-    let program_root_node = MastNode::new_join(join_node_id, dyn_node_id, &mast_forest).unwrap();
+    let program_root_node = JoinNode::new([join_node_id, dyn_node_id], &mast_forest).unwrap();
     let program_root_node_id = mast_forest.add_node(program_root_node.clone()).unwrap();
     mast_forest.make_root(program_root_node_id);
 
@@ -1454,18 +1457,19 @@ fn calls_in_syscall(#[case] op: Operation) {
         // add dummy block
         mast_forest.add_block(vec![Operation::Add], None).unwrap();
 
-        let node = match op {
-            Operation::Dyncall => MastNode::new_dyncall(),
-            Operation::Call => MastNode::new_call(
+        let node: MastNode = match op {
+            Operation::Dyncall => DynNode::new_dyncall().into(),
+            Operation::Call => {
+                CallNode::new(MastNodeId::from_u32_safe(0, &mast_forest).unwrap(), &mast_forest)
+                    .unwrap()
+                    .into()
+            },
+            Operation::SysCall => CallNode::new_syscall(
                 MastNodeId::from_u32_safe(0, &mast_forest).unwrap(),
                 &mast_forest,
             )
-            .unwrap(),
-            Operation::SysCall => MastNode::new_syscall(
-                MastNodeId::from_u32_safe(0, &mast_forest).unwrap(),
-                &mast_forest,
-            )
-            .unwrap(),
+            .unwrap()
+            .into(),
             _ => unreachable!(),
         };
 

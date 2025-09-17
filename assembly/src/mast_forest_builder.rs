@@ -8,8 +8,9 @@ use core::ops::{Index, IndexMut};
 use miden_core::{
     AdviceMap, Decorator, DecoratorList, Felt, Operation, Word,
     mast::{
-        DecoratorFingerprint, DecoratorId, MastForest, MastNode, MastNodeExt, MastNodeFingerprint,
-        MastNodeId, Remapping, SubtreeIterator,
+        BasicBlockNode, CallNode, DecoratorFingerprint, DecoratorId, DynNode, ExternalNode,
+        JoinNode, LoopNode, MastForest, MastNode, MastNodeExt, MastNodeFingerprint, MastNodeId,
+        Remapping, SplitNode, SubtreeIterator,
     },
 };
 
@@ -406,7 +407,8 @@ impl MastForestBuilder {
     /// Note that only one copy of nodes that have the same MAST root and decorators is added to the
     /// MAST forest; two nodes that have the same MAST root and decorators will have the same
     /// [`MastNodeId`].
-    pub fn ensure_node(&mut self, node: MastNode) -> Result<MastNodeId, Report> {
+    pub fn ensure_node(&mut self, node: impl Into<MastNode>) -> Result<MastNodeId, Report> {
+        let node: MastNode = node.into();
         let node_fingerprint = self.fingerprint_for_node(&node);
 
         if let Some(node_id) = self.node_id_by_fingerprint.get(&node_fingerprint) {
@@ -431,7 +433,7 @@ impl MastForestBuilder {
         operations: Vec<Operation>,
         decorators: Option<DecoratorList>,
     ) -> Result<MastNodeId, Report> {
-        let block = MastNode::new_basic_block(operations, decorators)
+        let block = BasicBlockNode::new(operations, decorators)
             .into_diagnostic()
             .wrap_err("assembler failed to add new basic block node")?;
         self.ensure_node(block)
@@ -443,7 +445,7 @@ impl MastForestBuilder {
         left_child: MastNodeId,
         right_child: MastNodeId,
     ) -> Result<MastNodeId, Report> {
-        let join = MastNode::new_join(left_child, right_child, &self.mast_forest)
+        let join = JoinNode::new([left_child, right_child], &self.mast_forest)
             .into_diagnostic()
             .wrap_err("assembler failed to add new join node")?;
         self.ensure_node(join)
@@ -455,7 +457,7 @@ impl MastForestBuilder {
         if_branch: MastNodeId,
         else_branch: MastNodeId,
     ) -> Result<MastNodeId, Report> {
-        let split = MastNode::new_split(if_branch, else_branch, &self.mast_forest)
+        let split = SplitNode::new([if_branch, else_branch], &self.mast_forest)
             .into_diagnostic()
             .wrap_err("assembler failed to add new split node")?;
         self.ensure_node(split)
@@ -463,7 +465,7 @@ impl MastForestBuilder {
 
     /// Adds a loop node to the forest, and returns the [`MastNodeId`] associated with it.
     pub fn ensure_loop(&mut self, body: MastNodeId) -> Result<MastNodeId, Report> {
-        let loop_node = MastNode::new_loop(body, &self.mast_forest)
+        let loop_node = LoopNode::new(body, &self.mast_forest)
             .into_diagnostic()
             .wrap_err("assembler failed to add new loop node")?;
         self.ensure_node(loop_node)
@@ -471,7 +473,7 @@ impl MastForestBuilder {
 
     /// Adds a call node to the forest, and returns the [`MastNodeId`] associated with it.
     pub fn ensure_call(&mut self, callee: MastNodeId) -> Result<MastNodeId, Report> {
-        let call = MastNode::new_call(callee, &self.mast_forest)
+        let call = CallNode::new(callee, &self.mast_forest)
             .into_diagnostic()
             .wrap_err("assembler failed to add new call node")?;
         self.ensure_node(call)
@@ -479,7 +481,7 @@ impl MastForestBuilder {
 
     /// Adds a syscall node to the forest, and returns the [`MastNodeId`] associated with it.
     pub fn ensure_syscall(&mut self, callee: MastNodeId) -> Result<MastNodeId, Report> {
-        let syscall = MastNode::new_syscall(callee, &self.mast_forest)
+        let syscall = CallNode::new_syscall(callee, &self.mast_forest)
             .into_diagnostic()
             .wrap_err("assembler failed to add new syscall node")?;
         self.ensure_node(syscall)
@@ -487,12 +489,12 @@ impl MastForestBuilder {
 
     /// Adds a dyn node to the forest, and returns the [`MastNodeId`] associated with it.
     pub fn ensure_dyn(&mut self) -> Result<MastNodeId, Report> {
-        self.ensure_node(MastNode::new_dyn())
+        self.ensure_node(DynNode::new_dyn())
     }
 
     /// Adds a dyncall node to the forest, and returns the [`MastNodeId`] associated with it.
     pub fn ensure_dyncall(&mut self) -> Result<MastNodeId, Report> {
-        self.ensure_node(MastNode::new_dyncall())
+        self.ensure_node(DynNode::new_dyncall())
     }
 
     /// Adds a node corresponding to the given MAST root, according to how it is linked.
@@ -510,7 +512,7 @@ impl MastForestBuilder {
             }
             Ok(root_id.remap(&self.statically_linked_mast_remapping))
         } else {
-            self.ensure_node(MastNode::new_external(mast_root))
+            self.ensure_node(ExternalNode::new(mast_root))
         }
     }
 
@@ -618,7 +620,7 @@ fn should_merge(is_procedure: bool, num_op_batches: usize) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use miden_core::Operation;
+    use miden_core::{Operation, mast::MastNodeErrorContext};
 
     use super::*;
 
@@ -698,13 +700,13 @@ mod tests {
 
         // Check each decorator in the merged block
         let decorators = merged_block.decorators();
-        assert_eq!(decorators.len(), 5); // 3 from block1 + 2 from block2
+        assert_eq!(merged_block.decorators().count(), 5); // 3 from block1 + 2 from block2
 
         // Create a map to track which trace values we've found
         let mut found_traces = std::collections::HashSet::new();
 
         // Check each decorator
-        for &(op_idx, decorator_id) in decorators {
+        for (op_idx, decorator_id) in decorators {
             let decorator = &builder.mast_forest[decorator_id];
 
             match decorator {

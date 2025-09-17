@@ -87,12 +87,12 @@ pub type DecoratorList = Vec<(usize, DecoratorId)>;
 
 /// Iterator used to iterate through the decorator list of a span block
 /// while executing operation batches of a span block.
-pub struct DecoratorIterator<'a> {
+pub struct DecoratorIdIterator<'a> {
     decorators: &'a DecoratorList,
     idx: usize,
 }
 
-impl<'a> DecoratorIterator<'a> {
+impl<'a> DecoratorIdIterator<'a> {
     /// Returns a new instance of decorator iterator instantiated with the provided decorator list.
     pub fn new(decorators: &'a DecoratorList) -> Self {
         Self { decorators, idx: 0 }
@@ -111,7 +111,7 @@ impl<'a> DecoratorIterator<'a> {
     }
 }
 
-impl<'a> Iterator for DecoratorIterator<'a> {
+impl<'a> Iterator for DecoratorIdIterator<'a> {
     type Item = &'a DecoratorId;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -124,7 +124,7 @@ impl<'a> Iterator for DecoratorIterator<'a> {
     }
 }
 
-impl<'a> ExactSizeIterator for DecoratorIterator<'a> {
+impl<'a> ExactSizeIterator for DecoratorIdIterator<'a> {
     fn len(&self) -> usize {
         self.decorators.len() - self.idx
     }
