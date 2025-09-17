@@ -97,13 +97,13 @@ impl MastForest {
     /// Adds a node to the forest, and returns the associated [`MastNodeId`].
     ///
     /// Adding two duplicate nodes will result in two distinct returned [`MastNodeId`]s.
-    pub fn add_node(&mut self, node: MastNode) -> Result<MastNodeId, MastForestError> {
+    pub fn add_node(&mut self, node: impl Into<MastNode>) -> Result<MastNodeId, MastForestError> {
         if self.nodes.len() == Self::MAX_NODES {
             return Err(MastForestError::TooManyNodes);
         }
 
         let new_node_id = MastNodeId(self.nodes.len() as u32);
-        self.nodes.push(node);
+        self.nodes.push(node.into());
 
         Ok(new_node_id)
     }
@@ -114,7 +114,7 @@ impl MastForest {
         operations: Vec<Operation>,
         decorators: Option<DecoratorList>,
     ) -> Result<MastNodeId, MastForestError> {
-        let block = MastNode::new_basic_block(operations, decorators)?;
+        let block = BasicBlockNode::new(operations, decorators)?;
         self.add_node(block)
     }
 
@@ -124,7 +124,7 @@ impl MastForest {
         left_child: MastNodeId,
         right_child: MastNodeId,
     ) -> Result<MastNodeId, MastForestError> {
-        let join = MastNode::new_join(left_child, right_child, self)?;
+        let join = JoinNode::new([left_child, right_child], self)?;
         self.add_node(join)
     }
 
@@ -134,41 +134,41 @@ impl MastForest {
         if_branch: MastNodeId,
         else_branch: MastNodeId,
     ) -> Result<MastNodeId, MastForestError> {
-        let split = MastNode::new_split(if_branch, else_branch, self)?;
+        let split = SplitNode::new([if_branch, else_branch], self)?;
         self.add_node(split)
     }
 
     /// Adds a loop node to the forest, and returns the [`MastNodeId`] associated with it.
     pub fn add_loop(&mut self, body: MastNodeId) -> Result<MastNodeId, MastForestError> {
-        let loop_node = MastNode::new_loop(body, self)?;
+        let loop_node = LoopNode::new(body, self)?;
         self.add_node(loop_node)
     }
 
     /// Adds a call node to the forest, and returns the [`MastNodeId`] associated with it.
     pub fn add_call(&mut self, callee: MastNodeId) -> Result<MastNodeId, MastForestError> {
-        let call = MastNode::new_call(callee, self)?;
+        let call = CallNode::new(callee, self)?;
         self.add_node(call)
     }
 
     /// Adds a syscall node to the forest, and returns the [`MastNodeId`] associated with it.
     pub fn add_syscall(&mut self, callee: MastNodeId) -> Result<MastNodeId, MastForestError> {
-        let syscall = MastNode::new_syscall(callee, self)?;
+        let syscall = CallNode::new_syscall(callee, self)?;
         self.add_node(syscall)
     }
 
     /// Adds a dyn node to the forest, and returns the [`MastNodeId`] associated with it.
     pub fn add_dyn(&mut self) -> Result<MastNodeId, MastForestError> {
-        self.add_node(MastNode::new_dyn())
+        self.add_node(DynNode::new_dyn())
     }
 
     /// Adds a dyncall node to the forest, and returns the [`MastNodeId`] associated with it.
     pub fn add_dyncall(&mut self) -> Result<MastNodeId, MastForestError> {
-        self.add_node(MastNode::new_dyncall())
+        self.add_node(DynNode::new_dyncall())
     }
 
     /// Adds an external node to the forest, and returns the [`MastNodeId`] associated with it.
     pub fn add_external(&mut self, mast_root: Word) -> Result<MastNodeId, MastForestError> {
-        self.add_node(MastNode::new_external(mast_root))
+        self.add_node(ExternalNode::new(mast_root))
     }
 
     /// Marks the given [`MastNodeId`] as being the root of a procedure.
@@ -291,7 +291,7 @@ impl MastForest {
         operations: Vec<Operation>,
         decorators: Vec<(usize, Decorator)>,
     ) -> Result<MastNodeId, MastForestError> {
-        let block = MastNode::new_basic_block_with_raw_decorators(operations, decorators, self)?;
+        let block = BasicBlockNode::new_with_raw_decorators(operations, decorators, self)?;
         self.add_node(block)
     }
 }

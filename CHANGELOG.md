@@ -38,6 +38,8 @@
 - Move `EMIT` flag to degree 5 bucket ([#2043](https://github.com/0xMiden/miden-vm/issues/2043)).
 - [BREAKING] Move `u64_div`, `falcon_div` and `smtpeek` system events to stdlib ([#1582](https://github.com/0xMiden/miden-vm/issues/1582))
 - [BREAKING] Renumber system event IDs ([#2151](https://github.com/0xMiden/miden-vm/issues/2151)).
+- [BREAKING] Move `u64_div`, `falcon_div` and `smtpeek` system events to stdlib ([#1582](https://github.com/0xMiden/miden-vm/issues/1582)).
+- [BREAKING] `MastNode` quality of life improvements ([#2166](https://github.com/0xMiden/miden-vm/pull/2166)).
 
 ## 0.17.1 (2025-08-29)
 

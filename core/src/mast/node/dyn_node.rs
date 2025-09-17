@@ -70,26 +70,6 @@ impl DynNode {
     }
 }
 
-//-------------------------------------------------------------------------------------------------
-/// Mutators
-impl DynNode {
-    /// Sets the list of decorators to be executed before this node.
-    pub fn append_before_enter(&mut self, decorator_ids: &[DecoratorId]) {
-        self.before_enter.extend_from_slice(decorator_ids);
-    }
-
-    /// Sets the list of decorators to be executed after this node.
-    pub fn append_after_exit(&mut self, decorator_ids: &[DecoratorId]) {
-        self.after_exit.extend_from_slice(decorator_ids);
-    }
-
-    /// Removes all decorators from this node.
-    pub fn remove_decorators(&mut self) {
-        self.before_enter.truncate(0);
-        self.after_exit.truncate(0);
-    }
-}
-
 impl MastNodeErrorContext for DynNode {
     fn decorators(&self) -> impl Iterator<Item = (usize, DecoratorId)> {
         self.before_enter.iter().chain(&self.after_exit).copied().enumerate()
@@ -223,16 +203,20 @@ impl MastNodeExt for DynNode {
         &self.after_exit
     }
 
+    /// Sets the list of decorators to be executed before this node.
     fn append_before_enter(&mut self, decorator_ids: &[DecoratorId]) {
-        self.append_before_enter(decorator_ids);
+        self.before_enter.extend_from_slice(decorator_ids);
     }
 
+    /// Sets the list of decorators to be executed after this node.
     fn append_after_exit(&mut self, decorator_ids: &[DecoratorId]) {
-        self.append_after_exit(decorator_ids);
+        self.after_exit.extend_from_slice(decorator_ids);
     }
 
+    /// Removes all decorators from this node.
     fn remove_decorators(&mut self) {
-        self.remove_decorators();
+        self.before_enter.truncate(0);
+        self.after_exit.truncate(0);
     }
 
     fn to_display<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn fmt::Display + 'a> {

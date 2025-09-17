@@ -121,28 +121,6 @@ impl CallNode {
 //-------------------------------------------------------------------------------------------------
 /// Public accessors
 impl CallNode {
-    /// Returns a commitment to this Call node.
-    ///
-    /// The commitment is computed as a hash of the callee and an empty word ([ZERO; 4]) in the
-    /// domain defined by either [Self::CALL_DOMAIN] or [Self::SYSCALL_DOMAIN], depending on
-    /// whether the node represents a simple call or a syscall - i.e.,:
-    /// ```
-    /// # use miden_core::mast::CallNode;
-    /// # use miden_crypto::{Word, hash::rpo::Rpo256 as Hasher};
-    /// # let callee_digest = Word::default();
-    /// Hasher::merge_in_domain(&[callee_digest, Word::default()], CallNode::CALL_DOMAIN);
-    /// ```
-    /// or
-    /// ```
-    /// # use miden_core::mast::CallNode;
-    /// # use miden_crypto::{Word, hash::rpo::Rpo256 as Hasher};
-    /// # let callee_digest = Word::default();
-    /// Hasher::merge_in_domain(&[callee_digest, Word::default()], CallNode::SYSCALL_DOMAIN);
-    /// ```
-    pub fn digest(&self) -> Word {
-        self.digest
-    }
-
     /// Returns the ID of the node to be invoked by this call node.
     pub fn callee(&self) -> MastNodeId {
         self.callee
@@ -160,42 +138,6 @@ impl CallNode {
         } else {
             Self::CALL_DOMAIN
         }
-    }
-
-    /// Returns the decorators to be executed before this node is executed.
-    pub fn before_enter(&self) -> &[DecoratorId] {
-        &self.before_enter
-    }
-
-    /// Returns the decorators to be executed after this node is executed.
-    pub fn after_exit(&self) -> &[DecoratorId] {
-        &self.after_exit
-    }
-}
-
-//-------------------------------------------------------------------------------------------------
-/// Mutators
-impl CallNode {
-    pub fn remap_children(&self, remapping: &Remapping) -> Self {
-        let mut node = self.clone();
-        node.callee = node.callee.remap(remapping);
-        node
-    }
-
-    /// Sets the list of decorators to be executed before this node.
-    pub fn append_before_enter(&mut self, decorator_ids: &[DecoratorId]) {
-        self.before_enter.extend_from_slice(decorator_ids);
-    }
-
-    /// Sets the list of decorators to be executed after this node.
-    pub fn append_after_exit(&mut self, decorator_ids: &[DecoratorId]) {
-        self.after_exit.extend_from_slice(decorator_ids);
-    }
-
-    /// Removes all decorators from this node.
-    pub fn remove_decorators(&mut self) {
-        self.before_enter.truncate(0);
-        self.after_exit.truncate(0);
     }
 }
 
@@ -333,16 +275,20 @@ impl MastNodeExt for CallNode {
         &self.after_exit
     }
 
+    /// Sets the list of decorators to be executed before this node.
     fn append_before_enter(&mut self, decorator_ids: &[DecoratorId]) {
-        self.append_before_enter(decorator_ids);
+        self.before_enter.extend_from_slice(decorator_ids);
     }
 
+    /// Sets the list of decorators to be executed after this node.
     fn append_after_exit(&mut self, decorator_ids: &[DecoratorId]) {
-        self.append_after_exit(decorator_ids);
+        self.after_exit.extend_from_slice(decorator_ids);
     }
 
+    /// Removes all decorators from this node.
     fn remove_decorators(&mut self) {
-        self.remove_decorators();
+        self.before_enter.truncate(0);
+        self.after_exit.truncate(0);
     }
 
     fn to_display<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn fmt::Display + 'a> {
