@@ -1,8 +1,30 @@
 use core::fmt;
 
+use crate::EventId;
+
 // SYSTEM EVENTS
 // ================================================================================================
-use crate::EventId;
+
+#[rustfmt::skip]
+mod constants {
+    pub const EVENT_MERKLE_NODE_MERGE: u8            = 0;
+    pub const EVENT_MERKLE_NODE_TO_STACK: u8         = 1;
+    pub const EVENT_MAP_VALUE_TO_STACK: u8           = 2;
+    pub const EVENT_MAP_VALUE_TO_STACK_N: u8         = 3;
+    pub const EVENT_HAS_MAP_KEY: u8                  = 4;
+    pub const EVENT_EXT2_INV: u8                     = 5;
+    pub const EVENT_U32_CLZ: u8                      = 6;
+    pub const EVENT_U32_CTZ: u8                      = 7;
+    pub const EVENT_U32_CLO: u8                      = 8;
+    pub const EVENT_U32_CTO: u8                      = 9;
+    pub const EVENT_ILOG2: u8                        = 10;
+    pub const EVENT_MEM_TO_MAP: u8                   = 11;
+    pub const EVENT_HDWORD_TO_MAP: u8                = 12;
+    pub const EVENT_HDWORD_TO_MAP_WITH_DOMAIN: u8    = 13;
+    pub const EVENT_HQWORD_TO_MAP: u8                = 14;
+    pub const EVENT_HPERM_TO_MAP: u8                 = 15;
+}
+use constants::*;
 
 /// Defines a set of actions which can be initiated from the VM to inject new data into the advice
 /// provider.
@@ -30,7 +52,7 @@ pub enum SystemEvent {
     ///
     /// After the operation, both the original trees and the new tree remains in the advice
     /// provider (i.e., the input trees are not removed).
-    MerkleNodeMerge,
+    MerkleNodeMerge = EVENT_MERKLE_NODE_MERGE,
 
     // ADVICE STACK SYSTEM EVENTS
     // --------------------------------------------------------------------------------------------
@@ -46,7 +68,7 @@ pub enum SystemEvent {
     ///   Operand stack: [depth, index, TREE_ROOT, ...]
     ///   Advice stack: [NODE, ...]
     ///   Merkle store: {TREE_ROOT<-NODE}
-    MerkleNodeToStack,
+    MerkleNodeToStack = EVENT_MERKLE_NODE_TO_STACK,
 
     /// Pushes a list of field elements onto the advice stack. The list is looked up in the advice
     /// map using the specified word from the operand stack as the key.
@@ -60,7 +82,7 @@ pub enum SystemEvent {
     ///   Operand stack: [KEY, ...]
     ///   Advice stack: [values, ...]
     ///   Advice map: {KEY: values}
-    MapValueToStack,
+    MapValueToStack = EVENT_MAP_VALUE_TO_STACK,
 
     /// Pushes a list of field elements onto the advice stack, and then the number of elements
     /// pushed. The list is looked up in the advice map using the specified word from the operand
@@ -75,7 +97,7 @@ pub enum SystemEvent {
     ///   Operand stack: [KEY, ...]
     ///   Advice stack: [num_values, values, ...]
     ///   Advice map: {KEY: values}
-    MapValueToStackN,
+    MapValueToStackN = EVENT_MAP_VALUE_TO_STACK_N,
 
     /// Pushes a flag onto the advice stack whether advice map has an entry with specified key.
     ///
@@ -89,7 +111,7 @@ pub enum SystemEvent {
     /// Outputs:
     ///   Operand stack: [KEY, ...]
     ///   Advice stack:  [has_mapkey, ...]
-    HasMapKey,
+    HasMapKey = EVENT_HAS_MAP_KEY,
 
     /// Given an element in a quadratic extension field on the top of the stack (i.e., a0, b1),
     /// computes its multiplicative inverse and push the result onto the advice stack.
@@ -104,7 +126,7 @@ pub enum SystemEvent {
     ///
     /// Where (b0, b1) is the multiplicative inverse of the extension field element (a0, a1) at the
     /// top of the stack.
-    Ext2Inv,
+    Ext2Inv = EVENT_EXT2_INV,
 
     /// Pushes the number of the leading zeros of the top stack element onto the advice stack.
     ///
@@ -115,7 +137,7 @@ pub enum SystemEvent {
     /// Outputs:
     ///   Operand stack: [n, ...]
     ///   Advice stack: [leading_zeros, ...]
-    U32Clz,
+    U32Clz = EVENT_U32_CLZ,
 
     /// Pushes the number of the trailing zeros of the top stack element onto the advice stack.
     ///
@@ -126,7 +148,7 @@ pub enum SystemEvent {
     /// Outputs:
     ///   Operand stack: [n, ...]
     ///   Advice stack: [trailing_zeros, ...]
-    U32Ctz,
+    U32Ctz = EVENT_U32_CTZ,
 
     /// Pushes the number of the leading ones of the top stack element onto the advice stack.
     ///
@@ -137,7 +159,7 @@ pub enum SystemEvent {
     /// Outputs:
     ///   Operand stack: [n, ...]
     ///   Advice stack: [leading_ones, ...]
-    U32Clo,
+    U32Clo = EVENT_U32_CLO,
 
     /// Pushes the number of the trailing ones of the top stack element onto the advice stack.
     ///
@@ -148,7 +170,7 @@ pub enum SystemEvent {
     /// Outputs:
     ///   Operand stack: [n, ...]
     ///   Advice stack: [trailing_ones, ...]
-    U32Cto,
+    U32Cto = EVENT_U32_CTO,
 
     /// Pushes the base 2 logarithm of the top stack element, rounded down.
     /// Inputs:
@@ -158,7 +180,7 @@ pub enum SystemEvent {
     /// Outputs:
     ///   Operand stack: [n, ...]
     ///   Advice stack: [ilog2(n), ...]
-    ILog2,
+    ILog2 = EVENT_ILOG2,
 
     // ADVICE MAP SYSTEM EVENTS
     // --------------------------------------------------------------------------------------------
@@ -174,7 +196,7 @@ pub enum SystemEvent {
     ///   Advice map: {KEY: values}
     ///
     /// Where `values` are the elements located in memory[start_addr..end_addr].
-    MemToMap,
+    MemToMap = EVENT_MEM_TO_MAP,
 
     /// Reads two word from the operand stack and inserts them into the advice map under the key
     /// defined by the hash of these words.
@@ -188,7 +210,7 @@ pub enum SystemEvent {
     ///   Advice map: {KEY: [a0, a1, a2, a3, b0, b1, b2, b3]}
     ///
     /// Where KEY is computed as hash(A || B, domain=0)
-    HdwordToMap,
+    HdwordToMap = EVENT_HDWORD_TO_MAP,
 
     /// Reads two words from the operand stack and inserts them into the advice map under the key
     /// defined by the hash of these words (using `d` as the domain).
@@ -202,7 +224,7 @@ pub enum SystemEvent {
     ///   Advice map: {KEY: [a0, a1, a2, a3, b0, b1, b2, b3]}
     ///
     /// Where KEY is computed as hash(A || B, d).
-    HdwordToMapWithDomain,
+    HdwordToMapWithDomain = EVENT_HDWORD_TO_MAP_WITH_DOMAIN,
 
     /// Reads four words from the operand stack and inserts them into the advice map under the key
     /// defined by the hash of these words.
@@ -219,7 +241,7 @@ pub enum SystemEvent {
     /// - KEY is the hash computed as hash(hash(hash(A || B) || C) || D) with domain=0.
     /// - A' (and other words with `'`) is the A word with the reversed element order: A = [a3, a2,
     ///   a1, a0], A' = [a0, a1, a2, a3].
-    HqwordToMap,
+    HqwordToMap = EVENT_HQWORD_TO_MAP,
 
     /// Reads three words from the operand stack and inserts the top two words into the advice map
     /// under the key defined by applying an RPO permutation to all three words.
@@ -234,58 +256,33 @@ pub enum SystemEvent {
     ///
     /// Where KEY is computed by extracting the digest elements from hperm([C, A, B]). For example,
     /// if C is [0, d, 0, 0], KEY will be set as hash(A || B, d).
-    HpermToMap,
+    HpermToMap = EVENT_HPERM_TO_MAP,
 }
 
-/// Last variant of the `SystemEvent` enum, used to derive the number of cases.
-const LAST_EVENT: SystemEvent = SystemEvent::HpermToMap;
-
 impl TryFrom<EventId> for SystemEvent {
-    type Error = u64;
+    type Error = EventId;
 
     fn try_from(event_id: EventId) -> Result<Self, Self::Error> {
-        let event_id = event_id.as_felt().as_int();
+        let value: u8 = event_id.as_felt().as_int().try_into().map_err(|_| event_id)?;
 
-        // This dummy match statement ensures a compile-time error is raised when this function
-        // has not been updated after adding a new SystemEvent variant.
-        // Make sure the match statement below is also updated, as well as `LAST_EVENT` above.
-        match LAST_EVENT {
-            SystemEvent::MerkleNodeMerge
-            | SystemEvent::MerkleNodeToStack
-            | SystemEvent::MapValueToStack
-            | SystemEvent::MapValueToStackN
-            | SystemEvent::HasMapKey
-            | SystemEvent::Ext2Inv
-            | SystemEvent::U32Clz
-            | SystemEvent::U32Ctz
-            | SystemEvent::U32Clo
-            | SystemEvent::U32Cto
-            | SystemEvent::ILog2
-            | SystemEvent::MemToMap
-            | SystemEvent::HdwordToMap
-            | SystemEvent::HdwordToMapWithDomain
-            | SystemEvent::HqwordToMap
-            | SystemEvent::HpermToMap => {},
-        };
-
-        match event_id {
-            0 => Ok(SystemEvent::MerkleNodeMerge),
-            1 => Ok(SystemEvent::MerkleNodeToStack),
-            2 => Ok(SystemEvent::MapValueToStack),
-            3 => Ok(SystemEvent::MapValueToStackN),
-            4 => Ok(SystemEvent::HasMapKey),
-            5 => Ok(SystemEvent::Ext2Inv),
-            6 => Ok(SystemEvent::U32Clz),
-            7 => Ok(SystemEvent::U32Ctz),
-            8 => Ok(SystemEvent::U32Clo),
-            9 => Ok(SystemEvent::U32Cto),
-            10 => Ok(SystemEvent::ILog2),
-            11 => Ok(SystemEvent::MemToMap),
-            12 => Ok(SystemEvent::HdwordToMap),
-            13 => Ok(SystemEvent::HdwordToMapWithDomain),
-            14 => Ok(SystemEvent::HqwordToMap),
-            15 => Ok(SystemEvent::HpermToMap),
-            other => Err(other),
+        match value {
+            EVENT_MERKLE_NODE_MERGE => Ok(SystemEvent::MerkleNodeMerge),
+            EVENT_MERKLE_NODE_TO_STACK => Ok(SystemEvent::MerkleNodeToStack),
+            EVENT_MAP_VALUE_TO_STACK => Ok(SystemEvent::MapValueToStack),
+            EVENT_MAP_VALUE_TO_STACK_N => Ok(SystemEvent::MapValueToStackN),
+            EVENT_HAS_MAP_KEY => Ok(SystemEvent::HasMapKey),
+            EVENT_EXT2_INV => Ok(SystemEvent::Ext2Inv),
+            EVENT_U32_CLZ => Ok(SystemEvent::U32Clz),
+            EVENT_U32_CTZ => Ok(SystemEvent::U32Ctz),
+            EVENT_U32_CLO => Ok(SystemEvent::U32Clo),
+            EVENT_U32_CTO => Ok(SystemEvent::U32Cto),
+            EVENT_ILOG2 => Ok(SystemEvent::ILog2),
+            EVENT_MEM_TO_MAP => Ok(SystemEvent::MemToMap),
+            EVENT_HDWORD_TO_MAP => Ok(SystemEvent::HdwordToMap),
+            EVENT_HDWORD_TO_MAP_WITH_DOMAIN => Ok(SystemEvent::HdwordToMapWithDomain),
+            EVENT_HQWORD_TO_MAP => Ok(SystemEvent::HqwordToMap),
+            EVENT_HPERM_TO_MAP => Ok(SystemEvent::HpermToMap),
+            _ => Err(event_id),
         }
     }
 }
@@ -331,6 +328,8 @@ mod test {
 
     #[test]
     fn test_try_from() {
+        /// Last variant of the `SystemEvent` enum, used to derive the number of cases.
+        const LAST_EVENT: SystemEvent = SystemEvent::HpermToMap;
         let last_event_id = LAST_EVENT as u8;
 
         // Check that the event IDs are contiguous
@@ -344,5 +343,29 @@ mod test {
         // Creating from an the next index results in an error.
         let invalid_event_id = EventId::from_u64((last_event_id + 1) as u64);
         SystemEvent::try_from(invalid_event_id).unwrap_err();
+
+        // This dummy match statement ensures a compile-time error is raised after adding a new
+        // SystemEvent variant. If so the following must also be done
+        // - create a new constant with the next available value
+        // - update try_from with the new constant
+        // - add a case to `fmt`
+        match LAST_EVENT {
+            SystemEvent::MerkleNodeMerge
+            | SystemEvent::MerkleNodeToStack
+            | SystemEvent::MapValueToStack
+            | SystemEvent::MapValueToStackN
+            | SystemEvent::HasMapKey
+            | SystemEvent::Ext2Inv
+            | SystemEvent::U32Clz
+            | SystemEvent::U32Ctz
+            | SystemEvent::U32Clo
+            | SystemEvent::U32Cto
+            | SystemEvent::ILog2
+            | SystemEvent::MemToMap
+            | SystemEvent::HdwordToMap
+            | SystemEvent::HdwordToMapWithDomain
+            | SystemEvent::HqwordToMap
+            | SystemEvent::HpermToMap => {},
+        };
     }
 }
