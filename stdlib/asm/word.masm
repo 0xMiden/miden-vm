@@ -9,10 +9,7 @@
 #!
 #! Cycles: 3
 export.reverse
-    movdn.3
-    # => [b, c, d, a, ...]
-    swap.2
-    # => [d, c, b, a, ...]
+    reversew
 end
 
 # COMPARISON OPERATIONS
