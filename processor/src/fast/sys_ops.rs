@@ -55,10 +55,12 @@ impl FastProcessor {
     }
 
     /// Analogous to `Process::op_sdepth`.
-    pub fn op_sdepth(&mut self) {
+    pub fn op_sdepth(&mut self) -> Result<(), ExecutionError> {
         let depth = self.stack_depth();
-        self.increment_stack_size();
+        self.increment_stack_size()?;
         self.stack_write(0, depth.into());
+
+        Ok(())
     }
 
     /// Analogous to `Process::op_caller`.
@@ -75,7 +77,7 @@ impl FastProcessor {
 
     /// Analogous to `Process::op_clk`.
     pub fn op_clk(&mut self) -> Result<(), ExecutionError> {
-        self.increment_stack_size();
+        self.increment_stack_size()?;
         self.stack_write(0, self.clk.into());
         Ok(())
     }

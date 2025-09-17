@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.17.2 (2025-09-17)
+
+- Hotfix: remove all stack underflow errors ([#2182](https://github.com/0xMiden/miden-vm/pull/2182)).
+
 ## 0.17.1 (2025-08-29)
 
 - added `MastForest::strip_decorators()` ([#2108](https://github.com/0xMiden/miden-vm/pull/2108)).

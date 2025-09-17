@@ -3,9 +3,11 @@ use crate::ErrorContext;
 
 impl FastProcessor {
     /// Analogous to `Process::op_push`.
-    pub fn op_push(&mut self, element: Felt) {
-        self.increment_stack_size();
+    pub fn op_push(&mut self, element: Felt) -> Result<(), ExecutionError> {
+        self.increment_stack_size()?;
         self.stack_write(0, element);
+
+        Ok(())
     }
 
     /// Analogous to `Process::op_advpop`.
@@ -15,8 +17,9 @@ impl FastProcessor {
             .advice
             .pop_stack()
             .map_err(|err| ExecutionError::advice_error(err, self.clk, err_ctx))?;
-        self.increment_stack_size();
+        self.increment_stack_size()?;
         self.stack_write(0, value);
+
         Ok(())
     }
 

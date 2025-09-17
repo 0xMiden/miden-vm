@@ -6,13 +6,15 @@ use crate::{ErrorContext, ExecutionError, utils::split_element};
 impl FastProcessor {
     /// Analogous to `Process::op_u32split`.
     #[inline(always)]
-    pub fn op_u32split(&mut self) {
+    pub fn op_u32split(&mut self) -> Result<(), ExecutionError> {
         let top = self.stack_get(0);
         let (hi, lo) = split_element(top);
 
-        self.increment_stack_size();
+        self.increment_stack_size()?;
         self.stack_write(0, hi);
         self.stack_write(1, lo);
+
+        Ok(())
     }
 
     /// Analogous to `Process::op_u32add`.

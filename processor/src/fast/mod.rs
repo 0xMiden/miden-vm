@@ -101,9 +101,6 @@ pub struct FastProcessor {
     stack_top_idx: usize,
     /// The index of the bottom of the stack.
     stack_bot_idx: usize,
-    /// The counter which keeps track of the number of instructions that we can execute without
-    /// hitting the bounds of `stack`.
-    bounds_check_counter: usize,
 
     /// The current clock cycle.
     pub(super) clk: RowIndex,
@@ -185,15 +182,11 @@ impl FastProcessor {
             stack
         };
 
-        let stack_bot_idx = stack_top_idx - MIN_STACK_DEPTH;
-
-        let bounds_check_counter = stack_bot_idx;
         Self {
             advice: advice_inputs.into(),
             stack,
             stack_top_idx,
-            stack_bot_idx,
-            bounds_check_counter,
+            stack_bot_idx: stack_top_idx - MIN_STACK_DEPTH,
             clk: 0_u32.into(),
             ctx: 0_u32.into(),
             fmp: Felt::new(FMP_MIN),
@@ -1012,15 +1005,6 @@ impl FastProcessor {
         host: &mut impl AsyncHost,
         err_ctx: &impl ErrorContext,
     ) -> Result<(), ExecutionError> {
-        if self.bounds_check_counter == 0 {
-            let err_str = if self.stack_top_idx - MIN_STACK_DEPTH == 0 {
-                "stack underflow"
-            } else {
-                "stack overflow"
-            };
-            return Err(ExecutionError::FailedToExecuteProgram(err_str));
-        }
-
         match operation {
             // ----- system operations ------------------------------------------------------------
             Operation::Noop => {
@@ -1029,7 +1013,7 @@ impl FastProcessor {
             Operation::Assert(err_code) => self.op_assert(*err_code, host, program, err_ctx)?,
             Operation::FmpAdd => self.op_fmpadd(),
             Operation::FmpUpdate => self.op_fmpupdate()?,
-            Operation::SDepth => self.op_sdepth(),
+            Operation::SDepth => self.op_sdepth()?,
             Operation::Caller => self.op_caller()?,
             Operation::Clk => self.op_clk()?,
             Operation::Emit(_event_id) => {
@@ -1066,7 +1050,7 @@ impl FastProcessor {
             Operation::Ext2Mul => self.op_ext2mul(),
 
             // ----- u32 operations ---------------------------------------------------------------
-            Operation::U32split => self.op_u32split(),
+            Operation::U32split => self.op_u32split()?,
             Operation::U32add => self.op_u32add(err_ctx)?,
             Operation::U32add3 => self.op_u32add3(err_ctx)?,
             Operation::U32sub => self.op_u32sub(op_idx, err_ctx)?,
@@ -1078,20 +1062,20 @@ impl FastProcessor {
             Operation::U32assert2(err_code) => self.op_u32assert2(*err_code, err_ctx)?,
 
             // ----- stack manipulation -----------------------------------------------------------
-            Operation::Pad => self.op_pad(),
+            Operation::Pad => self.op_pad()?,
             Operation::Drop => self.decrement_stack_size(),
-            Operation::Dup0 => self.dup_nth(0),
-            Operation::Dup1 => self.dup_nth(1),
-            Operation::Dup2 => self.dup_nth(2),
-            Operation::Dup3 => self.dup_nth(3),
-            Operation::Dup4 => self.dup_nth(4),
-            Operation::Dup5 => self.dup_nth(5),
-            Operation::Dup6 => self.dup_nth(6),
-            Operation::Dup7 => self.dup_nth(7),
-            Operation::Dup9 => self.dup_nth(9),
-            Operation::Dup11 => self.dup_nth(11),
-            Operation::Dup13 => self.dup_nth(13),
-            Operation::Dup15 => self.dup_nth(15),
+            Operation::Dup0 => self.dup_nth(0)?,
+            Operation::Dup1 => self.dup_nth(1)?,
+            Operation::Dup2 => self.dup_nth(2)?,
+            Operation::Dup3 => self.dup_nth(3)?,
+            Operation::Dup4 => self.dup_nth(4)?,
+            Operation::Dup5 => self.dup_nth(5)?,
+            Operation::Dup6 => self.dup_nth(6)?,
+            Operation::Dup7 => self.dup_nth(7)?,
+            Operation::Dup9 => self.dup_nth(9)?,
+            Operation::Dup11 => self.dup_nth(11)?,
+            Operation::Dup13 => self.dup_nth(13)?,
+            Operation::Dup15 => self.dup_nth(15)?,
             Operation::Swap => self.op_swap(),
             Operation::SwapW => self.swapw_nth(1),
             Operation::SwapW2 => self.swapw_nth(2),
@@ -1115,7 +1099,7 @@ impl FastProcessor {
             Operation::CSwapW => self.op_cswapw(err_ctx)?,
 
             // ----- input / output ---------------------------------------------------------------
-            Operation::Push(element) => self.op_push(*element),
+            Operation::Push(element) => self.op_push(*element)?,
             Operation::AdvPop => self.op_advpop(err_ctx)?,
             Operation::AdvPopW => self.op_advpopw(err_ctx)?,
             Operation::MLoadW => self.op_mloadw(err_ctx)?,
@@ -1202,9 +1186,13 @@ impl FastProcessor {
     ///
     /// The bottom of the stack is never affected by this operation.
     #[inline(always)]
-    fn increment_stack_size(&mut self) {
-        self.stack_top_idx += 1;
-        self.update_bounds_check_counter();
+    fn increment_stack_size(&mut self) -> Result<(), ExecutionError> {
+        if self.stack_top_idx < STACK_BUFFER_SIZE - 1 {
+            self.stack_top_idx += 1;
+            Ok(())
+        } else {
+            Err(ExecutionError::FailedToExecuteProgram("stack overflow"))
+        }
     }
 
     /// Decrements the stack top pointer by 1.
@@ -1213,41 +1201,21 @@ impl FastProcessor {
     /// than 16.
     #[inline(always)]
     fn decrement_stack_size(&mut self) {
+        if self.stack_top_idx == MIN_STACK_DEPTH {
+            // We no longer have any room in the stack buffer to decrement the stack size (which
+            // would cause the `stack_bot_idx` to go below 0). We therefore reset the stack to its
+            // original position.
+            self.reset_stack_in_buffer(INITIAL_STACK_TOP_IDX);
+        }
+
         self.stack_top_idx -= 1;
         self.stack_bot_idx = min(self.stack_bot_idx, self.stack_top_idx - MIN_STACK_DEPTH);
-        self.update_bounds_check_counter();
     }
 
     /// Returns the size of the stack.
     #[inline(always)]
     fn stack_size(&self) -> usize {
         self.stack_top_idx - self.stack_bot_idx
-    }
-
-    /// Updates the bounds check counter.
-    ///
-    /// The bounds check counter is decremented by 1. If it reaches 0, it is reset to the minimum of
-    /// the stack depth from the low end and the high end of the stack buffer.
-    ///
-    /// The purpose of the bounds check counter is to ensure that we never access the stack buffer
-    /// at an out-of-bounds index.
-    #[inline(always)]
-    fn update_bounds_check_counter(&mut self) {
-        self.bounds_check_counter -= 1;
-
-        if self.bounds_check_counter == 0 {
-            // We will need to check the bounds either because we reach the low end or the high end
-            // of the stack buffer. There are two worst cases that we are concerned about:
-            // - we only execute instructions that decrease stack depth
-            // - we only execute instructions that increase stack depth
-            //
-            // In the first case, we will hit the low end of the stack buffer; in the second case,
-            // we will hit the high end of the stack buffer. We set the number of instructions that
-            // is safe to execute to be the minimum of these two worst cases.
-
-            self.bounds_check_counter =
-                min(self.stack_top_idx - MIN_STACK_DEPTH, STACK_BUFFER_SIZE - self.stack_top_idx);
-        }
     }
 
     /// Saves the current execution context and truncates the stack to 16 elements in preparation to
@@ -1297,18 +1265,7 @@ impl FastProcessor {
             .expect("execution context stack should never be empty when restoring context");
 
         // restore the overflow stack
-        {
-            let overflow_len = ctx_info.overflow_stack.len();
-            if overflow_len > self.stack_bot_idx {
-                return Err(ExecutionError::FailedToExecuteProgram(
-                    "stack underflow when restoring context",
-                ));
-            }
-
-            self.stack[range(self.stack_bot_idx - overflow_len, overflow_len)]
-                .copy_from_slice(&ctx_info.overflow_stack);
-            self.stack_bot_idx -= overflow_len;
-        }
+        self.restore_overflow_stack(&ctx_info);
 
         // restore system parameters
         self.ctx = ctx_info.ctx;
@@ -1317,6 +1274,59 @@ impl FastProcessor {
         self.caller_hash = ctx_info.fn_hash;
 
         Ok(())
+    }
+
+    /// Restores the overflow stack from a previous context.
+    ///
+    /// If necessary, moves the stack in the buffer to make room for the overflow stack to be
+    /// restored.
+    ///
+    /// # Preconditions
+    /// - The current stack depth is exactly `MIN_STACK_DEPTH` (16).
+    #[inline(always)]
+    fn restore_overflow_stack(&mut self, ctx_info: &ExecutionContextInfo) {
+        let target_overflow_len = ctx_info.overflow_stack.len();
+
+        // Check if there's enough room to restore the overflow stack in the current stack buffer.
+        if target_overflow_len > self.stack_bot_idx {
+            // There's not enough room to restore the overflow stack, so we have to move the
+            // location of the stack in the buffer. We reset it so that after restoring the overflow
+            // stack, the stack_bot_idx is at its original position (i.e. INITIAL_STACK_TOP_IDX -
+            // 16).
+            let new_stack_top_idx =
+                core::cmp::min(INITIAL_STACK_TOP_IDX + target_overflow_len, STACK_BUFFER_SIZE - 1);
+
+            self.reset_stack_in_buffer(new_stack_top_idx);
+        }
+
+        // Restore the overflow
+        self.stack[range(self.stack_bot_idx - target_overflow_len, target_overflow_len)]
+            .copy_from_slice(&ctx_info.overflow_stack);
+        self.stack_bot_idx -= target_overflow_len;
+    }
+
+    /// Resets the stack in the buffer to a new position, preserving the top 16 elements of the
+    /// stack.
+    ///
+    /// # Preconditions
+    /// - The stack is expected to have exactly 16 elements.
+    fn reset_stack_in_buffer(&mut self, new_stack_top_idx: usize) {
+        debug_assert_eq!(self.stack_depth(), MIN_STACK_DEPTH as u32);
+
+        let new_stack_bot_idx = new_stack_top_idx - MIN_STACK_DEPTH;
+
+        // Copy stack to its new position
+        self.stack
+            .copy_within(self.stack_bot_idx..self.stack_top_idx, new_stack_bot_idx);
+
+        // Zero out stack below the new new_stack_bot_idx, since this is where overflow values
+        // come from, and are guaranteed to be ZERO. We don't need to zero out above
+        // `stack_top_idx`, since values there are never read before being written.
+        self.stack[0..new_stack_bot_idx].fill(ZERO);
+
+        // Update indices.
+        self.stack_bot_idx = new_stack_bot_idx;
+        self.stack_top_idx = new_stack_top_idx;
     }
 
     // TESTING

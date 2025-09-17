@@ -5,9 +5,10 @@ use crate::{ErrorContext, ExecutionError};
 
 impl FastProcessor {
     /// Analogous to `Process::op_pad`.
-    pub fn op_pad(&mut self) {
-        self.increment_stack_size();
+    pub fn op_pad(&mut self) -> Result<(), ExecutionError> {
+        self.increment_stack_size()?;
         self.stack_write(0, ZERO);
+        Ok(())
     }
 
     /// Analogous to `Process::op_swap`.
@@ -76,10 +77,12 @@ impl FastProcessor {
     ///
     /// The size of the stack is incremented by 1.
     #[inline(always)]
-    pub fn dup_nth(&mut self, n: usize) {
+    pub fn dup_nth(&mut self, n: usize) -> Result<(), ExecutionError> {
         let to_dup = self.stack_get(n);
-        self.increment_stack_size();
+        self.increment_stack_size()?;
         self.stack_write(0, to_dup);
+
+        Ok(())
     }
 
     /// Swaps the nth word from the top of the stack with the top word of the stack.
