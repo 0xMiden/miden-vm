@@ -24,9 +24,9 @@ type SimpleMerkleMap = BTreeMap<Word, StoreNode>;
 // ADVICE PROVIDER
 // ================================================================================================
 
-/// An advice provider is a component through which the host can interact with the advice provider.
-/// The host can request nondeterministic inputs from the advice provider (i.e., result of a
-/// computation performed outside of the VM), as well as insert new data into the advice provider.
+/// An advice provider is a component through which the VM can request nondeterministic inputs from
+/// the host (i.e., result of a computation performed outside of the VM), as well as insert new data
+/// into the advice provider to be recovered by the host after the program has finished executing.
 ///
 /// An advice provider consists of the following components:
 /// 1. Advice stack, which is a LIFO data structure. The processor can move the elements from the
@@ -38,7 +38,8 @@ type SimpleMerkleMap = BTreeMap<Word, StoreNode>;
 ///    Merkle paths from the store, as well as mutate it by updating or merging nodes contained in
 ///    the store.
 ///
-/// Advice data is store in-memory using [BTreeMap]s as its backing storage.
+/// Advice data is store in-memory using [`BTreeMap`](alloc::collections::btree_map::BTreeMap)s as
+/// its backing storage.
 #[derive(Debug, Clone, Default)]
 pub struct AdviceProvider {
     stack: Vec<Felt>,
