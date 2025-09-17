@@ -40,7 +40,7 @@
 - [BREAKING] Move `u64_div`, `falcon_div` and `smtpeek` system events to stdlib ([#1582](https://github.com/0xMiden/miden-vm/issues/1582)).
 - [BREAKING] `MastNode` quality of life improvements ([#2166](https://github.com/0xMiden/miden-vm/pull/2166)).
 - [BREAKING] Move `u64_div`, `falcon_div` and `smtpeek` system events to stdlib ([#1582](https://github.com/0xMiden/miden-vm/issues/1582))
-- [BREAKING] Update miden-crypto dependency to v0.17 (#[2168](https://github.com/0xMiden/miden-vm/pull/2168))
+- [BREAKING] Update miden-crypto dependency to v0.17 (#[2168](https://github.com/0xMiden/miden-vm/pull/2168)).
 
 ## 0.17.1 (2025-08-29)
 
