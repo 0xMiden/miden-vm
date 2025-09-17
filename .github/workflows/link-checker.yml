@@ -1,3 +1,4 @@
+# Checks documentation for broken links once per day and creates issues if broken links are found
 name: Check documentation links
 
 on:
@@ -53,4 +54,4 @@ jobs:
         with:
           title: Link Checker Report
           content-filepath: ./lychee/out.md
-          labels: report, automated issue
+          labels: documentation
