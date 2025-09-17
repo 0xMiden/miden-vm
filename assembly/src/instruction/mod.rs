@@ -441,7 +441,7 @@ impl Assembler {
             },
             Instruction::MemStore => block_builder.push_ops([MStore, Drop]),
             Instruction::MemStoreW | Instruction::MemStoreWLe => block_builder.push_ops([MStoreW]),
-            Instruction::MemStoreImm(v) | Instruction::MemStoreWLeImm(v) => mem_ops::mem_write_imm(
+            Instruction::MemStoreImm(v) => mem_ops::mem_write_imm(
                 block_builder,
                 proc_ctx,
                 v.expect_value(),
@@ -449,14 +449,16 @@ impl Assembler {
                 true,
                 span,
             )?,
-            Instruction::MemStoreWImm(v) => mem_ops::mem_write_imm(
-                block_builder,
-                proc_ctx,
-                v.expect_value(),
-                false,
-                false,
-                span,
-            )?,
+            Instruction::MemStoreWImm(v) | Instruction::MemStoreWLeImm(v) => {
+                mem_ops::mem_write_imm(
+                    block_builder,
+                    proc_ctx,
+                    v.expect_value(),
+                    false,
+                    false,
+                    span,
+                )?
+            },
             Instruction::MemStoreWBe => {
                 block_builder.push_op(MovDn4);
                 push_reversew(block_builder);

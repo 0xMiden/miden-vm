@@ -184,34 +184,39 @@ fn mem_storew_le() {
 #[test]
 fn mem_endianness_roundtrip() {
     // Test that we can store and load consistently with different endianness instructions
+    let input_le = [1, 2, 3, 4];
+    let mem_le = [1, 2, 3, 4];
+    let mem_be = [4, 3, 2, 1];
+    let output_le = [4, 3, 2, 1];
+    let output_be = [1, 2, 3, 4];
 
     // Test BE roundtrip: store BE, load BE should preserve order
-    let test = build_op_test!("mem_storew_be.0 mem_loadw_be.0", &[1, 2, 3, 4]);
-    test.expect_stack(&[4, 3, 2, 1]);
+    let test = build_op_test!("mem_storew_be.0 mem_loadw_be.0", &input_le);
+    test.expect_stack_and_memory(&output_le, 0, &mem_be);
 
     // Test LE roundtrip: store LE, load LE should preserve order
-    let test = build_op_test!("mem_storew_le.0 mem_loadw_le.0", &[1, 2, 3, 4]);
-    test.expect_stack(&[4, 3, 2, 1]);
+    let test = build_op_test!("mem_storew_le.0 mem_loadw_le.0", &input_le);
+    test.expect_stack_and_memory(&output_le, 0, &mem_le);
 
     // Test mixed endianness: store BE, load LE should reverse order
-    let test = build_op_test!("mem_storew_be.0 mem_loadw_le.0", &[1, 2, 3, 4]);
-    test.expect_stack(&[1, 2, 3, 4]);
+    let test = build_op_test!("mem_storew_be.0 mem_loadw_le.0", &input_le);
+    test.expect_stack_and_memory(&output_be, 0, &mem_be);
 
     // Test mixed endianness: store LE, load BE should reverse order
-    let test = build_op_test!("mem_storew_le.0 mem_loadw_be.0", &[1, 2, 3, 4]);
-    test.expect_stack(&[1, 2, 3, 4]);
+    let test = build_op_test!("mem_storew_le.0 mem_loadw_be.0", &input_le);
+    test.expect_stack_and_memory(&output_be, 0, &mem_le);
 
-    // Test store_le and load
-    let test = build_op_test!("mem_storew_le.0 mem_loadw.0", &[1, 2, 3, 4]);
-    test.expect_stack(&[4, 3, 2, 1]);
+    // Test storew_le and loadw
+    let test = build_op_test!("mem_storew_le.0 mem_loadw.0", &input_le);
+    test.expect_stack_and_memory(&output_le, 0, &mem_le);
 
     // Test store and load_le
-    let test = build_op_test!("mem_storew.0 mem_loadw_le.0", &[1, 2, 3, 4]);
-    test.expect_stack(&[4, 3, 2, 1]);
+    let test = build_op_test!("mem_storew.0 mem_loadw_le.0", &input_le);
+    test.expect_stack_and_memory(&output_le, 0, &mem_le);
 
     // Sanity check that the last two match with primitive store/load
-    let test = build_op_test!("mem_storew.0 mem_loadw.0", &[1, 2, 3, 4]);
-    test.expect_stack(&[4, 3, 2, 1]);
+    let test = build_op_test!("mem_storew.0 mem_loadw.0", &input_le);
+    test.expect_stack_and_memory(&output_le, 0, &mem_le);
 }
 
 // STREAMING ELEMENTS FROM MEMORY (MSTREAM)
