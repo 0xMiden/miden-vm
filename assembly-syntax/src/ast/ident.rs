@@ -5,6 +5,9 @@ use core::{
     str::FromStr,
 };
 
+use miden_core::utils::{
+    ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+};
 use miden_debug_types::{SourceSpan, Span, Spanned};
 
 /// Represents the types of errors that can occur when parsing/validating an [Ident]
@@ -217,6 +220,25 @@ impl<'de> serde::Deserialize<'de> for Ident {
     {
         let name = <&'de str as serde::Deserialize>::deserialize(deserializer)?;
         Self::new(name).map_err(serde::de::Error::custom)
+    }
+}
+
+impl Serializable for Ident {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        target.write_usize(self.len());
+        target.write_bytes(self.as_bytes());
+    }
+}
+
+impl Deserializable for Ident {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        use alloc::string::ToString;
+
+        let len = source.read_usize()?;
+        let bytes = source.read_slice(len)?;
+        let id = core::str::from_utf8(bytes)
+            .map_err(|err| DeserializationError::InvalidValue(err.to_string()))?;
+        Self::new(id).map_err(|err| DeserializationError::InvalidValue(err.to_string()))
     }
 }
 

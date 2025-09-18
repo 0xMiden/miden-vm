@@ -8,6 +8,7 @@ mod rewrites;
 use alloc::{boxed::Box, collections::BTreeMap, sync::Arc, vec::Vec};
 use core::ops::Index;
 
+use miden_assembly_syntax::ast::AttributeSet;
 use miden_core::{Kernel, Word};
 use smallvec::{SmallVec, smallvec};
 
@@ -806,6 +807,41 @@ impl Linker {
             }
         }
         Ok(Arc::new(types::FunctionType::new(cc, args, results)))
+    }
+
+    /// Resolves a [GlobalProcedureIndex] to the known attributes of that procedure
+    pub(super) fn resolve_attributes(
+        &self,
+        gid: GlobalProcedureIndex,
+    ) -> Result<AttributeSet, LinkerError> {
+        // Fetch procedure metadata from the graph
+        let module = match &self[gid.module] {
+            ModuleLink::Ast(module) => module,
+            ModuleLink::Info(module) => {
+                let proc = module
+                    .get_procedure_by_index(gid.index)
+                    .expect("invalid global procedure index");
+                return Ok(proc.attributes.clone());
+            },
+        };
+
+        match &module[gid.index] {
+            Export::Procedure(proc) => Ok(proc.attributes().clone()),
+            Export::Alias(alias) => {
+                let target = InvocationTarget::from(alias.target());
+                let caller = CallerInfo {
+                    span: target.span(),
+                    module: gid.module,
+                    kind: InvokeKind::ProcRef,
+                };
+                match self.resolve_target(&caller, &target)? {
+                    ResolvedTarget::Phantom(_) => Ok(AttributeSet::default()),
+                    ResolvedTarget::Exact { gid } | ResolvedTarget::Resolved { gid, .. } => {
+                        self.resolve_attributes(gid)
+                    },
+                }
+            },
+        }
     }
 
     /// Registers a [MastNodeId] as corresponding to a given [GlobalProcedureIndex].

@@ -1,6 +1,9 @@
 use alloc::vec::Vec;
 use core::fmt;
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 use super::*;
 use crate::ast::Ident;
 
@@ -12,6 +15,7 @@ use crate::ast::Ident;
 /// automatically, and a syntax error is only generated when keys conflict. All other attribute
 /// types produce an error if they are declared multiple times on the same item.
 #[derive(Default, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct AttributeSet {
     /// The attributes in this set.
     ///
@@ -235,5 +239,32 @@ impl AttributeSetVacantEntry<'_> {
         } else {
             self.set.attrs.insert(self.index, attr);
         }
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+impl proptest::arbitrary::Arbitrary for AttributeSet {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        use proptest::{arbitrary::any, strategy::Strategy};
+
+        let items = proptest::collection::vec(any::<Attribute>(), 1..3);
+        items.prop_map(|attrs| Self { attrs }).boxed()
+    }
+
+    type Strategy = proptest::prelude::BoxedStrategy<Self>;
+}
+
+impl Serializable for AttributeSet {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.attrs.write_into(target)
+    }
+}
+
+impl Deserializable for AttributeSet {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let attrs = Vec::read_from(source)?;
+        Ok(Self { attrs })
     }
 }

@@ -1,6 +1,11 @@
 use alloc::{string::String, sync::Arc};
 
+use miden_core::utils::{
+    ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+};
 use miden_debug_types::{SourceSpan, Span, Spanned};
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 use crate::{
     Felt,
@@ -11,6 +16,8 @@ use crate::{
 
 /// Represents a metadata expression of an [crate::ast::Attribute]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "lowercase"))]
 pub enum MetaExpr {
     /// An identifier/keyword, e.g. `inline`
     Ident(Ident),
@@ -92,6 +99,78 @@ impl Spanned for MetaExpr {
             Self::Ident(spanned) | Self::String(spanned) => spanned.span(),
             Self::Int(spanned) => spanned.span(),
             Self::Word(spanned) => spanned.span(),
+        }
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+impl proptest::arbitrary::Arbitrary for MetaExpr {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        use proptest::{arbitrary::any, prop_oneof, strategy::Strategy};
+
+        prop_oneof![
+            any::<Ident>().prop_map(Self::Ident),
+            any::<IntValue>().prop_map(|n| Self::Int(Span::unknown(n))),
+            any::<WordValue>().prop_map(|word| Self::Word(Span::unknown(word))),
+            any::<Ident>().prop_map(Self::String),
+        ]
+        .boxed()
+    }
+
+    type Strategy = proptest::prelude::BoxedStrategy<Self>;
+}
+
+impl Serializable for MetaExpr {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        match self {
+            Self::Ident(value) => {
+                target.write_u8(0);
+                value.write_into(target);
+            },
+            Self::Int(value) => {
+                target.write_u8(1);
+                value.inner().write_into(target);
+            },
+            Self::Word(value) => {
+                target.write_u8(2);
+                value.inner().write_into(target);
+            },
+            Self::String(value) => {
+                target.write_u8(3);
+                value.write_into(target);
+            },
+        }
+    }
+}
+
+impl Deserializable for MetaExpr {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        use alloc::string::ToString;
+
+        match source.read_u8()? {
+            0 => Ident::read_from(source).map(Self::Ident),
+            1 => {
+                let value = IntValue::read_from(source)?;
+                Ok(Self::Int(Span::unknown(value)))
+            },
+            2 => {
+                let value = WordValue::read_from(source)?;
+                Ok(Self::Word(Span::unknown(value)))
+            },
+            3 => {
+                let len = source.read_usize()?;
+                let bytes = source.read_slice(len)?;
+                let id = core::str::from_utf8(bytes)
+                    .map_err(|err| DeserializationError::InvalidValue(err.to_string()))?;
+                Ok(Self::String(Ident::from_raw_parts(Span::unknown(Arc::from(
+                    id.to_string().into_boxed_str(),
+                )))))
+            },
+            n => Err(DeserializationError::InvalidValue(format!(
+                "unknown MetaExpr variant tag '{n}'"
+            ))),
         }
     }
 }

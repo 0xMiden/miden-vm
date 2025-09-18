@@ -1,7 +1,12 @@
 use alloc::string::String;
 use core::fmt;
 
-use miden_core::{Felt, FieldElement};
+use miden_core::{
+    Felt, FieldElement,
+    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+};
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 // DOCUMENTATION TYPE
 // ================================================================================================
@@ -99,6 +104,8 @@ impl crate::prettier::PrettyPrint for PushValue {
 // ================================================================================================
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
 pub struct WordValue(pub [Felt; 4]);
 
 impl fmt::Display for WordValue {
@@ -153,12 +160,45 @@ impl core::hash::Hash for WordValue {
     }
 }
 
+#[cfg(feature = "arbitrary")]
+impl proptest::arbitrary::Arbitrary for WordValue {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        use proptest::{array::uniform4, num, strategy::Strategy};
+        uniform4(num::u64::ANY.prop_map(Felt::new)).prop_map(WordValue).boxed()
+    }
+
+    type Strategy = proptest::prelude::BoxedStrategy<Self>;
+}
+
+impl Serializable for WordValue {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        target.write_u64(self.0[0].as_int());
+        target.write_u64(self.0[1].as_int());
+        target.write_u64(self.0[2].as_int());
+        target.write_u64(self.0[3].as_int());
+    }
+}
+
+impl Deserializable for WordValue {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let a = source.read_u64().map(Felt::new)?;
+        let b = source.read_u64().map(Felt::new)?;
+        let c = source.read_u64().map(Felt::new)?;
+        let d = source.read_u64().map(Felt::new)?;
+        Ok(Self([a, b, c, d]))
+    }
+}
+
 // INT VALUE
 // ================================================================================================
 
 /// Represents one of the various types of values that have a hex-encoded representation in Miden
 /// Assembly source files.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(untagged))]
 pub enum IntValue {
     /// A tiny value
     U8(u8),
@@ -304,6 +344,38 @@ impl core::hash::Hash for IntValue {
             Self::Felt(value) => value.as_int().hash(state),
         }
     }
+}
+
+impl Serializable for IntValue {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.as_int().write_into(target)
+    }
+}
+
+impl Deserializable for IntValue {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let raw = source.read_u64()?;
+        Ok(super::lexer::shrink_u64_hex(raw))
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+impl proptest::arbitrary::Arbitrary for IntValue {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        use proptest::{num, prop_oneof, strategy::Strategy};
+        prop_oneof![
+            num::u8::ANY.prop_map(IntValue::U8),
+            ((u8::MAX as u16 + 1)..=u16::MAX).prop_map(IntValue::U16),
+            ((u16::MAX as u32 + 1)..=u32::MAX).prop_map(IntValue::U32),
+            ((u32::MAX as u64 + 1)..=crate::FIELD_MODULUS)
+                .prop_map(|n| IntValue::Felt(Felt::new(n))),
+        ]
+        .boxed()
+    }
+
+    type Strategy = proptest::prelude::BoxedStrategy<Self>;
 }
 
 // BINARY ENCODED VALUE
