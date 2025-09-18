@@ -15,7 +15,7 @@ use crate::{
     ProcessState,
     chiplets::Ace,
     continuation_stack::{Continuation, ContinuationStack},
-    fast::execution_tracer::{ExecutionTracer, TraceFragmentContexts},
+    fast::execution_tracer::{ExecutionTracer, TraceGenerationContext},
 };
 
 pub mod execution_tracer;
@@ -306,17 +306,17 @@ impl FastProcessor {
     }
 
     /// Executes the given program and returns the stack outputs, the advice provider, and
-    /// information for building the trace.
+    /// context necessary to build the trace.
     pub async fn execute_for_trace(
         self,
         program: &Program,
         host: &mut impl AsyncHost,
         fragment_size: usize,
-    ) -> Result<(ExecutionOutput, TraceFragmentContexts), ExecutionError> {
+    ) -> Result<(ExecutionOutput, TraceGenerationContext), ExecutionError> {
         let mut tracer = ExecutionTracer::new(fragment_size);
         let execution_output = self.execute_with_tracer(program, host, &mut tracer).await?;
 
-        Ok((execution_output, tracer.into_fragment_contexts()))
+        Ok((execution_output, tracer.into_trace_generation_context()))
     }
 
     /// Executes the given program with the provided tracer and returns the stack outputs, and the
@@ -670,7 +670,7 @@ impl FastProcessor {
         program: &Program,
         host: &mut impl AsyncHost,
         fragment_size: usize,
-    ) -> Result<(ExecutionOutput, TraceFragmentContexts), ExecutionError> {
+    ) -> Result<(ExecutionOutput, TraceGenerationContext), ExecutionError> {
         // Create a new Tokio runtime and block on the async execution
         let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
 

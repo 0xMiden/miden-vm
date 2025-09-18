@@ -77,14 +77,27 @@ impl Processor for FastProcessor {
     /// Note that we do not record any memory reads in this operation (through a
     /// [crate::fast::Tracer]), because the parallel trace generation skips the circuit
     /// evaluation completely.
-    fn op_eval_circuit(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
+    fn op_eval_circuit(
+        &mut self,
+        err_ctx: &impl ErrorContext,
+        tracer: &mut impl Tracer,
+    ) -> Result<(), ExecutionError> {
         let num_eval = self.stack_get(2);
         let num_read = self.stack_get(1);
         let ptr = self.stack_get(0);
         let ctx = self.ctx;
-        let circuit_evaluation =
-            eval_circuit_fast_(ctx, ptr, self.clk, num_read, num_eval, &mut self.memory, err_ctx)?;
-        self.ace.add_circuit_evaluation(self.clk, circuit_evaluation);
+        let circuit_evaluation = eval_circuit_fast_(
+            ctx,
+            ptr,
+            self.clk,
+            num_read,
+            num_eval,
+            &mut self.memory,
+            err_ctx,
+            tracer,
+        )?;
+        self.ace.add_circuit_evaluation(self.clk, circuit_evaluation.clone());
+        tracer.record_circuit_evaluation(self.clk, circuit_evaluation);
 
         Ok(())
     }
@@ -338,12 +351,7 @@ impl OperationHelperRegisters for NoopHelperRegisters {
     }
 
     #[inline(always)]
-    fn op_u32div_registers(
-        _numerator: u64,
-        _quotient: u64,
-        _denominator: u64,
-        _remainder: u64,
-    ) -> [Felt; NUM_USER_OP_HELPERS] {
+    fn op_u32div_registers(_hi: Felt, _lo: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
         DEFAULT_HELPERS
     }
 
@@ -386,6 +394,7 @@ fn eval_circuit_fast_(
     num_eval: Felt,
     mem: &mut Memory,
     err_ctx: &impl ErrorContext,
+    tracer: &mut impl Tracer,
 ) -> Result<CircuitEvaluation, ExecutionError> {
     let num_vars = num_vars.as_int();
     let num_eval = num_eval.as_int();
@@ -426,6 +435,7 @@ fn eval_circuit_fast_(
     // evaluation completely
     for _ in 0..num_read_rows {
         let word = mem.read_word(ctx, ptr, clk, err_ctx).map_err(ExecutionError::MemoryError)?;
+        tracer.record_memory_read_word(word, ptr, ctx, clk);
         evaluation_context.do_read(ptr, word)?;
         ptr += PTR_OFFSET_WORD;
     }
@@ -433,6 +443,7 @@ fn eval_circuit_fast_(
     for _ in 0..num_eval_rows {
         let instruction =
             mem.read_element(ctx, ptr, err_ctx).map_err(ExecutionError::MemoryError)?;
+        tracer.record_memory_read_element(instruction, ptr, ctx, clk);
         evaluation_context.do_eval(ptr, instruction, err_ctx)?;
         ptr += PTR_OFFSET_ELEM;
     }

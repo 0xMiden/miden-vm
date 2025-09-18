@@ -1,13 +1,13 @@
 use alloc::{boxed::Box, vec::Vec};
 use core::{mem::MaybeUninit, ops::ControlFlow};
 
+use itertools::Itertools;
 use miden_air::{
     FieldElement, RowIndex,
     trace::{
-        CHIPLETS_RANGE, CLK_COL_IDX, CTX_COL_IDX, DECODER_TRACE_OFFSET, DECODER_TRACE_WIDTH,
-        FMP_COL_IDX, FN_HASH_RANGE, IN_SYSCALL_COL_IDX, MIN_TRACE_LEN, RANGE_CHECK_TRACE_RANGE,
-        RANGE_CHECK_TRACE_WIDTH, STACK_TRACE_OFFSET, STACK_TRACE_WIDTH, SYS_TRACE_WIDTH,
-        TRACE_WIDTH,
+        CLK_COL_IDX, CTX_COL_IDX, DECODER_TRACE_OFFSET, DECODER_TRACE_WIDTH, FMP_COL_IDX,
+        FN_HASH_RANGE, IN_SYSCALL_COL_IDX, MIN_TRACE_LEN, PADDED_TRACE_WIDTH, STACK_TRACE_OFFSET,
+        STACK_TRACE_WIDTH, SYS_TRACE_WIDTH, TRACE_WIDTH,
         decoder::{
             ADDR_COL_IDX, GROUP_COUNT_COL_IDX, HASHER_STATE_OFFSET, IN_SPAN_COL_IDX,
             NUM_HASHER_COLUMNS, NUM_OP_BATCH_FLAGS, NUM_OP_BITS, NUM_USER_OP_HELPERS,
@@ -18,7 +18,7 @@ use miden_air::{
     },
 };
 use miden_core::{
-    Felt, ONE, OPCODE_PUSH, Operation, QuadFelt, StarkField, WORD_SIZE, Word, ZERO,
+    Felt, Kernel, ONE, OPCODE_PUSH, Operation, QuadFelt, StarkField, WORD_SIZE, Word, ZERO,
     mast::{BasicBlockNode, MastForest, MastNode, MastNodeExt, MastNodeId, OpBatch},
     stack::MIN_STACK_DEPTH,
     utils::{range, uninit_vector},
@@ -27,22 +27,34 @@ use rayon::prelude::*;
 use winter_prover::{crypto::RandomCoin, math::batch_inversion};
 
 use crate::{
-    ColMatrix, ContextId, ExecutionError, ProcessState,
+    ChipletsLengths, ColMatrix, ContextId, ErrorContext, ExecutionError, ExecutionTrace,
+    ProcessState, TraceLenSummary,
+    chiplets::{Chiplets, CircuitEvaluation, MAX_NUM_ACE_WIRES, PTR_OFFSET_ELEM, PTR_OFFSET_WORD},
     continuation_stack::Continuation,
     crypto::RpoRandomCoin,
-    decoder::{BasicBlockContext, block_stack::ExecutionContextInfo},
+    decoder::{
+        AuxTraceBuilder as DecoderAuxTraceBuilder, BasicBlockContext,
+        block_stack::ExecutionContextInfo,
+    },
+    errors::AceError,
     fast::{
-        NoopTracer, Tracer,
-        execution_tracer::TraceFragmentContexts,
+        ExecutionOutput, NoopTracer, Tracer,
+        execution_tracer::TraceGenerationContext,
         trace_state::{
-            AdviceReplay, DecoderState, ExecutionContextSystemInfo, HasherReplay, MemoryReplay,
-            NodeExecutionState, NodeFlags, TraceFragmentContext,
+            AceReplay, AdviceReplay, BitwiseOp, BitwiseReplay, CoreTraceFragmentContext,
+            DecoderState, ExecutionContextSystemInfo, HasherOp, HasherRequestReplay,
+            HasherResponseReplay, KernelReplay, MemoryReadsReplay, MemoryWritesReplay,
+            NodeExecutionState, NodeFlags,
         },
     },
     host::default::NoopHost,
-    processor::{OperationHelperRegisters, Processor, StackInterface, SystemInterface},
+    processor::{
+        MemoryInterface, OperationHelperRegisters, Processor, StackInterface, SystemInterface,
+    },
+    range::RangeChecker,
+    stack::AuxTraceBuilder as StackAuxTraceBuilder,
     system::{FMP_MIN, SYSCALL_FMP_MIN},
-    trace::NUM_RAND_ROWS,
+    trace::{AuxTraceBuilders, NUM_RAND_ROWS},
     utils::split_u32_into_u16,
 };
 
@@ -65,13 +77,141 @@ mod tests;
 
 /// Builds the main trace from the provided trace states in parallel.
 pub fn build_trace(
-    trace_fragment_contexts: TraceFragmentContexts,
+    execution_output: ExecutionOutput,
+    trace_generation_context: TraceGenerationContext,
     program_hash: Word,
-) -> MainTrace {
-    let TraceFragmentContexts { contexts, fragment_size } = trace_fragment_contexts;
+    kernel: Kernel,
+) -> ExecutionTrace {
+    let TraceGenerationContext {
+        core_trace_contexts,
+        range_checker_replay,
+        memory_writes,
+        bitwise_replay: bitwise,
+        kernel_replay,
+        hasher_for_chiplet,
+        ace_replay,
+        fragment_size,
+    } = trace_generation_context;
 
+    let chiplets = initialize_chiplets(
+        kernel.clone(),
+        &core_trace_contexts,
+        memory_writes,
+        bitwise,
+        kernel_replay,
+        hasher_for_chiplet,
+        ace_replay,
+    );
+
+    let range_checker = initialize_range_checker(range_checker_replay, &chiplets);
+
+    let fragments = generate_core_trace_fragments(core_trace_contexts, fragment_size);
+
+    // Calculate trace length
+    let core_trace_len = {
+        let core_trace_len: usize = fragments.iter().map(|f| f.row_count()).sum();
+
+        // TODO(plafer): We need to do a "- 1" here to be consistent with Process::execute(), which
+        // has a bug that causes it to not always insert a HALT row at the end of execution,
+        // documented in [#1383](https://github.com/0xMiden/miden-vm/issues/1383). We correctly insert a HALT row
+        // when generating the core trace fragments, so this "- 1" accounts for that extra row.
+        // We should remove this "- 1" once Process::execute() is fixed or removed entirely.
+        core_trace_len - 1
+    };
+
+    // Get the number of rows for the range checker
+    let range_table_len = range_checker.get_number_range_checker_rows();
+
+    let trace_len_summary =
+        TraceLenSummary::new(core_trace_len, range_table_len, ChipletsLengths::new(&chiplets));
+
+    // Compute the final main trace length, after accounting for random rows
+    let main_trace_len =
+        compute_main_trace_length(core_trace_len, range_table_len, chiplets.trace_len());
+
+    let (core_trace_columns, (range_checker_trace, chiplets_trace)) = rayon::join(
+        || combine_fragments(fragments, main_trace_len),
+        || {
+            rayon::join(
+                || {
+                    range_checker.into_trace_with_table(
+                        range_table_len,
+                        main_trace_len,
+                        NUM_RAND_ROWS,
+                    )
+                },
+                || chiplets.into_trace(main_trace_len, NUM_RAND_ROWS),
+            )
+        },
+    );
+
+    // Padding to make the number of columns a multiple of 8 i.e., the RPO permutation rate
+    let padding = vec![vec![ZERO; main_trace_len]; PADDED_TRACE_WIDTH - TRACE_WIDTH];
+
+    // Chain all trace columns together
+    let mut trace_columns: Vec<Vec<Felt>> = core_trace_columns
+        .into_iter()
+        .chain(range_checker_trace.trace)
+        .chain(chiplets_trace.trace)
+        .chain(padding)
+        .collect();
+
+    // Initialize random element generator using program hash
+    let mut rng = RpoRandomCoin::new(program_hash);
+
+    // Inject random values into the last NUM_RAND_ROWS rows for all columns
+    for i in main_trace_len - NUM_RAND_ROWS..main_trace_len {
+        for column in trace_columns.iter_mut() {
+            column[i] = rng.draw().expect("failed to draw a random value");
+        }
+    }
+
+    // Create the MainTrace
+    let main_trace = {
+        let last_program_row = RowIndex::from((core_trace_len as u32).saturating_sub(1));
+        let col_matrix = ColMatrix::new(trace_columns);
+        MainTrace::new(col_matrix, last_program_row)
+    };
+
+    // Create aux trace builders
+    let aux_trace_builders = AuxTraceBuilders {
+        decoder: DecoderAuxTraceBuilder::default(),
+        range: range_checker_trace.aux_builder,
+        chiplets: chiplets_trace.aux_builder,
+        stack: StackAuxTraceBuilder,
+    };
+
+    ExecutionTrace::new_from_parts(
+        program_hash,
+        kernel,
+        execution_output,
+        main_trace,
+        aux_trace_builders,
+        trace_len_summary,
+    )
+}
+
+fn compute_main_trace_length(
+    core_trace_len: usize,
+    range_table_len: usize,
+    chiplets_trace_len: usize,
+) -> usize {
+    // Get the trace length required to hold all execution trace steps
+    let max_len = range_table_len.max(core_trace_len).max(chiplets_trace_len);
+
+    // Pad the trace length to the next power of two and ensure that there is space for random
+    // rows
+    let trace_len = (max_len + NUM_RAND_ROWS).next_power_of_two();
+    core::cmp::max(trace_len, MIN_TRACE_LEN)
+}
+
+/// Generates core trace fragments in parallel from the provided trace fragment contexts.
+fn generate_core_trace_fragments(
+    core_trace_contexts: Vec<CoreTraceFragmentContext>,
+    fragment_size: usize,
+) -> Vec<CoreTraceFragment> {
     // Save the first stack top for initialization
-    let first_stack_top = if let Some(first_context) = contexts.first() {
+    let first_stack_top = if let Some(first_context) = core_trace_contexts.first() {
         first_context.state.stack.stack_top.to_vec()
     } else {
         vec![ZERO; MIN_STACK_DEPTH]
@@ -94,7 +234,7 @@ pub fn build_trace(
         CoreTraceFragment,
         [Felt; STACK_TRACE_WIDTH],
         [Felt; SYS_TRACE_WIDTH],
-    )> = contexts
+    )> = core_trace_contexts
         .into_par_iter()
         .map(|trace_state| {
             let main_trace_generator = CoreTraceFragmentGenerator::new(trace_state, fragment_size);
@@ -124,8 +264,17 @@ pub fn build_trace(
         &first_system_state,
     );
 
-    // Combine fragments into a single trace
-    combine_fragments(fragments, program_hash)
+    append_halt_opcode_row(
+        fragments.last_mut().expect("expected at least one trace fragment"),
+        system_rows.last().expect(
+            "system_rows should not be empty, which indicates that there are no trace fragments",
+        ),
+        stack_rows.last().expect(
+            "stack_rows should not be empty, which indicates that there are no trace fragments",
+        ),
+    );
+
+    fragments
 }
 
 /// Fixes up the stack and system rows in fragments by initializing the first row of each fragment
@@ -181,82 +330,243 @@ fn fixup_stack_and_system_rows(
             }
         }
     }
-
-    // Populate the last row into the last fragment
-    {
-        let last_fragment = fragments.last_mut().expect("expected at least one trace fragment");
-        let last_system_state = system_rows.last().expect(
-            "system_rows should not be empty, which indicates that there are no trace fragments",
-        );
-        let last_stack_state = stack_rows.last().expect(
-            "stack_rows should not be empty, which indicates that there are no trace fragments",
-        );
-
-        // system columns
-        // ---------------------------------------------------------------------------------------
-        for (col_idx, &value) in last_system_state.iter().enumerate() {
-            last_fragment.columns[col_idx].push(value);
-        }
-
-        // stack columns
-        // ---------------------------------------------------------------------------------------
-        for (col_idx, &value) in last_stack_state.iter().enumerate() {
-            last_fragment.columns[STACK_TRACE_OFFSET + col_idx].push(value);
-        }
-
-        // decoder columns: padding with final decoder state
-        // ---------------------------------------------------------------------------------------
-        // Pad addr trace (decoder block address column) with ZEROs
-        last_fragment.columns[DECODER_TRACE_OFFSET + ADDR_COL_IDX].push(ZERO);
-
-        // Pad op_bits columns with HALT opcode bits
-        let halt_opcode = Operation::Halt.op_code();
-        for bit_idx in 0..NUM_OP_BITS {
-            let bit_value = Felt::from((halt_opcode >> bit_idx) & 1);
-            last_fragment.columns[DECODER_TRACE_OFFSET + OP_BITS_OFFSET + bit_idx].push(bit_value);
-        }
-
-        // Pad hasher state columns (8 columns)
-        // - First 4 columns: copy the last value (to propagate program hash)
-        // - Remaining 4 columns: fill with ZEROs
-        for hasher_col_idx in 0..NUM_HASHER_COLUMNS {
-            let col_idx = DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + hasher_col_idx;
-            if hasher_col_idx < 4 {
-                // For first 4 hasher columns, copy the last value to propagate program hash
-                let last_row_idx = last_fragment.columns[col_idx].len() - 1;
-                let last_hasher_value = last_fragment.columns[col_idx][last_row_idx];
-                last_fragment.columns[col_idx].push(last_hasher_value);
-            } else {
-                // For remaining 4 hasher columns, fill with ZEROs
-                last_fragment.columns[col_idx].push(ZERO);
-            }
-        }
-
-        // Pad in_span column with ZEROs
-        last_fragment.columns[DECODER_TRACE_OFFSET + IN_SPAN_COL_IDX].push(ZERO);
-
-        // Pad group_count column with ZEROs
-        last_fragment.columns[DECODER_TRACE_OFFSET + GROUP_COUNT_COL_IDX].push(ZERO);
-
-        // Pad op_idx column with ZEROs
-        last_fragment.columns[DECODER_TRACE_OFFSET + OP_INDEX_COL_IDX].push(ZERO);
-
-        // Pad op_batch_flags columns (3 columns) with ZEROs
-        for batch_flag_idx in 0..NUM_OP_BATCH_FLAGS {
-            let col_idx = DECODER_TRACE_OFFSET + OP_BATCH_FLAGS_OFFSET + batch_flag_idx;
-            last_fragment.columns[col_idx].push(ZERO);
-        }
-
-        // Pad op_bit_extra columns (2 columns)
-        // - First column: fill with ZEROs (HALT doesn't use this)
-        // - Second column: fill with ONEs (product of two most significant HALT bits, both are 1)
-        last_fragment.columns[DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET].push(ZERO);
-        last_fragment.columns[DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET + 1].push(ONE);
-    }
 }
 
-/// Combines multiple CoreTraceFragments into a single MainTrace
-fn combine_fragments(fragments: Vec<CoreTraceFragment>, program_hash: Word) -> MainTrace {
+/// Appends a row with the HALT opcode to the end of the last fragment.
+///
+/// This ensures that the trace ends with at least one HALT operation, which is necessary to satisfy
+/// the constraints.
+fn append_halt_opcode_row(
+    last_fragment: &mut CoreTraceFragment,
+    last_system_state: &[Felt; SYS_TRACE_WIDTH],
+    last_stack_state: &[Felt; STACK_TRACE_WIDTH],
+) {
+    // system columns
+    // ---------------------------------------------------------------------------------------
+    for (col_idx, &value) in last_system_state.iter().enumerate() {
+        last_fragment.columns[col_idx].push(value);
+    }
+
+    // stack columns
+    // ---------------------------------------------------------------------------------------
+    for (col_idx, &value) in last_stack_state.iter().enumerate() {
+        last_fragment.columns[STACK_TRACE_OFFSET + col_idx].push(value);
+    }
+
+    // decoder columns: padding with final decoder state
+    // ---------------------------------------------------------------------------------------
+    // Pad addr trace (decoder block address column) with ZEROs
+    last_fragment.columns[DECODER_TRACE_OFFSET + ADDR_COL_IDX].push(ZERO);
+
+    // Pad op_bits columns with HALT opcode bits
+    let halt_opcode = Operation::Halt.op_code();
+    for bit_idx in 0..NUM_OP_BITS {
+        let bit_value = Felt::from((halt_opcode >> bit_idx) & 1);
+        last_fragment.columns[DECODER_TRACE_OFFSET + OP_BITS_OFFSET + bit_idx].push(bit_value);
+    }
+
+    // Pad hasher state columns (8 columns)
+    // - First 4 columns: copy the last value (to propagate program hash)
+    // - Remaining 4 columns: fill with ZEROs
+    for hasher_col_idx in 0..NUM_HASHER_COLUMNS {
+        let col_idx = DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + hasher_col_idx;
+        if hasher_col_idx < 4 {
+            // For first 4 hasher columns, copy the last value to propagate program hash
+            let last_row_idx = last_fragment.columns[col_idx].len() - 1;
+            let last_hasher_value = last_fragment.columns[col_idx][last_row_idx];
+            last_fragment.columns[col_idx].push(last_hasher_value);
+        } else {
+            // For remaining 4 hasher columns, fill with ZEROs
+            last_fragment.columns[col_idx].push(ZERO);
+        }
+    }
+
+    // Pad in_span column with ZEROs
+    last_fragment.columns[DECODER_TRACE_OFFSET + IN_SPAN_COL_IDX].push(ZERO);
+
+    // Pad group_count column with ZEROs
+    last_fragment.columns[DECODER_TRACE_OFFSET + GROUP_COUNT_COL_IDX].push(ZERO);
+
+    // Pad op_idx column with ZEROs
+    last_fragment.columns[DECODER_TRACE_OFFSET + OP_INDEX_COL_IDX].push(ZERO);
+
+    // Pad op_batch_flags columns (3 columns) with ZEROs
+    for batch_flag_idx in 0..NUM_OP_BATCH_FLAGS {
+        let col_idx = DECODER_TRACE_OFFSET + OP_BATCH_FLAGS_OFFSET + batch_flag_idx;
+        last_fragment.columns[col_idx].push(ZERO);
+    }
+
+    // Pad op_bit_extra columns (2 columns)
+    // - First column: fill with ZEROs (HALT doesn't use this)
+    // - Second column: fill with ONEs (product of two most significant HALT bits, both are 1)
+    last_fragment.columns[DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET].push(ZERO);
+    last_fragment.columns[DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET + 1].push(ONE);
+}
+
+fn initialize_range_checker(
+    range_checker_replay: crate::fast::trace_state::RangeCheckerReplay,
+    chiplets: &Chiplets,
+) -> RangeChecker {
+    let mut range_checker = RangeChecker::new();
+
+    // Add all u32 range checks recorded during execution
+    for (clk, values) in range_checker_replay.into_iter() {
+        range_checker.add_range_checks(clk, &values);
+    }
+
+    // Add all memory-related range checks
+    chiplets.append_range_checks(&mut range_checker);
+
+    range_checker
+}
+
+fn initialize_chiplets(
+    kernel: Kernel,
+    core_trace_contexts: &[CoreTraceFragmentContext],
+    memory_writes: MemoryWritesReplay,
+    bitwise: BitwiseReplay,
+    kernel_replay: KernelReplay,
+    hasher_for_chiplet: HasherRequestReplay,
+    ace_replay: AceReplay,
+) -> Chiplets {
+    let mut chiplets = Chiplets::new(kernel);
+
+    // populate hasher chiplet
+    for hasher_op in hasher_for_chiplet.into_iter() {
+        match hasher_op {
+            HasherOp::Permute(input_state) => {
+                chiplets.hasher.permute(input_state);
+            },
+            HasherOp::HashControlBlock((h1, h2, domain, expected_hash)) => {
+                chiplets.hasher.hash_control_block(h1, h2, domain, expected_hash);
+            },
+            HasherOp::HashBasicBlock((op_batches, expected_hash)) => {
+                chiplets.hasher.hash_basic_block(&op_batches, expected_hash);
+            },
+            HasherOp::BuildMerkleRoot((value, path, index)) => {
+                chiplets.hasher.build_merkle_root(value, &path, index);
+            },
+            HasherOp::UpdateMerkleRoot((old_value, new_value, path, index)) => {
+                chiplets.hasher.update_merkle_root(old_value, new_value, &path, index);
+            },
+        }
+    }
+
+    // populate bitwise chiplet
+    for (bitwise_op, a, b) in bitwise {
+        match bitwise_op {
+            BitwiseOp::U32And => {
+                chiplets
+                    .bitwise
+                    .u32and(a, b, &())
+                    .expect("bitwise AND operation failed when populating chiplet");
+            },
+            BitwiseOp::U32Xor => {
+                chiplets
+                    .bitwise
+                    .u32xor(a, b, &())
+                    .expect("bitwise XOR operation failed when populating chiplet");
+            },
+        }
+    }
+
+    // populate memory chiplet
+    //
+    // Note: care is taken to order all the accesses by clock cycle, since the memory chiplet
+    // currently assumes that all memory accesses are issued in the same order as they appear in
+    // the trace.
+    {
+        let elements_written: Box<dyn Iterator<Item = MemoryAccess>> =
+            Box::new(memory_writes.iter_elements_written().map(|(element, addr, ctx, clk)| {
+                MemoryAccess::WriteElement(*addr, *element, *ctx, *clk)
+            }));
+        let words_written: Box<dyn Iterator<Item = MemoryAccess>> = Box::new(
+            memory_writes
+                .iter_words_written()
+                .map(|(word, addr, ctx, clk)| MemoryAccess::WriteWord(*addr, *word, *ctx, *clk)),
+        );
+        let elements_read: Box<dyn Iterator<Item = MemoryAccess>> =
+            Box::new(core_trace_contexts.iter().flat_map(|ctx| {
+                ctx.replay
+                    .memory_reads
+                    .iter_read_elements()
+                    .map(|(_, addr, ctx, clk)| MemoryAccess::ReadElement(addr, ctx, clk))
+            }));
+        let words_read: Box<dyn Iterator<Item = MemoryAccess>> =
+            Box::new(core_trace_contexts.iter().flat_map(|ctx| {
+                ctx.replay
+                    .memory_reads
+                    .iter_read_words()
+                    .map(|(_, addr, ctx, clk)| MemoryAccess::ReadWord(addr, ctx, clk))
+            }));
+
+        [elements_written, words_written, elements_read, words_read]
+            .into_iter()
+            .kmerge_by(|a, b| a.clk() < b.clk())
+            .for_each(|mem_access| match mem_access {
+                MemoryAccess::ReadElement(addr, ctx, clk) => {
+                    chiplets
+                        .memory
+                        .read(ctx, addr, clk, &())
+                        .expect("memory read element failed when populating chiplet");
+                },
+                MemoryAccess::WriteElement(addr, element, ctx, clk) => {
+                    chiplets
+                        .memory
+                        .write(ctx, addr, clk, element, &())
+                        .expect("memory write element failed when populating chiplet");
+                },
+                MemoryAccess::ReadWord(addr, ctx, clk) => {
+                    chiplets
+                        .memory
+                        .read_word(ctx, addr, clk, &())
+                        .expect("memory read word failed when populating chiplet");
+                },
+                MemoryAccess::WriteWord(addr, word, ctx, clk) => {
+                    chiplets
+                        .memory
+                        .write_word(ctx, addr, clk, word, &())
+                        .expect("memory write word failed when populating chiplet");
+                },
+            });
+
+        enum MemoryAccess {
+            ReadElement(Felt, ContextId, RowIndex),
+            WriteElement(Felt, Felt, ContextId, RowIndex),
+            ReadWord(Felt, ContextId, RowIndex),
+            WriteWord(Felt, Word, ContextId, RowIndex),
+        }
+
+        impl MemoryAccess {
+            fn clk(&self) -> RowIndex {
+                match self {
+                    MemoryAccess::ReadElement(_, _, clk) => *clk,
+                    MemoryAccess::WriteElement(_, _, _, clk) => *clk,
+                    MemoryAccess::ReadWord(_, _, clk) => *clk,
+                    MemoryAccess::WriteWord(_, _, _, clk) => *clk,
+                }
+            }
+        }
+    }
+
+    // populate ACE chiplet
+    for (clk, circuit_eval) in ace_replay.into_iter() {
+        chiplets.ace.add_circuit_evaluation(clk, circuit_eval);
+    }
+
+    // populate kernel ROM
+    for proc_hash in kernel_replay.into_iter() {
+        chiplets
+            .kernel_rom
+            .access_proc(proc_hash, &())
+            .expect("kernel proc access failed when populating chiplet");
+    }
+
+    chiplets
+}
+
+/// Combines multiple CoreTraceFragments into core trace columns
+fn combine_fragments(fragments: Vec<CoreTraceFragment>, trace_len: usize) -> Vec<Vec<Felt>> {
     if fragments.is_empty() {
         panic!("Cannot combine empty fragments vector");
     }
@@ -264,22 +574,9 @@ fn combine_fragments(fragments: Vec<CoreTraceFragment>, program_hash: Word) -> M
     // Calculate total number of rows from fragments
     let total_program_rows: usize = fragments.iter().map(|f| f.row_count()).sum();
 
-    // Pad the trace length to the next power of two and ensure that there is space for random rows
-    // (or at least the minimum trace length). Note that `total_program_rows` contains one HALT
-    // operation, which is considered "padding" when considering random rows.
-    let trace_len =
-        core::cmp::max((total_program_rows + NUM_RAND_ROWS - 1).next_power_of_two(), MIN_TRACE_LEN);
-
-    // Find the last program row (last row of the last fragment)
-    let last_program_row = if let Some(_last_fragment) = fragments.last() {
-        RowIndex::from((total_program_rows as u32).saturating_sub(1))
-    } else {
-        RowIndex::from(0u32)
-    };
-
-    // Initialize columns for the full trace using uninitialized memory
+    // Initialize columns for the core trace only using uninitialized memory
     let mut trace_columns: Vec<Box<[MaybeUninit<Felt>]>> =
-        (0..TRACE_WIDTH).map(|_| Box::new_uninit_slice(trace_len)).collect();
+        (0..CORE_TRACE_WIDTH).map(|_| Box::new_uninit_slice(trace_len)).collect();
 
     // Copy core trace columns from fragments
     let mut current_row_idx = 0;
@@ -290,22 +587,8 @@ fn combine_fragments(fragments: Vec<CoreTraceFragment>, program_hash: Word) -> M
             let global_row_idx = current_row_idx + local_row_idx;
 
             // Copy core trace columns (system, decoder, stack)
-            for (col_idx, trace_column) in
-                trace_columns.iter_mut().enumerate().take(CORE_TRACE_WIDTH)
-            {
+            for (col_idx, trace_column) in trace_columns.iter_mut().enumerate() {
                 trace_column[global_row_idx].write(fragment.columns[col_idx][local_row_idx]);
-            }
-
-            // Add zeros for range check columns
-            for trace_column in
-                trace_columns.iter_mut().skip(CORE_TRACE_WIDTH).take(RANGE_CHECK_TRACE_WIDTH)
-            {
-                trace_column[global_row_idx].write(ZERO);
-            }
-
-            // Add zeros for chiplets columns
-            for col_idx in CHIPLETS_RANGE {
-                trace_columns[col_idx][global_row_idx].write(ZERO);
             }
         }
 
@@ -316,7 +599,7 @@ fn combine_fragments(fragments: Vec<CoreTraceFragment>, program_hash: Word) -> M
     pad_trace_columns(&mut trace_columns, total_program_rows, trace_len);
 
     // Convert uninitialized columns to initialized Vec<Felt>
-    let mut trace_columns: Vec<Vec<Felt>> = trace_columns
+    let mut core_trace_columns: Vec<Vec<Felt>> = trace_columns
         .into_iter()
         .map(|uninit_column| {
             // Safety: All elements have been initialized through MaybeUninit::write()
@@ -326,22 +609,11 @@ fn combine_fragments(fragments: Vec<CoreTraceFragment>, program_hash: Word) -> M
         .collect();
 
     // Run batch inversion on stack's H0 helper column
-    trace_columns[STACK_TRACE_OFFSET + H0_COL_IDX] =
-        batch_inversion(&trace_columns[STACK_TRACE_OFFSET + H0_COL_IDX]);
+    core_trace_columns[STACK_TRACE_OFFSET + H0_COL_IDX] =
+        batch_inversion(&core_trace_columns[STACK_TRACE_OFFSET + H0_COL_IDX]);
 
-    // Inject random values into the last NUM_RAND_ROWS rows of core trace columns only
-    // Use program hash to initialize random element generator
-    let mut rng = RpoRandomCoin::new(program_hash);
-
-    for i in trace_len - NUM_RAND_ROWS..trace_len {
-        for column in trace_columns.iter_mut().take(CORE_TRACE_WIDTH) {
-            column[i] = rng.draw().expect("failed to draw a random value");
-        }
-    }
-
-    // Create the MainTrace
-    let col_matrix = ColMatrix::new(trace_columns);
-    MainTrace::new(col_matrix, last_program_row)
+    // Return the core trace columns
+    core_trace_columns
 }
 
 /// Pads the trace columns from `total_program_rows` rows to `trace_len` rows.
@@ -507,23 +779,6 @@ fn pad_trace_columns(
             stack_row.write(last_stack_value);
         }
     }
-
-    // Range checker and chiplets columns
-    // ------------------------
-
-    // Pad with ZEROs for now (still unimplemented)
-    #[allow(clippy::needless_range_loop)]
-    for row_idx in 0..trace_len {
-        // Range checker columns
-        for col_idx in RANGE_CHECK_TRACE_RANGE {
-            trace_columns[col_idx][row_idx].write(ZERO);
-        }
-
-        // Chiplets columns
-        for col_idx in CHIPLETS_RANGE {
-            trace_columns[col_idx][row_idx].write(ZERO);
-        }
-    }
 }
 
 // CORE TRACE FRAGMENT
@@ -560,7 +815,7 @@ impl CoreTraceFragment {
 struct CoreTraceFragmentGenerator {
     fragment_start_clk: RowIndex,
     fragment: CoreTraceFragment,
-    context: TraceFragmentContext,
+    context: CoreTraceFragmentContext,
     span_context: Option<BasicBlockContext>,
     stack_rows: Option<[Felt; STACK_TRACE_WIDTH]>,
     system_rows: Option<[Felt; SYS_TRACE_WIDTH]>,
@@ -569,7 +824,7 @@ struct CoreTraceFragmentGenerator {
 
 impl CoreTraceFragmentGenerator {
     /// Creates a new CoreTraceFragmentGenerator with the provided checkpoint.
-    pub fn new(context: TraceFragmentContext, fragment_size: usize) -> Self {
+    pub fn new(context: CoreTraceFragmentContext, fragment_size: usize) -> Self {
         Self {
             fragment_start_clk: context.state.system.clk,
             // Safety: the `CoreTraceFragmentGenerator` will fill in all the rows, or truncate any
@@ -1021,7 +1276,7 @@ impl CoreTraceFragmentGenerator {
 
                 let callee_hash = {
                     let mem_addr = self.context.state.stack.get(0);
-                    self.context.replay.memory.replay_read_word(mem_addr)
+                    self.context.replay.memory_reads.replay_read_word(mem_addr)
                 };
 
                 // 1. Add "start DYN/DYNCALL" row
@@ -1491,8 +1746,8 @@ impl Processor for CoreTraceFragmentGenerator {
     type System = Self;
     type Stack = Self;
     type AdviceProvider = AdviceReplay;
-    type Memory = MemoryReplay;
-    type Hasher = HasherReplay;
+    type Memory = MemoryReadsReplay;
+    type Hasher = HasherResponseReplay;
 
     fn stack(&mut self) -> &mut Self::Stack {
         self
@@ -1511,7 +1766,7 @@ impl Processor for CoreTraceFragmentGenerator {
     }
 
     fn memory(&mut self) -> &mut Self::Memory {
-        &mut self.context.replay.memory
+        &mut self.context.replay.memory_reads
     }
 
     fn hasher(&mut self) -> &mut Self::Hasher {
@@ -1520,8 +1775,25 @@ impl Processor for CoreTraceFragmentGenerator {
 
     fn op_eval_circuit(
         &mut self,
-        _err_ctx: &impl crate::ErrorContext,
+        err_ctx: &impl ErrorContext,
+        tracer: &mut impl Tracer,
     ) -> Result<(), ExecutionError> {
+        let num_eval = self.stack().get(2);
+        let num_read = self.stack().get(1);
+        let ptr = self.stack().get(0);
+        let ctx = self.system().ctx();
+
+        let _circuit_evaluation = eval_circuit_fast_(
+            ctx,
+            ptr,
+            self.system().clk(),
+            num_read,
+            num_eval,
+            self,
+            err_ctx,
+            tracer,
+        )?;
+
         Ok(())
     }
 }
@@ -1655,15 +1927,10 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
     }
 
     #[inline(always)]
-    fn op_u32div_registers(
-        numerator: u64,
-        quotient: u64,
-        denominator: u64,
-        remainder: u64,
-    ) -> [Felt; NUM_USER_OP_HELPERS] {
+    fn op_u32div_registers(hi: Felt, lo: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
         // Compute helpers for range checks
-        let (t1, t0) = split_u32_into_u16(numerator - quotient);
-        let (t3, t2) = split_u32_into_u16(denominator - remainder - 1);
+        let (t1, t0) = split_u32_into_u16(lo.as_int());
+        let (t3, t2) = split_u32_into_u16(hi.as_int());
 
         [Felt::from(t0), Felt::from(t1), Felt::from(t2), Felt::from(t3), ZERO, ZERO]
     }
@@ -1703,4 +1970,90 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
             acc_tmp.base_element(1),
         ]
     }
+}
+
+// HELPERS
+// ================================================================================================
+
+// TODO(plafer): If we want to keep this strategy, then move the `op_eval_circuit()` method
+// implementation to the `Processor` trait, and have `FastProcessor` and
+// `CoreTraceFragmentGenerator` both use it.
+/// Identical to `[chiplets::ace::eval_circuit]` but adapted for use with `[FastProcessor]`.
+#[allow(clippy::too_many_arguments)]
+fn eval_circuit_fast_(
+    ctx: ContextId,
+    ptr: Felt,
+    clk: RowIndex,
+    num_vars: Felt,
+    num_eval: Felt,
+    processor: &mut CoreTraceFragmentGenerator,
+    err_ctx: &impl ErrorContext,
+    tracer: &mut impl Tracer,
+) -> Result<CircuitEvaluation, ExecutionError> {
+    let num_vars = num_vars.as_int();
+    let num_eval = num_eval.as_int();
+
+    let num_wires = num_vars + num_eval;
+    if num_wires > MAX_NUM_ACE_WIRES as u64 {
+        return Err(ExecutionError::failed_arithmetic_evaluation(
+            err_ctx,
+            AceError::TooManyWires(num_wires),
+        ));
+    }
+
+    // Ensure vars and instructions are word-aligned and non-empty. Note that variables are
+    // quadratic extension field elements while instructions are encoded as base field elements.
+    // Hence we can pack 2 variables and 4 instructions per word.
+    if !num_vars.is_multiple_of(2) || num_vars == 0 {
+        return Err(ExecutionError::failed_arithmetic_evaluation(
+            err_ctx,
+            AceError::NumVarIsNotWordAlignedOrIsEmpty(num_vars),
+        ));
+    }
+    if !num_eval.is_multiple_of(4) || num_eval == 0 {
+        return Err(ExecutionError::failed_arithmetic_evaluation(
+            err_ctx,
+            AceError::NumEvalIsNotWordAlignedOrIsEmpty(num_eval),
+        ));
+    }
+
+    // Ensure instructions are word-aligned and non-empty
+    let num_read_rows = num_vars as u32 / 2;
+    let num_eval_rows = num_eval as u32;
+
+    let mut evaluation_context = CircuitEvaluation::new(ctx, clk, num_read_rows, num_eval_rows);
+
+    let mut ptr = ptr;
+    // perform READ operations
+    // Note: we pass in a `NoopTracer`, because the parallel trace generation skips the circuit
+    // evaluation completely
+    for _ in 0..num_read_rows {
+        let word = processor
+            .memory()
+            .read_word(ctx, ptr, clk, err_ctx)
+            .map_err(ExecutionError::MemoryError)?;
+        tracer.record_memory_read_word(word, ptr, ctx, clk);
+        evaluation_context.do_read(ptr, word)?;
+        ptr += PTR_OFFSET_WORD;
+    }
+    // perform EVAL operations
+    for _ in 0..num_eval_rows {
+        let instruction = processor
+            .memory()
+            .read_element(ctx, ptr, err_ctx)
+            .map_err(ExecutionError::MemoryError)?;
+        tracer.record_memory_read_element(instruction, ptr, ctx, clk);
+        evaluation_context.do_eval(ptr, instruction, err_ctx)?;
+        ptr += PTR_OFFSET_ELEM;
+    }
+
+    // Ensure the circuit evaluated to zero.
+    if !evaluation_context.output_value().is_some_and(|eval| eval == QuadFelt::ZERO) {
+        return Err(ExecutionError::failed_arithmetic_evaluation(
+            err_ctx,
+            AceError::CircuitNotEvaluateZero,
+        ));
+    }
+
+    Ok(evaluation_context)
 }
