@@ -359,6 +359,11 @@ impl FastProcessor {
         let mut continuation_stack = ContinuationStack::new(program);
         let mut current_forest = program.mast_forest().clone();
 
+        // Merge the program's advice map into the advice provider
+        self.advice
+            .extend_map(current_forest.advice_map())
+            .map_err(|err| ExecutionError::advice_error(err, self.clk, &()))?;
+
         while let Some(continuation) = continuation_stack.pop_continuation() {
             match continuation {
                 Continuation::StartNode(node_id) => {
