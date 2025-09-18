@@ -1,5 +1,6 @@
 use alloc::{sync::Arc, vec::Vec};
 
+use miden_air::trace::rows::RowIndex;
 use miden_core::{
     Felt, ONE, Word, ZERO,
     crypto::merkle::MerklePath,
@@ -8,19 +9,23 @@ use miden_core::{
 };
 
 use crate::{
+    chiplets::CircuitEvaluation,
     continuation_stack::ContinuationStack,
     decoder::block_stack::{BlockInfo, BlockStack, BlockType, ExecutionContextInfo},
     fast::{
         FastProcessor,
         trace_state::{
-            AdviceReplay, BlockStackReplay, CoreTraceState, DecoderState,
-            ExecutionContextSystemInfo, ExecutionReplay, HasherReplay, MastForestResolutionReplay,
-            MemoryReplay, NodeExecutionState, NodeFlags, StackOverflowReplay, StackState,
-            SystemState, TraceFragmentContext,
+            AceReplay, AdviceReplay, BitwiseReplay, BlockStackReplay, CoreTraceFragmentContext,
+            CoreTraceState, DecoderState, ExecutionContextSystemInfo, ExecutionReplay,
+            HasherReplay, KernelReplay, MastForestResolutionReplay, MemoryReadsReplay,
+            MemoryWritesReplay, NodeExecutionState, NodeFlags, RangeCheckerReplay,
+            StackOverflowReplay, StackState, SystemState,
         },
         tracer::Tracer,
     },
     stack::OverflowTable,
+    system::ContextId,
+    utils::split_u32_into_u16,
 };
 
 /// The number of rows in the execution trace required to compute a permutation of Rescue Prime
@@ -36,9 +41,18 @@ struct StateSnapshot {
     initial_mast_forest: Arc<MastForest>,
 }
 
-pub struct TraceFragmentContexts {
+pub struct TraceGenerationContext {
     /// The list of trace fragment contexts built during execution.
-    pub contexts: Vec<TraceFragmentContext>,
+    pub core_trace_contexts: Vec<CoreTraceFragmentContext>,
+
+    // Replays that contain additional data needed to generate the range checker and chiplets
+    // columns.
+    pub range_checker: RangeCheckerReplay,
+    pub memory_writes: MemoryWritesReplay,
+    pub bitwise: BitwiseReplay,
+    pub kernel: KernelReplay,
+    pub ace: AceReplay,
+
     /// The number of rows per core trace fragment, except for the last fragment which may be
     /// shorter.
     pub fragment_size: usize,
@@ -50,7 +64,7 @@ pub struct TraceFragmentContexts {
 /// fragments of configurable length. This requires storing state at the very beginning of the
 /// fragment before any operations are executed, as well as recording the various values read during
 /// execution in the corresponding "replays" (e.g. values read from memory are recorded in
-/// [MemoryReplay], values read from the advice provider are recorded in [AdviceReplay], etc).
+/// [MemoryReadsReplay], values read from the advice provider are recorded in [AdviceReplay], etc).
 ///
 /// Then, to generate a trace fragment, we initialize the state of the processor using the stored
 /// snapshot from the beginning of the fragment, and replay the recorded values as they are
@@ -58,7 +72,7 @@ pub struct TraceFragmentContexts {
 /// value rather than querying the memory chiplet).
 #[derive(Debug)]
 pub struct ExecutionTracer {
-    // State stored at the start of a trace fragment.
+    // State stored at the start of a core trace fragment.
     //
     // This field is only set to `None` at initialization, and is populated when starting a new
     // trace fragment with `Self::start_new_fragment_context()`. Hence, on the first call to
@@ -66,7 +80,7 @@ pub struct ExecutionTracer {
     // every other call, we do.
     state_snapshot: Option<StateSnapshot>,
 
-    // Replay data aggregated throughout the execution of a fragment
+    // Replay data aggregated throughout the execution of a core trace fragment
     pub overflow_table: OverflowTable,
     pub overflow_replay: StackOverflowReplay,
 
@@ -74,12 +88,20 @@ pub struct ExecutionTracer {
     pub block_stack_replay: BlockStackReplay,
 
     pub hasher: HasherChipletShim,
-    pub memory: MemoryReplay,
+    pub memory_reads: MemoryReadsReplay,
     pub advice: AdviceReplay,
     pub external: MastForestResolutionReplay,
 
+    // Replays that contain additional data needed to generate the range checker and chiplets
+    // columns.
+    pub range_checker: RangeCheckerReplay,
+    pub memory_writes: MemoryWritesReplay,
+    pub bitwise: BitwiseReplay,
+    pub kernel: KernelReplay,
+    pub ace: AceReplay,
+
     // Output
-    fragment_contexts: Vec<TraceFragmentContext>,
+    fragment_contexts: Vec<CoreTraceFragmentContext>,
 
     /// The number of rows per core trace fragment.
     fragment_size: usize,
@@ -95,22 +117,32 @@ impl ExecutionTracer {
             block_stack: BlockStack::default(),
             block_stack_replay: BlockStackReplay::default(),
             hasher: HasherChipletShim::default(),
-            memory: MemoryReplay::default(),
+            memory_reads: MemoryReadsReplay::default(),
+            range_checker: RangeCheckerReplay::default(),
+            memory_writes: MemoryWritesReplay::default(),
             advice: AdviceReplay::default(),
+            bitwise: BitwiseReplay::default(),
+            kernel: KernelReplay::default(),
+            ace: AceReplay::default(),
             external: MastForestResolutionReplay::default(),
             fragment_contexts: Vec::new(),
             fragment_size,
         }
     }
 
-    /// Convert the `ExecutionTracer` into the `TraceFragmentContexts` built during
-    /// execution.
-    pub fn into_fragment_contexts(mut self) -> TraceFragmentContexts {
+    /// Convert the `ExecutionTracer` into a [TraceGenerationContext] using the data accumulated
+    /// during execution.
+    pub fn into_trace_generation_context(mut self) -> TraceGenerationContext {
         // If there is an ongoing trace state being built, finish it
         self.finish_current_fragment_context();
 
-        TraceFragmentContexts {
-            contexts: self.fragment_contexts,
+        TraceGenerationContext {
+            core_trace_contexts: self.fragment_contexts,
+            range_checker: self.range_checker,
+            memory_writes: self.memory_writes,
+            bitwise: self.bitwise,
+            kernel: self.kernel,
+            ace: self.ace,
             fragment_size: self.fragment_size,
         }
     }
@@ -279,17 +311,17 @@ impl ExecutionTracer {
         if let Some(snapshot) = self.state_snapshot.take() {
             // Extract the replays
             let hasher_replay = self.hasher.extract_replay();
-            let memory_replay = core::mem::take(&mut self.memory);
+            let memory_reads_replay = self.extract_memory_reads_replay();
             let advice_replay = core::mem::take(&mut self.advice);
             let external_replay = core::mem::take(&mut self.external);
             let stack_overflow_replay = core::mem::take(&mut self.overflow_replay);
             let block_stack_replay = core::mem::take(&mut self.block_stack_replay);
 
-            let trace_state = TraceFragmentContext {
+            let trace_state = CoreTraceFragmentContext {
                 state: snapshot.state,
                 replay: ExecutionReplay {
                     hasher: hasher_replay,
-                    memory: memory_replay,
+                    memory_reads: memory_reads_replay,
                     advice: advice_replay,
                     mast_forest_resolution: external_replay,
                     stack_overflow: stack_overflow_replay,
@@ -302,6 +334,11 @@ impl ExecutionTracer {
 
             self.fragment_contexts.push(trace_state);
         }
+    }
+
+    /// Extracts the memory reads replay from the current memory reads replay and resets it.
+    fn extract_memory_reads_replay(&mut self) -> MemoryReadsReplay {
+        core::mem::take(&mut self.memory_reads)
     }
 }
 
@@ -395,12 +432,32 @@ impl Tracer for ExecutionTracer {
         self.hasher.record_update_merkle_root(path, old_root, new_root);
     }
 
-    fn record_memory_read_element(&mut self, element: Felt, addr: Felt) {
-        self.memory.record_read_element(element, addr);
+    fn record_memory_read_element(
+        &mut self,
+        element: Felt,
+        addr: Felt,
+        ctx: ContextId,
+        clk: RowIndex,
+    ) {
+        self.memory_reads.record_read_element(element, addr, ctx, clk);
     }
 
-    fn record_memory_read_word(&mut self, word: Word, addr: Felt) {
-        self.memory.record_read_word(word, addr);
+    fn record_memory_read_word(&mut self, word: Word, addr: Felt, ctx: ContextId, clk: RowIndex) {
+        self.memory_reads.record_read_word(word, addr, ctx, clk);
+    }
+
+    fn record_memory_write_element(
+        &mut self,
+        element: Felt,
+        addr: Felt,
+        ctx: ContextId,
+        clk: RowIndex,
+    ) {
+        self.memory_writes.record_write_element(element, addr, ctx, clk);
+    }
+
+    fn record_memory_write_word(&mut self, word: Word, addr: Felt, ctx: ContextId, clk: RowIndex) {
+        self.memory_writes.record_write_word(word, addr, ctx, clk);
     }
 
     fn record_advice_pop_stack(&mut self, value: Felt) {
@@ -413,6 +470,29 @@ impl Tracer for ExecutionTracer {
 
     fn record_advice_pop_stack_dword(&mut self, words: [Word; 2]) {
         self.advice.record_pop_stack_dword(words);
+    }
+
+    fn record_u32and(&mut self, a: Felt, b: Felt) {
+        self.bitwise.record_u32and(a, b);
+    }
+
+    fn record_u32xor(&mut self, a: Felt, b: Felt) {
+        self.bitwise.record_u32xor(a, b);
+    }
+
+    fn record_u32_range_checks(&mut self, clk: RowIndex, u32_lo: Felt, u32_hi: Felt) {
+        let (t1, t0) = split_u32_into_u16(u32_lo.as_int());
+        let (t3, t2) = split_u32_into_u16(u32_hi.as_int());
+
+        self.range_checker.record_range_check_u32(clk, [t0, t1, t2, t3]);
+    }
+
+    fn record_kernel_proc_access(&mut self, proc_hash: Word) {
+        self.kernel.record_kernel_proc_access(proc_hash);
+    }
+
+    fn record_circuit_evaluation(&mut self, clk: RowIndex, circuit_eval: CircuitEvaluation) {
+        self.ace.record_circuit_evaluation(clk, circuit_eval);
     }
 
     fn increment_clk(&mut self) {
