@@ -384,10 +384,14 @@ impl Assembler {
                 true,
                 span,
             )?,
-            Instruction::MemLoadW | Instruction::MemLoadWLe => {
+            Instruction::MemLoadW | Instruction::MemLoadWBe => {
                 mem_ops::mem_read(block_builder, proc_ctx, None, false, false, span)?
             },
-            Instruction::MemLoadWImm(v) | Instruction::MemLoadWLeImm(v) => mem_ops::mem_read(
+            Instruction::MemLoadWLe => {
+                mem_ops::mem_read(block_builder, proc_ctx, None, false, false, span)?;
+                push_reversew(block_builder);
+            },
+            Instruction::MemLoadWImm(v) | Instruction::MemLoadWBeImm(v) => mem_ops::mem_read(
                 block_builder,
                 proc_ctx,
                 Some(v.expect_value()),
@@ -395,19 +399,7 @@ impl Assembler {
                 false,
                 span,
             )?,
-            Instruction::LocLoad(v) => mem_ops::mem_read(
-                block_builder,
-                proc_ctx,
-                Some(v.expect_value() as u32),
-                true,
-                true,
-                span,
-            )?,
-            Instruction::MemLoadWBe => {
-                mem_ops::mem_read(block_builder, proc_ctx, None, false, false, span)?;
-                push_reversew(block_builder);
-            },
-            Instruction::MemLoadWBeImm(v) => {
+            Instruction::MemLoadWLeImm(v) => {
                 mem_ops::mem_read(
                     block_builder,
                     proc_ctx,
@@ -418,6 +410,14 @@ impl Assembler {
                 )?;
                 push_reversew(block_builder);
             },
+            Instruction::LocLoad(v) => mem_ops::mem_read(
+                block_builder,
+                proc_ctx,
+                Some(v.expect_value() as u32),
+                true,
+                true,
+                span,
+            )?,
             Instruction::LocLoadW(v) => {
                 let local_addr = v.expect_value();
                 if !local_addr.is_multiple_of(WORD_SIZE as u16) {
@@ -440,7 +440,6 @@ impl Assembler {
                 )?
             },
             Instruction::MemStore => block_builder.push_ops([MStore, Drop]),
-            Instruction::MemStoreW | Instruction::MemStoreWLe => block_builder.push_ops([MStoreW]),
             Instruction::MemStoreImm(v) => mem_ops::mem_write_imm(
                 block_builder,
                 proc_ctx,
@@ -449,24 +448,15 @@ impl Assembler {
                 true,
                 span,
             )?,
-            Instruction::MemStoreWImm(v) | Instruction::MemStoreWLeImm(v) => {
-                mem_ops::mem_write_imm(
-                    block_builder,
-                    proc_ctx,
-                    v.expect_value(),
-                    false,
-                    false,
-                    span,
-                )?
-            },
-            Instruction::MemStoreWBe => {
+            Instruction::MemStoreW | Instruction::MemStoreWBe => block_builder.push_ops([MStoreW]),
+            Instruction::MemStoreWLe => {
                 block_builder.push_op(MovDn4);
                 push_reversew(block_builder);
                 block_builder.push_op(MovUp4);
                 block_builder.push_op(MStoreW);
-            },
-            Instruction::MemStoreWBeImm(v) => {
                 push_reversew(block_builder);
+            },
+            Instruction::MemStoreWImm(v) | Instruction::MemStoreWBeImm(v) => {
                 mem_ops::mem_write_imm(
                     block_builder,
                     proc_ctx,
@@ -475,6 +465,18 @@ impl Assembler {
                     false,
                     span,
                 )?
+            },
+            Instruction::MemStoreWLeImm(v) => {
+                push_reversew(block_builder);
+                mem_ops::mem_write_imm(
+                    block_builder,
+                    proc_ctx,
+                    v.expect_value(),
+                    false,
+                    false,
+                    span,
+                )?;
+                push_reversew(block_builder);
             },
             Instruction::LocStore(v) => mem_ops::mem_write_imm(
                 block_builder,

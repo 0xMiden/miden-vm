@@ -90,92 +90,91 @@ fn mem_storew() {
 // ================================================================================================
 
 #[test]
-fn mem_loadw_be() {
-    let asm_op = "mem_loadw_be";
-    let addr = 0_u32;
+fn mem_loadw_be_le() {
+    const ADDR: u32 = 4;
+    const INPUT_BE_IMM: [u64; 8] = [5, 6, 7, 8, 1, 2, 3, 4]; // reversed
+    const INPUT_BE: [u64; 9] = [5, 6, 7, 8, 1, 2, 3, 4, ADDR as u64]; // reversed
+    const OUTPUT_BE: [u64; 8] = [0, 0, 0, 0, 8, 7, 6, 5];
+    const MEM_EMPTY: [u64; 8] = [0, 0, 0, 0, 0, 0, 0, 0];
 
-    // mem_loadw_be loads from uninitialized memory (all zeros) and applies big-endian ordering
+    // Classic
+    {
+        let asm_op = "mem_loadw";
+        let test = build_op_test!(asm_op, &INPUT_BE);
+        test.expect_stack_and_memory(&OUTPUT_BE, 0, &MEM_EMPTY);
 
-    // --- address provided via the stack ---------------------------------------------------------
-    let test = build_op_test!(asm_op, &[addr as u64, 5, 6, 7, 8]);
-    test.expect_stack_and_memory(&[0, 0, 0, 0], addr, &[0, 0, 0, 0]);
+        let asm_op = format!("mem_loadw.{ADDR}");
+        let test = build_op_test!(&asm_op, &INPUT_BE_IMM);
+        test.expect_stack_and_memory(&OUTPUT_BE, 0, &MEM_EMPTY);
+    }
 
-    // --- address provided as a parameter --------------------------------------------------------
-    let asm_op = format!("{asm_op}.{addr}");
-    let test = build_op_test!(&asm_op, &[5, 6, 7, 8]);
-    test.expect_stack_and_memory(&[0, 0, 0, 0], addr, &[0, 0, 0, 0]);
+    // Big-endian (equivalent to classic)
+    {
+        let asm_op = "mem_loadw_be";
+        let test = build_op_test!(asm_op, &INPUT_BE);
+        test.expect_stack_and_memory(&OUTPUT_BE, 0, &MEM_EMPTY);
 
-    // --- the rest of the stack is unchanged -----------------------------------------------------
-    let test = build_op_test!(&asm_op, &[1, 2, 3, 4, 5, 6, 7, 8]);
-    test.expect_stack_and_memory(&[0, 0, 0, 0, 4, 3, 2, 1], addr, &[0, 0, 0, 0]);
-}
+        let asm_op = format!("mem_loadw_be.{ADDR}");
+        let test = build_op_test!(&asm_op, &INPUT_BE_IMM);
+        test.expect_stack_and_memory(&OUTPUT_BE, 0, &MEM_EMPTY);
+    }
 
-#[test]
-fn mem_loadw_le() {
-    let asm_op = "mem_loadw_le";
-    let addr = 0_u32;
+    // Little-endian
+    {
+        let asm_op = "mem_loadw_le";
+        let test = build_op_test!(asm_op, &INPUT_BE);
+        test.expect_stack_and_memory(&OUTPUT_BE, 0, &MEM_EMPTY);
 
-    // mem_loadw_le should behave exactly like standard mem_loadw (little-endian/reversed order)
-
-    // --- address provided via the stack ---------------------------------------------------------
-    let test = build_op_test!(asm_op, &[addr as u64, 5, 6, 7, 8]);
-    test.expect_stack_and_memory(&[0, 0, 0, 0], addr, &[0, 0, 0, 0]);
-
-    // --- address provided as a parameter --------------------------------------------------------
-    let asm_op = format!("{asm_op}.{addr}");
-    let test = build_op_test!(&asm_op, &[5, 6, 7, 8]);
-    test.expect_stack_and_memory(&[0, 0, 0, 0], addr, &[0, 0, 0, 0]);
-
-    // --- the rest of the stack is unchanged -----------------------------------------------------
-    let test = build_op_test!(&asm_op, &[1, 2, 3, 4, 5, 6, 7, 8]);
-    test.expect_stack_and_memory(&[0, 0, 0, 0, 4, 3, 2, 1], addr, &[0, 0, 0, 0]);
+        let asm_op = format!("mem_loadw_le.{ADDR}");
+        let test = build_op_test!(&asm_op, &INPUT_BE_IMM);
+        test.expect_stack_and_memory(&OUTPUT_BE, 0, &MEM_EMPTY);
+    }
 }
 
 // STORING A WORD TO MEMORY WITH ENDIANNESS (MEM_STOREW_BE/LE)
 // ================================================================================================
 
 #[test]
-fn mem_storew_be() {
-    let asm_op = "mem_storew_be";
-    let addr = 0_u32;
+fn mem_storew_be_le() {
+    const ADDR: u32 = 4;
+    const INPUT_BE_IMM: [u64; 8] = [5, 6, 7, 8, 1, 2, 3, 4]; // reversed
+    const INPUT_BE: [u64; 9] = [5, 6, 7, 8, 1, 2, 3, 4, ADDR as u64]; // reversed
+    const OUTPUT_BE: [u64; 8] = [4, 3, 2, 1, 8, 7, 6, 5];
+    const MEM_BE: [u64; 8] = [0, 0, 0, 0, 4, 3, 2, 1];
+    const MEM_LE: [u64; 8] = [0, 0, 0, 0, 1, 2, 3, 4];
 
-    // mem_storew_be should store in big-endian (memory) order
-    // Input stack: [1, 2, 3, 4] -> Memory: [4, 3, 2, 1], Stack: [1, 2, 3, 4] (preserves original
-    // order on stack)
+    // mem_storew
+    {
+        let asm_op = "mem_storew";
+        let test = build_op_test!(asm_op, &INPUT_BE);
+        test.expect_stack_and_memory(&OUTPUT_BE, 0, &MEM_LE);
 
-    // --- address provided via the stack ---------------------------------------------------------
-    let test = build_op_test!(asm_op, &[1, 2, 3, 4, addr as u64]);
-    test.expect_stack_and_memory(&[1, 2, 3, 4], addr, &[4, 3, 2, 1]);
+        let asm_op = format!("mem_storew.{ADDR}");
+        let test = build_op_test!(asm_op, &INPUT_BE_IMM);
+        test.expect_stack_and_memory(&OUTPUT_BE, 0, &MEM_LE);
+    }
 
-    // --- address provided as a parameter --------------------------------------------------------
-    let asm_op = format!("{asm_op}.{addr}");
-    let test = build_op_test!(&asm_op, &[1, 2, 3, 4]);
-    test.expect_stack_and_memory(&[1, 2, 3, 4], addr, &[4, 3, 2, 1]);
+    // mem_storew_be
+    {
+        let asm_op = "mem_storew_be";
+        let test = build_op_test!(asm_op, &INPUT_BE);
+        test.expect_stack_and_memory(&OUTPUT_BE, 0, &MEM_LE);
 
-    // --- the rest of the stack is unchanged -----------------------------------------------------
-    let test = build_op_test!(&asm_op, &[0, 1, 2, 3, 4]);
-    test.expect_stack_and_memory(&[1, 2, 3, 4, 0], addr, &[4, 3, 2, 1]);
-}
+        let asm_op = format!("mem_storew_be.{ADDR}");
+        let test = build_op_test!(asm_op, &INPUT_BE_IMM);
+        test.expect_stack_and_memory(&OUTPUT_BE, 0, &MEM_LE);
+    }
 
-#[test]
-fn mem_storew_le() {
-    let asm_op = "mem_storew_le";
-    let addr = 0_u32;
+    // mem_storew_le
+    {
+        let asm_op = "mem_storew_le";
+        let test = build_op_test!(asm_op, &INPUT_BE);
+        test.expect_stack_and_memory(&OUTPUT_BE, 0, &MEM_BE);
 
-    // mem_storew_le should behave exactly like standard mem_storew (little-endian/reversed order)
-
-    // --- address provided via the stack ---------------------------------------------------------
-    let test = build_op_test!(asm_op, &[1, 2, 3, 4, addr as u64]);
-    test.expect_stack_and_memory(&[4, 3, 2, 1], addr, &[1, 2, 3, 4]);
-
-    // --- address provided as a parameter --------------------------------------------------------
-    let asm_op = format!("{asm_op}.{addr}");
-    let test = build_op_test!(&asm_op, &[1, 2, 3, 4]);
-    test.expect_stack_and_memory(&[4, 3, 2, 1], addr, &[1, 2, 3, 4]);
-
-    // --- the rest of the stack is unchanged -----------------------------------------------------
-    let test = build_op_test!(&asm_op, &[0, 1, 2, 3, 4]);
-    test.expect_stack_and_memory(&[4, 3, 2, 1, 0], addr, &[1, 2, 3, 4]);
+        let asm_op = format!("mem_storew_le.{ADDR}");
+        let test = build_op_test!(asm_op, &INPUT_BE_IMM);
+        test.expect_stack_and_memory(&OUTPUT_BE, 0, &MEM_BE);
+    }
 }
 
 // ENDIANNESS ROUNDTRIP TESTS
@@ -183,40 +182,48 @@ fn mem_storew_le() {
 
 #[test]
 fn mem_endianness_roundtrip() {
-    // Test that we can store and load consistently with different endianness instructions
-    let input_le = [1, 2, 3, 4];
-    let mem_le = [1, 2, 3, 4];
-    let mem_be = [4, 3, 2, 1];
-    let output_le = [4, 3, 2, 1];
-    let output_be = [1, 2, 3, 4];
+    const ADDR: u32 = 4;
+    const INPUT_BE: [u64; 8] = [5, 6, 7, 8, 1, 2, 3, 4]; // reversed
+    const OUTPUT_BE: [u64; 8] = [4, 3, 2, 1, 8, 7, 6, 5];
+    const OUTPUT_LE: [u64; 8] = [1, 2, 3, 4, 8, 7, 6, 5];
+    const MEM_LE: [u64; 8] = [0, 0, 0, 0, 1, 2, 3, 4];
+    const MEM_BE: [u64; 8] = [0, 0, 0, 0, 4, 3, 2, 1];
 
-    // Test BE roundtrip: store BE, load BE should preserve order
-    let test = build_op_test!("mem_storew_be.0 mem_loadw_be.0", &input_le);
-    test.expect_stack_and_memory(&output_le, 0, &mem_be);
+    // Sanity check for input/output constants
+    {
+        let ops = "nop";
+        let test = build_op_test!(ops, &INPUT_BE);
+        test.expect_stack(&OUTPUT_BE);
+    }
 
-    // Test LE roundtrip: store LE, load LE should preserve order
-    let test = build_op_test!("mem_storew_le.0 mem_loadw_le.0", &input_le);
-    test.expect_stack_and_memory(&output_le, 0, &mem_le);
+    // Round trip with same ordering only affects memory
+    {
+        // Classic
+        let ops = format!("mem_storew.{ADDR} mem_loadw.{ADDR}");
+        let test = build_op_test!(ops, &INPUT_BE);
+        test.expect_stack_and_memory(&OUTPUT_BE, 0, &MEM_LE);
 
-    // Test mixed endianness: store BE, load LE should reverse order
-    let test = build_op_test!("mem_storew_be.0 mem_loadw_le.0", &input_le);
-    test.expect_stack_and_memory(&output_be, 0, &mem_be);
+        // Big-endian (equivalent to classic)
+        let ops = format!("mem_storew_be.{ADDR} mem_loadw_be.{ADDR}");
+        let test = build_op_test!(ops, &INPUT_BE);
+        test.expect_stack_and_memory(&OUTPUT_BE, 0, &MEM_LE);
 
-    // Test mixed endianness: store LE, load BE should reverse order
-    let test = build_op_test!("mem_storew_le.0 mem_loadw_be.0", &input_le);
-    test.expect_stack_and_memory(&output_be, 0, &mem_le);
+        // Little-endian
+        let ops = format!("mem_storew_le.{ADDR} mem_loadw_le.{ADDR}");
+        let test = build_op_test!(ops, &INPUT_BE);
+        test.expect_stack_and_memory(&OUTPUT_BE, 0, &MEM_BE);
+    }
 
-    // Test storew_le and loadw
-    let test = build_op_test!("mem_storew_le.0 mem_loadw.0", &input_le);
-    test.expect_stack_and_memory(&output_le, 0, &mem_le);
+    // Using opposite orderings reverses the top word on the stack
+    {
+        let ops = format!("mem_storew_be.{ADDR} mem_loadw_le.{ADDR}");
+        let test = build_op_test!(ops, &INPUT_BE);
+        test.expect_stack_and_memory(&OUTPUT_LE, 0, &MEM_LE);
 
-    // Test store and load_le
-    let test = build_op_test!("mem_storew.0 mem_loadw_le.0", &input_le);
-    test.expect_stack_and_memory(&output_le, 0, &mem_le);
-
-    // Sanity check that the last two match with primitive store/load
-    let test = build_op_test!("mem_storew.0 mem_loadw.0", &input_le);
-    test.expect_stack_and_memory(&output_le, 0, &mem_le);
+        let ops = format!("mem_storew_le.{ADDR} mem_loadw_be.{ADDR}");
+        let test = build_op_test!(ops, &INPUT_BE);
+        test.expect_stack_and_memory(&OUTPUT_LE, 0, &MEM_BE);
+    }
 }
 
 // STREAMING ELEMENTS FROM MEMORY (MSTREAM)
