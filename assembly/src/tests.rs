@@ -1,6 +1,9 @@
 use alloc::{collections::BTreeSet, string::ToString, vec::Vec};
 use core::str::FromStr;
-use std::sync::{Arc, LazyLock};
+use std::{
+    eprintln,
+    sync::{Arc, LazyLock},
+};
 
 use miden_assembly_syntax::{
     ast::types::{FunctionType, Type},
@@ -20,7 +23,7 @@ use proptest::{
 use crate::{
     Assembler, Library, LibraryNamespace, LibraryPath, ModuleParser,
     ast::{Ident, Module, ModuleKind, ProcedureName, QualifiedProcedureName},
-    diagnostics::Report,
+    diagnostics::{IntoDiagnostic, Report},
     mast_forest_builder::MastForestBuilder,
     report,
     testing::{TestContext, assert_diagnostic_lines, parse_module, regex, source_file},
@@ -3868,5 +3871,107 @@ fn can_assemble_a_multi_module_kernel() -> Result<(), Report> {
 
     Assembler::with_kernel(context.source_manager(), kernel_lib).assemble_program(PROGRAM)?;
 
+    Ok(())
+}
+
+/// Test for issue #1644: verify that single-forest merge doesn't preserves node digests
+#[test]
+fn issue_1644_single_forest_merge_identity() -> TestResult {
+    // Test to more precisely demonstrate MastForest::merge non-identity behavior
+    // This test focuses on the case where merge operation does not preserve identity for single
+    // forests
+
+    let context = TestContext::new();
+
+    // Create a simple program that will result in specific basic block structures
+
+    let program_source = r#"
+    proc.test
+        push.1
+        push.2
+        push.3
+    end
+
+    proc.main
+        push.10
+        if.true
+            exec.test
+            push.20
+        else
+            push.30
+        end
+        push.40
+    end
+
+    begin
+        exec.main
+    end"#;
+
+    let program = context.assemble(program_source)?;
+    let original_forest = program.mast_forest().clone();
+
+    // Core test: Merge the forest with itself
+    // This should act as identity (return the same forest) but doesn't
+    let (merged_forest, _) = MastForest::merge([&*original_forest]).into_diagnostic()?;
+
+    // Assert that the merged forest reorders nodes
+    assert_eq!(merged_forest.nodes()[5], original_forest.nodes()[6]);
+    original_forest.nodes()[5].unwrap_basic_block();
+    original_forest.nodes()[6].unwrap_join();
+    merged_forest.nodes()[6].unwrap_basic_block();
+    merged_forest.nodes()[5].unwrap_join();
+
+    //Assert that merging is idempotent
+    let (new_merged_forest, _) = MastForest::merge([&merged_forest]).into_diagnostic()?;
+    let mut should_panic = false;
+
+    // The merge operation does not act as identity for single-element arrays
+    // Check 1: Forest structure should be identical (same number of nodes)
+    if new_merged_forest.nodes().len() != merged_forest.nodes().len() {
+        eprintln!(
+            "Forest node count differs: original={}, merged={}",
+            new_merged_forest.nodes().len(),
+            merged_forest.nodes().len()
+        );
+        eprintln!("This violates the identity requirement for merge operation");
+
+        should_panic = true;
+    }
+
+    // Check 2: Each node should have identical digest (strict identity)
+    for (i, (orig_node, merged_node)) in
+        new_merged_forest.nodes().iter().zip(merged_forest.nodes().iter()).enumerate()
+    {
+        if orig_node.digest() != merged_node.digest() {
+            eprintln!("Node {} digest violation:", i);
+            eprintln!("   Original: {:?}", orig_node);
+            eprintln!("   Merged:   {:?}", merged_node);
+            eprintln!("   Original digest: {:?}", orig_node.digest());
+            eprintln!("   Merged digest:   {:?}", merged_node.digest());
+
+            should_panic = true;
+        }
+    }
+
+    // Check 3: Roots should be identical
+    for (i, (orig_root, merged_root)) in new_merged_forest
+        .procedure_roots()
+        .iter()
+        .zip(merged_forest.procedure_roots())
+        .enumerate()
+    {
+        if new_merged_forest[*orig_root].digest() != merged_forest[*merged_root].digest() {
+            eprintln!("Root {} digest violation:", i);
+            eprintln!("   Original: {:?}", original_forest[*orig_root].digest());
+            eprintln!("   Merged:   {:?}", merged_forest[*merged_root].digest());
+            should_panic = true;
+        }
+    }
+
+    if should_panic {
+        panic!("Merge idempotence violation");
+    }
+
+    eprintln!("Merge identity test passed - no violations detected");
     Ok(())
 }

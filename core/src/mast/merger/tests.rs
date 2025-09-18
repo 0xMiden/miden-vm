@@ -3,7 +3,7 @@ use miden_crypto::{Felt, ONE, Word};
 use super::*;
 use crate::{
     Decorator, Operation,
-    mast::{BasicBlockNode, JoinNode, MastNode},
+    mast::{BasicBlockNode, MastNode},
 };
 
 fn block_foo() -> MastNode {
@@ -848,57 +848,4 @@ fn mast_forest_merge_advice_maps_collision() {
 
     let err = MastForest::merge([&forest_a, &forest_b]).unwrap_err();
     assert_matches!(err, MastForestError::AdviceMapKeyCollisionOnMerge(_));
-}
-
-/// Test for issue #1644: verify that single-forest merge doesn't preserves node digests
-#[test]
-fn issue_1644_single_forest_merge_identity() {
-    let mut forest = MastForest::new();
-
-    // Create two child blocks
-    let child1 = forest.add_block(vec![Operation::Push(Felt::new(1))], None).unwrap();
-    let child2 = forest.add_block(vec![Operation::Push(Felt::new(2))], None).unwrap();
-
-    // Create a join node using the direct method
-    let join_node = JoinNode::new([child1, child2], &forest).unwrap();
-    let join_mast_node = MastNode::Join(join_node);
-    let join_node_id = forest.add_node(join_mast_node).unwrap();
-    forest.make_root(join_node_id);
-
-    // Get the original root node and its digest
-    let original_root = forest.get_node_by_id(join_node_id).unwrap();
-    let original_digest = original_root.digest();
-
-    // Access the join node's children
-    if let MastNode::Join(join) = original_root {
-        let original_child1 = join.first();
-        let original_child2 = join.second();
-        assert_eq!(original_child1, MastNodeId(0));
-        assert_eq!(original_child2, MastNodeId(1));
-    }
-
-    // Merge the forest with itself
-    let (merged_forest, _root_map) = MastForest::merge([&forest]).unwrap();
-
-    let merged_roots: Vec<_> = merged_forest.procedure_roots().iter().collect();
-    let new_root_id = merged_roots[0];
-
-    let new_root = merged_forest.get_node_by_id(*new_root_id).unwrap();
-    let new_digest = new_root.digest();
-
-    // even for identity operations, the merge process:
-    // 1. Remaps all node IDs to new indices in the merged forest
-    // 2. Recomputes fingerprints using the NEW node IDs
-    // 3. This changes the hash input, even though the logical structure is identical
-    assert_eq!(original_digest, new_digest, "Single-forest merge should not preserve digests");
-
-    // Check that the behavior is idempotent
-    let (merged_forest2, _root_map2) = MastForest::merge([&merged_forest]).unwrap();
-    let merged_roots2: Vec<_> = merged_forest2.procedure_roots().iter().collect();
-    let new_root_id2 = merged_roots2[0];
-
-    let new_root2 = merged_forest2.get_node_by_id(*new_root_id2).unwrap();
-    let new_digest2 = new_root2.digest();
-
-    assert_eq!(new_digest, new_digest2, "Single-forest merge should be idempotent");
 }

@@ -45,18 +45,14 @@ impl MastForestMerger {
     /// - Creates a clean, deduplicated forest structure
     /// - Provides consistent node ordering regardless of input
     ///
-    /// This normalization means that even for single-forest merges, the resulting forest may have
-    /// different node IDs and digests than the input. See test
-    /// `issue_1644_single_forest_merge_identity` for detailed explanation of this behavior.
+    /// This normalization is idempotent, but it means that even for single-forest merges, the
+    /// resulting forest may have different node IDs and digests than the input. See assembly
+    /// test `issue_1644_single_forest_merge_identity` for detailed explanation of this
+    /// behavior.
     pub(crate) fn merge<'forest>(
         forests: impl IntoIterator<Item = &'forest MastForest>,
     ) -> Result<(MastForest, MastForestRootMap), MastForestError> {
         let forests = forests.into_iter().collect::<Vec<_>>();
-
-        // DEVELOPER NOTE: This function performs normalization, not identity behavior.
-        // Even single-forest merges change node IDs and digests due to remapping.
-        // See test `issue_1644_single_forest_merge_identity` for detailed explanation.
-        // If you need identity behavior, consider cloning the forest directly instead.
 
         let decorator_id_mappings = Vec::with_capacity(forests.len());
         let node_id_mappings = vec![MastForestNodeIdMap::new(); forests.len()];
