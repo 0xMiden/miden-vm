@@ -581,8 +581,8 @@ impl Process {
 
         // execute any decorators which have not been executed during span ops execution; this
         // can happen for decorators appearing after all operations in a block. these decorators
-        // are executed after SPAN block is closed to make sure the VM clock cycle advances beyond
-        // the last clock cycle of the SPAN block ops.
+        // are executed after BASIC BLOCK is closed to make sure the VM clock cycle advances beyond
+        // the last clock cycle of the BASIC BLOCK ops.
         for &decorator_id in decorator_ids {
             let decorator = program
                 .get_decorator_by_id(decorator_id)
