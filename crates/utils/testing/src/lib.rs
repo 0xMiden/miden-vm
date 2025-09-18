@@ -213,6 +213,9 @@ impl Test {
     /// Add a handler for a specific event when running the `Host`.
     pub fn add_event_handlers(&mut self, handlers: Vec<(EventId, Arc<dyn EventHandler>)>) {
         for (id, handler) in handlers {
+            if id.is_reserved() {
+                panic!("tried to register handler with ID reserved for system events")
+            }
             if self.handlers.insert(id, handler).is_some() {
                 panic!("handler with id {id} was already added")
             }

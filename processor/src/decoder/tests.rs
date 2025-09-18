@@ -40,7 +40,7 @@ const INIT_ADDR: Felt = ONE;
 const FMP_MIN: Felt = Felt::new(crate::FMP_MIN);
 const SYSCALL_FMP_MIN: Felt = Felt::new(crate::SYSCALL_FMP_MIN as u64);
 
-const EMIT_EVENT_ID: EventId = EventId::from_u64(42);
+const EMIT_EVENT_ID: EventId = EventId::from_u64(1234);
 
 // TYPE ALIASES
 // ================================================================================================
