@@ -99,6 +99,35 @@ impl PrecompileRequests {
     {
         self.requests.extend(iter);
     }
+
+    /// Returns a commitment to all precompile calls by verifying them and hashing their individual
+    /// commitments.
+    ///
+    /// This method iterates through all requests and verifies each one using the
+    /// corresponding verifier from the registry, then computes a cryptographic commitment
+    /// over all precompile commitments.
+    ///
+    /// # Arguments
+    /// * `verifiers` - Registry of verifiers to use for validation
+    ///
+    /// # Errors
+    /// Returns a `PrecompileError` if:
+    /// - No verifier is registered for a request's event ID
+    /// - A verifier fails to verify its request
+    pub fn commitment(&self, verifiers: &PrecompileVerifiers) -> Result<Word, PrecompileError> {
+        let mut commitments = Vec::with_capacity(2 * self.len());
+        for request in &self.requests {
+            let verifier =
+                verifiers.get(request.event_id).ok_or(VerifierNotFound(request.event_id))?;
+
+            let commitment = verifier.verify(&request.data)?;
+            commitments.extend([commitment, Word::empty()])
+        }
+
+        let commitment_data = Word::words_as_elements(&commitments);
+
+        Ok(Rpo256::hash_elements(commitment_data))
+    }
 }
 
 impl From<Vec<PrecompileData>> for PrecompileRequests {
@@ -158,33 +187,6 @@ impl PrecompileVerifiers {
     /// Returns true if no verifiers are registered.
     pub fn is_empty(&self) -> bool {
         self.verifiers.is_empty()
-    }
-
-    /// Verifies all precompile requests using the provided verifiers and returns the commitment.
-    ///
-    /// This method iterates through all requests and verifies each one using the
-    /// corresponding verifier from the registry, then computes a cryptographic commitment
-    /// over all precompile commitments.
-    ///
-    /// # Arguments
-    /// * `verifiers` - Registry of verifiers to use for validation
-    ///
-    /// # Errors
-    /// Returns a `PrecompileError` if:
-    /// - No verifier is registered for a request's event ID
-    /// - A verifier fails to verify its request
-    pub fn verify(&self, requests: &PrecompileRequests) -> Result<Word, PrecompileError> {
-        let mut commitments = Vec::with_capacity(2 * requests.len());
-        for request in &requests.requests {
-            let verifier = self.get(request.event_id).ok_or(VerifierNotFound(request.event_id))?;
-
-            let commitment = verifier.verify(&request.data)?;
-            commitments.extend([commitment, Word::empty()])
-        }
-
-        let commitment_data = Word::words_as_elements(&commitments);
-
-        Ok(Rpo256::hash_elements(commitment_data))
     }
 }
 
@@ -303,7 +305,7 @@ mod tests {
         let verifiers = PrecompileVerifiers::new();
         let requests = PrecompileRequests::new();
 
-        let result = verifiers.verify(&requests).unwrap();
+        let result = requests.commitment(&verifiers).unwrap();
         assert_eq!(result, Word::empty());
     }
 }

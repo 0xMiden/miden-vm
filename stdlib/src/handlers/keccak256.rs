@@ -10,9 +10,11 @@
 use alloc::{vec, vec::Vec};
 use core::array;
 
-use miden_core::{EventId, Felt, Word, precompile::PrecompileData};
+use miden_core::{
+    EventId, Felt, Word,
+    precompile::{PrecompileData, PrecompileError},
+};
 use miden_crypto::hash::{keccak::Keccak256, rpo::Rpo256};
-use miden_core::precompile::PrecompileError;
 use miden_processor::{AdviceMutation, EventError, ProcessState};
 
 /// Qualified event name for the `hash_memory` event.
