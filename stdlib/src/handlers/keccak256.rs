@@ -12,6 +12,7 @@ use core::array;
 
 use miden_core::{EventId, Felt, Word, precompile::PrecompileData};
 use miden_crypto::hash::{keccak::Keccak256, rpo::Rpo256};
+use miden_core::precompile::PrecompileError;
 use miden_processor::{AdviceMutation, EventError, ProcessState};
 
 /// Qualified event name for the `hash_memory` event.
@@ -65,6 +66,19 @@ pub fn handle_keccak_hash_memory(
         AdviceMutation::extend_precompile_requests(preimage.to_precompile_data());
 
     Ok(vec![advice_stack_extension, deferred_extension])
+}
+
+// KECCAK VERIFIER
+// ================================================================================================
+
+/// Verifier for Keccak256 precompile computations.
+///
+/// This verifier validates that Keccak256 hash computations were performed correctly
+/// by recomputing the hash from the provided witness data and comparing the result.
+pub fn keccak_verifier(input_u8: &[u8]) -> Result<Word, PrecompileError> {
+    let preimage = KeccakPreimage::new(input_u8.to_vec());
+    let commitment = preimage.precompile_commitment();
+    Ok(commitment)
 }
 
 // KECCAK DIGEST

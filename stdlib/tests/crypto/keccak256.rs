@@ -10,7 +10,7 @@ use core::array;
 
 use miden_core::Felt;
 use miden_stdlib::handlers::keccak256::{
-    KECCAK_HASH_MEMORY_EVENT_ID, KECCAK_HASH_MEMORY_EVENT_NAME, KeccakPreimage,
+    KECCAK_HASH_MEMORY_EVENT_ID, KECCAK_HASH_MEMORY_EVENT_NAME, KeccakPreimage, keccak_verifier,
 };
 
 // Test constants
@@ -129,6 +129,12 @@ fn test_keccak_hash_memory_impl(input_u8: &[u8]) {
 
     let digest: [Felt; 8] = array::from_fn(|i| stack.get_stack_item(4 + i).unwrap());
     assert_eq!(digest, preimage.digest().inner(), "output digest does not match");
+
+    let commitment_verified = keccak_verifier(&preimage.0).unwrap();
+    assert_eq!(
+        commitment, commitment_verified,
+        "commitment returned by verifier does not match the one on the stack"
+    )
 }
 
 fn test_keccak_hash_memory(input_u8: &[u8]) {
