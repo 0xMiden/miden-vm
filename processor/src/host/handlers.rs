@@ -115,6 +115,9 @@ impl EventHandlerRegistry {
         id: EventId,
         handler: Arc<dyn EventHandler>,
     ) -> Result<(), ExecutionError> {
+        if id.is_reserved() {
+            return Err(ExecutionError::ReservedEventId { id });
+        }
         match self.handlers.entry(id) {
             Entry::Vacant(e) => e.insert(handler),
             Entry::Occupied(_) => return Err(ExecutionError::DuplicateEventHandler { id }),

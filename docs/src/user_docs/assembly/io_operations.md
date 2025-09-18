@@ -43,7 +43,7 @@ As mentioned above, nondeterministic inputs are provided to the VM via the advic
 
 > **Note**: The opcodes above always push data onto the operand stack so that the first element is placed deepest in the stack. For example, if the data on the stack is `a,b,c,d` and you use the opcode `adv_push.4`, the data will be `d,c,b,a` on your stack. This is also the behavior of the other opcodes.
 
-The second category injects new data into the advice provider. These operations are called *system events* and they affect only the advice provider state. That is, the state of all other VM components (e.g., stack, memory) are unaffected. Handling system events does not consume any VM cycles (i.e., these instructions are executed in $0$ cycles).
+The second category injects new data into the advice provider. These operations are called *system events* and they affect only the advice provider state. That is, the state of all other VM components (e.g., stack, memory) are unaffected. Handling system events uses the same mechanism as standard events using `emit` (i.e., these instructions are executed in $3$ cycles). System events use direct numeric event IDs in the reserved range 0-255, while user-defined events use string-based `EventId::from_name()` derivation with unique, descriptive names following hierarchical naming conventions to avoid conflicts.
 
 System events fall into two categories: (1) events which push new data onto the advice stack, and (2) events which insert new data into the advice map.
 

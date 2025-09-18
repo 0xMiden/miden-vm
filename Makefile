@@ -1,18 +1,56 @@
+# ------------------------------------------------------------------------------
+# Makefile
+# ------------------------------------------------------------------------------
+
 .DEFAULT_GOAL := help
 
+# -- help ----------------------------------------------------------------------
 .PHONY: help
 help:
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'
+	@printf "\nTargets:\n\n"
+	@awk 'BEGIN {FS = ":.*##"; OFS = ""} /^[a-zA-Z0-9_.-]+:.*?##/ { printf "  \033[36m%-24s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
+	@printf "\nCrate Testing:\n"
+	@printf "  make test-air                    # Test air crate\n"
+	@printf "  make test-assembly               # Test assembly crate\n"
+	@printf "  make test-assembly-syntax        # Test assembly-syntax crate\n"
+	@printf "  make test-core                   # Test core crate\n"
+	@printf "  make test-miden-vm               # Test miden-vm crate\n"
+	@printf "  make test-processor              # Test processor crate\n"
+	@printf "  make test-prover                 # Test prover crate\n"
+	@printf "  make test-stdlib                 # Test stdlib crate\n"
+	@printf "  make test-verifier               # Test verifier crate\n"
+	@printf "\nExamples:\n"
+	@printf "  make test-air test=\"some_test\"   # Test specific function\n"
+	@printf "  make test-fast                   # Fast tests (no proptests/CLI)\n"
+	@printf "  make test-skip-proptests         # All tests except proptests\n\n"
 
-# -- variables --------------------------------------------------------------------------------------
 
-BACKTRACE=RUST_BACKTRACE=1
-WARNINGS=RUSTDOCFLAGS="-D warnings"
-DEBUG_ASSERTIONS=RUSTFLAGS="-C debug-assertions"
-FEATURES_CONCURRENT_EXEC=--features concurrent,executable
-FEATURES_LOG_TREE=--features concurrent,executable,tracing-forest
-FEATURES_METAL_EXEC=--features concurrent,executable,metal,tracing-forest
-ALL_FEATURES_BUT_ASYNC=--features concurrent,executable,metal,testing,with-debug-info,internal
+# -- environment toggles -------------------------------------------------------
+BACKTRACE                := RUST_BACKTRACE=1
+WARNINGS                 := RUSTDOCFLAGS="-D warnings"
+
+# -- feature configuration -----------------------------------------------------
+ALL_FEATURES_BUT_ASYNC   := --features concurrent,executable,metal,testing,with-debug-info,internal
+
+# Workspace-wide test features
+WORKSPACE_TEST_FEATURES  := concurrent,testing,metal,executable
+FAST_TEST_FEATURES       := concurrent,testing,metal,no_err_ctx
+
+# Feature sets for executable builds
+FEATURES_CONCURRENT_EXEC := --features concurrent,executable
+FEATURES_METAL_EXEC      := --features concurrent,executable,metal,tracing-forest
+FEATURES_LOG_TREE        := --features concurrent,executable,tracing-forest
+
+# Per-crate default features
+FEATURES_air             := testing
+FEATURES_assembly        := testing
+FEATURES_assembly-syntax := testing
+FEATURES_core            :=
+FEATURES_miden-vm        := concurrent,executable,metal,internal
+FEATURES_processor       := concurrent,testing,bus-debugger
+FEATURES_prover          := concurrent,metal
+FEATURES_stdlib          := with-debug-info
+FEATURES_verifier        :=
 
 # -- linting --------------------------------------------------------------------------------------
 
@@ -49,35 +87,86 @@ doc: ## Generates & checks documentation
 book: ## Builds the book & serves documentation site
 	mdbook serve --open docs
 
-# --- testing -------------------------------------------------------------------------------------
+# -- core knobs (overridable from CLI or by caller targets) --------------------
+# Advanced usage (most users should use pattern rules like 'make test-air'):
+#   make core-test CRATE=miden-air FEATURES=testing
+#   make core-test CARGO_PROFILE=test-dev FEATURES="testing,no_err_ctx"
+#   make core-test CRATE=miden-processor FEATURES=testing EXPR="-E 'not test(#*proptest)'"
+
+NEXTEST_PROFILE ?= default
+CARGO_PROFILE   ?= test-dev
+CRATE           ?=
+FEATURES        ?=
+# Filter expression/selector passed through to nextest, e.g.:
+#   -E 'not test(#*proptest)'   or   'my::module::test_name'
+EXPR            ?=
+# Extra args to nextest (e.g., --no-run)
+EXTRA           ?=
+
+define _CARGO_NEXTEST
+	$(BACKTRACE) cargo nextest run \
+		--profile $(NEXTEST_PROFILE) \
+		--cargo-profile $(CARGO_PROFILE) \
+		$(if $(FEATURES),--features $(FEATURES),) \
+		$(if $(CRATE),-p $(CRATE),) \
+		$(EXTRA) $(EXPR)
+endef
+
+.PHONY: core-test core-test-build
+## Core: run tests with overridable CRATE/FEATURES/PROFILES/EXPR/EXTRA
+core-test:
+	$(_CARGO_NEXTEST)
+
+## Core: build test binaries only (no run)
+core-test-build:
+	$(MAKE) core-test EXTRA="--no-run"
+
+# -- pattern rule: `make test-<crate> [test=...]` ------------------------------
+# Primary method for testing individual crates (automatically uses correct features):
+#   make test-air                              # Test air crate with default features
+#   make test-processor                        # Test processor crate with default features
+#   make test-air test="'my::mod::some_test'"  # Test specific function in air crate
+.PHONY: test-%
+test-%: ## Tests a specific crate; accepts 'test=' to pass a selector or nextest expr
+	$(MAKE) core-test \
+		CRATE=miden-$* \
+		FEATURES=$(FEATURES_$*) \
+		EXPR=$(if $(test),$(test),)
+
+# -- workspace-wide tests ------------------------------------------------------
 
 .PHONY: test-build
-test-build: ## Build the test binary
-	cargo nextest run --profile ci --cargo-profile test-dev --features concurrent,testing,executable --no-run
+test-build: ## Build the test binaries for the workspace (no run)
+	$(MAKE) core-test-build NEXTEST_PROFILE=ci FEATURES="$(WORKSPACE_TEST_FEATURES)"
 
 .PHONY: test
-test: ## Run all tests
-	$(BACKTRACE) cargo nextest run --profile ci --cargo-profile test-dev --features concurrent,testing,executable
+test: ## Run all tests for the workspace
+	$(MAKE) core-test NEXTEST_PROFILE=ci FEATURES="$(WORKSPACE_TEST_FEATURES)"
 
 .PHONY: test-docs
-test-docs: ## Run documentation tests
+test-docs: ## Run documentation tests (cargo test - nextest doesn't support doctests)
 	cargo test --doc $(ALL_FEATURES_BUT_ASYNC)
 
+# -- filtered test runs --------------------------------------------------------
+
 .PHONY: test-fast
-test-fast: ## Runs all tests with the debug profile
-	$(DEBUG_ASSERTIONS) cargo nextest run --features testing
+test-fast: ## Runs fast tests (excludes all CLI tests and proptests)
+	$(MAKE) core-test \
+		FEATURES="$(FAST_TEST_FEATURES)" \
+		EXPR="-E 'not test(#*proptest) and not test(cli_)'"
 
 .PHONY: test-skip-proptests
 test-skip-proptests: ## Runs all tests, except property-based tests
-	$(DEBUG_ASSERTIONS) cargo nextest run --features testing -E 'not test(#*proptest)'
+	$(MAKE) core-test \
+		FEATURES="$(WORKSPACE_TEST_FEATURES)" \
+		EXPR="-E 'not test(#*proptest)'"
 
 .PHONY: test-loom
 test-loom: ## Runs all loom-based tests
-	RUSTFLAGS="--cfg loom" cargo nextest run --cargo-profile test-release --features testing -E 'test(#*loom)'
-
-.PHONY: test-package
-test-package: ## Tests specific package: make test-package package=miden-vm
-	$(DEBUG_ASSERTIONS) cargo nextest run --cargo-profile test-release --features testing -p $(package)
+	RUSTFLAGS="--cfg loom" $(MAKE) core-test \
+		CRATE=miden-utils-sync \
+		FEATURES= \
+		EXPR="-E 'test(#*loom)'"
 
 # --- checking ------------------------------------------------------------------------------------
 

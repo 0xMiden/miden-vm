@@ -75,7 +75,7 @@ pub use errors::{ErrorContext, ErrorContextImpl, ExecutionError};
 
 pub mod utils;
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "no_err_ctx")))]
 mod tests;
 
 mod debug;
