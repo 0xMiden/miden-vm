@@ -1507,6 +1507,7 @@ dependencies = [
 name = "miden-processor"
 version = "0.18.0"
 dependencies = [
+ "insta",
  "logtest",
  "miden-air",
  "miden-assembly",
@@ -1516,6 +1517,7 @@ dependencies = [
  "miden-utils-diagnostics",
  "paste",
  "pretty_assertions",
+ "rayon",
  "rstest",
  "thiserror 2.0.16",
  "tokio",
