@@ -25,9 +25,9 @@ pub enum Visibility {
 impl fmt::Display for Visibility {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if self.is_exported() {
-            f.write_str("pub fn")
+            f.write_str("pub proc")
         } else {
-            f.write_str("fn")
+            f.write_str("proc")
         }
     }
 }

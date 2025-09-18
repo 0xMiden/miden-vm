@@ -111,7 +111,6 @@ extern {
         "export" => Token::Export,
         "false" => Token::False,
         "felt" => Token::Felt,
-        "fn" => Token::Fn,
         "fri_ext2fold4" => Token::FriExt2Fold4,
         "gt" => Token::Gt,
         "gte" => Token::Gte,
@@ -779,14 +778,13 @@ AliasDef: ProcedureAlias = {
 Visibility: Visibility = {
     "proc" => Visibility::Private,
     "export" => Visibility::Public,
-    "pub" "."? "fn" => Visibility::Public,
-    "fn" => Visibility::Private,
+    "pub" "."? "proc" => Visibility::Public,
 }
 
 #[inline]
 PubVisibility: Visibility = {
     "export" => Visibility::Public,
-    "pub" "."? "fn" => Visibility::Public,
+    "pub" "."? "proc" => Visibility::Public,
 }
 
 // ANNOTATIONS

@@ -904,8 +904,8 @@ fn constant_must_be_valid_felt() -> TestResult {
         "  :                       `-- found a constant identifier here",
         "  `----",
         " help: expected \"*\", or \"+\", or \"-\", or \"/\", or \"//\", or \"@\", or \"adv_map\", or \"begin\", or \"const\", or \"enum\", \
-or \"export\", or \"fn\", or \"proc\", or \"pub\", or \"type\", or \"use\", or end of file, or",
-        "       doc comment"
+or \"export\", or \"proc\", or \"pub\", or \"type\", or \"use\", or end of file, or doc",
+        "       comment"
     );
     Ok(())
 }
@@ -2470,7 +2470,7 @@ fn module_alias() -> TestResult {
         "  :                                      `-- found a -> here",
         "3 |",
         "  `----",
-        r#" help: expected "@", or "adv_map", or "begin", or "const", or "enum", or "export", or "fn", or "proc", or "pub", or "type", or "use", or end of file, or doc comment"#
+        r#" help: expected "@", or "adv_map", or "begin", or "const", or "enum", or "export", or "proc", or "pub", or "type", or "use", or end of file, or doc comment"#
     );
 
     // --- duplicate module import --------------------------------------------
@@ -2700,7 +2700,7 @@ fn invalid_empty_program() {
         "unexpected end of file",
         regex!(r#",-\[test[\d]+:1:1\]"#),
         "`----",
-        r#" help: expected "@", or "adv_map", or "begin", or "const", or "enum", or "export", or "fn", or "proc", or "pub", or "type", or "use", or doc comment"#
+        r#" help: expected "@", or "adv_map", or "begin", or "const", or "enum", or "export", or "proc", or "pub", or "type", or "use", or doc comment"#
     );
 
     assert_assembler_diagnostic!(
@@ -2709,7 +2709,7 @@ fn invalid_empty_program() {
         "unexpected end of file",
         regex!(r#",-\[test[\d]+:1:1\]"#),
         "  `----",
-        r#" help: expected "@", or "adv_map", or "begin", or "const", or "enum", or "export", or "fn", or "proc", or "pub", or "type", or "use", or doc comment"#
+        r#" help: expected "@", or "adv_map", or "begin", or "const", or "enum", or "export", or "proc", or "pub", or "type", or "use", or doc comment"#
     );
 }
 
@@ -2725,7 +2725,7 @@ fn invalid_program_unrecognized_token() {
         "  : ^^|^",
         "  :   `-- found a identifier here",
         "  `----",
-        r#" help: expected "@", or "adv_map", or "begin", or "const", or "enum", or "export", or "fn", or "proc", or "pub", or "type", or "use", or doc comment"#
+        r#" help: expected "@", or "adv_map", or "begin", or "const", or "enum", or "export", or "proc", or "pub", or "type", or "use", or doc comment"#
     );
 }
 
@@ -2755,7 +2755,7 @@ fn invalid_program_invalid_top_level_token() {
         "  :               ^|^",
         "  :                `-- found a mul here",
         "  `----",
-        r#" help: expected "@", or "adv_map", or "begin", or "const", or "enum", or "export", or "fn", or "proc", or "pub", or "type", or "use", or end of file, or doc comment"#
+        r#" help: expected "@", or "adv_map", or "begin", or "const", or "enum", or "export", or "proc", or "pub", or "type", or "use", or end of file, or doc comment"#
     );
 }
 
@@ -3333,10 +3333,10 @@ fn build_library_example() -> Arc<Library> {
     let context = TestContext::new();
     // declare foo module
     let foo = r#"
-        pub fn foo(a: felt, b: felt) -> felt
+        pub proc foo(a: felt, b: felt) -> felt
             add
         end
-        pub fn foo_mul(a: felt, b: felt) -> felt
+        pub proc foo_mul(a: felt, b: felt) -> felt
             mul
         end
     "#;
@@ -3344,10 +3344,10 @@ fn build_library_example() -> Arc<Library> {
 
     // declare bar module
     let bar = r#"
-        pub fn.bar
+        pub proc.bar
             mtree_get
         end
-        pub fn bar_mul
+        pub proc bar_mul
             mul
         end
     "#;

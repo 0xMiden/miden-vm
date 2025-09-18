@@ -1316,7 +1316,7 @@ fn assert_parsing_line_unexpected_token() {
         "  :     ^|^",
         "  :      `-- found a mul here",
         "  `----",
-        r#" help: expected "@", or "adv_map", or "begin", or "const", or "enum", or "export", or "fn", or "proc", or "pub", or "type", or "use", or end of file, or doc comment"#
+        r#" help: expected "@", or "adv_map", or "begin", or "const", or "enum", or "export", or "proc", or "pub", or "type", or "use", or end of file, or doc comment"#
     );
 }
 
@@ -1346,7 +1346,7 @@ const DEFAULT_CONST = 100
 #! Perform `a + b`, `n` times
 #!
 #! with spaces
-fn add_n_times # [n, b, a]
+proc add_n_times # [n, b, a]
     dup.0
     push.0
     u32gt
@@ -1399,7 +1399,7 @@ end
 #! Perform `a + b`, `n` times
 #!
 #! with spaces
-fn add_n_times
+proc add_n_times
     dup.0
     push.0
     u32gt
@@ -1588,7 +1588,7 @@ use std::math::u64
 
 type Int64 = struct { hi: u32, lo: u32 }
 
-pub fn add(a: Int64, b: Int64) -> Int64
+pub proc add(a: Int64, b: Int64) -> Int64
     exec.u64::wrapping_mul
 end
 
@@ -1597,7 +1597,7 @@ enum Bool : i1 {
     TRUE,
 }
 
-pub fn is_number(a: Int64) -> Bool
+pub proc is_number(a: Int64) -> Bool
     push.TRUE
 end
 "#
