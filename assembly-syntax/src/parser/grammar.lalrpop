@@ -7,7 +7,7 @@ use alloc::{
 };
 use core::{marker::PhantomData, num::NonZeroU32, ops::Range};
 
-use miden_debug_types::{SourceFile, SourceSpan, Span, Spanned};
+use miden_debug_types::{SourceId, SourceSpan, Span, Spanned};
 use smallvec::smallvec;
 
 use crate::{LibraryPath, LibraryNamespace, ast::{*, types::{AddressSpace, Type}}, Felt, FieldElement, StarkField, Word};
@@ -17,7 +17,7 @@ use super::{
 };
 
 grammar<'input>(
-    source_file: &Arc<SourceFile>,
+    source_id: SourceId,
     interned: &mut BTreeSet<Arc<str>>,
     felt_type: &Arc<types::ArrayType>,
     _marker: PhantomData<&'input str>
@@ -316,11 +316,11 @@ Form: Form = {
 Doc: Form = {
     <l:@L> <doc:doc_comment> <r:@R> =>? {
         if doc.as_bytes().len() > u16::MAX as usize {
-            Err(ParseError::User { error: ParsingError::DocsTooLarge { span: span!(source_file.id(), l, r) } })
+            Err(ParseError::User { error: ParsingError::DocsTooLarge { span: span!(source_id, l, r) } })
         } else {
             match doc {
-                DocumentationType::Module(doc) => Ok(Form::ModuleDoc(Span::new(span!(source_file.id(), l, r), doc))),
-                DocumentationType::Form(doc) => Ok(Form::Doc(Span::new(span!(source_file.id(), l, r), doc))),
+                DocumentationType::Module(doc) => Ok(Form::ModuleDoc(Span::new(span!(source_id, l, r), doc))),
+                DocumentationType::Form(doc) => Ok(Form::Doc(Span::new(span!(source_id, l, r), doc))),
             }
         }
     }
@@ -328,12 +328,12 @@ Doc: Form = {
 
 TypeDecl: Form = {
     <l:@L> "type" <name:TypeName> "=" <ty:TypeExpr> <r:@R> => {
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         Form::Type(TypeAlias::new(name, ty).with_span(span))
     },
 
     <l:@L> "enum" <name:TypeName> ":" <repr:IntType> "{" <variants:CommaDelimitedAllowTrailing<EnumVariant>> "}" <r:@R> => {
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         let mut vs = Vec::with_capacity(variants.len());
         let mut next = ConstantExpr::Int(Span::new(span, IntValue::U8(0)));
         for (span, name, discriminant) in variants {
@@ -377,13 +377,13 @@ TypeDecl: Form = {
 
 EnumVariant: (SourceSpan, Ident, Option<ConstantExpr>) = {
     <l:@L> <name:ConstantName> <discriminant:("=" <ConstantArithmeticExpr>)?> <r:@R> => {
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         (span, name, discriminant)
     }
 }
 
 TypeExpr: TypeExpr = {
-    <l:@L> <t:PrimitiveType> <r:@R> => TypeExpr::Primitive(Span::new(span!(source_file.id(), l, r), t)),
+    <l:@L> <t:PrimitiveType> <r:@R> => TypeExpr::Primitive(Span::new(span!(source_id, l, r), t)),
     <PointerType> => TypeExpr::Ptr(<>),
     <ArrayType> => TypeExpr::Array(<>),
     <StructType> => TypeExpr::Struct(<>),
@@ -392,7 +392,7 @@ TypeExpr: TypeExpr = {
 
 PointerType: PointerType = {
     <l:@L> "ptr" "<" <pointee:TypeExpr> <addrspace:("," "addrspace" "(" <AddressSpace> ")")?> ">" <r:@R> => {
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         let ty = PointerType::new(pointee).with_span(span);
         if let Some(addrspace) = addrspace {
             ty.with_address_space(addrspace)
@@ -410,7 +410,7 @@ AddressSpace: AddressSpace = {
 
 ArrayType: ArrayType = {
     <l:@L> "[" <elem:TypeExpr> ";" <arity:uint> "]" <r:@R> =>? {
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         let arity = usize::try_from(arity)
             .map_err(|error| ParseError::User {
                 error: ParsingError::ImmediateOutOfRange {
@@ -429,7 +429,7 @@ StructType: StructType = {
     <l:@L> "struct" <repr:Annotation?> "{" <fields:CommaDelimitedAllowTrailing<StructField>> "}" <r:@R> =>? {
         use crate::ast::types::TypeRepr;
 
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
 
         // Expecting one of:
         //
@@ -514,7 +514,7 @@ StructType: StructType = {
 
 StructField: StructField = {
     <l:@L> <name:BareIdent> ":" <ty:TypeExpr> <r:@R> => {
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         StructField {
             span,
             name,
@@ -525,7 +525,7 @@ StructField: StructField = {
 
 FunctionType: FunctionType = {
     <l:@L> "(" <args:CommaDelimitedAllowTrailing<FunctionParamType>> ")" <results:("->" <FunctionResultType>)?> <r:@R> => {
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         FunctionType::new(types::CallConv::Fast, args, results.unwrap_or_default()).with_span(span)
     }
 }
@@ -569,7 +569,7 @@ TypeName: Ident = {
             interned.insert(name.clone());
             name
         });
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         Ident::validate(&name)
             .map_err(|error| ParseError::User {
                 error: ParsingError::InvalidIdentifier { error, span },
@@ -580,7 +580,7 @@ TypeName: Ident = {
 
 Import: Form = {
     <l:@L> "use" "."? <path:MaybeQualifiedPath> <alias:("->" <BareIdent>)?> <r:@R> =>? {
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         if path.num_components() == 1 {
             return Err(ParseError::User {
                 error: ParsingError::UnqualifiedImport { span },
@@ -594,7 +594,7 @@ Import: Form = {
 Const: Form = {
     <l:@L> "const" "."? <name:ConstantName> "=" <value:ConstantExpr> <r:@R> => {
         Form::Constant(Constant::new(
-            span!(source_file.id(), l, r),
+            span!(source_id, l, r),
             name,
             value,
         ))
@@ -603,7 +603,7 @@ Const: Form = {
 
 MaybeAdvMapKey: Option<Span<WordValue>> = {
     <l:@L> "(" <value:WordValue> ")" <r:@R> => {
-        Some(Span::new(span!(source_file.id(), l, r), value))
+        Some(Span::new(span!(source_id, l, r), value))
     },
     => None
 }
@@ -611,7 +611,7 @@ MaybeAdvMapKey: Option<Span<WordValue>> = {
 AdvMap: Form = {
     <l:@L> "adv_map" "."? <name:ConstantName> <key:MaybeAdvMapKey> "=" "[" <value:CommaDelimited<Felt>> "]" <r:@R> => {
         Form::AdviceMapEntry(AdviceMapEntry::new(
-            span!(source_file.id(), l, r),
+            span!(source_id, l, r),
             name,
             key,
             value,
@@ -621,7 +621,7 @@ AdvMap: Form = {
 
 Begin: Form = {
     <l:@L> "begin" <body:Ops> "end" <r:@R> => {
-        Form::Begin(Block::new(span!(source_file.id(), l, r), body))
+        Form::Begin(Block::new(span!(source_id, l, r), body))
     }
 }
 
@@ -738,7 +738,7 @@ ProcedureDef: Procedure = {
     <l:@L> <visibility:Visibility> "."? <name:ProcedureName> <num_locals:MaybeParam<U16>> <ty:FunctionType?> <body:Block> "end" <r:@R> =>? {
         let num_locals = num_locals.unwrap_or(0);
         let procedure = Procedure::new(
-            span!(source_file.id(), l, r),
+            span!(source_id, l, r),
             visibility,
             name,
             num_locals,
@@ -755,7 +755,7 @@ ProcedureDef: Procedure = {
 #[inline]
 AliasDef: ProcedureAlias = {
     <l:@L> <_pub:PubVisibility> "."? <name:MaybeQualifiedProcedurePath> <alias:("->" <ProcedureName>)?> <r:@R> =>? {
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         let alias = match name {
             InvocationTarget::ProcedureName(_) =>  return Err(ParseError::User {
                 error: ParsingError::UnqualifiedImport { span },
@@ -814,13 +814,13 @@ PubVisibility: Visibility = {
 // ================================================================================================
 
 Annotation: Attribute = {
-    <l:@L> "@" <attr:Attribute> <r:@R> => attr.with_span(span!(source_file.id(), l, r)),
+    <l:@L> "@" <attr:Attribute> <r:@R> => attr.with_span(span!(source_id, l, r)),
 }
 
 #[inline]
 Attribute: Attribute = {
     <l:@L> <name:BareIdent> "(" <items:CommaDelimited<MetaExpr>> ")" <r:@R>  => {
-        Attribute::List(MetaList { span: span!(source_file.id(), l, r), name, items })
+        Attribute::List(MetaList { span: span!(source_id, l, r), name, items })
     },
 
     <l:@L> <name:BareIdent> "(" <items:CommaDelimited<MetaKeyValue>> ")" <r:@R> =>? {
@@ -841,7 +841,7 @@ Attribute: Attribute = {
                 }
             }
         }
-        Ok(Attribute::KeyValue(MetaKeyValue { span: span!(source_file.id(), l, r), name, items: map }))
+        Ok(Attribute::KeyValue(MetaKeyValue { span: span!(source_id, l, r), name, items: map }))
     },
 
     <name:BareIdent> => Attribute::Marker(<>),
@@ -849,7 +849,7 @@ Attribute: Attribute = {
 
 MetaKeyValue: Span<(Ident, MetaExpr)> = {
     <l:@L> <key:BareIdent> "=" <value:MetaExpr> <r:@R> => {
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         Span::new(span, (key, value))
     }
 }
@@ -857,8 +857,8 @@ MetaKeyValue: Span<(Ident, MetaExpr)> = {
 MetaExpr: MetaExpr = {
     BareIdent => MetaExpr::Ident(<>),
     QuotedString => MetaExpr::String(<>),
-    <l:@L> <value:IntValue> <r:@R> => MetaExpr::Int(Span::new(span!(source_file.id(), l, r), value)),
-    <l:@L> <value:WordValue> <r:@R> => MetaExpr::Word(Span::new(span!(source_file.id(), l, r), value)),
+    <l:@L> <value:IntValue> <r:@R> => MetaExpr::Int(Span::new(span!(source_id, l, r), value)),
+    <l:@L> <value:WordValue> <r:@R> => MetaExpr::Word(Span::new(span!(source_id, l, r), value)),
 }
 
 #[inline]
@@ -869,7 +869,7 @@ QuotedString: Ident = {
             interned.insert(value.clone());
             value
         });
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         Ident::from_raw_parts(Span::new(span, value))
     }
 }
@@ -878,7 +878,7 @@ QuotedString: Ident = {
 // ================================================================================================
 
 Block: Block = {
-    <l:@L> <body:Ops> <r:@R> => Block::new(span!(source_file.id(), l, r), body),
+    <l:@L> <body:Ops> <r:@R> => Block::new(span!(source_id, l, r), body),
 }
 
 #[inline]
@@ -886,7 +886,7 @@ Ops: Vec<Op> = {
     <l:@L> <ops:Op+> <r:@R> =>? {
         let ops = ops.into_iter().flat_map(|ops| ops.into_iter()).collect::<Vec<_>>();
         if ops.len() > u16::MAX as usize {
-            Err(ParseError::User { error: ParsingError::CodeBlockTooBig { span: span!(source_file.id(), l, r) } })
+            Err(ParseError::User { error: ParsingError::CodeBlockTooBig { span: span!(source_id, l, r) } })
         } else {
             Ok(ops)
         }
@@ -903,7 +903,7 @@ Op: SmallOpsVec = {
 IfElse: Op = {
     // Handles the edge case of a code generator emitting an empty "then" block
     <l:@L> "if" "." <cond:Condition> "else" <else_blk:Block> "end" <r:@R> => {
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         let then_blk = Block::new(span, vec![Op::Inst(Span::new(span, Instruction::Nop))]);
         // If false-conditioned, swap the blocks
         if cond {
@@ -914,7 +914,7 @@ IfElse: Op = {
     },
 
     <l:@L> "if" "." <cond:Condition> <then_blk:Block> "else" <else_blk:Block?> "end" <r:@R> => {
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         let else_blk = else_blk.unwrap_or_else(|| Block::new(span, vec![Op::Inst(Span::new(span, Instruction::Nop))]));
         // If false-conditioned, swap the blocks
         if cond {
@@ -925,7 +925,7 @@ IfElse: Op = {
     },
 
     <l:@L> "if" "." <cond:Condition> <then_blk:Block> "end" <r:@R> => {
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         let else_blk = Block::new(span, vec![Op::Inst(Span::new(span, Instruction::Nop))]);
         // If false-conditioned, swap the blocks
         if cond {
@@ -944,13 +944,13 @@ Condition: bool = {
 
 While: Op = {
     <l:@L> "while" "." "true" <body:Block> "end" <r:@R> => {
-        Op::While { span: span!(source_file.id(), l, r), body }
+        Op::While { span: span!(source_id, l, r), body }
     },
 }
 
 Repeat: Op = {
     <l:@L> "repeat" "." <count:uint> <body:Block> "end" <r:@R> =>? {
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         u32::try_from(count)
             .map_err(|error| ParseError::User { error: ParsingError::ImmediateOutOfRange { span, range: 1..(u32::MAX as usize) } })
             .and_then(|count| {
@@ -963,7 +963,7 @@ Repeat: Op = {
 
 #[inline]
 Instruction: SmallOpsVec = {
-    <l:@L> <inst:Inst> <r:@R> => smallvec![Op::Inst(Span::new(span!(source_file.id(), l, r), inst))],
+    <l:@L> <inst:Inst> <r:@R> => smallvec![Op::Inst(Span::new(span!(source_id, l, r), inst))],
     // For instructions which may fold to zero or multiple instructions;
     // or for instruction macros, which expand to multiple instructions,
     // this is the rule under which those instructions should be handled
@@ -1089,7 +1089,7 @@ InstWithErrorCode: Instruction = {
 ImmError: Immediate<Arc<str>> = {
     <l:@L> <t:string> <r:@R> => {
         let name = Arc::<str>::from(t.to_string().into_boxed_str());
-        let id = Span::new(span!(source_file.id(), l, r), name);
+        let id = Span::new(span!(source_id, l, r), name);
         Immediate::Value(id)
     },
     <ConstantName> => Immediate::Constant(<>),
@@ -1138,7 +1138,7 @@ Debug: Instruction = {
     // emit.event("...") inline hashing
     <l:@L> "emit" "." "event" "(" <s:string> ")" <r:@R> => {
         let event_id = miden_core::EventId::from_name(s).as_felt();
-        Instruction::EmitImm(Immediate::Value(Span::new(span!(source_file.id(), l, r), event_id)))
+        Instruction::EmitImm(Immediate::Value(Span::new(span!(source_id, l, r), event_id)))
     },
     "trace" <id:Imm<U32>> => Instruction::Trace(id),
 }
@@ -1153,21 +1153,21 @@ ProcRef: Instruction = {
 #[inline]
 FoldableInstWithFeltImmediate: SmallOpsVec = {
     <l:@L> "eq" <imm:MaybeImm<Felt>> <r:@R> => {
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         match imm {
             Some(imm) => smallvec![Op::Inst(Span::new(span, Instruction::EqImm(imm)))],
             None => smallvec![Op::Inst(Span::new(span, Instruction::Eq))],
         }
     },
     <l:@L> "neq" <imm:MaybeImm<Felt>> <r:@R> => {
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         match imm {
             Some(imm) => smallvec![Op::Inst(Span::new(span, Instruction::NeqImm(imm)))],
             None => smallvec![Op::Inst(Span::new(span, Instruction::Neq))],
         }
     },
     <l:@L> "lt" <imm:MaybeImm<IntValue>> <r:@R> => {
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         match imm {
             Some(imm) => {
                 smallvec![
@@ -1179,7 +1179,7 @@ FoldableInstWithFeltImmediate: SmallOpsVec = {
         }
     },
     <l:@L> "lte" <imm:MaybeImm<IntValue>> <r:@R> => {
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         match imm {
             Some(imm) => {
                 smallvec![
@@ -1191,7 +1191,7 @@ FoldableInstWithFeltImmediate: SmallOpsVec = {
         }
     },
     <l:@L> "gt" <imm:MaybeImm<IntValue>> <r:@R> => {
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         match imm {
             Some(imm) => {
                 smallvec![
@@ -1203,7 +1203,7 @@ FoldableInstWithFeltImmediate: SmallOpsVec = {
         }
     },
     <l:@L> "gte" <imm:MaybeImm<IntValue>> <r:@R> => {
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         match imm {
             Some(imm) => {
                 smallvec![
@@ -1215,7 +1215,7 @@ FoldableInstWithFeltImmediate: SmallOpsVec = {
         }
     },
     <l:@L> "add" <imm:MaybeImm<Felt>> <r:@R> => {
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         match imm {
             Some(imm) if imm == Felt::ZERO => smallvec![],
             Some(imm) if imm == Felt::ONE => smallvec![Op::Inst(Span::new(span, Instruction::Incr))],
@@ -1224,7 +1224,7 @@ FoldableInstWithFeltImmediate: SmallOpsVec = {
         }
     },
     <l:@L> "sub" <imm:MaybeImm<Felt>> <r:@R> => {
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         match imm {
             Some(imm) if imm == Felt::ZERO => smallvec![],
             Some(imm) => smallvec![Op::Inst(Span::new(span, Instruction::SubImm(imm)))],
@@ -1232,7 +1232,7 @@ FoldableInstWithFeltImmediate: SmallOpsVec = {
         }
     },
     <l:@L> "mul" <imm:MaybeImm<Felt>> <r:@R> => {
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         match imm {
             Some(imm) if imm == Felt::ZERO => smallvec![Op::Inst(Span::new(span, Instruction::Drop)), Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U8(0).into())))))],
             Some(imm) if imm == Felt::ONE => smallvec![],
@@ -1241,9 +1241,9 @@ FoldableInstWithFeltImmediate: SmallOpsVec = {
         }
     },
     <l:@L> "div" <imm:MaybeImm<Felt>> <r:@R> =>? {
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         match imm {
-            Some(imm) if imm == Felt::ZERO => Err(ParseError::User { error: ParsingError::DivisionByZero { span: span!(source_file.id(), l, r) } }),
+            Some(imm) if imm == Felt::ZERO => Err(ParseError::User { error: ParsingError::DivisionByZero { span: span!(source_id, l, r) } }),
             Some(imm) if imm == Felt::ONE => Ok(smallvec![]),
             Some(imm) => Ok(smallvec![Op::Inst(Span::new(span, Instruction::DivImm(imm)))]),
             None => Ok(smallvec![Op::Inst(Span::new(span, Instruction::Div))]),
@@ -1254,32 +1254,32 @@ FoldableInstWithFeltImmediate: SmallOpsVec = {
 #[inline]
 FoldableInstWithU32Immediate: SmallOpsVec = {
     <l:@L> "u32div" <imm:MaybeImm<U32>> <r:@R> =>? {
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         match imm {
-            Some(imm) if imm == 0 => Err(ParseError::User { error: ParsingError::DivisionByZero { span: span!(source_file.id(), l, r) } }),
+            Some(imm) if imm == 0 => Err(ParseError::User { error: ParsingError::DivisionByZero { span: span!(source_id, l, r) } }),
             Some(imm) if imm == 1 => Ok(smallvec![]),
             Some(imm) => Ok(smallvec![Op::Inst(Span::new(span, Instruction::U32DivImm(imm)))]),
             None => Ok(smallvec![Op::Inst(Span::new(span, Instruction::U32Div))]),
         }
     },
     <l:@L> "u32divmod" <imm:MaybeImm<U32>> <r:@R> =>? {
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         match imm {
-            Some(imm) if imm == 0 => Err(ParseError::User { error: ParsingError::DivisionByZero { span: span!(source_file.id(), l, r) } }),
+            Some(imm) if imm == 0 => Err(ParseError::User { error: ParsingError::DivisionByZero { span: span!(source_id, l, r) } }),
             Some(imm) => Ok(smallvec![Op::Inst(Span::new(span, Instruction::U32DivModImm(imm)))]),
             None => Ok(smallvec![Op::Inst(Span::new(span, Instruction::U32DivMod))]),
         }
     },
     <l:@L> "u32mod" <imm:MaybeImm<U32>> <r:@R> =>? {
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         match imm {
-            Some(imm) if imm == 0 => Err(ParseError::User { error: ParsingError::DivisionByZero { span: span!(source_file.id(), l, r) } }),
+            Some(imm) if imm == 0 => Err(ParseError::User { error: ParsingError::DivisionByZero { span: span!(source_id, l, r) } }),
             Some(imm) => Ok(smallvec![Op::Inst(Span::new(span, Instruction::U32ModImm(imm)))]),
             None => Ok(smallvec![Op::Inst(Span::new(span, Instruction::U32Mod))]),
         }
     },
     <l:@L> "u32and" <imm:MaybeImm<U32>> <r:@R> => {
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         match imm {
             Some(imm) if imm == 0 => smallvec![Op::Inst(Span::new(span, Instruction::Drop)), Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U8(0).into())))))],
             Some(imm) => {
@@ -1292,7 +1292,7 @@ FoldableInstWithU32Immediate: SmallOpsVec = {
         }
     },
     <l:@L> "u32or" <imm:MaybeImm<U32>> <r:@R> => {
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         match imm {
             Some(imm) if imm == 0 => smallvec![],
             Some(imm) => {
@@ -1305,7 +1305,7 @@ FoldableInstWithU32Immediate: SmallOpsVec = {
         }
     },
     <l:@L> "u32xor" <imm:MaybeImm<U32>> <r:@R> => {
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         match imm {
             Some(imm) if imm == 0 => smallvec![],
             Some(imm) => {
@@ -1318,7 +1318,7 @@ FoldableInstWithU32Immediate: SmallOpsVec = {
         }
     },
     <l:@L> "u32not" <imm:MaybeImm<U32>> <r:@R> => {
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         match imm {
             Some(imm) => {
                 match imm {
@@ -1330,7 +1330,7 @@ FoldableInstWithU32Immediate: SmallOpsVec = {
         }
     },
     <l:@L> "u32wrapping_add" <imm:MaybeImm<U32>> <r:@R> => {
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         match imm {
             Some(imm) if imm == 0 => smallvec![],
             Some(imm) => smallvec![Op::Inst(Span::new(span, Instruction::U32WrappingAddImm(imm)))],
@@ -1338,7 +1338,7 @@ FoldableInstWithU32Immediate: SmallOpsVec = {
         }
     },
     <l:@L> "u32wrapping_sub" <imm:MaybeImm<U32>> <r:@R> => {
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         match imm {
             Some(imm) if imm == 0 => smallvec![],
             Some(imm) => smallvec![Op::Inst(Span::new(span, Instruction::U32WrappingSubImm(imm)))],
@@ -1346,7 +1346,7 @@ FoldableInstWithU32Immediate: SmallOpsVec = {
         }
     },
     <l:@L> "u32wrapping_mul" <imm:MaybeImm<U32>> <r:@R> => {
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         match imm {
             Some(imm) if imm == 0 => smallvec![Op::Inst(Span::new(span, Instruction::Drop)), Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U8(0).into())))))],
             Some(imm) if imm == 1 => smallvec![],
@@ -1355,28 +1355,28 @@ FoldableInstWithU32Immediate: SmallOpsVec = {
         }
     },
     <l:@L> "u32overflowing_add" <imm:MaybeImm<U32>> <r:@R> => {
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         match imm {
             Some(imm) => smallvec![Op::Inst(Span::new(span, Instruction::U32OverflowingAddImm(imm)))],
             None => smallvec![Op::Inst(Span::new(span, Instruction::U32OverflowingAdd))],
         }
     },
     <l:@L> "u32overflowing_sub" <imm:MaybeImm<U32>> <r:@R> => {
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         match imm {
             Some(imm) => smallvec![Op::Inst(Span::new(span, Instruction::U32OverflowingSubImm(imm)))],
             None => smallvec![Op::Inst(Span::new(span, Instruction::U32OverflowingSub))],
         }
     },
     <l:@L> "u32overflowing_mul" <imm:MaybeImm<U32>> <r:@R> => {
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         match imm {
             Some(imm) => smallvec![Op::Inst(Span::new(span, Instruction::U32OverflowingMulImm(imm)))],
             None => smallvec![Op::Inst(Span::new(span, Instruction::U32OverflowingMul))],
         }
     },
     <l:@L> "u32shl" <imm:MaybeImm<Shift32>> <r:@R> => {
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         match imm {
             Some(imm) if imm == 0 => smallvec![],
             Some(imm) => smallvec![Op::Inst(Span::new(span, Instruction::U32ShlImm(imm)))],
@@ -1384,7 +1384,7 @@ FoldableInstWithU32Immediate: SmallOpsVec = {
         }
     },
     <l:@L> "u32shr" <imm:MaybeImm<Shift32>> <r:@R> => {
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         match imm {
             Some(imm) if imm == 0 => smallvec![],
             Some(imm) => smallvec![Op::Inst(Span::new(span, Instruction::U32ShrImm(imm)))],
@@ -1392,7 +1392,7 @@ FoldableInstWithU32Immediate: SmallOpsVec = {
         }
     },
     <l:@L> "u32rotl" <imm:MaybeImm<Shift32>> <r:@R> => {
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         match imm {
             Some(imm) if imm == 0 => smallvec![],
             Some(imm) => smallvec![Op::Inst(Span::new(span, Instruction::U32RotlImm(imm)))],
@@ -1400,7 +1400,7 @@ FoldableInstWithU32Immediate: SmallOpsVec = {
         }
     },
     <l:@L> "u32rotr" <imm:MaybeImm<Shift32>> <r:@R> => {
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         match imm {
             Some(imm) if imm == 0 => smallvec![],
             Some(imm) => smallvec![Op::Inst(Span::new(span, Instruction::U32RotrImm(imm)))],
@@ -1408,7 +1408,7 @@ FoldableInstWithU32Immediate: SmallOpsVec = {
         }
     },
     <l:@L> "u32lt" <imm:MaybeImm<U32>> <r:@R> => {
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         match imm {
             Some(imm) => {
                 match imm {
@@ -1420,7 +1420,7 @@ FoldableInstWithU32Immediate: SmallOpsVec = {
         }
     },
     <l:@L> "u32lte" <imm:MaybeImm<U32>> <r:@R> => {
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         match imm {
             Some(imm) => {
                 match imm {
@@ -1432,7 +1432,7 @@ FoldableInstWithU32Immediate: SmallOpsVec = {
         }
     },
     <l:@L> "u32gt" <imm:MaybeImm<U32>> <r:@R> => {
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         match imm {
             Some(imm) => {
                 match imm {
@@ -1444,7 +1444,7 @@ FoldableInstWithU32Immediate: SmallOpsVec = {
         }
     },
     <l:@L> "u32gte" <imm:MaybeImm<U32>> <r:@R> => {
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         match imm {
             Some(imm) => {
                 match imm {
@@ -1456,7 +1456,7 @@ FoldableInstWithU32Immediate: SmallOpsVec = {
         }
     },
     <l:@L> "u32min" <imm:MaybeImm<U32>> <r:@R> => {
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         match imm {
             Some(imm) => {
                 match imm {
@@ -1468,7 +1468,7 @@ FoldableInstWithU32Immediate: SmallOpsVec = {
         }
     },
     <l:@L> "u32max" <imm:MaybeImm<U32>> <r:@R> => {
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         match imm {
             Some(imm) => {
                 match imm {
@@ -1509,7 +1509,7 @@ InstWithLocalIndex: Instruction = {
 
 #[inline]
 InstWithStackIndex: Instruction = {
-    "adv_push" "." <l:@L> <i:OneBasedStackIndex> <r:@R> => Instruction::AdvPush(Immediate::Value(Span::new(span!(source_file.id(), l, r), i))),
+    "adv_push" "." <l:@L> <i:OneBasedStackIndex> <r:@R> => Instruction::AdvPush(Immediate::Value(Span::new(span!(source_id, l, r), i))),
     "dup" <i:("." <U8>)?> =>? {
         let (span, idx) = i.map(|s| s.into_parts()).unwrap_or((SourceSpan::default(), 0));
         Ok(match idx {
@@ -1632,7 +1632,7 @@ InstWithBitSizeImmediate: Instruction = {
 Push: SmallOpsVec = {
     <l:@L> "push" "." <imm_value:WordImm> "[" <i:uint> "]" <r:@R> => {
         smallvec![Op::Inst(Span::new(
-            span!(source_file.id(), l, r),
+            span!(source_id, l, r),
             Instruction::PushSlice(
                 imm_value,
                 Range { start: i as usize, end: i as usize + 1 }
@@ -1642,7 +1642,7 @@ Push: SmallOpsVec = {
 
     <l:@L> "push" "." <imm_value:WordImm> "[" <l_range:uint> ".." <r_range:uint> "]" <r:@R> => {
         smallvec![Op::Inst(Span::new(
-            span!(source_file.id(), l, r),
+            span!(source_id, l, r),
             Instruction::PushSlice(
                 imm_value,
                 Range { start: l_range as usize, end: r_range as usize }
@@ -1652,7 +1652,7 @@ Push: SmallOpsVec = {
 
     <l:@L> "push" "." <imm_value:WordLiteral> <r:@R> => {
         smallvec![Op::Inst(Span::new(
-            span!(source_file.id(), l, r),
+            span!(source_id, l, r),
             Instruction::Push(Immediate::Value(imm_value.map(PushValue::Word)))
         ))]
     },
@@ -1662,7 +1662,7 @@ Push: SmallOpsVec = {
             let span = imm.span();
             // Include the "push" token in the first item's span
             let span = if i == 0 {
-                span!(source_file.id(), l, span.end().to_u32())
+                span!(source_id, l, span.end().to_u32())
             } else {
                 span
             };
@@ -1672,7 +1672,7 @@ Push: SmallOpsVec = {
             }))
         }).collect::<SmallOpsVec>();
         if ops.len() > 16 {
-            Err(ParseError::User { error: ParsingError::PushOverflow { span: span!(source_file.id(), l, r), count: ops.len() } })
+            Err(ParseError::User { error: ParsingError::PushOverflow { span: span!(source_id, l, r), count: ops.len() } })
         } else {
             Ok(ops)
         }
@@ -1690,7 +1690,7 @@ Imm<T>: Immediate<T> = {
 
 #[inline]
 ImmValue<T>: Immediate<T> = {
-    <l:@L> <t:T> <r:@R> => Immediate::Value(Span::new(span!(source_file.id(), l, r), t)),
+    <l:@L> <t:T> <r:@R> => Immediate::Value(Span::new(span!(source_id, l, r), t)),
     <ConstantName> => Immediate::Constant(<>),
 }
 
@@ -1727,7 +1727,7 @@ RawU8: u8 = {
 
 U8: Span<u8> = {
     <l:@L> <n:uint> <r:@R> =>? {
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         u8::try_from(n).map_err(|error| ParseError::User {
             error: ParsingError::ImmediateOutOfRange { span, range: 0..(u8::MAX as usize + 1) },
         }).map(|n| Span::new(span, n))
@@ -1737,7 +1737,7 @@ U8: Span<u8> = {
 U16: u16 = {
     <l:@L> <n:uint> <r:@R> =>? {
         u16::try_from(n).map_err(|error| ParseError::User {
-            error: ParsingError::ImmediateOutOfRange { span: span!(source_file.id(), l, r), range: 0..(u16::MAX as usize + 1) },
+            error: ParsingError::ImmediateOutOfRange { span: span!(source_id, l, r), range: 0..(u16::MAX as usize + 1) },
         })
     }
 }
@@ -1745,7 +1745,7 @@ U16: u16 = {
 U32: u32 = {
     <l:@L> <n:uint> <r:@R> =>? {
         u32::try_from(n).map_err(|error| ParseError::User {
-            error: ParsingError::InvalidLiteral { span: span!(source_file.id(), l, r), kind: LiteralErrorKind::U32Overflow },
+            error: ParsingError::InvalidLiteral { span: span!(source_id, l, r), kind: LiteralErrorKind::U32Overflow },
         })
     },
 
@@ -1754,7 +1754,7 @@ U32: u32 = {
             IntValue::U8(v) => Ok(v as u32),
             IntValue::U16(v) => Ok(v as u32),
             IntValue::U32(v) => Ok(v),
-            _ =>  Err(ParseError::User { error: ParsingError::InvalidLiteral { span: span!(source_file.id(), l, r), kind: LiteralErrorKind::U32Overflow } }),
+            _ =>  Err(ParseError::User { error: ParsingError::InvalidLiteral { span: span!(source_id, l, r), kind: LiteralErrorKind::U32Overflow } }),
         }
     },
 
@@ -1769,7 +1769,7 @@ U32: u32 = {
 
 MastRoot: Span<Word> = {
     <l:@L> <value:hex_word> <r:@R> => {
-        Span::new(span!(source_file.id(), l, r), Word::from(value.0))
+        Span::new(span!(source_id, l, r), Word::from(value.0))
     }
 }
 
@@ -1824,7 +1824,7 @@ BitSize: u8 = {
 }
 
 IntOrHexImm: Immediate<IntValue> = {
-    <l:@L> <value:IntValue> <r:@R> => Immediate::Value(Span::new(span!(source_file.id(), l, r), value)),
+    <l:@L> <value:IntValue> <r:@R> => Immediate::Value(Span::new(span!(source_id, l, r), value)),
     <ConstantName> => Immediate::Constant(<>),
 }
 
@@ -1832,7 +1832,7 @@ IntValue: IntValue = {
     <l:@L> <n:uint> <r:@R> =>? {
         if n >= Felt::MODULUS {
             return Err(ParseError::User { error: ParsingError::InvalidLiteral {
-                span: span!(source_file.id(), l, r),
+                span: span!(source_id, l, r),
                 kind: LiteralErrorKind::FeltOverflow
             } });
         }
@@ -1851,13 +1851,13 @@ IntValue: IntValue = {
 }
 
 WordImm: Immediate<WordValue> = {
-    <l:@L> <value:WordValue> <r:@R> => Immediate::Value(Span::new(span!(source_file.id(), l, r), value.into())),
+    <l:@L> <value:WordValue> <r:@R> => Immediate::Value(Span::new(span!(source_id, l, r), value.into())),
     <ConstantName> => Immediate::Constant(<>),
 }
 
 #[inline]
 WordLiteral: Span<WordValue> = {
-    <l:@L> <value:WordValue> <r:@R> => Span::new(span!(source_file.id(), l, r), value),
+    <l:@L> <value:WordValue> <r:@R> => Span::new(span!(source_id, l, r), value),
 }
 
 WordValue: WordValue = {
@@ -1866,12 +1866,6 @@ WordValue: WordValue = {
     },
 
     hex_word,
-}
-
-PushImm: Immediate<PushValue> = {
-    <l:@L> <value:WordValue> <r:@R> => Immediate::Value(Span::new(span!(source_file.id(), l, r), value.into())),
-    <l:@L> <value:IntValue> <r:@R> => Immediate::Value(Span::new(span!(source_file.id(), l, r), value.into())),
-    <ConstantName> => Immediate::Constant(<>),
 }
 
 #[inline]
@@ -1901,7 +1895,7 @@ QuotedProcedureName: ProcedureName = {
             interned.insert(name.clone());
             name
         });
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         Ident::validate(&name)
             .map_err(|error| ParseError::User {
                 error: ParsingError::InvalidIdentifier { error, span },
@@ -1915,7 +1909,7 @@ InvocationTarget: InvocationTarget = {
     <MastRoot> => InvocationTarget::MastRoot(<>),
     MaybeQualifiedProcedurePath,
     <l:@L> <_invalid:hex_value> <r:@R> =>? Err(ParseError::User {
-        error: ParsingError::InvalidMastRoot { span: span!(source_file.id(), l, r) },
+        error: ParsingError::InvalidMastRoot { span: span!(source_id, l, r) },
     }),
 }
 
@@ -1969,7 +1963,7 @@ BareIdent: Ident = {
             interned.insert(name.clone());
             name
         });
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         Ident::validate(&name)
             .map_err(|error| ParseError::User {
                 error: ParsingError::InvalidIdentifier { error, span },
@@ -1984,7 +1978,7 @@ BareIdent: Ident = {
 
 MaybeQualifiedPath: Span<LibraryPath> = {
     <l:@L> <_is_absolute:MaybeAbsolute> <mut components:PathComponents<BareIdent>> <r:@R> =>? {
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         let name = components.pop().unwrap();
         if components.is_empty() {
             let ns = LibraryNamespace::User(name.into_inner());
@@ -2024,7 +2018,7 @@ MaybeAbsolute: bool = {
 
 QualifiedName: (Ident, LibraryPath) = {
     <l:@L> <first:(<BareIdent> "::")> <mut components:PathComponents<BareIdent>> <r:@R> =>? {
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
 
         let name = components.pop().unwrap();
         let ns = match first.as_str() {
@@ -2056,7 +2050,7 @@ OpcodeName: Ident = {
             interned.insert(name.clone());
             name
         });
-        Ident::from_raw_parts(Span::new(span!(source_file.id(), l, r), name))
+        Ident::from_raw_parts(Span::new(span!(source_id, l, r), name))
     }
 }
 
@@ -2209,7 +2203,7 @@ TypeId: Ident = {
             interned.insert(name.clone());
             name
         });
-        Ident::from_raw_parts(Span::new(span!(source_file.id(), l, r), name))
+        Ident::from_raw_parts(Span::new(span!(source_id, l, r), name))
     }
 }
 
@@ -2237,22 +2231,22 @@ TypeIdStr: &'static str = {
 
 ConstantExpr: ConstantExpr = {
     <l:@L> "word" "(" <value:string> ")" <r:@R> => {
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         ConstantExpr::Hash(HashKind::Word, Ident::from_raw_parts(Span::new(span, value.into())))
     },
 
     <l:@L> "event" "(" <value:string> ")" <r:@R> => {
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
         ConstantExpr::Hash(HashKind::Event, Ident::from_raw_parts(Span::new(span, value.into())))
     },
 
     <l:@L> <x:ConstantExpr> "+" <y:ConstantExpr100> <r:@R> =>? {
-        let expr = ConstantExpr::BinaryOp {  span: span!(source_file.id(), l, r), op: ConstantOp::Add, lhs: Box::new(x), rhs: Box::new(y) };
+        let expr = ConstantExpr::BinaryOp {  span: span!(source_id, l, r), op: ConstantOp::Add, lhs: Box::new(x), rhs: Box::new(y) };
         expr.try_fold().map_err(|error| ParseError::User { error })
     },
 
     <l:@L> <x:ConstantExpr> "-" <y:ConstantExpr100> <r:@R> =>? {
-        let expr = ConstantExpr::BinaryOp { span: span!(source_file.id(), l, r), op: ConstantOp::Sub, lhs: Box::new(x), rhs: Box::new(y) };
+        let expr = ConstantExpr::BinaryOp { span: span!(source_id, l, r), op: ConstantOp::Sub, lhs: Box::new(x), rhs: Box::new(y) };
         expr.try_fold().map_err(|error| ParseError::User { error })
     },
 
@@ -2261,12 +2255,12 @@ ConstantExpr: ConstantExpr = {
 
 ConstantArithmeticExpr: ConstantExpr = {
     <l:@L> <x:ConstantArithmeticExpr> "+" <y:ConstantArithmeticExpr100> <r:@R> =>? {
-        let expr = ConstantExpr::BinaryOp {  span: span!(source_file.id(), l, r), op: ConstantOp::Add, lhs: Box::new(x), rhs: Box::new(y) };
+        let expr = ConstantExpr::BinaryOp {  span: span!(source_id, l, r), op: ConstantOp::Add, lhs: Box::new(x), rhs: Box::new(y) };
         expr.try_fold().map_err(|error| ParseError::User { error })
     },
 
     <l:@L> <x:ConstantArithmeticExpr> "-" <y:ConstantArithmeticExpr100> <r:@R> =>? {
-        let expr = ConstantExpr::BinaryOp { span: span!(source_file.id(), l, r), op: ConstantOp::Sub, lhs: Box::new(x), rhs: Box::new(y) };
+        let expr = ConstantExpr::BinaryOp { span: span!(source_id, l, r), op: ConstantOp::Sub, lhs: Box::new(x), rhs: Box::new(y) };
         expr.try_fold().map_err(|error| ParseError::User { error })
     },
 
@@ -2275,17 +2269,17 @@ ConstantArithmeticExpr: ConstantExpr = {
 
 ConstantExpr100: ConstantExpr = {
     <l:@L> <x:ConstantExpr100> "*" <y:Term> <r:@R> =>? {
-        let expr = ConstantExpr::BinaryOp { span: span!(source_file.id(), l, r), op: ConstantOp::Mul, lhs: Box::new(x), rhs: Box::new(y) };
+        let expr = ConstantExpr::BinaryOp { span: span!(source_id, l, r), op: ConstantOp::Mul, lhs: Box::new(x), rhs: Box::new(y) };
         expr.try_fold().map_err(|error| ParseError::User { error })
     },
 
     <l:@L> <x:ConstantExpr100> "/" <y:Term> <r:@R> =>? {
-        let expr = ConstantExpr::BinaryOp { span: span!(source_file.id(), l, r), op: ConstantOp::Div, lhs: Box::new(x), rhs: Box::new(y) };
+        let expr = ConstantExpr::BinaryOp { span: span!(source_id, l, r), op: ConstantOp::Div, lhs: Box::new(x), rhs: Box::new(y) };
         expr.try_fold().map_err(|error| ParseError::User { error })
     },
 
     <l:@L> <x:ConstantExpr100> "//" <y:Term> <r:@R> =>? {
-        let expr = ConstantExpr::BinaryOp { span: span!(source_file.id(), l, r), op: ConstantOp::IntDiv, lhs: Box::new(x), rhs: Box::new(y) };
+        let expr = ConstantExpr::BinaryOp { span: span!(source_id, l, r), op: ConstantOp::IntDiv, lhs: Box::new(x), rhs: Box::new(y) };
         expr.try_fold().map_err(|error| ParseError::User { error })
     },
 
@@ -2294,17 +2288,17 @@ ConstantExpr100: ConstantExpr = {
 
 ConstantArithmeticExpr100: ConstantExpr = {
     <l:@L> <x:ConstantArithmeticExpr100> "*" <y:NumericTerm> <r:@R> =>? {
-        let expr = ConstantExpr::BinaryOp { span: span!(source_file.id(), l, r), op: ConstantOp::Mul, lhs: Box::new(x), rhs: Box::new(y) };
+        let expr = ConstantExpr::BinaryOp { span: span!(source_id, l, r), op: ConstantOp::Mul, lhs: Box::new(x), rhs: Box::new(y) };
         expr.try_fold().map_err(|error| ParseError::User { error })
     },
 
     <l:@L> <x:ConstantArithmeticExpr100> "/" <y:NumericTerm> <r:@R> =>? {
-        let expr = ConstantExpr::BinaryOp { span: span!(source_file.id(), l, r), op: ConstantOp::Div, lhs: Box::new(x), rhs: Box::new(y) };
+        let expr = ConstantExpr::BinaryOp { span: span!(source_id, l, r), op: ConstantOp::Div, lhs: Box::new(x), rhs: Box::new(y) };
         expr.try_fold().map_err(|error| ParseError::User { error })
     },
 
     <l:@L> <x:ConstantArithmeticExpr100> "//" <y:NumericTerm> <r:@R> =>? {
-        let expr = ConstantExpr::BinaryOp { span: span!(source_file.id(), l, r), op: ConstantOp::IntDiv, lhs: Box::new(x), rhs: Box::new(y) };
+        let expr = ConstantExpr::BinaryOp { span: span!(source_id, l, r), op: ConstantOp::IntDiv, lhs: Box::new(x), rhs: Box::new(y) };
         expr.try_fold().map_err(|error| ParseError::User { error })
     },
 
@@ -2319,7 +2313,7 @@ ConstantName: Ident = {
             interned.insert(name.clone());
             name
         });
-        let span = span!(source_file.id(), l, r);
+        let span = span!(source_id, l, r);
 
         Ident::validate(&name)
             .map_err(|error| ParseError::User {
@@ -2333,11 +2327,11 @@ Term: ConstantExpr = {
     "(" <ConstantExpr> ")",
 
     <l:@L> <value:IntValue> <r:@R> => {
-        ConstantExpr::Int(Span::new(span!(source_file.id(), l, r), value))
+        ConstantExpr::Int(Span::new(span!(source_id, l, r), value))
     },
 
     <l:@L> <value:WordValue> <r:@R> => {
-        ConstantExpr::Word(Span::new(span!(source_file.id(), l, r), value))
+        ConstantExpr::Word(Span::new(span!(source_id, l, r), value))
     },
 
     <QuotedString> => ConstantExpr::String(<>),
@@ -2349,7 +2343,7 @@ NumericTerm: ConstantExpr = {
     "(" <ConstantArithmeticExpr> ")",
 
     <l:@L> <value:IntValue> <r:@R> => {
-        ConstantExpr::Int(Span::new(span!(source_file.id(), l, r), value))
+        ConstantExpr::Int(Span::new(span!(source_id, l, r), value))
     },
 
     <ConstantName> => ConstantExpr::Var(<>),
