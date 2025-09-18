@@ -2,7 +2,8 @@ use alloc::{sync::Arc, vec::Vec};
 use core::future::Future;
 
 use miden_core::{
-    AdviceMap, DebugOptions, EventId, Felt, Word, crypto::merkle::InnerNodeInfo, mast::MastForest,
+    AdviceMap, DebugOptions, Felt, Word, crypto::merkle::InnerNodeInfo, mast::MastForest,
+    precompile::PrecompileData,
 };
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 
@@ -31,7 +32,7 @@ pub enum AdviceMutation {
     ExtendStack { values: Vec<Felt> },
     ExtendMap { other: AdviceMap },
     ExtendMerkleStore { infos: Vec<InnerNodeInfo> },
-    ExtendDeferred { data: Vec<(EventId, Vec<Felt>)> },
+    ExtendPrecompileRequests { data: PrecompileData },
 }
 
 impl AdviceMutation {
@@ -47,8 +48,8 @@ impl AdviceMutation {
         Self::ExtendMerkleStore { infos: Vec::from_iter(infos) }
     }
 
-    pub fn extend_deferred(data: Vec<(EventId, Vec<Felt>)>) -> Self {
-        Self::ExtendDeferred { data }
+    pub fn extend_precompile_requests(data: PrecompileData) -> Self {
+        Self::ExtendPrecompileRequests { data }
     }
 }
 // HOST TRAIT

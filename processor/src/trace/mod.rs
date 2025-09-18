@@ -7,7 +7,10 @@ use miden_air::trace::{
     decoder::{NUM_USER_OP_HELPERS, USER_OP_HELPERS_OFFSET},
     main_trace::MainTrace,
 };
-use miden_core::{ProgramInfo, StackInputs, StackOutputs, Word, ZERO, stack::MIN_STACK_DEPTH};
+use miden_core::{
+    ProgramInfo, StackInputs, StackOutputs, Word, ZERO, precompile::PrecompileRequests,
+    stack::MIN_STACK_DEPTH,
+};
 use winter_prover::{EvaluationFrame, Trace, TraceInfo, crypto::RandomCoin};
 
 use super::{
@@ -121,6 +124,11 @@ impl ExecutionTrace {
     /// Returns outputs of the program execution which resulted in this execution trace.
     pub fn stack_outputs(&self) -> &StackOutputs {
         &self.stack_outputs
+    }
+
+    /// Returns the precompile requests generated during program execution.
+    pub fn precompile_requests(&self) -> &PrecompileRequests {
+        self.advice.precompile_requests()
     }
 
     /// Returns the initial state of the top 16 stack registers.

@@ -1,8 +1,9 @@
 use alloc::{collections::btree_map::Entry, vec::Vec};
 
 use miden_core::{
-    AdviceMap, EventId, Felt, Word,
+    AdviceMap, Felt, Word,
     crypto::merkle::{InnerNodeInfo, MerklePath, MerkleStore, NodeIndex},
+    precompile::{PrecompileData, PrecompileRequests},
 };
 
 mod inputs;
@@ -32,7 +33,7 @@ use crate::{host::AdviceMutation, processor::AdviceProviderInterface};
 /// 4. Deferred precompile requests containing the call-data of any precompile calls made by the VM.
 ///    The VM computes a commitment to the call-data of all the precompiles it requests. When
 ///    verifying each call, this commitment must be recomputed and should match the one computed by
-///    the VM. After executing a program, this deferred data can either
+///    the VM. After executing a program, the data in these requests can either
 ///    - be included in the proof of the VM execution and verified natively alongside the VM proof,
 ///      or,
 ///    - used to produce a STARK proof using a precompile VM, which can be verified in the epilog of
@@ -45,7 +46,7 @@ pub struct AdviceProvider {
     stack: Vec<Felt>,
     map: AdviceMap,
     store: MerkleStore,
-    deferred: Vec<(EventId, Vec<Felt>)>,
+    precompile_requests: PrecompileRequests,
 }
 
 impl AdviceProvider {
@@ -68,8 +69,8 @@ impl AdviceProvider {
             AdviceMutation::ExtendMerkleStore { infos } => {
                 self.extend_merkle_store(infos);
             },
-            AdviceMutation::ExtendDeferred { data } => {
-                self.extend_deferred(data);
+            AdviceMutation::ExtendPrecompileRequests { data } => {
+                self.extend_precompile_requests([data]);
             },
         }
         Ok(())
@@ -332,20 +333,20 @@ impl AdviceProvider {
         self.store.extend(iter);
     }
 
-    // DEFERRED DATA
+    // PRECOMPILE REQUESTS
     // --------------------------------------------------------------------------------------------
 
-    /// Returns a reference to the deferred data.
-    pub fn deferred(&self) -> &[(EventId, Vec<Felt>)] {
-        &self.deferred
+    /// Returns a reference to the precompile requests.
+    pub fn precompile_requests(&self) -> &PrecompileRequests {
+        &self.precompile_requests
     }
 
-    /// Extends the deferred data with the given entries.
-    pub fn extend_deferred<I>(&mut self, iter: I)
+    /// Extends the precompile requests with the given entries.
+    pub fn extend_precompile_requests<I>(&mut self, iter: I)
     where
-        I: IntoIterator<Item = (EventId, Vec<Felt>)>,
+        I: IntoIterator<Item = PrecompileData>,
     {
-        self.deferred.extend(iter);
+        self.precompile_requests.extend(iter);
     }
 
     // MUTATORS
@@ -358,13 +359,12 @@ impl AdviceProvider {
         self.extend_map(&inputs.map)
     }
 
-    /// Consumes `self` and return its parts (stack, map, store, deferred).
+    /// Consumes `self` and return its parts (stack, map, store, precompile_requests).
     ///
     /// Note that the order of the stack is such that the element at the top of the stack is at the
     /// end of the returned vector.
-    #[allow(clippy::type_complexity)]
-    pub fn into_parts(self) -> (Vec<Felt>, AdviceMap, MerkleStore, Vec<(EventId, Vec<Felt>)>) {
-        (self.stack, self.map, self.store, self.deferred)
+    pub fn into_parts(self) -> (Vec<Felt>, AdviceMap, MerkleStore, PrecompileRequests) {
+        (self.stack, self.map, self.store, self.precompile_requests)
     }
 }
 
@@ -372,7 +372,12 @@ impl From<AdviceInputs> for AdviceProvider {
     fn from(inputs: AdviceInputs) -> Self {
         let AdviceInputs { mut stack, map, store } = inputs;
         stack.reverse();
-        Self { stack, map, store, deferred: Vec::new() }
+        Self {
+            stack,
+            map,
+            store,
+            precompile_requests: PrecompileRequests::new(),
+        }
     }
 }
 
