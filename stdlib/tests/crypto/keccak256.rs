@@ -7,10 +7,18 @@
 //! - Various input sizes and edge cases are handled properly
 
 use core::array;
+use std::sync::Arc;
 
-use miden_core::Felt;
-use miden_stdlib::handlers::keccak256::{
-    KECCAK_HASH_MEMORY_EVENT_ID, KECCAK_HASH_MEMORY_EVENT_NAME, KeccakPreimage, keccak_verifier,
+use miden_air::ProvingOptions;
+use miden_assembly::Assembler;
+use miden_core::{Felt, ProgramInfo, precompile::PrecompileVerifiers};
+use miden_crypto::{Word, hash::rpo::Rpo256};
+use miden_processor::{AdviceInputs, DefaultHost, Program, StackInputs};
+use miden_stdlib::{
+    StdLibrary,
+    handlers::keccak256::{
+        KECCAK_HASH_MEMORY_EVENT_ID, KECCAK_HASH_MEMORY_EVENT_NAME, KeccakPreimage, keccak_verifier,
+    },
 };
 
 // Test constants
@@ -267,4 +275,100 @@ fn generate_stack_push_masm(preimage: &KeccakPreimage) -> String {
         .map(|value| format!("push.{value}"))
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+#[test]
+fn test_keccak_hash_1to1_prove_verify() {
+    // 32-byte input for 1-to-1 hash test
+    let input_u8: Vec<u8> = (0..32).collect();
+    let preimage = KeccakPreimage::new(input_u8);
+
+    // Generate memory stores for the input data
+    let memory_stores_source = generate_memory_store_masm(&preimage, INPUT_MEMORY_ADDR);
+
+    // MASM program that uses hash_memory_impl to get the commitment on stack
+    let source = format!(
+        r#"
+            use.std::crypto::hashes::keccak256
+            use.std::sys
+
+            begin
+                # Store packed u32 values in memory
+                {memory_stores_source}
+
+                # Push handler inputs: ptr and len_bytes
+                push.32.{INPUT_MEMORY_ADDR}
+                # => [ptr, len_bytes, ...]
+
+                # Call hash_memory_impl to get commitment and digest
+                exec.keccak256::hash_memory_impl
+                # => [COMM, DIGEST_U32[8], ...]
+
+                # Truncate stack to leave only the commitment and 15 more elements
+                exec.sys::truncate_stack
+            end
+            "#,
+    );
+
+    // Compile the program with standard library
+    let program: Program = Assembler::default()
+        .with_dynamic_library(StdLibrary::default())
+        .expect("failed to load stdlib")
+        .assemble_program(source)
+        .expect("failed to compile test source");
+
+    // Set up inputs
+    let stack_inputs = StackInputs::default();
+    let advice_inputs = AdviceInputs::default();
+
+    // Create host and load standard library with event handlers
+    let mut host = DefaultHost::default();
+    let stdlib = StdLibrary::default();
+    host.load_library(&stdlib).expect("failed to load stdlib");
+
+    // Generate proof with 96-bit security
+    let options = ProvingOptions::with_96_bit_security(miden_air::HashFunction::Blake3_192);
+    let (stack_outputs, proof) = miden_utils_testing::prove(
+        &program,
+        stack_inputs.clone(),
+        advice_inputs,
+        &mut host,
+        options,
+    )
+    .expect("failed to generate proof");
+
+    // Create precompile verifiers registry and register keccak verifier
+    let mut precompile_verifiers = PrecompileVerifiers::new();
+    precompile_verifiers.register(KECCAK_HASH_MEMORY_EVENT_ID, Arc::new(keccak_verifier));
+
+    // Hacky test to check that we compute the right commitment in `precompile_requests.commitment`
+    let precompile_requests = proof.precompile_requests.clone();
+    let commitment =
+        precompile_requests.commitment(&precompile_verifiers).expect("failed to verify");
+    let commitment_expected = {
+        let commitment_precompile = stack_outputs.get_stack_word(0).unwrap();
+        Rpo256::merge(&[commitment_precompile, Word::empty()])
+    };
+    assert_eq!(commitment_expected, commitment);
+
+    // Verify that the commitment on the stack matches the expected precompile commitment
+    let expected_commitment = preimage.precompile_commitment();
+    let stack_commitment = stack_outputs.get_stack_word(0).unwrap();
+    assert_eq!(
+        stack_commitment, expected_commitment,
+        "commitment on stack does not match expected precompile commitment"
+    );
+
+    // Verify the proof with precompiles
+    let program_info = ProgramInfo::from(program);
+    let result = miden_verifier::verify_with_precompiles(
+        program_info,
+        stack_inputs,
+        stack_outputs,
+        proof,
+        &precompile_verifiers,
+    );
+
+    // Assert that verification succeeds
+    assert!(result.is_ok(), "proof verification failed: {result:?}");
 }
