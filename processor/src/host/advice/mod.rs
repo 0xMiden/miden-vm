@@ -115,9 +115,27 @@ impl AdviceProvider {
         self.stack.push(value)
     }
 
+    /// Push multiple values to the advice stack at once.
+    pub fn push_stack_many(&mut self, values: &[Felt]) -> Result<(), AdviceError> {
+        for &value in values {
+            self.stack.push(value);
+        }
+
+        Ok(())
+    }
+
     /// Pushes a word (4 elements) onto the stack.
     pub fn push_stack_word(&mut self, word: &Word) {
         self.stack.extend(word.iter().rev())
+    }
+
+    /// Push multiple words to the advice stack in one shot
+    pub fn push_stack_words(&mut self, words: &[Word]) -> Result<(), AdviceError> {
+        for &word in words {
+            self.stack.extend(word.iter().rev())
+        }
+
+        Ok(())
     }
 
     /// Fetches a list of elements under the specified key from the advice map and pushes them onto
