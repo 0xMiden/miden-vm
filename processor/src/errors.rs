@@ -78,6 +78,8 @@ pub enum ExecutionError {
     },
     #[error("attempted to add event handler with previously inserted id: {id:?}")]
     DuplicateEventHandler { id: EventId },
+    #[error("attempted to add event handler with reseved id: {id:?}")]
+    ReservedEventId { id: EventId },
     #[error("assertion failed at clock cycle {clk} with error {}",
       match err_msg {
         Some(msg) => format!("message: {msg}"),

@@ -2,7 +2,7 @@
 
 Events interrupt VM execution for one cycle and hand control to the host. The host can read VM state and modify the advice provider. From the VM's perspective, `emit` has identical semantics to `noop` - the operand stack and registers remain unchanged.
 
-Event identifiers are field elements. Use a stable mapping: first 64 bits of `blake3("<name>")` as little-endian u64, mod p. The VM doesn't enforce structure for stack-provided IDs, but immediate forms restrict inputs to this mapping.
+Event identifiers are field elements derived from well-known strings using `EventId::from_name()` (first 64 bits of `blake3("<name>")` as little-endian u64, mod p). The first 256 event ID values are reserved for system events. The VM doesn't enforce structure for stack-provided IDs, but immediate forms restrict inputs to this string-based mapping.
 
 Event names should be as unique as possible to avoid collisions with other libraries. Use a hierarchical naming convention like `project_name::library_name::event_name`. Generic names may cause conflicts in multi-library environments.
 

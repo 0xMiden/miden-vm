@@ -320,8 +320,12 @@ where
         | U32DivModImm(imm)
         | MemLoadImm(imm)
         | MemLoadWImm(imm)
+        | MemLoadWBeImm(imm)
+        | MemLoadWLeImm(imm)
         | MemStoreImm(imm)
         | MemStoreWImm(imm)
+        | MemStoreWBeImm(imm)
+        | MemStoreWLeImm(imm)
         | Trace(imm) => visitor.visit_immediate_u32(imm),
         EmitImm(imm) => visitor.visit_immediate_felt(imm),
         SysEvent(sys_event) => visitor.visit_system_event(Span::new(span, sys_event)),
@@ -346,11 +350,12 @@ where
         | MovUp4 | MovUp5 | MovUp6 | MovUp7 | MovUp8 | MovUp9 | MovUp10 | MovUp11 | MovUp12
         | MovUp13 | MovUp14 | MovUp15 | MovUpW2 | MovUpW3 | MovDn2 | MovDn3 | MovDn4 | MovDn5
         | MovDn6 | MovDn7 | MovDn8 | MovDn9 | MovDn10 | MovDn11 | MovDn12 | MovDn13 | MovDn14
-        | MovDn15 | MovDnW2 | MovDnW3 | CSwap | CSwapW | CDrop | CDropW | PushFeltList(_)
-        | Sdepth | Caller | Clk | MemLoad | MemLoadW | MemStore | MemStoreW | MemStream
-        | AdvPipe | AdvLoadW | Hash | HMerge | HPerm | MTreeGet | MTreeSet | MTreeMerge
-        | MTreeVerify | FriExt2Fold4 | DynExec | DynCall | Breakpoint | HornerBase | HornerExt
-        | EvalCircuit | Emit => ControlFlow::Continue(()),
+        | MovDn15 | MovDnW2 | MovDnW3 | Reversew | Reversedw | CSwap | CSwapW | CDrop | CDropW
+        | PushFeltList(_) | Sdepth | Caller | Clk | MemLoad | MemLoadW | MemLoadWBe
+        | MemLoadWLe | MemStore | MemStoreW | MemStoreWBe | MemStoreWLe | MemStream | AdvPipe
+        | AdvLoadW | Hash | HMerge | HPerm | MTreeGet | MTreeSet | MTreeMerge | MTreeVerify
+        | FriExt2Fold4 | DynExec | DynCall | Breakpoint | HornerBase | HornerExt | EvalCircuit
+        | Emit => ControlFlow::Continue(()),
     }
 }
 
@@ -751,8 +756,12 @@ where
         | U32DivModImm(imm)
         | MemLoadImm(imm)
         | MemLoadWImm(imm)
+        | MemLoadWBeImm(imm)
+        | MemLoadWLeImm(imm)
         | MemStoreImm(imm)
         | MemStoreWImm(imm)
+        | MemStoreWBeImm(imm)
+        | MemStoreWLeImm(imm)
         | Trace(imm) => visitor.visit_mut_immediate_u32(imm),
         EmitImm(imm) => visitor.visit_mut_immediate_felt(imm),
         SysEvent(sys_event) => visitor.visit_mut_system_event(Span::new(span, sys_event)),
@@ -777,11 +786,12 @@ where
         | MovUp4 | MovUp5 | MovUp6 | MovUp7 | MovUp8 | MovUp9 | MovUp10 | MovUp11 | MovUp12
         | MovUp13 | MovUp14 | MovUp15 | MovUpW2 | MovUpW3 | MovDn2 | MovDn3 | MovDn4 | MovDn5
         | MovDn6 | MovDn7 | MovDn8 | MovDn9 | MovDn10 | MovDn11 | MovDn12 | MovDn13 | MovDn14
-        | MovDn15 | MovDnW2 | MovDnW3 | CSwap | CSwapW | CDrop | CDropW | PushFeltList(_)
-        | Sdepth | Caller | Clk | MemLoad | MemLoadW | MemStore | MemStoreW | MemStream
-        | AdvPipe | AdvLoadW | Hash | HMerge | HPerm | MTreeGet | MTreeSet | MTreeMerge
-        | MTreeVerify | FriExt2Fold4 | DynExec | DynCall | Breakpoint | HornerBase | HornerExt
-        | EvalCircuit | Emit => ControlFlow::Continue(()),
+        | MovDn15 | MovDnW2 | MovDnW3 | Reversew | Reversedw | CSwap | CSwapW | CDrop | CDropW
+        | PushFeltList(_) | Sdepth | Caller | Clk | MemLoad | MemLoadW | MemLoadWBe
+        | MemLoadWLe | MemStore | MemStoreW | MemStoreWBe | MemStoreWLe | MemStream | AdvPipe
+        | AdvLoadW | Hash | HMerge | HPerm | MTreeGet | MTreeSet | MTreeMerge | MTreeVerify
+        | FriExt2Fold4 | DynExec | DynCall | Breakpoint | HornerBase | HornerExt | EvalCircuit
+        | Emit => ControlFlow::Continue(()),
     }
 }
 
