@@ -590,8 +590,8 @@ impl Module {
                 let elem = self.resolve_type(&t.elem)?;
                 Some(types::Type::Array(Arc::new(types::ArrayType::new(elem, t.arity))))
             },
-            ast::TypeExpr::Ptr(pointee) => {
-                let pointee = self.resolve_type(pointee.inner())?;
+            ast::TypeExpr::Ptr(ty) => {
+                let pointee = self.resolve_type(&ty.pointee)?;
                 Some(types::Type::Ptr(Arc::new(types::PointerType::new(pointee))))
             },
             ast::TypeExpr::Struct(t) => {

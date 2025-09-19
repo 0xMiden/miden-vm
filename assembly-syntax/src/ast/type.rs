@@ -2,7 +2,7 @@ use alloc::{boxed::Box, string::String, vec::Vec};
 
 use miden_debug_types::{SourceSpan, Span, Spanned};
 pub use midenc_hir_type as types;
-use midenc_hir_type::{Type, TypeRepr};
+use midenc_hir_type::{AddressSpace, Type, TypeRepr};
 
 use super::{ConstantExpr, DocString, Ident};
 
@@ -165,7 +165,7 @@ pub enum TypeExpr {
     /// A primitive integral type, e.g. `i1`, `u16`
     Primitive(Span<Type>),
     /// A pointer type expression, e.g. `*u8`
-    Ptr(Span<Box<TypeExpr>>),
+    Ptr(PointerType),
     /// An array type expression, e.g. `[u8; 32]`
     Array(ArrayType),
     /// A struct type expression, e.g. `struct { a: u32 }`
@@ -188,11 +188,13 @@ impl From<Type> for TypeExpr {
                     }
                 })))
             },
-            Type::Ptr(t) => Self::Ptr(Span::unknown(Box::new(t.pointee().clone().into()))),
+            Type::Ptr(t) => Self::Ptr((*t).clone().into()),
             Type::Function(_) => {
-                Self::Ptr(Span::unknown(Box::new(TypeExpr::Primitive(Span::unknown(Type::U8)))))
+                Self::Ptr(PointerType::new(TypeExpr::Primitive(Span::unknown(Type::Felt))))
             },
-            Type::List(t) => Self::Ptr(Span::unknown(Box::new((*t).clone().into()))),
+            Type::List(t) => Self::Ptr(
+                PointerType::new((*t).clone().into()).with_address_space(AddressSpace::Byte),
+            ),
             Type::I128 | Type::U128 => Self::Array(ArrayType::new(Type::U32.into(), 4)),
             Type::I64 | Type::U64 => Self::Array(ArrayType::new(Type::U32.into(), 2)),
             Type::Unknown | Type::Never | Type::F64 => panic!("unrepresentable type value: {ty}"),
@@ -219,10 +221,96 @@ impl crate::prettier::PrettyPrint for TypeExpr {
 
         match self {
             Self::Primitive(ty) => display(ty),
-            Self::Ptr(ty) => const_text("*") + ty.render(),
+            Self::Ptr(ty) => ty.render(),
             Self::Array(ty) => ty.render(),
             Self::Struct(ty) => ty.render(),
             Self::Ref(ty) => display(ty),
+        }
+    }
+}
+
+// POINTER TYPE
+// ================================================================================================
+
+#[derive(Debug, Clone)]
+pub struct PointerType {
+    pub span: SourceSpan,
+    pub pointee: Box<TypeExpr>,
+    addrspace: Option<AddressSpace>,
+}
+
+impl From<types::PointerType> for PointerType {
+    fn from(ty: types::PointerType) -> Self {
+        let types::PointerType { addrspace, pointee } = ty;
+        let pointee = Box::new(TypeExpr::from(pointee));
+        Self {
+            span: SourceSpan::UNKNOWN,
+            pointee,
+            addrspace: Some(addrspace),
+        }
+    }
+}
+
+impl Eq for PointerType {}
+
+impl PartialEq for PointerType {
+    fn eq(&self, other: &Self) -> bool {
+        self.address_space() == other.address_space() && self.pointee == other.pointee
+    }
+}
+
+impl core::hash::Hash for PointerType {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        self.pointee.hash(state);
+        self.addrspace.hash(state);
+    }
+}
+
+impl Spanned for PointerType {
+    fn span(&self) -> SourceSpan {
+        self.span
+    }
+}
+
+impl PointerType {
+    pub fn new(pointee: TypeExpr) -> Self {
+        Self {
+            span: SourceSpan::UNKNOWN,
+            pointee: Box::new(pointee),
+            addrspace: None,
+        }
+    }
+
+    /// Override the default source span
+    #[inline]
+    pub fn with_span(mut self, span: SourceSpan) -> Self {
+        self.span = span;
+        self
+    }
+
+    /// Override the default address space
+    #[inline]
+    pub fn with_address_space(mut self, addrspace: AddressSpace) -> Self {
+        self.addrspace = Some(addrspace);
+        self
+    }
+
+    /// Get the address space of this pointer type
+    #[inline]
+    pub fn address_space(&self) -> AddressSpace {
+        self.addrspace.unwrap_or(AddressSpace::Element)
+    }
+}
+
+impl crate::prettier::PrettyPrint for PointerType {
+    fn render(&self) -> crate::prettier::Document {
+        use crate::prettier::*;
+
+        let doc = const_text("ptr<") + self.pointee.render();
+        if let Some(addrspace) = self.addrspace.as_ref() {
+            doc + const_text(", ") + text(format!("addrspace({})", addrspace)) + const_text(">")
+        } else {
+            doc + const_text(">")
         }
     }
 }

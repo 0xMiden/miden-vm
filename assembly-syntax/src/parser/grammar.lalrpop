@@ -10,7 +10,7 @@ use core::{marker::PhantomData, num::NonZeroU32, ops::Range};
 use miden_debug_types::{SourceFile, SourceSpan, Span, Spanned};
 use smallvec::smallvec;
 
-use crate::{LibraryPath, LibraryNamespace, ast::{*, types::Type}, Felt, FieldElement, StarkField, Word};
+use crate::{LibraryPath, LibraryNamespace, ast::{*, types::{AddressSpace, Type}}, Felt, FieldElement, StarkField, Word};
 use super::{
     BinEncodedValue, IntValue, PushValue, Token, WordValue, ParseError, ParsingError,
     LiteralErrorKind, DocumentationType
@@ -32,8 +32,6 @@ extern {
 
     enum Token<'input> {
         "!" => Token::Bang,
-        "(" => Token::Lparen,
-        ")" => Token::Rparen,
         "*" => Token::Star,
         "+" => Token::Plus,
         "," => Token::Comma,
@@ -47,12 +45,17 @@ extern {
         "=" => Token::Equal,
         "." => Token::Dot,
         "@" => Token::At,
+        "<" => Token::Langle,
+        ">" => Token::Rangle,
         "{" => Token::Lbrace,
         "}" => Token::Rbrace,
         "[" => Token::Lbracket,
         "]" => Token::Rbracket,
+        "(" => Token::Lparen,
+        ")" => Token::Rparen,
         ".." => Token::Range,
         "add" => Token::Add,
+        "addrspace" => Token::Addrspace,
         "adv" => Token::Adv,
         "adv_map" => Token::AdvMap,
         "insert_hdword" => Token::InsertHdword,
@@ -74,6 +77,8 @@ extern {
         "assert_eq" => Token::AssertEq,
         "assert_eqw" => Token::AssertEqw,
         "begin" => Token::Begin,
+        "breakpoint" => Token::Breakpoint,
+        "byte" => Token::Byte,
         "caller" => Token::Caller,
         "call" => Token::Call,
         "cdrop" => Token::Cdrop,
@@ -83,7 +88,6 @@ extern {
         "cswap" => Token::Cswap,
         "cswapw" => Token::Cswapw,
         "debug" => Token::Debug,
-        "breakpoint" => Token::Breakpoint,
         "div" => Token::Div,
         "drop" => Token::Drop,
         "dropw" => Token::Dropw,
@@ -164,6 +168,7 @@ extern {
         "pow2" => Token::Pow2,
         "proc" => Token::Proc,
         "procref" => Token::Procref,
+        "ptr" => Token::Ptr,
         "pub" => Token::Pub,
         "push" => Token::Push,
         "horner_eval_base" => Token::HornerBase,
@@ -379,10 +384,28 @@ EnumVariant: (SourceSpan, Ident, Option<ConstantExpr>) = {
 
 TypeExpr: TypeExpr = {
     <l:@L> <t:PrimitiveType> <r:@R> => TypeExpr::Primitive(Span::new(span!(source_file.id(), l, r), t)),
-    <l:@L> "*" <pointee:TypeExpr> <r:@R> => TypeExpr::Ptr(Span::new(span!(source_file.id(), l, r), Box::new(pointee))),
+    <PointerType> => TypeExpr::Ptr(<>),
     <ArrayType> => TypeExpr::Array(<>),
     <StructType> => TypeExpr::Struct(<>),
     <TypeName> => TypeExpr::Ref(<>),
+}
+
+PointerType: PointerType = {
+    <l:@L> "ptr" "<" <pointee:TypeExpr> <addrspace:("," "addrspace" "(" <AddressSpace> ")")?> ">" <r:@R> => {
+        let span = span!(source_file.id(), l, r);
+        let ty = PointerType::new(pointee).with_span(span);
+        if let Some(addrspace) = addrspace {
+            ty.with_address_space(addrspace)
+        } else {
+            ty
+        }
+    }
+}
+
+#[inline]
+AddressSpace: AddressSpace = {
+    "byte" => AddressSpace::Byte,
+    "felt" => AddressSpace::Element,
 }
 
 ArrayType: ArrayType = {
@@ -2204,6 +2227,9 @@ TypeIdStr: &'static str = {
     "u128" => "u128",
     "i128" => "i128",
     "felt" => "felt",
+    "ptr" => "ptr",
+    "addrspace" => "addrspace",
+    "byte" => "byte",
 }
 
 // CONSTANT EXPRESSIONS
