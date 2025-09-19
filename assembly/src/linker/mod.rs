@@ -737,7 +737,7 @@ impl Linker {
         resolver.resolve_target(caller, target)
     }
 
-    /// Resolves a user-defined type `signature` to concrete types
+    /// Resolves the user-defined type signature of the given procedure to the HIR type signature
     pub(super) fn resolve_signature(
         &self,
         gid: GlobalProcedureIndex,
@@ -755,34 +755,7 @@ impl Linker {
 
         match &module[gid.index] {
             Export::Procedure(proc) => match proc.signature() {
-                Some(sig) => {
-                    let cc = sig.cc;
-                    let mut args = Vec::with_capacity(sig.args.len());
-                    for arg in sig.args.iter() {
-                        if let Some(arg) = module.resolve_type(arg) {
-                            args.push(arg);
-                        } else {
-                            let span = arg.span();
-                            return Err(LinkerError::UndefinedType {
-                                span,
-                                source_file: self.source_manager.get(span.source_id()).ok(),
-                            });
-                        }
-                    }
-                    let mut results = Vec::with_capacity(sig.results.len());
-                    for result in sig.results.iter() {
-                        if let Some(result) = module.resolve_type(result) {
-                            results.push(result);
-                        } else {
-                            let span = result.span();
-                            return Err(LinkerError::UndefinedType {
-                                span,
-                                source_file: self.source_manager.get(span.source_id()).ok(),
-                            });
-                        }
-                    }
-                    Ok(Some(Arc::new(types::FunctionType::new(cc, args, results))))
-                },
+                Some(ty) => self.translate_function_type(module, ty).map(Some),
                 None => Ok(None),
             },
             Export::Alias(alias) => {
@@ -800,6 +773,39 @@ impl Linker {
                 }
             },
         }
+    }
+
+    fn translate_function_type(
+        &self,
+        module: &Module,
+        ty: &ast::FunctionType,
+    ) -> Result<Arc<types::FunctionType>, LinkerError> {
+        let cc = ty.cc;
+        let mut args = Vec::with_capacity(ty.args.len());
+        for arg in ty.args.iter() {
+            if let Some(arg) = module.resolve_type(arg) {
+                args.push(arg);
+            } else {
+                let span = arg.span();
+                return Err(LinkerError::UndefinedType {
+                    span,
+                    source_file: self.source_manager.get(span.source_id()).ok(),
+                });
+            }
+        }
+        let mut results = Vec::with_capacity(ty.results.len());
+        for result in ty.results.iter() {
+            if let Some(result) = module.resolve_type(result) {
+                results.push(result);
+            } else {
+                let span = result.span();
+                return Err(LinkerError::UndefinedType {
+                    span,
+                    source_file: self.source_manager.get(span.source_id()).ok(),
+                });
+            }
+        }
+        Ok(Arc::new(types::FunctionType::new(cc, args, results)))
     }
 
     /// Registers a [MastNodeId] as corresponding to a given [GlobalProcedureIndex].
