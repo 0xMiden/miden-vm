@@ -95,12 +95,13 @@ impl PrecompileRequests {
         self.requests.extend(iter);
     }
 
-    /// Returns a commitment to all precompile calls by verifying them and hashing their individual
-    /// commitments.
+    /// Verifies all precompile requests and returns their individual commitment words.
     ///
     /// This method iterates through all requests and verifies each one using the
-    /// corresponding verifier from the registry, then computes a cryptographic commitment
-    /// over all precompile commitments.
+    /// corresponding verifier from the registry. For each request, it produces a commitment
+    /// word followed by an empty word for metadata. The resulting vector has capacity for
+    /// additional words that can be added before final hashing, which will be added by
+    /// [`accumulate_commitments`] when computing the final commitment.
     ///
     /// # Arguments
     /// * `verifiers` - Registry of verifiers to use for validation
@@ -109,28 +110,48 @@ impl PrecompileRequests {
     /// Returns a `PrecompileError` if:
     /// - No verifier is registered for a request's event ID
     /// - A verifier fails to verify its request
-    pub fn commitment(&self, verifiers: &PrecompileVerifiers) -> Result<Word, PrecompileError> {
+    pub fn commitments(
+        &self,
+        verifiers: &PrecompileVerifiers,
+    ) -> Result<Vec<Word>, VerificationError> {
         let mut commitments = Vec::with_capacity(2 * (self.len() + 1));
-        for request in &self.requests {
-            let verifier =
-                verifiers.get(request.event_id).ok_or(VerifierNotFound(request.event_id))?;
+        for (index, PrecompileData { event_id, data }) in self.requests.iter().enumerate() {
+            let verifier = verifiers
+                .get(*event_id)
+                .ok_or(VerificationError::VerifierNotFound { index, event_id: *event_id })?;
 
             // The empty word in the second slot can be used for metadata, including the precompile
             // event ID, and auxiliary information.
-            let commitment = verifier.verify(&request.data)?;
+            let commitment = verifier.verify(&data).map_err(|error| {
+                VerificationError::PrecompileError { index, event_id: *event_id, error }
+            })?;
             commitments.extend([commitment, Word::empty()])
         }
+        Ok(commitments)
+    }
+
+    /// Accumulates precompile commitments into a final hash.
+    ///
+    /// Takes a vector of commitment words, adds two empty words for finalization,
+    /// and computes the final hash of all elements.
+    ///
+    /// # Arguments
+    /// * `commitments` - Vector of commitment words from precompile requests
+    ///
+    /// # Returns
+    /// The final accumulated commitment hash
+    pub fn accumulate_commitments(commitments: Vec<Word>) -> Word {
+        let mut final_commitments = commitments;
         // We add 2 empty words to account for the finalization of the hash inside the VM.
         // The VM keeps track of the sponge's capacity only, so once all precompile request
         // commitments have been absorbed, the finalization requires one last permutation where
         // we set the rate portion of the state to the zeros.
         // This slot could be used to encode auxiliary metadata for the entire list of precompile
         // requests.
-        commitments.extend([Word::empty(), Word::empty()]);
+        final_commitments.extend([Word::empty(), Word::empty()]);
 
-        let commitment_data = Word::words_as_elements(&commitments);
-
-        Ok(Rpo256::hash_elements(commitment_data))
+        let commitment_data = Word::words_as_elements(&final_commitments);
+        Rpo256::hash_elements(commitment_data)
     }
 }
 
@@ -222,10 +243,19 @@ where
 /// different precompile implementations to define their own specific error types.
 pub type PrecompileError = Box<dyn Error + Send + Sync + 'static>;
 
-/// No verifier registered for the specified event ID.
 #[derive(Debug, thiserror::Error)]
-#[error("no verifier found for event ID {0}")]
-pub struct VerifierNotFound(EventId);
+pub enum VerificationError {
+    #[error("no verifier found for request at index {index} with event ID {event_id}")]
+    VerifierNotFound { index: usize, event_id: EventId },
+
+    #[error("verification error when verifying request at index {index}, with event ID {event_id}")]
+    PrecompileError {
+        index: usize,
+        event_id: EventId,
+        #[source]
+        error: PrecompileError,
+    },
+}
 
 // SERIALIZATION
 // ================================================================================================
@@ -294,7 +324,18 @@ mod tests {
         let verifiers = PrecompileVerifiers::new();
         let requests = PrecompileRequests::new();
 
-        let result = requests.commitment(&verifiers).unwrap();
-        assert_eq!(result, Word::empty());
+        let commitments = requests.commitments(&verifiers).unwrap();
+        assert!(commitments.is_empty());
+        assert_eq!(commitments.capacity(), 2);
+        let result = PrecompileRequests::accumulate_commitments(commitments);
+
+        // The commitment is always finalized by absorbing [Word::ZERO, Word::ZERO] to mirror
+        // the VM implementation. Since no precompiles were accumulated, we just finalize the
+        // hash with no prior absorbs.
+        let final_chunk = [Word::empty(), Word::empty()];
+        let commitment_elements = Word::words_as_elements(&final_chunk);
+
+        let result_expected = Rpo256::hash_elements(commitment_elements);
+        assert_eq!(result, result_expected);
     }
 }

@@ -12,7 +12,7 @@ use std::sync::Arc;
 use miden_air::ProvingOptions;
 use miden_assembly::Assembler;
 use miden_core::{Felt, ProgramInfo, precompile::PrecompileVerifiers};
-use miden_crypto::{Word, hash::rpo::Rpo256};
+use miden_crypto::Word;
 use miden_processor::{AdviceInputs, DefaultHost, Program, StackInputs};
 use miden_stdlib::{
     StdLibrary,
@@ -337,20 +337,6 @@ fn test_keccak_hash_1to1_prove_verify() {
     )
     .expect("failed to generate proof");
 
-    // Create precompile verifiers registry and register keccak verifier
-    let mut precompile_verifiers = PrecompileVerifiers::new();
-    precompile_verifiers.register(KECCAK_HASH_MEMORY_EVENT_ID, Arc::new(keccak_verifier));
-
-    // Hacky test to check that we compute the right commitment in `precompile_requests.commitment`
-    let precompile_requests = proof.precompile_requests.clone();
-    let commitment =
-        precompile_requests.commitment(&precompile_verifiers).expect("failed to verify");
-    let commitment_expected = {
-        let commitment_precompile = stack_outputs.get_stack_word(0).unwrap();
-        Rpo256::merge(&[commitment_precompile, Word::empty()])
-    };
-    assert_eq!(commitment_expected, commitment);
-
     // Verify that the commitment on the stack matches the expected precompile commitment
     let expected_commitment = preimage.precompile_commitment();
     let stack_commitment = stack_outputs.get_stack_word(0).unwrap();
@@ -358,6 +344,21 @@ fn test_keccak_hash_1to1_prove_verify() {
         stack_commitment, expected_commitment,
         "commitment on stack does not match expected precompile commitment"
     );
+
+    // Check we get the same commitment from the verifier
+    let mut precompile_verifiers = PrecompileVerifiers::new();
+    precompile_verifiers.register(KECCAK_HASH_MEMORY_EVENT_ID, Arc::new(keccak_verifier));
+    let precompile_requests = proof.precompile_requests.clone();
+    let [verifier_commitment, empty]: [Word; 2] = precompile_requests
+        .commitments(&precompile_verifiers)
+        .expect("failed to verify")
+        .try_into()
+        .unwrap();
+    assert_eq!(
+        verifier_commitment, expected_commitment,
+        "commitment on stack does not match expected precompile commitment"
+    );
+    assert_eq!(empty, Word::empty());
 
     // Verify the proof with precompiles
     let program_info = ProgramInfo::from(program);

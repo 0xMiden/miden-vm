@@ -16,7 +16,7 @@ use miden_core::crypto::{
 // ================================================================================================
 pub use miden_core::{
     Kernel, ProgramInfo, StackInputs, StackOutputs, Word,
-    precompile::{PrecompileError, PrecompileVerifiers},
+    precompile::{PrecompileError, PrecompileRequests, PrecompileVerifiers},
 };
 pub use winter_verifier::{AcceptableOptions, VerifierError};
 use winter_verifier::{crypto::MerkleTree, verify as verify_proof};
@@ -100,9 +100,10 @@ pub fn verify_with_precompiles(
     let (hash_fn, proof, precompile_requests) = proof.into_parts();
 
     // TODO: Check that this corresponds to the commitment output by the VM
-    let _precompile_commitment = precompile_requests
-        .commitment(precompile_verifiers)
+    let commitments = precompile_requests
+        .commitments(precompile_verifiers)
         .map_err(VerificationError::PrecompileVerificationError)?;
+    let _precompile_commitment = PrecompileRequests::accumulate_commitments(commitments);
 
     match hash_fn {
         HashFunction::Blake3_192 => {
