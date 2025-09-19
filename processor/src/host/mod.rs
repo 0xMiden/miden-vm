@@ -26,13 +26,13 @@ pub use mast_forest_store::{MastForestStore, MemMastForestStore};
 // ADVICE MAP MUTATIONS
 // ================================================================================================
 
-/// Any possible way an event can modify the advice provider
+/// Any possible way an event can modify the advice provider.
 #[derive(Debug, PartialEq, Eq)]
 pub enum AdviceMutation {
     ExtendStack { values: Vec<Felt> },
     ExtendMap { other: AdviceMap },
     ExtendMerkleStore { infos: Vec<InnerNodeInfo> },
-    ExtendPrecompileRequests { data: PrecompileData },
+    ExtendPrecompileRequests { data: Vec<PrecompileData> },
 }
 
 impl AdviceMutation {
@@ -48,8 +48,8 @@ impl AdviceMutation {
         Self::ExtendMerkleStore { infos: Vec::from_iter(infos) }
     }
 
-    pub fn extend_precompile_requests(data: PrecompileData) -> Self {
-        Self::ExtendPrecompileRequests { data }
+    pub fn extend_precompile_requests(data: impl IntoIterator<Item = PrecompileData>) -> Self {
+        Self::ExtendPrecompileRequests { data: Vec::from_iter(data) }
     }
 }
 // HOST TRAIT

@@ -54,7 +54,7 @@ impl Deserializable for PrecompileData {
 ///
 /// This struct maintains a list of all precompile requests made during execution.
 /// Each request consists of an event ID and the call data required to recompute the result.
-/// The requests can later be verified using a separate PrecompileVerifiers registry.
+/// The requests can later be verified using a separate [`PrecompileVerifiers`] registry.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct PrecompileRequests {
     /// List of precompile requests made during execution
@@ -80,11 +80,6 @@ impl PrecompileRequests {
     /// Returns true if there are no precompile requests.
     pub fn is_empty(&self) -> bool {
         self.requests.is_empty()
-    }
-
-    /// Returns an iterator over the precompile requests.
-    pub fn iter(&self) -> impl Iterator<Item = &PrecompileData> {
-        self.requests.iter()
     }
 
     /// Converts into the underlying vector of requests.
@@ -115,33 +110,27 @@ impl PrecompileRequests {
     /// - No verifier is registered for a request's event ID
     /// - A verifier fails to verify its request
     pub fn commitment(&self, verifiers: &PrecompileVerifiers) -> Result<Word, PrecompileError> {
-        let mut commitments = Vec::with_capacity(2 * self.len());
+        let mut commitments = Vec::with_capacity(2 * (self.len() + 1));
         for request in &self.requests {
             let verifier =
                 verifiers.get(request.event_id).ok_or(VerifierNotFound(request.event_id))?;
 
+            // The empty word in the second slot can be used for metadata, including the precompile
+            // event ID, and auxiliary information.
             let commitment = verifier.verify(&request.data)?;
             commitments.extend([commitment, Word::empty()])
         }
+        // We add 2 empty words to account for the finalization of the hash inside the VM.
+        // The VM keeps track of the sponge's capacity only, so once all precompile request
+        // commitments have been absorbed, the finalization requires one last permutation where
+        // we set the rate portion of the state to the zeros.
+        // This slot could be used to encode auxiliary metadata for the entire list of precompile
+        // requests.
+        commitments.extend([Word::empty(), Word::empty()]);
 
         let commitment_data = Word::words_as_elements(&commitments);
 
         Ok(Rpo256::hash_elements(commitment_data))
-    }
-}
-
-impl From<Vec<PrecompileData>> for PrecompileRequests {
-    fn from(requests: Vec<PrecompileData>) -> Self {
-        Self { requests }
-    }
-}
-
-impl IntoIterator for PrecompileRequests {
-    type Item = PrecompileData;
-    type IntoIter = alloc::vec::IntoIter<PrecompileData>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.requests.into_iter()
     }
 }
 

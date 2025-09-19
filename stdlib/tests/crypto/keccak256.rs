@@ -58,7 +58,7 @@ fn test_keccak_handlers() {
 
 fn test_keccak_handler(input_u8: &[u8]) {
     let len_bytes = input_u8.len();
-    let preimage = KeccakPreimage::new(input_u8.to_vec());
+    let preimage = KeccakPreimage(input_u8.to_vec());
 
     let memory_stores_source = generate_memory_store_masm(&preimage, INPUT_MEMORY_ADDR);
 
@@ -83,7 +83,7 @@ fn test_keccak_handler(input_u8: &[u8]) {
     let output = test.execute().unwrap();
 
     let advice_stack = output.advice_provider().stack();
-    assert_eq!(advice_stack, preimage.digest().inner());
+    assert_eq!(advice_stack, preimage.digest().0);
 
     let deferred = output.advice_provider().precompile_requests().clone().into_requests();
     assert_eq!(deferred.len(), 1, "advice deferred must contain one entry");
@@ -99,7 +99,7 @@ fn test_keccak_handler(input_u8: &[u8]) {
 
 fn test_keccak_hash_memory_impl(input_u8: &[u8]) {
     let len_bytes = input_u8.len();
-    let preimage = KeccakPreimage::new(input_u8.to_vec());
+    let preimage = KeccakPreimage(input_u8.to_vec());
 
     let memory_stores_source = generate_memory_store_masm(&preimage, INPUT_MEMORY_ADDR);
 
@@ -136,7 +136,7 @@ fn test_keccak_hash_memory_impl(input_u8: &[u8]) {
     );
 
     let digest: [Felt; 8] = array::from_fn(|i| stack.get_stack_item(4 + i).unwrap());
-    assert_eq!(digest, preimage.digest().inner(), "output digest does not match");
+    assert_eq!(digest, preimage.digest().0, "output digest does not match");
 
     let commitment_verified = keccak_verifier(&preimage.0).unwrap();
     assert_eq!(
@@ -147,7 +147,7 @@ fn test_keccak_hash_memory_impl(input_u8: &[u8]) {
 
 fn test_keccak_hash_memory(input_u8: &[u8]) {
     let len_bytes = input_u8.len();
-    let preimage = KeccakPreimage::new(input_u8.to_vec());
+    let preimage = KeccakPreimage(input_u8.to_vec());
 
     let memory_stores_source = generate_memory_store_masm(&preimage, INPUT_MEMORY_ADDR);
 
@@ -173,14 +173,14 @@ fn test_keccak_hash_memory(input_u8: &[u8]) {
     );
 
     let test = build_debug_test!(source, &[]);
-    let digest = preimage.digest().inner().map(|felt| felt.as_int());
+    let digest = preimage.digest().0.map(|felt| felt.as_int());
     test.expect_stack(&digest);
 }
 
 #[test]
 fn test_keccak_hash_1to1() {
     let input_u8: Vec<u8> = (0..32).collect();
-    let preimage = KeccakPreimage::new(input_u8);
+    let preimage = KeccakPreimage(input_u8);
 
     let stack_stores_source = generate_stack_push_masm(&preimage);
 
@@ -203,14 +203,14 @@ fn test_keccak_hash_1to1() {
     );
 
     let test = build_debug_test!(source, &[]);
-    let digest = preimage.digest().inner().map(|felt| felt.as_int());
+    let digest = preimage.digest().0.map(|felt| felt.as_int());
     test.expect_stack(&digest);
 }
 
 #[test]
 fn test_keccak_hash_2to1() {
     let input_u8: Vec<u8> = (0..64).collect();
-    let preimage = KeccakPreimage::new(input_u8);
+    let preimage = KeccakPreimage(input_u8);
 
     let stack_stores_source = generate_stack_push_masm(&preimage);
 
@@ -233,7 +233,7 @@ fn test_keccak_hash_2to1() {
     );
 
     let test = build_debug_test!(source, &[]);
-    let digest = preimage.digest().inner().map(|felt| felt.as_int());
+    let digest = preimage.digest().0.map(|felt| felt.as_int());
     test.expect_stack(&digest);
 }
 
@@ -281,7 +281,7 @@ fn generate_stack_push_masm(preimage: &KeccakPreimage) -> String {
 fn test_keccak_hash_1to1_prove_verify() {
     // 32-byte input for 1-to-1 hash test
     let input_u8: Vec<u8> = (0..32).collect();
-    let preimage = KeccakPreimage::new(input_u8);
+    let preimage = KeccakPreimage(input_u8);
 
     // Generate memory stores for the input data
     let memory_stores_source = generate_memory_store_masm(&preimage, INPUT_MEMORY_ADDR);
