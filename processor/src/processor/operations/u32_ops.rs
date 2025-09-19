@@ -43,17 +43,17 @@ macro_rules! require_u32_operands {
 pub(super) fn op_u32split<P: Processor>(
     processor: &mut P,
     tracer: &mut impl Tracer,
-) -> [Felt; NUM_USER_OP_HELPERS] {
+) -> Result<[Felt; NUM_USER_OP_HELPERS], ExecutionError> {
     let (top_hi, top_lo) = {
         let top = processor.stack().get(0);
         split_element(top)
     };
 
-    processor.stack().increment_size(tracer);
+    processor.stack().increment_size(tracer)?;
     processor.stack().set(0, top_hi);
     processor.stack().set(1, top_lo);
 
-    P::HelperRegisters::op_u32split_registers(top_hi, top_lo)
+    Ok(P::HelperRegisters::op_u32split_registers(top_hi, top_lo))
 }
 
 /// Adds the top two elements of the stack and pushes the result onto the stack.

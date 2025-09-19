@@ -180,7 +180,7 @@ pub trait StackInterface {
     /// It is guaranteed that any operation that calls `increment_size()` will subsequently
     /// call `write(0)` or `write_word(0)` to write an element to that position on the
     /// stack.
-    fn increment_size(&mut self, tracer: &mut impl Tracer);
+    fn increment_size(&mut self, tracer: &mut impl Tracer) -> Result<(), ExecutionError>;
 
     /// Decrements the stack size by one, removing the top element from the stack.
     ///

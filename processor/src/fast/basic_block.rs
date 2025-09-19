@@ -1,9 +1,8 @@
 use alloc::sync::Arc;
 
 use miden_core::{
-    DecoratorIterator, EventId, Operation,
+    DecoratorIdIterator, EventId, Operation,
     mast::{BasicBlockNode, MastForest, MastNodeId, OpBatch},
-    stack::MIN_STACK_DEPTH,
     sys_events::SystemEvent,
 };
 
@@ -40,7 +39,7 @@ impl FastProcessor {
         // Execute decorators that should be executed before entering the node
         self.execute_before_enter_decorators(node_id, program, host)?;
 
-        // Corresponds to the row inserted for the SPAN operation added to the trace.
+        // Corresponds to the row inserted for the BASIC BLOCK operation added to the trace.
         self.increment_clk(tracer);
 
         let mut batch_offset_in_block = 0;
@@ -111,8 +110,8 @@ impl FastProcessor {
 
         // execute any decorators which have not been executed during span ops execution; this can
         // happen for decorators appearing after all operations in a block. these decorators are
-        // executed after SPAN block is closed to make sure the VM clock cycle advances beyond the
-        // last clock cycle of the SPAN block ops.
+        // executed after BASIC BLOCK is closed to make sure the VM clock cycle advances beyond the
+        // last clock cycle of the BASIC BLOCK ops.
         for &decorator_id in decorator_ids {
             let decorator = program
                 .get_decorator_by_id(decorator_id)
@@ -131,7 +130,7 @@ impl FastProcessor {
         node_id: MastNodeId,
         batch: &OpBatch,
         batch_index: usize,
-        decorators: &mut DecoratorIterator<'_>,
+        decorators: &mut DecoratorIdIterator<'_>,
         batch_offset_in_block: usize,
         program: &MastForest,
         host: &mut impl AsyncHost,
@@ -168,15 +167,6 @@ impl FastProcessor {
             // whereas all the other operations are synchronous (resulting in a significant
             // performance improvement).
             {
-                if self.bounds_check_counter == 0 {
-                    let err_str = if self.stack_top_idx - MIN_STACK_DEPTH == 0 {
-                        "stack underflow"
-                    } else {
-                        "stack overflow"
-                    };
-                    return Err(ExecutionError::FailedToExecuteProgram(err_str));
-                }
-
                 let err_ctx = err_ctx!(program, basic_block, host, op_idx_in_block);
                 match op {
                     Operation::Emit => self.op_emit(host, &err_ctx).await?,
@@ -216,7 +206,7 @@ impl FastProcessor {
         let mut process = self.state();
         let event_id = EventId::from_felt(process.get_stack_item(0));
         // If it's a system event, handle it directly. Otherwise, forward it to the host.
-        if let Some(system_event) = SystemEvent::from_event_id(event_id) {
+        if let Ok(system_event) = SystemEvent::try_from(event_id) {
             handle_system_event(&mut process, system_event, err_ctx)
         } else {
             let clk = process.clk();

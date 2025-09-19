@@ -855,11 +855,11 @@ impl StackOverflowReplay {
 ///
 /// Each MAST node has at least 2 different states associated with it: processing the START and END
 /// nodes (e.g. JOIN and END in the case of [miden_core::mast::JoinNode]). Some have more; for
-/// example, [miden_core::mast::BasicBlockNode] has SPAN and END, in addition to one state for each
-/// operation in the basic block. Since a trace fragment can begin at any clock cycle (determined by
-/// [super::NUM_ROWS_PER_CORE_FRAGMENT]), specifying which MAST node we're executing is
-/// insufficient; we also have to specify *at what point* during the execution of this node we are
-/// at. This is the information that this type is meant to encode.
+/// example, [miden_core::mast::BasicBlockNode] has BASIC BLOCK and END, in addition to one state
+/// for each operation in the basic block. Since a trace fragment can begin at any clock cycle
+/// (determined by [super::NUM_ROWS_PER_CORE_FRAGMENT]), specifying which MAST node we're executing
+/// is insufficient; we also have to specify *at what point* during the execution of this node we
+/// are at. This is the information that this type is meant to encode.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NodeExecutionState {
     /// Resume execution within a basic block at a specific batch and operation index.

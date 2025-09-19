@@ -11,7 +11,7 @@ use crate::{
     AdviceProvider, ContextId, ErrorContext, ExecutionError, ProcessState,
     chiplets::{CircuitEvaluation, MAX_NUM_ACE_WIRES, PTR_OFFSET_ELEM, PTR_OFFSET_WORD},
     errors::AceError,
-    fast::{FastProcessor, Tracer, memory::Memory},
+    fast::{FastProcessor, STACK_BUFFER_SIZE, Tracer, memory::Memory},
     processor::{
         HasherInterface, OperationHelperRegisters, Processor, StackInterface, SystemInterface,
     },
@@ -260,8 +260,13 @@ impl StackInterface for FastProcessor {
     }
 
     #[inline(always)]
-    fn increment_size(&mut self, tracer: &mut impl Tracer) {
-        self.increment_stack_size(tracer)
+    fn increment_size(&mut self, tracer: &mut impl Tracer) -> Result<(), ExecutionError> {
+        if self.stack_top_idx < STACK_BUFFER_SIZE - 1 {
+            self.increment_stack_size(tracer);
+            Ok(())
+        } else {
+            Err(ExecutionError::FailedToExecuteProgram("stack overflow"))
+        }
     }
 
     #[inline(always)]

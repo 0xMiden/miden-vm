@@ -199,9 +199,8 @@ impl fmt::Display for ExecutionDetails {
         let total_noops = self.total_noops();
         let asm_op_stats = self.asm_op_stats();
 
-        // calculate the total length of pading for the `AsmOp` column
-        let padding =
-            asm_op_stats.iter().try_fold(20, |max, value| Ok(value.op().len().max(max)))?;
+        // calculate the total length of padding for the `AsmOp` column
+        let padding = asm_op_stats.iter().map(|value| value.op().len()).fold(20, usize::max);
 
         writeln!(
             f,

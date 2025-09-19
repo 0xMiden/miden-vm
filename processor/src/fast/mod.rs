@@ -95,9 +95,6 @@ pub struct FastProcessor {
     stack_top_idx: usize,
     /// The index of the bottom of the stack.
     stack_bot_idx: usize,
-    /// The counter which keeps track of the number of instructions that we can execute without
-    /// hitting the bounds of `stack`.
-    bounds_check_counter: usize,
 
     /// The current clock cycle.
     pub(super) clk: RowIndex,
@@ -179,15 +176,11 @@ impl FastProcessor {
             stack
         };
 
-        let stack_bot_idx = stack_top_idx - MIN_STACK_DEPTH;
-
-        let bounds_check_counter = stack_bot_idx;
         Self {
             advice: advice_inputs.into(),
             stack,
             stack_top_idx,
-            stack_bot_idx,
-            bounds_check_counter,
+            stack_bot_idx: stack_top_idx - MIN_STACK_DEPTH,
             clk: 0_u32.into(),
             ctx: 0_u32.into(),
             fmp: Felt::new(FMP_MIN),
@@ -358,6 +351,11 @@ impl FastProcessor {
     ) -> Result<StackOutputs, ExecutionError> {
         let mut continuation_stack = ContinuationStack::new(program);
         let mut current_forest = program.mast_forest().clone();
+
+        // Merge the program's advice map into the advice provider
+        self.advice
+            .extend_map(current_forest.advice_map())
+            .map_err(|err| ExecutionError::advice_error(err, self.clk, &()))?;
 
         while let Some(continuation) = continuation_stack.pop_continuation() {
             match continuation {
@@ -603,7 +601,6 @@ impl FastProcessor {
         tracer.increment_stack_size(self);
 
         self.stack_top_idx += 1;
-        self.update_bounds_check_counter();
     }
 
     /// Decrements the stack top pointer by 1.
@@ -612,37 +609,42 @@ impl FastProcessor {
     /// than 16.
     #[inline(always)]
     fn decrement_stack_size(&mut self, tracer: &mut impl Tracer) {
-        tracer.decrement_stack_size();
+        if self.stack_top_idx == MIN_STACK_DEPTH {
+            // We no longer have any room in the stack buffer to decrement the stack size (which
+            // would cause the `stack_bot_idx` to go below 0). We therefore reset the stack to its
+            // original position.
+            self.reset_stack_in_buffer(INITIAL_STACK_TOP_IDX);
+        }
 
         self.stack_top_idx -= 1;
         self.stack_bot_idx = min(self.stack_bot_idx, self.stack_top_idx - MIN_STACK_DEPTH);
-        self.update_bounds_check_counter();
+
+        tracer.decrement_stack_size();
     }
 
-    /// Updates the bounds check counter.
+    /// Resets the stack in the buffer to a new position, preserving the top 16 elements of the
+    /// stack.
     ///
-    /// The bounds check counter is decremented by 1. If it reaches 0, it is reset to the minimum of
-    /// the stack depth from the low end and the high end of the stack buffer.
-    ///
-    /// The purpose of the bounds check counter is to ensure that we never access the stack buffer
-    /// at an out-of-bounds index.
+    /// # Preconditions
+    /// - The stack is expected to have exactly 16 elements.
     #[inline(always)]
-    fn update_bounds_check_counter(&mut self) {
-        self.bounds_check_counter -= 1;
+    fn reset_stack_in_buffer(&mut self, new_stack_top_idx: usize) {
+        debug_assert_eq!(self.stack_depth(), MIN_STACK_DEPTH as u32);
 
-        if self.bounds_check_counter == 0 {
-            // We will need to check the bounds either because we reach the low end or the high end
-            // of the stack buffer. There are two worst cases that we are concerned about:
-            // - we only execute instructions that decrease stack depth
-            // - we only execute instructions that increase stack depth
-            //
-            // In the first case, we will hit the low end of the stack buffer; in the second case,
-            // we will hit the high end of the stack buffer. We set the number of instructions that
-            // is safe to execute to be the minimum of these two worst cases.
+        let new_stack_bot_idx = new_stack_top_idx - MIN_STACK_DEPTH;
 
-            self.bounds_check_counter =
-                min(self.stack_top_idx - MIN_STACK_DEPTH, STACK_BUFFER_SIZE - self.stack_top_idx);
-        }
+        // Copy stack to its new position
+        self.stack
+            .copy_within(self.stack_bot_idx..self.stack_top_idx, new_stack_bot_idx);
+
+        // Zero out stack below the new new_stack_bot_idx, since this is where overflow values
+        // come from, and are guaranteed to be ZERO. We don't need to zero out above
+        // `stack_top_idx`, since values there are never read before being written.
+        self.stack[0..new_stack_bot_idx].fill(ZERO);
+
+        // Update indices.
+        self.stack_bot_idx = new_stack_bot_idx;
+        self.stack_top_idx = new_stack_top_idx;
     }
 
     // TESTING

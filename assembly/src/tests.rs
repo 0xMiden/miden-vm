@@ -8,7 +8,7 @@ use miden_assembly_syntax::{
 };
 use miden_core::{
     EventId, Operation, Program, Word, assert_matches,
-    mast::{MastNode, MastNodeExt, MastNodeId},
+    mast::{MastNodeExt, MastNodeId},
     utils::{Deserializable, Serializable},
 };
 use miden_mast_package::{MastArtifact, MastForest, Package, PackageExport, PackageManifest};
@@ -1867,10 +1867,7 @@ fn ensure_correct_procedure_selection_on_collision() -> TestResult {
 
     let (exec_f_node_id, exec_g_node_id) = {
         let split_node_id = program.entrypoint();
-        let split_node = match &program.mast_forest()[split_node_id] {
-            MastNode::Split(split_node) => split_node,
-            _ => panic!("expected split node"),
-        };
+        let split_node = &program.mast_forest()[split_node_id].unwrap_split();
 
         (split_node.on_true(), split_node.on_false())
     };
@@ -3689,10 +3686,7 @@ fn distinguish_grandchildren_correctly() {
 
     let program = context.assemble(program_source).unwrap();
 
-    let join_node = match &program.mast_forest()[program.entrypoint()] {
-        MastNode::Join(node) => node,
-        _ => panic!("expected join node"),
-    };
+    let join_node = &program.mast_forest()[program.entrypoint()].unwrap_join();
 
     // Make sure that both `if.true` blocks compile down to a different MAST node.
     assert_ne!(join_node.first(), join_node.second());

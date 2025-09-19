@@ -319,7 +319,7 @@ pub(crate) enum MultiMastForestIteratorItem {
 mod tests {
 
     use super::*;
-    use crate::{Operation, Word};
+    use crate::{Operation, Word, mast::BasicBlockNode};
 
     fn random_digest() -> Word {
         Word::new([winter_rand_utils::rand_value(); 4])
@@ -388,7 +388,7 @@ mod tests {
 
     #[test]
     fn multi_mast_forest_external_dependencies() {
-        let block_foo = MastNode::new_basic_block(vec![Operation::Drop], None).unwrap();
+        let block_foo = BasicBlockNode::new(vec![Operation::Drop], None).unwrap();
         let mut forest_a = MastForest::new();
         let id_foo_a = forest_a.add_external(block_foo.digest()).unwrap();
         let id_call_a = forest_a.add_call(id_foo_a).unwrap();
@@ -468,7 +468,7 @@ mod tests {
     /// Stdlib where this failed on a previous implementation.
     #[test]
     fn multi_mast_forest_child_duplicate() {
-        let block_foo = MastNode::new_basic_block(vec![Operation::Drop], None).unwrap();
+        let block_foo = BasicBlockNode::new(vec![Operation::Drop], None).unwrap();
         let mut forest = MastForest::new();
         let id_foo = forest.add_external(block_foo.digest()).unwrap();
         let id_call1 = forest.add_call(id_foo).unwrap();

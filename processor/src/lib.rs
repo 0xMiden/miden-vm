@@ -24,7 +24,7 @@ pub use miden_core::{
     utils::DeserializationError,
 };
 use miden_core::{
-    Decorator, DecoratorIterator, FieldElement,
+    Decorator, DecoratorIdIterator, FieldElement,
     mast::{
         BasicBlockNode, CallNode, DynNode, ExternalNode, JoinNode, LoopNode, OpBatch, SplitNode,
     },
@@ -75,7 +75,7 @@ pub use errors::{ErrorContext, ErrorContextImpl, ExecutionError};
 
 pub mod utils;
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "no_err_ctx")))]
 mod tests;
 
 mod debug;
@@ -581,8 +581,8 @@ impl Process {
 
         // execute any decorators which have not been executed during span ops execution; this
         // can happen for decorators appearing after all operations in a block. these decorators
-        // are executed after SPAN block is closed to make sure the VM clock cycle advances beyond
-        // the last clock cycle of the SPAN block ops.
+        // are executed after BASIC BLOCK is closed to make sure the VM clock cycle advances beyond
+        // the last clock cycle of the BASIC BLOCK ops.
         for &decorator_id in decorator_ids {
             let decorator = program
                 .get_decorator_by_id(decorator_id)
@@ -604,7 +604,7 @@ impl Process {
         &mut self,
         basic_block: &BasicBlockNode,
         batch: &OpBatch,
-        decorators: &mut DecoratorIterator,
+        decorators: &mut DecoratorIdIterator,
         op_offset: usize,
         program: &MastForest,
         host: &mut impl SyncHost,
