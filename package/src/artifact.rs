@@ -2,6 +2,8 @@ use alloc::sync::Arc;
 
 use miden_assembly_syntax::Library;
 use miden_core::{Program, Word, mast::MastForest};
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 // MAST ARTIFACT
 // ================================================================================================
@@ -10,6 +12,7 @@ use miden_core::{Program, Word, mast::MastForest};
 ///
 /// This type is used in compilation pipelines to abstract over the type of output requested.
 #[derive(Debug, Clone, Eq, PartialEq, derive_more::From)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum MastArtifact {
     /// A MAST artifact which can be executed by the VM directly
     Executable(Arc<Program>),

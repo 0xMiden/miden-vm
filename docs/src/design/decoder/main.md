@@ -25,8 +25,8 @@ Managing control flow in the VM is accomplished by executing control flow operat
 | `SPLIT`   | Initiates processing of a new [Split block](../programs.md#split-block).     |
 | `LOOP`    | Initiates processing of a new [Loop block](../programs.md#loop-block).       |
 | `REPEAT`  | Initiates a new iteration of an executing loop.                              |
-| `SPAN`    | Initiates processing of a new [Span block](../programs.md#span-block).       |
-| `RESPAN`  | Initiates processing of a new operation batch within a span block.           |
+| `SPAN`    | Initiates processing of a new [Basic block](../programs.md#basic-block). (historically called "span block") |
+| `RESPAN`  | Initiates processing of a new operation batch within a basic block. (historically called "span block") |
 | `DYN`     | Initiates processing of a new [Dyn block](../programs.md#dyn-block).         |
 | `CALL`    | Initiates processing of a new [Call block](../programs.md#call-block).       |
 | `SYSCALL` | Initiates processing ofa new  [Syscall block](../programs.md#syscall-block). |
@@ -117,8 +117,8 @@ These registers have the following meanings:
 1. Block address register $a$. This register contains address of the hasher for the current block (row index from the auxiliary hashing table). It also serves the role of unique block identifiers. This is convenient, because hasher addresses are guaranteed to be unique.
 2. Registers $b_0, ..., b_6$, which encode opcodes for operation to be executed by the VM. Each of these registers can contain a single binary value (either $1$ or $0$). And together these values describe a single opcode.
 3. Hasher registers $h_0, ..., h_7$. When control flow operations are executed, these registers are used to provide inputs for the current block's hash computation (e.g., for `JOIN`, `SPLIT`, `LOOP`, `SPAN`, `CALL`, `SYSCALL` operations) or to record the result of the hash computation (i.e., for `END` operation). However, when regular operations are executed, $2$ of these registers are used to help with op group decoding, and the remaining $6$ can be used to hold operation-specific helper variables.
-4. Register $sp$ which contains a binary flag indicating whether the VM is currently executing instructions inside a *span* block. The flag is set to $1$ when the VM executes non-control flow instructions, and is set to $0$ otherwise.
-5. Register $gc$ which keeps track of the number of unprocessed operation groups in a given *span* block.
+4. Register $sp$ which contains a binary flag indicating whether the VM is currently executing instructions inside a *basic* block (historically called "span block"). The flag is set to $1$ when the VM executes non-control flow instructions, and is set to $0$ otherwise.
+5. Register $gc$ which keeps track of the number of unprocessed operation groups in a given *basic* block (historically called "span block").
 6. Register $ox$ which keeps track of a currently executing operation's index within its operation group.
 7. Operation batch flags $c_0, c_1, c_2$ which indicate how many operation groups a given operation batch contains. These flags are set only for `SPAN` and `RESPAN` operations, and are set to $0$'s otherwise.
 8. Two additional registers (not shown) are used primarily for constraint degree reduction.
@@ -241,7 +241,7 @@ Unlike other virtual tables, block hash table does not start out in an empty sta
 Initialization of the block hash table is done by setting the initial value of $p_2$ to the value of the row containing the hash of a program's root block.
 
 #### Op group table
-*Op group* table is used in decoding of *span* blocks, which are leaves in a program's MAST. As described [here](../programs.md#span-block), a *span* block can contain one or more operation batches, each batch containing up to $8$ operation groups.
+*Op group* table is used in decoding of *basic* blocks, which are leaves in a program's MAST. As described [here](../programs.md#basic-block), a *basic* block can contain one or more operation batches, each batch containing up to $8$ operation groups.
 
 When the VM starts executing a new batch of operations, it adds all operation groups within a batch, except for the first one, to the *op group* table. Then, as the VM starts executing an operation group, it removes the group from the table. Thus, by the time all operation groups in a batch have been executed, the *op group* table must be empty.
 
@@ -252,7 +252,7 @@ The table can be thought of as consisting of $3$ columns as shown below:
 The meaning of the columns is as follows:
 
 * The first column ($t_0$) contains operation batch ID. During the execution of the program, each operation batch is assigned a unique ID.
-* The second column ($t_1$) contains the position of the group in the *span* block (not just in the current batch). The position is $1$-based and is counted from the end. Thus, for example, if a *span* block consists of a single batch with $4$ groups, the position of the first group would be $4$, the position of the second group would be $3$ etc. (the reason for this is explained in [this](#single-batch-span) section). Note that the group with position $4$ is not added to the table, because it is the first group in the batch, so the first row of the table will be for the group with position $3$.
+* The second column ($t_1$) contains the position of the group in the *basic* block (not just in the current batch). The position is $1$-based and is counted from the end. Thus, for example, if a *basic* block consists of a single batch with $4$ groups, the position of the first group would be $4$, the position of the second group would be $3$ etc. (the reason for this is explained in [this](#single-batch-span) section). Note that the group with position $4$ is not added to the table, because it is the first group in the batch, so the first row of the table will be for the group with position $3$.
 * The third column ($t_2$) contains the actual values of operation groups (this could include up to $9$ opcodes or a single immediate value).
 
 Permutation column $p_3$ is used to keep track of the state of the table. At any step of the computation, the current value of $p_3$ defines which rows are present in the table.
@@ -318,11 +318,11 @@ When the VM executes a `LOOP` operation, it does the following:
 
 #### SPAN operation
 
-Before a `SPAN` operation is executed by the VM, the prover populates $h_0, ..., h_7$ registers with contents of the first operation batch of the span block as shown in the diagram below. The prover also sets the group count register $gc$ to the total number of operation groups in the span block.
+Before a `SPAN` operation is executed by the VM, the prover populates $h_0, ..., h_7$ registers with contents of the first operation batch of the basic block as shown in the diagram below. The prover also sets the group count register $gc$ to the total number of operation groups in the basic block.
 
 ![decoder_span_block](../../assets/design/decoder/decoder_span_block.png)
 
-In the above diagram, `blk` is the ID of the *span* block which is about to be executed. `blk` is also the address of the hasher row in the auxiliary hasher table. `prnt` is the ID of the block's parent. `g0_op0` is the first operation of the batch, and `g_0'` is the first operation group of the batch with the first operation removed.
+In the above diagram, `blk` is the ID of the *basic* block which is about to be executed. `blk` is also the address of the hasher row in the auxiliary hasher table. `prnt` is the ID of the block's parent. `g0_op0` is the first operation of the batch, and `g_0'` is the first operation group of the batch with the first operation removed.
 
 When the VM executes a `SPAN` operation, it does the following:
 
@@ -423,7 +423,7 @@ The effect of the above is that the VM needs to execute the loop's body again to
 
 #### RESPAN operation
 
-Before a `RESPAN` operation is executed by the VM, the VM copies the ID of the current block `blk` and the number of remaining operation groups in the span to the next row, and sets the value of `in_span` column to $0$. The prover also sets the value of $h_1$ register for the next row to the ID of the current block's parent `prnt` as shown in the diagram below:
+Before a `RESPAN` operation is executed by the VM, the VM copies the ID of the current block `blk` and the number of remaining operation groups in the basic block to the next row, and sets the value of `in_span` column to $0$. The prover also sets the value of $h_1$ register for the next row to the ID of the current block's parent `prnt` as shown in the diagram below:
 
 ![decoder_respan_operation](../../assets/design/decoder/decoder_respan_operation.png)
 
@@ -492,7 +492,7 @@ When the VM executes a `SYSCALL` operation, it does the following:
 
 When decoding a program, we start at the root block of the program. We can compute the hash of the root block directly from hashes of its children. The prover provides hashes of the child blocks non-deterministically, and we use them to compute the program's hash (here we rely on the hash chiplet). We then verify the program hash via boundary constraints. Thus, if the prover provided valid hashes for the child blocks, we will get the expected program hash.
 
-Now, we need to verify that the VM executed the child blocks correctly. We do this recursively similar to what is described above: for each of the blocks, the prover provides hashes of its children non-deterministically and we verify that the hash has been computed correctly. We do this until we get to the leaf nodes (i.e., *span* blocks). Hashes of *span* blocks are computed sequentially from the instructions executed by the VM.
+Now, we need to verify that the VM executed the child blocks correctly. We do this recursively similar to what is described above: for each of the blocks, the prover provides hashes of its children non-deterministically and we verify that the hash has been computed correctly. We do this until we get to the leaf nodes (i.e., *basic* blocks). Hashes of *basic* blocks are computed sequentially from the instructions executed by the VM.
 
 The sections below illustrate how different types of code blocks are decoded by the VM.
 
@@ -549,25 +549,25 @@ When decoding a *dyn* bock, the VM first executes a `DYN` operation, then execut
 
 As described previously, when the VM executes a `DYN` operation, the hash of the child is added to the block hash table. This hash is removed only when the `END` operation for the child block is executed. Thus, until the child block corresponding to the dynamically specified target is executed, the block hash table is not cleared.
 
-### SPAN block decoding
+### Basic block decoding
 
-As described [here](../programs.md#span-block), a *span* block can contain one or more operation batches, each batch containing up to $8$ operation groups. At the high level, decoding of a span block is done as follows:
+As described [here](../programs.md#basic-block), a *basic* block can contain one or more operation batches, each batch containing up to $8$ operation groups. At the high level, decoding of a basic block is done as follows:
 
-1. At the beginning of the block, we make a request to the hash chiplet which initiates the hasher, absorbs the first operation batch ($8$ field elements) into the hasher, and returns the row address of the hasher, which we use as the unique ID for the *span* block (see [here](#sequential-hash)).
+1. At the beginning of the block, we make a request to the hash chiplet which initiates the hasher, absorbs the first operation batch ($8$ field elements) into the hasher, and returns the row address of the hasher, which we use as the unique ID for the *basic* block (see [here](#sequential-hash)).
 2. We then add groups of the operation batch, as specified by op batch flags (but always skipping the first one) to the op group table.
 3. We then remove operation groups from the op group table in the FIFO order one by one, and decode them in the manner similar to the one described [here](#operation-group-decoding).
 4. Once all operation groups in a batch have been decoded, we absorb the next batch into the hasher and repeat the process described above.
-5. Once all batches have been decoded, we return the hash of the span block from the hasher.
+5. Once all batches have been decoded, we return the hash of the basic block from the hasher.
 
-Overall, three control flow operations are used when decoding a *span* block:
+Overall, three control flow operations are used when decoding a *basic* block:
 
 1. `SPAN` operation is used to initialize a hasher and absorbs the first operation batch into it.
-2. `RESPAN` operation is used to absorb any additional batches in the span block.
-3. `END` operation is used to end the decoding of a span block and retrieve its hash from the hash chiplet.
+2. `RESPAN` operation is used to absorb any additional batches in the basic block.
+3. `END` operation is used to end the decoding of a basic block and retrieve its hash from the hash chiplet.
 
 #### Operation group decoding
 
-As described [here](../programs.md#span-block), an operation group is a sequence of operations which can be encoded into a single field element. For a field element of $64$ bits, we can fit up to $9$ operations into a group. We do this by concatenating binary representations of opcodes together with the first operation located in the least significant position.
+As described [here](../programs.md#basic-block), an operation group is a sequence of operations which can be encoded into a single field element. For a field element of $64$ bits, we can fit up to $9$ operations into a group. We do this by concatenating binary representations of opcodes together with the first operation located in the least significant position.
 
 We can read opcodes from the group by simply subtracting them from the op group value and then dividing the result by $2^7$. Once the value of the op group reaches $0$, we know that all opcodes have been read. Graphically, this can be illustrated like so:
 
@@ -597,11 +597,11 @@ Operation batch flags (denoted as $c_0, c_1, c_2$), encode the number of groups 
 
 #### Single-batch span
 
-The simplest example of a *span* block is a block with a single batch. This batch may contain up to $8$ operation groups (e.g., $g_0, ..., g_7$). Decoding of such a block is illustrated in the diagram below.
+The simplest example of a *basic* block is a block with a single batch. This batch may contain up to $8$ operation groups (e.g., $g_0, ..., g_7$). Decoding of such a block is illustrated in the diagram below.
 
 ![decoder_single_batch_span](../../assets/design/decoder/decoder_single_batch_span.png)
 
-Before the VM starts processing this *span* block, the prover populates registers $h_0, ..., h_7$ with operation groups $g_0, ..., g_7$. The prover also puts the total number of groups into the `group_count` register $gc$. In this case, the total number of groups is $8$.
+Before the VM starts processing this *basic* block, the prover populates registers $h_0, ..., h_7$ with operation groups $g_0, ..., g_7$. The prover also puts the total number of groups into the `group_count` register $gc$. In this case, the total number of groups is $8$.
 
 When the VM executes a `SPAN` operation, it does the following:
 
@@ -630,23 +630,23 @@ The above steps are executed until value of `group_count` reaches $0$. Once `gro
 
 Notice that by the time we get to the `END` operation, all rows are removed from the op group table.
 
-#### Multi-batch span
+#### Multi-batch basic block
 
-A *span* block may contain an unlimited number of operation batches. As mentioned previously, to absorb a new batch into the hasher, the VM executes a `RESPAN` operation. The diagram below illustrates decoding of a *span* block consisting of two operation batches.
+A *basic* block may contain an unlimited number of operation batches. As mentioned previously, to absorb a new batch into the hasher, the VM executes a `RESPAN` operation. The diagram below illustrates decoding of a *basic* block consisting of two operation batches.
 
 ![decoder_multi_batch_span](../../assets/design/decoder/decoder_multi_batch_span.png)
 
-Decoding of such a block will look very similar to decoding of the single-span block described previously, but there also will be some differences.
+Decoding of such a block will look very similar to decoding of the single-basic block described previously, but there also will be some differences.
 
 First, after the `SPAN` operation is executed, the op group table will look as follows:
 
 ![decoder_op_group_table_multi_span](../../assets/design/decoder/decoder_op_group_table_multi_span.png)
 
-Notice that while the same groups ($g_1, ..., g_7$) are added to the table, their positions now reflect the total number of groups in the *span* block.
+Notice that while the same groups ($g_1, ..., g_7$) are added to the table, their positions now reflect the total number of groups in the *basic* block.
 
 Second, executing a `RESPAN` operation increments hasher address by $8$. This is done because absorbing additional $8$ elements into the hasher state requires $8$ more rows in the auxiliary hasher table.
 
-Incrementing value of `addr` register actually changes the ID of the *span* block (though, for a *span* block, it may be more appropriate to view values in this column as IDs of individual operation batches). This means that we also need to update the block stack table. Specifically, we need to remove row `(blk, prnt, 0)` from it, and replace it with row `(blk + 8, prnt, 0)`. To perform this operation, the prover sets the value of $h_1$ in the next row to `prnt`.
+Incrementing value of `addr` register actually changes the ID of the *basic* block (though, for a *basic* block, it may be more appropriate to view values in this column as IDs of individual operation batches). This means that we also need to update the block stack table. Specifically, we need to remove row `(blk, prnt, 0)` from it, and replace it with row `(blk + 8, prnt, 0)`. To perform this operation, the prover sets the value of $h_1` in the next row to `prnt`.
 
 Executing a `RESPAN` operation also adds groups $g_9, g_{10}, g_{11}$ to the op group table, which now would look as follows:
 
@@ -654,15 +654,15 @@ Executing a `RESPAN` operation also adds groups $g_9, g_{10}, g_{11}$ to the op 
 
 Then, the execution of the second batch proceeds in a manner similar to the first batch: we remove operations from the current op group, execute them, and when the value of the op group reaches $0$, we start executing the next group in the batch. Thus, by the time we get to the `END` operation, the op group table should be empty.
 
-When executing the `END` operation, the hash of the *span* block will be read from hasher row at address `addr + 7`, which, in our example, will be equal to `blk + 15`.
+When executing the `END` operation, the hash of the *basic* block will be read from hasher row at address `addr + 7`, which, in our example, will be equal to `blk + 15`.
 
 #### Handling immediate values
 
 Miden VM operations can carry immediate values. Currently, the only such operation is a `PUSH` operation. Since immediate values can be thought of as constants embedded into program code, we need to make sure that changing immediate values affects program hash.
 
-To achieve this, we treat immediate values in a manner similar to how we treat operation groups. Specifically, when computing hash of a *span* block, immediate values are absorbed into the hasher state in the same way as operation groups are. As mentioned previously, an immediate value is represented by a single field element, and thus, an immediate value takes place of a single operation group.
+To achieve this, we treat immediate values in a manner similar to how we treat operation groups. Specifically, when computing hash of a *basic* block, immediate values are absorbed into the hasher state in the same way as operation groups are. As mentioned previously, an immediate value is represented by a single field element, and thus, an immediate value takes place of a single operation group.
 
-The diagram below illustrates decoding of a *span* block with $9$ operations one of which is a `PUSH` operation.
+The diagram below illustrates decoding of a *basic* block with $9$ operations one of which is a `PUSH` operation.
 
 ![decoder_decoding_span_block_with_push](../../assets/design/decoder/decoder_decoding_span_block_with_push.png)
 
@@ -710,15 +710,15 @@ b0: JOIN
 b0: END
 ```
 
-The root of the program is a *join* block $b_0$. This block contains two children: a *span* bock $b_1$ and a *split* block $b_2$. In turn, the *split* block $b_2$ contains two children: a *span* block $b_3$ and a *span* block $b_4$.
+The root of the program is a *join* block $b_0$. This block contains two children: a *basic* bock $b_1$ and a *split* block $b_2$. In turn, the *split* block $b_2$ contains two children: a *basic* block $b_3$ and a *basic* block $b_4$.
 
 When this program is executed on the VM, the following happens:
 
 1. Before the program starts executing, block hash table is initialized with a single row containing the hash of $b_0$.
 2. Then, `JOIN` operation for $b_0$ is executed. It adds hashes of $b_1$ and $b_2$ to the block hash table. It also adds an entry for $b_0$ to the block stack table. States of both tables after this step are illustrated below.
-3. Then, *span* $b_1$ is executed and a sequential hash of its operations is computed. Also, when `SPAN` operation for $b_1$ is executed, an entry for $b_1$ is added to the block stack table. At the end of $b_1$ (when `END` is executed), entries for $b_1$ are removed from both the block hash and block stack tables.
+3. Then, *basic* $b_1$ is executed and a sequential hash of its operations is computed. Also, when `SPAN` operation for $b_1$ is executed, an entry for $b_1$ is added to the block stack table. At the end of $b_1$ (when `END` is executed), entries for $b_1$ are removed from both the block hash and block stack tables.
 4. Then, `SPLIT` operation for $b_2$ is executed. It adds an entry for $b_2$ to the block stack table. Also, depending on whether the top of the stack is $1$ or $0$, either hash of $b_3$ or hash of $b_4$ is added to the block hash table. Let's say the top of the stack is $1$. Then, at this point, the block hash and block stack tables will look like in the second picture below.
-5. Then, *span* $b_3$ is executed and a sequential hash of its instructions is computed. Also, when `SPAN` operation for $b_3$ is executed, an entry for $b_3$ is added to the block stack table. At the end of $b_3$ (when `END` is executed), entries for $b_3$ are removed from both the block hash and block stack tables.
+5. Then, *basic* $b_3$ is executed and a sequential hash of its instructions is computed. Also, when `SPAN` operation for $b_3` is executed, an entry for $b_3$ is added to the block stack table. At the end of $b_3` (when `END` is executed), entries for $b_3` are removed from both the block hash and block stack tables.
 6. Then, `END` operation for $b_2$ is executed. It removes the hash of $b_2$ from the block hash table, and also removes the entry for $b_2$ from the block stack table. The third picture below illustrates the states of block stack and block hash tables after this step.
 7. Then, `END` for $b_0$ is executed, which removes entries for $b_0$ from the block stack and block hash tables. At this point both tables are empty.
 8. Finally, a sequence of `HALT` operations is executed until the length of the trace reaches a power of two.

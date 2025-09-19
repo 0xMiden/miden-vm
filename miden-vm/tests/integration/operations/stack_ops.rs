@@ -687,4 +687,28 @@ proptest! {
         build_op_test!(asm_op, &test_values).prop_expect_stack(&expected_values)?;
     }
 
+    #[test]
+    fn reversew_proptest(test_values in prop::collection::vec(any::<u64>(), MIN_STACK_DEPTH)) {
+        let asm_op = "reversew";
+        let mut expected_values = test_values.clone();
+        // reversew reverses the order of the top 4 elements (a word)
+        // The top 4 elements are at the end of test_values (indices len-4 to len-1)
+        let len = expected_values.len();
+        expected_values[(len-4)..len].reverse();
+        expected_values.reverse();
+        build_op_test!(asm_op, &test_values).prop_expect_stack(&expected_values)?;
+    }
+
+    #[test]
+    fn reversedw_proptest(test_values in prop::collection::vec(any::<u64>(), MIN_STACK_DEPTH)) {
+        let asm_op = "reversedw";
+        let mut expected_values = test_values.clone();
+        // reversedw reverses the order of the top 8 elements (a double word)
+        // The top 8 elements are at the end of test_values (indices len-8 to len-1)
+        let len = expected_values.len();
+        expected_values[(len-8)..len].reverse();
+        expected_values.reverse();
+        build_op_test!(asm_op, &test_values).prop_expect_stack(&expected_values)?;
+    }
+
 }

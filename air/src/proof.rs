@@ -104,12 +104,6 @@ pub enum HashFunction {
     Poseidon2 = 0x04,
 }
 
-impl Default for HashFunction {
-    fn default() -> Self {
-        Self::Blake3_192
-    }
-}
-
 impl HashFunction {
     /// Returns the collision resistance level (in bits) of this hash function.
     pub const fn collision_resistance(&self) -> u32 {
@@ -199,7 +193,7 @@ impl ExecutionProof {
     pub fn new_dummy() -> Self {
         ExecutionProof {
             proof: Proof::new_dummy(),
-            hash_fn: HashFunction::default(),
+            hash_fn: HashFunction::Blake3_192,
         }
     }
 }

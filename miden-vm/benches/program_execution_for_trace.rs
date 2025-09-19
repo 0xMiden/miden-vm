@@ -1,11 +1,14 @@
+use std::hint::black_box;
+
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
-use miden_processor::{AdviceInputs, ExecutionOptions, execute};
+use miden_processor::{AdviceInputs, fast::FastProcessor};
 use miden_stdlib::StdLibrary;
 use miden_vm::{Assembler, DefaultHost, StackInputs, internal::InputFile};
+use tokio::runtime::Runtime;
 use walkdir::WalkDir;
 
 /// Benchmark the execution of all the masm examples in the `masm-examples` directory.
-fn program_execution(c: &mut Criterion) {
+fn program_execution_for_trace(c: &mut Criterion) {
     let mut group = c.benchmark_group("program_execution");
 
     let masm_examples_dir = {
@@ -48,17 +51,24 @@ fn program_execution(c: &mut Criterion) {
                     let program = assembler
                         .assemble_program(&source)
                         .expect("Failed to compile test source.");
-                    bench.iter_batched(
-                        || DefaultHost::default().with_library(&StdLibrary::default()).unwrap(),
-                        |mut host| {
-                            execute(
-                                &program,
-                                stack_inputs.clone(),
+                    let stack_inputs: Vec<_> = stack_inputs.iter().rev().copied().collect();
+                    bench.to_async(Runtime::new().unwrap()).iter_batched(
+                        || {
+                            let host = DefaultHost::default()
+                                .with_library(&StdLibrary::default())
+                                .unwrap();
+
+                            let processor = FastProcessor::new_with_advice_inputs(
+                                &stack_inputs,
                                 advice_inputs.clone(),
-                                &mut host,
-                                ExecutionOptions::default(),
-                            )
-                            .unwrap()
+                            );
+
+                            (host, program.clone(), processor)
+                        },
+                        |(mut host, program, processor)| async move {
+                            let out =
+                                processor.execute_for_trace(&program, &mut host).await.unwrap();
+                            black_box(out);
                         },
                         BatchSize::SmallInput,
                     );
@@ -75,5 +85,5 @@ fn program_execution(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benchmark, program_execution);
+criterion_group!(benchmark, program_execution_for_trace);
 criterion_main!(benchmark);

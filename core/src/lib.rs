@@ -118,12 +118,15 @@ pub mod prettier {
 
 mod operations;
 pub use operations::{
-    AssemblyOp, DebugOptions, Decorator, DecoratorIterator, DecoratorList, Operation,
+    AssemblyOp, DebugOptions, Decorator, DecoratorIdIterator, DecoratorList, Operation,
     opcode_constants::*,
 };
 
 pub mod stack;
 pub use stack::{StackInputs, StackOutputs};
+
+mod event_id;
+pub use event_id::EventId;
 
 pub mod sys_events;
 

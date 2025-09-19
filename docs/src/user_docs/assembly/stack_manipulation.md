@@ -17,6 +17,8 @@ In addition to the typical stack manipulation instructions such as `drop`, `dup`
 | movupw.*n* <br> - *(2-3 cycles)* | [ ..., A, ... ]    | [A, ... ]          | Moves the $n$th stack word to the top of the stack. Valid for $n \in \{2, 3\}$                                                       |
 | movdn.*n* <br> - *(1-4 cycles)*  | [a, ... ]          | [ ..., a, ... ]    | Moves the top stack item to the $n$th position of the stack. Valid for $n \in \{2, ..., 15\}$                                        |
 | movdnw.*n* <br> - *(2-3 cycles)* | [A, ... ]          | [ ..., A, ... ]    | Moves the top stack word to the $n$th word position of the stack. Valid for $n \in \{2, 3\}$                                         |
+| reversew <br> - *(3 cycles)*     | [a, b, c, d, ... ] | [d, c, b, a, ... ] | Reverses the order of the top four stack elements (a word).                                                                          |
+| reversedw <br> - *(7 cycles)*    | [a, b, c, d, e, f, g, h, ... ] | [h, g, f, e, d, c, b, a, ... ] | Reverses the order of the top eight stack elements (double word).                                                                    |
 
 ### Conditional manipulation
 

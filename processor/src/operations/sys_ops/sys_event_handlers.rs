@@ -1,11 +1,7 @@
 use alloc::vec::Vec;
 
 use miden_core::{
-    Felt, FieldElement, QuadFelt, WORD_SIZE, Word, ZERO,
-    crypto::{
-        hash::Rpo256,
-        merkle::{EmptySubtreeRoots, SMT_DEPTH, Smt},
-    },
+    Felt, FieldElement, QuadFelt, WORD_SIZE, Word, ZERO, crypto::hash::Rpo256,
     sys_events::SystemEvent,
 };
 
@@ -14,9 +10,6 @@ use crate::{ExecutionError, MemoryError, ProcessState, errors::ErrorContext};
 /// The offset of the domain value on the stack in the `hdword_to_map_with_domain` system event.
 /// Offset accounts for the event ID at position 0 on the stack.
 pub const HDWORD_TO_MAP_WITH_DOMAIN_DOMAIN_OFFSET: usize = 9;
-
-/// Falcon signature prime.
-const M: u64 = 12289;
 
 pub fn handle_system_event(
     process: &mut ProcessState,
@@ -29,10 +22,7 @@ pub fn handle_system_event(
         SystemEvent::MapValueToStack => copy_map_value_to_adv_stack(process, false, err_ctx),
         SystemEvent::MapValueToStackN => copy_map_value_to_adv_stack(process, true, err_ctx),
         SystemEvent::HasMapKey => push_key_presence_flag(process),
-        SystemEvent::U64Div => push_u64_div_result(process, err_ctx),
-        SystemEvent::FalconDiv => push_falcon_mod_result(process, err_ctx),
         SystemEvent::Ext2Inv => push_ext2_inv_result(process, err_ctx),
-        SystemEvent::SmtPeek => push_smtpeek_result(process, err_ctx),
         SystemEvent::U32Clz => push_leading_zeros(process, err_ctx),
         SystemEvent::U32Ctz => push_trailing_zeros(process, err_ctx),
         SystemEvent::U32Clo => push_leading_ones(process, err_ctx),
@@ -325,119 +315,6 @@ pub fn push_key_presence_flag(process: &mut ProcessState) -> Result<(), Executio
     Ok(())
 }
 
-/// Pushes the result of [u64] division (both the quotient and the remainder) onto the advice
-/// stack.
-///
-/// Inputs:
-///   Operand stack: [event_id, b1, b0, a1, a0, ...]
-///   Advice stack: [...]
-///
-/// Outputs:
-///   Advice stack: [q0, q1, r0, r1, ...]
-///
-/// Where (a0, a1) and (b0, b1) are the 32-bit limbs of the dividend and the divisor
-/// respectively (with a0 representing the 32 lest significant bits and a1 representing the
-/// 32 most significant bits). Similarly, (q0, q1) and (r0, r1) represent the quotient and
-/// the remainder respectively.
-///
-/// # Errors
-/// Returns an error if the divisor is ZERO.
-fn push_u64_div_result(
-    process: &mut ProcessState,
-    err_ctx: &impl ErrorContext,
-) -> Result<(), ExecutionError> {
-    let divisor = {
-        let divisor_hi = process.get_stack_item(1).as_int();
-        let divisor_lo = process.get_stack_item(2).as_int();
-
-        // Ensure the divisor is a pair of u32 values
-        if divisor_hi > u32::MAX.into() {
-            return Err(ExecutionError::not_u32_value(Felt::new(divisor_hi), ZERO, err_ctx));
-        }
-        if divisor_lo > u32::MAX.into() {
-            return Err(ExecutionError::not_u32_value(Felt::new(divisor_lo), ZERO, err_ctx));
-        }
-
-        let divisor = (divisor_hi << 32) + divisor_lo;
-
-        if divisor == 0 {
-            return Err(ExecutionError::divide_by_zero(process.clk(), err_ctx));
-        }
-
-        divisor
-    };
-
-    let dividend = {
-        let dividend_hi = process.get_stack_item(3).as_int();
-        let dividend_lo = process.get_stack_item(4).as_int();
-
-        // Ensure the dividend is a pair of u32 values
-        if dividend_hi > u32::MAX.into() {
-            return Err(ExecutionError::not_u32_value(Felt::new(dividend_hi), ZERO, err_ctx));
-        }
-        if dividend_lo > u32::MAX.into() {
-            return Err(ExecutionError::not_u32_value(Felt::new(dividend_lo), ZERO, err_ctx));
-        }
-
-        (dividend_hi << 32) + dividend_lo
-    };
-
-    let quotient = dividend / divisor;
-    let remainder = dividend - quotient * divisor;
-
-    let (q_hi, q_lo) = u64_to_u32_elements(quotient);
-    let (r_hi, r_lo) = u64_to_u32_elements(remainder);
-
-    process.advice_provider_mut().push_stack(r_hi);
-    process.advice_provider_mut().push_stack(r_lo);
-    process.advice_provider_mut().push_stack(q_hi);
-    process.advice_provider_mut().push_stack(q_lo);
-    Ok(())
-}
-
-/// Pushes the result of divison (both the quotient and the remainder) of a [u64] by the Falcon
-/// prime (M = 12289) onto the advice stack.
-///
-/// Inputs:
-///   Operand stack: [event_id, a1, a0, ...]
-///   Advice stack: [...]
-///
-/// Outputs:
-///   Advice stack: [q1, q0, r, ...]
-///
-/// where (a0, a1) are the 32-bit limbs of the dividend (with a0 representing the 32 least
-/// significant bits and a1 representing the 32 most significant bits).
-/// Similarly, (q0, q1) represent the quotient and r the remainder.
-///
-/// # Errors
-/// - Returns an error if the divisor is ZERO.
-/// - Returns an error if either a0 or a1 is not a u32.
-fn push_falcon_mod_result(
-    process: &mut ProcessState,
-    err_ctx: &impl ErrorContext,
-) -> Result<(), ExecutionError> {
-    let dividend_hi = process.get_stack_item(1).as_int();
-    let dividend_lo = process.get_stack_item(2).as_int();
-    if dividend_lo > u32::MAX as u64 {
-        return Err(ExecutionError::input_not_u32(process.clk(), dividend_lo, err_ctx));
-    }
-    if dividend_hi > u32::MAX as u64 {
-        return Err(ExecutionError::input_not_u32(process.clk(), dividend_hi, err_ctx));
-    }
-    let dividend = (dividend_hi << 32) + dividend_lo;
-
-    let (quotient, remainder) = (dividend / M, dividend % M);
-
-    let (q_hi, q_lo) = u64_to_u32_elements(quotient);
-    let (r_hi, r_lo) = u64_to_u32_elements(remainder);
-    assert_eq!(r_hi, ZERO);
-
-    process.advice_provider_mut().push_stack(r_lo);
-    process.advice_provider_mut().push_stack(q_lo);
-    process.advice_provider_mut().push_stack(q_hi);
-    Ok(())
-}
-
 /// Given an element in a quadratic extension field on the top of the stack (i.e., a0, b1),
 /// computes its multiplicative inverse and push the result onto the advice stack.
 ///
@@ -555,63 +432,6 @@ fn push_ilog2(
     Ok(())
 }
 
-/// Pushes onto the advice stack the value associated with the specified key in a Sparse
-/// Merkle Tree defined by the specified root.
-///
-/// If no value was previously associated with the specified key, [ZERO; 4] is pushed onto
-/// the advice stack.
-///
-/// Inputs:
-///   Operand stack: [event_id, KEY, ROOT, ...]
-///   Advice stack: [...]
-///
-/// Outputs:
-///   Advice stack: [VALUE, ...]
-///
-/// # Errors
-/// Returns an error if the provided Merkle root doesn't exist on the advice provider.
-///
-/// # Panics
-/// Will panic as unimplemented if the target depth is `64`.
-fn push_smtpeek_result(
-    process: &mut ProcessState,
-    err_ctx: &impl ErrorContext,
-) -> Result<(), ExecutionError> {
-    let empty_leaf = EmptySubtreeRoots::entry(SMT_DEPTH, SMT_DEPTH);
-    // fetch the arguments from the operand stack
-    let key = process.get_stack_word(1);
-    let root = process.get_stack_word(5);
-
-    // get the node from the SMT for the specified key; this node can be either a leaf node,
-    // or a root of an empty subtree at the returned depth
-    let node = process
-        .advice_provider()
-        .get_tree_node(root, &Felt::new(SMT_DEPTH as u64), &key[3])
-        .map_err(|err| ExecutionError::advice_error(err, process.clk(), err_ctx))?;
-
-    if node == *empty_leaf {
-        // if the node is a root of an empty subtree, then there is no value associated with
-        // the specified key
-        process.advice_provider_mut().push_stack_word(&Smt::EMPTY_VALUE);
-    } else {
-        let leaf_preimage = get_smt_leaf_preimage(process, node, err_ctx)?;
-
-        for (key_in_leaf, value_in_leaf) in leaf_preimage {
-            if key == key_in_leaf {
-                // Found key - push value associated with key, and return
-                process.advice_provider_mut().push_stack_word(&value_in_leaf);
-
-                return Ok(());
-            }
-        }
-
-        // if we can't find any key in the leaf that matches `key`, it means no value is
-        // associated with `key`
-        process.advice_provider_mut().push_stack_word(&Smt::EMPTY_VALUE);
-    }
-    Ok(())
-}
-
 // HELPER METHODS
 // --------------------------------------------------------------------------------------------
 
@@ -639,12 +459,6 @@ fn get_mem_addr_range(
     Ok((start_addr as u32, end_addr as u32))
 }
 
-fn u64_to_u32_elements(value: u64) -> (Felt, Felt) {
-    let hi = Felt::from((value >> 32) as u32);
-    let lo = Felt::from(value as u32);
-    (hi, lo)
-}
-
 /// Gets the top stack element, applies a provided function to it and pushes it to the advice
 /// provider.
 fn push_transformed_stack_top(
@@ -660,29 +474,4 @@ fn push_transformed_stack_top(
     let transformed_stack_top = f(stack_top);
     process.advice_provider_mut().push_stack(transformed_stack_top);
     Ok(())
-}
-
-fn get_smt_leaf_preimage(
-    process: &ProcessState,
-    node: Word,
-    err_ctx: &impl ErrorContext,
-) -> Result<Vec<(Word, Word)>, ExecutionError> {
-    let kv_pairs = process
-        .advice_provider()
-        .get_mapped_values(&node)
-        .ok_or_else(|| ExecutionError::smt_node_not_found(node, err_ctx))?;
-
-    if kv_pairs.len() % WORD_SIZE * 2 != 0 {
-        return Err(ExecutionError::smt_node_preimage_not_valid(node, kv_pairs.len(), err_ctx));
-    }
-
-    Ok(kv_pairs
-        .chunks_exact(WORD_SIZE * 2)
-        .map(|kv_chunk| {
-            let key = [kv_chunk[0], kv_chunk[1], kv_chunk[2], kv_chunk[3]];
-            let value = [kv_chunk[4], kv_chunk[5], kv_chunk[6], kv_chunk[7]];
-
-            (key.into(), value.into())
-        })
-        .collect())
 }

@@ -28,10 +28,10 @@ pub const USER_OP_HELPERS: Range<usize> = Range { start: 2, end: NUM_HASHER_COLU
 /// - 1 column for code block ID / related hasher table row address.
 /// - 7 columns for the binary representation of an opcode.
 /// - 8 columns used for providing inputs to, and reading results from the hasher, but also used for
-///   other purposes when inside a SPAN block.
-/// - 1 column for the flag indicating whether we are in a SPAN block or not.
-/// - 1 column to keep track of the number of operation groups left to decode in the current SPAN
-///   block.
+///   other purposes when inside a BASIC BLOCK.
+/// - 1 column for the flag indicating whether we are in a BASIC BLOCK or not.
+/// - 1 column to keep track of the number of operation groups left to decode in the current BASIC
+///   BLOCK.
 /// - 1 column to keep track of the index of a currently executing operation within an operation
 ///   group.
 /// - 3 columns for keeping track of operation batch flags.
@@ -208,16 +208,16 @@ impl DecoderTrace {
         self.op_batch_flag_trace[2].push(ZERO);
     }
 
-    /// Appends a trace row marking the start of a SPAN block.
+    /// Appends a trace row marking the start of a BASIC BLOCK.
     ///
-    /// When a SPAN block is starting, we do the following:
+    /// When a BASIC BLOCK is starting, we do the following:
     /// - Set the address to the address of the parent block. This is not necessarily equal to the
     ///   address from the previous row because in a SPLIT block, the second child follows the first
     ///   child, rather than the parent.
     /// - Set op_bits to SPAN opcode.
-    /// - Set hasher state to op groups of the first op batch of the SPAN.
+    /// - Set hasher state to op groups of the first op batch of the BASIC BLOCK.
     /// - Set is_span to ZERO. is_span will be set to one in the following row.
-    /// - Set op group count to the total number of op groups in the SPAN.
+    /// - Set op group count to the total number of op groups in the BASIC BLOCK.
     /// - Set operation index register to ZERO.
     /// - Set the op_batch_flags based on the specified number of operation groups.
     pub fn append_span_start(
@@ -245,10 +245,10 @@ impl DecoderTrace {
     /// Appends a trace row marking a RESPAN operation.
     ///
     /// When a RESPAN operation is executed, we do the following:
-    /// - Copy over the block address from the previous row. The SPAN address will be updated in the
-    ///   following row.
+    /// - Copy over the block address from the previous row. The BASIC BLOCK address will be updated
+    ///   in the following row.
     /// - Set op_bits to RESPAN opcode.
-    /// - Set hasher state to op groups of the next op batch of the SPAN.
+    /// - Set hasher state to op groups of the next op batch of the BASIC BLOCK.
     /// - Set in_span to ZERO.
     /// - Copy over op group count from the previous row.
     /// - Set operation index register to ZERO.
@@ -273,12 +273,12 @@ impl DecoderTrace {
 
     /// Appends a trace row for a user operation.
     ///
-    /// When we execute a user operation in a SPAN block, we do the following:
-    /// - Set the address of the row to the address of the span block.
+    /// When we execute a user operation in a BASIC BLOCK, we do the following:
+    /// - Set the address of the row to the address of the basic block.
     /// - Set op_bits to the opcode of the executed operation.
     /// - Set the first hasher state register to the aggregation of remaining operations to be
     ///   executed in the current operation group.
-    /// - Set the second hasher state register to the address of the SPAN's parent block.
+    /// - Set the second hasher state register to the address of the BASIC BLOCK's parent block.
     /// - Set the remaining hasher state registers to ZEROs.
     /// - Set is_span to ONE.
     /// - Set the number of groups remaining to be processed. This number of groups changes if in
@@ -316,15 +316,15 @@ impl DecoderTrace {
         self.op_batch_flag_trace[2].push(ZERO);
     }
 
-    /// Appends a trace row marking the end of a SPAN block.
+    /// Appends a trace row marking the end of a BASIC BLOCK.
     ///
-    /// When the SPAN block is ending, we do the following:
+    /// When the BASIC BLOCK is ending, we do the following:
     /// - Copy over the block address from the previous row.
     /// - Set op_bits to END opcode.
-    /// - Put the hash of the span block into the first 4 registers of the hasher state.
-    /// - Put a flag indicating whether the SPAN block was a body of a loop into the 5th register of
-    ///   the hasher state.
-    /// - Set in_span to ZERO to indicate that the span block is completed.
+    /// - Put the hash of the basic block into the first 4 registers of the hasher state.
+    /// - Put a flag indicating whether the BASIC BLOCK was a body of a loop into the 5th register
+    ///   of the hasher state.
+    /// - Set in_span to ZERO to indicate that the basic block is completed.
     /// - Copy over op group count from the previous row. This group count must be ZERO.
     /// - Set operation index register to ZERO.
     /// - Set op_batch_flags to ZEROs.
@@ -340,7 +340,7 @@ impl DecoderTrace {
         self.hasher_trace[3].push(span_hash[3]);
 
         // we don't need to set is_loop, is_call, and is_syscall here because we know that this
-        // is a SPAN block
+        // is a BASIC BLOCK
         self.hasher_trace[4].push(is_loop_body);
         self.hasher_trace[5].push(ZERO);
         self.hasher_trace[6].push(ZERO);

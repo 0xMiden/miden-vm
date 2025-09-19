@@ -65,40 +65,40 @@ How operations are distributed between these $4$ groups is described in the sect
 ### No stack shift operations
 This group contains $32$ operations which do not shift the stack (this is almost all such operations). Since the op flag degree for these operations is $7$, constraints for these operations cannot exceed degree $2$.
 
-| Operation  | Opcode value | Binary encoding |        Operation group        | Flag degree |
-| ---------- | :----------: | :-------------: | :---------------------------: | :---------: |
-| `NOOP`     |     $0$      |   `000_0000`    | [System ops](./system_ops.md) |     $7$     |
-| `EQZ `     |     $1$      |   `000_0001`    |  [Field ops](./field_ops.md)  |     $7$     |
-| `NEG`      |     $2$      |   `000_0010`    |  [Field ops](./field_ops.md)  |     $7$     |
-| `INV`      |     $3$      |   `000_0011`    |  [Field ops](./field_ops.md)  |     $7$     |
-| `INCR`     |     $4$      |   `000_0100`    |  [Field ops](./field_ops.md)  |     $7$     |
-| `NOT`      |     $5$      |   `000_0101`    |  [Field ops](./field_ops.md)  |     $7$     |
-| `FMPADD`   |     $6$      |   `000_0110`    | [System ops](./system_ops.md) |     $7$     |
-| `MLOAD`    |     $7$      |   `000_0111`    |    [I/O ops](./io_ops.md)     |     $7$     |
-| `SWAP`     |     $8$      |   `000_1000`    |  [Stack ops](./stack_ops.md)  |     $7$     |
-| `CALLER`   |     $9$      |   `000_1001`    | [System ops](./system_ops.md) |     $7$     |
-| `MOVUP2`   |     $10$     |   `000_1010`    |  [Stack ops](./stack_ops.md)  |     $7$     |
-| `MOVDN2`   |     $11$     |   `000_1011`    |  [Stack ops](./stack_ops.md)  |     $7$     |
-| `MOVUP3`   |     $12$     |   `000_1100`    |  [Stack ops](./stack_ops.md)  |     $7$     |
-| `MOVDN3`   |     $13$     |   `000_1101`    |  [Stack ops](./stack_ops.md)  |     $7$     |
-| `ADVPOPW`  |     $14$     |   `000_1110`    |    [I/O ops](./io_ops.md)     |     $7$     |
-| `EXPACC`   |     $15$     |   `000_1111`    |  [Field ops](./field_ops.md)  |     $7$     |
-| `MOVUP4`   |     $16$     |   `001_0000`    |  [Stack ops](./stack_ops.md)  |     $7$     |
-| `MOVDN4`   |     $17$     |   `001_0001`    |  [Stack ops](./stack_ops.md)  |     $7$     |
-| `MOVUP5`   |     $18$     |   `001_0010`    |  [Stack ops](./stack_ops.md)  |     $7$     |
-| `MOVDN5`   |     $19$     |   `001_0011`    |  [Stack ops](./stack_ops.md)  |     $7$     |
-| `MOVUP6`   |     $20$     |   `001_0100`    |  [Stack ops](./stack_ops.md)  |     $7$     |
-| `MOVDN6`   |     $21$     |   `001_0101`    |  [Stack ops](./stack_ops.md)  |     $7$     |
-| `MOVUP7`   |     $22$     |   `001_0110`    |  [Stack ops](./stack_ops.md)  |     $7$     |
-| `MOVDN7`   |     $23$     |   `001_0111`    |  [Stack ops](./stack_ops.md)  |     $7$     |
-| `SWAPW`    |     $24$     |   `001_1000`    |  [Stack ops](./stack_ops.md)  |     $7$     |
-| `EXT2MUL`  |     $25$     |   `001_1001`    |  [Field ops](./field_ops.md)  |     $7$     |
-| `MOVUP8`   |     $26$     |   `001_1010`    |  [Stack ops](./stack_ops.md)  |     $7$     |
-| `MOVDN8`   |     $27$     |   `001_1011`    |  [Stack ops](./stack_ops.md)  |     $7$     |
-| `SWAPW2`   |     $28$     |   `001_1100`    |  [Stack ops](./stack_ops.md)  |     $7$     |
-| `SWAPW3`   |     $29$     |   `001_1101`    |  [Stack ops](./stack_ops.md)  |     $7$     |
-| `SWAPDW`   |     $30$     |   `001_1110`    |  [Stack ops](./stack_ops.md)  |     $7$     |
-| `<unused>` |     $31$     |   `001_1111`    |                               |     $7$     |
+| Operation | Opcode value | Binary encoding |        Operation group        | Flag degree |
+|-----------|:------------:|:---------------:|:-----------------------------:|:-----------:|
+| `NOOP`    |     $0$      |   `000_0000`    | [System ops](./system_ops.md) |     $7$     |
+| `EQZ `    |     $1$      |   `000_0001`    |  [Field ops](./field_ops.md)  |     $7$     |
+| `NEG`     |     $2$      |   `000_0010`    |  [Field ops](./field_ops.md)  |     $7$     |
+| `INV`     |     $3$      |   `000_0011`    |  [Field ops](./field_ops.md)  |     $7$     |
+| `INCR`    |     $4$      |   `000_0100`    |  [Field ops](./field_ops.md)  |     $7$     |
+| `NOT`     |     $5$      |   `000_0101`    |  [Field ops](./field_ops.md)  |     $7$     |
+| `FMPADD`  |     $6$      |   `000_0110`    | [System ops](./system_ops.md) |     $7$     |
+| `MLOAD`   |     $7$      |   `000_0111`    |    [I/O ops](./io_ops.md)     |     $7$     |
+| `SWAP`    |     $8$      |   `000_1000`    |  [Stack ops](./stack_ops.md)  |     $7$     |
+| `CALLER`  |     $9$      |   `000_1001`    | [System ops](./system_ops.md) |     $7$     |
+| `MOVUP2`  |     $10$     |   `000_1010`    |  [Stack ops](./stack_ops.md)  |     $7$     |
+| `MOVDN2`  |     $11$     |   `000_1011`    |  [Stack ops](./stack_ops.md)  |     $7$     |
+| `MOVUP3`  |     $12$     |   `000_1100`    |  [Stack ops](./stack_ops.md)  |     $7$     |
+| `MOVDN3`  |     $13$     |   `000_1101`    |  [Stack ops](./stack_ops.md)  |     $7$     |
+| `ADVPOPW` |     $14$     |   `000_1110`    |    [I/O ops](./io_ops.md)     |     $7$     |
+| `EXPACC`  |     $15$     |   `000_1111`    |  [Field ops](./field_ops.md)  |     $7$     |
+| `MOVUP4`  |     $16$     |   `001_0000`    |  [Stack ops](./stack_ops.md)  |     $7$     |
+| `MOVDN4`  |     $17$     |   `001_0001`    |  [Stack ops](./stack_ops.md)  |     $7$     |
+| `MOVUP5`  |     $18$     |   `001_0010`    |  [Stack ops](./stack_ops.md)  |     $7$     |
+| `MOVDN5`  |     $19$     |   `001_0011`    |  [Stack ops](./stack_ops.md)  |     $7$     |
+| `MOVUP6`  |     $20$     |   `001_0100`    |  [Stack ops](./stack_ops.md)  |     $7$     |
+| `MOVDN6`  |     $21$     |   `001_0101`    |  [Stack ops](./stack_ops.md)  |     $7$     |
+| `MOVUP7`  |     $22$     |   `001_0110`    |  [Stack ops](./stack_ops.md)  |     $7$     |
+| `MOVDN7`  |     $23$     |   `001_0111`    |  [Stack ops](./stack_ops.md)  |     $7$     |
+| `SWAPW`   |     $24$     |   `001_1000`    |  [Stack ops](./stack_ops.md)  |     $7$     |
+| `EXT2MUL` |     $25$     |   `001_1001`    |  [Field ops](./field_ops.md)  |     $7$     |
+| `MOVUP8`  |     $26$     |   `001_1010`    |  [Stack ops](./stack_ops.md)  |     $7$     |
+| `MOVDN8`  |     $27$     |   `001_1011`    |  [Stack ops](./stack_ops.md)  |     $7$     |
+| `SWAPW2`  |     $28$     |   `001_1100`    |  [Stack ops](./stack_ops.md)  |     $7$     |
+| `SWAPW3`  |     $29$     |   `001_1101`    |  [Stack ops](./stack_ops.md)  |     $7$     |
+| `SWAPDW`  |     $30$     |   `001_1110`    |  [Stack ops](./stack_ops.md)  |     $7$     |
+| `EMIT`    |     $31$     |   `001_1111`    | [System ops](./system_ops.md) |     $7$     |
 
 ### Left stack shift operations
 This group contains $16$ operations which shift the stack to the left (i.e., remove an item from the stack). Most of left-shift operations are contained in this group. Since the op flag degree for these operations is $7$, constraints for these operations cannot exceed degree $2$.
@@ -189,7 +189,7 @@ This group contains operations which require constraints with degree up to $3$. 
 | `JOIN`        |     $87$     |   `101_0111`    | [Flow control ops](../decoder/main.md) |     $5$     |
 | `DYN`         |     $88$     |   `101_1000`    | [Flow control ops](../decoder/main.md) |     $5$     |
 | `HORNEREXT`   |     $89$     |   `101_1001`    |     [Crypto ops](./crypto_ops.md)      |     $5$     |
-| `EMIT`        |     $90$     |   `101_1010`    |     [System ops](./system_ops.md)      |     $5$     |
+| `<unused>`    |     $90$     |   `101_1010`    |                                        |     $5$     |
 | `PUSH`        |     $91$     |   `101_1011`    |         [I/O ops](./io_ops.md)         |     $5$     |
 | `DYNCALL`     |     $92$     |   `101_1100`    | [Flow control ops](../decoder/main.md) |     $5$     |
 | `EVALCIRCUIT` |     $93$     |   `101_1101`    |     [Crypto ops](./crypto_ops.md)      |     $5$     |

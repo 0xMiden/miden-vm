@@ -1,20 +1,22 @@
-use alloc::vec::Vec;
+use alloc::{boxed::Box, vec::Vec};
 use core::{fmt, mem, ops::Index};
 
 use miden_crypto::{Felt, Word, ZERO};
 use miden_formatting::prettier::PrettyPrint;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 use crate::{
-    DecoratorIterator, DecoratorList, Operation,
+    DecoratorIdIterator, DecoratorList, Operation,
     chiplets::hasher,
-    mast::{DecoratorId, MastForest, MastForestError},
+    mast::{DecoratorId, MastForest, MastForestError, MastNodeId, Remapping},
 };
 
 mod op_batch;
 pub use op_batch::OpBatch;
 use op_batch::OpBatchAccumulator;
 
-use super::MastNodeExt;
+use super::{MastNodeErrorContext, MastNodeExt};
 
 #[cfg(test)]
 mod tests;
@@ -61,6 +63,7 @@ pub const BATCH_SIZE: usize = 8;
 /// Where `batches` is the concatenation of each `batch` in the basic block, and each batch is 8
 /// field elements (512 bits).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct BasicBlockNode {
     /// The primitive operations contained in this basic block.
     ///
@@ -69,6 +72,7 @@ pub struct BasicBlockNode {
     /// Multiple batches are used for blocks consisting of more than 72 operations.
     op_batches: Vec<OpBatch>,
     digest: Word,
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Vec::is_empty"))]
     decorators: DecoratorList,
 }
 
@@ -153,11 +157,6 @@ impl BasicBlockNode {
 // ------------------------------------------------------------------------------------------------
 /// Public accessors
 impl BasicBlockNode {
-    /// Returns a commitment to this basic block.
-    pub fn digest(&self) -> Word {
-        self.digest
-    }
-
     /// Returns a reference to the operation batches in this basic block.
     pub fn op_batches(&self) -> &[OpBatch] {
         &self.op_batches
@@ -188,25 +187,17 @@ impl BasicBlockNode {
         num_ops.try_into().expect("basic block contains more than 2^32 operations")
     }
 
-    /// Returns a list of decorators in this basic block node.
-    ///
-    /// Each decorator is accompanied by the operation index specifying the operation prior to
-    /// which the decorator should be executed.
-    pub fn decorators(&self) -> &DecoratorList {
-        &self.decorators
-    }
-
-    /// Returns a [`DecoratorIterator`] which allows us to iterate through the decorator list of
+    /// Returns a [`DecoratorIdIterator`] which allows us to iterate through the decorator list of
     /// this basic block node while executing operation batches of this basic block node.
-    pub fn decorator_iter(&self) -> DecoratorIterator<'_> {
-        DecoratorIterator::new(&self.decorators)
+    pub fn decorator_iter(&self) -> DecoratorIdIterator<'_> {
+        DecoratorIdIterator::new(&self.decorators)
     }
 
     /// Returns an iterator which allows us to iterate through the decorator list of
     /// this basic block node with op indexes aligned to the "raw" (un-padded)) op
     /// batches of the basic block node
-    pub fn raw_decorator_iter(&self) -> RawDecoratorIterator<'_> {
-        RawDecoratorIterator::new(&self.decorators, &self.op_batches)
+    pub fn raw_decorator_iter(&self) -> RawDecoratorIdIterator<'_> {
+        RawDecoratorIdIterator::new(&self.decorators, &self.op_batches)
     }
 
     /// Returns an iterator over the operations in the order in which they appear in the program.
@@ -240,36 +231,14 @@ impl BasicBlockNode {
 //-------------------------------------------------------------------------------------------------
 /// Mutators
 impl BasicBlockNode {
-    /// Sets the provided list of decorators to be executed before all existing decorators.
-    pub fn prepend_decorators(&mut self, decorator_ids: &[DecoratorId]) {
-        let mut new_decorators: DecoratorList =
-            decorator_ids.iter().map(|decorator_id| (0, *decorator_id)).collect();
-        new_decorators.extend(mem::take(&mut self.decorators));
-
-        self.decorators = new_decorators;
-    }
-
-    /// Sets the provided list of decorators to be executed after all existing decorators.
-    pub fn append_decorators(&mut self, decorator_ids: &[DecoratorId]) {
-        let after_last_op_idx = self.num_operations() as usize;
-
-        self.decorators
-            .extend(decorator_ids.iter().map(|&decorator_id| (after_last_op_idx, decorator_id)));
-    }
-
     /// Used to initialize decorators for the [`BasicBlockNode`]. Replaces the existing decorators
     /// with the given ['DecoratorList'].
     pub fn set_decorators(&mut self, decorator_list: DecoratorList) {
         self.decorators = decorator_list;
     }
-
-    /// Removes all decorators from this node.
-    pub fn remove_decorators(&mut self) {
-        self.decorators.truncate(0);
-    }
 }
 
-impl MastNodeExt for BasicBlockNode {
+impl MastNodeErrorContext for BasicBlockNode {
     fn decorators(&self) -> impl Iterator<Item = (usize, DecoratorId)> {
         self.decorators.iter().copied()
     }
@@ -288,6 +257,70 @@ impl BasicBlockNode {
         mast_forest: &'a MastForest,
     ) -> impl PrettyPrint + 'a {
         BasicBlockNodePrettyPrint { block_node: self, mast_forest }
+    }
+}
+
+// MAST NODE TRAIT IMPLEMENTATION
+// ================================================================================================
+
+impl MastNodeExt for BasicBlockNode {
+    /// Returns a commitment to this basic block.
+    fn digest(&self) -> Word {
+        self.digest
+    }
+
+    fn before_enter(&self) -> &[DecoratorId] {
+        &[]
+    }
+
+    fn after_exit(&self) -> &[DecoratorId] {
+        &[]
+    }
+
+    /// Sets the provided list of decorators to be executed before all existing decorators.
+    fn append_before_enter(&mut self, decorator_ids: &[DecoratorId]) {
+        let mut new_decorators: DecoratorList =
+            decorator_ids.iter().map(|decorator_id| (0, *decorator_id)).collect();
+        new_decorators.extend(mem::take(&mut self.decorators));
+
+        self.decorators = new_decorators;
+    }
+
+    /// Sets the provided list of decorators to be executed after all existing decorators.
+    fn append_after_exit(&mut self, decorator_ids: &[DecoratorId]) {
+        let after_last_op_idx = self.num_operations() as usize;
+
+        self.decorators
+            .extend(decorator_ids.iter().map(|&decorator_id| (after_last_op_idx, decorator_id)));
+    }
+
+    /// Removes all decorators from this node.
+    fn remove_decorators(&mut self) {
+        self.decorators.truncate(0);
+    }
+
+    fn to_display<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn fmt::Display + 'a> {
+        Box::new(BasicBlockNode::to_display(self, mast_forest))
+    }
+
+    fn to_pretty_print<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn PrettyPrint + 'a> {
+        Box::new(BasicBlockNode::to_pretty_print(self, mast_forest))
+    }
+
+    fn remap_children(&self, _remapping: &Remapping) -> Self {
+        self.clone()
+    }
+
+    fn has_children(&self) -> bool {
+        false
+    }
+
+    fn append_children_to(&self, _target: &mut Vec<MastNodeId>) {
+        // No children for basic blocks
+    }
+
+    fn domain(&self) -> Felt {
+        Self::DOMAIN
     }
 }
 
@@ -362,7 +395,7 @@ impl fmt::Display for BasicBlockNodePrettyPrint<'_> {
 ///
 /// IOW this makes its `BasicBlockNode::raw_decorators` padding-unaware, or equivalently
 /// "removes" the padding of these decorators
-pub struct RawDecoratorIterator<'a> {
+pub struct RawDecoratorIdIterator<'a> {
     decorators: &'a DecoratorList,
     // cumulative padding offsets per group
     padding_offsets: DecoratorPaddingOffsets,
@@ -370,7 +403,7 @@ pub struct RawDecoratorIterator<'a> {
     idx: usize,
 }
 
-impl<'a> RawDecoratorIterator<'a> {
+impl<'a> RawDecoratorIdIterator<'a> {
     /// Returns a new instance of raw decorator iterator instantiated with the provided decorator
     /// list, tied to the provided op_batches list
     fn new(decorators: &'a DecoratorList, op_batches: &'a [OpBatch]) -> Self {
@@ -381,7 +414,7 @@ impl<'a> RawDecoratorIterator<'a> {
     }
 }
 
-impl<'a> Iterator for RawDecoratorIterator<'a> {
+impl<'a> Iterator for RawDecoratorIdIterator<'a> {
     type Item = (usize, &'a DecoratorId);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -396,7 +429,7 @@ impl<'a> Iterator for RawDecoratorIterator<'a> {
     }
 }
 
-impl<'a> ExactSizeIterator for RawDecoratorIterator<'a> {
+impl<'a> ExactSizeIterator for RawDecoratorIdIterator<'a> {
     fn len(&self) -> usize {
         self.decorators.len() - self.idx
     }

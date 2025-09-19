@@ -2,13 +2,14 @@
 
 #! Reverses order of the first four elements on the stack
 #!
+#! Note: This functionality is also available as the `reversew` instruction
+#!
 #! Inputs:  [a, b, c, d, ...]
 #! Outputs: [d, c, b, a, ...]
 #!
 #! Cycles: 3
 export.reverse
-    movdn.3
-    swap.2
+    reversew
 end
 
 # COMPARISON OPERATIONS
@@ -73,7 +74,7 @@ end
 #! Inputs:  [RHS, LHS]
 #! Outputs: [is_lhs_greater]
 #!
-#! Cycles: 121
+#! Cycles: 117
 export.gt
     # => [r_3, r_2, r_1, r_0, l_3, l_2, l_1, l_0]
     exec.arrange_words_adjacent
@@ -186,7 +187,7 @@ end
 #! Inputs:  [RHS, LHS]
 #! Outputs: [is_lhs_less_or_equal]
 #!
-#! Cycles: 122
+#! Cycles: 118
 export.lte
     exec.gt
     not

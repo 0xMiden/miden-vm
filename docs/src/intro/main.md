@@ -22,7 +22,7 @@ Miden VM is a fully-featured virtual machine. Despite being optimized for zero-k
 ### Planned features
 In the coming months we plan to finalize the design of the VM and implement support for the following features:
 
-* **Recursive proofs.** Miden VM will soon be able to verify a proof of its own execution. This will enable infinitely recursive proofs, an extremely useful tool for real-world applications.
+* **Recursive proofs.** Miden VM will soon support efficient STARK-verifiers as pre-compiles, enabling infinitely recursive proofs and enabling proof composition in layers. This is an extremely useful tool for real-world applications that need to verify large numbers of proofs or build complex proof systems.
 * **Better debugging.** Miden VM will provide a better debugging experience including the ability to place breakpoints, better source mapping, and more complete program analysis info.
 * **Faulty execution.** Miden VM will support generating proofs for programs with faulty execution (a notoriously complex task in ZK context). That is, it will be possible to prove that execution of some program resulted in an error.
 

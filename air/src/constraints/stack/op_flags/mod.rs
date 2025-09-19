@@ -292,7 +292,7 @@ impl<E: FieldElement> OpFlags<E> {
             + degree5_op_flags[1] // MPVERIFY
             + degree5_op_flags[6] // SPAN
             + degree5_op_flags[7] // JOIN
-            + degree5_op_flags[10] // EMIT
+            + degree7_op_flags[31] // EMIT
             + degree4_op_flags[6] // RESPAN
             + degree4_op_flags[7] // HALT
             + degree4_op_flags[3] // CALL

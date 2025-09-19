@@ -21,19 +21,18 @@ use super::*;
 // AdviceMap inlined in the script
 // ------------------------------------------------------------------------------------------------
 
-#[ignore] // tracked by https://github.com/0xMiden/miden-vm/issues/1886
 #[test]
 fn test_advice_map_inline() {
     let source = "\
-adv_map.A=2
+adv_map.A=[0x01]
 
 begin
   push.A
   adv.push_mapval
-  adv_push.1
-  push.2
-  assert_eq
   dropw
+  adv_push.1
+  push.1
+  assert_eq
 end";
 
     let build_test = build_test!(source);

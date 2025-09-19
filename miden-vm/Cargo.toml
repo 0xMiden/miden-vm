@@ -26,8 +26,8 @@ bench = false
 doctest = false
 
 [[bench]]
-name = "program_execution"
-required-features = ["internal"]
+name = "program_execution_for_trace"
+required-features = ["internal", "no_err_ctx"]
 harness = false
 
 [[bench]]

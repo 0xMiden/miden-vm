@@ -1,9 +1,11 @@
-use alloc::vec::Vec;
+use alloc::{boxed::Box, vec::Vec};
 use core::fmt;
 
 use miden_crypto::{Felt, Word};
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
-use super::MastNodeExt;
+use super::{MastNodeErrorContext, MastNodeExt};
 use crate::{
     OPCODE_JOIN,
     chiplets::hasher,
@@ -17,10 +19,13 @@ use crate::{
 /// A Join node describe sequential execution. When the VM encounters a Join node, it executes the
 /// first child first and the second child second.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct JoinNode {
     children: [MastNodeId; 2],
     digest: Word,
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Vec::is_empty"))]
     before_enter: Vec<DecoratorId>,
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Vec::is_empty"))]
     after_exit: Vec<DecoratorId>,
 }
 
@@ -72,21 +77,6 @@ impl JoinNode {
 
 /// Public accessors
 impl JoinNode {
-    /// Returns a commitment to this Join node.
-    ///
-    /// The commitment is computed as a hash of the `first` and `second` child node in the domain
-    /// defined by [Self::DOMAIN] - i.e.,:
-    /// ```
-    /// # use miden_core::mast::JoinNode;
-    /// # use miden_crypto::{Word, hash::rpo::Rpo256 as Hasher};
-    /// # let first_child_digest = Word::default();
-    /// # let second_child_digest = Word::default();
-    /// Hasher::merge_in_domain(&[first_child_digest, second_child_digest], JoinNode::DOMAIN);
-    /// ```
-    pub fn digest(&self) -> Word {
-        self.digest
-    }
-
     /// Returns the ID of the node that is to be executed first.
     pub fn first(&self) -> MastNodeId {
         self.children[0]
@@ -97,46 +87,9 @@ impl JoinNode {
     pub fn second(&self) -> MastNodeId {
         self.children[1]
     }
-
-    /// Returns the decorators to be executed before this node is executed.
-    pub fn before_enter(&self) -> &[DecoratorId] {
-        &self.before_enter
-    }
-
-    /// Returns the decorators to be executed after this node is executed.
-    pub fn after_exit(&self) -> &[DecoratorId] {
-        &self.after_exit
-    }
 }
 
-//-------------------------------------------------------------------------------------------------
-/// Mutators
-impl JoinNode {
-    pub fn remap_children(&self, remapping: &Remapping) -> Self {
-        let mut node = self.clone();
-        node.children[0] = node.children[0].remap(remapping);
-        node.children[1] = node.children[1].remap(remapping);
-        node
-    }
-
-    /// Sets the list of decorators to be executed before this node.
-    pub fn append_before_enter(&mut self, decorator_ids: &[DecoratorId]) {
-        self.before_enter.extend_from_slice(decorator_ids);
-    }
-
-    /// Sets the list of decorators to be executed after this node.
-    pub fn append_after_exit(&mut self, decorator_ids: &[DecoratorId]) {
-        self.after_exit.extend_from_slice(decorator_ids);
-    }
-
-    /// Removes all decorators from this node.
-    pub fn remove_decorators(&mut self) {
-        self.before_enter.truncate(0);
-        self.after_exit.truncate(0);
-    }
-}
-
-impl MastNodeExt for JoinNode {
+impl MastNodeErrorContext for JoinNode {
     fn decorators(&self) -> impl Iterator<Item = (usize, DecoratorId)> {
         self.before_enter.iter().chain(&self.after_exit).copied().enumerate()
     }
@@ -220,5 +173,78 @@ impl fmt::Display for JoinNodePrettyPrint<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use crate::prettier::PrettyPrint;
         self.pretty_print(f)
+    }
+}
+
+// MAST NODE TRAIT IMPLEMENTATION
+// ================================================================================================
+
+impl MastNodeExt for JoinNode {
+    /// Returns a commitment to this Join node.
+    ///
+    /// The commitment is computed as a hash of the `first` and `second` child node in the domain
+    /// defined by [Self::DOMAIN] - i.e.,:
+    /// ```
+    /// # use miden_core::mast::JoinNode;
+    /// # use miden_crypto::{Word, hash::rpo::Rpo256 as Hasher};
+    /// # let first_child_digest = Word::default();
+    /// # let second_child_digest = Word::default();
+    /// Hasher::merge_in_domain(&[first_child_digest, second_child_digest], JoinNode::DOMAIN);
+    /// ```
+    fn digest(&self) -> Word {
+        self.digest
+    }
+
+    /// Returns the decorators to be executed before this node is executed.
+    fn before_enter(&self) -> &[DecoratorId] {
+        &self.before_enter
+    }
+
+    /// Returns the decorators to be executed after this node is executed.
+    fn after_exit(&self) -> &[DecoratorId] {
+        &self.after_exit
+    }
+    /// Sets the list of decorators to be executed before this node.
+    fn append_before_enter(&mut self, decorator_ids: &[DecoratorId]) {
+        self.before_enter.extend_from_slice(decorator_ids);
+    }
+
+    /// Sets the list of decorators to be executed after this node.
+    fn append_after_exit(&mut self, decorator_ids: &[DecoratorId]) {
+        self.after_exit.extend_from_slice(decorator_ids);
+    }
+
+    /// Removes all decorators from this node.
+    fn remove_decorators(&mut self) {
+        self.before_enter.truncate(0);
+        self.after_exit.truncate(0);
+    }
+
+    fn to_display<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn fmt::Display + 'a> {
+        Box::new(JoinNode::to_display(self, mast_forest))
+    }
+
+    fn to_pretty_print<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn PrettyPrint + 'a> {
+        Box::new(JoinNode::to_pretty_print(self, mast_forest))
+    }
+
+    fn remap_children(&self, remapping: &Remapping) -> Self {
+        let mut node = self.clone();
+        node.children[0] = node.children[0].remap(remapping);
+        node.children[1] = node.children[1].remap(remapping);
+        node
+    }
+
+    fn has_children(&self) -> bool {
+        true
+    }
+
+    fn append_children_to(&self, target: &mut Vec<MastNodeId>) {
+        target.push(self.first());
+        target.push(self.second());
+    }
+
+    fn domain(&self) -> Felt {
+        Self::DOMAIN
     }
 }

@@ -62,9 +62,6 @@ extern {
         "push_mapval" => Token::PushMapval,
         "push_mapvaln" => Token::PushMapvaln,
         "push_mtnode" => Token::PushMtnode,
-        "push_smtpeek" => Token::PushSmtpeek,
-        "push_u64div" => Token::PushU64Div,
-        "push_falcon_div" => Token::PushFalconDiv,
         "and" => Token::And,
         "eval_circuit" => Token::EvalCircuit,
         "assert" => Token::Assert,
@@ -128,8 +125,12 @@ extern {
         "mem" => Token::Mem,
         "mem_load" => Token::MemLoad,
         "mem_loadw" => Token::MemLoadw,
+        "mem_loadw_be" => Token::MemLoadwBe,
+        "mem_loadw_le" => Token::MemLoadwLe,
         "mem_store" => Token::MemStore,
         "mem_storew" => Token::MemStorew,
+        "mem_storew_be" => Token::MemStorewBe,
+        "mem_storew_le" => Token::MemStorewLe,
         "mem_stream" => Token::MemStream,
         "movdn" => Token::Movdn,
         "movdnw" => Token::Movdnw,
@@ -153,6 +154,8 @@ extern {
         "horner_eval_base" => Token::HornerBase,
         "horner_eval_ext" => Token::HornerExt,
         "repeat" => Token::Repeat,
+        "reversew" => Token::Reversew,
+        "reversedw" => Token::Reversedw,
         "sdepth" => Token::Sdepth,
         "stack" => Token::Stack,
         "sub" => Token::Sub,
@@ -675,6 +678,8 @@ Inst: Instruction = {
     "pow2" => Instruction::Pow2,
     "horner_eval_base" => Instruction::HornerBase,
     "horner_eval_ext" => Instruction::HornerExt,
+    "reversew" => Instruction::Reversew,
+    "reversedw" => Instruction::Reversedw,
     "sdepth" => Instruction::Sdepth,
     "swapdw" => Instruction::SwapDw,
     "u32cast" => Instruction::U32Cast,
@@ -704,9 +709,6 @@ SystemEvent: Instruction = {
     "adv" "." "push_mapvaln" => Instruction::SysEvent(SystemEventNode::PushMapValN),
     "adv" "." "has_mapkey" => Instruction::SysEvent(SystemEventNode::HasMapKey),
     "adv" "." "push_mtnode" => Instruction::SysEvent(SystemEventNode::PushMtNode),
-    "adv" "." "push_smtpeek" => Instruction::SysEvent(SystemEventNode::PushSmtPeek),
-    "adv" "." "push_u64div" => Instruction::SysEvent(SystemEventNode::PushU64Div),
-    "adv" "." "push_falcon_div" => Instruction::SysEvent(SystemEventNode::PushFalconDiv),
 }
 
 #[inline]
@@ -781,7 +783,7 @@ Debug: Instruction = {
     "emit" "." <name:ConstantName> => Instruction::EmitImm(Immediate::Constant(name)),
     // emit.event("...") inline hashing
     <l:@L> "emit" "." "event" "(" <s:string> ")" <r:@R> => {
-        let event_id = miden_core::utils::string_to_event_id(s);
+        let event_id = miden_core::EventId::from_name(s).as_felt();
         Instruction::EmitImm(Immediate::Value(Span::new(span!(source_file.id(), l, r), event_id)))
     },
     "trace" <id:Imm<U32>> => Instruction::Trace(id),
@@ -1134,8 +1136,12 @@ InstWithFeltImmediate: Instruction = {
 InstWithU32Immediate: Instruction = {
     "mem_load" <imm:MaybeImm<U32>> => imm.map(Instruction::MemLoadImm).unwrap_or(Instruction::MemLoad),
     "mem_loadw" <imm:MaybeImm<U32>> => imm.map(Instruction::MemLoadWImm).unwrap_or(Instruction::MemLoadW),
+    "mem_loadw_be" <imm:MaybeImm<U32>> => imm.map(Instruction::MemLoadWBeImm).unwrap_or(Instruction::MemLoadWBe),
+    "mem_loadw_le" <imm:MaybeImm<U32>> => imm.map(Instruction::MemLoadWLeImm).unwrap_or(Instruction::MemLoadWLe),
     "mem_store" <imm:MaybeImm<U32>> => imm.map(Instruction::MemStoreImm).unwrap_or(Instruction::MemStore),
-    "mem_storew" <imm:MaybeImm<U32>> => imm.map(Instruction::MemStoreWImm).unwrap_or(Instruction::MemStoreW)
+    "mem_storew" <imm:MaybeImm<U32>> => imm.map(Instruction::MemStoreWImm).unwrap_or(Instruction::MemStoreW),
+    "mem_storew_be" <imm:MaybeImm<U32>> => imm.map(Instruction::MemStoreWBeImm).unwrap_or(Instruction::MemStoreWBe),
+    "mem_storew_le" <imm:MaybeImm<U32>> => imm.map(Instruction::MemStoreWLeImm).unwrap_or(Instruction::MemStoreWLe),
 }
 
 #[inline]
@@ -1755,8 +1761,12 @@ Opcode: &'static str = {
     "mem" => "mem",
     "mem_load" => "mem_load",
     "mem_loadw" => "mem_loadw",
+    "mem_loadw_be" => "mem_loadw_be",
+    "mem_loadw_le" => "mem_loadw_le",
     "mem_store" => "mem_store",
     "mem_storew" => "mem_storew",
+    "mem_storew_be" => "mem_storew_be",
+    "mem_storew_le" => "mem_storew_le",
     "mem_stream" => "mem_stream",
     "movdn" => "movdn",
     "movdnw" => "movdnw",
@@ -1775,6 +1785,8 @@ Opcode: &'static str = {
     "procref" => "procref",
     "push" => "push",
     "repeat" => "repeat",
+    "reversew" => "reversew",
+    "reversedw" => "reversedw",
     "sdepth" => "sdepth",
     "stack" => "stack",
     "sub" => "sub",

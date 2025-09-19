@@ -336,6 +336,12 @@ impl Assembler {
             Instruction::MovDn15 => block_builder.push_ops([MovDn8, SwapDW, MovDn7, SwapDW]),
             Instruction::MovDnW2 => block_builder.push_ops([SwapW2, SwapW]),
             Instruction::MovDnW3 => block_builder.push_ops([SwapW3, SwapW2, SwapW]),
+            Instruction::Reversew => push_reversew(block_builder),
+            Instruction::Reversedw => {
+                push_reversew(block_builder);
+                block_builder.push_op(SwapW);
+                push_reversew(block_builder);
+            },
 
             Instruction::CSwap => block_builder.push_op(CSwap),
             Instruction::CSwapW => block_builder.push_op(CSwapW),
@@ -378,10 +384,14 @@ impl Assembler {
                 true,
                 span,
             )?,
-            Instruction::MemLoadW => {
+            Instruction::MemLoadW | Instruction::MemLoadWBe => {
                 mem_ops::mem_read(block_builder, proc_ctx, None, false, false, span)?
             },
-            Instruction::MemLoadWImm(v) => mem_ops::mem_read(
+            Instruction::MemLoadWLe => {
+                mem_ops::mem_read(block_builder, proc_ctx, None, false, false, span)?;
+                push_reversew(block_builder);
+            },
+            Instruction::MemLoadWImm(v) | Instruction::MemLoadWBeImm(v) => mem_ops::mem_read(
                 block_builder,
                 proc_ctx,
                 Some(v.expect_value()),
@@ -389,6 +399,17 @@ impl Assembler {
                 false,
                 span,
             )?,
+            Instruction::MemLoadWLeImm(v) => {
+                mem_ops::mem_read(
+                    block_builder,
+                    proc_ctx,
+                    Some(v.expect_value()),
+                    false,
+                    false,
+                    span,
+                )?;
+                push_reversew(block_builder);
+            },
             Instruction::LocLoad(v) => mem_ops::mem_read(
                 block_builder,
                 proc_ctx,
@@ -419,7 +440,6 @@ impl Assembler {
                 )?
             },
             Instruction::MemStore => block_builder.push_ops([MStore, Drop]),
-            Instruction::MemStoreW => block_builder.push_ops([MStoreW]),
             Instruction::MemStoreImm(v) => mem_ops::mem_write_imm(
                 block_builder,
                 proc_ctx,
@@ -428,14 +448,36 @@ impl Assembler {
                 true,
                 span,
             )?,
-            Instruction::MemStoreWImm(v) => mem_ops::mem_write_imm(
-                block_builder,
-                proc_ctx,
-                v.expect_value(),
-                false,
-                false,
-                span,
-            )?,
+            Instruction::MemStoreW | Instruction::MemStoreWBe => block_builder.push_ops([MStoreW]),
+            Instruction::MemStoreWLe => {
+                block_builder.push_op(MovDn4);
+                push_reversew(block_builder);
+                block_builder.push_op(MovUp4);
+                block_builder.push_op(MStoreW);
+                push_reversew(block_builder);
+            },
+            Instruction::MemStoreWImm(v) | Instruction::MemStoreWBeImm(v) => {
+                mem_ops::mem_write_imm(
+                    block_builder,
+                    proc_ctx,
+                    v.expect_value(),
+                    false,
+                    false,
+                    span,
+                )?
+            },
+            Instruction::MemStoreWLeImm(v) => {
+                push_reversew(block_builder);
+                mem_ops::mem_write_imm(
+                    block_builder,
+                    proc_ctx,
+                    v.expect_value(),
+                    false,
+                    false,
+                    span,
+                )?;
+                push_reversew(block_builder);
+            },
             Instruction::LocStore(v) => mem_ops::mem_write_imm(
                 block_builder,
                 proc_ctx,
@@ -603,4 +645,15 @@ fn push_felt(span_builder: &mut BasicBlockBuilder, value: Felt) {
     } else {
         span_builder.push_op(Push(value));
     }
+}
+
+/// Helper function that appends operations to reverse the order of the top 4 elements
+/// on the stack, used for big-endian memory instructions.
+///
+/// The instruction takes 3 cycles to execute and transforms the stack as follows:
+/// [a, b, c, d, ...] -> [d, c, b, a, ...].
+fn push_reversew(block_builder: &mut BasicBlockBuilder) {
+    use Operation::*;
+
+    block_builder.push_ops([MovDn3, Swap, MovUp2]);
 }
