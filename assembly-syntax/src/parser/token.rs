@@ -32,6 +32,9 @@ impl core::ops::Deref for DocumentationType {
     }
 }
 
+// PUSH VALUE
+// ================================================================================================
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PushValue {
     Int(IntValue),
@@ -92,6 +95,9 @@ impl crate::prettier::PrettyPrint for PushValue {
     }
 }
 
+// WORD VALUE
+// ================================================================================================
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WordValue(pub [Felt; 4]);
 
@@ -147,7 +153,7 @@ impl core::hash::Hash for WordValue {
     }
 }
 
-// HEX ENCODED VALUE
+// INT VALUE
 // ================================================================================================
 
 /// Represents one of the various types of values that have a hex-encoded representation in Miden

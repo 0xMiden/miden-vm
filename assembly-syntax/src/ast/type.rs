@@ -6,6 +6,9 @@ use midenc_hir_type::{Type, TypeRepr};
 
 use super::{ConstantExpr, DocString, Ident};
 
+// TYPE DECLARATION
+// ================================================================================================
+
 /// An abstraction over the different types of type declarations allowed in Miden Assembly
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TypeDecl {
@@ -62,6 +65,9 @@ impl crate::prettier::PrettyPrint for TypeDecl {
         }
     }
 }
+
+// FUNCTION TYPE
+// ================================================================================================
 
 /// A procedure type signature
 #[derive(Debug, Clone)]
@@ -150,6 +156,9 @@ impl crate::prettier::PrettyPrint for FunctionType {
     }
 }
 
+// TYPE EXPRESSION
+// ================================================================================================
+
 /// A syntax-level type expression (i.e. primitive type, reference to nominal type, etc.)
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum TypeExpr {
@@ -218,6 +227,9 @@ impl crate::prettier::PrettyPrint for TypeExpr {
     }
 }
 
+// ARRAY TYPE
+// ================================================================================================
+
 #[derive(Debug, Clone)]
 pub struct ArrayType {
     pub span: SourceSpan,
@@ -274,6 +286,9 @@ impl crate::prettier::PrettyPrint for ArrayType {
             + const_text("]")
     }
 }
+
+// STRUCT TYPE
+// ================================================================================================
 
 #[derive(Debug, Clone)]
 pub struct StructType {
@@ -360,6 +375,9 @@ impl crate::prettier::PrettyPrint for StructType {
     }
 }
 
+// STRUCT FIELD
+// ================================================================================================
+
 #[derive(Debug, Clone)]
 pub struct StructField {
     pub span: SourceSpan,
@@ -395,6 +413,9 @@ impl crate::prettier::PrettyPrint for StructField {
         display(&self.name) + const_text(": ") + self.ty.render()
     }
 }
+
+// TYPE ALIAS
+// ================================================================================================
 
 /// A [TypeAlias] represents a named [Type].
 ///
@@ -478,6 +499,9 @@ impl crate::prettier::PrettyPrint for TypeAlias {
             + self.ty.render()
     }
 }
+
+// ENUM TYPE
+// ================================================================================================
 
 /// A combined type alias and constant declaration corresponding to a C-like enumeration.
 ///
@@ -625,6 +649,9 @@ impl crate::prettier::PrettyPrint for EnumType {
             + const_text("}")
     }
 }
+
+// ENUM VARIANT
+// ================================================================================================
 
 /// A variant of an [EnumType].
 ///
