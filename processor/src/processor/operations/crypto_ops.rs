@@ -159,7 +159,12 @@ pub(super) fn op_horner_eval_base<P: Processor>(
             .memory()
             .read_word(ctx, addr, clk, err_ctx)
             .map_err(ExecutionError::MemoryError)?;
-        tracer.record_memory_read_word(word, addr);
+        tracer.record_memory_read_word(
+            word,
+            addr,
+            processor.system().ctx(),
+            processor.system().clk(),
+        );
 
         (QuadFelt::new(word[0], word[1]), word[2], word[3])
     };
@@ -224,7 +229,12 @@ pub(super) fn op_horner_eval_ext<P: Processor>(
             .memory()
             .read_word(ctx, addr, clk, err_ctx)
             .map_err(ExecutionError::MemoryError)?;
-        tracer.record_memory_read_word(word, addr);
+        tracer.record_memory_read_word(
+            word,
+            addr,
+            processor.system().ctx(),
+            processor.system().clk(),
+        );
 
         (QuadFelt::new(word[0], word[1]), word[2], word[3])
     };

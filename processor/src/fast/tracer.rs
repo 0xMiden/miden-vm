@@ -1,5 +1,6 @@
 use alloc::sync::Arc;
 
+use miden_air::trace::rows::RowIndex;
 use miden_core::{
     Felt, Word,
     crypto::merkle::MerklePath,
@@ -7,8 +8,10 @@ use miden_core::{
 };
 
 use crate::{
+    chiplets::CircuitEvaluation,
     continuation_stack::ContinuationStack,
     fast::{FastProcessor, trace_state::NodeExecutionState},
+    system::ContextId,
 };
 
 /// A trait for tracing the execution of a [FastProcessor].
@@ -65,10 +68,28 @@ pub trait Tracer {
     // -----------------------------------------------
 
     /// Records the element read from memory at the given address.
-    fn record_memory_read_element(&mut self, element: Felt, addr: Felt);
+    fn record_memory_read_element(
+        &mut self,
+        element: Felt,
+        addr: Felt,
+        ctx: ContextId,
+        clk: RowIndex,
+    );
 
     /// Records the word read from memory at the given address.
-    fn record_memory_read_word(&mut self, word: Word, addr: Felt);
+    fn record_memory_read_word(&mut self, word: Word, addr: Felt, ctx: ContextId, clk: RowIndex);
+
+    /// Records the element written to memory at the given address.
+    fn record_memory_write_element(
+        &mut self,
+        element: Felt,
+        addr: Felt,
+        ctx: ContextId,
+        clk: RowIndex,
+    );
+
+    /// Records the word written to memory at the given address.
+    fn record_memory_write_word(&mut self, word: Word, addr: Felt, ctx: ContextId, clk: RowIndex);
 
     // ADVICE PROVIDER METHODS
     // -----------------------------------------------
@@ -81,6 +102,31 @@ pub trait Tracer {
     /// Records the value returned by a [crate::host::advice::AdviceProvider::pop_stack_dword]
     /// operation.
     fn record_advice_pop_stack_dword(&mut self, words: [Word; 2]);
+
+    // U32 METHODS
+    // -----------------------------------------------
+
+    /// Records the operands of a u32and operation.
+    fn record_u32and(&mut self, a: Felt, b: Felt);
+
+    /// Records the operands of a u32xor operation.
+    fn record_u32xor(&mut self, a: Felt, b: Felt);
+
+    /// Records the high and low 32-bit limbs of the result of a u32 operation for the purposes of
+    /// the range checker. This is expected to result in four 16-bit range checks.
+    fn record_u32_range_checks(&mut self, clk: RowIndex, u32_lo: Felt, u32_hi: Felt);
+
+    // KERNEL METHODS
+    // -----------------------------------------------
+
+    /// Records the procedure hash of a syscall.
+    fn record_kernel_proc_access(&mut self, proc_hash: Word);
+
+    // ACE CHIPLET METHODS
+    // -----------------------------------------------
+
+    /// Records the evaluation of a circuit.
+    fn record_circuit_evaluation(&mut self, clk: RowIndex, circuit_eval: CircuitEvaluation);
 
     // MISCELLANEOUS
     // -----------------------------------------------
@@ -147,12 +193,46 @@ impl Tracer for NoopTracer {
     }
 
     #[inline(always)]
-    fn record_memory_read_element(&mut self, _element: Felt, _addr: Felt) {
+    fn record_memory_read_element(
+        &mut self,
+        _element: Felt,
+        _addr: Felt,
+        _ctx: ContextId,
+        _clk: RowIndex,
+    ) {
         // do nothing
     }
 
     #[inline(always)]
-    fn record_memory_read_word(&mut self, _word: Word, _addr: Felt) {
+    fn record_memory_read_word(
+        &mut self,
+        _word: Word,
+        _addr: Felt,
+        _ctx: ContextId,
+        _clk: RowIndex,
+    ) {
+        // do nothing
+    }
+
+    #[inline(always)]
+    fn record_memory_write_element(
+        &mut self,
+        _element: Felt,
+        _addr: Felt,
+        _ctx: ContextId,
+        _clk: RowIndex,
+    ) {
+        // do nothing
+    }
+
+    #[inline(always)]
+    fn record_memory_write_word(
+        &mut self,
+        _word: Word,
+        _addr: Felt,
+        _ctx: ContextId,
+        _clk: RowIndex,
+    ) {
         // do nothing
     }
 
@@ -168,6 +248,31 @@ impl Tracer for NoopTracer {
 
     #[inline(always)]
     fn record_advice_pop_stack_dword(&mut self, _words: [Word; 2]) {
+        // do nothing
+    }
+
+    #[inline(always)]
+    fn record_u32and(&mut self, _a: Felt, _b: Felt) {
+        // do nothing
+    }
+
+    #[inline(always)]
+    fn record_u32xor(&mut self, _a: Felt, _b: Felt) {
+        // do nothing
+    }
+
+    #[inline(always)]
+    fn record_u32_range_checks(&mut self, _clk: RowIndex, _u32_lo: Felt, _u32_hi: Felt) {
+        // do nothing
+    }
+
+    #[inline(always)]
+    fn record_kernel_proc_access(&mut self, _proc_hash: Word) {
+        // do nothing
+    }
+
+    #[inline(always)]
+    fn record_circuit_evaluation(&mut self, _clk: RowIndex, _circuit_eval: CircuitEvaluation) {
         // do nothing
     }
 

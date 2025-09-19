@@ -33,10 +33,10 @@ use crate::{
     decoder::{SpanContext, block_stack::ExecutionContextInfo},
     fast::{
         NoopTracer, Tracer,
-        execution_tracer::TraceFragmentContexts,
+        execution_tracer::TraceGenerationContext,
         trace_state::{
-            AdviceReplay, DecoderState, ExecutionContextSystemInfo, HasherReplay, MemoryReplay,
-            NodeExecutionState, NodeFlags, TraceFragmentContext,
+            AdviceReplay, CoreTraceFragmentContext, DecoderState, ExecutionContextSystemInfo,
+            HasherReplay, MemoryReadsReplay, NodeExecutionState, NodeFlags,
         },
     },
     host::default::NoopHost,
@@ -65,13 +65,21 @@ mod tests;
 
 /// Builds the main trace from the provided trace states in parallel.
 pub fn build_trace(
-    trace_fragment_contexts: TraceFragmentContexts,
+    trace_fragment_contexts: TraceGenerationContext,
     program_hash: Word,
 ) -> MainTrace {
-    let TraceFragmentContexts { contexts, fragment_size } = trace_fragment_contexts;
+    let TraceGenerationContext {
+        core_trace_contexts,
+        range_checker: _,
+        memory_writes: _,
+        bitwise: _,
+        kernel: _,
+        ace: _,
+        fragment_size,
+    } = trace_fragment_contexts;
 
     // Save the first stack top for initialization
-    let first_stack_top = if let Some(first_context) = contexts.first() {
+    let first_stack_top = if let Some(first_context) = core_trace_contexts.first() {
         first_context.state.stack.stack_top.to_vec()
     } else {
         vec![ZERO; MIN_STACK_DEPTH]
@@ -94,7 +102,7 @@ pub fn build_trace(
         CoreTraceFragment,
         [Felt; STACK_TRACE_WIDTH],
         [Felt; SYS_TRACE_WIDTH],
-    )> = contexts
+    )> = core_trace_contexts
         .into_par_iter()
         .map(|trace_state| {
             let main_trace_generator = CoreTraceFragmentGenerator::new(trace_state, fragment_size);
@@ -560,7 +568,7 @@ impl CoreTraceFragment {
 struct CoreTraceFragmentGenerator {
     fragment_start_clk: RowIndex,
     fragment: CoreTraceFragment,
-    context: TraceFragmentContext,
+    context: CoreTraceFragmentContext,
     span_context: Option<SpanContext>,
     stack_rows: Option<[Felt; STACK_TRACE_WIDTH]>,
     system_rows: Option<[Felt; SYS_TRACE_WIDTH]>,
@@ -569,7 +577,7 @@ struct CoreTraceFragmentGenerator {
 
 impl CoreTraceFragmentGenerator {
     /// Creates a new CoreTraceFragmentGenerator with the provided checkpoint.
-    pub fn new(context: TraceFragmentContext, fragment_size: usize) -> Self {
+    pub fn new(context: CoreTraceFragmentContext, fragment_size: usize) -> Self {
         Self {
             fragment_start_clk: context.state.system.clk,
             // Safety: the `CoreTraceFragmentGenerator` will fill in all the rows, or truncate any
@@ -1021,7 +1029,7 @@ impl CoreTraceFragmentGenerator {
 
                 let callee_hash = {
                     let mem_addr = self.context.state.stack.get(0);
-                    self.context.replay.memory.replay_read_word(mem_addr)
+                    self.context.replay.memory_reads.replay_read_word(mem_addr)
                 };
 
                 // 1. Add "start DYN/DYNCALL" row
@@ -1489,7 +1497,7 @@ impl Processor for CoreTraceFragmentGenerator {
     type System = Self;
     type Stack = Self;
     type AdviceProvider = AdviceReplay;
-    type Memory = MemoryReplay;
+    type Memory = MemoryReadsReplay;
     type Hasher = HasherReplay;
 
     fn stack(&mut self) -> &mut Self::Stack {
@@ -1509,7 +1517,7 @@ impl Processor for CoreTraceFragmentGenerator {
     }
 
     fn memory(&mut self) -> &mut Self::Memory {
-        &mut self.context.replay.memory
+        &mut self.context.replay.memory_reads
     }
 
     fn hasher(&mut self) -> &mut Self::Hasher {

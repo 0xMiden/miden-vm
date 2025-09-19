@@ -293,7 +293,7 @@ fn test_trace_generation_at_fragment_boundaries(
         let (_, trace_fragment_contexts) = processor
             .execute_for_trace_sync(&program, &mut host, MAX_FRAGMENT_SIZE)
             .unwrap();
-        assert!(trace_fragment_contexts.contexts.len() == 1);
+        assert!(trace_fragment_contexts.core_trace_contexts.len() == 1);
 
         build_trace(trace_fragment_contexts, program.hash())
     };
