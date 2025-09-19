@@ -12,7 +12,10 @@ use crate::{
     AsyncHost, ContextId, ErrorContext, ExecutionError, FMP_MIN, SYSCALL_FMP_MIN,
     continuation_stack::ContinuationStack,
     err_ctx,
-    fast::{ExecutionContextInfo, FastProcessor, Tracer, trace_state::NodeExecutionState},
+    fast::{
+        ExecutionContextInfo, FastProcessor, INITIAL_STACK_TOP_IDX, STACK_BUFFER_SIZE, Tracer,
+        trace_state::NodeExecutionState,
+    },
 };
 
 impl FastProcessor {
@@ -295,18 +298,7 @@ impl FastProcessor {
             .expect("execution context stack should never be empty when restoring context");
 
         // restore the overflow stack
-        {
-            let overflow_len = ctx_info.overflow_stack.len();
-            if overflow_len > self.stack_bot_idx {
-                return Err(ExecutionError::FailedToExecuteProgram(
-                    "stack underflow when restoring context",
-                ));
-            }
-
-            self.stack[range(self.stack_bot_idx - overflow_len, overflow_len)]
-                .copy_from_slice(&ctx_info.overflow_stack);
-            self.stack_bot_idx -= overflow_len;
-        }
+        self.restore_overflow_stack(&ctx_info);
 
         // restore system parameters
         self.ctx = ctx_info.ctx;
@@ -317,5 +309,34 @@ impl FastProcessor {
         tracer.restore_context();
 
         Ok(())
+    }
+
+    /// Restores the overflow stack from a previous context.
+    ///
+    /// If necessary, moves the stack in the buffer to make room for the overflow stack to be
+    /// restored.
+    ///
+    /// # Preconditions
+    /// - The current stack depth is exactly `MIN_STACK_DEPTH` (16).
+    #[inline(always)]
+    fn restore_overflow_stack(&mut self, ctx_info: &ExecutionContextInfo) {
+        let target_overflow_len = ctx_info.overflow_stack.len();
+
+        // Check if there's enough room to restore the overflow stack in the current stack buffer.
+        if target_overflow_len > self.stack_bot_idx {
+            // There's not enough room to restore the overflow stack, so we have to move the
+            // location of the stack in the buffer. We reset it so that after restoring the overflow
+            // stack, the stack_bot_idx is at its original position (i.e. INITIAL_STACK_TOP_IDX -
+            // 16).
+            let new_stack_top_idx =
+                core::cmp::min(INITIAL_STACK_TOP_IDX + target_overflow_len, STACK_BUFFER_SIZE - 1);
+
+            self.reset_stack_in_buffer(new_stack_top_idx);
+        }
+
+        // Restore the overflow
+        self.stack[range(self.stack_bot_idx - target_overflow_len, target_overflow_len)]
+            .copy_from_slice(&ctx_info.overflow_stack);
+        self.stack_bot_idx -= target_overflow_len;
     }
 }

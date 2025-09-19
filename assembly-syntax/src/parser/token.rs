@@ -269,8 +269,12 @@ pub enum Token<'input> {
     Mem,
     MemLoad,
     MemLoadw,
+    MemLoadwBe,
+    MemLoadwLe,
     MemStore,
     MemStorew,
+    MemStorewBe,
+    MemStorewLe,
     MemStream,
     Movdn,
     Movdnw,
@@ -292,6 +296,8 @@ pub enum Token<'input> {
     Procref,
     Push,
     Repeat,
+    Reversew,
+    Reversedw,
     Range,
     Sdepth,
     Stack,
@@ -455,8 +461,12 @@ impl fmt::Display for Token<'_> {
             Token::Mem => write!(f, "mem"),
             Token::MemLoad => write!(f, "mem_load"),
             Token::MemLoadw => write!(f, "mem_loadw"),
+            Token::MemLoadwBe => write!(f, "mem_loadw_be"),
+            Token::MemLoadwLe => write!(f, "mem_loadw_le"),
             Token::MemStore => write!(f, "mem_store"),
             Token::MemStorew => write!(f, "mem_storew"),
+            Token::MemStorewBe => write!(f, "mem_storew_be"),
+            Token::MemStorewLe => write!(f, "mem_storew_le"),
             Token::MemStream => write!(f, "mem_stream"),
             Token::Movdn => write!(f, "movdn"),
             Token::Movdnw => write!(f, "movdnw"),
@@ -480,6 +490,8 @@ impl fmt::Display for Token<'_> {
             Token::HornerBase => write!(f, "horner_eval_base"),
             Token::HornerExt => write!(f, "horner_eval_ext"),
             Token::Repeat => write!(f, "repeat"),
+            Token::Reversew => write!(f, "reversew"),
+            Token::Reversedw => write!(f, "reversedw"),
             Token::Sdepth => write!(f, "sdepth"),
             Token::Stack => write!(f, "stack"),
             Token::Sub => write!(f, "sub"),
@@ -643,8 +655,12 @@ impl<'input> Token<'input> {
                 | Token::Mem
                 | Token::MemLoad
                 | Token::MemLoadw
+                | Token::MemLoadwBe
+                | Token::MemLoadwLe
                 | Token::MemStore
                 | Token::MemStorew
+                | Token::MemStorewBe
+                | Token::MemStorewLe
                 | Token::MemStream
                 | Token::Movdn
                 | Token::Movdnw
@@ -665,6 +681,8 @@ impl<'input> Token<'input> {
                 | Token::Procref
                 | Token::Push
                 | Token::Repeat
+                | Token::Reversew
+                | Token::Reversedw
                 | Token::Sdepth
                 | Token::Stack
                 | Token::Sub
@@ -795,8 +813,12 @@ impl<'input> Token<'input> {
         ("mem", Token::Mem),
         ("mem_load", Token::MemLoad),
         ("mem_loadw", Token::MemLoadw),
+        ("mem_loadw_be", Token::MemLoadwBe),
+        ("mem_loadw_le", Token::MemLoadwLe),
         ("mem_store", Token::MemStore),
         ("mem_storew", Token::MemStorew),
+        ("mem_storew_be", Token::MemStorewBe),
+        ("mem_storew_le", Token::MemStorewLe),
         ("mem_stream", Token::MemStream),
         ("movdn", Token::Movdn),
         ("movdnw", Token::Movdnw),
@@ -820,6 +842,8 @@ impl<'input> Token<'input> {
         ("horner_eval_base", Token::HornerBase),
         ("horner_eval_ext", Token::HornerExt),
         ("repeat", Token::Repeat),
+        ("reversew", Token::Reversew),
+        ("reversedw", Token::Reversedw),
         ("sdepth", Token::Sdepth),
         ("stack", Token::Stack),
         ("sub", Token::Sub),

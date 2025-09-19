@@ -12,9 +12,13 @@
 - Added `FastProcessor::execute_for_trace()`, which outputs a series of checkpoints necessary to build the trace in parallel ([#2023](https://github.com/0xMiden/miden-vm/pull/2023))
 - Introduce `Tracer` trait to allow different ways of tracing program execution, including no tracing ([#2101](https://github.com/0xMiden/miden-vm/pull/2101))
 - `FastProcessor::execute_*()` methods now also return the state of the memory in a new `ExecutionOutput` struct ([#2028](https://github.com/0xMiden/miden-vm/pull/2128))
+- Removed all stack underflow error cases from `FastProcessor` ([#2173](https://github.com/0xMiden/miden-vm/pull/2173)).
+- Added `reversew` and `reversedw` instructions for reversing the order of elements in a word and double word on the stack ([#2125](https://github.com/0xMiden/miden-vm/issues/2125)).
+- Added endianness-aware memory instructions: `mem_loadw_be`, `mem_loadw_le`, `mem_storew_be`, and `mem_storew_le` for explicit control over word element ordering in memory operations ([#2125](https://github.com/0xMiden/miden-vm/issues/2125)).
 
 #### Changes
 
+- Fixed fast loop node not running after-exit decorators when skipping the body (condition == 0) ([#2169](https://github.com/0xMiden/miden-vm/pull/2169)).
 - Removed unused `PushU8List`, `PushU16List`, `PushU32List` and `PushFeltList` instructions ([#2057](https://github.com/0xMiden/miden-vm/pull/2057)).
 - Removed dedicated `PushU8`, `PushU16`, `PushU32`, `PushFelt`, and `PushWord` assembly instructions. These have been replaced with the generic `Push<Immediate>` instruction which supports all the same functionality through the `IntValue` enum (U8, U16, U32, Felt, Word) ([#2066](https://github.com/0xMiden/miden-vm/issues/2066)).
 - [BREAKING] Update miden-crypto dependency to v0.16 (#[2079](https://github.com/0xMiden/miden-vm/pull/2079))

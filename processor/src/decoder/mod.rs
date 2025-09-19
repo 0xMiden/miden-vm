@@ -467,8 +467,8 @@ impl Process {
         program: &MastForest,
         host: &mut H,
     ) -> Result<(), ExecutionError> {
-        // use the hasher to compute the hash of the SPAN block; the row address returned by the
-        // hasher is used as the ID of the block; hash of a SPAN block is computed by sequentially
+        // use the hasher to compute the hash of the BASIC BLOCK; the row address returned by the
+        // hasher is used as the ID of the block; hash of a BASIC BLOCK is computed by sequentially
         // hashing operation batches. Thus, the result of the hash is expected to be in row
         // addr + (num_batches * 8) - 1.
         let op_batches = basic_block.op_batches();
@@ -477,9 +477,10 @@ impl Process {
 
         debug_assert_eq!(basic_block.digest(), hashed_block);
 
-        // start decoding the first operation batch; this also appends a row with SPAN operation
-        // to the decoder trace. we also need the total number of operation groups so that we can
-        // set the value of the group_count register at the beginning of the SPAN.
+        // start decoding the first operation batch; this also appends a row with BASIC BLOCK
+        // operation to the decoder trace. we also need the total number of operation groups
+        // so that we can set the value of the group_count register at the beginning of the
+        // BASIC BLOCK.
         let num_op_groups = basic_block.num_op_groups();
         self.decoder
             .start_basic_block(&op_batches[0], Felt::new(num_op_groups as u64), addr);
@@ -500,7 +501,7 @@ impl Process {
         self.execute_op(Operation::Noop, program, host)
     }
 
-    /// Continues decoding a SPAN block by absorbing the next batch of operations.
+    /// Continues decoding a BASIC BLOCK by absorbing the next batch of operations.
     pub(super) fn respan(&mut self, op_batch: &OpBatch) {
         self.decoder.respan(op_batch);
     }
@@ -556,7 +557,7 @@ impl Process {
 ///   only when both the processor and assembler are in debug mode.
 pub struct Decoder {
     block_stack: BlockStack,
-    span_context: Option<SpanContext>,
+    basic_block_context: Option<BasicBlockContext>,
     trace: DecoderTrace,
     debug_info: DebugInfo,
 }
@@ -568,7 +569,7 @@ impl Decoder {
     pub fn new(in_debug_mode: bool) -> Self {
         Self {
             block_stack: BlockStack::default(),
-            span_context: None,
+            basic_block_context: None,
             trace: DecoderTrace::new(),
             debug_info: DebugInfo::new(in_debug_mode),
         }
@@ -727,7 +728,7 @@ impl Decoder {
         self.debug_info.append_operation(Operation::Dyncall);
     }
 
-    /// Ends decoding of a control block (i.e., a non-SPAN block).
+    /// Ends decoding of a control block (i.e., a non-BASIC BLOCK).
     ///
     /// This appends an execution of an END operation to the trace. The top block on the block
     /// stack is also popped.
@@ -752,21 +753,21 @@ impl Decoder {
         block_info.ctx_info
     }
 
-    // SPAN BLOCK
+    // BASIC BLOCK
     // --------------------------------------------------------------------------------------------
 
-    /// Starts decoding of a SPAN block defined by the specified operation batches.
+    /// Starts decoding of a BASIC BLOCK defined by the specified operation batches.
     pub fn start_basic_block(&mut self, first_op_batch: &OpBatch, num_op_groups: Felt, addr: Felt) {
-        debug_assert!(self.span_context.is_none(), "already in span");
-        let parent_addr = self.block_stack.push(addr, BlockType::Span, None);
+        debug_assert!(self.basic_block_context.is_none(), "already in basic block");
+        let parent_addr = self.block_stack.push(addr, BlockType::BasicBlock, None);
 
-        // add a SPAN row to the trace
+        // add a BASIC BLOCK row to the trace
         self.trace
             .append_span_start(parent_addr, first_op_batch.groups(), num_op_groups);
 
-        // after SPAN operation is executed, we decrement the number of remaining groups by ONE
-        // because executing SPAN consumes the first group of the batch.
-        self.span_context = Some(SpanContext {
+        // after BASIC BLOCK operation is executed, we decrement the number of remaining groups by
+        // ONE because executing BASIC BLOCK consumes the first group of the batch.
+        self.basic_block_context = Some(BasicBlockContext {
             num_groups_left: num_op_groups - ONE,
             group_ops_left: first_op_batch.groups()[0],
         });
@@ -774,7 +775,7 @@ impl Decoder {
         self.debug_info.append_operation(Operation::Span);
     }
 
-    /// Starts decoding of the next operation batch in the current SPAN.
+    /// Starts decoding of the next operation batch in the current BASIC BLOCK.
     pub fn respan(&mut self, op_batch: &OpBatch) {
         // get the current clock cycle here (before the trace table is updated)
         // add RESPAN row to the trace
@@ -785,7 +786,7 @@ impl Decoder {
         let block_info = self.block_stack.peek_mut();
         block_info.addr += HASH_CYCLE_LEN;
 
-        let ctx = self.span_context.as_mut().expect("not in span");
+        let ctx = self.basic_block_context.as_mut().expect("not in basic block");
 
         // after RESPAN operation is executed, we decrement the number of remaining groups by ONE
         // because executing RESPAN consumes the first group of the batch
@@ -797,7 +798,7 @@ impl Decoder {
 
     /// Starts decoding a new operation group.
     pub fn start_op_group(&mut self, op_group: Felt) {
-        let ctx = self.span_context.as_mut().expect("not in span");
+        let ctx = self.basic_block_context.as_mut().expect("not in basic block");
 
         // reset the current group value and decrement the number of left groups by ONE
         debug_assert_eq!(ZERO, ctx.group_ops_left, "not all ops executed in current group");
@@ -808,7 +809,7 @@ impl Decoder {
     /// Decodes a user operation (i.e., not a control flow operation).
     pub fn execute_user_op(&mut self, op: Operation, op_idx: usize) {
         let block = self.block_stack.peek();
-        let ctx = self.span_context.as_mut().expect("not in span");
+        let ctx = self.basic_block_context.as_mut().expect("not in basic block");
 
         // update operations left to be executed in the group
         ctx.group_ops_left = remove_opcode_from_group(ctx.group_ops_left, op);
@@ -847,13 +848,13 @@ impl Decoder {
         self.trace.set_user_op_helpers(values);
     }
 
-    /// Ends decoding of a SPAN block.
+    /// Ends decoding of a BASIC BLOCK.
     pub fn end_basic_block(&mut self, block_hash: Word) {
         // remove the block from the stack of executing blocks and add an END row to the
         // execution trace
         let block_info = self.block_stack.pop();
         self.trace.append_span_end(block_hash, block_info.is_loop_body());
-        self.span_context = None;
+        self.basic_block_context = None;
 
         self.debug_info.append_operation(Operation::End);
     }
@@ -905,16 +906,16 @@ impl Default for Decoder {
     }
 }
 
-// SPAN CONTEXT
+// BASIC BLOCK CONTEXT
 // ================================================================================================
 
-/// Keeps track of the info needed to decode a currently executing SPAN block. The info includes:
+/// Keeps track of the info needed to decode a currently executing BASIC BLOCK. The info includes:
 /// - Operations which still need to be executed in the current group. The operations are encoded as
 ///   opcodes (7 bits) appended one after another into a single field element, with the next
 ///   operation to be executed located at the least significant position.
-/// - Number of operation groups left to be executed in the entire SPAN block.
+/// - Number of operation groups left to be executed in the entire BASIC BLOCK.
 #[derive(Default)]
-pub(crate) struct SpanContext {
+pub(crate) struct BasicBlockContext {
     pub group_ops_left: Felt,
     pub num_groups_left: Felt,
 }

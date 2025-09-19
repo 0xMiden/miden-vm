@@ -105,7 +105,7 @@ As described [previously](./main.md#program-block-hashing), when the VM starts e
 
 For *join*, *split*, and *loop* blocks, the hash is computed directly from the hashes of the block's children. The prover provides these child hashes non-deterministically by populating registers $h_0,..., h_7$. For *dyn*, the hasher registers are populated with zeros, so the resulting hash is a constant value. The hasher is initialized using the hash chiplet, and we use the address of the hasher as the block's ID. The result of the hash is available $7$ rows down in the hasher table (i.e., at row with index equal to block ID plus $7$). We read the result from the hasher table at the time the `END` operation is executed for a given block.
 
-For *span* blocks, the hash is computed by absorbing a linear sequence of instructions (organized into operation groups and batches) into the hasher and then returning the result. The prover provides operation batches non-deterministically by populating registers $h_0, ..., h_7$. Similarly to other blocks, the hasher is initialized using the hash chiplet at the start of the block, and we use the address of the hasher as the ID of the first operation batch in the block. As we absorb additional operation batches into the hasher (by executing `RESPAN` operation), the batch address is incremented by $8$. This moves the "pointer" into the hasher table $8$ rows down with every new batch. We read the result from the hasher table at the time the `END` operation is executed for a given block.
+For *basic* blocks, the hash is computed by absorbing a linear sequence of instructions (organized into operation groups and batches) into the hasher and then returning the result. The prover provides operation batches non-deterministically by populating registers $h_0, ..., h_7$. Similarly to other blocks, the hasher is initialized using the hash chiplet at the start of the block, and we use the address of the hasher as the ID of the first operation batch in the block. As we absorb additional operation batches into the hasher (by executing `RESPAN` operation), the batch address is incremented by $8$. This moves the "pointer" into the hasher table $8$ rows down with every new batch. We read the result from the hasher table at the time the `END` operation is executed for a given block.
 
 ### Chiplets bus constraints
 
@@ -308,7 +308,7 @@ The degree of this constraint is $7$.
 In addition to the above transition constraint, we also need to impose boundary constraints against the $p_1$ column to make sure the first and the last values in the column are set to $1$. This enforces that the block stack table starts and ends in an empty state.
 
 ## Block hash table constraints
-As described [previously](./main.md#block-hash-table), when the VM starts executing a new program block, it adds hashes of the block's children to the block hash table. And when the VM finishes executing a block, it removes the block's hash from the block hash table. This means that the block hash table gets updated when we execute the `JOIN`, `SPLIT`, `LOOP`, `REPEAT`, `DYN`, and `END` operations (executing `SPAN` operation does not affect the block hash table because a *span* block has no children).
+As described [previously](./main.md#block-hash-table), when the VM starts executing a new program block, it adds hashes of the block's children to the block hash table. And when the VM finishes executing a block, it removes the block's hash from the block hash table. This means that the block hash table gets updated when we execute the `JOIN`, `SPLIT`, `LOOP`, `REPEAT`, `DYN`, and `END` operations (executing `SPAN` operation does not affect the block hash table because a *basic* block has no children).
 
 Adding and removing entries to/from the block hash table is accomplished as follows:
 * To add an entry, we multiply the value in column $p_2$ by a value representing a tuple `(prnt_id, block_hash, is_first_child, is_loop_body)`. A constraint to enforce this would look as $p_2' = p_2 \cdot v$, where $v$ is the value representing the row to be added.
@@ -384,8 +384,8 @@ In addition to the above transition constraint, we also need to set the followin
 * The first value in the column represents a row for the entire program. Specifically, the row tuple would be `(0, program_hash, 0, 0)`. This row should be removed from the table when the last `END` operation is executed.
 * The last value in the column is $1$ - i.e., the block hash table is empty.
 
-## Span block
-Span block constraints ensure proper decoding of span blocks. In addition to the block stack table constraints and block hash table constraints described previously, decoding of span blocks requires constraints described below.
+## Basic block
+Basic block constraints ensure proper decoding of basic blocks. In addition to the block stack table constraints and block hash table constraints described previously, decoding of basic blocks requires constraints described below.
 
 ### In-span column constraints
 The `in_span` column (denoted as $sp$) is used to identify rows which execute non-control flow operations. The values in this column are set as follows:
@@ -424,7 +424,7 @@ Additionally, we will need to impose a boundary constraint which specifies that 
 Also, note that the combination of the above constraints makes it impossible to execute `END` or `RESPAN` operations right after `SPAN` or `RESPAN` operations.
 
 ### Block address constraints
-When we are inside a *span* block, values in block address columns (denoted as $a$) must remain the same. This can be enforced with the following constraint:
+When we are inside a *basic* block, values in block address columns (denoted as $a$) must remain the same. This can be enforced with the following constraint:
 
 > $$
 sp \cdot (a' - a) = 0 \text{ | degree} = 2
@@ -435,13 +435,13 @@ Notice that this constraint does not apply when we execute any of the control fl
 Notice also that this constraint implies that when the next operation is the `END` operation, the value in the $a$ column must also be copied over to the next row. This is exactly the behavior we want to enforce so that when the `END` operation is executed, the block address is set to the address of the current span batch.
 
 ### Group count constraints
-The `group_count` column (denoted as $gc$) is used to keep track of the number of operation groups which remains to be executed in a span block.
+The `group_count` column (denoted as $gc$) is used to keep track of the number of operation groups which remains to be executed in a basic block.
 
-In the beginning of a span block (i.e., when `SPAN` operation is executed), the prover sets the value of $gc$ non-deterministically. This value is subsequently decremented according to the rules described below. By the time we exit the span block (i.e., when `END` operation is executed), the value in $gc$ must be $0$.
+In the beginning of a basic block (i.e., when `SPAN` operation is executed), the prover sets the value of $gc$ non-deterministically. This value is subsequently decremented according to the rules described below. By the time we exit the basic block (i.e., when `END` operation is executed), the value in $gc$ must be $0$.
 
 The rules for decrementing values in the $gc$ column are as follows:
 * The count cannot be decremented by more than $1$ in a single row.
-* When an operation group is fully executed (which happens when $h_0 = 0$ inside a span block), the count is decremented by $1$.
+* When an operation group is fully executed (which happens when $h_0 = 0$ inside a basic block), the count is decremented by $1$.
 * When `SPAN`, `RESPAN`, or `PUSH` operations are executed, the count is decremented by $1$.
 
 Note that these rules imply that the `PUSH` operation (or any operation with an immediate value) cannot be the last operation in an operation group (otherwise the count would have to be decremented by $2$).
@@ -454,13 +454,13 @@ $$
 
 Using this variable, we can describe the constraints against the $gc$ column as follows:
 
-Inside a *span* block, group count can either stay the same or decrease by one:
+Inside a *basic* block, group count can either stay the same or decrease by one:
 
 > $$
 sp \cdot \Delta gc \cdot (\Delta gc - 1) = 0 \text{ | degree} = 3
 $$
 
-When group count is decremented inside a *span* block, either $h_0$ must be $0$ (we consumed all operations in a group) or we must be executing an operation with an immediate value:
+When group count is decremented inside a *basic* block, either $h_0$ must be $0$ (we consumed all operations in a group) or we must be executing an operation with an immediate value:
 
 > $$
 sp \cdot \Delta gc \cdot (1 - f_{imm})\cdot h_0 = 0 \text{ | degree} = 8
@@ -487,7 +487,7 @@ f_{end} \cdot gc = 0 \text{ | degree} = 5
 $$
 
 ### Op group decoding constraints
-Inside a *span* block, register $h_0$ is used to keep track of operations to be executed in the current operation group. The value of this register is set by the prover non-deterministically at the time when the prover executes a `SPAN` or a `RESPAN` operation, or when processing of a new operation group within a batch starts. The picture below illustrates this.
+Inside a *basic* block, register $h_0$ is used to keep track of operations to be executed in the current operation group. The value of this register is set by the prover non-deterministically at the time when the prover executes a `SPAN` or a `RESPAN` operation, or when processing of a new operation group within a batch starts. The picture below illustrates this.
 
 ![air_decoder_op_group_constraint](../../assets/design/decoder/constraints/air_decoder_op_group_constraint.png)
 
@@ -505,7 +505,7 @@ op = \sum_{i=0}^6 (b_i \cdot 2^i) \\
 f_{sgc} = sp \cdot sp' \cdot (1 - \Delta gc)
 $$
 
-$op$ is just an opcode value implied by the values in `op_bits` registers. $f_{sgc}$ is a flag which is set to $1$ when the group count within a *span* block does not change. We multiply it by $sp'$ to make sure the flag is $0$ when we are about to end decoding of an operation batch. Note that $f_{sgc}$ flag is mutually exclusive with $f_{span}$, $f_{respan}$, and $f_{imm}$ flags as these three operations decrement the group count.
+$op$ is just an opcode value implied by the values in `op_bits` registers. $f_{sgc}$ is a flag which is set to $1$ when the group count within a *basic* block does not change. We multiply it by $sp'$ to make sure the flag is $0$ when we are about to end decoding of an operation batch. Note that $f_{sgc}$ flag is mutually exclusive with $f_{span}$, $f_{respan}$, and $f_{imm}$ flags as these three operations decrement the group count.
 
 Using these variables, we can describe operation group decoding constraints as follows:
 
@@ -517,7 +517,7 @@ $$
 
 Notice that when the group count does change, and we are not executing $f_{span}$, $f_{respan}$, or $f_{imm}$ operations, no constraints are placed against $h_0$, and thus, the prover can populate this register non-deterministically.
 
-When we are in a *span* block and the next operation is `END` or `RESPAN`, the current value in $h_0$ column must be $0$.
+When we are in a *basic* block and the next operation is `END` or `RESPAN`, the current value in $h_0$ column must be $0$.
 
 > $$
 sp \cdot (f_{end}' + f_{respan}') \cdot h_0 = 0 \text{ | degree} = 6
@@ -541,13 +541,13 @@ When executing `SPAN` or `RESPAN` operations the next value of `op_index` must b
 (f_{span} + f_{respan}) \cdot ox' = 0 \text{ | degree} = 6
 $$
 
-When starting a new operation group inside a *span* block, the next value of `op_index` must be set to $0$. Note that we multiply by $sp$ to exclude the cases when the group count is decremented because of `SPAN` or `RESPAN` operations:
+When starting a new operation group inside a *basic* block, the next value of `op_index` must be set to $0$. Note that we multiply by $sp$ to exclude the cases when the group count is decremented because of `SPAN` or `RESPAN` operations:
 
 > $$
 sp \cdot ng \cdot ox' = 0 \text{ | degree} = 6
 $$
 
-When inside a *span* block but not starting a new operation group, `op_index` must be incremented by $1$. Note that we multiply by $sp'$ to exclude the cases when we are about to exit processing of an operation batch (i.e., the next operation is either `END` or `RESPAN`):
+When inside a *basic* block but not starting a new operation group, `op_index` must be incremented by $1$. Note that we multiply by $sp'$ to exclude the cases when we are about to exit processing of an operation batch (i.e., the next operation is either `END` or `RESPAN`):
 
 > $$
 sp \cdot sp' \cdot (1 - ng) \cdot (\Delta ox - 1) = 0 \text{ | degree} = 7
@@ -560,7 +560,7 @@ Values of `op_index` must be in the range $[0, 8]$.
 $$
 
 ### Op batch flags constraints
-Operation batch flag columns (denoted $bc_0$, $bc_1$, and $bc_2$) are used to specify how many operation groups are present in an operation batch. This is relevant for the last batch in a span block (or the first batch if there is only one batch in a block) as all other batches should be completely full (i.e., contain 8 operation groups).
+Operation batch flag columns (denoted $bc_0$, $bc_1$, and $bc_2$) are used to specify how many operation groups are present in an operation batch. This is relevant for the last batch in a basic block (or the first batch if there is only one batch in a block) as all other batches should be completely full (i.e., contain 8 operation groups).
 
 These columns are used to define the following 4 flags:
 
@@ -610,7 +610,7 @@ f_{g1} \cdot h_1 = 0 \text{ | degree} = 4
 $$
 
 ### Op group table constraints
-Op group table is used to ensure that all operation groups in a given batch are consumed before a new batch is started (i.e., via a `RESPAN` operation) or the execution of a *span* block is complete (i.e., via an `END` operation). The op group table is updated according to the following rules:
+Op group table is used to ensure that all operation groups in a given batch are consumed before a new batch is started (i.e., via a `RESPAN` operation) or the execution of a *basic* block is complete (i.e., via an `END` operation). The op group table is updated according to the following rules:
 
 * When a new operation batch is started, we add groups from this batch to the table. To add a group to the table, we multiply the value in column $p_3$ by a value representing a tuple `(batch_id, group_pos, group)`. A constraint to enforce this would look as $p_3' = p_3 \cdot v$, where $v$ is the value representing the row to be added. Depending on the batch, we may need to add multiple groups to the table (i.e., $p_3' = p_3 \cdot v_1 \cdot v_2 \cdot v_3 ...$). Flags $f_{g1}$, $f_{g2}$, $f_{g4}$, and $f_{g8}$ are used to define how many groups to add.
 * When a new operation group starts executing or when an immediate value is consumed, we remove the corresponding group from the table. To do this, we divide the value in column $p_3$ by a value representing a tuple `(batch_id, group_pos, group)`. A constraint to enforce this would look as $p_3' \cdot u = p_3$, where $u$ is the value representing the row to be removed.
@@ -649,7 +649,7 @@ $$
 
 The above constraint specifies that:
 * When `SPAN` or `RESPAN` operations are executed, we add between $1$ and $7$ groups to the op group table; else, leave $p3$ untouched.
-* When group count is decremented inside a *span* block, we remove a group from the op group table; else, leave $p3'$ untouched.
+* When group count is decremented inside a *basic* block, we remove a group from the op group table; else, leave $p3'$ untouched.
 
 The degree of this constraint is $9$.
 
