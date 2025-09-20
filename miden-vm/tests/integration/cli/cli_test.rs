@@ -198,3 +198,44 @@ fn test_advmap_cli() -> Result<(), Box<dyn std::error::Error>> {
     cmd.assert().success();
     Ok(())
 }
+
+#[test]
+fn test_issue_2181_locaddr_bug() -> Result<(), Box<dyn std::error::Error>> {
+    let mut cmd = bin_under_test().command();
+    cmd.arg("run").arg("./tests/integration/cli/data/issue_2181_locaddr_bug.masm");
+
+    let output = cmd.output()?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Verify the program runs successfully
+    assert!(output.status.success());
+
+    // Compare output against the captured debug.output file
+    let expected_output =
+        std::fs::read_to_string("./tests/integration/cli/data/issue_2181_debug.output")?;
+    let expected_output = expected_output.trim();
+
+    let actual_output = stdout.trim();
+
+    // Create a snapshot test comparing actual output with expected output
+    if actual_output != expected_output {
+        println!("=== EXPECTED OUTPUT ===");
+        println!("{}", expected_output);
+        println!("=== ACTUAL OUTPUT ===");
+        println!("{}", actual_output);
+
+        // Check for the specific bug pattern
+        let buggy_output_count = actual_output.matches("18446744069414584317").count();
+        if buggy_output_count > 0 {
+            panic!(
+                "Test failed: Bug present - found {} occurrences of buggy output",
+                buggy_output_count
+            );
+        } else {
+            panic!("Test failed: Output mismatch - see comparison above");
+        }
+    }
+
+    Ok(())
+}
