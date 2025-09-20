@@ -21,8 +21,8 @@ use super::{GlobalProcedureIndex, ModuleIndex};
 use crate::{
     Library, LibraryNamespace, LibraryPath, SourceManager, Spanned,
     ast::{
-        Export, InvocationTarget, InvokeKind, Module, ProcedureIndex, ProcedureName,
-        ResolvedProcedure,
+        self, Export, InvocationTarget, InvokeKind, Module, ProcedureIndex, ProcedureName,
+        ResolvedProcedure, types,
     },
     library::{ModuleInfo, ProcedureInfo},
 };
@@ -102,6 +102,16 @@ impl ModuleLink {
             ModuleLink::Info(module) => {
                 module.get_procedure_digest_by_name(name).map(ResolvedProcedure::MastRoot)
             },
+        }
+    }
+
+    /// Resolves a user-expressed type, `ty`, to a concrete type
+    pub fn resolve_type(&self, ty: &ast::TypeExpr) -> Option<types::Type> {
+        match self {
+            Self::Ast(module) => module.resolve_type(ty),
+            // TODO(pauls): Ideally we ship user-defined types in packages so that we can
+            // reference them from dependencies, but we're punting on that for now.
+            Self::Info(_) => None,
         }
     }
 }
@@ -725,6 +735,77 @@ impl Linker {
     ) -> Result<ResolvedTarget, LinkerError> {
         let resolver = NameResolver::new(self);
         resolver.resolve_target(caller, target)
+    }
+
+    /// Resolves the user-defined type signature of the given procedure to the HIR type signature
+    pub(super) fn resolve_signature(
+        &self,
+        gid: GlobalProcedureIndex,
+    ) -> Result<Option<Arc<types::FunctionType>>, LinkerError> {
+        // Fetch procedure metadata from the graph
+        let module = match &self[gid.module] {
+            ModuleLink::Ast(module) => module,
+            ModuleLink::Info(module) => {
+                let proc = module
+                    .get_procedure_by_index(gid.index)
+                    .expect("invalid global procedure index");
+                return Ok(proc.signature.clone());
+            },
+        };
+
+        match &module[gid.index] {
+            Export::Procedure(proc) => match proc.signature() {
+                Some(ty) => self.translate_function_type(module, ty).map(Some),
+                None => Ok(None),
+            },
+            Export::Alias(alias) => {
+                let target = InvocationTarget::from(alias.target());
+                let caller = CallerInfo {
+                    span: target.span(),
+                    module: gid.module,
+                    kind: InvokeKind::ProcRef,
+                };
+                match self.resolve_target(&caller, &target)? {
+                    ResolvedTarget::Phantom(_) => Ok(None),
+                    ResolvedTarget::Exact { gid } | ResolvedTarget::Resolved { gid, .. } => {
+                        self.resolve_signature(gid)
+                    },
+                }
+            },
+        }
+    }
+
+    fn translate_function_type(
+        &self,
+        module: &Module,
+        ty: &ast::FunctionType,
+    ) -> Result<Arc<types::FunctionType>, LinkerError> {
+        let cc = ty.cc;
+        let mut args = Vec::with_capacity(ty.args.len());
+        for arg in ty.args.iter() {
+            if let Some(arg) = module.resolve_type(arg) {
+                args.push(arg);
+            } else {
+                let span = arg.span();
+                return Err(LinkerError::UndefinedType {
+                    span,
+                    source_file: self.source_manager.get(span.source_id()).ok(),
+                });
+            }
+        }
+        let mut results = Vec::with_capacity(ty.results.len());
+        for result in ty.results.iter() {
+            if let Some(result) = module.resolve_type(result) {
+                results.push(result);
+            } else {
+                let span = result.span();
+                return Err(LinkerError::UndefinedType {
+                    span,
+                    source_file: self.source_manager.get(span.source_id()).ok(),
+                });
+            }
+        }
+        Ok(Arc::new(types::FunctionType::new(cc, args, results)))
     }
 
     /// Registers a [MastNodeId] as corresponding to a given [GlobalProcedureIndex].

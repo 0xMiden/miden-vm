@@ -7,15 +7,15 @@ use miden_core::{
 };
 use miden_debug_types::{SourceFile, SourceSpan, Span, Spanned};
 use miden_utils_diagnostics::Report;
-use midenc_hir_type::FunctionType;
+use smallvec::SmallVec;
 
 use super::{
-    Constant, DocString, EnumType, Export, Import, LocalNameResolver, ProcedureIndex,
+    Constant, DocString, EnumType, Export, FunctionType, Import, LocalNameResolver, ProcedureIndex,
     ProcedureName, QualifiedProcedureName, ResolvedProcedure, TypeAlias, TypeDecl, Variant,
 };
 use crate::{
     LibraryNamespace, LibraryPath,
-    ast::{AliasTarget, Ident},
+    ast::{self, AliasTarget, Ident, types},
     parser::ModuleParser,
     sema::SemanticAnalysisError,
 };
@@ -243,28 +243,52 @@ impl Module {
     ///   with the same name as any of the variants of the given enum type, is already defined
     /// * The concrete type of the enumeration is not an integral type
     pub fn define_enum(&mut self, ty: EnumType) -> Result<(), SemanticAnalysisError> {
-        if !ty.ty().is_integer() {
+        let repr = ty.ty().clone();
+
+        if !repr.is_integer() {
             return Err(SemanticAnalysisError::InvalidEnumRepr { span: ty.span() });
         }
 
-        if let Some(prev) = self.types.iter().find(|t| t.name() == ty.name()) {
+        let (alias, variants) = ty.into_parts();
+
+        if let Some(prev) = self.types.iter().find(|t| t.name() == &alias.name) {
             return Err(SemanticAnalysisError::SymbolConflict {
-                span: ty.span(),
+                span: alias.span(),
                 prev_span: prev.span(),
             });
         }
 
-        for variant in ty.variants() {
+        let mut values = SmallVec::<[Span<u64>; 8]>::new_const();
+
+        for variant in variants {
+            // Validate that the discriminant value is unique amongst all variants
+            let value = match &variant.discriminant {
+                ast::ConstantExpr::Int(value) => (*value).map(|v| v.as_int()),
+                expr => {
+                    return Err(SemanticAnalysisError::InvalidEnumDiscriminant {
+                        span: expr.span(),
+                        repr,
+                    });
+                },
+            };
+            if let Some(prev) = values.iter().find(|v| *v == &value) {
+                return Err(SemanticAnalysisError::EnumDiscriminantConflict {
+                    span: value.span(),
+                    prev: prev.span(),
+                });
+            } else {
+                values.push(value);
+            }
+
+            // Validate that the discriminant is a valid instance of the `repr` type
+            variant.assert_instance_of(&repr)?;
+
             let Variant { span, docs, name, discriminant } = variant;
-            self.define_constant(Constant {
-                span: *span,
-                docs: docs.clone(),
-                name: name.clone(),
-                value: discriminant.clone(),
-            })?;
+
+            self.define_constant(Constant { span, docs, name, value: discriminant })?;
         }
 
-        self.types.push(ty.into());
+        self.types.push(alias.into());
 
         Ok(())
     }
@@ -552,6 +576,33 @@ impl Module {
     /// Return an iterator over the paths of all imports in this module
     pub fn import_paths(&self) -> impl Iterator<Item = &LibraryPath> + '_ {
         self.imports.iter().map(|import| &import.path)
+    }
+
+    /// Resolves a user-expressed type, `ty`, to a concrete type
+    pub fn resolve_type(&self, ty: &ast::TypeExpr) -> Option<types::Type> {
+        match ty {
+            ast::TypeExpr::Ref(name) => match self.types.iter().find(|t| t.name() == name)? {
+                ast::TypeDecl::Alias(alias) => self.resolve_type(&alias.ty),
+                ast::TypeDecl::Enum(enum_ty) => Some(enum_ty.ty().clone()),
+            },
+            ast::TypeExpr::Primitive(t) => Some(t.inner().clone()),
+            ast::TypeExpr::Array(t) => {
+                let elem = self.resolve_type(&t.elem)?;
+                Some(types::Type::Array(Arc::new(types::ArrayType::new(elem, t.arity))))
+            },
+            ast::TypeExpr::Ptr(ty) => {
+                let pointee = self.resolve_type(&ty.pointee)?;
+                Some(types::Type::Ptr(Arc::new(types::PointerType::new(pointee))))
+            },
+            ast::TypeExpr::Struct(t) => {
+                let mut fields = Vec::with_capacity(t.fields.len());
+                for field in t.fields.iter() {
+                    let field_ty = self.resolve_type(&field.ty)?;
+                    fields.push(field_ty);
+                }
+                Some(types::Type::Struct(Arc::new(types::StructType::new(fields))))
+            },
+        }
     }
 }
 

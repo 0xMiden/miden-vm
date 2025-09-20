@@ -8,7 +8,7 @@ use super::DocString;
 use crate::{
     Felt,
     ast::Ident,
-    parser::{ParsingError, WordValue},
+    parser::{IntValue, ParsingError, WordValue},
 };
 
 // CONSTANT
@@ -60,8 +60,8 @@ impl crate::prettier::PrettyPrint for Constant {
             .map(|docstring| docstring.render())
             .unwrap_or(Document::Empty);
 
-        doc += flatten(const_text("const") + const_text(".") + display(&self.name));
-        doc += const_text("=");
+        doc += flatten(const_text("const") + const_text(" ") + display(&self.name));
+        doc += const_text(" = ");
 
         doc + self.value.render()
     }
@@ -88,7 +88,7 @@ impl Spanned for Constant {
 #[derive(Clone)]
 pub enum ConstantExpr {
     /// A literal [`Felt`] value.
-    Felt(Span<Felt>),
+    Int(Span<IntValue>),
     /// A reference to another constant.
     Var(Ident),
     /// An binary arithmetic operator.
@@ -100,7 +100,7 @@ pub enum ConstantExpr {
     },
     /// A plain spanned string.
     String(Ident),
-    /// A literal [`WordValue`].
+    /// A literal ['WordValue'].
     Word(Span<WordValue>),
     /// A spanned string with a [`HashKind`] showing to which type of value the given string should
     /// be hashed.
@@ -108,6 +108,18 @@ pub enum ConstantExpr {
 }
 
 impl ConstantExpr {
+    /// Unwrap an [`IntValue`] from this expression or panic.
+    ///
+    /// This is used in places where we expect the expression to have been folded to an integer,
+    /// otherwise a bug occurred.
+    #[track_caller]
+    pub fn expect_int(&self) -> IntValue {
+        match self {
+            Self::Int(spanned) => spanned.into_inner(),
+            other => panic!("expected constant expression to be a literal, got {other:#?}"),
+        }
+    }
+
     /// Unwrap a [`Felt`] value from this expression or panic.
     ///
     /// This is used in places where we expect the expression to have been folded to a felt value,
@@ -115,7 +127,7 @@ impl ConstantExpr {
     #[track_caller]
     pub fn expect_felt(&self) -> Felt {
         match self {
-            Self::Felt(spanned) => spanned.into_inner(),
+            Self::Int(spanned) => Felt::new(spanned.inner().as_int()),
             other => panic!("expected constant expression to be a literal, got {other:#?}"),
         }
     }
@@ -135,7 +147,7 @@ impl ConstantExpr {
     /// Returns an error if an invalid expression is found while folding, such as division by zero.
     pub fn try_fold(self) -> Result<Self, ParsingError> {
         match self {
-            Self::String(_) | Self::Felt(_) | Self::Var(_) | Self::Word(_) | Self::Hash(..) => {
+            Self::String(_) | Self::Word(_) | Self::Int(_) | Self::Var(_) | Self::Hash(..) => {
                 Ok(self)
             },
             Self::BinaryOp { span, op, lhs, rhs } => {
@@ -145,7 +157,7 @@ impl ConstantExpr {
                         Self::String(ident) => {
                             Err(ParsingError::StringInArithmeticExpression { span: ident.span() })
                         },
-                        Self::Felt(rhs) => {
+                        Self::Int(rhs) => {
                             let lhs = Self::into_inner(lhs).try_fold()?;
                             match lhs {
                                 Self::String(ident) => {
@@ -153,7 +165,7 @@ impl ConstantExpr {
                                         span: ident.span(),
                                     })
                                 },
-                                Self::Felt(lhs) => {
+                                Self::Int(lhs) => {
                                     let lhs = lhs.into_inner();
                                     let rhs = rhs.into_inner();
                                     let is_division =
@@ -164,28 +176,27 @@ impl ConstantExpr {
                                     }
                                     match op {
                                         ConstantOp::Add => {
-                                            Ok(Self::Felt(Span::new(span, lhs + rhs)))
+                                            Ok(Self::Int(Span::new(span, lhs + rhs)))
                                         },
                                         ConstantOp::Sub => {
-                                            Ok(Self::Felt(Span::new(span, lhs - rhs)))
+                                            Ok(Self::Int(Span::new(span, lhs - rhs)))
                                         },
                                         ConstantOp::Mul => {
-                                            Ok(Self::Felt(Span::new(span, lhs * rhs)))
+                                            Ok(Self::Int(Span::new(span, lhs * rhs)))
                                         },
                                         ConstantOp::Div => {
-                                            Ok(Self::Felt(Span::new(span, lhs / rhs)))
+                                            Ok(Self::Int(Span::new(span, lhs / rhs)))
                                         },
-                                        ConstantOp::IntDiv => Ok(Self::Felt(Span::new(
-                                            span,
-                                            Felt::new(lhs.as_int() / rhs.as_int()),
-                                        ))),
+                                        ConstantOp::IntDiv => {
+                                            Ok(Self::Int(Span::new(span, lhs / rhs)))
+                                        },
                                     }
                                 },
                                 lhs => Ok(Self::BinaryOp {
                                     span,
                                     op,
                                     lhs: Box::new(lhs),
-                                    rhs: Box::new(Self::Felt(rhs)),
+                                    rhs: Box::new(Self::Int(rhs)),
                                 }),
                             }
                         },
@@ -209,7 +220,7 @@ impl ConstantExpr {
 
     fn is_literal(&self) -> bool {
         match self {
-            Self::Felt(_) | Self::String(_) | Self::Word(_) | Self::Hash(..) => true,
+            Self::Int(_) | Self::String(_) | Self::Word(_) | Self::Hash(..) => true,
             Self::Var(_) => false,
             Self::BinaryOp { lhs, rhs, .. } => lhs.is_literal() && rhs.is_literal(),
         }
@@ -227,7 +238,8 @@ impl Eq for ConstantExpr {}
 impl PartialEq for ConstantExpr {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Self::Felt(l), Self::Felt(y)) => l == y,
+            (Self::Int(l), Self::Int(y)) => l == y,
+            (Self::Word(l), Self::Word(y)) => l == y,
             (Self::Var(l), Self::Var(y)) => l == y,
             (Self::Hash(l_hk, l_i), Self::Hash(r_hk, r_i)) => l_i == r_i && l_hk == r_hk,
             (
@@ -243,9 +255,9 @@ impl core::hash::Hash for ConstantExpr {
     fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
         core::mem::discriminant(self).hash(state);
         match self {
-            Self::Felt(value) => value.as_int().hash(state),
-            Self::String(value) => value.hash(state),
+            Self::Int(value) => value.hash(state),
             Self::Word(value) => value.hash(state),
+            Self::String(value) => value.hash(state),
             Self::Var(value) => value.hash(state),
             Self::Hash(hash_kind, string) => {
                 hash_kind.hash(state);
@@ -263,8 +275,8 @@ impl core::hash::Hash for ConstantExpr {
 impl fmt::Debug for ConstantExpr {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::Felt(lit) => fmt::Debug::fmt(&**lit, f),
-            Self::Word(w) => fmt::Debug::fmt(&**w, f),
+            Self::Int(lit) => fmt::Debug::fmt(&**lit, f),
+            Self::Word(lit) => fmt::Debug::fmt(&**lit, f),
             Self::Var(name) | Self::String(name) => fmt::Debug::fmt(&**name, f),
             Self::Hash(hash_kind, str) => fmt::Debug::fmt(&(str, hash_kind), f),
             Self::BinaryOp { op, lhs, rhs, .. } => {
@@ -279,8 +291,8 @@ impl crate::prettier::PrettyPrint for ConstantExpr {
         use crate::prettier::*;
 
         match self {
-            Self::Felt(literal) => display(literal),
-            Self::Word(spanned) => spanned.render(),
+            Self::Int(literal) => display(literal),
+            Self::Word(literal) => display(literal),
             Self::Var(ident) | Self::String(ident) => display(ident),
             Self::Hash(hash_kind, str) => {
                 flatten(display(hash_kind) + const_text("(") + display(str) + const_text(")"))
@@ -297,7 +309,7 @@ impl crate::prettier::PrettyPrint for ConstantExpr {
 impl Spanned for ConstantExpr {
     fn span(&self) -> SourceSpan {
         match self {
-            Self::Felt(spanned) => spanned.span(),
+            Self::Int(spanned) => spanned.span(),
             Self::Word(spanned) => spanned.span(),
             Self::Hash(_, spanned) => spanned.span(),
             Self::Var(spanned) | Self::String(spanned) => spanned.span(),

@@ -10,15 +10,16 @@ use core::{marker::PhantomData, num::NonZeroU32, ops::Range};
 use miden_debug_types::{SourceFile, SourceSpan, Span, Spanned};
 use smallvec::smallvec;
 
-use crate::{LibraryPath, LibraryNamespace, ast::*, Felt, FieldElement, StarkField, Word};
+use crate::{LibraryPath, LibraryNamespace, ast::{*, types::{AddressSpace, Type}}, Felt, FieldElement, StarkField, Word};
 use super::{
-    BinEncodedValue, IntValue, Token, WordValue, ParseError, ParsingError,
-    LiteralErrorKind, HexErrorKind, DocumentationType
+    BinEncodedValue, IntValue, PushValue, Token, WordValue, ParseError, ParsingError,
+    LiteralErrorKind, DocumentationType
 };
 
 grammar<'input>(
     source_file: &Arc<SourceFile>,
     interned: &mut BTreeSet<Arc<str>>,
+    felt_type: &Arc<types::ArrayType>,
     _marker: PhantomData<&'input str>
 );
 
@@ -31,8 +32,6 @@ extern {
 
     enum Token<'input> {
         "!" => Token::Bang,
-        "(" => Token::Lparen,
-        ")" => Token::Rparen,
         "*" => Token::Star,
         "+" => Token::Plus,
         "," => Token::Comma,
@@ -40,14 +39,23 @@ extern {
         "->" => Token::Rstab,
         "/" => Token::Slash,
         "//" => Token::SlashSlash,
+        ";" => Token::Semicolon,
+        ":" => Token::Colon,
         "::" => Token::ColonColon,
         "=" => Token::Equal,
         "." => Token::Dot,
         "@" => Token::At,
+        "<" => Token::Langle,
+        ">" => Token::Rangle,
+        "{" => Token::Lbrace,
+        "}" => Token::Rbrace,
         "[" => Token::Lbracket,
         "]" => Token::Rbracket,
+        "(" => Token::Lparen,
+        ")" => Token::Rparen,
         ".." => Token::Range,
         "add" => Token::Add,
+        "addrspace" => Token::Addrspace,
         "adv" => Token::Adv,
         "adv_map" => Token::AdvMap,
         "insert_hdword" => Token::InsertHdword,
@@ -69,6 +77,8 @@ extern {
         "assert_eq" => Token::AssertEq,
         "assert_eqw" => Token::AssertEqw,
         "begin" => Token::Begin,
+        "breakpoint" => Token::Breakpoint,
+        "byte" => Token::Byte,
         "caller" => Token::Caller,
         "call" => Token::Call,
         "cdrop" => Token::Cdrop,
@@ -78,7 +88,6 @@ extern {
         "cswap" => Token::Cswap,
         "cswapw" => Token::Cswapw,
         "debug" => Token::Debug,
-        "breakpoint" => Token::Breakpoint,
         "div" => Token::Div,
         "drop" => Token::Drop,
         "dropw" => Token::Dropw,
@@ -89,6 +98,7 @@ extern {
         "else" => Token::Else,
         "emit" => Token::Emit,
         "end" => Token::End,
+        "enum" => Token::Enum,
         "eq" => Token::Eq,
         "eqw" => Token::Eqw,
         "ext2add" => Token::Ext2Add,
@@ -99,10 +109,12 @@ extern {
         "ext2sub" => Token::Ext2Sub,
         "err" => Token::Err,
         "exec" => Token::Exec,
+        "event" => Token::Event,
         "exp" => Token::Exp,
         "exp.u" => Token::ExpU,
         "export" => Token::Export,
         "false" => Token::False,
+        "felt" => Token::Felt,
         "fri_ext2fold4" => Token::FriExt2Fold4,
         "gt" => Token::Gt,
         "gte" => Token::Gte,
@@ -110,6 +122,12 @@ extern {
         "has_mapkey" => Token::HasMapkey,
         "hperm" => Token::Hperm,
         "hmerge" => Token::Hmerge,
+        "i1" => Token::I1,
+        "i8" => Token::I8,
+        "i16" => Token::I16,
+        "i32" => Token::I32,
+        "i64" => Token::I64,
+        "i128" => Token::I128,
         "if" => Token::If,
         "ilog2" => Token::ILog2,
         "inv" => Token::Inv,
@@ -150,6 +168,8 @@ extern {
         "pow2" => Token::Pow2,
         "proc" => Token::Proc,
         "procref" => Token::Procref,
+        "ptr" => Token::Ptr,
+        "pub" => Token::Pub,
         "push" => Token::Push,
         "horner_eval_base" => Token::HornerBase,
         "horner_eval_ext" => Token::HornerExt,
@@ -158,6 +178,7 @@ extern {
         "reversedw" => Token::Reversedw,
         "sdepth" => Token::Sdepth,
         "stack" => Token::Stack,
+        "struct" => Token::Struct,
         "sub" => Token::Sub,
         "swap" => Token::Swap,
         "swapw" => Token::Swapw,
@@ -165,7 +186,11 @@ extern {
         "syscall" => Token::Syscall,
         "trace" => Token::Trace,
         "true" => Token::True,
+        "type" => Token::Type,
         "use" => Token::Use,
+        "u8" => Token::U8,
+        "u16" => Token::U16,
+        "u32" => Token::U32,
         "u32and" => Token::U32And,
         "u32assert" => Token::U32Assert,
         "u32assert2" => Token::U32Assert2,
@@ -205,10 +230,11 @@ extern {
         "u32wrapping_mul" => Token::U32WrappingMul,
         "u32wrapping_sub" => Token::U32WrappingSub,
         "u32xor" => Token::U32Xor,
+        "u64" => Token::U64,
+        "u128" => Token::U128,
         "while" => Token::While,
-        "xor" => Token::Xor,
         "word" => Token::Word,
-        "event" => Token::Event,
+        "xor" => Token::Xor,
         EOF => Token::Eof,
         bare_ident => Token::Ident(<&'input str>),
         bin_value => Token::BinValue(<BinEncodedValue>),
@@ -216,6 +242,7 @@ extern {
         const_ident => Token::ConstantIdent(<&'input str>),
         doc_comment => Token::DocComment(<DocumentationType>),
         hex_value => Token::HexValue(<IntValue>),
+        hex_word => Token::HexWord(<WordValue>),
         quoted_ident => Token::QuotedIdent(<&'input str>),
         quoted_string => Token::QuotedString(<&'input str>),
         uint => Token::Int(<u64>),
@@ -229,6 +256,24 @@ CommaDelimited<T>: Vec<T> = {
     <mut v:(<T> ",")*> <e:T> => {
         v.push(e);
         v
+    }
+};
+
+// comma-delimited with at least one element, with optional trailing comma
+#[inline]
+CommaDelimitedAllowTrailing<T>: Vec<T> = {
+    <mut v:(<T> ",")+> <e:T?> => {
+        if let Some(e) = e {
+            v.push(e);
+        }
+        v
+    },
+
+    <e:T?> => {
+        match e {
+            Some(e) => vec![e],
+            None => vec![],
+        }
     }
 };
 
@@ -260,6 +305,7 @@ pub Forms: Vec<Form> = {
 
 Form: Form = {
     Doc,
+    TypeDecl,
     Import,
     Const,
     AdvMap,
@@ -280,8 +326,260 @@ Doc: Form = {
     }
 }
 
+TypeDecl: Form = {
+    <l:@L> "type" <name:TypeName> "=" <ty:TypeExpr> <r:@R> => {
+        let span = span!(source_file.id(), l, r);
+        Form::Type(TypeAlias::new(name, ty).with_span(span))
+    },
+
+    <l:@L> "enum" <name:TypeName> ":" <repr:IntType> "{" <variants:CommaDelimitedAllowTrailing<EnumVariant>> "}" <r:@R> => {
+        let span = span!(source_file.id(), l, r);
+        let mut vs = Vec::with_capacity(variants.len());
+        let mut next = ConstantExpr::Int(Span::new(span, IntValue::U8(0)));
+        for (span, name, discriminant) in variants {
+            match discriminant {
+                Some(discriminant) => {
+                    match discriminant {
+                        ConstantExpr::Int(value) => {
+                            vs.push(Variant::new(name.clone(), ConstantExpr::Int(value)).with_span(span));
+                            next = ConstantExpr::BinaryOp {
+                                span,
+                                op: ConstantOp::Add,
+                                lhs: Box::new(ConstantExpr::Var(name)),
+                                rhs: Box::new(ConstantExpr::Int(Span::new(span, IntValue::U8(1)))),
+                            };
+                        }
+                        expr => {
+                            vs.push(Variant::new(name.clone(), expr).with_span(span));
+                            next = ConstantExpr::BinaryOp {
+                                span,
+                                op: ConstantOp::Add,
+                                lhs: Box::new(ConstantExpr::Var(name)),
+                                rhs: Box::new(ConstantExpr::Int(Span::new(span, IntValue::U8(1)))),
+                            };
+                        }
+                    }
+                }
+                None => {
+                    let discriminant = core::mem::replace(&mut next, ConstantExpr::BinaryOp {
+                        span,
+                        op: ConstantOp::Add,
+                        lhs: Box::new(ConstantExpr::Var(name.clone())),
+                        rhs: Box::new(ConstantExpr::Int(Span::new(span, IntValue::U8(1)))),
+                    });
+                    vs.push(Variant::new(name, discriminant).with_span(span));
+                }
+            }
+        }
+        Form::Enum(EnumType::new(name, repr, vs).with_span(span))
+    }
+}
+
+EnumVariant: (SourceSpan, Ident, Option<ConstantExpr>) = {
+    <l:@L> <name:ConstantName> <discriminant:("=" <ConstantArithmeticExpr>)?> <r:@R> => {
+        let span = span!(source_file.id(), l, r);
+        (span, name, discriminant)
+    }
+}
+
+TypeExpr: TypeExpr = {
+    <l:@L> <t:PrimitiveType> <r:@R> => TypeExpr::Primitive(Span::new(span!(source_file.id(), l, r), t)),
+    <PointerType> => TypeExpr::Ptr(<>),
+    <ArrayType> => TypeExpr::Array(<>),
+    <StructType> => TypeExpr::Struct(<>),
+    <TypeName> => TypeExpr::Ref(<>),
+}
+
+PointerType: PointerType = {
+    <l:@L> "ptr" "<" <pointee:TypeExpr> <addrspace:("," "addrspace" "(" <AddressSpace> ")")?> ">" <r:@R> => {
+        let span = span!(source_file.id(), l, r);
+        let ty = PointerType::new(pointee).with_span(span);
+        if let Some(addrspace) = addrspace {
+            ty.with_address_space(addrspace)
+        } else {
+            ty
+        }
+    }
+}
+
+#[inline]
+AddressSpace: AddressSpace = {
+    "byte" => AddressSpace::Byte,
+    "felt" => AddressSpace::Element,
+}
+
+ArrayType: ArrayType = {
+    <l:@L> "[" <elem:TypeExpr> ";" <arity:uint> "]" <r:@R> =>? {
+        let span = span!(source_file.id(), l, r);
+        let arity = usize::try_from(arity)
+            .map_err(|error| ParseError::User {
+                error: ParsingError::ImmediateOutOfRange {
+                    span, range: 0..(u32::MAX as usize)
+                }
+            })?;
+        Ok(ArrayType {
+            span,
+            elem: Box::new(elem),
+            arity,
+        })
+    }
+}
+
+StructType: StructType = {
+    <l:@L> "struct" <repr:Annotation?> "{" <fields:CommaDelimitedAllowTrailing<StructField>> "}" <r:@R> =>? {
+        use crate::ast::types::TypeRepr;
+
+        let span = span!(source_file.id(), l, r);
+
+        // Expecting one of:
+        //
+        // * @packed
+        // * @transparent
+        // * @bigendian
+        // * @align(ALIGN)
+        let repr = match repr {
+            None => Span::new(span, TypeRepr::Default),
+            Some(repr) => match repr {
+                Attribute::Marker(ref id) => match id.as_str() {
+                    "packed" => Span::new(id.span(), TypeRepr::packed(1)),
+                    "transparent" => Span::new(id.span(), TypeRepr::Transparent),
+                    "bigendian" => Span::new(id.span(), TypeRepr::BigEndian),
+                    "align" => return Err(ParseError::User {
+                        error: ParsingError::InvalidStructRepr {
+                            span: repr.span(),
+                            message: "you must specify an alignment here, e.g. 'align(16)'".to_string(),
+                        }
+                    }),
+                    _ => return Err(ParseError::User {
+                        error: ParsingError::InvalidStructAnnotation {
+                            span: id.span(),
+                        }
+                    }),
+                },
+                Attribute::List(meta) => match meta.name.as_str() {
+                    "align" => {
+                        if meta.len() != 1 {
+                            return Err(ParseError::User {
+                                error: ParsingError::InvalidStructRepr {
+                                    span: meta.span(),
+                                    message: "expected a single element in this meta list, e.g. 'align(16)'".to_string(),
+                                }
+                            });
+                        }
+                        match &meta.items[0] {
+                            MetaExpr::Int(align) => {
+                                let raw_align = align.as_int();
+                                if raw_align < 1 || raw_align > (u16::MAX as u64) {
+                                    return Err(ParseError::User {
+                                        error: ParsingError::InvalidStructRepr {
+                                            span: align.span(),
+                                            message: "invalid alignment, expected a value in the range 1..=65535".to_string(),
+                                        }
+                                    });
+                                }
+                                Span::new(meta.span(), TypeRepr::align(raw_align as u16))
+                            }
+                            expr => {
+                                return Err(ParseError::User {
+                                    error: ParsingError::InvalidStructRepr {
+                                        span: expr.span(),
+                                        message: "invalid alignment expresssion, expected an integer".to_string(),
+                                    }
+                                });
+                            }
+                        }
+                    },
+                    _ => return Err(ParseError::User {
+                        error: ParsingError::InvalidStructAnnotation {
+                            span: meta.span(),
+                        }
+                    }),
+                }
+                Attribute::KeyValue(meta) => {
+                    return Err(ParseError::User {
+                        error: ParsingError::InvalidStructAnnotation {
+                            span: meta.span(),
+                        }
+                    });
+                }
+            },
+        };
+        Ok(StructType {
+            span,
+            repr,
+            fields,
+        })
+    },
+}
+
+StructField: StructField = {
+    <l:@L> <name:BareIdent> ":" <ty:TypeExpr> <r:@R> => {
+        let span = span!(source_file.id(), l, r);
+        StructField {
+            span,
+            name,
+            ty,
+        }
+    }
+}
+
+FunctionType: FunctionType = {
+    <l:@L> "(" <args:CommaDelimitedAllowTrailing<FunctionParamType>> ")" <results:("->" <FunctionResultType>)?> <r:@R> => {
+        let span = span!(source_file.id(), l, r);
+        FunctionType::new(types::CallConv::Fast, args, results.unwrap_or_default()).with_span(span)
+    }
+}
+
+FunctionParamType: TypeExpr = {
+    <l:@L> <_param:bare_ident> ":" <t:TypeExpr> <r:@R> => t,
+}
+
+FunctionResultType: Vec<TypeExpr> = {
+    "(" <CommaDelimitedAllowTrailing<TypeExpr>> ")" => <>,
+    <TypeExpr> => vec![<>],
+}
+
+#[inline]
+PrimitiveType: Type = {
+    IntType,
+    "word" => Type::Array(Arc::clone(felt_type)),
+}
+
+#[inline]
+IntType: Type = {
+    "i1" => Type::I1,
+    "i8" => Type::I8,
+    "i16" => Type::I16,
+    "i32" => Type::I32,
+    "i64" => Type::I64,
+    "i128" => Type::I128,
+    "u8" => Type::U8,
+    "u16" => Type::U16,
+    "u32" => Type::U32,
+    "u64" => Type::U64,
+    "u128" => Type::U128,
+    "felt" => Type::Felt,
+}
+
+#[inline]
+TypeName: Ident = {
+    <l:@L> <name:bare_ident> <r:@R> =>? {
+        let name = interned.get(name).cloned().unwrap_or_else(|| {
+            let name = Arc::<str>::from(name.to_string().into_boxed_str());
+            interned.insert(name.clone());
+            name
+        });
+        let span = span!(source_file.id(), l, r);
+        Ident::validate(&name)
+            .map_err(|error| ParseError::User {
+                error: ParsingError::InvalidIdentifier { error, span },
+            })?;
+        Ok(Ident::from_raw_parts(Span::new(span, name)))
+    },
+}
+
 Import: Form = {
-    <l:@L> "use" "." <path:MaybeQualifiedPath> <alias:("->" <BareIdent>)?> <r:@R> =>? {
+    <l:@L> "use" "."? <path:MaybeQualifiedPath> <alias:("->" <BareIdent>)?> <r:@R> =>? {
         let span = span!(source_file.id(), l, r);
         if path.num_components() == 1 {
             return Err(ParseError::User {
@@ -294,7 +592,7 @@ Import: Form = {
 }
 
 Const: Form = {
-    <l:@L> "const" "." <name:ConstantName> "=" <value:ConstantExpr> <r:@R> => {
+    <l:@L> "const" "."? <name:ConstantName> "=" <value:ConstantExpr> <r:@R> => {
         Form::Constant(Constant::new(
             span!(source_file.id(), l, r),
             name,
@@ -304,19 +602,14 @@ Const: Form = {
 }
 
 MaybeAdvMapKey: Option<Span<WordValue>> = {
-    <l:@L> "(" <value:IntValue> ")" <r:@R> =>? {
-        match value {
-            IntValue::Word(word) => Ok(Some(Span::new(span!(source_file.id(), l, r), word))),
-            _ => {
-                Err(ParseError::User { error: ParsingError::InvalidAdvMapKey { span: span!(source_file.id(), l, r) } })
-            }
-        }
+    <l:@L> "(" <value:WordValue> ")" <r:@R> => {
+        Some(Span::new(span!(source_file.id(), l, r), value))
     },
     => None
 }
 
 AdvMap: Form = {
-    <l:@L> "adv_map" "." <name:ConstantName> <key:MaybeAdvMapKey> "=" "[" <value:CommaDelimited<Felt>> "]" <r:@R> => {
+    <l:@L> "adv_map" "."? <name:ConstantName> <key:MaybeAdvMapKey> "=" "[" <value:CommaDelimited<Felt>> "]" <r:@R> => {
         Form::AdviceMapEntry(AdviceMapEntry::new(
             span!(source_file.id(), l, r),
             name,
@@ -336,6 +629,7 @@ Proc: Form = {
     <annotations:Annotation*> <mut proc:ProcedureDef> =>? {
         use alloc::collections::btree_map::Entry;
         let attributes = proc.attributes_mut();
+        let mut cc = None;
         for attr in annotations {
             match attr {
                 Attribute::KeyValue(kv) => {
@@ -371,6 +665,45 @@ Proc: Form = {
                         }
                     }
                 }
+                Attribute::List(list) if list.name() == "callconv" && list.len() == 1 => {
+                    match attributes.entry(list.id()) {
+                        AttributeSetEntry::Vacant(entry) => {
+                            let valid_cc = match &list.as_slice()[0] {
+                                MetaExpr::Ident(cc) => match cc.as_str() {
+                                    "fast" => Some(types::CallConv::Fast),
+                                    "C" => Some(types::CallConv::SystemV),
+                                    "wasm" => Some(types::CallConv::Wasm),
+                                    "canon-lift" => Some(types::CallConv::CanonLift),
+                                    "canon-lower" => Some(types::CallConv::CanonLower),
+                                    _ => None,
+                                },
+                                MetaExpr::String(cc) => match cc.as_str() {
+                                    "fast" => Some(types::CallConv::Fast),
+                                    "C" => Some(types::CallConv::SystemV),
+                                    "wasm" => Some(types::CallConv::Wasm),
+                                    "canon-lift" => Some(types::CallConv::CanonLift),
+                                    "canon-lower" => Some(types::CallConv::CanonLower),
+                                    _ => None,
+                                },
+                                _ => None,
+                            };
+                            if valid_cc.is_some() {
+                                cc = valid_cc;
+                                entry.insert(Attribute::List(list));
+                            } else {
+                                return Err(ParseError::User {
+                                    error: ParsingError::UnrecognizedCallConv { span: list.span() },
+                                });
+                            }
+                        }
+                        AttributeSetEntry::Occupied(entry) => {
+                            let prev_attr = entry.get();
+                            return Err(ParseError::User {
+                                error: ParsingError::AttributeConflict { span: list.span(), prev: prev_attr.span() },
+                            });
+                        }
+                    }
+                }
                 attr => {
                     match attributes.entry(attr.id()) {
                         AttributeSetEntry::Vacant(entry) => {
@@ -386,6 +719,15 @@ Proc: Form = {
                 }
             }
         }
+
+        if let Some(cc) = cc {
+            // Strip the 'callconv' attribute now that it is no longer needed
+            attributes.remove("callconv");
+            if let Some(signature) = proc.signature_mut() {
+                signature.cc = cc;
+            }
+        }
+
         Ok(Form::Procedure(Export::Procedure(proc)))
     },
     AliasDef => Form::Procedure(Export::Alias(<>)),
@@ -393,7 +735,7 @@ Proc: Form = {
 
 #[inline]
 ProcedureDef: Procedure = {
-    <l:@L> <visibility:Visibility> "." <name:ProcedureName> <num_locals:MaybeParam<U16>> <body:Block> "end" <r:@R> =>? {
+    <l:@L> <visibility:Visibility> "."? <name:ProcedureName> <num_locals:MaybeParam<U16>> <ty:FunctionType?> <body:Block> "end" <r:@R> =>? {
         let num_locals = num_locals.unwrap_or(0);
         let procedure = Procedure::new(
             span!(source_file.id(), l, r),
@@ -402,13 +744,17 @@ ProcedureDef: Procedure = {
             num_locals,
             body
         );
-        Ok(procedure)
+        Ok(if let Some(ty) = ty {
+            procedure.with_signature(ty)
+        } else {
+            procedure
+        })
     },
 }
 
 #[inline]
 AliasDef: ProcedureAlias = {
-    <l:@L> "export" "." <name:MaybeQualifiedProcedurePath> <alias:("->" <ProcedureName>)?> <r:@R> =>? {
+    <l:@L> <_pub:PubVisibility> "."? <name:MaybeQualifiedProcedurePath> <alias:("->" <ProcedureName>)?> <r:@R> =>? {
         let span = span!(source_file.id(), l, r);
         let alias = match name {
             InvocationTarget::ProcedureName(_) =>  return Err(ParseError::User {
@@ -455,6 +801,13 @@ AliasDef: ProcedureAlias = {
 Visibility: Visibility = {
     "proc" => Visibility::Private,
     "export" => Visibility::Public,
+    "pub" "."? "proc" => Visibility::Public,
+}
+
+#[inline]
+PubVisibility: Visibility = {
+    "export" => Visibility::Public,
+    "pub" "."? "proc" => Visibility::Public,
 }
 
 // ANNOTATIONS
@@ -505,6 +858,7 @@ MetaExpr: MetaExpr = {
     BareIdent => MetaExpr::Ident(<>),
     QuotedString => MetaExpr::String(<>),
     <l:@L> <value:IntValue> <r:@R> => MetaExpr::Int(Span::new(span!(source_file.id(), l, r), value)),
+    <l:@L> <value:WordValue> <r:@R> => MetaExpr::Word(Span::new(span!(source_file.id(), l, r), value)),
 }
 
 #[inline]
@@ -812,50 +1166,50 @@ FoldableInstWithFeltImmediate: SmallOpsVec = {
             None => smallvec![Op::Inst(Span::new(span, Instruction::Neq))],
         }
     },
-    <l:@L> "lt" <imm:MaybeImm<Felt>> <r:@R> => {
+    <l:@L> "lt" <imm:MaybeImm<IntValue>> <r:@R> => {
         let span = span!(source_file.id(), l, r);
         match imm {
             Some(imm) => {
-                match imm {
-                    Immediate::Constant(name) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Constant(name)))), Op::Inst(Span::new(span, Instruction::Lt))],
-                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::Felt(value.into_inner())))))), Op::Inst(Span::new(span, Instruction::Lt))],
-                }
+                smallvec![
+                    Op::Inst(Span::new(span, Instruction::Push(imm.map(PushValue::Int)))),
+                    Op::Inst(Span::new(span, Instruction::Lt)),
+                ]
             }
             None => smallvec![Op::Inst(Span::new(span, Instruction::Lt))],
         }
     },
-    <l:@L> "lte" <imm:MaybeImm<Felt>> <r:@R> => {
+    <l:@L> "lte" <imm:MaybeImm<IntValue>> <r:@R> => {
         let span = span!(source_file.id(), l, r);
         match imm {
             Some(imm) => {
-                match imm {
-                    Immediate::Constant(name) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Constant(name)))), Op::Inst(Span::new(span, Instruction::Lte))],
-                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::Felt(value.into_inner())))))), Op::Inst(Span::new(span, Instruction::Lte))],
-                }
+                smallvec![
+                    Op::Inst(Span::new(span, Instruction::Push(imm.map(PushValue::Int)))),
+                    Op::Inst(Span::new(span, Instruction::Lte)),
+                ]
             }
             None => smallvec![Op::Inst(Span::new(span, Instruction::Lte))],
         }
     },
-    <l:@L> "gt" <imm:MaybeImm<Felt>> <r:@R> => {
+    <l:@L> "gt" <imm:MaybeImm<IntValue>> <r:@R> => {
         let span = span!(source_file.id(), l, r);
         match imm {
             Some(imm) => {
-                match imm {
-                    Immediate::Constant(name) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Constant(name)))), Op::Inst(Span::new(span, Instruction::Gt))],
-                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::Felt(value.into_inner())))))), Op::Inst(Span::new(span, Instruction::Gt))],
-                }
+                smallvec![
+                    Op::Inst(Span::new(span, Instruction::Push(imm.map(PushValue::Int)))),
+                    Op::Inst(Span::new(span, Instruction::Gt)),
+                ]
             }
             None => smallvec![Op::Inst(Span::new(span, Instruction::Gt))],
         }
     },
-    <l:@L> "gte" <imm:MaybeImm<Felt>> <r:@R> => {
+    <l:@L> "gte" <imm:MaybeImm<IntValue>> <r:@R> => {
         let span = span!(source_file.id(), l, r);
         match imm {
             Some(imm) => {
-                match imm {
-                    Immediate::Constant(name) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Constant(name)))), Op::Inst(Span::new(span, Instruction::Gte))],
-                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::Felt(value.into_inner())))))), Op::Inst(Span::new(span, Instruction::Gte))],
-                }
+                smallvec![
+                    Op::Inst(Span::new(span, Instruction::Push(imm.map(PushValue::Int)))),
+                    Op::Inst(Span::new(span, Instruction::Gte)),
+                ]
             }
             None => smallvec![Op::Inst(Span::new(span, Instruction::Gte))],
         }
@@ -880,7 +1234,7 @@ FoldableInstWithFeltImmediate: SmallOpsVec = {
     <l:@L> "mul" <imm:MaybeImm<Felt>> <r:@R> => {
         let span = span!(source_file.id(), l, r);
         match imm {
-            Some(imm) if imm == Felt::ZERO => smallvec![Op::Inst(Span::new(span, Instruction::Drop)), Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U8(0))))))],
+            Some(imm) if imm == Felt::ZERO => smallvec![Op::Inst(Span::new(span, Instruction::Drop)), Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U8(0).into())))))],
             Some(imm) if imm == Felt::ONE => smallvec![],
             Some(imm) => smallvec![Op::Inst(Span::new(span, Instruction::MulImm(imm)))],
             None => smallvec![Op::Inst(Span::new(span, Instruction::Mul))],
@@ -927,11 +1281,11 @@ FoldableInstWithU32Immediate: SmallOpsVec = {
     <l:@L> "u32and" <imm:MaybeImm<U32>> <r:@R> => {
         let span = span!(source_file.id(), l, r);
         match imm {
-            Some(imm) if imm == 0 => smallvec![Op::Inst(Span::new(span, Instruction::Drop)), Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U8(0))))))],
+            Some(imm) if imm == 0 => smallvec![Op::Inst(Span::new(span, Instruction::Drop)), Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U8(0).into())))))],
             Some(imm) => {
                 match imm {
                     Immediate::Constant(name) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Constant(name)))), Op::Inst(Span::new(span, Instruction::U32And))],
-                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U32(value.into_inner())))))), Op::Inst(Span::new(span, Instruction::U32And))],
+                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U32(value.into_inner()).into()))))), Op::Inst(Span::new(span, Instruction::U32And))],
                 }
             }
             None => smallvec![Op::Inst(Span::new(span, Instruction::U32And))],
@@ -944,7 +1298,7 @@ FoldableInstWithU32Immediate: SmallOpsVec = {
             Some(imm) => {
                 match imm {
                     Immediate::Constant(name) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Constant(name)))), Op::Inst(Span::new(span, Instruction::U32Or))],
-                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U32(value.into_inner())))))), Op::Inst(Span::new(span, Instruction::U32Or))],
+                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U32(value.into_inner()).into()))))), Op::Inst(Span::new(span, Instruction::U32Or))],
                 }
             }
             None => smallvec![Op::Inst(Span::new(span, Instruction::U32Or))],
@@ -957,7 +1311,7 @@ FoldableInstWithU32Immediate: SmallOpsVec = {
             Some(imm) => {
                 match imm {
                     Immediate::Constant(name) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Constant(name)))), Op::Inst(Span::new(span, Instruction::U32Xor))],
-                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U32(value.into_inner())))))), Op::Inst(Span::new(span, Instruction::U32Xor))],
+                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U32(value.into_inner()).into()))))), Op::Inst(Span::new(span, Instruction::U32Xor))],
                 }
             }
             None => smallvec![Op::Inst(Span::new(span, Instruction::U32Xor))],
@@ -969,7 +1323,7 @@ FoldableInstWithU32Immediate: SmallOpsVec = {
             Some(imm) => {
                 match imm {
                     Immediate::Constant(name) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Constant(name)))), Op::Inst(Span::new(span, Instruction::U32Not))],
-                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U32(value.into_inner())))))), Op::Inst(Span::new(span, Instruction::U32Not))],
+                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U32(value.into_inner()).into()))))), Op::Inst(Span::new(span, Instruction::U32Not))],
                 }
             }
             None => smallvec![Op::Inst(Span::new(span, Instruction::U32Not))],
@@ -994,7 +1348,7 @@ FoldableInstWithU32Immediate: SmallOpsVec = {
     <l:@L> "u32wrapping_mul" <imm:MaybeImm<U32>> <r:@R> => {
         let span = span!(source_file.id(), l, r);
         match imm {
-            Some(imm) if imm == 0 => smallvec![Op::Inst(Span::new(span, Instruction::Drop)), Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U8(0))))))],
+            Some(imm) if imm == 0 => smallvec![Op::Inst(Span::new(span, Instruction::Drop)), Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U8(0).into())))))],
             Some(imm) if imm == 1 => smallvec![],
             Some(imm) => smallvec![Op::Inst(Span::new(span, Instruction::U32WrappingMulImm(imm)))],
             None => smallvec![Op::Inst(Span::new(span, Instruction::U32WrappingMul))],
@@ -1059,7 +1413,7 @@ FoldableInstWithU32Immediate: SmallOpsVec = {
             Some(imm) => {
                 match imm {
                     Immediate::Constant(name) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Constant(name)))), Op::Inst(Span::new(span, Instruction::U32Lt))],
-                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U32(value.into_inner())))))), Op::Inst(Span::new(span, Instruction::U32Lt))],
+                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U32(value.into_inner()).into()))))), Op::Inst(Span::new(span, Instruction::U32Lt))],
                 }
             }
             None => smallvec![Op::Inst(Span::new(span, Instruction::U32Lt))],
@@ -1071,7 +1425,7 @@ FoldableInstWithU32Immediate: SmallOpsVec = {
             Some(imm) => {
                 match imm {
                     Immediate::Constant(name) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Constant(name)))), Op::Inst(Span::new(span, Instruction::U32Lte))],
-                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U32(value.into_inner())))))), Op::Inst(Span::new(span, Instruction::U32Lte))],
+                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U32(value.into_inner()).into()))))), Op::Inst(Span::new(span, Instruction::U32Lte))],
                 }
             }
             None => smallvec![Op::Inst(Span::new(span, Instruction::U32Lte))],
@@ -1083,7 +1437,7 @@ FoldableInstWithU32Immediate: SmallOpsVec = {
             Some(imm) => {
                 match imm {
                     Immediate::Constant(name) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Constant(name)))), Op::Inst(Span::new(span, Instruction::U32Gt))],
-                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U32(value.into_inner())))))), Op::Inst(Span::new(span, Instruction::U32Gt))],
+                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U32(value.into_inner()).into()))))), Op::Inst(Span::new(span, Instruction::U32Gt))],
                 }
             }
             None => smallvec![Op::Inst(Span::new(span, Instruction::U32Gt))],
@@ -1095,7 +1449,7 @@ FoldableInstWithU32Immediate: SmallOpsVec = {
             Some(imm) => {
                 match imm {
                     Immediate::Constant(name) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Constant(name)))), Op::Inst(Span::new(span, Instruction::U32Gte))],
-                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U32(value.into_inner())))))), Op::Inst(Span::new(span, Instruction::U32Gte))],
+                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U32(value.into_inner()).into()))))), Op::Inst(Span::new(span, Instruction::U32Gte))],
                 }
             }
             None => smallvec![Op::Inst(Span::new(span, Instruction::U32Gte))],
@@ -1107,7 +1461,7 @@ FoldableInstWithU32Immediate: SmallOpsVec = {
             Some(imm) => {
                 match imm {
                     Immediate::Constant(name) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Constant(name)))), Op::Inst(Span::new(span, Instruction::U32Min))],
-                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U32(value.into_inner())))))), Op::Inst(Span::new(span, Instruction::U32Min))],
+                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U32(value.into_inner()).into()))))), Op::Inst(Span::new(span, Instruction::U32Min))],
                 }
             }
             None => smallvec![Op::Inst(Span::new(span, Instruction::U32Min))],
@@ -1119,7 +1473,7 @@ FoldableInstWithU32Immediate: SmallOpsVec = {
             Some(imm) => {
                 match imm {
                     Immediate::Constant(name) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Constant(name)))), Op::Inst(Span::new(span, Instruction::U32Max))],
-                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U32(value.into_inner())))))), Op::Inst(Span::new(span, Instruction::U32Max))],
+                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U32(value.into_inner()).into()))))), Op::Inst(Span::new(span, Instruction::U32Max))],
                 }
             }
             None => smallvec![Op::Inst(Span::new(span, Instruction::U32Max))],
@@ -1276,7 +1630,7 @@ InstWithBitSizeImmediate: Instruction = {
 }
 
 Push: SmallOpsVec = {
-    <l:@L> "push" "." <imm_value:IntOrHexImm> "[" <i:uint> "]" <r:@R> => {
+    <l:@L> "push" "." <imm_value:WordImm> "[" <i:uint> "]" <r:@R> => {
         smallvec![Op::Inst(Span::new(
             span!(source_file.id(), l, r),
             Instruction::PushSlice(
@@ -1286,13 +1640,20 @@ Push: SmallOpsVec = {
         ))]
     },
 
-    <l:@L> "push" "." <imm_value:IntOrHexImm> "[" <l_range:uint> ".." <r_range:uint> "]" <r:@R> => {
+    <l:@L> "push" "." <imm_value:WordImm> "[" <l_range:uint> ".." <r_range:uint> "]" <r:@R> => {
         smallvec![Op::Inst(Span::new(
             span!(source_file.id(), l, r),
             Instruction::PushSlice(
                 imm_value,
                 Range { start: l_range as usize, end: r_range as usize }
             )
+        ))]
+    },
+
+    <l:@L> "push" "." <imm_value:WordLiteral> <r:@R> => {
+        smallvec![Op::Inst(Span::new(
+            span!(source_file.id(), l, r),
+            Instruction::Push(Immediate::Value(imm_value.map(PushValue::Word)))
         ))]
     },
 
@@ -1307,7 +1668,7 @@ Push: SmallOpsVec = {
             };
             Op::Inst(Span::new(span, match imm {
                 Immediate::Constant(name) => Instruction::Push(Immediate::Constant(name)),
-                Immediate::Value(value) => Instruction::Push(Immediate::Value(value))
+                Immediate::Value(value) => Instruction::Push(Immediate::Value(value.map(PushValue::Int)))
             }))
         }).collect::<SmallOpsVec>();
         if ops.len() > 16 {
@@ -1407,13 +1768,8 @@ U32: u32 = {
 }
 
 MastRoot: Span<Word> = {
-    <l:@L> <value:hex_value> <r:@R> =>? {
-        match value {
-            IntValue::Word(word) => Ok(Span::new(span!(source_file.id(), l, r), Word::from(word.0))),
-            _ => {
-                Err(ParseError::User { error: ParsingError::InvalidMastRoot { span: span!(source_file.id(), l, r) } })
-            }
-        }
+    <l:@L> <value:hex_word> <r:@R> => {
+        Span::new(span!(source_file.id(), l, r), Word::from(value.0))
     }
 }
 
@@ -1469,13 +1825,16 @@ BitSize: u8 = {
 
 IntOrHexImm: Immediate<IntValue> = {
     <l:@L> <value:IntValue> <r:@R> => Immediate::Value(Span::new(span!(source_file.id(), l, r), value)),
-    <name:ConstantName> => Immediate::Constant(<>),
+    <ConstantName> => Immediate::Constant(<>),
 }
 
 IntValue: IntValue = {
     <l:@L> <n:uint> <r:@R> =>? {
         if n >= Felt::MODULUS {
-            return Err(ParseError::User { error: ParsingError::InvalidLiteral { span: span!(source_file.id(), l, r), kind: LiteralErrorKind::FeltOverflow } });
+            return Err(ParseError::User { error: ParsingError::InvalidLiteral {
+                span: span!(source_file.id(), l, r),
+                kind: LiteralErrorKind::FeltOverflow
+            } });
         }
         if n <= (u8::MAX as u64) {
             Ok(IntValue::U8(n as u8))
@@ -1488,25 +1847,36 @@ IntValue: IntValue = {
         }
     },
 
-    <l:@L> "[" <v0:Felt> "," <v1:Felt> ","<v2:Felt> ","<v3:Felt> "]" <r:@R> =>? {
-        Ok(IntValue::Word(WordValue([v0,v1,v2,v3])))
-    },
-
     hex_value
 }
 
+WordImm: Immediate<WordValue> = {
+    <l:@L> <value:WordValue> <r:@R> => Immediate::Value(Span::new(span!(source_file.id(), l, r), value.into())),
+    <ConstantName> => Immediate::Constant(<>),
+}
+
+#[inline]
+WordLiteral: Span<WordValue> = {
+    <l:@L> <value:WordValue> <r:@R> => Span::new(span!(source_file.id(), l, r), value),
+}
+
+WordValue: WordValue = {
+    <l:@L> "[" <v0:Felt> "," <v1:Felt> ","<v2:Felt> ","<v3:Felt> "]" <r:@R> => {
+        WordValue([v0,v1,v2,v3])
+    },
+
+    hex_word,
+}
+
+PushImm: Immediate<PushValue> = {
+    <l:@L> <value:WordValue> <r:@R> => Immediate::Value(Span::new(span!(source_file.id(), l, r), value.into())),
+    <l:@L> <value:IntValue> <r:@R> => Immediate::Value(Span::new(span!(source_file.id(), l, r), value.into())),
+    <ConstantName> => Immediate::Constant(<>),
+}
+
+#[inline]
 Felt: Felt = {
-    <l:@L> <value:IntValue> <r:@R> =>? {
-        Ok(match value {
-            IntValue::U8(v) => Felt::new(v as u64),
-            IntValue::U16(v) => Felt::new(v as u64),
-            IntValue::U32(v) => Felt::new(v as u64),
-            IntValue::Felt(v) => v,
-            IntValue::Word(_) => return Err(ParseError::User {
-                error: ParsingError::InvalidHexLiteral { span: span!(source_file.id(), l, r), kind: HexErrorKind::Overflow },
-            }),
-        })
-    }
+    <l:@L> <value:IntValue> <r:@R> => Felt::new(value.as_int()),
 }
 
 // SYMBOLS
@@ -1544,6 +1914,9 @@ QuotedProcedureName: ProcedureName = {
 InvocationTarget: InvocationTarget = {
     <MastRoot> => InvocationTarget::MastRoot(<>),
     MaybeQualifiedProcedurePath,
+    <l:@L> <_invalid:hex_value> <r:@R> =>? Err(ParseError::User {
+        error: ParsingError::InvalidMastRoot { span: span!(source_file.id(), l, r) },
+    }),
 }
 
 MaybeQualifiedProcedurePath: InvocationTarget = {
@@ -1590,16 +1963,6 @@ MaybeQualifiedProcedurePath: InvocationTarget = {
 
 #[inline]
 BareIdent: Ident = {
-    <l:@L> "word" <r:@R> => {
-        let name = interned.get("word").cloned().unwrap_or_else(|| {
-            let name = Arc::<str>::from("word".to_string().into_boxed_str());
-            interned.insert(name.clone());
-            name
-        });
-        let span = span!(source_file.id(), l, r);
-        Ident::from_raw_parts(Span::new(span, name))
-    },
-
     <l:@L> <name:bare_ident> <r:@R> =>? {
         let name = interned.get(name).cloned().unwrap_or_else(|| {
             let name = Arc::<str>::from(name.to_string().into_boxed_str());
@@ -1615,6 +1978,8 @@ BareIdent: Ident = {
     },
 
     OpcodeName,
+
+    TypeId,
 }
 
 MaybeQualifiedPath: Span<LibraryPath> = {
@@ -1837,6 +2202,36 @@ Opcode: &'static str = {
     "xor" => "xor",
 }
 
+TypeId: Ident = {
+    <l:@L> <name:TypeIdStr> <r:@R> => {
+        let name = interned.get(name).cloned().unwrap_or_else(|| {
+            let name = Arc::<str>::from(name.to_string().into_boxed_str());
+            interned.insert(name.clone());
+            name
+        });
+        Ident::from_raw_parts(Span::new(span!(source_file.id(), l, r), name))
+    }
+}
+
+TypeIdStr: &'static str = {
+    "word" => "word",
+    "i1" => "i1",
+    "u8" => "u8",
+    "i8" => "i8",
+    "u16" => "u16",
+    "i16" => "i16",
+    "u32" => "u32",
+    "i32" => "i32",
+    "u64" => "u64",
+    "i64" => "i64",
+    "u128" => "u128",
+    "i128" => "i128",
+    "felt" => "felt",
+    "ptr" => "ptr",
+    "addrspace" => "addrspace",
+    "byte" => "byte",
+}
+
 // CONSTANT EXPRESSIONS
 // ================================================================================================
 
@@ -1864,6 +2259,20 @@ ConstantExpr: ConstantExpr = {
     ConstantExpr100,
 }
 
+ConstantArithmeticExpr: ConstantExpr = {
+    <l:@L> <x:ConstantArithmeticExpr> "+" <y:ConstantArithmeticExpr100> <r:@R> =>? {
+        let expr = ConstantExpr::BinaryOp {  span: span!(source_file.id(), l, r), op: ConstantOp::Add, lhs: Box::new(x), rhs: Box::new(y) };
+        expr.try_fold().map_err(|error| ParseError::User { error })
+    },
+
+    <l:@L> <x:ConstantArithmeticExpr> "-" <y:ConstantArithmeticExpr100> <r:@R> =>? {
+        let expr = ConstantExpr::BinaryOp { span: span!(source_file.id(), l, r), op: ConstantOp::Sub, lhs: Box::new(x), rhs: Box::new(y) };
+        expr.try_fold().map_err(|error| ParseError::User { error })
+    },
+
+    ConstantArithmeticExpr100,
+}
+
 ConstantExpr100: ConstantExpr = {
     <l:@L> <x:ConstantExpr100> "*" <y:Term> <r:@R> =>? {
         let expr = ConstantExpr::BinaryOp { span: span!(source_file.id(), l, r), op: ConstantOp::Mul, lhs: Box::new(x), rhs: Box::new(y) };
@@ -1881,6 +2290,25 @@ ConstantExpr100: ConstantExpr = {
     },
 
     Term
+}
+
+ConstantArithmeticExpr100: ConstantExpr = {
+    <l:@L> <x:ConstantArithmeticExpr100> "*" <y:NumericTerm> <r:@R> =>? {
+        let expr = ConstantExpr::BinaryOp { span: span!(source_file.id(), l, r), op: ConstantOp::Mul, lhs: Box::new(x), rhs: Box::new(y) };
+        expr.try_fold().map_err(|error| ParseError::User { error })
+    },
+
+    <l:@L> <x:ConstantArithmeticExpr100> "/" <y:NumericTerm> <r:@R> =>? {
+        let expr = ConstantExpr::BinaryOp { span: span!(source_file.id(), l, r), op: ConstantOp::Div, lhs: Box::new(x), rhs: Box::new(y) };
+        expr.try_fold().map_err(|error| ParseError::User { error })
+    },
+
+    <l:@L> <x:ConstantArithmeticExpr100> "//" <y:NumericTerm> <r:@R> =>? {
+        let expr = ConstantExpr::BinaryOp { span: span!(source_file.id(), l, r), op: ConstantOp::IntDiv, lhs: Box::new(x), rhs: Box::new(y) };
+        expr.try_fold().map_err(|error| ParseError::User { error })
+    },
+
+    NumericTerm
 }
 
 #[inline]
@@ -1904,17 +2332,25 @@ ConstantName: Ident = {
 Term: ConstantExpr = {
     "(" <ConstantExpr> ")",
 
-    <l:@L> <value:IntValue> <r:@R> =>? {
-        Ok(match value {
-            IntValue::U8(v) => ConstantExpr::Felt(Span::new(span!(source_file.id(), l, r), Felt::new(v as u64))),
-            IntValue::U16(v) => ConstantExpr::Felt(Span::new(span!(source_file.id(), l, r), Felt::new(v as u64))),
-            IntValue::U32(v) => ConstantExpr::Felt(Span::new(span!(source_file.id(), l, r), Felt::new(v as u64))),
-            IntValue::Felt(v) => ConstantExpr::Felt(Span::new(span!(source_file.id(), l, r), v)),
-            IntValue::Word(v) => ConstantExpr::Word(Span::new(span!(source_file.id(), l, r), v))
-        })
+    <l:@L> <value:IntValue> <r:@R> => {
+        ConstantExpr::Int(Span::new(span!(source_file.id(), l, r), value))
     },
 
-    <l:@L> <t:QuotedString> <r:@R> => ConstantExpr::String(t),
+    <l:@L> <value:WordValue> <r:@R> => {
+        ConstantExpr::Word(Span::new(span!(source_file.id(), l, r), value))
+    },
+
+    <QuotedString> => ConstantExpr::String(<>),
+
+    <ConstantName> => ConstantExpr::Var(<>),
+}
+
+NumericTerm: ConstantExpr = {
+    "(" <ConstantArithmeticExpr> ")",
+
+    <l:@L> <value:IntValue> <r:@R> => {
+        ConstantExpr::Int(Span::new(span!(source_file.id(), l, r), value))
+    },
 
     <ConstantName> => ConstantExpr::Var(<>),
 }

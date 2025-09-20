@@ -2,10 +2,9 @@ use alloc::{collections::BTreeSet, string::String};
 use core::fmt;
 
 use miden_debug_types::{SourceSpan, Span, Spanned};
-use midenc_hir_type::FunctionType;
 
 use super::ProcedureName;
-use crate::ast::{Attribute, AttributeSet, Block, DocString, Invoke};
+use crate::ast::{Attribute, AttributeSet, Block, DocString, FunctionType, Invoke};
 
 // PROCEDURE VISIBILITY
 // ================================================================================================
@@ -26,7 +25,7 @@ pub enum Visibility {
 impl fmt::Display for Visibility {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if self.is_exported() {
-            f.write_str("export")
+            f.write_str("pub proc")
         } else {
             f.write_str("proc")
         }
@@ -142,6 +141,11 @@ impl Procedure {
     /// Get the type signature of this procedure, if known
     pub fn signature(&self) -> Option<&FunctionType> {
         self.ty.as_ref()
+    }
+
+    /// Get the type signature of this procedure mutably, if known
+    pub fn signature_mut(&mut self) -> Option<&mut FunctionType> {
+        self.ty.as_mut()
     }
 
     /// Returns the number of locals allocated by this procedure.
@@ -275,9 +279,18 @@ impl crate::prettier::PrettyPrint for Procedure {
         if self.is_entrypoint() {
             doc += const_text("begin");
         } else {
-            doc += display(self.visibility) + const_text(".") + display(&self.name);
+            match self.signature() {
+                Some(sig) if sig.cc != crate::ast::types::CallConv::Fast => {
+                    doc += text(format!("@callconv(\"{}\")", &sig.cc)) + nl();
+                },
+                _ => (),
+            }
+            doc += display(self.visibility) + const_text(" ") + display(&self.name);
             if self.num_locals > 0 {
                 doc += const_text(".") + display(self.num_locals);
+            }
+            if let Some(sig) = self.signature() {
+                doc += sig.render();
             }
         }
 

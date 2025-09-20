@@ -57,4 +57,12 @@ pub enum LinkerError {
         prev_values: Vec<Felt>,
         new_values: Vec<Felt>,
     },
+    #[error("undefined type alias")]
+    #[diagnostic()]
+    UndefinedType {
+        #[label]
+        span: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<SourceFile>>,
+    },
 }

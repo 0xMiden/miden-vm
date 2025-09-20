@@ -59,7 +59,7 @@ impl crate::prettier::PrettyPrint for Import {
     fn render(&self) -> crate::prettier::Document {
         use crate::prettier::*;
 
-        let mut doc = const_text("use") + const_text(".") + display(&self.path);
+        let mut doc = const_text("use") + const_text(" ") + display(&self.path);
         if self.is_aliased() {
             doc += const_text("->") + display(&self.name);
         }

@@ -104,7 +104,7 @@ impl crate::prettier::PrettyPrint for ProcedureAlias {
             .map(|docstring| docstring.render())
             .unwrap_or(Document::Empty);
 
-        doc += const_text("export.");
+        doc += const_text("pub proc ");
         doc += match &self.target {
             target @ AliasTarget::MastRoot(_) => display(format_args!("{}->{}", target, self.name)),
             target => {

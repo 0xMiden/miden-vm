@@ -701,6 +701,7 @@ impl Serializable for TypeSerializer<'_> {
                         target.write_u16(align.get());
                     },
                     TypeRepr::Transparent => target.write_u8(3),
+                    TypeRepr::BigEndian => target.write_u8(4),
                 }
                 target.write_u8(ty.len() as u8);
                 for field in ty.fields() {

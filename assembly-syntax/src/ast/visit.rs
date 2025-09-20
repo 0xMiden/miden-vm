@@ -54,7 +54,11 @@ use core::ops::ControlFlow;
 use miden_debug_types::Span;
 
 use super::immediate::ErrorMsg;
-use crate::{Felt, ast::*, parser::IntValue};
+use crate::{
+    Felt,
+    ast::*,
+    parser::{PushValue, WordValue},
+};
 
 /// Represents an immutable AST visitor, whose "early return" type is `T` (by default `()`).
 ///
@@ -137,8 +141,11 @@ pub trait Visit<T = ()> {
     fn visit_immediate_felt(&mut self, imm: &Immediate<Felt>) -> ControlFlow<T> {
         visit_immediate_felt(self, imm)
     }
-    fn visit_immediate_int_value(&mut self, code: &Immediate<IntValue>) -> ControlFlow<T> {
-        visit_immediate_int_value(self, code)
+    fn visit_immediate_word_value(&mut self, code: &Immediate<WordValue>) -> ControlFlow<T> {
+        visit_immediate_word_value(self, code)
+    }
+    fn visit_immediate_push_value(&mut self, code: &Immediate<PushValue>) -> ControlFlow<T> {
+        visit_immediate_push_value(self, code)
     }
     fn visit_immediate_error_message(&mut self, code: &ErrorMsg) -> ControlFlow<T> {
         visit_immediate_error_message(self, code)
@@ -208,6 +215,12 @@ where
     }
     fn visit_immediate_felt(&mut self, imm: &Immediate<Felt>) -> ControlFlow<T> {
         (**self).visit_immediate_felt(imm)
+    }
+    fn visit_immediate_word_value(&mut self, imm: &Immediate<WordValue>) -> ControlFlow<T> {
+        (**self).visit_immediate_word_value(imm)
+    }
+    fn visit_immediate_push_value(&mut self, imm: &Immediate<PushValue>) -> ControlFlow<T> {
+        (**self).visit_immediate_push_value(imm)
     }
     fn visit_immediate_error_message(&mut self, code: &ErrorMsg) -> ControlFlow<T> {
         (**self).visit_immediate_error_message(code)
@@ -308,7 +321,8 @@ where
         | MTreeVerifyWithError(code) => visitor.visit_immediate_error_message(code),
         AddImm(imm) | SubImm(imm) | MulImm(imm) | DivImm(imm) | ExpImm(imm) | EqImm(imm)
         | NeqImm(imm) => visitor.visit_immediate_felt(imm),
-        Push(imm) | PushSlice(imm, _) => visitor.visit_immediate_int_value(imm),
+        Push(imm) => visitor.visit_immediate_push_value(imm),
+        PushSlice(imm, _) => visitor.visit_immediate_word_value(imm),
         U32WrappingAddImm(imm)
         | U32OverflowingAddImm(imm)
         | U32WrappingSubImm(imm)
@@ -468,9 +482,21 @@ where
     ControlFlow::Continue(())
 }
 
-pub fn visit_immediate_int_value<V, T>(
+#[inline(always)]
+pub fn visit_immediate_word_value<V, T>(
     _visitor: &mut V,
-    _imm: &Immediate<IntValue>,
+    _imm: &Immediate<WordValue>,
+) -> ControlFlow<T>
+where
+    V: ?Sized + Visit<T>,
+{
+    ControlFlow::Continue(())
+}
+
+#[inline(always)]
+pub fn visit_immediate_push_value<V, T>(
+    _visitor: &mut V,
+    _imm: &Immediate<PushValue>,
 ) -> ControlFlow<T>
 where
     V: ?Sized + Visit<T>,
@@ -570,8 +596,11 @@ pub trait VisitMut<T = ()> {
     fn visit_mut_immediate_felt(&mut self, imm: &mut Immediate<Felt>) -> ControlFlow<T> {
         visit_mut_immediate_felt(self, imm)
     }
-    fn visit_mut_immediate_hex(&mut self, imm: &mut Immediate<IntValue>) -> ControlFlow<T> {
-        visit_mut_immediate_hex(self, imm)
+    fn visit_mut_immediate_word_value(&mut self, imm: &mut Immediate<WordValue>) -> ControlFlow<T> {
+        visit_mut_immediate_word_value(self, imm)
+    }
+    fn visit_mut_immediate_push_value(&mut self, imm: &mut Immediate<PushValue>) -> ControlFlow<T> {
+        visit_mut_immediate_push_value(self, imm)
     }
     fn visit_mut_immediate_error_message(&mut self, code: &mut ErrorMsg) -> ControlFlow<T> {
         visit_mut_immediate_error_message(self, code)
@@ -641,6 +670,12 @@ where
     }
     fn visit_mut_immediate_felt(&mut self, imm: &mut Immediate<Felt>) -> ControlFlow<T> {
         (**self).visit_mut_immediate_felt(imm)
+    }
+    fn visit_mut_immediate_word_value(&mut self, imm: &mut Immediate<WordValue>) -> ControlFlow<T> {
+        (**self).visit_mut_immediate_word_value(imm)
+    }
+    fn visit_mut_immediate_push_value(&mut self, imm: &mut Immediate<PushValue>) -> ControlFlow<T> {
+        (**self).visit_mut_immediate_push_value(imm)
     }
     fn visit_mut_immediate_error_message(&mut self, code: &mut ErrorMsg) -> ControlFlow<T> {
         (**self).visit_mut_immediate_error_message(code)
@@ -744,7 +779,8 @@ where
         | MTreeVerifyWithError(code) => visitor.visit_mut_immediate_error_message(code),
         AddImm(imm) | SubImm(imm) | MulImm(imm) | DivImm(imm) | ExpImm(imm) | EqImm(imm)
         | NeqImm(imm) => visitor.visit_mut_immediate_felt(imm),
-        Push(imm) | PushSlice(imm, _) => visitor.visit_mut_immediate_hex(imm),
+        Push(imm) => visitor.visit_mut_immediate_push_value(imm),
+        PushSlice(imm, _) => visitor.visit_mut_immediate_word_value(imm),
         U32WrappingAddImm(imm)
         | U32OverflowingAddImm(imm)
         | U32WrappingSubImm(imm)
@@ -917,9 +953,20 @@ where
 }
 
 #[inline(always)]
-pub fn visit_mut_immediate_hex<V, T>(
+pub fn visit_mut_immediate_word_value<V, T>(
     _visitor: &mut V,
-    _imm: &mut Immediate<IntValue>,
+    _imm: &mut Immediate<WordValue>,
+) -> ControlFlow<T>
+where
+    V: ?Sized + VisitMut<T>,
+{
+    ControlFlow::Continue(())
+}
+
+#[inline(always)]
+pub fn visit_mut_immediate_push_value<V, T>(
+    _visitor: &mut V,
+    _imm: &mut Immediate<PushValue>,
 ) -> ControlFlow<T>
 where
     V: ?Sized + VisitMut<T>,

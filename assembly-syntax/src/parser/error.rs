@@ -280,21 +280,18 @@ pub enum ParsingError {
         #[label(
             "an Advice Map key must be a word, either in 64-character hex format or in array-like format `[f0,f1,f2,f3]`"
         )]
-        #[label]
         span: SourceSpan,
     },
     #[error("invalid slice constant")]
     #[diagnostic()]
     InvalidSliceConstant {
         #[label("slices are only supported over word-sized constants")]
-        #[label]
         span: SourceSpan,
     },
     #[error("invalid slice: expected valid range")]
     #[diagnostic()]
     InvalidRange {
         #[label("range used for the word constant slice is malformed: `{range:?}`")]
-        #[label]
         span: SourceSpan,
         range: Range<usize>,
     },
@@ -302,9 +299,27 @@ pub enum ParsingError {
     #[diagnostic()]
     EmptySlice {
         #[label("range used for the word constant slice is empty: `{range:?}`")]
-        #[label]
         span: SourceSpan,
         range: Range<usize>,
+    },
+    #[error("unrecognized calling convention")]
+    #[diagnostic(help("expected one of: 'fast', 'C', 'wasm', 'canon-lift', or 'canon-lower'"))]
+    UnrecognizedCallConv {
+        #[label]
+        span: SourceSpan,
+    },
+    #[error("invalid struct annotation")]
+    #[diagnostic(help("expected one of: '@packed', '@transparent', '@bigendian', or '@align(N)'"))]
+    InvalidStructAnnotation {
+        #[label]
+        span: SourceSpan,
+    },
+    #[error("invalid struct representation")]
+    #[diagnostic()]
+    InvalidStructRepr {
+        #[label("{message}")]
+        span: SourceSpan,
+        message: String,
     },
 }
 
@@ -409,6 +424,7 @@ fn simplify_expected_tokens(expected: Vec<String>) -> Vec<String> {
     use super::Token;
     let mut has_instruction = false;
     let mut has_ctrl = false;
+    let mut has_type = false;
     expected
         .into_iter()
         .filter_map(|t| {
@@ -436,6 +452,14 @@ fn simplify_expected_tokens(expected: Vec<String>) -> Vec<String> {
                     if !has_instruction {
                         has_instruction = true;
                         Some("primitive opcode (e.g. \"add\")".to_string())
+                    } else {
+                        None
+                    }
+                },
+                Some(tok) if tok.is_type_keyword() => {
+                    if !has_type {
+                        has_type = true;
+                        Some("type (e.g. \"felt\")".to_string())
                     } else {
                         None
                     }

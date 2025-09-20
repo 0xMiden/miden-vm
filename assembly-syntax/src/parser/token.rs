@@ -1,7 +1,7 @@
 use alloc::string::String;
 use core::fmt;
 
-use miden_core::Felt;
+use miden_core::{Felt, FieldElement};
 
 // DOCUMENTATION TYPE
 // ================================================================================================
@@ -31,6 +31,72 @@ impl core::ops::Deref for DocumentationType {
         }
     }
 }
+
+// PUSH VALUE
+// ================================================================================================
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PushValue {
+    Int(IntValue),
+    Word(WordValue),
+}
+
+impl From<u8> for PushValue {
+    fn from(value: u8) -> Self {
+        Self::Int(value.into())
+    }
+}
+
+impl From<u16> for PushValue {
+    fn from(value: u16) -> Self {
+        Self::Int(value.into())
+    }
+}
+
+impl From<u32> for PushValue {
+    fn from(value: u32) -> Self {
+        Self::Int(value.into())
+    }
+}
+
+impl From<Felt> for PushValue {
+    fn from(value: Felt) -> Self {
+        Self::Int(value.into())
+    }
+}
+
+impl From<IntValue> for PushValue {
+    fn from(value: IntValue) -> Self {
+        Self::Int(value)
+    }
+}
+
+impl From<WordValue> for PushValue {
+    fn from(value: WordValue) -> Self {
+        Self::Word(value)
+    }
+}
+
+impl fmt::Display for PushValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Int(value) => fmt::Display::fmt(value, f),
+            Self::Word(value) => fmt::Display::fmt(value, f),
+        }
+    }
+}
+
+impl crate::prettier::PrettyPrint for PushValue {
+    fn render(&self) -> crate::prettier::Document {
+        match self {
+            Self::Int(value) => value.render(),
+            Self::Word(value) => value.render(),
+        }
+    }
+}
+
+// WORD VALUE
+// ================================================================================================
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WordValue(pub [Felt; 4]);
@@ -87,7 +153,7 @@ impl core::hash::Hash for WordValue {
     }
 }
 
-// HEX ENCODED VALUE
+// INT VALUE
 // ================================================================================================
 
 /// Represents one of the various types of values that have a hex-encoded representation in Miden
@@ -102,9 +168,86 @@ pub enum IntValue {
     U32(u32),
     /// A single field element, 8 bytes, encoded as 16 hex digits
     Felt(Felt),
-    /// A set of 4 field elements, 32 bytes, encoded as a contiguous string of 64 hex digits
-    Word(WordValue),
 }
+
+impl From<u8> for IntValue {
+    fn from(value: u8) -> Self {
+        Self::U8(value)
+    }
+}
+
+impl From<u16> for IntValue {
+    fn from(value: u16) -> Self {
+        Self::U16(value)
+    }
+}
+
+impl From<u32> for IntValue {
+    fn from(value: u32) -> Self {
+        Self::U32(value)
+    }
+}
+
+impl From<Felt> for IntValue {
+    fn from(value: Felt) -> Self {
+        Self::Felt(value)
+    }
+}
+
+impl IntValue {
+    pub fn as_int(&self) -> u64 {
+        match self {
+            Self::U8(value) => *value as u64,
+            Self::U16(value) => *value as u64,
+            Self::U32(value) => *value as u64,
+            Self::Felt(value) => value.as_int(),
+        }
+    }
+}
+
+impl core::ops::Add<IntValue> for IntValue {
+    type Output = IntValue;
+
+    fn add(self, rhs: IntValue) -> Self::Output {
+        super::lexer::shrink_u64_hex(self.as_int() + rhs.as_int())
+    }
+}
+
+impl core::ops::Sub<IntValue> for IntValue {
+    type Output = IntValue;
+
+    fn sub(self, rhs: IntValue) -> Self::Output {
+        super::lexer::shrink_u64_hex(self.as_int() - rhs.as_int())
+    }
+}
+
+impl core::ops::Mul<IntValue> for IntValue {
+    type Output = IntValue;
+
+    fn mul(self, rhs: IntValue) -> Self::Output {
+        super::lexer::shrink_u64_hex(self.as_int() * rhs.as_int())
+    }
+}
+
+impl core::ops::Div<IntValue> for IntValue {
+    type Output = IntValue;
+
+    fn div(self, rhs: IntValue) -> Self::Output {
+        super::lexer::shrink_u64_hex(self.as_int() / rhs.as_int())
+    }
+}
+
+impl PartialEq<Felt> for IntValue {
+    fn eq(&self, other: &Felt) -> bool {
+        match self {
+            Self::U8(lhs) => (*lhs as u64) == other.as_int(),
+            Self::U16(lhs) => (*lhs as u64) == other.as_int(),
+            Self::U32(lhs) => (*lhs as u64) == other.as_int(),
+            Self::Felt(lhs) => lhs == other,
+        }
+    }
+}
+
 impl fmt::Display for IntValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -112,7 +255,6 @@ impl fmt::Display for IntValue {
             Self::U16(value) => write!(f, "{value}"),
             Self::U32(value) => write!(f, "{value:#04x}"),
             Self::Felt(value) => write!(f, "{:#08x}", &value.as_int().to_be()),
-            Self::Word(value) => write!(f, "{value}"),
         }
     }
 }
@@ -124,7 +266,6 @@ impl crate::prettier::PrettyPrint for IntValue {
             Self::U16(v) => v.render(),
             Self::U32(v) => v.render(),
             Self::Felt(v) => u64::from(*v).render(),
-            Self::Word(v) => v.render(),
         }
     }
 }
@@ -134,6 +275,7 @@ impl PartialOrd for IntValue {
         Some(self.cmp(other))
     }
 }
+
 impl Ord for IntValue {
     fn cmp(&self, other: &Self) -> core::cmp::Ordering {
         use core::cmp::Ordering;
@@ -148,9 +290,6 @@ impl Ord for IntValue {
             (Self::U32(_), _) => Ordering::Less,
             (Self::Felt(_), Self::U8(_) | Self::U16(_) | Self::U32(_)) => Ordering::Greater,
             (Self::Felt(l), Self::Felt(r)) => l.as_int().cmp(&r.as_int()),
-            (Self::Felt(_), _) => Ordering::Less,
-            (Self::Word(l), Self::Word(r)) => l.cmp(r),
-            (Self::Word(_), _) => Ordering::Greater,
         }
     }
 }
@@ -163,7 +302,6 @@ impl core::hash::Hash for IntValue {
             Self::U16(value) => value.hash(state),
             Self::U32(value) => value.hash(state),
             Self::Felt(value) => value.as_int().hash(state),
-            Self::Word(value) => value.hash(state),
         }
     }
 }
@@ -190,6 +328,7 @@ pub enum BinEncodedValue {
 #[derive(Debug, Clone)]
 pub enum Token<'input> {
     Add,
+    Addrspace,
     Adv,
     AdvMap,
     InsertHdword,
@@ -212,6 +351,7 @@ pub enum Token<'input> {
     EvalCircuit,
     Begin,
     Breakpoint,
+    Byte,
     Caller,
     Call,
     Cdrop,
@@ -231,6 +371,7 @@ pub enum Token<'input> {
     Else,
     Emit,
     End,
+    Enum,
     Eq,
     Eqw,
     Ext2Add,
@@ -245,6 +386,7 @@ pub enum Token<'input> {
     Exp,
     ExpU,
     False,
+    Felt,
     FriExt2Fold4,
     Gt,
     Gte,
@@ -254,6 +396,12 @@ pub enum Token<'input> {
     HornerExt,
     Hperm,
     Hmerge,
+    I1,
+    I8,
+    I16,
+    I32,
+    I64,
+    I128,
     If,
     ILog2,
     Inv,
@@ -294,6 +442,8 @@ pub enum Token<'input> {
     Pow2,
     Proc,
     Procref,
+    Ptr,
+    Pub,
     Push,
     Repeat,
     Reversew,
@@ -301,6 +451,7 @@ pub enum Token<'input> {
     Range,
     Sdepth,
     Stack,
+    Struct,
     Sub,
     Swap,
     Swapw,
@@ -308,7 +459,11 @@ pub enum Token<'input> {
     Syscall,
     Trace,
     True,
+    Type,
     Use,
+    U8,
+    U16,
+    U32,
     U32And,
     U32Assert,
     U32Assert2,
@@ -348,28 +503,37 @@ pub enum Token<'input> {
     U32WrappingMul,
     U32WrappingSub,
     U32Xor,
+    U64,
+    U128,
     While,
     Word,
     Event,
     Xor,
     At,
     Bang,
+    Colon,
     ColonColon,
     Dot,
     Comma,
     Equal,
+    Langle,
     Lparen,
+    Lbrace,
     Lbracket,
     Minus,
     Plus,
+    Semicolon,
     SlashSlash,
     Slash,
     Star,
+    Rangle,
     Rparen,
+    Rbrace,
     Rbracket,
     Rstab,
     DocComment(DocumentationType),
     HexValue(IntValue),
+    HexWord(WordValue),
     BinValue(BinEncodedValue),
     Int(u64),
     Ident(&'input str),
@@ -384,6 +548,7 @@ impl fmt::Display for Token<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Token::Add => write!(f, "add"),
+            Token::Addrspace => write!(f, "addrspace"),
             Token::Adv => write!(f, "adv"),
             Token::AdvMap => write!(f, "adv_map"),
             Token::AdvStack => write!(f, "adv_stack"),
@@ -406,6 +571,7 @@ impl fmt::Display for Token<'_> {
             Token::EvalCircuit => write!(f, "eval_circuit"),
             Token::Begin => write!(f, "begin"),
             Token::Breakpoint => write!(f, "breakpoint"),
+            Token::Byte => write!(f, "byte"),
             Token::Caller => write!(f, "caller"),
             Token::Call => write!(f, "call"),
             Token::Cdrop => write!(f, "cdrop"),
@@ -425,6 +591,7 @@ impl fmt::Display for Token<'_> {
             Token::Else => write!(f, "else"),
             Token::Emit => write!(f, "emit"),
             Token::End => write!(f, "end"),
+            Token::Enum => write!(f, "enum"),
             Token::Eq => write!(f, "eq"),
             Token::Eqw => write!(f, "eqw"),
             Token::Ext2Add => write!(f, "ext2add"),
@@ -439,6 +606,7 @@ impl fmt::Display for Token<'_> {
             Token::ExpU => write!(f, "exp.u"),
             Token::Export => write!(f, "export"),
             Token::False => write!(f, "false"),
+            Token::Felt => write!(f, "felt"),
             Token::FriExt2Fold4 => write!(f, "fri_ext2fold4"),
             Token::Gt => write!(f, "gt"),
             Token::Gte => write!(f, "gte"),
@@ -446,6 +614,12 @@ impl fmt::Display for Token<'_> {
             Token::HasMapkey => write!(f, "has_mapkey"),
             Token::Hperm => write!(f, "hperm"),
             Token::Hmerge => write!(f, "hmerge"),
+            Token::I1 => write!(f, "i1"),
+            Token::I8 => write!(f, "i8"),
+            Token::I16 => write!(f, "i16"),
+            Token::I32 => write!(f, "i32"),
+            Token::I64 => write!(f, "i64"),
+            Token::I128 => write!(f, "i128"),
             Token::If => write!(f, "if"),
             Token::ILog2 => write!(f, "ilog2"),
             Token::Inv => write!(f, "inv"),
@@ -486,6 +660,8 @@ impl fmt::Display for Token<'_> {
             Token::Pow2 => write!(f, "pow2"),
             Token::Proc => write!(f, "proc"),
             Token::Procref => write!(f, "procref"),
+            Token::Ptr => write!(f, "ptr"),
+            Token::Pub => write!(f, "pub"),
             Token::Push => write!(f, "push"),
             Token::HornerBase => write!(f, "horner_eval_base"),
             Token::HornerExt => write!(f, "horner_eval_ext"),
@@ -494,6 +670,7 @@ impl fmt::Display for Token<'_> {
             Token::Reversedw => write!(f, "reversedw"),
             Token::Sdepth => write!(f, "sdepth"),
             Token::Stack => write!(f, "stack"),
+            Token::Struct => write!(f, "struct"),
             Token::Sub => write!(f, "sub"),
             Token::Swap => write!(f, "swap"),
             Token::Swapw => write!(f, "swapw"),
@@ -501,7 +678,11 @@ impl fmt::Display for Token<'_> {
             Token::Syscall => write!(f, "syscall"),
             Token::Trace => write!(f, "trace"),
             Token::True => write!(f, "true"),
+            Token::Type => write!(f, "type"),
             Token::Use => write!(f, "use"),
+            Token::U8 => write!(f, "u8"),
+            Token::U16 => write!(f, "u16"),
+            Token::U32 => write!(f, "u32"),
             Token::U32And => write!(f, "u32and"),
             Token::U32Assert => write!(f, "u32assert"),
             Token::U32Assert2 => write!(f, "u32assert2"),
@@ -541,30 +722,39 @@ impl fmt::Display for Token<'_> {
             Token::U32WrappingMul => write!(f, "u32wrapping_mul"),
             Token::U32WrappingSub => write!(f, "u32wrapping_sub"),
             Token::U32Xor => write!(f, "u32xor"),
+            Token::U64 => write!(f, "u64"),
+            Token::U128 => write!(f, "u128"),
             Token::While => write!(f, "while"),
             Token::Word => write!(f, "word"),
             Token::Event => write!(f, "event"),
             Token::Xor => write!(f, "xor"),
             Token::At => write!(f, "@"),
             Token::Bang => write!(f, "!"),
+            Token::Colon => write!(f, ":"),
             Token::ColonColon => write!(f, "::"),
             Token::Dot => write!(f, "."),
             Token::Comma => write!(f, ","),
             Token::Equal => write!(f, "="),
+            Token::Langle => write!(f, "<"),
             Token::Lparen => write!(f, "("),
+            Token::Lbrace => write!(f, "{{"),
             Token::Lbracket => write!(f, "["),
             Token::Minus => write!(f, "-"),
             Token::Plus => write!(f, "+"),
+            Token::Semicolon => write!(f, ";"),
             Token::SlashSlash => write!(f, "//"),
             Token::Slash => write!(f, "/"),
             Token::Star => write!(f, "*"),
+            Token::Rangle => write!(f, ">"),
             Token::Rparen => write!(f, ")"),
+            Token::Rbrace => write!(f, "}}"),
             Token::Rbracket => write!(f, "]"),
             Token::Rstab => write!(f, "->"),
             Token::Range => write!(f, ".."),
             Token::DocComment(DocumentationType::Module(_)) => f.write_str("module doc"),
             Token::DocComment(DocumentationType::Form(_)) => f.write_str("doc comment"),
             Token::HexValue(_) => f.write_str("hex-encoded value"),
+            Token::HexWord(_) => f.write_str("hex-encoded word"),
             Token::BinValue(_) => f.write_str("bin-encoded value"),
             Token::Int(_) => f.write_str("integer"),
             Token::Ident(_) => f.write_str("identifier"),
@@ -734,8 +924,33 @@ impl<'input> Token<'input> {
         )
     }
 
+    /// Returns true if this token represents the name of an type or a type-related keyword.
+    ///
+    /// This is used to simplify diagnostic output related to expected tokens so as not to
+    /// overwhelm the user with a ton of possible expected tokens.
+    pub fn is_type_keyword(&self) -> bool {
+        matches!(
+            self,
+            Token::Addrspace
+                | Token::Ptr
+                | Token::I1
+                | Token::I8
+                | Token::I16
+                | Token::I32
+                | Token::I64
+                | Token::I128
+                | Token::U8
+                | Token::U16
+                | Token::U32
+                | Token::U64
+                | Token::U128
+                | Token::Struct
+        )
+    }
+
     const KEYWORDS: &'static [(&'static str, Token<'static>)] = &[
         ("add", Token::Add),
+        ("addrspace", Token::Addrspace),
         ("adv", Token::Adv),
         ("adv_map", Token::AdvMap),
         ("eval_circuit", Token::EvalCircuit),
@@ -758,6 +973,7 @@ impl<'input> Token<'input> {
         ("assert_eqw", Token::AssertEqw),
         ("begin", Token::Begin),
         ("breakpoint", Token::Breakpoint),
+        ("byte", Token::Byte),
         ("caller", Token::Caller),
         ("call", Token::Call),
         ("cdrop", Token::Cdrop),
@@ -777,6 +993,7 @@ impl<'input> Token<'input> {
         ("else", Token::Else),
         ("emit", Token::Emit),
         ("end", Token::End),
+        ("enum", Token::Enum),
         ("eq", Token::Eq),
         ("eqw", Token::Eqw),
         ("ext2add", Token::Ext2Add),
@@ -791,6 +1008,7 @@ impl<'input> Token<'input> {
         ("exp.u", Token::ExpU),
         ("export", Token::Export),
         ("false", Token::False),
+        ("felt", Token::Felt),
         ("fri_ext2fold4", Token::FriExt2Fold4),
         ("gt", Token::Gt),
         ("gte", Token::Gte),
@@ -798,6 +1016,12 @@ impl<'input> Token<'input> {
         ("has_mapkey", Token::HasMapkey),
         ("hperm", Token::Hperm),
         ("hmerge", Token::Hmerge),
+        ("i1", Token::I1),
+        ("i8", Token::I8),
+        ("i16", Token::I16),
+        ("i32", Token::I32),
+        ("i64", Token::I64),
+        ("i128", Token::I128),
         ("if", Token::If),
         ("ilog2", Token::ILog2),
         ("inv", Token::Inv),
@@ -838,7 +1062,9 @@ impl<'input> Token<'input> {
         ("pow2", Token::Pow2),
         ("proc", Token::Proc),
         ("procref", Token::Procref),
+        ("ptr", Token::Ptr),
         ("push", Token::Push),
+        ("pub", Token::Pub),
         ("horner_eval_base", Token::HornerBase),
         ("horner_eval_ext", Token::HornerExt),
         ("repeat", Token::Repeat),
@@ -846,6 +1072,7 @@ impl<'input> Token<'input> {
         ("reversedw", Token::Reversedw),
         ("sdepth", Token::Sdepth),
         ("stack", Token::Stack),
+        ("struct", Token::Struct),
         ("sub", Token::Sub),
         ("swap", Token::Swap),
         ("swapw", Token::Swapw),
@@ -853,7 +1080,11 @@ impl<'input> Token<'input> {
         ("syscall", Token::Syscall),
         ("trace", Token::Trace),
         ("true", Token::True),
+        ("type", Token::Type),
         ("use", Token::Use),
+        ("u8", Token::U8),
+        ("u16", Token::U16),
+        ("u32", Token::U32),
         ("u32and", Token::U32And),
         ("u32assert", Token::U32Assert),
         ("u32assert2", Token::U32Assert2),
@@ -893,6 +1124,8 @@ impl<'input> Token<'input> {
         ("u32wrapping_mul", Token::U32WrappingMul),
         ("u32wrapping_sub", Token::U32WrappingSub),
         ("u32xor", Token::U32Xor),
+        ("u64", Token::U64),
+        ("u128", Token::U128),
         ("while", Token::While),
         ("word", Token::Word),
         ("event", Token::Event),
@@ -968,18 +1201,24 @@ impl<'input> Token<'input> {
                 match s {
                     "@" => Some(Token::At),
                     "!" => Some(Token::Bang),
+                    ":" => Some(Token::Colon),
                     "::" => Some(Token::ColonColon),
                     "." => Some(Token::Dot),
                     "," => Some(Token::Comma),
                     "=" => Some(Token::Equal),
+                    "<" => Some(Token::Langle),
                     "(" => Some(Token::Lparen),
+                    "{" => Some(Token::Lbrace),
                     "[" => Some(Token::Lbracket),
                     "-" => Some(Token::Minus),
                     "+" => Some(Token::Plus),
+                    ";" => Some(Token::Semicolon),
                     "//" => Some(Token::SlashSlash),
                     "/" => Some(Token::Slash),
                     "*" => Some(Token::Star),
+                    ">" => Some(Token::Rangle),
                     ")" => Some(Token::Rparen),
+                    "}" => Some(Token::Rbrace),
                     "]" => Some(Token::Rbracket),
                     "->" => Some(Token::Rstab),
                     ".." => Some(Token::Range),
@@ -992,6 +1231,7 @@ impl<'input> Token<'input> {
                     },
                     "comment" => Some(Token::Comment),
                     "hex-encoded value" => Some(Token::HexValue(IntValue::U8(0))),
+                    "hex-encoded word" => Some(Token::HexWord(WordValue([Felt::ZERO; 4]))),
                     "bin-encoded value" => Some(Token::BinValue(BinEncodedValue::U8(0))),
                     "integer" => Some(Token::Int(0)),
                     "identifier" => Some(Token::Ident("")),

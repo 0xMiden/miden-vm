@@ -277,18 +277,23 @@ impl<'input> Lexer<'input> {
             '!' => pop!(self, Token::Bang),
             ':' => match self.peek() {
                 ':' => pop2!(self, Token::ColonColon),
-                _ => Err(ParsingError::InvalidToken { span: self.span() }),
+                _ => pop!(self, Token::Colon),
             },
+            ';' => pop!(self, Token::Semicolon),
             '.' => match self.peek() {
                 '.' => pop2!(self, Token::Range),
                 _ => pop!(self, Token::Dot),
             },
             ',' => pop!(self, Token::Comma),
             '=' => pop!(self, Token::Equal),
-            '(' => pop!(self, Token::Lparen),
+            '<' => pop!(self, Token::Langle),
+            '{' => pop!(self, Token::Lbrace),
             '[' => pop!(self, Token::Lbracket),
-            ')' => pop!(self, Token::Rparen),
+            '(' => pop!(self, Token::Lparen),
+            '>' => pop!(self, Token::Rangle),
+            '}' => pop!(self, Token::Rbrace),
             ']' => pop!(self, Token::Rbracket),
+            ')' => pop!(self, Token::Rparen),
             '-' => match self.peek() {
                 '>' => pop2!(self, Token::Rstab),
                 _ => pop!(self, Token::Minus),
@@ -317,7 +322,7 @@ impl<'input> Lexer<'input> {
             },
             '1'..='9' => self.lex_number(),
             'a'..='z' => self.lex_keyword_or_ident(),
-            'A'..='Z' => self.lex_const_identifier(),
+            'A'..='Z' => self.lex_identifier(),
             '_' => match self.peek() {
                 c if c.is_ascii_alphanumeric() => self.lex_identifier(),
                 _ => Err(ParsingError::InvalidToken { span: self.span() }),
@@ -469,17 +474,26 @@ impl<'input> Lexer<'input> {
 
     fn lex_identifier(&mut self) -> Result<Token<'input>, ParsingError> {
         let c = self.pop();
-        debug_assert!(c.is_ascii_lowercase() || c == '_');
+        debug_assert!(c.is_ascii_alphabetic() || c == '_');
+
+        let mut is_constant_ident = c.is_ascii_uppercase() || c == '_';
 
         loop {
             match self.read() {
                 '_' | '0'..='9' => self.skip(),
-                c if c.is_ascii_lowercase() => self.skip(),
+                c if c.is_ascii_alphabetic() => {
+                    is_constant_ident &= c.is_ascii_uppercase();
+                    self.skip();
+                },
                 _ => break,
             }
         }
 
-        Ok(Token::Ident(self.slice()))
+        if is_constant_ident {
+            Ok(Token::ConstantIdent(self.slice()))
+        } else {
+            Ok(Token::Ident(self.slice()))
+        }
     }
 
     fn lex_special_identifier(&mut self) -> Result<Token<'input>, ParsingError> {
@@ -502,21 +516,6 @@ impl<'input> Lexer<'input> {
                 Err(ParsingError::InvalidToken { span })
             },
         }
-    }
-
-    fn lex_const_identifier(&mut self) -> Result<Token<'input>, ParsingError> {
-        let c = self.pop();
-        debug_assert!(c.is_ascii_uppercase() || c == '_');
-
-        loop {
-            match self.read() {
-                '_' | '0'..='9' => self.skip(),
-                c if c.is_ascii_uppercase() => self.skip(),
-                _ => break,
-            }
-        }
-
-        Ok(Token::ConstantIdent(self.slice()))
     }
 
     fn lex_number(&mut self) -> Result<Token<'input>, ParsingError> {
@@ -570,8 +569,7 @@ impl<'input> Lexer<'input> {
         let end = span.end();
         let digit_start = start.to_u32() + 2;
         let span = SourceSpan::new(span.source_id(), start..end);
-        let value = parse_hex(span, self.slice_span(digit_start..end.to_u32()))?;
-        Ok(Token::HexValue(value))
+        parse_hex(span, self.slice_span(digit_start..end.to_u32()))
     }
 
     fn lex_bin(&mut self) -> Result<Token<'input>, ParsingError> {
@@ -612,7 +610,10 @@ impl<'input> Iterator for Lexer<'input> {
 // HELPER FUNCTIONS
 // ================================================================================================
 
-fn parse_hex(span: SourceSpan, hex_digits: &str) -> Result<IntValue, ParsingError> {
+fn parse_hex<'input>(
+    span: SourceSpan,
+    hex_digits: &'input str,
+) -> Result<Token<'input>, ParsingError> {
     use miden_core::{FieldElement, StarkField};
     match hex_digits.len() {
         // Felt
@@ -632,7 +633,7 @@ fn parse_hex(span: SourceSpan, hex_digits: &str) -> Result<IntValue, ParsingErro
                     kind: LiteralErrorKind::FeltOverflow,
                 });
             }
-            Ok(shrink_u64_hex(value))
+            Ok(Token::HexValue(shrink_u64_hex(value)))
         },
         // Word
         64 => {
@@ -662,7 +663,7 @@ fn parse_hex(span: SourceSpan, hex_digits: &str) -> Result<IntValue, ParsingErro
                 }
                 *element = Felt::new(value);
             }
-            Ok(IntValue::Word(WordValue(word)))
+            Ok(Token::HexWord(WordValue(word)))
         },
         // Invalid
         n if n > 64 => Err(ParsingError::InvalidHexLiteral { span, kind: HexErrorKind::TooLong }),
@@ -695,7 +696,7 @@ fn is_ascii_binary(c: char) -> bool {
 }
 
 #[inline]
-fn shrink_u64_hex(n: u64) -> IntValue {
+pub fn shrink_u64_hex(n: u64) -> IntValue {
     if n <= (u8::MAX as u64) {
         IntValue::U8(n as u8)
     } else if n <= (u16::MAX as u64) {

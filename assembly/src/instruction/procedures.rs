@@ -10,7 +10,7 @@ use miden_core::{
 use smallvec::SmallVec;
 
 use crate::{
-    Assembler, ProcedureContext, basic_block_builder::BasicBlockBuilder,
+    Assembler, GlobalProcedureIndex, basic_block_builder::BasicBlockBuilder,
     mast_forest_builder::MastForestBuilder,
 };
 
@@ -25,10 +25,10 @@ impl Assembler {
         &self,
         kind: InvokeKind,
         callee: &InvocationTarget,
-        proc_ctx: &ProcedureContext,
+        caller: GlobalProcedureIndex,
         mast_forest_builder: &mut MastForestBuilder,
     ) -> Result<MastNodeId, Report> {
-        let resolved = self.resolve_target(kind, callee, proc_ctx, mast_forest_builder)?;
+        let resolved = self.resolve_target(kind, callee, caller, mast_forest_builder)?;
 
         match kind {
             InvokeKind::ProcRef | InvokeKind::Exec => Ok(resolved.node),
@@ -60,14 +60,14 @@ impl Assembler {
     pub(super) fn procref(
         &self,
         callee: &InvocationTarget,
-        proc_ctx: &mut ProcedureContext,
+        caller: GlobalProcedureIndex,
         block_builder: &mut BasicBlockBuilder,
     ) -> Result<(), Report> {
         let mast_root = {
             let resolved = self.resolve_target(
                 InvokeKind::ProcRef,
                 callee,
-                proc_ctx,
+                caller,
                 block_builder.mast_forest_builder_mut(),
             )?;
             // Note: it's ok to `unwrap()` here since `proc_body_id` was returned from

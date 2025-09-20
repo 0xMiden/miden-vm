@@ -28,7 +28,7 @@ pub use self::{
     error::{BinErrorKind, HexErrorKind, LiteralErrorKind, ParsingError},
     lexer::Lexer,
     scanner::Scanner,
-    token::{BinEncodedValue, DocumentationType, IntValue, Token, WordValue},
+    token::{BinEncodedValue, DocumentationType, IntValue, PushValue, Token, WordValue},
 };
 use crate::{LibraryPath, ast, sema};
 
@@ -159,8 +159,9 @@ fn parse_forms_internal(
     let source_id = source.id();
     let scanner = Scanner::new(source.as_str());
     let lexer = Lexer::new(source_id, scanner);
+    let felt_type = Arc::new(ast::types::ArrayType::new(ast::types::Type::Felt, 4));
     grammar::FormsParser::new()
-        .parse(&source, interned, core::marker::PhantomData, lexer)
+        .parse(&source, interned, &felt_type, core::marker::PhantomData, lexer)
         .map_err(|err| ParsingError::from_parse_error(source_id, err))
 }
 

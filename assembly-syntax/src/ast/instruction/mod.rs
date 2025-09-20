@@ -9,7 +9,7 @@ pub use self::{advice::SystemEventNode, debug::DebugOptions};
 use crate::{
     Felt,
     ast::{InvocationTarget, immediate::*},
-    parser::IntValue,
+    parser::{PushValue, WordValue},
 };
 
 // INSTRUCTION
@@ -208,8 +208,8 @@ pub enum Instruction {
     CDropW,
 
     // ----- input / output operations -----------------------------------------------------------
-    Push(Immediate<IntValue>),
-    PushSlice(Immediate<IntValue>, Range<usize>),
+    Push(Immediate<PushValue>),
+    PushSlice(Immediate<WordValue>, Range<usize>),
     PushFeltList(Vec<Felt>),
     Locaddr(ImmU16),
     Sdepth,

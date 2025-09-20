@@ -11,6 +11,7 @@ use alloc::{
 
 use miden_core::{Word, crypto::hash::Rpo256};
 use miden_debug_types::{SourceFile, Span, Spanned};
+use smallvec::SmallVec;
 
 use self::passes::{ConstEvalVisitor, VerifyInvokeTargets};
 pub use self::{
@@ -42,6 +43,7 @@ pub fn analyze(
     let mut module = Box::new(Module::new(kind, path).with_span(source.source_span()));
 
     let mut forms = VecDeque::from(forms);
+    let mut enums = SmallVec::<[EnumType; 1]>::new_const();
     let mut docs = None;
     while let Some(form) = forms.pop_front() {
         match form {
@@ -60,9 +62,19 @@ pub fn analyze(
                 }
             },
             Form::Enum(ty) => {
-                if let Err(err) = module.define_enum(ty.with_docs(docs.take())) {
-                    analyzer.error(err);
+                // Ensure the constants defined by the enum are made known to the analyzer
+                for variant in ty.variants() {
+                    let Variant { span, name, discriminant, .. } = variant;
+                    analyzer.define_constant(Constant {
+                        span: *span,
+                        docs: None,
+                        name: name.clone(),
+                        value: discriminant.clone(),
+                    })?;
                 }
+
+                // Defer definition of the enum until we discover all constants
+                enums.push(ty.with_docs(docs.take()));
             },
             Form::Constant(constant) => {
                 analyzer.define_constant(constant.with_docs(docs.take()))?;
@@ -117,6 +129,20 @@ pub fn analyze(
 
     if let Some(unused) = docs.take() {
         analyzer.error(SemanticAnalysisError::UnusedDocstring { span: unused.span() });
+    }
+
+    // Simplify all constant declarations
+    analyzer.simplify_constants();
+
+    // Define enums now that all constant declarations have been discovered
+    for mut ty in enums {
+        for variant in ty.variants_mut() {
+            variant.discriminant = analyzer.get_constant(&variant.name).unwrap().clone();
+        }
+
+        if let Err(err) = module.define_enum(ty) {
+            analyzer.error(err);
+        }
     }
 
     if matches!(kind, ModuleKind::Executable) && !module.has_entrypoint() {

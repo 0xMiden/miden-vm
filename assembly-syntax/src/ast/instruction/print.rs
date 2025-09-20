@@ -417,7 +417,7 @@ mod tests {
         let instruction = format!(
             "{}",
             Instruction::Push(Immediate::Value(miden_debug_types::Span::unknown(
-                crate::parser::IntValue::U8(3)
+                crate::parser::PushValue::Int(crate::parser::IntValue::U8(3))
             )))
         );
         assert_eq!("push.3", instruction);
