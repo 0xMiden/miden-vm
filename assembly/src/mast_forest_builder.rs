@@ -636,6 +636,7 @@ mod tests {
         // Create first block with operations that will cause padding (ending with Push)
         // Block1: [Push(1), Drop, Drop, Drop, Drop, Drop, Drop, Push(2), Push(3)]
         // This will result in padding after Push(2) because Push operations get padded
+        // Note: the following unpadded operations are 9 in number, indexed 0 to 8
         let block1_ops = vec![
             Operation::Push(Felt::new(1)),
             Operation::Drop,
@@ -656,7 +657,7 @@ mod tests {
         let block1_decorators = vec![
             (0, block1_decorator1), // Decorator for Push(1)
             (7, block1_decorator2), // Decorator for Push(2)
-            (9, block1_decorator3), // Decorator for Push(3)
+            (8, block1_decorator3), // Decorator for Push(3) at index 8
         ];
 
         let block1_id = builder.ensure_block(block1_ops.clone(), Some(block1_decorators)).unwrap();
@@ -757,7 +758,7 @@ mod tests {
                                 }
                             },
                             10 => {
-                                // Should be Push(34) from block2
+                                // Should be Push(4) from block2
                                 match &merged_ops[op_idx] {
                                     Operation::Push(x) if *x == Felt::new(4) => {
                                         assert_eq!(
