@@ -80,14 +80,8 @@ fn push_lowerbound_result(
         .into());
     }
 
-    // Validate address range is valid
-    if start_addr > end_addr {
-        return Err(MemoryError::InvalidMemoryRange {
-            start_addr: start_addr as u64,
-            end_addr: end_addr as u64,
-        }
-        .into());
-    }
+    // Address range validated by ProcessState::get_mem_addr_range
+    assert!(start_addr <= end_addr);
 
     // Validate the end_addr is properly aligned (i.e. the entire array has size divisible by
     // stride)
@@ -129,23 +123,21 @@ fn push_lowerbound_result(
     }
 
     // Validate the entire array is non-decreasing and find the first element where `element >= key`
-    let mut current_addr = start_addr + stride;
-    while current_addr < end_addr {
-        let current_word = get_word(current_addr)?;
-        if current_word < previous_word {
+    for addr in (start_addr..end_addr).step_by(stride as usize).skip(1) {
+        let word = get_word(addr)?;
+        if word < previous_word {
             return Err(SortedArrayError::NotAscendingOrder {
-                index: current_addr,
-                value: current_word.into(),
+                index: addr,
+                value: word.into(),
                 predecessor: previous_word.into(),
             }
             .into());
         }
-        if current_word >= key && result.is_none() {
-            was_key_found = current_word == key;
-            result = Some(current_addr);
+        if word >= key && result.is_none() {
+            was_key_found = word == key;
+            result = Some(addr);
         }
-        previous_word = current_word;
-        current_addr += stride;
+        previous_word = word;
     }
 
     Ok(vec![AdviceMutation::extend_stack(vec![
