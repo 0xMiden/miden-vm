@@ -67,12 +67,12 @@ fn push_lowerbound_result(
 
     // Read inputs from the stack
     let key = LexicographicWord::new(process.get_stack_word(KEY_OFFSET));
-    let (start_addr, end_addr) = process.get_mem_addr_range(START_ADDR_OFFSET, END_ADDR_OFFSET)?;
+    let addr_range = process.get_mem_addr_range(START_ADDR_OFFSET, END_ADDR_OFFSET)?;
 
     // Validate the start_addr is word-aligned (multiple of 4)
-    if start_addr % 4 != 0 {
+    if addr_range.start % 4 != 0 {
         return Err(MemoryError::unaligned_word_access(
-            start_addr,
+            addr_range.start,
             process.ctx(),
             Felt::from(process.clk()),
             &(),
@@ -80,26 +80,25 @@ fn push_lowerbound_result(
         .into());
     }
 
-    // Address range validated by ProcessState::get_mem_addr_range
-    assert!(start_addr <= end_addr);
-
     // Validate the end_addr is properly aligned (i.e. the entire array has size divisible by
     // stride)
-    if (end_addr - start_addr) % stride != 0 {
+    if (addr_range.end - addr_range.start) % stride != 0 {
         if stride == 4 {
-            return Err(SortedArrayError::InvalidArrayRange { size: end_addr - start_addr }.into());
+            return Err(
+                SortedArrayError::InvalidArrayRange { size: addr_range.len() as u32 }.into()
+            );
         } else {
             return Err(
-                SortedArrayError::InvalidKeyValueRange { size: end_addr - start_addr }.into()
+                SortedArrayError::InvalidKeyValueRange { size: addr_range.len() as u32 }.into()
             );
         }
     }
 
     // If range is empty, result is end_ptr
-    if start_addr == end_addr {
+    if addr_range.is_empty() {
         return Ok(vec![AdviceMutation::extend_stack(vec![
             Felt::from(false),
-            Felt::from(end_addr),
+            Felt::from(addr_range.end),
         ])]);
     }
 
@@ -116,14 +115,14 @@ fn push_lowerbound_result(
     let mut result = None;
 
     // Test the first element
-    let mut previous_word = get_word(start_addr)?;
+    let mut previous_word = get_word(addr_range.start)?;
     if previous_word >= key {
         was_key_found = previous_word == key;
-        result = Some(start_addr);
+        result = Some(addr_range.start);
     }
 
     // Validate the entire array is non-decreasing and find the first element where `element >= key`
-    for addr in (start_addr..end_addr).step_by(stride as usize).skip(1) {
+    for addr in addr_range.clone().step_by(stride as usize).skip(1) {
         let word = get_word(addr)?;
         if word < previous_word {
             return Err(SortedArrayError::NotAscendingOrder {
@@ -142,7 +141,7 @@ fn push_lowerbound_result(
 
     Ok(vec![AdviceMutation::extend_stack(vec![
         Felt::from(was_key_found),
-        Felt::from(result.unwrap_or(end_addr)),
+        Felt::from(result.unwrap_or(addr_range.end)),
     ])])
 }
 

@@ -60,12 +60,11 @@ fn insert_mem_values_into_adv_map(
     process: &mut ProcessState,
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
-    let (start_addr, end_addr) =
-        process.get_mem_addr_range(5, 6).map_err(ExecutionError::MemoryError)?;
+    let addr_range = process.get_mem_addr_range(5, 6).map_err(ExecutionError::MemoryError)?;
     let ctx = process.ctx();
 
-    let mut values = Vec::with_capacity(((end_addr - start_addr) as usize) * WORD_SIZE);
-    for addr in start_addr..end_addr {
+    let mut values = Vec::with_capacity(addr_range.len() * WORD_SIZE);
+    for addr in addr_range {
         let mem_value = process.get_mem_value(ctx, addr).unwrap_or(ZERO);
         values.push(mem_value);
     }

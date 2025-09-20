@@ -899,7 +899,7 @@ impl<'a> ProcessState<'a> {
         &self,
         start_idx: usize,
         end_idx: usize,
-    ) -> Result<(u32, u32), MemoryError> {
+    ) -> Result<core::ops::Range<u32>, MemoryError> {
         let start_addr = self.get_stack_item(start_idx).as_int();
         let end_addr = self.get_stack_item(end_idx).as_int();
 
@@ -914,7 +914,7 @@ impl<'a> ProcessState<'a> {
             return Err(MemoryError::InvalidMemoryRange { start_addr, end_addr });
         }
 
-        Ok((start_addr as u32, end_addr as u32))
+        Ok(start_addr as u32..end_addr as u32)
     }
 
     /// Returns the entire memory state for the specified execution context at the current clock
