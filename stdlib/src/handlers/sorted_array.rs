@@ -1,7 +1,7 @@
 use alloc::{vec, vec::Vec};
 
 use miden_core::{EventId, Felt, LexicographicWord, Word};
-use miden_processor::{AdviceMutation, EventError, MemoryError, ProcessState, get_mem_addr_range};
+use miden_processor::{AdviceMutation, EventError, MemoryError, ProcessState};
 
 /// Qualified event names for `lowerbound` events.
 pub const LOWERBOUND_ARRAY_EVENT_NAME: &str = "stdlib::collections::sorted_array::lowerbound_array";
@@ -67,7 +67,7 @@ fn push_lowerbound_result(
 
     // Read inputs from the stack
     let key = LexicographicWord::new(process.get_stack_word(KEY_OFFSET));
-    let (start_addr, end_addr) = get_mem_addr_range(process, START_ADDR_OFFSET, END_ADDR_OFFSET)?;
+    let (start_addr, end_addr) = process.get_mem_addr_range(START_ADDR_OFFSET, END_ADDR_OFFSET)?;
 
     // Validate the start_addr is word-aligned (multiple of 4)
     if start_addr % 4 != 0 {

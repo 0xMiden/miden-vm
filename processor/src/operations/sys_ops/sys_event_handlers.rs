@@ -5,7 +5,7 @@ use miden_core::{
     sys_events::SystemEvent,
 };
 
-use crate::{ExecutionError, ProcessState, errors::ErrorContext, get_mem_addr_range};
+use crate::{ExecutionError, ProcessState, errors::ErrorContext};
 
 /// The offset of the domain value on the stack in the `hdword_to_map_with_domain` system event.
 /// Offset accounts for the event ID at position 0 on the stack.
@@ -61,7 +61,7 @@ fn insert_mem_values_into_adv_map(
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
     let (start_addr, end_addr) =
-        get_mem_addr_range(process, 5, 6).map_err(ExecutionError::MemoryError)?;
+        process.get_mem_addr_range(5, 6).map_err(ExecutionError::MemoryError)?;
     let ctx = process.ctx();
 
     let mut values = Vec::with_capacity(((end_addr - start_addr) as usize) * WORD_SIZE);
