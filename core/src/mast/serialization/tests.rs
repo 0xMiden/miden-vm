@@ -411,7 +411,8 @@ fn mast_forest_serialize_deserialize_advice_map() {
     assert_eq!(forest.advice_map, parsed.advice_map);
 }
 
-/// Test that BasicBlockNode serialization doesn't duplicate before_enter/after_exit decorators.
+/// Test that [`BasicBlockNode`] serialization doesn't duplicate `before_enter`/`after_exit`
+/// decorators.
 ///
 /// This test verifies that the serialization process correctly uses `indexed_decorator_iter()`
 /// instead of `decorators()` to avoid duplicating before_enter and after_exit decorators, which

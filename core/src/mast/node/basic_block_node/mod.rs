@@ -201,7 +201,7 @@ impl BasicBlockNode {
     ///
     /// This iterator is intended for e.g. processor consumption, as such a component iterates
     /// differently through block operations: contrarily to e.g. the implementation of
-    /// [`MastNodeErrorContext`] this does not include the before_enter or after_exit
+    /// [`MastNodeErrorContext`] this does not include the `before_enter` or `after_exit`
     /// decorators.
     pub fn indexed_decorator_iter(&self) -> DecoratorOpLinkIterator<'_> {
         DecoratorOpLinkIterator::new(&[], &self.decorators, &[], self.num_operations() as usize)
@@ -213,7 +213,7 @@ impl BasicBlockNode {
     ///
     /// Though this adjusts the indexation of op-indexed decorators, this iterator returns all
     /// decorators of the [`BasicBlockNode`] in the order in which they appear in the program.
-    /// This includes before_enter, op-indexed decorators, and after_exit.
+    /// This includes `before_enter`, op-indexed decorators, and after_exit`.
     pub fn raw_decorator_iter(&self) -> RawDecoratorOpLinkIterator<'_> {
         RawDecoratorOpLinkIterator::new(
             &self.before_enter,
@@ -263,7 +263,8 @@ impl BasicBlockNode {
 
 impl MastNodeErrorContext for BasicBlockNode {
     /// This iterator returns all decorators of the [`BasicBlockNode`] in the order in which they
-    /// appear in the program. This includes before_enter, op-indexed decorators, and after_exit.
+    /// appear in the program. This includes `before_enter`, op-indexed decorators, and
+    /// `after_exit`.
     fn decorators(&self) -> impl Iterator<Item = DecoratedOpLink> {
         DecoratorOpLinkIterator::new(
             &self.before_enter,
@@ -412,8 +413,8 @@ impl fmt::Display for BasicBlockNodePrettyPrint<'_> {
 // DECORATOR ITERATION
 // ================================================================================================
 
-/// Iterator used to iterate through the decorator list of a span block
-/// while executing operation batches of a span block.
+/// Iterator used to iterate through the decorator list of a basic block
+/// while executing operation batches of a basic block.
 ///
 /// This lets the caller iterate through a Decorator list with indexes that match the
 /// standard (padded) representation of a basic block.
@@ -454,9 +455,9 @@ impl<'a> DecoratorOpLinkIterator<'a> {
     /// - middle items use their stored position
     /// - after_exit items map to `total_ops`
     //
-    // some decorators are pegged on an operation index equal to the total number of
+    // Some decorators are pegged on an operation index equal to the total number of
     // operations since decorators are meant to be executed before the operation
-    // they are attached to, this allows them to be executed after the last
+    // they are attached to. This allows them to be executed after the last
     // operation has been executed.
     #[inline]
     pub fn next_filtered(&mut self, pos: usize) -> Option<(usize, DecoratorId)> {
