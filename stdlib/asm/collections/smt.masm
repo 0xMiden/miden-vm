@@ -1,3 +1,6 @@
+use.std::mem
+use.std::sys
+
 # Constant value for the depth at which leaves sit
 const.LEAF_DEPTH=64
 
@@ -7,10 +10,10 @@ const.LEAF_DEPTH=64
 #! Inserts or removes a value associated with the given key. The leaf to which we're inserting is
 #! guaranteed to be empty.
 #!
-#! Inputs:  
+#! Inputs:
 #!   Operand stack: [V, K, R, ...]
 #!
-#! Outputs: 
+#! Outputs:
 #!   Operand stack: [V_old, R_new, ...]
 #!
 #! Cycles
@@ -34,7 +37,7 @@ proc.set_empty_leaf
         # (1 cycle)
         mtree_verify
         #=> [V (=ZERO), depth, K[3], R, K, ...]
-        
+
         # Prepare stack for return (X cycles)
         movup.4 drop movup.4 drop movupw.2 dropw
         #=> [V (=ZERO), R, ...]
@@ -73,7 +76,7 @@ end
 #! Inserts a value at the given key. The leaf to which we're inserting is
 #! guaranteed to hold a single key-value pair (provided on the advice stack).
 #!
-#! Inputs: 
+#! Inputs:
 #!   Operand stack: [V, K, R, ...]
 #!   Advice stack:  [K_in_leaf, V_in_leaf]
 #!
@@ -98,7 +101,7 @@ proc.insert_single_leaf
         # Leaf stays a "single" variant
 
         # (4 cycles)
-        dropw 
+        dropw
         # => [K, V_in_leaf, V, R]
 
         # Update advice map (3 cycles)
@@ -119,7 +122,7 @@ proc.insert_single_leaf
         mtree_set
         # => [NV_old, R_new, K, V_in_leaf]
 
-        # Confirm that claimed `V_in_leaf` from advice provider is correct by checking if 
+        # Confirm that claimed `V_in_leaf` from advice provider is correct by checking if
         # `[K, V_in_leaf]` hashes to `NV_old`
         # (33 cycles)
         movupw.2 dupw.3 hmerge assert_eqw
@@ -147,7 +150,7 @@ end
 #! Outputs:
 #!   Operand stack: [V_old, R_new, ...]
 #!
-#! Cycles: X 
+#! Cycles: X
 proc.remove_single_leaf
     # Push the leaf pre-image on stack
     # (0 cycles)
@@ -163,7 +166,7 @@ proc.remove_single_leaf
         # Keys match; we're removing the value associated with K
 
         # (4 cycles)
-        dropw 
+        dropw
         # => [K, V_in_leaf, V, R]
 
         # Update advice map (3 cycles)
@@ -179,16 +182,16 @@ proc.remove_single_leaf
 
         # (29 cycles)
         mtree_set
-        # => [NV_old, R_new, K, V_in_leaf, ...] 
+        # => [NV_old, R_new, K, V_in_leaf, ...]
 
         # Confirm that hmerge([K, V_in_leaf]) = NV_old
         # (33 cycles)
         movupw.2 dupw.3 hmerge assert_eqw
-        # => [R_new, V_in_leaf, ...] 
+        # => [R_new, V_in_leaf, ...]
 
         # Cleanup stack for return (1 cycle)
         swapw
-        # => [V_in_leaf, R_new, ...] 
+        # => [V_in_leaf, R_new, ...]
     else
         # Keys don't match; this is a no-op
         # We need to ensure that hash([K_in_leaf, V_in_leaf]) = NV;
@@ -240,13 +243,13 @@ proc.set_single_leaf
     # Check if we're inserting or removing a value
     # (X cycles)
     padw eqw
-    # => [V==ZERO, ZERO, V, K, R, ...] 
+    # => [V==ZERO, ZERO, V, K, R, ...]
     if.true
         # we're removing the value associated with K (if any)
 
         # (4 cycles)
-        dropw 
-        # => [V, K, R, ...] 
+        dropw
+        # => [V, K, R, ...]
 
         # (X cycles)
         exec.remove_single_leaf
@@ -255,8 +258,8 @@ proc.set_single_leaf
         # we're inserting the key/value pair
 
         # (4 cycles)
-        dropw 
-        # => [V, K, R, ...] 
+        dropw
+        # => [V, K, R, ...]
 
         # (X cycles)
         exec.insert_single_leaf
@@ -353,6 +356,124 @@ end
 # GET
 # =================================================================================================
 
+# Inputs: [PADDING, ptr]
+# Outputs: [WORD, next_ptr]
+proc.mem_loadw_and_inc
+    dup.4
+    # => [ptr, WORD, ptr]
+    mem_loadw
+    # => [WORD, ptr]
+    movup.4
+    # => [ptr, WORD]
+    add.4
+    # => [ptr_next, WORD]
+    movdn.4
+    # => [WORD, ptr_next]
+end
+
+#! Inputs:
+#!   Operand stack: [pair_count, NV, K, R]
+#!   Advice stack:  [V1, K2, V2, K2, ...]
+proc.get_multi_leaf_value.8
+
+    div.4
+    # => [num_words, NV, K, R]
+
+    # Keep track of `num_words`
+    loc_store.4
+    # => [NV, K, R]
+
+    # We use the node value (i.e., its hash) as the commitment COM.
+    # => [COM, K, R]
+
+    # FIXME: is there any particular value I should use for the pointer?
+    push.0xA0
+    # => [ptr, COM, K, R]
+
+    loc_load.4
+    # => [num_words, ptr, COM, K, R]
+
+    exec.mem::pipe_double_words_preimage_to_memory
+    # => [ptr_end, K, R]
+
+    # Consistency check: (ptr_end - ptr) / 4 == num_words
+    sub.0xA0 div.4
+    loc_load.4
+    assert_eq.err="pipe_preimage_to_memory copied more or less than expected"
+
+    # Keep track of `K`, since we'll be comparing against it.
+    # Don't drop it though. We can reuse that stack space for better stack hygeine.
+    loc_storew.0 swapw
+    # => [R, X]
+
+    # Memory => [K1, V1, Kn, Vn, ...]
+
+    push.0xA0
+    # => [ptr, R, X]
+
+    # XXX: replace loop with new VM instruction.
+
+    # Find the one that matches the requested key.
+    loc_load.4 div.2 # => [loop_count, ptr, R, X]
+    dup loc_store.4
+    gt.0 # => [continue, ptr, R, X]
+
+    while.true
+        # => [ptr_0, R, X]
+
+        movup.8 movup.8 movup.8 movup.8
+        # => [X, ptr_0, R]
+
+        exec.mem_loadw_and_inc
+        # => [K_n, ptr_1, R]
+
+        padw loc_loadw.0
+        # => [K, K_n, ptr_1, R]
+
+        eqw
+        # => [K == K_n, K, K_n, ptr_1, R]
+
+        if.true
+            # => [K, K_n, ptr_1, R]
+
+            # Get `V` and end the loop.
+            movup.8
+            # [ptr_1, K, K_n, R]
+            mem_loadw
+            # [V_n, K_n, R]
+
+            swapw dropw
+            # => [V_n, R]
+            push.0
+            # => [continue = 0, V_n, R]
+        else
+            # => [K, K_n, ptr_1, R]
+
+            # Set the next pointer and continue the loop if we should.
+            # We only care about the single local at index `4`, but loadw will
+            # overwrite the stack instead of growing it, and we don't need the
+            # top word.
+            loc_loadw.4
+            # => [x, x, x, loop_count, K_n, ptr_1, R]
+
+            movup.3 sub.1 movdn.3
+            # => [x, x, x, loop_count', K_n, ptr_1, R]
+
+            loc_storew.4 drop drop drop
+            # => [loop_count', K_n, ptr_1, R]
+
+            gt.0
+            # => [continue, K_n, ptr_1, R]
+
+            movdn.4 dropw
+
+
+            swap add.4 swap
+            # => [continue, ptr_1, R]
+        end
+    end
+end
+
 #! Returns the value located under the specified key in the Sparse Merkle Tree defined by the
 #! specified root.
 #!
@@ -370,7 +491,7 @@ end
 #! Cycles
 #!   Leaf empty: 48 cycles
 #!   Leaf single: 99 cycles
-#!   Leaf multiple: unimplemented
+#!   Leaf multiple: 184 cycles
 export.get
     # Prepare for `mtree_get`
     # (6 cycles)
@@ -431,9 +552,11 @@ export.get
             hmerge assert_eqw
             # => [V, R]
         else
-            # Multiple kv-pair case
-            # TODO (fail for now)
-            push.1 assertz
+            # => [leaf_size, NV, K, R]
+
+            exec.get_multi_leaf_value
+
+            # => [V, R]
         end
     end
 end
