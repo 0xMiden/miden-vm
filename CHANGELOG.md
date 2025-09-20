@@ -53,6 +53,7 @@
 - Allowed references between constants without requiring them to be declared in a specific order ([#2120](https://github.com/0xMiden/miden-vm/pull/2120)).
 - Introduced new `pub proc` syntax for procedure declarations to replace `export` syntax. This change is backwards-compatible. ([#2120](https://github.com/0xMiden/miden-vm/pull/2120)).
 - [BREAKING] Disallowed the use of word literals in conjunction with dot-delimited `push` syntax ([#2120](https://github.com/0xMiden/miden-vm/pull/2120)).
+- fix RawDecoratorIdIterator un-padding off-by-one ([#2193](https://github.com/0xMiden/miden-vm/pull/2193))
 
 ## 0.17.1 (2025-08-29)
 
