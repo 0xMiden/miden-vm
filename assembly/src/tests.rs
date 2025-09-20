@@ -3288,6 +3288,7 @@ prop_compose! {
                         name: export.name.clone(),
                         digest,
                         signature: export.signature.clone(),
+                        attributes: export.attributes.clone(),
                     });
                 }
             }
@@ -3302,6 +3303,7 @@ prop_compose! {
                     name: main,
                     digest,
                     signature: None,
+                    attributes: Default::default(),
                 });
             }
         }

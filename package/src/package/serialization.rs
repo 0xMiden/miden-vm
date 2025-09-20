@@ -28,7 +28,7 @@ use alloc::{
 
 use miden_assembly_syntax::{
     Library,
-    ast::QualifiedProcedureName,
+    ast::{AttributeSet, QualifiedProcedureName},
     library::{FunctionTypeDeserializer, FunctionTypeSerializer},
 };
 use miden_core::{
@@ -339,6 +339,7 @@ impl Serializable for PackageExport {
                 target.write_bool(false);
             },
         }
+        self.attributes.write_into(target);
     }
 }
 
@@ -351,6 +352,7 @@ impl Deserializable for PackageExport {
         } else {
             None
         };
-        Ok(Self { name, digest, signature })
+        let attributes = AttributeSet::read_from(source)?;
+        Ok(Self { name, digest, signature, attributes })
     }
 }

@@ -3,7 +3,12 @@ mod set;
 
 use core::fmt;
 
+use miden_core::utils::{
+    ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+};
 use miden_debug_types::{SourceSpan, Spanned};
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 pub use self::{
     meta::{BorrowedMeta, Meta, MetaExpr, MetaItem, MetaKeyValue, MetaList},
@@ -34,6 +39,11 @@ use crate::{ast::Ident, prettier};
 /// Any remaining attributes we don't explicitly handle in the assembler, will be passed along as
 /// metadata attached to the procedures in the MAST output by the assembler.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(
+    all(feature = "serde", feature = "arbitrary"),
+    miden_serde_test_macros::serde_test
+)]
 pub enum Attribute {
     /// A named behavior, trait or action; e.g. `@inline`
     Marker(Ident),
@@ -244,5 +254,55 @@ impl From<MetaList> for Attribute {
 impl From<MetaKeyValue> for Attribute {
     fn from(value: MetaKeyValue) -> Self {
         Self::KeyValue(value)
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+impl proptest::arbitrary::Arbitrary for Attribute {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        use proptest::{arbitrary::any, prop_oneof, strategy::Strategy};
+
+        prop_oneof![
+            any::<Ident>().prop_map(Self::Marker),
+            any::<MetaList>().prop_map(Self::List),
+            any::<MetaKeyValue>().prop_map(Self::KeyValue),
+        ]
+        .boxed()
+    }
+
+    type Strategy = proptest::prelude::BoxedStrategy<Self>;
+}
+
+impl Serializable for Attribute {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        match self {
+            Self::Marker(name) => {
+                target.write_u8(0);
+                name.write_into(target);
+            },
+            Self::List(list) => {
+                target.write_u8(1);
+                list.write_into(target);
+            },
+            Self::KeyValue(kv) => {
+                target.write_u8(1);
+                kv.write_into(target);
+            },
+        }
+    }
+}
+
+impl Deserializable for Attribute {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        match source.read_u8()? {
+            0 => Ident::read_from(source).map(Self::Marker),
+            1 => MetaList::read_from(source).map(Self::List),
+            2 => MetaKeyValue::read_from(source).map(Self::KeyValue),
+            n => Err(DeserializationError::InvalidValue(format!(
+                "unknown Attribute variant tag '{n}'"
+            ))),
+        }
     }
 }

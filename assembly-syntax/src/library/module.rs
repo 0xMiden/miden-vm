@@ -5,7 +5,7 @@ use midenc_hir_type::FunctionType;
 use super::LibraryPath;
 use crate::{
     Word,
-    ast::{ProcedureIndex, ProcedureName},
+    ast::{AttributeSet, ProcedureIndex, ProcedureName},
 };
 
 // MODULE INFO
@@ -29,8 +29,9 @@ impl ModuleInfo {
         name: ProcedureName,
         digest: Word,
         signature: Option<Arc<FunctionType>>,
+        attributes: AttributeSet,
     ) {
-        self.procedures.push(ProcedureInfo { name, digest, signature });
+        self.procedures.push(ProcedureInfo { name, digest, signature, attributes });
     }
 
     /// Returns the module's library path.
@@ -80,4 +81,5 @@ pub struct ProcedureInfo {
     pub name: ProcedureName,
     pub digest: Word,
     pub signature: Option<Arc<FunctionType>>,
+    pub attributes: AttributeSet,
 }

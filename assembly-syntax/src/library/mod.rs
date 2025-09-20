@@ -12,7 +12,7 @@ use proptest::prelude::*;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 
-use crate::ast::QualifiedProcedureName;
+use crate::ast::{AttributeSet, QualifiedProcedureName};
 
 mod error;
 mod module;
@@ -46,17 +46,30 @@ pub struct LibraryExport {
     /// The type signature of the exported procedure, if known
     #[cfg_attr(feature = "serde", serde(default))]
     pub signature: Option<FunctionType>,
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub attributes: AttributeSet,
 }
 
 impl LibraryExport {
     /// Create a new [LibraryExport] representing the export of `node` with `name`
     pub fn new(node: MastNodeId, name: QualifiedProcedureName) -> Self {
-        Self { node, name, signature: None }
+        Self {
+            node,
+            name,
+            signature: None,
+            attributes: Default::default(),
+        }
     }
 
     /// Specify the type signature and ABI of this export
     pub fn with_signature(mut self, signature: FunctionType) -> Self {
         self.signature = Some(signature);
+        self
+    }
+
+    /// Specify the set of attributes attached to this export
+    pub fn with_attributes(mut self, attrs: AttributeSet) -> Self {
+        self.attributes = attrs;
         self
     }
 }
@@ -74,6 +87,7 @@ impl Arbitrary for LibraryExport {
                 node: nodeid,
                 name: procname,
                 signature: None,
+                attributes: Default::default(),
             })
             .boxed()
     }
@@ -223,7 +237,7 @@ impl Library {
     pub fn module_infos(&self) -> impl Iterator<Item = ModuleInfo> {
         let mut modules_by_path: BTreeMap<LibraryPath, ModuleInfo> = BTreeMap::new();
 
-        for LibraryExport { node, name, signature } in self.exports.values() {
+        for LibraryExport { node, name, signature, attributes } in self.exports.values() {
             modules_by_path
                 .entry(name.module.clone())
                 .and_modify(|compiled_module| {
@@ -232,6 +246,7 @@ impl Library {
                         name.name.clone(),
                         proc_digest,
                         signature.clone().map(Arc::new),
+                        attributes.clone(),
                     );
                 })
                 .or_insert_with(|| {
@@ -242,6 +257,7 @@ impl Library {
                         name.name.clone(),
                         proc_digest,
                         signature.clone().map(Arc::new),
+                        attributes.clone(),
                     );
 
                     module_info
@@ -381,6 +397,7 @@ impl TryFrom<Library> for KernelLibrary {
                 export.name.name.clone(),
                 proc_digest,
                 export.signature.clone().map(Arc::new),
+                export.attributes.clone(),
             );
         }
 
@@ -413,7 +430,7 @@ impl Serializable for Library {
         mast_forest.write_into(target);
 
         target.write_usize(exports.len());
-        for LibraryExport { node, name, signature } in exports.values() {
+        for LibraryExport { node, name, signature, attributes: _ } in exports.values() {
             name.module.write_into(target);
             name.name.write_into(target);
             target.write_u32(node.as_u32());
@@ -447,7 +464,12 @@ impl Deserializable for Library {
             } else {
                 None
             };
-            let export = LibraryExport { node, name: proc_name.clone(), signature };
+            let export = LibraryExport {
+                node,
+                name: proc_name.clone(),
+                signature,
+                attributes: Default::default(),
+            };
 
             exports.insert(proc_name, export);
         }

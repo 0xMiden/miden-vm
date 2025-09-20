@@ -161,7 +161,7 @@ fn parse_forms_internal(
     let lexer = Lexer::new(source_id, scanner);
     let felt_type = Arc::new(ast::types::ArrayType::new(ast::types::Type::Felt, 4));
     grammar::FormsParser::new()
-        .parse(&source, interned, &felt_type, core::marker::PhantomData, lexer)
+        .parse(source_id, interned, &felt_type, core::marker::PhantomData, lexer)
         .map_err(|err| ParsingError::from_parse_error(source_id, err))
 }
 

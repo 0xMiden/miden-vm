@@ -475,10 +475,12 @@ impl Assembler {
                         .expect("compilation succeeded but root not found in cache")
                         .body_node_id();
                     let signature = self.linker.resolve_signature(gid)?;
+                    let attributes = self.linker.resolve_attributes(gid)?;
                     let export = LibraryExport {
                         node,
                         name: fqn.clone(),
                         signature: signature.map(Arc::unwrap_or_clone),
+                        attributes,
                     };
                     exports.insert(fqn, export);
                 }
