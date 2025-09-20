@@ -1650,7 +1650,7 @@ Push: SmallOpsVec = {
         ))]
     },
 
-    <l:@L> "push" "." <imm_value:HexWord> <r:@R> => {
+    <l:@L> "push" "." <imm_value:WordLiteral> <r:@R> => {
         smallvec![Op::Inst(Span::new(
             span!(source_file.id(), l, r),
             Instruction::Push(Immediate::Value(imm_value.map(PushValue::Word)))
@@ -1855,17 +1855,17 @@ WordImm: Immediate<WordValue> = {
     <ConstantName> => Immediate::Constant(<>),
 }
 
+#[inline]
+WordLiteral: Span<WordValue> = {
+    <l:@L> <value:WordValue> <r:@R> => Span::new(span!(source_file.id(), l, r), value),
+}
+
 WordValue: WordValue = {
     <l:@L> "[" <v0:Felt> "," <v1:Felt> ","<v2:Felt> ","<v3:Felt> "]" <r:@R> => {
         WordValue([v0,v1,v2,v3])
     },
 
     hex_word,
-}
-
-#[inline]
-HexWord: Span<WordValue> = {
-    <l:@L> <value:hex_word> <r:@R> => Span::new(span!(source_file.id(), l, r), value),
 }
 
 PushImm: Immediate<PushValue> = {

@@ -924,6 +924,30 @@ impl<'input> Token<'input> {
         )
     }
 
+    /// Returns true if this token represents the name of an type or a type-related keyword.
+    ///
+    /// This is used to simplify diagnostic output related to expected tokens so as not to
+    /// overwhelm the user with a ton of possible expected tokens.
+    pub fn is_type_keyword(&self) -> bool {
+        matches!(
+            self,
+            Token::Addrspace
+                | Token::Ptr
+                | Token::I1
+                | Token::I8
+                | Token::I16
+                | Token::I32
+                | Token::I64
+                | Token::I128
+                | Token::U8
+                | Token::U16
+                | Token::U32
+                | Token::U64
+                | Token::U128
+                | Token::Struct
+        )
+    }
+
     const KEYWORDS: &'static [(&'static str, Token<'static>)] = &[
         ("add", Token::Add),
         ("addrspace", Token::Addrspace),

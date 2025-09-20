@@ -424,6 +424,7 @@ fn simplify_expected_tokens(expected: Vec<String>) -> Vec<String> {
     use super::Token;
     let mut has_instruction = false;
     let mut has_ctrl = false;
+    let mut has_type = false;
     expected
         .into_iter()
         .filter_map(|t| {
@@ -451,6 +452,14 @@ fn simplify_expected_tokens(expected: Vec<String>) -> Vec<String> {
                     if !has_instruction {
                         has_instruction = true;
                         Some("primitive opcode (e.g. \"add\")".to_string())
+                    } else {
+                        None
+                    }
+                },
+                Some(tok) if tok.is_type_keyword() => {
+                    if !has_type {
+                        has_type = true;
+                        Some("type (e.g. \"felt\")".to_string())
                     } else {
                         None
                     }
