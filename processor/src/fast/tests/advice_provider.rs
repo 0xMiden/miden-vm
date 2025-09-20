@@ -1,15 +1,7 @@
-use alloc::collections::BTreeMap;
-
-use miden_assembly::SourceManager;
-use miden_core::Word;
-use miden_debug_types::{Location, SourceFile, SourceManagerSync, SourceSpan};
 use pretty_assertions::assert_eq;
 
 use super::*;
-use crate::{
-    AdviceMutation, AsyncHost, BaseHost, EventError, FutureMaybeSend, MastForestStore,
-    MemMastForestStore, MemoryAddress, ProcessState, SyncHost,
-};
+use crate::test_utils::test_consistency_host::TestConsistencyHost;
 
 #[test]
 fn test_advice_provider() {
@@ -157,12 +149,12 @@ fn test_advice_provider() {
     };
 
     // fast processor
-    let mut fast_host = ConsistencyHost::new(kernel_lib.mast_forest().clone());
+    let mut fast_host = TestConsistencyHost::with_kernel_forest(kernel_lib.mast_forest().clone());
     let processor = FastProcessor::new_debug(&stack_inputs, AdviceInputs::default());
     let fast_stack_outputs = processor.execute_sync(&program, &mut fast_host).unwrap();
 
     // slow processor
-    let mut slow_host = ConsistencyHost::new(kernel_lib.mast_forest().clone());
+    let mut slow_host = TestConsistencyHost::with_kernel_forest(kernel_lib.mast_forest().clone());
     let mut slow_processor = Process::new(
         kernel_lib.kernel().clone(),
         StackInputs::new(stack_inputs).unwrap(),
@@ -175,131 +167,22 @@ fn test_advice_provider() {
     assert_eq!(fast_stack_outputs, slow_stack_outputs);
 
     // check hosts. Check one trace event at a time to help debugging.
-    for (trace_id, fast_snapshots) in fast_host.snapshots.iter() {
-        let slow_snapshots = slow_host.snapshots.get(trace_id).unwrap_or_else(|| {
+    for (trace_id, fast_snapshots) in fast_host.snapshots().iter() {
+        let slow_snapshots = slow_host.snapshots().get(trace_id).unwrap_or_else(|| {
             panic!("fast host has snapshot(s) for trace id {trace_id}, but slow host doesn't")
         });
         assert_eq!(fast_snapshots, slow_snapshots, "trace id: {trace_id}");
     }
-    for (trace_id, slow_snapshots) in slow_host.snapshots.iter() {
-        let fast_snapshots = fast_host.snapshots.get(trace_id).unwrap_or_else(|| {
+    for (trace_id, slow_snapshots) in slow_host.snapshots().iter() {
+        let fast_snapshots = fast_host.snapshots().get(trace_id).unwrap_or_else(|| {
             panic!("slow host has snapshot(s) for trace id {trace_id}, but fast host doesn't")
         });
         assert_eq!(fast_snapshots, slow_snapshots, "trace_id: {trace_id}");
     }
 
     // Still check the snapshots explicitly just in case we have a bug in the logic above.
-    assert_eq!(fast_host.snapshots, slow_host.snapshots);
+    assert_eq!(fast_host.snapshots(), slow_host.snapshots());
 }
 
 // Host Implementation
 // ==============================================================================================
-
-/// A snapshot of the state of a process at a given clock cycle.
-#[derive(Debug, PartialEq, Eq)]
-struct ProcessStateSnapshot {
-    clk: RowIndex,
-    ctx: ContextId,
-    fmp: u64,
-    stack_state: Vec<Felt>,
-    stack_words: [Word; 4],
-    mem_state: Vec<(MemoryAddress, Felt)>,
-}
-
-impl From<&ProcessState<'_>> for ProcessStateSnapshot {
-    fn from(state: &ProcessState) -> Self {
-        ProcessStateSnapshot {
-            clk: state.clk(),
-            ctx: state.ctx(),
-            fmp: state.fmp(),
-            stack_state: state.get_stack_state(),
-            stack_words: [
-                state.get_stack_word(0),
-                state.get_stack_word(4),
-                state.get_stack_word(8),
-                state.get_stack_word(12),
-            ],
-            mem_state: state.get_mem_state(state.ctx()),
-        }
-    }
-}
-
-#[derive(Debug)]
-struct ConsistencyHost<S: SourceManager = DefaultSourceManager> {
-    /// A map of trace ID to a list of snapshots. A single trace ID can be associated with multiple
-    /// snapshots for example if it's used in a loop.
-    snapshots: BTreeMap<u32, Vec<ProcessStateSnapshot>>,
-    store: MemMastForestStore,
-    source_manager: Arc<S>,
-}
-
-impl ConsistencyHost {
-    fn new(kernel_forest: Arc<MastForest>) -> Self {
-        let mut store = MemMastForestStore::default();
-        store.insert(kernel_forest.clone());
-        let source_manager = Arc::new(DefaultSourceManager::default());
-        Self {
-            snapshots: BTreeMap::new(),
-            store,
-            source_manager,
-        }
-    }
-}
-
-impl<S> BaseHost for ConsistencyHost<S>
-where
-    S: SourceManager,
-{
-    fn get_label_and_source_file(
-        &self,
-        location: &Location,
-    ) -> (SourceSpan, Option<Arc<SourceFile>>) {
-        let maybe_file = self.source_manager.get_by_uri(location.uri());
-        let span = self.source_manager.location_to_span(location.clone()).unwrap_or_default();
-        (span, maybe_file)
-    }
-
-    fn on_trace(
-        &mut self,
-        process: &mut ProcessState,
-        trace_id: u32,
-    ) -> Result<(), ExecutionError> {
-        let snapshot = ProcessStateSnapshot::from(&*process);
-        self.snapshots.entry(trace_id).or_default().push(snapshot);
-
-        Ok(())
-    }
-}
-
-impl<S> SyncHost for ConsistencyHost<S>
-where
-    S: SourceManager,
-{
-    fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>> {
-        self.store.get(node_digest)
-    }
-
-    fn on_event(&mut self, _process: &ProcessState<'_>) -> Result<Vec<AdviceMutation>, EventError> {
-        Ok(Vec::new())
-    }
-}
-
-impl<S> AsyncHost for ConsistencyHost<S>
-where
-    S: SourceManagerSync,
-{
-    #[allow(clippy::manual_async_fn)]
-    fn get_mast_forest(&self, node_digest: &Word) -> impl FutureMaybeSend<Option<Arc<MastForest>>> {
-        let result = <Self as SyncHost>::get_mast_forest(self, node_digest);
-        async move { result }
-    }
-    // Note: clippy complains about this not using the `async` keyword, but if we use `async`, it
-    // doesn't compile.
-    #[allow(clippy::manual_async_fn)]
-    fn on_event(
-        &mut self,
-        _process: &ProcessState<'_>,
-    ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>> {
-        async move { Ok(Vec::new()) }
-    }
-}

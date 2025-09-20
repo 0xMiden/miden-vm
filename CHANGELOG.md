@@ -20,6 +20,7 @@
 - Added endianness-aware memory instructions: `mem_loadw_be`, `mem_loadw_le`, `mem_storew_be`, and `mem_storew_le` for explicit control over word element ordering in memory operations ([#2125](https://github.com/0xMiden/miden-vm/issues/2125))
 - `FastProcessor::execute_*()` methods now also return the state of the memory in a new `ExecutionOutput` struct ([#2028](https://github.com/0xMiden/miden-vm/pull/2128)).
 - Better document the normalizing behavior of `MastForestMerger::merge` ([#2174](https://github.com/0xMiden/miden-vm/pull/2174)).
+- Added `before_enter` and `after_exit` decorator lists to `BasicBlockNode`.([#2167](https://github.com/0xMiden/miden-vm/pull/2167))
 
 #### Changes
 
