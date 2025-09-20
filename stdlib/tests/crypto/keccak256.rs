@@ -8,19 +8,19 @@
 
 use core::array;
 
-use miden_core::{EventId, Felt};
+use miden_core::Felt;
 use miden_crypto::{
     Word,
     hash::{keccak::Keccak256, rpo::Rpo256},
 };
-use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessState};
-use miden_stdlib::handlers::keccak256::{KECCAK_HASH_MEMORY_EVENT_NAME, KeccakFeltDigest};
+use miden_stdlib::handlers::keccak256::{
+    KECCAK_HASH_MEMORY_EVENT_ID, KECCAK_HASH_MEMORY_EVENT_NAME, KeccakFeltDigest,
+};
 
 // Test constants
 // ================================================================================================
 
 const INPUT_MEMORY_ADDR: u32 = 128;
-const DEBUG_EVENT_NAME: &str = "miden::debug";
 
 // TESTS
 // ================================================================================================
@@ -70,16 +70,27 @@ fn test_keccak_handler(input_u8: &[u8]) {
 
                 emit.event("{KECCAK_HASH_MEMORY_EVENT_NAME}")
                 drop drop
-
-                emit.event("{DEBUG_EVENT_NAME}")
             end
             "#,
     );
 
-    let mut test = build_debug_test!(source, &[]);
+    let test = build_debug_test!(source, &[]);
 
-    test.add_event_handler(EventId::from_name(DEBUG_EVENT_NAME), preimage.handler_test());
-    test.execute().unwrap();
+    let output = test.execute().unwrap();
+
+    let advice_stack = output.advice_provider().stack();
+    assert_eq!(advice_stack, preimage.digest().inner());
+
+    let deferred = output.advice_provider().deferred();
+    assert_eq!(deferred.len(), 1, "advice deferred must contain one entry");
+    let (event_id, witness) = deferred[0].clone();
+    assert_eq!(event_id, KECCAK_HASH_MEMORY_EVENT_ID, "event ID does not match");
+
+    let witness_expected: Vec<Felt> = {
+        let len_bytes = preimage.0.len() as u64;
+        [Felt::new(len_bytes)].into_iter().chain(preimage.as_felt()).collect()
+    };
+    assert_eq!(witness, witness_expected, "witness in deferred storage does not match preimage");
 }
 
 fn test_keccak_hash_memory_impl(input_u8: &[u8]) {
@@ -282,31 +293,5 @@ impl Preimage {
             .map(|value| format!("push.{}", value))
             .collect::<Vec<_>>()
             .join(" ")
-    }
-
-    /// Handler for verifying the correctness of the keccak handler.
-    fn handler_test(self) -> impl EventHandler {
-        move |process: &ProcessState| -> Result<Vec<AdviceMutation>, EventError> {
-            let digest = self.digest();
-            assert_eq!(
-                &digest.inner(),
-                process.advice_provider().stack(),
-                "digest not found in advice stack"
-            );
-
-            let calldata_commitment = self.calldata_commitment();
-            let witness = process
-                .advice_provider()
-                .get_mapped_values(&calldata_commitment)
-                .expect("witness was not found in advice map with key {calldata_commitment:?}");
-            let witness_expected: Vec<Felt> = {
-                let len_bytes = self.0.len() as u64;
-
-                [Felt::new(len_bytes)].into_iter().chain(self.as_felt()).collect()
-            };
-            assert_eq!(witness, witness_expected, "witness in advice map does not match preimage");
-
-            Ok(vec![])
-        }
     }
 }
