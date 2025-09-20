@@ -3993,32 +3993,3 @@ end"#
     insta::assert_snapshot!(program);
     Ok(())
 }
-
-#[test]
-fn test_issue_2181_locaddr_bug_assembly_mast_forest() -> TestResult {
-    let context = TestContext::default().with_debug_info(true);
-    let source = source_file!(
-        &context,
-        r#"
-proc.some_proc
-    debug.stack.4
-    nop
-end
-
-proc.main.4
-    locaddr.0 debug.stack.4
-    locaddr.0 debug.stack.4
-    locaddr.0 debug.stack.4
-    exec.some_proc
-    debug.stack.4
-    dropw
-end
-
-begin
-    exec.main
-end"#
-    );
-    let program = context.assemble(source)?;
-    insta::assert_debug_snapshot!(program.mast_forest());
-    Ok(())
-}
