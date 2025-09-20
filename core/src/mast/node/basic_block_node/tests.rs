@@ -492,3 +492,51 @@ proptest! {
         }
     }
 }
+
+fn decorator_strategy(
+    nops: usize,
+    max_decorators: usize,
+) -> impl Strategy<Value = Vec<(usize, DecoratorId)>> {
+    prop::collection::vec(
+        (0..=nops, any::<u32>().prop_map(DecoratorId::new_unchecked)),
+        0..=max_decorators,
+    )
+    .prop_map(move |mut decorators| {
+        // Sort decorators by index to satisfy the BasicBlockNode requirement
+        decorators.sort_by_key(|(idx, _)| *idx);
+        decorators
+    })
+}
+
+// Strategy for generating a list of decorators with valid indices for a given operation sequence
+fn decorator_list_strategy(
+    ops_num: usize,
+) -> impl Strategy<Value = (Vec<Operation>, Vec<(usize, DecoratorId)>)> {
+    op_non_control_sequence_strategy(ops_num)
+        .prop_flat_map(|ops| (Just(ops.clone()), decorator_strategy(ops.len(), ops.len())))
+}
+
+proptest! {
+    /// Test that the raw_decorator_iter() method correctly preserves the original decorator list.
+    /// Given random operations and decorators with indices in the valid range,
+    /// creating a BasicBlock and then collecting its raw decorators should yield the original list.
+    #[test]
+    fn test_raw_decorator_iter_preserves_decorators(
+        (ops, decs) in decorator_list_strategy(20)
+    ) {
+        // Create a basic block with the generated operations and decorators
+        let block = BasicBlockNode::new(ops.clone(), Some(decs.clone())).unwrap();
+
+        // Collect the decorators using raw_decorator_iter()
+        let collected_decorators: Vec<(usize, &DecoratorId)> = block.raw_decorator_iter().collect();
+
+        // Convert to owned DecoratorId for comparison
+        let collected_owned: Vec<(usize, DecoratorId)> = collected_decorators
+            .into_iter()
+            .map(|(idx, &decorator_id)| (idx, decorator_id))
+            .collect();
+
+        // The collected decorators should match the original decorators
+        prop_assert_eq!(collected_owned, decs);
+    }
+}
