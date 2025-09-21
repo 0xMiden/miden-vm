@@ -1,7 +1,10 @@
 use miden_crypto::{Felt, ONE, Word};
 
 use super::*;
-use crate::{Decorator, Operation, mast::BasicBlockNode};
+use crate::{
+    Decorator, Operation,
+    mast::{BasicBlockNode, MastNode},
+};
 
 fn block_foo() -> MastNode {
     BasicBlockNode::new(vec![Operation::Mul, Operation::Add], None).unwrap().into()
