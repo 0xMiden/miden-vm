@@ -2,7 +2,7 @@ use alloc::string::String;
 use core::fmt;
 
 use miden_core::{
-    Felt, FieldElement,
+    Felt, FieldElement, StarkField,
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 #[cfg(feature = "serde")]
@@ -355,7 +355,13 @@ impl Serializable for IntValue {
 impl Deserializable for IntValue {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let raw = source.read_u64()?;
-        Ok(super::lexer::shrink_u64_hex(raw))
+        if raw >= Felt::MODULUS {
+            Err(DeserializationError::InvalidValue(
+                "int value is greater than field modulus".into(),
+            ))
+        } else {
+            Ok(super::lexer::shrink_u64_hex(raw))
+        }
     }
 }
 
