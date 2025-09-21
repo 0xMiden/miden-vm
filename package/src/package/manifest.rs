@@ -84,15 +84,16 @@ impl PackageManifest {
 #[cfg_attr(feature = "arbitrary", derive(proptest_derive::Arbitrary))]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct PackageExport {
-    /// The fully-qualified name of the procedure exported by this package
+    /// The fully-qualified name of the procedure exported by this package.
     pub name: QualifiedProcedureName,
-    /// The digest of the procedure exported by this package
+    /// The digest of the procedure exported by this package.
     #[cfg_attr(feature = "arbitrary", proptest(value = "Word::default()"))]
     pub digest: Word,
-    /// The type signature of the exported procedure
+    /// The type signature of the exported procedure.
     #[cfg_attr(feature = "arbitrary", proptest(value = "None"))]
     #[cfg_attr(feature = "serde", serde(default))]
     pub signature: Option<FunctionType>,
+    /// Attributes attached to the exported procedure.
     #[cfg_attr(feature = "arbitrary", proptest(value = "AttributeSet::default()"))]
     #[cfg_attr(feature = "serde", serde(default))]
     pub attributes: AttributeSet,

@@ -10,7 +10,7 @@ use crate::ast::Ident;
 /// An [AttributeSet] provides storage and access to all of the attributes attached to a Miden
 /// Assembly item, e.g. procedure definition.
 ///
-/// Attributes are uniqued by name, so if you attempt to add multiple attributes with the same name,
+/// Attributes are unique by name, so if you attempt to add multiple attributes with the same name,
 /// the last write wins. In Miden Assembly syntax, multiple key-value attributes are merged
 /// automatically, and a syntax error is only generated when keys conflict. All other attribute
 /// types produce an error if they are declared multiple times on the same item.
@@ -24,7 +24,7 @@ pub struct AttributeSet {
     /// * We expect attributes to be relatively rare, with no more than a handful on the same item
     ///   at any given time.
     /// * A vector is much more space and time efficient to search for small numbers of items
-    /// * We can acheive map-like semantics without O(N) complexity by keeping the vector sorted by
+    /// * We can achieve map-like semantics without O(N) complexity by keeping the vector sorted by
     ///   the attribute name, and using binary search to search it. This gives us O(1) best-case
     ///   performance, and O(log N) in the worst case.
     attrs: Vec<Attribute>,
