@@ -174,19 +174,19 @@ impl proptest::arbitrary::Arbitrary for WordValue {
 
 impl Serializable for WordValue {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        target.write_u64(self.0[0].as_int());
-        target.write_u64(self.0[1].as_int());
-        target.write_u64(self.0[2].as_int());
-        target.write_u64(self.0[3].as_int());
+        self.0[0].write_into(target);
+        self.0[1].write_into(target);
+        self.0[2].write_into(target);
+        self.0[3].write_into(target);
     }
 }
 
 impl Deserializable for WordValue {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let a = source.read_u64().map(Felt::new)?;
-        let b = source.read_u64().map(Felt::new)?;
-        let c = source.read_u64().map(Felt::new)?;
-        let d = source.read_u64().map(Felt::new)?;
+        let a = Felt::read_from(source)?;
+        let b = Felt::read_from(source)?;
+        let c = Felt::read_from(source)?;
+        let d = Felt::read_from(source)?;
         Ok(Self([a, b, c, d]))
     }
 }
