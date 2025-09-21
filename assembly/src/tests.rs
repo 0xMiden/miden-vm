@@ -1,6 +1,9 @@
 use alloc::{collections::BTreeSet, string::ToString, vec::Vec};
 use core::str::FromStr;
-use std::sync::{Arc, LazyLock};
+use std::{
+    eprintln,
+    sync::{Arc, LazyLock},
+};
 
 use miden_assembly_syntax::diagnostics::WrapErr;
 use miden_core::{
