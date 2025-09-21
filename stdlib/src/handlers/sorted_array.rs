@@ -1,7 +1,7 @@
 use alloc::{vec, vec::Vec};
 
 use miden_core::{EventId, Felt, LexicographicWord, Word};
-use miden_processor::{AdviceMutation, EventError, MemoryError, ProcessState, get_mem_addr_range};
+use miden_processor::{AdviceMutation, EventError, MemoryError, ProcessState};
 
 /// Qualified event names for `lowerbound` events.
 pub const LOWERBOUND_ARRAY_EVENT_NAME: &str = "stdlib::collections::sorted_array::lowerbound_array";
@@ -67,12 +67,12 @@ fn push_lowerbound_result(
 
     // Read inputs from the stack
     let key = LexicographicWord::new(process.get_stack_word(KEY_OFFSET));
-    let (start_addr, end_addr) = get_mem_addr_range(process, START_ADDR_OFFSET, END_ADDR_OFFSET)?;
+    let addr_range = process.get_mem_addr_range(START_ADDR_OFFSET, END_ADDR_OFFSET)?;
 
     // Validate the start_addr is word-aligned (multiple of 4)
-    if start_addr % 4 != 0 {
+    if addr_range.start % 4 != 0 {
         return Err(MemoryError::unaligned_word_access(
-            start_addr,
+            addr_range.start,
             process.ctx(),
             Felt::from(process.clk()),
             &(),
@@ -80,32 +80,25 @@ fn push_lowerbound_result(
         .into());
     }
 
-    // Validate address range is valid
-    if start_addr > end_addr {
-        return Err(MemoryError::InvalidMemoryRange {
-            start_addr: start_addr as u64,
-            end_addr: end_addr as u64,
-        }
-        .into());
-    }
-
     // Validate the end_addr is properly aligned (i.e. the entire array has size divisible by
     // stride)
-    if (end_addr - start_addr) % stride != 0 {
+    if (addr_range.end - addr_range.start) % stride != 0 {
         if stride == 4 {
-            return Err(SortedArrayError::InvalidArrayRange { size: end_addr - start_addr }.into());
+            return Err(
+                SortedArrayError::InvalidArrayRange { size: addr_range.len() as u32 }.into()
+            );
         } else {
             return Err(
-                SortedArrayError::InvalidKeyValueRange { size: end_addr - start_addr }.into()
+                SortedArrayError::InvalidKeyValueRange { size: addr_range.len() as u32 }.into()
             );
         }
     }
 
     // If range is empty, result is end_ptr
-    if start_addr == end_addr {
+    if addr_range.is_empty() {
         return Ok(vec![AdviceMutation::extend_stack(vec![
             Felt::from(false),
-            Felt::from(end_addr),
+            Felt::from(addr_range.end),
         ])]);
     }
 
@@ -122,35 +115,33 @@ fn push_lowerbound_result(
     let mut result = None;
 
     // Test the first element
-    let mut previous_word = get_word(start_addr)?;
+    let mut previous_word = get_word(addr_range.start)?;
     if previous_word >= key {
         was_key_found = previous_word == key;
-        result = Some(start_addr);
+        result = Some(addr_range.start);
     }
 
     // Validate the entire array is non-decreasing and find the first element where `element >= key`
-    let mut current_addr = start_addr + stride;
-    while current_addr < end_addr {
-        let current_word = get_word(current_addr)?;
-        if current_word < previous_word {
+    for addr in addr_range.clone().step_by(stride as usize).skip(1) {
+        let word = get_word(addr)?;
+        if word < previous_word {
             return Err(SortedArrayError::NotAscendingOrder {
-                index: current_addr,
-                value: current_word.into(),
+                index: addr,
+                value: word.into(),
                 predecessor: previous_word.into(),
             }
             .into());
         }
-        if current_word >= key && result.is_none() {
-            was_key_found = current_word == key;
-            result = Some(current_addr);
+        if word >= key && result.is_none() {
+            was_key_found = word == key;
+            result = Some(addr);
         }
-        previous_word = current_word;
-        current_addr += stride;
+        previous_word = word;
     }
 
     Ok(vec![AdviceMutation::extend_stack(vec![
         Felt::from(was_key_found),
-        Felt::from(result.unwrap_or(end_addr)),
+        Felt::from(result.unwrap_or(addr_range.end)),
     ])])
 }
 

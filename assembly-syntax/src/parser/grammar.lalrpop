@@ -393,6 +393,7 @@ TypeExpr: TypeExpr = {
 PointerType: PointerType = {
     <l:@L> "ptr" "<" <pointee:TypeExpr> <addrspace:("," "addrspace" "(" <AddressSpace> ")")?> ">" <r:@R> => {
         let span = span!(source_id, l, r);
+
         let ty = PointerType::new(pointee).with_span(span);
         if let Some(addrspace) = addrspace {
             ty.with_address_space(addrspace)
