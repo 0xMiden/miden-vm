@@ -11,7 +11,10 @@ use std::sync::Arc;
 
 use miden_air::ProvingOptions;
 use miden_assembly::Assembler;
-use miden_core::{Felt, ProgramInfo, precompile::PrecompileVerifiers};
+use miden_core::{
+    Felt, FieldElement, ProgramInfo,
+    precompile::{PrecompileCommitment, PrecompileVerifiers},
+};
 use miden_crypto::Word;
 use miden_processor::{AdviceInputs, DefaultHost, Program, StackInputs};
 use miden_stdlib::{
@@ -88,7 +91,6 @@ fn test_keccak_handler(input_u8: &[u8]) {
     let deferred = output.advice_provider().precompile_requests().clone().into_requests();
     assert_eq!(deferred.len(), 1, "advice deferred must contain one entry");
     let precompile_data = &deferred[0];
-    assert_eq!(precompile_data.event_id, KECCAK_HASH_MEMORY_EVENT_ID, "event ID does not match");
 
     // PrecompileData contains the raw input bytes directly
     assert_eq!(
@@ -117,7 +119,7 @@ fn test_keccak_hash_memory_impl(input_u8: &[u8]) {
                 # => [ptr, len_bytes]
 
                 exec.keccak256::hash_memory_impl
-                # => [COMM, DIGEST_U32[8]]
+                # => [COMM, TAG, DIGEST_U32[8]]
 
                 exec.sys::truncate_stack
             end
@@ -129,18 +131,31 @@ fn test_keccak_hash_memory_impl(input_u8: &[u8]) {
     let output = test.execute().unwrap();
     let stack = output.stack_outputs();
     let commitment = stack.get_stack_word(0).unwrap();
+    let tag = stack.get_stack_word(4).unwrap();
+    let precompile_commitment = PrecompileCommitment { tag, commitment };
     assert_eq!(
-        commitment,
+        precompile_commitment,
         preimage.precompile_commitment(),
         "precompile_commitment does not match"
     );
 
-    let digest: [Felt; 8] = array::from_fn(|i| stack.get_stack_item(4 + i).unwrap());
+    assert_eq!(
+        tag,
+        Word::from([
+            KECCAK_HASH_MEMORY_EVENT_ID.as_felt(),
+            Felt::new(len_bytes as u64),
+            Felt::ZERO,
+            Felt::ZERO
+        ])
+    );
+
+    // Get the digest from stack (first 8 elements)
+    let digest: [Felt; 8] = array::from_fn(|i| stack.get_stack_item(8 + i).unwrap());
     assert_eq!(digest, preimage.digest().0, "output digest does not match");
 
-    let commitment_verified = keccak_verifier(&preimage.0).unwrap();
+    let commitment_verifier = keccak_verifier(&preimage.0).unwrap();
     assert_eq!(
-        commitment, commitment_verified,
+        commitment_verifier, precompile_commitment,
         "commitment returned by verifier does not match the one on the stack"
     )
 }
@@ -302,7 +317,7 @@ fn test_keccak_hash_1to1_prove_verify() {
 
                 # Call hash_memory_impl to get commitment and digest
                 exec.keccak256::hash_memory_impl
-                # => [COMM, DIGEST_U32[8], ...]
+                # => [COMM, TAG, DIGEST_U32[8], ...]
 
                 # Truncate stack to leave only the commitment and 15 more elements
                 exec.sys::truncate_stack
@@ -340,8 +355,13 @@ fn test_keccak_hash_1to1_prove_verify() {
     // Verify that the commitment on the stack matches the expected precompile commitment
     let expected_commitment = preimage.precompile_commitment();
     let stack_commitment = stack_outputs.get_stack_word(0).unwrap();
+    let stack_tag = stack_outputs.get_stack_word(4).unwrap();
+    let precompile_commitment = PrecompileCommitment {
+        tag: stack_tag,
+        commitment: stack_commitment,
+    };
     assert_eq!(
-        stack_commitment, expected_commitment,
+        precompile_commitment, expected_commitment,
         "commitment on stack does not match expected precompile commitment"
     );
 
@@ -349,16 +369,14 @@ fn test_keccak_hash_1to1_prove_verify() {
     let mut precompile_verifiers = PrecompileVerifiers::new();
     precompile_verifiers.register(KECCAK_HASH_MEMORY_EVENT_ID, Arc::new(keccak_verifier));
     let precompile_requests = proof.precompile_requests.clone();
-    let [verifier_commitment, empty]: [Word; 2] = precompile_requests
+    let verifier_commitments = precompile_requests
         .commitments(&precompile_verifiers)
-        .expect("failed to verify")
-        .try_into()
-        .unwrap();
+        .expect("failed to verify");
     assert_eq!(
-        verifier_commitment, expected_commitment,
+        verifier_commitments,
+        vec![precompile_commitment],
         "commitment on stack does not match expected precompile commitment"
     );
-    assert_eq!(empty, Word::empty());
 
     // Verify the proof with precompiles
     let program_info = ProgramInfo::from(program);

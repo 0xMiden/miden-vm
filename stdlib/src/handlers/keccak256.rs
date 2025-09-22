@@ -11,8 +11,8 @@ use alloc::{vec, vec::Vec};
 use core::array;
 
 use miden_core::{
-    EventId, Felt, Word,
-    precompile::{PrecompileData, PrecompileError},
+    EventId, Felt, Word, ZERO,
+    precompile::{PrecompileCommitment, PrecompileData, PrecompileError},
 };
 use miden_crypto::hash::{keccak::Keccak256, rpo::Rpo256};
 use miden_processor::{AdviceMutation, EventError, ProcessState};
@@ -76,12 +76,11 @@ pub fn handle_keccak_hash_memory(
 /// Verifier for Keccak256 precompile computations.
 ///
 /// This verifier validates that Keccak256 hash computations were performed correctly
-/// by recomputing the hash from the provided witness data and recomputing the resulting precompile.
+/// by recomputing the hash from the provided witness data and recomputing the resulting precompile
 /// request commitment.
-pub fn keccak_verifier(input_u8: &[u8]) -> Result<Word, PrecompileError> {
+pub fn keccak_verifier(input_u8: &[u8]) -> Result<PrecompileCommitment, PrecompileError> {
     let preimage = KeccakPreimage(input_u8.to_vec());
-    let commitment = preimage.precompile_commitment();
-    Ok(commitment)
+    Ok(preimage.precompile_commitment())
 }
 
 // KECCAK DIGEST
@@ -225,20 +224,36 @@ impl KeccakPreimage {
         KeccakFeltDigest::from_bytes(&hash_u8)
     }
 
-    /// Computes the precompile commitment: RPO(RPO(input) || RPO(hash)).
+    /// Computes the precompile commitment: `RPO(RPO(input) || RPO(hash))`, along with the tag for
+    /// the computation.
     ///
     /// This commitment is used by the precompile verification system to ensure
-    /// that the hash computation was performed correctly. The double RPO structure
-    /// allows the verifier to independently verify both the input data integrity
-    /// and the correctness of the hash computation.
-    pub fn precompile_commitment(&self) -> Word {
-        Rpo256::merge(&[self.input_commitment(), self.digest().to_commitment()])
+    /// that the hash computation was performed correctly.
+    pub fn precompile_commitment(&self) -> PrecompileCommitment {
+        let commitment = Rpo256::merge(&[self.input_commitment(), self.digest().to_commitment()]);
+        let tag = self.precompile_tag();
+        PrecompileCommitment { tag, commitment }
+    }
+
+    /// Returns the tag used to identify the commitment to the precompile. defined as
+    /// `[KECCAK_HASH_MEMORY_EVENT_ID, preimage_u8.len(), 0, 0]`.
+    fn precompile_tag(&self) -> Word {
+        [
+            KECCAK_HASH_MEMORY_EVENT_ID.as_felt(),
+            Felt::new(self.0.len() as u64),
+            ZERO,
+            ZERO,
+        ]
+        .into()
     }
 
     /// Returns this preimage as [`PrecompileData`] from which the [`precompile_commitment`] can be
     /// recomputed.
     pub fn to_precompile_data(self) -> PrecompileData {
-        PrecompileData::new(KECCAK_HASH_MEMORY_EVENT_ID, self.0)
+        PrecompileData {
+            event_id: KECCAK_HASH_MEMORY_EVENT_ID,
+            data: self.0,
+        }
     }
 }
 
@@ -519,8 +534,11 @@ mod tests {
         assert_eq!(digest.to_commitment(), expected_digest_commitment);
 
         // Test precompile commitment (double hash)
-        let expected_precompile_commitment =
-            Rpo256::merge(&[preimage.input_commitment(), digest.to_commitment()]);
+        let expected_precompile_commitment = PrecompileCommitment {
+            tag: preimage.precompile_tag(),
+            commitment: Rpo256::merge(&[preimage.input_commitment(), digest.to_commitment()]),
+        };
+
         assert_eq!(preimage.precompile_commitment(), expected_precompile_commitment);
     }
 
@@ -546,7 +564,7 @@ mod tests {
         let preimage = KeccakPreimage(input.to_vec());
         let expected_commitment = preimage.precompile_commitment();
 
-        let result = keccak_verifier(input).unwrap();
-        assert_eq!(result, expected_commitment);
+        let commitment = keccak_verifier(input).unwrap();
+        assert_eq!(commitment, expected_commitment);
     }
 }
