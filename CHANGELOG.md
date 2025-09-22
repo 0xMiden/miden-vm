@@ -100,7 +100,6 @@
 - Add `drop_stack_top` procedure in std::sys ([#2031](https://github.com/0xMiden/miden-vm/pull/2031))
 - Add type information to procedures in the AST, `Library`, and `PackageExport`
   types ([#2028](https://github.com/0xMiden/miden-vm/pull/2028))
-- Support leaves with multiple pairs in `std::collections::smt::get` module ([#2048](https://github.com/0xMiden/miden-vm/pull/2048)).
 
 #### Changes
 
