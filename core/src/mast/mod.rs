@@ -48,6 +48,10 @@ mod tests;
 /// can be built from a [`MastForest`] to specify an entrypoint.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(
+    all(feature = "serde", feature = "arbitrary", test),
+    miden_serde_test_macros::serde_test
+)]
 pub struct MastForest {
     /// All of the nodes local to the trees comprising the MAST forest.
     nodes: Vec<MastNode>,
