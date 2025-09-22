@@ -26,7 +26,8 @@ pub const KECCAK_HASH_MEMORY_EVENT_ID: EventId = EventId::from_u64(5779517439479
 /// Keccak256 event handler that reads data from memory.
 ///
 /// Computes Keccak256 hash of data stored in memory and provides the result via the advice stack.
-/// Also stores the preimage in byte form in the [`AdviceProvider`] for deferred verification.
+/// Also stores the preimage in byte form in the [`AdviceProvider`](miden_processor::AdviceProvider)
+/// for deferred verification.
 ///
 /// ## Input Format
 /// - **Memory Layout**: Input bytes are packed into field elements as u32 values:
@@ -41,7 +42,7 @@ pub const KECCAK_HASH_MEMORY_EVENT_ID: EventId = EventId::from_u64(5779517439479
 /// - **Advice Stack**: Extended with digest `[h_0, ..., h_7]` so the least significant u32 (h_0) is
 ///   at the top of the stack
 /// - **Precompile Requests**: Logs the preimage as a precompile request and stores it in the
-///   [`AdviceProvider`] for deferred verification.
+///   [`AdviceProvider`](miden_processor::AdviceProvider) for deferred verification.
 /// - **Commitment**: `Rpo256(Rpo256(input) || Rpo256(digest))` for kernel tracking of deferred
 ///   computations
 pub fn handle_keccak_hash_memory(
@@ -247,7 +248,7 @@ impl KeccakPreimage {
         .into()
     }
 
-    /// Returns this preimage as [`PrecompileData`] from which the [`precompile_commitment`] can be
+    /// Returns this preimage as [`PrecompileData`] from which the [`PrecompileCommitment`] can be
     /// recomputed.
     pub fn to_precompile_data(self) -> PrecompileData {
         PrecompileData {
