@@ -49,12 +49,11 @@ impl BundleCmd {
         let dir = self.dir.file_name().ok_or("`dir` cannot end with `..`.").map_err(Report::msg)?;
 
         // write the masl output
-        let output_file = match &self.output {
-            Some(output) => output,
+        let output_file: PathBuf = match &self.output {
+            Some(output) => output.clone(),
             None => {
-                let parent =
-                    &self.dir.parent().ok_or("Invalid output path").map_err(Report::msg)?;
-                &parent.join("out").with_extension(Library::LIBRARY_EXTENSION)
+                let parent = self.dir.parent().ok_or("Invalid output path").map_err(Report::msg)?;
+                parent.join("out").with_extension(Library::LIBRARY_EXTENSION)
             },
         };
 
@@ -65,7 +64,7 @@ impl BundleCmd {
                 };
                 assembler.link_dynamic_library(StdLibrary::default())?;
                 let library = assembler.assemble_kernel_from_dir(kernel, Some(&self.dir))?;
-                library.write_to_file(output_file).into_diagnostic()?;
+                library.write_to_file(&output_file).into_diagnostic()?;
                 println!(
                     "Built kernel module {} with library {}",
                     kernel.display(),
@@ -80,7 +79,7 @@ impl BundleCmd {
                 let library_namespace = namespace.parse::<LibraryNamespace>()?;
                 assembler.link_dynamic_library(StdLibrary::default())?;
                 let library = assembler.assemble_library_from_dir(&self.dir, library_namespace)?;
-                library.write_to_file(output_file).into_diagnostic()?;
+                library.write_to_file(&output_file).into_diagnostic()?;
                 println!("Built library {namespace}");
             },
         }
