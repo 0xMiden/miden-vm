@@ -1,4 +1,5 @@
 use.std::mem
+use.std::collections::sorted_array
 use.std::sys
 
 # Constant value for the depth at which leaves sit
@@ -356,122 +357,46 @@ end
 # GET
 # =================================================================================================
 
-# Inputs: [PADDING, ptr]
-# Outputs: [WORD, next_ptr]
-proc.mem_loadw_and_inc
-    dup.4
-    # => [ptr, WORD, ptr]
-    mem_loadw
-    # => [WORD, ptr]
-    movup.4
-    # => [ptr, WORD]
-    add.4
-    # => [ptr_next, WORD]
-    movdn.4
-    # => [WORD, ptr_next]
-end
-
 #! Inputs:
 #!   Operand stack: [pair_count, NV, K, R]
 #!   Advice stack:  [V1, K2, V2, K2, ...]
-proc.get_multi_leaf_value.8
+proc.get_multi_leaf_value
+    # First, we'll pipe all the pairs in the leaf from the advice stack.
+    # We'll need a pointer, the count of words to copy, and a "commitment" that it should hash to.
+    # The node value (its hash) is our commitment, and we can just divide `pair_count` to get the
+    # word count.
 
     div.4
-    # => [num_words, NV, K, R]
-
-    # Keep track of `num_words`
-    loc_store.4
-    # => [NV, K, R]
-
-    # We use the node value (i.e., its hash) as the commitment COM.
-    # => [COM, K, R]
+    # => [num_words, COM, K, R]
 
     # FIXME: is there any particular value I should use for the pointer?
-    push.0xA0
-    # => [ptr, COM, K, R]
-
-    loc_load.4
+    push.0xA0 swap
     # => [num_words, ptr, COM, K, R]
 
     exec.mem::pipe_double_words_preimage_to_memory
     # => [ptr_end, K, R]
 
-    # Consistency check: (ptr_end - ptr) / 4 == num_words
-    sub.0xA0 div.4
-    loc_load.4
-    assert_eq.err="pipe_preimage_to_memory copied more or less than expected"
+    movdn.4
+    # => [K, ptr_end, R]
+    push.0xA0 movdn.4
+    # => [K, start_ptr, end_ptr, R]
 
-    # Keep track of `K`, since we'll be comparing against it.
-    # Don't drop it though. We can reuse that stack space for better stack hygeine.
-    loc_storew.0 swapw
-    # => [R, X]
+    exec.sorted_array::find_key_value
+    # => [is_key_found, key_ptr, start_ptr, end_ptr, R]
 
-    # Memory => [K1, V1, Kn, Vn, ...]
+    # is_key_found will always be true, so we can reuse that bit of stack. Likewise we can reuse
+    # start_ptr and end_ptr.
+    # => [x, key_ptr, x, x, R]
 
-    push.0xA0
-    # => [ptr, R, X]
+    push.0
+    # => [x, x, key_ptr, x, x, R]
 
-    # XXX: replace loop with new VM instruction.
+    # Now just load the word right next to the key to get the value we're looking for.
+    movup.2 add.4
+    # => [val_ptr, x, x, x, x, R]
 
-    # Find the one that matches the requested key.
-    loc_load.4 div.2 # => [loop_count, ptr, R, X]
-    dup loc_store.4
-    gt.0 # => [continue, ptr, R, X]
-
-    while.true
-        # => [ptr_0, R, X]
-
-        movup.8 movup.8 movup.8 movup.8
-        # => [X, ptr_0, R]
-
-        exec.mem_loadw_and_inc
-        # => [K_n, ptr_1, R]
-
-        padw loc_loadw.0
-        # => [K, K_n, ptr_1, R]
-
-        eqw
-        # => [K == K_n, K, K_n, ptr_1, R]
-
-        if.true
-            # => [K, K_n, ptr_1, R]
-
-            # Get `V` and end the loop.
-            movup.8
-            # [ptr_1, K, K_n, R]
-            mem_loadw
-            # [V_n, K_n, R]
-
-            swapw dropw
-            # => [V_n, R]
-            push.0
-            # => [continue = 0, V_n, R]
-        else
-            # => [K, K_n, ptr_1, R]
-
-            # Set the next pointer and continue the loop if we should.
-            # We only care about the single local at index `4`, but loadw will
-            # overwrite the stack instead of growing it, and we don't need the
-            # top word.
-            loc_loadw.4
-            # => [x, x, x, loop_count, K_n, ptr_1, R]
-
-            movup.3 sub.1 movdn.3
-            # => [x, x, x, loop_count', K_n, ptr_1, R]
-
-            loc_storew.4 drop drop drop
-            # => [loop_count', K_n, ptr_1, R]
-
-            gt.0
-            # => [continue, K_n, ptr_1, R]
-
-            movdn.4 dropw
-
-
-            swap add.4 swap
-            # => [continue, ptr_1, R]
-        end
-    end
+    mem_loadw
+    # => [V, R]
 end
 
 #! Returns the value located under the specified key in the Sparse Merkle Tree defined by the
