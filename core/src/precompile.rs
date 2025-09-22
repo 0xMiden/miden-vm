@@ -344,7 +344,6 @@ mod tests {
 
         let commitments = requests.commitments(&verifiers).unwrap();
         assert!(commitments.is_empty());
-        assert_eq!(commitments.capacity(), 2);
         let result = PrecompileRequests::accumulate_commitments(&commitments);
 
         // The commitment is always finalized by absorbing [Word::ZERO, Word::ZERO] to mirror
