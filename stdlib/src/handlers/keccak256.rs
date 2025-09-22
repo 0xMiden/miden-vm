@@ -12,7 +12,7 @@ use core::array;
 
 use miden_core::{
     EventId, Felt, Word, ZERO,
-    precompile::{PrecompileCommitment, PrecompileData, PrecompileError},
+    precompile::{PrecompileCommitment, PrecompileError, PrecompileRequest},
 };
 use miden_crypto::hash::{keccak::Keccak256, rpo::Rpo256};
 use miden_processor::{AdviceMutation, EventError, ProcessState};
@@ -65,10 +65,10 @@ pub fn handle_keccak_hash_memory(
     let advice_stack_extension = AdviceMutation::extend_stack(digest.0);
 
     // Store the precompile data for deferred verification.
-    let deferred_extension =
-        AdviceMutation::extend_precompile_requests([preimage.to_precompile_data()]);
+    let precompile_request_extension =
+        AdviceMutation::extend_precompile_requests([preimage.to_precompile_request()]);
 
-    Ok(vec![advice_stack_extension, deferred_extension])
+    Ok(vec![advice_stack_extension, precompile_request_extension])
 }
 
 // KECCAK VERIFIER
@@ -248,10 +248,10 @@ impl KeccakPreimage {
         .into()
     }
 
-    /// Returns this preimage as [`PrecompileData`] from which the [`PrecompileCommitment`] can be
-    /// recomputed.
-    pub fn to_precompile_data(self) -> PrecompileData {
-        PrecompileData {
+    /// Returns this preimage as [`PrecompileRequest`] from which the [`PrecompileCommitment`] can
+    /// be recomputed.
+    pub fn to_precompile_request(self) -> PrecompileRequest {
+        PrecompileRequest {
             event_id: KECCAK_HASH_MEMORY_EVENT_ID,
             data: self.0,
         }

@@ -3,7 +3,7 @@ use core::future::Future;
 
 use miden_core::{
     AdviceMap, DebugOptions, Felt, Word, crypto::merkle::InnerNodeInfo, mast::MastForest,
-    precompile::PrecompileData,
+    precompile::PrecompileRequest,
 };
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 
@@ -32,7 +32,7 @@ pub enum AdviceMutation {
     ExtendStack { values: Vec<Felt> },
     ExtendMap { other: AdviceMap },
     ExtendMerkleStore { infos: Vec<InnerNodeInfo> },
-    ExtendPrecompileRequests { data: Vec<PrecompileData> },
+    ExtendPrecompileRequests { data: Vec<PrecompileRequest> },
 }
 
 impl AdviceMutation {
@@ -48,7 +48,7 @@ impl AdviceMutation {
         Self::ExtendMerkleStore { infos: Vec::from_iter(infos) }
     }
 
-    pub fn extend_precompile_requests(data: impl IntoIterator<Item = PrecompileData>) -> Self {
+    pub fn extend_precompile_requests(data: impl IntoIterator<Item = PrecompileRequest>) -> Self {
         Self::ExtendPrecompileRequests { data: Vec::from_iter(data) }
     }
 }

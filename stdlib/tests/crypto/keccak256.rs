@@ -88,7 +88,7 @@ fn test_keccak_handler(input_u8: &[u8]) {
     let advice_stack = output.advice_provider().stack();
     assert_eq!(advice_stack, preimage.digest().0);
 
-    let deferred = output.advice_provider().precompile_requests().clone().into_requests();
+    let deferred = output.advice_provider().precompile_requests().to_vec();
     assert_eq!(deferred.len(), 1, "advice deferred must contain one entry");
     let precompile_data = &deferred[0];
 
@@ -368,9 +368,8 @@ fn test_keccak_hash_1to1_prove_verify() {
     // Check we get the same commitment from the verifier
     let mut precompile_verifiers = PrecompileVerifiers::new();
     precompile_verifiers.register(KECCAK_HASH_MEMORY_EVENT_ID, Arc::new(keccak_verifier));
-    let precompile_requests = precompile_requests.clone();
-    let verifier_commitments = precompile_requests
-        .commitments(&precompile_verifiers)
+    let verifier_commitments = precompile_verifiers
+        .commitments(&precompile_requests)
         .expect("failed to verify");
     assert_eq!(
         verifier_commitments,

@@ -3,7 +3,7 @@ use alloc::{collections::btree_map::Entry, vec::Vec};
 use miden_core::{
     AdviceMap, Felt, Word,
     crypto::merkle::{InnerNodeInfo, MerklePath, MerkleStore, NodeIndex},
-    precompile::{PrecompileData, PrecompileRequests},
+    precompile::PrecompileRequest,
 };
 
 mod inputs;
@@ -46,7 +46,7 @@ pub struct AdviceProvider {
     stack: Vec<Felt>,
     map: AdviceMap,
     store: MerkleStore,
-    precompile_requests: PrecompileRequests,
+    precompile_requests: Vec<PrecompileRequest>,
 }
 
 impl AdviceProvider {
@@ -337,14 +337,14 @@ impl AdviceProvider {
     // --------------------------------------------------------------------------------------------
 
     /// Returns a reference to the precompile requests.
-    pub fn precompile_requests(&self) -> &PrecompileRequests {
+    pub fn precompile_requests(&self) -> &[PrecompileRequest] {
         &self.precompile_requests
     }
 
     /// Extends the precompile requests with the given entries.
     pub fn extend_precompile_requests<I>(&mut self, iter: I)
     where
-        I: IntoIterator<Item = PrecompileData>,
+        I: IntoIterator<Item = PrecompileRequest>,
     {
         self.precompile_requests.extend(iter);
     }
@@ -363,7 +363,7 @@ impl AdviceProvider {
     ///
     /// Note that the order of the stack is such that the element at the top of the stack is at the
     /// end of the returned vector.
-    pub fn into_parts(self) -> (Vec<Felt>, AdviceMap, MerkleStore, PrecompileRequests) {
+    pub fn into_parts(self) -> (Vec<Felt>, AdviceMap, MerkleStore, Vec<PrecompileRequest>) {
         (self.stack, self.map, self.store, self.precompile_requests)
     }
 }
@@ -376,7 +376,7 @@ impl From<AdviceInputs> for AdviceProvider {
             stack,
             map,
             store,
-            precompile_requests: PrecompileRequests::new(),
+            precompile_requests: Vec::new(),
         }
     }
 }

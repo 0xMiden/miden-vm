@@ -9,7 +9,7 @@ use crate::{
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
-// PRECOMPILE DATA
+// PRECOMPILE REQUEST
 // ================================================================================================
 
 /// Represents a single precompile request consisting of an event ID and byte data.
@@ -17,14 +17,14 @@ use crate::{
 /// This structure encapsulates the call data for a precompile operation, storing
 /// the raw bytes that will be processed by the precompile function.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PrecompileData {
+pub struct PrecompileRequest {
     /// Event ID identifying the type of precompile operation
     pub event_id: EventId,
     /// Raw byte data for the precompile operation
     pub data: Vec<u8>,
 }
 
-impl Serializable for PrecompileData {
+impl Serializable for PrecompileRequest {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         target.write_u64(self.event_id.as_felt().as_int());
         target.write_usize(self.data.len());
@@ -32,7 +32,7 @@ impl Serializable for PrecompileData {
     }
 }
 
-impl Deserializable for PrecompileData {
+impl Deserializable for PrecompileRequest {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let event_id = EventId::from_u64(source.read_u64()?);
         let len = source.read_usize()?;
@@ -61,109 +61,6 @@ impl PrecompileCommitment {
     pub fn to_elements(&self) -> [Felt; 8] {
         let words = [self.tag, self.commitment];
         Word::words_as_elements(&words).try_into().unwrap()
-    }
-}
-
-// PRECOMPILE REQUESTS
-// ================================================================================================
-
-/// Container for precompile requests made during VM execution.
-///
-/// This struct maintains a list of all precompile requests made during execution.
-/// Each request consists of an event ID and the call data required to recompute the result.
-/// The requests can later be verified using a separate [`PrecompileVerifiers`] registry.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct PrecompileRequests {
-    /// List of precompile requests made during execution
-    requests: Vec<PrecompileData>,
-}
-
-impl PrecompileRequests {
-    /// Creates a new empty precompile requests container.
-    pub const fn new() -> Self {
-        Self { requests: Vec::new() }
-    }
-
-    /// Adds a new precompile request.
-    pub fn push(&mut self, data: PrecompileData) {
-        self.requests.push(data);
-    }
-
-    /// Returns the number of precompile requests.
-    pub fn len(&self) -> usize {
-        self.requests.len()
-    }
-
-    /// Returns true if there are no precompile requests.
-    pub fn is_empty(&self) -> bool {
-        self.requests.is_empty()
-    }
-
-    /// Converts into the underlying vector of requests.
-    pub fn into_requests(self) -> Vec<PrecompileData> {
-        self.requests
-    }
-
-    /// Extends the precompile requests with the given iterator.
-    pub fn extend<I>(&mut self, iter: I)
-    where
-        I: IntoIterator<Item = PrecompileData>,
-    {
-        self.requests.extend(iter);
-    }
-
-    /// Verifies all precompile requests and returns their individual commitment words.
-    ///
-    /// This method iterates through all requests and verifies each one using the
-    /// corresponding verifier from the registry. For each request, it produces a tag
-    /// word followed by a commitment word, represented as a [`PrecompileCommitment`]
-    ///
-    /// # Arguments
-    /// * `verifiers` - Registry of verifiers to use for validation
-    ///
-    /// # Errors
-    /// Returns a `PrecompileError` if:
-    /// - No verifier is registered for a request's event ID
-    /// - A verifier fails to verify its request
-    pub fn commitments(
-        &self,
-        verifiers: &PrecompileVerifiers,
-    ) -> Result<Vec<PrecompileCommitment>, PrecompileVerificationError> {
-        let mut commitments = Vec::with_capacity(self.len());
-        for (index, PrecompileData { event_id, data }) in self.requests.iter().enumerate() {
-            let event_id = *event_id;
-            let verifier = verifiers
-                .get(event_id)
-                .ok_or(PrecompileVerificationError::VerifierNotFound { index, event_id })?;
-
-            let precompile_commitment = verifier.verify(data).map_err(|error| {
-                PrecompileVerificationError::PrecompileError { index, event_id, error }
-            })?;
-            commitments.push(precompile_commitment)
-        }
-        Ok(commitments)
-    }
-
-    /// Accumulates precompile commitments into a final hash.
-    ///
-    /// # Arguments
-    /// * `commitments` - Vector of commitment words from precompile requests
-    ///
-    /// # Returns
-    /// The final accumulated commitment hash
-    pub fn accumulate_commitments(commitments: &[PrecompileCommitment]) -> Word {
-        let mut final_commitments = Vec::with_capacity((commitments.len() + 1) * 2);
-        for commitment in commitments {
-            final_commitments.extend(commitment.to_elements());
-        }
-        // We add 2 empty words to account for the finalization of the hash inside the VM.
-        // The VM keeps track of the sponge's capacity only, so once all precompile request
-        // commitments have been absorbed, the finalization requires one last permutation where
-        // we set the rate portion of the state to the zeros.
-        // This slot could be used to encode auxiliary metadata for the entire list of precompile
-        // requests.
-        final_commitments.extend([Felt::ZERO; 8]);
-        Rpo256::hash_elements(&final_commitments)
     }
 }
 
@@ -209,6 +106,60 @@ impl PrecompileVerifiers {
     /// Returns true if no verifiers are registered.
     pub fn is_empty(&self) -> bool {
         self.verifiers.is_empty()
+    }
+
+    /// Verifies all precompile requests and returns their individual commitment words.
+    ///
+    /// This method iterates through all requests and verifies each one using the
+    /// corresponding verifier from the registry. For each request, it produces a tag
+    /// word followed by a commitment word, represented as a [`PrecompileCommitment`]
+    ///
+    /// # Arguments
+    /// * `verifiers` - Registry of verifiers to use for validation
+    ///
+    /// # Errors
+    /// Returns a `PrecompileError` if:
+    /// - No verifier is registered for a request's event ID
+    /// - A verifier fails to verify its request
+    pub fn commitments(
+        &self,
+        requests: &[PrecompileRequest],
+    ) -> Result<Vec<PrecompileCommitment>, PrecompileVerificationError> {
+        let mut commitments = Vec::with_capacity(self.len());
+        for (index, PrecompileRequest { event_id, data }) in requests.iter().enumerate() {
+            let event_id = *event_id;
+            let verifier = self
+                .get(event_id)
+                .ok_or(PrecompileVerificationError::VerifierNotFound { index, event_id })?;
+
+            let precompile_commitment = verifier.verify(data).map_err(|error| {
+                PrecompileVerificationError::PrecompileError { index, event_id, error }
+            })?;
+            commitments.push(precompile_commitment)
+        }
+        Ok(commitments)
+    }
+
+    /// Accumulates precompile commitments into a final hash.
+    ///
+    /// # Arguments
+    /// * `commitments` - Vector of commitment words from precompile requests
+    ///
+    /// # Returns
+    /// The final accumulated commitment hash
+    pub fn accumulate_commitments(commitments: &[PrecompileCommitment]) -> Word {
+        let mut final_commitments = Vec::with_capacity((commitments.len() + 1) * 2);
+        for commitment in commitments {
+            final_commitments.extend(commitment.to_elements());
+        }
+        // We add 2 empty words to account for the finalization of the hash inside the VM.
+        // The VM keeps track of the sponge's capacity only, so once all precompile request
+        // commitments have been absorbed, the finalization requires one last permutation where
+        // we set the rate portion of the state to the zeros.
+        // This slot could be used to encode auxiliary metadata for the entire list of precompile
+        // requests.
+        final_commitments.extend([Felt::ZERO; 8]);
+        Rpo256::hash_elements(&final_commitments)
     }
 }
 
@@ -269,30 +220,6 @@ pub enum PrecompileVerificationError {
     },
 }
 
-// SERIALIZATION
-// ================================================================================================
-
-impl Serializable for PrecompileRequests {
-    fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        target.write_usize(self.requests.len());
-        for request in &self.requests {
-            request.write_into(target);
-        }
-    }
-}
-
-impl Deserializable for PrecompileRequests {
-    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let count = source.read_usize()?;
-        let mut requests = Vec::with_capacity(count);
-        for _ in 0..count {
-            let request = PrecompileData::read_from(source)?;
-            requests.push(request);
-        }
-        Ok(Self { requests })
-    }
-}
-
 // TESTS
 // ================================================================================================
 
@@ -305,46 +232,25 @@ mod tests {
     fn test_precompile_data_serialization() {
         let event_id = EventId::from_u64(123);
         let data = vec![5, 6, 7, 8, 9];
-        let original = PrecompileData { event_id, data };
+        let original = PrecompileRequest { event_id, data };
 
         let mut bytes = Vec::new();
         original.write_into(&mut bytes);
 
         let mut reader = SliceReader::new(&bytes);
-        let deserialized = PrecompileData::read_from(&mut reader).unwrap();
+        let deserialized = PrecompileRequest::read_from(&mut reader).unwrap();
 
         assert_eq!(original, deserialized);
     }
 
     #[test]
-    fn test_precompile_requests_serialization() {
-        let mut requests = PrecompileRequests::new();
-        requests.push(PrecompileData {
-            event_id: EventId::from_u64(1),
-            data: vec![1, 2],
-        });
-        requests.push(PrecompileData {
-            event_id: EventId::from_u64(2),
-            data: vec![3, 4, 5],
-        });
-
-        let mut bytes = Vec::new();
-        requests.write_into(&mut bytes);
-
-        let mut reader = SliceReader::new(&bytes);
-        let deserialized = PrecompileRequests::read_from(&mut reader).unwrap();
-
-        assert_eq!(requests, deserialized);
-    }
-
-    #[test]
     fn test_verify_empty_requests() {
         let verifiers = PrecompileVerifiers::new();
-        let requests = PrecompileRequests::new();
+        let requests = Vec::new();
 
-        let commitments = requests.commitments(&verifiers).unwrap();
+        let commitments = verifiers.commitments(&requests).unwrap();
         assert!(commitments.is_empty());
-        let result = PrecompileRequests::accumulate_commitments(&commitments);
+        let result = PrecompileVerifiers::accumulate_commitments(&commitments);
 
         // The commitment is always finalized by absorbing [Word::ZERO, Word::ZERO] to mirror
         // the VM implementation. Since no precompiles were accumulated, we just finalize the

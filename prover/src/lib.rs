@@ -6,6 +6,7 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
+use alloc::vec::Vec;
 use core::marker::PhantomData;
 
 use miden_air::{AuxRandElements, PartitionOptions, ProcessorAir, PublicInputs};
@@ -37,7 +38,7 @@ mod gpu;
 pub use miden_air::{
     DeserializationError, ExecutionProof, FieldExtension, HashFunction, ProvingOptions,
 };
-use miden_core::precompile::PrecompileRequests;
+use miden_core::precompile::PrecompileRequest;
 pub use miden_processor::{
     AdviceInputs, AsyncHost, BaseHost, ExecutionError, InputError, StackInputs, StackOutputs,
     SyncHost, Word, crypto, math, utils,
@@ -64,7 +65,7 @@ pub fn prove(
     advice_inputs: AdviceInputs,
     host: &mut impl SyncHost,
     options: ProvingOptions,
-) -> Result<(StackOutputs, ExecutionProof, PrecompileRequests), ExecutionError> {
+) -> Result<(StackOutputs, ExecutionProof, Vec<PrecompileRequest>), ExecutionError> {
     // execute the program to create an execution trace
     #[cfg(feature = "std")]
     let now = Instant::now();
@@ -89,7 +90,7 @@ pub fn prove(
     let hash_fn = options.hash_fn();
 
     // extract precompile requests from the trace to include in the proof
-    let precompile_requests = trace.precompile_requests().clone();
+    let precompile_requests = trace.precompile_requests().to_vec();
 
     // generate STARK proof
     let proof = match hash_fn {

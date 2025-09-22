@@ -8,7 +8,7 @@ use miden_air::trace::{
     main_trace::MainTrace,
 };
 use miden_core::{
-    ProgramInfo, StackInputs, StackOutputs, Word, ZERO, precompile::PrecompileRequests,
+    ProgramInfo, StackInputs, StackOutputs, Word, ZERO, precompile::PrecompileRequest,
     stack::MIN_STACK_DEPTH,
 };
 use winter_prover::{EvaluationFrame, Trace, TraceInfo, crypto::RandomCoin};
@@ -127,7 +127,7 @@ impl ExecutionTrace {
     }
 
     /// Returns the precompile requests generated during program execution.
-    pub fn precompile_requests(&self) -> &PrecompileRequests {
+    pub fn precompile_requests(&self) -> &[PrecompileRequest] {
         self.advice.precompile_requests()
     }
 

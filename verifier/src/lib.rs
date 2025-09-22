@@ -16,9 +16,7 @@ use miden_core::crypto::{
 // ================================================================================================
 pub use miden_core::{
     Kernel, ProgramInfo, StackInputs, StackOutputs, Word,
-    precompile::{
-        PrecompileError, PrecompileRequests, PrecompileVerificationError, PrecompileVerifiers,
-    },
+    precompile::{PrecompileError, PrecompileVerificationError, PrecompileVerifiers},
 };
 pub use winter_verifier::{AcceptableOptions, VerifierError};
 use winter_verifier::{crypto::MerkleTree, verify as verify_proof};
@@ -26,7 +24,7 @@ pub mod math {
     pub use miden_core::{Felt, FieldElement, StarkField};
 }
 pub use miden_air::ExecutionProof;
-
+use miden_core::precompile::PrecompileRequest;
 // VERIFIER
 // ================================================================================================
 
@@ -70,7 +68,7 @@ pub fn verify(
         stack_inputs,
         stack_outputs,
         proof,
-        &PrecompileRequests::new(),
+        &[],
         &PrecompileVerifiers::new(),
     )
 }
@@ -87,7 +85,7 @@ pub fn verify_with_precompiles(
     stack_inputs: StackInputs,
     stack_outputs: StackOutputs,
     proof: ExecutionProof,
-    precompile_requests: &PrecompileRequests,
+    precompile_requests: &[PrecompileRequest],
     precompile_verifiers: &PrecompileVerifiers,
 ) -> Result<u32, VerificationError> {
     // get security level of the proof
@@ -104,10 +102,10 @@ pub fn verify_with_precompiles(
     let (hash_fn, proof) = proof.into_parts();
 
     // TODO: Check that this corresponds to the commitment output by the VM
-    let commitments = precompile_requests
-        .commitments(precompile_verifiers)
+    let commitments = precompile_verifiers
+        .commitments(precompile_requests)
         .map_err(VerificationError::PrecompileVerificationError)?;
-    let _precompile_commitment = PrecompileRequests::accumulate_commitments(&commitments);
+    let _precompile_commitment = PrecompileVerifiers::accumulate_commitments(&commitments);
 
     match hash_fn {
         HashFunction::Blake3_192 => {
