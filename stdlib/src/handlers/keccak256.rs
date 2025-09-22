@@ -71,6 +71,36 @@ pub fn handle_keccak_hash_memory(
     Ok(vec![advice_stack_extension, precompile_request_extension])
 }
 
+/// Reads field elements from memory for Keccak computation.
+///
+/// The memory layout from ptr to `ptr+len_u32` contains inputs from least to most significant
+/// element.
+///
+/// Returns a vector containing `input_u32[..]` where:
+/// - `input_u32` is the array of u32 values read from memory of length `len_u32 = ⌈len_bytes/4⌉`
+///
+/// # Preconditions
+/// - `ptr` must be word-aligned (multiple of 4)
+/// - The memory range `[ptr, ptr + len_u32)` is valid
+/// - All read values have been initialized
+///
+/// The function returns `None` if any of the above conditions are not satisfied.
+fn read_witness(process: &ProcessState, ptr: u64, len_bytes: u64) -> Option<Vec<Felt>> {
+    // Convert inputs to u32 and check for overflow + alignment.
+    let start_addr: u32 = ptr.try_into().ok()?;
+    if !start_addr.is_multiple_of(4) {
+        return None;
+    }
+
+    // number of packed u32 values we will actually read
+    let len_packed: u32 = len_bytes.div_ceil(4).try_into().ok()?;
+    let end_addr = start_addr.checked_add(len_packed)?;
+
+    // Read each memory location in the range [start_addr, end_addr) and append to the witness.
+    let ctx = process.ctx();
+    (start_addr..end_addr).map(|addr| process.get_mem_value(ctx, addr)).collect()
+}
+
 // KECCAK VERIFIER
 // ================================================================================================
 
@@ -256,39 +286,6 @@ impl KeccakPreimage {
             data: self.0,
         }
     }
-}
-
-// HELPERS
-// =================================================================================================
-
-/// Reads field elements from memory for Keccak computation.
-///
-/// The memory layout from ptr to `ptr+len_u32` contains inputs from least to most significant
-/// element.
-///
-/// Returns a vector containing `input_u32[..]` where:
-/// - `input_u32` is the array of u32 values read from memory of length `len_u32 = ⌈len_bytes/4⌉`
-///
-/// # Preconditions
-/// - `ptr` must be word-aligned (multiple of 4)
-/// - The memory range `[ptr, ptr + len_u32)` is valid
-/// - All read values have been initialized
-///
-/// The function returns `None` if any of the above conditions are not satisfied.
-fn read_witness(process: &ProcessState, ptr: u64, len_bytes: u64) -> Option<Vec<Felt>> {
-    // Convert inputs to u32 and check for overflow + alignment.
-    let start_addr: u32 = ptr.try_into().ok()?;
-    if !start_addr.is_multiple_of(4) {
-        return None;
-    }
-
-    // number of packed u32 values we will actually read
-    let len_packed: u32 = len_bytes.div_ceil(4).try_into().ok()?;
-    let end_addr = start_addr.checked_add(len_packed)?;
-
-    // Read each memory location in the range [start_addr, end_addr) and append to the witness.
-    let ctx = process.ctx();
-    (start_addr..end_addr).map(|addr| process.get_mem_value(ctx, addr)).collect()
 }
 
 // ERRORS
