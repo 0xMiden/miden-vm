@@ -313,7 +313,7 @@ mod accumulator_tests {
     use proptest::prelude::*;
 
     use super::*;
-    use crate::mast::node::basic_block_node::tests::op_non_control_sequence_strategy;
+    use crate::mast::node::basic_block_node::arbitrary::op_non_control_sequence_strategy;
 
     proptest! {
         #[test]
