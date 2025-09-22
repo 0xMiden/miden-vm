@@ -1,6 +1,8 @@
-use.std::mem
+use.std::crypto::hashes::rpo
 use.std::collections::sorted_array
+use.std::mem
 use.std::sys
+use.std::word
 
 # Constant value for the depth at which leaves sit
 const.LEAF_DEPTH=64
@@ -138,9 +140,125 @@ proc.insert_single_leaf
         # => [V_in_leaf, R_new]
     else
         # Leaf becomes a Multiple kv-pair case
-        # TODO (fail for now)
-        push.1 assertz
+
+        exec.insert_single_to_multi_leaf
+        # => [V_in_leaf, R_new]
     end
+end
+
+#! Inputs: [K_in_leaf, K, V_in_leaf, V, R]
+#! Outputs: [V_in_leaf, R_new]
+proc.insert_single_to_multi_leaf.16
+
+    # Pairs in leaves are sorted by key, so we need to compare the new key against the existing
+    # key.
+
+    dupw dupw.2
+    # => [K, K_l, K_l, K, V_l, V, R]
+
+    exec.word::lt
+    # => [K_l < K, K_l, K, V_l, V, R]
+
+    # We need a contiguous region of memory containing the sorted pairs. Converting a single-leaf
+    # To a multi-leaf will always involve 2 pairs (8 words), so we can use local memory for this.
+
+    if.true
+        # => [K_l, K, V_l, V, R]
+
+        # Place our locals as follows:
+        #   0..4: K_in_leaf
+        #   4..8: V_in_leaf
+        #  8..12: K
+        # 12..16: V
+
+        loc_storew.0 dropw
+        # => [K, V_l, V, R]
+
+        # Save K[3], as that is our index.
+        dup movdn.12
+        # => [K, V_l, V, i, R]
+
+        loc_storew.8 dropw
+        # => [V_l, V, i, R]
+
+        loc_storew.4 dropw
+        # => [V, i, R]
+
+        loc_storew.12 dropw
+        # => [i, R]
+    else
+        # => [K_l, K, V_l, V, R]
+
+        # Place our locals as follows:
+        #   0..4: K
+        #   4..8: V
+        #  8..12: K_in_leaf
+        # 12..16: V_in_leaf
+
+        loc_storew.8 dropw
+        # => [K, V_l, V, R]
+
+        # Save K[3], as that is our index.
+        dup movdn.12
+        # => [K, V_l, V, i, R]
+
+        loc_storew.0 dropw
+        # => [V_l, V, i, R]
+
+        loc_storew.12 dropw
+        # => [V, i, R]
+
+        loc_storew.4 dropw
+        # => [i, R]
+    end
+
+    # => [i, R]
+    # LOCALS:
+    #   0..4: K_lt
+    #   4..8: V_lt
+    #  8..12: K_gt
+    # 12..16: V_gt
+
+    movdn.4
+    # => [R, i]
+
+    # Prepare for hash_memory_words,
+    locaddr.12 add.4
+    locaddr.0
+    # => [start_addr, end_addr, R, i]
+
+    exec.rpo::hash_memory_words
+    # => [NV, i, R]
+
+    # Prepare for adv.insert_mem, the key for which is NV, the node's hash.
+
+    locaddr.12 add.4 locaddr.0
+    # => [start_ptr, end_ptr, NV, R, i]
+
+    movdn.5 movdn.5
+    # => [NV, start_ptr, end_ptr, R, i]
+
+    adv.insert_mem
+    # => [NV, start_ptr, end_ptr, R, i]
+
+    # Drop both pointers, and prepare for mtree_set.
+    movup.4 drop movup.4 drop
+    # => [NV, R, i]
+
+    swapw movup.8
+    # => [i, R, NV]
+
+    push.LEAF_DEPTH
+    # => [d, i, R, NV]
+
+    mtree_set
+    # => [V_in_leaf, R_new]
+
+    # By nature, if an insertion transforms a single-leaf to a multi-leaf, then the old value at
+    # this key is an empty word.
+
+    padw swapw dropw
+    # => [Z, R_new]
 end
 
 #! Removes the provided key/value pair from the leaf. The leaf to which we're inserting is

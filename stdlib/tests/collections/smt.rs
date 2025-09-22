@@ -307,6 +307,45 @@ fn test_set_empty_key_in_non_empty_leaf() {
     build_test!(source, &init_stack, &[], store, advice_map).expect_stack(&final_stack);
 }
 
+#[test]
+fn test_smt_set_single_to_multi() {
+    const SOURCE: &str = "
+        use.std::collections::smt
+        use.std::sys
+
+        begin
+            # => [V, K, R]
+            exec.smt::set
+            # => [V_old, R_new]
+            exec.sys::truncate_stack
+        end
+    ";
+
+    fn expect_second_pair(smt: Smt, key: Word, value: Word) {
+        let mut initial_stack: Vec<u64> = Default::default();
+        prepend_word(&mut initial_stack, value);
+        prepend_word(&mut initial_stack, key);
+        prepend_word(&mut initial_stack, smt.root());
+
+        let mut expected_smt = smt.clone();
+        expected_smt.insert(key, value).unwrap();
+
+        let expected_output = build_expected_stack(EMPTY_WORD, expected_smt.root());
+
+        let (store, advice_map) = build_advice_inputs(&smt);
+        build_test!(SOURCE, &initial_stack, &[], store, advice_map).expect_stack(&expected_output);
+    }
+
+    const K0: Word = word(101, 102, 103, 420);
+    const V0: Word = word(555, 666, 777, 888);
+
+    const K1: Word = word(201, 202, 203, 420);
+    const V1: Word = word(122, 133, 144, 155);
+
+    expect_second_pair(Smt::with_entries([(K0, V0)]).unwrap(), K1, V1);
+    expect_second_pair(Smt::with_entries([(K1, V1)]).unwrap(), K0, V0);
+}
+
 // HELPER FUNCTIONS
 // ================================================================================================
 
