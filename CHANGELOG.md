@@ -2,6 +2,10 @@
 
 ## 0.19.0 (TBD)
 
+#### Enhancements
+
+- Added support for leaves with multiple pairs in `std::collections::smt::get` ([#2048](https://github.com/0xMiden/miden-vm/pull/2048)).
+
 #### Changes
 
 - [BREAKING] Incremented MSRV to 1.90.
