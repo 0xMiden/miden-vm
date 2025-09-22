@@ -343,7 +343,7 @@ fn test_keccak_hash_1to1_prove_verify() {
 
     // Generate proof with 96-bit security
     let options = ProvingOptions::with_96_bit_security(miden_air::HashFunction::Blake3_192);
-    let (stack_outputs, proof) = miden_utils_testing::prove(
+    let (stack_outputs, proof, precompile_requests) = miden_utils_testing::prove(
         &program,
         stack_inputs.clone(),
         advice_inputs,
@@ -368,7 +368,7 @@ fn test_keccak_hash_1to1_prove_verify() {
     // Check we get the same commitment from the verifier
     let mut precompile_verifiers = PrecompileVerifiers::new();
     precompile_verifiers.register(KECCAK_HASH_MEMORY_EVENT_ID, Arc::new(keccak_verifier));
-    let precompile_requests = proof.precompile_requests.clone();
+    let precompile_requests = precompile_requests.clone();
     let verifier_commitments = precompile_requests
         .commitments(&precompile_verifiers)
         .expect("failed to verify");
@@ -385,6 +385,7 @@ fn test_keccak_hash_1to1_prove_verify() {
         stack_inputs,
         stack_outputs,
         proof,
+        &precompile_requests,
         &precompile_verifiers,
     );
 

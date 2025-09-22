@@ -2,10 +2,10 @@ use alloc::{string::ToString, vec::Vec};
 
 use miden_core::{
     crypto::hash::{Blake3_192, Blake3_256, Hasher, Poseidon2, Rpo256, Rpx256},
-    precompile::PrecompileRequests,
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 use winter_air::proof::Proof;
+
 // EXECUTION PROOF
 // ================================================================================================
 
@@ -13,14 +13,10 @@ use winter_air::proof::Proof;
 ///
 /// The proof encodes the proof itself as well as STARK protocol parameters used to generate the
 /// proof. However, the proof does not contain public inputs needed to verify the proof.
-///
-/// The proof also includes any precompile requests made during execution, which can be verified
-/// alongside the VM proof to ensure computational integrity.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecutionProof {
     pub proof: Proof,
     pub hash_fn: HashFunction,
-    pub precompile_requests: PrecompileRequests,
 }
 
 impl ExecutionProof {
@@ -30,16 +26,7 @@ impl ExecutionProof {
     /// Creates a new instance of [ExecutionProof] from the specified STARK proof and hash
     /// function.
     pub const fn new(proof: Proof, hash_fn: HashFunction) -> Self {
-        Self::new_with_precompiles(proof, hash_fn, PrecompileRequests::new())
-    }
-
-    /// Creates a new instance of [ExecutionProof] with precompile requests.
-    pub const fn new_with_precompiles(
-        proof: Proof,
-        hash_fn: HashFunction,
-        precompile_requests: PrecompileRequests,
-    ) -> Self {
-        Self { proof, hash_fn, precompile_requests }
+        Self { proof, hash_fn }
     }
 
     // PUBLIC ACCESSORS
@@ -53,11 +40,6 @@ impl ExecutionProof {
     /// Returns the hash function used during proof generation process.
     pub const fn hash_fn(&self) -> HashFunction {
         self.hash_fn
-    }
-
-    /// Returns the precompile requests made by the VM while executing the program.
-    pub fn precompile_requests(&self) -> &PrecompileRequests {
-        &self.precompile_requests
     }
 
     /// Returns conjectured security level of this proof in bits.
@@ -77,14 +59,11 @@ impl ExecutionProof {
 
     /// Serializes this proof into a vector of bytes.
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut result = Vec::new();
-        result.push(self.hash_fn as u8);
-        let mut proof_bytes = self.proof.to_bytes();
-        assert!(!proof_bytes.is_empty(), "invalid STARK proof");
-        result.append(&mut proof_bytes);
-        let mut precompile_bytes = self.precompile_requests.to_bytes();
-        result.append(&mut precompile_bytes);
-        result
+        let mut bytes = self.proof.to_bytes();
+        assert!(!bytes.is_empty(), "invalid STARK proof");
+        // TODO: ideally we should write hash function into the proof first to avoid reallocations
+        bytes.insert(0, self.hash_fn as u8);
+        bytes
     }
 
     /// Reads the source bytes, parsing a new proof instance.
@@ -93,20 +72,16 @@ impl ExecutionProof {
             return Err(DeserializationError::UnexpectedEOF);
         }
         let hash_fn = HashFunction::try_from(source[0])?;
-
-        let mut reader = miden_core::utils::SliceReader::new(&source[1..]);
-        let proof = Proof::read_from(&mut reader)?;
-        let precompile_requests = PrecompileRequests::read_from(&mut reader)?;
-
-        Ok(Self::new_with_precompiles(proof, hash_fn, precompile_requests))
+        let proof = Proof::from_bytes(&source[1..])?;
+        Ok(Self::new(proof, hash_fn))
     }
 
     // DESTRUCTOR
     // --------------------------------------------------------------------------------------------
 
     /// Returns components of this execution proof.
-    pub fn into_parts(self) -> (HashFunction, Proof, PrecompileRequests) {
-        (self.hash_fn, self.proof, self.precompile_requests)
+    pub fn into_parts(self) -> (HashFunction, Proof) {
+        (self.hash_fn, self.proof)
     }
 }
 
@@ -195,7 +170,6 @@ impl Serializable for ExecutionProof {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         self.proof.write_into(target);
         self.hash_fn.write_into(target);
-        self.precompile_requests.write_into(target);
     }
 }
 
@@ -203,9 +177,8 @@ impl Deserializable for ExecutionProof {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let proof = Proof::read_from(source)?;
         let hash_fn = HashFunction::read_from(source)?;
-        let precompile_requests = PrecompileRequests::read_from(source)?;
 
-        Ok(ExecutionProof { proof, hash_fn, precompile_requests })
+        Ok(ExecutionProof { proof, hash_fn })
     }
 }
 
@@ -221,7 +194,6 @@ impl ExecutionProof {
         ExecutionProof {
             proof: Proof::new_dummy(),
             hash_fn: HashFunction::Blake3_192,
-            precompile_requests: PrecompileRequests::new(),
         }
     }
 }

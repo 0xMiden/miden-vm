@@ -84,14 +84,14 @@ pub fn generate_recursive_verifier_data(
     let options =
         ProvingOptions::new(27, 8, 0, FieldExtension::Quadratic, 4, 127, HashFunction::Rpo256);
 
-    let (stack_outputs, proof) =
+    let (stack_outputs, proof, _) =
         prove(&program, stack_inputs.clone(), advice_inputs, &mut host, options).unwrap();
 
     let program_info = ProgramInfo::from(program);
 
     // build public inputs and generate the advice data needed for recursive proof verification
     let pub_inputs = PublicInputs::new(program_info, stack_inputs, stack_outputs);
-    let (_, proof, _) = proof.into_parts();
+    let (_, proof) = proof.into_parts();
     Ok(generate_advice_inputs(proof, pub_inputs).unwrap())
 }
 

@@ -37,12 +37,12 @@ mod gpu;
 pub use miden_air::{
     DeserializationError, ExecutionProof, FieldExtension, HashFunction, ProvingOptions,
 };
+use miden_core::precompile::PrecompileRequests;
 pub use miden_processor::{
     AdviceInputs, AsyncHost, BaseHost, ExecutionError, InputError, StackInputs, StackOutputs,
     SyncHost, Word, crypto, math, utils,
 };
 pub use winter_prover::{Proof, crypto::MerkleTree as MerkleTreeVC};
-
 // PROVER
 // ================================================================================================
 
@@ -64,7 +64,7 @@ pub fn prove(
     advice_inputs: AdviceInputs,
     host: &mut impl SyncHost,
     options: ProvingOptions,
-) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
+) -> Result<(StackOutputs, ExecutionProof, PrecompileRequests), ExecutionError> {
     // execute the program to create an execution trace
     #[cfg(feature = "std")]
     let now = Instant::now();
@@ -140,9 +140,9 @@ pub fn prove(
     }
     .map_err(ExecutionError::ProverError)?;
 
-    let proof = ExecutionProof::new_with_precompiles(proof, hash_fn, precompile_requests);
+    let proof = ExecutionProof::new(proof, hash_fn);
 
-    Ok((stack_outputs, proof))
+    Ok((stack_outputs, proof, precompile_requests))
 }
 
 // PROVER

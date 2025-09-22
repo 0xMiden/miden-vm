@@ -70,6 +70,7 @@ pub fn verify(
         stack_inputs,
         stack_outputs,
         proof,
+        &PrecompileRequests::new(),
         &PrecompileVerifiers::new(),
     )
 }
@@ -86,6 +87,7 @@ pub fn verify_with_precompiles(
     stack_inputs: StackInputs,
     stack_outputs: StackOutputs,
     proof: ExecutionProof,
+    precompile_requests: &PrecompileRequests,
     precompile_verifiers: &PrecompileVerifiers,
 ) -> Result<u32, VerificationError> {
     // get security level of the proof
@@ -95,11 +97,11 @@ pub fn verify_with_precompiles(
     // build public inputs and try to verify the proof
     let pub_inputs = PublicInputs::new(program_info, stack_inputs, stack_outputs);
 
-    if precompile_verifiers.is_empty() && !proof.precompile_requests().is_empty() {
+    if precompile_verifiers.is_empty() && !precompile_requests.is_empty() {
         return Err(VerificationError::NoVerifiers);
     }
 
-    let (hash_fn, proof, precompile_requests) = proof.into_parts();
+    let (hash_fn, proof) = proof.into_parts();
 
     // TODO: Check that this corresponds to the commitment output by the VM
     let commitments = precompile_requests
