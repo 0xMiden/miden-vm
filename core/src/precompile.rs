@@ -115,17 +115,17 @@ impl PrecompileVerifiers {
     /// word followed by a commitment word, represented as a [`PrecompileCommitment`]
     ///
     /// # Arguments
-    /// * `verifiers` - Registry of verifiers to use for validation
+    /// * `requests` - Slice of precompile requests to verify
     ///
     /// # Errors
-    /// Returns a `PrecompileError` if:
+    /// Returns a `PrecompileVerificationError` if:
     /// - No verifier is registered for a request's event ID
     /// - A verifier fails to verify its request
     pub fn commitments(
         &self,
         requests: &[PrecompileRequest],
     ) -> Result<Vec<PrecompileCommitment>, PrecompileVerificationError> {
-        let mut commitments = Vec::with_capacity(self.len());
+        let mut commitments = Vec::with_capacity(requests.len());
         for (index, PrecompileRequest { event_id, data }) in requests.iter().enumerate() {
             let event_id = *event_id;
             let verifier = self
@@ -172,7 +172,7 @@ impl PrecompileVerifiers {
 /// computations during proof verification. The verifier validates that the
 /// computation was performed correctly and returns a precompile commitment.
 pub trait PrecompileVerifier: Send + Sync {
-    /// Verifies a precompile computation from the given call data and tag.
+    /// Verifies a precompile computation from the given call data.
     ///
     /// # Arguments
     /// * `data` - The byte data used for the precompile computation
@@ -186,7 +186,15 @@ pub trait PrecompileVerifier: Send + Sync {
 }
 
 /// Default implementation for both free functions and closures with signature
-/// `fn(Word, &[u8]) -> Result<PrecompileCommitment, PrecompileError>`
+/// `fn(&[u8]) -> Result<PrecompileCommitment, PrecompileError>`
+///
+/// # Example
+/// ```ignore
+/// let verifier = |data: &[u8]| -> Result<PrecompileCommitment, PrecompileError> {
+///     // Custom verification logic
+///     Ok(PrecompileCommitment { tag: [0; 4].into(), commitment: [0; 4].into() })
+/// };
+/// ```
 impl<F> PrecompileVerifier for F
 where
     F: Fn(&[u8]) -> Result<PrecompileCommitment, PrecompileError> + Send + Sync + 'static,

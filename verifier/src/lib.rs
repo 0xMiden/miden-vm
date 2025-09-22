@@ -151,7 +151,7 @@ pub fn verify_with_precompiles(
 // ERRORS
 // ================================================================================================
 
-/// TODO: add docs
+/// Errors that can occur during proof verification.
 #[derive(Debug, thiserror::Error)]
 pub enum VerificationError {
     #[error("failed to verify proof for program with hash {0}")]

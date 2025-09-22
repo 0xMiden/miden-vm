@@ -41,10 +41,8 @@ pub const KECCAK_HASH_MEMORY_EVENT_ID: EventId = EventId::from_u64(5779517439479
 /// ## Output Format
 /// - **Advice Stack**: Extended with digest `[h_0, ..., h_7]` so the least significant u32 (h_0) is
 ///   at the top of the stack
-/// - **Precompile Requests**: Logs the preimage as a precompile request and stores it in the
-///   [`AdviceProvider`](miden_processor::AdviceProvider) for deferred verification.
-/// - **Commitment**: `Rpo256(Rpo256(input) || Rpo256(digest))` for kernel tracking of deferred
-///   computations
+/// - **Precompile Requests**: Logs the preimage as a precompile request with tag `[event_id,
+///   len_bytes, 0, 0]` in the [`AdviceProvider`](miden_processor::AdviceProvider).
 pub fn handle_keccak_hash_memory(
     process: &ProcessState,
 ) -> Result<Vec<AdviceMutation>, EventError> {
@@ -107,8 +105,8 @@ fn read_witness(process: &ProcessState, ptr: u64, len_bytes: u64) -> Option<Vec<
 /// Verifier for Keccak256 precompile computations.
 ///
 /// This verifier validates that Keccak256 hash computations were performed correctly
-/// by recomputing the hash from the provided witness data and recomputing the resulting precompile
-/// request commitment.
+/// by recomputing the hash from the provided witness data and generating the precompile
+/// commitment.
 pub fn keccak_verifier(input_u8: &[u8]) -> Result<PrecompileCommitment, PrecompileError> {
     let preimage = KeccakPreimage(input_u8.to_vec());
     Ok(preimage.precompile_commitment())
@@ -257,6 +255,9 @@ impl KeccakPreimage {
 
     /// Computes the precompile commitment: `RPO(RPO(input) || RPO(hash))`, along with the tag for
     /// the computation.
+    ///
+    /// The tag format is `[event_id, len_bytes, 0, 0]` where `event_id` identifies the Keccak
+    /// precompile and `len_bytes` is the original input length.
     ///
     /// This commitment is used by the precompile verification system to ensure
     /// that the hash computation was performed correctly.
