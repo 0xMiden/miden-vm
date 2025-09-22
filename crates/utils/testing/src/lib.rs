@@ -34,7 +34,7 @@ pub use miden_processor::{
 };
 use miden_processor::{DefaultHost, EventHandler, Program, fast::FastProcessor};
 use miden_prover::utils::range;
-pub use miden_prover::{MerkleTreeVC, ProvingOptions, prove};
+pub use miden_prover::{MerkleTreeVC, ProvingOptions, prove, prove_with_precompiles};
 pub use miden_verifier::{AcceptableOptions, VerifierError, verify};
 pub use pretty_assertions::{assert_eq, assert_ne, assert_str_eq};
 #[cfg(not(target_family = "wasm"))]
@@ -400,7 +400,7 @@ impl Test {
     pub fn prove_and_verify(&self, pub_inputs: Vec<u64>, test_fail: bool) {
         let (program, mut host) = self.get_program_and_host();
         let stack_inputs = StackInputs::try_from_ints(pub_inputs).unwrap();
-        let (mut stack_outputs, proof, _) = miden_prover::prove(
+        let (mut stack_outputs, proof) = miden_prover::prove(
             &program,
             stack_inputs.clone(),
             self.advice_inputs.clone(),

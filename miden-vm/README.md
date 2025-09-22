@@ -118,7 +118,7 @@ let mut assembler = Assembler::default();
 let program = assembler.assemble_program("begin push.3 push.5 add swap drop end").unwrap();
 
 // let's execute it and generate a STARK proof
-let (outputs, proof, _precompile_requests) = prove(
+let (outputs, proof) = prove(
     &program,
     StackInputs::default(),       // we won't provide any inputs
     AdviceInputs::default(),      // we don't need any initial advice inputs
@@ -214,7 +214,7 @@ let mut host = DefaultHost::default();
 let stack_inputs = StackInputs::try_from_ints([0, 1]).unwrap();
 
 // execute the program
-let (outputs, proof, _) = miden_vm::prove(
+let (outputs, proof) = miden_vm::prove(
     &program,
     stack_inputs,
     AdviceInputs::default(), // without initial advice inputs

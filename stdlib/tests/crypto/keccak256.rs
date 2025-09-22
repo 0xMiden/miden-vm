@@ -343,7 +343,7 @@ fn test_keccak_hash_1to1_prove_verify() {
 
     // Generate proof with 96-bit security
     let options = ProvingOptions::with_96_bit_security(miden_air::HashFunction::Blake3_192);
-    let (stack_outputs, proof, precompile_requests) = miden_utils_testing::prove(
+    let (stack_outputs, proof, precompile_requests) = miden_utils_testing::prove_with_precompiles(
         &program,
         stack_inputs.clone(),
         advice_inputs,

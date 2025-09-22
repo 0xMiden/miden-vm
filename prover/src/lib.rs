@@ -44,6 +44,7 @@ pub use miden_processor::{
     SyncHost, Word, crypto, math, utils,
 };
 pub use winter_prover::{Proof, crypto::MerkleTree as MerkleTreeVC};
+
 // PROVER
 // ================================================================================================
 
@@ -57,9 +58,27 @@ pub use winter_prover::{Proof, crypto::MerkleTree as MerkleTreeVC};
 ///
 /// # Errors
 /// Returns an error if program execution or STARK proof generation fails for any reason.
-#[instrument("prove_program", skip_all)]
 #[maybe_async]
 pub fn prove(
+    program: &Program,
+    stack_inputs: StackInputs,
+    advice_inputs: AdviceInputs,
+    host: &mut impl SyncHost,
+    options: ProvingOptions,
+) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
+    let (stack_outputs, proof, precompile_requests) =
+        maybe_await!(prove_with_precompiles(program, stack_inputs, advice_inputs, host, options))?;
+    if !precompile_requests.is_empty() {
+        return Err(ExecutionError::UnexpectedPrecompiles);
+    }
+    Ok((stack_outputs, proof))
+}
+
+/// Same as [`prove`] but also returns any precompile requests that were made during the execution
+/// of the program.
+#[instrument("prove_program", skip_all)]
+#[maybe_async]
+pub fn prove_with_precompiles(
     program: &Program,
     stack_inputs: StackInputs,
     advice_inputs: AdviceInputs,

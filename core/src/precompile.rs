@@ -148,7 +148,7 @@ impl PrecompileVerifiers {
     /// # Returns
     /// The final accumulated commitment hash
     pub fn accumulate_commitments(commitments: &[PrecompileCommitment]) -> Word {
-        let mut final_commitments = Vec::with_capacity((commitments.len() + 1) * 2);
+        let mut final_commitments = Vec::with_capacity((commitments.len() + 1) * 8);
         for commitment in commitments {
             final_commitments.extend(commitment.to_elements());
         }

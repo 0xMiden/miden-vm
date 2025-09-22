@@ -27,7 +27,7 @@ let assembler = Assembler::default();
 let program = assembler.compile("begin push.3 push.5 add end").unwrap();
 
 // let's execute it and generate a STARK proof
-let (outputs, proof, _precompile_requests) = prove(
+let (outputs, proof) = prove(
     &program,
     StackInputs::default(),       // we won't provide any stack inputs
     &mut DefaultHost::default(),  // we'll be using a default host
