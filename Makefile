@@ -1,10 +1,10 @@
-# ------------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------------------
 # Makefile
-# ------------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------------------
 
 .DEFAULT_GOAL := help
 
-# -- help ----------------------------------------------------------------------
+# -- help -----------------------------------------------------------------------------------------
 .PHONY: help
 help:
 	@printf "\nTargets:\n\n"
@@ -25,11 +25,11 @@ help:
 	@printf "  make test-skip-proptests         # All tests except proptests\n\n"
 
 
-# -- environment toggles -------------------------------------------------------
+# -- environment toggles --------------------------------------------------------------------------
 BACKTRACE                := RUST_BACKTRACE=1
 WARNINGS                 := RUSTDOCFLAGS="-D warnings"
 
-# -- feature configuration -----------------------------------------------------
+# -- feature configuration ------------------------------------------------------------------------
 ALL_FEATURES_BUT_ASYNC   := --features concurrent,executable,metal,testing,with-debug-info,internal
 
 # Workspace-wide test features
@@ -133,7 +133,7 @@ test-%: ## Tests a specific crate; accepts 'test=' to pass a selector or nextest
 		FEATURES=$(FEATURES_$*) \
 		EXPR=$(if $(test),$(test),)
 
-# -- workspace-wide tests ------------------------------------------------------
+# -- workspace-wide tests -------------------------------------------------------------------------
 
 .PHONY: test-build
 test-build: ## Build the test binaries for the workspace (no run)
@@ -147,7 +147,7 @@ test: ## Run all tests for the workspace
 test-docs: ## Run documentation tests (cargo test - nextest doesn't support doctests)
 	cargo test --doc $(ALL_FEATURES_BUT_ASYNC)
 
-# -- filtered test runs --------------------------------------------------------
+# -- filtered test runs ---------------------------------------------------------------------------
 
 .PHONY: test-fast
 test-fast: ## Runs fast tests (excludes all CLI tests and proptests)
@@ -184,7 +184,7 @@ build: ## Builds with default parameters
 build-no-std: ## Builds without the standard library
 	cargo build --no-default-features --target wasm32-unknown-unknown --workspace
 
-# --- executable ------------------------------------------------------------------------------------
+# --- executable ----------------------------------------------------------------------------------
 
 .PHONY: exec
 exec: ## Builds an executable with optimized profile and features

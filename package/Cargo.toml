@@ -1,8 +1,8 @@
 [package]
 name = "miden-mast-package"
-version = "0.18.0"
+version.workspace = true
 description = "Package containing a compiled Miden MAST artifact with declared dependencies and exports"
-documentation = "https://docs.rs/miden-mast-package/0.18.0"
+documentation = "https://docs.rs/miden-mast-package"
 readme = "README.md"
 categories = ["compilers", "no-std"]
 keywords = ["package", "language", "miden"]
@@ -19,28 +19,17 @@ doctest = false
 
 [features]
 default = ["std", "serde"]
-arbitrary = [
-    "dep:proptest-derive",
-    "dep:proptest",
-    "miden-assembly-syntax/arbitrary",
-]
-std = [
-    "miden-assembly-syntax/std",
-    "miden-core/std",
-    "serde/std",
-    "thiserror/std",
-]
-serde = [
-    "dep:serde",
-    "dep:serde-untagged",
-    "miden-assembly-syntax/serde",
-    "miden-core/serde",
-]
+arbitrary = ["dep:proptest-derive", "dep:proptest", "miden-assembly-syntax/arbitrary"]
+std = ["miden-assembly-syntax/std", "miden-core/std", "serde/std", "thiserror/std"]
+serde = ["dep:serde", "dep:serde-untagged", "miden-assembly-syntax/serde", "miden-core/serde"]
 
 [dependencies]
-derive_more = { version = "2.0", features = ["from"] }
+# Miden dependencies
 miden-assembly-syntax.workspace = true
 miden-core.workspace = true
+
+# External dependencies
+derive_more = { version = "2.0", features = ["from"] }
 proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }

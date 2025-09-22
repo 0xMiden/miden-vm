@@ -1,8 +1,8 @@
 [package]
 name = "miden-processor"
-version = "0.18.0"
+version.workspace = true
 description = "Miden VM processor"
-documentation = "https://docs.rs/miden-processor/0.18.0"
+documentation = "https://docs.rs/miden-processor"
 readme = "README.md"
 categories = ["emulators", "no-std"]
 keywords = ["miden", "virtual-machine"]
@@ -35,15 +35,18 @@ no_err_ctx = []
 bus-debugger = ["testing", "miden-air/testing"]
 
 [dependencies]
+# Miden dependencies
 miden-air.workspace = true
 miden-core.workspace = true
 miden-debug-types.workspace = true
 miden-utils-diagnostics.workspace = true
+
+# External dependencies
 paste.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
 # For `testing`
-tokio = { version = "1.46", default-features = false, features = ["rt"], optional = true }
+tokio = { workspace = true, features = ["rt"], optional = true }
 winter-prover.workspace = true
 
 [dev-dependencies]
@@ -51,7 +54,7 @@ miden-assembly.workspace = true
 miden-utils-testing.workspace = true
 logtest = { version = "2.0", default-features = false }
 pretty_assertions = "1.4"
-rstest = { version = "0.25" }
-tokio = { version = "1.46", default-features = false, features = ["rt"] }
+rstest = { version = "0.26" }
+tokio = { workspace = true, features = ["rt"] }
 winter-fri.workspace = true
 winter-utils.workspace = true

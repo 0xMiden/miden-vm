@@ -59,15 +59,8 @@ impl<'de, T: serde::Deserialize<'de>> serde::Deserialize<'de> for Span<T> {
     where
         D: serde::Deserializer<'de>,
     {
-        let spanned = serde_spanned::Spanned::<T>::deserialize(deserializer)?;
-        let span = spanned.span();
-        let start = span.start as u32;
-        let end = span.end as u32;
-
-        Ok(Self {
-            span: SourceSpan::from(start..end),
-            spanned: spanned.into_inner(),
-        })
+        let spanned = T::deserialize(deserializer)?;
+        Ok(Self { span: SourceSpan::UNKNOWN, spanned })
     }
 }
 

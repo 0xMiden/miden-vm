@@ -1,8 +1,8 @@
 [package]
 name = "miden-stdlib"
-version = "0.18.0"
+version.workspace = true
 description = "Miden VM standard library"
-documentation = "https://docs.rs/miden-stdlib/0.18.0"
+documentation = "https://docs.rs/miden-stdlib"
 readme = "README.md"
 categories = ["cryptography", "mathematics"]
 keywords = ["miden", "program", "stdlib"]
@@ -31,16 +31,19 @@ std = ["miden-assembly/std", "miden-utils-sync/std"]
 with-debug-info = []
 
 [dependencies]
+# Miden dependencies
 miden-assembly.workspace = true
 miden-core.workspace = true
 miden-crypto.workspace = true
 miden-processor.workspace = true
 miden-utils-sync.workspace = true
+
+# External dependencies
 thiserror.workspace = true
 
 [dev-dependencies]
-blake3 = "1.8"
-criterion = "0.6"
+blake3.workspace = true
+criterion.workspace = true
 miden-air.workspace = true
 miden-processor = { workspace = true, features = ["testing"] }
 miden-utils-testing.workspace = true
@@ -50,7 +53,7 @@ num-bigint = "0.4"
 pretty_assertions = "1.4"
 rand = { version = "0.9", default-features = false }
 rand_chacha = { version = "0.9", default-features = false }
-rstest = "0.25"
+rstest = "0.26"
 serde_json.workspace = true
 sha2 = "0.10"
 sha3 = "0.10"
@@ -58,5 +61,5 @@ winter-air.workspace = true
 winter-fri.workspace = true
 
 [build-dependencies]
-env_logger = "0.11"
+env_logger.workspace = true
 miden-assembly = { workspace = true, features = ["std"] }

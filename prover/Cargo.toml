@@ -1,8 +1,8 @@
 [package]
 name = "miden-prover"
-version = "0.18.0"
+version.workspace = true
 description = "Miden VM prover"
-documentation = "https://docs.rs/miden-prover/0.18.0"
+documentation = "https://docs.rs/miden-prover"
 readme = "README.md"
 categories = ["cryptography", "emulators", "no-std"]
 keywords = ["miden", "prover", "stark", "zkp"]
@@ -21,14 +21,17 @@ metal = ["dep:miden-gpu", "dep:elsa", "dep:pollster", "concurrent", "std"]
 std = ["miden-air/std", "miden-debug-types/std", "miden-processor/std", "winter-prover/std"]
 
 [dependencies]
+# Miden dependencies
 miden-air.workspace = true
 miden-debug-types.workspace = true
 miden-processor.workspace = true
+
+# External dependencies
 tracing.workspace = true
 winter-maybe-async = { version = "0.13", default-features = false }
 winter-prover.workspace = true
 
 [target.'cfg(all(target_arch = "aarch64", target_os = "macos"))'.dependencies]
-elsa = { version = "1.9", optional = true }
+elsa = { version = "1.11", optional = true }
 miden-gpu = { version = "0.6", optional = true }
 pollster = { version = "0.4", optional = true }

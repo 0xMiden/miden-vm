@@ -1,8 +1,8 @@
 [package]
 name = "miden-core"
-version = "0.18.0"
+version.workspace = true
 description = "Miden VM core components"
-documentation = "https://docs.rs/miden-core/0.18.0"
+documentation = "https://docs.rs/miden-core"
 readme = "README.md"
 categories = ["emulators", "no-std"]
 keywords = ["instruction-set", "miden", "program"]
@@ -38,11 +38,13 @@ arbitrary = ["dep:proptest", "dep:proptest-derive"]
 testing = ["arbitrary" ]
 
 [dependencies]
-enum_dispatch = { version =  "0.3" }
+# Miden dependencies
 miden-crypto.workspace = true
 miden-debug-types.workspace = true
 miden-formatting.workspace = true
-miden-serde-test-macros = { workspace = true }
+
+# External dependencies
+enum_dispatch = { version =  "0.3" }
 num-derive = { version = "0.4", default-features = false }
 num-traits = { version = "0.2", default-features = false }
 proptest = { workspace = true, optional = true }
@@ -55,5 +57,6 @@ winter-utils.workspace = true
 
 [dev-dependencies]
 insta.workspace = true
+miden-serde-test-macros.workspace = true
 proptest.workspace = true
 winter-rand-utils.workspace = true

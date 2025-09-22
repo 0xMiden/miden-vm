@@ -1,8 +1,8 @@
 [package]
 name = "miden-utils-diagnostics"
-version = "0.18.0"
+version.workspace = true
 description = "Diagnostic infrastructure used in the Miden assembler and VM"
-documentation = "https://docs.rs/miden-utils-diagnostics/0.18.0"
+documentation = "https://docs.rs/miden-utils-diagnostics"
 readme = "README.md"
 categories = ["compilers", "no-std"]
 keywords = ["diagnostic", "error", "span"]
@@ -25,5 +25,5 @@ miette = { package = "miden-miette", version = "8.0", default-features = false, 
     "derive",
 ] }
 miden-crypto.workspace = true
-paste = "1.0"
+paste.workspace = true
 tracing.workspace = true

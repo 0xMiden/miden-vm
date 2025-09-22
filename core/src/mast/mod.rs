@@ -573,7 +573,7 @@ impl IndexMut<DecoratorId> for MastForest {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
 #[cfg_attr(
-    all(feature = "serde", feature = "arbitrary"),
+    all(feature = "serde", feature = "arbitrary", test),
     miden_serde_test_macros::serde_test
 )]
 pub struct MastNodeId(u32);

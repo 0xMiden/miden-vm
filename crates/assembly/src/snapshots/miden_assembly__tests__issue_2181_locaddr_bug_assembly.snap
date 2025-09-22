@@ -1,0 +1,34 @@
+---
+source: assembly/src/tests.rs
+expression: program
+---
+begin
+    basic_block
+        push(4)
+        fmpupdate
+        asmOp(locaddr.0, 2)
+        push(18446744069414584317)
+        fmpadd
+        debug(stack.4)
+        asmOp(locaddr.0, 2)
+        push(18446744069414584317)
+        fmpadd
+        debug(stack.4)
+        asmOp(locaddr.0, 2)
+        push(18446744069414584317)
+        fmpadd
+        debug(stack.4)
+        debug(stack.4)
+        asmOp(nop, 1)
+        noop
+        debug(stack.4)
+        asmOp(dropw, 4)
+        drop
+        drop
+        drop
+        drop
+        push(18446744069414584317)
+        fmpupdate
+        noop
+    end
+end

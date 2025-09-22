@@ -396,21 +396,30 @@ impl fmt::Display for BasicBlockNodePrettyPrint<'_> {
 /// IOW this makes its `BasicBlockNode::raw_decorators` padding-unaware, or equivalently
 /// "removes" the padding of these decorators
 pub struct RawDecoratorIdIterator<'a> {
-    decorators: &'a DecoratorList,
-    // cumulative padding offsets per group
-    padding_offsets: DecoratorPaddingOffsets,
-    // index of the current decorator in the decoratorlist
-    idx: usize,
+    decorators: &'a DecoratorList, // [(adjusted_idx, DecoratorId)]
+    padding_offsets: DecoratorPaddingOffsets, // indexable: padding_offsets[i]
+    idx: usize,                    // position in decorators
+    probe: usize,                  // running original index candidate
 }
 
+/// Returns a new instance of raw decorator iterator instantiated with the provided decorator
+/// list, tied to the provided op_batches list
 impl<'a> RawDecoratorIdIterator<'a> {
-    /// Returns a new instance of raw decorator iterator instantiated with the provided decorator
-    /// list, tied to the provided op_batches list
-    fn new(decorators: &'a DecoratorList, op_batches: &'a [OpBatch]) -> Self {
-        // Decorators have been validated at the creation of BlockNode because this constructor
-        // is private. Consider using `validate_decorators`` if that changes.
+    // Decorators have been validated at the creation of BlockNode because this constructor
+    // is private. Consider using `validate_decorators` if that changes.
+    pub fn new(decorators: &'a DecoratorList, op_batches: &'a [OpBatch]) -> Self {
         let padding_offsets = DecoratorPaddingOffsets::new(op_batches);
-        Self { decorators, padding_offsets, idx: 0 }
+        Self {
+            decorators,
+            padding_offsets,
+            idx: 0,
+            probe: 0,
+        }
+    }
+
+    #[inline]
+    fn f(&self, i: usize) -> usize {
+        i + self.padding_offsets[i]
     }
 }
 
@@ -418,14 +427,23 @@ impl<'a> Iterator for RawDecoratorIdIterator<'a> {
     type Item = (usize, &'a DecoratorId);
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.idx < self.decorators.len() {
-            let (this_op_idx, this_dec) = &self.decorators[self.idx];
-            self.idx += 1;
-
-            Some((this_op_idx - self.padding_offsets[*this_op_idx], this_dec))
-        } else {
-            None
+        if self.idx >= self.decorators.len() {
+            return None;
         }
+
+        // Borrow adjusted index & decorator id without moving them
+        let (adjusted_idx_ref, dec_ref) = &self.decorators[self.idx];
+        let adjusted_idx = *adjusted_idx_ref;
+        self.idx += 1;
+
+        // Advance the probe until f(probe) reaches the current adjusted index.
+        // Because both sequences are increasing, probe never moves backward.
+        let n = self.padding_offsets.0.len();
+        while self.probe < n && self.f(self.probe) < adjusted_idx {
+            self.probe += 1;
+        }
+
+        Some((self.probe, dec_ref))
     }
 }
 

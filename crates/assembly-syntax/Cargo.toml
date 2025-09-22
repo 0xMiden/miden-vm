@@ -1,0 +1,70 @@
+[package]
+name = "miden-assembly-syntax"
+version.workspace = true
+description = "Parsing and semantic analysis of the Miden Assembly language"
+documentation = "https://docs.rs/miden-assembly-syntax"
+readme = "README.md"
+categories = ["compilers", "no-std"]
+keywords = ["assembly", "language", "syntax", "miden"]
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+[features]
+default = ["std"]
+std = [
+    "aho-corasick/std",
+    "miden-core/std",
+    "miden-debug-types/std",
+    "miden-utils-diagnostics/std",
+    "thiserror/std",
+    "proptest/std",
+]
+serde = [
+    "dep:serde",
+    "dep:serde-untagged",
+    "miden-debug-types/serde",
+    "midenc-hir-type/serde",
+    "semver/serde",
+    "smallvec/serde",
+    "dep:serde_json",
+]
+arbitrary = ["dep:proptest", "dep:proptest-derive", "miden-core/arbitrary"]
+testing = ["arbitrary", "logging"]
+logging = ["dep:env_logger"]
+
+[dependencies]
+# Miden dependencies
+miden-core.workspace = true
+miden-debug-types.workspace = true
+miden-utils-diagnostics.workspace = true
+midenc-hir-type.workspace = true
+
+# External dependencies
+aho-corasick = { version = "1.1", default-features = false }
+env_logger = { workspace = true, optional = true }
+lalrpop-util = { version = "0.22", default-features = false }
+log.workspace = true
+proptest = { workspace = true, optional = true }
+proptest-derive = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+regex = { version = "1.11", default-features = false, features = ["unicode", "perf"] }
+semver = { version = "1.0", default-features = false }
+serde = { workspace = true, optional = true }
+serde-untagged = { workspace = true, optional = true }
+smallvec.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+env_logger.workspace = true
+miden-serde-test-macros.workspace = true
+proptest.workspace = true
+pretty_assertions = "1.4"
+
+[build-dependencies]
+lalrpop = { version = "0.22", default-features = false }
+rustc_version = "0.4"
