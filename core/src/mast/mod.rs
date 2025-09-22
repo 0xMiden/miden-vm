@@ -12,6 +12,8 @@ use core::{
 use serde::{Deserialize, Serialize};
 
 mod node;
+#[cfg(any(test, feature = "arbitrary"))]
+pub use node::arbitrary;
 pub use node::{
     BasicBlockNode, CallNode, DecoratedOpLink, DecoratorOpLinkIterator, DynNode, ExternalNode,
     JoinNode, LoopNode, MastNode, MastNodeErrorContext, MastNodeExt, OP_BATCH_SIZE, OP_GROUP_SIZE,

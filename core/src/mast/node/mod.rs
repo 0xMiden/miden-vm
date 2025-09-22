@@ -28,6 +28,8 @@ use miden_formatting::prettier::PrettyPrint;
 pub use split_node::SplitNode;
 
 mod loop_node;
+#[cfg(any(test, feature = "arbitrary"))]
+pub use basic_block_node::arbitrary;
 pub use loop_node::LoopNode;
 
 use super::DecoratorId;

@@ -182,7 +182,7 @@ impl Arbitrary for BasicBlockNode {
 /// Parameters for generating MastForest instances
 #[derive(Clone, Debug)]
 pub struct MastForestParams {
-    /// Maximum number of decorators to generate
+    /// Number of decorators to generate
     pub decorators: u32,
     /// Range of number of blocks to generate
     pub blocks: RangeInclusive<usize>,
