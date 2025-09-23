@@ -26,17 +26,15 @@ pub struct PrecompileRequest {
 
 impl Serializable for PrecompileRequest {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        target.write_u64(self.event_id.as_felt().as_int());
-        target.write_usize(self.data.len());
-        target.write_bytes(&self.data);
+        self.event_id.as_felt().write_into(target);
+        self.data.write_into(target);
     }
 }
 
 impl Deserializable for PrecompileRequest {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let event_id = EventId::from_u64(source.read_u64()?);
-        let len = source.read_usize()?;
-        let data = source.read_vec(len)?;
+        let event_id = EventId::from_felt(Felt::read_from(source)?);
+        let data = Vec::<u8>::read_from(source)?;
         Ok(Self { event_id, data })
     }
 }
