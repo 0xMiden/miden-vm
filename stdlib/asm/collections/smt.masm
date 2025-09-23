@@ -361,7 +361,9 @@ end
 #!   Operand stack: [leaf_size, NV, K, R]
 #!   Advice stack:  [V1, K2, V2, K2, ...]
 #!
-#! Cycles: 124 + 3 * pair_count
+#! Cycles:
+#!  Non-empty: 125 + 3 * pair_count
+#!  Empty: 129 + 3 * pair_count
 proc.get_multi_leaf_value
     # First, we'll pipe all the pairs in the leaf from the advice stack.
     # We'll need a pointer, the count of words to copy, and a "commitment" that it should hash to.
@@ -389,22 +391,35 @@ proc.get_multi_leaf_value
     exec.sorted_array::find_key_value
     # => [is_key_found, key_ptr, start_ptr, end_ptr, R]
 
-    # is_key_found will always be true, so we can reuse that bit of stack. Likewise we can reuse
-    # start_ptr and end_ptr.
-    # => [x, key_ptr, x, x, R]
+    if.true
 
-    # (1 cycle)
-    push.0
-    # => [x, x, key_ptr, x, x, R]
+        # If the key was found then key_ptr+4 points to the value we need to load from memory.
+        # We can reuse the [start_ptr, end_ptr] part of the stack when loading.
+        # => [key_ptr, x, x, R]
 
-    # Now just load the word right next to the key to get the value we're looking for.
-    # (3 cycles)
-    movup.2 add.4
-    # => [val_ptr, x, x, x, x, R]
+        # (2 cycles)
+        add.4
+        # => [val_ptr, x, x, R]
 
-    # (1 cycle)
-    mem_loadw
-    # => [V, R]
+        # (2 cycles)
+        push.0.0
+        # => [x, x, key_ptr, x, x, R]
+
+        # (1 cycle)
+        movup.2
+        # => [val_ptr, x, x, x, x, R]
+
+        # (1 cycle)
+        mem_loadw
+        # => [V, R]
+    else
+        # If the key wasn't found, then the key's value is an empty word.
+        # => [x, x, x, R]
+
+        # (10 cycles)
+        push.0 padw swapw dropw
+        # => [Z, R]
+    end
 end
 
 #! Returns the value located under the specified key in the Sparse Merkle Tree defined by the
