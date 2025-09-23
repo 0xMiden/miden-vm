@@ -121,7 +121,7 @@ pub fn keccak_verifier(input_u8: &[u8]) -> Result<PrecompileCommitment, Precompi
 /// packed in little-endian order: `[d_0, ..., d_7]` where
 /// `d_0 = u32::from_le_bytes([b_0, b_1, b_2, b_3])` and so on.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub struct KeccakFeltDigest(pub [Felt; 8]);
+pub struct KeccakFeltDigest([Felt; 8]);
 
 impl KeccakFeltDigest {
     /// Creates a digest from a 32-byte Keccak256 hash output.
@@ -253,8 +253,8 @@ impl KeccakPreimage {
         KeccakFeltDigest::from_bytes(&hash_u8)
     }
 
-    /// Computes the precompile commitment: `RPO(RPO(input) || RPO(hash))`, along with the tag for
-    /// the computation.
+    /// Computes the precompile commitment: `RPO(RPO(input) || RPO(keccak_hash))`, along with the
+    /// tag for the computation.
     ///
     /// The tag format is `[event_id, len_bytes, 0, 0]` where `event_id` identifies the Keccak
     /// precompile and `len_bytes` is the original input length.
@@ -286,6 +286,12 @@ impl KeccakPreimage {
             event_id: KECCAK_HASH_MEMORY_EVENT_ID,
             data: self.0,
         }
+    }
+}
+
+impl AsRef<[Felt]> for KeccakFeltDigest {
+    fn as_ref(&self) -> &[Felt] {
+        &self.0
     }
 }
 

@@ -86,7 +86,7 @@ fn test_keccak_handler(input_u8: &[u8]) {
     let output = test.execute().unwrap();
 
     let advice_stack = output.advice_provider().stack();
-    assert_eq!(advice_stack, preimage.digest().0);
+    assert_eq!(advice_stack, preimage.digest().as_ref());
 
     let deferred = output.advice_provider().precompile_requests().to_vec();
     assert_eq!(deferred.len(), 1, "advice deferred must contain one entry");
@@ -151,7 +151,7 @@ fn test_keccak_hash_memory_impl(input_u8: &[u8]) {
 
     // Get the digest from stack (first 8 elements)
     let digest: [Felt; 8] = array::from_fn(|i| stack.get_stack_item(8 + i).unwrap());
-    assert_eq!(digest, preimage.digest().0, "output digest does not match");
+    assert_eq!(&digest, preimage.digest().as_ref(), "output digest does not match");
 
     let commitment_verifier = keccak_verifier(&preimage.0).unwrap();
     assert_eq!(
@@ -188,7 +188,7 @@ fn test_keccak_hash_memory(input_u8: &[u8]) {
     );
 
     let test = build_debug_test!(source, &[]);
-    let digest = preimage.digest().0.map(|felt| felt.as_int());
+    let digest: Vec<u64> = preimage.digest().as_ref().iter().map(Felt::as_int).collect();
     test.expect_stack(&digest);
 }
 
@@ -218,7 +218,7 @@ fn test_keccak_hash_1to1() {
     );
 
     let test = build_debug_test!(source, &[]);
-    let digest = preimage.digest().0.map(|felt| felt.as_int());
+    let digest: Vec<u64> = preimage.digest().as_ref().iter().map(Felt::as_int).collect();
     test.expect_stack(&digest);
 }
 
@@ -248,7 +248,7 @@ fn test_keccak_hash_2to1() {
     );
 
     let test = build_debug_test!(source, &[]);
-    let digest = preimage.digest().0.map(|felt| felt.as_int());
+    let digest: Vec<u64> = preimage.digest().as_ref().iter().map(Felt::as_int).collect();
     test.expect_stack(&digest);
 }
 
