@@ -3,8 +3,8 @@ use alloc::{boxed::Box, vec::Vec};
 use core::fmt;
 
 pub use basic_block_node::{
-    BATCH_SIZE as OP_BATCH_SIZE, BasicBlockNode, GROUP_SIZE as OP_GROUP_SIZE, OpBatch,
-    OperationOrDecorator,
+    BATCH_SIZE as OP_BATCH_SIZE, BasicBlockNode, DecoratorOpLinkIterator,
+    GROUP_SIZE as OP_GROUP_SIZE, OpBatch, OperationOrDecorator,
 };
 use enum_dispatch::enum_dispatch;
 #[cfg(feature = "serde")]
@@ -210,7 +210,7 @@ pub trait MastNodeErrorContext: Send + Sync {
     ///
     /// The index is only meaningful for [`BasicBlockNode`]s, where it corresponds to the index of
     /// the operation in the basic block to which the decorator is attached.
-    fn decorators(&self) -> impl Iterator<Item = (usize, DecoratorId)>;
+    fn decorators(&self) -> impl Iterator<Item = DecoratedOpLink>;
 
     // PROVIDED METHODS
     // -------------------------------------------------------------------------------------------
@@ -261,6 +261,10 @@ pub trait MastNodeErrorContext: Send + Sync {
         None
     }
 }
+
+// Links an operation index in a block to a decoratorid, to be executed right before this
+// operation's position
+pub type DecoratedOpLink = (usize, DecoratorId);
 
 // HELPERS
 // ===============================================================================================

@@ -37,7 +37,7 @@ pub fn build_trace_from_program(program: &Program, stack_inputs: &[u64]) -> Exec
 pub fn build_trace_from_ops(operations: Vec<Operation>, stack: &[u64]) -> ExecutionTrace {
     let mut mast_forest = MastForest::new();
 
-    let basic_block_id = mast_forest.add_block(operations, None).unwrap();
+    let basic_block_id = mast_forest.add_block(operations, Vec::new()).unwrap();
     mast_forest.make_root(basic_block_id);
 
     let program = Program::new(mast_forest.into(), basic_block_id);
@@ -58,7 +58,7 @@ pub fn build_trace_from_ops_with_inputs(
         Process::new(Kernel::default(), stack_inputs, advice_inputs, ExecutionOptions::default());
 
     let mut mast_forest = MastForest::new();
-    let basic_block_id = mast_forest.add_block(operations, None).unwrap();
+    let basic_block_id = mast_forest.add_block(operations, Vec::new()).unwrap();
     mast_forest.make_root(basic_block_id);
 
     let program = Program::new(mast_forest.into(), basic_block_id);

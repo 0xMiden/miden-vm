@@ -3,19 +3,23 @@ use miden_crypto::{Felt, ONE, Word};
 use super::*;
 use crate::{
     Decorator, Operation,
-    mast::{BasicBlockNode, MastNode},
+    mast::{BasicBlockNode, MastNodeErrorContext},
 };
 
 fn block_foo() -> MastNode {
-    BasicBlockNode::new(vec![Operation::Mul, Operation::Add], None).unwrap().into()
+    BasicBlockNode::new(vec![Operation::Mul, Operation::Add], Vec::new())
+        .unwrap()
+        .into()
 }
 
 fn block_bar() -> MastNode {
-    BasicBlockNode::new(vec![Operation::And, Operation::Eq], None).unwrap().into()
+    BasicBlockNode::new(vec![Operation::And, Operation::Eq], Vec::new())
+        .unwrap()
+        .into()
 }
 
 fn block_qux() -> MastNode {
-    BasicBlockNode::new(vec![Operation::Swap, Operation::Push(ONE), Operation::Eq], None)
+    BasicBlockNode::new(vec![Operation::Swap, Operation::Push(ONE), Operation::Eq], Vec::new())
         .unwrap()
         .into()
 }

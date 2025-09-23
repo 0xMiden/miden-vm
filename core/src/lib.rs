@@ -118,8 +118,7 @@ pub mod prettier {
 
 mod operations;
 pub use operations::{
-    AssemblyOp, DebugOptions, Decorator, DecoratorIdIterator, DecoratorList, Operation,
-    opcode_constants::*,
+    AssemblyOp, DebugOptions, Decorator, DecoratorList, Operation, opcode_constants::*,
 };
 
 pub mod stack;

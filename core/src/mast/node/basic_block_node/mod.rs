@@ -1,5 +1,5 @@
 use alloc::{boxed::Box, vec::Vec};
-use core::{fmt, mem, ops::Index};
+use core::{fmt, iter::Peekable, ops::Index, slice::Iter};
 
 use miden_crypto::{Felt, Word, ZERO};
 use miden_formatting::prettier::PrettyPrint;
@@ -7,9 +7,9 @@ use miden_formatting::prettier::PrettyPrint;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    DecoratorIdIterator, DecoratorList, Operation,
+    DecoratorList, Operation,
     chiplets::hasher,
-    mast::{DecoratorId, MastForest, MastForestError, MastNodeId, Remapping},
+    mast::{DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId, Remapping},
 };
 
 mod op_batch;
@@ -74,6 +74,10 @@ pub struct BasicBlockNode {
     digest: Word,
     #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Vec::is_empty"))]
     decorators: DecoratorList,
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Vec::is_empty"))]
+    before_enter: Vec<DecoratorId>,
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Vec::is_empty"))]
+    after_exit: Vec<DecoratorId>,
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -92,14 +96,11 @@ impl BasicBlockNode {
     /// - `operations` vector is empty.
     pub fn new(
         operations: Vec<Operation>,
-        decorators: Option<DecoratorList>,
+        decorators: DecoratorList,
     ) -> Result<Self, MastForestError> {
         if operations.is_empty() {
             return Err(MastForestError::EmptyBasicBlock);
         }
-
-        // None is equivalent to an empty list of decorators moving forward.
-        let decorators = decorators.unwrap_or_default();
 
         // Validate decorators list (only in debug mode).
         #[cfg(debug_assertions)]
@@ -114,6 +115,8 @@ impl BasicBlockNode {
             op_batches,
             digest,
             decorators: reflowed_decorators,
+            before_enter: Vec::new(),
+            after_exit: Vec::new(),
         })
     }
 
@@ -135,7 +138,13 @@ impl BasicBlockNode {
     pub fn new_unsafe(operations: Vec<Operation>, decorators: DecoratorList, digest: Word) -> Self {
         assert!(!operations.is_empty());
         let op_batches = batch_ops(operations);
-        Self { op_batches, digest, decorators }
+        Self {
+            op_batches,
+            digest,
+            decorators,
+            before_enter: Vec::new(),
+            after_exit: Vec::new(),
+        }
     }
 
     /// Returns a new [`BasicBlockNode`] instantiated with the specified operations and decorators.
@@ -150,7 +159,7 @@ impl BasicBlockNode {
             decorator_list.push((idx, mast_forest.add_decorator(decorator)?));
         }
 
-        Self::new(operations, Some(decorator_list))
+        Self::new(operations, decorator_list)
     }
 }
 
@@ -187,17 +196,31 @@ impl BasicBlockNode {
         num_ops.try_into().expect("basic block contains more than 2^32 operations")
     }
 
-    /// Returns a [`DecoratorIdIterator`] which allows us to iterate through the decorator list of
-    /// this basic block node while executing operation batches of this basic block node.
-    pub fn decorator_iter(&self) -> DecoratorIdIterator<'_> {
-        DecoratorIdIterator::new(&self.decorators)
+    /// Returns a [`DecoratorOpLinkIterator`] which allows us to iterate through the decorator list
+    /// of this basic block node while executing operation batches of this basic block node.
+    ///
+    /// This iterator is intended for e.g. processor consumption, as such a component iterates
+    /// differently through block operations: contrarily to e.g. the implementation of
+    /// [`MastNodeErrorContext`] this does not include the `before_enter` or `after_exit`
+    /// decorators.
+    pub fn indexed_decorator_iter(&self) -> DecoratorOpLinkIterator<'_> {
+        DecoratorOpLinkIterator::new(&[], &self.decorators, &[], self.num_operations() as usize)
     }
 
     /// Returns an iterator which allows us to iterate through the decorator list of
     /// this basic block node with op indexes aligned to the "raw" (un-padded)) op
-    /// batches of the basic block node
-    pub fn raw_decorator_iter(&self) -> RawDecoratorIdIterator<'_> {
-        RawDecoratorIdIterator::new(&self.decorators, &self.op_batches)
+    /// batches of the basic block node.
+    ///
+    /// Though this adjusts the indexation of op-indexed decorators, this iterator returns all
+    /// decorators of the [`BasicBlockNode`] in the order in which they appear in the program.
+    /// This includes `before_enter`, op-indexed decorators, and after_exit`.
+    pub fn raw_decorator_iter(&self) -> RawDecoratorOpLinkIterator<'_> {
+        RawDecoratorOpLinkIterator::new(
+            &self.before_enter,
+            &self.decorators,
+            &self.after_exit,
+            &self.op_batches,
+        )
     }
 
     /// Returns an iterator over the operations in the order in which they appear in the program.
@@ -239,8 +262,16 @@ impl BasicBlockNode {
 }
 
 impl MastNodeErrorContext for BasicBlockNode {
-    fn decorators(&self) -> impl Iterator<Item = (usize, DecoratorId)> {
-        self.decorators.iter().copied()
+    /// This iterator returns all decorators of the [`BasicBlockNode`] in the order in which they
+    /// appear in the program. This includes `before_enter`, op-indexed decorators, and
+    /// `after_exit`.
+    fn decorators(&self) -> impl Iterator<Item = DecoratedOpLink> {
+        DecoratorOpLinkIterator::new(
+            &self.before_enter,
+            &self.decorators,
+            &self.after_exit,
+            self.num_operations() as usize,
+        )
     }
 }
 
@@ -270,33 +301,28 @@ impl MastNodeExt for BasicBlockNode {
     }
 
     fn before_enter(&self) -> &[DecoratorId] {
-        &[]
+        &self.before_enter
     }
 
     fn after_exit(&self) -> &[DecoratorId] {
-        &[]
+        &self.after_exit
     }
 
-    /// Sets the provided list of decorators to be executed before all existing decorators.
+    /// Sets the provided list of decorators to be executed before this node.
     fn append_before_enter(&mut self, decorator_ids: &[DecoratorId]) {
-        let mut new_decorators: DecoratorList =
-            decorator_ids.iter().map(|decorator_id| (0, *decorator_id)).collect();
-        new_decorators.extend(mem::take(&mut self.decorators));
-
-        self.decorators = new_decorators;
+        self.before_enter.extend_from_slice(decorator_ids);
     }
 
-    /// Sets the provided list of decorators to be executed after all existing decorators.
+    /// Sets the provided list of decorators to be executed after this node.
     fn append_after_exit(&mut self, decorator_ids: &[DecoratorId]) {
-        let after_last_op_idx = self.num_operations() as usize;
-
-        self.decorators
-            .extend(decorator_ids.iter().map(|&decorator_id| (after_last_op_idx, decorator_id)));
+        self.after_exit.extend_from_slice(decorator_ids);
     }
 
     /// Removes all decorators from this node.
     fn remove_decorators(&mut self) {
         self.decorators.truncate(0);
+        self.before_enter.truncate(0);
+        self.after_exit.truncate(0);
     }
 
     fn to_display<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn fmt::Display + 'a> {
@@ -384,6 +410,128 @@ impl fmt::Display for BasicBlockNodePrettyPrint<'_> {
     }
 }
 
+// DECORATOR ITERATION
+// ================================================================================================
+
+/// Iterator used to iterate through the decorator list of a basic block
+/// while executing operation batches of a basic block.
+///
+/// This lets the caller iterate through a Decorator list with indexes that match the
+/// standard (padded) representation of a basic block.
+pub struct DecoratorOpLinkIterator<'a> {
+    before: Peekable<Iter<'a, DecoratorId>>,
+    middle: Peekable<Iter<'a, (usize, DecoratorId)>>,
+    after: Peekable<Iter<'a, DecoratorId>>,
+    total_ops: usize,
+    seg: Segment,
+}
+
+// Driver of the Iterators' state machine
+enum Segment {
+    Before,
+    Middle,
+    After,
+    Done,
+}
+
+impl<'a> DecoratorOpLinkIterator<'a> {
+    pub fn new(
+        before_enter: &'a [DecoratorId],
+        decorators: &'a DecoratorList,
+        after_exit: &'a [DecoratorId],
+        total_operations: usize,
+    ) -> Self {
+        Self {
+            before: before_enter.iter().peekable(),
+            middle: decorators.iter().peekable(),
+            after: after_exit.iter().peekable(),
+            total_ops: total_operations,
+            seg: Segment::Before,
+        }
+    }
+
+    /// Optional: yield only if the next item corresponds to the given op index.
+    /// - before_enter items map to op 0
+    /// - middle items use their stored position
+    /// - after_exit items map to `total_ops`
+    //
+    // Some decorators are pegged on an operation index equal to the total number of
+    // operations since decorators are meant to be executed before the operation
+    // they are attached to. This allows them to be executed after the last
+    // operation has been executed.
+    #[inline]
+    pub fn next_filtered(&mut self, pos: usize) -> Option<(usize, DecoratorId)> {
+        let should_yield: bool;
+        'segwalk: loop {
+            match self.seg {
+                Segment::Before => {
+                    if self.before.peek().is_some() {
+                        should_yield = pos == 0;
+                        break 'segwalk;
+                    }
+                    self.seg = Segment::Middle;
+                },
+                Segment::Middle => {
+                    if let Some(&(p, _)) = self.middle.peek() {
+                        should_yield = pos == *p;
+                        break 'segwalk;
+                    }
+                    self.seg = Segment::After;
+                },
+                Segment::After => {
+                    if self.after.peek().is_some() {
+                        should_yield = pos == self.total_ops;
+                        break 'segwalk;
+                    }
+                    self.seg = Segment::Done;
+                },
+                Segment::Done => {
+                    should_yield = false;
+                    break 'segwalk;
+                },
+            }
+        }
+        if should_yield { self.next() } else { None }
+    }
+}
+
+impl<'a> Iterator for DecoratorOpLinkIterator<'a> {
+    type Item = (usize, DecoratorId);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            match self.seg {
+                Segment::Before => {
+                    if let Some(&id) = self.before.next() {
+                        return Some((0, id));
+                    }
+                    self.seg = Segment::Middle;
+                },
+                Segment::Middle => {
+                    if let Some(&(pos, id)) = self.middle.next() {
+                        return Some((pos, id));
+                    }
+                    self.seg = Segment::After;
+                },
+                Segment::After => {
+                    if let Some(&id) = self.after.next() {
+                        return Some((self.total_ops, id));
+                    }
+                    self.seg = Segment::Done;
+                },
+                Segment::Done => return None,
+            }
+        }
+    }
+}
+
+impl<'a> ExactSizeIterator for DecoratorOpLinkIterator<'a> {
+    #[inline]
+    fn len(&self) -> usize {
+        self.before.len() + self.middle.len() + self.after.len()
+    }
+}
+
 // RAW DECORATOR ITERATION
 // ================================================================================================
 
@@ -393,63 +541,84 @@ impl fmt::Display for BasicBlockNodePrettyPrint<'_> {
 /// This lets the caller iterate through a Decorator list with indexes that match the
 /// raw (unpadded) representation of a basic block.
 ///
-/// IOW this makes its `BasicBlockNode::raw_decorators` padding-unaware, or equivalently
+/// IOW this makes its `BasicBlockNode::raw_decorator_iter` padding-unaware, or equivalently
 /// "removes" the padding of these decorators
-pub struct RawDecoratorIdIterator<'a> {
-    decorators: &'a DecoratorList, // [(adjusted_idx, DecoratorId)]
-    padding_offsets: DecoratorPaddingOffsets, // indexable: padding_offsets[i]
-    idx: usize,                    // position in decorators
-    probe: usize,                  // running original index candidate
+pub struct RawDecoratorOpLinkIterator<'a> {
+    before: core::slice::Iter<'a, DecoratorId>,
+    middle: core::slice::Iter<'a, (usize, DecoratorId)>, // (adjusted_idx, id)
+    after: core::slice::Iter<'a, DecoratorId>,
+    padding_offsets: DecoratorPaddingOffsets, // indexable by ORIGINAL idx
+    total_ops: usize,                         // count of RAW ops
+    seg: Segment,
+    probe: usize, // running ORIGINAL idx candidate
 }
 
-/// Returns a new instance of raw decorator iterator instantiated with the provided decorator
-/// list, tied to the provided op_batches list
-impl<'a> RawDecoratorIdIterator<'a> {
-    // Decorators have been validated at the creation of BlockNode because this constructor
-    // is private. Consider using `validate_decorators` if that changes.
-    pub fn new(decorators: &'a DecoratorList, op_batches: &'a [OpBatch]) -> Self {
+impl<'a> RawDecoratorOpLinkIterator<'a> {
+    pub fn new(
+        before_enter: &'a [DecoratorId],
+        decorators: &'a DecoratorList, // contains adjusted indices
+        after_exit: &'a [DecoratorId],
+        op_batches: &'a [OpBatch],
+    ) -> Self {
         let padding_offsets = DecoratorPaddingOffsets::new(op_batches);
+
+        let total_ops = padding_offsets.0.len() - padding_offsets.0.last().unwrap_or(&0);
+
         Self {
-            decorators,
+            before: before_enter.iter(),
+            middle: decorators.iter(),
+            after: after_exit.iter(),
             padding_offsets,
-            idx: 0,
+            total_ops,
+            seg: Segment::Before,
             probe: 0,
         }
     }
 
-    #[inline]
+    #[inline(always)]
     fn f(&self, i: usize) -> usize {
         i + self.padding_offsets[i]
     }
 }
 
-impl<'a> Iterator for RawDecoratorIdIterator<'a> {
-    type Item = (usize, &'a DecoratorId);
+impl<'a> Iterator for RawDecoratorOpLinkIterator<'a> {
+    type Item = (usize, DecoratorId);
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.idx >= self.decorators.len() {
-            return None;
+        loop {
+            match self.seg {
+                Segment::Before => {
+                    if let Some(&id) = self.before.next() {
+                        return Some((0, id));
+                    }
+                    self.seg = Segment::Middle;
+                },
+                Segment::Middle => {
+                    if let Some(&(adjusted_idx, id)) = self.middle.next() {
+                        // Advance probe until f(probe) == adjusted_idx.
+                        // Because adjusted_idx is nondecreasing across the iterator
+                        // and f(i) is strictly increasing, probe never moves backward
+                        // => O(1) amortized across the whole iteration.
+                        let n = self.padding_offsets.0.len();
+                        while self.probe < n && self.f(self.probe) < adjusted_idx {
+                            self.probe += 1;
+                        }
+
+                        let original_idx = self.probe;
+                        return Some((original_idx, id));
+                    }
+                    self.seg = Segment::After;
+                },
+                Segment::After => {
+                    if let Some(&id) = self.after.next() {
+                        // After-exit decorators attach to the sentinel raw index
+                        return Some((self.total_ops, id));
+                    }
+                    self.seg = Segment::Done;
+                },
+                Segment::Done => return None,
+            }
         }
-
-        // Borrow adjusted index & decorator id without moving them
-        let (adjusted_idx_ref, dec_ref) = &self.decorators[self.idx];
-        let adjusted_idx = *adjusted_idx_ref;
-        self.idx += 1;
-
-        // Advance the probe until f(probe) reaches the current adjusted index.
-        // Because both sequences are increasing, probe never moves backward.
-        let n = self.padding_offsets.0.len();
-        while self.probe < n && self.f(self.probe) < adjusted_idx {
-            self.probe += 1;
-        }
-
-        Some((self.probe, dec_ref))
-    }
-}
-
-impl<'a> ExactSizeIterator for RawDecoratorIdIterator<'a> {
-    fn len(&self) -> usize {
-        self.decorators.len() - self.idx
     }
 }
 
@@ -466,27 +635,43 @@ pub enum OperationOrDecorator<'a> {
 struct OperationOrDecoratorIterator<'a> {
     node: &'a BasicBlockNode,
 
-    /// The index of the current batch
+    // extra segments
+    before: core::slice::Iter<'a, DecoratorId>,
+    after: core::slice::Iter<'a, DecoratorId>,
+
+    // operation traversal
     batch_index: usize,
-
-    /// The index of the operation in the current batch
     op_index_in_batch: usize,
+    op_index: usize, // across all batches
 
-    /// The index of the current operation across all batches
-    op_index: usize,
-
-    /// The index of the next element in `node.decorator_list`. This list is assumed to be sorted.
+    // decorators inside the block (sorted by op index)
     decorator_list_next_index: usize,
+    seg: Segment,
 }
 
 impl<'a> OperationOrDecoratorIterator<'a> {
     fn new(node: &'a BasicBlockNode) -> Self {
         Self {
             node,
+            before: node.before_enter().iter(),
+            after: node.after_exit().iter(),
             batch_index: 0,
             op_index_in_batch: 0,
             op_index: 0,
             decorator_list_next_index: 0,
+            seg: Segment::Before,
+        }
+    }
+
+    #[inline]
+    fn next_decorator_if_due(&mut self) -> Option<OperationOrDecorator<'a>> {
+        if let Some((op_idx, deco)) = self.node.decorators.get(self.decorator_list_next_index)
+            && *op_idx == self.op_index
+        {
+            self.decorator_list_next_index += 1;
+            Some(OperationOrDecorator::Decorator(deco))
+        } else {
+            None
         }
     }
 }
@@ -495,30 +680,49 @@ impl<'a> Iterator for OperationOrDecoratorIterator<'a> {
     type Item = OperationOrDecorator<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        // check if there's a decorator to execute
-        if let Some((op_index, decorator)) =
-            self.node.decorators.get(self.decorator_list_next_index)
-            && *op_index == self.op_index
-        {
-            self.decorator_list_next_index += 1;
-            return Some(OperationOrDecorator::Decorator(decorator));
-        }
+        loop {
+            match self.seg {
+                Segment::Before => {
+                    if let Some(id) = self.before.next() {
+                        return Some(OperationOrDecorator::Decorator(id));
+                    }
+                    self.seg = Segment::Middle;
+                },
 
-        // If no decorator needs to be executed, then execute the operation
-        if let Some(batch) = self.node.op_batches.get(self.batch_index) {
-            if let Some(operation) = batch.ops.get(self.op_index_in_batch) {
-                self.op_index_in_batch += 1;
-                self.op_index += 1;
+                Segment::Middle => {
+                    // 1) emit any decorators for the current op_index
+                    if let Some(d) = self.next_decorator_if_due() {
+                        return Some(d);
+                    }
 
-                Some(OperationOrDecorator::Operation(operation))
-            } else {
-                self.batch_index += 1;
-                self.op_index_in_batch = 0;
+                    // 2) otherwise emit the operation at current indices
+                    if let Some(batch) = self.node.op_batches.get(self.batch_index) {
+                        if let Some(op) = batch.ops.get(self.op_index_in_batch) {
+                            self.op_index_in_batch += 1;
+                            self.op_index += 1;
+                            return Some(OperationOrDecorator::Operation(op));
+                        } else {
+                            // advance to next batch and retry
+                            self.batch_index += 1;
+                            self.op_index_in_batch = 0;
+                            continue;
+                        }
+                    } else {
+                        // no more ops, decorators flushed through the operation index
+                        // and next_decorator_if_due
+                        self.seg = Segment::After;
+                    }
+                },
 
-                self.next()
+                Segment::After => {
+                    if let Some(id) = self.after.next() {
+                        return Some(OperationOrDecorator::Decorator(id));
+                    }
+                    self.seg = Segment::Done;
+                },
+
+                Segment::Done => return None,
             }
-        } else {
-            None
         }
     }
 }

@@ -18,6 +18,8 @@ use miden_utils_testing::{
 
 use super::*;
 
+mod decorator_execution_tests;
+
 // AdviceMap inlined in the script
 // ------------------------------------------------------------------------------------------------
 
@@ -68,7 +70,7 @@ fn test_diagnostic_advice_map_key_already_present() {
     host.load_library(lib_2.mast_forest()).unwrap();
 
     let mut mast_forest = MastForest::new();
-    let basic_block_id = mast_forest.add_block(vec![Operation::Noop], None).unwrap();
+    let basic_block_id = mast_forest.add_block(vec![Operation::Noop], Vec::new()).unwrap();
     mast_forest.make_root(basic_block_id);
 
     let program = Program::new(mast_forest.into(), basic_block_id);
