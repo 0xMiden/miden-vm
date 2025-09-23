@@ -238,6 +238,7 @@ fn test_pipe_preimage_to_memory_invalid_preimage() {
 
 #[test]
 fn test_pipe_double_words_preimage_to_memory() {
+    // Word-aligned address, as required by `pipe_double_words_preimage_to_memory`.
     let mem_addr = 1000;
     let four_words = format!(
         "use.std::mem
