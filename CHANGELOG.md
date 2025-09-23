@@ -6,6 +6,10 @@
 
 - [BREAKING] Incremented MSRV to 1.90.
 
+#### Fixes
+
+- Fixed `debug.adv_stack` printing in reverse order ([#2205](https://github.com/0xMiden/miden-vm/pull/2205)).
+
 ## 0.18.0 (2025-09-21)
 
 #### Enhancements

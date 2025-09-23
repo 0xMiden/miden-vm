@@ -80,10 +80,11 @@ fn print_vm_adv_stack(process: &ProcessState, n: u16) {
 
     let stack = &stack[..num_items];
 
-    if let Some((last, front)) = stack.split_last() {
+    // Note: `stack` is in reverse order. e.g., `adv_push.1` pushes `stack.last()`.
+    if let Some((last, front)) = stack.split_first() {
         // print all items except for the last one
         println!("Advice Stack state before step {}:", process.clk());
-        for (i, element) in front.iter().enumerate() {
+        for (i, element) in front.iter().rev().enumerate() {
             println!("├── {i:>2}: {element}");
         }
 
