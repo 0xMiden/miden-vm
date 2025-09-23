@@ -64,7 +64,7 @@ pub fn handle_keccak_hash_memory(
 
     // Store the precompile data for deferred verification.
     let precompile_request_extension =
-        AdviceMutation::extend_precompile_requests([preimage.to_precompile_request()]);
+        AdviceMutation::extend_precompile_requests([preimage.into()]);
 
     Ok(vec![advice_stack_extension, precompile_request_extension])
 }
@@ -276,13 +276,13 @@ impl KeccakPreimage {
         ]
         .into()
     }
+}
 
-    /// Returns this preimage as [`PrecompileRequest`] from which the [`PrecompileCommitment`] can
-    /// be recomputed.
-    pub fn to_precompile_request(self) -> PrecompileRequest {
+impl From<KeccakPreimage> for PrecompileRequest {
+    fn from(preimage: KeccakPreimage) -> Self {
         PrecompileRequest {
             event_id: KECCAK_HASH_MEMORY_EVENT_ID,
-            data: self.0,
+            data: preimage.0,
         }
     }
 }
