@@ -140,9 +140,7 @@ impl KeccakFeltDigest {
     /// `[d_0, ..., d_7]` on the operand stack. In masm, the `hmerge` operation computes
     /// `Rpo256([d_7, ..., d_0])`, so we reverse the order here to match that behavior.
     pub fn to_commitment(&self) -> Word {
-        let mut rev = self.0;
-        rev.reverse();
-        Rpo256::hash_elements(&rev)
+        Rpo256::hash_elements(&self.0)
     }
 }
 
@@ -355,19 +353,6 @@ mod tests {
         assert_eq!(digest.0, expected);
     }
 
-    #[test]
-    fn test_keccak_felt_digest_to_commitment() {
-        let bytes: Vec<u8> = (0..32).collect();
-        let digest = KeccakFeltDigest::from_bytes(&bytes);
-
-        // The commitment should be Rpo256 hash of elements in reverse order
-        let mut rev_elements = digest.0;
-        rev_elements.reverse();
-        let expected_commitment = Rpo256::hash_elements(&rev_elements);
-
-        assert_eq!(digest.to_commitment(), expected_commitment);
-    }
-
     // KECCAK PREIMAGE TESTS
     // ============================================================================================
 
@@ -533,9 +518,7 @@ mod tests {
 
         // Test digest commitment
         let digest = preimage.digest();
-        let mut rev_digest = digest.0;
-        rev_digest.reverse();
-        let expected_digest_commitment = Rpo256::hash_elements(&rev_digest);
+        let expected_digest_commitment = Rpo256::hash_elements(digest.as_ref());
         assert_eq!(digest.to_commitment(), expected_digest_commitment);
 
         // Test precompile commitment (double hash)
