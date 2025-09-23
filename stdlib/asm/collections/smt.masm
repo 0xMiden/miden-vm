@@ -370,6 +370,8 @@ proc.get_multi_leaf_value
     # The node value (its hash) is our commitment, and we can just divide `leaf_size` to get the
     # word count.
 
+    # => [leaf_size, COM=NV, K, R]
+
     # (2 cycles).
     div.4
     # => [num_words, COM, K, R]
