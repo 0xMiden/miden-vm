@@ -1,8 +1,8 @@
 use alloc::sync::Arc;
 
 use miden_core::{
-    DecoratorIdIterator, EventId, Operation,
-    mast::{BasicBlockNode, MastForest, MastNodeId, OpBatch},
+    EventId, Operation,
+    mast::{BasicBlockNode, DecoratorOpLinkIterator, MastForest, MastNodeId, OpBatch},
     sys_events::SystemEvent,
 };
 
@@ -44,7 +44,7 @@ impl FastProcessor {
 
         let mut batch_offset_in_block = 0;
         let mut op_batches = basic_block_node.op_batches().iter();
-        let mut decorator_ids = basic_block_node.decorator_iter();
+        let mut decorator_ids = basic_block_node.indexed_decorator_iter();
 
         // execute first op batch
         if let Some(first_op_batch) = op_batches.next() {
@@ -112,7 +112,7 @@ impl FastProcessor {
         // happen for decorators appearing after all operations in a block. these decorators are
         // executed after BASIC BLOCK is closed to make sure the VM clock cycle advances beyond the
         // last clock cycle of the BASIC BLOCK ops.
-        for &decorator_id in decorator_ids {
+        for (_, decorator_id) in decorator_ids {
             let decorator = program
                 .get_decorator_by_id(decorator_id)
                 .ok_or(ExecutionError::DecoratorNotFoundInForest { decorator_id })?;
@@ -130,7 +130,7 @@ impl FastProcessor {
         node_id: MastNodeId,
         batch: &OpBatch,
         batch_index: usize,
-        decorators: &mut DecoratorIdIterator<'_>,
+        decorators: &mut DecoratorOpLinkIterator<'_>,
         batch_offset_in_block: usize,
         program: &MastForest,
         host: &mut impl AsyncHost,
@@ -145,7 +145,7 @@ impl FastProcessor {
         // execute operations in the batch one by one
         for (op_idx_in_batch, op) in batch.ops().iter().enumerate() {
             let op_idx_in_block = batch_offset_in_block + op_idx_in_batch;
-            while let Some(&decorator_id) = decorators.next_filtered(op_idx_in_block) {
+            while let Some((_, decorator_id)) = decorators.next_filtered(op_idx_in_block) {
                 let decorator = program
                     .get_decorator_by_id(decorator_id)
                     .ok_or(ExecutionError::DecoratorNotFoundInForest { decorator_id })?;

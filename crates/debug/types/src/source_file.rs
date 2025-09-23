@@ -303,7 +303,6 @@ impl PartialOrd for SourceFileRef {
 
 impl core::hash::Hash for SourceFileRef {
     fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
-        self.span.hash(state);
         self.as_str().hash(state);
     }
 }

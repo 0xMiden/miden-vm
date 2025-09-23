@@ -11,6 +11,7 @@ use crate::{DefaultHost, Process, system::FMP_MAX};
 
 mod advice_provider;
 mod all_ops;
+mod fast_decorator_execution_tests;
 mod masm_consistency;
 mod memory;
 
@@ -171,7 +172,7 @@ fn test_syscall_fail() {
     let stack_inputs = vec![5_u32.into()];
     let program = {
         let mut program = MastForest::new();
-        let basic_block_id = program.add_block(vec![Operation::Add], None).unwrap();
+        let basic_block_id = program.add_block(vec![Operation::Add], Vec::new()).unwrap();
         let root_id = program.add_syscall(basic_block_id).unwrap();
         program.make_root(root_id);
 
@@ -323,11 +324,14 @@ fn test_call_node_preserves_stack_overflow_table() {
     let program = {
         let mut program = MastForest::new();
         // foo proc
-        let foo_id = program.add_block(vec![Operation::Add], None).unwrap();
+        let foo_id = program.add_block(vec![Operation::Add], Vec::new()).unwrap();
 
         // before call
         let push10_push20_id = program
-            .add_block(vec![Operation::Push(10_u32.into()), Operation::Push(20_u32.into())], None)
+            .add_block(
+                vec![Operation::Push(10_u32.into()), Operation::Push(20_u32.into())],
+                Vec::new(),
+            )
             .unwrap();
 
         // call
@@ -336,7 +340,7 @@ fn test_call_node_preserves_stack_overflow_table() {
         let swap_drop_swap_drop = program
             .add_block(
                 vec![Operation::Swap, Operation::Drop, Operation::Swap, Operation::Drop],
-                None,
+                Vec::new(),
             )
             .unwrap();
 
@@ -405,7 +409,7 @@ fn test_call_node_preserves_stack_overflow_table() {
 fn simple_program_with_ops(ops: Vec<Operation>) -> Program {
     let program: Program = {
         let mut program = MastForest::new();
-        let root_id = program.add_block(ops, None).unwrap();
+        let root_id = program.add_block(ops, Vec::new()).unwrap();
         program.make_root(root_id);
 
         Program::new(program.into(), root_id)
