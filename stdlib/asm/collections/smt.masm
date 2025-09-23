@@ -504,7 +504,6 @@ export.get
 
             # Cycles: 124 + 3 * leaf_size / 4
             exec.get_multi_leaf_value
-
             # => [V, R]
         end
     end
