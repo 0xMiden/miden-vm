@@ -625,18 +625,27 @@ impl SourceContent {
         line_index: LineIndex,
         column_index: ColumnIndex,
     ) -> Option<ByteIndex> {
-        let column_index = column_index.to_usize();
         let line_span = self.line_range(line_index)?;
         let line_src = self
             .content
             .get(line_span.start.to_usize()..line_span.end.to_usize())
             .expect("invalid line boundaries: invalid utf-8");
-        if line_src.len() < column_index {
+
+        let col_chars = column_index.to_usize();
+        let num_chars = line_src.chars().count();
+
+        if col_chars > num_chars {
             return None;
         }
-        let (pre, _) = line_src.split_at(column_index);
-        let start = line_span.start;
-        Some(start + ByteOffset::from_str_len(pre))
+
+        // Determine byte offset within the line corresponding to the character column
+        let byte_in_line = if col_chars == num_chars {
+            line_src.len()
+        } else {
+            line_src.char_indices().nth(col_chars).map(|(i, _)| i)?
+        };
+
+        Some(line_span.start + ByteOffset::from_str_len(&line_src[..byte_in_line]))
     }
 
     /// Get a [FileLineCol] corresponding to the line/column in this file at which `byte_index`
@@ -1302,5 +1311,36 @@ end
                 .expect("invalid byte range"),
             "".as_bytes()
         );
+    }
+
+    #[test]
+    fn line_column_round_trip_non_ascii() {
+        // Single-line content with multi-byte UTF-8 characters
+        let content_str = "aβ中💖\n"; // 'a'(1) 'β'(2) '中'(3) '💖'(4 bytes), then newline
+        let content = SourceContent::new("masm", "utf8.masm", content_str);
+
+        // Validate line count: 2 (line with content + trailing empty line after \n)
+        assert_eq!(content.line_count(), 2);
+
+        let line_index = LineIndex(0);
+        let line_span = content.line_range(line_index).expect("line range");
+        let line_src = content
+            .as_str()
+            .get(line_span.start.to_usize()..line_span.end.to_usize())
+            .expect("utf-8 slice");
+        assert_eq!(line_src, "aβ中💖\n");
+
+        let chars: Vec<char> = line_src.chars().collect();
+        // exclude the newline character for cursor positions within the line content
+        let visible_chars = chars.iter().take_while(|&&c| c != '\n').count();
+
+        for col in 0..=visible_chars {
+            let byte_index = content
+                .line_column_to_offset(line_index, ColumnIndex(col as u32))
+                .expect("byte index");
+            let flc = content.location(byte_index).expect("location");
+            assert_eq!(flc.line, line_index.number());
+            assert_eq!(flc.column.to_u32(), col as u32 + 1); // FileLineCol is one-indexed
+        }
     }
 }
