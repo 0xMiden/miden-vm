@@ -548,7 +548,7 @@ pub fn append_word_to_vec(target: &mut Vec<u64>, word: Word) {
     target.extend(word.iter().map(Felt::as_int));
 }
 
-/// Note that adding a word to the *beginning* of a Vec adds it to the *bottom* of the stack.
+/// Add a Word to the bottom of the operand stack Vec.
 pub fn prepend_word_to_vec(target: &mut Vec<u64>, word: Word) {
     // Actual insertion happens when this iterator is dropped.
     let _iterator = target.splice(0..0, word.iter().map(Felt::as_int));
