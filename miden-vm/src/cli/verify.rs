@@ -69,11 +69,10 @@ impl VerifyCmd {
     }
 
     fn infer_defaults(&self) -> Result<(PathBuf, PathBuf), Report> {
-        let proof_file = if Path::new(&self.proof_file.as_os_str()).try_exists().is_err() {
+        if !self.proof_file.exists() {
             return Err(Report::msg("Proof file does not exist"));
-        } else {
-            self.proof_file.clone()
-        };
+        }
+        let proof_file = self.proof_file.clone();
 
         let input_file = self.input_file.clone().unwrap_or_else(|| {
             let mut input_path = proof_file.clone();
