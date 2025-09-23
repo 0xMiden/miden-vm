@@ -203,7 +203,7 @@ export.pipe_double_words_preimage_to_memory
   padw padw padw
   # => [C, B, A, write_ptr, end_ptr, COM, ...]
 
-  # Cycles: 9 + 3 * num_words
+  # (9 + 3 * num_words cycles)
   # (e.g., 25 cycles for 4 words)
   exec.pipe_double_words_to_memory
   # => [C, B, A, write_ptr', COM, ...]
