@@ -357,9 +357,15 @@ end
 # GET
 # =================================================================================================
 
+#! Gets a value at the given get. The leaf we're retrieving from is guaranteed
+#! to hold more than one key-value pair (provided on the advice stack).
+#!
 #! Inputs:
 #!   Operand stack: [leaf_size, NV, K, R]
 #!   Advice stack:  [V1, K2, V2, K2, ...]
+#!
+#! Outputs:
+#!   Operand stack: [V, R]
 #!
 #! Cycles:
 #!  Non-empty: 125 + 3 * pair_count
