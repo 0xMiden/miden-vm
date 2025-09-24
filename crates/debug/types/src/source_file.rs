@@ -633,20 +633,8 @@ impl SourceContent {
 
         let column_index = column_index.to_usize();
         // Determine byte offset within the line corresponding to the character column
-        // Single pass over chars: accumulate byte length until reaching the desired column
-        let mut byte_in_line = 0usize;
-        let mut count = 0usize;
-        for ch in line_src.chars() {
-            if count == column_index {
-                break;
-            }
-            byte_in_line += ch.len_utf8();
-            count += 1;
-        }
-        if count != column_index {
-            // Out of bounds: requested column is greater than number of characters in line
-            return None;
-        }
+        let byte_in_line =
+            line_src.char_indices().nth(column_index).map(|(byte_index, _)| byte_index)?;
 
         Some(line_span.start + ByteOffset::from_str_len(&line_src[..byte_in_line]))
     }
