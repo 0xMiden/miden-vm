@@ -200,7 +200,7 @@ export.pipe_double_words_preimage_to_memory
   # Setup the initial hasher state, which starts with a capacity word `A`.
   # For us, the capacity word is entirely empty.
   # (12 cycles).
-  padw padw padw
+  exec.rpo::init_no_padding
   # => [C, B, A, write_ptr, end_ptr, COM, ...]
 
   # (9 + 3 * num_words cycles)
