@@ -60,7 +60,7 @@ The arithmetic operations below are performed in a 64-bit [prime field](https://
 | ---------------------------------- | --------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------- |
 | ext2add <br> - *(5 cycles)*   <br> | [b1, b0, a1, a0, ...] | [c1, c0, ...]   | $c1 \leftarrow (a1 + b1) \mod p$ and <br> $c0 \leftarrow (a0 + b0) \mod p$                                          |
 | ext2sub <br> - *(7 cycles)*   <br> | [b1, b0, a1, a0, ...] | [c1, c0, ...]   | $c1 \leftarrow (a1 - b1) \mod p$ and <br> $c0 \leftarrow (a0 - b0) \mod p$                                          |
-| ext2mul <br> - *(3 cycles)*   <br> | [b1, b0, a1, a0, ...] | [c1, c0, ...]   | $c1 \leftarrow (a0 + a1) * (b0 + b1) \mod p$ and <br> $c0 \leftarrow (a0 * b0) - 2 * (a1 * b1) \mod p$              |
+| ext2mul <br> - *(3 cycles)*   <br> | [b1, b0, a1, a0, ...] | [c1, c0, ...]   | $c1 \leftarrow a0 b1 + a1 b0 \mod p$ and <br> $c0 \leftarrow a0 b0 - 2 a1 b1 \mod p$              |
 | ext2neg <br> - *(4 cycles)*   <br> | [a1, a0, ...]         | [a1', a0', ...] | $a1' \leftarrow -a1$ and $a0' \leftarrow -a0$                                                                       |
-| ext2inv <br> - *(8 cycles)*   <br> | [a1, a0, ...]         | [a1', a0', ...] | $a' \leftarrow a^{-1} \mod q$ <br> Fails if $a = 0$                                                                 |
+| ext2inv <br> - *(8 cycles)*   <br> | [a1, a0, ...]         | [a1', a0', ...] | $a' \leftarrow a^{-1} \mod p$ <br> Fails if $a = 0$                                                                 |
 | ext2div <br> - *(11 cycles)*  <br> | [b1, b0, a1, a0, ...] | [c1, c0,]       | $c \leftarrow a * b^{-1}$ fails if $b=0$, where multiplication and inversion are as defined by the operations above |

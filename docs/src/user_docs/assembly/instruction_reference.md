@@ -52,9 +52,9 @@ This page provides a comprehensive reference for Miden Assembly instructions.
 | ----------- | --------------------- | --------------- | ------ | ------------------------------------------------------------------------------------------- |
 | `ext2add`   | `[b1, b0, a1, a0, ...]` | `[c1, c0, ...]`   | 5      | $c_1 = (a_1 + b_1) \bmod p$ <br> $c_0 = (a_0 + b_0) \bmod p$                                       |
 | `ext2sub`   | `[b1, b0, a1, a0, ...]` | `[c1, c0, ...]`   | 7      | $c_1 = (a_1 - b_1) \bmod p$ <br> $c_0 = (a_0 - b_0) \bmod p$                                       |
-| `ext2mul`   | `[b1, b0, a1, a0, ...]` | `[c1, c0, ...]`   | 3      | $c_1 = (a_0 + a_1) (b_0 + b_1) \bmod p$ <br> $c_0 = (a_0 b_0) - 2 (a_1 b_1) \bmod p$           |
+| `ext2mul`   | `[b1, b0, a1, a0, ...]` | `[c1, c0, ...]`   | 3      | $c_1 = a_0 \cdot b_1 + a_1 \cdot b_0 \bmod p$ <br> $c_0 = a_0 \cdot b_0 - 2 \cdot a_1 \cdot b_1 \bmod p$           |
 | `ext2neg`   | `[a1, a0, ...]`         | `[a1', a0', ...]` | 4      | $a_1' = -a_1$ <br> $a_0' = -a_0$                                                               |
-| `ext2inv`   | `[a1, a0, ...]`         | `[a1', a0', ...]` | 8      | $a' = a^{-1} \bmod q$. Fails if $a = 0$.                                                       |
+| `ext2inv`   | `[a1, a0, ...]`         | `[a1', a0', ...]` | 8      | $a' = a^{-1} \bmod p$. Fails if $a = 0$.                                                       |
 | `ext2div`   | `[b1, b0, a1, a0, ...]` | `[c1, c0, ...]`   | 11     | $c = a \cdot b^{-1}$. Fails if $b = 0$. Multiplication and inversion are as defined previously. |
 
 ## U32 Operations
