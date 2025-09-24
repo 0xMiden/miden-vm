@@ -43,7 +43,11 @@ pub trait Processor: Sized {
     fn hasher(&mut self) -> &mut Self::Hasher;
 
     /// Checks that the evaluation of an arithmetic circuit is equal to zero.
-    fn op_eval_circuit(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError>;
+    fn op_eval_circuit(
+        &mut self,
+        err_ctx: &impl ErrorContext,
+        tracer: &mut impl Tracer,
+    ) -> Result<(), ExecutionError>;
 
     // -------------------------------------------------------------------------------------------
     // PROVIDED METHODS

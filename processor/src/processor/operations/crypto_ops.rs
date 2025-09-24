@@ -23,19 +23,16 @@ pub(super) fn op_hperm<P: Processor>(
     let state_range = range(MIN_STACK_DEPTH - STATE_WIDTH, STATE_WIDTH);
 
     // Compute the hash of the input
-    let (addr, hashed_state) = {
-        let input_state: [Felt; STATE_WIDTH] = processor.stack().top()[state_range.clone()]
-            .try_into()
-            .expect("state range expected to be 12 elements");
-
-        processor.hasher().permute(input_state)
-    };
+    let input_state: [Felt; STATE_WIDTH] = processor.stack().top()[state_range.clone()]
+        .try_into()
+        .expect("state range expected to be 12 elements");
+    let (addr, output_state) = processor.hasher().permute(input_state);
 
     // Write the hash back to the stack
-    processor.stack().top_mut()[state_range].copy_from_slice(&hashed_state);
+    processor.stack().top_mut()[state_range].copy_from_slice(&output_state);
 
     // Record the hasher permutation
-    tracer.record_hasher_permute(hashed_state);
+    tracer.record_hasher_permute(input_state, output_state);
 
     P::HelperRegisters::op_hperm_registers(addr)
 }
@@ -63,7 +60,7 @@ pub(super) fn op_mpverify<P: Processor>(
         .get_merkle_path(root, &depth, &index)
         .map_err(|err| ExecutionError::advice_error(err, clk, err_ctx))?;
 
-    tracer.record_hasher_build_merkle_root(path.as_ref(), root);
+    tracer.record_hasher_build_merkle_root(node, path.as_ref(), index, root);
 
     // verify the path
     let addr = processor.hasher().verify_merkle_root(root, node, path.as_ref(), index, || {
@@ -87,11 +84,11 @@ pub(super) fn op_mrupdate<P: Processor>(
     let clk = processor.system().clk();
 
     // read old node value, depth, index, tree root and new node values from the stack
-    let old_node = processor.stack().get_word(0);
+    let old_value = processor.stack().get_word(0);
     let depth = processor.stack().get(4);
     let index = processor.stack().get(5);
     let claimed_old_root = processor.stack().get_word(6);
-    let new_node = processor.stack().get_word(10);
+    let new_value = processor.stack().get_word(10);
 
     // update the node at the specified index in the Merkle tree specified by the old root, and
     // get a Merkle path to it. The length of the returned path is expected to match the
@@ -99,7 +96,7 @@ pub(super) fn op_mrupdate<P: Processor>(
     // whole sub-tree to this node.
     let path = processor
         .advice_provider()
-        .update_merkle_node(claimed_old_root, &depth, &index, new_node)
+        .update_merkle_node(claimed_old_root, &depth, &index, new_value)
         .map_err(|err| ExecutionError::advice_error(err, clk, err_ctx))?;
 
     if let Some(path) = &path {
@@ -109,13 +106,13 @@ pub(super) fn op_mrupdate<P: Processor>(
 
     let (addr, new_root) = processor.hasher().update_merkle_root(
         claimed_old_root,
-        old_node,
-        new_node,
+        old_value,
+        new_value,
         path.as_ref(),
         index,
         || {
             ExecutionError::merkle_path_verification_failed(
-                old_node,
+                old_value,
                 index,
                 claimed_old_root,
                 ZERO,
@@ -124,7 +121,14 @@ pub(super) fn op_mrupdate<P: Processor>(
             )
         },
     )?;
-    tracer.record_hasher_update_merkle_root(path.as_ref(), claimed_old_root, new_root);
+    tracer.record_hasher_update_merkle_root(
+        old_value,
+        new_value,
+        path.as_ref(),
+        index,
+        claimed_old_root,
+        new_root,
+    );
 
     // Replace the old node value with computed new root; everything else remains the same.
     processor.stack().set_word(0, &new_root);
@@ -159,7 +163,12 @@ pub(super) fn op_horner_eval_base<P: Processor>(
             .memory()
             .read_word(ctx, addr, clk, err_ctx)
             .map_err(ExecutionError::MemoryError)?;
-        tracer.record_memory_read_word(word, addr);
+        tracer.record_memory_read_word(
+            word,
+            addr,
+            processor.system().ctx(),
+            processor.system().clk(),
+        );
 
         (QuadFelt::new(word[0], word[1]), word[2], word[3])
     };
@@ -224,7 +233,12 @@ pub(super) fn op_horner_eval_ext<P: Processor>(
             .memory()
             .read_word(ctx, addr, clk, err_ctx)
             .map_err(ExecutionError::MemoryError)?;
-        tracer.record_memory_read_word(word, addr);
+        tracer.record_memory_read_word(
+            word,
+            addr,
+            processor.system().ctx(),
+            processor.system().clk(),
+        );
 
         (QuadFelt::new(word[0], word[1]), word[2], word[3])
     };

@@ -1,15 +1,19 @@
-use alloc::{collections::VecDeque, sync::Arc};
+use alloc::{collections::VecDeque, sync::Arc, vec::Vec};
 
-use miden_air::{RowIndex, trace::chiplets::hasher::HasherState};
+use miden_air::{
+    RowIndex,
+    trace::chiplets::hasher::{HasherState, STATE_WIDTH},
+};
 use miden_core::{
     Felt, ONE, Word, ZERO,
     crypto::merkle::MerklePath,
-    mast::{MastForest, MastNodeId},
+    mast::{MastForest, MastNodeId, OpBatch},
     stack::MIN_STACK_DEPTH,
 };
 
 use crate::{
     AdviceError, ContextId, ErrorContext, ExecutionError,
+    chiplets::CircuitEvaluation,
     continuation_stack::ContinuationStack,
     fast::FastProcessor,
     processor::{AdviceProviderInterface, HasherInterface, MemoryInterface},
@@ -18,11 +22,12 @@ use crate::{
 // TRACE FRAGMENT CONTEXT
 // ================================================================================================
 
-/// Information required to build a trace fragment.
+/// Information required to build a core trace fragment (i.e. the system, decoder and stack
+/// columns).
 ///
-/// This struct is meant to be built by the processor, and consumed mutably by a trace fragment
-/// builder. That is, as trace generation progresses, this struct can be mutated to represent the
-/// generation context at any clock cycle within the fragment.
+/// This struct is meant to be built by the processor, and consumed mutably by a core trace fragment
+/// builder. That is, as core trace generation progresses, this struct can be mutated to represent
+/// the generation context at any clock cycle within the fragment.
 ///
 /// This struct is conceptually divided into 4 main components:
 /// 1. core trace state: the state of the processor at any clock cycle in the fragment, initialized
@@ -33,11 +38,12 @@ use crate::{
 ///    forest to execute when the current node is done executing,
 /// 4. initial state: some information about the state of the execution at the start of the
 ///    fragment. This includes the [MastForest] that is being executed at the start of the fragment
-///    (which can change when encountering an [miden_core::mast::ExternalNode]), and the current
-///    node's execution state, which contains additional information to pinpoint exactly where in
-///    the processing of the node we're at when this fragment begins.
+///    (which can change when encountering an [miden_core::mast::ExternalNode] or
+///    [miden_core::mast::DynNode]), and the current node's execution state, which contains
+///    additional information to pinpoint exactly where in the processing of the node we're at when
+///    this fragment begins.
 #[derive(Debug)]
-pub struct TraceFragmentContext {
+pub struct CoreTraceFragmentContext {
     pub state: CoreTraceState,
     pub replay: ExecutionReplay,
     pub continuation: ContinuationStack,
@@ -252,7 +258,7 @@ impl StackState {
 pub struct ExecutionReplay {
     pub block_stack: BlockStackReplay,
     pub stack_overflow: StackOverflowReplay,
-    pub memory: MemoryReplay,
+    pub memory_reads: MemoryReadsReplay,
     pub advice: AdviceReplay,
     pub hasher: HasherReplay,
     pub mast_forest_resolution: MastForestResolutionReplay,
@@ -436,55 +442,105 @@ impl MastForestResolutionReplay {
 // MEMORY REPLAY
 // ================================================================================================
 
-/// Implements a shim for the memory chiplet, in which all elements read from memory during a given
-/// fragment are recorded by the fast processor, and replayed by the main trace fragment generators.
+/// Records and replays all the reads made to memory, in which all elements and words read from
+/// memory during a given fragment are recorded by the fast processor, and replayed by the main
+/// trace fragment generators.
 ///
 /// This is used to simulate memory reads in parallel trace generation without needing to actually
-/// access the memory chiplet. Writes are not recorded here, as they are not needed for the trace
-/// generation process.
+/// access the memory chiplet.
 ///
 /// Elements/words read are stored with their addresses and are assumed to be read from the same
 /// addresses that they were recorded at. This works naturally since the fast processor has exactly
 /// the same access patterns as the main trace generators (which re-executes part of the program).
 /// The read methods include debug assertions to verify address consistency.
 #[derive(Debug, Default)]
-pub struct MemoryReplay {
-    elements_read: VecDeque<(Felt, Felt)>,
-    words_read: VecDeque<(Felt, Word)>,
+pub struct MemoryReadsReplay {
+    pub elements_read: VecDeque<(Felt, Felt, ContextId, RowIndex)>,
+    pub words_read: VecDeque<(Felt, Word, ContextId, RowIndex)>,
 }
 
-impl MemoryReplay {
+impl MemoryReadsReplay {
     // MUTATIONS (populated by the fast processor)
     // --------------------------------------------------------------------------------
 
     /// Records a read element from memory
-    pub fn record_read_element(&mut self, element: Felt, addr: Felt) {
-        self.elements_read.push_back((addr, element));
+    pub fn record_read_element(
+        &mut self,
+        element: Felt,
+        addr: Felt,
+        ctx: ContextId,
+        clk: RowIndex,
+    ) {
+        self.elements_read.push_back((addr, element, ctx, clk));
     }
 
     /// Records a read word from memory
-    pub fn record_read_word(&mut self, word: Word, addr: Felt) {
-        self.words_read.push_back((addr, word));
+    pub fn record_read_word(&mut self, word: Word, addr: Felt, ctx: ContextId, clk: RowIndex) {
+        self.words_read.push_back((addr, word, ctx, clk));
     }
 
     // ACCESSORS
     // --------------------------------------------------------------------------------
 
     pub fn replay_read_element(&mut self, addr: Felt) -> Felt {
-        let (stored_addr, element) =
+        let (stored_addr, element, _ctx, _clk) =
             self.elements_read.pop_front().expect("No elements read from memory");
         debug_assert_eq!(stored_addr, addr, "Address mismatch: expected {addr}, got {stored_addr}");
         element
     }
 
     pub fn replay_read_word(&mut self, addr: Felt) -> Word {
-        let (stored_addr, word) = self.words_read.pop_front().expect("No words read from memory");
+        let (stored_addr, word, _ctx, _clk) =
+            self.words_read.pop_front().expect("No words read from memory");
         debug_assert_eq!(stored_addr, addr, "Address mismatch: expected {addr}, got {stored_addr}");
         word
     }
+
+    /// Returns an iterator over all recorded memory element reads, yielding tuples of
+    /// (address, element, context ID, clock cycle).
+    pub fn iter_read_elements(&self) -> impl Iterator<Item = (Felt, Felt, ContextId, RowIndex)> {
+        self.elements_read.iter().copied()
+    }
+
+    /// Returns an iterator over all recorded memory word reads, yielding tuples of
+    /// (address, word, context ID, clock cycle).
+    pub fn iter_read_words(&self) -> impl Iterator<Item = (Felt, Word, ContextId, RowIndex)> {
+        self.words_read.iter().copied()
+    }
 }
 
-impl MemoryInterface for MemoryReplay {
+/// Records and replays all the writes made to memory, in which all elements written to memory
+/// throughout a program's execution are recorded by the fast processor.
+///
+/// This is separated from [MemoryReadsReplay] since writes are not needed for core trace generation
+/// (as reads are), but only to be able to fully build the memory chiplet trace.
+#[derive(Debug, Default)]
+pub struct MemoryWritesReplay {
+    pub elements_written: VecDeque<(Felt, Felt, ContextId, RowIndex)>,
+    pub words_written: VecDeque<(Felt, Word, ContextId, RowIndex)>,
+}
+
+impl MemoryWritesReplay {
+    /// Records a write element to memory
+    pub fn record_write_element(
+        &mut self,
+        element: Felt,
+        addr: Felt,
+        ctx: ContextId,
+        clk: RowIndex,
+    ) {
+        // TODO(plafer): push in same order as the signature of the method (i.e. addr, element are
+        // swapped)
+        self.elements_written.push_back((addr, element, ctx, clk));
+    }
+
+    /// Records a write word to memory
+    pub fn record_write_word(&mut self, word: Word, addr: Felt, ctx: ContextId, clk: RowIndex) {
+        self.words_written.push_back((addr, word, ctx, clk));
+    }
+}
+
+impl MemoryInterface for MemoryReadsReplay {
     fn read_element(
         &mut self,
         _ctx: ContextId,
@@ -623,6 +679,136 @@ impl AdviceProviderInterface for AdviceReplay {
     }
 }
 
+// BITWISE REPLAY
+// ================================================================================================
+
+/// Enum representing the different bitwise operations that can be recorded.
+#[derive(Debug)]
+pub enum BitwiseOp {
+    U32And,
+    U32Xor,
+}
+
+/// Replay data for bitwise operations.
+#[derive(Debug, Default)]
+pub struct BitwiseReplay {
+    u32op_with_operands: VecDeque<(BitwiseOp, Felt, Felt)>,
+}
+
+impl BitwiseReplay {
+    // MUTATIONS (populated by the fast processor)
+    // --------------------------------------------------------------------------------
+
+    /// Records the operands of a u32and operation.
+    pub fn record_u32and(&mut self, a: Felt, b: Felt) {
+        self.u32op_with_operands.push_back((BitwiseOp::U32And, a, b));
+    }
+
+    /// Records the operands of a u32xor operation.
+    pub fn record_u32xor(&mut self, a: Felt, b: Felt) {
+        self.u32op_with_operands.push_back((BitwiseOp::U32Xor, a, b));
+    }
+}
+
+impl IntoIterator for BitwiseReplay {
+    type Item = (BitwiseOp, Felt, Felt);
+    type IntoIter = <VecDeque<(BitwiseOp, Felt, Felt)> as IntoIterator>::IntoIter;
+
+    /// Returns an iterator over all recorded u32 operations with their operands.
+    fn into_iter(self) -> Self::IntoIter {
+        self.u32op_with_operands.into_iter()
+    }
+}
+
+// KERNEL REPLAY
+// ================================================================================================
+
+/// Replay data for kernel operations.
+#[derive(Debug, Default)]
+pub struct KernelReplay {
+    kernel_proc_accesses: VecDeque<Word>,
+}
+
+impl KernelReplay {
+    // MUTATIONS (populated by the fast processor)
+    // --------------------------------------------------------------------------------
+
+    /// Records the procedure hash of a syscall.
+    pub fn record_kernel_proc_access(&mut self, proc_hash: Word) {
+        self.kernel_proc_accesses.push_back(proc_hash);
+    }
+}
+
+impl IntoIterator for KernelReplay {
+    type Item = Word;
+    type IntoIter = <VecDeque<Word> as IntoIterator>::IntoIter;
+
+    /// Returns an iterator over all recorded kernel procedure accesses.
+    fn into_iter(self) -> Self::IntoIter {
+        self.kernel_proc_accesses.into_iter()
+    }
+}
+
+// ACE REPLAY
+// ================================================================================================
+
+/// Replay data for ACE operations.
+#[derive(Debug, Default)]
+pub struct AceReplay {
+    circuit_evaluations: VecDeque<(RowIndex, CircuitEvaluation)>,
+}
+
+impl AceReplay {
+    // MUTATIONS (populated by the fast processor)
+    // --------------------------------------------------------------------------------
+
+    /// Records the procedure hash of a syscall.
+    pub fn record_circuit_evaluation(&mut self, clk: RowIndex, circuit_eval: CircuitEvaluation) {
+        self.circuit_evaluations.push_back((clk, circuit_eval));
+    }
+}
+
+impl IntoIterator for AceReplay {
+    type Item = (RowIndex, CircuitEvaluation);
+    type IntoIter = <VecDeque<(RowIndex, CircuitEvaluation)> as IntoIterator>::IntoIter;
+
+    /// Returns an iterator over all recorded circuit evaluations.
+    fn into_iter(self) -> Self::IntoIter {
+        self.circuit_evaluations.into_iter()
+    }
+}
+
+// RANGE CHECKER REPLAY
+// ================================================================================================
+
+/// Replay data for range checking operations.
+///
+/// This currently only records
+#[derive(Debug, Default)]
+pub struct RangeCheckerReplay {
+    range_checks_u32_ops: VecDeque<(RowIndex, [u16; 4])>,
+}
+
+impl RangeCheckerReplay {
+    // MUTATIONS (populated by the fast processor)
+    // --------------------------------------------------------------------------------
+
+    /// Records the set of range checks which result from a u32 operation.
+    pub fn record_range_check_u32(&mut self, row_index: RowIndex, u16_limbs: [u16; 4]) {
+        self.range_checks_u32_ops.push_back((row_index, u16_limbs));
+    }
+}
+
+impl IntoIterator for RangeCheckerReplay {
+    type Item = (RowIndex, [u16; 4]);
+    type IntoIter = <VecDeque<(RowIndex, [u16; 4])> as IntoIterator>::IntoIter;
+
+    /// Returns an iterator over all recorded range checks resulting from u32 operations.
+    fn into_iter(self) -> Self::IntoIter {
+        self.range_checks_u32_ops.into_iter()
+    }
+}
+
 // HASHER REPLAY
 // ================================================================================================
 
@@ -747,6 +933,69 @@ impl HasherInterface for HasherReplay {
         } else {
             Err(on_err())
         }
+    }
+}
+
+/// Enum representing the different hasher operations that can be recorded, along with their
+/// operands.
+#[derive(Debug)]
+pub enum HasherOp {
+    Permute([Felt; STATE_WIDTH]),
+    HashControlBlock((Word, Word, Felt, Word)),
+    // TODO(plafer): think of a way to avoid cloning the op batches here
+    HashBasicBlock((Vec<OpBatch>, Word)),
+    BuildMerkleRoot((Word, MerklePath, Felt)),
+    UpdateMerkleRoot((Word, Word, MerklePath, Felt)),
+}
+
+// TODO(plafer): find better name, and disambiguate with `HasherReplay` and `HasherChipletShim`
+#[derive(Debug, Default)]
+pub struct HasherReplayForChiplet {
+    hasher_ops: VecDeque<HasherOp>,
+}
+
+impl HasherReplayForChiplet {
+    pub fn record_permute_input(&mut self, state: [Felt; STATE_WIDTH]) {
+        self.hasher_ops.push_back(HasherOp::Permute(state));
+    }
+
+    pub fn record_hash_control_block(
+        &mut self,
+        h1: Word,
+        h2: Word,
+        domain: Felt,
+        expected_hash: Word,
+    ) {
+        self.hasher_ops
+            .push_back(HasherOp::HashControlBlock((h1, h2, domain, expected_hash)));
+    }
+
+    pub fn record_hash_basic_block(&mut self, op_batches: Vec<OpBatch>, expected_hash: Word) {
+        self.hasher_ops.push_back(HasherOp::HashBasicBlock((op_batches, expected_hash)));
+    }
+
+    pub fn record_build_merkle_root(&mut self, leaf: Word, path: MerklePath, index: Felt) {
+        self.hasher_ops.push_back(HasherOp::BuildMerkleRoot((leaf, path, index)));
+    }
+
+    pub fn record_update_merkle_root(
+        &mut self,
+        old_value: Word,
+        new_value: Word,
+        path: MerklePath,
+        index: Felt,
+    ) {
+        self.hasher_ops
+            .push_back(HasherOp::UpdateMerkleRoot((old_value, new_value, path, index)));
+    }
+}
+
+impl IntoIterator for HasherReplayForChiplet {
+    type Item = HasherOp;
+    type IntoIter = <VecDeque<HasherOp> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.hasher_ops.into_iter()
     }
 }
 

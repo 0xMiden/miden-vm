@@ -97,7 +97,7 @@ pub(super) fn execute_sync_op(
             user_op_helpers = Some(u32split_helpers);
         },
         Operation::U32add => {
-            let u32add_helpers = u32_ops::op_u32add(processor, err_ctx)?;
+            let u32add_helpers = u32_ops::op_u32add(processor, err_ctx, tracer)?;
             user_op_helpers = Some(u32add_helpers);
         },
         Operation::U32add3 => {
@@ -105,11 +105,11 @@ pub(super) fn execute_sync_op(
             user_op_helpers = Some(u32add3_helpers);
         },
         Operation::U32sub => {
-            let u32sub_helpers = u32_ops::op_u32sub(processor, op_idx_in_block, err_ctx)?;
+            let u32sub_helpers = u32_ops::op_u32sub(processor, op_idx_in_block, err_ctx, tracer)?;
             user_op_helpers = Some(u32sub_helpers);
         },
         Operation::U32mul => {
-            let u32mul_helpers = u32_ops::op_u32mul(processor, err_ctx)?;
+            let u32mul_helpers = u32_ops::op_u32mul(processor, err_ctx, tracer)?;
             user_op_helpers = Some(u32mul_helpers);
         },
         Operation::U32madd => {
@@ -117,13 +117,13 @@ pub(super) fn execute_sync_op(
             user_op_helpers = Some(u32madd_helpers);
         },
         Operation::U32div => {
-            let u32div_helpers = u32_ops::op_u32div(processor, err_ctx)?;
+            let u32div_helpers = u32_ops::op_u32div(processor, err_ctx, tracer)?;
             user_op_helpers = Some(u32div_helpers);
         },
         Operation::U32and => u32_ops::op_u32and(processor, err_ctx, tracer)?,
         Operation::U32xor => u32_ops::op_u32xor(processor, err_ctx, tracer)?,
         Operation::U32assert2(err_code) => {
-            let u32assert2_helpers = u32_ops::op_u32assert2(processor, *err_code, err_ctx)?;
+            let u32assert2_helpers = u32_ops::op_u32assert2(processor, *err_code, err_ctx, tracer)?;
             user_op_helpers = Some(u32assert2_helpers);
         },
 
@@ -202,7 +202,7 @@ pub(super) fn execute_sync_op(
             user_op_helpers = Some(horner_ext_helpers);
         },
         Operation::EvalCircuit => {
-            processor.op_eval_circuit(err_ctx)?;
+            processor.op_eval_circuit(err_ctx, tracer)?;
         },
     }
 
