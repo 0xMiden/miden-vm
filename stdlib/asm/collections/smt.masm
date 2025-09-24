@@ -518,7 +518,8 @@ export.get
         else
             # => [leaf_size, NV, K, R]
 
-            # Cycles: 124 + 3 * leaf_size / 4
+            # (125 + 3 * leaf_size / 8 cycles if V is not empty)
+            # (129 + 3 * leaf_size / 8 cycles if V is empty)
             exec.get_multi_leaf_value
             # => [V, R]
         end
