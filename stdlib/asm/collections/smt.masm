@@ -364,7 +364,7 @@ end
 #! Cycles:
 #!  Non-empty: 125 + 3 * pair_count
 #!  Empty: 129 + 3 * pair_count
-proc.get_multi_leaf_value
+proc.get_multi_leaf_value.8192
     # First, we'll pipe all the pairs in the leaf from the advice stack.
     # We'll need a pointer, the count of words to copy, and a "commitment" that it should hash to.
     # The node value (its hash) is our commitment, and we can just divide `leaf_size` to get the
@@ -376,17 +376,18 @@ proc.get_multi_leaf_value
     div.4
     # => [num_words, COM, K, R]
 
-    # FIXME: is there any particular value I should use for the pointer?
-    # (2 cycles)
-    push.0xA0 swap
+    # We can use our local memory for this. A leaf can have a maximum of 1024 entries, each being
+    # a pair of words, for a total max leaf size of 8192.
+    # (3 cycles)
+    locaddr.0 swap
     # => [num_words, ptr, COM, K, R]
 
     # Cycles: 56 + 3 * num_words / 2
     exec.mem::pipe_double_words_preimage_to_memory
     # => [ptr_end, K, R]
 
-    # (3 cycles)
-    movdn.4 push.0xA0 movdn.4
+    # (4 cycles)
+    movdn.4 locaddr.0 movdn.4
     # => [K, start_ptr, end_ptr, R]
 
     # (56 cycles)
