@@ -5,6 +5,9 @@ use.std::sys
 # Constant value for the depth at which leaves sit
 const.LEAF_DEPTH=64
 
+# Each key-value pair is two words, and a leaf can hold up to 1024 pairs.
+const.MAX_LEAF_SIZE=8192
+
 # SET
 # =================================================================================================
 
@@ -480,6 +483,10 @@ export.get
         # (0 cycles)
         adv.push_mapvaln adv_push.1
         # => [leaf_size, NV, K, R]
+
+        # Consistency check: assert this is actually a valid leaf.
+        dup lte.MAX_LEAF_SIZE assert.err="invalid leaf: larger than maximum size of 8192"
+        dup u32mod.8 assertz.err="invalid leaf: size must be a multiple of 8"
 
         # Leaf size will be a multiple of 8 (each kv-pair in a leaf is 8 elements)
         # (3 cycles)
