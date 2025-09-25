@@ -28,7 +28,7 @@ pub fn compile_options(
             Vm::LocalInterval(index, index, proc_ctx.num_locals())
         },
         Ast::LocalAll => {
-            let end_exclusive = Ord::min(1, proc_ctx.num_locals());
+            let end_exclusive = Ord::max(1, proc_ctx.num_locals());
             Vm::LocalInterval(0, end_exclusive - 1, proc_ctx.num_locals())
         },
         Ast::AdvStackTop(n) => Vm::AdvStackTop(n.expect_value()),

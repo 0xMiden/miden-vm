@@ -58,11 +58,13 @@ mod range;
 use range::RangeChecker;
 
 mod host;
+
 pub use host::{
     AdviceMutation, AsyncHost, BaseHost, FutureMaybeSend, MastForestStore, MemMastForestStore,
     SyncHost,
     advice::{AdviceError, AdviceInputs, AdviceProvider},
-    default::{DefaultDebugHandler, DefaultHost, HostLibrary},
+    debug::DefaultDebugHandler,
+    default::{DefaultHost, HostLibrary},
     handlers::{DebugHandler, EventError, EventHandler, EventHandlerRegistry, NoopEventHandler},
 };
 
