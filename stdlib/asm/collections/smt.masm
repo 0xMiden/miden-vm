@@ -360,8 +360,10 @@ end
 # GET
 # =================================================================================================
 
-#! Gets a value at the given get. The leaf we're retrieving from is guaranteed
-#! to hold more than one key-value pair (provided on the advice stack).
+#! Gets a value at the given key.
+#!
+#! The leaf we're retrieving from is guaranteed to hold more than one key-value
+#! pair (provided on the advice stack).
 #!
 #! Inputs:
 #!   Operand stack: [leaf_size, NV, K, R]
