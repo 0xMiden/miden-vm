@@ -1,4 +1,4 @@
-use alloc::string::String;
+use alloc::{borrow::Cow, string::String};
 use core::{num::IntErrorKind, ops::Range};
 
 use miden_debug_types::{ByteOffset, SourceId, SourceSpan};
@@ -556,10 +556,10 @@ impl<'input> Lexer<'input> {
             // it is invalid
             let c2 = self.read();
             if !c2.is_ascii_hexdigit() {
-                return Err(ParsingError::InvalidHexLiteral {
-                    span: self.span(),
-                    kind: HexErrorKind::Invalid,
-                });
+                // For odd-length hex strings, we need to handle this by
+                // adjusting the span to not include the unpaired character
+                // and let parse_hex handle the padding
+                break;
             }
             self.skip();
         }
@@ -610,15 +610,31 @@ impl<'input> Iterator for Lexer<'input> {
 // HELPER FUNCTIONS
 // ================================================================================================
 
+fn pad_hex_if_needed<'a>(hex: &'a str) -> Cow<'a, str> {
+    if hex.len().is_multiple_of(2) {
+        Cow::Borrowed(hex)
+    } else {
+        // allocate once, with exact capacity
+        let mut s = alloc::string::String::with_capacity(hex.len() + 1);
+        s.push('0');
+        s.push_str(hex);
+        Cow::Owned(s)
+    }
+}
+
 fn parse_hex<'input>(
     span: SourceSpan,
     hex_digits: &'input str,
 ) -> Result<Token<'input>, ParsingError> {
     use miden_core::{FieldElement, StarkField};
+
+    // Handle odd-length hex strings by padding with a leading zero
+    let hex_digits = pad_hex_if_needed(hex_digits);
+
     match hex_digits.len() {
-        // Felt
+        // Felt - allow all even lengths up to 16
         n if n <= 16 && n.is_multiple_of(2) => {
-            let value = u64::from_str_radix(hex_digits, 16).map_err(|error| {
+            let value = u64::from_str_radix(&hex_digits, 16).map_err(|error| {
                 ParsingError::InvalidLiteral {
                     span,
                     kind: int_error_kind_to_literal_error_kind(
@@ -667,9 +683,6 @@ fn parse_hex<'input>(
         },
         // Invalid
         n if n > 64 => Err(ParsingError::InvalidHexLiteral { span, kind: HexErrorKind::TooLong }),
-        n if !n.is_multiple_of(2) && n < 64 => {
-            Err(ParsingError::InvalidHexLiteral { span, kind: HexErrorKind::MissingDigits })
-        },
         _ => Err(ParsingError::InvalidHexLiteral { span, kind: HexErrorKind::Invalid }),
     }
 }

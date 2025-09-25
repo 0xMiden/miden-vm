@@ -9,6 +9,7 @@
 #### Changes
 
 - [BREAKING] Incremented MSRV to 1.90.
+- Fix ability to parse odd-length hex strings ([#2196](https://github.com/0xMiden/miden-vm/pull/2196)).
 
 ## 0.18.0 (2025-09-21)
 
