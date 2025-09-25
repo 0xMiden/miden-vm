@@ -9,6 +9,7 @@
 #### Changes
 
 - [BREAKING] Incremented MSRV to 1.90.
+- [BREAKING] Fix inconsistencies in debugging instructions ([2205](https://github.com/0xMiden/miden-vm/pull/)).
 
 ## 0.18.0 (2025-09-21)
 
