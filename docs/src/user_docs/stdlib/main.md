@@ -29,6 +29,8 @@ Currently, Miden standard library contains just a few modules, which are listed 
 | [std::collections::mmr](./collections.md#merkle-mountain-range)     | Contains procedures for manipulating [Merkle Mountain Ranges](https://github.com/opentimestamps/opentimestamps-server/blob/master/doc/merkle-mountain-range.md). |
 | [std::collections::smt](./collections.md#sparse-merkle-tree)        | Contains procedures for manipulating Sparse Merkle Trees.                                                                                                        |
 | [std::crypto::fri::frie2f4](./crypto/fri.md#fri-extension-2-fold-4) | Contains procedures for verifying FRI proofs (field extension = 2, folding factor = 4).                                                                          |
+| [std::crypto::dsa::rpo_falcon512](./crypto/dsa.md#rpo-falcon512)    | Contains procedures for verifying RPO Falcon512 signatures (hash-to-point with RPO256). 
+                    |
 | [std::crypto::hashes::blake3](./crypto/hashes.md#blake3)            | Contains procedures for computing hashes using BLAKE3 hash function.                                                                                             |
 | [std::crypto::hashes::keccak256](./crypto/hashes.md#keccak256)      | Contains procedures for computing hashes using Keccak256 hash function.                                                                                          |
 | [std::crypto::hashes::rpo](./crypto/hashes.md#rpo256)               | Contains procedures for computing hashes using the RPO256 hash function.                                                                                         |
