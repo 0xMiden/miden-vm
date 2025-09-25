@@ -123,9 +123,11 @@ pub fn falcon_sign(sk: &[Felt], msg: Word) -> Option<Vec<Felt>> {
     let mut sk_bytes = Vec::with_capacity(sk.len());
     for element in sk {
         let value = element.as_int();
+        // Check for valid u8 range and ensure no data loss during conversion
         if value > u8::MAX as u64 {
             return None;
         }
+        // Safe conversion since we've verified the value is within u8 range
         sk_bytes.push(value as u8);
     }
 
