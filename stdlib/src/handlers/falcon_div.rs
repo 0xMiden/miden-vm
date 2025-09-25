@@ -29,14 +29,14 @@ pub const FALCON_DIV_EVENT_ID: EventId = EventId::from_u64(9834516640389212175);
 ///   Advice stack: [...]
 ///
 /// Outputs:
-///   Advice stack: [q1, q0, r, ...]
+///   Advice stack: [r_lo, q_lo, q_hi, ...]
 ///
 /// where (a0, a1) are the 32-bit limbs of the dividend (with a0 representing the 32 least
 /// significant bits and a1 representing the 32 most significant bits).
-/// Similarly, (q0, q1) represent the quotient and r the remainder.
+/// (q_lo, q_hi) represent the quotient limbs, and r_lo the remainder; for Falcon modulus M
+/// the remainder always fits into a 32-bit limb (r_hi = 0).
 ///
 /// # Errors
-/// - Returns an error if the divisor is ZERO.
 /// - Returns an error if either a0 or a1 is not a u32.
 pub fn handle_falcon_div(process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
     let dividend_hi = process.get_stack_item(1).as_int();
@@ -64,11 +64,10 @@ pub fn handle_falcon_div(process: &ProcessState) -> Result<Vec<AdviceMutation>, 
     let (q_hi, q_lo) = u64_to_u32_elements(quotient);
     let (r_hi, r_lo) = u64_to_u32_elements(remainder);
 
-    // Assertion from the original code: r_hi should always be zero for Falcon modulus
+    // Invariant: for Falcon modulus M=12289, remainder fits into 32 bits, so r_hi == 0
     assert_eq!(r_hi, ZERO);
 
-    // Create mutations to extend the advice stack with the result.
-    // The values are pushed in the order: r_lo, q_lo, q_hi
+    // Extend advice stack with [r_lo, q_lo, q_hi]
     let mutation = AdviceMutation::extend_stack([r_lo, q_lo, q_hi]);
     Ok(vec![mutation])
 }
