@@ -14,16 +14,20 @@ use miden_core::crypto::{
 };
 // EXPORTS
 // ================================================================================================
-pub use miden_core::{Kernel, ProgramInfo, StackInputs, StackOutputs, Word};
+pub use miden_core::{
+    Kernel, ProgramInfo, StackInputs, StackOutputs, Word,
+    precompile::{PrecompileError, PrecompileVerificationError, PrecompileVerifiers},
+};
 pub use winter_verifier::{AcceptableOptions, VerifierError};
 use winter_verifier::{crypto::MerkleTree, verify as verify_proof};
 pub mod math {
     pub use miden_core::{Felt, FieldElement, StarkField};
 }
 pub use miden_air::ExecutionProof;
-
+use miden_core::precompile::PrecompileRequest;
 // VERIFIER
 // ================================================================================================
+
 /// Returns the security level of the proof if the specified program was executed correctly against
 /// the specified inputs and outputs.
 ///
@@ -52,12 +56,37 @@ pub use miden_air::ExecutionProof;
 /// - The provided proof does not prove a correct execution of the program.
 /// - The protocol parameters used to generate the proof are not in the set of acceptable
 ///   parameters.
-#[tracing::instrument("verify_program", skip_all)]
+/// - The proof contains any precompile requests.
 pub fn verify(
     program_info: ProgramInfo,
     stack_inputs: StackInputs,
     stack_outputs: StackOutputs,
     proof: ExecutionProof,
+) -> Result<u32, VerificationError> {
+    verify_with_precompiles(
+        program_info,
+        stack_inputs,
+        stack_outputs,
+        proof,
+        &[],
+        &PrecompileVerifiers::new(),
+    )
+}
+
+/// Identical to [`verify`], with additional verification of any precompile requests made during the
+/// VM execution.
+///
+/// # Errors
+/// Returns any error produced by [`verify`], as well as any errors resulting from precompile
+/// verification
+#[tracing::instrument("verify_program", skip_all)]
+pub fn verify_with_precompiles(
+    program_info: ProgramInfo,
+    stack_inputs: StackInputs,
+    stack_outputs: StackOutputs,
+    proof: ExecutionProof,
+    precompile_requests: &[PrecompileRequest],
+    precompile_verifiers: &PrecompileVerifiers,
 ) -> Result<u32, VerificationError> {
     // get security level of the proof
     let security_level = proof.security_level();
@@ -66,6 +95,13 @@ pub fn verify(
     // build public inputs and try to verify the proof
     let pub_inputs = PublicInputs::new(program_info, stack_inputs, stack_outputs);
     let (hash_fn, proof) = proof.into_parts();
+
+    // TODO: Check that this corresponds to the commitment output by the VM
+    let commitments = precompile_verifiers
+        .commitments(precompile_requests)
+        .map_err(VerificationError::PrecompileVerificationError)?;
+    let _precompile_commitment = PrecompileVerifiers::accumulate_commitments(&commitments);
+
     match hash_fn {
         HashFunction::Blake3_192 => {
             let opts = AcceptableOptions::OptionSet(vec![ProvingOptions::REGULAR_96_BITS]);
@@ -115,7 +151,7 @@ pub fn verify(
 // ERRORS
 // ================================================================================================
 
-/// TODO: add docs
+/// Errors that can occur during proof verification.
 #[derive(Debug, thiserror::Error)]
 pub enum VerificationError {
     #[error("failed to verify proof for program with hash {0}")]
@@ -124,4 +160,6 @@ pub enum VerificationError {
     InputNotFieldElement(u64),
     #[error("the output {0} is not a valid field element")]
     OutputNotFieldElement(u64),
+    #[error("failed to verify precompile calls")]
+    PrecompileVerificationError(#[source] PrecompileVerificationError),
 }

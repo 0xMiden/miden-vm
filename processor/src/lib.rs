@@ -897,16 +897,13 @@ impl<'a> ProcessState<'a> {
         }
     }
 
-    /// Reads (start_addr, end_addr) tuple from the specified elements of the operand stack (
-    /// without modifying the state of the stack), and verifies that memory range is valid.
+    /// Returns a verified memory address range given untrusted `u64` values `start_addr` and
+    /// `end_addr`.
     pub fn get_mem_addr_range(
         &self,
-        start_idx: usize,
-        end_idx: usize,
+        start_addr: u64,
+        end_addr: u64,
     ) -> Result<core::ops::Range<u32>, MemoryError> {
-        let start_addr = self.get_stack_item(start_idx).as_int();
-        let end_addr = self.get_stack_item(end_idx).as_int();
-
         if start_addr > u32::MAX as u64 {
             return Err(MemoryError::address_out_of_bounds(start_addr, &()));
         }

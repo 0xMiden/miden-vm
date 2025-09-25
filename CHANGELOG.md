@@ -61,6 +61,8 @@
 - [BREAKING] Update miden-crypto dependency to v0.17 (#[2168](https://github.com/0xMiden/miden-vm/pull/2168)).
 - [BREAKING] Moved `u64_div`, `falcon_div` and `smtpeek` system events to stdlib ([#1582](https://github.com/0xMiden/miden-vm/issues/1582)).
 - [BREAKING] `MastNode` quality of life improvements ([#2166](https://github.com/0xMiden/miden-vm/pull/2166)).
+- [BREAKING] Log deferred precompile calls in `AdviceProvider` ([#2158](https://github.com/0xMiden/miden-vm/issues/2158)).
+- [BREAKING] Add precompile requests to proof ([#2187](https://github.com/0xMiden/miden-vm/issues/2187)).
 - Allowed references between constants without requiring them to be declared in a specific order ([#2120](https://github.com/0xMiden/miden-vm/pull/2120)).
 - Introduced new `pub proc` syntax for procedure declarations to replace `export` syntax. This change is backwards-compatible. ([#2120](https://github.com/0xMiden/miden-vm/pull/2120)).
 - [BREAKING] Disallowed the use of word literals in conjunction with dot-delimited `push` syntax ([#2120](https://github.com/0xMiden/miden-vm/pull/2120)).

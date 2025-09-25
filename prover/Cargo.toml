@@ -23,6 +23,7 @@ std = ["miden-air/std", "miden-debug-types/std", "miden-processor/std", "winter-
 [dependencies]
 # Miden dependencies
 miden-air.workspace = true
+miden-core.workspace = true
 miden-debug-types.workspace = true
 miden-processor.workspace = true
 
