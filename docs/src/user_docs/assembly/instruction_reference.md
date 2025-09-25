@@ -48,14 +48,16 @@ This page provides a comprehensive reference for Miden Assembly instructions.
 
 ### Extension Field Operations
 
+All operations in this section are defined over the quadratic extension field $\mathbb{F}_p[x] / (x^2 - x + 2)$, with modulus $p = 2^{64} - 2^{32} + 1$.
+
 | Instruction | Stack Input           | Stack Output    | Cycles | Notes                                                                                       |
 | ----------- | --------------------- | --------------- | ------ | ------------------------------------------------------------------------------------------- |
-| `ext2add`   | `[b1, b0, a1, a0, ...]` | `[c1, c0, ...]`   | 5      | $c_1 = (a_1 + b_1) \bmod p$ <br> $c_0 = (a_0 + b_0) \bmod p$                                       |
-| `ext2sub`   | `[b1, b0, a1, a0, ...]` | `[c1, c0, ...]`   | 7      | $c_1 = (a_1 - b_1) \bmod p$ <br> $c_0 = (a_0 - b_0) \bmod p$                                       |
-| `ext2mul`   | `[b1, b0, a1, a0, ...]` | `[c1, c0, ...]`   | 3      | $c_1 = (a_0 + a_1) (b_0 + b_1) \bmod p$ <br> $c_0 = (a_0 b_0) - 2 (a_1 b_1) \bmod p$           |
-| `ext2neg`   | `[a1, a0, ...]`         | `[a1', a0', ...]` | 4      | $a_1' = -a_1$ <br> $a_0' = -a_0$                                                               |
-| `ext2inv`   | `[a1, a0, ...]`         | `[a1', a0', ...]` | 8      | $a' = a^{-1} \bmod q$. Fails if $a = 0$.                                                       |
-| `ext2div`   | `[b1, b0, a1, a0, ...]` | `[c1, c0, ...]`   | 11     | $c = a \cdot b^{-1}$. Fails if $b = 0$. Multiplication and inversion are as defined previously. |
+| `ext2add`   | `[b1, b0, a1, a0, ...]` | `[c1, c0, ...]`   | 5      | $c1 = (a1 + b1) \bmod p$ <br> $c0 = (a0 + b0) \bmod p$                                       |
+| `ext2sub`   | `[b1, b0, a1, a0, ...]` | `[c1, c0, ...]`   | 7      | $c1 = (a1 - b1) \bmod p$ <br> $c0 = (a0 - b0) \bmod p$                                       |
+| `ext2mul`   | `[b1, b0, a1, a0, ...]` | `[c1, c0, ...]`   | 3      | $c1 = (a0 + a1)(b0 + b1) - a0b0 \bmod p$ <br> $c0 = a0b0 - 2a1b1 \bmod p$                     |
+| `ext2neg`   | `[a1, a0, ...]`         | `[a1', a0', ...]` | 4      | $a1' = -a1$ <br> $a0' = -a0$                                                                   |
+| `ext2inv`   | `[a1, a0, ...]`         | `[a1', a0', ...]` | 8      | $a' = a^{-1}$ in $\mathbb{F}_p[x]/(x^2 - x + 2)$. Fails if $a = 0$.                           |
+| `ext2div`   | `[b1, b0, a1, a0, ...]` | `[c1, c0, ...]`   | 11     | $c = a \cdot b^{-1}$ in $\mathbb{F}_p[x]/(x^2 - x + 2)$. Fails if $b = 0$.                    |
 
 ## U32 Operations
 
