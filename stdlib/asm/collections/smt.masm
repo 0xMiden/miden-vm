@@ -451,7 +451,8 @@ end
 #! Cycles
 #!   Leaf empty: 48 cycles
 #!   Leaf single: 99 cycles
-#!   Leaf multiple: 170 + 3 * leaf_size / 4 cycles
+#!   Leaf multiple, non-empty value: 171 + 3 * pair_count
+#!   Leaf multiple, empty value: 168 + 3 * pair_count
 export.get
     # Prepare for `mtree_get`
     # (6 cycles)
