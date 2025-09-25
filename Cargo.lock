@@ -1364,6 +1364,7 @@ dependencies = [
 name = "miden-core"
 version = "0.19.0"
 dependencies = [
+ "criterion",
  "enum_dispatch",
  "insta",
  "miden-crypto",

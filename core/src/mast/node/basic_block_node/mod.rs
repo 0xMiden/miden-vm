@@ -18,6 +18,9 @@ use op_batch::OpBatchAccumulator;
 
 use super::{MastNodeErrorContext, MastNodeExt};
 
+#[cfg(any(test, feature = "arbitrary"))]
+pub mod arbitrary;
+
 #[cfg(test)]
 mod tests;
 
@@ -64,6 +67,10 @@ pub const BATCH_SIZE: usize = 8;
 /// field elements (512 bits).
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(
+    all(feature = "serde", feature = "arbitrary", test),
+    miden_serde_test_macros::serde_test
+)]
 pub struct BasicBlockNode {
     /// The primitive operations contained in this basic block.
     ///
