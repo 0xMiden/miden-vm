@@ -1,11 +1,11 @@
 [workspace]
 members = [
+    "air",
+    "core",
+    "crates/assembly",
+    "crates/assembly-syntax",
     "crates/debug/*",
     "crates/utils/*",
-    "air",
-    "assembly",
-    "assembly-syntax",
-    "core",
     "miden-vm",
     "package",
     "processor",
@@ -17,13 +17,14 @@ resolver = "2"
 
 [workspace.package]
 edition = "2024"
-rust-version = "1.88"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
 authors = ["Miden contributors"]
-homepage = "https://polygon.technology/polygon-miden"
+homepage = "https://miden.xyz"
 repository = "https://github.com/0xMiden/miden-vm"
 exclude = [".github/"]
+rust-version = "1.90"
+version = "0.19.0"
 
 [profile.optimized]
 inherits = "release"
@@ -39,53 +40,42 @@ overflow-checks = true
 
 [workspace.dependencies]
 # Workspace crates
-miden-air = { path = "./air", version = "0.18", default-features = false }
-miden-assembly = { path = "./assembly", version = "0.18", default-features = false }
-miden-assembly-syntax = { path = "./assembly-syntax", version = "0.18", default-features = false }
-miden-core = { path = "./core", version = "0.18", default-features = false }
-miden-debug-types = { path = "./crates/debug/types", version = "0.18", default-features = false }
-miden-mast-package = { path = "./package", version = "0.18", default-features = false }
-miden-processor = { path = "./processor", version = "0.18", default-features = false }
-miden-serde-test-macros = { path = "./crates/utils/serde-test-macros", version = "0.1.0", default-features = false }
-miden-prover = { path = "./prover", version = "0.18", default-features = false }
-miden-stdlib = { path = "./stdlib", version = "0.18", default-features = false }
-miden-utils-diagnostics = { path = "./crates/utils/diagnostics", version = "0.18", default-features = false }
-miden-utils-sync = { path = "./crates/utils/sync", version = "0.18", default-features = false }
-miden-utils-testing = { path = "./crates/utils/testing", version = "0.1.0", package = "miden-test-utils" }
-miden-verifier = { path = "./verifier", version = "0.18", default-features = false }
+miden-air = { path = "./air", version = "0.19", default-features = false }
+miden-assembly = { path = "./crates/assembly", version = "0.19", default-features = false }
+miden-assembly-syntax = { path = "./crates/assembly-syntax", version = "0.19", default-features = false }
+miden-core = { path = "./core", version = "0.19", default-features = false }
+miden-debug-types = { path = "./crates/debug/types", version = "0.19", default-features = false }
+miden-mast-package = { path = "./package", version = "0.19", default-features = false }
+miden-processor = { path = "./processor", version = "0.19", default-features = false }
+miden-serde-test-macros = { path = "./crates/utils/serde-test-macros", default-features = false }
+miden-prover = { path = "./prover", version = "0.19", default-features = false }
+miden-stdlib = { path = "./stdlib", version = "0.19", default-features = false }
+miden-utils-diagnostics = { path = "./crates/utils/diagnostics", version = "0.19", default-features = false }
+miden-utils-sync = { path = "./crates/utils/sync", version = "0.19", default-features = false }
+miden-utils-testing = { path = "./crates/utils/testing", version = "0.1", package = "miden-test-utils" }
+miden-verifier = { path = "./verifier", version = "0.19", default-features = false }
 
 # Miden crates
-miden-crypto = { version = "0.16", default-features = false }
+miden-crypto = { version = "0.17", default-features = false }
 miden-formatting = { version = "0.1", default-features = false }
-midenc-hir-type = { version = "0.1", default-features = false }
+midenc-hir-type = { version = "0.4", default-features = false }
 
 # Third-party crates
-insta = { version = "1.43", default-features = false, features = [
-    "colors",
-] }
+blake3 = "1.8"
+criterion = "0.7"
+env_logger = { version = "0.11" }
+insta = { version = "1.43", default-features = false, features = ["colors"] }
 log = { version = "0.4", default-features = false }
 paste = { version = "1.0", default-features = false }
-proptest = { version = "1.7", default-features = false, features = [
-    "no_std",
-    "alloc",
-] }
+proptest = { version = "1.8", default-features = false, features = ["no_std", "alloc"] }
 proptest-derive = { version = "0.6", default-features = false }
-serde = { version = "1.0", default-features = false, features = [
-    "alloc",
-    "derive",
-    "rc",
-] }
+serde = { version = "1.0", default-features = false, features = ["alloc", "derive", "rc"] }
 serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
 serde-untagged = "0.1"
-smallvec = { version = "1.13", default-features = false, features = [
-    "union",
-    "const_generics",
-    "const_new",
-] }
+smallvec = { version = "1.15", default-features = false, features = ["union", "const_generics", "const_new"] }
 thiserror = { version = "2.0", default-features = false }
-tracing = { version = "0.1", default-features = false, features = [
-    "attributes",
-] }
+tokio = { version = "1.47", default-features = false }
+tracing = { version = "0.1", default-features = false, features = ["attributes"] }
 winter-air = { version = "0.13", default-features = false }
 winter-fri = "0.13"
 winter-math = { version = "0.13", default-features = false }

@@ -1,7 +1,7 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 use core::fmt;
 
-use miden_assembly_syntax::ast::{QualifiedProcedureName, types::FunctionType};
+use miden_assembly_syntax::ast::{AttributeSet, QualifiedProcedureName, types::FunctionType};
 use miden_core::{Word, utils::DisplayHex};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -84,24 +84,29 @@ impl PackageManifest {
 #[cfg_attr(feature = "arbitrary", derive(proptest_derive::Arbitrary))]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct PackageExport {
-    /// The fully-qualified name of the procedure exported by this package
+    /// The fully-qualified name of the procedure exported by this package.
     pub name: QualifiedProcedureName,
-    /// The digest of the procedure exported by this package
+    /// The digest of the procedure exported by this package.
     #[cfg_attr(feature = "arbitrary", proptest(value = "Word::default()"))]
     pub digest: Word,
-    /// The type signature of the exported procedure
+    /// The type signature of the exported procedure.
     #[cfg_attr(feature = "arbitrary", proptest(value = "None"))]
     #[cfg_attr(feature = "serde", serde(default))]
     pub signature: Option<FunctionType>,
+    /// Attributes attached to the exported procedure.
+    #[cfg_attr(feature = "arbitrary", proptest(value = "AttributeSet::default()"))]
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub attributes: AttributeSet,
 }
 
 impl fmt::Debug for PackageExport {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Self { name, digest, signature } = self;
+        let Self { name, digest, signature, attributes } = self;
         f.debug_struct("PackageExport")
             .field("name", &format_args!("{name}"))
             .field("digest", &format_args!("{}", DisplayHex::new(&digest.as_bytes())))
             .field("signature", signature)
+            .field("attributes", attributes)
             .finish()
     }
 }

@@ -1,0 +1,2360 @@
+use alloc::{
+    boxed::Box,
+    collections::{VecDeque, BTreeSet, BTreeMap},
+    string::ToString,
+    sync::Arc,
+    vec::Vec,
+};
+use core::{marker::PhantomData, num::NonZeroU32, ops::Range};
+
+use miden_debug_types::{SourceId, SourceSpan, Span, Spanned};
+use smallvec::smallvec;
+
+use crate::{LibraryPath, LibraryNamespace, ast::{*, types::{AddressSpace, Type}}, Felt, FieldElement, StarkField, Word};
+use super::{
+    BinEncodedValue, IntValue, PushValue, Token, WordValue, ParseError, ParsingError,
+    LiteralErrorKind, DocumentationType
+};
+
+grammar<'input>(
+    source_id: SourceId,
+    interned: &mut BTreeSet<Arc<str>>,
+    felt_type: &Arc<types::ArrayType>,
+    _marker: PhantomData<&'input str>
+);
+
+// LEXER
+// ================================================================================================
+
+extern {
+    type Error = ParsingError;
+    type Location = u32;
+
+    enum Token<'input> {
+        "!" => Token::Bang,
+        "*" => Token::Star,
+        "+" => Token::Plus,
+        "," => Token::Comma,
+        "-" => Token::Minus,
+        "->" => Token::Rstab,
+        "/" => Token::Slash,
+        "//" => Token::SlashSlash,
+        ";" => Token::Semicolon,
+        ":" => Token::Colon,
+        "::" => Token::ColonColon,
+        "=" => Token::Equal,
+        "." => Token::Dot,
+        "@" => Token::At,
+        "<" => Token::Langle,
+        ">" => Token::Rangle,
+        "{" => Token::Lbrace,
+        "}" => Token::Rbrace,
+        "[" => Token::Lbracket,
+        "]" => Token::Rbracket,
+        "(" => Token::Lparen,
+        ")" => Token::Rparen,
+        ".." => Token::Range,
+        "add" => Token::Add,
+        "addrspace" => Token::Addrspace,
+        "adv" => Token::Adv,
+        "adv_map" => Token::AdvMap,
+        "insert_hdword" => Token::InsertHdword,
+        "insert_hdword_d" => Token::InsertHdwordWithDomain,
+        "insert_hqword" => Token::InsertHqword,
+        "insert_hperm" => Token::InsertHperm,
+        "insert_mem" => Token::InsertMem,
+        "adv_loadw" => Token::AdvLoadw,
+        "adv_pipe" => Token::AdvPipe,
+        "adv_push" => Token::AdvPush,
+        "adv_stack" => Token::AdvStack,
+        "push_mapval" => Token::PushMapval,
+        "push_mapvaln" => Token::PushMapvaln,
+        "push_mtnode" => Token::PushMtnode,
+        "and" => Token::And,
+        "eval_circuit" => Token::EvalCircuit,
+        "assert" => Token::Assert,
+        "assertz" => Token::Assertz,
+        "assert_eq" => Token::AssertEq,
+        "assert_eqw" => Token::AssertEqw,
+        "begin" => Token::Begin,
+        "breakpoint" => Token::Breakpoint,
+        "byte" => Token::Byte,
+        "caller" => Token::Caller,
+        "call" => Token::Call,
+        "cdrop" => Token::Cdrop,
+        "cdropw" => Token::Cdropw,
+        "clk" => Token::Clk,
+        "const" => Token::Const,
+        "cswap" => Token::Cswap,
+        "cswapw" => Token::Cswapw,
+        "debug" => Token::Debug,
+        "div" => Token::Div,
+        "drop" => Token::Drop,
+        "dropw" => Token::Dropw,
+        "dup" => Token::Dup,
+        "dupw" => Token::Dupw,
+        "dynexec" => Token::Dynexec,
+        "dyncall" => Token::Dyncall,
+        "else" => Token::Else,
+        "emit" => Token::Emit,
+        "end" => Token::End,
+        "enum" => Token::Enum,
+        "eq" => Token::Eq,
+        "eqw" => Token::Eqw,
+        "ext2add" => Token::Ext2Add,
+        "ext2div" => Token::Ext2Div,
+        "ext2inv" => Token::Ext2Inv,
+        "ext2mul" => Token::Ext2Mul,
+        "ext2neg" => Token::Ext2Neg,
+        "ext2sub" => Token::Ext2Sub,
+        "err" => Token::Err,
+        "exec" => Token::Exec,
+        "event" => Token::Event,
+        "exp" => Token::Exp,
+        "exp.u" => Token::ExpU,
+        "export" => Token::Export,
+        "false" => Token::False,
+        "felt" => Token::Felt,
+        "fri_ext2fold4" => Token::FriExt2Fold4,
+        "gt" => Token::Gt,
+        "gte" => Token::Gte,
+        "hash" => Token::Hash,
+        "has_mapkey" => Token::HasMapkey,
+        "hperm" => Token::Hperm,
+        "hmerge" => Token::Hmerge,
+        "i1" => Token::I1,
+        "i8" => Token::I8,
+        "i16" => Token::I16,
+        "i32" => Token::I32,
+        "i64" => Token::I64,
+        "i128" => Token::I128,
+        "if" => Token::If,
+        "ilog2" => Token::ILog2,
+        "inv" => Token::Inv,
+        "is_odd" => Token::IsOdd,
+        "local" => Token::Local,
+        "locaddr" => Token::Locaddr,
+        "loc_load" => Token::LocLoad,
+        "loc_loadw" => Token::LocLoadw,
+        "loc_store" => Token::LocStore,
+        "loc_storew" => Token::LocStorew,
+        "lt" => Token::Lt,
+        "lte" => Token::Lte,
+        "mem" => Token::Mem,
+        "mem_load" => Token::MemLoad,
+        "mem_loadw" => Token::MemLoadw,
+        "mem_loadw_be" => Token::MemLoadwBe,
+        "mem_loadw_le" => Token::MemLoadwLe,
+        "mem_store" => Token::MemStore,
+        "mem_storew" => Token::MemStorew,
+        "mem_storew_be" => Token::MemStorewBe,
+        "mem_storew_le" => Token::MemStorewLe,
+        "mem_stream" => Token::MemStream,
+        "movdn" => Token::Movdn,
+        "movdnw" => Token::Movdnw,
+        "movup" => Token::Movup,
+        "movupw" => Token::Movupw,
+        "mtree_get" => Token::MtreeGet,
+        "mtree_merge" => Token::MtreeMerge,
+        "mtree_set" => Token::MtreeSet,
+        "mtree_verify" => Token::MtreeVerify,
+        "mul" => Token::Mul,
+        "neg" => Token::Neg,
+        "neq" => Token::Neq,
+        "not" => Token::Not,
+        "nop" => Token::Nop,
+        "or" => Token::Or,
+        "padw" => Token::Padw,
+        "pow2" => Token::Pow2,
+        "proc" => Token::Proc,
+        "procref" => Token::Procref,
+        "ptr" => Token::Ptr,
+        "pub" => Token::Pub,
+        "push" => Token::Push,
+        "horner_eval_base" => Token::HornerBase,
+        "horner_eval_ext" => Token::HornerExt,
+        "repeat" => Token::Repeat,
+        "reversew" => Token::Reversew,
+        "reversedw" => Token::Reversedw,
+        "sdepth" => Token::Sdepth,
+        "stack" => Token::Stack,
+        "struct" => Token::Struct,
+        "sub" => Token::Sub,
+        "swap" => Token::Swap,
+        "swapw" => Token::Swapw,
+        "swapdw" => Token::Swapdw,
+        "syscall" => Token::Syscall,
+        "trace" => Token::Trace,
+        "true" => Token::True,
+        "type" => Token::Type,
+        "use" => Token::Use,
+        "u8" => Token::U8,
+        "u16" => Token::U16,
+        "u32" => Token::U32,
+        "u32and" => Token::U32And,
+        "u32assert" => Token::U32Assert,
+        "u32assert2" => Token::U32Assert2,
+        "u32assertw" => Token::U32Assertw,
+        "u32cast" => Token::U32Cast,
+        "u32div" => Token::U32Div,
+        "u32divmod" => Token::U32Divmod,
+        "u32gt" => Token::U32Gt,
+        "u32gte" => Token::U32Gte,
+        "u32lt" => Token::U32Lt,
+        "u32lte" => Token::U32Lte,
+        "u32max" => Token::U32Max,
+        "u32min" => Token::U32Min,
+        "u32mod" => Token::U32Mod,
+        "u32not" => Token::U32Not,
+        "u32or" => Token::U32Or,
+        "u32overflowing_add" => Token::U32OverflowingAdd,
+        "u32overflowing_add3" => Token::U32OverflowingAdd3,
+        "u32overflowing_madd" => Token::U32OverflowingMadd,
+        "u32overflowing_mul" => Token::U32OverflowingMul,
+        "u32overflowing_sub" => Token::U32OverflowingSub,
+        "u32popcnt" => Token::U32Popcnt,
+        "u32clz" => Token::U32Clz,
+        "u32ctz" => Token::U32Ctz,
+        "u32clo" => Token::U32Clo,
+        "u32cto" => Token::U32Cto,
+        "u32rotl" => Token::U32Rotl,
+        "u32rotr" => Token::U32Rotr,
+        "u32shl" => Token::U32Shl,
+        "u32shr" => Token::U32Shr,
+        "u32split" => Token::U32Split,
+        "u32test" => Token::U32Test,
+        "u32testw" => Token::U32Testw,
+        "u32wrapping_add" => Token::U32WrappingAdd,
+        "u32wrapping_add3" => Token::U32WrappingAdd3,
+        "u32wrapping_madd" => Token::U32WrappingMadd,
+        "u32wrapping_mul" => Token::U32WrappingMul,
+        "u32wrapping_sub" => Token::U32WrappingSub,
+        "u32xor" => Token::U32Xor,
+        "u64" => Token::U64,
+        "u128" => Token::U128,
+        "while" => Token::While,
+        "word" => Token::Word,
+        "xor" => Token::Xor,
+        EOF => Token::Eof,
+        bare_ident => Token::Ident(<&'input str>),
+        bin_value => Token::BinValue(<BinEncodedValue>),
+        comment => Token::Comment,
+        const_ident => Token::ConstantIdent(<&'input str>),
+        doc_comment => Token::DocComment(<DocumentationType>),
+        hex_value => Token::HexValue(<IntValue>),
+        hex_word => Token::HexWord(<WordValue>),
+        quoted_ident => Token::QuotedIdent(<&'input str>),
+        quoted_string => Token::QuotedString(<&'input str>),
+        uint => Token::Int(<u64>),
+    }
+}
+
+
+// comma-delimited with at least one element
+#[inline]
+CommaDelimited<T>: Vec<T> = {
+    <mut v:(<T> ",")*> <e:T> => {
+        v.push(e);
+        v
+    }
+};
+
+// comma-delimited with at least one element, with optional trailing comma
+#[inline]
+CommaDelimitedAllowTrailing<T>: Vec<T> = {
+    <mut v:(<T> ",")+> <e:T?> => {
+        if let Some(e) = e {
+            v.push(e);
+        }
+        v
+    },
+
+    <e:T?> => {
+        match e {
+            Some(e) => vec![e],
+            None => vec![],
+        }
+    }
+};
+
+// dot-delimited with at least one element
+#[inline]
+DotDelimited<T>: Vec<T> = {
+    <mut v:(<T> ".")*> <e:T> => {
+        v.push(e);
+        v
+    }
+};
+
+
+// ::-delimited with at least one element, no trailing delimiter
+#[inline]
+PathComponents<T>: Vec<T> = {
+    <mut v:(<T> "::")*> <e:T> => {
+        v.push(e);
+        v
+    }
+};
+
+// TOP-LEVEL FORMS
+// ================================================================================================
+
+pub Forms: Vec<Form> = {
+    <forms:Form+> EOF => forms,
+}
+
+Form: Form = {
+    Doc,
+    TypeDecl,
+    Import,
+    Const,
+    AdvMap,
+    Begin,
+    Proc,
+}
+
+Doc: Form = {
+    <l:@L> <doc:doc_comment> <r:@R> =>? {
+        if doc.as_bytes().len() > u16::MAX as usize {
+            Err(ParseError::User { error: ParsingError::DocsTooLarge { span: span!(source_id, l, r) } })
+        } else {
+            match doc {
+                DocumentationType::Module(doc) => Ok(Form::ModuleDoc(Span::new(span!(source_id, l, r), doc))),
+                DocumentationType::Form(doc) => Ok(Form::Doc(Span::new(span!(source_id, l, r), doc))),
+            }
+        }
+    }
+}
+
+TypeDecl: Form = {
+    <l:@L> "type" <name:TypeName> "=" <ty:TypeExpr> <r:@R> => {
+        let span = span!(source_id, l, r);
+        Form::Type(TypeAlias::new(name, ty).with_span(span))
+    },
+
+    <l:@L> "enum" <name:TypeName> ":" <repr:IntType> "{" <variants:CommaDelimitedAllowTrailing<EnumVariant>> "}" <r:@R> => {
+        let span = span!(source_id, l, r);
+        let mut vs = Vec::with_capacity(variants.len());
+        let mut next = ConstantExpr::Int(Span::new(span, IntValue::U8(0)));
+        for (span, name, discriminant) in variants {
+            match discriminant {
+                Some(discriminant) => {
+                    match discriminant {
+                        ConstantExpr::Int(value) => {
+                            vs.push(Variant::new(name.clone(), ConstantExpr::Int(value)).with_span(span));
+                            next = ConstantExpr::BinaryOp {
+                                span,
+                                op: ConstantOp::Add,
+                                lhs: Box::new(ConstantExpr::Var(name)),
+                                rhs: Box::new(ConstantExpr::Int(Span::new(span, IntValue::U8(1)))),
+                            };
+                        }
+                        expr => {
+                            vs.push(Variant::new(name.clone(), expr).with_span(span));
+                            next = ConstantExpr::BinaryOp {
+                                span,
+                                op: ConstantOp::Add,
+                                lhs: Box::new(ConstantExpr::Var(name)),
+                                rhs: Box::new(ConstantExpr::Int(Span::new(span, IntValue::U8(1)))),
+                            };
+                        }
+                    }
+                }
+                None => {
+                    let discriminant = core::mem::replace(&mut next, ConstantExpr::BinaryOp {
+                        span,
+                        op: ConstantOp::Add,
+                        lhs: Box::new(ConstantExpr::Var(name.clone())),
+                        rhs: Box::new(ConstantExpr::Int(Span::new(span, IntValue::U8(1)))),
+                    });
+                    vs.push(Variant::new(name, discriminant).with_span(span));
+                }
+            }
+        }
+        Form::Enum(EnumType::new(name, repr, vs).with_span(span))
+    }
+}
+
+EnumVariant: (SourceSpan, Ident, Option<ConstantExpr>) = {
+    <l:@L> <name:ConstantName> <discriminant:("=" <ConstantArithmeticExpr>)?> <r:@R> => {
+        let span = span!(source_id, l, r);
+        (span, name, discriminant)
+    }
+}
+
+TypeExpr: TypeExpr = {
+    <l:@L> <t:PrimitiveType> <r:@R> => TypeExpr::Primitive(Span::new(span!(source_id, l, r), t)),
+    <PointerType> => TypeExpr::Ptr(<>),
+    <ArrayType> => TypeExpr::Array(<>),
+    <StructType> => TypeExpr::Struct(<>),
+    <TypeName> => TypeExpr::Ref(<>),
+}
+
+PointerType: PointerType = {
+    <l:@L> "ptr" "<" <pointee:TypeExpr> <addrspace:("," "addrspace" "(" <AddressSpace> ")")?> ">" <r:@R> => {
+        let span = span!(source_id, l, r);
+
+        let ty = PointerType::new(pointee).with_span(span);
+        if let Some(addrspace) = addrspace {
+            ty.with_address_space(addrspace)
+        } else {
+            ty
+        }
+    }
+}
+
+#[inline]
+AddressSpace: AddressSpace = {
+    "byte" => AddressSpace::Byte,
+    "felt" => AddressSpace::Element,
+}
+
+ArrayType: ArrayType = {
+    <l:@L> "[" <elem:TypeExpr> ";" <arity:uint> "]" <r:@R> =>? {
+        let span = span!(source_id, l, r);
+        let arity = usize::try_from(arity)
+            .map_err(|error| ParseError::User {
+                error: ParsingError::ImmediateOutOfRange {
+                    span, range: 0..(u32::MAX as usize)
+                }
+            })?;
+        Ok(ArrayType {
+            span,
+            elem: Box::new(elem),
+            arity,
+        })
+    }
+}
+
+StructType: StructType = {
+    <l:@L> "struct" <repr:Annotation?> "{" <fields:CommaDelimitedAllowTrailing<StructField>> "}" <r:@R> =>? {
+        use crate::ast::types::TypeRepr;
+
+        let span = span!(source_id, l, r);
+
+        // Expecting one of:
+        //
+        // * @packed
+        // * @transparent
+        // * @bigendian
+        // * @align(ALIGN)
+        let repr = match repr {
+            None => Span::new(span, TypeRepr::Default),
+            Some(repr) => match repr {
+                Attribute::Marker(ref id) => match id.as_str() {
+                    "packed" => Span::new(id.span(), TypeRepr::packed(1)),
+                    "transparent" => Span::new(id.span(), TypeRepr::Transparent),
+                    "bigendian" => Span::new(id.span(), TypeRepr::BigEndian),
+                    "align" => return Err(ParseError::User {
+                        error: ParsingError::InvalidStructRepr {
+                            span: repr.span(),
+                            message: "you must specify an alignment here, e.g. 'align(16)'".to_string(),
+                        }
+                    }),
+                    _ => return Err(ParseError::User {
+                        error: ParsingError::InvalidStructAnnotation {
+                            span: id.span(),
+                        }
+                    }),
+                },
+                Attribute::List(meta) => match meta.name.as_str() {
+                    "align" => {
+                        if meta.len() != 1 {
+                            return Err(ParseError::User {
+                                error: ParsingError::InvalidStructRepr {
+                                    span: meta.span(),
+                                    message: "expected a single element in this meta list, e.g. 'align(16)'".to_string(),
+                                }
+                            });
+                        }
+                        match &meta.items[0] {
+                            MetaExpr::Int(align) => {
+                                let raw_align = align.as_int();
+                                if raw_align < 1 || raw_align > (u16::MAX as u64) {
+                                    return Err(ParseError::User {
+                                        error: ParsingError::InvalidStructRepr {
+                                            span: align.span(),
+                                            message: "invalid alignment, expected a value in the range 1..=65535".to_string(),
+                                        }
+                                    });
+                                }
+                                Span::new(meta.span(), TypeRepr::align(raw_align as u16))
+                            }
+                            expr => {
+                                return Err(ParseError::User {
+                                    error: ParsingError::InvalidStructRepr {
+                                        span: expr.span(),
+                                        message: "invalid alignment expresssion, expected an integer".to_string(),
+                                    }
+                                });
+                            }
+                        }
+                    },
+                    _ => return Err(ParseError::User {
+                        error: ParsingError::InvalidStructAnnotation {
+                            span: meta.span(),
+                        }
+                    }),
+                }
+                Attribute::KeyValue(meta) => {
+                    return Err(ParseError::User {
+                        error: ParsingError::InvalidStructAnnotation {
+                            span: meta.span(),
+                        }
+                    });
+                }
+            },
+        };
+        Ok(StructType {
+            span,
+            repr,
+            fields,
+        })
+    },
+}
+
+StructField: StructField = {
+    <l:@L> <name:BareIdent> ":" <ty:TypeExpr> <r:@R> => {
+        let span = span!(source_id, l, r);
+        StructField {
+            span,
+            name,
+            ty,
+        }
+    }
+}
+
+FunctionType: FunctionType = {
+    <l:@L> "(" <args:CommaDelimitedAllowTrailing<FunctionParamType>> ")" <results:("->" <FunctionResultType>)?> <r:@R> => {
+        let span = span!(source_id, l, r);
+        FunctionType::new(types::CallConv::Fast, args, results.unwrap_or_default()).with_span(span)
+    }
+}
+
+FunctionParamType: TypeExpr = {
+    <l:@L> <_param:bare_ident> ":" <t:TypeExpr> <r:@R> => t,
+}
+
+FunctionResultType: Vec<TypeExpr> = {
+    "(" <CommaDelimitedAllowTrailing<TypeExpr>> ")" => <>,
+    <TypeExpr> => vec![<>],
+}
+
+#[inline]
+PrimitiveType: Type = {
+    IntType,
+    "word" => Type::Array(Arc::clone(felt_type)),
+}
+
+#[inline]
+IntType: Type = {
+    "i1" => Type::I1,
+    "i8" => Type::I8,
+    "i16" => Type::I16,
+    "i32" => Type::I32,
+    "i64" => Type::I64,
+    "i128" => Type::I128,
+    "u8" => Type::U8,
+    "u16" => Type::U16,
+    "u32" => Type::U32,
+    "u64" => Type::U64,
+    "u128" => Type::U128,
+    "felt" => Type::Felt,
+}
+
+#[inline]
+TypeName: Ident = {
+    <l:@L> <name:bare_ident> <r:@R> =>? {
+        let name = interned.get(name).cloned().unwrap_or_else(|| {
+            let name = Arc::<str>::from(name.to_string().into_boxed_str());
+            interned.insert(name.clone());
+            name
+        });
+        let span = span!(source_id, l, r);
+        Ident::validate(&name)
+            .map_err(|error| ParseError::User {
+                error: ParsingError::InvalidIdentifier { error, span },
+            })?;
+        Ok(Ident::from_raw_parts(Span::new(span, name)))
+    },
+}
+
+Import: Form = {
+    <l:@L> "use" "."? <path:MaybeQualifiedPath> <alias:("->" <BareIdent>)?> <r:@R> =>? {
+        let span = span!(source_id, l, r);
+        if path.num_components() == 1 {
+            return Err(ParseError::User {
+                error: ParsingError::UnqualifiedImport { span },
+            });
+        }
+        let name = alias.unwrap_or(path.last_component().to_ident());
+        Ok(Form::Import(Import { span, name, path: path.into_inner(), uses: 0 }))
+    }
+}
+
+Const: Form = {
+    <l:@L> "const" "."? <name:ConstantName> "=" <value:ConstantExpr> <r:@R> => {
+        Form::Constant(Constant::new(
+            span!(source_id, l, r),
+            name,
+            value,
+        ))
+    }
+}
+
+MaybeAdvMapKey: Option<Span<WordValue>> = {
+    <l:@L> "(" <value:WordValue> ")" <r:@R> => {
+        Some(Span::new(span!(source_id, l, r), value))
+    },
+    => None
+}
+
+AdvMap: Form = {
+    <l:@L> "adv_map" "."? <name:ConstantName> <key:MaybeAdvMapKey> "=" "[" <value:CommaDelimited<Felt>> "]" <r:@R> => {
+        Form::AdviceMapEntry(AdviceMapEntry::new(
+            span!(source_id, l, r),
+            name,
+            key,
+            value,
+        ))
+    }
+}
+
+Begin: Form = {
+    <l:@L> "begin" <body:Ops> "end" <r:@R> => {
+        Form::Begin(Block::new(span!(source_id, l, r), body))
+    }
+}
+
+Proc: Form = {
+    <annotations:Annotation*> <mut proc:ProcedureDef> =>? {
+        use alloc::collections::btree_map::Entry;
+        let attributes = proc.attributes_mut();
+        let mut cc = None;
+        for attr in annotations {
+            match attr {
+                Attribute::KeyValue(kv) => {
+                    match attributes.entry(kv.id()) {
+                        AttributeSetEntry::Vacant(entry) => {
+                            entry.insert(Attribute::KeyValue(kv));
+                        }
+                        AttributeSetEntry::Occupied(mut entry) => {
+                            let value = entry.get_mut();
+                            match value {
+                                Attribute::KeyValue(existing_kvs) => {
+                                    for (k, v) in kv.into_iter() {
+                                        let span = k.span();
+                                        match existing_kvs.entry(k) {
+                                            Entry::Vacant(entry) => {
+                                                entry.insert(v);
+                                            }
+                                            Entry::Occupied(entry) => {
+                                                let prev = entry.get();
+                                                return Err(ParseError::User {
+                                                    error: ParsingError::AttributeKeyValueConflict { span, prev: prev.span() },
+                                                });
+                                            }
+                                        }
+                                    }
+                                }
+                                other => {
+                                    return Err(ParseError::User {
+                                        error: ParsingError::AttributeConflict { span: kv.span(), prev: other.span() },
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+                Attribute::List(list) if list.name() == "callconv" && list.len() == 1 => {
+                    match attributes.entry(list.id()) {
+                        AttributeSetEntry::Vacant(entry) => {
+                            let valid_cc = match &list.as_slice()[0] {
+                                MetaExpr::Ident(cc) => match cc.as_str() {
+                                    "fast" => Some(types::CallConv::Fast),
+                                    "C" => Some(types::CallConv::SystemV),
+                                    "wasm" => Some(types::CallConv::Wasm),
+                                    "canon-lift" => Some(types::CallConv::CanonLift),
+                                    "canon-lower" => Some(types::CallConv::CanonLower),
+                                    _ => None,
+                                },
+                                MetaExpr::String(cc) => match cc.as_str() {
+                                    "fast" => Some(types::CallConv::Fast),
+                                    "C" => Some(types::CallConv::SystemV),
+                                    "wasm" => Some(types::CallConv::Wasm),
+                                    "canon-lift" => Some(types::CallConv::CanonLift),
+                                    "canon-lower" => Some(types::CallConv::CanonLower),
+                                    _ => None,
+                                },
+                                _ => None,
+                            };
+                            if valid_cc.is_some() {
+                                cc = valid_cc;
+                                entry.insert(Attribute::List(list));
+                            } else {
+                                return Err(ParseError::User {
+                                    error: ParsingError::UnrecognizedCallConv { span: list.span() },
+                                });
+                            }
+                        }
+                        AttributeSetEntry::Occupied(entry) => {
+                            let prev_attr = entry.get();
+                            return Err(ParseError::User {
+                                error: ParsingError::AttributeConflict { span: list.span(), prev: prev_attr.span() },
+                            });
+                        }
+                    }
+                }
+                attr => {
+                    match attributes.entry(attr.id()) {
+                        AttributeSetEntry::Vacant(entry) => {
+                            entry.insert(attr);
+                        }
+                        AttributeSetEntry::Occupied(entry) => {
+                            let prev_attr = entry.get();
+                            return Err(ParseError::User {
+                                error: ParsingError::AttributeConflict { span: attr.span(), prev: prev_attr.span() },
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some(cc) = cc {
+            // Strip the 'callconv' attribute now that it is no longer needed
+            attributes.remove("callconv");
+            if let Some(signature) = proc.signature_mut() {
+                signature.cc = cc;
+            }
+        }
+
+        Ok(Form::Procedure(Export::Procedure(proc)))
+    },
+    AliasDef => Form::Procedure(Export::Alias(<>)),
+}
+
+#[inline]
+ProcedureDef: Procedure = {
+    <l:@L> <visibility:Visibility> "."? <name:ProcedureName> <num_locals:MaybeParam<U16>> <ty:FunctionType?> <body:Block> "end" <r:@R> =>? {
+        let num_locals = num_locals.unwrap_or(0);
+        let procedure = Procedure::new(
+            span!(source_id, l, r),
+            visibility,
+            name,
+            num_locals,
+            body
+        );
+        Ok(if let Some(ty) = ty {
+            procedure.with_signature(ty)
+        } else {
+            procedure
+        })
+    },
+}
+
+#[inline]
+AliasDef: ProcedureAlias = {
+    <l:@L> <_pub:PubVisibility> "."? <name:MaybeQualifiedProcedurePath> <alias:("->" <ProcedureName>)?> <r:@R> =>? {
+        let span = span!(source_id, l, r);
+        let alias = match name {
+            InvocationTarget::ProcedureName(_) =>  return Err(ParseError::User {
+                error: ParsingError::UnqualifiedImport { span },
+            }),
+            InvocationTarget::MastRoot(digest) => {
+                if alias.is_none() {
+                    return Err(ParseError::User {
+                        error: ParsingError::UnnamedReexportOfMastRoot { span },
+                    });
+                }
+                ProcedureAlias::new(alias.unwrap(), AliasTarget::MastRoot(digest))
+            }
+            InvocationTarget::ProcedurePath { name, module } => {
+                let export_name = alias.unwrap_or_else(|| name.clone());
+                let module = match module.as_str() {
+                    LibraryNamespace::KERNEL_PATH => LibraryPath::new_from_components(LibraryNamespace::Kernel, []),
+                    LibraryNamespace::EXEC_PATH => LibraryPath::new_from_components(LibraryNamespace::Exec, []),
+                    LibraryNamespace::ANON_PATH => LibraryPath::new_from_components(LibraryNamespace::Anon, []),
+                    _ => LibraryPath::new_from_components(LibraryNamespace::User(module.into_inner()), []),
+                };
+                let target = QualifiedProcedureName {
+                    span,
+                    module,
+                    name,
+                };
+                ProcedureAlias::new(export_name, AliasTarget::ProcedurePath(target))
+            }
+            InvocationTarget::AbsoluteProcedurePath { name, path } => {
+                let export_name = alias.unwrap_or_else(|| name.clone());
+                let target = QualifiedProcedureName {
+                    span,
+                    module: path,
+                    name,
+                };
+                ProcedureAlias::new(export_name, AliasTarget::AbsoluteProcedurePath(target))
+            }
+        };
+        Ok(alias)
+    }
+}
+
+#[inline]
+Visibility: Visibility = {
+    "proc" => Visibility::Private,
+    "export" => Visibility::Public,
+    "pub" "."? "proc" => Visibility::Public,
+}
+
+#[inline]
+PubVisibility: Visibility = {
+    "export" => Visibility::Public,
+    "pub" "."? "proc" => Visibility::Public,
+}
+
+// ANNOTATIONS
+// ================================================================================================
+
+Annotation: Attribute = {
+    <l:@L> "@" <attr:Attribute> <r:@R> => attr.with_span(span!(source_id, l, r)),
+}
+
+#[inline]
+Attribute: Attribute = {
+    <l:@L> <name:BareIdent> "(" <items:CommaDelimited<MetaExpr>> ")" <r:@R>  => {
+        Attribute::List(MetaList { span: span!(source_id, l, r), name, items })
+    },
+
+    <l:@L> <name:BareIdent> "(" <items:CommaDelimited<MetaKeyValue>> ")" <r:@R> =>? {
+        use alloc::collections::btree_map::Entry;
+
+        let mut map = BTreeMap::<Ident, MetaExpr>::default();
+        for meta_kv in items {
+            let (span, (k, v)) = meta_kv.into_parts();
+            match map.entry(k) {
+                Entry::Occupied(entry) => {
+                    let prev = entry.key().span();
+                    return Err(ParseError::User {
+                        error: ParsingError::AttributeKeyValueConflict { span, prev },
+                    });
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(v);
+                }
+            }
+        }
+        Ok(Attribute::KeyValue(MetaKeyValue { span: span!(source_id, l, r), name, items: map }))
+    },
+
+    <name:BareIdent> => Attribute::Marker(<>),
+}
+
+MetaKeyValue: Span<(Ident, MetaExpr)> = {
+    <l:@L> <key:BareIdent> "=" <value:MetaExpr> <r:@R> => {
+        let span = span!(source_id, l, r);
+        Span::new(span, (key, value))
+    }
+}
+
+MetaExpr: MetaExpr = {
+    BareIdent => MetaExpr::Ident(<>),
+    QuotedString => MetaExpr::String(<>),
+    <l:@L> <value:IntValue> <r:@R> => MetaExpr::Int(Span::new(span!(source_id, l, r), value)),
+    <l:@L> <value:WordValue> <r:@R> => MetaExpr::Word(Span::new(span!(source_id, l, r), value)),
+}
+
+#[inline]
+QuotedString: Ident = {
+    <l:@L> <value:string> <r:@R> => {
+        let value = interned.get(value).cloned().unwrap_or_else(|| {
+            let value = Arc::<str>::from(value.to_string().into_boxed_str());
+            interned.insert(value.clone());
+            value
+        });
+        let span = span!(source_id, l, r);
+        Ident::from_raw_parts(Span::new(span, value))
+    }
+}
+
+// CODE BLOCKS
+// ================================================================================================
+
+Block: Block = {
+    <l:@L> <body:Ops> <r:@R> => Block::new(span!(source_id, l, r), body),
+}
+
+#[inline]
+Ops: Vec<Op> = {
+    <l:@L> <ops:Op+> <r:@R> =>? {
+        let ops = ops.into_iter().flat_map(|ops| ops.into_iter()).collect::<Vec<_>>();
+        if ops.len() > u16::MAX as usize {
+            Err(ParseError::User { error: ParsingError::CodeBlockTooBig { span: span!(source_id, l, r) } })
+        } else {
+            Ok(ops)
+        }
+    },
+}
+
+Op: SmallOpsVec = {
+    <IfElse> => smallvec![<>],
+    <While> => smallvec![<>],
+    <Repeat> => smallvec![<>],
+    Instruction,
+}
+
+IfElse: Op = {
+    // Handles the edge case of a code generator emitting an empty "then" block
+    <l:@L> "if" "." <cond:Condition> "else" <else_blk:Block> "end" <r:@R> => {
+        let span = span!(source_id, l, r);
+        let then_blk = Block::new(span, vec![Op::Inst(Span::new(span, Instruction::Nop))]);
+        // If false-conditioned, swap the blocks
+        if cond {
+            Op::If { span, then_blk, else_blk }
+        } else {
+            Op::If { span, then_blk: else_blk, else_blk: then_blk }
+        }
+    },
+
+    <l:@L> "if" "." <cond:Condition> <then_blk:Block> "else" <else_blk:Block?> "end" <r:@R> => {
+        let span = span!(source_id, l, r);
+        let else_blk = else_blk.unwrap_or_else(|| Block::new(span, vec![Op::Inst(Span::new(span, Instruction::Nop))]));
+        // If false-conditioned, swap the blocks
+        if cond {
+            Op::If { span, then_blk, else_blk }
+        } else {
+            Op::If { span, then_blk: else_blk, else_blk: then_blk }
+        }
+    },
+
+    <l:@L> "if" "." <cond:Condition> <then_blk:Block> "end" <r:@R> => {
+        let span = span!(source_id, l, r);
+        let else_blk = Block::new(span, vec![Op::Inst(Span::new(span, Instruction::Nop))]);
+        // If false-conditioned, swap the blocks
+        if cond {
+            Op::If { span, then_blk, else_blk }
+        } else {
+            Op::If { span, then_blk: else_blk, else_blk: then_blk }
+        }
+    }
+}
+
+#[inline]
+Condition: bool = {
+    "true" => true,
+    "false" => false,
+}
+
+While: Op = {
+    <l:@L> "while" "." "true" <body:Block> "end" <r:@R> => {
+        Op::While { span: span!(source_id, l, r), body }
+    },
+}
+
+Repeat: Op = {
+    <l:@L> "repeat" "." <count:uint> <body:Block> "end" <r:@R> =>? {
+        let span = span!(source_id, l, r);
+        u32::try_from(count)
+            .map_err(|error| ParseError::User { error: ParsingError::ImmediateOutOfRange { span, range: 1..(u32::MAX as usize) } })
+            .and_then(|count| {
+                NonZeroU32::try_from(count)
+                    .map(|count| Op::Repeat { span, count: count.get(), body })
+                    .map_err(|error| ParseError::User { error: ParsingError::ImmediateOutOfRange { span, range: 1..(u32::MAX as usize) } })
+            })
+    }
+}
+
+#[inline]
+Instruction: SmallOpsVec = {
+    <l:@L> <inst:Inst> <r:@R> => smallvec![Op::Inst(Span::new(span!(source_id, l, r), inst))],
+    // For instructions which may fold to zero or multiple instructions;
+    // or for instruction macros, which expand to multiple instructions,
+    // this is the rule under which those instructions should be handled
+    MacroInst,
+}
+
+// INSTRUCTIONS
+// ================================================================================================
+
+MacroInst: SmallOpsVec = {
+    // This rule is here because we constant-fold some operations
+    FoldableInstWithFeltImmediate,
+    FoldableInstWithU32Immediate,
+    Push,
+}
+
+#[inline]
+Inst: Instruction = {
+    SystemEvent,
+    Call,
+    Debug,
+    InstWithBitSizeImmediate,
+    InstWithErrorCode,
+    InstWithFeltImmediate,
+    InstWithLocalIndex,
+    InstWithStackIndex,
+    InstWithU32Immediate,
+    ProcRef,
+    "adv_pipe" => Instruction::AdvPipe,
+    "adv_loadw" => Instruction::AdvLoadW,
+    "and" => Instruction::And,
+    "eval_circuit" => Instruction::EvalCircuit,
+    "caller" => Instruction::Caller,
+    "cdrop" => Instruction::CDrop,
+    "cdropw" => Instruction::CDropW,
+    "clk" => Instruction::Clk,
+    "cswap" => Instruction::CSwap,
+    "cswapw" => Instruction::CSwapW,
+    "drop" => Instruction::Drop,
+    "dropw" => Instruction::DropW,
+    "dyncall" => Instruction::DynCall,
+    "dynexec" => Instruction::DynExec,
+    "eqw" => Instruction::Eqw,
+    "ext2add" => Instruction::Ext2Add,
+    "ext2div" => Instruction::Ext2Div,
+    "ext2inv" => Instruction::Ext2Inv,
+    "ext2mul" => Instruction::Ext2Mul,
+    "ext2neg" => Instruction::Ext2Neg,
+    "ext2sub" => Instruction::Ext2Sub,
+    "fri_ext2fold4" => Instruction::FriExt2Fold4,
+    "hash" => Instruction::Hash,
+    "hperm" => Instruction::HPerm,
+    "hmerge" => Instruction::HMerge,
+    "ilog2" => Instruction::ILog2,
+    "inv" => Instruction::Inv,
+    "is_odd" => Instruction::IsOdd,
+    "mem_stream" => Instruction::MemStream,
+    "mtree_get" => Instruction::MTreeGet,
+    "mtree_merge" => Instruction::MTreeMerge,
+    "mtree_set" => Instruction::MTreeSet,
+    "neg" => Instruction::Neg,
+    "not" => Instruction::Not,
+    "nop" => Instruction::Nop,
+    "or" => Instruction::Or,
+    "padw" => Instruction::PadW,
+    "pow2" => Instruction::Pow2,
+    "horner_eval_base" => Instruction::HornerBase,
+    "horner_eval_ext" => Instruction::HornerExt,
+    "reversew" => Instruction::Reversew,
+    "reversedw" => Instruction::Reversedw,
+    "sdepth" => Instruction::Sdepth,
+    "swapdw" => Instruction::SwapDw,
+    "u32cast" => Instruction::U32Cast,
+    "u32overflowing_add3" => Instruction::U32OverflowingAdd3,
+    "u32overflowing_madd" => Instruction::U32OverflowingMadd,
+    "u32popcnt" => Instruction::U32Popcnt,
+    "u32clz" => Instruction::U32Clz,
+    "u32ctz" => Instruction::U32Ctz,
+    "u32clo" => Instruction::U32Clo,
+    "u32cto" => Instruction::U32Cto,
+    "u32split" => Instruction::U32Split,
+    "u32test" => Instruction::U32Test,
+    "u32testw" => Instruction::U32TestW,
+    "u32wrapping_add3" => Instruction::U32WrappingAdd3,
+    "u32wrapping_madd" => Instruction::U32WrappingMadd,
+    "xor" => Instruction::Xor,
+}
+
+#[inline]
+SystemEvent: Instruction = {
+    "adv" "." "insert_hdword" => Instruction::SysEvent(SystemEventNode::InsertHdword),
+    "adv" "." "insert_hdword_d" => Instruction::SysEvent(SystemEventNode::InsertHdwordWithDomain),
+    "adv" "." "insert_hqword" => Instruction::SysEvent(SystemEventNode::InsertHqword),
+    "adv" "." "insert_hperm" => Instruction::SysEvent(SystemEventNode::InsertHperm),
+    "adv" "." "insert_mem" => Instruction::SysEvent(SystemEventNode::InsertMem),
+    "adv" "." "push_mapval" => Instruction::SysEvent(SystemEventNode::PushMapVal),
+    "adv" "." "push_mapvaln" => Instruction::SysEvent(SystemEventNode::PushMapValN),
+    "adv" "." "has_mapkey" => Instruction::SysEvent(SystemEventNode::HasMapKey),
+    "adv" "." "push_mtnode" => Instruction::SysEvent(SystemEventNode::PushMtNode),
+}
+
+#[inline]
+InstWithErrorCode: Instruction = {
+    "assert" => Instruction::Assert,
+    "assert" "." "err" "=" <value:ImmError> => Instruction::AssertWithError(value),
+    "assertz" => Instruction::Assertz,
+    "assertz" "." "err" "=" <value:ImmError> => Instruction::AssertzWithError(value),
+    "assert_eq" => Instruction::AssertEq,
+    "assert_eq" "." "err" "=" <value:ImmError> => Instruction::AssertEqWithError(value),
+    "assert_eqw" => Instruction::AssertEqw,
+    "assert_eqw" "." "err" "=" <value:ImmError> => Instruction::AssertEqwWithError(value),
+    "u32assert" => Instruction::U32Assert,
+    "u32assert" "." "err" "=" <value:ImmError> => Instruction::U32AssertWithError(value),
+    "u32assert2" => Instruction::U32Assert2,
+    "u32assert2" "." "err" "=" <value:ImmError> => Instruction::U32Assert2WithError(value),
+    "u32assertw" => Instruction::U32AssertW,
+    "u32assertw" "." "err" "=" <value:ImmError> => Instruction::U32AssertWWithError(value),
+    "mtree_verify" => Instruction::MTreeVerify,
+    "mtree_verify" "." "err" "=" <value:ImmError> => Instruction::MTreeVerifyWithError(value),
+}
+
+#[inline]
+ImmError: Immediate<Arc<str>> = {
+    <l:@L> <t:string> <r:@R> => {
+        let name = Arc::<str>::from(t.to_string().into_boxed_str());
+        let id = Span::new(span!(source_id, l, r), name);
+        Immediate::Value(id)
+    },
+    <ConstantName> => Immediate::Constant(<>),
+}
+
+
+Call: Instruction = {
+    "exec" "." <callee:InvocationTarget> => Instruction::Exec(callee),
+    "call" "." <callee:InvocationTarget> => Instruction::Call(callee),
+    "syscall" "." <callee:InvocationTarget> => Instruction::SysCall(callee),
+}
+
+#[inline]
+Debug: Instruction = {
+    "breakpoint" => Instruction::Breakpoint,
+    "debug" "." "stack" <n:MaybeImm<U8>> => {
+        match n {
+            Some(n) => Instruction::Debug(DebugOptions::StackTop(n.map(|spanned| spanned.into_inner()))),
+            None => Instruction::Debug(DebugOptions::StackAll),
+        }
+    },
+    "debug" "." "mem" <n:Imm<U32>> <m:Imm<U32>> => Instruction::Debug(DebugOptions::MemInterval(n, m)),
+    "debug" "." "mem" <n:MaybeImm<U32>> => {
+        match n {
+            Some(n) => Instruction::Debug(DebugOptions::MemInterval(n.clone(), n)),
+            None => Instruction::Debug(DebugOptions::MemAll),
+        }
+    },
+    "debug" "." "local" <n:Imm<U16>> <m:Imm<U16>> => Instruction::Debug(DebugOptions::LocalInterval(n, m)),
+    "debug" "." "local" <n:MaybeImm<U16>> => {
+        match n {
+            Some(n) => Instruction::Debug(DebugOptions::LocalRangeFrom(n)),
+            None => Instruction::Debug(DebugOptions::LocalAll),
+        }
+    },
+    "debug" "." "adv_stack" <n:MaybeImm<U16>> => {
+        match n {
+            Some(n) => Instruction::Debug(DebugOptions::AdvStackTop(n)),
+            None => // length 0 means print the whole stack
+            Instruction::Debug(DebugOptions::AdvStackTop(0.into())),
+        }
+    },
+    "emit" => Instruction::Emit,
+    // emit.EVENT_CONST  where EVENT_CONST is defined via const.EVENT_CONST=event("...")
+    "emit" "." <name:ConstantName> => Instruction::EmitImm(Immediate::Constant(name)),
+    // emit.event("...") inline hashing
+    <l:@L> "emit" "." "event" "(" <s:string> ")" <r:@R> => {
+        let event_id = miden_core::EventId::from_name(s).as_felt();
+        Instruction::EmitImm(Immediate::Value(Span::new(span!(source_id, l, r), event_id)))
+    },
+    "trace" <id:Imm<U32>> => Instruction::Trace(id),
+}
+
+#[inline]
+ProcRef: Instruction = {
+    "procref" "." <l:@L> <target:InvocationTarget> <r:@R> => {
+        Instruction::ProcRef(target)
+    }
+}
+
+#[inline]
+FoldableInstWithFeltImmediate: SmallOpsVec = {
+    <l:@L> "eq" <imm:MaybeImm<Felt>> <r:@R> => {
+        let span = span!(source_id, l, r);
+        match imm {
+            Some(imm) => smallvec![Op::Inst(Span::new(span, Instruction::EqImm(imm)))],
+            None => smallvec![Op::Inst(Span::new(span, Instruction::Eq))],
+        }
+    },
+    <l:@L> "neq" <imm:MaybeImm<Felt>> <r:@R> => {
+        let span = span!(source_id, l, r);
+        match imm {
+            Some(imm) => smallvec![Op::Inst(Span::new(span, Instruction::NeqImm(imm)))],
+            None => smallvec![Op::Inst(Span::new(span, Instruction::Neq))],
+        }
+    },
+    <l:@L> "lt" <imm:MaybeImm<IntValue>> <r:@R> => {
+        let span = span!(source_id, l, r);
+        match imm {
+            Some(imm) => {
+                smallvec![
+                    Op::Inst(Span::new(span, Instruction::Push(imm.map(PushValue::Int)))),
+                    Op::Inst(Span::new(span, Instruction::Lt)),
+                ]
+            }
+            None => smallvec![Op::Inst(Span::new(span, Instruction::Lt))],
+        }
+    },
+    <l:@L> "lte" <imm:MaybeImm<IntValue>> <r:@R> => {
+        let span = span!(source_id, l, r);
+        match imm {
+            Some(imm) => {
+                smallvec![
+                    Op::Inst(Span::new(span, Instruction::Push(imm.map(PushValue::Int)))),
+                    Op::Inst(Span::new(span, Instruction::Lte)),
+                ]
+            }
+            None => smallvec![Op::Inst(Span::new(span, Instruction::Lte))],
+        }
+    },
+    <l:@L> "gt" <imm:MaybeImm<IntValue>> <r:@R> => {
+        let span = span!(source_id, l, r);
+        match imm {
+            Some(imm) => {
+                smallvec![
+                    Op::Inst(Span::new(span, Instruction::Push(imm.map(PushValue::Int)))),
+                    Op::Inst(Span::new(span, Instruction::Gt)),
+                ]
+            }
+            None => smallvec![Op::Inst(Span::new(span, Instruction::Gt))],
+        }
+    },
+    <l:@L> "gte" <imm:MaybeImm<IntValue>> <r:@R> => {
+        let span = span!(source_id, l, r);
+        match imm {
+            Some(imm) => {
+                smallvec![
+                    Op::Inst(Span::new(span, Instruction::Push(imm.map(PushValue::Int)))),
+                    Op::Inst(Span::new(span, Instruction::Gte)),
+                ]
+            }
+            None => smallvec![Op::Inst(Span::new(span, Instruction::Gte))],
+        }
+    },
+    <l:@L> "add" <imm:MaybeImm<Felt>> <r:@R> => {
+        let span = span!(source_id, l, r);
+        match imm {
+            Some(imm) if imm == Felt::ZERO => smallvec![],
+            Some(imm) if imm == Felt::ONE => smallvec![Op::Inst(Span::new(span, Instruction::Incr))],
+            Some(imm) => smallvec![Op::Inst(Span::new(span, Instruction::AddImm(imm)))],
+            None => smallvec![Op::Inst(Span::new(span, Instruction::Add))],
+        }
+    },
+    <l:@L> "sub" <imm:MaybeImm<Felt>> <r:@R> => {
+        let span = span!(source_id, l, r);
+        match imm {
+            Some(imm) if imm == Felt::ZERO => smallvec![],
+            Some(imm) => smallvec![Op::Inst(Span::new(span, Instruction::SubImm(imm)))],
+            None => smallvec![Op::Inst(Span::new(span, Instruction::Sub))],
+        }
+    },
+    <l:@L> "mul" <imm:MaybeImm<Felt>> <r:@R> => {
+        let span = span!(source_id, l, r);
+        match imm {
+            Some(imm) if imm == Felt::ZERO => smallvec![Op::Inst(Span::new(span, Instruction::Drop)), Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U8(0).into())))))],
+            Some(imm) if imm == Felt::ONE => smallvec![],
+            Some(imm) => smallvec![Op::Inst(Span::new(span, Instruction::MulImm(imm)))],
+            None => smallvec![Op::Inst(Span::new(span, Instruction::Mul))],
+        }
+    },
+    <l:@L> "div" <imm:MaybeImm<Felt>> <r:@R> =>? {
+        let span = span!(source_id, l, r);
+        match imm {
+            Some(imm) if imm == Felt::ZERO => Err(ParseError::User { error: ParsingError::DivisionByZero { span: span!(source_id, l, r) } }),
+            Some(imm) if imm == Felt::ONE => Ok(smallvec![]),
+            Some(imm) => Ok(smallvec![Op::Inst(Span::new(span, Instruction::DivImm(imm)))]),
+            None => Ok(smallvec![Op::Inst(Span::new(span, Instruction::Div))]),
+        }
+    }
+}
+
+#[inline]
+FoldableInstWithU32Immediate: SmallOpsVec = {
+    <l:@L> "u32div" <imm:MaybeImm<U32>> <r:@R> =>? {
+        let span = span!(source_id, l, r);
+        match imm {
+            Some(imm) if imm == 0 => Err(ParseError::User { error: ParsingError::DivisionByZero { span: span!(source_id, l, r) } }),
+            Some(imm) if imm == 1 => Ok(smallvec![]),
+            Some(imm) => Ok(smallvec![Op::Inst(Span::new(span, Instruction::U32DivImm(imm)))]),
+            None => Ok(smallvec![Op::Inst(Span::new(span, Instruction::U32Div))]),
+        }
+    },
+    <l:@L> "u32divmod" <imm:MaybeImm<U32>> <r:@R> =>? {
+        let span = span!(source_id, l, r);
+        match imm {
+            Some(imm) if imm == 0 => Err(ParseError::User { error: ParsingError::DivisionByZero { span: span!(source_id, l, r) } }),
+            Some(imm) => Ok(smallvec![Op::Inst(Span::new(span, Instruction::U32DivModImm(imm)))]),
+            None => Ok(smallvec![Op::Inst(Span::new(span, Instruction::U32DivMod))]),
+        }
+    },
+    <l:@L> "u32mod" <imm:MaybeImm<U32>> <r:@R> =>? {
+        let span = span!(source_id, l, r);
+        match imm {
+            Some(imm) if imm == 0 => Err(ParseError::User { error: ParsingError::DivisionByZero { span: span!(source_id, l, r) } }),
+            Some(imm) => Ok(smallvec![Op::Inst(Span::new(span, Instruction::U32ModImm(imm)))]),
+            None => Ok(smallvec![Op::Inst(Span::new(span, Instruction::U32Mod))]),
+        }
+    },
+    <l:@L> "u32and" <imm:MaybeImm<U32>> <r:@R> => {
+        let span = span!(source_id, l, r);
+        match imm {
+            Some(imm) if imm == 0 => smallvec![Op::Inst(Span::new(span, Instruction::Drop)), Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U8(0).into())))))],
+            Some(imm) => {
+                match imm {
+                    Immediate::Constant(name) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Constant(name)))), Op::Inst(Span::new(span, Instruction::U32And))],
+                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U32(value.into_inner()).into()))))), Op::Inst(Span::new(span, Instruction::U32And))],
+                }
+            }
+            None => smallvec![Op::Inst(Span::new(span, Instruction::U32And))],
+        }
+    },
+    <l:@L> "u32or" <imm:MaybeImm<U32>> <r:@R> => {
+        let span = span!(source_id, l, r);
+        match imm {
+            Some(imm) if imm == 0 => smallvec![],
+            Some(imm) => {
+                match imm {
+                    Immediate::Constant(name) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Constant(name)))), Op::Inst(Span::new(span, Instruction::U32Or))],
+                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U32(value.into_inner()).into()))))), Op::Inst(Span::new(span, Instruction::U32Or))],
+                }
+            }
+            None => smallvec![Op::Inst(Span::new(span, Instruction::U32Or))],
+        }
+    },
+    <l:@L> "u32xor" <imm:MaybeImm<U32>> <r:@R> => {
+        let span = span!(source_id, l, r);
+        match imm {
+            Some(imm) if imm == 0 => smallvec![],
+            Some(imm) => {
+                match imm {
+                    Immediate::Constant(name) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Constant(name)))), Op::Inst(Span::new(span, Instruction::U32Xor))],
+                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U32(value.into_inner()).into()))))), Op::Inst(Span::new(span, Instruction::U32Xor))],
+                }
+            }
+            None => smallvec![Op::Inst(Span::new(span, Instruction::U32Xor))],
+        }
+    },
+    <l:@L> "u32not" <imm:MaybeImm<U32>> <r:@R> => {
+        let span = span!(source_id, l, r);
+        match imm {
+            Some(imm) => {
+                match imm {
+                    Immediate::Constant(name) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Constant(name)))), Op::Inst(Span::new(span, Instruction::U32Not))],
+                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U32(value.into_inner()).into()))))), Op::Inst(Span::new(span, Instruction::U32Not))],
+                }
+            }
+            None => smallvec![Op::Inst(Span::new(span, Instruction::U32Not))],
+        }
+    },
+    <l:@L> "u32wrapping_add" <imm:MaybeImm<U32>> <r:@R> => {
+        let span = span!(source_id, l, r);
+        match imm {
+            Some(imm) if imm == 0 => smallvec![],
+            Some(imm) => smallvec![Op::Inst(Span::new(span, Instruction::U32WrappingAddImm(imm)))],
+            None => smallvec![Op::Inst(Span::new(span, Instruction::U32WrappingAdd))],
+        }
+    },
+    <l:@L> "u32wrapping_sub" <imm:MaybeImm<U32>> <r:@R> => {
+        let span = span!(source_id, l, r);
+        match imm {
+            Some(imm) if imm == 0 => smallvec![],
+            Some(imm) => smallvec![Op::Inst(Span::new(span, Instruction::U32WrappingSubImm(imm)))],
+            None => smallvec![Op::Inst(Span::new(span, Instruction::U32WrappingSub))],
+        }
+    },
+    <l:@L> "u32wrapping_mul" <imm:MaybeImm<U32>> <r:@R> => {
+        let span = span!(source_id, l, r);
+        match imm {
+            Some(imm) if imm == 0 => smallvec![Op::Inst(Span::new(span, Instruction::Drop)), Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U8(0).into())))))],
+            Some(imm) if imm == 1 => smallvec![],
+            Some(imm) => smallvec![Op::Inst(Span::new(span, Instruction::U32WrappingMulImm(imm)))],
+            None => smallvec![Op::Inst(Span::new(span, Instruction::U32WrappingMul))],
+        }
+    },
+    <l:@L> "u32overflowing_add" <imm:MaybeImm<U32>> <r:@R> => {
+        let span = span!(source_id, l, r);
+        match imm {
+            Some(imm) => smallvec![Op::Inst(Span::new(span, Instruction::U32OverflowingAddImm(imm)))],
+            None => smallvec![Op::Inst(Span::new(span, Instruction::U32OverflowingAdd))],
+        }
+    },
+    <l:@L> "u32overflowing_sub" <imm:MaybeImm<U32>> <r:@R> => {
+        let span = span!(source_id, l, r);
+        match imm {
+            Some(imm) => smallvec![Op::Inst(Span::new(span, Instruction::U32OverflowingSubImm(imm)))],
+            None => smallvec![Op::Inst(Span::new(span, Instruction::U32OverflowingSub))],
+        }
+    },
+    <l:@L> "u32overflowing_mul" <imm:MaybeImm<U32>> <r:@R> => {
+        let span = span!(source_id, l, r);
+        match imm {
+            Some(imm) => smallvec![Op::Inst(Span::new(span, Instruction::U32OverflowingMulImm(imm)))],
+            None => smallvec![Op::Inst(Span::new(span, Instruction::U32OverflowingMul))],
+        }
+    },
+    <l:@L> "u32shl" <imm:MaybeImm<Shift32>> <r:@R> => {
+        let span = span!(source_id, l, r);
+        match imm {
+            Some(imm) if imm == 0 => smallvec![],
+            Some(imm) => smallvec![Op::Inst(Span::new(span, Instruction::U32ShlImm(imm)))],
+            None => smallvec![Op::Inst(Span::new(span, Instruction::U32Shl))],
+        }
+    },
+    <l:@L> "u32shr" <imm:MaybeImm<Shift32>> <r:@R> => {
+        let span = span!(source_id, l, r);
+        match imm {
+            Some(imm) if imm == 0 => smallvec![],
+            Some(imm) => smallvec![Op::Inst(Span::new(span, Instruction::U32ShrImm(imm)))],
+            None => smallvec![Op::Inst(Span::new(span, Instruction::U32Shr))],
+        }
+    },
+    <l:@L> "u32rotl" <imm:MaybeImm<Shift32>> <r:@R> => {
+        let span = span!(source_id, l, r);
+        match imm {
+            Some(imm) if imm == 0 => smallvec![],
+            Some(imm) => smallvec![Op::Inst(Span::new(span, Instruction::U32RotlImm(imm)))],
+            None => smallvec![Op::Inst(Span::new(span, Instruction::U32Rotl))],
+        }
+    },
+    <l:@L> "u32rotr" <imm:MaybeImm<Shift32>> <r:@R> => {
+        let span = span!(source_id, l, r);
+        match imm {
+            Some(imm) if imm == 0 => smallvec![],
+            Some(imm) => smallvec![Op::Inst(Span::new(span, Instruction::U32RotrImm(imm)))],
+            None => smallvec![Op::Inst(Span::new(span, Instruction::U32Rotr))],
+        }
+    },
+    <l:@L> "u32lt" <imm:MaybeImm<U32>> <r:@R> => {
+        let span = span!(source_id, l, r);
+        match imm {
+            Some(imm) => {
+                match imm {
+                    Immediate::Constant(name) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Constant(name)))), Op::Inst(Span::new(span, Instruction::U32Lt))],
+                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U32(value.into_inner()).into()))))), Op::Inst(Span::new(span, Instruction::U32Lt))],
+                }
+            }
+            None => smallvec![Op::Inst(Span::new(span, Instruction::U32Lt))],
+        }
+    },
+    <l:@L> "u32lte" <imm:MaybeImm<U32>> <r:@R> => {
+        let span = span!(source_id, l, r);
+        match imm {
+            Some(imm) => {
+                match imm {
+                    Immediate::Constant(name) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Constant(name)))), Op::Inst(Span::new(span, Instruction::U32Lte))],
+                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U32(value.into_inner()).into()))))), Op::Inst(Span::new(span, Instruction::U32Lte))],
+                }
+            }
+            None => smallvec![Op::Inst(Span::new(span, Instruction::U32Lte))],
+        }
+    },
+    <l:@L> "u32gt" <imm:MaybeImm<U32>> <r:@R> => {
+        let span = span!(source_id, l, r);
+        match imm {
+            Some(imm) => {
+                match imm {
+                    Immediate::Constant(name) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Constant(name)))), Op::Inst(Span::new(span, Instruction::U32Gt))],
+                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U32(value.into_inner()).into()))))), Op::Inst(Span::new(span, Instruction::U32Gt))],
+                }
+            }
+            None => smallvec![Op::Inst(Span::new(span, Instruction::U32Gt))],
+        }
+    },
+    <l:@L> "u32gte" <imm:MaybeImm<U32>> <r:@R> => {
+        let span = span!(source_id, l, r);
+        match imm {
+            Some(imm) => {
+                match imm {
+                    Immediate::Constant(name) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Constant(name)))), Op::Inst(Span::new(span, Instruction::U32Gte))],
+                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U32(value.into_inner()).into()))))), Op::Inst(Span::new(span, Instruction::U32Gte))],
+                }
+            }
+            None => smallvec![Op::Inst(Span::new(span, Instruction::U32Gte))],
+        }
+    },
+    <l:@L> "u32min" <imm:MaybeImm<U32>> <r:@R> => {
+        let span = span!(source_id, l, r);
+        match imm {
+            Some(imm) => {
+                match imm {
+                    Immediate::Constant(name) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Constant(name)))), Op::Inst(Span::new(span, Instruction::U32Min))],
+                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U32(value.into_inner()).into()))))), Op::Inst(Span::new(span, Instruction::U32Min))],
+                }
+            }
+            None => smallvec![Op::Inst(Span::new(span, Instruction::U32Min))],
+        }
+    },
+    <l:@L> "u32max" <imm:MaybeImm<U32>> <r:@R> => {
+        let span = span!(source_id, l, r);
+        match imm {
+            Some(imm) => {
+                match imm {
+                    Immediate::Constant(name) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Constant(name)))), Op::Inst(Span::new(span, Instruction::U32Max))],
+                    Immediate::Value(value) => smallvec![Op::Inst(Span::new(span, Instruction::Push(Immediate::Value(Span::new(span, IntValue::U32(value.into_inner()).into()))))), Op::Inst(Span::new(span, Instruction::U32Max))],
+                }
+            }
+            None => smallvec![Op::Inst(Span::new(span, Instruction::U32Max))],
+        }
+    },
+}
+
+#[inline]
+InstWithFeltImmediate: Instruction = {
+    "exp" <imm:MaybeImm<Felt>> => imm.map(Instruction::ExpImm).unwrap_or(Instruction::Exp),
+}
+
+#[inline]
+InstWithU32Immediate: Instruction = {
+    "mem_load" <imm:MaybeImm<U32>> => imm.map(Instruction::MemLoadImm).unwrap_or(Instruction::MemLoad),
+    "mem_loadw" <imm:MaybeImm<U32>> => imm.map(Instruction::MemLoadWImm).unwrap_or(Instruction::MemLoadW),
+    "mem_loadw_be" <imm:MaybeImm<U32>> => imm.map(Instruction::MemLoadWBeImm).unwrap_or(Instruction::MemLoadWBe),
+    "mem_loadw_le" <imm:MaybeImm<U32>> => imm.map(Instruction::MemLoadWLeImm).unwrap_or(Instruction::MemLoadWLe),
+    "mem_store" <imm:MaybeImm<U32>> => imm.map(Instruction::MemStoreImm).unwrap_or(Instruction::MemStore),
+    "mem_storew" <imm:MaybeImm<U32>> => imm.map(Instruction::MemStoreWImm).unwrap_or(Instruction::MemStoreW),
+    "mem_storew_be" <imm:MaybeImm<U32>> => imm.map(Instruction::MemStoreWBeImm).unwrap_or(Instruction::MemStoreWBe),
+    "mem_storew_le" <imm:MaybeImm<U32>> => imm.map(Instruction::MemStoreWLeImm).unwrap_or(Instruction::MemStoreWLe),
+}
+
+#[inline]
+InstWithLocalIndex: Instruction = {
+    "locaddr" <i:Imm<U16>> => Instruction::Locaddr(i),
+    "loc_load" <i:Imm<U16>> => Instruction::LocLoad(i),
+    "loc_loadw" <i:Imm<U16>> => Instruction::LocLoadW(i),
+    "loc_store" <i:Imm<U16>> => Instruction::LocStore(i),
+    "loc_storew" <i:Imm<U16>> => Instruction::LocStoreW(i)
+}
+
+#[inline]
+InstWithStackIndex: Instruction = {
+    "adv_push" "." <l:@L> <i:OneBasedStackIndex> <r:@R> => Instruction::AdvPush(Immediate::Value(Span::new(span!(source_id, l, r), i))),
+    "dup" <i:("." <U8>)?> =>? {
+        let (span, idx) = i.map(|s| s.into_parts()).unwrap_or((SourceSpan::default(), 0));
+        Ok(match idx {
+            0 => Instruction::Dup0,
+            1 => Instruction::Dup1,
+            2 => Instruction::Dup2,
+            3 => Instruction::Dup3,
+            4 => Instruction::Dup4,
+            5 => Instruction::Dup5,
+            6 => Instruction::Dup6,
+            7 => Instruction::Dup7,
+            8 => Instruction::Dup8,
+            9 => Instruction::Dup9,
+            10 => Instruction::Dup10,
+            11 => Instruction::Dup11,
+            12 => Instruction::Dup12,
+            13 => Instruction::Dup13,
+            14 => Instruction::Dup14,
+            15 => Instruction::Dup15,
+            _ => return Err(ParseError::User {
+                error: ParsingError::ImmediateOutOfRange { span, range: 0..16 },
+            }),
+        })
+    },
+    "dupw" <l:@L> <i:("." <U8>)?> <r:@R> =>? {
+        let (span, idx) = i.map(|s| s.into_parts()).unwrap_or((SourceSpan::default(), 0));
+        Ok(match idx {
+            0 => Instruction::DupW0,
+            1 => Instruction::DupW1,
+            2 => Instruction::DupW2,
+            3 => Instruction::DupW3,
+            _ => {
+                return Err(ParseError::User {
+                    error: ParsingError::ImmediateOutOfRange { span, range: 0..4 },
+                })
+            }
+        })
+    },
+    "movdn" <i:("." <U8>)> =>? Ok(match i.into_inner() {
+        2 => Instruction::MovDn2,
+        3 => Instruction::MovDn3,
+        4 => Instruction::MovDn4,
+        5 => Instruction::MovDn5,
+        6 => Instruction::MovDn6,
+        7 => Instruction::MovDn7,
+        8 => Instruction::MovDn8,
+        9 => Instruction::MovDn9,
+        10 => Instruction::MovDn10,
+        11 => Instruction::MovDn11,
+        12 => Instruction::MovDn12,
+        13 => Instruction::MovDn13,
+        14 => Instruction::MovDn14,
+        15 => Instruction::MovDn15,
+        _ => return Err(ParseError::User { error: ParsingError::ImmediateOutOfRange { span: i.span(), range: 2..16 }}),
+    }),
+    "movdnw" <i:("." <U8>)> =>? Ok(match i.into_inner() {
+        2 => Instruction::MovDnW2,
+        3 => Instruction::MovDnW3,
+        _ => return Err(ParseError::User { error: ParsingError::ImmediateOutOfRange { span: i.span(), range: 2..4 }}),
+    }),
+    "movup" <i:("." <U8>)> =>? Ok(match i.into_inner() {
+        2 => Instruction::MovUp2,
+        3 => Instruction::MovUp3,
+        4 => Instruction::MovUp4,
+        5 => Instruction::MovUp5,
+        6 => Instruction::MovUp6,
+        7 => Instruction::MovUp7,
+        8 => Instruction::MovUp8,
+        9 => Instruction::MovUp9,
+        10 => Instruction::MovUp10,
+        11 => Instruction::MovUp11,
+        12 => Instruction::MovUp12,
+        13 => Instruction::MovUp13,
+        14 => Instruction::MovUp14,
+        15 => Instruction::MovUp15,
+        _ => return Err(ParseError::User { error: ParsingError::ImmediateOutOfRange { span: i.span(), range: 2..16 }}),
+    }),
+    "movupw" <i:("." <U8>)> =>? Ok(match i.into_inner() {
+        2 => Instruction::MovUpW2,
+        3 => Instruction::MovUpW3,
+        _ => return Err(ParseError::User { error: ParsingError::ImmediateOutOfRange { span: i.span(), range: 2..4 }}),
+    }),
+    "swap" <i:("." <U8>)?> =>? {
+        let (span, idx) = i.map(|s| s.into_parts()).unwrap_or((SourceSpan::default(), 1));
+        Ok(match idx {
+            1 => Instruction::Swap1,
+            2 => Instruction::Swap2,
+            3 => Instruction::Swap3,
+            4 => Instruction::Swap4,
+            5 => Instruction::Swap5,
+            6 => Instruction::Swap6,
+            7 => Instruction::Swap7,
+            8 => Instruction::Swap8,
+            9 => Instruction::Swap9,
+            10 => Instruction::Swap10,
+            11 => Instruction::Swap11,
+            12 => Instruction::Swap12,
+            13 => Instruction::Swap13,
+            14 => Instruction::Swap14,
+            15 => Instruction::Swap15,
+            _ => return Err(ParseError::User { error: ParsingError::ImmediateOutOfRange { span, range: 1..16 }}),
+        })
+    },
+    "swapw" <i:("." <U8>)?> =>? {
+        let (span, idx) = i.map(|s| s.into_parts()).unwrap_or((SourceSpan::default(), 1));
+        Ok(match idx {
+            1 => Instruction::SwapW1,
+            2 => Instruction::SwapW2,
+            3 => Instruction::SwapW3,
+            _ => return Err(ParseError::User { error: ParsingError::ImmediateOutOfRange { span, range: 1..4 }}),
+        })
+    }
+}
+
+#[inline]
+InstWithBitSizeImmediate: Instruction = {
+    "exp.u" <imm:BitSize> => Instruction::ExpBitLength(imm),
+}
+
+Push: SmallOpsVec = {
+    <l:@L> "push" "." <imm_value:WordImm> "[" <i:uint> "]" <r:@R> => {
+        smallvec![Op::Inst(Span::new(
+            span!(source_id, l, r),
+            Instruction::PushSlice(
+                imm_value,
+                Range { start: i as usize, end: i as usize + 1 }
+            )
+        ))]
+    },
+
+    <l:@L> "push" "." <imm_value:WordImm> "[" <l_range:uint> ".." <r_range:uint> "]" <r:@R> => {
+        smallvec![Op::Inst(Span::new(
+            span!(source_id, l, r),
+            Instruction::PushSlice(
+                imm_value,
+                Range { start: l_range as usize, end: r_range as usize }
+            )
+        ))]
+    },
+
+    <l:@L> "push" "." <imm_value:WordLiteral> <r:@R> => {
+        smallvec![Op::Inst(Span::new(
+            span!(source_id, l, r),
+            Instruction::Push(Immediate::Value(imm_value.map(PushValue::Word)))
+        ))]
+    },
+
+    <l:@L> "push" "." <values:DotDelimited<IntOrHexImm>> <r:@R> =>? {
+        let ops = values.into_iter().enumerate().map(|(i, imm)| {
+            let span = imm.span();
+            // Include the "push" token in the first item's span
+            let span = if i == 0 {
+                span!(source_id, l, span.end().to_u32())
+            } else {
+                span
+            };
+            Op::Inst(Span::new(span, match imm {
+                Immediate::Constant(name) => Instruction::Push(Immediate::Constant(name)),
+                Immediate::Value(value) => Instruction::Push(Immediate::Value(value.map(PushValue::Int)))
+            }))
+        }).collect::<SmallOpsVec>();
+        if ops.len() > 16 {
+            Err(ParseError::User { error: ParsingError::PushOverflow { span: span!(source_id, l, r), count: ops.len() } })
+        } else {
+            Ok(ops)
+        }
+    }
+}
+
+// IMMEDIATES
+// ================================================================================================
+
+/// Parses an immediate integer value, either as a literal, or a reference to a constant
+#[inline]
+Imm<T>: Immediate<T> = {
+    "." <ImmValue<T>>,
+}
+
+#[inline]
+ImmValue<T>: Immediate<T> = {
+    <l:@L> <t:T> <r:@R> => Immediate::Value(Span::new(span!(source_id, l, r), t)),
+    <ConstantName> => Immediate::Constant(<>),
+}
+
+/// Parses an (optional) immediate integer value, either as a literal, or a reference to a constant
+#[inline]
+MaybeImm<T>: Option<Immediate<T>> = {
+    <Imm<T>> => Some(<>),
+    => None
+}
+
+/// Parses an (optional) `.<T>`
+#[inline]
+MaybeParam<T>: Option<T> = {
+    "." <t:T> => Some(t),
+    => None
+}
+
+/// Parses a valid 32-bit shift
+Shift32: u8 = {
+    <n:U8> =>? {
+        let (span, n) = n.into_parts();
+        if n > 31 {
+            Err(ParseError::User { error: ParsingError::ImmediateOutOfRange { span, range: 0..32 } })
+        } else {
+            Ok(n)
+        }
+    }
+}
+
+#[inline]
+RawU8: u8 = {
+    <n:U8> => n.into_inner(),
+}
+
+U8: Span<u8> = {
+    <l:@L> <n:uint> <r:@R> =>? {
+        let span = span!(source_id, l, r);
+        u8::try_from(n).map_err(|error| ParseError::User {
+            error: ParsingError::ImmediateOutOfRange { span, range: 0..(u8::MAX as usize + 1) },
+        }).map(|n| Span::new(span, n))
+    }
+}
+
+U16: u16 = {
+    <l:@L> <n:uint> <r:@R> =>? {
+        u16::try_from(n).map_err(|error| ParseError::User {
+            error: ParsingError::ImmediateOutOfRange { span: span!(source_id, l, r), range: 0..(u16::MAX as usize + 1) },
+        })
+    }
+}
+
+U32: u32 = {
+    <l:@L> <n:uint> <r:@R> =>? {
+        u32::try_from(n).map_err(|error| ParseError::User {
+            error: ParsingError::InvalidLiteral { span: span!(source_id, l, r), kind: LiteralErrorKind::U32Overflow },
+        })
+    },
+
+    <l:@L> <value:hex_value> <r:@R> =>? {
+        match value {
+            IntValue::U8(v) => Ok(v as u32),
+            IntValue::U16(v) => Ok(v as u32),
+            IntValue::U32(v) => Ok(v),
+            _ =>  Err(ParseError::User { error: ParsingError::InvalidLiteral { span: span!(source_id, l, r), kind: LiteralErrorKind::U32Overflow } }),
+        }
+    },
+
+    <l:@L> <value:bin_value> <r:@R> =>? {
+        match value {
+            BinEncodedValue::U8(v) => Ok(v as u32),
+            BinEncodedValue::U16(v) => Ok(v as u32),
+            BinEncodedValue::U32(v) => Ok(v),
+        }
+    }
+}
+
+MastRoot: Span<Word> = {
+    <l:@L> <value:hex_word> <r:@R> => {
+        Span::new(span!(source_id, l, r), Word::from(value.0))
+    }
+}
+
+OneBasedStackIndex: u8 = {
+    <n:U8> =>? {
+        let (span, n) = n.into_parts();
+        if n == 0 || n > 16 {
+            Err(ParseError::User {
+                error: ParsingError::ImmediateOutOfRange { span, range: 1..17 },
+            })
+        } else {
+            Ok(n)
+        }
+    }
+}
+
+StackWordOffset: u8 = {
+    <n:U8> =>? {
+        let (span, n) = n.into_parts();
+        if n > crate::ast::MAX_STACK_WORD_OFFSET {
+            Err(ParseError::User {
+                error: ParsingError::ImmediateOutOfRange { span, range: 0..(crate::ast::MAX_STACK_WORD_OFFSET as usize + 1) },
+            })
+        } else {
+            Ok(n)
+        }
+    }
+}
+
+OneBasedWordIndex: u8 = {
+    <n:U8> =>? {
+        let (span, n) = n.into_parts();
+        if n == 0 || n > 4 {
+            Err(ParseError::User {
+                error: ParsingError::ImmediateOutOfRange { span, range: 1..5 },
+            })
+        } else {
+            Ok(n)
+        }
+    }
+}
+
+BitSize: u8 = {
+    <n:U8> =>? {
+        let (span, n) = n.into_parts();
+        if n < 64 {
+            Ok(n)
+        } else {
+            Err(ParseError::User { error: ParsingError::InvalidLiteral { span, kind: LiteralErrorKind::InvalidBitSize } })
+        }
+    }
+}
+
+IntOrHexImm: Immediate<IntValue> = {
+    <l:@L> <value:IntValue> <r:@R> => Immediate::Value(Span::new(span!(source_id, l, r), value)),
+    <ConstantName> => Immediate::Constant(<>),
+}
+
+IntValue: IntValue = {
+    <l:@L> <n:uint> <r:@R> =>? {
+        if n >= Felt::MODULUS {
+            return Err(ParseError::User { error: ParsingError::InvalidLiteral {
+                span: span!(source_id, l, r),
+                kind: LiteralErrorKind::FeltOverflow
+            } });
+        }
+        if n <= (u8::MAX as u64) {
+            Ok(IntValue::U8(n as u8))
+        } else if n <= (u16::MAX as u64) {
+            Ok(IntValue::U16(n as u16))
+        } else if n <= (u32::MAX as u64) {
+            Ok(IntValue::U32(n as u32))
+        } else {
+            Ok(IntValue::Felt(Felt::new(n)))
+        }
+    },
+
+    hex_value
+}
+
+WordImm: Immediate<WordValue> = {
+    <l:@L> <value:WordValue> <r:@R> => Immediate::Value(Span::new(span!(source_id, l, r), value.into())),
+    <ConstantName> => Immediate::Constant(<>),
+}
+
+#[inline]
+WordLiteral: Span<WordValue> = {
+    <l:@L> <value:WordValue> <r:@R> => Span::new(span!(source_id, l, r), value),
+}
+
+WordValue: WordValue = {
+    <l:@L> "[" <v0:Felt> "," <v1:Felt> ","<v2:Felt> ","<v3:Felt> "]" <r:@R> => {
+        WordValue([v0,v1,v2,v3])
+    },
+
+    hex_word,
+}
+
+#[inline]
+Felt: Felt = {
+    <l:@L> <value:IntValue> <r:@R> => Felt::new(value.as_int()),
+}
+
+// SYMBOLS
+// ================================================================================================
+
+ProcedureName: ProcedureName = {
+    BareProcedureName,
+    QuotedProcedureName,
+}
+
+
+#[inline]
+BareProcedureName: ProcedureName = {
+    <BareIdent> => ProcedureName::from_raw_parts(<>),
+}
+
+#[inline]
+QuotedProcedureName: ProcedureName = {
+    <l:@L> <name:quoted_ident> <r:@R> =>? {
+        let name = interned.get(name).cloned().unwrap_or_else(|| {
+            let name = Arc::<str>::from(name.to_string().into_boxed_str());
+            interned.insert(name.clone());
+            name
+        });
+        let span = span!(source_id, l, r);
+        Ident::validate(&name)
+            .map_err(|error| ParseError::User {
+                error: ParsingError::InvalidIdentifier { error, span },
+            })?;
+        let id = Ident::from_raw_parts(Span::new(span, name));
+        Ok(ProcedureName::from_raw_parts(id))
+    }
+}
+
+InvocationTarget: InvocationTarget = {
+    <MastRoot> => InvocationTarget::MastRoot(<>),
+    MaybeQualifiedProcedurePath,
+    <l:@L> <_invalid:hex_value> <r:@R> =>? Err(ParseError::User {
+        error: ParsingError::InvalidMastRoot { span: span!(source_id, l, r) },
+    }),
+}
+
+MaybeQualifiedProcedurePath: InvocationTarget = {
+    "::" <components:(<BareIdent> "::")*> <name:ProcedureName> =>? {
+        // A fully-qualified path without a module is routed to the anonymous namespace
+        if components.is_empty() {
+            let path = LibraryPath::new_from_components(LibraryNamespace::Anon, []);
+            return Ok(InvocationTarget::AbsoluteProcedurePath { name, path });
+        }
+
+        // Otherwise, use the path specified
+        let mut components = VecDeque::from(components);
+        let ns = components.pop_front().unwrap();
+        let ns = match ns.as_str() {
+            // Disallow the use of special namespaces with other components
+            special_ns @ (
+                LibraryNamespace::EXEC_PATH
+                | LibraryNamespace::ANON_PATH
+            ) if !components.is_empty() => {
+                return Err(ParseError::User {
+                    error: ParsingError::InvalidLibraryPath {
+                        span: ns.span(),
+                        message: format!("the {special_ns} namespace cannot have submodules")
+                    },
+                });
+            }
+            LibraryNamespace::KERNEL_PATH => LibraryNamespace::Kernel,
+            LibraryNamespace::EXEC_PATH => LibraryNamespace::Exec,
+            LibraryNamespace::ANON_PATH => LibraryNamespace::Anon,
+            _ => LibraryNamespace::User(ns.into_inner()),
+        };
+        let path = LibraryPath::new_from_components(ns, components);
+        Ok(InvocationTarget::AbsoluteProcedurePath { name, path })
+    },
+
+    <module:(<BareIdent> "::")?> <name:ProcedureName> => {
+        if let Some(module) = module {
+            InvocationTarget::ProcedurePath { name, module }
+        } else {
+            InvocationTarget::ProcedureName(name)
+        }
+    }
+}
+
+#[inline]
+BareIdent: Ident = {
+    <l:@L> <name:bare_ident> <r:@R> =>? {
+        let name = interned.get(name).cloned().unwrap_or_else(|| {
+            let name = Arc::<str>::from(name.to_string().into_boxed_str());
+            interned.insert(name.clone());
+            name
+        });
+        let span = span!(source_id, l, r);
+        Ident::validate(&name)
+            .map_err(|error| ParseError::User {
+                error: ParsingError::InvalidIdentifier { error, span },
+            })?;
+        Ok(Ident::from_raw_parts(Span::new(span, name)))
+    },
+
+    OpcodeName,
+
+    TypeId,
+}
+
+MaybeQualifiedPath: Span<LibraryPath> = {
+    <l:@L> <_is_absolute:MaybeAbsolute> <mut components:PathComponents<BareIdent>> <r:@R> =>? {
+        let span = span!(source_id, l, r);
+        let name = components.pop().unwrap();
+        if components.is_empty() {
+            let ns = LibraryNamespace::User(name.into_inner());
+            Ok(Span::new(span, LibraryPath::new_from_components(ns, [])))
+        } else {
+            let mut components = VecDeque::from(components);
+            let ns = components.pop_front().unwrap();
+            let ns = match ns.as_str() {
+                // Disallow the use of special namespaces with other components
+                special_ns @ (
+                    LibraryNamespace::EXEC_PATH
+                    | LibraryNamespace::ANON_PATH
+                ) if !components.is_empty() => {
+                    return Err(ParseError::User {
+                        error: ParsingError::InvalidLibraryPath {
+                            span: ns.span(),
+                            message: format!("the {special_ns} namespace cannot have submodules")
+                        },
+                    });
+                }
+                LibraryNamespace::KERNEL_PATH => LibraryNamespace::Kernel,
+                LibraryNamespace::EXEC_PATH => LibraryNamespace::Exec,
+                LibraryNamespace::ANON_PATH => LibraryNamespace::Anon,
+                _ => LibraryNamespace::User(ns.into_inner()),
+            };
+            components.push_back(name);
+            Ok(Span::new(span, LibraryPath::new_from_components(ns, components)))
+        }
+    }
+}
+
+#[inline]
+MaybeAbsolute: bool = {
+    "::" => true,
+    => false,
+}
+
+QualifiedName: (Ident, LibraryPath) = {
+    <l:@L> <first:(<BareIdent> "::")> <mut components:PathComponents<BareIdent>> <r:@R> =>? {
+        let span = span!(source_id, l, r);
+
+        let name = components.pop().unwrap();
+        let ns = match first.as_str() {
+            // Disallow the use of special namespaces with other components
+            special_ns @ (
+                LibraryNamespace::EXEC_PATH
+                | LibraryNamespace::ANON_PATH
+            ) if !components.is_empty() => {
+                return Err(ParseError::User {
+                    error: ParsingError::InvalidLibraryPath {
+                        span: first.span(),
+                        message: format!("the {special_ns} namespace cannot have submodules")
+                    },
+                });
+            }
+            LibraryNamespace::KERNEL_PATH => LibraryNamespace::Kernel,
+            LibraryNamespace::EXEC_PATH => LibraryNamespace::Exec,
+            LibraryNamespace::ANON_PATH => LibraryNamespace::Anon,
+            _ => LibraryNamespace::User(first.into_inner()),
+        };
+        Ok((name, LibraryPath::new_from_components(ns, components)))
+    }
+}
+
+OpcodeName: Ident = {
+    <l:@L> <name:Opcode> <r:@R> => {
+        let name = interned.get(name).cloned().unwrap_or_else(|| {
+            let name = Arc::<str>::from(name.to_string().into_boxed_str());
+            interned.insert(name.clone());
+            name
+        });
+        Ident::from_raw_parts(Span::new(span!(source_id, l, r), name))
+    }
+}
+
+Opcode: &'static str = {
+    "add" => "add",
+    "adv" => "adv",
+    "adv_map" => "adv_map",
+    "adv_loadw" => "adv_loadw",
+    "adv_pipe" => "adv_pipe",
+    "adv_push" => "adv_push",
+    "adv_stack" => "adv_stack",
+    "and" => "and",
+    "eval_circuit" => "eval_circuit",
+    "assert" => "assert",
+    "assertz" => "assertz",
+    "assert_eq" => "assert_eq",
+    "assert_eqw" => "assert_eqw",
+    "begin" => "begin",
+    "caller" => "caller",
+    "call" => "call",
+    "cdrop" => "cdrop",
+    "cdropw" => "cdropw",
+    "clk" => "clk",
+    "const" => "const",
+    "cswap" => "cswap",
+    "cswapw" => "cswapw",
+    "debug" => "debug",
+    "div" => "div",
+    "drop" => "drop",
+    "dropw" => "dropw",
+    "dup" => "dup",
+    "dupw" => "dupw",
+    "dynexec" => "dynexec",
+    "dyncall" => "dyncall",
+    "else" => "else",
+    "emit" => "emit",
+    "end" => "end",
+    "eq" => "eq",
+    "eqw" => "eqw",
+    "ext2add" => "ext2add",
+    "ext2div" => "ext2div",
+    "ext2inv" => "ext2inv",
+    "ext2mul" => "ext2mul",
+    "ext2neg" => "ext2neg",
+    "ext2sub" => "ext2sub",
+    "err" => "err",
+    "exec" => "exec",
+    "exp" => "exp",
+    "exp.u" => "exp.u",
+    "export" => "export",
+    "gt" => "gt",
+    "gte" => "gte",
+    "hash" => "hash",
+    "hperm" => "hperm",
+    "hmerge" => "hmerge",
+    "ilog2" => "ilog2",
+    "inv" => "inv",
+    "is_odd" => "is_odd",
+    "local" => "local",
+    "locaddr" => "locaddr",
+    "loc_load" => "loc_load",
+    "loc_loadw" => "loc_loadw",
+    "loc_store" => "loc_store",
+    "loc_storew" => "loc_storew",
+    "lt" => "lt",
+    "lte" => "lte",
+    "mem" => "mem",
+    "mem_load" => "mem_load",
+    "mem_loadw" => "mem_loadw",
+    "mem_loadw_be" => "mem_loadw_be",
+    "mem_loadw_le" => "mem_loadw_le",
+    "mem_store" => "mem_store",
+    "mem_storew" => "mem_storew",
+    "mem_storew_be" => "mem_storew_be",
+    "mem_storew_le" => "mem_storew_le",
+    "mem_stream" => "mem_stream",
+    "movdn" => "movdn",
+    "movdnw" => "movdnw",
+    "movup" => "movup",
+    "movupw" => "movupw",
+    "mtree_merge" => "mtree_merge",
+    "mtree_verify" => "mtree_verify",
+    "mul" => "mul",
+    "neg" => "neg",
+    "neq" => "neq",
+    "not" => "not",
+    "or" => "or",
+    "padw" => "padw",
+    "pow2" => "pow2",
+    "proc" => "proc",
+    "procref" => "procref",
+    "push" => "push",
+    "repeat" => "repeat",
+    "reversew" => "reversew",
+    "reversedw" => "reversedw",
+    "sdepth" => "sdepth",
+    "stack" => "stack",
+    "sub" => "sub",
+    "swap" => "swap",
+    "swapw" => "swapw",
+    "swapdw" => "swapdw",
+    "syscall" => "syscall",
+    "trace" => "trace",
+    "u32and" => "u32and",
+    "u32assert" => "u32assert",
+    "u32assert2" => "u32assert2",
+    "u32assertw" => "u32assertw",
+    "u32cast" => "u32cast",
+    "u32div" => "u32div",
+    "u32divmod" => "u32divmod",
+    "u32gt" => "u32gt",
+    "u32gte" => "u32gte",
+    "u32lt" => "u32lt",
+    "u32lte" => "u32lte",
+    "u32max" => "u32max",
+    "u32min" => "u32min",
+    "u32mod" => "u32mod",
+    "u32not" => "u32not",
+    "u32or" => "u32or",
+    "u32overflowing_add" => "u32overflowing_add",
+    "u32overflowing_add3" => "u32overflowing_add3",
+    "u32overflowing_madd" => "u32overflowing_madd",
+    "u32overflowing_mul" => "u32overflowing_mul",
+    "u32overflowing_sub" => "u32overflowing_sub",
+    "u32popcnt" => "u32popcnt",
+    "u32clz" => "u32clz",
+    "u32ctz" => "u32ctz",
+    "u32clo" => "u32clo",
+    "u32cto" => "u32cto",
+    "u32rotl" => "u32rotl",
+    "u32rotr" => "u32rotr",
+    "u32shl" => "u32shl",
+    "u32shr" => "u32shr",
+    "u32split" => "u32split",
+    "u32test" => "u32test",
+    "u32testw" => "u32testw",
+    "u32wrapping_add" => "u32wrapping_add",
+    "u32wrapping_add3" => "u32wrapping_add3",
+    "u32wrapping_madd" => "u32wrapping_madd",
+    "u32wrapping_mul" => "u32wrapping_mul",
+    "u32wrapping_sub" => "u32wrapping_sub",
+    "u32xor" => "u32xor",
+    "xor" => "xor",
+}
+
+TypeId: Ident = {
+    <l:@L> <name:TypeIdStr> <r:@R> => {
+        let name = interned.get(name).cloned().unwrap_or_else(|| {
+            let name = Arc::<str>::from(name.to_string().into_boxed_str());
+            interned.insert(name.clone());
+            name
+        });
+        Ident::from_raw_parts(Span::new(span!(source_id, l, r), name))
+    }
+}
+
+TypeIdStr: &'static str = {
+    "word" => "word",
+    "i1" => "i1",
+    "u8" => "u8",
+    "i8" => "i8",
+    "u16" => "u16",
+    "i16" => "i16",
+    "u32" => "u32",
+    "i32" => "i32",
+    "u64" => "u64",
+    "i64" => "i64",
+    "u128" => "u128",
+    "i128" => "i128",
+    "felt" => "felt",
+    "ptr" => "ptr",
+    "addrspace" => "addrspace",
+    "byte" => "byte",
+}
+
+// CONSTANT EXPRESSIONS
+// ================================================================================================
+
+ConstantExpr: ConstantExpr = {
+    <l:@L> "word" "(" <value:string> ")" <r:@R> => {
+        let span = span!(source_id, l, r);
+        ConstantExpr::Hash(HashKind::Word, Ident::from_raw_parts(Span::new(span, value.into())))
+    },
+
+    <l:@L> "event" "(" <value:string> ")" <r:@R> => {
+        let span = span!(source_id, l, r);
+        ConstantExpr::Hash(HashKind::Event, Ident::from_raw_parts(Span::new(span, value.into())))
+    },
+
+    <l:@L> <x:ConstantExpr> "+" <y:ConstantExpr100> <r:@R> =>? {
+        let expr = ConstantExpr::BinaryOp {  span: span!(source_id, l, r), op: ConstantOp::Add, lhs: Box::new(x), rhs: Box::new(y) };
+        expr.try_fold().map_err(|error| ParseError::User { error })
+    },
+
+    <l:@L> <x:ConstantExpr> "-" <y:ConstantExpr100> <r:@R> =>? {
+        let expr = ConstantExpr::BinaryOp { span: span!(source_id, l, r), op: ConstantOp::Sub, lhs: Box::new(x), rhs: Box::new(y) };
+        expr.try_fold().map_err(|error| ParseError::User { error })
+    },
+
+    ConstantExpr100,
+}
+
+ConstantArithmeticExpr: ConstantExpr = {
+    <l:@L> <x:ConstantArithmeticExpr> "+" <y:ConstantArithmeticExpr100> <r:@R> =>? {
+        let expr = ConstantExpr::BinaryOp {  span: span!(source_id, l, r), op: ConstantOp::Add, lhs: Box::new(x), rhs: Box::new(y) };
+        expr.try_fold().map_err(|error| ParseError::User { error })
+    },
+
+    <l:@L> <x:ConstantArithmeticExpr> "-" <y:ConstantArithmeticExpr100> <r:@R> =>? {
+        let expr = ConstantExpr::BinaryOp { span: span!(source_id, l, r), op: ConstantOp::Sub, lhs: Box::new(x), rhs: Box::new(y) };
+        expr.try_fold().map_err(|error| ParseError::User { error })
+    },
+
+    ConstantArithmeticExpr100,
+}
+
+ConstantExpr100: ConstantExpr = {
+    <l:@L> <x:ConstantExpr100> "*" <y:Term> <r:@R> =>? {
+        let expr = ConstantExpr::BinaryOp { span: span!(source_id, l, r), op: ConstantOp::Mul, lhs: Box::new(x), rhs: Box::new(y) };
+        expr.try_fold().map_err(|error| ParseError::User { error })
+    },
+
+    <l:@L> <x:ConstantExpr100> "/" <y:Term> <r:@R> =>? {
+        let expr = ConstantExpr::BinaryOp { span: span!(source_id, l, r), op: ConstantOp::Div, lhs: Box::new(x), rhs: Box::new(y) };
+        expr.try_fold().map_err(|error| ParseError::User { error })
+    },
+
+    <l:@L> <x:ConstantExpr100> "//" <y:Term> <r:@R> =>? {
+        let expr = ConstantExpr::BinaryOp { span: span!(source_id, l, r), op: ConstantOp::IntDiv, lhs: Box::new(x), rhs: Box::new(y) };
+        expr.try_fold().map_err(|error| ParseError::User { error })
+    },
+
+    Term
+}
+
+ConstantArithmeticExpr100: ConstantExpr = {
+    <l:@L> <x:ConstantArithmeticExpr100> "*" <y:NumericTerm> <r:@R> =>? {
+        let expr = ConstantExpr::BinaryOp { span: span!(source_id, l, r), op: ConstantOp::Mul, lhs: Box::new(x), rhs: Box::new(y) };
+        expr.try_fold().map_err(|error| ParseError::User { error })
+    },
+
+    <l:@L> <x:ConstantArithmeticExpr100> "/" <y:NumericTerm> <r:@R> =>? {
+        let expr = ConstantExpr::BinaryOp { span: span!(source_id, l, r), op: ConstantOp::Div, lhs: Box::new(x), rhs: Box::new(y) };
+        expr.try_fold().map_err(|error| ParseError::User { error })
+    },
+
+    <l:@L> <x:ConstantArithmeticExpr100> "//" <y:NumericTerm> <r:@R> =>? {
+        let expr = ConstantExpr::BinaryOp { span: span!(source_id, l, r), op: ConstantOp::IntDiv, lhs: Box::new(x), rhs: Box::new(y) };
+        expr.try_fold().map_err(|error| ParseError::User { error })
+    },
+
+    NumericTerm
+}
+
+#[inline]
+ConstantName: Ident = {
+    <l:@L> <name:const_ident> <r:@R> =>? {
+        let name = interned.get(name).cloned().unwrap_or_else(|| {
+            let name = Arc::<str>::from(name.to_string().into_boxed_str());
+            interned.insert(name.clone());
+            name
+        });
+        let span = span!(source_id, l, r);
+
+        Ident::validate(&name)
+            .map_err(|error| ParseError::User {
+                error: ParsingError::InvalidIdentifier { error, span },
+            })?;
+        Ok(Ident::from_raw_parts(Span::new(span, name)))
+    }
+}
+
+Term: ConstantExpr = {
+    "(" <ConstantExpr> ")",
+
+    <l:@L> <value:IntValue> <r:@R> => {
+        ConstantExpr::Int(Span::new(span!(source_id, l, r), value))
+    },
+
+    <l:@L> <value:WordValue> <r:@R> => {
+        ConstantExpr::Word(Span::new(span!(source_id, l, r), value))
+    },
+
+    <QuotedString> => ConstantExpr::String(<>),
+
+    <ConstantName> => ConstantExpr::Var(<>),
+}
+
+NumericTerm: ConstantExpr = {
+    "(" <ConstantArithmeticExpr> ")",
+
+    <l:@L> <value:IntValue> <r:@R> => {
+        ConstantExpr::Int(Span::new(span!(source_id, l, r), value))
+    },
+
+    <ConstantName> => ConstantExpr::Var(<>),
+}
+
+// Terminals
+/////////////////////////////
+
+#[inline]
+string : &'input str = {
+    quoted_string,
+    quoted_ident
+}

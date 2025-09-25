@@ -60,10 +60,15 @@ pub(super) fn op_fmpupdate<P: Processor>(
 
 /// Writes the current stack depth to the top of the stack.
 #[inline(always)]
-pub(super) fn op_sdepth<P: Processor>(processor: &mut P, tracer: &mut impl Tracer) {
+pub(super) fn op_sdepth<P: Processor>(
+    processor: &mut P,
+    tracer: &mut impl Tracer,
+) -> Result<(), ExecutionError> {
     let depth = processor.stack().depth();
-    processor.stack().increment_size(tracer);
+    processor.stack().increment_size(tracer)?;
     processor.stack().set(0, depth.into());
+
+    Ok(())
 }
 
 /// Analogous to `Process::op_caller`.
@@ -81,8 +86,13 @@ pub(super) fn op_caller<P: Processor>(processor: &mut P) -> Result<(), Execution
 
 /// Writes the current clock value to the top of the stack.
 #[inline(always)]
-pub(super) fn op_clk<P: Processor>(processor: &mut P, tracer: &mut impl Tracer) {
+pub(super) fn op_clk<P: Processor>(
+    processor: &mut P,
+    tracer: &mut impl Tracer,
+) -> Result<(), ExecutionError> {
     let clk: Felt = processor.system().clk().into();
-    processor.stack().increment_size(tracer);
+    processor.stack().increment_size(tracer)?;
     processor.stack().set(0, clk);
+
+    Ok(())
 }

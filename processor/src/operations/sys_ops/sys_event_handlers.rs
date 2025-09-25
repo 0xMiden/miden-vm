@@ -5,7 +5,7 @@ use miden_core::{
     sys_events::SystemEvent,
 };
 
-use crate::{ExecutionError, MemoryError, ProcessState, errors::ErrorContext};
+use crate::{ExecutionError, ProcessState, errors::ErrorContext};
 
 /// The offset of the domain value on the stack in the `hdword_to_map_with_domain` system event.
 /// Offset accounts for the event ID at position 0 on the stack.
@@ -60,12 +60,11 @@ fn insert_mem_values_into_adv_map(
     process: &mut ProcessState,
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
-    let (start_addr, end_addr) =
-        get_mem_addr_range(process, 5, 6).map_err(ExecutionError::MemoryError)?;
+    let addr_range = process.get_mem_addr_range(5, 6).map_err(ExecutionError::MemoryError)?;
     let ctx = process.ctx();
 
-    let mut values = Vec::with_capacity(((end_addr - start_addr) as usize) * WORD_SIZE);
-    for addr in start_addr..end_addr {
+    let mut values = Vec::with_capacity(addr_range.len() * WORD_SIZE);
+    for addr in addr_range {
         let mem_value = process.get_mem_value(ctx, addr).unwrap_or(ZERO);
         values.push(mem_value);
     }
@@ -434,30 +433,6 @@ fn push_ilog2(
 
 // HELPER METHODS
 // --------------------------------------------------------------------------------------------
-
-/// Reads (start_addr, end_addr) tuple from the specified elements of the operand stack (
-/// without modifying the state of the stack), and verifies that memory range is valid.
-fn get_mem_addr_range(
-    process: &ProcessState,
-    start_idx: usize,
-    end_idx: usize,
-) -> Result<(u32, u32), MemoryError> {
-    let start_addr = process.get_stack_item(start_idx).as_int();
-    let end_addr = process.get_stack_item(end_idx).as_int();
-
-    if start_addr > u32::MAX as u64 {
-        return Err(MemoryError::address_out_of_bounds(start_addr, &()));
-    }
-    if end_addr > u32::MAX as u64 {
-        return Err(MemoryError::address_out_of_bounds(end_addr, &()));
-    }
-
-    if start_addr > end_addr {
-        return Err(MemoryError::InvalidMemoryRange { start_addr, end_addr });
-    }
-
-    Ok((start_addr as u32, end_addr as u32))
-}
 
 /// Gets the top stack element, applies a provided function to it and pushes it to the advice
 /// provider.

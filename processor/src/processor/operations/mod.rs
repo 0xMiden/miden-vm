@@ -44,9 +44,9 @@ pub(super) fn execute_sync_op(
         },
         Operation::FmpAdd => sys_ops::op_fmpadd(processor),
         Operation::FmpUpdate => sys_ops::op_fmpupdate(processor, tracer)?,
-        Operation::SDepth => sys_ops::op_sdepth(processor, tracer),
+        Operation::SDepth => sys_ops::op_sdepth(processor, tracer)?,
         Operation::Caller => sys_ops::op_caller(processor)?,
-        Operation::Clk => sys_ops::op_clk(processor, tracer),
+        Operation::Clk => sys_ops::op_clk(processor, tracer)?,
         Operation::Emit => {
             panic!("emit instruction requires async, so is not supported by execute_op()")
         },
@@ -93,7 +93,7 @@ pub(super) fn execute_sync_op(
 
         // ----- u32 operations ---------------------------------------------------------------
         Operation::U32split => {
-            let u32split_helpers = u32_ops::op_u32split(processor, tracer);
+            let u32split_helpers = u32_ops::op_u32split(processor, tracer)?;
             user_op_helpers = Some(u32split_helpers);
         },
         Operation::U32add => {
@@ -128,20 +128,20 @@ pub(super) fn execute_sync_op(
         },
 
         // ----- stack manipulation -----------------------------------------------------------
-        Operation::Pad => stack_ops::op_pad(processor, tracer),
+        Operation::Pad => stack_ops::op_pad(processor, tracer)?,
         Operation::Drop => processor.stack().decrement_size(tracer),
-        Operation::Dup0 => stack_ops::dup_nth(processor, 0, tracer),
-        Operation::Dup1 => stack_ops::dup_nth(processor, 1, tracer),
-        Operation::Dup2 => stack_ops::dup_nth(processor, 2, tracer),
-        Operation::Dup3 => stack_ops::dup_nth(processor, 3, tracer),
-        Operation::Dup4 => stack_ops::dup_nth(processor, 4, tracer),
-        Operation::Dup5 => stack_ops::dup_nth(processor, 5, tracer),
-        Operation::Dup6 => stack_ops::dup_nth(processor, 6, tracer),
-        Operation::Dup7 => stack_ops::dup_nth(processor, 7, tracer),
-        Operation::Dup9 => stack_ops::dup_nth(processor, 9, tracer),
-        Operation::Dup11 => stack_ops::dup_nth(processor, 11, tracer),
-        Operation::Dup13 => stack_ops::dup_nth(processor, 13, tracer),
-        Operation::Dup15 => stack_ops::dup_nth(processor, 15, tracer),
+        Operation::Dup0 => stack_ops::dup_nth(processor, 0, tracer)?,
+        Operation::Dup1 => stack_ops::dup_nth(processor, 1, tracer)?,
+        Operation::Dup2 => stack_ops::dup_nth(processor, 2, tracer)?,
+        Operation::Dup3 => stack_ops::dup_nth(processor, 3, tracer)?,
+        Operation::Dup4 => stack_ops::dup_nth(processor, 4, tracer)?,
+        Operation::Dup5 => stack_ops::dup_nth(processor, 5, tracer)?,
+        Operation::Dup6 => stack_ops::dup_nth(processor, 6, tracer)?,
+        Operation::Dup7 => stack_ops::dup_nth(processor, 7, tracer)?,
+        Operation::Dup9 => stack_ops::dup_nth(processor, 9, tracer)?,
+        Operation::Dup11 => stack_ops::dup_nth(processor, 11, tracer)?,
+        Operation::Dup13 => stack_ops::dup_nth(processor, 13, tracer)?,
+        Operation::Dup15 => stack_ops::dup_nth(processor, 15, tracer)?,
         Operation::Swap => stack_ops::op_swap(processor),
         Operation::SwapW => processor.stack().swapw_nth(1),
         Operation::SwapW2 => processor.stack().swapw_nth(2),
@@ -165,7 +165,7 @@ pub(super) fn execute_sync_op(
         Operation::CSwapW => stack_ops::op_cswapw(processor, err_ctx, tracer)?,
 
         // ----- input / output ---------------------------------------------------------------
-        Operation::Push(value) => stack_ops::op_push(processor, *value, tracer),
+        Operation::Push(value) => stack_ops::op_push(processor, *value, tracer)?,
         Operation::AdvPop => io_ops::op_advpop(processor, err_ctx, tracer)?,
         Operation::AdvPopW => io_ops::op_advpopw(processor, err_ctx, tracer)?,
         Operation::MLoadW => io_ops::op_mloadw(processor, err_ctx, tracer)?,

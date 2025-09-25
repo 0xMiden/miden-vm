@@ -24,9 +24,10 @@ pub use miden_core::{
     utils::DeserializationError,
 };
 use miden_core::{
-    Decorator, DecoratorIdIterator, FieldElement,
+    Decorator, FieldElement,
     mast::{
-        BasicBlockNode, CallNode, DynNode, ExternalNode, JoinNode, LoopNode, OpBatch, SplitNode,
+        BasicBlockNode, CallNode, DecoratorOpLinkIterator, DynNode, ExternalNode, JoinNode,
+        LoopNode, OpBatch, SplitNode,
     },
 };
 use miden_debug_types::SourceSpan;
@@ -43,6 +44,9 @@ mod operations;
 mod system;
 use system::System;
 pub use system::{ContextId, FMP_MIN, SYSCALL_FMP_MIN};
+
+#[cfg(test)]
+mod test_utils;
 
 pub(crate) mod decoder;
 use decoder::Decoder;
@@ -75,7 +79,7 @@ pub use errors::{ErrorContext, ErrorContextImpl, ExecutionError};
 
 pub mod utils;
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "no_err_ctx")))]
 mod tests;
 
 mod debug;
@@ -547,7 +551,7 @@ impl Process {
         self.start_basic_block_node(basic_block, program, host)?;
 
         let mut op_offset = 0;
-        let mut decorator_ids = basic_block.decorator_iter();
+        let mut decorator_ids = basic_block.indexed_decorator_iter();
 
         // execute the first operation batch
         self.execute_op_batch(
@@ -581,9 +585,9 @@ impl Process {
 
         // execute any decorators which have not been executed during span ops execution; this
         // can happen for decorators appearing after all operations in a block. these decorators
-        // are executed after SPAN block is closed to make sure the VM clock cycle advances beyond
-        // the last clock cycle of the SPAN block ops.
-        for &decorator_id in decorator_ids {
+        // are executed after BASIC BLOCK is closed to make sure the VM clock cycle advances beyond
+        // the last clock cycle of the BASIC BLOCK ops.
+        for (_, decorator_id) in decorator_ids {
             let decorator = program
                 .get_decorator_by_id(decorator_id)
                 .ok_or(ExecutionError::DecoratorNotFoundInForest { decorator_id })?;
@@ -594,7 +598,7 @@ impl Process {
     }
 
     /// Executes all operations in an [OpBatch]. This also ensures that all alignment rules are
-    /// satisfied by executing NOOPs as needed. Specifically:   
+    /// satisfied by executing NOOPs as needed. Specifically:
     /// - If an operation group ends with an operation carrying an immediate value, a NOOP is
     ///   executed after it.
     /// - If the number of groups in a batch is not a power of 2, NOOPs are executed (one per group)
@@ -604,7 +608,7 @@ impl Process {
         &mut self,
         basic_block: &BasicBlockNode,
         batch: &OpBatch,
-        decorators: &mut DecoratorIdIterator,
+        decorators: &mut DecoratorOpLinkIterator,
         op_offset: usize,
         program: &MastForest,
         host: &mut impl SyncHost,
@@ -621,7 +625,7 @@ impl Process {
 
         // execute operations in the batch one by one
         for (i, &op) in batch.ops().iter().enumerate() {
-            while let Some(&decorator_id) = decorators.next_filtered(i + op_offset) {
+            while let Some((_, decorator_id)) = decorators.next_filtered(i + op_offset) {
                 let decorator = program
                     .get_decorator_by_id(decorator_id)
                     .ok_or(ExecutionError::DecoratorNotFoundInForest { decorator_id })?;
@@ -891,6 +895,30 @@ impl<'a> ProcessState<'a> {
             },
             ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
         }
+    }
+
+    /// Reads (start_addr, end_addr) tuple from the specified elements of the operand stack (
+    /// without modifying the state of the stack), and verifies that memory range is valid.
+    pub fn get_mem_addr_range(
+        &self,
+        start_idx: usize,
+        end_idx: usize,
+    ) -> Result<core::ops::Range<u32>, MemoryError> {
+        let start_addr = self.get_stack_item(start_idx).as_int();
+        let end_addr = self.get_stack_item(end_idx).as_int();
+
+        if start_addr > u32::MAX as u64 {
+            return Err(MemoryError::address_out_of_bounds(start_addr, &()));
+        }
+        if end_addr > u32::MAX as u64 {
+            return Err(MemoryError::address_out_of_bounds(end_addr, &()));
+        }
+
+        if start_addr > end_addr {
+            return Err(MemoryError::InvalidMemoryRange { start_addr, end_addr });
+        }
+
+        Ok(start_addr as u32..end_addr as u32)
     }
 
     /// Returns the entire memory state for the specified execution context at the current clock

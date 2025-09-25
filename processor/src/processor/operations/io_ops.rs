@@ -20,7 +20,7 @@ pub(super) fn op_advpop<P: Processor>(
         .map_err(|err| ExecutionError::advice_error(err, processor.system().clk(), err_ctx))?;
     tracer.record_advice_pop_stack(value);
 
-    processor.stack().increment_size(tracer);
+    processor.stack().increment_size(tracer)?;
     processor.stack().set(0, value);
 
     Ok(())

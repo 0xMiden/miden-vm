@@ -5,6 +5,7 @@ description = "Proc macros for serde roundtrip testing in Miden VM"
 readme = "README.md"
 categories = ["development-tools::testing", "no-std"]
 keywords = ["miden", "serde", "testing", "proc-macro"]
+publish = false
 license.workspace = true
 authors.workspace = true
 homepage.workspace = true

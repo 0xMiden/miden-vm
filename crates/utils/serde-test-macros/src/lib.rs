@@ -88,8 +88,14 @@ pub fn serde_test(args: TokenStream, input: TokenStream) -> TokenStream {
                 proptest::proptest!{
                     #[test]
                     fn #test_name(obj in proptest::prelude::any::#ty()) {
-                        let buf = serde_json::to_vec(&obj).unwrap();
-                        proptest::prop_assert_eq!(obj, serde_json::from_slice::#ty(&buf).unwrap());
+                        use alloc::string::ToString;
+                        let buf = serde_json::to_vec(&obj)
+                            .map_err(|err| proptest::test_runner::TestCaseError::fail(err.to_string()))?;
+                        proptest::prop_assert_eq!(
+                            obj,
+                            serde_json::from_slice::#ty(&buf)
+                                .map_err(|err| proptest::test_runner::TestCaseError::fail(err.to_string()))?
+                        );
                     }
                 }
             }

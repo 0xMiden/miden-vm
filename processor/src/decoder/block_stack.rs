@@ -199,5 +199,5 @@ pub enum BlockType {
     Dyn,
     Dyncall,
     SysCall,
-    Span,
+    BasicBlock,
 }

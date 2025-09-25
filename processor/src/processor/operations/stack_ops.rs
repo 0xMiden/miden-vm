@@ -8,16 +8,25 @@ use crate::{
 
 /// Pushes a new element onto the stack.
 #[inline(always)]
-pub(super) fn op_push<P: Processor>(processor: &mut P, element: Felt, tracer: &mut impl Tracer) {
-    processor.stack().increment_size(tracer);
+pub(super) fn op_push<P: Processor>(
+    processor: &mut P,
+    element: Felt,
+    tracer: &mut impl Tracer,
+) -> Result<(), ExecutionError> {
+    processor.stack().increment_size(tracer)?;
     processor.stack().set(0, element);
+    Ok(())
 }
 
 /// Pushes a `ZERO` on top of the stack.
 #[inline(always)]
-pub(super) fn op_pad<P: Processor>(processor: &mut P, tracer: &mut impl Tracer) {
-    processor.stack().increment_size(tracer);
+pub(super) fn op_pad<P: Processor>(
+    processor: &mut P,
+    tracer: &mut impl Tracer,
+) -> Result<(), ExecutionError> {
+    processor.stack().increment_size(tracer)?;
     processor.stack().set(0, ZERO);
+    Ok(())
 }
 
 /// Swaps the top two elements of the stack.
@@ -43,10 +52,16 @@ pub(super) fn op_swap_double_word<P: Processor>(processor: &mut P) {
 ///
 /// The size of the stack is incremented by 1.
 #[inline(always)]
-pub(super) fn dup_nth<P: Processor>(processor: &mut P, n: usize, tracer: &mut impl Tracer) {
+pub(super) fn dup_nth<P: Processor>(
+    processor: &mut P,
+    n: usize,
+    tracer: &mut impl Tracer,
+) -> Result<(), ExecutionError> {
     let to_dup = processor.stack().get(n);
-    processor.stack().increment_size(tracer);
+    processor.stack().increment_size(tracer)?;
     processor.stack().set(0, to_dup);
+
+    Ok(())
 }
 
 /// Analogous to `Process::op_cswap`.

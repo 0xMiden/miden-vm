@@ -314,7 +314,8 @@ impl Tracer for ExecutionTracer {
                 },
                 MastNode::Block(basic_block_node) => {
                     let block_addr = self.hasher.record_hash_basic_block(basic_block_node);
-                    let parent_addr = self.block_stack.push(block_addr, BlockType::Span, None);
+                    let parent_addr =
+                        self.block_stack.push(block_addr, BlockType::BasicBlock, None);
                     self.block_stack_replay.record_node_start(parent_addr);
                 },
                 MastNode::External(_) => unreachable!(

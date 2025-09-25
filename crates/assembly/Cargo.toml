@@ -1,0 +1,42 @@
+[package]
+name = "miden-assembly"
+version.workspace = true
+description = "Miden VM assembly language"
+documentation = "https://docs.rs/miden-assembly"
+readme = "README.md"
+categories = ["compilers", "no-std"]
+keywords = ["assembler", "assembly", "language", "miden"]
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+
+[lib]
+bench = false
+doctest = false
+
+[features]
+default = ["std"]
+std = ["miden-assembly-syntax/std", "miden-core/std", "thiserror/std"]
+testing = ["logging", "miden-assembly-syntax/testing"]
+logging = ["dep:env_logger"]
+
+[dependencies]
+# Miden dependencies
+miden-assembly-syntax.workspace = true
+miden-core.workspace = true
+miden-mast-package.workspace = true
+
+# External dependencies
+env_logger = { workspace = true, optional = true }
+log.workspace = true
+smallvec.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+miden-mast-package = { workspace = true, features = ["arbitrary"] }
+miden-stdlib = { path = "../../stdlib", default-features = false }
+insta.workspace = true
+proptest = { workspace = true, features = ["std"] }
