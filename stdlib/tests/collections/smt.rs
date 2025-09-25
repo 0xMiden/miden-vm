@@ -29,7 +29,7 @@ const LEAVES_MULTI: [(Word, Word); 3] = [
     // Most significant felt does NOT differ from previous.
     (word(201, 202, 203, 69420), word(0xb, 0xc, 0xd, 0xe)),
     // A key in the same leaf, but with no corresponding value.
-    (word(301, 302, 303, 49420), EMPTY_WORD),
+    (word(301, 302, 303, 69420), EMPTY_WORD),
 ];
 
 /// Tests `get` on every key present in the SMT, as well as an empty leaf
