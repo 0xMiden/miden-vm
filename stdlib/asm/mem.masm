@@ -180,7 +180,8 @@ export.pipe_preimage_to_memory.0
   # => [write_ptr', ...]
 end
 
-#! Moves an even number of words from the advice stack to memory and asserts it matches the commitment.
+#! Moves an even number of words from the advice stack to memory and asserts
+#! that their sequential hash matches a given commitment.
 #!
 #! Input: [num_words, write_ptr, COM, ...]
 #! Output: [write_ptr', ...]
