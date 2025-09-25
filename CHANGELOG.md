@@ -9,6 +9,7 @@
 #### Changes
 
 - [BREAKING] Incremented MSRV to 1.90.
+- Introduce a new `build_trace()` which builds the trace in parallel from trace fragment contexts ([#1839](https://github.com/0xMiden/miden-vm/pull/1839))
 
 ## 0.18.0 (2025-09-21)
 

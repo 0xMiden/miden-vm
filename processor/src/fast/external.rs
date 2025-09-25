@@ -26,7 +26,7 @@ impl FastProcessor {
         let (resolved_node_id, new_mast_forest) =
             self.resolve_external_node(external_node, host).await?;
 
-        tracer.record_external_node_resolution(resolved_node_id, &new_mast_forest);
+        tracer.record_mast_forest_resolution(resolved_node_id, &new_mast_forest);
 
         // Push current forest to the continuation stack so that we can return to it
         continuation_stack.push_enter_forest(current_forest.clone());
