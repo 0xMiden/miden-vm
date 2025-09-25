@@ -381,7 +381,24 @@ pub fn enforce_expacc_constraints<E: FieldElement>(
 
 /// Enforces constraints of the EXT2MUL operation.
 ///
-/// The EXT2MUL operation computes the product of two elements in the extension field of degree 2.
+/// The EXT2MUL operation computes the product of two elements in the extension
+/// field 𝔽ₚ[x]/(x² - x + 2):
+///
+/// Let a = a1·x + a0 and b = b1·x + b0. Then:
+///
+///     a · b = (a1·b1)·x² + (a1·b0 + a0·b1)·x + (a0·b0).
+///
+/// Since x² ≡ x - 2 in 𝔽ₚ[x]/(x² - x + 2), this reduces to:
+///
+///     a · b = (a1·b0 + a0·b1 + a1·b1)·x + (a0·b0 - 2·a1·b1).
+///
+/// The formula for the x coefficient can be implemented more efficiently using the Karatsuba
+/// trick, namely
+///
+/// a1·b0 + a0·b1 + a1·b1 = (b0 + b1)(a0 + a1) - b0·a0
+///
+/// which reduces the number of multiplications at the expense of one subtraction.
+///
 /// Therefore, the following constraints are enforced, assuming the first 4 elements of the stack in
 /// the current frame are a1, a0, b1, b0:
 /// - The first element in the next frame should be a1.
