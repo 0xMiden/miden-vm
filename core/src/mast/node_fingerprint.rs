@@ -168,14 +168,16 @@ fn fingerprint_from_parts(
 
     let children_decorator_roots = children_ids
         .iter()
-        .filter_map(|child_id| {
+        .map(|child_id| {
             hash_by_node_id
                 .get(child_id)
                 .ok_or(MastForestError::ChildFingerprintMissing(*child_id))
                 .map(|child_fingerprint| child_fingerprint.decorator_root)
-                .transpose()
         })
-        .collect::<Result<Vec<DecoratorFingerprint>, MastForestError>>()?;
+        .collect::<Result<Vec<Option<DecoratorFingerprint>>, MastForestError>>()?
+        .into_iter()
+        .flatten()
+        .collect::<Vec<DecoratorFingerprint>>();
 
     // Reminder: the `MastNodeFingerprint`'s decorator root will be `None` if and only if there are
     // no decorators attached to the node, and all children have no decorator roots (meaning
