@@ -2,6 +2,10 @@
 
 ## 0.19.0 (TBD)
 
+#### Changes
+
+- Fixed mismatched Push expectations in decoder syscall_block test ([#2207](https://github.com/0xMiden/miden-vm/pull/2207))
+
 #### Enhancements
 
 - Added `before_enter` and `after_exit` decorator lists to `BasicBlockNode`.([#2167](https://github.com/0xMiden/miden-vm/pull/2167))
