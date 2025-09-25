@@ -13,9 +13,9 @@ use serde::{Deserialize, Serialize};
 
 mod node;
 pub use node::{
-    BasicBlockNode, CallNode, DynNode, ExternalNode, JoinNode, LoopNode, MastNode,
-    MastNodeErrorContext, MastNodeExt, OP_BATCH_SIZE, OP_GROUP_SIZE, OpBatch, OperationOrDecorator,
-    SplitNode,
+    BasicBlockNode, CallNode, DecoratedOpLink, DecoratorOpLinkIterator, DynNode, ExternalNode,
+    JoinNode, LoopNode, MastNode, MastNodeErrorContext, MastNodeExt, OP_BATCH_SIZE, OP_GROUP_SIZE,
+    OpBatch, OperationOrDecorator, SplitNode,
 };
 
 use crate::{
@@ -112,7 +112,7 @@ impl MastForest {
     pub fn add_block(
         &mut self,
         operations: Vec<Operation>,
-        decorators: Option<DecoratorList>,
+        decorators: DecoratorList,
     ) -> Result<MastNodeId, MastForestError> {
         let block = BasicBlockNode::new(operations, decorators)?;
         self.add_node(block)

@@ -13,7 +13,7 @@ use super::{MastNodeErrorContext, MastNodeExt};
 use crate::{
     OPCODE_CALL, OPCODE_SYSCALL,
     chiplets::hasher,
-    mast::{DecoratorId, MastForest, MastForestError, MastNodeId, Remapping},
+    mast::{DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId, Remapping},
 };
 
 // CALL NODE
@@ -142,7 +142,7 @@ impl CallNode {
 }
 
 impl MastNodeErrorContext for CallNode {
-    fn decorators(&self) -> impl Iterator<Item = (usize, DecoratorId)> {
+    fn decorators(&self) -> impl Iterator<Item = DecoratedOpLink> {
         self.before_enter.iter().chain(&self.after_exit).copied().enumerate()
     }
 }

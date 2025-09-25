@@ -41,5 +41,6 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build docs
         run: |
-          rustup update --no-self-update
+          rustup +stable update --no-self-update
+          rustup default stable
           make doc
