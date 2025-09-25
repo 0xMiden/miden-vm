@@ -2,9 +2,9 @@ use core::fmt;
 use std::path::PathBuf;
 
 use clap::Parser;
-use miden_assembly::diagnostics::{Report, WrapErr};
+use miden_assembly::diagnostics::Report;
 use miden_core::Program;
-use miden_processor::{AsmOpInfo, TraceLenSummary};
+use miden_processor::{AsmOpInfo, RowIndex, TraceLenSummary};
 use miden_prover::AdviceInputs;
 use miden_stdlib::StdLibrary;
 use miden_vm::{DefaultHost, Operation, StackInputs, SyncHost, internal::InputFile};
@@ -65,9 +65,6 @@ impl Analyze {
         let stack_inputs = input_data.parse_stack_inputs().map_err(Report::msg)?;
         let advice_inputs = input_data.parse_advice_inputs().map_err(Report::msg)?;
 
-        let execution_details: ExecutionDetails =
-            analyze(&program, stack_inputs, advice_inputs, host)
-                .expect("Could not retrieve execution details");
         let program_name = self
             .program_file
             .file_name()
@@ -75,8 +72,15 @@ impl Analyze {
             .to_str()
             .unwrap();
 
+        let execution_details = analyze(&program, stack_inputs, advice_inputs, host);
+
         println!("============================================================");
-        print!("Analyzed {program_name} program");
+        let err_part = if execution_details.error.is_some() {
+            " until error"
+        } else {
+            ""
+        };
+        print!("Analyzed {program_name} program{err_part}");
         if let Some(input_path) = &self.input_file {
             let input_name = input_path
                 .file_name()
@@ -88,7 +92,7 @@ impl Analyze {
 
         println!("{execution_details}");
 
-        Ok(())
+        execution_details.into_result()
     }
 }
 
@@ -96,7 +100,7 @@ impl Analyze {
 // ================================================================================================
 
 /// Contains details of executing a program, used for program analysis.
-#[derive(Debug, Default, Eq, PartialEq)]
+#[derive(Debug, Default)]
 pub struct ExecutionDetails {
     /// Number of noops executed as part of a program.
     total_noops: usize,
@@ -104,6 +108,8 @@ pub struct ExecutionDetails {
     asm_op_stats: Vec<AsmOpStats>,
     /// Information about VM components trace lengths.
     trace_len_summary: TraceLenSummary,
+    /// The error that halted execution, if any.
+    error: Option<Report>,
 }
 
 impl ExecutionDetails {
@@ -163,6 +169,14 @@ impl ExecutionDetails {
     /// Sets the information about lengths of the trace parts.
     pub fn set_trace_len_summary(&mut self, extended_cycles_info: &TraceLenSummary) {
         self.trace_len_summary = *extended_cycles_info;
+    }
+
+    /// Consumes self to retrieve the error that halted execution, if any.
+    pub fn into_result(self) -> Result<(), Report> {
+        match self.error {
+            Some(e) => Err(e),
+            None => Ok(()),
+        }
     }
 }
 
@@ -239,7 +253,7 @@ fn analyze<H>(
     stack_inputs: StackInputs,
     advice_inputs: AdviceInputs,
     mut host: H,
-) -> Result<ExecutionDetails, Report>
+) -> ExecutionDetails
 where
     H: SyncHost,
 {
@@ -249,8 +263,23 @@ where
         miden_processor::execute_iter(program, stack_inputs, advice_inputs, &mut host);
     execution_details.set_trace_len_summary(vm_state_iterator.trace_len_summary());
 
+    let mut last_clk = RowIndex::default();
+
     for state in vm_state_iterator {
-        let vm_state = state.wrap_err("execution error")?;
+        let vm_state = match state {
+            Ok(state) => state,
+            Err(e) => {
+                // If execution failed, we still include details of execution until the failure, as
+                // well as the failure itself.
+                execution_details.error = Some(
+                    Report::new(e).wrap_err(format!("execution error at clock cycle {last_clk}")),
+                );
+                break;
+            },
+        };
+
+        last_clk = vm_state.clk;
+
         if matches!(vm_state.op, Some(Operation::Noop)) {
             execution_details.incr_noop_count();
         }
@@ -259,7 +288,7 @@ where
         }
     }
 
-    Ok(execution_details)
+    execution_details
 }
 
 // ASMOP STATS
@@ -320,6 +349,27 @@ mod tests {
 
     use super::{AsmOpStats, ExecutionDetails, StackInputs, *};
 
+    impl PartialEq for ExecutionDetails {
+        fn eq(&self, rhs: &Self) -> bool {
+            // Minor hack: this function is used for assert_eq!() in the tests below, but errors
+            // don't impl PartialEq, so we just compare the errors stringly, which is
+            // good enough.
+            let lhs = (
+                self.total_noops,
+                &self.asm_op_stats,
+                self.trace_len_summary,
+                self.error.as_ref().map(|e| e.to_string()),
+            );
+            let rhs = (
+                rhs.total_noops,
+                &rhs.asm_op_stats,
+                rhs.trace_len_summary,
+                rhs.error.as_ref().map(|e| e.to_string()),
+            );
+            lhs.eq(&rhs)
+        }
+    }
+
     #[test]
     fn analyze_test() {
         let source = "proc.foo.1 loc_store.0 end begin mem_storew.4 dropw push.17 push.1 movdn.2 exec.foo drop end";
@@ -327,8 +377,7 @@ mod tests {
         let advice_inputs = AdviceInputs::default();
         let host = DefaultHost::default();
         let program = Assembler::default().with_debug_mode(true).assemble_program(source).unwrap();
-        let execution_details = super::analyze(&program, stack_inputs, advice_inputs, host)
-            .expect("analyze_test: Unexpected Error");
+        let execution_details = super::analyze(&program, stack_inputs, advice_inputs, host);
         let expected_details = ExecutionDetails {
             total_noops: 0,
             asm_op_stats: vec![
@@ -344,6 +393,7 @@ mod tests {
                 39,
                 ChipletsLengths::from_parts(8, 0, 2, 0),
             ),
+            error: None,
         };
         assert_eq!(execution_details, expected_details);
     }

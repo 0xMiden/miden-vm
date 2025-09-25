@@ -9,6 +9,7 @@
 #### Changes
 
 - [BREAKING] Incremented MSRV to 1.90.
+- Made `miden-vm analyze` output analysis even if execution ultimately errored.
 
 ## 0.18.0 (2025-09-21)
 
