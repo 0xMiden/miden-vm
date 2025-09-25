@@ -186,10 +186,8 @@ end
 #! Output: [write_ptr', ...]
 #!
 #! Cycles: 56 + 3 * num_words / 2
-# Possible other name: pipe_pairs_preimage_to_memory
 export.pipe_double_words_preimage_to_memory
   # Assert precondition (8 cycles).
-  # TODO: how precious are those cycles? Should we remove this assert?
   dup is_odd assertz.err="pipe_double_words_preimage_to_memory: num_words must be even"
   # => [num_words, write_ptr, COM, ...]
 
