@@ -372,7 +372,7 @@ end
 #!
 #! Cycles:
 #!  Non-empty: 125 + 3 * pair_count
-#!  Empty: 129 + 3 * pair_count
+#!  Empty: 122 + 3 * pair_count
 proc.get_multi_leaf_value.8192
     # First, we'll pipe all the pairs in the leaf from the advice stack.
     # We'll need a pointer, the count of words to copy, and a "commitment" that it should hash to.
@@ -428,8 +428,8 @@ proc.get_multi_leaf_value.8192
         # If the key wasn't found, then the key's value is an empty word.
         # => [x, x, x, R]
 
-        # (10 cycles)
-        push.0 padw swapw dropw
+        # (7 cycles)
+        drop drop drop padw
         # => [Z, R]
     end
 end
