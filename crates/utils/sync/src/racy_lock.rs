@@ -127,6 +127,15 @@ where
     }
 }
 
+// Ensure `RacyLock` only implements auto-traits when it is sound to do so.
+// `Send` requires ability to move the owned initializer and the (possibly
+// newly allocated) `T` across threads safely.
+unsafe impl<T: Send, F: Send + Fn() -> T> Send for RacyLock<T, F> {}
+
+// `Sync` requires that shared access through `&self` is safe, which implies
+// both the stored `T` and the initializer `F` can be shared across threads.
+unsafe impl<T: Sync, F: Sync + Fn() -> T> Sync for RacyLock<T, F> {}
+
 #[cfg(test)]
 mod tests {
     use alloc::vec::Vec;
@@ -183,5 +192,17 @@ mod tests {
     fn is_sync_send() {
         fn assert_traits<T: Send + Sync>() {}
         assert_traits::<RacyLock<Vec<i32>>>();
+    }
+
+    #[test]
+    fn is_send() {
+        fn assert_send<T: Send>() {}
+        assert_send::<RacyLock<i32>>();
+    }
+
+    #[test]
+    fn is_sync() {
+        fn assert_sync<T: Sync>() {}
+        assert_sync::<RacyLock<i32>>();
     }
 }
