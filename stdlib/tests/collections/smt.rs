@@ -388,6 +388,48 @@ fn test_smt_set_in_multi() {
 }
 
 #[test]
+fn test_smt_set_replace_in_multi() {
+    const SOURCE: &str = "
+        use.std::collections::smt
+        use.std::sys
+
+        begin
+            # => [V, K, R]
+            exec.smt::set
+            # => [V_old, R_new]
+            exec.sys::truncate_stack
+        end
+    ";
+
+    const K0: Word = word(101, 102, 103, 420);
+    const V0: Word = word(555, 666, 777, 888);
+
+    const K1: Word = word(901, 902, 903, 420);
+    const V1: Word = word(122, 133, 144, 155);
+
+    const K2: Word = word(505, 506, 507, 420);
+    const V2: Word = word(555, 566, 577, 588);
+
+    // Try setting K0 to V2.
+
+    let smt = Smt::with_entries([(K0, V0), (K1, V1), (K2, V2)]).unwrap();
+    let mut expected_smt = smt.clone();
+    expected_smt.insert(K0, V2).unwrap();
+
+    let mut initial_stack: Vec<u64> = Default::default();
+
+    prepend_word(&mut initial_stack, V2);
+    prepend_word(&mut initial_stack, K0);
+    prepend_word(&mut initial_stack, smt.root());
+
+    let expected_output = build_expected_stack(V0, expected_smt.root());
+
+    let (store, advice_map) = build_advice_inputs(&smt);
+    let test = build_debug_test!(SOURCE, &initial_stack, &[], store, advice_map);
+    test.expect_stack(&expected_output);
+}
+
+#[test]
 fn test_smt_set_multi_to_single() {
     const SOURCE: &str = "
         use.std::collections::smt

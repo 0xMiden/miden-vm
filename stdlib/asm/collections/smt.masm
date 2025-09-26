@@ -576,7 +576,7 @@ proc.insert_into_leaf.8192
     # => [Z, R_new]
 end
 
-proc.insert_or_replace_in_multi_leaf.8192
+proc.insert_or_replace_in_multi_leaf
     # => [V, K, NV, start_ptr, end_ptr, leaf_size, R]
 
     # Prepare for sorted_array::find_key_value
@@ -613,8 +613,9 @@ end
 
 # MAX_LEAF_SIZE (8192) + 8
 proc.remove_in_multi_leaf.8200
+    # [V=EMPTY, K, NV, end_ptr, leaf_size, R]
+
     push.0 assert.err="REMOVE_IN_MULTI_LEAF TODO"
-    # V=EMPTY, K, NV, end_ptr, leaf_size, R
 
     # => [leaf_size, NV, V, K, R]
 
@@ -704,31 +705,78 @@ proc.set_multi_leaf.8192
     exec.mem::pipe_double_words_preimage_to_memory
     # => [end_ptr; NV, K, V, leaf_size, R]
 
-    # Now we can check if we're removing or inserting a value.
     movdn.12
     # => [NV, K, V, end_ptr, leaf_size, R]
     swapw.2
     # => [V, K, NV, end_ptr, leaf_size, R]
+    locaddr.0 movdn.12
+    # => [V, K, NV, start_ptr, end_ptr, leaf_size, R]
 
-    padw eqw movdn.4 dropw
-    # => [V==EMPTY, V, K, NV, end_ptr, leaf_size, R]
-
-    if.true
-        # => [V=EMPTY, K, NV, end_ptr, leaf_size, R]
-        exec.remove_in_multi_leaf
-    else
-        # => [V, K, NV, end_ptr, leaf_size, R]
-        locaddr.0 movdn.12
-        # => [V, K, NV, start_ptr, end_ptr, leaf_size, R]
-        exec.insert_or_replace_in_multi_leaf
-    end
+    exec.insert_or_replace_in_multi_leaf
 end
 
 proc.replace_in_multi_leaf.8192
     # => [key_ptr, start_ptr, end_ptr, V, K, R]
     nop debug.str="replace_in_multi_leaf: key_ptr, start_ptr, end_ptr, V, K, R:" debug.stack nop
 
-    push.0 assert.err="TODO: replace multi"
+    add.4
+    # => [val_ptr, start_ptr, end_ptr, V, K, R]
+
+    padw dup.4
+    # => [val_ptr, Z, val_ptr, start_ptr, end_ptr, V, K, R]
+    mem_loadw
+    # => [V_old, val_ptr, start_ptr, end_ptr, V, K, R]
+
+    # Word-align the stack for a moment.
+    push.0 movdn.4
+    # => [V_old, X, V, K, R]
+
+    swapw.2
+    # => [V, z, val_ptr, start_ptr, end_ptr, V_old, K, R]
+    dup.5
+    # => [val_ptr, V, z, val_ptr, start_ptr, end_ptr, V_old, K, R]
+    mem_storew
+    # => [V, z, val_ptr, start_ptr, end_ptr, V_old, K, R]
+
+    # Prepare for hash_memory_words
+
+    dropw drop
+    # => [val_ptr, start_ptr, end_ptr, V_old, K, R]
+
+    dup.2 dup.2
+    # => [start_ptr, end_ptr; val_ptr, start_ptr, end_ptr, V_old, K, R]
+
+    exec.rpo::hash_memory_words
+    # => [NV, val_ptr, start_ptr, end_ptr, V_old, K, R]
+    nop debug.str="NV, val_ptr, start_ptr, end_ptr, V_old, K, R" debug.stack nop
+
+    # Prepare for adv.insert_mem.
+    movup.4 drop
+    # => [NV, start_ptr, end_ptr, V_old, K, R]
+    adv.insert_mem
+    # => [NV, start_ptr, end_ptr, V_old, K, R]
+
+    # Prepare for mtree_set.
+    movup.4 drop movup.4 drop
+    # => [NV, V_old, K, R]
+
+    movupw.3
+    # => [R, NV, V_old, K]
+
+    dup.12
+    # => [i, R, NV, V_old, K]
+    push.LEAF_DEPTH
+    # => [d, i, R, NV, V_old, K]
+    mtree_set
+    # => [NV_old, R_new, V_old, K]
+
+    dropw swapw
+    # => [V_old, R_new, K]
+
+    movupw.2 dropw
+    # => [V_old, R_new]
+
+    #push.0 assert.err="TODO: replace multi"
 end
 
 #! Inserts the specified value under the specified key in a Sparse Merkle Tree defined by the
