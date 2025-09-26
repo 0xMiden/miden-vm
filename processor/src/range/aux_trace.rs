@@ -96,7 +96,7 @@ impl AuxTraceBuilder {
             b_range[b_range_idx] = b_range[clk];
             // include the operation lookups
             for lookup in range_checks.iter() {
-                let value = divisors.get(lookup).expect("invalid lookup value {}");
+                let value = divisors.get(lookup).expect("invalid lookup value");
                 b_range[b_range_idx] -= *value;
             }
         }
