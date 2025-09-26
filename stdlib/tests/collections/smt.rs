@@ -1,3 +1,4 @@
+use miden_core::LexicographicWord;
 use miden_stdlib::handlers::smt_peek::SMT_PEEK_EVENT_NAME;
 use miden_utils_testing::prepend_word_to_vec as prepend_word;
 
@@ -344,6 +345,132 @@ fn test_smt_set_single_to_multi() {
 
     expect_second_pair(Smt::with_entries([(K0, V0)]).unwrap(), K1, V1);
     expect_second_pair(Smt::with_entries([(K1, V1)]).unwrap(), K0, V0);
+}
+
+#[test]
+fn test_smt_set_in_multi() {
+    const SOURCE: &str = "
+        use.std::collections::smt
+        use.std::sys
+        use.std::collections::sorted_array
+
+        begin
+            adv_push.4 mem_storew.0 dropw
+            adv_push.4 mem_storew.4 dropw
+            adv_push.4 mem_storew.8 dropw
+            adv_push.4 mem_storew.12 dropw
+            adv_push.4 mem_storew.16 dropw
+            adv_push.4 mem_storew.20 dropw
+            debug.mem.0.24
+
+            # Try sorted_array_find
+            push.24 push.0
+            padw mem_loadw.8
+            #debug.str=\"K, start, end\" debug.stack
+            exec.sorted_array::find_key_value
+            #debug.str=\"is_key_found, key_ptr, start_ptr, end_ptr\" debug.stack.5
+            drop drop drop drop
+
+            # => [V, K, R]
+            #padw mem_loadw.12 debug.stack.8 assert_eqw.err=\"NOPE\" padw mem_loadw.12
+            exec.smt::set
+            # => [V_old, R_new]
+            exec.sys::truncate_stack
+        end
+    ";
+
+    const K0: Word = word(101, 102, 103, 420);
+    const V0: Word = word(555, 666, 777, 888);
+
+    const K1: Word = word(901, 902, 903, 420);
+    const V1: Word = word(122, 133, 144, 155);
+
+    const K: Word = word(505, 506, 507, 420);
+    const V: Word = word(555, 566, 577, 588);
+
+    // XXX
+    let mut advice_stack_dbg: Vec<u64> = Default::default();
+    append_word_to_vec(&mut advice_stack_dbg, K0);
+    append_word_to_vec(&mut advice_stack_dbg, V0);
+    append_word_to_vec(&mut advice_stack_dbg, K);
+    append_word_to_vec(&mut advice_stack_dbg, V);
+    append_word_to_vec(&mut advice_stack_dbg, K1);
+    append_word_to_vec(&mut advice_stack_dbg, V1);
+    // XXX ^
+
+    // Try inserting right in the middle.
+
+    // XXX
+    let control = vec![
+        LexicographicWord::new(K0),
+        LexicographicWord::new(K),
+        LexicographicWord::new(K1),
+    ];
+    let mut sorted = control.clone();
+    sorted.sort();
+    assert_eq!(sorted, control);
+    // ^ XXX
+
+    let smt = Smt::with_entries([(K0, V0), (K1, V1)]).unwrap();
+    let expected_smt = Smt::with_entries([(K0, V0), (K1, V1), (K, V)]).unwrap();
+    let expected_leaf = expected_smt.get_leaf(&K0).hash();
+    std::eprintln!("EXPECTED_LEAF NV: {expected_leaf:?}");
+
+    let mut initial_stack: Vec<u64> = Default::default();
+
+    prepend_word(&mut initial_stack, V);
+    prepend_word(&mut initial_stack, K);
+    prepend_word(&mut initial_stack, smt.root());
+
+    let expected_output = build_expected_stack(EMPTY_WORD, expected_smt.root());
+
+    let (store, advice_map) = build_advice_inputs(&smt);
+    let test = build_debug_test!(SOURCE, &initial_stack, &advice_stack_dbg, store, advice_map);
+    test.expect_stack(&expected_output);
+}
+
+#[test]
+fn test_smt_set_multi_to_single() {
+    const SOURCE: &str = "
+        use.std::collections::smt
+        use.std::sys
+
+        begin
+            # => [V, K, R]
+            exec.smt::set
+            # => [V_old, R_new]
+            exec.sys::truncate_stack
+        end
+    ";
+
+    fn expect_remove_second_pair(smt: &Smt, key: Word) {
+        let mut initial_stack: Vec<u64> = Default::default();
+        prepend_word(&mut initial_stack, EMPTY_WORD);
+        prepend_word(&mut initial_stack, key);
+        prepend_word(&mut initial_stack, smt.root());
+
+        let expected_value = smt.get_value(&key);
+
+        let mut expected_smt = smt.clone();
+        expected_smt.insert(key, EMPTY_WORD).unwrap();
+
+        let expected_output = build_expected_stack(expected_value, expected_smt.root());
+
+        let (store, advice_map) = build_advice_inputs(smt);
+        build_debug_test!(SOURCE, &initial_stack, &[], store, advice_map)
+            .expect_stack(&expected_output);
+    }
+
+    const K0: Word = word(101, 102, 103, 420);
+    const V0: Word = word(555, 666, 777, 888);
+
+    const K1: Word = word(201, 202, 203, 420);
+    const V1: Word = word(122, 133, 144, 155);
+
+    let smt = Smt::with_entries([(K0, V0), (K1, V1)]).unwrap();
+
+    expect_remove_second_pair(&smt, K0);
+    expect_remove_second_pair(&smt, K1);
 }
 
 // HELPER FUNCTIONS
