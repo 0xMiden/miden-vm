@@ -117,7 +117,7 @@ Stack state before step 36:
     let test = build_debug_test!(source, &stack_inputs);
     let (_stack, output) = test.execute_with_debug_buffer().expect("execution failed");
 
-    assert_eq!(output, expected_output, "actual ouptut:\n{}", output);
+    assert_eq!(output, expected_output, "actual output:\n{}", output);
 }
 
 #[test]
@@ -173,7 +173,7 @@ Memory state before step 15 for the context 0 in the interval [12, 14]:
     let test = build_debug_test!(source, &stack_inputs);
     let (_stack, output) = test.execute_with_debug_buffer().expect("execution failed");
 
-    assert_eq!(output, expected_output, "actual ouptut:\n{}", output);
+    assert_eq!(output, expected_output, "actual output:\n{}", output);
 }
 
 #[test]
@@ -262,7 +262,7 @@ Memory state before step 34 for the context 0:
     let test = build_debug_test!(source, &stack_inputs);
     let (_stack, output) = test.execute_with_debug_buffer().expect("execution failed");
 
-    assert_eq!(output, expected_output, "actual ouptut:\n{}", output);
+    assert_eq!(output, expected_output, "actual output:\n{}", output);
 }
 
 #[test]
@@ -368,5 +368,5 @@ Advice Stack empty before step 45.
     let test = build_debug_test!(source, &stack_input, &advice_stack);
     let (_stack, output) = test.execute_with_debug_buffer().expect("execution failed");
 
-    assert_eq!(output, expected_output, "actual ouptut:\n{}", output);
+    assert_eq!(output, expected_output, "actual output:\n{}", output);
 }
