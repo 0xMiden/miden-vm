@@ -487,6 +487,7 @@ proc.insert_into_leaf.8192
     loc_load.6
     # => [cur_write, K]
 
+    # *cur_write = K
     mem_storew
 
     loc_loadw.16
@@ -495,6 +496,7 @@ proc.insert_into_leaf.8192
     loc_load.6 add.4
     # => [cur_write, V]
 
+    # *cur_write = V
     mem_storew dropw
 
     # cur_write = &new_pairs[2]
@@ -575,50 +577,45 @@ proc.insert_into_leaf.8192
 end
 
 proc.insert_or_replace_in_multi_leaf.8192
-    # LOCALS:
-    #    0: num_words
-    #    1: end_ptr
-    # 4..8: K
+    # => [V, K, NV, start_ptr, end_ptr, leaf_size, R]
 
-    div.4 loc_store.0
-    # => [NV, V, K, R]
-    dupw.2 loc_storew.4 dropw loc_load.0
-    # => [num_words, NV, V, K, R]
+    # Prepare for sorted_array::find_key_value
 
-    # NV is COM.
+    swapw
+    # => [K, V, NV, start_ptr, end_ptr, leaf_size, R]
+    movupw.2 dropw
+    # => [K, V, start_ptr, end_ptr, leaf_size, R]
 
-    # FIXME: is there any particular value I should use for the pointer?
-    push.0xA0 swap
-    # => [num_words, ptr, COM, V, K, R]
+    movup.10 drop
+    # => [K, V, start_ptr, end_ptr, R]
 
-    exec.mem::pipe_double_words_preimage_to_memory
-    # => [end_ptr, V, K, R]
+    swapw dupw.1
+    # => [K, V, K, start_ptr, end_ptr, R]
 
-    loc_store.1 # => [V, K, R]
-    dupw.1
-    # => [K, V, K, R]
+    movup.12 movdn.4
+    # => [K, start_ptr, V, K, end_ptr, R]
 
-    push.0xA0 movdn.4
-    # => [K, start_ptr, V, K, R]
-
-    loc_load.1 movdn.5
-    # => [K, start_ptr, end_ptr, V, K, R]
+    movup.13 movdn.5
+    # => [K, start_ptr, end_ptr; V, K, R]
 
     exec.sorted_array::find_key_value
-    # => [is_key_found, key_ptr, start_ptr, end_ptr, V, K, R]
-
+    # => [is_key_found, key_ptr, start_ptr, end_ptr; V, K, R]
     if.true
         # We're replacing or removing an existing value.
         # => [key_ptr, start_ptr, end_ptr, V, K, R]
         exec.replace_in_multi_leaf
     else
         # => [key_ptr, start_ptr, end_ptr, V, K, R]
+        # We're inserting a new value in the sorted array.
         exec.insert_into_leaf
     end
 end
 
 # MAX_LEAF_SIZE (8192) + 8
 proc.remove_in_multi_leaf.8200
+    push.0 assert.err="REMOVE_IN_MULTI_LEAF TODO"
+    # V=EMPTY, K, NV, end_ptr, leaf_size, R
+
     # => [leaf_size, NV, V, K, R]
 
     # LOCALS:
@@ -674,32 +671,55 @@ proc.remove_in_multi_leaf.8200
 
     # Okay now do the remove.
 
-    push.0 assert.err="TODO(replace_in_multi_leaf)"
+    push.0 assert.err="TODO(remove_in_multi_leaf)"
 end
 
 # Inputs: [leaf_size, NV, V, K, R]
-proc.set_multi_leaf
+proc.set_multi_leaf.8192
 
-    # Check if we're removing a value:
-    movdn.8
-    # => [NV, V, leaf_size, K, R]
-    dupw.1 padw
-    # => [Z, V, NV, V, leaf_size, K, R]
-    eqw
-    # => [V==EMPTY, Z, V, NV, V, leaf_size, K, R]
-    movdn.8 dropw dropw
-    # => [V==EMPTY, NV, V, leaf_size, K, R]
+    # => [leaf_size, NV, V, K, R]
+
+    # We'll have to pipe all the pairs from the advice stack. Let's get the
+    # stack ready for pipe_double_words_preimage_to_memory.
+
+    movdn.12
+    # => [NV, V, K, leaf_size, R]
+
+    movupw.2 swapw
+    # => [NV, K, V, leaf_size, R]
+
+    dup.12 div.4
+    # => [num_words, NV, K, V, leaf_size, R]
+
+    movdn.4
+    # => [NV, num_words, K, V, leaf_size, R]
+
+    # COM = NV
+    dupw movup.8
+    # => [num_words, COM, NV, K, V, leaf_size, R]
+
+    locaddr.0 swap
+    # => [num_words, ptr, COM; NV, K, V, leaf_size, R]
+
+    exec.mem::pipe_double_words_preimage_to_memory
+    # => [end_ptr; NV, K, V, leaf_size, R]
+
+    # Now we can check if we're removing or inserting a value.
+    movdn.12
+    # => [NV, K, V, end_ptr, leaf_size, R]
+    swapw.2
+    # => [V, K, NV, end_ptr, leaf_size, R]
+
+    padw eqw movdn.4 dropw
+    # => [V==EMPTY, V, K, NV, end_ptr, leaf_size, R]
+
     if.true
-        # We're actually removing.
-        # => [NV, V, leaf_size, K, R]
-        movup.8
-        # => [leaf_size, NV, V, K, R]
+        # => [V=EMPTY, K, NV, end_ptr, leaf_size, R]
         exec.remove_in_multi_leaf
     else
-        # => [NV, V, leaf_size, K, R]
-        movup.8
-        # => [leaf_size, NV, V, K, R]
-
+        # => [V, K, NV, end_ptr, leaf_size, R]
+        locaddr.0 movdn.12
+        # => [V, K, NV, start_ptr, end_ptr, leaf_size, R]
         exec.insert_or_replace_in_multi_leaf
     end
 end
