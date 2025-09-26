@@ -31,6 +31,8 @@ pub enum DebugOptions {
     /// specifies the overall number of locals.
     LocalInterval(u16, u16, u16),
     /// Prints out the top n items of the advice stack for the current context.
+    ///
+    /// If `n = 0`, the entire stack is printed.
     AdvStackTop(u16),
 }
 
