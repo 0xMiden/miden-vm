@@ -37,87 +37,86 @@ fn test_debug_stack() {
 
         end";
 
-    let expected_output = "\
-Stack state before step 1:
-Stack state before step 1:
-├──  0: 4
-├──  1: 3
-├──  2: 2
-└──  3: 1
-Stack state before step 15:
-├──  0: 42
-├──  1: 42
-├──  2: 42
-├──  3: 42
-├──  4: 42
-├──  5: 42
-├──  6: 42
-├──  7: 42
-├──  8: 42
-├──  9: 42
-├── 10: 42
-├── 11: 42
-├── 12: 4
-├── 13: 3
-├── 14: 2
-├── 15: 1
-├── 16: 0
-├── 17: 0
-├── 18: 0
-└── 19: 0
-└── (8 more items)
-Stack state before step 27:
-├──  0: 4
-├──  1: 3
-├──  2: 2
-├──  3: 1
-├──  4: 0
-├──  5: 0
-├──  6: 0
-├──  7: 0
-├──  8: 0
-├──  9: 0
-├── 10: 0
-├── 11: 0
-├── 12: 0
-├── 13: 0
-├── 14: 0
-├── 15: 0
-├── 16: EMPTY
-├── 17: EMPTY
-├── 18: EMPTY
-└── 19: EMPTY
-Stack state before step 30:
-├──  0: 5
-├──  1: 4
-├──  2: 3
-├──  3: 2
-├──  4: 1
-├──  5: 0
-└──  6: 0
-Stack state before step 36:
-├──  0: 0
-├──  1: 0
-├──  2: 0
-├──  3: 0
-├──  4: 0
-├──  5: 0
-├──  6: 0
-├──  7: 0
-├──  8: 0
-├──  9: 0
-├── 10: 0
-├── 11: 0
-├── 12: 0
-├── 13: 0
-├── 14: 0
-└── 15: 0
-";
     // Execute with debug buffer
     let test = build_debug_test!(source, &stack_inputs);
     let (_stack, output) = test.execute_with_debug_buffer().expect("execution failed");
 
-    assert_eq!(output, expected_output, "actual output:\n{}", output);
+    insta::assert_snapshot!(output, @r"
+    Stack state before step 1:
+    Stack state before step 1:
+    ├──  0: 4
+    ├──  1: 3
+    ├──  2: 2
+    └──  3: 1
+    Stack state before step 15:
+    ├──  0: 42
+    ├──  1: 42
+    ├──  2: 42
+    ├──  3: 42
+    ├──  4: 42
+    ├──  5: 42
+    ├──  6: 42
+    ├──  7: 42
+    ├──  8: 42
+    ├──  9: 42
+    ├── 10: 42
+    ├── 11: 42
+    ├── 12: 4
+    ├── 13: 3
+    ├── 14: 2
+    ├── 15: 1
+    ├── 16: 0
+    ├── 17: 0
+    ├── 18: 0
+    └── 19: 0
+    └── (8 more items)
+    Stack state before step 27:
+    ├──  0: 4
+    ├──  1: 3
+    ├──  2: 2
+    ├──  3: 1
+    ├──  4: 0
+    ├──  5: 0
+    ├──  6: 0
+    ├──  7: 0
+    ├──  8: 0
+    ├──  9: 0
+    ├── 10: 0
+    ├── 11: 0
+    ├── 12: 0
+    ├── 13: 0
+    ├── 14: 0
+    ├── 15: 0
+    ├── 16: EMPTY
+    ├── 17: EMPTY
+    ├── 18: EMPTY
+    └── 19: EMPTY
+    Stack state before step 30:
+    ├──  0: 5
+    ├──  1: 4
+    ├──  2: 3
+    ├──  3: 2
+    ├──  4: 1
+    ├──  5: 0
+    └──  6: 0
+    Stack state before step 36:
+    ├──  0: 0
+    ├──  1: 0
+    ├──  2: 0
+    ├──  3: 0
+    ├──  4: 0
+    ├──  5: 0
+    ├──  6: 0
+    ├──  7: 0
+    ├──  8: 0
+    ├──  9: 0
+    ├── 10: 0
+    ├── 11: 0
+    ├── 12: 0
+    ├── 13: 0
+    ├── 14: 0
+    └── 15: 0
+    ");
 }
 
 #[test]
@@ -138,42 +137,40 @@ fn test_debug_mem() {
             debug.mem.12.14 # [EMPTY, ..., EMPTY]
         end";
 
-    let expected_output = "\
-Memory state before step 11 for the context 0:
-├── 0x00000000: 1
-├── 0x00000001: 2
-├── 0x00000002: 3
-└── 0x00000003: 0
-Memory state before step 11 for the context 0 at address 0x00000002: 3
-Memory state before step 11 for the context 0 at address 0x00000006: EMPTY
-Memory state before step 11 for the context 0 in the interval [1, 2]:
-├── 0x00000001: 2
-└── 0x00000002: 3
-Memory state before step 15 for the context 0:
-├── 0x00000000: 1
-├── 0x00000001: 2
-├── 0x00000002: 3
-├── 0x00000003: 0
-├── 0x00000004: 5
-├── 0x00000005: 0
-├── 0x00000006: 0
-└── 0x00000007: 0
-Memory state before step 15 for the context 0 in the interval [2, 5]:
-├── 0x00000002: 3
-├── 0x00000003: 0
-├── 0x00000004: 5
-└── 0x00000005: 0
-Memory state before step 15 for the context 0 in the interval [12, 14]:
-├── 0x0000000c: EMPTY
-├── 0x0000000d: EMPTY
-└── 0x0000000e: EMPTY
-";
-
     // Execute with debug buffer
     let test = build_debug_test!(source, &stack_inputs);
     let (_stack, output) = test.execute_with_debug_buffer().expect("execution failed");
 
-    assert_eq!(output, expected_output, "actual output:\n{}", output);
+    insta::assert_snapshot!(output, @r"
+    Memory state before step 11 for the context 0:
+    ├── 0x00000000: 1
+    ├── 0x00000001: 2
+    ├── 0x00000002: 3
+    └── 0x00000003: 0
+    Memory state before step 11 for the context 0 at address 0x00000002: 3
+    Memory state before step 11 for the context 0 at address 0x00000006: EMPTY
+    Memory state before step 11 for the context 0 in the interval [1, 2]:
+    ├── 0x00000001: 2
+    └── 0x00000002: 3
+    Memory state before step 15 for the context 0:
+    ├── 0x00000000: 1
+    ├── 0x00000001: 2
+    ├── 0x00000002: 3
+    ├── 0x00000003: 0
+    ├── 0x00000004: 5
+    ├── 0x00000005: 0
+    ├── 0x00000006: 0
+    └── 0x00000007: 0
+    Memory state before step 15 for the context 0 in the interval [2, 5]:
+    ├── 0x00000002: 3
+    ├── 0x00000003: 0
+    ├── 0x00000004: 5
+    └── 0x00000005: 0
+    Memory state before step 15 for the context 0 in the interval [12, 14]:
+    ├── 0x0000000c: EMPTY
+    ├── 0x0000000d: EMPTY
+    └── 0x0000000e: EMPTY
+    ");
 }
 
 #[test]
@@ -210,59 +207,57 @@ fn test_debug_local() {
         end"
     );
 
-    let expected_output = "\
-Memory state before step 25 for the context 0:
-├── 0x40000000: 0
-├── 0x40000001: 0
-├── 0x40000002: 1
-├── 0x40000003: 2
-├── 0x40000004: 3
-├── 0x40000005: 0
-├── 0x40000006: 42
-└── 0x40000007: 0
-State of procedure locals [0, 5] before step 25:
-├──     0: 1
-├──     1: 2
-├──     2: 3
-├──     3: 0
-├──     4: 42
-└──     5: 0
-State of procedure local 2 before step 25: 3
-State of procedure local 4 before step 25: 42
-State of procedure locals [1, 2] before step 25:
-├──     1: 2
-└──     2: 3
-State of procedure locals [0, 5] before step 29:
-├──     0: 1
-├──     1: 2
-├──     2: 3
-├──     3: 0
-├──     4: 5
-└──     5: 0
-State of procedure local 4 before step 29: 5
-State of procedure local 6 before step 29: EMPTY
-State of procedure locals [2, 6] before step 29:
-├──     2: 3
-├──     3: 0
-├──     4: 5
-├──     5: 0
-└──     6: EMPTY
-Memory state before step 34 for the context 0:
-├── 0x40000000: 0
-├── 0x40000001: 0
-├── 0x40000002: 1
-├── 0x40000003: 2
-├── 0x40000004: 3
-├── 0x40000005: 0
-├── 0x40000006: 5
-└── 0x40000007: 0
-";
-
     // Execute with debug buffer
     let test = build_debug_test!(source, &stack_inputs);
     let (_stack, output) = test.execute_with_debug_buffer().expect("execution failed");
 
-    assert_eq!(output, expected_output, "actual output:\n{}", output);
+    insta::assert_snapshot!(output, @r"
+    Memory state before step 25 for the context 0:
+    ├── 0x40000000: 0
+    ├── 0x40000001: 0
+    ├── 0x40000002: 1
+    ├── 0x40000003: 2
+    ├── 0x40000004: 3
+    ├── 0x40000005: 0
+    ├── 0x40000006: 42
+    └── 0x40000007: 0
+    State of procedure locals [0, 5] before step 25:
+    ├──     0: 1
+    ├──     1: 2
+    ├──     2: 3
+    ├──     3: 0
+    ├──     4: 42
+    └──     5: 0
+    State of procedure local 2 before step 25: 3
+    State of procedure local 4 before step 25: 42
+    State of procedure locals [1, 2] before step 25:
+    ├──     1: 2
+    └──     2: 3
+    State of procedure locals [0, 5] before step 29:
+    ├──     0: 1
+    ├──     1: 2
+    ├──     2: 3
+    ├──     3: 0
+    ├──     4: 5
+    └──     5: 0
+    State of procedure local 4 before step 29: 5
+    State of procedure local 6 before step 29: EMPTY
+    State of procedure locals [2, 6] before step 29:
+    ├──     2: 3
+    ├──     3: 0
+    ├──     4: 5
+    ├──     5: 0
+    └──     6: EMPTY
+    Memory state before step 34 for the context 0:
+    ├── 0x40000000: 0
+    ├── 0x40000001: 0
+    ├── 0x40000002: 1
+    ├── 0x40000003: 2
+    ├── 0x40000004: 3
+    ├── 0x40000005: 0
+    ├── 0x40000006: 5
+    └── 0x40000007: 0
+    ");
 }
 
 #[test]
@@ -304,69 +299,67 @@ fn test_debug_adv_stack() {
             debug.adv_stack
         end";
 
-    let expected_output = "\
-Advice Stack state before step 1:
-├──  0: 8
-├──  1: 7
-├──  2: 6
-├──  3: 5
-├──  4: 4
-├──  5: 3
-├──  6: 2
-└──  7: 1
-Advice Stack state before step 1:
-├──  0: 8
-└──  1: 7
-└── (6 more items)
-Advice Stack state before step 1:
-├──  0: 8
-├──  1: 7
-├──  2: 6
-├──  3: 5
-├──  4: 4
-├──  5: 3
-├──  6: 2
-└──  7: 1
-Advice Stack state before step 6:
-├──  0: 4
-├──  1: 3
-├──  2: 2
-└──  3: 1
-Stack state before step 6:
-├──  0: 5
-├──  1: 6
-├──  2: 7
-├──  3: 8
-├──  4: 4
-├──  5: 3
-├──  6: 2
-├──  7: 1
-└──  8: 0
-Stack state before step 23:
-├──  0: 4
-├──  1: 4
-├──  2: 3
-├──  3: 2
-├──  4: 1
-└──  5: 0
-Advice Stack state before step 23:
-├──  0: 3
-├──  1: 2
-└──  2: 1
-Stack state before step 28:
-├──  0: 1
-├──  1: 2
-├──  2: 3
-├──  3: 3
-├──  4: 2
-├──  5: 1
-└──  6: 0
-Advice Stack empty before step 45.
-";
-
     // Execute with debug buffer
     let test = build_debug_test!(source, &stack_input, &advice_stack);
     let (_stack, output) = test.execute_with_debug_buffer().expect("execution failed");
 
-    assert_eq!(output, expected_output, "actual output:\n{}", output);
+    insta::assert_snapshot!(output, @r"
+    Advice Stack state before step 1:
+    ├──  0: 8
+    ├──  1: 7
+    ├──  2: 6
+    ├──  3: 5
+    ├──  4: 4
+    ├──  5: 3
+    ├──  6: 2
+    └──  7: 1
+    Advice Stack state before step 1:
+    ├──  0: 8
+    └──  1: 7
+    └── (6 more items)
+    Advice Stack state before step 1:
+    ├──  0: 8
+    ├──  1: 7
+    ├──  2: 6
+    ├──  3: 5
+    ├──  4: 4
+    ├──  5: 3
+    ├──  6: 2
+    └──  7: 1
+    Advice Stack state before step 6:
+    ├──  0: 4
+    ├──  1: 3
+    ├──  2: 2
+    └──  3: 1
+    Stack state before step 6:
+    ├──  0: 5
+    ├──  1: 6
+    ├──  2: 7
+    ├──  3: 8
+    ├──  4: 4
+    ├──  5: 3
+    ├──  6: 2
+    ├──  7: 1
+    └──  8: 0
+    Stack state before step 23:
+    ├──  0: 4
+    ├──  1: 4
+    ├──  2: 3
+    ├──  3: 2
+    ├──  4: 1
+    └──  5: 0
+    Advice Stack state before step 23:
+    ├──  0: 3
+    ├──  1: 2
+    └──  2: 1
+    Stack state before step 28:
+    ├──  0: 1
+    ├──  1: 2
+    ├──  2: 3
+    ├──  3: 3
+    ├──  4: 2
+    ├──  5: 1
+    └──  6: 0
+    Advice Stack empty before step 45.
+    ");
 }
