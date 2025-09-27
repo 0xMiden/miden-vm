@@ -604,7 +604,7 @@ proc.remove_in_multi_leaf.8200
 
     loc_store.3 # key_ptr
     dup loc_store.0 # pairs_array_start
-    loc_store.4 # cur_read
+    loc_store.4 # cur_read = pairs_array_start
     loc_store.1 # pairs_array_end
 
     locaddr.8 loc_store.5 # cur_write
@@ -628,26 +628,43 @@ proc.remove_in_multi_leaf.8200
 
     dup neq.0
     if.true
-        push.0 assert.err="TODO(unimpl)"
         # => [key - pairs_start, V_old, K, R]
+        div.4
+        # => [num_words, V_old, K, R]
+        loc_load.5 loc_load.4
+        # => [cur_read, cur_write, num_words, V_old, K, R]
+        dup.2
+        # => [num_words, cur_read, cur_write; num_words, V_old, K, R]
+        exec.mem::memcopy_words
+        # => [num_words, V_old, K, R]
+
+        # cur_write++
+        mul.4 dup loc_load.5 add loc_store.5
+
+        # cur_read++
+        loc_load.4 add loc_store.4
     else
         # => [key - pairs_start, V_old, K, R]
 
         drop
 
-        # Increment our pointer.
+        # cur_read++
         loc_load.4 add.8 loc_store.4
         nop
     end
 
     # => [V_old, K, R]
 
+    # cur_read = key_ptr+8
+    loc_load.3 add.8 loc_store.4
+
+
     # Copy from cur_read..end_ptr
     loc_load.1 # pairs_array_end
     loc_load.4 # cur_read
-    # => [cur_read, pairs_array_end]
+    # => [cur_read, pairs_array_end, V_old, K, R]
     sub
-    # => [pairs_end - cur_read]
+    # => [pairs_end - cur_read, V_old, K, R]
 
     dup neq.0
     if.true
@@ -659,7 +676,6 @@ proc.remove_in_multi_leaf.8200
 
         dup.2
         # => [num_words, cur_read, cur_write; num_words, V_old, K, R]
-
         exec.mem::memcopy_words
         # => [num_words, V_old, K, R]
 
@@ -667,6 +683,8 @@ proc.remove_in_multi_leaf.8200
         mul.4 loc_load.5 add loc_store.5
     else
         # Nothing to copy.
+        drop
+        # => [V_old, K, R]
         nop
     end
 
@@ -692,7 +710,6 @@ end
 
 proc.hash_and_insert_mem
     # => [start_addr, end_addr, i, R, ...]
-    nop debug.str="start_addr, end_addr, i, R, ..." debug.stack nop
 
     dup.1 dup.1
     # => [start_addr, end_addr, start_addr, end_addr, i, R, ...]
@@ -715,8 +732,6 @@ proc.hash_and_insert_mem
 
     push.LEAF_DEPTH
     # => [d, i, R, NV]
-
-    nop debug.str="d, i, R, NV" debug.stack nop
 
     mtree_set
     # => [NV_old, R_new, ...]
