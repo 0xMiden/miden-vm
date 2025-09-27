@@ -1,4 +1,4 @@
-// Prover-related proof data types (Proof, Commitments, OpenedValues) will live here
+// Prover-related proof data types (Proof, Commitments, OpenedValues)
 
 use serde::{Deserialize, Serialize};
 use p3_commit::Pcs;

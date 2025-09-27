@@ -2,8 +2,7 @@ use alloc::vec::Vec;
 
 use p3_air::{AirBuilder, AirBuilderWithPublicValues, ExtensionBuilder, PermutationAirBuilder};
 use p3_field::{BasedVectorSpace, PackedField};
-use p3_matrix::dense::{RowMajorMatrix, RowMajorMatrixView};
-use p3_matrix::stack::VerticalPair;
+use p3_matrix::dense::RowMajorMatrixView;
 use p3_uni_stark::{PackedChallenge, PackedVal, StarkGenericConfig, Val};
 
 #[derive(Debug)]
@@ -18,8 +17,6 @@ pub struct ProverConstraintFolder<'a, SC: StarkGenericConfig> {
     pub accumulator: PackedChallenge<SC>,
     pub constraint_index: usize,
 }
-
-type ViewPair<'a, T> = VerticalPair<RowMajorMatrixView<'a, T>, RowMajorMatrixView<'a, T>>;
 
 impl<'a, SC: StarkGenericConfig> AirBuilder for ProverConstraintFolder<'a, SC> {
     type F = Val<SC>;

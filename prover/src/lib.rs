@@ -7,15 +7,14 @@ extern crate alloc;
 extern crate std;
 
 use core::marker::PhantomData;
-use std::{println, vec, vec::Vec};
+use std::println;
 use tracing::instrument;
 
-use air::{ProcessorAir, PublicInputs, trace::TRACE_WIDTH};
+use air::{ProcessorAir, PublicInputs};
 #[cfg(all(feature = "metal", target_arch = "aarch64", target_os = "macos"))]
 use miden_gpu::HashFn;
 
 use p3_field::extension::BinomialExtensionField;
-use p3_matrix::dense::RowMajorMatrix;
 use p3_uni_stark::StarkGenericConfig;
 use processor::{ExecutionTrace, Program, ZERO, math::Felt};
 
@@ -148,57 +147,8 @@ where
 // HELPERS
 // ================================================================================================
 
-#[instrument("naive transposition", skip_all)]
-fn to_row_major(trace: &ExecutionTrace) -> RowMajorMatrix<Felt> {
-    let mut result: RowMajorMatrix<Felt> =
-        RowMajorMatrix::new(vec![ZERO; TRACE_WIDTH * trace.get_trace_len()], TRACE_WIDTH);
-    result.rows_mut().enumerate().for_each(|(row_idx, row)| {
-        for col_idx in 0..TRACE_WIDTH {
-            row[col_idx] = trace.main_trace.get(col_idx, row_idx)
-        }
-    });
-
-    result
-}
-
-// Prover-related proof data types (Proof, Commitments, OpenedValues) will live here
-
-use p3_commit::Pcs;
-use serde::{Deserialize, Serialize};
+// HELPERS and TYPES are consolidated into prove/ submodules
 
 use crate::prove::{prove_blake, prove_keccak, prove_rpo};
-
-type Com<SC> = <<SC as StarkGenericConfig>::Pcs as Pcs<
-    <SC as StarkGenericConfig>::Challenge,
-    <SC as StarkGenericConfig>::Challenger,
->>::Commitment;
-
-type PcsProof<SC> = <<SC as StarkGenericConfig>::Pcs as Pcs<
-    <SC as StarkGenericConfig>::Challenge,
-    <SC as StarkGenericConfig>::Challenger,
->>::Proof;
-
-#[derive(Serialize, Deserialize)]
-#[serde(bound = "")]
-pub struct Proof<SC: StarkGenericConfig> {
-    pub(crate) commitments: Commitments<Com<SC>>,
-    pub(crate) opened_values: OpenedValues<SC::Challenge>,
-    pub(crate) opening_proof: PcsProof<SC>,
-    pub(crate) degree_bits: usize,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Commitments<Com> {
-    pub(crate) trace: Com,
-    pub(crate) aux_trace: Com,
-    pub(crate) quotient_chunks: Com,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct OpenedValues<Challenge> {
-    pub(crate) trace_local: Vec<Challenge>,
-    pub(crate) trace_next: Vec<Challenge>,
-    pub(crate) aux_trace_local: Vec<Challenge>,
-    pub(crate) aux_trace_next: Vec<Challenge>,
-    pub(crate) quotient_chunks: Vec<Vec<Challenge>>,
-}
+pub use crate::prove::types::{Proof, Commitments, OpenedValues};
+use crate::prove::utils::to_row_major;

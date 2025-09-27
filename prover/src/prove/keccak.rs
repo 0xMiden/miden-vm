@@ -23,7 +23,7 @@ use p3_matrix::row_index_mapped::RowIndexMappedView;
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_symmetric::{CompressionFunctionFromHasher, PaddingFreeSponge, SerializingHasher};
 use p3_uni_stark::StarkGenericConfig;
-use p3_uni_stark::{StarkConfig, SymbolicExpression, get_symbolic_constraints};
+use p3_uni_stark::StarkConfig;
 use p3_util::{log2_ceil_usize, log2_strict_usize};
 use processor::ExecutionTrace;
 use std::vec;

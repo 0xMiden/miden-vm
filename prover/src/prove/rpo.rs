@@ -8,15 +8,15 @@ use miden_crypto::{BinomialExtensionField, hash::rpo::RpoPermutation256};
 use p3_challenger::{CanObserve, CanSample, DuplexChallenger, FieldChallenger};
 use p3_commit::{ExtensionMmcs, Pcs};
 use p3_dft::Radix2DitParallel;
-use p3_field::{Field, PrimeCharacteristicRing};
 use p3_field::coset::TwoAdicMultiplicativeCoset;
+use p3_field::{Field, PrimeCharacteristicRing};
 use p3_fri::{FriParameters, TwoAdicFriPcs};
 use p3_matrix::bitrev::BitReversalPerm;
 use p3_matrix::dense::DenseMatrix;
 use p3_matrix::row_index_mapped::RowIndexMappedView;
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_symmetric::{PaddingFreeSponge, TruncatedPermutation};
-use p3_uni_stark::{StarkConfig, StarkGenericConfig, SymbolicExpression, get_symbolic_constraints};
+use p3_uni_stark::{StarkConfig, StarkGenericConfig};
 use p3_util::{log2_ceil_usize, log2_strict_usize};
 use processor::ExecutionTrace;
 
@@ -30,7 +30,8 @@ type Challenge = BinomialExtensionField<Felt, 2>;
 type P = RpoPermutation256;
 type FieldHash = PaddingFreeSponge<P, 12, 8, 4>;
 type Compress = TruncatedPermutation<P, 2, 4, 12>;
-type ValMmcs = MerkleTreeMmcs<<Felt as Field>::Packing, <Felt as Field>::Packing, FieldHash, Compress, 4>;
+type ValMmcs =
+    MerkleTreeMmcs<<Felt as Field>::Packing, <Felt as Field>::Packing, FieldHash, Compress, 4>;
 type ChallengeMmcs = ExtensionMmcs<Felt, Challenge, ValMmcs>;
 type FriPcs = TwoAdicFriPcs<Felt, Dft, ValMmcs, ChallengeMmcs>;
 type Dft = Radix2DitParallel<Felt>;
@@ -38,7 +39,6 @@ type Challenger = DuplexChallenger<Felt, P, 12, 8>;
 type StarkConfigRpo = StarkConfig<FriPcs, Challenge, Challenger>;
 
 pub fn prove_rpo(trace: ExecutionTrace) -> Vec<u8> {
-
     let air = ProcessorAir {};
     let public_values: Vec<Felt> = vec![];
     let trace_row_major = to_row_major(&trace);
@@ -130,7 +130,7 @@ pub fn prove_rpo(trace: ExecutionTrace) -> Vec<u8> {
         info_span!("commit to quotient poly chunks").in_scope(|| {
             <FriPcs as Pcs<Challenge, Challenger>>::commit(
                 pcs,
-                qc_domains.into_iter().zip(quotient_chunks.into_iter()) ,
+                qc_domains.into_iter().zip(quotient_chunks.into_iter()),
             )
         });
     challenger.observe(quotient_commit.clone());
