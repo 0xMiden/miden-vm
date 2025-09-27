@@ -9,7 +9,7 @@ use tracing::instrument;
 
 use super::{
     data::{Libraries, OutputFile},
-    utils::{get_masm_program, get_masp_program},
+    utils::{get_masm_program, get_masm_program_with_kernel, get_masp_program},
 };
 
 #[derive(Debug, Clone, Parser)]
@@ -50,6 +50,10 @@ pub struct RunCmd {
     /// Disable debug instructions (release mode)
     #[arg(short = 'r', long = "release")]
     release: bool,
+
+    /// Path to kernel file (.masm assembly file)
+    #[arg(long = "kernel", value_parser)]
+    kernel_file: Option<PathBuf>,
 }
 
 impl RunCmd {
@@ -166,12 +170,26 @@ fn run_masm_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
         }
     }
 
+    // validate kernel file if provided
+    if let Some(kernel_path) = &params.kernel_file {
+        if !kernel_path.is_file() {
+            let name = kernel_path.display();
+            return Err(Report::msg(format!("Kernel file {name} must be a file.")));
+        }
+        if kernel_path.extension().and_then(|s| s.to_str()) != Some("masm") {
+            return Err(Report::msg("Kernel file must have a .masm extension."));
+        }
+    }
+
     // load libraries from files
     let libraries = Libraries::new(&params.library_paths)?;
 
     // load program from file and compile
-    let (program, source_manager) =
-        get_masm_program(&params.program_file, &libraries, !params.release)?;
+    let (program, source_manager) = if let Some(kernel_path) = &params.kernel_file {
+        get_masm_program_with_kernel(&params.program_file, &libraries, !params.release, kernel_path)?
+    } else {
+        get_masm_program(&params.program_file, &libraries, !params.release)?
+    };
     let input_data = InputFile::read(&params.input_file, &params.program_file)?;
 
     let execution_options = ExecutionOptions::new(
