@@ -50,21 +50,36 @@ pub fn get_masm_program_with_kernel(
     let debug_mode = if debug_on { Debug::On } else { Debug::Off };
     let source_manager = Arc::new(DefaultSourceManager::default());
     
-    // Load kernel file into source manager (same approach as in tests)
-    let kernel_source = source_manager.load(
-        SourceLanguage::Masm,
-        kernel_path.to_string_lossy().to_string().into(),
-        fs::read_to_string(kernel_path)
-            .into_diagnostic()
-            .wrap_err_with(|| format!("Failed to read kernel file `{}`", kernel_path.display()))?,
-    );
-    
-    // Compile kernel
-    println!("Compiling kernel from: {}", kernel_path.display());
-    let kernel_lib = Assembler::new(source_manager.clone())
-        .assemble_kernel(kernel_source)
-        .wrap_err_with(|| format!("Failed to compile kernel from `{}`", kernel_path.display()))?;
-    println!("Kernel compiled successfully!");
+    // Determine kernel file type and load accordingly
+    let kernel_ext = kernel_path.extension().and_then(|s| s.to_str()).unwrap_or("");
+    let kernel_lib = match kernel_ext {
+        "masm" => {
+            // Load kernel file into source manager (same approach as in tests)
+            let kernel_source = source_manager.load(
+                SourceLanguage::Masm,
+                kernel_path.to_string_lossy().to_string().into(),
+                fs::read_to_string(kernel_path)
+                    .into_diagnostic()
+                    .wrap_err_with(|| format!("Failed to read kernel file `{}`", kernel_path.display()))?,
+            );
+            
+            // Compile kernel
+            println!("Compiling kernel from: {}", kernel_path.display());
+            let kernel_lib = Assembler::new(source_manager.clone())
+                .assemble_kernel(kernel_source)
+                .wrap_err_with(|| format!("Failed to compile kernel from `{}`", kernel_path.display()))?;
+            println!("Kernel compiled successfully!");
+            kernel_lib
+        }
+        "masp" => {
+            // Load kernel from package
+            println!("Loading kernel from package: {}", kernel_path.display());
+            let kernel_lib = get_kernel_from_package(kernel_path)?;
+            println!("Kernel loaded successfully!");
+            kernel_lib
+        }
+        _ => return Err(Report::msg("Kernel file must have a .masm or .masp extension.")),
+    };
     
     // Create assembler with kernel
     let mut assembler = Assembler::with_kernel(source_manager.clone(), kernel_lib)
@@ -125,4 +140,20 @@ pub fn get_kernel_from_file_with_source_manager(
     assembler
         .assemble_kernel(kernel_source)
         .wrap_err_with(|| format!("Failed to compile kernel from `{}`", path.display()))
+}
+
+/// Returns a `KernelLibrary` from a `.masp` kernel package.
+pub fn get_kernel_from_package(path: &Path) -> Result<miden_assembly::KernelLibrary, Report> {
+    let bytes = fs::read(path).into_diagnostic().wrap_err("Failed to read kernel package file")?;
+    
+    // Deserialize the package
+    let package = Package::read_from_bytes(&bytes)
+        .into_diagnostic()
+        .wrap_err("Failed to deserialize kernel package")?;
+    
+    // Extract kernel from package
+    match package.into_mast_artifact() {
+        MastArtifact::Kernel(kernel_lib) => Ok(kernel_lib),
+        _ => Err(Report::msg("The provided package is not a kernel package.")),
+    }
 }
