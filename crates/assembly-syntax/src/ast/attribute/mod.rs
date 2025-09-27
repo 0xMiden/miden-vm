@@ -41,8 +41,8 @@ use crate::{ast::Ident, prettier};
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(
-    all(feature = "serde", feature = "arbitrary", test),
-    miden_serde_test_macros::serde_test
+    all(feature = "arbitrary", test),
+    miden_serde_test_macros::serde_test(winter_serde(true))
 )]
 pub enum Attribute {
     /// A named behavior, trait or action; e.g. `@inline`
@@ -287,7 +287,7 @@ impl Serializable for Attribute {
                 list.write_into(target);
             },
             Self::KeyValue(kv) => {
-                target.write_u8(1);
+                target.write_u8(2);
                 kv.write_into(target);
             },
         }

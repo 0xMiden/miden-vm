@@ -6,6 +6,7 @@
 
 - Added `before_enter` and `after_exit` decorator lists to `BasicBlockNode`.([#2167](https://github.com/0xMiden/miden-vm/pull/2167))
 - Added `proptest`'s `Arbitrary` instances for `BasicBlockNode` and `MastForest` ([#2200](https://github.com/0xMiden/miden-vm/pull/2200)).
+- Added `proptest`'s `Arbitrary` instances for `Program`, fixed `Attribute` serialization ([#2224](https://github.com/0xMiden/miden-vm/pull/2224)).
 
 #### Changes
 

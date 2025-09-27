@@ -24,6 +24,10 @@ use crate::{
 /// (the kernel can be an empty kernel).
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_serde_test_macros::serde_test(winter_serde(true))
+)]
 pub struct Program {
     mast_forest: Arc<MastForest>,
     /// The "entrypoint" is the node where execution of the program begins.

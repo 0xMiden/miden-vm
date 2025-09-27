@@ -1454,10 +1454,12 @@ dependencies = [
  "derive_more",
  "miden-assembly-syntax",
  "miden-core",
+ "miden-serde-test-macros",
  "proptest",
  "proptest-derive",
  "serde",
  "serde-untagged",
+ "serde_json",
  "thiserror",
 ]
 
