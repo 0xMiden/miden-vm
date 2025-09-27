@@ -28,7 +28,7 @@ pub enum Debug {
 
 impl Debug {
     /// Returns true if debug mode is on.
-    fn is_on(&self) -> bool {
+    pub fn is_on(&self) -> bool {
         matches!(self, Self::On)
     }
 }
@@ -153,6 +153,31 @@ where
         // compile program
         let mut assembler =
             Assembler::new(self.source_manager.clone()).with_debug_mode(debug.is_on());
+        assembler
+            .link_dynamic_library(StdLibrary::default())
+            .wrap_err("Failed to load stdlib")?;
+
+        for library in libraries {
+            assembler.link_dynamic_library(library).wrap_err("Failed to load libraries")?;
+        }
+
+        let program: Program = assembler
+            .assemble_program(self.ast.as_ref())
+            .wrap_err("Failed to compile program")?;
+
+        Ok(program)
+    }
+
+    /// Compiles this program file into a [Program] with a kernel.
+    #[instrument(name = "compile_program_with_kernel", skip_all)]
+    pub fn compile_with_kernel<'a, I>(&self, debug: Debug, libraries: I, kernel_lib: miden_assembly::KernelLibrary) -> Result<Program, Report>
+    where
+        I: IntoIterator<Item = &'a Library>,
+    {
+        // compile program with kernel
+        let mut assembler = Assembler::with_kernel(self.source_manager.clone(), kernel_lib)
+            .with_debug_mode(debug.is_on());
+        
         assembler
             .link_dynamic_library(StdLibrary::default())
             .wrap_err("Failed to load stdlib")?;
