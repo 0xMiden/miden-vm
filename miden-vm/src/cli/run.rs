@@ -51,7 +51,7 @@ pub struct RunCmd {
     #[arg(short = 'r', long = "release")]
     release: bool,
 
-    /// Path to kernel file (.masm assembly file)
+    /// Path to kernel file (.masm assembly file or .masp package)
     #[arg(long = "kernel", value_parser)]
     kernel_file: Option<PathBuf>,
 }
@@ -176,8 +176,9 @@ fn run_masm_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
             let name = kernel_path.display();
             return Err(Report::msg(format!("Kernel file {name} must be a file.")));
         }
-        if kernel_path.extension().and_then(|s| s.to_str()) != Some("masm") {
-            return Err(Report::msg("Kernel file must have a .masm extension."));
+        let kernel_ext = kernel_path.extension().and_then(|s| s.to_str()).unwrap_or("");
+        if kernel_ext != "masm" && kernel_ext != "masp" {
+            return Err(Report::msg("Kernel file must have a .masm or .masp extension."));
         }
     }
 
