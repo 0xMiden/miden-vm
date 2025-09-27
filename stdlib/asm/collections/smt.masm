@@ -214,46 +214,14 @@ proc.insert_single_to_multi_leaf.16
     end
 
     # => [i, R]
-    # LOCALS:
-    #   0..4: K_lt
-    #   4..8: V_lt
-    #  8..12: K_gt
-    # 12..16: V_gt
-
-    movdn.4
-    # => [R, i]
 
     # Prepare for hash_memory_words,
     locaddr.12 add.4
     locaddr.0
-    # => [start_addr, end_addr, R, i]
+    # => [start_addr, end_addr, i, R]
 
-    exec.rpo::hash_memory_words
-    # => [NV, i, R]
-
-    # Prepare for adv.insert_mem, the key for which is NV, the node's hash.
-
-    locaddr.12 add.4 locaddr.0
-    # => [start_ptr, end_ptr, NV, R, i]
-
-    movdn.5 movdn.5
-    # => [NV, start_ptr, end_ptr, R, i]
-
-    adv.insert_mem
-    # => [NV, start_ptr, end_ptr, R, i]
-
-    # Drop both pointers, and prepare for mtree_set.
-    movup.4 drop movup.4 drop
-    # => [NV, R, i]
-
-    swapw movup.8
-    # => [i, R, NV]
-
-    push.LEAF_DEPTH
-    # => [d, i, R, NV]
-
-    mtree_set
-    # => [V_in_leaf, R_new]
+    exec.hash_and_insert_mem
+    # => [NV_old, R_new]
 
     # By nature, if an insertion transforms a single-leaf to a multi-leaf, then the old value at
     # this key is an empty word.
@@ -542,36 +510,20 @@ proc.insert_into_leaf.8192
 
     # Prepare for hash_memory_words.
 
+    padw loc_loadw.24
+    loc_load.29
+    # => [R, i]
+
     # end_addr = write_ptr
     loc_load.6
     locaddr.64
-    # => [start_addr, end_addr]
-    exec.rpo::hash_memory_words
-    # => [NV]
 
-    # Prepare for adv.insert_mem, the key for which is NV, the node's hash.
-    loc_load.6 locaddr.64
-    # => [start_addr, end_addr, NV]
-    movdn.5 movdn.5
-    # => [NV, start_addr, end_addr]
-    adv.insert_mem
-
-    # Prepare for mtree_set
-    movup.4 drop movup.4 drop
-    # => [NV]
-    padw loc_loadw.24
-    # => [R, NV]
-
-    loc_load.29
-    # => [i, R, NV]
-    push.LEAF_DEPTH
-    # => [d, i, R, NV]
-    mtree_set
-    # => [V_in_leaf, R_new]
+    # => [start_addr, end_addr, R, i]
+    exec.hash_and_insert_mem
+    # => [NV_old, R_new]
 
     # By nature, if this insertion put a value where there wasn't one, then the
     # old value at this key is an empty word.
-
     padw swapw dropw
     # => [Z, R_new]
 end
@@ -812,7 +764,6 @@ end
 
 proc.replace_in_multi_leaf.8192
     # => [key_ptr, start_ptr, end_ptr, V, K, R]
-    nop debug.str="replace_in_multi_leaf: key_ptr, start_ptr, end_ptr, V, K, R:" debug.stack nop
 
     add.4
     # => [val_ptr, start_ptr, end_ptr, V, K, R]
@@ -835,43 +786,38 @@ proc.replace_in_multi_leaf.8192
 
     # Prepare for hash_memory_words
 
-    dropw drop
-    # => [val_ptr, start_ptr, end_ptr, V_old, K, R]
+    dropw
+    # => [z, val_ptr, start_ptr, end_ptr, V_old, K, R]
+    # => [X, V_old, K, R]
 
-    dup.2 dup.2
-    # => [start_ptr, end_ptr; val_ptr, start_ptr, end_ptr, V_old, K, R]
-
-    exec.rpo::hash_memory_words
-    # => [NV, val_ptr, start_ptr, end_ptr, V_old, K, R]
-    nop debug.str="NV, val_ptr, start_ptr, end_ptr, V_old, K, R" debug.stack nop
-
-    # Prepare for adv.insert_mem.
-    movup.4 drop
-    # => [NV, start_ptr, end_ptr, V_old, K, R]
-    adv.insert_mem
-    # => [NV, start_ptr, end_ptr, V_old, K, R]
-
-    # Prepare for mtree_set.
-    movup.4 drop movup.4 drop
-    # => [NV, V_old, K, R]
+    movupw.2
+    # => [K, X, V_old, R]
 
     movupw.3
-    # => [R, NV, V_old, K]
+    # => [R, K, X, V_old]
 
-    dup.12
-    # => [i, R, NV, V_old, K]
-    push.LEAF_DEPTH
-    # => [d, i, R, NV, V_old, K]
-    mtree_set
-    # => [NV_old, R_new, V_old, K]
+    movupw.2
+    # => [X, R, K, V_old]
+    # => [z, val_ptr, start_ptr, end_ptr, R, K, V_old]
 
-    dropw swapw
-    # => [V_old, R_new, K]
+    drop drop
+    # => [start_ptr, end_ptr, R, K, V_old]
 
-    movupw.2 dropw
+    dup.6 # K[3]
+    # => [i, start_ptr, end_ptr, R, K, V_old]
+
+    movdn.2
+    # => [start_ptr, end_ptr, i, R; K, V_old]
+
+    exec.hash_and_insert_mem
+    # => [NV_old, R_new; K, V_old]
+
+    dropw
+    # => [R_new, K, V_old]
+    swapw dropw
+    # => [R_new, V_old]
+    swapw
     # => [V_old, R_new]
-
-    #push.0 assert.err="TODO: replace multi"
 end
 
 #! Inserts the specified value under the specified key in a Sparse Merkle Tree defined by the
