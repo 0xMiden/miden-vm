@@ -1,9 +1,12 @@
+use alloc::{collections::BTreeMap, sync::Arc};
 use core::ops::RangeInclusive;
 
 use proptest::{arbitrary::Arbitrary, prelude::*};
 
 use super::*;
-use crate::{Decorator, Operation, mast::DecoratorId};
+use crate::{
+    AdviceMap, AssemblyOp, DebugOptions, Decorator, Felt, Operation, Word, mast::DecoratorId,
+};
 
 // Strategy for operations without immediate values (non-control flow)
 pub fn op_no_imm_strategy() -> impl Strategy<Value = Operation> {
@@ -203,16 +206,19 @@ pub fn mast_forest_strategy(params: MastForestParams) -> impl Strategy<Value = M
     };
 
     // 1) Generate a Vec<BasicBlockNode> with length in `params.blocks`
-    prop::collection::vec(any_with::<BasicBlockNode>(bb_params), params.blocks.clone())
+    (
+        prop::collection::vec(any_with::<BasicBlockNode>(bb_params), params.blocks.clone()),
+        prop::collection::vec(any::<Decorator>(), params.decorators as usize..=params.decorators as usize)
+    )
         // 2) Map concrete blocks -> build a concrete MastForest
-        .prop_map(move |blocks| {
+        .prop_map(move |(blocks, decorators)| {
             let mut forest = MastForest::new();
 
             // Pre-populate the decorator ID space so referenced IDs are valid.
-            // TODO: Replace Decorator::Trace(i) with Arbitrary for Decorator
-            for i in 0..params.decorators {
+            // Generate all decorator types for more comprehensive testing
+            for decorator in decorators {
                 forest
-                    .add_decorator(Decorator::Trace(i))
+                    .add_decorator(decorator)
                     .expect("Failed to add decorator");
             }
 
@@ -231,5 +237,181 @@ impl Arbitrary for MastForest {
 
     fn arbitrary_with(p: Self::Parameters) -> Self::Strategy {
         mast_forest_strategy(p).boxed()
+    }
+}
+
+// ---------- Decorator strategies ----------
+
+/// Strategy for generating DebugOptions values
+pub fn debug_options_strategy() -> impl Strategy<Value = DebugOptions> {
+    prop_oneof![
+        Just(DebugOptions::StackAll),
+        any::<u8>().prop_map(DebugOptions::StackTop),
+        Just(DebugOptions::MemAll),
+        (any::<u32>(), any::<u32>()).prop_map(|(start, end)| DebugOptions::MemInterval(start, end)),
+        (any::<u16>(), any::<u16>(), any::<u16>()).prop_map(|(start, end, num_locals)| {
+            DebugOptions::LocalInterval(start, end, num_locals)
+        }),
+        any::<u16>().prop_map(DebugOptions::AdvStackTop),
+    ]
+}
+
+/// Strategy for generating AssemblyOp values
+pub fn assembly_op_strategy() -> impl Strategy<Value = AssemblyOp> {
+    (
+        any::<bool>(),
+        prop::collection::vec(any::<char>(), 1..=20).prop_map(|chars| chars.into_iter().collect()),
+        prop::collection::vec(any::<char>(), 1..=20).prop_map(|chars| chars.into_iter().collect()),
+        any::<u8>(),
+        any::<bool>(),
+    )
+        .prop_map(|(has_location, context_name, op, num_cycles, should_break)| {
+            use miden_debug_types::{ByteIndex, Location, Uri};
+
+            let location = if has_location {
+                Some(Location::new(Uri::new("dummy.rs"), ByteIndex(0), ByteIndex(0)))
+            } else {
+                None
+            };
+
+            AssemblyOp::new(location, context_name, num_cycles, op, should_break)
+        })
+}
+
+// ---------- Arbitrary implementations for missing types ----------
+
+impl Arbitrary for DebugOptions {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        debug_options_strategy().boxed()
+    }
+}
+
+impl Arbitrary for AssemblyOp {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        assembly_op_strategy().boxed()
+    }
+}
+
+impl Arbitrary for Decorator {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        prop_oneof![
+            any_with::<AssemblyOp>(()).prop_map(Decorator::AsmOp),
+            any_with::<DebugOptions>(()).prop_map(Decorator::Debug),
+            any::<u32>().prop_map(Decorator::Trace),
+        ]
+        .boxed()
+    }
+}
+
+impl Arbitrary for crate::advice::map::AdviceMap {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        // Strategy for generating Word keys
+        let word_strategy = prop_oneof![
+            Just(Word::default()),
+            any::<[u64; 4]>().prop_map(|[a, b, c, d]| Word::new([
+                Felt::new(a),
+                Felt::new(b),
+                Felt::new(c),
+                Felt::new(d)
+            ])),
+        ];
+
+        // Strategy for generating Arc<[Felt]> values
+        let felt_array_strategy = prop::collection::vec(any::<u64>(), 1..=4).prop_map(|vals| {
+            let felts: Arc<[Felt]> = vals.into_iter().map(Felt::new).collect();
+            felts
+        });
+
+        // Strategy for generating map entries
+        let entry_strategy = (word_strategy, felt_array_strategy);
+
+        // Strategy for generating the map itself (0 to 10 entries)
+        prop::collection::vec(entry_strategy, 0..=10)
+            .prop_map(|entries| {
+                let mut map = BTreeMap::new();
+                for (key, value) in entries {
+                    map.insert(key, value);
+                }
+                AdviceMap::from(map)
+            })
+            .boxed()
+    }
+}
+
+impl Arbitrary for crate::Program {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        // Generate a mast forest with at least one procedure root
+        let forest_strategy = prop::collection::vec(
+            any_with::<BasicBlockNode>(BasicBlockNodeParams {
+                max_ops_len: 5,
+                max_pairs: 2,
+                max_decorator_id_u32: 5,
+            }),
+            1..=3,
+        )
+        .prop_map(|blocks| {
+            let mut forest = MastForest::new();
+
+            // Add all blocks and make them roots
+            for block in blocks {
+                let node_id = forest.add_node(block).expect("Failed to add block");
+                forest.make_root(node_id);
+            }
+
+            forest
+        });
+
+        forest_strategy
+            .prop_map(|forest| {
+                use alloc::sync::Arc;
+
+                use crate::Program;
+
+                // Pick the first valid procedure root as entrypoint
+                let entrypoint = if forest.num_procedures() > 0 {
+                    forest.procedure_roots()[0]
+                } else {
+                    // Fallback to node 0 if no procedures (shouldn't happen due to our forest
+                    // generation)
+                    crate::mast::MastNodeId::new_unchecked(0)
+                };
+
+                Program::new(Arc::new(forest), entrypoint)
+            })
+            .boxed()
+    }
+}
+
+impl Arbitrary for crate::Kernel {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        // Strategy for generating Word vectors
+        let word_strategy = any::<[u64; 4]>().prop_map(|[a, b, c, d]| {
+            Word::new([Felt::new(a), Felt::new(b), Felt::new(c), Felt::new(d)])
+        });
+
+        // Strategy for generating kernel (0 to 3 words to avoid hitting MAX_NUM_PROCEDURES limit)
+        prop::collection::vec(word_strategy, 0..=3)
+            .prop_map(|words: Vec<Word>| {
+                crate::Kernel::new(&words).expect("Generated kernel should be valid")
+            })
+            .boxed()
     }
 }
