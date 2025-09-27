@@ -601,9 +601,35 @@ proc.insert_or_replace_in_multi_leaf
     exec.sorted_array::find_key_value
     # => [is_key_found, key_ptr, start_ptr, end_ptr; V, K, R]
     if.true
-        # We're replacing or removing an existing value.
         # => [key_ptr, start_ptr, end_ptr, V, K, R]
-        exec.replace_in_multi_leaf
+
+        # We're replacing or removing an existing value.
+        # To check which, we'll word-align the stack for a moment.
+        push.0
+        # => [X, V, K, R]
+        swapw padw
+        # => [Z, V, X, K, R]
+
+        eqw movdn.8
+        # => [Z, V, V==EMPTY, 0, key_ptr, start_ptr, end_ptr, K, R]
+
+        dropw
+        # => [V, V==EMPTY, 0, key_ptr, start_ptr, end_ptr, K, R]
+
+        # Now we can use V==EMPTY for word-aligning the stack instead.
+        # Convenient!
+        movup.5 drop
+        # => [V, X, K, R]
+        # => [V, V==EMPTY, key_ptr, start_ptr, end_ptr, V, K, R]
+
+        swapw
+        # => [V==EMPTY, key_ptr, start_ptr, end_ptr, V, K, R]
+
+        if.true
+            exec.remove_in_multi_leaf
+        else
+            exec.replace_in_multi_leaf
+        end
     else
         # => [key_ptr, start_ptr, end_ptr, V, K, R]
         # We're inserting a new value in the sorted array.
@@ -611,68 +637,137 @@ proc.insert_or_replace_in_multi_leaf
     end
 end
 
-# MAX_LEAF_SIZE (8192) + 8
+# MAX_LEAF_SIZE + 8
 proc.remove_in_multi_leaf.8200
-    # [V=EMPTY, K, NV, end_ptr, leaf_size, R]
-
-    push.0 assert.err="REMOVE_IN_MULTI_LEAF TODO"
-
-    # => [leaf_size, NV, V, K, R]
+    # => [key_ptr, start_ptr, end_ptr, V=EMPTY, K, R]
 
     # LOCALS:
-    # 0..4: K
-    # 4..8: unused
-    # 8..8200: leaf memory
+    # 0: pairs_array_start
+    # 1: pairs_array_end
+    # 2: pairs_array_len
+    # 3: key_ptr
+    # 4: cur_read
+    # 5: cur_write
+    # 8..8200: leaf memory space
 
-    movdn.12
-    # => [NV, V, K, leaf_size, R]
+    loc_store.3 # key_ptr
+    dup loc_store.0 # pairs_array_start
+    loc_store.4 # cur_read
+    loc_store.1 # pairs_array_end
+
+    locaddr.8 loc_store.5 # cur_write
+
+    # => [V=EMPTY, K, R]
+
+    # Copy from pairs_array_start..key_ptr
+
+    # Get V_in_leaf from key_ptr+4. We'll need it later.
+    loc_load.3 movdn.4 dup.4 add.4
+    # => [val_ptr, V=EMPTY, key_ptr, K, R]
+    mem_loadw
+    # => [V_old, key_ptr, K, R]
+    movup.4
+    # => [key_ptr, V_old, K, R]
+
+    loc_load.0
+    # => [pairs_array_start, key_ptr, V_old, K, R]
+    sub
+    # => [key - pairs_start, V_old, K, R]
+
+    dup neq.0
+    if.true
+        push.0 assert.err="TODO(unimpl)"
+        # => [key - pairs_start, V_old, K, R]
+    else
+        # => [key - pairs_start, V_old, K, R]
+
+        drop
+
+        # Increment our pointer.
+        loc_load.4 add.8 loc_store.4
+        nop
+    end
+
+    # => [V_old, K, R]
+
+    # Copy from cur_read..end_ptr
+    loc_load.1 # pairs_array_end
+    loc_load.4 # cur_read
+    # => [cur_read, pairs_array_end]
+    sub
+    # => [pairs_end - cur_read]
+
+    dup neq.0
+    if.true
+        div.4
+        # => [num_words, V_old, K, R]
+
+        loc_load.5 loc_load.4
+        # => [cur_read, cur_write, num_words, V_old, K, R]
+
+        dup.2
+        # => [num_words, cur_read, cur_write; num_words, V_old, K, R]
+
+        exec.mem::memcopy_words
+        # => [num_words, V_old, K, R]
+
+        # cur_write++
+        mul.4 loc_load.5 add loc_store.5
+    else
+        # Nothing to copy.
+        nop
+    end
+
+    # => [V_old, K, R]
     movupw.2
-    # => [K, NV, V, leaf_size, R]
-    loc_storew.0
+    # => [R, V_old, K]
 
-    swapw
-    # => [NV, K, V, leaf_size, R]
+    # K[3] is the leaf index.
+    dup.8
+    # => [i, R, V_old, K]
 
-    dup.12 div.4
-    # => [num_words, NV, K, V, leaf_size, R]
+    loc_load.5 locaddr.8
+    # => [start_addr, end_addr, i, R; V_old, K]
 
-    movdn.4
-    # => [NV, num_words, K, V, leaf_size, R]
+    exec.hash_and_insert_mem
+    # => [NV_old, R_new, V_old, K]
 
-    # COM = NV
-    dupw
-    # => [COM, NV, num_words, K, V, leaf_size, R]
-    movup.8
-    # => [num_words, COM, NV, K, V, leaf_size, R]
+    # FIXME: Confirm that old leaf hashes to NV_old.
 
-    # Grab all the pairs from the advice stack.
+    dropw movupw.2 dropw swapw
+    # => [V_old, R_new]
+end
 
-    locaddr.8 swap
-    # => [num_words, ptr, COM; NV, K, V, leaf_size, R]
+proc.hash_and_insert_mem
+    # => [start_addr, end_addr, i, R, ...]
+    nop debug.str="start_addr, end_addr, i, R, ..." debug.stack nop
 
-    exec.mem::pipe_double_words_preimage_to_memory
-    # => [end_ptr; NV, K, V, leaf_size, R]
+    dup.1 dup.1
+    # => [start_addr, end_addr, start_addr, end_addr, i, R, ...]
 
-    # Find which pair we need to remove.
+    exec.rpo::hash_memory_words
+    # => [NV, start_addr, end_addr, i, R, ...]
 
-    movdn.8
-    # => [NV, K, end_ptr, V, leaf_size, R]
+    # We're already ready for adv.insert_mem.
+    adv.insert_mem
 
-    swapw
-    # => [K, NV, end_ptr, V, leaf_size, R]
+    # Prepare for mtree_set
+    movup.4 drop movup.4 drop
+    # => [NV, i, R, ...]
 
-    movup.8 movdn.4
-    # => [K, end_ptr, NV, V, leaf_size, R]
+    movup.4 movdn.8
 
-    locaddr.8 movdn.4
-    # => [K, start_ptr, end_ptr; NV, V, leaf_size, R]
+    # => [NV, R, i]
+    swapw movup.8
+    # => [i, R, NV]
 
-    exec.sorted_array::find_key_value
-    # => [is_key_found, key_ptr, start_ptr, end_ptr; NV, V, leaf_size, R]
+    push.LEAF_DEPTH
+    # => [d, i, R, NV]
 
-    # Okay now do the remove.
+    nop debug.str="d, i, R, NV" debug.stack nop
 
-    push.0 assert.err="TODO(remove_in_multi_leaf)"
+    mtree_set
+    # => [NV_old, R_new, ...]
 end
 
 # Inputs: [leaf_size, NV, V, K, R]
