@@ -369,6 +369,8 @@ proc.insert_into_leaf.8192
     # 2: pairs_array_len
     # 3: key_ptr
     # 4: target_pair_end (=key_ptr + 8)
+    # 5: cur_read
+    # 6: cur_write
     # 16..20: V
     # 20..24: K
     # 24..28: R
@@ -399,50 +401,56 @@ proc.insert_into_leaf.8192
     # => []
 
     #
-    # STEP 1:
+    # STEP 1: Copy from pairs_array_start..key_ptr.
     #
-    # while start != insertion_point:
-    #   *new_start = *start
-    #   start++
-    #   new_start++
 
-    # LOCALS:
-    # 5: cur_read
-    # 6: cur_write
-
-    # let cur_read = pairs_array_start
+    # cur_read = pairs_array_start
     loc_load.0 loc_store.5
 
-    # let cur_write = LOCALS[64]
+    # cur_write = LOCALS[64]
     locaddr.64 loc_store.6
 
-    # while cur_read != key_ptr
-    loc_load.3 # => [key_ptr]
-    loc_load.5 # => [cur_read, key_ptr]
-    neq while.true
+    loc_load.3 # key_ptr
+    loc_load.5 # cur_read
+    # => [cur_read, key_ptr]
 
-        # Do: *cur_write = *cur_read
+    # FIXME: can locaddr overflow u32?
+    u32overflowing_sub
+    # => [ovf, key_ptr - cur_read]
 
-        padw loc_load.5
-        # => [cur_read, Z]
-        mem_loadw
-        # => [READ_WORD]
+    dup.1 neq.0
+    # => [nonzero, ovf, key_ptr - cur_read]
 
-        loc_load.6
-        # => [cur_write, READ_WORD]
-        mem_storew dropw
-        # => []
+    # Fewer cycles than xor.
+    u32xor
+    # => [anything_to_read, key_ptr - cur_read]
 
+    if.true
+        div.4
+        # => [num_words]
 
-        # Increment our two pointers.
-        loc_load.5 add.4 loc_store.5 # cur_read++
-        loc_load.6 add.4 loc_store.6 # cur_write++
+        loc_load.6 # cur_write
+        loc_load.5 # cur_read
+        # => [cur_read, cur_write, num_words]
 
-        # Setup loop condition.
-        loc_load.3 # [key_ptr]
-        loc_load.5 # [cur_read, key_ptr]
-        neq
-        # => [cur_read != key_ptr]
+        dup.2
+        # => [num_words, cur_read, cur_write; num_words]
+
+        exec.mem::memcopy_words
+        # => [num_words]
+
+        mul.4 dup
+        # => [num_elems, num_elems]
+
+        # cur_read++
+        loc_load.5 add loc_store.5
+        # => [num_elems]
+
+        # cur_write++
+        loc_load.6 add loc_store.6
+    else
+        # => [num_words]
+        drop
     end
 
     ### STEP 2: write (K, V) there.
