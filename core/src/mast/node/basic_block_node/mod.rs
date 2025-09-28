@@ -19,7 +19,7 @@ use op_batch::OpBatchAccumulator;
 use super::{MastNodeErrorContext, MastNodeExt};
 
 #[cfg(any(test, feature = "arbitrary"))]
-mod arbitrary;
+pub mod arbitrary;
 
 #[cfg(test)]
 mod tests;

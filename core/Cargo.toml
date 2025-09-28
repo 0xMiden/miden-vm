@@ -17,6 +17,11 @@ edition.workspace = true
 bench = false
 doctest = false
 
+[[bench]]
+name = "mast_forest_merge"
+required-features = ["arbitrary"]
+harness = false
+
 [features]
 default = ["std"]
 std = [
@@ -54,6 +59,7 @@ winter-math.workspace = true
 winter-utils.workspace = true
 
 [dev-dependencies]
+criterion = { workspace = true }
 insta.workspace = true
 miden-serde-test-macros.workspace = true
 proptest.workspace = true
