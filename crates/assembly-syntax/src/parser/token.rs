@@ -106,6 +106,10 @@ impl crate::prettier::PrettyPrint for PushValue {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_serde_test_macros::serde_test(winter_serde(true))
+)]
 pub struct WordValue(pub [Felt; 4]);
 
 impl fmt::Display for WordValue {
@@ -165,8 +169,10 @@ impl proptest::arbitrary::Arbitrary for WordValue {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        use proptest::{array::uniform4, num, strategy::Strategy};
-        uniform4(num::u64::ANY.prop_map(Felt::new)).prop_map(WordValue).boxed()
+        use proptest::{array::uniform4, strategy::Strategy};
+        uniform4((0..=crate::FIELD_MODULUS).prop_map(Felt::new))
+            .prop_map(WordValue)
+            .boxed()
     }
 
     type Strategy = proptest::prelude::BoxedStrategy<Self>;
@@ -199,6 +205,10 @@ impl Deserializable for WordValue {
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(untagged))]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_serde_test_macros::serde_test(winter_serde(true))
+)]
 pub enum IntValue {
     /// A tiny value
     U8(u8),

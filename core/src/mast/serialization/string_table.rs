@@ -8,6 +8,7 @@ use crate::utils::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
 };
 
+#[derive(Debug)]
 pub struct StringTable {
     data: Vec<u8>,
 

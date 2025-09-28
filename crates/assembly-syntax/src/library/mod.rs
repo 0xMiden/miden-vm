@@ -34,10 +34,7 @@ pub use self::{
 /// Metadata about a procedure exported by the interface of a [Library]
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(
-    all(feature = "serde", feature = "arbitrary", test),
-    miden_serde_test_macros::serde_test
-)]
+#[cfg_attr(all(feature = "arbitrary", test), miden_serde_test_macros::serde_test)]
 pub struct LibraryExport {
     /// The id of the MAST root node of the exported procedure
     pub node: MastNodeId,
@@ -122,10 +119,7 @@ impl Arbitrary for LibraryExport {
 /// A library exports a set of one or more procedures. Currently, all exported procedures belong
 /// to the same top-level namespace.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(
-    all(feature = "serde", feature = "arbitrary", test),
-    miden_serde_test_macros::serde_test
-)]
+#[cfg_attr(all(feature = "arbitrary", test), miden_serde_test_macros::serde_test)]
 pub struct Library {
     /// The content hash of this library, formed by hashing the roots of all exports in
     /// lexicographical order (by digest, not procedure name)

@@ -3,6 +3,8 @@ use alloc::vec::Vec;
 use miden_debug_types::{Location, Uri};
 use num_derive::{FromPrimitive, ToPrimitive};
 use num_traits::{FromPrimitive, ToPrimitive};
+#[cfg(all(feature = "arbitrary", feature = "std"))]
+use proptest_derive::Arbitrary;
 
 use super::{
     DecoratorDataOffset,
@@ -20,7 +22,12 @@ use crate::{
 /// The serialized representation of [`DecoratorInfo`] is guaranteed to be fixed width, so that the
 /// decorators stored in the `decorators` table of the serialized [`MastForest`] can be accessed
 /// quickly by index.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(all(feature = "arbitrary", feature = "std"), derive(Arbitrary))]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_serde_test_macros::serde_test(winter_serde(true), serde_test(false))
+)]
 pub struct DecoratorInfo {
     variant: EncodedDecoratorVariant,
     decorator_data_offset: DecoratorDataOffset,
@@ -145,7 +152,12 @@ impl Deserializable for DecoratorInfo {
 ///
 /// This is effectively equivalent to a set of constants, and designed to convert between variant
 /// discriminant and enum variant conveniently.
-#[derive(Debug, FromPrimitive, ToPrimitive)]
+#[derive(Debug, FromPrimitive, ToPrimitive, PartialEq, Eq)]
+#[cfg_attr(all(feature = "arbitrary", feature = "std"), derive(Arbitrary))]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_serde_test_macros::serde_test(winter_serde(true), serde_test(false))
+)]
 #[repr(u8)]
 pub enum EncodedDecoratorVariant {
     AssemblyOp,

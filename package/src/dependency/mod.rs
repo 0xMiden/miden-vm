@@ -14,6 +14,10 @@ pub(crate) mod resolver;
 #[derive(Debug, Clone, PartialEq, Eq, derive_more::From)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_serde_test_macros::serde_test(winter_serde(true))
+)]
 pub struct DependencyName(String);
 
 #[cfg(feature = "arbitrary")]
@@ -47,6 +51,10 @@ impl Deserializable for DependencyName {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(proptest_derive::Arbitrary))]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_serde_test_macros::serde_test(winter_serde(true))
+)]
 pub struct Dependency {
     /// The name of the dependency.
     /// Serves as a human-readable identifier for the dependency and a search hint for the resolver
