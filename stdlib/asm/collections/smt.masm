@@ -360,18 +360,15 @@ end
 
 
 
-# MAX_LEAF_SIZE + 8
-proc.insert_into_leaf.8200
+# MAX_LEAF_SIZE + 4
+proc.insert_into_leaf.8196
     # => [key_ptr, start_ptr, end_ptr, V, K, R]
 
     # LOCALS:
     # 0: pairs_array_start
     # 1: pairs_array_end
-    # 2:
-    # 3:
-    # 4:
-    # 5: cur_read
-    # 6: cur_write
+    # 2: cur_read
+    # 3: cur_write
 
     movdn.2
     # => [start_ptr, end_ptr, key_ptr, V, K, R]
@@ -389,12 +386,12 @@ proc.insert_into_leaf.8200
     #
 
     # cur_read = pairs_array_start
-    loc_load.0 loc_store.5
+    loc_load.0 loc_store.2
 
     # cur_write = &LOCALS[8]
-    locaddr.8 loc_store.6
+    locaddr.8 loc_store.3
 
-    loc_load.5 # cur_read
+    loc_load.2 # cur_read
     # => [cur_read, key_ptr, V, K, i, R]
 
     # FIXME: can locaddr overflow u32?
@@ -412,8 +409,8 @@ proc.insert_into_leaf.8200
         div.4
         # => [num_words]
 
-        loc_load.6 # cur_write
-        loc_load.5 # cur_read
+        loc_load.3 # cur_write
+        loc_load.2 # cur_read
         # => [cur_read, cur_write, num_words, V, K, i, R]
 
         dup.2
@@ -426,11 +423,11 @@ proc.insert_into_leaf.8200
         # => [num_elems, num_elems, V, K, i, R]
 
         # cur_read++
-        loc_load.5 add loc_store.5
+        loc_load.2 add loc_store.2
         # => [num_elems, V, K, i, R]
 
         # cur_write++
-        loc_load.6 add loc_store.6
+        loc_load.3 add loc_store.3
     else
         # => [key_ptr - cur_read, V, K, i, R]
         drop
@@ -445,7 +442,7 @@ proc.insert_into_leaf.8200
     swapw
     # => [K, V, i, R]
 
-    loc_load.6 movdn.4 dup.4
+    loc_load.3 movdn.4 dup.4
     # => [cur_write, K, cur_write, V, i, R]
 
     # *cur_write = K
@@ -460,14 +457,14 @@ proc.insert_into_leaf.8200
     # => [cur_write, i, R, ]
 
     # cur_write = &new_pairs[2]
-    add.4 loc_store.6
+    add.4 loc_store.3
     # => [i, R]
 
     #
     # STEP 3: copy from cur_read..pairs_array_end
     #
 
-    loc_load.1 loc_load.5
+    loc_load.1 loc_load.2
     # => [cur_read, pairs_array_end, i, R]
 
     # FIXME: can locaddr overflow u32?
@@ -481,7 +478,7 @@ proc.insert_into_leaf.8200
     if.true
         div.4
         # => [num_words, i, R]
-        loc_load.6 loc_load.5
+        loc_load.3 loc_load.2
         # => [cur_read, cur_write, num_words, i, R]
 
         dup.2
@@ -493,10 +490,10 @@ proc.insert_into_leaf.8200
         # => [num_elems, num_elems, i, R]
 
         # cur_read++
-        loc_load.5 add loc_store.5
+        loc_load.2 add loc_store.2
 
         # cur_write++
-        loc_load.6 add loc_store.6
+        loc_load.3 add loc_store.3
     else
         # => [pairs_end - cur_read, i, R]
         drop
@@ -507,7 +504,7 @@ proc.insert_into_leaf.8200
     # Prepare for hash_memory_words.
 
     # end_addr = write_ptr
-    loc_load.6
+    loc_load.3
 
     # start_addr = &LOCALS[8]
     locaddr.8
