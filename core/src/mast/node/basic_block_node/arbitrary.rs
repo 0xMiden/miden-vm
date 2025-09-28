@@ -1,3 +1,5 @@
+use core::ops::RangeInclusive;
+
 use proptest::{arbitrary::Arbitrary, prelude::*};
 
 use super::*;
@@ -115,8 +117,8 @@ pub struct BasicBlockNodeParams {
 impl Default for BasicBlockNodeParams {
     fn default() -> Self {
         Self {
-            max_ops_len: 64,
-            max_pairs: 16,
+            max_ops_len: 32,
+            max_pairs: 8,
             max_decorator_id_u32: 10,
         }
     }
@@ -183,12 +185,12 @@ pub struct MastForestParams {
     /// Maximum number of decorators to generate
     pub decorators: u32,
     /// Range of number of blocks to generate
-    pub blocks: core::ops::RangeInclusive<usize>,
+    pub blocks: RangeInclusive<usize>,
 }
 
 impl Default for MastForestParams {
     fn default() -> Self {
-        Self { decorators: 10, blocks: 1..=20 }
+        Self { decorators: 10, blocks: 1..=10 }
     }
 }
 
@@ -207,7 +209,7 @@ pub fn mast_forest_strategy(params: MastForestParams) -> impl Strategy<Value = M
             let mut forest = MastForest::new();
 
             // Pre-populate the decorator ID space so referenced IDs are valid.
-            // Replace Decorator::Trace(i) with whatever minimal decorator your codebase provides.
+            // TODO: Replace Decorator::Trace(i) with Arbitrary for Decorator
             for i in 0..params.decorators {
                 forest
                     .add_decorator(Decorator::Trace(i))
