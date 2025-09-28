@@ -368,16 +368,21 @@ proc.insert_into_leaf.8200
     # 0: pairs_array_start
     # 1: pairs_array_end
     # 2:
-    # 3: key_ptr
+    # 3:
     # 4:
     # 5: cur_read
     # 6: cur_write
 
-    loc_store.3 # key_ptr
-    # => [start_ptr, end_ptr, V, K, R]
+    movdn.2
+    # => [start_ptr, end_ptr, key_ptr, V, K, R]
 
-    loc_store.0 loc_store.1
-    # => [V, K, R]
+    loc_store.0 # start_ptr
+    loc_store.1 # end_ptr
+    # => [key_ptr, V, K, R]
+
+    # Save K[3], which is the leaf index `i`.
+    dup.5 movdn.9
+    # => [key_ptr, V, K, i, R]
 
     #
     # STEP 1: Copy from pairs_array_start..key_ptr.
@@ -389,20 +394,19 @@ proc.insert_into_leaf.8200
     # cur_write = &LOCALS[8]
     locaddr.8 loc_store.6
 
-    loc_load.3 # key_ptr
     loc_load.5 # cur_read
-    # => [cur_read, key_ptr]
+    # => [cur_read, key_ptr, V, K, i, R]
 
     # FIXME: can locaddr overflow u32?
     u32overflowing_sub
-    # => [ovf, key_ptr - cur_read]
+    # => [ovf, key_ptr - cur_read, V, K, i, R]
 
     dup.1 neq.0
-    # => [nonzero, ovf, key_ptr - cur_read]
+    # => [nonzero, ovf, key_ptr - cur_read, V, K, i, R]
 
     # Fewer cycles than xor.
     u32xor
-    # => [anything_to_read, key_ptr - cur_read]
+    # => [anything_to_read, key_ptr - cur_read, V, K, i, R]
 
     if.true
         div.4
@@ -410,94 +414,92 @@ proc.insert_into_leaf.8200
 
         loc_load.6 # cur_write
         loc_load.5 # cur_read
-        # => [cur_read, cur_write, num_words]
+        # => [cur_read, cur_write, num_words, V, K, i, R]
 
         dup.2
-        # => [num_words, cur_read, cur_write; num_words]
+        # => [num_words, cur_read, cur_write; num_words, V, K, i, R]
 
         exec.mem::memcopy_words
-        # => [num_words]
+        # => [num_words, V, K, i, R]
 
         mul.4 dup
-        # => [num_elems, num_elems]
+        # => [num_elems, num_elems, V, K, i, R]
 
         # cur_read++
         loc_load.5 add loc_store.5
-        # => [num_elems]
+        # => [num_elems, V, K, i, R]
 
         # cur_write++
         loc_load.6 add loc_store.6
     else
-        # => [num_words]
+        # => [key_ptr - cur_read, V, K, i, R]
         drop
     end
 
-    ### STEP 2: write (K, V) there.
-
-    # => [V, K, R]
-    dup.4
-    # => [i, V, K, R]
-    movdn.8
     # => [V, K, i, R]
+
+    #
+    # STEP 2: write (K, V) there.
+    #
 
     swapw
     # => [K, V, i, R]
 
-    loc_load.6
-    # => [cur_write, K, V, i, R]
+    loc_load.6 movdn.4 dup.4
+    # => [cur_write, K, cur_write, V, i, R]
 
     # *cur_write = K
     mem_storew dropw
-
-    # => [V, i, R]
-    loc_load.6 add.4
     # => [cur_write, V, i, R]
+
+    add.4 movdn.4 dup.4
+    # => [cur_write, V, cur_write, i, R]
 
     # *cur_write = V
     mem_storew dropw
-    # => [i, R]
+    # => [cur_write, i, R, ]
 
     # cur_write = &new_pairs[2]
-    loc_load.6 add.8 loc_store.6
-
+    add.4 loc_store.6
     # => [i, R]
 
     #
-    # STEP 3:
+    # STEP 3: copy from cur_read..pairs_array_end
     #
-    # while cur_read != pairs_array_end
 
-    loc_load.5
-    # => [cur_read, i, R]
+    loc_load.1 loc_load.5
+    # => [cur_read, pairs_array_end, i, R]
 
-    loc_load.1
-    # => [pairs_array_end, cur_read, i, R]
-    neq while.true
-        # => []
+    # FIXME: can locaddr overflow u32?
+    u32overflowing_sub
+    # => [ovf, pairs_end - cur_read, i, R]
+    dup.1 neq.0
+    # => [nonzero, ovf, pairs_end - cur_read, i, R]
+    u32xor
+    # => [anything_to_read, pairs_end - cur_read, i, R]
 
-        # Do: *cur_write = *cur_read
-        padw loc_load.5
-        # => [cur_read, Z, i, R]
-        mem_loadw
-        # => [READ_WORD]
+    if.true
+        div.4
+        # => [num_words, i, R]
+        loc_load.6 loc_load.5
+        # => [cur_read, cur_write, num_words, i, R]
 
-        loc_load.6
-        # => [cur_write, READ_WORD, i, R]
-        mem_storew dropw
-        # => []
+        dup.2
+        # => [num_words, cur_read, cur_write; num_words, i, R]
+        exec.mem::memcopy_words
+        # => [num_words, i, R]
+
+        mul.4 dup
+        # => [num_elems, num_elems, i, R]
 
         # cur_read++
-        loc_load.5 add.4 loc_store.5
+        loc_load.5 add loc_store.5
 
         # cur_write++
-        loc_load.6 add.4 loc_store.6
-
-        # Setup loop condition.
-        loc_load.5
-        # => [cur_read, i, R]
-        loc_load.1
-        # => [cur_read, pairs_array_end, i, R]
-        neq
+        loc_load.6 add loc_store.6
+    else
+        # => [pairs_end - cur_read, i, R]
+        drop
     end
 
     # => [i, R]
