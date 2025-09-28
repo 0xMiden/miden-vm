@@ -360,45 +360,24 @@ end
 
 
 
-proc.insert_into_leaf.8192
+# MAX_LEAF_SIZE + 8
+proc.insert_into_leaf.8200
     # => [key_ptr, start_ptr, end_ptr, V, K, R]
 
     # LOCALS:
     # 0: pairs_array_start
     # 1: pairs_array_end
-    # 2: pairs_array_len
+    # 2:
     # 3: key_ptr
-    # 4: target_pair_end (=key_ptr + 8)
+    # 4:
     # 5: cur_read
     # 6: cur_write
-    # 16..20: V
-    # 20..24: K
-    # 24..28: R
-    # 29: i=K[3]
 
     loc_store.3 # key_ptr
     # => [start_ptr, end_ptr, V, K, R]
 
-    loc_load.3 add.8 loc_store.4 # target_pair_end
-
-    dup.1 dup.1
-    # => [start_ptr, end_ptr, start_ptr, end_ptr, V, K, R]
-    sub
-    # => [pairs_array_len, start_ptr, end_ptr, V, K, R]
-    loc_store.2 # pairs_array_len
-    # => [start_ptr, end_ptr, V, K, R]
-
     loc_store.0 loc_store.1
-
     # => [V, K, R]
-    loc_storew.16 dropw # V
-    loc_storew.20 # K
-    # Also store K[3] while we're at it.
-    dup loc_store.29
-    dropw
-    # => [R]
-    loc_storew.24 dropw
-    # => []
 
     #
     # STEP 1: Copy from pairs_array_start..key_ptr.
@@ -407,8 +386,8 @@ proc.insert_into_leaf.8192
     # cur_read = pairs_array_start
     loc_load.0 loc_store.5
 
-    # cur_write = LOCALS[64]
-    locaddr.64 loc_store.6
+    # cur_write = &LOCALS[8]
+    locaddr.8 loc_store.6
 
     loc_load.3 # key_ptr
     loc_load.5 # cur_read
@@ -454,29 +433,34 @@ proc.insert_into_leaf.8192
     end
 
     ### STEP 2: write (K, V) there.
-    # LOCALS:
-    # 6: cur_write
 
-    padw loc_loadw.20
-    # => [K]
+    # => [V, K, R]
+    dup.4
+    # => [i, V, K, R]
+    movdn.8
+    # => [V, K, i, R]
+
+    swapw
+    # => [K, V, i, R]
 
     loc_load.6
-    # => [cur_write, K]
+    # => [cur_write, K, V, i, R]
 
     # *cur_write = K
-    mem_storew
+    mem_storew dropw
 
-    loc_loadw.16
-    # => [V]
-
+    # => [V, i, R]
     loc_load.6 add.4
-    # => [cur_write, V]
+    # => [cur_write, V, i, R]
 
     # *cur_write = V
     mem_storew dropw
+    # => [i, R]
 
     # cur_write = &new_pairs[2]
     loc_load.6 add.8 loc_store.6
+
+    # => [i, R]
 
     #
     # STEP 3:
@@ -484,21 +468,21 @@ proc.insert_into_leaf.8192
     # while cur_read != pairs_array_end
 
     loc_load.5
-    # => [cur_read]
+    # => [cur_read, i, R]
 
     loc_load.1
-    # => [pairs_array_end, cur_read]
+    # => [pairs_array_end, cur_read, i, R]
     neq while.true
         # => []
 
         # Do: *cur_write = *cur_read
         padw loc_load.5
-        # => [cur_read, Z]
+        # => [cur_read, Z, i, R]
         mem_loadw
         # => [READ_WORD]
 
         loc_load.6
-        # => [cur_write, READ_WORD]
+        # => [cur_write, READ_WORD, i, R]
         mem_storew dropw
         # => []
 
@@ -510,23 +494,23 @@ proc.insert_into_leaf.8192
 
         # Setup loop condition.
         loc_load.5
-        # => [cur_read]
+        # => [cur_read, i, R]
         loc_load.1
-        # => [cur_read, pairs_array_end]
+        # => [cur_read, pairs_array_end, i, R]
         neq
     end
 
-    # Prepare for hash_memory_words.
+    # => [i, R]
 
-    padw loc_loadw.24
-    loc_load.29
-    # => [R, i]
+    # Prepare for hash_memory_words.
 
     # end_addr = write_ptr
     loc_load.6
-    locaddr.64
 
-    # => [start_addr, end_addr, R, i]
+    # start_addr = &LOCALS[8]
+    locaddr.8
+
+    # => [start_addr, end_addr, i, R]
     exec.hash_and_insert_mem
     # => [NV_old, R_new]
 
