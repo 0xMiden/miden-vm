@@ -175,7 +175,7 @@ proc.insert_single_to_multi_leaf.16
         loc_storew.0 dropw
         # => [K, V_l, V, R]
 
-        # Save K[3], as that is our index.
+        # Save K[3], as that is our index `i`.
         dup movdn.12
         # => [K, V_l, V, i, R]
 
@@ -199,7 +199,7 @@ proc.insert_single_to_multi_leaf.16
         loc_storew.8 dropw
         # => [K, V_l, V, R]
 
-        # Save K[3], as that is our index.
+        # Save K[3], as that is our index `i`.
         dup movdn.12
         # => [K, V_l, V, i, R]
 
@@ -358,6 +358,9 @@ proc.set_single_leaf
     end
 end
 
+# Unlike mem::memcopy_words, this procedure takes a start pointer and end pointer to read from,
+# and does not copy anything if [cur_read..read_end] is not a positive non-zero length.
+# It also returns [cur_read, cur_write] incremented by the amount copied.
 proc.memcopy_word_range_and_advance_ptrs
     # => [cur_read, read_end, cur_write]
 
@@ -388,14 +391,12 @@ proc.memcopy_word_range_and_advance_ptrs
         mul.4 dup
         # => [num_elems, num_elems, cur_read, cur_write]
 
-        # cur_write++
+        # cur_write += num_elems
         movup.3 add
         # => [cur_write', num_elems, cur_read]
 
-        swap.2
-        # => [num_elems, cur_read, cur_write']
-
-        add
+        # cur_read += num_elems
+        swap.2 add
         # => [cur_read', cur_write']
     else
         drop
@@ -512,6 +513,7 @@ proc.insert_or_replace_in_multi_leaf
     # => [V, K, NV, start_ptr, end_ptr, leaf_size, R]
 
     # Prepare for sorted_array::find_key_value
+
     swapw
     # => [K, V, NV, start_ptr, end_ptr, leaf_size, R]
     movupw.2 dropw
@@ -893,6 +895,8 @@ export.set
 
             # (remove key/value: X cycles)
             # (insert; leaf single after insertion: X cycles)
+            # NOTE: set_single_leaf includes the case where the single leaf
+            # becomes a multi-leaf.
             exec.set_single_leaf
         else
             nop debug.str="set: multi kv-pair case"
