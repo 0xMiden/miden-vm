@@ -358,6 +358,49 @@ proc.set_single_leaf
     end
 end
 
+proc.memcopy_word_range_and_advance_ptrs
+    # => [cur_read, read_end, cur_write]
+
+    dup movdn.2
+    # => [cur_read, read_end, cur_read, cur_write]
+
+    # FIXME: can locaddr overflow u32?
+    u32overflowing_sub
+    # => [ovf, read_end - cur_read, cur_read, cur_write]
+
+    dup.1 neq.0
+    # => [nonzero, ovf, read_end - cur_read, cur_read, cur_write]
+
+    # Fewer cycles than xor.
+    u32xor
+    # => [anything_to_read, read_end - cur_read, cur_read, cur_write]
+
+    if.true
+        div.4
+        # => [num_words, cur_read, cur_write]
+
+        dup.2 dup.2 dup.2
+        # => [num_words, cur_read, cur_write, num_words, cur_read, cur_write]
+
+        exec.mem::memcopy_words
+        # => [num_words, cur_read, cur_write]
+
+        mul.4 dup
+        # => [num_elems, num_elems, cur_read, cur_write]
+
+        # cur_write++
+        movup.3 add
+        # => [cur_write', num_elems, cur_read]
+
+        swap.2
+        # => [num_elems, cur_read, cur_write']
+
+        add
+        # => [cur_read', cur_write']
+    else
+        drop
+    end
+end
 
 
 # MAX_LEAF_SIZE + 4
@@ -394,44 +437,16 @@ proc.insert_into_leaf.8196
     loc_load.2 # cur_read
     # => [cur_read, key_ptr, V, K, i, R]
 
-    # FIXME: can locaddr overflow u32?
-    u32overflowing_sub
-    # => [ovf, key_ptr - cur_read, V, K, i, R]
+    loc_load.3 # cur_write
+    # => [cur_write, cur_read, key_ptr, V, K, i, R]
 
-    dup.1 neq.0
-    # => [nonzero, ovf, key_ptr - cur_read, V, K, i, R]
+    movdn.2
+    # => [cur_read, key_ptr, cur_write; V, K, i, R]
 
-    # Fewer cycles than xor.
-    u32xor
-    # => [anything_to_read, key_ptr - cur_read, V, K, i, R]
-
-    if.true
-        div.4
-        # => [num_words]
-
-        loc_load.3 # cur_write
-        loc_load.2 # cur_read
-        # => [cur_read, cur_write, num_words, V, K, i, R]
-
-        dup.2
-        # => [num_words, cur_read, cur_write; num_words, V, K, i, R]
-
-        exec.mem::memcopy_words
-        # => [num_words, V, K, i, R]
-
-        mul.4 dup
-        # => [num_elems, num_elems, V, K, i, R]
-
-        # cur_read++
-        loc_load.2 add loc_store.2
-        # => [num_elems, V, K, i, R]
-
-        # cur_write++
-        loc_load.3 add loc_store.3
-    else
-        # => [key_ptr - cur_read, V, K, i, R]
-        drop
-    end
+    # => [cur_read, read_end, cur_write; V, K, i, R]
+    exec.memcopy_word_range_and_advance_ptrs
+    # => [cur_read', cur_write', V, K, i, R]
+    loc_store.2 loc_store.3
 
     # => [V, K, i, R]
 
@@ -464,52 +479,26 @@ proc.insert_into_leaf.8196
     # STEP 3: copy from cur_read..pairs_array_end
     #
 
-    loc_load.1 loc_load.2
-    # => [cur_read, pairs_array_end, i, R]
+    loc_load.3 # cur_write
+    loc_load.1 # read_end = pairs_array_end
+    loc_load.2 # cur_read
+    # => [cur_read, read_end, cur_write, i, R]
 
-    # FIXME: can locaddr overflow u32?
-    u32overflowing_sub
-    # => [ovf, pairs_end - cur_read, i, R]
-    dup.1 neq.0
-    # => [nonzero, ovf, pairs_end - cur_read, i, R]
-    u32xor
-    # => [anything_to_read, pairs_end - cur_read, i, R]
+    exec.memcopy_word_range_and_advance_ptrs
+    # => [cur_read', cur_write', i, R]
 
-    if.true
-        div.4
-        # => [num_words, i, R]
-        loc_load.3 loc_load.2
-        # => [cur_read, cur_write, num_words, i, R]
+    # Prepare for hash_memory_words and mtree_set.
 
-        dup.2
-        # => [num_words, cur_read, cur_write; num_words, i, R]
-        exec.mem::memcopy_words
-        # => [num_words, i, R]
+    drop
+    # => [cur_write, i, R]
 
-        mul.4 dup
-        # => [num_elems, num_elems, i, R]
-
-        # cur_read++
-        loc_load.2 add loc_store.2
-
-        # cur_write++
-        loc_load.3 add loc_store.3
-    else
-        # => [pairs_end - cur_read, i, R]
-        drop
-    end
-
-    # => [i, R]
-
-    # Prepare for hash_memory_words.
-
-    # end_addr = write_ptr
-    loc_load.3
+    # end_addr = cur_write
+    # => [end_addr, i, R]
 
     # start_addr = &LOCALS[8]
     locaddr.8
-
     # => [start_addr, end_addr, i, R]
+
     exec.hash_and_insert_mem
     # => [NV_old, R_new]
 
@@ -523,7 +512,6 @@ proc.insert_or_replace_in_multi_leaf
     # => [V, K, NV, start_ptr, end_ptr, leaf_size, R]
 
     # Prepare for sorted_array::find_key_value
-
     swapw
     # => [K, V, NV, start_ptr, end_ptr, leaf_size, R]
     movupw.2 dropw
