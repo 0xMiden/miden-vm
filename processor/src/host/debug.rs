@@ -2,11 +2,11 @@ use alloc::{
     string::{String, ToString},
     vec::Vec,
 };
-use core::{cmp::min, fmt};
+use core::{fmt, ops::RangeInclusive};
 
-use miden_core::{DebugOptions, stack::MIN_STACK_DEPTH};
+use miden_core::DebugOptions;
 
-use crate::{DebugHandler, ExecutionError, MemoryAddress, ProcessState};
+use crate::{DebugHandler, ExecutionError, Felt, ProcessState};
 
 // WRITER IMPLEMENTATIONS
 // ================================================================================================
@@ -57,14 +57,28 @@ impl<W: fmt::Write + Sync> DebugHandler for DefaultDebugHandler<W> {
         options: &DebugOptions,
     ) -> Result<(), ExecutionError> {
         let _ = match *options {
-            DebugOptions::StackAll => self.print_vm_stack(process, None),
-            DebugOptions::StackTop(n) => self.print_vm_stack(process, Some(n)),
-            DebugOptions::MemAll => self.print_mem_all(process),
-            DebugOptions::MemInterval(n, m) => self.print_mem_interval(process, n, m),
-            DebugOptions::LocalInterval(n, m, num_locals) => {
-                self.print_local_interval(process, n, m, num_locals as u32)
+            DebugOptions::StackAll => {
+                let stack = process.get_stack_state();
+                self.print_stack(&stack, None, "Stack", process)
             },
-            DebugOptions::AdvStackTop(n) => self.print_vm_adv_stack(process, n),
+            DebugOptions::StackTop(n) => {
+                let stack = process.get_stack_state();
+                let count = if n == 0 { None } else { Some(n as usize) };
+                self.print_stack(&stack, count, "Stack", process)
+            },
+            DebugOptions::MemAll => self.print_mem_all(process),
+            DebugOptions::MemInterval(n, m) => self.print_mem_interval(process, n..=m),
+            DebugOptions::LocalInterval(n, m, num_locals) => {
+                self.print_local_interval(process, n..=m, num_locals as u32)
+            },
+            DebugOptions::AdvStackTop(n) => {
+                // Reverse the advice stack so last element becomes index 0
+                let stack = process.advice_provider().stack();
+                let reversed_stack: Vec<_> = stack.iter().copied().rev().collect();
+
+                let count = if n == 0 { None } else { Some(n as usize) };
+                self.print_stack(&reversed_stack, count, "Advice stack", process)
+            },
         };
         Ok(())
     }
@@ -82,109 +96,53 @@ impl<W: fmt::Write + Sync> DebugHandler for DefaultDebugHandler<W> {
 }
 
 impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
-    /// Writes the number of stack items specified by `n` if it is provided, otherwise writes
-    /// the whole stack.
-    fn print_vm_stack(&mut self, process: &ProcessState, n: Option<u8>) -> fmt::Result {
-        let stack = process.get_stack_state();
+    /// Generic stack printing.
+    fn print_stack(
+        &mut self,
+        stack: &[Felt],
+        n: Option<usize>,
+        stack_type: &str,
+        process: &ProcessState,
+    ) -> fmt::Result {
+        if stack.is_empty() {
+            writeln!(self.writer, "{stack_type} empty before step {}.", process.clk())?;
+            return Ok(());
+        }
 
-        let num_items =
-            n.map(|n| if n == 0 { stack.len() } else { n as usize }).unwrap_or(stack.len());
+        // Determine how many items to show
+        let num_items = n.unwrap_or(stack.len());
 
-        // Determine if we're printing the whole stack or a partial interval
-        let is_partial = n.is_some() && n != Some(0) && num_items < stack.len();
+        // Write header
+        let is_partial = num_items < stack.len();
         if is_partial {
             writeln!(
                 self.writer,
-                "Stack state in interval [0, {}] before step {}:",
+                "{stack_type} state in interval [0, {}] before step {}:",
                 num_items - 1,
                 process.clk()
-            )?;
+            )?
         } else {
-            writeln!(self.writer, "Stack state before step {}:", process.clk())?;
+            writeln!(self.writer, "{stack_type} state before step {}:", process.clk())?
         }
 
-        // Collect stack items for printing
+        // Build stack items for display
         let mut stack_items = Vec::new();
-
-        // Add actual stack elements
-        let num_stack_items = min(num_items, stack.len());
-        for (i, element) in stack.iter().enumerate().take(num_stack_items) {
+        for (i, element) in stack.iter().enumerate().take(num_items) {
             stack_items.push((i.to_string(), Some(element.to_string())));
         }
-
-        // Add EMPTY slots if requested
+        // Add extra EMPTY slots if requested more than available
         for i in stack.len()..num_items {
             stack_items.push((i.to_string(), None));
         }
 
-        // Calculate remaining overflow items
-        let num_remaining = stack.len() - num_stack_items;
-        let remaining = if num_stack_items > MIN_STACK_DEPTH && num_remaining > 0 {
-            Some(num_remaining)
+        // Calculate remaining items for partial views
+        let remaining = if num_items < stack.len() {
+            Some(stack.len() - num_items)
         } else {
             None
         };
 
-        // Print using the generic interval method
-        self.print_interval(stack_items, remaining)?;
-
-        Ok(())
-    }
-
-    /// Writes length items from the top of the advice stack. If length is 0 it writes the whole
-    /// stack.
-    fn print_vm_adv_stack(&mut self, process: &ProcessState, n: u16) -> fmt::Result {
-        let stack = process.advice_provider().stack();
-
-        if stack.is_empty() {
-            writeln!(self.writer, "Advice Stack empty before step {}.", process.clk())?;
-            return Ok(());
-        }
-
-        // If n = 0 print the entire stack
-        let num_items = if n == 0 {
-            stack.len()
-        } else {
-            min(stack.len(), n as usize)
-        };
-
-        let num_remaining = stack.len() - num_items;
-
-        // Determine if we're printing the whole stack or a partial interval
-        let is_partial = n != 0 && num_items > 0 && num_items < stack.len();
-        if is_partial {
-            writeln!(
-                self.writer,
-                "Advice stack state in interval [0, {}] before step {}:",
-                num_items - 1,
-                process.clk()
-            )?;
-        } else {
-            writeln!(self.writer, "Advice stack state before step {}:", process.clk())?;
-        }
-
-        // Collect advice stack items for printing
-        let mut advice_items = Vec::new();
-
-        // Note: `stack` is in reverse order. e.g., `adv_push.1` pushes `stack.last()`.
-        // We need to print the top `num_items` from the stack, which are the last `num_items`
-        // elements but we want to display them in logical order (index 0 is the top of the
-        // stack)
-
-        // Get items from the end of the stack (most recent) going backwards
-        let start_idx = num_remaining;
-        for (logical_idx, stack_idx) in (start_idx..stack.len()).rev().enumerate() {
-            let element = &stack[stack_idx];
-            advice_items.push((logical_idx.to_string(), Some(element.to_string())));
-        }
-
-        // Calculate remaining items
-        let remaining = if num_remaining > 0 { Some(num_remaining) } else { None };
-
-        // Print using the generic interval method
-        self.print_interval(advice_items, remaining)?;
-
-        Ok(())
+        self.print_interval(stack_items, remaining)
     }
 
     /// Writes the whole memory state at the cycle `clk` in context `ctx`.
@@ -199,7 +157,7 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
         )?;
 
         let mem_items: Vec<_> = mem
-            .iter()
+            .into_iter()
             .map(|(addr, value)| (format!("{addr:#010x}"), Some(value.to_string())))
             .collect();
 
@@ -208,25 +166,23 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
     }
 
     /// Writes memory values in the provided addresses interval.
-    fn print_mem_interval(&mut self, process: &ProcessState, n: u32, m: u32) -> fmt::Result {
-        let addr_range = n..m + 1;
-        let mem_interval: Vec<_> = addr_range
-            .map(|addr| (MemoryAddress(addr), process.get_mem_value(process.ctx(), addr)))
-            .collect();
+    fn print_mem_interval(
+        &mut self,
+        process: &ProcessState,
+        range: RangeInclusive<u32>,
+    ) -> fmt::Result {
+        let start = *range.start();
+        let end = *range.end();
 
-        if n == m {
-            debug_assert_eq!(mem_interval.len(), 1);
-            let (addr, value) = mem_interval[0];
-            let value_str = if let Some(value) = value {
-                value.to_string()
-            } else {
-                "EMPTY".to_string()
-            };
+        if start == end {
+            let value = process.get_mem_value(process.ctx(), start);
+            let value_str = format_value(value);
             writeln!(
                 self.writer,
-                "Memory state before step {} for the context {} at address {addr:#010x}: {value_str}",
+                "Memory state before step {} for the context {} at address {:#010x}: {value_str}",
                 process.clk(),
                 process.ctx(),
+                start
             )
         } else {
             writeln!(
@@ -234,12 +190,12 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
                 "Memory state before step {} for the context {} in the interval [{}, {}]:",
                 process.clk(),
                 process.ctx(),
-                n,
-                m
+                start,
+                end
             )?;
-            let mem_items: Vec<_> = mem_interval
-                .iter()
-                .map(|(addr, value)| {
+            let mem_items: Vec<_> = range
+                .map(|addr| {
+                    let value = process.get_mem_value(process.ctx(), addr);
                     let addr_str = format!("{addr:#010x}");
                     let value_str = value.map(|v| v.to_string());
                     (addr_str, value_str)
@@ -256,32 +212,22 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
     fn print_local_interval(
         &mut self,
         process: &ProcessState,
-        start: u16,
-        end: u16,
+        range: RangeInclusive<u16>,
         num_locals: u32,
     ) -> fmt::Result {
         let local_memory_offset = process.fmp() as u32 - num_locals;
 
-        let locals: Vec<_> = (start..=end)
-            .map(|local_idx| {
-                let addr = local_memory_offset + local_idx as u32;
-                let value = process.get_mem_value(process.ctx(), addr);
-                (MemoryAddress(local_idx as u32), value)
-            })
-            .collect();
+        let start = *range.start() as u32;
+        let end = *range.end() as u32;
 
         if start == end {
-            debug_assert_eq!(locals.len(), 1);
-            let (addr, value) = locals[0];
-            let value_str = if let Some(value) = value {
-                value.to_string()
-            } else {
-                "EMPTY".to_string()
-            };
+            let addr = local_memory_offset + start;
+            let value = process.get_mem_value(process.ctx(), addr);
+            let value_str = format_value(value);
 
             writeln!(
                 self.writer,
-                "State of procedure local {addr} before step {}: {value_str}",
+                "State of procedure local {start} before step {}: {value_str}",
                 process.clk(),
             )
         } else {
@@ -290,10 +236,11 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
                 "State of procedure locals [{start}, {end}] before step {}:",
                 process.clk()
             )?;
-            let local_items: Vec<_> = locals
-                .iter()
-                .map(|(addr, value)| {
-                    let addr_str = format!("{}", addr.0);
+            let local_items: Vec<_> = range
+                .map(|local_idx| {
+                    let addr = local_memory_offset + local_idx as u32;
+                    let value = process.get_mem_value(process.ctx(), addr);
+                    let addr_str = local_idx.to_string();
                     let value_str = value.map(|v| v.to_string());
                     (addr_str, value_str)
                 })
@@ -308,44 +255,48 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
     /// Takes a vector of (address_string, optional_value_string) pairs where:
     /// - address_string: The address as a string (not pre-padded)
     /// - optional_value_string: Some(value) or None (prints "EMPTY")
-    /// - remaining: Optional count of remaining items to show as "(N remaining elements)"
+    /// - remaining: Optional count of remaining items to show as "(N more items)"
     fn print_interval(
         &mut self,
         items: Vec<(String, Option<String>)>,
         remaining: Option<usize>,
     ) -> fmt::Result {
-        if items.is_empty() && remaining.is_none() {
-            return Ok(());
-        }
-
         // Find the maximum address width for proper alignment
         let max_addr_width = items.iter().map(|(addr, _)| addr.len()).max().unwrap_or(0);
 
         // Collect formatted items
         let mut formatted_items: Vec<String> = items
-            .iter()
+            .into_iter()
             .map(|(addr, value_opt)| {
-                let value_string = value_opt.as_deref().unwrap_or("EMPTY");
+                let value_string = format_value(value_opt);
                 format!("{addr:>width$}: {value_string}", width = max_addr_width)
             })
             .collect();
 
         // Add remaining count if specified
         if let Some(count) = remaining {
-            formatted_items.push(format!("({} more items)", count));
+            formatted_items.push(format!("({count} more items)"));
         }
 
         // Prints a list of items with proper tree-style indentation.
         // All items except the last are prefixed with "├── ", and the last item with "└── ".
-        if let Some((last, front)) = items.split_last() {
+        if let Some((last, front)) = formatted_items.split_last() {
             // Print all items except the last with "├── " prefix
             for item in front {
-                writeln!(self.writer, "├── {}", item)?;
+                writeln!(self.writer, "├── {item}")?;
             }
             // Print the last item with "└── " prefix
-            writeln!(self.writer, "└── {}", last)?;
+            writeln!(self.writer, "└── {last}")?;
         }
 
         Ok(())
     }
+}
+
+// HELPER FUNCTIONS
+// ================================================================================================
+
+/// Formats a value as a string, using "EMPTY" for None values.
+fn format_value<T: ToString>(value: Option<T>) -> String {
+    value.map(|v| v.to_string()).unwrap_or_else(|| "EMPTY".to_string())
 }

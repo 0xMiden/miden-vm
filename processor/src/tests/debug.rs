@@ -63,7 +63,8 @@ fn test_debug_stack() {
     ├── 0: 4
     ├── 1: 3
     ├── 2: 2
-    └── 3: 1
+    ├── 3: 1
+    └── (12 more items)
     Stack state in interval [0, 19] before step 15:
     ├──  0: 42
     ├──  1: 42
@@ -114,7 +115,8 @@ fn test_debug_stack() {
     ├── 3: 2
     ├── 4: 1
     ├── 5: 0
-    └── 6: 0
+    ├── 6: 0
+    └── (10 more items)
     Stack state before step 36:
     ├──  0: 0
     ├──  1: 0
@@ -287,6 +289,9 @@ fn test_debug_adv_stack() {
             debug.adv_stack.2 # => [8, 7]
             debug.adv_stack.0 # => [8..1]
 
+            # Check that we can output output EMPTY when too many elements are requested
+            debug.adv_stack.10
+
             padw adv_loadw
             # => [5, 6, 7, 8, 4, 3, 2, 1, 0]
             debug.adv_stack # => [4, 3, 2, 1, 0]
@@ -342,6 +347,17 @@ fn test_debug_adv_stack() {
     ├── 5: 3
     ├── 6: 2
     └── 7: 1
+    Advice stack state before step 1:
+    ├── 0: 8
+    ├── 1: 7
+    ├── 2: 6
+    ├── 3: 5
+    ├── 4: 4
+    ├── 5: 3
+    ├── 6: 2
+    ├── 7: 1
+    ├── 8: EMPTY
+    └── 9: EMPTY
     Advice stack state before step 6:
     ├── 0: 4
     ├── 1: 3
@@ -356,14 +372,16 @@ fn test_debug_adv_stack() {
     ├── 5: 3
     ├── 6: 2
     ├── 7: 1
-    └── 8: 0
+    ├── 8: 0
+    └── (11 more items)
     Stack state in interval [0, 5] before step 23:
     ├── 0: 4
     ├── 1: 4
     ├── 2: 3
     ├── 3: 2
     ├── 4: 1
-    └── 5: 0
+    ├── 5: 0
+    └── (11 more items)
     Advice stack state before step 23:
     ├── 0: 3
     ├── 1: 2
@@ -375,7 +393,8 @@ fn test_debug_adv_stack() {
     ├── 3: 3
     ├── 4: 2
     ├── 5: 1
-    └── 6: 0
-    Advice Stack empty before step 45.
+    ├── 6: 0
+    └── (12 more items)
+    Advice stack empty before step 45.
     ");
 }
