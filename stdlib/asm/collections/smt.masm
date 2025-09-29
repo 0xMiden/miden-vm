@@ -579,24 +579,25 @@ proc.remove_in_multi_leaf.8200
     # 0: pairs_array_start
     # 1: pairs_array_end
     # 2: pairs_array_len
-    # 3: key_ptr
+    # 3:
     # 4: cur_read
     # 5: cur_write
     # 8..8200: leaf memory space
 
-    loc_store.3 # key_ptr
-    dup loc_store.0 # pairs_array_start
-    loc_store.4 # cur_read = pairs_array_start
-    loc_store.1 # pairs_array_end
+    movdn.6
+    # => [start_ptr, end_ptr, V=EMPTY, key_ptr, K, R]
+    dup loc_store.0 # start_ptr
+    loc_store.4 # cur_read = start_ptr
+    loc_store.1 # end_ptr
+    # => [V, key_ptr, K, R]
 
-    locaddr.8 loc_store.5 # cur_write
-
-    # => [V=EMPTY, K, R]
+    # cur_write = &LOCALS[8]
+    locaddr.8 loc_store.5
+    # => [V=EMPTY, key_ptr, K, R]
 
     # Get V_in_leaf from key_ptr+4. We'll need it later. Since we know V is an
     # empty word, we can reuse that stack space for mem_loadw.
-    loc_load.3 movdn.4
-    # => [V=EMPTY, key_ptr, K, R]
+
     dup.4 add.4
     # => [val_ptr, V=EMPTY, key_ptr, K, R]
     mem_loadw
@@ -607,33 +608,33 @@ proc.remove_in_multi_leaf.8200
     loc_load.5
     # => [cur_write, V_old, key_ptr, K, R]
 
-    movup.5
-    # => [read_end=key_ptr, cur_write, V_old, K, R]
+    dup.5
+    # => [read_end=key_ptr, cur_write, V_old, key_ptr, K, R]
 
     loc_load.4
-    # => [cur_read, read_end, cur_write; V_old, K, R]
+    # => [cur_read, read_end, cur_write; V_old, key_ptr, K, R]
     exec.memcopy_word_range_and_advance_ptrs
-    # => [cur_read', cur_write'; V_old, K, R]
+    # => [cur_read', cur_write'; V_old, key_ptr, K, R]
 
     # We ignore the advanced cur_read, and instead set it to key_ptr+8.
     drop
 
     # We still update cur_write, though.
     loc_store.5
-    # => [V_old, K, R]
+    # => [V_old, key_ptr, K, R]
 
     # cur_read = key_ptr+8
-    loc_load.3 add.8 loc_store.4
+    movup.4 add.8 loc_store.4
 
 
     # Copy from cur_read..end_ptr
 
     loc_load.5
-    # => [cur_write, V_old, K, R]
+    # => [cur_write, V_old, key_ptr, K, R]
     loc_load.1
-    # => [cur_write, end_ptr=pairs_array_end, V_old, K, R]
+    # => [cur_write, end_ptr=pairs_array_end, V_old, key_ptr, K, R]
     loc_load.4
-    # => [cur_read, cur_write, end_ptr; V_old, K, R]
+    # => [cur_read, cur_write, end_ptr; V_old, key_ptr, K, R]
     exec.memcopy_word_range_and_advance_ptrs
     # => [cur_read', cur_write'; V_old, K, R]
 
