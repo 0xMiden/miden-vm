@@ -857,7 +857,6 @@ export.set
     # => [NV == ZERO, ZERO, NV, V, K, R]
 
     if.true
-        nop debug.str="set: empty leaf case"
         # empty leaf
 
         # (8 cycles)
@@ -886,7 +885,6 @@ export.set
         # => [is_single_kv_pair, leaf_size, NV, V, K, R]
 
         if.true
-            nop debug.str="set: single kv-pair case"
             #  Single kv-pair case
 
             # (1 cycle)
@@ -899,7 +897,6 @@ export.set
             # becomes a multi-leaf.
             exec.set_single_leaf
         else
-            nop debug.str="set: multi kv-pair case"
             # Multiple kv-pair case
 
             # => [leaf_size, NV, V, K, R]
