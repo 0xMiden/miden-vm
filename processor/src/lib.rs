@@ -898,8 +898,8 @@ impl<'a> ProcessState<'a> {
         }
     }
 
-    /// Reads (start_addr, end_addr) tuple from the specified elements of the operand stack, and
-    /// verifies that memory range is valid.
+    /// Reads (start_addr, end_addr) tuple from the specified elements of the operand stack (
+    /// without modifying the state of the stack), and verifies that memory range is valid.
     pub fn get_mem_addr_range(
         &self,
         start_idx: usize,
@@ -920,19 +920,6 @@ impl<'a> ProcessState<'a> {
         }
 
         Ok(start_addr as u32..end_addr as u32)
-    }
-
-    /// Returns a memory address range given a range of memory addresses.
-    pub fn get_memory_range(&self, range: core::ops::Range<u32>) -> Result<Vec<Felt>, MemoryError> {
-        let ctx = self.ctx();
-        let mut result = Vec::with_capacity(range.len());
-        for addr in range {
-            result.push(
-                self.get_mem_value(ctx, addr)
-                    .ok_or(MemoryError::address_out_of_bounds(addr as u64, &()))?,
-            );
-        }
-        Ok(result)
     }
 
     /// Returns the entire memory state for the specified execution context at the current clock

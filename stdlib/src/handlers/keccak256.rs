@@ -95,7 +95,8 @@ fn read_witness(process: &ProcessState, ptr: u64, len_bytes: u64) -> Option<Vec<
     let end_addr = start_addr.checked_add(len_packed)?;
 
     // Read each memory location in the range [start_addr, end_addr) and append to the witness.
-    process.get_memory_range(start_addr..end_addr).ok()
+    let ctx = process.ctx();
+    (start_addr..end_addr).map(|addr| process.get_mem_value(ctx, addr)).collect()
 }
 
 // KECCAK VERIFIER
