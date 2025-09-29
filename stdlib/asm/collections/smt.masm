@@ -593,48 +593,33 @@ proc.remove_in_multi_leaf.8200
 
     # => [V=EMPTY, K, R]
 
-    # Copy from pairs_array_start..key_ptr
-
-    # Get V_in_leaf from key_ptr+4. We'll need it later.
-    loc_load.3 movdn.4 dup.4 add.4
+    # Get V_in_leaf from key_ptr+4. We'll need it later. Since we know V is an
+    # empty word, we can reuse that stack space for mem_loadw.
+    loc_load.3 movdn.4
+    # => [V=EMPTY, key_ptr, K, R]
+    dup.4 add.4
     # => [val_ptr, V=EMPTY, key_ptr, K, R]
     mem_loadw
     # => [V_old, key_ptr, K, R]
-    movup.4
-    # => [key_ptr, V_old, K, R]
 
-    loc_load.0
-    # => [pairs_array_start, key_ptr, V_old, K, R]
-    sub
-    # => [key - pairs_start, V_old, K, R]
+    # Now copy from pairs_array_start..key_ptr.
 
-    dup neq.0
-    if.true
-        # => [key - pairs_start, V_old, K, R]
-        div.4
-        # => [num_words, V_old, K, R]
-        loc_load.5 loc_load.4
-        # => [cur_read, cur_write, num_words, V_old, K, R]
-        dup.2
-        # => [num_words, cur_read, cur_write; num_words, V_old, K, R]
-        exec.mem::memcopy_words
-        # => [num_words, V_old, K, R]
+    loc_load.5
+    # => [cur_write, V_old, key_ptr, K, R]
 
-        # cur_write++
-        mul.4 dup loc_load.5 add loc_store.5
+    movup.5
+    # => [read_end=key_ptr, cur_write, V_old, K, R]
 
-        # cur_read++
-        loc_load.4 add loc_store.4
-    else
-        # => [key - pairs_start, V_old, K, R]
+    loc_load.4
+    # => [cur_read, read_end, cur_write; V_old, K, R]
+    exec.memcopy_word_range_and_advance_ptrs
+    # => [cur_read', cur_write'; V_old, K, R]
 
-        drop
+    # We ignore the advanced cur_read, and instead set it to key_ptr+8.
+    drop
 
-        # cur_read++
-        loc_load.4 add.8 loc_store.4
-        nop
-    end
-
+    # We still update cur_write, though.
+    loc_store.5
     # => [V_old, K, R]
 
     # cur_read = key_ptr+8
