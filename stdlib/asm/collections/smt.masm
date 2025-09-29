@@ -72,6 +72,42 @@ proc.memcopy_word_range_and_advance_ptrs
     end
 end
 
+#! Hashes an array of SMT leaves, then updates both the advice map and Merkle store.
+#!
+#! Returns the node value (hash) of the previous leaf at the given index, as well as
+#! the root for the new SMT.
+#!
+#! Inputs: [start_addr, end_addr, leaf_index, R]
+#! Outputs: [NV_old, R_new]
+proc.hash_and_insert_mem
+    # => [start_addr, end_addr, i, R, ...]
+
+    dup.1 dup.1
+    # => [start_addr, end_addr, start_addr, end_addr, i, R, ...]
+
+    exec.rpo::hash_memory_words
+    # => [NV, start_addr, end_addr, i, R, ...]
+
+    # We're already ready for adv.insert_mem.
+    adv.insert_mem
+
+    # Prepare for mtree_set
+    movup.4 drop movup.4 drop
+    # => [NV, i, R, ...]
+
+    movup.4 movdn.8
+    # => [NV, R, i]
+
+    swapw movup.8
+    # => [i, R, NV]
+
+    push.LEAF_DEPTH
+    # => [d, i, R, NV]
+
+    mtree_set
+    # => [NV_old, R_new, ...]
+end
+
 #! Inserts or removes a value associated with the given key. The leaf to which we're inserting is
 #! guaranteed to be empty.
 #!
@@ -667,35 +703,6 @@ proc.remove_in_multi_leaf.8196
 
     dropw movupw.2 dropw swapw
     # => [V_old, R_new]
-end
-
-proc.hash_and_insert_mem
-    # => [start_addr, end_addr, i, R, ...]
-
-    dup.1 dup.1
-    # => [start_addr, end_addr, start_addr, end_addr, i, R, ...]
-
-    exec.rpo::hash_memory_words
-    # => [NV, start_addr, end_addr, i, R, ...]
-
-    # We're already ready for adv.insert_mem.
-    adv.insert_mem
-
-    # Prepare for mtree_set
-    movup.4 drop movup.4 drop
-    # => [NV, i, R, ...]
-
-    movup.4 movdn.8
-
-    # => [NV, R, i]
-    swapw movup.8
-    # => [i, R, NV]
-
-    push.LEAF_DEPTH
-    # => [d, i, R, NV]
-
-    mtree_set
-    # => [NV_old, R_new, ...]
 end
 
 # Inputs: [leaf_size, NV, V, K, R]
