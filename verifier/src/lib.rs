@@ -8,23 +8,30 @@ extern crate std;
 use alloc::vec;
 
 use miden_air::{HashFunction, ProcessorAir, ProvingOptions, PublicInputs};
-use miden_core::crypto::{
-    hash::{Blake3_192, Blake3_256, Poseidon2, Rpo256, Rpx256},
-    random::{RpoRandomCoin, RpxRandomCoin, WinterRandomCoin},
+use miden_core::{
+    crypto::{
+        hash::{Blake3_192, Blake3_256, Poseidon2, Rpo256, Rpx256},
+        random::{RpoRandomCoin, RpxRandomCoin, WinterRandomCoin},
+    },
+    precompile::PrecompileRequest,
 };
+use winter_verifier::{crypto::MerkleTree, verify as verify_proof};
+
 // EXPORTS
 // ================================================================================================
-pub use miden_core::{
-    Kernel, ProgramInfo, StackInputs, StackOutputs, Word,
-    precompile::{PrecompileError, PrecompileVerificationError, PrecompileVerifierRegistry},
-};
-pub use winter_verifier::{AcceptableOptions, VerifierError};
-use winter_verifier::{crypto::MerkleTree, verify as verify_proof};
-pub mod math {
-    pub use miden_core::{Felt, FieldElement, StarkField};
+mod exports {
+    pub use miden_core::{
+        Kernel, ProgramInfo, StackInputs, StackOutputs, Word,
+        precompile::{PrecompileError, PrecompileVerificationError, PrecompileVerifierRegistry},
+    };
+    pub use winter_verifier::{AcceptableOptions, VerifierError};
+    pub mod math {
+        pub use miden_core::{Felt, FieldElement, StarkField};
+    }
+    pub use miden_air::ExecutionProof;
 }
-pub use miden_air::ExecutionProof;
-use miden_core::precompile::PrecompileRequest;
+pub use exports::*;
+
 // VERIFIER
 // ================================================================================================
 
