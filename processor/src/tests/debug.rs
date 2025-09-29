@@ -68,7 +68,7 @@ fn test_debug_stack() {
     ├── 16: 0
     ├── 17: 0
     ├── 18: 0
-    └── 19: 0
+    ├── 19: 0
     └── (8 more items)
     Stack state before step 27:
     ├──  0: 4
@@ -315,7 +315,7 @@ fn test_debug_adv_stack() {
     └──  7: 1
     Advice Stack state before step 1:
     ├──  0: 8
-    └──  1: 7
+    ├──  1: 7
     └── (6 more items)
     Advice Stack state before step 1:
     ├──  0: 8

@@ -1,4 +1,7 @@
-use alloc::{string::ToString, vec::Vec};
+use alloc::{
+    string::{String, ToString},
+    vec::Vec,
+};
 use core::{cmp::min, fmt};
 
 use miden_core::{DebugOptions, Felt, stack::MIN_STACK_DEPTH};
@@ -88,29 +91,28 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
 
         writeln!(self.writer, "Stack state before step {}:", process.clk())?;
 
-        // Print actual requested stack elements
+        // Collect all items to print
+        let mut all_items = Vec::new();
+
+        // Add actual stack elements
         let num_stack_items = min(num_items, stack.len());
         for (i, element) in stack.iter().enumerate().take(num_stack_items) {
-            if i + 1 < num_items {
-                writeln!(self.writer, "├── {i:>2}: {element}")?;
-            } else {
-                writeln!(self.writer, "└── {i:>2}: {element}")?;
-            }
+            all_items.push(format!("{i:>2}: {element}"));
         }
 
-        // Report whether there are any elements in the overflow stack,
+        // Add overflow message if needed
         let num_remaining = stack.len() - num_stack_items;
         if num_stack_items > MIN_STACK_DEPTH && num_remaining > 0 {
-            writeln!(self.writer, "└── ({} more items)", num_remaining)?;
+            all_items.push(format!("({} more items)", num_remaining));
         }
 
+        // Add EMPTY slots if requested
         for i in stack.len()..num_items {
-            if i + 1 < num_items {
-                writeln!(self.writer, "├── {i:>2}: EMPTY")?;
-            } else {
-                writeln!(self.writer, "└── {i:>2}: EMPTY")?;
-            }
+            all_items.push(format!("{i:>2}: EMPTY"));
         }
+
+        // Print all items using the tree method
+        print_tree_list(&mut self.writer, all_items)?;
 
         Ok(())
     }
@@ -134,17 +136,27 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
 
         // Note: `stack` is in reverse order. e.g., `adv_push.1` pushes `stack.last()`.
         if let Some((bottom, top_slice)) = stack_top_slice.split_first() {
-            // print all items except for the last one
             writeln!(self.writer, "Advice Stack state before step {}:", process.clk())?;
+
+            // Collect all items to print
+            let mut all_items = Vec::new();
+
+            // Add top elements (reversed)
             for (i, element) in top_slice.iter().rev().enumerate() {
-                writeln!(self.writer, "├── {i:>2}: {element}")?;
+                all_items.push(format!("{i:>2}: {element}"));
             }
 
+            // Add bottom element
             let i = num_items - 1;
-            writeln!(self.writer, "└── {i:>2}: {bottom}")?;
+            all_items.push(format!("{i:>2}: {bottom}"));
+
+            // Add overflow message if needed
             if num_remaining > 0 {
-                writeln!(self.writer, "└── ({} more items)", num_remaining)?;
+                all_items.push(format!("({} more items)", num_remaining));
             }
+
+            // Print all items using the tree method
+            print_tree_list(&mut self.writer, all_items)?;
         } else {
             writeln!(self.writer, "Advice Stack empty before step {}.", process.clk())?;
         }
@@ -154,11 +166,6 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
     /// Writes the whole memory state at the cycle `clk` in context `ctx`.
     fn print_mem_all(&mut self, process: &ProcessState) -> fmt::Result {
         let mem = process.get_mem_state(process.ctx());
-        let element_width = mem
-            .iter()
-            .map(|(_addr, value)| element_printed_width(*value))
-            .max()
-            .unwrap_or(0);
 
         writeln!(
             self.writer,
@@ -167,15 +174,9 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
             process.ctx()
         )?;
 
-        if let Some(((last_addr, last_value), front)) = mem.split_last() {
-            // print the main part of the memory (without the last value)
-            for (addr, value) in front.iter() {
-                self.print_mem_address(*addr, Some(*value), false, false, element_width)?;
-            }
+        let mem_interval: Vec<_> = mem.iter().map(|(addr, value)| (*addr, Some(*value))).collect();
 
-            // print the last memory value
-            self.print_mem_address(*last_addr, Some(*last_value), true, false, element_width)?;
-        }
+        self.print_interval(mem_interval, false)?;
         Ok(())
     }
 
@@ -272,48 +273,28 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
             .max()
             .unwrap_or(0);
 
-        if let Some(((last_addr, last_value), front_elements)) = mem_interval.split_last() {
-            // print the main part of the memory (without the last value)
-            for (addr, mem_value) in front_elements {
-                self.print_mem_address(*addr, *mem_value, false, is_local, element_width)?;
-            }
+        // Collect formatted items
+        let formatted_items: Vec<String> = mem_interval
+            .iter()
+            .map(|(addr, mem_value)| {
+                let value_string = if let Some(value) = mem_value {
+                    format!("{:>width$}", value, width = element_width as usize)
+                } else {
+                    "EMPTY".to_string()
+                };
 
-            // print the last memory value
-            self.print_mem_address(*last_addr, *last_value, true, is_local, element_width)?;
-        }
-        Ok(())
-    }
+                let addr_string = if is_local {
+                    format!("{addr:>5}")
+                } else {
+                    format!("{addr:#010x}")
+                };
 
-    /// Writes single memory value with its address.
-    ///
-    /// If `is_local` is true, the output address is formatted as decimal value, otherwise as hex
-    /// string.
-    fn print_mem_address(
-        &mut self,
-        addr: MemoryAddress,
-        mem_value: Option<Felt>,
-        is_last: bool,
-        is_local: bool,
-        element_width: u32,
-    ) -> fmt::Result {
-        let value_string = if let Some(value) = mem_value {
-            format!("{:>width$}", value, width = element_width as usize)
-        } else {
-            "EMPTY".to_string()
-        };
+                format!("{addr_string}: {value_string}")
+            })
+            .collect();
 
-        let addr_string = if is_local {
-            format!("{addr:>5}")
-        } else {
-            format!("{addr:#010x}")
-        };
-
-        if is_last {
-            writeln!(self.writer, "└── {addr_string}: {value_string}")?;
-        } else {
-            writeln!(self.writer, "├── {addr_string}: {value_string}")?;
-        }
-        Ok(())
+        // Print using the tree method
+        print_tree_list(&mut self.writer, formatted_items)
     }
 }
 
@@ -323,4 +304,19 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
 /// Returns the number of digits required to print the provided element.
 fn element_printed_width(element: Felt) -> u32 {
     element.as_int().checked_ilog10().unwrap_or(1) + 1
+}
+
+/// Prints a list of items with proper tree-style indentation.
+/// All items except the last are prefixed with "├── ", and the last item with "└── ".
+fn print_tree_list<W: fmt::Write + Sync>(writer: &mut W, items: Vec<String>) -> fmt::Result {
+    if let Some((last, front)) = items.split_last() {
+        // Print all items except the last with "├── " prefix
+        for item in front {
+            writeln!(writer, "├── {}", item)?;
+        }
+        // Print the last item with "└── " prefix
+        writeln!(writer, "└── {}", last)?;
+    }
+
+    Ok(())
 }
