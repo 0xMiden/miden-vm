@@ -490,9 +490,8 @@ proc.insert_into_leaf.8196
     # => [cur_write, cur_read, key_ptr, V, K, i, R]
 
     movdn.2
-    # => [cur_read, key_ptr, cur_write; V, K, i, R]
+    # => [cur_read, read_end=key_ptr, cur_write; V, K, i, R]
 
-    # => [cur_read, read_end, cur_write; V, K, i, R]
     exec.memcopy_word_range_and_advance_ptrs
     # => [cur_read', cur_write', V, K, i, R]
     loc_store.2 loc_store.3
@@ -550,6 +549,8 @@ proc.insert_into_leaf.8196
 
     exec.hash_and_insert_mem
     # => [NV_old, R_new]
+
+    # FIXME: Confirm that old leaf hashes to NV_old.
 
     # By nature, if this insertion put a value where there wasn't one, then the
     # old value at this key is an empty word.
@@ -745,7 +746,7 @@ proc.set_multi_leaf.8192
     exec.insert_or_replace_in_multi_leaf
 end
 
-proc.replace_in_multi_leaf.8192
+proc.replace_in_multi_leaf
     # => [key_ptr, start_ptr, end_ptr, V, K, R]
 
     add.4
