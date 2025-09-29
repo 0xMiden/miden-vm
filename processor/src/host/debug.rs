@@ -87,9 +87,21 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
     fn print_vm_stack(&mut self, process: &ProcessState, n: Option<u8>) -> fmt::Result {
         let stack = process.get_stack_state();
 
-        let num_items = n.map(|n| n as usize).unwrap_or(stack.len());
+        let num_items =
+            n.map(|n| if n == 0 { stack.len() } else { n as usize }).unwrap_or(stack.len());
 
-        writeln!(self.writer, "Stack state before step {}:", process.clk())?;
+        // Determine if we're printing the whole stack or a partial interval
+        let is_partial = n.is_some() && n != Some(0) && num_items < stack.len();
+        if is_partial {
+            writeln!(
+                self.writer,
+                "Stack state in interval [0, {}] before step {}:",
+                num_items - 1,
+                process.clk()
+            )?;
+        } else {
+            writeln!(self.writer, "Stack state before step {}:", process.clk())?;
+        }
 
         // Collect all items to print
         let mut all_items = Vec::new();
@@ -136,7 +148,18 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
 
         // Note: `stack` is in reverse order. e.g., `adv_push.1` pushes `stack.last()`.
         if let Some((bottom, top_slice)) = stack_top_slice.split_first() {
-            writeln!(self.writer, "Advice Stack state before step {}:", process.clk())?;
+            // Determine if we're printing the whole stack or a partial interval
+            let is_partial = n != 0 && num_items > 0 && num_items < stack.len();
+            if is_partial {
+                writeln!(
+                    self.writer,
+                    "Advice Stack state in interval [0, {}] before step {}:",
+                    num_items - 1,
+                    process.clk()
+                )?;
+            } else {
+                writeln!(self.writer, "Advice Stack state before step {}:", process.clk())?;
+            }
 
             // Collect all items to print
             let mut all_items = Vec::new();

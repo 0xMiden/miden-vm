@@ -43,12 +43,28 @@ fn test_debug_stack() {
 
     insta::assert_snapshot!(output, @r"
     Stack state before step 1:
-    Stack state before step 1:
+    ├──  0: 4
+    ├──  1: 3
+    ├──  2: 2
+    ├──  3: 1
+    ├──  4: 0
+    ├──  5: 0
+    ├──  6: 0
+    ├──  7: 0
+    ├──  8: 0
+    ├──  9: 0
+    ├── 10: 0
+    ├── 11: 0
+    ├── 12: 0
+    ├── 13: 0
+    ├── 14: 0
+    └── 15: 0
+    Stack state in interval [0, 3] before step 1:
     ├──  0: 4
     ├──  1: 3
     ├──  2: 2
     └──  3: 1
-    Stack state before step 15:
+    Stack state in interval [0, 19] before step 15:
     ├──  0: 42
     ├──  1: 42
     ├──  2: 42
@@ -91,7 +107,7 @@ fn test_debug_stack() {
     ├── 17: EMPTY
     ├── 18: EMPTY
     └── 19: EMPTY
-    Stack state before step 30:
+    Stack state in interval [0, 6] before step 30:
     ├──  0: 5
     ├──  1: 4
     ├──  2: 3
@@ -313,7 +329,7 @@ fn test_debug_adv_stack() {
     ├──  5: 3
     ├──  6: 2
     └──  7: 1
-    Advice Stack state before step 1:
+    Advice Stack state in interval [0, 1] before step 1:
     ├──  0: 8
     ├──  1: 7
     └── (6 more items)
@@ -331,7 +347,7 @@ fn test_debug_adv_stack() {
     ├──  1: 3
     ├──  2: 2
     └──  3: 1
-    Stack state before step 6:
+    Stack state in interval [0, 8] before step 6:
     ├──  0: 5
     ├──  1: 6
     ├──  2: 7
@@ -341,7 +357,7 @@ fn test_debug_adv_stack() {
     ├──  6: 2
     ├──  7: 1
     └──  8: 0
-    Stack state before step 23:
+    Stack state in interval [0, 5] before step 23:
     ├──  0: 4
     ├──  1: 4
     ├──  2: 3
@@ -352,7 +368,7 @@ fn test_debug_adv_stack() {
     ├──  0: 3
     ├──  1: 2
     └──  2: 1
-    Stack state before step 28:
+    Stack state in interval [0, 6] before step 28:
     ├──  0: 1
     ├──  1: 2
     ├──  2: 3
