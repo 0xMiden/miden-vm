@@ -4,7 +4,7 @@ use alloc::{
 };
 use core::{cmp::min, fmt};
 
-use miden_core::{DebugOptions, Felt, stack::MIN_STACK_DEPTH};
+use miden_core::{DebugOptions, stack::MIN_STACK_DEPTH};
 
 use crate::{DebugHandler, ExecutionError, MemoryAddress, ProcessState};
 
@@ -103,28 +103,30 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
             writeln!(self.writer, "Stack state before step {}:", process.clk())?;
         }
 
-        // Collect all items to print
-        let mut all_items = Vec::new();
+        // Collect stack items for printing
+        let mut stack_items = Vec::new();
 
         // Add actual stack elements
         let num_stack_items = min(num_items, stack.len());
         for (i, element) in stack.iter().enumerate().take(num_stack_items) {
-            all_items.push(format!("{i:>2}: {element}"));
-        }
-
-        // Add overflow message if needed
-        let num_remaining = stack.len() - num_stack_items;
-        if num_stack_items > MIN_STACK_DEPTH && num_remaining > 0 {
-            all_items.push(format!("({} more items)", num_remaining));
+            stack_items.push((i.to_string(), Some(element.to_string())));
         }
 
         // Add EMPTY slots if requested
         for i in stack.len()..num_items {
-            all_items.push(format!("{i:>2}: EMPTY"));
+            stack_items.push((i.to_string(), None));
         }
 
-        // Print all items using the tree method
-        print_tree_list(&mut self.writer, all_items)?;
+        // Calculate remaining overflow items
+        let num_remaining = stack.len() - num_stack_items;
+        let remaining = if num_stack_items > MIN_STACK_DEPTH && num_remaining > 0 {
+            Some(num_remaining)
+        } else {
+            None
+        };
+
+        // Print using the generic interval method
+        self.print_interval(stack_items, remaining)?;
 
         Ok(())
     }
@@ -133,6 +135,11 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
     /// stack.
     fn print_vm_adv_stack(&mut self, process: &ProcessState, n: u16) -> fmt::Result {
         let stack = process.advice_provider().stack();
+
+        if stack.is_empty() {
+            writeln!(self.writer, "Advice Stack empty before step {}.", process.clk())?;
+            return Ok(());
+        }
 
         // If n = 0 print the entire stack
         let num_items = if n == 0 {
@@ -143,46 +150,39 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
 
         let num_remaining = stack.len() - num_items;
 
-        // get the top `num_items`
-        let (_stack_bottom_slice, stack_top_slice) = stack.split_at(num_remaining);
+        // Determine if we're printing the whole stack or a partial interval
+        let is_partial = n != 0 && num_items > 0 && num_items < stack.len();
+        if is_partial {
+            writeln!(
+                self.writer,
+                "Advice Stack state in interval [0, {}] before step {}:",
+                num_items - 1,
+                process.clk()
+            )?;
+        } else {
+            writeln!(self.writer, "Advice Stack state before step {}:", process.clk())?;
+        }
+
+        // Collect advice stack items for printing
+        let mut advice_items = Vec::new();
 
         // Note: `stack` is in reverse order. e.g., `adv_push.1` pushes `stack.last()`.
-        if let Some((bottom, top_slice)) = stack_top_slice.split_first() {
-            // Determine if we're printing the whole stack or a partial interval
-            let is_partial = n != 0 && num_items > 0 && num_items < stack.len();
-            if is_partial {
-                writeln!(
-                    self.writer,
-                    "Advice Stack state in interval [0, {}] before step {}:",
-                    num_items - 1,
-                    process.clk()
-                )?;
-            } else {
-                writeln!(self.writer, "Advice Stack state before step {}:", process.clk())?;
-            }
+        // We need to print the top `num_items` from the stack, which are the last `num_items` elements
+        // but we want to display them in logical order (index 0 is the top of the stack)
 
-            // Collect all items to print
-            let mut all_items = Vec::new();
-
-            // Add top elements (reversed)
-            for (i, element) in top_slice.iter().rev().enumerate() {
-                all_items.push(format!("{i:>2}: {element}"));
-            }
-
-            // Add bottom element
-            let i = num_items - 1;
-            all_items.push(format!("{i:>2}: {bottom}"));
-
-            // Add overflow message if needed
-            if num_remaining > 0 {
-                all_items.push(format!("({} more items)", num_remaining));
-            }
-
-            // Print all items using the tree method
-            print_tree_list(&mut self.writer, all_items)?;
-        } else {
-            writeln!(self.writer, "Advice Stack empty before step {}.", process.clk())?;
+        // Get items from the end of the stack (most recent) going backwards
+        let start_idx = num_remaining;
+        for (logical_idx, stack_idx) in (start_idx..stack.len()).rev().enumerate() {
+            let element = &stack[stack_idx];
+            advice_items.push((logical_idx.to_string(), Some(element.to_string())));
         }
+
+        // Calculate remaining items
+        let remaining = if num_remaining > 0 { Some(num_remaining) } else { None };
+
+        // Print using the generic interval method
+        self.print_interval(advice_items, remaining)?;
+
         Ok(())
     }
 
@@ -197,9 +197,12 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
             process.ctx()
         )?;
 
-        let mem_interval: Vec<_> = mem.iter().map(|(addr, value)| (*addr, Some(*value))).collect();
+        let mem_items: Vec<_> = mem
+            .iter()
+            .map(|(addr, value)| (format!("{addr:#010x}"), Some(value.to_string())))
+            .collect();
 
-        self.print_interval(mem_interval, false)?;
+        self.print_interval(mem_items, None)?;
         Ok(())
     }
 
@@ -233,7 +236,16 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
                 n,
                 m
             )?;
-            self.print_interval(mem_interval, false)
+            let mem_items: Vec<_> = mem_interval
+                .iter()
+                .map(|(addr, value)| {
+                    let addr_str = format!("{addr:#010x}");
+                    let value_str = value.map(|v| v.to_string());
+                    (addr_str, value_str)
+                })
+                .collect();
+
+            self.print_interval(mem_items, None)
         }
     }
 
@@ -277,44 +289,50 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
                 "State of procedure locals [{start}, {end}] before step {}:",
                 process.clk()
             )?;
-            self.print_interval(locals, true)
+            let local_items: Vec<_> = locals
+                .iter()
+                .map(|(addr, value)| {
+                    let addr_str = format!("{}", addr.0);
+                    let value_str = value.map(|v| v.to_string());
+                    (addr_str, value_str)
+                })
+                .collect();
+
+            self.print_interval(local_items, None)
         }
     }
 
-    /// Writes the provided memory interval.
+    /// Writes a generic interval with proper alignment and optional remaining count.
     ///
-    /// If `is_local` is true, the output addresses are formatted as decimal values, otherwise as
-    /// hex strings.
+    /// Takes a vector of (address_string, optional_value_string) pairs where:
+    /// - address_string: The address as a string (not pre-padded)
+    /// - optional_value_string: Some(value) or None (prints "EMPTY")
+    /// - remaining: Optional count of remaining items to show as "(N remaining elements)"
     fn print_interval(
         &mut self,
-        mem_interval: Vec<(MemoryAddress, Option<Felt>)>,
-        is_local: bool,
+        items: Vec<(String, Option<String>)>,
+        remaining: Option<usize>,
     ) -> fmt::Result {
-        let element_width = mem_interval
-            .iter()
-            .filter_map(|(_addr, value)| value.map(element_printed_width))
-            .max()
-            .unwrap_or(0);
+        if items.is_empty() && remaining.is_none() {
+            return Ok(());
+        }
+
+        // Find the maximum address width for proper alignment
+        let max_addr_width = items.iter().map(|(addr, _)| addr.len()).max().unwrap_or(0);
 
         // Collect formatted items
-        let formatted_items: Vec<String> = mem_interval
+        let mut formatted_items: Vec<String> = items
             .iter()
-            .map(|(addr, mem_value)| {
-                let value_string = if let Some(value) = mem_value {
-                    format!("{:>width$}", value, width = element_width as usize)
-                } else {
-                    "EMPTY".to_string()
-                };
-
-                let addr_string = if is_local {
-                    format!("{addr:>5}")
-                } else {
-                    format!("{addr:#010x}")
-                };
-
-                format!("{addr_string}: {value_string}")
+            .map(|(addr, value_opt)| {
+                let value_string = value_opt.as_deref().unwrap_or("EMPTY");
+                format!("{addr:>width$}: {value_string}", width = max_addr_width)
             })
             .collect();
+
+        // Add remaining count if specified
+        if let Some(count) = remaining {
+            formatted_items.push(format!("({} more items)", count));
+        }
 
         // Print using the tree method
         print_tree_list(&mut self.writer, formatted_items)
@@ -323,11 +341,6 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
 
 // HELPER FUNCTIONS
 // ================================================================================================
-
-/// Returns the number of digits required to print the provided element.
-fn element_printed_width(element: Felt) -> u32 {
-    element.as_int().checked_ilog10().unwrap_or(1) + 1
-}
 
 /// Prints a list of items with proper tree-style indentation.
 /// All items except the last are prefixed with "├── ", and the last item with "└── ".
