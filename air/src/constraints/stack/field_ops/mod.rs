@@ -381,13 +381,36 @@ pub fn enforce_expacc_constraints<E: FieldElement>(
 
 /// Enforces constraints of the EXT2MUL operation.
 ///
-/// The EXT2MUL operation computes the product of two elements in the extension field of degree 2.
+/// The EXT2MUL operation computes the product of two elements in the extension
+/// field 𝔽ₚ\[x\]/(x² - x + 2):
+///
+/// Let $a = a1 \cdot x + a0$ and $b = b1 \cdot x + b0$. Then:
+///
+/// ```math
+/// a \cdot b = (a1 \cdot b1)x^2 + (a1 \cdot b0 + a0 \cdot b1)x + (a0 \cdot b0)
+/// ```
+///
+/// Since $x^2 \equiv x - 2$ in $\mathbb{F}_p\[x\]/(x^2 - x + 2)$, this reduces to:
+///
+/// ```math
+/// a \cdot b = (a1 \cdot b0 + a0 \cdot b1 + a1 \cdot b1)x + (a0 \cdot b0 - 2 \cdot a1 \cdot b1)
+/// ```
+///
+/// The formula for the $x$ coefficient can be implemented more efficiently using the Karatsuba
+/// trick:
+///
+/// ```math
+/// a1 \cdot b0 + a0 \cdot b1 + a1 \cdot b1 = (b0 + b1)(a0 + a1) - (a0 \cdot b0)
+/// ```
+///
+/// which reduces the number of multiplications at the expense of one subtraction.
+///
 /// Therefore, the following constraints are enforced, assuming the first 4 elements of the stack in
 /// the current frame are a1, a0, b1, b0:
 /// - The first element in the next frame should be a1.
 /// - The second element in the next frame should be a0.
-/// - The third element in the next frame should be equal to (b0 + b1) * (a0 + a1) - b0 * a0.
-/// - The fourth element in the next frame should be equal to b0 * a0 - 2 * b1 * a1.
+/// - The third element in the next frame should be equal to $(b0 + b1)(a0 + a1) - a0 \cdot b0$.
+/// - The fourth element in the next frame should be equal to $a0 \cdot b0 - 2 \cdot a1 \cdot b1$.
 pub fn enforce_ext2mul_constraints<E: FieldElement>(
     frame: &EvaluationFrame<E>,
     result: &mut [E],
