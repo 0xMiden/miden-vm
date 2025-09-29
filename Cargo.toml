@@ -38,4 +38,4 @@ overflow-checks = true
 thiserror = { version = "2.0", default-features = false }
 
 [patch.crates-io]
-miden-crypto = {path = "/Users/al/Code/crypto/miden-crypto"}
+miden-crypto = { git = "https://github.com/0xMiden/crypto", branch = "plonky3-migration" }

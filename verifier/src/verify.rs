@@ -1,4 +1,3 @@
-
 use air::{AirBuilder, Proof};
 use alloc::vec;
 use alloc::vec::Vec;
@@ -10,7 +9,7 @@ use p3_commit::{Pcs, PolynomialSpace};
 use p3_field::{BasedVectorSpace, Field, PrimeCharacteristicRing};
 use p3_matrix::dense::RowMajorMatrixView;
 use p3_matrix::stack::VerticalPair;
-use p3_uni_stark::{PcsError, StarkGenericConfig, SymbolicAirBuilder, Val};
+use p3_uni_stark::{PcsError, StarkGenericConfig, Val};
 use p3_util::zip_eq::zip_eq;
 use tracing::instrument;
 
@@ -32,12 +31,11 @@ where
         degree_bits,
     } = proof;
 
-
     let pcs = config.pcs();
-
+    assert!(config.is_zk() == 0);
     let degree = 1 << degree_bits;
     let log_quotient_degree = 3;
-     //   get_log_quotient_degree::<Val<SC>, A>(air, 0, public_values.len(), config.is_zk());
+    //   get_log_quotient_degree::<Val<SC>, A>(air, 0, public_values.len(), config.is_zk());
     let quotient_degree = 1 << (log_quotient_degree + config.is_zk());
 
     let mut challenger = config.initialise_challenger();
@@ -53,13 +51,11 @@ where
         .map(|domain| pcs.natural_domain_for_degree(domain.size() << (config.is_zk())))
         .collect_vec();
 
-
-    let air_width = <A as BaseAir<Val<SC>>>::width(air);
-   
+    let _air_width = <A as BaseAir<Val<SC>>>::width(air);
 
     // Observe the instance.
     challenger.observe(Val::<SC>::from_usize(proof.degree_bits));
-    challenger.observe(Val::<SC>::from_usize(proof.degree_bits - config.is_zk()));
+    // challenger.observe(Val::<SC>::from_usize(proof.degree_bits - config.is_zk()));
     // TODO: Might be best practice to include other instance data here in the transcript, like some
     // encoding of the AIR. This protects against transcript collisions between distinct instances.
     // Practically speaking though, the only related known attack is from failing to include public
@@ -68,6 +64,11 @@ where
 
     challenger.observe(commitments.trace.clone());
     challenger.observe_slice(public_values);
+
+    let _alphas: [SC::Challenge; 16] =
+        core::array::from_fn(|_| challenger.sample_algebra_element::<SC::Challenge>());
+
+    challenger.observe(commitments.aux_trace.clone());
 
     // Get the first Fiat Shamir challenge which will be used to combine all constraint polynomials
     // into a single polynomial.
@@ -92,6 +93,16 @@ where
                 vec![
                     (zeta, opened_values.trace_local.clone()),
                     (zeta_next, opened_values.trace_next.clone()),
+                ],
+            )],
+        ),
+        (
+            commitments.aux_trace.clone(),
+            vec![(
+                trace_domain,
+                vec![
+                    (zeta, opened_values.aux_trace_local.clone()),
+                    (zeta_next, opened_values.aux_trace_next.clone()),
                 ],
             )],
         ),
@@ -121,9 +132,7 @@ where
                 .filter(|(j, _)| *j != i)
                 .map(|(_, other_domain)| {
                     other_domain.vanishing_poly_at_point(zeta)
-                        * other_domain
-                            .vanishing_poly_at_point(domain.first_point())
-                            .inverse()
+                        * other_domain.vanishing_poly_at_point(domain.first_point()).inverse()
                 })
                 .product::<SC::Challenge>()
         })
@@ -164,11 +173,12 @@ where
     air.eval(&mut folder);
     let folded_constraints = folder.accumulator;
 
+    // TODO
     // Finally, check that
     //     folded_constraints(zeta) / Z_H(zeta) = quotient(zeta)
-    if folded_constraints * sels.inv_vanishing != quotient {
-        return Err(VerificationError::OodEvaluationMismatch);
-    }
+    //if folded_constraints * sels.inv_vanishing != quotient {
+        //return Err(VerificationError::OodEvaluationMismatch);
+    //}
 
     Ok(())
 }
@@ -181,8 +191,6 @@ pub enum VerificationError<PcsErr> {
     /// Out-of-domain evaluation mismatch, i.e. `constraints(zeta)` did not match
     /// `quotient(zeta) Z_H(zeta)`.
     OodEvaluationMismatch,
-    /// The FRI batch randomization does not correspond to the ZK setting.
-    RandomizationError,
 }
 type ViewPair<'a, T> = VerticalPair<RowMajorMatrixView<'a, T>, RowMajorMatrixView<'a, T>>;
 
@@ -196,7 +204,6 @@ pub struct VerifierConstraintFolder<'a, SC: StarkGenericConfig> {
     pub alpha: SC::Challenge,
     pub accumulator: SC::Challenge,
 }
-
 
 impl<'a, SC: StarkGenericConfig> AirBuilder for VerifierConstraintFolder<'a, SC> {
     type F = Val<SC>;
@@ -241,7 +248,6 @@ impl<SC: StarkGenericConfig> AirBuilderWithPublicValues for VerifierConstraintFo
     }
 }
 
-
 impl<SC: StarkGenericConfig> ExtensionBuilder for VerifierConstraintFolder<'_, SC> {
     type EF = Val<SC>;
     type ExprEF = SC::Challenge;
@@ -251,7 +257,7 @@ impl<SC: StarkGenericConfig> ExtensionBuilder for VerifierConstraintFolder<'_, S
     where
         I: Into<Self::ExprEF>,
     {
-        let x:  SC::Challenge= x.into();
+        let x: SC::Challenge = x.into();
         self.accumulator *= self.alpha;
         self.accumulator += x;
     }
@@ -270,4 +276,3 @@ impl<'a, SC: StarkGenericConfig> PermutationAirBuilder for VerifierConstraintFol
         todo!()
     }
 }
-

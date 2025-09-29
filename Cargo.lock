@@ -1157,6 +1157,7 @@ dependencies = [
 [[package]]
 name = "miden-crypto"
 version = "0.14.0"
+source = "git+https://github.com/0xMiden/crypto?branch=plonky3-migration#ce3de5151ca95bf7b1f9d05c6fa9346f32ba84f2"
 dependencies = [
  "blake3",
  "cc",

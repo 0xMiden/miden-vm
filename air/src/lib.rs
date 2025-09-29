@@ -7,12 +7,12 @@ extern crate alloc;
 extern crate std;
 
 use core::borrow::{Borrow, BorrowMut};
-use std::println;
 
 use p3_air::{AirBuilderWithPublicValues, PermutationAirBuilder};
 pub use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::Matrix;
+use alloc::vec::Vec;
 //use serde::{Deserialize, Serialize}; TODO(Al)
 use vm_core::{ProgramInfo, StackInputs, StackOutputs};
 use winter_air::ProofOptions as WinterProofOptions;
@@ -32,7 +32,6 @@ mod proof;
 pub use proof::{Proof, Commitments, OpenedValues};
 
 mod air_builder;
-use air_builder::TraceTableAirBuilder;
 
 mod utils;
 // RE-EXPORTS
@@ -284,6 +283,19 @@ impl PublicInputs {
 
     pub fn program_info(&self) -> ProgramInfo {
         self.program_info.clone()
+    }
+
+    /// Converts public inputs into a vector of field elements (Felt) in the canonical order:
+    /// - program info elements
+    /// - stack inputs
+    /// - stack outputs
+    pub fn to_elements(&self) -> Vec<Felt> {
+        let mut result = self.program_info.to_elements();
+        let mut ins = self.stack_inputs.to_vec();
+        result.append(&mut ins);
+        let mut outs = self.stack_outputs.to_vec();
+        result.append(&mut outs);
+        result
     }
 }
 /*

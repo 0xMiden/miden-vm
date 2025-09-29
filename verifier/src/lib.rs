@@ -78,7 +78,7 @@ pub fn verify(
     let program_hash = *program_info.program_hash();
 
     // build public inputs and try to verify the proof
-    let _pub_inputs = PublicInputs::new(program_info, stack_inputs, stack_outputs);
+    let pub_inputs = PublicInputs::new(program_info, stack_inputs, stack_outputs);
     let (hash_fn, proof) = proof.into_parts();
     let processor_air = ProcessorAir {};
 
@@ -165,7 +165,7 @@ pub fn verify(
                 let config = Config::new(pcs, challenger);
 
                 let proof: Proof<Config> = bincode::deserialize(&proof).unwrap();
-                verify_proof(&config, &processor_air, &proof, &vec![])
+                verify_proof(&config, &processor_air, &proof, &pub_inputs.to_elements())
             },
         HashFunction::Rpx256 => {
                 todo!()

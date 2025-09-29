@@ -1,8 +1,8 @@
 // Blake-specific prover implementation
 
 use super::utils::{quotient_values, to_row_major, to_row_major_aux};
-use air::{Commitments, Felt, OpenedValues, Proof};
 use air::ProcessorAir;
+use air::{Commitments, Felt, OpenedValues, Proof};
 use miden_crypto::BinomialExtensionField;
 use p3_blake3::Blake3;
 use p3_challenger::HashChallenger;
@@ -20,18 +20,18 @@ use p3_matrix::dense::DenseMatrix;
 use p3_matrix::row_index_mapped::RowIndexMappedView;
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_symmetric::{CompressionFunctionFromHasher, SerializingHasher};
-use p3_uni_stark::StarkGenericConfig;
 use p3_uni_stark::StarkConfig;
+use p3_uni_stark::StarkGenericConfig;
 use p3_util::{log2_ceil_usize, log2_strict_usize};
 use processor::ExecutionTrace;
-use std::{println, vec};
 use std::vec::Vec;
+use std::{println, vec};
 use tracing::info_span;
 
 type Challenge = BinomialExtensionField<Felt, 2>;
 type H = Blake3;
 
- type FieldHash = SerializingHasher<H>; 
+type FieldHash = SerializingHasher<H>;
 type Compress<H> = CompressionFunctionFromHasher<H, 2, 32>;
 type ValMmcs<H> = MerkleTreeMmcs<Felt, u8, FieldHash, Compress<H>, 32>;
 type ChallengeMmcs<H> = ExtensionMmcs<Felt, Challenge, ValMmcs<H>>;
@@ -46,25 +46,25 @@ pub fn prove_blake(trace: ExecutionTrace) -> Vec<u8> {
     let trace_row_major = to_row_major(&trace);
     let degree = trace_row_major.height();
     let log_degree = log2_strict_usize(degree);
-/*
-    let symbolic_constraints =
-        get_symbolic_constraints::<Felt, ProcessorAir>(&air, 0, public_values.len());
+    /*
+       let symbolic_constraints =
+           get_symbolic_constraints::<Felt, ProcessorAir>(&air, 0, public_values.len());
 
-    let constraint_count = symbolic_constraints.len();
-    let constraint_degree = symbolic_constraints
-        .iter()
-        .map(SymbolicExpression::degree_multiple)
-        .max()
-        .unwrap_or(0);
- */
+       let constraint_count = symbolic_constraints.len();
+       let constraint_degree = symbolic_constraints
+           .iter()
+           .map(SymbolicExpression::degree_multiple)
+           .max()
+           .unwrap_or(0);
+    */
 
- let constraint_degree = 8;
- let constraint_count = 2;
+    let constraint_degree = 8;
+    let constraint_count = 2;
 
     let log_quotient_degree = log2_ceil_usize(constraint_degree - 1);
     let quotient_degree = 1 << log_quotient_degree;
-println!("constraints degree {:?}", constraint_degree);
-println!("constraints count {:?}", constraint_count);
+    println!("constraints degree {:?}", constraint_degree);
+    println!("constraints count {:?}", constraint_count);
 
     let config = generate_blake_config();
     let mut challenger = config.initialise_challenger();
@@ -150,6 +150,7 @@ println!("constraints count {:?}", constraint_count);
             )
         });
     challenger.observe(quotient_commit.clone());
+    println!("alpha prover {:?}", alpha);
 
     let commitments = Commitments {
         trace: trace_commit,
