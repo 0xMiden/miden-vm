@@ -167,8 +167,9 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
         let mut advice_items = Vec::new();
 
         // Note: `stack` is in reverse order. e.g., `adv_push.1` pushes `stack.last()`.
-        // We need to print the top `num_items` from the stack, which are the last `num_items` elements
-        // but we want to display them in logical order (index 0 is the top of the stack)
+        // We need to print the top `num_items` from the stack, which are the last `num_items`
+        // elements but we want to display them in logical order (index 0 is the top of the
+        // stack)
 
         // Get items from the end of the stack (most recent) going backwards
         let start_idx = num_remaining;
@@ -334,25 +335,17 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
             formatted_items.push(format!("({} more items)", count));
         }
 
-        // Print using the tree method
-        print_tree_list(&mut self.writer, formatted_items)
-    }
-}
-
-// HELPER FUNCTIONS
-// ================================================================================================
-
-/// Prints a list of items with proper tree-style indentation.
-/// All items except the last are prefixed with "├── ", and the last item with "└── ".
-fn print_tree_list<W: fmt::Write + Sync>(writer: &mut W, items: Vec<String>) -> fmt::Result {
-    if let Some((last, front)) = items.split_last() {
-        // Print all items except the last with "├── " prefix
-        for item in front {
-            writeln!(writer, "├── {}", item)?;
+        // Prints a list of items with proper tree-style indentation.
+        // All items except the last are prefixed with "├── ", and the last item with "└── ".
+        if let Some((last, front)) = items.split_last() {
+            // Print all items except the last with "├── " prefix
+            for item in front {
+                writeln!(self.writer, "├── {}", item)?;
+            }
+            // Print the last item with "└── " prefix
+            writeln!(self.writer, "└── {}", last)?;
         }
-        // Print the last item with "└── " prefix
-        writeln!(writer, "└── {}", last)?;
-    }
 
-    Ok(())
+        Ok(())
+    }
 }
