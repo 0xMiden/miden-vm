@@ -320,7 +320,7 @@ fn test_debug_adv_stack() {
     let (_stack, output) = test.execute_with_debug_buffer().expect("execution failed");
 
     insta::assert_snapshot!(output, @r"
-    Advice Stack state before step 1:
+    Advice stack state before step 1:
     ├── 0: 8
     ├── 1: 7
     ├── 2: 6
@@ -329,11 +329,11 @@ fn test_debug_adv_stack() {
     ├── 5: 3
     ├── 6: 2
     └── 7: 1
-    Advice Stack state in interval [0, 1] before step 1:
+    Advice stack state in interval [0, 1] before step 1:
     ├── 0: 8
     ├── 1: 7
     └── (6 more items)
-    Advice Stack state before step 1:
+    Advice stack state before step 1:
     ├── 0: 8
     ├── 1: 7
     ├── 2: 6
@@ -342,7 +342,7 @@ fn test_debug_adv_stack() {
     ├── 5: 3
     ├── 6: 2
     └── 7: 1
-    Advice Stack state before step 6:
+    Advice stack state before step 6:
     ├── 0: 4
     ├── 1: 3
     ├── 2: 2
@@ -364,7 +364,7 @@ fn test_debug_adv_stack() {
     ├── 3: 2
     ├── 4: 1
     └── 5: 0
-    Advice Stack state before step 23:
+    Advice stack state before step 23:
     ├── 0: 3
     ├── 1: 2
     └── 2: 1

@@ -155,12 +155,12 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
         if is_partial {
             writeln!(
                 self.writer,
-                "Advice Stack state in interval [0, {}] before step {}:",
+                "Advice stack state in interval [0, {}] before step {}:",
                 num_items - 1,
                 process.clk()
             )?;
         } else {
-            writeln!(self.writer, "Advice Stack state before step {}:", process.clk())?;
+            writeln!(self.writer, "Advice stack state before step {}:", process.clk())?;
         }
 
         // Collect advice stack items for printing
