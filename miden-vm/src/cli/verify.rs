@@ -1,7 +1,4 @@
-use std::{
-    path::PathBuf,
-    time::Instant,
-};
+use std::{path::PathBuf, time::Instant};
 
 use clap::Parser;
 use miden_assembly::diagnostics::{IntoDiagnostic, Report, Result, WrapErr};
