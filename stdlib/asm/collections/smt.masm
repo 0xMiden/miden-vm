@@ -433,8 +433,8 @@ proc.insert_into_leaf.8196
     # cur_read = pairs_array_start
     loc_load.0 loc_store.2
 
-    # cur_write = &LOCALS[8]
-    locaddr.8 loc_store.3
+    # cur_write = &LOCALS[4]
+    locaddr.4 loc_store.3
 
     loc_load.2 # cur_read
     # => [cur_read, key_ptr, V, K, i, R]
@@ -497,8 +497,8 @@ proc.insert_into_leaf.8196
     # end_addr = cur_write
     # => [end_addr, i, R]
 
-    # start_addr = &LOCALS[8]
-    locaddr.8
+    # start_addr = &LOCALS[4]
+    locaddr.4
     # => [start_addr, end_addr, i, R]
 
     exec.hash_and_insert_mem
