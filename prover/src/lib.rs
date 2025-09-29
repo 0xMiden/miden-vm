@@ -38,10 +38,9 @@ mod gpu;
 pub use miden_air::{
     DeserializationError, ExecutionProof, FieldExtension, HashFunction, ProvingOptions,
 };
-use miden_core::precompile::PrecompileRequest;
 pub use miden_processor::{
-    AdviceInputs, AsyncHost, BaseHost, ExecutionError, InputError, StackInputs, StackOutputs,
-    SyncHost, Word, crypto, math, utils,
+    AdviceInputs, AsyncHost, BaseHost, ExecutionError, InputError, PrecompileRequest, StackInputs,
+    StackOutputs, SyncHost, Word, crypto, math, utils,
 };
 pub use winter_prover::{Proof, crypto::MerkleTree as MerkleTreeVC};
 

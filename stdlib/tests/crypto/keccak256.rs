@@ -13,7 +13,7 @@ use miden_air::ProvingOptions;
 use miden_assembly::Assembler;
 use miden_core::{
     Felt, FieldElement, ProgramInfo,
-    precompile::{PrecompileCommitment, PrecompileVerifiers},
+    precompile::{PrecompileCommitment, PrecompileVerifierRegistry},
 };
 use miden_crypto::Word;
 use miden_processor::{AdviceInputs, DefaultHost, Program, StackInputs};
@@ -366,7 +366,7 @@ fn test_keccak_hash_1to1_prove_verify() {
     );
 
     // Check we get the same commitment from the verifier
-    let mut precompile_verifiers = PrecompileVerifiers::new();
+    let mut precompile_verifiers = PrecompileVerifierRegistry::new();
     precompile_verifiers.register(KECCAK_HASH_MEMORY_EVENT_ID, Arc::new(keccak_verifier));
     let verifier_commitments = precompile_verifiers
         .commitments(&precompile_requests)

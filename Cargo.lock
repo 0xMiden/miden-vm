@@ -1530,7 +1530,6 @@ version = "0.19.0"
 dependencies = [
  "elsa",
  "miden-air",
- "miden-core",
  "miden-debug-types",
  "miden-gpu",
  "miden-processor",

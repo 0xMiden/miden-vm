@@ -20,6 +20,7 @@ pub use miden_core::{
     crypto::merkle::SMT_DEPTH,
     errors::InputError,
     mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
+    precompile::PrecompileRequest,
     sys_events::SystemEvent,
     utils::DeserializationError,
 };
@@ -897,13 +898,16 @@ impl<'a> ProcessState<'a> {
         }
     }
 
-    /// Returns a verified memory address range given untrusted `u64` values `start_addr` and
-    /// `end_addr`.
+    /// Reads (start_addr, end_addr) tuple from the specified elements of the operand stack, and
+    /// verifies that memory range is valid.
     pub fn get_mem_addr_range(
         &self,
-        start_addr: u64,
-        end_addr: u64,
+        start_idx: usize,
+        end_idx: usize,
     ) -> Result<core::ops::Range<u32>, MemoryError> {
+        let start_addr = self.get_stack_item(start_idx).as_int();
+        let end_addr = self.get_stack_item(end_idx).as_int();
+
         if start_addr > u32::MAX as u64 {
             return Err(MemoryError::address_out_of_bounds(start_addr, &()));
         }
@@ -916,6 +920,19 @@ impl<'a> ProcessState<'a> {
         }
 
         Ok(start_addr as u32..end_addr as u32)
+    }
+
+    /// Returns a memory address range given a range of memory addresses.
+    pub fn get_memory_range(&self, range: core::ops::Range<u32>) -> Result<Vec<Felt>, MemoryError> {
+        let ctx = self.ctx();
+        let mut result = Vec::with_capacity(range.len());
+        for addr in range {
+            result.push(
+                self.get_mem_value(ctx, addr)
+                    .ok_or(MemoryError::address_out_of_bounds(addr as u64, &()))?,
+            );
+        }
+        Ok(result)
     }
 
     /// Returns the entire memory state for the specified execution context at the current clock

@@ -70,12 +70,12 @@ impl PrecompileCommitment {
 /// This struct maintains a map of event IDs to their corresponding verifiers.
 /// It is used to verify precompile requests during proof verification.
 #[derive(Default, Clone)]
-pub struct PrecompileVerifiers {
+pub struct PrecompileVerifierRegistry {
     /// Map of event IDs to their corresponding verifiers
     verifiers: BTreeMap<EventId, Arc<dyn PrecompileVerifier>>,
 }
 
-impl PrecompileVerifiers {
+impl PrecompileVerifierRegistry {
     /// Creates a new empty precompile verifiers registry.
     pub fn new() -> Self {
         Self { verifiers: BTreeMap::new() }
@@ -251,12 +251,12 @@ mod tests {
 
     #[test]
     fn test_verify_empty_requests() {
-        let verifiers = PrecompileVerifiers::new();
+        let verifiers = PrecompileVerifierRegistry::new();
         let requests = Vec::new();
 
         let commitments = verifiers.commitments(&requests).unwrap();
         assert!(commitments.is_empty());
-        let result = PrecompileVerifiers::accumulate_commitments(&commitments);
+        let result = PrecompileVerifierRegistry::accumulate_commitments(&commitments);
 
         // The commitment is always finalized by absorbing [Word::ZERO, Word::ZERO] to mirror
         // the VM implementation. Since no precompiles were accumulated, we just finalize the

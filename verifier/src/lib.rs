@@ -16,7 +16,7 @@ use miden_core::crypto::{
 // ================================================================================================
 pub use miden_core::{
     Kernel, ProgramInfo, StackInputs, StackOutputs, Word,
-    precompile::{PrecompileError, PrecompileVerificationError, PrecompileVerifiers},
+    precompile::{PrecompileError, PrecompileVerificationError, PrecompileVerifierRegistry},
 };
 pub use winter_verifier::{AcceptableOptions, VerifierError};
 use winter_verifier::{crypto::MerkleTree, verify as verify_proof};
@@ -69,7 +69,7 @@ pub fn verify(
         stack_outputs,
         proof,
         &[],
-        &PrecompileVerifiers::new(),
+        &PrecompileVerifierRegistry::new(),
     )
 }
 
@@ -86,7 +86,7 @@ pub fn verify_with_precompiles(
     stack_outputs: StackOutputs,
     proof: ExecutionProof,
     precompile_requests: &[PrecompileRequest],
-    precompile_verifiers: &PrecompileVerifiers,
+    precompile_verifiers: &PrecompileVerifierRegistry,
 ) -> Result<u32, VerificationError> {
     // get security level of the proof
     let security_level = proof.security_level();
@@ -100,7 +100,7 @@ pub fn verify_with_precompiles(
     let commitments = precompile_verifiers
         .commitments(precompile_requests)
         .map_err(VerificationError::PrecompileVerificationError)?;
-    let _precompile_commitment = PrecompileVerifiers::accumulate_commitments(&commitments);
+    let _precompile_commitment = PrecompileVerifierRegistry::accumulate_commitments(&commitments);
 
     match hash_fn {
         HashFunction::Blake3_192 => {

@@ -60,10 +60,8 @@ fn insert_mem_values_into_adv_map(
     process: &mut ProcessState,
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
-    let start_addr = process.get_stack_item(5).as_int();
-    let end_addr = process.get_stack_item(6).as_int();
     let addr_range = process
-        .get_mem_addr_range(start_addr, end_addr)
+        .get_mem_addr_range(5, 6)
         .map_err(ExecutionError::MemoryError)?;
     let ctx = process.ctx();
 
