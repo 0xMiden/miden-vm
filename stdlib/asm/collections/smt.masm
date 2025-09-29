@@ -571,28 +571,26 @@ proc.insert_or_replace_in_multi_leaf
     end
 end
 
-# MAX_LEAF_SIZE + 8
-proc.remove_in_multi_leaf.8200
+# MAX_LEAF_SIZE + 4
+proc.remove_in_multi_leaf.8196
     # => [key_ptr, start_ptr, end_ptr, V=EMPTY, K, R]
 
     # LOCALS:
     # 0: pairs_array_start
     # 1: pairs_array_end
-    # 2: pairs_array_len
-    # 3:
-    # 4: cur_read
-    # 5: cur_write
-    # 8..8200: leaf memory space
+    # 2: cur_read
+    # 3: cur_write
+    # 8..8196: leaf memory space
 
     movdn.6
     # => [start_ptr, end_ptr, V=EMPTY, key_ptr, K, R]
     dup loc_store.0 # start_ptr
-    loc_store.4 # cur_read = start_ptr
+    loc_store.2 # cur_read = start_ptr
     loc_store.1 # end_ptr
     # => [V, key_ptr, K, R]
 
-    # cur_write = &LOCALS[8]
-    locaddr.8 loc_store.5
+    # cur_write = &LOCALS[4]
+    locaddr.4 loc_store.3
     # => [V=EMPTY, key_ptr, K, R]
 
     # Get V_in_leaf from key_ptr+4. We'll need it later. Since we know V is an
@@ -605,13 +603,13 @@ proc.remove_in_multi_leaf.8200
 
     # Now copy from pairs_array_start..key_ptr.
 
-    loc_load.5
+    loc_load.3
     # => [cur_write, V_old, key_ptr, K, R]
 
     dup.5
     # => [read_end=key_ptr, cur_write, V_old, key_ptr, K, R]
 
-    loc_load.4
+    loc_load.2
     # => [cur_read, read_end, cur_write; V_old, key_ptr, K, R]
     exec.memcopy_word_range_and_advance_ptrs
     # => [cur_read', cur_write'; V_old, key_ptr, K, R]
@@ -620,25 +618,25 @@ proc.remove_in_multi_leaf.8200
     drop
 
     # We still update cur_write, though.
-    loc_store.5
+    loc_store.3
     # => [V_old, key_ptr, K, R]
 
     # cur_read = key_ptr+8
-    movup.4 add.8 loc_store.4
+    movup.4 add.8 loc_store.2
 
 
     # Copy from cur_read..end_ptr
 
-    loc_load.5
+    loc_load.3
     # => [cur_write, V_old, key_ptr, K, R]
     loc_load.1
     # => [cur_write, end_ptr=pairs_array_end, V_old, key_ptr, K, R]
-    loc_load.4
+    loc_load.2
     # => [cur_read, cur_write, end_ptr; V_old, key_ptr, K, R]
     exec.memcopy_word_range_and_advance_ptrs
     # => [cur_read', cur_write'; V_old, K, R]
 
-    drop loc_store.5
+    drop loc_store.3
     # => [V_old, K, R]
 
     movupw.2
@@ -648,7 +646,7 @@ proc.remove_in_multi_leaf.8200
     dup.8
     # => [i, R, V_old, K]
 
-    loc_load.5 locaddr.8
+    loc_load.3 locaddr.4
     # => [start_addr, end_addr, i, R; V_old, K]
 
     exec.hash_and_insert_mem
