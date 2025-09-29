@@ -14,6 +14,64 @@ const.MAX_LEAF_SIZE=8192
 # SET
 # =================================================================================================
 
+#! Copies from the memory range starting at `read_start_ptr` and ending at `read_end_ptr`, to
+#! memory starting at `write_ptr`, and returns updated pointers, advanced by how much data was
+#! copied.
+#!
+#! Unlike mem::memcopy_words, this procedure takes a start and end pointer, and does not copy
+#! anything if `end - start < 1`.
+#!
+#! Inputs: [read_start_ptr, read_end_ptr, write_ptr]
+#! Outputs: [read_ptr', write_ptr']
+#!
+#! Where:
+#! - `read_ptr'` is `read_start_ptr` plus the count of elements that were copied.
+#! - `write_ptr'` is `write_ptr` plus the count of elements that were copied.
+proc.memcopy_word_range_and_advance_ptrs
+    # => [read_start_ptr, read_end_ptr, write_ptr]
+
+    # => [cur_read=read_start_ptr, read_end, cur_write=write_ptr]
+
+    dup movdn.2
+    # => [cur_read, read_end, cur_read, cur_write]
+
+    # Our pointers are originally from local memory, whose address range fits in a u32:
+    # https://0xmiden.github.io/miden-vm/user_docs/assembly/execution_contexts.html#memory-layout.
+    u32overflowing_sub
+    # => [ovf, read_end - cur_read, cur_read, cur_write]
+
+    dup.1 neq.0
+    # => [nonzero, ovf, read_end - cur_read, cur_read, cur_write]
+
+    # Fewer cycles than xor.
+    u32xor
+    # => [anything_to_read, read_end - cur_read, cur_read, cur_write]
+
+    if.true
+        div.4
+        # => [num_words, cur_read, cur_write]
+
+        dup.2 dup.2 dup.2
+        # => [num_words, cur_read, cur_write, num_words, cur_read, cur_write]
+
+        exec.mem::memcopy_words
+        # => [num_words, cur_read, cur_write]
+
+        mul.4 dup
+        # => [num_elems, num_elems, cur_read, cur_write]
+
+        # cur_write += num_elems
+        movup.3 add
+        # => [cur_write', num_elems, cur_read]
+
+        # cur_read += num_elems
+        swap.2 add
+        # => [cur_read', cur_write']
+    else
+        drop
+    end
+end
+
 #! Inserts or removes a value associated with the given key. The leaf to which we're inserting is
 #! guaranteed to be empty.
 #!
@@ -357,53 +415,6 @@ proc.set_single_leaf
         # => [V_old, R_new]
     end
 end
-
-# Unlike mem::memcopy_words, this procedure takes a start pointer and end pointer to read from,
-# and does not copy anything if [cur_read..read_end] is not a positive non-zero length.
-# It also returns [cur_read, cur_write] incremented by the amount copied.
-proc.memcopy_word_range_and_advance_ptrs
-    # => [cur_read, read_end, cur_write]
-
-    dup movdn.2
-    # => [cur_read, read_end, cur_read, cur_write]
-
-    # Our pointers are originally from local memory, whose address range fits in a u32:
-    # https://0xmiden.github.io/miden-vm/user_docs/assembly/execution_contexts.html#memory-layout.
-    u32overflowing_sub
-    # => [ovf, read_end - cur_read, cur_read, cur_write]
-
-    dup.1 neq.0
-    # => [nonzero, ovf, read_end - cur_read, cur_read, cur_write]
-
-    # Fewer cycles than xor.
-    u32xor
-    # => [anything_to_read, read_end - cur_read, cur_read, cur_write]
-
-    if.true
-        div.4
-        # => [num_words, cur_read, cur_write]
-
-        dup.2 dup.2 dup.2
-        # => [num_words, cur_read, cur_write, num_words, cur_read, cur_write]
-
-        exec.mem::memcopy_words
-        # => [num_words, cur_read, cur_write]
-
-        mul.4 dup
-        # => [num_elems, num_elems, cur_read, cur_write]
-
-        # cur_write += num_elems
-        movup.3 add
-        # => [cur_write', num_elems, cur_read]
-
-        # cur_read += num_elems
-        swap.2 add
-        # => [cur_read', cur_write']
-    else
-        drop
-    end
-end
-
 
 # MAX_LEAF_SIZE + 4
 proc.insert_into_leaf.8196
