@@ -627,35 +627,19 @@ proc.remove_in_multi_leaf.8200
 
 
     # Copy from cur_read..end_ptr
-    loc_load.1 # pairs_array_end
-    loc_load.4 # cur_read
-    # => [cur_read, pairs_array_end, V_old, K, R]
-    sub
-    # => [pairs_end - cur_read, V_old, K, R]
 
-    dup neq.0
-    if.true
-        div.4
-        # => [num_words, V_old, K, R]
+    loc_load.5
+    # => [cur_write, V_old, K, R]
+    loc_load.1
+    # => [cur_write, end_ptr=pairs_array_end, V_old, K, R]
+    loc_load.4
+    # => [cur_read, cur_write, end_ptr; V_old, K, R]
+    exec.memcopy_word_range_and_advance_ptrs
+    # => [cur_read', cur_write'; V_old, K, R]
 
-        loc_load.5 loc_load.4
-        # => [cur_read, cur_write, num_words, V_old, K, R]
-
-        dup.2
-        # => [num_words, cur_read, cur_write; num_words, V_old, K, R]
-        exec.mem::memcopy_words
-        # => [num_words, V_old, K, R]
-
-        # cur_write++
-        mul.4 loc_load.5 add loc_store.5
-    else
-        # Nothing to copy.
-        drop
-        # => [V_old, K, R]
-        nop
-    end
-
+    drop loc_store.5
     # => [V_old, K, R]
+
     movupw.2
     # => [R, V_old, K]
 
