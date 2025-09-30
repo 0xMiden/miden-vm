@@ -1,9 +1,10 @@
 use std::{
-    env, fs,
+    env,
     io::{self, Write},
     path::{Path, PathBuf},
 };
 
+use fs_err as fs;
 use miden_assembly::{
     Assembler, Library, LibraryNamespace, LibraryPath, Parse, ParseOptions, ast::ModuleKind,
     debuginfo::DefaultSourceManager,
@@ -59,9 +60,9 @@ fn markdown_file_name(ns: &str) -> String {
 /// Writes Miden standard library modules documentation markdown files based on the available
 /// modules and comments.
 pub fn build_stdlib_docs(asm_dir: &Path, output_dir: &str) -> io::Result<()> {
-    // Remove docs folder to re-generate
-    fs::remove_dir_all(output_dir).unwrap();
-    fs::create_dir(output_dir).unwrap();
+    // Remove docs folder to re-generate, but don't fail, fail later
+    let _ = fs::remove_dir_all(output_dir);
+    let _ = fs::create_dir(output_dir);
 
     // Find all .masm files recursively
     let modules = find_masm_modules(asm_dir, asm_dir)?;
@@ -196,11 +197,16 @@ fn main() -> io::Result<()> {
     // write the masl output
     let build_dir = env::var("OUT_DIR").unwrap();
     let build_dir = Path::new(&build_dir);
-    let output_file = build_dir
-        .join(ASL_DIR_PATH)
-        .join("std")
-        .with_extension(Library::LIBRARY_EXTENSION);
-    stdlib.write_to_file(output_file).map_err(|e| io::Error::other(e.to_string()))?;
+
+    // Ensure the assets directory exists
+    let assets_dir = build_dir.join(ASL_DIR_PATH);
+    fs::create_dir_all(&assets_dir)?;
+
+    let output_path = assets_dir.join("std").with_extension(Library::LIBRARY_EXTENSION);
+    let _ = fs::remove_file(&output_path);
+    stdlib
+        .write_to_file(&output_path)
+        .map_err(|e| io::Error::other(e.to_string()))?;
 
     // Generate documentation
     build_stdlib_docs(&asm_dir, DOC_DIR_PATH)?;

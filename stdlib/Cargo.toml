@@ -62,3 +62,4 @@ winter-fri.workspace = true
 [build-dependencies]
 env_logger.workspace = true
 miden-assembly = { workspace = true, features = ["std"] }
+fs-err = "3"
