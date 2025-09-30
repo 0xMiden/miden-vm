@@ -360,6 +360,31 @@ fn test_smt_set_in_multi() {
         end
     ";
 
+    fn expect_insertion(smt: &Smt, key: Word, value: Word) {
+        let mut expected_smt = smt.clone();
+        expected_smt.insert(key, value).unwrap();
+        let old_value = smt.get_value(&key);
+
+        let mut initial_stack: Vec<u64> = Default::default();
+        prepend_word(&mut initial_stack, value);
+        prepend_word(&mut initial_stack, key);
+        prepend_word(&mut initial_stack, smt.root());
+
+        let expected_output = build_expected_stack(old_value, expected_smt.root());
+
+        let (store, advice_map) = build_advice_inputs(&smt);
+        build_debug_test!(SOURCE, &initial_stack, &[], store, advice_map)
+            .expect_stack(&expected_output);
+    }
+
+    // Try every place we can do an insertion.
+    for (key, value) in LEAVES_MULTI {
+        // Start with LEAVES_MULTI - (key, value) for the existing leaf.
+        let existing_pairs = LEAVES_MULTI.into_iter().filter(|&pair| pair != (key, value));
+        let smt = Smt::with_entries(existing_pairs).unwrap();
+        expect_insertion(&smt, key, value);
+    }
+
     const K0: Word = word(101, 102, 103, 420);
     const V0: Word = word(555, 666, 777, 888);
 

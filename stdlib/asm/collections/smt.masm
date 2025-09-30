@@ -357,8 +357,31 @@ proc.insert_or_replace_in_multi_leaf
         end
     else
         # => [key_ptr, start_ptr, end_ptr, V, K, R]
-        # We're inserting a new value in the sorted array.
-        exec.insert_into_leaf
+
+        # We still need to check if V is empty, which would make this a no-op.
+        push.0
+        # => [X, V, K, R]
+        swapw padw
+        # => [Z, V, X, K, R]
+        eqw
+        if.true
+            # No-op case. Clean up the stack.
+
+            # => [Z, V, X, K, R]
+            dropw swapw dropw
+            # => [V, K, R]
+            swapw dropw
+            # => [V, R]
+        else
+            # We're inserting a new value in the sorted array.
+
+            # => [Z, V, X, K, R]
+            dropw
+            swapw drop
+            # => [key_ptr, start_ptr, end_ptr, V, K, R]
+
+            exec.insert_into_leaf
+        end
     end
 end
 
