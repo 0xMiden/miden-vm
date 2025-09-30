@@ -369,7 +369,7 @@ fn test_smt_set_in_multi() {
 
         let expected_output = build_expected_stack(old_value, expected_smt.root());
 
-        let (store, advice_map) = build_advice_inputs(&smt);
+        let (store, advice_map) = build_advice_inputs(smt);
         build_debug_test!(SOURCE, &initial_stack, &[], store, advice_map)
             .expect_stack(&expected_output);
     }
