@@ -21,9 +21,11 @@ std = [
     "miden-prover/std",
     "miden-verifier/std",
     "winter-prover/std",
+    "itertools/use_std",
 ]
 
 [dependencies]
+itertools = { version = "0.14.0", default-features = false, features = ["use_alloc"] }
 miden-air.workspace = true
 miden-assembly = { workspace = true, features = ["testing"] }
 miden-core.workspace = true
