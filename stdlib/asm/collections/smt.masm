@@ -11,7 +11,7 @@ const.LEAF_DEPTH=64
 # Each key-value pair is two words, and a leaf can hold up to 1024 pairs.
 const.MAX_LEAF_SIZE=8192
 
-# SET
+# SET MULTILEAF
 # =================================================================================================
 
 #! Copies from the memory range starting at `read_start_ptr` and ending at `read_end_ptr`, to
@@ -108,139 +108,9 @@ proc.hash_and_insert_mem
     # => [NV_old, R_new, ...]
 end
 
-#! Inserts or removes a value associated with the given key. The leaf to which we're inserting is
-#! guaranteed to be empty.
+#! Inserts a key-value pair into a leaf currently containing a single, non-empty pair,
+#! converting the leaf to a multi-leaf.
 #!
-#! Inputs:
-#!   Operand stack: [V, K, R, ...]
-#!
-#! Outputs:
-#!   Operand stack: [V_old, R_new, ...]
-#!
-#! Cycles
-#!   Insert empty value: X cycles
-#!   Insert non-empty value: X cycles
-proc.set_empty_leaf
-    # Check if we're inserting the empty value (X cycles)
-    padw eqw
-    #=> [V == ZERO, ZERO, V, K, R]
-
-    if.true
-        # Inserting an empty value; this is a no-op (4 cycles)
-        dropw
-        #=> [V (=ZERO), K, R, ...]
-
-        # Prepare stack: verify that the leaf is actually empty
-        # (X cycles)
-        movupw.2 swapw dup.8 movdn.4 push.LEAF_DEPTH movdn.4
-        #=> [V (=ZERO), depth, K[3], R, K, ...]
-
-        # (1 cycle)
-        mtree_verify
-        #=> [V (=ZERO), depth, K[3], R, K, ...]
-
-        # Prepare stack for return (X cycles)
-        movup.4 drop movup.4 drop movupw.2 dropw
-        #=> [V (=ZERO), R, ...]
-    else
-        # Inserting a non-empty value (4 cycles)
-        dropw
-        #=> [V, K, R, ...]
-
-        # Update advice map
-        adv.insert_hdword
-        #=> [V, K, R, ...]
-
-        # Compute hash([K, V]); the new node value (NV)
-        # (21 cycles)
-        dupw.1 swapw hmerge
-        # => [NV, K, R]
-
-        # Prepare stack for `mtree_set` (5 cycles)
-        movupw.2 dup.8 push.LEAF_DEPTH
-        #=> [depth, K[3], R, NV, K]
-
-        # Insert node in Merkle store (29 cycles)
-        mtree_set
-        #=> [V_in_leaf, R_new, K]
-
-        # Check that V_in_leaf is indeed empty (15 cycles)
-        padw assert_eqw
-        #=> [R_new, K]
-
-        # Prepare stack for return (9 cycles)
-        swapw dropw padw
-        #=> [ZERO, R_new]
-    end
-end
-
-#! Inserts a value at the given key. The leaf to which we're inserting is
-#! guaranteed to hold a single key-value pair (provided on the advice stack).
-#!
-#! Inputs:
-#!   Operand stack: [V, K, R, ...]
-#!   Advice stack:  [K_in_leaf, V_in_leaf]
-#!
-#! Outputs:
-#!   Operand stack: [V_old, R_new, ...]
-#!
-#! Cycles:
-#!   Leaf single after insertion: X cycles
-#!   Leaf multiple after insertion: unimplemented
-proc.insert_single_leaf
-    # Push the leaf pre-image on stack
-    # (X cycles)
-    adv_push.8
-    # => [V_in_leaf, K_in_leaf, V, K, R]
-
-    # Check if the key stored in the leaf is the same as K
-    # (X cycles)
-    movupw.3 movupw.2 eqw
-    # => [K_in_leaf==K, K_in_leaf, K, V_in_leaf, V, R]
-
-    if.true
-        # Leaf stays a "single" variant
-
-        # (4 cycles)
-        dropw
-        # => [K, V_in_leaf, V, R]
-
-        # Update advice map (3 cycles)
-        movupw.2 adv.insert_hdword
-        # => [V, K, V_in_leaf, R]
-
-        # Compute hash([K, V]); the new node value (NV)
-        # (X cycles)
-        dupw.1 swapw hmerge
-        # => [NV, K, V_in_leaf, R]
-
-        # Prepare stack to update Merkle store
-        # (X cycles)
-        movupw.3 dup.8 push.LEAF_DEPTH
-        # => [depth, K[3], R, NV, K, V_in_leaf]
-
-        # Update Merkle store (29 cycles)
-        mtree_set
-        # => [NV_old, R_new, K, V_in_leaf]
-
-        # Confirm that claimed `V_in_leaf` from advice provider is correct by checking if
-        # `[K, V_in_leaf]` hashes to `NV_old`
-        # (33 cycles)
-        movupw.2 dupw.3 hmerge assert_eqw
-        # => [R_new, V_in_leaf]
-
-        # Clean up stack for return
-        # (1 cycle)
-        swapw
-        # => [V_in_leaf, R_new]
-    else
-        # Leaf becomes a Multiple kv-pair case
-
-        exec.insert_single_to_multi_leaf
-        # => [V_in_leaf, R_new]
-    end
-end
-
 #! Inputs: [K_in_leaf, K, V_in_leaf, V, R]
 #! Outputs: [V_in_leaf, R_new]
 proc.insert_single_to_multi_leaf.16
@@ -324,133 +194,6 @@ proc.insert_single_to_multi_leaf.16
     # => [Z, R_new]
 end
 
-#! Removes the provided key/value pair from the leaf. The leaf to which we're inserting is
-#! guaranteed to hold a single key-value pair (provided on the advice stack). Hence, after the
-#! operation, the leaf will be empty.
-#!
-#! Inputs:
-#!   Operand stack: [V (=ZERO), K, R, ...]
-#!   Advice stack:  [K_in_leaf, V_in_leaf]
-#!
-#! Outputs:
-#!   Operand stack: [V_old, R_new, ...]
-#!
-#! Cycles: X
-proc.remove_single_leaf
-    # Push the leaf pre-image on stack
-    # (0 cycles)
-    adv_push.8
-    # => [V_in_leaf, K_in_leaf, V, K, R]
-
-    # Check if the key stored in the leaf is the same as K
-    # (X cycles)
-    movupw.3 movupw.2 eqw
-    # => [K_in_leaf==K, K_in_leaf, K, V_in_leaf, V, R]
-
-    if.true
-        # Keys match; we're removing the value associated with K
-
-        # (4 cycles)
-        dropw
-        # => [K, V_in_leaf, V, R]
-
-        # Update advice map (3 cycles)
-        movupw.2 adv.insert_hdword
-        # => [V, K, V_in_leaf, R]
-
-        # Prepare the stack for `mtree_set`
-        # Note that the new node value will be the empty word, so we can use `V`
-        # as the node value (since we confirmed that it's `ZERO`)
-        # (7 cycles)
-        movupw.3 dup.8 push.LEAF_DEPTH
-        # => [depth, K[3], R, V, K, V_in_leaf]
-
-        # (29 cycles)
-        mtree_set
-        # => [NV_old, R_new, K, V_in_leaf, ...]
-
-        # Confirm that hmerge([K, V_in_leaf]) = NV_old
-        # (33 cycles)
-        movupw.2 dupw.3 hmerge assert_eqw
-        # => [R_new, V_in_leaf, ...]
-
-        # Cleanup stack for return (1 cycle)
-        swapw
-        # => [V_in_leaf, R_new, ...]
-    else
-        # Keys don't match; this is a no-op
-        # We need to ensure that hash([K_in_leaf, V_in_leaf]) = NV;
-        # that is, we need to verify the advice provider's claims.
-        # If all checks pass, we're done.
-
-        # => [K_in_leaf, K, V_in_leaf, V, R]
-
-        # We no longer need V, since we're not removing anything
-        movupw.3 dropw
-        # => [K_in_leaf, K, V_in_leaf, R]
-
-        # Prepare stack for mtree_get
-        movupw.3 dup.8 push.LEAF_DEPTH
-        # => [depth, K[3], R, K_in_leaf, K, V_in_leaf]
-
-        # Retrieve node value (NV) from merkle tree
-        mtree_get
-        # => [NV, R, K_in_leaf, K, V_in_leaf]
-
-        # Cleanup stack (we no longer need K)
-        movupw.3 dropw
-        # => [NV, R, K_in_leaf, V_in_leaf]
-
-        # Ensure that hash([K_in_leaf, V_in_leaf]) == NV
-        movupw.2 movupw.3 hmerge assert_eqw
-        # => [R]
-
-        # Prepare stack for return
-        padw
-        # => [ZERO, R]
-    end
-end
-
-#! Inserts or removes a value associated with the given key. The leaf to which we're inserting is
-#! guaranteed to hold a single key-value pair (provided on the advice stack).
-#!
-#! Inputs:
-#!   Operand stack: [V, K, R, ...]
-#!   Advice stack:  [K_in_leaf, V_in_leaf]
-#!
-#! Outputs:
-#!   Operand stack: [V_old, R_new, ...]
-#! Cycles:
-#!   Remove: X cycles
-#!   Insert; leaf single after insertion: X cycles
-#!   Insert; leaf multiple after insertion: unimplemented
-proc.set_single_leaf
-    # Check if we're inserting or removing a value
-    # (X cycles)
-    padw eqw
-    # => [V==ZERO, ZERO, V, K, R, ...]
-    if.true
-        # we're removing the value associated with K (if any)
-
-        # (4 cycles)
-        dropw
-        # => [V, K, R, ...]
-
-        # (X cycles)
-        exec.remove_single_leaf
-        # => [V_old, R_new]
-    else
-        # we're inserting the key/value pair
-
-        # (4 cycles)
-        dropw
-        # => [V, K, R, ...]
-
-        # (X cycles)
-        exec.insert_single_leaf
-        # => [V_old, R_new]
-    end
-end
 
 # MAX_LEAF_SIZE + 4
 proc.insert_into_leaf.8196
@@ -802,6 +545,272 @@ proc.replace_in_multi_leaf
     # => [R_new, V_old]
     swapw
     # => [V_old, R_new]
+end
+
+# SET SINGLE LEAF
+# =================================================================================================
+
+#! Inserts or removes a value associated with the given key. The leaf to which we're inserting is
+#! guaranteed to be empty.
+#!
+#! Inputs:
+#!   Operand stack: [V, K, R, ...]
+#!
+#! Outputs:
+#!   Operand stack: [V_old, R_new, ...]
+#!
+#! Cycles
+#!   Insert empty value: X cycles
+#!   Insert non-empty value: X cycles
+proc.set_empty_leaf
+    # Check if we're inserting the empty value (X cycles)
+    padw eqw
+    #=> [V == ZERO, ZERO, V, K, R]
+
+    if.true
+        # Inserting an empty value; this is a no-op (4 cycles)
+        dropw
+        #=> [V (=ZERO), K, R, ...]
+
+        # Prepare stack: verify that the leaf is actually empty
+        # (X cycles)
+        movupw.2 swapw dup.8 movdn.4 push.LEAF_DEPTH movdn.4
+        #=> [V (=ZERO), depth, K[3], R, K, ...]
+
+        # (1 cycle)
+        mtree_verify
+        #=> [V (=ZERO), depth, K[3], R, K, ...]
+
+        # Prepare stack for return (X cycles)
+        movup.4 drop movup.4 drop movupw.2 dropw
+        #=> [V (=ZERO), R, ...]
+    else
+        # Inserting a non-empty value (4 cycles)
+        dropw
+        #=> [V, K, R, ...]
+
+        # Update advice map
+        adv.insert_hdword
+        #=> [V, K, R, ...]
+
+        # Compute hash([K, V]); the new node value (NV)
+        # (21 cycles)
+        dupw.1 swapw hmerge
+        # => [NV, K, R]
+
+        # Prepare stack for `mtree_set` (5 cycles)
+        movupw.2 dup.8 push.LEAF_DEPTH
+        #=> [depth, K[3], R, NV, K]
+
+        # Insert node in Merkle store (29 cycles)
+        mtree_set
+        #=> [V_in_leaf, R_new, K]
+
+        # Check that V_in_leaf is indeed empty (15 cycles)
+        padw assert_eqw
+        #=> [R_new, K]
+
+        # Prepare stack for return (9 cycles)
+        swapw dropw padw
+        #=> [ZERO, R_new]
+    end
+end
+
+#! Inserts a value at the given key. The leaf to which we're inserting is
+#! guaranteed to hold a single key-value pair (provided on the advice stack).
+#!
+#! If `K != K_in_leaf`
+#!
+#! Inputs:
+#!   Operand stack: [V, K, R, ...]
+#!   Advice stack:  [K_in_leaf, V_in_leaf]
+#!
+#! Outputs:
+#!   Operand stack: [V_old, R_new, ...]
+#!
+#! Cycles:
+#!   Leaf single after insertion: X cycles
+#!   Leaf multiple after insertion: unimplemented
+proc.insert_single_leaf
+    # Push the leaf pre-image on stack
+    # (X cycles)
+    adv_push.8
+    # => [V_in_leaf, K_in_leaf, V, K, R]
+
+    # Check if the key stored in the leaf is the same as K
+    # (X cycles)
+    movupw.3 movupw.2 eqw
+    # => [K_in_leaf==K, K_in_leaf, K, V_in_leaf, V, R]
+
+    if.true
+        # Leaf stays a "single" variant
+
+        # (4 cycles)
+        dropw
+        # => [K, V_in_leaf, V, R]
+
+        # Update advice map (3 cycles)
+        movupw.2 adv.insert_hdword
+        # => [V, K, V_in_leaf, R]
+
+        # Compute hash([K, V]); the new node value (NV)
+        # (X cycles)
+        dupw.1 swapw hmerge
+        # => [NV, K, V_in_leaf, R]
+
+        # Prepare stack to update Merkle store
+        # (X cycles)
+        movupw.3 dup.8 push.LEAF_DEPTH
+        # => [depth, K[3], R, NV, K, V_in_leaf]
+
+        # Update Merkle store (29 cycles)
+        mtree_set
+        # => [NV_old, R_new, K, V_in_leaf]
+
+        # Confirm that claimed `V_in_leaf` from advice provider is correct by checking if
+        # `[K, V_in_leaf]` hashes to `NV_old`
+        # (33 cycles)
+        movupw.2 dupw.3 hmerge assert_eqw
+        # => [R_new, V_in_leaf]
+
+        # Clean up stack for return
+        # (1 cycle)
+        swapw
+        # => [V_in_leaf, R_new]
+    else
+        # Leaf becomes a Multiple kv-pair case
+
+        exec.insert_single_to_multi_leaf
+        # => [V_in_leaf, R_new]
+    end
+end
+
+#! Removes the provided key/value pair from the leaf. The leaf to which we're inserting is
+#! guaranteed to hold a single key-value pair (provided on the advice stack). Hence, after the
+#! operation, the leaf will be empty.
+#!
+#! Inputs:
+#!   Operand stack: [V (=ZERO), K, R, ...]
+#!   Advice stack:  [K_in_leaf, V_in_leaf]
+#!
+#! Outputs:
+#!   Operand stack: [V_old, R_new, ...]
+#!
+#! Cycles: X
+proc.remove_single_leaf
+    # Push the leaf pre-image on stack
+    # (0 cycles)
+    adv_push.8
+    # => [V_in_leaf, K_in_leaf, V, K, R]
+
+    # Check if the key stored in the leaf is the same as K
+    # (X cycles)
+    movupw.3 movupw.2 eqw
+    # => [K_in_leaf==K, K_in_leaf, K, V_in_leaf, V, R]
+
+    if.true
+        # Keys match; we're removing the value associated with K
+
+        # (4 cycles)
+        dropw
+        # => [K, V_in_leaf, V, R]
+
+        # Update advice map (3 cycles)
+        movupw.2 adv.insert_hdword
+        # => [V, K, V_in_leaf, R]
+
+        # Prepare the stack for `mtree_set`
+        # Note that the new node value will be the empty word, so we can use `V`
+        # as the node value (since we confirmed that it's `ZERO`)
+        # (7 cycles)
+        movupw.3 dup.8 push.LEAF_DEPTH
+        # => [depth, K[3], R, V, K, V_in_leaf]
+
+        # (29 cycles)
+        mtree_set
+        # => [NV_old, R_new, K, V_in_leaf, ...]
+
+        # Confirm that hmerge([K, V_in_leaf]) = NV_old
+        # (33 cycles)
+        movupw.2 dupw.3 hmerge assert_eqw
+        # => [R_new, V_in_leaf, ...]
+
+        # Cleanup stack for return (1 cycle)
+        swapw
+        # => [V_in_leaf, R_new, ...]
+    else
+        # Keys don't match; this is a no-op
+        # We need to ensure that hash([K_in_leaf, V_in_leaf]) = NV;
+        # that is, we need to verify the advice provider's claims.
+        # If all checks pass, we're done.
+
+        # => [K_in_leaf, K, V_in_leaf, V, R]
+
+        # We no longer need V, since we're not removing anything
+        movupw.3 dropw
+        # => [K_in_leaf, K, V_in_leaf, R]
+
+        # Prepare stack for mtree_get
+        movupw.3 dup.8 push.LEAF_DEPTH
+        # => [depth, K[3], R, K_in_leaf, K, V_in_leaf]
+
+        # Retrieve node value (NV) from merkle tree
+        mtree_get
+        # => [NV, R, K_in_leaf, K, V_in_leaf]
+
+        # Cleanup stack (we no longer need K)
+        movupw.3 dropw
+        # => [NV, R, K_in_leaf, V_in_leaf]
+
+        # Ensure that hash([K_in_leaf, V_in_leaf]) == NV
+        movupw.2 movupw.3 hmerge assert_eqw
+        # => [R]
+
+        # Prepare stack for return
+        padw
+        # => [ZERO, R]
+    end
+end
+
+#! Inserts or removes a value associated with the given key. The leaf to which we're inserting is
+#! guaranteed to hold a single key-value pair (provided on the advice stack).
+#!
+#! Inputs:
+#!   Operand stack: [V, K, R, ...]
+#!   Advice stack:  [K_in_leaf, V_in_leaf]
+#!
+#! Outputs:
+#!   Operand stack: [V_old, R_new, ...]
+#! Cycles:
+#!   Remove: X cycles
+#!   Insert; leaf single after insertion: X cycles
+#!   Insert; leaf multiple after insertion: unimplemented
+proc.set_single_leaf
+    # Check if we're inserting or removing a value
+    # (X cycles)
+    padw eqw
+    # => [V==ZERO, ZERO, V, K, R, ...]
+    if.true
+        # we're removing the value associated with K (if any)
+
+        # (4 cycles)
+        dropw
+        # => [V, K, R, ...]
+
+        # (X cycles)
+        exec.remove_single_leaf
+        # => [V_old, R_new]
+    else
+        # we're inserting the key/value pair
+
+        # (4 cycles)
+        dropw
+        # => [V, K, R, ...]
+
+        # (X cycles)
+        exec.insert_single_leaf
+        # => [V_old, R_new]
+    end
 end
 
 #! Inserts the specified value under the specified key in a Sparse Merkle Tree defined by the
