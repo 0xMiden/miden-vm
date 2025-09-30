@@ -15,7 +15,7 @@ jobs:
       - name: Send repository_dispatch to aggregator
         uses: peter-evans/repository-dispatch@v3
         with:
-          # PAT that can access the central aggregator repository
+          # PAT (Personal Access Token) that grants permission to trigger the rebuild workflow at the docs repository
           token: ${{ secrets.DOCS_REPO_TOKEN }}
           repository: ${{ vars.DOCS_AGGREGATOR_REPO }}
           event-type: rebuild
