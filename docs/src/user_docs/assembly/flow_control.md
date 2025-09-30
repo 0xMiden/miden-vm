@@ -1,3 +1,8 @@
+---
+title: "Flow Control"
+sidebar_position: 4
+---
+
 ## Flow control
 As mentioned above, Miden assembly provides high-level constructs to facilitate flow control. These constructs are:
 

@@ -1,6 +1,11 @@
+---
+title: "Multiset Checks"
+sidebar_position: 2
+---
+
 # Multiset checks
 
-A brief introduction to multiset checks can be found [here](https://hackmd.io/@relgabizon/ByFgSDA7D). In Miden VM, multiset checks are used to implement [virtual tables](#virtual-tables) and efficient [communication buses](./main.md#communication-buses-in-miden-vm).
+A brief introduction to multiset checks can be found [here](https://hackmd.io/@relgabizon/ByFgSDA7D). In Miden VM, multiset checks are used to implement [virtual tables](#virtual-tables) and efficient [communication buses](./index.md#communication-buses-in-miden-vm).
 
 ## Running product columns
 Although the multiset equality check can be thought of as comparing multiset equality between two vectors $a$ and $b$, in Miden VM it is implemented as a single running product column in the following way:
@@ -49,13 +54,13 @@ $$
 Miden VM makes use of 6 virtual tables across 4 components:
 
 - Stack:
-    - [Overflow table](../stack/main.md#overflow-table)
+    - [Overflow table](../stack/index.md#overflow-table)
 - Decoder:
-    - [Block stack table](../decoder/main.md#block-stack-table)
-    - [Block hash table](../decoder/main.md#block-hash-table)
-    - [Op group table](../decoder/main.md#op-group-table)
+    - [Block stack table](../decoder/index.md#block-stack-table)
+    - [Block hash table](../decoder/index.md#block-hash-table)
+    - [Op group table](../decoder/index.md#op-group-table)
 - Chiplets:
-    - [Chiplets virtual table](../chiplets/main.md#chiplets-virtual-table), which combines the following two tables into one:
+    - [Chiplets virtual table](../chiplets/index.md#chiplets-virtual-table), which combines the following two tables into one:
         - [Hash chiplet sibling table](../chiplets/hasher.md#sibling-table-constraints)
         - [Kernel ROM chiplet procedure table](../chiplets/kernel_rom.md#kernel-procedure-table-constraints)
 
@@ -103,4 +108,4 @@ $$b' \cdot u_{lookup} = b \cdot v_{lookup}$$
 
 In Miden VM, the specialized components are implemented as dedicated segments of the execution trace, which include the 3 chiplets in the Chiplets module (the hash chiplet, bitwise chiplet, and memory chiplet).
 
-Miden VM currently uses multiset checks to implement the chiplets bus [$b_{chip}$](../chiplets/main.md#chiplets-bus), which communicates with all of the chiplets (Hash, Bitwise, and Memory).
+Miden VM currently uses multiset checks to implement the chiplets bus [$b_{chip}$](../chiplets/index.md#chiplets-bus), which communicates with all of the chiplets (Hash, Bitwise, and Memory).

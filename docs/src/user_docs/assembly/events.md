@@ -1,3 +1,8 @@
+---
+title: "Events"
+sidebar_position: 10
+---
+
 ## Events
 
 Events interrupt VM execution for one cycle and hand control to the host. The host can read VM state and modify the advice provider. From the VM's perspective, `emit` has identical semantics to `noop` - the operand stack and registers remain unchanged.

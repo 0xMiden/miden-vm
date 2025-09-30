@@ -1,3 +1,8 @@
+---
+title: "Operand Stack"
+sidebar_position: 1
+---
+
 # Operand stack
 
 Miden VM is a stack machine. The stack is a push-down stack of practically unlimited depth (in practical terms, the depth will never exceed $2^{32}$), but only the top $16$ items are directly accessible to the VM. Items on the stack are elements in a prime field with modulus $2^{64} - 2^{32} + 1$.
@@ -16,7 +21,7 @@ To ensure that managing stack depth does not impose significant burden, we adopt
 
 The VM allocates $19$ trace columns for the stack. The layout of the columns is illustrated below.
 
-![trace_layout](../../assets/design/stack/trace_layout.png)
+![trace_layout](../../img/design/stack/trace_layout.png)
 
 The meaning of the above columns is as follows:
 
@@ -31,7 +36,7 @@ To keep track of the data which doesn't fit into the top $16$ stack slots, we'll
 
 The table itself can be thought of as having 3 columns as illustrated below.
 
-![overflow_table_layout](../../assets/design/stack/overflow_table_layout.png)
+![overflow_table_layout](../../img/design/stack/overflow_table_layout.png)
 
 The meaning of the columns is as follows:
 
@@ -70,7 +75,7 @@ How these are enforced will be described a bit later.
 
 If an operation adds data to the stack, we say that the operation caused a right shift. For example, `PUSH` and `DUP` operations cause a right shift. Graphically, this looks like so:
 
-![stack_right_shift](../../assets/design/stack/stack_right_shift.png)
+![stack_right_shift](../../img/design/stack/stack_right_shift.png)
 
 Here, we pushed value $v_{17}$ onto the stack. All other values on the stack are shifted by one slot to the right and the stack depth increases by $1$. There is not enough space at the top of the stack for all $17$ values, thus, $v_1$ needs to be moved to the overflow table.
 
@@ -78,17 +83,17 @@ To do this, we need to rely on another column: $k_0$. This is a system column wh
 
 The row we want to add to the overflow table is defined by tuple $(clk, v1, 0)$, and after it is added, the table would look like so:
 
-![stack_overflow_table_post_1_right_shift](../../assets/design/stack/stack_overflow_table_post_1_right_shift.png)
+![stack_overflow_table_post_1_right_shift](../../img/design/stack/stack_overflow_table_post_1_right_shift.png)
 
 The reason we use VM clock cycle as row address is that the clock cycle is guaranteed to be unique, and thus, the same row can not be added to the table twice.
 
 Let's push another item onto the stack:
 
-![stack_overflow_push_2nd_item](../../assets/design/stack/stack_overflow_push_2nd_item.png)
+![stack_overflow_push_2nd_item](../../img/design/stack/stack_overflow_push_2nd_item.png)
 
 Again, as we push $v_{18}$ onto the stack, all items on the stack are shifted to the right, and now $v_2$ needs to be moved to the overflow table. The tuple we want to insert into the table now is $(clk+1, v2, clk)$. After the operation, the overflow table will look like so:
 
-![stack_overflow_table_post_2_right_shift](../../assets/design/stack/stack_overflow_table_post_2_right_shift.png)
+![stack_overflow_table_post_2_right_shift](../../img/design/stack/stack_overflow_table_post_2_right_shift.png)
 
 Notice that $t_2$ for row which contains value $v_2$ points back to the row with address $clk$.
 
@@ -105,7 +110,7 @@ Also, as mentioned previously, the prover sets values in $h_0$ non-deterministic
 
 If an operation removes an item from the stack, we say that the operation caused a left shift. For example, a `DROP` operation causes a left shift. Assuming the stack is in the state we left it at the end of the previous section, graphically, this looks like so:
 
-![stack_1st_left_shift](../../assets/design/stack/stack_1st_left_shift.png)
+![stack_1st_left_shift](../../img/design/stack/stack_1st_left_shift.png)
 
 Overall, during the left shift we do the following:
 
@@ -144,7 +149,7 @@ $$
 
 To ensure that this flag is set correctly, we need to impose the following constraint:
 
->$$
+$$
 (1 - f_{ov}) \cdot (b_0 - 16) = 0 \text{ | degree} = 3
 $$
 
@@ -159,12 +164,12 @@ To make sure stack depth column $b_0$ is updated correctly, we need to impose th
 | Condition                   | Constraint__     | Description                                                                                                          |
 | --------------------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------- |
 | $f_{shr}=1$                 | $b'_0 = b_0 + 1$ | When the stack is shifted to the right, stack depth should be incremented by $1$.                                    |
-| $f_{shl}=1$ <br> $f_{ov}=1$ | $b'_0 = b_0 - 1$ | When the stack is shifted to the left and the overflow table is not empty, stack depth should be decremented by $1$. |
+| $f_{shl}=1$ <br /> $f_{ov}=1$ | $b'_0 = b_0 - 1$ | When the stack is shifted to the left and the overflow table is not empty, stack depth should be decremented by $1$. |
 | otherwise                   | $b'_0 = b_0$     | In all other cases, stack depth should not change.                                                                   |
 
 We can combine the above constraints into a single expression as follows:
 
->$$
+$$
 b'_0 - b_0 + f_{shl} \cdot f_{ov} - f_{shr} = 0 \text{ | degree} = 7
 $$
 
@@ -184,7 +189,7 @@ $$
 
 Using the above variables, we can ensure that right and left shifts update the overflow table correctly by enforcing the following constraint:
 
->$$
+$$
 p_1' \cdot (u \cdot f_{shl} \cdot f_{ov} + 1 - f_{shl} \cdot f_{ov}) = p_1 \cdot (v \cdot f_{shr} + 1 - f_{shr}) \text{ | degree} = 9
 $$
 
@@ -201,13 +206,13 @@ Notice that in the case of the left shift, the constraint forces the prover to s
 
 In case of a right shift, we also need to make sure that the next value of $b_1$ is set to the current value of $k_0$. This can be done with the following constraint:
 
->$$
+$$
 f_{shr} \cdot (b'_1 - k_0) = 0 \text{ | degree} = 7
 $$
 
 In case of a left shift, when the overflow table is empty, we need to make sure that a $0$ is "shifted in" from the right (i.e., $s_{15}$ is set to $0$). This can be done with the following constraint:
 
->$$
+$$
 f_{shl} \cdot (1 - f_{ov}) \cdot s_{15}' = 0 \text{ | degree} = 8
 $$
 

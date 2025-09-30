@@ -1,0 +1,21 @@
+name: Trigger Aggregator Docs Rebuild
+
+on:
+  push:
+    branches: [next]
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Send repository_dispatch to aggregator
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          # PAT that can access the central aggregator repository
+          token: ${{ secrets.DOCS_REPO_TOKEN }}
+          repository: ${{ vars.DOCS_AGGREGATOR_REPO }}
+          event-type: rebuild

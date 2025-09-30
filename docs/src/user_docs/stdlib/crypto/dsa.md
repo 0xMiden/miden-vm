@@ -1,3 +1,8 @@
+---
+title: "Digital Signatures"
+sidebar_position: 1
+---
+
 # Digital signatures
 Namespace `std::crypto::dsa` contains a set of  digital signature schemes supported by default in the Miden VM. Currently, these schemes are:
 

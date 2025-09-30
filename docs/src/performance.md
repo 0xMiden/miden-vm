@@ -1,3 +1,8 @@
+---
+title: "Performance"
+sidebar_position: 4
+---
+
 # Performance
 The benchmarks below should be viewed only as a rough guide for expected future performance. The reasons for this are twofold:
 1. Not all constraints have been implemented yet, and we expect that there will be some slowdown once constraint evaluation is completed.

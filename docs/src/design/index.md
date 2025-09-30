@@ -1,3 +1,8 @@
+---
+title: "Design"
+sidebar_position: 1
+---
+
 # Design
 In the following sections, we provide in-depth descriptions of Miden VM internals, including all AIR constraints for the proving system. We also provide rationale for making specific design choices.
 
@@ -10,7 +15,7 @@ Throughout these sections we adopt the following notations and assumptions:
   - For multiset equality constraints, we denote random values sent by the verifier after the prover commits to the main execution trace as $\alpha_0, \alpha_1, \alpha_2$ etc.
   - To differentiate constraints from other formulas, we frequently use the following format for constraint equations.
 
->$$
+$$
 x' - (x + y) = 0 \text{ | degree} = 1
 $$
 
@@ -31,12 +36,12 @@ Miden VM consists of several interconnected components, each providing a specifi
   - Memory chiplet, used to support random-access memory in the VM.
   - Kernel ROM chiplet, used to enable calling predefined kernel procedures which are provided before execution begins.
 
-The above components are connected via **buses**, which are implemented using [lookup arguments](./lookups/main.md). We also use [multiset check lookups](./lookups/multiset.md) internally within components to describe **virtual tables**.
+The above components are connected via **buses**, which are implemented using [lookup arguments](./lookups/index.md). We also use [multiset check lookups](./lookups/multiset.md) internally within components to describe **virtual tables**.
 
 ## VM execution trace
 The execution trace of Miden VM consists of $73$ main trace columns, $2$ buses, and $5$ virtual tables, as shown in the diagram below.
 
-![vm_trace.png](../assets/design/vm_trace.png)
+![vm_trace.png](../img/design/vm_trace.png)
 
 As can be seen from the above, the system, decoder, stack, and range checker components use dedicated sets of columns, while all chiplets share the same $18$ columns. To differentiate between chiplets, we use a set of binary selector columns, a combination of which uniquely identifies each chiplet.
 
@@ -47,6 +52,6 @@ The system component does not yet have a dedicated documentation section, since 
 
 AIR constraints for the `fmp` column are described in [system operations](./stack/system_ops.md) section. For the `clk` column, the constraints are straightforward:
 
->$$
+$$
 clk' - (clk + 1) = 0 \text{ | degree} = 1
 $$

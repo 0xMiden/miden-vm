@@ -1,3 +1,8 @@
+---
+title: "Programs in Miden VM"
+sidebar_position: 2
+---
+
 # Programs in Miden VM
 Miden VM consumes programs in a form of a Merkelized Abstract Syntax Tree (MAST). This tree is a binary tree where each node is a *code block*. The VM starts execution at the root of the tree, and attempts to recursively execute each required block according to its semantics. If the execution of a code block fails, the VM halts at that point and no further blocks are executed. A set of currently available blocks and their execution semantics are described below.
 
@@ -6,14 +11,14 @@ Miden VM consumes programs in a form of a Merkelized Abstract Syntax Tree (MAST)
 ### Join block
 A **join** block is used to describe sequential execution. When the VM encounters a *join* block, it executes its left child first, and then executes its right child.
 
-![join_block](../assets/design/programs/join_block.png)
+![join_block](../img/design/programs/join_block.png)
 
 A *join* block must always have two children, and thus, cannot be a leaf node in the tree.
 
 ### Split block
 A **split** block is used to describe conditional execution. When the VM encounters a *split* block, it checks the top of the stack. If the top of the stack is $1$, it executes the left child, if the top of the stack is $0$, it executes the right child. If the top of the stack is neither $0$ nor $1$, the execution fails.
 
-![split_block](../assets/design/programs/split_block.png)
+![split_block](../img/design/programs/split_block.png)
 
 A *split* block must always have two children, and thus, cannot be a leaf node in the tree.
 
@@ -22,14 +27,14 @@ A **loop** block is used to describe condition-based iterative execution. When t
 
 After the body of the loop is executed, the VM checks the top of the stack again. If the top of the stack is $1$, the body is executed again, if the top of the stack is $0$, the loop is exited. If the top of the stack is neither $0$ nor $1$, the execution fails.
 
-![loop_block](../assets/design/programs/loop_block.png)
+![loop_block](../img/design/programs/loop_block.png)
 
 A *loop* block must always have one child, and thus, cannot be a leaf node in the tree.
 
 ### Dyn block
 A **dyn** block is used to describe a node whose target is specified dynamically via the stack. When the VM encounters a *dyn* block, it executes a program which hashes to the target specified by the top of the stack. Thus, it has a dynamic target rather than a hardcoded target. In order to execute a *dyn* block, the VM must be aware of a program with the hash value that is specified by the top of the stack. Otherwise, the execution fails.
 
-![dyn_block](../assets/design/programs/dyn_block.png)
+![dyn_block](../img/design/programs/dyn_block.png)
 
 A *dyn* block must always have one (dynamically-specified) child. Thus, it cannot be a leaf node in the tree.
 
@@ -43,7 +48,7 @@ When executing a *call* block, the VM does the following:
 2. Sets the depth of the stack to 16.
 3. Upon return, checks that the depth of the stack is 16. If so, the original stack depth is restored. Otherwise, an error occurs.
 
-![call_block](../assets/design/programs/call_block.png)
+![call_block](../img/design/programs/call_block.png)
 
 A *call* block does not have any children. Thus, it must be leaf node in the tree.
 
@@ -56,7 +61,7 @@ When executing a *syscall* block, the VM does the following:
 2. Sets the depth of the stack to 16.
 3. Upon return, checks that the depth of the stack is 16. If so, the original stack depth is restored. Otherwise, an error occurs.
 
-![syscall_block](../assets/design/programs/syscall_block.png)
+![syscall_block](../img/design/programs/syscall_block.png)
 
 A *syscall* block does not have any children. Thus, it must be leaf node in the tree.
 
@@ -68,7 +73,7 @@ A **basic** block is used to describe a linear sequence of operations. When the 
 
 Thus, for example, executing 8 pushes in a row will result in two operation batches as illustrated in the picture below:
 
-![span_block_creation](../assets/design/programs/span_block_creation.png)
+![span_block_creation](../img/design/programs/span_block_creation.png)
 
 * The first batch will contain 8 groups, with the first group containing 7 `PUSH` opcodes and 1 `NOOP`, and the remaining 7 groups containing immediate values for each of the push operations. The reason for the `NOOP` is explained later in this section.
 * The second batch will contain 2 groups, with the first group containing 1 `PUSH` opcode and 1 `NOOP`, and the second group containing the immediate value for the last push operation.
@@ -100,7 +105,7 @@ f_0, ..., f_l
 
 A MAST for this program would look as follows:
 
-![mast_of_program](../assets/design/programs/mast_of_program.png)
+![mast_of_program](../img/design/programs/mast_of_program.png)
 
 Execution of this program would proceed as follows:
 

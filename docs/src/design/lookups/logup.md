@@ -1,6 +1,11 @@
+---
+title: "LogUp: Multivariate Lookups with Logarithmic Derivatives"
+sidebar_position: 3
+---
+
 # LogUp: multivariate lookups with logarithmic derivatives
 
-The description of LogUp can be found [here](https://eprint.iacr.org/2022/1530.pdf). In MidenVM, LogUp is used to implement efficient [communication buses](./main.md#communication-buses-in-miden-vm).
+The description of LogUp can be found [here](https://eprint.iacr.org/2022/1530.pdf). In MidenVM, LogUp is used to implement efficient [communication buses](./index.md#communication-buses-in-miden-vm).
 
 Using the LogUp construction instead of a simple [multiset check](./multiset.md) with running products reduces the computational effort for the prover and the verifier. Given two columns $a$ and $b$ in the main trace where $a$ contains duplicates and $b$ does not (i.e. $b$ is part of the lookup table), LogUp allows us to compute two logarithmic derivatives and check their equality.
 
@@ -20,9 +25,9 @@ Thus, instead of needing to compute running products, we are able to assert corr
 
 The generalized trace columns and constraints for this construction are as follows, where component $X$ is some component in the trace and lookup table $T$ contains the values $v$ which need to be looked up from $X$ and how many times they are looked up (the multiplicity $m$).
 
-![logup_component_x](../../assets/design/lookups/logup_component.png)
+![logup_component_x](../../img/design/lookups/logup_component.png)
 
-![logup_table_t](../../assets/design/lookups/logup_table.png)
+![logup_table_t](../../img/design/lookups/logup_table.png)
 
 ### Constraints
 
@@ -31,14 +36,14 @@ The diagrams above show running sum columns for computing the logarithmic deriva
 This can be expressed as follows:
 
 > $$
-b' = b + \frac{m}{(\alpha - v)} - \frac{1}{(\alpha - x)}
-$$
+> b' = b + \frac{m}{(\alpha - v)} - \frac{1}{(\alpha - x)}
+> $$
 
 Since constraints must be expressed without division, the actual constraint which is enforced will be the following:
 
 > $$
-b' \cdot (\alpha - v) \cdot (\alpha - x) = b \cdot (\alpha - x) \cdot (\alpha - v) + m \cdot (\alpha - x) - (\alpha - v) \text{ | degree} = 3
-$$
+> b' \cdot (\alpha - v) \cdot (\alpha - x) = b \cdot (\alpha - x) \cdot (\alpha - v) + m \cdot (\alpha - x) - (\alpha - v) \text{ | degree} = 3
+> $$
 
 In general, we will write constraints within these docs using the previous form, since it's clearer and more readable.
 
@@ -49,8 +54,8 @@ Additionally, boundary constraints must be enforced against $b$ to ensure that i
 The functionality of the bus can easily be extended to receive lookup requests from multiple components. For example, to additionally support requests from column $y$, the bus constraint would be modified to the following:
 
 > $$
-b' = b + \frac{m}{(\alpha - v)} - \frac{1}{(\alpha - x)} - \frac{1}{(\alpha - y)} \text{ | degree} = 4
-$$
+> b' = b + \frac{m}{(\alpha - v)} - \frac{1}{(\alpha - x)} - \frac{1}{(\alpha - y)} \text{ | degree} = 4
+> $$
 
 Since the maximum constraint degree in Miden VM is 9, the lookup table $T$ could accommodate requests from at most 7 trace columns in the same trace row via this construction.
 
@@ -59,7 +64,7 @@ Since the maximum constraint degree in Miden VM is 9, the lookup table $T$ could
 Boolean flags can also be used to determine when requests from various components are sent to the bus. For example, let $f_x$ be 1 when a request should be sent from $x$ and 0 otherwise, and let $f_y$ be similarly defined for column $y$. We can use the following constraint to turn requests on or off:
 
 > $$
-b' = b + \frac{m}{(\alpha - v)} - \frac{f_x}{(\alpha - x)} - \frac{f_y}{(\alpha - y)} \text{ | degree} = 4
-$$
+> b' = b + \frac{m}{(\alpha - v)} - \frac{f_x}{(\alpha - x)} - \frac{f_y}{(\alpha - y)} \text{ | degree} = 4
+> $$
 
 If any of these flags have degree greater than 2 then this will increase the overall degree of the constraint and reduce the number of lookup requests that can be accommodated by the bus per row.

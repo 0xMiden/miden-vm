@@ -1,3 +1,8 @@
+---
+title: "Chiplets"
+sidebar_position: 1
+---
+
 # Chiplets
 
 The Chiplets module contains specialized components dedicated to accelerating complex computations. Each chiplet specializes in executing a specific type of computation and is responsible for proving both the correctness of its computations and its own internal consistency.
@@ -21,7 +26,7 @@ The result is an execution trace of 18 trace columns, which allows space for the
 
 _**Note**: The following diagram is outdated (see [issue #1829](https://github.com/0xMiden/miden-vm/issues/1829))._
 
-![chiplets](../../assets/design/chiplets/chiplets.png)
+![chiplets](../../img/design/chiplets/chiplets.png)
 
 During the finalization of the overall execution trace, the chiplets' traces (including internal selectors) are appended to the trace of the Chiplets module one after another, as pictured. Thus, when one chiplet's trace ends, the trace of the next chiplet starts in the subsequent row.
 
@@ -38,7 +43,7 @@ After that, chiplets are ordered by degree of constraints so that higher-degree 
 The resulting order is as follows:
 
 | Chiplet         | Cycle Length | Internal Degree | Chiplet Selector Degree | Total Degree | Columns | Chiplet Selector Flag |
-|-----------------|:------------:|:---------------:|:-----------------------:|:------------:|:-------:|-----------------------|
+| --------------- | :----------: | :-------------: | :---------------------: | :----------: | :-----: | --------------------- |
 | Hash chiplet    |      8       |        8        |            1            |      9       |   17    | $\{0\}$               |
 | Bitwise chiplet |      8       |        3        |            2            |      5       |   13    | $\{1, 0\}$            |
 | Memory          |      -       |        6        |            3            |      9       |   12    | $\{1, 1, 0\}$         |
@@ -73,23 +78,23 @@ Each operation supported by the chiplets is given a unique identifier to ensure 
 The labels are composed from the flag values of the chiplet selector(s) and internal operation selectors (if applicable).
 The unique label of the operation is computed as the binary aggregation of the combined selectors plus $1$, note that the combined flag is represented in big-endian, so the bit representation below is reversed.
 
-| Operation              | Chiplet & Internal <br> Selector Flags | Label           | Value |
-|------------------------|----------------------------------------|-----------------|-------|
-| `HASHER_LINEAR_HASH`   | $\{0 \,\|\, 1, 0, 0\}$                 | `1 + 0b001_0`   | 3     |
-| `HASHER_MP_VERIFY`     | $\{0 \,\|\, 1, 0, 1\}$                 | `1 + 0b101_0`   | 11    |
-| `HASHER_MR_UPDATE_OLD` | $\{0 \,\|\, 1, 1, 0\}$                 | `1 + 0b011_0`   | 7     |
-| `HASHER_MR_UPDATE_NEW` | $\{0 \,\|\, 1, 1, 1\}$                 | `1 + 0b111_0`   | 15    |
-| `HASHER_RETURN_HASH`   | $\{0 \,\|\, 0, 0, 0\}$                 | `1 + 0b000_0`   | 1     |
-| `HASHER_RETURN_STATE`  | $\{0 \,\|\, 0, 0, 1\}$                 | `1 + 0b100_0`   | 9     |
-| `BITWISE_AND`          | $\{1, 0 \,\|\, 0\}$                    | `1 + 0b0_01`    | 2     |
-| `BITWISE_XOR`          | $\{1, 0 \,\|\, 1\}$                    | `1 + 0b1_01`    | 6     |
-| `MEMORY_WRITE_ELEMENT` | $\{1, 1, 0 \,\|\, 0, 0\}$              | `1 + 0b00_011`  | 4     |
-| `MEMORY_WRITE_WORD`    | $\{1, 1, 0 \,\|\, 0, 1\}$              | `1 + 0b10_011`  | 20    |
-| `MEMORY_READ_ELEMENT`  | $\{1, 1, 0 \,\|\, 1, 0\}$              | `1 + 0b01_011`  | 12    |
-| `MEMORY_READ_WORD`     | $\{1, 1, 0 \,\|\, 1, 1\}$              | `1 + 0b11_011`  | 28    |
-| `ACE_INIT`             | $\{1, 1, 1, 0 \,\|\, - \}$             | `1 + 0b_0111`   | 8     |
-| `KERNEL_PROC_CALL`     | $\{1, 1, 1, 1, 0 \,\|\, 0\}$           | `1 + 0b0_01111` | 16    |
-| `KERNEL_PROC_INIT`     | $\{1, 1, 1, 1, 0 \,\|\, 1\}$           | `1 + 0b1_01111` | 48    |
+| Operation              | Chiplet & Internal <br /> Selector Flags | Label           | Value |
+| ---------------------- | ---------------------------------------- | --------------- | ----- |
+| `HASHER_LINEAR_HASH`   | $\{0 \,\|\, 1, 0, 0\}$                   | `1 + 0b001_0`   | 3     |
+| `HASHER_MP_VERIFY`     | $\{0 \,\|\, 1, 0, 1\}$                   | `1 + 0b101_0`   | 11    |
+| `HASHER_MR_UPDATE_OLD` | $\{0 \,\|\, 1, 1, 0\}$                   | `1 + 0b011_0`   | 7     |
+| `HASHER_MR_UPDATE_NEW` | $\{0 \,\|\, 1, 1, 1\}$                   | `1 + 0b111_0`   | 15    |
+| `HASHER_RETURN_HASH`   | $\{0 \,\|\, 0, 0, 0\}$                   | `1 + 0b000_0`   | 1     |
+| `HASHER_RETURN_STATE`  | $\{0 \,\|\, 0, 0, 1\}$                   | `1 + 0b100_0`   | 9     |
+| `BITWISE_AND`          | $\{1, 0 \,\|\, 0\}$                      | `1 + 0b0_01`    | 2     |
+| `BITWISE_XOR`          | $\{1, 0 \,\|\, 1\}$                      | `1 + 0b1_01`    | 6     |
+| `MEMORY_WRITE_ELEMENT` | $\{1, 1, 0 \,\|\, 0, 0\}$                | `1 + 0b00_011`  | 4     |
+| `MEMORY_WRITE_WORD`    | $\{1, 1, 0 \,\|\, 0, 1\}$                | `1 + 0b10_011`  | 20    |
+| `MEMORY_READ_ELEMENT`  | $\{1, 1, 0 \,\|\, 1, 0\}$                | `1 + 0b01_011`  | 12    |
+| `MEMORY_READ_WORD`     | $\{1, 1, 0 \,\|\, 1, 1\}$                | `1 + 0b11_011`  | 28    |
+| `ACE_INIT`             | $\{1, 1, 1, 0 \,\|\, - \}$               | `1 + 0b_0111`   | 8     |
+| `KERNEL_PROC_CALL`     | $\{1, 1, 1, 1, 0 \,\|\, 0\}$             | `1 + 0b0_01111` | 16    |
+| `KERNEL_PROC_INIT`     | $\{1, 1, 1, 1, 0 \,\|\, 1\}$             | `1 + 0b1_01111` | 48    |
 
 ## Chiplets module constraints
 
@@ -100,25 +105,24 @@ Each chiplet's internal constraints are defined in the documentation for the ind
 This gives the following sets of constraints:
 
 > $$
-(1 - s_0) \cdot c_{hash} = 0 \text{ | degree} = 1 + \deg(c_{hash})
-$$
+> (1 - s_0) \cdot c_{hash} = 0 \text{ | degree} = 1 + \deg(c_{hash})
+> $$
 
 > $$
-s_0 \cdot (1 - s_1) \cdot c_{bitwise} = 0 \text{ | degree} = 2 + \deg(c_{bitwise})
-$$
+> s_0 \cdot (1 - s_1) \cdot c_{bitwise} = 0 \text{ | degree} = 2 + \deg(c_{bitwise})
+> $$
 
 > $$
-s_0 \cdot s_1 \cdot (1 - s'_2) \cdot c_{memory} = 0 \text{ | degree} = 3 + \deg(c_{memory})
-$$
+> s_0 \cdot s_1 \cdot (1 - s'_2) \cdot c_{memory} = 0 \text{ | degree} = 3 + \deg(c_{memory})
+> $$
 
 > $$
-s_0 \cdot s_1 \cdot (s_2) \cdot (1 - s'_3) \cdot c_{ace} = 0 \text{ | degree} = 4 + \deg(c_{ace})
-$$
+> s_0 \cdot s_1 \cdot (s_2) \cdot (1 - s'_3) \cdot c_{ace} = 0 \text{ | degree} = 4 + \deg(c_{ace})
+> $$
 
 > $$
-s_0 \cdot s_1 \cdot (s_2) \cdot (s_3) \cdot (1 - s'_4) \cdot c_{krom} = 0 \text{ | degree} = 5 + \deg(c_{krom})
-$$
-
+> s_0 \cdot s_1 \cdot (s_2) \cdot (s_3) \cdot (1 - s'_4) \cdot c_{krom} = 0 \text{ | degree} = 5 + \deg(c_{krom})
+> $$
 
 In the above:
 
@@ -145,22 +149,22 @@ Two conditions must be enforced for columns acting as chiplet selectors.
 The following constraints ensure that selector values are binary.
 
 > $$
-s_0^2 - s_0 = 0 \text{ | degree} = 2 \\
-s_0 \cdot (s_1^2 - s_1) = 0 \text{ | degree} = 3 \\
-s_0 \cdot s_1 \cdot (s_2^2 - s_2) = 0 \text{ | degree} = 4
-s_0 \cdot s_1 \cdot s_2 \cdot (s_3^2 - s_3) = 0 \text{ | degree} = 5
-s_0 \cdot s_1 \cdot s_2 \cdot s_3 \cdot (s_4^2 - s_4) = 0 \text{ | degree} = 6
-$$
+> s_0^2 - s_0 = 0 \text{ | degree} = 2 \\
+> s_0 \cdot (s_1^2 - s_1) = 0 \text{ | degree} = 3 \\
+> s_0 \cdot s_1 \cdot (s_2^2 - s_2) = 0 \text{ | degree} = 4
+> s_0 \cdot s_1 \cdot s_2 \cdot (s_3^2 - s_3) = 0 \text{ | degree} = 5
+> s_0 \cdot s_1 \cdot s_2 \cdot s_3 \cdot (s_4^2 - s_4) = 0 \text{ | degree} = 6
+> $$
 
 The following constraints ensure that the chiplets are stacked correctly by restricting selector values so they can only change from $0 \rightarrow 1$.
 
 > $$
-s_0 \cdot (s_0 - s'_0) = 0 \text{ | degree} = 2 \\
-s_0 \cdot s_1 \cdot (s_1 - s'_1) \text{ | degree} = 3 \\
-s_0 \cdot s_1 \cdot s_2 \cdot (s_2 - s'_2) \text{ | degree} = 4 \\
-s_0 \cdot s_1 \cdot s_2 \cdot s_3 \cdot (s_3 - s'_3) \text{ | degree} = 5 \\
-s_0 \cdot s_1 \cdot s_2 \cdot s_3 \cdot s_4 \cdot (s_4 - s'_4) \text{ | degree} = 6 \\
-$$
+> s_0 \cdot (s_0 - s'_0) = 0 \text{ | degree} = 2 \\
+> s_0 \cdot s_1 \cdot (s_1 - s'_1) \text{ | degree} = 3 \\
+> s_0 \cdot s_1 \cdot s_2 \cdot (s_2 - s'_2) \text{ | degree} = 4 \\
+> s_0 \cdot s_1 \cdot s_2 \cdot s_3 \cdot (s_3 - s'_3) \text{ | degree} = 5 \\
+> s_0 \cdot s_1 \cdot s_2 \cdot s_3 \cdot s_4 \cdot (s_4 - s'_4) \text{ | degree} = 6 \\
+> $$
 
 In other words, the above constraints enforce that if a selector is $0$ in the current row, then it must be either $0$ or $1$ in the next row; if it is $1$ in the current row, it must be $1$ in the next row.
 
@@ -168,7 +172,7 @@ In other words, the above constraints enforce that if a selector is $0$ in the c
 
 The chiplets must be explicitly connected to the rest of the VM in order for it to use their operations. This connection must prove that all specialized operations which a given VM component claimed to offload to one of the chiplets were in fact executed by the correct chiplet with the same set of inputs and outputs as those used by the offloading component.
 
-This is achieved via a [bus](../lookups/main.md#communication-buses-in-miden-vm) called $b_{chip}$ where a request can be sent to any chiplet and a corresponding response will be sent back by that chiplet.
+This is achieved via a [bus](../lookups/index.md#communication-buses-in-miden-vm) called $b_{chip}$ where a request can be sent to any chiplet and a corresponding response will be sent back by that chiplet.
 
 The bus is implemented as a single [running product column](../lookups/multiset.md) where:
 
@@ -189,8 +193,8 @@ The chiplets bus constraints are defined by the components that use it to commun
 Lookup requests are sent to the chiplets bus by the following components:
 
 - The stack sends requests for [bitwise](../stack/u32_ops.md#u32and), [memory](../stack/io_ops.md#memory-access-operations), and [cryptographic hash operations](../stack/crypto_ops.md).
-- The decoder sends requests for [hash operations](../decoder/main.md#program-block-hashing) for program block hashing.
-- The decoder sends a procedure access request to the [Kernel ROM chiplet](./kernel_rom.md) for each `SYSCALL` during [program block hashing](../decoder/main.md#program-block-hashing).
+- The decoder sends requests for [hash operations](../decoder/index.md#program-block-hashing) for program block hashing.
+- The decoder sends a procedure access request to the [Kernel ROM chiplet](./kernel_rom.md) for each `SYSCALL` during [program block hashing](../decoder/index.md#program-block-hashing).
 - The verifier initializes the bus with requests to the [Kernel ROM chiplet](./kernel_rom.md) for each unique kernel procedure digest.
 
 Responses are provided by the [hash](./hasher.md#chiplets-bus-constraints), [bitwise](./bitwise.md#chiplets-bus-constraints), [memory](./memory.md#chiplets-bus-constraints), and [kernel ROM](./kernel_rom.md#chiplets-bus-constraints) chiplets.
@@ -200,8 +204,8 @@ $b_{chip} = \frac{1}{v_{init}}$.
 Note that $v_{init}$ is a constant, and therefore does not contribute to the constraint degree.
 
 > $$
-b_{chip} \cdot v_{init} - 1 = 0 \text{ | degree} = 1
-$$
+> b_{chip} \cdot v_{init} - 1 = 0 \text{ | degree} = 1
+> $$
 
 ## Chiplets virtual table
 
@@ -233,14 +237,14 @@ we must also enforce this property at the boundary of the chiplet itself.
 Using the hasher chiplet's selector $s_0$, the following constraint ensures the bus equals one whenever $s_0$ transitions.
 
 > $$
-(s'_0 - s_0) \cdot (1 - vt_{chip}) = 0 \text{ | degree} = 2
-$$
+> (s'_0 - s_0) \cdot (1 - vt_{chip}) = 0 \text{ | degree} = 2
+> $$
 
 To connect the chiplet virtual table and the bus, we enforce the following constraint in the last row, ensuring the product of both their running products is 1.
 
 > $$
-vt_{chip} \cdot b_{chip} - 1 = 0 \text{ | degree} = 2.
-$$
+> vt_{chip} \cdot b_{chip} - 1 = 0 \text{ | degree} = 2.
+> $$
 
 ## Chiplet logUp bus
 
