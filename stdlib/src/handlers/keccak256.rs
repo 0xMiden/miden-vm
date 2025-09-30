@@ -282,7 +282,7 @@ impl From<KeccakPreimage> for PrecompileRequest {
     fn from(preimage: KeccakPreimage) -> Self {
         PrecompileRequest {
             event_id: KECCAK_HASH_MEMORY_EVENT_ID,
-            data: preimage.0,
+            calldata: preimage.0,
         }
     }
 }

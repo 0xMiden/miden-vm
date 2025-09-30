@@ -15,7 +15,7 @@ use miden_core::{
     Felt, FieldElement, ProgramInfo,
     precompile::{PrecompileCommitment, PrecompileVerifierRegistry},
 };
-use miden_crypto::Word;
+use miden_crypto::{Word, hash::rpo::Rpo256};
 use miden_processor::{AdviceInputs, DefaultHost, Program, StackInputs};
 use miden_stdlib::{
     StdLibrary,
@@ -94,7 +94,7 @@ fn test_keccak_handler(input_u8: &[u8]) {
 
     // PrecompileData contains the raw input bytes directly
     assert_eq!(
-        precompile_data.data, preimage.0,
+        precompile_data.calldata, preimage.0,
         "data in deferred storage does not match preimage"
     );
 }
@@ -368,26 +368,36 @@ fn test_keccak_hash_1to1_prove_verify() {
     // Check we get the same commitment from the verifier
     let mut precompile_verifiers = PrecompileVerifierRegistry::new();
     precompile_verifiers.register(KECCAK_HASH_MEMORY_EVENT_ID, Arc::new(keccak_verifier));
-    let verifier_commitments = precompile_verifiers
-        .commitments(&precompile_requests)
+    let deferred_commitment = precompile_verifiers
+        .deferred_requests_commitment(&precompile_requests)
         .expect("failed to verify");
-    assert_eq!(
-        verifier_commitments,
-        vec![precompile_commitment],
-        "commitment on stack does not match expected precompile commitment"
-    );
+
+    let deferred_commitment_expected = {
+        let elements = [
+            precompile_commitment.tag,
+            precompile_commitment.commitment,
+            Word::empty(),
+            Word::empty(),
+        ];
+        Rpo256::hash_elements(Word::words_as_elements(&elements))
+    };
+    assert_eq!(deferred_commitment_expected, deferred_commitment, "");
 
     // Verify the proof with precompiles
     let program_info = ProgramInfo::from(program);
-    let result = miden_verifier::verify_with_precompiles(
+    let (_, verifier_commitment) = miden_verifier::verify_with_precompiles(
         program_info,
         stack_inputs,
         stack_outputs,
         proof,
         &precompile_requests,
         &precompile_verifiers,
-    );
+    )
+    .expect("proof verification failed");
 
     // Assert that verification succeeds
-    assert!(result.is_ok(), "proof verification failed: {result:?}");
+    assert_eq!(
+        deferred_commitment_expected, verifier_commitment,
+        "verifier did not produce the same commitment"
+    );
 }

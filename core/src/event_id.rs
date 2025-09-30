@@ -1,5 +1,7 @@
 use core::fmt::{Display, Formatter};
 
+use winter_utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
+
 use crate::{Felt, utils::hash_string_to_word};
 
 /// A type-safe wrapper around a [`Felt`] that represents an event identifier.
@@ -72,5 +74,17 @@ impl Ord for EventId {
 impl Display for EventId {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         core::fmt::Display::fmt(&self.0, f)
+    }
+}
+
+impl Serializable for EventId {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.0.write_into(target);
+    }
+}
+
+impl Deserializable for EventId {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        Ok(Self(Felt::read_from(source)?))
     }
 }

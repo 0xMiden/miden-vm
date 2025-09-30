@@ -85,8 +85,8 @@ end
 
 #! Internal implementation of memory-based Keccak256 computation via deferred computation.
 #!
-#! Emits an event to populate advice stack with digest, and storing the preimage for deferred verification.
-#! It returns the commitment to the precompile call and its tag.
+#! Emits an event to populate the advice stack with digest and store the preimage for deferred verification.
+#! Returns the commitment to the precompile call and its tag.
 #!
 #! Input: [ptr, len_bytes, ...]
 #! Output: [COMM, TAG, DIGEST_U32[8], ...]

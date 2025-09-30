@@ -70,18 +70,19 @@ pub fn verify(
     stack_outputs: StackOutputs,
     proof: ExecutionProof,
 ) -> Result<u32, VerificationError> {
-    verify_with_precompiles(
+    let (security_level, _commitment) = verify_with_precompiles(
         program_info,
         stack_inputs,
         stack_outputs,
         proof,
         &[],
         &PrecompileVerifierRegistry::new(),
-    )
+    )?;
+    Ok(security_level)
 }
 
 /// Identical to [`verify`], with additional verification of any precompile requests made during the
-/// VM execution.
+/// VM execution. The
 ///
 /// # Errors
 /// Returns any error produced by [`verify`], as well as any errors resulting from precompile
@@ -94,7 +95,7 @@ pub fn verify_with_precompiles(
     proof: ExecutionProof,
     precompile_requests: &[PrecompileRequest],
     precompile_verifiers: &PrecompileVerifierRegistry,
-) -> Result<u32, VerificationError> {
+) -> Result<(u32, Word), VerificationError> {
     // get security level of the proof
     let security_level = proof.security_level();
     let program_hash = *program_info.program_hash();
@@ -104,10 +105,9 @@ pub fn verify_with_precompiles(
     let (hash_fn, proof) = proof.into_parts();
 
     // TODO: Check that this corresponds to the commitment output by the VM
-    let commitments = precompile_verifiers
-        .commitments(precompile_requests)
+    let requests_commitment = precompile_verifiers
+        .deferred_requests_commitment(precompile_requests)
         .map_err(VerificationError::PrecompileVerificationError)?;
-    let _precompile_commitment = PrecompileVerifierRegistry::accumulate_commitments(&commitments);
 
     match hash_fn {
         HashFunction::Blake3_192 => {
@@ -152,7 +152,7 @@ pub fn verify_with_precompiles(
     }
     .map_err(|source| VerificationError::ProgramVerificationError(program_hash, source))?;
 
-    Ok(security_level)
+    Ok((security_level, requests_commitment))
 }
 
 // ERRORS
