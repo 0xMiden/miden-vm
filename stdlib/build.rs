@@ -1,9 +1,11 @@
 use std::{
-    env, fs,
+    env,
     io::{self, Write},
     path::{Path, PathBuf},
+    sync::OnceLock,
 };
 
+use fs_err as fs;
 use miden_assembly::{
     Assembler, Library, LibraryNamespace, LibraryPath, Parse, ParseOptions, ast::ModuleKind,
     debuginfo::DefaultSourceManager,
@@ -40,6 +42,26 @@ impl MarkdownRenderer {
 // HELPER FUNCTIONS
 // ================================================================================================
 
+/// Check if the filesystem at the given path is read-only
+static READ_ONLY_CACHE: OnceLock<bool> = OnceLock::new();
+
+fn is_readonly_filesystem(target_dir: &Path) -> bool {
+    *READ_ONLY_CACHE.get_or_init(|| {
+        let _ = fs::create_dir_all(target_dir);
+        let probe = target_dir.join(".write_test");
+        match fs::write(&probe, "test") {
+            Ok(_) => {
+                let _ = fs::remove_file(&probe);
+                false
+            },
+            Err(e) => matches!(
+                e.kind(),
+                io::ErrorKind::ReadOnlyFilesystem | io::ErrorKind::PermissionDenied
+            ),
+        }
+    })
+}
+
 fn markdown_file_name(ns: &str) -> String {
     let parts: Vec<&str> = ns.split("::").collect();
 
@@ -59,9 +81,34 @@ fn markdown_file_name(ns: &str) -> String {
 /// Writes Miden standard library modules documentation markdown files based on the available
 /// modules and comments.
 pub fn build_stdlib_docs(asm_dir: &Path, output_dir: &str) -> io::Result<()> {
-    // Remove docs folder to re-generate
-    fs::remove_dir_all(output_dir).unwrap();
-    fs::create_dir(output_dir).unwrap();
+    let output_path = Path::new(output_dir);
+
+    // Check if filesystem is read-only by probing the actual target directory
+    fs::create_dir_all(output_path).ok(); // ignore here; probe will decide
+    if is_readonly_filesystem(output_path) {
+        eprintln!("Warning: Read-only filesystem detected, skipping documentation generation");
+        return Ok(());
+    }
+
+    // Remove docs folder to re-generate (handle gracefully if it doesn't exist)
+    match fs::remove_dir_all(output_path) {
+        Ok(()) => {},
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {}, // Directory doesn't exist, fine
+        Err(e) => {
+            eprintln!(
+                "Warning: Failed to remove docs directory '{}': {}",
+                output_path.display(),
+                e
+            );
+            // Continue anyway - directory creation might still work
+        },
+    }
+
+    // Create docs directory
+    if let Err(e) = fs::create_dir_all(output_path) {
+        eprintln!("Warning: Failed to create docs directory '{}': {}", output_path.display(), e);
+        return Err(e);
+    }
 
     // Find all .masm files recursively
     let modules = find_masm_modules(asm_dir, asm_dir)?;
@@ -76,11 +123,17 @@ pub fn build_stdlib_docs(asm_dir: &Path, output_dir: &str) -> io::Result<()> {
             fs::create_dir_all(parent)?;
         }
 
-        let mut f = fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(output_file_path)?;
+        let mut f = match fs::File::create(&output_file_path) {
+            Ok(file) => file,
+            Err(e) => {
+                println!(
+                    "cargo::warn=Failed to create documentation file '{}': {}",
+                    output_file_path.display(),
+                    e
+                );
+                continue; // Skip this file but continue with others
+            },
+        };
 
         // Parse module using AST-based approach
         let (module_docs, procedures) = parse_module_with_ast(&label, &file_path)?;
@@ -107,31 +160,35 @@ pub fn build_stdlib_docs(asm_dir: &Path, output_dir: &str) -> io::Result<()> {
 /// Find all .masm files recursively
 fn find_masm_modules(base_dir: &Path, current_dir: &Path) -> io::Result<Vec<(String, PathBuf)>> {
     let mut modules = Vec::new();
+    let entries = match fs::read_dir(current_dir) {
+        Ok(e) => e,
+        Err(e) => {
+            eprintln!("Warning: read_dir({}): {e}", current_dir.display());
+            return Ok(modules);
+        },
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_file() {
+            if let Some(ext) = path.extension()
+                && ext == "masm"
+            {
+                // Convert relative path to module path
+                let relative_path = path.strip_prefix(base_dir).unwrap();
+                let module_path = relative_path
+                    .with_extension("")
+                    .components()
+                    .map(|c| c.as_os_str().to_string_lossy())
+                    .collect::<Vec<_>>()
+                    .join("::");
 
-    if let Ok(entries) = fs::read_dir(current_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_file() {
-                if let Some(ext) = path.extension()
-                    && ext == "masm"
-                {
-                    // Convert relative path to module path
-                    let relative_path = path.strip_prefix(base_dir).unwrap();
-                    let module_path = relative_path
-                        .with_extension("")
-                        .components()
-                        .map(|c| c.as_os_str().to_string_lossy())
-                        .collect::<Vec<_>>()
-                        .join("::");
+                let label = format!("std::{}", module_path);
 
-                    let label = format!("std::{}", module_path);
-
-                    modules.push((label, path));
-                }
-            } else if path.is_dir() {
-                // Recursively scan subdirectories
-                modules.extend(find_masm_modules(base_dir, &path)?);
+                modules.push((label, path));
             }
+        } else if path.is_dir() {
+            // Recursively scan subdirectories
+            modules.extend(find_masm_modules(base_dir, &path)?);
         }
     }
 
