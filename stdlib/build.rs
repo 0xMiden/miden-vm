@@ -108,11 +108,11 @@ pub fn build_stdlib_docs(asm_dir: &Path, output_dir: &str) -> io::Result<()> {
             }
 
             // Write header
-            MarkdownRenderer::write_docs_header(&f, &label);
+            MarkdownRenderer::write_docs_header(f, &label);
 
             // Write procedures
             for (name, docs) in procedures {
-                MarkdownRenderer::write_docs_procedure(&f, &name, docs.as_deref());
+                MarkdownRenderer::write_docs_procedure(f, &name, docs.as_deref());
             }
             Ok(())
         })?;
