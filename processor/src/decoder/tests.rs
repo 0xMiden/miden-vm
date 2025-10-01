@@ -1005,7 +1005,7 @@ fn syscall_block() {
     //
     // begin
     //    fmp <- fmp + 1
-    //    syscall.bar
+    //    call.bar
     //    stack[0] <- fmp
     //    swap
     //    drop
@@ -1064,7 +1064,7 @@ fn syscall_block() {
     // starting first SPAN block
     let first_basic_block_addr = inner_join_addr + EIGHT;
     check_op_decoding(&dec_trace, 2, inner_join_addr, Operation::Span, 2, 0, 0);
-    check_op_decoding_with_imm(&dec_trace, 3, first_basic_block_addr, ONE, 1, 0, 1);
+    check_op_decoding_with_imm(&dec_trace, 3, first_basic_block_addr, ONE, 0, 1, 0, 1);
     check_op_decoding(&dec_trace, 4, first_basic_block_addr, Operation::FmpUpdate, 0, 1, 1);
     check_op_decoding(&dec_trace, 5, first_basic_block_addr, Operation::Pad, 0, 2, 1);
     check_op_decoding(&dec_trace, 6, first_basic_block_addr, Operation::End, 0, 0, 0);
@@ -1078,7 +1078,7 @@ fn syscall_block() {
     // starting SPAN block inside bar
     let bar_basic_block_addr = bar_join_addr + EIGHT;
     check_op_decoding(&dec_trace, 9, bar_join_addr, Operation::Span, 2, 0, 0);
-    check_op_decoding_with_imm(&dec_trace, 10, bar_basic_block_addr, TWO, 1, 0, 1);
+    check_op_decoding_with_imm(&dec_trace, 10, bar_basic_block_addr, TWO, 0, 1, 0, 1);
     check_op_decoding(&dec_trace, 11, bar_basic_block_addr, Operation::FmpUpdate, 0, 1, 1);
     check_op_decoding(&dec_trace, 12, bar_basic_block_addr, Operation::End, 0, 0, 0);
 
@@ -1639,6 +1639,7 @@ fn check_op_decoding_with_imm(
     row_idx: usize,
     addr: Felt,
     imm: Felt,
+    imm_idx: usize,
     group_count: u64,
     op_idx: u64,
     in_span: u64,
@@ -1657,14 +1658,7 @@ fn check_op_decoding_with_imm(
     }
     let span_row = span_row.expect("no preceding SPAN/RESPAN row found for PUSH");
 
-    let mut found = false;
-    for column in trace[HASHER_STATE_RANGE].iter() {
-        if column[span_row] == imm {
-            found = true;
-            break;
-        }
-    }
-    assert!(found, "immediate value not found in hasher state of SPAN/RESPAN row");
+    assert_eq!(trace[HASHER_STATE_RANGE.start + imm_idx][span_row], imm);
 }
 
 fn contains_op(trace: &DecoderTrace, row_idx: usize, op: Operation) -> bool {
