@@ -1634,6 +1634,7 @@ fn check_op_decoding(
     assert_eq!(trace[OP_BITS_EXTRA_COLS_RANGE.start + 1][row_idx], bit6 * bit5);
 }
 
+#[allow(clippy::too_many_arguments)]
 fn check_op_decoding_with_imm(
     trace: &DecoderTrace,
     row_idx: usize,
