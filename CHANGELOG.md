@@ -11,6 +11,7 @@
 
 - [BREAKING] Incremented MSRV to 1.90.
 - Fix ability to parse odd-length hex strings ([#2196](https://github.com/0xMiden/miden-vm/pull/2196)).
+- Ensure we do atomic writes for documentation ([#2238](https://github.com/0xMiden/miden-vm/pull/2238)).
 
 ## 0.18.0 (2025-09-21)
 
