@@ -218,7 +218,6 @@ fn main() -> io::Result<()> {
     let assets_dir = build_dir.join(ASL_DIR_PATH);
     fs::create_dir_all(&assets_dir)?;
 
-
     let output_path = assets_dir.join("std").with_extension(Library::LIBRARY_EXTENSION);
     atomic_file_write(&output_path, |sink| {
         stdlib.write_to(sink).map_err(|e| io::Error::other(e.to_string()))
