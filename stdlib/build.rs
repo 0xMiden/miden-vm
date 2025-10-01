@@ -203,7 +203,6 @@ fn main() -> io::Result<()> {
     fs::create_dir_all(&assets_dir)?;
 
     let output_path = assets_dir.join("std").with_extension(Library::LIBRARY_EXTENSION);
-    let _ = fs::remove_file(&output_path);
     stdlib
         .write_to_file(&output_path)
         .map_err(|e| io::Error::other(e.to_string()))?;
