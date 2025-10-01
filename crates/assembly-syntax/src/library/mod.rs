@@ -1,5 +1,9 @@
 use alloc::{collections::BTreeMap, string::String, sync::Arc, vec::Vec};
+#[cfg(feature = "std")]
+use core::panic::UnwindSafe;
 
+#[cfg(feature = "std")]
+use fs_err as fs;
 use miden_core::{
     AdviceMap, Kernel, Word,
     mast::{MastForest, MastNodeExt, MastNodeId},
@@ -273,7 +277,7 @@ impl Library {
     /// File extension for the Assembly Library.
     pub const LIBRARY_EXTENSION: &'static str = "masl";
 
-    /// Write the library to a target file
+    /// Write the library to a target file path
     ///
     /// NOTE: It is up to the caller to use the correct file extension, but there is no
     /// specific requirement that the extension be set, or the same as
@@ -282,17 +286,30 @@ impl Library {
         let path = path.as_ref();
 
         if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir)?;
+            fs::create_dir_all(dir)?;
         }
 
+        let mut f = fs::File::create(path)?;
+        self.write_to(&mut f)
+    }
+
+    /// Write the library to a writer
+    pub fn write_to<W>(&self, sink: &mut W) -> std::io::Result<()>
+    where
+        W: std::io::Write + UnwindSafe,
+    {
         // NOTE: We catch panics due to i/o errors here due to the fact that the ByteWriter
         // trait does not provide fallible APIs, so WriteAdapter will panic if the underlying
         // writes fail. This needs to be addressed in winterfell at some point
-        std::panic::catch_unwind(|| {
-            let mut file = std::fs::File::create(path)?;
-            self.write_into(&mut file);
+        // NOTE: We my use `AssertUnwindSafe` if and only if we do not use `sink` afterwards
+        // anymore. If we look into the implementation of how `write_into` works, we can see
+        // there is no interior state accumulation for the `Library`, but only writes to the buffer.
+        // NOTE: It makes the assumption that `write_into` does ONLY panic due to unhandled IO via
+        // `unwrap` or `expect`.
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.write_into(sink);
             Ok(())
-        })
+        }))
         .map_err(|p| {
             match p.downcast::<std::io::Error>() {
                 // SAFETY: It is guaranteed safe to read Box<std::io::Error>
@@ -308,7 +325,7 @@ impl Library {
         use miden_core::utils::ReadAdapter;
 
         let path = path.as_ref();
-        let mut file = std::fs::File::open(path).map_err(|err| {
+        let mut file = fs::File::open(path).map_err(|err| {
             DeserializationError::InvalidValue(format!(
                 "failed to open file at {}: {err}",
                 path.to_string_lossy()
