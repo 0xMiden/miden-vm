@@ -32,7 +32,9 @@ pub use miden_processor::{
     AdviceInputs, AdviceProvider, BaseHost, ContextId, ExecutionError, ExecutionOptions,
     ExecutionTrace, Process, ProcessState, VmStateIterator,
 };
-use miden_processor::{DefaultHost, EventHandler, Program, fast::FastProcessor};
+use miden_processor::{
+    DefaultDebugHandler, DefaultHost, EventHandler, Program, fast::FastProcessor,
+};
 use miden_prover::utils::range;
 pub use miden_prover::{MerkleTreeVC, ProvingOptions, prove};
 pub use miden_verifier::{AcceptableOptions, VerifierError, verify};
@@ -177,6 +179,22 @@ pub struct Test {
     pub libraries: Vec<Library>,
     pub handlers: BTreeMap<EventId, Arc<dyn EventHandler>>,
     pub add_modules: Vec<(LibraryPath, String)>,
+}
+
+// BUFFER WRITER FOR TESTING
+// ================================================================================================
+
+/// A writer that buffers output in a String for testing debug output.
+#[derive(Default)]
+pub struct BufferWriter {
+    pub buffer: String,
+}
+
+impl core::fmt::Write for BufferWriter {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        self.buffer.push_str(s);
+        Ok(())
+    }
 }
 
 impl Test {
@@ -394,6 +412,40 @@ impl Test {
         }
     }
 
+    /// Compiles the test's source to a Program and executes it with the tests inputs. Returns
+    /// the [`StackOutputs`] and a [`String`] containing all debug output.
+    ///
+    /// If the execution fails, the output is printed `stderr`.
+    pub fn execute_with_debug_buffer(&self) -> Result<(StackOutputs, String), ExecutionError> {
+        let debug_handler = DefaultDebugHandler::new(BufferWriter::default());
+
+        let (program, host) = self.get_program_and_host();
+        let mut host = host
+            .with_source_manager(self.source_manager.clone())
+            .with_debug_handler(debug_handler);
+
+        let mut process = Process::new(
+            program.kernel().clone(),
+            self.stack_inputs.clone(),
+            self.advice_inputs.clone(),
+            ExecutionOptions::default().with_debugging(self.in_debug_mode),
+        );
+
+        let stack_result = process.execute(&program, &mut host);
+
+        let debug_output = host.debug_handler().writer().buffer.clone();
+
+        match stack_result {
+            Ok(stack_output) => Ok((stack_output, debug_output)),
+            Err(err) => {
+                // If we get an error, we print the output as an error
+                #[cfg(feature = "std")]
+                std::eprintln!("{}", debug_output);
+                Err(err)
+            },
+        }
+    }
+
     /// Compiles the test's code into a program, then generates and verifies a proof of execution
     /// using the given public inputs and the specified number of stack outputs. When `test_fail`
     /// is true, this function will force a failure by modifying the first output.
@@ -546,6 +598,12 @@ impl Test {
 /// Appends a Word to an operand stack Vec.
 pub fn append_word_to_vec(target: &mut Vec<u64>, word: Word) {
     target.extend(word.iter().map(Felt::as_int));
+}
+
+/// Add a Word to the bottom of the operand stack Vec.
+pub fn prepend_word_to_vec(target: &mut Vec<u64>, word: Word) {
+    // Actual insertion happens when this iterator is dropped.
+    let _iterator = target.splice(0..0, word.iter().map(Felt::as_int));
 }
 
 /// Converts a slice of Felts into a vector of u64 values.

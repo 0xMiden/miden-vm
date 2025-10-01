@@ -152,6 +152,8 @@ impl AdviceProvider {
     }
 
     /// Returns the current stack.
+    ///
+    /// The element at the top of the stack is in last position of the returned slice.
     pub fn stack(&self) -> &[Felt] {
         &self.stack
     }

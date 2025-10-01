@@ -1517,6 +1517,7 @@ dependencies = [
 name = "miden-processor"
 version = "0.19.0"
 dependencies = [
+ "insta",
  "logtest",
  "miden-air",
  "miden-assembly",
