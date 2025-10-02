@@ -11,7 +11,7 @@ use crate::{
     chiplets::hasher,
     mast::{DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId, Remapping},
     prettier::PrettyPrint,
-    utils::indexing::Idx,
+    Idx,
 };
 
 // JOIN NODE

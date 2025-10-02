@@ -11,7 +11,7 @@ use crate::{
     OPCODE_LOOP,
     chiplets::hasher,
     mast::{DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId, Remapping},
-    utils::indexing::Idx,
+    Idx,
 };
 
 // LOOP NODE

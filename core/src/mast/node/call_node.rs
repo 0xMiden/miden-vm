@@ -14,7 +14,7 @@ use crate::{
     OPCODE_CALL, OPCODE_SYSCALL,
     chiplets::hasher,
     mast::{DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId, Remapping},
-    utils::indexing::Idx,
+    Idx,
 };
 
 // CALL NODE

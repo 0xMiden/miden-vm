@@ -4,7 +4,7 @@ use super::*;
 use crate::{
     Decorator, Operation,
     mast::{BasicBlockNode, MastNode, MastNodeErrorContext},
-    utils::indexing::{Idx, IndexVec},
+    {Idx, IndexVec},
 };
 
 fn block_foo() -> MastNode {

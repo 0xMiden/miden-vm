@@ -8,7 +8,7 @@ use crate::{
         MastForest, MastForestError, MastNode, MastNodeFingerprint, MastNodeId,
         MultiMastForestIteratorItem, MultiMastForestNodeIter, SplitNode, node::MastNodeExt,
     },
-    utils::indexing::{DenseIdMap, IndexVec},
+    {DenseIdMap, IndexVec},
 };
 
 #[cfg(test)]
@@ -58,7 +58,8 @@ impl MastForestMerger {
         let forests = forests.into_iter().collect::<Vec<_>>();
 
         let decorator_id_mappings = Vec::with_capacity(forests.len());
-        let node_id_mappings = forests.iter().map(|f| DenseIdMap::new(f.nodes().len())).collect();
+        let node_id_mappings =
+            forests.iter().map(|f| DenseIdMap::with_capacity(f.nodes().len())).collect();
 
         let mut merger = Self {
             node_id_by_hash: BTreeMap::new(),
@@ -163,7 +164,7 @@ impl MastForestMerger {
     }
 
     fn merge_decorators(&mut self, other_forest: &MastForest) -> Result<(), MastForestError> {
-        let mut decorator_id_remapping = DenseIdMap::new(other_forest.decorators.len());
+        let mut decorator_id_remapping = DenseIdMap::with_capacity(other_forest.decorators.len());
 
         for (merging_id, merging_decorator) in other_forest.decorators.iter().enumerate() {
             let merging_decorator_hash = merging_decorator.fingerprint();

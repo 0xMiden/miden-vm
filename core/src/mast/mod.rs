@@ -11,7 +11,7 @@ use core::{
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-pub use crate::utils::indexing::{IndexVec, IndexedVecError};
+pub use miden_utils_indexing::{IndexVec, IndexedVecError};
 
 mod node;
 #[cfg(any(test, feature = "arbitrary"))]
@@ -25,7 +25,8 @@ pub use node::{
 use crate::{
     AdviceMap, Decorator, DecoratorList, Felt, LexicographicWord, Operation, Word,
     crypto::hash::Hasher,
-    utils::{ByteWriter, DeserializationError, Serializable, hash_string_to_word, indexing::Idx},
+    utils::{ByteWriter, DeserializationError, Serializable, hash_string_to_word},
+    Idx,
 };
 
 mod serialization;
