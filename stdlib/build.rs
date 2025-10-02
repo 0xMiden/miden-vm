@@ -2,7 +2,6 @@ use std::{
     env,
     io::{self, Write},
     path::{Path, PathBuf},
-    sync::OnceLock,
 };
 
 use fs_err as fs;
@@ -42,26 +41,6 @@ impl MarkdownRenderer {
 // HELPER FUNCTIONS
 // ================================================================================================
 
-/// Check if the filesystem at the given path is read-only
-static READ_ONLY_CACHE: OnceLock<bool> = OnceLock::new();
-
-fn is_readonly_filesystem(target_dir: &Path) -> bool {
-    *READ_ONLY_CACHE.get_or_init(|| {
-        let _ = fs::create_dir_all(target_dir);
-        let probe = target_dir.join(".write_test");
-        match fs::write(&probe, "test") {
-            Ok(_) => {
-                let _ = fs::remove_file(&probe);
-                false
-            },
-            Err(e) => matches!(
-                e.kind(),
-                io::ErrorKind::ReadOnlyFilesystem | io::ErrorKind::PermissionDenied
-            ),
-        }
-    })
-}
-
 fn markdown_file_name(ns: &str) -> String {
     let parts: Vec<&str> = ns.split("::").collect();
 
@@ -83,57 +62,30 @@ fn markdown_file_name(ns: &str) -> String {
 pub fn build_stdlib_docs(asm_dir: &Path, output_dir: &str) -> io::Result<()> {
     let output_path = Path::new(output_dir);
 
-    // Check if filesystem is read-only by probing the actual target directory
-    fs::create_dir_all(output_path).ok(); // ignore here; probe will decide
-    if is_readonly_filesystem(output_path) {
-        eprintln!("Warning: Read-only filesystem detected, skipping documentation generation");
-        return Ok(());
-    }
-
-    // Remove docs folder to re-generate (handle gracefully if it doesn't exist)
+    // Try to delete, but ignore “not found” error
     match fs::remove_dir_all(output_path) {
         Ok(()) => {},
-        Err(e) if e.kind() == io::ErrorKind::NotFound => {}, // Directory doesn't exist, fine
-        Err(e) => {
-            eprintln!(
-                "Warning: Failed to remove docs directory '{}': {}",
-                output_path.display(),
-                e
-            );
-            // Continue anyway - directory creation might still work
-        },
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {},
+        Err(e) => return Err(e),
     }
 
-    // Create docs directory
-    if let Err(e) = fs::create_dir_all(output_path) {
-        eprintln!("Warning: Failed to create docs directory '{}': {}", output_path.display(), e);
-        return Err(e);
-    }
+    // Create docs directory (and parents)
+    fs::create_dir_all(output_path)?;
 
-    // Find all .masm files recursively
+    // Find all .masm
     let modules = find_masm_modules(asm_dir, asm_dir)?;
 
     // Render the modules into markdown
     for (label, file_path) in modules {
-        let relative_path = markdown_file_name(&label);
-        let output_file_path = Path::new(output_dir).join(relative_path);
+        let relative = markdown_file_name(&label);
+        let out = output_path.join(&relative);
 
         // Create directories if needed
-        if let Some(parent) = output_file_path.parent() {
+        if let Some(parent) = out.parent() {
             fs::create_dir_all(parent)?;
         }
 
-        let mut f = match fs::File::create(&output_file_path) {
-            Ok(file) => file,
-            Err(e) => {
-                println!(
-                    "cargo::warn=Failed to create documentation file '{}': {}",
-                    output_file_path.display(),
-                    e
-                );
-                continue; // Skip this file but continue with others
-            },
-        };
+        let mut f = fs::File::create(&out)?;
 
         // Parse module using AST-based approach
         let (module_docs, procedures) = parse_module_with_ast(&label, &file_path)?;
