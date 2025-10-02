@@ -235,6 +235,7 @@ fn main() -> io::Result<()> {
     // re-build the `[OUT_DIR]/assets/std.masl` file iff something in the `./asm` directory
     // or its builder changed:
     println!("cargo:rerun-if-changed=asm");
+    println!("cargo:rerun-if-env-changed=MIDEN_BUILD_STDLIB_DOCS");
     println!("cargo:rerun-if-changed=../assembly/src");
 
     // Enable debug tracing to stderr via the MIDEN_LOG environment variable, if present
@@ -260,7 +261,9 @@ fn main() -> io::Result<()> {
     stdlib.write_to_file(output_file).map_err(|e| io::Error::other(e.to_string()))?;
 
     // Generate documentation
-    build_stdlib_docs(&asm_dir, DOC_DIR_PATH)?;
+    if std::env::var("MIDEN_BUILD_STDLIB_DOCS").is_ok() {
+        build_stdlib_docs(&asm_dir, DOC_DIR_PATH)?;
+    }
 
     Ok(())
 }
