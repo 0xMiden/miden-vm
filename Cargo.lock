@@ -1587,7 +1587,6 @@ dependencies = [
 name = "miden-test-utils"
 version = "0.1.0"
 dependencies = [
- "itertools 0.14.0",
  "miden-air",
  "miden-assembly",
  "miden-core",

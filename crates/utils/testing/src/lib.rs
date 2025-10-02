@@ -14,7 +14,6 @@ use alloc::{
     vec::Vec,
 };
 
-pub use itertools::Itertools;
 use miden_assembly::{KernelLibrary, Library, Parse, diagnostics::reporting::PrintDiagnostic};
 pub use miden_assembly::{
     LibraryPath,

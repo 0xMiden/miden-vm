@@ -1,5 +1,5 @@
 use miden_stdlib::handlers::smt_peek::SMT_PEEK_EVENT_NAME;
-use miden_utils_testing::{Itertools, prepend_word_to_vec as prepend_word};
+use miden_utils_testing::prepend_word_to_vec as prepend_word;
 
 use super::*;
 
@@ -339,10 +339,10 @@ fn test_smt_set_single_to_multi() {
         build_test!(SOURCE, &initial_stack, &[], store, advice_map).expect_stack(&expected_output);
     }
 
-    for (existing_pair, (new_key, new_val)) in
-        LEAVES_MULTI.into_iter().cartesian_product(LEAVES_MULTI)
-    {
-        expect_second_pair(Smt::with_entries([existing_pair]).unwrap(), new_key, new_val);
+    for existing_pair in LEAVES_MULTI {
+        for (new_key, new_val) in LEAVES_MULTI {
+            expect_second_pair(Smt::with_entries([existing_pair]).unwrap(), new_key, new_val);
+        }
     }
 }
 
