@@ -26,7 +26,7 @@ impl Memory {
     /// - Returns an error if the provided address is out-of-bounds.
     #[inline(always)]
     pub fn read_element(
-        &mut self,
+        &self,
         ctx: ContextId,
         addr: Felt,
         err_ctx: &impl ErrorContext,
@@ -216,7 +216,7 @@ impl MemoryInterface for Memory {
         addr: Felt,
         err_ctx: &impl ErrorContext,
     ) -> Result<Felt, MemoryError> {
-        self.read_element(ctx, addr, err_ctx)
+        Self::read_element(self, ctx, addr, err_ctx)
     }
 
     fn read_word(

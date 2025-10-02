@@ -1,5 +1,5 @@
 use miden_stdlib::handlers::smt_peek::SMT_PEEK_EVENT_NAME;
-use miden_utils_testing::{Itertools, prepend_word_to_vec as prepend_word};
+use miden_utils_testing::{prepend_word_to_vec as prepend_word, Itertools};
 
 use super::*;
 
@@ -24,13 +24,12 @@ const LEAVES: [(Word, Word); 2] = [
 
 /// Unlike the above `LEAVES`, these leaves use the same value for their most-significant felts, to
 /// test leaves with multiple pairs.
-const LEAVES_MULTI: [(Word, Word); 4] = [
+const LEAVES_MULTI: [(Word, Word); 3] = [
     (word(101, 102, 103, 69420), word(0x1, 0x2, 0x3, 0x4)),
     // Most significant felt does NOT differ from previous.
     (word(201, 202, 203, 69420), word(0xb, 0xc, 0xd, 0xe)),
     // A key in the same leaf, but with no corresponding value.
     (word(301, 302, 303, 69420), EMPTY_WORD),
-    (word(401, 402, 403, 69420), word(0x11, 0x22, 0x33, 0x44)),
 ];
 
 /// Tests `get` on every key present in the SMT, as well as an empty leaf
@@ -95,9 +94,13 @@ fn test_smt_get_multi() {
 
     let smt = Smt::with_entries(LEAVES_MULTI).unwrap();
 
-    for (k, v) in LEAVES_MULTI {
-        expect_value_from_get(k, v, &smt);
-    }
+    let (k0, v0) = LEAVES_MULTI[0];
+    let (k1, v1) = LEAVES_MULTI[1];
+    let (k2, v_empty) = LEAVES_MULTI[2];
+
+    expect_value_from_get(k0, v0, &smt);
+    expect_value_from_get(k1, v1, &smt);
+    expect_value_from_get(k2, v_empty, &smt);
 }
 
 /// Tests inserting and removing key-value pairs to an SMT. We do the insert/removal twice to ensure

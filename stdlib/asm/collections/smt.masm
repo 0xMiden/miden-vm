@@ -1020,7 +1020,7 @@ end
 #!
 #! Cycles
 #!   Leaf empty: 66 cycles
-#!   Leaf single: 117 cycles
+#!   Leaf single: 115 cycles
 #!   Leaf multiple, non-empty value: 189 + 3 * pair_count
 #!   Leaf multiple, empty value: 186 + 3 * pair_count
 export.get
@@ -1057,7 +1057,7 @@ export.get
 
         # Consistency check: assert this is actually a valid leaf.
         # (18 cycles).
-        dup u32lte.MAX_LEAF_SIZE u32assert.err="invalid leaf: larger than maximum size of 8192" drop
+        dup u32assert2 u32lte.MAX_LEAF_SIZE assert.err="invalid leaf: larger than maximum size of 8192"
         dup u32mod.8 assertz.err="invalid leaf: size must be a multiple of 8"
 
         # Leaf size will be a multiple of 8 (each kv-pair in a leaf is 8 elements)

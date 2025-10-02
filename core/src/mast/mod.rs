@@ -12,6 +12,8 @@ use core::{
 use serde::{Deserialize, Serialize};
 
 mod node;
+#[cfg(any(test, feature = "arbitrary"))]
+pub use node::arbitrary;
 pub use node::{
     BasicBlockNode, CallNode, DecoratedOpLink, DecoratorOpLinkIterator, DynNode, ExternalNode,
     JoinNode, LoopNode, MastNode, MastNodeErrorContext, MastNodeExt, OP_BATCH_SIZE, OP_GROUP_SIZE,
@@ -48,6 +50,7 @@ mod tests;
 /// can be built from a [`MastForest`] to specify an entrypoint.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(all(feature = "arbitrary", test), miden_serde_test_macros::serde_test)]
 pub struct MastForest {
     /// All of the nodes local to the trees comprising the MAST forest.
     nodes: Vec<MastNode>,
@@ -66,7 +69,6 @@ pub struct MastForest {
     /// code is triggered.
     error_codes: BTreeMap<u64, Arc<str>>,
 }
-
 // ------------------------------------------------------------------------------------------------
 /// Constructors
 impl MastForest {
@@ -572,10 +574,7 @@ impl IndexMut<DecoratorId> for MastForest {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
-#[cfg_attr(
-    all(feature = "serde", feature = "arbitrary", test),
-    miden_serde_test_macros::serde_test
-)]
+#[cfg_attr(all(feature = "arbitrary", test), miden_serde_test_macros::serde_test)]
 pub struct MastNodeId(u32);
 
 /// Operations that mutate a MAST often produce this mapping between old and new NodeIds.

@@ -1364,6 +1364,7 @@ dependencies = [
 name = "miden-core"
 version = "0.19.0"
 dependencies = [
+ "criterion",
  "enum_dispatch",
  "insta",
  "miden-crypto",
@@ -1453,10 +1454,12 @@ dependencies = [
  "derive_more",
  "miden-assembly-syntax",
  "miden-core",
+ "miden-serde-test-macros",
  "proptest",
  "proptest-derive",
  "serde",
  "serde-untagged",
+ "serde_json",
  "thiserror",
 ]
 
@@ -1506,6 +1509,7 @@ dependencies = [
 name = "miden-processor"
 version = "0.19.0"
 dependencies = [
+ "insta",
  "logtest",
  "miden-air",
  "miden-assembly",
