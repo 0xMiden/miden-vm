@@ -4,10 +4,9 @@ use miden_crypto::{Felt, ONE, Word};
 
 use super::*;
 use crate::{
-    AssemblyOp, DebugOptions, Decorator,
+    AssemblyOp, DebugOptions, Decorator, Idx,
     mast::{BasicBlockNode, MastForestError, MastNodeExt, node::MastNodeErrorContext},
     operations::Operation,
-    Idx,
 };
 
 /// If this test fails to compile, it means that `Operation` or `Decorator` was changed. Make sure

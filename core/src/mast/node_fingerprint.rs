@@ -6,12 +6,11 @@ use miden_crypto::hash::{
 };
 
 use crate::{
-    Operation, Word,
+    FingerPrintLookup, Operation, Word,
     mast::{
         DecoratorId, MastForest, MastForestError, MastNode, MastNodeId,
         node::{MastNodeErrorContext, MastNodeExt},
     },
-    FingerPrintLookup,
 };
 
 // MAST NODE EQUALITY

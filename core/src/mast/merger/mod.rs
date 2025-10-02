@@ -3,12 +3,12 @@ use alloc::{collections::BTreeMap, vec::Vec};
 use miden_crypto::hash::blake::Blake3Digest;
 
 use crate::{
+    DenseIdMap, IndexVec,
     mast::{
         BasicBlockNode, CallNode, DecoratorId, DynNode, ExternalNode, JoinNode, LoopNode,
         MastForest, MastForestError, MastNode, MastNodeFingerprint, MastNodeId,
         MultiMastForestIteratorItem, MultiMastForestNodeIter, SplitNode, node::MastNodeExt,
     },
-    {DenseIdMap, IndexVec},
 };
 
 #[cfg(test)]

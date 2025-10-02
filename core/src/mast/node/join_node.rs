@@ -7,11 +7,10 @@ use serde::{Deserialize, Serialize};
 
 use super::{MastNodeErrorContext, MastNodeExt};
 use crate::{
-    OPCODE_JOIN,
+    Idx, OPCODE_JOIN,
     chiplets::hasher,
     mast::{DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId, Remapping},
     prettier::PrettyPrint,
-    Idx,
 };
 
 // JOIN NODE

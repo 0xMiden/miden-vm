@@ -8,10 +8,9 @@ use serde::{Deserialize, Serialize};
 
 use super::{MastNodeErrorContext, MastNodeExt};
 use crate::{
-    OPCODE_SPLIT,
+    Idx, OPCODE_SPLIT,
     chiplets::hasher,
     mast::{DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId, Remapping},
-    Idx,
 };
 
 // SPLIT NODE

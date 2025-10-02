@@ -8,10 +8,9 @@ use core::{
     ops::{Index, IndexMut},
 };
 
+pub use miden_utils_indexing::{IndexVec, IndexedVecError};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-
-pub use miden_utils_indexing::{IndexVec, IndexedVecError};
 
 mod node;
 #[cfg(any(test, feature = "arbitrary"))]
@@ -23,10 +22,9 @@ pub use node::{
 };
 
 use crate::{
-    AdviceMap, Decorator, DecoratorList, Felt, LexicographicWord, Operation, Word,
+    AdviceMap, Decorator, DecoratorList, Felt, Idx, LexicographicWord, Operation, Word,
     crypto::hash::Hasher,
     utils::{ByteWriter, DeserializationError, Serializable, hash_string_to_word},
-    Idx,
 };
 
 mod serialization;
