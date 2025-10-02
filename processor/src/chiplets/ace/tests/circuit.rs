@@ -105,11 +105,23 @@ impl Circuit {
         nodes.extend(self.constants.iter().map(|c| QuadFelt::from(*c)));
 
         for instruction in &self.instructions {
-            let id_l = layout.node_index(&instruction.node_l).expect("TODO");
-            let v_l = *nodes.get(id_l).expect("TODO");
+            let id_l = match layout.node_index(&instruction.node_l) {
+                Some(id) => id,
+                None => return Err(CircuitError::InstructionMalformed),
+            };
+            let v_l = match nodes.get(id_l) {
+                Some(v) => *v,
+                None => return Err(CircuitError::InstructionMalformed),
+            };
 
-            let id_r = layout.node_index(&instruction.node_r).expect("TODO");
-            let v_r = *nodes.get(id_r).expect("TODO");
+            let id_r = match layout.node_index(&instruction.node_r) {
+                Some(id) => id,
+                None => return Err(CircuitError::InstructionMalformed),
+            };
+            let v_r = match nodes.get(id_r) {
+                Some(v) => *v,
+                None => return Err(CircuitError::InstructionMalformed),
+            };
 
             let v_out = match instruction.op {
                 Op::Sub => v_l - v_r,
