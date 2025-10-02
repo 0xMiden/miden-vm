@@ -55,6 +55,16 @@ impl Processor for FastProcessor {
         self
     }
 
+    #[inline(always)]
+    fn precompile_capacity(&self) -> Word {
+        self.precompile_capacity
+    }
+
+    #[inline(always)]
+    fn set_precompile_capacity(&mut self, capacity: Word) {
+        self.precompile_capacity = capacity;
+    }
+
     /// Checks that the evaluation of an arithmetic circuit is equal to zero.
     ///
     /// The inputs are composed of:
@@ -354,6 +364,11 @@ impl OperationHelperRegisters for NoopHelperRegisters {
 
     #[inline(always)]
     fn op_hperm_registers(_addr: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
+        DEFAULT_HELPERS
+    }
+
+    #[inline(always)]
+    fn op_log_precompile_registers(_addr: Felt, _cap_prev: Word) -> [Felt; NUM_USER_OP_HELPERS] {
         DEFAULT_HELPERS
     }
 

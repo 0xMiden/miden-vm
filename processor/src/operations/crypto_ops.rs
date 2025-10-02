@@ -186,6 +186,84 @@ impl Process {
 
         Ok(())
     }
+
+    /// Logs a precompile event by absorbing TAG and HASH_CALL_DATA into the RPO sponge capacity.
+    ///
+    /// Stack transition:
+    /// [HASH_CALL_DATA (4 elements), TAG (4 elements), ...]
+    /// -> [R1 (4 elements), R0 (4 elements), CAP_NEXT (4 elements) ...]
+    ///
+    /// Where:
+    /// - TAG and HASH_CALL_DATA are user-provided words on the stack
+    /// - CAP_PREV is the previous capacity (from processor state)
+    /// - The hasher computes: (CAP_NEXT, R0, R1) = Rpo(CAP_PREV, TAG, HASH_CALL_DATA)
+    /// - CAP_NEXT is stored back into the processor state
+    /// - R1 and R0 are written to the top of the stack
+    pub(super) fn op_log_precompile(&mut self) -> Result<(), ExecutionError> {
+        // Read TAG and HASH_CALL_DATA from stack
+        // Stack layout (top to bottom): [HASH_CALL_DATA[3..0], TAG[3..0], ...]
+        let hash_call_data = self.stack.get_word(0);
+        let tag = self.stack.get_word(4);
+
+        // Get the current capacity
+        let cap_prev: [Felt; 4] = self.precompile_capacity.into();
+
+        // Build the full 12-element hasher state for RPO permutation
+        // State layout: [CAP_PREV, TAG, HASH_CALL_DATA]
+        let input_state = [
+            cap_prev[0],
+            cap_prev[1],
+            cap_prev[2],
+            cap_prev[3],
+            tag[0],
+            tag[1],
+            tag[2],
+            tag[3],
+            hash_call_data[0],
+            hash_call_data[1],
+            hash_call_data[2],
+            hash_call_data[3],
+        ];
+
+        // Perform the RPO permutation
+        let (addr, output_state) = self.chiplets.hasher.permute(input_state);
+
+        // Save the hasher address and CAP_PREV in helper registers
+        self.decoder.set_user_op_helpers(
+            Operation::LogPrecompile,
+            &[addr, cap_prev[0], cap_prev[1], cap_prev[2], cap_prev[3]],
+        );
+
+        // Extract CAP_NEXT (first 4 elements), R0 (next 4 elements), R1 (last 4 elements)
+        let cap_next: [Felt; 4] =
+            [output_state[0], output_state[1], output_state[2], output_state[3]];
+        let r0: [Felt; 4] = [output_state[4], output_state[5], output_state[6], output_state[7]];
+        let r1: [Felt; 4] = [output_state[8], output_state[9], output_state[10], output_state[11]];
+
+        // Update the processor's capacity
+        self.precompile_capacity = cap_next.into();
+
+        // Write R0, R1, and CAP_NEXT to the stack (top 12 elements)
+        // Stack output: [R1[3..0], R0[3..0], CAP_NEXT[3..0], ...]
+        // Each word is reversed individually, not the entire sequence
+        self.stack.set(0, r1[3]);
+        self.stack.set(1, r1[2]);
+        self.stack.set(2, r1[1]);
+        self.stack.set(3, r1[0]);
+        self.stack.set(4, r0[3]);
+        self.stack.set(5, r0[2]);
+        self.stack.set(6, r0[1]);
+        self.stack.set(7, r0[0]);
+        self.stack.set(8, cap_next[3]);
+        self.stack.set(9, cap_next[2]);
+        self.stack.set(10, cap_next[1]);
+        self.stack.set(11, cap_next[0]);
+
+        // Copy state for the rest of the stack
+        self.stack.copy_state(12);
+
+        Ok(())
+    }
 }
 
 // TESTS

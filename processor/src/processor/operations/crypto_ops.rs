@@ -1,7 +1,7 @@
 use miden_air::trace::decoder::NUM_USER_OP_HELPERS;
 use miden_core::{
-    Felt, QuadFelt, ZERO, chiplets::hasher::STATE_WIDTH, mast::MastForest, stack::MIN_STACK_DEPTH,
-    utils::range,
+    Felt, QuadFelt, Word, ZERO, chiplets::hasher::STATE_WIDTH, mast::MastForest,
+    stack::MIN_STACK_DEPTH, utils::range,
 };
 
 use crate::{
@@ -194,13 +194,71 @@ pub(super) fn op_horner_eval_base<P: Processor>(
 // LOG PRECOMPILE OPERATION
 // ================================================================================================
 
-/// Logs a precompile event. The actual implementation is left empty for now.
+/// Logs a precompile event by absorbing TAG and HASH_CALL_DATA into the RPO sponge capacity.
+///
+/// Stack transition:
+/// [HASH_CALL_DATA (4 elements), TAG (4 elements), ...] -> [R1 (4 elements), R0 (4 elements), ...]
+///
+/// Where:
+/// - TAG and HASH_CALL_DATA are user-provided words on the stack
+/// - CAP_PREV is the previous capacity (from processor state)
+/// - The hasher computes: (CAP_NEXT, R0, R1) = Rpo(CAP_PREV, TAG, HASH_CALL_DATA)
+/// - CAP_NEXT is stored back into the processor state
+/// - R1 and R0 are written to the top of the stack
 #[inline(always)]
 pub(super) fn op_log_precompile<P: Processor>(
-    _processor: &mut P,
-) -> Result<(), ExecutionError> {
-    // TODO: Implement precompile logging logic
-    Ok(())
+    processor: &mut P,
+    tracer: &mut impl Tracer,
+) -> [Felt; NUM_USER_OP_HELPERS] {
+    // Read TAG and HASH_CALL_DATA from stack
+    // Stack layout: [HASH_CALL_DATA, TAG, ...] where each is a 4-element word
+    // Both Fast and Slow processors have reversed stack after initialization
+    // Slow: stack.get(0..7) = [8,7,6,5,4,3,2,1] for input vec![1,2,3,4,5,6,7,8]
+    // Fast: stack_top[0..7] = [1,2,3,4,5,6,7,8] for input vec![1,2,3,4,5,6,7,8]
+    // To match slow processor's reading:
+    // - Slow reads: hash_call_data=[stack.get(3..0)], tag=[stack.get(7..4)]
+    // - Fast must read: hash_call_data=[stack_top[4..7]], tag=[stack_top[0..3]]
+    let hash_call_data = processor.stack().get_word(0);
+    let tag = processor.stack().get_word(4);
+
+    // Get the current capacity
+    let cap_prev = processor.precompile_capacity();
+
+    // Build the full 12-element hasher state for RPO permutation
+    // State layout: [capacity (4), rate (8)]
+    // For MASM, the layout is inverted, so we construct: [CAP_PREV, TAG, HASH_CALL_DATA]
+    let mut hasher_state: [Felt; 12] = [ZERO; 12];
+    hasher_state[0..4].copy_from_slice(cap_prev.as_slice());
+    hasher_state[4..8].copy_from_slice(tag.as_slice());
+    hasher_state[8..12].copy_from_slice(hash_call_data.as_slice());
+
+    // Perform the RPO permutation
+    let (addr, output_state) = processor.hasher().permute(hasher_state);
+
+    // Extract CAP_NEXT (first 4 elements), R0 (next 4 elements), R1 (last 4 elements)
+    let cap_next: Word =
+        [output_state[0], output_state[1], output_state[2], output_state[3]].into();
+    let r0: Word = [output_state[4], output_state[5], output_state[6], output_state[7]].into();
+    let r1: Word = [output_state[8], output_state[9], output_state[10], output_state[11]].into();
+
+    // Update the processor's capacity
+    processor.set_precompile_capacity(cap_next.into());
+
+    // Write R1, R0, and CAP_NEXT to the stack (top 12 elements)
+    // Stack output: [R1[3..0], R0[3..0], CAP_NEXT[3..0], ...]
+    // Note: FastProcessor reverses stack when converting to StackOutputs
+    // To write to StackOutputs[0..12], we write to stack_top[4..16] in reverse
+    processor.stack().set_word(0, &r1);
+    processor.stack().set_word(4, &r0);
+    processor.stack().set_word(8, &cap_next);
+
+    // Record the hasher permutation for trace generation
+    tracer.record_hasher_permute(output_state);
+
+    // Return helper registers containing the hasher address and CAP_PREV
+    // Convert cap_prev Word to array for the helper registers
+    let cap_prev_array: [Felt; 4] = cap_prev.into();
+    P::HelperRegisters::op_log_precompile_registers(addr, cap_prev_array.into())
 }
 
 /// Evaluates a polynomial using Horner's method (extension field).

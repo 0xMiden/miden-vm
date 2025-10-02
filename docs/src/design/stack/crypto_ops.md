@@ -297,3 +297,98 @@ Then, using the above value, we can describe the constraint for the chiplets' bu
 >$$
 b_{chip}' \cdot v_{ace} = b_{chip} \text{ | degree} = 2
 $$
+
+## LOG_PRECOMPILE
+
+The `LOG_PRECOMPILE` operation logs a precompile event by absorbing two user-provided words (`TAG` and `HASH_CALL_DATA`) into an RPO sponge whose capacity (`CAP`) is maintained across multiple invocations. This operation is designed to accumulate precompile-related data in a verifiable manner.
+
+### Operation Overview
+
+The stack is expected to be arranged as follows (from the top):
+- `HASH_CALL_DATA`: A 4-element word containing call data to be logged
+- `TAG`: A 4-element word serving as a tag or identifier
+- Remaining stack elements (unchanged)
+
+Additionally, the processor maintains a persistent capacity word `CAP` (4 elements) that is updated with each `LOG_PRECOMPILE` invocation.
+
+The diagram below illustrates the stack transition:
+
+```
+Before:  [HASH_CALL_DATA, TAG, ...]
+After:   [R0, R1, CAP_NEXT, ...]
+```
+
+Where:
+- `R0` and `R1` are 4-element words derived from the RPO permutation output (positions 0-7)
+- `CAP_NEXT` is the updated capacity (4 elements at positions 8-11), visible on the stack for verification
+- The capacity is also stored in processor state for use in subsequent `LOG_PRECOMPILE` calls
+
+### Cryptographic Computation
+
+The operation performs an RPO (Rescue Prime Optimized) permutation on a 12-element state:
+
+$$
+(\text{CAP}_{next}, R_0, R_1) = \text{Rpo}(\text{CAP}_{prev}, \text{TAG}, \text{HASH\_CALL\_DATA})
+$$
+
+More precisely:
+- **Input state** (12 elements): $[\text{CAP}_{prev}, \text{TAG}, \text{HASH\_CALL\_DATA}]$
+  - $\text{CAP}_{prev}$: Previous capacity (4 elements) from processor state
+  - $\text{TAG}$: User-provided tag (4 elements) from stack positions 4-7
+  - $\text{HASH\_CALL\_DATA}$: User-provided call data (4 elements) from stack positions 0-3
+
+- **Output state** (12 elements): $[\text{CAP}_{next}, R_0, R_1]$
+  - $\text{CAP}_{next}$: Updated capacity (4 elements) stored to processor state and stack positions 8-11
+  - $R_0$: First output word (4 elements) written to stack positions 0-3
+  - $R_1$: Second output word (4 elements) written to stack positions 4-7
+
+### Helper Registers
+
+The operation uses the following helper registers:
+- $h_0$: Hasher chiplet row address
+- $h_1, h_2, h_3, h_4$: Previous capacity $\text{CAP}_{prev}$
+
+### Bus Communication
+
+For the `LOG_PRECOMPILE` operation, we define input and output bus messages as follows:
+
+$$
+v_{input} = \alpha_0 + \alpha_1 \cdot op_{linhash} + \alpha_2 \cdot h_0 + \sum_{j=0}^{11} (\alpha_{j+4} \cdot s_{input,11-j})
+$$
+
+$$
+v_{output} = \alpha_0 + \alpha_1 \cdot op_{retstate} + \alpha_2 \cdot (h_0 + 7) + \sum_{j=0}^{11} (\alpha_{j+4} \cdot s_{output,11-j})
+$$
+
+Where:
+- $op_{linhash}$ is the operation label for initiating a linear hash (RPO permutation)
+- $op_{retstate}$ is the operation label for returning the full hasher state
+- $s_{input}$ represents the input state $[\text{CAP}_{prev}, \text{TAG}, \text{HASH\_CALL\_DATA}]$
+- $s_{output}$ represents the output state $[\text{CAP}_{next}, R_0, R_1]$
+- The hasher operation spans 7 rows (from $h_0$ to $h_0 + 7$)
+
+Using the above values, we can describe the constraint for the chiplet bus column as follows:
+
+>$$
+b_{chip}' \cdot v_{input} \cdot v_{output} = b_{chip} \text{ | degree} = 3
+$$
+
+The above constraint enforces that the specified input and output rows must be present in the trace of the hash chiplet, and that they must be exactly 7 rows apart.
+
+### Stack Effects
+
+The effect of this operation on the rest of the stack is:
+* **No change** for stack positions 12 and beyond
+* Positions 0-3 are overwritten with the output word $R_0$
+* Positions 4-7 are overwritten with the output word $R_1$
+* Positions 8-11 are overwritten with the updated capacity $\text{CAP}_{next}$
+
+### Capacity Management
+
+The capacity word `CAP` is:
+- Initialized to $[0, 0, 0, 0]$ at the start of program execution
+- Updated to $\text{CAP}_{next}$ after each `LOG_PRECOMPILE` operation
+- Persistent across multiple `LOG_PRECOMPILE` invocations within the same execution context
+- Used as input ($\text{CAP}_{prev}$) for the next `LOG_PRECOMPILE` operation
+
+This allows the operation to maintain a running cryptographic accumulator across multiple precompile log events.

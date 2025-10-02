@@ -196,7 +196,8 @@ use super::*;
     "begin
         log_precompile
         end",
-    vec![],
+    vec![1_u32.into(), 2_u32.into(), 3_u32.into(), 4_u32.into(),
+         5_u32.into(), 6_u32.into(), 7_u32.into(), 8_u32.into()],
 )]
 #[case(None,
     "begin 
@@ -348,4 +349,98 @@ fn test_masm_errors_consistency(
     let slow_stack_outputs = slow_processor.execute(&program, &mut host).unwrap_err();
 
     assert_eq!(fast_stack_outputs.to_string(), slow_stack_outputs.to_string());
+}
+
+/// Tests that `log_precompile` correctly computes the RPO permutation and updates the stack.
+///
+/// This test verifies:
+/// 1. The RPO permutation is applied correctly to [CAP_PREV, TAG, HASH_CALL_DATA]
+/// 2. The stack is updated with [R0, R1, CAP_NEXT] as expected
+/// 3. The capacity is properly initialized to [0,0,0,0] for the first call
+#[test]
+fn test_log_precompile_correctness() {
+    use miden_core::crypto::hash::Rpo256;
+
+    // Stack inputs: [1,2,3,4,5,6,7,8] (provided to both processors)
+    // After initialization: Both processors reverse, giving stack = [8,7,6,5,4,3,2,1] (8 on top)
+    // Maps to: HASH_CALL_DATA=[5,6,7,8], TAG=[1,2,3,4]
+    let stack_inputs = vec![
+        1_u32.into(),
+        2_u32.into(),
+        3_u32.into(),
+        4_u32.into(),
+        5_u32.into(),
+        6_u32.into(),
+        7_u32.into(),
+        8_u32.into(),
+    ];
+
+    // Compute expected output using RPO permutation
+    // Input state: [CAP_PREV, TAG, HASH_CALL_DATA]
+    // CAP_PREV is initialized to [0,0,0,0] by default
+    let mut hasher_state = [ZERO; 12];
+    // CAP_PREV (positions 0-3): [0,0,0,0]
+    hasher_state[0..4].copy_from_slice(&[ZERO, ZERO, ZERO, ZERO]);
+    // TAG (positions 4-7): stack.get(4..7) = [1,2,3,4]
+    hasher_state[4..8].copy_from_slice(&[1_u32.into(), 2_u32.into(), 3_u32.into(), 4_u32.into()]);
+    // HASH_CALL_DATA (positions 8-11): stack.get(0..3) = [5,6,7,8]
+    hasher_state[8..12].copy_from_slice(&[5_u32.into(), 6_u32.into(), 7_u32.into(), 8_u32.into()]);
+
+    // Apply RPO permutation
+    Rpo256::apply_permutation(&mut hasher_state);
+
+    // Extract expected outputs
+    // Output state layout: [CAP_NEXT (0-3), R0 (4-7), R1 (8-11)]
+    // But on stack, each word is written reversed: [R0[3], R0[2], R0[1], R0[0], ...]
+    let expected_cap_next = [hasher_state[0], hasher_state[1], hasher_state[2], hasher_state[3]];
+    let expected_r0 = [hasher_state[4], hasher_state[5], hasher_state[6], hasher_state[7]];
+    let expected_r1 = [hasher_state[8], hasher_state[9], hasher_state[10], hasher_state[11]];
+
+    // Stack output order: each word is reversed
+    let expected_r1_on_stack = [expected_r1[3], expected_r1[2], expected_r1[1], expected_r1[0]];
+    let expected_r0_on_stack = [expected_r0[3], expected_r0[2], expected_r0[1], expected_r0[0]];
+    let expected_cap_next_on_stack = [
+        expected_cap_next[3],
+        expected_cap_next[2],
+        expected_cap_next[1],
+        expected_cap_next[0],
+    ];
+
+    // Execute the program
+    let program_source = "begin log_precompile end";
+    let program = {
+        let source_manager = Arc::new(DefaultSourceManager::default());
+        Assembler::new(source_manager).assemble_program(program_source).unwrap()
+    };
+
+    let mut host = DefaultHost::default();
+    let processor = FastProcessor::new(&stack_inputs);
+    let stack_outputs = processor.execute_sync(&program, &mut host).unwrap();
+
+    // Verify stack outputs: [R1, R0, CAP_NEXT, ...]
+    let output_stack = stack_outputs.stack_truncated(16);
+
+    // Check R1 (positions 0-3) - reversed on stack
+    assert_eq!(output_stack[0], expected_r1_on_stack[0], "R1[3] on stack mismatch");
+    assert_eq!(output_stack[1], expected_r1_on_stack[1], "R1[2] on stack mismatch");
+    assert_eq!(output_stack[2], expected_r1_on_stack[2], "R1[1] on stack mismatch");
+    assert_eq!(output_stack[3], expected_r1_on_stack[3], "R1[0] on stack mismatch");
+
+    // Check R0 (positions 4-7) - reversed on stack
+    assert_eq!(output_stack[4], expected_r0_on_stack[0], "R0[3] on stack mismatch");
+    assert_eq!(output_stack[5], expected_r0_on_stack[1], "R0[2] on stack mismatch");
+    assert_eq!(output_stack[6], expected_r0_on_stack[2], "R0[1] on stack mismatch");
+    assert_eq!(output_stack[7], expected_r0_on_stack[3], "R0[0] on stack mismatch");
+
+    // Check CAP_NEXT (positions 8-11) - reversed on stack
+    assert_eq!(output_stack[8], expected_cap_next_on_stack[0], "CAP_NEXT[3] on stack mismatch");
+    assert_eq!(output_stack[9], expected_cap_next_on_stack[1], "CAP_NEXT[2] on stack mismatch");
+    assert_eq!(output_stack[10], expected_cap_next_on_stack[2], "CAP_NEXT[1] on stack mismatch");
+    assert_eq!(output_stack[11], expected_cap_next_on_stack[3], "CAP_NEXT[0] on stack mismatch");
+
+    // Positions 12-15 should be zeros (default padding)
+    assert_eq!(output_stack[12], ZERO, "Stack position 12 should be 0");
+    assert_eq!(output_stack[13], ZERO, "Stack position 13 should be 0");
+    assert_eq!(output_stack[14], ZERO, "Stack position 14 should be 0");
+    assert_eq!(output_stack[15], ZERO, "Stack position 15 should be 0");
 }

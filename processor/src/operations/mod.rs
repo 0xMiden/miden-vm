@@ -178,7 +178,7 @@ impl Process {
             Operation::HornerExt => self.op_horner_eval_ext(err_ctx)?,
             Operation::EvalCircuit => self.op_eval_circuit(err_ctx)?,
             Operation::LogPrecompile => {
-                // TODO: Implement precompile logging logic
+                self.op_log_precompile()?;
             },
         }
 

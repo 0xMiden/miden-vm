@@ -205,7 +205,8 @@ pub(super) fn execute_sync_op(
             processor.op_eval_circuit(err_ctx)?;
         },
         Operation::LogPrecompile => {
-            crypto_ops::op_log_precompile(processor)?;
+            let log_precompile_helpers = crypto_ops::op_log_precompile(processor, tracer);
+            user_op_helpers = Some(log_precompile_helpers);
         },
     }
 

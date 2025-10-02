@@ -109,7 +109,7 @@ fn confirm_operation_and_decorator_structure() {
         Operation::HornerExt => (),
         Operation::EvalCircuit => (),
         Operation::Emit => (),
-        Operation::LogPrecompile => {}
+        Operation::LogPrecompile => (),
     };
 
     match Decorator::Trace(0) {
