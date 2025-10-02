@@ -11,6 +11,7 @@ use alloc::{borrow::ToOwned, vec::Vec};
 
 use miden_core::{
     ExtensionOf, ONE, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
+    precompile::PrecompileSponge,
     utils::{ByteReader, ByteWriter, Deserializable, Serializable},
 };
 use winter_air::{
@@ -321,10 +322,20 @@ pub struct PublicInputs {
 }
 
 impl PublicInputs {
+    /// Creates a new instance of `PublicInputs` from program information, stack inputs and outputs,
+    /// and the precompile sponge state.
+    ///
+    /// # Note on Precompile Sponge
+    ///
+    /// The `precompile_sponge` parameter is currently ignored because the Winterfell backend does
+    /// not yet support verifying it as a public input. However, this parameter is included to make
+    /// explicit that the sponge state is conceptually part of the public inputs for proof
+    /// verification. Future versions will enforce this verification.
     pub fn new(
         program_info: ProgramInfo,
         stack_inputs: StackInputs,
         stack_outputs: StackOutputs,
+        _precompile_sponge: PrecompileSponge,
     ) -> Self {
         Self {
             program_info,

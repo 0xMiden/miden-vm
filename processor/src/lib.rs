@@ -240,6 +240,10 @@ pub struct Process {
     chiplets: Chiplets,
     max_cycles: u32,
     enable_tracing: bool,
+    /// Capacity for the RPO sponge used in log_precompile operations. This is a 4-element word
+    /// that gets updated on each log_precompile call, maintaining state across multiple
+    /// invocations.
+    precompile_capacity: Word,
 }
 
 #[cfg(any(test, feature = "testing"))]
@@ -252,6 +256,10 @@ pub struct Process {
     pub chiplets: Chiplets,
     pub max_cycles: u32,
     pub enable_tracing: bool,
+    /// Capacity for the RPO sponge used in log_precompile operations. This is a 4-element word
+    /// that gets updated on each log_precompile call, maintaining state across multiple
+    /// invocations.
+    pub precompile_capacity: Word,
 }
 
 impl Process {
@@ -297,6 +305,7 @@ impl Process {
             chiplets: Chiplets::new(kernel),
             max_cycles: execution_options.max_cycles(),
             enable_tracing: execution_options.enable_tracing(),
+            precompile_capacity: [ZERO; 4].into(),
         }
     }
 
@@ -743,8 +752,15 @@ impl Process {
         self.chiplets.kernel_rom.kernel()
     }
 
-    pub fn into_parts(self) -> (System, Decoder, Stack, RangeChecker, Chiplets) {
-        (self.system, self.decoder, self.stack, self.range, self.chiplets)
+    pub fn into_parts(self) -> (System, Decoder, Stack, RangeChecker, Chiplets, Word) {
+        (
+            self.system,
+            self.decoder,
+            self.stack,
+            self.range,
+            self.chiplets,
+            self.precompile_capacity,
+        )
     }
 }
 

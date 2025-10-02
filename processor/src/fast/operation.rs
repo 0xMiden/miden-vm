@@ -5,6 +5,7 @@ use miden_air::{
 use miden_core::{
     QuadFelt, WORD_SIZE, Word, ZERO,
     crypto::{hash::Rpo256, merkle::MerklePath},
+    precompile::PrecompileSponge,
 };
 
 use crate::{
@@ -53,6 +54,16 @@ impl Processor for FastProcessor {
     #[inline(always)]
     fn system(&mut self) -> &mut Self::System {
         self
+    }
+
+    #[inline(always)]
+    fn precompile_capacity(&self) -> Word {
+        self.precompile_sponge.into()
+    }
+
+    #[inline(always)]
+    fn set_precompile_capacity(&mut self, capacity: Word) {
+        self.precompile_sponge = PrecompileSponge::from_capacity(capacity);
     }
 
     /// Checks that the evaluation of an arithmetic circuit is equal to zero.
@@ -362,6 +373,11 @@ impl OperationHelperRegisters for NoopHelperRegisters {
 
     #[inline(always)]
     fn op_hperm_registers(_addr: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
+        DEFAULT_HELPERS
+    }
+
+    #[inline(always)]
+    fn op_log_precompile_registers(_addr: Felt, _cap_prev: Word) -> [Felt; NUM_USER_OP_HELPERS] {
         DEFAULT_HELPERS
     }
 

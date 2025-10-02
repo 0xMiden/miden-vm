@@ -34,8 +34,10 @@ export.hash_memory
     exec.hash_memory_impl
     # => [COMM, TAG, DIGEST_U32[8], ...]
 
-    # This will be replaced by a syscall to a procedure which logs the call to the precompile
-    dropw dropw
+    # Log the precompile request for deferred verification
+    padw movdnw.2
+    log_precompile
+    dropw dropw dropw
     # => [DIGEST_U32[8], ...]
 end
 

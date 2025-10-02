@@ -1,7 +1,8 @@
+use miden_air::trace::chiplets::hasher::HasherState;
 use miden_core::mast::MastForest;
 
 use super::{ExecutionError, Operation, Process};
-use crate::{ErrorContext, Felt};
+use crate::{ErrorContext, Felt, Word};
 
 // CRYPTOGRAPHIC OPERATIONS
 // ================================================================================================
@@ -183,6 +184,52 @@ impl Process {
             self.stack.set(i, value);
         }
         self.stack.copy_state(4);
+
+        Ok(())
+    }
+
+    /// Logs a precompile event by absorbing TAG and HASH_CALL_DATA into the RPO sponge capacity.
+    ///
+    /// Stack transition:
+    /// `[HASH_CALL_DATA, TAG, GARBAGE, ...] -> [R1, R0, CAP_NEXT, ...]`
+    ///
+    /// Where:
+    /// - The hasher computes: `[CAP_NEXT, R0, R1] = Rpo([CAP_PREV, TAG, HASH_CALL_DATA])`
+    /// - `CAP_PREV` is the previous capacity provided non-deterministically via helper registers.
+    /// - The VM stack stores each 4-element word in reverse element order, so the top of the stack
+    ///   exposes the elements of `R1` first, followed by the elements of `R0`, then `CAP_NEXT`.
+    pub(super) fn op_log_precompile(&mut self) -> Result<(), ExecutionError> {
+        // Read TAG and HASH_CALL_DATA from stack, and CAP_PREV from the processor state
+        let hash_call_data = self.stack.get_word(0);
+        let tag = self.stack.get_word(4);
+        let cap_prev = self.precompile_capacity;
+
+        let input_state: HasherState = {
+            let input_state_words = [cap_prev, tag, hash_call_data];
+            Word::words_as_elements(&input_state_words).try_into().unwrap()
+        };
+
+        // Perform the RPO permutation, with output state [CAP_NEXT, R0, R1]
+        let (addr, output_state) = self.chiplets.hasher.permute(input_state);
+
+        // Save the hasher address and CAP_PREV in helper registers
+        self.decoder.set_user_op_helpers(
+            Operation::LogPrecompile,
+            &[addr, cap_prev[0], cap_prev[1], cap_prev[2], cap_prev[3]],
+        );
+
+        // Update the processor's capacity with CAP_NEXT
+        let cap_next =
+            Word::from([output_state[0], output_state[1], output_state[2], output_state[3]]);
+        self.precompile_capacity = cap_next;
+
+        // Write the output [CAP_NEXT, R0, R1] to the stack (top 12 elements) in reverse order
+        for (i, elt) in output_state.iter().enumerate() {
+            self.stack.set(11 - i, *elt);
+        }
+
+        // Copy state for the rest of the stack
+        self.stack.copy_state(12);
 
         Ok(())
     }

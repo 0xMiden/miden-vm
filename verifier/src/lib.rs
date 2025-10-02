@@ -105,17 +105,18 @@ pub fn verify_with_precompiles(
     let security_level = proof.security_level();
     let program_hash = *program_info.program_hash();
 
-    // build public inputs and try to verify the proof
-    let pub_inputs = PublicInputs::new(program_info, stack_inputs, stack_outputs);
     let (hash_fn, proof, precompile_requests) = proof.into_parts();
 
-    // TODO: Check that this corresponds to the commitment output by the VM
-    // compute the commitment to the list of all precompile requests.
+    // recompute the precompile sponge by verifying all precompile requests.
     // if no verifiers were provided (e.g. when this function was called from `verify()`),
     // but the proof contained requests anyway, returns a `NoVerifierFound` error.
-    let requests_commitment = precompile_verifiers
+    let recomputed_sponge = precompile_verifiers
         .deferred_requests_commitment(&precompile_requests)
         .map_err(VerificationError::PrecompileVerificationError)?;
+
+    // build public inputs, explicitly passing sponge (though currently ignored by Winterfell)
+    let pub_inputs =
+        PublicInputs::new(program_info, stack_inputs, stack_outputs, recomputed_sponge);
 
     match hash_fn {
         HashFunction::Blake3_192 => {
@@ -160,7 +161,8 @@ pub fn verify_with_precompiles(
     }
     .map_err(|source| VerificationError::ProgramVerificationError(program_hash, source))?;
 
-    Ok((security_level, requests_commitment))
+    // return finalized digest for compatibility (if needed by caller)
+    Ok((security_level, recomputed_sponge.finalize()))
 }
 
 // ERRORS

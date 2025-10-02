@@ -297,3 +297,101 @@ Then, using the above value, we can describe the constraint for the chiplets' bu
 >$$
 b_{chip}' \cdot v_{ace} = b_{chip} \text{ | degree} = 2
 $$
+
+## LOG_PRECOMPILE
+
+The `LOG_PRECOMPILE` operation logs a precompile event by absorbing two user-provided words (`TAG` and `HASH_CALL_DATA`) into an RPO sponge whose capacity (`CAP`) is maintained across multiple invocations. This operation is designed to accumulate precompile-related data for deferred verification.
+
+### Operation Overview
+
+The stack is expected to be arranged as `[HASH_CALL_DATA, TAG, GARBAGE, ...]`, where
+- `HASH_CALL_DATA` is a commitment to the calldata for the precompile request
+- `TAG` is a 4-element word identifying the precompile, which may contain request-specific data.
+- `GARBAGE` is word which will get overwritten in the next cycle.
+
+Additionally, the processor maintains a persistent capacity word `CAP` that is updated with each `LOG_PRECOMPILE` invocation.
+This word is provided non-deterministically by the processor via the helper registers, and is denoted `CAP_PREV`.
+
+The operation evaluates `[CAP_NEXT, R0, R1] = RPO([CAP_PREV, TAG, HASH_CALL_DATA])`, with the following stack transition
+
+```
+Before:  [HASH_CALL_DATA, TAG, GARBAGE,  ...]
+After:   [R1,             R0,  CAP_NEXT, ...]
+```
+
+The VM updates its internal capacity slot with `CAP_NEXT` using a bus as we describe below.
+The actual output state is irrelevant to the user and should be manually dropped.
+
+The operation uses the following helper registers:
+- $h_0$: Hasher chiplet row address
+- $h_1, h_2, h_3, h_4$: Previous capacity $\mathsf{CAP}_{prev}$
+
+### Bus Communication
+
+#### Hasher chiplet
+
+The following two messages are sent to the hasher chiplet, ensuring the validity of the resulting permutation.
+
+$$
+v_{input} = \alpha_0 + \alpha_1 \cdot op_{linhash} + \alpha_2 \cdot h_0 + \sum_{j=0}^{11} (\alpha_{j+4} \cdot s_{input,11-j})
+$$
+
+$$
+v_{output} = \alpha_0 + \alpha_1 \cdot op_{retstate} + \alpha_2 \cdot (h_0 + 7) + \sum_{j=0}^{11} (\alpha_{j+4} \cdot s_{output,11-j})
+$$
+
+Where:
+- $op_{linhash}$ is the operation label for initiating a linear hash (RPO permutation)
+- $op_{retstate}$ is the operation label for returning the full hasher state
+- $s_{input}$ represents the input state $[\mathsf{CAP}_{prev}, \mathsf{TAG}, \mathsf{HASH\_CALL\_DATA}]$
+- $s_{output}$ represents the output state $[\mathsf{CAP}_{next}, R_0, R_1]$
+
+Using the above values, we can describe the constraint for the chiplet bus column as follows:
+
+>$$
+b_{chip}' \cdot v_{input} \cdot v_{output} = b_{chip}
+$$
+
+The above constraint enforces that the specified input and output rows must be present in the trace of the hash chiplet, and that they must be exactly 7 rows apart.
+
+Note that the words stored on both stack words are laid out in big-endian order, hence the reversal when constructing the message.
+
+Given the similarity with the `HPERM` opcode which sends the same message, albeit from different variables in the trace, it should be possible to combine the bus constraint in a way that avoids increasing the degree of the overall bus expression.
+
+### Capacity Management
+
+Inside the VM, the capacity is stored in a bus, so that each update must remove the previous entry before inserting the next one.
+
+We denote the messages for removing and inserting the message as
+>$$
+v_{rem} = \alpha_0 + \alpha_1 \cdot op_{log\_precompile} + \sum_{j=0}^{3} \alpha_{j+2} \cdot \mathsf{CAP\_PREV}_j
+$$
+$$
+v_{ins} = \alpha_0 + \alpha_1 \cdot op_{log\_precompile} + \sum_{j=0}^{3} \alpha_{j+2} \cdot \mathsf{CAP\_NEXT}_j
+$$
+
+The bus constraint is applied to the virtual table column as follows.
+
+>$$
+b_{vtable}' \cdot v_{rem} = b_{vtable} \cdot v_{ins}
+$$
+
+**NOTE:** The above constraint assumes the Hasher chiplet has been modified to remove the requirement that the bus be empty at the start and end of a Merkle tree update.
+
+This update always occurs simultaneously with a hasher request, which creates a linked list of verified capacities.
+However, we must also ensure that the first requested & final removed capacity words are accounted for, since the bus would otherwise be non-empty at the end of the execution.
+To account for this, the verifier must initialize the bus with these two messages via a variable-length public.
+More specifically, it constrains the final value of the bus to be equal to 
+>$$
+b_{vtable}_0 = \frac{v_{ins, init}}{v_{rem, last}}
+$$
+
+Usually, we will initialize the capacity to the empty word `[0,0,0,0]`, though it may also be used to extend an existing running-capacity from a previous execution.
+The final capacity must always be set to `CAP_FINAL` which must be provided to the verifier as a public input.
+The messages $v_{ins, init}$ and $v_{rem, last}$ are given by
+>$$
+v_{ins,init} = \alpha_0 + \alpha_1 \cdot op_{log\_precompile},
+$$
+>$$
+v_{rem,last} = \alpha_0 + \alpha_1 \cdot op_{log\_precompile} + \sum_{j=0}^{3} \alpha_{j+2} \cdot \mathsf{CAP\_FINAL}_j.
+$$

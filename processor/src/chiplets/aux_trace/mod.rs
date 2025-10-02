@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use miden_air::trace::main_trace::MainTrace;
-use miden_core::Kernel;
+use miden_core::{Kernel, Word};
 use wiring_bus::WiringBusBuilder;
 
 use super::{super::trace::AuxColumnBuilder, Felt, FieldElement, ace::AceHints};
@@ -21,14 +21,19 @@ mod wiring_bus;
 pub struct AuxTraceBuilder {
     kernel: Kernel,
     ace_hints: AceHints,
+    final_precompile_capacity: Word,
 }
 
 impl AuxTraceBuilder {
     // CONSTRUCTORS
     // --------------------------------------------------------------------------------------------
 
-    pub fn new(kernel: Kernel, ace_hints: AceHints) -> Self {
-        Self { kernel, ace_hints }
+    pub fn new(kernel: Kernel, ace_hints: AceHints, final_precompile_capacity: Word) -> Self {
+        Self {
+            kernel,
+            ace_hints,
+            final_precompile_capacity,
+        }
     }
 
     // COLUMN TRACE CONSTRUCTOR
@@ -48,7 +53,7 @@ impl AuxTraceBuilder {
         main_trace: &MainTrace,
         rand_elements: &[E],
     ) -> [Vec<E>; 3] {
-        let v_table_col_builder = ChipletsVTableColBuilder::default();
+        let v_table_col_builder = ChipletsVTableColBuilder::new(self.final_precompile_capacity);
         let bus_col_builder = BusColumnBuilder::new(&self.kernel);
         let wiring_bus_builder = WiringBusBuilder::new(&self.ace_hints);
         let t_chip = v_table_col_builder.build_aux_column(main_trace, rand_elements);

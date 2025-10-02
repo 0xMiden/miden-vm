@@ -90,6 +90,7 @@ pub fn build_trace(
         kernel_replay,
         hasher_for_chiplet,
         ace_replay,
+        final_precompile_sponge,
         fragment_size,
     } = trace_generation_context;
 
@@ -140,7 +141,13 @@ pub fn build_trace(
                         NUM_RAND_ROWS,
                     )
                 },
-                || chiplets.into_trace(main_trace_len, NUM_RAND_ROWS),
+                || {
+                    chiplets.into_trace(
+                        main_trace_len,
+                        NUM_RAND_ROWS,
+                        final_precompile_sponge.into(),
+                    )
+                },
             )
         },
     );
@@ -1779,6 +1786,14 @@ impl Processor for CoreTraceFragmentGenerator {
         &mut self.context.replay.hasher
     }
 
+    fn precompile_capacity(&self) -> Word {
+        self.context.state.system.precompile_capacity
+    }
+
+    fn set_precompile_capacity(&mut self, capacity: Word) {
+        self.context.state.system.precompile_capacity = capacity;
+    }
+
     fn op_eval_circuit(
         &mut self,
         err_ctx: &impl ErrorContext,
@@ -1975,6 +1990,12 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
             acc_tmp.base_element(0),
             acc_tmp.base_element(1),
         ]
+    }
+
+    #[inline(always)]
+    fn op_log_precompile_registers(addr: Felt, cap_prev: Word) -> [Felt; NUM_USER_OP_HELPERS] {
+        // Helper registers h0-h4 contain: [addr, CAP_PREV[0..3]]
+        [addr, cap_prev[0], cap_prev[1], cap_prev[2], cap_prev[3], ZERO]
     }
 }
 

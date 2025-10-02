@@ -1,7 +1,7 @@
 use miden_air::trace::decoder::NUM_USER_OP_HELPERS;
 use miden_core::{
-    Felt, QuadFelt, ZERO, chiplets::hasher::STATE_WIDTH, mast::MastForest, stack::MIN_STACK_DEPTH,
-    utils::range,
+    Felt, QuadFelt, Word, ZERO, chiplets::hasher::STATE_WIDTH, mast::MastForest,
+    stack::MIN_STACK_DEPTH, utils::range,
 };
 
 use crate::{
@@ -198,6 +198,61 @@ pub(super) fn op_horner_eval_base<P: Processor>(
 
     // Return the user operation helpers
     Ok(P::HelperRegisters::op_horner_eval_registers(alpha, k0, k1, acc_tmp))
+}
+
+// LOG PRECOMPILE OPERATION
+// ================================================================================================
+
+/// Logs a precompile event by absorbing `TAG` and `HASH_CALL_DATA` into the RPO sponge capacity.
+///
+/// Stack transition:
+/// `[HASH_CALL_DATA, TAG, GARBAGE, ...] -> [R1, R0, CAP_NEXT, ...]`
+///
+/// Where:
+/// - The hasher computes: `[CAP_NEXT, R0, R1] = Rpo([CAP_PREV, TAG, HASH_CALL_DATA])`
+/// - `CAP_PREV` is the previous capacity provided non-deterministically via helper registers.
+#[inline(always)]
+pub(super) fn op_log_precompile<P: Processor>(
+    processor: &mut P,
+    tracer: &mut impl Tracer,
+) -> [Felt; NUM_USER_OP_HELPERS] {
+    // Read TAG and HASH_CALL_DATA from stack
+    let hash_call_data = processor.stack().get_word(0);
+    let tag = processor.stack().get_word(4);
+
+    // Get the current capacity
+    let cap_prev = processor.precompile_capacity();
+
+    // Build the full 12-element hasher state for RPO permutation
+    // State layout: [CAP_PREV, TAG, HASH_CALL_DATA]
+    let mut hasher_state: [Felt; 12] = [ZERO; 12];
+    hasher_state[0..4].copy_from_slice(cap_prev.as_slice());
+    hasher_state[4..8].copy_from_slice(tag.as_slice());
+    hasher_state[8..12].copy_from_slice(hash_call_data.as_slice());
+
+    // Perform the RPO permutation
+    let (addr, output_state) = processor.hasher().permute(hasher_state);
+
+    // Extract CAP_NEXT (first 4 elements), R0 (next 4 elements), R1 (last 4 elements)
+    let cap_next: Word = [0, 1, 2, 3].map(|i| output_state[i]).into();
+    let r0: Word = [4, 5, 6, 7].map(|i| output_state[i]).into();
+    let r1: Word = [8, 9, 10, 11].map(|i| output_state[i]).into();
+
+    // Update the processor's precompile_capacity
+    processor.set_precompile_capacity(cap_next);
+
+    // Write R1, R0, and CAP_NEXT to the stack (top 12 elements).
+    // Stack output: [R1, R0, CAP_NEXT, ...]
+    processor.stack().set_word(0, &r1);
+    processor.stack().set_word(4, &r0);
+    processor.stack().set_word(8, &cap_next);
+
+    // Record the hasher permutation for trace generation
+    tracer.record_hasher_permute(hasher_state, output_state);
+
+    // Return helper registers containing the hasher address and CAP_PREV
+    // Convert cap_prev Word to array for the helper registers
+    P::HelperRegisters::op_log_precompile_registers(addr, cap_prev)
 }
 
 /// Evaluates a polynomial using Horner's method (extension field).

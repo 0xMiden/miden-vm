@@ -177,24 +177,24 @@ Putting these operations into a group with flag degree $6$ is important for two 
 ### High-degree operations
 This group contains operations which require constraints with degree up to $3$. All $7$ operation bits are used for these flags. The extra $e_0$ column is used for degree reduction of the three high-degree bits.
 
-| Operation     | Opcode value | Binary encoding |            Operation group             | Flag degree |
-|---------------|:------------:|:---------------:|:--------------------------------------:|:-----------:|
-| `HPERM`       |     $80$     |   `101_0000`    |     [Crypto ops](./crypto_ops.md)      |     $5$     |
-| `MPVERIFY`    |     $81$     |   `101_0001`    |     [Crypto ops](./crypto_ops.md)      |     $5$     |
-| `PIPE`        |     $82$     |   `101_0010`    |         [I/O ops](./io_ops.md)         |     $5$     |
-| `MSTREAM`     |     $83$     |   `101_0011`    |         [I/O ops](./io_ops.md)         |     $5$     |
-| `SPLIT`       |     $84$     |   `101_0100`    | [Flow control ops](../decoder/main.md) |     $5$     |
-| `LOOP`        |     $85$     |   `101_0101`    | [Flow control ops](../decoder/main.md) |     $5$     |
-| `SPAN`        |     $86$     |   `101_0110`    | [Flow control ops](../decoder/main.md) |     $5$     |
-| `JOIN`        |     $87$     |   `101_0111`    | [Flow control ops](../decoder/main.md) |     $5$     |
-| `DYN`         |     $88$     |   `101_1000`    | [Flow control ops](../decoder/main.md) |     $5$     |
-| `HORNEREXT`   |     $89$     |   `101_1001`    |     [Crypto ops](./crypto_ops.md)      |     $5$     |
-| `<unused>`    |     $90$     |   `101_1010`    |                                        |     $5$     |
-| `PUSH`        |     $91$     |   `101_1011`    |         [I/O ops](./io_ops.md)         |     $5$     |
-| `DYNCALL`     |     $92$     |   `101_1100`    | [Flow control ops](../decoder/main.md) |     $5$     |
-| `EVALCIRCUIT` |     $93$     |   `101_1101`    |     [Crypto ops](./crypto_ops.md)      |     $5$     |
-| `<unused>`    |     $94$     |   `101_1110`    |                                        |     $5$     |
-| `<unused>`    |     $95$     |   `101_1111`    |                                        |     $5$     |
+| Operation       | Opcode value | Binary encoding |               Operation group                | Flag degree |
+|-----------------|:------------:|:---------------:|:--------------------------------------------:|:-----------:|
+| `HPERM`         |     $80$     |   `101_0000`    |        [Crypto ops](./crypto_ops.md)         |     $5$     |
+| `MPVERIFY`      |     $81$     |   `101_0001`    |        [Crypto ops](./crypto_ops.md)         |     $5$     |
+| `PIPE`          |     $82$     |   `101_0010`    |            [I/O ops](./io_ops.md)            |     $5$     |
+| `MSTREAM`       |     $83$     |   `101_0011`    |            [I/O ops](./io_ops.md)            |     $5$     |
+| `SPLIT`         |     $84$     |   `101_0100`    |    [Flow control ops](../decoder/main.md)    |     $5$     |
+| `LOOP`          |     $85$     |   `101_0101`    |    [Flow control ops](../decoder/main.md)    |     $5$     |
+| `SPAN`          |     $86$     |   `101_0110`    |    [Flow control ops](../decoder/main.md)    |     $5$     |
+| `JOIN`          |     $87$     |   `101_0111`    |    [Flow control ops](../decoder/main.md)    |     $5$     |
+| `DYN`           |     $88$     |   `101_1000`    |    [Flow control ops](../decoder/main.md)    |     $5$     |
+| `HORNEREXT`     |     $89$     |   `101_1001`    |        [Crypto ops](./crypto_ops.md)         |     $5$     |
+| `LOGPRECOMPILE` |     $90$     |   `101_1010`    | [Crypto ops](./crypto_ops.md#LOG_PRECOMPILE) |     $5$     |
+| `PUSH`          |     $91$     |   `101_1011`    |            [I/O ops](./io_ops.md)            |     $5$     |
+| `DYNCALL`       |     $92$     |   `101_1100`    |    [Flow control ops](../decoder/main.md)    |     $5$     |
+| `EVALCIRCUIT`   |     $93$     |   `101_1101`    |        [Crypto ops](./crypto_ops.md)         |     $5$     |
+| `<unused>`      |     $94$     |   `101_1110`    |                                              |     $5$     |
+| `<unused>`      |     $95$     |   `101_1111`    |                                              |     $5$     |
 
 Note that the `SPLIT` and `LOOP` operations are grouped together under the common prefix `101010`, and thus can have a common flag of degree $4$ (using $e_0$ for degree reduction). This is important because both of these operations shift the stack to the left.
 

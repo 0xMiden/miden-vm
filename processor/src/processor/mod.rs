@@ -42,6 +42,18 @@ pub trait Processor: Sized {
     /// Returns a mutable reference to the internal hasher subsystem.
     fn hasher(&mut self) -> &mut Self::Hasher;
 
+    /// Returns the current precompile capacity (CAP).
+    ///
+    /// This capacity is used in log_precompile operations to maintain state across multiple
+    /// invocations of the precompile logging instruction.
+    fn precompile_capacity(&self) -> Word;
+
+    /// Sets the precompile capacity (CAP) to a new value.
+    ///
+    /// This is called by log_precompile to update the capacity after absorbing new data into
+    /// the sponge.
+    fn set_precompile_capacity(&mut self, capacity: Word);
+
     /// Checks that the evaluation of an arithmetic circuit is equal to zero.
     fn op_eval_circuit(
         &mut self,
@@ -390,6 +402,10 @@ pub trait OperationHelperRegisters {
 
     /// The helper registers for the HPerm operation.
     fn op_hperm_registers(addr: Felt) -> [Felt; NUM_USER_OP_HELPERS];
+
+    /// The helper registers for the LogPrecompile operation.
+    /// Contains the hasher address and the previous capacity (CAP_PREV).
+    fn op_log_precompile_registers(addr: Felt, cap_prev: Word) -> [Felt; NUM_USER_OP_HELPERS];
 
     /// The helper registers for the MPVerify and MrUpdate operation.
     fn op_merkle_path_registers(addr: Felt) -> [Felt; NUM_USER_OP_HELPERS];

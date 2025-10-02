@@ -230,7 +230,13 @@ where
         );
 
         let program_info = trace.program_info().clone();
-        PublicInputs::new(program_info, self.stack_inputs.clone(), self.stack_outputs.clone())
+        let final_precompile_sponge = trace.final_precompile_sponge();
+        PublicInputs::new(
+            program_info,
+            self.stack_inputs.clone(),
+            self.stack_outputs.clone(),
+            final_precompile_sponge,
+        )
     }
 
     #[maybe_async]

@@ -17,19 +17,20 @@
 //!    - Computes the result non-deterministically using the host
 //!    - Creates a [`PrecompileCommitment`] binding inputs and outputs together
 //!    - Stores a [`PrecompileRequest`] containing the raw input data for later verification
-//!    - Absorbs the commitment into a running capacity (sponge state)
+//!    - Absorbs the commitment into a [`PrecompileSponge`]
 //!
 //! 2. **Request Storage**: All precompile requests are collected and included in the execution
-//!    proof alongside the final capacity word produced by the VM.
+//!    proof.
 //!
-//! 3. **Proof Generation**: The prover generates a STARK proof of the VM execution, including the
-//!    final capacity as a public input.
+//! 3. **Proof Generation**: The prover generates a STARK proof of the VM execution. The
+//!    [`PrecompileSponge`] state is passed as a conceptual public input (though not yet enforced by
+//!    the STARK verifier).
 //!
 //! 4. **Verification**: The verifier:
 //!    - Recomputes each precompile using the stored requests via [`PrecompileVerifier`]
-//!    - Reconstructs the capacity using `PrecompileVerificationState`
-//!    - Verifies the STARK proof with the recomputed capacity as public input
-//!    - Accepts the proof only if both the STARK and the capacity match
+//!    - Reconstructs the [`PrecompileSponge`] by re-absorbing all commitments in order
+//!    - Verifies the STARK proof (sponge state enforcement to be added in future versions)
+//!    - Accepts the proof only if precompile verification succeeds and the STARK proof is valid
 //!
 //! # Key Types
 //!
@@ -38,7 +39,8 @@
 //!   a tag (with event ID and metadata) and a commitment word
 //! - [`PrecompileVerifier`]: Trait for implementing verification logic for specific precompiles
 //! - [`PrecompileVerifierRegistry`]: Registry mapping event IDs to their verifier implementations
-//! - `PrecompileVerificationState`: Tracks the RPO256 sponge capacity for aggregating commitments
+//! - [`PrecompileSponge`]: An RPO256 sponge that creates a sequential commitment to all precompile
+//!   operations
 //!
 //! # Example Implementation
 //!
@@ -201,15 +203,7 @@ impl PrecompileVerifierRegistry {
         self.verifiers.is_empty()
     }
 
-    /// Verifies all precompile requests and returns an aggregated commitment for deferred
-    /// verification.
-    ///
-    /// This method iterates through all requests and verifies each one using the
-    /// corresponding verifier from the registry. The commitments are then absorbed into a sponge,
-    /// from which we can squeeze a digest.
-    ///
-    /// # Arguments
-    /// * `requests` - Slice of precompile requests to verify
+    /// Verifies all precompile requests and returns the final sponge state.
     ///
     /// # Errors
     /// Returns a [`PrecompileVerificationError`] if:
@@ -218,8 +212,8 @@ impl PrecompileVerifierRegistry {
     pub fn deferred_requests_commitment(
         &self,
         requests: &[PrecompileRequest],
-    ) -> Result<Word, PrecompileVerificationError> {
-        let mut state = PrecompileVerificationState::new();
+    ) -> Result<PrecompileSponge, PrecompileVerificationError> {
+        let mut sponge = PrecompileSponge::new();
         for (index, PrecompileRequest { event_id, calldata: data }) in requests.iter().enumerate() {
             let event_id = *event_id;
             let verifier = self
@@ -229,9 +223,9 @@ impl PrecompileVerifierRegistry {
             let precompile_commitment = verifier.verify(data).map_err(|error| {
                 PrecompileVerificationError::PrecompileError { index, event_id, error }
             })?;
-            state.absorb(precompile_commitment);
+            sponge.absorb(precompile_commitment);
         }
-        Ok(state.finalize())
+        Ok(sponge)
     }
 }
 
@@ -263,38 +257,45 @@ pub trait PrecompileVerifier: Send + Sync {
     fn verify(&self, calldata: &[u8]) -> Result<PrecompileCommitment, PrecompileError>;
 }
 
-// PRECOMPILE VERIFICATION STATE
+// PRECOMPILE SPONGE
 // ================================================================================================
 
-/// Tracks the RPO256 sponge capacity for aggregating [`PrecompileCommitment`]s.
+/// An RPO256 sponge for creating a sequential commitment to precompile operations.
 ///
-/// This structure mirrors the VM's implementation of precompile commitment tracking. During
-/// execution, the VM maintains only the capacity portion of an RPO256 sponge, absorbing each
-/// precompile commitment as it's produced. At the end of execution, the verifier recomputes
-/// this same aggregation and compares the final digest.
+/// # Structure
+/// Standard RPO256 sponge: 12 elements = capacity (4 elements) + rate (8 elements)
 ///
-/// # Aggregation Process
+/// # Operation
+/// - **Absorption**: Each precompile commitment is absorbed into the rate, updating the capacity
+/// - **State**: The evolving capacity tracks all absorbed commitments in order
+/// - **Finalization**: Squeeze with zero rate to extract a digest (the sequential commitment)
 ///
-/// - **`new()`**: Initialize capacity to `ZERO`
-/// - **`absorb(comm)`**: Apply RPO256 permutation to `[capacity, tag, commitment]` and update
-///   capacity to the first word of the result
-/// - **`finalize()`**: Apply RPO256 permutation to `[capacity, ZERO, ZERO]` and extract the second
-///   word as the final digest
+/// # Implementation Note
+/// We store only the 4-element capacity portion between absorptions since the rate is ephemeral.
 #[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
-struct PrecompileVerificationState {
-    /// RPO256 sponge capacity, updated with each absorbed commitment.
+pub struct PrecompileSponge {
+    /// The capacity portion (4 elements) of the RPO256 sponge state.
     capacity: Word,
 }
 
-impl PrecompileVerificationState {
-    /// Creates a new verification state with zero-initialized capacity.
-    fn new() -> Self {
+impl PrecompileSponge {
+    /// Creates a new sponge with zero capacity.
+    pub fn new() -> Self {
         Self::default()
     }
 
-    /// Absorbs a precompile commitment by applying RPO256 to `[capacity, tag, commitment]`
-    /// and saving the resulting capacity word.
-    fn absorb(&mut self, commitment: PrecompileCommitment) {
+    /// Creates a sponge from an existing capacity word (for VM operations like `log_precompile`).
+    pub fn from_capacity(capacity: Word) -> Self {
+        Self { capacity }
+    }
+
+    /// Returns the current capacity word.
+    pub fn capacity(&self) -> Word {
+        self.capacity
+    }
+
+    /// Absorbs a precompile commitment into the rate, updating the capacity.
+    pub fn absorb(&mut self, commitment: PrecompileCommitment) {
         let mut state =
             Word::words_as_elements(&[self.capacity, commitment.tag, commitment.commitment])
                 .try_into()
@@ -303,17 +304,20 @@ impl PrecompileVerificationState {
         self.capacity = Word::new(state[0..4].try_into().unwrap());
     }
 
-    /// Finalizes by applying RPO256 to `[capacity, ZERO, ZERO]` and extracting elements the first
-    /// rate word.
-    ///
-    /// This matches the VM's finalization where the rate portion is set to zeros for the final
-    /// permutation. The zero-padded rate could be used for auxiliary metadata in future versions.
-    fn finalize(self) -> Word {
+    /// Squeezes the sponge with zero rate to extract a digest (sequential commitment to all
+    /// absorbed requests).
+    pub fn finalize(self) -> Word {
         let mut state = Word::words_as_elements(&[self.capacity, Word::empty(), Word::empty()])
             .try_into()
             .unwrap();
         Rpo256::apply_permutation(&mut state);
         Word::new(state[4..8].try_into().unwrap())
+    }
+}
+
+impl From<PrecompileSponge> for Word {
+    fn from(sponge: PrecompileSponge) -> Word {
+        sponge.capacity
     }
 }
 

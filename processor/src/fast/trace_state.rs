@@ -89,6 +89,11 @@ pub struct SystemState {
     /// - For CALL/DYNCALL contexts: hash of the called function
     /// - For SYSCALL contexts: hash remains from the calling function
     pub fn_hash: Word,
+
+    /// Precompile capacity used for accumulating log_precompile operations
+    /// - Initially [ZERO; 4]
+    /// - Updated with each log_precompile invocation
+    pub precompile_capacity: Word,
 }
 
 impl SystemState {
@@ -100,6 +105,7 @@ impl SystemState {
             fmp: processor.fmp,
             in_syscall: processor.in_syscall,
             fn_hash: processor.caller_hash,
+            precompile_capacity: processor.precompile_sponge.into(),
         }
     }
 }

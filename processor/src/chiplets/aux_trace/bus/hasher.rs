@@ -20,6 +20,7 @@ use miden_core::{
 
 use super::get_op_label;
 use crate::{
+    Word,
     chiplets::aux_trace::build_value,
     debug::{BusDebugger, BusMessage},
 };
@@ -162,6 +163,74 @@ pub(super) fn build_hperm_request<E: FieldElement<BaseField = Felt>>(
             s1_nxt, s0_nxt,
         ],
         source: "hperm output",
+    };
+
+    let combined_value = input_req.value(alphas) * output_req.value(alphas);
+
+    #[cfg(any(test, feature = "bus-debugger"))]
+    {
+        _debugger.add_request(alloc::boxed::Box::new(input_req), alphas);
+        _debugger.add_request(alloc::boxed::Box::new(output_req), alphas);
+    }
+
+    combined_value
+}
+
+/// Builds `LOG_PRECOMPILE` requests made to the hash chiplet.
+///
+/// The operation absorbs `[TAG, HASH_CALL_DATA]` into the RPO sponge with capacity `CAP_PREV`,
+/// producing output `[CAP_NEXT, R0, R1]`.
+///
+/// Stack layout (current row):
+/// - `s0..s3`: `HASH_CALL_DATA[3..0]`
+/// - `s4..s7`: `TAG[3..0]`
+///
+/// Helper registers (current row):
+/// - `h0`: hasher address
+/// - `h1..h4`: `CAP_PREV[0..3]`
+///
+/// Stack layout (next row):
+/// - `s0..s3`: `R1[3..0]`
+/// - `s4..s7`: `R0[3..0]`
+/// - `s8..s11`: `CAP_NEXT[3..0]`
+pub(super) fn build_log_precompile_request<E: FieldElement<BaseField = Felt>>(
+    main_trace: &MainTrace,
+    alphas: &[E],
+    row: RowIndex,
+    _debugger: &mut BusDebugger<E>,
+) -> E {
+    // Read helper registers
+    let addr = main_trace.helper_register(0, row);
+
+    // Input state [CAP_PREV, TAG, HASH_CALL_DATA]
+    // Helper registers store capacity in sequential order [e0, e1, e2, e3]
+    let cap_prev: Word = [1, 2, 3, 4].map(|idx| main_trace.helper_register(idx, row)).into();
+    // Stack stores words in big-endian order: stack[0..3] = [e3, e2, e1, e0]
+    // Therefore we read in reverse order to reconstruct the word correctly
+    let hash_call_data: Word = [3, 2, 1, 0].map(|idx| main_trace.stack_element(idx, row)).into();
+    let tag: Word = [7, 6, 5, 4].map(|idx| main_trace.stack_element(idx, row)).into();
+    let state_input = [cap_prev, tag, hash_call_data];
+
+    // Output state [CAP_NEXT, R0, R1]
+    let r1: Word = [3, 2, 1, 0].map(|idx| main_trace.stack_element(idx, row + 1)).into();
+    let r0: Word = [7, 6, 5, 4].map(|idx| main_trace.stack_element(idx, row + 1)).into();
+    let cap_next: Word = [11, 10, 9, 8].map(|idx| main_trace.stack_element(idx, row + 1)).into();
+    let state_output = [cap_next, r0, r1];
+
+    let input_req = HasherMessage {
+        transition_label: Felt::from(LINEAR_HASH_LABEL + 16),
+        addr_next: addr,
+        node_index: ZERO,
+        hasher_state: Word::words_as_elements(&state_input).try_into().unwrap(),
+        source: "log_precompile input",
+    };
+
+    let output_req = HasherMessage {
+        transition_label: Felt::from(RETURN_STATE_LABEL + 32),
+        addr_next: addr + Felt::new(7),
+        node_index: ZERO,
+        hasher_state: Word::words_as_elements(&state_output).try_into().unwrap(),
+        source: "log_precompile output",
     };
 
     let combined_value = input_req.value(alphas) * output_req.value(alphas);

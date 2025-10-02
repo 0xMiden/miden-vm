@@ -382,7 +382,7 @@ fn test_keccak_hash_1to1_prove_verify() {
         ];
         Rpo256::hash_elements(Word::words_as_elements(&elements))
     };
-    assert_eq!(deferred_commitment_expected, deferred_commitment, "");
+    assert_eq!(deferred_commitment_expected, deferred_commitment.finalize(), "");
 
     // Verify the proof with precompiles
     let program_info = ProgramInfo::from(program);
