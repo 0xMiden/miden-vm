@@ -293,8 +293,6 @@ proc.insert_into_leaf.8196
     exec.hash_and_insert_mem
     # => [NV_old, R_new]
 
-    # FIXME: Confirm that old leaf hashes to NV_old.
-
     # By nature, if this insertion put a value where there wasn't one, then the
     # old value at this key is an empty word.
     padw swapw dropw
@@ -466,8 +464,6 @@ proc.remove_in_multi_leaf.8196
     exec.hash_and_insert_mem
     # => [NV_old, R_new, V_old, K]
 
-    # FIXME: Confirm that old leaf hashes to NV_old.
-
     dropw movupw.2 dropw swapw
     # => [V_old, R_new]
 end
@@ -501,7 +497,7 @@ proc.set_multi_leaf.8192
 
     exec.mem::pipe_double_words_preimage_to_memory
     # => [end_ptr; NV, K, V, leaf_size, R]
-
+    
     movdn.12
     # => [NV, K, V, end_ptr, leaf_size, R]
     swapw.2
