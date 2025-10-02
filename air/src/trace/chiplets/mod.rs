@@ -53,6 +53,10 @@ pub const HASHER_RATE_COL_RANGE: Range<usize> = Range {
 };
 /// The index of the hasher's node index column in the execution trace.
 pub const HASHER_NODE_INDEX_COL_IDX: usize = HASHER_STATE_COL_RANGE.end;
+/// The index of the hasher's Merkle update address column in the execution trace.
+/// This column stores the address when MV (Merkle Verify old) is initiated and remains constant
+/// throughout the entire Merkle update block (MV/MVA/MU/MUA operations).
+pub const HASHER_MU_ADDR_COL_IDX: usize = HASHER_NODE_INDEX_COL_IDX + 1;
 
 // --- GLOBALLY-INDEXED CHIPLET COLUMN ACCESSORS: BITWISE -----------------------------------------
 

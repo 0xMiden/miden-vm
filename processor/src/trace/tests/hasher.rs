@@ -1,14 +1,14 @@
 use alloc::vec::Vec;
-
-use miden_air::trace::{
-    AUX_TRACE_RAND_ELEMENTS, chiplets::hasher::P1_COL_IDX, main_trace::MainTrace,
+use miden_air::{
+    RowIndex,
+    trace::{AUX_TRACE_RAND_ELEMENTS, chiplets::hasher::P1_COL_IDX, main_trace::MainTrace},
 };
 use miden_core::{
     FieldElement,
     crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},
 };
 use rstest::rstest;
-
+use miden_air::trace::chiplets::HASHER_MU_ADDR_COL_IDX;
 use super::{
     super::NUM_RAND_ROWS, AdviceInputs, Felt, ONE, Operation, Word, ZERO,
     build_trace_from_ops_with_inputs, rand_array,
@@ -78,10 +78,23 @@ fn hasher_p1_mr_update(#[case] index: u64) {
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p1 = aux_columns.get_column(P1_COL_IDX);
 
+    let mu_addr_col = trace.main_trace.get_column(HASHER_MU_ADDR_COL_IDX);
+    std::println!("{}", mu_addr_col.len());
+    for (row, value) in mu_addr_col.iter().enumerate() {
+        std::println!("{row}:{value}");
+    }
+
+    // Get the mu_addr value from the hasher trace (it's set when MR_UPDATE starts at step 8)
+    // and remains constant throughout the Merkle path computation
+    let mu_addr = trace.main_trace.chiplet_hasher_mu_addr(RowIndex::from(8));
+
     let row_values = [
-        SiblingTableRow::new(Felt::new(index), path[0]).to_value(&trace.main_trace, &alphas),
-        SiblingTableRow::new(Felt::new(index >> 1), path[1]).to_value(&trace.main_trace, &alphas),
-        SiblingTableRow::new(Felt::new(index >> 2), path[2]).to_value(&trace.main_trace, &alphas),
+        SiblingTableRow::new(Felt::new(index), path[0], mu_addr)
+            .to_value(&trace.main_trace, &alphas),
+        SiblingTableRow::new(Felt::new(index >> 1), path[1], mu_addr)
+            .to_value(&trace.main_trace, &alphas),
+        SiblingTableRow::new(Felt::new(index >> 2), path[2], mu_addr)
+            .to_value(&trace.main_trace, &alphas),
     ];
 
     // make sure the first entry is ONE
@@ -150,6 +163,87 @@ fn hasher_p1_mr_update(#[case] index: u64) {
     for value in p1.iter().skip(50).take(p1.len() - NUM_RAND_ROWS - 50) {
         assert_eq!(ONE, *value);
     }
+
+}
+
+#[test]
+fn hasher_p1_requires_matching_mu_addr() {
+    let (tree, _) = build_merkle_tree();
+    let index = 5_u64;
+    let depth = 3_u64;
+    let old_node = tree.get_node(NodeIndex::new(depth as u8, index).unwrap()).unwrap();
+    let new_node = init_leaf(42);
+    let path = tree.get_path(NodeIndex::new(depth as u8, index).unwrap()).unwrap();
+
+    // Build program inputs for a single MRUPDATE to obtain a main trace instance.
+    let mut init_stack = vec![];
+    append_word(&mut init_stack, old_node);
+    init_stack.extend_from_slice(&[depth, index]);
+    append_word(&mut init_stack, tree.root());
+    append_word(&mut init_stack, new_node);
+    init_stack.reverse();
+    let stack_inputs = StackInputs::try_from_ints(init_stack).unwrap();
+    let store = MerkleStore::from(&tree);
+    let advice_inputs = AdviceInputs::default().with_merkle_store(store);
+    let trace =
+        build_trace_from_ops_with_inputs(vec![Operation::MrUpdate], stack_inputs, advice_inputs);
+
+    // Use deterministic alphas so the test is reproducible.
+    let mut alphas = [Felt::ZERO; AUX_TRACE_RAND_ELEMENTS];
+    for (i, alpha) in alphas.iter_mut().enumerate() {
+        *alpha = Felt::new((i + 1) as u64);
+    }
+
+    let mu_addr_first = Felt::new(7);
+    let mu_addr_second = Felt::new(11);
+
+    let insertion_values: Vec<Felt> = path
+        .iter()
+        .enumerate()
+        .map(|(i, sibling)| {
+            let idx = Felt::new(index >> i);
+            SiblingTableRow::new(idx, *sibling, mu_addr_first).to_value(&trace.main_trace, &alphas)
+        })
+        .collect();
+
+    let removal_with_same_mu_addr: Vec<Felt> = path
+        .iter()
+        .enumerate()
+        .map(|(i, sibling)| {
+            let idx = Felt::new(index >> i);
+            SiblingTableRow::new(idx, *sibling, mu_addr_first).to_value(&trace.main_trace, &alphas)
+        })
+        .collect();
+
+    let insertion_product = insertion_values.iter().fold(Felt::ONE, |acc, value| acc * *value);
+    let removal_same_product =
+        removal_with_same_mu_addr.iter().fold(Felt::ONE, |acc, value| acc * value.inv());
+
+    assert_eq!(Felt::ONE, insertion_product * removal_same_product);
+
+    let removal_with_different_mu_addr: Vec<Felt> = path
+        .iter()
+        .enumerate()
+        .map(|(i, sibling)| {
+            let idx = Felt::new(index >> i);
+            SiblingTableRow::new(idx, *sibling, mu_addr_second).to_value(&trace.main_trace, &alphas)
+        })
+        .collect();
+
+    // Ensure that at least one sibling contribution changes when the address changes.
+    assert!(
+        removal_with_same_mu_addr
+            .iter()
+            .zip(&removal_with_different_mu_addr)
+            .any(|(same, different)| same != different)
+    );
+
+    let removal_different_product = removal_with_different_mu_addr
+        .iter()
+        .fold(Felt::ONE, |acc, value| acc * value.inv());
+    let final_value = insertion_product * removal_different_product;
+
+    assert_ne!(Felt::ONE, final_value);
 }
 
 // HELPER STRUCTS, METHODS AND FUNCTIONS
@@ -181,11 +275,12 @@ fn append_word(target: &mut Vec<u64>, word: Word) {
 pub struct SiblingTableRow {
     index: Felt,
     sibling: Word,
+    mu_addr: Felt,
 }
 
 impl SiblingTableRow {
-    pub fn new(index: Felt, sibling: Word) -> Self {
-        Self { index, sibling }
+    pub fn new(index: Felt, sibling: Word, mu_addr: Felt) -> Self {
+        Self { index, sibling, mu_addr }
     }
 
     /// Reduces this row to a single field element in the field specified by E. This requires
@@ -203,6 +298,7 @@ impl SiblingTableRow {
         if lsb == 0 {
             alphas[0]
                 + alphas[3].mul_base(self.index)
+                + alphas[4].mul_base(self.mu_addr)
                 + alphas[12].mul_base(self.sibling[0])
                 + alphas[13].mul_base(self.sibling[1])
                 + alphas[14].mul_base(self.sibling[2])
@@ -210,6 +306,7 @@ impl SiblingTableRow {
         } else {
             alphas[0]
                 + alphas[3].mul_base(self.index)
+                + alphas[4].mul_base(self.mu_addr)
                 + alphas[8].mul_base(self.sibling[0])
                 + alphas[9].mul_base(self.sibling[1])
                 + alphas[10].mul_base(self.sibling[2])

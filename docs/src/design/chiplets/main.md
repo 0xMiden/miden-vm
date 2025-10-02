@@ -228,7 +228,7 @@ To combine these correctly, the [running product column](../lookups/multiset.md)
 
 ### Chiplets virtual table constraints
 
-Although the [hasher chiplet](./hasher.md#sibling-table-constraints) ensures the sibling table is empty between any Merkle tree update computation,
+Although the [hasher chiplet](./hasher.md#sibling-table-constraints) ensures the sibling table is empty between any Merkle tree update computation—and now tags each insertion/removal with the originating VM clock $clk_{req}$—
 we must also enforce this property at the boundary of the chiplet itself.
 Using the hasher chiplet's selector $s_0$, the following constraint ensures the bus equals one whenever $s_0$ transitions.
 

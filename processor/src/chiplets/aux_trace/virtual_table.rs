@@ -76,11 +76,13 @@ where
 
     if f_mu {
         let index = main_trace.chiplet_node_index(row);
+        let mu_addr = main_trace.chiplet_hasher_mu_addr(row);
         let lsb = index.as_int() & 1;
         if lsb == 0 {
             let sibling = &main_trace.chiplet_hasher_state(row)[DIGEST_RANGE.end..];
             alphas[0]
                 + alphas[3].mul_base(index)
+                + alphas[4].mul_base(mu_addr)
                 + alphas[12].mul_base(sibling[0])
                 + alphas[13].mul_base(sibling[1])
                 + alphas[14].mul_base(sibling[2])
@@ -89,6 +91,7 @@ where
             let sibling = &main_trace.chiplet_hasher_state(row)[DIGEST_RANGE];
             alphas[0]
                 + alphas[3].mul_base(index)
+                + alphas[4].mul_base(mu_addr)
                 + alphas[8].mul_base(sibling[0])
                 + alphas[9].mul_base(sibling[1])
                 + alphas[10].mul_base(sibling[2])
@@ -96,11 +99,13 @@ where
         }
     } else if f_mua {
         let index = main_trace.chiplet_node_index(row);
+        let mu_addr = main_trace.chiplet_hasher_mu_addr(row);
         let lsb = index.as_int() & 1;
         if lsb == 0 {
             let sibling = &main_trace.chiplet_hasher_state(row + 1)[DIGEST_RANGE.end..];
             alphas[0]
                 + alphas[3].mul_base(index)
+                + alphas[4].mul_base(mu_addr)
                 + alphas[12].mul_base(sibling[0])
                 + alphas[13].mul_base(sibling[1])
                 + alphas[14].mul_base(sibling[2])
@@ -109,6 +114,7 @@ where
             let sibling = &main_trace.chiplet_hasher_state(row + 1)[DIGEST_RANGE];
             alphas[0]
                 + alphas[3].mul_base(index)
+                + alphas[4].mul_base(mu_addr)
                 + alphas[8].mul_base(sibling[0])
                 + alphas[9].mul_base(sibling[1])
                 + alphas[10].mul_base(sibling[2])
@@ -133,11 +139,13 @@ where
 
     if f_mv {
         let index = main_trace.chiplet_node_index(row);
+        let mu_addr = main_trace.chiplet_hasher_mu_addr(row);
         let lsb = index.as_int() & 1;
         if lsb == 0 {
             let sibling = &main_trace.chiplet_hasher_state(row)[DIGEST_RANGE.end..];
             alphas[0]
                 + alphas[3].mul_base(index)
+                + alphas[4].mul_base(mu_addr)
                 + alphas[12].mul_base(sibling[0])
                 + alphas[13].mul_base(sibling[1])
                 + alphas[14].mul_base(sibling[2])
@@ -146,6 +154,7 @@ where
             let sibling = &main_trace.chiplet_hasher_state(row)[DIGEST_RANGE];
             alphas[0]
                 + alphas[3].mul_base(index)
+                + alphas[4].mul_base(mu_addr)
                 + alphas[8].mul_base(sibling[0])
                 + alphas[9].mul_base(sibling[1])
                 + alphas[10].mul_base(sibling[2])
@@ -153,11 +162,13 @@ where
         }
     } else if f_mva {
         let index = main_trace.chiplet_node_index(row);
+        let mu_addr = main_trace.chiplet_hasher_mu_addr(row);
         let lsb = index.as_int() & 1;
         if lsb == 0 {
             let sibling = &main_trace.chiplet_hasher_state(row + 1)[DIGEST_RANGE.end..];
             alphas[0]
                 + alphas[3].mul_base(index)
+                + alphas[4].mul_base(mu_addr)
                 + alphas[12].mul_base(sibling[0])
                 + alphas[13].mul_base(sibling[1])
                 + alphas[14].mul_base(sibling[2])
@@ -166,6 +177,7 @@ where
             let sibling = &main_trace.chiplet_hasher_state(row + 1)[DIGEST_RANGE];
             alphas[0]
                 + alphas[3].mul_base(index)
+                + alphas[4].mul_base(mu_addr)
                 + alphas[8].mul_base(sibling[0])
                 + alphas[9].mul_base(sibling[1])
                 + alphas[10].mul_base(sibling[2])

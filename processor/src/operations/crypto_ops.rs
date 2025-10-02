@@ -165,8 +165,14 @@ impl Process {
 
         assert_eq!(path.len(), depth.as_int() as usize);
 
-        let merkle_tree_update =
-            self.chiplets.hasher.update_merkle_root(old_node, new_node, &path, index);
+        // Pass the current hasher address (which will be the address when MV initializes) for
+        // domain separation in the sibling virtual table. This ensures that siblings from different
+        // MRUPDATE operations are not reused.
+        let mu_addr = self.chiplets.hasher.next_row_addr();
+        let merkle_tree_update = self
+            .chiplets
+            .hasher
+            .update_merkle_root(old_node, new_node, &path, index, mu_addr);
 
         // Asserts the computed old root of the Merkle path from the advice provider is consistent
         // with the input root provided via the stack. This will panic only if the advice provider

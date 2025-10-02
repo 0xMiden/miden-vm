@@ -48,8 +48,8 @@ mod tests;
 /// * Hasher segment: contains the trace and selector for the hasher chiplet. This segment fills the
 ///   first rows of the trace up to the length of the hasher `trace_len`.
 ///   - column 0: selector column with values set to ZERO
-///   - columns 1-16: execution trace of hash chiplet
-///   - columns 17-20: unused columns padded with ZERO
+///   - columns 1-17: execution trace of hash chiplet
+///   - columns 18-20: unused columns padded with ZERO
 ///
 /// * Bitwise segment: contains the trace and selectors for the bitwise chiplet. This segment begins
 ///   at the end of the hasher segment and fills the next rows of the trace for the `trace_len` of
@@ -96,7 +96,7 @@ mod tests;
 ///             +---+--------------------------------------------------------------+------+
 ///             | 0 |                                                              |------|
 ///             | . |         Hash chiplet                                         |------|
-///             | . |         16 columns                                           |------|
+///             | . |         17 columns                                           |------|
 ///             | . |       constraint degree 8                                    |------|
 ///             | 0 |                                                              |------|
 ///             +---+---+------------------------------------------------------+---+------+
@@ -300,21 +300,38 @@ impl Chiplets {
                     let rest = ace_fragment.push_column_slice(rest, ace.trace_len());
                     kernel_rom_fragment.push_column_slice(rest, kernel_rom.trace_len());
                 },
-                15 | 16 => {
-                    // columns 15 and 16 are relevant only for the hasher, memory and ace chiplets
+                15 | 16 | 17 => {
+                    // columns 15-17 is relevant only for the hasher, memory and ace chiplets
                     let rest = hasher_fragment.push_column_slice(column, hasher.trace_len());
                     // skip bitwise chiplet
                     let (_, rest) = rest.split_at_mut(bitwise.trace_len());
                     let rest = memory_fragment.push_column_slice(rest, memory.trace_len());
                     ace_fragment.push_column_slice(rest, ace.trace_len());
                 },
-                17 => {
-                    // column 17 is relevant only for the memory chiplet
-                    // skip the hasher and bitwise chiplets
-                    let (_, rest) = column.split_at_mut(hasher.trace_len() + bitwise.trace_len());
-                    let rest = memory_fragment.push_column_slice(rest, memory.trace_len());
-                    ace_fragment.push_column_slice(rest, ace.trace_len());
-                },
+                // 15 => {
+                //     // column 15 is relevant only for the hasher, memory and ace chiplets
+                //     let rest = hasher_fragment.push_column_slice(column, hasher.trace_len());
+                //     // skip bitwise chiplet
+                //     let (_, rest) = rest.split_at_mut(bitwise.trace_len());
+                //     let rest = memory_fragment.push_column_slice(rest, memory.trace_len());
+                //     ace_fragment.push_column_slice(rest, ace.trace_len());
+                // },
+                // 16 => {
+                //     // column 16 is relevant only for the hasher, memory, and ace chiplets
+                //     let rest = hasher_fragment.push_column_slice(column, hasher.trace_len());
+                //     // skip bitwise chiplet
+                //     let (_, rest) = rest.split_at_mut(bitwise.trace_len());
+                //     let rest = memory_fragment.push_column_slice(rest, memory.trace_len());
+                //     ace_fragment.push_column_slice(rest, ace.trace_len());
+                // },
+                // 17 => {
+                //     // column 17 is relevant for hasher, memory, and ace chiplets
+                //     let rest = hasher_fragment.push_column_slice(column, hasher.trace_len());
+                //     // skip bitwise chiplet
+                //     let (_, rest) = rest.split_at_mut(bitwise.trace_len());
+                //     let rest = memory_fragment.push_column_slice(rest, memory.trace_len());
+                //     ace_fragment.push_column_slice(rest, ace.trace_len());
+                // },
                 18 | 19 => {
                     // column 18 and 19 are relevant only for the ACE chiplet
                     // skip the hasher, bitwise and memory chiplets

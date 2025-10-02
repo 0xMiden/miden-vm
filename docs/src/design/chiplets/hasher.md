@@ -26,7 +26,7 @@ The chiplet can be thought of as having a small instruction set of $11$ instruct
 
 ## Chiplet trace
 
-Execution trace table of the chiplet consists of $16$ trace columns and $3$ periodic columns. The structure of the table is such that a single permutation of the hash function can be computed using $8$ table rows. The layout of the table is illustrated below.
+Execution trace table of the chiplet consists of $17$ trace columns (selector columns $s_0, s_1, s_2$, state columns $h_0..h_{11}$, the node index $i$, and the Merkle update address $\mu_{addr}$) and $3$ periodic columns. The structure of the table is such that a single permutation of the hash function can be computed using $8$ table rows. The layout of the table is illustrated below.
 
 ![hash_execution_trace](../../assets/design/chiplets/hasher/hash_execution_trace.png)
 
@@ -38,6 +38,7 @@ The meaning of the columns is as follows:
   - The first four columns ($h_0, ..., h_3$) are reserved for capacity elements of the state. When the state is initialized for hash computations, $h_0$ should be set to $0$ if the number of elements to be hashed is a multiple of the rate width ($8$). Otherwise, $h_0$ should be set to $1$. $h_1$ should be set to the domain value if a domain has been provided (as in the case of [control block hashing](../programs.md#program-hash-computation)).  All other capacity elements should be set to $0$'s.
   - The next eight columns ($h_4, ..., h_{11}$) are reserved for the rate elements of the state. These are used to absorb the values to be hashed. Once the permutation is complete, hash output is located in the first four rate columns ($h_4, ..., h_7$).
 - One index column $i$. This column is used to help with Merkle path verification and Merkle root update computations.
+- One Merkle update address column $\mu_{addr}$. This column stores the address when the MV (Merkle Verify old) operation is initiated and remains constant throughout the entire Merkle update block (MV/MVA/MU/MUA operations). This is used for domain separation in the sibling virtual table to ensure siblings from different MRUPDATE operations are not reused. Outside of MRUPDATE cycles, the column is set to $0$.
 
 In addition to the columns described above, the chiplet relies on two running product columns which are used to facilitate multiset checks (similar to the ones described [here](https://hackmd.io/@relgabizon/ByFgSDA7D)). These columns are:
 
@@ -268,6 +269,8 @@ The above constraints enforce that on every step which is one less than a multip
 
 Node index column $i$ is relevant only for Merkle path verification and Merkle root update computations, but to simplify the overall constraint system, the same constraints will be imposed on this column for all computations.
 
+Merkle root updates also record the address at which the MV (Merkle Verify old) operation was initiated. We track this value in a dedicated column $\mu_{addr}$. The column is initialized with the hasher address when an `MV` instruction starts, and the value is copied to every row of the corresponding Merkle update block (MV/MVA/MU/MUA operations). Outside of Merkle root updates the column is left unconstrained (and thus defaults to zero). In the AIR, we enforce a single transition constraint to ensure $\mu_{addr}$ stays constant during `MV`, `MVA`, `MU`, and `MUA` rows.
+
 Overall, we want values in the index column to behave as follows:
 
 - When we start a new computation, we should be able to set $i$ to an arbitrary value.
@@ -405,7 +408,7 @@ As mentioned previously, the sibling table (represented by running column $p_1$)
 
 To simplify the description of the constraints, we use variables $v_b$ and $v_c$ defined above and define the value representing an entry in the sibling table as follows:
 $$
-v_{sibling} = \alpha_0 + \alpha_3 \cdot i + b \cdot v_b + (1-b) \cdot v_c
+v_{sibling} = \alpha_0 + \alpha_4 \cdot \mu_{addr} + \alpha_3 \cdot i + b \cdot v_b + (1-b) \cdot v_c
 $$
 
 Using the above value, we can define the constraint for updating $p_1$ as follows:
@@ -427,12 +430,4 @@ The above constraint reduces to the following under various flag conditions:
 
 Note that the degree of the above constraint is $7$.
 
-To make sure computation of the old Merkle root is immediately followed by the computation of the new Merkle root, we impose the following constraint:
-
->$$
-(f_{bp} + f_{mp} + f_{mv}) \cdot (1 - p_1) = 0 \text{ | degree} = 5
-$$
-
-The above means that whenever we start a new computation which is not the computation of the new Merkle root, the sibling table must be empty. Thus, after the hash chiplet computes the old Merkle root, the only way to clear the table is to compute the new Merkle root.
-
-Together with boundary constraints enforcing that $p_1=1$ at the first and last rows of the running product column which implements the sibling table, the above constraints ensure that if a node was included into $p_1$ as a part of computing the old Merkle root, the same node must be removed from $p_1$ as a part of computing the new Merkle root. These two boundary constraints are described as part of the [chiplets virtual table constraints](../chiplets/main.md#chiplets-virtual-table-constraints).
+Including $\mu_{addr}$ in the reduced value domain-separates the multiset by MRUPDATE request: siblings inserted while processing one request can only be removed by the matching request with the same address. Together with boundary constraints enforcing that $p_1 = 1$ at the first and last rows of the hasher trace (see the [chiplets virtual table constraints](../chiplets/main.md#chiplets-virtual-table-constraints)), this guarantees that every sibling added during the "old" path of an update must be removed by the corresponding "new" path.

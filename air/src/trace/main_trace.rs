@@ -9,9 +9,10 @@ use super::{
     CHIPLETS_OFFSET, CLK_COL_IDX, CTX_COL_IDX, DECODER_TRACE_OFFSET, FMP_COL_IDX, FN_HASH_OFFSET,
     STACK_TRACE_OFFSET,
     chiplets::{
-        BITWISE_A_COL_IDX, BITWISE_B_COL_IDX, BITWISE_OUTPUT_COL_IDX, HASHER_NODE_INDEX_COL_IDX,
-        HASHER_STATE_COL_RANGE, MEMORY_CLK_COL_IDX, MEMORY_CTX_COL_IDX, MEMORY_IDX0_COL_IDX,
-        MEMORY_IDX1_COL_IDX, MEMORY_V_COL_RANGE, MEMORY_WORD_COL_IDX, NUM_ACE_SELECTORS,
+        BITWISE_A_COL_IDX, BITWISE_B_COL_IDX, BITWISE_OUTPUT_COL_IDX, HASHER_MU_ADDR_COL_IDX,
+        HASHER_NODE_INDEX_COL_IDX, HASHER_STATE_COL_RANGE, MEMORY_CLK_COL_IDX, MEMORY_CTX_COL_IDX,
+        MEMORY_IDX0_COL_IDX, MEMORY_IDX1_COL_IDX, MEMORY_V_COL_RANGE, MEMORY_WORD_COL_IDX,
+        NUM_ACE_SELECTORS,
         ace::{
             CLK_IDX, CTX_IDX, EVAL_OP_IDX, ID_0_IDX, ID_1_IDX, ID_2_IDX, M_0_IDX, M_1_IDX, PTR_IDX,
             READ_NUM_EVAL_IDX, SELECTOR_BLOCK_IDX, SELECTOR_START_IDX, V_0_0_IDX, V_0_1_IDX,
@@ -342,6 +343,11 @@ impl MainTrace {
             state[idx] = column[i];
         }
         state
+    }
+
+    /// Returns the Merkle update address recorded in the hasher trace at row i.
+    pub fn chiplet_hasher_mu_addr(&self, i: RowIndex) -> Felt {
+        self.columns.get(HASHER_MU_ADDR_COL_IDX, i.into())
     }
 
     /// Returns the hasher's node index column at row i

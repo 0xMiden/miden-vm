@@ -10,7 +10,7 @@ The `HPERM` operation applies Rescue Prime Optimized permutation to the top $12$
 
 ![hperm](../../assets/design/stack/crypto_ops/HPERM.png)
 
-In the above, $r$ (located in the helper register $h_0$) is the row address from the hash chiplet set by the prover non-deterministically.
+In the above, $r$ (located in the helper register $h_0$) is the row address from the hash chiplet set by the prover non-deterministically. We also capture the VM clock when the instruction is issued and denote it by $clk$.
 
 For the `HPERM` operation, we define input and output values as follows:
 
@@ -92,7 +92,7 @@ In the above, $r$ (located in the helper register $h_0$) is the row address from
 For the `MRUPDATE` operation, we define input and output values as follows:
 
 $$
-v_{inputold} = \alpha_0 + \alpha_1 \cdot op_{mruold} + \alpha_2 \cdot h_0 + \alpha_3 \cdot s_5 + \sum_{j=0}^3\alpha_{j + 8} \cdot s_{3 - j}
+v_{inputold} = \alpha_0 + \alpha_1 \cdot op_{mruold} + \alpha_2 \cdot h_0 + \alpha_3 \cdot s_5 + \alpha_{16} \cdot clk + \sum_{j=0}^3\alpha_{j + 8} \cdot s_{3 - j}
 $$
 
 $$
@@ -100,7 +100,7 @@ v_{outputold} = \alpha_0 + \alpha_1 \cdot op_{rethash} + \alpha_2 \cdot (h_0 + 8
 $$
 
 $$
-v_{inputnew} = \alpha_0 + \alpha_1 \cdot op_{mrunew} + \alpha_2 \cdot (h_0 + 8 \cdot s_4) + \alpha_3 \cdot s_5 + \sum_{j=0}^3\alpha_{j + 8} \cdot s_{13 - j}
+v_{inputnew} = \alpha_0 + \alpha_1 \cdot op_{mrunew} + \alpha_2 \cdot (h_0 + 8 \cdot s_4) + \alpha_3 \cdot s_5 + \alpha_{16} \cdot clk + \sum_{j=0}^3\alpha_{j + 8} \cdot s_{13 - j}
 $$
 
 $$
@@ -115,7 +115,7 @@ The $op_{mruold}$, $op_{mrunew}$, and $op_{rethash}$ are the unique [operation l
 b_{chip}' \cdot v_{inputold} \cdot v_{outputold} \cdot v_{inputnew} \cdot v_{outputnew} = b_{chip} \text{ | degree} = 5
 $$
 
-The above constraint enforces that the specified input and output rows for both, the old and the new node/root combinations, must be present in the trace of the hash chiplet, and that they must be exactly $8 \cdot d - 1$ rows apart, where $d$ is the depth of the node. It also ensures that the computation for the old node/root combination is immediately followed by the computation for the new node/root combination.
+The above constraint enforces that the specified input and output rows for both, the old and the new node/root combinations, must be present in the trace of the hash chiplet, and that they must be exactly $8 \cdot d - 1$ rows apart, where $d$ is the depth of the node. The sibling multiset (via the `mu_addr` column recorded in the hasher trace) uses the hasher address when MV starts to associate node insertions and removals. Consequently, the "old" and "new" Merkle path computations no longer need to execute back-to-back, yet remain bound to the same MRUPDATE request.
 
 The effect of this operation on the rest of the stack is:
 * **No change** for positions starting from $4$.

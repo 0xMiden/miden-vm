@@ -68,8 +68,9 @@ pub const NUM_SELECTORS: usize = 3;
 /// Optimized. This is equal to 8.
 pub const HASH_CYCLE_LEN: usize = NUM_ROUNDS.next_power_of_two();
 
-/// Number of columns in Hasher execution trace. There is one additional column for the node index.
-pub const TRACE_WIDTH: usize = NUM_SELECTORS + STATE_WIDTH + 1;
+/// Number of columns in Hasher execution trace. Includes selector columns, full state, the node
+/// index column, and the Merkle request clock column.
+pub const TRACE_WIDTH: usize = NUM_SELECTORS + STATE_WIDTH + 2;
 
 // --- Transition selectors -----------------------------------------------------------------------
 

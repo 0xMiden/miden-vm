@@ -4,7 +4,8 @@ use super::{EvaluationFrame, Felt, FieldElement, TransitionConstraintDegree};
 use crate::{
     ONE, ZERO,
     trace::chiplets::{
-        HASHER_NODE_INDEX_COL_IDX, HASHER_SELECTOR_COL_RANGE, HASHER_STATE_COL_RANGE,
+        HASHER_MU_ADDR_COL_IDX, HASHER_NODE_INDEX_COL_IDX, HASHER_SELECTOR_COL_RANGE,
+        HASHER_STATE_COL_RANGE,
         hasher::{
             CAPACITY_LEN, DIGEST_LEN, DIGEST_RANGE, HASH_CYCLE_LEN, Hasher, NUM_SELECTORS,
             STATE_WIDTH,
@@ -19,7 +20,7 @@ mod tests;
 // CONSTANTs
 // ================================================================================================
 /// The number of constraints on the management of the hash chiplet.
-pub const NUM_CONSTRAINTS: usize = 30;
+pub const NUM_CONSTRAINTS: usize = 31;
 
 /// The number of periodic columns which are used as selectors to specify a particular row or rows
 /// within the hash cycle.
@@ -65,6 +66,8 @@ pub fn get_transition_constraint_degrees() -> Vec<TransitionConstraintDegree> {
         // absorbing a new node.
         TransitionConstraintDegree::with_cycles(4, vec![HASH_CYCLE_LEN]),
         TransitionConstraintDegree::with_cycles(6, vec![HASH_CYCLE_LEN]),
+        TransitionConstraintDegree::with_cycles(5, vec![HASH_CYCLE_LEN]),
+        // Propagate the Merkle update address during MRUPDATE permutations.
         TransitionConstraintDegree::with_cycles(5, vec![HASH_CYCLE_LEN]),
         // Apply RPO rounds.
         TransitionConstraintDegree::with_cycles(8, vec![HASH_CYCLE_LEN]),
@@ -115,6 +118,8 @@ pub fn enforce_constraints<E: FieldElement<BaseField = Felt>>(
     index += enforce_hasher_selectors(frame, periodic_values, &mut result[index..], hasher_flag);
 
     index += enforce_node_index(frame, periodic_values, &mut result[index..], hasher_flag);
+
+    index += enforce_mu_addr(frame, periodic_values, &mut result[index..], hasher_flag);
 
     enforce_hasher_state(frame, periodic_values, &mut result[index..], hasher_flag);
 }
@@ -198,6 +203,30 @@ fn enforce_node_index<E: FieldElement>(
     result[constraint_offset] = hasher_flag
         * (E::ONE - frame.f_an(periodic_values) - frame.f_out(periodic_values))
         * (frame.i_next() - frame.i());
+    constraint_offset += 1;
+
+    constraint_offset
+}
+
+/// Ensures that the Merkle update address remains constant throughout Merkle root update
+/// permutations. The mu_addr column is otherwise unconstrained.
+fn enforce_mu_addr<E: FieldElement>(
+    frame: &EvaluationFrame<E>,
+    periodic_values: &[E],
+    result: &mut [E],
+    hasher_flag: E,
+) -> usize {
+    let mut constraint_offset = 0;
+
+    let merkle_update_flag = frame.f_mp(periodic_values)
+        + frame.f_mv(periodic_values)
+        + frame.f_mu(periodic_values)
+        + frame.f_mpa()
+        + frame.f_mva()
+        + frame.f_mua();
+
+    result[constraint_offset] =
+        hasher_flag * merkle_update_flag * (frame.mu_addr_next() - frame.mu_addr());
     constraint_offset += 1;
 
     constraint_offset
@@ -337,6 +366,10 @@ trait EvaluationFrameExt<E: FieldElement> {
     fn i(&self) -> E;
     /// Gets the value of the node index in the next row.
     fn i_next(&self) -> E;
+    /// Gets the Merkle update address in the current row.
+    fn mu_addr(&self) -> E;
+    /// Gets the Merkle update address in the next row.
+    fn mu_addr_next(&self) -> E;
 
     // --- Intermediate variables & helpers -------------------------------------------------------
 
@@ -438,6 +471,16 @@ impl<E: FieldElement> EvaluationFrameExt<E> for &EvaluationFrame<E> {
     #[inline(always)]
     fn i_next(&self) -> E {
         self.next()[HASHER_NODE_INDEX_COL_IDX]
+    }
+
+    #[inline(always)]
+    fn mu_addr(&self) -> E {
+        self.current()[HASHER_MU_ADDR_COL_IDX]
+    }
+
+    #[inline(always)]
+    fn mu_addr_next(&self) -> E {
+        self.next()[HASHER_MU_ADDR_COL_IDX]
     }
 
     // --- Intermediate variables & helpers -------------------------------------------------------

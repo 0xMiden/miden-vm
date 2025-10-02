@@ -28,10 +28,10 @@ mod tests;
 /// * Merkle root updates.
 ///
 /// ## Execution trace
-/// Hasher execution trace consists of 16 columns as illustrated below:
+/// Hasher execution trace consists of 17 columns as illustrated below:
 ///
-///   s0   s1   s2   h0   h1   h2   h3   h4   h5   h6   h7   h8   h9   h10   h11   idx
-/// ├────┴────┴────┴────┴────┴────┴────┴────┴────┴────┴────┴────┴────┴─────┴─────┴─────┤
+///   s0   s1   s2   h0   h1   h2   h3   h4   h5   h6   h7   h8   h9   h10   h11   idx  mu_addr
+/// ├────┴────┴────┴────┴────┴────┴────┴────┴────┴────┴────┴────┴────┴─────┴─────┴────┴────────┤
 ///
 /// In the above, the meaning of the columns is as follows:
 /// * Selector columns s0, s1, and s2 used to help select transition function for a given row.
@@ -43,6 +43,10 @@ mod tests;
 ///     four rate columns (h4, h5, h6, h7).
 /// * Node index column idx used to help with Merkle path verification and Merkle root update
 ///   computations. For all other computations the values in this column are set to 0s.
+/// * Merkle update address column `mu_addr` used only during Merkle root updates. It stores the
+///   address when the MV (Merkle Verify old) operation is initiated and stays constant throughout
+///   the entire Merkle update block (MV/MVA/MU/MUA operations). Outside of MRUPDATE cycles the
+///   column is set to 0s.
 ///
 /// Each permutation of the hash function adds 8 rows to the execution trace. Thus, for Merkle
 /// path verification, number of rows added to the trace is 8 * path.len(), and for Merkle root
@@ -68,6 +72,12 @@ impl Hasher {
     /// Returns current length of the execution trace stored in this hasher.
     pub(super) fn trace_len(&self) -> usize {
         self.trace.trace_len()
+    }
+
+    /// Returns the address for the next row in the hasher trace.
+    /// This is used to get the mu_addr value for MRUPDATE operations.
+    pub fn next_row_addr(&self) -> Felt {
+        self.trace.next_row_addr()
     }
 
     // HASHING METHODS
@@ -199,6 +209,9 @@ impl Hasher {
     /// The returned tuple contains the root of the Merkle path and the row address of the
     /// execution trace at which the computation started.
     ///
+    /// For MPVERIFY operations, `mu_addr` is set to ZERO since they don't participate in the
+    /// sibling virtual table (unlike MRUPDATE operations).
+    ///
     /// # Panics
     /// Panics if:
     /// - The provided path does not contain any nodes.
@@ -212,7 +225,7 @@ impl Hasher {
         let addr = self.trace.next_row_addr();
 
         let root =
-            self.verify_merkle_path(value, path, index.as_int(), MerklePathContext::MpVerify);
+            self.verify_merkle_path(value, path, index.as_int(), MerklePathContext::MpVerify, ZERO);
 
         (addr, root)
     }
@@ -221,6 +234,9 @@ impl Hasher {
     ///
     /// The computation consists of two Merkle path verifications, one for the old value of the
     /// node (value before the update), and another for the new value (value after the update).
+    ///
+    /// The `mu_addr` parameter specifies the address when the MRUPDATE operation (MV) was initiated.
+    /// This address is used for domain separation in the sibling virtual table.
     ///
     /// # Panics
     /// Panics if:
@@ -232,14 +248,25 @@ impl Hasher {
         new_value: Digest,
         path: &MerklePath,
         index: Felt,
+        mu_addr: Felt,
     ) -> MerkleRootUpdate {
         let address = self.trace.next_row_addr();
         let index = index.as_int();
 
-        let old_root =
-            self.verify_merkle_path(old_value, path, index, MerklePathContext::MrUpdateOld);
-        let new_root =
-            self.verify_merkle_path(new_value, path, index, MerklePathContext::MrUpdateNew);
+        let old_root = self.verify_merkle_path(
+            old_value,
+            path,
+            index,
+            MerklePathContext::MrUpdateOld,
+            mu_addr,
+        );
+        let new_root = self.verify_merkle_path(
+            new_value,
+            path,
+            index,
+            MerklePathContext::MrUpdateNew,
+            mu_addr,
+        );
 
         MerkleRootUpdate { address, old_root, new_root }
     }
@@ -261,6 +288,9 @@ impl Hasher {
     ///
     /// This also records the execution trace of the Merkle path computation.
     ///
+    /// The `mu_addr` parameter is the address when the Merkle operation (MV) was initiated. It is
+    /// used for domain separation in the sibling virtual table for MRUPDATE operations.
+    ///
     /// # Panics
     /// Panics if:
     /// - The provided path does not contain any nodes.
@@ -271,6 +301,7 @@ impl Hasher {
         path: &MerklePath,
         mut index: u64,
         context: MerklePathContext,
+        mu_addr: Felt,
     ) -> Digest {
         assert!(!path.is_empty(), "path is empty");
         assert!(
@@ -286,22 +317,35 @@ impl Hasher {
         if path.len() == 1 {
             // handle path of length 1 separately because pattern for init and final selectors
             // is different from other cases
-            self.verify_mp_leg(root, path[0], &mut index, main_selectors, RETURN_HASH)
+            self.verify_mp_leg(root, path[0], &mut index, main_selectors, RETURN_HASH, mu_addr)
         } else {
             // process the first node of the path; for this node, init and final selectors are
             // the same
             let sibling = path[0];
-            root = self.verify_mp_leg(root, sibling, &mut index, main_selectors, main_selectors);
+            root = self.verify_mp_leg(
+                root,
+                sibling,
+                &mut index,
+                main_selectors,
+                main_selectors,
+                mu_addr,
+            );
 
             // process all other nodes, except for the last one
             for &sibling in &path[1..path.len() - 1] {
-                root =
-                    self.verify_mp_leg(root, sibling, &mut index, part_selectors, main_selectors);
+                root = self.verify_mp_leg(
+                    root,
+                    sibling,
+                    &mut index,
+                    part_selectors,
+                    main_selectors,
+                    mu_addr,
+                );
             }
 
             // process the last node
             let sibling = path[path.len() - 1];
-            self.verify_mp_leg(root, sibling, &mut index, part_selectors, RETURN_HASH)
+            self.verify_mp_leg(root, sibling, &mut index, part_selectors, RETURN_HASH, mu_addr)
         }
     }
 
@@ -312,6 +356,8 @@ impl Hasher {
     /// - Applies a permutation to this state and records the resulting trace.
     /// - Returns the result of the permutation and updates the index by removing its least
     ///   significant bit.
+    ///
+    /// The `mu_addr` parameter is propagated to the trace for use in sibling virtual table.
     fn verify_mp_leg(
         &mut self,
         root: Digest,
@@ -319,6 +365,7 @@ impl Hasher {
         index: &mut u64,
         init_selectors: Selectors,
         final_selectors: Selectors,
+        mu_addr: Felt,
     ) -> Digest {
         // build the hasher state based on the value of the least significant bit of the index
         let index_bit = *index & 1;
@@ -341,6 +388,7 @@ impl Hasher {
             final_selectors,
             init_index,
             rest_index,
+            mu_addr,
         );
 
         // remove the least significant bit from the index and return hash result

@@ -615,12 +615,12 @@ where
     E: FieldElement<BaseField = Felt>,
 {
     fn value(&self, alphas: &[E]) -> E {
-        let header = alphas[0]
+        let value = alphas[0]
             + alphas[1].mul_base(self.transition_label)
             + alphas[2].mul_base(self.addr_next)
             + alphas[3].mul_base(self.node_index);
 
-        header
+        value
             + build_value(&alphas[range(NUM_HEADER_ALPHAS, hasher::STATE_WIDTH)], self.hasher_state)
     }
 

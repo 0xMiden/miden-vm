@@ -11,15 +11,20 @@ use super::{Felt, HasherState, STATE_WIDTH, Selectors, TRACE_WIDTH, TraceFragmen
 
 /// Execution trace of the hasher component.
 ///
-/// The trace consists of 16 columns grouped logically as follows:
+/// The trace consists of 17 columns grouped logically as follows:
 /// - 3 selector columns.
 /// - 12 columns describing hasher state.
 /// - 1 node index column used for Merkle path related computations.
+/// - 1 Merkle update address column used to track the address when a Merkle root update
+///   operation (MV) was initiated. This address remains constant throughout the entire Merkle
+///   update block (MV/MVA/MU/MUA operations) and is used for domain separation in the sibling
+///   virtual table.
 #[derive(Debug, Default)]
 pub struct HasherTrace {
     selectors: [Vec<Felt>; 3],
     hasher_state: [Vec<Felt>; STATE_WIDTH],
     node_index: Vec<Felt>,
+    mu_addr: Vec<Felt>,
 }
 
 impl HasherTrace {
@@ -54,6 +59,9 @@ impl HasherTrace {
     ///
     /// Node index values are provided via `init_index` and `rest_index` parameters. The former is
     /// used for the first row, and the latter for all subsequent rows.
+    ///
+    /// The `mu_addr` parameter specifies the address when the Merkle root update operation (MV)
+    /// was initiated. It is set to ZERO for non-Merkle-update operations.
     pub fn append_permutation_with_index(
         &mut self,
         state: &mut HasherState,
@@ -61,29 +69,31 @@ impl HasherTrace {
         final_selectors: Selectors,
         init_index: Felt,
         rest_index: Felt,
+        mu_addr: Felt,
     ) {
         // append the first row of the permutation cycle
-        self.append_row(init_selectors, state, init_index);
+        self.append_row(init_selectors, state, init_index, mu_addr);
 
         // append the next 6 rows of the permutation cycle. for these rows:
         // - the last two selectors are carried over from row to row; the first selector is set to
         //   ZERO.
         // - hasher state is updated by applying a single round of the hash function for every row.
+        // - mu_addr is propagated unchanged throughout the permutation
         let next_selectors = [ZERO, init_selectors[1], init_selectors[2]];
         for i in 0..NUM_ROUNDS - 1 {
             apply_round(state, i);
-            self.append_row(next_selectors, state, rest_index);
+            self.append_row(next_selectors, state, rest_index, mu_addr);
         }
 
         // apply the last round and append the last row to the trace
         apply_round(state, NUM_ROUNDS - 1);
-        self.append_row(final_selectors, state, rest_index);
+        self.append_row(final_selectors, state, rest_index, mu_addr);
     }
 
     /// Appends 8 rows to the execution trace describing a single permutation of the hash function.
     ///
     /// This function is similar to the append_permutation_with_index() function above, but it sets
-    /// init_index and rest_index parameters to ZEROs.
+    /// init_index, rest_index, and clk_req parameters to ZEROs.
     #[inline(always)]
     pub fn append_permutation(
         &mut self,
@@ -91,11 +101,24 @@ impl HasherTrace {
         init_selectors: Selectors,
         final_selectors: Selectors,
     ) {
-        self.append_permutation_with_index(state, init_selectors, final_selectors, ZERO, ZERO);
+        self.append_permutation_with_index(
+            state,
+            init_selectors,
+            final_selectors,
+            ZERO,
+            ZERO,
+            ZERO,
+        );
     }
 
     /// Appends a new row to the execution trace based on the supplied parameters.
-    fn append_row(&mut self, selectors: Selectors, state: &HasherState, index: Felt) {
+    fn append_row(
+        &mut self,
+        selectors: Selectors,
+        state: &HasherState,
+        index: Felt,
+        mu_addr: Felt,
+    ) {
         for (trace_col, selector_val) in self.selectors.iter_mut().zip(selectors) {
             trace_col.push(selector_val);
         }
@@ -103,6 +126,7 @@ impl HasherTrace {
             trace_col.push(state_val);
         }
         self.node_index.push(index);
+        self.mu_addr.push(mu_addr);
     }
 
     /// Copies section of trace from the given range of start and end rows at the end of the trace.
@@ -117,6 +141,7 @@ impl HasherTrace {
         }
 
         self.node_index.extend_from_within(range.clone());
+        self.mu_addr.extend_from_within(range.clone());
 
         // copy the latest hasher state to the provided state slice
         for (col, hasher) in self.hasher_state.iter().enumerate() {
@@ -139,6 +164,7 @@ impl HasherTrace {
 
         self.hasher_state.into_iter().for_each(|c| columns.push(c));
         columns.push(self.node_index);
+        columns.push(self.mu_addr);
 
         // copy trace into the fragment column-by-column
         // TODO: this can be parallelized to copy columns in multiple threads

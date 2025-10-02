@@ -108,10 +108,14 @@ fn hasher_build_merkle_root() {
     check_selector_trace(&trace, 8, MP_VERIFY, RETURN_HASH);
     check_hasher_state_trace(&trace, 0, init_state_from_words(&leaves[0], &path0[0]));
     check_hasher_state_trace(&trace, 0, init_state_from_words(&path1[0], &leaves[1]));
-    let node_idx_column = trace.last().unwrap();
+    // Node index is now the second-to-last column (clk_req is the last column)
+    let node_idx_column = &trace[trace.len() - 2];
     assert_eq!(&node_idx_column[..8], &[ZERO; 8]);
     assert_eq!(node_idx_column[8], ONE);
     assert_eq!(&node_idx_column[9..], &[ZERO; 7]);
+    // For MPVERIFY operations, clk_req should be ZERO
+    let clk_req_column = trace.last().unwrap();
+    assert_eq!(&clk_req_column[..], &[ZERO; 16]);
 
     // --- Merkle tree with 8 leaves ------------------------------------------
 
@@ -171,13 +175,15 @@ fn hasher_update_merkle_root() {
     let path0 = tree.get_path(NodeIndex::new(1, 0).unwrap()).unwrap();
     let new_leaf0 = init_leaf(3);
 
-    hasher.update_merkle_root(leaves[0], new_leaf0, &path0, ZERO);
+    // Use clock value 1 for the first update
+    hasher.update_merkle_root(leaves[0], new_leaf0, &path0, ZERO, ONE);
     tree.update_leaf(0, new_leaf0).unwrap();
 
     let path1 = tree.get_path(NodeIndex::new(1, 1).unwrap()).unwrap();
     let new_leaf1 = init_leaf(4);
 
-    hasher.update_merkle_root(leaves[1], new_leaf1, &path1, ONE);
+    // Use clock value 2 for the second update (different from first)
+    hasher.update_merkle_root(leaves[1], new_leaf1, &path1, ONE, Felt::new(2));
     tree.update_leaf(1, new_leaf1).unwrap();
 
     // build the trace
@@ -192,12 +198,18 @@ fn hasher_update_merkle_root() {
     check_hasher_state_trace(&trace, 8, init_state_from_words(&new_leaf0, &path0[0]));
     check_hasher_state_trace(&trace, 16, init_state_from_words(&path1[0], &leaves[1]));
     check_hasher_state_trace(&trace, 24, init_state_from_words(&path1[0], &new_leaf1));
-    let node_idx_column = trace.last().unwrap();
+    // Node index is now the second-to-last column (clk_req is the last column)
+    let node_idx_column = &trace[trace.len() - 2];
     assert_eq!(&node_idx_column[..16], &[ZERO; 16]);
     assert_eq!(node_idx_column[16], ONE);
     assert_eq!(&node_idx_column[17..24], &[ZERO; 7]);
     assert_eq!(node_idx_column[24], ONE);
     assert_eq!(&node_idx_column[25..], &[ZERO; 7]);
+    // For MRUPDATE operations, clk_req should be the clock values we passed
+    let clk_req_column = trace.last().unwrap();
+    // First update uses clk_req = 1, second update uses clk_req = 2
+    assert_eq!(&clk_req_column[..16], &[ONE; 16]); // First MRUPDATE (clk=1)
+    assert_eq!(&clk_req_column[16..32], &[Felt::new(2); 16]); // Second MRUPDATE (clk=2)
 
     // --- Merkle tree with 8 leaves ------------------------------------------
 
@@ -211,18 +223,21 @@ fn hasher_update_merkle_root() {
     let path3 = tree.get_path(NodeIndex::new(3, 3).unwrap()).unwrap();
     let new_leaf3 = init_leaf(23);
 
-    hasher.update_merkle_root(leaves[3], new_leaf3, &path3, Felt::new(3));
+    // Use clock value 10 for the first update
+    hasher.update_merkle_root(leaves[3], new_leaf3, &path3, Felt::new(3), Felt::new(10));
     tree.update_leaf(3, new_leaf3).unwrap();
 
     let path6 = tree.get_path(NodeIndex::new(3, 6).unwrap()).unwrap();
     let new_leaf6 = init_leaf(25);
-    hasher.update_merkle_root(leaves[6], new_leaf6, &path6, Felt::new(6));
+    // Use clock value 20 for the second update
+    hasher.update_merkle_root(leaves[6], new_leaf6, &path6, Felt::new(6), Felt::new(20));
     tree.update_leaf(6, new_leaf6).unwrap();
 
     // update leaf 3 again
     let path3_2 = tree.get_path(NodeIndex::new(3, 3).unwrap()).unwrap();
     let new_leaf3_2 = init_leaf(27);
-    hasher.update_merkle_root(new_leaf3, new_leaf3_2, &path3_2, Felt::new(3));
+    // Use clock value 30 for the third update
+    hasher.update_merkle_root(new_leaf3, new_leaf3_2, &path3_2, Felt::new(3), Felt::new(30));
     tree.update_leaf(3, new_leaf3_2).unwrap();
     assert_ne!(path3, path3_2);
 
@@ -571,7 +586,8 @@ fn check_merkle_path(
     }
 
     // make sure node index is set correctly
-    let node_idx_column = trace.last().unwrap();
+    // Node index is now the second-to-last column (clk_req is the last column)
+    let node_idx_column = &trace[trace.len() - 2];
     assert_eq!(Felt::new(node_index), node_idx_column[row_idx]);
     let mut node_index = node_index >> 1;
     for i in 1..8 {
