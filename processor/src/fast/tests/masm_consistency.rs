@@ -182,7 +182,7 @@ use super::*;
 )]
 // ---- horner ops --------------------------------
 #[case(None,
-    "begin 
+    "begin
         push.1.2.3.4 mem_storew.40 dropw
         horner_eval_base
         end",
@@ -190,6 +190,13 @@ use super::*;
     vec![100_u32.into(), 4_u32.into(), 40_u32.into(), 4_u32.into(), 5_u32.into(), 6_u32.into(), 7_u32.into(),
         8_u32.into(), 9_u32.into(), 10_u32.into(), 11_u32.into(), 12_u32.into(), 13_u32.into(),
         14_u32.into(), 15_u32.into(), 16_u32.into()]
+)]
+// ---- log precompile ops --------------------------------
+#[case(None,
+    "begin
+        log_precompile
+        end",
+    vec![],
 )]
 #[case(None,
     "begin 

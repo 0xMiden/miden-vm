@@ -369,7 +369,7 @@ where
         | MemLoadWLe | MemStore | MemStoreW | MemStoreWBe | MemStoreWLe | MemStream | AdvPipe
         | AdvLoadW | Hash | HMerge | HPerm | MTreeGet | MTreeSet | MTreeMerge | MTreeVerify
         | FriExt2Fold4 | DynExec | DynCall | Breakpoint | HornerBase | HornerExt | EvalCircuit
-        | Emit => ControlFlow::Continue(()),
+        | LogPrecompile | Emit => ControlFlow::Continue(()),
     }
 }
 
@@ -827,7 +827,7 @@ where
         | MemLoadWLe | MemStore | MemStoreW | MemStoreWBe | MemStoreWLe | MemStream | AdvPipe
         | AdvLoadW | Hash | HMerge | HPerm | MTreeGet | MTreeSet | MTreeMerge | MTreeVerify
         | FriExt2Fold4 | DynExec | DynCall | Breakpoint | HornerBase | HornerExt | EvalCircuit
-        | Emit => ControlFlow::Continue(()),
+        | LogPrecompile | Emit => ControlFlow::Continue(()),
     }
 }
 

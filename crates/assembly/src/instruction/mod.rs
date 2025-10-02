@@ -531,7 +531,10 @@ impl Assembler {
             Instruction::HornerBase => block_builder.push_op(HornerBase),
             Instruction::HornerExt => block_builder.push_op(HornerExt),
             Instruction::EvalCircuit => {
-                block_builder.push_op(Operation::EvalCircuit);
+                block_builder.push_op(EvalCircuit);
+            },
+            Instruction::LogPrecompile => {
+                block_builder.push_op(LogPrecompile);
             },
 
             // ----- exec/call instructions -------------------------------------------------------

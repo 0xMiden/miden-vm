@@ -191,6 +191,18 @@ pub(super) fn op_horner_eval_base<P: Processor>(
     Ok(P::HelperRegisters::op_horner_eval_registers(alpha, k0, k1, acc_tmp))
 }
 
+// LOG PRECOMPILE OPERATION
+// ================================================================================================
+
+/// Logs a precompile event. The actual implementation is left empty for now.
+#[inline(always)]
+pub(super) fn op_log_precompile<P: Processor>(
+    _processor: &mut P,
+) -> Result<(), ExecutionError> {
+    // TODO: Implement precompile logging logic
+    Ok(())
+}
+
 /// Evaluates a polynomial using Horner's method (extension field).
 ///
 /// In this implementation, we replay the recorded operations and compute the result.

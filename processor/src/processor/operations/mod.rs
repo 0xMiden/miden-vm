@@ -204,6 +204,9 @@ pub(super) fn execute_sync_op(
         Operation::EvalCircuit => {
             processor.op_eval_circuit(err_ctx)?;
         },
+        Operation::LogPrecompile => {
+            crypto_ops::op_log_precompile(processor)?;
+        },
     }
 
     Ok(user_op_helpers)
