@@ -23,6 +23,8 @@ pub mod math {
     pub use winter_math::batch_inversion;
 }
 
+pub mod indexing;
+
 // TO ELEMENTS
 // ================================================================================================
 

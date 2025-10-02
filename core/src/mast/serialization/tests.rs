@@ -7,6 +7,7 @@ use crate::{
     AssemblyOp, DebugOptions, Decorator,
     mast::{BasicBlockNode, MastForestError, MastNodeExt, node::MastNodeErrorContext},
     operations::Operation,
+    utils::indexing::Idx,
 };
 
 /// If this test fails to compile, it means that `Operation` or `Decorator` was changed. Make sure
@@ -324,7 +325,7 @@ fn mast_forest_serialize_deserialize_with_child_ids_exceeding_parent_id() {
     forest.add_join(first, second).unwrap();
 
     // Move the Join node before its child nodes and remove the temporary zero node.
-    forest.nodes.swap_remove(zero.as_usize());
+    forest.nodes.swap_remove(zero.to_usize());
 
     MastForest::read_from_bytes(&forest.to_bytes()).unwrap();
 }

@@ -446,7 +446,7 @@ impl Serializable for Library {
         for LibraryExport { node, name, signature, attributes: _ } in exports.values() {
             name.module.write_into(target);
             name.name.write_into(target);
-            target.write_u32(node.as_u32());
+            target.write_u32(u32::from(*node));
             if let Some(sig) = signature {
                 target.write_bool(true);
                 FunctionTypeSerializer(sig).write_into(target);
