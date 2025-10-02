@@ -3,6 +3,8 @@ name: Trigger Aggregator Docs Rebuild
 on:
   push:
     branches: [next]
+    paths:
+      - "docs/**"
 
 jobs:
   notify:
@@ -13,7 +15,7 @@ jobs:
 
     steps:
       - name: Send repository_dispatch to aggregator
-        uses: peter-evans/repository-dispatch@v3
+        uses: peter-evans/repository-dispatch@a628c95fd17070f003ea24579a56e6bc89b25766
         with:
           # PAT (Personal Access Token) that grants permission to trigger the rebuild workflow at the docs repository
           token: ${{ secrets.DOCS_REPO_TOKEN }}
