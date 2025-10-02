@@ -133,3 +133,6 @@ mod advice;
 pub use advice::map::AdviceMap;
 
 pub mod utils;
+
+// Re-export indexing functionality from the new standalone crate
+pub use miden_utils_indexing::{IndexVec, IndexedVecError, Idx, DenseIdMap, FingerPrintLookup, newtype_id};

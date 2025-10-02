@@ -1,8 +1,19 @@
-use alloc::{collections::BTreeMap, vec::Vec};
+//! Type-safe u32-indexed vector utilities for Miden
+//!
+//! This module provides utilities for working with u32-indexed vectors in a type-safe manner,
+//! including the `IndexVec` type and related functionality.
+
+#![no_std]
+#![allow(clippy::arithmetic_side_effects)]
+
+extern crate alloc;
+
+use alloc::{collections::BTreeMap, vec, vec::Vec};
 use core::{fmt::Debug, marker::PhantomData, ops};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+
 use thiserror::Error;
 
 /// Error returned when too many items are added to an IndexedVec.
@@ -45,7 +56,7 @@ macro_rules! newtype_id {
                 v.0
             }
         }
-        impl $crate::utils::indexing::Idx for $name {}
+        impl $crate::Idx for $name {}
     };
 }
 
@@ -102,10 +113,13 @@ impl<I: Idx, T> IndexVec<I, T> {
 
     /// Insert an element at the specified ID.
     ///
+    /// This sets the value at the given index. It does **not** insert or shift elements.
+    /// If you need to append elements, use `push()` instead.
+    ///
     /// # Panics
     /// - If the ID is out of bounds.
     #[inline]
-    pub fn insert_at(&mut self, idx: I, v: T) {
+    pub(crate) fn insert_at(&mut self, idx: I, v: T) {
         self.raw[idx.to_usize()] = v;
     }
 
@@ -168,7 +182,7 @@ impl<I: Idx, T> ops::IndexMut<I> for IndexVec<I, T> {
 
 /// A dense mapping from ID to ID.
 ///
-/// This is equivalent to IndexVec<From, Option<To>> and provides
+/// This is equivalent to `IndexVec<From, Option<To>>` and provides
 /// efficient dense ID remapping.
 #[derive(Clone)]
 pub struct DenseIdMap<From: Idx, To: Idx> {
@@ -176,12 +190,12 @@ pub struct DenseIdMap<From: Idx, To: Idx> {
 }
 
 impl<From: Idx, To: Idx> DenseIdMap<From, To> {
-    /// Create a new dense ID mapping with the specified number of source IDs.
+    /// Create a new dense ID mapping with the specified capacity.
     #[inline]
-    pub fn new(num_from: usize) -> Self {
+    pub fn with_capacity(capacity: usize) -> Self {
         Self {
             inner: IndexVec {
-                raw: vec![None; num_from],
+                raw: vec![None; capacity],
                 _m: PhantomData,
             },
         }
@@ -287,7 +301,7 @@ mod tests {
 
     #[test]
     fn test_dense_id_map() {
-        let mut map = DenseIdMap::<TestId, TestId2>::new(2);
+        let mut map = DenseIdMap::<TestId, TestId2>::with_capacity(2);
         map.insert(TestId::from(0), TestId2::from(10));
         map.insert(TestId::from(1), TestId2::from(11));
 

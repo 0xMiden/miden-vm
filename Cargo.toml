@@ -51,6 +51,7 @@ miden-serde-test-macros = { path = "./crates/utils/serde-test-macros", default-f
 miden-prover = { path = "./prover", version = "0.19", default-features = false }
 miden-stdlib = { path = "./stdlib", version = "0.19", default-features = false }
 miden-utils-diagnostics = { path = "./crates/utils/diagnostics", version = "0.19", default-features = false }
+miden-utils-indexing = { path = "./crates/utils/indexing", version = "0.19", default-features = false }
 miden-utils-sync = { path = "./crates/utils/sync", version = "0.19", default-features = false }
 miden-utils-testing = { path = "./crates/utils/testing", version = "0.1", package = "miden-test-utils" }
 miden-verifier = { path = "./verifier", version = "0.19", default-features = false }

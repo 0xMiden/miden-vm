@@ -11,7 +11,7 @@ use crate::{
         DecoratorId, MastForest, MastForestError, MastNode, MastNodeId,
         node::{MastNodeErrorContext, MastNodeExt},
     },
-    utils::indexing::FingerPrintLookup,
+    FingerPrintLookup,
 };
 
 // MAST NODE EQUALITY

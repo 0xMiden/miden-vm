@@ -7,7 +7,7 @@ use crate::{
     AssemblyOp, DebugOptions, Decorator,
     mast::{BasicBlockNode, MastForestError, MastNodeExt, node::MastNodeErrorContext},
     operations::Operation,
-    utils::indexing::Idx,
+    Idx,
 };
 
 /// If this test fails to compile, it means that `Operation` or `Decorator` was changed. Make sure
