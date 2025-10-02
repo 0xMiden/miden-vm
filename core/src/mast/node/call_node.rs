@@ -14,6 +14,7 @@ use crate::{
     OPCODE_CALL, OPCODE_SYSCALL,
     chiplets::hasher,
     mast::{DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId, Remapping},
+    utils::indexing::Idx,
 };
 
 // CALL NODE
@@ -51,7 +52,7 @@ impl CallNode {
 impl CallNode {
     /// Returns a new [`CallNode`] instantiated with the specified callee.
     pub fn new(callee: MastNodeId, mast_forest: &MastForest) -> Result<Self, MastForestError> {
-        if callee.as_usize() >= mast_forest.nodes.len() {
+        if callee.to_usize() >= mast_forest.nodes.len() {
             return Err(MastForestError::NodeIdOverflow(callee, mast_forest.nodes.len()));
         }
         let digest = {
@@ -87,7 +88,7 @@ impl CallNode {
         callee: MastNodeId,
         mast_forest: &MastForest,
     ) -> Result<Self, MastForestError> {
-        if callee.as_usize() >= mast_forest.nodes.len() {
+        if callee.to_usize() >= mast_forest.nodes.len() {
             return Err(MastForestError::NodeIdOverflow(callee, mast_forest.nodes.len()));
         }
         let digest = {
