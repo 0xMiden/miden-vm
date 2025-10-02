@@ -5,14 +5,8 @@
 #### Enhancements
 
 - Added support for leaves with multiple pairs in `std::collections::smt::get` ([#2048](https://github.com/0xMiden/miden-vm/pull/2048)).
+- Added support for leaves with multiple pairs in `std::collections::smt::set` ([#2232](https://github.com/0xMiden/miden-vm/pull/2232)).
 - Added `std::mem::pipe_double_words_preimage_to_memory`, a version of `pipe_preimage_to_memory` optimized for pairs of words ([#2048](https://github.com/0xMiden/miden-vm/pull/2048)).
-
-#### Enhancements
-
-- Added support for leaves with multiple pairs in `std::collections::smt::get` ([#2048](https://github.com/0xMiden/miden-vm/pull/2048)).
-- Added support for leaves with multiple pairs in `std::collections::smt::get` ([#2048](https://github.com/0xMiden/miden-vm/pull/2048)).
-- Added `std::mem::pipe_double_words_preimage_to_memory`, a version of `pipe_preimage_to_memory` optimized for pairs of words ([#2048](https://github.com/0xMiden/miden-vm/pull/2048)).
-- Added `before_enter` and `after_exit` decorator lists to `BasicBlockNode`.([#2167](https://github.com/0xMiden/miden-vm/pull/2167))
 
 #### Changes
 
