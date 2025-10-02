@@ -18,6 +18,7 @@ use miden_utils_testing::{
 
 use super::*;
 
+mod debug;
 mod decorator_execution_tests;
 
 // AdviceMap inlined in the script

@@ -153,44 +153,6 @@ fn cli_run_with_lib() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-// Test the decorator to debug the advice stack
-#[test]
-fn test_debug_adv_stack_all() -> Result<(), Box<dyn std::error::Error>> {
-    let mut cmd = bin_under_test().command();
-    cmd.arg("run")
-        .arg("./tests/integration/cli/data/debug_adv_stack_all.masm")
-        .arg("-i")
-        .arg("./tests/integration/cli/data/debug_adv_stack.inputs");
-    cmd.assert().success();
-
-    cmd.assert().stdout(predicate::str::contains(
-        "Advice Stack state before step 2:
-├──  0: 42
-└──  1: 21
-",
-    ));
-
-    Ok(())
-}
-
-#[test]
-fn test_debug_adv_stack_prefix() -> Result<(), Box<dyn std::error::Error>> {
-    let mut cmd = bin_under_test().command();
-    cmd.arg("run")
-        .arg("./tests/integration/cli/data/debug_adv_stack_prefix.masm")
-        .arg("-i")
-        .arg("./tests/integration/cli/data/debug_adv_stack.inputs");
-    cmd.assert().success();
-
-    cmd.assert().stdout(predicate::str::contains(
-        "Advice Stack state before step 2:
-└──  0: 42
-",
-    ));
-
-    Ok(())
-}
-
 #[test]
 fn test_advmap_cli() -> Result<(), Box<dyn std::error::Error>> {
     let mut cmd = bin_under_test().command();

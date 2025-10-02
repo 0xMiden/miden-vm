@@ -168,10 +168,8 @@ pub trait DebugHandler: Sync {
         process: &ProcessState,
         options: &DebugOptions,
     ) -> Result<(), ExecutionError> {
-        let _ = (&process, options);
-        #[cfg(feature = "std")]
-        crate::host::debug::print_debug_info(process, options);
-        Ok(())
+        let mut handler = crate::host::debug::DefaultDebugHandler::default();
+        handler.on_debug(process, options)
     }
 
     /// This function is invoked when the `Trace` decorator is executed.
