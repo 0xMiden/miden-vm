@@ -21,7 +21,8 @@
 - Systematized u32-indexed vectors ([#2254](https://github.com/0xMiden/miden-vm/pull/2254)).
 - Introduce a new `build_trace()` which builds the trace in parallel from trace fragment contexts ([#1839](https://github.com/0xMiden/miden-vm/pull/1839)) ([#2188](https://github.com/0xMiden/miden-vm/pull/2188)).
 - Place the `FastProcessor` stack on the heap instead of the (OS thread) stack (#[2271](https://github.com/0xMiden/miden-vm/pull/2271)).
- 
+- `after_exit` decorators execute in the correct sequence in External nodes in the Fast processor ([#2247](https://github.com/0xMiden/miden-vm/pull/2247)).
+
 ## 0.18.2 (2025-10-10)
 
 - Place the `FastProcessor` stack on the heap instead of the (OS thread) stack (#[2275](https://github.com/0xMiden/miden-vm/pull/2275)).
@@ -29,6 +30,7 @@
 ## 0.18.1 (2025-10-02)
 
 - Gate stdlib doc generation in build.rs on `MIDEN_BUILD_STDLIB_DOCS` environment variable ([#2239](https://github.com/0xMiden/miden-vm/pull/2239/)).
+- Gate stdlib doc generation in build.rs on `MIDEN_BUILD_STDLIB_DOCS` environmnent variable ([#2239](https://github.com/0xMiden/miden-vm/pull/2239/))
 
 ## 0.18.0 (2025-09-21)
 
