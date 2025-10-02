@@ -44,6 +44,8 @@ pub enum CircuitError {
     LayoutInvalid,
     InstructionMalformed,
     InputsWrongNumber,
+    NodeIndexOutOfBounds,
+    NodeNotFound,
 }
 
 /// Layout of a circuit representing the number of different `Node`s of each type.
@@ -105,11 +107,15 @@ impl Circuit {
         nodes.extend(self.constants.iter().map(|c| QuadFelt::from(*c)));
 
         for instruction in &self.instructions {
-            let id_l = layout.node_index(&instruction.node_l).expect("TODO");
-            let v_l = *nodes.get(id_l).expect("TODO");
+            let id_l = layout.node_index(&instruction.node_l)
+                .ok_or(CircuitError::NodeIndexOutOfBounds)?;
+            let v_l = *nodes.get(id_l)
+                .ok_or(CircuitError::NodeNotFound)?;
 
-            let id_r = layout.node_index(&instruction.node_r).expect("TODO");
-            let v_r = *nodes.get(id_r).expect("TODO");
+            let id_r = layout.node_index(&instruction.node_r)
+                .ok_or(CircuitError::NodeIndexOutOfBounds)?;
+            let v_r = *nodes.get(id_r)
+                .ok_or(CircuitError::NodeNotFound)?;
 
             let v_out = match instruction.op {
                 Op::Sub => v_l - v_r,
