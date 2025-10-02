@@ -32,7 +32,7 @@ macro_rules! require_u32_operands {
                 return Err(ExecutionError::not_u32_values(invalid_values, $errno, $err_ctx));
             }
             // Return tuple of operands based on indices
-            ($([<operand_ $idx>].as_int()),*)
+            ($([<operand_ $idx>]),*)
         }
     }};
 }
@@ -67,7 +67,7 @@ pub(super) fn op_u32add<P: Processor>(
     let (sum_hi, sum_lo) = {
         let (b, a) = require_u32_operands!(processor, [0, 1], err_ctx);
 
-        let result = Felt::new(a + b);
+        let result = Felt::new(a.as_int() + b.as_int());
         split_element(result)
     };
     tracer.record_u32_range_checks(processor.system().clk(), sum_lo, sum_hi);
@@ -91,7 +91,7 @@ pub(super) fn op_u32add3<P: Processor>(
     let (sum_hi, sum_lo) = {
         let (c, b, a) = require_u32_operands!(processor, [0, 1, 2], err_ctx);
 
-        let sum = Felt::new(a + b + c);
+        let sum = Felt::new(a.as_int() + b.as_int() + c.as_int());
         split_element(sum)
     };
     tracer.record_u32_range_checks(processor.system().clk(), sum_lo, sum_hi);
@@ -117,7 +117,7 @@ pub(super) fn op_u32sub<P: Processor>(
     let (first_old, second_old) =
         require_u32_operands!(processor, [0, 1], Felt::from(op_idx as u32), err_ctx);
 
-    let result = second_old.wrapping_sub(first_old);
+    let result = second_old.as_int().wrapping_sub(first_old.as_int());
     let first_new = Felt::new(result >> 63);
     let second_new = Felt::new(result & u32::MAX as u64);
 
@@ -139,7 +139,7 @@ pub(super) fn op_u32mul<P: Processor>(
 ) -> Result<[Felt; NUM_USER_OP_HELPERS], ExecutionError> {
     let (b, a) = require_u32_operands!(processor, [0, 1], err_ctx);
 
-    let result = Felt::new(a * b);
+    let result = Felt::new(a.as_int() * b.as_int());
     let (hi, lo) = split_element(result);
     tracer.record_u32_range_checks(processor.system().clk(), lo, hi);
 
@@ -160,7 +160,7 @@ pub(super) fn op_u32madd<P: Processor>(
 ) -> Result<[Felt; NUM_USER_OP_HELPERS], ExecutionError> {
     let (b, a, c) = require_u32_operands!(processor, [0, 1, 2], err_ctx);
 
-    let result = Felt::new(a * b + c);
+    let result = Felt::new(a.as_int() * b.as_int() + c.as_int());
     let (hi, lo) = split_element(result);
     tracer.record_u32_range_checks(processor.system().clk(), lo, hi);
 
@@ -183,7 +183,11 @@ pub(super) fn op_u32div<P: Processor>(
     err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
 ) -> Result<[Felt; NUM_USER_OP_HELPERS], ExecutionError> {
-    let (denominator, numerator) = require_u32_operands!(processor, [0, 1], err_ctx);
+    let (denominator, numerator) = {
+        let (denominator, numerator) = require_u32_operands!(processor, [0, 1], err_ctx);
+
+        (denominator.as_int(), numerator.as_int())
+    };
 
     if denominator == 0 {
         return Err(ExecutionError::divide_by_zero(processor.system().clk(), err_ctx));
@@ -215,10 +219,9 @@ pub(super) fn op_u32and<P: Processor>(
     tracer: &mut impl Tracer,
 ) -> Result<(), ExecutionError> {
     let (b, a) = require_u32_operands!(processor, [0, 1], err_ctx);
-    // TODO(plafer): change macro to not call `as_int()`? Or return both versions?
-    tracer.record_u32and(Felt::new(a), Felt::new(b));
+    tracer.record_u32and(a, b);
 
-    let result = a & b;
+    let result = a.as_int() & b.as_int();
 
     // Update stack
     processor.stack().decrement_size(tracer);
@@ -235,9 +238,9 @@ pub(super) fn op_u32xor<P: Processor>(
     tracer: &mut impl Tracer,
 ) -> Result<(), ExecutionError> {
     let (b, a) = require_u32_operands!(processor, [0, 1], err_ctx);
-    tracer.record_u32xor(Felt::new(a), Felt::new(b));
+    tracer.record_u32xor(a, b);
 
-    let result = a ^ b;
+    let result = a.as_int() ^ b.as_int();
 
     // Update stack
     processor.stack().decrement_size(tracer);
@@ -256,8 +259,6 @@ pub(super) fn op_u32assert2<P: Processor>(
     tracer: &mut impl Tracer,
 ) -> Result<[Felt; NUM_USER_OP_HELPERS], ExecutionError> {
     let (first, second) = require_u32_operands!(processor, [0, 1], err_code, err_ctx);
-    let first = Felt::new(first);
-    let second = Felt::new(second);
 
     tracer.record_u32_range_checks(processor.system().clk(), first, second);
 
