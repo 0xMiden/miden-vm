@@ -642,8 +642,6 @@ end
 #! Inserts a value at the given key. The leaf to which we're inserting is
 #! guaranteed to hold a single key-value pair (provided on the advice stack).
 #!
-#! If `K != K_in_leaf`
-#!
 #! Inputs:
 #!   Operand stack: [V, K, R, ...]
 #!   Advice stack:  [K_in_leaf, V_in_leaf]
@@ -653,7 +651,7 @@ end
 #!
 #! Cycles:
 #!   Leaf single after insertion: X cycles
-#!   Leaf multiple after insertion: unimplemented
+#!   Leaf multiple after insertion: X cycles
 proc.insert_single_leaf
     # Push the leaf pre-image on stack
     # (X cycles)
@@ -807,7 +805,7 @@ end
 #! Cycles:
 #!   Remove: X cycles
 #!   Insert; leaf single after insertion: X cycles
-#!   Insert; leaf multiple after insertion: unimplemented
+#!   Insert; leaf multiple after insertion: X cycles
 proc.set_single_leaf
     # Check if we're inserting or removing a value
     # (X cycles)
@@ -857,9 +855,9 @@ end
 #!   Leaf single
 #!     removal: 227 cycles
 #!     insertion (leaf remains single): 205
-#!     insertion (leaf becomes multiple): unimplemented
+#!     insertion (leaf becomes multiple): X cycles
 #!   Leaf multiple
-#!     unimplemented
+#!     X cycles
 export.set
     # Prepare stack for adv.push_mtnode
     # (X cycles)
