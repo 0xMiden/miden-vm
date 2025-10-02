@@ -8,10 +8,9 @@ use serde::{Deserialize, Serialize};
 
 use super::{MastNodeErrorContext, MastNodeExt};
 use crate::{
-    OPCODE_LOOP,
+    Idx, OPCODE_LOOP,
     chiplets::hasher,
     mast::{DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId, Remapping},
-    Idx,
 };
 
 // LOOP NODE

@@ -11,10 +11,9 @@ use serde::{Deserialize, Serialize};
 
 use super::{MastNodeErrorContext, MastNodeExt};
 use crate::{
-    OPCODE_CALL, OPCODE_SYSCALL,
+    Idx, OPCODE_CALL, OPCODE_SYSCALL,
     chiplets::hasher,
     mast::{DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId, Remapping},
-    Idx,
 };
 
 // CALL NODE

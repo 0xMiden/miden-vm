@@ -4,9 +4,8 @@ use alloc::{
 };
 
 use crate::{
-    Word,
+    Idx, Word,
     mast::{MastForest, MastForestError, MastNode, MastNodeId, node::MastNodeExt},
-    Idx,
 };
 
 type ForestIndex = usize;

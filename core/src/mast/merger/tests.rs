@@ -2,9 +2,8 @@ use miden_crypto::{Felt, ONE, Word};
 
 use super::*;
 use crate::{
-    Decorator, Operation,
+    Decorator, Idx, IndexVec, Operation,
     mast::{BasicBlockNode, MastNode, MastNodeErrorContext},
-    {Idx, IndexVec},
 };
 
 fn block_foo() -> MastNode {

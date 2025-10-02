@@ -1,6 +1,6 @@
 use miden_core::{
-    mast::{MastForest, MastForestRootMap, MastNodeExt},
     Idx,
+    mast::{MastForest, MastForestRootMap, MastNodeExt},
 };
 
 use crate::{

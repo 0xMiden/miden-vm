@@ -13,7 +13,6 @@ use core::{fmt::Debug, marker::PhantomData, ops};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-
 use thiserror::Error;
 
 /// Error returned when too many items are added to an IndexedVec.
