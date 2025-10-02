@@ -264,7 +264,9 @@ impl InputFile {
 
     /// Parse a `Word` from a hex string.
     pub fn parse_word(word_hex: &str) -> Result<Word, String> {
-        let word_value = &word_hex[2..];
+        let Some(word_value) = word_hex.strip_prefix("0x") else {
+            return Err(format!("failed to decode `Word` from hex {word_hex} - missing 0x prefix"));
+        };
         let mut word_data = [0u8; 32];
         hex::decode_to_slice(word_value, &mut word_data)
             .map_err(|e| format!("failed to decode `Word` from hex {word_hex} - {e}"))?;
