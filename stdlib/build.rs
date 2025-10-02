@@ -1,9 +1,10 @@
 use std::{
-    env, fs,
+    env,
     io::{self, Write},
     path::{Path, PathBuf},
 };
 
+use fs_err as fs;
 use miden_assembly::{
     Assembler, Library, LibraryNamespace, LibraryPath, Parse, ParseOptions, ast::ModuleKind,
     debuginfo::DefaultSourceManager,
@@ -15,6 +16,25 @@ use miden_assembly::{
 const ASM_DIR_PATH: &str = "asm";
 const ASL_DIR_PATH: &str = "assets";
 const DOC_DIR_PATH: &str = "docs";
+
+// UTILS
+// ================================================================================================
+
+fn atomic_file_write(
+    path: impl AsRef<std::path::Path>,
+    writer: impl FnOnce(&mut fs::File) -> io::Result<()>,
+) -> io::Result<()> {
+    let path = path.as_ref();
+    let uuid = uuid::Uuid::new_v4();
+    let name = format!(".tmp-{uuid}");
+    let parent_dir = path.parent().expect("Always a file path, so must have a parent");
+    let tmp_path = parent_dir.join(name);
+    let mut f = fs::File::create(&tmp_path)?;
+    writer(&mut f)?;
+    // ensure atomic file updates, to deal with any racing updates
+    fs::rename(&tmp_path, path)?;
+    Ok(())
+}
 
 // MARKDOWN RENDERER
 // ================================================================================================
@@ -59,9 +79,9 @@ fn markdown_file_name(ns: &str) -> String {
 /// Writes Miden standard library modules documentation markdown files based on the available
 /// modules and comments.
 pub fn build_stdlib_docs(asm_dir: &Path, output_dir: &str) -> io::Result<()> {
-    // Remove docs folder to re-generate
-    fs::remove_dir_all(output_dir).unwrap();
-    fs::create_dir(output_dir).unwrap();
+    // Remove docs folder to re-generate, but don't fail, fail later
+    let _ = fs::remove_dir_all(output_dir);
+    let _ = fs::create_dir(output_dir);
 
     // Find all .masm files recursively
     let modules = find_masm_modules(asm_dir, asm_dir)?;
@@ -76,29 +96,26 @@ pub fn build_stdlib_docs(asm_dir: &Path, output_dir: &str) -> io::Result<()> {
             fs::create_dir_all(parent)?;
         }
 
-        let mut f = fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(output_file_path)?;
-
         // Parse module using AST-based approach
         let (module_docs, procedures) = parse_module_with_ast(&label, &file_path)?;
 
-        // Write module docs
-        if let Some(docs) = module_docs {
-            let escaped = docs.replace('|', "\\|").replace('\n', "<br />");
-            f.write_all(escaped.as_bytes())?;
-            f.write_all(b"\n\n")?;
-        }
+        atomic_file_write(&output_file_path, |f| {
+            // Write module docs
+            if let Some(docs) = module_docs {
+                let escaped = docs.replace('|', "\\|").replace('\n', "<br />");
+                f.write_all(escaped.as_bytes())?;
+                f.write_all(b"\n\n")?;
+            }
 
-        // Write header
-        MarkdownRenderer::write_docs_header(&f, &label);
+            // Write header
+            MarkdownRenderer::write_docs_header(f, &label);
 
-        // Write procedures
-        for (name, docs) in procedures {
-            MarkdownRenderer::write_docs_procedure(&f, &name, docs.as_deref());
-        }
+            // Write procedures
+            for (name, docs) in procedures {
+                MarkdownRenderer::write_docs_procedure(f, &name, docs.as_deref());
+            }
+            Ok(())
+        })?;
     }
 
     Ok(())
@@ -196,11 +213,15 @@ fn main() -> io::Result<()> {
     // write the masl output
     let build_dir = env::var("OUT_DIR").unwrap();
     let build_dir = Path::new(&build_dir);
-    let output_file = build_dir
-        .join(ASL_DIR_PATH)
-        .join("std")
-        .with_extension(Library::LIBRARY_EXTENSION);
-    stdlib.write_to_file(output_file).map_err(|e| io::Error::other(e.to_string()))?;
+
+    // Ensure the assets directory exists
+    let assets_dir = build_dir.join(ASL_DIR_PATH);
+    fs::create_dir_all(&assets_dir)?;
+
+    let output_path = assets_dir.join("std").with_extension(Library::LIBRARY_EXTENSION);
+    atomic_file_write(&output_path, |sink| {
+        stdlib.write_to(sink).map_err(|e| io::Error::other(e.to_string()))
+    })?;
 
     // Generate documentation
     build_stdlib_docs(&asm_dir, DOC_DIR_PATH)?;

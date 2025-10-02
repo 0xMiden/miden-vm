@@ -12,6 +12,7 @@
 - [BREAKING] Incremented MSRV to 1.90.
 - [BREAKING] Fix inconsistencies in debugging instructions ([#2205](https://github.com/0xMiden/miden-vm/pull/2205)).
 - Fix ability to parse odd-length hex strings ([#2196](https://github.com/0xMiden/miden-vm/pull/2196)).
+- Ensure we do atomic writes for documentation ([#2238](https://github.com/0xMiden/miden-vm/pull/2238)).
 - Added `before_enter` and `after_exit` decorator lists to `BasicBlockNode`.([#2167](https://github.com/0xMiden/miden-vm/pull/2167)).
 - Added `proptest`'s `Arbitrary` instances for `BasicBlockNode` and `MastForest` ([#2200](https://github.com/0xMiden/miden-vm/pull/2200)).
 - Fixed mismatched Push expectations in decoder syscall_block test ([#2207](https://github.com/0xMiden/miden-vm/pull/2207))
