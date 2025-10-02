@@ -5,7 +5,7 @@
 #### Enhancements
 
 - Added support for leaves with multiple pairs in `std::collections::smt::get` ([#2048](https://github.com/0xMiden/miden-vm/pull/2048)).
-- Added support for leaves with multiple pairs in `std::collections::smt::set` ([#2232](https://github.com/0xMiden/miden-vm/pull/2232)).
+- Added support for leaves with multiple pairs in `std::collections::smt::set` ([#2248](https://github.com/0xMiden/miden-vm/pull/2248)).
 - Added `std::mem::pipe_double_words_preimage_to_memory`, a version of `pipe_preimage_to_memory` optimized for pairs of words ([#2048](https://github.com/0xMiden/miden-vm/pull/2048)).
 
 #### Changes
