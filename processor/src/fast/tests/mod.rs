@@ -412,8 +412,15 @@ fn test_call_node_preserves_stack_overflow_table() {
 #[test]
 fn test_external_node_decorator_sequencing() {
     let mut lib_forest = MastForest::new();
+
+    // Add a decorator to the lib forest to track execution inside the external node
+    let lib_decorator = Decorator::Trace(2);
+    let lib_decorator_id = lib_forest.add_decorator(lib_decorator.clone()).unwrap();
+
     let lib_operations = [Operation::Push(1_u32.into()), Operation::Add];
-    let lib_block = BasicBlockNode::new(lib_operations.to_vec(), alloc::vec::Vec::new()).unwrap();
+    // Attach the decorator to the first operation (index 0)
+    let lib_block =
+        BasicBlockNode::new(lib_operations.to_vec(), vec![(0, lib_decorator_id)]).unwrap();
     let lib_block_id = lib_forest.add_node(lib_block).unwrap();
     lib_forest.make_root(lib_block_id);
 
@@ -439,20 +446,30 @@ fn test_external_node_decorator_sequencing() {
     let result = processor.execute_sync(&program, &mut host);
     assert!(result.is_ok(), "Execution failed: {:?}", result);
 
-    // Verify both decorators executed
+    // Verify all decorators executed
     assert_eq!(host.get_trace_count(1), 1, "before_enter decorator should execute exactly once");
+    assert_eq!(
+        host.get_trace_count(2),
+        1,
+        "external node decorator should execute exactly once"
+    );
     assert_eq!(host.get_trace_count(3), 1, "after_exit decorator should execute exactly once");
 
-    // More importantly, verify the execution order by checking trace order
+    // More importantly, verify the complete execution order
     let execution_order = host.get_execution_order();
-    assert_eq!(execution_order.len(), 2, "Should have exactly 2 trace events");
+    assert_eq!(execution_order.len(), 3, "Should have exactly 3 trace events");
     assert_eq!(execution_order[0].0, 1, "before_enter should execute first");
-    assert_eq!(execution_order[1].0, 3, "after_exit should execute after external operations");
+    assert_eq!(execution_order[1].0, 2, "external node decorator should execute second");
+    assert_eq!(execution_order[2].0, 3, "after_exit should execute last");
 
-    // Verify that after_exit executes at a later clock cycle than before_enter
+    // Verify that clock cycles are in strictly increasing order
     assert!(
-        execution_order[1].1 >= execution_order[0].1,
-        "after_exit should execute at a later clock cycle"
+        execution_order[1].1 > execution_order[0].1,
+        "external node should execute after before_enter"
+    );
+    assert!(
+        execution_order[2].1 > execution_order[1].1,
+        "after_exit should execute after external node operations"
     );
 }
 

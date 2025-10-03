@@ -467,9 +467,10 @@ impl FastProcessor {
                     host,
                     tracer,
                 )?,
-                Continuation::FinishExternal((node_id, external_forest)) => {
+                Continuation::FinishExternal(node_id) => {
                     // Execute after_exit decorators when returning from an external node
-                    self.execute_after_exit_decorators(node_id, &external_forest, host)?;
+                    // Note: current_forest should already be restored by EnterForest continuation
+                    self.execute_after_exit_decorators(node_id, &current_forest, host)?;
                 },
                 Continuation::EnterForest(previous_forest) => {
                     // Restore the previous forest
