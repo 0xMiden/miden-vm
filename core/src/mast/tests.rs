@@ -8,7 +8,7 @@ use winter_rand_utils::prng_array;
 use crate::{
     Felt, Kernel, ProgramInfo, Word,
     chiplets::hasher,
-    mast::{DynNode, MastNodeExt},
+    mast::{DynNode, DynNodeBuilder, MastNodeExt},
     utils::{Deserializable, Serializable},
 };
 
@@ -16,7 +16,7 @@ use crate::{
 fn dyn_hash_is_correct() {
     let expected_constant =
         hasher::merge_in_domain(&[Word::default(), Word::default()], DynNode::DYN_DOMAIN);
-    assert_eq!(expected_constant, DynNode::new_dyn().digest());
+    assert_eq!(expected_constant, DynNodeBuilder::new_dyn().build().digest());
 }
 
 proptest! {
