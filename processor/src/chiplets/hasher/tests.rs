@@ -7,7 +7,10 @@ use miden_core::{
     ONE, Operation, ZERO,
     chiplets::hasher,
     crypto::merkle::{MerkleTree, NodeIndex},
-    mast::{BasicBlockNodeBuilder, MastForest, MastNode, MastNodeExt},
+    mast::{
+        BasicBlockNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForest, MastNode, MastNodeExt,
+        SplitNodeBuilder,
+    },
 };
 use miden_utils_testing::rand::rand_array;
 
@@ -16,8 +19,6 @@ use super::{
     MerklePath, RETURN_HASH, RETURN_STATE, Selectors, TRACE_WIDTH, TraceFragment,
     init_state_from_words,
 };
-use crate::{JoinNode, LoopNode, SplitNode};
-use miden_core::mast::{JoinNodeBuilder, LoopNodeBuilder, SplitNodeBuilder};
 
 // LINEAR HASH TESTS
 // ================================================================================================
@@ -438,13 +439,17 @@ fn hash_memoization_basic_blocks_check(basic_block: MastNode) {
     let loop_block = LoopNodeBuilder::new(loop_body_id).build(&mast_forest).unwrap();
     let loop_block_id = mast_forest.add_node(loop_block.clone()).unwrap();
 
-    let join2_block = JoinNodeBuilder::new([basic_block_1_id, loop_block_id]).build(&mast_forest).unwrap();
+    let join2_block = JoinNodeBuilder::new([basic_block_1_id, loop_block_id])
+        .build(&mast_forest)
+        .unwrap();
     let join2_block_id = mast_forest.add_node(join2_block.clone()).unwrap();
 
     let basic_block_2 = basic_block;
     let basic_block_2_id = mast_forest.add_node(basic_block_2.clone()).unwrap();
 
-    let join1_block = JoinNodeBuilder::new([join2_block_id, basic_block_2_id]).build(&mast_forest).unwrap();
+    let join1_block = JoinNodeBuilder::new([join2_block_id, basic_block_2_id])
+        .build(&mast_forest)
+        .unwrap();
 
     let mut hasher = Hasher::default();
     let h1: [Felt; DIGEST_LEN] = join2_block
