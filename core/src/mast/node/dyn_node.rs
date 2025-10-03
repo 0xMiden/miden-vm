@@ -278,28 +278,6 @@ impl proptest::prelude::Arbitrary for DynNode {
     type Strategy = proptest::prelude::BoxedStrategy<Self>;
 }
 
-#[cfg(test)]
-mod tests {
-    use miden_crypto::hash::rpo::Rpo256;
-
-    use super::*;
-
-    /// Ensures that the hash of `DynNode` is indeed the hash of 2 empty words, in the `DynNode`
-    /// domain.
-    #[test]
-    pub fn test_dyn_node_digest() {
-        assert_eq!(
-            DynNode::new_dyn().digest(),
-            Rpo256::merge_in_domain(&[Word::default(), Word::default()], DynNode::DYN_DOMAIN)
-        );
-
-        assert_eq!(
-            DynNode::new_dyncall().digest(),
-            Rpo256::merge_in_domain(&[Word::default(), Word::default()], DynNode::DYNCALL_DOMAIN)
-        );
-    }
-}
-
 // ------------------------------------------------------------------------------------------------
 /// Builder for creating [`DynNode`] instances with decorators.
 pub struct DynNodeBuilder {
@@ -346,5 +324,27 @@ impl DynNodeBuilder {
             before_enter: self.before_enter,
             after_exit: self.after_exit,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use miden_crypto::hash::rpo::Rpo256;
+
+    use super::*;
+
+    /// Ensures that the hash of `DynNode` is indeed the hash of 2 empty words, in the `DynNode`
+    /// domain.
+    #[test]
+    pub fn test_dyn_node_digest() {
+        assert_eq!(
+            DynNode::new_dyn().digest(),
+            Rpo256::merge_in_domain(&[Word::default(), Word::default()], DynNode::DYN_DOMAIN)
+        );
+
+        assert_eq!(
+            DynNode::new_dyncall().digest(),
+            Rpo256::merge_in_domain(&[Word::default(), Word::default()], DynNode::DYNCALL_DOMAIN)
+        );
     }
 }
