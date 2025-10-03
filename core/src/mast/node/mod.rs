@@ -3,7 +3,7 @@ use alloc::{boxed::Box, vec::Vec};
 use core::fmt;
 
 pub use basic_block_node::{
-    BATCH_SIZE as OP_BATCH_SIZE, BasicBlockNode, DecoratorOpLinkIterator,
+    BATCH_SIZE as OP_BATCH_SIZE, BasicBlockNode, BasicBlockNodeBuilder, DecoratorOpLinkIterator,
     GROUP_SIZE as OP_GROUP_SIZE, OpBatch, OperationOrDecorator,
 };
 use enum_dispatch::enum_dispatch;
@@ -11,26 +11,26 @@ use enum_dispatch::enum_dispatch;
 use serde::{Deserialize, Serialize};
 
 mod call_node;
-pub use call_node::CallNode;
+pub use call_node::{CallNode, CallNodeBuilder};
 
 mod dyn_node;
-pub use dyn_node::DynNode;
+pub use dyn_node::{DynNode, DynNodeBuilder};
 
 mod external;
-pub use external::ExternalNode;
+pub use external::{ExternalNode, ExternalNodeBuilder};
 
 mod join_node;
-pub use join_node::JoinNode;
+pub use join_node::{JoinNode, JoinNodeBuilder};
 
 mod split_node;
 use miden_crypto::{Felt, Word};
 use miden_formatting::prettier::PrettyPrint;
-pub use split_node::SplitNode;
+pub use split_node::{SplitNode, SplitNodeBuilder};
 
 mod loop_node;
 #[cfg(any(test, feature = "arbitrary"))]
 pub use basic_block_node::arbitrary;
-pub use loop_node::LoopNode;
+pub use loop_node::{LoopNode, LoopNodeBuilder};
 
 use super::DecoratorId;
 use crate::{

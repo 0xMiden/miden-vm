@@ -229,3 +229,43 @@ impl proptest::prelude::Arbitrary for ExternalNode {
 
     type Strategy = proptest::prelude::BoxedStrategy<Self>;
 }
+
+// ------------------------------------------------------------------------------------------------
+/// Builder for creating [`ExternalNode`] instances with decorators.
+pub struct ExternalNodeBuilder {
+    digest: Word,
+    before_enter: Vec<DecoratorId>,
+    after_exit: Vec<DecoratorId>,
+}
+
+impl ExternalNodeBuilder {
+    /// Creates a new builder for an ExternalNode with the specified procedure hash.
+    pub fn new(digest: Word) -> Self {
+        Self {
+            digest,
+            before_enter: Vec::new(),
+            after_exit: Vec::new(),
+        }
+    }
+
+    /// Adds decorators to be executed before this node.
+    pub fn with_before_enter(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
+        self.before_enter = decorators.into();
+        self
+    }
+
+    /// Adds decorators to be executed after this node.
+    pub fn with_after_exit(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
+        self.after_exit = decorators.into();
+        self
+    }
+
+    /// Builds the ExternalNode with the specified decorators.
+    pub fn build(self) -> ExternalNode {
+        ExternalNode {
+            digest: self.digest,
+            before_enter: self.before_enter,
+            after_exit: self.after_exit,
+        }
+    }
+}
