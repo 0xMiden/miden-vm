@@ -383,7 +383,7 @@ mod tests {
         let mut forest_b = MastForest::new();
         let id_ext_b = forest_b.add_external(forest_a[id_call_a].digest()).unwrap();
         let id_call_b = forest_b.add_call(id_ext_b).unwrap();
-        forest_b.add_node(block_foo).unwrap();
+        forest_b.add_block(vec![Operation::Drop], Vec::new()).unwrap();
         forest_b.make_root(id_call_b);
 
         let nodes = MultiMastForestNodeIter::new(vec![&forest_a, &forest_b]).collect::<Vec<_>>();
