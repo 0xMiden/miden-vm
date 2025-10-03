@@ -2,6 +2,10 @@
 
 ## 0.19.0 (TBD)
 
+#### Fixes
+
+- Fix SourceContent::line_column_to_offset to use character-based columns (UTF‑8) and add a non‑ASCII round‑trip test. ([#2203](https://github.com/0xMiden/miden-vm/pull/2203))
+
 #### Enhancements
 
 - Added support for leaves with multiple pairs in `std::collections::smt::get` ([#2048](https://github.com/0xMiden/miden-vm/pull/2048)).

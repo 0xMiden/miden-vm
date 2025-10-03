@@ -625,18 +625,23 @@ impl SourceContent {
         line_index: LineIndex,
         column_index: ColumnIndex,
     ) -> Option<ByteIndex> {
-        let column_index = column_index.to_usize();
         let line_span = self.line_range(line_index)?;
         let line_src = self
             .content
             .get(line_span.start.to_usize()..line_span.end.to_usize())
             .expect("invalid line boundaries: invalid utf-8");
-        if line_src.len() < column_index {
-            return None;
-        }
-        let (pre, _) = line_src.split_at(column_index);
-        let start = line_span.start;
-        Some(start + ByteOffset::from_str_len(pre))
+
+        let column_index = column_index.to_usize();
+        // Determine byte offset within the line corresponding to the character column.
+        // Include end-of-line position so that col == num_chars maps to line_src.len(),
+        // and col == 0 on an empty line maps to 0.
+        let byte_in_line = line_src
+            .char_indices()
+            .map(|(i, _)| i)
+            .chain(core::iter::once(line_src.len()))
+            .nth(column_index)?;
+
+        Some(line_span.start + ByteOffset::from_str_len(&line_src[..byte_in_line]))
     }
 
     /// Get a [FileLineCol] corresponding to the line/column in this file at which `byte_index`
@@ -1302,5 +1307,52 @@ end
                 .expect("invalid byte range"),
             "".as_bytes()
         );
+    }
+
+    #[test]
+    fn line_column_round_trip_non_ascii() {
+        // Single-line content with multi-byte UTF-8 characters
+        let content_str = "aβ中💖\n"; // 'a'(1) 'β'(2) '中'(3) '💖'(4 bytes), then newline
+        let content = SourceContent::new("masm", "utf8.masm", content_str);
+
+        // Validate line count: 2 (line with content + trailing empty line after \n)
+        assert_eq!(content.line_count(), 2);
+
+        let line_index = LineIndex(0);
+        let line_span = content.line_range(line_index).expect("line range");
+        let line_src = content
+            .as_str()
+            .get(line_span.start.to_usize()..line_span.end.to_usize())
+            .expect("utf-8 slice");
+        assert_eq!(line_src, "aβ中💖\n");
+
+        let chars: Vec<char> = line_src.chars().collect();
+        // exclude the newline character for cursor positions within the line content
+        let visible_chars = chars.iter().take_while(|&&c| c != '\n').count();
+
+        for col in 0..=visible_chars {
+            let byte_index = content
+                .line_column_to_offset(line_index, ColumnIndex(col as u32))
+                .expect("byte index");
+            let flc = content.location(byte_index).expect("location");
+            assert_eq!(flc.line, line_index.number());
+            assert_eq!(flc.column.to_u32(), col as u32 + 1); // FileLineCol is one-indexed
+        }
+    }
+
+    #[test]
+    fn selection_end_at_next_empty_line_start() {
+        // Single line with trailing newline creates an empty next line
+        let content_str = "abc\n";
+        let content = SourceContent::new("masm", "newline.masm", content_str);
+
+        // Selection from line 0 to line 1 should resolve end to the byte after '\n'
+        let start = content.line_column_to_offset(LineIndex(0), ColumnIndex(0)).expect("start");
+        let end = content.line_column_to_offset(LineIndex(1), ColumnIndex(0)).expect("end");
+
+        // start at 0
+        assert_eq!(start.to_usize(), 0);
+        // end at position after 'abc\n' (i.e., 4)
+        assert_eq!(end.to_usize(), content_str.len());
     }
 }
