@@ -182,7 +182,7 @@ mod tests {
     use super::*;
     use crate::{
         Decorator, Felt, Operation,
-        mast::{BasicBlockNode, MastNode},
+        mast::{BasicBlockNode, MastNode, node::BasicBlockNodeBuilder},
     };
 
     /// Creates a basic block with the given operations
@@ -201,17 +201,21 @@ mod tests {
         let deco1 = add_trace_decorator(&mut forest, 1);
         let deco2 = add_trace_decorator(&mut forest, 2);
 
-        // Create two identical basic blocks with different before_enter decorators
-        let mut block1 = basic_block_with_ops(vec![Operation::Add, Operation::Mul]);
-        let mut block2 = basic_block_with_ops(vec![Operation::Add, Operation::Mul]);
-
-        block1.append_before_enter(&[deco1]);
-        block2.append_before_enter(&[deco2]);
+        // Create two identical basic blocks with different before_enter decorators using builder
+        // pattern
+        let block1 = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul], Vec::new())
+            .with_before_enter(vec![deco1])
+            .build()
+            .unwrap();
+        let block2 = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul], Vec::new())
+            .with_before_enter(vec![deco2])
+            .build()
+            .unwrap();
 
         // Compute fingerprints
         let empty_map = BTreeMap::new();
-        let fp1 = MastNodeFingerprint::from_mast_node(&forest, &empty_map, &block1).unwrap();
-        let fp2 = MastNodeFingerprint::from_mast_node(&forest, &empty_map, &block2).unwrap();
+        let fp1 = MastNodeFingerprint::from_mast_node(&forest, &empty_map, &block1.into()).unwrap();
+        let fp2 = MastNodeFingerprint::from_mast_node(&forest, &empty_map, &block2.into()).unwrap();
 
         // Fingerprints should be different
         assert_ne!(
@@ -226,17 +230,21 @@ mod tests {
         let deco1 = add_trace_decorator(&mut forest, 1);
         let deco2 = add_trace_decorator(&mut forest, 2);
 
-        // Create two identical basic blocks with different after_exit decorators
-        let mut block1 = basic_block_with_ops(vec![Operation::Add, Operation::Mul]);
-        let mut block2 = basic_block_with_ops(vec![Operation::Add, Operation::Mul]);
-
-        block1.append_after_exit(&[deco1]);
-        block2.append_after_exit(&[deco2]);
+        // Create two identical basic blocks with different after_exit decorators using builder
+        // pattern
+        let block1 = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul], Vec::new())
+            .with_after_exit(vec![deco1])
+            .build()
+            .unwrap();
+        let block2 = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul], Vec::new())
+            .with_after_exit(vec![deco2])
+            .build()
+            .unwrap();
 
         // Compute fingerprints
         let empty_map = BTreeMap::new();
-        let fp1 = MastNodeFingerprint::from_mast_node(&forest, &empty_map, &block1).unwrap();
-        let fp2 = MastNodeFingerprint::from_mast_node(&forest, &empty_map, &block2).unwrap();
+        let fp1 = MastNodeFingerprint::from_mast_node(&forest, &empty_map, &block1.into()).unwrap();
+        let fp2 = MastNodeFingerprint::from_mast_node(&forest, &empty_map, &block2.into()).unwrap();
 
         // Fingerprints should be different
         assert_ne!(
