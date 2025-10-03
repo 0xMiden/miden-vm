@@ -195,6 +195,52 @@ where
     }
 }
 
+// NOOPHOST
+// ================================================================================================
+
+/// A Host which does nothing.
+pub struct NoopHost;
+
+impl BaseHost for NoopHost {
+    #[inline(always)]
+    fn get_label_and_source_file(
+        &self,
+        _location: &Location,
+    ) -> (SourceSpan, Option<Arc<SourceFile>>) {
+        (SourceSpan::UNKNOWN, None)
+    }
+}
+
+impl SyncHost for NoopHost {
+    #[inline(always)]
+    fn get_mast_forest(&self, _node_digest: &Word) -> Option<Arc<MastForest>> {
+        None
+    }
+
+    #[inline(always)]
+    fn on_event(&mut self, _process: &ProcessState<'_>) -> Result<Vec<AdviceMutation>, EventError> {
+        Ok(Vec::new())
+    }
+}
+
+impl AsyncHost for NoopHost {
+    #[inline(always)]
+    fn get_mast_forest(
+        &self,
+        _node_digest: &Word,
+    ) -> impl FutureMaybeSend<Option<Arc<MastForest>>> {
+        async { None }
+    }
+
+    #[inline(always)]
+    fn on_event(
+        &mut self,
+        _process: &ProcessState<'_>,
+    ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>> {
+        async { Ok(Vec::new()) }
+    }
+}
+
 // HOST LIBRARY
 // ================================================================================================
 

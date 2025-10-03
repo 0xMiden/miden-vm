@@ -193,6 +193,7 @@ impl FastProcessor {
                         &err_ctx,
                     )
                     .await?;
+                tracer.record_mast_forest_resolution(root_id, &new_forest);
 
                 // Push current forest to the continuation stack so that we can return to it
                 continuation_stack.push_enter_forest(current_forest.clone());
