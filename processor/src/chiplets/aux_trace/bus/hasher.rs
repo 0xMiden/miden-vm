@@ -175,6 +175,101 @@ pub(super) fn build_hperm_request<E: FieldElement<BaseField = Felt>>(
     combined_value
 }
 
+/// Builds `LOG_PRECOMPILE` requests made to the hash chiplet.
+///
+/// The operation absorbs [TAG, HASH_CALL_DATA] into the RPO sponge with capacity CAP_PREV,
+/// producing output (CAP_NEXT, R0, R1).
+///
+/// Stack layout (current row):
+/// - s0..s3: HASH_CALL_DATA (reversed: s0 is HASH_CALL_DATA[3], s3 is HASH_CALL_DATA[0])
+/// - s4..s7: TAG (reversed: s4 is TAG[3], s7 is TAG[0])
+///
+/// Helper registers (current row):
+/// - h0: hasher address
+/// - h1..h4: CAP_PREV
+///
+/// Stack layout (next row):
+/// - s0..s3: R0 (reversed: s0 is R0[3], s3 is R0[0])
+/// - s4..s7: R1 (reversed: s4 is R1[3], s7 is R1[0])
+/// - s8..s11: CAP_NEXT (reversed: s8 is CAP_NEXT[3], s11 is CAP_NEXT[0])
+pub(super) fn build_log_precompile_request<E: FieldElement<BaseField = Felt>>(
+    main_trace: &MainTrace,
+    alphas: &[E],
+    row: RowIndex,
+    _debugger: &mut BusDebugger<E>,
+) -> E {
+    // Read helper registers
+    let addr = main_trace.helper_register(0, row);
+    // capacity stored in helper registers
+    let cap_prev_0 = main_trace.helper_register(1, row);
+    let cap_prev_1 = main_trace.helper_register(2, row);
+    let cap_prev_2 = main_trace.helper_register(3, row);
+    let cap_prev_3 = main_trace.helper_register(4, row);
+
+    // hash_call_data
+    let s0 = main_trace.stack_element(0, row);
+    let s1 = main_trace.stack_element(1, row);
+    let s2 = main_trace.stack_element(2, row);
+    let s3 = main_trace.stack_element(3, row);
+    // tag
+    let s4 = main_trace.stack_element(4, row);
+    let s5 = main_trace.stack_element(5, row);
+    let s6 = main_trace.stack_element(6, row);
+    let s7 = main_trace.stack_element(7, row);
+
+    // Read next stack (output: R1, R0, and CAP_NEXT)
+    // r1
+    let s0_nxt = main_trace.stack_element(0, row + 1);
+    let s1_nxt = main_trace.stack_element(1, row + 1);
+    let s2_nxt = main_trace.stack_element(2, row + 1);
+    let s3_nxt = main_trace.stack_element(3, row + 1);
+    // r0
+    let s4_nxt = main_trace.stack_element(4, row + 1);
+    let s5_nxt = main_trace.stack_element(5, row + 1);
+    let s6_nxt = main_trace.stack_element(6, row + 1);
+    let s7_nxt = main_trace.stack_element(7, row + 1);
+    // cap_next
+    let s8_nxt = main_trace.stack_element(8, row + 1);
+    let s9_nxt = main_trace.stack_element(9, row + 1);
+    let s10_nxt = main_trace.stack_element(10, row + 1);
+    let s11_nxt = main_trace.stack_element(11, row + 1);
+
+    // Build input hasher state: [CAP_PREV, TAG, HASH_CALL_DATA]
+    // Stack elements are in reverse order, so s7..s4 is TAG, s3..s0 is HASH_CALL_DATA
+    let input_req = HasherMessage {
+        transition_label: Felt::from(LINEAR_HASH_LABEL + 16),
+        addr_next: addr,
+        node_index: ZERO,
+        hasher_state: [
+            cap_prev_0, cap_prev_1, cap_prev_2, cap_prev_3, s7, s6, s5, s4, s3, s2, s1, s0,
+        ],
+        source: "log_precompile input",
+    };
+
+    // Build output hasher state: [CAP_NEXT, R0, R1]
+    // CAP_NEXT is now available on the stack at the next row (positions 8-11)
+    let output_req = HasherMessage {
+        transition_label: Felt::from(RETURN_STATE_LABEL + 32),
+        addr_next: addr + Felt::new(7),
+        node_index: ZERO,
+        hasher_state: [
+            s11_nxt, s10_nxt, s9_nxt, s8_nxt, s7_nxt, s6_nxt, s5_nxt, s4_nxt, s3_nxt, s2_nxt,
+            s1_nxt, s0_nxt,
+        ],
+        source: "log_precompile output",
+    };
+
+    let combined_value = input_req.value(alphas) * output_req.value(alphas);
+
+    #[cfg(any(test, feature = "bus-debugger"))]
+    {
+        _debugger.add_request(alloc::boxed::Box::new(input_req), alphas);
+        _debugger.add_request(alloc::boxed::Box::new(output_req), alphas);
+    }
+
+    combined_value
+}
+
 /// Builds `MPVERIFY` requests made to the hash chiplet.
 pub(super) fn build_mpverify_request<E: FieldElement<BaseField = Felt>>(
     main_trace: &MainTrace,

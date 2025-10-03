@@ -7,7 +7,10 @@ use miden_air::trace::{
     decoder::{NUM_USER_OP_HELPERS, USER_OP_HELPERS_OFFSET},
     main_trace::MainTrace,
 };
-use miden_core::{ProgramInfo, StackInputs, StackOutputs, Word, ZERO, stack::MIN_STACK_DEPTH};
+use miden_core::{
+    ProgramInfo, StackInputs, StackOutputs, Word, ZERO, precompile::PrecompileRequest,
+    stack::MIN_STACK_DEPTH,
+};
 use winter_prover::{EvaluationFrame, Trace, TraceInfo, crypto::RandomCoin};
 
 use super::{
@@ -121,6 +124,11 @@ impl ExecutionTrace {
     /// Returns outputs of the program execution which resulted in this execution trace.
     pub fn stack_outputs(&self) -> &StackOutputs {
         &self.stack_outputs
+    }
+
+    /// Returns the precompile requests generated during program execution.
+    pub fn precompile_requests(&self) -> &[PrecompileRequest] {
+        self.advice.precompile_requests()
     }
 
     /// Returns the initial state of the top 16 stack registers.
@@ -290,7 +298,7 @@ fn finalize_trace(
     process: Process,
     mut rng: RpoRandomCoin,
 ) -> (MainTrace, AuxTraceBuilders, TraceLenSummary) {
-    let (system, decoder, stack, mut range, chiplets) = process.into_parts();
+    let (system, decoder, stack, mut range, chiplets, final_capacity) = process.into_parts();
 
     let clk = system.clk();
 
@@ -324,7 +332,7 @@ fn finalize_trace(
     let system_trace = system.into_trace(trace_len, NUM_RAND_ROWS);
     let decoder_trace = decoder.into_trace(trace_len, NUM_RAND_ROWS);
     let stack_trace = stack.into_trace(trace_len, NUM_RAND_ROWS);
-    let chiplets_trace = chiplets.into_trace(trace_len, NUM_RAND_ROWS);
+    let chiplets_trace = chiplets.into_trace(trace_len, NUM_RAND_ROWS, final_capacity);
 
     // Combine the range trace segment using the support lookup table
     let range_check_trace = range.into_trace_with_table(range_table_len, trace_len, NUM_RAND_ROWS);

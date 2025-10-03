@@ -128,6 +128,9 @@ pub struct FastProcessor {
 
     /// Whether to enable debug statements and tracing.
     in_debug_mode: bool,
+
+    /// Capacity for the RPO sponge used in log_precompile operations.
+    pub(super) precompile_capacity: Word,
 }
 
 impl FastProcessor {
@@ -190,6 +193,7 @@ impl FastProcessor {
             call_stack: Vec::new(),
             ace: Ace::default(),
             in_debug_mode,
+            precompile_capacity: [ZERO; 4].into(),
         }
     }
 
