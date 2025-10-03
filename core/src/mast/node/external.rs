@@ -36,7 +36,7 @@ pub struct ExternalNode {
 
 impl ExternalNode {
     /// Returns a new [`ExternalNode`] instantiated with the specified procedure hash.
-    pub fn new(procedure_hash: Word) -> Self {
+    pub(in crate::mast) fn new(procedure_hash: Word) -> Self {
         Self {
             digest: procedure_hash,
             before_enter: Vec::new(),

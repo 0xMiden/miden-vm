@@ -39,7 +39,7 @@ impl JoinNode {
 /// Constructors
 impl JoinNode {
     /// Returns a new [`JoinNode`] instantiated with the specified children nodes.
-    pub fn new(
+    pub(in crate::mast) fn new(
         children: [MastNodeId; 2],
         mast_forest: &MastForest,
     ) -> Result<Self, MastForestError> {
@@ -66,7 +66,7 @@ impl JoinNode {
 
     /// Returns a new [`JoinNode`] from values that are assumed to be correct.
     /// Should only be used when the source of the inputs is trusted (e.g. deserialization).
-    pub fn new_unsafe(children: [MastNodeId; 2], digest: Word) -> Self {
+    pub(in crate::mast) fn new_unsafe(children: [MastNodeId; 2], digest: Word) -> Self {
         Self {
             children,
             digest,

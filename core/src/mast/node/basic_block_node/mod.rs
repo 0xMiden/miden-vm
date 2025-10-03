@@ -102,7 +102,7 @@ impl BasicBlockNode {
     ///
     /// Returns an error if:
     /// - `operations` vector is empty.
-    pub fn new(
+    pub(in crate::mast) fn new(
         operations: Vec<Operation>,
         decorators: DecoratorList,
     ) -> Result<Self, MastForestError> {
@@ -143,7 +143,11 @@ impl BasicBlockNode {
 
     /// Returns a new [`BasicBlockNode`] from values that are assumed to be correct.
     /// Should only be used when the source of the inputs is trusted (e.g. deserialization).
-    pub fn new_unsafe(operations: Vec<Operation>, decorators: DecoratorList, digest: Word) -> Self {
+    pub(in crate::mast) fn new_unsafe(
+        operations: Vec<Operation>,
+        decorators: DecoratorList,
+        digest: Word,
+    ) -> Self {
         assert!(!operations.is_empty());
         let op_batches = batch_ops(operations);
         Self {
@@ -157,7 +161,7 @@ impl BasicBlockNode {
 
     /// Returns a new [`BasicBlockNode`] instantiated with the specified operations and decorators.
     #[cfg(test)]
-    pub fn new_with_raw_decorators(
+    pub(in crate::mast) fn new_with_raw_decorators(
         operations: Vec<Operation>,
         decorators: Vec<(usize, crate::Decorator)>,
         mast_forest: &mut crate::mast::MastForest,

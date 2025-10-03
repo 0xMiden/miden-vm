@@ -51,7 +51,10 @@ impl CallNode {
 /// Constructors
 impl CallNode {
     /// Returns a new [`CallNode`] instantiated with the specified callee.
-    pub fn new(callee: MastNodeId, mast_forest: &MastForest) -> Result<Self, MastForestError> {
+    pub(in crate::mast) fn new(
+        callee: MastNodeId,
+        mast_forest: &MastForest,
+    ) -> Result<Self, MastForestError> {
         if callee.to_usize() >= mast_forest.nodes.len() {
             return Err(MastForestError::NodeIdOverflow(callee, mast_forest.nodes.len()));
         }
@@ -72,7 +75,7 @@ impl CallNode {
 
     /// Returns a new [`CallNode`] from values that are assumed to be correct.
     /// Should only be used when the source of the inputs is trusted (e.g. deserialization).
-    pub fn new_unsafe(callee: MastNodeId, digest: Word) -> Self {
+    pub(in crate::mast) fn new_unsafe(callee: MastNodeId, digest: Word) -> Self {
         Self {
             callee,
             is_syscall: false,
@@ -84,7 +87,7 @@ impl CallNode {
 
     /// Returns a new [`CallNode`] instantiated with the specified callee and marked as a kernel
     /// call.
-    pub fn new_syscall(
+    pub(in crate::mast) fn new_syscall(
         callee: MastNodeId,
         mast_forest: &MastForest,
     ) -> Result<Self, MastForestError> {
@@ -108,7 +111,7 @@ impl CallNode {
 
     /// Returns a new syscall [`CallNode`] from values that are assumed to be correct.
     /// Should only be used when the source of the inputs is trusted (e.g. deserialization).
-    pub fn new_syscall_unsafe(callee: MastNodeId, digest: Word) -> Self {
+    pub(in crate::mast) fn new_syscall_unsafe(callee: MastNodeId, digest: Word) -> Self {
         Self {
             callee,
             is_syscall: true,

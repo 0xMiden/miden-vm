@@ -39,7 +39,7 @@ impl DynNode {
 /// Public accessors
 impl DynNode {
     /// Creates a new [`DynNode`] representing a dynexec operation.
-    pub fn new_dyn() -> Self {
+    pub(in crate::mast) fn new_dyn() -> Self {
         Self {
             is_dyncall: false,
             before_enter: Vec::new(),
@@ -48,7 +48,7 @@ impl DynNode {
     }
 
     /// Creates a new [`DynNode`] representing a dyncall operation.
-    pub fn new_dyncall() -> Self {
+    pub(in crate::mast) fn new_dyncall() -> Self {
         Self {
             is_dyncall: true,
             before_enter: Vec::new(),

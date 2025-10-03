@@ -43,7 +43,10 @@ impl LoopNode {
 /// Constructors
 impl LoopNode {
     /// Returns a new [`LoopNode`] instantiated with the specified body node.
-    pub fn new(body: MastNodeId, mast_forest: &MastForest) -> Result<Self, MastForestError> {
+    pub(in crate::mast) fn new(
+        body: MastNodeId,
+        mast_forest: &MastForest,
+    ) -> Result<Self, MastForestError> {
         if body.to_usize() >= mast_forest.nodes.len() {
             return Err(MastForestError::NodeIdOverflow(body, mast_forest.nodes.len()));
         }
@@ -63,7 +66,7 @@ impl LoopNode {
 
     /// Returns a new [`LoopNode`] from values that are assumed to be correct.
     /// Should only be used when the source of the inputs is trusted (e.g. deserialization).
-    pub fn new_unsafe(body: MastNodeId, digest: Word) -> Self {
+    pub(in crate::mast) fn new_unsafe(body: MastNodeId, digest: Word) -> Self {
         Self {
             body,
             digest,
