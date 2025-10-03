@@ -17,6 +17,7 @@
 - Fixed mismatched Push expectations in decoder syscall_block test ([#2207](https://github.com/0xMiden/miden-vm/pull/2207))
 - [BREAKING] `Memory::read_element()` now requires `&self` instead of `&mut self` ([#2237](https://github.com/0xMiden/miden-vm/issues/2237))
 - Added `proptest`'s `Arbitrary` instances for `Program`, fixed `Attribute` serialization ([#2224](https://github.com/0xMiden/miden-vm/pull/2224)).
+- `after_exit` decorators execute in the correct sequence in External nodes in the Fast processor ([#2247](https://github.com/0xMiden/miden-vm/pull/2247)).
 
 ## 0.18.1 (2025-10-02)
 
