@@ -1,3 +1,8 @@
+---
+title: "Miden VM Program Decoder"
+sidebar_position: 1
+---
+
 # Miden VM Program decoder
 
 Miden VM program decoder is responsible for ensuring that a program with a given [MAST root](../programs.md) is executed by the VM. As the VM executes a program, the decoder does the following:
@@ -110,7 +115,7 @@ The decoder is one of the more complex parts of the VM. It consists of the follo
 
 Decoder trace columns can be grouped into several logical sets of registers as illustrated below.
 
-![decoder_trace.png](../../assets/design/decoder/decoder_trace.png)
+![decoder_trace.png](../../img/design/decoder/decoder_trace.png)
 
 These registers have the following meanings:
 
@@ -130,7 +135,7 @@ To compute hashes of program blocks, the decoder relies on the [hash chiplet](..
 1. A simple 2-to-1 hash, where we provide a sequence of $8$ field elements, and get back $4$ field elements representing the result. Computing such a hash requires $8$ rows in the hash chiplet.
 2. A sequential hash of $n$ elements. Computing such a hash requires multiple absorption steps, and at each step $8$ field elements are absorbed into the hasher. Thus, computing a sequential hash of $n$ elements requires $\lceil {n/8} \rceil$ rows in the hash chiplet. At the end, we also get $4$ field elements representing the result.
 
-To make hashing requests to the hash chiplet and to read the results from it, we will need to divide out relevant values from the [chiplets bus](../chiplets/main.md#chiplets-bus) column $b_{chip}$ as described below.
+To make hashing requests to the hash chiplet and to read the results from it, we will need to divide out relevant values from the [chiplets bus](../chiplets/index.md#chiplets-bus) column $b_{chip}$ as described below.
 
 #### Simple 2-to-1 hash
 
@@ -191,7 +196,7 @@ The block stack table is also used to ensure that execution contexts are managed
 
 The table can be thought of as consisting of $11$ columns as shown below:
 
-![decoder_block_stack_table](../../assets/design/decoder/decoder_block_stack_table.png)
+![decoder_block_stack_table](../../img/design/decoder/decoder_block_stack_table.png)
 
 where:
 * The first column ($t_0$) contains the ID of the block.
@@ -218,7 +223,7 @@ When the VM starts executing a new program block, it adds hashes of the block's 
 
 The table can be thought of as consisting of $7$ columns as shown below:
 
-![block_hash_table](../../assets/design/decoder/block_hash_table.png)
+![block_hash_table](../../img/design/decoder/block_hash_table.png)
 
 where:
 * The first column ($t_0$) contains the ID of the block's parent. For program root, parent ID is $0$.
@@ -247,7 +252,7 @@ When the VM starts executing a new batch of operations, it adds all operation gr
 
 The table can be thought of as consisting of $3$ columns as shown below:
 
-![decoder_op_group_table](../../assets/design/decoder/decoder_op_group_table.png)
+![decoder_op_group_table](../../img/design/decoder/decoder_op_group_table.png)
 
 The meaning of the columns is as follows:
 
@@ -273,7 +278,7 @@ In this section we describe high-level semantics of executing all control flow o
 
 Before a `JOIN` operation is executed by the VM, the prover populates $h_0, ..., h_7$ registers with hashes of left and right children of the *join* program block as shown in the diagram below.
 
-![decoder_join_operation](../../assets/design/decoder/decoder_join_operation.png)
+![decoder_join_operation](../../img/design/decoder/decoder_join_operation.png)
 
 In the above diagram, `blk` is the ID of the *join* block which is about to be executed. `blk` is also the address of the hasher row in the auxiliary hasher table. `prnt` is the ID of the block's parent.
 
@@ -287,7 +292,7 @@ When the VM executes a `JOIN` operation, it does the following:
 
 Before a `SPLIT` operation is executed by the VM, the prover populates $h_0, ..., h_7$ registers with hashes of true and false branches of the *split* program block as shown in the diagram below.
 
-![decoder_split_operation](../../assets/design/decoder/decoder_split_operation.png)
+![decoder_split_operation](../../img/design/decoder/decoder_split_operation.png)
 
 In the above diagram, `blk` is the ID of the *split* block which is about to be executed. `blk` is also the address of the hasher row in the auxiliary hasher table. `prnt` is the ID of the block's parent.
 
@@ -304,7 +309,7 @@ When the VM executes a `SPLIT` operation, it does the following:
 
 Before a `LOOP` operation is executed by the VM, the prover populates $h_0, ..., h_3$ registers with hash of the loop's body as shown in the diagram below.
 
-![decoder_loop_operation](../../assets/design/decoder/decoder_loop_operation.png)
+![decoder_loop_operation](../../img/design/decoder/decoder_loop_operation.png)
 
 In the above diagram, `blk` is the ID of the *loop* block which is about to be executed. `blk` is also the address of the hasher row in the auxiliary hasher table. `prnt` is the ID of the block's parent.
 
@@ -320,7 +325,7 @@ When the VM executes a `LOOP` operation, it does the following:
 
 Before a `SPAN` operation is executed by the VM, the prover populates $h_0, ..., h_7$ registers with contents of the first operation batch of the basic block as shown in the diagram below. The prover also sets the group count register $gc$ to the total number of operation groups in the basic block.
 
-![decoder_span_block](../../assets/design/decoder/decoder_span_block.png)
+![decoder_span_block](../../img/design/decoder/decoder_span_block.png)
 
 In the above diagram, `blk` is the ID of the *basic* block which is about to be executed. `blk` is also the address of the hasher row in the auxiliary hasher table. `prnt` is the ID of the block's parent. `g0_op0` is the first operation of the batch, and `g_0'` is the first operation group of the batch with the first operation removed.
 
@@ -336,7 +341,7 @@ When the VM executes a `SPAN` operation, it does the following:
 
 #### DYN operation
 
-![decoder_dyn_operation](../../assets/design/decoder/decoder_dyn_operation.png)
+![decoder_dyn_operation](../../img/design/decoder/decoder_dyn_operation.png)
 
 In the above diagram, `blk` is the ID of the *dyn* block which is about to be executed. `blk` is also the address of the hasher row in the auxiliary hasher table. `p_addr` is the ID of the block's parent.
 
@@ -353,7 +358,7 @@ Note that unlike `DYNCALL`, the `fmp`, `ctx`, `in_syscall` and `fn_hash` registe
 
 #### DYNCALL operation
 
-![decoder_dyncall_operation](../../assets/design/decoder/decoder_dyncall_operation.png)
+![decoder_dyncall_operation](../../img/design/decoder/decoder_dyncall_operation.png)
 
 In the above diagram, `blk` is the ID of the *dyn* block which is about to be executed. `blk` is also the address of the hasher row in the auxiliary hasher table. `p_addr` is the ID of the block's parent.
 
@@ -376,7 +381,7 @@ Before an `END` operation is executed by the VM, the prover populates $h_0, ...,
 * $h_6$ is set to $1$ if the block is a *call* block. We denote this value as `f2`.
 * $h_7$ is set to $1$ if the block is a *syscall* block. We denote this value as `f3`.
 
-![decoder_end_operation](../../assets/design/decoder/decoder_end_operation.png)
+![decoder_end_operation](../../img/design/decoder/decoder_end_operation.png)
 
 In the above diagram, `blk` is the ID of the block which is about to finish executing. `prnt` is the ID of the block's parent.
 
@@ -395,7 +400,7 @@ When the VM executes an `END` operation, it does the following:
 
 Before a `HALT` operation is executed by the VM, the VM copies values in $h_0, ..., h_3$ registers to the next row as illustrated in the diagram below:
 
-![decoder_halt_operation](../../assets/design/decoder/decoder_halt_operation.png)
+![decoder_halt_operation](../../img/design/decoder/decoder_halt_operation.png)
 
 In the above diagram, `blk` is the ID of the block which is about to finish executing.
 
@@ -410,7 +415,7 @@ When the VM executes a `HALT` operation, it does the following:
 
 Before a `REPEAT` operation is executed by the VM, the VM copies values in registers $h_0, ..., h_4$ to the next row as shown in the diagram below.
 
-![decoder_repeat_operation](../../assets/design/decoder/decoder_repeat_operation.png)
+![decoder_repeat_operation](../../img/design/decoder/decoder_repeat_operation.png)
 
 In the above diagram, `blk` is the ID of the loop's body and `prnt` is the ID of the loop.
 
@@ -425,7 +430,7 @@ The effect of the above is that the VM needs to execute the loop's body again to
 
 Before a `RESPAN` operation is executed by the VM, the VM copies the ID of the current block `blk` and the number of remaining operation groups in the basic block to the next row, and sets the value of `in_span` column to $0$. The prover also sets the value of $h_1$ register for the next row to the ID of the current block's parent `prnt` as shown in the diagram below:
 
-![decoder_respan_operation](../../assets/design/decoder/decoder_respan_operation.png)
+![decoder_respan_operation](../../img/design/decoder/decoder_respan_operation.png)
 
 In the above diagram, `g0_op0` is the first operation of the new operation batch, and `g0'` is the first operation group of the batch with `g0_op0` operation removed.
 
@@ -454,7 +459,7 @@ Before a `CALL` operation, the prover populates $h_0, ..., h_3$ registers with t
 - resets the overflow address to 0 (which tracks the "address" of the last element added to the overflow table)
     - it is set to 0 to indicate that the overflow table is empty
 
-![decoder_call_operation](../../assets/design/decoder/decoder_call_operation.png)
+![decoder_call_operation](../../img/design/decoder/decoder_call_operation.png)
 
 In the above diagram, `blk` is the ID of the *call* block which is about to be executed. `blk` is also the address of the hasher row in the auxiliary hasher table. `prnt` is the ID of the block's parent.
 
@@ -477,7 +482,7 @@ Before a `SYSCALL` operation, the prover populates $h_0, ..., h_3$ registers wit
 - resets the overflow address to 0 (which tracks the "address" of the last element added to the overflow table)
     - it is set to 0 to indicate that the overflow table is empty
 
-![decoder_syscall_operation](../../assets/design/decoder/decoder_syscall_operation.png)
+![decoder_syscall_operation](../../img/design/decoder/decoder_syscall_operation.png)
 
 In the above diagram, `blk` is the ID of the *syscall* block which is about to be executed. `blk` is also the address of the hasher row in the auxiliary hasher table. `prnt` is the ID of the block's parent.
 
@@ -500,7 +505,7 @@ The sections below illustrate how different types of code blocks are decoded by 
 
 When decoding a *join* bock, the VM first executes a `JOIN` operation, then executes the first child block, followed by the second child block. Once the children of the *join* block are executed, the VM executes an `END` operation. This is illustrated in the diagram below.
 
-![decoder_join_block_decoding](../../assets/design/decoder/decoder_join_block_decoding.png)
+![decoder_join_block_decoding](../../img/design/decoder/decoder_join_block_decoding.png)
 
 As described previously, when the VM executes a `JOIN` operation, hashes of both children are added to the block hash table. These hashes are removed only when the `END` operations for the child blocks are executed. Thus, until both child blocks are executed, the block hash table is not cleared.
 
@@ -508,7 +513,7 @@ As described previously, when the VM executes a `JOIN` operation, hashes of both
 
 When decoding a *split* block, the decoder pops an element off the top of the stack, and if the popped element is $1$, executes the block corresponding to the `true branch`. If the popped element is $0$, the decoder executes the block corresponding to the `false branch`. This is illustrated on the diagram below.
 
-![decoder_split_block_decoding](../../assets/design/decoder/decoder_split_block_decoding.png)
+![decoder_split_block_decoding](../../img/design/decoder/decoder_split_block_decoding.png)
 
 As described previously, when the VM executes a `SPLIT` operation, only the hash of the branch to be executed is added to the block hash table. Thus, until the child block corresponding to the required branch is executed, the block hash table is not cleared.
 
@@ -529,7 +534,7 @@ To clear the block hash table, the VM needs to execute the loop body (executing 
 
 This process is illustrated on the diagram below.
 
-![decoder_loop_execution](../../assets/design/decoder/decoder_loop_execution.png)
+![decoder_loop_execution](../../img/design/decoder/decoder_loop_execution.png)
 
 The above steps are repeated until the top of the stack becomes $0$, at which point the VM executes the `END` operation. Since in the beginning we set `is_loop` column in the block stack table to $1$, $h_6$ column will be set to $1$ when the `END` operation is executed. Thus, executing the `END` operation will also remove the top value from the stack. If the removed value is not $0$, the operation will fail. Thus, the VM can exit the loop block only when the top of the stack is $0$.
 
@@ -537,7 +542,7 @@ The above steps are repeated until the top of the stack becomes $0$, at which po
 
 If the top of the stack is $0$, the VM still executes the `LOOP` operation. But unlike in the case when we need to enter the loop, the VM sets `is_loop` flag to $0$ in the block stack table, and does not add any rows to the block hash table. The last point means that the only possible operation to be executed after the `LOOP` operation is the `END` operation. This is illustrated in the diagram below.
 
-![decoder_loop_skipping](../../assets/design/decoder/decoder_loop_skipping.png)
+![decoder_loop_skipping](../../img/design/decoder/decoder_loop_skipping.png)
 
 Moreover, since we've set the `is_loop` flag to $0$, executing the `END` operation does not remove any items from the stack.
 
@@ -545,7 +550,7 @@ Moreover, since we've set the `is_loop` flag to $0$, executing the `END` operati
 
 When decoding a *dyn* bock, the VM first executes a `DYN` operation, then executes the child block dynamically specified by the top of the stack. Once the child of the *dyn* block has been executed, the VM executes an `END` operation. This is illustrated in the diagram below.
 
-![decoder_dyn_block_decoding](../../assets/design/decoder/decoder_dyn_block_decoding.png)
+![decoder_dyn_block_decoding](../../img/design/decoder/decoder_dyn_block_decoding.png)
 
 As described previously, when the VM executes a `DYN` operation, the hash of the child is added to the block hash table. This hash is removed only when the `END` operation for the child block is executed. Thus, until the child block corresponding to the dynamically specified target is executed, the block hash table is not cleared.
 
@@ -571,7 +576,7 @@ As described [here](../programs.md#basic-block), an operation group is a sequenc
 
 We can read opcodes from the group by simply subtracting them from the op group value and then dividing the result by $2^7$. Once the value of the op group reaches $0$, we know that all opcodes have been read. Graphically, this can be illustrated like so:
 
-![decoder_operation_group_decoding](../../assets/design/decoder/decoder_operation_group_decoding.png)
+![decoder_operation_group_decoding](../../img/design/decoder/decoder_operation_group_decoding.png)
 
 Notice that despite their appearance, `op bits` is actually $7$ separate registers, while `op group` is just a single register.
 
@@ -583,7 +588,7 @@ Operation batch flags are used to specify how many operation groups comprise a g
 
 To simplify the constraint system, the number of groups in a batch can be only one of the following values: $1$, $2$, $4$, and $8$. If the number of groups in a batch does not match one of these values, the batch is simply padded with `NOOP`'s (one `NOOP` per added group). Consider the diagram below.
 
-![decoder_OPERATION_batch_flags](../../assets/design/decoder/decoder_OPERATION_batch_flags.png)
+![decoder_OPERATION_batch_flags](../../img/design/decoder/decoder_OPERATION_batch_flags.png)
 
 In the above, the batch contains $3$ operation groups. To bring the count up to $4$, we consider the $4$-th group (i.e., $0$) to be a part of the batch. Since a numeric value for `NOOP` operation is $0$, op group value of $0$ can be interpreted as a single `NOOP`.
 
@@ -599,7 +604,7 @@ Operation batch flags (denoted as $c_0, c_1, c_2$), encode the number of groups 
 
 The simplest example of a *basic* block is a block with a single batch. This batch may contain up to $8$ operation groups (e.g., $g_0, ..., g_7$). Decoding of such a block is illustrated in the diagram below.
 
-![decoder_single_batch_span](../../assets/design/decoder/decoder_single_batch_span.png)
+![decoder_single_batch_span](../../img/design/decoder/decoder_single_batch_span.png)
 
 Before the VM starts processing this *basic* block, the prover populates registers $h_0, ..., h_7$ with operation groups $g_0, ..., g_7$. The prover also puts the total number of groups into the `group_count` register $gc$. In this case, the total number of groups is $8$.
 
@@ -613,7 +618,7 @@ When the VM executes a `SPAN` operation, it does the following:
 6. Sets `op bits` registers at the next step to the first operation of $g_0$, and also copies $g_0$ with the first operation removed (denoted as $g_0'$) to the next row.
 7. Adds groups $g_1, ..., g_7$ to the op group table. Thus, after the `SPAN` operation is executed, op group table looks as shown below.
 
-![decoder_op_group_table_after_span_op](../../assets/design/decoder/decoder_op_group_table_after_span_op.png)
+![decoder_op_group_table_after_span_op](../../img/design/decoder/decoder_op_group_table_after_span_op.png)
 
 Then, with every step the next operation is removed from $g_0$, and by step $9$, the value of $g_0$ is $0$. Once this happens, the VM does the following:
 
@@ -634,13 +639,13 @@ Notice that by the time we get to the `END` operation, all rows are removed from
 
 A *basic* block may contain an unlimited number of operation batches. As mentioned previously, to absorb a new batch into the hasher, the VM executes a `RESPAN` operation. The diagram below illustrates decoding of a *basic* block consisting of two operation batches.
 
-![decoder_multi_batch_span](../../assets/design/decoder/decoder_multi_batch_span.png)
+![decoder_multi_batch_span](../../img/design/decoder/decoder_multi_batch_span.png)
 
 Decoding of such a block will look very similar to decoding of the single-basic block described previously, but there also will be some differences.
 
 First, after the `SPAN` operation is executed, the op group table will look as follows:
 
-![decoder_op_group_table_multi_span](../../assets/design/decoder/decoder_op_group_table_multi_span.png)
+![decoder_op_group_table_multi_span](../../img/design/decoder/decoder_op_group_table_multi_span.png)
 
 Notice that while the same groups ($g_1, ..., g_7$) are added to the table, their positions now reflect the total number of groups in the *basic* block.
 
@@ -650,7 +655,7 @@ Incrementing value of `addr` register actually changes the ID of the *basic* blo
 
 Executing a `RESPAN` operation also adds groups $g_9, g_{10}, g_{11}$ to the op group table, which now would look as follows:
 
-![decoder_op_group_table_post_respan](../../assets/design/decoder/decoder_op_group_table_post_respan.png)
+![decoder_op_group_table_post_respan](../../img/design/decoder/decoder_op_group_table_post_respan.png)
 
 Then, the execution of the second batch proceeds in a manner similar to the first batch: we remove operations from the current op group, execute them, and when the value of the op group reaches $0$, we start executing the next group in the batch. Thus, by the time we get to the `END` operation, the op group table should be empty.
 
@@ -664,11 +669,11 @@ To achieve this, we treat immediate values in a manner similar to how we treat o
 
 The diagram below illustrates decoding of a *basic* block with $9$ operations one of which is a `PUSH` operation.
 
-![decoder_decoding_span_block_with_push](../../assets/design/decoder/decoder_decoding_span_block_with_push.png)
+![decoder_decoding_span_block_with_push](../../img/design/decoder/decoder_decoding_span_block_with_push.png)
 
 In the above, when the `SPAN` operation is executed, immediate value `imm0` will be added to the op group table, which will look as follows:
 
-![decoder_imm_vale_op_group_table](../../assets/design/decoder/decoder_imm_vale_op_group_table.png)
+![decoder_imm_vale_op_group_table](../../img/design/decoder/decoder_imm_vale_op_group_table.png)
 
 Then, when the `PUSH` operation is executed, the VM will do the following:
 
@@ -724,10 +729,10 @@ When this program is executed on the VM, the following happens:
 8. Finally, a sequence of `HALT` operations is executed until the length of the trace reaches a power of two.
 
 States of block hash and block stack tables after step 2:
-![decoder_state_block_hash_2](../../assets/design/decoder/decoder_state_block_hash_2.png)
+![decoder_state_block_hash_2](../../img/design/decoder/decoder_state_block_hash_2.png)
 
 States of block hash and block stack tables after step 4:
-![decoder_state_block_hash_4](../../assets/design/decoder/decoder_state_block_hash_4.png)
+![decoder_state_block_hash_4](../../img/design/decoder/decoder_state_block_hash_4.png)
 
 States of block hash and block stack tables after step 6:
-![decoder_state_block_hash_6](../../assets/design/decoder/decoder_state_block_hash_6.png)
+![decoder_state_block_hash_6](../../img/design/decoder/decoder_state_block_hash_6.png)

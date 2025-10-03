@@ -1,5 +1,10 @@
+---
+title: "Miden Standard Library"
+sidebar_position: 1
+---
+
 # Miden Standard Library
-Miden standard library provides a set of procedures which can be used by any Miden program. These procedures build on the core instruction set of [Miden assembly](../assembly/main.md) expanding the functionality immediately available to the user.
+Miden standard library provides a set of procedures which can be used by any Miden program. These procedures build on the core instruction set of [Miden assembly](../assembly/index.md) expanding the functionality immediately available to the user.
 
 The goals of Miden standard library are:
 * Provide highly-optimized and battle-tested implementations of commonly-used primitives.

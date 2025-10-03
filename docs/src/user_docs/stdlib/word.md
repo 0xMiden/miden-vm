@@ -1,7 +1,13 @@
+---
+title: "Word Procedures"
+sidebar_position: 8
+draft: true
+---
+
 # Word procedures
 
 Module `std::word` contains utilities for manipulating *words* &mdash; sequences of four *field elements*.
-See [Terms and notations](./main.md#Terms-and-notations) for more information.
+See [Terms and notations](./index.md#Terms-and-notations) for more information.
 
 | Procedure      | Description   |
 | -------------- | ------------- |

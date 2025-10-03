@@ -1,3 +1,8 @@
+---
+title: "Kernel ROM Chiplet"
+sidebar_position: 6
+---
+
 # Kernel ROM chiplet
 
 The kernel ROM enables executing predefined kernel procedures.
@@ -40,19 +45,19 @@ In this row, the chiplet responds to a bus request made by the verifier to ensur
 As $s_{first}$ is a selector, it must be binary.
 
 > $$
-s_{first}^2 - s_{first} = 0 \text{ | degree} = 2
-$$
+> s_{first}^2 - s_{first} = 0 \text{ | degree} = 2
+> $$
 
 
 The flag $s_{first}$ must be set to be 1 in the first row of the kernel ROM chiplet.
 Otherwise, the digest in this row would not be matched with one of the input procedure roots.
-This constraint is enforced in the last row of the previous trace, using selector columns from the [chiplets](main.md) module.
+This constraint is enforced in the last row of the previous trace, using selector columns from the [chiplets](index.md) module.
 More precisely, we use the virtual $f_{ACE}$ flag from the chiplet selectors $s_0, s_1, \ldots, s_{ACE}$ which is active in all rows of the previous (in this case ACE) chiplet,
 along with the selector $s_{ACE}$ which transitions from 0 to 1 in the last row, allowing us to target the first row of the kernel ROM trace.
 
 > $$
-f_{ACE} \cdot s_{ACE}' \cdot (1 - s_{first}') = 0 \text{ | degree} = \deg(f_{prev}) + 2
-$$
+> f_{ACE} \cdot s_{ACE}' \cdot (1 - s_{first}') = 0 \text{ | degree} = \deg(f_{prev}) + 2
+> $$
 
 _Note that this selector need not be multiplied by the kernel ROM chiplet flag $chip\_s_4$, since it is only active when the previous chiplet is active._
 
@@ -61,8 +66,8 @@ That is, when $s_{first}' = 0$, it must hold that $r_i = r_i'$.
 We disable this constraint in the last row of the kernel ROM chiplet trace by using the kernel ROM chiplet selector $s_4'$, since the latter transitions from 0 to 1 when the next chiplet starts.
 
 > $$
-(1 - s_4') \cdot (1 - s_{first}') \cdot (r_i' - r_i) = 0 \text{ | degree} = 3
-$$
+> (1 - s_4') \cdot (1 - s_{first}') \cdot (r_i' - r_i) = 0 \text{ | degree} = 3
+> $$
 
 _**Note**: we could technically remove the selector $(1-s_4')$ since $s_4$ and $s_{first}$ correspond to the same column. We include it here for completeness though._
 
@@ -91,14 +96,14 @@ v_{call} &= \alpha_0 + \alpha_1 \cdot \textsf{KERNEL\_PROC\_CALL} + \tilde{r}
 \end{aligned}
 $$
 
-Here, $\textsf{KERNEL\_PROC\_INIT}$ and $\textsf{KERNEL\_PROC\_CALL}$ are the unique [operation labels](./main.md#operation-labels) for the kernel ROM bus message.
+Here, $\textsf{KERNEL\_PROC\_INIT}$ and $\textsf{KERNEL\_PROC\_CALL}$ are the unique [operation labels](./index.md#operation-labels) for the kernel ROM bus message.
 
 Each row of the kernel ROM chiplet trace responds to either a procedure digest initialization or decoder call request.
 Since the $s_{first}$ column defines which type of response is sent to the bus, it is used to combine both requests into a single constraint given by
 
 > $$
-b'_{chip} = b_{chip} \cdot (s_{first} \cdot v_{init} + (1 - s_{first}) \cdot v_{call}) \text{ | degree} = 3.
-$$
+> b'_{chip} = b_{chip} \cdot (s_{first} \cdot v_{init} + (1 - s_{first}) \cdot v_{call}) \text{ | degree} = 3.
+> $$
 
 The above simplifies to
 
@@ -106,9 +111,9 @@ The above simplifies to
 - $s_{first} = 0$: $b'_{chip} = b_{chip} \cdot v_{call}$, when responding to a $\textsf{KERNEL\_PROC\_CALL}$ request.
 
 The kernel procedure digests initialization requests are implemented by imposing a boundary constraint in the first row of the $b_{chip}$ column.
-This is described in the [chiplets bus constraints](../chiplets/main.md#chiplets-bus-constraints).
+This is described in the [chiplets bus constraints](../chiplets/index.md#chiplets-bus-constraints).
 
 By using the bus to initialize the kernel ROM procedure digest in this way, the verifier only learns which procedures can be invoked but doesn't learn how often they were called, if at all.
 
-The full set of constraints applied to the $b_{chip}$ are described as part of the [chiplets bus constraints](../chiplets/main.md#chiplets-bus-constraints).
+The full set of constraints applied to the $b_{chip}$ are described as part of the [chiplets bus constraints](../chiplets/index.md#chiplets-bus-constraints).
 

@@ -1,3 +1,8 @@
+---
+title: "Lookup Arguments in Miden VM"
+sidebar_position: 1
+---
+
 # Lookup arguments in Miden VM
 
 Zero knowledge virtual machines frequently make use of lookup arguments to enable performance optimizations. Miden VM uses two types of arguments: multiset checks and a multivariate lookup based on logarithmic derivatives known as LogUp. A brief introduction to multiset checks can be found [here](./multiset.md). The description of LogUp can be found [here](https://eprint.iacr.org/2022/1530.pdf).
@@ -17,13 +22,13 @@ The second is done by reducing each operation to a lookup value and then using a
 Miden VM makes use of 6 virtual tables across 4 components, all of which are implemented via [multiset checks](./multiset.md#virtual-tables):
 
 - Stack:
-    - [Overflow table](../stack/main.md#overflow-table)
+    - [Overflow table](../stack/index.md#overflow-table)
 - Decoder:
-    - [Block stack table](../decoder/main.md#block-stack-table)
-    - [Block hash table](../decoder/main.md#block-hash-table)
-    - [Op group table](../decoder/main.md#op-group-table)
+    - [Block stack table](../decoder/index.md#block-stack-table)
+    - [Block hash table](../decoder/index.md#block-hash-table)
+    - [Op group table](../decoder/index.md#op-group-table)
 - Chiplets:
-    - [Chiplets virtual table](../chiplets/main.md#chiplets-virtual-table), which combines the following two tables into one:
+    - [Chiplets virtual table](../chiplets/index.md#chiplets-virtual-table), which combines the following two tables into one:
         - [Hash chiplet sibling table](../chiplets/hasher.md#sibling-table-constraints)
         - [Kernel ROM chiplet procedure table](../chiplets/kernel_rom.md#kernel-procedure-table-constraints)
 
@@ -39,7 +44,7 @@ This bus is typically implemented as some kind of lookup argument, and in Miden 
 
 Miden VM uses 2 communication buses:
 
-- The chiplets bus [$b_{chip}$](../chiplets/main.md#chiplets-bus), which communicates with all of the chiplets (Hash, Bitwise, Memory, and Kernel ROM). It is implemented using multiset checks.
+- The chiplets bus [$b_{chip}$](../chiplets/index.md#chiplets-bus), which communicates with all of the chiplets (Hash, Bitwise, Memory, and Kernel ROM). It is implemented using multiset checks.
 - The range checker bus [$b_{range}$](../range.md#communication-bus), which facilitates requests between the [stack](../stack/u32_ops.md) and [memory](../chiplets/memory.md) components and the [range checker](../range.md). It is implemented using LogUp.
 
 

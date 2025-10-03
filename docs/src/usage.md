@@ -1,3 +1,8 @@
+---
+title: "Usage"
+sidebar_position: 3
+---
+
 # Usage
 
 Before you can use Miden VM, you'll need to make sure you have Rust [installed](https://www.rust-lang.org/tools/install). Miden VM v0.19 requires Rust version **1.90** or later.
@@ -81,10 +86,10 @@ Currently, Miden VM can be executed with the following subcommands:
 - `run` - this will execute a Miden assembly program and output the result, but will not generate a proof of execution.
 - `prove` - this will execute a Miden assembly program, and will also generate a STARK proof of execution.
 - `verify` - this will verify a previously generated proof of execution for a given program.
-- `compile` - this will compile a Miden assembly program (i.e., build a program [MAST](../design/programs.md)) and outputs stats about the compilation process.
-- `debug` - this will instantiate a [Miden debugger](../tools/debugger.md) against the specified Miden assembly program and inputs.
+- `compile` - this will compile a Miden assembly program (i.e., build a program [MAST](./design/programs.md)) and outputs stats about the compilation process.
+- `debug` - this will instantiate a [Miden debugger](./tools/debugger.md) against the specified Miden assembly program and inputs.
 - `analyze` - this will run a Miden assembly program against specific inputs and will output stats about its execution.
-- `repl` - this will initiate the [Miden REPL](../tools/repl.md) tool.
+- `repl` - this will initiate the [Miden REPL](./tools/repl.md) tool.
 - `example` - this will execute a Miden assembly example program, generate a STARK proof of execution and verify it. Currently, it is possible to run `blake3` and `fibonacci` examples.
 
 All of the above subcommands require various parameters to be provided. To get more detailed help on what is needed for a given subcommand, you can run the following:
@@ -113,7 +118,7 @@ If the level is not specified, `warn` level is set as default.
 
 #### Enable Debugging features
 
-You can use the run command with `--debug` parameter to enable debugging with the [debug instruction](../user_docs/assembly/debugging.md) such as `debug.stack`:
+You can use the run command with `--debug` parameter to enable debugging with the [debug instruction](./user_docs/assembly/debugging.md) such as `debug.stack`:
 
 ```shell
 ./target/optimized/miden-vm run [path_to.masm] --debug
@@ -135,7 +140,7 @@ As described [here](https://0xMiden.github.io/miden-vm/intro/overview.html#input
 
 _Check out the [comparison example](https://github.com/0xMiden/examples/blob/main/examples/comparison.masm) to see how secret inputs work._
 
-After a program finishes executing, the elements that remain on the stack become the outputs of the program. Notice that the number of values on the operand stack at the end of the program execution can not be greater than 16, otherwise the program will return an error. The [`truncate_stack`](../user_docs/stdlib/sys.md) utility procedure from the standard library could be used to conveniently truncate the stack at the end of the program.
+After a program finishes executing, the elements that remain on the stack become the outputs of the program. Notice that the number of values on the operand stack at the end of the program execution can not be greater than 16, otherwise the program will return an error. The [`truncate_stack`](./user_docs/stdlib/sys.md) utility procedure from the standard library could be used to conveniently truncate the stack at the end of the program.
 
 ## Fibonacci example
 

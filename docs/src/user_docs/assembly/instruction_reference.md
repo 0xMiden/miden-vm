@@ -1,3 +1,8 @@
+---
+title: "Miden VM Instruction Reference"
+sidebar_position: 12
+---
+
 # Miden VM Instruction Reference
 
 This page provides a comprehensive reference for Miden Assembly instructions.
@@ -8,12 +13,12 @@ This page provides a comprehensive reference for Miden Assembly instructions.
 
 | Instruction                       | Stack Input | Stack Output | Cycles      | Notes                                                                      |
 | --------------------------------- | ----------- | ------------ | ----------- | -------------------------------------------------------------------------- |
-| `lte` <br> `lte.b`                | `[b, a, ...]` | `[c, ...]`   | 15 <br> 16   | $$c = \begin{cases} 1, & \text{if } a \leq b \\ 0, & \text{otherwise} \end{cases}$$ |
-| `lt` <br> `lt.b`                  | `[b, a, ...]` | `[c, ...]`   | 14 <br> 15   | $$c = \begin{cases} 1, & \text{if } a < b \\ 0, & \text{otherwise} \end{cases}$$ |
-| `gte` <br> `gte.b`                | `[b, a, ...]` | `[c, ...]`   | 16 <br> 17   | $$c = \begin{cases} 1, & \text{if } a \geq b \\ 0, & \text{otherwise} \end{cases}$$ |
-| `gt` <br> `gt.b`                  | `[b, a, ...]` | `[c, ...]`   | 15 <br> 16   | $$c = \begin{cases} 1, & \text{if } a > b \\ 0, & \text{otherwise} \end{cases}$$ |
-| `eq` <br> `eq.b`                  | `[b, a, ...]` | `[c, ...]`   | 1 <br> 1-2   | $$c = \begin{cases} 1, & \text{if } a = b \\ 0, & \text{otherwise} \end{cases}$$ |
-| `neq` <br> `neq.b`                | `[b, a, ...]` | `[c, ...]`   | 2 <br> 2-3   | $$c = \begin{cases} 1, & \text{if } a \neq b \\ 0, & \text{otherwise} \end{cases}$$ |
+| `lte` <br /> `lte.b`                | `[b, a, ...]` | `[c, ...]`   | 15 <br /> 16   | $$c = \begin{cases} 1, & \text{if } a \leq b \\ 0, & \text{otherwise} \end{cases}$$ |
+| `lt` <br /> `lt.b`                  | `[b, a, ...]` | `[c, ...]`   | 14 <br /> 15   | $$c = \begin{cases} 1, & \text{if } a < b \\ 0, & \text{otherwise} \end{cases}$$ |
+| `gte` <br /> `gte.b`                | `[b, a, ...]` | `[c, ...]`   | 16 <br /> 17   | $$c = \begin{cases} 1, & \text{if } a \geq b \\ 0, & \text{otherwise} \end{cases}$$ |
+| `gt` <br /> `gt.b`                  | `[b, a, ...]` | `[c, ...]`   | 15 <br /> 16   | $$c = \begin{cases} 1, & \text{if } a > b \\ 0, & \text{otherwise} \end{cases}$$ |
+| `eq` <br /> `eq.b`                  | `[b, a, ...]` | `[c, ...]`   | 1 <br /> 1-2   | $$c = \begin{cases} 1, & \text{if } a = b \\ 0, & \text{otherwise} \end{cases}$$ |
+| `neq` <br /> `neq.b`                | `[b, a, ...]` | `[c, ...]`   | 2 <br /> 2-3   | $$c = \begin{cases} 1, & \text{if } a \neq b \\ 0, & \text{otherwise} \end{cases}$$ |
 | `eqw`                             | `[A, B, ...]` | `[c, A, B, ...]` | 15          | $$c = \begin{cases} 1, & \text{if } a_i = b_i\ \forall i \in \{0,1,2,3\} \\ 0, & \text{otherwise} \end{cases}$$ |
 | `is_odd`                          | `[a, ...]`    | `[b, ...]`   | 5           | $$b = \begin{cases} 1, & \text{if $a$ is odd} \\ 0, & \text{otherwise} \end{cases}$$ |
 
@@ -32,14 +37,14 @@ This page provides a comprehensive reference for Miden Assembly instructions.
 
 | Instruction                             | Stack Input | Stack Output | Cycles             | Notes                                                                                                                          |
 | --------------------------------------- | ----------- | ------------ | ------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
-| `add` <br> `add.b`                       | `[b, a, ...]` | `[c, ...]`   | 1 <br> 1-2        | $c = (a + b) \bmod p$                                                                                                           |
-| `sub` <br> `sub.b`                       | `[b, a, ...]` | `[c, ...]`   | 2 <br> 2          | $c = (a - b) \bmod p$                                                                                                           |
-| `mul` <br> `mul.b`                       | `[b, a, ...]` | `[c, ...]`   | 1 <br> 2          | $c = (a \cdot b) \bmod p$                                                                                                           |
-| `div` <br> `div.b`                       | `[b, a, ...]` | `[c, ...]`   | 2 <br> 2          | $c = (a \cdot b^{-1}) \bmod p$. Fails if $b = 0$.                                                                                     |
+| `add` <br /> `add.b`                       | `[b, a, ...]` | `[c, ...]`   | 1 <br /> 1-2        | $c = (a + b) \bmod p$                                                                                                           |
+| `sub` <br /> `sub.b`                       | `[b, a, ...]` | `[c, ...]`   | 2 <br /> 2          | $c = (a - b) \bmod p$                                                                                                           |
+| `mul` <br /> `mul.b`                       | `[b, a, ...]` | `[c, ...]`   | 1 <br /> 2          | $c = (a \cdot b) \bmod p$                                                                                                           |
+| `div` <br /> `div.b`                       | `[b, a, ...]` | `[c, ...]`   | 2 <br /> 2          | $c = (a \cdot b^{-1}) \bmod p$. Fails if $b = 0$.                                                                                     |
 | `neg`                                   | `[a, ...]`  | `[b, ...]`   | 1                  | $b = -a \bmod p$                                                                                                                |
 | `inv`                                   | `[a, ...]`  | `[b, ...]`   | 1                  | $b = a^{-1} \bmod p$. Fails if $a = 0$.                                                                                           |
 | `pow2`                                  | `[a, ...]`  | `[b, ...]`   | 16                 | $b = 2^a$. Fails if $a > 63$.                                                                                                 |
-| `exp.uxx` <br> `exp.b`                   | `[b, a, ...]` | `[c, ...]`   | 9+xx <br> 9+log2(b) | $c = a^b$. Fails if $xx$ is outside $[0, 63)$. `exp` is `exp.u64` (73 cycles).                                                |
+| `exp.uxx` <br /> `exp.b`                   | `[b, a, ...]` | `[c, ...]`   | 9+xx <br /> 9+log2(b) | $c = a^b$. Fails if $xx$ is outside $[0, 63)$. `exp` is `exp.u64` (73 cycles).                                                |
 | `ilog2`                                 | `[a, ...]`  | `[b, ...]`   | 44                 | $b = \lfloor \log_2(a) \rfloor$. Fails if $a = 0$.                                                                                       |
 | `not`                                   | `[a, ...]`  | `[b, ...]`   | 1                  | $b = 1 - a$. Fails if $a > 1$.                                                                                                |
 | `and`                                   | `[b, a, ...]` | `[c, ...]`   | 1                  | $c = a \cdot b$. Fails if $\max(a, b) > 1$.                                                                                        |
@@ -52,10 +57,10 @@ All operations in this section are defined over the quadratic extension field $\
 
 | Instruction | Stack Input           | Stack Output    | Cycles | Notes                                                                                       |
 | ----------- | --------------------- | --------------- | ------ | ------------------------------------------------------------------------------------------- |
-| `ext2add`   | `[b1, b0, a1, a0, ...]` | `[c1, c0, ...]`   | 5      | $c1 = (a1 + b1) \bmod p$ <br> $c0 = (a0 + b0) \bmod p$                                       |
-| `ext2sub`   | `[b1, b0, a1, a0, ...]` | `[c1, c0, ...]`   | 7      | $c1 = (a1 - b1) \bmod p$ <br> $c0 = (a0 - b0) \bmod p$                                       |
-| `ext2mul`   | `[b1, b0, a1, a0, ...]` | `[c1, c0, ...]`   | 3      | $c1 = (a0 + a1)(b0 + b1) - a0b0 \bmod p$ <br> $c0 = a0b0 - 2a1b1 \bmod p$                     |
-| `ext2neg`   | `[a1, a0, ...]`         | `[a1', a0', ...]` | 4      | $a1' = -a1$ <br> $a0' = -a0$                                                                   |
+| `ext2add`   | `[b1, b0, a1, a0, ...]` | `[c1, c0, ...]`   | 5      | $c1 = (a1 + b1) \bmod p$ <br /> $c0 = (a0 + b0) \bmod p$                                       |
+| `ext2sub`   | `[b1, b0, a1, a0, ...]` | `[c1, c0, ...]`   | 7      | $c1 = (a1 - b1) \bmod p$ <br /> $c0 = (a0 - b0) \bmod p$                                       |
+| `ext2mul`   | `[b1, b0, a1, a0, ...]` | `[c1, c0, ...]`   | 3      | $c1 = (a0 + a1)(b0 + b1) - a0b0 \bmod p$ <br /> $c0 = a0b0 - 2a1b1 \bmod p$                     |
+| `ext2neg`   | `[a1, a0, ...]`         | `[a1', a0', ...]` | 4      | $a1' = -a1$ <br /> $a0' = -a0$                                                                   |
 | `ext2inv`   | `[a1, a0, ...]`         | `[a1', a0', ...]` | 8      | $a' = a^{-1}$ in $\mathbb{F}_p[x]/(x^2 - x + 2)$. Fails if $a = 0$.                           |
 | `ext2div`   | `[b1, b0, a1, a0, ...]` | `[c1, c0, ...]`   | 11     | $c = a \cdot b^{-1}$ in $\mathbb{F}_p[x]/(x^2 - x + 2)$. Fails if $b = 0$.                    |
 
@@ -81,32 +86,32 @@ Operations on 32-bit integers. Most instructions will fail or have undefined beh
 
 | Instruction                                   | Stack Input    | Stack Output  | Cycles    | Notes                                                                                                                            |
 | --------------------------------------------- | -------------- | ------------- | --------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `u32overflowing_add` <br> `u32overflowing_add.b` | `[b, a, ...]`  | `[d, c, ...]` | 1 <br> 2-3 | $c = (a + b) \bmod 2^{32}$, $$d = \begin{cases} 1, & \text{if } (a + b) \geq 2^{32} \\ 0, & \text{otherwise} \end{cases}$$. Undefined if $\max(a,b) \geq 2^{32}$. |
-| `u32wrapping_add` <br> `u32wrapping_add.b`     | `[b, a, ...]`  | `[c, ...]`    | 2 <br> 3-4 | $c = (a + b) \bmod 2^{32}$. Undefined if $\max(a,b) \geq 2^{32}$.                                                                         |
+| `u32overflowing_add` <br /> `u32overflowing_add.b` | `[b, a, ...]`  | `[d, c, ...]` | 1 <br /> 2-3 | $c = (a + b) \bmod 2^{32}$, $$d = \begin{cases} 1, & \text{if } (a + b) \geq 2^{32} \\ 0, & \text{otherwise} \end{cases}$$. Undefined if $\max(a,b) \geq 2^{32}$. |
+| `u32wrapping_add` <br /> `u32wrapping_add.b`     | `[b, a, ...]`  | `[c, ...]`    | 2 <br /> 3-4 | $c = (a + b) \bmod 2^{32}$. Undefined if $\max(a,b) \geq 2^{32}$.                                                                         |
 | `u32overflowing_add3`                         | `[c, b, a, ...]` | `[e, d, ...]` | 1         | $d = (a+b+c) \bmod 2^{32}$, $e = \lfloor (a+b+c)/2^{32} \rfloor$. Undefined if $\max(a,b,c) \geq 2^{32}$.                                          |
 | `u32wrapping_add3`                            | `[c, b, a, ...]` | `[d, ...]`    | 2         | $d = (a+b+c) \bmod 2^{32}$. Undefined if $\max(a,b,c) \geq 2^{32}$.                                                                      |
-| `u32overflowing_sub` <br> `u32overflowing_sub.b` | `[b, a, ...]`  | `[d, c, ...]` | 1 <br> 2-3 | $c = (a - b) \bmod 2^{32}$, $$d = \begin{cases} 1, & \text{if } a < b \\ 0, & \text{otherwise} \end{cases}$$. Undefined if $\max(a,b) \geq 2^{32}$.                                     |
-| `u32wrapping_sub` <br> `u32wrapping_sub.b`     | `[b, a, ...]`  | `[c, ...]`    | 2 <br> 3-4 | $c = (a - b) \bmod 2^{32}$. Undefined if $\max(a,b) \geq 2^{32}$.                                                                         |
-| `u32overflowing_mul` <br> `u32overflowing_mul.b` | `[b, a, ...]`  | `[d, c, ...]` | 1 <br> 2-3 | $c = (a \cdot b) \bmod 2^{32}$, $d = \lfloor(a \cdot b) / 2^{32}\rfloor$. Undefined if $\max(a,b) \geq 2^{32}$.                                                 |
-| `u32wrapping_mul` <br> `u32wrapping_mul.b`     | `[b, a, ...]`  | `[c, ...]`    | 2 <br> 3-4 | $c = (a \cdot b) \bmod 2^{32}$. Undefined if $\max(a,b) \geq 2^{32}$.                                                                           |
+| `u32overflowing_sub` <br /> `u32overflowing_sub.b` | `[b, a, ...]`  | `[d, c, ...]` | 1 <br /> 2-3 | $c = (a - b) \bmod 2^{32}$, $$d = \begin{cases} 1, & \text{if } a < b \\ 0, & \text{otherwise} \end{cases}$$. Undefined if $\max(a,b) \geq 2^{32}$.                                     |
+| `u32wrapping_sub` <br /> `u32wrapping_sub.b`     | `[b, a, ...]`  | `[c, ...]`    | 2 <br /> 3-4 | $c = (a - b) \bmod 2^{32}$. Undefined if $\max(a,b) \geq 2^{32}$.                                                                         |
+| `u32overflowing_mul` <br /> `u32overflowing_mul.b` | `[b, a, ...]`  | `[d, c, ...]` | 1 <br /> 2-3 | $c = (a \cdot b) \bmod 2^{32}$, $d = \lfloor(a \cdot b) / 2^{32}\rfloor$. Undefined if $\max(a,b) \geq 2^{32}$.                                                 |
+| `u32wrapping_mul` <br /> `u32wrapping_mul.b`     | `[b, a, ...]`  | `[c, ...]`    | 2 <br /> 3-4 | $c = (a \cdot b) \bmod 2^{32}$. Undefined if $\max(a,b) \geq 2^{32}$.                                                                           |
 | `u32overflowing_madd`                         | `[b, a, c, ...]` | `[e, d, ...]` | 1         | $d = (a \cdot b+c) \bmod 2^{32}$, $e = \lfloor(a \cdot b+c) / 2^{32}\rfloor$. Undefined if $\max(a,b,c) \geq 2^{32}$.                                          |
 | `u32wrapping_madd`                            | `[b, a, c, ...]` | `[d, ...]`    | 2         | $d = (a \cdot b+c) \bmod 2^{32}$. Undefined if $\max(a,b,c) \geq 2^{32}$.                                                                      |
-| `u32div` <br> `u32div.b`                        | `[b, a, ...]`  | `[c, ...]`    | 2 <br> 3-4 | $c = \lfloor a/b \rfloor$. Fails if $b=0$. Undefined if $\max(a,b) \geq 2^{32}$.                                                               |
-| `u32mod` <br> `u32mod.b`                        | `[b, a, ...]`  | `[c, ...]`    | 3 <br> 4-5 | $c = a \bmod b$. Fails if $b=0$. Undefined if $\max(a,b) \geq 2^{32}$.                                                                 |
-| `u32divmod` <br> `u32divmod.b`                  | `[b, a, ...]`  | `[d, c, ...]` | 1 <br> 2-3 | $c = \lfloor a/b \rfloor$, $d = a \bmod b$. Fails if $b=0$. Undefined if $\max(a,b) \geq 2^{32}$.                                               |
+| `u32div` <br /> `u32div.b`                        | `[b, a, ...]`  | `[c, ...]`    | 2 <br /> 3-4 | $c = \lfloor a/b \rfloor$. Fails if $b=0$. Undefined if $\max(a,b) \geq 2^{32}$.                                                               |
+| `u32mod` <br /> `u32mod.b`                        | `[b, a, ...]`  | `[c, ...]`    | 3 <br /> 4-5 | $c = a \bmod b$. Fails if $b=0$. Undefined if $\max(a,b) \geq 2^{32}$.                                                                 |
+| `u32divmod` <br /> `u32divmod.b`                  | `[b, a, ...]`  | `[d, c, ...]` | 1 <br /> 2-3 | $c = \lfloor a/b \rfloor$, $d = a \bmod b$. Fails if $b=0$. Undefined if $\max(a,b) \geq 2^{32}$.                                               |
 
 ### Bitwise Operations
 
 | Instruction                       | Stack Input | Stack Output | Cycles    | Notes                                                                                             |
 | --------------------------------- | ----------- | ------------ | --------- | ------------------------------------------------------------------------------------------------- |
-| `u32and` <br> `u32and.b`           | `[b, a, ...]` | `[c, ...]`   | 1 <br> 2  | Bitwise AND. Fails if $\max(a,b) \geq 2^{32}$.                                                         |
-| `u32or` <br> `u32or.b`             | `[b, a, ...]` | `[c, ...]`   | 6 <br> 7  | Bitwise OR. Fails if $\max(a,b) \geq 2^{32}$.                                                          |
-| `u32xor` <br> `u32xor.b`           | `[b, a, ...]` | `[c, ...]`   | 1 <br> 2  | Bitwise XOR. Fails if $\max(a,b) \geq 2^{32}$.                                                         |
-| `u32not` <br> `u32not.a`           | `[a, ...]`  | `[b, ...]`   | 5 <br> 6  | Bitwise NOT. Fails if $a \geq 2^{32}$.                                                                |
-| `u32shl` <br> `u32shl.b`           | `[b, a, ...]` | `[c, ...]`   | 18 <br> 3 | $c = (a \cdot 2^b) \bmod 2^{32}$. Undefined if $a \geq 2^{32}$ or $b > 31$.                                  |
-| `u32shr` <br> `u32shr.b`           | `[b, a, ...]` | `[c, ...]`   | 18 <br> 3 | $c = \lfloor a / 2^b \rfloor$. Undefined if $a \geq 2^{32}$ or $b > 31$.                                      |
-| `u32rotl` <br> `u32rotl.b`         | `[b, a, ...]` | `[c, ...]`   | 18 <br> 3 | Rotate left. Undefined if $a \geq 2^{32}$ or $b > 31$.                                                  |
-| `u32rotr` <br> `u32rotr.b`         | `[b, a, ...]` | `[c, ...]`   | 23 <br> 3 | Rotate right. Undefined if $a \geq 2^{32}$ or $b > 31$.                                                 |
+| `u32and` <br /> `u32and.b`           | `[b, a, ...]` | `[c, ...]`   | 1 <br /> 2  | Bitwise AND. Fails if $\max(a,b) \geq 2^{32}$.                                                         |
+| `u32or` <br /> `u32or.b`             | `[b, a, ...]` | `[c, ...]`   | 6 <br /> 7  | Bitwise OR. Fails if $\max(a,b) \geq 2^{32}$.                                                          |
+| `u32xor` <br /> `u32xor.b`           | `[b, a, ...]` | `[c, ...]`   | 1 <br /> 2  | Bitwise XOR. Fails if $\max(a,b) \geq 2^{32}$.                                                         |
+| `u32not` <br /> `u32not.a`           | `[a, ...]`  | `[b, ...]`   | 5 <br /> 6  | Bitwise NOT. Fails if $a \geq 2^{32}$.                                                                |
+| `u32shl` <br /> `u32shl.b`           | `[b, a, ...]` | `[c, ...]`   | 18 <br /> 3 | $c = (a \cdot 2^b) \bmod 2^{32}$. Undefined if $a \geq 2^{32}$ or $b > 31$.                                  |
+| `u32shr` <br /> `u32shr.b`           | `[b, a, ...]` | `[c, ...]`   | 18 <br /> 3 | $c = \lfloor a / 2^b \rfloor$. Undefined if $a \geq 2^{32}$ or $b > 31$.                                      |
+| `u32rotl` <br /> `u32rotl.b`         | `[b, a, ...]` | `[c, ...]`   | 18 <br /> 3 | Rotate left. Undefined if $a \geq 2^{32}$ or $b > 31$.                                                  |
+| `u32rotr` <br /> `u32rotr.b`         | `[b, a, ...]` | `[c, ...]`   | 23 <br /> 3 | Rotate right. Undefined if $a \geq 2^{32}$ or $b > 31$.                                                 |
 | `u32popcnt`                       | `[a, ...]`    | `[b, ...]`   | 33        | Population count (Hamming weight). Undefined if $a \geq 2^{32}$.                                        |
 | `u32clz`                          | `[a, ...]`    | `[b, ...]`   | 42        | Count leading zeros. Undefined if $a \geq 2^{32}$.                                                      |
 | `u32ctz`                          | `[a, ...]`    | `[b, ...]`   | 34        | Count trailing zeros. Undefined if $a \geq 2^{32}$.                                                     |
@@ -117,12 +122,12 @@ Operations on 32-bit integers. Most instructions will fail or have undefined beh
 
 | Instruction                     | Stack Input | Stack Output | Cycles    | Notes                                                                                             |
 | ------------------------------- | ----------- | ------------ | --------- | ------------------------------------------------------------------------------------------------- |
-| `u32lt` <br> `u32lt.b`           | `[b, a, ...]` | `[c, ...]`   | 3 <br> 4  | $$c = \begin{cases} 1, & \text{if } a < b \\ 0, & \text{otherwise} \end{cases}$$. Undefined if $\max(a,b) \geq 2^{32}$.                                   |
-| `u32lte` <br> `u32lte.b`         | `[b, a, ...]` | `[c, ...]`   | 5 <br> 6  | $$c = \begin{cases} 1, & \text{if } a \leq b \\ 0, & \text{otherwise} \end{cases}$$. Undefined if $\max(a,b) \geq 2^{32}$.                                  |
-| `u32gt` <br> `u32gt.b`           | `[b, a, ...]` | `[c, ...]`   | 4 <br> 5  | $$c = \begin{cases} 1, & \text{if } a > b \\ 0, & \text{otherwise} \end{cases}$$. Undefined if $\max(a,b) \geq 2^{32}$.                                   |
-| `u32gte` <br> `u32gte.b`         | `[b, a, ...]` | `[c, ...]`   | 4 <br> 5  | $$c = \begin{cases} 1, & \text{if } a \geq b \\ 0, & \text{otherwise} \end{cases}$$. Undefined if $\max(a,b) \geq 2^{32}$.                                  |
-| `u32min` <br> `u32min.b`         | `[b, a, ...]` | `[c, ...]`   | 8 <br> 9  | $c = \min(a,b)$. Undefined if $\max(a,b) \geq 2^{32}$.                                                  |
-| `u32max` <br> `u32max.b`         | `[b, a, ...]` | `[c, ...]`   | 9 <br> 10 | $c = \max(a,b)$. Undefined if $\max(a,b) \geq 2^{32}$.                                                  |
+| `u32lt` <br /> `u32lt.b`           | `[b, a, ...]` | `[c, ...]`   | 3 <br /> 4  | $$c = \begin{cases} 1, & \text{if } a < b \\ 0, & \text{otherwise} \end{cases}$$. Undefined if $\max(a,b) \geq 2^{32}$.                                   |
+| `u32lte` <br /> `u32lte.b`         | `[b, a, ...]` | `[c, ...]`   | 5 <br /> 6  | $$c = \begin{cases} 1, & \text{if } a \leq b \\ 0, & \text{otherwise} \end{cases}$$. Undefined if $\max(a,b) \geq 2^{32}$.                                  |
+| `u32gt` <br /> `u32gt.b`           | `[b, a, ...]` | `[c, ...]`   | 4 <br /> 5  | $$c = \begin{cases} 1, & \text{if } a > b \\ 0, & \text{otherwise} \end{cases}$$. Undefined if $\max(a,b) \geq 2^{32}$.                                   |
+| `u32gte` <br /> `u32gte.b`         | `[b, a, ...]` | `[c, ...]`   | 4 <br /> 5  | $$c = \begin{cases} 1, & \text{if } a \geq b \\ 0, & \text{otherwise} \end{cases}$$. Undefined if $\max(a,b) \geq 2^{32}$.                                  |
+| `u32min` <br /> `u32min.b`         | `[b, a, ...]` | `[c, ...]`   | 8 <br /> 9  | $c = \min(a,b)$. Undefined if $\max(a,b) \geq 2^{32}$.                                                  |
+| `u32max` <br /> `u32max.b`         | `[b, a, ...]` | `[c, ...]`   | 9 <br /> 10 | $c = \max(a,b)$. Undefined if $\max(a,b) \geq 2^{32}$.                                                  |
 
 ## Stack Manipulation
 
@@ -180,7 +185,7 @@ Instructions for moving data between the stack and other sources like program co
 | ---------------- | ------------------ | ---------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `adv_push.n`     | `[ ... ]`          | `[a, ...]`       | n      | Pops `n` values from advice stack to operand stack (1st popped is deepest). Valid `n` in `1..=16`. Fails if advice stack has `< n` values.                        |
 | `adv_loadw`      | `[0,0,0,0, ...]`   | `[A, ...]`       | 1      | Pops word `A` (4 elements) from advice stack, overwrites top word of operand stack. Fails if advice stack has `< 4` values.                                       |
-| `adv_pipe`       | `[C,B,A,a,...]`    | `[E,D,A,a',...]` | 1      | Pops 2 words `[D,E]` from advice stack. Overwrites top 2 words of operand stack. Writes `[D,E]` to memory at `a` and `a+1`. `a' <- a+2`. Fails if advice stack has `< 8` values. |
+| `adv_pipe`       | `[C,B,A,a,...]`    | `[E,D,A,a',...]` | 1      | Pops 2 words `[D,E]` from advice stack. Overwrites top 2 words of operand stack. Writes `[D,E]` to memory at `a` and `a+1`. `a' ← a+2`. Fails if advice stack has `< 8` values. |
 
 #### Injecting into Advice Provider (System Events - 3 cycles)
 
@@ -196,11 +201,11 @@ Instructions for moving data between the stack and other sources like program co
 
 | Instruction           | Stack Input          | Stack Output         | Notes                                                                                    |
 | --------------------- | -------------------- | -------------------- | ---------------------------------------------------------------------------------------- |
-| `adv.insert_mem`      | `[K, a, b, ... ]`    | `[K, a, b, ... ]`    | `advice_map[K] <- mem[a..b]`.                                                            |
-| `adv.insert_hdword`   | `[B, A, ... ]`       | `[B, A, ... ]`       | `K <- hash(A \|\| B, domain=0)`. `advice_map[K] <- [A,B]`.                               |
-| `adv.insert_hdword_d` | `[B, A, d, ... ]`    | `[B, A, d, ... ]`    | `K <- hash(A \|\| B, domain=d)`. `advice_map[K] <- [A,B]`.                               |
-| `adv.insert_hqword`   | `[D, C, B, A, ... ]` | `[D, C, B, A, ... ]` | `K <- hash(hash(hash(A \|\| B) \|\| C) \|\| D), domain=0`. `advice_map[K] <- [A,B,C,D]`. |
-| `adv.insert_hperm`    | `[B, A, C, ...]`     | `[B, A, C, ...]`     | `K <- permute(C,A,B).digest`. `advice_map[K] <- [A,B]`.                                  |
+| `adv.insert_mem`      | `[K, a, b, ... ]`    | `[K, a, b, ... ]`    | `advice_map[K] ← mem[a..b]`.                                                            |
+| `adv.insert_hdword`   | `[B, A, ... ]`       | `[B, A, ... ]`       | `K ← hash(A \|\| B, domain=0)`. `advice_map[K] ← [A,B]`.                               |
+| `adv.insert_hdword_d` | `[B, A, d, ... ]`    | `[B, A, d, ... ]`    | `K ← hash(A \|\| B, domain=d)`. `advice_map[K] ← [A,B]`.                               |
+| `adv.insert_hqword`   | `[D, C, B, A, ... ]` | `[D, C, B, A, ... ]` | `K ← hash(hash(hash(A \|\| B) \|\| C) \|\| D), domain=0`. `advice_map[K] ← [A,B,C,D]`. |
+| `adv.insert_hperm`    | `[B, A, C, ...]`     | `[B, A, C, ...]`     | `K ← permute(C,A,B).digest`. `advice_map[K] ← [A,B]`.                                  |
 
 ### Random Access Memory
 
@@ -210,11 +215,11 @@ Memory is 0-initialized. Addresses are absolute `[0, 2^32)`. Locals are stored a
 
 | Instruction                       | Stack Input           | Stack Output     | Cycles    | Notes                                                                                                                                                                                                  |
 | --------------------------------- | --------------------- | ---------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `mem_load` <br> `mem_load.a`       | `[a, ... ]`           | `[v, ... ]`      | 1 <br> 2  | `v <- mem[a]`. Pushes element from `mem[a]`. If `a` on stack, it's popped. Fails if `a >= 2^32`.                                                                                                       |
-| `mem_loadw` <br> `mem_loadw.a`     | `[a, 0,0,0,0,...]`    | `[A, ... ]`      | 1 <br> 2  | `A <- mem[a..a+3]` (word). Overwrites top 4 stack elements (`mem[a+3]` is top). If `a` on stack, it's popped. Fails if `a >= 2^32` or `a` not multiple of 4.                                         |
-| `mem_store` <br> `mem_store.a`     | `[a, v, ... ]`        | `[ ... ]`        | 2 <br> 3-4| `mem[a] <- v`. Pops `v` to `mem[a]`. If `a` on stack, it's popped. Fails if `a >= 2^32`.                                                                                                             |
-| `mem_storew` <br> `mem_storew.a`   | `[a, A, ... ]`        | `[A, ... ]`      | 1 <br> 2-3| `mem[a..a+3] <- A`. Stores word `A` (top stack element at `mem[a+3]`). If `a` on stack, it's popped. Fails if `a >= 2^32` or `a` not multiple of 4.                                                  |
-| `mem_stream`                      | `[C, B, A, a, ... ]`  | `[E,D,A,a',...]` | 1         | `[E,D] <- [mem[a..a+3], mem[a+4..a+7]]`. `a' <- a+8`. Reads 2 sequential words from memory to top of stack.                                                                                              |
+| `mem_load` <br /> `mem_load.a`       | `[a, ... ]`           | `[v, ... ]`      | 1 <br /> 2  | `v ← mem[a]`. Pushes element from `mem[a]`. If `a` on stack, it's popped. Fails if `a >= 2^32`.                                                                                                       |
+| `mem_loadw` <br /> `mem_loadw.a`     | `[a, 0,0,0,0,...]`    | `[A, ... ]`      | 1 <br /> 2  | `A ← mem[a..a+3]` (word). Overwrites top 4 stack elements (`mem[a+3]` is top). If `a` on stack, it's popped. Fails if `a >= 2^32` or `a` not multiple of 4.                                         |
+| `mem_store` <br /> `mem_store.a`     | `[a, v, ... ]`        | `[ ... ]`        | 2 <br /> 3-4| `mem[a] ← v`. Pops `v` to `mem[a]`. If `a` on stack, it's popped. Fails if `a >= 2^32`.                                                                                                             |
+| `mem_storew` <br /> `mem_storew.a`   | `[a, A, ... ]`        | `[A, ... ]`      | 1 <br /> 2-3| `mem[a..a+3] ← A`. Stores word `A` (top stack element at `mem[a+3]`). If `a` on stack, it's popped. Fails if `a >= 2^32` or `a` not multiple of 4.                                                  |
+| `mem_stream`                      | `[C, B, A, a, ... ]`  | `[E,D,A,a',...]` | 1         | `[E,D] ← [mem[a..a+3], mem[a+4..a+7]]`. `a' ← a+8`. Reads 2 sequential words from memory to top of stack.                                                                                              |
 
 #### Procedure Locals (Context-Specific)
 
@@ -222,10 +227,10 @@ Locals are not 0-initialized. Max $2^{16}$ locals per procedure, $2^{30}$ total.
 
 | Instruction        | Stack Input        | Stack Output | Cycles    | Notes                                                                                                                                                                      |
 | ------------------ | ------------------ | ------------ | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `loc_load.i`       | `[ ... ]`          | `[v, ... ]`  | 3-4       | `v <- local[i]`. Pushes element from local memory at index `i`.                                                                                                            |
-| `loc_loadw.i`      | `[0,0,0,0, ...]`   | `[A, ... ]`  | 3-4       | `A <- local[i..i+3]`. Reads word, `local[i+3]` is top of stack. Fails if `i` not multiple of 4.                                                                           |
-| `loc_store.i`      | `[v, ... ]`        | `[ ... ]`    | 4-5       | `local[i] <- v`. Pops `v` to local memory at index `i`.                                                                                                                    |
-| `loc_storew.i`     | `[A, ... ]`        | `[A, ... ]`  | 3-4       | `local[i..i+3] <- A`. Stores word, top stack element at `local[i+3]`.                                                                                                      |
+| `loc_load.i`       | `[ ... ]`          | `[v, ... ]`  | 3-4       | `v ← local[i]`. Pushes element from local memory at index `i`.                                                                                                            |
+| `loc_loadw.i`      | `[0,0,0,0, ...]`   | `[A, ... ]`  | 3-4       | `A ← local[i..i+3]`. Reads word, `local[i+3]` is top of stack. Fails if `i` not multiple of 4.                                                                           |
+| `loc_store.i`      | `[v, ... ]`        | `[ ... ]`    | 4-5       | `local[i] ← v`. Pops `v` to local memory at index `i`.                                                                                                                    |
+| `loc_storew.i`     | `[A, ... ]`        | `[A, ... ]`  | 3-4       | `local[i..i+3] ← A`. Stores word, top stack element at `local[i+3]`.                                                                                                      |
 
 ## Cryptographic Operations
 
@@ -235,13 +240,13 @@ Common cryptographic operations, including hashing and Merkle tree manipulations
 
 | Instruction     | Stack Input         | Stack Output      | Cycles | Notes                                                                                                                                                                                          |
 | --------------- | ------------------- | ----------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `hash`          | `[A, ...]`          | `[B, ...]`        | 20     | `B <- hash(A)`. 1-to-1 Rescue Prime Optimized hash.                                                                                                                                            |
-| `hperm`         | `[B, A, C, ...]`    | `[F, E, D, ...]`  | 1      | `D,E,F <- permute(C,A,B)`. Rescue Prime Optimized permutation. `C`=capacity, `A,B`=rate, `E`=digest.                                                                                             |
-| `hmerge`        | `[B, A, ...]`       | `[C, ...]`        | 16     | `C <- hash(A,B)`. 2-to-1 Rescue Prime Optimized hash.                                                                                                                                          |
+| `hash`          | `[A, ...]`          | `[B, ...]`        | 20     | `B ← hash(A)`. 1-to-1 Rescue Prime Optimized hash.                                                                                                                                            |
+| `hperm`         | `[B, A, C, ...]`    | `[F, E, D, ...]`  | 1      | `D,E,F ← permute(C,A,B)`. Rescue Prime Optimized permutation. `C`=capacity, `A,B`=rate, `E`=digest.                                                                                             |
+| `hmerge`        | `[B, A, ...]`       | `[C, ...]`        | 16     | `C ← hash(A,B)`. 2-to-1 Rescue Prime Optimized hash.                                                                                                                                          |
 | `mtree_get`     | `[d, i, R, ...]`    | `[V, R, ...]`     | 9      | Verifies Merkle path for node `V` at depth `d`, index `i` for tree `R` (from advice provider), returns `V`.                                                                                      |
 | `mtree_set`     | `[d, i, R, V', ...]`| `[V, R', ...]`    | 29     | Updates node in tree `R` at `d,i` to `V'`. Returns old value `V` and new root `R'`. Both trees in advice provider.                                                                              |
 | `mtree_merge`   | `[R, L, ...]`       | `[M, ...]`        | 16     | Merges Merkle trees with roots `L` (left) and `R` (right) into new tree `M`. Input trees retained.                                                                                               |
-| `mtree_verify`  | `[V, d, i, R, ...]` | `[V,d,i,R,...]`   | 1      | Verifies Merkle path for node `V` at depth `d`, index `i` for tree `R` (from advice provider). <br> *Can be parameterized with `err` code (e.g., `mtree_verify.err=123`). Default error code is 0.* |
+| `mtree_verify`  | `[V, d, i, R, ...]` | `[V,d,i,R,...]`   | 1      | Verifies Merkle path for node `V` at depth `d`, index `i` for tree `R` (from advice provider). <br /> *Can be parameterized with `err` code (e.g., `mtree_verify.err=123`). Default error code is 0.* |
 
 ## Flow Control Operations
 
