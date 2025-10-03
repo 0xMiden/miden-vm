@@ -930,3 +930,60 @@ fn batch_ops(ops: Vec<Operation>) -> Vec<OpBatch> {
 
     batches
 }
+
+// ------------------------------------------------------------------------------------------------
+/// Builder for creating [`BasicBlockNode`] instances with decorators.
+pub struct BasicBlockNodeBuilder {
+    operations: Vec<Operation>,
+    decorators: DecoratorList,
+    before_enter: Vec<DecoratorId>,
+    after_exit: Vec<DecoratorId>,
+}
+
+impl BasicBlockNodeBuilder {
+    /// Creates a new builder for a BasicBlockNode with the specified operations and decorators.
+    pub fn new(operations: Vec<Operation>, decorators: DecoratorList) -> Self {
+        Self {
+            operations,
+            decorators,
+            before_enter: Vec::new(),
+            after_exit: Vec::new(),
+        }
+    }
+
+    /// Adds decorators to be executed before this node.
+    pub fn with_before_enter(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
+        self.before_enter = decorators.into();
+        self
+    }
+
+    /// Adds decorators to be executed after this node.
+    pub fn with_after_exit(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
+        self.after_exit = decorators.into();
+        self
+    }
+
+    /// Builds the BasicBlockNode with the specified decorators.
+    pub fn build(self) -> Result<BasicBlockNode, MastForestError> {
+        if self.operations.is_empty() {
+            return Err(MastForestError::EmptyBasicBlock);
+        }
+
+        // Validate decorators list (only in debug mode).
+        #[cfg(debug_assertions)]
+        validate_decorators(self.operations.len(), &self.decorators);
+
+        let (op_batches, digest) = batch_and_hash_ops(self.operations);
+        // the prior line may have inserted some padding Noops in the op_batches
+        // the decorator mapping should still point to the correct operation when that happens
+        let reflowed_decorators = BasicBlockNode::adjust_decorators(self.decorators, &op_batches);
+
+        Ok(BasicBlockNode {
+            op_batches,
+            digest,
+            decorators: reflowed_decorators,
+            before_enter: self.before_enter,
+            after_exit: self.after_exit,
+        })
+    }
+}
