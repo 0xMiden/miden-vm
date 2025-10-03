@@ -266,7 +266,7 @@ impl LoopNodeBuilder {
 
     /// Builds the LoopNode with the specified decorators.
     pub fn build(self, mast_forest: &MastForest) -> Result<LoopNode, MastForestError> {
-        if self.body.as_usize() >= mast_forest.nodes.len() {
+        if self.body.to_usize() >= mast_forest.nodes.len() {
             return Err(MastForestError::NodeIdOverflow(self.body, mast_forest.nodes.len()));
         }
         let digest = {

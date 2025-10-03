@@ -290,9 +290,9 @@ impl JoinNodeBuilder {
     /// Builds the JoinNode with the specified decorators.
     pub fn build(self, mast_forest: &MastForest) -> Result<JoinNode, MastForestError> {
         let forest_len = mast_forest.nodes.len();
-        if self.children[0].as_usize() >= forest_len {
+        if self.children[0].to_usize() >= forest_len {
             return Err(MastForestError::NodeIdOverflow(self.children[0], forest_len));
-        } else if self.children[1].as_usize() >= forest_len {
+        } else if self.children[1].to_usize() >= forest_len {
             return Err(MastForestError::NodeIdOverflow(self.children[1], forest_len));
         }
         let digest = {

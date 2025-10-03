@@ -285,9 +285,9 @@ impl SplitNodeBuilder {
     /// Builds the SplitNode with the specified decorators.
     pub fn build(self, mast_forest: &MastForest) -> Result<SplitNode, MastForestError> {
         let forest_len = mast_forest.nodes.len();
-        if self.branches[0].as_usize() >= forest_len {
+        if self.branches[0].to_usize() >= forest_len {
             return Err(MastForestError::NodeIdOverflow(self.branches[0], forest_len));
-        } else if self.branches[1].as_usize() >= forest_len {
+        } else if self.branches[1].to_usize() >= forest_len {
             return Err(MastForestError::NodeIdOverflow(self.branches[1], forest_len));
         }
         let digest = {

@@ -369,7 +369,7 @@ impl CallNodeBuilder {
 
     /// Builds the CallNode with the specified decorators.
     pub fn build(self, mast_forest: &MastForest) -> Result<CallNode, MastForestError> {
-        if self.callee.as_usize() >= mast_forest.nodes.len() {
+        if self.callee.to_usize() >= mast_forest.nodes.len() {
             return Err(MastForestError::NodeIdOverflow(self.callee, mast_forest.nodes.len()));
         }
         let digest = {
