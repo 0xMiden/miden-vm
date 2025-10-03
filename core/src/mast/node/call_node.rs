@@ -374,7 +374,11 @@ impl CallNodeBuilder {
         }
         let digest = {
             let callee_digest = mast_forest[self.callee].digest();
-            let domain = if self.is_syscall { CallNode::SYSCALL_DOMAIN } else { CallNode::CALL_DOMAIN };
+            let domain = if self.is_syscall {
+                CallNode::SYSCALL_DOMAIN
+            } else {
+                CallNode::CALL_DOMAIN
+            };
 
             hasher::merge_in_domain(&[callee_digest, Word::default()], domain)
         };
