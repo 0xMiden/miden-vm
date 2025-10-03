@@ -618,6 +618,14 @@ impl Test {
         &self,
         trace_from_slow_processor: &ExecutionTrace,
     ) {
+        // Skip large traces in CI, which fail due to memory constraints.
+        #[cfg(feature = "std")]
+        if std::env::var("CI") == Ok("true".to_string())
+            && trace_from_slow_processor.main_segment().num_rows() >= (1 << 21)
+        {
+            return;
+        }
+
         // Note: we fix a large fragment size here (i.e. the largest trace length we can prove), as
         // we're not testing the fragment boundaries with these tests (which are tested separately),
         // but rather only the per-fragment trace generation logic.
