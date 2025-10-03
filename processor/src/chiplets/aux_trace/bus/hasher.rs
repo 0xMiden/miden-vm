@@ -201,7 +201,7 @@ pub(super) fn build_log_precompile_request<E: FieldElement<BaseField = Felt>>(
     // Read helper registers
     let addr = main_trace.helper_register(0, row);
     // capacity stored in helper registers
-    let cap_prev_0 = main_trace.helper_register(1 , row);
+    let cap_prev_0 = main_trace.helper_register(1, row);
     let cap_prev_1 = main_trace.helper_register(2, row);
     let cap_prev_2 = main_trace.helper_register(3, row);
     let cap_prev_3 = main_trace.helper_register(4, row);

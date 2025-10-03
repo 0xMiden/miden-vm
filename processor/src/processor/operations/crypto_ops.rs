@@ -242,7 +242,7 @@ pub(super) fn op_log_precompile<P: Processor>(
     let r1: Word = [output_state[8], output_state[9], output_state[10], output_state[11]].into();
 
     // Update the processor's capacity
-    processor.set_precompile_capacity(cap_next.into());
+    processor.set_precompile_capacity(cap_next);
 
     // Write R1, R0, and CAP_NEXT to the stack (top 12 elements)
     // Stack output: [R1[3..0], R0[3..0], CAP_NEXT[3..0], ...]
@@ -257,8 +257,7 @@ pub(super) fn op_log_precompile<P: Processor>(
 
     // Return helper registers containing the hasher address and CAP_PREV
     // Convert cap_prev Word to array for the helper registers
-    let cap_prev_array: [Felt; 4] = cap_prev.into();
-    P::HelperRegisters::op_log_precompile_registers(addr, cap_prev_array.into())
+    P::HelperRegisters::op_log_precompile_registers(addr, cap_prev)
 }
 
 /// Evaluates a polynomial using Horner's method (extension field).

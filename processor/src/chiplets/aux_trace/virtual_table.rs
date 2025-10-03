@@ -1,12 +1,22 @@
+use core::fmt::{Display, Formatter, Result as FmtResult};
+
 use miden_air::{
     RowIndex,
-    trace::{chiplets::hasher::DIGEST_RANGE, main_trace::MainTrace},
+    trace::{
+        chiplets::hasher::{self, DIGEST_RANGE},
+        main_trace::MainTrace,
+    },
 };
+use miden_core::{Felt, OPCODE_LOGPRECOMPILE, Word};
 
 use super::{
-    Felt, FieldElement, build_ace_memory_read_element_request, build_ace_memory_read_word_request,
+    FieldElement, build_ace_memory_read_element_request, build_ace_memory_read_word_request,
 };
-use crate::{debug::BusDebugger, trace::AuxColumnBuilder};
+use crate::{
+    chiplets::aux_trace::build_value,
+    debug::{BusDebugger, BusMessage},
+    trace::AuxColumnBuilder,
+};
 
 /// Describes how to construct the execution trace of the chiplets virtual table auxiliary trace
 /// column. This column enables communication between the different chiplets, in particular:
@@ -27,8 +37,15 @@ use crate::{debug::BusDebugger, trace::AuxColumnBuilder};
 ///
 /// If public inputs are required for other chiplets, it is also possible to use the chiplet bus,
 /// as is done for the kernel ROM chiplet.
-#[derive(Default)]
-pub struct ChipletsVTableColBuilder {}
+pub struct ChipletsVTableColBuilder {
+    final_capacity: Word,
+}
+
+impl ChipletsVTableColBuilder {
+    pub fn new(final_capacity: Word) -> Self {
+        Self { final_capacity }
+    }
+}
 
 impl<E> AuxColumnBuilder<E> for ChipletsVTableColBuilder
 where
@@ -41,6 +58,21 @@ where
         row: RowIndex,
         _debugger: &mut BusDebugger<E>,
     ) -> E {
+        // Check if this is a log_precompile operation
+        let op_code = main_trace.get_op_code(row).as_int() as u8;
+        let log_precompile_request = if op_code == OPCODE_LOGPRECOMPILE {
+            build_log_precompile_message(
+                LogPrecompileMessageType::Request,
+                Some(main_trace),
+                Some(row),
+                None,
+                alphas,
+                _debugger,
+            )
+        } else {
+            E::ONE
+        };
+
         let request_ace = if main_trace.chiplet_ace_is_read_row(row) {
             build_ace_memory_read_word_request(main_trace, alphas, row, _debugger)
         } else if main_trace.chiplet_ace_is_eval_row(row) {
@@ -48,7 +80,10 @@ where
         } else {
             E::ONE
         };
-        chiplets_vtable_remove_sibling(main_trace, alphas, row) * request_ace
+
+        chiplets_vtable_remove_sibling(main_trace, alphas, row)
+            * request_ace
+            * log_precompile_request
     }
 
     fn get_responses_at(
@@ -58,7 +93,55 @@ where
         row: RowIndex,
         _debugger: &mut BusDebugger<E>,
     ) -> E {
-        chiplets_vtable_add_sibling(main_trace, alphas, row)
+        // Check if this is a log_precompile operation - send capacity response
+        let op_code = main_trace.get_op_code(row).as_int() as u8;
+        let log_precompile_response = if op_code == OPCODE_LOGPRECOMPILE {
+            build_log_precompile_message(
+                LogPrecompileMessageType::Response,
+                Some(main_trace),
+                Some(row),
+                None,
+                alphas,
+                _debugger,
+            )
+        } else {
+            E::ONE
+        };
+
+        chiplets_vtable_add_sibling(main_trace, alphas, row) * log_precompile_response
+    }
+
+    fn init_requests(
+        &self,
+        _main_trace: &MainTrace,
+        alphas: &[E],
+        _debugger: &mut BusDebugger<E>,
+    ) -> E {
+        // Send final capacity request at initialization (will be checked at the end of trace)
+        build_log_precompile_message(
+            LogPrecompileMessageType::Final,
+            None,
+            None,
+            Some(self.final_capacity),
+            alphas,
+            _debugger,
+        )
+    }
+
+    fn init_responses(
+        &self,
+        _main_trace: &MainTrace,
+        alphas: &[E],
+        _debugger: &mut BusDebugger<E>,
+    ) -> E {
+        build_log_precompile_message(
+            LogPrecompileMessageType::Init,
+            None,
+            None,
+            None,
+            alphas,
+            _debugger,
+        )
     }
 }
 
@@ -174,4 +257,123 @@ where
     } else {
         E::ONE
     }
+}
+
+// LOG PRECOMPILE MESSAGES
+// ================================================================================================
+
+/// Type of log_precompile message for debugging purposes.
+#[derive(Debug, Clone, Copy)]
+enum LogPrecompileMessageType {
+    /// Initial capacity response at first row (capacity = [0,0,0,0])
+    Init,
+    /// Final capacity request at trace boundary
+    Final,
+    /// Capacity request during execution
+    Request,
+    /// Capacity response during execution
+    Response,
+}
+
+impl Display for LogPrecompileMessageType {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        match self {
+            Self::Init => write!(f, "init"),
+            Self::Final => write!(f, "final"),
+            Self::Request => write!(f, "request"),
+            Self::Response => write!(f, "response"),
+        }
+    }
+}
+
+/// Message for log_precompile capacity tracking on the virtual table bus.
+struct LogPrecompileMessage {
+    capacity: Word,
+    msg_type: LogPrecompileMessageType,
+}
+
+impl<E> BusMessage<E> for LogPrecompileMessage
+where
+    E: FieldElement<BaseField = Felt>,
+{
+    fn value(&self, alphas: &[E]) -> E {
+        let capacity_array: [Felt; 4] = self.capacity.into();
+        alphas[0]
+            + alphas[1].mul_base(Felt::from(hasher::LOG_PRECOMPILE_CAP_LABEL))
+            + build_value(&alphas[2..6], capacity_array)
+    }
+
+    fn source(&self) -> &str {
+        "log_precompile"
+    }
+}
+
+impl Display for LogPrecompileMessage {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        write!(f, "{{ type: {}, capacity: {:?} }}", self.msg_type, self.capacity)
+    }
+}
+
+// LOG PRECOMPILE BUILDER FUNCTIONS
+// ================================================================================================
+
+/// Builds a log_precompile message based on the message type.
+///
+/// The capacity value and request/response direction are determined by the message type:
+/// - Init: capacity = [0,0,0,0], response
+/// - Final: capacity = final_capacity parameter, request
+/// - Request: capacity = cap_prev from helper registers h1..h4, request
+/// - Response: capacity = cap_next from stack positions 8-11 in next row, response
+fn build_log_precompile_message<E: FieldElement<BaseField = Felt>>(
+    msg_type: LogPrecompileMessageType,
+    main_trace: Option<&MainTrace>,
+    row: Option<RowIndex>,
+    final_capacity: Option<Word>,
+    alphas: &[E],
+    _debugger: &mut BusDebugger<E>,
+) -> E {
+    let capacity = match msg_type {
+        LogPrecompileMessageType::Init => Word::default(),
+        LogPrecompileMessageType::Final => {
+            final_capacity.expect("final_capacity required for Final message")
+        },
+        LogPrecompileMessageType::Request => {
+            let trace = main_trace.expect("main_trace required for Request message");
+            let r = row.expect("row required for Request message");
+            [
+                trace.helper_register(1, r),
+                trace.helper_register(2, r),
+                trace.helper_register(3, r),
+                trace.helper_register(4, r),
+            ]
+            .into()
+        },
+        LogPrecompileMessageType::Response => {
+            let trace = main_trace.expect("main_trace required for Response message");
+            let r = row.expect("row required for Response message");
+            // Stack is reversed, so s8 is CAP_NEXT[3], s11 is CAP_NEXT[0]
+            [
+                trace.stack_element(11, r + 1),
+                trace.stack_element(10, r + 1),
+                trace.stack_element(9, r + 1),
+                trace.stack_element(8, r + 1),
+            ]
+            .into()
+        },
+    };
+
+    let message = LogPrecompileMessage { capacity, msg_type };
+    let value = message.value(alphas);
+
+    #[cfg(any(test, feature = "bus-debugger"))]
+    match msg_type {
+        LogPrecompileMessageType::Init | LogPrecompileMessageType::Response => {
+            _debugger.add_response(alloc::boxed::Box::new(message), alphas);
+        },
+        LogPrecompileMessageType::Final | LogPrecompileMessageType::Request => {
+            _debugger.add_request(alloc::boxed::Box::new(message), alphas);
+        },
+    }
+
+    value
 }

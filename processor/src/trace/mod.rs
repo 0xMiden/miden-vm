@@ -298,7 +298,7 @@ fn finalize_trace(
     process: Process,
     mut rng: RpoRandomCoin,
 ) -> (MainTrace, AuxTraceBuilders, TraceLenSummary) {
-    let (system, decoder, stack, mut range, chiplets) = process.into_parts();
+    let (system, decoder, stack, mut range, chiplets, final_capacity) = process.into_parts();
 
     let clk = system.clk();
 
@@ -332,7 +332,7 @@ fn finalize_trace(
     let system_trace = system.into_trace(trace_len, NUM_RAND_ROWS);
     let decoder_trace = decoder.into_trace(trace_len, NUM_RAND_ROWS);
     let stack_trace = stack.into_trace(trace_len, NUM_RAND_ROWS);
-    let chiplets_trace = chiplets.into_trace(trace_len, NUM_RAND_ROWS);
+    let chiplets_trace = chiplets.into_trace(trace_len, NUM_RAND_ROWS, final_capacity);
 
     // Combine the range trace segment using the support lookup table
     let range_check_trace = range.into_trace_with_table(range_table_len, trace_len, NUM_RAND_ROWS);
