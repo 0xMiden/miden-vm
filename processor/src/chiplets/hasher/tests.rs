@@ -7,7 +7,7 @@ use miden_core::{
     ONE, Operation, ZERO,
     chiplets::hasher,
     crypto::merkle::{MerkleTree, NodeIndex},
-    mast::{MastForest, MastNode, MastNodeExt},
+    mast::{BasicBlockNodeBuilder, MastForest, MastNode, MastNodeExt},
 };
 use miden_utils_testing::rand::rand_array;
 
@@ -16,7 +16,7 @@ use super::{
     MerklePath, RETURN_HASH, RETURN_STATE, Selectors, TRACE_WIDTH, TraceFragment,
     init_state_from_words,
 };
-use crate::{BasicBlockNode, JoinNode, LoopNode, SplitNode};
+use crate::{JoinNode, LoopNode, SplitNode};
 
 // LINEAR HASH TESTS
 // ================================================================================================
@@ -250,10 +250,14 @@ fn hash_memoization_control_blocks() {
 
     let mut mast_forest = MastForest::new();
 
-    let t_branch = BasicBlockNode::new(vec![Operation::Push(ZERO)], Vec::new()).unwrap();
+    let t_branch = BasicBlockNodeBuilder::new(vec![Operation::Push(ZERO)], Vec::new())
+        .build()
+        .unwrap();
     let t_branch_id = mast_forest.add_node(t_branch.clone()).unwrap();
 
-    let f_branch = BasicBlockNode::new(vec![Operation::Push(ONE)], Vec::new()).unwrap();
+    let f_branch = BasicBlockNodeBuilder::new(vec![Operation::Push(ONE)], Vec::new())
+        .build()
+        .unwrap();
     let f_branch_id = mast_forest.add_node(f_branch.clone()).unwrap();
 
     let split1 = SplitNode::new([t_branch_id, f_branch_id], &mast_forest).unwrap();
@@ -353,9 +357,12 @@ fn hash_memoization_control_blocks() {
 #[test]
 fn hash_memoization_basic_blocks() {
     // --- basic block with 1 batch ----------------------------------------------------------------
-    let basic_block =
-        BasicBlockNode::new(vec![Operation::Push(Felt::new(10)), Operation::Drop], Vec::new())
-            .unwrap();
+    let basic_block = BasicBlockNodeBuilder::new(
+        vec![Operation::Push(Felt::new(10)), Operation::Drop],
+        Vec::new(),
+    )
+    .build()
+    .unwrap();
 
     hash_memoization_basic_blocks_check(basic_block.into());
 
@@ -398,7 +405,7 @@ fn hash_memoization_basic_blocks() {
         Operation::Drop,
         Operation::Drop,
     ];
-    let basic_block = BasicBlockNode::new(ops, Vec::new()).unwrap();
+    let basic_block = BasicBlockNodeBuilder::new(ops, Vec::new()).build().unwrap();
 
     hash_memoization_basic_blocks_check(basic_block.into());
 }
