@@ -41,7 +41,7 @@ impl SplitNode {
 
 /// Constructors
 impl SplitNode {
-    pub fn new(
+    pub(in crate::mast) fn new(
         branches: [MastNodeId; 2],
         mast_forest: &MastForest,
     ) -> Result<Self, MastForestError> {
@@ -68,7 +68,7 @@ impl SplitNode {
 
     /// Returns a new [`SplitNode`] from values that are assumed to be correct.
     /// Should only be used when the source of the inputs is trusted (e.g. deserialization).
-    pub fn new_unsafe(branches: [MastNodeId; 2], digest: Word) -> Self {
+    pub(in crate::mast) fn new_unsafe(branches: [MastNodeId; 2], digest: Word) -> Self {
         Self {
             branches,
             digest,
