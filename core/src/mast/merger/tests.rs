@@ -1,27 +1,34 @@
 use miden_crypto::{Felt, ONE, Word};
+use miden_utils_indexing::Idx;
 
 use super::*;
 use crate::{
-    Decorator, Idx, IndexVec, Operation,
-    mast::{BasicBlockNode, MastNode, MastNodeErrorContext},
+    Decorator, Operation,
+    mast::{BasicBlockNodeBuilder, MastNodeErrorContext},
 };
 
 fn block_foo() -> MastNode {
-    BasicBlockNode::new(vec![Operation::Mul, Operation::Add], Vec::new())
+    BasicBlockNodeBuilder::new(vec![Operation::Mul, Operation::Add], Vec::new())
+        .build()
         .unwrap()
         .into()
 }
 
 fn block_bar() -> MastNode {
-    BasicBlockNode::new(vec![Operation::And, Operation::Eq], Vec::new())
+    BasicBlockNodeBuilder::new(vec![Operation::And, Operation::Eq], Vec::new())
+        .build()
         .unwrap()
         .into()
 }
 
 fn block_qux() -> MastNode {
-    BasicBlockNode::new(vec![Operation::Swap, Operation::Push(ONE), Operation::Eq], Vec::new())
-        .unwrap()
-        .into()
+    BasicBlockNodeBuilder::new(
+        vec![Operation::Swap, Operation::Push(ONE), Operation::Eq],
+        Vec::new(),
+    )
+    .build()
+    .unwrap()
+    .into()
 }
 
 /// Asserts that the given forest contains exactly one node with the given digest.
