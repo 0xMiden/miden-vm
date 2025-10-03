@@ -201,12 +201,17 @@ impl<From: Idx, To: Idx> DenseIdMap<From, To> {
     }
 
     /// Insert a mapping from source ID to target ID.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the source ID is beyond the capacity of this DenseIdMap.
+    /// This DenseIdMap should be created with sufficient capacity to accommodate
+    /// all expected source IDs.
     #[inline]
     pub fn insert(&mut self, k: From, v: To) {
         let idx = k.to_usize();
-        // Ensure the vector is large enough to accommodate this index
         if idx >= self.inner.len() {
-            self.inner.raw.resize(idx + 1, None);
+            panic!("source ID {} exceeds DenseIdMap capacity {}", idx, self.inner.len());
         }
         self.inner.insert_at(k, Some(v));
     }
