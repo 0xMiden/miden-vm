@@ -29,7 +29,7 @@ pub const NUM_ACE_LOGUP_FRACTIONS_EVAL: usize = 3;
 /// The output value is checked to be equal to 0.
 ///
 /// The set of nodes is used to fill the ACE chiplet trace.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CircuitEvaluation {
     ctx: ContextId,
     clk: RowIndex,
@@ -256,7 +256,7 @@ impl CircuitEvaluation {
 
 /// Set of columns for a given wire containing `[id, v_0, v_1]`, where `id` is the wire identifier
 /// and `v = (v_0, v_1)` is the quadratic extension field element value of the wire.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct WireColumn {
     id: Vec<Felt>,
     v_0: Vec<Felt>,
@@ -289,7 +289,7 @@ impl WireColumn {
 /// gate, to "receive" the values of the input wires from the bus and to "send" the value of
 /// the value of the output wire back with multiplicity equal to the fan-out of the respective gate.
 /// Note that the messages include extra data in order to avoid collisions.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct WireBus {
     // Circuit ID as Felt of the next wire to be inserted
     id_next: Felt,

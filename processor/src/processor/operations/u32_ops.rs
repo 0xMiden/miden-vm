@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use miden_air::trace::decoder::NUM_USER_OP_HELPERS;
-use miden_core::Felt;
+use miden_core::{Felt, ZERO};
 use paste::paste;
 
 use crate::{
@@ -32,7 +32,7 @@ macro_rules! require_u32_operands {
                 return Err(ExecutionError::not_u32_values(invalid_values, $errno, $err_ctx));
             }
             // Return tuple of operands based on indices
-            ($([<operand_ $idx>].as_int()),*)
+            ($([<operand_ $idx>]),*)
         }
     }};
 }
@@ -48,6 +48,7 @@ pub(super) fn op_u32split<P: Processor>(
         let top = processor.stack().get(0);
         split_element(top)
     };
+    tracer.record_u32_range_checks(processor.system().clk(), top_lo, top_hi);
 
     processor.stack().increment_size(tracer)?;
     processor.stack().set(0, top_hi);
@@ -61,13 +62,15 @@ pub(super) fn op_u32split<P: Processor>(
 pub(super) fn op_u32add<P: Processor>(
     processor: &mut P,
     err_ctx: &impl ErrorContext,
+    tracer: &mut impl Tracer,
 ) -> Result<[Felt; NUM_USER_OP_HELPERS], ExecutionError> {
     let (sum_hi, sum_lo) = {
         let (b, a) = require_u32_operands!(processor, [0, 1], err_ctx);
 
-        let result = Felt::new(a + b);
+        let result = Felt::new(a.as_int() + b.as_int());
         split_element(result)
     };
+    tracer.record_u32_range_checks(processor.system().clk(), sum_lo, sum_hi);
 
     processor.stack().set(0, sum_hi);
     processor.stack().set(1, sum_lo);
@@ -88,9 +91,10 @@ pub(super) fn op_u32add3<P: Processor>(
     let (sum_hi, sum_lo) = {
         let (c, b, a) = require_u32_operands!(processor, [0, 1, 2], err_ctx);
 
-        let sum = Felt::new(a + b + c);
+        let sum = Felt::new(a.as_int() + b.as_int() + c.as_int());
         split_element(sum)
     };
+    tracer.record_u32_range_checks(processor.system().clk(), sum_lo, sum_hi);
 
     // write the high 32 bits to the new top of the stack, and low 32 bits after
     processor.stack().decrement_size(tracer);
@@ -108,13 +112,16 @@ pub(super) fn op_u32sub<P: Processor>(
     processor: &mut P,
     op_idx: usize,
     err_ctx: &impl ErrorContext,
+    tracer: &mut impl Tracer,
 ) -> Result<[Felt; NUM_USER_OP_HELPERS], ExecutionError> {
     let (first_old, second_old) =
         require_u32_operands!(processor, [0, 1], Felt::from(op_idx as u32), err_ctx);
 
-    let result = second_old.wrapping_sub(first_old);
+    let result = second_old.as_int().wrapping_sub(first_old.as_int());
     let first_new = Felt::new(result >> 63);
     let second_new = Felt::new(result & u32::MAX as u64);
+
+    tracer.record_u32_range_checks(processor.system().clk(), second_new, ZERO);
 
     processor.stack().set(0, first_new);
     processor.stack().set(1, second_new);
@@ -128,11 +135,13 @@ pub(super) fn op_u32sub<P: Processor>(
 pub(super) fn op_u32mul<P: Processor>(
     processor: &mut P,
     err_ctx: &impl ErrorContext,
+    tracer: &mut impl Tracer,
 ) -> Result<[Felt; NUM_USER_OP_HELPERS], ExecutionError> {
     let (b, a) = require_u32_operands!(processor, [0, 1], err_ctx);
 
-    let result = Felt::new(a * b);
+    let result = Felt::new(a.as_int() * b.as_int());
     let (hi, lo) = split_element(result);
+    tracer.record_u32_range_checks(processor.system().clk(), lo, hi);
 
     processor.stack().set(0, hi);
     processor.stack().set(1, lo);
@@ -151,8 +160,9 @@ pub(super) fn op_u32madd<P: Processor>(
 ) -> Result<[Felt; NUM_USER_OP_HELPERS], ExecutionError> {
     let (b, a, c) = require_u32_operands!(processor, [0, 1, 2], err_ctx);
 
-    let result = Felt::new(a * b + c);
+    let result = Felt::new(a.as_int() * b.as_int() + c.as_int());
     let (hi, lo) = split_element(result);
+    tracer.record_u32_range_checks(processor.system().clk(), lo, hi);
 
     // write the high 32 bits to the new top of the stack, and low 32 bits after
     processor.stack().decrement_size(tracer);
@@ -171,8 +181,13 @@ pub(super) fn op_u32madd<P: Processor>(
 pub(super) fn op_u32div<P: Processor>(
     processor: &mut P,
     err_ctx: &impl ErrorContext,
+    tracer: &mut impl Tracer,
 ) -> Result<[Felt; NUM_USER_OP_HELPERS], ExecutionError> {
-    let (denominator, numerator) = require_u32_operands!(processor, [0, 1], err_ctx);
+    let (denominator, numerator) = {
+        let (denominator, numerator) = require_u32_operands!(processor, [0, 1], err_ctx);
+
+        (denominator.as_int(), numerator.as_int())
+    };
 
     if denominator == 0 {
         return Err(ExecutionError::divide_by_zero(processor.system().clk(), err_ctx));
@@ -182,16 +197,17 @@ pub(super) fn op_u32div<P: Processor>(
     let quotient = numerator / denominator;
     let remainder = numerator - quotient * denominator;
 
-    // r is placed on top of the stack, followed by q
+    // remainder is placed on top of the stack, followed by quotient
     processor.stack().set(0, Felt::new(remainder));
     processor.stack().set(1, Felt::new(quotient));
 
-    Ok(P::HelperRegisters::op_u32div_registers(
-        numerator,
-        quotient,
-        denominator,
-        remainder,
-    ))
+    // These range checks help enforce that quotient <= numerator.
+    let lo = Felt::new(numerator - quotient);
+    // These range checks help enforce that remainder < denominator.
+    let hi = Felt::new(denominator - remainder - 1);
+
+    tracer.record_u32_range_checks(processor.system().clk(), lo, hi);
+    Ok(P::HelperRegisters::op_u32div_registers(hi, lo))
 }
 
 /// Pops two elements off the stack, computes their bitwise AND, and pushes the result back
@@ -203,8 +219,9 @@ pub(super) fn op_u32and<P: Processor>(
     tracer: &mut impl Tracer,
 ) -> Result<(), ExecutionError> {
     let (b, a) = require_u32_operands!(processor, [0, 1], err_ctx);
+    tracer.record_u32and(a, b);
 
-    let result = a & b;
+    let result = a.as_int() & b.as_int();
 
     // Update stack
     processor.stack().decrement_size(tracer);
@@ -221,8 +238,9 @@ pub(super) fn op_u32xor<P: Processor>(
     tracer: &mut impl Tracer,
 ) -> Result<(), ExecutionError> {
     let (b, a) = require_u32_operands!(processor, [0, 1], err_ctx);
+    tracer.record_u32xor(a, b);
 
-    let result = a ^ b;
+    let result = a.as_int() ^ b.as_int();
 
     // Update stack
     processor.stack().decrement_size(tracer);
@@ -238,10 +256,13 @@ pub(super) fn op_u32assert2<P: Processor>(
     processor: &mut P,
     err_code: Felt,
     err_ctx: &impl ErrorContext,
+    tracer: &mut impl Tracer,
 ) -> Result<[Felt; NUM_USER_OP_HELPERS], ExecutionError> {
     let (first, second) = require_u32_operands!(processor, [0, 1], err_code, err_ctx);
 
+    tracer.record_u32_range_checks(processor.system().clk(), first, second);
+
     // Stack remains unchanged for assert operations
 
-    Ok(P::HelperRegisters::op_u32assert2_registers(Felt::new(first), Felt::new(second)))
+    Ok(P::HelperRegisters::op_u32assert2_registers(first, second))
 }

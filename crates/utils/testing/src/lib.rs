@@ -635,15 +635,20 @@ impl Test {
         let stack_inputs: Vec<Felt> = self.stack_inputs.clone().into_iter().rev().collect();
         let advice_inputs: AdviceInputs = self.advice_inputs.clone();
         let fast_process = FastProcessor::new_with_advice_inputs(&stack_inputs, advice_inputs);
-        let (_, trace_fragment_contexts) =
+        let (execution_output, trace_fragment_contexts) =
             fast_process.execute_for_trace_sync(&program, &mut host, FRAGMENT_SIZE).unwrap();
 
-        let trace_from_parallel = build_trace(trace_fragment_contexts, program.hash());
+        let trace_from_parallel = build_trace(
+            execution_output,
+            trace_fragment_contexts,
+            program.hash(),
+            program.kernel().clone(),
+        );
 
-        // Compare the core trace state columns (first RANGE_CHECK_TRACE_OFFSET columns)
-        for col_idx in 0..miden_air::trace::RANGE_CHECK_TRACE_OFFSET {
+        // Compare the main trace columns
+        for col_idx in 0..miden_air::trace::PADDED_TRACE_WIDTH {
             let slow_column = trace_from_slow_processor.main_segment().get_column(col_idx);
-            let parallel_column = trace_from_parallel.get_column(col_idx);
+            let parallel_column = trace_from_parallel.main_segment().get_column(col_idx);
 
             // Since the parallel trace generator only generates core traces, its column length will
             // be lower than the slow processor's trace in the case where the range checker or
