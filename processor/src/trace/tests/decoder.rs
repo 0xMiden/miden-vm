@@ -6,7 +6,7 @@ use miden_air::trace::{
 };
 use miden_core::{
     FieldElement, ONE, Operation, Program, Word, ZERO,
-    mast::{BasicBlockNodeBuilder, JoinNodeBuilder, MastForest, MastNodeExt},
+    mast::{MastForest, MastNodeExt},
 };
 use miden_utils_testing::rand::rand_array;
 
@@ -356,18 +356,13 @@ fn decoder_p2_span_with_respan() {
 fn decoder_p2_join() {
     let mut mast_forest = MastForest::new();
 
-    let basic_block_1 =
-        BasicBlockNodeBuilder::new(vec![Operation::Mul], Vec::new()).build().unwrap();
-    let basic_block_1_id = mast_forest.add_node(basic_block_1.clone()).unwrap();
+    let basic_block_1_id = mast_forest.add_block(vec![Operation::Mul], Vec::new()).unwrap();
+    let basic_block_2_id = mast_forest.add_block(vec![Operation::Add], Vec::new()).unwrap();
 
-    let basic_block_2 =
-        BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new()).build().unwrap();
-    let basic_block_2_id = mast_forest.add_node(basic_block_2.clone()).unwrap();
-
-    let join = JoinNodeBuilder::new([basic_block_1_id, basic_block_2_id])
-        .build(&mast_forest)
-        .unwrap();
-    let join_id = mast_forest.add_node(join.clone()).unwrap();
+    let join_id = mast_forest.add_join(basic_block_1_id, basic_block_2_id).unwrap();
+    let basic_block_1 = mast_forest[basic_block_1_id].clone();
+    let basic_block_2 = mast_forest[basic_block_2_id].clone();
+    let join = mast_forest[join_id].clone();
     mast_forest.make_root(join_id);
 
     let program = Program::new(mast_forest.into(), join_id);
@@ -424,10 +419,10 @@ fn decoder_p2_split_true() {
     // build program
     let mut mast_forest = MastForest::new();
 
-    let basic_block_1 =
-        BasicBlockNodeBuilder::new(vec![Operation::Mul], Vec::new()).build().unwrap();
-    let basic_block_1_id = mast_forest.add_node(basic_block_1.clone()).unwrap();
+    let basic_block_1_id = mast_forest.add_block(vec![Operation::Mul], Vec::new()).unwrap();
     let basic_block_2_id = mast_forest.add_block(vec![Operation::Add], Vec::new()).unwrap();
+    let basic_block_1 = mast_forest[basic_block_1_id].clone();
+    let _basic_block_2 = mast_forest[basic_block_2_id].clone();
     let split_id = mast_forest.add_split(basic_block_1_id, basic_block_2_id).unwrap();
     mast_forest.make_root(split_id);
 
@@ -477,13 +472,10 @@ fn decoder_p2_split_false() {
     // build program
     let mut mast_forest = MastForest::new();
 
-    let basic_block_1 =
-        BasicBlockNodeBuilder::new(vec![Operation::Mul], Vec::new()).build().unwrap();
-    let basic_block_1_id = mast_forest.add_node(basic_block_1.clone()).unwrap();
-
-    let basic_block_2 =
-        BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new()).build().unwrap();
-    let basic_block_2_id = mast_forest.add_node(basic_block_2.clone()).unwrap();
+    let basic_block_1_id = mast_forest.add_block(vec![Operation::Mul], Vec::new()).unwrap();
+    let basic_block_2_id = mast_forest.add_block(vec![Operation::Add], Vec::new()).unwrap();
+    let _basic_block_1 = mast_forest[basic_block_1_id].clone();
+    let basic_block_2 = mast_forest[basic_block_2_id].clone();
 
     let split_id = mast_forest.add_split(basic_block_1_id, basic_block_2_id).unwrap();
     mast_forest.make_root(split_id);
@@ -534,18 +526,13 @@ fn decoder_p2_loop_with_repeat() {
     // build program
     let mut mast_forest = MastForest::new();
 
-    let basic_block_1 =
-        BasicBlockNodeBuilder::new(vec![Operation::Pad], Vec::new()).build().unwrap();
-    let basic_block_1_id = mast_forest.add_node(basic_block_1.clone()).unwrap();
+    let basic_block_1_id = mast_forest.add_block(vec![Operation::Pad], Vec::new()).unwrap();
+    let basic_block_2_id = mast_forest.add_block(vec![Operation::Drop], Vec::new()).unwrap();
 
-    let basic_block_2 =
-        BasicBlockNodeBuilder::new(vec![Operation::Drop], Vec::new()).build().unwrap();
-    let basic_block_2_id = mast_forest.add_node(basic_block_2.clone()).unwrap();
-
-    let join = JoinNodeBuilder::new([basic_block_1_id, basic_block_2_id])
-        .build(&mast_forest)
-        .unwrap();
-    let join_id = mast_forest.add_node(join.clone()).unwrap();
+    let join_id = mast_forest.add_join(basic_block_1_id, basic_block_2_id).unwrap();
+    let basic_block_1 = mast_forest[basic_block_1_id].clone();
+    let basic_block_2 = mast_forest[basic_block_2_id].clone();
+    let join = mast_forest[join_id].clone();
 
     let loop_node_id = mast_forest.add_loop(join_id).unwrap();
     mast_forest.make_root(loop_node_id);
