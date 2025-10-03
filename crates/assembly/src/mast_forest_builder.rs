@@ -8,7 +8,7 @@ use core::ops::{Index, IndexMut};
 use miden_core::{
     AdviceMap, Decorator, DecoratorList, Felt, Operation, Word,
     mast::{
-        BasicBlockNode, CallNodeBuilder, DecoratorFingerprint, DecoratorId, DynNodeBuilder,
+        BasicBlockNodeBuilder, CallNodeBuilder, DecoratorFingerprint, DecoratorId, DynNodeBuilder,
         ExternalNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForest, MastNode, MastNodeExt,
         MastNodeFingerprint, MastNodeId, Remapping, SplitNodeBuilder, SubtreeIterator,
     },
@@ -408,7 +408,8 @@ impl MastForestBuilder {
         operations: Vec<Operation>,
         decorators: DecoratorList,
     ) -> Result<MastNodeId, Report> {
-        let block = BasicBlockNode::new(operations, decorators)
+        let block = BasicBlockNodeBuilder::new(operations, decorators)
+            .build()
             .into_diagnostic()
             .wrap_err("assembler failed to add new basic block node")?;
         self.ensure_node(block)

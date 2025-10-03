@@ -1,6 +1,6 @@
 use miden_core::{
     FMP_INIT_VALUE, Operation,
-    mast::{CallNode, MastForest, MastNode, MastNodeExt},
+    mast::{CallNodeBuilder, MastForest, MastNode, MastNodeExt},
 };
 use miden_debug_types::{SourceLanguage, SourceManager};
 use miden_utils_testing::{MIN_STACK_DEPTH, StackInputs, Test, Word, build_op_test, build_test};
@@ -192,7 +192,8 @@ fn build_bar_hash() -> [u64; 4] {
 
     let foo_root_id = mast_forest.add_block(vec![Operation::Caller], Vec::new()).unwrap();
 
-    let bar_root: MastNode = CallNode::new_syscall(foo_root_id, &mast_forest).unwrap().into();
+    let bar_root: MastNode =
+        CallNodeBuilder::new_syscall(foo_root_id).build(&mast_forest).unwrap().into();
     let bar_hash: Word = bar_root.digest();
     [
         bar_hash[0].as_int(),
