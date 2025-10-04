@@ -307,6 +307,247 @@ fn test_set_empty_key_in_non_empty_leaf() {
     build_test!(source, &init_stack, &[], store, advice_map).expect_stack(&final_stack);
 }
 
+#[test]
+fn test_smt_set_single_to_multi() {
+    const SOURCE: &str = "
+        use.std::collections::smt
+        use.std::sys
+
+        begin
+            # => [V, K, R]
+            exec.smt::set
+            # => [V_old, R_new]
+            exec.sys::truncate_stack
+        end
+    ";
+
+    fn expect_second_pair(smt: Smt, key: Word, value: Word) {
+        let mut initial_stack: Vec<u64> = Default::default();
+        prepend_word(&mut initial_stack, value);
+        prepend_word(&mut initial_stack, key);
+        prepend_word(&mut initial_stack, smt.root());
+
+        // Will be an empty word for all cases except the no-op case (where V == V_old).
+        let expected_old_value = smt.get_value(&key);
+
+        let mut expected_smt = smt.clone();
+        expected_smt.insert(key, value).unwrap();
+
+        let expected_output = build_expected_stack(expected_old_value, expected_smt.root());
+
+        let (store, advice_map) = build_advice_inputs(&smt);
+        build_test!(SOURCE, &initial_stack, &[], store, advice_map).expect_stack(&expected_output);
+    }
+
+    for existing_pair in LEAVES_MULTI {
+        for (new_key, new_val) in LEAVES_MULTI {
+            expect_second_pair(Smt::with_entries([existing_pair]).unwrap(), new_key, new_val);
+        }
+    }
+}
+
+#[test]
+fn test_smt_set_in_multi() {
+    const SOURCE: &str = "
+        use.std::collections::smt
+        use.std::sys
+
+        begin
+            # => [V, K, R]
+            exec.smt::set
+            # => [V_old, R_new]
+            exec.sys::truncate_stack
+        end
+    ";
+
+    fn expect_insertion(smt: &Smt, key: Word, value: Word) {
+        let mut expected_smt = smt.clone();
+        expected_smt.insert(key, value).unwrap();
+        let old_value = smt.get_value(&key);
+
+        let mut initial_stack: Vec<u64> = Default::default();
+        prepend_word(&mut initial_stack, value);
+        prepend_word(&mut initial_stack, key);
+        prepend_word(&mut initial_stack, smt.root());
+
+        let expected_output = build_expected_stack(old_value, expected_smt.root());
+
+        let (store, advice_map) = build_advice_inputs(smt);
+        build_debug_test!(SOURCE, &initial_stack, &[], store, advice_map)
+            .expect_stack(&expected_output);
+    }
+
+    // Try every place we can do an insertion.
+    for (key, value) in LEAVES_MULTI {
+        // Start with LEAVES_MULTI - (key, value) for the existing leaf.
+        let existing_pairs = LEAVES_MULTI.into_iter().filter(|&pair| pair != (key, value));
+        let smt = Smt::with_entries(existing_pairs).unwrap();
+        expect_insertion(&smt, key, value);
+    }
+
+    const K0: Word = word(101, 102, 103, 420);
+    const V0: Word = word(555, 666, 777, 888);
+
+    const K1: Word = word(901, 902, 903, 420);
+    const V1: Word = word(122, 133, 144, 155);
+
+    const K: Word = word(505, 506, 507, 420);
+    const V: Word = word(555, 566, 577, 588);
+
+    // Try inserting right in the middle.
+
+    let smt = Smt::with_entries([(K0, V0), (K1, V1)]).unwrap();
+    let expected_smt = Smt::with_entries([(K0, V0), (K1, V1), (K, V)]).unwrap();
+
+    let mut initial_stack: Vec<u64> = Default::default();
+
+    prepend_word(&mut initial_stack, V);
+    prepend_word(&mut initial_stack, K);
+    prepend_word(&mut initial_stack, smt.root());
+
+    let expected_output = build_expected_stack(EMPTY_WORD, expected_smt.root());
+
+    let (store, advice_map) = build_advice_inputs(&smt);
+    let test = build_debug_test!(SOURCE, &initial_stack, &[], store, advice_map);
+    test.expect_stack(&expected_output);
+}
+
+#[test]
+fn test_smt_set_replace_in_multi() {
+    const SOURCE: &str = "
+        use.std::collections::smt
+        use.std::sys
+
+        begin
+            # => [V, K, R]
+            exec.smt::set
+            # => [V_old, R_new]
+            exec.sys::truncate_stack
+        end
+    ";
+
+    const K0: Word = word(101, 102, 103, 420);
+    const V0: Word = word(555, 666, 777, 888);
+
+    const K1: Word = word(901, 902, 903, 420);
+    const V1: Word = word(122, 133, 144, 155);
+
+    const K2: Word = word(505, 506, 507, 420);
+    const V2: Word = word(555, 566, 577, 588);
+
+    // Try setting K0 to V2.
+
+    let smt = Smt::with_entries([(K0, V0), (K1, V1), (K2, V2)]).unwrap();
+    let mut expected_smt = smt.clone();
+    expected_smt.insert(K0, V2).unwrap();
+
+    let mut initial_stack: Vec<u64> = Default::default();
+
+    prepend_word(&mut initial_stack, V2);
+    prepend_word(&mut initial_stack, K0);
+    prepend_word(&mut initial_stack, smt.root());
+
+    let expected_output = build_expected_stack(V0, expected_smt.root());
+
+    let (store, advice_map) = build_advice_inputs(&smt);
+    let test = build_debug_test!(SOURCE, &initial_stack, &[], store, advice_map);
+    test.expect_stack(&expected_output);
+}
+
+#[test]
+fn test_smt_set_multi_to_single() {
+    const SOURCE: &str = "
+        use.std::collections::smt
+        use.std::sys
+
+        begin
+            # => [V, K, R]
+            exec.smt::set
+            # => [V_old, R_new]
+            exec.sys::truncate_stack
+        end
+    ";
+
+    fn expect_remove_second_pair(smt: &Smt, key: Word) {
+        let mut initial_stack: Vec<u64> = Default::default();
+        prepend_word(&mut initial_stack, EMPTY_WORD);
+        prepend_word(&mut initial_stack, key);
+        prepend_word(&mut initial_stack, smt.root());
+
+        let expected_value = smt.get_value(&key);
+
+        let mut expected_smt = smt.clone();
+        expected_smt.insert(key, EMPTY_WORD).unwrap();
+
+        let expected_output = build_expected_stack(expected_value, expected_smt.root());
+
+        let (store, advice_map) = build_advice_inputs(smt);
+        build_debug_test!(SOURCE, &initial_stack, &[], store, advice_map)
+            .expect_stack(&expected_output);
+    }
+
+    const K0: Word = word(101, 102, 103, 420);
+    const V0: Word = word(555, 666, 777, 888);
+
+    const K1: Word = word(201, 202, 203, 420);
+    const V1: Word = word(122, 133, 144, 155);
+
+    let smt = Smt::with_entries([(K0, V0), (K1, V1)]).unwrap();
+
+    expect_remove_second_pair(&smt, K0);
+    expect_remove_second_pair(&smt, K1);
+}
+
+#[test]
+fn test_smt_set_remove_in_multi() {
+    const SOURCE: &str = "
+        use.std::collections::smt
+        use.std::sys
+
+        begin
+            # => [V, K, R]
+            exec.smt::set
+            # => [V_old, R_new]
+            exec.sys::truncate_stack
+        end
+    ";
+
+    fn expect_remove(smt: &Smt, key: Word) {
+        let mut initial_stack: Vec<u64> = Default::default();
+        prepend_word(&mut initial_stack, EMPTY_WORD);
+        prepend_word(&mut initial_stack, key);
+        prepend_word(&mut initial_stack, smt.root());
+
+        let expected_value = smt.get_value(&key);
+
+        let mut expected_smt = smt.clone();
+        expected_smt.insert(key, EMPTY_WORD).unwrap();
+
+        let expected_output = build_expected_stack(expected_value, expected_smt.root());
+
+        let (store, advice_map) = build_advice_inputs(smt);
+        build_debug_test!(SOURCE, &initial_stack, &[], store, advice_map)
+            .expect_stack(&expected_output);
+    }
+
+    const K0: Word = word(101, 102, 103, 420);
+    const V0: Word = word(555, 666, 777, 888);
+
+    const K1: Word = word(201, 202, 203, 420);
+    const V1: Word = word(122, 133, 144, 155);
+
+    const K2: Word = word(301, 302, 303, 420);
+    const V2: Word = word(51, 52, 53, 54);
+
+    let all_pairs = [(K0, V0), (K1, V1), (K2, V2)];
+
+    let smt = Smt::with_entries(all_pairs).unwrap();
+
+    expect_remove(&smt, K0);
+    expect_remove(&smt, K1);
+    expect_remove(&smt, K2);
+}
+
 // HELPER FUNCTIONS
 // ================================================================================================
 
