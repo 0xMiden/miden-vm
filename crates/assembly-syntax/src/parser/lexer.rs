@@ -1,5 +1,6 @@
 use alloc::{borrow::Cow, string::String};
 use core::{num::IntErrorKind, ops::Range};
+use vm_core::PrimeCharacteristicRing;
 
 use miden_debug_types::{ByteOffset, SourceId, SourceSpan};
 
@@ -677,7 +678,7 @@ fn parse_hex<'input>(
                         kind: LiteralErrorKind::FeltOverflow,
                     });
                 }
-                *element = Felt::new(value);
+                *element = Felt::from_u64(value);
             }
             Ok(Token::HexWord(WordValue(word)))
         },

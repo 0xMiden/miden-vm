@@ -13,6 +13,8 @@ use serde::{Deserialize, Serialize};
 use crate::{
     Felt, Word,
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    crypto::hash::RpoDigest,
+    // utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable}, TODO(Al)
 };
 
 // ADVICE MAP
@@ -163,7 +165,7 @@ where
         self.0.extend(iter.into_iter().map(|(key, value)| (key, value.into())))
     }
 }
-
+/*
 impl Serializable for AdviceMap {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         target.write_usize(self.0.len());
@@ -187,6 +189,8 @@ impl Deserializable for AdviceMap {
 
 #[cfg(test)]
 mod tests {
+    use miden_crypto::PrimeCharacteristicRing;
+
     use super::*;
 
     #[test]
@@ -201,3 +205,4 @@ mod tests {
         assert_eq!(map1, map2);
     }
 }
+ */

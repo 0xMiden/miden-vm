@@ -18,6 +18,13 @@ use miden_core::{
         OP_BATCH_SIZE,
     },
 };
+use rstest::rstest;
+use test_utils::rand::rand_value;
+use vm_core::{
+    EMPTY_WORD, ONE, PrimeCharacteristicRing, PrimeField64, Program, ZERO, assert_matches,
+    lazy_static,
+    mast::{BasicBlockNode, MastForest, MastNode, MastNodeId, OP_BATCH_SIZE},
+};
 use miden_utils_testing::rand::rand_value;
 use rstest::rstest;
 
@@ -32,13 +39,14 @@ use crate::{AdviceInputs, DefaultHost, ExecutionError, NoopEventHandler};
 // CONSTANTS
 // ================================================================================================
 
-const TWO: Felt = Felt::new(2);
-const THREE: Felt = Felt::new(3);
-const EIGHT: Felt = Felt::new(8);
-
-const INIT_ADDR: Felt = ONE;
-const FMP_MIN: Felt = Felt::new(crate::FMP_MIN);
-const SYSCALL_FMP_MIN: Felt = Felt::new(crate::SYSCALL_FMP_MIN as u64);
+lazy_static! {
+    static ref TWO: Felt = Felt::from_u64(2);
+    static ref THREE: Felt = Felt::from_u64(3);
+    static ref EIGHT: Felt = Felt::from_u64(8);
+    static ref INIT_ADDR: Felt = ONE;
+    static ref FMP_MIN: Felt = Felt::from_u64(crate::FMP_MIN);
+    static ref SYSCALL_FMP_MIN: Felt = Felt::from_u64(crate::SYSCALL_FMP_MIN as u64);
+}
 
 const EMIT_EVENT_ID: EventId = EventId::from_u64(1234);
 
@@ -69,10 +77,10 @@ fn basic_block_one_group() {
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
     check_op_decoding(&trace, 0, ZERO, Operation::Span, 1, 0, 0);
-    check_op_decoding(&trace, 1, INIT_ADDR, Operation::Pad, 0, 0, 1);
-    check_op_decoding(&trace, 2, INIT_ADDR, Operation::Add, 0, 1, 1);
-    check_op_decoding(&trace, 3, INIT_ADDR, Operation::Mul, 0, 2, 1);
-    check_op_decoding(&trace, 4, INIT_ADDR, Operation::End, 0, 0, 0);
+    check_op_decoding(&trace, 1, *INIT_ADDR, Operation::Pad, 0, 0, 1);
+    check_op_decoding(&trace, 2, *INIT_ADDR, Operation::Add, 0, 1, 1);
+    check_op_decoding(&trace, 3, *INIT_ADDR, Operation::Mul, 0, 2, 1);
+    check_op_decoding(&trace, 4, *INIT_ADDR, Operation::End, 0, 0, 0);
     check_op_decoding(&trace, 5, ZERO, Operation::Halt, 0, 0, 0);
 
     // --- check hasher state columns -------------------------------------------------------------
@@ -99,7 +107,7 @@ fn basic_block_one_group() {
 
 #[test]
 fn basic_block_small() {
-    let iv = [ONE, TWO];
+    let iv = [ONE, *TWO];
     let ops = vec![
         Operation::Push(iv[0]),
         Operation::Push(iv[1]),
@@ -130,8 +138,8 @@ fn basic_block_small() {
 
     // starting new group: NOOP group is inserted by the processor to make sure number of groups
     // is a power of two
-    check_op_decoding(&trace, 6, INIT_ADDR, Operation::Noop, 0, 0, 1);
-    check_op_decoding(&trace, 7, INIT_ADDR, Operation::End, 0, 0, 0);
+    check_op_decoding(&trace, 6, *INIT_ADDR, Operation::Noop, 0, 0, 1);
+    check_op_decoding(&trace, 7, *INIT_ADDR, Operation::End, 0, 0, 0);
     check_op_decoding(&trace, 8, ZERO, Operation::Halt, 0, 0, 0);
 
     // --- check hasher state columns -------------------------------------------------------------
@@ -222,7 +230,7 @@ fn basic_block_small_with_emit() {
 
 #[test]
 fn basic_block() {
-    let iv = [ONE, TWO, Felt::new(3), Felt::new(4), Felt::new(5)];
+    let iv = [ONE, *TWO, Felt::from_u64(3), Felt::from_u64(4), Felt::from_u64(5)];
     let ops = vec![
         Operation::Push(iv[0]),
         Operation::Push(iv[1]),
@@ -262,7 +270,7 @@ fn basic_block() {
     check_op_decoding(&trace, 7, INIT_ADDR, Operation::Drop, 4, 6, 1);
     check_op_decoding_with_imm(&trace, 8, INIT_ADDR, iv[3], 4, 4, 7, 1);
     // NOOP inserted by the processor to make sure the group doesn't end with a PUSH
-    check_op_decoding(&trace, 9, INIT_ADDR, Operation::Noop, 3, 8, 1);
+    check_op_decoding(&trace, 9, *INIT_ADDR, Operation::Noop, 3, 8, 1);
     // starting new operation group
     check_op_decoding_with_imm(&trace, 10, INIT_ADDR, iv[4], 6, 2, 0, 1);
     check_op_decoding(&trace, 11, INIT_ADDR, Operation::Mul, 1, 1, 1);
@@ -272,8 +280,8 @@ fn basic_block() {
     check_op_decoding(&trace, 15, INIT_ADDR, Operation::Drop, 1, 5, 1);
 
     // NOOP inserted by the processor to make sure the number of groups is a power of two
-    check_op_decoding(&trace, 16, INIT_ADDR, Operation::Noop, 0, 0, 1);
-    check_op_decoding(&trace, 17, INIT_ADDR, Operation::End, 0, 0, 0);
+    check_op_decoding(&trace, 16, *INIT_ADDR, Operation::Noop, 0, 0, 1);
+    check_op_decoding(&trace, 17, *INIT_ADDR, Operation::End, 0, 0, 0);
     check_op_decoding(&trace, 18, ZERO, Operation::Halt, 0, 0, 0);
 
     // --- check hasher state columns -------------------------------------------------------------
@@ -315,14 +323,14 @@ fn basic_block() {
 fn span_block_with_respan() {
     let iv = [
         ONE,
-        TWO,
-        Felt::new(3),
-        Felt::new(4),
-        Felt::new(5),
-        Felt::new(6),
-        Felt::new(7),
-        EIGHT,
-        Felt::new(9),
+        *TWO,
+        Felt::from_u64(3),
+        Felt::from_u64(4),
+        Felt::from_u64(5),
+        Felt::from_u64(6),
+        Felt::from_u64(7),
+        *EIGHT,
+        Felt::from_u64(9),
     ];
 
     let ops = vec![
@@ -368,7 +376,7 @@ fn span_block_with_respan() {
     check_op_decoding_with_imm(&trace, 6, INIT_ADDR, iv[5], 6, 6, 5, 1);
     check_op_decoding_with_imm(&trace, 7, INIT_ADDR, iv[6], 7, 5, 6, 1);
     // NOOP inserted by the processor to make sure the group doesn't end with a PUSH
-    check_op_decoding(&trace, 8, INIT_ADDR, Operation::Noop, 4, 7, 1);
+    check_op_decoding(&trace, 8, *INIT_ADDR, Operation::Noop, 4, 7, 1);
     // RESPAN since the previous batch is full
     let batch1_addr = INIT_ADDR + EIGHT;
     check_op_decoding(&trace, 9, INIT_ADDR, Operation::Respan, 4, 0, 0);
@@ -454,16 +462,16 @@ fn join_node() {
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
     check_op_decoding(&trace, 0, ZERO, Operation::Join, 0, 0, 0);
     // starting first span
-    let span1_addr = INIT_ADDR + EIGHT;
-    check_op_decoding(&trace, 1, INIT_ADDR, Operation::Span, 1, 0, 0);
+    let span1_addr = *INIT_ADDR + *EIGHT;
+    check_op_decoding(&trace, 1, *INIT_ADDR, Operation::Span, 1, 0, 0);
     check_op_decoding(&trace, 2, span1_addr, Operation::Mul, 0, 0, 1);
     check_op_decoding(&trace, 3, span1_addr, Operation::End, 0, 0, 0);
     // starting second span
-    let span2_addr = INIT_ADDR + Felt::new(16);
-    check_op_decoding(&trace, 4, INIT_ADDR, Operation::Span, 1, 0, 0);
+    let span2_addr = *INIT_ADDR + Felt::from_u64(16);
+    check_op_decoding(&trace, 4, *INIT_ADDR, Operation::Span, 1, 0, 0);
     check_op_decoding(&trace, 5, span2_addr, Operation::Add, 0, 0, 1);
     check_op_decoding(&trace, 6, span2_addr, Operation::End, 0, 0, 0);
-    check_op_decoding(&trace, 7, INIT_ADDR, Operation::End, 0, 0, 0);
+    check_op_decoding(&trace, 7, *INIT_ADDR, Operation::End, 0, 0, 0);
     check_op_decoding(&trace, 8, ZERO, Operation::Halt, 0, 0, 0);
 
     // --- check hasher state columns -------------------------------------------------------------
@@ -518,12 +526,12 @@ fn split_node_true() {
     let (trace, trace_len) = build_trace(&[1], &program);
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
-    let basic_block_addr = INIT_ADDR + EIGHT;
+    let basic_block_addr = *INIT_ADDR + *EIGHT;
     check_op_decoding(&trace, 0, ZERO, Operation::Split, 0, 0, 0);
-    check_op_decoding(&trace, 1, INIT_ADDR, Operation::Span, 1, 0, 0);
+    check_op_decoding(&trace, 1, *INIT_ADDR, Operation::Span, 1, 0, 0);
     check_op_decoding(&trace, 2, basic_block_addr, Operation::Mul, 0, 0, 1);
     check_op_decoding(&trace, 3, basic_block_addr, Operation::End, 0, 0, 0);
-    check_op_decoding(&trace, 4, INIT_ADDR, Operation::End, 0, 0, 0);
+    check_op_decoding(&trace, 4, *INIT_ADDR, Operation::End, 0, 0, 0);
     check_op_decoding(&trace, 5, ZERO, Operation::Halt, 0, 0, 0);
 
     // --- check hasher state columns -------------------------------------------------------------
@@ -571,12 +579,12 @@ fn split_node_false() {
     let (trace, trace_len) = build_trace(&[0], &program);
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
-    let basic_block_addr = INIT_ADDR + EIGHT;
+    let basic_block_addr = *INIT_ADDR + *EIGHT;
     check_op_decoding(&trace, 0, ZERO, Operation::Split, 0, 0, 0);
-    check_op_decoding(&trace, 1, INIT_ADDR, Operation::Span, 1, 0, 0);
+    check_op_decoding(&trace, 1, *INIT_ADDR, Operation::Span, 1, 0, 0);
     check_op_decoding(&trace, 2, basic_block_addr, Operation::Add, 0, 0, 1);
     check_op_decoding(&trace, 3, basic_block_addr, Operation::End, 0, 0, 0);
-    check_op_decoding(&trace, 4, INIT_ADDR, Operation::End, 0, 0, 0);
+    check_op_decoding(&trace, 4, *INIT_ADDR, Operation::End, 0, 0, 0);
     check_op_decoding(&trace, 5, ZERO, Operation::Halt, 0, 0, 0);
 
     // --- check hasher state columns -------------------------------------------------------------
@@ -624,13 +632,13 @@ fn loop_node() {
     let (trace, trace_len) = build_trace(&[0, 1], &program);
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
-    let body_addr = INIT_ADDR + EIGHT;
+    let body_addr = *INIT_ADDR + *EIGHT;
     check_op_decoding(&trace, 0, ZERO, Operation::Loop, 0, 0, 0);
-    check_op_decoding(&trace, 1, INIT_ADDR, Operation::Span, 1, 0, 0);
+    check_op_decoding(&trace, 1, *INIT_ADDR, Operation::Span, 1, 0, 0);
     check_op_decoding(&trace, 2, body_addr, Operation::Pad, 0, 0, 1);
     check_op_decoding(&trace, 3, body_addr, Operation::Drop, 0, 1, 1);
     check_op_decoding(&trace, 4, body_addr, Operation::End, 0, 0, 0);
-    check_op_decoding(&trace, 5, INIT_ADDR, Operation::End, 0, 0, 0);
+    check_op_decoding(&trace, 5, *INIT_ADDR, Operation::End, 0, 0, 0);
     check_op_decoding(&trace, 6, ZERO, Operation::Halt, 0, 0, 0);
 
     // --- check hasher state columns -------------------------------------------------------------
@@ -677,7 +685,7 @@ fn loop_node_skip() {
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
     check_op_decoding(&trace, 0, ZERO, Operation::Loop, 0, 0, 0);
-    check_op_decoding(&trace, 1, INIT_ADDR, Operation::End, 0, 0, 0);
+    check_op_decoding(&trace, 1, *INIT_ADDR, Operation::End, 0, 0, 0);
     check_op_decoding(&trace, 2, ZERO, Operation::Halt, 0, 0, 0);
 
     // --- check hasher state columns -------------------------------------------------------------
@@ -718,21 +726,21 @@ fn loop_node_repeat() {
     let (trace, trace_len) = build_trace(&[0, 1, 1], &program);
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
-    let iter1_addr = INIT_ADDR + EIGHT;
-    let iter2_addr = INIT_ADDR + Felt::new(16);
+    let iter1_addr = *INIT_ADDR + *EIGHT;
+    let iter2_addr = *INIT_ADDR + Felt::from_u64(16);
 
     check_op_decoding(&trace, 0, ZERO, Operation::Loop, 0, 0, 0);
-    check_op_decoding(&trace, 1, INIT_ADDR, Operation::Span, 1, 0, 0);
+    check_op_decoding(&trace, 1, *INIT_ADDR, Operation::Span, 1, 0, 0);
     check_op_decoding(&trace, 2, iter1_addr, Operation::Pad, 0, 0, 1);
     check_op_decoding(&trace, 3, iter1_addr, Operation::Drop, 0, 1, 1);
     check_op_decoding(&trace, 4, iter1_addr, Operation::End, 0, 0, 0);
     // start second iteration
-    check_op_decoding(&trace, 5, INIT_ADDR, Operation::Repeat, 0, 0, 0);
-    check_op_decoding(&trace, 6, INIT_ADDR, Operation::Span, 1, 0, 0);
+    check_op_decoding(&trace, 5, *INIT_ADDR, Operation::Repeat, 0, 0, 0);
+    check_op_decoding(&trace, 6, *INIT_ADDR, Operation::Span, 1, 0, 0);
     check_op_decoding(&trace, 7, iter2_addr, Operation::Pad, 0, 0, 1);
     check_op_decoding(&trace, 8, iter2_addr, Operation::Drop, 0, 1, 1);
     check_op_decoding(&trace, 9, iter2_addr, Operation::End, 0, 0, 0);
-    check_op_decoding(&trace, 10, INIT_ADDR, Operation::End, 0, 0, 0);
+    check_op_decoding(&trace, 10, *INIT_ADDR, Operation::End, 0, 0, 0);
     check_op_decoding(&trace, 11, ZERO, Operation::Halt, 0, 0, 0);
 
     // --- check hasher state columns -------------------------------------------------------------
@@ -826,20 +834,20 @@ fn call_block() {
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
     check_op_decoding(&dec_trace, 0, ZERO, Operation::Join, 0, 0, 0);
     // starting the internal JOIN block
-    let join1_addr = INIT_ADDR + EIGHT;
-    check_op_decoding(&dec_trace, 1, INIT_ADDR, Operation::Join, 0, 0, 0);
+    let join1_addr = *INIT_ADDR + *EIGHT;
+    check_op_decoding(&dec_trace, 1, *INIT_ADDR, Operation::Join, 0, 0, 0);
     // starting first SPAN block
-    let first_basic_block_addr = join1_addr + EIGHT;
+    let first_basic_block_addr = join1_addr + *EIGHT;
     check_op_decoding(&dec_trace, 2, join1_addr, Operation::Span, 2, 0, 0);
     check_op_decoding_with_imm(&dec_trace, 3, first_basic_block_addr, TWO, 1, 1, 0, 1);
     check_op_decoding(&dec_trace, 4, first_basic_block_addr, Operation::FmpUpdate, 0, 1, 1);
     check_op_decoding(&dec_trace, 5, first_basic_block_addr, Operation::Pad, 0, 2, 1);
     check_op_decoding(&dec_trace, 6, first_basic_block_addr, Operation::End, 0, 0, 0);
     // starting CALL block
-    let foo_call_addr = first_basic_block_addr + EIGHT;
+    let foo_call_addr = first_basic_block_addr + *EIGHT;
     check_op_decoding(&dec_trace, 7, join1_addr, Operation::Call, 0, 0, 0);
     // starting second SPAN block
-    let foo_root_addr = foo_call_addr + EIGHT;
+    let foo_root_addr = foo_call_addr + *EIGHT;
     check_op_decoding(&dec_trace, 8, foo_call_addr, Operation::Span, 2, 0, 0);
     check_op_decoding_with_imm(&dec_trace, 9, foo_root_addr, ONE, 1, 1, 0, 1);
     check_op_decoding(&dec_trace, 10, foo_root_addr, Operation::FmpUpdate, 0, 1, 1);
@@ -849,15 +857,15 @@ fn call_block() {
     // ending internal JOIN block
     check_op_decoding(&dec_trace, 13, join1_addr, Operation::End, 0, 0, 0);
     // starting the 3rd SPAN block
-    let last_basic_block_addr = foo_root_addr + EIGHT;
-    check_op_decoding(&dec_trace, 14, INIT_ADDR, Operation::Span, 1, 0, 0);
+    let last_basic_block_addr = foo_root_addr + *EIGHT;
+    check_op_decoding(&dec_trace, 14, *INIT_ADDR, Operation::Span, 1, 0, 0);
     check_op_decoding(&dec_trace, 15, last_basic_block_addr, Operation::FmpAdd, 0, 0, 1);
     check_op_decoding(&dec_trace, 16, last_basic_block_addr, Operation::Swap, 0, 1, 1);
     check_op_decoding(&dec_trace, 17, last_basic_block_addr, Operation::Drop, 0, 2, 1);
 
     check_op_decoding(&dec_trace, 18, last_basic_block_addr, Operation::End, 0, 0, 0);
     // ending the program
-    check_op_decoding(&dec_trace, 19, INIT_ADDR, Operation::End, 0, 0, 0);
+    check_op_decoding(&dec_trace, 19, *INIT_ADDR, Operation::End, 0, 0, 0);
     check_op_decoding(&dec_trace, 20, ZERO, Operation::Halt, 0, 0, 0);
 
     // --- check hasher state columns -------------------------------------------------------------
@@ -921,7 +929,7 @@ fn call_block() {
 
     // when CALL operation is executed, we switch to the new context
     for i in 8..13 {
-        assert_eq!(sys_trace[CTX_COL_IDX][i], EIGHT);
+        assert_eq!(sys_trace[CTX_COL_IDX][i], *EIGHT);
     }
 
     // once the CALL block exited, we go back to the root context
@@ -933,28 +941,28 @@ fn call_block() {
 
     // for the first 5 cycles fmp stays at initial value
     for i in 0..5 {
-        assert_eq!(sys_trace[FMP_COL_IDX][i], FMP_MIN);
+        assert_eq!(sys_trace[FMP_COL_IDX][i], *FMP_MIN);
     }
 
     // when the first FmpUpdate is executed, fmp gets gets incremented by 2
     for i in 5..8 {
-        assert_eq!(sys_trace[FMP_COL_IDX][i], FMP_MIN + TWO);
+        assert_eq!(sys_trace[FMP_COL_IDX][i], *FMP_MIN + *TWO);
     }
 
     // when CALL operation is executed, fmp gets reset to the initial value
     for i in 8..11 {
-        assert_eq!(sys_trace[FMP_COL_IDX][i], FMP_MIN);
+        assert_eq!(sys_trace[FMP_COL_IDX][i], *FMP_MIN);
     }
 
     // when the second FmpUpdate is executed, fmp gets gets incremented by 1
     for i in 11..13 {
-        assert_eq!(sys_trace[FMP_COL_IDX][i], FMP_MIN + ONE);
+        assert_eq!(sys_trace[FMP_COL_IDX][i], *FMP_MIN + ONE);
     }
 
     // once the CALL block exited, fmp gets reset back to FMP_MIN + 2, and it remains unchanged
     // until the end of the trace
     for i in 13..trace_len {
-        assert_eq!(sys_trace[FMP_COL_IDX][i], FMP_MIN + TWO);
+        assert_eq!(sys_trace[FMP_COL_IDX][i], *FMP_MIN + *TWO);
     }
 
     // --- check the in_syscall column ------------------------------------------------------------
@@ -1059,10 +1067,10 @@ fn syscall_block() {
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
     check_op_decoding(&dec_trace, 0, ZERO, Operation::Join, 0, 0, 0);
     // starting the internal JOIN block
-    let inner_join_addr = INIT_ADDR + EIGHT;
-    check_op_decoding(&dec_trace, 1, INIT_ADDR, Operation::Join, 0, 0, 0);
+    let inner_join_addr = *INIT_ADDR + *EIGHT;
+    check_op_decoding(&dec_trace, 1, *INIT_ADDR, Operation::Join, 0, 0, 0);
     // starting first SPAN block
-    let first_basic_block_addr = inner_join_addr + EIGHT;
+    let first_basic_block_addr = inner_join_addr + *EIGHT;
     check_op_decoding(&dec_trace, 2, inner_join_addr, Operation::Span, 2, 0, 0);
     check_op_decoding_with_imm(&dec_trace, 3, first_basic_block_addr, ONE, 1, 1, 0, 1);
     check_op_decoding(&dec_trace, 4, first_basic_block_addr, Operation::FmpUpdate, 0, 1, 1);
@@ -1070,23 +1078,23 @@ fn syscall_block() {
     check_op_decoding(&dec_trace, 6, first_basic_block_addr, Operation::End, 0, 0, 0);
 
     // starting CALL block for bar
-    let call_addr = first_basic_block_addr + EIGHT;
+    let call_addr = first_basic_block_addr + *EIGHT;
     check_op_decoding(&dec_trace, 7, inner_join_addr, Operation::Call, 0, 0, 0);
     // starting JOIN block inside bar
-    let bar_join_addr = call_addr + EIGHT;
+    let bar_join_addr = call_addr + *EIGHT;
     check_op_decoding(&dec_trace, 8, call_addr, Operation::Join, 0, 0, 0);
     // starting SPAN block inside bar
-    let bar_basic_block_addr = bar_join_addr + EIGHT;
+    let bar_basic_block_addr = bar_join_addr + *EIGHT;
     check_op_decoding(&dec_trace, 9, bar_join_addr, Operation::Span, 2, 0, 0);
     check_op_decoding_with_imm(&dec_trace, 10, bar_basic_block_addr, TWO, 1, 1, 0, 1);
     check_op_decoding(&dec_trace, 11, bar_basic_block_addr, Operation::FmpUpdate, 0, 1, 1);
     check_op_decoding(&dec_trace, 12, bar_basic_block_addr, Operation::End, 0, 0, 0);
 
     // starting SYSCALL block for bar
-    let syscall_addr = bar_basic_block_addr + EIGHT;
+    let syscall_addr = bar_basic_block_addr + *EIGHT;
     check_op_decoding(&dec_trace, 13, bar_join_addr, Operation::SysCall, 0, 0, 0);
     // starting SPAN block within syscall
-    let syscall_basic_block_addr = syscall_addr + EIGHT;
+    let syscall_basic_block_addr = syscall_addr + *EIGHT;
     check_op_decoding(&dec_trace, 14, syscall_addr, Operation::Span, 2, 0, 0);
     check_op_decoding_with_imm(&dec_trace, 15, syscall_basic_block_addr, THREE, 1, 1, 0, 1);
     check_op_decoding(&dec_trace, 16, syscall_basic_block_addr, Operation::FmpUpdate, 0, 1, 1);
@@ -1102,15 +1110,15 @@ fn syscall_block() {
     check_op_decoding(&dec_trace, 21, inner_join_addr, Operation::End, 0, 0, 0);
 
     // starting the last SPAN block
-    let last_basic_block_addr = syscall_basic_block_addr + EIGHT;
-    check_op_decoding(&dec_trace, 22, INIT_ADDR, Operation::Span, 1, 0, 0);
+    let last_basic_block_addr = syscall_basic_block_addr + *EIGHT;
+    check_op_decoding(&dec_trace, 22, *INIT_ADDR, Operation::Span, 1, 0, 0);
     check_op_decoding(&dec_trace, 23, last_basic_block_addr, Operation::FmpAdd, 0, 0, 1);
     check_op_decoding(&dec_trace, 24, last_basic_block_addr, Operation::Swap, 0, 1, 1);
     check_op_decoding(&dec_trace, 25, last_basic_block_addr, Operation::Drop, 0, 2, 1);
     check_op_decoding(&dec_trace, 26, last_basic_block_addr, Operation::End, 0, 0, 0);
 
     // ending the program
-    check_op_decoding(&dec_trace, 27, INIT_ADDR, Operation::End, 0, 0, 0);
+    check_op_decoding(&dec_trace, 27, *INIT_ADDR, Operation::End, 0, 0, 0);
     check_op_decoding(&dec_trace, 28, ZERO, Operation::Halt, 0, 0, 0);
 
     // --- check hasher state columns -------------------------------------------------------------
@@ -1199,7 +1207,7 @@ fn syscall_block() {
     // when CALL operation is executed, we switch to the new context; the ID of this context is 8
     // because we switch to it at the 8th cycle
     for i in 8..14 {
-        assert_eq!(sys_trace[CTX_COL_IDX][i], EIGHT);
+        assert_eq!(sys_trace[CTX_COL_IDX][i], *EIGHT);
     }
 
     // when SYSCALL operation is executed, we switch back to the root context (0)
@@ -1209,7 +1217,7 @@ fn syscall_block() {
 
     // when SYSCALL ends, we return to the context of the CALL block
     for i in 19..21 {
-        assert_eq!(sys_trace[CTX_COL_IDX][i], EIGHT);
+        assert_eq!(sys_trace[CTX_COL_IDX][i], *EIGHT);
     }
 
     // once the CALL block exited, we go back to the root context
@@ -1221,43 +1229,43 @@ fn syscall_block() {
 
     // for the first 5 cycles fmp stays at initial value
     for i in 0..5 {
-        assert_eq!(sys_trace[FMP_COL_IDX][i], FMP_MIN);
+        assert_eq!(sys_trace[FMP_COL_IDX][i], *FMP_MIN);
     }
 
     // when the first FmpUpdate is executed, fmp gets gets incremented by 1
     for i in 5..8 {
-        assert_eq!(sys_trace[FMP_COL_IDX][i], FMP_MIN + ONE);
+        assert_eq!(sys_trace[FMP_COL_IDX][i], *FMP_MIN + ONE);
     }
 
     // when CALL operation is executed, fmp gets reset to the initial value
     for i in 8..12 {
-        assert_eq!(sys_trace[FMP_COL_IDX][i], FMP_MIN);
+        assert_eq!(sys_trace[FMP_COL_IDX][i], *FMP_MIN);
     }
 
     // when the second FmpUpdate is executed, fmp gets gets incremented by 2
     for i in 12..14 {
-        assert_eq!(sys_trace[FMP_COL_IDX][i], FMP_MIN + TWO);
+        assert_eq!(sys_trace[FMP_COL_IDX][i], *FMP_MIN + *TWO);
     }
 
     // when SYSCALL operation is executed, fmp gets reset to the initial value for syscalls
     for i in 14..17 {
-        assert_eq!(sys_trace[FMP_COL_IDX][i], SYSCALL_FMP_MIN);
+        assert_eq!(sys_trace[FMP_COL_IDX][i], *SYSCALL_FMP_MIN);
     }
 
     // when the third FmpUpdate is executed, fmp gets gets incremented by 3
     for i in 17..19 {
-        assert_eq!(sys_trace[FMP_COL_IDX][i], SYSCALL_FMP_MIN + THREE);
+        assert_eq!(sys_trace[FMP_COL_IDX][i], *SYSCALL_FMP_MIN + *THREE);
     }
 
     // once the SYSCALL block exited, fmp gets reset back to FMP_MIN + 2
     for i in 19..21 {
-        assert_eq!(sys_trace[FMP_COL_IDX][i], FMP_MIN + TWO);
+        assert_eq!(sys_trace[FMP_COL_IDX][i], *FMP_MIN + *TWO);
     }
 
     // once the CALL block exited, fmp gets reset back to FMP_MIN + 1, and it remains unchanged
     // until the end of the trace
     for i in 21..trace_len {
-        assert_eq!(sys_trace[FMP_COL_IDX][i], FMP_MIN + ONE);
+        assert_eq!(sys_trace[FMP_COL_IDX][i], *FMP_MIN + ONE);
     }
 
     // --- check the is_syscall column ------------------------------------------------------------
@@ -1313,8 +1321,10 @@ fn dyn_block() {
     //   dynexec
     // end
 
-    const FOO_ROOT_NODE_ADDR: u64 = 40;
-    const PUSH_40_OP: Operation = Operation::Push(Felt::new(FOO_ROOT_NODE_ADDR));
+    lazy_static! {
+        static ref FOO_ROOT_NODE_ADDR: u64 = 40;
+        static ref PUSH_40_OP: Operation = Operation::Push(Felt::from_u64(*FOO_ROOT_NODE_ADDR));
+    }
 
     let mut mast_forest = MastForest::new();
 
@@ -1344,11 +1354,11 @@ fn dyn_block() {
 
     let (trace, trace_len) = build_dyn_trace(
         &[
-            foo_root_node.digest()[0].as_int(),
-            foo_root_node.digest()[1].as_int(),
-            foo_root_node.digest()[2].as_int(),
-            foo_root_node.digest()[3].as_int(),
-            FOO_ROOT_NODE_ADDR,
+            foo_root_node.digest()[0].as_canonical_u64(),
+            foo_root_node.digest()[1].as_canonical_u64(),
+            foo_root_node.digest()[2].as_canonical_u64(),
+            foo_root_node.digest()[3].as_canonical_u64(),
+            *FOO_ROOT_NODE_ADDR,
         ],
         &program,
     );
@@ -1356,26 +1366,26 @@ fn dyn_block() {
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
     check_op_decoding(&trace, 0, ZERO, Operation::Join, 0, 0, 0);
     // starting inner join
-    let join_addr = INIT_ADDR + EIGHT;
-    check_op_decoding(&trace, 1, INIT_ADDR, Operation::Join, 0, 0, 0);
+    let join_addr = *INIT_ADDR + *EIGHT;
+    check_op_decoding(&trace, 1, *INIT_ADDR, Operation::Join, 0, 0, 0);
     // starting first span
-    let mstorew_basic_block_addr = join_addr + EIGHT;
+    let mstorew_basic_block_addr = join_addr + *EIGHT;
     check_op_decoding(&trace, 2, join_addr, Operation::Span, 1, 0, 0);
     check_op_decoding(&trace, 3, mstorew_basic_block_addr, Operation::MStoreW, 0, 0, 1);
     check_op_decoding(&trace, 4, mstorew_basic_block_addr, Operation::End, 0, 0, 0);
     // starting second span
-    let push_basic_block_addr = mstorew_basic_block_addr + EIGHT;
+    let push_basic_block_addr = mstorew_basic_block_addr + *EIGHT;
     check_op_decoding(&trace, 5, join_addr, Operation::Span, 2, 0, 0);
-    check_op_decoding(&trace, 6, push_basic_block_addr, PUSH_40_OP, 1, 0, 1);
+    check_op_decoding(&trace, 6, push_basic_block_addr, *PUSH_40_OP, 1, 0, 1);
     check_op_decoding(&trace, 7, push_basic_block_addr, Operation::Noop, 0, 1, 1);
     check_op_decoding(&trace, 8, push_basic_block_addr, Operation::End, 0, 0, 0);
     // end inner join
     check_op_decoding(&trace, 9, join_addr, Operation::End, 0, 0, 0);
     // dyn
-    check_op_decoding(&trace, 10, INIT_ADDR, Operation::Dyn, 0, 0, 0);
+    check_op_decoding(&trace, 10, *INIT_ADDR, Operation::Dyn, 0, 0, 0);
     // starting foo span
-    let dyn_addr = push_basic_block_addr + EIGHT;
-    let add_basic_block_addr = dyn_addr + EIGHT;
+    let dyn_addr = push_basic_block_addr + *EIGHT;
+    let add_basic_block_addr = dyn_addr + *EIGHT;
     check_op_decoding(&trace, 11, dyn_addr, Operation::Span, 2, 0, 0);
     check_op_decoding_with_imm(&trace, 12, add_basic_block_addr, ONE, 1, 1, 0, 1);
     check_op_decoding(&trace, 13, add_basic_block_addr, Operation::Add, 0, 1, 1);
@@ -1383,7 +1393,7 @@ fn dyn_block() {
     // end dyn
     check_op_decoding(&trace, 15, dyn_addr, Operation::End, 0, 0, 0);
     // end outer join
-    check_op_decoding(&trace, 16, INIT_ADDR, Operation::End, 0, 0, 0);
+    check_op_decoding(&trace, 16, *INIT_ADDR, Operation::End, 0, 0, 0);
 
     // --- check hasher state columns -------------------------------------------------------------
 
@@ -1511,10 +1521,10 @@ fn set_user_op_helpers_many() {
     let expected = build_expected_hasher_state(&[
         ZERO,
         ZERO,
-        Felt::new((check_1 as u16).into()),
-        Felt::new(((check_1 >> 16) as u16).into()),
-        Felt::new((check_2 as u16).into()),
-        Felt::new(((check_2 >> 16) as u16).into()),
+        Felt::from_u64((check_1 as u16).into()),
+        Felt::from_u64(((check_1 >> 16) as u16).into()),
+        Felt::from_u64((TryInto::<u32>::try_into(check_2).unwrap() as u16).into()),
+        Felt::from_u64((TryInto::<u32>::try_into(check_2 >> 16).unwrap()).into()),
     ]);
 
     assert_eq!(expected, hasher_state);
@@ -1611,9 +1621,9 @@ fn check_op_decoding(
 
     assert_eq!(trace[ADDR_COL_IDX][row_idx], addr);
     assert_eq!(op.op_code(), opcode);
-    assert_eq!(trace[IN_SPAN_COL_IDX][row_idx], Felt::new(in_span));
-    assert_eq!(trace[GROUP_COUNT_COL_IDX][row_idx], Felt::new(group_count));
-    assert_eq!(trace[OP_INDEX_COL_IDX][row_idx], Felt::new(op_idx));
+    assert_eq!(trace[IN_SPAN_COL_IDX][row_idx], Felt::from_u64(in_span));
+    assert_eq!(trace[GROUP_COUNT_COL_IDX][row_idx], Felt::from_u64(group_count));
+    assert_eq!(trace[OP_INDEX_COL_IDX][row_idx], Felt::from_u64(op_idx));
 
     let expected_batch_flags = if op == Operation::Span || op == Operation::Respan {
         let num_groups = core::cmp::min(OP_BATCH_SIZE, group_count as usize);
@@ -1627,9 +1637,9 @@ fn check_op_decoding(
     }
 
     // make sure the op bit extra columns for degree reduction are set correctly
-    let bit6 = Felt::from((opcode >> 6) & 1);
-    let bit5 = Felt::from((opcode >> 5) & 1);
-    let bit4 = Felt::from((opcode >> 4) & 1);
+    let bit6 = Felt::from_u8((opcode >> 6) & 1);
+    let bit5 = Felt::from_u8((opcode >> 5) & 1);
+    let bit4 = Felt::from_u8((opcode >> 4) & 1);
     assert_eq!(trace[OP_BITS_EXTRA_COLS_RANGE.start][row_idx], bit6 * (ONE - bit5) * bit4);
     assert_eq!(trace[OP_BITS_EXTRA_COLS_RANGE.start + 1][row_idx], bit6 * bit5);
 }
@@ -1669,7 +1679,7 @@ fn contains_op(trace: &DecoderTrace, row_idx: usize, op: Operation) -> bool {
 fn read_opcode(trace: &DecoderTrace, row_idx: usize) -> u8 {
     let mut result = 0;
     for (i, column) in trace.iter().skip(OP_BITS_OFFSET).take(NUM_OP_BITS).enumerate() {
-        let op_bit = column[row_idx].as_int();
+        let op_bit = column[row_idx].as_canonical_u64();
         assert!(op_bit <= 1, "invalid op bit");
         result += op_bit << i;
     }

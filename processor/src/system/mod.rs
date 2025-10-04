@@ -1,9 +1,10 @@
 use alloc::vec::Vec;
+use vm_core::{PrimeCharacteristicRing, PrimeField64};
 use core::fmt::{self, Display};
 
 use miden_air::RowIndex;
 
-use super::{EMPTY_WORD, ExecutionError, Felt, FieldElement, ONE, SysTrace, Word, ZERO};
+use super::{EMPTY_WORD, ExecutionError, Felt, ONE, SysTrace, Word, ZERO};
 
 #[cfg(test)]
 mod tests;
@@ -62,7 +63,7 @@ impl System {
     /// Initializes the free memory pointer `fmp` used for local memory offsets to 2^30.
     pub fn new(init_trace_capacity: usize) -> Self {
         // set the first value of the fmp trace to 2^30.
-        let fmp = Felt::new(FMP_MIN);
+        let fmp = Felt::from_u64(FMP_MIN);
         let mut fmp_trace = vec![Felt::ZERO; init_trace_capacity];
         fmp_trace[0] = fmp;
 
@@ -128,7 +129,7 @@ impl System {
     /// Returns execution context ID at the specified clock cycle.
     #[inline(always)]
     pub fn get_ctx_at(&self, clk: RowIndex) -> ContextId {
-        (self.ctx_trace[clk.as_usize()].as_int() as u32).into()
+        (self.ctx_trace[clk.as_usize()].as_canonical_u64() as u32).into()
     }
 
     /// Returns free memory pointer at the specified clock cycle.
@@ -201,7 +202,7 @@ impl System {
     /// for SYSCALLs this remains set to the hash of the last invoked function.
     pub fn start_syscall(&mut self) {
         self.ctx = ContextId::root();
-        self.fmp = Felt::from(SYSCALL_FMP_MIN);
+        self.fmp = Felt::from_u32(SYSCALL_FMP_MIN);
         self.in_syscall = true;
     }
 
@@ -246,7 +247,7 @@ impl System {
         self.clk_trace.resize(trace_len, ZERO);
         for (i, clk) in self.clk_trace.iter_mut().enumerate().skip(clk) {
             // converting from u32 is OK here because max trace length is 2^32
-            *clk = Felt::from(i as u32);
+            *clk = Felt::from_u32(i as u32);
         }
 
         // complete the ctx column by filling all values after the last clock cycle with ZEROs as
@@ -353,7 +354,7 @@ impl From<ContextId> for u64 {
 
 impl From<ContextId> for Felt {
     fn from(context_id: ContextId) -> Self {
-        context_id.0.into()
+        Felt::from_u32(context_id.0.into())
     }
 }
 

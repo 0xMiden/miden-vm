@@ -14,6 +14,18 @@ use super::{
     AdviceProvider, ColMatrix, Felt, FieldElement, Process,
     chiplets::AuxTraceBuilder as ChipletsAuxTraceBuilder, crypto::RpoRandomCoin,
     decoder::AuxTraceBuilder as DecoderAuxTraceBuilder,
+}
+use miden_core::{
+    ExtensionField, PrimeField64, ProgramInfo, StackInputs, StackOutputs, ZERO,
+    stack::MIN_STACK_DEPTH,
+};
+use winter_prover::TraceInfo;
+
+use crate::ColMatrix;
+
+use super::{
+    Digest, Felt, Process, chiplets::AuxTraceBuilder as ChipletsAuxTraceBuilder,
+    crypto::RpoRandomCoin, decoder::AuxTraceBuilder as DecoderAuxTraceBuilder,
     range::AuxTraceBuilder as RangeCheckerAuxTraceBuilder,
     stack::AuxTraceBuilder as StackAuxTraceBuilder,
 };
@@ -54,7 +66,7 @@ pub struct AuxTraceBuilders {
 pub struct ExecutionTrace {
     meta: Vec<u8>,
     trace_info: TraceInfo,
-    main_trace: MainTrace,
+    pub main_trace: MainTrace,
     aux_trace_builders: AuxTraceBuilders,
     program_info: ProgramInfo,
     stack_outputs: StackOutputs,
@@ -208,7 +220,7 @@ impl ExecutionTrace {
 
     pub fn build_aux_trace<E>(&self, rand_elements: &[E]) -> Option<ColMatrix<E>>
     where
-        E: FieldElement<BaseField = Felt>,
+        E: ExtensionField<Felt>,
     {
         // add decoder's running product columns
         let decoder_aux_columns = self
@@ -231,7 +243,7 @@ impl ExecutionTrace {
             .build_aux_columns(&self.main_trace, rand_elements);
 
         // combine all auxiliary columns into a single vector
-        let mut aux_columns = decoder_aux_columns
+        let aux_columns = decoder_aux_columns
             .into_iter()
             .chain(stack_aux_columns)
             .chain(range_aux_columns)
@@ -248,30 +260,9 @@ impl ExecutionTrace {
 
         Some(ColMatrix::new(aux_columns))
     }
-}
-
-// TRACE TRAIT IMPLEMENTATION
-// ================================================================================================
-
-impl Trace for ExecutionTrace {
-    type BaseField = Felt;
 
     fn length(&self) -> usize {
         self.main_trace.num_rows()
-    }
-
-    fn main_segment(&self) -> &ColMatrix<Felt> {
-        &self.main_trace
-    }
-
-    fn read_main_frame(&self, row_idx: usize, frame: &mut EvaluationFrame<Felt>) {
-        let next_row_idx = (row_idx + 1) % self.length();
-        self.main_trace.read_row_into(row_idx, frame.current_mut());
-        self.main_trace.read_row_into(next_row_idx, frame.next_mut());
-    }
-
-    fn info(&self) -> &TraceInfo {
-        &self.trace_info
     }
 }
 
@@ -288,7 +279,7 @@ impl Trace for ExecutionTrace {
 ///   in turn, ensures that polynomial degrees of all columns are stable.
 fn finalize_trace(
     process: Process,
-    mut rng: RpoRandomCoin,
+    mut _rng: RpoRandomCoin,
 ) -> (MainTrace, AuxTraceBuilders, TraceLenSummary) {
     let (system, decoder, stack, mut range, chiplets) = process.into_parts();
 

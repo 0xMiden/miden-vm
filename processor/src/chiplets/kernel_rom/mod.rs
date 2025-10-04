@@ -1,6 +1,7 @@
 use alloc::collections::BTreeMap;
 
 use miden_air::{RowIndex, trace::chiplets::kernel_rom::TRACE_WIDTH};
+use vm_core::PrimeCharacteristicRing;
 
 use super::{ExecutionError, Felt, Kernel, TraceFragment, Word as Digest};
 use crate::ErrorContext;

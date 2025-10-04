@@ -4,6 +4,7 @@ use core::fmt;
 use miden_crypto::{Felt, Word};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+use miden_crypto::{Felt, PrimeCharacteristicRing, hash::rpo::RpoDigest};
 
 use super::{MastNodeErrorContext, MastNodeExt};
 use crate::{
@@ -32,7 +33,9 @@ pub struct JoinNode {
 /// Constants
 impl JoinNode {
     /// The domain of the join block (used for control block hashing).
-    pub const DOMAIN: Felt = Felt::new(OPCODE_JOIN as u64);
+    pub fn join_domain() -> Felt {
+        Felt::from_u64(OPCODE_JOIN as u64)
+    }
 }
 
 /// Constructors
@@ -52,7 +55,7 @@ impl JoinNode {
             let left_child_hash = mast_forest[children[0]].digest();
             let right_child_hash = mast_forest[children[1]].digest();
 
-            hasher::merge_in_domain(&[left_child_hash, right_child_hash], Self::DOMAIN)
+            hasher::merge_in_domain(&[left_child_hash, right_child_hash], Self::join_domain())
         };
 
         Ok(Self {
@@ -77,6 +80,21 @@ impl JoinNode {
 
 /// Public accessors
 impl JoinNode {
+    /// Returns a commitment to this Join node.
+    ///
+    /// The commitment is computed as a hash of the `first` and `second` child node in the domain
+    /// defined by [Self::join_domain()] - i.e.,:
+    /// ```
+    /// # use miden_core::mast::JoinNode;
+    /// # use miden_crypto::{hash::rpo::{RpoDigest as Digest, Rpo256 as Hasher}};
+    /// # let first_child_digest = Digest::default();
+    /// # let second_child_digest = Digest::default();
+    /// Hasher::merge_in_domain(&[first_child_digest, second_child_digest], JoinNode::join_domain());
+    /// ```
+    pub fn digest(&self) -> RpoDigest {
+        self.digest
+    }
+
     /// Returns the ID of the node that is to be executed first.
     pub fn first(&self) -> MastNodeId {
         self.children[0]

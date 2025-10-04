@@ -8,6 +8,8 @@ use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
 use miden_core::{Felt, WORD_SIZE};
 use serde::Deserialize;
 pub use tracing::{Level, event, instrument};
+use miden_core::Felt;
+use miden_core::PrimeCharacteristicRing;
 
 use crate::{
     AdviceInputs, StackInputs, Word, ZERO,
@@ -161,6 +163,7 @@ impl InputFile {
                     .map_err(|e| format!("failed to decode advice map key '{k}': {e}"))?;
 
                 // convert values to Felt
+                /* TODO(Al)
                 let values = v
                     .iter()
                     .map(|v| {
@@ -168,7 +171,8 @@ impl InputFile {
                             format!("failed to convert advice map value '{v}' to Felt: {e}")
                         })
                     })
-                    .collect::<Result<Vec<_>, _>>()?;
+                    .collect::<Result<Vec<_>, _>>()?; */
+                let values = v.iter().map(|v| Felt::from_u64(*v)).collect::<Vec<_>>();
                 Ok((key, values))
             })
             .collect::<Result<BTreeMap<Word, Vec<Felt>>, String>>()?;
@@ -270,9 +274,11 @@ impl InputFile {
             .map_err(|e| format!("failed to decode `Word` from hex {word_hex} - {e}"))?;
         let mut word = [ZERO; WORD_SIZE];
         for (i, value) in word_data.chunks(8).enumerate() {
-            word[i] = Felt::try_from(value).map_err(|e| {
-                format!("failed to convert `Word` data {word_hex} (element {i}) to Felt - {e}")
-            })?;
+            // word[i] = Felt::try_from(value).map_err(|e| {
+            //    format!("failed to convert `Word` data {word_hex} (element {i}) to Felt - {e}")
+            //})?; TODO(Al)
+            let value = u64::from_be_bytes(value.try_into().unwrap());
+            word[i] = Felt::from_u64(value);
         }
         Ok(word.into())
     }

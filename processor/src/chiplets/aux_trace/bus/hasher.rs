@@ -16,6 +16,10 @@ use miden_air::{
 use miden_core::{
     Felt, FieldElement, ONE, OPCODE_CALL, OPCODE_JOIN, OPCODE_LOOP, OPCODE_SPLIT, ZERO,
     utils::range,
+}
+use vm_core::{
+    ExtensionField, Felt, ONE, OPCODE_CALL, OPCODE_JOIN, OPCODE_LOOP, OPCODE_SPLIT,
+    PrimeCharacteristicRing, PrimeField64, ZERO, utils::range,
 };
 
 use super::get_op_label;
@@ -27,7 +31,7 @@ use crate::{
 // ==============================================================================================
 
 /// Builds requests made to the hasher chiplet at the start of a control block.
-pub(super) fn build_control_block_request<E: FieldElement<BaseField = Felt>>(
+pub(super) fn build_control_block_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     decoder_hasher_state: [Felt; 8],
     op_code_felt: Felt,
@@ -36,7 +40,7 @@ pub(super) fn build_control_block_request<E: FieldElement<BaseField = Felt>>(
     _debugger: &mut BusDebugger<E>,
 ) -> E {
     let message = ControlBlockRequestMessage {
-        transition_label: Felt::from(LINEAR_HASH_LABEL + 16),
+        transition_label: Felt::from_u8(LINEAR_HASH_LABEL + 16),
         addr_next: main_trace.addr(row + 1),
         op_code: op_code_felt,
         decoder_hasher_state,
@@ -51,14 +55,14 @@ pub(super) fn build_control_block_request<E: FieldElement<BaseField = Felt>>(
 }
 
 /// Builds requests made to the hasher chiplet at the start of a span block.
-pub(super) fn build_span_block_request<E: FieldElement<BaseField = Felt>>(
+pub(super) fn build_span_block_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     alphas: &[E],
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
     let span_block_message = SpanBlockMessage {
-        transition_label: Felt::from(LINEAR_HASH_LABEL + 16),
+        transition_label: Felt::from_u8(LINEAR_HASH_LABEL + 16),
         addr_next: main_trace.addr(row + 1),
         state: main_trace.decoder_hasher_state(row),
     };
@@ -72,14 +76,14 @@ pub(super) fn build_span_block_request<E: FieldElement<BaseField = Felt>>(
 }
 
 /// Builds requests made to the hasher chiplet at the start of a respan block.
-pub(super) fn build_respan_block_request<E: FieldElement<BaseField = Felt>>(
+pub(super) fn build_respan_block_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     alphas: &[E],
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
     let respan_block_message = RespanBlockMessage {
-        transition_label: Felt::from(LINEAR_HASH_LABEL + 32),
+        transition_label: Felt::from_u8(LINEAR_HASH_LABEL + 32),
         addr_next: main_trace.addr(row + 1),
         state: main_trace.decoder_hasher_state(row),
     };
@@ -93,15 +97,15 @@ pub(super) fn build_respan_block_request<E: FieldElement<BaseField = Felt>>(
 }
 
 /// Builds requests made to the hasher chiplet at the end of a block.
-pub(super) fn build_end_block_request<E: FieldElement<BaseField = Felt>>(
+pub(super) fn build_end_block_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     alphas: &[E],
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
     let end_block_message = EndBlockMessage {
-        addr: main_trace.addr(row) + Felt::from(NUM_ROUNDS as u8),
-        transition_label: Felt::from(RETURN_HASH_LABEL + 32),
+        addr: main_trace.addr(row) + Felt::from_u8(NUM_ROUNDS as u8),
+        transition_label: Felt::from_u8(RETURN_HASH_LABEL + 32),
         digest: main_trace.decoder_hasher_state(row)[..4].try_into().unwrap(),
     };
 
@@ -114,7 +118,7 @@ pub(super) fn build_end_block_request<E: FieldElement<BaseField = Felt>>(
 }
 
 /// Builds `HPERM` requests made to the hash chiplet.
-pub(super) fn build_hperm_request<E: FieldElement<BaseField = Felt>>(
+pub(super) fn build_hperm_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     alphas: &[E],
     row: RowIndex,
@@ -147,15 +151,15 @@ pub(super) fn build_hperm_request<E: FieldElement<BaseField = Felt>>(
     let s11_nxt = main_trace.stack_element(11, row + 1);
 
     let input_req = HasherMessage {
-        transition_label: Felt::from(LINEAR_HASH_LABEL + 16),
+        transition_label: Felt::from_u8(LINEAR_HASH_LABEL + 16),
         addr_next: helper_0,
         node_index: ZERO,
         hasher_state: [s11, s10, s9, s8, s7, s6, s5, s4, s3, s2, s1, s0],
         source: "hperm input",
     };
     let output_req = HasherMessage {
-        transition_label: Felt::from(RETURN_STATE_LABEL + 32),
-        addr_next: helper_0 + Felt::new(7),
+        transition_label: Felt::from_u8(RETURN_STATE_LABEL + 32),
+        addr_next: helper_0 + Felt::from_u64(7),
         node_index: ZERO,
         hasher_state: [
             s11_nxt, s10_nxt, s9_nxt, s8_nxt, s7_nxt, s6_nxt, s5_nxt, s4_nxt, s3_nxt, s2_nxt,
@@ -176,7 +180,7 @@ pub(super) fn build_hperm_request<E: FieldElement<BaseField = Felt>>(
 }
 
 /// Builds `MPVERIFY` requests made to the hash chiplet.
-pub(super) fn build_mpverify_request<E: FieldElement<BaseField = Felt>>(
+pub(super) fn build_mpverify_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     alphas: &[E],
     row: RowIndex,
@@ -201,7 +205,7 @@ pub(super) fn build_mpverify_request<E: FieldElement<BaseField = Felt>>(
     ];
 
     let input = HasherMessage {
-        transition_label: Felt::from(MP_VERIFY_LABEL + 16),
+        transition_label: Felt::from_u8(MP_VERIFY_LABEL + 16),
         addr_next: helper_0,
         node_index,
         hasher_state: [
@@ -222,8 +226,8 @@ pub(super) fn build_mpverify_request<E: FieldElement<BaseField = Felt>>(
     };
 
     let output = HasherMessage {
-        transition_label: Felt::from(RETURN_HASH_LABEL + 32),
-        addr_next: helper_0 + node_depth.mul_small(8) - ONE,
+        transition_label: Felt::from_u8(RETURN_HASH_LABEL + 32),
+        addr_next: helper_0 + node_depth * Felt::from_u8(8) - ONE,
         node_index: ZERO,
         hasher_state: [
             ZERO,
@@ -254,7 +258,7 @@ pub(super) fn build_mpverify_request<E: FieldElement<BaseField = Felt>>(
 }
 
 /// Builds `MRUPDATE` requests made to the hash chiplet.
-pub(super) fn build_mrupdate_request<E: FieldElement<BaseField = Felt>>(
+pub(super) fn build_mrupdate_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     alphas: &[E],
     row: RowIndex,
@@ -290,7 +294,7 @@ pub(super) fn build_mrupdate_request<E: FieldElement<BaseField = Felt>>(
     ];
 
     let input_old = HasherMessage {
-        transition_label: Felt::from(MR_UPDATE_OLD_LABEL + 16),
+        transition_label: Felt::from_u8(MR_UPDATE_OLD_LABEL + 16),
         addr_next: helper_0,
         node_index,
         hasher_state: [
@@ -311,8 +315,8 @@ pub(super) fn build_mrupdate_request<E: FieldElement<BaseField = Felt>>(
     };
 
     let output_old = HasherMessage {
-        transition_label: Felt::from(RETURN_HASH_LABEL + 32),
-        addr_next: helper_0 + merkle_path_depth.mul_small(8) - ONE,
+        transition_label: Felt::from_u8(RETURN_HASH_LABEL + 32),
+        addr_next: helper_0 + merkle_path_depth * Felt::from_u8(8) - ONE,
         node_index: ZERO,
         hasher_state: [
             ZERO,
@@ -332,8 +336,8 @@ pub(super) fn build_mrupdate_request<E: FieldElement<BaseField = Felt>>(
     };
 
     let input_new = HasherMessage {
-        transition_label: Felt::from(MR_UPDATE_NEW_LABEL + 16),
-        addr_next: helper_0 + merkle_path_depth.mul_small(8),
+        transition_label: Felt::from_u8(MR_UPDATE_NEW_LABEL + 16),
+        addr_next: helper_0 + merkle_path_depth * Felt::from_u8(8),
         node_index,
         hasher_state: [
             ZERO,
@@ -353,8 +357,8 @@ pub(super) fn build_mrupdate_request<E: FieldElement<BaseField = Felt>>(
     };
 
     let output_new = HasherMessage {
-        transition_label: Felt::from(RETURN_HASH_LABEL + 32),
-        addr_next: helper_0 + merkle_path_depth.mul_small(16) - ONE,
+        transition_label: Felt::from_u8(RETURN_HASH_LABEL + 32),
+        addr_next: helper_0 + merkle_path_depth * Felt::from_u8(16) - ONE,
         node_index: ZERO,
         hasher_state: [
             ZERO,
@@ -400,7 +404,7 @@ pub(super) fn build_hasher_chiplet_responses<E>(
     _debugger: &mut BusDebugger<E>,
 ) -> E
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     let mut multiplicand = E::ONE;
     let selector0 = main_trace.chiplet_selector_0(row);
@@ -414,7 +418,7 @@ where
     if row.as_usize().is_multiple_of(HASH_CYCLE_LEN) {
         let state = main_trace.chiplet_hasher_state(row);
         let node_index = main_trace.chiplet_node_index(row);
-        let transition_label = op_label + Felt::from(16_u8);
+        let transition_label = op_label + Felt::from_u8(16_u8);
 
         // f_bp == 1
         // v_all = v_h + v_a + v_b + v_c
@@ -435,7 +439,7 @@ where
         // f_mp or f_mv or f_mu == 1
         // v_leaf = v_h + (1 - b) * v_b + b * v_d
         if selector1 == ONE && !(selector2 == ZERO && selector3 == ZERO) {
-            let bit = (node_index.as_int() & 1) as u8;
+            let bit = (node_index.as_canonical_u64() & 1) as u8;
             if bit == 0 {
                 let hasher_message = HasherMessage {
                     transition_label,
@@ -476,7 +480,7 @@ where
     if row.as_usize() % HASH_CYCLE_LEN == HASH_CYCLE_LEN - 1 {
         let state = main_trace.chiplet_hasher_state(row);
         let node_index = main_trace.chiplet_node_index(row);
-        let transition_label = op_label + Felt::from(32_u8);
+        let transition_label = op_label + Felt::from_u8(32_u8);
 
         // f_hout == 1
         // v_res = v_h + v_b;
@@ -563,20 +567,16 @@ pub struct ControlBlockRequestMessage {
 
 impl<E> BusMessage<E> for ControlBlockRequestMessage
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     fn value(&self, alphas: &[E]) -> E {
-        let header = alphas[0]
-            + alphas[1].mul_base(self.transition_label)
-            + alphas[2].mul_base(self.addr_next);
+        let header = alphas[0] + alphas[1] * (self.transition_label) + alphas[2] * (self.addr_next);
 
-        header
-            + alphas[5].mul_base(self.op_code)
-            + build_value(&alphas[8..16], self.decoder_hasher_state)
+        header + alphas[5] * (self.op_code) + build_value(&alphas[8..16], self.decoder_hasher_state)
     }
 
     fn source(&self) -> &str {
-        let op_code = self.op_code.as_int() as u8;
+        let op_code = self.op_code.as_canonical_u64() as u8;
         match op_code {
             OPCODE_JOIN => "join",
             OPCODE_SPLIT => "split",
@@ -612,13 +612,13 @@ pub struct HasherMessage {
 
 impl<E> BusMessage<E> for HasherMessage
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     fn value(&self, alphas: &[E]) -> E {
         let header = alphas[0]
-            + alphas[1].mul_base(self.transition_label)
-            + alphas[2].mul_base(self.addr_next)
-            + alphas[3].mul_base(self.node_index);
+            + alphas[1] * (self.transition_label)
+            + alphas[2] * (self.addr_next)
+            + alphas[3] * (self.node_index);
 
         header
             + build_value(&alphas[range(NUM_HEADER_ALPHAS, hasher::STATE_WIDTH)], self.hasher_state)
@@ -650,12 +650,10 @@ pub struct SpanBlockMessage {
 
 impl<E> BusMessage<E> for SpanBlockMessage
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     fn value(&self, alphas: &[E]) -> E {
-        let header = alphas[0]
-            + alphas[1].mul_base(self.transition_label)
-            + alphas[2].mul_base(self.addr_next);
+        let header = alphas[0] + alphas[1] * (self.transition_label) + alphas[2] * (self.addr_next);
 
         header + build_value(&alphas[8..16], self.state)
     }
@@ -686,12 +684,11 @@ pub struct RespanBlockMessage {
 
 impl<E> BusMessage<E> for RespanBlockMessage
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     fn value(&self, alphas: &[E]) -> E {
-        let header = alphas[0]
-            + alphas[1].mul_base(self.transition_label)
-            + alphas[2].mul_base(self.addr_next - ONE);
+        let header =
+            alphas[0] + alphas[1] * (self.transition_label) + alphas[2] * (self.addr_next - ONE);
 
         header + build_value(&alphas[8..16], self.state)
     }
@@ -722,11 +719,10 @@ pub struct EndBlockMessage {
 
 impl<E> BusMessage<E> for EndBlockMessage
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     fn value(&self, alphas: &[E]) -> E {
-        let header =
-            alphas[0] + alphas[1].mul_base(self.transition_label) + alphas[2].mul_base(self.addr);
+        let header = alphas[0] + alphas[1] * (self.transition_label) + alphas[2] * (self.addr);
 
         header + build_value(&alphas[8..12], self.digest)
     }

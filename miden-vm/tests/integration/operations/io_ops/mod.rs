@@ -2,6 +2,9 @@ use miden_core::chiplets::hasher::apply_permutation;
 use miden_utils_testing::{
     Felt, TRUNCATE_STACK_PROC, ToElements, assert_eq, build_op_test, build_test,
 };
+use test_utils::{Felt, TRUNCATE_STACK_PROC, ToElements, assert_eq, build_op_test, build_test};
+use vm_core::PrimeField64;
+use vm_core::chiplets::hasher::apply_permutation;
 
 mod adv_ops;
 mod constant_ops;
@@ -73,7 +76,7 @@ fn mem_stream_pipe() {
     let mut final_stack = state[4..8]
         .iter()
         .chain(state[4..8].iter())
-        .map(|&v| v.as_int())
+        .map(|&v| v.as_canonical_u64())
         .collect::<Vec<u64>>();
     final_stack.reverse();
 

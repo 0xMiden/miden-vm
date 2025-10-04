@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
-
-use miden_core::{ExtensionOf, ZERO};
+/*
+use vm_core::{ExtensionOf, ZERO};
 
 use crate::{
     Assertion, EvaluationFrame, Felt, FieldElement, TransitionConstraintDegree,
@@ -255,3 +255,4 @@ impl<E: FieldElement> EvaluationFrameExt<E> for &EvaluationFrame<E> {
         self.next()[column] - self.current()[column]
     }
 }
+ */

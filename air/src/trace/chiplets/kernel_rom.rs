@@ -1,3 +1,5 @@
+use vm_core::ZERO;
+
 use super::Felt;
 
 // CONSTANTS

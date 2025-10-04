@@ -6,6 +6,8 @@ use miden_air::trace::chiplets::bitwise::{
 };
 use miden_core::ZERO;
 use miden_utils_testing::rand::rand_value;
+use test_utils::rand::rand_value;
+use miden_core::{ZERO, PrimeField64, PrimeCharacteristicRing};
 
 use super::{Bitwise, Felt, TraceFragment};
 
@@ -38,7 +40,7 @@ fn bitwise_and() {
     assert_eq!(result, trace[OUTPUT_COL_IDX][OP_CYCLE_LEN - 1]);
 
     // make sure values a and b were decomposed correctly
-    check_decomposition(&trace, 0, a.as_int(), b.as_int());
+    check_decomposition(&trace, 0, a.as_canonical_u64(), b.as_canonical_u64());
 
     // make sure the result was re-composed correctly
     let mut prev_result = ZERO;
@@ -49,8 +51,8 @@ fn bitwise_and() {
         let c2 = binary_and(trace[A_COL_RANGE.start + 2][i], trace[B_COL_RANGE.start + 2][i]);
         let c3 = binary_and(trace[A_COL_RANGE.start + 3][i], trace[B_COL_RANGE.start + 3][i]);
 
-        let result_4_bit = c0 + Felt::new(2) * c1 + Felt::new(4) * c2 + Felt::new(8) * c3;
-        let result = prev_result * Felt::new(16) + result_4_bit;
+        let result_4_bit = c0 + Felt::from_u64(2) * c1 + Felt::from_u64(4) * c2 + Felt::from_u64(8) * c3;
+        let result = prev_result * Felt::from_u64(16) + result_4_bit;
 
         assert_eq!(prev_result, trace[PREV_OUTPUT_COL_IDX][i]);
         assert_eq!(result, trace[OUTPUT_COL_IDX][i]);
@@ -82,7 +84,7 @@ fn bitwise_xor() {
     assert_eq!(result, trace[OUTPUT_COL_IDX][OP_CYCLE_LEN - 1]);
 
     // make sure values a and b were decomposed correctly
-    check_decomposition(&trace, 0, a.as_int(), b.as_int());
+    check_decomposition(&trace, 0, a.as_canonical_u64(), b.as_canonical_u64());
 
     // make sure the result was re-composed correctly
     let mut prev_result = ZERO;
@@ -93,8 +95,8 @@ fn bitwise_xor() {
         let c2 = binary_xor(trace[A_COL_RANGE.start + 2][i], trace[B_COL_RANGE.start + 2][i]);
         let c3 = binary_xor(trace[A_COL_RANGE.start + 3][i], trace[B_COL_RANGE.start + 3][i]);
 
-        let result_4_bit = c0 + Felt::new(2) * c1 + Felt::new(4) * c2 + Felt::new(8) * c3;
-        let result = prev_result * Felt::new(16) + result_4_bit;
+        let result_4_bit = c0 + Felt::from_u64(2) * c1 + Felt::from_u64(4) * c2 + Felt::from_u64(8) * c3;
+        let result = prev_result * Felt::from_u64(16) + result_4_bit;
 
         assert_eq!(prev_result, trace[PREV_OUTPUT_COL_IDX][i]);
         assert_eq!(result, trace[OUTPUT_COL_IDX][i]);
@@ -131,9 +133,9 @@ fn bitwise_multiple() {
     assert_eq!(result1, trace[OUTPUT_COL_IDX][2 * OP_CYCLE_LEN - 1]);
     assert_eq!(result2, trace[OUTPUT_COL_IDX][3 * OP_CYCLE_LEN - 1]);
     // make sure input values were decomposed correctly
-    check_decomposition(&trace, 0, a[0].as_int(), b[0].as_int());
-    check_decomposition(&trace, OP_CYCLE_LEN, a[1].as_int(), b[1].as_int());
-    check_decomposition(&trace, 2 * OP_CYCLE_LEN, a[2].as_int(), b[2].as_int());
+    check_decomposition(&trace, 0, a[0].as_canonical_u64(), b[0].as_canonical_u64());
+    check_decomposition(&trace, OP_CYCLE_LEN, a[1].as_canonical_u64(), b[1].as_canonical_u64());
+    check_decomposition(&trace, 2 * OP_CYCLE_LEN, a[2].as_canonical_u64(), b[2].as_canonical_u64());
 
     // make sure the results was re-composed correctly
 
@@ -144,8 +146,8 @@ fn bitwise_multiple() {
         let c2 = binary_and(trace[A_COL_RANGE.start + 2][i], trace[B_COL_RANGE.start + 2][i]);
         let c3 = binary_and(trace[A_COL_RANGE.start + 3][i], trace[B_COL_RANGE.start + 3][i]);
 
-        let result_4_bit = c0 + Felt::new(2) * c1 + Felt::new(4) * c2 + Felt::new(8) * c3;
-        let result = prev_result * Felt::new(16) + result_4_bit;
+        let result_4_bit = c0 + Felt::from_u64(2) * c1 + Felt::from_u64(4) * c2 + Felt::from_u64(8) * c3;
+        let result = prev_result * Felt::from_u64(16) + result_4_bit;
 
         assert_eq!(prev_result, trace[PREV_OUTPUT_COL_IDX][i]);
         assert_eq!(result, trace[OUTPUT_COL_IDX][i]);
@@ -160,8 +162,8 @@ fn bitwise_multiple() {
         let c2 = binary_xor(trace[A_COL_RANGE.start + 2][i], trace[B_COL_RANGE.start + 2][i]);
         let c3 = binary_xor(trace[A_COL_RANGE.start + 3][i], trace[B_COL_RANGE.start + 3][i]);
 
-        let result_4_bit = c0 + Felt::new(2) * c1 + Felt::new(4) * c2 + Felt::new(8) * c3;
-        let result = prev_result * Felt::new(16) + result_4_bit;
+        let result_4_bit = c0 + Felt::from_u64(2) * c1 + Felt::from_u64(4) * c2 + Felt::from_u64(8) * c3;
+        let result = prev_result * Felt::from_u64(16) + result_4_bit;
 
         assert_eq!(prev_result, trace[PREV_OUTPUT_COL_IDX][i]);
         assert_eq!(result, trace[OUTPUT_COL_IDX][i]);
@@ -176,8 +178,8 @@ fn bitwise_multiple() {
         let c2 = binary_and(trace[A_COL_RANGE.start + 2][i], trace[B_COL_RANGE.start + 2][i]);
         let c3 = binary_and(trace[A_COL_RANGE.start + 3][i], trace[B_COL_RANGE.start + 3][i]);
 
-        let result_4_bit = c0 + Felt::new(2) * c1 + Felt::new(4) * c2 + Felt::new(8) * c3;
-        let result = prev_result * Felt::new(16) + result_4_bit;
+        let result_4_bit = c0 + Felt::from_u64(2) * c1 + Felt::from_u64(4) * c2 + Felt::from_u64(8) * c3;
+        let result = prev_result * Felt::from_u64(16) + result_4_bit;
 
         assert_eq!(prev_result, trace[PREV_OUTPUT_COL_IDX][i]);
         assert_eq!(result, trace[OUTPUT_COL_IDX][i]);
@@ -207,18 +209,18 @@ fn check_decomposition(trace: &[Vec<Felt>], start: usize, a: u64, b: u64) {
         let a = a >> bit_offset;
         let b = b >> bit_offset;
 
-        assert_eq!(Felt::new(a), trace[A_COL_IDX][i]);
-        assert_eq!(Felt::new(b), trace[B_COL_IDX][i]);
+        assert_eq!(Felt::from_u64(a), trace[A_COL_IDX][i]);
+        assert_eq!(Felt::from_u64(b), trace[B_COL_IDX][i]);
 
-        assert_eq!(Felt::new(a & 1), trace[A_COL_RANGE.start][i]);
-        assert_eq!(Felt::new((a >> 1) & 1), trace[A_COL_RANGE.start + 1][i]);
-        assert_eq!(Felt::new((a >> 2) & 1), trace[A_COL_RANGE.start + 2][i]);
-        assert_eq!(Felt::new((a >> 3) & 1), trace[A_COL_RANGE.start + 3][i]);
+        assert_eq!(Felt::from_u64(a & 1), trace[A_COL_RANGE.start][i]);
+        assert_eq!(Felt::from_u64((a >> 1) & 1), trace[A_COL_RANGE.start + 1][i]);
+        assert_eq!(Felt::from_u64((a >> 2) & 1), trace[A_COL_RANGE.start + 2][i]);
+        assert_eq!(Felt::from_u64((a >> 3) & 1), trace[A_COL_RANGE.start + 3][i]);
 
-        assert_eq!(Felt::new(b & 1), trace[B_COL_RANGE.start][i]);
-        assert_eq!(Felt::new((b >> 1) & 1), trace[B_COL_RANGE.start + 1][i]);
-        assert_eq!(Felt::new((b >> 2) & 1), trace[B_COL_RANGE.start + 2][i]);
-        assert_eq!(Felt::new((b >> 3) & 1), trace[B_COL_RANGE.start + 3][i]);
+        assert_eq!(Felt::from_u64(b & 1), trace[B_COL_RANGE.start][i]);
+        assert_eq!(Felt::from_u64((b >> 1) & 1), trace[B_COL_RANGE.start + 1][i]);
+        assert_eq!(Felt::from_u64((b >> 2) & 1), trace[B_COL_RANGE.start + 2][i]);
+        assert_eq!(Felt::from_u64((b >> 3) & 1), trace[B_COL_RANGE.start + 3][i]);
 
         bit_offset -= 4;
     }
@@ -229,10 +231,10 @@ fn binary_and(a: Felt, b: Felt) -> Felt {
 }
 
 fn binary_xor(a: Felt, b: Felt) -> Felt {
-    a + b - Felt::new(2) * a * b
+    a + b - Felt::from_u64(2) * a * b
 }
 
 fn rand_u32() -> Felt {
     let value = rand_value::<u64>() as u32 as u64;
-    Felt::new(value)
+    Felt::from_u64(value)
 }

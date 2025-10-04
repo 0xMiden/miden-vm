@@ -2,6 +2,7 @@ use alloc::{boxed::Box, vec::Vec};
 use core::fmt;
 
 use miden_crypto::{Felt, Word};
+use miden_crypto::{Felt, PrimeCharacteristicRing, hash::rpo::RpoDigest};
 use miden_formatting::{
     hex::ToHex,
     prettier::{Document, PrettyPrint, const_text, nl, text},
@@ -41,9 +42,14 @@ pub struct CallNode {
 /// Constants
 impl CallNode {
     /// The domain of the call block (used for control block hashing).
-    pub const CALL_DOMAIN: Felt = Felt::new(OPCODE_CALL as u64);
+    pub fn call_domain() -> Felt {
+        Felt::from_u64(OPCODE_CALL as u64)
+    }
+
     /// The domain of the syscall block (used for control block hashing).
-    pub const SYSCALL_DOMAIN: Felt = Felt::new(OPCODE_SYSCALL as u64);
+    pub fn syscall_domain() -> Felt {
+        Felt::from_u64(OPCODE_SYSCALL as u64)
+    }
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -121,6 +127,28 @@ impl CallNode {
 //-------------------------------------------------------------------------------------------------
 /// Public accessors
 impl CallNode {
+    /// Returns a commitment to this Call node.
+    ///
+    /// The commitment is computed as a hash of the callee and an empty word ([ZERO; 4]) in the
+    /// domain defined by either [Self::call_domain()] or [Self::syscall_domain()], depending on
+    /// whether the node represents a simple call or a syscall - i.e.,:
+    /// ```
+    /// # use miden_core::mast::CallNode;
+    /// # use miden_crypto::{hash::rpo::{RpoDigest as Digest, Rpo256 as Hasher}};
+    /// # let callee_digest = Digest::default();
+    /// Hasher::merge_in_domain(&[callee_digest, Digest::default()], CallNode::call_domain());
+    /// ```
+    /// or
+    /// ```
+    /// # use miden_core::mast::CallNode;
+    /// # use miden_crypto::{hash::rpo::{RpoDigest as Digest, Rpo256 as Hasher}};
+    /// # let callee_digest = Digest::default();
+    /// Hasher::merge_in_domain(&[callee_digest, Digest::default()], CallNode::syscall_domain());
+    /// ```
+    pub fn digest(&self) -> RpoDigest {
+        self.digest
+    }
+
     /// Returns the ID of the node to be invoked by this call node.
     pub fn callee(&self) -> MastNodeId {
         self.callee
@@ -134,9 +162,9 @@ impl CallNode {
     /// Returns the domain of this call node.
     pub fn domain(&self) -> Felt {
         if self.is_syscall() {
-            Self::SYSCALL_DOMAIN
+            Self::syscall_domain()
         } else {
-            Self::CALL_DOMAIN
+            Self::call_domain()
         }
     }
 }

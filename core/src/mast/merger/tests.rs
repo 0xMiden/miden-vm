@@ -1,4 +1,5 @@
 use miden_crypto::{Felt, ONE, Word};
+use miden_crypto::{hash::rpo::RpoDigest, Felt, PrimeCharacteristicRing, ONE};
 
 use super::*;
 use crate::{
@@ -847,7 +848,7 @@ fn mast_forest_merge_advice_maps_collision() {
     forest_b.make_root(id_call_b);
     // The key collides with key_a in the forest_a.
     let key_b = key_a;
-    let value_b = vec![Felt::new(2), Felt::new(2)];
+    let value_b = vec![Felt::from_u64(2), Felt::from_u64(2)];
     forest_b.advice_map_mut().insert(key_b, value_b.clone());
 
     let err = MastForest::merge([&forest_a, &forest_b]).unwrap_err();

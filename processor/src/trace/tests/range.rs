@@ -3,8 +3,10 @@ use miden_air::trace::{
 };
 use miden_core::{ExtensionOf, Operation};
 use miden_utils_testing::rand::rand_array;
+use test_utils::rand::rand_array;
+use miden_core::{Field, Operation, PrimeCharacteristicRing};
 
-use super::{Felt, FieldElement, NUM_RAND_ROWS, ONE, Trace, ZERO, build_trace_from_ops};
+use super::{Felt, NUM_RAND_ROWS, ONE, ZERO, build_trace_from_ops};
 
 /// This test checks that range check lookups from stack operations are balanced by the range checks
 /// processed in the Range Checker.
@@ -49,7 +51,7 @@ fn b_range_trace_stack() {
     // After the padded rows, the first value will be unchanged.
     assert_eq!(expected, b_range[values_start]);
     // We include 3 lookups of 0.
-    expected += alpha.inv().mul_base(Felt::new(3));
+    expected += alpha.inverse() * (Felt::from_u64(3));
     assert_eq!(expected, b_range[values_start + 1]);
     // Then we have 3 bridge rows between 0 and 255 where the value does not change
     assert_eq!(expected, b_range[values_start + 2]);
@@ -113,7 +115,7 @@ fn b_range_trace_mem() {
     // StoreW is executed at cycle 1 (after the initial span), so clk' - clk = 1.
     let (d0_store, d1_store) = (ONE, ZERO);
     // LoadW is executed at cycle 6, so i' - i = 6 - 1 = 5.
-    let (d0_load, d1_load) = (Felt::new(5), ZERO);
+    let (d0_load, d1_load) = (Felt::from_u64(5), ZERO);
 
     // Include the lookups from the `MStoreW` operation at the next row.
     expected -= (alpha + d0_store).inv() + (alpha + d1_store).inv();
@@ -130,7 +132,7 @@ fn b_range_trace_mem() {
     // --- Check the range checker's lookups. -----------------------------------------------------
 
     // We include 2 lookups of ZERO in the next row.
-    expected += alpha.inv().mul_base(Felt::new(2));
+    expected += alpha.inverse() * (Felt::from_u64(2));
     assert_eq!(expected, b_range[values_start + 1]);
 
     // We include 1 lookup of ONE in the next row.

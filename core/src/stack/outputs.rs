@@ -2,8 +2,9 @@ use alloc::vec::Vec;
 use core::ops::Deref;
 
 use miden_crypto::{WORD_SIZE, Word, ZERO};
+use miden_crypto::{PrimeCharacteristicRing, PrimeField64, Word, ZERO};
 
-use super::{ByteWriter, Felt, MIN_STACK_DEPTH, OutputError, Serializable, get_num_stack_values};
+use super::{ByteWriter, Felt, MIN_STACK_DEPTH, OutputError, Serializable};
 use crate::utils::{ByteReader, Deserializable, DeserializationError, range};
 
 // STACK OUTPUTS
@@ -16,7 +17,7 @@ use crate::utils::{ByteReader, Deserializable, DeserializationError, range};
 /// `stack` is expected to be ordered as if the elements were popped off the stack one by one.
 /// Thus, the value at the top of the stack is expected to be in the first position, and the order
 /// of the rest of the output elements will also match the order on the stack.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq)]
 pub struct StackOutputs {
     elements: [Felt; MIN_STACK_DEPTH],
 }
@@ -52,9 +53,11 @@ impl StackOutputs {
         // Validate stack elements
         let stack = iter
             .into_iter()
-            .map(Felt::try_from)
-            .collect::<Result<Vec<Felt>, _>>()
-            .map_err(OutputError::InvalidStackElement)?;
+            //.map(Felt::try_from)
+            // .collect::<Result<Vec<Felt>, _>>();
+            //.map_err(OutputError::InvalidStackElement)?;
+            .map(|a| Felt::from_u64(a))
+            .collect::<Vec<Felt>>();
 
         Self::new(stack)
     }
@@ -103,7 +106,7 @@ impl StackOutputs {
 
     /// Converts the [`StackOutputs`] into the vector of `u64` values.
     pub fn as_int_vec(&self) -> Vec<u64> {
-        self.elements.iter().map(|e| (*e).as_int()).collect()
+        self.elements.iter().map(|e| (*e).as_canonical_u64()).collect()
     }
 }
 
@@ -125,15 +128,19 @@ impl From<[Felt; MIN_STACK_DEPTH]> for StackOutputs {
 // ================================================================================================
 
 impl Serializable for StackOutputs {
-    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+    fn write_into<W: ByteWriter>(&self, _target: &mut W) {
+        /*
         let num_stack_values = get_num_stack_values(self);
         target.write_u8(num_stack_values);
         target.write_many(&self.elements[..num_stack_values as usize]);
+         */
+        todo!()
     }
 }
 
 impl Deserializable for StackOutputs {
-    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+    fn read_from<R: ByteReader>(_source: &mut R) -> Result<Self, DeserializationError> {
+        /*
         let num_elements = source.read_u8()?;
 
         let elements = source.read_many::<Felt>(num_elements.into())?;
@@ -141,5 +148,7 @@ impl Deserializable for StackOutputs {
         StackOutputs::new(elements).map_err(|err| {
             DeserializationError::InvalidValue(format!("failed to create stack outputs: {err}",))
         })
+         */
+        todo!()
     }
 }

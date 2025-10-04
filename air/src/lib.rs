@@ -22,18 +22,32 @@ use winter_prover::{
     math::get_power_series,
     matrix::ColMatrix,
 };
+use core::borrow::{Borrow, BorrowMut};
+
+use p3_air::{AirBuilderWithPublicValues, PermutationAirBuilder};
+pub use p3_air::{Air, AirBuilder, BaseAir};
+use p3_field::PrimeCharacteristicRing;
+use p3_matrix::Matrix;
+use alloc::vec::Vec;
+//use serde::{Deserialize, Serialize}; TODO(Al)
+use vm_core::{ProgramInfo, StackInputs, StackOutputs};
+use winter_air::ProofOptions as WinterProofOptions;
 
 mod constraints;
-pub use constraints::stack;
-use constraints::{chiplets, range};
+//pub use constraints::stack;
+//use constraints::{chiplets, range};
 
 pub mod trace;
+pub use trace::ColMatrix;
 pub use trace::rows::RowIndex;
 use trace::*;
 
 mod errors;
 mod options;
 mod proof;
+pub use proof::{Proof, Commitments, OpenedValues};
+
+mod air_builder;
 
 mod utils;
 
@@ -41,8 +55,11 @@ mod utils;
 // ================================================================================================
 
 pub use errors::ExecutionOptionsError;
+pub use options::{ExecutionOptions, ProvingOptions};
+pub use proof::{ExecutionProof, HashFunction};
+//use utils::TransitionConstraintRange;
 pub use miden_core::{
-    Felt, FieldElement, StarkField,
+    Felt,
     utils::{DeserializationError, ToElements},
 };
 pub use options::{ExecutionOptions, ProvingOptions};
@@ -56,7 +73,7 @@ const IS_FULL_CONSTRAINT_SET: bool = false;
 
 // PROCESSOR AIR
 // ================================================================================================
-
+/*
 /// TODO: add docs
 pub struct ProcessorAir {
     context: AirContext<Felt>,
@@ -309,11 +326,11 @@ impl Air for ProcessorAir {
         Ok(AuxRandElements::new(rand_elements))
     }
 }
-
+ */
 // PUBLIC INPUTS
 // ================================================================================================
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Default)]
 pub struct PublicInputs {
     program_info: ProgramInfo,
     stack_inputs: StackInputs,
@@ -332,9 +349,34 @@ impl PublicInputs {
             stack_outputs,
         }
     }
-}
 
-impl miden_core::ToElements<Felt> for PublicInputs {
+    pub fn stack_inputs(&self) -> StackInputs {
+        self.stack_inputs
+    }
+
+    pub fn stack_outputs(&self) -> StackOutputs {
+        self.stack_outputs
+    }
+
+    pub fn program_info(&self) -> ProgramInfo {
+        self.program_info.clone()
+    }
+
+    /// Converts public inputs into a vector of field elements (Felt) in the canonical order:
+    /// - program info elements
+    /// - stack inputs
+    /// - stack outputs
+    pub fn to_elements(&self) -> Vec<Felt> {
+        let mut result = self.program_info.to_elements();
+        let mut ins = self.stack_inputs.to_vec();
+        result.append(&mut ins);
+        let mut outs = self.stack_outputs.to_vec();
+        result.append(&mut outs);
+        result
+    }
+}
+/*
+impl vm_core::ToElements<Felt> for PublicInputs {
     fn to_elements(&self) -> Vec<Felt> {
         let mut result = self.stack_inputs.to_vec();
         result.append(&mut self.stack_outputs.to_vec());
@@ -367,3 +409,99 @@ impl Deserializable for PublicInputs {
         })
     }
 }
+*/
+
+#[derive(Default)]
+pub struct ProcessorAir;
+
+impl<F> BaseAir<F> for ProcessorAir {
+    fn width(&self) -> usize {
+        TRACE_WIDTH
+    }
+}
+
+impl<AB: AirBuilderWithPublicValues + PermutationAirBuilder> Air<AB> for ProcessorAir {
+    fn eval(&self, builder: &mut AB) {
+        let main = builder.main();
+        let (local, next) = (main.row_slice(0).unwrap(), main.row_slice(1).unwrap());
+        let local: &MainTraceCols<AB::Var> = (*local).borrow();
+        let next: &MainTraceCols<AB::Var> = (*next).borrow();
+
+        let clk_cur = local.clk;
+        let clk_nxt = next.clk;
+        /*
+               let final_stack = local.stack;
+
+               let pis = builder.public_values();
+               let output_stack = pis[16];
+
+               let mut when_first_row = builder.when_first_row();
+
+               when_first_row.assert_eq(final_stack[0],  output_stack);
+        */
+        let mut when_transition = builder.when_transition();
+
+        when_transition
+            
+            .assert_zero(clk_nxt - (clk_cur + AB::Expr::ONE));
+ 
+        let change_v = next.range[1] - local.range[1];
+        when_transition.assert_zero(
+            (change_v.clone() - AB::Expr::ONE)
+                * (change_v.clone() - AB::Expr::from_i128(3))
+                * (change_v.clone() - AB::Expr::from_i128(9))
+                * (change_v.clone() - AB::Expr::from_i128(27))
+                * (change_v.clone() - AB::Expr::from_i128(81))
+                * (change_v.clone() - AB::Expr::from_i128(243))
+                * (change_v.clone() - AB::Expr::from_i128(729))
+                * (change_v.clone() - AB::Expr::from_i128(2187)),
+        );    
+
+    }
+}
+
+#[derive(Debug)]
+#[repr(C)]
+pub struct MainTraceCols<T> {
+    // System
+    pub clk: T,
+    pub fmp: T,
+    pub ctx: T,
+    pub in_syscall: T,
+    pub fn_hash: [T; 4],
+
+    // Decoder
+    pub decoder: [T; 24],
+
+    // Stack
+    pub stack: [T; 19],
+
+    // Range checker
+    pub range: [T; 2],
+
+    // Chiplets
+    pub chiplets: [T; 18],
+}
+
+impl<T> Borrow<MainTraceCols<T>> for [T] {
+    fn borrow(&self) -> &MainTraceCols<T> {
+        debug_assert_eq!(self.len(), TRACE_WIDTH);
+        let (prefix, shorts, suffix) = unsafe { self.align_to::<MainTraceCols<T>>() };
+        debug_assert!(prefix.is_empty(), "Alignment should match");
+        debug_assert!(suffix.is_empty(), "Alignment should match");
+        debug_assert_eq!(shorts.len(), 1);
+        &shorts[0]
+    }
+}
+
+impl<T> BorrowMut<MainTraceCols<T>> for [T] {
+    fn borrow_mut(&mut self) -> &mut MainTraceCols<T> {
+        debug_assert_eq!(self.len(), TRACE_WIDTH);
+        let (prefix, shorts, suffix) = unsafe { self.align_to_mut::<MainTraceCols<T>>() };
+        debug_assert!(prefix.is_empty(), "Alignment should match");
+        debug_assert!(suffix.is_empty(), "Alignment should match");
+        debug_assert_eq!(shorts.len(), 1);
+        &mut shorts[0]
+    }
+}
+

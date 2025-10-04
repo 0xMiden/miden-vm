@@ -6,6 +6,10 @@ use miden_core::{Felt, Operation::*};
 
 use super::{BasicBlockBuilder, push_felt, push_u32_value};
 use crate::ProcedureContext;
+use vm_core::{Felt, Operation::*, PrimeCharacteristicRing};
+
+use super::{BasicBlockBuilder, push_felt, push_u32_value, validate_param};
+use crate::{AssemblyError, assembler::ProcedureContext, diagnostics::Report};
 
 // INSTRUCTION PARSERS
 // ================================================================================================
@@ -184,7 +188,7 @@ pub fn local_to_absolute_addr(
     }
 
     let fmp_offset_of_local = num_proc_locals - index_of_local;
-    push_felt(block_builder, -Felt::from(fmp_offset_of_local));
+    push_felt(block_builder, -Felt::from_u16(fmp_offset_of_local));
     block_builder.push_op(FmpAdd);
 
     Ok(())

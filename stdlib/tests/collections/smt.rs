@@ -2,6 +2,7 @@ use miden_stdlib::handlers::smt_peek::SMT_PEEK_EVENT_NAME;
 use miden_utils_testing::prepend_word_to_vec as prepend_word;
 
 use super::*;
+use vm_core::{PrimeCharacteristicRing, PrimeField64, lazy_static};
 
 // TEST DATA
 // ================================================================================================
@@ -31,6 +32,7 @@ const LEAVES_MULTI: [(Word, Word); 3] = [
     // A key in the same leaf, but with no corresponding value.
     (word(301, 302, 303, 69420), EMPTY_WORD),
 ];
+}
 
 /// Tests `get` on every key present in the SMT, as well as an empty leaf
 #[test]
@@ -52,11 +54,11 @@ fn test_smt_get() {
         build_test!(source, &initial_stack, &[], store, advice_map).expect_stack(&expected_output);
     }
 
-    let smt = Smt::with_entries(LEAVES).unwrap();
+    let smt = Smt::with_entries(*LEAVES).unwrap();
 
     // Get all leaves present in tree
-    for (key, value) in LEAVES {
-        expect_value_from_get(key, value, &smt);
+    for (key, value) in LEAVES.iter() {
+        expect_value_from_get(*key, *value, &smt);
     }
 
     // Get an empty leaf
@@ -121,10 +123,10 @@ fn test_smt_set() {
 
         // insert values one-by-one into the tree
         let mut old_roots = Vec::new();
-        for (key, value) in LEAVES {
+        for (key, value) in LEAVES.iter() {
             old_roots.push(smt.root());
             let (init_stack, final_stack, store, advice_map) =
-                prepare_insert_or_set(key, value, smt);
+                prepare_insert_or_set(*key, *value, smt);
             build_test!(source, &init_stack, &[], store, advice_map).expect_stack(&final_stack);
         }
 
@@ -151,7 +153,7 @@ fn test_smt_set() {
 /// Tests updating an existing key with a different value
 #[test]
 fn test_smt_set_same_key() {
-    let mut smt = Smt::with_entries(LEAVES).unwrap();
+    let mut smt = Smt::with_entries(*LEAVES).unwrap();
 
     let source = "
     use.std::collections::smt
@@ -235,7 +237,7 @@ fn test_set_advice_map_empty_key() {
 /// Tests that the advice map is properly updated after a `set` on a key that has existing value
 #[test]
 fn test_set_advice_map_single_key() {
-    let mut smt = Smt::with_entries(LEAVES).unwrap();
+    let mut smt = Smt::with_entries(*LEAVES).unwrap();
 
     let source = format!(
         "
@@ -280,7 +282,7 @@ fn test_set_advice_map_single_key() {
 /// (i.e. removing a value that's already empty)
 #[test]
 fn test_set_empty_key_in_non_empty_leaf() {
-    let key_mse = Felt::new(42);
+    let key_mse = Felt::from_u64(42);
 
     let leaves: [(Word, Word); 1] = [(
         Word::new([Felt::new(101), Felt::new(102), Felt::new(103), key_mse]),
@@ -346,13 +348,13 @@ fn build_advice_inputs(smt: &Smt) -> (MerkleStore, Vec<(Word, Vec<Felt>)>) {
 
 fn build_expected_stack(word0: Word, word1: Word) -> Vec<u64> {
     vec![
-        word0[3].as_int(),
-        word0[2].as_int(),
-        word0[1].as_int(),
-        word0[0].as_int(),
-        word1[3].as_int(),
-        word1[2].as_int(),
-        word1[1].as_int(),
-        word1[0].as_int(),
+        word0[3].as_canonical_u64(),
+        word0[2].as_canonical_u64(),
+        word0[1].as_canonical_u64(),
+        word0[0].as_canonical_u64(),
+        word1[3].as_canonical_u64(),
+        word1[2].as_canonical_u64(),
+        word1[1].as_canonical_u64(),
+        word1[0].as_canonical_u64(),
     ]
 }

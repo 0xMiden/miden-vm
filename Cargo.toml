@@ -83,3 +83,6 @@ winter-prover = { version = "0.13", default-features = false }
 winter-rand-utils = "0.13"
 winter-utils = { version = "0.13", default-features = false }
 winter-verifier = { version = "0.13", default-features = false }
+
+[patch.crates-io]
+miden-crypto = { git = "https://github.com/0xMiden/crypto", branch = "plonky3-migration" }

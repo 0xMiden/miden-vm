@@ -1,4 +1,5 @@
 use miden_core::WORD_SIZE;
+use miden_core::{PrimeCharacteristicRing, WORD_SIZE};
 
 use super::{ExecutionError, Felt, Process};
 use crate::errors::ErrorContext;
@@ -153,7 +154,7 @@ impl Process {
         let ctx = self.system.ctx();
         let clk = self.system.clk();
         let addr_first_word = self.stack.get(MEM_ADDR_STACK_IDX);
-        let addr_second_word = addr_first_word + Felt::from(WORD_SIZE as u32);
+        let addr_second_word = addr_first_word + Felt::from_u32(WORD_SIZE as u32);
 
         // load two words from memory
         let words = [
@@ -180,7 +181,7 @@ impl Process {
 
         // increment the address by 8 (2 words)
         self.stack
-            .set(MEM_ADDR_STACK_IDX, addr_first_word + Felt::from(WORD_SIZE as u32 * 2));
+            .set(MEM_ADDR_STACK_IDX, addr_first_word + Felt::from_u32(WORD_SIZE as u32 * 2));
 
         // copy over the rest of the stack
         self.stack.copy_state(13);
@@ -208,7 +209,7 @@ impl Process {
         let ctx = self.system.ctx();
         let clk = self.system.clk();
         let addr_first_word = self.stack.get(MEM_ADDR_STACK_IDX);
-        let addr_second_word = addr_first_word + Felt::from(WORD_SIZE as u32);
+        let addr_second_word = addr_first_word + Felt::from_u32(WORD_SIZE as u32);
 
         // pop two words from the advice stack
         let words = self
@@ -239,7 +240,7 @@ impl Process {
 
         // increment the address by 8 (2 words)
         self.stack
-            .set(MEM_ADDR_STACK_IDX, addr_first_word + Felt::from(WORD_SIZE as u32 * 2));
+            .set(MEM_ADDR_STACK_IDX, addr_first_word + Felt::from_u32(WORD_SIZE as u32 * 2));
 
         // copy over the rest of the stack
         self.stack.copy_state(13);
@@ -293,6 +294,7 @@ mod tests {
     use miden_core::{
         ONE, WORD_SIZE, Word, ZERO, assert_matches, mast::MastForest, utils::ToElements,
     };
+    use miden_core::{assert_matches, utils::ToElements, PrimeCharacteristicRing, Word, ONE, ZERO};
 
     use super::{
         super::{MIN_STACK_DEPTH, Operation},
@@ -324,7 +326,7 @@ mod tests {
         let op = Operation::Push(Felt::new(3));
         process.execute_op(op, program, &mut host).unwrap();
         let mut expected = [ZERO; 16];
-        expected[0] = Felt::new(3);
+        expected[0] = Felt::from_u64(3);
         expected[1] = ONE;
 
         assert_eq!(MIN_STACK_DEPTH + 2, process.stack.depth());
@@ -542,7 +544,7 @@ mod tests {
 
         // push new element onto the stack and save it as first element of the word on
         // uninitialized memory at address 0
-        let element = Felt::new(10);
+        let element = Felt::from_u64(10);
         store_element(&mut process, 0, element, &mut host);
 
         // check stack state
@@ -559,7 +561,7 @@ mod tests {
         store_value(&mut process, 4, word_2, &mut host);
 
         // push new element onto the stack and save it as first element of the word at address 2
-        let element = Felt::new(12);
+        let element = Felt::from_u64(12);
         store_element(&mut process, 4, element, &mut host);
 
         // check stack state
@@ -763,7 +765,7 @@ mod tests {
     fn build_expected_stack(values: &[u64]) -> [Felt; 16] {
         let mut expected = [ZERO; 16];
         for (&value, result) in values.iter().zip(expected.iter_mut()) {
-            *result = Felt::new(value);
+            *result = Felt::from_u64(value);
         }
         expected
     }

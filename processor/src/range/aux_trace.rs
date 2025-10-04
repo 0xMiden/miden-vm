@@ -8,8 +8,9 @@ use miden_air::{
     },
 };
 use miden_core::ZERO;
+use miden_core::{ExtensionField, PrimeField64};
 
-use super::{Felt, FieldElement, NUM_RAND_ROWS, uninit_vector};
+use super::{Felt, NUM_RAND_ROWS, uninit_vector};
 
 // AUXILIARY TRACE BUILDER
 // ================================================================================================
@@ -50,7 +51,7 @@ impl AuxTraceBuilder {
     /// column:
     /// - `b_range`: ensures that the range checks performed by the Range Checker match those
     ///   requested by the Stack and Memory processors.
-    pub fn build_aux_columns<E: FieldElement<BaseField = Felt>>(
+    pub fn build_aux_columns<E: ExtensionField<Felt>>(
         &self,
         main_trace: &MainTrace,
         rand_elements: &[E],
@@ -61,7 +62,7 @@ impl AuxTraceBuilder {
 
     /// Builds the execution trace of the range check `b_range` column which ensure that the range
     /// check lookups performed by user operations match those executed by the Range Checker.
-    fn build_aux_col_b_range<E: FieldElement<BaseField = Felt>>(
+    fn build_aux_col_b_range<E: ExtensionField<Felt>>(
         &self,
         main_trace: &MainTrace,
         rand_elements: &[E],
@@ -152,11 +153,8 @@ impl AuxTraceBuilder {
 
 /// Runs batch inversion on all range check lookup values and returns a map which maps each value
 /// to the divisor used for including it in the LogUp lookup. In other words, the map contains
-/// mappings of x to 1/(alpha + x).
-fn get_divisors<E: FieldElement<BaseField = Felt>>(
-    lookup_values: &[u16],
-    alpha: E,
-) -> BTreeMap<u16, E> {
+/// mappings of x to 1/(alpha - x).
+fn get_divisors<E: ExtensionField<Felt>>(lookup_values: &[u16], alpha: E) -> BTreeMap<u16, E> {
     // run batch inversion on the lookup values
     let mut values = unsafe { uninit_vector(lookup_values.len()) };
     let mut inv_values = unsafe { uninit_vector(lookup_values.len()) };
@@ -170,7 +168,7 @@ fn get_divisors<E: FieldElement<BaseField = Felt>>(
     }
 
     // invert the accumulated product
-    acc = acc.inv();
+    acc = acc.inverse();
 
     // multiply the accumulated product by the original values to compute the inverses, then
     // build a map of inverses for the lookup values

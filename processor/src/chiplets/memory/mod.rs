@@ -11,9 +11,10 @@ use miden_air::{
     },
 };
 use miden_core::{WORD_SIZE, ZERO};
+use miden_core::{PrimeCharacteristicRing, PrimeField64, Field, WORD_SIZE, ZERO};
 
 use super::{
-    EMPTY_WORD, Felt, FieldElement, ONE, RangeChecker, TraceFragment, Word,
+    EMPTY_WORD, Felt, ONE, RangeChecker, TraceFragment, Word,
     utils::{split_element_u32_into_u16, split_u32_into_u16},
 };
 use crate::{MemoryAddress, errors::ErrorContext, system::ContextId};
@@ -169,7 +170,7 @@ impl Memory {
         err_ctx: &impl ErrorContext,
     ) -> Result<Felt, MemoryError> {
         let addr: u32 = addr
-            .as_int()
+            .as_canonical_u64()
             .try_into()
             .map_err(|_| MemoryError::address_out_of_bounds(addr.as_int(), err_ctx))?;
         self.num_trace_rows += 1;
@@ -193,7 +194,7 @@ impl Memory {
         err_ctx: &impl ErrorContext,
     ) -> Result<Word, MemoryError> {
         let addr: u32 = addr
-            .as_int()
+            .as_canonical_u64()
             .try_into()
             .map_err(|_| MemoryError::address_out_of_bounds(addr.as_int(), err_ctx))?;
         if !addr.is_multiple_of(WORD_SIZE as u32) {
@@ -218,7 +219,7 @@ impl Memory {
         err_ctx: &impl ErrorContext,
     ) -> Result<(), MemoryError> {
         let addr: u32 = addr
-            .as_int()
+            .as_canonical_u64()
             .try_into()
             .map_err(|_| MemoryError::address_out_of_bounds(addr.as_int(), err_ctx))?;
         self.num_trace_rows += 1;
@@ -240,7 +241,7 @@ impl Memory {
         err_ctx: &impl ErrorContext,
     ) -> Result<(), MemoryError> {
         let addr: u32 = addr
-            .as_int()
+            .as_canonical_u64()
             .try_into()
             .map_err(|_| MemoryError::address_out_of_bounds(addr.as_int(), err_ctx))?;
         if !addr.is_multiple_of(WORD_SIZE as u32) {
@@ -261,7 +262,7 @@ impl Memory {
         // trace; we also adjust the clock cycle so that delta value for the first row would end
         // up being ZERO. if the trace is empty, return without any further processing.
         let (mut prev_ctx, mut prev_addr, mut prev_clk) = match self.get_first_row_info() {
-            Some((ctx, addr, clk)) => (ctx, addr, clk.as_int() - 1),
+            Some((ctx, addr, clk)) => (ctx, addr, clk.as_canonical_u64() - 1),
             None => return,
         };
 
@@ -273,7 +274,7 @@ impl Memory {
                 // when we start a new address, we set the previous value to all zeros. the effect
                 // of this is that memory is always initialized to zero.
                 for memory_access in addr_trace {
-                    let clk = memory_access.clk().as_int();
+                    let clk = memory_access.clk().as_canonical_u64();
 
                     // compute delta as difference between context IDs, addresses, or clock cycles
                     let delta = if prev_ctx != ctx {
@@ -305,7 +306,7 @@ impl Memory {
         // trace; we also adjust the clock cycle so that delta value for the first row would end
         // up being ZERO. if the trace is empty, return without any further processing.
         let (mut prev_ctx, mut prev_addr, mut prev_clk) = match self.get_first_row_info() {
-            Some((ctx, addr, clk)) => (Felt::from(ctx), Felt::from(addr), clk - ONE),
+            Some((ctx, addr, clk)) => (Felt::from(ctx), Felt::from_u32(addr), clk - ONE),
             None => return,
         };
 
@@ -318,7 +319,7 @@ impl Memory {
             for (addr, addr_trace) in segment.into_inner() {
                 // when we start a new address, we set the previous value to all zeros. the effect
                 // of this is that memory is always initialized to zero.
-                let felt_addr = Felt::from(addr);
+                let felt_addr = Felt::from_u32(addr);
                 for memory_access in addr_trace {
                     let clk = memory_access.clk();
                     let value = memory_access.word();
@@ -366,7 +367,7 @@ impl Memory {
                     trace.set(row, D0_COL_IDX, delta_lo);
                     trace.set(row, D1_COL_IDX, delta_hi);
                     // TODO: switch to batch inversion to improve efficiency.
-                    trace.set(row, D_INV_COL_IDX, delta.inv());
+                    trace.set(row, D_INV_COL_IDX, delta.inverse());
 
                     if prev_ctx == ctx && prev_addr == felt_addr {
                         trace.set(row, FLAG_SAME_CONTEXT_AND_WORD, ONE);

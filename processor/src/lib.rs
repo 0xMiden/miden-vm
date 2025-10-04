@@ -17,6 +17,12 @@ pub use miden_air::{ExecutionOptions, ExecutionOptionsError, RowIndex};
 pub use miden_core::{
     AssemblyOp, EMPTY_WORD, Felt, Kernel, ONE, Operation, Program, ProgramInfo, QuadExtension,
     StackInputs, StackOutputs, WORD_SIZE, Word, ZERO,
+}
+pub use miden_air::{ColMatrix, ExecutionOptions, ExecutionOptionsError, RowIndex};
+pub use vm_core::{
+    AssemblyOp, EMPTY_WORD, Felt, Kernel, ONE, Operation, Program, ProgramInfo, StackInputs,
+    StackOutputs, Word, ZERO,
+    chiplets::hasher::Digest,
     crypto::merkle::SMT_DEPTH,
     errors::InputError,
     mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
@@ -25,6 +31,9 @@ pub use miden_core::{
 };
 use miden_core::{
     Decorator, FieldElement,
+}
+use miden_core::{
+    BinomialExtensionField, Decorator, DecoratorIterator, PrimeField64,
     mast::{
         BasicBlockNode, CallNode, DecoratorOpLinkIterator, DynNode, ExternalNode, JoinNode,
         LoopNode, OpBatch, SplitNode,
@@ -151,6 +160,7 @@ impl core::ops::Add<u32> for MemoryAddress {
         MemoryAddress(self.0 + rhs)
     }
 }
+type QuadFelt = BinomialExtensionField<Felt, 2>;
 
 type SysTrace = [Vec<Felt>; SYS_TRACE_WIDTH];
 

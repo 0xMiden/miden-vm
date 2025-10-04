@@ -57,6 +57,8 @@ serde = { workspace = true, optional = true, features = ["derive"] }
 thiserror.workspace = true
 winter-math.workspace = true
 winter-utils.workspace = true
+parking_lot = { version = "0.12", optional = true }
+lazy_static = "1.4"
 
 [dev-dependencies]
 criterion = { workspace = true }

@@ -2,6 +2,9 @@ use miden_core::{AssemblyOp, Felt, Operation};
 use miden_debug_types::Location;
 use miden_processor::{AsmOpInfo, RowIndex, VmStateIterator};
 use miden_utils_testing::{assert_eq, build_debug_test};
+use processor::{AsmOpInfo, RowIndex, VmStateIterator};
+use test_utils::{assert_eq, build_debug_test};
+use vm_core::{debuginfo::Location, AssemblyOp, Felt, Operation, PrimeCharacteristicRing};
 
 #[test]
 fn asmop_one_span_block_test() {
@@ -95,7 +98,7 @@ fn asmop_one_span_block_test() {
                 ),
                 1,
             )),
-            op: Some(Operation::Push(Felt::new(2))),
+            op: Some(Operation::Push(Felt::from_u64(2))),
         },
         VmStatePartial {
             clk: RowIndex::from(5),
@@ -263,7 +266,7 @@ fn asmop_with_one_procedure() {
                 ),
                 1,
             )),
-            op: Some(Operation::Push(Felt::new(2))),
+            op: Some(Operation::Push(Felt::from_u64(2))),
         },
         VmStatePartial {
             clk: RowIndex::from(5),
@@ -432,7 +435,7 @@ fn asmop_repeat_test() {
                 ),
                 1,
             )),
-            op: Some(Operation::Push(Felt::new(2))),
+            op: Some(Operation::Push(Felt::from_u64(2))),
         },
         VmStatePartial {
             clk: RowIndex::from(5),
@@ -489,7 +492,7 @@ fn asmop_repeat_test() {
                 ),
                 1,
             )),
-            op: Some(Operation::Push(Felt::new(2))),
+            op: Some(Operation::Push(Felt::from_u64(2))),
         },
         VmStatePartial {
             clk: RowIndex::from(9),
@@ -546,7 +549,7 @@ fn asmop_repeat_test() {
                 ),
                 1,
             )),
-            op: Some(Operation::Push(Felt::new(2))),
+            op: Some(Operation::Push(Felt::from_u64(2))),
         },
         VmStatePartial {
             clk: RowIndex::from(13),
@@ -858,7 +861,7 @@ fn asmop_conditional_execution_test() {
                 ),
                 1,
             )),
-            op: Some(Operation::Push(Felt::new(2))),
+            op: Some(Operation::Push(Felt::from_u64(2))),
         },
         VmStatePartial {
             clk: RowIndex::from(11),
@@ -1072,7 +1075,7 @@ fn asmop_conditional_execution_test() {
                 ),
                 1,
             )),
-            op: Some(Operation::Push(Felt::new(3))),
+            op: Some(Operation::Push(Felt::from_u64(3))),
         },
         VmStatePartial {
             clk: RowIndex::from(9),
@@ -1086,7 +1089,7 @@ fn asmop_conditional_execution_test() {
                 ),
                 1,
             )),
-            op: Some(Operation::Push(Felt::new(4))),
+            op: Some(Operation::Push(Felt::from_u64(4))),
         },
         VmStatePartial {
             clk: RowIndex::from(10),

@@ -2,6 +2,7 @@ use alloc::{boxed::Box, vec::Vec};
 use core::fmt;
 
 use miden_crypto::{Felt, Word};
+use miden_crypto::{Felt, PrimeCharacteristicRing, hash::rpo::RpoDigest};
 use miden_formatting::prettier::PrettyPrint;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -36,7 +37,9 @@ pub struct LoopNode {
 /// Constants
 impl LoopNode {
     /// The domain of the loop node (used for control block hashing).
-    pub const DOMAIN: Felt = Felt::new(OPCODE_LOOP as u64);
+    pub fn domain() -> Felt {
+        Felt::from_u64(OPCODE_LOOP as u64)
+    }
 }
 
 /// Constructors
@@ -73,6 +76,20 @@ impl LoopNode {
 }
 
 impl LoopNode {
+    /// Returns a commitment to this Loop node.
+    ///
+    /// The commitment is computed as a hash of the loop body and an empty word ([ZERO; 4]) in
+    /// the domain defined by [Self::domain()] - i..e,:
+    /// ```
+    /// # use miden_core::mast::LoopNode;
+    /// # use miden_crypto::{hash::rpo::{RpoDigest as Digest, Rpo256 as Hasher}};
+    /// # let body_digest = Digest::default();
+    /// Hasher::merge_in_domain(&[body_digest, Digest::default()], LoopNode::domain());
+    /// ```
+    pub fn digest(&self) -> RpoDigest {
+        self.digest
+    }
+
     /// Returns the ID of the node presenting the body of the loop.
     pub fn body(&self) -> MastNodeId {
         self.body

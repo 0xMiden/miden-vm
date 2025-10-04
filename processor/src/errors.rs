@@ -1,4 +1,7 @@
 use alloc::{sync::Arc, vec::Vec};
+use alloc::{boxed::Box, string::String};
+use core::error::Error;
+use std::{string::ToString, vec::Vec};
 
 use miden_air::RowIndex;
 use miden_core::{
@@ -16,6 +19,12 @@ use crate::{
     host::advice::AdviceError,
     system::{FMP_MAX, FMP_MIN},
 };
+use crate::ContextId;
+
+// TODO(Al)
+fn felts_to_hex(elements: &[Felt]) -> Vec<u8> {
+    elements.iter().flat_map(|e| e.to_string().into_bytes()).collect()
+}
 // EXECUTION ERROR
 // ================================================================================================
 
@@ -34,6 +43,12 @@ pub enum ExecutionError {
         err: AdviceError,
     },
     /// This error is caught by the assembler, so we don't need diagnostics here.
+    #[error("value for key {} not present in the advice map", to_hex(felts_to_hex(.0)))]
+    AdviceMapKeyNotFound(Word),
+    #[error("value for key {} already present in the advice map", to_hex(felts_to_hex(.0)))]
+    AdviceMapKeyAlreadyPresent(Word),
+    #[error("advice stack read failed at step {0}")]
+    AdviceStackReadFailed(RowIndex),
     #[error("illegal use of instruction {0} while inside a syscall")]
     CallInSyscall(&'static str),
     /// This error is caught by the assembler, so we don't need diagnostics here.

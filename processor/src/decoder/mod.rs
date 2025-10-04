@@ -18,7 +18,11 @@ use miden_core::{
         BasicBlockNode, CallNode, DynNode, JoinNode, LoopNode, MastForest, MastNodeExt,
         OP_BATCH_SIZE, SplitNode,
     },
-    stack::MIN_STACK_DEPTH,
+    stack::MIN_STACK_DEPTH,};
+use miden_core::{
+    lazy_static, mast::{
+        BasicBlockNode, CallNode, DynNode, JoinNode, LoopNode, MastForest, SplitNode, OP_BATCH_SIZE
+    }, stack::MIN_STACK_DEPTH, AssemblyOp, PrimeCharacteristicRing, PrimeField64
 };
 
 use super::{
@@ -45,7 +49,11 @@ mod tests;
 // CONSTANTS
 // ================================================================================================
 
-const HASH_CYCLE_LEN: Felt = Felt::new(miden_air::trace::chiplets::hasher::HASH_CYCLE_LEN as u64);
+//const HASH_CYCLE_LEN: Felt = Felt::from_u8(8);
+// TODO(Al)
+lazy_static!{
+    static ref HASH_CYCLE_LEN: Felt = Felt::from_u8(8);
+}
 
 // DECODER PROCESS EXTENSION
 // ================================================================================================
@@ -76,7 +84,7 @@ impl Process {
         let (addr, hashed_block) = self.chiplets.hasher.hash_control_block(
             child1_hash,
             child2_hash,
-            JoinNode::DOMAIN,
+            JoinNode::join_domain(),
             node.digest(),
         );
 
@@ -129,7 +137,7 @@ impl Process {
         let (addr, hashed_block) = self.chiplets.hasher.hash_control_block(
             child1_hash,
             child2_hash,
-            SplitNode::DOMAIN,
+            SplitNode::domain(),
             node.digest(),
         );
 
@@ -181,7 +189,7 @@ impl Process {
         let (addr, hashed_block) = self.chiplets.hasher.hash_control_block(
             body_hash,
             EMPTY_WORD,
-            LoopNode::DOMAIN,
+            LoopNode::domain(),
             node.digest(),
         );
 
@@ -714,7 +722,7 @@ impl Decoder {
     /// them (since in the next row, we start a new context, and hence the stack registers are reset
     /// to their default values).
     pub fn start_dyncall(&mut self, addr: Felt, callee_hash: Word, ctx_info: ExecutionContextInfo) {
-        let parent_stack_depth = ctx_info.parent_stack_depth.into();
+        let parent_stack_depth = Felt::from_u32(ctx_info.parent_stack_depth);
         let parent_next_overflow_addr = ctx_info.parent_next_overflow_addr;
 
         let parent_addr = self.block_stack.push(addr, BlockType::Dyncall, Some(ctx_info));
@@ -784,7 +792,7 @@ impl Decoder {
         // we also need to increment block address by 8 because hashing every additional operation
         // batch requires 8 rows of the hasher trace.
         let block_info = self.block_stack.peek_mut();
-        block_info.addr += HASH_CYCLE_LEN;
+        block_info.addr += *HASH_CYCLE_LEN;
 
         let ctx = self.basic_block_context.as_mut().expect("not in basic block");
 
@@ -821,7 +829,7 @@ impl Decoder {
             block.parent_addr,
             ctx.num_groups_left,
             ctx.group_ops_left,
-            Felt::from(op_idx as u32),
+            Felt::from_u32(op_idx as u32),
         );
 
         // if the operation carries an immediate value, decrement the number of  operation
@@ -926,8 +934,8 @@ pub(crate) struct BasicBlockContext {
 /// Removes the specified operation from the op group and returns the resulting op group.
 fn remove_opcode_from_group(op_group: Felt, op: Operation) -> Felt {
     let opcode = op.op_code() as u64;
-    let result = Felt::new((op_group.as_int() - opcode) >> NUM_OP_BITS);
-    debug_assert!(op_group.as_int() >= result.as_int(), "op group underflow");
+    let result = Felt::from_u64((op_group.as_canonical_u64() - opcode) >> NUM_OP_BITS);
+    debug_assert!(op_group.as_canonical_u64() >= result.as_canonical_u64(), "op group underflow");
     result
 }
 
@@ -938,7 +946,7 @@ fn remove_opcode_from_group(op_group: Felt, op: Operation) -> Felt {
 /// of groups left is > 8, the number of groups will be 8; otherwise, it will be equal to the
 /// number of groups left to process.
 fn get_num_groups_in_next_batch(num_groups_left: Felt) -> usize {
-    core::cmp::min(num_groups_left.as_int() as usize, OP_BATCH_SIZE)
+    core::cmp::min(num_groups_left.as_canonical_u64() as usize, OP_BATCH_SIZE)
 }
 
 // TEST HELPERS

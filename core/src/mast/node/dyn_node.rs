@@ -2,6 +2,7 @@ use alloc::{boxed::Box, vec::Vec};
 use core::fmt;
 
 use miden_crypto::{Felt, Word};
+use miden_crypto::{Felt, PrimeCharacteristicRing, hash::rpo::RpoDigest};
 use miden_formatting::prettier::{Document, PrettyPrint, const_text, nl};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -29,10 +30,14 @@ pub struct DynNode {
 /// Constants
 impl DynNode {
     /// The domain of the Dyn block (used for control block hashing).
-    pub const DYN_DOMAIN: Felt = Felt::new(OPCODE_DYN as u64);
+    pub fn dyn_domain() -> Felt {
+        Felt::from_u64(OPCODE_DYN as u64)
+    }
 
     /// The domain of the Dyncall block (used for control block hashing).
-    pub const DYNCALL_DOMAIN: Felt = Felt::new(OPCODE_DYNCALL as u64);
+    pub fn dyncall_domain() -> Felt {
+        Felt::from_u64(OPCODE_DYNCALL as u64)
+    }
 }
 
 /// Public accessors
@@ -63,10 +68,49 @@ impl DynNode {
     /// Returns the domain of this dyn node.
     pub fn domain(&self) -> Felt {
         if self.is_dyncall() {
-            Self::DYNCALL_DOMAIN
+            Self::dyncall_domain()
         } else {
-            Self::DYN_DOMAIN
+            Self::dyn_domain()
         }
+    }
+
+    /// Returns a commitment to a Dyn node.
+    ///
+    /// The commitment is computed by hashing two empty words ([ZERO; 4]) in the domain defined
+    /// by [Self::dyn_domain()] or [Self::dyncall_domain()], i.e.:
+    ///
+    /// ```
+    /// # use miden_core::mast::DynNode;
+    /// # use miden_crypto::{hash::rpo::{RpoDigest as Digest, Rpo256 as Hasher}};
+    /// Hasher::merge_in_domain(&[Digest::default(), Digest::default()], DynNode::dyn_domain());
+    /// Hasher::merge_in_domain(&[Digest::default(), Digest::default()], DynNode::dyncall_domain());
+    /// ```
+    pub fn digest(&self) -> RpoDigest {
+        if self.is_dyncall {
+            RpoDigest::new([
+                Felt::from_u64(8751004906421739448),
+                Felt::from_u64(13469709002495534233),
+                Felt::from_u64(12584249374630430826),
+                Felt::from_u64(7624899870831503004),
+            ])
+        } else {
+            RpoDigest::new([
+                Felt::from_u64(8115106948140260551),
+                Felt::from_u64(13491227816952616836),
+                Felt::from_u64(15015806788322198710),
+                Felt::from_u64(16575543461540527115),
+            ])
+        }
+    }
+
+    /// Returns the decorators to be executed before this node is executed.
+    pub fn before_enter(&self) -> &[DecoratorId] {
+        &self.before_enter
+    }
+
+    /// Returns the decorators to be executed after this node is executed.
+    pub fn after_exit(&self) -> &[DecoratorId] {
+        &self.after_exit
     }
 }
 

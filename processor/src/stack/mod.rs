@@ -1,10 +1,13 @@
+use std::println;
+
 use alloc::vec::Vec;
 
 use miden_air::RowIndex;
 use miden_core::{Word, stack::MIN_STACK_DEPTH};
+use miden_core::{stack::MIN_STACK_DEPTH, PrimeCharacteristicRing, Word, WORD_SIZE};
 
 use super::{
-    ExecutionError, Felt, FieldElement, ONE, STACK_TRACE_WIDTH, StackInputs, StackOutputs, ZERO,
+    ExecutionError, Felt, ONE, STACK_TRACE_WIDTH, StackInputs, StackOutputs, ZERO,
 };
 
 mod trace;

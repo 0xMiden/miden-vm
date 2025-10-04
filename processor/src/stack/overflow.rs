@@ -2,6 +2,9 @@ use alloc::vec::Vec;
 
 use miden_air::RowIndex;
 
+use alloc::{collections::BTreeMap, vec::Vec};
+use miden_core::{PrimeField64, ExtensionField};
+
 use super::{Felt, ZERO};
 
 // OVERFLOW TABLE

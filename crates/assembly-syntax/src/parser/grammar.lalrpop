@@ -9,6 +9,7 @@ use core::{marker::PhantomData, num::NonZeroU32, ops::Range};
 
 use miden_debug_types::{SourceId, SourceSpan, Span, Spanned};
 use smallvec::smallvec;
+use miden_core::{Felt, crypto::hash::RpoDigest, PrimeField64, PrimeCharacteristicRing};
 
 use crate::{LibraryPath, LibraryNamespace, ast::{*, types::{AddressSpace, Type}}, Felt, FieldElement, StarkField, Word};
 use super::{

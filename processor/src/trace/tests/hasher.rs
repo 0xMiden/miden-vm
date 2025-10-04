@@ -5,7 +5,10 @@ use miden_air::trace::{
 };
 use miden_core::{
     FieldElement,
-    crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},
+    crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},};
+use rstest::rstest;
+use miden_core::{
+    crypto::merkle::{MerkleStore, MerkleTree, NodeIndex}, ExtensionField, PrimeCharacteristicRing, PrimeField64, Field
 };
 use rstest::rstest;
 
@@ -124,7 +127,7 @@ fn hasher_p1_mr_update(#[case] index: u64) {
 
     // on step 32, computations of the "new Merkle root" is started and the first sibling is
     // removed from the table in the following row (step 33)
-    expected_value *= row_values[0].inv();
+    expected_value *= row_values[0].inverse();
     assert_eq!(expected_value, p1[33]);
 
     // then, for the next 6 steps the value remains the same
@@ -133,7 +136,7 @@ fn hasher_p1_mr_update(#[case] index: u64) {
     }
 
     // on step 39, the next sibling is removed from the table in the following row (step 40)
-    expected_value *= row_values[1].inv();
+    expected_value *= row_values[1].inverse();
     assert_eq!(expected_value, p1[40]);
 
     // and then again for the next 6 steps the value remains the same
@@ -142,7 +145,7 @@ fn hasher_p1_mr_update(#[case] index: u64) {
     }
 
     // on step 47, the last sibling is removed from the table in the following row (step 48)
-    expected_value *= row_values[2].inv();
+    expected_value *= row_values[2].inverse();
     assert_eq!(expected_value, p1[48]);
 
     // at this point the table should be empty again, and it should stay empty until the end
@@ -170,7 +173,7 @@ fn init_leaf(value: u64) -> Word {
 }
 
 fn append_word(target: &mut Vec<u64>, word: Word) {
-    word.iter().rev().for_each(|v| target.push(v.as_int()));
+    word.iter().rev().for_each(|v| target.push(v.as_canonical_u64()));
 }
 
 /// Describes a single entry in the sibling table which consists of a tuple `(index, node)` where
@@ -190,7 +193,7 @@ impl SiblingTableRow {
 
     /// Reduces this row to a single field element in the field specified by E. This requires
     /// at least 6 alpha values.
-    pub fn to_value<E: FieldElement<BaseField = Felt>>(
+    pub fn to_value<E: ExtensionField<Felt>>(
         &self,
         _main_trace: &MainTrace,
         alphas: &[E],
@@ -199,21 +202,21 @@ impl SiblingTableRow {
         // of the hasher state, and when the least significant bit is 1, it will be in the 2nd
         // word. we compute the value in this way to make constraint evaluation a bit easier since
         // we need to compute the 2nd and the 3rd word values for other purposes as well.
-        let lsb = self.index.as_int() & 1;
+        let lsb = self.index.as_canonical_u64() & 1;
         if lsb == 0 {
             alphas[0]
-                + alphas[3].mul_base(self.index)
-                + alphas[12].mul_base(self.sibling[0])
-                + alphas[13].mul_base(self.sibling[1])
-                + alphas[14].mul_base(self.sibling[2])
-                + alphas[15].mul_base(self.sibling[3])
+                + alphas[3] * (self.index)
+                + alphas[12] * (self.sibling[0])
+                + alphas[13] * (self.sibling[1])
+                + alphas[14] * (self.sibling[2])
+                + alphas[15] * (self.sibling[3])
         } else {
             alphas[0]
-                + alphas[3].mul_base(self.index)
-                + alphas[8].mul_base(self.sibling[0])
-                + alphas[9].mul_base(self.sibling[1])
-                + alphas[10].mul_base(self.sibling[2])
-                + alphas[11].mul_base(self.sibling[3])
+                + alphas[3] * (self.index)
+                + alphas[8] * (self.sibling[0])
+                + alphas[9] * (self.sibling[1])
+                + alphas[10] * (self.sibling[2])
+                + alphas[11] * (self.sibling[3])
         }
     }
 }

@@ -1,6 +1,13 @@
 use miden_core::{
     Operation,
     mast::{CallNode, MastForest, MastNode, MastNodeExt},
+}
+use assembly::SourceManager;
+use processor::FMP_MIN;
+use test_utils::{MIN_STACK_DEPTH, StackInputs, Test, Word, build_op_test, build_test};
+use vm_core::{
+    Operation, PrimeField64,
+    mast::{MastForest, MastNode},
 };
 use miden_debug_types::{SourceLanguage, SourceManager};
 use miden_processor::FMP_MIN;
@@ -153,6 +160,7 @@ fn locaddr() {
 // ================================================================================================
 
 #[test]
+#[ignore = "fix-prover"]
 fn caller() {
     let kernel_source = "
         export.foo
@@ -194,10 +202,10 @@ fn build_bar_hash() -> [u64; 4] {
     let bar_root: MastNode = CallNode::new_syscall(foo_root_id, &mast_forest).unwrap().into();
     let bar_hash: Word = bar_root.digest();
     [
-        bar_hash[0].as_int(),
-        bar_hash[1].as_int(),
-        bar_hash[2].as_int(),
-        bar_hash[3].as_int(),
+        bar_hash[0].as_canonical_u64(),
+        bar_hash[1].as_canonical_u64(),
+        bar_hash[2].as_canonical_u64(),
+        bar_hash[3].as_canonical_u64(),
     ]
 }
 

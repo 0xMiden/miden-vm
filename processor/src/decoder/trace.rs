@@ -4,6 +4,7 @@ use core::ops::Range;
 #[cfg(test)]
 use miden_air::trace::decoder::NUM_USER_OP_HELPERS;
 use miden_core::utils::new_array_vec;
+use miden_core::{utils::new_array_vec, PrimeCharacteristicRing, PrimeField64};
 
 use super::{
     super::utils::get_trace_len, DIGEST_LEN, Felt, MIN_TRACE_LEN, NUM_HASHER_COLUMNS,
@@ -148,10 +149,10 @@ impl DecoderTrace {
         is_call: Felt,
         is_syscall: Felt,
     ) {
-        debug_assert!(is_loop_body.as_int() <= 1, "invalid is_loop_body");
-        debug_assert!(is_loop.as_int() <= 1, "invalid is_loop");
-        debug_assert!(is_call.as_int() <= 1, "invalid is_call");
-        debug_assert!(is_syscall.as_int() <= 1, "invalid is_syscall");
+        debug_assert!(is_loop_body.as_canonical_u64() <= 1, "invalid is_loop_body");
+        debug_assert!(is_loop.as_canonical_u64() <= 1, "invalid is_loop");
+        debug_assert!(is_call.as_canonical_u64() <= 1, "invalid is_call");
+        debug_assert!(is_syscall.as_canonical_u64() <= 1, "invalid is_syscall");
 
         self.addr_trace.push(block_addr);
         self.append_opcode(Operation::End);
@@ -329,7 +330,7 @@ impl DecoderTrace {
     /// - Set operation index register to ZERO.
     /// - Set op_batch_flags to ZEROs.
     pub fn append_span_end(&mut self, span_hash: Word, is_loop_body: Felt) {
-        debug_assert!(is_loop_body.as_int() <= 1, "invalid loop body");
+        debug_assert!(is_loop_body.as_canonical_u64() <= 1, "invalid loop body");
 
         self.addr_trace.push(self.last_addr());
         self.append_opcode(Operation::End);
@@ -386,7 +387,7 @@ impl DecoderTrace {
         let halt_opcode = Operation::Halt.op_code();
         for (i, mut column) in self.op_bits_trace.into_iter().enumerate() {
             debug_assert_eq!(own_len, column.len());
-            let value = Felt::from((halt_opcode >> i) & 1);
+            let value = Felt::from_u8((halt_opcode >> i) & 1);
             column.resize(trace_len, value);
             trace.push(column);
         }
@@ -479,7 +480,7 @@ impl DecoderTrace {
     fn append_opcode(&mut self, op: Operation) {
         let op_code = op.op_code();
         for i in 0..NUM_OP_BITS {
-            let bit = Felt::from((op_code >> i) & 1);
+            let bit = Felt::from_u8((op_code >> i) & 1);
             self.op_bits_trace[i].push(bit);
         }
 

@@ -11,6 +11,7 @@ use crate::{
     Felt,
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
+use miden_crypto::{PrimeCharacteristicRing, PrimeField64};
 
 // OPERATIONS OP CODES
 // ================================================================================================

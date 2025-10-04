@@ -7,6 +7,7 @@ use miden_utils_testing::{
     Felt, TRUNCATE_STACK_PROC, U32_BOUND, ZERO, expect_exec_error_matches, proptest::prelude::*,
     rand::rand_value,
 };
+use vm_core::{assert_matches, PrimeCharacteristicRing};
 
 // ADDITION
 // ------------------------------------------------------------------------------------------------

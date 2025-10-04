@@ -3,6 +3,7 @@ use alloc::{string::ToString, sync::Arc, vec::Vec};
 use miden_debug_types::{SourceSpan, Span};
 use miden_utils_diagnostics::Report;
 use pretty_assertions::assert_eq;
+use vm_core::PrimeCharacteristicRing;
 
 use crate::{
     Felt, LibraryNamespace, LibraryPath, assert_diagnostic, assert_diagnostic_lines,

@@ -208,7 +208,7 @@ impl ProofFile {
     #[instrument(name = "write_data_to_proof_file",
                  fields(
                     path = %proof_path.clone().unwrap_or(program_path.with_extension("proof")).display(),
-                    size = format!("{} KB", proof.to_bytes().len() / 1024)), skip_all)]
+                    size = format!("{} KB", bincode::serialize(&proof).unwrap().len() / 1024)), skip_all)]
     pub fn write(
         proof: ExecutionProof,
         proof_path: &Option<PathBuf>,
@@ -225,7 +225,7 @@ impl ProofFile {
         let mut file = fs::File::create(&path)
             .map_err(|err| format!("Failed to create proof file `{}` - {}", path.display(), err))?;
 
-        let proof_bytes = proof.to_bytes();
+        let proof_bytes = bincode::serialize(&proof).unwrap();
 
         // write proof bytes to file
         file.write_all(&proof_bytes)

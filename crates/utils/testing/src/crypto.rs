@@ -10,6 +10,7 @@ pub use miden_core::crypto::{
         MmrPeaks, NodeIndex, PartialMerkleTree, SimpleSmt, Smt,
     },
 };
+use vm_core::PrimeCharacteristicRing;
 pub use winter_prover::crypto::{
     BatchMerkleProof, DefaultRandomCoin as WinterRandomCoin, ElementHasher, Hasher, RandomCoin,
 };

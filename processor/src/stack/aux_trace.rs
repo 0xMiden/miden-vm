@@ -4,6 +4,9 @@ use miden_air::{RowIndex, trace::main_trace::MainTrace};
 use miden_core::OPCODE_DYNCALL;
 
 use super::{Felt, FieldElement};
+use miden_core::{ExtensionField, OPCODE_DYNCALL, PrimeCharacteristicRing};
+
+use super::{Felt, OverflowTableRow};
 use crate::{debug::BusDebugger, trace::AuxColumnBuilder};
 
 // AUXILIARY TRACE BUILDER
@@ -17,7 +20,7 @@ pub struct AuxTraceBuilder;
 impl AuxTraceBuilder {
     /// Builds and returns stack auxiliary trace columns. Currently this consists of a single
     /// column p1 describing states of the stack overflow table.
-    pub fn build_aux_columns<E: FieldElement<BaseField = Felt>>(
+    pub fn build_aux_columns<E: ExtensionField<Felt>>(
         &self,
         main_trace: &MainTrace,
         rand_elements: &[E],
@@ -29,7 +32,7 @@ impl AuxTraceBuilder {
     }
 }
 
-impl<E: FieldElement<BaseField = Felt>> AuxColumnBuilder<E> for AuxTraceBuilder {
+impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for AuxTraceBuilder {
     /// Removes a row from the stack overflow table.
     fn get_requests_at(
         &self,
@@ -39,7 +42,7 @@ impl<E: FieldElement<BaseField = Felt>> AuxColumnBuilder<E> for AuxTraceBuilder 
         _debugger: &mut BusDebugger<E>,
     ) -> E {
         let is_left_shift = main_trace.is_left_shift(i);
-        let is_dyncall = main_trace.get_op_code(i) == OPCODE_DYNCALL.into();
+        let is_dyncall = main_trace.get_op_code(i) == Felt::from_u8(OPCODE_DYNCALL);
         let is_non_empty_overflow = main_trace.is_non_empty_overflow(i);
 
         if is_left_shift && is_non_empty_overflow {
