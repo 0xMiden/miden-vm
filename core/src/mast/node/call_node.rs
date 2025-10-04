@@ -50,7 +50,10 @@ impl CallNode {
 /// Constructors
 impl CallNode {
     /// Returns a new [`CallNode`] instantiated with the specified callee.
-    pub fn new(callee: MastNodeId, mast_forest: &MastForest) -> Result<Self, MastForestError> {
+    pub(in crate::mast) fn new(
+        callee: MastNodeId,
+        mast_forest: &MastForest,
+    ) -> Result<Self, MastForestError> {
         if callee.as_usize() >= mast_forest.nodes.len() {
             return Err(MastForestError::NodeIdOverflow(callee, mast_forest.nodes.len()));
         }
@@ -71,7 +74,7 @@ impl CallNode {
 
     /// Returns a new [`CallNode`] from values that are assumed to be correct.
     /// Should only be used when the source of the inputs is trusted (e.g. deserialization).
-    pub fn new_unsafe(callee: MastNodeId, digest: Word) -> Self {
+    pub(in crate::mast) fn new_unsafe(callee: MastNodeId, digest: Word) -> Self {
         Self {
             callee,
             is_syscall: false,
@@ -83,7 +86,7 @@ impl CallNode {
 
     /// Returns a new [`CallNode`] instantiated with the specified callee and marked as a kernel
     /// call.
-    pub fn new_syscall(
+    pub(in crate::mast) fn new_syscall(
         callee: MastNodeId,
         mast_forest: &MastForest,
     ) -> Result<Self, MastForestError> {
@@ -107,7 +110,7 @@ impl CallNode {
 
     /// Returns a new syscall [`CallNode`] from values that are assumed to be correct.
     /// Should only be used when the source of the inputs is trusted (e.g. deserialization).
-    pub fn new_syscall_unsafe(callee: MastNodeId, digest: Word) -> Self {
+    pub(in crate::mast) fn new_syscall_unsafe(callee: MastNodeId, digest: Word) -> Self {
         Self {
             callee,
             is_syscall: true,
@@ -315,5 +318,73 @@ impl MastNodeExt for CallNode {
 
     fn domain(&self) -> Felt {
         self.domain()
+    }
+}
+
+// ------------------------------------------------------------------------------------------------
+/// Builder for creating [`CallNode`] instances with decorators.
+pub struct CallNodeBuilder {
+    callee: MastNodeId,
+    is_syscall: bool,
+    before_enter: Vec<DecoratorId>,
+    after_exit: Vec<DecoratorId>,
+}
+
+impl CallNodeBuilder {
+    /// Creates a new builder for a CallNode with the specified callee.
+    pub fn new(callee: MastNodeId) -> Self {
+        Self {
+            callee,
+            is_syscall: false,
+            before_enter: Vec::new(),
+            after_exit: Vec::new(),
+        }
+    }
+
+    /// Creates a new builder for a syscall CallNode with the specified callee.
+    pub fn new_syscall(callee: MastNodeId) -> Self {
+        Self {
+            callee,
+            is_syscall: true,
+            before_enter: Vec::new(),
+            after_exit: Vec::new(),
+        }
+    }
+
+    /// Adds decorators to be executed before this node.
+    pub fn with_before_enter(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
+        self.before_enter = decorators.into();
+        self
+    }
+
+    /// Adds decorators to be executed after this node.
+    pub fn with_after_exit(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
+        self.after_exit = decorators.into();
+        self
+    }
+
+    /// Builds the CallNode with the specified decorators.
+    pub fn build(self, mast_forest: &MastForest) -> Result<CallNode, MastForestError> {
+        if self.callee.as_usize() >= mast_forest.nodes.len() {
+            return Err(MastForestError::NodeIdOverflow(self.callee, mast_forest.nodes.len()));
+        }
+        let digest = {
+            let callee_digest = mast_forest[self.callee].digest();
+            let domain = if self.is_syscall {
+                CallNode::SYSCALL_DOMAIN
+            } else {
+                CallNode::CALL_DOMAIN
+            };
+
+            hasher::merge_in_domain(&[callee_digest, Word::default()], domain)
+        };
+
+        Ok(CallNode {
+            callee: self.callee,
+            is_syscall: self.is_syscall,
+            digest,
+            before_enter: self.before_enter,
+            after_exit: self.after_exit,
+        })
     }
 }
