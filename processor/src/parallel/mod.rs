@@ -1154,11 +1154,7 @@ impl CoreTraceFragmentGenerator {
                 self.update_decoder_state_on_node_start();
 
                 // 1. Add "start JOIN" row
-                self.add_join_start_trace_row(
-                    join_node,
-                    current_forest,
-                    self.context.state.decoder.parent_addr,
-                )?;
+                self.add_join_start_trace_row(join_node, current_forest)?;
 
                 // 2. Execute first child
                 self.execute_mast_node(join_node.first(), current_forest)?;
@@ -1176,11 +1172,7 @@ impl CoreTraceFragmentGenerator {
                 self.decrement_size(&mut NoopTracer);
 
                 // 1. Add "start SPLIT" row
-                self.add_split_start_trace_row(
-                    split_node,
-                    current_forest,
-                    self.context.state.decoder.parent_addr,
-                )?;
+                self.add_split_start_trace_row(split_node, current_forest)?;
 
                 // 2. Execute the appropriate branch based on the stack top value
                 if condition == ONE {
@@ -1201,11 +1193,7 @@ impl CoreTraceFragmentGenerator {
                 self.decrement_size(&mut NoopTracer);
 
                 // 1. Add "start LOOP" row
-                self.add_loop_start_trace_row(
-                    loop_node,
-                    current_forest,
-                    self.context.state.decoder.parent_addr,
-                )?;
+                self.add_loop_start_trace_row(loop_node, current_forest)?;
 
                 // 2. Loop while condition is true
                 //
@@ -1255,11 +1243,7 @@ impl CoreTraceFragmentGenerator {
                 }
 
                 // Add "start CALL/SYSCALL" row
-                self.add_call_start_trace_row(
-                    call_node,
-                    current_forest,
-                    self.context.state.decoder.parent_addr,
-                )?;
+                self.add_call_start_trace_row(call_node, current_forest)?;
 
                 // Execute the callee
                 self.execute_mast_node(call_node.callee(), current_forest)?;
@@ -1301,18 +1285,11 @@ impl CoreTraceFragmentGenerator {
                     self.context.state.system.fmp = Felt::new(FMP_MIN);
                     self.context.state.system.fn_hash = callee_hash;
 
-                    self.add_dyncall_start_trace_row(
-                        self.context.state.decoder.parent_addr,
-                        callee_hash,
-                        ctx_info,
-                    )?;
+                    self.add_dyncall_start_trace_row(callee_hash, ctx_info)?;
                 } else {
                     // Pop the memory address off the stack, and write the DYN trace row
                     self.decrement_size(&mut NoopTracer);
-                    self.add_dyn_start_trace_row(
-                        self.context.state.decoder.parent_addr,
-                        callee_hash,
-                    )?;
+                    self.add_dyn_start_trace_row(callee_hash)?;
                 };
 
                 // 2. Execute the callee
