@@ -161,7 +161,7 @@ impl Serializable for Program {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         self.mast_forest.write_into(target);
         self.kernel.write_into(target);
-        target.write_u32(self.entrypoint.as_u32());
+        target.write_u32(self.entrypoint.into());
     }
 }
 

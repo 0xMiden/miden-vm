@@ -105,6 +105,8 @@ impl From<u32> for RowIndex {
     }
 }
 
+impl miden_utils_indexing::Idx for RowIndex {}
+
 /// Converts an i32 value into a [`RowIndex`].
 ///
 /// # Panics

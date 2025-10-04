@@ -4,7 +4,7 @@ use miden_crypto::{Felt, ONE, Word};
 
 use super::*;
 use crate::{
-    AssemblyOp, DebugOptions, Decorator,
+    AssemblyOp, DebugOptions, Decorator, Idx,
     mast::{BasicBlockNode, MastForestError, MastNodeExt, node::MastNodeErrorContext},
     operations::Operation,
 };
@@ -324,7 +324,7 @@ fn mast_forest_serialize_deserialize_with_child_ids_exceeding_parent_id() {
     forest.add_join(first, second).unwrap();
 
     // Move the Join node before its child nodes and remove the temporary zero node.
-    forest.nodes.swap_remove(zero.as_usize());
+    forest.nodes.swap_remove(zero.to_usize());
 
     MastForest::read_from_bytes(&forest.to_bytes()).unwrap();
 }

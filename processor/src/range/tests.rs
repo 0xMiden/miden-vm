@@ -4,7 +4,7 @@ use miden_core::utils::ToElements;
 use miden_utils_testing::rand::rand_array;
 
 use super::{Felt, RangeChecker, ZERO};
-use crate::{RangeCheckTrace, utils::get_trace_len};
+use crate::RangeCheckTrace;
 
 #[test]
 fn range_checks() {
@@ -73,7 +73,7 @@ fn validate_trace(trace: &[Vec<Felt>], lookups: &[Felt]) {
     assert_eq!(2, trace.len());
 
     // trace length must be a power of two
-    let trace_len = get_trace_len(trace);
+    let trace_len = trace[0].len();
     assert!(trace_len.is_power_of_two());
 
     // --- validate the trace ---------------------------

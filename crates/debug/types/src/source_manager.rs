@@ -1,5 +1,7 @@
-use alloc::{boxed::Box, collections::BTreeMap, string::String, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, collections::BTreeMap, string::String, sync::Arc};
 use core::{error::Error, fmt::Debug};
+
+use miden_utils_indexing::IndexVec;
 
 use super::*;
 
@@ -12,6 +14,20 @@ use super::*;
 #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
 pub struct SourceId(u32);
+
+impl From<u32> for SourceId {
+    fn from(value: u32) -> Self {
+        SourceId::new_unchecked(value)
+    }
+}
+
+impl From<SourceId> for u32 {
+    fn from(value: SourceId) -> Self {
+        value.to_u32()
+    }
+}
+
+impl miden_utils_indexing::Idx for SourceId {}
 
 impl Default for SourceId {
     fn default() -> Self {
@@ -271,6 +287,12 @@ use miden_utils_sync::RwLock;
 
 #[derive(Debug, Default)]
 pub struct DefaultSourceManager(RwLock<DefaultSourceManagerImpl>);
+
+impl Default for DefaultSourceManagerImpl {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 impl Clone for DefaultSourceManager {
     fn clone(&self) -> Self {
         let manager = self.0.read();
@@ -278,18 +300,34 @@ impl Clone for DefaultSourceManager {
     }
 }
 
-#[derive(Debug, Default, Clone)]
+impl Clone for DefaultSourceManagerImpl {
+    fn clone(&self) -> Self {
+        Self {
+            files: self.files.clone(),
+            uris: self.uris.clone(),
+        }
+    }
+}
+
+#[derive(Debug)]
 struct DefaultSourceManagerImpl {
-    files: Vec<Arc<SourceFile>>,
+    files: IndexVec<SourceId, Arc<SourceFile>>,
     uris: BTreeMap<Uri, SourceId>,
 }
 
 impl DefaultSourceManagerImpl {
+    fn new() -> Self {
+        Self {
+            files: IndexVec::new(),
+            uris: BTreeMap::new(),
+        }
+    }
+
     fn insert(&mut self, uri: Uri, content: SourceContent) -> Arc<SourceFile> {
         // If we have previously inserted the same content with `name`, return the previously
         // inserted source id
         if let Some(file) = self.uris.get(&uri).copied().and_then(|id| {
-            let file = &self.files[id.to_usize()];
+            let file = &self.files[id];
             if file.as_str() == content.as_str() {
                 Some(Arc::clone(file))
             } else {
@@ -301,16 +339,16 @@ impl DefaultSourceManagerImpl {
         let id = SourceId::try_from(self.files.len())
             .expect("system limit: source manager has exhausted its supply of source ids");
         let file = Arc::new(SourceFile::from_raw_parts(id, content));
-        self.files.push(Arc::clone(&file));
+        let file_clone = Arc::clone(&file);
+        self.files
+            .push(file_clone)
+            .expect("system limit: source manager has exhausted its supply of source ids");
         self.uris.insert(uri.clone(), id);
         file
     }
 
     fn get(&self, id: SourceId) -> Result<Arc<SourceFile>, SourceManagerError> {
-        self.files
-            .get(id.to_usize())
-            .cloned()
-            .ok_or(SourceManagerError::InvalidSourceId)
+        self.files.get(id).cloned().ok_or(SourceManagerError::InvalidSourceId)
     }
 
     fn get_by_uri(&self, uri: &Uri) -> Option<Arc<SourceFile>> {
@@ -322,19 +360,19 @@ impl DefaultSourceManagerImpl {
     }
 
     fn file_line_col_to_span(&self, loc: FileLineCol) -> Option<SourceSpan> {
-        let file = self.uris.get(&loc.uri).copied().and_then(|id| self.files.get(id.to_usize()))?;
+        let file = self.uris.get(&loc.uri).copied().and_then(|id| self.files.get(id))?;
         file.line_column_to_span(loc.line, loc.column)
     }
 
     fn file_line_col(&self, span: SourceSpan) -> Result<FileLineCol, SourceManagerError> {
         self.files
-            .get(span.source_id().to_usize())
+            .get(span.source_id())
             .ok_or(SourceManagerError::InvalidSourceId)
             .map(|file| file.location(span))
     }
 
     fn location_to_span(&self, loc: Location) -> Option<SourceSpan> {
-        let file = self.uris.get(&loc.uri).copied().and_then(|id| self.files.get(id.to_usize()))?;
+        let file = self.uris.get(&loc.uri).copied().and_then(|id| self.files.get(id))?;
 
         let max_len = ByteIndex::from(file.as_str().len() as u32);
         if loc.start >= max_len || loc.end > max_len {
@@ -346,7 +384,7 @@ impl DefaultSourceManagerImpl {
 
     fn location(&self, span: SourceSpan) -> Result<Location, SourceManagerError> {
         self.files
-            .get(span.source_id().to_usize())
+            .get(span.source_id())
             .ok_or(SourceManagerError::InvalidSourceId)
             .map(|file| Location::new(file.uri().clone(), span.start(), span.end()))
     }
@@ -366,12 +404,9 @@ impl SourceManager for DefaultSourceManager {
         version: i32,
     ) -> Result<(), SourceManagerError> {
         let mut manager = self.0.write();
-        let source_file = manager
-            .files
-            .get_mut(id.to_usize())
-            .ok_or(SourceManagerError::InvalidSourceId)?;
-        let source_file = Arc::make_mut(source_file);
-        source_file
+        let source_file = &mut manager.files[id];
+        let source_file_cloned = Arc::make_mut(source_file);
+        source_file_cloned
             .content_mut()
             .update(text, range, version)
             .map_err(SourceManagerError::InvalidContentUpdate)
@@ -416,7 +451,7 @@ impl SourceManager for DefaultSourceManager {
         let manager = self.0.read();
         let ptr = manager
             .files
-            .get(id.to_usize())
+            .get(id)
             .ok_or(SourceManagerError::InvalidSourceId)
             .map(|file| file.as_str() as *const str)?;
         drop(manager);
