@@ -14,6 +14,7 @@ mod all_ops;
 mod fast_decorator_execution_tests;
 mod masm_consistency;
 mod memory;
+mod trace_state;
 
 /// Ensures that the stack is correctly reset in the buffer when the stack is reset in the buffer
 /// as a result of underflow.

@@ -1281,8 +1281,11 @@ impl CoreTraceFragmentGenerator {
 
                 // 1. Add "start DYN/DYNCALL" row
                 if dyn_node.is_dyncall() {
-                    let (stack_depth, next_overflow_addr) =
-                        self.shift_stack_left_and_start_context();
+                    let (stack_depth, next_overflow_addr) = self
+                        .context
+                        .state
+                        .stack
+                        .shift_left_and_start_context(&mut self.context.replay.stack_overflow);
                     // For DYNCALL, we need to save the current context state
                     // and prepare for dynamic execution
                     let ctx_info = ExecutionContextInfo::new(
@@ -1475,12 +1478,6 @@ impl CoreTraceFragmentGenerator {
 
     // HELPERS
     // -------------------------------------------------------------------------------------------
-
-    // TODO(plafer): Should this be a `StackState` method?
-    pub fn shift_stack_left_and_start_context(&mut self) -> (usize, Felt) {
-        self.decrement_size(&mut NoopTracer);
-        self.context.state.stack.start_context()
-    }
 
     fn append_opcode(&mut self, opcode: u8, row_idx: usize) {
         use miden_air::trace::{

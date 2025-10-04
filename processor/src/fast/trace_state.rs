@@ -245,6 +245,47 @@ impl StackState {
         self.stack_depth = stack_depth;
         self.last_overflow_addr = last_overflow_addr;
     }
+
+    /// Shifts the stack left by one position (removing the top element) and starts a new context.
+    ///
+    /// This method performs two operations:
+    /// 1. Removes the top element of the stack by shifting all other elements up
+    /// 2. Starts a new execution context, hiding the overflow table
+    ///
+    /// Returns a tuple of (stack_depth_before_context, overflow_addr_before_context)
+    pub fn shift_left_and_start_context(
+        &mut self,
+        stack_overflow_replay: &mut StackOverflowReplay,
+    ) -> (usize, Felt) {
+        // Shift stack elements up by one position (removing the top element)
+        // This mirrors the logic in decrement_size: set(write_idx, get(write_idx + 1))
+        for write_idx in 0..(MIN_STACK_DEPTH - 1) {
+            let read_idx = write_idx + 1;
+            // Apply the same reverse indexing logic as in StackInterface::get and ::set
+            // stack_top[MIN_STACK_DEPTH - write_idx - 1] = stack_top[MIN_STACK_DEPTH - read_idx -
+            // 1]
+            self.stack_top[MIN_STACK_DEPTH - write_idx - 1] =
+                self.stack_top[MIN_STACK_DEPTH - read_idx - 1];
+        }
+
+        // Pop from overflow if the stack was deeper than MIN_STACK_DEPTH and set the bottom element
+        if self.stack_depth > MIN_STACK_DEPTH {
+            if let Some(last_element) = self.pop_overflow(stack_overflow_replay) {
+                // Set the bottom element (index MIN_STACK_DEPTH - 1 in stack_top, which is
+                // stack[15])
+                self.stack_top[0] = last_element;
+            } else {
+                // If overflow table is empty, set the bottom element to ZERO
+                self.stack_top[0] = ZERO;
+            }
+        } else {
+            // If overflow table is empty, set the bottom element to ZERO
+            self.stack_top[0] = ZERO;
+        }
+
+        // Start a new context and return the context info
+        self.start_context()
+    }
 }
 
 /// Replay data necessary to build a trace fragment.
