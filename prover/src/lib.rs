@@ -6,6 +6,7 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
+use alloc::vec::Vec;
 use core::marker::PhantomData;
 
 use miden_air::{AuxRandElements, PartitionOptions, ProcessorAir, PublicInputs};
@@ -38,8 +39,8 @@ pub use miden_air::{
     DeserializationError, ExecutionProof, FieldExtension, HashFunction, ProvingOptions,
 };
 pub use miden_processor::{
-    AdviceInputs, AsyncHost, BaseHost, ExecutionError, InputError, StackInputs, StackOutputs,
-    SyncHost, Word, crypto, math, utils,
+    AdviceInputs, AsyncHost, BaseHost, ExecutionError, InputError, PrecompileRequest, StackInputs,
+    StackOutputs, SyncHost, Word, crypto, math, utils,
 };
 pub use winter_prover::{Proof, crypto::MerkleTree as MerkleTreeVC};
 
@@ -56,7 +57,6 @@ pub use winter_prover::{Proof, crypto::MerkleTree as MerkleTreeVC};
 ///
 /// # Errors
 /// Returns an error if program execution or STARK proof generation fails for any reason.
-#[instrument("prove_program", skip_all)]
 #[maybe_async]
 pub fn prove(
     program: &Program,
@@ -65,6 +65,25 @@ pub fn prove(
     host: &mut impl SyncHost,
     options: ProvingOptions,
 ) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
+    let (stack_outputs, proof, precompile_requests) =
+        maybe_await!(prove_with_precompiles(program, stack_inputs, advice_inputs, host, options))?;
+    if !precompile_requests.is_empty() {
+        return Err(ExecutionError::UnexpectedPrecompiles);
+    }
+    Ok((stack_outputs, proof))
+}
+
+/// Same as [`prove`] but also returns any precompile requests that were made during the execution
+/// of the program.
+#[instrument("prove_program", skip_all)]
+#[maybe_async]
+pub fn prove_with_precompiles(
+    program: &Program,
+    stack_inputs: StackInputs,
+    advice_inputs: AdviceInputs,
+    host: &mut impl SyncHost,
+    options: ProvingOptions,
+) -> Result<(StackOutputs, ExecutionProof, Vec<PrecompileRequest>), ExecutionError> {
     // execute the program to create an execution trace
     #[cfg(feature = "std")]
     let now = Instant::now();
@@ -87,6 +106,9 @@ pub fn prove(
 
     let stack_outputs = trace.stack_outputs().clone();
     let hash_fn = options.hash_fn();
+
+    // extract precompile requests from the trace to include in the proof
+    let precompile_requests = trace.precompile_requests().to_vec();
 
     // generate STARK proof
     let proof = match hash_fn {
@@ -136,9 +158,10 @@ pub fn prove(
         },
     }
     .map_err(ExecutionError::ProverError)?;
+
     let proof = ExecutionProof::new(proof, hash_fn);
 
-    Ok((stack_outputs, proof))
+    Ok((stack_outputs, proof, precompile_requests))
 }
 
 // PROVER

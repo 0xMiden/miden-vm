@@ -20,6 +20,7 @@ pub use miden_core::{
     crypto::merkle::SMT_DEPTH,
     errors::InputError,
     mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
+    precompile::PrecompileRequest,
     sys_events::SystemEvent,
     utils::DeserializationError,
 };
