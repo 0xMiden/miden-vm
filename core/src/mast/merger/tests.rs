@@ -1,5 +1,4 @@
-use miden_crypto::{Felt, ONE, Word};
-use miden_crypto::{hash::rpo::RpoDigest, Felt, PrimeCharacteristicRing, ONE};
+use miden_crypto::{Felt, ONE, PrimeCharacteristicRing, Word, hash::rpo::RpoDigest};
 
 use super::*;
 use crate::{

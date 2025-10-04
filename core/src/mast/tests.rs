@@ -1,13 +1,12 @@
 use alloc::vec::Vec;
 
-use miden_crypto::WORD_SIZE;
-use miden_crypto::{Felt, PrimeCharacteristicRing, hash::rpo::RpoDigest};
+use miden_crypto::{Felt, PrimeCharacteristicRing, WORD_SIZE};
 use proptest::prelude::*;
 use winter_math::FieldElement;
 use winter_rand_utils::prng_array;
 
 use crate::{
-    Felt, Kernel, ProgramInfo, Word,
+    Kernel, ProgramInfo, Word,
     chiplets::hasher,
     mast::{DynNode, MastNodeExt},
     utils::{Deserializable, Serializable},

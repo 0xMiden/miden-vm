@@ -3,8 +3,8 @@ use core::{
     fmt::Debug,
     ops::{Bound, Range},
 };
-use miden_crypto::{ExtensionField, PrimeCharacteristicRing, PrimeField64};
 
+use miden_crypto::{ExtensionField, PrimeCharacteristicRing, PrimeField64};
 // RE-EXPORTS
 // ================================================================================================
 pub use miden_crypto::{
@@ -19,9 +19,6 @@ pub use winter_utils::ReadAdapter;
 pub use winter_utils::group_slice_elements;
 
 use crate::{Felt, Word};
-pub mod sync;
-
-use super::Felt;
 
 pub mod math {
     pub use winter_math::batch_inversion;

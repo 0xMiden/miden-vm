@@ -518,7 +518,7 @@ impl MastForest {
 
     /// Given an error code as a Felt, resolves it to its corresponding error message.
     pub fn resolve_error_message(&self, code: Felt) -> Option<Arc<str>> {
-        let key = u64::from(code);
+        let key = code.as_int();
         self.error_codes.get(&key).cloned()
     }
 }

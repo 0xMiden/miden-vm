@@ -5,13 +5,13 @@ use serde::{Deserialize, Serialize};
 
 mod decorators;
 pub use decorators::{AssemblyOp, DebugOptions, Decorator, DecoratorList};
+use miden_crypto::{PrimeCharacteristicRing, PrimeField64};
 use opcode_constants::*;
 
 use crate::{
     Felt,
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
-use miden_crypto::{PrimeCharacteristicRing, PrimeField64};
 
 // OPERATIONS OP CODES
 // ================================================================================================

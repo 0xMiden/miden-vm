@@ -57,12 +57,10 @@ pub use program::{Program, ProgramInfo};
 
 mod kernel;
 pub use kernel::Kernel;
-pub use miden_crypto::{EMPTY_WORD, ONE, WORD_SIZE, Word, ZERO, word::LexicographicWord};
-pub use miden_crypto::hash::rpo::RpoPermutation256;
 pub use miden_crypto::{
     BasedVectorSpace, BinomialExtensionField, EMPTY_WORD, ExtensionField, Felt, Field, ONE,
     PrimeCharacteristicRing, PrimeField64, WORD_SIZE, Word, ZERO, batch_multiplicative_inverse,
-    batch_multiplicative_inverse_general,
+    batch_multiplicative_inverse_general, word::LexicographicWord,
 };
 pub mod crypto {
     pub mod merkle {

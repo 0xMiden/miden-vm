@@ -2,7 +2,6 @@ use alloc::{boxed::Box, vec::Vec};
 use core::fmt;
 
 use miden_crypto::{Felt, Word};
-use miden_crypto::{Felt, PrimeCharacteristicRing, hash::rpo::RpoDigest};
 use miden_formatting::prettier::PrettyPrint;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -37,9 +36,7 @@ pub struct LoopNode {
 /// Constants
 impl LoopNode {
     /// The domain of the loop node (used for control block hashing).
-    pub fn domain() -> Felt {
-        Felt::from_u64(OPCODE_LOOP as u64)
-    }
+    pub const DOMAIN: Felt = Felt::new(OPCODE_LOOP as u64);
 }
 
 /// Constructors
@@ -82,11 +79,11 @@ impl LoopNode {
     /// the domain defined by [Self::domain()] - i..e,:
     /// ```
     /// # use miden_core::mast::LoopNode;
-    /// # use miden_crypto::{hash::rpo::{RpoDigest as Digest, Rpo256 as Hasher}};
+    /// # use miden_crypto::{hash::rpo::{Word as Digest, Rpo256 as Hasher}};
     /// # let body_digest = Digest::default();
     /// Hasher::merge_in_domain(&[body_digest, Digest::default()], LoopNode::domain());
     /// ```
-    pub fn digest(&self) -> RpoDigest {
+    pub fn digest(&self) -> Word {
         self.digest
     }
 

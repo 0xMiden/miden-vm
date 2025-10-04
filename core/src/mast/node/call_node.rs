@@ -2,7 +2,6 @@ use alloc::{boxed::Box, vec::Vec};
 use core::fmt;
 
 use miden_crypto::{Felt, Word};
-use miden_crypto::{Felt, PrimeCharacteristicRing, hash::rpo::RpoDigest};
 use miden_formatting::{
     hex::ToHex,
     prettier::{Document, PrettyPrint, const_text, nl, text},
@@ -42,14 +41,10 @@ pub struct CallNode {
 /// Constants
 impl CallNode {
     /// The domain of the call block (used for control block hashing).
-    pub fn call_domain() -> Felt {
-        Felt::from_u64(OPCODE_CALL as u64)
-    }
+    pub const CALL_DOMAIN: Felt = Felt::new(OPCODE_CALL as u64);
 
     /// The domain of the syscall block (used for control block hashing).
-    pub fn syscall_domain() -> Felt {
-        Felt::from_u64(OPCODE_SYSCALL as u64)
-    }
+    pub const SYSCALL_DOMAIN: Felt = Felt::new(OPCODE_SYSCALL as u64);
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -143,9 +138,9 @@ impl CallNode {
     /// # use miden_core::mast::CallNode;
     /// # use miden_crypto::{hash::rpo::{RpoDigest as Digest, Rpo256 as Hasher}};
     /// # let callee_digest = Digest::default();
-    /// Hasher::merge_in_domain(&[callee_digest, Digest::default()], CallNode::syscall_domain());
+    /// Hasher::merge_in_domain(&[callee_digest, Digest::default()], CallNode::SYSCALL_DOMAIN);
     /// ```
-    pub fn digest(&self) -> RpoDigest {
+    pub fn digest(&self) -> Word {
         self.digest
     }
 
@@ -162,9 +157,9 @@ impl CallNode {
     /// Returns the domain of this call node.
     pub fn domain(&self) -> Felt {
         if self.is_syscall() {
-            Self::syscall_domain()
+            Self::SYSCALL_DOMAIN
         } else {
-            Self::call_domain()
+            Self::CALL_DOMAIN
         }
     }
 }

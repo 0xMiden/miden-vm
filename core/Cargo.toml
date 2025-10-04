@@ -25,21 +25,21 @@ harness = false
 [features]
 default = ["std"]
 std = [
-    "miden-crypto/std",
-    "miden-debug-types/std",
-    "miden-formatting/std",
-    "thiserror/std",
-    "winter-math/std",
-    "winter-utils/std",
+  "miden-crypto/std",
+  "miden-debug-types/std",
+  "miden-formatting/std",
+  "thiserror/std",
+  "winter-math/std",
+  "winter-utils/std",
 ]
 serde = [
-    "dep:serde",
-    "miden-crypto/serde",
-    "miden-debug-types/serde",
-    "winter-math/serde",
+  "dep:serde",
+  "miden-crypto/serde",
+  "miden-debug-types/serde",
+  "winter-math/serde",
 ]
 arbitrary = ["dep:proptest", "dep:proptest-derive"]
-testing = ["arbitrary" ]
+testing = ["arbitrary"]
 
 [dependencies]
 # Miden dependencies
@@ -48,7 +48,7 @@ miden-debug-types.workspace = true
 miden-formatting.workspace = true
 
 # External dependencies
-enum_dispatch = { version =  "0.3" }
+enum_dispatch = { version = "0.3" }
 num-derive = { version = "0.4", default-features = false }
 num-traits = { version = "0.2", default-features = false }
 proptest = { workspace = true, optional = true }

@@ -1,5 +1,6 @@
 use alloc::vec::Vec;
 use core::{ops::Deref, slice};
+
 use miden_crypto::PrimeCharacteristicRing;
 
 use super::{super::ZERO, ByteWriter, Felt, InputError, MIN_STACK_DEPTH, Serializable};

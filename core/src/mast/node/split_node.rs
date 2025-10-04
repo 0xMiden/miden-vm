@@ -2,7 +2,6 @@ use alloc::{boxed::Box, vec::Vec};
 use core::fmt;
 
 use miden_crypto::{Felt, Word};
-use miden_crypto::{Felt, PrimeCharacteristicRing, hash::rpo::RpoDigest};
 use miden_formatting::prettier::PrettyPrint;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -37,9 +36,7 @@ pub struct SplitNode {
 /// Constants
 impl SplitNode {
     /// The domain of the split node (used for control block hashing).
-    pub fn domain() -> Felt {
-        Felt::from_u64(OPCODE_SPLIT as u64)
-    }
+    pub const DOMAIN: Felt = Felt::new(OPCODE_SPLIT as u64);
 }
 
 /// Constructors
@@ -58,7 +55,7 @@ impl SplitNode {
             let if_branch_hash = mast_forest[branches[0]].digest();
             let else_branch_hash = mast_forest[branches[1]].digest();
 
-            hasher::merge_in_domain(&[if_branch_hash, else_branch_hash], Self::domain())
+            hasher::merge_in_domain(&[if_branch_hash, else_branch_hash], Self::DOMAIN)
         };
 
         Ok(Self {
@@ -89,12 +86,12 @@ impl SplitNode {
     /// domain defined by [Self::domain()] - i..e,:
     /// ```
     /// # use miden_core::mast::SplitNode;
-    /// # use miden_crypto::{hash::rpo::{RpoDigest as Digest, Rpo256 as Hasher}};
+    /// # use miden_crypto::{hash::rpo::{Word as Digest, Rpo256 as Hasher}};
     /// # let on_true_digest = Digest::default();
     /// # let on_false_digest = Digest::default();
     /// Hasher::merge_in_domain(&[on_true_digest, on_false_digest], SplitNode::domain());
     /// ```
-    pub fn digest(&self) -> RpoDigest {
+    pub fn digest(&self) -> Word {
         self.digest
     }
 

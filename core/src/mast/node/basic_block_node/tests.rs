@@ -1,9 +1,8 @@
+use miden_crypto::PrimeCharacteristicRing;
 use proptest::prelude::*;
 
 // Import strategy functions from arbitrary.rs
 pub(super) use super::arbitrary::op_non_control_sequence_strategy;
-use miden_crypto::PrimeCharacteristicRing;
-
 use super::*;
 use crate::{Decorator, ONE, mast::MastForest};
 
