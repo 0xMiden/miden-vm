@@ -19,7 +19,12 @@ doctest = false
 
 [features]
 default = ["std"]
-std = ["miden-air/std", "miden-core/std", "thiserror/std", "winter-verifier/std"]
+std = [
+  "miden-air/std",
+  "miden-core/std",
+  "thiserror/std",
+  "winter-verifier/std",
+]
 
 [dependencies]
 # Miden dependencies
@@ -30,26 +35,29 @@ miden-core.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
 winter-verifier.workspace = true
-air = { package = "miden-air", path = "../air", version = "0.14", default-features = false }
+# air = { package = "miden-air", path = "../air", version = "0.14", default-features = false }
 # tracing = { version = "0.1", default-features = false, features = ["attributes"] }
 # vm-core = { package = "miden-core", path = "../core", version = "0.14", default-features = false }
 # winter-verifier = { package = "winter-verifier", version = "0.12", default-features = false }
 # thiserror = { workspace = true }
-p3-matrix = { version = "0.3.0" }
-p3-uni-stark = { version = "0.3.0" }
-p3-field = { version = "0.3.0" }
-p3-merkle-tree = { version = "0.3.0" }
-p3-commit = { version = "0.3.0" }
-p3-fri = { version = "0.3.0" }
-p3-dft = { version = "0.3.0" }
-p3-poseidon2 = { version = "0.3.0" }
-p3-challenger = { version = "0.3.0" }
-p3-goldilocks = { version = "0.3.0" }
-p3-symmetric = { version = "0.3.0" }
-p3-util = { version = "0.3.0" }
-p3-blake3 = { version = "0.3.0" }
-p3-air = { version = "0.3.0" }
+
+
+p3-matrix.workspace = true
+p3-uni-stark.workspace = true
+p3-field.workspace = true
+p3-merkle-tree .workspace = true
+p3-commit.workspace = true
+p3-fri .workspace = true
+p3-dft .workspace = true
+p3-poseidon2 .workspace = true
+p3-challenger .workspace = true
+p3-goldilocks.workspace = true
+p3-symmetric.workspace = true
+p3-util .workspace = true
+p3-blake3.workspace = true
+p3-air .workspace = true
+
 itertools = "0.12"
 
-serde = { version = "1.0", features = ["derive"]}
+serde = { version = "1.0", features = ["derive"] }
 bincode = "1.3"

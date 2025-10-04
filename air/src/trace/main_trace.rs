@@ -2,7 +2,6 @@
 use alloc::vec::Vec;
 use core::ops::{Deref, Range};
 
-use miden_core::{Felt, ONE, Word, ZERO, utils::range};
 use miden_core::{Felt, ONE, PrimeCharacteristicRing, Word, ZERO, utils::range};
 
 use super::{

@@ -15,21 +15,21 @@ edition.workspace = true
 [features]
 default = ["std"]
 std = [
-    "assembly/std",
-    "processor/std",
-    "prover/std",
-    "verifier/std",
-    "vm-core/std",
-    "winter-prover/std",
+  "assembly/std",
+  "processor/std",
+  "prover/std",
+  "verifier/std",
+  "vm-core/std",
+  "winter-prover/std",
 ]
 
 [dependencies]
-air = { package = "miden-air", path = "../air", version = "0.14", default-features = false }
+# air = { package = "miden-air", path = "../air", version = "0.14", default-features = false }
 assembly = { package = "miden-assembly", path = "../assembly", version = "0.14", default-features = false, features = [
-    "testing",
+  "testing",
 ] }
 processor = { package = "miden-processor", path = "../processor", version = "0.14", default-features = false, features = [
-    "testing",
+  "testing",
 ] }
 prover = { package = "miden-prover", path = "../prover", version = "0.14", default-features = false }
 stdlib = { package = "miden-stdlib", path = "../stdlib", version = "0.14", default-features = false }
@@ -40,7 +40,9 @@ winter-prover = { package = "winter-prover", version = "0.12", default-features 
 rand = "0.9"
 
 [target.'cfg(target_family = "wasm")'.dependencies]
-pretty_assertions = { version = "1.4", default-features = false, features = ["alloc"] }
+pretty_assertions = { version = "1.4", default-features = false, features = [
+  "alloc",
+] }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 pretty_assertions = "1.4"

@@ -1,14 +1,12 @@
 use alloc::{string::ToString, vec::Vec};
 
-use miden_core::{
-    crypto::hash::{Blake3_192, Blake3_256, Hasher, Poseidon2, Rpo256, Rpx256},
-};
+use miden_core::crypto::hash::{Blake3_192, Blake3_256, Hasher, Poseidon2, Rpo256, Rpx256};
 use p3_uni_stark::StarkGenericConfig;
+use serde::{Deserialize, Serialize};
 use vm_core::{
     crypto::hash::{Blake3_192, Blake3_256, Hasher, Rpo256, Rpx256},
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
-use serde::{Deserialize, Serialize};
 
 //use winter_air::proof::Proof;
 
@@ -99,8 +97,7 @@ impl ExecutionProof {
 // ================================================================================================
 
 /// A hash function used during STARK proof generation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(bound = "")]
 #[repr(u8)]
 pub enum HashFunction {
@@ -112,8 +109,8 @@ pub enum HashFunction {
     Rpo256 = 0x02,
     /// RPX hash function with 256-bit output.
     Rpx256 = 0x03,
-        /// Keccak hash function with 256-bit output.
-        Keccak = 0x04,
+    /// Keccak hash function with 256-bit output.
+    Keccak = 0x04,
 }
 
 impl Default for HashFunction {
@@ -201,7 +198,7 @@ impl Deserializable for ExecutionProof {
 }
  */
 
- use p3_commit::Pcs;
+use p3_commit::Pcs;
 
 type Com<SC> = <<SC as StarkGenericConfig>::Pcs as Pcs<
     <SC as StarkGenericConfig>::Challenge,
@@ -236,4 +233,3 @@ pub struct OpenedValues<Challenge> {
     pub aux_trace_next: Vec<Challenge>,
     pub quotient_chunks: Vec<Vec<Challenge>>,
 }
-

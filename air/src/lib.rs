@@ -8,11 +8,18 @@ extern crate alloc;
 extern crate std;
 
 use alloc::{borrow::ToOwned, vec::Vec};
+use core::borrow::{Borrow, BorrowMut};
 
 use miden_core::{
     ExtensionOf, ONE, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
     utils::{ByteReader, ByteWriter, Deserializable, Serializable},
 };
+pub use p3_air::{Air, AirBuilder, BaseAir};
+use p3_air::{AirBuilderWithPublicValues, PermutationAirBuilder};
+use p3_field::PrimeCharacteristicRing;
+use p3_matrix::Matrix;
+//use serde::{Deserialize, Serialize}; TODO(Al)
+use vm_core::{ProgramInfo, StackInputs, StackOutputs};
 use winter_air::{
     Air, AirContext, Assertion, EvaluationFrame, ProofOptions as WinterProofOptions, TraceInfo,
     TransitionConstraintDegree,
@@ -22,32 +29,19 @@ use winter_prover::{
     math::get_power_series,
     matrix::ColMatrix,
 };
-use core::borrow::{Borrow, BorrowMut};
-
-use p3_air::{AirBuilderWithPublicValues, PermutationAirBuilder};
-pub use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::PrimeCharacteristicRing;
-use p3_matrix::Matrix;
-use alloc::vec::Vec;
-//use serde::{Deserialize, Serialize}; TODO(Al)
-use vm_core::{ProgramInfo, StackInputs, StackOutputs};
-use winter_air::ProofOptions as WinterProofOptions;
 
 mod constraints;
 //pub use constraints::stack;
 //use constraints::{chiplets, range};
 
 pub mod trace;
-pub use trace::ColMatrix;
-pub use trace::rows::RowIndex;
 use trace::*;
+pub use trace::{ColMatrix, rows::RowIndex};
 
 mod errors;
 mod options;
 mod proof;
-pub use proof::{Proof, Commitments, OpenedValues};
-
-mod air_builder;
+pub use proof::{Commitments, OpenedValues, Proof};
 
 mod utils;
 
@@ -55,8 +49,6 @@ mod utils;
 // ================================================================================================
 
 pub use errors::ExecutionOptionsError;
-pub use options::{ExecutionOptions, ProvingOptions};
-pub use proof::{ExecutionProof, HashFunction};
 //use utils::TransitionConstraintRange;
 pub use miden_core::{
     Felt,
@@ -441,10 +433,8 @@ impl<AB: AirBuilderWithPublicValues + PermutationAirBuilder> Air<AB> for Process
         */
         let mut when_transition = builder.when_transition();
 
-        when_transition
-            
-            .assert_zero(clk_nxt - (clk_cur + AB::Expr::ONE));
- 
+        when_transition.assert_zero(clk_nxt - (clk_cur + AB::Expr::ONE));
+
         let change_v = next.range[1] - local.range[1];
         when_transition.assert_zero(
             (change_v.clone() - AB::Expr::ONE)
@@ -455,8 +445,7 @@ impl<AB: AirBuilderWithPublicValues + PermutationAirBuilder> Air<AB> for Process
                 * (change_v.clone() - AB::Expr::from_i128(243))
                 * (change_v.clone() - AB::Expr::from_i128(729))
                 * (change_v.clone() - AB::Expr::from_i128(2187)),
-        );    
-
+        );
     }
 }
 
@@ -504,4 +493,3 @@ impl<T> BorrowMut<MainTraceCols<T>> for [T] {
         &mut shorts[0]
     }
 }
-

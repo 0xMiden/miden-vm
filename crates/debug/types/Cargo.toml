@@ -17,12 +17,12 @@ exclude.workspace = true
 [features]
 default = ["std"]
 std = [
-    "memchr/std",
-    "miden-formatting/std",
-    "miden-utils-sync/std",
-    "serde/std",
-    "serde_spanned?/std",
-    "thiserror/std",
+  "memchr/std",
+  "miden-formatting/std",
+  "miden-utils-sync/std",
+  "serde/std",
+  "serde_spanned?/std",
+  "thiserror/std",
 ]
 serde = ["dep:serde", "dep:serde_spanned", "serde_spanned?/serde"]
 
