@@ -1,7 +1,4 @@
-use std::{
-    path::{Path, PathBuf},
-    time::Instant,
-};
+use std::{path::PathBuf, time::Instant};
 
 use clap::Parser;
 use miden_assembly::diagnostics::{IntoDiagnostic, Report, Result, WrapErr};
@@ -69,23 +66,18 @@ impl VerifyCmd {
     }
 
     fn infer_defaults(&self) -> Result<(PathBuf, PathBuf), Report> {
-        let proof_file = if Path::new(&self.proof_file.as_os_str()).try_exists().is_err() {
+        if !self.proof_file.exists() {
             return Err(Report::msg("Proof file does not exist"));
-        } else {
-            self.proof_file.clone()
-        };
+        }
+        let default_path = |ext: &str| self.proof_file.with_extension(ext);
 
-        let input_file = self.input_file.clone().unwrap_or_else(|| {
-            let mut input_path = proof_file.clone();
-            input_path.set_extension("inputs");
-            input_path
-        });
-        let output_file = self.output_file.clone().unwrap_or_else(|| {
-            let mut output_path = proof_file.clone();
-            output_path.set_extension("outputs");
-            output_path
-        });
+        let input_file =
+            self.input_file.as_ref().map_or_else(|| default_path("inputs"), PathBuf::clone);
+        let output_file = self
+            .output_file
+            .as_ref()
+            .map_or_else(|| default_path("outputs"), PathBuf::clone);
 
-        Ok((input_file.to_path_buf(), output_file.to_path_buf()))
+        Ok((input_file, output_file))
     }
 }
