@@ -314,17 +314,16 @@ fn fixup_stack_and_system_rows(
     }
 
     // Initialize subsequent fragments with their corresponding rows from the previous fragment
-    // TODO(plafer): use zip
-    for (i, fragment) in fragments.iter_mut().enumerate().skip(1) {
-        if fragment.row_count() > 0 && i - 1 < stack_rows.len() && i - 1 < system_rows.len() {
+    for (fragment, (system_row, stack_row)) in
+        fragments.iter_mut().skip(1).zip(system_rows.iter().zip(stack_rows.iter()))
+    {
+        if fragment.row_count() > 0 {
             // Copy the system_row to the first row of this fragment
-            let system_row = &system_rows[i - 1];
             for (col_idx, &value) in system_row.iter().enumerate() {
                 fragment.columns[col_idx][0] = value;
             }
 
             // Copy the stack_row to the first row of this fragment
-            let stack_row = &stack_rows[i - 1];
             for (col_idx, &value) in stack_row.iter().enumerate() {
                 fragment.columns[STACK_TRACE_OFFSET + col_idx][0] = value;
             }
