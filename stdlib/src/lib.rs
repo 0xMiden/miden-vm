@@ -111,14 +111,13 @@ pub fn falcon_sign(sk: &[Felt], msg: Word) -> Option<Vec<Felt>> {
     use alloc::vec;
 
     use miden_core::{
-        Felt,};
-    use miden_core::{
+        Felt, PrimeCharacteristicRing, PrimeField64,
         crypto::{
             dsa::rpo_falcon512::{Polynomial, SecretKey},
             hash::Rpo256,
-        }, utils::Deserializable, Felt, PrimeCharacteristicRing
+        },
+        utils::Deserializable,
     };
-    use miden_core::PrimeField64;
 
     // Create the corresponding secret key
     let mut sk_bytes = Vec::with_capacity(sk.len());

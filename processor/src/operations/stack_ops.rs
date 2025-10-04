@@ -1,7 +1,7 @@
+use vm_core::PrimeField64;
+
 use super::{ExecutionError, MIN_STACK_DEPTH, Process};
 use crate::{ErrorContext, ZERO};
-use crate::ZERO;
-use vm_core::PrimeField64;
 
 impl Process {
     // STACK MANIPULATION
@@ -301,8 +301,7 @@ impl Process {
 
 #[cfg(test)]
 mod tests {
-    use miden_core::mast::MastForest;
-    use miden_core::PrimeCharacteristicRing;
+    use miden_core::{PrimeCharacteristicRing, mast::MastForest};
 
     use super::{
         super::{Operation, Process},

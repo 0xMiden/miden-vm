@@ -18,8 +18,6 @@ use miden_air::{
     },
 };
 use miden_core::{
-    Program, Word,};
-use miden_core::{
     Field, PrimeCharacteristicRing, PrimeField64, Program, Word,
     chiplets::hasher::apply_permutation,
     crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},
@@ -28,11 +26,10 @@ use miden_core::{
 };
 
 use super::{
-    AUX_TRACE_RAND_ELEMENTS, AdviceInputs, CHIPLETS_BUS_AUX_TRACE_OFFSET, ExecutionTrace, Felt,
-    FieldElement, NUM_RAND_ROWS, ONE, Operation, Trace, ZERO, build_span_with_respan_ops,
-    AUX_TRACE_RAND_ELEMENTS, AdviceInputs, CHIPLETS_AUX_TRACE_OFFSET, ExecutionTrace, Felt,
-    NUM_RAND_ROWS, ONE, Operation, ZERO, build_span_with_respan_ops,
-    build_trace_from_ops_with_inputs, build_trace_from_program, init_state_from_words, rand_array,
+    AUX_TRACE_RAND_ELEMENTS, AdviceInputs, CHIPLETS_AUX_TRACE_OFFSET,
+    CHIPLETS_BUS_AUX_TRACE_OFFSET, ExecutionTrace, Felt, FieldElement, NUM_RAND_ROWS, ONE,
+    Operation, Trace, ZERO, build_span_with_respan_ops, build_trace_from_ops_with_inputs,
+    build_trace_from_program, init_state_from_words, rand_array,
 };
 use crate::StackInputs;
 

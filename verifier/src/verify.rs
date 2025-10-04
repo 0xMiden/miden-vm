@@ -1,14 +1,12 @@
-use air::{AirBuilder, Proof};
-use alloc::vec;
-use alloc::vec::Vec;
+use alloc::{vec, vec::Vec};
 
+use air::{AirBuilder, Proof};
 use itertools::Itertools;
 use p3_air::{Air, AirBuilderWithPublicValues, BaseAir, ExtensionBuilder, PermutationAirBuilder};
 use p3_challenger::{CanObserve, FieldChallenger};
 use p3_commit::{Pcs, PolynomialSpace};
 use p3_field::{BasedVectorSpace, Field, PrimeCharacteristicRing};
-use p3_matrix::dense::RowMajorMatrixView;
-use p3_matrix::stack::VerticalPair;
+use p3_matrix::{dense::RowMajorMatrixView, stack::VerticalPair};
 use p3_uni_stark::{PcsError, StarkGenericConfig, Val};
 use p3_util::zip_eq::zip_eq;
 use tracing::instrument;
@@ -79,11 +77,13 @@ where
 
     // Get an out-of-domain point to open our values at.
     //
-    // Soundness Error: dN/|EF| where `N` is the trace length and our constraint polynomial has degree `d`.
+    // Soundness Error: dN/|EF| where `N` is the trace length and our constraint polynomial has
+    // degree `d`.
     let zeta: SC::Challenge = challenger.sample_algebra_element();
     let zeta_next = init_trace_domain.next_point(zeta).unwrap();
 
-    // We've already checked that commitments.random and opened_values.random are present if and only if ZK is enabled.
+    // We've already checked that commitments.random and opened_values.random are present if and
+    // only if ZK is enabled.
     let mut coms_to_verify = vec![];
     coms_to_verify.extend(vec![
         (
@@ -177,7 +177,7 @@ where
     // Finally, check that
     //     folded_constraints(zeta) / Z_H(zeta) = quotient(zeta)
     //if folded_constraints * sels.inv_vanishing != quotient {
-        //return Err(VerificationError::OodEvaluationMismatch);
+    //return Err(VerificationError::OodEvaluationMismatch);
     //}
 
     Ok(())

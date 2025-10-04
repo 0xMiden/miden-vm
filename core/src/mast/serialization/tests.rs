@@ -393,8 +393,7 @@ fn mast_forest_invalid_node_id() {
     forest.add_join(first, second).unwrap();
 }
 
-// TODO(Al)
-/*
+
 /// Test `MastForest::advice_map` serialization and deserialization.
 #[test]
 fn mast_forest_serialize_deserialize_advice_map() {

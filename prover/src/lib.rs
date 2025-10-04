@@ -8,9 +8,13 @@ extern crate std;
 
 use core::marker::PhantomData;
 use std::println;
-use tracing::instrument;
+#[cfg(feature = "std")]
+use std::time::Instant;
 
+use air::{ProcessorAir, PublicInputs};
 use miden_air::{AuxRandElements, PartitionOptions, ProcessorAir, PublicInputs};
+#[cfg(all(feature = "metal", target_arch = "aarch64", target_os = "macos"))]
+use miden_gpu::HashFn;
 #[cfg(all(feature = "metal", target_arch = "aarch64", target_os = "macos"))]
 use miden_gpu::HashFn;
 use miden_processor::{
@@ -21,6 +25,9 @@ use miden_processor::{
     },
     math::{Felt, FieldElement},
 };
+use p3_field::extension::BinomialExtensionField;
+use p3_uni_stark::StarkGenericConfig;
+use processor::{ExecutionTrace, Program, ZERO, math::Felt};
 use tracing::instrument;
 use winter_maybe_async::{maybe_async, maybe_await};
 use winter_prover::{
@@ -29,16 +36,6 @@ use winter_prover::{
     ProofOptions as WinterProofOptions, Prover, StarkDomain, TraceInfo, TracePolyTable,
     matrix::ColMatrix,
 };
-use air::{ProcessorAir, PublicInputs};
-#[cfg(all(feature = "metal", target_arch = "aarch64", target_os = "macos"))]
-use miden_gpu::HashFn;
-
-use p3_field::extension::BinomialExtensionField;
-use p3_uni_stark::StarkGenericConfig;
-use processor::{ExecutionTrace, Program, ZERO, math::Felt};
-
-#[cfg(feature = "std")]
-use std::time::Instant;
 mod gpu;
 
 mod prove;
@@ -187,6 +184,5 @@ where
 
 // HELPERS and TYPES are consolidated into prove/ submodules
 
-use crate::prove::{prove_blake, prove_keccak, prove_rpo};
-pub use crate::prove::types::{Proof, Commitments, OpenedValues};
-use crate::prove::utils::to_row_major;
+pub use crate::prove::types::{Commitments, OpenedValues, Proof};
+use crate::prove::{prove_blake, prove_keccak, prove_rpo, utils::to_row_major};

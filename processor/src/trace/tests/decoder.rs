@@ -5,14 +5,12 @@ use miden_air::trace::{
     decoder::{P1_COL_IDX, P2_COL_IDX, P3_COL_IDX},
 };
 use miden_core::{
-    FieldElement, ONE, Operation, Program, Word, ZERO,
-    mast::{MastForest, MastNodeExt},};
-use test_utils::rand::rand_array;
-use miden_core::{
-    ExtensionField, Field, ONE, Operation, PrimeCharacteristicRing, Program, Word, ZERO,
-    mast::{MastForest, MastNode},
+    ExtensionField, Field, FieldElement, ONE, Operation, PrimeCharacteristicRing, Program, Word,
+    ZERO,
+    mast::{MastForest, MastNode, MastNodeExt},
 };
 use miden_utils_testing::rand::rand_array;
+use test_utils::rand::rand_array;
 
 use super::{
     super::{

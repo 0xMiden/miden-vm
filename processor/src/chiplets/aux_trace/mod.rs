@@ -2,12 +2,10 @@ use alloc::vec::Vec;
 
 use miden_air::trace::main_trace::MainTrace;
 use miden_core::Kernel;
+use vm_core::{ExtensionField, Kernel};
 use wiring_bus::WiringBusBuilder;
 
 use super::{super::trace::AuxColumnBuilder, Felt, FieldElement, ace::AceHints};
-use vm_core::{ExtensionField, Kernel};
-
-use super::{super::trace::AuxColumnBuilder, Felt};
 
 mod bus;
 pub use bus::{

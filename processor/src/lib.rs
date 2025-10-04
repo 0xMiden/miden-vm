@@ -13,12 +13,19 @@ use miden_air::trace::{
     CHIPLETS_WIDTH, DECODER_TRACE_WIDTH, MIN_TRACE_LEN, RANGE_CHECK_TRACE_WIDTH, STACK_TRACE_WIDTH,
     SYS_TRACE_WIDTH,
 };
-pub use miden_air::{ExecutionOptions, ExecutionOptionsError, RowIndex};
+pub use miden_air::{ColMatrix, ExecutionOptions, ExecutionOptionsError, RowIndex};
 pub use miden_core::{
     AssemblyOp, EMPTY_WORD, Felt, Kernel, ONE, Operation, Program, ProgramInfo, QuadExtension,
     StackInputs, StackOutputs, WORD_SIZE, Word, ZERO,
-}
-pub use miden_air::{ColMatrix, ExecutionOptions, ExecutionOptionsError, RowIndex};
+};
+use miden_core::{
+    BinomialExtensionField, Decorator, DecoratorIterator, FieldElement, PrimeField64,
+    mast::{
+        BasicBlockNode, CallNode, DecoratorOpLinkIterator, DynNode, ExternalNode, JoinNode,
+        LoopNode, OpBatch, SplitNode,
+    },
+};
+use miden_debug_types::SourceSpan;
 pub use vm_core::{
     AssemblyOp, EMPTY_WORD, Felt, Kernel, ONE, Operation, Program, ProgramInfo, StackInputs,
     StackOutputs, Word, ZERO,
@@ -29,17 +36,6 @@ pub use vm_core::{
     sys_events::SystemEvent,
     utils::DeserializationError,
 };
-use miden_core::{
-    Decorator, FieldElement,
-}
-use miden_core::{
-    BinomialExtensionField, Decorator, DecoratorIterator, PrimeField64,
-    mast::{
-        BasicBlockNode, CallNode, DecoratorOpLinkIterator, DynNode, ExternalNode, JoinNode,
-        LoopNode, OpBatch, SplitNode,
-    },
-};
-use miden_debug_types::SourceSpan;
 pub use winter_prover::matrix::ColMatrix;
 
 pub(crate) mod continuation_stack;

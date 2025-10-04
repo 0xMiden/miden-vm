@@ -7,8 +7,7 @@ use miden_air::{
         range::{M_COL_IDX, V_COL_IDX},
     },
 };
-use miden_core::ZERO;
-use miden_core::{ExtensionField, PrimeField64};
+use miden_core::{ExtensionField, PrimeField64, ZERO};
 
 use super::{Felt, NUM_RAND_ROWS, uninit_vector};
 

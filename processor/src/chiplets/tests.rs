@@ -10,8 +10,7 @@ use miden_air::trace::{
         memory::TRACE_WIDTH as MEMORY_TRACE_WIDTH,
     },
 };
-use miden_core::{Felt, ONE, Program, Word, ZERO, mast::MastForest};
-use miden_core::{mast::MastForest, Felt, PrimeCharacteristicRing, Program, ONE, ZERO};
+use miden_core::{Felt, ONE, PrimeCharacteristicRing, Program, Word, ZERO, mast::MastForest};
 
 use crate::{
     AdviceInputs, DefaultHost, ExecutionOptions, ExecutionTrace, Kernel, Operation, Process,

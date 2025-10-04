@@ -1,9 +1,11 @@
-use miden_core::{ExtensionOf, FieldElement, ONE, QuadFelt, StarkField, ZERO};
-use miden_core::{ lazy_static, BasedVectorSpace, Field, PrimeCharacteristicRing, PrimeField64, ONE, ZERO};
+use miden_core::{
+    BasedVectorSpace, ExtensionOf, Field, FieldElement, ONE, PrimeCharacteristicRing, PrimeField64,
+    QuadFelt, StarkField, ZERO, lazy_static,
+};
 
 use super::{ExecutionError, Felt, Operation, Process};
 
-lazy_static!{
+lazy_static! {
 
 // CONSTANTS
 // ================================================================================================

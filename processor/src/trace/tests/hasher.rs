@@ -4,11 +4,8 @@ use miden_air::trace::{
     AUX_TRACE_RAND_ELEMENTS, chiplets::hasher::P1_COL_IDX, main_trace::MainTrace,
 };
 use miden_core::{
-    FieldElement,
-    crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},};
-use rstest::rstest;
-use miden_core::{
-    crypto::merkle::{MerkleStore, MerkleTree, NodeIndex}, ExtensionField, PrimeCharacteristicRing, PrimeField64, Field
+    ExtensionField, Field, FieldElement, PrimeCharacteristicRing, PrimeField64,
+    crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},
 };
 use rstest::rstest;
 
@@ -193,11 +190,7 @@ impl SiblingTableRow {
 
     /// Reduces this row to a single field element in the field specified by E. This requires
     /// at least 6 alpha values.
-    pub fn to_value<E: ExtensionField<Felt>>(
-        &self,
-        _main_trace: &MainTrace,
-        alphas: &[E],
-    ) -> E {
+    pub fn to_value<E: ExtensionField<Felt>>(&self, _main_trace: &MainTrace, alphas: &[E]) -> E {
         // when the least significant bit of the index is 0, the sibling will be in the 3rd word
         // of the hasher state, and when the least significant bit is 1, it will be in the 2nd
         // word. we compute the value in this way to make constraint evaluation a bit easier since

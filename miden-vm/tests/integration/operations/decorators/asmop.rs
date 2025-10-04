@@ -4,7 +4,7 @@ use miden_processor::{AsmOpInfo, RowIndex, VmStateIterator};
 use miden_utils_testing::{assert_eq, build_debug_test};
 use processor::{AsmOpInfo, RowIndex, VmStateIterator};
 use test_utils::{assert_eq, build_debug_test};
-use vm_core::{debuginfo::Location, AssemblyOp, Felt, Operation, PrimeCharacteristicRing};
+use vm_core::{AssemblyOp, Felt, Operation, PrimeCharacteristicRing, debuginfo::Location};
 
 #[test]
 fn asmop_one_span_block_test() {

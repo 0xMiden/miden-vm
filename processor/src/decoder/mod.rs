@@ -13,16 +13,12 @@ use miden_air::{
 #[cfg(test)]
 use miden_core::mast::OP_GROUP_SIZE;
 use miden_core::{
-    AssemblyOp,
+    AssemblyOp, PrimeCharacteristicRing, PrimeField64, lazy_static,
     mast::{
         BasicBlockNode, CallNode, DynNode, JoinNode, LoopNode, MastForest, MastNodeExt,
         OP_BATCH_SIZE, SplitNode,
     },
-    stack::MIN_STACK_DEPTH,};
-use miden_core::{
-    lazy_static, mast::{
-        BasicBlockNode, CallNode, DynNode, JoinNode, LoopNode, MastForest, SplitNode, OP_BATCH_SIZE
-    }, stack::MIN_STACK_DEPTH, AssemblyOp, PrimeCharacteristicRing, PrimeField64
+    stack::MIN_STACK_DEPTH,
 };
 
 use super::{
@@ -51,7 +47,7 @@ mod tests;
 
 //const HASH_CYCLE_LEN: Felt = Felt::from_u8(8);
 // TODO(Al)
-lazy_static!{
+lazy_static! {
     static ref HASH_CYCLE_LEN: Felt = Felt::from_u8(8);
 }
 

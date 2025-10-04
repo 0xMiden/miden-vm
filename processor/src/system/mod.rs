@@ -1,8 +1,8 @@
 use alloc::vec::Vec;
-use vm_core::{PrimeCharacteristicRing, PrimeField64};
 use core::fmt::{self, Display};
 
 use miden_air::RowIndex;
+use vm_core::{PrimeCharacteristicRing, PrimeField64};
 
 use super::{EMPTY_WORD, ExecutionError, Felt, ONE, SysTrace, Word, ZERO};
 

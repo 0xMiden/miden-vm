@@ -9,13 +9,12 @@ use miden_air::{
     },
 };
 use miden_assembly::SourceSpan;
-use miden_core::{WORD_SIZE, Word, assert_matches};
-use miden_core::{assert_matches, PrimeCharacteristicRing, PrimeField64, Word, WORD_SIZE, Field};
+use miden_core::{Field, PrimeCharacteristicRing, PrimeField64, WORD_SIZE, Word, assert_matches};
 
 use super::{
     super::ZERO,
-    CLK_COL_IDX, CTX_COL_IDX, D_INV_COL_IDX, D0_COL_IDX, D1_COL_IDX, EMPTY_WORD, Felt,
-    Memory, ONE, TraceFragment, V_COL_RANGE, WORD_COL_IDX,
+    CLK_COL_IDX, CTX_COL_IDX, D_INV_COL_IDX, D0_COL_IDX, D1_COL_IDX, EMPTY_WORD, Felt, Memory, ONE,
+    TraceFragment, V_COL_RANGE, WORD_COL_IDX,
     segment::{MemoryAccessType, MemoryOperation},
 };
 use crate::{ContextId, MemoryAddress, MemoryError};

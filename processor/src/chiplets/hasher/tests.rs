@@ -4,11 +4,10 @@ use miden_air::trace::chiplets::hasher::{
     DIGEST_LEN, HASH_CYCLE_LEN, NUM_ROUNDS, NUM_SELECTORS, STATE_COL_RANGE,
 };
 use miden_core::{
-    ONE, Operation, ZERO,
+    ONE, Operation, PrimeCharacteristicRing, PrimeField64, ZERO,
     chiplets::hasher,
     crypto::merkle::{MerkleTree, NodeIndex},
     mast::{MastForest, MastNode, MastNodeExt},
-    mast::{MastForest, MastNode}, PrimeCharacteristicRing, PrimeField64
 };
 use miden_utils_testing::rand::rand_array;
 

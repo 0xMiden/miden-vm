@@ -2,8 +2,7 @@ use alloc::vec::Vec;
 use core::ops::Range;
 
 use miden_air::trace::chiplets::hasher::NUM_ROUNDS;
-use miden_core::chiplets::hasher::apply_round;
-use miden_core::{chiplets::hasher::apply_round, PrimeCharacteristicRing};
+use miden_core::{PrimeCharacteristicRing, chiplets::hasher::apply_round};
 
 use super::{Felt, HasherState, STATE_WIDTH, Selectors, TRACE_WIDTH, TraceFragment, ZERO};
 

@@ -7,28 +7,20 @@ use miden_air::trace::{
     decoder::{NUM_USER_OP_HELPERS, USER_OP_HELPERS_OFFSET},
     main_trace::MainTrace,
 };
-use miden_core::{ProgramInfo, StackInputs, StackOutputs, Word, ZERO, stack::MIN_STACK_DEPTH};
+use miden_core::{
+    ExtensionField, PrimeField64, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
+    stack::MIN_STACK_DEPTH,
+};
 use winter_prover::{EvaluationFrame, Trace, TraceInfo, crypto::RandomCoin};
 
 use super::{
-    AdviceProvider, ColMatrix, Felt, FieldElement, Process,
+    AdviceProvider, ColMatrix, Digest, Felt, FieldElement, Process,
     chiplets::AuxTraceBuilder as ChipletsAuxTraceBuilder, crypto::RpoRandomCoin,
     decoder::AuxTraceBuilder as DecoderAuxTraceBuilder,
-}
-use miden_core::{
-    ExtensionField, PrimeField64, ProgramInfo, StackInputs, StackOutputs, ZERO,
-    stack::MIN_STACK_DEPTH,
-};
-use winter_prover::TraceInfo;
-
-use crate::ColMatrix;
-
-use super::{
-    Digest, Felt, Process, chiplets::AuxTraceBuilder as ChipletsAuxTraceBuilder,
-    crypto::RpoRandomCoin, decoder::AuxTraceBuilder as DecoderAuxTraceBuilder,
     range::AuxTraceBuilder as RangeCheckerAuxTraceBuilder,
     stack::AuxTraceBuilder as StackAuxTraceBuilder,
 };
+use crate::ColMatrix;
 
 mod utils;
 pub use utils::{AuxColumnBuilder, ChipletsLengths, TraceFragment, TraceLenSummary};

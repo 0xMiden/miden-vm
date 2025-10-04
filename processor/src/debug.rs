@@ -6,8 +6,7 @@ use alloc::{
 use core::fmt;
 
 use miden_air::RowIndex;
-use miden_core::{AssemblyOp, FieldElement, Operation, StackOutputs};
-use miden_core::{AssemblyOp, PrimeField64, ExtensionField, Operation, StackOutputs};
+use miden_core::{AssemblyOp, ExtensionField, FieldElement, Operation, PrimeField64, StackOutputs};
 
 use crate::{
     Chiplets, ChipletsLengths, Decoder, ExecutionError, Felt, MemoryAddress, Process, Stack,

@@ -1,7 +1,7 @@
 use std::ops::Mul;
 
-use miden_utils_testing::{push_inputs, rand::rand_value};
 use miden_core::PrimeField64;
+use miden_utils_testing::{push_inputs, rand::rand_value};
 use test_utils::{push_inputs, rand::rand_value};
 
 #[derive(Copy, Clone, Debug)]

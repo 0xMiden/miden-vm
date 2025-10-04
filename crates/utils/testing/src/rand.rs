@@ -1,18 +1,15 @@
-pub use winter_rand_utils::*;
-
-use super::{Felt, WORD_SIZE, Word};
 use core::fmt::Debug;
 use std::vec::Vec;
 
-use vm_core::PrimeCharacteristicRing;
-
-use super::{Felt, Word};
-use rand::prelude::*;
 use rand::{
     Rng,
     distr::{Distribution, StandardUniform},
+    prelude::*,
 };
+use vm_core::PrimeCharacteristicRing;
+pub use winter_rand_utils::*;
 
+use super::{Felt, WORD_SIZE, Word};
 
 // SEEDED GENERATORS
 // ================================================================================================

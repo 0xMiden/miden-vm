@@ -5,11 +5,9 @@ use std::{
 };
 
 use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
-use miden_core::{Felt, WORD_SIZE};
+use miden_core::{Felt, PrimeCharacteristicRing, WORD_SIZE};
 use serde::Deserialize;
 pub use tracing::{Level, event, instrument};
-use miden_core::Felt;
-use miden_core::PrimeCharacteristicRing;
 
 use crate::{
     AdviceInputs, StackInputs, Word, ZERO,

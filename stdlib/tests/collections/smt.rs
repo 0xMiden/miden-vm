@@ -1,8 +1,8 @@
 use miden_stdlib::handlers::smt_peek::SMT_PEEK_EVENT_NAME;
 use miden_utils_testing::prepend_word_to_vec as prepend_word;
+use vm_core::{PrimeCharacteristicRing, PrimeField64, lazy_static};
 
 use super::*;
-use vm_core::{PrimeCharacteristicRing, PrimeField64, lazy_static};
 
 // TEST DATA
 // ================================================================================================
@@ -32,7 +32,6 @@ const LEAVES_MULTI: [(Word, Word); 3] = [
     // A key in the same leaf, but with no corresponding value.
     (word(301, 302, 303, 69420), EMPTY_WORD),
 ];
-}
 
 /// Tests `get` on every key present in the SMT, as well as an empty leaf
 #[test]

@@ -1,10 +1,8 @@
 use alloc::vec::Vec;
 
 use miden_core::{
-    Felt, FieldElement, QuadFelt, WORD_SIZE, Word, ZERO, crypto::hash::Rpo256,
-}
-use miden_core::{
-    Felt, Field, PrimeCharacteristicRing, PrimeField64, WORD_SIZE, Word, ZERO,
+    Felt, Field, FieldElement, PrimeCharacteristicRing, PrimeField64, QuadFelt, WORD_SIZE, Word,
+    ZERO,
     crypto::{
         hash::{Rpo256, RpoDigest},
         merkle::{EmptySubtreeRoots, SMT_DEPTH, Smt},

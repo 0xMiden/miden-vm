@@ -3,18 +3,15 @@ use miden_assembly_syntax::{
     debuginfo::{SourceSpan, Span},
     diagnostics::{RelatedError, RelatedLabel, Report},
 };
-use vm_core::{sys_events::SystemEvent, Operation::*, PrimeCharacteristicRing, PrimeField64};
+use miden_core::{FieldElement, Operation::*, sys_events::SystemEvent};
+use vm_core::{Operation::*, PrimeCharacteristicRing, PrimeField64, sys_events::SystemEvent};
 
 use super::{BasicBlockBuilder, validate_param};
 use crate::{
-    AssemblyError, Felt, MAX_EXP_BITS, ONE, Span, ZERO,
+    AssemblyError, Felt, MAX_EXP_BITS, ONE, ProcedureContext, Span, ZERO,
     assembler::ProcedureContext,
     diagnostics::{RelatedError, Report},
 };
-use miden_core::{FieldElement, Operation::*, sys_events::SystemEvent};
-
-use super::BasicBlockBuilder;
-use crate::{MAX_EXP_BITS, ONE, ProcedureContext, ZERO};
 
 /// Field element representing TWO in the base field of the VM.
 const TWO: Felt = Felt::TWO;

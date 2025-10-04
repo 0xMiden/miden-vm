@@ -7,11 +7,11 @@ use miden_prover::Word;
 use miden_stdlib::StdLibrary;
 use miden_utils_testing::{StackInputs, Test, build_test, expect_exec_error_matches, push_inputs};
 use miden_vm::Module;
-use vm_core::PrimeField64;
 use processor::ExecutionError;
 use prover::Digest;
 use stdlib::StdLibrary;
 use test_utils::{StackInputs, Test, build_test, expect_exec_error_matches, push_inputs};
+use vm_core::PrimeField64;
 
 // SIMPLE FLOW CONTROL TESTS
 // ================================================================================================

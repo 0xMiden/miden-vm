@@ -3,8 +3,7 @@ use miden_utils_testing::{
     Felt, TRUNCATE_STACK_PROC, ToElements, assert_eq, build_op_test, build_test,
 };
 use test_utils::{Felt, TRUNCATE_STACK_PROC, ToElements, assert_eq, build_op_test, build_test};
-use vm_core::PrimeField64;
-use vm_core::chiplets::hasher::apply_permutation;
+use vm_core::{PrimeField64, chiplets::hasher::apply_permutation};
 
 mod adv_ops;
 mod constant_ops;

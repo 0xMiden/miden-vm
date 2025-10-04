@@ -1,8 +1,7 @@
 use miden_core::{mast::MastForest, stack::MIN_STACK_DEPTH};
 
-use super::{ExecutionError, Felt, FieldElement, Operation, Process, SyncHost};
+use super::{ExecutionError, Felt, FieldElement, Host, Operation, Process, SyncHost};
 use crate::errors::ErrorContext;
-use super::{ExecutionError, Felt, Host, Operation, Process};
 
 mod circuit_eval;
 mod crypto_ops;

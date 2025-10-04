@@ -1,10 +1,7 @@
-use miden_core::{ONE, Operation, ZERO};
+use miden_core::{Field, ONE, Operation, PrimeCharacteristicRing, PrimeField64, ZERO};
 
 use super::{ExecutionError, Felt, FieldElement, Process, utils::assert_binary};
 use crate::ErrorContext;
-use miden_core::{ONE, Operation, ZERO, PrimeCharacteristicRing, PrimeField64, Field};
-
-use super::{ExecutionError, Felt, Process, utils::assert_binary};
 
 // FIELD OPERATIONS
 // ================================================================================================
@@ -231,10 +228,9 @@ impl Process {
 
 #[cfg(test)]
 mod tests {
-    use miden_core::{ONE, ZERO, mast::MastForest};
+    use miden_core::{Field, ONE, PrimeCharacteristicRing, PrimeField64, ZERO, mast::MastForest};
     use miden_utils_testing::rand::rand_value;
     use test_utils::rand::rand_value;
-    use miden_core::{Field, PrimeCharacteristicRing, PrimeField64, ONE, ZERO};
 
     use super::{
         super::{Felt, MIN_STACK_DEPTH, Operation},
@@ -249,7 +245,12 @@ mod tests {
     fn op_add() {
         // initialize the stack with a few values
         let (a, b, c) = get_rand_values();
-        let stack = StackInputs::try_from_ints([c.as_canonical_u64(), b.as_canonical_u64(), a.as_canonical_u64()]).unwrap();
+        let stack = StackInputs::try_from_ints([
+            c.as_canonical_u64(),
+            b.as_canonical_u64(),
+            a.as_canonical_u64(),
+        ])
+        .unwrap();
         let mut process = Process::new_dummy(stack);
         let mut host = DefaultHost::default();
         let program = &MastForest::default();
@@ -271,7 +272,12 @@ mod tests {
     fn op_neg() {
         // initialize the stack with a few values
         let (a, b, c) = get_rand_values();
-        let stack = StackInputs::try_from_ints([c.as_canonical_u64(), b.as_canonical_u64(), a.as_canonical_u64()]).unwrap();
+        let stack = StackInputs::try_from_ints([
+            c.as_canonical_u64(),
+            b.as_canonical_u64(),
+            a.as_canonical_u64(),
+        ])
+        .unwrap();
         let mut process = Process::new_dummy(stack);
         let mut host = DefaultHost::default();
         let program = &MastForest::default();
@@ -289,7 +295,12 @@ mod tests {
     fn op_mul() {
         // initialize the stack with a few values
         let (a, b, c) = get_rand_values();
-        let stack = StackInputs::try_from_ints([c.as_canonical_u64(), b.as_canonical_u64(), a.as_canonical_u64()]).unwrap();
+        let stack = StackInputs::try_from_ints([
+            c.as_canonical_u64(),
+            b.as_canonical_u64(),
+            a.as_canonical_u64(),
+        ])
+        .unwrap();
         let mut process = Process::new_dummy(stack);
         let mut host = DefaultHost::default();
         let program = &MastForest::default();
@@ -311,7 +322,12 @@ mod tests {
     fn op_inv() {
         // initialize the stack with a few values
         let (a, b, c) = get_rand_values();
-        let stack = StackInputs::try_from_ints([c.as_canonical_u64(), b.as_canonical_u64(), a.as_canonical_u64()]).unwrap();
+        let stack = StackInputs::try_from_ints([
+            c.as_canonical_u64(),
+            b.as_canonical_u64(),
+            a.as_canonical_u64(),
+        ])
+        .unwrap();
         let mut process = Process::new_dummy(stack);
         let mut host = DefaultHost::default();
         let program = &MastForest::default();
@@ -335,7 +351,12 @@ mod tests {
     fn op_incr() {
         // initialize the stack with a few values
         let (a, b, c) = get_rand_values();
-        let stack = StackInputs::try_from_ints([c.as_canonical_u64(), b.as_canonical_u64(), a.as_canonical_u64()]).unwrap();
+        let stack = StackInputs::try_from_ints([
+            c.as_canonical_u64(),
+            b.as_canonical_u64(),
+            a.as_canonical_u64(),
+        ])
+        .unwrap();
         let mut process = Process::new_dummy(stack);
         let mut host = DefaultHost::default();
         let program = &MastForest::default();

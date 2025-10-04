@@ -1,10 +1,9 @@
 use miden_air::trace::{
     AUX_TRACE_RAND_ELEMENTS, chiplets::hasher::HASH_CYCLE_LEN, range::B_RANGE_COL_IDX,
 };
-use miden_core::{ExtensionOf, Operation};
+use miden_core::{ExtensionOf, Field, Operation, PrimeCharacteristicRing};
 use miden_utils_testing::rand::rand_array;
 use test_utils::rand::rand_array;
-use miden_core::{Field, Operation, PrimeCharacteristicRing};
 
 use super::{Felt, NUM_RAND_ROWS, ONE, ZERO, build_trace_from_ops};
 

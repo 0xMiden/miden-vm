@@ -1,9 +1,8 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 
-use miden_core::utils::ToElements;
+use miden_core::{PrimeCharacteristicRing, PrimeField64, utils::ToElements};
 use miden_utils_testing::rand::rand_array;
 use test_utils::rand::rand_array;
-use miden_core::{PrimeCharacteristicRing, PrimeField64, utils::ToElements};
 
 use super::{Felt, RangeChecker, ZERO};
 use crate::{RangeCheckTrace, utils::get_trace_len};

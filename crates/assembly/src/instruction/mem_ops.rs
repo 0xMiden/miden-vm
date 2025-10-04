@@ -3,13 +3,10 @@ use miden_assembly_syntax::{
     diagnostics::{RelatedLabel, Report},
 };
 use miden_core::{Felt, Operation::*};
-
-use super::{BasicBlockBuilder, push_felt, push_u32_value};
-use crate::ProcedureContext;
 use vm_core::{Felt, Operation::*, PrimeCharacteristicRing};
 
 use super::{BasicBlockBuilder, push_felt, push_u32_value, validate_param};
-use crate::{AssemblyError, assembler::ProcedureContext, diagnostics::Report};
+use crate::{AssemblyError, ProcedureContext, assembler::ProcedureContext, diagnostics::Report};
 
 // INSTRUCTION PARSERS
 // ================================================================================================

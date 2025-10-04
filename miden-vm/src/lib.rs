@@ -16,12 +16,12 @@ pub use miden_processor::{
 };
 pub use miden_prover::{
     ExecutionProof, FieldExtension, HashFunction, InputError, Proof, ProvingOptions, StackOutputs,
-}
+};
+pub use miden_verifier::{VerificationError, verify};
 pub use prover::{
     Digest, ExecutionProof, FieldExtension, HashFunction, InputError, ProvingOptions, StackOutputs,
     Word, math, prove,
 };
-pub use miden_verifier::{VerificationError, verify};
 
 // (private) exports
 // ================================================================================================

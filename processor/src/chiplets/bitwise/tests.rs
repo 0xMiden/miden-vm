@@ -4,10 +4,9 @@ use miden_air::trace::chiplets::bitwise::{
     A_COL_IDX, A_COL_RANGE, B_COL_IDX, B_COL_RANGE, BITWISE_AND, BITWISE_XOR, OP_CYCLE_LEN,
     OUTPUT_COL_IDX, PREV_OUTPUT_COL_IDX, TRACE_WIDTH,
 };
-use miden_core::ZERO;
+use miden_core::{PrimeCharacteristicRing, PrimeField64, ZERO};
 use miden_utils_testing::rand::rand_value;
 use test_utils::rand::rand_value;
-use miden_core::{ZERO, PrimeField64, PrimeCharacteristicRing};
 
 use super::{Bitwise, Felt, TraceFragment};
 
@@ -51,7 +50,8 @@ fn bitwise_and() {
         let c2 = binary_and(trace[A_COL_RANGE.start + 2][i], trace[B_COL_RANGE.start + 2][i]);
         let c3 = binary_and(trace[A_COL_RANGE.start + 3][i], trace[B_COL_RANGE.start + 3][i]);
 
-        let result_4_bit = c0 + Felt::from_u64(2) * c1 + Felt::from_u64(4) * c2 + Felt::from_u64(8) * c3;
+        let result_4_bit =
+            c0 + Felt::from_u64(2) * c1 + Felt::from_u64(4) * c2 + Felt::from_u64(8) * c3;
         let result = prev_result * Felt::from_u64(16) + result_4_bit;
 
         assert_eq!(prev_result, trace[PREV_OUTPUT_COL_IDX][i]);
@@ -95,7 +95,8 @@ fn bitwise_xor() {
         let c2 = binary_xor(trace[A_COL_RANGE.start + 2][i], trace[B_COL_RANGE.start + 2][i]);
         let c3 = binary_xor(trace[A_COL_RANGE.start + 3][i], trace[B_COL_RANGE.start + 3][i]);
 
-        let result_4_bit = c0 + Felt::from_u64(2) * c1 + Felt::from_u64(4) * c2 + Felt::from_u64(8) * c3;
+        let result_4_bit =
+            c0 + Felt::from_u64(2) * c1 + Felt::from_u64(4) * c2 + Felt::from_u64(8) * c3;
         let result = prev_result * Felt::from_u64(16) + result_4_bit;
 
         assert_eq!(prev_result, trace[PREV_OUTPUT_COL_IDX][i]);
@@ -146,7 +147,8 @@ fn bitwise_multiple() {
         let c2 = binary_and(trace[A_COL_RANGE.start + 2][i], trace[B_COL_RANGE.start + 2][i]);
         let c3 = binary_and(trace[A_COL_RANGE.start + 3][i], trace[B_COL_RANGE.start + 3][i]);
 
-        let result_4_bit = c0 + Felt::from_u64(2) * c1 + Felt::from_u64(4) * c2 + Felt::from_u64(8) * c3;
+        let result_4_bit =
+            c0 + Felt::from_u64(2) * c1 + Felt::from_u64(4) * c2 + Felt::from_u64(8) * c3;
         let result = prev_result * Felt::from_u64(16) + result_4_bit;
 
         assert_eq!(prev_result, trace[PREV_OUTPUT_COL_IDX][i]);
@@ -162,7 +164,8 @@ fn bitwise_multiple() {
         let c2 = binary_xor(trace[A_COL_RANGE.start + 2][i], trace[B_COL_RANGE.start + 2][i]);
         let c3 = binary_xor(trace[A_COL_RANGE.start + 3][i], trace[B_COL_RANGE.start + 3][i]);
 
-        let result_4_bit = c0 + Felt::from_u64(2) * c1 + Felt::from_u64(4) * c2 + Felt::from_u64(8) * c3;
+        let result_4_bit =
+            c0 + Felt::from_u64(2) * c1 + Felt::from_u64(4) * c2 + Felt::from_u64(8) * c3;
         let result = prev_result * Felt::from_u64(16) + result_4_bit;
 
         assert_eq!(prev_result, trace[PREV_OUTPUT_COL_IDX][i]);
@@ -178,7 +181,8 @@ fn bitwise_multiple() {
         let c2 = binary_and(trace[A_COL_RANGE.start + 2][i], trace[B_COL_RANGE.start + 2][i]);
         let c3 = binary_and(trace[A_COL_RANGE.start + 3][i], trace[B_COL_RANGE.start + 3][i]);
 
-        let result_4_bit = c0 + Felt::from_u64(2) * c1 + Felt::from_u64(4) * c2 + Felt::from_u64(8) * c3;
+        let result_4_bit =
+            c0 + Felt::from_u64(2) * c1 + Felt::from_u64(4) * c2 + Felt::from_u64(8) * c3;
         let result = prev_result * Felt::from_u64(16) + result_4_bit;
 
         assert_eq!(prev_result, trace[PREV_OUTPUT_COL_IDX][i]);

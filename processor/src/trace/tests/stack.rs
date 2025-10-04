@@ -1,11 +1,9 @@
 use alloc::vec::Vec;
 
 use miden_air::trace::{AUX_TRACE_RAND_ELEMENTS, STACK_AUX_TRACE_OFFSET};
-use vm_core::{PrimeCharacteristicRing, Field};
+use vm_core::{Field, PrimeCharacteristicRing};
 
-use super::{
-    Felt, NUM_RAND_ROWS, ONE, Operation, ZERO, build_trace_from_ops, rand_array,
-};
+use super::{Felt, NUM_RAND_ROWS, ONE, Operation, ZERO, build_trace_from_ops, rand_array};
 use crate::stack::OverflowTableRow;
 
 // CONSTANTS

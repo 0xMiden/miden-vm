@@ -13,8 +13,9 @@ use miden_air::{
         main_trace::MainTrace,
     },
 };
-use miden_core::{Felt, FieldElement, ONE, ZERO};
-use miden_core::{ExtensionField, Felt, ONE, PrimeCharacteristicRing, ZERO, lazy_static};
+use miden_core::{
+    ExtensionField, Felt, FieldElement, ONE, PrimeCharacteristicRing, ZERO, lazy_static,
+};
 
 use crate::{
     chiplets::aux_trace::build_value,

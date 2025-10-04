@@ -1,6 +1,6 @@
-pub mod utils;
-pub mod types;
 mod blake;
+pub mod types;
+pub mod utils;
 pub use blake::prove_blake;
 mod rpo;
 pub use rpo::prove_rpo;

@@ -1,8 +1,6 @@
 use alloc::vec::Vec;
 
-use miden_core::{
-    AdviceMap, Felt, Word,
-    crypto::merkle::MerkleStore,};
+use miden_core::{AdviceMap, Felt, Word, crypto::merkle::MerkleStore};
 use vm_core::{
     AdviceMap, Felt, PrimeCharacteristicRing,
     crypto::{

@@ -18,6 +18,7 @@ use miden_core::{
         OP_BATCH_SIZE,
     },
 };
+use miden_utils_testing::rand::rand_value;
 use rstest::rstest;
 use test_utils::rand::rand_value;
 use vm_core::{
@@ -25,8 +26,6 @@ use vm_core::{
     lazy_static,
     mast::{BasicBlockNode, MastForest, MastNode, MastNodeId, OP_BATCH_SIZE},
 };
-use miden_utils_testing::rand::rand_value;
-use rstest::rstest;
 
 use super::{
     super::{

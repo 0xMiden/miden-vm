@@ -22,19 +22,6 @@ pub use miden_assembly::{
 };
 pub use miden_core::{
     EMPTY_WORD, Felt, FieldElement, ONE, StackInputs, StackOutputs, StarkField, WORD_SIZE, Word,
-}
-#[cfg(not(target_family = "wasm"))]
-use proptest::prelude::{Arbitrary, Strategy};
-use prover::utils::range;
-pub use prover::{MemAdviceProvider, ProvingOptions, prove};
-pub use test_case::test_case;
-pub use verifier::{AcceptableOptions, VerifierError, verify};
-pub use vm_core::{
-    EMPTY_WORD, Felt, ONE, StackInputs, StackOutputs, WORD_SIZE, Word,
-    ZERO,
-    chiplets::hasher::{STATE_WIDTH, hash_elements},
-    stack::MIN_STACK_DEPTH,
-    utils::{IntoBytes, ToElements, group_slice_elements},
 };
 use miden_core::{EventId, ProgramInfo, chiplets::hasher::apply_permutation};
 pub use miden_processor::{
@@ -50,8 +37,22 @@ pub use miden_verifier::{AcceptableOptions, VerifierError, verify};
 pub use pretty_assertions::{assert_eq, assert_ne, assert_str_eq};
 #[cfg(not(target_family = "wasm"))]
 use proptest::prelude::{Arbitrary, Strategy};
+#[cfg(not(target_family = "wasm"))]
+use proptest::prelude::{Arbitrary, Strategy};
+use prover::utils::range;
+pub use prover::{MemAdviceProvider, ProvingOptions, prove};
 pub use test_case::test_case;
-use vm_core::{chiplets::hasher::apply_permutation, BinomialExtensionField, PrimeCharacteristicRing, PrimeField64, ProgramInfo};
+pub use verifier::{AcceptableOptions, VerifierError, verify};
+use vm_core::{
+    BinomialExtensionField, PrimeCharacteristicRing, PrimeField64, ProgramInfo,
+    chiplets::hasher::apply_permutation,
+};
+pub use vm_core::{
+    EMPTY_WORD, Felt, ONE, StackInputs, StackOutputs, WORD_SIZE, Word, ZERO,
+    chiplets::hasher::{STATE_WIDTH, hash_elements},
+    stack::MIN_STACK_DEPTH,
+    utils::{IntoBytes, ToElements, group_slice_elements},
+};
 
 pub mod math {
     pub use winter_prover::math::{

@@ -4,8 +4,8 @@ use alloc::{
 };
 use core::{fmt, ops::RangeInclusive};
 
-use miden_core::DebugOptions;
 use miden_air::RowIndex;
+use miden_core::DebugOptions;
 use vm_core::{DebugOptions, Felt, PrimeField64};
 
 use crate::{DebugHandler, ExecutionError, Felt, ProcessState};

@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
-use paste::paste;
 use miden_core::{Field, PrimeCharacteristicRing, PrimeField64};
+use paste::paste;
 
 use super::{
     super::utils::{split_element, split_u32_into_u16},
@@ -252,10 +252,9 @@ impl Process {
 #[cfg(test)]
 mod tests {
     use miden_air::trace::decoder::NUM_USER_OP_HELPERS;
-    use miden_core::{mast::MastForest, stack::MIN_STACK_DEPTH};
+    use miden_core::{PrimeCharacteristicRing, mast::MastForest, stack::MIN_STACK_DEPTH};
     use miden_utils_testing::rand::rand_value;
     use test_utils::rand::rand_value;
-    use miden_core::{PrimeCharacteristicRing, stack::MIN_STACK_DEPTH};
 
     use super::{
         super::{Felt, Operation},

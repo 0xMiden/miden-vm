@@ -1,30 +1,29 @@
 // RPO-specific prover implementation
 
-use super::types::{Commitments, OpenedValues, Proof};
-use super::utils::{quotient_values, to_row_major, to_row_major_aux};
-use air::Felt;
-use air::ProcessorAir;
+use core::array;
+use std::{vec, vec::Vec};
+
+use air::{Felt, ProcessorAir};
 use miden_crypto::{BinomialExtensionField, hash::rpo::RpoPermutation256};
 use p3_challenger::{CanObserve, CanSample, DuplexChallenger, FieldChallenger};
-use p3_commit::{ExtensionMmcs, Pcs};
+use p3_commit::{ExtensionMmcs, Pcs, PolynomialSpace};
 use p3_dft::Radix2DitParallel;
-use p3_field::coset::TwoAdicMultiplicativeCoset;
-use p3_field::{Field, PrimeCharacteristicRing};
+use p3_field::{Field, PrimeCharacteristicRing, coset::TwoAdicMultiplicativeCoset};
 use p3_fri::{FriParameters, TwoAdicFriPcs};
-use p3_matrix::bitrev::BitReversalPerm;
-use p3_matrix::dense::DenseMatrix;
-use p3_matrix::row_index_mapped::RowIndexMappedView;
+use p3_matrix::{
+    Matrix, bitrev::BitReversalPerm, dense::DenseMatrix, row_index_mapped::RowIndexMappedView,
+};
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_symmetric::{PaddingFreeSponge, TruncatedPermutation};
 use p3_uni_stark::{StarkConfig, StarkGenericConfig};
 use p3_util::{log2_ceil_usize, log2_strict_usize};
 use processor::ExecutionTrace;
-
-use core::array;
-use p3_commit::PolynomialSpace;
-use p3_matrix::Matrix;
-use std::{vec, vec::Vec};
 use tracing::info_span;
+
+use super::{
+    types::{Commitments, OpenedValues, Proof},
+    utils::{quotient_values, to_row_major, to_row_major_aux},
+};
 
 type Challenge = BinomialExtensionField<Felt, 2>;
 type P = RpoPermutation256;

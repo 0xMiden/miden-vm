@@ -1,34 +1,29 @@
 // Keccak-specific prover implementation
 
-use super::types::{Commitments, OpenedValues, Proof};
-use super::utils::{quotient_values, to_row_major, to_row_major_aux};
-use air::Felt;
-use air::ProcessorAir;
-use miden_crypto::BinomialExtensionField;
-use p3_keccak::{Keccak256Hash, KeccakF};
+use std::{vec, vec::Vec};
 
-use p3_challenger::HashChallenger;
-use p3_challenger::SerializingChallenger64;
-use p3_challenger::*;
-use p3_commit::PolynomialSpace;
-use p3_commit::{ExtensionMmcs, Pcs};
+use air::{Felt, ProcessorAir};
+use miden_crypto::BinomialExtensionField;
+use p3_challenger::{HashChallenger, SerializingChallenger64, *};
+use p3_commit::{ExtensionMmcs, Pcs, PolynomialSpace};
 use p3_dft::Radix2DitParallel;
-use p3_field::PrimeCharacteristicRing;
-use p3_field::coset::TwoAdicMultiplicativeCoset;
+use p3_field::{PrimeCharacteristicRing, coset::TwoAdicMultiplicativeCoset};
 use p3_fri::{FriParameters, TwoAdicFriPcs};
-use p3_matrix::Matrix;
-use p3_matrix::bitrev::BitReversalPerm;
-use p3_matrix::dense::DenseMatrix;
-use p3_matrix::row_index_mapped::RowIndexMappedView;
+use p3_keccak::{Keccak256Hash, KeccakF};
+use p3_matrix::{
+    Matrix, bitrev::BitReversalPerm, dense::DenseMatrix, row_index_mapped::RowIndexMappedView,
+};
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_symmetric::{CompressionFunctionFromHasher, PaddingFreeSponge, SerializingHasher};
-use p3_uni_stark::StarkGenericConfig;
-use p3_uni_stark::StarkConfig;
+use p3_uni_stark::{StarkConfig, StarkGenericConfig};
 use p3_util::{log2_ceil_usize, log2_strict_usize};
 use processor::ExecutionTrace;
-use std::vec;
-use std::vec::Vec;
 use tracing::info_span;
+
+use super::{
+    types::{Commitments, OpenedValues, Proof},
+    utils::{quotient_values, to_row_major, to_row_major_aux},
+};
 
 type Val = Felt;
 type Challenge = BinomialExtensionField<Val, 2>;
@@ -57,14 +52,14 @@ pub fn prove_keccak(trace: ExecutionTrace) -> Vec<u8> {
     let degree = trace_row_major.height();
     let log_degree = log2_strict_usize(degree);
 
-        let constraint_degree = 8;
-        let constraint_count = 2;
+    let constraint_degree = 8;
+    let constraint_count = 2;
 
-    /* 
+    /*
     let symbolic_constraints =
         get_symbolic_constraints::<Felt, ProcessorAir>(&air, 0, public_values.len());
 
-    
+
     let constraint_count = symbolic_constraints.len();
     let constraint_degree = symbolic_constraints
         .iter()

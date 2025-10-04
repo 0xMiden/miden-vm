@@ -1,4 +1,3 @@
-use miden_core::WORD_SIZE;
 use miden_core::{PrimeCharacteristicRing, WORD_SIZE};
 
 use super::{ExecutionError, Felt, Process};
@@ -292,9 +291,9 @@ impl Process {
 #[cfg(test)]
 mod tests {
     use miden_core::{
-        ONE, WORD_SIZE, Word, ZERO, assert_matches, mast::MastForest, utils::ToElements,
+        ONE, PrimeCharacteristicRing, WORD_SIZE, Word, ZERO, assert_matches, mast::MastForest,
+        utils::ToElements,
     };
-    use miden_core::{assert_matches, utils::ToElements, PrimeCharacteristicRing, Word, ONE, ZERO};
 
     use super::{
         super::{MIN_STACK_DEPTH, Operation},

@@ -212,8 +212,12 @@ impl Hasher {
     ) -> (Felt, Digest) {
         let addr = self.trace.next_row_addr();
 
-        let root =
-            self.verify_merkle_path(value, path, index.as_canonical_u64(), MerklePathContext::MpVerify);
+        let root = self.verify_merkle_path(
+            value,
+            path,
+            index.as_canonical_u64(),
+            MerklePathContext::MpVerify,
+        );
 
         (addr, root)
     }

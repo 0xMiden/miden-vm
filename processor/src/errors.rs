@@ -1,5 +1,4 @@
-use alloc::{sync::Arc, vec::Vec};
-use alloc::{boxed::Box, string::String};
+use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 use core::error::Error;
 use std::{string::ToString, vec::Vec};
 
@@ -15,11 +14,10 @@ use miden_utils_diagnostics::{Diagnostic, miette};
 use winter_prover::ProverError;
 
 use crate::{
-    BaseHost, EventError, MemoryError,
+    BaseHost, ContextId, EventError, MemoryError,
     host::advice::AdviceError,
     system::{FMP_MAX, FMP_MIN},
 };
-use crate::ContextId;
 
 // TODO(Al)
 fn felts_to_hex(elements: &[Felt]) -> Vec<u8> {

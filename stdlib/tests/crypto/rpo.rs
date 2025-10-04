@@ -1,8 +1,8 @@
 use miden_air::RowIndex;
+use miden_core::PrimeField64;
 use miden_processor::{ExecutionError, ZERO};
 use miden_utils_testing::{build_expected_hash, build_expected_perm, expect_exec_error_matches};
 use processor::ExecutionError;
-use miden_core::PrimeField64;
 use test_utils::{build_expected_hash, build_expected_perm, expect_exec_error_matches};
 
 #[test]

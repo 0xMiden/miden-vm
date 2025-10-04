@@ -1,12 +1,9 @@
 use alloc::vec::Vec;
 
 use miden_air::{RowIndex, trace::main_trace::MainTrace};
-use miden_core::OPCODE_DYNCALL;
-
-use super::{Felt, FieldElement};
 use miden_core::{ExtensionField, OPCODE_DYNCALL, PrimeCharacteristicRing};
 
-use super::{Felt, OverflowTableRow};
+use super::{Felt, FieldElement, OverflowTableRow};
 use crate::{debug::BusDebugger, trace::AuxColumnBuilder};
 
 // AUXILIARY TRACE BUILDER

@@ -1,6 +1,5 @@
-use miden_core::WORD_SIZE;
-use miden_utils_testing::{
-    EMPTY_WORD, Felt, ONE, StarkField, Word, ZERO,};
+use miden_core::{PrimeCharacteristicRing, PrimeField64, WORD_SIZE};
+use miden_utils_testing::{EMPTY_WORD, Felt, ONE, StarkField, Word, ZERO};
 use test_utils::{
     EMPTY_WORD, Felt, ONE, Word, ZERO,
     crypto::{
@@ -8,7 +7,6 @@ use test_utils::{
     },
     felt_slice_to_ints, hash_elements,
 };
-use miden_core::{PrimeCharacteristicRing, PrimeField64};
 
 // TESTS
 // ================================================================================================
@@ -272,7 +270,8 @@ fn test_mmr_unpack() {
 
     let mut mmr_mem_repr: Vec<Felt> = Vec::with_capacity(peaks.len() + 1);
     mmr_mem_repr.extend_from_slice(&[Felt::from_u64(number_of_leaves), ZERO, ZERO, ZERO]);
-    //mmr_mem_repr.extend_from_slice(&[number_of_leaves.try_into().unwrap(), ZERO, ZERO, ZERO]); TODO(Al)
+    //mmr_mem_repr.extend_from_slice(&[number_of_leaves.try_into().unwrap(), ZERO, ZERO, ZERO]);
+    // TODO(Al)
     mmr_mem_repr.extend_from_slice(&peaks.as_slice().concat());
 
     let advice_map: &[(Word, Vec<Felt>)] = &[
@@ -396,8 +395,9 @@ fn test_mmr_unpack_large_mmr() {
 
     let mut mmr_mem_repr: Vec<Felt> = Vec::with_capacity(peaks.len() + 1);
     mmr_mem_repr.extend_from_slice(&[Felt::from_u64(number_of_leaves), ZERO, ZERO, ZERO]);
-    //mmr_mem_repr.extend_from_slice(&[number_of_leaves.try_into().unwrap(), ZERO, ZERO, ZERO]); TODO(Al)
-    mmr_mem_repr.extend_from_slice(&peaks.as_slice().concat()); 
+    //mmr_mem_repr.extend_from_slice(&[number_of_leaves.try_into().unwrap(), ZERO, ZERO, ZERO]);
+    // TODO(Al)
+    mmr_mem_repr.extend_from_slice(&peaks.as_slice().concat());
 
     let advice_map: &[(Word, Vec<Felt>)] = &[
         // Under the MMR key is the number_of_leaves, followed by the MMR peaks, and any padding
@@ -695,8 +695,12 @@ fn test_mmr_large_add_roundtrip() {
     new_peaks.resize(16, Word::default());
     expected_memory.extend(digests_to_ints(&new_peaks));
 
-    let expect_stack: Vec<u64> =
-        new_accumulator.hash_peaks().iter().rev().map(|v| v.as_canonical_u64()).collect();
+    let expect_stack: Vec<u64> = new_accumulator
+        .hash_peaks()
+        .iter()
+        .rev()
+        .map(|v| v.as_canonical_u64())
+        .collect();
 
     let test = build_test!(source, &stack, advice_stack, store, advice_map.iter().cloned());
     test.expect_stack_and_memory(&expect_stack, mmr_ptr, &expected_memory);

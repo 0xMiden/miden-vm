@@ -9,7 +9,6 @@ use miden_air::{
     },
     trace::STACK_TRACE_OFFSET,
 };
-use miden_core::{Operation, ZERO};
 use miden_core::{Operation, PrimeCharacteristicRing, ZERO};
 
 fn enforce_stack_constraint(c: &mut Criterion) {

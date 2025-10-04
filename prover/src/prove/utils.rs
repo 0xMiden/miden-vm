@@ -1,23 +1,21 @@
 // Common helper functions for the prover will live here
 
-use air::trace::{AUX_TRACE_WIDTH, TRACE_WIDTH};
-use air::{Air, ColMatrix, Felt};
-use processor::{ExecutionTrace, ZERO};
-use p3_matrix::dense::RowMajorMatrix;
-use p3_field::ExtensionField;
-use tracing::instrument;
-use p3_uni_stark::{Domain, PackedChallenge, StarkGenericConfig, Val, PackedVal};
-use p3_matrix::Matrix;
-use p3_util::log2_strict_usize;
-use p3_field::{PackedValue, BasedVectorSpace, PrimeCharacteristicRing};
-use tracing::debug_span;
-use std::vec::Vec;
-use std::vec;
+use std::{vec, vec::Vec};
+
+use air::{
+    Air, ColMatrix, Felt,
+    trace::{AUX_TRACE_WIDTH, TRACE_WIDTH},
+};
 use p3_commit::PolynomialSpace;
+use p3_field::{BasedVectorSpace, ExtensionField, PackedValue, PrimeCharacteristicRing};
+use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use p3_maybe_rayon::prelude::*;
+use p3_uni_stark::{Domain, PackedChallenge, PackedVal, StarkGenericConfig, Val};
+use p3_util::log2_strict_usize;
+use processor::{ExecutionTrace, ZERO};
+use tracing::{debug_span, instrument};
 
 use crate::prove::ProverConstraintFolder;
-
 
 #[instrument("naive transposition", skip_all)]
 pub fn to_row_major(trace: &ExecutionTrace) -> RowMajorMatrix<Felt> {

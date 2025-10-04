@@ -1,8 +1,8 @@
 use alloc::{borrow::Cow, string::String};
 use core::{num::IntErrorKind, ops::Range};
-use vm_core::PrimeCharacteristicRing;
 
 use miden_debug_types::{ByteOffset, SourceId, SourceSpan};
+use vm_core::PrimeCharacteristicRing;
 
 use super::{
     BinEncodedValue, BinErrorKind, DocumentationType, HexErrorKind, IntValue, LiteralErrorKind,

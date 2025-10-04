@@ -5,15 +5,18 @@ use miden_assembly_syntax::{
     parser::{IntValue, PushValue},
 };
 use miden_core::{Decorator, Felt, ONE, Operation, WORD_SIZE, ZERO, mast::MastNodeId};
-
-use crate::{Assembler, ProcedureContext, ast::InvokeKind, basic_block_builder::BasicBlockBuilder};
 use miette::miette;
 use vm_core::{
     Decorator, ONE, PrimeCharacteristicRing, WORD_SIZE, ZERO, debuginfo::Spanned, mast::MastNodeId,
 };
 
 use super::{Assembler, BasicBlockBuilder, Felt, Operation, ProcedureContext, ast::InvokeKind};
-use crate::{AssemblyError, Span, ast::Instruction, utils::bound_into_included_u64};
+use crate::{
+    Assembler, AssemblyError, ProcedureContext, Span,
+    ast::{Instruction, InvokeKind},
+    basic_block_builder::BasicBlockBuilder,
+    utils::bound_into_included_u64,
+};
 
 mod adv_ops;
 mod crypto_ops;

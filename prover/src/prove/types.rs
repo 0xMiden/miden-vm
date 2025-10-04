@@ -1,9 +1,10 @@
 // Prover-related proof data types (Proof, Commitments, OpenedValues)
 
-use serde::{Deserialize, Serialize};
+use std::vec::Vec;
+
 use p3_commit::Pcs;
 use p3_uni_stark::StarkGenericConfig;
-use std::vec::Vec;
+use serde::{Deserialize, Serialize};
 
 type Com<SC> = <<SC as StarkGenericConfig>::Pcs as Pcs<
     <SC as StarkGenericConfig>::Challenge,

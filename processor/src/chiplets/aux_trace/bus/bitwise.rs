@@ -1,11 +1,10 @@
 use core::fmt::{Display, Formatter, Result as FmtResult};
+
 use miden_air::{
     RowIndex,
     trace::{chiplets::bitwise::OP_CYCLE_LEN as BITWISE_OP_CYCLE_LEN, main_trace::MainTrace},
 };
-use miden_core::{Felt, FieldElement, ONE, ZERO};
-use miden_core::ExtensionField;
-use miden_core::{Felt, ONE, ZERO};
+use miden_core::{ExtensionField, Felt, FieldElement, ONE, ZERO};
 
 use super::get_op_label;
 use crate::{
