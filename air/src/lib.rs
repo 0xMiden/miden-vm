@@ -11,18 +11,17 @@ use alloc::{borrow::ToOwned, vec::Vec};
 use core::borrow::{Borrow, BorrowMut};
 
 use miden_core::{
-    ExtensionOf, ONE, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
+    ONE, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
     utils::{ByteReader, ByteWriter, Deserializable, Serializable},
 };
 pub use p3_air::{Air, AirBuilder, BaseAir};
 use p3_air::{AirBuilderWithPublicValues, PermutationAirBuilder};
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::Matrix;
-//use serde::{Deserialize, Serialize}; TODO(Al)
-use vm_core::{ProgramInfo, StackInputs, StackOutputs};
+use serde::{Deserialize, Serialize};
 use winter_air::{
-    Air, AirContext, Assertion, EvaluationFrame, ProofOptions as WinterProofOptions, TraceInfo,
-    TransitionConstraintDegree,
+    Air as WinterAir, AirContext, Assertion, EvaluationFrame, ProofOptions as WinterProofOptions,
+    TraceInfo, TransitionConstraintDegree,
 };
 use winter_prover::{
     crypto::{RandomCoin, RandomCoinError},
@@ -35,8 +34,8 @@ mod constraints;
 //use constraints::{chiplets, range};
 
 pub mod trace;
+pub use trace::rows::RowIndex;
 use trace::*;
-pub use trace::{ColMatrix, rows::RowIndex};
 
 mod errors;
 mod options;
@@ -56,7 +55,6 @@ pub use miden_core::{
 };
 pub use options::{ExecutionOptions, ProvingOptions};
 pub use proof::{ExecutionProof, HashFunction};
-use utils::TransitionConstraintRange;
 pub use winter_air::{AuxRandElements, FieldExtension, PartitionOptions};
 
 /// Selects whether to include all existing constraints or only the ones currently encoded in
@@ -419,8 +417,8 @@ impl<AB: AirBuilderWithPublicValues + PermutationAirBuilder> Air<AB> for Process
         let local: &MainTraceCols<AB::Var> = (*local).borrow();
         let next: &MainTraceCols<AB::Var> = (*next).borrow();
 
-        let clk_cur = local.clk;
-        let clk_nxt = next.clk;
+        let clk_cur = local.clk.clone();
+        let clk_nxt = next.clk.clone();
         /*
                let final_stack = local.stack;
 
@@ -435,7 +433,7 @@ impl<AB: AirBuilderWithPublicValues + PermutationAirBuilder> Air<AB> for Process
 
         when_transition.assert_zero(clk_nxt - (clk_cur + AB::Expr::ONE));
 
-        let change_v = next.range[1] - local.range[1];
+        let change_v = next.range[1].clone() - local.range[1].clone();
         when_transition.assert_zero(
             (change_v.clone() - AB::Expr::ONE)
                 * (change_v.clone() - AB::Expr::from_i128(3))

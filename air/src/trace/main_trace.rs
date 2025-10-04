@@ -1,4 +1,3 @@
-#[cfg(any(test, feature = "testing"))]
 use alloc::vec::Vec;
 use core::ops::{Deref, Range};
 

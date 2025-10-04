@@ -1,12 +1,11 @@
 use alloc::{string::ToString, vec::Vec};
 
-use miden_core::crypto::hash::{Blake3_192, Blake3_256, Hasher, Poseidon2, Rpo256, Rpx256};
-use p3_uni_stark::StarkGenericConfig;
-use serde::{Deserialize, Serialize};
-use vm_core::{
-    crypto::hash::{Blake3_192, Blake3_256, Hasher, Rpo256, Rpx256},
+use miden_core::{
+    crypto::hash::{Blake3_192, Blake3_256, Hasher, Poseidon2, Rpo256, Rpx256},
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
+use p3_uni_stark::StarkGenericConfig;
+use serde::{Deserialize, Serialize};
 
 //use winter_air::proof::Proof;
 
@@ -64,26 +63,27 @@ impl ExecutionProof {
 
     // SERIALIZATION / DESERIALIZATION
     // --------------------------------------------------------------------------------------------
-    /*
-       /// Serializes this proof into a vector of bytes.
-       pub fn to_bytes(&self) -> Vec<u8> {
-           let mut bytes = self.proof.to_bytes();
-           assert!(!bytes.is_empty(), "invalid STARK proof");
-           // TODO: ideally we should write hash function into the proof first to avoid reallocations
-           bytes.insert(0, self.hash_fn as u8);
-           bytes
-       }
 
-       /// Reads the source bytes, parsing a new proof instance.
-       pub fn from_bytes(source: &[u8]) -> Result<Self, DeserializationError> {
-           if source.len() < 2 {
-               return Err(DeserializationError::UnexpectedEOF);
-           }
-           let hash_fn = HashFunction::try_from(source[0])?;
-           let proof = Proof::from_bytes(&source[1..])?;
-           Ok(Self::new(proof, hash_fn))
-       }
-    */
+    /// Serializes this proof into a vector of bytes.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = self.proof.to_bytes();
+        assert!(!bytes.is_empty(), "invalid STARK proof");
+        // TODO: ideally we should write hash function into the proof first to avoid reallocations
+        bytes.insert(0, self.hash_fn as u8);
+        bytes
+    }
+
+    /// Reads the source bytes, parsing a new proof instance.
+    pub fn from_bytes(source: &[u8]) -> Result<Self, DeserializationError> {
+        // Question(ZZ): is there a bug here? the hash_fn comes last in the to_bytes function.
+        if source.len() < 2 {
+            return Err(DeserializationError::UnexpectedEOF);
+        }
+        let hash_fn = HashFunction::try_from(source[0])?;
+        let proof = Vec::<u8>::read_from_bytes(&source[1..])?;
+        Ok(Self::new(proof, hash_fn))
+    }
+
     // DESTRUCTOR
     // --------------------------------------------------------------------------------------------
 
@@ -111,6 +111,8 @@ pub enum HashFunction {
     Rpx256 = 0x03,
     /// Keccak hash function with 256-bit output.
     Keccak = 0x04,
+    /// Poseidon hash function with 256-bit output.
+    Poseidon2 = 0x05,
 }
 
 impl Default for HashFunction {
@@ -128,6 +130,7 @@ impl HashFunction {
             HashFunction::Rpo256 => Rpo256::COLLISION_RESISTANCE,
             HashFunction::Rpx256 => Rpx256::COLLISION_RESISTANCE,
             HashFunction::Keccak => 128,
+            HashFunction::Poseidon2 => Poseidon2::COLLISION_RESISTANCE,
         }
     }
 }
@@ -158,6 +161,7 @@ impl TryFrom<&str> for HashFunction {
             "blake3-256" => Ok(Self::Blake3_256),
             "rpo" => Ok(Self::Rpo256),
             "rpx" => Ok(Self::Rpx256),
+            "keccak" => Ok(Self::Keccak),
             "poseidon2" => Ok(Self::Poseidon2),
             _ => Err(super::ExecutionOptionsError::InvalidHashFunction {
                 hash_function: hash_fn_str.to_string(),
@@ -180,7 +184,7 @@ impl Deserializable for HashFunction {
         source.read_u8()?.try_into()
     }
 }
-/*
+
 impl Serializable for ExecutionProof {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         self.proof.write_into(target);
@@ -190,13 +194,12 @@ impl Serializable for ExecutionProof {
 
 impl Deserializable for ExecutionProof {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let proof = Proof::read_from(source)?;
+        let proof = Vec::<u8>::read_from(source)?;
         let hash_fn = HashFunction::read_from(source)?;
 
         Ok(ExecutionProof { proof, hash_fn })
     }
 }
- */
 
 use p3_commit::Pcs;
 
@@ -232,4 +235,20 @@ pub struct OpenedValues<Challenge> {
     pub aux_trace_local: Vec<Challenge>,
     pub aux_trace_next: Vec<Challenge>,
     pub quotient_chunks: Vec<Vec<Challenge>>,
+}
+
+impl<SC: StarkGenericConfig> Serializable for Proof<SC> {
+    fn write_into<W: ByteWriter>(&self, _target: &mut W) {
+        todo!()
+    }
+
+    fn get_size_hint(&self) -> usize {
+        todo!()
+    }
+}
+
+impl<SC: StarkGenericConfig> Deserializable for Proof<SC> {
+    fn read_from<R: ByteReader>(_source: &mut R) -> Result<Self, DeserializationError> {
+        todo!()
+    }
 }
