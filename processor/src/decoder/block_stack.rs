@@ -39,23 +39,22 @@ impl BlockStack {
         }
 
         // determine additional info about the new block based on its parent
-        let (parent_addr, is_loop_body, is_first_child) = match self.blocks.last() {
+        let (parent_addr, is_loop_body) = match self.blocks.last() {
             Some(parent) => match parent.block_type {
                 // if the parent block is a LOOP block, the new block must be a loop body
                 BlockType::Loop(loop_entered) => {
                     debug_assert!(loop_entered, "parent is un-entered loop");
-                    (parent.addr, true, false)
+                    (parent.addr, true)
                 },
-                // if the parent block is a JOIN block, figure out if the new block is the first
-                // or the second child
-                BlockType::Join(first_child_executed) => {
-                    (parent.addr, false, !first_child_executed)
+                // if the parent block is a JOIN block, the new block is a child
+                BlockType::Join(_first_child_executed) => {
+                    (parent.addr, false)
                 },
-                _ => (parent.addr, false, false),
+                _ => (parent.addr, false),
             },
             // if the block stack is empty, a new block is neither a body of a loop nor the first
             // child of a JOIN block; also, we set the parent address to ZERO.
-            None => (ZERO, false, false),
+            None => (ZERO, false),
         };
 
         self.blocks.push(BlockInfo {
@@ -64,7 +63,6 @@ impl BlockStack {
             parent_addr,
             ctx_info,
             is_loop_body,
-            is_first_child,
         });
         parent_addr
     }
@@ -110,8 +108,6 @@ pub struct BlockInfo {
     pub parent_addr: Felt,
     pub ctx_info: Option<ExecutionContextInfo>,
     pub is_loop_body: bool,
-    #[allow(dead_code)] // TODO: remove this filed
-    pub is_first_child: bool,
 }
 
 impl BlockInfo {
