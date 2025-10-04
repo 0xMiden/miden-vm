@@ -59,7 +59,7 @@ impl MastForestMerger {
 
         let decorator_id_mappings = Vec::with_capacity(forests.len());
         let node_id_mappings =
-            forests.iter().map(|f| DenseIdMap::with_capacity(f.nodes().len())).collect();
+            forests.iter().map(|f| DenseIdMap::with_len(f.nodes().len())).collect();
 
         let mut merger = Self {
             node_id_by_hash: BTreeMap::new(),
@@ -164,7 +164,7 @@ impl MastForestMerger {
     }
 
     fn merge_decorators(&mut self, other_forest: &MastForest) -> Result<(), MastForestError> {
-        let mut decorator_id_remapping = DenseIdMap::with_capacity(other_forest.decorators.len());
+        let mut decorator_id_remapping = DenseIdMap::with_len(other_forest.decorators.len());
 
         for (merging_id, merging_decorator) in other_forest.decorators.iter().enumerate() {
             let merging_decorator_hash = merging_decorator.fingerprint();
@@ -245,7 +245,14 @@ impl MastForestMerger {
                 // which has descendants (Call, Loop, Split, ...), then their descendants need to be
                 // in the indices.
                 self.node_id_by_hash.insert(node_fingerprint, new_node_id);
-                let _ = self.hash_by_node_id.push(node_fingerprint);
+                let returned_id = self
+                    .hash_by_node_id
+                    .push(node_fingerprint)
+                    .map_err(|_| MastForestError::TooManyNodes)?;
+                debug_assert_eq!(
+                    returned_id, new_node_id,
+                    "hash_by_node_id push() should return the same node IDs as node_id_by_hash"
+                );
             },
         }
 

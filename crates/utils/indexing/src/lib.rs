@@ -189,14 +189,11 @@ pub struct DenseIdMap<From: Idx, To: Idx> {
 }
 
 impl<From: Idx, To: Idx> DenseIdMap<From, To> {
-    /// Create a new dense ID mapping with the specified capacity.
+    /// Create a new dense ID mapping with the specified length.
     #[inline]
-    pub fn with_capacity(capacity: usize) -> Self {
+    pub fn with_len(length: usize) -> Self {
         Self {
-            inner: IndexVec {
-                raw: vec![None; capacity],
-                _m: PhantomData,
-            },
+            inner: IndexVec { raw: vec![None; length], _m: PhantomData },
         }
     }
 
@@ -204,15 +201,15 @@ impl<From: Idx, To: Idx> DenseIdMap<From, To> {
     ///
     /// # Panics
     ///
-    /// Panics if the source ID is beyond the capacity of this DenseIdMap.
-    /// This DenseIdMap should be created with sufficient capacity to accommodate
+    /// Panics if the source ID is beyond the length of this DenseIdMap.
+    /// This DenseIdMap should be created with sufficient length to accommodate
     /// all expected source IDs.
     #[inline]
     pub fn insert(&mut self, k: From, v: To) {
         let idx = k.to_usize();
-        if idx >= self.inner.len() {
-            panic!("source ID {} exceeds DenseIdMap capacity {}", idx, self.inner.len());
-        }
+        let len = self.len();
+
+        assert!(idx < len, "source ID {idx} exceeds DenseIdMap length {len}");
         self.inner.insert_at(k, Some(v));
     }
 
@@ -305,7 +302,7 @@ mod tests {
 
     #[test]
     fn test_dense_id_map() {
-        let mut map = DenseIdMap::<TestId, TestId2>::with_capacity(2);
+        let mut map = DenseIdMap::<TestId, TestId2>::with_len(2);
         map.insert(TestId::from(0), TestId2::from(10));
         map.insert(TestId::from(1), TestId2::from(11));
 
