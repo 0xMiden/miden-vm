@@ -137,7 +137,7 @@ pub fn generate_advice_inputs(
 
     // 5 ----- FRI  -------------------------------------------------------------------------------
 
-    // read the FRI layer committments as well as remainder polynomial
+    // read the FRI layer commitments as well as remainder polynomial
     let fri_commitments_digests = channel.read_fri_layer_commitments();
     let poly = channel.read_remainder().unwrap();
 

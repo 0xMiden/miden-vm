@@ -112,7 +112,7 @@ macro_rules! build_test_by_mode {
     ($in_debug_mode:expr, $source:expr, $stack_inputs:expr) => {{
         use $crate::SourceManager;
 
-        let stack_inputs: Vec<u64> = $stack_inputs.to_vec();
+        let stack_inputs: ::alloc::vec::Vec<u64> = $stack_inputs.to_vec();
         let stack_inputs = $crate::StackInputs::try_from_ints(stack_inputs).unwrap();
         let advice_inputs = $crate::AdviceInputs::default();
         let name = format!("test{}", line!());
@@ -138,9 +138,9 @@ macro_rules! build_test_by_mode {
     ($in_debug_mode:expr, $source:expr, $stack_inputs:expr, $advice_stack:expr) => {{
         use $crate::SourceManager;
 
-        let stack_inputs: Vec<u64> = $stack_inputs.to_vec();
+        let stack_inputs: ::alloc::vec::Vec<u64> = $stack_inputs.to_vec();
         let stack_inputs = $crate::StackInputs::try_from_ints(stack_inputs).unwrap();
-        let stack_values: Vec<u64> = $advice_stack.to_vec();
+        let stack_values: ::alloc::vec::Vec<u64> = $advice_stack.to_vec();
         let store = $crate::crypto::MerkleStore::new();
         let advice_inputs = $crate::AdviceInputs::default()
             .with_stack_values(stack_values)

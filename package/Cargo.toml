@@ -35,3 +35,7 @@ proptest-derive = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 serde-untagged = { workspace = true, optional = true }
 thiserror.workspace = true
+
+[dev-dependencies]
+miden-serde-test-macros.workspace = true
+serde_json = { workspace = true }

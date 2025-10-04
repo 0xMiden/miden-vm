@@ -3435,8 +3435,9 @@ fn nested_blocks() -> Result<(), Report> {
     // contains the MAST nodes for the kernel after a call to
     // `Assembler::with_kernel_from_module()`.
     let syscall_foo_node_id = {
-        let kernel_foo_node_id =
-            expected_mast_forest_builder.ensure_block(vec![Operation::Add], None).unwrap();
+        let kernel_foo_node_id = expected_mast_forest_builder
+            .ensure_block(vec![Operation::Add], Vec::new())
+            .unwrap();
 
         expected_mast_forest_builder.ensure_syscall(kernel_foo_node_id).unwrap()
     };
@@ -3481,26 +3482,26 @@ fn nested_blocks() -> Result<(), Report> {
 
     // basic block representing foo::bar.baz procedure
     let exec_foo_bar_baz_node_id = expected_mast_forest_builder
-        .ensure_block(vec![Operation::Push(29_u32.into())], None)
+        .ensure_block(vec![Operation::Push(29_u32.into())], Vec::new())
         .unwrap();
 
     let before = expected_mast_forest_builder
-        .ensure_block(vec![Operation::Push(2u32.into())], None)
+        .ensure_block(vec![Operation::Push(2u32.into())], Vec::new())
         .unwrap();
 
     let r#true1 = expected_mast_forest_builder
-        .ensure_block(vec![Operation::Push(3u32.into())], None)
+        .ensure_block(vec![Operation::Push(3u32.into())], Vec::new())
         .unwrap();
     let r#false1 = expected_mast_forest_builder
-        .ensure_block(vec![Operation::Push(5u32.into())], None)
+        .ensure_block(vec![Operation::Push(5u32.into())], Vec::new())
         .unwrap();
     let r#if1 = expected_mast_forest_builder.ensure_split(r#true1, r#false1).unwrap();
 
     let r#true3 = expected_mast_forest_builder
-        .ensure_block(vec![Operation::Push(7u32.into())], None)
+        .ensure_block(vec![Operation::Push(7u32.into())], Vec::new())
         .unwrap();
     let r#false3 = expected_mast_forest_builder
-        .ensure_block(vec![Operation::Push(11u32.into())], None)
+        .ensure_block(vec![Operation::Push(11u32.into())], Vec::new())
         .unwrap();
     let r#true2 = expected_mast_forest_builder.ensure_split(r#true3, r#false3).unwrap();
 
@@ -3512,14 +3513,14 @@ fn nested_blocks() -> Result<(), Report> {
                     Operation::Push(19u32.into()),
                     Operation::Push(23u32.into()),
                 ],
-                None,
+                Vec::new(),
             )
             .unwrap();
 
         expected_mast_forest_builder.ensure_loop(body_node_id).unwrap()
     };
     let push_13_basic_block_id = expected_mast_forest_builder
-        .ensure_block(vec![Operation::Push(13u32.into())], None)
+        .ensure_block(vec![Operation::Push(13u32.into())], Vec::new())
         .unwrap();
 
     let r#false2 = expected_mast_forest_builder
@@ -3705,9 +3706,11 @@ fn duplicate_nodes() {
 
     let mut expected_mast_forest = MastForest::new();
 
-    let mul_basic_block_id = expected_mast_forest.add_block(vec![Operation::Mul], None).unwrap();
+    let mul_basic_block_id =
+        expected_mast_forest.add_block(vec![Operation::Mul], Vec::new()).unwrap();
 
-    let add_basic_block_id = expected_mast_forest.add_block(vec![Operation::Add], None).unwrap();
+    let add_basic_block_id =
+        expected_mast_forest.add_block(vec![Operation::Add], Vec::new()).unwrap();
 
     // inner split: `if.true add else mul end`
     let inner_split_id =

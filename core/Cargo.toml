@@ -17,6 +17,11 @@ edition.workspace = true
 bench = false
 doctest = false
 
+[[bench]]
+name = "mast_forest_merge"
+required-features = ["arbitrary"]
+harness = false
+
 [features]
 default = ["std"]
 std = [
@@ -29,7 +34,6 @@ std = [
 ]
 serde = [
     "dep:serde",
-    "dep:serde_json",
     "miden-crypto/serde",
     "miden-debug-types/serde",
     "winter-math/serde",
@@ -50,13 +54,14 @@ num-traits = { version = "0.2", default-features = false }
 proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }
 serde = { workspace = true, optional = true, features = ["derive"] }
-serde_json = { workspace = true, optional = true }
 thiserror.workspace = true
 winter-math.workspace = true
 winter-utils.workspace = true
 
 [dev-dependencies]
+criterion = { workspace = true }
 insta.workspace = true
 miden-serde-test-macros.workspace = true
 proptest.workspace = true
+serde_json = { workspace = true }
 winter-rand-utils.workspace = true

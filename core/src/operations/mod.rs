@@ -4,7 +4,7 @@ use core::fmt;
 use serde::{Deserialize, Serialize};
 
 mod decorators;
-pub use decorators::{AssemblyOp, DebugOptions, Decorator, DecoratorIdIterator, DecoratorList};
+pub use decorators::{AssemblyOp, DebugOptions, Decorator, DecoratorList};
 use opcode_constants::*;
 
 use crate::{
@@ -283,6 +283,9 @@ pub enum Operation {
     /// Computes the product of two elements in the extension field of degree 2 and pushes the
     /// result back onto the stack as the third and fourth elements. Pushes 0 onto the stack as
     /// the first and second elements.
+    ///
+    /// The extension field is defined as 𝔽ₚ\[x\]/(x² - x + 2), i.e. using the
+    /// irreducible quadratic polynomial x² - x + 2 over the base field.
     Ext2Mul = OPCODE_EXT2MUL,
 
     // ----- u32 operations ----------------------------------------------------------------------

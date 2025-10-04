@@ -8,10 +8,11 @@ use crate::utils::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
 };
 
+#[derive(Debug)]
 pub struct StringTable {
     data: Vec<u8>,
 
-    table: Vec<StringIndex>,
+    table: Vec<StringDataOffset>,
 
     /// This field is used to allocate an `Arc` for any string in `strings` where the decoder
     /// requests a reference-counted string rather than a fresh allocation as a `String`.
@@ -28,7 +29,7 @@ pub struct StringTable {
 }
 
 impl StringTable {
-    pub fn new(table: Vec<StringIndex>, data: Vec<u8>) -> Self {
+    pub fn new(table: Vec<StringDataOffset>, data: Vec<u8>) -> Self {
         let mut refc_strings = Vec::with_capacity(table.len());
         refc_strings.resize(table.len(), RefCell::new(None));
 
@@ -86,7 +87,8 @@ pub struct StringTableBuilder {
 
 impl StringTableBuilder {
     pub fn add_string(&mut self, string: &str) -> StringIndex {
-        if let Some(str_idx) = self.str_to_index.get(&Blake3_256::hash(string.as_bytes())) {
+        let digest = Blake3_256::hash(string.as_bytes());
+        if let Some(str_idx) = self.str_to_index.get(&digest) {
             // return already interned string
             *str_idx
         } else {
@@ -102,7 +104,7 @@ impl StringTableBuilder {
 
             string.write_into(&mut self.strings_data);
             self.table.push(str_offset);
-            self.str_to_index.insert(Blake3_256::hash(string.as_bytes()), str_idx);
+            self.str_to_index.insert(digest, str_idx);
 
             str_idx
         }

@@ -1,5 +1,5 @@
-use miden_core::Word;
-use miden_processor::{AdviceInputs, ContextId, DefaultHost, Program};
+use miden_core::{Word, assert_matches};
+use miden_processor::{AdviceInputs, ContextId, DefaultHost, ExecutionError, Program};
 use miden_utils_testing::{
     ExecutionOptions, ONE, Process, StackInputs, ZERO, build_expected_hash, build_expected_perm,
     felt_slice_to_ints,
@@ -234,4 +234,80 @@ fn test_pipe_preimage_to_memory_invalid_preimage() {
     advice_stack.extend(data);
     let res = build_test!(three_words, operand_stack, &advice_stack).execute();
     assert!(res.is_err());
+}
+
+#[test]
+fn test_pipe_double_words_preimage_to_memory() {
+    // Word-aligned address, as required by `pipe_double_words_preimage_to_memory`.
+    let mem_addr = 1000;
+    let four_words = format!(
+        "use.std::mem
+
+        begin
+            adv_push.4 # push commitment to stack
+            push.{mem_addr}    # target address
+            push.4     # number of words
+
+            exec.mem::pipe_double_words_preimage_to_memory
+            swap drop
+        end"
+    );
+
+    let operand_stack = &[];
+    let data = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+    let mut advice_stack = felt_slice_to_ints(&build_expected_hash(data));
+    advice_stack.reverse();
+    advice_stack.extend(data);
+    build_test!(four_words, operand_stack, &advice_stack).expect_stack_and_memory(
+        &[mem_addr + (4u64 * 4u64)],
+        mem_addr as u32,
+        data,
+    );
+}
+
+#[test]
+fn test_pipe_double_words_preimage_to_memory_invalid_preimage() {
+    let four_words = "
+    use.std::mem
+
+    begin
+        adv_push.4  # push commitment to stack
+        push.1000   # target address
+        push.4      # number of words
+
+        exec.mem::pipe_double_words_preimage_to_memory
+    end
+    ";
+
+    let operand_stack = &[];
+    let data = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+    let mut advice_stack = felt_slice_to_ints(&build_expected_hash(data));
+    advice_stack.reverse();
+    advice_stack[0] += 1; // corrupt the expected hash
+    advice_stack.extend(data);
+    let execution_result = build_test!(four_words, operand_stack, &advice_stack).execute();
+    assert_matches!(execution_result, Err(ExecutionError::FailedAssertion { .. }));
+}
+
+#[test]
+fn test_pipe_double_words_preimage_to_memory_invalid_count() {
+    let three_words = "
+    use.std::mem
+
+    begin
+        adv_push.4  # push commitment to stack
+        push.1000   # target address
+        push.3      # number of words
+
+        exec.mem::pipe_double_words_preimage_to_memory
+    end
+    ";
+
+    let operand_stack = &[];
+    let data = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+    let mut advice_stack = felt_slice_to_ints(&build_expected_hash(data));
+    advice_stack.reverse();
+    advice_stack.extend(data);
+    let execution_result = build_test!(three_words, operand_stack, &advice_stack).execute();
+    assert_matches!(execution_result, Err(ExecutionError::FailedAssertion { .. }));
 }

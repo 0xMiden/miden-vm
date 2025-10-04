@@ -395,7 +395,7 @@ impl ConstraintQueries {
 // ================================================================================================
 
 /// Takes a set of positions, query values of a trace at these positions and a Merkle batch proof
-/// against a committment to this trace, and outputs a partial Merkle tree with individual Merkle
+/// against a commitment to this trace, and outputs a partial Merkle tree with individual Merkle
 /// paths for each position as well as a key-value map mapping the digests of the query values
 /// (i.e. Merkle tree leaves) to their corresponding query values.
 pub fn unbatch_to_partial_mt(

@@ -52,6 +52,7 @@ winter-prover.workspace = true
 [dev-dependencies]
 miden-assembly.workspace = true
 miden-utils-testing.workspace = true
+insta.workspace = true
 logtest = { version = "2.0", default-features = false }
 pretty_assertions = "1.4"
 rstest = { version = "0.26" }
