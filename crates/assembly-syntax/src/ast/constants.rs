@@ -3,6 +3,7 @@ use core::fmt;
 
 use miden_core::FieldElement;
 use miden_debug_types::{SourceSpan, Span, Spanned};
+use vm_core::{PrimeCharacteristicRing, PrimeField64};
 
 use super::DocString;
 use crate::{

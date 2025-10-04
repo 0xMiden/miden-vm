@@ -7,7 +7,7 @@ use super::{
     super::chiplets::init_state_from_words, ExecutionTrace, Felt, FieldElement, NUM_RAND_ROWS,
     Process, Trace,
 };
-use crate::{AdviceInputs, DefaultHost, ExecutionOptions, StackInputs};
+use crate::{AdviceInputs, DefaultHost, ExecutionOptions, MemAdviceProvider, StackInputs};
 
 mod chiplets;
 mod decoder;

@@ -1,9 +1,13 @@
+use vm_core::{PrimeCharacteristicRing, lazy_static};
+
 use super::{ExecutionError, Felt, Process};
 
 // EXTENSION FIELD OPERATIONS
 // ================================================================================================
 
-const TWO: Felt = Felt::new(2);
+lazy_static! {
+    static ref SEVEN: Felt = Felt::from_u64(7);
+}
 
 impl Process {
     // ARITHMETIC OPERATIONS
@@ -17,8 +21,10 @@ impl Process {
         let [a0, a1, b0, b1] = self.stack.get_word(0).into();
         self.stack.set(0, b1);
         self.stack.set(1, b0);
-        self.stack.set(2, (b0 + b1) * (a1 + a0) - b0 * a0);
-        self.stack.set(3, b0 * a0 - TWO * b1 * a1);
+        //self.stack.set(2, (b0 + b1) * (a1 + a0) - b0 * a0);
+        //self.stack.set(3, b0 * a0 - TWO * b1 * a1);
+        self.stack.set(2, a0 * b1 + a1 * b0);
+        self.stack.set(3, a0 * b0 + *SEVEN * a1 * b1);
         self.stack.copy_state(4);
         Ok(())
     }
@@ -31,6 +37,9 @@ impl Process {
 mod tests {
     use miden_core::{Operation, QuadFelt, ZERO, mast::MastForest};
     use miden_utils_testing::rand::rand_value;
+    type QuadFelt = BinomialExtensionField<Felt, 2>;
+    use test_utils::rand::rand_value;
+    use vm_core::BinomialExtensionField;
 
     use super::*;
     use crate::{DefaultHost, StackInputs, operations::MIN_STACK_DEPTH};
@@ -41,7 +50,7 @@ mod tests {
     #[test]
     fn op_ext2mul() {
         // initialize the stack with a few values
-        let [a0, a1, b0, b1] = [rand_value(); 4];
+        let [a0, a1, b0, b1] = rand_value();
 
         let stack = StackInputs::new(vec![a0, a1, b0, b1]).expect("inputs lenght too long");
         let mut host = DefaultHost::default();

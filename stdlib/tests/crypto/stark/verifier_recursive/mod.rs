@@ -11,6 +11,15 @@ use winter_air::{
     Air,
     proof::{Proof, merge_ood_evaluations},
 };
+//use miden_air::ProcessorAir;
+use processor::crypto::RpoRandomCoin;
+use test_utils::{
+    VerifierError,
+    crypto::{MerkleStore, RandomCoin, Rpo256, RpoDigest},
+    math::{FieldElement, ToElements},
+};
+use vm_core::{BinomialExtensionField, Felt};
+use winter_air::{Air, proof::Proof};
 use winter_fri::VerifierChannel as FriVerifierChannel;
 
 mod channel;

@@ -15,12 +15,12 @@ edition.workspace = true
 [features]
 default = ["std"]
 std = [
-    "miden-assembly/std",
-    "miden-core/std",
-    "miden-processor/std",
-    "miden-prover/std",
-    "miden-verifier/std",
-    "winter-prover/std",
+  "miden-assembly/std",
+  "miden-core/std",
+  "miden-processor/std",
+  "miden-prover/std",
+  "miden-verifier/std",
+  "winter-prover/std",
 ]
 
 [dependencies]
@@ -36,7 +36,7 @@ winter-prover.workspace = true
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 pretty_assertions = { version = "1.4", default-features = false, features = [
-    "alloc",
+  "alloc",
 ] }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]

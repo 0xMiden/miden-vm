@@ -1,6 +1,7 @@
-use alloc::vec::Vec;
+use alloc::{collections::BTreeMap, vec::Vec};
 
 use miden_air::RowIndex;
+use miden_core::{ExtensionField, PrimeField64};
 
 use super::{Felt, ZERO};
 

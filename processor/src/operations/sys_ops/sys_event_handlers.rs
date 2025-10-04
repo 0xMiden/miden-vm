@@ -1,7 +1,12 @@
 use alloc::vec::Vec;
 
 use miden_core::{
-    Felt, FieldElement, QuadFelt, WORD_SIZE, Word, ZERO, crypto::hash::Rpo256,
+    Felt, Field, FieldElement, PrimeCharacteristicRing, PrimeField64, QuadFelt, WORD_SIZE, Word,
+    ZERO,
+    crypto::{
+        hash::{Rpo256, RpoDigest},
+        merkle::{EmptySubtreeRoots, SMT_DEPTH, Smt},
+    },
     sys_events::SystemEvent,
 };
 
@@ -336,11 +341,11 @@ fn push_ext2_inv_result(
     let coef0 = process.get_stack_item(2);
     let coef1 = process.get_stack_item(1);
 
-    let element = QuadFelt::new(coef0, coef1);
+    let element = QuadFelt::new_complex(coef0, coef1);
     if element == QuadFelt::ZERO {
         return Err(ExecutionError::divide_by_zero(process.clk(), err_ctx));
     }
-    let result = element.inv().to_base_elements();
+    let result = element.inverse().to_array();
 
     process.advice_provider_mut().push_stack(result[1]);
     process.advice_provider_mut().push_stack(result[0]);
@@ -443,7 +448,7 @@ fn push_transformed_stack_top(
 ) -> Result<(), ExecutionError> {
     let stack_top = process.get_stack_item(1);
     let stack_top: u32 = stack_top
-        .as_int()
+        .as_canonical_u64()
         .try_into()
         .map_err(|_| ExecutionError::not_u32_value(stack_top, ZERO, err_ctx))?;
     let transformed_stack_top = f(stack_top);

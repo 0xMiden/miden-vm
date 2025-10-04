@@ -1,7 +1,7 @@
 use alloc::{sync::Arc, vec::Vec};
 use core::fmt;
 
-use miden_crypto::{Felt, WORD_SIZE, Word};
+use miden_crypto::{Felt, PrimeCharacteristicRing, WORD_SIZE, Word};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use winter_math::FieldElement;

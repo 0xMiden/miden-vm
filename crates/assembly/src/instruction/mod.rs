@@ -5,8 +5,18 @@ use miden_assembly_syntax::{
     parser::{IntValue, PushValue},
 };
 use miden_core::{Decorator, Felt, ONE, Operation, WORD_SIZE, ZERO, mast::MastNodeId};
+use miette::miette;
+use vm_core::{
+    Decorator, ONE, PrimeCharacteristicRing, WORD_SIZE, ZERO, debuginfo::Spanned, mast::MastNodeId,
+};
 
-use crate::{Assembler, ProcedureContext, ast::InvokeKind, basic_block_builder::BasicBlockBuilder};
+use super::{Assembler, BasicBlockBuilder, Felt, Operation, ProcedureContext, ast::InvokeKind};
+use crate::{
+    Assembler, AssemblyError, ProcedureContext, Span,
+    ast::{Instruction, InvokeKind},
+    basic_block_builder::BasicBlockBuilder,
+    utils::bound_into_included_u64,
+};
 
 mod adv_ops;
 mod crypto_ops;
@@ -627,7 +637,7 @@ fn push_u32_value(span_builder: &mut BasicBlockBuilder, value: u32) {
         span_builder.push_op(Pad);
         span_builder.push_op(Incr);
     } else {
-        span_builder.push_op(Push(Felt::from(value)));
+        span_builder.push_op(Push(Felt::from_u32(value)));
     }
 }
 

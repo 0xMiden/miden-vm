@@ -1,5 +1,6 @@
 use alloc::vec::Vec;
 
+use miden_crypto::PrimeCharacteristicRing;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 

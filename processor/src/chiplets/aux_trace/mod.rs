@@ -2,6 +2,7 @@ use alloc::vec::Vec;
 
 use miden_air::trace::main_trace::MainTrace;
 use miden_core::Kernel;
+use vm_core::{ExtensionField, Kernel};
 use wiring_bus::WiringBusBuilder;
 
 use super::{super::trace::AuxColumnBuilder, Felt, FieldElement, ace::AceHints};
@@ -43,7 +44,7 @@ impl AuxTraceBuilder {
     ///    - a virtual table for the sibling table used by the hasher chiplet,
     ///    - a bus between the memory chiplet and the ACE chiplet.
     /// 3. A column used as a bus to wire the gates of the ACE chiplet.
-    pub fn build_aux_columns<E: FieldElement<BaseField = Felt>>(
+    pub fn build_aux_columns<E: ExtensionField<Felt>>(
         &self,
         main_trace: &MainTrace,
         rand_elements: &[E],

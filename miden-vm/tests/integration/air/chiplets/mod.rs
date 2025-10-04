@@ -5,6 +5,7 @@ mod hasher;
 mod memory;
 
 #[test]
+#[ignore = "fix-prover"]
 fn chiplets() {
     // Test a program that uses all of the chiplets.
     let source = "

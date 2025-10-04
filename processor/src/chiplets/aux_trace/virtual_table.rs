@@ -69,50 +69,50 @@ where
 /// computing the new Merkle root.
 fn chiplets_vtable_remove_sibling<E>(main_trace: &MainTrace, alphas: &[E], row: RowIndex) -> E
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     let f_mu: bool = main_trace.f_mu(row);
     let f_mua: bool = main_trace.f_mua(row);
 
     if f_mu {
         let index = main_trace.chiplet_node_index(row);
-        let lsb = index.as_int() & 1;
+        let lsb = index.as_canonical_u64() & 1;
         if lsb == 0 {
             let sibling = &main_trace.chiplet_hasher_state(row)[DIGEST_RANGE.end..];
             alphas[0]
-                + alphas[3].mul_base(index)
-                + alphas[12].mul_base(sibling[0])
-                + alphas[13].mul_base(sibling[1])
-                + alphas[14].mul_base(sibling[2])
-                + alphas[15].mul_base(sibling[3])
+                + alphas[3] * index
+                + alphas[12] * sibling[0]
+                + alphas[13] * sibling[1]
+                + alphas[14] * sibling[2]
+                + alphas[15] * sibling[3]
         } else {
             let sibling = &main_trace.chiplet_hasher_state(row)[DIGEST_RANGE];
             alphas[0]
-                + alphas[3].mul_base(index)
-                + alphas[8].mul_base(sibling[0])
-                + alphas[9].mul_base(sibling[1])
-                + alphas[10].mul_base(sibling[2])
-                + alphas[11].mul_base(sibling[3])
+                + alphas[3] * index
+                + alphas[8] * sibling[0]
+                + alphas[9] * sibling[1]
+                + alphas[10] * sibling[2]
+                + alphas[11] * sibling[3]
         }
     } else if f_mua {
         let index = main_trace.chiplet_node_index(row);
-        let lsb = index.as_int() & 1;
+        let lsb = index.as_canonical_u64() & 1;
         if lsb == 0 {
             let sibling = &main_trace.chiplet_hasher_state(row + 1)[DIGEST_RANGE.end..];
             alphas[0]
-                + alphas[3].mul_base(index)
-                + alphas[12].mul_base(sibling[0])
-                + alphas[13].mul_base(sibling[1])
-                + alphas[14].mul_base(sibling[2])
-                + alphas[15].mul_base(sibling[3])
+                + alphas[3] * index
+                + alphas[12] * sibling[0]
+                + alphas[13] * sibling[1]
+                + alphas[14] * sibling[2]
+                + alphas[15] * sibling[3]
         } else {
             let sibling = &main_trace.chiplet_hasher_state(row + 1)[DIGEST_RANGE];
             alphas[0]
-                + alphas[3].mul_base(index)
-                + alphas[8].mul_base(sibling[0])
-                + alphas[9].mul_base(sibling[1])
-                + alphas[10].mul_base(sibling[2])
-                + alphas[11].mul_base(sibling[3])
+                + alphas[3] * index
+                + alphas[8] * sibling[0]
+                + alphas[9] * sibling[1]
+                + alphas[10] * sibling[2]
+                + alphas[11] * sibling[3]
         }
     } else {
         E::ONE
@@ -126,50 +126,50 @@ where
 /// computing the old Merkle root.
 fn chiplets_vtable_add_sibling<E>(main_trace: &MainTrace, alphas: &[E], row: RowIndex) -> E
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     let f_mv: bool = main_trace.f_mv(row);
     let f_mva: bool = main_trace.f_mva(row);
 
     if f_mv {
         let index = main_trace.chiplet_node_index(row);
-        let lsb = index.as_int() & 1;
+        let lsb = index.as_canonical_u64() & 1;
         if lsb == 0 {
             let sibling = &main_trace.chiplet_hasher_state(row)[DIGEST_RANGE.end..];
             alphas[0]
-                + alphas[3].mul_base(index)
-                + alphas[12].mul_base(sibling[0])
-                + alphas[13].mul_base(sibling[1])
-                + alphas[14].mul_base(sibling[2])
-                + alphas[15].mul_base(sibling[3])
+                + alphas[3] * index
+                + alphas[12] * sibling[0]
+                + alphas[13] * sibling[1]
+                + alphas[14] * sibling[2]
+                + alphas[15] * sibling[3]
         } else {
             let sibling = &main_trace.chiplet_hasher_state(row)[DIGEST_RANGE];
             alphas[0]
-                + alphas[3].mul_base(index)
-                + alphas[8].mul_base(sibling[0])
-                + alphas[9].mul_base(sibling[1])
-                + alphas[10].mul_base(sibling[2])
-                + alphas[11].mul_base(sibling[3])
+                + alphas[3] * index
+                + alphas[8] * sibling[0]
+                + alphas[9] * sibling[1]
+                + alphas[10] * sibling[2]
+                + alphas[11] * sibling[3]
         }
     } else if f_mva {
         let index = main_trace.chiplet_node_index(row);
-        let lsb = index.as_int() & 1;
+        let lsb = index.as_canonical_u64() & 1;
         if lsb == 0 {
             let sibling = &main_trace.chiplet_hasher_state(row + 1)[DIGEST_RANGE.end..];
             alphas[0]
-                + alphas[3].mul_base(index)
-                + alphas[12].mul_base(sibling[0])
-                + alphas[13].mul_base(sibling[1])
-                + alphas[14].mul_base(sibling[2])
-                + alphas[15].mul_base(sibling[3])
+                + alphas[3] * index
+                + alphas[12] * sibling[0]
+                + alphas[13] * sibling[1]
+                + alphas[14] * sibling[2]
+                + alphas[15] * sibling[3]
         } else {
             let sibling = &main_trace.chiplet_hasher_state(row + 1)[DIGEST_RANGE];
             alphas[0]
-                + alphas[3].mul_base(index)
-                + alphas[8].mul_base(sibling[0])
-                + alphas[9].mul_base(sibling[1])
-                + alphas[10].mul_base(sibling[2])
-                + alphas[11].mul_base(sibling[3])
+                + alphas[3] * index
+                + alphas[8] * sibling[0]
+                + alphas[9] * sibling[1]
+                + alphas[10] * sibling[2]
+                + alphas[11] * sibling[3]
         }
     } else {
         E::ONE

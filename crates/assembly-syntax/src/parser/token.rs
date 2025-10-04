@@ -7,6 +7,7 @@ use miden_core::{
 };
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+use vm_core::{Felt, PrimeField64};
 
 // DOCUMENTATION TYPE
 // ================================================================================================

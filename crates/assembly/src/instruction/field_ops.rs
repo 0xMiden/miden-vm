@@ -4,12 +4,17 @@ use miden_assembly_syntax::{
     diagnostics::{RelatedError, RelatedLabel, Report},
 };
 use miden_core::{FieldElement, Operation::*, sys_events::SystemEvent};
+use vm_core::{Operation::*, PrimeCharacteristicRing, PrimeField64, sys_events::SystemEvent};
 
-use super::BasicBlockBuilder;
-use crate::{MAX_EXP_BITS, ONE, ProcedureContext, ZERO};
+use super::{BasicBlockBuilder, validate_param};
+use crate::{
+    AssemblyError, Felt, MAX_EXP_BITS, ONE, ProcedureContext, Span, ZERO,
+    assembler::ProcedureContext,
+    diagnostics::{RelatedError, Report},
+};
 
 /// Field element representing TWO in the base field of the VM.
-const TWO: Felt = Felt::new(2);
+const TWO: Felt = Felt::TWO;
 
 // ASSERTIONS
 // ================================================================================================
@@ -106,7 +111,7 @@ pub fn div_imm(
     } else if imm == ONE {
         span_builder.push_op(Noop);
     } else {
-        span_builder.push_ops([Push(imm.into_inner().inv()), Mul]);
+        span_builder.push_ops([Push(ONE / imm.into_inner()), Mul]);
     }
     Ok(())
 }
@@ -127,7 +132,7 @@ pub fn pow2(span_builder: &mut BasicBlockBuilder) {
 /// VM cycles: 16 cycles
 pub fn append_pow2_op(span_builder: &mut BasicBlockBuilder) {
     // push base 2 onto the stack: [exp, ...] -> [2, exp, ...]
-    span_builder.push_op(Push(2_u8.into()));
+    span_builder.push_op(Push(Felt::TWO));
     // introduce initial value of acc onto the stack: [2, exp, ...] -> [1, 2, exp, ...]
     span_builder.push_ops([Pad, Incr]);
     // arrange the top of the stack for EXPACC operation: [1, 2, exp, ...] -> [0, 2, 1, exp, ...]
@@ -204,7 +209,7 @@ pub fn exp_imm(
         Ok(())
     } else {
         // compute the bits length of the exponent
-        let num_pow_bits = (64 - pow.as_int().leading_zeros()) as u8;
+        let num_pow_bits = (64 - pow.as_canonical_u64().leading_zeros()) as u8;
 
         // pushing the exponent onto the stack.
         span_builder.push_op(Push(pow));

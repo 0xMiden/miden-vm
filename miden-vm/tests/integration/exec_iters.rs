@@ -2,6 +2,9 @@ use miden_core::{AssemblyOp, Operation};
 use miden_debug_types::Location;
 use miden_processor::{AsmOpInfo, ContextId, RowIndex, VmState};
 use miden_utils_testing::{Felt, ONE, ToElements, assert_eq, build_debug_test};
+use processor::{AsmOpInfo, ContextId, RowIndex, VmState};
+use test_utils::{Felt, ONE, ToElements, assert_eq, build_debug_test};
+use vm_core::{AssemblyOp, Operation, PrimeCharacteristicRing, debuginfo::Location};
 
 // EXEC ITER TESTS
 // =================================================================
@@ -18,7 +21,7 @@ fn test_exec_iter() {
     let test = build_debug_test!(source, &init_stack);
     let path = test.source.uri();
     let traces = test.execute_iter();
-    let fmp = Felt::new(2u64.pow(30));
+    let fmp = Felt::from_u64(2u64.pow(30));
     let next_fmp = fmp + ONE;
     // TODO: double check this value
     let mem = vec![(1u32.into(), Felt::from(13_u32))];
@@ -199,7 +202,7 @@ fn test_exec_iter() {
         VmState {
             clk: RowIndex::from(10),
             ctx: ContextId::root(),
-            op: Some(Operation::Push(Felt::new(17))),
+            op: Some(Operation::Push(Felt::from_u64(17))),
             asmop: Some(AsmOpInfo::new(
                 AssemblyOp::new(
                     push17_loc,
@@ -335,7 +338,7 @@ fn test_exec_iter() {
         VmState {
             clk: RowIndex::from(20),
             ctx: ContextId::root(),
-            op: Some(Operation::Push(Felt::new(18446744069414584320))),
+            op: Some(Operation::Push(Felt::from_u64(18446744069414584320))),
             asmop: None,
             stack: [18446744069414584320, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 0, 0]
                 .to_elements(),

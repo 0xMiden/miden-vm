@@ -25,8 +25,8 @@ impl ProvingOptions {
         8,
         16,
         FieldExtension::Quadratic,
-        8,
-        255,
+        2,
+        127,
         BatchingMethod::Algebraic,
         BatchingMethod::Algebraic,
     );
@@ -37,8 +37,8 @@ impl ProvingOptions {
         16,
         21,
         FieldExtension::Cubic,
-        8,
-        255,
+        2,
+        127,
         BatchingMethod::Algebraic,
         BatchingMethod::Algebraic,
     );
@@ -101,7 +101,9 @@ impl ProvingOptions {
     /// settings that are well-suited for recursive verification.
     pub fn with_96_bit_security(hash_fn: HashFunction) -> Self {
         let proof_options = match hash_fn {
-            HashFunction::Blake3_192 | HashFunction::Blake3_256 => Self::REGULAR_96_BITS,
+            HashFunction::Blake3_192 | HashFunction::Blake3_256 | HashFunction::Keccak => {
+                Self::REGULAR_96_BITS
+            },
             HashFunction::Rpo256 | HashFunction::Rpx256 | HashFunction::Poseidon2 => {
                 Self::RECURSIVE_96_BITS
             },
@@ -120,7 +122,9 @@ impl ProvingOptions {
     /// settings that are well-suited for recursive verification.
     pub fn with_128_bit_security(hash_fn: HashFunction) -> Self {
         let proof_options = match hash_fn {
-            HashFunction::Blake3_192 | HashFunction::Blake3_256 => Self::REGULAR_128_BITS,
+            HashFunction::Blake3_192 | HashFunction::Blake3_256 | HashFunction::Keccak => {
+                Self::REGULAR_128_BITS
+            },
             HashFunction::Rpo256 | HashFunction::Rpx256 | HashFunction::Poseidon2 => {
                 Self::RECURSIVE_128_BITS
             },

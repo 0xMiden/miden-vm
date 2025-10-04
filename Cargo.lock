@@ -37,6 +37,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "allocator-api2"
+version = "0.2.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
+
+[[package]]
 name = "anes"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -181,6 +187,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "55248b47b0caf0546f7988906588779981c43bb1bc9d0c44087278f80cdb44ba"
 
 [[package]]
+name = "bincode"
+version = "1.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1f45e9417d87227c7a56d22e471c6206462cba514c7590c09aff4cf6d1ddcad"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "bit-set"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -254,9 +269,9 @@ checksum = "37b2a672a2cb129a2e41c10b1224bb368f9f37a2b16b612598138befd7b37eb5"
 
 [[package]]
 name = "cc"
-version = "1.2.39"
+version = "1.2.40"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e1354349954c6fc9cb0deab020f27f783cf0b604e8bb754dc4658ecf0d29c35f"
+checksum = "e1d05d92f4b1fd76aad469d46cdd858ca761576082cd37df81416691e50199fb"
 dependencies = [
  "find-msvc-tools",
  "jobserver",
@@ -542,6 +557,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "curve25519-dalek"
+version = "4.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "97fb8b7c4503de7d6ae7b42ab72a5a59857b4c937ec27a3d4539dba95b5ab2be"
+dependencies = [
+ "cfg-if",
+ "cpufeatures",
+ "curve25519-dalek-derive",
+ "digest",
+ "fiat-crypto",
+ "rustc_version 0.4.1",
+ "subtle",
+ "zeroize",
+]
+
+[[package]]
+name = "curve25519-dalek-derive"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f46882e17999c6cc590af592290432be3bce0428cb0d5f8b6715e4dc7b383eb3"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.106",
+]
+
+[[package]]
 name = "der"
 version = "0.7.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -619,6 +661,30 @@ dependencies = [
  "rfc6979",
  "signature",
  "spki",
+]
+
+[[package]]
+name = "ed25519"
+version = "2.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "115531babc129696a58c64a4fef0a8bf9e9698629fb97e9e40767d235cfbcd53"
+dependencies = [
+ "pkcs8",
+ "signature",
+]
+
+[[package]]
+name = "ed25519-dalek"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "70e796c081cee67dc755e1a36a0a172b897fab85fc3f6bc48307991f64e4eca9"
+dependencies = [
+ "curve25519-dalek",
+ "ed25519",
+ "serde",
+ "sha2",
+ "subtle",
+ "zeroize",
 ]
 
 [[package]]
@@ -761,10 +827,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "find-msvc-tools"
-version = "0.1.2"
+name = "fiat-crypto"
+version = "0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ced73b1dacfc750a6db6c0a0c3a3853c8b41997e2e2c563dc90804ae6867959"
+checksum = "28dea519a9695b9977216879a3ebfddf92f1c08c05d984f8996aecd6ecdc811d"
+
+[[package]]
+name = "find-msvc-tools"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0399f9d26e5191ce32c498bebd31e7a3ceabc2745f0ac54af3f335126c3f24b3"
 
 [[package]]
 name = "fixedbitset"
@@ -792,6 +864,12 @@ dependencies = [
  "nanorand",
  "spin",
 ]
+
+[[package]]
+name = "foldhash"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
 
 [[package]]
 name = "foreign-types"
@@ -994,6 +1072,19 @@ dependencies = [
 
 [[package]]
 name = "hashbrown"
+version = "0.15.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
+dependencies = [
+ "allocator-api2",
+ "equivalent",
+ "foldhash",
+ "rayon",
+ "serde",
+]
+
+[[package]]
+name = "hashbrown"
 version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5419bdc4f6a9207fbeba6d11b604d481addf78ecd10c11ad51e76c2f6482748d"
@@ -1041,7 +1132,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4b0f83760fb341a774ed326568e19f5a863af4a952def8c39f9ab92fd95b88e5"
 dependencies = [
  "equivalent",
- "hashbrown",
+ "hashbrown 0.16.0",
 ]
 
 [[package]]
@@ -1086,6 +1177,15 @@ name = "is_terminal_polyfill"
 version = "1.70.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7943c866cc5cd64cbc25b2e01621d07fa8eb2a1a23160ee81ce38704e97b8ecf"
+
+[[package]]
+name = "itertools"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba291022dbbd398a455acf126c1e341954079855bc60dfdda641363bd6922569"
+dependencies = [
+ "either",
+]
 
 [[package]]
 name = "itertools"
@@ -1234,11 +1334,10 @@ checksum = "d26c52dbd32dccf2d10cac7725f8eae5296885fb5703b261f7d0a0739ec807ab"
 
 [[package]]
 name = "lock_api"
-version = "0.4.13"
+version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "96936507f153605bddfcda068dd804796c84324ed2510809e5b2a624c81da765"
+checksum = "224399e74b87b5f3557511d98dff8b14089b3dadafcab6bb93eab67d3aace965"
 dependencies = [
- "autocfg",
  "scopeguard",
 ]
 
@@ -1317,9 +1416,16 @@ dependencies = [
 name = "miden-air"
 version = "0.19.0"
 dependencies = [
+ "bincode",
  "criterion",
  "miden-core",
+ "p3-air",
+ "p3-commit",
+ "p3-field",
+ "p3-matrix",
+ "p3-uni-stark",
  "proptest",
+ "serde",
  "thiserror",
  "winter-air",
  "winter-prover",
@@ -1376,48 +1482,76 @@ dependencies = [
  "criterion",
  "enum_dispatch",
  "insta",
- "miden-crypto",
+ "lazy_static",
+ "miden-crypto 0.18.0",
  "miden-debug-types",
  "miden-formatting",
  "miden-serde-test-macros",
  "num-derive",
  "num-traits",
+ "parking_lot",
  "proptest",
  "proptest-derive",
  "serde",
  "serde_json",
  "thiserror",
- "winter-math",
+ "winter-math 0.13.1",
  "winter-rand-utils",
- "winter-utils",
+ "winter-utils 0.13.1",
 ]
 
 [[package]]
 name = "miden-crypto"
-version = "0.17.0"
+version = "0.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4b8c283ed3017d58d9b648d9b1099f26abff52b185ecbb7b91ff4fb406c286b7"
+checksum = "6dd5fee625e5024c1e47c2914ae2f9bcf36055afe47a680314b4613709bdbdf4"
+dependencies = [
+ "blake3",
+ "glob",
+ "num",
+ "num-complex",
+ "rand",
+ "rand_core 0.9.3",
+ "sha3",
+ "thiserror",
+ "winter-crypto 0.12.0",
+ "winter-math 0.12.0",
+ "winter-utils 0.12.0",
+]
+
+[[package]]
+name = "miden-crypto"
+version = "0.18.0"
+source = "git+https://github.com/0xMiden/crypto?branch=zz%2Fmigrate-plonky3#f8c019ea9bb5e87a571c9c7c4dcd317b82140f85"
 dependencies = [
  "blake3",
  "cc",
  "chacha20poly1305",
+ "ed25519-dalek",
  "flume",
  "getrandom 0.2.16",
  "glob",
+ "hashbrown 0.15.5",
  "hkdf",
  "k256",
  "num",
  "num-complex",
+ "p3-air",
+ "p3-challenger",
+ "p3-field",
+ "p3-goldilocks",
+ "p3-symmetric",
  "rand",
  "rand_chacha",
  "rand_core 0.9.3",
  "rand_hc",
+ "rayon",
  "serde",
  "sha3",
  "thiserror",
- "winter-crypto",
- "winter-math",
- "winter-utils",
+ "winter-crypto 0.13.1",
+ "winter-utils 0.13.1",
+ "x25519-dalek",
  "zeroize",
 ]
 
@@ -1426,7 +1560,7 @@ name = "miden-debug-types"
 version = "0.19.0"
 dependencies = [
  "memchr",
- "miden-crypto",
+ "miden-crypto 0.18.0",
  "miden-formatting",
  "miden-miette",
  "miden-utils-sync",
@@ -1453,7 +1587,7 @@ checksum = "9968713c6f174f1f14dbf6a73228a1ceab94a11293dd66132891bb3ecd41fb53"
 dependencies = [
  "metal",
  "once_cell",
- "winter-math",
+ "winter-math 0.13.1",
 ]
 
 [[package]]
@@ -1534,19 +1668,39 @@ dependencies = [
  "tracing",
  "winter-fri",
  "winter-prover",
- "winter-utils",
+ "winter-utils 0.13.1",
 ]
 
 [[package]]
 name = "miden-prover"
 version = "0.19.0"
 dependencies = [
+ "bincode",
  "elsa",
  "miden-air",
+ "miden-crypto 0.14.1",
  "miden-debug-types",
  "miden-gpu",
  "miden-processor",
+ "p3-air",
+ "p3-blake3",
+ "p3-challenger",
+ "p3-commit",
+ "p3-dft",
+ "p3-field",
+ "p3-fri",
+ "p3-goldilocks",
+ "p3-keccak",
+ "p3-matrix",
+ "p3-maybe-rayon",
+ "p3-merkle-tree",
+ "p3-poseidon2",
+ "p3-symmetric",
+ "p3-uni-stark",
+ "p3-util",
  "pollster",
+ "rand",
+ "serde",
  "tracing",
  "winter-maybe-async",
  "winter-prover",
@@ -1575,7 +1729,7 @@ dependencies = [
  "miden-air",
  "miden-assembly",
  "miden-core",
- "miden-crypto",
+ "miden-crypto 0.18.0",
  "miden-processor",
  "miden-test-utils",
  "miden-utils-sync",
@@ -1615,7 +1769,7 @@ dependencies = [
 name = "miden-utils-diagnostics"
 version = "0.19.0"
 dependencies = [
- "miden-crypto",
+ "miden-crypto 0.18.0",
  "miden-debug-types",
  "miden-miette",
  "paste",
@@ -1636,8 +1790,25 @@ dependencies = [
 name = "miden-verifier"
 version = "0.19.0"
 dependencies = [
+ "bincode",
+ "itertools 0.12.1",
  "miden-air",
  "miden-core",
+ "p3-air",
+ "p3-blake3",
+ "p3-challenger",
+ "p3-commit",
+ "p3-dft",
+ "p3-field",
+ "p3-fri",
+ "p3-goldilocks",
+ "p3-matrix",
+ "p3-merkle-tree",
+ "p3-poseidon2",
+ "p3-symmetric",
+ "p3-uni-stark",
+ "p3-util",
+ "serde",
  "thiserror",
  "tracing",
  "winter-verifier",
@@ -1885,10 +2056,243 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9c6901729fa79e91a0913333229e9ca5dc725089d1c363b2f4b4760709dc4a52"
 
 [[package]]
+name = "p3-air"
+version = "0.3.0"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#5602dd31c6d16e97b7bd272b26b3fef7bf86629d"
+dependencies = [
+ "p3-field",
+ "p3-matrix",
+]
+
+[[package]]
+name = "p3-blake3"
+version = "0.3.0"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#5602dd31c6d16e97b7bd272b26b3fef7bf86629d"
+dependencies = [
+ "blake3",
+ "p3-symmetric",
+ "p3-util",
+]
+
+[[package]]
+name = "p3-challenger"
+version = "0.3.0"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#5602dd31c6d16e97b7bd272b26b3fef7bf86629d"
+dependencies = [
+ "p3-field",
+ "p3-maybe-rayon",
+ "p3-symmetric",
+ "p3-util",
+ "tracing",
+]
+
+[[package]]
+name = "p3-commit"
+version = "0.3.0"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#5602dd31c6d16e97b7bd272b26b3fef7bf86629d"
+dependencies = [
+ "itertools 0.14.0",
+ "p3-challenger",
+ "p3-dft",
+ "p3-field",
+ "p3-matrix",
+ "p3-util",
+ "serde",
+]
+
+[[package]]
+name = "p3-dft"
+version = "0.3.0"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#5602dd31c6d16e97b7bd272b26b3fef7bf86629d"
+dependencies = [
+ "itertools 0.14.0",
+ "p3-field",
+ "p3-matrix",
+ "p3-maybe-rayon",
+ "p3-util",
+ "tracing",
+]
+
+[[package]]
+name = "p3-field"
+version = "0.3.0"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#5602dd31c6d16e97b7bd272b26b3fef7bf86629d"
+dependencies = [
+ "itertools 0.14.0",
+ "num-bigint",
+ "p3-maybe-rayon",
+ "p3-util",
+ "paste",
+ "rand",
+ "serde",
+ "tracing",
+]
+
+[[package]]
+name = "p3-fri"
+version = "0.3.0"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#5602dd31c6d16e97b7bd272b26b3fef7bf86629d"
+dependencies = [
+ "itertools 0.14.0",
+ "p3-challenger",
+ "p3-commit",
+ "p3-dft",
+ "p3-field",
+ "p3-interpolation",
+ "p3-matrix",
+ "p3-maybe-rayon",
+ "p3-util",
+ "rand",
+ "serde",
+ "tracing",
+]
+
+[[package]]
+name = "p3-goldilocks"
+version = "0.3.0"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#5602dd31c6d16e97b7bd272b26b3fef7bf86629d"
+dependencies = [
+ "num-bigint",
+ "p3-dft",
+ "p3-field",
+ "p3-mds",
+ "p3-poseidon2",
+ "p3-symmetric",
+ "p3-util",
+ "paste",
+ "rand",
+ "serde",
+ "winter-utils 0.13.1",
+]
+
+[[package]]
+name = "p3-interpolation"
+version = "0.3.0"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#5602dd31c6d16e97b7bd272b26b3fef7bf86629d"
+dependencies = [
+ "p3-field",
+ "p3-matrix",
+ "p3-maybe-rayon",
+ "p3-util",
+]
+
+[[package]]
+name = "p3-keccak"
+version = "0.3.0"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#5602dd31c6d16e97b7bd272b26b3fef7bf86629d"
+dependencies = [
+ "p3-field",
+ "p3-symmetric",
+ "p3-util",
+ "tiny-keccak",
+]
+
+[[package]]
+name = "p3-matrix"
+version = "0.3.0"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#5602dd31c6d16e97b7bd272b26b3fef7bf86629d"
+dependencies = [
+ "itertools 0.14.0",
+ "p3-field",
+ "p3-maybe-rayon",
+ "p3-util",
+ "rand",
+ "serde",
+ "tracing",
+ "transpose",
+]
+
+[[package]]
+name = "p3-maybe-rayon"
+version = "0.3.0"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#5602dd31c6d16e97b7bd272b26b3fef7bf86629d"
+dependencies = [
+ "rayon",
+]
+
+[[package]]
+name = "p3-mds"
+version = "0.3.0"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#5602dd31c6d16e97b7bd272b26b3fef7bf86629d"
+dependencies = [
+ "p3-dft",
+ "p3-field",
+ "p3-symmetric",
+ "p3-util",
+ "rand",
+]
+
+[[package]]
+name = "p3-merkle-tree"
+version = "0.3.0"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#5602dd31c6d16e97b7bd272b26b3fef7bf86629d"
+dependencies = [
+ "itertools 0.14.0",
+ "p3-commit",
+ "p3-field",
+ "p3-matrix",
+ "p3-maybe-rayon",
+ "p3-symmetric",
+ "p3-util",
+ "rand",
+ "serde",
+ "tracing",
+]
+
+[[package]]
+name = "p3-poseidon2"
+version = "0.3.0"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#5602dd31c6d16e97b7bd272b26b3fef7bf86629d"
+dependencies = [
+ "p3-field",
+ "p3-mds",
+ "p3-symmetric",
+ "p3-util",
+ "rand",
+]
+
+[[package]]
+name = "p3-symmetric"
+version = "0.3.0"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#5602dd31c6d16e97b7bd272b26b3fef7bf86629d"
+dependencies = [
+ "itertools 0.14.0",
+ "p3-field",
+ "serde",
+]
+
+[[package]]
+name = "p3-uni-stark"
+version = "0.3.0"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#5602dd31c6d16e97b7bd272b26b3fef7bf86629d"
+dependencies = [
+ "itertools 0.14.0",
+ "p3-air",
+ "p3-challenger",
+ "p3-commit",
+ "p3-dft",
+ "p3-field",
+ "p3-matrix",
+ "p3-maybe-rayon",
+ "p3-util",
+ "serde",
+ "tracing",
+]
+
+[[package]]
+name = "p3-util"
+version = "0.3.0"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#5602dd31c6d16e97b7bd272b26b3fef7bf86629d"
+dependencies = [
+ "rayon",
+ "serde",
+]
+
+[[package]]
 name = "parking_lot"
-version = "0.12.4"
+version = "0.12.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70d58bf43669b5795d1576d0641cfb6fbb2057bf629506267a92807158584a13"
+checksum = "93857453250e3077bd71ff98b6a65ea6621a19bb0f559a85248955ac12c45a1a"
 dependencies = [
  "lock_api",
  "parking_lot_core",
@@ -1896,15 +2300,15 @@ dependencies = [
 
 [[package]]
 name = "parking_lot_core"
-version = "0.9.11"
+version = "0.9.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bc838d2a56b5b1a6c25f55575dfc605fabb63bb2365f6c2353ef9159aa69e4a5"
+checksum = "2621685985a2ebf1c516881c026032ac7deafcda1a2c9b7850dc81e3dfcb64c1"
 dependencies = [
  "cfg-if",
  "libc",
  "redox_syscall",
  "smallvec",
- "windows-targets 0.52.6",
+ "windows-link 0.2.0",
 ]
 
 [[package]]
@@ -2207,9 +2611,9 @@ dependencies = [
 
 [[package]]
 name = "redox_syscall"
-version = "0.5.17"
+version = "0.5.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5407465600fb0548f1442edf71dd20683c6ed326200ace4b1ef0763521bb3b77"
+checksum = "ed2bf2547551a7053d6fdfafda3f938979645c44812fbfcda098faae3f1a362d"
 dependencies = [
  "bitflags",
 ]
@@ -2333,9 +2737,9 @@ checksum = "b39cdef0fa800fc44525c84ccb54a029961a8215f9619753635a9c0d2538d46d"
 
 [[package]]
 name = "rustyline"
-version = "17.0.1"
+version = "17.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6614df0b6d4cfb20d1d5e295332921793ce499af3ebc011bf1e393380e1e492"
+checksum = "e902948a25149d50edc1a8e0141aad50f54e22ba83ff988cf8f7c9ef07f50564"
 dependencies = [
  "bitflags",
  "cfg-if",
@@ -2596,6 +3000,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a8f112729512f8e442d81f95a8a7ddf2b7c6b8a1a6f509a95864142b30cab2d3"
 
 [[package]]
+name = "strength_reduce"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fe895eb47f22e2ddd4dabc02bce419d2e643c8e3b585c78158b349195bc24d82"
+
+[[package]]
 name = "string_cache"
 version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2785,6 +3195,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "tiny-keccak"
+version = "2.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2c9d3793400a45f954c52e73d068316d76b6f4e36977e3fcebb13a2721e80237"
+dependencies = [
+ "crunchy",
+]
+
+[[package]]
 name = "tinytemplate"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2931,6 +3350,16 @@ dependencies = [
  "tracing",
  "tracing-core",
  "tracing-log",
+]
+
+[[package]]
+name = "transpose"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ad61aed86bc3faea4300c7aee358b4c6d0c8d6ccc36524c96e4c92ccf26e77e"
+dependencies = [
+ "num-integer",
+ "strength_reduce",
 ]
 
 [[package]]
@@ -3553,10 +3982,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ef01227f23c7c331710f43b877a8333f5f8d539631eea763600f1a74bf018c7c"
 dependencies = [
  "libm",
- "winter-crypto",
+ "winter-crypto 0.13.1",
  "winter-fri",
- "winter-math",
- "winter-utils",
+ "winter-math 0.13.1",
+ "winter-utils 0.13.1",
+]
+
+[[package]]
+name = "winter-crypto"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32247cde9f43e5bbd05362caa7274608790ea69b14f7c81cd509aae7127c5ff2"
+dependencies = [
+ "blake3",
+ "sha3",
+ "winter-math 0.12.0",
+ "winter-utils 0.12.0",
 ]
 
 [[package]]
@@ -3567,8 +4008,8 @@ checksum = "1cdb247bc142438798edb04067ab72a22cf815f57abbd7b78a6fa986fc101db8"
 dependencies = [
  "blake3",
  "sha3",
- "winter-math",
- "winter-utils",
+ "winter-math 0.13.1",
+ "winter-utils 0.13.1",
 ]
 
 [[package]]
@@ -3577,9 +4018,18 @@ version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fd592b943f9d65545683868aaf1b601eb66e52bfd67175347362efff09101d3a"
 dependencies = [
- "winter-crypto",
- "winter-math",
- "winter-utils",
+ "winter-crypto 0.13.1",
+ "winter-math 0.13.1",
+ "winter-utils 0.13.1",
+]
+
+[[package]]
+name = "winter-math"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "326dfe4bfa4072b7c909133a88f8807820d3e49e5dfd246f67981771f74a0ed3"
+dependencies = [
+ "winter-utils 0.12.0",
 ]
 
 [[package]]
@@ -3589,7 +4039,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7aecfb48ee6a8b4746392c8ff31e33e62df8528a3b5628c5af27b92b14aef1ea"
 dependencies = [
  "serde",
- "winter-utils",
+ "winter-utils 0.13.1",
 ]
 
 [[package]]
@@ -3610,11 +4060,11 @@ checksum = "84cc631ed56cd39b78ef932c1ec4060cc6a44d114474291216c32f56655b3048"
 dependencies = [
  "tracing",
  "winter-air",
- "winter-crypto",
+ "winter-crypto 0.13.1",
  "winter-fri",
- "winter-math",
+ "winter-math 0.13.1",
  "winter-maybe-async",
- "winter-utils",
+ "winter-utils 0.13.1",
 ]
 
 [[package]]
@@ -3624,8 +4074,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4ff3b651754a7bd216f959764d0a5ab6f4b551c9a3a08fb9ccecbed594b614a"
 dependencies = [
  "rand",
- "winter-utils",
+ "winter-utils 0.13.1",
 ]
+
+[[package]]
+name = "winter-utils"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2d47518e6931955dcac73a584cacb04550b82ab2f45c72880cbbbdbe13adb63c"
 
 [[package]]
 name = "winter-utils"
@@ -3643,10 +4099,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0425ea81f8f703a1021810216da12003175c7974a584660856224df04b2e2fdb"
 dependencies = [
  "winter-air",
- "winter-crypto",
+ "winter-crypto 0.13.1",
  "winter-fri",
- "winter-math",
- "winter-utils",
+ "winter-math 0.13.1",
+ "winter-utils 0.13.1",
 ]
 
 [[package]]
@@ -3654,6 +4110,16 @@ name = "wit-bindgen"
 version = "0.46.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
+
+[[package]]
+name = "x25519-dalek"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c7e468321c81fb07fa7f4c636c3972b9100f0346e5b6a9f2bd0603a52f7ed277"
+dependencies = [
+ "curve25519-dalek",
+ "rand_core 0.6.4",
+]
 
 [[package]]
 name = "yansi"

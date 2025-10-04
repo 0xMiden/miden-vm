@@ -46,18 +46,26 @@ path = "tests/integration/main.rs"
 [features]
 concurrent = ["miden-prover/concurrent", "std"]
 default = ["std"]
-executable = ["dep:hex", "dep:clap", "dep:rustyline", "dep:tracing-subscriber", "internal", "serde", "std"]
+executable = [
+  "dep:hex",
+  "dep:clap",
+  "dep:rustyline",
+  "dep:tracing-subscriber",
+  "internal",
+  "serde",
+  "std",
+]
 metal = ["miden-prover/metal", "std"]
 serde = ["dep:serde", "dep:serde_json"]
 std = [
-    "hex?/std",
-    "miden-assembly/std",
-    "miden-debug-types/std",
-    "miden-processor/std",
-    "miden-prover/std",
-    "miden-verifier/std",
-    "serde?/std",
-    "serde_json?/std",
+  "hex?/std",
+  "miden-assembly/std",
+  "miden-debug-types/std",
+  "miden-processor/std",
+  "miden-prover/std",
+  "miden-verifier/std",
+  "serde?/std",
+  "serde_json?/std",
 ]
 # Removes proper error context from the error messages. Enable in production builds that need
 # maximal performance.
@@ -84,8 +92,14 @@ rustyline = { version = "17.0", default-features = false, optional = true }
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 tracing.workspace = true
-tracing-subscriber = { version = "0.3", optional = true, features = ["std", "env-filter"] }
-tracing-forest = { version = "0.2", optional = true, features = ["ansi", "smallvec"] }
+tracing-subscriber = { version = "0.3", optional = true, features = [
+  "std",
+  "env-filter",
+] }
+tracing-forest = { version = "0.2", optional = true, features = [
+  "ansi",
+  "smallvec",
+] }
 
 [dev-dependencies]
 assert_cmd = "2.0"
