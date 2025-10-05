@@ -81,3 +81,41 @@ impl VerifyCmd {
         Ok((input_file, output_file))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::{fs, fs::File};
+
+    use super::*;
+
+    #[test]
+    fn infer_defaults_uses_proof_file_basename_for_defaults() {
+        // prepare a unique temp directory
+        let base =
+            std::env::temp_dir().join(format!("miden_vm_verify_test_{}", std::process::id()));
+        fs::create_dir_all(&base).expect("create temp test dir");
+
+        // create a dummy proof file
+        let proof_path = base.join("proof_file");
+        File::create(&proof_path).expect("create proof file");
+
+        // build command with no explicit input/output
+        let cmd = VerifyCmd {
+            input_file: None,
+            output_file: None,
+            proof_file: proof_path.clone(),
+            program_hash: "00".to_string(),
+        };
+
+        // exercise
+        let (input, output) = cmd.infer_defaults().expect("infer defaults");
+
+        // verify: defaults are proof file with replaced extensions
+        assert_eq!(input, proof_path.with_extension("inputs"));
+        assert_eq!(output, proof_path.with_extension("outputs"));
+
+        // cleanup best-effort
+        let _ = fs::remove_file(&proof_path);
+        let _ = fs::remove_dir_all(&base);
+    }
+}
