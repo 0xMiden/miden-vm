@@ -10,11 +10,9 @@ use std::println;
 
 // use air::{Felt, HashFunction, ProcessorAir, Proof, PublicInputs};
 use miden_air::{Felt, HashFunction, ProcessorAir, Proof, ProvingOptions, PublicInputs};
-use miden_core::{
-    crypto::{
-        hash::{Blake3_192, Blake3_256, Poseidon2, Rpo256, Rpx256},
-        random::{RpoRandomCoin, RpxRandomCoin, WinterRandomCoin},
-    },
+use miden_core::crypto::{
+    hash::{Blake3_192, Blake3_256, Poseidon2, Rpo256, Rpx256},
+    random::{RpoRandomCoin, RpxRandomCoin, WinterRandomCoin},
 };
 use p3_blake3::Blake3;
 use p3_challenger::{DuplexChallenger, HashChallenger, SerializingChallenger64};
@@ -26,7 +24,7 @@ use p3_merkle_tree::MerkleTreeMmcs;
 use p3_symmetric::{
     CompressionFunctionFromHasher, PaddingFreeSponge, SerializingHasher, TruncatedPermutation,
 };
-use p3_uni_stark::{ StarkConfig};
+use p3_uni_stark::StarkConfig;
 
 mod verify;
 // EXPORTS
@@ -35,7 +33,7 @@ pub use miden_core::{Kernel, ProgramInfo, StackInputs, StackOutputs, Word};
 use verify::verify as verify_proof;
 pub use winter_verifier::{AcceptableOptions, VerifierError};
 pub mod math {
-    pub use miden_core::{Felt, };
+    pub use miden_core::Felt;
 }
 pub use miden_air::ExecutionProof;
 
@@ -132,14 +130,14 @@ pub fn verify(
             todo!()
         },
         HashFunction::Rpx256 => {
-           todo!()
+            todo!()
         },
         HashFunction::Poseidon2 => {
             todo!()
         },
         HashFunction::Keccak => {
             todo!()
-        }
+        },
     }
     .map_err(|_source| VerificationError::ProgramVerificationError(program_hash))?;
 

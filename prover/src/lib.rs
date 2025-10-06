@@ -11,7 +11,6 @@ use std::println;
 #[cfg(feature = "std")]
 use std::time::Instant;
 
-use air::{ProcessorAir, PublicInputs};
 use miden_air::{AuxRandElements, PartitionOptions, ProcessorAir, PublicInputs};
 #[cfg(all(feature = "metal", target_arch = "aarch64", target_os = "macos"))]
 use miden_gpu::HashFn;
@@ -23,11 +22,10 @@ use miden_processor::{
         Blake3_192, Blake3_256, ElementHasher, Poseidon2, RandomCoin, Rpo256, RpoRandomCoin,
         Rpx256, RpxRandomCoin, WinterRandomCoin,
     },
-    math::{Felt, FieldElement},
+    math::Felt,
 };
 use p3_field::extension::BinomialExtensionField;
 use p3_uni_stark::StarkGenericConfig;
-use processor::{ExecutionTrace, Program, ZERO, math::Felt};
 use tracing::instrument;
 use winter_maybe_async::{maybe_async, maybe_await};
 use winter_prover::{
@@ -144,10 +142,11 @@ where
     // generate STARK proof
     let proof = match hash_fn {
         HashFunction::Rpo256 => {
-            println!("rpo proving");
-            let proof = prove_rpo(trace);
+            todo!()
+            // println!("rpo proving");
+            // let proof = prove_rpo(trace);
 
-            ExecutionProof::new(proof, hash_fn)
+            // ExecutionProof::new(proof, hash_fn)
         },
         HashFunction::Blake3_256 | HashFunction::Blake3_192 => {
             println!("blake proving");
@@ -165,16 +164,16 @@ where
             unimplemented!()
         },
         HashFunction::Poseidon2 => {
-            let prover = ExecutionProver::<Poseidon2, WinterRandomCoin<_>>::new(
-                options,
-                stack_inputs,
-                stack_outputs.clone(),
-            );
-            maybe_await!(prover.prove(trace))
+            todo!()
+            // let prover = ExecutionProver::<Poseidon2, WinterRandomCoin<_>>::new(
+            //     options,
+            //     stack_inputs,
+            //     stack_outputs.clone(),
+            // );
+            // maybe_await!(prover.prove(trace))
         },
-    }
-    .map_err(ExecutionError::ProverError)?;
-    let proof = ExecutionProof::new(proof, hash_fn);
+    };
+    // let proof = ExecutionProof::new(proof, hash_fn);
 
     Ok((stack_outputs, proof))
 }
@@ -185,4 +184,4 @@ where
 // HELPERS and TYPES are consolidated into prove/ submodules
 
 pub use crate::prove::types::{Commitments, OpenedValues, Proof};
-use crate::prove::{prove_blake, prove_keccak, prove_rpo, utils::to_row_major};
+use crate::prove::{prove_blake, prove_keccak,  utils::to_row_major};

@@ -1,5 +1,7 @@
-use miden_air::trace::decoder::NUM_USER_OP_HELPERS;use core::ops::Mul;
-use miden_core::{BasedVectorSpace, Felt, Field, QuadFelt, ONE, ZERO, PrimeCharacteristicRing};
+use core::ops::Mul;
+
+use miden_air::trace::decoder::NUM_USER_OP_HELPERS;
+use miden_core::{BasedVectorSpace, Felt, Field, ONE, PrimeCharacteristicRing, QuadFelt, ZERO};
 
 use crate::{
     ExecutionError,

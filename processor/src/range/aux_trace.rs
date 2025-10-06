@@ -162,7 +162,7 @@ fn get_divisors<E: ExtensionField<Felt>>(lookup_values: &[u16], alpha: E) -> BTr
     let mut acc = E::ONE;
     for (i, (value, inv_value)) in values.iter_mut().zip(inv_values.iter_mut()).enumerate() {
         *inv_value = acc;
-        *value = alpha + E::from_u16(lookup_values[i] );
+        *value = alpha + E::from_u16(lookup_values[i]);
         acc *= *value;
     }
 

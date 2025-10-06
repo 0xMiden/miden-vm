@@ -3,16 +3,15 @@
 use std::{vec, vec::Vec};
 
 use miden_air::{
-    Air, ColMatrix, Felt,
-    trace::{AUX_TRACE_WIDTH, TRACE_WIDTH},
+    trace::{ColMatrix, AUX_TRACE_WIDTH, TRACE_WIDTH}, Air, Felt
 };
+use miden_processor::{ExecutionTrace, ZERO};
 use p3_commit::PolynomialSpace;
 use p3_field::{BasedVectorSpace, ExtensionField, PackedValue, PrimeCharacteristicRing};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use p3_maybe_rayon::prelude::*;
 use p3_uni_stark::{Domain, PackedChallenge, PackedVal, StarkGenericConfig, Val};
 use p3_util::log2_strict_usize;
-use processor::{ExecutionTrace, ZERO};
 use tracing::{debug_span, instrument};
 
 use crate::prove::ProverConstraintFolder;

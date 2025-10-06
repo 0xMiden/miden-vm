@@ -2,12 +2,14 @@
 
 use std::{vec, vec::Vec};
 
-use air::{Felt, ProcessorAir};
-use miden_crypto::BinomialExtensionField;
+use miden_air::{Felt, ProcessorAir};
+use miden_processor::ExecutionTrace;
 use p3_challenger::{HashChallenger, SerializingChallenger64, *};
 use p3_commit::{ExtensionMmcs, Pcs, PolynomialSpace};
 use p3_dft::Radix2DitParallel;
-use p3_field::{PrimeCharacteristicRing, coset::TwoAdicMultiplicativeCoset};
+use p3_field::{
+    PrimeCharacteristicRing, coset::TwoAdicMultiplicativeCoset, extension::BinomialExtensionField,
+};
 use p3_fri::{FriParameters, TwoAdicFriPcs};
 use p3_keccak::{Keccak256Hash, KeccakF};
 use p3_matrix::{
@@ -17,7 +19,6 @@ use p3_merkle_tree::MerkleTreeMmcs;
 use p3_symmetric::{CompressionFunctionFromHasher, PaddingFreeSponge, SerializingHasher};
 use p3_uni_stark::{StarkConfig, StarkGenericConfig};
 use p3_util::{log2_ceil_usize, log2_strict_usize};
-use processor::ExecutionTrace;
 use tracing::info_span;
 
 use super::{

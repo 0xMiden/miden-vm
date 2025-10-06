@@ -3,7 +3,8 @@ use miden_air::{
     trace::{chiplets::hasher::HasherState, decoder::NUM_USER_OP_HELPERS},
 };
 use miden_core::{
-    crypto::{hash::Rpo256, merkle::MerklePath}, PrimeCharacteristicRing, QuadFelt, Word, WORD_SIZE, ZERO
+    PrimeCharacteristicRing, QuadFelt, WORD_SIZE, Word, ZERO,
+    crypto::{hash::Rpo256, merkle::MerklePath},
 };
 
 use crate::{

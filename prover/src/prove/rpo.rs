@@ -3,12 +3,15 @@
 use core::array;
 use std::{vec, vec::Vec};
 
-use air::{Felt, ProcessorAir};
-use miden_crypto::{BinomialExtensionField, hash::rpo::RpoPermutation256};
+use miden_air::{Felt, ProcessorAir};
+use miden_processor::ExecutionTrace;
 use p3_challenger::{CanObserve, CanSample, DuplexChallenger, FieldChallenger};
 use p3_commit::{ExtensionMmcs, Pcs, PolynomialSpace};
 use p3_dft::Radix2DitParallel;
-use p3_field::{Field, PrimeCharacteristicRing, coset::TwoAdicMultiplicativeCoset};
+use p3_field::{
+    Field, PrimeCharacteristicRing, coset::TwoAdicMultiplicativeCoset,
+    extension::BinomialExtensionField,
+};
 use p3_fri::{FriParameters, TwoAdicFriPcs};
 use p3_matrix::{
     Matrix, bitrev::BitReversalPerm, dense::DenseMatrix, row_index_mapped::RowIndexMappedView,
@@ -17,7 +20,6 @@ use p3_merkle_tree::MerkleTreeMmcs;
 use p3_symmetric::{PaddingFreeSponge, TruncatedPermutation};
 use p3_uni_stark::{StarkConfig, StarkGenericConfig};
 use p3_util::{log2_ceil_usize, log2_strict_usize};
-use processor::ExecutionTrace;
 use tracing::info_span;
 
 use super::{
