@@ -1,6 +1,6 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 
-use vm_core::{crypto::merkle::{MerkleStore, NodeIndex, StoreNode}, PrimeCharacteristicRing, PrimeField64};
+use miden_core::{crypto::merkle::{MerkleStore, NodeIndex, StoreNode}, PrimeCharacteristicRing, PrimeField64};
 
 use super::{
     AdviceInputs, AdviceProvider, AdviceSource, ExecutionError, Felt, MerklePath, RpoDigest, Word,

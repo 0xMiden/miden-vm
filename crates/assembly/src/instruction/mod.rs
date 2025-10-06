@@ -4,11 +4,11 @@ use miden_assembly_syntax::{
     diagnostics::{RelatedLabel, Report},
     parser::{IntValue, PushValue},
 };
-use miden_core::{Decorator, Felt, ONE, Operation, WORD_SIZE, ZERO, mast::MastNodeId};
-use miette::miette;
-use vm_core::{
-    Decorator, ONE, PrimeCharacteristicRing, WORD_SIZE, ZERO, debuginfo::Spanned, mast::MastNodeId,
+use miden_core::{
+    Decorator, Felt, ONE, Operation, PrimeCharacteristicRing, WORD_SIZE, ZERO, debuginfo::Spanned,
+    mast::MastNodeId,
 };
+use miette::miette;
 
 use super::{Assembler, BasicBlockBuilder, Felt, Operation, ProcedureContext, ast::InvokeKind};
 use crate::{

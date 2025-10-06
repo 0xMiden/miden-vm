@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 use core::fmt::{self, Display};
 
 use miden_air::RowIndex;
-use vm_core::{PrimeCharacteristicRing, PrimeField64};
+use miden_core::{PrimeCharacteristicRing, PrimeField64};
 
 use super::{EMPTY_WORD, ExecutionError, Felt, ONE, SysTrace, Word, ZERO};
 

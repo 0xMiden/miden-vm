@@ -1,4 +1,4 @@
-use miden_core::{Felt, FieldElement, ONE, Operation, ZERO};
+use miden_core::{Felt,  ONE, Operation, ZERO};
 
 use super::{B0_COL_IDX, EvaluationFrame};
 use crate::{

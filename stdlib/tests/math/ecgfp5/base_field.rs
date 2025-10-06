@@ -1,7 +1,7 @@
 use core::ops::{Add, Div, Mul, Neg, Sub};
 
 use miden_core::{PrimeCharacteristicRing, PrimeField64};
-use miden_utils_testing::{Felt, FieldElement, ONE, StarkField, ZERO, rand::rand_value};
+use miden_utils_testing::{Felt, ONE, StarkField, ZERO, rand::rand_value};
 use test_utils::{Felt, ONE, ZERO, rand::rand_value};
 
 // Given an element v ∈ Z_q | q = 2^64 - 2^32 + 1, this routine raises

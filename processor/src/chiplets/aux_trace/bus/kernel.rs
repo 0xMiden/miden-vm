@@ -7,7 +7,7 @@ use miden_air::{
         main_trace::MainTrace,
     },
 };
-use miden_core::{ExtensionField, Felt, FieldElement, ONE, PrimeCharacteristicRing, Word};
+use miden_core::{ExtensionField, Felt, ONE, PrimeCharacteristicRing, Word};
 
 use crate::{
     chiplets::aux_trace::build_value,
@@ -24,7 +24,7 @@ pub(super) fn build_kernel_init_requests<E>(
     _debugger: &mut BusDebugger<E>,
 ) -> E
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     let mut requests = E::ONE;
     // Initialize the bus with the kernel rom hashes provided by the public inputs.
@@ -144,7 +144,7 @@ pub struct KernelRomInitMessage {
 
 impl<E> BusMessage<E> for KernelRomInitMessage
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     #[inline(always)]
     fn value(&self, alphas: &[E]) -> E {

@@ -3,7 +3,7 @@ use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 use basic_block_builder::BasicBlockOrDecorators;
 use mast_forest_builder::MastForestBuilder;
 use module_graph::{ProcedureWrapper, WrappedModule};
-use vm_core::{
+use miden_core::{
     crypto::hash::RpoDigest, debuginfo::SourceSpan, mast::{DecoratorId, MastNodeId}, DecoratorList, Felt, Kernel, Operation, PrimeCharacteristicRing, Program, WORD_SIZE
 };
 
@@ -228,7 +228,7 @@ impl Assembler {
     /// Adds the compiled library to provide modules for the compilation.
     ///
     /// All calls to the library's procedures will be compiled down to a
-    /// [`vm_core::mast::ExternalNode`] (i.e. a reference to the procedure's MAST root).
+    /// [`miden_core::mast::ExternalNode`] (i.e. a reference to the procedure's MAST root).
     /// The library's source code is expected to be loaded in the processor at execution time.
     /// This means that when executing a program compiled against a library, the processor will not
     /// be able to differentiate procedures with the same MAST root but different decorators.

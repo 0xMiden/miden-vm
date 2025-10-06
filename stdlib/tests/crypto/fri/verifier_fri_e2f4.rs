@@ -1,6 +1,6 @@
 use core::{marker::PhantomData, mem};
 
-use miden_core::{EMPTY_WORD, Felt, FieldElement, QuadFelt, Word};
+use miden_core::{EMPTY_WORD, Felt,  QuadFelt, Word};
 use miden_processor::crypto::{Hasher, RandomCoin, WinterRandomCoin};
 use miden_utils_testing::{
     MerkleTreeVC, StarkField,
@@ -467,7 +467,7 @@ where
 
 pub fn eval_horner_rev<E>(p: &[E], x: E::BaseField) -> E
 where
-    E: FieldElement,
+    E: 
 {
     p.iter().fold(E::ZERO, |acc, &coeff| acc * E::from(x) + coeff)
 }

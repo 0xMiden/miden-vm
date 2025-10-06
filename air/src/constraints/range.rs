@@ -1,9 +1,9 @@
 use alloc::vec::Vec;
 /*
-use vm_core::{ExtensionOf, ZERO};
+use miden_core::{ExtensionOf, ZERO};
 
 use crate::{
-    Assertion, EvaluationFrame, Felt, FieldElement, TransitionConstraintDegree,
+    Assertion, EvaluationFrame, Felt,  TransitionConstraintDegree,
     chiplets::ChipletsFrameExt,
     constraints::MainFrameExt,
     trace::range::{B_RANGE_COL_IDX, M_COL_IDX, V_COL_IDX},
@@ -113,8 +113,8 @@ pub fn enforce_aux_constraints<F, E>(
     aux_rand_elements: &[E],
     result: &mut [E],
 ) where
-    F: FieldElement<BaseField = Felt>,
-    E: FieldElement<BaseField = Felt> + ExtensionOf<F>,
+    F: ExtensionField<Felt>,
+    E: ExtensionField<Felt> + ExtensionOf<F>,
 {
     // Get the first random element for this segment.
     let alpha = aux_rand_elements[0];
@@ -159,8 +159,8 @@ fn enforce_b_range<E, F>(
     alpha: E,
     result: &mut [E],
 ) where
-    F: FieldElement<BaseField = Felt>,
-    E: FieldElement<BaseField = Felt> + ExtensionOf<F>,
+    F: ExtensionField<Felt>,
+    E: ExtensionField<Felt> + ExtensionOf<F>,
 {
     // The denominator values for the LogUp lookup.
     let mv0: E = main_frame.lookup_mv0(alpha);
@@ -178,16 +178,16 @@ fn enforce_b_range<E, F>(
     // operation with range checks. This value has degree 6.
     let sflag_rc_mem: E = range_check
         .mul(memory_lookups)
-        .mul_base(<EvaluationFrame<F> as MainFrameExt<F, E>>::u32_rc_op(main_frame));
+        .mul(<EvaluationFrame<F> as MainFrameExt<F, E>>::u32_rc_op(main_frame));
     // An intermediate value required by all memory terms that includes the flag indicating the
     // memory portion of the chiplets trace. This value has degree 8.
     let mflag_rc_stack: E =
-        range_check.mul(stack_lookups).mul_base(main_frame.chiplets_memory_flag());
+        range_check.mul(stack_lookups).mul(main_frame.chiplets_memory_flag());
 
     // The terms for the LogUp check after all denominators have been multiplied in.
     let b_next_term = aux_frame.b_range_next().mul(lookups); // degree 8
     let b_term = aux_frame.b_range().mul(lookups); // degree 8
-    let rc_term = stack_lookups.mul(memory_lookups).mul_base(main_frame.multiplicity()); // degree 7
+    let rc_term = stack_lookups.mul(memory_lookups).mul(main_frame.multiplicity()); // degree 7
     let s0_term = sflag_rc_mem.mul(sv1).mul(sv2).mul(sv3); // degree 9
     let s1_term = sflag_rc_mem.mul(sv0).mul(sv2).mul(sv3); // degree 9
     let s2_term = sflag_rc_mem.mul(sv0).mul(sv1).mul(sv3); // degree 9

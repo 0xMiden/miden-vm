@@ -27,9 +27,9 @@ use miden_core::{
 
 use super::{
     AUX_TRACE_RAND_ELEMENTS, AdviceInputs, CHIPLETS_AUX_TRACE_OFFSET,
-    CHIPLETS_BUS_AUX_TRACE_OFFSET, ExecutionTrace, Felt, FieldElement, NUM_RAND_ROWS, ONE,
-    Operation, Trace, ZERO, build_span_with_respan_ops, build_trace_from_ops_with_inputs,
-    build_trace_from_program, init_state_from_words, rand_array,
+    CHIPLETS_BUS_AUX_TRACE_OFFSET, ExecutionTrace, Felt, NUM_RAND_ROWS, ONE, Operation, Trace,
+    ZERO, build_span_with_respan_ops, build_trace_from_ops_with_inputs, build_trace_from_program,
+    init_state_from_words, rand_array,
 };
 use crate::StackInputs;
 

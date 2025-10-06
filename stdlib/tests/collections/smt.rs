@@ -1,6 +1,6 @@
+use miden_core::{PrimeCharacteristicRing, PrimeField64, lazy_static};
 use miden_stdlib::handlers::smt_peek::SMT_PEEK_EVENT_NAME;
 use miden_utils_testing::prepend_word_to_vec as prepend_word;
-use vm_core::{PrimeCharacteristicRing, PrimeField64, lazy_static};
 
 use super::*;
 

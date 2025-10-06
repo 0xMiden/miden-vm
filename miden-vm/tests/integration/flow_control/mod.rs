@@ -1,6 +1,7 @@
 use alloc::sync::Arc;
 
 use miden_assembly::{Assembler, LibraryPath, Report, ast::ModuleKind};
+use miden_core::PrimeField64;
 use miden_debug_types::{SourceLanguage, SourceManager};
 use miden_processor::ExecutionError;
 use miden_prover::Word;
@@ -11,7 +12,6 @@ use processor::ExecutionError;
 use prover::Digest;
 use stdlib::StdLibrary;
 use test_utils::{StackInputs, Test, build_test, expect_exec_error_matches, push_inputs};
-use vm_core::PrimeField64;
 
 // SIMPLE FLOW CONTROL TESTS
 // ================================================================================================

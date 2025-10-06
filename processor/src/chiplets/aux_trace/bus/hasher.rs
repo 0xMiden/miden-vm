@@ -14,7 +14,7 @@ use miden_air::{
     },
 };
 use miden_core::{
-    ExtensionField, Felt, FieldElement, ONE, OPCODE_CALL, OPCODE_JOIN, OPCODE_LOOP, OPCODE_SPLIT,
+    ExtensionField, Felt, ONE, OPCODE_CALL, OPCODE_JOIN, OPCODE_LOOP, OPCODE_SPLIT,
     PrimeCharacteristicRing, PrimeField64, ZERO, utils::range,
 };
 

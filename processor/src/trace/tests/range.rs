@@ -34,7 +34,7 @@ fn b_range_trace_stack() {
     // at cycle 1. (The trace begins by executing `span`). It must be subtracted out of `b_range`.
     // The range-checked values are 0, 256, 0, 0, so the values to subtract are 3/(alpha + 0) and
     // 1/(alpha + 256).
-    let lookups = alpha.inv().mul_base(Felt::new(3)) + (alpha + Felt::new(256)).inv();
+    let lookups = alpha.inv().mul(Felt::new(3)) + (alpha + Felt::new(256)).inv();
     let mut expected = b_range[1] - lookups;
     assert_eq!(expected, b_range[2]);
 

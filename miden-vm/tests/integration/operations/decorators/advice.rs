@@ -1,4 +1,4 @@
-use miden_core::Felt;
+use miden_core::{Felt, PrimeCharacteristicRing};
 use miden_prover::Word;
 use miden_utils_testing::{build_test, crypto::MerkleStore};
 use test_utils::{
@@ -6,7 +6,6 @@ use test_utils::{
     crypto::{MerkleStore, RpoDigest},
     rand::rand_value,
 };
-use vm_core::{Felt, PrimeCharacteristicRing};
 
 // ADVICE INJECTION
 // ================================================================================================

@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use miden_core::{Felt, FieldElement, QuadFelt};
+use miden_core::{Felt, QuadFelt};
 use winter_prover::crypto::ElementHasher;
 
 use super::*;

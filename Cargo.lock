@@ -900,9 +900,9 @@ checksum = "aa9a19cbb55df58761df49b23516a86d432839add4af60fc256da840f66ed35b"
 
 [[package]]
 name = "fs-err"
-version = "3.1.2"
+version = "3.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "44f150ffc8782f35521cec2b23727707cb4045706ba3c854e86bef66b3a8cdbd"
+checksum = "6ad492b2cf1d89d568a43508ab24f98501fe03f2f31c01e1d0fe7366a71745d2"
 dependencies = [
  "autocfg",
 ]
@@ -1522,7 +1522,7 @@ dependencies = [
 [[package]]
 name = "miden-crypto"
 version = "0.18.0"
-source = "git+https://github.com/0xMiden/crypto?branch=zz%2Fmigrate-plonky3#f8c019ea9bb5e87a571c9c7c4dcd317b82140f85"
+source = "git+https://github.com/0xMiden/crypto?branch=zz%2Fmigrate-plonky3#1c21b799b51d0179cdd586c9e96e93022b690caa"
 dependencies = [
  "blake3",
  "cc",
@@ -2058,7 +2058,7 @@ checksum = "9c6901729fa79e91a0913333229e9ca5dc725089d1c363b2f4b4760709dc4a52"
 [[package]]
 name = "p3-air"
 version = "0.3.0"
-source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#5602dd31c6d16e97b7bd272b26b3fef7bf86629d"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#035385c88f6c5e85d37cf9d3c442dc5ea6768aa5"
 dependencies = [
  "p3-field",
  "p3-matrix",
@@ -2067,7 +2067,7 @@ dependencies = [
 [[package]]
 name = "p3-blake3"
 version = "0.3.0"
-source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#5602dd31c6d16e97b7bd272b26b3fef7bf86629d"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#035385c88f6c5e85d37cf9d3c442dc5ea6768aa5"
 dependencies = [
  "blake3",
  "p3-symmetric",
@@ -2077,7 +2077,7 @@ dependencies = [
 [[package]]
 name = "p3-challenger"
 version = "0.3.0"
-source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#5602dd31c6d16e97b7bd272b26b3fef7bf86629d"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#035385c88f6c5e85d37cf9d3c442dc5ea6768aa5"
 dependencies = [
  "p3-field",
  "p3-maybe-rayon",
@@ -2089,7 +2089,7 @@ dependencies = [
 [[package]]
 name = "p3-commit"
 version = "0.3.0"
-source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#5602dd31c6d16e97b7bd272b26b3fef7bf86629d"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#035385c88f6c5e85d37cf9d3c442dc5ea6768aa5"
 dependencies = [
  "itertools 0.14.0",
  "p3-challenger",
@@ -2103,7 +2103,7 @@ dependencies = [
 [[package]]
 name = "p3-dft"
 version = "0.3.0"
-source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#5602dd31c6d16e97b7bd272b26b3fef7bf86629d"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#035385c88f6c5e85d37cf9d3c442dc5ea6768aa5"
 dependencies = [
  "itertools 0.14.0",
  "p3-field",
@@ -2116,7 +2116,7 @@ dependencies = [
 [[package]]
 name = "p3-field"
 version = "0.3.0"
-source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#5602dd31c6d16e97b7bd272b26b3fef7bf86629d"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#035385c88f6c5e85d37cf9d3c442dc5ea6768aa5"
 dependencies = [
  "itertools 0.14.0",
  "num-bigint",
@@ -2131,7 +2131,7 @@ dependencies = [
 [[package]]
 name = "p3-fri"
 version = "0.3.0"
-source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#5602dd31c6d16e97b7bd272b26b3fef7bf86629d"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#035385c88f6c5e85d37cf9d3c442dc5ea6768aa5"
 dependencies = [
  "itertools 0.14.0",
  "p3-challenger",
@@ -2150,7 +2150,7 @@ dependencies = [
 [[package]]
 name = "p3-goldilocks"
 version = "0.3.0"
-source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#5602dd31c6d16e97b7bd272b26b3fef7bf86629d"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#035385c88f6c5e85d37cf9d3c442dc5ea6768aa5"
 dependencies = [
  "num-bigint",
  "p3-dft",
@@ -2168,7 +2168,7 @@ dependencies = [
 [[package]]
 name = "p3-interpolation"
 version = "0.3.0"
-source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#5602dd31c6d16e97b7bd272b26b3fef7bf86629d"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#035385c88f6c5e85d37cf9d3c442dc5ea6768aa5"
 dependencies = [
  "p3-field",
  "p3-matrix",
@@ -2179,7 +2179,7 @@ dependencies = [
 [[package]]
 name = "p3-keccak"
 version = "0.3.0"
-source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#5602dd31c6d16e97b7bd272b26b3fef7bf86629d"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#035385c88f6c5e85d37cf9d3c442dc5ea6768aa5"
 dependencies = [
  "p3-field",
  "p3-symmetric",
@@ -2190,7 +2190,7 @@ dependencies = [
 [[package]]
 name = "p3-matrix"
 version = "0.3.0"
-source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#5602dd31c6d16e97b7bd272b26b3fef7bf86629d"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#035385c88f6c5e85d37cf9d3c442dc5ea6768aa5"
 dependencies = [
  "itertools 0.14.0",
  "p3-field",
@@ -2205,7 +2205,7 @@ dependencies = [
 [[package]]
 name = "p3-maybe-rayon"
 version = "0.3.0"
-source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#5602dd31c6d16e97b7bd272b26b3fef7bf86629d"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#035385c88f6c5e85d37cf9d3c442dc5ea6768aa5"
 dependencies = [
  "rayon",
 ]
@@ -2213,7 +2213,7 @@ dependencies = [
 [[package]]
 name = "p3-mds"
 version = "0.3.0"
-source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#5602dd31c6d16e97b7bd272b26b3fef7bf86629d"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#035385c88f6c5e85d37cf9d3c442dc5ea6768aa5"
 dependencies = [
  "p3-dft",
  "p3-field",
@@ -2225,7 +2225,7 @@ dependencies = [
 [[package]]
 name = "p3-merkle-tree"
 version = "0.3.0"
-source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#5602dd31c6d16e97b7bd272b26b3fef7bf86629d"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#035385c88f6c5e85d37cf9d3c442dc5ea6768aa5"
 dependencies = [
  "itertools 0.14.0",
  "p3-commit",
@@ -2242,7 +2242,7 @@ dependencies = [
 [[package]]
 name = "p3-poseidon2"
 version = "0.3.0"
-source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#5602dd31c6d16e97b7bd272b26b3fef7bf86629d"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#035385c88f6c5e85d37cf9d3c442dc5ea6768aa5"
 dependencies = [
  "p3-field",
  "p3-mds",
@@ -2254,7 +2254,7 @@ dependencies = [
 [[package]]
 name = "p3-symmetric"
 version = "0.3.0"
-source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#5602dd31c6d16e97b7bd272b26b3fef7bf86629d"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#035385c88f6c5e85d37cf9d3c442dc5ea6768aa5"
 dependencies = [
  "itertools 0.14.0",
  "p3-field",
@@ -2264,7 +2264,7 @@ dependencies = [
 [[package]]
 name = "p3-uni-stark"
 version = "0.3.0"
-source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#5602dd31c6d16e97b7bd272b26b3fef7bf86629d"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#035385c88f6c5e85d37cf9d3c442dc5ea6768aa5"
 dependencies = [
  "itertools 0.14.0",
  "p3-air",
@@ -2282,7 +2282,7 @@ dependencies = [
 [[package]]
 name = "p3-util"
 version = "0.3.0"
-source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#5602dd31c6d16e97b7bd272b26b3fef7bf86629d"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#035385c88f6c5e85d37cf9d3c442dc5ea6768aa5"
 dependencies = [
  "rayon",
  "serde",
@@ -2749,7 +2749,7 @@ dependencies = [
  "memchr",
  "nix",
  "unicode-segmentation",
- "unicode-width 0.2.1",
+ "unicode-width 0.2.2",
  "utf8parse",
  "windows-sys 0.60.2",
 ]
@@ -3162,7 +3162,7 @@ checksum = "c13547615a44dc9c452a8a534638acdf07120d4b6847c8178705da06306a3057"
 dependencies = [
  "smawk",
  "unicode-linebreak",
- "unicode-width 0.2.1",
+ "unicode-width 0.2.2",
 ]
 
 [[package]]
@@ -3422,9 +3422,9 @@ checksum = "7dd6e30e90baa6f72411720665d41d89b9a3d039dc45b8faea1ddd07f617f6af"
 
 [[package]]
 name = "unicode-width"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a1a07cc7db3810833284e8d372ccdc6da29741639ecc70c9ec107df0fa6154c"
+checksum = "b4ac048d71ede7ee76d585517add45da530660ef4390e49b098733c6e897f254"
 
 [[package]]
 name = "unicode-xid"

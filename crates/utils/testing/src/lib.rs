@@ -20,10 +20,16 @@ pub use miden_assembly::{
     debuginfo::{DefaultSourceManager, SourceFile, SourceLanguage, SourceManager},
     diagnostics::Report,
 };
-pub use miden_core::{
-    EMPTY_WORD, Felt, FieldElement, ONE, StackInputs, StackOutputs, StarkField, WORD_SIZE, Word,
+use miden_core::{
+    BinomialExtensionField, EventId, PrimeCharacteristicRing, PrimeField64, ProgramInfo,
+    chiplets::hasher::apply_permutation,
 };
-use miden_core::{EventId, ProgramInfo, chiplets::hasher::apply_permutation};
+pub use miden_core::{
+    EMPTY_WORD, Felt, ONE, StackInputs, StackOutputs, StarkField, WORD_SIZE, Word, ZERO,
+    chiplets::hasher::{STATE_WIDTH, hash_elements},
+    stack::MIN_STACK_DEPTH,
+    utils::{IntoBytes, ToElements, group_slice_elements},
+};
 pub use miden_processor::{
     AdviceInputs, AdviceProvider, BaseHost, ContextId, ExecutionError, ExecutionOptions,
     ExecutionTrace, Process, ProcessState, VmStateIterator,
@@ -43,20 +49,10 @@ use prover::utils::range;
 pub use prover::{MemAdviceProvider, ProvingOptions, prove};
 pub use test_case::test_case;
 pub use verifier::{AcceptableOptions, VerifierError, verify};
-use vm_core::{
-    BinomialExtensionField, PrimeCharacteristicRing, PrimeField64, ProgramInfo,
-    chiplets::hasher::apply_permutation,
-};
-pub use vm_core::{
-    EMPTY_WORD, Felt, ONE, StackInputs, StackOutputs, WORD_SIZE, Word, ZERO,
-    chiplets::hasher::{STATE_WIDTH, hash_elements},
-    stack::MIN_STACK_DEPTH,
-    utils::{IntoBytes, ToElements, group_slice_elements},
-};
 
 pub mod math {
     pub use winter_prover::math::{
-        ExtensionOf, FieldElement, StarkField, ToElements, fft, fields::QuadExtension, polynom,
+        ExtensionOf, StarkField, ToElements, fft, fields::QuadExtension, polynom,
     };
 }
 

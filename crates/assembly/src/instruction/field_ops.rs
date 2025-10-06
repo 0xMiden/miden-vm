@@ -3,8 +3,7 @@ use miden_assembly_syntax::{
     debuginfo::{SourceSpan, Span},
     diagnostics::{RelatedError, RelatedLabel, Report},
 };
-use miden_core::{FieldElement, Operation::*, sys_events::SystemEvent};
-use vm_core::{Operation::*, PrimeCharacteristicRing, PrimeField64, sys_events::SystemEvent};
+use miden_core::{Operation::*, PrimeCharacteristicRing, PrimeField64, sys_events::SystemEvent};
 
 use super::{BasicBlockBuilder, validate_param};
 use crate::{

@@ -124,7 +124,7 @@ impl AuxTraceBuilder {
             if *multiplicity != ZERO {
                 // add the value in the range checker: multiplicity / (alpha + lookup)
                 let value = divisors.get(&(lookup.as_int() as u16)).expect("invalid lookup value");
-                b_range[b_range_idx] = b_range[row_idx] + value.mul_base(*multiplicity);
+                b_range[b_range_idx] = b_range[row_idx] + value.mul(*multiplicity);
             } else {
                 b_range[b_range_idx] = b_range[row_idx];
             }
@@ -162,7 +162,7 @@ fn get_divisors<E: ExtensionField<Felt>>(lookup_values: &[u16], alpha: E) -> BTr
     let mut acc = E::ONE;
     for (i, (value, inv_value)) in values.iter_mut().zip(inv_values.iter_mut()).enumerate() {
         *inv_value = acc;
-        *value = alpha + E::from(lookup_values[i]);
+        *value = alpha + E::from_u16(lookup_values[i] );
         acc *= *value;
     }
 

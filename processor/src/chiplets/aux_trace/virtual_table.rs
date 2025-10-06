@@ -2,10 +2,9 @@ use miden_air::{
     RowIndex,
     trace::{chiplets::hasher::DIGEST_RANGE, main_trace::MainTrace},
 };
+use miden_core::ExtensionField;
 
-use super::{
-    Felt, FieldElement, build_ace_memory_read_element_request, build_ace_memory_read_word_request,
-};
+use super::{Felt, build_ace_memory_read_element_request, build_ace_memory_read_word_request};
 use crate::{debug::BusDebugger, trace::AuxColumnBuilder};
 
 /// Describes how to construct the execution trace of the chiplets virtual table auxiliary trace
@@ -32,7 +31,7 @@ pub struct ChipletsVTableColBuilder {}
 
 impl<E> AuxColumnBuilder<E> for ChipletsVTableColBuilder
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     fn get_requests_at(
         &self,
@@ -76,7 +75,7 @@ where
 
     if f_mu {
         let index = main_trace.chiplet_node_index(row);
-        let lsb = index.as_canonical_u64() & 1;
+        let lsb = index.as_int() & 1;
         if lsb == 0 {
             let sibling = &main_trace.chiplet_hasher_state(row)[DIGEST_RANGE.end..];
             alphas[0]
@@ -96,7 +95,7 @@ where
         }
     } else if f_mua {
         let index = main_trace.chiplet_node_index(row);
-        let lsb = index.as_canonical_u64() & 1;
+        let lsb = index.as_int() & 1;
         if lsb == 0 {
             let sibling = &main_trace.chiplet_hasher_state(row + 1)[DIGEST_RANGE.end..];
             alphas[0]
@@ -133,7 +132,7 @@ where
 
     if f_mv {
         let index = main_trace.chiplet_node_index(row);
-        let lsb = index.as_canonical_u64() & 1;
+        let lsb = index.as_int() & 1;
         if lsb == 0 {
             let sibling = &main_trace.chiplet_hasher_state(row)[DIGEST_RANGE.end..];
             alphas[0]
@@ -153,7 +152,7 @@ where
         }
     } else if f_mva {
         let index = main_trace.chiplet_node_index(row);
-        let lsb = index.as_canonical_u64() & 1;
+        let lsb = index.as_int() & 1;
         if lsb == 0 {
             let sibling = &main_trace.chiplet_hasher_state(row + 1)[DIGEST_RANGE.end..];
             alphas[0]

@@ -232,7 +232,7 @@ impl Air for ProcessorAir {
     // TRANSITION CONSTRAINTS
     // --------------------------------------------------------------------------------------------
 
-    fn evaluate_transition<E: FieldElement<BaseField = Felt>>(
+    fn evaluate_transition<E: ExtensionField<Felt>>(
         &self,
         frame: &EvaluationFrame<E>,
         periodic_values: &[E],
@@ -277,8 +277,8 @@ impl Air for ProcessorAir {
         aux_rand_elements: &AuxRandElements<E>,
         result: &mut [E],
     ) where
-        F: FieldElement<BaseField = Felt>,
-        E: FieldElement<BaseField = Felt> + ExtensionOf<F>,
+        F: ExtensionField<Felt>,
+        E: ExtensionField<Felt> + ExtensionOf<F>,
     {
         // --- range checker ----------------------------------------------------------------------
         range::enforce_aux_constraints::<F, E>(
@@ -366,7 +366,7 @@ impl PublicInputs {
     }
 }
 /*
-impl vm_core::ToElements<Felt> for PublicInputs {
+impl miden_core::ToElements<Felt> for PublicInputs {
     fn to_elements(&self) -> Vec<Felt> {
         let mut result = self.stack_inputs.to_vec();
         result.append(&mut self.stack_outputs.to_vec());

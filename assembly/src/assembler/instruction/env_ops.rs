@@ -1,4 +1,4 @@
-use vm_core::{Operation::*, PrimeCharacteristicRing};
+use miden_core::{Operation::*, PrimeCharacteristicRing};
 
 use super::{BasicBlockBuilder, mem_ops::local_to_absolute_addr, push_felt};
 use crate::{AssemblyError, Felt, SourceSpan, assembler::ProcedureContext};

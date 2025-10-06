@@ -5,7 +5,7 @@ use crate::{
     ast::*,
     sema::{AnalysisContext, SemanticAnalysisError},
 };
-use vm_core::PrimeField64;
+use miden_core::PrimeField64;
 
 /// This visitor evaluates all constant expressions and folds them to literals.
 pub struct ConstEvalVisitor<'analyzer> {

@@ -2,8 +2,7 @@ use miden_air::{
     RowIndex,
     trace::decoder::{OP_BATCH_2_GROUPS, OP_BATCH_4_GROUPS, OP_BATCH_8_GROUPS},
 };
-use miden_core::{OPCODE_PUSH, OPCODE_RESPAN, OPCODE_SPAN};
-use vm_core::{
+use miden_core::{
     ExtensionField, OPCODE_EMIT, OPCODE_PUSH, OPCODE_RESPAN, OPCODE_SPAN, PrimeCharacteristicRing,
     PrimeField64,
 };

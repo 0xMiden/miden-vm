@@ -1,7 +1,7 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 
 use miden_air::RowIndex;
-use vm_core::PrimeCharacteristicRing;
+use miden_core::PrimeCharacteristicRing;
 
 use super::{Felt, RangeCheckTrace, ZERO, trace::NUM_RAND_ROWS};
 use crate::utils::uninit_vector;

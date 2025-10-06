@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use super::{EvaluationFrame, Felt, FieldElement, TransitionConstraintDegree};
+use super::{EvaluationFrame, Felt,  TransitionConstraintDegree};
 use crate::{
     ONE, ZERO,
     trace::chiplets::{
@@ -105,7 +105,7 @@ pub fn get_transition_constraint_count() -> usize {
 ///   by the caller and set to `Felt::ONE`
 /// - The `transition_flag` indicates whether this is the last row this chiplet's execution trace,
 ///   and therefore the constraints should not be enforced.
-pub fn enforce_constraints<E: FieldElement<BaseField = Felt>>(
+pub fn enforce_constraints<E: ExtensionField<Felt>>(
     frame: &EvaluationFrame<E>,
     periodic_values: &[E],
     result: &mut [E],

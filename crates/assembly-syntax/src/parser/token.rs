@@ -2,12 +2,11 @@ use alloc::string::String;
 use core::fmt;
 
 use miden_core::{
-    Felt, FieldElement, StarkField,
+    Felt, PrimeField64, StarkField,
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-use vm_core::{Felt, PrimeField64};
 
 // DOCUMENTATION TYPE
 // ================================================================================================

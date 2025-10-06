@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 use core::mem;
 
 use miden_air::trace::{
-    AUX_TRACE_RAND_ELEMENTS, AUX_TRACE_WIDTH, DECODER_TRACE_OFFSET, MIN_TRACE_LEN,
+    AUX_TRACE_RAND_ELEMENTS, AUX_TRACE_WIDTH, ColMatrix, DECODER_TRACE_OFFSET, MIN_TRACE_LEN,
     PADDED_TRACE_WIDTH, STACK_TRACE_OFFSET, TRACE_WIDTH,
     decoder::{NUM_USER_OP_HELPERS, USER_OP_HELPERS_OFFSET},
     main_trace::MainTrace,
@@ -14,13 +14,11 @@ use miden_core::{
 use winter_prover::{EvaluationFrame, Trace, TraceInfo, crypto::RandomCoin};
 
 use super::{
-    AdviceProvider, ColMatrix, Digest, Felt, FieldElement, Process,
-    chiplets::AuxTraceBuilder as ChipletsAuxTraceBuilder, crypto::RpoRandomCoin,
-    decoder::AuxTraceBuilder as DecoderAuxTraceBuilder,
+    AdviceProvider, Felt, Process, chiplets::AuxTraceBuilder as ChipletsAuxTraceBuilder,
+    crypto::RpoRandomCoin, decoder::AuxTraceBuilder as DecoderAuxTraceBuilder,
     range::AuxTraceBuilder as RangeCheckerAuxTraceBuilder,
     stack::AuxTraceBuilder as StackAuxTraceBuilder,
 };
-use crate::ColMatrix;
 
 mod utils;
 pub use utils::{AuxColumnBuilder, ChipletsLengths, TraceFragment, TraceLenSummary};
@@ -235,7 +233,7 @@ impl ExecutionTrace {
             .build_aux_columns(&self.main_trace, rand_elements);
 
         // combine all auxiliary columns into a single vector
-        let aux_columns = decoder_aux_columns
+        let mut aux_columns = decoder_aux_columns
             .into_iter()
             .chain(stack_aux_columns)
             .chain(range_aux_columns)
@@ -246,7 +244,7 @@ impl ExecutionTrace {
         let mut rng = RpoRandomCoin::new(*self.program_hash());
         for i in self.length() - NUM_RAND_ROWS..self.length() {
             for column in aux_columns.iter_mut() {
-                column[i] = rng.draw().expect("failed to draw a random value");
+                column[i] = rng.draw_ext_field::<E>().expect("failed to draw a random value");
             }
         }
 
@@ -271,7 +269,7 @@ impl ExecutionTrace {
 ///   in turn, ensures that polynomial degrees of all columns are stable.
 fn finalize_trace(
     process: Process,
-    mut _rng: RpoRandomCoin,
+    mut rng: RpoRandomCoin,
 ) -> (MainTrace, AuxTraceBuilders, TraceLenSummary) {
     let (system, decoder, stack, mut range, chiplets) = process.into_parts();
 
@@ -327,7 +325,7 @@ fn finalize_trace(
     // Inject random values into the last rows of the trace
     for i in trace_len - NUM_RAND_ROWS..trace_len {
         for column in trace.iter_mut().take(TRACE_WIDTH) {
-            column[i] = rng.draw().expect("failed to draw a random value");
+            column[i] = rng.draw_basefield();
         }
     }
 

@@ -1,4 +1,4 @@
-use miden_core::{Felt, FieldElement, Operation, ZERO};
+use miden_core::{Felt,  Operation, ZERO};
 use proptest::prelude::*;
 
 use super::{

@@ -1,6 +1,6 @@
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 use core::error::Error;
-use std::{string::ToString, vec::Vec};
+use std::string::ToString;
 
 use miden_air::RowIndex;
 use miden_core::{
@@ -40,11 +40,6 @@ pub enum ExecutionError {
         #[diagnostic_source]
         err: AdviceError,
     },
-    /// This error is caught by the assembler, so we don't need diagnostics here.
-    #[error("value for key {} not present in the advice map", to_hex(felts_to_hex(.0)))]
-    AdviceMapKeyNotFound(Word),
-    #[error("value for key {} already present in the advice map", to_hex(felts_to_hex(.0)))]
-    AdviceMapKeyAlreadyPresent(Word),
     #[error("advice stack read failed at step {0}")]
     AdviceStackReadFailed(RowIndex),
     #[error("illegal use of instruction {0} while inside a syscall")]

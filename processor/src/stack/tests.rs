@@ -4,7 +4,7 @@ use miden_air::trace::{
     STACK_TRACE_WIDTH,
     stack::{B0_COL_IDX, B1_COL_IDX, H0_COL_IDX, NUM_STACK_HELPER_COLS},
 };
-use miden_core::{Field, FieldElement, PrimeCharacteristicRing, PrimeField64};
+use miden_core::{Field, PrimeCharacteristicRing, PrimeField64};
 
 use super::*;
 use crate::stack::OverflowTableRow;

@@ -1,6 +1,6 @@
 use miden_core::{
-    BasedVectorSpace, ExtensionOf, Field, FieldElement, ONE, PrimeCharacteristicRing, PrimeField64,
-    QuadFelt, StarkField, ZERO, lazy_static,
+    BasedVectorSpace, Field, ONE, PrimeCharacteristicRing, PrimeField64, QuadFelt, ZERO,
+    lazy_static,
 };
 
 use super::{ExecutionError, Felt, Operation, Process};
@@ -284,7 +284,7 @@ mod tests {
         // fold evaluations at a single point using fold4 procedure
         let pos = 3;
         let x = domain[pos];
-        let ev = alpha.mul_base(x.inverse());
+        let ev = alpha.mul(x.inverse());
         let (result, ..) = super::fold4(transposed_evaluations[pos], ev, ev.square());
 
         // make sure the results of fold4 are the same as results form Winterfell

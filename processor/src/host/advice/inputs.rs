@@ -1,12 +1,8 @@
 use alloc::vec::Vec;
 
-use miden_core::{AdviceMap, Felt, Word, crypto::merkle::MerkleStore};
-use vm_core::{
-    AdviceMap, Felt, PrimeCharacteristicRing,
-    crypto::{
-        hash::RpoDigest,
-        merkle::{InnerNodeInfo, MerkleStore},
-    },
+use miden_core::{
+    AdviceMap, Felt, PrimeCharacteristicRing, Word,
+    crypto::merkle::{InnerNodeInfo, MerkleStore},
     errors::InputError,
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };

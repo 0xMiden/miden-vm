@@ -1,11 +1,7 @@
 use alloc::vec::Vec;
 
-use miden_air::{
-    RowIndex,
-    trace::chiplets::hasher::{Digest, HasherState},
-};
-use miden_core::{Kernel, mast::OpBatch};
-use vm_core::{Kernel, PrimeCharacteristicRing, mast::OpBatch};
+use miden_air::{RowIndex, trace::chiplets::hasher::HasherState};
+use miden_core::{Kernel, PrimeCharacteristicRing, mast::OpBatch};
 
 use super::{
     CHIPLETS_WIDTH, ChipletsTrace, EMPTY_WORD, ExecutionError, Felt, ONE, RangeChecker,

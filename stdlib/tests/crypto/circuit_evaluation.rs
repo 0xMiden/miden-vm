@@ -1,4 +1,4 @@
-use miden_core::{Felt, FieldElement, ONE, QuadFelt, ZERO};
+use miden_core::{Felt, ONE, QuadFelt, ZERO};
 use miden_utils_testing::rand::rand_value;
 
 #[test]

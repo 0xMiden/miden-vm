@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use pretty_assertions::assert_eq;
-use vm_core::{
+use miden_core::{
     assert_matches, crypto::hash::RpoDigest, mast::{MastForest, MastNode}, Felt, PrimeCharacteristicRing, Program
 };
 

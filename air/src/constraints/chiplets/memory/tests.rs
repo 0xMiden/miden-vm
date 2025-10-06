@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use miden_core::{Felt, FieldElement, WORD_SIZE};
+use miden_core::{Felt,  WORD_SIZE};
 use winter_rand_utils::rand_value;
 
 use super::{

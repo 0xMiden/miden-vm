@@ -1,9 +1,8 @@
-use miden_core::{Felt, chiplets::hasher::apply_permutation, utils::ToElements};
+use miden_core::{Felt, PrimeField64, chiplets::hasher::apply_permutation, utils::ToElements};
 use miden_processor::{AdviceError, ExecutionError, RowIndex};
 use miden_utils_testing::expect_exec_error_matches;
 use processor::{ExecutionError, RowIndex};
 use test_utils::expect_exec_error_matches;
-use vm_core::{Felt, PrimeField64, chiplets::hasher::apply_permutation, utils::ToElements};
 
 use super::{TRUNCATE_STACK_PROC, build_op_test, build_test};
 

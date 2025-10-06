@@ -12,7 +12,8 @@ use miden_air::trace::{
     },
 };
 use miden_core::{
-    EMPTY_WORD, EventId, ONE, Program, WORD_SIZE, ZERO, assert_matches,
+    EMPTY_WORD, EventId, ONE, PrimeCharacteristicRing, PrimeField64, Program, WORD_SIZE, ZERO,
+    assert_matches, lazy_static,
     mast::{
         BasicBlockNode, CallNode, DynNode, JoinNode, MastForest, MastNode, MastNodeExt, MastNodeId,
         OP_BATCH_SIZE,
@@ -21,11 +22,6 @@ use miden_core::{
 use miden_utils_testing::rand::rand_value;
 use rstest::rstest;
 use test_utils::rand::rand_value;
-use vm_core::{
-    EMPTY_WORD, ONE, PrimeCharacteristicRing, PrimeField64, Program, ZERO, assert_matches,
-    lazy_static,
-    mast::{BasicBlockNode, MastForest, MastNode, MastNodeId, OP_BATCH_SIZE},
-};
 
 use super::{
     super::{

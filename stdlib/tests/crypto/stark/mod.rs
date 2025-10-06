@@ -2,7 +2,7 @@ use std::array;
 
 use miden_air::{FieldExtension, HashFunction, PublicInputs};
 use miden_assembly::Assembler;
-use miden_core::{Felt, FieldElement, QuadFelt, WORD_SIZE, Word, ZERO};
+use miden_core::{Felt,  QuadFelt, WORD_SIZE, Word, ZERO};
 use miden_processor::{
     DefaultHost, Program, ProgramInfo,
     crypto::{RandomCoin, RpoRandomCoin},

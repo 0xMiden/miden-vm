@@ -2,9 +2,9 @@ use alloc::{string::ToString, vec::Vec};
 use core::slice;
 
 use miden_air::{RowIndex, trace::main_trace::MainTrace};
+use miden_core::ExtensionField;
 #[cfg(test)]
 use miden_core::{Operation, utils::ToElements};
-use vm_core::ExtensionField;
 
 use super::{Felt, NUM_RAND_ROWS};
 use crate::{chiplets::Chiplets, debug::BusDebugger, utils::uninit_vector};
@@ -273,7 +273,7 @@ pub trait AuxColumnBuilder<E: ExtensionField<Felt>> {
 
         // Use batch-inversion method to compute running product of `response[i]/request[i]`.
         let mut result_aux_column = responses_prod;
-        let mut requests_running_divisor = requests_running_prod.inv();
+        let mut requests_running_divisor = requests_running_prod.inverse();
         for i in (0..main_trace.num_rows()).rev() {
             result_aux_column[i] *= requests_running_divisor;
             requests_running_divisor *= requests[i];

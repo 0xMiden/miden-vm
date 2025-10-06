@@ -80,7 +80,7 @@ impl Process {
         let (addr, hashed_block) = self.chiplets.hasher.hash_control_block(
             child1_hash,
             child2_hash,
-            JoinNode::join_domain(),
+            JoinNode::DOMAIN,
             node.digest(),
         );
 
@@ -133,7 +133,7 @@ impl Process {
         let (addr, hashed_block) = self.chiplets.hasher.hash_control_block(
             child1_hash,
             child2_hash,
-            SplitNode::domain(),
+            SplitNode::DOMAIN,
             node.digest(),
         );
 
@@ -185,7 +185,7 @@ impl Process {
         let (addr, hashed_block) = self.chiplets.hasher.hash_control_block(
             body_hash,
             EMPTY_WORD,
-            LoopNode::domain(),
+            LoopNode::DOMAIN,
             node.digest(),
         );
 

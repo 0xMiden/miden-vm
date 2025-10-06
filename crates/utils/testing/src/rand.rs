@@ -1,12 +1,12 @@
 use core::fmt::Debug;
 use std::vec::Vec;
 
+use miden_core::PrimeCharacteristicRing;
 use rand::{
     Rng,
     distr::{Distribution, StandardUniform},
     prelude::*,
 };
-use vm_core::PrimeCharacteristicRing;
 pub use winter_rand_utils::*;
 
 use super::{Felt, WORD_SIZE, Word};

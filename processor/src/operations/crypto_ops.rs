@@ -1,8 +1,7 @@
-use miden_core::mast::MastForest;
-use vm_core::PrimeField64;
+use miden_core::{PrimeField64, mast::MastForest};
 
 use super::{ExecutionError, Operation, Process};
-use crate::{AdviceProvider, ErrorContext, Felt, Host};
+use crate::{AdviceProvider, ErrorContext, Felt};
 
 // CRYPTOGRAPHIC OPERATIONS
 // ================================================================================================
@@ -197,17 +196,13 @@ mod tests {
     use alloc::vec::Vec;
 
     use miden_core::{
+        PrimeCharacteristicRing, PrimeField64,
         chiplets::hasher::{STATE_WIDTH, apply_permutation},
         crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},
         mast::MastForest,
     };
     use miden_utils_testing::rand::rand_vector;
     use test_utils::rand::rand_vector;
-    use vm_core::{
-        PrimeCharacteristicRing, PrimeField64,
-        chiplets::hasher::{STATE_WIDTH, apply_permutation},
-        crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},
-    };
 
     use super::{
         super::{Felt, Operation},

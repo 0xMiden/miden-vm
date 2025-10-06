@@ -2,8 +2,7 @@ use miden_assembly_syntax::{
     debuginfo::{SourceSpan, Spanned},
     diagnostics::{RelatedLabel, Report},
 };
-use miden_core::{Felt, Operation::*};
-use vm_core::{Felt, Operation::*, PrimeCharacteristicRing};
+use miden_core::{Felt, Operation::*, PrimeCharacteristicRing};
 
 use super::{BasicBlockBuilder, push_felt, push_u32_value, validate_param};
 use crate::{AssemblyError, ProcedureContext, assembler::ProcedureContext, diagnostics::Report};

@@ -1,14 +1,14 @@
 use alloc::vec::Vec;
 
 use miden_core::{
-    Felt, Field, FieldElement, PrimeCharacteristicRing, PrimeField64, QuadFelt, WORD_SIZE, Word,
-    ZERO,
+    Felt, Field, PrimeCharacteristicRing, PrimeField64, QuadFelt, WORD_SIZE, Word, ZERO,
     crypto::{
-        hash::{Rpo256, RpoDigest},
+        hash::Rpo256,
         merkle::{EmptySubtreeRoots, SMT_DEPTH, Smt},
     },
     sys_events::SystemEvent,
 };
+use miden_core::AlgebraicSponge;
 
 use crate::{ExecutionError, ProcessState, errors::ErrorContext};
 
@@ -314,7 +314,7 @@ pub fn push_key_presence_flag(process: &mut ProcessState) -> Result<(), Executio
     let map_key = process.get_stack_word(1);
 
     let presence_flag = process.advice_provider().contains_map_key(&map_key);
-    process.advice_provider_mut().push_stack(Felt::from(presence_flag));
+    process.advice_provider_mut().push_stack(Felt::new(presence_flag as u64));
 
     Ok(())
 }

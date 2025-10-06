@@ -3,7 +3,7 @@ use alloc::{
     sync::Arc,
     vec::Vec,
 };
-use vm_core::{PrimeCharacteristicRing, PrimeField64};
+use miden_core::{PrimeCharacteristicRing, PrimeField64};
 
 use super::{SemanticAnalysisError, SyntaxError};
 use crate::{

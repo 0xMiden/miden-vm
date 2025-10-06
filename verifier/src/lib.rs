@@ -36,7 +36,7 @@ pub use miden_core::{Kernel, ProgramInfo, StackInputs, StackOutputs, Word};
 use verify::verify as verify_proof;
 pub use winter_verifier::{AcceptableOptions, VerifierError};
 pub mod math {
-    pub use miden_core::{Felt, FieldElement, StarkField};
+    pub use miden_core::{Felt, StarkField};
 }
 pub use miden_air::ExecutionProof;
 

@@ -1,11 +1,10 @@
 use alloc::vec::Vec;
 
 use miden_air::trace::main_trace::MainTrace;
-use miden_core::Kernel;
-use vm_core::{ExtensionField, Kernel};
+use miden_core::{ExtensionField, Kernel};
 use wiring_bus::WiringBusBuilder;
 
-use super::{super::trace::AuxColumnBuilder, Felt, FieldElement, ace::AceHints};
+use super::{super::trace::AuxColumnBuilder, Felt, ace::AceHints};
 
 mod bus;
 pub use bus::{
@@ -75,12 +74,12 @@ impl AuxTraceBuilder {
 #[inline(always)]
 fn build_value<E, const N: usize>(alphas: &[E], elements: [Felt; N]) -> E
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     debug_assert_eq!(alphas.len(), elements.len());
-    let mut value = alphas[0].mul_base(elements[0]);
+    let mut value = alphas[0].mul(elements[0]);
     for i in 1..N {
-        value += alphas[i].mul_base(elements[i]);
+        value += alphas[i].mul(elements[i]);
     }
     value
 }

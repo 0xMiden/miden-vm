@@ -62,7 +62,7 @@ impl<'a> BusColumnBuilder<'a> {
     }
 }
 
-impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for BusColumnBuilder {
+impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for BusColumnBuilder<'_> {
     /// Constructs the requests made by the VM-components to the chiplets at `row`.
     fn get_requests_at(
         &self,
@@ -179,7 +179,7 @@ fn build_dyn_block_request<E: ExtensionField<Felt>>(
     _debugger: &mut BusDebugger<E>,
 ) -> E
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     let control_block_req = ControlBlockRequestMessage {
         transition_label: Felt::from_u8(LINEAR_HASH_LABEL + 16),
@@ -221,7 +221,7 @@ fn build_syscall_block_request<E: ExtensionField<Felt>>(
     _debugger: &mut BusDebugger<E>,
 ) -> E
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     let control_block_req = ControlBlockRequestMessage {
         transition_label: Felt::from_u8(LINEAR_HASH_LABEL + 16),

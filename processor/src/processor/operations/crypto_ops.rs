@@ -1,7 +1,7 @@
 use miden_air::trace::decoder::NUM_USER_OP_HELPERS;
 use miden_core::{
-    Felt, QuadFelt, ZERO, chiplets::hasher::STATE_WIDTH, mast::MastForest, stack::MIN_STACK_DEPTH,
-    utils::range,
+    BasedVectorSpace, Felt, QuadFelt, ZERO, chiplets::hasher::STATE_WIDTH, mast::MastForest,
+    stack::MIN_STACK_DEPTH, utils::range,
 };
 
 use crate::{
@@ -161,12 +161,14 @@ pub(super) fn op_horner_eval_base<P: Processor>(
             .map_err(ExecutionError::MemoryError)?;
         tracer.record_memory_read_word(word, addr);
 
-        (QuadFelt::new(word[0], word[1]), word[2], word[3])
+        (QuadFelt::new([word[0], word[1]]), word[2], word[3])
     };
 
     // Read the current accumulator
-    let acc_old =
-        QuadFelt::new(processor.stack().get(ACC_LOW_INDEX), processor.stack().get(ACC_HIGH_INDEX));
+    let acc_old = QuadFelt::new([
+        processor.stack().get(ACC_LOW_INDEX),
+        processor.stack().get(ACC_HIGH_INDEX),
+    ]);
 
     // Compute the temporary accumulator (first 4 coefficients)
     let acc_tmp = coef
@@ -183,7 +185,7 @@ pub(super) fn op_horner_eval_base<P: Processor>(
         .fold(acc_tmp, |acc, coef| QuadFelt::from(*coef) + alpha * acc);
 
     // Update the accumulator values on the stack
-    let acc_new_base_elements = acc_new.to_base_elements();
+    let acc_new_base_elements = acc_new.as_basis_coefficients_slice();
     processor.stack().set(ACC_HIGH_INDEX, acc_new_base_elements[1]);
     processor.stack().set(ACC_LOW_INDEX, acc_new_base_elements[0]);
 
@@ -211,10 +213,10 @@ pub(super) fn op_horner_eval_ext<P: Processor>(
     // Read the coefficients from the stack as extension field elements (4 QuadFelt elements)
     // Stack layout: [c3_1, c3_0, c2_1, c2_0, c1_1, c1_0, c0_1, c0_0, ...]
     let coef = [
-        QuadFelt::new(processor.stack().get(1), processor.stack().get(0)), // c0: (c0_0, c0_1)
-        QuadFelt::new(processor.stack().get(3), processor.stack().get(2)), // c1: (c1_0, c1_1)
-        QuadFelt::new(processor.stack().get(5), processor.stack().get(4)), // c2: (c2_0, c2_1)
-        QuadFelt::new(processor.stack().get(7), processor.stack().get(6)), // c3: (c3_0, c3_1)
+        QuadFelt::new([processor.stack().get(1), processor.stack().get(0)]), // c0: (c0_0, c0_1)
+        QuadFelt::new([processor.stack().get(3), processor.stack().get(2)]), // c1: (c1_0, c1_1)
+        QuadFelt::new([processor.stack().get(5), processor.stack().get(4)]), // c2: (c2_0, c2_1)
+        QuadFelt::new([processor.stack().get(7), processor.stack().get(6)]), // c3: (c3_0, c3_1)
     ];
 
     // Read the evaluation point alpha from memory
@@ -226,14 +228,14 @@ pub(super) fn op_horner_eval_ext<P: Processor>(
             .map_err(ExecutionError::MemoryError)?;
         tracer.record_memory_read_word(word, addr);
 
-        (QuadFelt::new(word[0], word[1]), word[2], word[3])
+        (QuadFelt::new([word[0], word[1]]), word[2], word[3])
     };
 
     // Read the current accumulator
-    let acc_old = QuadFelt::new(
+    let acc_old = QuadFelt::new([
         processor.stack().get(ACC_LOW_INDEX),  // acc0
         processor.stack().get(ACC_HIGH_INDEX), // acc1
-    );
+    ]);
 
     // Compute the temporary accumulator (first 2 coefficients: c0, c1)
     let acc_tmp = coef.iter().rev().take(2).fold(acc_old, |acc, coef| *coef + alpha * acc);
@@ -242,7 +244,7 @@ pub(super) fn op_horner_eval_ext<P: Processor>(
     let acc_new = coef.iter().rev().skip(2).fold(acc_tmp, |acc, coef| *coef + alpha * acc);
 
     // Update the accumulator values on the stack
-    let acc_new_base_elements = acc_new.to_base_elements();
+    let acc_new_base_elements = acc_new.as_basis_coefficients_slice();
     processor.stack().set(ACC_HIGH_INDEX, acc_new_base_elements[1]);
     processor.stack().set(ACC_LOW_INDEX, acc_new_base_elements[0]);
 

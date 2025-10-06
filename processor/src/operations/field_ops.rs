@@ -1,6 +1,6 @@
 use miden_core::{Field, ONE, Operation, PrimeCharacteristicRing, PrimeField64, ZERO};
 
-use super::{ExecutionError, Felt, FieldElement, Process, utils::assert_binary};
+use super::{ExecutionError, Felt, Process, utils::assert_binary};
 use crate::ErrorContext;
 
 // FIELD OPERATIONS

@@ -1,4 +1,4 @@
-use vm_core::PrimeField64;
+use miden_core::PrimeField64;
 
 use super::{ExecutionError, MIN_STACK_DEPTH, Process};
 use crate::{ErrorContext, ZERO};

@@ -60,7 +60,7 @@ pub use kernel::Kernel;
 pub use miden_crypto::{
     BasedVectorSpace, BinomialExtensionField, EMPTY_WORD, ExtensionField, Felt, Field, ONE,
     PrimeCharacteristicRing, PrimeField64, WORD_SIZE, Word, ZERO, batch_multiplicative_inverse,
-    batch_multiplicative_inverse_general, word::LexicographicWord,
+    batch_multiplicative_inverse_general, word::LexicographicWord, AlgebraicSponge
 };
 pub mod crypto {
     pub mod merkle {
@@ -92,14 +92,16 @@ pub mod crypto {
     }
 }
 
+pub type QuadFelt = BinomialExtensionField<Felt, 2>;
+
 pub mod mast;
-/*
-pub use math::{
-    ExtensionOf, FieldElement, StarkField, ToElements,
-    fields::{QuadExtension, f64::BaseElement as Felt},
-    polynom,
-};
- */
+
+// pub use math::{
+//     ExtensionOf,  StarkField, ToElements,
+//     fields::{QuadExtension, f64::BaseElement as Felt},
+//     polynom,
+// };
+
 pub use lazy_static::lazy_static;
 
 pub mod prettier {

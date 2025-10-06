@@ -13,29 +13,24 @@ use miden_air::trace::{
     CHIPLETS_WIDTH, DECODER_TRACE_WIDTH, MIN_TRACE_LEN, RANGE_CHECK_TRACE_WIDTH, STACK_TRACE_WIDTH,
     SYS_TRACE_WIDTH,
 };
-pub use miden_air::{ColMatrix, ExecutionOptions, ExecutionOptionsError, RowIndex};
+pub use miden_air::{ExecutionOptions, ExecutionOptionsError, RowIndex};
 pub use miden_core::{
-    AssemblyOp, EMPTY_WORD, Felt, Kernel, ONE, Operation, Program, ProgramInfo, QuadExtension,
-    StackInputs, StackOutputs, WORD_SIZE, Word, ZERO,
-};
-use miden_core::{
-    BinomialExtensionField, Decorator, DecoratorIterator, FieldElement, PrimeField64,
-    mast::{
-        BasicBlockNode, CallNode, DecoratorOpLinkIterator, DynNode, ExternalNode, JoinNode,
-        LoopNode, OpBatch, SplitNode,
-    },
-};
-use miden_debug_types::SourceSpan;
-pub use vm_core::{
     AssemblyOp, EMPTY_WORD, Felt, Kernel, ONE, Operation, Program, ProgramInfo, StackInputs,
-    StackOutputs, Word, ZERO,
-    chiplets::hasher::Digest,
+    StackOutputs, WORD_SIZE, Word, ZERO,
     crypto::merkle::SMT_DEPTH,
     errors::InputError,
     mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
     sys_events::SystemEvent,
     utils::DeserializationError,
 };
+use miden_core::{
+    BinomialExtensionField, Decorator, PrimeField64,
+    mast::{
+        BasicBlockNode, CallNode, DecoratorOpLinkIterator, DynNode, ExternalNode, JoinNode,
+        LoopNode, OpBatch, SplitNode,
+    },
+};
+use miden_debug_types::SourceSpan;
 pub use winter_prover::matrix::ColMatrix;
 
 pub(crate) mod continuation_stack;
@@ -96,7 +91,7 @@ pub use debug::{AsmOpInfo, VmState, VmStateIterator};
 // ================================================================================================
 
 pub mod math {
-    pub use miden_core::{Felt, FieldElement, StarkField};
+    pub use miden_core::{ExtensionField, Felt, PrimeCharacteristicRing, PrimeField64, QuadFelt};
     pub use winter_prover::math::fft;
 }
 
@@ -156,7 +151,6 @@ impl core::ops::Add<u32> for MemoryAddress {
         MemoryAddress(self.0 + rhs)
     }
 }
-type QuadFelt = BinomialExtensionField<Felt, 2>;
 
 type SysTrace = [Vec<Felt>; SYS_TRACE_WIDTH];
 

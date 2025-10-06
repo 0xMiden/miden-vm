@@ -5,11 +5,11 @@ use miden_air::{
         bitwise::{BITWISE_AND, BITWISE_XOR, OP_CYCLE_LEN},
     },
 };
-use vm_core::{Field, PrimeCharacteristicRing};
+use miden_core::{Field, PrimeCharacteristicRing};
 
 use super::{
     AUX_TRACE_RAND_ELEMENTS, CHIPLETS_AUX_TRACE_OFFSET, CHIPLETS_BUS_AUX_TRACE_OFFSET,
-    ExecutionTrace, Felt, FieldElement, HASH_CYCLE_LEN, NUM_RAND_ROWS, ONE, Operation, Trace,
+    ExecutionTrace, Felt, HASH_CYCLE_LEN, NUM_RAND_ROWS, ONE, Operation, Trace,
     build_trace_from_ops, rand_array, rand_value,
 };
 

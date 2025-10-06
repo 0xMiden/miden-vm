@@ -1,5 +1,6 @@
 use alloc::vec::Vec;
 
+use miden_core::PrimeCharacteristicRing;
 // RE-EXPORTS
 // ================================================================================================
 pub use miden_core::crypto::{
@@ -10,7 +11,6 @@ pub use miden_core::crypto::{
         MmrPeaks, NodeIndex, PartialMerkleTree, SimpleSmt, Smt,
     },
 };
-use vm_core::PrimeCharacteristicRing;
 pub use winter_prover::crypto::{
     BatchMerkleProof, DefaultRandomCoin as WinterRandomCoin, ElementHasher, Hasher, RandomCoin,
 };

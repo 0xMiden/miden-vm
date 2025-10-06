@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use super::super::{
-    CHIPLETS_OFFSET, EvaluationFrame, Felt, FieldElement, TransitionConstraintDegree,
+    CHIPLETS_OFFSET, EvaluationFrame, Felt,  TransitionConstraintDegree,
 };
 use crate::{
     Assertion, AuxRandElements, Word,
@@ -44,7 +44,7 @@ pub fn get_aux_assertions_first_step<E>(
     kernel_digests: &[Word],
     aux_rand_elements: &AuxRandElements<E>,
 ) where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     let reduced_kernel_digests = reduce_kernel_digests(kernel_digests, aux_rand_elements);
     result.push(Assertion::single(
@@ -82,7 +82,7 @@ pub fn get_transition_constraint_count() -> usize {
 }
 
 /// Enforces constraints for the chiplets module and all chiplet components.
-pub fn enforce_constraints<E: FieldElement<BaseField = Felt>>(
+pub fn enforce_constraints<E: ExtensionField<Felt>>(
     frame: &EvaluationFrame<E>,
     periodic_values: &[E],
     result: &mut [E],
@@ -256,7 +256,7 @@ impl<E: FieldElement> ChipletsFrameExt<E> for &EvaluationFrame<E> {
 /// Reduces kernel procedures digests using auxiliary randomness.
 fn reduce_kernel_digests<E>(kernel_digests: &[Word], aux_rand_elements: &AuxRandElements<E>) -> E
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     let alphas = aux_rand_elements.rand_elements();
     kernel_digests.iter().fold(E::ONE, |acc, digest: &Word| {
@@ -266,7 +266,7 @@ where
             .iter()
             .skip(2)
             .zip(digest.iter())
-            .map(|(alpha, coef)| alpha.mul_base(*coef))
+            .map(|(alpha, coef)| alpha.mul(*coef))
             .fold(affine_term, |acc, term| acc + term);
 
         acc * cur

@@ -1,4 +1,4 @@
-use vm_core::{PrimeCharacteristicRing, lazy_static};
+use miden_core::{PrimeCharacteristicRing, lazy_static};
 
 use super::{ExecutionError, Felt, Process};
 
@@ -38,8 +38,8 @@ mod tests {
     use miden_core::{Operation, QuadFelt, ZERO, mast::MastForest};
     use miden_utils_testing::rand::rand_value;
     type QuadFelt = BinomialExtensionField<Felt, 2>;
+    use miden_core::BinomialExtensionField;
     use test_utils::rand::rand_value;
-    use vm_core::BinomialExtensionField;
 
     use super::*;
     use crate::{DefaultHost, StackInputs, operations::MIN_STACK_DEPTH};

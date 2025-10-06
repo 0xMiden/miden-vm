@@ -1,4 +1,4 @@
-use miden_core::{Felt, FieldElement, ONE, Operation, ZERO};
+use miden_core::{Felt,  ONE, Operation, ZERO};
 use winter_rand_utils::rand_value;
 
 use super::{EvaluationFrame, NUM_CONSTRAINTS, enforce_constraints};

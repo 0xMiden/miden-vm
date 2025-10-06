@@ -1,4 +1,4 @@
-use miden_core::{Felt, FieldElement, Operation, QuadFelt};
+use miden_core::{BasedVectorSpace, Felt, Operation, QuadFelt};
 
 use crate::{ExecutionError, Process, errors::ErrorContext};
 
@@ -92,17 +92,13 @@ impl Process {
         self.stack.set(ACC_HIGH_INDEX, acc_new.to_array()[1]);
         self.stack.set(ACC_LOW_INDEX, acc_new.to_array()[0]);
 
+        let alpha_base = alpha.as_basis_coefficients_slice();
+        let acc_tmp_base = acc_tmp.as_basis_coefficients_slice();
+
         // set the helper registers
         self.decoder.set_user_op_helpers(
             Operation::HornerBase,
-            &[
-                alpha.base_element(0),
-                alpha.base_element(1),
-                k0,
-                k1,
-                acc_tmp.base_element(0),
-                acc_tmp.base_element(1),
-            ],
+            &[alpha_base[0], alpha_base[1], k0, k1, acc_tmp_base[0], acc_tmp_base[1]],
         );
 
         Ok(())
@@ -165,6 +161,7 @@ impl Process {
         // read the evaluation point from memory
         // we also read the second half of the memory word containing alpha
         let (alpha, k0, k1) = self.get_evaluation_point(err_ctx)?;
+        let alpha_base = alpha.as_basis_coefficients_slice();
 
         // compute the temporary and updated accumulator values
         let acc_old = self.get_accumulator();
@@ -176,17 +173,12 @@ impl Process {
         self.stack.set(ACC_HIGH_INDEX, acc_new.to_array()[1]);
         self.stack.set(ACC_LOW_INDEX, acc_new.to_array()[0]);
 
+        let acc_tmp_base = acc_tmp.as_basis_coefficients_slice();
+
         // set the helper registers
         self.decoder.set_user_op_helpers(
             Operation::HornerBase,
-            &[
-                alpha.base_element(0),
-                alpha.base_element(1),
-                k0,
-                k1,
-                acc_tmp.base_element(0),
-                acc_tmp.base_element(1),
-            ],
+            &[alpha_base[0], alpha_base[1], k0, k1, acc_tmp_base[0], acc_tmp_base[1]],
         );
 
         Ok(())
@@ -245,7 +237,7 @@ impl Process {
         let alpha_0 = word[0];
         let alpha_1 = word[1];
 
-        Ok((QuadFelt::new(alpha_0, alpha_1), word[2], word[3]))
+        Ok((QuadFelt::new([alpha_0, alpha_1]), word[2], word[3]))
     }
 
     /// Reads the accumulator values.
@@ -428,7 +420,7 @@ mod tests {
         let coefficients: Vec<_> = stack_state
             .chunks(2)
             .take(4)
-            .map(|coef| QuadFelt::new(coef[1], coef[0]))
+            .map(|coef| QuadFelt::new([coef[1], coef[0]]))
             .collect();
 
         let acc_tmp =

@@ -4,8 +4,7 @@ use miden_core::{Kernel, ONE, Operation, Program, StackOutputs, Word, ZERO, mast
 use miden_utils_testing::rand::rand_array;
 
 use super::{
-    super::chiplets::init_state_from_words, ExecutionTrace, Felt, FieldElement, NUM_RAND_ROWS,
-    Process, Trace,
+    super::chiplets::init_state_from_words, ExecutionTrace, Felt, NUM_RAND_ROWS, Process, Trace,
 };
 use crate::{AdviceInputs, DefaultHost, ExecutionOptions, MemAdviceProvider, StackInputs};
 

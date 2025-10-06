@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use miden_air::{
-    Felt, FieldElement,
+    Felt,
     stack::{
         NUM_GENERAL_CONSTRAINTS, enforce_constraints, field_ops, io_ops,
         op_flags::generate_evaluation_frame, overflow, stack_manipulation, system_ops, u32_ops,

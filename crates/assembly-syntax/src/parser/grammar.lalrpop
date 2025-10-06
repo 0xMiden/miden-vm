@@ -11,7 +11,7 @@ use miden_debug_types::{SourceId, SourceSpan, Span, Spanned};
 use smallvec::smallvec;
 use miden_core::{Felt, crypto::hash::RpoDigest, PrimeField64, PrimeCharacteristicRing};
 
-use crate::{LibraryPath, LibraryNamespace, ast::{*, types::{AddressSpace, Type}}, Felt, FieldElement, StarkField, Word};
+use crate::{LibraryPath, LibraryNamespace, ast::{*, types::{AddressSpace, Type}}, Felt,  StarkField, Word};
 use super::{
     BinEncodedValue, IntValue, PushValue, Token, WordValue, ParseError, ParsingError,
     LiteralErrorKind, DocumentationType
