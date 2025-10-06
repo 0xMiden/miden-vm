@@ -494,14 +494,14 @@ fn mast_forest_merge_external_node_reference_with_decorator() {
         let id_foo_a_fingerprint =
             MastNodeFingerprint::from_mast_node(&forest_a, &BTreeMap::new(), &forest_a[id_foo_a]);
 
-        let fingerprints: Vec<_> = merged
-            .nodes()
-            .iter()
-            .map(|node| MastNodeFingerprint::from_mast_node(&merged, &BTreeMap::new(), node))
-            .collect();
-
-        assert_eq!(merged.nodes.len(), 1);
-        assert!(fingerprints.contains(&id_foo_a_fingerprint));
+        assert_eq!(merged.nodes().len(), 1);
+        assert!(
+            merged
+                .nodes()
+                .iter()
+                .map(|node| MastNodeFingerprint::from_mast_node(&merged, &BTreeMap::new(), node))
+                .any(|fingerprint| fingerprint == id_foo_a_fingerprint)
+        );
 
         if idx == 0 {
             assert_root_mapping(&root_maps, vec![&forest_a.roots, &forest_b.roots], &merged.roots)
@@ -562,14 +562,13 @@ fn mast_forest_merge_external_node_with_decorator() {
         let id_foo_b_fingerprint =
             MastNodeFingerprint::from_mast_node(&forest_a, &BTreeMap::new(), &forest_b[id_foo_b]);
 
-        let fingerprints: Vec<_> = merged
-            .nodes()
-            .iter()
-            .map(|node| MastNodeFingerprint::from_mast_node(&merged, &BTreeMap::new(), node))
-            .collect();
-
-        // Block foo should be unmodified.
-        assert!(fingerprints.contains(&id_foo_b_fingerprint));
+        assert!(
+            merged
+                .nodes()
+                .iter()
+                .map(|node| MastNodeFingerprint::from_mast_node(&merged, &BTreeMap::new(), node))
+                .any(|fingerprint| fingerprint == id_foo_b_fingerprint)
+        );
 
         if idx == 0 {
             assert_root_mapping(&root_maps, vec![&forest_a.roots, &forest_b.roots], &merged.roots)
@@ -632,14 +631,14 @@ fn mast_forest_merge_external_node_and_referenced_node_have_decorators() {
         let id_foo_b_fingerprint =
             MastNodeFingerprint::from_mast_node(&forest_b, &BTreeMap::new(), &forest_b[id_foo_b]);
 
-        let fingerprints: Vec<_> = merged
-            .nodes()
-            .iter()
-            .map(|node| MastNodeFingerprint::from_mast_node(&merged, &BTreeMap::new(), node))
-            .collect();
-
         // Block foo should be unmodified.
-        assert!(fingerprints.contains(&id_foo_b_fingerprint));
+        assert!(
+            merged
+                .nodes()
+                .iter()
+                .map(|node| MastNodeFingerprint::from_mast_node(&merged, &BTreeMap::new(), node))
+                .any(|fingerprint| fingerprint == id_foo_b_fingerprint)
+        );
 
         if idx == 0 {
             assert_root_mapping(&root_maps, vec![&forest_a.roots, &forest_b.roots], &merged.roots)
@@ -710,14 +709,14 @@ fn mast_forest_merge_multiple_external_nodes_with_decorator() {
         let id_foo_b_fingerprint =
             MastNodeFingerprint::from_mast_node(&forest_a, &BTreeMap::new(), &forest_b[id_foo_b]);
 
-        let fingerprints: Vec<_> = merged
-            .nodes()
-            .iter()
-            .map(|node| MastNodeFingerprint::from_mast_node(&merged, &BTreeMap::new(), node))
-            .collect();
-
         // Block foo should be unmodified.
-        assert!(fingerprints.contains(&id_foo_b_fingerprint));
+        assert!(
+            merged
+                .nodes()
+                .iter()
+                .map(|node| MastNodeFingerprint::from_mast_node(&merged, &BTreeMap::new(), node))
+                .any(|fingerprint| fingerprint == id_foo_b_fingerprint)
+        );
 
         if idx == 0 {
             assert_root_mapping(&root_maps, vec![&forest_a.roots, &forest_b.roots], &merged.roots)
