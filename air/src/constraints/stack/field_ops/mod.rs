@@ -67,7 +67,7 @@ pub fn enforce_constraints<E: FieldElement>(
     index += enforce_mul_constraints(frame, &mut result[index..], op_flag.mul());
 
     // Enforce constaints of the INV operation.
-    index += enforce_inv_constraints(frame, &mut result[index..], op_flag.inv());
+    index += enforce_inv_constraints(frame, &mut result[index..], op_flag.inverse());
 
     // Enforce constaints of the INCR operation.
     index += enforce_incr_constraints(frame, &mut result[index..], op_flag.incr());

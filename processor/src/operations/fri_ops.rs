@@ -62,7 +62,7 @@ impl Process {
         // --- read all relevant variables from the stack ---------------------
         let query_values = self.get_query_values();
         let f_pos = self.get_folded_position();
-        let d_seg = self.get_domain_segment().as_canonical_u64();
+        let d_seg = self.get_domain_segment().as_int();
         let poe = self.get_poe();
         let prev_value = self.get_previous_value();
         let alpha = self.get_alpha();
@@ -343,7 +343,7 @@ mod tests {
         let stack_state = process.stack.trace_state();
 
         // perform layer folding
-        let f_tau = super::get_tau_factor(d_seg.as_canonical_u64() as usize);
+        let f_tau = super::get_tau_factor(d_seg.as_int() as usize);
         let x = poe * f_tau * super::DOMAIN_OFFSET;
         let x_inv = x.inverse();
 
@@ -359,7 +359,7 @@ mod tests {
         assert_eq!(stack_state[3], tmp1[0]);
 
         // check domain segment flags
-        let ds = super::get_domain_segment_flags(d_seg.as_canonical_u64() as usize);
+        let ds = super::get_domain_segment_flags(d_seg.as_int() as usize);
         assert_eq!(stack_state[4], ds[3]);
         assert_eq!(stack_state[5], ds[2]);
         assert_eq!(stack_state[6], ds[1]);

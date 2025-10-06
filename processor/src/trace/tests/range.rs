@@ -1,9 +1,10 @@
+use core::ops::Mul;
+
 use miden_air::trace::{
     AUX_TRACE_RAND_ELEMENTS, chiplets::hasher::HASH_CYCLE_LEN, range::B_RANGE_COL_IDX,
 };
-use miden_core::{ExtensionOf, Field, Operation, PrimeCharacteristicRing};
+use miden_core::{Field, Operation, PrimeCharacteristicRing};
 use miden_utils_testing::rand::rand_array;
-use test_utils::rand::rand_array;
 
 use super::{Felt, NUM_RAND_ROWS, ONE, ZERO, build_trace_from_ops};
 
@@ -34,7 +35,7 @@ fn b_range_trace_stack() {
     // at cycle 1. (The trace begins by executing `span`). It must be subtracted out of `b_range`.
     // The range-checked values are 0, 256, 0, 0, so the values to subtract are 3/(alpha + 0) and
     // 1/(alpha + 256).
-    let lookups = alpha.inv().mul(Felt::new(3)) + (alpha + Felt::new(256)).inv();
+    let lookups = alpha.inverse().mul(Felt::new(3)) + (alpha + Felt::new(256)).inverse();
     let mut expected = b_range[1] - lookups;
     assert_eq!(expected, b_range[2]);
 
@@ -57,7 +58,7 @@ fn b_range_trace_stack() {
     assert_eq!(expected, b_range[values_start + 3]);
     assert_eq!(expected, b_range[values_start + 4]);
     // Then we include 1 lookup of 256, so it should be multiplied by alpha + 256.
-    expected += (alpha + Felt::new(256)).inv();
+    expected += (alpha + Felt::new(256)).inverse();
     assert_eq!(expected, b_range[values_start + 5]);
 
     // --- Check the last value of the b_range column is zero --------------------------------------
@@ -117,10 +118,10 @@ fn b_range_trace_mem() {
     let (d0_load, d1_load) = (Felt::from_u64(5), ZERO);
 
     // Include the lookups from the `MStoreW` operation at the next row.
-    expected -= (alpha + d0_store).inv() + (alpha + d1_store).inv();
+    expected -= (alpha + d0_store).inverse() + (alpha + d1_store).inverse();
     assert_eq!(expected, b_range[memory_start + 1]);
     // Include the lookup from the `MLoadW` operation at the next row.
-    expected -= (alpha + d0_load).inv() + (alpha + d1_load).inv();
+    expected -= (alpha + d0_load).inverse() + (alpha + d1_load).inverse();
     assert_eq!(expected, b_range[memory_start + 2]);
 
     // The value should be unchanged until the range checker's lookups are included.
@@ -135,14 +136,14 @@ fn b_range_trace_mem() {
     assert_eq!(expected, b_range[values_start + 1]);
 
     // We include 1 lookup of ONE in the next row.
-    expected += (alpha + d0_store).inv();
+    expected += (alpha + d0_store).inverse();
     assert_eq!(expected, b_range[values_start + 2]);
 
     // We have one bridge row between 1 and 5 where the value does not change.
     assert_eq!(expected, b_range[values_start + 3]);
 
     // We include 1 lookup of 5 in the next row.
-    expected += (alpha + d0_load).inv();
+    expected += (alpha + d0_load).inverse();
     assert_eq!(expected, b_range[values_start + 4]);
 
     // --- The value should now be ZERO for the rest of the trace. ---------------------------------

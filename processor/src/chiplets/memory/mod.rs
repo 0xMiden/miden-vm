@@ -169,7 +169,7 @@ impl Memory {
         err_ctx: &impl ErrorContext,
     ) -> Result<Felt, MemoryError> {
         let addr: u32 = addr
-            .as_canonical_u64()
+            .as_int()
             .try_into()
             .map_err(|_| MemoryError::address_out_of_bounds(addr.as_int(), err_ctx))?;
         self.num_trace_rows += 1;
@@ -193,7 +193,7 @@ impl Memory {
         err_ctx: &impl ErrorContext,
     ) -> Result<Word, MemoryError> {
         let addr: u32 = addr
-            .as_canonical_u64()
+            .as_int()
             .try_into()
             .map_err(|_| MemoryError::address_out_of_bounds(addr.as_int(), err_ctx))?;
         if !addr.is_multiple_of(WORD_SIZE as u32) {
@@ -218,7 +218,7 @@ impl Memory {
         err_ctx: &impl ErrorContext,
     ) -> Result<(), MemoryError> {
         let addr: u32 = addr
-            .as_canonical_u64()
+            .as_int()
             .try_into()
             .map_err(|_| MemoryError::address_out_of_bounds(addr.as_int(), err_ctx))?;
         self.num_trace_rows += 1;
@@ -240,7 +240,7 @@ impl Memory {
         err_ctx: &impl ErrorContext,
     ) -> Result<(), MemoryError> {
         let addr: u32 = addr
-            .as_canonical_u64()
+            .as_int()
             .try_into()
             .map_err(|_| MemoryError::address_out_of_bounds(addr.as_int(), err_ctx))?;
         if !addr.is_multiple_of(WORD_SIZE as u32) {
@@ -261,7 +261,7 @@ impl Memory {
         // trace; we also adjust the clock cycle so that delta value for the first row would end
         // up being ZERO. if the trace is empty, return without any further processing.
         let (mut prev_ctx, mut prev_addr, mut prev_clk) = match self.get_first_row_info() {
-            Some((ctx, addr, clk)) => (ctx, addr, clk.as_canonical_u64() - 1),
+            Some((ctx, addr, clk)) => (ctx, addr, clk.as_int() - 1),
             None => return,
         };
 
@@ -273,7 +273,7 @@ impl Memory {
                 // when we start a new address, we set the previous value to all zeros. the effect
                 // of this is that memory is always initialized to zero.
                 for memory_access in addr_trace {
-                    let clk = memory_access.clk().as_canonical_u64();
+                    let clk = memory_access.clk().as_int();
 
                     // compute delta as difference between context IDs, addresses, or clock cycles
                     let delta = if prev_ctx != ctx {

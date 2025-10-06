@@ -448,7 +448,7 @@ fn push_transformed_stack_top(
 ) -> Result<(), ExecutionError> {
     let stack_top = process.get_stack_item(1);
     let stack_top: u32 = stack_top
-        .as_canonical_u64()
+        .as_int()
         .try_into()
         .map_err(|_| ExecutionError::not_u32_value(stack_top, ZERO, err_ctx))?;
     let transformed_stack_top = f(stack_top);

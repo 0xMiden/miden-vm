@@ -222,8 +222,8 @@ impl Process {
         hi: Felt,
         check_element_validity: bool,
     ) {
-        let (t1, t0) = split_u32_into_u16(lo.as_canonical_u64());
-        let (t3, t2) = split_u32_into_u16(hi.as_canonical_u64());
+        let (t1, t0) = split_u32_into_u16(lo.as_int());
+        let (t3, t2) = split_u32_into_u16(hi.as_int());
 
         // add lookup values to the range checker.
         self.range.add_range_checks(self.system.clk(), &[t0, t1, t2, t3]);
@@ -254,7 +254,6 @@ mod tests {
     use miden_air::trace::decoder::NUM_USER_OP_HELPERS;
     use miden_core::{PrimeCharacteristicRing, mast::MastForest, stack::MIN_STACK_DEPTH};
     use miden_utils_testing::rand::rand_value;
-    use test_utils::rand::rand_value;
 
     use super::{
         super::{Felt, Operation},

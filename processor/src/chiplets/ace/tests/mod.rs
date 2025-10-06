@@ -10,7 +10,9 @@ use miden_air::{
         V_2_0_IDX, V_2_1_IDX,
     },
 };
-use miden_core::{Felt, QuadFelt, WORD_SIZE, Word, ZERO};
+use miden_core::{
+    BasedVectorSpace, Felt, PrimeCharacteristicRing, QuadFelt, WORD_SIZE, Word, ZERO,
+};
 
 use crate::{
     ContextId,
@@ -76,7 +78,7 @@ fn test_bool_check() {
     let circuit = Circuit::new(2, constants, instructions).unwrap();
     let inputs: Vec<_> = (0u8..20)
         .map(|x_int| {
-            let x = QuadFelt::from(x_int);
+            let x = QuadFelt::from_u8(x_int);
             let result = x * (x - QuadFelt::ONE);
             [x, result]
         })
@@ -263,7 +265,7 @@ fn generate_memory(circuit: &EncodedCircuit, inputs: &[QuadFelt]) -> Vec<Word> {
     // Inputs are store two by two in the fest set of words, followed by the instructions.
     let mut mem = Vec::with_capacity(2 * inputs.len() + circuit.encoded_circuit().len());
     // Add inputs
-    mem.extend(inputs.iter().flat_map(|input| input.to_base_elements()));
+    mem.extend(inputs.iter().flat_map(|input| input.as_basis_coefficients_slice()));
     // Add circuit
     mem.extend(circuit.encoded_circuit().iter());
 
@@ -306,7 +308,7 @@ fn verify_trace(context: &CircuitEvaluation, num_read_rows: usize, num_eval_rows
         // Get value 0
         let v_00 = columns[V_0_0_IDX][row_idx];
         let v_01 = columns[V_0_1_IDX][row_idx];
-        let v_0 = QuadFelt::new(v_00, v_01);
+        let v_0 = QuadFelt::new([v_00, v_01]);
 
         // Insert wire 0
         let id_0 = columns[ID_0_IDX][row_idx].as_int();
@@ -317,7 +319,7 @@ fn verify_trace(context: &CircuitEvaluation, num_read_rows: usize, num_eval_rows
         // Get value 1
         let v_10 = columns[V_1_0_IDX][row_idx];
         let v_11 = columns[V_1_1_IDX][row_idx];
-        let v_1 = QuadFelt::new(v_10, v_11);
+        let v_1 = QuadFelt::new([v_10, v_11]);
 
         // Insert wire 1
         let id_1 = columns[ID_1_IDX][row_idx].as_int();
@@ -336,7 +338,7 @@ fn verify_trace(context: &CircuitEvaluation, num_read_rows: usize, num_eval_rows
         // Get value 0
         let v_00 = columns[V_0_0_IDX][row_idx];
         let v_01 = columns[V_0_1_IDX][row_idx];
-        let v_0 = QuadFelt::new(v_00, v_01);
+        let v_0 = QuadFelt::new([v_00, v_01]);
 
         // Insert wire 0
         let id_0 = columns[ID_0_IDX][row_idx].as_int();
@@ -352,7 +354,7 @@ fn verify_trace(context: &CircuitEvaluation, num_read_rows: usize, num_eval_rows
         // Get value 1
         let v_10 = columns[V_1_0_IDX][row_idx];
         let v_11 = columns[V_1_1_IDX][row_idx];
-        let v_1 = QuadFelt::new(v_10, v_11);
+        let v_1 = QuadFelt::new([v_10, v_11]);
         assert_eq!(*v_l, v_1);
 
         // Get wire 2
@@ -363,7 +365,7 @@ fn verify_trace(context: &CircuitEvaluation, num_read_rows: usize, num_eval_rows
         // Get value 2
         let v_20 = columns[V_2_0_IDX][row_idx];
         let v_21 = columns[V_2_1_IDX][row_idx];
-        let v_2 = QuadFelt::new(v_20, v_21);
+        let v_2 = QuadFelt::new([v_20, v_21]);
         assert_eq!(*v_r, v_2);
 
         // Check operation

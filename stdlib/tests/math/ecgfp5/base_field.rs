@@ -1,8 +1,7 @@
 use core::ops::{Add, Div, Mul, Neg, Sub};
 
 use miden_core::{PrimeCharacteristicRing, PrimeField64};
-use miden_utils_testing::{Felt, ONE, StarkField, ZERO, rand::rand_value};
-use test_utils::{Felt, ONE, ZERO, rand::rand_value};
+use miden_utils_testing::{Felt, ONE, ZERO, rand::rand_value};
 
 // Given an element v ∈ Z_q | q = 2^64 - 2^32 + 1, this routine raises
 // it to the power 2^n, by means of n successive squarings
@@ -41,7 +40,7 @@ pub fn bv_or(a: Felt, b: Felt) -> Felt {
 
     assert!(flg_a & flg_b);
 
-    let c = a.as_canonical_u64() | b.as_canonical_u64();
+    let c = a.as_int() | b.as_int();
     Felt::from_u64(c)
 }
 
@@ -376,16 +375,16 @@ fn test_ext5_add() {
     let c = a + b;
 
     let mut stack = [
-        a.a0.as_canonical_u64(),
-        a.a1.as_canonical_u64(),
-        a.a2.as_canonical_u64(),
-        a.a3.as_canonical_u64(),
-        a.a4.as_canonical_u64(),
-        b.a0.as_canonical_u64(),
-        b.a1.as_canonical_u64(),
-        b.a2.as_canonical_u64(),
-        b.a3.as_canonical_u64(),
-        b.a4.as_canonical_u64(),
+        a.a0.as_int(),
+        a.a1.as_int(),
+        a.a2.as_int(),
+        a.a3.as_int(),
+        a.a4.as_int(),
+        b.a0.as_int(),
+        b.a1.as_int(),
+        b.a2.as_int(),
+        b.a3.as_int(),
+        b.a4.as_int(),
     ];
     stack.reverse();
 
@@ -413,16 +412,16 @@ fn test_ext5_sub() {
     let c = a - b;
 
     let mut stack = [
-        a.a0.as_canonical_u64(),
-        a.a1.as_canonical_u64(),
-        a.a2.as_canonical_u64(),
-        a.a3.as_canonical_u64(),
-        a.a4.as_canonical_u64(),
-        b.a0.as_canonical_u64(),
-        b.a1.as_canonical_u64(),
-        b.a2.as_canonical_u64(),
-        b.a3.as_canonical_u64(),
-        b.a4.as_canonical_u64(),
+        a.a0.as_int(),
+        a.a1.as_int(),
+        a.a2.as_int(),
+        a.a3.as_int(),
+        a.a4.as_int(),
+        b.a0.as_int(),
+        b.a1.as_int(),
+        b.a2.as_int(),
+        b.a3.as_int(),
+        b.a4.as_int(),
     ];
     stack.reverse();
 
@@ -450,16 +449,16 @@ fn test_ext5_mul() {
     let c = a * b;
 
     let mut stack = [
-        a.a0.as_canonical_u64(),
-        a.a1.as_canonical_u64(),
-        a.a2.as_canonical_u64(),
-        a.a3.as_canonical_u64(),
-        a.a4.as_canonical_u64(),
-        b.a0.as_canonical_u64(),
-        b.a1.as_canonical_u64(),
-        b.a2.as_canonical_u64(),
-        b.a3.as_canonical_u64(),
-        b.a4.as_canonical_u64(),
+        a.a0.as_int(),
+        a.a1.as_int(),
+        a.a2.as_int(),
+        a.a3.as_int(),
+        a.a4.as_int(),
+        b.a0.as_int(),
+        b.a1.as_int(),
+        b.a2.as_int(),
+        b.a3.as_int(),
+        b.a4.as_int(),
     ];
     stack.reverse();
 
@@ -485,13 +484,7 @@ fn test_ext5_square() {
     let a = Ext5::rand();
     let b = a.square();
 
-    let mut stack = [
-        a.a0.as_canonical_u64(),
-        a.a1.as_canonical_u64(),
-        a.a2.as_canonical_u64(),
-        a.a3.as_canonical_u64(),
-        a.a4.as_canonical_u64(),
-    ];
+    let mut stack = [a.a0.as_int(), a.a1.as_int(), a.a2.as_int(), a.a3.as_int(), a.a4.as_int()];
     stack.reverse();
 
     let test = build_test!(source, &stack);
@@ -505,7 +498,7 @@ fn test_ext5_square() {
 }
 
 #[test]
-fn test_ext5_inv() {
+fn test_ext5_inverse() {
     let source = "
     use.std::math::ecgfp5::base_field
 
@@ -516,13 +509,7 @@ fn test_ext5_inv() {
     let a = Ext5::rand();
     let b = a.inv();
 
-    let mut stack = [
-        a.a0.as_canonical_u64(),
-        a.a1.as_canonical_u64(),
-        a.a2.as_canonical_u64(),
-        a.a3.as_canonical_u64(),
-        a.a4.as_canonical_u64(),
-    ];
+    let mut stack = [a.a0.as_int(), a.a1.as_int(), a.a2.as_int(), a.a3.as_int(), a.a4.as_int()];
     stack.reverse();
 
     let test = build_test!(source, &stack);
@@ -549,16 +536,16 @@ fn test_ext5_div() {
     let c = a / b;
 
     let mut stack = [
-        a.a0.as_canonical_u64(),
-        a.a1.as_canonical_u64(),
-        a.a2.as_canonical_u64(),
-        a.a3.as_canonical_u64(),
-        a.a4.as_canonical_u64(),
-        b.a0.as_canonical_u64(),
-        b.a1.as_canonical_u64(),
-        b.a2.as_canonical_u64(),
-        b.a3.as_canonical_u64(),
-        b.a4.as_canonical_u64(),
+        a.a0.as_int(),
+        a.a1.as_int(),
+        a.a2.as_int(),
+        a.a3.as_int(),
+        a.a4.as_int(),
+        b.a0.as_int(),
+        b.a1.as_int(),
+        b.a2.as_int(),
+        b.a3.as_int(),
+        b.a4.as_int(),
     ];
     stack.reverse();
 
@@ -584,13 +571,7 @@ fn test_ext5_legendre() {
     let a = Ext5::rand();
     let b = a.legendre();
 
-    let mut stack = [
-        a.a0.as_canonical_u64(),
-        a.a1.as_canonical_u64(),
-        a.a2.as_canonical_u64(),
-        a.a3.as_canonical_u64(),
-        a.a4.as_canonical_u64(),
-    ];
+    let mut stack = [a.a0.as_int(), a.a1.as_int(), a.a2.as_int(), a.a3.as_int(), a.a4.as_int()];
     stack.reverse();
 
     let test = build_test!(source, &stack);
@@ -612,13 +593,7 @@ fn test_ext5_sqrt() {
     let a = Ext5::rand();
     let (b, c) = a.sqrt();
 
-    let mut stack = [
-        a.a0.as_canonical_u64(),
-        a.a1.as_canonical_u64(),
-        a.a2.as_canonical_u64(),
-        a.a3.as_canonical_u64(),
-        a.a4.as_canonical_u64(),
-    ];
+    let mut stack = [a.a0.as_int(), a.a1.as_int(), a.a2.as_int(), a.a3.as_int(), a.a4.as_int()];
     stack.reverse();
 
     let test = build_test!(source, &stack);

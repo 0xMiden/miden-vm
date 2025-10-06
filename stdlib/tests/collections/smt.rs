@@ -53,7 +53,7 @@ fn test_smt_get() {
         build_test!(source, &initial_stack, &[], store, advice_map).expect_stack(&expected_output);
     }
 
-    let smt = Smt::with_entries(*LEAVES).unwrap();
+    let smt = Smt::with_entries(LEAVES).unwrap();
 
     // Get all leaves present in tree
     for (key, value) in LEAVES.iter() {
@@ -152,7 +152,7 @@ fn test_smt_set() {
 /// Tests updating an existing key with a different value
 #[test]
 fn test_smt_set_same_key() {
-    let mut smt = Smt::with_entries(*LEAVES).unwrap();
+    let mut smt = Smt::with_entries(LEAVES).unwrap();
 
     let source = "
     use.std::collections::smt
@@ -236,7 +236,7 @@ fn test_set_advice_map_empty_key() {
 /// Tests that the advice map is properly updated after a `set` on a key that has existing value
 #[test]
 fn test_set_advice_map_single_key() {
-    let mut smt = Smt::with_entries(*LEAVES).unwrap();
+    let mut smt = Smt::with_entries(LEAVES).unwrap();
 
     let source = format!(
         "
@@ -347,13 +347,13 @@ fn build_advice_inputs(smt: &Smt) -> (MerkleStore, Vec<(Word, Vec<Felt>)>) {
 
 fn build_expected_stack(word0: Word, word1: Word) -> Vec<u64> {
     vec![
-        word0[3].as_canonical_u64(),
-        word0[2].as_canonical_u64(),
-        word0[1].as_canonical_u64(),
-        word0[0].as_canonical_u64(),
-        word1[3].as_canonical_u64(),
-        word1[2].as_canonical_u64(),
-        word1[1].as_canonical_u64(),
-        word1[0].as_canonical_u64(),
+        word0[3].as_int(),
+        word0[2].as_int(),
+        word0[1].as_int(),
+        word0[0].as_int(),
+        word1[3].as_int(),
+        word1[2].as_int(),
+        word1[1].as_int(),
+        word1[0].as_int(),
     ]
 }

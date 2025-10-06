@@ -2,7 +2,6 @@ use std::ops::Mul;
 
 use miden_core::PrimeField64;
 use miden_utils_testing::{push_inputs, rand::rand_value};
-use test_utils::{push_inputs, rand::rand_value};
 
 #[derive(Copy, Clone, Debug)]
 struct Scalar {
@@ -51,7 +50,7 @@ impl Scalar {
     /// = -1/ n0 (mod 2^32)
     ///
     /// Adapted from https://github.com/pornin/ecgfp5/blob/82325b9/rust/src/scalar.rs#L34-L35
-    const fn get_neg_n0_inv() -> u32 {
+    const fn get_neg_n0_inverse() -> u32 {
         91978719
     }
 
@@ -99,7 +98,7 @@ impl Scalar {
             let f = self.limbs[0]
                 .wrapping_mul(m)
                 .wrapping_add(r.limbs[0])
-                .wrapping_mul(Self::get_neg_n0_inv());
+                .wrapping_mul(Self::get_neg_n0_inverse());
 
             let mut cc1 = 0u32;
             let mut cc2 = 0u32;
@@ -276,7 +275,7 @@ fn test_ec_ext5_scalar_mont_mul() {
     let strace = test.get_last_stack_state();
 
     for (i, limb) in c.limbs.iter().enumerate() {
-        assert_eq!(strace[i].as_canonical_u64(), *limb as u64);
+        assert_eq!(strace[i].as_int(), *limb as u64);
     }
 }
 
@@ -322,12 +321,12 @@ fn test_ec_ext5_scalar_to_and_from_mont_repr() {
     let strace = test.get_last_stack_state();
 
     for (i, limb) in c.limbs.iter().enumerate() {
-        assert_eq!(strace[i].as_canonical_u64(), *limb as u64);
+        assert_eq!(strace[i].as_int(), *limb as u64);
     }
 }
 
 #[test]
-fn test_ec_ext5_scalar_inv() {
+fn test_ec_ext5_scalar_inverse() {
     let source = "
     use.std::math::ecgfp5::scalar_field
     use.std::sys
@@ -364,6 +363,6 @@ fn test_ec_ext5_scalar_inv() {
     let strace = test.get_last_stack_state();
 
     for (i, limb) in b.limbs.iter().enumerate() {
-        assert_eq!(strace[i].as_canonical_u64(), *limb as u64);
+        assert_eq!(strace[i].as_int(), *limb as u64);
     }
 }

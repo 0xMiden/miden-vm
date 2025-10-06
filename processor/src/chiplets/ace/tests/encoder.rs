@@ -1,6 +1,8 @@
 use alloc::vec::Vec;
 
-use miden_core::{Felt, QuadFelt};
+use miden_core::{
+    AlgebraicSponge, BinomialExtensionField, Felt, QuadFelt, chiplets::hasher::hash_elements,
+};
 use winter_prover::crypto::ElementHasher;
 
 use super::*;
@@ -39,7 +41,7 @@ impl EncodedCircuit {
     }
 
     /// Computes the hash of all circuit constants and instructions.
-    fn raw_circuit_hash<H: ElementHasher<BaseField = Felt>>(&self) -> H::Digest {
+    fn raw_circuit_hash<H: AlgebraicSponge>(&self) -> Word {
         H::hash_elements(&self.encoded_circuit)
     }
 
@@ -84,8 +86,10 @@ impl EncodedCircuit {
         let mut encoded_circuit = Vec::with_capacity(circuit_size);
 
         // Add constants encoded as `QuadFelt`s
-        encoded_circuit
-            .extend(circuit.constants.iter().flat_map(|c| QuadFelt::from(*c).to_base_elements()));
+        encoded_circuit.extend(circuit.constants.iter().flat_map(|c| {
+            <QuadFelt as BasedVectorSpace<Felt>>::as_basis_coefficients_slice(&QuadFelt::from(*c))
+                .to_vec()
+        }));
         // Pad with zero constants.
         let encoded_constants_size = 2 * layout.num_constants;
         encoded_circuit.resize(encoded_constants_size, Felt::ZERO);

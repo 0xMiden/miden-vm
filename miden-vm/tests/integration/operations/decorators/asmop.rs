@@ -3,7 +3,6 @@ use miden_debug_types::Location;
 use miden_processor::{AsmOpInfo, RowIndex, VmStateIterator};
 use miden_utils_testing::{assert_eq, build_debug_test};
 use processor::{AsmOpInfo, RowIndex, VmStateIterator};
-use test_utils::{assert_eq, build_debug_test};
 
 #[test]
 fn asmop_one_span_block_test() {

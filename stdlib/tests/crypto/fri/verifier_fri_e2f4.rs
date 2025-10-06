@@ -313,7 +313,7 @@ fn iterate_query_fold_4_quad_ext(
     let get_domain_offset = Felt::GENERATOR;
 
     let initial_domain_generator = *domain_generator;
-    let norm_cst = Felt::get_root_of_unity(2).inv();
+    let norm_cst = Felt::get_root_of_unity(2).inverse();
     let mut init_exp = initial_domain_generator.exp(position as u64);
 
     let arr = vec![evaluation];
@@ -376,7 +376,7 @@ fn iterate_query_fold_4_quad_ext(
             let f_x = query_values[1];
             let alpha = layer_alphas[depth];
 
-            let tmp1 = fri_2(f_x, f_minus_x, x_star * QuadFelt::from(norm_cst.inv()), alpha);
+            let tmp1 = fri_2(f_x, f_minus_x, x_star * QuadFelt::from(norm_cst.inverse()), alpha);
 
             fri_2(tmp0, tmp1, x_star * x_star, alpha * alpha)
         };

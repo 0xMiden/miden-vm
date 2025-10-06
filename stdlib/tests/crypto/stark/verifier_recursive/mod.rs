@@ -13,7 +13,7 @@ use winter_air::{
 };
 //use miden_air::ProcessorAir;
 use processor::crypto::RpoRandomCoin;
-use test_utils::{
+use miden_utils_testing::{
     VerifierError,
     crypto::{MerkleStore, RandomCoin, Rpo256, RpoDigest},
     math::{ ToElements},

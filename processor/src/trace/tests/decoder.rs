@@ -9,7 +9,6 @@ use miden_core::{
     mast::{MastForest, MastNode, MastNodeExt},
 };
 use miden_utils_testing::rand::rand_array;
-use test_utils::rand::rand_array;
 
 use super::{
     super::{

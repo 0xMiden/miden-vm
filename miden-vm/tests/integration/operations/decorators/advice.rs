@@ -1,7 +1,6 @@
 use miden_core::{Felt, PrimeCharacteristicRing};
 use miden_prover::Word;
-use miden_utils_testing::{build_test, crypto::MerkleStore};
-use test_utils::{
+use miden_utils_testing::{
     TRUNCATE_STACK_PROC, build_test,
     crypto::{MerkleStore, RpoDigest},
     rand::rand_value,

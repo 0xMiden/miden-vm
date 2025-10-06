@@ -1,6 +1,5 @@
 use miden_core::{PrimeCharacteristicRing, PrimeField64};
 use miden_utils_testing::{Felt, TRUNCATE_STACK_PROC, build_test, push_inputs, rand::rand_array};
-use test_utils::{Felt, TRUNCATE_STACK_PROC, build_test, push_inputs, rand::rand_array};
 
 // FRI_EXT2FOLD4
 // ================================================================================================
@@ -9,10 +8,7 @@ use test_utils::{Felt, TRUNCATE_STACK_PROC, build_test, push_inputs, rand::rand_
 #[ignore = "fix-folding-op"]
 fn fri_ext2fold4() {
     // create a set of random inputs
-    let mut inputs = rand_array::<Felt, 17>()
-        .iter()
-        .map(|v| v.as_canonical_u64())
-        .collect::<Vec<_>>();
+    let mut inputs = rand_array::<Felt, 17>().iter().map(|v| v.as_int()).collect::<Vec<_>>();
     inputs[7] = 2; // domain segment must be < 4
 
     // when domain segment is 2, the 3rd query value and the previous value must be the same

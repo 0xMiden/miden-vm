@@ -14,9 +14,8 @@ use miden_air::{
 use miden_core::{Field, PrimeCharacteristicRing, PrimeField64, WORD_SIZE, lazy_static};
 
 use super::{
-    AUX_TRACE_RAND_ELEMENTS, CHIPLETS_AUX_TRACE_OFFSET, CHIPLETS_BUS_AUX_TRACE_OFFSET,
-    ExecutionTrace, Felt, NUM_RAND_ROWS, ONE, Operation, Trace, Word, ZERO, build_trace_from_ops,
-    rand_array,
+    AUX_TRACE_RAND_ELEMENTS, CHIPLETS_BUS_AUX_TRACE_OFFSET, ExecutionTrace, Felt, NUM_RAND_ROWS,
+    ONE, Operation, Word, ZERO, build_trace_from_ops, rand_array,
 };
 
 /// Tests the generation of the `b_chip` bus column when only memory lookups are included. It
@@ -76,7 +75,7 @@ fn b_chip_trace_mem() {
         ONE,
         word.into(),
     );
-    let mut expected = value.inv();
+    let mut expected = value.inverse();
     assert_eq!(expected, b_chip[2]);
 
     // Nothing changes after user operations that don't make requests to the Chiplets.
@@ -264,8 +263,8 @@ fn build_expected_bus_msg_from_trace(
     }
 
     if element_or_word == MEMORY_ACCESS_ELEMENT {
-        let idx1 = trace.main_trace.get_column(MEMORY_IDX1_COL_IDX)[row].as_canonical_u64();
-        let idx0 = trace.main_trace.get_column(MEMORY_IDX0_COL_IDX)[row].as_canonical_u64();
+        let idx1 = trace.main_trace.get_column(MEMORY_IDX1_COL_IDX)[row].as_int();
+        let idx0 = trace.main_trace.get_column(MEMORY_IDX0_COL_IDX)[row].as_int();
         let idx = idx1 * 2 + idx0;
 
         build_expected_bus_element_msg(alphas, op_label, ctx, addr, clk, word[idx as usize])

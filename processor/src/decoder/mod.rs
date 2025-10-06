@@ -930,8 +930,8 @@ pub(crate) struct BasicBlockContext {
 /// Removes the specified operation from the op group and returns the resulting op group.
 fn remove_opcode_from_group(op_group: Felt, op: Operation) -> Felt {
     let opcode = op.op_code() as u64;
-    let result = Felt::from_u64((op_group.as_canonical_u64() - opcode) >> NUM_OP_BITS);
-    debug_assert!(op_group.as_canonical_u64() >= result.as_canonical_u64(), "op group underflow");
+    let result = Felt::from_u64((op_group.as_int() - opcode) >> NUM_OP_BITS);
+    debug_assert!(op_group.as_int() >= result.as_int(), "op group underflow");
     result
 }
 
@@ -942,7 +942,7 @@ fn remove_opcode_from_group(op_group: Felt, op: Operation) -> Felt {
 /// of groups left is > 8, the number of groups will be 8; otherwise, it will be equal to the
 /// number of groups left to process.
 fn get_num_groups_in_next_batch(num_groups_left: Felt) -> usize {
-    core::cmp::min(num_groups_left.as_canonical_u64() as usize, OP_BATCH_SIZE)
+    core::cmp::min(num_groups_left.as_int() as usize, OP_BATCH_SIZE)
 }
 
 // TEST HELPERS

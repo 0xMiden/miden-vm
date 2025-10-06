@@ -2,7 +2,7 @@ use std::{sync::Arc, vec};
 
 use miden_air::{Felt, ProvingOptions, RowIndex};
 use miden_assembly::{Assembler, utils::Serializable};
-use miden_core::{EventId, PrimeCharacteristicRing, PrimeField64, StarkField, ZERO};
+use miden_core::{AlgebraicSponge, EventId, PrimeCharacteristicRing, PrimeField64, ZERO};
 use miden_processor::{
     AdviceInputs, AdviceMutation, DefaultHost, EventError, ExecutionError, ProcessState, Program,
     ProgramInfo, StackInputs, crypto::RpoRandomCoin,
@@ -16,7 +16,7 @@ use miden_utils_testing::{
     },
     expect_exec_error_matches,
     proptest::proptest,
-    rand::rand_value,
+    rand::{rand_array, rand_value},
 };
 use rand::{Rng, rng};
 
@@ -216,7 +216,7 @@ fn test_move_sig_to_adv_stack() {
     let seed = Word::default();
     let mut rng = RpoRandomCoin::new(seed);
     let secret_key = SecretKey::with_rng(&mut rng);
-    let message = rand_value::<Word>();
+    let message = rand_array::<Felt, 4>().into();
 
     let source = "
     use.std::crypto::dsa::rpo_falcon512
@@ -240,13 +240,9 @@ fn test_move_sig_to_adv_stack() {
 
     let op_stack = {
         let mut op_stack = vec![];
-        let message = message.into_iter().map(|a| a.as_canonical_u64()).collect::<Vec<u64>>();
+        let message = message.into_iter().map(|a| a.as_int()).collect::<Vec<u64>>();
         op_stack.extend_from_slice(&message);
-        let pk_elements = public_key
-            .as_elements()
-            .iter()
-            .map(|a| a.as_canonical_u64())
-            .collect::<Vec<u64>>();
+        let pk_elements = public_key.as_elements().iter().map(|a| a.as_int()).collect::<Vec<u64>>();
         op_stack.extend_from_slice(&pk_elements);
 
         op_stack
@@ -265,7 +261,7 @@ fn falcon_execution() {
     let seed = Word::default();
     let mut rng = RpoRandomCoin::new(seed);
     let sk = SecretKey::with_rng(&mut rng);
-    let message = rand_value::<Word>();
+    let message = rand_array::<Felt, 4>().into();
     let (source, op_stack, adv_stack, store, advice_map) = generate_test(sk, message);
 
     let mut test = build_test!(&source, &op_stack, &adv_stack, store, advice_map.into_iter());
@@ -276,7 +272,7 @@ fn falcon_execution() {
 #[test]
 fn falcon_prove_verify() {
     let sk = SecretKey::new();
-    let message = rand_value::<Word>();
+    let message = rand_array::<Felt, 4>().into();
     let (source, op_stack, _, _, advice_map) = generate_test(sk, message);
 
     let program: Program = Assembler::default()
@@ -330,16 +326,14 @@ fn generate_test(
     let pk: Word = sk.public_key().to_commitment();
     let sk_bytes = sk.to_bytes();
 
-    let to_adv_map = sk_bytes.iter().map(|a| Felt::from_u64(*a as u64)).collect::<Vec<Felt>>();
+    let to_adv_map = sk_bytes.iter().map(|a| Felt::new(*a as u64)).collect::<Vec<Felt>>();
 
     let advice_map: Vec<(Word, Vec<Felt>)> = vec![(pk, to_adv_map)];
 
     let mut op_stack = vec![];
-    let message = message.into_iter().map(|a| a.as_canonical_u64()).collect::<Vec<u64>>();
+    let message = message.into_iter().map(|a| a.as_int()).collect::<Vec<u64>>();
     op_stack.extend_from_slice(&message);
-    op_stack.extend_from_slice(
-        &pk.as_elements().iter().map(|a| a.as_canonical_u64()).collect::<Vec<u64>>(),
-    );
+    op_stack.extend_from_slice(&pk.as_elements().iter().map(|a| a.as_int()).collect::<Vec<u64>>());
     let adv_stack = vec![];
     let store = MerkleStore::new();
 
@@ -369,7 +363,7 @@ fn mul_modulo_p(a: Polynomial<Felt>, b: Polynomial<Felt>) -> [u64; 1024] {
     let mut c = [0; 2 * N];
     for i in 0..N {
         for j in 0..N {
-            c[i + j] += a.coefficients[i].as_canonical_u64() * b.coefficients[j].as_canonical_u64();
+            c[i + j] += a.coefficients[i].as_int() * b.coefficients[j].as_int();
         }
     }
     c
@@ -400,16 +394,16 @@ fn generate_data_probabilistic_product_test(
     // get the challenge point and push it to the advice stack
     let digest_polynomials = Rpo256::hash_elements(&polynomials);
     let challenge = (digest_polynomials[0], digest_polynomials[1]);
-    let mut advice_stack = vec![challenge.0.as_canonical_u64(), challenge.1.as_canonical_u64()];
+    let mut advice_stack = vec![challenge.0.as_int(), challenge.1.as_int()];
 
     // push the polynomials to the advice stack
-    let polynomials: Vec<u64> = polynomials.iter().map(|&e| e.as_canonical_u64()).collect();
+    let polynomials: Vec<u64> = polynomials.iter().map(|&e| e.as_int()).collect();
     advice_stack.extend_from_slice(&polynomials);
 
     // compute hash of h and place it on the stack.
     let binding = Rpo256::hash_elements(&to_elements(h.clone()));
     let h_hash = binding.as_elements();
-    let h_hash_copy: Vec<u64> = h_hash.iter().map(|felt| (*felt).as_canonical_u64()).collect();
+    let h_hash_copy: Vec<u64> = h_hash.iter().map(|felt| (*felt).as_int()).collect();
     let operand_stack = vec![h_hash_copy[0], h_hash_copy[1], h_hash_copy[2], h_hash_copy[3]];
 
     (operand_stack, advice_stack)

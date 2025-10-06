@@ -73,7 +73,7 @@ impl Process {
         let fmp = self.system.fmp();
 
         let new_fmp = fmp + offset;
-        if new_fmp.as_canonical_u64() < FMP_MIN || new_fmp.as_canonical_u64() > FMP_MAX {
+        if new_fmp.as_int() < FMP_MIN || new_fmp.as_int() > FMP_MAX {
             return Err(ExecutionError::InvalidFmpValue(fmp, new_fmp));
         }
 

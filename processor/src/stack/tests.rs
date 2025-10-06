@@ -280,7 +280,7 @@ fn start_restore_context() {
     assert_eq!(stack.trace_state(), build_stack(&stack_state[..16]));
     assert_eq!(
         stack.helpers_state(),
-        build_helpers_partial(ctx0_depth - 16, ctx0_next_overflow_addr.as_canonical_u64() as usize)
+        build_helpers_partial(ctx0_depth - 16, ctx0_next_overflow_addr.as_int() as usize)
     );
 
     // stack depth = 16

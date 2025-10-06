@@ -500,7 +500,7 @@ impl MemoryAccess {
         word_values: Word,
     ) -> Self {
         if let MemoryAccessType::Element { addr_idx_in_word } = access_type {
-            let addr: u32 = addr.as_canonical_u64().try_into().unwrap();
+            let addr: u32 = addr.as_int().try_into().unwrap();
             assert_eq!(addr_idx_in_word as u32, addr % WORD_SIZE as u32);
         }
 
@@ -547,7 +547,7 @@ fn build_trace_row(
     } = memory_access;
 
     let (word, idx1, idx0) = {
-        let addr: u32 = addr.as_canonical_u64() as u32;
+        let addr: u32 = addr.as_int() as u32;
         //let addr: u32 = addr.try_into().unwrap(); TODO(Al)
         let remainder = addr % WORD_SIZE as u32;
         let word = Felt::from_u32(addr - remainder);

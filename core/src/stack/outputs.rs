@@ -105,7 +105,7 @@ impl StackOutputs {
 
     /// Converts the [`StackOutputs`] into the vector of `u64` values.
     pub fn as_int_vec(&self) -> Vec<u64> {
-        self.elements.iter().map(|e| (*e).as_canonical_u64()).collect()
+        self.elements.iter().map(|e| (*e).as_int()).collect()
     }
 }
 

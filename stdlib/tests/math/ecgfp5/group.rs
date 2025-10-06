@@ -2,7 +2,6 @@ use std::ops::Add;
 
 use miden_core::{PrimeCharacteristicRing, PrimeField64};
 use miden_utils_testing::{Felt, ONE, ZERO, push_inputs, test_case};
-use test_utils::{Felt, ONE, ZERO, push_inputs, test_case};
 
 use super::base_field::{Ext5, bv_or};
 
@@ -225,13 +224,7 @@ fn test_ec_ext5_point_validate(a0: u64, a1: u64, a2: u64, a3: u64, a4: u64, shou
     let w = Ext5::new(a0, a1, a2, a3, a4);
     let flg = ECExt5::validate(w);
 
-    let mut stack = [
-        w.a0.as_canonical_u64(),
-        w.a1.as_canonical_u64(),
-        w.a2.as_canonical_u64(),
-        w.a3.as_canonical_u64(),
-        w.a4.as_canonical_u64(),
-    ];
+    let mut stack = [w.a0.as_int(), w.a1.as_int(), w.a2.as_int(), w.a3.as_int(), w.a4.as_int()];
     stack.reverse();
 
     let test = build_test!(source, &stack);
@@ -270,13 +263,7 @@ fn test_ec_ext5_point_decode(a0: u64, a1: u64, a2: u64, a3: u64, a4: u64, should
     let w = Ext5::new(a0, a1, a2, a3, a4);
     let (point, flg) = ECExt5::decode(w);
 
-    let mut stack = [
-        w.a0.as_canonical_u64(),
-        w.a1.as_canonical_u64(),
-        w.a2.as_canonical_u64(),
-        w.a3.as_canonical_u64(),
-        w.a4.as_canonical_u64(),
-    ];
+    let mut stack = [w.a0.as_int(), w.a1.as_int(), w.a2.as_int(), w.a3.as_int(), w.a4.as_int()];
     stack.reverse();
 
     let test = build_test!(source, &stack);
@@ -325,17 +312,17 @@ fn test_ec_ext5_point_encode(a0: u64, a1: u64, a2: u64, a3: u64, a4: u64) {
     assert_eq!(w, w_prime);
 
     let mut stack = [
-        point.x.a0.as_canonical_u64(),
-        point.x.a1.as_canonical_u64(),
-        point.x.a2.as_canonical_u64(),
-        point.x.a3.as_canonical_u64(),
-        point.x.a4.as_canonical_u64(),
-        point.y.a0.as_canonical_u64(),
-        point.y.a1.as_canonical_u64(),
-        point.y.a2.as_canonical_u64(),
-        point.y.a3.as_canonical_u64(),
-        point.y.a4.as_canonical_u64(),
-        point.point_at_infinity.as_canonical_u64(),
+        point.x.a0.as_int(),
+        point.x.a1.as_int(),
+        point.x.a2.as_int(),
+        point.x.a3.as_int(),
+        point.x.a4.as_int(),
+        point.y.a0.as_int(),
+        point.y.a1.as_int(),
+        point.y.a2.as_int(),
+        point.y.a3.as_int(),
+        point.y.a4.as_int(),
+        point.point_at_infinity.as_int(),
     ];
     stack.reverse();
 
@@ -385,28 +372,28 @@ fn test_ec_ext5_point_addition(
     assert_eq!(q2.encode(), p2.encode());
 
     let mut stack = [
-        p0.x.a0.as_canonical_u64(),
-        p0.x.a1.as_canonical_u64(),
-        p0.x.a2.as_canonical_u64(),
-        p0.x.a3.as_canonical_u64(),
-        p0.x.a4.as_canonical_u64(),
-        p0.y.a0.as_canonical_u64(),
-        p0.y.a1.as_canonical_u64(),
-        p0.y.a2.as_canonical_u64(),
-        p0.y.a3.as_canonical_u64(),
-        p0.y.a4.as_canonical_u64(),
-        p0.point_at_infinity.as_canonical_u64(),
-        p1.x.a0.as_canonical_u64(),
-        p1.x.a1.as_canonical_u64(),
-        p1.x.a2.as_canonical_u64(),
-        p1.x.a3.as_canonical_u64(),
-        p1.x.a4.as_canonical_u64(),
-        p1.y.a0.as_canonical_u64(),
-        p1.y.a1.as_canonical_u64(),
-        p1.y.a2.as_canonical_u64(),
-        p1.y.a3.as_canonical_u64(),
-        p1.y.a4.as_canonical_u64(),
-        p1.point_at_infinity.as_canonical_u64(),
+        p0.x.a0.as_int(),
+        p0.x.a1.as_int(),
+        p0.x.a2.as_int(),
+        p0.x.a3.as_int(),
+        p0.x.a4.as_int(),
+        p0.y.a0.as_int(),
+        p0.y.a1.as_int(),
+        p0.y.a2.as_int(),
+        p0.y.a3.as_int(),
+        p0.y.a4.as_int(),
+        p0.point_at_infinity.as_int(),
+        p1.x.a0.as_int(),
+        p1.x.a1.as_int(),
+        p1.x.a2.as_int(),
+        p1.x.a3.as_int(),
+        p1.x.a4.as_int(),
+        p1.y.a0.as_int(),
+        p1.y.a1.as_int(),
+        p1.y.a2.as_int(),
+        p1.y.a3.as_int(),
+        p1.y.a4.as_int(),
+        p1.point_at_infinity.as_int(),
     ];
     stack.reverse();
 
@@ -476,17 +463,17 @@ fn test_ec_ext5_point_doubling(
     assert_eq!(q1.encode(), p1.encode());
 
     let mut stack = [
-        p0.x.a0.as_canonical_u64(),
-        p0.x.a1.as_canonical_u64(),
-        p0.x.a2.as_canonical_u64(),
-        p0.x.a3.as_canonical_u64(),
-        p0.x.a4.as_canonical_u64(),
-        p0.y.a0.as_canonical_u64(),
-        p0.y.a1.as_canonical_u64(),
-        p0.y.a2.as_canonical_u64(),
-        p0.y.a3.as_canonical_u64(),
-        p0.y.a4.as_canonical_u64(),
-        p0.point_at_infinity.as_canonical_u64(),
+        p0.x.a0.as_int(),
+        p0.x.a1.as_int(),
+        p0.x.a2.as_int(),
+        p0.x.a3.as_int(),
+        p0.x.a4.as_int(),
+        p0.y.a0.as_int(),
+        p0.y.a1.as_int(),
+        p0.y.a2.as_int(),
+        p0.y.a3.as_int(),
+        p0.y.a4.as_int(),
+        p0.point_at_infinity.as_int(),
     ];
     stack.reverse();
 
@@ -546,17 +533,17 @@ fn test_ec_ext5_point_multiplication() {
     assert_eq!(q1.encode(), p1.encode());
 
     let mut stack = [
-        p0.x.a0.as_canonical_u64(),
-        p0.x.a1.as_canonical_u64(),
-        p0.x.a2.as_canonical_u64(),
-        p0.x.a3.as_canonical_u64(),
-        p0.x.a4.as_canonical_u64(),
-        p0.y.a0.as_canonical_u64(),
-        p0.y.a1.as_canonical_u64(),
-        p0.y.a2.as_canonical_u64(),
-        p0.y.a3.as_canonical_u64(),
-        p0.y.a4.as_canonical_u64(),
-        p0.point_at_infinity.as_canonical_u64(),
+        p0.x.a0.as_int(),
+        p0.x.a1.as_int(),
+        p0.x.a2.as_int(),
+        p0.x.a3.as_int(),
+        p0.x.a4.as_int(),
+        p0.y.a0.as_int(),
+        p0.y.a1.as_int(),
+        p0.y.a2.as_int(),
+        p0.y.a3.as_int(),
+        p0.y.a4.as_int(),
+        p0.point_at_infinity.as_int(),
         e[0] as u64,
         e[1] as u64,
         e[2] as u64,

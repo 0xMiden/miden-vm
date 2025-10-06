@@ -260,7 +260,7 @@ pub fn get_eqz_test_frame(a: u64) -> EvaluationFrame<Felt> {
         },
         _ => {
             frame.current_mut()[STACK_TRACE_OFFSET] = Felt::new(a);
-            frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET] = Felt::new(a).inv();
+            frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET] = Felt::new(a).inverse();
             frame.next_mut()[STACK_TRACE_OFFSET] = ZERO;
         },
     }
@@ -291,7 +291,7 @@ pub fn get_inv_test_frame(a: u64) -> EvaluationFrame<Felt> {
     // Set the output. First element in the next frame should be the inverse of
     // the first element of the current frame.
     frame.current_mut()[STACK_TRACE_OFFSET] = Felt::new(a);
-    frame.next_mut()[STACK_TRACE_OFFSET] = Felt::new(a).inv();
+    frame.next_mut()[STACK_TRACE_OFFSET] = Felt::new(a).inverse();
 
     frame
 }
@@ -360,7 +360,7 @@ pub fn get_eq_test_frame(a: u64, b: u64) -> EvaluationFrame<Felt> {
         frame.current_mut()[STACK_TRACE_OFFSET] = Felt::new(a);
         frame.current_mut()[STACK_TRACE_OFFSET + 1] = Felt::new(b);
         frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET] =
-            (Felt::new(a) - Felt::new(b)).inv();
+            (Felt::new(a) - Felt::new(b)).inverse();
         frame.next_mut()[STACK_TRACE_OFFSET] = ZERO;
     }
 

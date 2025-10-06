@@ -129,7 +129,7 @@ impl System {
     /// Returns execution context ID at the specified clock cycle.
     #[inline(always)]
     pub fn get_ctx_at(&self, clk: RowIndex) -> ContextId {
-        (self.ctx_trace[clk.as_usize()].as_canonical_u64() as u32).into()
+        (self.ctx_trace[clk.as_usize()].as_int() as u32).into()
     }
 
     /// Returns free memory pointer at the specified clock cycle.

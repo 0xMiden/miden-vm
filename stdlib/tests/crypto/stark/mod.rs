@@ -162,7 +162,7 @@ fn variable_length_public_inputs(#[case] num_kernel_proc_digests: usize) {
     let alpha =
         QuadFelt::new(Felt::new(auxiliary_rand_values[2]), Felt::new(auxiliary_rand_values[3]));
     let reduced_value_inv =
-        reduce_kernel_procedures_digests(&kernel_procedures_digests, alpha, beta).inv();
+        reduce_kernel_procedures_digests(&kernel_procedures_digests, alpha, beta).inverse();
     let [reduced_value_inv_0, reduced_value_inv_1] = reduced_value_inv.to_base_elements();
 
     // 6) Run the test

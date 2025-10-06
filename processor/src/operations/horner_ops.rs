@@ -261,7 +261,6 @@ mod tests {
         mast::MastForest,
     };
     use miden_utils_testing::{build_test, rand::rand_array};
-    use test_utils::{build_test, rand::rand_array};
 
     use super::{ACC_HIGH_INDEX, ACC_LOW_INDEX, ALPHA_ADDR_INDEX, *};
     use crate::{ContextId, DefaultHost, Process};
@@ -348,13 +347,14 @@ mod tests {
         assert_eq!(inputs[ALPHA_ADDR_INDEX], stack_state[ALPHA_ADDR_INDEX]);
 
         // --- check that the helper registers were updated correctly -----------------------------
+        let acc_tmp_base = acc_tmp.as_basis_coefficients_slice();
         let helper_reg_expected = [
             alpha_mem_word[0],
             alpha_mem_word[1],
             alpha_mem_word[2],
             alpha_mem_word[3],
-            acc_tmp.base_element(0),
-            acc_tmp.base_element(1),
+            acc_tmp_base[0],
+            acc_tmp_base[1],
         ];
         assert_eq!(helper_reg_expected, process.decoder.get_user_op_helpers());
     }
@@ -427,6 +427,7 @@ mod tests {
             coefficients.iter().rev().take(2).fold(acc_old, |acc, coef| *coef + alpha * acc);
         let acc_new =
             coefficients.iter().rev().skip(2).fold(acc_tmp, |acc, coef| *coef + alpha * acc);
+        let acc_tmp_base = acc_tmp.as_basis_coefficients_slice().to_vec();
 
         assert_eq!(acc_new.to_array()[1], stack_state[ACC_HIGH_INDEX]);
         assert_eq!(acc_new.to_array()[0], stack_state[ACC_LOW_INDEX]);
@@ -441,8 +442,8 @@ mod tests {
             alpha_mem_word[1],
             alpha_mem_word[2],
             alpha_mem_word[3],
-            acc_tmp.base_element(0),
-            acc_tmp.base_element(1),
+            acc_tmp_base[0],
+            acc_tmp_base[1],
         ];
         assert_eq!(helper_reg_expected, process.decoder.get_user_op_helpers());
     }
@@ -487,7 +488,7 @@ mod tests {
 
         // prepare the advice stack with the generated data
         let adv_stack = [a[0], a[1], ZERO, ZERO];
-        let adv_stack: Vec<u64> = adv_stack.iter().map(|e| e.as_canonical_u64()).collect();
+        let adv_stack: Vec<u64> = adv_stack.iter().map(|e| e.as_int()).collect();
 
         // create the expected operand stack
         let mut expected = Vec::new();
@@ -495,10 +496,10 @@ mod tests {
         expected.extend_from_slice(&[acc_new.to_array()[0], acc_new.to_array()[1]]);
         // the rest of the stack should remain unchanged
         expected.extend_from_slice(&inputs[2..]);
-        let expected: Vec<u64> = expected.iter().rev().map(|e| e.as_canonical_u64()).collect();
+        let expected: Vec<u64> = expected.iter().rev().map(|e| e.as_int()).collect();
 
         // convert input stack
-        let inputs: Vec<u64> = inputs.iter().map(|e| e.as_canonical_u64()).collect();
+        let inputs: Vec<u64> = inputs.iter().map(|e| e.as_int()).collect();
 
         let test = build_test!(source, &inputs, &adv_stack);
         test.expect_stack(&expected);
@@ -547,7 +548,7 @@ mod tests {
 
         // prepare the advice stack with the generated data
         let adv_stack = [a[0], a[1], ZERO, ZERO];
-        let adv_stack: Vec<u64> = adv_stack.iter().map(|e| e.as_canonical_u64()).collect();
+        let adv_stack: Vec<u64> = adv_stack.iter().map(|e| e.as_int()).collect();
 
         // create the expected operand stack
         let mut expected = Vec::new();
@@ -555,10 +556,10 @@ mod tests {
         expected.extend_from_slice(&[acc_new.to_array()[0], acc_new.to_array()[1]]);
         // the rest of the stack should remain unchanged
         expected.extend_from_slice(&inputs[2..]);
-        let expected: Vec<u64> = expected.iter().rev().map(|e| e.as_canonical_u64()).collect();
+        let expected: Vec<u64> = expected.iter().rev().map(|e| e.as_int()).collect();
 
         // convert input stack
-        let inputs: Vec<u64> = inputs.iter().map(|e| e.as_canonical_u64()).collect();
+        let inputs: Vec<u64> = inputs.iter().map(|e| e.as_int()).collect();
 
         let test = build_test!(source, &inputs, &adv_stack);
         test.expect_stack(&expected);

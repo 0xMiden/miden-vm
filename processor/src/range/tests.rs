@@ -2,7 +2,6 @@ use alloc::{collections::BTreeMap, vec::Vec};
 
 use miden_core::{PrimeCharacteristicRing, PrimeField64, utils::ToElements};
 use miden_utils_testing::rand::rand_array;
-use test_utils::rand::rand_array;
 
 use super::{Felt, RangeChecker, ZERO};
 use crate::{RangeCheckTrace, utils::get_trace_len};
@@ -15,7 +14,7 @@ fn range_checks() {
 
     for &value in values.iter() {
         // add the value to the range checker's trace
-        checker.add_value(value.as_canonical_u64() as u16);
+        checker.add_value(value.as_int() as u16);
     }
 
     let RangeCheckTrace { trace, aux_builder: _ } = checker.into_trace(64, 0);
@@ -53,7 +52,7 @@ fn range_checks_rand() {
     let values = rand_array::<u64, 300>();
     let values = values.into_iter().map(|v| Felt::from_u64(v as u16 as u64)).collect::<Vec<_>>();
     for &value in values.iter() {
-        checker.add_value(value.as_canonical_u64() as u16);
+        checker.add_value(value.as_int() as u16);
     }
 
     let trace_len = checker.trace_len().next_power_of_two();
@@ -85,7 +84,7 @@ fn validate_trace(trace: &[Vec<Felt>], lookups: &[Felt]) {
 
     // process the first row
     assert_eq!(trace[1][i], ZERO);
-    let count = trace[0][i].as_canonical_u64();
+    let count = trace[0][i].as_int();
     lookups_16bit.insert(0u16, count);
     i += 1;
 
@@ -93,7 +92,7 @@ fn validate_trace(trace: &[Vec<Felt>], lookups: &[Felt]) {
     let mut prev_value = 0u16;
     while i < trace_len {
         // make sure the value is a 16-bit value
-        let value = trace[1][i].as_canonical_u64();
+        let value = trace[1][i].as_int();
         assert!(value <= 65535, "not a 16-bit value");
         let value = value as u16;
 
@@ -103,7 +102,7 @@ fn validate_trace(trace: &[Vec<Felt>], lookups: &[Felt]) {
         assert!(valid_delta(delta));
 
         // keep track of lookup count for each value
-        let multiplicity = trace[0][i].as_canonical_u64();
+        let multiplicity = trace[0][i].as_int();
         lookups_16bit
             .entry(value)
             .and_modify(|count| *count += multiplicity)
@@ -114,12 +113,12 @@ fn validate_trace(trace: &[Vec<Felt>], lookups: &[Felt]) {
     }
 
     // validate the last row (must be 65535)
-    let last_value = trace[1][i - 1].as_canonical_u64();
+    let last_value = trace[1][i - 1].as_int();
     assert_eq!(65535, last_value);
 
     // remove all the looked up values from the lookup table
     for value in lookups {
-        let value = value.as_canonical_u64();
+        let value = value.as_int();
         assert!(value <= 65535, "not a 16-bit value");
         let value = value as u16;
 

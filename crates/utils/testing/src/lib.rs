@@ -288,7 +288,7 @@ impl Test {
                 .unwrap_or(ZERO);
             assert_eq!(
                 *mem_value,
-                mem_state.as_canonical_u64(),
+                mem_state.as_int(),
                 "Expected memory [{}] => {:?}, found {:?}",
                 addr,
                 mem_value,
@@ -611,7 +611,7 @@ pub fn prepend_word_to_vec(target: &mut Vec<u64>, word: Word) {
 
 /// Converts a slice of Felts into a vector of u64 values.
 pub fn felt_slice_to_ints(values: &[Felt]) -> Vec<u64> {
-    values.iter().map(|e| (*e).as_canonical_u64()).collect()
+    values.iter().map(|e| (*e).as_int()).collect()
 }
 
 pub fn resize_to_min_stack_depth(values: &[u64]) -> Vec<u64> {

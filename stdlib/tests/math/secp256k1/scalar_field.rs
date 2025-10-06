@@ -277,7 +277,7 @@ fn test_secp256k1_scalar_field_mul() {
 }
 
 #[test]
-fn test_secp256k1_scalar_field_inv() {
+fn test_secp256k1_scalar_field_inverse() {
     let source = "
     use.std::math::secp256k1::scalar_field
 

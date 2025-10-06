@@ -6,7 +6,6 @@ use miden_air::trace::chiplets::bitwise::{
 };
 use miden_core::{PrimeCharacteristicRing, PrimeField64, ZERO};
 use miden_utils_testing::rand::rand_value;
-use test_utils::rand::rand_value;
 
 use super::{Bitwise, Felt, TraceFragment};
 
@@ -39,7 +38,7 @@ fn bitwise_and() {
     assert_eq!(result, trace[OUTPUT_COL_IDX][OP_CYCLE_LEN - 1]);
 
     // make sure values a and b were decomposed correctly
-    check_decomposition(&trace, 0, a.as_canonical_u64(), b.as_canonical_u64());
+    check_decomposition(&trace, 0, a.as_int(), b.as_int());
 
     // make sure the result was re-composed correctly
     let mut prev_result = ZERO;
@@ -84,7 +83,7 @@ fn bitwise_xor() {
     assert_eq!(result, trace[OUTPUT_COL_IDX][OP_CYCLE_LEN - 1]);
 
     // make sure values a and b were decomposed correctly
-    check_decomposition(&trace, 0, a.as_canonical_u64(), b.as_canonical_u64());
+    check_decomposition(&trace, 0, a.as_int(), b.as_int());
 
     // make sure the result was re-composed correctly
     let mut prev_result = ZERO;
@@ -134,9 +133,9 @@ fn bitwise_multiple() {
     assert_eq!(result1, trace[OUTPUT_COL_IDX][2 * OP_CYCLE_LEN - 1]);
     assert_eq!(result2, trace[OUTPUT_COL_IDX][3 * OP_CYCLE_LEN - 1]);
     // make sure input values were decomposed correctly
-    check_decomposition(&trace, 0, a[0].as_canonical_u64(), b[0].as_canonical_u64());
-    check_decomposition(&trace, OP_CYCLE_LEN, a[1].as_canonical_u64(), b[1].as_canonical_u64());
-    check_decomposition(&trace, 2 * OP_CYCLE_LEN, a[2].as_canonical_u64(), b[2].as_canonical_u64());
+    check_decomposition(&trace, 0, a[0].as_int(), b[0].as_int());
+    check_decomposition(&trace, OP_CYCLE_LEN, a[1].as_int(), b[1].as_int());
+    check_decomposition(&trace, 2 * OP_CYCLE_LEN, a[2].as_int(), b[2].as_int());
 
     // make sure the results was re-composed correctly
 

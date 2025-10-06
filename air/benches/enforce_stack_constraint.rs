@@ -26,7 +26,7 @@ fn enforce_stack_constraint(c: &mut Criterion) {
 
         let mut frame = generate_evaluation_frame(Operation::Inv.op_code() as usize);
         frame.current_mut()[STACK_TRACE_OFFSET] = Felt::from_u64(89u64);
-        frame.next_mut()[STACK_TRACE_OFFSET] = Felt::from_u64(89u64).inv();
+        frame.next_mut()[STACK_TRACE_OFFSET] = Felt::from_u64(89u64).inverse();
 
         let mut result = [ZERO; NUM_CONSTRAINTS];
 

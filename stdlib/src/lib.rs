@@ -7,7 +7,7 @@ extern crate alloc;
 use alloc::{sync::Arc, vec, vec::Vec};
 
 use miden_assembly::{Library, mast::MastForest, utils::Deserializable};
-use miden_core::{AlgebraicSponge, EventId, Felt, Word};
+use miden_core::{EventId, Felt, Word};
 use miden_processor::{EventHandler, HostLibrary};
 use miden_utils_sync::LazyLock;
 
@@ -111,7 +111,7 @@ pub fn falcon_sign(sk: &[Felt], msg: Word) -> Option<Vec<Felt>> {
     use alloc::vec;
 
     use miden_core::{
-        Felt, PrimeCharacteristicRing, PrimeField64,
+        AlgebraicSponge, Felt, PrimeCharacteristicRing, PrimeField64,
         crypto::{
             dsa::rpo_falcon512::{Polynomial, SecretKey},
             hash::Rpo256,
@@ -122,7 +122,7 @@ pub fn falcon_sign(sk: &[Felt], msg: Word) -> Option<Vec<Felt>> {
     // Create the corresponding secret key
     let mut sk_bytes = Vec::with_capacity(sk.len());
     for element in sk {
-        let value = element.as_canonical_u64();
+        let value = element.as_int();
         if value > u8::MAX as u64 {
             return None;
         }

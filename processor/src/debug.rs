@@ -27,7 +27,7 @@ pub struct VmState {
 
 impl fmt::Display for VmState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let stack: Vec<u64> = self.stack.iter().map(|x| x.as_canonical_u64()).collect();
+        let stack: Vec<u64> = self.stack.iter().map(|x| x.as_int()).collect();
         write!(
             f,
             "clk={}{}{}, fmp={}, stack={stack:?}, memory={:?}",

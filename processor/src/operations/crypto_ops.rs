@@ -163,7 +163,7 @@ impl Process {
             .update_merkle_node(old_root, &depth, &index, new_node)
             .map_err(|err| ExecutionError::advice_error(err, self.system.clk(), err_ctx))?;
 
-        assert_eq!(path.len(), depth.as_canonical_u64() as usize);
+        assert_eq!(path.len(), depth.as_int() as usize);
 
         let merkle_tree_update =
             self.chiplets.hasher.update_merkle_root(old_node, new_node, &path, index);
@@ -202,7 +202,6 @@ mod tests {
         mast::MastForest,
     };
     use miden_utils_testing::rand::rand_vector;
-    use test_utils::rand::rand_vector;
 
     use super::{
         super::{Felt, Operation},
@@ -264,16 +263,16 @@ mod tests {
         let depth = tree.depth() as u64;
 
         let stack_inputs = [
-            root[0].as_canonical_u64(),
-            root[1].as_canonical_u64(),
-            root[2].as_canonical_u64(),
-            root[3].as_canonical_u64(),
+            root[0].as_int(),
+            root[1].as_int(),
+            root[2].as_int(),
+            root[3].as_int(),
             index,
             depth,
-            node[0].as_canonical_u64(),
-            node[1].as_canonical_u64(),
-            node[2].as_canonical_u64(),
-            node[3].as_canonical_u64(),
+            node[0].as_int(),
+            node[1].as_int(),
+            node[2].as_int(),
+            node[3].as_int(),
         ];
 
         let depth = Felt::from_u64(depth);
@@ -305,20 +304,20 @@ mod tests {
         let new_tree = MerkleTree::new(new_leaves).unwrap();
 
         let stack_inputs = [
-            new_leaf[0].as_canonical_u64(),
-            new_leaf[1].as_canonical_u64(),
-            new_leaf[2].as_canonical_u64(),
-            new_leaf[3].as_canonical_u64(),
-            tree.root()[0].as_canonical_u64(),
-            tree.root()[1].as_canonical_u64(),
-            tree.root()[2].as_canonical_u64(),
-            tree.root()[3].as_canonical_u64(),
+            new_leaf[0].as_int(),
+            new_leaf[1].as_int(),
+            new_leaf[2].as_int(),
+            new_leaf[3].as_int(),
+            tree.root()[0].as_int(),
+            tree.root()[1].as_int(),
+            tree.root()[2].as_int(),
+            tree.root()[3].as_int(),
             leaf_index as u64,
             tree.depth() as u64,
-            leaves[leaf_index][0].as_canonical_u64(),
-            leaves[leaf_index][1].as_canonical_u64(),
-            leaves[leaf_index][2].as_canonical_u64(),
-            leaves[leaf_index][3].as_canonical_u64(),
+            leaves[leaf_index][0].as_int(),
+            leaves[leaf_index][1].as_int(),
+            leaves[leaf_index][2].as_int(),
+            leaves[leaf_index][3].as_int(),
         ];
 
         let store = MerkleStore::from(&tree);
@@ -387,20 +386,20 @@ mod tests {
         // setup the process
         let advice_inputs = AdviceInputs::default().with_merkle_store(store);
         let stack_inputs = [
-            target_node[0].as_canonical_u64(),
-            target_node[1].as_canonical_u64(),
-            target_node[2].as_canonical_u64(),
-            target_node[3].as_canonical_u64(),
-            replaced_root[0].as_canonical_u64(),
-            replaced_root[1].as_canonical_u64(),
-            replaced_root[2].as_canonical_u64(),
-            replaced_root[3].as_canonical_u64(),
+            target_node[0].as_int(),
+            target_node[1].as_int(),
+            target_node[2].as_int(),
+            target_node[3].as_int(),
+            replaced_root[0].as_int(),
+            replaced_root[1].as_int(),
+            replaced_root[2].as_int(),
+            replaced_root[3].as_int(),
             target_index,
             target_depth,
-            replaced_node[0].as_canonical_u64(),
-            replaced_node[1].as_canonical_u64(),
-            replaced_node[2].as_canonical_u64(),
-            replaced_node[3].as_canonical_u64(),
+            replaced_node[0].as_int(),
+            replaced_node[1].as_int(),
+            replaced_node[2].as_int(),
+            replaced_node[3].as_int(),
         ];
         let stack_inputs = StackInputs::try_from_ints(stack_inputs).unwrap();
         let (mut process, mut host) =

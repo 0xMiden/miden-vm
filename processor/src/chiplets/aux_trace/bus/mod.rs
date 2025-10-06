@@ -72,7 +72,7 @@ impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for BusColumnBuilder<'_> {
         debugger: &mut BusDebugger<E>,
     ) -> E {
         let op_code_felt = main_trace.get_op_code(row);
-        let op_code = op_code_felt.as_canonical_u64() as u8;
+        let op_code = op_code_felt.as_int() as u8;
 
         match op_code {
             OPCODE_JOIN | OPCODE_SPLIT | OPCODE_LOOP | OPCODE_CALL => build_control_block_request(

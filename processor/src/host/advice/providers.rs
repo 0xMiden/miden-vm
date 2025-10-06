@@ -158,10 +158,10 @@ where
         tree_depth: &Felt,
         index: &Felt,
     ) -> Result<u8, ExecutionError> {
-        let tree_depth = u8::try_from(tree_depth.as_canonical_u64())
+        let tree_depth = u8::try_from(tree_depth.as_int())
             .map_err(|_| ExecutionError::InvalidMerkleTreeDepth { depth: *tree_depth })?;
         self.store
-            .get_leaf_depth(root.into(), tree_depth, index.as_canonical_u64())
+            .get_leaf_depth(root.into(), tree_depth, index.as_int())
             .map_err(ExecutionError::MerkleStoreLookupFailed)
     }
 

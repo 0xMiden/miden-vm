@@ -45,7 +45,7 @@ impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for OpGroupTableColumnBuilder 
         _debugger: &mut BusDebugger<E>,
     ) -> E {
         let op_code_felt = main_trace.get_op_code(i);
-        let op_code = op_code_felt.as_canonical_u64() as u8;
+        let op_code = op_code_felt.as_int() as u8;
 
         match op_code {
             OPCODE_SPAN | OPCODE_RESPAN => {

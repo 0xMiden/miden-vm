@@ -50,7 +50,7 @@ pub fn get_aux_assertions_first_step<E>(
     result.push(Assertion::single(
         CHIPLETS_BUS_AUX_TRACE_OFFSET,
         0,
-        reduced_kernel_digests.inv(),
+        reduced_kernel_digests.inverse(),
     ));
 }
 

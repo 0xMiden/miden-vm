@@ -171,7 +171,7 @@ fn get_test_frame(
     };
     next[MEMORY_D0_COL_IDX] = Felt::new(delta as u16 as u64);
     next[MEMORY_D1_COL_IDX] = Felt::new(delta >> 16);
-    next[MEMORY_D_INV_COL_IDX] = (Felt::new(delta)).inv();
+    next[MEMORY_D_INV_COL_IDX] = (Felt::new(delta)).inverse();
 
     // since we're always writing a word, the idx0 and idx1 columns should be zero
     next[MEMORY_IDX0_COL_IDX] = ZERO;

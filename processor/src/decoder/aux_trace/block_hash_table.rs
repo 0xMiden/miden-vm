@@ -42,7 +42,7 @@ impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for BlockHashTableColumnBuilde
         row: RowIndex,
         _debugger: &mut BusDebugger<E>,
     ) -> E {
-        let op_code = main_trace.get_op_code(row).as_canonical_u64() as u8;
+        let op_code = main_trace.get_op_code(row).as_int() as u8;
 
         match op_code {
             OPCODE_END => BlockHashTableRow::from_end(main_trace, row).collapse(alphas),
@@ -58,7 +58,7 @@ impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for BlockHashTableColumnBuilde
         row: RowIndex,
         _debugger: &mut BusDebugger<E>,
     ) -> E {
-        let op_code = main_trace.get_op_code(row).as_canonical_u64() as u8;
+        let op_code = main_trace.get_op_code(row).as_int() as u8;
 
         match op_code {
             OPCODE_JOIN => {
@@ -121,7 +121,7 @@ impl BlockHashTableRow {
     /// Computes the row to be removed from the block hash table when encountering an `END`
     /// operation.
     pub fn from_end(main_trace: &MainTrace, row: RowIndex) -> Self {
-        let op_code_next = main_trace.get_op_code(row + 1).as_canonical_u64() as u8;
+        let op_code_next = main_trace.get_op_code(row + 1).as_int() as u8;
         let parent_block_id = main_trace.addr(row + 1);
         let child_block_hash = main_trace.decoder_hasher_state_first_half(row);
 
@@ -137,7 +137,7 @@ impl BlockHashTableRow {
         let is_first_child = op_code_next != OPCODE_END
             && op_code_next != OPCODE_REPEAT
             && op_code_next != OPCODE_HALT;
-        let is_loop_body = main_trace.is_loop_body_flag(row).as_canonical_u64() != 0;
+        let is_loop_body = main_trace.is_loop_body_flag(row).as_int() != 0;
         // TODO(Al)
         //.try_into()
         //.expect("expected loop body flag to be a boolean");

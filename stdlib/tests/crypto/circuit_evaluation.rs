@@ -1,4 +1,4 @@
-use miden_core::{Felt, ONE, QuadFelt, ZERO};
+use miden_core::{BasedVectorSpace, Felt, ONE, PrimeCharacteristicRing, QuadFelt, ZERO};
 use miden_utils_testing::rand::rand_value;
 
 #[test]
@@ -38,14 +38,17 @@ fn circuit_evaluation_prove_verify() {
     // the circuit
     let input_0: QuadFelt = rand_value();
     let input_1 = input_0 * (input_0 - QuadFelt::ONE);
+    let input_0_base = input_0.as_basis_coefficients_slice().to_vec();
+    let input_1_base = input_1.as_basis_coefficients_slice().to_vec();
+
     // inputs
     let mut data = vec![
         // id = 7, v = rand
-        input_0.base_element(0),
-        input_0.base_element(1),
+        input_0_base[0],
+        input_0_base[1],
         // id = 6, v = rand * (rand - 1) = result
-        input_1.base_element(0),
-        input_1.base_element(1),
+        input_1_base[0],
+        input_1_base[1],
     ];
 
     // constants

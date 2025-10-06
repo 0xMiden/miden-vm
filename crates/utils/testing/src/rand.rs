@@ -15,8 +15,9 @@ use super::{Felt, WORD_SIZE, Word};
 // ================================================================================================
 
 /// Mutates a seed and generates a word deterministically
-pub fn seeded_word(seed: u64) -> Word {
-    let mut rng = SmallRng::seed_from_u64(seed);
+pub fn seeded_word(seed: &mut u64) -> Word {
+    let mut rng = SmallRng::seed_from_u64(*seed);
+    *seed = rng.next_u64();
     [
         Felt::new(rng.next_u64()),
         Felt::new(rng.next_u64()),

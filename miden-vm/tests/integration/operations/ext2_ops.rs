@@ -1,6 +1,5 @@
 use miden_core::{Field, PrimeField64, QuadFelt};
-use miden_utils_testing::{build_op_test, rand::rand_value};
-use test_utils::{QuadFelt, build_op_test, rand::rand_value};
+use miden_utils_testing::{QuadFelt, build_op_test, rand::rand_value};
 
 // EXT2 OPS ASSERTIONS - MANUAL TESTS
 // ================================================================================================
@@ -97,7 +96,7 @@ fn ext2neg() {
 }
 
 #[test]
-fn ext2inv() {
+fn ext2inverse() {
     let asm_op = "ext2inv";
 
     let a = rand_value::<QuadFelt>();
@@ -119,5 +118,5 @@ fn ext2inv() {
 /// underlying base field and convert them into integers.
 fn ext_element_to_ints(ext_elem: QuadFelt) -> (u64, u64) {
     let base_elements = ext_elem.to_array();
-    (base_elements[0].as_canonical_u64(), base_elements[1].as_canonical_u64())
+    (base_elements[0].as_int(), base_elements[1].as_int())
 }

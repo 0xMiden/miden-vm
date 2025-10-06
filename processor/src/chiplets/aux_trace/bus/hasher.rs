@@ -435,7 +435,7 @@ where
         // f_mp or f_mv or f_mu == 1
         // v_leaf = v_h + (1 - b) * v_b + b * v_d
         if selector1 == ONE && !(selector2 == ZERO && selector3 == ZERO) {
-            let bit = (node_index.as_canonical_u64() & 1) as u8;
+            let bit = (node_index.as_int() & 1) as u8;
             if bit == 0 {
                 let hasher_message = HasherMessage {
                     transition_label,
@@ -572,7 +572,7 @@ where
     }
 
     fn source(&self) -> &str {
-        let op_code = self.op_code.as_canonical_u64() as u8;
+        let op_code = self.op_code.as_int() as u8;
         match op_code {
             OPCODE_JOIN => "join",
             OPCODE_SPLIT => "split",
