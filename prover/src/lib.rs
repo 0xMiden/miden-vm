@@ -184,4 +184,4 @@ where
 // HELPERS and TYPES are consolidated into prove/ submodules
 
 pub use crate::prove::types::{Commitments, OpenedValues, Proof};
-use crate::prove::{prove_blake, prove_keccak,  utils::to_row_major};
+use crate::prove::{prove_blake, prove_keccak, utils::to_row_major};

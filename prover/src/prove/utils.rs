@@ -3,7 +3,8 @@
 use std::{vec, vec::Vec};
 
 use miden_air::{
-    trace::{ColMatrix, AUX_TRACE_WIDTH, TRACE_WIDTH}, Air, Felt
+    Air, Felt,
+    trace::{AUX_TRACE_WIDTH, ColMatrix, TRACE_WIDTH},
 };
 use miden_processor::{ExecutionTrace, ZERO};
 use p3_commit::PolynomialSpace;

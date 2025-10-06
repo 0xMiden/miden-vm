@@ -1,5 +1,4 @@
 use alloc::vec::Vec;
-use std::println;
 
 use miden_air::RowIndex;
 use miden_core::{PrimeCharacteristicRing, WORD_SIZE, Word, stack::MIN_STACK_DEPTH};

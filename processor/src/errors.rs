@@ -1,6 +1,10 @@
-use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
+use alloc::{
+    boxed::Box,
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
+};
 use core::error::Error;
-use std::string::ToString;
 
 use miden_air::RowIndex;
 use miden_core::{
