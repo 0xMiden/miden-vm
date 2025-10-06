@@ -15,16 +15,22 @@ use super::{Felt, WORD_SIZE, Word};
 // ================================================================================================
 
 /// Mutates a seed and generates a word deterministically
-pub fn seeded_word(seed: &mut u64) -> Word {
-    let seed = generate_bytes_seed(seed);
-    prng_array::<Felt, WORD_SIZE>(seed).into()
+pub fn seeded_word(seed: u64) -> Word {
+    let mut rng = SmallRng::seed_from_u64(seed);
+    [
+        Felt::new(rng.next_u64()),
+        Felt::new(rng.next_u64()),
+        Felt::new(rng.next_u64()),
+        Felt::new(rng.next_u64()),
+    ]
+    .into()
 }
 
 /// Mutates a seed and generates an element deterministically
 pub fn seeded_element(seed: u64) -> Felt {
     let mut rng = SmallRng::seed_from_u64(seed);
     let num = rng.next_u64();
-    Felt::from_u64(num)
+    Felt::new(num)
 }
 
 // RANDOM VALUE GENERATION

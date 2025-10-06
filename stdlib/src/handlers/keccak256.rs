@@ -10,7 +10,7 @@
 use alloc::{vec, vec::Vec};
 use core::array;
 
-use miden_core::{AdviceMap, EventId, Felt, Word, crypto::hash::Digest};
+use miden_core::{AdviceMap, AlgebraicSponge, EventId, Felt, Word, crypto::hash::Digest};
 use miden_crypto::hash::{keccak::Keccak256, rpo::Rpo256};
 use miden_processor::{AdviceMutation, EventError, ProcessState};
 

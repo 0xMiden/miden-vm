@@ -97,7 +97,7 @@ fn push_lowerbound_result(
     // If range is empty, result is end_ptr
     if addr_range.is_empty() {
         return Ok(vec![AdviceMutation::extend_stack(vec![
-            Felt::from(false),
+            Felt::new(false as u64),
             Felt::from(addr_range.end),
         ])]);
     }
@@ -140,7 +140,7 @@ fn push_lowerbound_result(
     }
 
     Ok(vec![AdviceMutation::extend_stack(vec![
-        Felt::from(was_key_found),
+        Felt::new(was_key_found as u64),
         Felt::from(result.unwrap_or(addr_range.end)),
     ])])
 }

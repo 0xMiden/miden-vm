@@ -1760,6 +1760,7 @@ dependencies = [
  "miden-verifier",
  "pretty_assertions",
  "proptest",
+ "rand",
  "test-case",
  "winter-prover",
  "winter-rand-utils",

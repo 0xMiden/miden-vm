@@ -106,5 +106,6 @@ p3-uni-stark =  { branch = "zz/migrate-plonky3", default-features = false, git =
 p3-util = { branch = "zz/migrate-plonky3", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
 
 
+rand = { version = "0.9", default-features = false }
 # [patch.crates-io]
 # miden-crypto = { git = "https://github.com/0xMiden/crypto", branch = "zz/migrate-plonky3" }

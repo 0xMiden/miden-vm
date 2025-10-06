@@ -25,7 +25,7 @@ use miden_core::{
     chiplets::hasher::apply_permutation,
 };
 pub use miden_core::{
-    EMPTY_WORD, Felt, ONE, StackInputs, StackOutputs, StarkField, WORD_SIZE, Word, ZERO,
+    EMPTY_WORD, Felt, ONE, StackInputs, StackOutputs, WORD_SIZE, Word, ZERO,
     chiplets::hasher::{STATE_WIDTH, hash_elements},
     stack::MIN_STACK_DEPTH,
     utils::{IntoBytes, ToElements, group_slice_elements},
@@ -38,17 +38,12 @@ use miden_processor::{
     DefaultDebugHandler, DefaultHost, EventHandler, Program, fast::FastProcessor,
 };
 use miden_prover::utils::range;
-pub use miden_prover::{MerkleTreeVC, ProvingOptions, prove};
+pub use miden_prover::{ProvingOptions, prove};
 pub use miden_verifier::{AcceptableOptions, VerifierError, verify};
 pub use pretty_assertions::{assert_eq, assert_ne, assert_str_eq};
 #[cfg(not(target_family = "wasm"))]
 use proptest::prelude::{Arbitrary, Strategy};
-#[cfg(not(target_family = "wasm"))]
-use proptest::prelude::{Arbitrary, Strategy};
-use prover::utils::range;
-pub use prover::{MemAdviceProvider, ProvingOptions, prove};
 pub use test_case::test_case;
-pub use verifier::{AcceptableOptions, VerifierError, verify};
 
 pub mod math {
     pub use winter_prover::math::{

@@ -6,7 +6,7 @@ use miden_assembly_syntax::{
     debuginfo::{SourceFile, SourceSpan},
     diagnostics::{Diagnostic, RelatedLabel, miette},
 };
-use miden_core::utils::to_hex;
+use miden_core::utils::{Serializable, to_hex};
 
 // LINKER ERROR
 // ================================================================================================
@@ -48,7 +48,8 @@ pub enum LinkerError {
         source_file: Option<Arc<SourceFile>>,
         callee: Box<QualifiedProcedureName>,
     },
-    #[error("value for key {} already present in the advice map", to_hex(Felt::elements_as_bytes(.key)))]
+    // FIXME: print key in the error message
+    #[error("value for key already present in the advice map")]
     #[diagnostic(help(
         "previous values at key were '{prev_values:?}'. Operation would have replaced them with '{new_values:?}'",
     ))]
