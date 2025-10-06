@@ -2,7 +2,7 @@
 
 use std::{vec, vec::Vec};
 
-use air::{
+use miden_air::{
     Air, ColMatrix, Felt,
     trace::{AUX_TRACE_WIDTH, TRACE_WIDTH},
 };

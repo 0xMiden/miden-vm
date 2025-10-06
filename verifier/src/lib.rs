@@ -8,10 +8,9 @@ extern crate std;
 use alloc::vec;
 use std::println;
 
-use air::{Felt, HashFunction, ProcessorAir, Proof, PublicInputs};
-use miden_air::{HashFunction, ProcessorAir, ProvingOptions, PublicInputs};
+// use air::{Felt, HashFunction, ProcessorAir, Proof, PublicInputs};
+use miden_air::{Felt, HashFunction, ProcessorAir, Proof, ProvingOptions, PublicInputs};
 use miden_core::{
-    RpoPermutation256,
     crypto::{
         hash::{Blake3_192, Blake3_256, Poseidon2, Rpo256, Rpx256},
         random::{RpoRandomCoin, RpxRandomCoin, WinterRandomCoin},
@@ -27,7 +26,7 @@ use p3_merkle_tree::MerkleTreeMmcs;
 use p3_symmetric::{
     CompressionFunctionFromHasher, PaddingFreeSponge, SerializingHasher, TruncatedPermutation,
 };
-use p3_uni_stark::StarkConfig;
+use p3_uni_stark::{ StarkConfig};
 
 mod verify;
 // EXPORTS
@@ -36,7 +35,7 @@ pub use miden_core::{Kernel, ProgramInfo, StackInputs, StackOutputs, Word};
 use verify::verify as verify_proof;
 pub use winter_verifier::{AcceptableOptions, VerifierError};
 pub mod math {
-    pub use miden_core::{Felt, StarkField};
+    pub use miden_core::{Felt, };
 }
 pub use miden_air::ExecutionProof;
 
@@ -130,66 +129,17 @@ pub fn verify(
             verify_proof(&config, &processor_air, &proof, &vec![])
         },
         HashFunction::Rpo256 => {
-            type Perm = RpoPermutation256;
-
-            type MyHash = PaddingFreeSponge<Perm, 12, 8, 4>;
-            let hash = MyHash::new(Perm {});
-
-            type MyCompress = TruncatedPermutation<Perm, 2, 4, 12>;
-            let compress = MyCompress::new(Perm {});
-
-            type Challenger = DuplexChallenger<Val, Perm, 12, 8>;
-            let challenger = Challenger::new(Perm {});
-
-            type ValMmcs = MerkleTreeMmcs<
-                <Val as Field>::Packing,
-                <Val as Field>::Packing,
-                MyHash,
-                MyCompress,
-                4,
-            >;
-            let val_mmcs = ValMmcs::new(hash, compress);
-
-            type ChallengeMmcs = ExtensionMmcs<Val, Challenge, ValMmcs>;
-            let challenge_mmcs = ChallengeMmcs::new(val_mmcs.clone());
-
-            type Dft = Radix2DitParallel<Val>;
-            let dft = Dft::default();
-
-            let fri_config = FriParameters {
-                log_blowup: 3,
-                log_final_poly_len: 7,
-                num_queries: 27,
-                proof_of_work_bits: 16,
-                mmcs: challenge_mmcs,
-            };
-
-            type Pcs = TwoAdicFriPcs<Val, Dft, ValMmcs, ChallengeMmcs>;
-            let pcs = Pcs::new(dft, val_mmcs, fri_config);
-            type Config = StarkConfig<Pcs, Challenge, Challenger>;
-            let config = Config::new(pcs, challenger);
-
-            let proof: Proof<Config> = bincode::deserialize(&proof).unwrap();
-            verify_proof(&config, &processor_air, &proof, &pub_inputs.to_elements())
+            todo!()
         },
         HashFunction::Rpx256 => {
-            let opts = AcceptableOptions::OptionSet(vec![
-                ProvingOptions::RECURSIVE_96_BITS,
-                ProvingOptions::RECURSIVE_128_BITS,
-            ]);
-            verify_proof::<ProcessorAir, Rpx256, RpxRandomCoin, MerkleTree<_>>(
-                proof, pub_inputs, &opts,
-            )
+           todo!()
         },
         HashFunction::Poseidon2 => {
-            let opts = AcceptableOptions::OptionSet(vec![
-                ProvingOptions::RECURSIVE_96_BITS,
-                ProvingOptions::REGULAR_128_BITS,
-            ]);
-            verify_proof::<ProcessorAir, Poseidon2, WinterRandomCoin<_>, MerkleTree<_>>(
-                proof, pub_inputs, &opts,
-            )
+            todo!()
         },
+        HashFunction::Keccak => {
+            todo!()
+        }
     }
     .map_err(|_source| VerificationError::ProgramVerificationError(program_hash))?;
 
@@ -203,7 +153,7 @@ pub fn verify(
 #[derive(Debug, thiserror::Error)]
 pub enum VerificationError {
     #[error("failed to verify proof for program with hash {0}")]
-    ProgramVerificationError(Word, #[source] VerifierError),
+    ProgramVerificationError(Word),
     #[error("the input {0} is not a valid field element")]
     InputNotFieldElement(u64),
     #[error("the output {0} is not a valid field element")]
