@@ -1403,13 +1403,13 @@ impl CoreTraceFragmentGenerator {
         start_op_idx: Option<usize>,
         current_forest: &MastForest,
     ) -> ControlFlow<()> {
-        let end_indices = batch.end_indices();
         let start_op_idx = start_op_idx.unwrap_or(0);
+        let end_indices = batch.end_indices();
 
         // Execute operations in the batch starting from the correct static operation index
-        for (op_idx_in_batch, &op) in batch.ops().iter().enumerate().skip(start_op_idx) {
-            let (op_group_idx, op_idx_in_group) =
-                batch.op_idx_in_batch_to_group(op_idx_in_batch).expect("invalid op batch");
+        for (op_idx_in_batch, (op_group_idx, op_idx_in_group, op)) in
+            batch.iter_with_groups().enumerate().skip(start_op_idx)
+        {
             {
                 // `execute_sync_op` does not support executing `Emit`, so we only call it for all
                 // other operations.
@@ -1420,7 +1420,7 @@ impl CoreTraceFragmentGenerator {
                     // to 0.
                     // TODO(plafer): remove op_idx_in_block from u32_sub's error?
                     self.execute_sync_op(
-                        &op,
+                        op,
                         0,
                         current_forest,
                         &mut NoopHost,
@@ -1434,7 +1434,7 @@ impl CoreTraceFragmentGenerator {
                 };
 
                 // write the operation to the trace
-                self.add_operation_trace_row(op, op_idx_in_group, user_op_helpers)?;
+                self.add_operation_trace_row(*op, op_idx_in_group, user_op_helpers)?;
             }
 
             // if we executed all operations in a group and haven't reached the end of the batch
