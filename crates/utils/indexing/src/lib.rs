@@ -62,11 +62,17 @@ macro_rules! newtype_id {
 /// A dense vector indexed by ID types.
 ///
 /// This provides O(1) access and storage for dense ID-indexed data.
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct IndexVec<I: Idx, T> {
     raw: Vec<T>,
     _m: PhantomData<I>,
+}
+
+impl<I: Idx, T> Default for IndexVec<I, T> {
+    fn default() -> Self {
+        Self { raw: Vec::new(), _m: PhantomData }
+    }
 }
 
 impl<I: Idx, T> IndexVec<I, T> {
@@ -232,16 +238,22 @@ impl<From: Idx, To: Idx> DenseIdMap<From, To> {
     }
 }
 
-/// A trait for looking up fingerprints by node ID with generic fingerprint type.
-pub trait FingerPrintLookup<ID, F>
+/// A trait for looking up values by ID.
+pub trait LookupByIdx<ID, V>
 where
     ID: Idx,
 {
-    /// Get the fingerprint for the given node ID.
-    fn get(&self, id: ID) -> Option<&F>;
+    /// Get the value for the given ID.
+    fn get(&self, id: ID) -> Option<&V>;
 }
 
-impl<I, T> FingerPrintLookup<I, T> for IndexVec<I, T>
+/// A trait for looking up values by key that doesn't need to implement Idx.
+pub trait LookupByKey<K, V> {
+    /// Get the value for the given key.
+    fn get(&self, key: &K) -> Option<&V>;
+}
+
+impl<I, T> LookupByIdx<I, T> for IndexVec<I, T>
 where
     I: Idx,
 {
@@ -250,12 +262,21 @@ where
     }
 }
 
-impl<K, V> FingerPrintLookup<K, V> for BTreeMap<K, V>
+impl<K, V> LookupByKey<K, V> for BTreeMap<K, V>
+where
+    K: Ord,
+{
+    fn get(&self, key: &K) -> Option<&V> {
+        BTreeMap::get(self, key)
+    }
+}
+
+impl<K, V> LookupByIdx<K, V> for BTreeMap<K, V>
 where
     K: Idx,
 {
     fn get(&self, id: K) -> Option<&V> {
-        self.get(&id)
+        BTreeMap::get(self, &id)
     }
 }
 

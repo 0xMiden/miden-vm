@@ -282,7 +282,6 @@ impl MastForestMerger {
     /// the given maps.
     fn remap_node(&self, forest_idx: usize, node: &MastNode) -> Result<MastNode, MastForestError> {
         self.build_node_with_remapped_children(
-            forest_idx,
             node,
             &self.node_id_mappings[forest_idx],
             &self.decorator_id_mappings[forest_idx],
@@ -310,7 +309,6 @@ impl MastForestMerger {
     /// Builds a new node with remapped children and decorators using the provided mappings.
     fn build_node_with_remapped_children(
         &self,
-        _forest_idx: usize,
         src: &MastNode,
         nmap: &DenseIdMap<MastNodeId, MastNodeId>,
         dmap: &DenseIdMap<DecoratorId, DecoratorId>,

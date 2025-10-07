@@ -49,7 +49,7 @@ mod tests;
 ///
 /// A [`MastForest`] does not have an entrypoint, and hence is not executable. A [`crate::Program`]
 /// can be built from a [`MastForest`] to specify an entrypoint.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(all(feature = "arbitrary", test), miden_serde_test_macros::serde_test)]
 pub struct MastForest {
@@ -69,18 +69,6 @@ pub struct MastForest {
     /// codes, so they are stored in order to provide a useful message to the user in case a error
     /// code is triggered.
     error_codes: BTreeMap<u64, Arc<str>>,
-}
-
-impl Default for MastForest {
-    fn default() -> Self {
-        Self {
-            nodes: IndexVec::new(),
-            roots: Vec::new(),
-            decorators: IndexVec::new(),
-            advice_map: AdviceMap::default(),
-            error_codes: BTreeMap::new(),
-        }
-    }
 }
 
 // ------------------------------------------------------------------------------------------------

@@ -136,5 +136,5 @@ pub mod utils;
 
 // Re-export indexing functionality from the new standalone crate
 pub use miden_utils_indexing::{
-    DenseIdMap, FingerPrintLookup, Idx, IndexVec, IndexedVecError, newtype_id,
+    DenseIdMap, Idx, IndexVec, IndexedVecError, LookupByIdx, newtype_id,
 };

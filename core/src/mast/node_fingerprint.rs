@@ -6,7 +6,7 @@ use miden_crypto::hash::{
 };
 
 use crate::{
-    FingerPrintLookup, Operation, Word,
+    LookupByIdx, Operation, Word,
     mast::{
         DecoratorId, MastForest, MastForestError, MastNode, MastNodeId,
         node::{MastNodeErrorContext, MastNodeExt},
@@ -53,7 +53,7 @@ impl MastNodeFingerprint {
     /// this map.
     pub fn from_mast_node(
         forest: &MastForest,
-        hash_by_node_id: &impl FingerPrintLookup<MastNodeId, MastNodeFingerprint>,
+        hash_by_node_id: &impl LookupByIdx<MastNodeId, MastNodeFingerprint>,
         node: &MastNode,
     ) -> Result<MastNodeFingerprint, MastForestError> {
         match node {
@@ -155,7 +155,7 @@ impl MastNodeFingerprint {
 
 fn fingerprint_from_parts(
     forest: &MastForest,
-    hash_by_node_id: &impl FingerPrintLookup<MastNodeId, MastNodeFingerprint>,
+    hash_by_node_id: &impl LookupByIdx<MastNodeId, MastNodeFingerprint>,
     before_enter_ids: &[DecoratorId],
     after_exit_ids: &[DecoratorId],
     children_ids: &[MastNodeId],
