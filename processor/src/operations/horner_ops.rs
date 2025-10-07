@@ -257,8 +257,7 @@ mod tests {
     use alloc::vec::Vec;
 
     use miden_core::{
-        Felt, Operation, PrimeCharacteristicRing, PrimeField64, QuadFelt, StackInputs, ZERO,
-        mast::MastForest,
+        Felt, Operation, PrimeCharacteristicRing, QuadFelt, StackInputs, ZERO, mast::MastForest,
     };
     use miden_utils_testing::{build_test, rand::rand_array};
 

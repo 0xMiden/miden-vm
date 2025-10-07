@@ -1,13 +1,8 @@
 use alloc::vec::Vec;
 
 use miden_core::{
-    AlgebraicSponge, Felt, Field, PrimeCharacteristicRing, PrimeField64, QuadFelt, WORD_SIZE, Word,
-    ZERO,
-    crypto::{
-        hash::Rpo256,
-        merkle::{EmptySubtreeRoots, SMT_DEPTH, Smt},
-    },
-    sys_events::SystemEvent,
+    AlgebraicSponge, Felt, Field, PrimeCharacteristicRing, QuadFelt, WORD_SIZE, Word, ZERO,
+    crypto::hash::Rpo256, sys_events::SystemEvent,
 };
 
 use crate::{ExecutionError, ProcessState, errors::ErrorContext};

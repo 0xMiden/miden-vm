@@ -1,6 +1,5 @@
 use alloc::{string::ToString, sync::Arc, vec::Vec};
 
-use miden_core::PrimeCharacteristicRing;
 use miden_debug_types::{SourceSpan, Span};
 use miden_utils_diagnostics::Report;
 use pretty_assertions::assert_eq;

@@ -4,7 +4,7 @@ use core::{
     ops::{Bound, Range},
 };
 
-use miden_crypto::{ExtensionField, PrimeCharacteristicRing, PrimeField64};
+use miden_crypto::{ExtensionField, PrimeCharacteristicRing};
 // RE-EXPORTS
 // ================================================================================================
 pub use miden_crypto::{

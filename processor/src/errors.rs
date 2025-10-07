@@ -1,10 +1,4 @@
-use alloc::{
-    boxed::Box,
-    string::{String, ToString},
-    sync::Arc,
-    vec::Vec,
-};
-use core::error::Error;
+use alloc::{sync::Arc, vec::Vec};
 
 use miden_air::RowIndex;
 use miden_core::{
@@ -18,15 +12,11 @@ use miden_utils_diagnostics::{Diagnostic, miette};
 use winter_prover::ProverError;
 
 use crate::{
-    BaseHost, ContextId, EventError, MemoryError,
+    BaseHost, EventError, MemoryError,
     host::advice::AdviceError,
     system::{FMP_MAX, FMP_MIN},
 };
 
-// TODO(Al)
-fn felts_to_hex(elements: &[Felt]) -> Vec<u8> {
-    elements.iter().flat_map(|e| e.to_string().into_bytes()).collect()
-}
 // EXECUTION ERROR
 // ================================================================================================
 

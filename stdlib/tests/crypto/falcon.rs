@@ -16,7 +16,7 @@ use miden_utils_testing::{
     },
     expect_exec_error_matches,
     proptest::proptest,
-    rand::{rand_array, rand_value},
+    rand::rand_array,
 };
 use rand::{Rng, rng};
 

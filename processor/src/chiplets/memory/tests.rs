@@ -9,7 +9,7 @@ use miden_air::{
     },
 };
 use miden_assembly::SourceSpan;
-use miden_core::{Field, PrimeCharacteristicRing, PrimeField64, WORD_SIZE, Word, assert_matches};
+use miden_core::{Field, PrimeCharacteristicRing, WORD_SIZE, Word, assert_matches};
 
 use super::{
     super::ZERO,
@@ -105,7 +105,7 @@ fn mem_read() {
         4.into(),
         EMPTY_WORD,
     );
-    verify_memory_access(&trace, 3, memory_access, prev_row);
+    let _ = verify_memory_access(&trace, 3, memory_access, prev_row);
 }
 
 /// Tests that writing a word to an address that is not aligned with the word boundary results in an
@@ -254,7 +254,7 @@ fn mem_write() {
         5.into(),
         word1234,
     );
-    verify_memory_access(&trace, 5, memory_access, prev_row);
+    let _ = verify_memory_access(&trace, 5, memory_access, prev_row);
 }
 
 /// Tests that writing a word to an address that is not aligned with the word boundary results in an
@@ -431,7 +431,7 @@ fn mem_write_read() {
         clk,
         [1_u32, 2, 42, 4].into(),
     );
-    verify_memory_access(&trace, 8, memory_access, prev_row);
+    let _ = verify_memory_access(&trace, 8, memory_access, prev_row);
 }
 
 #[test]

@@ -4,7 +4,7 @@ use alloc::{
 };
 
 use miden_air::RowIndex;
-use miden_core::{PrimeField64, WORD_SIZE};
+use miden_core::WORD_SIZE;
 
 use super::{Felt, INIT_MEM_VALUE, MemoryError, Word};
 use crate::{ContextId, MemoryAddress};

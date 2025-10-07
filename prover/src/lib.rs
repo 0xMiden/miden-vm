@@ -11,29 +11,13 @@ use std::println;
 #[cfg(feature = "std")]
 use std::time::Instant;
 
-use miden_air::{AuxRandElements, PartitionOptions, ProcessorAir, PublicInputs};
+use miden_air::{ProcessorAir, PublicInputs, ToElements};
 #[cfg(all(feature = "metal", target_arch = "aarch64", target_os = "macos"))]
 use miden_gpu::HashFn;
-#[cfg(all(feature = "metal", target_arch = "aarch64", target_os = "macos"))]
-use miden_gpu::HashFn;
-use miden_processor::{
-    ExecutionTrace, Program,
-    crypto::{
-        Blake3_192, Blake3_256, ElementHasher, Poseidon2, RandomCoin, Rpo256, RpoRandomCoin,
-        Rpx256, RpxRandomCoin, WinterRandomCoin,
-    },
-    math::Felt,
-};
-use p3_field::extension::BinomialExtensionField;
+use miden_processor::{ExecutionTrace, Program};
 use p3_uni_stark::StarkGenericConfig;
 use tracing::instrument;
-use winter_maybe_async::{maybe_async, maybe_await};
-use winter_prover::{
-    CompositionPoly, CompositionPolyTrace, ConstraintCompositionCoefficients,
-    DefaultConstraintCommitment, DefaultConstraintEvaluator, DefaultTraceLde,
-    ProofOptions as WinterProofOptions, Prover, StarkDomain, TraceInfo, TracePolyTable,
-    matrix::ColMatrix,
-};
+
 mod gpu;
 
 mod prove;
@@ -52,7 +36,7 @@ pub use miden_processor::{
 // PROVER
 // ================================================================================================
 
-struct ExecutionProver<SC> {
+pub struct ExecutionProver<SC> {
     config: SC,
     public_inputs: PublicInputs,
     _sc: PhantomData<SC>,
@@ -70,7 +54,7 @@ where
     // --------------------------------------------------------------------------------------------
 
     /// Validates the stack inputs against the provided execution trace and returns true if valid.
-    fn are_inputs_valid(&self, trace: &ExecutionTrace) -> bool {
+    pub fn are_inputs_valid(&self, trace: &ExecutionTrace) -> bool {
         self.public_inputs
             .stack_inputs()
             .iter()
@@ -79,7 +63,7 @@ where
     }
 
     /// Validates the stack outputs against the provided execution trace and returns true if valid.
-    fn are_outputs_valid(&self, trace: &ExecutionTrace) -> bool {
+    pub fn are_outputs_valid(&self, trace: &ExecutionTrace) -> bool {
         self.public_inputs
             .stack_outputs()
             .iter()
@@ -87,15 +71,15 @@ where
             .all(|(l, r)| l == r)
     }
 
-    fn prove(&self, trace: ExecutionTrace) -> Proof<SC> where {
-        let processor_air = ProcessorAir {};
+    pub fn prove(&self, trace: ExecutionTrace) -> Proof<SC> where {
+        let _processor_air = ProcessorAir {};
 
         //let mut public_inputs = self.public_inputs.stack_inputs().to_vec();
         //public_inputs.extend_from_slice(&self.public_inputs.stack_outputs().to_vec() );
         //public_inputs.extend_from_slice(&self.public_inputs.program_info().to_elements() );
 
         //let public_inputs = vec![];
-        let trace_row_major = to_row_major(&trace);
+        let _trace_row_major = to_row_major(&trace);
         //prove_uni_stark(&self.config, &processor_air, trace_row_major, &public_inputs)
         todo!()
     }
@@ -133,11 +117,7 @@ where
 
     let stack_outputs = trace.stack_outputs().clone();
     let hash_fn = options.hash_fn();
-    let program_info = trace.program_info();
-    let public_inputs = PublicInputs::new(program_info.clone(), stack_inputs, stack_outputs);
-
-    type Val = Felt;
-    type Challenge = BinomialExtensionField<Val, 2>;
+    let _program_info = trace.program_info();
 
     // generate STARK proof
     let proof = match hash_fn {

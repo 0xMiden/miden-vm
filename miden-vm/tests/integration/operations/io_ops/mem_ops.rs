@@ -1,5 +1,3 @@
-use miden_core::PrimeField64;
-
 use super::{Felt, TRUNCATE_STACK_PROC, ToElements, apply_permutation, build_op_test, build_test};
 
 // LOADING SINGLE ELEMENT ONTO THE STACK (MLOAD)

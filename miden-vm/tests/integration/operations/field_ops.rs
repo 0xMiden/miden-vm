@@ -1,12 +1,10 @@
-use assembly::regex;
 use miden_assembly::testing::regex;
 use miden_core::{Field, PrimeCharacteristicRing, PrimeField64};
 use miden_processor::{ExecutionError, RowIndex};
 use miden_utils_testing::{
-    Felt, ONE, StarkField, WORD_SIZE, ZERO, assert_assembler_diagnostic, assert_diagnostic_lines,
+    Felt, ONE, WORD_SIZE, ZERO, assert_assembler_diagnostic, assert_diagnostic_lines,
     build_op_test, expect_exec_error_matches, prop_randw, proptest::prelude::*, rand::rand_value,
 };
-use processor::{ExecutionError, RowIndex};
 
 // FIELD OPS ARITHMETIC - MANUAL TESTS
 // ================================================================================================

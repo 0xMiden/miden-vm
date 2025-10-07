@@ -4,7 +4,6 @@ use core::fmt;
 use miden_crypto::{Felt, PrimeCharacteristicRing, WORD_SIZE, Word};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-use winter_math::FieldElement;
 use winter_utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
 
 use super::Kernel;

@@ -20,15 +20,14 @@ pub use miden_assembly::{
     debuginfo::{DefaultSourceManager, SourceFile, SourceLanguage, SourceManager},
     diagnostics::Report,
 };
-use miden_core::{
-    BinomialExtensionField, EventId, PrimeCharacteristicRing, PrimeField64, ProgramInfo,
-    chiplets::hasher::apply_permutation,
-};
 pub use miden_core::{
     EMPTY_WORD, Felt, ONE, StackInputs, StackOutputs, WORD_SIZE, Word, ZERO,
     chiplets::hasher::{STATE_WIDTH, hash_elements},
     stack::MIN_STACK_DEPTH,
     utils::{IntoBytes, ToElements, group_slice_elements},
+};
+use miden_core::{
+    EventId, PrimeCharacteristicRing, ProgramInfo, chiplets::hasher::apply_permutation,
 };
 pub use miden_processor::{
     AdviceInputs, AdviceProvider, BaseHost, ContextId, ExecutionError, ExecutionOptions,

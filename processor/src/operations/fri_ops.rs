@@ -1,6 +1,5 @@
 use miden_core::{
-    BasedVectorSpace, Field, ONE, PrimeCharacteristicRing, PrimeField64, QuadFelt, ZERO,
-    lazy_static,
+    BasedVectorSpace, Field, ONE, PrimeCharacteristicRing, QuadFelt, ZERO, lazy_static,
 };
 
 use super::{ExecutionError, Felt, Operation, Process};

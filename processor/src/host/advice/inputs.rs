@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 
 use miden_core::{
     AdviceMap, Felt, PrimeCharacteristicRing, Word,
-    crypto::merkle::{InnerNodeInfo, MerkleStore},
+    crypto::merkle::MerkleStore,
     errors::InputError,
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };

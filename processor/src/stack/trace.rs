@@ -7,7 +7,6 @@ use miden_air::{
 use miden_core::{PrimeCharacteristicRing, stack::MIN_STACK_DEPTH, utils::serial_batch_inversion};
 
 use super::{super::utils::get_trace_len, Felt, MAX_TOP_IDX, ONE, STACK_TRACE_WIDTH, ZERO};
-use crate::utils::math::batch_inversion;
 
 // STACK TRACE
 // ================================================================================================

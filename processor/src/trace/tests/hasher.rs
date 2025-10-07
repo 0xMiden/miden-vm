@@ -4,7 +4,7 @@ use miden_air::trace::{
     AUX_TRACE_RAND_ELEMENTS, chiplets::hasher::P1_COL_IDX, main_trace::MainTrace,
 };
 use miden_core::{
-    ExtensionField, Field, PrimeCharacteristicRing, PrimeField64,
+    ExtensionField, Field,
     crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},
 };
 use rstest::rstest;

@@ -4,7 +4,7 @@ use miden_air::trace::chiplets::hasher::{
     DIGEST_RANGE, LINEAR_HASH, MP_VERIFY, MR_UPDATE_NEW, MR_UPDATE_OLD, RATE_LEN, RETURN_HASH,
     RETURN_STATE, STATE_WIDTH, Selectors, TRACE_WIDTH,
 };
-use miden_core::{PrimeCharacteristicRing, PrimeField64};
+use miden_core::PrimeCharacteristicRing;
 
 use super::{
     Felt, HasherState, MerklePath, MerkleRootUpdate, ONE, OpBatch, TraceFragment, Word as Digest,

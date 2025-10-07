@@ -1,4 +1,4 @@
-use miden_core::{Field, ONE, Operation, PrimeCharacteristicRing, PrimeField64, ZERO};
+use miden_core::{Field, ONE, Operation, PrimeCharacteristicRing, ZERO};
 
 use super::{ExecutionError, Felt, Process, utils::assert_binary};
 use crate::ErrorContext;
@@ -228,7 +228,7 @@ impl Process {
 
 #[cfg(test)]
 mod tests {
-    use miden_core::{Field, ONE, PrimeCharacteristicRing, PrimeField64, ZERO, mast::MastForest};
+    use miden_core::{Field, ONE, PrimeCharacteristicRing, ZERO, mast::MastForest};
     use miden_utils_testing::rand::rand_value;
 
     use super::{

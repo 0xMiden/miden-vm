@@ -1,5 +1,5 @@
-use miden_core::{Field, PrimeField64, QuadFelt};
-use miden_utils_testing::{QuadFelt, build_op_test, rand::rand_value};
+use miden_core::{Field, QuadFelt};
+use miden_utils_testing::{build_op_test, rand::rand_value};
 
 // EXT2 OPS ASSERTIONS - MANUAL TESTS
 // ================================================================================================

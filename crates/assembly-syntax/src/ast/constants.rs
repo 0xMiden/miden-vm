@@ -1,7 +1,7 @@
 use alloc::{boxed::Box, string::String, sync::Arc};
 use core::fmt;
 
-use miden_core::{PrimeCharacteristicRing, PrimeField64};
+use miden_core::PrimeCharacteristicRing;
 use miden_debug_types::{SourceSpan, Span, Spanned};
 
 use super::DocString;

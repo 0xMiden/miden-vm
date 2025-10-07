@@ -1,4 +1,4 @@
-use miden_core::{PrimeCharacteristicRing, PrimeField64, WORD_SIZE};
+use miden_core::{PrimeCharacteristicRing, WORD_SIZE};
 use miden_utils_testing::{
     EMPTY_WORD, Felt, ONE, Word, ZERO,
     crypto::{

@@ -1,9 +1,6 @@
 use alloc::vec::Vec;
 
-use miden_core::{
-    AlgebraicSponge, BinomialExtensionField, Felt, QuadFelt, chiplets::hasher::hash_elements,
-};
-use winter_prover::crypto::ElementHasher;
+use miden_core::{AlgebraicSponge, Felt, QuadFelt};
 
 use super::*;
 use crate::chiplets::ace::instruction::{ID_BITS, MAX_ID};

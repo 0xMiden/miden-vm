@@ -35,9 +35,7 @@ impl Process {
 
 #[cfg(test)]
 mod tests {
-    use miden_core::{
-        BasedVectorSpace, BinomialExtensionField, Operation, QuadFelt, ZERO, mast::MastForest,
-    };
+    use miden_core::{BasedVectorSpace, Operation, QuadFelt, ZERO, mast::MastForest};
     use miden_utils_testing::rand::rand_value;
 
     use super::*;

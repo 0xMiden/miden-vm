@@ -317,8 +317,6 @@ pub(crate) enum MultiMastForestIteratorItem {
 
 #[cfg(test)]
 mod tests {
-    use miden_crypto::ZERO;
-
     use super::*;
     use crate::{Operation, Word, mast::BasicBlockNode};
 

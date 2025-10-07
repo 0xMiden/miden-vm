@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 use core::ops::Deref;
 
-use miden_crypto::{PrimeCharacteristicRing, PrimeField64, WORD_SIZE, Word, ZERO};
+use miden_crypto::{PrimeCharacteristicRing, WORD_SIZE, Word, ZERO};
 
 use super::{ByteWriter, Felt, MIN_STACK_DEPTH, OutputError, Serializable};
 use crate::utils::{ByteReader, Deserializable, DeserializationError, range};

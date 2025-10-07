@@ -4,7 +4,7 @@ use miden_air::trace::chiplets::hasher::{
     DIGEST_LEN, HASH_CYCLE_LEN, NUM_ROUNDS, NUM_SELECTORS, STATE_COL_RANGE,
 };
 use miden_core::{
-    ONE, Operation, PrimeCharacteristicRing, PrimeField64, ZERO,
+    ONE, Operation, PrimeCharacteristicRing, ZERO,
     chiplets::hasher,
     crypto::merkle::{MerkleTree, NodeIndex},
     mast::{MastForest, MastNode, MastNodeExt},
@@ -94,11 +94,11 @@ fn hasher_build_merkle_root() {
     let mut hasher = Hasher::default();
     let path0 = tree.get_path(NodeIndex::new(1, 0).unwrap()).unwrap();
 
-    hasher.build_merkle_root(leaves[0], &path0, ZERO);
+    let _ = hasher.build_merkle_root(leaves[0], &path0, ZERO);
 
     let path1 = tree.get_path(NodeIndex::new(1, 1).unwrap()).unwrap();
 
-    hasher.build_merkle_root(leaves[1], &path1, ONE);
+    let _ = hasher.build_merkle_root(leaves[1], &path1, ONE);
 
     // build the trace
     let trace = build_trace(hasher, 16);
@@ -122,7 +122,7 @@ fn hasher_build_merkle_root() {
     // initialize the hasher and perform one Merkle branch verifications
     let mut hasher = Hasher::default();
     let path = tree.get_path(NodeIndex::new(3, 5).unwrap()).unwrap();
-    hasher.build_merkle_root(leaves[5], &path, Felt::from_u64(5));
+    let _ = hasher.build_merkle_root(leaves[5], &path, Felt::from_u64(5));
 
     // build and check the trace for validity
     let trace = build_trace(hasher, 24);
@@ -135,19 +135,19 @@ fn hasher_build_merkle_root() {
 
     let path0 = tree.get_path(NodeIndex::new(3, 0).unwrap()).unwrap();
 
-    hasher.build_merkle_root(leaves[0], &path0, ZERO);
+    let _ = hasher.build_merkle_root(leaves[0], &path0, ZERO);
 
     let path3 = tree.get_path(NodeIndex::new(3, 3).unwrap()).unwrap();
 
-    hasher.build_merkle_root(leaves[3], &path3, Felt::from_u64(3));
+    let _ = hasher.build_merkle_root(leaves[3], &path3, Felt::from_u64(3));
 
     let path7 = tree.get_path(NodeIndex::new(3, 7).unwrap()).unwrap();
 
-    hasher.build_merkle_root(leaves[7], &path7, Felt::from_u64(7));
+    let _ = hasher.build_merkle_root(leaves[7], &path7, Felt::from_u64(7));
 
     // path3 again
 
-    hasher.build_merkle_root(leaves[3], &path3, Felt::from_u64(3));
+    let _ = hasher.build_merkle_root(leaves[3], &path3, Felt::from_u64(3));
 
     // build and check the trace for validity
     let trace = build_trace(hasher, 96);

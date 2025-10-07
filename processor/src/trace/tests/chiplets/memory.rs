@@ -11,7 +11,7 @@ use miden_air::{
         },
     },
 };
-use miden_core::{Field, PrimeCharacteristicRing, PrimeField64, WORD_SIZE, lazy_static};
+use miden_core::{Field, PrimeCharacteristicRing, WORD_SIZE, lazy_static};
 
 use super::{
     AUX_TRACE_RAND_ELEMENTS, CHIPLETS_BUS_AUX_TRACE_OFFSET, ExecutionTrace, Felt, NUM_RAND_ROWS,

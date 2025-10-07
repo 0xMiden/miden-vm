@@ -1,4 +1,3 @@
-use miden_core::PrimeCharacteristicRing;
 use miden_processor::{ExecutionError, math::Felt};
 use miden_utils_testing::{
     U32_BOUND, ZERO, build_op_test, expect_exec_error_matches, proptest::prelude::*,

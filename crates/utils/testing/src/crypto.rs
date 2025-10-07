@@ -1,6 +1,5 @@
 use alloc::vec::Vec;
 
-use miden_core::PrimeCharacteristicRing;
 // RE-EXPORTS
 // ================================================================================================
 pub use miden_core::crypto::{

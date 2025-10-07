@@ -1,7 +1,7 @@
 use miden_air::RowIndex;
 use miden_core::{
     ExtensionField, OPCODE_CALL, OPCODE_DYN, OPCODE_DYNCALL, OPCODE_END, OPCODE_JOIN, OPCODE_LOOP,
-    OPCODE_RESPAN, OPCODE_SPAN, OPCODE_SPLIT, OPCODE_SYSCALL, PrimeField64,
+    OPCODE_RESPAN, OPCODE_SPAN, OPCODE_SPLIT, OPCODE_SYSCALL,
 };
 
 use super::{AuxColumnBuilder, Felt, MainTrace, ONE, ZERO};

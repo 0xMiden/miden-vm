@@ -1,6 +1,5 @@
 use miden_core::{
-    EventId, Felt, Operation, PrimeCharacteristicRing, PrimeField64, mast::MastForest,
-    sys_events::SystemEvent,
+    EventId, Felt, PrimeCharacteristicRing, mast::MastForest, sys_events::SystemEvent,
 };
 
 use super::{

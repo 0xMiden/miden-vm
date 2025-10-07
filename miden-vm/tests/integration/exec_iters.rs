@@ -1,8 +1,7 @@
-use miden_core::{AssemblyOp, Operation, PrimeCharacteristicRing, debuginfo::Location};
+use miden_core::{AssemblyOp, Operation, PrimeCharacteristicRing};
 use miden_debug_types::Location;
 use miden_processor::{AsmOpInfo, ContextId, RowIndex, VmState};
 use miden_utils_testing::{Felt, ONE, ToElements, assert_eq, build_debug_test};
-use processor::{AsmOpInfo, ContextId, RowIndex, VmState};
 
 // EXEC ITER TESTS
 // =================================================================

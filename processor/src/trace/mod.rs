@@ -8,10 +8,9 @@ use miden_air::trace::{
     main_trace::MainTrace,
 };
 use miden_core::{
-    ExtensionField, PrimeField64, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
-    stack::MIN_STACK_DEPTH,
+    ExtensionField, ProgramInfo, StackInputs, StackOutputs, Word, ZERO, stack::MIN_STACK_DEPTH,
 };
-use winter_prover::{EvaluationFrame, Trace, TraceInfo, crypto::RandomCoin};
+use winter_prover::TraceInfo;
 
 use super::{
     AdviceProvider, Felt, Process, chiplets::AuxTraceBuilder as ChipletsAuxTraceBuilder,

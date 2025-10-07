@@ -1,5 +1,5 @@
 use super::{
-    Felt, PrimeField64,
+    Felt,
     errors::{InputError, OutputError},
 };
 use crate::utils::{ByteWriter, Serializable};

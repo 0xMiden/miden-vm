@@ -13,7 +13,7 @@ use miden_air::{
 #[cfg(test)]
 use miden_core::mast::OP_GROUP_SIZE;
 use miden_core::{
-    AssemblyOp, PrimeCharacteristicRing, PrimeField64, lazy_static,
+    AssemblyOp, PrimeCharacteristicRing,
     mast::{
         BasicBlockNode, CallNode, DynNode, JoinNode, LoopNode, MastForest, MastNodeExt,
         OP_BATCH_SIZE, SplitNode,
@@ -45,11 +45,7 @@ mod tests;
 // CONSTANTS
 // ================================================================================================
 
-//const HASH_CYCLE_LEN: Felt = Felt::from_u8(8);
-// TODO(Al)
-lazy_static! {
-    static ref HASH_CYCLE_LEN: Felt = Felt::from_u8(8);
-}
+const HASH_CYCLE_LEN: Felt = Felt::new(8);
 
 // DECODER PROCESS EXTENSION
 // ================================================================================================
@@ -788,7 +784,7 @@ impl Decoder {
         // we also need to increment block address by 8 because hashing every additional operation
         // batch requires 8 rows of the hasher trace.
         let block_info = self.block_stack.peek_mut();
-        block_info.addr += *HASH_CYCLE_LEN;
+        block_info.addr += HASH_CYCLE_LEN;
 
         let ctx = self.basic_block_context.as_mut().expect("not in basic block");
 

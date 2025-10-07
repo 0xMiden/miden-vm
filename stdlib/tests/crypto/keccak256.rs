@@ -8,7 +8,7 @@
 
 use core::array;
 
-use miden_core::{AlgebraicSponge, EventId, Felt, PrimeCharacteristicRing};
+use miden_core::{AlgebraicSponge, EventId, Felt};
 use miden_crypto::{
     Word,
     hash::{keccak::Keccak256, rpo::Rpo256},

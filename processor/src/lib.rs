@@ -24,7 +24,7 @@ pub use miden_core::{
     utils::DeserializationError,
 };
 use miden_core::{
-    BinomialExtensionField, Decorator, PrimeField64,
+    Decorator,
     mast::{
         BasicBlockNode, CallNode, DecoratorOpLinkIterator, DynNode, ExternalNode, JoinNode,
         LoopNode, OpBatch, SplitNode,

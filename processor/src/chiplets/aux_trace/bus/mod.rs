@@ -29,7 +29,7 @@ use miden_core::{
     OPCODE_EVALCIRCUIT, OPCODE_HORNERBASE, OPCODE_HORNEREXT, OPCODE_HPERM, OPCODE_JOIN,
     OPCODE_LOOP, OPCODE_MLOAD, OPCODE_MLOADW, OPCODE_MPVERIFY, OPCODE_MRUPDATE, OPCODE_MSTORE,
     OPCODE_MSTOREW, OPCODE_MSTREAM, OPCODE_PIPE, OPCODE_RESPAN, OPCODE_SPAN, OPCODE_SPLIT,
-    OPCODE_SYSCALL, OPCODE_U32AND, OPCODE_U32XOR, PrimeCharacteristicRing, PrimeField64, ZERO,
+    OPCODE_SYSCALL, OPCODE_U32AND, OPCODE_U32XOR, PrimeCharacteristicRing, ZERO,
 };
 
 use super::Felt;
@@ -250,7 +250,7 @@ where
 
 /// Runs an inner product between the alphas and the elements.
 #[inline(always)]
-fn build_value<E: ExtensionField<Felt>, const N: usize>(alphas: &[E], elements: [Felt; N]) -> E {
+fn _build_value<E: ExtensionField<Felt>, const N: usize>(alphas: &[E], elements: [Felt; N]) -> E {
     debug_assert_eq!(alphas.len(), elements.len());
     let mut value = E::ZERO;
     for i in 0..N {

@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 // RE-EXPORTS
 // ================================================================================================
 pub use miden_core::utils::*;
-use miden_core::{Felt, PrimeCharacteristicRing, PrimeField64};
+use miden_core::{Felt, PrimeCharacteristicRing};
 
 // HELPER FUNCTIONS
 // ================================================================================================

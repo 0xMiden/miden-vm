@@ -1,15 +1,13 @@
 use core::fmt::Debug;
 use std::vec::Vec;
 
-use miden_core::PrimeCharacteristicRing;
 use rand::{
     Rng,
     distr::{Distribution, StandardUniform},
     prelude::*,
 };
-pub use winter_rand_utils::*;
 
-use super::{Felt, WORD_SIZE, Word};
+use super::{Felt, Word};
 
 // SEEDED GENERATORS
 // ================================================================================================

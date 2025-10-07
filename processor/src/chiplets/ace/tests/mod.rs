@@ -47,7 +47,7 @@ fn test_var_plus_one() {
     let inputs = [[QuadFelt::ZERO], [QuadFelt::ONE], [-QuadFelt::ONE]];
 
     for input in &inputs {
-        verify_circuit_eval(&circuit, input, |inputs| inputs[0] + QuadFelt::ONE);
+        let _ = verify_circuit_eval(&circuit, input, |inputs| inputs[0] + QuadFelt::ONE);
     }
 
     let valid_input = &[-QuadFelt::ONE, QuadFelt::ZERO];
@@ -85,9 +85,9 @@ fn test_bool_check() {
         .collect();
     let err_ctx = ();
     for input in &inputs {
-        verify_circuit_eval(&circuit, input, |_| QuadFelt::ZERO);
+        let _ = verify_circuit_eval(&circuit, input, |_| QuadFelt::ZERO);
         let encoded_circuit = verify_encoded_circuit_eval(&circuit, input, &err_ctx);
-        verify_eval_circuit(&encoded_circuit, input);
+        let _ = verify_eval_circuit(&encoded_circuit, input);
     }
 }
 

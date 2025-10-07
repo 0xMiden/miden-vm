@@ -1,6 +1,6 @@
 use core::cmp;
 
-use miden_core::{PrimeCharacteristicRing, assert_matches};
+use miden_core::assert_matches;
 use miden_processor::ExecutionError;
 use miden_stdlib::handlers::u64_div::{U64_DIV_EVENT_NAME, U64DivError};
 use miden_utils_testing::{

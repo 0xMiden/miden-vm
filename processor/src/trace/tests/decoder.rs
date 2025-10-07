@@ -6,7 +6,7 @@ use miden_air::trace::{
 };
 use miden_core::{
     ExtensionField, Field, ONE, Operation, PrimeCharacteristicRing, Program, Word, ZERO,
-    mast::{MastForest, MastNode, MastNodeExt},
+    mast::{MastForest, MastNodeExt},
 };
 use miden_utils_testing::rand::rand_array;
 

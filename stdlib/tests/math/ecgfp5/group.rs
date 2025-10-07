@@ -1,6 +1,6 @@
 use std::ops::Add;
 
-use miden_core::{PrimeCharacteristicRing, PrimeField64};
+use miden_core::PrimeCharacteristicRing;
 use miden_utils_testing::{Felt, ONE, ZERO, push_inputs, test_case};
 
 use super::base_field::{Ext5, bv_or};

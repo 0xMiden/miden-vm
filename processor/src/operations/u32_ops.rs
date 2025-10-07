@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use miden_core::{Field, PrimeCharacteristicRing, PrimeField64};
+use miden_core::{Field, PrimeCharacteristicRing};
 use paste::paste;
 
 use super::{

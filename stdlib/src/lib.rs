@@ -111,7 +111,7 @@ pub fn falcon_sign(sk: &[Felt], msg: Word) -> Option<Vec<Felt>> {
     use alloc::vec;
 
     use miden_core::{
-        AlgebraicSponge, Felt, PrimeCharacteristicRing, PrimeField64,
+        AlgebraicSponge, Felt, PrimeCharacteristicRing,
         crypto::{
             dsa::rpo_falcon512::{Polynomial, SecretKey},
             hash::Rpo256,

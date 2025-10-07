@@ -18,7 +18,7 @@ use miden_air::{
     },
 };
 use miden_core::{
-    Field, PrimeCharacteristicRing, PrimeField64, Program, Word,
+    Field, PrimeCharacteristicRing, Program, Word,
     chiplets::hasher::apply_permutation,
     crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},
     mast::MastForest,

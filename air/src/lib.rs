@@ -7,27 +7,15 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-use alloc::{borrow::ToOwned, vec::Vec};
+use alloc::vec::Vec;
 use core::borrow::{Borrow, BorrowMut};
 
-use miden_core::{
-    ONE, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
-    utils::{ByteReader, ByteWriter, Deserializable, Serializable},
-};
+use miden_core::{ProgramInfo, StackInputs, StackOutputs};
 pub use p3_air::{Air, AirBuilder, BaseAir};
 use p3_air::{AirBuilderWithPublicValues, PermutationAirBuilder};
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::Matrix;
-use serde::{Deserialize, Serialize};
-use winter_air::{
-    Air as WinterAir, AirContext, Assertion, EvaluationFrame, ProofOptions as WinterProofOptions,
-    TraceInfo, TransitionConstraintDegree,
-};
-use winter_prover::{
-    crypto::{RandomCoin, RandomCoinError},
-    math::get_power_series,
-    matrix::ColMatrix,
-};
+use winter_air::ProofOptions as WinterProofOptions;
 
 mod constraints;
 //pub use constraints::stack;
