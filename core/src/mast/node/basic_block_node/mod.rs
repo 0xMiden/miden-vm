@@ -158,21 +158,6 @@ impl BasicBlockNode {
             after_exit: Vec::new(),
         }
     }
-
-    /// Returns a new [`BasicBlockNode`] instantiated with the specified operations and decorators.
-    #[cfg(test)]
-    pub(in crate::mast) fn new_with_raw_decorators(
-        operations: Vec<Operation>,
-        decorators: Vec<(usize, crate::Decorator)>,
-        mast_forest: &mut crate::mast::MastForest,
-    ) -> Result<Self, MastForestError> {
-        let mut decorator_list = Vec::new();
-        for (idx, decorator) in decorators {
-            decorator_list.push((idx, mast_forest.add_decorator(decorator)?));
-        }
-
-        Self::new(operations, decorator_list)
-    }
 }
 
 // ------------------------------------------------------------------------------------------------

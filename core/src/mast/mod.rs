@@ -288,8 +288,16 @@ impl MastForest {
         operations: Vec<Operation>,
         decorators: Vec<(usize, Decorator)>,
     ) -> Result<MastNodeId, MastForestError> {
-        let block = BasicBlockNode::new_with_raw_decorators(operations, decorators, self)?;
-        self.add_node(block)
+        // Convert raw decorators to decorator list by adding them to the forest first
+        let decorator_list: Vec<(usize, DecoratorId)> = decorators
+            .into_iter()
+            .map(|(idx, decorator)| -> Result<(usize, DecoratorId), MastForestError> {
+                let decorator_id = self.add_decorator(decorator)?;
+                Ok((idx, decorator_id))
+            })
+            .collect::<Result<Vec<_>, MastForestError>>()?;
+
+        self.add_block(operations, decorator_list)
     }
 }
 
