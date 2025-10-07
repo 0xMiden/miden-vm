@@ -274,8 +274,8 @@ fn operation_or_decorator_iterator() {
         (4, Decorator::Trace(4)), // ID: 4
     ];
 
-    let node =
-        BasicBlockNode::new_with_raw_decorators(operations, decorators, &mut mast_forest).unwrap();
+    let node_id = mast_forest.add_block_with_raw_decorators(operations, decorators).unwrap();
+    let node = mast_forest.get_node_by_id(node_id).unwrap().unwrap_basic_block();
 
     let mut iterator = node.iter();
 
