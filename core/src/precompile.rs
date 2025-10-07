@@ -17,6 +17,12 @@ use crate::{
 ///
 /// This structure encapsulates the call data for a precompile operation, storing
 /// the raw bytes that will be processed by the precompile function.
+///
+/// # Note:
+/// The use of `EventID` here is temporary as we establish a way to identify specific verifiers.
+/// If we were to allow arbitrary precompiles, we would likely need a 256-bit collision-resistant
+/// identifier. If on the other hand we only allow a fixed set of verifiers, an enum descirminant
+/// would be enough.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(
@@ -211,6 +217,8 @@ where
 /// execution, the VM maintains only the capacity portion of an RPO256 sponge, absorbing each
 /// precompile commitment as it's produced. At the end of execution, the verifier recomputes
 /// this same aggregation and compares the final digest.
+///
+/// The exact shape of the commitment is described in TODO(adr1anh)
 ///
 /// # Details:
 /// - The capacity of the sponge is set to `ZERO`.
