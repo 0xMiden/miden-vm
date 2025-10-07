@@ -42,12 +42,11 @@ fn advice_map_loaded_before_execution() {
     }
 
     // Test `miden_processor::execute` works if advice map provided with the program
-    let mast_forest: MastForest = (**program_without_advice_map.mast_forest()).clone();
+    let mut mast_forest: MastForest = (**program_without_advice_map.mast_forest()).clone();
 
     let key = Word::new([ONE, ONE, ONE, ONE]);
     let value = vec![ONE, ONE];
 
-    let mut mast_forest = mast_forest.clone();
     mast_forest.advice_map_mut().insert(key, value);
     let program_with_advice_map =
         Program::new(mast_forest.into(), program_without_advice_map.entrypoint());
