@@ -2,6 +2,8 @@ use alloc::{boxed::Box, collections::BTreeMap, sync::Arc, vec::Vec};
 use core::error::Error;
 
 use miden_crypto::{Felt, Word, hash::rpo::Rpo256};
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 use crate::{
     EventId,
@@ -16,6 +18,11 @@ use crate::{
 /// This structure encapsulates the call data for a precompile operation, storing
 /// the raw bytes that will be processed by the precompile function.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_serde_test_macros::serde_test(winter_serde(true))
+)]
 pub struct PrecompileRequest {
     /// Event ID identifying the type of precompile operation
     event_id: EventId,
@@ -274,23 +281,16 @@ pub enum PrecompileVerificationError {
 // TESTS
 // ================================================================================================
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::utils::SliceReader;
+#[cfg(all(feature = "arbitrary", test))]
+impl proptest::prelude::Arbitrary for PrecompileRequest {
+    type Parameters = ();
 
-    #[test]
-    fn test_precompile_data_serialization() {
-        let event_id = EventId::from_u64(123);
-        let calldata = vec![5, 6, 7, 8, 9];
-        let original = PrecompileRequest { event_id, calldata };
-
-        let mut bytes = Vec::new();
-        original.write_into(&mut bytes);
-
-        let mut reader = SliceReader::new(&bytes);
-        let deserialized = PrecompileRequest::read_from(&mut reader).unwrap();
-
-        assert_eq!(original, deserialized);
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        use proptest::prelude::*;
+        (any::<EventId>(), proptest::collection::vec(any::<u8>(), 0..=1000))
+            .prop_map(|(event_id, calldata)| PrecompileRequest::new(event_id, calldata))
+            .boxed()
     }
+
+    type Strategy = proptest::prelude::BoxedStrategy<Self>;
 }
