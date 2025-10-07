@@ -18,9 +18,23 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrecompileRequest {
     /// Event ID identifying the type of precompile operation
-    pub event_id: EventId,
+    event_id: EventId,
     /// Raw byte data representing the input of the precompile computation
-    pub calldata: Vec<u8>,
+    calldata: Vec<u8>,
+}
+
+impl PrecompileRequest {
+    pub fn new(event_id: EventId, calldata: Vec<u8>) -> Self {
+        Self { event_id, calldata }
+    }
+
+    pub fn calldata(&self) -> &[u8] {
+        &self.calldata
+    }
+
+    pub fn event_id(&self) -> EventId {
+        self.event_id
+    }
 }
 
 impl Serializable for PrecompileRequest {

@@ -280,10 +280,7 @@ impl KeccakPreimage {
 
 impl From<KeccakPreimage> for PrecompileRequest {
     fn from(preimage: KeccakPreimage) -> Self {
-        PrecompileRequest {
-            event_id: KECCAK_HASH_MEMORY_EVENT_ID,
-            calldata: preimage.0,
-        }
+        PrecompileRequest::new(KECCAK_HASH_MEMORY_EVENT_ID, preimage.0)
     }
 }
 

@@ -94,7 +94,8 @@ fn test_keccak_handler(input_u8: &[u8]) {
 
     // PrecompileData contains the raw input bytes directly
     assert_eq!(
-        precompile_data.calldata, preimage.0,
+        precompile_data.calldata(),
+        preimage.0,
         "data in deferred storage does not match preimage"
     );
 }
