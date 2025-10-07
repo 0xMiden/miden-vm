@@ -82,11 +82,12 @@ pub fn verify(
 }
 
 /// Identical to [`verify`], with additional verification of any precompile requests made during the
-/// VM execution. The
+/// VM execution. The resulting aggregated precompile commitment is returned, which can be compared
+/// against the commitment computed by the VM.
 ///
 /// # Errors
 /// Returns any error produced by [`verify`], as well as any errors resulting from precompile
-/// verification
+/// verification.
 #[tracing::instrument("verify_program", skip_all)]
 pub fn verify_with_precompiles(
     program_info: ProgramInfo,
