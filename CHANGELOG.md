@@ -17,6 +17,11 @@
 - Fixed mismatched Push expectations in decoder syscall_block test ([#2207](https://github.com/0xMiden/miden-vm/pull/2207))
 - [BREAKING] `Memory::read_element()` now requires `&self` instead of `&mut self` ([#2237](https://github.com/0xMiden/miden-vm/issues/2237))
 - Added `proptest`'s `Arbitrary` instances for `Program`, fixed `Attribute` serialization ([#2224](https://github.com/0xMiden/miden-vm/pull/2224)).
+- Fixed hex word parsing to guard against missing 0x prefix ([#2245](https://github.com/0xMiden/miden-vm/pull/2245)).
+
+## 0.18.1 (2025-10-02)
+
+- Gate stdlib doc generation in build.rs on `MIDEN_BUILD_STDLIB_DOCS` environmnent variable ([#2239](https://github.com/0xMiden/miden-vm/pull/2239/))
 
 ## 0.18.0 (2025-09-21)
 

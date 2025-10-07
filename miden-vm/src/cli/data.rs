@@ -243,7 +243,7 @@ pub struct ProgramHash;
 /// Helper method to parse program hash from hex
 impl ProgramHash {
     #[instrument(name = "read_program_hash", skip_all)]
-    pub fn read(hash_hex_string: &String) -> Result<Word, String> {
+    pub fn read(hash_hex_string: &str) -> Result<Word, String> {
         // decode hex to bytes
         let program_hash_bytes = hex::decode(hash_hex_string)
             .map_err(|err| format!("Failed to convert program hash to bytes {err}"))?;
