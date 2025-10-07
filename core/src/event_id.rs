@@ -1,5 +1,7 @@
 use core::fmt::{Display, Formatter};
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 use winter_utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
 
 use crate::{Felt, utils::hash_string_to_word};
@@ -13,6 +15,12 @@ use crate::{Felt, utils::hash_string_to_word};
 /// While not enforced by this type, the values 0..256 are reserved for
 /// [`SystemEvent`](crate::sys_events::SystemEvent)s.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_serde_test_macros::serde_test(winter_serde(true))
+)]
 pub struct EventId(Felt);
 
 impl EventId {
@@ -87,4 +95,16 @@ impl Deserializable for EventId {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         Ok(Self(Felt::read_from(source)?))
     }
+}
+
+#[cfg(all(feature = "arbitrary", test))]
+impl proptest::prelude::Arbitrary for EventId {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        use proptest::prelude::*;
+        any::<u64>().prop_map(EventId::from_u64).boxed()
+    }
+
+    type Strategy = proptest::prelude::BoxedStrategy<Self>;
 }

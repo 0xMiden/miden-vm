@@ -30,7 +30,7 @@ BACKTRACE                := RUST_BACKTRACE=1
 WARNINGS                 := RUSTDOCFLAGS="-D warnings"
 
 # -- feature configuration ------------------------------------------------------------------------
-ALL_FEATURES_BUT_ASYNC   := --features concurrent,executable,metal,testing,with-debug-info,internal
+ALL_FEATURES_BUT_ASYNC   := --features concurrent,executable,metal,testing,with-debug-info,internal,arbitrary,serde
 
 # Workspace-wide test features
 WORKSPACE_TEST_FEATURES  := concurrent,testing,metal,executable
@@ -45,7 +45,7 @@ FEATURES_LOG_TREE        := --features concurrent,executable,tracing-forest
 FEATURES_air             := testing
 FEATURES_assembly        := testing
 FEATURES_assembly-syntax := testing
-FEATURES_core            :=
+FEATURES_core            := testing,serde,arbitrary
 FEATURES_miden-vm        := concurrent,executable,metal,internal
 FEATURES_processor       := concurrent,testing,bus-debugger
 FEATURES_prover          := concurrent,metal
