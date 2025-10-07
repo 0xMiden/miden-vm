@@ -1,12 +1,15 @@
 use miden_air::{
-    RowIndex,
+    FieldElement, RowIndex,
     trace::{chiplets::hasher::HasherState, decoder::NUM_USER_OP_HELPERS},
 };
 use miden_core::{Felt, Operation, QuadFelt, Word, crypto::merkle::MerklePath, mast::MastForest};
 
 use crate::{
     AdviceError, BaseHost, ContextId, ErrorContext, ExecutionError, MemoryError, ProcessState,
-    fast::Tracer, processor::operations::execute_sync_op,
+    chiplets::{CircuitEvaluation, MAX_NUM_ACE_WIRES, PTR_OFFSET_ELEM, PTR_OFFSET_WORD},
+    errors::AceError,
+    fast::Tracer,
+    processor::operations::execute_sync_op,
 };
 
 mod operations;
@@ -47,11 +50,122 @@ pub trait Processor: Sized {
         &mut self,
         err_ctx: &impl ErrorContext,
         tracer: &mut impl Tracer,
-    ) -> Result<(), ExecutionError>;
+    ) -> Result<(), ExecutionError> {
+        let num_eval = self.stack().get(2);
+        let num_read = self.stack().get(1);
+        let ptr = self.stack().get(0);
+        let ctx = self.system().ctx();
+        let clk = self.system().clk();
+
+        let circuit_evaluation =
+            self.eval_circuit_shared(ctx, ptr, clk, num_read, num_eval, err_ctx, tracer)?;
+
+        // Record circuit evaluation for tracer
+        tracer.record_circuit_evaluation(self.system().clk(), circuit_evaluation.clone());
+
+        // Allow processors to handle the result differently
+        self.handle_circuit_evaluation(circuit_evaluation);
+
+        Ok(())
+    }
 
     // -------------------------------------------------------------------------------------------
     // PROVIDED METHODS
     // -------------------------------------------------------------------------------------------
+
+    /// Shared circuit evaluation logic that all processors can use.
+    /// This eliminates the duplication across FastProcessor, CoreTraceFragmentGenerator,
+    /// and the original eval_circuit function.
+    #[allow(clippy::too_many_arguments)]
+    fn eval_circuit_shared(
+        &mut self,
+        ctx: ContextId,
+        ptr: Felt,
+        clk: RowIndex,
+        num_vars: Felt,
+        num_eval: Felt,
+        err_ctx: &impl ErrorContext,
+        tracer: &mut impl Tracer,
+    ) -> Result<CircuitEvaluation, ExecutionError> {
+        let num_vars = num_vars.as_int();
+        let num_eval = num_eval.as_int();
+
+        let num_wires = num_vars + num_eval;
+        if num_wires > MAX_NUM_ACE_WIRES as u64 {
+            return Err(ExecutionError::failed_arithmetic_evaluation(
+                err_ctx,
+                AceError::TooManyWires(num_wires),
+            ));
+        }
+
+        // Ensure vars and instructions are word-aligned and non-empty. Note that variables are
+        // quadratic extension field elements while instructions are encoded as base field elements.
+        // Hence we can pack 2 variables and 4 instructions per word.
+        if !num_vars.is_multiple_of(2) || num_vars == 0 {
+            return Err(ExecutionError::failed_arithmetic_evaluation(
+                err_ctx,
+                AceError::NumVarIsNotWordAlignedOrIsEmpty(num_vars),
+            ));
+        }
+        if !num_eval.is_multiple_of(4) || num_eval == 0 {
+            return Err(ExecutionError::failed_arithmetic_evaluation(
+                err_ctx,
+                AceError::NumEvalIsNotWordAlignedOrIsEmpty(num_eval),
+            ));
+        }
+
+        // Ensure instructions are word-aligned and non-empty
+        let num_read_rows = num_vars as u32 / 2;
+        let num_eval_rows = num_eval as u32;
+
+        let mut evaluation_context = CircuitEvaluation::new(ctx, clk, num_read_rows, num_eval_rows);
+
+        let mut ptr = ptr;
+
+        // perform READ operations
+        for _ in 0..num_read_rows {
+            let word = self
+                .memory()
+                .read_word(ctx, ptr, clk, err_ctx)
+                .map_err(ExecutionError::MemoryError)?;
+            // Record memory reads for tracer if needed (word-level for READ operations)
+            tracer.record_memory_read_word(word, ptr, ctx, clk);
+            evaluation_context.do_read(ptr, word)?;
+            ptr += PTR_OFFSET_WORD;
+        }
+
+        // perform EVAL operations
+        for _ in 0..num_eval_rows {
+            let instruction = self
+                .memory()
+                .read_element(ctx, ptr, err_ctx)
+                .map_err(ExecutionError::MemoryError)?;
+            // Record memory read for tracer
+            tracer.record_memory_read_element(instruction, ptr, ctx, clk);
+            evaluation_context.do_eval(ptr, instruction, err_ctx)?;
+            ptr += PTR_OFFSET_ELEM;
+        }
+
+        // Ensure the circuit evaluated to zero.
+        if !evaluation_context.output_value().is_some_and(|eval| eval == QuadFelt::ZERO) {
+            return Err(ExecutionError::failed_arithmetic_evaluation(
+                err_ctx,
+                AceError::CircuitNotEvaluateZero,
+            ));
+        }
+
+        Ok(evaluation_context)
+    }
+
+    /// Record circuit evaluation for later use in ACE chiplet.
+    /// Different processors can implement this differently:
+    /// - FastProcessor: Store in AceReplay
+    /// - CoreTraceFragmentGenerator: Store in AceReplay or compute later
+    /// - Regular Processor: Use directly
+    fn handle_circuit_evaluation(&mut self, _evaluation: CircuitEvaluation) {
+        // Default implementation - do nothing
+        // Most processors don't need to store this
+    }
 
     /// Executes the provided synchronous operation.
     ///
