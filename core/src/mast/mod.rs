@@ -24,7 +24,7 @@ pub use node::{
 };
 
 use crate::{
-    AdviceMap, Decorator, DecoratorList, Felt, Idx, LexicographicWord, Operation, Word,
+    AdviceMap, Decorator, Felt, Idx, LexicographicWord, Word,
     crypto::hash::Hasher,
     utils::{ByteWriter, DeserializationError, Serializable, hash_string_to_word},
 };
@@ -104,69 +104,6 @@ impl MastForest {
     /// Adding two duplicate nodes will result in two distinct returned [`MastNodeId`]s.
     pub fn add_node(&mut self, node: impl Into<MastNode>) -> Result<MastNodeId, MastForestError> {
         self.nodes.push(node.into()).map_err(|_| MastForestError::TooManyNodes)
-    }
-
-    /// Adds a basic block node to the forest, and returns the [`MastNodeId`] associated with it.
-    pub fn add_block(
-        &mut self,
-        operations: Vec<Operation>,
-        decorators: DecoratorList,
-    ) -> Result<MastNodeId, MastForestError> {
-        let block = BasicBlockNode::new(operations, decorators)?;
-        self.add_node(block)
-    }
-
-    /// Adds a join node to the forest, and returns the [`MastNodeId`] associated with it.
-    pub fn add_join(
-        &mut self,
-        left_child: MastNodeId,
-        right_child: MastNodeId,
-    ) -> Result<MastNodeId, MastForestError> {
-        let join = JoinNode::new([left_child, right_child], self)?;
-        self.add_node(join)
-    }
-
-    /// Adds a split node to the forest, and returns the [`MastNodeId`] associated with it.
-    pub fn add_split(
-        &mut self,
-        if_branch: MastNodeId,
-        else_branch: MastNodeId,
-    ) -> Result<MastNodeId, MastForestError> {
-        let split = SplitNode::new([if_branch, else_branch], self)?;
-        self.add_node(split)
-    }
-
-    /// Adds a loop node to the forest, and returns the [`MastNodeId`] associated with it.
-    pub fn add_loop(&mut self, body: MastNodeId) -> Result<MastNodeId, MastForestError> {
-        let loop_node = LoopNode::new(body, self)?;
-        self.add_node(loop_node)
-    }
-
-    /// Adds a call node to the forest, and returns the [`MastNodeId`] associated with it.
-    pub fn add_call(&mut self, callee: MastNodeId) -> Result<MastNodeId, MastForestError> {
-        let call = CallNode::new(callee, self)?;
-        self.add_node(call)
-    }
-
-    /// Adds a syscall node to the forest, and returns the [`MastNodeId`] associated with it.
-    pub fn add_syscall(&mut self, callee: MastNodeId) -> Result<MastNodeId, MastForestError> {
-        let syscall = CallNode::new_syscall(callee, self)?;
-        self.add_node(syscall)
-    }
-
-    /// Adds a dyn node to the forest, and returns the [`MastNodeId`] associated with it.
-    pub fn add_dyn(&mut self) -> Result<MastNodeId, MastForestError> {
-        self.add_node(DynNode::new_dyn())
-    }
-
-    /// Adds a dyncall node to the forest, and returns the [`MastNodeId`] associated with it.
-    pub fn add_dyncall(&mut self) -> Result<MastNodeId, MastForestError> {
-        self.add_node(DynNode::new_dyncall())
-    }
-
-    /// Adds an external node to the forest, and returns the [`MastNodeId`] associated with it.
-    pub fn add_external(&mut self, mast_root: Word) -> Result<MastNodeId, MastForestError> {
-        self.add_node(ExternalNode::new(mast_root))
     }
 
     /// Marks the given [`MastNodeId`] as being the root of a procedure.
@@ -277,28 +214,6 @@ impl MastForest {
         forests: impl IntoIterator<Item = &'forest MastForest>,
     ) -> Result<(MastForest, MastForestRootMap), MastForestError> {
         MastForestMerger::merge(forests)
-    }
-
-    /// Adds a basic block node to the forest, and returns the [`MastNodeId`] associated with it.
-    ///
-    /// It is assumed that the decorators have not already been added to the MAST forest. If they
-    /// were, they will be added again (and result in a different set of [`DecoratorId`]s).
-    #[cfg(test)]
-    pub fn add_block_with_raw_decorators(
-        &mut self,
-        operations: Vec<Operation>,
-        decorators: Vec<(usize, Decorator)>,
-    ) -> Result<MastNodeId, MastForestError> {
-        // Convert raw decorators to decorator list by adding them to the forest first
-        let decorator_list: Vec<(usize, DecoratorId)> = decorators
-            .into_iter()
-            .map(|(idx, decorator)| -> Result<(usize, DecoratorId), MastForestError> {
-                let decorator_id = self.add_decorator(decorator)?;
-                Ok((idx, decorator_id))
-            })
-            .collect::<Result<Vec<_>, MastForestError>>()?;
-
-        BasicBlockNodeBuilder::new(operations, decorator_list).add_to_forest(self)
     }
 }
 
