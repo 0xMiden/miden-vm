@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 
 use miden_core::{
     Decorator, Kernel, Operation,
-    mast::{BasicBlockNodeBuilder, DecoratorId, MastForest},
+    mast::{BasicBlockNodeBuilder, DecoratorId, MastForest, MastForestContributor},
 };
 
 use crate::{
@@ -29,13 +29,11 @@ fn create_test_program(
         .collect();
 
     // Create the basic block with decorators using builder pattern
-    let basic_block = BasicBlockNodeBuilder::new(operations.to_vec(), Vec::new())
+    let basic_block_id = BasicBlockNodeBuilder::new(operations.to_vec(), Vec::new())
         .with_before_enter(before_enter_ids)
         .with_after_exit(after_exit_ids)
-        .build()
+        .add_to_forest(&mut mast_forest)
         .unwrap();
-
-    let basic_block_id = mast_forest.add_node(basic_block).unwrap();
     mast_forest.make_root(basic_block_id);
 
     Program::new(mast_forest.into(), basic_block_id)
@@ -352,13 +350,11 @@ fn create_test_program_with_inner_decorators(
         .collect();
 
     // Create the basic block with decorators using builder pattern
-    let basic_block = BasicBlockNodeBuilder::new(operations.to_vec(), inner_decorator_list)
+    let basic_block_id = BasicBlockNodeBuilder::new(operations.to_vec(), inner_decorator_list)
         .with_before_enter(before_enter_ids)
         .with_after_exit(after_exit_ids)
-        .build()
+        .add_to_forest(&mut mast_forest)
         .unwrap();
-
-    let basic_block_id = mast_forest.add_node(basic_block).unwrap();
     mast_forest.make_root(basic_block_id);
 
     Program::new(mast_forest.into(), basic_block_id)

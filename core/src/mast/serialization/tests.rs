@@ -274,65 +274,60 @@ fn serialize_deserialize_all_nodes() {
     let decorator_id2 = mast_forest.add_decorator(Decorator::Trace(2)).unwrap();
 
     // Call node
-    let call_node = CallNodeBuilder::new(basic_block_id)
+    let call_node_id = CallNodeBuilder::new(basic_block_id)
         .with_before_enter(vec![decorator_id1])
         .with_after_exit(vec![decorator_id2])
-        .build(&mast_forest)
+        .add_to_forest(&mut mast_forest)
         .unwrap();
-    let call_node_id = mast_forest.add_node(call_node).unwrap();
 
     // Syscall node
-    let syscall_node = CallNodeBuilder::new_syscall(basic_block_id)
+    let syscall_node_id = CallNodeBuilder::new_syscall(basic_block_id)
         .with_before_enter(vec![decorator_id1])
         .with_after_exit(vec![decorator_id2])
-        .build(&mast_forest)
+        .add_to_forest(&mut mast_forest)
         .unwrap();
-    let syscall_node_id = mast_forest.add_node(syscall_node).unwrap();
 
     // Loop node
-    let loop_node = LoopNodeBuilder::new(basic_block_id)
+    let loop_node_id = LoopNodeBuilder::new(basic_block_id)
         .with_before_enter(vec![decorator_id1])
         .with_after_exit(vec![decorator_id2])
-        .build(&mast_forest)
+        .add_to_forest(&mut mast_forest)
         .unwrap();
-    let loop_node_id = mast_forest.add_node(loop_node).unwrap();
 
     // Join node
-    let join_node = JoinNodeBuilder::new([basic_block_id, call_node_id])
+    let join_node_id = JoinNodeBuilder::new([basic_block_id, call_node_id])
         .with_before_enter(vec![decorator_id1])
         .with_after_exit(vec![decorator_id2])
-        .build(&mast_forest)
+        .add_to_forest(&mut mast_forest)
         .unwrap();
-    let join_node_id = mast_forest.add_node(join_node).unwrap();
 
     // Split node
-    let split_node = SplitNodeBuilder::new([basic_block_id, call_node_id])
+    let split_node_id = SplitNodeBuilder::new([basic_block_id, call_node_id])
         .with_before_enter(vec![decorator_id1])
         .with_after_exit(vec![decorator_id2])
-        .build(&mast_forest)
+        .add_to_forest(&mut mast_forest)
         .unwrap();
-    let split_node_id = mast_forest.add_node(split_node).unwrap();
 
     // Dyn node
-    let dyn_node = DynNodeBuilder::new_dyn()
+    let dyn_node_id = DynNodeBuilder::new_dyn()
         .with_before_enter(vec![decorator_id1])
         .with_after_exit(vec![decorator_id2])
-        .build();
-    let dyn_node_id = mast_forest.add_node(dyn_node).unwrap();
+        .add_to_forest(&mut mast_forest)
+        .unwrap();
 
     // Dyncall node
-    let dyncall_node = DynNodeBuilder::new_dyncall()
+    let dyncall_node_id = DynNodeBuilder::new_dyncall()
         .with_before_enter(vec![decorator_id1])
         .with_after_exit(vec![decorator_id2])
-        .build();
-    let dyncall_node_id = mast_forest.add_node(dyncall_node).unwrap();
+        .add_to_forest(&mut mast_forest)
+        .unwrap();
 
     // External node
-    let external_node = ExternalNodeBuilder::new(Word::default())
+    let external_node_id = ExternalNodeBuilder::new(Word::default())
         .with_before_enter(vec![decorator_id1])
         .with_after_exit(vec![decorator_id2])
-        .build();
-    let external_node_id = mast_forest.add_node(external_node).unwrap();
+        .add_to_forest(&mut mast_forest)
+        .unwrap();
 
     mast_forest.make_root(join_node_id);
     mast_forest.make_root(syscall_node_id);
@@ -504,14 +499,11 @@ fn mast_forest_basic_block_serialization_no_decorator_duplication() {
 
     // Create a basic block with all types of decorators using builder pattern
     let operations = vec![Operation::Add, Operation::Mul];
-    let block = BasicBlockNodeBuilder::new(operations, vec![(0, op_deco)])
+    let block_id = BasicBlockNodeBuilder::new(operations, vec![(0, op_deco)])
         .with_before_enter(vec![before_enter_deco])
         .with_after_exit(vec![after_exit_deco])
-        .build()
+        .add_to_forest(&mut forest)
         .unwrap();
-
-    // Add the block to the forest
-    let block_id = forest.add_node(block).unwrap();
     forest.make_root(block_id);
 
     // Serialize and deserialize the forest
