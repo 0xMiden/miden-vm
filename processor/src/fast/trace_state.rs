@@ -18,7 +18,7 @@ use crate::{
 // TRACE FRAGMENT CONTEXT
 // ================================================================================================
 
-/// Information required to build a trace fragment of length [super::NUM_ROWS_PER_CORE_FRAGMENT].
+/// Information required to build a trace fragment.
 ///
 /// This struct is meant to be built by the processor, and consumed mutably by a trace fragment
 /// builder. That is, as trace generation progresses, this struct can be mutated to represent the
@@ -255,7 +255,7 @@ pub struct ExecutionReplay {
     pub memory: MemoryReplay,
     pub advice: AdviceReplay,
     pub hasher: HasherReplay,
-    pub external_node: ExternalNodeReplay,
+    pub mast_forest_resolution: MastForestResolutionReplay,
 }
 
 // BLOCK STACK REPLAY
@@ -404,38 +404,32 @@ pub struct ExecutionContextSystemInfo {
     pub parent_fmp: Felt,
 }
 
-// EXTERNAL NODE REPLAY
+// MAST FOREST RESOLUTION REPLAY
 // ================================================================================================
 
-#[derive(Debug)]
-pub struct ExternalNodeReplay {
-    external_node_resolutions: VecDeque<(MastNodeId, Arc<MastForest>)>,
+/// Records and replays the resolutions of [crate::host::AsyncHost::get_mast_forest] or
+/// [crate::host::SyncHost::get_mast_forest].
+///
+/// These calls are made when encountering an [miden_core::mast::ExternalNode], or when
+/// encountering a [miden_core::mast::DynNode] where the procedure hash on the stack refers to
+/// a procedure not present in the current forest.
+#[derive(Debug, Default)]
+pub struct MastForestResolutionReplay {
+    mast_forest_resolutions: VecDeque<(MastNodeId, Arc<MastForest>)>,
 }
 
-impl Default for ExternalNodeReplay {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl ExternalNodeReplay {
-    /// Creates a new ExternalNodeReplay with an empty resolution queue
-    pub fn new() -> Self {
-        Self {
-            external_node_resolutions: VecDeque::new(),
-        }
-    }
-
-    /// Records a resolution of an external node to a MastNodeId with its associated MastForest
+impl MastForestResolutionReplay {
+    /// Records a resolution of a MastNodeId with its associated MastForest when encountering an
+    /// External node, or `DYN`/`DYNCALL` node with an external procedure hash on the stack.
     pub fn record_resolution(&mut self, node_id: MastNodeId, forest: Arc<MastForest>) {
-        self.external_node_resolutions.push_back((node_id, forest));
+        self.mast_forest_resolutions.push_back((node_id, forest));
     }
 
-    /// Replays the next recorded external node resolution, returning both the node ID and forest
+    /// Replays the next recorded MastForest resolution, returning both the node ID and forest
     pub fn replay_resolution(&mut self) -> (MastNodeId, Arc<MastForest>) {
-        self.external_node_resolutions
+        self.mast_forest_resolutions
             .pop_front()
-            .expect("No external node resolutions recorded")
+            .expect("No MastForest resolutions recorded")
     }
 }
 
@@ -855,11 +849,11 @@ impl StackOverflowReplay {
 ///
 /// Each MAST node has at least 2 different states associated with it: processing the START and END
 /// nodes (e.g. JOIN and END in the case of [miden_core::mast::JoinNode]). Some have more; for
-/// example, [miden_core::mast::BasicBlockNode] has BASIC BLOCK and END, in addition to one state
-/// for each operation in the basic block. Since a trace fragment can begin at any clock cycle
-/// (determined by [super::NUM_ROWS_PER_CORE_FRAGMENT]), specifying which MAST node we're executing
-/// is insufficient; we also have to specify *at what point* during the execution of this node we
-/// are at. This is the information that this type is meant to encode.
+/// example, [miden_core::mast::BasicBlockNode] has SPAN and END, in addition to one state for each
+/// operation in the basic block. Since a trace fragment can begin at any clock cycle (determined by
+/// the configured fragment size), specifying which MAST node we're executing is
+/// insufficient; we also have to specify *at what point* during the execution of this node we are
+/// at. This is the information that this type is meant to encode.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NodeExecutionState {
     /// Resume execution within a basic block at a specific batch and operation index.

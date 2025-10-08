@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{MastNodeErrorContext, MastNodeExt};
 use crate::{
-    OPCODE_JOIN,
+    Idx, OPCODE_JOIN,
     chiplets::hasher,
     mast::{DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId, Remapping},
     prettier::PrettyPrint,
@@ -43,9 +43,9 @@ impl JoinNode {
         mast_forest: &MastForest,
     ) -> Result<Self, MastForestError> {
         let forest_len = mast_forest.nodes.len();
-        if children[0].as_usize() >= forest_len {
+        if children[0].to_usize() >= forest_len {
             return Err(MastForestError::NodeIdOverflow(children[0], forest_len));
-        } else if children[1].as_usize() >= forest_len {
+        } else if children[1].to_usize() >= forest_len {
             return Err(MastForestError::NodeIdOverflow(children[1], forest_len));
         }
         let digest = {

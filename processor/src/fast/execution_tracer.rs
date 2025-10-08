@@ -11,10 +11,10 @@ use crate::{
     continuation_stack::ContinuationStack,
     decoder::block_stack::{BlockInfo, BlockStack, BlockType, ExecutionContextInfo},
     fast::{
-        FastProcessor, NUM_ROWS_PER_CORE_FRAGMENT,
+        FastProcessor,
         trace_state::{
             AdviceReplay, BlockStackReplay, CoreTraceState, DecoderState,
-            ExecutionContextSystemInfo, ExecutionReplay, ExternalNodeReplay, HasherReplay,
+            ExecutionContextSystemInfo, ExecutionReplay, HasherReplay, MastForestResolutionReplay,
             MemoryReplay, NodeExecutionState, NodeFlags, StackOverflowReplay, StackState,
             SystemState, TraceFragmentContext,
         },
@@ -36,20 +36,27 @@ struct StateSnapshot {
     initial_mast_forest: Arc<MastForest>,
 }
 
+pub struct TraceFragmentContexts {
+    /// The list of trace fragment contexts built during execution.
+    pub contexts: Vec<TraceFragmentContext>,
+    /// The number of rows per core trace fragment, except for the last fragment which may be
+    /// shorter.
+    pub fragment_size: usize,
+}
+
 /// Builder for recording the context to generate trace fragments during execution.
 ///
 /// Specifically, this records the information necessary to be able to generate the trace in
-/// fragments of length [super::NUM_ROWS_PER_CORE_FRAGMENT]. This requires storing state at the very
-/// beginning of the fragment before any operations are executed (stored in [StateSnapshot]), as
-/// well as recording the various values read during execution in the corresponding "replays" (e.g.
-/// values read from memory are recorded in [MemoryReplay], values read from the advice provider are
-/// recorded in [AdviceReplay], etc).
+/// fragments of configurable length. This requires storing state at the very beginning of the
+/// fragment before any operations are executed, as well as recording the various values read during
+/// execution in the corresponding "replays" (e.g. values read from memory are recorded in
+/// [MemoryReplay], values read from the advice provider are recorded in [AdviceReplay], etc).
 ///
-/// Then, to generate a trace fragment, we initialize the state of the processor using the snapshot
-/// stored in [StateSnapshot], and replay the recorded values as they are encountered during
-/// execution (e.g. when encountering a memory read operation, we will replay the value rather than
-/// querying the memory chiplet).
-#[derive(Debug, Default)]
+/// Then, to generate a trace fragment, we initialize the state of the processor using the stored
+/// snapshot from the beginning of the fragment, and replay the recorded values as they are
+/// encountered during execution (e.g. when encountering a memory read operation, we will replay the
+/// value rather than querying the memory chiplet).
+#[derive(Debug)]
 pub struct ExecutionTracer {
     // State stored at the start of a trace fragment.
     //
@@ -69,20 +76,43 @@ pub struct ExecutionTracer {
     pub hasher: HasherChipletShim,
     pub memory: MemoryReplay,
     pub advice: AdviceReplay,
-    pub external: ExternalNodeReplay,
+    pub external: MastForestResolutionReplay,
 
     // Output
     fragment_contexts: Vec<TraceFragmentContext>,
+
+    /// The number of rows per core trace fragment.
+    fragment_size: usize,
 }
 
 impl ExecutionTracer {
-    /// Convert the `ExecutionTracer` into the list of `TraceFragmentContext` built during
+    /// Creates a new `ExecutionTracer` with the given fragment size.
+    pub fn new(fragment_size: usize) -> Self {
+        Self {
+            state_snapshot: None,
+            overflow_table: OverflowTable::default(),
+            overflow_replay: StackOverflowReplay::default(),
+            block_stack: BlockStack::default(),
+            block_stack_replay: BlockStackReplay::default(),
+            hasher: HasherChipletShim::default(),
+            memory: MemoryReplay::default(),
+            advice: AdviceReplay::default(),
+            external: MastForestResolutionReplay::default(),
+            fragment_contexts: Vec::new(),
+            fragment_size,
+        }
+    }
+
+    /// Convert the `ExecutionTracer` into the `TraceFragmentContexts` built during
     /// execution.
-    pub fn into_fragment_contexts(mut self) -> Vec<TraceFragmentContext> {
+    pub fn into_fragment_contexts(mut self) -> TraceFragmentContexts {
         // If there is an ongoing trace state being built, finish it
         self.finish_current_fragment_context();
 
-        self.fragment_contexts
+        TraceFragmentContexts {
+            contexts: self.fragment_contexts,
+            fragment_size: self.fragment_size,
+        }
     }
 
     // HELPERS
@@ -261,7 +291,7 @@ impl ExecutionTracer {
                     hasher: hasher_replay,
                     memory: memory_replay,
                     advice: advice_replay,
-                    external_node: external_replay,
+                    mast_forest_resolution: external_replay,
                     stack_overflow: stack_overflow_replay,
                     block_stack: block_stack_replay,
                 },
@@ -286,7 +316,7 @@ impl Tracer for ExecutionTracer {
         current_forest: &Arc<MastForest>,
     ) {
         // check if we need to start a new trace state
-        if processor.clk.as_usize().is_multiple_of(NUM_ROWS_PER_CORE_FRAGMENT) {
+        if processor.clk.as_usize().is_multiple_of(self.fragment_size) {
             self.start_new_fragment_context(
                 SystemState::from_processor(processor),
                 processor
@@ -343,7 +373,7 @@ impl Tracer for ExecutionTracer {
         }
     }
 
-    fn record_external_node_resolution(&mut self, node_id: MastNodeId, forest: &Arc<MastForest>) {
+    fn record_mast_forest_resolution(&mut self, node_id: MastNodeId, forest: &Arc<MastForest>) {
         self.external.record_resolution(node_id, forest.clone());
     }
 

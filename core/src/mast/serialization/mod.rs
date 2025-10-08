@@ -120,7 +120,7 @@ impl Serializable for MastForest {
         target.write_usize(self.decorators.len());
 
         // roots
-        let roots: Vec<u32> = self.roots.iter().map(u32::from).collect();
+        let roots: Vec<u32> = self.roots.iter().copied().map(u32::from).collect();
         roots.write_into(target);
 
         // Prepare MAST node infos, but don't store them yet. We store them at the end to make

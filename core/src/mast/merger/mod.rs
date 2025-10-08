@@ -2,10 +2,13 @@ use alloc::{collections::BTreeMap, vec::Vec};
 
 use miden_crypto::hash::blake::Blake3Digest;
 
-use crate::mast::{
-    BasicBlockNode, CallNode, DecoratorId, DynNode, ExternalNode, JoinNode, LoopNode, MastForest,
-    MastForestError, MastNode, MastNodeFingerprint, MastNodeId, MultiMastForestIteratorItem,
-    MultiMastForestNodeIter, SplitNode, node::MastNodeExt,
+use crate::{
+    DenseIdMap, IndexVec,
+    mast::{
+        BasicBlockNode, CallNode, DecoratorId, DynNode, ExternalNode, JoinNode, LoopNode,
+        MastForest, MastForestError, MastNode, MastNodeFingerprint, MastNodeId,
+        MultiMastForestIteratorItem, MultiMastForestNodeIter, SplitNode, node::MastNodeExt,
+    },
 };
 
 #[cfg(test)]
@@ -22,16 +25,16 @@ pub(crate) struct MastForestMerger {
     // These are always in-sync with the nodes in `mast_forest`, i.e. all nodes added to the
     // `mast_forest` are also added to the indices.
     node_id_by_hash: BTreeMap<MastNodeFingerprint, MastNodeId>,
-    hash_by_node_id: BTreeMap<MastNodeId, MastNodeFingerprint>,
+    hash_by_node_id: IndexVec<MastNodeId, MastNodeFingerprint>,
     decorators_by_hash: BTreeMap<Blake3Digest<32>, DecoratorId>,
     /// Mappings from old decorator and node ids to their new ids.
     ///
     /// Any decorator in `mast_forest` is present as the target of some mapping in this map.
-    decorator_id_mappings: Vec<DecoratorIdMap>,
+    decorator_id_mappings: Vec<DenseIdMap<DecoratorId, DecoratorId>>,
     /// Mappings from previous `MastNodeId`s to their new ids.
     ///
     /// Any `MastNodeId` in `mast_forest` is present as the target of some mapping in this map.
-    node_id_mappings: Vec<MastForestNodeIdMap>,
+    node_id_mappings: Vec<DenseIdMap<MastNodeId, MastNodeId>>,
 }
 
 impl MastForestMerger {
@@ -55,11 +58,12 @@ impl MastForestMerger {
         let forests = forests.into_iter().collect::<Vec<_>>();
 
         let decorator_id_mappings = Vec::with_capacity(forests.len());
-        let node_id_mappings = vec![MastForestNodeIdMap::new(); forests.len()];
+        let node_id_mappings =
+            forests.iter().map(|f| DenseIdMap::with_len(f.nodes().len())).collect();
 
         let mut merger = Self {
             node_id_by_hash: BTreeMap::new(),
-            hash_by_node_id: BTreeMap::new(),
+            hash_by_node_id: IndexVec::new(),
             decorators_by_hash: BTreeMap::new(),
             mast_forest: MastForest::new(),
             decorator_id_mappings,
@@ -141,8 +145,7 @@ impl MastForestMerger {
                     // replacement to its new location, since it was previously merged and its IDs
                     // have very likely changed.
                     let mapped_replacement = self.node_id_mappings[replacement_forest_idx]
-                        .get(&replacement_mast_node_id)
-                        .copied()
+                        .get(replacement_mast_node_id)
                         .expect("every merged node id should be mapped");
 
                     // SAFETY: The iterator only yields valid forest indices, so it is safe to index
@@ -161,7 +164,7 @@ impl MastForestMerger {
     }
 
     fn merge_decorators(&mut self, other_forest: &MastForest) -> Result<(), MastForestError> {
-        let mut decorator_id_remapping = DecoratorIdMap::new(other_forest.decorators.len());
+        let mut decorator_id_remapping = DenseIdMap::with_len(other_forest.decorators.len());
 
         for (merging_id, merging_decorator) in other_forest.decorators.iter().enumerate() {
             let merging_decorator_hash = merging_decorator.fingerprint();
@@ -242,7 +245,14 @@ impl MastForestMerger {
                 // which has descendants (Call, Loop, Split, ...), then their descendants need to be
                 // in the indices.
                 self.node_id_by_hash.insert(node_fingerprint, new_node_id);
-                self.hash_by_node_id.insert(new_node_id, node_fingerprint);
+                let returned_id = self
+                    .hash_by_node_id
+                    .push(node_fingerprint)
+                    .map_err(|_| MastForestError::TooManyNodes)?;
+                debug_assert_eq!(
+                    returned_id, new_node_id,
+                    "hash_by_node_id push() should return the same node IDs as node_id_by_hash"
+                );
             },
         }
 
@@ -257,12 +267,12 @@ impl MastForestMerger {
         for root_id in other_forest.roots.iter() {
             // Map the previous root to its possibly new id.
             let new_root = self.node_id_mappings[forest_idx]
-                .get(root_id)
+                .get(*root_id)
                 .expect("all node ids should have an entry");
             // This takes O(n) where n is the number of roots in the merged forest every time to
             // check if the root already exists. As the number of roots is relatively low generally,
             // this should be okay.
-            self.mast_forest.make_root(*new_root);
+            self.mast_forest.make_root(new_root);
         }
 
         Ok(())
@@ -271,94 +281,100 @@ impl MastForestMerger {
     /// Remaps a nodes' potentially contained children and decorators to their new IDs according to
     /// the given maps.
     fn remap_node(&self, forest_idx: usize, node: &MastNode) -> Result<MastNode, MastForestError> {
-        let map_decorator_id = |decorator_id: &DecoratorId| {
-            self.decorator_id_mappings[forest_idx].get(decorator_id).ok_or_else(|| {
-                MastForestError::DecoratorIdOverflow(
-                    *decorator_id,
-                    self.decorator_id_mappings[forest_idx].len(),
-                )
-            })
+        self.build_node_with_remapped_children(
+            node,
+            &self.node_id_mappings[forest_idx],
+            &self.decorator_id_mappings[forest_idx],
+        )
+    }
+
+    // HELPERS
+    // ================================================================================================
+
+    /// Remaps a child node ID using the node ID map, returning the original ID if not found.
+    fn remap_child(
+        &self,
+        child_id: MastNodeId,
+        nmap: &DenseIdMap<MastNodeId, MastNodeId>,
+    ) -> MastNodeId {
+        nmap.get(child_id).expect("every node id should have an entry")
+    }
+
+    /// Returns the ID of the node in the merged forest that matches the given
+    /// fingerprint, if any.
+    fn lookup_node_by_fingerprint(&self, fingerprint: &MastNodeFingerprint) -> Option<MastNodeId> {
+        self.node_id_by_hash.get(fingerprint).copied()
+    }
+
+    /// Builds a new node with remapped children and decorators using the provided mappings.
+    fn build_node_with_remapped_children(
+        &self,
+        src: &MastNode,
+        nmap: &DenseIdMap<MastNodeId, MastNodeId>,
+        dmap: &DenseIdMap<DecoratorId, DecoratorId>,
+    ) -> Result<MastNode, MastForestError> {
+        let map_decorator_id = |decorator_id: DecoratorId| {
+            dmap.get(decorator_id)
+                .ok_or_else(|| MastForestError::DecoratorIdOverflow(decorator_id, dmap.len()))
         };
+
         let map_decorators = |decorators: &[DecoratorId]| -> Result<Vec<_>, MastForestError> {
-            decorators.iter().map(map_decorator_id).collect()
+            decorators.iter().copied().map(map_decorator_id).collect()
         };
 
-        let map_node_id = |node_id: MastNodeId| {
-            self.node_id_mappings[forest_idx]
-                .get(&node_id)
-                .copied()
-                .expect("every node id should have an entry")
-        };
-
-        // Due to DFS postorder iteration all children of node's should have been inserted before
-        // their parents which is why we can `expect` the constructor calls here.
-        let mut mapped_node: MastNode = match node {
+        let mut mapped_node: MastNode = match src {
             MastNode::Join(join_node) => {
-                let first = map_node_id(join_node.first());
-                let second = map_node_id(join_node.second());
+                let first = self.remap_child(join_node.first(), nmap);
+                let second = self.remap_child(join_node.second(), nmap);
 
                 JoinNode::new([first, second], &self.mast_forest)
                     .expect("JoinNode children should have been mapped to a lower index")
                     .into()
             },
             MastNode::Split(split_node) => {
-                let if_branch = map_node_id(split_node.on_true());
-                let else_branch = map_node_id(split_node.on_false());
+                let if_branch = self.remap_child(split_node.on_true(), nmap);
+                let else_branch = self.remap_child(split_node.on_false(), nmap);
 
                 SplitNode::new([if_branch, else_branch], &self.mast_forest)
                     .expect("SplitNode children should have been mapped to a lower index")
                     .into()
             },
             MastNode::Loop(loop_node) => {
-                let body = map_node_id(loop_node.body());
+                let body = self.remap_child(loop_node.body(), nmap);
                 LoopNode::new(body, &self.mast_forest)
                     .expect("LoopNode children should have been mapped to a lower index")
                     .into()
             },
             MastNode::Call(call_node) => {
-                let callee = map_node_id(call_node.callee());
+                let callee = self.remap_child(call_node.callee(), nmap);
                 CallNode::new(callee, &self.mast_forest)
                     .expect("CallNode children should have been mapped to a lower index")
                     .into()
             },
-            // Other nodes are simply copied.
-            MastNode::Block(basic_block_node) => {
-                BasicBlockNode::new(
-                    basic_block_node.operations().copied().collect(),
-                    // Operation Indices of decorators stay the same while decorator IDs need to be
-                    // mapped.
-                    basic_block_node
-                        .indexed_decorator_iter()
-                        .map(|(idx, decorator_id)| match map_decorator_id(&decorator_id) {
-                            Ok(mapped_decorator) => Ok((idx, mapped_decorator)),
-                            Err(err) => Err(err),
-                        })
-                        .collect::<Result<Vec<_>, _>>()?,
-                )
-                .expect("previously valid BasicBlockNode should still be valid")
-                .into()
-            },
+            MastNode::Block(basic_block_node) => BasicBlockNode::new(
+                basic_block_node.operations().copied().collect(),
+                basic_block_node
+                    .indexed_decorator_iter()
+                    .map(|(idx, decorator_id)| {
+                        let mapped_decorator = map_decorator_id(decorator_id)?;
+                        Ok((idx, mapped_decorator))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+            )
+            .expect("previously valid BasicBlockNode should still be valid")
+            .into(),
             MastNode::Dyn(_) => DynNode::new_dyn().into(),
             MastNode::External(external_node) => ExternalNode::new(external_node.digest()).into(),
         };
 
-        // Decorators must be handled specially for the op-indexed ones of basic block nodes above.
-        // For before_enter/after_exit node types we can handle it centrally.
+        // Decorators must be handled specially for basic block nodes.
+        // For other node types we can handle it centrally.
         {
-            mapped_node.append_before_enter(&map_decorators(node.before_enter())?);
-            mapped_node.append_after_exit(&map_decorators(node.after_exit())?);
+            mapped_node.append_before_enter(&map_decorators(src.before_enter())?);
+            mapped_node.append_after_exit(&map_decorators(src.after_exit())?);
         }
 
         Ok(mapped_node)
-    }
-
-    // HELPERS
-    // ================================================================================================
-
-    /// Returns the ID of the node in the merged forest that matches the given
-    /// fingerprint, if any.
-    fn lookup_node_by_fingerprint(&self, fingerprint: &MastNodeFingerprint) -> Option<MastNodeId> {
-        self.node_id_by_hash.get(fingerprint).copied()
     }
 }
 
@@ -375,14 +391,16 @@ pub struct MastForestRootMap {
 }
 
 impl MastForestRootMap {
-    fn from_node_id_map(id_map: Vec<MastForestNodeIdMap>, forests: Vec<&MastForest>) -> Self {
+    fn from_node_id_map(
+        id_map: Vec<DenseIdMap<MastNodeId, MastNodeId>>,
+        forests: Vec<&MastForest>,
+    ) -> Self {
         let mut root_maps = vec![BTreeMap::new(); forests.len()];
 
         for (forest_idx, forest) in forests.into_iter().enumerate() {
             for root in forest.procedure_roots() {
                 let new_id = id_map[forest_idx]
-                    .get(root)
-                    .copied()
+                    .get(*root)
                     .expect("every node id should be mapped to its new id");
                 root_maps[forest_idx].insert(*root, new_id);
             }
@@ -398,57 +416,3 @@ impl MastForestRootMap {
         self.root_maps.get(forest_index).and_then(|map| map.get(root)).copied()
     }
 }
-
-// DECORATOR ID MAP
-// ================================================================================================
-
-/// A specialized map from [`DecoratorId`] -> [`DecoratorId`].
-///
-/// When mapping Decorator IDs during merging, we always map all IDs of the merging
-/// forest to new ids. Hence it is more efficient to use a `Vec` instead of, say, a `BTreeMap`.
-///
-/// In other words, this type is similar to `BTreeMap<ID, ID>` but takes advantage of the fact that
-/// the keys are contiguous.
-///
-/// This type is meant to encapsulates some guarantees:
-///
-/// - Indexing into the vector for any ID is safe if that ID is valid for the corresponding forest.
-///   Despite that, we still cannot index unconditionally in case a node with invalid
-///   [`DecoratorId`]s is passed to `merge`.
-/// - The entry itself can be either None or Some. However:
-///   - For `DecoratorId`s we iterate and insert all decorators into this map before retrieving any
-///     entry, so all entries contain `Some`. Because of this, we can use `expect` in `get` for the
-///     `Option` value.
-/// - Similarly, inserting any ID from the corresponding forest is safe as the map contains a
-///   pre-allocated `Vec` of the appropriate size.
-struct DecoratorIdMap {
-    inner: Vec<Option<DecoratorId>>,
-}
-
-impl DecoratorIdMap {
-    fn new(num_ids: usize) -> Self {
-        Self { inner: vec![None; num_ids] }
-    }
-
-    /// Maps the given key to the given value.
-    ///
-    /// It is the caller's responsibility to only pass keys that belong to the forest for which this
-    /// map was originally created.
-    fn insert(&mut self, key: DecoratorId, value: DecoratorId) {
-        self.inner[key.as_usize()] = Some(value);
-    }
-
-    /// Retrieves the value for the given key.
-    fn get(&self, key: &DecoratorId) -> Option<DecoratorId> {
-        self.inner
-            .get(key.as_usize())
-            .map(|id| id.expect("every id should have a Some entry in the map when calling get"))
-    }
-
-    fn len(&self) -> usize {
-        self.inner.len()
-    }
-}
-
-/// A type definition for increased readability in function signatures.
-type MastForestNodeIdMap = BTreeMap<MastNodeId, MastNodeId>;
