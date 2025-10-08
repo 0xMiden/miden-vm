@@ -87,6 +87,7 @@ impl CallNode {
 
     /// Returns a new [`CallNode`] instantiated with the specified callee and marked as a kernel
     /// call.
+    #[allow(dead_code)]
     pub(in crate::mast) fn new_syscall(
         callee: MastNodeId,
         mast_forest: &MastForest,
