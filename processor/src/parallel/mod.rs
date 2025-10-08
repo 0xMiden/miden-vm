@@ -1081,6 +1081,12 @@ impl CoreTraceFragmentGenerator {
 
                     self.add_end_trace_row(dyn_node.digest())?;
                 },
+                Continuation::FinishExternal(_node_id) => {
+                    // Execute after_exit decorators when returning from an external node
+                    // Note: current_forest should already be restored by EnterForest continuation
+                    // External nodes don't generate END trace rows in the parallel processor
+                    // as they only execute after_exit decorators
+                },
                 Continuation::EnterForest(previous_forest) => {
                     // Restore the previous forest
                     current_forest = previous_forest;
