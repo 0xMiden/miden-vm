@@ -8,7 +8,10 @@ use std::{
 use miden_assembly_syntax::diagnostics::WrapErr;
 use miden_core::{
     EventId, Operation, Program, Word, assert_matches,
-    mast::{MastNodeExt, MastNodeId},
+    mast::{
+        BasicBlockNodeBuilder, JoinNodeBuilder, MastForestContributor, MastNodeExt, MastNodeId,
+        SplitNodeBuilder,
+    },
     utils::{Deserializable, Serializable},
 };
 use miden_mast_package::{MastArtifact, MastForest, Package, PackageExport, PackageManifest};
@@ -3818,26 +3821,32 @@ fn duplicate_nodes() {
 
     let mut expected_mast_forest = MastForest::new();
 
-    let fmp_initialization = expected_mast_forest
-        .add_block(fmp_initialization_sequence(), Vec::new())
+    let fmp_initialization = BasicBlockNodeBuilder::new(fmp_initialization_sequence(), Vec::new())
+        .add_to_forest(&mut expected_mast_forest)
         .unwrap();
 
-    let mul_basic_block_id =
-        expected_mast_forest.add_block(vec![Operation::Mul], Vec::new()).unwrap();
+    let mul_basic_block_id = BasicBlockNodeBuilder::new(vec![Operation::Mul], Vec::new())
+        .add_to_forest(&mut expected_mast_forest)
+        .unwrap();
 
-    let add_basic_block_id =
-        expected_mast_forest.add_block(vec![Operation::Add], Vec::new()).unwrap();
+    let add_basic_block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        .add_to_forest(&mut expected_mast_forest)
+        .unwrap();
 
     // inner split: `if.true add else mul end`
-    let inner_split_id =
-        expected_mast_forest.add_split(add_basic_block_id, mul_basic_block_id).unwrap();
+    let inner_split_id = SplitNodeBuilder::new([add_basic_block_id, mul_basic_block_id])
+        .add_to_forest(&mut expected_mast_forest)
+        .unwrap();
 
     // outer split
-    let outer_split_id =
-        expected_mast_forest.add_split(mul_basic_block_id, inner_split_id).unwrap();
+    let outer_split_id = SplitNodeBuilder::new([mul_basic_block_id, inner_split_id])
+        .add_to_forest(&mut expected_mast_forest)
+        .unwrap();
 
-    // root
-    let root_id = expected_mast_forest.add_join(fmp_initialization, outer_split_id).unwrap();
+    // root: outer split
+    let root_id = JoinNodeBuilder::new([fmp_initialization, outer_split_id])
+        .add_to_forest(&mut expected_mast_forest)
+        .unwrap();
 
     expected_mast_forest.make_root(root_id);
 

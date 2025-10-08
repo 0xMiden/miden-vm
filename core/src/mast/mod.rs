@@ -18,8 +18,9 @@ pub use node::arbitrary;
 pub use node::{
     BasicBlockNode, BasicBlockNodeBuilder, CallNode, CallNodeBuilder, DecoratedOpLink,
     DecoratorOpLinkIterator, DynNode, DynNodeBuilder, ExternalNode, ExternalNodeBuilder, JoinNode,
-    JoinNodeBuilder, LoopNode, LoopNodeBuilder, MastNode, MastNodeErrorContext, MastNodeExt,
-    OP_BATCH_SIZE, OP_GROUP_SIZE, OpBatch, OperationOrDecorator, SplitNode, SplitNodeBuilder,
+    JoinNodeBuilder, LoopNode, LoopNodeBuilder, MastForestContributor, MastNode,
+    MastNodeErrorContext, MastNodeExt, OP_BATCH_SIZE, OP_GROUP_SIZE, OpBatch, OperationOrDecorator,
+    SplitNode, SplitNodeBuilder,
 };
 
 use crate::{
@@ -297,7 +298,7 @@ impl MastForest {
             })
             .collect::<Result<Vec<_>, MastForestError>>()?;
 
-        self.add_block(operations, decorator_list)
+        BasicBlockNodeBuilder::new(operations, decorator_list).add_to_forest(self)
     }
 }
 
@@ -327,7 +328,7 @@ impl MastForest {
                         .copied()
                         .unwrap_or(join_node.second());
 
-                    self.add_join(first_child, second_child).unwrap();
+                    JoinNodeBuilder::new([first_child, second_child]).add_to_forest(self).unwrap();
                 },
                 MastNode::Split(split_node) => {
                     let on_true_child = id_remappings
@@ -339,13 +340,15 @@ impl MastForest {
                         .copied()
                         .unwrap_or(split_node.on_false());
 
-                    self.add_split(on_true_child, on_false_child).unwrap();
+                    SplitNodeBuilder::new([on_true_child, on_false_child])
+                        .add_to_forest(self)
+                        .unwrap();
                 },
                 MastNode::Loop(loop_node) => {
                     let body_id =
                         id_remappings.get(&loop_node.body()).copied().unwrap_or(loop_node.body());
 
-                    self.add_loop(body_id).unwrap();
+                    LoopNodeBuilder::new(body_id).add_to_forest(self).unwrap();
                 },
                 MastNode::Call(call_node) => {
                     let callee_id = id_remappings
@@ -354,9 +357,9 @@ impl MastForest {
                         .unwrap_or(call_node.callee());
 
                     if call_node.is_syscall() {
-                        self.add_syscall(callee_id).unwrap();
+                        CallNodeBuilder::new_syscall(callee_id).add_to_forest(self).unwrap();
                     } else {
-                        self.add_call(callee_id).unwrap();
+                        CallNodeBuilder::new(callee_id).add_to_forest(self).unwrap();
                     }
                 },
                 MastNode::Block(_) | MastNode::Dyn(_) | MastNode::External(_) => {

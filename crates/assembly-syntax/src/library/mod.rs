@@ -2,7 +2,7 @@ use alloc::{collections::BTreeMap, string::String, sync::Arc, vec::Vec};
 
 use miden_core::{
     AdviceMap, Kernel, Word,
-    mast::{MastForest, MastNodeExt, MastNodeId},
+    mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, MastNodeExt, MastNodeId},
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 use midenc_hir_type::{FunctionType, Type};
@@ -879,9 +879,12 @@ impl proptest::prelude::Arbitrary for Library {
                     // impl will generate different paths for each
                     export.name = export_name.clone();
 
-                    let node_id = mast_forest
-                        .add_block(vec![Operation::Add, Operation::Mul], Vec::new())
-                        .unwrap();
+                    let node_id = BasicBlockNodeBuilder::new(
+                        vec![Operation::Add, Operation::Mul],
+                        Vec::new(),
+                    )
+                    .add_to_forest(&mut mast_forest)
+                    .unwrap();
                     nodes.push((export.node, node_id));
                 }
 

@@ -6,7 +6,7 @@ use miden_formatting::prettier::PrettyPrint;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::{MastNodeErrorContext, MastNodeExt};
+use super::{MastForestContributor, MastNodeErrorContext, MastNodeExt};
 use crate::{
     Idx, OPCODE_SPLIT,
     chiplets::hasher,
@@ -254,6 +254,7 @@ impl MastNodeExt for SplitNode {
 
 // ------------------------------------------------------------------------------------------------
 /// Builder for creating [`SplitNode`] instances with decorators.
+#[derive(Debug)]
 pub struct SplitNodeBuilder {
     branches: [MastNodeId; 2],
     before_enter: Vec<DecoratorId>,
@@ -303,5 +304,14 @@ impl SplitNodeBuilder {
             before_enter: self.before_enter,
             after_exit: self.after_exit,
         })
+    }
+}
+
+impl MastForestContributor for SplitNodeBuilder {
+    fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
+        forest
+            .nodes
+            .push(self.build(forest)?.into())
+            .map_err(|_| MastForestError::TooManyNodes)
     }
 }

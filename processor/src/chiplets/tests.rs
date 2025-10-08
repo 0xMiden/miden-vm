@@ -10,7 +10,10 @@ use miden_air::trace::{
         memory::TRACE_WIDTH as MEMORY_TRACE_WIDTH,
     },
 };
-use miden_core::{Felt, ONE, Program, Word, ZERO, mast::MastForest};
+use miden_core::{
+    Felt, ONE, Program, Word, ZERO,
+    mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor},
+};
 
 use crate::{
     AdviceInputs, DefaultHost, ExecutionOptions, ExecutionTrace, Kernel, Operation, Process,
@@ -123,7 +126,9 @@ fn build_trace(
     let program = {
         let mut mast_forest = MastForest::new();
 
-        let basic_block_id = mast_forest.add_block(operations, Vec::new()).unwrap();
+        let basic_block_id = BasicBlockNodeBuilder::new(operations, Vec::new())
+            .add_to_forest(&mut mast_forest)
+            .unwrap();
         mast_forest.make_root(basic_block_id);
 
         Program::new(mast_forest.into(), basic_block_id)
