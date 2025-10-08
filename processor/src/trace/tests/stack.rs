@@ -62,7 +62,7 @@ fn p1_trace() {
     assert_eq!(expected_value, p1[5]);
 
     // DROP removes a row from the overflow table
-    expected_value *= row_values[1].inverse();
+    expected_value *= row_values[1].inverse_unwrap_zero();
     assert_eq!(expected_value, p1[6]);
 
     // PAD pushes the value onto the overflow table again
@@ -70,9 +70,9 @@ fn p1_trace() {
     assert_eq!(expected_value, p1[7]);
 
     // two DROPs remove both values from the overflow table
-    expected_value *= row_values[2].inverse();
+    expected_value *= row_values[2].inverse_unwrap_zero();
     assert_eq!(expected_value, p1[8]);
-    expected_value *= row_values[0].inverse();
+    expected_value *= row_values[0].inverse_unwrap_zero();
     assert_eq!(expected_value, p1[9]);
 
     // at this point the table should be empty
@@ -86,7 +86,7 @@ fn p1_trace() {
     assert_eq!(expected_value, p1[11]);
 
     // and then the last DROP removes it from the overflow table
-    expected_value *= row_values[3].inverse();
+    expected_value *= row_values[3].inverse_unwrap_zero();
     assert_eq!(expected_value, p1[12]);
 
     // at this point the table should be empty again, and it should stay empty until the end

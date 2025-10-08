@@ -124,7 +124,7 @@ fn hasher_p1_mr_update(#[case] index: u64) {
 
     // on step 32, computations of the "new Merkle root" is started and the first sibling is
     // removed from the table in the following row (step 33)
-    expected_value *= row_values[0].inverse();
+    expected_value *= row_values[0].inverse_unwrap_zero();
     assert_eq!(expected_value, p1[33]);
 
     // then, for the next 6 steps the value remains the same
@@ -133,7 +133,7 @@ fn hasher_p1_mr_update(#[case] index: u64) {
     }
 
     // on step 39, the next sibling is removed from the table in the following row (step 40)
-    expected_value *= row_values[1].inverse();
+    expected_value *= row_values[1].inverse_unwrap_zero();
     assert_eq!(expected_value, p1[40]);
 
     // and then again for the next 6 steps the value remains the same
@@ -142,7 +142,7 @@ fn hasher_p1_mr_update(#[case] index: u64) {
     }
 
     // on step 47, the last sibling is removed from the table in the following row (step 48)
-    expected_value *= row_values[2].inverse();
+    expected_value *= row_values[2].inverse_unwrap_zero();
     assert_eq!(expected_value, p1[48]);
 
     // at this point the table should be empty again, and it should stay empty until the end

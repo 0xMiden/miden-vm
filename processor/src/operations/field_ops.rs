@@ -49,7 +49,7 @@ impl Process {
             return Err(ExecutionError::divide_by_zero(self.system.clk(), err_ctx));
         }
 
-        self.stack.set(0, a.inverse());
+        self.stack.set(0, a.inverse_unwrap_zero());
         self.stack.copy_state(1);
         Ok(())
     }
@@ -133,7 +133,7 @@ impl Process {
             self.stack.set(0, ZERO);
             // setting h0 to the inverse of the difference between the top two elements of the
             // stack.
-            h0 = (b - a).inverse();
+            h0 = (b - a).inverse_unwrap_zero();
         }
 
         // save h0 in the decoder helper register.
@@ -156,7 +156,7 @@ impl Process {
             self.stack.set(0, ONE);
         } else {
             // setting h0 to the inverse of the top element of the stack.
-            h0 = a.inverse();
+            h0 = a.inverse_unwrap_zero();
             self.stack.set(0, ZERO);
         }
 
@@ -314,7 +314,7 @@ mod tests {
         // invert the top value
         if b != ZERO {
             process.execute_op(Operation::Inv, program, &mut host).unwrap();
-            let expected = build_expected(&[a.inverse(), b, c]);
+            let expected = build_expected(&[a.inverse_unwrap_zero(), b, c]);
 
             assert_eq!(MIN_STACK_DEPTH, process.stack.depth());
             assert_eq!(2, process.stack.current_clk());

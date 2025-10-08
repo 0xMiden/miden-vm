@@ -167,7 +167,10 @@ fn get_divisors<E: ExtensionField<Felt>>(lookup_values: &[u16], alpha: E) -> BTr
     }
 
     // invert the accumulated product
-    acc = acc.inverse();
+    acc = match acc.try_inverse() {
+        Some(p) => p,
+        None => E::ZERO,
+    };
 
     // multiply the accumulated product by the original values to compute the inverses, then
     // build a map of inverses for the lookup values

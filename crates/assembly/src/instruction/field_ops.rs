@@ -106,7 +106,7 @@ pub fn div_imm(
     } else if imm == ONE {
         span_builder.push_op(Noop);
     } else {
-        span_builder.push_ops([Push(imm.into_inner().inverse()), Mul]);
+        span_builder.push_ops([Push(imm.into_inner().inverse_unwrap_zero()), Mul]);
     }
     Ok(())
 }

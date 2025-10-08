@@ -340,7 +340,11 @@ fn push_ext2_inv_result(
     if element == QuadFelt::ZERO {
         return Err(ExecutionError::divide_by_zero(process.clk(), err_ctx));
     }
-    let result = element.inverse().to_array();
+    let result = match element.try_inverse() {
+        Some(p) => p,
+        None => QuadFelt::ZERO,
+    }
+    .to_array();
 
     process.advice_provider_mut().push_stack(result[1]);
     process.advice_provider_mut().push_stack(result[0]);

@@ -75,7 +75,7 @@ fn b_chip_trace_mem() {
         ONE,
         word.into(),
     );
-    let mut expected = value.inverse();
+    let mut expected = value.inverse_unwrap_zero();
     assert_eq!(expected, b_chip[2]);
 
     // Nothing changes after user operations that don't make requests to the Chiplets.
@@ -93,13 +93,13 @@ fn b_chip_trace_mem() {
         Felt::from_u64(6),
         word[0],
     );
-    expected *= value.inverse();
+    expected *= value.inverse_unwrap_zero();
     assert_eq!(expected, b_chip[7]);
 
     // At cycle 7 the hasher provides the result of the `SPAN` hash. Since this test is for changes
     // from memory lookups, just set it explicitly and save the multiplied-in value for later.
     assert_ne!(expected, b_chip[8]);
-    let span_result = b_chip[8] * b_chip[7].inverse();
+    let span_result = b_chip[8] * b_chip[7].inverse_unwrap_zero();
     expected = b_chip[8];
 
     // Memory responses will be provided during the memory segment of the Chiplets trace,
@@ -115,7 +115,7 @@ fn b_chip_trace_mem() {
         Felt::new(8),
         word.into(),
     );
-    expected *= value.inverse();
+    expected *= value.inverse_unwrap_zero();
     expected *= build_expected_bus_msg_from_trace(&trace, &rand_elements, 8.into());
     assert_eq!(expected, b_chip[9]);
 
@@ -137,7 +137,7 @@ fn b_chip_trace_mem() {
         Felt::from_u64(11),
         ONE,
     );
-    expected *= value.inverse();
+    expected *= value.inverse_unwrap_zero();
     expected *= build_expected_bus_msg_from_trace(&trace, &rand_elements, 11.into());
     assert_eq!(expected, b_chip[12]);
 
@@ -163,14 +163,14 @@ fn b_chip_trace_mem() {
         Felt::new(13),
         [ONE, ZERO, ZERO, ZERO].into(),
     );
-    expected *= (value1 * value2).inverse();
+    expected *= (value1 * value2).inverse_unwrap_zero();
     expected *= build_expected_bus_msg_from_trace(&trace, &rand_elements, 13.into());
     assert_eq!(expected, b_chip[14]);
 
     // At cycle 14 the decoder requests the span hash. We set this as the inverse of the previously
     // identified `span_result`, since this test is for consistency of the memory lookups.
     assert_ne!(expected, b_chip[15]);
-    expected *= span_result.inverse();
+    expected *= span_result.inverse_unwrap_zero();
     assert_eq!(expected, b_chip[15]);
 
     // The value in b_chip should be ONE now and for the rest of the trace.

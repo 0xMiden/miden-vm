@@ -161,8 +161,8 @@ fn div() {
 
     // --- test remainder -------------------------------------------------------------------------
     let test = build_op_test!(asm_op, &[5, 2]);
-    let expected =
-        (Felt::from_u64(2).inverse().as_int() as u128 * 5_u128) % Felt::ORDER_U64 as u128;
+    let expected = (Felt::from_u64(2).inverse_unwrap_zero().as_int() as u128 * 5_u128)
+        % Felt::ORDER_U64 as u128;
     test.expect_stack(&[expected as u64]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
@@ -199,8 +199,8 @@ fn div_b() {
 
     // --- test remainder -------------------------------------------------------------------------
     let test = build_op_test!(build_asm_op(2), &[5]);
-    let expected =
-        (Felt::from_u64(2).inverse().as_int() as u128 * 5_u128) % Felt::ORDER_U64 as u128;
+    let expected = (Felt::from_u64(2).inverse_unwrap_zero().as_int() as u128 * 5_u128)
+        % Felt::ORDER_U64 as u128;
     test.expect_stack(&[expected as u64]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
@@ -267,15 +267,15 @@ fn inverse() {
 
     // --- simple cases ---------------------------------------------------------------------------
     let test = build_op_test!(asm_op, &[1]);
-    test.expect_stack(&[ONE.inverse().as_int()]);
+    test.expect_stack(&[ONE.inverse_unwrap_zero().as_int()]);
 
     let test = build_op_test!(asm_op, &[64]);
-    test.expect_stack(&[Felt::from_u64(64).inverse().as_int()]);
+    test.expect_stack(&[Felt::from_u64(64).inverse_unwrap_zero().as_int()]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
     let c = rand_value::<u64>();
     let test = build_op_test!(asm_op, &[c, 5]);
-    test.expect_stack(&[Felt::from_u64(5).inverse().as_int(), c]);
+    test.expect_stack(&[Felt::from_u64(5).inverse_unwrap_zero().as_int(), c]);
 }
 
 #[test]
@@ -719,7 +719,7 @@ proptest! {
         let asm_op = "div";
 
         // allow a possible overflow then mod by the Felt Modulus
-        let expected = (Felt::from_u64(b).inverse().as_int() as u128 * a as u128) % Felt::ORDER_U64 as u128;
+        let expected = (Felt::from_u64(b).inverse_unwrap_zero().as_int() as u128 * a as u128) % Felt::ORDER_U64 as u128;
 
         // b provided via the stack
         let test = build_op_test!(asm_op, &[a, b]);
@@ -749,7 +749,7 @@ proptest! {
     fn inv_proptest(a in 1..u64::MAX) {
         let asm_op = "inv";
 
-        let expected = Felt::from_u64(a).inverse().as_int();
+        let expected = Felt::from_u64(a).inverse_unwrap_zero().as_int();
 
         let test = build_op_test!(asm_op, &[a]);
         test.prop_expect_stack(&[expected])?;

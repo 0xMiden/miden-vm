@@ -49,7 +49,7 @@ pub(super) fn op_fri_ext2fold4<P: Processor>(
     // --- fold query values ----------------------------------------------
     let f_tau = get_tau_factor(d_seg);
     let x = poe * f_tau * DOMAIN_OFFSET;
-    let x_inv = x.inverse();
+    let x_inv = x.inverse_unwrap_zero();
 
     let (ev, es) = compute_evaluation_points(alpha, x_inv);
     let (folded_value, tmp0, tmp1) = fold4(query_values, ev, es);

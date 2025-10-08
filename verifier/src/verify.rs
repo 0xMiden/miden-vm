@@ -132,7 +132,12 @@ where
                 .filter(|(j, _)| *j != i)
                 .map(|(_, other_domain)| {
                     other_domain.vanishing_poly_at_point(zeta)
-                        * other_domain.vanishing_poly_at_point(domain.first_point()).inverse()
+                        * match (other_domain.vanishing_poly_at_point(domain.first_point()))
+                            .try_inverse()
+                        {
+                            Some(p) => p,
+                            None => Val::<SC>::ZERO,
+                        }
                 })
                 .product::<SC::Challenge>()
         })

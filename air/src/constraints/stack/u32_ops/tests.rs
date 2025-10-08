@@ -121,7 +121,7 @@ pub fn get_u32split_test_frame(a: u64) -> EvaluationFrame<Felt> {
 
     let (t1, t0) = split_u32_into_u16(b.as_int());
     let (t3, t2) = split_u32_into_u16(c.as_int());
-    let m = (Felt::from(u32::MAX) - c).inverse();
+    let m = (Felt::from(u32::MAX) - c).inverse_unwrap_zero();
 
     // set the helper registers in the decoder.
     frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET] = Felt::new(t0 as u64);
@@ -208,7 +208,7 @@ pub fn get_u32mul_test_frame(a: u32, b: u32) -> EvaluationFrame<Felt> {
 
     let (t1, t0) = split_u32_into_u16(lo.as_int());
     let (t3, t2) = split_u32_into_u16(hi.as_int());
-    let m = (Felt::from(u32::MAX) - hi).inverse();
+    let m = (Felt::from(u32::MAX) - hi).inverse_unwrap_zero();
 
     // set the helper registers in the decoder.
     frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET] = Felt::new(t0 as u64);
@@ -240,7 +240,7 @@ pub fn get_u32madd_test_frame(a: u32, b: u32, c: u32) -> EvaluationFrame<Felt> {
 
     let (t1, t0) = split_u32_into_u16(lo.as_int());
     let (t3, t2) = split_u32_into_u16(hi.as_int());
-    let m = (Felt::from(u32::MAX) - hi).inverse();
+    let m = (Felt::from(u32::MAX) - hi).inverse_unwrap_zero();
 
     // set the helper registers in the decoder.
     frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET] = Felt::new(t0 as u64);

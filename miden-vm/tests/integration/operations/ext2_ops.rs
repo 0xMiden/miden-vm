@@ -67,7 +67,7 @@ fn ext2div() {
 
     let a = rand_value::<QuadFelt>();
     let b = rand_value::<QuadFelt>();
-    let c = a * b.inverse();
+    let c = a * b.inverse_unwrap_zero();
     let (a0, a1) = ext_element_to_ints(a);
     let (b0, b1) = ext_element_to_ints(b);
     let (c0, c1) = ext_element_to_ints(c);
@@ -100,7 +100,7 @@ fn ext2inverse() {
     let asm_op = "ext2inv";
 
     let a = rand_value::<QuadFelt>();
-    let b = a.inverse();
+    let b = a.inverse_unwrap_zero();
 
     let (a0, a1) = ext_element_to_ints(a);
     let (b0, b1) = ext_element_to_ints(b);

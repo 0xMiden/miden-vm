@@ -81,7 +81,7 @@ pub fn b_chip_span() {
     // request the initialization of the span hash
     let request_init =
         build_expected(&alphas, LINEAR_HASH_LABEL, state, [ZERO; STATE_WIDTH], ONE, ZERO);
-    let mut expected = request_init.inverse();
+    let mut expected = request_init.inverse_unwrap_zero();
 
     // provide the initialization of the span hash
     expected *= build_expected_from_trace(&trace, &alphas, 0.into());
@@ -102,7 +102,7 @@ pub fn b_chip_span() {
         Felt::from_u64(HASH_CYCLE_LEN as u64),
         ZERO,
     );
-    expected *= request_result.inverse();
+    expected *= request_result.inverse_unwrap_zero();
     assert_eq!(expected, b_chip[4]);
 
     // Nothing changes when there is no communication with the hash chiplet.
@@ -153,7 +153,7 @@ pub fn b_chip_span_with_respan() {
     // request the initialization of the span hash
     let request_init =
         build_expected(&alphas, LINEAR_HASH_LABEL, state, [ZERO; STATE_WIDTH], ONE, ZERO);
-    let mut expected = request_init.inverse();
+    let mut expected = request_init.inverse_unwrap_zero();
 
     // provide the initialization of the span hash
     expected *= build_expected_from_trace(&trace, &alphas, 0.into());
@@ -181,7 +181,7 @@ pub fn b_chip_span_with_respan() {
 
     let request_respan =
         build_expected(&alphas, LINEAR_HASH_LABEL, prev_state, state, Felt::from_u64(8), ZERO);
-    expected *= request_respan.inverse();
+    expected *= request_respan.inverse_unwrap_zero();
     assert_eq!(expected, b_chip[10]);
 
     // Nothing changes when there is no communication with the hash chiplet.
@@ -210,7 +210,7 @@ pub fn b_chip_span_with_respan() {
         Felt::from_u64(16),
         ZERO,
     );
-    expected *= request_result.inverse();
+    expected *= request_result.inverse_unwrap_zero();
     assert_eq!(expected, b_chip[22]);
 
     // The value in b_chip should be ONE now and for the rest of the trace.
@@ -254,7 +254,7 @@ pub fn b_chip_merge() {
     // request the initialization of the span hash
     let split_init =
         build_expected(&alphas, LINEAR_HASH_LABEL, split_state, [ZERO; STATE_WIDTH], ONE, ZERO);
-    let mut expected = split_init.inverse();
+    let mut expected = split_init.inverse_unwrap_zero();
 
     // provide the initialization of the span hash
     expected *= build_expected_from_trace(&trace, &alphas, 0.into());
@@ -273,7 +273,7 @@ pub fn b_chip_merge() {
         Felt::from_u64(9),
         ZERO,
     );
-    expected *= f_branch_init.inverse();
+    expected *= f_branch_init.inverse_unwrap_zero();
     assert_eq!(expected, b_chip[2]);
 
     // Nothing changes when there is no communication with the hash chiplet.
@@ -289,7 +289,7 @@ pub fn b_chip_merge() {
         Felt::from_u64(16),
         ZERO,
     );
-    expected *= f_branch_result.inverse();
+    expected *= f_branch_result.inverse_unwrap_zero();
     assert_eq!(expected, b_chip[4]);
 
     // at cycle 4 the result of the split code block's hash is requested by the decoder
@@ -302,7 +302,7 @@ pub fn b_chip_merge() {
         Felt::from_u64(8),
         ZERO,
     );
-    expected *= split_result.inverse();
+    expected *= split_result.inverse_unwrap_zero();
     assert_eq!(expected, b_chip[5]);
 
     // Nothing changes when there is no communication with the hash chiplet.
@@ -373,7 +373,7 @@ pub fn b_chip_permutation() {
     // request the initialization of the span hash
     let span_init =
         build_expected(&alphas, LINEAR_HASH_LABEL, span_state, [ZERO; STATE_WIDTH], ONE, ZERO);
-    let mut expected = span_init.inverse();
+    let mut expected = span_init.inverse_unwrap_zero();
     // provide the initialization of the span hash
     expected *= build_expected_from_trace(&trace, &alphas, 0.into());
     assert_eq!(expected, b_chip[1]);
@@ -389,7 +389,7 @@ pub fn b_chip_permutation() {
         ZERO,
     );
     // request the hperm initialization.
-    expected *= hperm_init.inverse();
+    expected *= hperm_init.inverse_unwrap_zero();
     apply_permutation(&mut hperm_state);
     let hperm_result = build_expected(
         &alphas,
@@ -400,7 +400,7 @@ pub fn b_chip_permutation() {
         ZERO,
     );
     // request the hperm result.
-    expected *= hperm_result.inverse();
+    expected *= hperm_result.inverse_unwrap_zero();
     assert_eq!(expected, b_chip[2]);
 
     // at cycle 2 the result of the span hash is requested by the decoder
@@ -413,7 +413,7 @@ pub fn b_chip_permutation() {
         Felt::from_u64(8),
         ZERO,
     );
-    expected *= span_result.inverse();
+    expected *= span_result.inverse_unwrap_zero();
     assert_eq!(expected, b_chip[3]);
 
     // Nothing changes when there is no communication with the hash chiplet.
@@ -491,7 +491,7 @@ fn b_chip_mpverify() {
     // request the initialization of the span hash
     let span_init =
         build_expected(&alphas, LINEAR_HASH_LABEL, span_state, [ZERO; STATE_WIDTH], ONE, ZERO);
-    let mut expected = span_init.inverse();
+    let mut expected = span_init.inverse_unwrap_zero();
     // provide the initialization of the span hash
     expected *= build_expected_from_trace(&trace, &alphas, 0.into());
     assert_eq!(expected, b_chip[1]);
@@ -514,7 +514,7 @@ fn b_chip_mpverify() {
         Felt::from_u64(index as u64),
     );
     // request the initialization of the Merkle path verification
-    expected *= mp_init.inverse();
+    expected *= mp_init.inverse_unwrap_zero();
 
     let mp_verify_complete = HASH_CYCLE_LEN + (tree.depth() as usize) * HASH_CYCLE_LEN;
     let mp_result = build_expected(
@@ -540,7 +540,7 @@ fn b_chip_mpverify() {
         Felt::from_u64(index as u64 >> tree.depth()),
     );
     // request the result of the Merkle path verification
-    expected *= mp_result.inverse();
+    expected *= mp_result.inverse_unwrap_zero();
     assert_eq!(expected, b_chip[2]);
 
     // at cycle 2 the result of the span hash is requested by the decoder
@@ -553,7 +553,7 @@ fn b_chip_mpverify() {
         Felt::from_u64(8),
         ZERO,
     );
-    expected *= span_result.inverse();
+    expected *= span_result.inverse_unwrap_zero();
     assert_eq!(expected, b_chip[3]);
 
     // Nothing changes when there is no communication with the hash chiplet.
@@ -637,7 +637,7 @@ fn b_chip_mrupdate() {
     // request the initialization of the span hash
     let span_init =
         build_expected(&alphas, LINEAR_HASH_LABEL, span_state, [ZERO; STATE_WIDTH], ONE, ZERO);
-    let mut expected = span_init.inverse();
+    let mut expected = span_init.inverse_unwrap_zero();
     // provide the initialization of the span hash
     expected *= build_expected_from_trace(&trace, &alphas, 0.into());
     assert_eq!(expected, b_chip[1]);
@@ -660,7 +660,7 @@ fn b_chip_mrupdate() {
         Felt::from_u64(index as u64),
     );
     // request the initialization of the (first) Merkle path verification
-    expected *= mp_init_old.inverse();
+    expected *= mp_init_old.inverse_unwrap_zero();
 
     let mp_old_verify_complete = HASH_CYCLE_LEN + (tree.depth() as usize) * HASH_CYCLE_LEN;
     let mp_result_old = build_expected(
@@ -687,7 +687,7 @@ fn b_chip_mrupdate() {
     );
 
     // request the result of the first Merkle path verification
-    expected *= mp_result_old.inverse();
+    expected *= mp_result_old.inverse_unwrap_zero();
 
     let new_leaf_value = leaves[0];
     tree.update_leaf(index as u64, new_leaf_value).unwrap();
@@ -714,7 +714,7 @@ fn b_chip_mrupdate() {
     );
 
     // request the initialization of the second Merkle path verification
-    expected *= mp_init_new.inverse();
+    expected *= mp_init_new.inverse_unwrap_zero();
 
     let mp_result_new = build_expected(
         &alphas,
@@ -740,7 +740,7 @@ fn b_chip_mrupdate() {
     );
 
     // request the result of the second Merkle path verification
-    expected *= mp_result_new.inverse();
+    expected *= mp_result_new.inverse_unwrap_zero();
     assert_eq!(expected, b_chip[2]);
 
     // at cycle 2 the result of the span hash is requested by the decoder
@@ -753,7 +753,7 @@ fn b_chip_mrupdate() {
         Felt::from_u64(8),
         ZERO,
     );
-    expected *= span_result.inverse();
+    expected *= span_result.inverse_unwrap_zero();
     assert_eq!(expected, b_chip[3]);
 
     // Nothing changes when there is no communication with the hash chiplet.

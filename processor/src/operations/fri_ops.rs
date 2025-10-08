@@ -81,7 +81,7 @@ impl Process {
         // compute x corresponding to the query position
         let f_tau = get_tau_factor(d_seg);
         let x = poe * f_tau * *DOMAIN_OFFSET;
-        let x_inv = x.inverse();
+        let x_inv = x.inverse_unwrap_zero();
 
         let (ev, es) = compute_evaluation_points(alpha, x_inv);
         let (folded_value, tmp0, tmp1) = fold4(query_values, ev, es);
@@ -283,7 +283,7 @@ mod tests {
         // fold evaluations at a single point using fold4 procedure
         let pos = 3;
         let x = domain[pos];
-        let ev = alpha.mul(x.inverse());
+        let ev = alpha.mul(x.inverse_unwrap_zero());
         let (result, ..) = super::fold4(transposed_evaluations[pos], ev, ev.square());
 
         // make sure the results of fold4 are the same as results form Winterfell
@@ -294,11 +294,11 @@ mod tests {
     fn constants() {
         let tau = Felt::get_root_of_unity(2);
 
-        assert_eq!(super::TAU_INV, tau.inverse());
-        assert_eq!(super::TAU2_INV, tau.square().inverse());
-        assert_eq!(super::TAU3_INV, tau.cube().inverse());
+        assert_eq!(super::TAU_INV, tau.inverse_unwrap_zero());
+        assert_eq!(super::TAU2_INV, tau.square().inverse_unwrap_zero());
+        assert_eq!(super::TAU3_INV, tau.cube().inverse_unwrap_zero());
 
-        assert_eq!(Felt::from_u64(2).inverse(), TWO_INV);
+        assert_eq!(Felt::from_u64(2).inverse_unwrap_zero(), TWO_INV);
     }
 
     #[test]
@@ -344,7 +344,7 @@ mod tests {
         // perform layer folding
         let f_tau = super::get_tau_factor(d_seg.as_int() as usize);
         let x = poe * f_tau * super::DOMAIN_OFFSET;
-        let x_inv = x.inverse();
+        let x_inv = x.inverse_unwrap_zero();
 
         let (ev, es) = super::compute_evaluation_points(alpha, x_inv);
         let (folded_value, tmp0, tmp1) = super::fold4(query_values, ev, es);

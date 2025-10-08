@@ -26,11 +26,11 @@ fn test_stack_overflow_constraints() {
     frame.current_mut()[CLK_COL_IDX] = Felt::new(8);
     frame.current_mut()[B0_COL_IDX] = Felt::new(depth);
     frame.current_mut()[B1_COL_IDX] = Felt::new(7);
-    frame.current_mut()[H0_COL_IDX] = Felt::new(depth - 16).inverse();
+    frame.current_mut()[H0_COL_IDX] = Felt::new(depth - 16).inverse_unwrap_zero();
 
     frame.next_mut()[B0_COL_IDX] = Felt::new(depth + 1);
     frame.next_mut()[B1_COL_IDX] = frame.current()[CLK_COL_IDX];
-    frame.next_mut()[H0_COL_IDX] = Felt::new(depth + 1 - 16).inverse();
+    frame.next_mut()[H0_COL_IDX] = Felt::new(depth + 1 - 16).inverse_unwrap_zero();
     frame.next_mut()[CLK_COL_IDX] = Felt::new(9);
 
     let result = get_constraint_evaluation(frame);
@@ -78,7 +78,7 @@ fn test_stack_overflow_constraints() {
 
     let depth = 16 + rand_value::<u32>() as u64;
     let b1 = rand_value::<u64>();
-    let h1 = Felt::new(depth - 16).inverse();
+    let h1 = Felt::new(depth - 16).inverse_unwrap_zero();
     let mut frame = generate_evaluation_frame(Operation::Noop.op_code().into());
 
     // Set the output.
@@ -113,12 +113,12 @@ fn test_stack_depth_air() {
     frame.current_mut()[DECODER_TRACE_OFFSET + IS_CALL_FLAG_COL_IDX] =
         Felt::new(rand_value::<u32>() as u64);
     frame.current_mut()[B1_COL_IDX] = Felt::new(12);
-    frame.current_mut()[H0_COL_IDX] = Felt::new(depth - 16).inverse();
+    frame.current_mut()[H0_COL_IDX] = Felt::new(depth - 16).inverse_unwrap_zero();
 
     frame.next_mut()[CLK_COL_IDX] = ONE;
     frame.next_mut()[B0_COL_IDX] = Felt::new(depth - 1);
     frame.next_mut()[B1_COL_IDX] = Felt::new(12);
-    frame.next_mut()[H0_COL_IDX] = Felt::new(depth - 1 - 16).inverse();
+    frame.next_mut()[H0_COL_IDX] = Felt::new(depth - 1 - 16).inverse_unwrap_zero();
 
     let expected = [ZERO; NUM_CONSTRAINTS];
     let result = get_constraint_evaluation(frame);

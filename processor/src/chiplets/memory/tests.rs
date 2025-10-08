@@ -592,7 +592,7 @@ fn build_trace_row(
     let (hi, lo) = super::split_element_u32_into_u16(delta);
     row[D0_COL_IDX] = lo;
     row[D1_COL_IDX] = hi;
-    row[D_INV_COL_IDX] = delta.inverse();
+    row[D_INV_COL_IDX] = delta.inverse_unwrap_zero();
 
     if row[WORD_COL_IDX] == prev_row[WORD_COL_IDX] && row[CTX_COL_IDX] == prev_row[CTX_COL_IDX] {
         row[FLAG_SAME_CONTEXT_AND_WORD] = ONE;

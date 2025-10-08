@@ -256,7 +256,10 @@ impl AceHints {
         }
 
         // invert the accumulated product
-        acc = acc.inverse();
+        acc = match acc.try_inverse() {
+            Some(p) => p,
+            None => E::ZERO,
+        };
 
         for i in (0..total_values.len()).rev() {
             total_inv_values[i] *= acc;

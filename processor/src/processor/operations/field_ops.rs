@@ -44,7 +44,7 @@ pub(super) fn op_inv<P: Processor>(
     if (*top) == ZERO {
         return Err(ExecutionError::divide_by_zero(processor.system().clk(), err_ctx));
     }
-    *top = top.inverse();
+    *top = top.inverse_unwrap_zero();
     Ok(())
 }
 
