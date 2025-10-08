@@ -23,8 +23,7 @@ Contributions should:
 - Include clear reasoning for the change
 - Be linked to an issue the author has been assigned to
 - Be testable / reviewable without unnecessary overhead
-- Pass all CI tests, namely `make test`, `make build-no-std`, and `make lint`
-- Come from accounts with a track record of genuine engagement
+- Pass all CI tests
 
 **We reserve the right to close PRs at our discretion, or batch trivial valid fixes into internal commits.**
 
