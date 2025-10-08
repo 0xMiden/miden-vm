@@ -31,8 +31,10 @@ export.find_word
 
     if.true
         # assert `start_ptr <= maybe_value_ptr < end_ptr` (15 cycles)
-        dup dup.6 u32assert2 u32gte assert.err="lowerbound_array invariant: maybe_value_ptr < start_ptr"
-        dup dup.7 u32assert2 u32lt assert.err="lowerbound_array invariant: maybe_value_ptr >= end_ptr"
+        dup dup.6 u32assert2.err="maybe_value_ptr is not u32"
+        u32gte assert.err="lowerbound_array invariant: maybe_value_ptr < start_ptr"
+        dup dup.7 u32assert2.err="maybe_value_ptr is not u32"
+        u32lt assert.err="lowerbound_array invariant: maybe_value_ptr >= end_ptr"
         #=> [maybe_value_ptr, VALUE, start_ptr, end_ptr]
 
         # dereference maybe_value_ptr (8 cycles)
@@ -142,6 +144,22 @@ end
 
 # ===== KEY-VALUE UTILITIES ============================================================================
 
+#! Inputs: [KEY, start_ptr, end_ptr]
+#! Output: [is_key_found, key_ptr, start_ptr, end_ptr]
+export.find_key_value
+    push.0
+    # => [use_half_key = 0, KEY, start_ptr, end_ptr]
+
+    movdn.6
+    # => [KEY, start_ptr, end_ptr, use_half_key]
+
+    exec.find_key_value_partial
+    # => [is_key_found, key_ptr, start_ptr, end_ptr]
+end
+
+#! TODO: Update cycle counts.
+#! TODO: Avoid local memory.
+#!
 #! Finds a key in a sorted array of (key, value) word tuples.
 #!
 #! This function will crash if the following conditions aren't met:
@@ -151,7 +169,7 @@ end
 #!       `(end_ptr - start_ptr)` must be divisible by 8
 #! - `start_ptr <= end_ptr`
 #!
-#! Input:  [KEY, start_ptr, end_ptr]
+#! Input:  [KEY, start_ptr, end_ptr, use_half_key]
 #! Output: [is_key_found, key_ptr, start_ptr, end_ptr]
 #!
 #! Cycles:
@@ -160,16 +178,24 @@ end
 #!   Key doesn't exist and is smaller than all stored keys: 151 cycles
 #!   Key doesn't exist and is larger than all stored keys: 149 cycles
 #!   Key doesn't exist: 298 cycles
-export.find_key_value
+export.find_key_value_partial.1
     # Call the non-deterministic lowerbound advisor (5 cycles)
     emit.LOWERBOUND_KEY_VALUE_EVENT
+    # => [KEY, start_ptr, end_ptr, use_half_key]
+
+    # store use_half_key for later
+    movup.6 loc_store.0
+    # => [KEY, start_ptr, end_ptr]
+
     adv_push.2
     #=> [was_key_found, maybe_key_ptr, KEY, start_ptr, end_ptr]
 
     if.true
-        # assert `start_ptr <= maybe_value_ptr < end_ptr` (15 cycles)
-        dup dup.6 u32assert2 u32gte assert.err="lowerbound_key_value invariant: maybe_key_ptr < start_ptr"
-        dup dup.7 u32assert2 u32lt assert.err="lowerbound_key_value invariant: maybe_key_ptr >= end_ptr"
+        # assert `start_ptr <= maybe_key_ptr < end_ptr` (15 cycles)
+        dup dup.6 u32assert2.err="maybe_key_ptr is not u32"
+        u32gte assert.err="lowerbound_key_value invariant: maybe_key_ptr < start_ptr"
+        dup dup.7 u32assert2.err="maybe_key_ptr is not u32"
+        u32lt assert.err="lowerbound_key_value invariant: maybe_key_ptr >= end_ptr"
         #=> [maybe_key_ptr, KEY, start_ptr, end_ptr]
 
         # make sure maybe_key_ptr is pointing to a key, not value (10 cycles)
@@ -177,10 +203,13 @@ export.find_key_value
         #=> [maybe_key_ptr, KEY, start_ptr, end_ptr]
 
         # dereference maybe_key_ptr (8 cycles)
-        dup movdn.5 padw movup.4 mem_loadw
+        dup movdn.5
+        #=> [maybe_key_ptr, KEY, maybe_key_ptr, start_ptr, end_ptr]
+
+        loc_load.0 exec.load_key
         #=> [MAYBE_KEY, KEY, maybe_key_ptr, start_ptr, end_ptr]
 
-        # check if it matches the requested VALUE (15 cycles)
+        # check if it matches the requested KEY (15 cycles)
         exec.word::eq
         dup assert.err="lowerbound_key_value invariant: key_ptr not pointing to KEY"
         #=> [is_key_found, maybe_key_ptr, start_ptr, end_ptr]
@@ -208,11 +237,11 @@ export.find_key_value
                 # assert `the key at start_ptr > KEY`
                 #=> [maybe_key_ptr = start_ptr, KEY, start_ptr, end_ptr]
 
-                movdn.4
-                #=> [KEY, maybe_key_ptr, start_ptr, end_ptr]
-                
+                dup movdn.5
+                #=> [maybe_key_ptr, KEY, maybe_key_ptr, start_ptr, end_ptr]
+
                 # dereference maybe_key_ptr (7 cycles)
-                dup.4 padw movup.4 mem_loadw
+                loc_load.0 exec.load_key
                 #=> [FIRST_KEY, KEY, maybe_key_ptr = start_ptr, start_ptr, end_ptr]
 
                 # there was no match, the first map element must be larger than KEY
@@ -233,7 +262,10 @@ export.find_key_value
                 #=> [maybe_key_ptr = end_ptr, KEY, start_ptr, end_ptr]
 
                 # fetch the last key in the array (10 cycles)
-                dup movdn.5 sub.8 padw movup.4 mem_loadw
+                dup movdn.5 sub.8
+                #=> [maybe_key_ptr-8, KEY, maybe_key_ptr, start_ptr, end_ptr]
+
+                loc_load.0 exec.load_key
                 #=> [LAST_KEY, KEY, maybe_key_ptr = end_ptr, start_ptr, end_ptr]
 
                 # there was no match, the last map element must be smaller than KEY
@@ -252,22 +284,27 @@ export.find_key_value
                 #=> [maybe_key_ptr, KEY, start_ptr, end_ptr]
 
                 # make sure maybe_key_ptr is pointing to a key, not value (10 cycles)
-                dup dup.6 sub u32assert2 u32mod.8 assertz.err="lowerbound_key_value invariant: key_ptr must be double-word aligned with start_ptr"
+                dup dup.6 sub u32assert2.err="maybe_key_ptr is not u32"
+                u32mod.8 assertz.err="lowerbound_key_value invariant: key_ptr must be double-word aligned with start_ptr"
 
                 # Duplicate KEY word (5 cycles)
                 movdn.4 dupw
                 #=> [KEY, KEY, maybe_key_ptr, start_ptr, end_ptr]
 
                 # dereference maybe_key_ptr (8 cycles)
-                padw dup.12 mem_loadw
+                dup.8 loc_load.0 exec.load_key
                 #=> [MAYBE_KEY, KEY, KEY, maybe_key_ptr, start_ptr, end_ptr]
-                
+
                 # there was no match, `*maybe_key_ptr` must be larger than KEY (123 cycles)
                 exec.word::lt
                 assert.err="lowerbound_key_value invariant: MAYBE_KEY not greater than KEY"
+                #=> [KEY, maybe_key_ptr, start_ptr, end_ptr]
 
                 # dereference `maybe_key_ptr-8` (previous key) (11 cycles)
-                padw dup.8 sub.8 mem_loadw
+                dup.4 sub.8
+                #=> [maybe_key_ptr-8, KEY, maybe_key_ptr, start_ptr, end_ptr]
+
+                loc_load.0 exec.load_key
                 #=> [MAYBE_KEY_PREV, KEY, maybe_key_ptr, start_ptr, end_ptr]
                 
                 # there was no match, `*(maybe_key_ptr-8)` must be smaller than KEY (119 cycles)
@@ -280,4 +317,32 @@ export.find_key_value
             end
         end
     end
+end
+
+#! Inputs:  [use_half_key, key_ptr]
+#! Outputs: [KEY]
+proc.load_key
+    swap
+    # => [key_ptr, use_half_key]
+
+    padw movup.4 mem_loadw
+    # => [FULL_KEY, use_half_key]
+
+    dupw
+    # => [FULL_KEY, FULL_KEY, use_half_key]
+
+    push.0 swap.4 drop
+    # => [[key3, key2, key1, 0], FULL_KEY, use_half_key]
+
+    push.0 swap.3 drop
+    # => [[key3, key2, 0, 0], FULL_KEY, use_half_key]
+    # => [HALF_KEY, FULL_KEY, use_half_key]
+
+    movup.8
+    # => [use_half_key, HALF_KEY, FULL_KEY]
+
+    # If use_half_key HALF_KEY remains.
+    # If !use_half_key FULL_KEY remains.
+    cdropw
+    # => [KEY]
 end

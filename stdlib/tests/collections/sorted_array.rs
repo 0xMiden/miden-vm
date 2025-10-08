@@ -129,7 +129,7 @@ fn test_sorted_key_value_array_find_key() {
         "
         );
 
-        let program = build_test!(source, &[]);
+        let program = build_debug_test!(source, &[]);
         println!("testing {key}");
         program.expect_stack(&[was_key_found, key_ptr, 100, 124, 0]);
     }
