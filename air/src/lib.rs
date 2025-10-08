@@ -31,7 +31,6 @@ mod options;
 mod proof;
 pub use proof::{Proof, Commitments, OpenedValues};
 
-mod air_builder;
 
 mod utils;
 // RE-EXPORTS
