@@ -108,7 +108,7 @@ fn read_witness(process: &ProcessState, ptr: u64, len_bytes: u64) -> Option<Vec<
 /// by recomputing the hash from the provided witness data and generating the precompile
 /// commitment.
 pub fn keccak_verifier(input_u8: &[u8]) -> Result<PrecompileCommitment, PrecompileError> {
-    let preimage = KeccakPreimage(input_u8.to_vec());
+    let preimage = KeccakPreimage::new(input_u8.to_vec());
     Ok(preimage.precompile_commitment())
 }
 
@@ -156,9 +156,19 @@ impl KeccakFeltDigest {
 /// - Generating precompile commitments for verification
 /// - Handling the data packing format used by the VM
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct KeccakPreimage(pub Vec<u8>);
+pub struct KeccakPreimage(Vec<u8>);
 
 impl KeccakPreimage {
+    /// Creates a new `KeccakPreimage` from a vector of bytes.
+    pub fn new(bytes: Vec<u8>) -> Self {
+        Self(bytes)
+    }
+
+    /// Consumes the preimage and returns the inner byte vector.
+    pub fn into_inner(self) -> Vec<u8> {
+        self.0
+    }
+
     /// Converts field elements to bytes using the VM's u32 packing format.
     ///
     /// This method validates that:
@@ -221,7 +231,7 @@ impl KeccakPreimage {
     /// This method is the inverse of `from_felts()` and produces the same format
     /// expected by the Keccak256 event handlers.
     pub fn as_felts(&self) -> Vec<Felt> {
-        self.0
+        self.as_ref()
             .chunks(4)
             .map(|bytes| {
                 // Pack up to 4 bytes into a u32 in little-endian format
@@ -247,7 +257,7 @@ impl KeccakPreimage {
     /// in little-endian byte order. This matches the format expected by the VM
     /// and can be directly used on the operand stack.
     pub fn digest(&self) -> KeccakFeltDigest {
-        let hash_u8 = Keccak256::hash(&self.0);
+        let hash_u8 = Keccak256::hash(self.as_ref());
         KeccakFeltDigest::from_bytes(&hash_u8)
     }
 
@@ -270,7 +280,7 @@ impl KeccakPreimage {
     fn precompile_tag(&self) -> Word {
         [
             KECCAK_HASH_MEMORY_EVENT_ID.as_felt(),
-            Felt::new(self.0.len() as u64),
+            Felt::new(self.as_ref().len() as u64),
             ZERO,
             ZERO,
         ]
@@ -280,7 +290,19 @@ impl KeccakPreimage {
 
 impl From<KeccakPreimage> for PrecompileRequest {
     fn from(preimage: KeccakPreimage) -> Self {
-        PrecompileRequest::new(KECCAK_HASH_MEMORY_EVENT_ID, preimage.0)
+        PrecompileRequest::new(KECCAK_HASH_MEMORY_EVENT_ID, preimage.into_inner())
+    }
+}
+
+impl AsRef<[u8]> for KeccakPreimage {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl From<Vec<u8>> for KeccakPreimage {
+    fn from(bytes: Vec<u8>) -> Self {
+        Self::new(bytes)
     }
 }
 
@@ -355,14 +377,14 @@ mod tests {
 
     #[test]
     fn test_keccak_preimage_empty() {
-        let preimage = KeccakPreimage(vec![]);
+        let preimage = KeccakPreimage::new(vec![]);
 
         // Empty input should produce empty felt vector
         assert_eq!(preimage.as_felts(), vec![]);
 
         // Test round-trip conversion
         let recovered = KeccakPreimage::from_felts(&[], 0).unwrap();
-        assert_eq!(recovered.0, vec![]);
+        assert_eq!(recovered.as_ref(), &[]);
 
         // An empty preimage yields the empty word
         assert_eq!(preimage.input_commitment(), Word::empty())
@@ -371,7 +393,7 @@ mod tests {
     #[test]
     fn test_keccak_preimage_single_byte() {
         let input = vec![0x42u8];
-        let preimage = KeccakPreimage(input.clone());
+        let preimage = KeccakPreimage::new(input.clone());
 
         // Should pack into single felt with zero padding
         let felts = preimage.as_felts();
@@ -380,13 +402,13 @@ mod tests {
 
         // Test round-trip conversion
         let recovered = KeccakPreimage::from_felts(&felts, 1).unwrap();
-        assert_eq!(recovered.0, input);
+        assert_eq!(recovered.as_ref(), input.as_slice());
     }
 
     #[test]
     fn test_keccak_preimage_four_bytes() {
         let input = vec![0x01, 0x02, 0x03, 0x04];
-        let preimage = KeccakPreimage(input.clone());
+        let preimage = KeccakPreimage::new(input.clone());
 
         // Should pack into single u32 in little-endian order
         let felts = preimage.as_felts();
@@ -395,13 +417,13 @@ mod tests {
 
         // Test round-trip conversion
         let recovered = KeccakPreimage::from_felts(&felts, 4).unwrap();
-        assert_eq!(recovered.0, input);
+        assert_eq!(recovered.as_ref(), input.as_slice());
     }
 
     #[test]
     fn test_keccak_preimage_five_bytes() {
         let input = vec![0x01, 0x02, 0x03, 0x04, 0x05];
-        let preimage = KeccakPreimage(input.clone());
+        let preimage = KeccakPreimage::new(input.clone());
 
         // Should pack into two felts: first with 4 bytes, second with 1 byte + padding
         let felts = preimage.as_felts();
@@ -411,13 +433,13 @@ mod tests {
 
         // Test round-trip conversion
         let recovered = KeccakPreimage::from_felts(&felts, 5).unwrap();
-        assert_eq!(recovered.0, input);
+        assert_eq!(recovered.as_ref(), input.as_slice());
     }
 
     #[test]
     fn test_keccak_preimage_32_bytes() {
         let input: Vec<u8> = (1..=32).collect();
-        let preimage = KeccakPreimage(input.clone());
+        let preimage = KeccakPreimage::new(input.clone());
 
         // Should pack into 8 felts (32 bytes / 4 bytes per felt)
         let felts = preimage.as_felts();
@@ -429,7 +451,7 @@ mod tests {
 
         // Test round-trip conversion
         let recovered = KeccakPreimage::from_felts(&felts, 32).unwrap();
-        assert_eq!(recovered.0, input);
+        assert_eq!(recovered.as_ref(), input.as_slice());
     }
 
     #[test]
@@ -438,12 +460,12 @@ mod tests {
         for size in 4..=7 {
             // Create input data of the specified size
             let input: Vec<u8> = (0..size).map(|i| (i + 1) as u8).collect();
-            let preimage = KeccakPreimage(input.clone());
+            let preimage = KeccakPreimage::new(input.clone());
             let felts = preimage.as_felts();
 
             // Test 1: Valid round-trip with proper zero padding
             let recovered = KeccakPreimage::from_felts(&felts, size).unwrap();
-            assert_eq!(recovered.0, input, "Round-trip failed for size {}", size);
+            assert_eq!(recovered.as_ref(), input.as_slice(), "Round-trip failed for size {}", size);
 
             // Test 2: Invalid padding - modify the felt to have non-zero padding bytes
             // Only test padding corruption for sizes that don't fill the complete felt (sizes 4-7
@@ -491,7 +513,7 @@ mod tests {
     fn test_keccak_preimage_digest_consistency() {
         // Test that digest computation is consistent with direct Keccak256
         let input = b"hello world";
-        let preimage = KeccakPreimage(input.to_vec());
+        let preimage = KeccakPreimage::new(input.to_vec());
 
         // Compute digest using preimage
         let preimage_digest = preimage.digest();
@@ -506,7 +528,7 @@ mod tests {
     #[test]
     fn test_keccak_preimage_commitments() {
         let input = b"test input for commitments";
-        let preimage = KeccakPreimage(input.to_vec());
+        let preimage = KeccakPreimage::new(input.to_vec());
 
         // Test input commitment
         let felts = preimage.as_felts();
@@ -533,20 +555,20 @@ mod tests {
 
         for size in test_sizes {
             let input: Vec<u8> = (0..size).map(|i| (i % 256) as u8).collect();
-            let preimage = KeccakPreimage(input.clone());
+            let preimage = KeccakPreimage::new(input.clone());
 
             // Convert to felts and back
             let felts = preimage.as_felts();
             let recovered = KeccakPreimage::from_felts(&felts, size).unwrap();
 
-            assert_eq!(recovered.0, input, "Round-trip failed for size {}", size);
+            assert_eq!(recovered.as_ref(), input.as_slice(), "Round-trip failed for size {}", size);
         }
     }
 
     #[test]
     fn test_keccak_verifier() {
         let input = b"test verifier input";
-        let preimage = KeccakPreimage(input.to_vec());
+        let preimage = KeccakPreimage::new(input.to_vec());
         let expected_commitment = preimage.precompile_commitment();
 
         let commitment = keccak_verifier(input).unwrap();
