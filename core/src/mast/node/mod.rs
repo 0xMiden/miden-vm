@@ -32,6 +32,9 @@ mod loop_node;
 pub use basic_block_node::arbitrary;
 pub use loop_node::{LoopNode, LoopNodeBuilder};
 
+mod mast_forest_contributor;
+pub use mast_forest_contributor::MastForestContributor;
+
 use super::DecoratorId;
 use crate::{
     AssemblyOp, Decorator,

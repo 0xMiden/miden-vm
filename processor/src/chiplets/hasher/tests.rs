@@ -7,7 +7,10 @@ use miden_core::{
     ONE, Operation, ZERO,
     chiplets::hasher,
     crypto::merkle::{MerkleTree, NodeIndex},
-    mast::{DecoratorId, MastForest, MastNode, MastNodeExt},
+    mast::{
+        BasicBlockNodeBuilder, DecoratorId, JoinNodeBuilder, LoopNodeBuilder, MastForest,
+        MastForestContributor, MastNode, MastNodeExt, SplitNodeBuilder,
+    },
 };
 use miden_utils_testing::rand::rand_array;
 
@@ -249,19 +252,29 @@ fn hash_memoization_control_blocks() {
 
     let mut mast_forest = MastForest::new();
 
-    let t_branch_id = mast_forest.add_block(vec![Operation::Push(ZERO)], Vec::new()).unwrap();
+    let t_branch_id = BasicBlockNodeBuilder::new(vec![Operation::Push(ZERO)], Vec::new())
+        .add_to_forest(&mut mast_forest)
+        .unwrap();
     let t_branch = mast_forest[t_branch_id].clone();
 
-    let f_branch_id = mast_forest.add_block(vec![Operation::Push(ONE)], Vec::new()).unwrap();
+    let f_branch_id = BasicBlockNodeBuilder::new(vec![Operation::Push(ONE)], Vec::new())
+        .add_to_forest(&mut mast_forest)
+        .unwrap();
     let f_branch = mast_forest[f_branch_id].clone();
 
-    let split1_id = mast_forest.add_split(t_branch_id, f_branch_id).unwrap();
+    let split1_id = SplitNodeBuilder::new([t_branch_id, f_branch_id])
+        .add_to_forest(&mut mast_forest)
+        .unwrap();
     let split1 = mast_forest[split1_id].clone();
 
-    let split2_id = mast_forest.add_split(t_branch_id, f_branch_id).unwrap();
+    let split2_id = SplitNodeBuilder::new([t_branch_id, f_branch_id])
+        .add_to_forest(&mut mast_forest)
+        .unwrap();
     let split2 = mast_forest[split2_id].clone();
 
-    let _join_node_id = mast_forest.add_join(split1_id, split2_id).unwrap();
+    let _join_node_id = JoinNodeBuilder::new([split1_id, split2_id])
+        .add_to_forest(&mut mast_forest)
+        .unwrap();
     let join_node = mast_forest[_join_node_id].clone();
 
     let mut hasher = Hasher::default();
@@ -420,23 +433,32 @@ fn hash_memoization_basic_blocks_check(
 
     let mut mast_forest = MastForest::new();
 
-    let basic_block_1_id = mast_forest.add_block(operations.clone(), decorators.clone()).unwrap();
+    let basic_block_1_id = BasicBlockNodeBuilder::new(operations.clone(), decorators.clone())
+        .add_to_forest(&mut mast_forest)
+        .unwrap();
     let basic_block_1 = mast_forest[basic_block_1_id].clone();
 
-    let loop_body_id = mast_forest
-        .add_block(vec![Operation::Pad, Operation::Eq, Operation::Not], Vec::new())
-        .unwrap();
+    let loop_body_id =
+        BasicBlockNodeBuilder::new(vec![Operation::Pad, Operation::Eq, Operation::Not], Vec::new())
+            .add_to_forest(&mut mast_forest)
+            .unwrap();
 
-    let loop_block_id = mast_forest.add_loop(loop_body_id).unwrap();
+    let loop_block_id = LoopNodeBuilder::new(loop_body_id).add_to_forest(&mut mast_forest).unwrap();
     let loop_block = mast_forest[loop_block_id].clone();
 
-    let join2_block_id = mast_forest.add_join(basic_block_1_id, loop_block_id).unwrap();
+    let join2_block_id = JoinNodeBuilder::new([basic_block_1_id, loop_block_id])
+        .add_to_forest(&mut mast_forest)
+        .unwrap();
     let join2_block = mast_forest[join2_block_id].clone();
 
-    let basic_block_2_id = mast_forest.add_block(operations.clone(), decorators.clone()).unwrap();
+    let basic_block_2_id = BasicBlockNodeBuilder::new(operations.clone(), decorators.clone())
+        .add_to_forest(&mut mast_forest)
+        .unwrap();
     let basic_block_2 = mast_forest[basic_block_2_id].clone();
 
-    let join1_block_id = mast_forest.add_join(join2_block_id, basic_block_2_id).unwrap();
+    let join1_block_id = JoinNodeBuilder::new([join2_block_id, basic_block_2_id])
+        .add_to_forest(&mut mast_forest)
+        .unwrap();
     let join1_block = mast_forest[join1_block_id].clone();
 
     let mut hasher = Hasher::default();

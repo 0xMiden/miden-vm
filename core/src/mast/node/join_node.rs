@@ -5,7 +5,7 @@ use miden_crypto::{Felt, Word};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::{MastNodeErrorContext, MastNodeExt};
+use super::{MastForestContributor, MastNodeErrorContext, MastNodeExt};
 use crate::{
     Idx, OPCODE_JOIN,
     chiplets::hasher,
@@ -287,6 +287,7 @@ impl proptest::prelude::Arbitrary for JoinNode {
 
 // ------------------------------------------------------------------------------------------------
 /// Builder for creating [`JoinNode`] instances with decorators.
+#[derive(Debug)]
 pub struct JoinNodeBuilder {
     children: [MastNodeId; 2],
     before_enter: Vec<DecoratorId>,
@@ -336,5 +337,14 @@ impl JoinNodeBuilder {
             before_enter: self.before_enter,
             after_exit: self.after_exit,
         })
+    }
+}
+
+impl MastForestContributor for JoinNodeBuilder {
+    fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
+        forest
+            .nodes
+            .push(self.build(forest)?.into())
+            .map_err(|_| MastForestError::TooManyNodes)
     }
 }

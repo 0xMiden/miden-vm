@@ -9,8 +9,10 @@ use miden_formatting::{
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::{MastNodeErrorContext, MastNodeExt};
-use crate::mast::{DecoratedOpLink, DecoratorId, MastForest, MastNodeId, Remapping};
+use super::{MastForestContributor, MastNodeErrorContext, MastNodeExt};
+use crate::mast::{
+    DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId, Remapping,
+};
 
 // EXTERNAL NODE
 // ================================================================================================
@@ -232,6 +234,7 @@ impl proptest::prelude::Arbitrary for ExternalNode {
 
 // ------------------------------------------------------------------------------------------------
 /// Builder for creating [`ExternalNode`] instances with decorators.
+#[derive(Debug)]
 pub struct ExternalNodeBuilder {
     digest: Word,
     before_enter: Vec<DecoratorId>,
@@ -267,5 +270,14 @@ impl ExternalNodeBuilder {
             before_enter: self.before_enter,
             after_exit: self.after_exit,
         }
+    }
+}
+
+impl MastForestContributor for ExternalNodeBuilder {
+    fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
+        forest
+            .nodes
+            .push(self.build().into())
+            .map_err(|_| MastForestError::TooManyNodes)
     }
 }
