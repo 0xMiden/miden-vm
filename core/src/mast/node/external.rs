@@ -11,7 +11,8 @@ use serde::{Deserialize, Serialize};
 
 use super::{MastForestContributor, MastNodeErrorContext, MastNodeExt};
 use crate::mast::{
-    DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId, Remapping,
+    DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId,
+    Remapping,
 };
 
 // EXTERNAL NODE
@@ -204,6 +205,14 @@ impl MastNodeExt for ExternalNode {
 
     fn domain(&self) -> Felt {
         panic!("Can't fetch domain for an `External` node.")
+    }
+
+    type Builder = ExternalNodeBuilder;
+
+    fn to_builder(self) -> Self::Builder {
+        ExternalNodeBuilder::new(self.digest)
+            .with_before_enter(self.before_enter)
+            .with_after_exit(self.after_exit)
     }
 }
 

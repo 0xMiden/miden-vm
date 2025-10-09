@@ -10,7 +10,10 @@ use super::{MastForestContributor, MastNodeErrorContext, MastNodeExt};
 use crate::{
     Idx, OPCODE_SPLIT,
     chiplets::hasher,
-    mast::{DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId, Remapping},
+    mast::{
+        DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId,
+        Remapping,
+    },
 };
 
 // SPLIT NODE
@@ -250,6 +253,14 @@ impl MastNodeExt for SplitNode {
 
     fn domain(&self) -> Felt {
         Self::DOMAIN
+    }
+
+    type Builder = SplitNodeBuilder;
+
+    fn to_builder(self) -> Self::Builder {
+        SplitNodeBuilder::new(self.branches)
+            .with_before_enter(self.before_enter)
+            .with_after_exit(self.after_exit)
     }
 }
 

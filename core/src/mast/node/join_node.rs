@@ -9,7 +9,10 @@ use super::{MastForestContributor, MastNodeErrorContext, MastNodeExt};
 use crate::{
     Idx, OPCODE_JOIN,
     chiplets::hasher,
-    mast::{DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId, Remapping},
+    mast::{
+        DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId,
+        Remapping,
+    },
     prettier::PrettyPrint,
 };
 
@@ -255,6 +258,14 @@ impl MastNodeExt for JoinNode {
 
     fn domain(&self) -> Felt {
         Self::DOMAIN
+    }
+
+    type Builder = JoinNodeBuilder;
+
+    fn to_builder(self) -> Self::Builder {
+        JoinNodeBuilder::new(self.children)
+            .with_before_enter(self.before_enter)
+            .with_after_exit(self.after_exit)
     }
 }
 

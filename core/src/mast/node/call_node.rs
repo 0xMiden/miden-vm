@@ -13,7 +13,10 @@ use super::{MastForestContributor, MastNodeErrorContext, MastNodeExt};
 use crate::{
     Idx, OPCODE_CALL, OPCODE_SYSCALL,
     chiplets::hasher,
-    mast::{DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId, Remapping},
+    mast::{
+        DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId,
+        Remapping,
+    },
 };
 
 // CALL NODE
@@ -327,6 +330,17 @@ impl MastNodeExt for CallNode {
 
     fn domain(&self) -> Felt {
         self.domain()
+    }
+
+    type Builder = CallNodeBuilder;
+
+    fn to_builder(self) -> Self::Builder {
+        let builder = if self.is_syscall {
+            CallNodeBuilder::new_syscall(self.callee)
+        } else {
+            CallNodeBuilder::new(self.callee)
+        };
+        builder.with_before_enter(self.before_enter).with_after_exit(self.after_exit)
     }
 }
 

@@ -9,7 +9,10 @@ use serde::{Deserialize, Serialize};
 use super::{MastForestContributor, MastNodeErrorContext, MastNodeExt};
 use crate::{
     OPCODE_DYN, OPCODE_DYNCALL,
-    mast::{DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId, Remapping},
+    mast::{
+        DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId,
+        Remapping,
+    },
 };
 
 // DYN NODE
@@ -249,6 +252,18 @@ impl MastNodeExt for DynNode {
 
     fn domain(&self) -> Felt {
         self.domain()
+    }
+
+    type Builder = DynNodeBuilder;
+
+    fn to_builder(self) -> Self::Builder {
+        if self.is_dyncall {
+            DynNodeBuilder::new_dyncall()
+        } else {
+            DynNodeBuilder::new_dyn()
+        }
+        .with_before_enter(self.before_enter)
+        .with_after_exit(self.after_exit)
     }
 }
 

@@ -6,7 +6,6 @@ pub use basic_block_node::{
     BATCH_SIZE as OP_BATCH_SIZE, BasicBlockNode, BasicBlockNodeBuilder, DecoratorOpLinkIterator,
     GROUP_SIZE as OP_GROUP_SIZE, OpBatch, OperationOrDecorator,
 };
-use enum_dispatch::enum_dispatch;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -41,7 +40,6 @@ use crate::{
     mast::{MastForest, MastNodeId, Remapping},
 };
 
-#[enum_dispatch]
 pub trait MastNodeExt {
     /// Returns a commitment/hash of the node.
     fn digest(&self) -> Word;
@@ -83,12 +81,16 @@ pub trait MastNodeExt {
 
     /// Returns the domain of this node.
     fn domain(&self) -> Felt;
+
+    /// Converts this node into its corresponding builder, reusing allocated data where possible.
+    type Builder: MastForestContributor;
+
+    fn to_builder(self) -> Self::Builder;
 }
 
 // MAST NODE
 // ================================================================================================
 
-#[enum_dispatch(MastNodeExt)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum MastNode {
@@ -205,6 +207,228 @@ impl MastNode {
             Self::External(external_node) => external_node,
             other => unwrap_failed(other, "external"),
         }
+    }
+}
+
+// Manual implementation of MastNodeExt for MastNode
+// TODO: This should be replaced with a proc-macro.
+// enum_dispatch doesn't support associated types yet : https://gitlab.com/antonok/enum_dispatch/-/issues/50
+// but there's no reason this can't be macro-generated at all.
+impl MastNodeExt for MastNode {
+    type Builder = MastNodeBuilder;
+
+    fn digest(&self) -> Word {
+        match self {
+            MastNode::Block(node) => node.digest(),
+            MastNode::Join(node) => node.digest(),
+            MastNode::Split(node) => node.digest(),
+            MastNode::Loop(node) => node.digest(),
+            MastNode::Call(node) => node.digest(),
+            MastNode::Dyn(node) => node.digest(),
+            MastNode::External(node) => node.digest(),
+        }
+    }
+
+    fn before_enter(&self) -> &[DecoratorId] {
+        match self {
+            MastNode::Block(node) => node.before_enter(),
+            MastNode::Join(node) => node.before_enter(),
+            MastNode::Split(node) => node.before_enter(),
+            MastNode::Loop(node) => node.before_enter(),
+            MastNode::Call(node) => node.before_enter(),
+            MastNode::Dyn(node) => node.before_enter(),
+            MastNode::External(node) => node.before_enter(),
+        }
+    }
+
+    fn after_exit(&self) -> &[DecoratorId] {
+        match self {
+            MastNode::Block(node) => node.after_exit(),
+            MastNode::Join(node) => node.after_exit(),
+            MastNode::Split(node) => node.after_exit(),
+            MastNode::Loop(node) => node.after_exit(),
+            MastNode::Call(node) => node.after_exit(),
+            MastNode::Dyn(node) => node.after_exit(),
+            MastNode::External(node) => node.after_exit(),
+        }
+    }
+
+    fn append_before_enter(&mut self, decorator_ids: &[DecoratorId]) {
+        match self {
+            MastNode::Block(node) => node.append_before_enter(decorator_ids),
+            MastNode::Join(node) => node.append_before_enter(decorator_ids),
+            MastNode::Split(node) => node.append_before_enter(decorator_ids),
+            MastNode::Loop(node) => node.append_before_enter(decorator_ids),
+            MastNode::Call(node) => node.append_before_enter(decorator_ids),
+            MastNode::Dyn(node) => node.append_before_enter(decorator_ids),
+            MastNode::External(node) => node.append_before_enter(decorator_ids),
+        }
+    }
+
+    fn append_after_exit(&mut self, decorator_ids: &[DecoratorId]) {
+        match self {
+            MastNode::Block(node) => node.append_after_exit(decorator_ids),
+            MastNode::Join(node) => node.append_after_exit(decorator_ids),
+            MastNode::Split(node) => node.append_after_exit(decorator_ids),
+            MastNode::Loop(node) => node.append_after_exit(decorator_ids),
+            MastNode::Call(node) => node.append_after_exit(decorator_ids),
+            MastNode::Dyn(node) => node.append_after_exit(decorator_ids),
+            MastNode::External(node) => node.append_after_exit(decorator_ids),
+        }
+    }
+
+    fn remove_decorators(&mut self) {
+        match self {
+            MastNode::Block(node) => node.remove_decorators(),
+            MastNode::Join(node) => node.remove_decorators(),
+            MastNode::Split(node) => node.remove_decorators(),
+            MastNode::Loop(node) => node.remove_decorators(),
+            MastNode::Call(node) => node.remove_decorators(),
+            MastNode::Dyn(node) => node.remove_decorators(),
+            MastNode::External(node) => node.remove_decorators(),
+        }
+    }
+
+    fn to_display<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn fmt::Display + 'a> {
+        match self {
+            MastNode::Block(node) => Box::new(node.to_display(mast_forest)),
+            MastNode::Join(node) => Box::new(node.to_display(mast_forest)),
+            MastNode::Split(node) => Box::new(node.to_display(mast_forest)),
+            MastNode::Loop(node) => Box::new(node.to_display(mast_forest)),
+            MastNode::Call(node) => Box::new(node.to_display(mast_forest)),
+            MastNode::Dyn(node) => Box::new(node.to_display(mast_forest)),
+            MastNode::External(node) => Box::new(node.to_display(mast_forest)),
+        }
+    }
+
+    fn to_pretty_print<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn PrettyPrint + 'a> {
+        match self {
+            MastNode::Block(node) => Box::new(node.to_pretty_print(mast_forest)),
+            MastNode::Join(node) => Box::new(node.to_pretty_print(mast_forest)),
+            MastNode::Split(node) => Box::new(node.to_pretty_print(mast_forest)),
+            MastNode::Loop(node) => Box::new(node.to_pretty_print(mast_forest)),
+            MastNode::Call(node) => Box::new(node.to_pretty_print(mast_forest)),
+            MastNode::Dyn(node) => Box::new(node.to_pretty_print(mast_forest)),
+            MastNode::External(node) => Box::new(node.to_pretty_print(mast_forest)),
+        }
+    }
+
+    fn remap_children(&self, remapping: &Remapping) -> Self {
+        match self {
+            MastNode::Block(node) => MastNode::Block(node.remap_children(remapping)),
+            MastNode::Join(node) => MastNode::Join(node.remap_children(remapping)),
+            MastNode::Split(node) => MastNode::Split(node.remap_children(remapping)),
+            MastNode::Loop(node) => MastNode::Loop(node.remap_children(remapping)),
+            MastNode::Call(node) => MastNode::Call(node.remap_children(remapping)),
+            MastNode::Dyn(node) => MastNode::Dyn(node.remap_children(remapping)),
+            MastNode::External(node) => MastNode::External(node.remap_children(remapping)),
+        }
+    }
+
+    fn has_children(&self) -> bool {
+        match self {
+            MastNode::Block(node) => node.has_children(),
+            MastNode::Join(node) => node.has_children(),
+            MastNode::Split(node) => node.has_children(),
+            MastNode::Loop(node) => node.has_children(),
+            MastNode::Call(node) => node.has_children(),
+            MastNode::Dyn(node) => node.has_children(),
+            MastNode::External(node) => node.has_children(),
+        }
+    }
+
+    fn append_children_to(&self, target: &mut Vec<MastNodeId>) {
+        match self {
+            MastNode::Block(node) => node.append_children_to(target),
+            MastNode::Join(node) => node.append_children_to(target),
+            MastNode::Split(node) => node.append_children_to(target),
+            MastNode::Loop(node) => node.append_children_to(target),
+            MastNode::Call(node) => node.append_children_to(target),
+            MastNode::Dyn(node) => node.append_children_to(target),
+            MastNode::External(node) => node.append_children_to(target),
+        }
+    }
+
+    fn for_each_child<F>(&self, f: F)
+    where
+        F: FnMut(MastNodeId),
+    {
+        match self {
+            MastNode::Block(node) => node.for_each_child(f),
+            MastNode::Join(node) => node.for_each_child(f),
+            MastNode::Split(node) => node.for_each_child(f),
+            MastNode::Loop(node) => node.for_each_child(f),
+            MastNode::Call(node) => node.for_each_child(f),
+            MastNode::Dyn(node) => node.for_each_child(f),
+            MastNode::External(node) => node.for_each_child(f),
+        }
+    }
+
+    fn domain(&self) -> Felt {
+        match self {
+            MastNode::Block(node) => node.domain(),
+            MastNode::Join(node) => node.domain(),
+            MastNode::Split(node) => node.domain(),
+            MastNode::Loop(node) => node.domain(),
+            MastNode::Call(node) => node.domain(),
+            MastNode::Dyn(node) => node.domain(),
+            MastNode::External(node) => node.domain(),
+        }
+    }
+
+    fn to_builder(self) -> Self::Builder {
+        match self {
+            MastNode::Block(node) => MastNodeBuilder::BasicBlock(node.to_builder()),
+            MastNode::Join(node) => MastNodeBuilder::Join(node.to_builder()),
+            MastNode::Split(node) => MastNodeBuilder::Split(node.to_builder()),
+            MastNode::Loop(node) => MastNodeBuilder::Loop(node.to_builder()),
+            MastNode::Call(node) => MastNodeBuilder::Call(node.to_builder()),
+            MastNode::Dyn(node) => MastNodeBuilder::Dyn(node.to_builder()),
+            MastNode::External(node) => MastNodeBuilder::External(node.to_builder()),
+        }
+    }
+}
+
+// From implementations for converting individual node types to MastNode
+impl From<BasicBlockNode> for MastNode {
+    fn from(node: BasicBlockNode) -> Self {
+        MastNode::Block(node)
+    }
+}
+
+impl From<JoinNode> for MastNode {
+    fn from(node: JoinNode) -> Self {
+        MastNode::Join(node)
+    }
+}
+
+impl From<SplitNode> for MastNode {
+    fn from(node: SplitNode) -> Self {
+        MastNode::Split(node)
+    }
+}
+
+impl From<LoopNode> for MastNode {
+    fn from(node: LoopNode) -> Self {
+        MastNode::Loop(node)
+    }
+}
+
+impl From<CallNode> for MastNode {
+    fn from(node: CallNode) -> Self {
+        MastNode::Call(node)
+    }
+}
+
+impl From<DynNode> for MastNode {
+    fn from(node: DynNode) -> Self {
+        MastNode::Dyn(node)
+    }
+}
+
+impl From<ExternalNode> for MastNode {
+    fn from(node: ExternalNode) -> Self {
+        MastNode::External(node)
     }
 }
 

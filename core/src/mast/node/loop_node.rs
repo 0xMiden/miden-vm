@@ -10,7 +10,10 @@ use super::{MastForestContributor, MastNodeErrorContext, MastNodeExt};
 use crate::{
     Idx, OPCODE_LOOP,
     chiplets::hasher,
-    mast::{DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId, Remapping},
+    mast::{
+        DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId,
+        Remapping,
+    },
 };
 
 // LOOP NODE
@@ -235,6 +238,14 @@ impl MastNodeExt for LoopNode {
 
     fn domain(&self) -> Felt {
         Self::DOMAIN
+    }
+
+    type Builder = LoopNodeBuilder;
+
+    fn to_builder(self) -> Self::Builder {
+        LoopNodeBuilder::new(self.body)
+            .with_before_enter(self.before_enter)
+            .with_after_exit(self.after_exit)
     }
 }
 
