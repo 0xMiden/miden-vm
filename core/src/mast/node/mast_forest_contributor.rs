@@ -36,6 +36,24 @@ pub enum MastNodeBuilder {
     Split(SplitNodeBuilder),
 }
 
+impl MastNodeBuilder {
+    /// Build the node from this builder.
+    ///
+    /// For nodes that depend on a MastForest (Call, Join, Loop, Split), the forest is required.
+    /// For nodes that don't depend on a MastForest (BasicBlock, Dyn, External), the forest is ignored.
+    pub fn build(self, mast_forest: &MastForest) -> Result<crate::mast::MastNode, MastForestError> {
+        match self {
+            MastNodeBuilder::BasicBlock(builder) => Ok(builder.build()?.into()),
+            MastNodeBuilder::Call(builder) => Ok(builder.build(mast_forest)?.into()),
+            MastNodeBuilder::Dyn(builder) => Ok(builder.build().into()),
+            MastNodeBuilder::External(builder) => Ok(builder.build().into()),
+            MastNodeBuilder::Join(builder) => Ok(builder.build(mast_forest)?.into()),
+            MastNodeBuilder::Loop(builder) => Ok(builder.build(mast_forest)?.into()),
+            MastNodeBuilder::Split(builder) => Ok(builder.build(mast_forest)?.into()),
+        }
+    }
+}
+
 #[cfg(any(test, feature = "arbitrary"))]
 impl proptest::prelude::Arbitrary for MastNodeBuilder {
     type Parameters = ();
@@ -478,5 +496,255 @@ mod fingerprint_consistency_tests {
             assert_eq!(fingerprint_from_builder, fingerprint_from_node,
                 "ExternalNodeBuilder fingerprint should match node fingerprint");
         }
+    }
+}
+
+#[cfg(test)]
+mod round_trip_tests {
+    use crate::{
+        Decorator, Felt, Operation,
+        mast::{
+            BasicBlockNode, CallNode, DynNode, ExternalNode, JoinNode, LoopNode, MastForest,
+            MastForestError, MastNode, MastNodeExt, SplitNode,
+        },
+    };
+
+    /// Helper function to create a test forest with some nodes and decorators
+    fn create_test_forest() -> MastForest {
+        let mut forest = MastForest::new();
+
+        // Add some decorators
+        let trace_decorator = forest.add_decorator(Decorator::Trace(1)).unwrap();
+        let _ = forest.add_decorator(Decorator::Trace(2)).unwrap();
+
+        // Add a basic block node
+        let basic_block_node =
+            BasicBlockNode::new(vec![Operation::Add, Operation::Mul], vec![(0, trace_decorator)])
+                .unwrap();
+        let _basic_block_id = forest.add_node(MastNode::Block(basic_block_node)).unwrap();
+
+        forest
+    }
+
+    #[test]
+    fn test_basic_block_node_round_trip() -> Result<(), MastForestError> {
+        let mut forest = create_test_forest();
+        let decorator_id = forest.add_decorator(Decorator::Trace(42)).unwrap();
+
+        let original = BasicBlockNode::new(
+            vec![Operation::Add, Operation::Mul, Operation::Drop],
+            vec![(0, decorator_id), (2, decorator_id)],
+        )?;
+
+        let round_trip = original.clone().to_builder().build()?.into();
+
+        let round_trip_basic_block = match round_trip {
+            MastNode::Block(node) => node,
+            _ => panic!("Expected BasicBlockNode"),
+        };
+
+        assert_eq!(original, round_trip_basic_block);
+        Ok(())
+    }
+
+    #[test]
+    fn test_join_node_round_trip() -> Result<(), MastForestError> {
+        let mut forest = create_test_forest();
+
+        // Add two basic block nodes to use as children
+        let child1 = BasicBlockNode::new(vec![Operation::Add], vec![])?;
+        let child2 = BasicBlockNode::new(vec![Operation::Mul], vec![])?;
+        let child1_id = forest.add_node(MastNode::Block(child1))?;
+        let child2_id = forest.add_node(MastNode::Block(child2))?;
+
+        let decorator_id = forest.add_decorator(Decorator::Trace(99)).unwrap();
+
+        let original = JoinNode::new([child1_id, child2_id], &forest)?;
+
+        // Add decorators
+        let mut original_with_decorators = original.clone();
+        original_with_decorators.append_before_enter(&[decorator_id]);
+        original_with_decorators.append_after_exit(&[decorator_id]);
+
+        let round_trip = original_with_decorators.clone().to_builder().build(&forest)?.into();
+
+        let round_trip_join = match round_trip {
+            MastNode::Join(node) => node,
+            _ => panic!("Expected JoinNode"),
+        };
+
+        assert_eq!(original_with_decorators, round_trip_join);
+        Ok(())
+    }
+
+    #[test]
+    fn test_split_node_round_trip() -> Result<(), MastForestError> {
+        let mut forest = create_test_forest();
+
+        // Add two basic block nodes to use as branches
+        let branch1 = BasicBlockNode::new(vec![Operation::Add], vec![])?;
+        let branch2 = BasicBlockNode::new(vec![Operation::Mul], vec![])?;
+        let branch1_id = forest.add_node(MastNode::Block(branch1))?;
+        let branch2_id = forest.add_node(MastNode::Block(branch2))?;
+
+        let original = SplitNode::new([branch1_id, branch2_id], &forest)?;
+
+        let round_trip = original.clone().to_builder().build(&forest)?.into();
+
+        let round_trip_split = match round_trip {
+            MastNode::Split(node) => node,
+            _ => panic!("Expected SplitNode"),
+        };
+
+        assert_eq!(original, round_trip_split);
+        Ok(())
+    }
+
+    #[test]
+    fn test_loop_node_round_trip() -> Result<(), MastForestError> {
+        let mut forest = create_test_forest();
+
+        // Add a basic block node to use as the loop body
+        let body = BasicBlockNode::new(vec![Operation::Add, Operation::Add], vec![])?;
+        let body_id = forest.add_node(MastNode::Block(body))?;
+
+        let original = LoopNode::new(body_id, &forest)?;
+
+        let round_trip = original.clone().to_builder().build(&forest)?.into();
+
+        let round_trip_loop = match round_trip {
+            MastNode::Loop(node) => node,
+            _ => panic!("Expected LoopNode"),
+        };
+
+        assert_eq!(original, round_trip_loop);
+        Ok(())
+    }
+
+    #[test]
+    fn test_call_node_round_trip() -> Result<(), MastForestError> {
+        let mut forest = create_test_forest();
+
+        // Add a basic block node to use as the callee
+        let callee = BasicBlockNode::new(vec![Operation::Push(Felt::new(42))], vec![])?;
+        let callee_id = forest.add_node(MastNode::Block(callee))?;
+
+        let original_call = CallNode::new(callee_id, &forest)?;
+        let original_syscall = CallNode::new_syscall(callee_id, &forest)?;
+
+        let round_trip_call = original_call.clone().to_builder().build(&forest)?.into();
+        let round_trip_syscall = original_syscall.clone().to_builder().build(&forest)?.into();
+
+        let round_trip_call_node = match round_trip_call {
+            MastNode::Call(node) => node,
+            _ => panic!("Expected CallNode"),
+        };
+
+        let round_trip_syscall_node = match round_trip_syscall {
+            MastNode::Call(node) => node,
+            _ => panic!("Expected CallNode"),
+        };
+
+        assert_eq!(original_call, round_trip_call_node);
+        assert_eq!(original_syscall, round_trip_syscall_node);
+        Ok(())
+    }
+
+    #[test]
+    fn test_dyn_node_round_trip() -> Result<(), MastForestError> {
+        let original_dyn = DynNode::new_dyn();
+        let original_dyncall = DynNode::new_dyncall();
+
+        let round_trip_dyn = original_dyn.clone().to_builder().build().into();
+        let round_trip_dyncall = original_dyncall.clone().to_builder().build().into();
+
+        let round_trip_dyn_node = match round_trip_dyn {
+            MastNode::Dyn(node) => node,
+            _ => panic!("Expected DynNode"),
+        };
+
+        let round_trip_dyncall_node = match round_trip_dyncall {
+            MastNode::Dyn(node) => node,
+            _ => panic!("Expected DynNode"),
+        };
+
+        assert_eq!(original_dyn, round_trip_dyn_node);
+        assert_eq!(original_dyncall, round_trip_dyncall_node);
+        Ok(())
+    }
+
+    #[test]
+    fn test_external_node_round_trip() -> Result<(), MastForestError> {
+        let digest = crate::Word::default();
+        let original = ExternalNode::new(digest);
+
+        let round_trip = original.clone().to_builder().build().into();
+
+        let round_trip_external = match round_trip {
+            MastNode::External(node) => node,
+            _ => panic!("Expected ExternalNode"),
+        };
+
+        assert_eq!(original, round_trip_external);
+        Ok(())
+    }
+
+    #[test]
+    fn test_mast_node_enum_round_trip() -> Result<(), MastForestError> {
+        let mut forest = create_test_forest();
+
+        // Test each MastNode variant
+        let basic_block = BasicBlockNode::new(vec![Operation::Add], vec![])?;
+        let mast_node_basic_block: MastNode = MastNode::Block(basic_block.clone());
+
+        let child = BasicBlockNode::new(vec![Operation::Mul], vec![])?;
+        let child_id = forest.add_node(MastNode::Block(child))?;
+        let join_node = JoinNode::new([child_id, child_id], &forest)?;
+        let mast_node_join: MastNode = MastNode::Join(join_node.clone());
+
+        let external = ExternalNode::new(crate::Word::default());
+        let mast_node_external: MastNode = MastNode::External(external.clone());
+
+        // Test round trip for each variant
+        let round_trip_basic_block = mast_node_basic_block.clone().to_builder().build(&forest)?;
+        let round_trip_join = mast_node_join.clone().to_builder().build(&forest)?;
+        let round_trip_external = mast_node_external.clone().to_builder().build(&forest)?;
+
+        assert_eq!(mast_node_basic_block, round_trip_basic_block);
+        assert_eq!(mast_node_join, round_trip_join);
+        assert_eq!(mast_node_external, round_trip_external);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_round_trip_with_complex_decorators() -> Result<(), MastForestError> {
+        let mut forest = create_test_forest();
+
+        // Add multiple decorators
+        let deco1 = forest.add_decorator(Decorator::Trace(1)).unwrap();
+        let deco2 = forest.add_decorator(Decorator::Trace(2)).unwrap();
+        let deco3 = forest.add_decorator(Decorator::Trace(3)).unwrap();
+
+        // Create a basic block with multiple decorators
+        let original = BasicBlockNode::new(
+            vec![Operation::Add, Operation::Mul, Operation::Push(Felt::new(42))],
+            vec![(0, deco1), (1, deco2), (2, deco3)],
+        )?;
+
+        // Add before/after decorators
+        let mut with_extra_decorators = original.clone();
+        with_extra_decorators.append_before_enter(&[deco1, deco2]);
+        with_extra_decorators.append_after_exit(&[deco3]);
+
+        let round_trip = with_extra_decorators.clone().to_builder().build()?.into();
+
+        let round_trip_basic_block = match round_trip {
+            MastNode::Block(node) => node,
+            _ => panic!("Expected BasicBlockNode"),
+        };
+
+        assert_eq!(with_extra_decorators, round_trip_basic_block);
+        Ok(())
     }
 }

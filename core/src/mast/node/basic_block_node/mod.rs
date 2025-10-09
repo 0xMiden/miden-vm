@@ -358,6 +358,19 @@ impl MastNodeExt for BasicBlockNode {
     fn domain(&self) -> Felt {
         Self::DOMAIN
     }
+
+    type Builder = BasicBlockNodeBuilder;
+
+    fn to_builder(self) -> Self::Builder {
+        let operations: Vec<Operation> = self.raw_operations().cloned().collect();
+        let un_adjusted_decorators =
+            RawDecoratorOpLinkIterator::new(&[], &self.decorators, &[], &self.op_batches())
+                .collect();
+
+        BasicBlockNodeBuilder::new(operations, un_adjusted_decorators)
+            .with_before_enter(self.before_enter)
+            .with_after_exit(self.after_exit)
+    }
 }
 
 struct BasicBlockNodePrettyPrint<'a> {
