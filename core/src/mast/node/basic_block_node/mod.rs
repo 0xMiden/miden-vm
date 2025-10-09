@@ -5,7 +5,10 @@ use core::{
     slice::Iter,
 };
 
-use miden_crypto::{Felt, Word, ZERO};
+use miden_crypto::{
+    Felt, Word, ZERO,
+    hash::{Digest, blake::Blake3_256},
+};
 use miden_formatting::prettier::PrettyPrint;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -13,7 +16,10 @@ use serde::{Deserialize, Serialize};
 use crate::{
     DecoratorList, Operation,
     chiplets::hasher,
-    mast::{DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId, Remapping},
+    mast::{
+        DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeFingerprint, MastNodeId,
+        Remapping,
+    },
 };
 
 mod op_batch;
@@ -984,5 +990,95 @@ impl MastForestContributor for BasicBlockNodeBuilder {
             .nodes
             .push(self.build()?.into())
             .map_err(|_| MastForestError::TooManyNodes)
+    }
+
+    fn fingerprint_for_node(
+        &self,
+        forest: &MastForest,
+        _hash_by_node_id: &impl crate::LookupByIdx<MastNodeId, crate::mast::MastNodeFingerprint>,
+    ) -> Result<crate::mast::MastNodeFingerprint, MastForestError> {
+        // For BasicBlockNode, we need to implement custom logic because BasicBlock has special
+        // decorator handling with operation indices that other nodes don't have
+
+        // Compute digest
+        let (op_batches, digest) = batch_and_hash_ops(self.operations.clone());
+
+        // Hash before_enter decorators first
+        let mut bytes_to_hash = Vec::new();
+        for decorator_id in &self.before_enter {
+            bytes_to_hash.extend(forest[*decorator_id].fingerprint().as_bytes());
+        }
+
+        // Hash op-indexed decorators using the same logic as node.indexed_decorator_iter()
+        #[cfg(debug_assertions)]
+        validate_decorators(self.operations.len(), &self.decorators);
+        let adjusted_decorators =
+            BasicBlockNode::adjust_decorators(self.decorators.clone(), &op_batches);
+        for (raw_op_idx, decorator_id) in adjusted_decorators.iter() {
+            bytes_to_hash.extend(raw_op_idx.to_le_bytes());
+            bytes_to_hash.extend(forest[*decorator_id].fingerprint().as_bytes());
+        }
+
+        // Hash after_exit decorators last
+        for decorator_id in &self.after_exit {
+            bytes_to_hash.extend(forest[*decorator_id].fingerprint().as_bytes());
+        }
+
+        // Add any `Assert`, `U32assert2` and `MpVerify` opcodes present, since these are
+        // not included in the MAST root.
+        for (op_idx, op) in op_batches.iter().flat_map(|batch| batch.ops()).enumerate() {
+            if let Operation::U32assert2(inner_value)
+            | Operation::Assert(inner_value)
+            | Operation::MpVerify(inner_value) = op
+            {
+                let op_idx: u32 = op_idx
+                    .try_into()
+                    .expect("there are more than 2^{32}-1 operations in basic block");
+
+                // we include the opcode to differentiate between `Assert` and `U32assert2`
+                bytes_to_hash.push(op.op_code());
+                // we include the operation index to distinguish between basic blocks that
+                // would have the same assert instructions, but in a different order
+                bytes_to_hash.extend(op_idx.to_le_bytes());
+                let inner_value = u64::from(*inner_value);
+                bytes_to_hash.extend(inner_value.to_le_bytes());
+            }
+        }
+
+        if bytes_to_hash.is_empty() {
+            Ok(MastNodeFingerprint::new(digest))
+        } else {
+            let decorator_root = Blake3_256::hash(&bytes_to_hash);
+            Ok(MastNodeFingerprint::with_decorator_root(digest, decorator_root))
+        }
+    }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl proptest::prelude::Arbitrary for BasicBlockNodeBuilder {
+    type Parameters = super::arbitrary::BasicBlockNodeParams;
+    type Strategy = proptest::strategy::BoxedStrategy<Self>;
+
+    fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
+        use proptest::prelude::*;
+
+        use super::arbitrary::{decorator_id_strategy, op_non_control_sequence_strategy};
+
+        (op_non_control_sequence_strategy(params.max_ops_len),)
+            .prop_flat_map(move |(ops,)| {
+                let ops_len = ops.len().max(1); // ensure at least 1 op
+                // For builders, decorator indices must be strictly less than ops_len
+                // because they reference actual operation positions
+                prop::collection::vec(
+                    (0..ops_len, decorator_id_strategy(params.max_decorator_id_u32)),
+                    0..=params.max_pairs,
+                )
+                .prop_map(move |mut decorators| {
+                    decorators.sort_by_key(|(i, _)| *i);
+                    (ops.clone(), decorators)
+                })
+            })
+            .prop_map(|(ops, decorators)| Self::new(ops, decorators))
+            .boxed()
     }
 }

@@ -18,9 +18,9 @@ pub use node::arbitrary;
 pub use node::{
     BasicBlockNode, BasicBlockNodeBuilder, CallNode, CallNodeBuilder, DecoratedOpLink,
     DecoratorOpLinkIterator, DynNode, DynNodeBuilder, ExternalNode, ExternalNodeBuilder, JoinNode,
-    JoinNodeBuilder, LoopNode, LoopNodeBuilder, MastForestContributor, MastNode,
-    MastNodeBuilder, MastNodeErrorContext, MastNodeExt, OP_BATCH_SIZE, OP_GROUP_SIZE, OpBatch,
-    OperationOrDecorator, SplitNode, SplitNodeBuilder,
+    JoinNodeBuilder, LoopNode, LoopNodeBuilder, MastForestContributor, MastNode, MastNodeBuilder,
+    MastNodeErrorContext, MastNodeExt, OP_BATCH_SIZE, OP_GROUP_SIZE, OpBatch, OperationOrDecorator,
+    SplitNode, SplitNodeBuilder,
 };
 
 use crate::{

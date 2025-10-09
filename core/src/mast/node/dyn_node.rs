@@ -335,6 +335,87 @@ impl MastForestContributor for DynNodeBuilder {
             .push(self.build().into())
             .map_err(|_| MastForestError::TooManyNodes)
     }
+
+    fn fingerprint_for_node(
+        &self,
+        forest: &MastForest,
+        _hash_by_node_id: &impl crate::LookupByIdx<MastNodeId, crate::mast::MastNodeFingerprint>,
+    ) -> Result<crate::mast::MastNodeFingerprint, MastForestError> {
+        // DynNode has no children, so we don't need hash_by_node_id
+        // Use the fingerprint_from_parts helper function with empty children array
+        crate::mast::node_fingerprint::fingerprint_from_parts(
+            forest,
+            _hash_by_node_id,
+            &self.before_enter,
+            &self.after_exit,
+            &[], // DynNode has no children
+            // Use the same hardcoded digest values as in DynNode::digest()
+            if self.is_dyncall {
+                miden_crypto::Word::new([
+                    miden_crypto::Felt::new(8751004906421739448),
+                    miden_crypto::Felt::new(13469709002495534233),
+                    miden_crypto::Felt::new(12584249374630430826),
+                    miden_crypto::Felt::new(7624899870831503004),
+                ])
+            } else {
+                miden_crypto::Word::new([
+                    miden_crypto::Felt::new(8115106948140260551),
+                    miden_crypto::Felt::new(13491227816952616836),
+                    miden_crypto::Felt::new(15015806788322198710),
+                    miden_crypto::Felt::new(16575543461540527115),
+                ])
+            },
+        )
+    }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl proptest::prelude::Arbitrary for DynNodeBuilder {
+    type Parameters = DynNodeBuilderParams;
+    type Strategy = proptest::strategy::BoxedStrategy<Self>;
+
+    fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
+        use proptest::prelude::*;
+
+        (
+            any::<bool>(),
+            proptest::collection::vec(
+                super::arbitrary::decorator_id_strategy(params.max_decorator_id_u32),
+                0..=params.max_decorators,
+            ),
+            proptest::collection::vec(
+                super::arbitrary::decorator_id_strategy(params.max_decorator_id_u32),
+                0..=params.max_decorators,
+            ),
+        )
+            .prop_map(|(is_dyncall, before_enter, after_exit)| {
+                let builder = if is_dyncall {
+                    Self::new_dyncall()
+                } else {
+                    Self::new_dyn()
+                };
+                builder.with_before_enter(before_enter).with_after_exit(after_exit)
+            })
+            .boxed()
+    }
+}
+
+/// Parameters for generating DynNodeBuilder instances
+#[cfg(any(test, feature = "arbitrary"))]
+#[derive(Clone, Debug)]
+pub struct DynNodeBuilderParams {
+    pub max_decorators: usize,
+    pub max_decorator_id_u32: u32,
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl Default for DynNodeBuilderParams {
+    fn default() -> Self {
+        Self {
+            max_decorators: 4,
+            max_decorator_id_u32: 10,
+        }
+    }
 }
 
 #[cfg(test)]

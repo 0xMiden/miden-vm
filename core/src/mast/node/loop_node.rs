@@ -323,4 +323,72 @@ impl MastForestContributor for LoopNodeBuilder {
             .push(self.build(forest)?.into())
             .map_err(|_| MastForestError::TooManyNodes)
     }
+
+    fn fingerprint_for_node(
+        &self,
+        forest: &MastForest,
+        hash_by_node_id: &impl crate::LookupByIdx<MastNodeId, crate::mast::MastNodeFingerprint>,
+    ) -> Result<crate::mast::MastNodeFingerprint, MastForestError> {
+        // Use the fingerprint_from_parts helper function
+        crate::mast::node_fingerprint::fingerprint_from_parts(
+            forest,
+            hash_by_node_id,
+            &self.before_enter,
+            &self.after_exit,
+            &[self.body],
+            // Compute digest the same way as in build()
+            {
+                let body_hash = forest[self.body].digest();
+
+                crate::chiplets::hasher::merge_in_domain(
+                    &[body_hash, miden_crypto::Word::default()],
+                    LoopNode::DOMAIN,
+                )
+            },
+        )
+    }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl proptest::prelude::Arbitrary for LoopNodeBuilder {
+    type Parameters = LoopNodeBuilderParams;
+    type Strategy = proptest::strategy::BoxedStrategy<Self>;
+
+    fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
+        use proptest::prelude::*;
+
+        (
+            any::<crate::mast::MastNodeId>(),
+            proptest::collection::vec(
+                super::arbitrary::decorator_id_strategy(params.max_decorator_id_u32),
+                0..=params.max_decorators,
+            ),
+            proptest::collection::vec(
+                super::arbitrary::decorator_id_strategy(params.max_decorator_id_u32),
+                0..=params.max_decorators,
+            ),
+        )
+            .prop_map(|(body, before_enter, after_exit)| {
+                Self::new(body).with_before_enter(before_enter).with_after_exit(after_exit)
+            })
+            .boxed()
+    }
+}
+
+/// Parameters for generating LoopNodeBuilder instances
+#[cfg(any(test, feature = "arbitrary"))]
+#[derive(Clone, Debug)]
+pub struct LoopNodeBuilderParams {
+    pub max_decorators: usize,
+    pub max_decorator_id_u32: u32,
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl Default for LoopNodeBuilderParams {
+    fn default() -> Self {
+        Self {
+            max_decorators: 4,
+            max_decorator_id_u32: 10,
+        }
+    }
 }

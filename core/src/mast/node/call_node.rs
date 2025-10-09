@@ -435,4 +435,84 @@ impl MastForestContributor for CallNodeBuilder {
             .push(self.build(forest)?.into())
             .map_err(|_| MastForestError::TooManyNodes)
     }
+
+    fn fingerprint_for_node(
+        &self,
+        forest: &MastForest,
+        hash_by_node_id: &impl crate::LookupByIdx<MastNodeId, crate::mast::MastNodeFingerprint>,
+    ) -> Result<crate::mast::MastNodeFingerprint, MastForestError> {
+        // Use the fingerprint_from_parts helper function
+        crate::mast::node_fingerprint::fingerprint_from_parts(
+            forest,
+            hash_by_node_id,
+            &self.before_enter,
+            &self.after_exit,
+            &[self.callee],
+            // Compute digest the same way as in build()
+            {
+                let callee_digest = forest[self.callee].digest();
+                let domain = if self.is_syscall {
+                    CallNode::SYSCALL_DOMAIN
+                } else {
+                    CallNode::CALL_DOMAIN
+                };
+
+                crate::chiplets::hasher::merge_in_domain(
+                    &[callee_digest, miden_crypto::Word::default()],
+                    domain,
+                )
+            },
+        )
+    }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl proptest::prelude::Arbitrary for CallNodeBuilder {
+    type Parameters = CallNodeBuilderParams;
+    type Strategy = proptest::strategy::BoxedStrategy<Self>;
+
+    fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
+        use proptest::prelude::*;
+
+        (
+            any::<crate::mast::MastNodeId>(),
+            any::<bool>(),
+            proptest::collection::vec(
+                super::arbitrary::decorator_id_strategy(params.max_decorator_id_u32),
+                0..=params.max_decorators,
+            ),
+            proptest::collection::vec(
+                super::arbitrary::decorator_id_strategy(params.max_decorator_id_u32),
+                0..=params.max_decorators,
+            ),
+        )
+            .prop_map(|(callee, is_syscall, before_enter, after_exit)| {
+                let mut builder = if is_syscall {
+                    Self::new_syscall(callee)
+                } else {
+                    Self::new(callee)
+                };
+                builder = builder.with_before_enter(before_enter).with_after_exit(after_exit);
+                builder
+            })
+            .boxed()
+    }
+}
+
+/// Parameters for generating CallNodeBuilder instances
+#[cfg(any(test, feature = "arbitrary"))]
+#[derive(Clone, Debug)]
+pub struct CallNodeBuilderParams {
+    pub max_decorators: usize,
+    pub max_decorator_id_u32: u32,
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl Default for CallNodeBuilderParams {
+    fn default() -> Self {
+        Self {
+            max_decorators: 4,
+            max_decorator_id_u32: 10,
+        }
+    }
 }

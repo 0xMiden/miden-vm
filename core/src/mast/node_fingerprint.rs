@@ -125,7 +125,7 @@ impl MastNodeFingerprint {
     }
 }
 
-fn fingerprint_from_parts(
+pub fn fingerprint_from_parts(
     forest: &MastForest,
     hash_by_node_id: &impl LookupByIdx<MastNodeId, MastNodeFingerprint>,
     before_enter_ids: &[DecoratorId],

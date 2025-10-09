@@ -280,4 +280,72 @@ impl MastForestContributor for ExternalNodeBuilder {
             .push(self.build().into())
             .map_err(|_| MastForestError::TooManyNodes)
     }
+
+    fn fingerprint_for_node(
+        &self,
+        forest: &MastForest,
+        _hash_by_node_id: &impl crate::LookupByIdx<MastNodeId, crate::mast::MastNodeFingerprint>,
+    ) -> Result<crate::mast::MastNodeFingerprint, MastForestError> {
+        // ExternalNode has no children, so we don't need hash_by_node_id
+        // Use the fingerprint_from_parts helper function with empty children array
+        crate::mast::node_fingerprint::fingerprint_from_parts(
+            forest,
+            _hash_by_node_id,
+            &self.before_enter,
+            &self.after_exit,
+            &[],         // ExternalNode has no children
+            self.digest, // ExternalNodeBuilder stores the digest directly
+        )
+    }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl proptest::prelude::Arbitrary for ExternalNodeBuilder {
+    type Parameters = ExternalNodeBuilderParams;
+    type Strategy = proptest::strategy::BoxedStrategy<Self>;
+
+    fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
+        use proptest::prelude::*;
+
+        (
+            any::<[u64; 4]>().prop_map(|[a, b, c, d]| {
+                miden_crypto::Word::new([
+                    miden_crypto::Felt::new(a),
+                    miden_crypto::Felt::new(b),
+                    miden_crypto::Felt::new(c),
+                    miden_crypto::Felt::new(d),
+                ])
+            }),
+            proptest::collection::vec(
+                super::arbitrary::decorator_id_strategy(params.max_decorator_id_u32),
+                0..=params.max_decorators,
+            ),
+            proptest::collection::vec(
+                super::arbitrary::decorator_id_strategy(params.max_decorator_id_u32),
+                0..=params.max_decorators,
+            ),
+        )
+            .prop_map(|(digest, before_enter, after_exit)| {
+                Self::new(digest).with_before_enter(before_enter).with_after_exit(after_exit)
+            })
+            .boxed()
+    }
+}
+
+/// Parameters for generating ExternalNodeBuilder instances
+#[cfg(any(test, feature = "arbitrary"))]
+#[derive(Clone, Debug)]
+pub struct ExternalNodeBuilderParams {
+    pub max_decorators: usize,
+    pub max_decorator_id_u32: u32,
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl Default for ExternalNodeBuilderParams {
+    fn default() -> Self {
+        Self {
+            max_decorators: 4,
+            max_decorator_id_u32: 10,
+        }
+    }
 }
