@@ -85,25 +85,20 @@ impl AdviceInputs {
 }
 
 impl Serializable for AdviceInputs {
-    fn write_into<W: ByteWriter>(&self, _target: &mut W) {
-
-        /* TODO(Al)
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
         let Self { stack, map, store } = self;
         stack.write_into(target);
         map.write_into(target);
         store.write_into(target);
-        */
     }
 }
 
 impl Deserializable for AdviceInputs {
-    fn read_from<R: ByteReader>(_source: &mut R) -> Result<Self, DeserializationError> {
-        /*
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let stack = Vec::<Felt>::read_from(source)?;
         let map = AdviceMap::read_from(source)?;
         let store = MerkleStore::read_from(source)?;
-        Ok(Self { stack, map, store }) */
-        todo!()
+        Ok(Self { stack, map, store })
     }
 }
 

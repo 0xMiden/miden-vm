@@ -16,7 +16,7 @@ use miden_air::{ProcessorAir, PublicInputs, ToElements};
 use miden_gpu::HashFn;
 use miden_processor::{ExecutionTrace, Program};
 use p3_uni_stark::StarkGenericConfig;
-use tracing::instrument;
+use tracing::{info_span, instrument};
 
 mod gpu;
 
@@ -98,13 +98,15 @@ where
     // execute the program to create an execution trace
     #[cfg(feature = "std")]
     let now = Instant::now();
-    let trace = miden_processor::execute(
-        program,
-        stack_inputs.clone(),
-        advice_inputs,
-        host,
-        *options.execution_options(),
-    )?;
+    let trace = info_span!("construct_execution_trace").in_scope(|| {
+        miden_processor::execute(
+            program,
+            stack_inputs.clone(),
+            advice_inputs,
+            host,
+            *options.execution_options(),
+        )
+    })?;
     #[cfg(feature = "std")]
     tracing::event!(
         tracing::Level::INFO,

@@ -9,21 +9,15 @@ use alloc::vec;
 use std::println;
 
 // use air::{Felt, HashFunction, ProcessorAir, Proof, PublicInputs};
-use miden_air::{Felt, HashFunction, ProcessorAir, Proof, ProvingOptions, PublicInputs};
-use miden_core::crypto::{
-    hash::{Blake3_192, Blake3_256, Poseidon2, Rpo256, Rpx256},
-    random::{RpoRandomCoin, RpxRandomCoin, WinterRandomCoin},
-};
+use miden_air::{Felt, HashFunction, ProcessorAir, Proof, PublicInputs};
 use p3_blake3::Blake3;
-use p3_challenger::{DuplexChallenger, HashChallenger, SerializingChallenger64};
+use p3_challenger::{HashChallenger, SerializingChallenger64};
 use p3_commit::ExtensionMmcs;
 use p3_dft::Radix2DitParallel;
-use p3_field::{Field, extension::BinomialExtensionField};
+use p3_field::extension::BinomialExtensionField;
 use p3_fri::{FriParameters, TwoAdicFriPcs};
 use p3_merkle_tree::MerkleTreeMmcs;
-use p3_symmetric::{
-    CompressionFunctionFromHasher, PaddingFreeSponge, SerializingHasher, TruncatedPermutation,
-};
+use p3_symmetric::{CompressionFunctionFromHasher, SerializingHasher};
 use p3_uni_stark::StarkConfig;
 
 mod verify;

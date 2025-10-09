@@ -72,6 +72,7 @@ std = [
 no_err_ctx = ["miden-processor/no_err_ctx"]
 # For internal use, not meant to be used by users
 internal = ["dep:hex", "serde"]
+tracing-forest = ["dep:tracing-forest"]
 
 [dependencies]
 # Miden dependencies
