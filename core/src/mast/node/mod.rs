@@ -33,7 +33,7 @@ pub use basic_block_node::arbitrary;
 pub use loop_node::{LoopNode, LoopNodeBuilder};
 
 mod mast_forest_contributor;
-pub use mast_forest_contributor::MastForestContributor;
+pub use mast_forest_contributor::{MastForestContributor, MastNodeBuilder};
 
 use super::DecoratorId;
 use crate::{
