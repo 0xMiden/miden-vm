@@ -1,0 +1,22 @@
+[package]
+name = "miden-derive-mast-node-ext"
+version = "0.1.0"
+description = "Proc macro to derive MastNodeExt trait implementations"
+readme = "README.md"
+categories = ["development-tools::procedural-macro-helpers", "no-std"]
+keywords = ["miden", "mast", "proc-macro", "derive"]
+publish = false
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2 = "1.0"
+quote = "1.0"
+syn = { version = "1.0", features = ["derive", "extra-traits", "full"] }
