@@ -47,8 +47,9 @@ paste.workspace = true
 rayon = { version = "1.10", default-features = false }
 tracing.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["rt"]}
+tokio = { workspace = true, features = ["rt"] }
 winter-prover.workspace = true
+itertools = { version = "0.14", default-features = false, features = ["use_alloc"] }
 
 [dev-dependencies]
 miden-assembly.workspace = true

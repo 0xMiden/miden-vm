@@ -1,4 +1,4 @@
-use alloc::{sync::Arc, vec::Vec};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::cmp::min;
 
 use memory::Memory;
@@ -15,7 +15,7 @@ use crate::{
     ProcessState,
     chiplets::Ace,
     continuation_stack::{Continuation, ContinuationStack},
-    fast::execution_tracer::{ExecutionTracer, TraceFragmentContexts},
+    fast::execution_tracer::{ExecutionTracer, TraceGenerationContext},
 };
 
 pub mod execution_tracer;
@@ -87,7 +87,7 @@ const INITIAL_STACK_TOP_IDX: usize = 250;
 #[derive(Debug)]
 pub struct FastProcessor {
     /// The stack is stored in reverse order, so that the last element is at the top of the stack.
-    pub(super) stack: [Felt; STACK_BUFFER_SIZE],
+    pub(super) stack: Box<[Felt; STACK_BUFFER_SIZE]>,
     /// The index of the top of the stack.
     stack_top_idx: usize,
     /// The index of the bottom of the stack.
@@ -166,7 +166,11 @@ impl FastProcessor {
 
         let stack_top_idx = INITIAL_STACK_TOP_IDX;
         let stack = {
-            let mut stack = [ZERO; STACK_BUFFER_SIZE];
+            // Note: we use `Vec::into_boxed_slice()` here, since `Box::new([T; N])` first allocates
+            // the array on the stack, and then moves it to the heap. This might cause a
+            // stack overflow on some systems.
+            let mut stack: Box<[Felt; STACK_BUFFER_SIZE]> =
+                vec![ZERO; STACK_BUFFER_SIZE].into_boxed_slice().try_into().unwrap();
             let bottom_idx = stack_top_idx - stack_inputs.len();
 
             stack[bottom_idx..stack_top_idx].copy_from_slice(stack_inputs);
@@ -306,17 +310,17 @@ impl FastProcessor {
     }
 
     /// Executes the given program and returns the stack outputs, the advice provider, and
-    /// information for building the trace.
+    /// context necessary to build the trace.
     pub async fn execute_for_trace(
         self,
         program: &Program,
         host: &mut impl AsyncHost,
         fragment_size: usize,
-    ) -> Result<(ExecutionOutput, TraceFragmentContexts), ExecutionError> {
+    ) -> Result<(ExecutionOutput, TraceGenerationContext), ExecutionError> {
         let mut tracer = ExecutionTracer::new(fragment_size);
         let execution_output = self.execute_with_tracer(program, host, &mut tracer).await?;
 
-        Ok((execution_output, tracer.into_fragment_contexts()))
+        Ok((execution_output, tracer.into_trace_generation_context()))
     }
 
     /// Executes the given program with the provided tracer and returns the stack outputs, and the
@@ -670,7 +674,7 @@ impl FastProcessor {
         program: &Program,
         host: &mut impl AsyncHost,
         fragment_size: usize,
-    ) -> Result<(ExecutionOutput, TraceFragmentContexts), ExecutionError> {
+    ) -> Result<(ExecutionOutput, TraceGenerationContext), ExecutionError> {
         // Create a new Tokio runtime and block on the async execution
         let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
 

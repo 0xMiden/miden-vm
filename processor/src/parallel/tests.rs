@@ -5,6 +5,7 @@ use miden_core::{Kernel, Operation, Program, mast::MastForest};
 use miden_utils_testing::get_column_name;
 use pretty_assertions::assert_eq;
 use rstest::{fixture, rstest};
+use winter_prover::Trace;
 
 use super::*;
 use crate::{DefaultHost, HostLibrary, fast::FastProcessor};
@@ -280,29 +281,40 @@ fn test_trace_generation_at_fragment_boundaries(
         let processor = FastProcessor::new(stack_inputs);
         let mut host = DefaultHost::default();
         host.load_library(create_simple_library()).unwrap();
-        let (_, trace_fragment_contexts) =
+        let (execution_output, trace_fragment_contexts) =
             processor.execute_for_trace_sync(&program, &mut host, fragment_size).unwrap();
 
-        build_trace(trace_fragment_contexts, program.hash())
+        build_trace(
+            execution_output,
+            trace_fragment_contexts,
+            program.hash(),
+            program.kernel().clone(),
+        )
     };
 
     let trace_from_single_fragment = {
         let processor = FastProcessor::new(stack_inputs);
         let mut host = DefaultHost::default();
         host.load_library(create_simple_library()).unwrap();
-        let (_, trace_fragment_contexts) = processor
+        let (execution_output, trace_fragment_contexts) = processor
             .execute_for_trace_sync(&program, &mut host, MAX_FRAGMENT_SIZE)
             .unwrap();
-        assert!(trace_fragment_contexts.contexts.len() == 1);
+        assert!(trace_fragment_contexts.core_trace_contexts.len() == 1);
 
-        build_trace(trace_fragment_contexts, program.hash())
+        build_trace(
+            execution_output,
+            trace_fragment_contexts,
+            program.hash(),
+            program.kernel().clone(),
+        )
     };
 
     // Ensure that the trace generated from multiple fragments is identical to the one generated
     // from a single fragment.
     for (col_idx, (col_from_fragments, col_from_single_fragment)) in trace_from_fragments
+        .main_segment()
         .columns()
-        .zip(trace_from_single_fragment.columns())
+        .zip(trace_from_single_fragment.main_segment().columns())
         .enumerate()
     {
         if col_from_fragments != col_from_single_fragment {

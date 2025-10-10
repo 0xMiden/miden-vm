@@ -1522,6 +1522,7 @@ name = "miden-processor"
 version = "0.19.0"
 dependencies = [
  "insta",
+ "itertools 0.14.0",
  "logtest",
  "miden-air",
  "miden-assembly",

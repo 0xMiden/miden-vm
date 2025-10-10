@@ -59,7 +59,7 @@ pub(super) fn op_mloadw<P: Processor>(
         .memory()
         .read_word(ctx, addr, clk, err_ctx)
         .map_err(ExecutionError::MemoryError)?;
-    tracer.record_memory_read_word(word, addr);
+    tracer.record_memory_read_word(word, addr, processor.system().ctx(), processor.system().clk());
 
     processor.stack().set_word(0, &word);
 
@@ -83,6 +83,8 @@ pub(super) fn op_mstorew<P: Processor>(
         .memory()
         .write_word(ctx, addr, clk, word, err_ctx)
         .map_err(ExecutionError::MemoryError)?;
+    tracer.record_memory_write_word(word, addr, processor.system().ctx(), processor.system().clk());
+
     Ok(())
 }
 
@@ -99,7 +101,12 @@ pub(super) fn op_mload<P: Processor>(
         .memory()
         .read_element(ctx, addr, err_ctx)
         .map_err(ExecutionError::MemoryError)?;
-    tracer.record_memory_read_element(element, addr);
+    tracer.record_memory_read_element(
+        element,
+        addr,
+        processor.system().ctx(),
+        processor.system().clk(),
+    );
 
     processor.stack().set(0, element);
 
@@ -122,6 +129,12 @@ pub(super) fn op_mstore<P: Processor>(
         .memory()
         .write_element(ctx, addr, value, err_ctx)
         .map_err(ExecutionError::MemoryError)?;
+    tracer.record_memory_write_element(
+        value,
+        addr,
+        processor.system().ctx(),
+        processor.system().clk(),
+    );
 
     Ok(())
 }
@@ -152,13 +165,23 @@ pub(super) fn op_mstream<P: Processor>(
             .memory()
             .read_word(ctx, addr_first_word, clk, err_ctx)
             .map_err(ExecutionError::MemoryError)?;
-        tracer.record_memory_read_word(first_word, addr_first_word);
+        tracer.record_memory_read_word(
+            first_word,
+            addr_first_word,
+            processor.system().ctx(),
+            processor.system().clk(),
+        );
 
         let second_word = processor
             .memory()
             .read_word(ctx, addr_second_word, clk, err_ctx)
             .map_err(ExecutionError::MemoryError)?;
-        tracer.record_memory_read_word(second_word, addr_second_word);
+        tracer.record_memory_read_word(
+            second_word,
+            addr_second_word,
+            processor.system().ctx(),
+            processor.system().clk(),
+        );
 
         [first_word, second_word]
     };
@@ -205,10 +228,23 @@ pub(super) fn op_pipe<P: Processor>(
         .memory()
         .write_word(ctx, addr_first_word, clk, words[0], err_ctx)
         .map_err(ExecutionError::MemoryError)?;
+    tracer.record_memory_write_word(
+        words[0],
+        addr_first_word,
+        processor.system().ctx(),
+        processor.system().clk(),
+    );
+
     processor
         .memory()
         .write_word(ctx, addr_second_word, clk, words[1], err_ctx)
         .map_err(ExecutionError::MemoryError)?;
+    tracer.record_memory_write_word(
+        words[1],
+        addr_second_word,
+        processor.system().ctx(),
+        processor.system().clk(),
+    );
 
     // replace the elements on the stack with the word elements (in stack order)
     processor.stack().set_word(0, &words[1]);
