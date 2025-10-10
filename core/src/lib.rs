@@ -62,6 +62,7 @@ pub use miden_crypto::{
     Field, ONE, PrimeCharacteristicRing, PrimeField64, WORD_SIZE, Word, ZERO,
     batch_multiplicative_inverse, batch_multiplicative_inverse_general, word::LexicographicWord,
 };
+
 pub mod crypto {
     pub mod merkle {
         pub use miden_crypto::merkle::{
@@ -140,3 +141,8 @@ mod advice;
 pub use advice::map::AdviceMap;
 
 pub mod utils;
+
+// Re-export indexing functionality from the new standalone crate
+pub use miden_utils_indexing::{
+    DenseIdMap, Idx, IndexVec, IndexedVecError, LookupByIdx, newtype_id,
+};

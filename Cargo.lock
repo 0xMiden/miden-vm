@@ -1420,6 +1420,7 @@ dependencies = [
  "bincode",
  "criterion",
  "miden-core",
+ "miden-utils-indexing",
  "p3-air",
  "p3-commit",
  "p3-field",
@@ -1488,6 +1489,7 @@ dependencies = [
  "miden-debug-types",
  "miden-formatting",
  "miden-serde-test-macros",
+ "miden-utils-indexing",
  "num-derive",
  "num-traits",
  "parking_lot",
@@ -1564,6 +1566,7 @@ dependencies = [
  "miden-crypto 0.18.0",
  "miden-formatting",
  "miden-miette",
+ "miden-utils-indexing",
  "miden-utils-sync",
  "paste",
  "serde",
@@ -1654,6 +1657,7 @@ name = "miden-processor"
 version = "0.19.0"
 dependencies = [
  "insta",
+ "itertools 0.14.0",
  "logtest",
  "miden-air",
  "miden-assembly",
@@ -1661,8 +1665,10 @@ dependencies = [
  "miden-debug-types",
  "miden-test-utils",
  "miden-utils-diagnostics",
+ "miden-utils-indexing",
  "paste",
  "pretty_assertions",
+ "rayon",
  "rstest",
  "thiserror",
  "tokio",
@@ -1776,6 +1782,14 @@ dependencies = [
  "miden-miette",
  "paste",
  "tracing",
+]
+
+[[package]]
+name = "miden-utils-indexing"
+version = "0.19.0"
+dependencies = [
+ "serde",
+ "thiserror",
 ]
 
 [[package]]

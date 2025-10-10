@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{MastNodeErrorContext, MastNodeExt};
 use crate::{
-    OPCODE_SPLIT,
+    Idx, OPCODE_SPLIT,
     chiplets::hasher,
     mast::{DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId, Remapping},
 };
@@ -46,9 +46,9 @@ impl SplitNode {
         mast_forest: &MastForest,
     ) -> Result<Self, MastForestError> {
         let forest_len = mast_forest.nodes.len();
-        if branches[0].as_usize() >= forest_len {
+        if branches[0].to_usize() >= forest_len {
             return Err(MastForestError::NodeIdOverflow(branches[0], forest_len));
-        } else if branches[1].as_usize() >= forest_len {
+        } else if branches[1].to_usize() >= forest_len {
             return Err(MastForestError::NodeIdOverflow(branches[1], forest_len));
         }
         let digest = {

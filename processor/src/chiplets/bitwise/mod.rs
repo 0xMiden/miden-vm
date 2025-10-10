@@ -6,7 +6,7 @@ use miden_air::trace::chiplets::bitwise::{
 };
 use miden_core::PrimeCharacteristicRing;
 
-use super::{ExecutionError, Felt, TraceFragment, ZERO, utils::get_trace_len};
+use super::{ExecutionError, Felt, TraceFragment, ZERO};
 use crate::ErrorContext;
 
 #[cfg(test)]
@@ -74,7 +74,7 @@ impl Bitwise {
     /// Returns length of execution trace required to describe bitwise operations executed on the
     /// VM.
     pub fn trace_len(&self) -> usize {
-        get_trace_len(&self.trace)
+        self.trace[0].len()
     }
 
     // TRACE MUTATORS

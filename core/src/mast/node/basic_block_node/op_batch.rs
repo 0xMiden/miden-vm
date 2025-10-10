@@ -115,6 +115,43 @@ impl OpBatch {
     pub fn num_groups(&self) -> usize {
         self.num_groups
     }
+
+    /// Returns the (op_group_idx, op_idx_in_group) given an operation index in the batch. Returns
+    /// `None` if the index is out of bounds.
+    pub fn op_idx_in_batch_to_group(&self, op_idx_in_batch: usize) -> Option<(usize, usize)> {
+        if op_idx_in_batch >= self.ops.len() {
+            return None;
+        }
+
+        let group_idx = {
+            let n = self.num_groups();
+            // Ends of groups (length n), monotonic non-decreasing (zero-length groups allowed).
+            let ends = &self.indptr[1..=n];
+
+            // first index where end > op_idx_in_batch
+            let group_idx = ends.partition_point(|&end| end <= op_idx_in_batch);
+            debug_assert!(group_idx < n);
+
+            group_idx
+        };
+
+        Some((group_idx, op_idx_in_batch - self.indptr[group_idx]))
+    }
+
+    /// Returns the index of the first group that contains operations that comes after
+    /// `after_this_group_index`, if any.
+    ///
+    /// Since groups either contain immediate values or operations, this is equivalent to skipping
+    /// all groups that contain immediate values after `after_this_group_index` and returns the
+    /// index of the first group that contains operations.
+    pub fn next_op_group_index(&self, after_this_group_index: usize) -> Option<usize> {
+        // when indptr[i] == indptr[i+1], the group has no operations - and therefore carries an
+        // immediate value
+        let is_op_group = |group_idx: usize| self.indptr[group_idx] != self.indptr[group_idx + 1];
+
+        ((after_this_group_index + 1)..self.num_groups())
+            .find(|&candidate_group_index| is_op_group(candidate_group_index))
+    }
 }
 
 // OPERATION BATCH ACCUMULATOR
@@ -305,6 +342,126 @@ impl OpBatchAccumulator {
             self.push_op(Operation::Noop);
             self.padding[self.group_idx] = true;
         }
+    }
+}
+
+#[cfg(test)]
+mod op_batch_tests {
+    use super::*;
+
+    #[test]
+    fn test_op_idx_in_batch_to_group() {
+        // batch:
+        // 0: [push, push, push, swap, swap, swap, swap, swap, swap] [2] [3] [4]
+        // 4: [swap, swap, swap, swap, swap, swap, swap, swap]
+        // 5: [push, swap, swap, swap, swap, swap, swap, swap, swap] [5]
+        // 7: [noop]
+        let batch = {
+            let mut acc = OpBatchAccumulator::new();
+            // group 0
+            acc.add_op(Operation::Push(Felt::new(2)));
+            acc.add_op(Operation::Push(Felt::new(3)));
+            acc.add_op(Operation::Push(Felt::new(4)));
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+
+            // group 4
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+
+            // group 5
+            acc.add_op(Operation::Push(Felt::new(5)));
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+
+            // group 7: [noop]
+
+            acc.into_batch()
+        };
+        assert_eq!(batch.num_groups(), 8);
+
+        assert_eq!(batch.op_idx_in_batch_to_group(0), Some((0, 0)));
+        assert_eq!(batch.op_idx_in_batch_to_group(5), Some((0, 5)));
+        assert_eq!(batch.op_idx_in_batch_to_group(9), Some((4, 0)));
+        assert_eq!(batch.op_idx_in_batch_to_group(10), Some((4, 1)));
+        assert_eq!(batch.op_idx_in_batch_to_group(16), Some((4, 7)));
+        assert_eq!(batch.op_idx_in_batch_to_group(17), Some((5, 0)));
+        assert_eq!(batch.op_idx_in_batch_to_group(25), Some((5, 8)));
+        assert_eq!(batch.op_idx_in_batch_to_group(26), Some((7, 0)));
+        assert_eq!(batch.op_idx_in_batch_to_group(27), None);
+    }
+
+    #[test]
+    fn test_next_op_group_index() {
+        // batch:
+        // 0: [push, push, push, swap, swap, swap, swap, swap, swap] [2] [3] [4]
+        // 4: [swap, swap, swap, swap, swap, swap, swap, swap]
+        // 5: [push, swap, swap, swap, swap, swap, swap, swap, swap] [5]
+        // 7: [noop]
+        let batch = {
+            let mut acc = OpBatchAccumulator::new();
+            // group 0
+            acc.add_op(Operation::Push(Felt::new(2)));
+            acc.add_op(Operation::Push(Felt::new(3)));
+            acc.add_op(Operation::Push(Felt::new(4)));
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+
+            // group 4
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+
+            // group 5
+            acc.add_op(Operation::Push(Felt::new(5)));
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+
+            // group 7: [noop]
+
+            acc.into_batch()
+        };
+        assert_eq!(batch.num_groups(), 8);
+
+        assert_eq!(batch.next_op_group_index(0), Some(4));
+        assert_eq!(batch.next_op_group_index(1), Some(4));
+        assert_eq!(batch.next_op_group_index(2), Some(4));
+        assert_eq!(batch.next_op_group_index(3), Some(4));
+        assert_eq!(batch.next_op_group_index(4), Some(5));
+        assert_eq!(batch.next_op_group_index(5), Some(7));
+        assert_eq!(batch.next_op_group_index(6), Some(7));
+        assert_eq!(batch.next_op_group_index(7), None);
     }
 }
 

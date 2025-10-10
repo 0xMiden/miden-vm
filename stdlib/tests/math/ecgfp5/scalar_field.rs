@@ -55,7 +55,7 @@ impl Scalar {
 
     /// Raw subtraction of a Scalar element from another one, without reduction
     ///
-    /// Second return value, = 0xffff_ffff, if oveflow has occurred
+    /// Second return value, = 0xffff_ffff, if overflow has occurred
     ///                else  = 0, if no overflow during subtraction
     ///
     /// Adapted from https://github.com/pornin/ecgfp5/blob/82325b9/rust/src/scalar.rs#L80-L92
