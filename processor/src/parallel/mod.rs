@@ -27,8 +27,8 @@ use miden_core::{
 use rayon::prelude::*;
 
 use crate::{
-    ChipletsLengths, ContextId, ErrorContext, ExecutionError, ExecutionTrace,
-    ProcessState, TraceLenSummary,
+    ChipletsLengths, ContextId, ErrorContext, ExecutionError, ExecutionTrace, ProcessState,
+    TraceLenSummary,
     chiplets::{Chiplets, CircuitEvaluation, MAX_NUM_ACE_WIRES, PTR_OFFSET_ELEM, PTR_OFFSET_WORD},
     continuation_stack::Continuation,
     crypto::RpoRandomCoin,
@@ -435,16 +435,16 @@ fn initialize_chiplets(
     for hasher_op in hasher_for_chiplet.into_iter() {
         match hasher_op {
             HasherOp::Permute(input_state) => {
-                chiplets.hasher.permute(input_state);
+                let _ = chiplets.hasher.permute(input_state);
             },
             HasherOp::HashControlBlock((h1, h2, domain, expected_hash)) => {
-                chiplets.hasher.hash_control_block(h1, h2, domain, expected_hash);
+                let _ = chiplets.hasher.hash_control_block(h1, h2, domain, expected_hash);
             },
             HasherOp::HashBasicBlock((op_batches, expected_hash)) => {
-                chiplets.hasher.hash_basic_block(&op_batches, expected_hash);
+                let _ = chiplets.hasher.hash_basic_block(&op_batches, expected_hash);
             },
             HasherOp::BuildMerkleRoot((value, path, index)) => {
-                chiplets.hasher.build_merkle_root(value, &path, index);
+                let _ = chiplets.hasher.build_merkle_root(value, &path, index);
             },
             HasherOp::UpdateMerkleRoot((old_value, new_value, path, index)) => {
                 chiplets.hasher.update_merkle_root(old_value, new_value, &path, index);
@@ -456,13 +456,13 @@ fn initialize_chiplets(
     for (bitwise_op, a, b) in bitwise {
         match bitwise_op {
             BitwiseOp::U32And => {
-                chiplets
+               let _ =   chiplets
                     .bitwise
                     .u32and(a, b, &())
                     .expect("bitwise AND operation failed when populating chiplet");
             },
             BitwiseOp::U32Xor => {
-                chiplets
+                let _ = chiplets
                     .bitwise
                     .u32xor(a, b, &())
                     .expect("bitwise XOR operation failed when populating chiplet");
@@ -505,7 +505,7 @@ fn initialize_chiplets(
             .kmerge_by(|a, b| a.clk() < b.clk())
             .for_each(|mem_access| match mem_access {
                 MemoryAccess::ReadElement(addr, ctx, clk) => {
-                    chiplets
+                    let _ = chiplets
                         .memory
                         .read(ctx, addr, clk, &())
                         .expect("memory read element failed when populating chiplet");
@@ -609,8 +609,11 @@ fn combine_fragments(fragments: Vec<CoreTraceFragment>, trace_len: usize) -> Vec
         .collect();
 
     // Run batch inversion on stack's H0 helper column
-    core_trace_columns[STACK_TRACE_OFFSET + H0_COL_IDX] =
-        batch_multiplicative_inverse(&core_trace_columns[STACK_TRACE_OFFSET + H0_COL_IDX]);
+    // core_trace_columns[STACK_TRACE_OFFSET + H0_COL_IDX] =
+    //     batch_multiplicative_inverse(&core_trace_columns[STACK_TRACE_OFFSET + H0_COL_IDX]);
+    // TODO(ZZ) fixme 
+    core_trace_columns[STACK_TRACE_OFFSET + H0_COL_IDX].iter_mut().for_each(|x|*x= x.inverse_unwrap_zero());
+
 
     // Return the core trace columns
     core_trace_columns
@@ -1240,7 +1243,7 @@ impl CoreTraceFragmentGenerator {
             MastNode::Call(call_node) => {
                 self.update_decoder_state_on_node_start();
 
-                self.context.state.stack.start_context();
+                let _ = self.context.state.stack.start_context();
 
                 // Set up new context for the call
                 if call_node.is_syscall() {

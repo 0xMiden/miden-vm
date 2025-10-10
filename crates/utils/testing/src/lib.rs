@@ -44,7 +44,6 @@ pub use pretty_assertions::{assert_eq, assert_ne, assert_str_eq};
 #[cfg(not(target_family = "wasm"))]
 use proptest::prelude::{Arbitrary, Strategy};
 pub use test_case::test_case;
-use winter_prover::Trace;
 
 pub mod math {
     pub use winter_prover::math::{
@@ -623,7 +622,7 @@ impl Test {
         // Skip large traces in CI, which fail due to memory constraints.
         #[cfg(feature = "std")]
         if std::env::var("CI") == Ok("true".to_string())
-            && trace_from_slow_processor.main_segment().num_rows() >= (1 << 21)
+            && trace_from_slow_processor.main_trace.num_rows() >= (1 << 21)
         {
             return;
         }
@@ -649,8 +648,8 @@ impl Test {
 
         // Compare the main trace columns
         for col_idx in 0..miden_air::trace::PADDED_TRACE_WIDTH {
-            let slow_column = trace_from_slow_processor.main_segment().get_column(col_idx);
-            let parallel_column = trace_from_parallel.main_segment().get_column(col_idx);
+            let slow_column = trace_from_slow_processor.main_trace.get_column(col_idx);
+            let parallel_column = trace_from_parallel.main_trace.get_column(col_idx);
 
             // Since the parallel trace generator only generates core traces, its column length will
             // be lower than the slow processor's trace in the case where the range checker or

@@ -158,7 +158,7 @@ pub fn serial_batch_inversion<E: ExtensionField<Felt>>(values: &[E], result: &mu
         }
     }
 
-    last = last.inverse();
+    last = last.inverse_unwrap_zero();
 
     for i in (0..values.len()).rev() {
         if values[i] == E::ZERO {
