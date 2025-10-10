@@ -395,18 +395,7 @@ impl CallNodeBuilder {
         }
     }
 
-    /// Adds decorators to be executed before this node.
-    pub fn with_before_enter(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
-        self.before_enter = decorators.into();
-        self
-    }
-
-    /// Adds decorators to be executed after this node.
-    pub fn with_after_exit(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
-        self.after_exit = decorators.into();
-        self
-    }
-
+    
     /// Builds the CallNode with the specified decorators.
     pub fn build(self, mast_forest: &MastForest) -> Result<CallNode, MastForestError> {
         if self.callee.to_usize() >= mast_forest.nodes.len() {
@@ -477,6 +466,16 @@ impl MastForestContributor for CallNodeBuilder {
             before_enter: self.before_enter,
             after_exit: self.after_exit,
         }
+    }
+
+    fn with_before_enter(mut self, decorators: impl Into<Vec<crate::mast::DecoratorId>>) -> Self {
+        self.before_enter = decorators.into();
+        self
+    }
+
+    fn with_after_exit(mut self, decorators: impl Into<Vec<crate::mast::DecoratorId>>) -> Self {
+        self.after_exit = decorators.into();
+        self
     }
 }
 

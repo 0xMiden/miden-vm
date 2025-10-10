@@ -955,18 +955,7 @@ impl BasicBlockNodeBuilder {
         }
     }
 
-    /// Adds decorators to be executed before this node.
-    pub fn with_before_enter(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
-        self.before_enter = decorators.into();
-        self
-    }
-
-    /// Adds decorators to be executed after this node.
-    pub fn with_after_exit(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
-        self.after_exit = decorators.into();
-        self
-    }
-
+    
     /// Builds the BasicBlockNode with the specified decorators.
     pub fn build(self) -> Result<BasicBlockNode, MastForestError> {
         if self.operations.is_empty() {
@@ -1063,6 +1052,16 @@ impl MastForestContributor for BasicBlockNodeBuilder {
 
     fn remap_children(self, _remapping: &crate::mast::Remapping) -> Self {
         // BasicBlockNode has no children to remap
+        self
+    }
+
+    fn with_before_enter(mut self, decorators: impl Into<Vec<crate::mast::DecoratorId>>) -> Self {
+        self.before_enter = decorators.into();
+        self
+    }
+
+    fn with_after_exit(mut self, decorators: impl Into<Vec<crate::mast::DecoratorId>>) -> Self {
+        self.after_exit = decorators.into();
         self
     }
 }

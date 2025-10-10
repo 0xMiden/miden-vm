@@ -1,3 +1,4 @@
+use alloc::vec::Vec;
 use enum_dispatch::enum_dispatch;
 
 use super::{
@@ -24,6 +25,13 @@ pub trait MastForestContributor {
     /// Remap the node children to their new positions indicated by the given
     /// [`crate::mast::Remapping`].
     fn remap_children(self, remapping: &crate::mast::Remapping) -> Self;
+
+    /// Adds decorators to be executed before this node.
+    fn with_before_enter(self, _decorators: impl Into<Vec<crate::mast::DecoratorId>>) -> Self;
+
+    /// Adds decorators to be executed after this node.
+    ///
+    fn with_after_exit(self, _decorators: impl Into<Vec<crate::mast::DecoratorId>>) -> Self;
 }
 
 /// Enum of all MAST node builders that can be added to a forest.

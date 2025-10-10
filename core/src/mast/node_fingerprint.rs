@@ -177,6 +177,7 @@ pub fn fingerprint_from_parts(
 
 #[cfg(test)]
 mod tests {
+    use crate::mast::MastForestContributor;
     use alloc::collections::BTreeMap;
 
     use super::*;

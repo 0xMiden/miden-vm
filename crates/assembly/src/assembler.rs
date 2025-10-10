@@ -13,7 +13,7 @@ use miden_assembly_syntax::{
 };
 use miden_core::{
     AssemblyOp, Decorator, Kernel, Operation, Program, Word,
-    mast::{DecoratorId, MastNodeExt, MastNodeId},
+    mast::{DecoratorId, MastForestContributor, MastNodeExt, MastNodeId},
 };
 
 use crate::{
@@ -828,12 +828,14 @@ impl Assembler {
 
                     if let Some(decorator_ids) = block_builder.drain_decorators() {
                         // Attach the decorators before the first instance of the repeated node
-                        let mut first_repeat_node =
-                            block_builder.mast_forest_builder_mut()[repeat_node_id].clone();
-                        first_repeat_node.append_before_enter(&decorator_ids);
+                        let first_repeat_builder = block_builder.mast_forest_builder()
+                            [repeat_node_id]
+                            .clone()
+                            .to_builder()
+                            .with_before_enter(decorator_ids);
                         let first_repeat_node_id = block_builder
                             .mast_forest_builder_mut()
-                            .ensure_node(first_repeat_node)?;
+                            .ensure_node(first_repeat_builder)?;
 
                         body_node_ids.push(first_repeat_node_id);
                         for _ in 0..(*count - 1) {

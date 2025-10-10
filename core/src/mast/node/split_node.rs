@@ -300,18 +300,7 @@ impl SplitNodeBuilder {
         }
     }
 
-    /// Adds decorators to be executed before this node.
-    pub fn with_before_enter(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
-        self.before_enter = decorators.into();
-        self
-    }
-
-    /// Adds decorators to be executed after this node.
-    pub fn with_after_exit(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
-        self.after_exit = decorators.into();
-        self
-    }
-
+    
     /// Builds the SplitNode with the specified decorators.
     pub fn build(self, mast_forest: &MastForest) -> Result<SplitNode, MastForestError> {
         let forest_len = mast_forest.nodes.len();
@@ -342,6 +331,16 @@ impl MastForestContributor for SplitNodeBuilder {
             .nodes
             .push(self.build(forest)?.into())
             .map_err(|_| MastForestError::TooManyNodes)
+    }
+
+    fn with_before_enter(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
+        self.before_enter = decorators.into();
+        self
+    }
+
+    fn with_after_exit(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
+        self.after_exit = decorators.into();
+        self
     }
 
     fn fingerprint_for_node(

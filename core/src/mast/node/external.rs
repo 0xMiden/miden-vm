@@ -253,18 +253,7 @@ impl ExternalNodeBuilder {
         }
     }
 
-    /// Adds decorators to be executed before this node.
-    pub fn with_before_enter(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
-        self.before_enter = decorators.into();
-        self
-    }
-
-    /// Adds decorators to be executed after this node.
-    pub fn with_after_exit(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
-        self.after_exit = decorators.into();
-        self
-    }
-
+    
     /// Builds the ExternalNode with the specified decorators.
     pub fn build(self) -> ExternalNode {
         ExternalNode {
@@ -281,6 +270,16 @@ impl MastForestContributor for ExternalNodeBuilder {
             .nodes
             .push(self.build().into())
             .map_err(|_| MastForestError::TooManyNodes)
+    }
+
+    fn with_before_enter(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
+        self.before_enter = decorators.into();
+        self
+    }
+
+    fn with_after_exit(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
+        self.after_exit = decorators.into();
+        self
     }
 
     fn fingerprint_for_node(
