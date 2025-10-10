@@ -19,7 +19,7 @@ use miden_air::{
 };
 use miden_core::{
     BasedVectorSpace, Felt, Field, Kernel, ONE, OPCODE_PUSH, Operation, PrimeCharacteristicRing,
-    PrimeField64, QuadFelt, WORD_SIZE, Word, ZERO, batch_multiplicative_inverse,
+    PrimeField64, QuadFelt, WORD_SIZE, Word, ZERO,
     mast::{BasicBlockNode, MastForest, MastNode, MastNodeExt, MastNodeId, OpBatch},
     stack::MIN_STACK_DEPTH,
     utils::{range, uninit_vector},
@@ -456,7 +456,7 @@ fn initialize_chiplets(
     for (bitwise_op, a, b) in bitwise {
         match bitwise_op {
             BitwiseOp::U32And => {
-               let _ =   chiplets
+                let _ = chiplets
                     .bitwise
                     .u32and(a, b, &())
                     .expect("bitwise AND operation failed when populating chiplet");
@@ -611,9 +611,10 @@ fn combine_fragments(fragments: Vec<CoreTraceFragment>, trace_len: usize) -> Vec
     // Run batch inversion on stack's H0 helper column
     // core_trace_columns[STACK_TRACE_OFFSET + H0_COL_IDX] =
     //     batch_multiplicative_inverse(&core_trace_columns[STACK_TRACE_OFFSET + H0_COL_IDX]);
-    // TODO(ZZ) fixme 
-    core_trace_columns[STACK_TRACE_OFFSET + H0_COL_IDX].iter_mut().for_each(|x|*x= x.inverse_unwrap_zero());
-
+    // TODO(ZZ) fixme
+    core_trace_columns[STACK_TRACE_OFFSET + H0_COL_IDX]
+        .iter_mut()
+        .for_each(|x| *x = x.inverse_unwrap_zero());
 
     // Return the core trace columns
     core_trace_columns

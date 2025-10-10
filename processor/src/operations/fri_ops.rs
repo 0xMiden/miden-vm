@@ -1,26 +1,21 @@
-use miden_core::{
-    BasedVectorSpace, Field, ONE, PrimeCharacteristicRing, QuadFelt, ZERO, lazy_static,
-};
+use miden_core::{BasedVectorSpace, Field, ONE, PrimeCharacteristicRing, QuadFelt, ZERO};
 
 use super::{ExecutionError, Felt, Operation, Process};
-
-lazy_static! {
 
 // CONSTANTS
 // ================================================================================================
 
-static ref EIGHT: Felt = Felt::from_u8(8);
-static ref TWO_INV: Felt = ONE / Felt::TWO;
+const EIGHT: Felt = Felt::new(8);
+const TWO_INV: Felt = Felt::new(9223372034707292161);
 
-static ref DOMAIN_OFFSET: Felt = Felt::GENERATOR;
+const DOMAIN_OFFSET: Felt = Felt::GENERATOR;
 
 // Pre-computed powers of 1/tau, where tau is the generator of multiplicative subgroup of size 4
 // (i.e., tau is the 4th root of unity). Correctness of these constants is checked in the test at
 // the end of this module.
-static ref TAU_INV: Felt = Felt::from_u64(18446462594437873665); // tau^{-1}
-static ref TAU2_INV: Felt = Felt::from_u64(18446744069414584320); // tau^{-2}
-static ref TAU3_INV: Felt = Felt::from_u64(281474976710656); // tau^{-3}
-}
+const TAU_INV: Felt = Felt::new(18446462594437873665); // tau^{-1}
+const TAU2_INV: Felt = Felt::new(18446744069414584320); // tau^{-2}
+const TAU3_INV: Felt = Felt::new(281474976710656); // tau^{-3}
 
 // FRI OPERATIONS
 // ================================================================================================
@@ -80,7 +75,7 @@ impl Process {
         // --- fold query values ----------------------------------------------
         // compute x corresponding to the query position
         let f_tau = get_tau_factor(d_seg);
-        let x = poe * f_tau * *DOMAIN_OFFSET;
+        let x = poe * f_tau * DOMAIN_OFFSET;
         let x_inv = x.inverse_unwrap_zero();
 
         let (ev, es) = compute_evaluation_points(alpha, x_inv);
@@ -105,7 +100,7 @@ impl Process {
         self.stack.set(7, ds[0]);
         self.stack.set(8, poe2);
         self.stack.set(9, f_tau);
-        self.stack.set(10, layer_ptr + *EIGHT);
+        self.stack.set(10, layer_ptr + EIGHT);
         self.stack.set(11, poe4);
         self.stack.set(12, f_pos);
         self.stack.set(13, folded_value[1]);
@@ -195,9 +190,9 @@ impl Process {
 fn get_tau_factor(domain_segment: usize) -> Felt {
     match domain_segment {
         0 => ONE,
-        1 => *TAU_INV,
-        2 => *TAU2_INV,
-        3 => *TAU3_INV,
+        1 => TAU_INV,
+        2 => TAU2_INV,
+        3 => TAU3_INV,
         _ => panic!("invalid domain segment {domain_segment}"),
     }
 }
@@ -226,7 +221,7 @@ fn compute_evaluation_points(alpha: QuadFelt, x_inv: Felt) -> (QuadFelt, QuadFel
 /// - es = (alpha / x)^2
 fn fold4(values: [QuadFelt; 4], ev: QuadFelt, es: QuadFelt) -> (QuadFelt, QuadFelt, QuadFelt) {
     let tmp0 = fold2(values[0], values[2], ev);
-    let tmp1 = fold2(values[1], values[3], ev * *TAU_INV);
+    let tmp1 = fold2(values[1], values[3], ev * TAU_INV);
     let folded_value = fold2(tmp0, tmp1, es);
     (folded_value, tmp0, tmp1)
 }
@@ -234,7 +229,7 @@ fn fold4(values: [QuadFelt; 4], ev: QuadFelt, es: QuadFelt) -> (QuadFelt, QuadFe
 /// Performs folding by a factor of 2. ep is a value computed based on x and verifier challenge
 /// alpha.
 fn fold2(f_x: QuadFelt, f_neg_x: QuadFelt, ep: QuadFelt) -> QuadFelt {
-    (f_x + f_neg_x + ((f_x - f_neg_x) * ep)) * (*TWO_INV)
+    (f_x + f_neg_x + ((f_x - f_neg_x) * ep)) * TWO_INV
 }
 
 // TESTS

@@ -1,13 +1,9 @@
-use miden_core::{PrimeCharacteristicRing, lazy_static};
-
 use super::{ExecutionError, Felt, Process};
 
 // EXTENSION FIELD OPERATIONS
 // ================================================================================================
 
-lazy_static! {
-    static ref SEVEN: Felt = Felt::from_u64(7);
-}
+const SEVEN: Felt = Felt::new(7);
 
 impl Process {
     // ARITHMETIC OPERATIONS
@@ -21,11 +17,10 @@ impl Process {
         let [a0, a1, b0, b1] = self.stack.get_word(0).into();
         self.stack.set(0, b1);
         self.stack.set(1, b0);
-        //self.stack.set(2, (b0 + b1) * (a1 + a0) - b0 * a0);
-        //self.stack.set(3, b0 * a0 - TWO * b1 * a1);
         self.stack.set(2, a0 * b1 + a1 * b0);
-        self.stack.set(3, a0 * b0 + *SEVEN * a1 * b1);
+        self.stack.set(3, a0 * b0 + SEVEN * a1 * b1);
         self.stack.copy_state(4);
+
         Ok(())
     }
 }

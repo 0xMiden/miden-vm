@@ -13,7 +13,7 @@ use miden_air::{
         main_trace::MainTrace,
     },
 };
-use miden_core::{ExtensionField, Felt, ONE, PrimeCharacteristicRing, ZERO, lazy_static};
+use miden_core::{ExtensionField, Felt, ONE, PrimeCharacteristicRing, ZERO};
 
 use crate::{
     chiplets::aux_trace::build_value,
@@ -23,11 +23,7 @@ use crate::{
 // CONSTANTS
 // ================================================================================================
 
-// TODO(Al)
-lazy_static! {
-    static ref FOUR: Felt = Felt::from_u8(4);
-}
-//const FOUR: Felt = Felt::from_u8(4);
+const FOUR: Felt = Felt::new(4);
 
 // REQUESTS
 // ================================================================================================
@@ -202,7 +198,7 @@ pub(super) fn build_mstream_request<E: ExtensionField<Felt>>(
     let mem_req_2 = MemoryWordMessage {
         op_label,
         ctx,
-        addr: addr + *FOUR,
+        addr: addr + FOUR,
         clk,
         word: [
             main_trace.stack_element(3, row + 1),
@@ -252,7 +248,7 @@ pub(super) fn build_pipe_request<E: ExtensionField<Felt>>(
     let mem_req_2 = MemoryWordMessage {
         op_label,
         ctx,
-        addr: addr + *FOUR,
+        addr: addr + FOUR,
         clk,
         word: [
             main_trace.stack_element(3, row + 1),

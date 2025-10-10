@@ -149,7 +149,7 @@ pub fn prove_keccak(trace: ExecutionTrace) -> Vec<u8> {
                 qc_domains.into_iter().zip(quotient_chunks.into_iter()),
             )
         });
-    challenger.observe(quotient_commit.clone());
+    challenger.observe(quotient_commit);
 
     let commitments = Commitments {
         trace: trace_commit,

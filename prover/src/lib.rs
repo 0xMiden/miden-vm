@@ -101,7 +101,7 @@ where
     let trace = info_span!("construct_execution_trace").in_scope(|| {
         miden_processor::execute(
             program,
-            stack_inputs.clone(),
+            stack_inputs,
             advice_inputs,
             host,
             *options.execution_options(),

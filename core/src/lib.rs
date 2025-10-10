@@ -97,14 +97,6 @@ pub type QuadFelt = BinomialExtensionField<Felt, 2>;
 
 pub mod mast;
 
-// pub use math::{
-//     ExtensionOf,  StarkField, ToElements,
-//     fields::{QuadExtension, f64::BaseElement as Felt},
-//     polynom,
-// };
-
-pub use lazy_static::lazy_static;
-
 pub mod prettier {
     pub use miden_formatting::{prettier::*, pretty_via_display, pretty_via_to_string};
 

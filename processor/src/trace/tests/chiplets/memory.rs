@@ -11,7 +11,7 @@ use miden_air::{
         },
     },
 };
-use miden_core::{Field, PrimeCharacteristicRing, WORD_SIZE, lazy_static};
+use miden_core::{Field, PrimeCharacteristicRing, WORD_SIZE};
 
 use super::{
     AUX_TRACE_RAND_ELEMENTS, CHIPLETS_BUS_AUX_TRACE_OFFSET, ExecutionTrace, Felt, NUM_RAND_ROWS,
@@ -31,9 +31,7 @@ use super::{
 #[test]
 #[allow(clippy::needless_range_loop)]
 fn b_chip_trace_mem() {
-    lazy_static! {
-        static ref FOUR: Felt = Felt::from_u64(4);
-    }
+    const FOUR: Felt = Felt::new(4);
 
     let stack = [1, 2, 3, 4, 0];
     let word = [ONE, Felt::from_u64(2), Felt::from_u64(3), Felt::from_u64(4)];
@@ -43,14 +41,14 @@ fn b_chip_trace_mem() {
         Operation::Drop,
         Operation::Drop,
         Operation::Drop,
-        Operation::MLoad,       // read the first value of the word
-        Operation::MovDn5,      // put address 0 and space for a full word at top of stack
-        Operation::MLoadW,      // load word from address 0 to stack
-        Operation::Push(ONE),   // push a new value onto the stack
-        Operation::Push(*FOUR), // push a new address on to the stack
-        Operation::MStore,      // store 1 at address 4
-        Operation::Drop,        // ensure the stack overflow table is empty
-        Operation::MStream,     // read 2 words starting at address 0
+        Operation::MLoad,      // read the first value of the word
+        Operation::MovDn5,     // put address 0 and space for a full word at top of stack
+        Operation::MLoadW,     // load word from address 0 to stack
+        Operation::Push(ONE),  // push a new value onto the stack
+        Operation::Push(FOUR), // push a new address on to the stack
+        Operation::MStore,     // store 1 at address 4
+        Operation::Drop,       // ensure the stack overflow table is empty
+        Operation::MStream,    // read 2 words starting at address 0
     ];
     let trace = build_trace_from_ops(operations, &stack);
 
@@ -133,7 +131,7 @@ fn b_chip_trace_mem() {
         &rand_elements,
         MEMORY_WRITE_ELEMENT_LABEL,
         ZERO,
-        *FOUR,
+        FOUR,
         Felt::from_u64(11),
         ONE,
     );

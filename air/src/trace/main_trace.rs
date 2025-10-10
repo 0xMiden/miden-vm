@@ -1,5 +1,8 @@
 use alloc::vec::Vec;
-use core::{ops::{Deref, Range}, slice};
+use core::{
+    ops::{Deref, Range},
+    slice,
+};
 
 use miden_core::{Felt, ONE, PrimeCharacteristicRing, Word, ZERO, utils::range};
 
@@ -161,11 +164,9 @@ impl MainTrace {
         self.last_program_row
     }
 
-    pub fn columns(&self) -> slice::Iter<'_, Vec<Felt>>  {
+    pub fn columns(&self) -> slice::Iter<'_, Vec<Felt>> {
         self.columns.columns.iter()
     }
-
-
 
     #[cfg(any(test, feature = "testing"))]
     pub fn get_column_range(&self, range: Range<usize>) -> Vec<Vec<Felt>> {
