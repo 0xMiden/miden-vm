@@ -9,8 +9,9 @@ use miden_core::{
     AdviceMap, Decorator, DecoratorList, Felt, Operation, Word,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DecoratorFingerprint, DecoratorId, DynNodeBuilder,
-        ExternalNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForest, MastNode, MastNodeExt,
-        MastNodeFingerprint, MastNodeId, Remapping, SplitNodeBuilder, SubtreeIterator,
+        ExternalNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForest, MastForestContributor,
+        MastNode, MastNodeExt, MastNodeFingerprint, MastNodeId, Remapping, SplitNodeBuilder,
+        SubtreeIterator,
     },
 };
 
@@ -487,8 +488,10 @@ impl MastForestBuilder {
         if let Some(root_id) = self.statically_linked_mast.find_procedure_root(mast_root) {
             for old_id in SubtreeIterator::new(&root_id, &self.statically_linked_mast.clone()) {
                 let node = self.statically_linked_mast[old_id]
+                    .clone()
+                    .to_builder()
                     .remap_children(&self.statically_linked_mast_remapping);
-                let new_id = self.ensure_node(node)?;
+                let new_id = self.ensure_node(node.build(&self.mast_forest).into_diagnostic()?)?;
                 self.statically_linked_mast_remapping.insert(old_id, new_id);
             }
             Ok(root_id.remap(&self.statically_linked_mast_remapping))
