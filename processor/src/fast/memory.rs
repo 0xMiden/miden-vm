@@ -1,4 +1,5 @@
 use alloc::{collections::BTreeMap, vec::Vec};
+use core::cell::RefCell;
 
 use miden_air::RowIndex;
 use miden_core::{EMPTY_WORD, Felt, WORD_SIZE, Word, ZERO};
@@ -12,6 +13,8 @@ use crate::{ContextId, ErrorContext, MemoryAddress, MemoryError, processor::Memo
 #[derive(Debug, Default)]
 pub struct Memory {
     memory: BTreeMap<(ContextId, u32), Word>,
+    /// Tracks the last access kind and clock per (context, word address)
+    last_access: RefCell<BTreeMap<(ContextId, u32), (RowIndex, LastAccessKind)>>,
 }
 
 impl Memory {
@@ -49,7 +52,28 @@ impl Memory {
         err_ctx: &impl ErrorContext,
     ) -> Result<Word, MemoryError> {
         let addr = clean_addr(addr, err_ctx)?;
-        let word = self.read_word_impl(ctx, addr, Some(clk), err_ctx)?.unwrap_or(EMPTY_WORD);
+        let word_addr = enforce_word_aligned_addr(ctx, addr, Some(clk), err_ctx)?;
+
+        // Enforce: multiple reads in the same clock cycle are allowed, but if one of the accesses
+        // is a write, only a single access is allowed in that cycle for the same (ctx, word_addr).
+        if let Some((last_clk, last_kind)) =
+            self.last_access.borrow().get(&(ctx, word_addr)).copied()
+            && last_clk == clk
+            && matches!(last_kind, LastAccessKind::Write)
+        {
+            return Err(MemoryError::IllegalMemoryAccess {
+                ctx,
+                addr: word_addr,
+                clk: Felt::from(clk.as_u32()),
+            });
+        }
+
+        let word = self.memory.get(&(ctx, word_addr)).copied().unwrap_or(EMPTY_WORD);
+
+        // Record last access as a read at this clock
+        self.last_access
+            .borrow_mut()
+            .insert((ctx, word_addr), (clk, LastAccessKind::Read));
 
         Ok(word)
     }
@@ -99,7 +123,20 @@ impl Memory {
         err_ctx: &impl ErrorContext,
     ) -> Result<(), MemoryError> {
         let addr = enforce_word_aligned_addr(ctx, clean_addr(addr, err_ctx)?, Some(clk), err_ctx)?;
+
+        // Enforce: only one access allowed in a given clk when one of them is a write.
+        if let Some((last_clk, _last_kind)) = self.last_access.borrow().get(&(ctx, addr)).copied()
+            && last_clk == clk
+        {
+            return Err(MemoryError::IllegalMemoryAccess {
+                ctx,
+                addr,
+                clk: Felt::from(clk.as_u32()),
+            });
+        }
+
         self.memory.insert((ctx, addr), word);
+        self.last_access.borrow_mut().insert((ctx, addr), (clk, LastAccessKind::Write));
 
         Ok(())
     }
@@ -249,4 +286,13 @@ impl MemoryInterface for Memory {
     ) -> Result<(), MemoryError> {
         self.write_word(ctx, addr, clk, word, err_ctx)
     }
+}
+
+// INTERNAL TYPES
+// ================================================================================================
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum LastAccessKind {
+    Read,
+    Write,
 }
