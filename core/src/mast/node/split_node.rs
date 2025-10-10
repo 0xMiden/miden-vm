@@ -300,7 +300,6 @@ impl SplitNodeBuilder {
         }
     }
 
-    
     /// Builds the SplitNode with the specified decorators.
     pub fn build(self, mast_forest: &MastForest) -> Result<SplitNode, MastForestError> {
         let forest_len = mast_forest.nodes.len();

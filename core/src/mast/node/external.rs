@@ -253,7 +253,6 @@ impl ExternalNodeBuilder {
         }
     }
 
-    
     /// Builds the ExternalNode with the specified decorators.
     pub fn build(self) -> ExternalNode {
         ExternalNode {

@@ -305,7 +305,6 @@ impl JoinNodeBuilder {
         }
     }
 
-    
     /// Builds the JoinNode with the specified decorators.
     pub fn build(self, mast_forest: &MastForest) -> Result<JoinNode, MastForestError> {
         let forest_len = mast_forest.nodes.len();

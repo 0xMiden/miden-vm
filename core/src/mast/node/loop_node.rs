@@ -286,7 +286,6 @@ impl LoopNodeBuilder {
         }
     }
 
-    
     /// Builds the LoopNode with the specified decorators.
     pub fn build(self, mast_forest: &MastForest) -> Result<LoopNode, MastForestError> {
         if self.body.to_usize() >= mast_forest.nodes.len() {

@@ -392,7 +392,9 @@ fn mast_forest_serialize_deserialize_with_overflowing_ids_fails() {
     BasicBlockNodeBuilder::new(vec![Operation::U32add], vec![(0, deco0), (1, deco1)])
         .add_to_forest(&mut forest)
         .unwrap();
-    forest.add_node(join_node).unwrap();
+    // hack to force addition of a node which builder would return an error at runtime
+    // don't use this in production
+    forest.nodes.push(join_node).unwrap();
 
     assert_matches!(
         MastForest::read_from_bytes(&forest.to_bytes()),
