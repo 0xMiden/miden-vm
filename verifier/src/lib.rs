@@ -8,12 +8,9 @@ extern crate std;
 use alloc::vec;
 
 use miden_air::{HashFunction, ProcessorAir, ProvingOptions, PublicInputs};
-use miden_core::{
-    crypto::{
-        hash::{Blake3_192, Blake3_256, Poseidon2, Rpo256, Rpx256},
-        random::{RpoRandomCoin, RpxRandomCoin, WinterRandomCoin},
-    },
-    precompile::PrecompileRequest,
+use miden_core::crypto::{
+    hash::{Blake3_192, Blake3_256, Poseidon2, Rpo256, Rpx256},
+    random::{RpoRandomCoin, RpxRandomCoin, WinterRandomCoin},
 };
 use winter_verifier::{crypto::MerkleTree, verify as verify_proof};
 
@@ -63,7 +60,7 @@ pub use exports::*;
 /// - The provided proof does not prove a correct execution of the program.
 /// - The protocol parameters used to generate the proof are not in the set of acceptable
 ///   parameters.
-/// - The proof contains any precompile requests.
+/// - The proof contains one or more precompile requests.
 pub fn verify(
     program_info: ProgramInfo,
     stack_inputs: StackInputs,
@@ -75,7 +72,6 @@ pub fn verify(
         stack_inputs,
         stack_outputs,
         proof,
-        &[],
         &PrecompileVerifierRegistry::new(),
     )?;
     Ok(security_level)
@@ -94,7 +90,6 @@ pub fn verify_with_precompiles(
     stack_inputs: StackInputs,
     stack_outputs: StackOutputs,
     proof: ExecutionProof,
-    precompile_requests: &[PrecompileRequest],
     precompile_verifiers: &PrecompileVerifierRegistry,
 ) -> Result<(u32, Word), VerificationError> {
     // get security level of the proof
@@ -103,11 +98,14 @@ pub fn verify_with_precompiles(
 
     // build public inputs and try to verify the proof
     let pub_inputs = PublicInputs::new(program_info, stack_inputs, stack_outputs);
-    let (hash_fn, proof) = proof.into_parts();
+    let (hash_fn, proof, precompile_requests) = proof.into_parts();
 
     // TODO: Check that this corresponds to the commitment output by the VM
+    // compute the commitment to the list of all precompile requests.
+    // if no verifiers were provided (e.g. when this function was called from `verify),
+    // but the proof contained requests anyway, returns a `NoVerifierFound` error.
     let requests_commitment = precompile_verifiers
-        .deferred_requests_commitment(precompile_requests)
+        .deferred_requests_commitment(&precompile_requests)
         .map_err(VerificationError::PrecompileVerificationError)?;
 
     match hash_fn {

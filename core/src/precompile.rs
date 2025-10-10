@@ -75,9 +75,10 @@ impl Deserializable for PrecompileRequest {
 /// and the commitment word that represents the verified computation result.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrecompileCommitment {
-    /// Tag containing metadata including the event ID in the first element
+    /// Tag containing metadata including the event ID in the first element. The remaining 3
+    /// elements can be used for precompile-defined associated data.
     pub tag: Word,
-    /// Commitment word representing the verified computation result
+    /// Commitment word representing the inputs and result of the request.
     pub commitment: Word,
 }
 
@@ -179,14 +180,14 @@ pub trait PrecompileVerifier: Send + Sync {
     /// Verifies a precompile computation from the given call data.
     ///
     /// # Arguments
-    /// * `data` - The byte data used for the precompile computation
+    /// * `calldata` - The byte data containing the inputs to evaluate the precompile.
     ///
     /// # Returns
     /// Returns a precompile commitment containing both tag and commitment word on success.
     ///
     /// # Errors
     /// Returns an error if the verification fails.
-    fn verify(&self, data: &[u8]) -> Result<PrecompileCommitment, PrecompileError>;
+    fn verify(&self, calldata: &[u8]) -> Result<PrecompileCommitment, PrecompileError>;
 }
 
 /// Default implementation for both free functions and closures with signature
@@ -203,8 +204,8 @@ impl<F> PrecompileVerifier for F
 where
     F: Fn(&[u8]) -> Result<PrecompileCommitment, PrecompileError> + Send + Sync + 'static,
 {
-    fn verify(&self, data: &[u8]) -> Result<PrecompileCommitment, PrecompileError> {
-        self(data)
+    fn verify(&self, calldata: &[u8]) -> Result<PrecompileCommitment, PrecompileError> {
+        self(calldata)
     }
 }
 
@@ -221,10 +222,12 @@ where
 /// The exact shape of the commitment is described in TODO(adr1anh)
 ///
 /// # Details:
-/// - The capacity of the sponge is set to `ZERO`.
-/// - We absorb a new commitment by permuting `[capacity, tag, commitment]` and saving the resulting
-///   capacity.
-/// - The digest is finalized by absorbing `[ZERO, ZERO]` and returning the resulting digest.
+/// This struct is a specialization of an RPO based sponge for aggregating precompile commitment.
+/// - `new()`: Initialize a sponge with capacity set to `ZERO`.
+/// - `absorb(comm)`: Permute the state `[self.capacity, comm.tag, comm.commitment]`, absorbing the
+///   `PrecompileCommitment` into the sponge and saving the resulting capacity.
+/// - `finalize()`: Permute the state `[self.capacity, ZERO, ZERO]` and extract the resulting
+///   digest.
 #[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
 struct PrecompileVerificationState {
     /// RPO256 sponge capacity, updated with each absorbed commitment.

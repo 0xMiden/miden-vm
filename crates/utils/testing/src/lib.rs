@@ -37,7 +37,7 @@ use miden_processor::{
     parallel::build_trace,
 };
 use miden_prover::utils::range;
-pub use miden_prover::{MerkleTreeVC, ProvingOptions, prove, prove_with_precompiles};
+pub use miden_prover::{MerkleTreeVC, ProvingOptions, prove};
 pub use miden_verifier::{AcceptableOptions, VerifierError, verify};
 pub use pretty_assertions::{assert_eq, assert_ne, assert_str_eq};
 #[cfg(not(target_family = "wasm"))]
