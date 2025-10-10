@@ -716,18 +716,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "34aa73646ffb006b8f5147f3dc182bd4bcb190227ce861fc4a4844bf8e3cb2c0"
 
 [[package]]
-name = "enum_dispatch"
-version = "0.3.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aa18ce2bc66555b3218614519ac839ddb759a7d6720732f979ef8d13be147ecd"
-dependencies = [
- "once_cell",
- "proc-macro2",
- "quote",
- "syn 2.0.109",
-]
-
-[[package]]
 name = "env_filter"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1402,13 +1390,12 @@ name = "miden-core"
 version = "0.20.0"
 dependencies = [
  "criterion",
- "enum_dispatch",
  "insta",
  "miden-crypto",
  "miden-debug-types",
- "miden-derive-mast-node-ext",
  "miden-formatting",
  "miden-test-serde-macros",
+ "miden-utils-core-derive",
  "miden-utils-indexing",
  "num-derive",
  "num-traits",
@@ -1477,15 +1464,6 @@ dependencies = [
  "serde",
  "serde_spanned",
  "thiserror",
-]
-
-[[package]]
-name = "miden-derive-mast-node-ext"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
 ]
 
 [[package]]
@@ -1664,6 +1642,15 @@ dependencies = [
  "test-case",
  "winter-prover",
  "winter-rand-utils",
+]
+
+[[package]]
+name = "miden-utils-core-derive"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
 ]
 
 [[package]]

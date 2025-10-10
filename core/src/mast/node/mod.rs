@@ -6,7 +6,7 @@ pub use basic_block_node::{
     BATCH_SIZE as OP_BATCH_SIZE, BasicBlockNode, BasicBlockNodeBuilder, DecoratorOpLinkIterator,
     GROUP_SIZE as OP_GROUP_SIZE, OpBatch, OperationOrDecorator,
 };
-use miden_derive_mast_node_ext::{FromVariant, MastNodeExt};
+use miden_utils_core_derive::{FromVariant, MastNodeExt};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 

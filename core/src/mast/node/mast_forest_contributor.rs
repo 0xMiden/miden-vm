@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use enum_dispatch::enum_dispatch;
+use miden_utils_core_derive::MastForestContributor;
 
 use super::{
     BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder,
@@ -8,8 +8,6 @@ use super::{
 };
 use crate::mast::{MastForest, MastForestError, MastNodeId};
 
-#[allow(dead_code)]
-#[enum_dispatch]
 pub trait MastForestContributor {
     fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError>;
 
@@ -35,9 +33,8 @@ pub trait MastForestContributor {
 }
 
 /// Enum of all MAST node builders that can be added to a forest.
-/// This allows for generic handling of different builder types through enum_dispatch.
-#[enum_dispatch(MastForestContributor)]
-#[derive(Debug)]
+/// This allows for generic handling of different builder types through enum dispatch.
+#[derive(Debug, MastForestContributor)]
 pub enum MastNodeBuilder {
     BasicBlock(BasicBlockNodeBuilder),
     Call(CallNodeBuilder),
