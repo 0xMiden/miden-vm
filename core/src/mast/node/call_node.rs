@@ -13,10 +13,7 @@ use super::{MastForestContributor, MastNodeErrorContext, MastNodeExt};
 use crate::{
     Idx, OPCODE_CALL, OPCODE_SYSCALL,
     chiplets::hasher,
-    mast::{
-        DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId,
-        Remapping,
-    },
+    mast::{DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId},
 };
 
 // CALL NODE
@@ -307,12 +304,6 @@ impl MastNodeExt for CallNode {
         Box::new(CallNode::to_pretty_print(self, mast_forest))
     }
 
-    fn remap_children(&self, remapping: &Remapping) -> Self {
-        let mut node = self.clone();
-        node.callee = node.callee.remap(remapping);
-        node
-    }
-
     fn has_children(&self) -> bool {
         true
     }
@@ -477,6 +468,15 @@ impl MastForestContributor for CallNodeBuilder {
                 )
             },
         )
+    }
+
+    fn remap_children(self, remapping: &crate::mast::Remapping) -> Self {
+        CallNodeBuilder {
+            callee: self.callee.remap(remapping),
+            is_syscall: self.is_syscall,
+            before_enter: self.before_enter,
+            after_exit: self.after_exit,
+        }
     }
 }
 

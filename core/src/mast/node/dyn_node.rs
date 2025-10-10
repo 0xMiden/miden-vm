@@ -9,10 +9,7 @@ use serde::{Deserialize, Serialize};
 use super::{MastForestContributor, MastNodeErrorContext, MastNodeExt};
 use crate::{
     OPCODE_DYN, OPCODE_DYNCALL,
-    mast::{
-        DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId,
-        Remapping,
-    },
+    mast::{DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId},
 };
 
 // DYN NODE
@@ -231,10 +228,6 @@ impl MastNodeExt for DynNode {
         Box::new(DynNode::to_pretty_print(self, mast_forest))
     }
 
-    fn remap_children(&self, _remapping: &Remapping) -> Self {
-        self.clone()
-    }
-
     fn has_children(&self) -> bool {
         false
     }
@@ -381,6 +374,11 @@ impl MastForestContributor for DynNodeBuilder {
                 ])
             },
         )
+    }
+
+    fn remap_children(self, _remapping: &crate::mast::Remapping) -> Self {
+        // DynNode has no children to remap, so return self unchanged
+        self
     }
 }
 

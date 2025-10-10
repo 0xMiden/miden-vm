@@ -37,7 +37,7 @@ pub use mast_forest_contributor::{MastForestContributor, MastNodeBuilder};
 use super::DecoratorId;
 use crate::{
     AssemblyOp, Decorator,
-    mast::{MastForest, MastNodeId, Remapping},
+    mast::{MastForest, MastNodeId},
 };
 
 pub trait MastNodeExt {
@@ -64,9 +64,6 @@ pub trait MastNodeExt {
 
     /// Returns a pretty printer for this node.
     fn to_pretty_print<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn PrettyPrint + 'a>;
-
-    /// Remap the node children to their new positions indicated by the given [`Remapping`].
-    fn remap_children(&self, remapping: &Remapping) -> Self;
 
     /// Returns true if the this node has children.
     fn has_children(&self) -> bool;
@@ -310,18 +307,6 @@ impl MastNodeExt for MastNode {
             MastNode::Call(node) => Box::new(node.to_pretty_print(mast_forest)),
             MastNode::Dyn(node) => Box::new(node.to_pretty_print(mast_forest)),
             MastNode::External(node) => Box::new(node.to_pretty_print(mast_forest)),
-        }
-    }
-
-    fn remap_children(&self, remapping: &Remapping) -> Self {
-        match self {
-            MastNode::Block(node) => MastNode::Block(node.remap_children(remapping)),
-            MastNode::Join(node) => MastNode::Join(node.remap_children(remapping)),
-            MastNode::Split(node) => MastNode::Split(node.remap_children(remapping)),
-            MastNode::Loop(node) => MastNode::Loop(node.remap_children(remapping)),
-            MastNode::Call(node) => MastNode::Call(node.remap_children(remapping)),
-            MastNode::Dyn(node) => MastNode::Dyn(node.remap_children(remapping)),
-            MastNode::External(node) => MastNode::External(node.remap_children(remapping)),
         }
     }
 

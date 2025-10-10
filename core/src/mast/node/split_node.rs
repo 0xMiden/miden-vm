@@ -10,10 +10,7 @@ use super::{MastForestContributor, MastNodeErrorContext, MastNodeExt};
 use crate::{
     Idx, OPCODE_SPLIT,
     chiplets::hasher,
-    mast::{
-        DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId,
-        Remapping,
-    },
+    mast::{DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId},
 };
 
 // SPLIT NODE
@@ -227,13 +224,6 @@ impl MastNodeExt for SplitNode {
         Box::new(SplitNode::to_pretty_print(self, mast_forest))
     }
 
-    fn remap_children(&self, remapping: &Remapping) -> Self {
-        let mut node = self.clone();
-        node.branches[0] = node.branches[0].remap(remapping);
-        node.branches[1] = node.branches[1].remap(remapping);
-        node
-    }
-
     fn has_children(&self) -> bool {
         true
     }
@@ -377,6 +367,14 @@ impl MastForestContributor for SplitNodeBuilder {
                 )
             },
         )
+    }
+
+    fn remap_children(self, remapping: &crate::mast::Remapping) -> Self {
+        SplitNodeBuilder {
+            branches: [self.branches[0].remap(remapping), self.branches[1].remap(remapping)],
+            before_enter: self.before_enter,
+            after_exit: self.after_exit,
+        }
     }
 }
 

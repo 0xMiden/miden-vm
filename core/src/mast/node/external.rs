@@ -10,10 +10,7 @@ use miden_formatting::{
 use serde::{Deserialize, Serialize};
 
 use super::{MastForestContributor, MastNodeErrorContext, MastNodeExt};
-use crate::mast::{
-    DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId,
-    Remapping,
-};
+use crate::mast::{DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId};
 
 // EXTERNAL NODE
 // ================================================================================================
@@ -184,10 +181,6 @@ impl MastNodeExt for ExternalNode {
         Box::new(ExternalNode::to_pretty_print(self, mast_forest))
     }
 
-    fn remap_children(&self, _remapping: &Remapping) -> Self {
-        self.clone()
-    }
-
     fn has_children(&self) -> bool {
         false
     }
@@ -305,6 +298,11 @@ impl MastForestContributor for ExternalNodeBuilder {
             &[],         // ExternalNode has no children
             self.digest, // ExternalNodeBuilder stores the digest directly
         )
+    }
+
+    fn remap_children(self, _remapping: &crate::mast::Remapping) -> Self {
+        // ExternalNode has no children to remap, so return self unchanged
+        self
     }
 }
 

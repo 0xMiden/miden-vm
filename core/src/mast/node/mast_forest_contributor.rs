@@ -20,6 +20,10 @@ pub trait MastForestContributor {
         forest: &MastForest,
         hash_by_node_id: &impl crate::LookupByIdx<MastNodeId, crate::mast::MastNodeFingerprint>,
     ) -> Result<crate::mast::MastNodeFingerprint, MastForestError>;
+
+    /// Remap the node children to their new positions indicated by the given
+    /// [`crate::mast::Remapping`].
+    fn remap_children(self, remapping: &crate::mast::Remapping) -> Self;
 }
 
 /// Enum of all MAST node builders that can be added to a forest.
@@ -40,7 +44,8 @@ impl MastNodeBuilder {
     /// Build the node from this builder.
     ///
     /// For nodes that depend on a MastForest (Call, Join, Loop, Split), the forest is required.
-    /// For nodes that don't depend on a MastForest (BasicBlock, Dyn, External), the forest is ignored.
+    /// For nodes that don't depend on a MastForest (BasicBlock, Dyn, External), the forest is
+    /// ignored.
     pub fn build(self, mast_forest: &MastForest) -> Result<crate::mast::MastNode, MastForestError> {
         match self {
             MastNodeBuilder::BasicBlock(builder) => Ok(builder.build()?.into()),

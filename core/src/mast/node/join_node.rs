@@ -9,10 +9,7 @@ use super::{MastForestContributor, MastNodeErrorContext, MastNodeExt};
 use crate::{
     Idx, OPCODE_JOIN,
     chiplets::hasher,
-    mast::{
-        DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId,
-        Remapping,
-    },
+    mast::{DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId},
     prettier::PrettyPrint,
 };
 
@@ -232,13 +229,6 @@ impl MastNodeExt for JoinNode {
         Box::new(JoinNode::to_pretty_print(self, mast_forest))
     }
 
-    fn remap_children(&self, remapping: &Remapping) -> Self {
-        let mut node = self.clone();
-        node.children[0] = node.children[0].remap(remapping);
-        node.children[1] = node.children[1].remap(remapping);
-        node
-    }
-
     fn has_children(&self) -> bool {
         true
     }
@@ -382,6 +372,14 @@ impl MastForestContributor for JoinNodeBuilder {
                 )
             },
         )
+    }
+
+    fn remap_children(self, remapping: &crate::mast::Remapping) -> Self {
+        JoinNodeBuilder {
+            children: [self.children[0].remap(remapping), self.children[1].remap(remapping)],
+            before_enter: self.before_enter,
+            after_exit: self.after_exit,
+        }
     }
 }
 

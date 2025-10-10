@@ -10,10 +10,7 @@ use super::{MastForestContributor, MastNodeErrorContext, MastNodeExt};
 use crate::{
     Idx, OPCODE_LOOP,
     chiplets::hasher,
-    mast::{
-        DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId,
-        Remapping,
-    },
+    mast::{DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId},
 };
 
 // LOOP NODE
@@ -215,12 +212,6 @@ impl MastNodeExt for LoopNode {
         Box::new(LoopNode::to_pretty_print(self, mast_forest))
     }
 
-    fn remap_children(&self, remapping: &Remapping) -> Self {
-        let mut node = self.clone();
-        node.body = node.body.remap(remapping);
-        node
-    }
-
     fn has_children(&self) -> bool {
         true
     }
@@ -357,6 +348,14 @@ impl MastForestContributor for LoopNodeBuilder {
                 )
             },
         )
+    }
+
+    fn remap_children(self, remapping: &crate::mast::Remapping) -> Self {
+        LoopNodeBuilder {
+            body: self.body.remap(remapping),
+            before_enter: self.before_enter,
+            after_exit: self.after_exit,
+        }
     }
 }
 
