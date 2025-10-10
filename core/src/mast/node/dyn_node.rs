@@ -287,7 +287,6 @@ impl DynNodeBuilder {
         }
     }
 
-  
     /// Builds the DynNode with the specified decorators.
     pub fn build(self) -> DynNode {
         DynNode {

@@ -102,7 +102,10 @@ impl MastForest {
     /// Adds a node to the forest, and returns the associated [`MastNodeId`].
     ///
     /// Adding two duplicate nodes will result in two distinct returned [`MastNodeId`]s.
-    pub fn add_node(&mut self, node: impl Into<MastNode>) -> Result<MastNodeId, MastForestError> {
+    pub(crate) fn add_node(
+        &mut self,
+        node: impl Into<MastNode>,
+    ) -> Result<MastNodeId, MastForestError> {
         self.nodes.push(node.into()).map_err(|_| MastForestError::TooManyNodes)
     }
 
