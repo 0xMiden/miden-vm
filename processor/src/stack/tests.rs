@@ -493,7 +493,7 @@ fn build_stack(stack_inputs: &[u64]) -> [Felt; MIN_STACK_DEPTH] {
 fn build_helpers(stack_depth: u64, next_overflow_addr: u64) -> StackHelpersState {
     let b0 = Felt::from_u64(stack_depth);
     let b1 = Felt::from_u64(next_overflow_addr);
-    let h0 = (b0 - Felt::from_u64(MIN_STACK_DEPTH as u64)).try_inverse().unwrap_or(ZERO);
+    let h0 = (b0 - Felt::from_u64(MIN_STACK_DEPTH as u64)).inverse_unwrap_zero();
 
     [b0, b1, h0]
 }

@@ -238,7 +238,7 @@ impl Process {
         ];
 
         if check_element_validity {
-            let m = (Felt::from_u32(u32::MAX) - hi).try_inverse().unwrap_or(ZERO);
+            let m = (Felt::from_u32(u32::MAX) - hi).inverse_unwrap_zero();
             helper_values[4] = m;
         }
 

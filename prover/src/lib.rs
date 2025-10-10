@@ -11,7 +11,7 @@ use std::println;
 #[cfg(feature = "std")]
 use std::time::Instant;
 
-use miden_air::{ProcessorAir, PublicInputs, ToElements};
+use miden_air::{ProcessorAir, PublicInputs};
 #[cfg(all(feature = "metal", target_arch = "aarch64", target_os = "macos"))]
 use miden_gpu::HashFn;
 use miden_processor::{ExecutionTrace, Program};
