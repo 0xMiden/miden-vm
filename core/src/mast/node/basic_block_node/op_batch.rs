@@ -126,7 +126,7 @@ impl OpBatch {
     /// # Performance Consideration
     /// For iterating over all operations in a batch, prefer using `iter_with_groups()`
     /// which tracks group boundaries incrementally in O(1) per operation rather than
-    /// O(log m) per operation.
+    /// O(log m) per operation, where m is the number of groups.
     #[must_use]
     pub fn op_idx_in_batch_to_group(&self, op_idx_in_batch: usize) -> Option<(usize, usize)> {
         if op_idx_in_batch >= self.ops.len() {
@@ -161,12 +161,8 @@ impl OpBatch {
     ///
     /// This is significantly more efficient than calling `op_idx_in_batch_to_group()` for each
     /// operation because it tracks group boundaries incrementally instead of using binary search
-    /// for each operation (which would be O(n * log m) total).
-    ///
-    /// This method returns an iterator that yields tuples of `(group_idx, op_idx_in_group,
-    /// operation)` for each operation in the batch, making it easy to iterate over operations
-    /// while keeping track of their group positions without the overhead of repeated binary
-    /// searches.
+    /// for each operation (which would be O(n * log m) total, where m is the number of groups,
+    /// and n is the number of operations).
     pub fn iter_with_groups(&self) -> OpBatchIterator<'_> {
         OpBatchIterator::new(self)
     }
@@ -390,8 +386,8 @@ impl OpBatchAccumulator {
 ///
 ///
 /// This is more efficient than calling `op_idx_in_batch_to_group()` for each
-/// operation (O(log m) per operation) because it tracks group boundaries incrementally
-/// using a simple counter check.
+/// operation (O(log m) per operation, for m groups) because it tracks group boundaries
+/// incrementally using a simple counter check.
 pub struct OpBatchIterator<'a> {
     batch: &'a OpBatch,
     current_op_idx: usize,
@@ -418,6 +414,8 @@ impl<'a> Iterator for OpBatchIterator<'a> {
 
         // Increment grp_idx if we've crossed into the next group
         // Check if current_op_idx >= indptr[self.grp_idx + 1] (start of next group)
+        // The while loop skips the groups dedicated to immediates, which are devoid
+        // of operations.
         while self.grp_idx + 1 < self.batch.num_groups()
             && self.current_op_idx >= indptr[self.grp_idx + 1]
         {
