@@ -1,19 +1,22 @@
 #![no_std]
 
 pub mod handlers;
+pub mod precompile;
 
 extern crate alloc;
 
 use alloc::{sync::Arc, vec, vec::Vec};
 
 use miden_assembly::{Library, mast::MastForest, utils::Deserializable};
-use miden_core::{EventId, Felt, Word, precompile::PrecompileVerifier};
+use miden_core::{EventId, Felt, Word};
 use miden_processor::{EventHandler, HostLibrary};
 use miden_utils_sync::LazyLock;
+// Export the sealed trait and registry
+pub use precompile::{PrecompileVerificationError, PrecompileVerifier, PrecompileVerifierRegistry};
 
 use crate::handlers::{
     falcon_div::{FALCON_DIV_EVENT_ID, handle_falcon_div},
-    keccak256::{KECCAK_HASH_MEMORY_EVENT_ID, handle_keccak_hash_memory, keccak_verifier},
+    keccak256::{KECCAK_HASH_MEMORY_EVENT_ID, KeccakVerifier, handle_keccak_hash_memory},
     smt_peek::{SMT_PEEK_EVENT_ID, handle_smt_peek},
     sorted_array::{
         LOWERBOUND_ARRAY_EVENT_ID, LOWERBOUND_KEY_VALUE_EVENT_ID, handle_lowerbound_array,
@@ -79,7 +82,7 @@ impl StdLibrary {
 
     /// List of all `PrecompileVerifier` required to verify precompile requests.
     pub fn verifiers(&self) -> Vec<(EventId, Arc<dyn PrecompileVerifier>)> {
-        vec![(KECCAK_HASH_MEMORY_EVENT_ID, Arc::new(keccak_verifier))]
+        vec![(KECCAK_HASH_MEMORY_EVENT_ID, Arc::new(KeccakVerifier::new()))]
     }
 }
 

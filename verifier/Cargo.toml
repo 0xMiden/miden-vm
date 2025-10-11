@@ -25,6 +25,7 @@ std = ["miden-air/std", "miden-core/std", "thiserror/std", "winter-verifier/std"
 # Miden dependencies
 miden-air.workspace = true
 miden-core.workspace = true
+miden-stdlib.workspace = true
 
 # External dependencies
 tracing.workspace = true

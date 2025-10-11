@@ -19,13 +19,16 @@ use winter_verifier::{crypto::MerkleTree, verify as verify_proof};
 mod exports {
     pub use miden_core::{
         Kernel, ProgramInfo, StackInputs, StackOutputs, Word,
-        precompile::{PrecompileError, PrecompileVerificationError, PrecompileVerifierRegistry},
+        precompile::{PrecompileError, PrecompileRequest},
     };
     pub use winter_verifier::{AcceptableOptions, VerifierError};
     pub mod math {
         pub use miden_core::{Felt, FieldElement, StarkField};
     }
     pub use miden_air::ExecutionProof;
+    pub use miden_stdlib::{
+        PrecompileVerificationError, PrecompileVerifier, PrecompileVerifierRegistry,
+    };
 }
 pub use exports::*;
 

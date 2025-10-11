@@ -10,10 +10,7 @@
 use alloc::{vec, vec::Vec};
 use core::array;
 
-use miden_core::{
-    EventId, Felt, Word, ZERO,
-    precompile::{PrecompileCommitment, PrecompileError, PrecompileRequest},
-};
+use miden_core::{EventId, Felt, Word, ZERO};
 use miden_crypto::hash::{keccak::Keccak256, rpo::Rpo256};
 use miden_processor::{AdviceMutation, EventError, ProcessState};
 
@@ -102,14 +99,35 @@ fn read_witness(process: &ProcessState, ptr: u64, len_bytes: u64) -> Option<Vec<
 // KECCAK VERIFIER
 // ================================================================================================
 
-/// Verifier for Keccak256 precompile computations.
+use crate::precompile::{
+    PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileVerifier,
+};
+
+/// Keccak256 precompile verifier.
 ///
 /// This verifier validates that Keccak256 hash computations were performed correctly
 /// by recomputing the hash from the provided witness data and generating the precompile
 /// commitment.
-pub fn keccak_verifier(input_u8: &[u8]) -> Result<PrecompileCommitment, PrecompileError> {
-    let preimage = KeccakPreimage::new(input_u8.to_vec());
-    Ok(preimage.precompile_commitment())
+#[derive(Debug, Default)]
+pub struct KeccakVerifier(());
+
+impl KeccakVerifier {
+    /// Creates a new Keccak256 verifier.
+    pub fn new() -> Self {
+        Self(())
+    }
+}
+
+impl PrecompileVerifier for KeccakVerifier {
+    fn verify(&self, calldata: &[u8]) -> Result<PrecompileCommitment, PrecompileError> {
+        let preimage = KeccakPreimage::new(calldata.to_vec());
+        Ok(preimage.precompile_commitment())
+    }
+}
+
+/// Creates a new Keccak256 verifier.
+pub fn keccak_verifier() -> KeccakVerifier {
+    KeccakVerifier::new()
 }
 
 // KECCAK DIGEST
@@ -571,7 +589,8 @@ mod tests {
         let preimage = KeccakPreimage::new(input.to_vec());
         let expected_commitment = preimage.precompile_commitment();
 
-        let commitment = keccak_verifier(input).unwrap();
+        let verifier = keccak_verifier();
+        let commitment = verifier.verify(input).unwrap();
         assert_eq!(commitment, expected_commitment);
     }
 }

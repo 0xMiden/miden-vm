@@ -11,17 +11,15 @@ use std::sync::Arc;
 
 use miden_air::ProvingOptions;
 use miden_assembly::Assembler;
-use miden_core::{
-    Felt, FieldElement, ProgramInfo,
-    precompile::{PrecompileCommitment, PrecompileVerifierRegistry},
-};
+use miden_core::{Felt, FieldElement, ProgramInfo};
 use miden_crypto::{Word, hash::rpo::Rpo256};
 use miden_processor::{AdviceInputs, DefaultHost, Program, StackInputs};
 use miden_stdlib::{
     StdLibrary,
     handlers::keccak256::{
-        KECCAK_HASH_MEMORY_EVENT_ID, KECCAK_HASH_MEMORY_EVENT_NAME, KeccakPreimage, keccak_verifier,
+        KECCAK_HASH_MEMORY_EVENT_ID, KECCAK_HASH_MEMORY_EVENT_NAME, KeccakPreimage, KeccakVerifier,
     },
+    precompile::{PrecompileCommitment, PrecompileVerifier, PrecompileVerifierRegistry},
 };
 
 // Test constants
@@ -154,7 +152,8 @@ fn test_keccak_hash_memory_impl(input_u8: &[u8]) {
     let digest: [Felt; 8] = array::from_fn(|i| stack.get_stack_item(8 + i).unwrap());
     assert_eq!(&digest, preimage.digest().as_ref(), "output digest does not match");
 
-    let commitment_verifier = keccak_verifier(preimage.as_ref()).unwrap();
+    let verifier = KeccakVerifier::new();
+    let commitment_verifier = verifier.verify(preimage.as_ref()).unwrap();
     assert_eq!(
         commitment_verifier, precompile_commitment,
         "commitment returned by verifier does not match the one on the stack"
@@ -368,7 +367,7 @@ fn test_keccak_hash_1to1_prove_verify() {
 
     // Check we get the same commitment from the verifier
     let mut precompile_verifiers = PrecompileVerifierRegistry::new();
-    precompile_verifiers.register(KECCAK_HASH_MEMORY_EVENT_ID, Arc::new(keccak_verifier));
+    precompile_verifiers.register(KECCAK_HASH_MEMORY_EVENT_ID, Arc::new(KeccakVerifier::new()));
     let deferred_commitment = precompile_verifiers
         .deferred_requests_commitment(proof.precompile_requests())
         .expect("failed to verify");
