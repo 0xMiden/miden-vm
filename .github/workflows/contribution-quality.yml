@@ -1,4 +1,4 @@
-name: Contribution Quality (Single Label)
+name: Contribution Quality
 
 on:
   pull_request:
@@ -71,7 +71,7 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           else
             case "$assoc" in
-              OWNER|MEMBER|COLLABORATOR) echo "skip=true"  >> "$GITHUB_OUTPUT" ;;
+              OWNER|CONTRIBUTOR|COLLABORATOR) echo "skip=true"  >> "$GITHUB_OUTPUT" ;;
               *)                         echo "skip=false" >> "$GITHUB_OUTPUT" ;;
             esac
             [ "$draft" = "true" ] && echo "skip=true" >> "$GITHUB_OUTPUT" || true
