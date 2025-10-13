@@ -1,3 +1,57 @@
+//! Precompile framework for deferred verification in the Miden VM.
+//!
+//! This module provides the infrastructure for executing computationally expensive operations
+//! (precompiles) during VM execution while deferring their verification until proof generation.
+//!
+//! # Overview
+//!
+//! Precompiles enable the Miden VM to efficiently handle operations like cryptographic hashing
+//! (e.g., Keccak256) that would be prohibitively expensive to prove directly in the VM. Instead
+//! of proving every step of these computations, the VM uses a deferred verification approach.
+//!
+//! # Workflow
+//!
+//! The precompile system follows a four-stage lifecycle:
+//!
+//! 1. **VM Execution**: When a program calls a precompile (via an event handler), the VM:
+//!    - Computes the result non-deterministically using the host
+//!    - Creates a [`PrecompileCommitment`] binding inputs and outputs together
+//!    - Stores a [`PrecompileRequest`] containing the raw input data for later verification
+//!    - Absorbs the commitment into a running capacity (sponge state)
+//!
+//! 2. **Request Storage**: All precompile requests are collected and included in the execution
+//!    proof alongside the final capacity word produced by the VM.
+//!
+//! 3. **Proof Generation**: The prover generates a STARK proof of the VM execution, including
+//!    the final capacity as a public input.
+//!
+//! 4. **Verification**: The verifier:
+//!    - Recomputes each precompile using the stored requests via [`PrecompileVerifier`]
+//!    - Reconstructs the capacity using [`PrecompileVerificationState`]
+//!    - Verifies the STARK proof with the recomputed capacity as public input
+//!    - Accepts the proof only if both the STARK and the capacity match
+//!
+//! # Key Types
+//!
+//! - [`PrecompileRequest`]: Stores the event ID and raw input bytes for a precompile call
+//! - [`PrecompileCommitment`]: A cryptographic commitment to both inputs and outputs, consisting
+//!   of a tag (with event ID and metadata) and a commitment word
+//! - [`PrecompileVerifier`]: Trait for implementing verification logic for specific precompiles
+//! - [`PrecompileVerifierRegistry`]: Registry mapping event IDs to their verifier implementations
+//! - [`PrecompileVerificationState`]: Tracks the RPO256 sponge capacity for aggregating commitments
+//!
+//! # Example Implementation
+//!
+//! See the Keccak256 precompile in `miden_stdlib::handlers::keccak256` for a complete reference
+//! implementation demonstrating both execution-time event handling and verification-time
+//! commitment recomputation.
+//!
+//! # Security Considerations
+//!
+//! **⚠️ Alpha Status**: This framework is under active development and subject to change. The
+//! security model assumes a fixed set of precompiles supported by the network. User-defined
+//! precompiles cannot be verified in the current architecture.
+
 use alloc::{boxed::Box, collections::BTreeMap, sync::Arc, vec::Vec};
 use core::error::Error;
 
@@ -19,9 +73,9 @@ use crate::{
 /// the raw bytes that will be processed by the precompile verifier when recomputing the
 /// corresponding commitment.
 ///
-/// The `EventId` should correspond to the one used by the corresponding
-/// `EventHandler` which invoked the precompile in the VM. It is used by the verifier to select
-/// which `PrecompileVerifier` must be called to validate the underlying `calldata`.
+/// The `EventId` corresponds to the one used by the `EventHandler` that invoked the precompile
+/// during VM execution. The verifier uses this ID to select the appropriate `PrecompileVerifier`
+/// to validate the `calldata`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(
@@ -72,6 +126,14 @@ impl Deserializable for PrecompileRequest {
 ///
 /// This structure contains both the tag (which includes metadata like event ID)
 /// and the commitment word that represents the verified computation result.
+///
+/// # Tag Structure
+///
+/// The tag is a 4-element word `[event_id, meta1, meta2, meta3]` where:
+///
+/// - **First element**: The [`EventId`] from the corresponding `EventHandler`
+/// - **Remaining 3 elements**: Available for precompile-specific metadata (e.g., `len_bytes` for
+///   hash functions to distinguish actual data from padding)
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrecompileCommitment {
     /// Tag containing metadata including the event ID in the first element. The remaining 3
@@ -181,6 +243,12 @@ impl PrecompileVerifierRegistry {
 /// Each precompile type must implement this trait to enable verification of its
 /// computations during proof verification. The verifier validates that the
 /// computation was performed correctly and returns a precompile commitment.
+///
+/// # Stability
+///
+/// **⚠️ Alpha Status**: This trait and the broader precompile verification framework are under
+/// active development. The interface and behavior may change in future releases as the framework
+/// evolves. Production use should account for potential breaking changes.
 pub trait PrecompileVerifier: Send + Sync {
     /// Verifies a precompile computation from the given call data.
     ///
@@ -205,15 +273,16 @@ pub trait PrecompileVerifier: Send + Sync {
 /// precompile commitment as it's produced. At the end of execution, the verifier recomputes
 /// this same aggregation and compares the final digest.
 ///
-/// The exact shape of the commitment is described in TODO(adr1anh)
+/// For architectural details, see
+/// [`arch.md`](https://github.com/0xMiden/miden-vm/blob/main/arch.md).
 ///
-/// # Details:
-/// This struct is a specialization of an RPO based sponge for aggregating precompile commitment.
-/// - `new()`: Initialize a sponge with capacity set to `ZERO`.
-/// - `absorb(comm)`: Permute the state `[self.capacity, comm.tag, comm.commitment]`, absorbing the
-///   `PrecompileCommitment` into the sponge and saving the resulting capacity.
-/// - `finalize()`: Permute the state `[self.capacity, ZERO, ZERO]` and extract the resulting
-///   digest.
+/// # Aggregation Process
+///
+/// - **`new()`**: Initialize capacity to `ZERO`
+/// - **`absorb(comm)`**: Apply RPO256 permutation to `[capacity, tag, commitment]` and update
+///   capacity to the first word of the result
+/// - **`finalize()`**: Apply RPO256 permutation to `[capacity, ZERO, ZERO]` and extract the
+///   second word as the final digest
 #[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
 struct PrecompileVerificationState {
     /// RPO256 sponge capacity, updated with each absorbed commitment.
