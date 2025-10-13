@@ -1,7 +1,23 @@
-//! Keccak256 precompile event handlers for the Miden VM.
+//! Keccak256 precompile for the Miden VM.
 //!
-//! Event handlers compute Keccak256 hashes and provide them to the VM via the advice stack,
-//! while storing witness data for later proof generation.
+//! This module provides both execution-time and verification-time support for Keccak256 hashing.
+//!
+//! ## Architecture
+//!
+//! ### Event Handler (Execution-Time)
+//! When the VM emits a Keccak event requesting non-deterministic hash results, the processor calls
+//! [`KeccakPrecompile`] which reads input data from memory, computes the hash, provides the digest
+//! via the advice stack, and logs the raw preimage bytes as a precompile request.
+//!
+//! ### Precompile Verifier (Verification-Time)
+//! During verification, the [`PrecompileVerifier`] receives the stored preimage bytes, recomputes
+//! the hash, and generates a commitment `RPO(RPO(input) || RPO(digest))` that validates the
+//! computation was performed correctly.
+//!
+//! ### Commitment Tag Format
+//! Each request is tagged as `[event_id, len_bytes, 0, 0]`. The `len_bytes` field prevents
+//! collisions: since bytes are packed into 32-bit limbs, we must distinguish actual data bytes
+//! from padding in the final limb.
 //!
 //! ## Digest Representation
 //! A Keccak256 digest (256 bits) is represented as 8 field elements `[h0, ..., h7]`,
@@ -26,27 +42,20 @@ pub const KECCAK_HASH_MEMORY_EVENT_ID: EventId = EventId::from_u64(5779517439479
 pub struct KeccakPrecompile;
 
 impl EventHandler for KeccakPrecompile {
-    /// Keccak256 event handler that reads data from memory.
+    /// Keccak256 event handler called by the processor when the VM emits a hash request event.
     ///
-    /// Computes Keccak256 hash of data stored in memory and provides the result via the advice
-    /// stack. Also stores the preimage in byte form in the
-    /// [`AdviceProvider`](miden_processor::AdviceProvider) for deferred verification.
+    /// Reads packed input data from memory, computes the Keccak256 hash, provides the digest via
+    /// the advice stack, and stores the raw preimage for verification (see [`PrecompileVerifier`]).
     ///
     /// ## Input Format
-    /// - **Memory Layout**: Input bytes are packed into field elements as u32 values:
-    ///   - Each field element holds 4 bytes in little-endian format
-    ///   - Number of field elements = `ceil(len_bytes / 4)`
-    ///   - Unused bytes in the final u32 must be zero
-    ///   - Memory layout from `ptr` to `ptr+len_u32` contains inputs from least to most significant
-    ///     element
-    /// - **Stack**: `[event_id, ptr, len_bytes, ...]` where `ptr` must be word-aligned (divisible
-    ///   by 4)
+    /// - **Stack**: `[event_id, ptr, len_bytes, ...]` where `ptr` is word-aligned (divisible by 4)
+    /// - **Memory**: Input bytes packed as u32 field elements (4 bytes per element, little-endian)
+    ///   from `ptr` to `ptr+ceil(len_bytes/4)`, with unused bytes in the final u32 set to zero
     ///
     /// ## Output Format
-    /// - **Advice Stack**: Extended with digest `[h_0, ..., h_7]` so the least significant u32
-    ///   (h_0) is at the top of the stack
-    /// - **Precompile Requests**: Logs the preimage as a precompile request with tag `[event_id,
-    ///   len_bytes, 0, 0]` in the [`AdviceProvider`](miden_processor::AdviceProvider).
+    /// - **Advice Stack**: Extended with digest `[h_0, ..., h_7]` (least significant u32 on top)
+    /// - **Precompile Request**: Stores tag `[event_id, len_bytes, 0, 0]` and raw preimage bytes
+    ///   for verification time
     fn on_event(&self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
         // Stack: [event_id, ptr, len_bytes, ...]
         let ptr = process.get_stack_item(1).as_int();
@@ -106,11 +115,11 @@ fn read_witness(process: &ProcessState, ptr: u64, len_bytes: u64) -> Option<Vec<
 // ================================================================================================
 
 impl PrecompileVerifier for KeccakPrecompile {
-    /// Verifier for Keccak256 precompile computations.
+    /// Verifier for Keccak256 precompile computations at verification time.
     ///
-    /// This verifier validates that Keccak256 hash computations were performed correctly
-    /// by recomputing the hash from the provided witness data and generating the precompile
-    /// commitment.
+    /// Receives the raw preimage bytes stored during execution (see [`EventHandler::on_event`]),
+    /// recomputes the Keccak256 hash, and generates a commitment `RPO(RPO(input) || RPO(digest))`
+    /// with tag `[event_id, len_bytes, 0, 0]` that validates against the execution trace.
     fn verify(&self, calldata: &[u8]) -> Result<PrecompileCommitment, PrecompileError> {
         let preimage = KeccakPreimage::new(calldata.to_vec());
         Ok(preimage.precompile_commitment())
@@ -266,14 +275,12 @@ impl KeccakPreimage {
         KeccakFeltDigest::from_bytes(&hash_u8)
     }
 
-    /// Computes the precompile commitment: `RPO(RPO(input) || RPO(keccak_hash))`, along with the
-    /// tag for the computation.
+    /// Computes the precompile commitment: `RPO(RPO(input) || RPO(keccak_hash))` with tag
+    /// `[event_id, len_bytes, 0, 0]`.
     ///
-    /// The tag format is `[event_id, len_bytes, 0, 0]` where `event_id` identifies the Keccak
-    /// precompile and `len_bytes` is the original input length.
-    ///
-    /// This commitment is used by the precompile verification system to ensure
-    /// that the hash computation was performed correctly.
+    /// Generated by the [`PrecompileVerifier`] at verification time and validated against
+    /// commitments tracked during execution by the [`EventHandler`]. The double RPO hash binds
+    /// input and output together, preventing tampering.
     pub fn precompile_commitment(&self) -> PrecompileCommitment {
         let commitment = Rpo256::merge(&[self.input_commitment(), self.digest().to_commitment()]);
         let tag = self.precompile_tag();
