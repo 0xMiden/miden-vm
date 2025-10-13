@@ -190,25 +190,6 @@ pub trait PrecompileVerifier: Send + Sync {
     fn verify(&self, calldata: &[u8]) -> Result<PrecompileCommitment, PrecompileError>;
 }
 
-/// Default implementation for both free functions and closures with signature
-/// `fn(&[u8]) -> Result<PrecompileCommitment, PrecompileError>`
-///
-/// # Example
-/// ```ignore
-/// let verifier = |data: &[u8]| -> Result<PrecompileCommitment, PrecompileError> {
-///     // Custom verification logic
-///     Ok(PrecompileCommitment { tag: [0; 4].into(), commitment: [0; 4].into() })
-/// };
-/// ```
-impl<F> PrecompileVerifier for F
-where
-    F: Fn(&[u8]) -> Result<PrecompileCommitment, PrecompileError> + Send + Sync + 'static,
-{
-    fn verify(&self, calldata: &[u8]) -> Result<PrecompileCommitment, PrecompileError> {
-        self(calldata)
-    }
-}
-
 // PRECOMPILE VERIFICATION STATE
 // ================================================================================================
 

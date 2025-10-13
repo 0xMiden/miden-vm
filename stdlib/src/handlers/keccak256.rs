@@ -12,61 +12,64 @@ use core::array;
 
 use miden_core::{
     EventId, Felt, Word, ZERO,
-    precompile::{PrecompileCommitment, PrecompileError, PrecompileRequest},
+    precompile::{PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileVerifier},
 };
 use miden_crypto::hash::{keccak::Keccak256, rpo::Rpo256};
-use miden_processor::{AdviceMutation, EventError, ProcessState};
+use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessState};
 
 /// Qualified event name for the `hash_memory` event.
 pub const KECCAK_HASH_MEMORY_EVENT_NAME: &str = "stdlib::hash::keccak256::hash_memory";
 /// Constant Event ID for the `hash_memory` event, derived via
-/// `EventId::from_name(SMT_PEEK_EVENT_NAME)`
+/// `EventId::from_name(KECCAK_HASH_MEMORY_EVENT_NAME)`
 pub const KECCAK_HASH_MEMORY_EVENT_ID: EventId = EventId::from_u64(5779517439479051634);
 
-/// Keccak256 event handler that reads data from memory.
-///
-/// Computes Keccak256 hash of data stored in memory and provides the result via the advice stack.
-/// Also stores the preimage in byte form in the [`AdviceProvider`](miden_processor::AdviceProvider)
-/// for deferred verification.
-///
-/// ## Input Format
-/// - **Memory Layout**: Input bytes are packed into field elements as u32 values:
-///   - Each field element holds 4 bytes in little-endian format
-///   - Number of field elements = `ceil(len_bytes / 4)`
-///   - Unused bytes in the final u32 must be zero
-///   - Memory layout from `ptr` to `ptr+len_u32` contains inputs from least to most significant
-///     element
-/// - **Stack**: `[event_id, ptr, len_bytes, ...]` where `ptr` must be word-aligned (divisible by 4)
-///
-/// ## Output Format
-/// - **Advice Stack**: Extended with digest `[h_0, ..., h_7]` so the least significant u32 (h_0) is
-///   at the top of the stack
-/// - **Precompile Requests**: Logs the preimage as a precompile request with tag `[event_id,
-///   len_bytes, 0, 0]` in the [`AdviceProvider`](miden_processor::AdviceProvider).
-pub fn handle_keccak_hash_memory(
-    process: &ProcessState,
-) -> Result<Vec<AdviceMutation>, EventError> {
-    // Stack: [event_id, ptr, len_bytes, ...]
-    let ptr = process.get_stack_item(1).as_int();
-    let len_bytes = process.get_stack_item(2).as_int();
+pub struct KeccakPrecompile;
 
-    // Read packed u32 values from memory
-    let input_felt = read_witness(process, ptr, len_bytes)
-        .ok_or(KeccakError::MemoryReadFailed { ptr, len: len_bytes })?;
+impl EventHandler for KeccakPrecompile {
+    /// Keccak256 event handler that reads data from memory.
+    ///
+    /// Computes Keccak256 hash of data stored in memory and provides the result via the advice
+    /// stack. Also stores the preimage in byte form in the
+    /// [`AdviceProvider`](miden_processor::AdviceProvider) for deferred verification.
+    ///
+    /// ## Input Format
+    /// - **Memory Layout**: Input bytes are packed into field elements as u32 values:
+    ///   - Each field element holds 4 bytes in little-endian format
+    ///   - Number of field elements = `ceil(len_bytes / 4)`
+    ///   - Unused bytes in the final u32 must be zero
+    ///   - Memory layout from `ptr` to `ptr+len_u32` contains inputs from least to most significant
+    ///     element
+    /// - **Stack**: `[event_id, ptr, len_bytes, ...]` where `ptr` must be word-aligned (divisible
+    ///   by 4)
+    ///
+    /// ## Output Format
+    /// - **Advice Stack**: Extended with digest `[h_0, ..., h_7]` so the least significant u32
+    ///   (h_0) is at the top of the stack
+    /// - **Precompile Requests**: Logs the preimage as a precompile request with tag `[event_id,
+    ///   len_bytes, 0, 0]` in the [`AdviceProvider`](miden_processor::AdviceProvider).
+    fn on_event(&self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
+        // Stack: [event_id, ptr, len_bytes, ...]
+        let ptr = process.get_stack_item(1).as_int();
+        let len_bytes = process.get_stack_item(2).as_int();
 
-    // Recover the input represented as bytes
-    let preimage = KeccakPreimage::from_felts(&input_felt, len_bytes as usize)?;
-    let digest = preimage.digest();
+        // Read packed u32 values from memory
+        let input_felt = read_witness(process, ptr, len_bytes)
+            .ok_or(KeccakError::MemoryReadFailed { ptr, len: len_bytes })?;
 
-    // Extend the stack with the digest [h_0, ..., h_7] so it can be popped in the right order,
-    // i.e. with h_0 at the top.
-    let advice_stack_extension = AdviceMutation::extend_stack(digest.0);
+        // Recover the input represented as bytes
+        let preimage = KeccakPreimage::from_felts(&input_felt, len_bytes as usize)?;
+        let digest = preimage.digest();
 
-    // Store the precompile data for deferred verification.
-    let precompile_request_extension =
-        AdviceMutation::extend_precompile_requests([preimage.into()]);
+        // Extend the stack with the digest [h_0, ..., h_7] so it can be popped in the right order,
+        // i.e. with h_0 at the top.
+        let advice_stack_extension = AdviceMutation::extend_stack(digest.0);
 
-    Ok(vec![advice_stack_extension, precompile_request_extension])
+        // Store the precompile data for deferred verification.
+        let precompile_request_extension =
+            AdviceMutation::extend_precompile_requests([preimage.into()]);
+
+        Ok(vec![advice_stack_extension, precompile_request_extension])
+    }
 }
 
 /// Reads field elements from memory for Keccak computation.
@@ -102,14 +105,16 @@ fn read_witness(process: &ProcessState, ptr: u64, len_bytes: u64) -> Option<Vec<
 // KECCAK VERIFIER
 // ================================================================================================
 
-/// Verifier for Keccak256 precompile computations.
-///
-/// This verifier validates that Keccak256 hash computations were performed correctly
-/// by recomputing the hash from the provided witness data and generating the precompile
-/// commitment.
-pub fn keccak_verifier(input_u8: &[u8]) -> Result<PrecompileCommitment, PrecompileError> {
-    let preimage = KeccakPreimage::new(input_u8.to_vec());
-    Ok(preimage.precompile_commitment())
+impl PrecompileVerifier for KeccakPrecompile {
+    /// Verifier for Keccak256 precompile computations.
+    ///
+    /// This verifier validates that Keccak256 hash computations were performed correctly
+    /// by recomputing the hash from the provided witness data and generating the precompile
+    /// commitment.
+    fn verify(&self, calldata: &[u8]) -> Result<PrecompileCommitment, PrecompileError> {
+        let preimage = KeccakPreimage::new(calldata.to_vec());
+        Ok(preimage.precompile_commitment())
+    }
 }
 
 // KECCAK DIGEST
@@ -571,7 +576,7 @@ mod tests {
         let preimage = KeccakPreimage::new(input.to_vec());
         let expected_commitment = preimage.precompile_commitment();
 
-        let commitment = keccak_verifier(input).unwrap();
+        let commitment = KeccakPrecompile.verify(input).unwrap();
         assert_eq!(commitment, expected_commitment);
     }
 }
