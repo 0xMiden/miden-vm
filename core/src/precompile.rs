@@ -16,13 +16,12 @@ use crate::{
 /// Represents a single precompile request consisting of an event ID and byte data.
 ///
 /// This structure encapsulates the call data for a precompile operation, storing
-/// the raw bytes that will be processed by the precompile function.
+/// the raw bytes that will be processed by the precompile verifier when recomputing the
+/// corresponding commitment.
 ///
-/// # Note:
-/// The use of `EventID` here is temporary as we establish a way to identify specific verifiers.
-/// If we were to allow arbitrary precompiles, we would likely need a 256-bit collision-resistant
-/// identifier. If on the other hand we only allow a fixed set of verifiers, an enum descirminant
-/// would be enough.
+/// The `EventId` should correspond to the one used by the corresponding
+/// `EventHandler` which invoked the precompile in the VM. It is used by the verifier to select
+/// which `PrecompileVerifier` must be called to validate the underlying `calldata`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(
@@ -87,6 +86,12 @@ impl PrecompileCommitment {
     pub fn to_elements(&self) -> [Felt; 8] {
         let words = [self.tag, self.commitment];
         Word::words_as_elements(&words).try_into().unwrap()
+    }
+
+    /// Returns the `EventId` used to identify the verifier that produced this commitment from a
+    /// `PrecompileRequest`.
+    pub fn event_id(&self) -> EventId {
+        EventId::from_felt(self.tag[0])
     }
 }
 

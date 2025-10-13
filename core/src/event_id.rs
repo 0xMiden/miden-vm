@@ -13,7 +13,7 @@ use crate::{Felt, utils::hash_string_to_word};
 /// with other [`Felt`] values.
 ///
 /// While not enforced by this type, the values 0..256 are reserved for
-/// [`SystemEvent`](crate::sys_events::SystemEvent)s.
+/// [`SystemEvent`](crate::sys_events::SystemEvent)s. Collisions with
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
@@ -40,8 +40,15 @@ impl EventId {
     /// providing good distribution properties to minimize collisions between different names.
     pub fn from_name(name: impl AsRef<str>) -> Self {
         let digest_word = hash_string_to_word(name.as_ref());
+        let event_id = Self(digest_word[0]);
 
-        Self(digest_word[0])
+        assert!(
+            !event_id.is_reserved(),
+            "Event ID with name {} collides with an ID reserved for a system event",
+            name.as_ref()
+        );
+
+        event_id
     }
 
     /// Creates a new event ID from a [`Felt`].
