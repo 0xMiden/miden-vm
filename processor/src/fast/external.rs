@@ -28,13 +28,15 @@ impl FastProcessor {
 
         tracer.record_mast_forest_resolution(resolved_node_id, &new_mast_forest);
 
+        // Push a continuation to execute after_exit decorators when we return from the external
+        // forest
+        continuation_stack.push_finish_external(external_node_id);
+
         // Push current forest to the continuation stack so that we can return to it
         continuation_stack.push_enter_forest(current_forest.clone());
 
         // Push the root node of the external MAST forest onto the continuation stack.
         continuation_stack.push_start_node(resolved_node_id);
-
-        self.execute_after_exit_decorators(external_node_id, current_forest, host)?;
 
         // Update the current forest to the new MAST forest.
         *current_forest = new_mast_forest;
