@@ -49,10 +49,10 @@ pub(super) fn op_mpverify<P: Processor>(
     let clk = processor.system().clk();
 
     // read node value, depth, index and root value from the stack
-    let node = processor.stack().get_word(0);
+    let node = processor.stack().get_word_be(0);
     let depth = processor.stack().get(4);
     let index = processor.stack().get(5);
-    let root = processor.stack().get_word(6);
+    let root = processor.stack().get_word_be(6);
 
     // get a Merkle path from the advice provider for the specified root and node index
     let path = processor
@@ -84,11 +84,11 @@ pub(super) fn op_mrupdate<P: Processor>(
     let clk = processor.system().clk();
 
     // read old node value, depth, index, tree root and new node values from the stack
-    let old_value = processor.stack().get_word(0);
+    let old_value = processor.stack().get_word_be(0);
     let depth = processor.stack().get(4);
     let index = processor.stack().get(5);
-    let claimed_old_root = processor.stack().get_word(6);
-    let new_value = processor.stack().get_word(10);
+    let claimed_old_root = processor.stack().get_word_be(6);
+    let new_value = processor.stack().get_word_be(10);
 
     // update the node at the specified index in the Merkle tree specified by the old root, and
     // get a Merkle path to it. The length of the returned path is expected to match the

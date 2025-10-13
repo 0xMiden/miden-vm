@@ -113,7 +113,7 @@ fn test_keccak_hash_memory_impl(input_u8: &[u8]) {
 
     let output = test.execute().unwrap();
     let stack = output.stack_outputs();
-    let commitment = stack.get_stack_word(0).unwrap();
+    let commitment = stack.get_stack_word_be(0).unwrap();
     assert_eq!(commitment, preimage.calldata_commitment(), "calldata_commitment does not match");
 
     let digest: [Felt; 8] = array::from_fn(|i| stack.get_stack_item(4 + i).unwrap());

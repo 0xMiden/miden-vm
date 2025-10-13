@@ -86,8 +86,8 @@ pub(super) fn op_fri_ext2fold4<P: Processor>(
 /// value in the folded domain.
 #[inline(always)]
 fn get_query_values<P: Processor>(processor: &mut P) -> [QuadFelt; 4] {
-    let [v4, v5, v6, v7] = processor.stack().get_word(0).into();
-    let [v0, v1, v2, v3] = processor.stack().get_word(4).into();
+    let [v4, v5, v6, v7] = processor.stack().get_word_be(0).into();
+    let [v0, v1, v2, v3] = processor.stack().get_word_be(4).into();
 
     [
         QuadFelt::new(v0, v1),

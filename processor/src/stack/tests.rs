@@ -523,3 +523,50 @@ fn read_stack_top(trace: &[Vec<Felt>; STACK_TRACE_WIDTH], row: usize) -> [Felt; 
 fn read_helpers(trace: &[Vec<Felt>; STACK_TRACE_WIDTH], row: usize) -> StackHelpersState {
     [trace[B0_COL_IDX][row], trace[B1_COL_IDX][row], trace[H0_COL_IDX][row]]
 }
+
+// GET_WORD ENDIANNESS TESTS
+// ================================================================================================
+
+#[test]
+fn get_word_be_and_le() {
+    // Initialize a stack with known values.
+    // Note: StackInputs reverses values, so [1, 2, 3, 4, ...] becomes [16, 15, 14, 13, ...] on
+    // stack. Stack position 0 = 16, position 1 = 15, position 2 = 14, etc.
+    let stack_values: Vec<u64> = (1..=16).collect();
+    let stack_inputs = StackInputs::try_from_ints(stack_values).unwrap();
+    let stack = Stack::new(&stack_inputs, 4, false);
+
+    // Test big-endian (reversed) ordering
+    // For start_idx=0, stack positions [0, 1, 2, 3] = [16, 15, 14, 13]
+    // get_word_be returns [pos+3, pos+2, pos+1, pos] = [13, 14, 15, 16]
+    let word_be_0 = stack.get_word_be(0);
+    assert_eq!(word_be_0[0], Felt::new(13), "BE word[0] element 0");
+    assert_eq!(word_be_0[1], Felt::new(14), "BE word[0] element 1");
+    assert_eq!(word_be_0[2], Felt::new(15), "BE word[0] element 2");
+    assert_eq!(word_be_0[3], Felt::new(16), "BE word[0] element 3");
+
+    // For start_idx=4, stack positions [4, 5, 6, 7] = [12, 11, 10, 9]
+    // get_word_be returns [9, 10, 11, 12]
+    let word_be_4 = stack.get_word_be(4);
+    assert_eq!(word_be_4[0], Felt::new(9), "BE word[4] element 0");
+    assert_eq!(word_be_4[1], Felt::new(10), "BE word[4] element 1");
+    assert_eq!(word_be_4[2], Felt::new(11), "BE word[4] element 2");
+    assert_eq!(word_be_4[3], Felt::new(12), "BE word[4] element 3");
+
+    // Test little-endian (memory) ordering
+    // For start_idx=0, stack positions [0, 1, 2, 3] = [16, 15, 14, 13]
+    // get_word_le returns [pos, pos+1, pos+2, pos+3] = [16, 15, 14, 13]
+    let word_le_0 = stack.get_word_le(0);
+    assert_eq!(word_le_0[0], Felt::new(16), "LE word[0] element 0");
+    assert_eq!(word_le_0[1], Felt::new(15), "LE word[0] element 1");
+    assert_eq!(word_le_0[2], Felt::new(14), "LE word[0] element 2");
+    assert_eq!(word_le_0[3], Felt::new(13), "LE word[0] element 3");
+
+    // For start_idx=4, stack positions [4, 5, 6, 7] = [12, 11, 10, 9]
+    // get_word_le returns [12, 11, 10, 9]
+    let word_le_4 = stack.get_word_le(4);
+    assert_eq!(word_le_4[0], Felt::new(12), "LE word[4] element 0");
+    assert_eq!(word_le_4[1], Felt::new(11), "LE word[4] element 1");
+    assert_eq!(word_le_4[2], Felt::new(10), "LE word[4] element 2");
+    assert_eq!(word_le_4[3], Felt::new(9), "LE word[4] element 3");
+}

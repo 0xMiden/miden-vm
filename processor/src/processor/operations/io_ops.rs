@@ -73,7 +73,7 @@ pub(super) fn op_mstorew<P: Processor>(
     tracer: &mut impl Tracer,
 ) -> Result<(), ExecutionError> {
     let addr = processor.stack().get(0);
-    let word = processor.stack().get_word(1);
+    let word = processor.stack().get_word_be(1);
     let ctx = processor.system().ctx();
     let clk = processor.system().clk();
 

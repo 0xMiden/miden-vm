@@ -214,7 +214,7 @@ pub(super) fn op_expacc<P: Processor>(processor: &mut P) -> [Felt; NUM_USER_OP_H
 #[inline(always)]
 pub(super) fn op_ext2mul<P: Processor>(processor: &mut P) {
     const TWO: Felt = Felt::new(2);
-    let [a0, a1, b0, b1] = processor.stack().get_word(0).into();
+    let [a0, a1, b0, b1] = processor.stack().get_word_be(0).into();
 
     /* top 2 elements remain unchanged */
 

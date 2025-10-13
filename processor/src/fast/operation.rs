@@ -207,8 +207,8 @@ impl StackInterface for FastProcessor {
     }
 
     #[inline(always)]
-    fn get_word(&self, start_idx: usize) -> Word {
-        self.stack_get_word(start_idx)
+    fn get_word_be(&self, start_idx: usize) -> Word {
+        self.stack_get_word_be(start_idx)
     }
 
     #[inline(always)]
