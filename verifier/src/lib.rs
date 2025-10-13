@@ -60,9 +60,9 @@ pub use exports::*;
 /// - The provided proof does not prove a correct execution of the program.
 /// - The protocol parameters used to generate the proof are not in the set of acceptable
 ///   parameters.
-/// - The proof contains one or more precompile requests. When precompile requests are present,
-///   use [`verify_with_precompiles`] instead with an appropriate [`PrecompileVerifierRegistry`]
-///   to verify the precompile computations.
+/// - The proof contains one or more precompile requests. When precompile requests are present, use
+///   [`verify_with_precompiles`] instead with an appropriate [`PrecompileVerifierRegistry`] to
+///   verify the precompile computations.
 pub fn verify(
     program_info: ProgramInfo,
     stack_inputs: StackInputs,
@@ -87,8 +87,8 @@ pub fn verify(
 /// Returns a tuple `(security_level, aggregated_commitment)` where:
 /// - `security_level`: The security level (in bits) of the verified proof
 /// - `aggregated_commitment`: A [`Word`] containing the final aggregated commitment to all
-///   precompile requests, computed by recomputing and absorbing each precompile commitment into
-///   an RPO256 sponge
+///   precompile requests, computed by recomputing and absorbing each precompile commitment into an
+///   RPO256 sponge
 ///
 /// # Errors
 /// Returns any error produced by [`verify`], as well as any errors resulting from precompile

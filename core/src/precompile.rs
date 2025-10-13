@@ -22,8 +22,8 @@
 //! 2. **Request Storage**: All precompile requests are collected and included in the execution
 //!    proof alongside the final capacity word produced by the VM.
 //!
-//! 3. **Proof Generation**: The prover generates a STARK proof of the VM execution, including
-//!    the final capacity as a public input.
+//! 3. **Proof Generation**: The prover generates a STARK proof of the VM execution, including the
+//!    final capacity as a public input.
 //!
 //! 4. **Verification**: The verifier:
 //!    - Recomputes each precompile using the stored requests via [`PrecompileVerifier`]
@@ -34,8 +34,8 @@
 //! # Key Types
 //!
 //! - [`PrecompileRequest`]: Stores the event ID and raw input bytes for a precompile call
-//! - [`PrecompileCommitment`]: A cryptographic commitment to both inputs and outputs, consisting
-//!   of a tag (with event ID and metadata) and a commitment word
+//! - [`PrecompileCommitment`]: A cryptographic commitment to both inputs and outputs, consisting of
+//!   a tag (with event ID and metadata) and a commitment word
 //! - [`PrecompileVerifier`]: Trait for implementing verification logic for specific precompiles
 //! - [`PrecompileVerifierRegistry`]: Registry mapping event IDs to their verifier implementations
 //! - [`PrecompileVerificationState`]: Tracks the RPO256 sponge capacity for aggregating commitments
@@ -281,8 +281,8 @@ pub trait PrecompileVerifier: Send + Sync {
 /// - **`new()`**: Initialize capacity to `ZERO`
 /// - **`absorb(comm)`**: Apply RPO256 permutation to `[capacity, tag, commitment]` and update
 ///   capacity to the first word of the result
-/// - **`finalize()`**: Apply RPO256 permutation to `[capacity, ZERO, ZERO]` and extract the
-///   second word as the final digest
+/// - **`finalize()`**: Apply RPO256 permutation to `[capacity, ZERO, ZERO]` and extract the second
+///   word as the final digest
 #[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
 struct PrecompileVerificationState {
     /// RPO256 sponge capacity, updated with each absorbed commitment.
