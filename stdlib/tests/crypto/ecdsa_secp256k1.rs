@@ -20,10 +20,10 @@ struct Point([BaseField; 3]);
 #[ignore]
 fn verify(pubkey: Point, h: ScalarField, r: ScalarField, s: ScalarField) {
     let source = "
-    use.std::crypto::dsa::ecdsa::secp256k1
+    use.std::crypto::dsa::ecdsa::secp256k1_deprecated
 
     begin
-        exec.secp256k1::verify
+        exec.secp256k1_deprecated::verify
     end";
 
     let mut stack = [0u64; 48];
