@@ -27,7 +27,7 @@
 //!
 //! 4. **Verification**: The verifier:
 //!    - Recomputes each precompile using the stored requests via [`PrecompileVerifier`]
-//!    - Reconstructs the capacity using [`PrecompileVerificationState`]
+//!    - Reconstructs the capacity using `PrecompileVerificationState`
 //!    - Verifies the STARK proof with the recomputed capacity as public input
 //!    - Accepts the proof only if both the STARK and the capacity match
 //!
@@ -38,7 +38,7 @@
 //!   a tag (with event ID and metadata) and a commitment word
 //! - [`PrecompileVerifier`]: Trait for implementing verification logic for specific precompiles
 //! - [`PrecompileVerifierRegistry`]: Registry mapping event IDs to their verifier implementations
-//! - [`PrecompileVerificationState`]: Tracks the RPO256 sponge capacity for aggregating commitments
+//! - `PrecompileVerificationState`: Tracks the RPO256 sponge capacity for aggregating commitments
 //!
 //! # Example Implementation
 //!
