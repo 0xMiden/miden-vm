@@ -91,6 +91,7 @@ jobs:
 
             const DOC_ONLY_MAX_LINES = 20;
             const CODE_ONLY_MAX_LINES = 8;
+            const MAX_ISSUES_TO_CHECK = 5;
 
             const files = await github.rest.pulls.listFiles({
               owner: context.repo.owner,
@@ -124,7 +125,7 @@ jobs:
               const author = (await github.rest.pulls.get({
                 owner: context.repo.owner, repo: context.repo.repo, pull_number: prNumber
               })).data.user.login.toLowerCase();
-              for (const n of [...issueNums].slice(0,5).map(x=>parseInt(x,10)).filter(Number.isInteger)) {
+              for (const n of [...issueNums].slice(0,MAX_ISSUES_TO_CHECK).map(x=>parseInt(x,10)).filter(Number.isInteger)) {
                 try {
                   const { data: iss } = await github.rest.issues.get({
                     owner: context.repo.owner, repo: context.repo.repo, issue_number: n
@@ -135,7 +136,7 @@ jobs:
                     if (assignees.includes(author)) linkedAssigned = true;
                     break;
                   }
-                } catch {}
+                } catch (err) { core.warning(`Failed to fetch issue #${n}: ${err}`); }
               }
             }
 
