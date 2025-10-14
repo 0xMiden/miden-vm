@@ -14,7 +14,7 @@ use miden_crypto::{
     hash::{keccak::Keccak256, rpo::Rpo256},
 };
 use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessState};
-use miden_stdlib::handlers::keccak256::{KECCAK_HASH_MEMORY_EVENT_NAME, KeccakFeltDigest};
+use miden_stdlib::handlers::keccak256::{KECCAK_HASH_MEMORY_EVENT_ID, KeccakFeltDigest};
 
 // Test constants
 // ================================================================================================
@@ -68,7 +68,7 @@ fn test_keccak_handler(input_u8: &[u8]) {
                 push.{len_bytes}.{INPUT_MEMORY_ADDR}
                 # => [ptr, len_bytes, ...]
 
-                emit.event("{KECCAK_HASH_MEMORY_EVENT_NAME}")
+                emit.event("{KECCAK_HASH_MEMORY_EVENT_ID}")
                 drop drop
 
                 emit.event("{DEBUG_EVENT_NAME}")

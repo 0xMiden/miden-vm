@@ -23,6 +23,7 @@
 - Place the `FastProcessor` stack on the heap instead of the (OS thread) stack (#[2271](https://github.com/0xMiden/miden-vm/pull/2271)).
 - `after_exit` decorators execute in the correct sequence in External nodes in the Fast processor ([#2247](https://github.com/0xMiden/miden-vm/pull/2247)).
 - Remove O(n log m) iteration in parallel processor (#[2273](https://github.com/0xMiden/miden-vm/pull/2273)).
+- [BREAKING] `EventId` now stores optional event names and is no longer `Copy`; use `.clone()` when needed ([#2150](https://github.com/0xMiden/miden-vm/issues/2150)).
 
 ## 0.18.2 (2025-10-10)
 

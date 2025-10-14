@@ -2,7 +2,7 @@ use core::cmp;
 
 use miden_core::assert_matches;
 use miden_processor::ExecutionError;
-use miden_stdlib::handlers::u64_div::{U64_DIV_EVENT_NAME, U64DivError};
+use miden_stdlib::handlers::u64_div::{U64_DIV_EVENT_ID, U64DivError};
 use miden_utils_testing::{
     Felt, TRUNCATE_STACK_PROC, U32_BOUND, ZERO, expect_exec_error_matches, proptest::prelude::*,
     rand::rand_value,
@@ -408,8 +408,7 @@ fn unchecked_eqz() {
 #[test]
 fn advice_push_u64div() {
     // push a/b onto the advice stack and then move these values onto the operand stack.
-    let source =
-        format!("begin emit.event(\"{U64_DIV_EVENT_NAME}\") adv_push.4 movupw.2 dropw end");
+    let source = format!("begin emit.event(\"{U64_DIV_EVENT_ID}\") adv_push.4 movupw.2 dropw end",);
 
     // get two random 64-bit integers and split them into 32-bit limbs
     let a = rand_value::<u64>();
@@ -449,7 +448,7 @@ fn advice_push_u64div_repeat() {
 
     begin
         repeat.7
-            emit.event(\"{U64_DIV_EVENT_NAME}\")
+            emit.event(\"{U64_DIV_EVENT_ID}\")
             drop drop
             adv_push.2
             push.2
@@ -491,7 +490,7 @@ fn advice_push_u64div_local_procedure() {
     let source = format!(
         "
     proc.foo
-        emit.event(\"{U64_DIV_EVENT_NAME}\")
+        emit.event(\"{U64_DIV_EVENT_ID}\")
         adv_push.4
     end
 
@@ -532,7 +531,7 @@ fn advice_push_u64div_conditional_execution() {
     begin
         eq
         if.true
-            emit.event(\"{U64_DIV_EVENT_NAME}\")
+            emit.event(\"{U64_DIV_EVENT_ID}\")
             adv_push.4
         else
             padw

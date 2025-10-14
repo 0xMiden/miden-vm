@@ -314,12 +314,13 @@ fn generate_test(
     use.std::crypto::dsa::rpo_falcon512
 
     begin
-        push.{EVENT_FALCON_SIG_TO_STACK}
+        push.{}
         emit
         drop
         exec.rpo_falcon512::verify
     end
-    "
+    ",
+        EVENT_FALCON_SIG_TO_STACK.as_felt().as_int()
     );
 
     let pk: Word = sk.public_key().to_commitment();

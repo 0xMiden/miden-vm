@@ -259,11 +259,37 @@ pub enum SystemEvent {
     HpermToMap = EVENT_HPERM_TO_MAP,
 }
 
+impl SystemEvent {
+    /// Returns the human-readable name of this system event.
+    ///
+    /// System event names are prefixed with `sys::` to distinguish them from user-defined events.
+    pub const fn event_name(&self) -> &'static str {
+        match self {
+            Self::MerkleNodeMerge => "sys::merkle_node_merge",
+            Self::MerkleNodeToStack => "sys::merkle_node_to_stack",
+            Self::MapValueToStack => "sys::map_value_to_stack",
+            Self::MapValueToStackN => "sys::map_value_to_stack_n",
+            Self::HasMapKey => "sys::has_map_key",
+            Self::Ext2Inv => "sys::ext2_inv",
+            Self::U32Clz => "sys::u32_clz",
+            Self::U32Ctz => "sys::u32_ctz",
+            Self::U32Clo => "sys::u32_clo",
+            Self::U32Cto => "sys::u32_cto",
+            Self::ILog2 => "sys::ilog2",
+            Self::MemToMap => "sys::mem_to_map",
+            Self::HdwordToMap => "sys::hdword_to_map",
+            Self::HdwordToMapWithDomain => "sys::hdword_to_map_with_domain",
+            Self::HqwordToMap => "sys::hqword_to_map",
+            Self::HpermToMap => "sys::hperm_to_map",
+        }
+    }
+}
+
 impl TryFrom<EventId> for SystemEvent {
     type Error = EventId;
 
     fn try_from(event_id: EventId) -> Result<Self, Self::Error> {
-        let value: u8 = event_id.as_felt().as_int().try_into().map_err(|_| event_id)?;
+        let value: u8 = event_id.as_felt().as_int().try_into().map_err(|_| event_id.clone())?;
 
         match value {
             EVENT_MERKLE_NODE_MERGE => Ok(SystemEvent::MerkleNodeMerge),
@@ -289,7 +315,9 @@ impl TryFrom<EventId> for SystemEvent {
 
 impl From<SystemEvent> for EventId {
     fn from(system_event: SystemEvent) -> Self {
-        Self::from_u64(system_event as u64)
+        // SAFETY: SystemEvent's event_name() is hardcoded to match the enum discriminant,
+        // so the ID is guaranteed to be correct for the name.
+        unsafe { Self::from_static(system_event.event_name(), system_event as u64) }
     }
 }
 
@@ -367,5 +395,26 @@ mod test {
             | SystemEvent::HqwordToMap
             | SystemEvent::HpermToMap => {},
         };
+    }
+
+    #[test]
+    fn test_system_event_names() {
+        // Test that all system events have names
+        for id in 0..=15u64 {
+            let event_id = EventId::from_u64(id);
+            if let Ok(system_event) = SystemEvent::try_from(event_id.clone()) {
+                let name = system_event.event_name();
+                assert!(
+                    name.starts_with("sys::"),
+                    "System event name should start with 'sys::': {}",
+                    name
+                );
+
+                // Test conversion includes name
+                let event_with_name: EventId = system_event.into();
+                assert_eq!(event_with_name.name(), Some(name));
+                assert_eq!(event_with_name.as_felt().as_int(), id);
+            }
+        }
     }
 }

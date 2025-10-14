@@ -5,7 +5,7 @@
 
 use alloc::{vec, vec::Vec};
 
-use miden_core::{EventId, ZERO};
+use miden_core::{ZERO, declare_event};
 use miden_processor::{AdviceMutation, EventError, ProcessState};
 
 use crate::handlers::u64_to_u32_elements;
@@ -13,11 +13,12 @@ use crate::handlers::u64_to_u32_elements;
 /// Falcon signature prime.
 const M: u64 = 12289;
 
-/// Qualified event name for the `falcon_div` event.
-pub const FALCON_DIV_EVENT_NAME: &str = "stdlib::crypto::dsa::rpo_falcon512::falcon_div";
-/// Constant Event ID for the `falcon_div` event, derived via
-/// `EventId::from_name(FALCON_DIV_EVENT_NAME)`.
-pub const FALCON_DIV_EVENT_ID: EventId = EventId::from_u64(9834516640389212175);
+// Declare the falcon_div event with automatic ID validation
+declare_event!(
+    FALCON_DIV_EVENT_ID,
+    "stdlib::crypto::dsa::rpo_falcon512::falcon_div",
+    9834516640389212175u64
+);
 
 /// FALCON_DIV system event handler.
 ///
@@ -82,15 +83,4 @@ pub enum FalconDivError {
     /// Input value is not a valid u32.
     #[error("input value {value} at {position} is not a valid u32")]
     InputNotU32 { value: u64, position: &'static str },
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_event_id() {
-        let expected_event_id = EventId::from_name(FALCON_DIV_EVENT_NAME);
-        assert_eq!(FALCON_DIV_EVENT_ID, expected_event_id);
-    }
 }

@@ -95,7 +95,7 @@ where
     /// Replaces a handler with the given id, returning a flag indicating whether a handler
     /// was previously registered with this id.
     pub fn replace_handler(&mut self, id: EventId, handler: Arc<dyn EventHandler>) -> bool {
-        let existed = self.event_handlers.unregister(id);
+        let existed = self.event_handlers.unregister(id.clone());
         self.register_handler(id, handler).unwrap();
         existed
     }

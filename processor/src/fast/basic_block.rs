@@ -206,7 +206,7 @@ impl FastProcessor {
         let mut process = self.state();
         let event_id = EventId::from_felt(process.get_stack_item(0));
         // If it's a system event, handle it directly. Otherwise, forward it to the host.
-        if let Ok(system_event) = SystemEvent::try_from(event_id) {
+        if let Ok(system_event) = SystemEvent::try_from(event_id.clone()) {
             handle_system_event(&mut process, system_event, err_ctx)
         } else {
             let clk = process.clk();

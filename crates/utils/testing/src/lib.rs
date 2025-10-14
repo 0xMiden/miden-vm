@@ -236,7 +236,7 @@ impl Test {
             if id.is_reserved() {
                 panic!("tried to register handler with ID reserved for system events")
             }
-            if self.handlers.insert(id, handler).is_some() {
+            if self.handlers.insert(id.clone(), handler).is_some() {
                 panic!("handler with id {id} was already added")
             }
         }
@@ -550,7 +550,7 @@ impl Test {
             host.load_library(library.mast_forest()).unwrap();
         }
         for (id, handler) in &self.handlers {
-            host.register_handler(*id, handler.clone()).unwrap();
+            host.register_handler(id.clone(), handler.clone()).unwrap();
         }
 
         (program, host)

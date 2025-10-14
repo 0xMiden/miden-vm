@@ -10,15 +10,16 @@
 use alloc::{vec, vec::Vec};
 use core::array;
 
-use miden_core::{AdviceMap, EventId, Felt, Word, crypto::hash::Digest};
+use miden_core::{AdviceMap, Felt, Word, crypto::hash::Digest, declare_event};
 use miden_crypto::hash::{keccak::Keccak256, rpo::Rpo256};
 use miden_processor::{AdviceMutation, EventError, ProcessState};
 
-/// Qualified event name for the `hash_memory` event.
-pub const KECCAK_HASH_MEMORY_EVENT_NAME: &str = "stdlib::hash::keccak256::hash_memory";
-/// Constant Event ID for the `hash_memory` event, derived via
-/// `EventId::from_name(SMT_PEEK_EVENT_NAME)`
-pub const KECCAK_HASH_MEMORY_EVENT_ID: EventId = EventId::from_u64(5779517439479051634);
+// Declare the keccak256 hash_memory event with automatic ID validation
+declare_event!(
+    KECCAK_HASH_MEMORY_EVENT_ID,
+    "stdlib::hash::keccak256::hash_memory",
+    5779517439479051634u64
+);
 
 /// Keccak256 event handler that reads data from memory.
 ///
@@ -201,15 +202,4 @@ pub enum KeccakError {
     /// Non-zero padding bytes found in unused portion of final u32.
     #[error("non-zero padding byte {value:#x} at position {index}")]
     InvalidPadding { value: u8, index: usize },
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_event_id() {
-        let expected_event_id = EventId::from_name(KECCAK_HASH_MEMORY_EVENT_NAME);
-        assert_eq!(KECCAK_HASH_MEMORY_EVENT_ID, expected_event_id);
-    }
 }

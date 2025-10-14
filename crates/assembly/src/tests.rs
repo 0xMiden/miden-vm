@@ -1264,11 +1264,12 @@ fn const_event_from_string() -> TestResult {
         format!(
             r#"
     begin
-        push.{expected_felt}
+        push.{}
         emit
         drop
     end
-    "#
+    "#,
+            expected_felt.as_felt().as_int()
         )
     );
 

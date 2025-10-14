@@ -1,4 +1,4 @@
-use miden_stdlib::handlers::smt_peek::SMT_PEEK_EVENT_NAME;
+use miden_stdlib::handlers::smt_peek::SMT_PEEK_EVENT_ID;
 use miden_utils_testing::prepend_word_to_vec as prepend_word;
 
 use super::*;
@@ -210,7 +210,7 @@ fn test_set_advice_map_empty_key() {
         # => [K, R_new, V]
 
         # Fetch what was stored on advice map and clean stack
-        emit.event(\"{SMT_PEEK_EVENT_NAME}\") dropw dropw
+        emit.event(\"{SMT_PEEK_EVENT_ID}\") dropw dropw
         # => [V]
 
         # Push advice map values on stack
@@ -255,7 +255,7 @@ fn test_set_advice_map_single_key() {
         # => [K, R_new, V]
 
         # Fetch what was stored on advice map and clean stack
-        emit.event(\"{SMT_PEEK_EVENT_NAME}\") dropw dropw
+        emit.event(\"{SMT_PEEK_EVENT_ID}\") dropw dropw
         # => [V]
 
         # Push advice map values on stack
