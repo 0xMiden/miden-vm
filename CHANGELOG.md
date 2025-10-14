@@ -18,6 +18,21 @@
 - Fixed mismatched Push expectations in decoder syscall_block test ([#2207](https://github.com/0xMiden/miden-vm/pull/2207))
 - [BREAKING] `Memory::read_element()` now requires `&self` instead of `&mut self` ([#2237](https://github.com/0xMiden/miden-vm/issues/2237))
 - Added `proptest`'s `Arbitrary` instances for `Program`, fixed `Attribute` serialization ([#2224](https://github.com/0xMiden/miden-vm/pull/2224)).
+- Fixed hex word parsing to guard against missing 0x prefix ([#2245](https://github.com/0xMiden/miden-vm/pull/2245)).
+- Systematized u32-indexed vectors ([#2254](https://github.com/0xMiden/miden-vm/pull/2254)).
+- Introduce a new `build_trace()` which builds the trace in parallel from trace fragment contexts ([#1839](https://github.com/0xMiden/miden-vm/pull/1839)) ([#2188](https://github.com/0xMiden/miden-vm/pull/2188)).
+- Place the `FastProcessor` stack on the heap instead of the (OS thread) stack (#[2271](https://github.com/0xMiden/miden-vm/pull/2271)).
+- `after_exit` decorators execute in the correct sequence in External nodes in the Fast processor ([#2247](https://github.com/0xMiden/miden-vm/pull/2247)).
+- Remove O(n log m) iteration in parallel processor (#[2273](https://github.com/0xMiden/miden-vm/pull/2273)).
+
+## 0.18.2 (2025-10-10)
+
+- Place the `FastProcessor` stack on the heap instead of the (OS thread) stack (#[2275](https://github.com/0xMiden/miden-vm/pull/2275)).
+
+## 0.18.1 (2025-10-02)
+
+- Gate stdlib doc generation in build.rs on `MIDEN_BUILD_STDLIB_DOCS` environment variable ([#2239](https://github.com/0xMiden/miden-vm/pull/2239/)).
+- Gate stdlib doc generation in build.rs on `MIDEN_BUILD_STDLIB_DOCS` environmnent variable ([#2239](https://github.com/0xMiden/miden-vm/pull/2239/))
 
 ## 0.18.0 (2025-09-21)
 

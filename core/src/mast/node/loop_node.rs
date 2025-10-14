@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{MastNodeErrorContext, MastNodeExt};
 use crate::{
-    OPCODE_LOOP,
+    Idx, OPCODE_LOOP,
     chiplets::hasher,
     mast::{DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId, Remapping},
 };
@@ -43,7 +43,7 @@ impl LoopNode {
 impl LoopNode {
     /// Returns a new [`LoopNode`] instantiated with the specified body node.
     pub fn new(body: MastNodeId, mast_forest: &MastForest) -> Result<Self, MastForestError> {
-        if body.as_usize() >= mast_forest.nodes.len() {
+        if body.to_usize() >= mast_forest.nodes.len() {
             return Err(MastForestError::NodeIdOverflow(body, mast_forest.nodes.len()));
         }
         let digest = {

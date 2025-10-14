@@ -115,6 +115,72 @@ impl OpBatch {
     pub fn num_groups(&self) -> usize {
         self.num_groups
     }
+
+    /// Returns the (op_group_idx, op_idx_in_group) given an operation index in the batch. Returns
+    /// `None` if the index is out of bounds.
+    ///
+    /// This uses binary search (`partition_point`) on the group end indices to find the
+    /// containing group. For batches with many operations, this can be expensive when
+    /// called repeatedly.
+    ///
+    /// # Performance Consideration
+    /// For iterating over all operations in a batch, prefer using `iter_with_groups()`
+    /// which tracks group boundaries incrementally in O(1) per operation rather than
+    /// O(log m) per operation, where m is the number of groups.
+    #[must_use]
+    pub fn op_idx_in_batch_to_group(&self, op_idx_in_batch: usize) -> Option<(usize, usize)> {
+        if op_idx_in_batch >= self.ops.len() {
+            return None;
+        }
+
+        let group_idx = {
+            let n = self.num_groups();
+            // Ends of groups (length n), monotonic non-decreasing (zero-length groups allowed).
+            let ends = &self.indptr[1..=n];
+
+            // first index where end > op_idx_in_batch
+            let group_idx = ends.partition_point(|&end| end <= op_idx_in_batch);
+            debug_assert!(group_idx < n);
+
+            group_idx
+        };
+
+        Some((group_idx, op_idx_in_batch - self.indptr[group_idx]))
+    }
+
+    /// Returns an iterator over operations in the batch with their group information.
+    ///
+    /// This iterator yields tuples of (group_idx, op_idx_in_group, operation) for each operation
+    /// in the batch, tracking group boundaries incrementally without binary search.
+    ///
+    /// # Returns
+    /// An iterator that produces tuples containing:
+    /// - `group_idx`: Index of the operation group within the batch (0-7)
+    /// - `op_idx_in_group`: Index of the operation within its group (0-8)
+    /// - `operation`: Reference to the operation itself
+    ///
+    /// This is significantly more efficient than calling `op_idx_in_batch_to_group()` for each
+    /// operation because it tracks group boundaries incrementally instead of using binary search
+    /// for each operation (which would be O(n * log m) total, where m is the number of groups,
+    /// and n is the number of operations).
+    pub fn iter_with_groups(&self) -> OpBatchIterator<'_> {
+        OpBatchIterator::new(self)
+    }
+
+    /// Returns the index of the first group that contains operations that comes after
+    /// `after_this_group_index`, if any.
+    ///
+    /// Since groups either contain immediate values or operations, this is equivalent to skipping
+    /// all groups that contain immediate values after `after_this_group_index` and returns the
+    /// index of the first group that contains operations.
+    pub fn next_op_group_index(&self, after_this_group_index: usize) -> Option<usize> {
+        // when indptr[i] == indptr[i+1], the group has no operations - and therefore carries an
+        // immediate value
+        let is_op_group = |group_idx: usize| self.indptr[group_idx] != self.indptr[group_idx + 1];
+
+        ((after_this_group_index + 1)..self.num_groups())
+            .find(|&candidate_group_index| is_op_group(candidate_group_index))
+    }
 }
 
 // OPERATION BATCH ACCUMULATOR
@@ -304,6 +370,251 @@ impl OpBatchAccumulator {
             );
             self.push_op(Operation::Noop);
             self.padding[self.group_idx] = true;
+        }
+    }
+}
+
+/// Iterator over operations in an OpBatch with their group information.
+///
+/// This iterator yields tuples of (group_idx, op_idx_in_group, operation) for each operation
+/// in the batch, tracking group boundaries incrementally without binary search.
+///
+/// # Fields
+/// - `batch`: Reference to the batch being iterated
+/// - `current_op_idx`: Current operation index within the batch
+/// - `grp_idx`: Current group index tracked incrementally
+///
+///
+/// This is more efficient than calling `op_idx_in_batch_to_group()` for each
+/// operation (O(log m) per operation, for m groups) because it tracks group boundaries
+/// incrementally using a simple counter check.
+pub struct OpBatchIterator<'a> {
+    batch: &'a OpBatch,
+    current_op_idx: usize,
+    grp_idx: usize,
+}
+
+impl<'a> OpBatchIterator<'a> {
+    /// Creates a new iterator over the operations in the batch.
+    pub fn new(batch: &'a OpBatch) -> Self {
+        Self { batch, current_op_idx: 0, grp_idx: 0 }
+    }
+}
+
+impl<'a> Iterator for OpBatchIterator<'a> {
+    type Item = (usize, usize, &'a Operation);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.current_op_idx >= self.batch.ops().len() {
+            return None;
+        }
+
+        let op = &self.batch.ops()[self.current_op_idx];
+        let indptr = self.batch.indptr();
+
+        // Increment grp_idx if we've crossed into the next group
+        // Check if current_op_idx >= indptr[self.grp_idx + 1] (start of next group)
+        // The while loop skips the groups dedicated to immediates, which are devoid
+        // of operations.
+        while self.grp_idx + 1 < self.batch.num_groups()
+            && self.current_op_idx >= indptr[self.grp_idx + 1]
+        {
+            self.grp_idx += 1;
+        }
+
+        let op_idx_in_group = self.current_op_idx - indptr[self.grp_idx];
+        let result = (self.grp_idx, op_idx_in_group, op);
+
+        self.current_op_idx += 1;
+        Some(result)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.batch.ops().len() - self.current_op_idx;
+        (remaining, Some(remaining))
+    }
+}
+
+impl<'a> ExactSizeIterator for OpBatchIterator<'a> {}
+
+#[cfg(test)]
+mod op_batch_tests {
+    use proptest::prelude::*;
+
+    use super::*;
+    use crate::mast::{BasicBlockNode, arbitrary::BasicBlockNodeParams};
+
+    #[test]
+    fn test_op_idx_in_batch_to_group() {
+        // batch:
+        // 0: [push, push, push, swap, swap, swap, swap, swap, swap] [2] [3] [4]
+        // 4: [swap, swap, swap, swap, swap, swap, swap, swap]
+        // 5: [push, swap, swap, swap, swap, swap, swap, swap, swap] [5]
+        // 7: [noop]
+        let batch = {
+            let mut acc = OpBatchAccumulator::new();
+            // group 0
+            acc.add_op(Operation::Push(Felt::new(2)));
+            acc.add_op(Operation::Push(Felt::new(3)));
+            acc.add_op(Operation::Push(Felt::new(4)));
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+
+            // group 4
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+
+            // group 5
+            acc.add_op(Operation::Push(Felt::new(5)));
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+
+            // group 7: [noop]
+
+            acc.into_batch()
+        };
+        assert_eq!(batch.num_groups(), 8);
+
+        assert_eq!(batch.op_idx_in_batch_to_group(0), Some((0, 0)));
+        assert_eq!(batch.op_idx_in_batch_to_group(5), Some((0, 5)));
+        assert_eq!(batch.op_idx_in_batch_to_group(9), Some((4, 0)));
+        assert_eq!(batch.op_idx_in_batch_to_group(10), Some((4, 1)));
+        assert_eq!(batch.op_idx_in_batch_to_group(16), Some((4, 7)));
+        assert_eq!(batch.op_idx_in_batch_to_group(17), Some((5, 0)));
+        assert_eq!(batch.op_idx_in_batch_to_group(25), Some((5, 8)));
+        assert_eq!(batch.op_idx_in_batch_to_group(26), Some((7, 0)));
+        assert_eq!(batch.op_idx_in_batch_to_group(27), None);
+    }
+
+    #[test]
+    fn test_next_op_group_index() {
+        // batch:
+        // 0: [push, push, push, swap, swap, swap, swap, swap, swap] [2] [3] [4]
+        // 4: [swap, swap, swap, swap, swap, swap, swap, swap]
+        // 5: [push, swap, swap, swap, swap, swap, swap, swap, swap] [5]
+        // 7: [noop]
+        let batch = {
+            let mut acc = OpBatchAccumulator::new();
+            // group 0
+            acc.add_op(Operation::Push(Felt::new(2)));
+            acc.add_op(Operation::Push(Felt::new(3)));
+            acc.add_op(Operation::Push(Felt::new(4)));
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+
+            // group 4
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+
+            // group 5
+            acc.add_op(Operation::Push(Felt::new(5)));
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+            acc.add_op(Operation::Swap);
+
+            // group 7: [noop]
+
+            acc.into_batch()
+        };
+        assert_eq!(batch.num_groups(), 8);
+
+        assert_eq!(batch.next_op_group_index(0), Some(4));
+        assert_eq!(batch.next_op_group_index(1), Some(4));
+        assert_eq!(batch.next_op_group_index(2), Some(4));
+        assert_eq!(batch.next_op_group_index(3), Some(4));
+        assert_eq!(batch.next_op_group_index(4), Some(5));
+        assert_eq!(batch.next_op_group_index(5), Some(7));
+        assert_eq!(batch.next_op_group_index(6), Some(7));
+        assert_eq!(batch.next_op_group_index(7), None);
+    }
+
+    #[test]
+    fn test_op_batch_iterator_edge_cases() {
+        // Test with empty batch - it gets padded with a NOOP, so has 1 operation
+        let empty_batch = OpBatchAccumulator::new().into_batch();
+        assert_eq!(empty_batch.iter_with_groups().count(), 1);
+
+        // Test with single operation
+        let mut acc = OpBatchAccumulator::new();
+        acc.add_op(Operation::Noop);
+        let single_op_batch = acc.into_batch();
+
+        let results: Vec<_> = single_op_batch.iter_with_groups().collect();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0], (0, 0, &Operation::Noop));
+    }
+
+    proptest! {
+        #[test]
+        fn test_op_batch_iterator_arbitrary_large_block(
+            // Generate BasicBlockNodes with 73-200 operations to ensure multiple batches
+            basic_block in any_with::<BasicBlockNode>(BasicBlockNodeParams {
+                max_ops_len: 200,        // Generate blocks with up to 200 operations
+                max_pairs: 30,           // Allow more decorators
+                max_decorator_id_u32: 100,
+            })
+        ) {
+            // Verify that we actually have a multi-batch block
+            prop_assume!(basic_block.num_operations() > 72, "Need multiple batches for meaningful testing");
+
+            // Test all batches in the basic block
+            for batch in basic_block.op_batches() {
+                // Verify iterator results match op_idx_in_batch_to_group for every operation
+                for (op_idx_in_batch, (group_idx, op_idx_in_group, _op)) in
+                    batch.iter_with_groups().enumerate()
+                {
+                    let expected = batch.op_idx_in_batch_to_group(op_idx_in_batch);
+                    prop_assert_eq!(
+                        expected,
+                        Some((group_idx, op_idx_in_group)),
+                        "Mismatch for op_idx_in_batch {}: expected {:?}, got ({}, {})",
+                        op_idx_in_batch,
+                        expected,
+                        group_idx,
+                        op_idx_in_group
+                    );
+                }
+
+                // Verify that the iterator produces the correct number of results
+                let iterator_count = batch.iter_with_groups().count();
+                let expected_count = batch.ops().len();
+                prop_assert_eq!(
+                    iterator_count, expected_count,
+                    "Iterator should produce {} results, got {}",
+                    expected_count, iterator_count
+                );
+            }
         }
     }
 }

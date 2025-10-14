@@ -43,7 +43,11 @@ pub trait Processor: Sized {
     fn hasher(&mut self) -> &mut Self::Hasher;
 
     /// Checks that the evaluation of an arithmetic circuit is equal to zero.
-    fn op_eval_circuit(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError>;
+    fn op_eval_circuit(
+        &mut self,
+        err_ctx: &impl ErrorContext,
+        tracer: &mut impl Tracer,
+    ) -> Result<(), ExecutionError>;
 
     // -------------------------------------------------------------------------------------------
     // PROVIDED METHODS
@@ -379,12 +383,7 @@ pub trait OperationHelperRegisters {
     fn op_u32madd_registers(hi: Felt, lo: Felt) -> [Felt; NUM_USER_OP_HELPERS];
 
     /// The helper registers for the U32div operation.
-    fn op_u32div_registers(
-        numerator: u64,
-        quotient: u64,
-        denominator: u64,
-        remainder: u64,
-    ) -> [Felt; NUM_USER_OP_HELPERS];
+    fn op_u32div_registers(hi: Felt, lo: Felt) -> [Felt; NUM_USER_OP_HELPERS];
 
     /// The helper registers for the U32assert2 operation.
     fn op_u32assert2_registers(first: Felt, second: Felt) -> [Felt; NUM_USER_OP_HELPERS];

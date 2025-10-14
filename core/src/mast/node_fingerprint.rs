@@ -1,4 +1,4 @@
-use alloc::{collections::BTreeMap, vec::Vec};
+use alloc::vec::Vec;
 
 use miden_crypto::hash::{
     Digest,
@@ -6,7 +6,7 @@ use miden_crypto::hash::{
 };
 
 use crate::{
-    Operation, Word,
+    LookupByIdx, Operation, Word,
     mast::{
         DecoratorId, MastForest, MastForestError, MastNode, MastNodeId,
         node::{MastNodeErrorContext, MastNodeExt},
@@ -53,7 +53,7 @@ impl MastNodeFingerprint {
     /// this map.
     pub fn from_mast_node(
         forest: &MastForest,
-        hash_by_node_id: &BTreeMap<MastNodeId, MastNodeFingerprint>,
+        hash_by_node_id: &impl LookupByIdx<MastNodeId, MastNodeFingerprint>,
         node: &MastNode,
     ) -> Result<MastNodeFingerprint, MastForestError> {
         match node {
@@ -155,7 +155,7 @@ impl MastNodeFingerprint {
 
 fn fingerprint_from_parts(
     forest: &MastForest,
-    hash_by_node_id: &BTreeMap<MastNodeId, MastNodeFingerprint>,
+    hash_by_node_id: &impl LookupByIdx<MastNodeId, MastNodeFingerprint>,
     before_enter_ids: &[DecoratorId],
     after_exit_ids: &[DecoratorId],
     children_ids: &[MastNodeId],
@@ -170,7 +170,7 @@ fn fingerprint_from_parts(
         .iter()
         .filter_map(|child_id| {
             hash_by_node_id
-                .get(child_id)
+                .get(*child_id)
                 .ok_or(MastForestError::ChildFingerprintMissing(*child_id))
                 .map(|child_fingerprint| child_fingerprint.decorator_root)
                 .transpose()

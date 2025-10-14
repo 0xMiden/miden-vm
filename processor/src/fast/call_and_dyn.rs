@@ -62,6 +62,7 @@ impl FastProcessor {
             if !program.kernel().contains_proc(callee_hash) {
                 return Err(ExecutionError::syscall_target_not_in_kernel(callee_hash, &err_ctx));
             }
+            tracer.record_kernel_proc_access(callee_hash);
 
             // set the system registers to the syscall context
             self.ctx = ContextId::root();
@@ -155,7 +156,7 @@ impl FastProcessor {
                 .memory
                 .read_word(self.ctx, mem_addr, self.clk, &err_ctx)
                 .map_err(ExecutionError::MemoryError)?;
-            tracer.record_memory_read_word(word, mem_addr);
+            tracer.record_memory_read_word(word, mem_addr, self.ctx, self.clk);
 
             word
         };
@@ -193,6 +194,7 @@ impl FastProcessor {
                         &err_ctx,
                     )
                     .await?;
+                tracer.record_mast_forest_resolution(root_id, &new_forest);
 
                 // Push current forest to the continuation stack so that we can return to it
                 continuation_stack.push_enter_forest(current_forest.clone());

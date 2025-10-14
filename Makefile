@@ -28,6 +28,7 @@ help:
 # -- environment toggles --------------------------------------------------------------------------
 BACKTRACE                := RUST_BACKTRACE=1
 WARNINGS                 := RUSTDOCFLAGS="-D warnings"
+BUILDDOCS                := MIDEN_BUILD_STDLIB_DOCS=1
 
 # -- feature configuration ------------------------------------------------------------------------
 ALL_FEATURES_BUT_ASYNC   := --features concurrent,executable,metal,testing,with-debug-info,internal
@@ -81,7 +82,7 @@ lint: format fix clippy ## Runs all linting tasks at once (Clippy, fixing, forma
 
 .PHONY: doc
 doc: ## Generates & checks documentation
-	$(WARNINGS) cargo doc ${ALL_FEATURES_BUT_ASYNC} --keep-going --release
+	$(WARNINGS) $(BUILDDOCS) cargo doc ${ALL_FEATURES_BUT_ASYNC} --keep-going --release
 
 .PHONY: book
 book: ## Builds the book & serves documentation site
@@ -115,7 +116,7 @@ endef
 .PHONY: core-test core-test-build
 ## Core: run tests with overridable CRATE/FEATURES/PROFILES/EXPR/EXTRA
 core-test:
-	$(_CARGO_NEXTEST)
+	$(BUILDDOCS) $(_CARGO_NEXTEST)
 
 ## Core: build test binaries only (no run)
 core-test-build:
@@ -145,7 +146,7 @@ test: ## Run all tests for the workspace
 
 .PHONY: test-docs
 test-docs: ## Run documentation tests (cargo test - nextest doesn't support doctests)
-	cargo test --doc $(ALL_FEATURES_BUT_ASYNC)
+	$(BUILDDOCS) cargo test --doc $(ALL_FEATURES_BUT_ASYNC)
 
 # -- filtered test runs ---------------------------------------------------------------------------
 
@@ -172,17 +173,17 @@ test-loom: ## Runs all loom-based tests
 
 .PHONY: check
 check: ## Checks all targets and features for errors without code generation
-	cargo check --all-targets ${ALL_FEATURES_BUT_ASYNC}
+	$(BUILDDOCS) cargo check --all-targets ${ALL_FEATURES_BUT_ASYNC}
 
 # --- building ------------------------------------------------------------------------------------
 
 .PHONY: build
 build: ## Builds with default parameters
-	cargo build --release --features concurrent
+	$(BUILDDOCS) cargo build --release --features concurrent
 
 .PHONY: build-no-std
 build-no-std: ## Builds without the standard library
-	cargo build --no-default-features --target wasm32-unknown-unknown --workspace
+	$(BUILDDOCS) cargo build --no-default-features --target wasm32-unknown-unknown --workspace
 
 # --- executable ----------------------------------------------------------------------------------
 

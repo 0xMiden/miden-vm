@@ -5,11 +5,25 @@ use core::ops::Range;
 use miden_air::trace::decoder::NUM_USER_OP_HELPERS;
 use miden_core::utils::new_array_vec;
 
+// TRACE LENGTH TRAIT EXTENSION
+// ================================================================================================
+
+/// Trait for getting trace length from column-major trace data.
+pub trait TraceLen {
+    /// Returns the number of rows in the trace.
+    fn trace_length(&self) -> usize;
+}
+
+impl TraceLen for [Vec<Felt>] {
+    fn trace_length(&self) -> usize {
+        self[0].len()
+    }
+}
+
 use super::{
-    super::utils::get_trace_len, DIGEST_LEN, Felt, MIN_TRACE_LEN, NUM_HASHER_COLUMNS,
-    NUM_OP_BATCH_FLAGS, NUM_OP_BITS, NUM_OP_BITS_EXTRA_COLS, ONE, OP_BATCH_1_GROUPS,
-    OP_BATCH_2_GROUPS, OP_BATCH_4_GROUPS, OP_BATCH_8_GROUPS, OP_BATCH_SIZE, Operation, Word, ZERO,
-    get_num_groups_in_next_batch,
+    DIGEST_LEN, Felt, MIN_TRACE_LEN, NUM_HASHER_COLUMNS, NUM_OP_BATCH_FLAGS, NUM_OP_BITS,
+    NUM_OP_BITS_EXTRA_COLS, ONE, OP_BATCH_1_GROUPS, OP_BATCH_2_GROUPS, OP_BATCH_4_GROUPS,
+    OP_BATCH_8_GROUPS, OP_BATCH_SIZE, Operation, Word, ZERO, get_num_groups_in_next_batch,
 };
 
 // CONSTANTS
@@ -194,7 +208,7 @@ impl DecoderTrace {
         self.addr_trace.push(loop_addr);
         self.append_opcode(Operation::Repeat);
 
-        let last_row = get_trace_len(&self.hasher_trace) - 1;
+        let last_row = self.hasher_trace.trace_length() - 1;
         for column in self.hasher_trace.iter_mut() {
             column.push(column[last_row]);
         }

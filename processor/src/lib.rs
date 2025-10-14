@@ -37,6 +37,7 @@ pub(crate) mod continuation_stack;
 
 pub mod fast;
 use fast::FastProcessState;
+pub mod parallel;
 pub(crate) mod processor;
 
 mod operations;
