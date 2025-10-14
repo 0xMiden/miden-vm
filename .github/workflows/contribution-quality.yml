@@ -147,35 +147,44 @@ jobs:
             const trivialCode = onlyCode && !touchesTests && (adds+dels)<=CODE_ONLY_MAX_LINES && changedFiles<=1;
 
             const findings = [];
+            const recommendations = [];
             if (!hasLinkedIssue) findings.push('Link an issue in the PR body (e.g., "Fixes #123").');
             else if (!linkedAssigned) findings.push(`Ensure issue #${linkedNumber} is assigned to the PR author.`);
             if (!hasRationale) findings.push('Add a short Rationale explaining why the change is needed.');
-            if (!hasTestPlan) findings.push('Add a Test plan or clear review steps.');
+            if (!hasTestPlan) recommendations.push('Consider adding a Test plan or clear review steps.');
             if (trivialDoc) findings.push('Change appears to be a trivial doc-only edit; may be batched internally.');
             if (trivialCode) findings.push('Change appears to be a trivial code-only edit without tests; may be batched internally.');
 
             core.setOutput('hasFindings', String(findings.length > 0));
             core.setOutput('findings', JSON.stringify(findings));
+            core.setOutput('recommendations', JSON.stringify(recommendations));
             core.setOutput('linked', linkedNumber ? String(linkedNumber) : '');
             core.setOutput('pr_number', String(prNumber));
 
       - name: Apply label and comment
-        if: steps.gate.outputs.skip != 'true' && steps.eval.outputs.hasFindings == 'true'
+        if: steps.gate.outputs.skip != 'true' && (steps.eval.outputs.hasFindings == 'true' || steps.eval.outputs.recommendations != '[]')
         uses: actions/github-script@v7
         env:
           FINDINGS: ${{ steps.eval.outputs.findings }}
+          RECOMMENDATIONS: ${{ steps.eval.outputs.recommendations }}
           LINK: ${{ steps.eval.outputs.linked }}
           PRNUM: ${{ steps.eval.outputs.pr_number }}
+          HAS_FINDINGS: ${{ steps.eval.outputs.hasFindings }}
         with:
           script: |
             const issue_number = parseInt(process.env.PRNUM, 10);
             const findings = JSON.parse(process.env.FINDINGS || "[]");
+            const recommendations = JSON.parse(process.env.RECOMMENDATIONS || "[]");
             const linked = process.env.LINK;
+            const hasFindings = process.env.HAS_FINDINGS === 'true';
 
-            await github.rest.issues.addLabels({
-              owner: context.repo.owner, repo: context.repo.repo, issue_number,
-              labels: ['quality-concern']
-            });
+            // Only apply label if there are actual findings (not just recommendations)
+            if (hasFindings) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner, repo: context.repo.repo, issue_number,
+                labels: ['quality-concern']
+              });
+            }
 
             const guidance = [
               linked ? `- Ensure issue #${linked} is assigned to you.` : `- Link a relevant issue (e.g., "Fixes #123") and ensure it is assigned to you.`,
@@ -183,15 +192,27 @@ jobs:
               '- If this is a false positive, comment: `/quality-review`.'
             ];
 
+            const commentBody = [
+              'Automated check (CONTRIBUTING.md)',
+              ''
+            ];
+
+            if (findings.length > 0) {
+              commentBody.push('Findings:');
+              commentBody.push(...findings.map(f => `- ${f}`));
+              commentBody.push('');
+            }
+
+            if (recommendations.length > 0) {
+              commentBody.push('Recommendations:');
+              commentBody.push(...recommendations.map(f => `- ${f}`));
+              commentBody.push('');
+            }
+
+            commentBody.push('Next steps:');
+            commentBody.push(...guidance);
+
             await github.rest.issues.createComment({
               owner: context.repo.owner, repo: context.repo.repo, issue_number,
-              body: [
-                'Automated check (CONTRIBUTING.md)',
-                '',
-                'Findings:',
-                ...findings.map(f => `- ${f}`),
-                '',
-                'Next steps:',
-                ...guidance
-              ].join('\n')
+              body: commentBody.join('\n')
             });
