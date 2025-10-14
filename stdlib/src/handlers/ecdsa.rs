@@ -104,7 +104,7 @@ impl EventHandler for EcdsaPrecompile {
             .try_into()
             .expect("digest is exactly 32 bytes");
 
-        let request = EcdsaRequest { pk, digest, sig };
+        let request = EcdsaRequest::new(pk, digest, sig);
         let result = request.result();
 
         Ok(vec![
@@ -132,7 +132,7 @@ impl PrecompileVerifier for EcdsaPrecompile {
 /// This structure encapsulates a complete ECDSA verification request including the public key,
 /// message digest, and signature. It is used during both execution (via the event handler) and
 /// verification (via the precompile verifier).
-struct EcdsaRequest {
+pub struct EcdsaRequest {
     /// secp256k1 public key (33 bytes, compressed)
     pk: PublicKey,
     /// Message digest (32 bytes, typically Keccak256 hash)
@@ -142,6 +142,31 @@ struct EcdsaRequest {
 }
 
 impl EcdsaRequest {
+    /// Creates a new ECDSA verification request.
+    ///
+    /// # Arguments
+    /// * `pk` - The secp256k1 public key (33 bytes, compressed)
+    /// * `digest` - The message digest (32 bytes)
+    /// * `sig` - The ECDSA signature
+    pub fn new(pk: PublicKey, digest: [u8; MESSAGE_DIGEST_LEN_BYTES], sig: Signature) -> Self {
+        Self { pk, digest, sig }
+    }
+
+    /// Returns a reference to the public key.
+    pub fn pk(&self) -> &PublicKey {
+        &self.pk
+    }
+
+    /// Returns a reference to the digest.
+    pub fn digest(&self) -> &[u8; MESSAGE_DIGEST_LEN_BYTES] {
+        &self.digest
+    }
+
+    /// Returns a reference to the signature.
+    pub fn sig(&self) -> &Signature {
+        &self.sig
+    }
+
     /// Converts this request into a [`PrecompileRequest`] for deferred verification.
     ///
     /// Serializes the request data (public key || digest || signature) and wraps it in a
