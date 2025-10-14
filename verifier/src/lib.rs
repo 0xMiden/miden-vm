@@ -111,7 +111,7 @@ pub fn verify_with_precompiles(
 
     // TODO: Check that this corresponds to the commitment output by the VM
     // compute the commitment to the list of all precompile requests.
-    // if no verifiers were provided (e.g. when this function was called from `verify),
+    // if no verifiers were provided (e.g. when this function was called from `verify()`),
     // but the proof contained requests anyway, returns a `NoVerifierFound` error.
     let requests_commitment = precompile_verifiers
         .deferred_requests_commitment(&precompile_requests)
