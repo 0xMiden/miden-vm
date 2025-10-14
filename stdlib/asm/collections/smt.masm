@@ -199,6 +199,12 @@ end
 proc.insert_into_leaf.8196
     # => [key_ptr, start_ptr, end_ptr, V, K, R]
 
+    # Ensure we have space to insert without exceeding the maximum size of 1024 k-v pairs.
+    # We already validated all pointers are u32 and end_ptr >= start_ptr.
+    dup.2 dup.2 sub add.8 u32lte.MAX_LEAF_SIZE assert.err="invalid insert: already at maximum size of 8192"
+
+    # => [key_ptr, start_ptr, end_ptr, V, K, R]
+
     # LOCALS:
     # 0: pairs_array_start
     # 1: pairs_array_end
@@ -448,10 +454,6 @@ end
 
 # Inputs: [leaf_size, NV, V, K, R]
 proc.set_multi_leaf.8192
-    # Ensure that the leaf size does not exceed the maximum size of 1024 k-v pairs.
-    dup u32assert u32lte.MAX_LEAF_SIZE assert.err="invalid leaf: larger than maximum size of 8192"
-    # => [leaf_size, NV, V, K, R]
-
     # We'll have to pipe all the pairs from the advice stack. Let's get the
     # stack ready for pipe_double_words_preimage_to_memory.
 
@@ -891,6 +893,9 @@ export.set
             exec.set_single_leaf
         else
             # Multiple kv-pair case
+
+            # Ensure that the leaf size does not exceed the maximum size of 1024 k-v pairs.
+            dup u32assert u32lte.MAX_LEAF_SIZE assert.err="invalid leaf: larger than maximum size of 8192"
 
             # => [leaf_size, NV, V, K, R]
             exec.set_multi_leaf
