@@ -470,7 +470,8 @@ end
 
 # Inputs: [leaf_size, NV, V, K, R]
 proc.set_multi_leaf.8192
-
+    # Ensure that the leaf size does not exceed the maximum size of 1024 k-v pairs.
+    dup u32assert u32lte.MAX_LEAF_SIZE assert.err="invalid leaf: larger than maximum size of 8192"
     # => [leaf_size, NV, V, K, R]
 
     # We'll have to pipe all the pairs from the advice stack. Let's get the
