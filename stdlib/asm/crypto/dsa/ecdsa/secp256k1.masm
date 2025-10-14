@@ -14,6 +14,10 @@ use.std::crypto::hashes::rpo
 
 const.ECDSA_VERIFY_EVENT=event("stdlib::crypto::dsa::ecdsa::verify")
 
+const.PK_LEN_FELTS=9     # 33.div_ceil(4)
+const.DIGEST_LEN_FELTS=8 # 32.div_ceil(4)
+const.SIG_LEN_FELTS=17   # 66.div_ceil(4)
+
 # PROCEDURES
 # ================================================================================================
 
@@ -22,13 +26,13 @@ const.ECDSA_VERIFY_EVENT=event("stdlib::crypto::dsa::ecdsa::verify")
 #! This procedure uses deferred verification via a precompile. The actual cryptographic
 #! verification is performed by the host, and the result is provided via the advice stack.
 #!
-#! Input: `[ptr_pk, ptr_sig, ptr_digest, ...]`
+#! Input: `[ptr_pk, ptr_digest, ptr_sig, ...]`
 #! Output: `[result, ...]`
 #!
 #! Where:
 #! - `ptr_pk`: word-aligned memory address containing the 33-byte compressed secp256k1 public key
-#! - `ptr_sig`: word-aligned memory address containing the 64-byte signature (r || s, 32 bytes each)
 #! - `ptr_digest`: word-aligned memory address containing the 32-byte message digest
+#! - `ptr_sig`: word-aligned memory address containing the 66-byte signature
 #! - `result`: 1 if the signature is valid, 0 if invalid
 #!
 #! All data must be stored in memory as packed u32 values (little-endian), with unused bytes
@@ -52,39 +56,46 @@ end
 #! Emits an event to trigger the precompile handler, reads the verification result from
 #! the advice stack, and computes the commitment and tag for tracking deferred verification.
 #!
-#! Input: `[ptr_pk, ptr_sig, ptr_digest, ...]`
+#! Input: `[ptr_pk, ptr_digest, ptr_sig, ...]`
 #! Output: `[COMM, TAG, result, ...]`
 #!
 #! Where:
-#! - ptr_pk: word-aligned memory address containing 33-byte public key
-#! - ptr_sig: word-aligned memory address containing 64-byte signature
-#! - ptr_digest: word-aligned memory address containing 32-byte digest
-#! - COMM: Rpo256(pk_bytes || digest_bytes || sig_bytes) for kernel tracking
-#! - TAG: [ECDSA_VERIFY_EVENT, result, 0, 0] for precompile verification
-#! - result: 1 if signature is valid, 0 if invalid
+#! - `ptr_pk`: word-aligned memory address containing 33-byte public key
+#! - `ptr_digest`: word-aligned memory address containing 32-byte digest
+#! - `ptr_sig`: word-aligned memory address containing 66-byte signature
+#! - `COMM`: `Rpo256(Rpo256(Rpo256(pk || digest) || Rpo256(sig)))`
+#! - `TAG`: `[0, 0, result, ECDSA_VERIFY_EVENT]`
+#! - `result`: 1 if signature is valid, 0 if invalid
 export.verify_impl
     emit.ECDSA_VERIFY_EVENT
-    # => [ptr_pk, ptr_sig, ptr_digest, ...]
+    # => [ptr_pk, ptr_digest, ptr_sig, ...]
 
     # Read verification result from advice stack (provided by the host)
-    # For now, just push 1 (valid) as a placeholder
-    push.1
-    # => [result, ptr_pk, ptr_sig, ptr_digest, ...]
+    adv_push.1
+    # => [result, ptr_pk, ptr_digest, ptr_sig, ...]
 
-    # TODO: Compute proper commitment: COMM = Rpo256(pk_bytes || digest_bytes || sig_bytes)
-    # For now, use a placeholder commitment
-    padw
-    # => [0, 0, 0, 0, result, ptr_pk, ptr_sig, ptr_digest, ...]
+    # Compute commitment: COMM = Rpo256(Rpo256(Rpo256(pk) || Rpo256(digest)) || Rpo256(sig))
+    # Compute COMM_PK = Rpo256(pk)
+    push.PK_LEN_FELTS movup.2 exec.rpo::hash_memory
+    # => [COMM_PK, result, ptr_digest, ptr_sig]
 
-    # Create TAG = [ECDSA_VERIFY_EVENT, result, 0, 0]
-    push.0.0 movup.6 push.ECDSA_VERIFY_EVENT
-    # => [ECDSA_VERIFY_EVENT, result, 0, 0, COMM, ptr_pk, ptr_sig, ptr_digest, ...]
+    # Compute COMM_DIGEST = Rpo256(digest_bytes)
+    push.DIGEST_LEN_FELTS movup.6 exec.rpo::hash_memory
+    # => [COMM_DIGEST, COMM_PK, result, ptr_sig]
 
-    # Reorder stack to [COMM, TAG, result, ...]
-    swapw
-    # => [COMM, TAG, result, ptr_pk, ptr_sig, ptr_digest, ...]
+    # Merge COMM_PK and COMM_DIGEST into COMM_PK_DIGEST = Rpo256(Rpo256(pk) || Rpo256(digest))
+    hmerge
+    # => [COMM_PK_DIGEST, result, ptr_sig]
 
-    # Clean up the pointers
-    movup.12 drop movup.11 drop movup.10 drop
-    # => [COMM, TAG, result, ...]
+    # Compute COMM_SIG = Rpo256(sig_bytes)
+    push.SIG_LEN_FELTS movup.6 exec.rpo::hash_memory
+    # => [COMM_SIG, COMM_PK_DIGEST, result]
+
+    # Merge into final commitment COMM = Rpo256(COMM_PK_DIGEST || COMM_SIG)
+    hmerge
+    # => [COMM, result]
+
+    # Create TAG = [0, 0, result, ECDSA_VERIFY_EVENT]
+    push.ECDSA_VERIFY_EVENT movup.5 push.0.0 swapw
+    # => [COMM, TAG, result]
 end

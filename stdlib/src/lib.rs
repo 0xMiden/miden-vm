@@ -12,6 +12,7 @@ use miden_processor::{EventHandler, HostLibrary};
 use miden_utils_sync::LazyLock;
 
 use crate::handlers::{
+    ecdsa::{ECDSA_VERIFY_EVENT_ID, EcdsaPrecompile},
     falcon_div::{FALCON_DIV_EVENT_ID, handle_falcon_div},
     keccak256::{KECCAK_HASH_MEMORY_EVENT_ID, KeccakPrecompile},
     smt_peek::{SMT_PEEK_EVENT_ID, handle_smt_peek},
@@ -69,6 +70,7 @@ impl StdLibrary {
     pub fn handlers(&self) -> Vec<(EventId, Arc<dyn EventHandler>)> {
         vec![
             (KECCAK_HASH_MEMORY_EVENT_ID, Arc::new(KeccakPrecompile)),
+            (ECDSA_VERIFY_EVENT_ID, Arc::new(EcdsaPrecompile)),
             (SMT_PEEK_EVENT_ID, Arc::new(handle_smt_peek)),
             (U64_DIV_EVENT_ID, Arc::new(handle_u64_div)),
             (FALCON_DIV_EVENT_ID, Arc::new(handle_falcon_div)),
@@ -79,7 +81,10 @@ impl StdLibrary {
 
     /// List of all `PrecompileVerifier` required to verify precompile requests.
     pub fn verifiers(&self) -> Vec<(EventId, Arc<dyn PrecompileVerifier>)> {
-        vec![(KECCAK_HASH_MEMORY_EVENT_ID, Arc::new(KeccakPrecompile))]
+        vec![
+            (KECCAK_HASH_MEMORY_EVENT_ID, Arc::new(KeccakPrecompile)),
+            (ECDSA_VERIFY_EVENT_ID, Arc::new(EcdsaPrecompile)),
+        ]
     }
 }
 
