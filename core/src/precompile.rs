@@ -273,9 +273,6 @@ pub trait PrecompileVerifier: Send + Sync {
 /// precompile commitment as it's produced. At the end of execution, the verifier recomputes
 /// this same aggregation and compares the final digest.
 ///
-/// For architectural details, see
-/// [`arch.md`](https://github.com/0xMiden/miden-vm/blob/main/arch.md).
-///
 /// # Aggregation Process
 ///
 /// - **`new()`**: Initialize capacity to `ZERO`

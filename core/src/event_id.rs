@@ -13,7 +13,7 @@ use crate::{Felt, utils::hash_string_to_word};
 /// with other [`Felt`] values.
 ///
 /// While not enforced by this type, the values 0..256 are reserved for
-/// [`SystemEvent`](crate::sys_events::SystemEvent)s. Collisions with
+/// [`SystemEvent`](crate::sys_events::SystemEvent)s.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
