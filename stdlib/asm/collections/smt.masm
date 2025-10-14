@@ -413,38 +413,16 @@ proc.remove_in_multi_leaf.8196
     mem_loadw
     # => [V_old, key_ptr, K, R]
 
-    # Now copy from pairs_array_start..key_ptr.
+    # Shift memory from key_ptr+8..end_ptr to key_ptr, removing the (K, V_old) pair in the process.
+    movup.4
+    # => [write_ptr=key_ptr, V_old, K, R]
 
-    loc_load.3
-    # => [cur_write, V_old, key_ptr, K, R]
-
-    dup.5
-    # => [read_end=key_ptr, cur_write, V_old, key_ptr, K, R]
-
-    loc_load.2
-    # => [cur_read, read_end, cur_write; V_old, key_ptr, K, R]
-    exec.memcopy_word_range_and_advance_ptrs
-    # => [cur_read', cur_write'; V_old, key_ptr, K, R]
-
-    # We ignore the advanced cur_read, and instead set it to key_ptr+8.
-    drop
-
-    # We still update cur_write, though.
-    loc_store.3
-    # => [V_old, key_ptr, K, R]
-
-    # cur_read = key_ptr+8
-    movup.4 add.8 loc_store.2
-
-
-    # Copy from cur_read..end_ptr
-
-    loc_load.3
-    # => [cur_write, V_old, key_ptr, K, R]
     loc_load.1
-    # => [cur_write, end_ptr=pairs_array_end, V_old, key_ptr, K, R]
-    loc_load.2
-    # => [cur_read, cur_write, end_ptr; V_old, key_ptr, K, R]
+    # => [end_ptr=pairs_array_end, write_ptr=key_ptr, V_old, K, R]
+
+    dup.1 add.8
+    # => [start_ptr=key_ptr+8, end_ptr=pairs_array_end, write_ptr=key_ptr, V_old, K, R]
+
     exec.memcopy_word_range_and_advance_ptrs
     # => [cur_read', cur_write'; V_old, K, R]
 
@@ -458,7 +436,7 @@ proc.remove_in_multi_leaf.8196
     dup.8
     # => [i, R, V_old, K]
 
-    loc_load.3 locaddr.4
+    loc_load.3 loc_load.0
     # => [start_addr, end_addr, i, R; V_old, K]
 
     exec.hash_and_insert_mem
