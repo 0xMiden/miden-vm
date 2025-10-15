@@ -9,6 +9,7 @@
 - Added missing implementations of `proptest::Arbitrary` for non-`BasicBlockNode` variants of `MastNode` ([#2335](https://github.com/0xMiden/miden-vm/pull/2335)).
 - [BREAKING] Added builder patterns for all `MastNode` types, made naked constructors module-private ([#2259](https://github.com/0xMiden/miden-vm/pull/2259)).
 - Extend builder patterns for all `MastNode` types ([#2274](https://github.com/0xMiden/miden-vm/pull/2274)).
+- Further extend builder patterns for all `MastNode` types, replace `enum-dispatch` by our own derivations ([#2291](https://github.com/0xMiden/miden-vm/pull/2291)).
 
 ## 0.19.1 (2025-11-6)
 
