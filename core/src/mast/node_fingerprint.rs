@@ -7,10 +7,7 @@ use miden_crypto::hash::{
 
 use crate::{
     LookupByIdx, Operation, Word,
-    mast::{
-        DecoratorId, MastForest, MastForestError, MastNode, MastNodeId,
-        node::{MastNodeErrorContext, MastNodeExt},
-    },
+    mast::{DecoratorId, MastForest, MastForestError, MastNode, MastNodeId, node::MastNodeExt},
 };
 
 // MAST NODE EQUALITY
@@ -58,11 +55,32 @@ impl MastNodeFingerprint {
     ) -> Result<MastNodeFingerprint, MastForestError> {
         match node {
             MastNode::Block(node) => {
+                // Check if we have any decorators at all (before_enter, op-indexed, or after_exit)
+                let has_before_decorators = !node.before_enter().is_empty();
+                let has_after_decorators = !node.after_exit().is_empty();
+                let has_op_decorators = node.decorators().next().is_some();
+
+                // If no decorators, return simple fingerprint
+                if !has_before_decorators && !has_after_decorators && !has_op_decorators {
+                    return Ok(MastNodeFingerprint::new(node.digest()));
+                }
+
                 let mut bytes_to_hash = Vec::new();
 
-                for (idx, decorator_id) in node.decorators() {
+                // Hash before_enter decorators first
+                for decorator_id in node.before_enter() {
+                    bytes_to_hash.extend(forest[*decorator_id].fingerprint().as_bytes());
+                }
+
+                // Hash op-indexed decorators
+                for (idx, decorator_id) in node.indexed_decorator_iter() {
                     bytes_to_hash.extend(idx.to_le_bytes());
                     bytes_to_hash.extend(forest[decorator_id].fingerprint().as_bytes());
+                }
+
+                // Hash after_exit decorators last
+                for decorator_id in node.after_exit() {
+                    bytes_to_hash.extend(forest[*decorator_id].fingerprint().as_bytes());
                 }
 
                 // Add any `Assert`, `U32assert2` and `MpVerify` opcodes present, since these are
@@ -86,12 +104,8 @@ impl MastNodeFingerprint {
                     }
                 }
 
-                if bytes_to_hash.is_empty() {
-                    Ok(MastNodeFingerprint::new(node.digest()))
-                } else {
-                    let decorator_root = Blake3_256::hash(&bytes_to_hash);
-                    Ok(MastNodeFingerprint::with_decorator_root(node.digest(), decorator_root))
-                }
+                let decorator_root = Blake3_256::hash(&bytes_to_hash);
+                Ok(MastNodeFingerprint::with_decorator_root(node.digest(), decorator_root))
             },
             other_node => {
                 let mut children = Vec::new();
@@ -161,5 +175,79 @@ fn fingerprint_from_parts(
 
         let decorator_root = Blake3_256::hash(&decorator_bytes_to_hash);
         Ok(MastNodeFingerprint::with_decorator_root(node_digest, decorator_root))
+    }
+}
+
+// TESTS
+// ================================================================================================
+
+#[cfg(test)]
+mod tests {
+    use alloc::collections::BTreeMap;
+
+    use super::*;
+    use crate::{
+        Decorator, Operation,
+        mast::{BasicBlockNode, MastNode},
+    };
+
+    /// Creates a basic block with the given operations
+    fn basic_block_with_ops(ops: Vec<Operation>) -> MastNode {
+        BasicBlockNode::new(ops, Vec::new()).unwrap().into()
+    }
+
+    /// Creates a decorator and returns its ID
+    fn add_trace_decorator(forest: &mut MastForest, value: u8) -> DecoratorId {
+        forest.add_decorator(Decorator::Trace(value.into())).unwrap()
+    }
+
+    #[test]
+    fn basic_block_fingerprint_different_before_decorators() {
+        let mut forest = MastForest::new();
+        let deco1 = add_trace_decorator(&mut forest, 1);
+        let deco2 = add_trace_decorator(&mut forest, 2);
+
+        // Create two identical basic blocks with different before_enter decorators
+        let mut block1 = basic_block_with_ops(vec![Operation::Add, Operation::Mul]);
+        let mut block2 = basic_block_with_ops(vec![Operation::Add, Operation::Mul]);
+
+        block1.append_before_enter(&[deco1]);
+        block2.append_before_enter(&[deco2]);
+
+        // Compute fingerprints
+        let empty_map = BTreeMap::new();
+        let fp1 = MastNodeFingerprint::from_mast_node(&forest, &empty_map, &block1).unwrap();
+        let fp2 = MastNodeFingerprint::from_mast_node(&forest, &empty_map, &block2).unwrap();
+
+        // Fingerprints should be different
+        assert_ne!(
+            fp1, fp2,
+            "Basic blocks with different before_enter decorators should have different fingerprints"
+        );
+    }
+
+    #[test]
+    fn basic_block_fingerprint_different_after_decorators() {
+        let mut forest = MastForest::new();
+        let deco1 = add_trace_decorator(&mut forest, 1);
+        let deco2 = add_trace_decorator(&mut forest, 2);
+
+        // Create two identical basic blocks with different after_exit decorators
+        let mut block1 = basic_block_with_ops(vec![Operation::Add, Operation::Mul]);
+        let mut block2 = basic_block_with_ops(vec![Operation::Add, Operation::Mul]);
+
+        block1.append_after_exit(&[deco1]);
+        block2.append_after_exit(&[deco2]);
+
+        // Compute fingerprints
+        let empty_map = BTreeMap::new();
+        let fp1 = MastNodeFingerprint::from_mast_node(&forest, &empty_map, &block1).unwrap();
+        let fp2 = MastNodeFingerprint::from_mast_node(&forest, &empty_map, &block2).unwrap();
+
+        // Fingerprints should be different
+        assert_ne!(
+            fp1, fp2,
+            "Basic blocks with different after_exit decorators should have different fingerprints"
+        );
     }
 }
