@@ -24,6 +24,7 @@
 - `after_exit` decorators execute in the correct sequence in External nodes in the Fast processor ([#2247](https://github.com/0xMiden/miden-vm/pull/2247)).
 - Remove O(n log m) iteration in parallel processor (#[2273](https://github.com/0xMiden/miden-vm/pull/2273)).
 - Added explicit endianness methods `get_stack_word_be()` and `get_stack_word_le()` to stack word accessors, deprecated ambiguous `get_stack_word()` ([#2235](https://github.com/0xMiden/miden-vm/issues/2235)).
+- [BREAKING] add pre/post decorators to BasicBlockNode fingerprint ([#2267](https://github.com/0xMiden/miden-vm/pull/2267)).
 
 ## 0.18.2 (2025-10-10)
 
@@ -32,7 +33,6 @@
 ## 0.18.1 (2025-10-02)
 
 - Gate stdlib doc generation in build.rs on `MIDEN_BUILD_STDLIB_DOCS` environment variable ([#2239](https://github.com/0xMiden/miden-vm/pull/2239/)).
-- Gate stdlib doc generation in build.rs on `MIDEN_BUILD_STDLIB_DOCS` environmnent variable ([#2239](https://github.com/0xMiden/miden-vm/pull/2239/))
 
 ## 0.18.0 (2025-09-21)
 

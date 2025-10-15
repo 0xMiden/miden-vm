@@ -244,6 +244,14 @@ impl MastNodeExt for JoinNode {
         target.push(self.second());
     }
 
+    fn for_each_child<F>(&self, mut f: F)
+    where
+        F: FnMut(MastNodeId),
+    {
+        f(self.first());
+        f(self.second());
+    }
+
     fn domain(&self) -> Felt {
         Self::DOMAIN
     }
