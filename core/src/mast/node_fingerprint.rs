@@ -181,7 +181,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        Decorator, Operation,
+        Decorator, Felt, Operation,
         mast::{BasicBlockNode, MastNode},
     };
 
@@ -242,6 +242,88 @@ mod tests {
         assert_ne!(
             fp1, fp2,
             "Basic blocks with different after_exit decorators should have different fingerprints"
+        );
+    }
+
+    #[test]
+    fn basic_block_fingerprint_different_assert_opcodes_no_decorators() {
+        let forest = MastForest::new();
+        let error_code = Felt::new(42);
+
+        // Create three basic blocks with different assert opcodes but no decorators
+        let block_assert = basic_block_with_ops(vec![Operation::Assert(error_code)]);
+        let block_u32assert2 = basic_block_with_ops(vec![Operation::U32assert2(error_code)]);
+        let block_mpverify = basic_block_with_ops(vec![Operation::MpVerify(error_code)]);
+
+        // Compute fingerprints
+        let empty_map = BTreeMap::new();
+        let fp_assert =
+            MastNodeFingerprint::from_mast_node(&forest, &empty_map, &block_assert).unwrap();
+        let fp_u32assert2 =
+            MastNodeFingerprint::from_mast_node(&forest, &empty_map, &block_u32assert2).unwrap();
+        let fp_mpverify =
+            MastNodeFingerprint::from_mast_node(&forest, &empty_map, &block_mpverify).unwrap();
+
+        // All fingerprints should be different since the opcodes are different
+        assert_ne!(
+            fp_assert, fp_u32assert2,
+            "Basic blocks with Assert vs U32assert2 should have different fingerprints"
+        );
+        assert_ne!(
+            fp_assert, fp_mpverify,
+            "Basic blocks with Assert vs MpVerify should have different fingerprints"
+        );
+        assert_ne!(
+            fp_u32assert2, fp_mpverify,
+            "Basic blocks with U32assert2 vs MpVerify should have different fingerprints"
+        );
+    }
+
+    #[test]
+    fn basic_block_fingerprint_different_assert_values_no_decorators() {
+        let forest = MastForest::new();
+        let error_code_1 = Felt::new(42);
+        let error_code_2 = Felt::new(123);
+
+        // Create basic blocks with same assert opcode but different inner values, no decorators
+        let block_assert_1 = basic_block_with_ops(vec![Operation::Assert(error_code_1)]);
+        let block_assert_2 = basic_block_with_ops(vec![Operation::Assert(error_code_2)]);
+
+        let block_u32assert2_1 = basic_block_with_ops(vec![Operation::U32assert2(error_code_1)]);
+        let block_u32assert2_2 = basic_block_with_ops(vec![Operation::U32assert2(error_code_2)]);
+
+        let block_mpverify_1 = basic_block_with_ops(vec![Operation::MpVerify(error_code_1)]);
+        let block_mpverify_2 = basic_block_with_ops(vec![Operation::MpVerify(error_code_2)]);
+
+        // Compute fingerprints
+        let empty_map = BTreeMap::new();
+        let fp_assert_1 =
+            MastNodeFingerprint::from_mast_node(&forest, &empty_map, &block_assert_1).unwrap();
+        let fp_assert_2 =
+            MastNodeFingerprint::from_mast_node(&forest, &empty_map, &block_assert_2).unwrap();
+
+        let fp_u32assert2_1 =
+            MastNodeFingerprint::from_mast_node(&forest, &empty_map, &block_u32assert2_1).unwrap();
+        let fp_u32assert2_2 =
+            MastNodeFingerprint::from_mast_node(&forest, &empty_map, &block_u32assert2_2).unwrap();
+
+        let fp_mpverify_1 =
+            MastNodeFingerprint::from_mast_node(&forest, &empty_map, &block_mpverify_1).unwrap();
+        let fp_mpverify_2 =
+            MastNodeFingerprint::from_mast_node(&forest, &empty_map, &block_mpverify_2).unwrap();
+
+        // All fingerprints should be different since the inner values are different
+        assert_ne!(
+            fp_assert_1, fp_assert_2,
+            "Basic blocks with Assert operations with different error codes should have different fingerprints"
+        );
+        assert_ne!(
+            fp_u32assert2_1, fp_u32assert2_2,
+            "Basic blocks with U32assert2 operations with different error codes should have different fingerprints"
+        );
+        assert_ne!(
+            fp_mpverify_1, fp_mpverify_2,
+            "Basic blocks with MpVerify operations with different error codes should have different fingerprints"
         );
     }
 }
