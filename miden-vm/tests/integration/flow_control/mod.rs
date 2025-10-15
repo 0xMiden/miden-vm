@@ -465,7 +465,7 @@ fn simple_dyncall() {
         libraries: vec![StdLibrary::default().into()],
         ..Test::new(&format!("test{}", line!()), program_source, false)
     };
-    test.add_event_handlers(StdLibrary::default().handlers());
+    test.add_registry(StdLibrary::default().handlers());
 
     test.expect_stack(&[6]);
 
@@ -583,7 +583,7 @@ fn procref() -> Result<(), Report> {
     let stdlib = StdLibrary::default();
     let mut test = build_test!(source, &[]);
     test.libraries.push(stdlib.library().clone());
-    test.add_event_handlers(stdlib.handlers());
+    test.add_registry(stdlib.handlers());
 
     test.expect_stack(&[
         mast_roots[0][3].as_int(),

@@ -7,7 +7,7 @@ macro_rules! build_test {
         let stdlib = miden_stdlib::StdLibrary::default();
         let mut test = miden_utils_testing::build_test_by_mode!(false, $($params)+);
         test.libraries.push(stdlib.library().clone());
-        test.add_event_handlers(stdlib.handlers());
+        test.add_registry(stdlib.handlers());
 
         test
     }}
@@ -20,7 +20,7 @@ macro_rules! build_debug_test {
         let stdlib = miden_stdlib::StdLibrary::default();
         let mut test = miden_utils_testing::build_test_by_mode!(true, $($params)+);
         test.libraries.push(stdlib.library().clone());
-        test.add_event_handlers(stdlib.handlers());
+        test.add_registry(stdlib.handlers());
 
         test
     }}

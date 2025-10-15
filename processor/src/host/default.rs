@@ -56,18 +56,15 @@ where
         }
     }
 
-    /// Loads a [`HostLibrary`] containing a [`MastForest`] with its list of event handlers.
+    /// Loads a [`HostLibrary`] containing a [`MastForest`] with its registry of event handlers.
     pub fn load_library(&mut self, library: impl Into<HostLibrary>) -> Result<(), ExecutionError> {
         let library = library.into();
         self.store.insert(library.mast_forest);
-
-        for (id, handler) in library.handlers {
-            self.event_handlers.register(id, handler)?;
-        }
+        self.event_handlers.extend(library.handlers.into_iter())?;
         Ok(())
     }
 
-    /// Adds a [`HostLibrary`] containing a [`MastForest`] with its list of event handlers.
+    /// Adds a [`HostLibrary`] containing a [`MastForest`] with its registry of event handlers
     /// to the host.
     pub fn with_library(mut self, library: impl Into<HostLibrary>) -> Result<Self, ExecutionError> {
         self.load_library(library)?;
@@ -245,18 +242,21 @@ impl AsyncHost for NoopHost {
 // ================================================================================================
 
 /// A rich library representing a [`MastForest`] which also exports
-/// a list of handlers for events it may call.
+/// a registry of handlers for events it may call.
 #[derive(Default)]
 pub struct HostLibrary {
     /// A `MastForest` with procedures exposed by this library.
     pub mast_forest: Arc<MastForest>,
-    /// List of handlers along with an event id to call them with `emit`.
-    pub handlers: Vec<(EventId, Arc<dyn EventHandler>)>,
+    /// Registry of event handlers that can be called via `emit`.
+    pub handlers: EventHandlerRegistry,
 }
 
 impl From<Arc<MastForest>> for HostLibrary {
     fn from(mast_forest: Arc<MastForest>) -> Self {
-        Self { mast_forest, handlers: vec![] }
+        Self {
+            mast_forest,
+            handlers: EventHandlerRegistry::default(),
+        }
     }
 }
 
@@ -264,7 +264,7 @@ impl From<&Arc<MastForest>> for HostLibrary {
     fn from(mast_forest: &Arc<MastForest>) -> Self {
         Self {
             mast_forest: mast_forest.clone(),
-            handlers: vec![],
+            handlers: EventHandlerRegistry::default(),
         }
     }
 }

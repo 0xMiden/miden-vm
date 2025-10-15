@@ -10,6 +10,8 @@
 
 #### Changes
 
+- [BREAKING] `StdLibrary::handlers()` now returns `EventHandlerRegistry` instead of `Vec<(EventId, Arc<dyn EventHandler>)>` ([#2222](https://github.com/0xMiden/miden-vm/issues/2222)).
+- [BREAKING] `HostLibrary::handlers` field type changed from `Vec<(EventId, Arc<dyn EventHandler>)>` to `EventHandlerRegistry` ([#2222](https://github.com/0xMiden/miden-vm/issues/2222)).
 - [BREAKING] Incremented MSRV to 1.90.
 - [BREAKING] Fix inconsistencies in debugging instructions ([#2205](https://github.com/0xMiden/miden-vm/pull/2205)).
 - Fix ability to parse odd-length hex strings ([#2196](https://github.com/0xMiden/miden-vm/pull/2196)).

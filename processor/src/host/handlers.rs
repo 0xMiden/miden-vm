@@ -131,6 +131,20 @@ impl EventHandlerRegistry {
         self.handlers.remove(&id).is_some()
     }
 
+    /// Merges handlers from another registry into this one.
+    ///
+    /// Returns an error if any handler in `other` has an ID that conflicts with an existing
+    /// handler in this registry.
+    pub fn extend(
+        &mut self,
+        handlers: impl IntoIterator<Item = (EventId, Arc<dyn EventHandler>)>,
+    ) -> Result<(), ExecutionError> {
+        for (id, handler) in handlers {
+            self.register(id, handler)?;
+        }
+        Ok(())
+    }
+
     /// Handles the event if the registry contains a handler with the same identifier.
     ///
     /// Returns an `Option<_>` indicating whether the event was handled, wrapping resulting
@@ -154,6 +168,15 @@ impl Debug for EventHandlerRegistry {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let keys: Vec<_> = self.handlers.keys().collect();
         f.debug_struct("EventHandlerRegistry").field("handlers", &keys).finish()
+    }
+}
+
+impl IntoIterator for EventHandlerRegistry {
+    type Item = (EventId, Arc<dyn EventHandler>);
+    type IntoIter = alloc::collections::btree_map::IntoIter<EventId, Arc<dyn EventHandler>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.handlers.into_iter()
     }
 }
 

@@ -4,11 +4,11 @@ pub mod handlers;
 
 extern crate alloc;
 
-use alloc::{sync::Arc, vec, vec::Vec};
+use alloc::{sync::Arc, vec::Vec};
 
 use miden_assembly::{Library, mast::MastForest, utils::Deserializable};
-use miden_core::{EventId, Felt, Word};
-use miden_processor::{EventHandler, HostLibrary};
+use miden_core::{Felt, Word};
+use miden_processor::{EventHandlerRegistry, HostLibrary};
 use miden_utils_sync::LazyLock;
 
 use crate::handlers::{
@@ -65,16 +65,21 @@ impl StdLibrary {
         &self.0
     }
 
-    /// List of all `EventHandlers` required to run all of the standard library.
-    pub fn handlers(&self) -> Vec<(EventId, Arc<dyn EventHandler>)> {
-        vec![
-            (KECCAK_HASH_MEMORY_EVENT_ID, Arc::new(handle_keccak_hash_memory)),
-            (SMT_PEEK_EVENT_ID, Arc::new(handle_smt_peek)),
-            (U64_DIV_EVENT_ID, Arc::new(handle_u64_div)),
-            (FALCON_DIV_EVENT_ID, Arc::new(handle_falcon_div)),
-            (LOWERBOUND_ARRAY_EVENT_ID, Arc::new(handle_lowerbound_array)),
-            (LOWERBOUND_KEY_VALUE_EVENT_ID, Arc::new(handle_lowerbound_key_value)),
-        ]
+    /// Returns an [`EventHandlerRegistry`] containing all event handlers required by the standard
+    /// library.
+    pub fn handlers(&self) -> EventHandlerRegistry {
+        let handlers = [
+            (KECCAK_HASH_MEMORY_EVENT_ID, Arc::new(handle_keccak_hash_memory) as Arc<_>),
+            (SMT_PEEK_EVENT_ID, Arc::new(handle_smt_peek) as Arc<_>),
+            (U64_DIV_EVENT_ID, Arc::new(handle_u64_div) as Arc<_>),
+            (FALCON_DIV_EVENT_ID, Arc::new(handle_falcon_div) as Arc<_>),
+            (LOWERBOUND_ARRAY_EVENT_ID, Arc::new(handle_lowerbound_array) as Arc<_>),
+            (LOWERBOUND_KEY_VALUE_EVENT_ID, Arc::new(handle_lowerbound_key_value) as Arc<_>),
+        ];
+
+        let mut registry = EventHandlerRegistry::new();
+        registry.extend(handlers).expect("stdlib handler registration should not fail");
+        registry
     }
 }
 

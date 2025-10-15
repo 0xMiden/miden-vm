@@ -10,7 +10,6 @@ use alloc::{
     format,
     string::{String, ToString},
     sync::Arc,
-    vec,
     vec::Vec,
 };
 
@@ -227,11 +226,14 @@ impl Test {
 
     /// Add a handler for a specific event when running the `Host`.
     pub fn add_event_handler(&mut self, id: EventId, handler: impl EventHandler) {
-        self.add_event_handlers(vec![(id, Arc::new(handler))]);
+        self.add_event_handlers([(id, Arc::new(handler) as Arc<dyn EventHandler>)]);
     }
 
-    /// Add a handler for a specific event when running the `Host`.
-    pub fn add_event_handlers(&mut self, handlers: Vec<(EventId, Arc<dyn EventHandler>)>) {
+    /// Add handlers for specific events when running the `Host`.
+    pub fn add_event_handlers(
+        &mut self,
+        handlers: impl IntoIterator<Item = (EventId, Arc<dyn EventHandler>)>,
+    ) {
         for (id, handler) in handlers {
             if id.is_reserved() {
                 panic!("tried to register handler with ID reserved for system events")
@@ -240,6 +242,11 @@ impl Test {
                 panic!("handler with id {id} was already added")
             }
         }
+    }
+
+    /// Add all handlers from an [`miden_processor::EventHandlerRegistry`] when running the `Host`.
+    pub fn add_registry(&mut self, registry: miden_processor::EventHandlerRegistry) {
+        self.add_event_handlers(registry);
     }
 
     // TEST METHODS
