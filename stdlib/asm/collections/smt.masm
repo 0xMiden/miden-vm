@@ -8,6 +8,9 @@ const.LEAF_DEPTH=64
 # Each key-value pair is two words, and a leaf can hold up to 1024 pairs.
 const.MAX_LEAF_SIZE=8192
 
+# Event ID for the smt_peek event
+const.SMT_PEEK_EVENT=event("stdlib::collections::smt::smt_peek")
+
 # SET
 # =================================================================================================
 
@@ -528,4 +531,28 @@ export.get
             # => [V, R]
         end
     end
+end
+
+#! Pushes the value associated with the specified key in the Sparse Merkle Tree defined by
+#! the specified root onto the advice stack. The operand stack remains unchanged.
+#!
+#! If no value was previously inserted under the specified key, an empty word (i.e., [ZERO; 4])
+#! is pushed onto the advice stack.
+#!
+#! Inputs:
+#!   Operand stack: [K, R, ...]
+#!
+#! Outputs:
+#!   Operand stack: [K, R, ...]  (unchanged)
+#!   Advice stack:  [V, ...]
+#!
+#! # WARNING
+#! Values from the advice provider are UNTRUSTED and must be explicitly verified before use.
+#! After loading from the advice stack (e.g., `padw adv_loadw`), verify the value by
+#! recomputing the tree root or using domain-specific verification. For a safe, fully-verified
+#! alternative, use `std::collections::smt::get` instead.
+#!
+#! Cycles: 3
+export.peek
+    emit.SMT_PEEK_EVENT
 end

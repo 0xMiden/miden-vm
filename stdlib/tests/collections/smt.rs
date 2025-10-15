@@ -307,8 +307,62 @@ fn test_set_empty_key_in_non_empty_leaf() {
     build_test!(source, &init_stack, &[], store, advice_map).expect_stack(&final_stack);
 }
 
+/// Tests `peek` which retrieves values via the advice stack without modifying the operand stack
+#[test]
+fn test_smt_peek() {
+    // Test with single-pair leaves
+    let smt = Smt::with_entries(LEAVES).unwrap();
+    for (key, value) in LEAVES {
+        expect_value_from_peek(key, value, &smt);
+    }
+    // Non-existent key mapping to empty leaf
+    expect_value_from_peek(
+        Word::new([42_u32.into(), 42_u32.into(), 42_u32.into(), 42_u32.into()]),
+        EMPTY_WORD,
+        &smt,
+    );
+
+    // Test with multi-pair leaf
+    let smt = Smt::with_entries(LEAVES_MULTI).unwrap();
+    for (key, value) in LEAVES_MULTI {
+        expect_value_from_peek(key, value, &smt);
+    }
+    // Non-existent key mapping to the same multi-pair leaf (same MSE, different key)
+    expect_value_from_peek(
+        Word::new([999_u32.into(), 999_u32.into(), 999_u32.into(), 69420_u32.into()]),
+        EMPTY_WORD,
+        &smt,
+    );
+}
+
 // HELPER FUNCTIONS
 // ================================================================================================
+
+fn expect_value_from_peek(key: Word, expected_value: Word, smt: &Smt) {
+    const SOURCE: &str = "
+        use.std::collections::smt
+
+        begin
+            exec.smt::peek
+            padw adv_loadw
+            swapw.2 dropw dropw
+        end
+    ";
+
+    let mut initial_stack = Vec::new();
+    append_word_to_vec(&mut initial_stack, smt.root());
+    append_word_to_vec(&mut initial_stack, key);
+
+    let expected_output: Vec<u64> = vec![
+        expected_value[3].as_int(),
+        expected_value[2].as_int(),
+        expected_value[1].as_int(),
+        expected_value[0].as_int(),
+    ];
+
+    let (store, advice_map) = build_advice_inputs(smt);
+    build_test!(SOURCE, &initial_stack, &[], store, advice_map).expect_stack(&expected_output);
+}
 
 #[allow(clippy::type_complexity)]
 fn prepare_insert_or_set(
