@@ -6,6 +6,7 @@
 
 - Added support for leaves with multiple pairs in `std::collections::smt::get` ([#2048](https://github.com/0xMiden/miden-vm/pull/2048)).
 - Added `std::mem::pipe_double_words_preimage_to_memory`, a version of `pipe_preimage_to_memory` optimized for pairs of words ([#2048](https://github.com/0xMiden/miden-vm/pull/2048)).
+- Added `std::collections::smt::peek` for non-deterministic SMT value retrieval via the advice stack ([#2222](https://github.com/0xMiden/miden-vm/issues/2222)).
 
 #### Changes
 
