@@ -349,6 +349,13 @@ impl MastNodeExt for BasicBlockNode {
         // No children for basic blocks
     }
 
+    fn for_each_child<F>(&self, _f: F)
+    where
+        F: FnMut(MastNodeId),
+    {
+        // BasicBlockNode has no children
+    }
+
     fn domain(&self) -> Felt {
         Self::DOMAIN
     }

@@ -93,54 +93,18 @@ impl MastNodeFingerprint {
                     Ok(MastNodeFingerprint::with_decorator_root(node.digest(), decorator_root))
                 }
             },
-            MastNode::Join(node) => fingerprint_from_parts(
-                forest,
-                hash_by_node_id,
-                node.before_enter(),
-                node.after_exit(),
-                &[node.first(), node.second()],
-                node.digest(),
-            ),
-            MastNode::Split(node) => fingerprint_from_parts(
-                forest,
-                hash_by_node_id,
-                node.before_enter(),
-                node.after_exit(),
-                &[node.on_true(), node.on_false()],
-                node.digest(),
-            ),
-            MastNode::Loop(node) => fingerprint_from_parts(
-                forest,
-                hash_by_node_id,
-                node.before_enter(),
-                node.after_exit(),
-                &[node.body()],
-                node.digest(),
-            ),
-            MastNode::Call(node) => fingerprint_from_parts(
-                forest,
-                hash_by_node_id,
-                node.before_enter(),
-                node.after_exit(),
-                &[node.callee()],
-                node.digest(),
-            ),
-            MastNode::Dyn(node) => fingerprint_from_parts(
-                forest,
-                hash_by_node_id,
-                node.before_enter(),
-                node.after_exit(),
-                &[],
-                node.digest(),
-            ),
-            MastNode::External(node) => fingerprint_from_parts(
-                forest,
-                hash_by_node_id,
-                node.before_enter(),
-                node.after_exit(),
-                &[],
-                node.digest(),
-            ),
+            other_node => {
+                let mut children = Vec::new();
+                other_node.for_each_child(|child_id| children.push(child_id));
+                fingerprint_from_parts(
+                    forest,
+                    hash_by_node_id,
+                    other_node.before_enter(),
+                    other_node.after_exit(),
+                    &children,
+                    other_node.digest(),
+                )
+            },
         }
     }
 }
