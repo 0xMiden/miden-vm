@@ -1633,7 +1633,7 @@ impl StackInterface for CoreTraceFragmentGenerator {
         &mut self.context.state.stack.stack_top[MIN_STACK_DEPTH - idx - 1]
     }
 
-    fn get_word_be(&self, start_idx: usize) -> Word {
+    fn get_word(&self, start_idx: usize) -> Word {
         debug_assert!(start_idx < MIN_STACK_DEPTH - 4);
 
         let word_start_idx = MIN_STACK_DEPTH - start_idx - 4;

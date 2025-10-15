@@ -231,7 +231,10 @@ impl FastProcessor {
         &mut self.stack[self.stack_top_idx - idx - 1]
     }
 
-    /// Returns the word on the stack starting at index `start_idx` in big-endian (reversed) order.
+    /// Returns the word on the stack starting at index `start_idx` in "stack order".
+    ///
+    /// That is, for `start_idx=0` the top element of the stack will be at the last position in the
+    /// word.
     ///
     /// For example, if the stack looks like this:
     ///
@@ -240,13 +243,11 @@ impl FastProcessor {
     /// a | b | c | d | e | f | g | h | i | j | k | l | m | n | o | p
     ///
     /// Then
-    /// - `stack_get_word_be(0)` returns `[d, c, b, a]` (big-endian),
-    /// - `stack_get_word_be(1)` returns `[e, d, c, b]` (big-endian),
+    /// - `stack_get_word(0)` returns `[d, c, b, a]`,
+    /// - `stack_get_word(1)` returns `[e, d, c ,b]`,
     /// - etc.
-    ///
-    /// This matches the behavior of `mem_loadw_be` where `mem[a+3]` ends up on top of the stack.
     #[inline(always)]
-    pub fn stack_get_word_be(&self, start_idx: usize) -> Word {
+    pub fn stack_get_word(&self, start_idx: usize) -> Word {
         // Ensure we have enough elements to form a complete word
         debug_assert!(
             start_idx + WORD_SIZE <= self.stack_depth() as usize,
@@ -257,27 +258,6 @@ impl FastProcessor {
         let result: [Felt; WORD_SIZE] =
             self.stack[range(word_start_idx, WORD_SIZE)].try_into().unwrap();
         result.into()
-    }
-
-    /// Returns the word on the stack starting at index `start_idx` in little-endian (memory) order.
-    ///
-    /// For example, if the stack looks like this:
-    ///
-    /// top                                                       bottom
-    /// v                                                           v
-    /// a | b | c | d | e | f | g | h | i | j | k | l | m | n | o | p
-    ///
-    /// Then
-    /// - `stack_get_word_le(0)` returns `[a, b, c, d]` (little-endian),
-    /// - `stack_get_word_le(1)` returns `[b, c, d, e]` (little-endian),
-    /// - etc.
-    ///
-    /// This matches the behavior of `mem_loadw_le` where `mem[a]` ends up on top of the stack.
-    #[inline(always)]
-    pub fn stack_get_word_le(&self, start_idx: usize) -> Word {
-        let mut word = self.stack_get_word_be(start_idx);
-        word.reverse();
-        word
     }
 
     /// Returns the number of elements on the stack in the current context.

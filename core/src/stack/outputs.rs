@@ -104,7 +104,7 @@ impl StackOutputs {
     pub fn get_stack_word_le(&self, idx: usize) -> Option<Word> {
         self.get_stack_word_be(idx).map(|mut word| {
             word.reverse();
-            word.into()
+            word
         })
     }
 

@@ -858,8 +858,8 @@ impl<'a> ProcessState<'a> {
     #[inline(always)]
     pub fn get_stack_word_be(&self, start_idx: usize) -> Word {
         match self {
-            ProcessState::Slow(state) => state.stack.get_word_be(start_idx),
-            ProcessState::Fast(state) => state.processor.stack_get_word_be(start_idx),
+            ProcessState::Slow(state) => state.stack.get_word(start_idx),
+            ProcessState::Fast(state) => state.processor.stack_get_word(start_idx),
             ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
         }
     }

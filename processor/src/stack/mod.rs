@@ -162,20 +162,20 @@ impl Stack {
         }
     }
 
-    /// Returns a word starting at the specified element index on the stack in big-endian
-    /// (reversed) order, including overflow items.
+    /// Returns a word starting at the specified element index on the stack, including overflow
+    /// items.
     ///
     /// The word is formed by taking 4 consecutive elements starting from the specified index.
     /// For example, start_idx=0 creates a word from stack elements 0-3, start_idx=1 creates
     /// a word from elements 1-4, etc.
     ///
-    /// In big-endian order, stack element N+3 will be at position 0 of the word, N+2 at
-    /// position 1, N+1 at position 2, and N at position 3. This matches the behavior of
-    /// `mem_loadw_be` where `mem[a+3]` ends up on top of the stack.
+    /// The words are created in reverse order. For a word starting at index N, stack element
+    /// N+3 will be at position 0 of the word, N+2 at position 1, N+1 at position 2, and N
+    /// at position 3.
     ///
     /// This method can access words that span into the overflow table.
     /// Creating a word does not change the state of the stack.
-    pub fn get_word_be(&self, start_idx: usize) -> Word {
+    pub fn get_word(&self, start_idx: usize) -> Word {
         [
             self.get(start_idx + 3),
             self.get(start_idx + 2),
@@ -183,41 +183,6 @@ impl Stack {
             self.get(start_idx),
         ]
         .into()
-    }
-
-    /// Returns a word starting at the specified element index on the stack in little-endian
-    /// (memory) order, including overflow items.
-    ///
-    /// The word is formed by taking 4 consecutive elements starting from the specified index.
-    /// For example, start_idx=0 creates a word from stack elements 0-3, start_idx=1 creates
-    /// a word from elements 1-4, etc.
-    ///
-    /// In little-endian order, stack element N will be at position 0 of the word, N+1 at
-    /// position 1, N+2 at position 2, and N+3 at position 3. This matches the behavior of
-    /// `mem_loadw_le` where `mem[a]` ends up on top of the stack.
-    ///
-    /// This method can access words that span into the overflow table.
-    /// Creating a word does not change the state of the stack.
-    pub fn get_word_le(&self, start_idx: usize) -> Word {
-        let mut word = self.get_word_be(start_idx);
-        word.reverse();
-        word
-    }
-
-    /// Returns a word starting at the specified element index on the stack, including overflow
-    /// items.
-    ///
-    /// This is an alias for [`Self::get_word_be`] for backward compatibility. For new code,
-    /// prefer using the explicit `get_word_be()` or `get_word_le()` to make the ordering
-    /// expectations clear.
-    ///
-    /// See [`Self::get_word_be`] for detailed documentation.
-    #[deprecated(
-        since = "0.19.0",
-        note = "Use `get_word_be()` or `get_word_le()` to make endianness explicit"
-    )]
-    pub fn get_word(&self, start_idx: usize) -> Word {
-        self.get_word_be(start_idx)
     }
 
     /// Sets the value at the specified position on the stack at the next clock cycle.

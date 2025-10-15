@@ -117,7 +117,10 @@ pub trait StackInterface {
     /// Mutable variant of `stack_get()`.
     fn get_mut(&mut self, idx: usize) -> &mut Felt;
 
-    /// Returns the word on the stack starting at index `start_idx` in big-endian (reversed) order.
+    /// Returns the word on the stack starting at index `start_idx` in "stack order".
+    ///
+    /// That is, for `start_idx=0` the top element of the stack will be at the last position in the
+    /// word.
     ///
     /// For example, if the stack looks like this:
     ///
@@ -126,10 +129,10 @@ pub trait StackInterface {
     /// a | b | c | d | e | f | g | h | i | j | k | l | m | n | o | p
     ///
     /// Then
-    /// - `get_word_be(0)` returns `[d, c, b, a]` (big-endian),
-    /// - `get_word_be(1)` returns `[e, d, c, b]` (big-endian),
+    /// - `stack_get_word(0)` returns `[d, c, b, a]`,
+    /// - `stack_get_word(1)` returns `[e, d, c ,b]`,
     /// - etc.
-    fn get_word_be(&self, start_idx: usize) -> Word;
+    fn get_word(&self, start_idx: usize) -> Word;
 
     /// Returns the number of elements on the stack in the current context.
     fn depth(&self) -> u32;
