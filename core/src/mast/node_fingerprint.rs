@@ -55,16 +55,6 @@ impl MastNodeFingerprint {
     ) -> Result<MastNodeFingerprint, MastForestError> {
         match node {
             MastNode::Block(node) => {
-                // Check if we have any decorators at all (before_enter, op-indexed, or after_exit)
-                let has_before_decorators = !node.before_enter().is_empty();
-                let has_after_decorators = !node.after_exit().is_empty();
-                let has_op_decorators = node.decorators().next().is_some();
-
-                // If no decorators, return simple fingerprint
-                if !has_before_decorators && !has_after_decorators && !has_op_decorators {
-                    return Ok(MastNodeFingerprint::new(node.digest()));
-                }
-
                 let mut bytes_to_hash = Vec::new();
 
                 // Hash before_enter decorators first
@@ -104,8 +94,12 @@ impl MastNodeFingerprint {
                     }
                 }
 
-                let decorator_root = Blake3_256::hash(&bytes_to_hash);
-                Ok(MastNodeFingerprint::with_decorator_root(node.digest(), decorator_root))
+                if bytes_to_hash.is_empty() {
+                    Ok(MastNodeFingerprint::new(node.digest()))
+                } else {
+                    let decorator_root = Blake3_256::hash(&bytes_to_hash);
+                    Ok(MastNodeFingerprint::with_decorator_root(node.digest(), decorator_root))
+                }
             },
             other_node => {
                 let mut children = Vec::new();
