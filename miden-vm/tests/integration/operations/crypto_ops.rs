@@ -1,3 +1,4 @@
+use miden_core::PrimeCharacteristicRing;
 use miden_utils_testing::{
     Felt, build_expected_hash, build_expected_perm, build_op_test,
     crypto::{MerkleTree, NodeIndex, init_merkle_leaf, init_merkle_store},
@@ -53,7 +54,7 @@ fn hperm() {
     // --- test that the rest of the stack isn't affected -----------------------------------------
     let mut stack_inputs: Vec<u64> = vec![1, 2, 3, 4];
     let expected_stack_slice =
-        stack_inputs.iter().rev().map(|&v| Felt::new(v)).collect::<Vec<Felt>>();
+        stack_inputs.iter().rev().map(|&v| Felt::from_u64(v)).collect::<Vec<Felt>>();
 
     let values_to_hash: Vec<u64> = vec![1, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0];
     stack_inputs.extend_from_slice(&values_to_hash);
@@ -89,7 +90,7 @@ fn hmerge() {
     // --- test that the rest of the stack isn't affected -----------------------------------------
     let mut stack_inputs: Vec<u64> = vec![1, 2, 3, 4];
     let expected_stack_slice =
-        stack_inputs.iter().rev().map(|&v| Felt::new(v)).collect::<Vec<Felt>>();
+        stack_inputs.iter().rev().map(|&v| Felt::from_u64(v)).collect::<Vec<Felt>>();
 
     let values_to_hash: Vec<u64> = vec![1, 1, 0, 0, 0, 0, 0, 0];
     stack_inputs.extend_from_slice(&values_to_hash);

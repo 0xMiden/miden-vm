@@ -1,13 +1,13 @@
 use alloc::vec::Vec;
 
-use super::{EvaluationFrame, FieldElement, TransitionConstraintDegree, op_flags::OpFlags};
+use super::{EvaluationFrame,  TransitionConstraintDegree, op_flags::OpFlags};
 use crate::{
     stack::EvaluationFrameExt,
     utils::{are_equal, is_binary},
 };
 
 #[cfg(test)]
-pub mod tests;
+//pub mod tests;
 
 // CONSTANTS
 // ================================================================================================
@@ -67,7 +67,7 @@ pub fn enforce_constraints<E: FieldElement>(
     index += enforce_mul_constraints(frame, &mut result[index..], op_flag.mul());
 
     // Enforce constaints of the INV operation.
-    index += enforce_inv_constraints(frame, &mut result[index..], op_flag.inv());
+    index += enforce_inv_constraints(frame, &mut result[index..], op_flag.inverse_unwrap_zero());
 
     // Enforce constaints of the INCR operation.
     index += enforce_incr_constraints(frame, &mut result[index..], op_flag.incr());

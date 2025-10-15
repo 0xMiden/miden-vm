@@ -299,7 +299,7 @@ impl Process {
 
 #[cfg(test)]
 mod tests {
-    use miden_core::mast::MastForest;
+    use miden_core::{PrimeCharacteristicRing, mast::MastForest};
 
     use super::{
         super::{Operation, Process},
@@ -619,7 +619,7 @@ mod tests {
     fn build_expected(values: &[u64]) -> [Felt; 16] {
         let mut expected = [ZERO; 16];
         for (&value, result) in values.iter().zip(expected.iter_mut()) {
-            *result = Felt::new(value);
+            *result = Felt::from_u64(value);
         }
         expected
     }

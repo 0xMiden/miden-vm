@@ -1,9 +1,9 @@
 use miden_air::{
-    Felt, FieldElement, RowIndex,
+    Felt, RowIndex,
     trace::{chiplets::hasher::HasherState, decoder::NUM_USER_OP_HELPERS},
 };
 use miden_core::{
-    QuadFelt, WORD_SIZE, Word, ZERO,
+    PrimeCharacteristicRing, QuadFelt, WORD_SIZE, Word, ZERO,
     crypto::{hash::Rpo256, merkle::MerklePath},
 };
 

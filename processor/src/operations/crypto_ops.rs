@@ -196,6 +196,7 @@ mod tests {
     use alloc::vec::Vec;
 
     use miden_core::{
+        PrimeCharacteristicRing,
         chiplets::hasher::{STATE_WIDTH, apply_permutation},
         crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},
         mast::MastForest,
@@ -240,7 +241,7 @@ mod tests {
 
         // --- test that the rest of the stack isn't affected -------------------------------------
         let mut inputs: Vec<u64> = vec![1, 2, 3, 4];
-        let expected = inputs.iter().rev().map(|&v| Felt::new(v)).collect::<Vec<Felt>>();
+        let expected = inputs.iter().rev().map(|&v| Felt::from_u64(v)).collect::<Vec<Felt>>();
         let values: Vec<u64> = vec![2, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0];
         inputs.extend_from_slice(&values);
 
@@ -274,8 +275,8 @@ mod tests {
             node[3].as_int(),
         ];
 
-        let depth = Felt::new(depth);
-        let index = Felt::new(index);
+        let depth = Felt::from_u64(depth);
+        let index = Felt::from_u64(index);
 
         let advice_inputs = AdviceInputs::default().with_merkle_store(store);
         let stack_inputs = StackInputs::try_from_ints(stack_inputs).unwrap();
@@ -333,8 +334,8 @@ mod tests {
             new_tree.root()[2],
             new_tree.root()[1],
             new_tree.root()[0],
-            Felt::new(tree.depth() as u64),
-            Felt::new(leaf_index as u64),
+            Felt::from_u64(tree.depth() as u64),
+            Felt::from_u64(leaf_index as u64),
             tree.root()[3],
             tree.root()[2],
             tree.root()[1],
@@ -415,8 +416,8 @@ mod tests {
             expected_root[2],
             expected_root[1],
             expected_root[0],
-            Felt::new(target_depth),
-            Felt::new(target_index),
+            Felt::from_u64(target_depth),
+            Felt::from_u64(target_index),
             replaced_root[3],
             replaced_root[2],
             replaced_root[1],
@@ -453,7 +454,7 @@ mod tests {
     fn build_expected_perm(values: &[u64]) -> [Felt; STATE_WIDTH] {
         let mut expected = [ZERO; STATE_WIDTH];
         for (&value, result) in values.iter().zip(expected.iter_mut()) {
-            *result = Felt::new(value);
+            *result = Felt::from_u64(value);
         }
         apply_permutation(&mut expected);
         expected.reverse();

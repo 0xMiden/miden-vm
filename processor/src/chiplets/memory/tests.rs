@@ -9,12 +9,12 @@ use miden_air::{
     },
 };
 use miden_assembly::SourceSpan;
-use miden_core::{WORD_SIZE, Word, assert_matches};
+use miden_core::{Field, PrimeCharacteristicRing, WORD_SIZE, Word, assert_matches};
 
 use super::{
     super::ZERO,
-    CLK_COL_IDX, CTX_COL_IDX, D_INV_COL_IDX, D0_COL_IDX, D1_COL_IDX, EMPTY_WORD, Felt,
-    FieldElement, Memory, ONE, TraceFragment, V_COL_RANGE, WORD_COL_IDX,
+    CLK_COL_IDX, CTX_COL_IDX, D_INV_COL_IDX, D0_COL_IDX, D1_COL_IDX, EMPTY_WORD, Felt, Memory, ONE,
+    TraceFragment, V_COL_RANGE, WORD_COL_IDX,
     segment::{MemoryAccessType, MemoryOperation},
 };
 use crate::{ContextId, MemoryAddress, MemoryError};
@@ -105,7 +105,7 @@ fn mem_read() {
         4.into(),
         EMPTY_WORD,
     );
-    verify_memory_access(&trace, 3, memory_access, prev_row);
+    let _ = verify_memory_access(&trace, 3, memory_access, prev_row);
 }
 
 /// Tests that writing a word to an address that is not aligned with the word boundary results in an
@@ -199,7 +199,7 @@ fn mem_write() {
         MemoryOperation::Write,
         MemoryAccessType::Word,
         ContextId::root(),
-        addr0.into(),
+        Felt::from_u32(addr0.into()),
         1.into(),
         word1,
     );
@@ -209,7 +209,7 @@ fn mem_write() {
         MemoryOperation::Write,
         MemoryAccessType::Element { addr_idx_in_word: 2 },
         ContextId::root(),
-        addr2.into(),
+        Felt::from_u32(addr2),
         2.into(),
         [ONE, ZERO, value5, ZERO].into(),
     );
@@ -219,7 +219,7 @@ fn mem_write() {
         MemoryOperation::Write,
         MemoryAccessType::Element { addr_idx_in_word: 1 },
         ContextId::root(),
-        addr1.into(),
+        Felt::from_u32(addr1),
         3.into(),
         [ONE, value7, value5, ZERO].into(),
     );
@@ -229,7 +229,7 @@ fn mem_write() {
         MemoryOperation::Write,
         MemoryAccessType::Element { addr_idx_in_word: 3 },
         ContextId::root(),
-        addr3.into(),
+        Felt::from_u32(addr3),
         4.into(),
         [ONE, value7, value5, value9].into(),
     );
@@ -239,7 +239,7 @@ fn mem_write() {
         MemoryOperation::Write,
         MemoryAccessType::Word,
         ContextId::root(),
-        addr0.into(),
+        Felt::from_u32(addr0.into()),
         6.into(),
         word5678,
     );
@@ -250,11 +250,11 @@ fn mem_write() {
         MemoryOperation::Write,
         MemoryAccessType::Word,
         ContextId::root(),
-        addr4.into(),
+        Felt::from_u32(addr4),
         5.into(),
         word1234,
     );
-    verify_memory_access(&trace, 5, memory_access, prev_row);
+    let _ = verify_memory_access(&trace, 5, memory_access, prev_row);
 }
 
 /// Tests that writing a word to an address that is not aligned with the word boundary results in an
@@ -350,7 +350,7 @@ fn mem_write_read() {
         MemoryOperation::Read,
         MemoryAccessType::Element { addr_idx_in_word: 3 },
         ContextId::root(),
-        3_u32.into(),
+        Felt::from_u32(3),
         clk,
         word1234,
     );
@@ -361,7 +361,7 @@ fn mem_write_read() {
         MemoryOperation::Read,
         MemoryAccessType::Element { addr_idx_in_word: 2 },
         ContextId::root(),
-        2_u32.into(),
+        Felt::from_u32(2),
         clk,
         word1234,
     );
@@ -372,7 +372,7 @@ fn mem_write_read() {
         MemoryOperation::Read,
         MemoryAccessType::Element { addr_idx_in_word: 1 },
         ContextId::root(),
-        1_u32.into(),
+        Felt::from_u32(1),
         clk,
         word1234,
     );
@@ -405,7 +405,7 @@ fn mem_write_read() {
         MemoryOperation::Write,
         MemoryAccessType::Element { addr_idx_in_word: 2 },
         ContextId::root(),
-        2_u32.into(),
+        Felt::from_u32(2),
         clk,
         Word::from([1_u32, 2, 42, 4]),
     );
@@ -416,7 +416,7 @@ fn mem_write_read() {
         MemoryOperation::Read,
         MemoryAccessType::Element { addr_idx_in_word: 2 },
         ContextId::root(),
-        2_u32.into(),
+        Felt::from_u32(2),
         clk,
         Word::from([1_u32, 2, 42, 4]),
     );
@@ -431,7 +431,7 @@ fn mem_write_read() {
         clk,
         [1_u32, 2, 42, 4].into(),
     );
-    verify_memory_access(&trace, 8, memory_access, prev_row);
+    let _ = verify_memory_access(&trace, 8, memory_access, prev_row);
 }
 
 #[test]
@@ -500,7 +500,7 @@ impl MemoryAccess {
         word_values: Word,
     ) -> Self {
         if let MemoryAccessType::Element { addr_idx_in_word } = access_type {
-            let addr: u32 = addr.try_into().unwrap();
+            let addr: u32 = addr.as_int().try_into().unwrap();
             assert_eq!(addr_idx_in_word as u32, addr % WORD_SIZE as u32);
         }
 
@@ -547,9 +547,10 @@ fn build_trace_row(
     } = memory_access;
 
     let (word, idx1, idx0) = {
-        let addr: u32 = addr.try_into().unwrap();
+        let addr: u32 = addr.as_int() as u32;
+        //let addr: u32 = addr.try_into().unwrap(); TODO(Al)
         let remainder = addr % WORD_SIZE as u32;
-        let word = Felt::from(addr - remainder);
+        let word = Felt::from_u32(addr - remainder);
 
         match remainder {
             0 => (word, ZERO, ZERO),
@@ -591,7 +592,7 @@ fn build_trace_row(
     let (hi, lo) = super::split_element_u32_into_u16(delta);
     row[D0_COL_IDX] = lo;
     row[D1_COL_IDX] = hi;
-    row[D_INV_COL_IDX] = delta.inv();
+    row[D_INV_COL_IDX] = delta.inverse_unwrap_zero();
 
     if row[WORD_COL_IDX] == prev_row[WORD_COL_IDX] && row[CTX_COL_IDX] == prev_row[CTX_COL_IDX] {
         row[FLAG_SAME_CONTEXT_AND_WORD] = ONE;

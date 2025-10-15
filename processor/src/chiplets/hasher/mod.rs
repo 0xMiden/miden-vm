@@ -4,6 +4,7 @@ use miden_air::trace::chiplets::hasher::{
     DIGEST_RANGE, LINEAR_HASH, MP_VERIFY, MR_UPDATE_NEW, MR_UPDATE_OLD, RATE_LEN, RETURN_HASH,
     RETURN_STATE, STATE_WIDTH, Selectors, TRACE_WIDTH,
 };
+use miden_core::PrimeCharacteristicRing;
 
 use super::{
     Felt, HasherState, MerklePath, MerkleRootUpdate, ONE, OpBatch, TraceFragment, Word as Digest,
@@ -329,9 +330,9 @@ impl Hasher {
         // path), the index for the first row is different from the index for the other rows;
         // otherwise, indexes are the same.
         let (init_index, rest_index) = if init_selectors[0] == ZERO {
-            (Felt::new(*index >> 1), Felt::new(*index >> 1))
+            (Felt::from_u64(*index >> 1), Felt::from_u64(*index >> 1))
         } else {
-            (Felt::new(*index), Felt::new(*index >> 1))
+            (Felt::from_u64(*index), Felt::from_u64(*index >> 1))
         };
 
         // apply the permutation to the state and record its trace

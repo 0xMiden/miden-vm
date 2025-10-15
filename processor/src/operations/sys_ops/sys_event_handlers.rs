@@ -1,8 +1,8 @@
 use alloc::vec::Vec;
 
 use miden_core::{
-    Felt, FieldElement, QuadFelt, WORD_SIZE, Word, ZERO, crypto::hash::Rpo256,
-    sys_events::SystemEvent,
+    AlgebraicSponge, Felt, PrimeCharacteristicRing, QuadFelt, WORD_SIZE, Word, ZERO,
+    crypto::hash::Rpo256, sys_events::SystemEvent,
 };
 
 use crate::{ExecutionError, ProcessState, errors::ErrorContext};
@@ -309,7 +309,7 @@ pub fn push_key_presence_flag(process: &mut ProcessState) -> Result<(), Executio
     let map_key = process.get_stack_word(1);
 
     let presence_flag = process.advice_provider().contains_map_key(&map_key);
-    process.advice_provider_mut().push_stack(Felt::from(presence_flag));
+    process.advice_provider_mut().push_stack(Felt::new(presence_flag as u64));
 
     Ok(())
 }
@@ -336,11 +336,11 @@ fn push_ext2_inv_result(
     let coef0 = process.get_stack_item(2);
     let coef1 = process.get_stack_item(1);
 
-    let element = QuadFelt::new(coef0, coef1);
+    let element = QuadFelt::new_complex(coef0, coef1);
     if element == QuadFelt::ZERO {
         return Err(ExecutionError::divide_by_zero(process.clk(), err_ctx));
     }
-    let result = element.inv().to_base_elements();
+    let result = element.inverse_unwrap_zero().to_array();
 
     process.advice_provider_mut().push_stack(result[1]);
     process.advice_provider_mut().push_stack(result[0]);

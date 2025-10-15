@@ -1,6 +1,6 @@
 use miden_core::{mast::MastForest, stack::MIN_STACK_DEPTH};
 
-use super::{ExecutionError, Felt, FieldElement, Operation, Process, SyncHost};
+use super::{ExecutionError, Felt, Operation, Process, SyncHost};
 use crate::errors::ErrorContext;
 
 mod circuit_eval;

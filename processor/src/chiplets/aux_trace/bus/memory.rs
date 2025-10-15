@@ -13,7 +13,7 @@ use miden_air::{
         main_trace::MainTrace,
     },
 };
-use miden_core::{Felt, FieldElement, ONE, ZERO};
+use miden_core::{ExtensionField, Felt, ONE, PrimeCharacteristicRing, ZERO};
 
 use crate::{
     chiplets::aux_trace::build_value,
@@ -29,7 +29,7 @@ const FOUR: Felt = Felt::new(4);
 // ================================================================================================
 
 /// Builds ACE chiplet read requests as part of the `READ` section made to the memory chiplet.
-pub fn build_ace_memory_read_word_request<E: FieldElement<BaseField = Felt>>(
+pub fn build_ace_memory_read_word_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     alphas: &[E],
     row: RowIndex,
@@ -64,7 +64,7 @@ pub fn build_ace_memory_read_word_request<E: FieldElement<BaseField = Felt>>(
 }
 
 /// Builds ACE chiplet read requests as part of the `EVAL` section made to the memory chiplet.
-pub fn build_ace_memory_read_element_request<E: FieldElement<BaseField = Felt>>(
+pub fn build_ace_memory_read_element_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     alphas: &[E],
     row: RowIndex,
@@ -98,7 +98,7 @@ pub fn build_ace_memory_read_element_request<E: FieldElement<BaseField = Felt>>(
 }
 
 /// Builds `MLOADW` and `MSTOREW` requests made to the memory chiplet.
-pub(super) fn build_mem_mloadw_mstorew_request<E: FieldElement<BaseField = Felt>>(
+pub(super) fn build_mem_mloadw_mstorew_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     op_label: u8,
     alphas: &[E],
@@ -118,7 +118,7 @@ pub(super) fn build_mem_mloadw_mstorew_request<E: FieldElement<BaseField = Felt>
     let clk = main_trace.clk(row);
 
     let message = MemoryWordMessage {
-        op_label: Felt::from(op_label),
+        op_label: Felt::from_u8(op_label),
         ctx,
         addr,
         clk,
@@ -139,7 +139,7 @@ pub(super) fn build_mem_mloadw_mstorew_request<E: FieldElement<BaseField = Felt>
 }
 
 /// Builds `MLOAD` and `MSTORE` requests made to the memory chiplet.
-pub(super) fn build_mem_mload_mstore_request<E: FieldElement<BaseField = Felt>>(
+pub(super) fn build_mem_mload_mstore_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     op_label: u8,
     alphas: &[E],
@@ -155,7 +155,7 @@ pub(super) fn build_mem_mload_mstore_request<E: FieldElement<BaseField = Felt>>(
     let clk = main_trace.clk(row);
 
     let message = MemoryElementMessage {
-        op_label: Felt::from(op_label),
+        op_label: Felt::from_u8(op_label),
         ctx,
         addr,
         clk,
@@ -171,13 +171,13 @@ pub(super) fn build_mem_mload_mstore_request<E: FieldElement<BaseField = Felt>>(
 }
 
 /// Builds `MSTREAM` requests made to the memory chiplet.
-pub(super) fn build_mstream_request<E: FieldElement<BaseField = Felt>>(
+pub(super) fn build_mstream_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     alphas: &[E],
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
-    let op_label = Felt::from(MEMORY_READ_WORD_LABEL);
+    let op_label = Felt::from_u8(MEMORY_READ_WORD_LABEL);
     let addr = main_trace.stack_element(12, row);
     let ctx = main_trace.ctx(row);
     let clk = main_trace.clk(row);
@@ -221,13 +221,13 @@ pub(super) fn build_mstream_request<E: FieldElement<BaseField = Felt>>(
 }
 
 /// Builds `PIPE` requests made to the memory chiplet.
-pub(super) fn build_pipe_request<E: FieldElement<BaseField = Felt>>(
+pub(super) fn build_pipe_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     alphas: &[E],
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
-    let op_label = Felt::from(MEMORY_WRITE_WORD_LABEL);
+    let op_label = Felt::from_u8(MEMORY_WRITE_WORD_LABEL);
     let addr = main_trace.stack_element(12, row);
     let ctx = main_trace.ctx(row);
     let clk = main_trace.clk(row);
@@ -271,7 +271,7 @@ pub(super) fn build_pipe_request<E: FieldElement<BaseField = Felt>>(
 }
 
 /// Builds `HORNERBASE` or `HORNEREXT` requests made to the memory chiplet.
-pub(super) fn build_horner_eval_request<E: FieldElement<BaseField = Felt>>(
+pub(super) fn build_horner_eval_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     alphas: &[E],
     row: RowIndex,
@@ -282,7 +282,7 @@ pub(super) fn build_horner_eval_request<E: FieldElement<BaseField = Felt>>(
     let mem_junk_0 = main_trace.helper_register(2, row);
     let mem_junk_1 = main_trace.helper_register(3, row);
     let eval_point_ptr = main_trace.stack_element(13, row);
-    let op_label = Felt::from(MEMORY_READ_WORD_LABEL);
+    let op_label = Felt::from_u8(MEMORY_READ_WORD_LABEL);
 
     let ctx = main_trace.ctx(row);
     let clk = main_trace.clk(row);
@@ -317,7 +317,7 @@ pub(super) fn build_memory_chiplet_responses<E>(
     _debugger: &mut BusDebugger<E>,
 ) -> E
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     let access_type = main_trace.chiplet_selector_4(row);
     let op_label = {
@@ -331,7 +331,7 @@ where
         let idx0 = main_trace.chiplet_memory_idx0(row);
         let idx1 = main_trace.chiplet_memory_idx1(row);
 
-        word + idx1.mul_small(2) + idx0
+        word + idx1 * Felt::TWO + idx0
     };
 
     if access_type == MEMORY_ACCESS_ELEMENT {
@@ -418,7 +418,7 @@ pub struct MemoryWordMessage {
 
 impl<E> BusMessage<E> for MemoryWordMessage
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     fn value(&self, alphas: &[E]) -> E {
         alphas[0]
@@ -462,7 +462,7 @@ pub struct MemoryElementMessage {
 
 impl<E> BusMessage<E> for MemoryElementMessage
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     fn value(&self, alphas: &[E]) -> E {
         alphas[0]

@@ -21,13 +21,14 @@ pub use miden_assembly::{
     diagnostics::Report,
 };
 pub use miden_core::{
-    EMPTY_WORD, Felt, FieldElement, ONE, StackInputs, StackOutputs, StarkField, WORD_SIZE, Word,
-    ZERO,
+    EMPTY_WORD, Felt, ONE, StackInputs, StackOutputs, WORD_SIZE, Word, ZERO,
     chiplets::hasher::{STATE_WIDTH, hash_elements},
     stack::MIN_STACK_DEPTH,
     utils::{IntoBytes, ToElements, group_slice_elements},
 };
-use miden_core::{EventId, ProgramInfo, chiplets::hasher::apply_permutation};
+use miden_core::{
+    EventId, PrimeCharacteristicRing, ProgramInfo, chiplets::hasher::apply_permutation,
+};
 pub use miden_processor::{
     AdviceInputs, AdviceProvider, BaseHost, ContextId, ExecutionError, ExecutionOptions,
     ExecutionTrace, Process, ProcessState, VmStateIterator,
@@ -37,17 +38,16 @@ use miden_processor::{
     parallel::build_trace,
 };
 use miden_prover::utils::range;
-pub use miden_prover::{MerkleTreeVC, ProvingOptions, prove};
+pub use miden_prover::{ProvingOptions, prove};
 pub use miden_verifier::{AcceptableOptions, VerifierError, verify};
 pub use pretty_assertions::{assert_eq, assert_ne, assert_str_eq};
 #[cfg(not(target_family = "wasm"))]
 use proptest::prelude::{Arbitrary, Strategy};
 pub use test_case::test_case;
-use winter_prover::Trace;
 
 pub mod math {
     pub use winter_prover::math::{
-        ExtensionOf, FieldElement, StarkField, ToElements, fft, fields::QuadExtension, polynom,
+        ExtensionOf, StarkField, ToElements, fft, fields::QuadExtension, polynom,
     };
 }
 
@@ -487,6 +487,7 @@ impl Test {
         }
 
         let program_info = ProgramInfo::from(program);
+
         if test_fail {
             stack_outputs.stack_mut()[0] += ONE;
             assert!(
@@ -621,7 +622,7 @@ impl Test {
         // Skip large traces in CI, which fail due to memory constraints.
         #[cfg(feature = "std")]
         if std::env::var("CI") == Ok("true".to_string())
-            && trace_from_slow_processor.main_segment().num_rows() >= (1 << 21)
+            && trace_from_slow_processor.main_trace.num_rows() >= (1 << 21)
         {
             return;
         }
@@ -647,8 +648,8 @@ impl Test {
 
         // Compare the main trace columns
         for col_idx in 0..miden_air::trace::PADDED_TRACE_WIDTH {
-            let slow_column = trace_from_slow_processor.main_segment().get_column(col_idx);
-            let parallel_column = trace_from_parallel.main_segment().get_column(col_idx);
+            let slow_column = trace_from_slow_processor.main_trace.get_column(col_idx);
+            let parallel_column = trace_from_parallel.main_trace.get_column(col_idx);
 
             // Since the parallel trace generator only generates core traces, its column length will
             // be lower than the slow processor's trace in the case where the range checker or
@@ -728,7 +729,7 @@ pub fn prop_randw<T: Arbitrary>() -> impl Strategy<Value = Vec<T>> {
 pub fn build_expected_perm(values: &[u64]) -> [Felt; STATE_WIDTH] {
     let mut expected = [ZERO; STATE_WIDTH];
     for (&value, result) in values.iter().zip(expected.iter_mut()) {
-        *result = Felt::new(value);
+        *result = Felt::from_u64(value);
     }
     apply_permutation(&mut expected);
     expected.reverse();
@@ -737,7 +738,7 @@ pub fn build_expected_perm(values: &[u64]) -> [Felt; STATE_WIDTH] {
 }
 
 pub fn build_expected_hash(values: &[u64]) -> [Felt; 4] {
-    let digest = hash_elements(&values.iter().map(|&v| Felt::new(v)).collect::<Vec<_>>());
+    let digest = hash_elements(&values.iter().map(|&v| Felt::from_u64(v)).collect::<Vec<_>>());
     let mut expected: [Felt; 4] = digest.into();
     expected.reverse();
 

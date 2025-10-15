@@ -303,7 +303,6 @@ pub(crate) enum MultiMastForestIteratorItem {
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
     use crate::{Operation, Word, mast::BasicBlockNode};
 

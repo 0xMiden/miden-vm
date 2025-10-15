@@ -390,7 +390,7 @@ fn inst_with_pretty_felt_params(inst: &'static str, params: &[crate::Felt]) -> D
 
 #[cfg(test)]
 mod tests {
-    use miden_core::crypto::hash::Rpo256;
+    use miden_core::{PrimeCharacteristicRing, crypto::hash::Rpo256};
     use miden_debug_types::Span;
 
     use crate::{Felt, ast::*};
@@ -403,7 +403,7 @@ mod tests {
         let instruction = format!("{}", Instruction::Add);
         assert_eq!("add", instruction);
 
-        let instruction = format!("{}", Instruction::AddImm(Felt::new(5).into()));
+        let instruction = format!("{}", Instruction::AddImm(Felt::from_u8(5).into()));
         assert_eq!("add.5", instruction);
 
         let instruction = format!("{}", Instruction::ExpBitLength(32));
@@ -411,7 +411,12 @@ mod tests {
 
         let instruction = format!(
             "{}",
-            Instruction::PushFeltList(vec![Felt::new(3), Felt::new(4), Felt::new(8), Felt::new(9)])
+            Instruction::PushFeltList(vec![
+                Felt::from_u8(3),
+                Felt::from_u8(4),
+                Felt::from_u8(8),
+                Felt::from_u8(9)
+            ])
         );
         assert_eq!("push.3.4.8.9", instruction);
         let instruction = format!(

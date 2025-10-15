@@ -1,5 +1,5 @@
 use miden_air::trace::decoder::NUM_USER_OP_HELPERS;
-use miden_core::{Felt, FieldElement, ONE, ZERO};
+use miden_core::{Felt, Field, ONE, ZERO};
 
 use crate::{
     ErrorContext, ExecutionError,
@@ -44,7 +44,7 @@ pub(super) fn op_inv<P: Processor>(
     if (*top) == ZERO {
         return Err(ExecutionError::divide_by_zero(processor.system().clk(), err_ctx));
     }
-    *top = top.inv();
+    *top = top.inverse_unwrap_zero();
     Ok(())
 }
 
@@ -69,8 +69,8 @@ pub(super) fn op_and<P: Processor>(
     pop2_applyfn_push(
         processor,
         |a, b| {
-            assert_binary(b, err_ctx)?;
-            assert_binary(a, err_ctx)?;
+            let _ = assert_binary(b, err_ctx)?;
+            let _ = assert_binary(a, err_ctx)?;
 
             if a == ONE && b == ONE { Ok(ONE) } else { Ok(ZERO) }
         },
@@ -93,8 +93,8 @@ pub(super) fn op_or<P: Processor>(
     pop2_applyfn_push(
         processor,
         |a, b| {
-            assert_binary(b, err_ctx)?;
-            assert_binary(a, err_ctx)?;
+            let _ = assert_binary(b, err_ctx)?;
+            let _ = assert_binary(a, err_ctx)?;
 
             if a == ONE || b == ONE { Ok(ONE) } else { Ok(ZERO) }
         },
@@ -213,14 +213,12 @@ pub(super) fn op_expacc<P: Processor>(processor: &mut P) -> [Felt; NUM_USER_OP_H
 /// and leaves the rest of the stack unchanged.
 #[inline(always)]
 pub(super) fn op_ext2mul<P: Processor>(processor: &mut P) {
-    const TWO: Felt = Felt::new(2);
     let [a0, a1, b0, b1] = processor.stack().get_word(0).into();
 
-    /* top 2 elements remain unchanged */
-
-    let b0_times_a0 = b0 * a0;
-    processor.stack().set(2, (b0 + b1) * (a1 + a0) - b0_times_a0);
-    processor.stack().set(3, b0_times_a0 - TWO * b1 * a1);
+    processor.stack().set(0, b1);
+    processor.stack().set(1, b0);
+    processor.stack().set(2, a0 * b1 + a1 * b0);
+    processor.stack().set(3, a0 * b0 + Felt::new(7) * a1 * b1);
 }
 
 // HELPERS

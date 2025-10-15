@@ -41,7 +41,7 @@ serde = [
     "winter-math/serde",
 ]
 arbitrary = ["dep:proptest", "dep:proptest-derive"]
-testing = ["arbitrary" ]
+testing = ["arbitrary"]
 
 [dependencies]
 # Miden dependencies
@@ -51,7 +51,7 @@ miden-formatting.workspace = true
 miden-utils-indexing.workspace = true
 
 # External dependencies
-enum_dispatch = { version =  "0.3" }
+enum_dispatch = { version = "0.3" }
 num-derive = { version = "0.4", default-features = false }
 num-traits = { version = "0.2", default-features = false }
 proptest = { workspace = true, optional = true }
@@ -60,6 +60,8 @@ serde = { workspace = true, optional = true, features = ["derive"] }
 thiserror.workspace = true
 winter-math.workspace = true
 winter-utils.workspace = true
+parking_lot = { version = "0.12", optional = true }
+lazy_static = "1.4"
 
 [dev-dependencies]
 criterion = { workspace = true }

@@ -12,7 +12,7 @@ use miden_air::trace::{
     },
 };
 use miden_core::{
-    EMPTY_WORD, EventId, ONE, Program, WORD_SIZE, ZERO, assert_matches,
+    EMPTY_WORD, EventId, ONE, PrimeCharacteristicRing, Program, WORD_SIZE, ZERO, assert_matches,
     mast::{
         BasicBlockNode, CallNode, DynNode, JoinNode, MastForest, MastNode, MastNodeExt, MastNodeId,
         OP_BATCH_SIZE,
@@ -222,7 +222,7 @@ fn basic_block_small_with_emit() {
 
 #[test]
 fn basic_block() {
-    let iv = [ONE, TWO, Felt::new(3), Felt::new(4), Felt::new(5)];
+    let iv = [ONE, TWO, Felt::from_u64(3), Felt::from_u64(4), Felt::from_u64(5)];
     let ops = vec![
         Operation::Push(iv[0]),
         Operation::Push(iv[1]),
@@ -316,13 +316,13 @@ fn span_block_with_respan() {
     let iv = [
         ONE,
         TWO,
-        Felt::new(3),
-        Felt::new(4),
-        Felt::new(5),
-        Felt::new(6),
-        Felt::new(7),
+        Felt::from_u64(3),
+        Felt::from_u64(4),
+        Felt::from_u64(5),
+        Felt::from_u64(6),
+        Felt::from_u64(7),
         EIGHT,
-        Felt::new(9),
+        Felt::from_u64(9),
     ];
 
     let ops = vec![
@@ -459,7 +459,7 @@ fn join_node() {
     check_op_decoding(&trace, 2, span1_addr, Operation::Mul, 0, 0, 1);
     check_op_decoding(&trace, 3, span1_addr, Operation::End, 0, 0, 0);
     // starting second span
-    let span2_addr = INIT_ADDR + Felt::new(16);
+    let span2_addr = INIT_ADDR + Felt::from_u64(16);
     check_op_decoding(&trace, 4, INIT_ADDR, Operation::Span, 1, 0, 0);
     check_op_decoding(&trace, 5, span2_addr, Operation::Add, 0, 0, 1);
     check_op_decoding(&trace, 6, span2_addr, Operation::End, 0, 0, 0);
@@ -719,7 +719,7 @@ fn loop_node_repeat() {
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
     let iter1_addr = INIT_ADDR + EIGHT;
-    let iter2_addr = INIT_ADDR + Felt::new(16);
+    let iter2_addr = INIT_ADDR + Felt::from_u64(16);
 
     check_op_decoding(&trace, 0, ZERO, Operation::Loop, 0, 0, 0);
     check_op_decoding(&trace, 1, INIT_ADDR, Operation::Span, 1, 0, 0);
@@ -1511,10 +1511,10 @@ fn set_user_op_helpers_many() {
     let expected = build_expected_hasher_state(&[
         ZERO,
         ZERO,
-        Felt::new((check_1 as u16).into()),
-        Felt::new(((check_1 >> 16) as u16).into()),
-        Felt::new((check_2 as u16).into()),
-        Felt::new(((check_2 >> 16) as u16).into()),
+        Felt::from_u64((check_1 as u16).into()),
+        Felt::from_u64(((check_1 >> 16) as u16).into()),
+        Felt::from_u64((TryInto::<u32>::try_into(check_2).unwrap() as u16).into()),
+        Felt::from_u64((TryInto::<u32>::try_into(check_2 >> 16).unwrap()).into()),
     ]);
 
     assert_eq!(expected, hasher_state);
@@ -1611,9 +1611,9 @@ fn check_op_decoding(
 
     assert_eq!(trace[ADDR_COL_IDX][row_idx], addr);
     assert_eq!(op.op_code(), opcode);
-    assert_eq!(trace[IN_SPAN_COL_IDX][row_idx], Felt::new(in_span));
-    assert_eq!(trace[GROUP_COUNT_COL_IDX][row_idx], Felt::new(group_count));
-    assert_eq!(trace[OP_INDEX_COL_IDX][row_idx], Felt::new(op_idx));
+    assert_eq!(trace[IN_SPAN_COL_IDX][row_idx], Felt::from_u64(in_span));
+    assert_eq!(trace[GROUP_COUNT_COL_IDX][row_idx], Felt::from_u64(group_count));
+    assert_eq!(trace[OP_INDEX_COL_IDX][row_idx], Felt::from_u64(op_idx));
 
     let expected_batch_flags = if op == Operation::Span || op == Operation::Respan {
         let num_groups = core::cmp::min(OP_BATCH_SIZE, group_count as usize);
@@ -1627,9 +1627,9 @@ fn check_op_decoding(
     }
 
     // make sure the op bit extra columns for degree reduction are set correctly
-    let bit6 = Felt::from((opcode >> 6) & 1);
-    let bit5 = Felt::from((opcode >> 5) & 1);
-    let bit4 = Felt::from((opcode >> 4) & 1);
+    let bit6 = Felt::from_u8((opcode >> 6) & 1);
+    let bit5 = Felt::from_u8((opcode >> 5) & 1);
+    let bit4 = Felt::from_u8((opcode >> 4) & 1);
     assert_eq!(trace[OP_BITS_EXTRA_COLS_RANGE.start][row_idx], bit6 * (ONE - bit5) * bit4);
     assert_eq!(trace[OP_BITS_EXTRA_COLS_RANGE.start + 1][row_idx], bit6 * bit5);
 }

@@ -3,11 +3,11 @@ use core::{mem::MaybeUninit, ops::ControlFlow};
 
 use itertools::Itertools;
 use miden_air::{
-    FieldElement, RowIndex,
+    RowIndex,
     trace::{
-        CLK_COL_IDX, CTX_COL_IDX, DECODER_TRACE_OFFSET, DECODER_TRACE_WIDTH, FMP_COL_IDX,
-        FN_HASH_RANGE, IN_SYSCALL_COL_IDX, MIN_TRACE_LEN, PADDED_TRACE_WIDTH, STACK_TRACE_OFFSET,
-        STACK_TRACE_WIDTH, SYS_TRACE_WIDTH, TRACE_WIDTH,
+        CLK_COL_IDX, CTX_COL_IDX, ColMatrix, DECODER_TRACE_OFFSET, DECODER_TRACE_WIDTH,
+        FMP_COL_IDX, FN_HASH_RANGE, IN_SYSCALL_COL_IDX, MIN_TRACE_LEN, PADDED_TRACE_WIDTH,
+        STACK_TRACE_OFFSET, STACK_TRACE_WIDTH, SYS_TRACE_WIDTH, TRACE_WIDTH,
         decoder::{
             ADDR_COL_IDX, GROUP_COUNT_COL_IDX, HASHER_STATE_OFFSET, IN_SPAN_COL_IDX,
             NUM_HASHER_COLUMNS, NUM_OP_BATCH_FLAGS, NUM_OP_BITS, NUM_USER_OP_HELPERS,
@@ -18,17 +18,17 @@ use miden_air::{
     },
 };
 use miden_core::{
-    Felt, Kernel, ONE, OPCODE_PUSH, Operation, QuadFelt, StarkField, WORD_SIZE, Word, ZERO,
+    BasedVectorSpace, Felt, Field, Kernel, ONE, OPCODE_PUSH, Operation, PrimeCharacteristicRing,
+    PrimeField64, QuadFelt, WORD_SIZE, Word, ZERO,
     mast::{BasicBlockNode, MastForest, MastNode, MastNodeExt, MastNodeId, OpBatch},
     stack::MIN_STACK_DEPTH,
     utils::{range, uninit_vector},
 };
 use rayon::prelude::*;
-use winter_prover::{crypto::RandomCoin, math::batch_inversion};
 
 use crate::{
-    ChipletsLengths, ColMatrix, ContextId, ErrorContext, ExecutionError, ExecutionTrace,
-    ProcessState, TraceLenSummary,
+    ChipletsLengths, ContextId, ErrorContext, ExecutionError, ExecutionTrace, ProcessState,
+    TraceLenSummary,
     chiplets::{Chiplets, CircuitEvaluation, MAX_NUM_ACE_WIRES, PTR_OFFSET_ELEM, PTR_OFFSET_WORD},
     continuation_stack::Continuation,
     crypto::RpoRandomCoin,
@@ -162,7 +162,7 @@ pub fn build_trace(
     // Inject random values into the last NUM_RAND_ROWS rows for all columns
     for i in main_trace_len - NUM_RAND_ROWS..main_trace_len {
         for column in trace_columns.iter_mut() {
-            column[i] = rng.draw().expect("failed to draw a random value");
+            column[i] = rng.draw_basefield();
         }
     }
 
@@ -435,16 +435,16 @@ fn initialize_chiplets(
     for hasher_op in hasher_for_chiplet.into_iter() {
         match hasher_op {
             HasherOp::Permute(input_state) => {
-                chiplets.hasher.permute(input_state);
+                let _ = chiplets.hasher.permute(input_state);
             },
             HasherOp::HashControlBlock((h1, h2, domain, expected_hash)) => {
-                chiplets.hasher.hash_control_block(h1, h2, domain, expected_hash);
+                let _ = chiplets.hasher.hash_control_block(h1, h2, domain, expected_hash);
             },
             HasherOp::HashBasicBlock((op_batches, expected_hash)) => {
-                chiplets.hasher.hash_basic_block(&op_batches, expected_hash);
+                let _ = chiplets.hasher.hash_basic_block(&op_batches, expected_hash);
             },
             HasherOp::BuildMerkleRoot((value, path, index)) => {
-                chiplets.hasher.build_merkle_root(value, &path, index);
+                let _ = chiplets.hasher.build_merkle_root(value, &path, index);
             },
             HasherOp::UpdateMerkleRoot((old_value, new_value, path, index)) => {
                 chiplets.hasher.update_merkle_root(old_value, new_value, &path, index);
@@ -456,13 +456,13 @@ fn initialize_chiplets(
     for (bitwise_op, a, b) in bitwise {
         match bitwise_op {
             BitwiseOp::U32And => {
-                chiplets
+                let _ = chiplets
                     .bitwise
                     .u32and(a, b, &())
                     .expect("bitwise AND operation failed when populating chiplet");
             },
             BitwiseOp::U32Xor => {
-                chiplets
+                let _ = chiplets
                     .bitwise
                     .u32xor(a, b, &())
                     .expect("bitwise XOR operation failed when populating chiplet");
@@ -505,7 +505,7 @@ fn initialize_chiplets(
             .kmerge_by(|a, b| a.clk() < b.clk())
             .for_each(|mem_access| match mem_access {
                 MemoryAccess::ReadElement(addr, ctx, clk) => {
-                    chiplets
+                    let _ = chiplets
                         .memory
                         .read(ctx, addr, clk, &())
                         .expect("memory read element failed when populating chiplet");
@@ -609,8 +609,12 @@ fn combine_fragments(fragments: Vec<CoreTraceFragment>, trace_len: usize) -> Vec
         .collect();
 
     // Run batch inversion on stack's H0 helper column
-    core_trace_columns[STACK_TRACE_OFFSET + H0_COL_IDX] =
-        batch_inversion(&core_trace_columns[STACK_TRACE_OFFSET + H0_COL_IDX]);
+    // core_trace_columns[STACK_TRACE_OFFSET + H0_COL_IDX] =
+    //     batch_multiplicative_inverse(&core_trace_columns[STACK_TRACE_OFFSET + H0_COL_IDX]);
+    // TODO(ZZ) fixme
+    core_trace_columns[STACK_TRACE_OFFSET + H0_COL_IDX]
+        .iter_mut()
+        .for_each(|x| *x = x.inverse_unwrap_zero());
 
     // Return the core trace columns
     core_trace_columns
@@ -1246,7 +1250,7 @@ impl CoreTraceFragmentGenerator {
             MastNode::Call(call_node) => {
                 self.update_decoder_state_on_node_start();
 
-                self.context.state.stack.start_context();
+                let _ = self.context.state.stack.start_context();
 
                 // Set up new context for the call
                 if call_node.is_syscall() {
@@ -1706,7 +1710,7 @@ impl StackInterface for CoreTraceFragmentGenerator {
     }
 
     fn increment_size(&mut self, _tracer: &mut impl Tracer) -> Result<(), ExecutionError> {
-        const SENTINEL_VALUE: Felt = Felt::new(Felt::MODULUS - 1);
+        const SENTINEL_VALUE: Felt = Felt::new(Felt::ORDER_U64 - 1);
 
         // push the last element on the overflow table
         {
@@ -1840,7 +1844,7 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
         let h0 = if stack_second == stack_first {
             ZERO
         } else {
-            (stack_first - stack_second).inv()
+            (stack_first - stack_second).inverse_unwrap_zero()
         };
 
         [h0, ZERO, ZERO, ZERO, ZERO, ZERO]
@@ -1850,7 +1854,7 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
     fn op_u32split_registers(hi: Felt, lo: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
         let (t1, t0) = split_u32_into_u16(lo.as_int());
         let (t3, t2) = split_u32_into_u16(hi.as_int());
-        let m = (Felt::from(u32::MAX) - hi).inv();
+        let m = (Felt::from(u32::MAX) - hi).inverse_unwrap_zero();
 
         [Felt::from(t0), Felt::from(t1), Felt::from(t2), Felt::from(t3), m, ZERO]
     }
@@ -1859,7 +1863,7 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
     fn op_eqz_registers(top: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
         // h0 is a helper variable provided by the prover. If the top element is zero, then, h0 can
         // be set to anything otherwise set it to the inverse of the top element in the stack.
-        let h0 = if top == ZERO { ZERO } else { top.inv() };
+        let h0 = if top == ZERO { ZERO } else { top.inverse_unwrap_zero() };
 
         [h0, ZERO, ZERO, ZERO, ZERO, ZERO]
     }
@@ -1876,11 +1880,8 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
         x: Felt,
         x_inv: Felt,
     ) -> [Felt; NUM_USER_OP_HELPERS] {
-        let ev_arr = [ev];
-        let ev_felts = QuadFelt::slice_as_base_elements(&ev_arr);
-
-        let es_arr = [es];
-        let es_felts = QuadFelt::slice_as_base_elements(&es_arr);
+        let ev_felts = ev.as_basis_coefficients_slice();
+        let es_felts = es.as_basis_coefficients_slice();
 
         [ev_felts[0], ev_felts[1], es_felts[0], es_felts[1], x, x_inv]
     }
@@ -1917,7 +1918,7 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
         // Compute helpers for range checks
         let (t1, t0) = split_u32_into_u16(lo.as_int());
         let (t3, t2) = split_u32_into_u16(hi.as_int());
-        let m = (Felt::from(u32::MAX) - hi).inv();
+        let m = (Felt::from(u32::MAX) - hi).inverse_unwrap_zero();
 
         [Felt::from(t0), Felt::from(t1), Felt::from(t2), Felt::from(t3), m, ZERO]
     }
@@ -1927,7 +1928,7 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
         // Compute helpers for range checks
         let (t1, t0) = split_u32_into_u16(lo.as_int());
         let (t3, t2) = split_u32_into_u16(hi.as_int());
-        let m = (Felt::from(u32::MAX) - hi).inv();
+        let m = (Felt::from(u32::MAX) - hi).inverse_unwrap_zero();
 
         [Felt::from(t0), Felt::from(t1), Felt::from(t2), Felt::from(t3), m, ZERO]
     }
@@ -1967,14 +1968,10 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
         k1: Felt,
         acc_tmp: QuadFelt,
     ) -> [Felt; NUM_USER_OP_HELPERS] {
-        [
-            alpha.base_element(0),
-            alpha.base_element(1),
-            k0,
-            k1,
-            acc_tmp.base_element(0),
-            acc_tmp.base_element(1),
-        ]
+        let alpha_base = alpha.as_basis_coefficients_slice().to_vec();
+        let acc_tmp_base = acc_tmp.as_basis_coefficients_slice().to_vec();
+
+        [alpha_base[0], alpha_base[1], k0, k1, acc_tmp_base[0], acc_tmp_base[1]]
     }
 }
 

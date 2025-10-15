@@ -1,6 +1,6 @@
-use miden_core::WORD_SIZE;
+use miden_core::{PrimeCharacteristicRing, WORD_SIZE};
 use miden_utils_testing::{
-    EMPTY_WORD, Felt, ONE, StarkField, Word, ZERO,
+    EMPTY_WORD, Felt, ONE, Word, ZERO,
     crypto::{
         MerkleError, MerkleStore, MerkleTree, Mmr, NodeIndex, init_merkle_leaf, init_merkle_leaves,
     },
@@ -67,7 +67,7 @@ fn test_mmr_get_single_peak() -> Result<(), MerkleError> {
     let merkle_tree = MerkleTree::new(init_merkle_leaves(leaves))?;
     let merkle_root = merkle_tree.root();
     let merkle_store = MerkleStore::from(&merkle_tree);
-    let advice_stack: Vec<u64> = merkle_root.iter().map(StarkField::as_int).collect();
+    let advice_stack: Vec<u64> = merkle_root.iter().map(Felt::as_int).collect();
 
     for pos in 0..(leaves.len() as u64) {
         let source = format!(
@@ -90,7 +90,7 @@ fn test_mmr_get_single_peak() -> Result<(), MerkleError> {
         let leaf = merkle_store.get_node(merkle_root, NodeIndex::new(2, pos)?)?;
 
         // the stack should be first the leaf followed by the tree root
-        let stack: Vec<u64> = leaf.iter().map(StarkField::as_int).rev().collect();
+        let stack: Vec<u64> = leaf.iter().map(Felt::as_int).rev().collect();
         test.expect_stack(&stack);
     }
 
@@ -114,8 +114,8 @@ fn test_mmr_get_two_peaks() -> Result<(), MerkleError> {
 
     let advice_stack: Vec<u64> = merkle_root1
         .iter()
-        .map(StarkField::as_int)
-        .chain(merkle_root2.iter().map(StarkField::as_int))
+        .map(Felt::as_int)
+        .chain(merkle_root2.iter().map(Felt::as_int))
         .collect();
 
     let examples = [
@@ -148,7 +148,7 @@ fn test_mmr_get_two_peaks() -> Result<(), MerkleError> {
         let test = build_test!(source, &[], advice_stack, merkle_store.clone());
 
         // the stack should be first the leaf element followed by the tree root
-        let stack: Vec<u64> = leaf.iter().map(StarkField::as_int).rev().collect();
+        let stack: Vec<u64> = leaf.iter().map(Felt::as_int).rev().collect();
         test.expect_stack(&stack);
     }
 
@@ -176,10 +176,10 @@ fn test_mmr_tree_with_one_element() -> Result<(), MerkleError> {
     merkle_store.extend(merkle_tree2.inner_nodes());
 
     // In the case of a single leaf, the leaf is itself also the root
-    let stack: Vec<u64> = merkle_root3.iter().map(StarkField::as_int).rev().collect();
+    let stack: Vec<u64> = merkle_root3.iter().map(Felt::as_int).rev().collect();
 
     // Test case for single element MMR
-    let advice_stack: Vec<u64> = merkle_root3.iter().map(StarkField::as_int).collect();
+    let advice_stack: Vec<u64> = merkle_root3.iter().map(Felt::as_int).collect();
     let source = format!(
         "
         use.std::collections::mmr
@@ -201,9 +201,9 @@ fn test_mmr_tree_with_one_element() -> Result<(), MerkleError> {
     // Test case for the single element tree in a MMR with multiple trees
     let advice_stack: Vec<u64> = merkle_root1
         .iter()
-        .map(StarkField::as_int)
-        .chain(merkle_root2.iter().map(StarkField::as_int))
-        .chain(merkle_root3.iter().map(StarkField::as_int))
+        .map(Felt::as_int)
+        .chain(merkle_root2.iter().map(Felt::as_int))
+        .chain(merkle_root3.iter().map(Felt::as_int))
         .collect();
     let num_leaves = leaves1.len() + leaves2.len() + leaves3.len();
     let source = format!(
@@ -238,8 +238,8 @@ fn test_mmr_unpack() {
         // 3 peaks. These hashes are invalid, we can't produce data for any of these peaks (only
         // for testing)
         [ZERO, ZERO, ZERO, ONE],
-        [ZERO, ZERO, ZERO, Felt::new(2)],
-        [ZERO, ZERO, ZERO, Felt::new(3)],
+        [ZERO, ZERO, ZERO, Felt::from_u64(2)],
+        [ZERO, ZERO, ZERO, Felt::from_u64(3)],
         // Padding, the MMR is padded to a minimum length of 16
         EMPTY_WORD.into(),
         EMPTY_WORD.into(),
@@ -268,7 +268,9 @@ fn test_mmr_unpack() {
     let store = MerkleStore::new();
 
     let mut mmr_mem_repr: Vec<Felt> = Vec::with_capacity(peaks.len() + 1);
-    mmr_mem_repr.extend_from_slice(&[number_of_leaves.try_into().unwrap(), ZERO, ZERO, ZERO]);
+    mmr_mem_repr.extend_from_slice(&[Felt::from_u64(number_of_leaves), ZERO, ZERO, ZERO]);
+    //mmr_mem_repr.extend_from_slice(&[number_of_leaves.try_into().unwrap(), ZERO, ZERO, ZERO]);
+    // TODO(Al)
     mmr_mem_repr.extend_from_slice(&peaks.as_slice().concat());
 
     let advice_map: &[(Word, Vec<Felt>)] = &[
@@ -300,8 +302,8 @@ fn test_mmr_unpack_invalid_hash() {
         // 3 peaks. These hashes are invalid, we can't produce data for any of these peaks (only
         // for testing)
         [ZERO, ZERO, ZERO, ONE],
-        [ZERO, ZERO, ZERO, Felt::new(2)],
-        [ZERO, ZERO, ZERO, Felt::new(3)],
+        [ZERO, ZERO, ZERO, Felt::from_u64(2)],
+        [ZERO, ZERO, ZERO, Felt::from_u64(3)],
         // Padding, the MMR is padded to a minimum length o 16
         EMPTY_WORD.into(),
         EMPTY_WORD.into(),
@@ -333,7 +335,7 @@ fn test_mmr_unpack_invalid_hash() {
     hash_data[0][0] += ONE;
 
     let mut map_data: Vec<Felt> = Vec::with_capacity(hash_data.len() + 1);
-    map_data.extend_from_slice(&[Felt::new(0b10101), ZERO, ZERO, ZERO]); // 3 peaks, 21 leaves
+    map_data.extend_from_slice(&[Felt::from_u64(0b10101), ZERO, ZERO, ZERO]); // 3 peaks, 21 leaves
     map_data.extend_from_slice(&hash_data.as_slice().concat());
 
     let advice_map: &[(Word, Vec<Felt>)] = &[
@@ -359,21 +361,21 @@ fn test_mmr_unpack_large_mmr() {
         // These hashes are invalid, we can't produce data for any of these peaks (only for
         // testing)
         [ZERO, ZERO, ZERO, ONE],
-        [ZERO, ZERO, ZERO, Felt::new(2)],
-        [ZERO, ZERO, ZERO, Felt::new(3)],
-        [ZERO, ZERO, ZERO, Felt::new(4)],
-        [ZERO, ZERO, ZERO, Felt::new(5)],
-        [ZERO, ZERO, ZERO, Felt::new(6)],
-        [ZERO, ZERO, ZERO, Felt::new(7)],
-        [ZERO, ZERO, ZERO, Felt::new(8)],
-        [ZERO, ZERO, ZERO, Felt::new(9)],
-        [ZERO, ZERO, ZERO, Felt::new(10)],
-        [ZERO, ZERO, ZERO, Felt::new(11)],
-        [ZERO, ZERO, ZERO, Felt::new(12)],
-        [ZERO, ZERO, ZERO, Felt::new(13)],
-        [ZERO, ZERO, ZERO, Felt::new(14)],
-        [ZERO, ZERO, ZERO, Felt::new(15)],
-        [ZERO, ZERO, ZERO, Felt::new(16)],
+        [ZERO, ZERO, ZERO, Felt::from_u64(2)],
+        [ZERO, ZERO, ZERO, Felt::from_u64(3)],
+        [ZERO, ZERO, ZERO, Felt::from_u64(4)],
+        [ZERO, ZERO, ZERO, Felt::from_u64(5)],
+        [ZERO, ZERO, ZERO, Felt::from_u64(6)],
+        [ZERO, ZERO, ZERO, Felt::from_u64(7)],
+        [ZERO, ZERO, ZERO, Felt::from_u64(8)],
+        [ZERO, ZERO, ZERO, Felt::from_u64(9)],
+        [ZERO, ZERO, ZERO, Felt::from_u64(10)],
+        [ZERO, ZERO, ZERO, Felt::from_u64(11)],
+        [ZERO, ZERO, ZERO, Felt::from_u64(12)],
+        [ZERO, ZERO, ZERO, Felt::from_u64(13)],
+        [ZERO, ZERO, ZERO, Felt::from_u64(14)],
+        [ZERO, ZERO, ZERO, Felt::from_u64(15)],
+        [ZERO, ZERO, ZERO, Felt::from_u64(16)],
         // Padding, peaks greater than 16 are padded to an even number
         [ZERO, ZERO, ZERO, Felt::new(17)],
         EMPTY_WORD.into(),
@@ -391,7 +393,9 @@ fn test_mmr_unpack_large_mmr() {
     let store = MerkleStore::new();
 
     let mut mmr_mem_repr: Vec<Felt> = Vec::with_capacity(peaks.len() + 1);
-    mmr_mem_repr.extend_from_slice(&[number_of_leaves.try_into().unwrap(), ZERO, ZERO, ZERO]);
+    mmr_mem_repr.extend_from_slice(&[Felt::from_u64(number_of_leaves), ZERO, ZERO, ZERO]);
+    //mmr_mem_repr.extend_from_slice(&[number_of_leaves.try_into().unwrap(), ZERO, ZERO, ZERO]);
+    // TODO(Al)
     mmr_mem_repr.extend_from_slice(&peaks.as_slice().concat());
 
     let advice_map: &[(Word, Vec<Felt>)] = &[
@@ -509,7 +513,7 @@ fn test_mmr_pack() {
     #[rustfmt::skip]
     hash_data.extend_from_slice( &[
         ONE, ZERO, ZERO, ZERO, // peak1
-        Felt::new(2), ZERO, ZERO, ZERO, // peak2
+        Felt::from_u64(2), ZERO, ZERO, ZERO, // peak2
     ]);
     hash_data.resize(16 * 4, ZERO); // padding data
 
@@ -517,7 +521,7 @@ fn test_mmr_pack() {
     let hash_u8 = hash;
 
     let mut expect_data: Vec<Felt> = Vec::new();
-    expect_data.extend_from_slice(&[Felt::new(3), ZERO, ZERO, ZERO]); // num_leaves
+    expect_data.extend_from_slice(&[Felt::from_u64(3), ZERO, ZERO, ZERO]); // num_leaves
     expect_data.extend_from_slice(&hash_data);
 
     let (process, _) = build_test!(source).execute_process().unwrap();
@@ -571,8 +575,8 @@ fn test_mmr_two() {
     );
 
     let mut mmr = Mmr::new();
-    mmr.add([ONE, Felt::new(2), Felt::new(3), Felt::new(4)].into());
-    mmr.add([Felt::new(5), Felt::new(6), Felt::new(7), Felt::new(8)].into());
+    mmr.add([ONE, Felt::from_u64(2), Felt::from_u64(3), Felt::from_u64(4)].into());
+    mmr.add([Felt::from_u64(5), Felt::from_u64(6), Felt::from_u64(7), Felt::from_u64(8)].into());
 
     let accumulator = mmr.peaks();
     let peak = accumulator.peaks()[0];
@@ -609,12 +613,12 @@ fn test_add_mmr_large() {
 
     let mut mmr = Mmr::new();
     mmr.add([ZERO, ZERO, ZERO, ONE].into());
-    mmr.add([ZERO, ZERO, ZERO, Felt::new(2)].into());
-    mmr.add([ZERO, ZERO, ZERO, Felt::new(3)].into());
-    mmr.add([ZERO, ZERO, ZERO, Felt::new(4)].into());
-    mmr.add([ZERO, ZERO, ZERO, Felt::new(5)].into());
-    mmr.add([ZERO, ZERO, ZERO, Felt::new(6)].into());
-    mmr.add([ZERO, ZERO, ZERO, Felt::new(7)].into());
+    mmr.add([ZERO, ZERO, ZERO, Felt::from_u64(2)].into());
+    mmr.add([ZERO, ZERO, ZERO, Felt::from_u64(3)].into());
+    mmr.add([ZERO, ZERO, ZERO, Felt::from_u64(4)].into());
+    mmr.add([ZERO, ZERO, ZERO, Felt::from_u64(5)].into());
+    mmr.add([ZERO, ZERO, ZERO, Felt::from_u64(6)].into());
+    mmr.add([ZERO, ZERO, ZERO, Felt::from_u64(7)].into());
 
     let accumulator = mmr.peaks();
 
@@ -633,12 +637,12 @@ fn test_mmr_large_add_roundtrip() {
 
     let mut mmr: Mmr = Mmr::from([
         [ZERO, ZERO, ZERO, ONE].into(),
-        [ZERO, ZERO, ZERO, Felt::new(2)].into(),
-        [ZERO, ZERO, ZERO, Felt::new(3)].into(),
-        [ZERO, ZERO, ZERO, Felt::new(4)].into(),
-        [ZERO, ZERO, ZERO, Felt::new(5)].into(),
-        [ZERO, ZERO, ZERO, Felt::new(6)].into(),
-        [ZERO, ZERO, ZERO, Felt::new(7)].into(),
+        [ZERO, ZERO, ZERO, Felt::from_u64(2)].into(),
+        [ZERO, ZERO, ZERO, Felt::from_u64(3)].into(),
+        [ZERO, ZERO, ZERO, Felt::from_u64(4)].into(),
+        [ZERO, ZERO, ZERO, Felt::from_u64(5)].into(),
+        [ZERO, ZERO, ZERO, Felt::from_u64(6)].into(),
+        [ZERO, ZERO, ZERO, Felt::from_u64(7)].into(),
     ]);
 
     let old_accumulator = mmr.peaks();
@@ -680,7 +684,7 @@ fn test_mmr_large_add_roundtrip() {
     "
     );
 
-    mmr.add([ZERO, ZERO, ZERO, Felt::new(8)].into());
+    mmr.add([ZERO, ZERO, ZERO, Felt::from_u64(8)].into());
 
     let new_accumulator = mmr.peaks();
     let num_leaves = new_accumulator.num_leaves() as u64;

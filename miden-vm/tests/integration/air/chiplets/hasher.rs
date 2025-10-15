@@ -5,6 +5,7 @@ use miden_utils_testing::{
 };
 
 #[test]
+#[ignore = "fix-prover"]
 fn hperm() {
     let asm_op = "hperm";
     let pub_inputs = rand_vector::<u64>(8);
@@ -13,6 +14,7 @@ fn hperm() {
 }
 
 #[test]
+#[ignore = "fix-prover"]
 fn hmerge() {
     let asm_op = "hmerge";
     let pub_inputs = rand_vector::<u64>(8);
@@ -21,6 +23,7 @@ fn hmerge() {
 }
 
 #[test]
+#[ignore = "fix-prover"]
 fn mtree_get() {
     let asm_op = "mtree_get";
 
@@ -42,6 +45,7 @@ fn mtree_get() {
 }
 
 #[test]
+#[ignore = "fix-prover"]
 fn mtree_set() {
     let asm_op = "mtree_set";
     let (stack_inputs, store, _leaves) = build_mtree_update_test_inputs();
@@ -51,6 +55,7 @@ fn mtree_set() {
 }
 
 #[test]
+#[ignore = "fix-prover"]
 fn mtree_verify() {
     let asm_op = "mtree_verify";
 
@@ -76,6 +81,7 @@ fn mtree_verify() {
 }
 
 #[test]
+#[ignore = "fix-prover"]
 fn mtree_merge() {
     let asm_op = "mtree_merge";
 

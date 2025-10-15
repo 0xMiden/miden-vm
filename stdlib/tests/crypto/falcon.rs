@@ -2,7 +2,7 @@ use std::{sync::Arc, vec};
 
 use miden_air::{Felt, ProvingOptions, RowIndex};
 use miden_assembly::{Assembler, utils::Serializable};
-use miden_core::{EventId, StarkField, ZERO};
+use miden_core::{AlgebraicSponge, EventId, PrimeCharacteristicRing, PrimeField64, ZERO};
 use miden_processor::{
     AdviceInputs, AdviceMutation, DefaultHost, EventError, ExecutionError, ProcessState, Program,
     ProgramInfo, StackInputs, crypto::RpoRandomCoin,
@@ -16,7 +16,7 @@ use miden_utils_testing::{
     },
     expect_exec_error_matches,
     proptest::proptest,
-    rand::rand_value,
+    rand::rand_array,
 };
 use rand::{Rng, rng};
 
@@ -114,7 +114,7 @@ fn test_falcon512_diff_mod_m() {
         exec.rpo_falcon512::diff_mod_M
     end
     ";
-    let v = Felt::MODULUS - 1;
+    let v = Felt::ORDER_U64 - 1;
     let (v_lo, v_hi) = (v as u32, v >> 32);
 
     // test largest possible value given v
@@ -150,7 +150,7 @@ fn test_falcon512_diff_mod_m() {
 
 proptest! {
     #[test]
-    fn diff_mod_m_proptest(v in 0..Felt::MODULUS, w in 0..J, u in 0..J) {
+    fn diff_mod_m_proptest(v in 0..Felt::ORDER_U64, w in 0..J, u in 0..J) {
 
           let source = "
     use.std::crypto::dsa::rpo_falcon512
@@ -216,7 +216,7 @@ fn test_move_sig_to_adv_stack() {
     let seed = Word::default();
     let mut rng = RpoRandomCoin::new(seed);
     let secret_key = SecretKey::with_rng(&mut rng);
-    let message = rand_value::<Word>();
+    let message = rand_array::<Felt, 4>().into();
 
     let source = "
     use.std::crypto::dsa::rpo_falcon512
@@ -261,7 +261,7 @@ fn falcon_execution() {
     let seed = Word::default();
     let mut rng = RpoRandomCoin::new(seed);
     let sk = SecretKey::with_rng(&mut rng);
-    let message = rand_value::<Word>();
+    let message = rand_array::<Felt, 4>().into();
     let (source, op_stack, adv_stack, store, advice_map) = generate_test(sk, message);
 
     let mut test = build_test!(&source, &op_stack, &adv_stack, store, advice_map.into_iter());
@@ -272,7 +272,7 @@ fn falcon_execution() {
 #[test]
 fn falcon_prove_verify() {
     let sk = SecretKey::new();
-    let message = rand_value::<Word>();
+    let message = rand_array::<Felt, 4>().into();
     let (source, op_stack, _, _, advice_map) = generate_test(sk, message);
 
     let program: Program = Assembler::default()
@@ -301,6 +301,7 @@ fn falcon_prove_verify() {
     let program_info = ProgramInfo::from(program);
     let result = miden_utils_testing::verify(program_info, stack_inputs, stack_outputs, proof);
 
+    //assert!(result.is_ok());
     assert!(result.is_ok(), "error: {result:?}");
 }
 
@@ -346,7 +347,7 @@ fn generate_test(
 fn random_coefficients() -> Vec<Felt> {
     let mut res = Vec::new();
     for _i in 0..N {
-        res.push(Felt::new(rng().random_range(0..M)))
+        res.push(Felt::from_u64(rng().random_range(0..M)))
     }
     res
 }
@@ -388,7 +389,7 @@ fn generate_data_probabilistic_product_test(
         to_elements(h.clone())
     };
     polynomials.extend(to_elements(s2.clone()));
-    polynomials.extend(pi.iter().map(|a| Felt::new(*a)));
+    polynomials.extend(pi.iter().map(|a| Felt::from_u64(*a)));
 
     // get the challenge point and push it to the advice stack
     let digest_polynomials = Rpo256::hash_elements(&polynomials);
@@ -396,13 +397,13 @@ fn generate_data_probabilistic_product_test(
     let mut advice_stack = vec![challenge.0.as_int(), challenge.1.as_int()];
 
     // push the polynomials to the advice stack
-    let polynomials: Vec<u64> = polynomials.iter().map(|&e| e.into()).collect();
+    let polynomials: Vec<u64> = polynomials.iter().map(|&e| e.as_int()).collect();
     advice_stack.extend_from_slice(&polynomials);
 
     // compute hash of h and place it on the stack.
     let binding = Rpo256::hash_elements(&to_elements(h.clone()));
     let h_hash = binding.as_elements();
-    let h_hash_copy: Vec<u64> = h_hash.iter().map(|felt| (*felt).into()).collect();
+    let h_hash_copy: Vec<u64> = h_hash.iter().map(|felt| (*felt).as_int()).collect();
     let operand_stack = vec![h_hash_copy[0], h_hash_copy[1], h_hash_copy[2], h_hash_copy[3]];
 
     (operand_stack, advice_stack)

@@ -474,7 +474,7 @@ fn test_secp256k1_base_field_add_then_sub() {
 }
 
 #[test]
-fn test_secp256k1_base_field_inv() {
+fn test_secp256k1_base_field_inverse() {
     let source = "
     use.std::math::secp256k1::base_field
 

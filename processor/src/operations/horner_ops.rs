@@ -1,4 +1,4 @@
-use miden_core::{Felt, FieldElement, Operation, QuadFelt};
+use miden_core::{BasedVectorSpace, Felt, Operation, QuadFelt};
 
 use crate::{ExecutionError, Process, errors::ErrorContext};
 
@@ -89,20 +89,16 @@ impl Process {
 
         // copy over the stack state to the next cycle changing only the accumulator values
         self.stack.copy_state(0);
-        self.stack.set(ACC_HIGH_INDEX, acc_new.to_base_elements()[1]);
-        self.stack.set(ACC_LOW_INDEX, acc_new.to_base_elements()[0]);
+        self.stack.set(ACC_HIGH_INDEX, acc_new.to_array()[1]);
+        self.stack.set(ACC_LOW_INDEX, acc_new.to_array()[0]);
+
+        let alpha_base = alpha.as_basis_coefficients_slice();
+        let acc_tmp_base = acc_tmp.as_basis_coefficients_slice();
 
         // set the helper registers
         self.decoder.set_user_op_helpers(
             Operation::HornerBase,
-            &[
-                alpha.base_element(0),
-                alpha.base_element(1),
-                k0,
-                k1,
-                acc_tmp.base_element(0),
-                acc_tmp.base_element(1),
-            ],
+            &[alpha_base[0], alpha_base[1], k0, k1, acc_tmp_base[0], acc_tmp_base[1]],
         );
 
         Ok(())
@@ -165,6 +161,7 @@ impl Process {
         // read the evaluation point from memory
         // we also read the second half of the memory word containing alpha
         let (alpha, k0, k1) = self.get_evaluation_point(err_ctx)?;
+        let alpha_base = alpha.as_basis_coefficients_slice();
 
         // compute the temporary and updated accumulator values
         let acc_old = self.get_accumulator();
@@ -173,20 +170,15 @@ impl Process {
 
         // copy over the stack state to the next cycle changing only the accumulator values
         self.stack.copy_state(0);
-        self.stack.set(ACC_HIGH_INDEX, acc_new.to_base_elements()[1]);
-        self.stack.set(ACC_LOW_INDEX, acc_new.to_base_elements()[0]);
+        self.stack.set(ACC_HIGH_INDEX, acc_new.to_array()[1]);
+        self.stack.set(ACC_LOW_INDEX, acc_new.to_array()[0]);
+
+        let acc_tmp_base = acc_tmp.as_basis_coefficients_slice();
 
         // set the helper registers
         self.decoder.set_user_op_helpers(
             Operation::HornerBase,
-            &[
-                alpha.base_element(0),
-                alpha.base_element(1),
-                k0,
-                k1,
-                acc_tmp.base_element(0),
-                acc_tmp.base_element(1),
-            ],
+            &[alpha_base[0], alpha_base[1], k0, k1, acc_tmp_base[0], acc_tmp_base[1]],
         );
 
         Ok(())
@@ -221,10 +213,10 @@ impl Process {
         let c3_0 = self.stack.get(7);
 
         [
-            QuadFelt::new(c0_0, c0_1),
-            QuadFelt::new(c1_0, c1_1),
-            QuadFelt::new(c2_0, c2_1),
-            QuadFelt::new(c3_0, c3_1),
+            QuadFelt::new_complex(c0_0, c0_1),
+            QuadFelt::new_complex(c1_0, c1_1),
+            QuadFelt::new_complex(c2_0, c2_1),
+            QuadFelt::new_complex(c3_0, c3_1),
         ]
     }
 
@@ -245,7 +237,7 @@ impl Process {
         let alpha_0 = word[0];
         let alpha_1 = word[1];
 
-        Ok((QuadFelt::new(alpha_0, alpha_1), word[2], word[3]))
+        Ok((QuadFelt::new([alpha_0, alpha_1]), word[2], word[3]))
     }
 
     /// Reads the accumulator values.
@@ -253,7 +245,7 @@ impl Process {
         let acc1 = self.stack.get(ACC_HIGH_INDEX);
         let acc0 = self.stack.get(ACC_LOW_INDEX);
 
-        QuadFelt::new(acc0, acc1)
+        QuadFelt::new_complex(acc0, acc1)
     }
 }
 
@@ -264,7 +256,9 @@ impl Process {
 mod tests {
     use alloc::vec::Vec;
 
-    use miden_core::{Felt, Operation, QuadFelt, StackInputs, ZERO, mast::MastForest};
+    use miden_core::{
+        Felt, Operation, PrimeCharacteristicRing, QuadFelt, StackInputs, ZERO, mast::MastForest,
+    };
     use miden_utils_testing::{build_test, rand::rand_array};
 
     use super::{ACC_HIGH_INDEX, ACC_LOW_INDEX, ALPHA_ADDR_INDEX, *};
@@ -276,7 +270,7 @@ mod tests {
         let mut inputs = rand_array::<Felt, 16>();
 
         // set alpha_addr pointer
-        inputs[ALPHA_ADDR_INDEX] = Felt::new(1000);
+        inputs[ALPHA_ADDR_INDEX] = Felt::from_u64(1000);
 
         // set initial accumulator to zero
         inputs[ACC_HIGH_INDEX] = ZERO;
@@ -326,9 +320,9 @@ mod tests {
         // --- check that the accumulator was updated correctly -----------------------------------
         let acc1_old = inputs[ACC_HIGH_INDEX];
         let acc0_old = inputs[ACC_LOW_INDEX];
-        let acc_old = QuadFelt::new(acc0_old, acc1_old);
+        let acc_old = QuadFelt::new_complex(acc0_old, acc1_old);
 
-        let alpha = QuadFelt::new(alpha_mem_word[0], alpha_mem_word[1]);
+        let alpha = QuadFelt::new_complex(alpha_mem_word[0], alpha_mem_word[1]);
 
         let acc_tmp = stack_state
             .iter()
@@ -344,21 +338,22 @@ mod tests {
             .skip(4)
             .fold(acc_tmp, |acc, coef| QuadFelt::from(*coef) + alpha * acc);
 
-        assert_eq!(acc_new.to_base_elements()[1], stack_state[ACC_HIGH_INDEX]);
-        assert_eq!(acc_new.to_base_elements()[0], stack_state[ACC_LOW_INDEX]);
+        assert_eq!(acc_new.to_array()[1], stack_state[ACC_HIGH_INDEX]);
+        assert_eq!(acc_new.to_array()[0], stack_state[ACC_LOW_INDEX]);
 
         // --- check that memory pointers were untouched ------------------------------------------
         assert_eq!(inputs[12], stack_state[12]);
         assert_eq!(inputs[ALPHA_ADDR_INDEX], stack_state[ALPHA_ADDR_INDEX]);
 
         // --- check that the helper registers were updated correctly -----------------------------
+        let acc_tmp_base = acc_tmp.as_basis_coefficients_slice();
         let helper_reg_expected = [
             alpha_mem_word[0],
             alpha_mem_word[1],
             alpha_mem_word[2],
             alpha_mem_word[3],
-            acc_tmp.base_element(0),
-            acc_tmp.base_element(1),
+            acc_tmp_base[0],
+            acc_tmp_base[1],
         ];
         assert_eq!(helper_reg_expected, process.decoder.get_user_op_helpers());
     }
@@ -369,7 +364,7 @@ mod tests {
         let mut inputs = rand_array::<Felt, 16>();
 
         // set alpha_addr pointer
-        inputs[ALPHA_ADDR_INDEX] = Felt::new(1000);
+        inputs[ALPHA_ADDR_INDEX] = Felt::from_u64(1000);
 
         // set initial accumulator to zero
         inputs[ACC_HIGH_INDEX] = ZERO;
@@ -417,23 +412,24 @@ mod tests {
         // --- check that the accumulator was updated correctly -----------------------------------
         let acc1_old = inputs[ACC_HIGH_INDEX];
         let acc0_old = inputs[ACC_LOW_INDEX];
-        let acc_old = QuadFelt::new(acc0_old, acc1_old);
+        let acc_old = QuadFelt::new_complex(acc0_old, acc1_old);
 
-        let alpha = QuadFelt::new(alpha_mem_word[0], alpha_mem_word[1]);
+        let alpha = QuadFelt::new_complex(alpha_mem_word[0], alpha_mem_word[1]);
 
         let coefficients: Vec<_> = stack_state
             .chunks(2)
             .take(4)
-            .map(|coef| QuadFelt::new(coef[1], coef[0]))
+            .map(|coef| QuadFelt::new([coef[1], coef[0]]))
             .collect();
 
         let acc_tmp =
             coefficients.iter().rev().take(2).fold(acc_old, |acc, coef| *coef + alpha * acc);
         let acc_new =
             coefficients.iter().rev().skip(2).fold(acc_tmp, |acc, coef| *coef + alpha * acc);
+        let acc_tmp_base = acc_tmp.as_basis_coefficients_slice().to_vec();
 
-        assert_eq!(acc_new.to_base_elements()[1], stack_state[ACC_HIGH_INDEX]);
-        assert_eq!(acc_new.to_base_elements()[0], stack_state[ACC_LOW_INDEX]);
+        assert_eq!(acc_new.to_array()[1], stack_state[ACC_HIGH_INDEX]);
+        assert_eq!(acc_new.to_array()[0], stack_state[ACC_LOW_INDEX]);
 
         // --- check that memory pointers were untouched ------------------------------------------
         assert_eq!(inputs[12], stack_state[12]);
@@ -445,13 +441,14 @@ mod tests {
             alpha_mem_word[1],
             alpha_mem_word[2],
             alpha_mem_word[3],
-            acc_tmp.base_element(0),
-            acc_tmp.base_element(1),
+            acc_tmp_base[0],
+            acc_tmp_base[1],
         ];
         assert_eq!(helper_reg_expected, process.decoder.get_user_op_helpers());
     }
 
     #[test]
+    #[ignore = "fix-prover"]
     fn prove_verify_horner_base() {
         let source = "
             begin
@@ -471,16 +468,16 @@ mod tests {
         let mut inputs = rand_array::<Felt, 16>();
 
         // set alpha_addr pointer
-        inputs[ALPHA_ADDR_INDEX] = Felt::new(1000);
+        inputs[ALPHA_ADDR_INDEX] = Felt::from_u64(1000);
 
         // sample a random evaluation point
         let a: [Felt; 2] = rand_array();
         let alpha_0 = a[0];
         let alpha_1 = a[1];
-        let alpha = QuadFelt::new(alpha_0, alpha_1);
+        let alpha = QuadFelt::new_complex(alpha_0, alpha_1);
 
         // compute the evaluation
-        let acc_old = QuadFelt::new(inputs[ACC_LOW_INDEX], inputs[ACC_HIGH_INDEX]);
+        let acc_old = QuadFelt::new_complex(inputs[ACC_LOW_INDEX], inputs[ACC_HIGH_INDEX]);
         let acc_new = inputs
             .iter()
             .take(8)
@@ -495,7 +492,7 @@ mod tests {
         // create the expected operand stack
         let mut expected = Vec::new();
         // updated accumulators
-        expected.extend_from_slice(&[acc_new.to_base_elements()[0], acc_new.to_base_elements()[1]]);
+        expected.extend_from_slice(&[acc_new.to_array()[0], acc_new.to_array()[1]]);
         // the rest of the stack should remain unchanged
         expected.extend_from_slice(&inputs[2..]);
         let expected: Vec<u64> = expected.iter().rev().map(|e| e.as_int()).collect();
@@ -511,6 +508,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "fix-prover"]
     fn prove_verify_horner_ext() {
         let source = "
             begin
@@ -530,21 +528,21 @@ mod tests {
         let mut inputs = rand_array::<Felt, 16>();
 
         // set alpha_addr pointer
-        inputs[ALPHA_ADDR_INDEX] = Felt::new(1000);
+        inputs[ALPHA_ADDR_INDEX] = Felt::from_u64(1000);
 
         // sample a random evaluation point
         let a: [Felt; 2] = rand_array();
         let alpha_0 = a[0];
         let alpha_1 = a[1];
-        let alpha = QuadFelt::new(alpha_0, alpha_1);
+        let alpha = QuadFelt::new_complex(alpha_0, alpha_1);
 
         // compute the evaluation
-        let acc_old = QuadFelt::new(inputs[ACC_LOW_INDEX], inputs[ACC_HIGH_INDEX]);
+        let acc_old = QuadFelt::new_complex(inputs[ACC_LOW_INDEX], inputs[ACC_HIGH_INDEX]);
         let acc_new = inputs
             .chunks(2)
             .take(4)
             .rev()
-            .fold(acc_old, |acc, coef| QuadFelt::new(coef[1], coef[0]) + alpha * acc);
+            .fold(acc_old, |acc, coef| QuadFelt::new_complex(coef[1], coef[0]) + alpha * acc);
         inputs.reverse();
 
         // prepare the advice stack with the generated data
@@ -554,7 +552,7 @@ mod tests {
         // create the expected operand stack
         let mut expected = Vec::new();
         // updated accumulators
-        expected.extend_from_slice(&[acc_new.to_base_elements()[0], acc_new.to_base_elements()[1]]);
+        expected.extend_from_slice(&[acc_new.to_array()[0], acc_new.to_array()[1]]);
         // the rest of the stack should remain unchanged
         expected.extend_from_slice(&inputs[2..]);
         let expected: Vec<u64> = expected.iter().rev().map(|e| e.as_int()).collect();

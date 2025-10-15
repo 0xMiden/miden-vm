@@ -6,19 +6,28 @@ extern crate alloc;
 extern crate std;
 
 use alloc::vec;
+use std::println;
 
-use miden_air::{HashFunction, ProcessorAir, ProvingOptions, PublicInputs};
-use miden_core::crypto::{
-    hash::{Blake3_192, Blake3_256, Poseidon2, Rpo256, Rpx256},
-    random::{RpoRandomCoin, RpxRandomCoin, WinterRandomCoin},
-};
+// use air::{Felt, HashFunction, ProcessorAir, Proof, PublicInputs};
+use miden_air::{Felt, HashFunction, ProcessorAir, Proof, PublicInputs};
+use p3_blake3::Blake3;
+use p3_challenger::{HashChallenger, SerializingChallenger64};
+use p3_commit::ExtensionMmcs;
+use p3_dft::Radix2DitParallel;
+use p3_field::extension::BinomialExtensionField;
+use p3_fri::{FriParameters, TwoAdicFriPcs};
+use p3_merkle_tree::MerkleTreeMmcs;
+use p3_symmetric::{CompressionFunctionFromHasher, SerializingHasher};
+use p3_uni_stark::StarkConfig;
+
+mod verify;
 // EXPORTS
 // ================================================================================================
 pub use miden_core::{Kernel, ProgramInfo, StackInputs, StackOutputs, Word};
+use verify::verify as verify_proof;
 pub use winter_verifier::{AcceptableOptions, VerifierError};
-use winter_verifier::{crypto::MerkleTree, verify as verify_proof};
 pub mod math {
-    pub use miden_core::{Felt, FieldElement, StarkField};
+    pub use miden_core::Felt;
 }
 pub use miden_air::ExecutionProof;
 
@@ -52,13 +61,14 @@ pub use miden_air::ExecutionProof;
 /// - The provided proof does not prove a correct execution of the program.
 /// - The protocol parameters used to generate the proof are not in the set of acceptable
 ///   parameters.
-#[tracing::instrument("verify_program", skip_all)]
+//#[tracing::instrument("verify_program", skip_all)]
 pub fn verify(
     program_info: ProgramInfo,
     stack_inputs: StackInputs,
     stack_outputs: StackOutputs,
     proof: ExecutionProof,
-) -> Result<u32, VerificationError> {
+) -> Result<u32, VerificationError> where
+{
     // get security level of the proof
     let security_level = proof.security_level();
     let program_hash = *program_info.program_hash();
@@ -66,48 +76,64 @@ pub fn verify(
     // build public inputs and try to verify the proof
     let pub_inputs = PublicInputs::new(program_info, stack_inputs, stack_outputs);
     let (hash_fn, proof) = proof.into_parts();
+    let processor_air = ProcessorAir {};
+
+    type Val = Felt;
+    type Challenge = BinomialExtensionField<Val, 2>;
+
     match hash_fn {
-        HashFunction::Blake3_192 => {
-            let opts = AcceptableOptions::OptionSet(vec![ProvingOptions::REGULAR_96_BITS]);
-            verify_proof::<ProcessorAir, Blake3_192, WinterRandomCoin<_>, MerkleTree<_>>(
-                proof, pub_inputs, &opts,
-            )
-        },
-        HashFunction::Blake3_256 => {
-            let opts = AcceptableOptions::OptionSet(vec![ProvingOptions::REGULAR_128_BITS]);
-            verify_proof::<ProcessorAir, Blake3_256, WinterRandomCoin<_>, MerkleTree<_>>(
-                proof, pub_inputs, &opts,
-            )
+        HashFunction::Blake3_192 | HashFunction::Blake3_256 => {
+            println!("blake verifying");
+            type H = Blake3;
+            type FieldHash = SerializingHasher<H>;
+            type Compress<H> = CompressionFunctionFromHasher<H, 2, 32>;
+            type ValMmcs<H> = MerkleTreeMmcs<Val, u8, FieldHash, Compress<H>, 32>;
+            type ChallengeMmcs<H> = ExtensionMmcs<Val, Challenge, ValMmcs<H>>;
+            type Pcs = TwoAdicFriPcs<Val, Dft, ValMmcs<H>, ChallengeMmcs<H>>;
+            type Dft = Radix2DitParallel<Val>;
+
+            type Challenger<H> = SerializingChallenger64<Val, HashChallenger<u8, H, 32>>;
+            type Config = StarkConfig<Pcs, Challenge, Challenger<H>>;
+
+            let field_hash = FieldHash::new(H {});
+            let compress = Compress::new(H {});
+
+            let val_mmcs = ValMmcs::new(field_hash, compress);
+            let challenge_mmcs = ChallengeMmcs::new(val_mmcs.clone());
+
+            let dft = Dft::default();
+
+            let fri_config = FriParameters {
+                log_blowup: 3,
+                log_final_poly_len: 7,
+                num_queries: 27,
+                proof_of_work_bits: 16,
+                mmcs: challenge_mmcs,
+            };
+
+            let pcs = Pcs::new(dft, val_mmcs, fri_config);
+
+            let challenger = Challenger::from_hasher(vec![], H {});
+
+            let config = Config::new(pcs, challenger);
+
+            let proof: Proof<Config> = bincode::deserialize(&proof).unwrap();
+            verify_proof(&config, &processor_air, &proof, &vec![])
         },
         HashFunction::Rpo256 => {
-            let opts = AcceptableOptions::OptionSet(vec![
-                ProvingOptions::RECURSIVE_96_BITS,
-                ProvingOptions::RECURSIVE_128_BITS,
-            ]);
-            verify_proof::<ProcessorAir, Rpo256, RpoRandomCoin, MerkleTree<_>>(
-                proof, pub_inputs, &opts,
-            )
+            todo!()
         },
         HashFunction::Rpx256 => {
-            let opts = AcceptableOptions::OptionSet(vec![
-                ProvingOptions::RECURSIVE_96_BITS,
-                ProvingOptions::RECURSIVE_128_BITS,
-            ]);
-            verify_proof::<ProcessorAir, Rpx256, RpxRandomCoin, MerkleTree<_>>(
-                proof, pub_inputs, &opts,
-            )
+            todo!()
         },
         HashFunction::Poseidon2 => {
-            let opts = AcceptableOptions::OptionSet(vec![
-                ProvingOptions::RECURSIVE_96_BITS,
-                ProvingOptions::REGULAR_128_BITS,
-            ]);
-            verify_proof::<ProcessorAir, Poseidon2, WinterRandomCoin<_>, MerkleTree<_>>(
-                proof, pub_inputs, &opts,
-            )
+            todo!()
+        },
+        HashFunction::Keccak => {
+            todo!()
         },
     }
-    .map_err(|source| VerificationError::ProgramVerificationError(program_hash, source))?;
+    .map_err(|_source| VerificationError::ProgramVerificationError(program_hash))?;
 
     Ok(security_level)
 }
@@ -119,9 +145,14 @@ pub fn verify(
 #[derive(Debug, thiserror::Error)]
 pub enum VerificationError {
     #[error("failed to verify proof for program with hash {0}")]
-    ProgramVerificationError(Word, #[source] VerifierError),
+    ProgramVerificationError(Word),
     #[error("the input {0} is not a valid field element")]
     InputNotFieldElement(u64),
     #[error("the output {0} is not a valid field element")]
     OutputNotFieldElement(u64),
 }
+
+/*
+pub enum VerificationError {
+    FailedVerification,
+} */

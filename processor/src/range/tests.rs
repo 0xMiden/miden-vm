@@ -1,6 +1,6 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 
-use miden_core::utils::ToElements;
+use miden_core::{PrimeCharacteristicRing, utils::ToElements};
 use miden_utils_testing::rand::rand_array;
 
 use super::{Felt, RangeChecker, ZERO};
@@ -50,7 +50,7 @@ fn range_checks() {
 fn range_checks_rand() {
     let mut checker = RangeChecker::new();
     let values = rand_array::<u64, 300>();
-    let values = values.into_iter().map(|v| Felt::new(v as u16 as u64)).collect::<Vec<_>>();
+    let values = values.into_iter().map(|v| Felt::from_u64(v as u16 as u64)).collect::<Vec<_>>();
     for &value in values.iter() {
         checker.add_value(value.as_int() as u16);
     }
@@ -64,8 +64,10 @@ fn range_checks_rand() {
 // ================================================================================================
 
 fn validate_row(trace: &[Vec<Felt>], row_idx: &mut usize, value: u64, num_lookups: u64) {
-    assert_eq!(trace[0][*row_idx], Felt::try_from(num_lookups).unwrap());
-    assert_eq!(trace[1][*row_idx], Felt::try_from(value).unwrap());
+    //assert_eq!(trace[0][*row_idx], Felt::from_u64(num_lookups).unwrap()); TODO(Al)
+    //assert_eq!(trace[1][*row_idx], Felt::from_u64(value).unwrap());
+    assert_eq!(trace[0][*row_idx], Felt::from_u64(num_lookups));
+    assert_eq!(trace[1][*row_idx], Felt::from_u64(value));
     *row_idx += 1;
 }
 

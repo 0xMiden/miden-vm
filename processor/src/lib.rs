@@ -15,8 +15,8 @@ use miden_air::trace::{
 };
 pub use miden_air::{ExecutionOptions, ExecutionOptionsError, RowIndex};
 pub use miden_core::{
-    AssemblyOp, EMPTY_WORD, Felt, Kernel, ONE, Operation, Program, ProgramInfo, QuadExtension,
-    StackInputs, StackOutputs, WORD_SIZE, Word, ZERO,
+    AssemblyOp, EMPTY_WORD, Felt, Kernel, ONE, Operation, Program, ProgramInfo, StackInputs,
+    StackOutputs, WORD_SIZE, Word, ZERO,
     crypto::merkle::SMT_DEPTH,
     errors::InputError,
     mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
@@ -24,7 +24,7 @@ pub use miden_core::{
     utils::DeserializationError,
 };
 use miden_core::{
-    Decorator, FieldElement,
+    Decorator,
     mast::{
         BasicBlockNode, CallNode, DecoratorOpLinkIterator, DynNode, ExternalNode, JoinNode,
         LoopNode, OpBatch, SplitNode,
@@ -92,7 +92,7 @@ pub use debug::{AsmOpInfo, VmState, VmStateIterator};
 // ================================================================================================
 
 pub mod math {
-    pub use miden_core::{Felt, FieldElement, StarkField};
+    pub use miden_core::{ExtensionField, Felt, PrimeCharacteristicRing, PrimeField64, QuadFelt};
     pub use winter_prover::math::fft;
 }
 

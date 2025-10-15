@@ -19,6 +19,7 @@ use crate::{
     host::advice::AdviceError,
     system::{FMP_MAX, FMP_MIN},
 };
+
 // EXECUTION ERROR
 // ================================================================================================
 
@@ -36,7 +37,8 @@ pub enum ExecutionError {
         #[diagnostic_source]
         err: AdviceError,
     },
-    /// This error is caught by the assembler, so we don't need diagnostics here.
+    #[error("advice stack read failed at step {0}")]
+    AdviceStackReadFailed(RowIndex),
     #[error("illegal use of instruction {0} while inside a syscall")]
     CallInSyscall(&'static str),
     /// This error is caught by the assembler, so we don't need diagnostics here.

@@ -1,3 +1,4 @@
+use miden_core::PrimeCharacteristicRing;
 use miden_stdlib::handlers::smt_peek::SMT_PEEK_EVENT_NAME;
 use miden_utils_testing::prepend_word_to_vec as prepend_word;
 
@@ -55,8 +56,8 @@ fn test_smt_get() {
     let smt = Smt::with_entries(LEAVES).unwrap();
 
     // Get all leaves present in tree
-    for (key, value) in LEAVES {
-        expect_value_from_get(key, value, &smt);
+    for (key, value) in LEAVES.iter() {
+        expect_value_from_get(*key, *value, &smt);
     }
 
     // Get an empty leaf
@@ -121,10 +122,10 @@ fn test_smt_set() {
 
         // insert values one-by-one into the tree
         let mut old_roots = Vec::new();
-        for (key, value) in LEAVES {
+        for (key, value) in LEAVES.iter() {
             old_roots.push(smt.root());
             let (init_stack, final_stack, store, advice_map) =
-                prepare_insert_or_set(key, value, smt);
+                prepare_insert_or_set(*key, *value, smt);
             build_test!(source, &init_stack, &[], store, advice_map).expect_stack(&final_stack);
         }
 
@@ -280,7 +281,7 @@ fn test_set_advice_map_single_key() {
 /// (i.e. removing a value that's already empty)
 #[test]
 fn test_set_empty_key_in_non_empty_leaf() {
-    let key_mse = Felt::new(42);
+    let key_mse = Felt::from_u64(42);
 
     let leaves: [(Word, Word); 1] = [(
         Word::new([Felt::new(101), Felt::new(102), Felt::new(103), key_mse]),

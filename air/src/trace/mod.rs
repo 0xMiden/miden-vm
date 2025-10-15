@@ -6,6 +6,7 @@ use miden_core::utils::range;
 pub mod chiplets;
 pub mod decoder;
 pub mod main_trace;
+pub use main_trace::ColMatrix;
 pub mod range;
 pub mod rows;
 pub mod stack;

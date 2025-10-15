@@ -4,6 +4,7 @@ use core::{
     ops::{Bound, Range},
 };
 
+use miden_crypto::{ExtensionField, PrimeCharacteristicRing};
 // RE-EXPORTS
 // ================================================================================================
 pub use miden_crypto::{
@@ -32,13 +33,13 @@ pub trait ToElements {
 
 impl<const N: usize> ToElements for [u64; N] {
     fn to_elements(&self) -> Vec<Felt> {
-        self.iter().map(|&v| Felt::new(v)).collect()
+        self.iter().map(|&v| Felt::from_u64(v)).collect()
     }
 }
 
 impl ToElements for Vec<u64> {
     fn to_elements(&self) -> Vec<Felt> {
-        self.iter().map(|&v| Felt::new(v)).collect()
+        self.iter().map(|&v| Felt::from_u64(v)).collect()
     }
 }
 
@@ -147,3 +148,24 @@ fn debug_assert_is_checked() {
 // ================================================================================================
 
 pub use miden_formatting::hex::{DisplayHex, ToHex, to_hex};
+
+pub fn serial_batch_inversion<E: ExtensionField<Felt>>(values: &[E], result: &mut [E]) {
+    let mut last = E::ONE;
+    for (result, &value) in result.iter_mut().zip(values.iter()) {
+        *result = last;
+        if value != E::ZERO {
+            last *= value;
+        }
+    }
+
+    last = last.inverse_unwrap_zero();
+
+    for i in (0..values.len()).rev() {
+        if values[i] == E::ZERO {
+            result[i] = E::ZERO;
+        } else {
+            result[i] *= last;
+            last *= values[i];
+        }
+    }
+}

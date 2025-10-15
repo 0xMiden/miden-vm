@@ -1,6 +1,7 @@
 use alloc::{borrow::Cow, string::String};
 use core::{num::IntErrorKind, ops::Range};
 
+use miden_core::{PrimeCharacteristicRing, PrimeField64};
 use miden_debug_types::{ByteOffset, SourceId, SourceSpan};
 
 use super::{
@@ -626,8 +627,6 @@ fn parse_hex<'input>(
     span: SourceSpan,
     hex_digits: &'input str,
 ) -> Result<Token<'input>, ParsingError> {
-    use miden_core::{FieldElement, StarkField};
-
     // Handle odd-length hex strings by padding with a leading zero
     let hex_digits = pad_hex_if_needed(hex_digits);
 
@@ -643,7 +642,7 @@ fn parse_hex<'input>(
                     ),
                 }
             })?;
-            if value >= Felt::MODULUS {
+            if value >= Felt::ORDER_U64 {
                 return Err(ParsingError::InvalidLiteral {
                     span,
                     kind: LiteralErrorKind::FeltOverflow,
@@ -671,13 +670,13 @@ fn parse_hex<'input>(
                     })?;
                 }
                 let value = u64::from_le_bytes(felt_bytes);
-                if value >= Felt::MODULUS {
+                if value >= Felt::ORDER_U64 {
                     return Err(ParsingError::InvalidLiteral {
                         span,
                         kind: LiteralErrorKind::FeltOverflow,
                     });
                 }
-                *element = Felt::new(value);
+                *element = Felt::from_u64(value);
             }
             Ok(Token::HexWord(WordValue(word)))
         },

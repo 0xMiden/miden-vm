@@ -1,4 +1,6 @@
-use miden_core::{EventId, Felt, mast::MastForest, sys_events::SystemEvent};
+use miden_core::{
+    EventId, Felt, PrimeCharacteristicRing, mast::MastForest, sys_events::SystemEvent,
+};
 
 use super::{
     super::{
@@ -87,7 +89,7 @@ impl Process {
     /// the stack.
     pub(super) fn op_sdepth(&mut self) -> Result<(), ExecutionError> {
         let stack_depth = self.stack.depth();
-        self.stack.set(0, Felt::new(stack_depth as u64));
+        self.stack.set(0, Felt::from_u64(stack_depth as u64));
         self.stack.shift_right(0);
         Ok(())
     }
@@ -169,7 +171,7 @@ impl Process {
 
 #[cfg(test)]
 mod tests {
-    use miden_core::mast::MastForest;
+    use miden_core::{PrimeCharacteristicRing, mast::MastForest};
 
     use super::{
         super::{MIN_STACK_DEPTH, Operation},
@@ -200,7 +202,7 @@ mod tests {
         let program = &MastForest::default();
 
         // initial value of fmp register should be 2^30
-        assert_eq!(Felt::new(2_u64.pow(30)), process.system.fmp());
+        assert_eq!(Felt::from_u64(2_u64.pow(30)), process.system.fmp());
 
         // increment fmp register
         process.execute_op(Operation::Push(Felt::new(2)), program, &mut host).unwrap();
@@ -331,7 +333,7 @@ mod tests {
     fn build_expected_stack(values: &[u64]) -> [Felt; 16] {
         let mut expected = [ZERO; 16];
         for (&value, result) in values.iter().zip(expected.iter_mut()) {
-            *result = Felt::new(value);
+            *result = Felt::from_u64(value);
         }
         expected
     }

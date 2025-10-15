@@ -1,9 +1,9 @@
 [book]
-authors      = ["Miden contributors"]
-description  = "Documentation for the Miden STARK-based virtual machine"
-language     = "en"
+authors = ["Miden contributors"]
+description = "Documentation for the Miden STARK-based virtual machine"
+language = "en"
 multilingual = false
-title        = "The Miden virtual machine"
+title = "The Miden virtual machine"
 
 [output.html]
 git-repository-url = "https://github.com/0xMiden/miden-vm"

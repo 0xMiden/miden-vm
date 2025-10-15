@@ -4,8 +4,10 @@ use miden_air::{
     RowIndex,
     trace::stack::{H0_COL_IDX, NUM_STACK_HELPER_COLS},
 };
-use miden_core::{FieldElement, stack::MIN_STACK_DEPTH};
+use miden_core::{PrimeCharacteristicRing, stack::MIN_STACK_DEPTH, utils::serial_batch_inversion};
 use miden_utils_indexing::IndexVec;
+
+use super::{Felt, MAX_TOP_IDX, ONE, STACK_TRACE_WIDTH, ZERO};
 
 // TRACE LENGTH TRAIT EXTENSION
 // ================================================================================================
@@ -27,9 +29,6 @@ impl TraceLen for [Vec<Felt>] {
         self[0].len()
     }
 }
-
-use super::{Felt, MAX_TOP_IDX, ONE, STACK_TRACE_WIDTH, ZERO};
-use crate::utils::math::batch_inversion;
 
 // STACK TRACE
 // ================================================================================================
@@ -205,8 +204,10 @@ impl StackTrace {
 
         // compute inverses in the h0 helper column using batch inversion; any ZERO in the vector
         // will remain unchanged
-        trace[H0_COL_IDX] = batch_inversion(&trace[H0_COL_IDX]);
-
+        // TODO(Al)
+        let mut result = vec![Felt::ZERO; trace[H0_COL_IDX].len()];
+        serial_batch_inversion(&trace[H0_COL_IDX], &mut result);
+        trace[H0_COL_IDX] = result;
         trace.try_into().expect("Failed to convert vector to an array")
     }
 

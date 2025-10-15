@@ -1,5 +1,6 @@
 use std::ops::Add;
 
+use miden_core::PrimeCharacteristicRing;
 use miden_utils_testing::{Felt, ONE, ZERO, push_inputs, test_case};
 
 use super::base_field::{Ext5, bv_or};
@@ -24,7 +25,7 @@ impl ECExt5 {
 
     // Taken from https://github.com/pornin/ecgfp5/blob/ce059c6/python/ecGFp5.py#L998
     pub fn bmul4_1() -> Felt {
-        Self::b().a1 * Felt::new(4)
+        Self::b().a1 * Felt::from_u64(4)
     }
 
     // Taken from https://github.com/pornin/ecgfp5/blob/ce059c6/python/ecGFp5.py#L999
@@ -67,7 +68,7 @@ impl ECExt5 {
     pub fn validate(w: Ext5) -> Felt {
         let e = w.square() - Self::a();
         let delta = e.square().subk1(Self::bmul4_1());
-        bv_or(Felt::new((delta.legendre() == ONE) as u64), w.is_zero())
+        bv_or(Felt::from_u64((delta.legendre() == ONE) as u64), w.is_zero())
     }
 
     // Given an encoded elliptic curve point, this routine attempts to decode it using
@@ -169,7 +170,7 @@ impl Add for ECExt5 {
 
         let x3 = lamb.square() - self.x - rhs.x;
         let y3 = lamb * (self.x - x3) - self.y;
-        let inf3 = Felt::new((samex & diffy) as u64);
+        let inf3 = Felt::from_u64((samex & diffy) as u64);
 
         Self {
             x: if rhs.point_at_infinity == ONE {
@@ -230,7 +231,7 @@ fn test_ec_ext5_point_validate(a0: u64, a1: u64, a2: u64, a3: u64, a4: u64, shou
     let strace = test.get_last_stack_state();
 
     assert_eq!(strace[0], flg);
-    assert_eq!(strace[0], Felt::new(should_validate as u64));
+    assert_eq!(strace[0], Felt::from_u64(should_validate as u64));
 }
 
 // Test vectors taken from https://github.com/pornin/ecgfp5/blob/ce059c6/python/ecGFp5.py#L1528-L1556
@@ -280,7 +281,7 @@ fn test_ec_ext5_point_decode(a0: u64, a1: u64, a2: u64, a3: u64, a4: u64, should
     assert_eq!(strace[9], point.y.a4);
     assert_eq!(strace[10], point.point_at_infinity);
     assert_eq!(strace[11], flg);
-    assert_eq!(strace[11], Felt::new(should_decode as u64));
+    assert_eq!(strace[11], Felt::from_u64(should_decode as u64));
 }
 
 // Test vectors taken from https://github.com/pornin/ecgfp5/blob/ce059c6/python/ecGFp5.py#L1528-L1548

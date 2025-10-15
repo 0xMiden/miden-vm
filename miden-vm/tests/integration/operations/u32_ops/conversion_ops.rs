@@ -1,6 +1,7 @@
+use miden_core::PrimeField64;
 use miden_processor::ExecutionError;
 use miden_utils_testing::{
-    Felt, StarkField, U32_BOUND, WORD_SIZE, ZERO, build_op_test, expect_exec_error_matches,
+    Felt, U32_BOUND, WORD_SIZE, ZERO, build_op_test, expect_exec_error_matches,
     proptest::prelude::*, rand::rand_value,
 };
 
@@ -267,7 +268,7 @@ proptest! {
         let asm_op = "u32test";
 
         // check to see if the value of the element will be a valid u32
-        let expected_result = if value % Felt::MODULUS < U32_BOUND { 1 } else { 0 };
+        let expected_result = if value % Felt::ORDER_U64 < U32_BOUND { 1 } else { 0 };
 
         let test = build_op_test!(asm_op, &[value]);
         test.prop_expect_stack(&[expected_result, value])?;
@@ -318,7 +319,7 @@ proptest! {
 
         // expected result will be mod 2^32 applied to a field element
         // so the field modulus should be applied first
-        let expected_result = value % Felt::MODULUS % U32_BOUND;
+        let expected_result = value % Felt::ORDER_U64 % U32_BOUND;
 
         let test = build_op_test!(asm_op, &[value]);
         test.prop_expect_stack(&[expected_result])?;
@@ -330,7 +331,7 @@ proptest! {
 
         // expected result will be mod 2^32 applied to a field element
         // so the field modulus must be applied first
-        let felt_value = value % Felt::MODULUS;
+        let felt_value = value % Felt::ORDER_U64;
         let expected_b = felt_value >> 32;
         let expected_c = felt_value as u32 as u64;
 

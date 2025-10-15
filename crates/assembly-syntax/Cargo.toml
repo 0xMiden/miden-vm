@@ -17,20 +17,20 @@ exclude.workspace = true
 [features]
 default = ["std"]
 std = [
-    "aho-corasick/std",
-    "miden-core/std",
-    "miden-debug-types/std",
-    "miden-utils-diagnostics/std",
-    "thiserror/std",
-    "proptest/std",
+  "aho-corasick/std",
+  "miden-core/std",
+  "miden-debug-types/std",
+  "miden-utils-diagnostics/std",
+  "thiserror/std",
+  "proptest/std",
 ]
 serde = [
-    "dep:serde",
-    "dep:serde-untagged",
-    "miden-debug-types/serde",
-    "midenc-hir-type/serde",
-    "semver/serde",
-    "smallvec/serde",
+  "dep:serde",
+  "dep:serde-untagged",
+  "miden-debug-types/serde",
+  "midenc-hir-type/serde",
+  "semver/serde",
+  "smallvec/serde",
 ]
 arbitrary = ["dep:proptest", "dep:proptest-derive", "miden-core/arbitrary"]
 testing = ["arbitrary", "logging"]
@@ -50,7 +50,10 @@ lalrpop-util = { version = "0.22", default-features = false }
 log.workspace = true
 proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }
-regex = { version = "1.11", default-features = false, features = ["unicode", "perf"] }
+regex = { version = "1.11", default-features = false, features = [
+  "unicode",
+  "perf",
+] }
 semver = { version = "1.0", default-features = false }
 serde = { workspace = true, optional = true }
 serde-untagged = { workspace = true, optional = true }

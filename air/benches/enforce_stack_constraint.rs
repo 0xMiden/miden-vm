@@ -2,14 +2,14 @@ use std::time::Duration;
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use miden_air::{
-    Felt, FieldElement,
+    Felt,
     stack::{
         NUM_GENERAL_CONSTRAINTS, enforce_constraints, field_ops, io_ops,
         op_flags::generate_evaluation_frame, overflow, stack_manipulation, system_ops, u32_ops,
     },
     trace::STACK_TRACE_OFFSET,
 };
-use miden_core::{Operation, ZERO};
+use miden_core::{Operation, PrimeCharacteristicRing, ZERO};
 
 fn enforce_stack_constraint(c: &mut Criterion) {
     let mut group = c.benchmark_group("enforce_stack_constraint");
@@ -25,8 +25,8 @@ fn enforce_stack_constraint(c: &mut Criterion) {
             + NUM_GENERAL_CONSTRAINTS;
 
         let mut frame = generate_evaluation_frame(Operation::Inv.op_code() as usize);
-        frame.current_mut()[STACK_TRACE_OFFSET] = Felt::new(89u64);
-        frame.next_mut()[STACK_TRACE_OFFSET] = Felt::new(89u64).inv();
+        frame.current_mut()[STACK_TRACE_OFFSET] = Felt::from_u64(89u64);
+        frame.next_mut()[STACK_TRACE_OFFSET] = Felt::from_u64(89u64).inverse_unwrap_zero();
 
         let mut result = [ZERO; NUM_CONSTRAINTS];
 

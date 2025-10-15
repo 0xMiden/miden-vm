@@ -2,20 +2,20 @@ use alloc::vec::Vec;
 use core::mem;
 
 use miden_air::trace::{
-    AUX_TRACE_RAND_ELEMENTS, AUX_TRACE_WIDTH, DECODER_TRACE_OFFSET, MIN_TRACE_LEN,
+    AUX_TRACE_RAND_ELEMENTS, AUX_TRACE_WIDTH, ColMatrix, DECODER_TRACE_OFFSET, MIN_TRACE_LEN,
     PADDED_TRACE_WIDTH, STACK_TRACE_OFFSET, TRACE_WIDTH,
     decoder::{NUM_USER_OP_HELPERS, USER_OP_HELPERS_OFFSET},
     main_trace::MainTrace,
 };
 use miden_core::{
-    Kernel, ProgramInfo, StackInputs, StackOutputs, Word, ZERO, stack::MIN_STACK_DEPTH,
+    ExtensionField, Kernel, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
+    stack::MIN_STACK_DEPTH,
 };
-use winter_prover::{EvaluationFrame, Trace, TraceInfo, crypto::RandomCoin};
+use winter_prover::TraceInfo;
 
 use super::{
-    AdviceProvider, ColMatrix, Felt, FieldElement, Process,
-    chiplets::AuxTraceBuilder as ChipletsAuxTraceBuilder, crypto::RpoRandomCoin,
-    decoder::AuxTraceBuilder as DecoderAuxTraceBuilder,
+    AdviceProvider, Felt, Process, chiplets::AuxTraceBuilder as ChipletsAuxTraceBuilder,
+    crypto::RpoRandomCoin, decoder::AuxTraceBuilder as DecoderAuxTraceBuilder,
     range::AuxTraceBuilder as RangeCheckerAuxTraceBuilder,
     stack::AuxTraceBuilder as StackAuxTraceBuilder,
 };
@@ -57,7 +57,7 @@ pub struct AuxTraceBuilders {
 pub struct ExecutionTrace {
     meta: Vec<u8>,
     trace_info: TraceInfo,
-    main_trace: MainTrace,
+    pub main_trace: MainTrace,
     aux_trace_builders: AuxTraceBuilders,
     program_info: ProgramInfo,
     stack_outputs: StackOutputs,
@@ -240,7 +240,7 @@ impl ExecutionTrace {
 
     pub fn build_aux_trace<E>(&self, rand_elements: &[E]) -> Option<ColMatrix<E>>
     where
-        E: FieldElement<BaseField = Felt>,
+        E: ExtensionField<Felt>,
     {
         // add decoder's running product columns
         let decoder_aux_columns = self
@@ -274,36 +274,15 @@ impl ExecutionTrace {
         let mut rng = RpoRandomCoin::new(*self.program_hash());
         for i in self.length() - NUM_RAND_ROWS..self.length() {
             for column in aux_columns.iter_mut() {
-                column[i] = rng.draw().expect("failed to draw a random value");
+                column[i] = rng.draw_ext_field::<E>().expect("failed to draw a random value");
             }
         }
 
         Some(ColMatrix::new(aux_columns))
     }
-}
-
-// TRACE TRAIT IMPLEMENTATION
-// ================================================================================================
-
-impl Trace for ExecutionTrace {
-    type BaseField = Felt;
 
     fn length(&self) -> usize {
         self.main_trace.num_rows()
-    }
-
-    fn main_segment(&self) -> &ColMatrix<Felt> {
-        &self.main_trace
-    }
-
-    fn read_main_frame(&self, row_idx: usize, frame: &mut EvaluationFrame<Felt>) {
-        let next_row_idx = (row_idx + 1) % self.length();
-        self.main_trace.read_row_into(row_idx, frame.current_mut());
-        self.main_trace.read_row_into(next_row_idx, frame.next_mut());
-    }
-
-    fn info(&self) -> &TraceInfo {
-        &self.trace_info
     }
 }
 
@@ -376,7 +355,7 @@ fn finalize_trace(
     // Inject random values into the last rows of the trace
     for i in trace_len - NUM_RAND_ROWS..trace_len {
         for column in trace.iter_mut().take(TRACE_WIDTH) {
-            column[i] = rng.draw().expect("failed to draw a random value");
+            column[i] = rng.draw_basefield();
         }
     }
 

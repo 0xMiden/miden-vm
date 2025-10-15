@@ -1,3 +1,4 @@
+/*
 use super::{EvaluationFrame, ExtensionOf, Felt, FieldElement};
 use crate::{
     trace::{
@@ -17,8 +18,8 @@ pub mod stack;
 /// calculations.
 pub trait MainFrameExt<F, E>
 where
-    F: FieldElement<BaseField = Felt>,
-    E: FieldElement<BaseField = Felt> + ExtensionOf<F>,
+    F: ExtensionField<Felt>,
+    E: ExtensionField<Felt> + ExtensionOf<F>,
 {
     /// Returns true when a u32 stack operation that requires range checks is being performed.
     fn u32_rc_op(&self) -> F;
@@ -61,8 +62,8 @@ where
 
 impl<F, E> MainFrameExt<F, E> for EvaluationFrame<F>
 where
-    F: FieldElement<BaseField = Felt>,
-    E: FieldElement<BaseField = Felt> + ExtensionOf<F>,
+    F: ExtensionField<Felt>,
+    E: ExtensionField<Felt> + ExtensionOf<F>,
 {
     /// Returns true when the stack operation is a u32 operation that requires range checks.
     /// TODO: this is also defined in the op flags. It's redefined here to avoid computing all of
@@ -106,3 +107,4 @@ where
         alpha + self.current()[DECODER_USER_OP_HELPERS_OFFSET + 3].into()
     }
 }
+ */

@@ -4,9 +4,9 @@ use alloc::{
 };
 use core::{fmt, ops::RangeInclusive};
 
-use miden_core::DebugOptions;
+use miden_core::{DebugOptions, Felt};
 
-use crate::{DebugHandler, ExecutionError, Felt, ProcessState};
+use crate::{DebugHandler, ExecutionError, ProcessState};
 
 // WRITER IMPLEMENTATIONS
 // ================================================================================================

@@ -1,6 +1,7 @@
 use std::ops::Add;
 
-use miden_utils_testing::{Felt, FieldElement, push_inputs, rand::rand_array};
+use miden_core::PrimeCharacteristicRing;
+use miden_utils_testing::{Felt, push_inputs, rand::rand_array};
 
 use crate::math::ecgfp5::{base_field::Ext5, group::ECExt5};
 

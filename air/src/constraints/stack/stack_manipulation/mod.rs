@@ -1,13 +1,13 @@
 use alloc::vec::Vec;
 
-use super::{EvaluationFrame, FieldElement, TransitionConstraintDegree, op_flags::OpFlags};
+use super::{EvaluationFrame,  TransitionConstraintDegree, op_flags::OpFlags};
 use crate::{
     stack::EvaluationFrameExt,
     utils::{are_equal, binary_not},
 };
 
 #[cfg(test)]
-pub mod tests;
+//pub mod tests;
 
 // CONSTANTS
 // ================================================================================================

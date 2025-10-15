@@ -5,6 +5,7 @@ use miden_assembly::diagnostics::{Report, WrapErr};
 use miden_processor::{DefaultHost, ExecutionOptions, ExecutionOptionsError};
 use miden_stdlib::StdLibrary;
 use miden_vm::{HashFunction, ProvingOptions, internal::InputFile};
+use tracing::info_span;
 
 use super::{
     data::{Libraries, OutputFile, ProofFile},
@@ -86,30 +87,47 @@ impl ProveCmd {
         println!("Prove program: {}", self.program_file.display());
         println!("-------------------------------------------------------------------------------");
 
-        // load libraries from files
-        let libraries = Libraries::new(&self.library_paths)?;
+        let (program, mut host, input_data) =
+            info_span!("load_masm_data").in_scope(|| -> Result<_, Report> {
+                // load libraries from files
+                let libraries = info_span!("read_library_files")
+                    .in_scope(|| Libraries::new(&self.library_paths))?;
 
-        // determine file type based on extension
-        let ext = self
-            .program_file
-            .extension()
-            .and_then(|s| s.to_str())
-            .unwrap_or("")
-            .to_lowercase();
+                // determine file type based on extension
+                let ext = self
+                    .program_file
+                    .extension()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("")
+                    .to_lowercase();
 
-        let input_data = InputFile::read(&self.input_file, &self.program_file)?;
+                let input_data = info_span!("read_input_file")
+                    .in_scope(|| InputFile::read(&self.input_file, &self.program_file))?;
 
-        let host = DefaultHost::default().with_library(&StdLibrary::default())?;
-        // Use a single match expression to load the program.
-        let (program, mut host) = match ext.as_str() {
-            "masp" => (get_masp_program(&self.program_file)?, host),
-            "masm" => {
-                let (program, source_manager) =
-                    get_masm_program(&self.program_file, &libraries, true)?;
-                (program, host.with_source_manager(source_manager))
-            },
-            _ => return Err(Report::msg("The provided file must have a .masm or .masp extension")),
-        };
+                let host = DefaultHost::default().with_library(&StdLibrary::default())?;
+
+                // Use a single match expression to load the program.
+                let (program, host) =
+                    info_span!("read_program_file", path = %self.program_file.display()).in_scope(
+                        || -> Result<_, Report> {
+                            match ext.as_str() {
+                                "masp" => Ok((get_masp_program(&self.program_file)?, host)),
+                                "masm" => {
+                                    let (program, source_manager) = info_span!("compile_program")
+                                        .in_scope(|| {
+                                        get_masm_program(&self.program_file, &libraries, true)
+                                    })?;
+                                    Ok((program, host.with_source_manager(source_manager)))
+                                },
+                                _ => Err(Report::msg(
+                                    "The provided file must have a .masm or .masp extension",
+                                )),
+                            }
+                        },
+                    )?;
+
+                Ok((program, host, input_data))
+            })?;
 
         let program_hash: [u8; 32] = program.hash().into();
         println!("Proving program with hash {}...", hex::encode(program_hash));
@@ -123,14 +141,26 @@ impl ProveCmd {
             self.get_proof_options().map_err(|err| Report::msg(format!("{err}")))?;
 
         // execute program and generate proof
-        let (stack_outputs, proof) =
-            miden_prover::prove(&program, stack_inputs, advice_inputs, &mut host, proving_options)
-                .wrap_err("Failed to prove program")?;
+        let (stack_outputs, proof) = info_span!("program proving")
+            .in_scope(|| {
+                miden_prover::prove(
+                    &program,
+                    stack_inputs,
+                    advice_inputs,
+                    &mut host,
+                    proving_options,
+                )
+            })
+            .wrap_err("Failed to prove program")?;
 
         println!("Program proved in {} ms", now.elapsed().as_millis());
 
         // write proof to file
-        ProofFile::write(proof, &self.proof_file, &self.program_file).map_err(Report::msg)?;
+        let default_proof_path = self.program_file.with_extension("proof");
+        let proof_path = self.proof_file.as_ref().unwrap_or(&default_proof_path);
+        info_span!("write_data_to_proof_file", path = %proof_path.display(), size = "251 KB")
+            .in_scope(|| ProofFile::write(proof, &self.proof_file, &self.program_file))
+            .map_err(Report::msg)?;
 
         // provide outputs
         if let Some(output_path) = &self.output_file {
@@ -142,7 +172,9 @@ impl ProveCmd {
 
             // write all outputs to default location if none was provided
             let default_output_path = self.program_file.with_extension("outputs");
-            OutputFile::write(&stack_outputs, &default_output_path).map_err(Report::msg)?;
+            info_span!("write_data_to_output_file", path = %default_output_path.display())
+                .in_scope(|| OutputFile::write(&stack_outputs, &default_output_path))
+                .map_err(Report::msg)?;
 
             // print stack outputs to screen.
             println!("Output: {stack:?}");

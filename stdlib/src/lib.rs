@@ -111,7 +111,7 @@ pub fn falcon_sign(sk: &[Felt], msg: Word) -> Option<Vec<Felt>> {
     use alloc::vec;
 
     use miden_core::{
-        Felt,
+        AlgebraicSponge, Felt, PrimeCharacteristicRing,
         crypto::{
             dsa::rpo_falcon512::{Polynomial, SecretKey},
             hash::Rpo256,
@@ -157,9 +157,9 @@ pub fn falcon_sign(sk: &[Felt], msg: Word) -> Option<Vec<Felt>> {
     // Finally, we push the nonce needed for the hash-to-point algorithm.
 
     let mut polynomials: Vec<Felt> =
-        h.coefficients.iter().map(|a| Felt::from(a.value() as u32)).collect();
-    polynomials.extend(s2.coefficients.iter().map(|a| Felt::from(a.value() as u32)));
-    polynomials.extend(pi.iter().map(|a| Felt::new(*a)));
+        h.coefficients.iter().map(|a| Felt::from_u32(a.value() as u32)).collect();
+    polynomials.extend(s2.coefficients.iter().map(|a| Felt::from_u32(a.value() as u32)));
+    polynomials.extend(pi.iter().map(|a| Felt::from_u64(*a)));
 
     let digest_polynomials = Rpo256::hash_elements(&polynomials);
     let challenge = (digest_polynomials[0], digest_polynomials[1]);
