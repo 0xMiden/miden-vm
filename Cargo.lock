@@ -1585,6 +1585,7 @@ dependencies = [
  "miden-processor",
  "miden-test-utils",
  "miden-utils-sync",
+ "miden-verifier",
  "num",
  "num-bigint",
  "pretty_assertions",

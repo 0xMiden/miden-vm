@@ -7,13 +7,13 @@ extern crate alloc;
 use alloc::{sync::Arc, vec, vec::Vec};
 
 use miden_assembly::{Library, mast::MastForest, utils::Deserializable};
-use miden_core::{EventId, Felt, Word};
+use miden_core::{EventId, Felt, Word, precompile::PrecompileVerifier};
 use miden_processor::{EventHandler, HostLibrary};
 use miden_utils_sync::LazyLock;
 
 use crate::handlers::{
     falcon_div::{FALCON_DIV_EVENT_ID, handle_falcon_div},
-    keccak256::{KECCAK_HASH_MEMORY_EVENT_ID, handle_keccak_hash_memory},
+    keccak256::{KECCAK_HASH_MEMORY_EVENT_ID, KeccakPrecompile},
     smt_peek::{SMT_PEEK_EVENT_ID, handle_smt_peek},
     sorted_array::{
         LOWERBOUND_ARRAY_EVENT_ID, LOWERBOUND_KEY_VALUE_EVENT_ID, handle_lowerbound_array,
@@ -68,13 +68,18 @@ impl StdLibrary {
     /// List of all `EventHandlers` required to run all of the standard library.
     pub fn handlers(&self) -> Vec<(EventId, Arc<dyn EventHandler>)> {
         vec![
-            (KECCAK_HASH_MEMORY_EVENT_ID, Arc::new(handle_keccak_hash_memory)),
+            (KECCAK_HASH_MEMORY_EVENT_ID, Arc::new(KeccakPrecompile)),
             (SMT_PEEK_EVENT_ID, Arc::new(handle_smt_peek)),
             (U64_DIV_EVENT_ID, Arc::new(handle_u64_div)),
             (FALCON_DIV_EVENT_ID, Arc::new(handle_falcon_div)),
             (LOWERBOUND_ARRAY_EVENT_ID, Arc::new(handle_lowerbound_array)),
             (LOWERBOUND_KEY_VALUE_EVENT_ID, Arc::new(handle_lowerbound_key_value)),
         ]
+    }
+
+    /// List of all `PrecompileVerifier` required to verify precompile requests.
+    pub fn verifiers(&self) -> Vec<(EventId, Arc<dyn PrecompileVerifier>)> {
+        vec![(KECCAK_HASH_MEMORY_EVENT_ID, Arc::new(KeccakPrecompile))]
     }
 }
 

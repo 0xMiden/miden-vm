@@ -1,6 +1,10 @@
 use alloc::{borrow::Cow, string::String};
 use core::fmt::{Display, Formatter};
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+use winter_utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
+
 use crate::{Felt, utils::hash_string_to_word};
 
 /// A type-safe wrapper around a [`Felt`] that represents an event identifier.
@@ -16,8 +20,15 @@ use crate::{Felt, utils::hash_string_to_word};
 /// While not enforced by this type, the values 0..256 are reserved for
 /// [`SystemEvent`](crate::sys_events::SystemEvent)s.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_serde_test_macros::serde_test(winter_serde(true))
+)]
 pub struct EventId {
+    #[cfg_attr(feature = "serde", serde(flatten))]
     id: Felt,
+    #[cfg_attr(feature = "serde", serde(skip))]
     name: Option<Cow<'static, str>>,
 }
 
@@ -42,10 +53,17 @@ impl EventId {
         let name_str = name.into();
         let digest_word = hash_string_to_word(name_str.as_ref());
 
-        Self {
+        let event_id = Self {
             id: digest_word[0],
-            name: Some(Cow::Owned(name_str)),
-        }
+            name: Some(Cow::Owned(name_str.clone())),
+        };
+        assert!(
+            !event_id.is_reserved(),
+            "Event ID with name {} collides with an ID reserved for a system event",
+            name_str
+        );
+
+        event_id
     }
 
     /// Creates a new event ID from a [`Felt`] without an associated name.
@@ -201,6 +219,33 @@ macro_rules! declare_event {
             }
         }
     };
+}
+
+// SERIALIZATION
+// ================================================================================================
+
+impl Serializable for EventId {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.id.write_into(target);
+    }
+}
+
+impl Deserializable for EventId {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        Ok(Self::from_felt(Felt::read_from(source)?))
+    }
+}
+
+#[cfg(all(feature = "arbitrary", test))]
+impl proptest::prelude::Arbitrary for EventId {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        use proptest::prelude::*;
+        any::<u64>().prop_map(EventId::from_u64).boxed()
+    }
+
+    type Strategy = proptest::prelude::BoxedStrategy<Self>;
 }
 
 // TESTS

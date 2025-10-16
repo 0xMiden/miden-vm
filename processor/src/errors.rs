@@ -274,6 +274,8 @@ pub enum ExecutionError {
         source_file: Option<Arc<SourceFile>>,
         error: AceError,
     },
+    #[error("execution yielded unexpected precompiles")]
+    UnexpectedPrecompiles,
 }
 
 impl ExecutionError {

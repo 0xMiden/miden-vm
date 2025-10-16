@@ -22,10 +22,13 @@
 - Systematized u32-indexed vectors ([#2254](https://github.com/0xMiden/miden-vm/pull/2254)).
 - Introduce a new `build_trace()` which builds the trace in parallel from trace fragment contexts ([#1839](https://github.com/0xMiden/miden-vm/pull/1839)) ([#2188](https://github.com/0xMiden/miden-vm/pull/2188)).
 - Place the `FastProcessor` stack on the heap instead of the (OS thread) stack (#[2271](https://github.com/0xMiden/miden-vm/pull/2271)).
+- [BREAKING] Log deferred precompile calls in `AdviceProvider` ([#2158](https://github.com/0xMiden/miden-vm/issues/2158)).
+- [BREAKING] Add precompile requests to proof ([#2187](https://github.com/0xMiden/miden-vm/issues/2187)).
 - `after_exit` decorators execute in the correct sequence in External nodes in the Fast processor ([#2247](https://github.com/0xMiden/miden-vm/pull/2247)).
 - Remove O(n log m) iteration in parallel processor (#[2273](https://github.com/0xMiden/miden-vm/pull/2273)).
 - [BREAKING] `EventId` now stores optional event names and is no longer `Copy`; use `.clone()` when needed ([#2150](https://github.com/0xMiden/miden-vm/issues/2150)).
 - [BREAKING] add pre/post decorators to BasicBlockNode fingerprint ([#2267](https://github.com/0xMiden/miden-vm/pull/2267)).
+- [BREAKING] Added explicit endianness methods `get_stack_word_be()` and `get_stack_word_le()` to stack word accessors, deprecated ambiguous `get_stack_word()` ([#2235](https://github.com/0xMiden/miden-vm/issues/2235)).
 
 ## 0.18.2 (2025-10-10)
 
