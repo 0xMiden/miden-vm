@@ -239,6 +239,13 @@ impl MastNodeExt for DynNode {
         // No children for dyn nodes
     }
 
+    fn for_each_child<F>(&self, _f: F)
+    where
+        F: FnMut(MastNodeId),
+    {
+        // DynNode has no children
+    }
+
     fn domain(&self) -> Felt {
         self.domain()
     }

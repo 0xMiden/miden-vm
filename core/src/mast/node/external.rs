@@ -192,6 +192,13 @@ impl MastNodeExt for ExternalNode {
         // No children for external nodes
     }
 
+    fn for_each_child<F>(&self, _f: F)
+    where
+        F: FnMut(MastNodeId),
+    {
+        // ExternalNode has no children
+    }
+
     fn domain(&self) -> Felt {
         panic!("Can't fetch domain for an `External` node.")
     }
