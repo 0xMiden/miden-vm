@@ -156,30 +156,6 @@ impl<'forest> MultiMastForestNodeIter<'forest> {
         // Note that we can process nodes in postorder, since we push them onto the back of the
         // deque but pop them off the front.
         match current_node {
-            MastNode::Block(_) => {
-                self.push_node(forest_idx, node_id);
-            },
-            MastNode::Join(join_node) => {
-                self.discover_tree(forest_idx, join_node.first())?;
-                self.discover_tree(forest_idx, join_node.second())?;
-                self.push_node(forest_idx, node_id);
-            },
-            MastNode::Split(split_node) => {
-                self.discover_tree(forest_idx, split_node.on_true())?;
-                self.discover_tree(forest_idx, split_node.on_false())?;
-                self.push_node(forest_idx, node_id);
-            },
-            MastNode::Loop(loop_node) => {
-                self.discover_tree(forest_idx, loop_node.body())?;
-                self.push_node(forest_idx, node_id);
-            },
-            MastNode::Call(call_node) => {
-                self.discover_tree(forest_idx, call_node.callee())?;
-                self.push_node(forest_idx, node_id);
-            },
-            MastNode::Dyn(_) => {
-                self.push_node(forest_idx, node_id);
-            },
             MastNode::External(external_node) => {
                 // When we encounter an external node referencing digest `foo` there are two cases:
                 // - If there exists a node `replacement` in any forest with digest `foo`, we want
@@ -210,6 +186,17 @@ impl<'forest> MultiMastForestNodeIter<'forest> {
                 } else {
                     self.push_node(forest_idx, node_id);
                 }
+            },
+            other_node => {
+                // Discover all children first, then push the node itself
+                let mut result = Ok(());
+                other_node.for_each_child(|child_id| {
+                    if result.is_ok() {
+                        result = self.discover_tree(forest_idx, child_id);
+                    }
+                });
+                result?;
+                self.push_node(forest_idx, node_id);
             },
         }
 

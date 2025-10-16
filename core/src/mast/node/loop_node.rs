@@ -222,6 +222,13 @@ impl MastNodeExt for LoopNode {
         target.push(self.body());
     }
 
+    fn for_each_child<F>(&self, mut f: F)
+    where
+        F: FnMut(MastNodeId),
+    {
+        f(self.body());
+    }
+
     fn domain(&self) -> Felt {
         Self::DOMAIN
     }
