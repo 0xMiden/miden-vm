@@ -6,6 +6,7 @@
 
 - Added support for leaves with multiple pairs in `std::collections::smt::get` ([#2048](https://github.com/0xMiden/miden-vm/pull/2048)).
 - Added `std::mem::pipe_double_words_preimage_to_memory`, a version of `pipe_preimage_to_memory` optimized for pairs of words ([#2048](https://github.com/0xMiden/miden-vm/pull/2048)).
+- Added missing endianness-aware memory instructions (`mem_loadw_be`, `mem_loadw_le`, `mem_storew_be`, `mem_storew_le`) to Instruction Reference documentation ([#2285](https://github.com/0xMiden/miden-vm/issues/2285)).
 
 #### Changes
 
@@ -26,6 +27,8 @@
 - `after_exit` decorators execute in the correct sequence in External nodes in the Fast processor ([#2247](https://github.com/0xMiden/miden-vm/pull/2247)).
 - Remove O(n log m) iteration in parallel processor (#[2273](https://github.com/0xMiden/miden-vm/pull/2273)).
 - [BREAKING] Add `log_precompile` opcode ([#2147](https://github.com/0xMiden/miden-vm/issues/2147)).
+- [BREAKING] add pre/post decorators to BasicBlockNode fingerprint ([#2267](https://github.com/0xMiden/miden-vm/pull/2267)).
+- [BREAKING] Added explicit endianness methods `get_stack_word_be()` and `get_stack_word_le()` to stack word accessors, deprecated ambiguous `get_stack_word()` ([#2235](https://github.com/0xMiden/miden-vm/issues/2235)).
 
 ## 0.18.2 (2025-10-10)
 

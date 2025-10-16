@@ -131,8 +131,8 @@ fn test_keccak_hash_memory_impl(input_u8: &[u8]) {
 
     let output = test.execute().unwrap();
     let stack = output.stack_outputs();
-    let commitment = stack.get_stack_word(0).unwrap();
-    let tag = stack.get_stack_word(4).unwrap();
+    let commitment = stack.get_stack_word_be(0).unwrap();
+    let tag = stack.get_stack_word_be(4).unwrap();
     let precompile_commitment = PrecompileCommitment { tag, commitment };
     assert_eq!(
         precompile_commitment,
@@ -355,8 +355,8 @@ fn test_keccak_hash_1to1_prove_verify() {
 
     // Verify that the commitment on the stack matches the expected precompile commitment
     let expected_commitment = preimage.precompile_commitment();
-    let stack_commitment = stack_outputs.get_stack_word(0).unwrap();
-    let stack_tag = stack_outputs.get_stack_word(4).unwrap();
+    let stack_commitment = stack_outputs.get_stack_word_be(0).unwrap();
+    let stack_tag = stack_outputs.get_stack_word_be(4).unwrap();
     let precompile_commitment = PrecompileCommitment {
         tag: stack_tag,
         commitment: stack_commitment,

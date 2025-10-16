@@ -73,6 +73,11 @@ pub trait MastNodeExt {
     /// Appends the NodeIds of the children of this node, if any, to the vector.
     fn append_children_to(&self, target: &mut Vec<MastNodeId>);
 
+    /// Executes the given closure for each child of this node.
+    fn for_each_child<F>(&self, f: F)
+    where
+        F: FnMut(MastNodeId);
+
     /// Returns the domain of this node.
     fn domain(&self) -> Felt;
 }
