@@ -11,7 +11,7 @@ use crate::{
     utils::split_element,
 };
 
-const U32_MAX: u64 = u32::MAX as u64;
+use crate::utils::U32_MAX;
 
 macro_rules! require_u32_operands {
     ($processor:expr, [$($idx:expr),*], $err_ctx:expr) => {
