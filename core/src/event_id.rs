@@ -26,9 +26,8 @@ use crate::{Felt, utils::hash_string_to_word};
     miden_serde_test_macros::serde_test(winter_serde(true))
 )]
 pub struct EventId {
-    #[cfg_attr(feature = "serde", serde(flatten))]
     id: Felt,
-    #[cfg_attr(feature = "serde", serde(skip))]
+    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
     name: Option<Cow<'static, str>>,
 }
 
@@ -227,12 +226,18 @@ macro_rules! declare_event {
 impl Serializable for EventId {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         self.id.write_into(target);
+        // Serialize the name as Option<String>
+        let name_string: Option<String> = self.name.as_ref().map(|cow| String::from(cow.as_ref()));
+        name_string.write_into(target);
     }
 }
 
 impl Deserializable for EventId {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        Ok(Self::from_felt(Felt::read_from(source)?))
+        let id = Felt::read_from(source)?;
+        let name_string: Option<String> = Option::<String>::read_from(source)?;
+        let name = name_string.map(Cow::Owned);
+        Ok(Self { id, name })
     }
 }
 
