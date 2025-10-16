@@ -37,13 +37,6 @@
 ## 0.18.1 (2025-10-02)
 
 - Gate stdlib doc generation in build.rs on `MIDEN_BUILD_STDLIB_DOCS` environment variable ([#2239](https://github.com/0xMiden/miden-vm/pull/2239/)).
-- [BREAKING] Log deferred precompile calls in `AdviceProvider` ([#2158](https://github.com/0xMiden/miden-vm/issues/2158)).
-- [BREAKING] Add precompile requests to proof ([#2187](https://github.com/0xMiden/miden-vm/issues/2187)).
-- [BREAKING] Add `log_precompile` opcode ([#2147](https://github.com/0xMiden/miden-vm/issues/2147)).
-
-## 0.18.1 (2025-10-02)
-
-- Gate stdlib doc generation in build.rs on `MIDEN_BUILD_STDLIB_DOCS` environmnent variable ([#2239](https://github.com/0xMiden/miden-vm/pull/2239/))
 
 ## 0.18.0 (2025-09-21)
 
