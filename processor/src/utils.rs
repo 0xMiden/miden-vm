@@ -6,6 +6,12 @@ pub use miden_core::utils::*;
 // HELPER FUNCTIONS
 // ================================================================================================
 
+/// The maximum value for a 32-bit unsigned integer as `u64`.
+///
+/// Placed here to avoid duplicating this constant across multiple modules
+/// that implement 32-bit operations on field elements.
+pub(crate) const U32_MAX: u64 = u32::MAX as u64;
+
 /// Splits an element into two field elements containing 32-bit integer values
 #[inline(always)]
 pub(crate) fn split_element(value: Felt) -> (Felt, Felt) {
