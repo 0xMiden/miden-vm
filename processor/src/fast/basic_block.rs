@@ -211,9 +211,9 @@ impl FastProcessor {
         } else {
             let clk = process.clk();
             let mutations = host.on_event(&process).await.map_err(|err| {
-                // Create a NamedEvent for the error message
-                // TODO: In the future, we could look up the name from the host's registry
-                let event = NamedEvent::from_name_and_id("unknown event", event_id);
+                let event = host
+                    .resolve_event(event_id)
+                    .unwrap_or_else(|| NamedEvent::from_name_and_id("unknown event", event_id));
                 ExecutionError::event_error(err, event, err_ctx)
             })?;
             self.advice

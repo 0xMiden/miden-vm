@@ -132,20 +132,24 @@ impl EventHandlerRegistry {
         self.handlers.remove(&id).is_some()
     }
 
+    /// Returns the [`NamedEvent`] registered for `id`, if any.
+    pub fn resolve_event(&self, id: EventId) -> Option<NamedEvent> {
+        self.handlers.get(&id).map(|(event, _)| event.clone())
+    }
+
     /// Handles the event if the registry contains a handler with the same identifier.
     ///
-    /// Returns an `Option<_>` indicating whether the event was handled, wrapping the named event
-    /// and resulting mutations. Returns `None` if the event was not handled, if the event was
-    /// handled successfully `Some((event, mutations))` is returned, and if the handler returns
-    /// an error, it is propagated to the caller.
+    /// Returns an `Option<_>` indicating whether the event was handled. Returns `None` if the
+    /// event was not handled, `Some(mutations)` if it was handled successfully, and propagates
+    /// handler errors to the caller.
     pub fn handle_event(
         &self,
         id: EventId,
         process: &ProcessState,
-    ) -> Result<Option<(NamedEvent, Vec<AdviceMutation>)>, EventError> {
-        if let Some((named_event, handler)) = self.handlers.get(&id) {
+    ) -> Result<Option<Vec<AdviceMutation>>, EventError> {
+        if let Some((_named_event, handler)) = self.handlers.get(&id) {
             let mutations = handler.on_event(process)?;
-            return Ok(Some((named_event.clone(), mutations)));
+            return Ok(Some(mutations));
         }
 
         Ok(None)

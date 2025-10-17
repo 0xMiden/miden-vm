@@ -149,6 +149,10 @@ where
 
     /// Handles the failure of the assertion instruction.
     fn on_assert_failed(&mut self, _process: &ProcessState, _err_code: Felt) {}
+
+    fn resolve_event(&self, event_id: EventId) -> Option<NamedEvent> {
+        self.event_handlers.resolve_event(event_id)
+    }
 }
 
 impl<D, S> SyncHost for DefaultHost<D, S>
@@ -162,9 +166,7 @@ where
 
     fn on_event(&mut self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
         let event_id = EventId::from_felt(process.get_stack_item(0));
-        if let Some((_named_event, mutations)) =
-            self.event_handlers.handle_event(event_id, process)?
-        {
+        if let Some(mutations) = self.event_handlers.handle_event(event_id, process)? {
             // the event was handled by the registered event handlers; just return
             return Ok(mutations);
         }
