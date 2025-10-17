@@ -439,7 +439,7 @@ pub fn b_chip_permutation() {
 }
 
 /// Tests the generation of the `b_chip` bus column when the hasher performs a log_precompile
-/// operation requested by the stack. The operation absorbs TAG and HASH_CALL_DATA into an RPO
+/// operation requested by the stack. The operation absorbs TAG and COMM_CALLDATA into an RPO
 /// sponge with capacity CAP_PREV, producing (CAP_NEXT, R0, R1).
 #[test]
 #[allow(clippy::needless_range_loop)]
@@ -455,7 +455,7 @@ pub fn b_chip_log_precompile() {
     };
     // Stack inputs are specified deepest-first: [1,2,3,4,5,6,7,8]. The VM reverses them at
     // initialization, so the live stack holds [8,7,6,5,4,3,2,1] with 8 on top. Because
-    // `stack.get_word` returns words in little-endian order, `HASH_CALL_DATA` is read as
+    // `stack.get_word` returns words in little-endian order, `COMM_CALLDATA` is read as
     // [5,6,7,8] from stack slots 0-3 and `TAG` as [1,2,3,4] from slots 4-7.
     let stack = vec![1, 2, 3, 4, 5, 6, 7, 8];
     let trace = build_trace_from_program(&program, &stack);
@@ -487,10 +487,10 @@ pub fn b_chip_log_precompile() {
     // at cycle 1 log_precompile is executed and the initialization and result of the hash are both
     // requested by the stack.
 
-    // Build the input state: [CAP_PREV, TAG, HASH_CALL_DATA]
+    // Build the input state: [CAP_PREV, TAG, COMM_CALLDATA]
     // CAP_PREV comes from helper registers and defaults to [0,0,0,0].
     // TAG = [1,2,3,4] is drawn via `stack.get_word(4)`.
-    // HASH_CALL_DATA = [5,6,7,8] is drawn via `stack.get_word(0)`.
+    // COMM_CALLDATA = [5,6,7,8] is drawn via `stack.get_word(0)`.
     let log_precompile_state = init_state_from_words(
         &[Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)].into(),
         &[Felt::new(5), Felt::new(6), Felt::new(7), Felt::new(8)].into(),

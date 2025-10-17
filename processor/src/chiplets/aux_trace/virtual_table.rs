@@ -36,6 +36,7 @@ use crate::{
 /// If public inputs are required for other chiplets, it is also possible to use the chiplet bus,
 /// as is done for the kernel ROM chiplet.
 pub struct ChipletsVTableColBuilder {
+    /// Final precompile sponge capacity supplied as a public input to the bus.
     final_precompile_capacity: Word,
 }
 
@@ -59,7 +60,7 @@ where
         // Check if this is a log_precompile operation
         let op_code = main_trace.get_op_code(row).as_int() as u8;
         let log_precompile_request = if op_code == OPCODE_LOGPRECOMPILE {
-            build_log_precompile_request(main_trace, row, alphas, _debugger)
+            build_log_precompile_capacity_remove(main_trace, row, alphas, _debugger)
         } else {
             E::ONE
         };
@@ -84,10 +85,10 @@ where
         row: RowIndex,
         _debugger: &mut BusDebugger<E>,
     ) -> E {
-        // Check if this is a log_precompile operation - send capacity response
+        // Check if this is a log_precompile operation - send sponge capacity response
         let op_code = main_trace.get_op_code(row).as_int() as u8;
         let log_precompile_response = if op_code == OPCODE_LOGPRECOMPILE {
-            build_log_precompile_response(main_trace, row, alphas, _debugger)
+            build_log_precompile_capacity_insert(main_trace, row, alphas, _debugger)
         } else {
             E::ONE
         };
@@ -101,7 +102,8 @@ where
         alphas: &[E],
         _debugger: &mut BusDebugger<E>,
     ) -> E {
-        let message = LogPrecompileMessage { capacity: self.final_precompile_capacity };
+        let message =
+            LogPrecompileMessage { capacity: self.final_precompile_capacity };
         let value = message.value(alphas);
 
         #[cfg(any(test, feature = "bus-debugger"))]
@@ -243,7 +245,7 @@ where
 // LOG PRECOMPILE MESSAGES
 // ================================================================================================
 
-/// Message for log_precompile capacity tracking on the virtual table bus.
+/// Message for log_precompile sponge capacity tracking on the virtual table bus.
 struct LogPrecompileMessage {
     capacity: Word,
 }
@@ -270,7 +272,11 @@ impl core::fmt::Display for LogPrecompileMessage {
     }
 }
 
-fn build_log_precompile_request<E: FieldElement<BaseField = Felt>>(
+/// Removes the previous sponge capacity (`CAP_PREV`) from the virtual table bus.
+///
+/// Helper registers store `CAP_PREV` at indices 1..=4 (index 0 is the hasher address), which is
+/// why we offset by 1 when reading them here.
+fn build_log_precompile_capacity_remove<E: FieldElement<BaseField = Felt>>(
     main_trace: &MainTrace,
     row: RowIndex,
     alphas: &[E],
@@ -289,7 +295,8 @@ fn build_log_precompile_request<E: FieldElement<BaseField = Felt>>(
     value
 }
 
-fn build_log_precompile_response<E: FieldElement<BaseField = Felt>>(
+/// Inserts the next sponge capacity (`CAP_NEXT`) into the virtual table bus.
+fn build_log_precompile_capacity_insert<E: FieldElement<BaseField = Felt>>(
     main_trace: &MainTrace,
     row: RowIndex,
     alphas: &[E],

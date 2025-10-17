@@ -354,7 +354,7 @@ fn test_masm_errors_consistency(
 /// Tests that `log_precompile` correctly computes the RPO permutation and updates the stack.
 ///
 /// This test verifies:
-/// 1. The RPO permutation is applied correctly to [CAP_PREV, TAG, HASH_CALL_DATA]
+/// 1. The RPO permutation is applied correctly to [CAP_PREV, TAG, COMM_CALLDATA]
 /// 2. The stack is updated with [R0, R1, CAP_NEXT] as expected
 /// 3. The capacity is properly initialized to [0,0,0,0] for the first call
 #[test]
@@ -362,18 +362,18 @@ fn test_log_precompile_correctness() {
     use miden_core::crypto::hash::Rpo256;
 
     // Stack inputs: [1,2,3,4,5,6,7,8] (provided to both processors)
-    // Taking into account big-endian encoding, the stack is [HASH_CALL_DATA, TAG]
+    // Taking into account big-endian encoding, the stack is [COMM_CALLDATA, TAG]
     let stack_inputs = [1, 2, 3, 4, 5, 6, 7, 8].map(Felt::new);
     let cap_prev = Word::empty();
     let tag: Word = [1, 2, 3, 4].map(Felt::new).into();
-    let hash_call_data: Word = [5, 6, 7, 8].map(Felt::new).into();
+    let comm_calldata: Word = [5, 6, 7, 8].map(Felt::new).into();
 
     // Compute expected output using RPO permutation
-    // Input state: [CAP_PREV, TAG, HASH_CALL_DATA], with CAP_PREV = [0,0,0,0]
+    // Input state: [CAP_PREV, TAG, COMM_CALLDATA], with CAP_PREV = [0,0,0,0]
     let mut hasher_state = [ZERO; 12];
     hasher_state[0..4].copy_from_slice(cap_prev.as_slice());
     hasher_state[4..8].copy_from_slice(tag.as_slice());
-    hasher_state[8..12].copy_from_slice(hash_call_data.as_slice());
+    hasher_state[8..12].copy_from_slice(comm_calldata.as_slice());
 
     // Apply RPO permutation
     Rpo256::apply_permutation(&mut hasher_state);

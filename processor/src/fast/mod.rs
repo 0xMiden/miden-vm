@@ -325,7 +325,7 @@ impl FastProcessor {
         let mut tracer = ExecutionTracer::new(fragment_size);
         let execution_output = self.execute_with_tracer(program, host, &mut tracer).await?;
 
-        // Pass the final precompile capacity from execution output to the trace generation context
+        // Pass the final precompile sponge from execution output to the trace generation context
         let context =
             tracer.into_trace_generation_context(execution_output.final_precompile_sponge);
 

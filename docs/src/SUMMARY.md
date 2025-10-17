@@ -43,6 +43,7 @@
     - [Stack manipulation](./design/stack/stack_ops.md)
     - [Input / output operations](./design/stack/io_ops.md)
     - [Cryptographic operations](./design/stack/crypto_ops.md)
+    - [Precompile flow](./design/stack/precompiles.md)
   - [Range Checker](./design/range.md)
   - [Chiplets](./design/chiplets/main.md)
     - [Hash Chiplet](./design/chiplets/hasher.md)

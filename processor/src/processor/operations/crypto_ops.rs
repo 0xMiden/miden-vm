@@ -203,32 +203,34 @@ pub(super) fn op_horner_eval_base<P: Processor>(
 // LOG PRECOMPILE OPERATION
 // ================================================================================================
 
-/// Logs a precompile event by absorbing `TAG` and `HASH_CALL_DATA` into the RPO sponge capacity.
+/// Logs a precompile event by absorbing `TAG` and `COMM_CALLDATA` into the precompile sponge
+/// capacity.
 ///
 /// Stack transition:
-/// `[HASH_CALL_DATA, TAG, GARBAGE, ...] -> [R1, R0, CAP_NEXT, ...]`
+/// `[COMM_CALLDATA, TAG, PAD, ...] -> [R1, R0, CAP_NEXT, ...]`
 ///
 /// Where:
-/// - The hasher computes: `[CAP_NEXT, R0, R1] = Rpo([CAP_PREV, TAG, HASH_CALL_DATA])`
-/// - `CAP_PREV` is the previous capacity provided non-deterministically via helper registers.
+/// - The hasher computes: `[CAP_NEXT, R0, R1] = Rpo([CAP_PREV, TAG, COMM_CALLDATA])`
+/// - `CAP_PREV` is the previous sponge capacity provided non-deterministically via helper
+///   registers.
 #[inline(always)]
 pub(super) fn op_log_precompile<P: Processor>(
     processor: &mut P,
     tracer: &mut impl Tracer,
 ) -> [Felt; NUM_USER_OP_HELPERS] {
-    // Read TAG and HASH_CALL_DATA from stack
-    let hash_call_data = processor.stack().get_word(0);
+    // Read TAG and COMM_CALLDATA from stack
+    let comm_calldata = processor.stack().get_word(0);
     let tag = processor.stack().get_word(4);
 
-    // Get the current capacity
+    // Get the current precompile sponge capacity
     let cap_prev = processor.precompile_capacity();
 
     // Build the full 12-element hasher state for RPO permutation
-    // State layout: [CAP_PREV, TAG, HASH_CALL_DATA]
+    // State layout: [CAP_PREV, TAG, COMM_CALLDATA]
     let mut hasher_state: [Felt; 12] = [ZERO; 12];
     hasher_state[0..4].copy_from_slice(cap_prev.as_slice());
     hasher_state[4..8].copy_from_slice(tag.as_slice());
-    hasher_state[8..12].copy_from_slice(hash_call_data.as_slice());
+    hasher_state[8..12].copy_from_slice(comm_calldata.as_slice());
 
     // Perform the RPO permutation
     let (addr, output_state) = processor.hasher().permute(hasher_state);
@@ -238,7 +240,7 @@ pub(super) fn op_log_precompile<P: Processor>(
     let r0: Word = [4, 5, 6, 7].map(|i| output_state[i]).into();
     let r1: Word = [8, 9, 10, 11].map(|i| output_state[i]).into();
 
-    // Update the processor's precompile_capacity
+    // Update the processor's precompile sponge capacity
     processor.set_precompile_capacity(cap_next);
 
     // Write R1, R0, and CAP_NEXT to the stack (top 12 elements).

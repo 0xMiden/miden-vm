@@ -42,16 +42,15 @@ pub trait Processor: Sized {
     /// Returns a mutable reference to the internal hasher subsystem.
     fn hasher(&mut self) -> &mut Self::Hasher;
 
-    /// Returns the current precompile capacity (CAP).
+    /// Returns the current precompile sponge capacity (CAP).
     ///
-    /// This capacity is used in log_precompile operations to maintain state across multiple
-    /// invocations of the precompile logging instruction.
+    /// This capacity is used in `log_precompile` operations to maintain the precompile sponge across
+    /// multiple invocations of the logging instruction.
     fn precompile_capacity(&self) -> Word;
 
-    /// Sets the precompile capacity (CAP) to a new value.
+    /// Sets the precompile sponge capacity (CAP) to a new value.
     ///
-    /// This is called by log_precompile to update the capacity after absorbing new data into
-    /// the sponge.
+    /// This is called by `log_precompile` to update the sponge capacity after absorbing new data.
     fn set_precompile_capacity(&mut self, capacity: Word);
 
     /// Checks that the evaluation of an arithmetic circuit is equal to zero.

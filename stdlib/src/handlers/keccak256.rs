@@ -148,11 +148,7 @@ impl KeccakFeltDigest {
         Self(packed.map(Felt::from))
     }
 
-    /// Creates an commitment of the digest using Rpo256.
-    ///
-    /// When the digest is popped from the advice stack, it appears as
-    /// `[d_0, ..., d_7]` on the operand stack. In masm, the `hmerge` operation computes
-    /// `Rpo256([d_7, ..., d_0])`, so we reverse the order here to match that behavior.
+    /// Creates a commitment of the digest using Rpo256 over `[d_0, ..., d_7]`.
     pub fn to_commitment(&self) -> Word {
         Rpo256::hash_elements(&self.0)
     }

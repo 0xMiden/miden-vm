@@ -21,6 +21,7 @@ mod wiring_bus;
 pub struct AuxTraceBuilder {
     kernel: Kernel,
     ace_hints: AceHints,
+    /// Final precompile sponge capacity emitted by the VM.
     final_precompile_capacity: Word,
 }
 

@@ -23,8 +23,9 @@
 //!    proof.
 //!
 //! 3. **Proof Generation**: The prover generates a STARK proof of the VM execution. The
-//!    [`PrecompileSponge`] state is passed as a conceptual public input (though not yet enforced by
-//!    the STARK verifier).
+//!    [`PrecompileSponge`] capacity is conceptually a public input, but is not currently enforced
+//!    by the Winterfell backend. Instead, capacity initialization/finality is enforced via
+//!    variable‑length public inputs that seed the relevant auxiliary column during verification.
 //!
 //! 4. **Verification**: The verifier:
 //!    - Recomputes each precompile using the stored requests via [`PrecompileVerifier`]
