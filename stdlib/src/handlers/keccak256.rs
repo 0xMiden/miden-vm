@@ -292,7 +292,7 @@ impl KeccakPreimage {
     /// `[KECCAK_HASH_MEMORY_EVENT_ID, preimage_u8.len(), 0, 0]`.
     fn precompile_tag(&self) -> Word {
         [
-            KECCAK_HASH_MEMORY_EVENT_ID.as_felt(),
+            KECCAK_HASH_MEMORY_EVENT_ID.id().as_felt(),
             Felt::new(self.as_ref().len() as u64),
             ZERO,
             ZERO,
@@ -303,7 +303,7 @@ impl KeccakPreimage {
 
 impl From<KeccakPreimage> for PrecompileRequest {
     fn from(preimage: KeccakPreimage) -> Self {
-        PrecompileRequest::new(KECCAK_HASH_MEMORY_EVENT_ID, preimage.into_inner())
+        PrecompileRequest::new(KECCAK_HASH_MEMORY_EVENT_ID.id(), preimage.into_inner())
     }
 }
 

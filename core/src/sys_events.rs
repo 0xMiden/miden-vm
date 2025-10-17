@@ -1,6 +1,6 @@
 use core::fmt;
 
-use crate::EventId;
+use crate::{EventId, NamedEvent};
 
 // SYSTEM EVENTS
 // ================================================================================================
@@ -289,7 +289,7 @@ impl TryFrom<EventId> for SystemEvent {
     type Error = EventId;
 
     fn try_from(event_id: EventId) -> Result<Self, Self::Error> {
-        let value: u8 = event_id.as_felt().as_int().try_into().map_err(|_| event_id.clone())?;
+        let value: u8 = event_id.as_felt().as_int().try_into().map_err(|_| event_id)?;
 
         match value {
             EVENT_MERKLE_NODE_MERGE => Ok(SystemEvent::MerkleNodeMerge),
@@ -315,9 +315,19 @@ impl TryFrom<EventId> for SystemEvent {
 
 impl From<SystemEvent> for EventId {
     fn from(system_event: SystemEvent) -> Self {
-        // SAFETY: SystemEvent's event_name() is hardcoded to match the enum discriminant,
-        // so the ID is guaranteed to be correct for the name.
-        unsafe { Self::from_static(system_event.event_name(), system_event as u64) }
+        // SystemEvents use enum discriminants (0-15) as IDs, not hashes.
+        // This is different from user-defined events which derive IDs from name hashes.
+        EventId::from_u64(system_event as u64)
+    }
+}
+
+impl From<SystemEvent> for NamedEvent {
+    fn from(system_event: SystemEvent) -> Self {
+        // SystemEvents use enum discriminants (0-15) as IDs, not hashes.
+        NamedEvent::from_name_and_id(
+            system_event.event_name(),
+            EventId::from_u64(system_event as u64),
+        )
     }
 }
 
@@ -399,10 +409,10 @@ mod test {
 
     #[test]
     fn test_system_event_names() {
-        // Test that all system events have names
+        // Test that all system events have names when converted to NamedEvent
         for id in 0..=15u64 {
             let event_id = EventId::from_u64(id);
-            if let Ok(system_event) = SystemEvent::try_from(event_id.clone()) {
+            if let Ok(system_event) = SystemEvent::try_from(event_id) {
                 let name = system_event.event_name();
                 assert!(
                     name.starts_with("sys::"),
@@ -410,11 +420,24 @@ mod test {
                     name
                 );
 
-                // Test conversion includes name
-                let event_with_name: EventId = system_event.into();
-                assert_eq!(event_with_name.name(), Some(name));
-                assert_eq!(event_with_name.as_felt().as_int(), id);
+                // Test conversion to EventId (ID only)
+                let id_only: EventId = system_event.into();
+                assert_eq!(id_only.as_felt().as_int(), id);
+
+                // Test conversion to NamedEvent (ID + name)
+                let named: NamedEvent = system_event.into();
+                assert_eq!(named.id().as_felt().as_int(), id);
+                assert_eq!(named.name(), name);
             }
         }
+    }
+
+    #[test]
+    fn test_system_event_ids_are_discriminants() {
+        // Verify SystemEvents use enum discriminants, not hashes
+        assert_eq!(EventId::from(SystemEvent::MerkleNodeMerge).as_felt().as_int(), 0u64);
+        assert_eq!(EventId::from(SystemEvent::MerkleNodeToStack).as_felt().as_int(), 1u64);
+        assert_eq!(EventId::from(SystemEvent::U32Clz).as_felt().as_int(), 6u64);
+        assert_eq!(EventId::from(SystemEvent::HpermToMap).as_felt().as_int(), 15u64);
     }
 }

@@ -2,7 +2,7 @@ use std::{sync::Arc, vec};
 
 use miden_air::{Felt, ProvingOptions, RowIndex};
 use miden_assembly::{Assembler, utils::Serializable};
-use miden_core::{EventId, StarkField, ZERO};
+use miden_core::{EventId, NamedEvent, StarkField, ZERO};
 use miden_processor::{
     AdviceInputs, AdviceMutation, DefaultHost, EventError, ExecutionError, ProcessState, Program,
     ProgramInfo, StackInputs, crypto::RpoRandomCoin,
@@ -41,7 +41,8 @@ const PROBABILISTIC_PRODUCT_SOURCE: &str = "
 
 /// Event ID for pushing a Falcon signature to the advice stack.
 /// This event is used for testing purposes only.
-const EVENT_FALCON_SIG_TO_STACK: EventId = EventId::from_u64(3419226139);
+const EVENT_FALCON_SIG_TO_STACK: NamedEvent =
+    NamedEvent::from_name_and_id("test::falcon::sig_to_stack", EventId::from_u64(3419226139));
 
 /// Event handler which pushes values onto the advice stack which are required for verification
 /// of a DSA in Miden VM.
@@ -320,7 +321,7 @@ fn generate_test(
         exec.rpo_falcon512::verify
     end
     ",
-        EVENT_FALCON_SIG_TO_STACK.as_felt().as_int()
+        EVENT_FALCON_SIG_TO_STACK.id().as_felt().as_int()
     );
 
     let pk: Word = sk.public_key().to_commitment();

@@ -7,29 +7,24 @@ use winter_utils::{ByteReader, ByteWriter, Deserializable, DeserializationError,
 
 use crate::{Felt, utils::hash_string_to_word};
 
-/// A type-safe wrapper around a [`Felt`] that represents an event identifier.
+// EVENT ID
+// ================================================================================================
+
+/// A lightweight, type-safe wrapper around a [`Felt`] that represents an event identifier.
 ///
 /// Event IDs are used to identify events that can be emitted by the VM or handled by the host.
 /// This newtype provides type safety and ensures that event IDs are not accidentally confused
 /// with other [`Felt`] values.
 ///
-/// Event IDs can optionally store the human-readable event name for better error messages and
-/// debugging. The name can be either a static string (for compile-time defined events) or an
-/// owned string (for runtime-generated events).
+/// [`EventId`] is a Copy type containing only the identifier. For events with human-readable
+/// names, use [`NamedEvent`] instead.
 ///
 /// While not enforced by this type, the values 0..256 are reserved for
 /// [`SystemEvent`](crate::sys_events::SystemEvent)s.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(
-    all(feature = "arbitrary", test),
-    miden_serde_test_macros::serde_test(winter_serde(true))
-)]
-pub struct EventId {
-    id: Felt,
-    #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
-    name: Option<Cow<'static, str>>,
-}
+#[cfg_attr(feature = "serde", serde(transparent))]
+pub struct EventId(Felt);
 
 impl EventId {
     /// Computes the canonical event identifier for the given `name`.
@@ -47,78 +42,42 @@ impl EventId {
     /// This ensures that identical event names always produce the same event ID, while
     /// providing good distribution properties to minimize collisions between different names.
     ///
-    /// The event name is stored and will be displayed in error messages.
-    pub fn from_name(name: impl Into<String>) -> Self {
-        let name_str = name.into();
-        let digest_word = hash_string_to_word(name_str.as_ref());
+    /// Use this at runtime when you don't have a pre-declared event. For compile-time constants,
+    /// prefer using [`NamedEvent`] with the [`declare_event!`](crate::declare_event) macro.
+    pub fn from_name(name: impl AsRef<str>) -> Self {
+        let digest_word = hash_string_to_word(name.as_ref());
+        let event_id = Self(digest_word[0]);
 
-        let event_id = Self {
-            id: digest_word[0],
-            name: Some(Cow::Owned(name_str.clone())),
-        };
         assert!(
             !event_id.is_reserved(),
             "Event ID with name {} collides with an ID reserved for a system event",
-            name_str
+            name.as_ref()
         );
 
         event_id
     }
 
-    /// Creates a new event ID from a [`Felt`] without an associated name.
+    /// Creates an EventId from a [`Felt`] value (e.g., from the stack).
     pub const fn from_felt(value: Felt) -> Self {
-        Self { id: value, name: None }
+        Self(value)
     }
 
-    /// Creates a new event ID from a u64, converting it to a [`Felt`], without an associated name.
+    /// Creates an EventId from a u64, converting it to a [`Felt`].
     pub const fn from_u64(value: u64) -> Self {
-        Self { id: Felt::new(value), name: None }
-    }
-
-    /// Creates a new event ID from a static string name and its pre-computed ID value.
-    ///
-    /// This constructor is `const` and can be used to define event IDs as compile-time constants.
-    ///
-    /// # Safety
-    ///
-    /// The caller must ensure the ID correctly corresponds to `hash_string_to_word(name)[0]`.
-    /// Providing an incorrect ID can lead to event handler mismatches and incorrect program
-    /// behavior.
-    ///
-    /// **Prefer using the [`declare_event!`](crate::declare_event) macro instead**, which generates
-    /// both the constant and a compile-time test to validate the ID is correct.
-    pub const unsafe fn from_static(name: &'static str, id: u64) -> Self {
-        Self {
-            id: Felt::new(id),
-            name: Some(Cow::Borrowed(name)),
-        }
+        Self(Felt::new(value))
     }
 
     /// Returns the underlying [`Felt`] value.
     pub const fn as_felt(&self) -> Felt {
-        self.id
-    }
-
-    /// Returns the event name, if one was associated with this event ID.
-    pub fn name(&self) -> Option<&str> {
-        self.name.as_ref().map(|cow| cow.as_ref())
+        self.0
     }
 
     /// Returns `true` if this event ID is reserved for a
     /// [`SystemEvent`](crate::sys_events::SystemEvent).
     pub const fn is_reserved(&self) -> bool {
-        let value = self.id.as_int();
-        value <= u8::MAX as u64
+        self.0.as_int() <= u8::MAX as u64
     }
 }
-
-impl PartialEq for EventId {
-    fn eq(&self, other: &Self) -> bool {
-        self.id == other.id
-    }
-}
-
-impl Eq for EventId {}
 
 impl PartialOrd for EventId {
     fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
@@ -128,32 +87,128 @@ impl PartialOrd for EventId {
 
 impl Ord for EventId {
     fn cmp(&self, other: &Self) -> core::cmp::Ordering {
-        self.id.inner().cmp(&other.id.inner())
+        self.0.as_int().cmp(&other.0.as_int())
     }
 }
 
 impl core::hash::Hash for EventId {
     fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
-        // Hash only the ID, not the name
-        self.id.as_int().hash(state);
+        self.0.as_int().hash(state);
     }
 }
 
 impl Display for EventId {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
-        match &self.name {
-            Some(name) => write!(f, "{name}"),
-            None => write!(f, "unknown event"),
-        }
+        // Display just the felt value
+        write!(f, "{}", self.0)
+    }
+}
+
+// NAMED EVENT
+// ================================================================================================
+
+/// An event with both an identifier and a human-readable name.
+///
+/// [`NamedEvent`] combines an [`EventId`] with its associated name for better error messages
+/// and debugging. This type is used for:
+/// - Event handler registration
+/// - Error messages
+/// - Debug output
+///
+/// For lightweight event identification (e.g., when reading from the stack), use [`EventId`]
+/// directly. The name can be looked up later via the event registry if needed.
+///
+/// # Equality and Ordering
+///
+/// Two [`NamedEvent`]s are considered equal if they have the same [`EventId`], regardless of
+/// their names. This ensures consistent behavior when the same event is referenced with
+/// different name representations. Ordering and hashing are also based solely on the ID.
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct NamedEvent {
+    id: EventId,
+    name: Cow<'static, str>,
+}
+
+impl NamedEvent {
+    /// Creates a NamedEvent, computing the ID from the name.
+    ///
+    /// This is for runtime/dynamic event creation. The ID is computed by hashing the name.
+    /// For compile-time constants, use the [`declare_event!`](crate::declare_event) macro
+    /// instead.
+    pub fn from_name(name: impl Into<String>) -> Self {
+        let name_str = name.into();
+        let id = EventId::from_name(&name_str);
+        Self { id, name: Cow::Owned(name_str) }
+    }
+
+    /// Creates a NamedEvent from a static name and pre-computed ID.
+    ///
+    /// # Warning
+    ///
+    /// The caller must ensure `id` matches `EventId::from_name(name)`, meaning the ID should
+    /// be the first element of the BLAKE3 hash of the name. Providing a mismatched ID can cause
+    /// handler lookup failures and incorrect program behavior.
+    ///
+    /// **Prefer using the [`declare_event!`](crate::declare_event) macro instead**, which
+    /// generates both the constant and a compile-time test to validate the ID is correct.
+    pub const fn from_name_and_id(name: &'static str, id: EventId) -> Self {
+        Self { id, name: Cow::Borrowed(name) }
+    }
+
+    /// Returns the event identifier.
+    pub const fn id(&self) -> EventId {
+        self.id
+    }
+
+    /// Returns the event name.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+}
+
+impl Display for NamedEvent {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}", self.name)
+    }
+}
+
+// Equality for NamedEvent only compares the underlying ID, not the name.
+// This means that two NamedEvents with different names but the same ID are considered equal.
+// The name is only used for debugging and error messages, and is not part of the identity.
+impl PartialEq for NamedEvent {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl Eq for NamedEvent {}
+
+impl PartialOrd for NamedEvent {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for NamedEvent {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        self.id.cmp(&other.id)
+    }
+}
+
+impl core::hash::Hash for NamedEvent {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        // Hash only the ID, not the name
+        self.id.hash(state);
     }
 }
 
 // EVENT DECLARATION MACRO
 // ================================================================================================
 
-/// Declares an event constant with compile-time ID validation.
+/// Declares a named event constant with compile-time ID validation.
 ///
-/// This macro creates a public constant [`EventId`] and automatically generates a test to
+/// This macro creates a public constant [`NamedEvent`] and automatically generates a test to
 /// verify that the provided ID matches the hash of the event name.
 ///
 /// # Workflow
@@ -171,7 +226,7 @@ impl Display for EventId {
 /// // Step 1: Write with placeholder
 /// declare_event!(MY_EVENT, "miden::foo::bar", 0);
 ///
-/// // Step 2: Run test, see error: "claimed 0 but should be 12345678901234567"
+/// // Step 2: Run test, see error: "declared 0 but hash is 12345678901234567"
 ///
 /// // Step 3: Update with correct ID
 /// declare_event!(MY_EVENT, "miden::foo::bar", 12345678901234567);
@@ -180,7 +235,7 @@ impl Display for EventId {
 /// ```
 ///
 /// The macro expands to:
-/// - A `pub const` [`EventId`] with the given name
+/// - A `pub const` [`NamedEvent`] with the given name
 /// - A test module with the same name containing validation logic
 ///
 /// # Note on Naming
@@ -192,9 +247,10 @@ impl Display for EventId {
 macro_rules! declare_event {
     ($name:ident, $event_name:expr, $event_id:expr) => {
         // Note: constant naming conventions (UPPER_SNAKE_CASE) are still enforced.
-        // Use _ prefix for test-only constants to suppress unused warnings.
-        pub const $name: $crate::EventId =
-            unsafe { $crate::EventId::from_static($event_name, $event_id) };
+        // The macro always generates a public constant; underscore prefix only suppresses
+        // unused warnings, not visibility.
+        pub const $name: $crate::NamedEvent =
+            $crate::NamedEvent::from_name_and_id($event_name, $crate::EventId::from_u64($event_id));
 
         #[cfg(test)]
         #[allow(non_snake_case)]
@@ -205,7 +261,7 @@ macro_rules! declare_event {
                 assert_eq!(
                     $event_id,
                     computed.as_felt().as_int(),
-                    "EventId mismatch for '{}': claimed {} but should be {}.\n\
+                    "EventId mismatch for '{}': declared {} but hash is {}.\n\
      Update your declaration to:\n\
      declare_event!({}, \"{}\", {});",
                     $event_name,
@@ -225,19 +281,30 @@ macro_rules! declare_event {
 
 impl Serializable for EventId {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        self.id.write_into(target);
-        // Serialize the name as Option<String>
-        let name_string: Option<String> = self.name.as_ref().map(|cow| String::from(cow.as_ref()));
-        name_string.write_into(target);
+        self.0.write_into(target);
     }
 }
 
 impl Deserializable for EventId {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let id = Felt::read_from(source)?;
-        let name_string: Option<String> = Option::<String>::read_from(source)?;
-        let name = name_string.map(Cow::Owned);
-        Ok(Self { id, name })
+        Ok(Self(Felt::read_from(source)?))
+    }
+}
+
+impl Serializable for NamedEvent {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.id.write_into(target);
+        // Serialize the name as String
+        let name_string = String::from(self.name.as_ref());
+        name_string.write_into(target);
+    }
+}
+
+impl Deserializable for NamedEvent {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let id = EventId::read_from(source)?;
+        let name_string = String::read_from(source)?;
+        Ok(Self { id, name: Cow::Owned(name_string) })
     }
 }
 
@@ -253,6 +320,18 @@ impl proptest::prelude::Arbitrary for EventId {
     type Strategy = proptest::prelude::BoxedStrategy<Self>;
 }
 
+#[cfg(all(feature = "arbitrary", test))]
+impl proptest::prelude::Arbitrary for NamedEvent {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        use proptest::prelude::*;
+        any::<String>().prop_map(NamedEvent::from_name).boxed()
+    }
+
+    type Strategy = proptest::prelude::BoxedStrategy<Self>;
+}
+
 // TESTS
 // ================================================================================================
 
@@ -260,43 +339,58 @@ impl proptest::prelude::Arbitrary for EventId {
 mod tests {
     use super::*;
 
-    // Test the declare_event! macro - the generated test validates the ID
+    #[test]
+    fn event_id_basics() {
+        // Constructors
+        assert_eq!(EventId::from_u64(100).as_felt().as_int(), 100);
+        assert_eq!(EventId::from_felt(Felt::new(200)).as_felt().as_int(), 200);
+
+        // Reserved range: 0-255
+        assert!(EventId::from_u64(0).is_reserved());
+        assert!(EventId::from_u64(255).is_reserved());
+        assert!(!EventId::from_u64(256).is_reserved());
+    }
+
+    #[test]
+    fn named_event_basics() {
+        let event = NamedEvent::from_name("test::event");
+        assert_eq!(event.name(), "test::event");
+        assert!(event.id().as_felt().as_int() > 0);
+
+        let id = EventId::from_u64(999);
+        let static_event = NamedEvent::from_name_and_id("static", id);
+        assert_eq!(static_event.name(), "static");
+        assert_eq!(static_event.id(), id);
+    }
+
+    #[test]
+    fn named_event_compares_by_id_not_name() {
+        use core::hash::{Hash, Hasher};
+        use std::collections::hash_map::DefaultHasher;
+
+        let id = EventId::from_u64(100);
+        let event1 = NamedEvent::from_name_and_id("foo", id);
+        let event2 = NamedEvent::from_name_and_id("bar", id);
+
+        // Same ID, different names
+        assert_eq!(event1, event2);
+
+        let mut h1 = DefaultHasher::new();
+        event1.hash(&mut h1);
+        let mut h2 = DefaultHasher::new();
+        event2.hash(&mut h2);
+        assert_eq!(h1.finish(), h2.finish());
+
+        // Different IDs
+        let event3 = NamedEvent::from_name_and_id("zzz", EventId::from_u64(50));
+        assert!(event3 < event1);
+    }
+
     declare_event!(_TEST_EVENT, "test::event::correct", 4588470772146341859u64);
 
     #[test]
-    fn constructors_and_accessors() {
-        // from_u64 - no name
-        let no_name = EventId::from_u64(100);
-        assert_eq!(no_name.as_felt().as_int(), 100);
-        assert_eq!(no_name.name(), None);
-
-        // from_name - derives ID from name and stores it
-        let with_name = EventId::from_name("test::event");
-        assert_eq!(with_name.name(), Some("test::event"));
-
-        // from_static - unsafe constructor with custom ID and name (tested via declare_event!)
-        let static_event = unsafe { EventId::from_static("static::event", 999) };
-        assert_eq!(static_event.as_felt().as_int(), 999);
-        assert_eq!(static_event.name(), Some("static::event"));
-    }
-
-    #[test]
-    fn display() {
-        assert_eq!(format!("{}", EventId::from_name("foo::bar")), "foo::bar");
-        assert_eq!(format!("{}", EventId::from_u64(100)), "unknown event");
-    }
-
-    #[test]
-    fn comparison_ignores_names() {
-        let id100_named = unsafe { EventId::from_static("foo", 100) };
-        let id100_unnamed = EventId::from_u64(100);
-        let id50_named = unsafe { EventId::from_static("zzz", 50) };
-
-        // Equality based only on ID
-        assert_eq!(id100_named, id100_unnamed);
-
-        // Ordering based only on ID
-        assert!(id100_named > id50_named);
-        assert!(id50_named < id100_unnamed);
+    fn declare_event_macro_works() {
+        assert_eq!(_TEST_EVENT.name(), "test::event::correct");
+        assert_eq!(_TEST_EVENT.id().as_felt().as_int(), 4588470772146341859u64);
     }
 }

@@ -131,7 +131,7 @@ macro_rules! build_test_by_mode {
             advice_inputs,
             in_debug_mode: $in_debug_mode,
             libraries: ::alloc::vec::Vec::default(),
-            handlers: ::alloc::collections::BTreeMap::default(),
+            handlers: ::alloc::vec::Vec::new(),
             add_modules: ::alloc::vec::Vec::default(),
         }
     }};
@@ -162,7 +162,7 @@ macro_rules! build_test_by_mode {
             advice_inputs,
             in_debug_mode: $in_debug_mode,
             libraries: ::alloc::vec::Vec::default(),
-            handlers: ::alloc::collections::BTreeMap::default(),
+            handlers: ::alloc::vec::Vec::new(),
             add_modules: ::alloc::vec::Vec::default(),
         }
     }};
@@ -198,7 +198,7 @@ macro_rules! build_test_by_mode {
             advice_inputs,
             in_debug_mode: $in_debug_mode,
             libraries: ::alloc::vec::Vec::default(),
-            handlers: ::alloc::collections::BTreeMap::default(),
+            handlers: ::alloc::vec::Vec::new(),
             add_modules: ::alloc::vec::Vec::default(),
         }
     }};
@@ -236,7 +236,7 @@ macro_rules! build_test_by_mode {
             advice_inputs,
             in_debug_mode: $in_debug_mode,
             libraries: ::alloc::vec::Vec::default(),
-            handlers: ::alloc::collections::BTreeMap::default(),
+            handlers: ::alloc::vec::Vec::new(),
             add_modules: ::alloc::vec::Vec::default(),
         }
     }};

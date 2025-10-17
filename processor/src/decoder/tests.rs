@@ -12,7 +12,7 @@ use miden_air::trace::{
     },
 };
 use miden_core::{
-    EMPTY_WORD, EventId, ONE, Program, WORD_SIZE, ZERO, assert_matches,
+    EMPTY_WORD, EventId, NamedEvent, ONE, Program, WORD_SIZE, ZERO, assert_matches,
     mast::{
         BasicBlockNode, CallNode, DynNode, JoinNode, MastForest, MastNode, MastNodeExt, MastNodeId,
         OP_BATCH_SIZE,
@@ -41,6 +41,7 @@ const FMP_MIN: Felt = Felt::new(crate::FMP_MIN);
 const SYSCALL_FMP_MIN: Felt = Felt::new(crate::SYSCALL_FMP_MIN as u64);
 
 const EMIT_EVENT_ID: EventId = EventId::from_u64(1234);
+const EMIT_EVENT: NamedEvent = NamedEvent::from_name_and_id("test::emit::event", EMIT_EVENT_ID);
 
 // TYPE ALIASES
 // ================================================================================================
@@ -1526,7 +1527,7 @@ fn set_user_op_helpers_many() {
 fn build_trace(stack_inputs: &[u64], program: &Program) -> (DecoderTrace, usize) {
     let stack_inputs = StackInputs::try_from_ints(stack_inputs.iter().copied()).unwrap();
     let mut host = DefaultHost::default();
-    host.register_handler(EMIT_EVENT_ID, Arc::new(NoopEventHandler)).unwrap();
+    host.register_handler(EMIT_EVENT, Arc::new(NoopEventHandler)).unwrap();
     let mut process = Process::new(
         Kernel::default(),
         stack_inputs,

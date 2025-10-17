@@ -7,7 +7,7 @@ extern crate alloc;
 use alloc::{sync::Arc, vec, vec::Vec};
 
 use miden_assembly::{Library, mast::MastForest, utils::Deserializable};
-use miden_core::{EventId, Felt, Word, precompile::PrecompileVerifier};
+use miden_core::{EventId, Felt, NamedEvent, Word, precompile::PrecompileVerifier};
 use miden_processor::{EventHandler, HostLibrary};
 use miden_utils_sync::LazyLock;
 
@@ -66,7 +66,7 @@ impl StdLibrary {
     }
 
     /// List of all `EventHandlers` required to run all of the standard library.
-    pub fn handlers(&self) -> Vec<(EventId, Arc<dyn EventHandler>)> {
+    pub fn handlers(&self) -> Vec<(NamedEvent, Arc<dyn EventHandler>)> {
         vec![
             (KECCAK_HASH_MEMORY_EVENT_ID, Arc::new(KeccakPrecompile)),
             (SMT_PEEK_EVENT_ID, Arc::new(handle_smt_peek)),
@@ -79,7 +79,7 @@ impl StdLibrary {
 
     /// List of all `PrecompileVerifier` required to verify precompile requests.
     pub fn verifiers(&self) -> Vec<(EventId, Arc<dyn PrecompileVerifier>)> {
-        vec![(KECCAK_HASH_MEMORY_EVENT_ID, Arc::new(KeccakPrecompile))]
+        vec![(KECCAK_HASH_MEMORY_EVENT_ID.id(), Arc::new(KeccakPrecompile))]
     }
 }
 

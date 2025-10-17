@@ -6,7 +6,6 @@ extern crate alloc;
 extern crate std;
 
 use alloc::{
-    collections::BTreeMap,
     format,
     string::{String, ToString},
     sync::Arc,
@@ -27,7 +26,7 @@ pub use miden_core::{
     stack::MIN_STACK_DEPTH,
     utils::{IntoBytes, ToElements, group_slice_elements},
 };
-use miden_core::{EventId, ProgramInfo, chiplets::hasher::apply_permutation};
+use miden_core::{NamedEvent, ProgramInfo, chiplets::hasher::apply_permutation};
 pub use miden_processor::{
     AdviceInputs, AdviceProvider, BaseHost, ContextId, ExecutionError, ExecutionOptions,
     ExecutionTrace, Process, ProcessState, VmStateIterator,
@@ -179,7 +178,7 @@ pub struct Test {
     pub advice_inputs: AdviceInputs,
     pub in_debug_mode: bool,
     pub libraries: Vec<Library>,
-    pub handlers: BTreeMap<EventId, Arc<dyn EventHandler>>,
+    pub handlers: Vec<(NamedEvent, Arc<dyn EventHandler>)>,
     pub add_modules: Vec<(LibraryPath, String)>,
 }
 
@@ -215,7 +214,7 @@ impl Test {
             advice_inputs: AdviceInputs::default(),
             in_debug_mode,
             libraries: Vec::default(),
-            handlers: BTreeMap::default(),
+            handlers: Vec::new(),
             add_modules: Vec::default(),
         }
     }
@@ -226,19 +225,20 @@ impl Test {
     }
 
     /// Add a handler for a specific event when running the `Host`.
-    pub fn add_event_handler(&mut self, id: EventId, handler: impl EventHandler) {
-        self.add_event_handlers(vec![(id, Arc::new(handler))]);
+    pub fn add_event_handler(&mut self, event: NamedEvent, handler: impl EventHandler) {
+        self.add_event_handlers(vec![(event, Arc::new(handler))]);
     }
 
     /// Add a handler for a specific event when running the `Host`.
-    pub fn add_event_handlers(&mut self, handlers: Vec<(EventId, Arc<dyn EventHandler>)>) {
-        for (id, handler) in handlers {
-            if id.is_reserved() {
+    pub fn add_event_handlers(&mut self, handlers: Vec<(NamedEvent, Arc<dyn EventHandler>)>) {
+        for (event, handler) in handlers {
+            if event.id().is_reserved() {
                 panic!("tried to register handler with ID reserved for system events")
             }
-            if self.handlers.insert(id.clone(), handler).is_some() {
-                panic!("handler with id {id} was already added")
+            if self.handlers.iter().any(|(e, _)| e.id() == event.id()) {
+                panic!("handler for event '{}' was already added", event.name())
             }
+            self.handlers.push((event, handler));
         }
     }
 
@@ -549,8 +549,8 @@ impl Test {
         for library in &self.libraries {
             host.load_library(library.mast_forest()).unwrap();
         }
-        for (id, handler) in &self.handlers {
-            host.register_handler(id.clone(), handler.clone()).unwrap();
+        for (event, handler) in &self.handlers {
+            host.register_handler(event.clone(), handler.clone()).unwrap();
         }
 
         (program, host)

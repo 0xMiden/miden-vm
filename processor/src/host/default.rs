@@ -1,6 +1,6 @@
 use alloc::{sync::Arc, vec::Vec};
 
-use miden_core::{DebugOptions, EventId, Felt, Word, mast::MastForest};
+use miden_core::{DebugOptions, EventId, Felt, NamedEvent, Word, mast::MastForest};
 use miden_debug_types::{
     DefaultSourceManager, Location, SourceFile, SourceManager, SourceManagerSync, SourceSpan,
 };
@@ -61,8 +61,8 @@ where
         let library = library.into();
         self.store.insert(library.mast_forest);
 
-        for (id, handler) in library.handlers {
-            self.event_handlers.register(id, handler)?;
+        for (event, handler) in library.handlers {
+            self.event_handlers.register(event, handler)?;
         }
         Ok(())
     }
@@ -80,10 +80,10 @@ where
     /// `fn(&mut ProcessState) -> Result<(), EventHandler>`
     pub fn register_handler(
         &mut self,
-        id: EventId,
+        event: NamedEvent,
         handler: Arc<dyn EventHandler>,
     ) -> Result<(), ExecutionError> {
-        self.event_handlers.register(id, handler)
+        self.event_handlers.register(event, handler)
     }
 
     /// Un-registers a handler with the given id, returning a flag indicating whether a handler
@@ -92,11 +92,11 @@ where
         self.event_handlers.unregister(id)
     }
 
-    /// Replaces a handler with the given id, returning a flag indicating whether a handler
-    /// was previously registered with this id.
-    pub fn replace_handler(&mut self, id: EventId, handler: Arc<dyn EventHandler>) -> bool {
-        let existed = self.event_handlers.unregister(id.clone());
-        self.register_handler(id, handler).unwrap();
+    /// Replaces a handler with the given event, returning a flag indicating whether a handler
+    /// was previously registered with this event ID.
+    pub fn replace_handler(&mut self, event: NamedEvent, handler: Arc<dyn EventHandler>) -> bool {
+        let existed = self.event_handlers.unregister(event.id());
+        self.register_handler(event, handler).unwrap();
         existed
     }
 
@@ -162,17 +162,19 @@ where
 
     fn on_event(&mut self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
         let event_id = EventId::from_felt(process.get_stack_item(0));
-        if let Some(mutations) = self.event_handlers.handle_event(event_id, process)? {
+        if let Some((_named_event, mutations)) =
+            self.event_handlers.handle_event(event_id, process)?
+        {
             // the event was handled by the registered event handlers; just return
             return Ok(mutations);
         }
 
         // EventError is a `Box` so we can define the error anonymously.
         #[derive(Debug, thiserror::Error)]
-        #[error("no event handler was registered with given id")]
-        struct UnhandledEvent;
+        #[error("no event handler registered for event ID {0}")]
+        struct UnhandledEvent(EventId);
 
-        Err(UnhandledEvent.into())
+        Err(UnhandledEvent(event_id).into())
     }
 }
 
@@ -250,8 +252,8 @@ impl AsyncHost for NoopHost {
 pub struct HostLibrary {
     /// A `MastForest` with procedures exposed by this library.
     pub mast_forest: Arc<MastForest>,
-    /// List of handlers along with an event id to call them with `emit`.
-    pub handlers: Vec<(EventId, Arc<dyn EventHandler>)>,
+    /// List of handlers along with their named events to call them with `emit`.
+    pub handlers: Vec<(NamedEvent, Arc<dyn EventHandler>)>,
 }
 
 impl From<Arc<MastForest>> for HostLibrary {

@@ -6,7 +6,7 @@ use alloc::{
 };
 use core::{error::Error, fmt, fmt::Debug};
 
-use miden_core::{DebugOptions, EventId};
+use miden_core::{DebugOptions, EventId, NamedEvent};
 
 use crate::{AdviceMutation, ExecutionError, ProcessState};
 
@@ -101,7 +101,7 @@ pub type EventError = Box<dyn Error + Send + Sync + 'static>;
 /// ```
 #[derive(Default)]
 pub struct EventHandlerRegistry {
-    handlers: BTreeMap<EventId, Arc<dyn EventHandler>>,
+    handlers: BTreeMap<EventId, (NamedEvent, Arc<dyn EventHandler>)>,
 }
 
 impl EventHandlerRegistry {
@@ -109,18 +109,19 @@ impl EventHandlerRegistry {
         Self { handlers: BTreeMap::new() }
     }
 
-    /// Registers an [`EventHandler`] with a given identifier.
+    /// Registers an [`EventHandler`] with a given named event.
     pub fn register(
         &mut self,
-        id: EventId,
+        event: NamedEvent,
         handler: Arc<dyn EventHandler>,
     ) -> Result<(), ExecutionError> {
+        let id = event.id();
         if id.is_reserved() {
-            return Err(ExecutionError::ReservedEventId { id: id.clone() });
+            return Err(ExecutionError::ReservedEventId { event: event.clone() });
         }
-        match self.handlers.entry(id.clone()) {
-            Entry::Vacant(e) => e.insert(handler),
-            Entry::Occupied(_) => return Err(ExecutionError::DuplicateEventHandler { id }),
+        match self.handlers.entry(id) {
+            Entry::Vacant(e) => e.insert((event, handler)),
+            Entry::Occupied(_) => return Err(ExecutionError::DuplicateEventHandler { event }),
         };
         Ok(())
     }
@@ -133,17 +134,18 @@ impl EventHandlerRegistry {
 
     /// Handles the event if the registry contains a handler with the same identifier.
     ///
-    /// Returns an `Option<_>` indicating whether the event was handled, wrapping resulting
-    /// mutations if any. Returns `None` if the event was not handled, if the event was handled
-    /// successfully `Some(mutations)` is returned, and if the handler returns an error, it is
-    /// propagated to the caller.
+    /// Returns an `Option<_>` indicating whether the event was handled, wrapping the named event
+    /// and resulting mutations. Returns `None` if the event was not handled, if the event was
+    /// handled successfully `Some((event, mutations))` is returned, and if the handler returns
+    /// an error, it is propagated to the caller.
     pub fn handle_event(
         &self,
         id: EventId,
         process: &ProcessState,
-    ) -> Result<Option<Vec<AdviceMutation>>, EventError> {
-        if let Some(handler) = self.handlers.get(&id) {
-            return handler.on_event(process).map(Some);
+    ) -> Result<Option<(NamedEvent, Vec<AdviceMutation>)>, EventError> {
+        if let Some((named_event, handler)) = self.handlers.get(&id) {
+            let mutations = handler.on_event(process)?;
+            return Ok(Some((named_event.clone(), mutations)));
         }
 
         Ok(None)
@@ -152,8 +154,8 @@ impl EventHandlerRegistry {
 
 impl Debug for EventHandlerRegistry {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let keys: Vec<_> = self.handlers.keys().collect();
-        f.debug_struct("EventHandlerRegistry").field("handlers", &keys).finish()
+        let events: Vec<_> = self.handlers.values().map(|(event, _)| event).collect();
+        f.debug_struct("EventHandlerRegistry").field("handlers", &events).finish()
     }
 }
 

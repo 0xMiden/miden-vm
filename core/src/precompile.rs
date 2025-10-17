@@ -99,7 +99,7 @@ impl PrecompileRequest {
     }
 
     pub fn event_id(&self) -> EventId {
-        self.event_id.clone()
+        self.event_id
     }
 }
 
@@ -182,13 +182,13 @@ impl PrecompileVerifierRegistry {
     }
 
     /// Gets a verifier for the specified event ID.
-    pub fn get(&self, event_id: &EventId) -> Option<&dyn PrecompileVerifier> {
-        self.verifiers.get(event_id).map(|v| v.as_ref())
+    pub fn get(&self, event_id: EventId) -> Option<&dyn PrecompileVerifier> {
+        self.verifiers.get(&event_id).map(|v| v.as_ref())
     }
 
     /// Returns true if a verifier is registered for the specified event ID.
-    pub fn contains(&self, event_id: &EventId) -> bool {
-        self.verifiers.contains_key(event_id)
+    pub fn contains(&self, event_id: EventId) -> bool {
+        self.verifiers.contains_key(&event_id)
     }
 
     /// Returns the number of registered verifiers.
@@ -221,18 +221,13 @@ impl PrecompileVerifierRegistry {
     ) -> Result<Word, PrecompileVerificationError> {
         let mut state = PrecompileVerificationState::new();
         for (index, PrecompileRequest { event_id, calldata: data }) in requests.iter().enumerate() {
-            let verifier =
-                self.get(event_id).ok_or(PrecompileVerificationError::VerifierNotFound {
-                    index,
-                    event_id: event_id.clone(),
-                })?;
+            let event_id = *event_id;
+            let verifier = self
+                .get(event_id)
+                .ok_or(PrecompileVerificationError::VerifierNotFound { index, event_id })?;
 
             let precompile_commitment = verifier.verify(data).map_err(|error| {
-                PrecompileVerificationError::PrecompileError {
-                    index,
-                    event_id: event_id.clone(),
-                    error,
-                }
+                PrecompileVerificationError::PrecompileError { index, event_id, error }
             })?;
             state.absorb(precompile_commitment);
         }

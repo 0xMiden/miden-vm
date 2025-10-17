@@ -1,4 +1,4 @@
-use miden_core::{EventId, Felt, mast::MastForest, sys_events::SystemEvent};
+use miden_core::{EventId, Felt, NamedEvent, mast::MastForest, sys_events::SystemEvent};
 
 use super::{
     super::{
@@ -149,13 +149,16 @@ impl Process {
         let event_id = EventId::from_felt(process.get_stack_item(0));
 
         // If it's a system event, handle it directly. Otherwise, forward it to the host.
-        if let Ok(system_event) = SystemEvent::try_from(event_id.clone()) {
+        if let Ok(system_event) = SystemEvent::try_from(event_id) {
             handle_system_event(&mut process, system_event, err_ctx)
         } else {
             let clk = process.clk();
-            let mutations = host
-                .on_event(&process)
-                .map_err(|err| ExecutionError::event_error(err, event_id, err_ctx))?;
+            let mutations = host.on_event(&process).map_err(|err| {
+                // Create a NamedEvent for the error message
+                // TODO: In the future, we could look up the name from the host's registry
+                let event = NamedEvent::from_name_and_id("unknown event", event_id);
+                ExecutionError::event_error(err, event, err_ctx)
+            })?;
             self.advice
                 .apply_mutations(mutations)
                 .map_err(|err| ExecutionError::advice_error(err, clk, err_ctx))?;
