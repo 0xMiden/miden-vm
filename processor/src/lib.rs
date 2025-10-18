@@ -341,18 +341,12 @@ impl Process {
             MastNode::Split(node) => self.execute_split_node(node, program, host)?,
             MastNode::Loop(node) => self.execute_loop_node(node, program, host)?,
             MastNode::Call(node) => {
-                let err_ctx = err_ctx!(program, node, host);
-                add_error_ctx_to_external_error(
-                    self.execute_call_node(node, program, host),
-                    err_ctx,
-                )?
+                err_ctx!(program, node, host);
+                add_error_ctx_to_external_error(self.execute_call_node(node, program, host), ())?
             },
             MastNode::Dyn(node) => {
-                let err_ctx = err_ctx!(program, node, host);
-                add_error_ctx_to_external_error(
-                    self.execute_dyn_node(node, program, host),
-                    err_ctx,
-                )?
+                err_ctx!(program, node, host);
+                add_error_ctx_to_external_error(self.execute_dyn_node(node, program, host), ())?
             },
             MastNode::External(external_node) => {
                 let (root_id, mast_forest) = self.resolve_external_node(external_node, host)?;
@@ -402,8 +396,8 @@ impl Process {
         } else if condition == ZERO {
             self.execute_mast_node(node.on_false(), program, host)?;
         } else {
-            let err_ctx = err_ctx!(program, node, host);
-            return Err(ExecutionError::not_binary_value_if(condition, &err_ctx));
+            err_ctx!(program, node, host);
+            return Err(ExecutionError::not_binary_value_if(condition, &()));
         }
 
         self.end_split_node(node, program, host)
@@ -435,8 +429,8 @@ impl Process {
             }
 
             if self.stack.peek() != ZERO {
-                let err_ctx = err_ctx!(program, node, host);
-                return Err(ExecutionError::not_binary_value_loop(self.stack.peek(), &err_ctx));
+                err_ctx!(program, node, host);
+                return Err(ExecutionError::not_binary_value_loop(self.stack.peek(), &()));
             }
 
             // end the LOOP block and drop the condition from the stack
@@ -446,8 +440,8 @@ impl Process {
             // already dropped when we started the LOOP block
             self.end_loop_node(node, false, program, host)
         } else {
-            let err_ctx = err_ctx!(program, node, host);
-            Err(ExecutionError::not_binary_value_loop(condition, &err_ctx))
+            err_ctx!(program, node, host);
+            Err(ExecutionError::not_binary_value_loop(condition, &()))
         }
     }
 
@@ -470,14 +464,14 @@ impl Process {
             let callee = program.get_node_by_id(call_node.callee()).ok_or_else(|| {
                 ExecutionError::MastNodeNotFoundInForest { node_id: call_node.callee() }
             })?;
-            let err_ctx = err_ctx!(program, call_node, host);
-            self.chiplets.kernel_rom.access_proc(callee.digest(), &err_ctx)?;
+            err_ctx!(program, call_node, host);
+            self.chiplets.kernel_rom.access_proc(callee.digest(), &())?;
         }
-        let err_ctx = err_ctx!(program, call_node, host);
+        err_ctx!(program, call_node, host);
 
         self.start_call_node(call_node, program, host)?;
         self.execute_mast_node(call_node.callee(), program, host)?;
-        self.end_call_node(call_node, program, host, &err_ctx)
+        self.end_call_node(call_node, program, host, &())
     }
 
     /// Executes the specified [miden_core::mast::DynNode].
@@ -496,12 +490,12 @@ impl Process {
             return Err(ExecutionError::CallInSyscall("dyncall"));
         }
 
-        let err_ctx = err_ctx!(program, node, host);
+        err_ctx!(program, node, host);
 
         let callee_hash = if node.is_dyncall() {
-            self.start_dyncall_node(node, &err_ctx)?
+            self.start_dyncall_node(node, &())?
         } else {
-            self.start_dyn_node(node, program, host, &err_ctx)?
+            self.start_dyn_node(node, program, host, &())?
         };
 
         // if the callee is not in the program's MAST forest, try to find a MAST forest for it in
@@ -512,7 +506,7 @@ impl Process {
             None => {
                 let mast_forest = host
                     .get_mast_forest(&callee_hash)
-                    .ok_or_else(|| ExecutionError::dynamic_node_not_found(callee_hash, &err_ctx))?;
+                    .ok_or_else(|| ExecutionError::dynamic_node_not_found(callee_hash, &()))?;
 
                 // We limit the parts of the program that can be called externally to procedure
                 // roots, even though MAST doesn't have that restriction.
@@ -534,7 +528,7 @@ impl Process {
         }
 
         if node.is_dyncall() {
-            self.end_dyncall_node(node, program, host, &err_ctx)
+            self.end_dyncall_node(node, program, host, &())
         } else {
             self.end_dyn_node(node, program, host)
         }
@@ -606,7 +600,7 @@ impl Process {
     #[inline(always)]
     fn execute_op_batch(
         &mut self,
-        basic_block: &BasicBlockNode,
+        _basic_block: &BasicBlockNode,
         batch: &OpBatch,
         decorators: &mut DecoratorOpLinkIterator,
         op_offset: usize,
@@ -633,9 +627,9 @@ impl Process {
             }
 
             // decode and execute the operation
-            let err_ctx = err_ctx!(program, basic_block, host, i + op_offset);
+            err_ctx!(program, _basic_block, host, i + op_offset);
             self.decoder.execute_user_op(op, op_idx);
-            self.execute_op_with_error_ctx(op, program, host, &err_ctx)?;
+            self.execute_op_with_error_ctx(op, program, host, &())?;
 
             // if the operation carries an immediate value, the value is stored at the next group
             // pointer; so, we advance the pointer to the following group
