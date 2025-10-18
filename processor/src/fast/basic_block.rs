@@ -126,7 +126,7 @@ impl FastProcessor {
     #[allow(clippy::too_many_arguments)]
     async fn execute_op_batch(
         &mut self,
-        basic_block: &BasicBlockNode,
+        _basic_block: &BasicBlockNode,
         node_id: MastNodeId,
         batch: &OpBatch,
         batch_index: usize,
@@ -167,12 +167,12 @@ impl FastProcessor {
             // whereas all the other operations are synchronous (resulting in a significant
             // performance improvement).
             {
-                let err_ctx = err_ctx!(program, basic_block, host, op_idx_in_block);
+                err_ctx!(program, _basic_block, host, op_idx_in_block);
                 match op {
-                    Operation::Emit => self.op_emit(host, &err_ctx).await?,
+                    Operation::Emit => self.op_emit(host, &()).await?,
                     _ => {
                         // if the operation is not an Emit, we execute it normally
-                        self.execute_sync_op(op, op_idx_in_block, program, host, &err_ctx, tracer)?;
+                        self.execute_sync_op(op, op_idx_in_block, program, host, &(), tracer)?;
                     },
                 }
             }
