@@ -42,7 +42,7 @@ impl FastProcessor {
         // Execute decorators that should be executed before entering the node
         self.execute_before_enter_decorators(current_node_id, current_forest, host)?;
 
-        let err_ctx = err_ctx!(current_forest, call_node, host);
+        err_ctx!(current_forest, call_node, host);
 
         // call or syscall are not allowed inside a syscall
         if self.in_syscall {
@@ -60,7 +60,7 @@ impl FastProcessor {
         if call_node.is_syscall() {
             // check if the callee is in the kernel
             if !program.kernel().contains_proc(callee_hash) {
-                return Err(ExecutionError::syscall_target_not_in_kernel(callee_hash, &err_ctx));
+                return Err(ExecutionError::syscall_target_not_in_kernel(callee_hash, &()));
             }
 
             // set the system registers to the syscall context
@@ -103,13 +103,13 @@ impl FastProcessor {
             current_forest,
         );
 
-        let call_node = current_forest[node_id].unwrap_call();
-        let err_ctx = err_ctx!(current_forest, call_node, host);
+        let _call_node = current_forest[node_id].unwrap_call();
+        err_ctx!(current_forest, _call_node, host);
         // when returning from a function call or a syscall, restore the
         // context of the
         // system registers and the operand stack to what it was prior
         // to the call.
-        self.restore_context(tracer, &err_ctx)?;
+        self.restore_context(tracer, &())?;
 
         // Corresponds to the row inserted for the END operation added to the trace.
         self.increment_clk(tracer);
@@ -145,7 +145,7 @@ impl FastProcessor {
             return Err(ExecutionError::CallInSyscall("dyncall"));
         }
 
-        let err_ctx = err_ctx!(&current_forest, dyn_node, host);
+        err_ctx!(&current_forest, dyn_node, host);
 
         // Retrieve callee hash from memory, using stack top as the memory
         // address.
@@ -153,7 +153,7 @@ impl FastProcessor {
             let mem_addr = self.stack_get(0);
             let word = self
                 .memory
-                .read_word(self.ctx, mem_addr, self.clk, &err_ctx)
+                .read_word(self.ctx, mem_addr, self.clk, &())
                 .map_err(ExecutionError::MemoryError)?;
             tracer.record_memory_read_word(word, mem_addr);
 
@@ -190,7 +190,7 @@ impl FastProcessor {
                         callee_hash,
                         host,
                         ExecutionError::dynamic_node_not_found,
-                        &err_ctx,
+                        &(),
                     )
                     .await?;
 
@@ -230,10 +230,10 @@ impl FastProcessor {
         );
 
         let dyn_node = current_forest[node_id].unwrap_dyn();
-        let err_ctx = err_ctx!(current_forest, dyn_node, host);
+        err_ctx!(current_forest, dyn_node, host);
         // For dyncall, restore the context.
         if dyn_node.is_dyncall() {
-            self.restore_context(tracer, &err_ctx)?;
+            self.restore_context(tracer, &())?;
         }
 
         // Corresponds to the row inserted for the END operation added to
