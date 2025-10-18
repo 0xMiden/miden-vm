@@ -47,6 +47,7 @@ criterion.workspace = true
 miden-air.workspace = true
 miden-processor = { workspace = true, features = ["testing"] }
 miden-utils-testing.workspace = true
+miden-verifier.workspace = true
 num = "0.4"
 num-bigint = "0.4"
 pretty_assertions = "1.4"
@@ -61,4 +62,5 @@ winter-fri.workspace = true
 
 [build-dependencies]
 env_logger.workspace = true
+fs-err = "3.0"
 miden-assembly = { workspace = true, features = ["std"] }

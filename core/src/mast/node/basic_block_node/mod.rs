@@ -18,6 +18,9 @@ use op_batch::OpBatchAccumulator;
 
 use super::{MastNodeErrorContext, MastNodeExt};
 
+#[cfg(any(test, feature = "arbitrary"))]
+pub mod arbitrary;
+
 #[cfg(test)]
 mod tests;
 
@@ -64,6 +67,7 @@ pub const BATCH_SIZE: usize = 8;
 /// field elements (512 bits).
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(all(feature = "arbitrary", test), miden_serde_test_macros::serde_test)]
 pub struct BasicBlockNode {
     /// The primitive operations contained in this basic block.
     ///
@@ -343,6 +347,13 @@ impl MastNodeExt for BasicBlockNode {
 
     fn append_children_to(&self, _target: &mut Vec<MastNodeId>) {
         // No children for basic blocks
+    }
+
+    fn for_each_child<F>(&self, _f: F)
+    where
+        F: FnMut(MastNodeId),
+    {
+        // BasicBlockNode has no children
     }
 
     fn domain(&self) -> Felt {

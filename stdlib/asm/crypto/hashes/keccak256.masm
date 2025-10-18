@@ -32,10 +32,10 @@ const.KECCAK_HASH_MEMORY_EVENT=event("stdlib::hash::keccak256::hash_memory")
 #! - DIGEST_U32[8] = [d_0, ..., d_7] = Keccak256(INPUT_U8[len_bytes])
 export.hash_memory
     exec.hash_memory_impl
-    # => [COMM, DIGEST_U32[8], ...]
+    # => [COMM, TAG, DIGEST_U32[8], ...]
 
     # This will be replaced by a syscall to a procedure which logs the call to the precompile
-    dropw
+    dropw dropw
     # => [DIGEST_U32[8], ...]
 end
 
@@ -85,40 +85,49 @@ end
 
 #! Internal implementation of memory-based Keccak256 computation via deferred computation.
 #!
-#! Emits event to populate advice stack with digest, computes commitment for tracking
-#! deferred computations, and stores witness in advice map for later proof generation.
+#! Emits an event to populate the advice stack with digest and store the preimage for deferred verification.
+#! Returns the commitment to the precompile call and its tag.
 #!
 #! Input: [ptr, len_bytes, ...]
-#! Output: [COMM, DIGEST_U32[8], ...]
+#! Output: [COMM, TAG, DIGEST_U32[8], ...]
 #!
 #! Where:
 #! - ptr: word-aligned memory address containing INPUT_U32[len_u32] where len_u32=⌈len_bytes/4⌉
 #! - len_bytes: number of bytes to hash
-#! - COMM: Rpo256(Rpo256(INPUT_U32[..]) || Rpo256(DIGEST_U32[..].reversed())) for kernel tracking
+#! - COMM: Rpo256(Rpo256(INPUT_U32[..]) || Rpo256(DIGEST_U32[..])) for kernel tracking
+#! - TAG = [0, 0, len_bytes, KECCAK_HASH_MEMORY_EVENT] for precompile verification
 #! - DIGEST_U32[8] = [d_0, ..., d_7] = Keccak256(INPUT_U8[len_bytes])
 export.hash_memory_impl
     emit.KECCAK_HASH_MEMORY_EVENT
     # => [ptr, len_bytes, ...]
 
     # Compute len_u32 = ceil(len_bytes / 4)
-    swap add.3 u32shr.2 swap
-    # => [ptr, len_u32, ...]
+    dup.1 add.3 u32shr.2 swap
+    # => [ptr, len_u32, len_bytes, ...]
 
     exec.rpo::hash_memory
-    # => [COMM_INPUT, ...]
+    # => [COMM_INPUT, len_bytes, ...]
+
+    # Prepare TAG = [0, 0, len_bytes, KECCAK_HASH_MEMORY_EVENT]
+    push.KECCAK_HASH_MEMORY_EVENT movup.5 push.0.0 swapw
+    # => [COMM_INPUT, TAG, ...]
 
     # Load digest from advice stack
     adv_push.8
-    # => [DIGEST_U32[8], COMM_INPUT, ...]
+    # => [DIGEST_U32[8], COMM_INPUT, TAG, ...]
 
-    # Compute COMM_DIGEST = Rpo256(DIGEST_U32[8].reversed())
-    dupw.1 dupw.1 hmerge
-    # => [COMM_DIGEST, DIGEST_U32[8], COMM_INPUT, ...]
+    # Compute COMM_DIGEST = Rpo256(DIGEST_U32[8])
+    dupw.1 dupw.1 reversedw hmerge
+    # => [COMM_DIGEST, DIGEST_U32[8], COMM_INPUT, TAG, ...]
 
     movupw.3 swapw
-    # => [COMM_DIGEST, COMM_INPUT, DIGEST_U32[8], ...]
+    # => [COMM_DIGEST, COMM_INPUT, DIGEST_U32[8], TAG, ...]
 
-    # compute COMM = Rpo256(COMM_INPUT || COMM_DIGEST)
+    # Compute COMM = Rpo256(COMM_INPUT || COMM_DIGEST)
     hmerge
-    # => [COMM, DIGEST_U32[8]]
+    # => [COMM, DIGEST_U32[8], TAG, ...]
+
+    # Reorder stack
+    movupw.3 swapw
+    # => [COMM, TAG, DIGEST_U32[8], ...]
 end

@@ -10,7 +10,7 @@ use super::{TRUNCATE_STACK_PROC, build_op_test, build_test};
 #[test]
 fn adv_push() {
     let asm_op = "adv_push";
-    let advice_stack = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+    let advice_stack = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
     let test_n = |n: usize| {
         let source = format!("{asm_op}.{n}");
         let mut final_stack = vec![0; n];

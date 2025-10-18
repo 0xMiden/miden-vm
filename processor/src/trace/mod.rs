@@ -7,7 +7,10 @@ use miden_air::trace::{
     decoder::{NUM_USER_OP_HELPERS, USER_OP_HELPERS_OFFSET},
     main_trace::MainTrace,
 };
-use miden_core::{ProgramInfo, StackInputs, StackOutputs, Word, ZERO, stack::MIN_STACK_DEPTH};
+use miden_core::{
+    Kernel, ProgramInfo, StackInputs, StackOutputs, Word, ZERO, precompile::PrecompileRequest,
+    stack::MIN_STACK_DEPTH,
+};
 use winter_prover::{EvaluationFrame, Trace, TraceInfo, crypto::RandomCoin};
 
 use super::{
@@ -17,6 +20,7 @@ use super::{
     range::AuxTraceBuilder as RangeCheckerAuxTraceBuilder,
     stack::AuxTraceBuilder as StackAuxTraceBuilder,
 };
+use crate::fast::ExecutionOutput;
 
 mod utils;
 pub use utils::{AuxColumnBuilder, ChipletsLengths, TraceFragment, TraceLenSummary};
@@ -105,6 +109,35 @@ impl ExecutionTrace {
         }
     }
 
+    pub fn new_from_parts(
+        program_hash: Word,
+        kernel: Kernel,
+        execution_output: ExecutionOutput,
+        main_trace: MainTrace,
+        aux_trace_builders: AuxTraceBuilders,
+        trace_len_summary: TraceLenSummary,
+    ) -> Self {
+        let program_info = ProgramInfo::new(program_hash, kernel);
+        let trace_info = TraceInfo::new_multi_segment(
+            PADDED_TRACE_WIDTH,
+            AUX_TRACE_WIDTH,
+            AUX_TRACE_RAND_ELEMENTS,
+            main_trace.num_rows(),
+            vec![],
+        );
+
+        Self {
+            meta: Vec::new(),
+            trace_info,
+            aux_trace_builders,
+            main_trace,
+            program_info,
+            stack_outputs: execution_output.stack,
+            advice: execution_output.advice,
+            trace_len_summary,
+        }
+    }
+
     // PUBLIC ACCESSORS
     // --------------------------------------------------------------------------------------------
 
@@ -121,6 +154,11 @@ impl ExecutionTrace {
     /// Returns outputs of the program execution which resulted in this execution trace.
     pub fn stack_outputs(&self) -> &StackOutputs {
         &self.stack_outputs
+    }
+
+    /// Returns the precompile requests generated during program execution.
+    pub fn precompile_requests(&self) -> &[PrecompileRequest] {
+        self.advice.precompile_requests()
     }
 
     /// Returns the initial state of the top 16 stack registers.

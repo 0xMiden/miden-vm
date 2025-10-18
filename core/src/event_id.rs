@@ -1,5 +1,9 @@
 use core::fmt::{Display, Formatter};
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+use winter_utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
+
 use crate::{Felt, utils::hash_string_to_word};
 
 /// A type-safe wrapper around a [`Felt`] that represents an event identifier.
@@ -11,6 +15,12 @@ use crate::{Felt, utils::hash_string_to_word};
 /// While not enforced by this type, the values 0..256 are reserved for
 /// [`SystemEvent`](crate::sys_events::SystemEvent)s.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_serde_test_macros::serde_test(winter_serde(true))
+)]
 pub struct EventId(Felt);
 
 impl EventId {
@@ -30,8 +40,15 @@ impl EventId {
     /// providing good distribution properties to minimize collisions between different names.
     pub fn from_name(name: impl AsRef<str>) -> Self {
         let digest_word = hash_string_to_word(name.as_ref());
+        let event_id = Self(digest_word[0]);
 
-        Self(digest_word[0])
+        assert!(
+            !event_id.is_reserved(),
+            "Event ID with name {} collides with an ID reserved for a system event",
+            name.as_ref()
+        );
+
+        event_id
     }
 
     /// Creates a new event ID from a [`Felt`].
@@ -73,4 +90,28 @@ impl Display for EventId {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         core::fmt::Display::fmt(&self.0, f)
     }
+}
+
+impl Serializable for EventId {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.0.write_into(target);
+    }
+}
+
+impl Deserializable for EventId {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        Ok(Self(Felt::read_from(source)?))
+    }
+}
+
+#[cfg(all(feature = "arbitrary", test))]
+impl proptest::prelude::Arbitrary for EventId {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        use proptest::prelude::*;
+        any::<u64>().prop_map(EventId::from_u64).boxed()
+    }
+
+    type Strategy = proptest::prelude::BoxedStrategy<Self>;
 }

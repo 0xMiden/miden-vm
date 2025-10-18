@@ -31,6 +31,7 @@ serde = ["dep:serde", "dep:serde_spanned", "serde_spanned?/serde"]
 miden-crypto.workspace = true
 miden-formatting.workspace = true
 miden-utils-sync.workspace = true
+miden-utils-indexing.workspace = true
 
 # External dependencies
 memchr = { version = "2.7", default-features = false }

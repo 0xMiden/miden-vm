@@ -53,14 +53,15 @@ The arithmetic operations below are performed in a 64-bit [prime field](https://
 | gte <br> - *(16 cycles)* <br> gte.*b* <br> - *(17 cycles)* | [b, a, ...] | [c, ...]       | $c \leftarrow \begin{cases} 1, & \text{if}\ a \ge b \\ 0, & \text{otherwise}\ \end{cases}$                                   |
 | is_odd <br> - *(5 cycles)*                                 | [a, ...]    | [b, ...]       | $b \leftarrow \begin{cases} 1, & \text{if}\ a \text{ is odd} \\ 0, & \text{otherwise}\ \end{cases}$                          |
 | eqw <br> - *(15 cycles)*                                   | [A, B, ...] | [c, A, B, ...] | $c \leftarrow \begin{cases} 1, & \text{if}\ a_i = b_i \; \forall i \in \{0, 1, 2, 3\} \\ 0, & \text{otherwise}\ \end{cases}$ |
-
 ### Extension Field Operations
+
+All operations in this section are defined over the quadratic extension field $\mathbb{F}_p[x] / (x^2 - x + 2)$, with modulus $p = 2^{64} - 2^{32} + 1$.
 
 | Instruction                        | Stack_input           | Stack_output    | Notes                                                                                                               |
 | ---------------------------------- | --------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------- |
 | ext2add <br> - *(5 cycles)*   <br> | [b1, b0, a1, a0, ...] | [c1, c0, ...]   | $c1 \leftarrow (a1 + b1) \mod p$ and <br> $c0 \leftarrow (a0 + b0) \mod p$                                          |
 | ext2sub <br> - *(7 cycles)*   <br> | [b1, b0, a1, a0, ...] | [c1, c0, ...]   | $c1 \leftarrow (a1 - b1) \mod p$ and <br> $c0 \leftarrow (a0 - b0) \mod p$                                          |
-| ext2mul <br> - *(3 cycles)*   <br> | [b1, b0, a1, a0, ...] | [c1, c0, ...]   | $c1 \leftarrow (a0 + a1) * (b0 + b1) \mod p$ and <br> $c0 \leftarrow (a0 * b0) - 2 * (a1 * b1) \mod p$              |
+| ext2mul <br> - *(3 cycles)*   <br> | [b1, b0, a1, a0, ...] | [c1, c0, ...]   | $c1 \leftarrow (a0 + a1)(b0 + b1) - a0b0 \mod p$ and <br> $c0 \leftarrow a0b0 - 2a1b1 \mod p$                       |
 | ext2neg <br> - *(4 cycles)*   <br> | [a1, a0, ...]         | [a1', a0', ...] | $a1' \leftarrow -a1$ and $a0' \leftarrow -a0$                                                                       |
-| ext2inv <br> - *(8 cycles)*   <br> | [a1, a0, ...]         | [a1', a0', ...] | $a' \leftarrow a^{-1} \mod q$ <br> Fails if $a = 0$                                                                 |
-| ext2div <br> - *(11 cycles)*  <br> | [b1, b0, a1, a0, ...] | [c1, c0,]       | $c \leftarrow a * b^{-1}$ fails if $b=0$, where multiplication and inversion are as defined by the operations above |
+| ext2inv <br> - *(8 cycles)*   <br> | [a1, a0, ...]         | [a1', a0', ...] | $a' \leftarrow a^{-1}$ in $\mathbb{F}_p[x]/(x^2 - x + 2)$ <br> Fails if $a = 0$                                     |
+| ext2div <br> - *(11 cycles)*  <br> | [b1, b0, a1, a0, ...] | [c1, c0,]       | $c \leftarrow a \cdot b^{-1}$ in $\mathbb{F}_p[x]/(x^2 - x + 2)$ <br> Fails if $b=0$                                |

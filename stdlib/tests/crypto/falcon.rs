@@ -60,8 +60,8 @@ const EVENT_FALCON_SIG_TO_STACK: EventId = EventId::from_u64(3419226139);
 ///
 /// The advice provider is expected to contain the private key associated to the public key PK.
 pub fn push_falcon_signature(process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
-    let pub_key = process.get_stack_word(1);
-    let msg = process.get_stack_word(5);
+    let pub_key = process.get_stack_word_be(1);
+    let msg = process.get_stack_word_be(5);
 
     let pk_sk = process
         .advice_provider()

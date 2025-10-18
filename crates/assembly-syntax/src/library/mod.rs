@@ -34,10 +34,7 @@ pub use self::{
 /// Metadata about a procedure exported by the interface of a [Library]
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(
-    all(feature = "serde", feature = "arbitrary", test),
-    miden_serde_test_macros::serde_test
-)]
+#[cfg_attr(all(feature = "arbitrary", test), miden_serde_test_macros::serde_test)]
 pub struct LibraryExport {
     /// The id of the MAST root node of the exported procedure
     pub node: MastNodeId,
@@ -74,19 +71,38 @@ impl LibraryExport {
     }
 }
 
-// TODO: include an arbitrary Signature here (for serde roundtrip tests)
 #[cfg(feature = "arbitrary")]
 impl Arbitrary for LibraryExport {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        use proptest::collection::vec as prop_vec;
+
+        // Generate a small set of simple types for params/results to keep strategies fast/stable
+        let simple_type = prop_oneof![Just(Type::Felt), Just(Type::U32), Just(Type::U64),];
+
+        // Small vectors of params/results
+        let params = prop_vec(simple_type.clone(), 0..=4);
+        let results = prop_vec(simple_type, 0..=2);
+
+        // Use Fast ABI for roundtrip coverage
+        let abi = Just(midenc_hir_type::CallConv::Fast);
+
+        // Option<FunctionType>
+        let signature =
+            prop::option::of((abi, params, results).prop_map(|(abi, params_vec, results_vec)| {
+                let params = SmallVec::<[Type; 4]>::from_vec(params_vec);
+                let results = SmallVec::<[Type; 1]>::from_vec(results_vec);
+                FunctionType { abi, params, results }
+            }));
+
         let nid = any::<MastNodeId>();
         let name = any::<QualifiedProcedureName>();
-        (nid, name)
-            .prop_map(|(nodeid, procname)| LibraryExport {
+        (nid, name, signature)
+            .prop_map(|(nodeid, procname, signature)| LibraryExport {
                 node: nodeid,
                 name: procname,
-                signature: None,
+                signature,
                 attributes: Default::default(),
             })
             .boxed()
@@ -103,10 +119,7 @@ impl Arbitrary for LibraryExport {
 /// A library exports a set of one or more procedures. Currently, all exported procedures belong
 /// to the same top-level namespace.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(
-    all(feature = "serde", feature = "arbitrary", test),
-    miden_serde_test_macros::serde_test
-)]
+#[cfg_attr(all(feature = "arbitrary", test), miden_serde_test_macros::serde_test)]
 pub struct Library {
     /// The content hash of this library, formed by hashing the roots of all exports in
     /// lexicographical order (by digest, not procedure name)
@@ -433,7 +446,7 @@ impl Serializable for Library {
         for LibraryExport { node, name, signature, attributes: _ } in exports.values() {
             name.module.write_into(target);
             name.name.write_into(target);
-            target.write_u32(node.as_u32());
+            target.write_u32(u32::from(*node));
             if let Some(sig) = signature {
                 target.write_bool(true);
                 FunctionTypeSerializer(sig).write_into(target);

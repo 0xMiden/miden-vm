@@ -28,6 +28,8 @@ use miden_formatting::prettier::PrettyPrint;
 pub use split_node::SplitNode;
 
 mod loop_node;
+#[cfg(any(test, feature = "arbitrary"))]
+pub use basic_block_node::arbitrary;
 pub use loop_node::LoopNode;
 
 use super::DecoratorId;
@@ -70,6 +72,11 @@ pub trait MastNodeExt {
 
     /// Appends the NodeIds of the children of this node, if any, to the vector.
     fn append_children_to(&self, target: &mut Vec<MastNodeId>);
+
+    /// Executes the given closure for each child of this node.
+    fn for_each_child<F>(&self, f: F)
+    where
+        F: FnMut(MastNodeId);
 
     /// Returns the domain of this node.
     fn domain(&self) -> Felt;

@@ -3,6 +3,7 @@ use alloc::{collections::btree_map::Entry, vec::Vec};
 use miden_core::{
     AdviceMap, Felt, Word,
     crypto::merkle::{InnerNodeInfo, MerklePath, MerkleStore, NodeIndex},
+    precompile::PrecompileRequest,
 };
 
 mod inputs;
@@ -29,6 +30,14 @@ use crate::{host::AdviceMutation, processor::AdviceProviderInterface};
 /// 3. Merkle store, which contains structured data reducible to Merkle paths. The VM can request
 ///    Merkle paths from the store, as well as mutate it by updating or merging nodes contained in
 ///    the store.
+/// 4. Deferred precompile requests containing the call-data of any precompile requests made by the
+///    VM. The VM computes a commitment to the call-data of all the precompiles it requests. When
+///    verifying each call, this commitment must be recomputed and should match the one computed by
+///    the VM. After executing a program, the data in these requests can either
+///    - be included in the proof of the VM execution and verified natively alongside the VM proof,
+///      or,
+///    - used to produce a STARK proof using a precompile VM, which can be verified in the epilog of
+///      the program.
 ///
 /// Advice data is store in-memory using [`BTreeMap`](alloc::collections::btree_map::BTreeMap)s as
 /// its backing storage.
@@ -37,6 +46,7 @@ pub struct AdviceProvider {
     stack: Vec<Felt>,
     map: AdviceMap,
     store: MerkleStore,
+    precompile_requests: Vec<PrecompileRequest>,
 }
 
 impl AdviceProvider {
@@ -58,6 +68,9 @@ impl AdviceProvider {
             },
             AdviceMutation::ExtendMerkleStore { infos } => {
                 self.extend_merkle_store(infos);
+            },
+            AdviceMutation::ExtendPrecompileRequests { data } => {
+                self.extend_precompile_requests(data);
             },
         }
         Ok(())
@@ -152,6 +165,8 @@ impl AdviceProvider {
     }
 
     /// Returns the current stack.
+    ///
+    /// The element at the top of the stack is in last position of the returned slice.
     pub fn stack(&self) -> &[Felt] {
         &self.stack
     }
@@ -320,6 +335,22 @@ impl AdviceProvider {
         self.store.extend(iter);
     }
 
+    // PRECOMPILE REQUESTS
+    // --------------------------------------------------------------------------------------------
+
+    /// Returns a reference to the precompile requests.
+    pub fn precompile_requests(&self) -> &[PrecompileRequest] {
+        &self.precompile_requests
+    }
+
+    /// Extends the precompile requests with the given entries.
+    pub fn extend_precompile_requests<I>(&mut self, iter: I)
+    where
+        I: IntoIterator<Item = PrecompileRequest>,
+    {
+        self.precompile_requests.extend(iter);
+    }
+
     // MUTATORS
     // --------------------------------------------------------------------------------------------
 
@@ -330,12 +361,12 @@ impl AdviceProvider {
         self.extend_map(&inputs.map)
     }
 
-    /// Consumes `self` and return its parts (stack, map, store).
+    /// Consumes `self` and return its parts (stack, map, store, precompile_requests).
     ///
     /// Note that the order of the stack is such that the element at the top of the stack is at the
     /// end of the returned vector.
-    pub fn into_parts(self) -> (Vec<Felt>, AdviceMap, MerkleStore) {
-        (self.stack, self.map, self.store)
+    pub fn into_parts(self) -> (Vec<Felt>, AdviceMap, MerkleStore, Vec<PrecompileRequest>) {
+        (self.stack, self.map, self.store, self.precompile_requests)
     }
 }
 
@@ -343,7 +374,12 @@ impl From<AdviceInputs> for AdviceProvider {
     fn from(inputs: AdviceInputs) -> Self {
         let AdviceInputs { mut stack, map, store } = inputs;
         stack.reverse();
-        Self { stack, map, store }
+        Self {
+            stack,
+            map,
+            store,
+            precompile_requests: Vec::new(),
+        }
     }
 }
 

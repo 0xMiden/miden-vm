@@ -48,14 +48,16 @@ This page provides a comprehensive reference for Miden Assembly instructions.
 
 ### Extension Field Operations
 
+All operations in this section are defined over the quadratic extension field $\mathbb{F}_p[x] / (x^2 - x + 2)$, with modulus $p = 2^{64} - 2^{32} + 1$.
+
 | Instruction | Stack Input           | Stack Output    | Cycles | Notes                                                                                       |
 | ----------- | --------------------- | --------------- | ------ | ------------------------------------------------------------------------------------------- |
-| `ext2add`   | `[b1, b0, a1, a0, ...]` | `[c1, c0, ...]`   | 5      | $c_1 = (a_1 + b_1) \bmod p$ <br> $c_0 = (a_0 + b_0) \bmod p$                                       |
-| `ext2sub`   | `[b1, b0, a1, a0, ...]` | `[c1, c0, ...]`   | 7      | $c_1 = (a_1 - b_1) \bmod p$ <br> $c_0 = (a_0 - b_0) \bmod p$                                       |
-| `ext2mul`   | `[b1, b0, a1, a0, ...]` | `[c1, c0, ...]`   | 3      | $c_1 = (a_0 + a_1) (b_0 + b_1) \bmod p$ <br> $c_0 = (a_0 b_0) - 2 (a_1 b_1) \bmod p$           |
-| `ext2neg`   | `[a1, a0, ...]`         | `[a1', a0', ...]` | 4      | $a_1' = -a_1$ <br> $a_0' = -a_0$                                                               |
-| `ext2inv`   | `[a1, a0, ...]`         | `[a1', a0', ...]` | 8      | $a' = a^{-1} \bmod q$. Fails if $a = 0$.                                                       |
-| `ext2div`   | `[b1, b0, a1, a0, ...]` | `[c1, c0, ...]`   | 11     | $c = a \cdot b^{-1}$. Fails if $b = 0$. Multiplication and inversion are as defined previously. |
+| `ext2add`   | `[b1, b0, a1, a0, ...]` | `[c1, c0, ...]`   | 5      | $c1 = (a1 + b1) \bmod p$ <br> $c0 = (a0 + b0) \bmod p$                                       |
+| `ext2sub`   | `[b1, b0, a1, a0, ...]` | `[c1, c0, ...]`   | 7      | $c1 = (a1 - b1) \bmod p$ <br> $c0 = (a0 - b0) \bmod p$                                       |
+| `ext2mul`   | `[b1, b0, a1, a0, ...]` | `[c1, c0, ...]`   | 3      | $c1 = (a0 + a1)(b0 + b1) - a0b0 \bmod p$ <br> $c0 = a0b0 - 2a1b1 \bmod p$                     |
+| `ext2neg`   | `[a1, a0, ...]`         | `[a1', a0', ...]` | 4      | $a1' = -a1$ <br> $a0' = -a0$                                                                   |
+| `ext2inv`   | `[a1, a0, ...]`         | `[a1', a0', ...]` | 8      | $a' = a^{-1}$ in $\mathbb{F}_p[x]/(x^2 - x + 2)$. Fails if $a = 0$.                           |
+| `ext2div`   | `[b1, b0, a1, a0, ...]` | `[c1, c0, ...]`   | 11     | $c = a \cdot b^{-1}$ in $\mathbb{F}_p[x]/(x^2 - x + 2)$. Fails if $b = 0$.                    |
 
 ## U32 Operations
 
@@ -210,8 +212,12 @@ Memory is 0-initialized. Addresses are absolute `[0, 2^32)`. Locals are stored a
 | --------------------------------- | --------------------- | ---------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `mem_load` <br> `mem_load.a`       | `[a, ... ]`           | `[v, ... ]`      | 1 <br> 2  | `v <- mem[a]`. Pushes element from `mem[a]`. If `a` on stack, it's popped. Fails if `a >= 2^32`.                                                                                                       |
 | `mem_loadw` <br> `mem_loadw.a`     | `[a, 0,0,0,0,...]`    | `[A, ... ]`      | 1 <br> 2  | `A <- mem[a..a+3]` (word). Overwrites top 4 stack elements (`mem[a+3]` is top). If `a` on stack, it's popped. Fails if `a >= 2^32` or `a` not multiple of 4.                                         |
+| `mem_loadw_be` <br> `mem_loadw_be.a` | `[a, 0,0,0,0,...]`  | `[A, ... ]`      | 1 <br> 2  | `A <- mem[a..a+3]` (word, big-endian). Overwrites top 4 stack elements (`mem[a+3]` is top). Equivalent to `mem_loadw`. If `a` on stack, it's popped. Fails if `a >= 2^32` or `a` not multiple of 4. |
+| `mem_loadw_le` <br> `mem_loadw_le.a` | `[a, 0,0,0,0,...]`  | `[A, ... ]`      | 4 <br> 5  | `A <- mem[a..a+3]` (word, little-endian). Overwrites top 4 stack elements (`mem[a]` is top). Equivalent to `mem_loadw reversew`. If `a` on stack, it's popped. Fails if `a >= 2^32` or `a` not multiple of 4. |
 | `mem_store` <br> `mem_store.a`     | `[a, v, ... ]`        | `[ ... ]`        | 2 <br> 3-4| `mem[a] <- v`. Pops `v` to `mem[a]`. If `a` on stack, it's popped. Fails if `a >= 2^32`.                                                                                                             |
 | `mem_storew` <br> `mem_storew.a`   | `[a, A, ... ]`        | `[A, ... ]`      | 1 <br> 2-3| `mem[a..a+3] <- A`. Stores word `A` (top stack element at `mem[a+3]`). If `a` on stack, it's popped. Fails if `a >= 2^32` or `a` not multiple of 4.                                                  |
+| `mem_storew_be` <br> `mem_storew_be.a` | `[a, A, ... ]`    | `[A, ... ]`      | 1 <br> 2-3| `mem[a..a+3] <- A`. Stores word `A` in big-endian order (top stack element at `mem[a+3]`). Equivalent to `mem_storew`. If `a` on stack, it's popped. Fails if `a >= 2^32` or `a` not multiple of 4. |
+| `mem_storew_le` <br> `mem_storew_le.a` | `[a, A, ... ]`    | `[A, ... ]`      | 9 <br> 8-9| `mem[a..a+3] <- A`. Stores word `A` in little-endian order (top stack element at `mem[a]`). Equivalent to `reversew mem_storew reversew`. If `a` on stack, it's popped. Fails if `a >= 2^32` or `a` not multiple of 4. |
 | `mem_stream`                      | `[C, B, A, a, ... ]`  | `[E,D,A,a',...]` | 1         | `[E,D] <- [mem[a..a+3], mem[a+4..a+7]]`. `a' <- a+8`. Reads 2 sequential words from memory to top of stack.                                                                                              |
 
 #### Procedure Locals (Context-Specific)

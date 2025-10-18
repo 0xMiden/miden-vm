@@ -66,7 +66,7 @@ fn push_lowerbound_result(
     assert!(stride == 4 || stride == 8);
 
     // Read inputs from the stack
-    let key = LexicographicWord::new(process.get_stack_word(KEY_OFFSET));
+    let key = LexicographicWord::new(process.get_stack_word_be(KEY_OFFSET));
     let addr_range = process.get_mem_addr_range(START_ADDR_OFFSET, END_ADDR_OFFSET)?;
 
     // Validate the start_addr is word-aligned (multiple of 4)

@@ -14,6 +14,10 @@ use crate::ast::Ident;
 /// Represents the metadata of a key-value [crate::ast::Attribute], i.e. `@props(key = value)`
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_serde_test_macros::serde_test(winter_serde(true))
+)]
 pub struct MetaKeyValue {
     #[cfg_attr(feature = "serde", serde(skip, default))]
     pub span: SourceSpan,

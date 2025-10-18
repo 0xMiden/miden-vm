@@ -1,4 +1,7 @@
-use miden_core::mast::{MastForest, MastForestRootMap, MastNodeExt};
+use miden_core::{
+    Idx,
+    mast::{MastForest, MastForestRootMap, MastNodeExt},
+};
 
 use crate::{
     Assembler,
@@ -64,9 +67,9 @@ fn mast_forest_merge_assembler() {
 
     for (forest_idx, forest) in [forest_a, forest_b].into_iter().enumerate() {
         for root in forest.procedure_roots() {
-            let original_digest = forest.nodes()[root.as_usize()].digest();
+            let original_digest = forest.nodes()[root.to_usize()].digest();
             let new_root = root_maps.map_root(forest_idx, root).unwrap();
-            let new_digest = merged.nodes()[new_root.as_usize()].digest();
+            let new_digest = merged.nodes()[new_root.to_usize()].digest();
             assert_eq!(original_digest, new_digest);
         }
     }

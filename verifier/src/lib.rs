@@ -12,18 +12,26 @@ use miden_core::crypto::{
     hash::{Blake3_192, Blake3_256, Poseidon2, Rpo256, Rpx256},
     random::{RpoRandomCoin, RpxRandomCoin, WinterRandomCoin},
 };
+use winter_verifier::{crypto::MerkleTree, verify as verify_proof};
+
 // EXPORTS
 // ================================================================================================
-pub use miden_core::{Kernel, ProgramInfo, StackInputs, StackOutputs, Word};
-pub use winter_verifier::{AcceptableOptions, VerifierError};
-use winter_verifier::{crypto::MerkleTree, verify as verify_proof};
-pub mod math {
-    pub use miden_core::{Felt, FieldElement, StarkField};
+mod exports {
+    pub use miden_core::{
+        Kernel, ProgramInfo, StackInputs, StackOutputs, Word,
+        precompile::{PrecompileError, PrecompileVerificationError, PrecompileVerifierRegistry},
+    };
+    pub use winter_verifier::{AcceptableOptions, VerifierError};
+    pub mod math {
+        pub use miden_core::{Felt, FieldElement, StarkField};
+    }
+    pub use miden_air::ExecutionProof;
 }
-pub use miden_air::ExecutionProof;
+pub use exports::*;
 
 // VERIFIER
 // ================================================================================================
+
 /// Returns the security level of the proof if the specified program was executed correctly against
 /// the specified inputs and outputs.
 ///
@@ -52,20 +60,63 @@ pub use miden_air::ExecutionProof;
 /// - The provided proof does not prove a correct execution of the program.
 /// - The protocol parameters used to generate the proof are not in the set of acceptable
 ///   parameters.
-#[tracing::instrument("verify_program", skip_all)]
+/// - The proof contains one or more precompile requests. When precompile requests are present, use
+///   [`verify_with_precompiles`] instead with an appropriate [`PrecompileVerifierRegistry`] to
+///   verify the precompile computations.
 pub fn verify(
     program_info: ProgramInfo,
     stack_inputs: StackInputs,
     stack_outputs: StackOutputs,
     proof: ExecutionProof,
 ) -> Result<u32, VerificationError> {
+    let (security_level, _commitment) = verify_with_precompiles(
+        program_info,
+        stack_inputs,
+        stack_outputs,
+        proof,
+        &PrecompileVerifierRegistry::new(),
+    )?;
+    Ok(security_level)
+}
+
+/// Identical to [`verify`], with additional verification of any precompile requests made during the
+/// VM execution. The resulting aggregated precompile commitment is returned, which can be compared
+/// against the commitment computed by the VM.
+///
+/// # Returns
+/// Returns a tuple `(security_level, aggregated_commitment)` where:
+/// - `security_level`: The security level (in bits) of the verified proof
+/// - `aggregated_commitment`: A [`Word`] containing the final aggregated commitment to all
+///   precompile requests, computed by recomputing and absorbing each precompile commitment into an
+///   RPO256 sponge
+///
+/// # Errors
+/// Returns any error produced by [`verify`], as well as any errors resulting from precompile
+/// verification.
+#[tracing::instrument("verify_program", skip_all)]
+pub fn verify_with_precompiles(
+    program_info: ProgramInfo,
+    stack_inputs: StackInputs,
+    stack_outputs: StackOutputs,
+    proof: ExecutionProof,
+    precompile_verifiers: &PrecompileVerifierRegistry,
+) -> Result<(u32, Word), VerificationError> {
     // get security level of the proof
     let security_level = proof.security_level();
     let program_hash = *program_info.program_hash();
 
     // build public inputs and try to verify the proof
     let pub_inputs = PublicInputs::new(program_info, stack_inputs, stack_outputs);
-    let (hash_fn, proof) = proof.into_parts();
+    let (hash_fn, proof, precompile_requests) = proof.into_parts();
+
+    // TODO: Check that this corresponds to the commitment output by the VM
+    // compute the commitment to the list of all precompile requests.
+    // if no verifiers were provided (e.g. when this function was called from `verify()`),
+    // but the proof contained requests anyway, returns a `NoVerifierFound` error.
+    let requests_commitment = precompile_verifiers
+        .deferred_requests_commitment(&precompile_requests)
+        .map_err(VerificationError::PrecompileVerificationError)?;
+
     match hash_fn {
         HashFunction::Blake3_192 => {
             let opts = AcceptableOptions::OptionSet(vec![ProvingOptions::REGULAR_96_BITS]);
@@ -109,13 +160,13 @@ pub fn verify(
     }
     .map_err(|source| VerificationError::ProgramVerificationError(program_hash, source))?;
 
-    Ok(security_level)
+    Ok((security_level, requests_commitment))
 }
 
 // ERRORS
 // ================================================================================================
 
-/// TODO: add docs
+/// Errors that can occur during proof verification.
 #[derive(Debug, thiserror::Error)]
 pub enum VerificationError {
     #[error("failed to verify proof for program with hash {0}")]
@@ -124,4 +175,6 @@ pub enum VerificationError {
     InputNotFieldElement(u64),
     #[error("the output {0} is not a valid field element")]
     OutputNotFieldElement(u64),
+    #[error("failed to verify precompile calls")]
+    PrecompileVerificationError(#[source] PrecompileVerificationError),
 }

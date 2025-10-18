@@ -6,10 +6,39 @@
 
 - Added `before_enter` and `after_exit` decorator lists to `BasicBlockNode`.([#2167](https://github.com/0xMiden/miden-vm/pull/2167))
 - Added `--kernel` flag to `miden-vm run` command to support specifying a kernel file when running Miden Assembly programs via CLI ([#2225](https://github.com/0xMiden/miden-vm/pull/2225))
+- Added support for leaves with multiple pairs in `std::collections::smt::get` ([#2048](https://github.com/0xMiden/miden-vm/pull/2048)).
+- Added `std::mem::pipe_double_words_preimage_to_memory`, a version of `pipe_preimage_to_memory` optimized for pairs of words ([#2048](https://github.com/0xMiden/miden-vm/pull/2048)).
+- Added missing endianness-aware memory instructions (`mem_loadw_be`, `mem_loadw_le`, `mem_storew_be`, `mem_storew_le`) to Instruction Reference documentation ([#2285](https://github.com/0xMiden/miden-vm/issues/2285)).
+- Made `miden-vm analyze` output analysis even if execution ultimately errored. ([#2204](https://github.com/0xMiden/miden-vm/pull/2204)).
 
 #### Changes
 
 - [BREAKING] Incremented MSRV to 1.90.
+- [BREAKING] Fix inconsistencies in debugging instructions ([#2205](https://github.com/0xMiden/miden-vm/pull/2205)).
+- Fix ability to parse odd-length hex strings ([#2196](https://github.com/0xMiden/miden-vm/pull/2196)).
+- Added `before_enter` and `after_exit` decorator lists to `BasicBlockNode`.([#2167](https://github.com/0xMiden/miden-vm/pull/2167)).
+- Added `proptest`'s `Arbitrary` instances for `BasicBlockNode` and `MastForest` ([#2200](https://github.com/0xMiden/miden-vm/pull/2200)).
+- Fixed mismatched Push expectations in decoder syscall_block test ([#2207](https://github.com/0xMiden/miden-vm/pull/2207))
+- [BREAKING] `Memory::read_element()` now requires `&self` instead of `&mut self` ([#2237](https://github.com/0xMiden/miden-vm/issues/2237))
+- Added `proptest`'s `Arbitrary` instances for `Program`, fixed `Attribute` serialization ([#2224](https://github.com/0xMiden/miden-vm/pull/2224)).
+- Fixed hex word parsing to guard against missing 0x prefix ([#2245](https://github.com/0xMiden/miden-vm/pull/2245)).
+- Systematized u32-indexed vectors ([#2254](https://github.com/0xMiden/miden-vm/pull/2254)).
+- Introduce a new `build_trace()` which builds the trace in parallel from trace fragment contexts ([#1839](https://github.com/0xMiden/miden-vm/pull/1839)) ([#2188](https://github.com/0xMiden/miden-vm/pull/2188)).
+- Place the `FastProcessor` stack on the heap instead of the (OS thread) stack (#[2271](https://github.com/0xMiden/miden-vm/pull/2271)).
+- [BREAKING] Log deferred precompile calls in `AdviceProvider` ([#2158](https://github.com/0xMiden/miden-vm/issues/2158)).
+- [BREAKING] Add precompile requests to proof ([#2187](https://github.com/0xMiden/miden-vm/issues/2187)).
+- `after_exit` decorators execute in the correct sequence in External nodes in the Fast processor ([#2247](https://github.com/0xMiden/miden-vm/pull/2247)).
+- Remove O(n log m) iteration in parallel processor (#[2273](https://github.com/0xMiden/miden-vm/pull/2273)).
+- [BREAKING] add pre/post decorators to BasicBlockNode fingerprint ([#2267](https://github.com/0xMiden/miden-vm/pull/2267)).
+- [BREAKING] Added explicit endianness methods `get_stack_word_be()` and `get_stack_word_le()` to stack word accessors, deprecated ambiguous `get_stack_word()` ([#2235](https://github.com/0xMiden/miden-vm/issues/2235)).
+
+## 0.18.2 (2025-10-10)
+
+- Place the `FastProcessor` stack on the heap instead of the (OS thread) stack (#[2275](https://github.com/0xMiden/miden-vm/pull/2275)).
+
+## 0.18.1 (2025-10-02)
+
+- Gate stdlib doc generation in build.rs on `MIDEN_BUILD_STDLIB_DOCS` environment variable ([#2239](https://github.com/0xMiden/miden-vm/pull/2239/)).
 
 ## 0.18.0 (2025-09-21)
 

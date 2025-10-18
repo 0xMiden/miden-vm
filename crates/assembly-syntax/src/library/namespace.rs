@@ -1,3 +1,6 @@
+// Allow unused assignments - required by miette::Diagnostic derive macro
+#![allow(unused_assignments)]
+
 use alloc::{string::ToString, sync::Arc};
 use core::{
     fmt,
@@ -38,8 +41,8 @@ pub enum LibraryNamespaceError {
 #[derive(Default, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u8)]
 #[cfg_attr(
-    all(feature = "serde", feature = "arbitrary", test),
-    miden_serde_test_macros::serde_test
+    all(feature = "arbitrary", test),
+    miden_serde_test_macros::serde_test(winter_serde(true))
 )]
 pub enum LibraryNamespace {
     /// A reserved namespace for kernel modules

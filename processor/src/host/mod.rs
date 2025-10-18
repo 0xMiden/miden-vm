@@ -3,6 +3,7 @@ use core::future::Future;
 
 use miden_core::{
     AdviceMap, DebugOptions, Felt, Word, crypto::merkle::InnerNodeInfo, mast::MastForest,
+    precompile::PrecompileRequest,
 };
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 
@@ -10,11 +11,9 @@ use crate::{EventError, ExecutionError, ProcessState};
 
 pub(super) mod advice;
 
-#[cfg(feature = "std")]
-mod debug;
+pub mod debug;
 
 pub mod default;
-use default::DefaultDebugHandler;
 
 pub mod handlers;
 use handlers::DebugHandler;
@@ -25,12 +24,13 @@ pub use mast_forest_store::{MastForestStore, MemMastForestStore};
 // ADVICE MAP MUTATIONS
 // ================================================================================================
 
-/// Any possible way an event can modify the advice map
+/// Any possible way an event can modify the advice provider.
 #[derive(Debug, PartialEq, Eq)]
 pub enum AdviceMutation {
     ExtendStack { values: Vec<Felt> },
     ExtendMap { other: AdviceMap },
     ExtendMerkleStore { infos: Vec<InnerNodeInfo> },
+    ExtendPrecompileRequests { data: Vec<PrecompileRequest> },
 }
 
 impl AdviceMutation {
@@ -44,6 +44,10 @@ impl AdviceMutation {
 
     pub fn extend_merkle_store(infos: impl IntoIterator<Item = InnerNodeInfo>) -> Self {
         Self::ExtendMerkleStore { infos: Vec::from_iter(infos) }
+    }
+
+    pub fn extend_precompile_requests(data: impl IntoIterator<Item = PrecompileRequest>) -> Self {
+        Self::ExtendPrecompileRequests { data: Vec::from_iter(data) }
     }
 }
 // HOST TRAIT
@@ -72,7 +76,8 @@ pub trait BaseHost {
         process: &mut ProcessState,
         options: &DebugOptions,
     ) -> Result<(), ExecutionError> {
-        DefaultDebugHandler.on_debug(process, options)
+        let mut handler = debug::DefaultDebugHandler::default();
+        handler.on_debug(process, options)
     }
 
     /// Handles the trace emitted from the VM.
@@ -81,7 +86,8 @@ pub trait BaseHost {
         process: &mut ProcessState,
         trace_id: u32,
     ) -> Result<(), ExecutionError> {
-        DefaultDebugHandler.on_trace(process, trace_id)
+        let mut handler = debug::DefaultDebugHandler::default();
+        handler.on_trace(process, trace_id)
     }
 
     /// Handles the failure of the assertion instruction.

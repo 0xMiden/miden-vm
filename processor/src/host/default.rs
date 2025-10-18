@@ -8,7 +8,7 @@ use miden_debug_types::{
 use crate::{
     AdviceMutation, AsyncHost, BaseHost, DebugHandler, EventHandler, EventHandlerRegistry,
     ExecutionError, MastForestStore, MemMastForestStore, ProcessState, SyncHost,
-    host::{EventError, FutureMaybeSend},
+    host::{EventError, FutureMaybeSend, debug::DefaultDebugHandler},
 };
 
 // DEFAULT HOST IMPLEMENTATION
@@ -31,7 +31,7 @@ impl Default for DefaultHost {
         Self {
             store: MemMastForestStore::default(),
             event_handlers: EventHandlerRegistry::default(),
-            debug_handler: DefaultDebugHandler,
+            debug_handler: DefaultDebugHandler::default(),
             source_manager: Arc::new(DefaultSourceManager::default()),
         }
     }
@@ -108,6 +108,12 @@ where
             debug_handler: handler,
             source_manager: self.source_manager,
         }
+    }
+
+    /// Returns a reference to the [`DebugHandler`], useful for recovering debug information
+    /// emitted during a program execution.
+    pub fn debug_handler(&self) -> &D {
+        &self.debug_handler
     }
 }
 
@@ -189,6 +195,52 @@ where
     }
 }
 
+// NOOPHOST
+// ================================================================================================
+
+/// A Host which does nothing.
+pub struct NoopHost;
+
+impl BaseHost for NoopHost {
+    #[inline(always)]
+    fn get_label_and_source_file(
+        &self,
+        _location: &Location,
+    ) -> (SourceSpan, Option<Arc<SourceFile>>) {
+        (SourceSpan::UNKNOWN, None)
+    }
+}
+
+impl SyncHost for NoopHost {
+    #[inline(always)]
+    fn get_mast_forest(&self, _node_digest: &Word) -> Option<Arc<MastForest>> {
+        None
+    }
+
+    #[inline(always)]
+    fn on_event(&mut self, _process: &ProcessState<'_>) -> Result<Vec<AdviceMutation>, EventError> {
+        Ok(Vec::new())
+    }
+}
+
+impl AsyncHost for NoopHost {
+    #[inline(always)]
+    fn get_mast_forest(
+        &self,
+        _node_digest: &Word,
+    ) -> impl FutureMaybeSend<Option<Arc<MastForest>>> {
+        async { None }
+    }
+
+    #[inline(always)]
+    fn on_event(
+        &mut self,
+        _process: &ProcessState<'_>,
+    ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>> {
+        async { Ok(Vec::new()) }
+    }
+}
+
 // HOST LIBRARY
 // ================================================================================================
 
@@ -216,12 +268,3 @@ impl From<&Arc<MastForest>> for HostLibrary {
         }
     }
 }
-
-// DEFAULT DEBUG HANDLER IMPLEMENTATION
-// ================================================================================================
-
-/// Concrete [`DebugHandler`] which re-uses the default `on_debug` and `on_trace` implementations.
-#[derive(Clone, Default)]
-pub struct DefaultDebugHandler;
-
-impl DebugHandler for DefaultDebugHandler {}

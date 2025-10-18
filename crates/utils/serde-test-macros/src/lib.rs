@@ -22,25 +22,73 @@ use syn::{AttributeArgs, Ident, Item, Lit, Meta, MetaList, NestedMeta, Type, par
 /// * Implementation of `Arbitrary` trait
 /// * Implementations of `Serialize` and `DeserializeOwned` traits
 ///
-/// For testing generic types, use the `types(...)` attribute to list type parameters for testing,
-/// separated by commas. For complex types (e.g., ones where type parameters have their own
-/// parameters), enclose them in quotation marks. To test different combinations of type parameters,
-/// `types` can be used multiple times.
+/// When using the winter_serde annotation, the type furthermore must implement the
+/// Winterfell `Serializable` and `Deserializable` traits.
 ///
-/// # Example
+/// # Configuration Attributes
+///
+/// The macro supports configuration attributes to control test generation:
+///
+/// | Attribute   | Type | Default | Purpose | Features Required |
+/// |-------------|------|---------|---------|-------------------|
+/// | `serde_test` | `bool` | `true` | Generate standard Serde round-trip tests | `arbitrary`, `serde`, `test` |
+/// | `winter_serde` | `bool` | `false` | Generate Winterfell-style round-trip tests | `arbitrary`, `test` |
+/// | `types(...)` | - | none | Specify type parameters for generics | - |
+///
+/// ## Usage Examples
+///
+/// Default (Serde tests only):
+/// ```rust
+/// # use miden_serde_test_macros::serde_test;
+/// # use proptest_derive::Arbitrary;
+/// # use serde::{Deserialize, Serialize};
+/// #[serde_test]
+/// #[derive(Debug, PartialEq, Arbitrary, Serialize, Deserialize)]
+/// struct Simple {
+///     value: u64,
+/// }
 /// ```
-/// use miden_serde_test_macros::serde_test;
-/// use proptest_derive::Arbitrary;
-/// use serde::{Deserialize, Serialize};
 ///
-/// // The macro derives serialization tests using an arbitrary instance.
+/// Winterfell tests only:
+/// ```rust
+/// # use miden_serde_test_macros::serde_test;
+/// # use proptest_derive::Arbitrary;
+/// #[serde_test(winter_serde(true), serde_test(false))]
+/// #[derive(Debug, PartialEq, Arbitrary)]
+/// struct WinterTest {
+///     data: [u8; 32],
+/// }
+/// ```
+///
+/// Both test types:
+/// ```rust
+/// # use miden_serde_test_macros::serde_test;
+/// # use proptest_derive::Arbitrary;
+/// # use serde::{Deserialize, Serialize};
+/// #[serde_test(winter_serde(true))]
+/// #[derive(Debug, PartialEq, Arbitrary, Serialize, Deserialize)]
+/// struct DualTest {
+///     name: u32,
+///     value: u64,
+/// }
+/// ```
+///
+/// Generic types:
+/// ```rust
+/// # use miden_serde_test_macros::serde_test;
+/// # use proptest_derive::Arbitrary;
+/// # use serde::{Deserialize, Serialize};
 /// #[serde_test(types(u64, "Vec<u64>"), types(u32, bool))]
-/// #[derive(Debug, Default, PartialEq, Arbitrary, Serialize, Deserialize)]
+/// #[derive(Debug, PartialEq, Arbitrary, Serialize, Deserialize)]
 /// struct Generic<T1, T2> {
 ///     t1: T1,
 ///     t2: T2,
 /// }
 /// ```
+///
+/// # Generated Test Names
+/// - Serde tests: `test_serde_roundtrip_{struct_name}_{index}`
+/// - Winter tests: `test_winter_serde_roundtrip_{struct_name}_{index}`
 #[proc_macro_attribute]
 pub fn serde_test(args: TokenStream, input: TokenStream) -> TokenStream {
     let args = parse_macro_input!(args as AttributeArgs);
@@ -54,6 +102,8 @@ pub fn serde_test(args: TokenStream, input: TokenStream) -> TokenStream {
 
     // Parse arguments.
     let mut types = Vec::new();
+    let mut winter_serde = false;
+    let mut serde_test = true;
     for arg in args {
         match arg {
             // List arguments (as in #[serde_test(arg(val))])
@@ -62,10 +112,31 @@ pub fn serde_test(args: TokenStream, input: TokenStream) -> TokenStream {
                     let params = nested.iter().map(parse_type).collect::<Vec<_>>();
                     types.push(quote!(<#name<#(#params),*>>));
                 },
-                _ => panic!("invalid attribute {:?}", path),
+
+                Some(id) if *id == "winter_serde" => {
+                    assert!(nested.len() == 1, "winter_serde attribute takes 1 argument");
+                    match &nested[0] {
+                        NestedMeta::Lit(Lit::Bool(b)) => {
+                            winter_serde = b.value;
+                        },
+                        _ => panic!("winter_serde argument must be a boolean"),
+                    }
+                },
+
+                Some(id) if *id == "serde_test" => {
+                    assert!(nested.len() == 1, "serde_test attribute takes 1 argument");
+                    match &nested[0] {
+                        NestedMeta::Lit(Lit::Bool(b)) => {
+                            serde_test = b.value;
+                        },
+                        _ => panic!("serde_test argument must be a boolean"),
+                    }
+                },
+
+                _ => panic!("invalid attribute {path:?}"),
             },
 
-            _ => panic!("invalid argument {:?}", arg),
+            _ => panic!("invalid argument {arg:?}"),
         }
     }
 
@@ -80,11 +151,11 @@ pub fn serde_test(args: TokenStream, input: TokenStream) -> TokenStream {
     };
 
     for (i, ty) in types.into_iter().enumerate() {
-        let serde_test = {
+        let serde_test = if serde_test {
             let test_name =
                 Ident::new(&format!("test_serde_roundtrip_{}_{}", name, i), Span::mixed_site());
             quote! {
-                #[cfg(all(feature = "serde", feature = "arbitrary", test))]
+                #[cfg(all(feature = "arbitrary", feature = "serde", test))]
                 proptest::proptest!{
                     #[test]
                     fn #test_name(obj in proptest::prelude::any::#ty()) {
@@ -99,11 +170,32 @@ pub fn serde_test(args: TokenStream, input: TokenStream) -> TokenStream {
                     }
                 }
             }
+        } else {
+            quote! {}
+        };
+
+        let winter_test = if winter_serde {
+            let test_name =
+                Ident::new(&format!("test_winter_serde_roundtrip_{name}_{i}"), Span::mixed_site());
+            quote! {
+                #[cfg(all(feature = "arbitrary", test))]
+                proptest::proptest!{
+                    #[test]
+                    fn #test_name(obj in proptest::prelude::any::#ty()) {
+                        let bytes = obj.to_bytes();
+                        let deser = #ty::read_from_bytes(&bytes).unwrap();
+                        proptest::prop_assert_eq!(obj, deser);
+                    }
+                }
+            }
+        } else {
+            quote! {}
         };
 
         output = quote! {
             #output
             #serde_test
+            #winter_test
         };
     }
 
