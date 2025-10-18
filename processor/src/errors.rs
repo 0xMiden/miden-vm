@@ -487,8 +487,8 @@ macro_rules! err_ctx {
 #[cfg(feature = "no_err_ctx")]
 #[macro_export]
 macro_rules! err_ctx {
-    ($mast_forest:expr, $node:expr, $host:expr) => {{ () }};
-    ($mast_forest:expr, $node:expr, $host:expr, $op_idx:expr) => {{ () }};
+    ($mast_forest:expr, $node:expr, $host:expr) => {};
+    ($mast_forest:expr, $node:expr, $host:expr, $op_idx:expr) => {};
 }
 
 /// Trait defining the interface for error context providers.
