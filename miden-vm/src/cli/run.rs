@@ -187,7 +187,12 @@ fn run_masm_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
 
     // load program from file and compile
     let (program, source_manager) = if let Some(kernel_path) = &params.kernel_file {
-        get_masm_program_with_kernel(&params.program_file, &libraries, !params.release, kernel_path)?
+        get_masm_program_with_kernel(
+            &params.program_file,
+            &libraries,
+            !params.release,
+            kernel_path,
+        )?
     } else {
         get_masm_program(&params.program_file, &libraries, !params.release)?
     };
