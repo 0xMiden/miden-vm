@@ -5,6 +5,7 @@
 #### Enhancements
 
 - Added `before_enter` and `after_exit` decorator lists to `BasicBlockNode`.([#2167](https://github.com/0xMiden/miden-vm/pull/2167))
+- Added `--kernel` flag to `miden-vm run` command to support specifying a kernel file when running Miden Assembly programs via CLI ([#2225](https://github.com/0xMiden/miden-vm/pull/2225))
 
 #### Changes
 
