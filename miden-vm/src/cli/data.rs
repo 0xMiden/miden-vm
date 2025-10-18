@@ -170,15 +170,21 @@ where
 
     /// Compiles this program file into a [Program] with a kernel.
     /// The kernel can be loaded from either a .masm assembly file or a .masp package.
+    #[allow(dead_code)]
     #[instrument(name = "compile_program_with_kernel", skip_all)]
-    pub fn compile_with_kernel<'a, I>(&self, debug: Debug, libraries: I, kernel_lib: miden_assembly::KernelLibrary) -> Result<Program, Report>
+    pub fn compile_with_kernel<'a, I>(
+        &self,
+        debug: Debug,
+        libraries: I,
+        kernel_lib: miden_assembly::KernelLibrary,
+    ) -> Result<Program, Report>
     where
         I: IntoIterator<Item = &'a Library>,
     {
         // compile program with kernel
         let mut assembler = Assembler::with_kernel(self.source_manager.clone(), kernel_lib)
             .with_debug_mode(debug.is_on());
-        
+
         assembler
             .link_dynamic_library(StdLibrary::default())
             .wrap_err("Failed to load stdlib")?;
