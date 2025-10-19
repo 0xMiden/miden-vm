@@ -225,6 +225,15 @@ impl BasicBlockNode {
         )
     }
 
+    /// Returns only the raw op-indexed decorators (without before_enter/after_exit)
+    /// with indices based on raw operations.
+    ///
+    /// This is used for serialization to store decorators with raw operation indices.
+    pub fn raw_op_indexed_decorators(&self) -> Vec<(usize, DecoratorId)> {
+        RawDecoratorOpLinkIterator::new(&[], &self.decorators, &[], &self.op_batches)
+            .collect()
+    }
+
     /// Returns an iterator over the operations in the order in which they appear in the program.
     pub fn operations(&self) -> impl Iterator<Item = &Operation> {
         self.op_batches.iter().flat_map(|batch| batch.ops())
@@ -742,7 +751,7 @@ pub(crate) fn validate_decorators(operations_len: usize, decorators: &DecoratorL
         for i in 0..(decorators.len() - 1) {
             debug_assert!(decorators[i + 1].0 >= decorators[i].0, "unsorted decorators list");
         }
-        // assert the last index in decorator list is less than operations vector length
+        // assert the last index in decorator list is less than or equal to operations vector length
         debug_assert!(
             operations_len >= decorators.last().expect("empty decorators list").0,
             "last op index in decorator list should be less than or equal to the number of ops"
@@ -957,6 +966,12 @@ impl BasicBlockNodeBuilder {
         }
     }
 
+    /// Used to initialize decorators for the [`BasicBlockNodeBuilder`]. Replaces the existing
+    /// decorators with the given ['DecoratorList'].
+    pub(crate) fn set_decorators(&mut self, decorators: DecoratorList) {
+        self.decorators = decorators;
+    }
+
     /// Builds the BasicBlockNode with the specified decorators.
     pub fn build(self) -> Result<BasicBlockNode, MastForestError> {
         if self.operations.is_empty() {
@@ -982,6 +997,29 @@ impl BasicBlockNodeBuilder {
             before_enter: self.before_enter,
             after_exit: self.after_exit,
         })
+    }
+}
+
+impl BasicBlockNodeBuilder {
+    /// Add this node to a forest using relaxed validation.
+    ///
+    /// This method is used during deserialization where nodes may reference child nodes
+    /// that haven't been added to the forest yet. The child node IDs have already been
+    /// validated against the expected final node count during the `try_into_mast_node_builder`
+    /// step, so we can safely skip validation here.
+    ///
+    /// Note: This is not part of the `MastForestContributor` trait because it's only
+    /// intended for internal use during deserialization.
+    ///
+    /// For BasicBlockNode, this is equivalent to the normal `add_to_forest` since basic blocks
+    /// don't have child nodes to validate.
+    pub(in crate::mast) fn add_to_forest_relaxed(
+        self,
+        forest: &mut MastForest,
+    ) -> Result<MastNodeId, MastForestError> {
+        // BasicBlockNode doesn't have child dependencies, so relaxed validation is the same
+        // as normal validation. We delegate to the normal method for consistency.
+        self.add_to_forest(forest)
     }
 }
 
@@ -1070,11 +1108,17 @@ impl MastForestContributor for BasicBlockNodeBuilder {
         self
     }
 
-    fn append_before_enter(&mut self, decorators: impl IntoIterator<Item = crate::mast::DecoratorId>) {
+    fn append_before_enter(
+        &mut self,
+        decorators: impl IntoIterator<Item = crate::mast::DecoratorId>,
+    ) {
         self.before_enter.extend(decorators);
     }
 
-    fn append_after_exit(&mut self, decorators: impl IntoIterator<Item = crate::mast::DecoratorId>) {
+    fn append_after_exit(
+        &mut self,
+        decorators: impl IntoIterator<Item = crate::mast::DecoratorId>,
+    ) {
         self.after_exit.extend(decorators);
     }
 
