@@ -8,7 +8,7 @@ use miden_assembly_syntax::{
         types::FunctionType,
     },
     debuginfo::{DefaultSourceManager, SourceManager, SourceSpan, Spanned},
-    diagnostics::{RelatedLabel, Report},
+    diagnostics::{IntoDiagnostic, RelatedLabel, Report},
     library::LibraryExport,
 };
 use miden_core::{
@@ -764,7 +764,8 @@ impl Assembler {
                         } else if let Some(decorator_ids) = block_builder.drain_decorators() {
                             block_builder
                                 .mast_forest_builder_mut()
-                                .append_before_enter(node_id, &decorator_ids);
+                                .append_before_enter(node_id, decorator_ids)
+                                .into_diagnostic()?;
                         }
 
                         body_node_ids.push(node_id);
@@ -925,7 +926,9 @@ impl Assembler {
 
         // Make sure that any post decorators are added at the end of the procedure body
         if let Some(post_decorator_ids) = maybe_post_decorators {
-            mast_forest_builder.append_after_exit(procedure_body_id, &post_decorator_ids);
+            mast_forest_builder
+                .append_after_exit(procedure_body_id, post_decorator_ids)
+                .into_diagnostic()?;
         }
 
         Ok(procedure_body_id)
