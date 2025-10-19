@@ -1,4 +1,4 @@
-use alloc::vec;
+use alloc::vec::Vec;
 
 use miden_assembly_syntax::{
     Word,
@@ -29,14 +29,17 @@ impl Assembler {
         callee: &InvocationTarget,
         caller: GlobalProcedureIndex,
         mast_forest_builder: &mut MastForestBuilder,
+        before_enter: Vec<miden_core::mast::DecoratorId>,
     ) -> Result<MastNodeId, Report> {
         let resolved = self.resolve_target(kind, callee, caller, mast_forest_builder)?;
 
         match kind {
             InvokeKind::ProcRef | InvokeKind::Exec => Ok(resolved.node),
-            InvokeKind::Call => mast_forest_builder.ensure_call(resolved.node, vec![], vec![]),
+            InvokeKind::Call => {
+                mast_forest_builder.ensure_call(resolved.node, before_enter, vec![])
+            },
             InvokeKind::SysCall => {
-                mast_forest_builder.ensure_syscall(resolved.node, vec![], vec![])
+                mast_forest_builder.ensure_syscall(resolved.node, before_enter, vec![])
             },
         }
     }
@@ -45,8 +48,9 @@ impl Assembler {
     pub(super) fn dynexec(
         &self,
         mast_forest_builder: &mut MastForestBuilder,
+        before_enter: Vec<miden_core::mast::DecoratorId>,
     ) -> Result<Option<MastNodeId>, Report> {
-        let dyn_node_id = mast_forest_builder.ensure_dyn(vec![], vec![])?;
+        let dyn_node_id = mast_forest_builder.ensure_dyn(before_enter, vec![])?;
 
         Ok(Some(dyn_node_id))
     }
@@ -55,8 +59,9 @@ impl Assembler {
     pub(super) fn dyncall(
         &self,
         mast_forest_builder: &mut MastForestBuilder,
+        before_enter: Vec<miden_core::mast::DecoratorId>,
     ) -> Result<Option<MastNodeId>, Report> {
-        let dyn_call_node_id = mast_forest_builder.ensure_dyncall(vec![], vec![])?;
+        let dyn_call_node_id = mast_forest_builder.ensure_dyncall(before_enter, vec![])?;
 
         Ok(Some(dyn_call_node_id))
     }
