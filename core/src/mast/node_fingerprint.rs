@@ -15,7 +15,7 @@ use crate::{
 
 pub type DecoratorFingerprint = Blake3Digest<32>;
 
-/// Represents the hash used to test for equality between [`MastNode`]s.
+/// Represents the hash used to test for equality between [`crate::mast::MastNode`]s.
 ///
 /// The decorator root will be `None` if and only if there are no decorators attached to the node,
 /// and all children have no decorator roots (meaning that there are no decorators in all the

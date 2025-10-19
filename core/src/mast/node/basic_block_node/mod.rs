@@ -107,7 +107,8 @@ impl BasicBlockNode {
     ///
     /// Returns an error if:
     /// - `operations` vector is empty.
-    pub(in crate::mast) fn new(
+    #[cfg(any(test, feature = "arbitrary"))]
+    pub(crate) fn new(
         operations: Vec<Operation>,
         decorators: DecoratorList,
     ) -> Result<Self, MastForestError> {

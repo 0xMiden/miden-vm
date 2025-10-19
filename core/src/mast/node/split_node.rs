@@ -41,33 +41,7 @@ impl SplitNode {
 }
 
 /// Constructors
-impl SplitNode {
-    #[allow(dead_code)]
-    pub(in crate::mast) fn new(
-        branches: [MastNodeId; 2],
-        mast_forest: &MastForest,
-    ) -> Result<Self, MastForestError> {
-        let forest_len = mast_forest.nodes.len();
-        if branches[0].to_usize() >= forest_len {
-            return Err(MastForestError::NodeIdOverflow(branches[0], forest_len));
-        } else if branches[1].to_usize() >= forest_len {
-            return Err(MastForestError::NodeIdOverflow(branches[1], forest_len));
-        }
-        let digest = {
-            let if_branch_hash = mast_forest[branches[0]].digest();
-            let else_branch_hash = mast_forest[branches[1]].digest();
-
-            hasher::merge_in_domain(&[if_branch_hash, else_branch_hash], Self::DOMAIN)
-        };
-
-        Ok(Self {
-            branches,
-            digest,
-            before_enter: Vec::new(),
-            after_exit: Vec::new(),
-        })
-    }
-}
+impl SplitNode {}
 
 /// Public accessors
 impl SplitNode {

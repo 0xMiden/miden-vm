@@ -41,7 +41,6 @@ impl MastNodeInfo {
     ///
     /// The `node_count` is the total expected number of nodes in the [`MastForest`] **after
     /// deserialization**.
-    #[allow(dead_code)]
     pub fn try_into_mast_node_builder(
         self,
         node_count: usize,

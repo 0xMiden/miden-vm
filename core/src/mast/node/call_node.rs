@@ -49,56 +49,7 @@ impl CallNode {
 
 //-------------------------------------------------------------------------------------------------
 /// Constructors
-impl CallNode {
-    /// Returns a new [`CallNode`] instantiated with the specified callee.
-    #[allow(dead_code)]
-    pub(in crate::mast) fn new(
-        callee: MastNodeId,
-        mast_forest: &MastForest,
-    ) -> Result<Self, MastForestError> {
-        if callee.to_usize() >= mast_forest.nodes.len() {
-            return Err(MastForestError::NodeIdOverflow(callee, mast_forest.nodes.len()));
-        }
-        let digest = {
-            let callee_digest = mast_forest[callee].digest();
-
-            hasher::merge_in_domain(&[callee_digest, Word::default()], Self::CALL_DOMAIN)
-        };
-
-        Ok(Self {
-            callee,
-            is_syscall: false,
-            digest,
-            before_enter: Vec::new(),
-            after_exit: Vec::new(),
-        })
-    }
-
-    /// Returns a new [`CallNode`] instantiated with the specified callee and marked as a kernel
-    /// call.
-    #[allow(dead_code)]
-    pub(in crate::mast) fn new_syscall(
-        callee: MastNodeId,
-        mast_forest: &MastForest,
-    ) -> Result<Self, MastForestError> {
-        if callee.to_usize() >= mast_forest.nodes.len() {
-            return Err(MastForestError::NodeIdOverflow(callee, mast_forest.nodes.len()));
-        }
-        let digest = {
-            let callee_digest = mast_forest[callee].digest();
-
-            hasher::merge_in_domain(&[callee_digest, Word::default()], Self::SYSCALL_DOMAIN)
-        };
-
-        Ok(Self {
-            callee,
-            is_syscall: true,
-            digest,
-            before_enter: Vec::new(),
-            after_exit: Vec::new(),
-        })
-    }
-}
+impl CallNode {}
 
 //-------------------------------------------------------------------------------------------------
 /// Public accessors

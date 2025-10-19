@@ -37,34 +37,7 @@ impl JoinNode {
 }
 
 /// Constructors
-impl JoinNode {
-    /// Returns a new [`JoinNode`] instantiated with the specified children nodes.
-    #[allow(dead_code)]
-    pub(in crate::mast) fn new(
-        children: [MastNodeId; 2],
-        mast_forest: &MastForest,
-    ) -> Result<Self, MastForestError> {
-        let forest_len = mast_forest.nodes.len();
-        if children[0].to_usize() >= forest_len {
-            return Err(MastForestError::NodeIdOverflow(children[0], forest_len));
-        } else if children[1].to_usize() >= forest_len {
-            return Err(MastForestError::NodeIdOverflow(children[1], forest_len));
-        }
-        let digest = {
-            let left_child_hash = mast_forest[children[0]].digest();
-            let right_child_hash = mast_forest[children[1]].digest();
-
-            hasher::merge_in_domain(&[left_child_hash, right_child_hash], JoinNode::DOMAIN)
-        };
-
-        Ok(Self {
-            children,
-            digest,
-            before_enter: Vec::new(),
-            after_exit: Vec::new(),
-        })
-    }
-}
+impl JoinNode {}
 
 /// Public accessors
 impl JoinNode {

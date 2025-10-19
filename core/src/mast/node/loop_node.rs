@@ -41,30 +41,7 @@ impl LoopNode {
 }
 
 /// Constructors
-impl LoopNode {
-    /// Returns a new [`LoopNode`] instantiated with the specified body node.
-    #[allow(dead_code)]
-    pub(in crate::mast) fn new(
-        body: MastNodeId,
-        mast_forest: &MastForest,
-    ) -> Result<Self, MastForestError> {
-        if body.to_usize() >= mast_forest.nodes.len() {
-            return Err(MastForestError::NodeIdOverflow(body, mast_forest.nodes.len()));
-        }
-        let digest = {
-            let body_hash = mast_forest[body].digest();
-
-            hasher::merge_in_domain(&[body_hash, Word::default()], Self::DOMAIN)
-        };
-
-        Ok(Self {
-            body,
-            digest,
-            before_enter: Vec::new(),
-            after_exit: Vec::new(),
-        })
-    }
-}
+impl LoopNode {}
 
 impl LoopNode {
     /// Returns the ID of the node presenting the body of the loop.
