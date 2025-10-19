@@ -6,7 +6,10 @@ use super::{
     BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder,
     LoopNodeBuilder, SplitNodeBuilder,
 };
-use crate::mast::{MastForest, MastForestError, MastNodeId};
+use crate::{
+    LookupByIdx,
+    mast::{MastForest, MastForestError, MastNodeId},
+};
 
 pub trait MastForestContributor {
     fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError>;
@@ -22,8 +25,8 @@ pub trait MastForestContributor {
     ) -> Result<crate::mast::MastNodeFingerprint, MastForestError>;
 
     /// Remap the node children to their new positions indicated by the given
-    /// [`crate::mast::Remapping`].
-    fn remap_children(self, remapping: &crate::mast::Remapping) -> Self;
+    /// lookup.
+    fn remap_children(self, remapping: &impl LookupByIdx<MastNodeId, MastNodeId>) -> Self;
 
     /// Adds decorators to be executed before this node.
     fn with_before_enter(self, _decorators: impl Into<Vec<crate::mast::DecoratorId>>) -> Self;

@@ -1064,7 +1064,10 @@ impl MastForestContributor for BasicBlockNodeBuilder {
         }
     }
 
-    fn remap_children(self, _remapping: &crate::mast::Remapping) -> Self {
+    fn remap_children(
+        self,
+        _remapping: &impl crate::LookupByIdx<crate::mast::MastNodeId, crate::mast::MastNodeId>,
+    ) -> Self {
         // BasicBlockNode has no children to remap
         self
     }

@@ -328,7 +328,7 @@ fn generate_mast_forest_contributor_impl(
                 }
             }
 
-            fn remap_children(self, remapping: &crate::mast::Remapping) -> Self {
+            fn remap_children(self, remapping: &impl crate::LookupByIdx<crate::mast::MastNodeId, crate::mast::MastNodeId>) -> Self {
                 match self {
                     #(#enum_name::#variant_names(field) => #enum_name::#variant_names(field.remap_children(remapping))),*
                 }
