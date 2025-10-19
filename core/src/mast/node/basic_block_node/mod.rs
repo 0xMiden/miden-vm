@@ -1070,6 +1070,14 @@ impl MastForestContributor for BasicBlockNodeBuilder {
         self
     }
 
+    fn append_before_enter(&mut self, decorators: impl IntoIterator<Item = crate::mast::DecoratorId>) {
+        self.before_enter.extend(decorators);
+    }
+
+    fn append_after_exit(&mut self, decorators: impl IntoIterator<Item = crate::mast::DecoratorId>) {
+        self.after_exit.extend(decorators);
+    }
+
     fn with_digest(mut self, digest: crate::Word) -> Self {
         self.digest = Some(digest);
         self
