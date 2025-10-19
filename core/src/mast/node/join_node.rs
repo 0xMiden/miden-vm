@@ -344,29 +344,6 @@ impl MastForestContributor for JoinNodeBuilder {
             .map_err(|_| MastForestError::TooManyNodes)
     }
 
-    fn with_before_enter(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
-        self.before_enter = decorators.into();
-        self
-    }
-
-    fn with_after_exit(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
-        self.after_exit = decorators.into();
-        self
-    }
-
-    fn append_before_enter(&mut self, decorators: impl IntoIterator<Item = DecoratorId>) {
-        self.before_enter.extend(decorators);
-    }
-
-    fn append_after_exit(&mut self, decorators: impl IntoIterator<Item = DecoratorId>) {
-        self.after_exit.extend(decorators);
-    }
-
-    fn with_digest(mut self, digest: crate::Word) -> Self {
-        self.digest = Some(digest);
-        self
-    }
-
     fn fingerprint_for_node(
         &self,
         forest: &MastForest,
@@ -401,6 +378,66 @@ impl MastForestContributor for JoinNodeBuilder {
             after_exit: self.after_exit,
             digest: self.digest,
         }
+    }
+
+    fn with_before_enter(mut self, decorators: impl Into<Vec<crate::mast::DecoratorId>>) -> Self {
+        self.before_enter = decorators.into();
+        self
+    }
+
+    fn with_after_exit(mut self, decorators: impl Into<Vec<crate::mast::DecoratorId>>) -> Self {
+        self.after_exit = decorators.into();
+        self
+    }
+
+    fn append_before_enter(
+        &mut self,
+        decorators: impl IntoIterator<Item = crate::mast::DecoratorId>,
+    ) {
+        self.before_enter.extend(decorators);
+    }
+
+    fn append_after_exit(
+        &mut self,
+        decorators: impl IntoIterator<Item = crate::mast::DecoratorId>,
+    ) {
+        self.after_exit.extend(decorators);
+    }
+
+    fn with_digest(mut self, digest: crate::Word) -> Self {
+        self.digest = Some(digest);
+        self
+    }
+}
+
+impl JoinNodeBuilder {
+    /// Add this node to a forest using relaxed validation.
+    ///
+    /// This method is used during deserialization where nodes may reference child nodes
+    /// that haven't been added to the forest yet. The child node IDs have already been
+    /// validated against the expected final node count during the `try_into_mast_node_builder`
+    /// step, so we can safely skip validation here.
+    ///
+    /// Note: This is not part of the `MastForestContributor` trait because it's only
+    /// intended for internal use during deserialization.
+    pub(in crate::mast) fn add_to_forest_relaxed(
+        self,
+        forest: &mut MastForest,
+    ) -> Result<MastNodeId, MastForestError> {
+        // Use the forced digest if provided, otherwise use a default digest
+        // The actual digest computation will be handled when the forest is complete
+        let digest = self.digest.unwrap_or_else(|| {
+            // During deserialization, we can't compute the digest yet because children may not
+            // exist Use a placeholder that will be overridden by the correct digest
+            // from serialization
+            Word::default()
+        });
+
+        let mut node = JoinNode::new_unsafe(self.children, digest);
+        node.append_before_enter(&self.before_enter);
+        node.append_after_exit(&self.after_exit);
+
+        forest.nodes.push(node.into()).map_err(|_| MastForestError::TooManyNodes)
     }
 }
 

@@ -271,29 +271,6 @@ impl MastForestContributor for ExternalNodeBuilder {
             .map_err(|_| MastForestError::TooManyNodes)
     }
 
-    fn with_before_enter(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
-        self.before_enter = decorators.into();
-        self
-    }
-
-    fn with_after_exit(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
-        self.after_exit = decorators.into();
-        self
-    }
-
-    fn append_before_enter(&mut self, decorators: impl IntoIterator<Item = DecoratorId>) {
-        self.before_enter.extend(decorators);
-    }
-
-    fn append_after_exit(&mut self, decorators: impl IntoIterator<Item = DecoratorId>) {
-        self.after_exit.extend(decorators);
-    }
-
-    fn with_digest(mut self, digest: crate::Word) -> Self {
-        self.digest = digest;
-        self
-    }
-
     fn fingerprint_for_node(
         &self,
         forest: &MastForest,
@@ -314,6 +291,58 @@ impl MastForestContributor for ExternalNodeBuilder {
     fn remap_children(self, _remapping: &crate::mast::Remapping) -> Self {
         // ExternalNode has no children to remap, so return self unchanged
         self
+    }
+
+    fn with_before_enter(mut self, decorators: impl Into<Vec<crate::mast::DecoratorId>>) -> Self {
+        self.before_enter = decorators.into();
+        self
+    }
+
+    fn with_after_exit(mut self, decorators: impl Into<Vec<crate::mast::DecoratorId>>) -> Self {
+        self.after_exit = decorators.into();
+        self
+    }
+
+    fn append_before_enter(
+        &mut self,
+        decorators: impl IntoIterator<Item = crate::mast::DecoratorId>,
+    ) {
+        self.before_enter.extend(decorators);
+    }
+
+    fn append_after_exit(
+        &mut self,
+        decorators: impl IntoIterator<Item = crate::mast::DecoratorId>,
+    ) {
+        self.after_exit.extend(decorators);
+    }
+
+    fn with_digest(mut self, digest: crate::Word) -> Self {
+        self.digest = digest;
+        self
+    }
+}
+
+impl ExternalNodeBuilder {
+    /// Add this node to a forest using relaxed validation.
+    ///
+    /// This method is used during deserialization where nodes may reference child nodes
+    /// that haven't been added to the forest yet. The child node IDs have already been
+    /// validated against the expected final node count during the `try_into_mast_node_builder`
+    /// step, so we can safely skip validation here.
+    ///
+    /// Note: This is not part of the `MastForestContributor` trait because it's only
+    /// intended for internal use during deserialization.
+    ///
+    /// For ExternalNode, this is equivalent to the normal `add_to_forest` since external nodes
+    /// don't have child nodes to validate.
+    pub(in crate::mast) fn add_to_forest_relaxed(
+        self,
+        forest: &mut MastForest,
+    ) -> Result<MastNodeId, MastForestError> {
+        // ExternalNode doesn't have child dependencies, so relaxed validation is the same
+        // as normal validation. We delegate to the normal method for consistency.
+        self.add_to_forest(forest)
     }
 }
 

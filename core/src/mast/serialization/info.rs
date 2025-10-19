@@ -3,8 +3,7 @@ use alloc::vec::Vec;
 use super::{NodeDataOffset, basic_blocks::BasicBlockDataDecoder};
 use crate::{
     mast::{
-        BasicBlockNode, CallNode, DynNode, ExternalNode, JoinNode, LoopNode, MastForestContributor,
-        MastNode, MastNodeId, SplitNode, Word,
+        MastForestContributor, MastNode, MastNodeId, Word,
         node::{MastNodeBuilder, MastNodeExt},
     },
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
@@ -38,54 +37,7 @@ impl MastNodeInfo {
         Self { ty, digest: mast_node.digest() }
     }
 
-    /// Attempts to convert this [`MastNodeInfo`] into a [`MastNode`].
-    ///
-    /// The `node_count` is the total expected number of nodes in the [`MastForest`] **after
-    /// deserialization**.
-    pub fn try_into_mast_node(
-        self,
-        node_count: usize,
-        basic_block_data_decoder: &BasicBlockDataDecoder,
-    ) -> Result<MastNode, DeserializationError> {
-        match self.ty {
-            MastNodeType::Block { ops_offset } => {
-                let operations = basic_block_data_decoder.decode_operations(ops_offset)?;
-                let block = BasicBlockNode::new_unsafe(operations, Vec::new(), self.digest);
-                Ok(MastNode::Block(block))
-            },
-            MastNodeType::Join { left_child_id, right_child_id } => {
-                let left_child = MastNodeId::from_u32_with_node_count(left_child_id, node_count)?;
-                let right_child = MastNodeId::from_u32_with_node_count(right_child_id, node_count)?;
-                let join = JoinNode::new_unsafe([left_child, right_child], self.digest);
-                Ok(MastNode::Join(join))
-            },
-            MastNodeType::Split { if_branch_id, else_branch_id } => {
-                let if_branch = MastNodeId::from_u32_with_node_count(if_branch_id, node_count)?;
-                let else_branch = MastNodeId::from_u32_with_node_count(else_branch_id, node_count)?;
-                let split = SplitNode::new_unsafe([if_branch, else_branch], self.digest);
-                Ok(MastNode::Split(split))
-            },
-            MastNodeType::Loop { body_id } => {
-                let body_id = MastNodeId::from_u32_with_node_count(body_id, node_count)?;
-                let loop_node = LoopNode::new_unsafe(body_id, self.digest);
-                Ok(MastNode::Loop(loop_node))
-            },
-            MastNodeType::Call { callee_id } => {
-                let callee_id = MastNodeId::from_u32_with_node_count(callee_id, node_count)?;
-                let call = CallNode::new_unsafe(callee_id, self.digest);
-                Ok(MastNode::Call(call))
-            },
-            MastNodeType::SysCall { callee_id } => {
-                let callee_id = MastNodeId::from_u32_with_node_count(callee_id, node_count)?;
-                let syscall = CallNode::new_syscall_unsafe(callee_id, self.digest);
-                Ok(MastNode::Call(syscall))
-            },
-            MastNodeType::Dyn => Ok(MastNode::Dyn(DynNode::new_dyn())),
-            MastNodeType::Dyncall => Ok(MastNode::Dyn(DynNode::new_dyncall())),
-            MastNodeType::External => Ok(MastNode::External(ExternalNode::new(self.digest))),
-        }
-    }
-
+  
     /// Attempts to convert this [`MastNodeInfo`] into a [`MastNodeBuilder`].
     ///
     /// The `node_count` is the total expected number of nodes in the [`MastForest`] **after
