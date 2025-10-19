@@ -16,8 +16,9 @@ pub trait MastForestContributor {
 
     /// Returns the fingerprint for this builder without constructing a MastNode.
     ///
-    /// This method computes the same value as `MastNodeFingerprint::from_mast_node`, but
-    /// operates directly on the builder data without first constructing a MastNode.
+    /// This method computes the fingerprint for a node directly from the builder data
+    /// without first constructing a MastNode, providing the same result as the
+    /// traditional fingerprint computation approach.
     fn fingerprint_for_node(
         &self,
         forest: &MastForest,
@@ -134,425 +135,227 @@ impl proptest::prelude::Arbitrary for MastNodeBuilder {
 }
 
 #[cfg(test)]
-mod fingerprint_consistency_tests {
-    use alloc::vec::Vec;
+mod fingerprint_invariant_tests {
+    use alloc::{collections::BTreeMap, vec::Vec};
 
     use proptest::prelude::*;
 
     use crate::{
-        Operation,
+        Decorator, Felt, Operation,
         mast::{
-            BasicBlockNodeBuilder, CallNodeBuilder, Decorator, DynNodeBuilder, ExternalNodeBuilder,
-            JoinNodeBuilder, LoopNodeBuilder, MastForest, MastForestContributor,
-            MastNodeFingerprint, SplitNodeBuilder,
-            arbitrary::{decorator_id_strategy, op_non_control_strategy},
+            BasicBlockNodeBuilder, DecoratorId, MastForest, MastForestContributor,
+            arbitrary::op_non_control_strategy,
         },
     };
 
-    // Test helper to create a test forest with decorators
-    fn create_test_forest_with_decorators(decorators: &[Decorator]) -> MastForest {
+    /// Creates a decorator and returns its ID
+    fn add_trace_decorator(forest: &mut MastForest, value: u8) -> DecoratorId {
+        forest.add_decorator(Decorator::Trace(value.into())).unwrap()
+    }
+
+    #[test]
+    fn basic_block_fingerprint_different_before_decorators() {
         let mut forest = MastForest::new();
-        for decorator in decorators {
-            forest.add_decorator(decorator.clone()).unwrap();
-        }
-        forest
-    }
+        let deco1 = add_trace_decorator(&mut forest, 1);
+        let deco2 = add_trace_decorator(&mut forest, 2);
 
-    // Test BasicBlockNodeBuilder fingerprint consistency
-    proptest! {
-        #[test]
-        fn basic_block_builder_fingerprint_consistency(
-            ops in prop::collection::vec(op_non_control_strategy(), 10..=10),
-            decorator_pairs in prop::collection::vec(
-                (any::<usize>(), decorator_id_strategy(5)),
-                0..5
-            ),
-        ) {
-            // Ensure decorator indices are valid (not exceeding operations length) and sorted
-            let valid_decorator_pairs: Vec<_> = decorator_pairs
-                .into_iter()
-                .map(|(idx, decorator_id)| (idx % ops.len(), decorator_id))
-                .collect();
-            let mut valid_decorator_pairs = valid_decorator_pairs;
-            valid_decorator_pairs.sort_by_key(|(idx, _)| *idx);
-            let forest = create_test_forest_with_decorators(&[
-                Decorator::Trace(1),
-                Decorator::Trace(2),
-                Decorator::Trace(3),
-                Decorator::Trace(4),
-                Decorator::Trace(5),
-            ]);
+        // Create two identical basic blocks with different before_enter decorators using builder
+        // pattern
+        let builder1 = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul], Vec::new())
+            .with_before_enter(vec![deco1]);
+        let builder2 = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul], Vec::new())
+            .with_before_enter(vec![deco2]);
 
-            let builder = BasicBlockNodeBuilder::new(ops, valid_decorator_pairs);
+        // Compute fingerprints using fingerprint_for_node
+        let empty_map = BTreeMap::new();
+        let fp1 = builder1.fingerprint_for_node(&forest, &empty_map).unwrap();
+        let fp2 = builder2.fingerprint_for_node(&forest, &empty_map).unwrap();
 
-            // Get fingerprint from builder
-            let fingerprint_from_builder = builder
-                .fingerprint_for_node(&forest, &crate::IndexVec::new())
-                .unwrap();
-
-            // Build the node and get fingerprint from node
-            let node = builder.build().unwrap().into();
-            let fingerprint_from_node = MastNodeFingerprint::from_mast_node(&forest, &crate::IndexVec::new(), &node)
-                .unwrap();
-
-            // They should be identical
-            assert_eq!(fingerprint_from_builder, fingerprint_from_node,
-                "BasicBlockNodeBuilder fingerprint should match node fingerprint");
-        }
-    }
-
-    // Test BasicBlockNodeBuilder fingerprint consistency without decorators
-    #[test]
-    fn basic_block_builder_fingerprint_consistency_no_decorators() {
-        let ops = vec![Operation::Add, Operation::Mul];
-        let forest =
-            create_test_forest_with_decorators(&[Decorator::Trace(1), Decorator::Trace(2)]);
-
-        let builder = BasicBlockNodeBuilder::new(ops, Vec::new());
-
-        // Get fingerprint from builder
-        let fingerprint_from_builder =
-            builder.fingerprint_for_node(&forest, &crate::IndexVec::new()).unwrap();
-
-        // Build the node and get fingerprint from node
-        let node = builder.build().unwrap().into();
-        let fingerprint_from_node =
-            MastNodeFingerprint::from_mast_node(&forest, &crate::IndexVec::new(), &node).unwrap();
-
-        // They should be identical
-        assert_eq!(
-            fingerprint_from_builder, fingerprint_from_node,
-            "BasicBlockNodeBuilder fingerprint should match node fingerprint without decorators"
+        // Fingerprints should be different
+        assert_ne!(
+            fp1, fp2,
+            "Basic blocks with different before_enter decorators should have different fingerprints"
         );
     }
 
-    // Test BasicBlockNodeBuilder fingerprint consistency with single decorator
     #[test]
-    fn basic_block_builder_fingerprint_consistency_single_decorator() {
-        let ops = vec![Operation::Add, Operation::Mul];
-        let mut forest =
-            create_test_forest_with_decorators(&[Decorator::Trace(1), Decorator::Trace(2)]);
+    fn basic_block_fingerprint_different_after_decorators() {
+        let mut forest = MastForest::new();
+        let deco1 = add_trace_decorator(&mut forest, 1);
+        let deco2 = add_trace_decorator(&mut forest, 2);
 
-        let decorator_pairs = vec![(0, forest.add_decorator(Decorator::Trace(3)).unwrap())];
-        let builder = BasicBlockNodeBuilder::new(ops, decorator_pairs);
+        // Create two identical basic blocks with different after_exit decorators using builder
+        // pattern
+        let builder1 = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul], Vec::new())
+            .with_after_exit(vec![deco1]);
+        let builder2 = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul], Vec::new())
+            .with_after_exit(vec![deco2]);
 
-        // Get fingerprint from builder
-        let fingerprint_from_builder =
-            builder.fingerprint_for_node(&forest, &crate::IndexVec::new()).unwrap();
+        // Compute fingerprints using fingerprint_for_node
+        let empty_map = BTreeMap::new();
+        let fp1 = builder1.fingerprint_for_node(&forest, &empty_map).unwrap();
+        let fp2 = builder2.fingerprint_for_node(&forest, &empty_map).unwrap();
 
-        // Build the node and get fingerprint from node
-        let node = builder.build().unwrap().into();
-        let fingerprint_from_node =
-            MastNodeFingerprint::from_mast_node(&forest, &crate::IndexVec::new(), &node).unwrap();
-
-        // They should be identical
-        assert_eq!(
-            fingerprint_from_builder, fingerprint_from_node,
-            "BasicBlockNodeBuilder fingerprint should match node fingerprint with single decorator"
+        // Fingerprints should be different
+        assert_ne!(
+            fp1, fp2,
+            "Basic blocks with different after_exit decorators should have different fingerprints"
         );
     }
 
-    // Test CallNodeBuilder fingerprint consistency
-    proptest! {
-        #[test]
-        fn call_node_builder_fingerprint_consistency(
-            callee_id in any::<usize>(),
-            is_syscall in any::<bool>(),
-            before_enter in prop::collection::vec(decorator_id_strategy(5), 0..5),
-            after_exit in prop::collection::vec(decorator_id_strategy(5), 0..5),
-        ) {
-            let mut forest = create_test_forest_with_decorators(&[
-                Decorator::Trace(1),
-                Decorator::Trace(2),
-                Decorator::Trace(3),
-                Decorator::Trace(4),
-                Decorator::Trace(5),
-            ]);
+    #[test]
+    fn basic_block_fingerprint_different_assert_opcodes_no_decorators() {
+        let forest = MastForest::new();
+        let error_code = Felt::new(42);
 
-            // Add some dummy nodes to ensure we have valid node IDs
-            let node_ids: Vec<crate::mast::MastNodeId> = (0..5).map(|_| {
-                BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
-                    .add_to_forest(&mut forest)
-                    .unwrap()
-            }).collect();
+        // Create three basic blocks with different assert opcodes but no decorators using builders
+        let builder_assert =
+            BasicBlockNodeBuilder::new(vec![Operation::Assert(error_code)], Vec::new());
+        let builder_u32assert2 =
+            BasicBlockNodeBuilder::new(vec![Operation::U32assert2(error_code)], Vec::new());
+        let builder_mpverify =
+            BasicBlockNodeBuilder::new(vec![Operation::MpVerify(error_code)], Vec::new());
 
-            // Use a valid node ID from the nodes we just created
-            let callee = node_ids[callee_id % node_ids.len()];
+        // Compute fingerprints using fingerprint_for_node
+        let empty_map = BTreeMap::new();
+        let fp_assert = builder_assert.fingerprint_for_node(&forest, &empty_map).unwrap();
+        let fp_u32assert2 = builder_u32assert2.fingerprint_for_node(&forest, &empty_map).unwrap();
+        let fp_mpverify = builder_mpverify.fingerprint_for_node(&forest, &empty_map).unwrap();
 
-            let builder = if is_syscall {
-                CallNodeBuilder::new_syscall(callee)
-            } else {
-                CallNodeBuilder::new(callee)
-            };
-            let builder = builder.with_before_enter(before_enter).with_after_exit(after_exit);
-
-            // Create hash lookup containing all node fingerprints in the forest
-            let mut hash_lookup = crate::IndexVec::new();
-            for mast_node in forest.nodes.iter() {
-                let fingerprint = MastNodeFingerprint::from_mast_node(&forest, &hash_lookup, mast_node).unwrap();
-                let _ = hash_lookup.push(fingerprint);
-            }
-
-            // Get fingerprint from builder using the populated hash lookup
-            let fingerprint_from_builder = builder
-                .fingerprint_for_node(&forest, &hash_lookup)
-                .unwrap();
-
-            // Build the node and get fingerprint from node
-            let node = builder.build(&forest).unwrap().into();
-            let fingerprint_from_node = MastNodeFingerprint::from_mast_node(&forest, &hash_lookup, &node)
-                .unwrap();
-
-            // They should be identical
-            assert_eq!(fingerprint_from_builder, fingerprint_from_node,
-                "CallNodeBuilder fingerprint should match node fingerprint");
-        }
+        // All fingerprints should be different since the opcodes are different
+        assert_ne!(
+            fp_assert, fp_u32assert2,
+            "Basic blocks with Assert vs U32assert2 should have different fingerprints"
+        );
+        assert_ne!(
+            fp_assert, fp_mpverify,
+            "Basic blocks with Assert vs MpVerify should have different fingerprints"
+        );
+        assert_ne!(
+            fp_u32assert2, fp_mpverify,
+            "Basic blocks with U32assert2 vs MpVerify should have different fingerprints"
+        );
     }
 
-    // Test JoinNodeBuilder fingerprint consistency
-    proptest! {
-        #[test]
-        fn join_node_builder_fingerprint_consistency(
-            child_ids in any::<[usize; 2]>(),
-            before_enter in prop::collection::vec(decorator_id_strategy(5), 0..=5),
-            after_exit in prop::collection::vec(decorator_id_strategy(5), 0..=5),
-        ) {
-            let mut forest = create_test_forest_with_decorators(&[
-                Decorator::Trace(1),
-                Decorator::Trace(2),
-                Decorator::Trace(3),
-                Decorator::Trace(4),
-                Decorator::Trace(5),
-            ]);
+    #[test]
+    fn basic_block_fingerprint_different_assert_values_no_decorators() {
+        let forest = MastForest::new();
+        let error_code_1 = Felt::new(42);
+        let error_code_2 = Felt::new(123);
 
-            // Add some dummy nodes to ensure we have valid node IDs
-            let node_ids: Vec<crate::mast::MastNodeId> = (0..5).map(|_| {
-                BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
-                    .add_to_forest(&mut forest)
-                    .unwrap()
-            }).collect();
+        // Create basic blocks with same assert opcode but different inner values, no decorators
+        let builder_assert_1 =
+            BasicBlockNodeBuilder::new(vec![Operation::Assert(error_code_1)], Vec::new());
+        let builder_assert_2 =
+            BasicBlockNodeBuilder::new(vec![Operation::Assert(error_code_2)], Vec::new());
 
-            // Use valid node IDs from the nodes we just created
-            let children = [
-                node_ids[child_ids[0] % node_ids.len()],
-                node_ids[child_ids[1] % node_ids.len()],
-            ];
+        let builder_u32assert2_1 =
+            BasicBlockNodeBuilder::new(vec![Operation::U32assert2(error_code_1)], Vec::new());
+        let builder_u32assert2_2 =
+            BasicBlockNodeBuilder::new(vec![Operation::U32assert2(error_code_2)], Vec::new());
 
-            let builder = JoinNodeBuilder::new(children)
-                .with_before_enter(before_enter)
-                .with_after_exit(after_exit);
+        let builder_mpverify_1 =
+            BasicBlockNodeBuilder::new(vec![Operation::MpVerify(error_code_1)], Vec::new());
+        let builder_mpverify_2 =
+            BasicBlockNodeBuilder::new(vec![Operation::MpVerify(error_code_2)], Vec::new());
 
-            // Create hash lookup containing all node fingerprints in the forest
-            let mut hash_lookup = crate::IndexVec::new();
-            for mast_node in forest.nodes.iter() {
-                let fingerprint = MastNodeFingerprint::from_mast_node(&forest, &hash_lookup, mast_node).unwrap();
-                let _ = hash_lookup.push(fingerprint);
-            }
+        // Compute fingerprints using fingerprint_for_node
+        let empty_map = BTreeMap::new();
+        let fp_assert_1 = builder_assert_1.fingerprint_for_node(&forest, &empty_map).unwrap();
+        let fp_assert_2 = builder_assert_2.fingerprint_for_node(&forest, &empty_map).unwrap();
 
-            // Get fingerprint from builder using the populated hash lookup
-            let fingerprint_from_builder = builder
-                .fingerprint_for_node(&forest, &hash_lookup)
-                .unwrap();
+        let fp_u32assert2_1 =
+            builder_u32assert2_1.fingerprint_for_node(&forest, &empty_map).unwrap();
+        let fp_u32assert2_2 =
+            builder_u32assert2_2.fingerprint_for_node(&forest, &empty_map).unwrap();
 
-            // Build the node and get fingerprint from node
-            let node = builder.build(&forest).unwrap().into();
-            let fingerprint_from_node = MastNodeFingerprint::from_mast_node(&forest, &hash_lookup, &node)
-                .unwrap();
+        let fp_mpverify_1 = builder_mpverify_1.fingerprint_for_node(&forest, &empty_map).unwrap();
+        let fp_mpverify_2 = builder_mpverify_2.fingerprint_for_node(&forest, &empty_map).unwrap();
 
-            // They should be identical
-            assert_eq!(fingerprint_from_builder, fingerprint_from_node,
-                "JoinNodeBuilder fingerprint should match node fingerprint");
-        }
+        // All fingerprints should be different since the inner values are different
+        assert_ne!(
+            fp_assert_1, fp_assert_2,
+            "Basic blocks with Assert operations with different error codes should have different fingerprints"
+        );
+        assert_ne!(
+            fp_u32assert2_1, fp_u32assert2_2,
+            "Basic blocks with U32assert2 operations with different error codes should have different fingerprints"
+        );
+        assert_ne!(
+            fp_mpverify_1, fp_mpverify_2,
+            "Basic blocks with MpVerify operations with different error codes should have different fingerprints"
+        );
     }
 
-    // Test SplitNodeBuilder fingerprint consistency
+    // Property-based test using proptest to verify fingerprint invariants with random builders
     proptest! {
         #[test]
-        fn split_node_builder_fingerprint_consistency(
-            branch_ids in any::<[usize; 2]>(),
-            before_enter in prop::collection::vec(decorator_id_strategy(5), 0..=5),
-            after_exit in prop::collection::vec(decorator_id_strategy(5), 0..=5),
+        fn prop_basic_block_fingerprint_different_before_decorators(
+            ops in prop::collection::vec(op_non_control_strategy(), 1..=10),
+            deco1_val in any::<u8>(),
+            deco2_val in any::<u8>(),
         ) {
-            let mut forest = create_test_forest_with_decorators(&[
-                Decorator::Trace(1),
-                Decorator::Trace(2),
-                Decorator::Trace(3),
-                Decorator::Trace(4),
-                Decorator::Trace(5),
-            ]);
+            prop_assume!(deco1_val != deco2_val); // Ensure different decorator values
 
-            // Add some dummy nodes to ensure we have valid node IDs
-            let node_ids: Vec<crate::mast::MastNodeId> = (0..5).map(|_| {
-                BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
-                    .add_to_forest(&mut forest)
-                    .unwrap()
-            }).collect();
+            let mut forest = MastForest::new();
+            let deco1 = add_trace_decorator(&mut forest, deco1_val);
+            let deco2 = add_trace_decorator(&mut forest, deco2_val);
 
-            // Use valid node IDs from the nodes we just created
-            let branches = [
-                node_ids[branch_ids[0] % node_ids.len()],
-                node_ids[branch_ids[1] % node_ids.len()],
-            ];
+            let builder1 = BasicBlockNodeBuilder::new(ops.clone(), Vec::new())
+                .with_before_enter(vec![deco1]);
+            let builder2 = BasicBlockNodeBuilder::new(ops, Vec::new())
+                .with_before_enter(vec![deco2]);
 
-            let builder = SplitNodeBuilder::new(branches)
-                .with_before_enter(before_enter)
-                .with_after_exit(after_exit);
+            let empty_map = BTreeMap::new();
+            let fp1 = builder1.fingerprint_for_node(&forest, &empty_map).unwrap();
+            let fp2 = builder2.fingerprint_for_node(&forest, &empty_map).unwrap();
 
-            // Create hash lookup containing all node fingerprints in the forest
-            let mut hash_lookup = crate::IndexVec::new();
-            for mast_node in forest.nodes.iter() {
-                let fingerprint = MastNodeFingerprint::from_mast_node(&forest, &hash_lookup, mast_node).unwrap();
-                let _ = hash_lookup.push(fingerprint);
-            }
-
-            // Get fingerprint from builder using the populated hash lookup
-            let fingerprint_from_builder = builder
-                .fingerprint_for_node(&forest, &hash_lookup)
-                .unwrap();
-
-            // Build the node and get fingerprint from node
-            let node = builder.build(&forest).unwrap().into();
-            let fingerprint_from_node = MastNodeFingerprint::from_mast_node(&forest, &hash_lookup, &node)
-                .unwrap();
-
-            // They should be identical
-            assert_eq!(fingerprint_from_builder, fingerprint_from_node,
-                "SplitNodeBuilder fingerprint should match node fingerprint");
+            assert_ne!(fp1, fp2, "Basic blocks with different before_enter decorators should have different fingerprints");
         }
-    }
 
-    // Test LoopNodeBuilder fingerprint consistency
-    proptest! {
         #[test]
-        fn loop_node_builder_fingerprint_consistency(
-            body_id in any::<usize>(),
-            before_enter in prop::collection::vec(decorator_id_strategy(5), 0..=5),
-            after_exit in prop::collection::vec(decorator_id_strategy(5), 0..=5),
+        fn prop_basic_block_fingerprint_different_after_decorators(
+            ops in prop::collection::vec(op_non_control_strategy(), 1..=10),
+            deco1_val in any::<u8>(),
+            deco2_val in any::<u8>(),
         ) {
-            let mut forest = create_test_forest_with_decorators(&[
-                Decorator::Trace(1),
-                Decorator::Trace(2),
-                Decorator::Trace(3),
-                Decorator::Trace(4),
-                Decorator::Trace(5),
-            ]);
+            prop_assume!(deco1_val != deco2_val); // Ensure different decorator values
 
-            // Add some dummy nodes to ensure we have valid node IDs
-            let node_ids: Vec<crate::mast::MastNodeId> = (0..5).map(|_| {
-                BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
-                    .add_to_forest(&mut forest)
-                    .unwrap()
-            }).collect();
+            let mut forest = MastForest::new();
+            let deco1 = add_trace_decorator(&mut forest, deco1_val);
+            let deco2 = add_trace_decorator(&mut forest, deco2_val);
 
-            // Use a valid node ID from the nodes we just created
-            let body = node_ids[body_id % node_ids.len()];
+            let builder1 = BasicBlockNodeBuilder::new(ops.clone(), Vec::new())
+                .with_after_exit(vec![deco1]);
+            let builder2 = BasicBlockNodeBuilder::new(ops, Vec::new())
+                .with_after_exit(vec![deco2]);
 
-            let builder = LoopNodeBuilder::new(body)
-                .with_before_enter(before_enter)
-                .with_after_exit(after_exit);
+            let empty_map = BTreeMap::new();
+            let fp1 = builder1.fingerprint_for_node(&forest, &empty_map).unwrap();
+            let fp2 = builder2.fingerprint_for_node(&forest, &empty_map).unwrap();
 
-            // Create hash lookup containing all node fingerprints in the forest
-            let mut hash_lookup = crate::IndexVec::new();
-            for mast_node in forest.nodes.iter() {
-                let fingerprint = MastNodeFingerprint::from_mast_node(&forest, &hash_lookup, mast_node).unwrap();
-                let _ = hash_lookup.push(fingerprint);
-            }
-
-            // Get fingerprint from builder using the populated hash lookup
-            let fingerprint_from_builder = builder
-                .fingerprint_for_node(&forest, &hash_lookup)
-                .unwrap();
-
-            // Build the node and get fingerprint from node
-            let node = builder.build(&forest).unwrap().into();
-            let fingerprint_from_node = MastNodeFingerprint::from_mast_node(&forest, &hash_lookup, &node)
-                .unwrap();
-
-            // They should be identical
-            assert_eq!(fingerprint_from_builder, fingerprint_from_node,
-                "LoopNodeBuilder fingerprint should match node fingerprint");
+            assert_ne!(fp1, fp2, "Basic blocks with different after_exit decorators should have different fingerprints");
         }
-    }
 
-    // Test DynNodeBuilder fingerprint consistency
-    proptest! {
         #[test]
-        fn dyn_node_builder_fingerprint_consistency(
-            is_dyncall in any::<bool>(),
-            before_enter in prop::collection::vec(decorator_id_strategy(5), 0..=5),
-            after_exit in prop::collection::vec(decorator_id_strategy(5), 0..=5),
+        fn prop_basic_block_fingerprint_different_assert_values(
+            error_code_1 in any::<u64>(),
+            error_code_2 in any::<u64>(),
         ) {
-            let forest = create_test_forest_with_decorators(&[
-                Decorator::Trace(1),
-                Decorator::Trace(2),
-                Decorator::Trace(3),
-                Decorator::Trace(4),
-                Decorator::Trace(5),
-            ]);
+            prop_assume!(error_code_1 != error_code_2); // Ensure different error codes
 
-            let builder = if is_dyncall {
-                DynNodeBuilder::new_dyncall()
-            } else {
-                DynNodeBuilder::new_dyn()
-            };
-            let builder = builder.with_before_enter(before_enter).with_after_exit(after_exit);
+            let forest = MastForest::new();
+            let felt_1 = Felt::new(error_code_1);
+            let felt_2 = Felt::new(error_code_2);
 
-            // Get fingerprint from builder
-            let fingerprint_from_builder = builder
-                .fingerprint_for_node(&forest, &crate::IndexVec::new())
-                .unwrap();
+            let builder_assert_1 = BasicBlockNodeBuilder::new(vec![Operation::Assert(felt_1)], Vec::new());
+            let builder_assert_2 = BasicBlockNodeBuilder::new(vec![Operation::Assert(felt_2)], Vec::new());
 
-            // Build the node and get fingerprint from node
-            let node = builder.build().into();
-            let fingerprint_from_node = MastNodeFingerprint::from_mast_node(&forest, &crate::IndexVec::new(), &node)
-                .unwrap();
+            let empty_map = BTreeMap::new();
+            let fp_assert_1 = builder_assert_1.fingerprint_for_node(&forest, &empty_map).unwrap();
+            let fp_assert_2 = builder_assert_2.fingerprint_for_node(&forest, &empty_map).unwrap();
 
-            // They should be identical
-            assert_eq!(fingerprint_from_builder, fingerprint_from_node,
-                "DynNodeBuilder fingerprint should match node fingerprint");
-        }
-    }
-
-    // Test ExternalNodeBuilder fingerprint consistency
-    proptest! {
-        #[test]
-        fn external_node_builder_fingerprint_consistency(
-            digest in any::<[u64; 4]>().prop_map(|[a, b, c, d]| {
-                crate::Word::new([
-                    crate::Felt::new(a),
-                    crate::Felt::new(b),
-                    crate::Felt::new(c),
-                    crate::Felt::new(d),
-                ])
-            }),
-            before_enter in prop::collection::vec(decorator_id_strategy(5), 0..=5),
-            after_exit in prop::collection::vec(decorator_id_strategy(5), 0..=5),
-        ) {
-            let forest = create_test_forest_with_decorators(&[
-                Decorator::Trace(1),
-                Decorator::Trace(2),
-                Decorator::Trace(3),
-                Decorator::Trace(4),
-                Decorator::Trace(5),
-            ]);
-
-            let builder = ExternalNodeBuilder::new(digest)
-                .with_before_enter(before_enter)
-                .with_after_exit(after_exit);
-
-            // Get fingerprint from builder
-            let fingerprint_from_builder = builder
-                .fingerprint_for_node(&forest, &crate::IndexVec::new())
-                .unwrap();
-
-            // Build the node and get fingerprint from node
-            let node = builder.build().into();
-            let fingerprint_from_node = MastNodeFingerprint::from_mast_node(&forest, &crate::IndexVec::new(), &node)
-                .unwrap();
-
-            // They should be identical
-            assert_eq!(fingerprint_from_builder, fingerprint_from_node,
-                "ExternalNodeBuilder fingerprint should match node fingerprint");
+            assert_ne!(fp_assert_1, fp_assert_2, "Basic blocks with Assert operations with different error codes should have different fingerprints");
         }
     }
 }
