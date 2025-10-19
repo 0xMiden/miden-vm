@@ -918,7 +918,7 @@ impl Assembler {
                 ));
             }
 
-            mast_forest_builder.ensure_block(vec![Operation::Noop], Vec::new())?
+            mast_forest_builder.ensure_block(vec![Operation::Noop], Vec::new(), vec![], vec![])?
         } else {
             mast_forest_builder.join_nodes(body_node_ids)?
         };
