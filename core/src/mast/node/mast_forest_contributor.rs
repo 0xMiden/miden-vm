@@ -522,9 +522,8 @@ mod round_trip_tests {
         mast::{
             BasicBlockNode, BasicBlockNodeBuilder, CallNode, DynNode, ExternalNode, JoinNode,
             JoinNodeBuilder, LoopNode, MastForest, MastForestError, MastNode, MastNodeBuilder,
-            MastNodeExt, SplitNode,
+            MastNodeExt, SplitNode, node::mast_forest_contributor::MastForestContributor,
         },
-        mast::node::mast_forest_contributor::MastForestContributor,
     };
 
     /// Helper function to create a test forest with some nodes and decorators
@@ -789,8 +788,7 @@ mod round_trip_tests {
         // Test digest forcing
         let forced_join_digest =
             Word::new([Felt::new(5), Felt::new(6), Felt::new(7), Felt::new(8)]);
-        let join_builder2 =
-            JoinNodeBuilder::new([child1, child2]).with_digest(forced_join_digest);
+        let join_builder2 = JoinNodeBuilder::new([child1, child2]).with_digest(forced_join_digest);
         let join_node2 = join_builder2
             .build(&forest)
             .expect("Failed to build join node with forced digest");

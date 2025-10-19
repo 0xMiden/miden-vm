@@ -3,8 +3,9 @@ use alloc::vec::Vec;
 use super::{NodeDataOffset, basic_blocks::BasicBlockDataDecoder};
 use crate::{
     mast::{
-        BasicBlockNode, CallNode, DynNode, ExternalNode, JoinNode, LoopNode, MastNode, MastNodeId,
-        SplitNode, Word, node::MastNodeExt,
+        BasicBlockNode, CallNode, DynNode, ExternalNode, JoinNode, LoopNode, MastForestContributor,
+        MastNode, MastNodeId, SplitNode, Word,
+        node::{MastNodeBuilder, MastNodeExt},
     },
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
@@ -82,6 +83,70 @@ impl MastNodeInfo {
             MastNodeType::Dyn => Ok(MastNode::Dyn(DynNode::new_dyn())),
             MastNodeType::Dyncall => Ok(MastNode::Dyn(DynNode::new_dyncall())),
             MastNodeType::External => Ok(MastNode::External(ExternalNode::new(self.digest))),
+        }
+    }
+
+    /// Attempts to convert this [`MastNodeInfo`] into a [`MastNodeBuilder`].
+    ///
+    /// The `node_count` is the total expected number of nodes in the [`MastForest`] **after
+    /// deserialization**.
+    #[allow(dead_code)]
+    pub fn try_into_mast_node_builder(
+        self,
+        node_count: usize,
+        basic_block_data_decoder: &BasicBlockDataDecoder,
+    ) -> Result<MastNodeBuilder, DeserializationError> {
+        match self.ty {
+            MastNodeType::Block { ops_offset } => {
+                let operations = basic_block_data_decoder.decode_operations(ops_offset)?;
+                let builder = crate::mast::node::BasicBlockNodeBuilder::new(operations, Vec::new())
+                    .with_digest(self.digest);
+                Ok(MastNodeBuilder::BasicBlock(builder))
+            },
+            MastNodeType::Join { left_child_id, right_child_id } => {
+                let left_child = MastNodeId::from_u32_with_node_count(left_child_id, node_count)?;
+                let right_child = MastNodeId::from_u32_with_node_count(right_child_id, node_count)?;
+                let builder = crate::mast::node::JoinNodeBuilder::new([left_child, right_child])
+                    .with_digest(self.digest);
+                Ok(MastNodeBuilder::Join(builder))
+            },
+            MastNodeType::Split { if_branch_id, else_branch_id } => {
+                let if_branch = MastNodeId::from_u32_with_node_count(if_branch_id, node_count)?;
+                let else_branch = MastNodeId::from_u32_with_node_count(else_branch_id, node_count)?;
+                let builder = crate::mast::node::SplitNodeBuilder::new([if_branch, else_branch])
+                    .with_digest(self.digest);
+                Ok(MastNodeBuilder::Split(builder))
+            },
+            MastNodeType::Loop { body_id } => {
+                let body_id = MastNodeId::from_u32_with_node_count(body_id, node_count)?;
+                let builder =
+                    crate::mast::node::LoopNodeBuilder::new(body_id).with_digest(self.digest);
+                Ok(MastNodeBuilder::Loop(builder))
+            },
+            MastNodeType::Call { callee_id } => {
+                let callee_id = MastNodeId::from_u32_with_node_count(callee_id, node_count)?;
+                let builder =
+                    crate::mast::node::CallNodeBuilder::new(callee_id).with_digest(self.digest);
+                Ok(MastNodeBuilder::Call(builder))
+            },
+            MastNodeType::SysCall { callee_id } => {
+                let callee_id = MastNodeId::from_u32_with_node_count(callee_id, node_count)?;
+                let builder = crate::mast::node::CallNodeBuilder::new_syscall(callee_id)
+                    .with_digest(self.digest);
+                Ok(MastNodeBuilder::Call(builder))
+            },
+            MastNodeType::Dyn => {
+                let builder = crate::mast::node::DynNodeBuilder::new_dyn();
+                Ok(MastNodeBuilder::Dyn(builder))
+            },
+            MastNodeType::Dyncall => {
+                let builder = crate::mast::node::DynNodeBuilder::new_dyncall();
+                Ok(MastNodeBuilder::Dyn(builder))
+            },
+            MastNodeType::External => {
+                let builder = crate::mast::node::ExternalNodeBuilder::new(self.digest);
+                Ok(MastNodeBuilder::External(builder))
+            },
         }
     }
 }
