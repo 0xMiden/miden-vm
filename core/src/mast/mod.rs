@@ -598,13 +598,20 @@ impl DecoratorId {
         value: u32,
         mast_forest: &MastForest,
     ) -> Result<Self, DeserializationError> {
-        if (value as usize) < mast_forest.decorators.len() {
+        Self::from_u32_bounded(value, mast_forest.decorators.len())
+    }
+
+    /// Returns a new `DecoratorId` with the provided inner value, or an error if the provided
+    /// `value` is greater than or equal to `bound`.
+    ///
+    /// For use in deserialization when the bound is known without needing the full MastForest.
+    pub fn from_u32_bounded(value: u32, bound: usize) -> Result<Self, DeserializationError> {
+        if (value as usize) < bound {
             Ok(Self(value))
         } else {
             Err(DeserializationError::InvalidValue(format!(
-                "Invalid deserialized MAST decorator id '{}', but only {} decorators in the forest",
-                value,
-                mast_forest.decorators.len(),
+                "Invalid deserialized MAST decorator id '{}', but allows only {} decorators",
+                value, bound,
             )))
         }
     }
