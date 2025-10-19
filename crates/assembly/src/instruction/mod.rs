@@ -38,13 +38,14 @@ impl Assembler {
             block_builder.track_instruction(instruction, proc_ctx)?;
         }
 
-        let new_node_id = self.compile_instruction_impl(instruction, block_builder, proc_ctx)?;
+        let opt_new_node_id =
+            self.compile_instruction_impl(instruction, block_builder, proc_ctx)?;
 
         if self.in_debug_mode() {
             // compute and update the cycle count of the instruction which just finished executing
             let maybe_asm_op_id = block_builder.set_instruction_cycle_count();
 
-            if let Some(node_id) = new_node_id {
+            if let Some(node_id) = opt_new_node_id {
                 // New node was created, so we are done building the current block. We then want to
                 // add the assembly operation to the new node - for example call, dyncall, if/else
                 // statements, loops, etc. However, `exec` instructions are compiled away and not
@@ -71,7 +72,7 @@ impl Assembler {
             }
         }
 
-        Ok(new_node_id)
+        Ok(opt_new_node_id)
     }
 
     fn compile_instruction_impl(

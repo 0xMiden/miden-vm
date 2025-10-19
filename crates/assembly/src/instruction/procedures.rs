@@ -1,3 +1,5 @@
+use alloc::vec;
+
 use miden_assembly_syntax::{
     Word,
     ast::{InvocationTarget, InvokeKind},
@@ -32,8 +34,10 @@ impl Assembler {
 
         match kind {
             InvokeKind::ProcRef | InvokeKind::Exec => Ok(resolved.node),
-            InvokeKind::Call => mast_forest_builder.ensure_call(resolved.node),
-            InvokeKind::SysCall => mast_forest_builder.ensure_syscall(resolved.node),
+            InvokeKind::Call => mast_forest_builder.ensure_call(resolved.node, vec![], vec![]),
+            InvokeKind::SysCall => {
+                mast_forest_builder.ensure_syscall(resolved.node, vec![], vec![])
+            },
         }
     }
 
@@ -42,7 +46,7 @@ impl Assembler {
         &self,
         mast_forest_builder: &mut MastForestBuilder,
     ) -> Result<Option<MastNodeId>, Report> {
-        let dyn_node_id = mast_forest_builder.ensure_dyn()?;
+        let dyn_node_id = mast_forest_builder.ensure_dyn(vec![], vec![])?;
 
         Ok(Some(dyn_node_id))
     }
@@ -52,7 +56,7 @@ impl Assembler {
         &self,
         mast_forest_builder: &mut MastForestBuilder,
     ) -> Result<Option<MastNodeId>, Report> {
-        let dyn_call_node_id = mast_forest_builder.ensure_dyncall()?;
+        let dyn_call_node_id = mast_forest_builder.ensure_dyncall(vec![], vec![])?;
 
         Ok(Some(dyn_call_node_id))
     }
