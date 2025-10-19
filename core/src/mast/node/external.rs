@@ -277,7 +277,10 @@ impl MastForestContributor for ExternalNodeBuilder {
         )
     }
 
-    fn remap_children(self, _remapping: &crate::mast::Remapping) -> Self {
+    fn remap_children(
+        self,
+        _remapping: &impl crate::LookupByIdx<crate::mast::MastNodeId, crate::mast::MastNodeId>,
+    ) -> Self {
         // ExternalNode has no children to remap, so return self unchanged
         self
     }

@@ -444,9 +444,12 @@ impl MastForestContributor for CallNodeBuilder {
         )
     }
 
-    fn remap_children(self, remapping: &crate::mast::Remapping) -> Self {
+    fn remap_children(
+        self,
+        remapping: &impl crate::LookupByIdx<crate::mast::MastNodeId, crate::mast::MastNodeId>,
+    ) -> Self {
         CallNodeBuilder {
-            callee: self.callee.remap(remapping),
+            callee: *remapping.get(self.callee).unwrap_or(&self.callee),
             is_syscall: self.is_syscall,
             before_enter: self.before_enter,
             after_exit: self.after_exit,

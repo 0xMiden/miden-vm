@@ -355,9 +355,15 @@ impl MastForestContributor for SplitNodeBuilder {
         )
     }
 
-    fn remap_children(self, remapping: &crate::mast::Remapping) -> Self {
+    fn remap_children(
+        self,
+        remapping: &impl crate::LookupByIdx<crate::mast::MastNodeId, crate::mast::MastNodeId>,
+    ) -> Self {
         SplitNodeBuilder {
-            branches: [self.branches[0].remap(remapping), self.branches[1].remap(remapping)],
+            branches: [
+                *remapping.get(self.branches[0]).unwrap_or(&self.branches[0]),
+                *remapping.get(self.branches[1]).unwrap_or(&self.branches[1]),
+            ],
             before_enter: self.before_enter,
             after_exit: self.after_exit,
             digest: self.digest,

@@ -360,9 +360,15 @@ impl MastForestContributor for JoinNodeBuilder {
         )
     }
 
-    fn remap_children(self, remapping: &crate::mast::Remapping) -> Self {
+    fn remap_children(
+        self,
+        remapping: &impl crate::LookupByIdx<crate::mast::MastNodeId, crate::mast::MastNodeId>,
+    ) -> Self {
         JoinNodeBuilder {
-            children: [self.children[0].remap(remapping), self.children[1].remap(remapping)],
+            children: [
+                *remapping.get(self.children[0]).unwrap_or(&self.children[0]),
+                *remapping.get(self.children[1]).unwrap_or(&self.children[1]),
+            ],
             before_enter: self.before_enter,
             after_exit: self.after_exit,
             digest: self.digest,
