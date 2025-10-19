@@ -469,7 +469,9 @@ impl Arbitrary for MastForest {
                     // 2) Add basic blocks and collect their IDs
                     let mut basic_block_ids = Vec::new();
                     for block in basic_blocks {
-                        let node_id = forest.add_node(block).expect("Failed to add basic block");
+                        let builder = block.to_builder();
+                        let node_id =
+                            builder.add_to_forest(&mut forest).expect("Failed to add block");
                         basic_block_ids.push(node_id);
                     }
 
@@ -701,8 +703,9 @@ impl Arbitrary for Program {
                 forest.add_decorator(decorator).expect("Failed to add decorator");
             }
 
-            // Add the node to the forest
-            let node_id = forest.add_node(node).expect("Failed to add node");
+            // Add the node to the forest using builder
+            let builder = node.to_builder();
+            let node_id = builder.add_to_forest(&mut forest).expect("Failed to add node");
 
             // Since we added a node, it should be available as a procedure root
             // If not, we need to make it a root manually
