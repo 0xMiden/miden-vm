@@ -38,6 +38,7 @@ impl JoinNode {
 /// Constructors
 impl JoinNode {
     /// Returns a new [`JoinNode`] instantiated with the specified children nodes.
+    #[allow(dead_code)]
     pub(in crate::mast) fn new(
         children: [MastNodeId; 2],
         mast_forest: &MastForest,

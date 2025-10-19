@@ -5,9 +5,10 @@ use miden_crypto::hash::blake::Blake3Digest;
 use crate::{
     DenseIdMap, IndexVec,
     mast::{
-        BasicBlockNode, CallNode, DecoratorId, DynNode, ExternalNode, JoinNode, LoopNode,
-        MastForest, MastForestError, MastNode, MastNodeFingerprint, MastNodeId,
-        MultiMastForestIteratorItem, MultiMastForestNodeIter, SplitNode, node::MastNodeExt,
+        BasicBlockNodeBuilder, CallNodeBuilder, DecoratorId, DynNodeBuilder, ExternalNodeBuilder,
+        JoinNodeBuilder, LoopNodeBuilder, MastForest, MastForestContributor, MastForestError,
+        MastNode, MastNodeFingerprint, MastNodeId, MultiMastForestIteratorItem,
+        MultiMastForestNodeIter, SplitNodeBuilder, node::MastNodeExt,
     },
 };
 
@@ -235,8 +236,9 @@ impl MastForestMerger {
             },
             None => {
                 // If no node with a matching fingerprint exists, then the merging node is
-                // unique and we can add it to the merged forest.
-                let new_node_id = self.mast_forest.add_node(remapped_node)?;
+                // unique and we can add it to the merged forest using builders.
+                let builder = remapped_node.to_builder();
+                let new_node_id = builder.add_to_forest(&mut self.mast_forest)?;
                 self.node_id_mappings[forest_idx].insert(merging_id, new_node_id);
 
                 // We need to update the indices with the newly inserted nodes
@@ -322,57 +324,70 @@ impl MastForestMerger {
             decorators.iter().copied().map(map_decorator_id).collect()
         };
 
-        let mut mapped_node: MastNode = match src {
+        let before_enter_decorators = map_decorators(src.before_enter())?;
+        let after_exit_decorators = map_decorators(src.after_exit())?;
+
+        let mapped_node = match src {
             MastNode::Join(join_node) => {
                 let first = self.remap_child(join_node.first(), nmap);
                 let second = self.remap_child(join_node.second(), nmap);
 
-                JoinNode::new([first, second], &self.mast_forest)
-                    .expect("JoinNode children should have been mapped to a lower index")
-                    .into()
+                let builder = JoinNodeBuilder::new([first, second])
+                    .with_before_enter(before_enter_decorators)
+                    .with_after_exit(after_exit_decorators);
+                builder.build(&self.mast_forest)?.into()
             },
             MastNode::Split(split_node) => {
                 let if_branch = self.remap_child(split_node.on_true(), nmap);
                 let else_branch = self.remap_child(split_node.on_false(), nmap);
 
-                SplitNode::new([if_branch, else_branch], &self.mast_forest)
-                    .expect("SplitNode children should have been mapped to a lower index")
-                    .into()
+                let builder = SplitNodeBuilder::new([if_branch, else_branch])
+                    .with_before_enter(before_enter_decorators)
+                    .with_after_exit(after_exit_decorators);
+                builder.build(&self.mast_forest)?.into()
             },
             MastNode::Loop(loop_node) => {
                 let body = self.remap_child(loop_node.body(), nmap);
-                LoopNode::new(body, &self.mast_forest)
-                    .expect("LoopNode children should have been mapped to a lower index")
-                    .into()
+                let builder = LoopNodeBuilder::new(body)
+                    .with_before_enter(before_enter_decorators)
+                    .with_after_exit(after_exit_decorators);
+                builder.build(&self.mast_forest)?.into()
             },
             MastNode::Call(call_node) => {
                 let callee = self.remap_child(call_node.callee(), nmap);
-                CallNode::new(callee, &self.mast_forest)
-                    .expect("CallNode children should have been mapped to a lower index")
-                    .into()
+                let builder = CallNodeBuilder::new(callee)
+                    .with_before_enter(before_enter_decorators)
+                    .with_after_exit(after_exit_decorators);
+                builder.build(&self.mast_forest)?.into()
             },
-            MastNode::Block(basic_block_node) => BasicBlockNode::new(
-                basic_block_node.operations().copied().collect(),
-                basic_block_node
-                    .indexed_decorator_iter()
-                    .map(|(idx, decorator_id)| {
-                        let mapped_decorator = map_decorator_id(decorator_id)?;
-                        Ok((idx, mapped_decorator))
-                    })
-                    .collect::<Result<Vec<_>, _>>()?,
-            )
-            .expect("previously valid BasicBlockNode should still be valid")
-            .into(),
-            MastNode::Dyn(_) => DynNode::new_dyn().into(),
-            MastNode::External(external_node) => ExternalNode::new(external_node.digest()).into(),
+            MastNode::Block(basic_block_node) => {
+                let builder = BasicBlockNodeBuilder::new(
+                    basic_block_node.operations().copied().collect(),
+                    basic_block_node
+                        .indexed_decorator_iter()
+                        .map(|(idx, decorator_id)| {
+                            let mapped_decorator = map_decorator_id(decorator_id)?;
+                            Ok((idx, mapped_decorator))
+                        })
+                        .collect::<Result<Vec<_>, _>>()?,
+                )
+                .with_before_enter(before_enter_decorators)
+                .with_after_exit(after_exit_decorators);
+                builder.build()?.into()
+            },
+            MastNode::Dyn(_) => {
+                let builder = DynNodeBuilder::new_dyn()
+                    .with_before_enter(before_enter_decorators)
+                    .with_after_exit(after_exit_decorators);
+                builder.build().into()
+            },
+            MastNode::External(external_node) => {
+                let builder = ExternalNodeBuilder::new(external_node.digest())
+                    .with_before_enter(before_enter_decorators)
+                    .with_after_exit(after_exit_decorators);
+                builder.build().into()
+            },
         };
-
-        // Decorators must be handled specially for basic block nodes.
-        // For other node types we can handle it centrally.
-        {
-            mapped_node.append_before_enter(&map_decorators(src.before_enter())?);
-            mapped_node.append_after_exit(&map_decorators(src.after_exit())?);
-        }
 
         Ok(mapped_node)
     }
