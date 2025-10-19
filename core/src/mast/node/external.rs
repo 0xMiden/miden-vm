@@ -281,6 +281,14 @@ impl MastForestContributor for ExternalNodeBuilder {
         self
     }
 
+    fn append_before_enter(&mut self, decorators: impl IntoIterator<Item = DecoratorId>) {
+        self.before_enter.extend(decorators);
+    }
+
+    fn append_after_exit(&mut self, decorators: impl IntoIterator<Item = DecoratorId>) {
+        self.after_exit.extend(decorators);
+    }
+
     fn with_digest(mut self, digest: crate::Word) -> Self {
         self.digest = digest;
         self

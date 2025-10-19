@@ -346,6 +346,18 @@ fn generate_mast_forest_contributor_impl(
                 }
             }
 
+            fn append_before_enter(&mut self, decorators: impl IntoIterator<Item = crate::mast::DecoratorId>) {
+                match self {
+                    #(#enum_name::#variant_names(field) => field.append_before_enter(decorators)),*
+                }
+            }
+
+            fn append_after_exit(&mut self, decorators: impl IntoIterator<Item = crate::mast::DecoratorId>) {
+                match self {
+                    #(#enum_name::#variant_names(field) => field.append_after_exit(decorators)),*
+                }
+            }
+
             fn with_digest(self, digest: crate::Word) -> Self {
                 match self {
                     #(#enum_name::#variant_names(field) => #enum_name::#variant_names(field.with_digest(digest))),*

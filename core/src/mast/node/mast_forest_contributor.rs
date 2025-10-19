@@ -31,6 +31,18 @@ pub trait MastForestContributor {
     /// Adds decorators to be executed after this node.
     fn with_after_exit(self, _decorators: impl Into<Vec<crate::mast::DecoratorId>>) -> Self;
 
+    /// Appends decorators to be executed before this node.
+    ///
+    /// Unlike `with_before_enter`, this method adds to the existing list of decorators
+    /// rather than replacing them.
+    fn append_before_enter(&mut self, decorators: impl IntoIterator<Item = crate::mast::DecoratorId>);
+
+    /// Appends decorators to be executed after this node.
+    ///
+    /// Unlike `with_after_exit`, this method adds to the existing list of decorators
+    /// rather than replacing them.
+    fn append_after_exit(&mut self, decorators: impl IntoIterator<Item = crate::mast::DecoratorId>);
+
     /// Sets a digest to be forced into the built node.
     ///
     /// When a digest is set, the builder will use this digest instead of computing
