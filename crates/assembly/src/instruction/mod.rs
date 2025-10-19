@@ -1,4 +1,5 @@
 use alloc::vec::Vec;
+
 use miden_assembly_syntax::{
     ast::{ImmU16, Instruction},
     debuginfo::{Span, Spanned},
@@ -45,9 +46,9 @@ impl Assembler {
         let mut decorators = Vec::new();
 
         if self.in_debug_mode() {
-            // if the assembler is in debug mode, start tracking the instruction about to be executed;
-            // this will allow us to map the instruction to the sequence of operations which were
-            // executed as a part of this instruction.
+            // if the assembler is in debug mode, start tracking the instruction about to be
+            // executed; this will allow us to map the instruction to the sequence of
+            // operations which were executed as a part of this instruction.
             block_builder.track_instruction(instruction, proc_ctx)?;
 
             // New node is being created, so we are done building the current block. We then want to
@@ -56,16 +57,17 @@ impl Assembler {
             // added to the trace, so we should ignore them. Theoretically, we
             // could probably add them anyways, but it currently breaks the
             // `VmStateIterator`.
-            if can_create_node && !matches!(instruction.inner(), Instruction::Exec(_)) {
-                if let Some(asm_op_id) = block_builder.set_instruction_cycle_count() {
-                    // Set the cycle count for this assembly op to 1
-                    let assembly_op = &mut block_builder.mast_forest_builder_mut()[asm_op_id];
-                    match assembly_op {
-                        Decorator::AsmOp(op) => op.set_num_cycles(1),
-                        _ => panic!("expected AsmOp decorator"),
-                    }
-                    decorators.push(asm_op_id);
+            if can_create_node
+                && !matches!(instruction.inner(), Instruction::Exec(_))
+                && let Some(asm_op_id) = block_builder.set_instruction_cycle_count()
+            {
+                // Set the cycle count for this assembly op to 1
+                let assembly_op = &mut block_builder.mast_forest_builder_mut()[asm_op_id];
+                match assembly_op {
+                    Decorator::AsmOp(op) => op.set_num_cycles(1),
+                    _ => panic!("expected AsmOp decorator"),
                 }
+                decorators.push(asm_op_id);
             }
         }
 

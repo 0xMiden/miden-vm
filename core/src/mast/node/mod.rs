@@ -52,12 +52,6 @@ pub trait MastNodeExt {
     /// Returns the decorators to be executed after this node is executed.
     fn after_exit(&self) -> &[DecoratorId];
 
-    /// Sets the list of decorators to be executed before this node.
-    fn append_before_enter(&mut self, decorator_ids: &[DecoratorId]);
-
-    /// Sets the list of decorators to be executed after this node.
-    fn append_after_exit(&mut self, decorator_ids: &[DecoratorId]);
-
     /// Removes all decorators from this node.
     fn remove_decorators(&mut self);
 

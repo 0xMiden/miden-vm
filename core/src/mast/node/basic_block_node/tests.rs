@@ -557,12 +557,11 @@ fn test_decorator_positions() {
     ];
 
     // Create a basic block with complex operations using builder pattern
-    let mut block =
-        BasicBlockNodeBuilder::new(operations.clone(), vec![(2, trace_id), (4, debug_id)])
-            .with_before_enter(vec![trace_id, debug_id])
-            .with_after_exit(vec![trace_id])
-            .build()
-            .unwrap();
+    let block = BasicBlockNodeBuilder::new(operations.clone(), vec![(2, trace_id), (4, debug_id)])
+        .with_before_enter(vec![trace_id, debug_id])
+        .with_after_exit(vec![trace_id])
+        .build()
+        .unwrap();
 
     // Test that MastNodeErrorContext::decorators returns all decorators
     let all_decorators: Vec<_> = block.decorators().collect();
@@ -593,26 +592,6 @@ fn test_decorator_positions() {
     assert_eq!(indexed_positions, expected_indexed_positions);
     assert!(!indexed_positions.contains(&0)); // No before_enter
     assert!(!indexed_positions.contains(&5)); // No after_exit
-
-    // Test that the block preserves all decorator types after modification
-    block.append_before_enter(&[]);
-    block.append_after_exit(&[]);
-
-    let all_decorators_after_mod: Vec<_> = block.decorators().collect();
-    assert_eq!(
-        all_decorators_after_mod.len(),
-        5,
-        "Expected 5 decorators, got {:?}. All decorators: {:?}",
-        all_decorators_after_mod.len(),
-        all_decorators_after_mod.iter().collect::<Vec<_>>()
-    );
-
-    // Verify the new before_enter decorator
-    assert!(all_decorators_after_mod.iter().any(|&(_, id)| id == debug_id));
-
-    // Verify the new after_exit decorators
-    assert!(all_decorators_after_mod.iter().any(|&(_, id)| id == debug_id));
-    assert!(all_decorators_after_mod.iter().any(|&(_, id)| id == trace_id));
 }
 
 proptest! {
