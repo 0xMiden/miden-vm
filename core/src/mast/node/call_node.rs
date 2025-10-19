@@ -74,18 +74,6 @@ impl CallNode {
         })
     }
 
-    /// Returns a new [`CallNode`] from values that are assumed to be correct.
-    /// Should only be used when the source of the inputs is trusted (e.g. deserialization).
-    pub(in crate::mast) fn new_unsafe(callee: MastNodeId, digest: Word) -> Self {
-        Self {
-            callee,
-            is_syscall: false,
-            digest,
-            before_enter: Vec::new(),
-            after_exit: Vec::new(),
-        }
-    }
-
     /// Returns a new [`CallNode`] instantiated with the specified callee and marked as a kernel
     /// call.
     #[allow(dead_code)]
@@ -109,18 +97,6 @@ impl CallNode {
             before_enter: Vec::new(),
             after_exit: Vec::new(),
         })
-    }
-
-    /// Returns a new syscall [`CallNode`] from values that are assumed to be correct.
-    /// Should only be used when the source of the inputs is trusted (e.g. deserialization).
-    pub(in crate::mast) fn new_syscall_unsafe(callee: MastNodeId, digest: Word) -> Self {
-        Self {
-            callee,
-            is_syscall: true,
-            digest,
-            before_enter: Vec::new(),
-            after_exit: Vec::new(),
-        }
     }
 }
 
@@ -524,20 +500,17 @@ impl CallNodeBuilder {
     ) -> Result<MastNodeId, MastForestError> {
         // Use the forced digest if provided, otherwise use a default digest
         // The actual digest computation will be handled when the forest is complete
-        let digest = self.digest.unwrap_or_else(|| {
-            // During deserialization, we can't compute the digest yet because children may not
-            // exist Use a placeholder that will be overridden by the correct digest
-            // from serialization
-            Word::default()
-        });
-
-        let mut node = if self.is_syscall {
-            CallNode::new_syscall_unsafe(self.callee, digest)
-        } else {
-            CallNode::new_unsafe(self.callee, digest)
+        let Some(digest) = self.digest else {
+            panic!("Digest is required for deserialization")
         };
-        node.append_before_enter(&self.before_enter);
-        node.append_after_exit(&self.after_exit);
+
+        let node = CallNode {
+            callee: self.callee,
+            is_syscall: self.is_syscall,
+            digest,
+            before_enter: self.before_enter,
+            after_exit: self.after_exit,
+        };
 
         forest.nodes.push(node.into()).map_err(|_| MastForestError::TooManyNodes)
     }

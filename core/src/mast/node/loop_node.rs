@@ -64,17 +64,6 @@ impl LoopNode {
             after_exit: Vec::new(),
         })
     }
-
-    /// Returns a new [`LoopNode`] from values that are assumed to be correct.
-    /// Should only be used when the source of the inputs is trusted (e.g. deserialization).
-    pub(in crate::mast) fn new_unsafe(body: MastNodeId, digest: Word) -> Self {
-        Self {
-            body,
-            digest,
-            before_enter: Vec::new(),
-            after_exit: Vec::new(),
-        }
-    }
 }
 
 impl LoopNode {
@@ -402,16 +391,16 @@ impl LoopNodeBuilder {
     ) -> Result<MastNodeId, MastForestError> {
         // Use the forced digest if provided, otherwise use a default digest
         // The actual digest computation will be handled when the forest is complete
-        let digest = self.digest.unwrap_or_else(|| {
-            // During deserialization, we can't compute the digest yet because children may not
-            // exist Use a placeholder that will be overridden by the correct digest
-            // from serialization
-            Word::default()
-        });
+        let Some(digest) = self.digest else {
+            panic!("Digest is required for deserialization")
+        };
 
-        let mut node = LoopNode::new_unsafe(self.body, digest);
-        node.append_before_enter(&self.before_enter);
-        node.append_after_exit(&self.after_exit);
+        let node = LoopNode {
+            body: self.body,
+            digest,
+            before_enter: self.before_enter,
+            after_exit: self.after_exit,
+        };
 
         forest.nodes.push(node.into()).map_err(|_| MastForestError::TooManyNodes)
     }

@@ -34,17 +34,6 @@ pub struct ExternalNode {
     after_exit: Vec<DecoratorId>,
 }
 
-impl ExternalNode {
-    /// Returns a new [`ExternalNode`] instantiated with the specified procedure hash.
-    pub(in crate::mast) fn new(procedure_hash: Word) -> Self {
-        Self {
-            digest: procedure_hash,
-            before_enter: Vec::new(),
-            after_exit: Vec::new(),
-        }
-    }
-}
-
 impl MastNodeErrorContext for ExternalNode {
     fn decorators(&self) -> impl Iterator<Item = DecoratedOpLink> {
         self.before_enter.iter().chain(&self.after_exit).copied().enumerate()

@@ -145,24 +145,6 @@ impl BasicBlockNode {
             .map(|(raw_idx, dec_id)| (raw_idx + raw2pad[raw_idx], dec_id))
             .collect()
     }
-
-    /// Returns a new [`BasicBlockNode`] from values that are assumed to be correct.
-    /// Should only be used when the source of the inputs is trusted (e.g. deserialization).
-    pub(in crate::mast) fn new_unsafe(
-        operations: Vec<Operation>,
-        decorators: DecoratorList,
-        digest: Word,
-    ) -> Self {
-        assert!(!operations.is_empty());
-        let op_batches = batch_ops(operations);
-        Self {
-            op_batches,
-            digest,
-            decorators,
-            before_enter: Vec::new(),
-            after_exit: Vec::new(),
-        }
-    }
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -230,8 +212,7 @@ impl BasicBlockNode {
     ///
     /// This is used for serialization to store decorators with raw operation indices.
     pub fn raw_op_indexed_decorators(&self) -> Vec<(usize, DecoratorId)> {
-        RawDecoratorOpLinkIterator::new(&[], &self.decorators, &[], &self.op_batches)
-            .collect()
+        RawDecoratorOpLinkIterator::new(&[], &self.decorators, &[], &self.op_batches).collect()
     }
 
     /// Returns an iterator over the operations in the order in which they appear in the program.
@@ -259,16 +240,6 @@ impl BasicBlockNode {
     /// the program.
     pub fn iter(&self) -> impl Iterator<Item = OperationOrDecorator<'_>> {
         OperationOrDecoratorIterator::new(self)
-    }
-}
-
-//-------------------------------------------------------------------------------------------------
-/// Mutators
-impl BasicBlockNode {
-    /// Used to initialize decorators for the [`BasicBlockNode`]. Replaces the existing decorators
-    /// with the given ['DecoratorList'].
-    pub(in crate::mast) fn set_decorators(&mut self, decorator_list: DecoratorList) {
-        self.decorators = decorator_list;
     }
 }
 

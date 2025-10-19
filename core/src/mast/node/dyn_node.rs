@@ -39,36 +39,6 @@ impl DynNode {
 
 /// Public accessors
 impl DynNode {
-    /// Creates a new [`DynNode`] representing a dynexec operation.
-    pub(in crate::mast) fn new_dyn() -> Self {
-        Self {
-            is_dyncall: false,
-            digest: Word::new([
-                Felt::new(8115106948140260551),
-                Felt::new(13491227816952616836),
-                Felt::new(15015806788322198710),
-                Felt::new(16575543461540527115),
-            ]),
-            before_enter: Vec::new(),
-            after_exit: Vec::new(),
-        }
-    }
-
-    /// Creates a new [`DynNode`] representing a dyncall operation.
-    pub(in crate::mast) fn new_dyncall() -> Self {
-        Self {
-            is_dyncall: true,
-            digest: Word::new([
-                Felt::new(8751004906421739448),
-                Felt::new(13469709002495534233),
-                Felt::new(12584249374630430826),
-                Felt::new(7624899870831503004),
-            ]),
-            before_enter: Vec::new(),
-            after_exit: Vec::new(),
-        }
-    }
-
     /// Returns true if the [`DynNode`] represents a dyncall operation, and false for dynexec.
     pub fn is_dyncall(&self) -> bool {
         self.is_dyncall
@@ -496,12 +466,12 @@ mod tests {
     #[test]
     pub fn test_dyn_node_digest() {
         assert_eq!(
-            DynNode::new_dyn().digest(),
+            DynNodeBuilder::new_dyn().build().digest(),
             Rpo256::merge_in_domain(&[Word::default(), Word::default()], DynNode::DYN_DOMAIN)
         );
 
         assert_eq!(
-            DynNode::new_dyncall().digest(),
+            DynNodeBuilder::new_dyncall().build().digest(),
             Rpo256::merge_in_domain(&[Word::default(), Word::default()], DynNode::DYNCALL_DOMAIN)
         );
     }
