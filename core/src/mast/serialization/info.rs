@@ -37,7 +37,6 @@ impl MastNodeInfo {
         Self { ty, digest: mast_node.digest() }
     }
 
-  
     /// Attempts to convert this [`MastNodeInfo`] into a [`MastNodeBuilder`].
     ///
     /// The `node_count` is the total expected number of nodes in the [`MastForest`] **after

@@ -99,16 +99,6 @@ impl MastForest {
         self.decorators.push(decorator).map_err(|_| MastForestError::TooManyDecorators)
     }
 
-    /// Adds a node to the forest, and returns the associated [`MastNodeId`].
-    ///
-    /// Adding two duplicate nodes will result in two distinct returned [`MastNodeId`]s.
-    pub(crate) fn add_node(
-        &mut self,
-        node: impl Into<MastNode>,
-    ) -> Result<MastNodeId, MastForestError> {
-        self.nodes.push(node.into()).map_err(|_| MastForestError::TooManyNodes)
-    }
-
     /// Marks the given [`MastNodeId`] as being the root of a procedure.
     ///
     /// If the specified node is already marked as a root, this will have no effect.
@@ -146,14 +136,6 @@ impl MastForest {
         self.remap_and_add_nodes(retained_nodes, &id_remappings);
         self.remap_and_add_roots(old_root_ids, &id_remappings);
         id_remappings
-    }
-
-    pub fn append_before_enter(&mut self, node_id: MastNodeId, decorator_ids: &[DecoratorId]) {
-        self[node_id].append_before_enter(decorator_ids)
-    }
-
-    pub fn append_after_exit(&mut self, node_id: MastNodeId, decorator_ids: &[DecoratorId]) {
-        self[node_id].append_after_exit(decorator_ids)
     }
 
     /// Removes all decorators from this MAST forest.
