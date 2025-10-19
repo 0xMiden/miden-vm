@@ -30,6 +30,12 @@ pub trait MastForestContributor {
 
     /// Adds decorators to be executed after this node.
     fn with_after_exit(self, _decorators: impl Into<Vec<crate::mast::DecoratorId>>) -> Self;
+
+    /// Sets a digest to be forced into the built node.
+    ///
+    /// When a digest is set, the builder will use this digest instead of computing
+    /// the normal digest for the node during the build() operation.
+    fn with_digest(self, digest: crate::Word) -> Self;
 }
 
 /// Enum of all MAST node builders that can be added to a forest.
@@ -512,11 +518,13 @@ mod fingerprint_consistency_tests {
 #[cfg(test)]
 mod round_trip_tests {
     use crate::{
-        Decorator, Felt, Operation,
+        Decorator, Felt, Operation, Word,
         mast::{
-            BasicBlockNode, CallNode, DynNode, ExternalNode, JoinNode, LoopNode, MastForest,
-            MastForestError, MastNode, MastNodeExt, SplitNode,
+            BasicBlockNode, BasicBlockNodeBuilder, CallNode, DynNode, ExternalNode, JoinNode,
+            JoinNodeBuilder, LoopNode, MastForest, MastForestError, MastNode, MastNodeBuilder,
+            MastNodeExt, SplitNode,
         },
+        mast::node::mast_forest_contributor::MastForestContributor,
     };
 
     /// Helper function to create a test forest with some nodes and decorators
@@ -756,5 +764,73 @@ mod round_trip_tests {
 
         assert_eq!(with_extra_decorators, round_trip_basic_block);
         Ok(())
+    }
+
+    #[test]
+    fn test_join_node_builder_round_trip_with_digest() {
+        let mut forest = MastForest::new();
+
+        // create two basic block nodes to use as children for the join node
+        let add_builder = BasicBlockNodeBuilder::new(vec![Operation::Add], vec![]);
+        let mul_builder = BasicBlockNodeBuilder::new(vec![Operation::Mul], vec![]);
+
+        // add children to forest and build node
+        let child1 = add_builder.add_to_forest(&mut forest).unwrap();
+        let child2 = mul_builder.add_to_forest(&mut forest).unwrap();
+        let join_builder1 = JoinNodeBuilder::new([child1, child2]);
+        let join_id = join_builder1.add_to_forest(&mut forest).unwrap();
+
+        // perform round-trip
+        let join_node = forest.get_node_by_id(join_id).unwrap().clone();
+        let rebuilt_node = join_node.clone().to_builder().build(&forest).unwrap();
+
+        assert_eq!(join_node, rebuilt_node);
+
+        // Test digest forcing
+        let forced_join_digest =
+            Word::new([Felt::new(5), Felt::new(6), Felt::new(7), Felt::new(8)]);
+        let join_builder2 =
+            JoinNodeBuilder::new([child1, child2]).with_digest(forced_join_digest);
+        let join_node2 = join_builder2
+            .build(&forest)
+            .expect("Failed to build join node with forced digest");
+
+        assert_eq!(
+            join_node2.digest(),
+            forced_join_digest,
+            "Forced digest should be used for join node"
+        );
+    }
+
+    #[test]
+    fn test_mast_node_builder_enum_digest_forcing() {
+        let forest = MastForest::new();
+
+        let mast_builder1 = MastNodeBuilder::BasicBlock(BasicBlockNodeBuilder::new(
+            vec![Operation::Push(Felt::new(10))],
+            vec![],
+        ));
+        let mast_node1 = mast_builder1.build(&forest).expect("Failed to build mast node1");
+        let mast_normal_digest = mast_node1.digest();
+
+        let forced_mast_digest =
+            Word::new([Felt::new(9), Felt::new(10), Felt::new(11), Felt::new(12)]);
+        let mast_builder2 = MastNodeBuilder::BasicBlock(
+            BasicBlockNodeBuilder::new(vec![Operation::Push(Felt::new(10))], vec![])
+                .with_digest(forced_mast_digest),
+        );
+        let mast_node2 = mast_builder2
+            .build(&forest)
+            .expect("Failed to build mast node with forced digest");
+
+        assert_ne!(
+            mast_normal_digest, forced_mast_digest,
+            "Normal and forced digests should be different"
+        );
+        assert_eq!(
+            mast_node2.digest(),
+            forced_mast_digest,
+            "Forced digest should be used for mast node builder enum"
+        );
     }
 }

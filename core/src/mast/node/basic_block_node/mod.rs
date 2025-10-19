@@ -942,6 +942,7 @@ pub struct BasicBlockNodeBuilder {
     decorators: DecoratorList,
     before_enter: Vec<DecoratorId>,
     after_exit: Vec<DecoratorId>,
+    digest: Option<Word>,
 }
 
 impl BasicBlockNodeBuilder {
@@ -952,6 +953,7 @@ impl BasicBlockNodeBuilder {
             decorators,
             before_enter: Vec::new(),
             after_exit: Vec::new(),
+            digest: None,
         }
     }
 
@@ -965,10 +967,13 @@ impl BasicBlockNodeBuilder {
         #[cfg(debug_assertions)]
         validate_decorators(self.operations.len(), &self.decorators);
 
-        let (op_batches, digest) = batch_and_hash_ops(self.operations);
+        let (op_batches, computed_digest) = batch_and_hash_ops(self.operations);
         // the prior line may have inserted some padding Noops in the op_batches
         // the decorator mapping should still point to the correct operation when that happens
         let reflowed_decorators = BasicBlockNode::adjust_decorators(self.decorators, &op_batches);
+
+        // Use the forced digest if provided, otherwise use the computed digest
+        let digest = self.digest.unwrap_or(computed_digest);
 
         Ok(BasicBlockNode {
             op_batches,
@@ -996,8 +1001,9 @@ impl MastForestContributor for BasicBlockNodeBuilder {
         // For BasicBlockNode, we need to implement custom logic because BasicBlock has special
         // decorator handling with operation indices that other nodes don't have
 
-        // Compute digest
-        let (op_batches, digest) = batch_and_hash_ops(self.operations.clone());
+        // Compute digest - use forced digest if available, otherwise compute normally
+        let (op_batches, computed_digest) = batch_and_hash_ops(self.operations.clone());
+        let digest = self.digest.unwrap_or(computed_digest);
 
         // Hash before_enter decorators first
         let mut bytes_to_hash = Vec::new();
@@ -1061,6 +1067,11 @@ impl MastForestContributor for BasicBlockNodeBuilder {
 
     fn with_after_exit(mut self, decorators: impl Into<Vec<crate::mast::DecoratorId>>) -> Self {
         self.after_exit = decorators.into();
+        self
+    }
+
+    fn with_digest(mut self, digest: crate::Word) -> Self {
+        self.digest = Some(digest);
         self
     }
 }

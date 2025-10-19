@@ -261,6 +261,7 @@ pub struct SplitNodeBuilder {
     branches: [MastNodeId; 2],
     before_enter: Vec<DecoratorId>,
     after_exit: Vec<DecoratorId>,
+    digest: Option<Word>,
 }
 
 impl SplitNodeBuilder {
@@ -270,6 +271,7 @@ impl SplitNodeBuilder {
             branches,
             before_enter: Vec::new(),
             after_exit: Vec::new(),
+            digest: None,
         }
     }
 
@@ -281,7 +283,11 @@ impl SplitNodeBuilder {
         } else if self.branches[1].to_usize() >= forest_len {
             return Err(MastForestError::NodeIdOverflow(self.branches[1], forest_len));
         }
-        let digest = {
+
+        // Use the forced digest if provided, otherwise compute the digest
+        let digest = if let Some(forced_digest) = self.digest {
+            forced_digest
+        } else {
             let if_branch_hash = mast_forest[self.branches[0]].digest();
             let else_branch_hash = mast_forest[self.branches[1]].digest();
 
@@ -315,6 +321,11 @@ impl MastForestContributor for SplitNodeBuilder {
         self
     }
 
+    fn with_digest(mut self, digest: crate::Word) -> Self {
+        self.digest = Some(digest);
+        self
+    }
+
     fn fingerprint_for_node(
         &self,
         forest: &MastForest,
@@ -327,8 +338,10 @@ impl MastForestContributor for SplitNodeBuilder {
             &self.before_enter,
             &self.after_exit,
             &self.branches,
-            // Compute digest the same way as in build()
-            {
+            // Use the forced digest if available, otherwise compute the digest
+            if let Some(forced_digest) = self.digest {
+                forced_digest
+            } else {
                 let if_branch_hash = forest[self.branches[0]].digest();
                 let else_branch_hash = forest[self.branches[1]].digest();
 
@@ -345,6 +358,7 @@ impl MastForestContributor for SplitNodeBuilder {
             branches: [self.branches[0].remap(remapping), self.branches[1].remap(remapping)],
             before_enter: self.before_enter,
             after_exit: self.after_exit,
+            digest: self.digest,
         }
     }
 }

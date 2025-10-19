@@ -345,6 +345,12 @@ fn generate_mast_forest_contributor_impl(
                     #(#enum_name::#variant_names(field) => #enum_name::#variant_names(field.with_after_exit(decorators))),*
                 }
             }
+
+            fn with_digest(self, digest: crate::Word) -> Self {
+                match self {
+                    #(#enum_name::#variant_names(field) => #enum_name::#variant_names(field.with_digest(digest))),*
+                }
+            }
         }
     }
 }

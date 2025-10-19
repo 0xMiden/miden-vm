@@ -20,6 +20,7 @@ use crate::{
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DynNode {
     is_dyncall: bool,
+    digest: Word,
     #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Vec::is_empty"))]
     before_enter: Vec<DecoratorId>,
     #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Vec::is_empty"))]
@@ -41,6 +42,12 @@ impl DynNode {
     pub(in crate::mast) fn new_dyn() -> Self {
         Self {
             is_dyncall: false,
+            digest: Word::new([
+                Felt::new(8115106948140260551),
+                Felt::new(13491227816952616836),
+                Felt::new(15015806788322198710),
+                Felt::new(16575543461540527115),
+            ]),
             before_enter: Vec::new(),
             after_exit: Vec::new(),
         }
@@ -50,6 +57,12 @@ impl DynNode {
     pub(in crate::mast) fn new_dyncall() -> Self {
         Self {
             is_dyncall: true,
+            digest: Word::new([
+                Felt::new(8751004906421739448),
+                Felt::new(13469709002495534233),
+                Felt::new(12584249374630430826),
+                Felt::new(7624899870831503004),
+            ]),
             before_enter: Vec::new(),
             after_exit: Vec::new(),
         }
@@ -165,32 +178,8 @@ impl fmt::Display for DynNodePrettyPrint<'_> {
 
 impl MastNodeExt for DynNode {
     /// Returns a commitment to a Dyn node.
-    ///
-    /// The commitment is computed by hashing two empty words ([ZERO; 4]) in the domain defined
-    /// by [Self::DYN_DOMAIN] or [Self::DYNCALL_DOMAIN], i.e.:
-    ///
-    /// ```
-    /// # use miden_core::mast::DynNode;
-    /// # use miden_crypto::{Word, hash::rpo::Rpo256 as Hasher};
-    /// Hasher::merge_in_domain(&[Word::default(), Word::default()], DynNode::DYN_DOMAIN);
-    /// Hasher::merge_in_domain(&[Word::default(), Word::default()], DynNode::DYNCALL_DOMAIN);
-    /// ```
     fn digest(&self) -> Word {
-        if self.is_dyncall {
-            Word::new([
-                Felt::new(8751004906421739448),
-                Felt::new(13469709002495534233),
-                Felt::new(12584249374630430826),
-                Felt::new(7624899870831503004),
-            ])
-        } else {
-            Word::new([
-                Felt::new(8115106948140260551),
-                Felt::new(13491227816952616836),
-                Felt::new(15015806788322198710),
-                Felt::new(16575543461540527115),
-            ])
-        }
+        self.digest
     }
 
     /// Returns the decorators to be executed before this node is executed.
@@ -266,6 +255,7 @@ pub struct DynNodeBuilder {
     is_dyncall: bool,
     before_enter: Vec<DecoratorId>,
     after_exit: Vec<DecoratorId>,
+    digest: Option<Word>,
 }
 
 impl DynNodeBuilder {
@@ -275,6 +265,7 @@ impl DynNodeBuilder {
             is_dyncall: false,
             before_enter: Vec::new(),
             after_exit: Vec::new(),
+            digest: None,
         }
     }
 
@@ -284,13 +275,34 @@ impl DynNodeBuilder {
             is_dyncall: true,
             before_enter: Vec::new(),
             after_exit: Vec::new(),
+            digest: None,
         }
     }
 
     /// Builds the DynNode with the specified decorators.
     pub fn build(self) -> DynNode {
+        // Use the forced digest if provided, otherwise use the default digest
+        let digest = if let Some(forced_digest) = self.digest {
+            forced_digest
+        } else if self.is_dyncall {
+            Word::new([
+                Felt::new(8751004906421739448),
+                Felt::new(13469709002495534233),
+                Felt::new(12584249374630430826),
+                Felt::new(7624899870831503004),
+            ])
+        } else {
+            Word::new([
+                Felt::new(8115106948140260551),
+                Felt::new(13491227816952616836),
+                Felt::new(15015806788322198710),
+                Felt::new(16575543461540527115),
+            ])
+        };
+
         DynNode {
             is_dyncall: self.is_dyncall,
+            digest,
             before_enter: self.before_enter,
             after_exit: self.after_exit,
         }
@@ -315,6 +327,11 @@ impl MastForestContributor for DynNodeBuilder {
         self
     }
 
+    fn with_digest(mut self, digest: crate::Word) -> Self {
+        self.digest = Some(digest);
+        self
+    }
+
     fn fingerprint_for_node(
         &self,
         forest: &MastForest,
@@ -328,8 +345,10 @@ impl MastForestContributor for DynNodeBuilder {
             &self.before_enter,
             &self.after_exit,
             &[], // DynNode has no children
-            // Use the same hardcoded digest values as in DynNode::digest()
-            if self.is_dyncall {
+            // Use the forced digest if available, otherwise use the default digest values
+            if let Some(forced_digest) = self.digest {
+                forced_digest
+            } else if self.is_dyncall {
                 miden_crypto::Word::new([
                     miden_crypto::Felt::new(8751004906421739448),
                     miden_crypto::Felt::new(13469709002495534233),
@@ -348,7 +367,7 @@ impl MastForestContributor for DynNodeBuilder {
     }
 
     fn remap_children(self, _remapping: &crate::mast::Remapping) -> Self {
-        // DynNode has no children to remap, so return self unchanged
+        // DynNode has no children to remap, but preserve the digest
         self
     }
 }
