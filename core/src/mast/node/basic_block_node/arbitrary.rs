@@ -224,9 +224,10 @@ impl Arbitrary for MastForest {
                         .expect("Failed to add decorator");
                 }
 
-                // Insert the generated blocks into the forest
+                // Insert the generated blocks into the forest using builders
                 for block in blocks {
-                    let node_id = forest.add_node(block).expect("Failed to add block");
+                    let builder = block.to_builder();
+                    let node_id = builder.add_to_forest(&mut forest).expect("Failed to add block");
                     forest.make_root(node_id);
                 }
 
@@ -363,8 +364,9 @@ impl Arbitrary for Program {
                 forest.add_decorator(decorator).expect("Failed to add decorator");
             }
 
-            // Add the node to the forest
-            let node_id = forest.add_node(node).expect("Failed to add node");
+            // Add the node to the forest using builder
+            let builder = node.to_builder();
+            let node_id = builder.add_to_forest(&mut forest).expect("Failed to add node");
 
             // Since we added a node, it should be available as a procedure root
             // If not, we need to make it a root manually
