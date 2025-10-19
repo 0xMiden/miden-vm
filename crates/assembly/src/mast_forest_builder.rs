@@ -11,8 +11,8 @@ use miden_core::{
     AdviceMap, Decorator, DecoratorList, Felt, Operation, Word,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DecoratorFingerprint, DecoratorId, DynNodeBuilder,
-        ExternalNodeBuilder, JoinNodeBuilder, MastForest, MastForestContributor, MastNode,
-        MastNodeExt, MastNodeFingerprint, MastNodeId, Remapping, SubtreeIterator,
+        ExternalNodeBuilder, JoinNodeBuilder, MastForest, MastForestContributor, MastForestError,
+        MastNode, MastNodeExt, MastNodeFingerprint, MastNodeId, Remapping, SubtreeIterator,
     },
 };
 
@@ -544,18 +544,38 @@ impl MastForestBuilder {
     ///
     /// If other decorators are already present, the new decorators are added to the end of the
     /// list.
-    pub fn append_before_enter(&mut self, node_id: MastNodeId, decorator_ids: &[DecoratorId]) {
-        self.mast_forest[node_id].append_before_enter(decorator_ids);
+    pub fn append_before_enter(
+        &mut self,
+        node_id: MastNodeId,
+        decorator_ids: Vec<DecoratorId>,
+    ) -> Result<(), MastForestError> {
+        // Extract the existing node and convert it to a builder
+        let mut decorated_builder = self.mast_forest[node_id].clone().to_builder();
+        decorated_builder.append_before_enter(decorator_ids);
+        let new_node_fingerprint =
+            decorated_builder.fingerprint_for_node(&self.mast_forest, &self.hash_by_node_id)?;
+        self.mast_forest[node_id] = decorated_builder.build(&self.mast_forest)?;
 
-        let new_node_fingerprint = self.fingerprint_for_node(&self[node_id]);
         self.hash_by_node_id.insert(node_id, new_node_fingerprint);
+        self.node_id_by_fingerprint.insert(new_node_fingerprint, node_id);
+        Ok(())
     }
 
-    pub fn append_after_exit(&mut self, node_id: MastNodeId, decorator_ids: &[DecoratorId]) {
-        self.mast_forest[node_id].append_after_exit(decorator_ids);
+    pub fn append_after_exit(
+        &mut self,
+        node_id: MastNodeId,
+        decorator_ids: Vec<DecoratorId>,
+    ) -> Result<(), MastForestError> {
+        // Extract the existing node and convert it to a builder
+        let mut decorated_builder = self.mast_forest[node_id].clone().to_builder();
+        decorated_builder.append_after_exit(decorator_ids);
+        let new_node_fingerprint =
+            decorated_builder.fingerprint_for_node(&self.mast_forest, &self.hash_by_node_id)?;
+        self.mast_forest[node_id] = decorated_builder.build(&self.mast_forest)?;
 
-        let new_node_fingerprint = self.fingerprint_for_node(&self[node_id]);
         self.hash_by_node_id.insert(node_id, new_node_fingerprint);
+        self.node_id_by_fingerprint.insert(new_node_fingerprint, node_id);
+        Ok(())
     }
 }
 
