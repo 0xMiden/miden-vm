@@ -275,6 +275,7 @@ pub struct LoopNodeBuilder {
     body: MastNodeId,
     before_enter: Vec<DecoratorId>,
     after_exit: Vec<DecoratorId>,
+    digest: Option<Word>,
 }
 
 impl LoopNodeBuilder {
@@ -284,6 +285,7 @@ impl LoopNodeBuilder {
             body,
             before_enter: Vec::new(),
             after_exit: Vec::new(),
+            digest: None,
         }
     }
 
@@ -292,7 +294,11 @@ impl LoopNodeBuilder {
         if self.body.to_usize() >= mast_forest.nodes.len() {
             return Err(MastForestError::NodeIdOverflow(self.body, mast_forest.nodes.len()));
         }
-        let digest = {
+
+        // Use the forced digest if provided, otherwise compute the digest
+        let digest = if let Some(forced_digest) = self.digest {
+            forced_digest
+        } else {
             let body_hash = mast_forest[self.body].digest();
 
             hasher::merge_in_domain(&[body_hash, Word::default()], LoopNode::DOMAIN)
@@ -325,6 +331,11 @@ impl MastForestContributor for LoopNodeBuilder {
         self
     }
 
+    fn with_digest(mut self, digest: crate::Word) -> Self {
+        self.digest = Some(digest);
+        self
+    }
+
     fn fingerprint_for_node(
         &self,
         forest: &MastForest,
@@ -337,8 +348,10 @@ impl MastForestContributor for LoopNodeBuilder {
             &self.before_enter,
             &self.after_exit,
             &[self.body],
-            // Compute digest the same way as in build()
-            {
+            // Use the forced digest if available, otherwise compute the digest
+            if let Some(forced_digest) = self.digest {
+                forced_digest
+            } else {
                 let body_hash = forest[self.body].digest();
 
                 crate::chiplets::hasher::merge_in_domain(
@@ -354,6 +367,7 @@ impl MastForestContributor for LoopNodeBuilder {
             body: self.body.remap(remapping),
             before_enter: self.before_enter,
             after_exit: self.after_exit,
+            digest: self.digest,
         }
     }
 }

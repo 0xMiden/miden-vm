@@ -281,6 +281,11 @@ impl MastForestContributor for ExternalNodeBuilder {
         self
     }
 
+    fn with_digest(mut self, digest: crate::Word) -> Self {
+        self.digest = digest;
+        self
+    }
+
     fn fingerprint_for_node(
         &self,
         forest: &MastForest,

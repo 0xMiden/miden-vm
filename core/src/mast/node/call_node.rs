@@ -373,6 +373,7 @@ pub struct CallNodeBuilder {
     is_syscall: bool,
     before_enter: Vec<DecoratorId>,
     after_exit: Vec<DecoratorId>,
+    digest: Option<Word>,
 }
 
 impl CallNodeBuilder {
@@ -383,6 +384,7 @@ impl CallNodeBuilder {
             is_syscall: false,
             before_enter: Vec::new(),
             after_exit: Vec::new(),
+            digest: None,
         }
     }
 
@@ -393,6 +395,7 @@ impl CallNodeBuilder {
             is_syscall: true,
             before_enter: Vec::new(),
             after_exit: Vec::new(),
+            digest: None,
         }
     }
 
@@ -401,7 +404,11 @@ impl CallNodeBuilder {
         if self.callee.to_usize() >= mast_forest.nodes.len() {
             return Err(MastForestError::NodeIdOverflow(self.callee, mast_forest.nodes.len()));
         }
-        let digest = {
+
+        // Use the forced digest if provided, otherwise compute the digest
+        let digest = if let Some(forced_digest) = self.digest {
+            forced_digest
+        } else {
             let callee_digest = mast_forest[self.callee].digest();
             let domain = if self.is_syscall {
                 CallNode::SYSCALL_DOMAIN
@@ -442,8 +449,10 @@ impl MastForestContributor for CallNodeBuilder {
             &self.before_enter,
             &self.after_exit,
             &[self.callee],
-            // Compute digest the same way as in build()
-            {
+            // Use the forced digest if available, otherwise compute the digest
+            if let Some(forced_digest) = self.digest {
+                forced_digest
+            } else {
                 let callee_digest = forest[self.callee].digest();
                 let domain = if self.is_syscall {
                     CallNode::SYSCALL_DOMAIN
@@ -465,6 +474,7 @@ impl MastForestContributor for CallNodeBuilder {
             is_syscall: self.is_syscall,
             before_enter: self.before_enter,
             after_exit: self.after_exit,
+            digest: self.digest,
         }
     }
 
@@ -475,6 +485,11 @@ impl MastForestContributor for CallNodeBuilder {
 
     fn with_after_exit(mut self, decorators: impl Into<Vec<crate::mast::DecoratorId>>) -> Self {
         self.after_exit = decorators.into();
+        self
+    }
+
+    fn with_digest(mut self, digest: crate::Word) -> Self {
+        self.digest = Some(digest);
         self
     }
 }

@@ -294,6 +294,7 @@ pub struct JoinNodeBuilder {
     children: [MastNodeId; 2],
     before_enter: Vec<DecoratorId>,
     after_exit: Vec<DecoratorId>,
+    digest: Option<Word>,
 }
 
 impl JoinNodeBuilder {
@@ -303,6 +304,7 @@ impl JoinNodeBuilder {
             children,
             before_enter: Vec::new(),
             after_exit: Vec::new(),
+            digest: None,
         }
     }
 
@@ -314,7 +316,11 @@ impl JoinNodeBuilder {
         } else if self.children[1].to_usize() >= forest_len {
             return Err(MastForestError::NodeIdOverflow(self.children[1], forest_len));
         }
-        let digest = {
+
+        // Use the forced digest if provided, otherwise compute the digest
+        let digest = if let Some(forced_digest) = self.digest {
+            forced_digest
+        } else {
             let left_child_hash = mast_forest[self.children[0]].digest();
             let right_child_hash = mast_forest[self.children[1]].digest();
 
@@ -348,6 +354,11 @@ impl MastForestContributor for JoinNodeBuilder {
         self
     }
 
+    fn with_digest(mut self, digest: crate::Word) -> Self {
+        self.digest = Some(digest);
+        self
+    }
+
     fn fingerprint_for_node(
         &self,
         forest: &MastForest,
@@ -360,8 +371,10 @@ impl MastForestContributor for JoinNodeBuilder {
             &self.before_enter,
             &self.after_exit,
             &self.children,
-            // Compute digest the same way as in build()
-            {
+            // Use the forced digest if available, otherwise compute the digest
+            if let Some(forced_digest) = self.digest {
+                forced_digest
+            } else {
                 let left_child_hash = forest[self.children[0]].digest();
                 let right_child_hash = forest[self.children[1]].digest();
 
@@ -378,6 +391,7 @@ impl MastForestContributor for JoinNodeBuilder {
             children: [self.children[0].remap(remapping), self.children[1].remap(remapping)],
             before_enter: self.before_enter,
             after_exit: self.after_exit,
+            digest: self.digest,
         }
     }
 }
