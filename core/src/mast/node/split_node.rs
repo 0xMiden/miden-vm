@@ -42,6 +42,7 @@ impl SplitNode {
 
 /// Constructors
 impl SplitNode {
+    #[allow(dead_code)]
     pub(in crate::mast) fn new(
         branches: [MastNodeId; 2],
         mast_forest: &MastForest,

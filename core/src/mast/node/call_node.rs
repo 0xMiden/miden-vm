@@ -51,6 +51,7 @@ impl CallNode {
 /// Constructors
 impl CallNode {
     /// Returns a new [`CallNode`] instantiated with the specified callee.
+    #[allow(dead_code)]
     pub(in crate::mast) fn new(
         callee: MastNodeId,
         mast_forest: &MastForest,

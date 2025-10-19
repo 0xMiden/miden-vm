@@ -43,6 +43,7 @@ impl LoopNode {
 /// Constructors
 impl LoopNode {
     /// Returns a new [`LoopNode`] instantiated with the specified body node.
+    #[allow(dead_code)]
     pub(in crate::mast) fn new(
         body: MastNodeId,
         mast_forest: &MastForest,
