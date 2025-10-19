@@ -559,64 +559,15 @@ mod fingerprint_consistency_tests {
 
 #[cfg(test)]
 mod round_trip_tests {
+    use miden_crypto::Felt;
+
     use crate::{
-        Decorator, Felt, Operation, Word,
+        Operation, Word,
         mast::{
-            BasicBlockNode, BasicBlockNodeBuilder, JoinNodeBuilder, MastForest, MastForestError,
-            MastNode, MastNodeBuilder, MastNodeExt,
+            BasicBlockNodeBuilder, JoinNodeBuilder, MastForest, MastNodeBuilder, MastNodeExt,
             node::mast_forest_contributor::MastForestContributor,
         },
     };
-
-    /// Helper function to create a test forest with some nodes and decorators
-    fn create_test_forest() -> MastForest {
-        let mut forest = MastForest::new();
-
-        // Add some decorators
-        let trace_decorator = forest.add_decorator(Decorator::Trace(1)).unwrap();
-        let _ = forest.add_decorator(Decorator::Trace(2)).unwrap();
-
-        // Add a basic block node
-        let _basic_block_node = BasicBlockNodeBuilder::new(
-            vec![Operation::Add, Operation::Mul],
-            vec![(0, trace_decorator)],
-        )
-        .add_to_forest(&mut forest)
-        .unwrap();
-
-        forest
-    }
-
-    #[test]
-    fn test_round_trip_with_complex_decorators() -> Result<(), MastForestError> {
-        let mut forest = create_test_forest();
-
-        // Add multiple decorators
-        let deco1 = forest.add_decorator(Decorator::Trace(1)).unwrap();
-        let deco2 = forest.add_decorator(Decorator::Trace(2)).unwrap();
-        let deco3 = forest.add_decorator(Decorator::Trace(3)).unwrap();
-
-        // Create a basic block with multiple decorators
-        let original = BasicBlockNode::new(
-            vec![Operation::Add, Operation::Mul, Operation::Push(Felt::new(42))],
-            vec![(0, deco1), (1, deco2), (2, deco3)],
-        )?;
-
-        // Add before/after decorators
-        let mut with_extra_decorators = original.clone();
-        with_extra_decorators.append_before_enter(&[deco1, deco2]);
-        with_extra_decorators.append_after_exit(&[deco3]);
-
-        let round_trip = with_extra_decorators.clone().to_builder().build()?.into();
-
-        let round_trip_basic_block = match round_trip {
-            MastNode::Block(node) => node,
-            _ => panic!("Expected BasicBlockNode"),
-        };
-
-        assert_eq!(with_extra_decorators, round_trip_basic_block);
-        Ok(())
-    }
 
     #[test]
     fn test_join_node_builder_round_trip_with_digest() {

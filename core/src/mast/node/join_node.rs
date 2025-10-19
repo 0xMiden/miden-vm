@@ -195,15 +195,6 @@ impl MastNodeExt for JoinNode {
     fn after_exit(&self) -> &[DecoratorId] {
         &self.after_exit
     }
-    /// Sets the list of decorators to be executed before this node.
-    fn append_before_enter(&mut self, decorator_ids: &[DecoratorId]) {
-        self.before_enter.extend_from_slice(decorator_ids);
-    }
-
-    /// Sets the list of decorators to be executed after this node.
-    fn append_after_exit(&mut self, decorator_ids: &[DecoratorId]) {
-        self.after_exit.extend_from_slice(decorator_ids);
-    }
 
     /// Removes all decorators from this node.
     fn remove_decorators(&mut self) {
