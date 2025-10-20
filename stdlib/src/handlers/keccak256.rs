@@ -27,18 +27,15 @@ use alloc::{vec, vec::Vec};
 use core::array;
 
 use miden_core::{
-    Felt, Word, ZERO, declare_event,
+    EventName, Felt, Word, ZERO,
     precompile::{PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileVerifier},
 };
 use miden_crypto::hash::{keccak::Keccak256, rpo::Rpo256};
 use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessState};
 
-// Declare the keccak256 hash_memory event with automatic ID validation
-declare_event!(
-    KECCAK_HASH_MEMORY_EVENT_ID,
-    "stdlib::hash::keccak256::hash_memory",
-    5779517439479051634u64
-);
+/// Event name for the keccak256 hash_memory operation.
+pub const KECCAK_HASH_MEMORY_EVENT_NAME: EventName =
+    EventName::new("stdlib::hash::keccak256::hash_memory");
 
 pub struct KeccakPrecompile;
 
@@ -289,10 +286,10 @@ impl KeccakPreimage {
     }
 
     /// Returns the tag used to identify the commitment to the precompile. defined as
-    /// `[KECCAK_HASH_MEMORY_EVENT_ID, preimage_u8.len(), 0, 0]`.
+    /// `[event_id, preimage_u8.len(), 0, 0]` where event_id is computed from the event name.
     fn precompile_tag(&self) -> Word {
         [
-            KECCAK_HASH_MEMORY_EVENT_ID.id().as_felt(),
+            KECCAK_HASH_MEMORY_EVENT_NAME.to_event_id().as_felt(),
             Felt::new(self.as_ref().len() as u64),
             ZERO,
             ZERO,
@@ -303,7 +300,8 @@ impl KeccakPreimage {
 
 impl From<KeccakPreimage> for PrecompileRequest {
     fn from(preimage: KeccakPreimage) -> Self {
-        PrecompileRequest::new(KECCAK_HASH_MEMORY_EVENT_ID.id(), preimage.into_inner())
+        let event_id = KECCAK_HASH_MEMORY_EVENT_NAME.to_event_id();
+        PrecompileRequest::new(event_id, preimage.into_inner())
     }
 }
 

@@ -7,14 +7,13 @@
 use alloc::{format, string::String, vec, vec::Vec};
 
 use miden_core::{
-    Felt, WORD_SIZE, Word,
+    EventName, Felt, WORD_SIZE, Word,
     crypto::merkle::{EmptySubtreeRoots, SMT_DEPTH, Smt},
-    declare_event,
 };
 use miden_processor::{AdviceMutation, EventError, ProcessState};
 
-// Declare the smt_peek event with automatic ID validation
-declare_event!(SMT_PEEK_EVENT_ID, "stdlib::collections::smt::smt_peek", 3580205917336794987u64);
+/// Event name for the smt_peek operation.
+pub const SMT_PEEK_EVENT_NAME: EventName = EventName::new("stdlib::collections::smt::smt_peek");
 
 /// SMT_PEEK system event handler.
 ///

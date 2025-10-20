@@ -5,7 +5,7 @@
 
 use alloc::{vec, vec::Vec};
 
-use miden_core::{ZERO, declare_event};
+use miden_core::{EventName, ZERO};
 use miden_processor::{AdviceMutation, EventError, ProcessState};
 
 use crate::handlers::u64_to_u32_elements;
@@ -13,12 +13,9 @@ use crate::handlers::u64_to_u32_elements;
 /// Falcon signature prime.
 const M: u64 = 12289;
 
-// Declare the falcon_div event with automatic ID validation
-declare_event!(
-    FALCON_DIV_EVENT_ID,
-    "stdlib::crypto::dsa::rpo_falcon512::falcon_div",
-    9834516640389212175u64
-);
+/// Event name for the falcon_div operation.
+pub const FALCON_DIV_EVENT_NAME: EventName =
+    EventName::new("stdlib::crypto::dsa::rpo_falcon512::falcon_div");
 
 /// FALCON_DIV system event handler.
 ///

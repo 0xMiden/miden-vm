@@ -5,7 +5,7 @@ use alloc::{sync::Arc, vec::Vec};
 
 use miden_air::RowIndex;
 use miden_core::{
-    Felt, NamedEvent, QuadFelt, Word,
+    EventName, Felt, QuadFelt, Word,
     mast::{DecoratorId, MastForest, MastNodeErrorContext, MastNodeId},
     stack::MIN_STACK_DEPTH,
     utils::to_hex,
@@ -75,14 +75,14 @@ pub enum ExecutionError {
         label: SourceSpan,
         #[source_code]
         source_file: Option<Arc<SourceFile>>,
-        event: NamedEvent,
+        event: EventName,
         #[source]
         error: EventError,
     },
     #[error("attempted to add event handler for '{event}' (already registered)")]
-    DuplicateEventHandler { event: NamedEvent },
+    DuplicateEventHandler { event: EventName },
     #[error("attempted to add event handler for '{event}' (reserved for system events)")]
-    ReservedEventId { event: NamedEvent },
+    ReservedEventId { event: EventName },
     #[error("assertion failed at clock cycle {clk} with error {}",
       match err_msg {
         Some(msg) => format!("message: {msg}"),
@@ -304,7 +304,7 @@ impl ExecutionError {
         Self::DynamicNodeNotFound { label, source_file, digest }
     }
 
-    pub fn event_error(error: EventError, event: NamedEvent, err_ctx: &impl ErrorContext) -> Self {
+    pub fn event_error(error: EventError, event: EventName, err_ctx: &impl ErrorContext) -> Self {
         let (label, source_file) = err_ctx.label_and_source_file();
 
         Self::EventError { label, source_file, event, error }

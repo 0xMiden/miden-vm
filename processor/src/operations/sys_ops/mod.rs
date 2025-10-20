@@ -1,4 +1,4 @@
-use miden_core::{EventId, Felt, NamedEvent, mast::MastForest, sys_events::SystemEvent};
+use miden_core::{EventId, EventName, Felt, mast::MastForest, sys_events::SystemEvent};
 
 use super::{
     super::{
@@ -154,9 +154,9 @@ impl Process {
         } else {
             let clk = process.clk();
             let mutations = host.on_event(&process).map_err(|err| {
-                let event = host
-                    .resolve_event(event_id)
-                    .unwrap_or_else(|| NamedEvent::from_name_and_id("unknown event", event_id));
+                let event = host.resolve_event(event_id).cloned().unwrap_or_else(|| {
+                    EventName::from_string(format!("unknown event (ID: {})", event_id))
+                });
                 ExecutionError::event_error(err, event, err_ctx)
             })?;
             self.advice

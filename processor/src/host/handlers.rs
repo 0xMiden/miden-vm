@@ -6,7 +6,7 @@ use alloc::{
 };
 use core::{error::Error, fmt, fmt::Debug};
 
-use miden_core::{DebugOptions, EventId, NamedEvent};
+use miden_core::{DebugOptions, EventId, EventName};
 
 use crate::{AdviceMutation, ExecutionError, ProcessState};
 
@@ -101,7 +101,7 @@ pub type EventError = Box<dyn Error + Send + Sync + 'static>;
 /// ```
 #[derive(Default)]
 pub struct EventHandlerRegistry {
-    handlers: BTreeMap<EventId, (NamedEvent, Arc<dyn EventHandler>)>,
+    handlers: BTreeMap<EventId, (EventName, Arc<dyn EventHandler>)>,
 }
 
 impl EventHandlerRegistry {
@@ -109,13 +109,16 @@ impl EventHandlerRegistry {
         Self { handlers: BTreeMap::new() }
     }
 
-    /// Registers an [`EventHandler`] with a given named event.
+    /// Registers an [`EventHandler`] with a given event name.
+    ///
+    /// The [`EventId`] is computed from the event name during registration.
     pub fn register(
         &mut self,
-        event: NamedEvent,
+        event: EventName,
         handler: Arc<dyn EventHandler>,
     ) -> Result<(), ExecutionError> {
-        let id = event.id();
+        // Compute EventId from the event name
+        let id = event.to_event_id();
         if id.is_reserved() {
             return Err(ExecutionError::ReservedEventId { event: event.clone() });
         }
@@ -132,9 +135,9 @@ impl EventHandlerRegistry {
         self.handlers.remove(&id).is_some()
     }
 
-    /// Returns the [`NamedEvent`] registered for `id`, if any.
-    pub fn resolve_event(&self, id: EventId) -> Option<NamedEvent> {
-        self.handlers.get(&id).map(|(event, _)| event.clone())
+    /// Returns the [`EventName`] registered for `id`, if any.
+    pub fn resolve_event(&self, id: EventId) -> Option<&EventName> {
+        self.handlers.get(&id).map(|(event, _)| event)
     }
 
     /// Handles the event if the registry contains a handler with the same identifier.
@@ -147,7 +150,7 @@ impl EventHandlerRegistry {
         id: EventId,
         process: &ProcessState,
     ) -> Result<Option<Vec<AdviceMutation>>, EventError> {
-        if let Some((_named_event, handler)) = self.handlers.get(&id) {
+        if let Some((_event_name, handler)) = self.handlers.get(&id) {
             let mutations = handler.on_event(process)?;
             return Ok(Some(mutations));
         }

@@ -1,7 +1,7 @@
 use alloc::sync::Arc;
 
 use miden_core::{
-    EventId, NamedEvent, Operation,
+    EventId, EventName, Operation,
     mast::{BasicBlockNode, DecoratorOpLinkIterator, MastForest, MastNodeId, OpBatch},
     sys_events::SystemEvent,
 };
@@ -211,9 +211,9 @@ impl FastProcessor {
         } else {
             let clk = process.clk();
             let mutations = host.on_event(&process).await.map_err(|err| {
-                let event = host
-                    .resolve_event(event_id)
-                    .unwrap_or_else(|| NamedEvent::from_name_and_id("unknown event", event_id));
+                let event = host.resolve_event(event_id).cloned().unwrap_or_else(|| {
+                    EventName::from_string(format!("unknown event (ID: {})", event_id))
+                });
                 ExecutionError::event_error(err, event, err_ctx)
             })?;
             self.advice

@@ -2,7 +2,7 @@ use alloc::{sync::Arc, vec::Vec};
 use core::future::Future;
 
 use miden_core::{
-    AdviceMap, DebugOptions, EventId, Felt, NamedEvent, Word, crypto::merkle::InnerNodeInfo,
+    AdviceMap, DebugOptions, EventId, EventName, Felt, Word, crypto::merkle::InnerNodeInfo,
     mast::MastForest, precompile::PrecompileRequest,
 };
 use miden_debug_types::{Location, SourceFile, SourceSpan};
@@ -93,11 +93,11 @@ pub trait BaseHost {
     /// Handles the failure of the assertion instruction.
     fn on_assert_failed(&mut self, _process: &ProcessState, _err_code: Felt) {}
 
-    /// Returns the [`NamedEvent`] registered for the provided [`EventId`], if any.
+    /// Returns the [`EventName`] registered for the provided [`EventId`], if any.
     ///
     /// Hosts that maintain an event registry can override this method to surface human-readable
     /// names for diagnostics. The default implementation returns `None`.
-    fn resolve_event(&self, _event_id: EventId) -> Option<NamedEvent> {
+    fn resolve_event(&self, _event_id: EventId) -> Option<&EventName> {
         None
     }
 }

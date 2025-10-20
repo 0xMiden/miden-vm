@@ -5,13 +5,13 @@
 
 use alloc::{vec, vec::Vec};
 
-use miden_core::declare_event;
+use miden_core::EventName;
 use miden_processor::{AdviceMutation, EventError, ProcessState};
 
 use crate::handlers::u64_to_u32_elements;
 
-// Declare the u64_div event with automatic ID validation
-declare_event!(U64_DIV_EVENT_ID, "stdlib::math::u64::u64_div", 16308489928383702680u64);
+/// Event name for the u64_div operation.
+pub const U64_DIV_EVENT_NAME: EventName = EventName::new("stdlib::math::u64::u64_div");
 
 /// U64_DIV system event handler.
 ///

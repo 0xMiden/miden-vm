@@ -26,7 +26,7 @@ pub use miden_core::{
     stack::MIN_STACK_DEPTH,
     utils::{IntoBytes, ToElements, group_slice_elements},
 };
-use miden_core::{NamedEvent, ProgramInfo, chiplets::hasher::apply_permutation};
+use miden_core::{EventName, ProgramInfo, chiplets::hasher::apply_permutation};
 pub use miden_processor::{
     AdviceInputs, AdviceProvider, BaseHost, ContextId, ExecutionError, ExecutionOptions,
     ExecutionTrace, Process, ProcessState, VmStateIterator,
@@ -178,7 +178,7 @@ pub struct Test {
     pub advice_inputs: AdviceInputs,
     pub in_debug_mode: bool,
     pub libraries: Vec<Library>,
-    pub handlers: Vec<(NamedEvent, Arc<dyn EventHandler>)>,
+    pub handlers: Vec<(EventName, Arc<dyn EventHandler>)>,
     pub add_modules: Vec<(LibraryPath, String)>,
 }
 
@@ -225,18 +225,19 @@ impl Test {
     }
 
     /// Add a handler for a specific event when running the `Host`.
-    pub fn add_event_handler(&mut self, event: NamedEvent, handler: impl EventHandler) {
+    pub fn add_event_handler(&mut self, event: EventName, handler: impl EventHandler) {
         self.add_event_handlers(vec![(event, Arc::new(handler))]);
     }
 
     /// Add a handler for a specific event when running the `Host`.
-    pub fn add_event_handlers(&mut self, handlers: Vec<(NamedEvent, Arc<dyn EventHandler>)>) {
+    pub fn add_event_handlers(&mut self, handlers: Vec<(EventName, Arc<dyn EventHandler>)>) {
         for (event, handler) in handlers {
-            if event.id().is_reserved() {
+            let event_id = event.to_event_id();
+            if event_id.is_reserved() {
                 panic!("tried to register handler with ID reserved for system events")
             }
-            if self.handlers.iter().any(|(e, _)| e.id() == event.id()) {
-                panic!("handler for event '{}' was already added", event.name())
+            if self.handlers.iter().any(|(e, _)| e.to_event_id() == event_id) {
+                panic!("handler for event '{}' was already added", event.as_str())
             }
             self.handlers.push((event, handler));
         }

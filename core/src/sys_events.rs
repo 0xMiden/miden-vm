@@ -1,6 +1,6 @@
 use core::fmt;
 
-use crate::{EventId, NamedEvent};
+use crate::{EventId, EventName};
 
 // SYSTEM EVENTS
 // ================================================================================================
@@ -321,13 +321,9 @@ impl From<SystemEvent> for EventId {
     }
 }
 
-impl From<SystemEvent> for NamedEvent {
+impl From<SystemEvent> for EventName {
     fn from(system_event: SystemEvent) -> Self {
-        // SystemEvents use enum discriminants (0-15) as IDs, not hashes.
-        NamedEvent::from_name_and_id(
-            system_event.event_name(),
-            EventId::from_u64(system_event as u64),
-        )
+        EventName::new(system_event.event_name())
     }
 }
 
@@ -409,7 +405,7 @@ mod test {
 
     #[test]
     fn test_system_event_names() {
-        // Test that all system events have names when converted to NamedEvent
+        // Test that all system events have names and correct conversions
         for id in 0..=15u64 {
             let event_id = EventId::from_u64(id);
             if let Ok(system_event) = SystemEvent::try_from(event_id) {
@@ -420,14 +416,13 @@ mod test {
                     name
                 );
 
-                // Test conversion to EventId (ID only)
+                // Test conversion to EventId
                 let id_only: EventId = system_event.into();
                 assert_eq!(id_only.as_felt().as_int(), id);
 
-                // Test conversion to NamedEvent (ID + name)
-                let named: NamedEvent = system_event.into();
-                assert_eq!(named.id().as_felt().as_int(), id);
-                assert_eq!(named.name(), name);
+                // Test conversion to EventName
+                let event_name: EventName = system_event.into();
+                assert_eq!(event_name.as_str(), name);
             }
         }
     }

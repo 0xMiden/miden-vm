@@ -1,19 +1,15 @@
 use alloc::{vec, vec::Vec};
 
-use miden_core::{Felt, LexicographicWord, Word, declare_event};
+use miden_core::{EventName, Felt, LexicographicWord, Word};
 use miden_processor::{AdviceMutation, EventError, MemoryError, ProcessState};
 
-// Declare the sorted_array lowerbound events with automatic ID validation
-declare_event!(
-    LOWERBOUND_ARRAY_EVENT_ID,
-    "stdlib::collections::sorted_array::lowerbound_array",
-    2382974753388103136u64
-);
-declare_event!(
-    LOWERBOUND_KEY_VALUE_EVENT_ID,
-    "stdlib::collections::sorted_array::lowerbound_key_value",
-    486819235893213157u64
-);
+/// Event name for the lowerbound_array operation.
+pub const LOWERBOUND_ARRAY_EVENT_NAME: EventName =
+    EventName::new("stdlib::collections::sorted_array::lowerbound_array");
+
+/// Event name for the lowerbound_key_value operation.
+pub const LOWERBOUND_KEY_VALUE_EVENT_NAME: EventName =
+    EventName::new("stdlib::collections::sorted_array::lowerbound_key_value");
 
 /// Pushes onto the advice stack the first pointer in [start_ptr, end_ptr) such that
 /// `mem[word_ptr] >= KEY` in lexicographic order of words. If all words are < KEY, returns end_ptr.
