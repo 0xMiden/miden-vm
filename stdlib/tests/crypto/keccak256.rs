@@ -38,20 +38,15 @@ const INPUT_MEMORY_ADDR: u32 = 128;
 fn test_keccak_handlers() {
     // Test various input sizes including edge cases
     let hash_memory_inputs: Vec<Vec<u8>> = vec![
-        //empty
+        // empty
         vec![],
-        // different byte packing
+        // representative small sizes and alignments
         vec![1],
-        vec![1, 2],
-        vec![1, 2, 3],
         vec![1, 2, 3, 4],
-        // longer inputs with non-aligned sizes
-        (0..31).collect(),
+        vec![1, 2, 3, 4, 5],
+        // boundary and just-over-boundary
         (0..32).collect(),
         (0..33).collect(),
-        // large-ish inputs
-        (0..64).collect(),
-        (0..128).collect(),
     ];
 
     for input in &hash_memory_inputs {

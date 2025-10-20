@@ -14,8 +14,9 @@
 //! ### Precompile Verifier (Verification-Time)
 //! During verification, the [`PrecompileVerifier`] receives the stored request data (public key,
 //! digest, signature), re-performs the ECDSA verification, and generates a commitment
-//! `Rpo256(Rpo256(Rpo256(pk || digest) || Rpo256(sig)))` with a tag containing the verification
-//! result that validates the computation was performed correctly.
+//! `Rpo256(Rpo256(Rpo256(pk) || Rpo256(digest)) || Rpo256(sig))` with a tag containing the
+//! verification result that validates the computation was performed correctly. Here `pk`,
+//! `digest`, and `sig` are hashed as u32‑packed field elements before being merged.
 //!
 //! ### Commitment Tag Format
 //! Each request is tagged as `[event_id, result, 0, 0]` where `result` is 1 for valid signatures
@@ -25,7 +26,9 @@
 //! ## Data Format
 //! - **Public Key**: 33 bytes (compressed secp256k1 point)
 //! - **Message Digest**: 32 bytes (Keccak256 hash of the message)
-//! - **Signature**: 66 bytes (r, s, and v components: 32 + 32 + 1 bytes + 1 padding byte)
+//! - **Signature**: 66 bytes (implementation‑defined serialization used by
+//!   `miden_crypto::dsa::ecdsa_k256_keccak::Signature`). When packed into u32 elements for VM
+//!   memory, the final word contains 2 zero padding bytes (since 66 ≡ 2 mod 4).
 
 use alloc::{vec, vec::Vec};
 
@@ -119,8 +122,9 @@ impl PrecompileVerifier for EcdsaPrecompile {
     ///
     /// Receives the serialized request data (public key || digest || signature) stored during
     /// execution (see [`EventHandler::on_event`]), re-performs the ECDSA verification, and
-    /// generates a commitment `RPO(pk || digest || sig)` with tag `[event_id, result, 0, 0]`
-    /// that validates against the execution trace.
+    /// generates a commitment `RPO(RPO(RPO(pk) || RPO(digest)) || RPO(sig))` with tag
+    /// `[event_id, result, 0, 0]` that validates against the execution trace. Each of `pk`,
+    /// `digest`, and `sig` is first converted to u32‑packed field elements before hashing.
     fn verify(&self, calldata: &[u8]) -> Result<PrecompileCommitment, PrecompileError> {
         let request = EcdsaRequest::read_from_bytes(calldata)?;
         Ok(request.as_precompile_commitment())
@@ -137,7 +141,7 @@ pub struct EcdsaRequest {
     pk: PublicKey,
     /// Message digest (32 bytes, typically Keccak256 hash)
     digest: [u8; MESSAGE_DIGEST_LEN_BYTES],
-    /// ECDSA signature (64 bytes: r || s)
+    /// ECDSA signature (serialized by the implementation; 66 bytes in this crate)
     sig: Signature,
 }
 
@@ -187,8 +191,9 @@ impl EcdsaRequest {
 
     /// Computes the precompile commitment for this request.
     ///
-    /// The commitment is `RPO(pk || digest || sig)` with tag `[event_id, result, 0, 0]`,
-    /// where `result` is 1 for valid signatures and 0 for invalid ones.
+    /// The commitment is `RPO(RPO(RPO(pk) || RPO(digest)) || RPO(sig))` with tag
+    /// `[event_id, result, 0, 0]`, where `result` is 1 for valid signatures and 0 for
+    /// invalid ones. Each component is hashed over u32‑packed field elements.
     ///
     /// This is called by the [`PrecompileVerifier`] at verification time and must match
     /// the commitment generated during execution.
@@ -203,7 +208,8 @@ impl EcdsaRequest {
             Rpo256::hash_elements(&felts)
         };
         let digest_comm = {
-            let felts = bytes_to_felts(&self.digest.to_bytes());
+            // `digest` is a 32‑byte array; hash its u32‑packed representation
+            let felts = bytes_to_felts(&self.digest);
             Rpo256::hash_elements(&felts)
         };
         let sig_comm = {

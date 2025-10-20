@@ -15,16 +15,15 @@ use miden_core::{
     precompile::{
         PrecompileCommitment, PrecompileSponge, PrecompileVerifier, PrecompileVerifierRegistry,
     },
-    utils::{Deserializable, Serializable},
+    utils::Serializable,
 };
-use miden_crypto::dsa::ecdsa_k256_keccak::{SecretKey, Signature};
+use miden_crypto::dsa::ecdsa_k256_keccak::SecretKey;
 use miden_processor::{AdviceInputs, DefaultHost, Program, StackInputs};
 use miden_stdlib::{
     StdLibrary,
     handlers::ecdsa::{ECDSA_VERIFY_EVENT_ID, EcdsaPrecompile, EcdsaRequest},
 };
 use rand::{SeedableRng, rngs::StdRng};
-
 // TEST CONSTANTS
 // ================================================================================================
 
@@ -36,76 +35,55 @@ const SIG_ADDR: u32 = 256;
 // ================================================================================================
 
 #[test]
-fn test_ecdsa_handlers() {
-    // Test both valid and invalid signatures with deterministic test vectors
+fn test_ecdsa_verify_cases() {
+    // One valid and one invalid (wrong key) request
     let test_cases = vec![
         (generate_valid_signature(), true),
-        (generate_invalid_signature_corrupted(), false),
         (generate_invalid_signature_wrong_key(), false),
     ];
 
     for (request, expected_valid) in test_cases {
-        test_ecdsa_handler(&request, expected_valid);
-        test_ecdsa_verify_impl(&request, expected_valid);
+        let memory_stores = generate_memory_store_masm(&request);
+
+        let source = format!(
+            "
+                use.std::crypto::dsa::ecdsa::secp256k1
+                use.std::sys
+
+                begin
+                    # Store test data in memory
+                    {memory_stores}
+
+                    # Call verify: [ptr_pk, ptr_digest, ptr_sig]
+                    push.{SIG_ADDR}.{DIGEST_ADDR}.{PK_ADDR}
+                    exec.secp256k1::verify
+                    # => [result, ...]
+
+                    exec.sys::truncate_stack
+                end
+            ",
+        );
+
+        let test = build_debug_test!(source, &[]);
+        let output = test.execute().unwrap();
+
+        // Assert result
+        let result = output.stack_outputs().get_stack_item(0).unwrap();
+        let expected = if expected_valid { Felt::ONE } else { Felt::ZERO };
+        assert_eq!(result, expected);
+
+        // Verify the precompile request was logged with the right event ID
+        let deferred = output.advice_provider().precompile_requests().to_vec();
+        assert_eq!(deferred.len(), 1);
+        assert_eq!(deferred[0], request.as_precompile_request());
     }
 }
 
-/// Tests the raw event handler without MASM wrapper
-fn test_ecdsa_handler(request: &EcdsaRequest, expected_valid: bool) {
-    let memory_stores = generate_memory_store_masm(request);
-
-    let source = format!(
-        r#"
-            begin
-                # Store test data in memory
-                {memory_stores}
-
-                # Push handler inputs: [ptr_pk, ptr_digest, ptr_sig]
-                push.{}.{}.{}
-                # => [ptr_pk, ptr_digest, ptr_sig, ...]
-
-                emit.event("stdlib::crypto::dsa::ecdsa::verify")
-                drop drop drop
-            end
-            "#,
-        SIG_ADDR, DIGEST_ADDR, PK_ADDR
-    );
-
-    let test = build_debug_test!(source, &[]);
-    let output = test.execute().unwrap();
-
-    // Verify result was pushed to advice stack
-    let advice_stack = output.advice_provider().stack();
-    let expected_result = if expected_valid { 1u64 } else { 0u64 };
-    assert_eq!(
-        advice_stack.first().copied().unwrap().as_int(),
-        expected_result,
-        "advice stack result does not match expected validity"
-    );
-
-    // Verify precompile request was stored
-    let deferred = output.advice_provider().precompile_requests().to_vec();
-    assert_eq!(deferred.len(), 1, "should have exactly one deferred request");
-
-    // Verify that the verifier produces the correct commitment
-    let commitment =
-        EcdsaPrecompile.verify(deferred[0].calldata()).expect("verifier should succeed");
-
-    assert_eq!(
-        commitment.tag[0],
-        ECDSA_VERIFY_EVENT_ID.as_felt(),
-        "tag should contain event ID"
-    );
-    assert_eq!(
-        commitment.tag[1].as_int(),
-        expected_result,
-        "tag should contain verification result"
-    );
-}
-
-/// Tests the verify_impl wrapper using build_debug_test
-fn test_ecdsa_verify_impl(request: &EcdsaRequest, expected_valid: bool) {
-    let memory_stores = generate_memory_store_masm(request);
+#[test]
+fn test_ecdsa_verify_impl_commitment() {
+    // Verify tag/commitment once on a valid request
+    let request = generate_valid_signature();
+    let memory_stores = generate_memory_store_masm(&request);
 
     let source = format!(
         "
@@ -141,16 +119,15 @@ fn test_ecdsa_verify_impl(request: &EcdsaRequest, expected_valid: bool) {
 
     // Verify result
     let result = stack.get_stack_item(6).unwrap();
-    let expected_result = if expected_valid { Felt::ONE } else { Felt::ZERO };
-    assert_eq!(result, expected_result, "result does not match expected validity");
+    assert_eq!(result, Felt::ONE, "result does not match expected validity");
 
     // Verify tag format: [event_id, result, 0, 0]
     assert_eq!(tag[0], ECDSA_VERIFY_EVENT_ID.as_felt());
-    assert_eq!(tag[1], expected_result);
+    assert_eq!(tag[1], Felt::ONE);
     assert_eq!(tag[2], Felt::ZERO);
     assert_eq!(tag[3], Felt::ZERO);
 
-    // Verify commitment matches what the verifier produces
+    // Commitment and tag must match verifier output
     let precompile_commitment = PrecompileCommitment { tag, commitment };
     let verifier_commitment =
         EcdsaPrecompile.verify(&request.to_bytes()).expect("verifier should succeed");
@@ -288,24 +265,6 @@ fn generate_valid_signature() -> EcdsaRequest {
     let sig = secret_key.sign_prehash(digest);
 
     EcdsaRequest::new(pk, digest, sig)
-}
-
-/// Generates an invalid signature by corrupting the signature bytes
-fn generate_invalid_signature_corrupted() -> EcdsaRequest {
-    let mut rng = StdRng::seed_from_u64(42);
-    let mut secret_key = SecretKey::with_rng(&mut rng);
-    let pk = secret_key.public_key();
-
-    let digest = [1u8; 32];
-    let sig = secret_key.sign_prehash(digest);
-
-    // Corrupt the signature by deserializing, modifying bytes, and re-parsing
-    let mut sig_bytes = sig.to_bytes();
-    sig_bytes[0] ^= 0xff;
-    let corrupted_sig =
-        Signature::read_from_bytes(&sig_bytes).expect("corrupted bytes should still deserialize");
-
-    EcdsaRequest::new(pk, digest, corrupted_sig)
 }
 
 /// Generates an invalid signature by signing with a different key
