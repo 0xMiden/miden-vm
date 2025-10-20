@@ -34,23 +34,23 @@ fn merge_programs(
 #[test]
 fn mast_forest_merge_assembler() {
     let lib_a = r#"
-  export.foo
+  pub proc foo
       push.19
   end
 
-  export.qux
+  pub proc qux
       swap drop
   end
 "#;
 
     let lib_b = r#"
-  use.lib::mod
+  use lib::mod
 
-  export.qux_duplicate
+  pub proc qux_duplicate
       swap drop
   end
 
-  export.bar
+  pub proc bar
       push.2
       if.true
           push.3

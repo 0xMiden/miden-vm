@@ -37,7 +37,7 @@ const LEAVES_MULTI: [(Word, Word); 3] = [
 fn test_smt_get() {
     fn expect_value_from_get(key: Word, value: Word, smt: &Smt) {
         let source = "
-            use.std::collections::smt
+            use std::collections::smt
 
             begin
                 exec.smt::get
@@ -70,8 +70,8 @@ fn test_smt_get() {
 #[test]
 fn test_smt_get_multi() {
     const SOURCE: &str = "
-        use.std::collections::smt
-        use.std::sys
+        use std::collections::smt
+        use std::sys
 
         begin
             # => [K, R]
@@ -111,7 +111,7 @@ fn test_smt_set() {
         let empty_tree_root = smt.root();
 
         let source = "
-            use.std::collections::smt
+            use std::collections::smt
 
             begin
                 exec.smt::set
@@ -154,7 +154,7 @@ fn test_smt_set_same_key() {
     let mut smt = Smt::with_entries(LEAVES).unwrap();
 
     let source = "
-    use.std::collections::smt
+    use std::collections::smt
     begin
       exec.smt::set
     end
@@ -173,7 +173,7 @@ fn test_smt_set_empty_value_to_empty_leaf() {
     let empty_tree_root = smt.root();
 
     let source = "
-    use.std::collections::smt
+    use std::collections::smt
     begin
       exec.smt::set
     end
@@ -194,7 +194,7 @@ fn test_set_advice_map_empty_key() {
 
     let source = format!(
         "
-    use.std::collections::smt
+    use std::collections::smt
     # Stack: [V, K, R]
     begin
         # copy V and K, and save lower on stack
@@ -239,7 +239,7 @@ fn test_set_advice_map_single_key() {
 
     let source = format!(
         "
-    use.std::collections::smt
+    use std::collections::smt
     # Stack: [V, K, R]
     begin
         # copy V and K, and save lower on stack
@@ -294,7 +294,7 @@ fn test_set_empty_key_in_non_empty_leaf() {
     let new_key = Word::new([Felt::new(1), Felt::new(12), Felt::new(3), key_mse]);
 
     let source = "
-    use.std::collections::smt
+    use std::collections::smt
 
     begin
         exec.smt::set

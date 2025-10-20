@@ -124,7 +124,7 @@ impl BasicBlockBuilder<'_> {
     ) -> Result<(), Report> {
         let span = instruction.span();
         let location = proc_ctx.source_manager().location(span).ok();
-        let context_name = proc_ctx.name().to_string();
+        let context_name = proc_ctx.path().to_string();
         let num_cycles = 0;
         let op = instruction.to_string();
         let should_break = instruction.should_break();

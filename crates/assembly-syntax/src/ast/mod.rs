@@ -1,6 +1,7 @@
 //! Abstract syntax tree (AST) components of Miden programs, modules, and procedures.
 
 mod advice_map_entry;
+mod alias;
 mod attribute;
 mod block;
 mod constants;
@@ -8,19 +9,22 @@ mod docstring;
 mod form;
 mod ident;
 mod immediate;
-mod imports;
 mod instruction;
 mod invocation_target;
+mod item;
 mod module;
 mod op;
+pub mod path;
 mod procedure;
 #[cfg(test)]
 mod tests;
 mod r#type;
+mod visibility;
 pub mod visit;
 
 pub use self::{
     advice_map_entry::AdviceMapEntry,
+    alias::{Alias, AliasTarget},
     attribute::{
         Attribute, AttributeSet, AttributeSetEntry, BorrowedMeta, Meta, MetaExpr, MetaItem,
         MetaKeyValue, MetaList,
@@ -31,13 +35,15 @@ pub use self::{
     form::Form,
     ident::{CaseKindError, Ident, IdentError},
     immediate::{ErrorMsg, ImmFelt, ImmU8, ImmU16, ImmU32, Immediate},
-    imports::Import,
     instruction::{DebugOptions, Instruction, SystemEventNode},
     invocation_target::{InvocationTarget, Invoke, InvokeKind},
+    item::*,
     module::{Module, ModuleKind},
     op::Op,
+    path::{Path, PathBuf, PathComponent, PathError},
     procedure::*,
     r#type::*,
+    visibility::Visibility,
     visit::{Visit, VisitMut},
 };
 

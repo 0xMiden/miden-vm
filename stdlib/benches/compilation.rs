@@ -1,7 +1,7 @@
 use std::{path::Path, time::Duration};
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use miden_assembly::{Assembler, LibraryNamespace};
+use miden_assembly::{Assembler, PathBuf as LibraryPath};
 
 fn stdlib_compilation(c: &mut Criterion) {
     let mut group = c.benchmark_group("compile_stdlib");
@@ -14,7 +14,7 @@ fn stdlib_compilation(c: &mut Criterion) {
 
             let manifest_dir = env!("CARGO_MANIFEST_DIR");
             let asm_dir = Path::new(manifest_dir).join("asm");
-            let namespace = "std".parse::<LibraryNamespace>().expect("invalid base namespace");
+            let namespace = LibraryPath::new("std").expect("invalid base namespace");
             assembler.assemble_library_from_dir(asm_dir, namespace).unwrap();
         });
     });

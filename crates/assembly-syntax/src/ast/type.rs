@@ -1,10 +1,23 @@
-use alloc::{boxed::Box, string::String, vec::Vec};
+use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 
 use miden_debug_types::{SourceSpan, Span, Spanned};
 pub use midenc_hir_type as types;
 use midenc_hir_type::{AddressSpace, Type, TypeRepr};
 
-use super::{ConstantExpr, DocString, Ident};
+use super::{
+    ConstantExpr, DocString, GlobalItemIndex, Ident, ItemIndex, LocalSymbolResolutionError, Path,
+    PathBuf, SymbolResolution, Visibility,
+};
+
+pub trait TypeResolver<E> {
+    fn get_type(&self, context: SourceSpan, gid: GlobalItemIndex) -> Result<Type, E>;
+    fn get_local_type(&self, context: SourceSpan, id: ItemIndex) -> Result<Option<Type>, E>;
+    fn resolve_local_failed(&self, err: LocalSymbolResolutionError) -> E;
+    fn resolve_type_ref(&self, ty: Span<&Path>) -> Result<Option<SymbolResolution>, E>;
+    fn resolve(&self, ty: &TypeExpr) -> Result<Option<Type>, E> {
+        ty.resolve_type(self)
+    }
+}
 
 // TYPE DECLARATION
 // ================================================================================================
@@ -19,11 +32,35 @@ pub enum TypeDecl {
 }
 
 impl TypeDecl {
+    /// Adds documentation to this type alias
+    pub fn with_docs(self, docs: Option<Span<String>>) -> Self {
+        match self {
+            Self::Alias(ty) => Self::Alias(ty.with_docs(docs)),
+            Self::Enum(ty) => Self::Enum(ty.with_docs(docs)),
+        }
+    }
+
     /// Get the name assigned to this type declaration
     pub fn name(&self) -> &Ident {
         match self {
             Self::Alias(ty) => &ty.name,
             Self::Enum(ty) => &ty.name,
+        }
+    }
+
+    /// Get the visibility of this type declaration
+    pub const fn visibility(&self) -> Visibility {
+        match self {
+            Self::Alias(ty) => ty.visibility,
+            Self::Enum(ty) => ty.visibility,
+        }
+    }
+
+    /// Get the documentation of this enum type
+    pub fn docs(&self) -> Option<Span<&str>> {
+        match self {
+            Self::Alias(ty) => ty.docs(),
+            Self::Enum(ty) => ty.docs(),
         }
     }
 
@@ -171,7 +208,73 @@ pub enum TypeExpr {
     /// A struct type expression, e.g. `struct { a: u32 }`
     Struct(StructType),
     /// A reference to a type aliased by name, e.g. `Foo`
-    Ref(Ident),
+    Ref(Span<PathBuf>),
+}
+
+impl TypeExpr {
+    pub fn resolve_type<E, R>(&self, resolver: &R) -> Result<Option<Type>, E>
+    where
+        R: ?Sized + TypeResolver<E>,
+    {
+        match self {
+            TypeExpr::Ref(path) => {
+                let mut current_path: Span<Arc<Path>> = path.clone().map(|path| path.into());
+                loop {
+                    match resolver.resolve_type_ref(current_path.as_deref())? {
+                        Some(SymbolResolution::Local(item)) => {
+                            return resolver.get_local_type(current_path.span(), item.into_inner());
+                        },
+                        Some(SymbolResolution::External(path)) => {
+                            current_path = path;
+                        },
+                        Some(SymbolResolution::Exact { gid, .. }) => {
+                            return resolver.get_type(current_path.span(), gid).map(Some);
+                        },
+                        Some(SymbolResolution::Module { path: module_path, .. }) => {
+                            break Err(resolver.resolve_local_failed(
+                                LocalSymbolResolutionError::InvalidSymbolType {
+                                    expected: "type",
+                                    span: path.span(),
+                                    actual: module_path.span(),
+                                },
+                            ));
+                        },
+                        Some(SymbolResolution::MastRoot(item)) => {
+                            break Err(resolver.resolve_local_failed(
+                                LocalSymbolResolutionError::InvalidSymbolType {
+                                    expected: "type",
+                                    span: path.span(),
+                                    actual: item.span(),
+                                },
+                            ));
+                        },
+                        None => break Ok(None),
+                    }
+                }
+            },
+            TypeExpr::Primitive(t) => Ok(Some(t.inner().clone())),
+            TypeExpr::Array(t) => Ok(t
+                .elem
+                .resolve_type(resolver)?
+                .map(|elem| types::Type::Array(Arc::new(types::ArrayType::new(elem, t.arity))))),
+            TypeExpr::Ptr(ty) => Ok(ty
+                .pointee
+                .resolve_type(resolver)?
+                .map(|pointee| types::Type::Ptr(Arc::new(types::PointerType::new(pointee))))),
+            TypeExpr::Struct(t) => {
+                let mut fields = Vec::with_capacity(t.fields.len());
+                for field in t.fields.iter() {
+                    let field_ty = field.ty.resolve_type(resolver)?;
+                    if let Some(field_ty) = field_ty {
+                        fields.push(field_ty);
+                    } else {
+                        return Ok(None);
+                    }
+                }
+                Ok(Some(Type::Struct(Arc::new(types::StructType::new(fields)))))
+            },
+        }
+    }
 }
 
 impl From<Type> for TypeExpr {
@@ -515,6 +618,8 @@ pub struct TypeAlias {
     span: SourceSpan,
     /// The documentation string attached to this definition.
     docs: Option<DocString>,
+    /// The visibility of this type alias
+    pub visibility: Visibility,
     /// The name of this type alias
     pub name: Ident,
     /// The concrete underlying type
@@ -523,8 +628,14 @@ pub struct TypeAlias {
 
 impl TypeAlias {
     /// Create a new type alias from a name and type
-    pub fn new(name: Ident, ty: TypeExpr) -> Self {
-        Self { span: name.span(), docs: None, name, ty }
+    pub fn new(visibility: Visibility, name: Ident, ty: TypeExpr) -> Self {
+        Self {
+            span: name.span(),
+            docs: None,
+            visibility,
+            name,
+            ty,
+        }
     }
 
     /// Adds documentation to this type alias
@@ -545,6 +656,22 @@ impl TypeAlias {
     pub fn set_span(&mut self, span: SourceSpan) {
         self.span = span;
     }
+
+    /// Returns the documentation associated with this item.
+    pub fn docs(&self) -> Option<Span<&str>> {
+        self.docs.as_ref().map(|docstring| docstring.as_spanned_str())
+    }
+
+    /// Get the name of this type alias
+    pub fn name(&self) -> &Ident {
+        &self.name
+    }
+
+    /// Get the visibility of this type alias
+    #[inline]
+    pub const fn visibility(&self) -> Visibility {
+        self.visibility
+    }
 }
 
 impl Eq for TypeAlias {}
@@ -557,8 +684,9 @@ impl PartialEq for TypeAlias {
 
 impl core::hash::Hash for TypeAlias {
     fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
-        let Self { span: _, docs, name, ty } = self;
+        let Self { span: _, docs, visibility, name, ty } = self;
         docs.hash(state);
+        visibility.hash(state);
         name.hash(state);
         ty.hash(state);
     }
@@ -574,11 +702,15 @@ impl crate::prettier::PrettyPrint for TypeAlias {
     fn render(&self) -> crate::prettier::Document {
         use crate::prettier::*;
 
-        let doc = self
+        let mut doc = self
             .docs
             .as_ref()
             .map(|docstring| docstring.render())
             .unwrap_or(Document::Empty);
+
+        if self.visibility.is_public() {
+            doc += display(self.visibility) + const_text(" ");
+        }
 
         doc + const_text("type")
             + const_text(" ")
@@ -606,6 +738,8 @@ pub struct EnumType {
     span: SourceSpan,
     /// The documentation string attached to this definition.
     docs: Option<DocString>,
+    /// The visibility of this enum type
+    visibility: Visibility,
     /// The enum name
     name: Ident,
     /// The type of the discriminant value used for this enum's variants
@@ -621,11 +755,17 @@ impl EnumType {
     ///
     /// The caller is assumed to have already validated that `ty` is an integral type, and this
     /// function will assert that this is the case.
-    pub fn new(name: Ident, ty: Type, variants: impl IntoIterator<Item = Variant>) -> Self {
+    pub fn new(
+        visibility: Visibility,
+        name: Ident,
+        ty: Type,
+        variants: impl IntoIterator<Item = Variant>,
+    ) -> Self {
         assert!(ty.is_integer(), "only integer types are allowed in enum type definitions");
         Self {
             span: name.span(),
             docs: None,
+            visibility,
             name,
             ty,
             variants: Vec::from_iter(variants),
@@ -654,6 +794,16 @@ impl EnumType {
         &self.name
     }
 
+    /// Get the visibility of this enum type
+    pub const fn visibility(&self) -> Visibility {
+        self.visibility
+    }
+
+    /// Returns the documentation associated with this item.
+    pub fn docs(&self) -> Option<Span<&str>> {
+        self.docs.as_ref().map(|docstring| docstring.as_spanned_str())
+    }
+
     /// Get the concrete type of this enum's variants
     pub fn ty(&self) -> &Type {
         &self.ty
@@ -671,10 +821,18 @@ impl EnumType {
 
     /// Split this definition into its type alias and variant parts
     pub fn into_parts(self) -> (TypeAlias, Vec<Variant>) {
-        let Self { span, docs, name, ty, variants } = self;
+        let Self {
+            span,
+            docs,
+            visibility,
+            name,
+            ty,
+            variants,
+        } = self;
         let alias = TypeAlias {
             span,
             docs,
+            visibility,
             name,
             ty: TypeExpr::Primitive(Span::new(span, ty)),
         };
@@ -701,8 +859,16 @@ impl PartialEq for EnumType {
 
 impl core::hash::Hash for EnumType {
     fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
-        let Self { span: _, docs, name, ty, variants } = self;
+        let Self {
+            span: _,
+            docs,
+            visibility,
+            name,
+            ty,
+            variants,
+        } = self;
         docs.hash(state);
+        visibility.hash(state);
         name.hash(state);
         ty.hash(state);
         variants.hash(state);
@@ -713,7 +879,7 @@ impl crate::prettier::PrettyPrint for EnumType {
     fn render(&self) -> crate::prettier::Document {
         use crate::prettier::*;
 
-        let doc = self
+        let mut doc = self
             .docs
             .as_ref()
             .map(|docstring| docstring.render())
@@ -725,6 +891,10 @@ impl crate::prettier::PrettyPrint for EnumType {
             .map(|v| v.render())
             .reduce(|acc, v| acc + const_text(",") + nl() + v)
             .unwrap_or(Document::Empty);
+
+        if self.visibility.is_public() {
+            doc += display(self.visibility) + const_text(" ");
+        }
 
         doc + const_text("enum")
             + const_text(" ")

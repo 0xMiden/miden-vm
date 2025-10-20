@@ -49,7 +49,8 @@ fn sdepth() {
 fn locaddr() {
     // --- locaddr returns expected address -------------------------------------------------------
     let source = "
-        proc.foo.5
+        @locals(5)
+        proc foo
             locaddr.0
             locaddr.4
         end
@@ -65,7 +66,8 @@ fn locaddr() {
 
     // --- accessing mem via locaddr updates the correct variables --------------------------------
     let source = "
-        proc.foo.8
+        @locals(8)
+        proc foo
             locaddr.0
             mem_store
             locaddr.4
@@ -88,12 +90,14 @@ fn locaddr() {
         "
         {TRUNCATE_STACK_PROC}
 
-        proc.foo.12
+        @locals(12)
+        proc foo
             locaddr.0
             locaddr.4
             locaddr.8
         end
-        proc.bar.8
+        @locals(8)
+        proc bar
             locaddr.0
             exec.foo
             locaddr.4
@@ -121,7 +125,8 @@ fn locaddr() {
 
     // --- accessing mem via locaddr in nested procedures updates the correct variables -----------
     let source = "
-        proc.foo.8
+        @locals(8)
+        proc foo
             locaddr.0
             mem_store
             locaddr.4
@@ -131,7 +136,8 @@ fn locaddr() {
             loc_loadw.4
             loc_load.0
         end
-        proc.bar.8
+        @locals(8)
+        proc bar
             locaddr.0
             mem_store
             loc_store.4
@@ -155,13 +161,13 @@ fn locaddr() {
 #[test]
 fn caller() {
     let kernel_source = "
-        export.foo
+        pub proc foo
             caller
         end
     ";
 
     let program_source = "
-        proc.bar
+        proc bar
             syscall.foo
         end
 
@@ -210,7 +216,7 @@ fn clk() {
     test.expect_stack(&[2]);
 
     let source = "
-        proc.foo
+        proc foo
             push.5
             push.4
             clk

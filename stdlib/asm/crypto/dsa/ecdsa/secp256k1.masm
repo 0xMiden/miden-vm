@@ -1,6 +1,6 @@
-use.std::math::secp256k1::base_field
-use.std::math::secp256k1::scalar_field
-use.std::math::secp256k1::group
+use std::math::secp256k1::base_field
+use std::math::secp256k1::scalar_field
+use std::math::secp256k1::group
 
 #! Given an ECDSA public key ( in projective coordinate system i.e. each secp256k1 curve point
 #! is represented in terms of X, Y, Z coordinates ), hashed message h ( a 256 -bit element represented
@@ -25,7 +25,8 @@ use.std::math::secp256k1::group
 #! If verification fails, program execution will be aborted.
 #!
 #! See https://github.com/itzmeanjan/secp256k1/blob/37b339db3e03d24c2977399eb8896ef515ebb09b/ecdsa/verify.py#L11-L45
-export.verify.96
+@locals(96)
+pub proc verify
     # cache pub_key
     loc_storew.0
     dropw

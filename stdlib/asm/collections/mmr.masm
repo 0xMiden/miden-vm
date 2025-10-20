@@ -1,6 +1,6 @@
-use.std::mem
-use.std::crypto::hashes::rpo
-use.std::math::u64
+use std::mem
+use std::crypto::hashes::rpo
+use std::math::u64
 
 #! Loads the leaf at the absolute `pos` in the MMR.
 #!
@@ -11,7 +11,7 @@ use.std::math::u64
 #! Output: [N, ...] where `N` is the leaf and `R` is the MMR peak that owns the leaf.
 #!
 #! Cycles: 118
-export.get
+pub proc get
   # load the num_leaves of the MMR (2 cycles)
   dup.1 mem_load
   # stack: [num_leaves, pos, mmr_ptr, ...]
@@ -84,7 +84,7 @@ end
 #! Input: [num_leaves, ...]
 #! Output: [num_peaks, ...]
 #! Cycles: 69
-export.num_leaves_to_num_peaks
+pub proc num_leaves_to_num_peaks
   # count number of peaks (69 cycles)
   u32split u32popcnt swap u32popcnt add
   # => [count, ...]
@@ -96,7 +96,7 @@ end
 #! Input: [num_peaks, ...]
 #! Output: [len, ...]
 #! Cycles: 19
-export.num_peaks_to_message_size
+pub proc num_peaks_to_message_size
   # the peaks are padded to a minimum length of 16 (10 cycles)
   push.16 u32max
   # => [count_min, ...]
@@ -125,7 +125,7 @@ end
 #! Cycles: 164 + 9 * extra_peak_pair cycles
 #!    where `extra_peak` is the number of peak pairs in addition to the first
 #!    16, i.e. `round_up((num_of_peaks - 16) / 2)`
-export.unpack
+pub proc unpack
   # load the num_leaves and peaks to the advice_stack (0 cycles)
   adv.push_mapval
   # operand_stack => [HASH, mmr_ptr, ...]
@@ -182,7 +182,7 @@ end
 #! Input: [mmr_ptr, ...]
 #! Output: [HASH, ...]
 #! Cycles: 130 + 3 * num_peaks
-export.pack
+pub proc pack
   # load num_leaves (2 cycles)
   dup mem_load
   # => [num_leaves, mmr_ptr, ...]
@@ -225,7 +225,7 @@ end
 #! Input: [EL, mmr_ptr, ...]
 #! Output: [...]
 #! Cycles: 147 + 39 * peak_merges
-export.add
+pub proc add
   # get num_leaves (2 cycles)
   dup.4 mem_load
   # => [num_leaves, EL, mmr_ptr]

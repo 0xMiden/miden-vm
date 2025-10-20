@@ -1,12 +1,12 @@
-use.std::mem
-use.std::collections::sorted_array
-use.std::sys
+use std::mem
+use std::collections::sorted_array
+use std::sys
 
 # Constant value for the depth at which leaves sit
-const.LEAF_DEPTH=64
+const LEAF_DEPTH = 64
 
 # Each key-value pair is two words, and a leaf can hold up to 1024 pairs.
-const.MAX_LEAF_SIZE=8192
+const MAX_LEAF_SIZE = 8192
 
 # SET
 # =================================================================================================
@@ -23,7 +23,7 @@ const.MAX_LEAF_SIZE=8192
 #! Cycles
 #!   Insert empty value: X cycles
 #!   Insert non-empty value: X cycles
-proc.set_empty_leaf
+proc set_empty_leaf
     # Check if we're inserting the empty value (X cycles)
     padw eqw
     #=> [V == ZERO, ZERO, V, K, R]
@@ -90,7 +90,7 @@ end
 #! Cycles:
 #!   Leaf single after insertion: X cycles
 #!   Leaf multiple after insertion: unimplemented
-proc.insert_single_leaf
+proc insert_single_leaf
     # Push the leaf pre-image on stack
     # (X cycles)
     adv_push.8
@@ -155,7 +155,7 @@ end
 #!   Operand stack: [V_old, R_new, ...]
 #!
 #! Cycles: X
-proc.remove_single_leaf
+proc remove_single_leaf
     # Push the leaf pre-image on stack
     # (0 cycles)
     adv_push.8
@@ -243,7 +243,7 @@ end
 #!   Remove: X cycles
 #!   Insert; leaf single after insertion: X cycles
 #!   Insert; leaf multiple after insertion: unimplemented
-proc.set_single_leaf
+proc set_single_leaf
     # Check if we're inserting or removing a value
     # (X cycles)
     padw eqw
@@ -295,7 +295,7 @@ end
 #!     insertion (leaf becomes multiple): unimplemented
 #!   Leaf multiple
 #!     unimplemented
-export.set
+pub proc set
     # Prepare stack for adv.push_mtnode
     # (X cycles)
     movupw.2 dup.8 push.LEAF_DEPTH
@@ -375,7 +375,8 @@ end
 #! Cycles:
 #!  Non-empty: 125 + 3 * pair_count
 #!  Empty: 122 + 3 * pair_count
-proc.get_multi_leaf_value.8192
+@locals(8192)
+proc get_multi_leaf_value
     # First, we'll pipe all the pairs in the leaf from the advice stack.
     # We'll need a pointer, the count of words to copy, and a "commitment" that it should hash to.
     # The node value (its hash) is our commitment, and we can just divide `leaf_size` to get the
@@ -455,7 +456,7 @@ end
 #!   Leaf single: 115 cycles
 #!   Leaf multiple, non-empty value: 189 + 3 * pair_count
 #!   Leaf multiple, empty value: 186 + 3 * pair_count
-export.get
+pub proc get
     # Prepare for `mtree_get`
     # (6 cycles)
     dupw.1 dup.4 push.LEAF_DEPTH

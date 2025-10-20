@@ -780,7 +780,7 @@ fn loop_node_repeat() {
 fn call_block() {
     // build a program which looks like this:
     //
-    // proc.foo
+    // proc foo
     //     fmp <- fmp + 1
     // end
     //
@@ -993,12 +993,12 @@ fn syscall_block() {
     // build a program which looks like this:
     //
     // --- kernel ---
-    // export.foo
+    // pub proc foo
     //     fmp <- fmp + 3
     // end
     //
     // --- program ---
-    // proc.bar
+    // proc bar
     //     fmp <- fmp + 2
     //     syscall.foo
     // end
@@ -1302,7 +1302,7 @@ fn syscall_block() {
 fn dyn_block() {
     // Equivalent masm:
     //
-    // proc.foo
+    // proc foo
     //   push.1 add
     // end
     //

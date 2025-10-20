@@ -396,7 +396,9 @@ mod tests {
 
         // Test round-trip conversion
         let recovered = KeccakPreimage::from_felts(&[], 0).unwrap();
-        assert_eq!(recovered.as_ref(), &[]);
+        let recovered_bytes: &[u8] = recovered.as_ref();
+        let expected: &[u8] = &[];
+        assert_eq!(recovered_bytes, expected);
 
         // An empty preimage yields the empty word
         assert_eq!(preimage.input_commitment(), Word::empty())

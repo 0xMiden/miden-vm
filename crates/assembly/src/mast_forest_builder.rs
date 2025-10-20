@@ -14,7 +14,7 @@ use miden_core::{
     },
 };
 
-use super::{GlobalProcedureIndex, LinkerError, Procedure};
+use super::{GlobalItemIndex, LinkerError, Procedure};
 use crate::{
     Library,
     diagnostics::{IntoDiagnostic, Report, WrapErr},
@@ -49,11 +49,11 @@ pub struct MastForestBuilder {
     /// This includes all local, exported, and re-exported procedures. In case multiple procedures
     /// with the same digest are added to the MAST forest builder, only the first procedure is
     /// added to the map, and all subsequent insertions are ignored.
-    procedures: BTreeMap<GlobalProcedureIndex, Procedure>,
+    procedures: BTreeMap<GlobalItemIndex, Procedure>,
     /// A map from procedure MAST root to its global procedure index. Similar to the `procedures`
     /// map, this map contains only the first inserted procedure for procedures with the same MAST
     /// root.
-    proc_gid_by_mast_root: BTreeMap<Word, GlobalProcedureIndex>,
+    proc_gid_by_mast_root: BTreeMap<Word, GlobalItemIndex>,
     /// A map of MAST node fingerprints to their corresponding positions in the MAST forest.
     node_id_by_fingerprint: BTreeMap<MastNodeFingerprint, MastNodeId>,
     /// The reverse mapping of `node_id_by_fingerprint`. This map caches the fingerprints of all
@@ -149,7 +149,7 @@ impl MastForestBuilder {
     /// Returns a reference to the procedure with the specified [`GlobalProcedureIndex`], or None
     /// if such a procedure is not present in this MAST forest builder.
     #[inline(always)]
-    pub fn get_procedure(&self, gid: GlobalProcedureIndex) -> Option<&Procedure> {
+    pub fn get_procedure(&self, gid: GlobalItemIndex) -> Option<&Procedure> {
         self.procedures.get(&gid)
     }
 
@@ -178,7 +178,7 @@ impl MastForestBuilder {
     /// no effect.
     pub fn insert_procedure(
         &mut self,
-        gid: GlobalProcedureIndex,
+        gid: GlobalItemIndex,
         procedure: Procedure,
     ) -> Result<(), Report> {
         // Check if an entry is already in this cache slot.
@@ -212,8 +212,8 @@ impl MastForestBuilder {
             let is_valid =
                 !mismatched_locals || core::cmp::min(cached_locals, procedure_locals) == 0;
             if !is_valid {
-                let first = cached.fully_qualified_name();
-                let second = procedure.fully_qualified_name();
+                let first = cached.path();
+                let second = procedure.path();
                 return Err(report!(
                     "two procedures found with same mast root, but conflicting definitions ('{}' and '{}')",
                     first,

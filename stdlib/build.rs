@@ -6,8 +6,8 @@ use std::{
 
 use fs_err as fs;
 use miden_assembly::{
-    Assembler, Library, LibraryNamespace, LibraryPath, Parse, ParseOptions, ast::ModuleKind,
-    debuginfo::DefaultSourceManager,
+    self as masm, Assembler, Library, Parse, ParseOptions, Report, ast::ModuleKind,
+    debuginfo::DefaultSourceManager, diagnostics::IntoDiagnostic,
 };
 
 // CONSTANTS
@@ -152,7 +152,7 @@ type DocPayload = (Option<String>, Vec<(String, Option<String>)>);
 
 /// Parse MASM source using AST-parsing
 fn parse_module_with_ast(label: &str, file_path: &Path) -> io::Result<DocPayload> {
-    let path = LibraryPath::new(label).map_err(|e| io::Error::other(e.to_string()))?;
+    let path = masm::PathBuf::new(label).map_err(|e| io::Error::other(e.to_string()))?;
     let module = file_path
         .parse_with_options(
             &DefaultSourceManager::default(),
@@ -183,12 +183,20 @@ fn parse_module_with_ast(label: &str, file_path: &Path) -> io::Result<DocPayload
 
 /// Read and parse the contents from `./asm` into a `LibraryContents` struct, serializing it into
 /// `assets` folder under `std` namespace.
-fn main() -> io::Result<()> {
+fn main() -> Result<(), Report> {
+    use miden_assembly::diagnostics::reporting::ReportHandlerOpts;
+
     // re-build the `[OUT_DIR]/assets/std.masl` file iff something in the `./asm` directory
     // or its builder changed:
     println!("cargo:rerun-if-changed=asm");
     println!("cargo:rerun-if-env-changed=MIDEN_BUILD_STDLIB_DOCS");
     println!("cargo:rerun-if-changed=../assembly/src");
+
+    miden_assembly::diagnostics::reporting::set_hook(Box::new(|_| {
+        Box::new(ReportHandlerOpts::new().build())
+    }))
+    .unwrap();
+    miden_assembly::diagnostics::reporting::set_panic_hook();
 
     // Enable debug tracing to stderr via the MIDEN_LOG environment variable, if present
     env_logger::Builder::from_env("MIDEN_LOG").format_timestamp(None).init();
@@ -198,10 +206,8 @@ fn main() -> io::Result<()> {
     let asm_dir = Path::new(manifest_dir).join(ASM_DIR_PATH);
 
     let assembler = Assembler::default().with_debug_mode(cfg!(feature = "with-debug-info"));
-    let namespace = "std".parse::<LibraryNamespace>().expect("invalid base namespace");
-    let stdlib = assembler
-        .assemble_library_from_dir(&asm_dir, namespace)
-        .map_err(|e| io::Error::other(e.to_string()))?;
+    let namespace = "::std".parse::<masm::PathBuf>().expect("invalid base namespace");
+    let stdlib = assembler.assemble_library_from_dir(&asm_dir, namespace)?;
 
     // write the masl output
     let build_dir = env::var("OUT_DIR").unwrap();
@@ -210,11 +216,14 @@ fn main() -> io::Result<()> {
         .join(ASL_DIR_PATH)
         .join("std")
         .with_extension(Library::LIBRARY_EXTENSION);
-    stdlib.write_to_file(output_file).map_err(|e| io::Error::other(e.to_string()))?;
+    stdlib
+        .write_to_file(output_file)
+        .map_err(|e| io::Error::other(e.to_string()))
+        .into_diagnostic()?;
 
     // Generate documentation
     if std::env::var("MIDEN_BUILD_STDLIB_DOCS").is_ok() {
-        build_stdlib_docs(&asm_dir, DOC_DIR_PATH)?;
+        build_stdlib_docs(&asm_dir, DOC_DIR_PATH).into_diagnostic()?;
     }
 
     Ok(())

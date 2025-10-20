@@ -63,7 +63,7 @@ fn test_reset_stack_in_buffer_from_restore_context() {
 
     let asm = format!(
         "
-        proc.fn_in_new_context
+        proc fn_in_new_context
             repeat.{NUM_DROPS_IN_NEW_CONTEXT} drop end
         end
 
@@ -311,7 +311,7 @@ fn test_call_node_preserves_stack_overflow_table() {
     let mut host = DefaultHost::default();
 
     // equivalent to:
-    // proc.foo
+    // proc foo
     //   add
     // end
     //

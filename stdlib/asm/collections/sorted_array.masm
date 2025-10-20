@@ -1,9 +1,9 @@
-use.std::word
+use std::word
 
 # CONSTANTS
 # =================================================================================================
-const.LOWERBOUND_ARRAY_EVENT=event("stdlib::collections::sorted_array::lowerbound_array")
-const.LOWERBOUND_KEY_VALUE_EVENT=event("stdlib::collections::sorted_array::lowerbound_key_value")
+const LOWERBOUND_ARRAY_EVENT = event("stdlib::collections::sorted_array::lowerbound_array")
+const LOWERBOUND_KEY_VALUE_EVENT = event("stdlib::collections::sorted_array::lowerbound_key_value")
 
 # ===== ARRAY UTILITIES ============================================================================
 
@@ -23,7 +23,7 @@ const.LOWERBOUND_KEY_VALUE_EVENT=event("stdlib::collections::sorted_array::lower
 #!   Value doesn't exist and is smaller than all elements: 151 cycles
 #!   Value doesn't exist and is larger than all elements: 149 cycles
 #!   Value doesn't exist: 286 cycles
-export.find_word
+pub proc find_word
     # Call the non-deterministic lowerbound advisor (5 cycles)
     emit.LOWERBOUND_ARRAY_EVENT
     adv_push.2
@@ -45,7 +45,7 @@ export.find_word
         #=> [is_value_found, maybe_value_ptr, start_ptr, end_ptr]
     else
         # the value was not found
-        
+
         # pre-compute is_start_ptr, is_end_ptr to reduce the depth of the generated MAST
         # (6 cycles)
         dup.6 dup.1 eq
@@ -119,7 +119,7 @@ export.find_word
                 # dereference maybe_value_ptr (8 cycles)
                 padw dup.12 mem_loadw
                 #=> [MAYBE_VALUE, VALUE, VALUE, maybe_value_ptr, start_ptr, end_ptr]
-                
+
                 # there was no match, MAYBE_VALUE must be larger than VALUE (123 cycles)
                 exec.word::lt
                 assert.err="lowerbound_array invariant: *maybe_value_ptr not greater than VALUE"
@@ -127,11 +127,11 @@ export.find_word
                 # dereference `maybe_value_ptr-4` (11 cycles)
                 padw dup.8 sub.4 mem_loadw
                 #=> [MAYBE_VALUE_PREV, VALUE, maybe_value_ptr, start_ptr, end_ptr]
-                
+
                 # there was no match, MAYBE_VALUE_PREV must be smaller than VALUE (119 cycles)
                 exec.word::gt
                 assert.err="lowerbound_array invariant: *(maybe_value_ptr-4) not smaller than VALUE"
-                
+
                 # No value was found (1 cycle)
                 push.0
                 #=> [is_value_found = 0, maybe_value_ptr, start_ptr, end_ptr]
@@ -160,7 +160,7 @@ end
 #!   Key doesn't exist and is smaller than all stored keys: 151 cycles
 #!   Key doesn't exist and is larger than all stored keys: 149 cycles
 #!   Key doesn't exist: 298 cycles
-export.find_key_value
+pub proc find_key_value
     # Call the non-deterministic lowerbound advisor (5 cycles)
     emit.LOWERBOUND_KEY_VALUE_EVENT
     adv_push.2
@@ -210,7 +210,7 @@ export.find_key_value
 
                 movdn.4
                 #=> [KEY, maybe_key_ptr, start_ptr, end_ptr]
-                
+
                 # dereference maybe_key_ptr (7 cycles)
                 dup.4 padw movup.4 mem_loadw
                 #=> [FIRST_KEY, KEY, maybe_key_ptr = start_ptr, start_ptr, end_ptr]
@@ -261,7 +261,7 @@ export.find_key_value
                 # dereference maybe_key_ptr (8 cycles)
                 padw dup.12 mem_loadw
                 #=> [MAYBE_KEY, KEY, KEY, maybe_key_ptr, start_ptr, end_ptr]
-                
+
                 # there was no match, `*maybe_key_ptr` must be larger than KEY (123 cycles)
                 exec.word::lt
                 assert.err="lowerbound_key_value invariant: MAYBE_KEY not greater than KEY"
@@ -269,11 +269,11 @@ export.find_key_value
                 # dereference `maybe_key_ptr-8` (previous key) (11 cycles)
                 padw dup.8 sub.8 mem_loadw
                 #=> [MAYBE_KEY_PREV, KEY, maybe_key_ptr, start_ptr, end_ptr]
-                
+
                 # there was no match, `*(maybe_key_ptr-8)` must be smaller than KEY (119 cycles)
                 exec.word::gt
                 assert.err="lowerbound_key_value invariant: MAYBE_KEY_PREV not smaller than KEY"
-                
+
                 # No value was found (1 cycle)
                 push.0
                 #=> [is_key_found = 0, maybe_key_ptr, start_ptr, end_ptr]

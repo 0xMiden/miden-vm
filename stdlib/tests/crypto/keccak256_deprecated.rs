@@ -8,7 +8,7 @@ use sha3::{Digest, Keccak256};
 #[test]
 fn keccak256_bit_interleaving() {
     let source = "
-    use.std::crypto::hashes::keccak256_deprecated
+    use std::crypto::hashes::keccak256_deprecated
 
     begin
         exec.keccak256_deprecated::to_bit_interleaved
@@ -31,7 +31,7 @@ fn keccak256_bit_interleaving() {
 #[test]
 fn keccak256_2_to_1_hash() {
     let source = "
-    use.std::crypto::hashes::keccak256_deprecated
+    use std::crypto::hashes::keccak256_deprecated
 
     begin
         exec.keccak256_deprecated::hash

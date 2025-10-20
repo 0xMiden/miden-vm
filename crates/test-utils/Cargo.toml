@@ -40,6 +40,7 @@ pretty_assertions = { version = "1.4", default-features = false, features = [
 ] }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
+env_logger.workspace = true
 pretty_assertions = "1.4"
 proptest.workspace = true
 winter-rand-utils.workspace = true

@@ -1,8 +1,8 @@
-use.std::crypto::stark::constants
-use.std::crypto::stark::random_coin
-use.std::crypto::stark::public_inputs
+use std::crypto::stark::constants
+use std::crypto::stark::random_coin
+use std::crypto::stark::public_inputs
 
-use.std::crypto::hashes::rpo
+use std::crypto::hashes::rpo
 
 # CONSTANTS
 # =================================================================================================
@@ -10,19 +10,19 @@ use.std::crypto::hashes::rpo
 # Number of fixed length public inputs with padding (in field elements)
 # This is composed of the input/output operand stacks (16 * 2) and the program digest (4) and four
 # zeros for padding to the next multiple of 4. Note that, then, the fixed length public inputs
-# which are stored as extension field elements will be double-word aligned. 
-const.NUM_FIXED_LEN_PUBLIC_INPUTS=40
+# which are stored as extension field elements will be double-word aligned.
+const NUM_FIXED_LEN_PUBLIC_INPUTS = 40
 
 # Number of variable length public input groups
-const.NUM_VAR_LEN_PI_GROUPS=1
+const NUM_VAR_LEN_PI_GROUPS = 1
 
 # Op label for kernel procedures table messages
-const.KERNEL_OP_LABEL=48
+const KERNEL_OP_LABEL = 48
 
 # CONSTANTS GETTERS
 # =================================================================================================
 
-export.get_num_fixed_len_public_inputs
+pub proc get_num_fixed_len_public_inputs
     push.NUM_FIXED_LEN_PUBLIC_INPUTS
 end
 
@@ -30,7 +30,7 @@ end
 # =================================================================================================
 
 #! Processes the public inputs.
-#! 
+#!
 #! This involves:
 #!
 #! 1. Loading from the advice stack the fixed-length public inputs and storing them in memory
@@ -38,7 +38,7 @@ end
 #! 2. Loading from the advice stack the variable-length public inputs, storing them temporarily
 #!    in memory, and then reducing them to an element in the challenge field using the auxiliary
 #!    randomness. This reduced value is then used to impose a boundary condition on the relevant
-#!    auxiliary column. 
+#!    auxiliary column.
 #!
 #! Note that the fixed length public inputs are stored as extension field elements while
 #! the variable length ones are stored as base field elements.
@@ -79,7 +79,7 @@ end
 #!
 #! Input: [C, ...]
 #! Output: [...]
-export.process_public_inputs
+pub proc process_public_inputs
     # 1) Compute the address where the public inputs will be stored and store it.
     #    This also computes the address where the reduced variable-length public inputs will be stored.
     exec.get_num_fixed_len_public_inputs push.NUM_VAR_LEN_PI_GROUPS
@@ -114,9 +114,9 @@ end
 #!
 #! Inputs:  [C, ...]
 #! Outputs: [D, ...]
-proc.load_public_inputs
+proc load_public_inputs
     # 1) Load and hash the fixed length public inputs
-    
+
     exec.constants::public_inputs_address_ptr mem_load
     movdn.4
     padw padw
@@ -139,7 +139,7 @@ proc.load_public_inputs
     # => [rem, num_iter, R2, R1, C, ptr, ...]
     push.0 assert_eq
     # => [num_iter, R2, R1, C, ptr, ...]
-    
+
     ## c) Prepare the stack for hashing
     movdn.13
     # => [R2, R1, C, ptr, num_iter, ...]
@@ -175,11 +175,11 @@ end
 #!
 #! Currently, the only variable-length public inputs are the kernel procedure digests.
 #!
-#! Input: 
+#! Input:
 #!      - Operand stack: [...]
 #!      - Advice stack: [beta0, beta1, alpha0, alpha1, var_len_pi_1_len, ..., var_len_pi_k_len, ...]
 #! Output: [...]
-proc.reduce_variable_length_public_inputs
+proc reduce_variable_length_public_inputs
     # 1) Load the auxiliary randomness i.e., alpha and beta
     #    We store them as [beta0, beta1, alpha0, alpha1] since `horner_eval_ext` requires memory
     #    word-alignment.
@@ -201,7 +201,7 @@ proc.reduce_variable_length_public_inputs
     # Note that, as mentioned in the top of this module, the variable-length public inputs are only
     # stored temporarily and they will be over-written by, among other data, the result of reducing
     # the variable public inputs.
-    
+
     adv_push.1 exec.reduce_kernel_digests
     # => [next_var_len_pub_inputs_ptr, var_len_pub_inputs_res_ptr, ...]
 
@@ -217,7 +217,7 @@ end
 #!
 #! where `digests_ptr` is a pointer to the kernel procedures digests and `next_ptr` is a pointer to
 #! the start of the next group of variable public inputs to be reduced, if such a group exists.
-proc.reduce_kernel_digests
+proc reduce_kernel_digests
     # Assert that the number of kernel procedures is at most 1023
     dup u32lt.1024 assert
 
@@ -282,7 +282,7 @@ proc.reduce_kernel_digests
 
         movup.7 movup.7
         # => [acc1, acc0, alpha1, alpha0 + op_label, beta1, beta0, digests_ptr, beta_ptr, Y, Y, ...]
-        
+
         # Compute `tmp = β ⋅ acc =  ∑ {0≤i<4} digest_ptr[i] ⋅ βⁱ⁺¹`
         dup.5 dup.5
         # => [beta1, beta0, acc1, acc0, alpha1, alpha0 + op_label, beta1, beta0, digests_ptr, beta_ptr, Y, Y, ...]
@@ -293,7 +293,7 @@ proc.reduce_kernel_digests
         dup.3 dup.3
         ext2add
         # => [term1, term0, alpha1, alpha0 + op_label, beta1, beta0, digests_ptr, beta_ptr, Y, Y, ...]
-  
+
         movdn.15
         movdn.15
         # => [alpha1, alpha0 + op_label, beta1, beta0, digests_ptr, beta_ptr, Y, Y, term1, term0, ...]
@@ -301,7 +301,7 @@ proc.reduce_kernel_digests
         push.0 movdn.6
         push.0 movdn.6
         # => [alpha1, alpha0 + op_label, beta1, beta0, digests_ptr, beta_ptr, 0, 0, Y, Y, term1, term0, ...]
- 
+
         swapdw
         # => [Y, Y, alpha1, alpha0 + op_label, beta1, beta0, digests_ptr, beta_ptr, 0, 0, term1, term0, ...]
 

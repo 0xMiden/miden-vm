@@ -28,7 +28,7 @@ use alloc::{
 
 use miden_assembly_syntax::{
     Library,
-    ast::{AttributeSet, QualifiedProcedureName},
+    ast::{AttributeSet, PathBuf},
     library::{FunctionTypeDeserializer, FunctionTypeSerializer},
 };
 use miden_core::{
@@ -36,6 +36,7 @@ use miden_core::{
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
+use super::{ConstantExport, ProcedureExport, TypeExport};
 use crate::{Dependency, MastArtifact, Package, PackageExport, PackageManifest, Section};
 
 // CONSTANTS
@@ -191,7 +192,9 @@ impl serde::Serialize for PackageManifest {
     {
         use serde::ser::SerializeStruct;
 
-        struct PackageExports<'a>(&'a BTreeMap<QualifiedProcedureName, PackageExport>);
+        use miden_assembly_syntax::Path;
+
+        struct PackageExports<'a>(&'a BTreeMap<Arc<Path>, PackageExport>);
 
         impl serde::Serialize for PackageExports<'_> {
             fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -310,7 +313,7 @@ impl Deserializable for PackageManifest {
         let mut exports = BTreeMap::new();
         for _ in 0..exports_len {
             let export = PackageExport::read_from(source)?;
-            exports.insert(export.name.clone(), export);
+            exports.insert(export.path().clone(), export);
         }
 
         // Read dependencies
@@ -328,7 +331,31 @@ impl Deserializable for PackageManifest {
 // ================================================================================================
 impl Serializable for PackageExport {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        self.name.write_into(target);
+        target.write_u8(self.tag());
+        match self {
+            Self::Procedure(export) => export.write_into(target),
+            Self::Constant(export) => export.write_into(target),
+            Self::Type(export) => export.write_into(target),
+        }
+    }
+}
+
+impl Deserializable for PackageExport {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        match source.read_u8()? {
+            1 => ProcedureExport::read_from(source).map(Self::Procedure),
+            2 => ConstantExport::read_from(source).map(Self::Constant),
+            3 => TypeExport::read_from(source).map(Self::Type),
+            invalid => Err(DeserializationError::InvalidValue(format!(
+                "unexpected PackageExport tag: '{invalid}'"
+            ))),
+        }
+    }
+}
+
+impl Serializable for ProcedureExport {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.path.write_into(target);
         self.digest.write_into(target);
         match self.signature.as_ref() {
             Some(sig) => {
@@ -343,9 +370,9 @@ impl Serializable for PackageExport {
     }
 }
 
-impl Deserializable for PackageExport {
+impl Deserializable for ProcedureExport {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let name = QualifiedProcedureName::read_from(source)?;
+        let path = PathBuf::read_from(source)?.into_boxed_path().into();
         let digest = Word::read_from(source)?;
         let signature = if source.read_bool()? {
             Some(FunctionTypeDeserializer::read_from(source)?.0)
@@ -353,6 +380,40 @@ impl Deserializable for PackageExport {
             None
         };
         let attributes = AttributeSet::read_from(source)?;
-        Ok(Self { name, digest, signature, attributes })
+        Ok(Self { path, digest, signature, attributes })
+    }
+}
+
+impl Serializable for ConstantExport {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.path.write_into(target);
+        self.value.write_into(target);
+    }
+}
+
+impl Deserializable for ConstantExport {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let path = PathBuf::read_from(source)?.into_boxed_path().into();
+        let value = miden_assembly_syntax::ast::ConstantExpr::read_from(source)?;
+        Ok(Self { path, value })
+    }
+}
+
+impl Serializable for TypeExport {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        use miden_assembly_syntax::library::TypeSerializer;
+
+        self.path.write_into(target);
+        TypeSerializer(&self.ty).write_into(target);
+    }
+}
+
+impl Deserializable for TypeExport {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        use miden_assembly_syntax::library::TypeDeserializer;
+
+        let path = PathBuf::read_from(source)?.into_boxed_path().into();
+        let ty = TypeDeserializer::read_from(source)?.0;
+        Ok(Self { path, ty })
     }
 }

@@ -1,16 +1,16 @@
-use.std::crypto::stark::constants
-use.std::crypto::hashes::rpo
-use.std::crypto::stark::random_coin
+use std::crypto::stark::constants
+use std::crypto::hashes::rpo
+use std::crypto::stark::random_coin
 
 #! Loads the execution trace and the quotient trace evaluation frames.
-#! 
+#!
 #! This also computes Q^z(alpha) and Q^gz(alpha) where:
 #!
 #! Q^z(alpha) = (q_z_0, q_z_1) = \sum_{i=0}^{n+m+l} S_i * alpha^i
 #!
-#! and 
+#! and
 #!
-#! Q^gz(alpha) = (q_gz_0, q_gz_1) = \sum_{i=0}^{n+m+l} T_i * alpha^i 
+#! Q^gz(alpha) = (q_gz_0, q_gz_1) = \sum_{i=0}^{n+m+l} T_i * alpha^i
 #!
 #! where:
 #!
@@ -26,7 +26,7 @@ use.std::crypto::stark::random_coin
 #!
 #! Inputs:  []
 #! Outputs: []
-export.load_and_horner_eval_ood_frames
+pub proc load_and_horner_eval_ood_frames
     # --- Load the random challenge used in computing the DEEP polynomial -----
 
     # We use this challenge to compute the constant terms needed in the computation of the DEEP
@@ -35,7 +35,7 @@ export.load_and_horner_eval_ood_frames
     # we can hash, memory store and Horner evaluate in parallel.
     # The check for the correctness of the use of this non-determinism is checked in
     # `std::crypto::stark::random_coin::generate_deep_composition_random_coefficients`
-    
+
     ## Load the random challenge non-deterministically
     adv_push.2
     # => [alpha_1, alpha_0]
@@ -63,7 +63,7 @@ export.load_and_horner_eval_ood_frames
     ##    of the sponge state is always initialized to `[0, 0, 0, 0]`.
 
     ### a) Set up the hasher state
-    padw padw     
+    padw padw
     # => [ZERO, 0, 0, 0, 0, U, Y]
     movupw.3
     # => [Y, ZERO, 0, 0, 0, 0, U]
@@ -118,6 +118,6 @@ end
 #!
 #! Inputs:  [R2, R1, C, ptr, acc1, acc0]
 #! Outputs: [R2, R1, C, ptr, acc1`, acc0`]
-proc.process_row_ood_evaluations
+proc process_row_ood_evaluations
     exec.constants::get_procedure_digest_process_row_ood_evaluations_ptr dynexec
 end

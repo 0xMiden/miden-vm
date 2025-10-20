@@ -1,8 +1,15 @@
-use alloc::{collections::BTreeMap, vec::Vec};
+use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 use core::fmt;
 
-use miden_assembly_syntax::ast::{AttributeSet, QualifiedProcedureName, types::FunctionType};
+#[cfg(feature = "arbitrary")]
+use miden_assembly_syntax::ast::PathBuf;
+use miden_assembly_syntax::ast::{
+    self, AttributeSet, Path,
+    types::{FunctionType, Type},
+};
 use miden_core::{Word, utils::DisplayHex};
+#[cfg(feature = "arbitrary")]
+use proptest::prelude::{Strategy, any};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -17,7 +24,13 @@ use crate::Dependency;
 #[cfg_attr(feature = "arbitrary", derive(proptest_derive::Arbitrary))]
 pub struct PackageManifest {
     /// The set of exports in this package.
-    pub(super) exports: BTreeMap<QualifiedProcedureName, PackageExport>,
+    #[cfg_attr(
+        feature = "arbitrary",
+        proptest(
+            strategy = "proptest::collection::vec(any::<PackageExport>(), 1..10).prop_map(|exports| PackageManifest::new(exports).exports)"
+        )
+    )]
+    pub(super) exports: BTreeMap<Arc<Path>, PackageExport>,
     /// The libraries (packages) linked against by this package, which must be provided when
     /// executing the program.
     pub(super) dependencies: Vec<Dependency>,
@@ -25,7 +38,7 @@ pub struct PackageManifest {
 
 impl PackageManifest {
     pub fn new(exports: impl IntoIterator<Item = PackageExport>) -> Self {
-        let exports = exports.into_iter().map(|export| (export.name.clone(), export)).collect();
+        let exports = exports.into_iter().map(|export| (export.path(), export)).collect();
         Self {
             exports,
             dependencies: Default::default(),
@@ -55,7 +68,7 @@ impl PackageManifest {
 
     /// Get the number of procedures exported from this package
     pub fn num_exports(&self) -> usize {
-        self.exports.len()
+        self.exports.values().filter(|export| export.is_procedure()).count()
     }
 
     /// Get an iterator over the exports in this package
@@ -64,8 +77,8 @@ impl PackageManifest {
     }
 
     /// Get information about an export by it's qualified name
-    pub fn get_export(&self, name: &QualifiedProcedureName) -> Option<&PackageExport> {
-        self.exports.get(name)
+    pub fn get_export(&self, name: impl AsRef<Path>) -> Option<&PackageExport> {
+        self.exports.get(name.as_ref())
     }
 
     /// Get information about all exports of this package with the given MAST root digest
@@ -74,19 +87,97 @@ impl PackageManifest {
         digest: &Word,
     ) -> impl Iterator<Item = &PackageExport> + '_ {
         let digest = *digest;
-        self.exports.values().filter(move |export| export.digest == digest)
+        self.exports.values().filter(move |export| match export {
+            PackageExport::Procedure(export) => export.digest == digest,
+            PackageExport::Constant(_) | PackageExport::Type(_) => false,
+        })
     }
 }
 
-/// A procedure exported by a package, along with its digest and signature (will be added after
-/// MASM type attributes are implemented).
+/// Represents a named item exported from a package.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[repr(u8)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
+pub enum PackageExport {
+    /// A procedure definition or alias with 'pub' visibility
+    Procedure(ProcedureExport) = 1,
+    /// A constant definition with 'pub' visibility
+    Constant(ConstantExport),
+    /// A type declaration with 'pub' visibility
+    Type(TypeExport),
+}
+
+impl PackageExport {
+    /// Get the path of this exported item
+    pub fn path(&self) -> Arc<Path> {
+        match self {
+            Self::Procedure(export) => export.path.clone(),
+            Self::Constant(export) => export.path.clone(),
+            Self::Type(export) => export.path.clone(),
+        }
+    }
+
+    /// Returns true if this item is a procedure
+    #[inline]
+    pub fn is_procedure(&self) -> bool {
+        matches!(self, Self::Procedure(_))
+    }
+
+    /// Returns true if this item is a constant
+    #[inline]
+    pub fn is_constant(&self) -> bool {
+        matches!(self, Self::Constant(_))
+    }
+
+    /// Returns true if this item is a type declaration
+    #[inline]
+    pub fn is_type(&self) -> bool {
+        matches!(self, Self::Type(_))
+    }
+
+    pub(crate) const fn tag(&self) -> u8 {
+        // SAFETY: This is safe because we have given this enum a
+        // primitive representation with #[repr(u8)], with the first
+        // field of the underlying union-of-structs the discriminant
+        //
+        // See the section on "accessing the numeric value of the discriminant"
+        // here: https://doc.rust-lang.org/std/mem/fn.discriminant.html
+        unsafe { *(self as *const Self).cast::<u8>() }
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+impl proptest::arbitrary::Arbitrary for PackageExport {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        use proptest::{arbitrary::any, prop_oneof, strategy::Strategy};
+
+        prop_oneof![
+            any::<ProcedureExport>().prop_map(Self::Procedure),
+            any::<ConstantExport>().prop_map(Self::Constant),
+            any::<TypeExport>().prop_map(Self::Type),
+        ]
+        .boxed()
+    }
+
+    type Strategy = proptest::prelude::BoxedStrategy<Self>;
+}
+
+/// A procedure exported by a package, along with its digest, signature, and attributes.
 #[derive(Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(proptest_derive::Arbitrary))]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
-pub struct PackageExport {
-    /// The fully-qualified name of the procedure exported by this package.
-    pub name: QualifiedProcedureName,
+pub struct ProcedureExport {
+    /// The fully-qualified path of the procedure exported by this package.
+    #[cfg_attr(feature = "serde", serde(with = "miden_assembly_syntax::ast::path"))]
+    #[cfg_attr(
+        feature = "arbitrary",
+        proptest(strategy = "any::<PathBuf>().prop_map(|p| p.into())")
+    )]
+    pub path: Arc<Path>,
     /// The digest of the procedure exported by this package.
     #[cfg_attr(feature = "arbitrary", proptest(value = "Word::default()"))]
     pub digest: Word,
@@ -100,14 +191,74 @@ pub struct PackageExport {
     pub attributes: AttributeSet,
 }
 
-impl fmt::Debug for PackageExport {
+impl fmt::Debug for ProcedureExport {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Self { name, digest, signature, attributes } = self;
+        let Self { path, digest, signature, attributes } = self;
         f.debug_struct("PackageExport")
-            .field("name", &format_args!("{name}"))
+            .field("path", &format_args!("{path}"))
             .field("digest", &format_args!("{}", DisplayHex::new(&digest.as_bytes())))
             .field("signature", signature)
             .field("attributes", attributes)
+            .finish()
+    }
+}
+
+/// A constant definition exported by a package
+#[derive(Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "arbitrary", derive(proptest_derive::Arbitrary))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
+pub struct ConstantExport {
+    /// The fully-qualified path of the constant exported by this package.
+    #[cfg_attr(feature = "serde", serde(with = "miden_assembly_syntax::ast::path"))]
+    #[cfg_attr(
+        feature = "arbitrary",
+        proptest(strategy = "any::<PathBuf>().prop_map(|p| p.into())")
+    )]
+    pub path: Arc<Path>,
+    /// The value of the exported constant
+    ///
+    /// We export a [ast::ConstantExpr] here, rather than a concrete value, because it is how a
+    /// constant is used that determines its final concrete value, not the declaration itself.
+    /// However, we do ensure that the expression here has been folded to _some_ concrete value,
+    /// i.e. there are no references to other constants; no unapplied operators, etc.
+    pub value: ast::ConstantExpr,
+}
+
+impl fmt::Debug for ConstantExport {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { path, value } = self;
+        f.debug_struct("ConstantExport")
+            .field("path", &format_args!("{path}"))
+            .field("value", value)
+            .finish()
+    }
+}
+
+/// A named type declaration exported by a package
+#[derive(Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "arbitrary", derive(proptest_derive::Arbitrary))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
+pub struct TypeExport {
+    /// The fully-qualified path of the type exported by this package.
+    #[cfg_attr(feature = "serde", serde(with = "miden_assembly_syntax::ast::path"))]
+    #[cfg_attr(
+        feature = "arbitrary",
+        proptest(strategy = "any::<PathBuf>().prop_map(|p| p.into())")
+    )]
+    pub path: Arc<Path>,
+    /// The type that was declared
+    #[cfg_attr(feature = "arbitrary", proptest(value = "Type::Felt"))]
+    pub ty: Type,
+}
+
+impl fmt::Debug for TypeExport {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { path, ty } = self;
+        f.debug_struct("TypeExport")
+            .field("path", &format_args!("{path}"))
+            .field("ty", ty)
             .finish()
     }
 }

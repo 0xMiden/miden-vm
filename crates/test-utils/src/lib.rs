@@ -16,7 +16,7 @@ use alloc::{
 
 use miden_assembly::{KernelLibrary, Library, Parse, diagnostics::reporting::PrintDiagnostic};
 pub use miden_assembly::{
-    LibraryPath,
+    PathBuf,
     debuginfo::{DefaultSourceManager, SourceFile, SourceLanguage, SourceManager},
     diagnostics::Report,
 };
@@ -75,7 +75,8 @@ pub const U32_BOUND: u64 = u32::MAX as u64 + 1;
 
 /// A source code of the `truncate_stack` procedure.
 pub const TRUNCATE_STACK_PROC: &str = "
-proc.truncate_stack.4
+@locals(4)
+proc truncate_stack
     loc_storew.0 dropw movupw.3
     sdepth neq.16
     while.true
@@ -180,7 +181,7 @@ pub struct Test {
     pub in_debug_mode: bool,
     pub libraries: Vec<Library>,
     pub handlers: BTreeMap<EventId, Arc<dyn EventHandler>>,
-    pub add_modules: Vec<(LibraryPath, String)>,
+    pub add_modules: Vec<(PathBuf, String)>,
 }
 
 // BUFFER WRITER FOR TESTING
@@ -221,7 +222,7 @@ impl Test {
     }
 
     /// Add an extra module to link in during assembly
-    pub fn add_module(&mut self, path: miden_assembly::LibraryPath, source: impl ToString) {
+    pub fn add_module(&mut self, path: PathBuf, source: impl ToString) {
         self.add_modules.push((path, source.to_string()));
     }
 
@@ -324,6 +325,12 @@ impl Test {
     /// Returns an error if compilation of the program source or the kernel fails.
     pub fn compile(&self) -> Result<(Program, Option<KernelLibrary>), Report> {
         use miden_assembly::{Assembler, ParseOptions, ast::ModuleKind};
+
+        // Enable debug tracing to stderr via the MIDEN_LOG environment variable, if present
+        #[cfg(not(target_family = "wasm"))]
+        {
+            let _ = env_logger::Builder::from_env("MIDEN_LOG").format_timestamp(None).try_init();
+        }
 
         let (assembler, kernel_lib) = if let Some(kernel) = self.kernel_source.clone() {
             let kernel_lib =

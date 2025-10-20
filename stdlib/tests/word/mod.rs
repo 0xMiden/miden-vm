@@ -14,7 +14,7 @@ use rstest::rstest;
 fn test_word_comparison(#[case] proc_name: &str, #[case] valid_ords: &[Ordering]) {
     let source = &format!(
         "
-        use.std::word
+        use std::word
 
         begin
             exec.word::{proc_name}
@@ -44,7 +44,7 @@ fn test_word_comparison(#[case] proc_name: &str, #[case] valid_ords: &[Ordering]
 #[test]
 fn test_reverse() {
     const SOURCE: &str = "
-        use.std::word
+        use std::word
 
         begin
             exec.word::reverse
@@ -65,7 +65,7 @@ fn test_reverse() {
 #[test]
 fn test_eqz() {
     const SOURCE: &str = "
-        use.std::word
+        use std::word
 
         begin
             exec.word::eqz
@@ -79,8 +79,8 @@ fn test_eqz() {
 #[test]
 fn test_preserving_eqz() {
     const SOURCE: &str = "
-        use.std::word
-        use.std::sys
+        use std::word
+        use std::sys
 
         begin
             exec.word::testz
@@ -95,8 +95,8 @@ fn test_preserving_eqz() {
 #[test]
 fn test_preserving_eq() {
     const SOURCE: &str = "
-        use.std::word
-        use.std::sys
+        use std::word
+        use std::sys
 
         begin
             exec.word::test_eq

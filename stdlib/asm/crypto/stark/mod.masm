@@ -1,4 +1,4 @@
-use.std::crypto::stark::verifier
+use std::crypto::stark::verifier
 
 #! Verifies a STARK proof.
 #!
@@ -31,4 +31,4 @@ use.std::crypto::stark::verifier
 #!
 #! Inputs:  [D3, D2, D1, D0, log(trace_length), num_queries, grinding, num_constraints, trace_info, num_fixed_len_pi]
 #! Outputs: []
-export.verifier::verify
+pub use verifier::verify

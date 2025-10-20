@@ -10,7 +10,7 @@ use miden_core::{
 use smallvec::SmallVec;
 
 use crate::{
-    Assembler, GlobalProcedureIndex, basic_block_builder::BasicBlockBuilder,
+    Assembler, GlobalItemIndex, basic_block_builder::BasicBlockBuilder,
     mast_forest_builder::MastForestBuilder,
 };
 
@@ -25,10 +25,12 @@ impl Assembler {
         &self,
         kind: InvokeKind,
         callee: &InvocationTarget,
-        caller: GlobalProcedureIndex,
+        caller: GlobalItemIndex,
         mast_forest_builder: &mut MastForestBuilder,
     ) -> Result<MastNodeId, Report> {
-        let resolved = self.resolve_target(kind, callee, caller, mast_forest_builder)?;
+        let resolved = self
+            .resolve_target(kind, callee, caller, mast_forest_builder)?
+            .expect("invocation target is not a procedure");
 
         match kind {
             InvokeKind::ProcRef | InvokeKind::Exec => Ok(resolved.node),
@@ -60,16 +62,18 @@ impl Assembler {
     pub(super) fn procref(
         &self,
         callee: &InvocationTarget,
-        caller: GlobalProcedureIndex,
+        caller: GlobalItemIndex,
         block_builder: &mut BasicBlockBuilder,
     ) -> Result<(), Report> {
         let mast_root = {
-            let resolved = self.resolve_target(
-                InvokeKind::ProcRef,
-                callee,
-                caller,
-                block_builder.mast_forest_builder_mut(),
-            )?;
+            let resolved = self
+                .resolve_target(
+                    InvokeKind::ProcRef,
+                    callee,
+                    caller,
+                    block_builder.mast_forest_builder_mut(),
+                )?
+                .expect("invocation target is not a procedure");
             // Note: it's ok to `unwrap()` here since `proc_body_id` was returned from
             // `mast_forest_builder`
             block_builder

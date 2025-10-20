@@ -374,7 +374,7 @@ fn handle_use_command(
             }
         },
         2 => {
-            imported_modules.insert(format!("use.{}", tokens[1]).to_string());
+            imported_modules.insert(format!("use {}", tokens[1]).to_string());
         },
         _ => println!("malformed instruction '!use': too many parameters provided"),
     }

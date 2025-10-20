@@ -73,6 +73,9 @@ pub struct Ident {
 }
 
 impl Ident {
+    /// Reserved name for a main procedure.
+    pub const MAIN: &'static str = "$main";
+
     /// Creates an [Ident] from `source`.
     ///
     /// This can fail if:
@@ -124,13 +127,21 @@ impl Ident {
         self.name.as_ref()
     }
 
+    /// Returns true if this identifier is a valid constant identifier
+    pub fn is_constant_ident(&self) -> bool {
+        self.name.chars().all(|c| c.is_ascii_uppercase() || c == '_')
+    }
+
     /// Applies the default [Ident] validation rules to `source`.
     pub fn validate(source: impl AsRef<str>) -> Result<(), IdentError> {
         let source = source.as_ref();
         if source.is_empty() {
             return Err(IdentError::Empty);
         }
-        if !source.chars().all(|c| c.is_ascii_graphic() || c.is_alphanumeric()) {
+        if !source
+            .chars()
+            .all(|c| (c.is_ascii_graphic() || c.is_alphanumeric()) && c != '#')
+        {
             return Err(IdentError::InvalidChars { ident: source.into() });
         }
         Ok(())
@@ -305,13 +316,20 @@ pub(crate) mod testing {
     }
 
     prop_compose! {
-        /// A strategy to produce a raw String of length `length`, containing any characers from
-        /// our dictionary.
+        /// A strategy to produce a raw String of no more than length `length` bytes, containing any
+        /// characers from our dictionary.
         ///
         /// The returned string will always be at least 1 characters.
         fn ident_raw_any(length: u32)
                         (chars in vec(ident_chars(), 1..=(length as usize))) -> String {
-            String::from_iter(chars)
+            let mut buf = String::with_capacity(length as usize);
+            for c in chars {
+                if !buf.is_empty() && buf.len() + c.len_utf8() > length as usize {
+                    break;
+                }
+                buf.push(c);
+            }
+            buf
         }
     }
 

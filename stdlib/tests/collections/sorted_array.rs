@@ -17,7 +17,7 @@ fn test_sorted_array_find_word() {
         let (key, was_key_found, key_ptr) = test;
         let source: String = format!(
             "
-            use.std::collections::sorted_array
+            use std::collections::sorted_array
 
             {TRUNCATE_STACK_PROC}
 
@@ -44,7 +44,7 @@ fn test_sorted_array_find_word() {
 fn test_empty_sorted_array_find_word() {
     let source: String = format!(
         "
-        use.std::collections::sorted_array
+        use std::collections::sorted_array
 
         {TRUNCATE_STACK_PROC}
 
@@ -65,7 +65,7 @@ fn test_empty_sorted_array_find_word() {
 fn test_unsorted_array_find_word_fails() {
     let source: String = format!(
         "
-        use.std::collections::sorted_array
+        use std::collections::sorted_array
 
         {TRUNCATE_STACK_PROC}
 
@@ -107,7 +107,7 @@ fn test_sorted_key_value_array_find_key() {
         let (key, was_key_found, key_ptr) = test;
         let source: String = format!(
             "
-            use.std::collections::sorted_array
+            use std::collections::sorted_array
 
             {TRUNCATE_STACK_PROC}
 
@@ -139,7 +139,7 @@ fn test_sorted_key_value_array_find_key() {
 fn test_empty_sorted_key_value_array_find_key() {
     let source: String = format!(
         "
-        use.std::collections::sorted_array
+        use std::collections::sorted_array
 
         {TRUNCATE_STACK_PROC}
 
@@ -160,7 +160,7 @@ fn test_empty_sorted_key_value_array_find_key() {
 fn test_unsorted_key_value_find_key_fails() {
     let source: String = format!(
         "
-        use.std::collections::sorted_array
+        use std::collections::sorted_array
 
         {TRUNCATE_STACK_PROC}
 
@@ -191,7 +191,7 @@ fn test_unsorted_key_value_find_key_fails() {
 fn test_misaligned_key_value_find_key_fails() {
     let source: String = format!(
         "
-        use.std::collections::sorted_array
+        use std::collections::sorted_array
 
         {TRUNCATE_STACK_PROC}
 

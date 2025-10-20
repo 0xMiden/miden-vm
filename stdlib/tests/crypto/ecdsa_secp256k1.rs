@@ -20,7 +20,7 @@ struct Point([BaseField; 3]);
 #[ignore]
 fn verify(pubkey: Point, h: ScalarField, r: ScalarField, s: ScalarField) {
     let source = "
-    use.std::crypto::dsa::ecdsa::secp256k1
+    use std::crypto::dsa::ecdsa::secp256k1
 
     begin
         exec.secp256k1::verify

@@ -19,10 +19,8 @@ pub mod testing;
 
 #[doc(hidden)]
 pub use self::{
-    library::{
-        KernelLibrary, Library, LibraryError, LibraryNamespace, LibraryPath, LibraryPathComponent,
-        PathError, Version, VersionError,
-    },
+    ast::{PathBuf, PathComponent, PathError, Path},
+    library::{KernelLibrary, Library, LibraryError, Version, VersionError},
     parser::{ModuleParser, ParsingError},
 };
 pub use self::{

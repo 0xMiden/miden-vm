@@ -1,4 +1,4 @@
-use.std::crypto::hashes::rpo
+use std::crypto::hashes::rpo
 
 # ===== MEMORY FUNCTIONS ==========================================================================
 
@@ -9,7 +9,7 @@ use.std::crypto::hashes::rpo
 #! Stack transition looks as follows:
 #! [n, read_ptr, write_ptr, ...] -> [...]
 #! cycles: 15 + 16n
-export.memcopy_words
+pub proc memcopy_words
   # The loop variable is changed with an add instead of sub because the former
   # uses one fewer cycle. So here the counter is negated. (1 cycles)
   # stack: [-n, read_ptr, write_ptr, ...]
@@ -66,7 +66,7 @@ end
 #! - The value `words = end_ptr - write_ptr` must be positive and a multiple of 8
 #!
 #! Cycles: 9 + 6 * word_pairs
-export.pipe_double_words_to_memory.0
+pub proc pipe_double_words_to_memory
   dup.13 dup.13 neq # (4 cycles)
 
   # loop until write_ptr reaches end_ptr (6 cycles per iteration + 1)
@@ -90,7 +90,7 @@ end
 #! Cycles:
 #!  even num_words: 43 + 9 * num_words / 2
 #!  odd num_words: 60 + 9 * round_down(num_words / 2)
-export.pipe_words_to_memory.0
+pub proc pipe_words_to_memory
   # check if there is an odd number of words (6 cycles)
   dup is_odd
   # => [is_odd, num_words, write_ptr, ...]
@@ -162,7 +162,7 @@ end
 #! Cycles:
 #!  even num_words: 62 + 9 * num_words / 2
 #!  odd num_words: 79 + 9 * round_down(num_words / 2)
-export.pipe_preimage_to_memory.0
+pub proc pipe_preimage_to_memory
   # Copies the advice stack data to memory
   exec.pipe_words_to_memory
   # => [C, B, A, write_ptr', COM, ...]
@@ -187,7 +187,7 @@ end
 #! Output: [write_ptr', ...]
 #!
 #! Cycles: 56 + 3 * num_words / 2
-export.pipe_double_words_preimage_to_memory
+pub proc pipe_double_words_preimage_to_memory
   # Assert precondition (8 cycles).
   dup is_odd assertz.err="pipe_double_words_preimage_to_memory: num_words must be even"
   # => [num_words, write_ptr, COM, ...]

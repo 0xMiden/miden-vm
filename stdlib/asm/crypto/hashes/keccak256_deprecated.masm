@@ -15,7 +15,8 @@
 #! s.t. last two elements of 12 -th ( when indexed from zero ) memory address are zeroed.
 #!
 #! Consecutive memory addresses can be computed by repeated application of `add.4`.
-proc.theta.12
+@locals(12)
+proc theta
     dup
     locaddr.0
     mem_store
@@ -1055,7 +1056,8 @@ end
 #! s.t. last two elements of 12 -th ( when indexed from zero ) memory address are zeroed.
 #!
 #! Consecutive memory addresses can be computed by repeated application of `add.4`.
-proc.rho.4
+@locals(4)
+proc rho
     dup
     locaddr.0
     mem_store
@@ -1340,7 +1342,8 @@ end
 #! s.t. last two elements of 12 -th ( when indexed from zero ) memory address are zeroed.
 #!
 #! Consecutive memory addresses can be computed by repeated application of `add.4`.
-proc.pi.56
+@locals(56)
+proc pi
     dup
     locaddr.0
     mem_store
@@ -1759,7 +1762,8 @@ end
 #! s.t. last two elements of 12 -th ( when indexed from zero ) memory address are zeroed.
 #!
 #! Consecutive memory addresses can be computed by repeated application of `add.4`.
-proc.chi.16
+@locals(16)
+proc chi
     dup
     locaddr.0
     mem_store
@@ -2908,7 +2912,7 @@ end
 #!
 #! state[0] ^= c0
 #! state[1] ^= c1
-proc.iota
+proc iota
     dup
     push.0.0.0.0
     movup.4
@@ -2950,7 +2954,7 @@ end
 #! Consecutive memory addresses can be computed by repeated application of `add.4`.
 #!
 #! See https://github.com/itzmeanjan/merklize-sha/blob/1d35aae9da7fed20127489f362b4bc93242a516c/include/sha3.hpp#L325-L340
-proc.round
+proc round
     dup
     exec.theta
 
@@ -2980,7 +2984,7 @@ end
 #! Consecutive memory addresses can be computed by repeated application of `add.4`.
 #!
 #! See https://github.com/itzmeanjan/merklize-sha/blob/1d35aae9da7fed20127489f362b4bc93242a516c/include/sha3.hpp#L379-L427
-proc.keccak_p
+proc keccak_p
     # permutation round 1
     dup
     exec.round
@@ -3193,7 +3197,7 @@ end
 #!
 #! See https://github.com/itzmeanjan/merklize-sha/blob/1d35aae9da7fed20127489f362b4bc93242a516c/include/utils.hpp#L123-L149
 #! for reference implementation in higher level language.
-export.to_bit_interleaved
+pub proc to_bit_interleaved
     push.0.0
 
     repeat.16
@@ -3281,7 +3285,7 @@ end
 #!
 #! See https://github.com/itzmeanjan/merklize-sha/blob/1d35aae9da7fed20127489f362b4bc93242a516c/include/utils.hpp#L151-L175
 #! for reference implementation in higher level language.
-export.from_bit_interleaved
+pub proc from_bit_interleaved
     push.0.0
 
     repeat.16
@@ -3364,7 +3368,7 @@ end
 #! [...]
 #!
 #! See https://github.com/itzmeanjan/merklize-sha/blob/1d35aae9da7fed20127489f362b4bc93242a516c/include/keccak_256.hpp#L73-L153
-proc.to_state_array
+proc to_state_array
     repeat.4
         movdn.4
         exec.to_bit_interleaved
@@ -3460,7 +3464,7 @@ end
 #! [dig0_hi, dig0_lo, dig1_hi, dig1_lo, dig2_hi, dig2_lo, dig3_hi, dig3_lo, ...]
 #!
 #! See https://github.com/itzmeanjan/merklize-sha/blob/1d35aae9da7fed20127489f362b4bc93242a516c/include/keccak_256.hpp#L180-L209
-proc.to_digest
+proc to_digest
     repeat.4
         movup.7
         movup.7
@@ -3485,7 +3489,8 @@ end
 #! [oword0, oword1, oword2, oword3, oword4, oword5, oword6, oword7, ... ]
 #!
 #! See https://github.com/itzmeanjan/merklize-sha/blob/1d35aae9da7fed20127489f362b4bc93242a516c/include/keccak_256.hpp#L232-L257
-export.hash.52
+@locals(52)
+pub proc hash
     # prapare keccak256 state from input message
     locaddr.0
     exec.to_state_array

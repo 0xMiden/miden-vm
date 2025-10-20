@@ -10,12 +10,13 @@ use miden_utils_diagnostics::Report;
 use smallvec::SmallVec;
 
 use super::{
-    Constant, DocString, EnumType, Export, FunctionType, Import, LocalNameResolver, ProcedureIndex,
-    ProcedureName, QualifiedProcedureName, ResolvedProcedure, TypeAlias, TypeDecl, Variant,
+    Alias, Constant, DocString, EnumType, Export, FunctionType, GlobalItemIndex, ItemIndex,
+    LocalSymbolResolutionError, LocalSymbolResolver, Path, Procedure, ProcedureName,
+    QualifiedProcedureName, SymbolResolution, TypeAlias, TypeDecl, TypeResolver, Variant,
 };
 use crate::{
-    LibraryNamespace, LibraryPath,
-    ast::{self, AliasTarget, Ident, types},
+    PathBuf,
+    ast::{self, Ident, types},
     parser::ModuleParser,
     sema::SemanticAnalysisError,
 };
@@ -120,20 +121,11 @@ pub struct Module {
     /// precede in the module body.
     docs: Option<DocString>,
     /// The fully-qualified path representing the name of this module.
-    path: LibraryPath,
+    path: PathBuf,
     /// The kind of module this represents.
     kind: ModuleKind,
-    /// The constants defined in the module body.
-    pub(crate) constants: Vec<Constant>,
-    /// The types defined in the module body.
-    pub(crate) types: Vec<TypeDecl>,
-    /// The imports defined in the module body.
-    pub(crate) imports: Vec<Import>,
-    /// The procedures (defined or re-exported) in the module body.
-    ///
-    /// NOTE: Despite the name, the procedures in this set are not necessarily exported, the
-    /// individual procedure item must be checked to determine visibility.
-    pub(crate) procedures: Vec<Export>,
+    /// The items (defined or re-exported) in the module body.
+    pub(crate) items: Vec<Export>,
     /// AdviceMap that this module expects to be loaded in the host before executing.
     pub(crate) advice_map: AdviceMap,
 }
@@ -154,28 +146,26 @@ impl Module {
 impl Module {
     /// Creates a new [Module] with the specified `kind` and fully-qualified path, e.g.
     /// `std::math::u64`.
-    pub fn new(kind: ModuleKind, path: LibraryPath) -> Self {
+    pub fn new(kind: ModuleKind, path: impl AsRef<Path>) -> Self {
+        let path = path.as_ref().to_absolute().into_owned();
         Self {
             span: Default::default(),
             docs: None,
             path,
             kind,
-            constants: Default::default(),
-            types: Default::default(),
-            imports: Default::default(),
-            procedures: Default::default(),
+            items: Default::default(),
             advice_map: Default::default(),
         }
     }
 
     /// An alias for creating the default, but empty, `#kernel` [Module].
     pub fn new_kernel() -> Self {
-        Self::new(ModuleKind::Kernel, LibraryNamespace::Kernel.into())
+        Self::new(ModuleKind::Kernel, Path::kernel_path())
     }
 
     /// An alias for creating the default, but empty, `$exec` [Module].
     pub fn new_executable() -> Self {
-        Self::new(ModuleKind::Executable, LibraryNamespace::Exec.into())
+        Self::new(ModuleKind::Executable, Path::exec_path())
     }
 
     /// Specifies the source span in the source file in which this module was defined, that covers
@@ -185,14 +175,17 @@ impl Module {
         self
     }
 
-    /// Sets the [LibraryPath] for this module
-    pub fn set_path(&mut self, path: LibraryPath) {
-        self.path = path;
+    /// Sets the [Path] for this module
+    pub fn set_path(&mut self, path: impl AsRef<Path>) {
+        self.path = path.as_ref().to_path_buf();
     }
 
-    /// Sets the [LibraryNamespace] for this module
-    pub fn set_namespace(&mut self, ns: LibraryNamespace) {
-        self.path.set_namespace(ns);
+    /// Modifies the path of this module by overriding the portion of the path preceding
+    /// [`Self::name`], i.e. the portion returned by [`Self::parent`].
+    ///
+    /// See [`Path::set_parent`] for details.
+    pub fn set_parent(&mut self, ns: impl AsRef<Path>) {
+        self.path.set_parent(ns.as_ref());
     }
 
     /// Sets the documentation for this module
@@ -207,33 +200,37 @@ impl Module {
 
     /// Defines a constant, raising an error if the constant conflicts with a previous definition
     pub fn define_constant(&mut self, constant: Constant) -> Result<(), SemanticAnalysisError> {
-        for c in self.constants.iter() {
-            if c.name == constant.name {
+        for item in self.items.iter() {
+            if let Export::Constant(c) = item
+                && c.name == constant.name
+            {
                 return Err(SemanticAnalysisError::SymbolConflict {
                     span: constant.span,
                     prev_span: c.span,
                 });
             }
         }
-        self.constants.push(constant);
+        self.items.push(Export::Constant(constant));
         Ok(())
     }
 
     /// Defines a type alias, raising an error if the alias conflicts with a previous definition
     pub fn define_type(&mut self, ty: TypeAlias) -> Result<(), SemanticAnalysisError> {
-        for t in self.types.iter() {
-            if t.name() == &ty.name {
+        for item in self.items.iter() {
+            if let Export::Type(t) = item
+                && t.name() == ty.name()
+            {
                 return Err(SemanticAnalysisError::SymbolConflict {
                     span: ty.span(),
                     prev_span: t.span(),
                 });
             }
         }
-        self.types.push(ty.into());
+        self.items.push(Export::Type(ty.into()));
         Ok(())
     }
 
-    /// Define a new enum type `ty`
+    /// Define a new enum type `ty` with `visibility`
     ///
     /// Returns `Err` if:
     ///
@@ -251,7 +248,7 @@ impl Module {
 
         let (alias, variants) = ty.into_parts();
 
-        if let Some(prev) = self.types.iter().find(|t| t.name() == &alias.name) {
+        if let Some(prev) = self.items.iter().find(|t| t.name() == &alias.name) {
             return Err(SemanticAnalysisError::SymbolConflict {
                 span: alias.span(),
                 prev_span: prev.span(),
@@ -285,45 +282,45 @@ impl Module {
 
             let Variant { span, docs, name, discriminant } = variant;
 
-            self.define_constant(Constant { span, docs, name, value: discriminant })?;
+            self.define_constant(Constant {
+                span,
+                docs,
+                visibility: alias.visibility(),
+                name,
+                value: discriminant,
+            })?;
         }
 
-        self.types.push(alias.into());
+        self.items.push(Export::Type(alias.into()));
 
         Ok(())
     }
 
     /// Defines a procedure, raising an error if the procedure is invalid, or conflicts with a
     /// previous definition
-    pub fn define_procedure(&mut self, export: Export) -> Result<(), SemanticAnalysisError> {
-        if self.is_kernel() && matches!(export, Export::Alias(_)) {
-            return Err(SemanticAnalysisError::ReexportFromKernel { span: export.span() });
-        }
-        if let Some(prev) = self.resolve(export.name()) {
+    pub fn define_procedure(&mut self, procedure: Procedure) -> Result<(), SemanticAnalysisError> {
+        if let Some(prev) = self.resolve(procedure.name().as_ref())? {
             let prev_span = prev.span();
-            Err(SemanticAnalysisError::SymbolConflict { span: export.span(), prev_span })
+            Err(SemanticAnalysisError::SymbolConflict { span: procedure.span(), prev_span })
         } else {
-            self.procedures.push(export);
+            self.items.push(Export::Procedure(procedure));
             Ok(())
         }
     }
 
-    /// Defines an import, raising an error if the import is invalid, or conflicts with a previous
-    /// definition.
-    pub fn define_import(&mut self, import: Import) -> Result<(), SemanticAnalysisError> {
-        if let Some(prev_import) = self.resolve_import(&import.name) {
-            let prev_span = prev_import.span;
-            return Err(SemanticAnalysisError::ImportConflict { span: import.span, prev_span });
+    /// Defines an item alias, raising an error if the alias is invalid, or conflicts with a
+    /// previous definition
+    pub fn define_alias(&mut self, item: Alias) -> Result<(), SemanticAnalysisError> {
+        if self.is_kernel() && item.visibility().is_public() {
+            return Err(SemanticAnalysisError::ReexportFromKernel { span: item.span() });
         }
-
-        if let Some(prev_defined) = self.procedures.iter().find(|e| e.name().eq(&import.name)) {
-            let prev_span = prev_defined.span();
-            return Err(SemanticAnalysisError::SymbolConflict { span: import.span, prev_span });
+        if let Some(prev) = self.resolve(item.name())? {
+            let prev_span = prev.span();
+            Err(SemanticAnalysisError::SymbolConflict { span: item.span(), prev_span })
+        } else {
+            self.items.push(Export::Alias(item));
+            Ok(())
         }
-
-        self.imports.push(import);
-
-        Ok(())
     }
 }
 
@@ -331,10 +328,11 @@ impl Module {
 impl Module {
     /// Parse a [Module], `name`, of the given [ModuleKind], from `source_file`.
     pub fn parse(
-        name: LibraryPath,
+        name: impl AsRef<Path>,
         kind: ModuleKind,
         source_file: Arc<SourceFile>,
     ) -> Result<Box<Self>, Report> {
+        let name = name.as_ref();
         let mut parser = Self::parser(kind);
         parser.parse(name, source_file)
     }
@@ -347,25 +345,25 @@ impl Module {
 
 /// Metadata
 impl Module {
-    /// Get the name of this specific module, i.e. the last component of the [LibraryPath] that
+    /// Get the name of this specific module, i.e. the last component of the [Path] that
     /// represents the fully-qualified name of the module, e.g. `u64` in `std::math::u64`
     pub fn name(&self) -> &str {
-        self.path.last()
+        self.path.last().unwrap()
     }
 
     /// Get the fully-qualified name of this module, e.g. `std::math::u64`
-    pub fn path(&self) -> &LibraryPath {
+    pub fn path(&self) -> &Path {
         &self.path
     }
 
-    /// Get the namespace of this module, e.g. `std` in `std::math::u64`
-    pub fn namespace(&self) -> &LibraryNamespace {
-        self.path.namespace()
+    /// Get the path of the parent module of this module, e.g. `std::math` in `std::math::u64`
+    pub fn parent(&self) -> Option<&Path> {
+        self.path.parent()
     }
 
     /// Returns true if this module belongs to the provided namespace.
-    pub fn is_in_namespace(&self, namespace: &LibraryNamespace) -> bool {
-        self.path.namespace() == namespace
+    pub fn is_in_namespace(&self, namespace: &Path) -> bool {
+        self.path.starts_with(namespace)
     }
 
     /// Get the module documentation for this module, if it was present in the source code the
@@ -418,207 +416,195 @@ impl Module {
     }
 
     /// Get an iterator over the constants defined in this module.
-    pub fn constants(&self) -> core::slice::Iter<'_, Constant> {
-        self.constants.iter()
-    }
-
-    /// Same as [Module::constants], but returns mutable references.
-    pub fn constants_mut(&mut self) -> core::slice::IterMut<'_, Constant> {
-        self.constants.iter_mut()
-    }
-
-    /// Get an iterator over the types defined in this module.
-    pub fn types(&self) -> core::slice::Iter<'_, TypeDecl> {
-        self.types.iter()
-    }
-
-    /// Same as [Module::types], but returns mutable references.
-    pub fn types_mut(&mut self) -> core::slice::IterMut<'_, TypeDecl> {
-        self.types.iter_mut()
-    }
-
-    /// Get an iterator over the procedures defined in this module.
-    ///
-    /// The entity returned is an [Export], which abstracts over locally-defined procedures and
-    /// re-exported procedures from imported modules.
-    pub fn procedures(&self) -> core::slice::Iter<'_, Export> {
-        self.procedures.iter()
-    }
-
-    /// Same as [Module::procedures], but returns mutable references.
-    pub fn procedures_mut(&mut self) -> core::slice::IterMut<'_, Export> {
-        self.procedures.iter_mut()
-    }
-
-    /// Returns procedures exported from this module.
-    ///
-    /// Each exported procedure is represented by its local procedure index and a fully qualified
-    /// name.
-    pub fn exported_procedures(
-        &self,
-    ) -> impl Iterator<Item = (ProcedureIndex, QualifiedProcedureName)> + '_ {
-        self.procedures.iter().enumerate().filter_map(|(proc_idx, p)| {
-            // skip un-exported procedures
-            if !p.visibility().is_exported() {
-                return None;
-            }
-
-            let proc_idx = ProcedureIndex::new(proc_idx);
-            let fqn = QualifiedProcedureName::new(self.path().clone(), p.name().clone());
-
-            Some((proc_idx, fqn))
+    pub fn constants(&self) -> impl Iterator<Item = &Constant> + '_ {
+        self.items.iter().filter_map(|item| match item {
+            Export::Constant(item) => Some(item),
+            _ => None,
         })
     }
 
-    /// Gets the type signature for the given [ProcedureIndex], if available.
-    pub fn procedure_signature(&self, id: ProcedureIndex) -> Option<&FunctionType> {
-        self.procedures[id.as_usize()].signature()
+    /// Same as [Module::constants], but returns mutable references.
+    pub fn constants_mut(&mut self) -> impl Iterator<Item = &mut Constant> + '_ {
+        self.items.iter_mut().filter_map(|item| match item {
+            Export::Constant(item) => Some(item),
+            _ => None,
+        })
     }
 
-    /// Get an iterator over the imports declared in this module.
+    /// Get an iterator over the types defined in this module.
+    pub fn types(&self) -> impl Iterator<Item = &TypeDecl> + '_ {
+        self.items.iter().filter_map(|item| match item {
+            Export::Type(item) => Some(item),
+            _ => None,
+        })
+    }
+
+    /// Same as [Module::types], but returns mutable references.
+    pub fn types_mut(&mut self) -> impl Iterator<Item = &mut TypeDecl> + '_ {
+        self.items.iter_mut().filter_map(|item| match item {
+            Export::Type(item) => Some(item),
+            _ => None,
+        })
+    }
+
+    /// Get an iterator over the procedures defined in this module.
+    pub fn procedures(&self) -> impl Iterator<Item = &Procedure> + '_ {
+        self.items.iter().filter_map(|item| match item {
+            Export::Procedure(item) => Some(item),
+            _ => None,
+        })
+    }
+
+    /// Same as [Module::procedures], but returns mutable references.
+    pub fn procedures_mut(&mut self) -> impl Iterator<Item = &mut Procedure> + '_ {
+        self.items.iter_mut().filter_map(|item| match item {
+            Export::Procedure(item) => Some(item),
+            _ => None,
+        })
+    }
+
+    /// Get an iterator over the item aliases in this module.
+    pub fn aliases(&self) -> impl Iterator<Item = &Alias> + '_ {
+        self.items.iter().filter_map(|item| match item {
+            Export::Alias(item) => Some(item),
+            _ => None,
+        })
+    }
+
+    /// Same as [Module::aliases], but returns mutable references.
+    pub fn aliases_mut(&mut self) -> impl Iterator<Item = &mut Alias> + '_ {
+        self.items.iter_mut().filter_map(|item| match item {
+            Export::Alias(item) => Some(item),
+            _ => None,
+        })
+    }
+
+    /// Get an iterator over the items in this module.
+    pub fn items(&self) -> core::slice::Iter<'_, Export> {
+        self.items.iter()
+    }
+
+    /// Same as [Module::items], but returns mutable references.
+    pub fn items_mut(&mut self) -> core::slice::IterMut<'_, Export> {
+        self.items.iter_mut()
+    }
+
+    /// Returns items exported from this module.
     ///
-    /// See [Import] for details on what information is available for imports.
-    pub fn imports(&self) -> core::slice::Iter<'_, Import> {
-        self.imports.iter()
+    /// Each exported item is represented by its local item index and a fully qualified name.
+    pub fn exported(&self) -> impl Iterator<Item = (ItemIndex, QualifiedProcedureName)> + '_ {
+        self.items.iter().enumerate().filter_map(|(idx, item)| {
+            // skip un-exported items
+            if !item.visibility().is_public() {
+                return None;
+            }
+
+            let idx = ItemIndex::new(idx);
+            let name = ProcedureName::from_raw_parts(item.name().clone());
+            let fqn = QualifiedProcedureName::new(self.path.clone(), name);
+
+            Some((idx, fqn))
+        })
     }
 
-    /// Same as [Self::imports], but returns mutable references to each import.
-    pub fn imports_mut(&mut self) -> core::slice::IterMut<'_, Import> {
-        self.imports.iter_mut()
+    /// Gets the type signature for the given [ItemIndex], if available.
+    pub fn procedure_signature(&self, id: ItemIndex) -> Option<&FunctionType> {
+        self.items[id.as_usize()].signature()
     }
 
-    /// Get an iterator over the "dependencies" of a module, i.e. what library namespaces we expect
-    /// to find imported procedures in.
+    /// Get the item at `index` in this module's item table.
     ///
-    /// For example, if we have imported `std::math::u64`, then we would expect to find a library
-    /// on disk named `std.masl`, although that isn't a strict requirement. This notion of
-    /// dependencies may go away with future packaging-related changed.
-    pub fn dependencies(&self) -> impl Iterator<Item = &LibraryNamespace> {
-        self.import_paths().map(|import| import.namespace())
+    /// The item returned may be either a locally-defined item, or a re-exported item. See [Export]
+    /// for details.
+    pub fn get(&self, index: ItemIndex) -> Option<&Export> {
+        self.items.get(index.as_usize())
     }
 
-    /// Get the procedure at `index` in this module's procedure table.
-    ///
-    /// The procedure returned may be either a locally-defined procedure, or a re-exported
-    /// procedure. See [Export] for details.
-    pub fn get(&self, index: ProcedureIndex) -> Option<&Export> {
-        self.procedures.get(index.as_usize())
-    }
-
-    /// Get the [ProcedureIndex] for the first procedure in this module's procedure table which
-    /// returns true for `predicate`.
-    pub fn index_of<F>(&self, predicate: F) -> Option<ProcedureIndex>
+    /// Get the [ItemIndex] for the first item in this module's item table which returns true for
+    /// `predicate`.
+    pub fn index_of<F>(&self, predicate: F) -> Option<ItemIndex>
     where
         F: FnMut(&Export) -> bool,
     {
-        self.procedures.iter().position(predicate).map(ProcedureIndex::new)
+        self.items.iter().position(predicate).map(ItemIndex::new)
     }
 
-    /// Get the [ProcedureIndex] for the procedure whose name is `name` in this module's procedure
-    /// table, _if_ that procedure is exported.
+    /// Get the [ItemIndex] for the item whose name is `name` in this module's item table, _if_ that
+    /// item is exported.
     ///
-    /// Non-exported procedures can be retrieved by using [Module::index_of].
-    pub fn index_of_name(&self, name: &ProcedureName) -> Option<ProcedureIndex> {
-        self.index_of(|p| p.name() == name && p.visibility().is_exported())
+    /// Non-exported items can be retrieved by using [Module::index_of].
+    pub fn index_of_name(&self, name: &Ident) -> Option<ItemIndex> {
+        self.index_of(|item| item.name() == name && item.visibility().is_public())
     }
 
-    /// Resolves `name` to a procedure within the local scope of this module
-    pub fn resolve(&self, name: &ProcedureName) -> Option<ResolvedProcedure> {
-        let index =
-            self.procedures.iter().position(|p| p.name() == name).map(ProcedureIndex::new)?;
-        match &self.procedures[index.as_usize()] {
-            Export::Procedure(proc) => {
-                Some(ResolvedProcedure::Local(Span::new(proc.name().span(), index)))
-            },
-            Export::Alias(alias) => match alias.target() {
-                AliasTarget::MastRoot(digest) => Some(ResolvedProcedure::MastRoot(**digest)),
-                AliasTarget::ProcedurePath(path) | AliasTarget::AbsoluteProcedurePath(path) => {
-                    Some(ResolvedProcedure::External(path.clone()))
-                },
-            },
-        }
+    /// Resolves `name` to an item within the local scope of this module
+    pub fn resolve(
+        &self,
+        name: &str,
+    ) -> Result<Option<SymbolResolution>, ast::LocalSymbolResolutionError> {
+        let resolver = self.resolver();
+        resolver.resolve(name)
+    }
+
+    /// Resolves `path` to an item within the local scope of this module
+    pub fn resolve_path(
+        &self,
+        path: Span<&Path>,
+    ) -> Result<Option<SymbolResolution>, ast::LocalSymbolResolutionError> {
+        let resolver = self.resolver();
+        resolver.resolve_path(path)
     }
 
     /// Construct a search structure that can resolve procedure names local to this module
-    pub fn resolver(&self) -> LocalNameResolver {
-        LocalNameResolver::from_iter(self.procedures.iter().enumerate().map(|(i, p)| match p {
-            Export::Procedure(p) => (
-                p.name().clone(),
-                ResolvedProcedure::Local(Span::new(p.name().span(), ProcedureIndex::new(i))),
-            ),
-            Export::Alias(p) => {
-                let target = match p.target() {
-                    AliasTarget::MastRoot(digest) => ResolvedProcedure::MastRoot(**digest),
-                    AliasTarget::ProcedurePath(path) | AliasTarget::AbsoluteProcedurePath(path) => {
-                        ResolvedProcedure::External(path.clone())
-                    },
-                };
-                (p.name().clone(), target)
-            },
-        }))
-        .with_imports(
-            self.imports
-                .iter()
-                .map(|import| (import.name.clone(), Span::new(import.span(), import.path.clone()))),
-        )
+    #[inline]
+    pub fn resolver(&self) -> LocalSymbolResolver {
+        LocalSymbolResolver::from(self)
     }
 
-    /// Resolves `module_name` to an [Import] within the context of this module
-    pub fn resolve_import(&self, module_name: &Ident) -> Option<&Import> {
-        self.imports.iter().find(|import| &import.name == module_name)
+    /// Resolves `module_name` to an [Alias] within the context of this module
+    pub fn get_import(&self, module_name: &str) -> Option<&Alias> {
+        self.items.iter().find_map(|item| match item {
+            Export::Alias(item) if item.name().as_str() == module_name => Some(item),
+            _ => None,
+        })
     }
 
-    /// Same as [Module::resolve_import], but returns a mutable reference to the [Import]
-    pub fn resolve_import_mut(&mut self, module_name: &Ident) -> Option<&mut Import> {
-        self.imports.iter_mut().find(|import| &import.name == module_name)
-    }
-
-    /// Return an iterator over the paths of all imports in this module
-    pub fn import_paths(&self) -> impl Iterator<Item = &LibraryPath> + '_ {
-        self.imports.iter().map(|import| &import.path)
+    /// Same as [Module::resolve_import], but returns a mutable reference to the [Alias]
+    pub fn get_import_mut(&mut self, module_name: &str) -> Option<&mut Alias> {
+        self.items.iter_mut().find_map(|item| match item {
+            Export::Alias(item) if item.name().as_str() == module_name => Some(item),
+            _ => None,
+        })
     }
 
     /// Resolves a user-expressed type, `ty`, to a concrete type
-    pub fn resolve_type(&self, ty: &ast::TypeExpr) -> Option<types::Type> {
-        match ty {
-            ast::TypeExpr::Ref(name) => match self.types.iter().find(|t| t.name() == name)? {
-                ast::TypeDecl::Alias(alias) => self.resolve_type(&alias.ty),
-                ast::TypeDecl::Enum(enum_ty) => Some(enum_ty.ty().clone()),
-            },
-            ast::TypeExpr::Primitive(t) => Some(t.inner().clone()),
-            ast::TypeExpr::Array(t) => {
-                let elem = self.resolve_type(&t.elem)?;
-                Some(types::Type::Array(Arc::new(types::ArrayType::new(elem, t.arity))))
-            },
-            ast::TypeExpr::Ptr(ty) => {
-                let pointee = self.resolve_type(&ty.pointee)?;
-                Some(types::Type::Ptr(Arc::new(types::PointerType::new(pointee))))
-            },
-            ast::TypeExpr::Struct(t) => {
-                let mut fields = Vec::with_capacity(t.fields.len());
-                for field in t.fields.iter() {
-                    let field_ty = self.resolve_type(&field.ty)?;
-                    fields.push(field_ty);
-                }
-                Some(types::Type::Struct(Arc::new(types::StructType::new(fields))))
-            },
-        }
+    pub fn resolve_type(
+        &self,
+        ty: &ast::TypeExpr,
+    ) -> Result<Option<types::Type>, LocalSymbolResolutionError> {
+        let type_resolver = ModuleTypeResolver::new(self);
+        type_resolver.resolve(ty)
+    }
+
+    /// Get a type resolver for this module
+    pub fn type_resolver(&self) -> impl TypeResolver<LocalSymbolResolutionError> + '_ {
+        ModuleTypeResolver::new(self)
     }
 }
 
-impl core::ops::Index<ProcedureIndex> for Module {
+impl core::ops::Index<ItemIndex> for Module {
     type Output = Export;
 
     #[inline]
-    fn index(&self, index: ProcedureIndex) -> &Self::Output {
-        &self.procedures[index.as_usize()]
+    fn index(&self, index: ItemIndex) -> &Self::Output {
+        &self.items[index.as_usize()]
     }
 }
 
-impl core::ops::IndexMut<ProcedureIndex> for Module {
+impl core::ops::IndexMut<ItemIndex> for Module {
     #[inline]
-    fn index_mut(&mut self, index: ProcedureIndex) -> &mut Self::Output {
-        &mut self.procedures[index.as_usize()]
+    fn index_mut(&mut self, index: ItemIndex) -> &mut Self::Output {
+        &mut self.items[index.as_usize()]
     }
 }
 
@@ -635,10 +621,7 @@ impl PartialEq for Module {
         self.kind == other.kind
             && self.path == other.path
             && self.docs == other.docs
-            && self.constants == other.constants
-            && self.types == other.types
-            && self.imports == other.imports
-            && self.procedures == other.procedures
+            && self.items == other.items
     }
 }
 
@@ -649,10 +632,7 @@ impl fmt::Debug for Module {
             .field("docs", &self.docs)
             .field("path", &self.path)
             .field("kind", &self.kind)
-            .field("constants", &self.constants)
-            .field("types", &self.types)
-            .field("imports", &self.imports)
-            .field("procedures", &self.procedures)
+            .field("items", &self.items)
             .finish()
     }
 }
@@ -684,47 +664,75 @@ impl crate::prettier::PrettyPrint for Module {
             .map(|docstring| docstring.render() + nl())
             .unwrap_or(Document::Empty);
 
-        for (i, import) in self.imports.iter().enumerate() {
-            if i > 0 {
-                doc += nl();
-            }
-            doc += import.render();
-        }
-
-        if !self.imports.is_empty() {
-            doc += nl();
-        }
-
-        for (i, constant) in self.constants.iter().enumerate() {
-            if i > 0 {
-                doc += nl();
-            }
-            doc += constant.render();
-        }
-
-        if !self.constants.is_empty() {
-            doc += nl();
-        }
-
-        let mut export_index = 0;
-        for export in self.procedures.iter() {
-            if export.is_main() {
+        let mut item_index = 0;
+        for item in self.items.iter() {
+            if item.is_main() {
                 continue;
             }
-            if export_index > 0 {
+
+            if item_index > 0 {
                 doc += nl();
             }
-            doc += export.render();
-            export_index += 1;
+            doc += item.render();
+            item_index += 1;
         }
 
-        if let Some(main) = self.procedures().find(|p| p.is_main()) {
-            if export_index > 0 {
+        if let Some(main) = self.items.iter().find(|item| item.is_main()) {
+            if item_index > 0 {
                 doc += nl();
             }
             doc += main.render();
         }
 
         doc
+    }
+}
+
+struct ModuleTypeResolver<'a> {
+    module: &'a Module,
+    resolver: LocalSymbolResolver,
+}
+
+impl<'a> ModuleTypeResolver<'a> {
+    pub fn new(module: &'a Module) -> Self {
+        let resolver = module.resolver();
+        Self { module, resolver }
+    }
+}
+
+impl TypeResolver<LocalSymbolResolutionError> for ModuleTypeResolver<'_> {
+    fn get_type(
+        &self,
+        context: SourceSpan,
+        _gid: GlobalItemIndex,
+    ) -> Result<ast::types::Type, LocalSymbolResolutionError> {
+        Err(LocalSymbolResolutionError::UndefinedSymbol { span: context })
+    }
+    fn get_local_type(
+        &self,
+        context: SourceSpan,
+        id: ItemIndex,
+    ) -> Result<Option<ast::types::Type>, LocalSymbolResolutionError> {
+        match &self.module[id] {
+            super::Export::Type(ty) => match ty {
+                TypeDecl::Alias(ty) => self.resolve(&ty.ty),
+                TypeDecl::Enum(ty) => Ok(Some(ty.ty().clone())),
+            },
+            item => Err(self.resolve_local_failed(LocalSymbolResolutionError::InvalidSymbolType {
+                expected: "type",
+                span: context,
+                actual: item.span(),
+            })),
+        }
+    }
+    #[inline(always)]
+    fn resolve_local_failed(&self, err: LocalSymbolResolutionError) -> LocalSymbolResolutionError {
+        err
+    }
+    fn resolve_type_ref(
+        &self,
+        path: Span<&Path>,
+    ) -> Result<Option<SymbolResolution>, LocalSymbolResolutionError> {
+        self.resolver.resolve_path(path)
     }
 }

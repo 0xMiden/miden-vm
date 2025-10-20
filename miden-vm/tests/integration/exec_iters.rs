@@ -10,7 +10,8 @@ use miden_utils_testing::{Felt, ONE, ToElements, assert_eq, build_debug_test};
 #[test]
 #[ignore]
 fn test_exec_iter() {
-    let source = "proc.foo.1 loc_store.0 end begin mem_storew.1 dropw push.17 exec.foo end";
+    let source =
+        "@locals(1) proc foo loc_store.0 end begin mem_storew.1 dropw push.17 exec.foo end";
     let mut init_stack: Vec<u64> = Vec::new();
     (1..=16).for_each(|i| {
         init_stack.push(i);

@@ -11,7 +11,6 @@ use miden_core::{ONE, ZERO};
 
 mod assembler;
 mod basic_block_builder;
-mod id;
 mod instruction;
 pub mod linker;
 mod mast_forest_builder;
@@ -26,7 +25,8 @@ mod tests;
 
 // Re-exported for downstream crates
 pub use miden_assembly_syntax::{
-    KernelLibrary, Library, LibraryNamespace, LibraryPath, ModuleParser, Parse, ParseOptions, ast,
+    KernelLibrary, Library, ModuleParser, Parse, ParseOptions, Path, PathBuf, ast,
+    ast::{GlobalItemIndex, ModuleIndex},
     debuginfo::{
         self, DefaultSourceManager, SourceFile, SourceId, SourceManager, SourceSpan, Span, Spanned,
     },
@@ -42,7 +42,6 @@ pub use miden_core::{mast, utils};
 pub use self::linker::{LinkLibraryKind, LinkerError};
 pub use self::{
     assembler::Assembler,
-    id::{GlobalProcedureIndex, ModuleIndex},
     procedure::{Procedure, ProcedureContext},
 };
 

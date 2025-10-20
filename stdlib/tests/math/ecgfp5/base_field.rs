@@ -362,7 +362,7 @@ impl PartialEq for Ext5 {
 #[test]
 fn test_ext5_add() {
     let source = "
-    use.std::math::ecgfp5::base_field
+    use std::math::ecgfp5::base_field
 
     begin
         exec.base_field::add
@@ -399,7 +399,7 @@ fn test_ext5_add() {
 #[test]
 fn test_ext5_sub() {
     let source = "
-    use.std::math::ecgfp5::base_field
+    use std::math::ecgfp5::base_field
 
     begin
         exec.base_field::sub
@@ -436,7 +436,7 @@ fn test_ext5_sub() {
 #[test]
 fn test_ext5_mul() {
     let source = "
-    use.std::math::ecgfp5::base_field
+    use std::math::ecgfp5::base_field
 
     begin
         exec.base_field::mul
@@ -473,7 +473,7 @@ fn test_ext5_mul() {
 #[test]
 fn test_ext5_square() {
     let source = "
-    use.std::math::ecgfp5::base_field
+    use std::math::ecgfp5::base_field
 
     begin
         exec.base_field::square
@@ -498,7 +498,7 @@ fn test_ext5_square() {
 #[test]
 fn test_ext5_inv() {
     let source = "
-    use.std::math::ecgfp5::base_field
+    use std::math::ecgfp5::base_field
 
     begin
         exec.base_field::inv
@@ -523,7 +523,7 @@ fn test_ext5_inv() {
 #[test]
 fn test_ext5_div() {
     let source = "
-    use.std::math::ecgfp5::base_field
+    use std::math::ecgfp5::base_field
 
     begin
         exec.base_field::div
@@ -560,7 +560,7 @@ fn test_ext5_div() {
 #[test]
 fn test_ext5_legendre() {
     let source = "
-    use.std::math::ecgfp5::base_field
+    use std::math::ecgfp5::base_field
 
     begin
         exec.base_field::legendre
@@ -581,7 +581,7 @@ fn test_ext5_legendre() {
 #[test]
 fn test_ext5_sqrt() {
     let source = "
-    use.std::math::ecgfp5::base_field
+    use std::math::ecgfp5::base_field
 
     begin
         exec.base_field::sqrt

@@ -38,8 +38,8 @@ fn test_elgamal_keygen() {
         private_key.iter().map(|x| *x as u64).collect::<Vec<u64>>().try_into().unwrap();
 
     let source = "
-        use.std::crypto::elgamal_ecgfp5
-        use.std::sys
+        use std::crypto::elgamal_ecgfp5
+        use std::sys
 
         begin
             exec.elgamal_ecgfp5::gen_privatekey
@@ -96,8 +96,8 @@ fn test_elgamal_encrypt() {
     let cb = pm.add(rh);
 
     let source = "
-        use.std::crypto::elgamal_ecgfp5
-        use.std::sys
+        use std::crypto::elgamal_ecgfp5
+        use std::sys
 
         begin
             exec.elgamal_ecgfp5::encrypt_ca
@@ -174,8 +174,8 @@ fn test_elgamal_encrypt() {
 
     let source = format!(
         "
-        use.std::crypto::elgamal_ecgfp5
-        use.std::sys
+        use std::crypto::elgamal_ecgfp5
+        use std::sys
 
         begin
             {inputs}
@@ -266,8 +266,8 @@ fn test_elgamal_remask() {
 
     let source = format!(
         "
-        use.std::crypto::elgamal_ecgfp5
-        use.std::sys
+        use std::crypto::elgamal_ecgfp5
+        use std::sys
 
         begin
             {inputs}
@@ -332,8 +332,8 @@ fn test_elgamal_remask() {
 
     let source = format!(
         "
-        use.std::crypto::elgamal_ecgfp5
-        use.std::sys
+        use std::crypto::elgamal_ecgfp5
+        use std::sys
 
         begin
             {inputs}
