@@ -42,6 +42,10 @@ pub struct ChipletsVTableColBuilder {
 
 impl ChipletsVTableColBuilder {
     pub fn new(final_precompile_capacity: Word) -> Self {
+        // NOTE: This value must match the `precompile_capacity` public input enforced by AIR.
+        // The AIR boundary assertion for the bus column multiplies the kernel ROM init message
+        // and the log_precompile init message derived from this capacity; any mismatch will
+        // cause verification to fail.
         Self { final_precompile_capacity }
     }
 }

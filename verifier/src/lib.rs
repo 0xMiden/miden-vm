@@ -80,15 +80,14 @@ pub fn verify(
 }
 
 /// Identical to [`verify`], with additional verification of any precompile requests made during the
-/// VM execution. The resulting aggregated precompile commitment is returned, which can be compared
+/// VM execution. The resulting precompile digest is returned, which can be compared
 /// against the commitment computed by the VM.
 ///
 /// # Returns
-/// Returns a tuple `(security_level, aggregated_commitment)` where:
+/// Returns a tuple `(security_level, precompile_digest)` where:
 /// - `security_level`: The security level (in bits) of the verified proof
-/// - `aggregated_commitment`: A [`Word`] containing the final aggregated commitment to all
-///   precompile requests, computed by recomputing and absorbing each precompile commitment into an
-///   RPO256 sponge
+/// - `precompile_digest`: A [`Word`] containing the finalized digest of all precompile requests,
+///   computed by recomputing and absorbing each precompile commitment into an RPO256 sponge
 ///
 /// # Errors
 /// Returns any error produced by [`verify`], as well as any errors resulting from precompile
@@ -114,7 +113,7 @@ pub fn verify_with_precompiles(
         .deferred_requests_commitment(&precompile_requests)
         .map_err(VerificationError::PrecompileVerificationError)?;
 
-    // build public inputs, explicitly passing sponge (though currently ignored by Winterfell)
+    // build public inputs, explicitly passing the recomputed precompile sponge capacity
     let pub_inputs =
         PublicInputs::new(program_info, stack_inputs, stack_outputs, recomputed_sponge);
 

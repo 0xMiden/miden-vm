@@ -302,7 +302,7 @@ fn test_keccak_hash_1to1_prove_verify() {
     // Generate memory stores for the input data
     let memory_stores_source = generate_memory_store_masm(&preimage, INPUT_MEMORY_ADDR);
 
-    // MASM program that uses hash_memory_impl to get the commitment on stack
+    // MASM program that logs the precompile (via hash_memory) and computes the digest
     let source = format!(
         r#"
             use.std::crypto::hashes::keccak256
@@ -316,11 +316,11 @@ fn test_keccak_hash_1to1_prove_verify() {
                 push.32.{INPUT_MEMORY_ADDR}
                 # => [ptr, len_bytes, ...]
 
-                # Call hash_memory_impl to get commitment and digest
-                exec.keccak256::hash_memory_impl
-                # => [COMM, TAG, DIGEST_U32[8], ...]
+                # Call hash_memory (wrapper) to log precompile and compute digest
+                exec.keccak256::hash_memory
+                # => [DIGEST_U32[8], ...]
 
-                # Truncate stack to leave only the commitment and 15 more elements
+                # Truncate stack to ensure fixed-size outputs
                 exec.sys::truncate_stack
             end
             "#,
@@ -353,19 +353,6 @@ fn test_keccak_hash_1to1_prove_verify() {
     )
     .expect("failed to generate proof");
 
-    // Verify that the commitment on the stack matches the expected precompile commitment
-    let expected_commitment = preimage.precompile_commitment();
-    let stack_commitment = stack_outputs.get_stack_word_be(0).unwrap();
-    let stack_tag = stack_outputs.get_stack_word_be(4).unwrap();
-    let precompile_commitment = PrecompileCommitment {
-        tag: stack_tag,
-        commitment: stack_commitment,
-    };
-    assert_eq!(
-        precompile_commitment, expected_commitment,
-        "commitment on stack does not match expected precompile commitment"
-    );
-
     // Check we get the same commitment from the verifier
     let mut precompile_verifiers = PrecompileVerifierRegistry::new();
     precompile_verifiers.register(KECCAK_HASH_MEMORY_EVENT_ID, Arc::new(KeccakPrecompile));
@@ -373,10 +360,11 @@ fn test_keccak_hash_1to1_prove_verify() {
         .deferred_requests_commitment(proof.precompile_requests())
         .expect("failed to verify");
 
+    let expected_commitment = preimage.precompile_commitment();
     let deferred_commitment_expected = {
         let elements = [
-            precompile_commitment.tag,
-            precompile_commitment.commitment,
+            expected_commitment.tag,
+            expected_commitment.commitment,
             Word::empty(),
             Word::empty(),
         ];
@@ -396,8 +384,5 @@ fn test_keccak_hash_1to1_prove_verify() {
     .expect("proof verification failed");
 
     // Assert that verification succeeds
-    assert_eq!(
-        deferred_commitment_expected, verifier_commitment,
-        "verifier did not produce the same commitment"
-    );
+    assert_eq!(deferred_commitment_expected, verifier_commitment);
 }

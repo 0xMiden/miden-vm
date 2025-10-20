@@ -5,7 +5,13 @@ use super::super::{
 };
 use crate::{
     Assertion, AuxRandElements, Word,
-    trace::{CHIPLETS_BUS_AUX_TRACE_OFFSET, chiplets::kernel_rom::KERNEL_PROC_INIT_LABEL},
+    trace::{
+        CHIPLETS_BUS_AUX_TRACE_OFFSET,
+        chiplets::{
+            hasher::{LOG_PRECOMPILE_CAP_LABEL, P1_COL_IDX},
+            kernel_rom::KERNEL_PROC_INIT_LABEL,
+        },
+    },
     utils::{are_equal, binary_not, is_binary},
 };
 
@@ -43,6 +49,7 @@ pub fn get_aux_assertions_first_step<E>(
     result: &mut Vec<Assertion<E>>,
     kernel_digests: &[Word],
     aux_rand_elements: &AuxRandElements<E>,
+    precompile_capacity: Word,
 ) where
     E: FieldElement<BaseField = Felt>,
 {
@@ -52,6 +59,18 @@ pub fn get_aux_assertions_first_step<E>(
         0,
         reduced_kernel_digests.inv(),
     ));
+
+    // Anchor hasher vtable init against PI-provided capacity: ratio of empty vs. full capacity message
+    let alphas = aux_rand_elements.rand_elements();
+    let capacity: [Felt; 4] = precompile_capacity.into();
+    let label: Felt = Felt::from(LOG_PRECOMPILE_CAP_LABEL);
+    let empty = alphas[0] + alphas[1].mul_base(label);
+    let mut full = empty;
+    for (i, c) in capacity.iter().enumerate() {
+        full += alphas[2 + i].mul_base(*c);
+    }
+    let vtable_init_ratio = empty * full.inv();
+    result.push(Assertion::single(P1_COL_IDX, 0, vtable_init_ratio));
 }
 
 // CHIPLETS TRANSITION CONSTRAINTS

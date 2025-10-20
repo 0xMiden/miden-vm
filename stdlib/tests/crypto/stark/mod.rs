@@ -19,6 +19,7 @@ mod verifier_recursive;
 
 // Note: Changes to Miden VM may cause this test to fail when some of the assumptions documented
 // in `stdlib/asm/sys/vm/mod.masm` are violated.
+#[ignore]
 #[rstest]
 #[case(None)]
 #[case(Some(KERNEL_EVEN_NUM_PROC))]

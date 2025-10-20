@@ -65,6 +65,7 @@ pub struct ProcessorAir {
     stack_outputs: StackOutputs,
     program_digest: Word,
     kernel_digests: Vec<Word>,
+    precompile_capacity: Word,
     constraint_ranges: TransitionConstraintRange,
 }
 
@@ -123,7 +124,7 @@ impl Air for ProcessorAir {
         let num_aux_assertions = if IS_FULL_CONSTRAINT_SET {
             stack::NUM_AUX_ASSERTIONS + range::NUM_AUX_ASSERTIONS
         } else {
-            3
+            4
         };
 
         // Create the context and set the number of transition constraint exemptions to two; this
@@ -145,6 +146,7 @@ impl Air for ProcessorAir {
             constraint_ranges,
             program_digest: pub_inputs.program_info.program_hash().to_owned(),
             kernel_digests: pub_inputs.program_info.kernel_procedures().to_owned(),
+            precompile_capacity: pub_inputs.precompile_capacity,
         }
     }
 
@@ -202,6 +204,7 @@ impl Air for ProcessorAir {
             &mut result,
             &self.kernel_digests,
             aux_rand_elements,
+            self.precompile_capacity,
         );
 
         // --- set assertions for the first step --------------------------------------------------
@@ -319,28 +322,24 @@ pub struct PublicInputs {
     program_info: ProgramInfo,
     stack_inputs: StackInputs,
     stack_outputs: StackOutputs,
+    precompile_capacity: Word,
 }
 
 impl PublicInputs {
     /// Creates a new instance of `PublicInputs` from program information, stack inputs and outputs,
     /// and the precompile sponge state.
-    ///
-    /// # Note on Precompile Sponge
-    ///
-    /// The `precompile_sponge` parameter is currently ignored because the Winterfell backend does
-    /// not yet support verifying it as a public input. However, this parameter is included to make
-    /// explicit that the sponge state is conceptually part of the public inputs for proof
-    /// verification. Future versions will enforce this verification.
     pub fn new(
         program_info: ProgramInfo,
         stack_inputs: StackInputs,
         stack_outputs: StackOutputs,
-        _precompile_sponge: PrecompileSponge,
+        precompile_sponge: PrecompileSponge,
     ) -> Self {
+        let precompile_capacity = Word::from(precompile_sponge);
         Self {
             program_info,
             stack_inputs,
             stack_outputs,
+            precompile_capacity,
         }
     }
 }
@@ -350,6 +349,8 @@ impl miden_core::ToElements<Felt> for PublicInputs {
         let mut result = self.stack_inputs.to_vec();
         result.append(&mut self.stack_outputs.to_vec());
         result.append(&mut self.program_info.to_elements());
+        let cap: [Felt; 4] = self.precompile_capacity.into();
+        result.extend_from_slice(&cap);
         result
     }
 }
@@ -362,6 +363,7 @@ impl Serializable for PublicInputs {
         self.program_info.write_into(target);
         self.stack_inputs.write_into(target);
         self.stack_outputs.write_into(target);
+        self.precompile_capacity.write_into(target);
     }
 }
 
@@ -370,11 +372,13 @@ impl Deserializable for PublicInputs {
         let program_info = ProgramInfo::read_from(source)?;
         let stack_inputs = StackInputs::read_from(source)?;
         let stack_outputs = StackOutputs::read_from(source)?;
+        let precompile_capacity = Word::read_from(source)?;
 
         Ok(PublicInputs {
             program_info,
             stack_inputs,
             stack_outputs,
+            precompile_capacity,
         })
     }
 }
