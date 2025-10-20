@@ -61,8 +61,8 @@ pub fn get_aux_assertions_first_step<E>(
     ));
 
     if IS_FULL_CONSTRAINT_SET {
-        // Anchor hasher vtable init against PI-provided capacity: ratio of empty vs. full capacity
-        // message
+        // TODO: Enable in reduced mode after recursive verifier update.
+        // Anchor hasher vtable init against PI-provided capacity (empty/full).
         let alphas = aux_rand_elements.rand_elements();
         let capacity: [Felt; 4] = precompile_capacity.into();
         let label: Felt = Felt::from(LOG_PRECOMPILE_CAP_LABEL);

@@ -121,6 +121,7 @@ impl Air for ProcessorAir {
         };
 
         // Define the number of boundary constraints for the auxiliary execution trace segment.
+        // TODO: Re-enable vtable boundary in reduced mode after recursive verifier update.
         let num_aux_assertions = if IS_FULL_CONSTRAINT_SET {
             stack::NUM_AUX_ASSERTIONS + range::NUM_AUX_ASSERTIONS + 1
         } else {
@@ -334,6 +335,7 @@ impl PublicInputs {
         stack_outputs: StackOutputs,
         _precompile_sponge: PrecompileSponge,
     ) -> Self {
+        // TODO: Use precompile_sponge once recursion supports PI capacity.
         // let precompile_capacity = Word::from(precompile_sponge);
         let precompile_capacity = Word::empty();
         Self {
@@ -350,6 +352,7 @@ impl miden_core::ToElements<Felt> for PublicInputs {
         let mut result = self.stack_inputs.to_vec();
         result.append(&mut self.stack_outputs.to_vec());
         result.append(&mut self.program_info.to_elements());
+        // TODO: Append capacity to PI elements after recursion supports it.
         // let cap: [Felt; 4] = self.precompile_capacity.into();
         // result.extend_from_slice(&cap);
         result
@@ -364,6 +367,7 @@ impl Serializable for PublicInputs {
         self.program_info.write_into(target);
         self.stack_inputs.write_into(target);
         self.stack_outputs.write_into(target);
+        // TODO: Serialize capacity after recursion supports it.
         // self.precompile_capacity.write_into(target);
     }
 }
@@ -373,6 +377,7 @@ impl Deserializable for PublicInputs {
         let program_info = ProgramInfo::read_from(source)?;
         let stack_inputs = StackInputs::read_from(source)?;
         let stack_outputs = StackOutputs::read_from(source)?;
+        // TODO: Read capacity after recursion supports it.
         // let precompile_capacity = Word::read_from(source)?;
         let precompile_capacity = Word::default();
 
