@@ -12,13 +12,12 @@ use miden_air::ProvingOptions;
 use miden_assembly::Assembler;
 use miden_core::{
     Felt, FieldElement, ProgramInfo, Word,
-    precompile::{PrecompileCommitment, PrecompileVerifier, PrecompileVerifierRegistry},
+    precompile::{
+        PrecompileCommitment, PrecompileSponge, PrecompileVerifier, PrecompileVerifierRegistry,
+    },
     utils::{Deserializable, Serializable},
 };
-use miden_crypto::{
-    dsa::ecdsa_k256_keccak::{SecretKey, Signature},
-    hash::rpo::Rpo256,
-};
+use miden_crypto::dsa::ecdsa_k256_keccak::{SecretKey, Signature};
 use miden_processor::{AdviceInputs, DefaultHost, Program, StackInputs};
 use miden_stdlib::{
     StdLibrary,
@@ -132,7 +131,7 @@ fn test_ecdsa_verify_impl(request: &EcdsaRequest, expected_valid: bool) {
     let stack = output.stack_outputs();
 
     // Verify stack layout: [COMM (0-3), TAG (4-7), result (at position 6 = TAG[1]), ...]
-    let commitment = stack.get_stack_word(0).unwrap();
+    let commitment = stack.get_stack_word_be(0).unwrap();
     let tag = Word::from([
         stack.get_stack_item(7).unwrap(),
         stack.get_stack_item(6).unwrap(),
@@ -168,6 +167,8 @@ fn test_ecdsa_prove_verify() {
     let request = generate_valid_signature();
     let memory_stores = generate_memory_store_masm(&request);
 
+    assert!(request.result());
+
     let source = format!(
         "
             use.std::crypto::dsa::ecdsa::secp256k1
@@ -177,10 +178,10 @@ fn test_ecdsa_prove_verify() {
                 # Store test data in memory
                 {memory_stores}
 
-                # Call verify_impl: [ptr_pk, ptr_digest, ptr_sig]
+                # Call verify: [ptr_pk, ptr_digest, ptr_sig]
                 push.{SIG_ADDR}.{DIGEST_ADDR}.{PK_ADDR}
-                exec.secp256k1::verify_impl
-                # => [COMM, TAG, result, ...]
+                exec.secp256k1::verify
+                # => [result, ...]
 
                 exec.sys::truncate_stack
             end
@@ -212,28 +213,30 @@ fn test_ecdsa_prove_verify() {
     )
     .expect("failed to generate proof");
 
-    // Extract commitment from stack
-    let stack_commitment = stack_outputs.get_stack_word(0).unwrap();
-    let stack_tag = Word::from([
-        stack_outputs.get_stack_item(7).unwrap(),
-        stack_outputs.get_stack_item(6).unwrap(),
-        stack_outputs.get_stack_item(5).unwrap(),
-        stack_outputs.get_stack_item(4).unwrap(),
-    ]);
-    let precompile_commitment = PrecompileCommitment {
-        tag: stack_tag,
-        commitment: stack_commitment,
-    };
+    // Verify stack result indicates valid signature
+    let result = stack_outputs.get_stack_item(0).unwrap();
+    assert_eq!(result, Felt::ONE, "runtime result should be 1 for a valid signature");
 
-    // Verify result indicates valid signature
-    let result = stack_outputs.get_stack_item(6).unwrap();
-    assert_eq!(result, Felt::ONE, "signature should be valid");
-
-    // Verify tag format
+    // Verify the logged precompile request contains the expected data
+    let proof_requests = proof.precompile_requests();
+    assert_eq!(proof_requests.len(), 1, "expected a single precompile request");
+    let proof_request = &proof_requests[0];
     assert_eq!(
-        stack_tag,
-        Word::from([ECDSA_VERIFY_EVENT_ID.as_felt(), Felt::ONE, Felt::ZERO, Felt::ZERO])
+        proof_request.event_id(),
+        ECDSA_VERIFY_EVENT_ID,
+        "precompile request should use the ECDSA event ID"
     );
+    let expected_request = request.as_precompile_request();
+    assert_eq!(
+        proof_request.calldata(),
+        expected_request.calldata(),
+        "logged calldata should match the original request"
+    );
+
+    // Build the expected precompile commitment from the logged data
+    let precompile_commitment = EcdsaPrecompile
+        .verify(proof_request.calldata())
+        .expect("verifier should succeed");
 
     // Set up precompile verifier registry
     let mut precompile_verifiers = PrecompileVerifierRegistry::new();
@@ -244,16 +247,10 @@ fn test_ecdsa_prove_verify() {
         .deferred_requests_commitment(proof.precompile_requests())
         .expect("failed to compute deferred commitment");
 
-    let deferred_commitment_expected = {
-        let elements = [
-            precompile_commitment.tag,
-            precompile_commitment.commitment,
-            Word::empty(),
-            Word::empty(),
-        ];
-        Rpo256::hash_elements(Word::words_as_elements(&elements))
-    };
-    assert_eq!(deferred_commitment_expected, deferred_commitment);
+    let mut expected_sponge = PrecompileSponge::new();
+    expected_sponge.absorb(precompile_commitment);
+    let deferred_commitment_expected = expected_sponge.finalize();
+    assert_eq!(deferred_commitment_expected, deferred_commitment.finalize());
 
     // Verify the proof
     let program_info = ProgramInfo::from(program);

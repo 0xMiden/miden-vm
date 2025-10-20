@@ -96,6 +96,6 @@ export.verify_impl
     # => [COMM, result]
 
     # Create TAG = [0, 0, result, ECDSA_VERIFY_EVENT]
-    push.ECDSA_VERIFY_EVENT movup.5 push.0.0 swapw
+    push.ECDSA_VERIFY_EVENT dup.5 push.0.0 swapw
     # => [COMM, TAG, result]
 end
