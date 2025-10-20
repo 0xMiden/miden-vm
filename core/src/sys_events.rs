@@ -289,7 +289,7 @@ impl TryFrom<EventId> for SystemEvent {
     type Error = EventId;
 
     fn try_from(event_id: EventId) -> Result<Self, Self::Error> {
-        let value: u8 = event_id.as_felt().as_int().try_into().map_err(|_| event_id)?;
+        let value: u8 = event_id.as_u64().try_into().map_err(|_| event_id)?;
 
         match value {
             EVENT_MERKLE_NODE_MERGE => Ok(SystemEvent::MerkleNodeMerge),
@@ -418,7 +418,7 @@ mod test {
 
                 // Test conversion to EventId
                 let id_only: EventId = system_event.into();
-                assert_eq!(id_only.as_felt().as_int(), id);
+                assert_eq!(id_only.as_u64(), id);
 
                 // Test conversion to EventName
                 let event_name: EventName = system_event.into();
@@ -430,9 +430,9 @@ mod test {
     #[test]
     fn test_system_event_ids_are_discriminants() {
         // Verify SystemEvents use enum discriminants, not hashes
-        assert_eq!(EventId::from(SystemEvent::MerkleNodeMerge).as_felt().as_int(), 0u64);
-        assert_eq!(EventId::from(SystemEvent::MerkleNodeToStack).as_felt().as_int(), 1u64);
-        assert_eq!(EventId::from(SystemEvent::U32Clz).as_felt().as_int(), 6u64);
-        assert_eq!(EventId::from(SystemEvent::HpermToMap).as_felt().as_int(), 15u64);
+        assert_eq!(EventId::from(SystemEvent::MerkleNodeMerge).as_u64(), 0u64);
+        assert_eq!(EventId::from(SystemEvent::MerkleNodeToStack).as_u64(), 1u64);
+        assert_eq!(EventId::from(SystemEvent::U32Clz).as_u64(), 6u64);
+        assert_eq!(EventId::from(SystemEvent::HpermToMap).as_u64(), 15u64);
     }
 }

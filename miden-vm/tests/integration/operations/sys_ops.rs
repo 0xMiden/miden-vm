@@ -86,7 +86,7 @@ fn emit() {
     let event_name = EventName::new("test::emit");
     let event_id = event_name.to_event_id().as_felt();
 
-    let source = format!("begin push.{} emit drop end", event_id);
+    let source = format!("push.{event_id} emit drop");
     let mut test = build_op_test!(&source, &[0, 0, 0, 0]);
     test.add_event_handler(event_name, NoopEventHandler);
     test.prove_and_verify(vec![], false);

@@ -10,20 +10,24 @@ use crate::{Felt, utils::hash_string_to_word};
 // EVENT ID
 // ================================================================================================
 
-/// A lightweight, type-safe wrapper around a [`Felt`] that represents an event identifier.
+/// A type-safe wrapper around a [`Felt`] that represents an event identifier.
 ///
 /// Event IDs are used to identify events that can be emitted by the VM or handled by the host.
 /// This newtype provides type safety and ensures that event IDs are not accidentally confused
 /// with other [`Felt`] values.
 ///
 /// [`EventId`] contains only the identifier. For events with human-readable names,
-/// use [`NamedEvent`] instead.
+/// use [`EventName`] instead.
 ///
 /// While not enforced by this type, the values 0..256 are reserved for
 /// [`SystemEvent`](crate::sys_events::SystemEvent)s.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_serde_test_macros::serde_test(winter_serde(true))
+)]
 pub struct EventId(Felt);
 
 impl EventId {
@@ -55,13 +59,13 @@ impl EventId {
     }
 
     /// Creates an EventId from a [`Felt`] value (e.g., from the stack).
-    pub const fn from_felt(value: Felt) -> Self {
-        Self(value)
+    pub const fn from_felt(event_id: Felt) -> Self {
+        Self(event_id)
     }
 
     /// Creates an EventId from a u64, converting it to a [`Felt`].
-    pub const fn from_u64(value: u64) -> Self {
-        Self(Felt::new(value))
+    pub const fn from_u64(event_id: u64) -> Self {
+        Self(Felt::new(event_id))
     }
 
     /// Returns the underlying [`Felt`] value.
@@ -69,10 +73,16 @@ impl EventId {
         self.0
     }
 
+    /// Returns the underlying `u64` value.
+    pub const fn as_u64(&self) -> u64 {
+        self.0.as_int()
+    }
+
     /// Returns `true` if this event ID is reserved for a
     /// [`SystemEvent`](crate::sys_events::SystemEvent).
     pub const fn is_reserved(&self) -> bool {
-        self.0.as_int() <= u8::MAX as u64
+        let value = self.0.as_int();
+        value <= u8::MAX as u64
     }
 }
 
@@ -84,19 +94,18 @@ impl PartialOrd for EventId {
 
 impl Ord for EventId {
     fn cmp(&self, other: &Self) -> core::cmp::Ordering {
-        self.0.as_int().cmp(&other.0.as_int())
+        self.0.inner().cmp(&other.0.inner())
     }
 }
 
 impl core::hash::Hash for EventId {
     fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
-        self.0.as_int().hash(state);
+        self.0.inner().hash(state);
     }
 }
 
 impl Display for EventId {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
-        // Display just the felt value
         write!(f, "{}", self.0)
     }
 }
@@ -113,8 +122,12 @@ impl Display for EventId {
 ///
 /// For event identification during execution (e.g., reading from the stack), use [`EventId`]
 /// directly. Names can be looked up via the event registry when needed for error reporting.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_serde_test_macros::serde_test(winter_serde(true))
+)]
 pub struct EventName(Cow<'static, str>);
 
 impl EventName {
@@ -163,6 +176,25 @@ impl Deserializable for EventId {
     }
 }
 
+impl Serializable for EventName {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        // Serialize as a length-prefixed string
+        target.write_usize(self.as_str().len());
+        target.write_bytes(self.as_str().as_bytes());
+    }
+}
+
+impl Deserializable for EventName {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let len = source.read_usize()?;
+        let bytes = source.read_vec(len)?;
+        let name = alloc::string::String::from_utf8(bytes).map_err(|_| {
+            DeserializationError::InvalidValue("invalid UTF-8 in event name".into())
+        })?;
+        Ok(Self::from_string(name))
+    }
+}
+
 #[cfg(all(feature = "arbitrary", test))]
 impl proptest::prelude::Arbitrary for EventId {
     type Parameters = ();
@@ -170,6 +202,28 @@ impl proptest::prelude::Arbitrary for EventId {
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         use proptest::prelude::*;
         any::<u64>().prop_map(EventId::from_u64).boxed()
+    }
+
+    type Strategy = proptest::prelude::BoxedStrategy<Self>;
+}
+
+#[cfg(all(feature = "arbitrary", test))]
+impl proptest::prelude::Arbitrary for EventName {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        use proptest::prelude::*;
+
+        // Test both Cow::Borrowed (static) and Cow::Owned (dynamic) variants
+        prop_oneof![
+            // Static strings (Cow::Borrowed)
+            Just(EventName::new("test::static::event")),
+            Just(EventName::new("stdlib::handler::example")),
+            // Dynamic strings (Cow::Owned)
+            any::<(u32, u32)>()
+                .prop_map(|(a, b)| EventName::from_string(format!("dynamic::event::{}::{}", a, b))),
+        ]
+        .boxed()
     }
 
     type Strategy = proptest::prelude::BoxedStrategy<Self>;
@@ -187,8 +241,11 @@ mod tests {
     #[test]
     fn event_id_basics() {
         // Constructors
-        assert_eq!(EventId::from_u64(100).as_felt().as_int(), 100);
-        assert_eq!(EventId::from_felt(Felt::new(200)).as_felt().as_int(), 200);
+        assert_eq!(EventId::from_u64(100).as_u64(), 100);
+        assert_eq!(EventId::from_felt(Felt::new(200)).as_u64(), 200);
+
+        // Conversion to Felt
+        assert_eq!(EventId::from_u64(100).as_felt(), Felt::new(100));
 
         // Reserved range: 0-255
         assert!(EventId::from_u64(0).is_reserved());
