@@ -1,0 +1,218 @@
+name: Contribution Quality
+
+on:
+  pull_request:
+    types: [opened, reopened, edited, synchronize, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "PR number to evaluate (manual runs)"
+        required: true
+        type: string
+      force_all:
+        description: "Skip trusted/draft checks"
+        required: false
+        default: "false"
+        type: choice
+        options: ["false", "true"]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    env:
+      DISPATCH_PR_NUMBER: ${{ inputs.pr_number }}
+      DISPATCH_FORCE_ALL: ${{ inputs.force_all }}
+    steps:
+      - name: Resolve PR number and event mode
+        id: ctx
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const isPREvent = !!context.payload.pull_request;
+            const fromDispatch = context.payload?.inputs?.pr_number || process.env.DISPATCH_PR_NUMBER || '';
+            const prNumber = isPREvent ? String(context.payload.pull_request.number) : String(fromDispatch || '');
+            if (!prNumber) {
+              core.setFailed('pr_number is required for manual (workflow_dispatch) runs.');
+              return;
+            }
+            const forceAll = (context.payload?.inputs?.force_all || process.env.DISPATCH_FORCE_ALL || 'false').toLowerCase();
+            core.setOutput('is_pr_event', String(isPREvent));
+            core.setOutput('pr_number', prNumber);
+            core.setOutput('force_all', forceAll);
+
+      - name: Load PR details
+        id: pr
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = parseInt("${{ steps.ctx.outputs.pr_number }}", 10);
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber
+            });
+            core.setOutput('author_association', pr.author_association || 'NONE');
+            core.setOutput('draft', pr.draft ? 'true' : 'false');
+            core.setOutput('body', (pr.body || '').replace(/\r/g,''));
+            core.setOutput('number', String(pr.number));
+
+      - name: Skip trusted or drafts (unless forced)
+        id: gate
+        run: |
+          assoc="${{ steps.pr.outputs.author_association }}"
+          draft="${{ steps.pr.outputs.draft }}"
+          force="${{ steps.ctx.outputs.force_all }}"
+          if [ "$force" = "true" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          else
+            case "$assoc" in
+              OWNER|CONTRIBUTOR|COLLABORATOR) echo "skip=true"  >> "$GITHUB_OUTPUT" ;;
+              *)                         echo "skip=false" >> "$GITHUB_OUTPUT" ;;
+            esac
+            [ "$draft" = "true" ] && echo "skip=true" >> "$GITHUB_OUTPUT" || true
+          fi
+
+      - name: Evaluate
+        if: steps.gate.outputs.skip != 'true'
+        id: eval
+        uses: actions/github-script@v7
+        env:
+          PRNUM: ${{ steps.pr.outputs.number }}
+          BODY: ${{ steps.pr.outputs.body }}
+        with:
+          script: |
+            const prNumber = parseInt(process.env.PRNUM, 10);
+            const body = process.env.BODY || '';
+
+            const DOC_ONLY_MAX_LINES = 20;
+            const CODE_ONLY_MAX_LINES = 8;
+            const MAX_ISSUES_TO_CHECK = 5;
+
+            const files = await github.rest.pulls.listFiles({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+              per_page: 100
+            }).then(r => r.data);
+
+            const ext = (p) => { const i=p.lastIndexOf('.'); return i>=0?p.slice(i).toLowerCase():''; };
+            const DOCS = new Set(['.md','.rst','.txt']);
+            const CODE = new Set(['.rs','.go','.py','.ts','.tsx','.js','.jsx','.java','.kt','.cpp','.c','.hpp','.hh','.h','.rb','.swift','.scala','.php','.sh','.bash','.zsh','.ps1','.yaml','.yml','.toml','.json']);
+            const TEST_HINTS = [/^tests?\//i, /\/tests?\//i, /_test\./i, /\.spec\./i, /\.test\./i];
+
+            const changedFiles = files.length;
+            const adds = files.reduce((a,f)=>a+(f.additions||0),0);
+            const dels = files.reduce((a,f)=>a+(f.deletions||0),0);
+            const onlyDocs = changedFiles>0 && files.every(f => DOCS.has(ext(f.filename)));
+            const onlyCode = changedFiles>0 && files.every(f => CODE.has(ext(f.filename)));
+            const touchesTests = files.some(f => TEST_HINTS.some(rx => rx.test(f.filename)));
+
+            const issueNums = new Set();
+            for (const m of (body.match(/(?:fixe?s?|close?s?|resolve?s?)\s*#(\d+)/ig) || [])) {
+              const mm = m.match(/#(\d+)/); if (mm) issueNums.add(mm[1]);
+            }
+            for (const m of (body.match(/#(\d+)/g) || [])) {
+              issueNums.add(m.replace('#',''));
+            }
+
+            let hasLinkedIssue=false, linkedAssigned=false, linkedNumber=null;
+            if (issueNums.size) {
+              const author = (await github.rest.pulls.get({
+                owner: context.repo.owner, repo: context.repo.repo, pull_number: prNumber
+              })).data.user.login.toLowerCase();
+              for (const n of [...issueNums].slice(0,MAX_ISSUES_TO_CHECK).map(x=>parseInt(x,10)).filter(Number.isInteger)) {
+                try {
+                  const { data: iss } = await github.rest.issues.get({
+                    owner: context.repo.owner, repo: context.repo.repo, issue_number: n
+                  });
+                  if (!iss.pull_request) {
+                    hasLinkedIssue = true; linkedNumber = n;
+                    const assignees = (iss.assignees||[]).map(a=>a.login.toLowerCase());
+                    if (assignees.includes(author)) linkedAssigned = true;
+                    break;
+                  }
+                } catch (err) { core.warning(`Failed to fetch issue #${n}: ${err}`); }
+              }
+            }
+
+            const hasRationale = /(^|\n)#{0,3}\s*(rationale|why)\b/i.test(body) || /\bbecause\b/i.test(body);
+            const hasTestPlan = /(^|\n)#{0,3}\s*(test\s*plan|how\s*i\s*tested)\b/i.test(body);
+
+            const trivialDoc = onlyDocs && (adds+dels)<=DOC_ONLY_MAX_LINES && changedFiles<=2;
+            const trivialCode = onlyCode && !touchesTests && (adds+dels)<=CODE_ONLY_MAX_LINES && changedFiles<=1;
+
+            const findings = [];
+            const recommendations = [];
+            if (!hasLinkedIssue) findings.push('Link an issue in the PR body (e.g., "Fixes #123").');
+            else if (!linkedAssigned) findings.push(`Ensure issue #${linkedNumber} is assigned to the PR author.`);
+            if (!hasRationale) findings.push('Add a short Rationale explaining why the change is needed.');
+            if (!hasTestPlan) recommendations.push('Consider adding a Test plan or clear review steps.');
+            if (trivialDoc) findings.push('Change appears to be a trivial doc-only edit; may be batched internally.');
+            if (trivialCode) findings.push('Change appears to be a trivial code-only edit without tests; may be batched internally.');
+
+            core.setOutput('hasFindings', String(findings.length > 0));
+            core.setOutput('findings', JSON.stringify(findings));
+            core.setOutput('recommendations', JSON.stringify(recommendations));
+            core.setOutput('linked', linkedNumber ? String(linkedNumber) : '');
+            core.setOutput('pr_number', String(prNumber));
+
+      - name: Apply label and comment
+        if: steps.gate.outputs.skip != 'true' && (steps.eval.outputs.hasFindings == 'true' || steps.eval.outputs.recommendations != '[]')
+        uses: actions/github-script@v7
+        env:
+          FINDINGS: ${{ steps.eval.outputs.findings }}
+          RECOMMENDATIONS: ${{ steps.eval.outputs.recommendations }}
+          LINK: ${{ steps.eval.outputs.linked }}
+          PRNUM: ${{ steps.eval.outputs.pr_number }}
+          HAS_FINDINGS: ${{ steps.eval.outputs.hasFindings }}
+        with:
+          script: |
+            const issue_number = parseInt(process.env.PRNUM, 10);
+            const findings = JSON.parse(process.env.FINDINGS || "[]");
+            const recommendations = JSON.parse(process.env.RECOMMENDATIONS || "[]");
+            const linked = process.env.LINK;
+            const hasFindings = process.env.HAS_FINDINGS === 'true';
+
+            // Only apply label if there are actual findings (not just recommendations)
+            if (hasFindings) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner, repo: context.repo.repo, issue_number,
+                labels: ['quality-concern']
+              });
+            }
+
+            const guidance = [
+              linked ? `- Ensure issue #${linked} is assigned to you.` : `- Link a relevant issue (e.g., "Fixes #123") and ensure it is assigned to you.`,
+              '- See CONTRIBUTING.md for expectations.',
+              '- If this is a false positive, comment: `/quality-review`.'
+            ];
+
+            const commentBody = [
+              'Automated check (CONTRIBUTING.md)',
+              ''
+            ];
+
+            if (findings.length > 0) {
+              commentBody.push('Findings:');
+              commentBody.push(...findings.map(f => `- ${f}`));
+              commentBody.push('');
+            }
+
+            if (recommendations.length > 0) {
+              commentBody.push('Recommendations:');
+              commentBody.push(...recommendations.map(f => `- ${f}`));
+              commentBody.push('');
+            }
+
+            commentBody.push('Next steps:');
+            commentBody.push(...guidance);
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner, repo: context.repo.repo, issue_number,
+              body: commentBody.join('\n')
+            });
