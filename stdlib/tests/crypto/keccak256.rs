@@ -357,7 +357,7 @@ fn test_keccak_hash_1to1_prove_verify() {
     let mut precompile_verifiers = PrecompileVerifierRegistry::new();
     precompile_verifiers.register(KECCAK_HASH_MEMORY_EVENT_ID, Arc::new(KeccakPrecompile));
     let deferred_commitment = precompile_verifiers
-        .deferred_requests_commitment(proof.precompile_requests())
+        .deferred_requests_sponge(proof.precompile_requests())
         .expect("failed to verify");
 
     let expected_commitment = preimage.precompile_commitment();

@@ -300,21 +300,21 @@ $$
 
 ## LOG_PRECOMPILE
 
-The `LOG_PRECOMPILE` operation logs a precompile event by absorbing two user-provided words (`TAG` and `COMM_CALLDATA`) into the precompile sponge. Initialization and boundary enforcement are handled via variable‑length public inputs; see [Precompile flow](./precompiles.md) for a high‑level overview. This section concentrates on the stack interaction and bus messages.
+The `log_precompile` operation logs a precompile event by absorbing two user-provided words (`TAG` and `COMM`) into the precompile sponge. Initialization and boundary enforcement are handled via variable‑length public inputs; see [Precompile flow](./precompiles.md) for a high‑level overview. This section concentrates on the stack interaction and bus messages.
 
 ### Operation Overview
 
-The stack is expected to be arranged as `[COMM_CALLDATA, TAG, PAD, ...]`, where
-- `COMM_CALLDATA` is the commitment to the request’s calldata (precompile-specific),
+The stack is expected to be arranged as `[COMM, TAG, PAD, ...]`, where
+- `COMM` is the precompile commitment to the calldata (precompile-specific),
 - `TAG` is a word identifying the precompile, which may contain request-specific metadata,
 - `PAD` is a word that will get overwritten in the next cycle.
 
 Additionally, the processor maintains a persistent precompile sponge capacity word `CAP` that is updated with each `LOG_PRECOMPILE` invocation. This word is provided non-deterministically via helper registers and is denoted `CAP_PREV`. The virtual table bus links each removal to a matching insertion, ensuring a single, consistent capacity sequence.
 
-The operation evaluates `[CAP_NEXT, R0, R1] = RPO([CAP_PREV, TAG, COMM_CALLDATA])`, with the following stack transition
+The operation evaluates `[CAP_NEXT, R0, R1] = RPO([CAP_PREV, TAG, COMM])`, with the following stack transition
 
 ```
-Before:  [COMM_CALLDATA, TAG, PAD,      ...]
+Before:  [COMM, TAG, PAD,      ...]
 After:   [R1,            R0,  CAP_NEXT, ...]
 ```
 
@@ -323,6 +323,9 @@ The VM updates its internal precompile sponge capacity with `CAP_NEXT` using a b
 The operation uses the following helper registers:
 - $h_0$: Hasher chiplet row address
 - $h_1, h_2, h_3, h_4$: Previous capacity $\mathsf{CAP}_{prev}$
+
+Note: helper registers expose $\mathsf{CAP}_{prev}$ for bus constraints only; the VM maintains the
+capacity internally between invocations.
 
 ### Bus Communication
 
@@ -334,18 +337,18 @@ The following two messages are sent to the hasher chiplet, ensuring the validity
 \begin{aligned}
 \mathsf{CAP}^{\text{prev}}_i &= h_{i+1} &&\text{(helper registers)}\\
 \mathsf{TAG}_i &= s_{7-i} &&\text{(stack slots 4..7)}\\
-\mathsf{COMM\_CALLDATA}_i &= s_{3-i} &&\text{(stack slots 0..3)}
+\mathsf{COMM}_i &= s_{3-i} &&\text{(stack slots 0..3)}
 \end{aligned}
 \qquad i \in \{0,1,2,3\}.
 \]
 
-The input message therefore reduces the RPO state in the canonical order `[CAP_PREV, TAG, COMM_CALLDATA]`:
+The input message therefore reduces the RPO state in the canonical order `[CAP_PREV, TAG, COMM]`:
 
 $$
 v_{\text{input}} = \alpha_0 + \alpha_1 \cdot op_{linhash} + \alpha_2 \cdot h_0
  + \sum_{i=0}^{3} \alpha_{i+3} \cdot \mathsf{CAP}_{\text{prev}}_i
  + \sum_{i=0}^{3} \alpha_{i+7} \cdot \mathsf{TAG}_i
- + \sum_{i=0}^{3} \alpha_{i+11} \cdot \mathsf{COMM\_CALLDATA}_i.
+ + \sum_{i=0}^{3} \alpha_{i+11} \cdot \mathsf{COMM}_i.
 $$
 
 Seven rows later, the `op_retstate` response provides the permuted state `[CAP_{next}, R0, R1]`. Denote the stack after the instruction by $s'_i$; the top twelve elements are `[R1, R0, CAP_NEXT]` in reverse order. Thus

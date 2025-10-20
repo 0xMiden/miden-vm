@@ -204,13 +204,14 @@ impl PrecompileVerifierRegistry {
         self.verifiers.is_empty()
     }
 
-    /// Verifies all precompile requests and returns the final sponge state.
+    /// Verifies all precompile requests and returns the resulting precompile sponge state after
+    /// absorbing all commitments.
     ///
     /// # Errors
     /// Returns a [`PrecompileVerificationError`] if:
     /// - No verifier is registered for a request's event ID
     /// - A verifier fails to verify its request
-    pub fn deferred_requests_commitment(
+    pub fn deferred_requests_sponge(
         &self,
         requests: &[PrecompileRequest],
     ) -> Result<PrecompileSponge, PrecompileVerificationError> {

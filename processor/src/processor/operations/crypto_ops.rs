@@ -203,14 +203,14 @@ pub(super) fn op_horner_eval_base<P: Processor>(
 // LOG PRECOMPILE OPERATION
 // ================================================================================================
 
-/// Logs a precompile event by absorbing `TAG` and `COMM_CALLDATA` into the precompile sponge
+/// Logs a precompile event by absorbing `TAG` and `COMM` into the precompile sponge
 /// capacity.
 ///
 /// Stack transition:
-/// `[COMM_CALLDATA, TAG, PAD, ...] -> [R1, R0, CAP_NEXT, ...]`
+/// `[COMM, TAG, PAD, ...] -> [R1, R0, CAP_NEXT, ...]`
 ///
 /// Where:
-/// - The hasher computes: `[CAP_NEXT, R0, R1] = Rpo([CAP_PREV, TAG, COMM_CALLDATA])`
+/// - The hasher computes: `[CAP_NEXT, R0, R1] = Rpo([CAP_PREV, TAG, COMM])`
 /// - `CAP_PREV` is the previous sponge capacity provided non-deterministically via helper
 ///   registers.
 #[inline(always)]
@@ -218,19 +218,19 @@ pub(super) fn op_log_precompile<P: Processor>(
     processor: &mut P,
     tracer: &mut impl Tracer,
 ) -> [Felt; NUM_USER_OP_HELPERS] {
-    // Read TAG and COMM_CALLDATA from stack
-    let comm_calldata = processor.stack().get_word(0);
+    // Read TAG and COMM from stack
+    let comm = processor.stack().get_word(0);
     let tag = processor.stack().get_word(4);
 
     // Get the current precompile sponge capacity
     let cap_prev = processor.precompile_capacity();
 
     // Build the full 12-element hasher state for RPO permutation
-    // State layout: [CAP_PREV, TAG, COMM_CALLDATA]
+    // State layout: [CAP_PREV, TAG, COMM]
     let mut hasher_state: [Felt; 12] = [ZERO; 12];
     hasher_state[0..4].copy_from_slice(cap_prev.as_slice());
     hasher_state[4..8].copy_from_slice(tag.as_slice());
-    hasher_state[8..12].copy_from_slice(comm_calldata.as_slice());
+    hasher_state[8..12].copy_from_slice(comm.as_slice());
 
     // Perform the RPO permutation
     let (addr, output_state) = processor.hasher().permute(hasher_state);

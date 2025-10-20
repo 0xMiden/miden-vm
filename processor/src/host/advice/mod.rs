@@ -30,8 +30,8 @@ use crate::{host::AdviceMutation, processor::AdviceProviderInterface};
 /// 3. Merkle store, which contains structured data reducible to Merkle paths. The VM can request
 ///    Merkle paths from the store, as well as mutate it by updating or merging nodes contained in
 ///    the store.
-/// 4. Deferred precompile requests containing the call-data of any precompile requests made by the
-///    VM. The VM computes a commitment to the call-data of all the precompiles it requests. When
+/// 4. Deferred precompile requests containing the calldata of any precompile requests made by the
+///    VM. The VM computes a commitment to the calldata of all the precompiles it requests. When
 ///    verifying each call, this commitment must be recomputed and should match the one computed by
 ///    the VM. After executing a program, the data in these requests can either
 ///    - be included in the proof of the VM execution and verified natively alongside the VM proof,

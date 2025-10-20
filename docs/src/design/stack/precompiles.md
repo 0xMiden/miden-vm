@@ -9,17 +9,17 @@ coordinate to maintain a sequential commitment to every precompile invocation.
 | Concept | Description |
 | ------- | ----------- |
 | `PrecompileRequest` | The raw calldata for a precompile invocation. Requests are stored by the host and included in the proof artifact. |
-| `PrecompileCommitment` | A word pair `(TAG, COMMITMENT)` emitted by the host-side precompile handler. The tag encodes the precompile identifier and optional metadata; the commitment is an RPO hash derived from the request’s calldata (or other handler-specific witness). |
+| `PrecompileCommitment` | A word pair `(TAG, COMM)` emitted by the host-side precompile handler. `COMM` is the RPO hash commitment to the request’s calldata (or other handler-specific witness). The tag encodes the precompile identifier and optional metadata. |
 | `PrecompileSponge` | An RPO256 sponge that aggregates all commitments. The VM stores only the 4-element capacity word; the verifier reconstructs the same sponge from the recorded requests. |
 
 ## Lifecycle overview
 
 1. **Handler emits advice** – When a MASM wrapper invokes a precompile, the host handler:
    - Computes the raw calldata, stores it as a `PrecompileRequest`, and exposes the request via advice.
-   - Recomputes the matching `PrecompileCommitment` and provides `(TAG, COMM_CALLDATA)` so the program can log the operation.
-2. **`log_precompile` absorbs the commitment** – The wrapper (or any caller) invokes the `log_precompile` instruction with the tag and the call‑data commitment. The instruction:
+   - Recomputes the matching `PrecompileCommitment` and provides `(TAG, COMM)` so the program can log the operation.
+2. **`log_precompile` absorbs the commitment** – The wrapper (or any caller) invokes the `log_precompile` instruction with the tag and `COMM` (the calldata commitment). The instruction:
    - Reads the previous capacity `CAP_PREV` from helper registers (supplied non-deterministically).
-   - Applies the RPO permutation to `[CAP_PREV, TAG, COMM_CALLDATA]`, producing `[CAP_NEXT, R0, R1]`.
+   - Applies the RPO permutation to `[CAP_PREV, TAG, COMM]`, producing `[CAP_NEXT, R0, R1]`.
    - Writes `[R1, R0, CAP_NEXT]` back onto the stack; programs typically drop these words immediately.
 3. **Virtual table initialization** – Capacity tracking is wired via the chiplets’ virtual table. The verifier initializes the auxiliary column with variable‑length public inputs (similar to the kernel ROM chiplet) so that the column includes the initial and final sponge capacities for the execution.
 4. **Trace output** – Execution records each `PrecompileRequest` and carries the current capacity forward. The VM never finalizes the sponge; it only retains the capacity between absorptions.
@@ -35,7 +35,7 @@ coordinate to maintain a sequential commitment to every precompile invocation.
 | Participant | Responsibilities |
 | ----------- | ---------------- |
 | VM | Executes `log_precompile`, maintains the capacity word internally, and participates in capacity initialization via the chiplets’ virtual table. |
-| Host / MASM wrapper | Provides advice containing raw calldata, recomputes `(TAG, COMM_CALLDATA)`, and invokes `log_precompile`. |
+| Host / MASM wrapper | Provides advice containing raw calldata, recomputes `(TAG, COMM)`, and invokes `log_precompile`. |
 | Prover | Includes the precompile requests in the proof. |
 | Verifier | Replays requests into registered verifiers, rebuilds the sponge, optionally finalizes it (absorbing two zero words), and enforces the initial/final capacity via variable‑length public inputs. |
 

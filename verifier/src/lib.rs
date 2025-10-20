@@ -110,7 +110,7 @@ pub fn verify_with_precompiles(
     // if no verifiers were provided (e.g. when this function was called from `verify()`),
     // but the proof contained requests anyway, returns a `NoVerifierFound` error.
     let recomputed_sponge = precompile_verifiers
-        .deferred_requests_commitment(&precompile_requests)
+        .deferred_requests_sponge(&precompile_requests)
         .map_err(VerificationError::PrecompileVerificationError)?;
 
     // build public inputs, explicitly passing the recomputed precompile sponge capacity

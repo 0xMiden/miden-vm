@@ -188,26 +188,26 @@ impl Process {
         Ok(())
     }
 
-    /// Logs a precompile event by absorbing TAG and COMM_CALLDATA into the precompile sponge
+    /// Logs a precompile event by absorbing TAG and COMM into the precompile sponge
     /// capacity.
     ///
     /// Stack transition:
-    /// `[COMM_CALLDATA, TAG, PAD, ...] -> [R1, R0, CAP_NEXT, ...]`
+    /// `[COMM, TAG, PAD, ...] -> [R1, R0, CAP_NEXT, ...]`
     ///
     /// Where:
-    /// - The hasher computes: `[CAP_NEXT, R0, R1] = Rpo([CAP_PREV, TAG, COMM_CALLDATA])`
+    /// - The hasher computes: `[CAP_NEXT, R0, R1] = Rpo([CAP_PREV, TAG, COMM])`
     /// - `CAP_PREV` is the previous sponge capacity provided non-deterministically via helper
     ///   registers.
     /// - The VM stack stores each 4-element word in reverse element order, so the top of the stack
     ///   exposes the elements of `R1` first, followed by the elements of `R0`, then `CAP_NEXT`.
     pub(super) fn op_log_precompile(&mut self) -> Result<(), ExecutionError> {
-        // Read TAG and COMM_CALLDATA from stack, and CAP_PREV from the processor state
-        let comm_calldata = self.stack.get_word(0);
+        // Read TAG and COMM from stack, and CAP_PREV from the processor state
+        let comm = self.stack.get_word(0);
         let tag = self.stack.get_word(4);
         let cap_prev = self.precompile_capacity;
 
         let input_state: HasherState = {
-            let input_state_words = [cap_prev, tag, comm_calldata];
+            let input_state_words = [cap_prev, tag, comm];
             Word::words_as_elements(&input_state_words).try_into().unwrap()
         };
 
