@@ -44,8 +44,8 @@ pub trait Processor: Sized {
 
     /// Returns the current precompile sponge capacity (CAP).
     ///
-    /// This capacity is used in `log_precompile` operations to maintain the precompile sponge across
-    /// multiple invocations of the logging instruction.
+    /// This capacity is used in `log_precompile` operations to maintain the precompile sponge
+    /// across multiple invocations of the logging instruction.
     fn precompile_capacity(&self) -> Word;
 
     /// Sets the precompile sponge capacity (CAP) to a new value.

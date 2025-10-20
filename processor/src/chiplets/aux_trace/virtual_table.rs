@@ -106,8 +106,7 @@ where
         alphas: &[E],
         _debugger: &mut BusDebugger<E>,
     ) -> E {
-        let message =
-            LogPrecompileMessage { capacity: self.final_precompile_capacity };
+        let message = LogPrecompileMessage { capacity: self.final_precompile_capacity };
         let value = message.value(alphas);
 
         #[cfg(any(test, feature = "bus-debugger"))]
