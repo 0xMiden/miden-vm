@@ -64,7 +64,7 @@ end
 #! - `ptr_digest`: word-aligned memory address containing 32-byte digest
 #! - `ptr_sig`: word-aligned memory address containing 66-byte signature
 #! - `COMM`: `Rpo256(Rpo256(Rpo256(pk || digest) || Rpo256(sig)))`
-#! - `TAG`: `[0, 0, result, ECDSA_VERIFY_EVENT]`
+#! - `TAG`: `[ECDSA_VERIFY_EVENT, result, 0, 0]`
 #! - `result`: 1 if signature is valid, 0 if invalid
 export.verify_impl
     emit.ECDSA_VERIFY_EVENT
@@ -95,7 +95,7 @@ export.verify_impl
     hmerge
     # => [COMM, result]
 
-    # Create TAG = [0, 0, result, ECDSA_VERIFY_EVENT]
+    # Create TAG = [ECDSA_VERIFY_EVENT, result, 0, 0]
     push.ECDSA_VERIFY_EVENT dup.5 push.0.0 swapw
     # => [COMM, TAG, result]
 end

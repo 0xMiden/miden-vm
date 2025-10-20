@@ -237,6 +237,11 @@ fn test_ecdsa_prove_verify() {
     let precompile_commitment = EcdsaPrecompile
         .verify(proof_request.calldata())
         .expect("verifier should succeed");
+    assert_eq!(
+        precompile_commitment.tag,
+        Word::from([ECDSA_VERIFY_EVENT_ID.as_felt(), Felt::ONE, Felt::ZERO, Felt::ZERO]),
+        "precompile tag should encode [event_id, result, 0, 0]",
+    );
 
     // Set up precompile verifier registry
     let mut precompile_verifiers = PrecompileVerifierRegistry::new();
