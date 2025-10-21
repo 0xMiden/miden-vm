@@ -235,8 +235,6 @@ impl AsRef<[Felt]> for KeccakFeltDigest {
     }
 }
 
-// No custom error type is needed; memory access errors are propagated via `MemoryReadError`.
-
 #[cfg(test)]
 mod tests {
     use super::*;

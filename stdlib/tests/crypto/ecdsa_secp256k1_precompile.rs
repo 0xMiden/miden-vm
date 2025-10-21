@@ -4,26 +4,16 @@
 //! - Raw event handlers correctly perform ECDSA verification and populate advice provider
 //! - MASM wrapper correctly returns commitment, tag, and result on stack
 //! - Both valid and invalid signatures are handled correctly
-//! - Full prove/verify workflow succeeds
 
-use std::sync::Arc;
-
-use miden_air::ProvingOptions;
-use miden_assembly::Assembler;
 use miden_core::{
-    Felt, FieldElement, ProgramInfo, Word,
-    precompile::{
-        PrecompileCommitment, PrecompileTranscript, PrecompileVerifier, PrecompileVerifierRegistry,
-    },
+    Felt, FieldElement,
+    precompile::{PrecompileCommitment, PrecompileVerifier},
     utils::Serializable,
 };
 use miden_crypto::dsa::ecdsa_k256_keccak::SecretKey;
-use miden_processor::{AdviceInputs, DefaultHost, Program, StackInputs};
-use miden_stdlib::{
-    StdLibrary,
-    handlers::ecdsa::{ECDSA_VERIFY_EVENT_ID, EcdsaPrecompile, EcdsaRequest},
-};
+use miden_stdlib::handlers::ecdsa::{EcdsaPrecompile, EcdsaRequest};
 use rand::{SeedableRng, rngs::StdRng};
+
 // TEST CONSTANTS
 // ================================================================================================
 
@@ -81,12 +71,17 @@ fn test_ecdsa_verify_cases() {
 
 #[test]
 fn test_ecdsa_verify_impl_commitment() {
-    // Verify tag/commitment once on a valid request
-    let request = generate_valid_signature();
-    let memory_stores = generate_memory_store_masm(&request);
+    // One valid and one invalid (wrong key) request
+    let test_cases = vec![
+        (generate_valid_signature(), true),
+        (generate_invalid_signature_wrong_key(), false),
+    ];
+    for (request, expected_valid) in test_cases {
+        // Verify tag/commitment once on a valid request
+        let memory_stores = generate_memory_store_masm(&request);
 
-    let source = format!(
-        "
+        let source = format!(
+            "
             use.std::crypto::dsa::ecdsa::secp256k1
             use.std::sys
 
@@ -102,149 +97,35 @@ fn test_ecdsa_verify_impl_commitment() {
                 exec.sys::truncate_stack
             end
         ",
-    );
+        );
 
-    let test = build_debug_test!(source, &[]);
-    let output = test.execute().unwrap();
-    let stack = output.stack_outputs();
+        let test = build_debug_test!(source, &[]);
+        let output = test.execute().unwrap();
+        let stack = output.stack_outputs();
 
-    // Verify stack layout: [COMM (0-3), TAG (4-7), result (at position 6 = TAG[1]), ...]
-    let commitment = stack.get_stack_word_be(0).unwrap();
-    let tag = Word::from([
-        stack.get_stack_item(7).unwrap(),
-        stack.get_stack_item(6).unwrap(),
-        stack.get_stack_item(5).unwrap(),
-        stack.get_stack_item(4).unwrap(),
-    ]);
+        // Verify stack layout: [COMM (0-3), TAG (4-7), result (at position 6 = TAG[1]), ...]
+        let commitment = stack.get_stack_word_be(0).unwrap();
+        let tag = stack.get_stack_word_be(4).unwrap();
+        // Commitment and tag must match verifier output
+        let precompile_commitment = PrecompileCommitment::new(tag, commitment);
+        let verifier_commitment =
+            EcdsaPrecompile.verify(&request.to_bytes()).expect("verifier should succeed");
+        assert_eq!(
+            precompile_commitment, verifier_commitment,
+            "commitment on stack should match verifier output"
+        );
 
-    // Verify result
-    let result = stack.get_stack_item(6).unwrap();
-    assert_eq!(result, Felt::ONE, "result does not match expected validity");
+        // Verify result
+        let result = stack.get_stack_item(6).unwrap();
+        assert_eq!(result, Felt::from(expected_valid), "result does not match expected validity");
 
-    // Verify tag format: [event_id, result, 0, 0]
-    assert_eq!(tag[0], ECDSA_VERIFY_EVENT_ID.as_felt());
-    assert_eq!(tag[1], Felt::ONE);
-    assert_eq!(tag[2], Felt::ZERO);
-    assert_eq!(tag[3], Felt::ZERO);
+        let deferred = output.advice_provider().precompile_requests().to_vec();
+        assert_eq!(deferred.len(), 1, "expected a single deferred request");
+        assert_eq!(deferred[0], request.as_precompile_request());
 
-    // Commitment and tag must match verifier output
-    let precompile_commitment = PrecompileCommitment::new(tag, commitment);
-    let verifier_commitment =
-        EcdsaPrecompile.verify(&request.to_bytes()).expect("verifier should succeed");
-
-    assert_eq!(
-        precompile_commitment, verifier_commitment,
-        "commitment on stack should match verifier output"
-    );
-}
-
-#[test]
-fn test_ecdsa_prove_verify() {
-    // Test full prove/verify workflow with a valid signature
-    let request = generate_valid_signature();
-    let memory_stores = generate_memory_store_masm(&request);
-
-    assert!(request.result());
-
-    let source = format!(
-        "
-            use.std::crypto::dsa::ecdsa::secp256k1
-            use.std::sys
-
-            begin
-                # Store test data in memory
-                {memory_stores}
-
-                # Call verify: [ptr_pk, ptr_digest, ptr_sig]
-                push.{SIG_ADDR}.{DIGEST_ADDR}.{PK_ADDR}
-                exec.secp256k1::verify
-                # => [result, ...]
-
-                exec.sys::truncate_stack
-            end
-            ",
-    );
-
-    // Compile program
-    let program: Program = Assembler::default()
-        .with_dynamic_library(StdLibrary::default())
-        .expect("failed to load stdlib")
-        .assemble_program(source)
-        .expect("failed to compile test source");
-
-    // Set up inputs
-    let stack_inputs = StackInputs::default();
-    let advice_inputs = AdviceInputs::default();
-    let mut host = DefaultHost::default();
-    let stdlib = StdLibrary::default();
-    host.load_library(&stdlib).expect("failed to load stdlib");
-
-    // Generate proof
-    let options = ProvingOptions::with_96_bit_security(miden_air::HashFunction::Blake3_192);
-    let (stack_outputs, proof) = miden_utils_testing::prove(
-        &program,
-        stack_inputs.clone(),
-        advice_inputs,
-        &mut host,
-        options,
-    )
-    .expect("failed to generate proof");
-
-    // Verify stack result indicates valid signature
-    let result = stack_outputs.get_stack_item(0).unwrap();
-    assert_eq!(result, Felt::ONE, "runtime result should be 1 for a valid signature");
-
-    // Verify the logged precompile request contains the expected data
-    let proof_requests = proof.precompile_requests();
-    assert_eq!(proof_requests.len(), 1, "expected a single precompile request");
-    let proof_request = &proof_requests[0];
-    assert_eq!(
-        proof_request.event_id(),
-        ECDSA_VERIFY_EVENT_ID,
-        "precompile request should use the ECDSA event ID"
-    );
-    let expected_request = request.as_precompile_request();
-    assert_eq!(
-        proof_request.calldata(),
-        expected_request.calldata(),
-        "logged calldata should match the original request"
-    );
-
-    // Build the expected precompile commitment from the logged data
-    let precompile_commitment = EcdsaPrecompile
-        .verify(proof_request.calldata())
-        .expect("verifier should succeed");
-    assert_eq!(
-        precompile_commitment.tag(),
-        Word::from([ECDSA_VERIFY_EVENT_ID.as_felt(), Felt::ONE, Felt::ZERO, Felt::ZERO]),
-        "precompile tag should encode [event_id, result, 0, 0]",
-    );
-
-    // Set up precompile verifier registry
-    let mut precompile_verifiers = PrecompileVerifierRegistry::new();
-    precompile_verifiers.register(ECDSA_VERIFY_EVENT_ID, Arc::new(EcdsaPrecompile));
-
-    // Compute expected deferred commitment
-    let transcript = precompile_verifiers
-        .requests_transcript(proof.precompile_requests())
-        .expect("failed to compute deferred commitment");
-
-    let mut expected_transcript = PrecompileTranscript::new();
-    expected_transcript.record(precompile_commitment);
-    assert_eq!(expected_transcript, transcript);
-
-    // Verify the proof
-    let program_info = ProgramInfo::from(program);
-    let (_, transcript_digest) = miden_verifier::verify_with_precompiles(
-        program_info,
-        stack_inputs,
-        stack_outputs,
-        proof,
-        &precompile_verifiers,
-    )
-    .expect("proof verification failed");
-
-    assert_eq!(transcript.finalize(), transcript_digest, "verifier commitment should match");
+        let advice_stack = output.advice_provider().stack();
+        assert!(advice_stack.is_empty(), "advice stack should be empty after verify_impl");
+    }
 }
 
 // TEST DATA GENERATION

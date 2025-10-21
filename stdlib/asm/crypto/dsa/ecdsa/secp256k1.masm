@@ -1,4 +1,5 @@
 use.std::crypto::hashes::rpo
+use.std::sys
 
 # ENCODING CONVENTIONS
 # ================================================================================================
@@ -42,9 +43,7 @@ export.verify
     # => [COMM, TAG, result, ...]
 
     # Log the precompile request for deferred verification
-    padw movdnw.2
-    log_precompile
-    dropw dropw dropw
+    exec.sys::log_precompile_request
     # => [result, ...]
 end
 
