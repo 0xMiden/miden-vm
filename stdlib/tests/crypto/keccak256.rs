@@ -133,7 +133,7 @@ fn test_keccak_hash_memory_impl(input_u8: &[u8]) {
     let stack = output.stack_outputs();
     let commitment = stack.get_stack_word_be(0).unwrap();
     let tag = stack.get_stack_word_be(4).unwrap();
-    let precompile_commitment = PrecompileCommitment { tag, commitment };
+    let precompile_commitment = PrecompileCommitment::new(tag, commitment);
     assert_eq!(
         precompile_commitment,
         preimage.precompile_commitment(),
@@ -363,8 +363,8 @@ fn test_keccak_hash_1to1_prove_verify() {
     let expected_commitment = preimage.precompile_commitment();
     let deferred_commitment_expected = {
         let elements = [
-            expected_commitment.tag,
-            expected_commitment.commitment,
+            expected_commitment.tag(),
+            expected_commitment.comm_calldata(),
             Word::empty(),
             Word::empty(),
         ];

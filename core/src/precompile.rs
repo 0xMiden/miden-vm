@@ -128,7 +128,7 @@ impl Deserializable for PrecompileRequest {
 /// of the request.
 ///
 /// This structure contains both the tag (which includes metadata like event ID)
-/// and the commitment word that represents the verified computation result.
+/// and the commitment to the input and result (calldata) of the precompile request.
 ///
 /// # Tag Structure
 ///
@@ -139,17 +139,36 @@ impl Deserializable for PrecompileRequest {
 ///   hash functions to distinguish actual data from padding)
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrecompileCommitment {
-    /// Tag containing metadata including the event ID in the first element. The remaining 3
-    /// elements can be used for precompile-defined associated data.
-    pub tag: Word,
-    /// Commitment word representing the inputs and result of the request.
-    pub commitment: Word,
+    tag: Word,
+    comm: Word,
 }
 
 impl PrecompileCommitment {
-    /// Returns the concatenation of tag and commitment as field elements.
+    /// Creates a new precompile commitment from a `TAG` and `COMM`.
+    ///
+    /// - `TAG`: 4-element word where the first element encodes the [`EventId`]; the remaining
+    ///   elements are available as precompile-specific metadata (e.g., `len_bytes`).
+    /// - `COMM`: 4-element word containing the commitment to the calldata (or handler-specific
+    ///   witness) for this precompile request.
+    pub fn new(tag: Word, comm: Word) -> Self {
+        Self { tag, comm }
+    }
+
+    /// Returns the `TAG` word which encodes the [`EventId`] in the first element and optional
+    /// precompile-specific metadata in the remaining three elements.
+    pub fn tag(&self) -> Word {
+        self.tag
+    }
+
+    /// Returns the `COMM` word (calldata commitment), i.e., the commitment to the precompile's
+    /// calldata (or other handler-specific witness).
+    pub fn comm_calldata(&self) -> Word {
+        self.comm
+    }
+
+    /// Returns the concatenation of `TAG` and `COMM` as field elements.
     pub fn to_elements(&self) -> [Felt; 8] {
-        let words = [self.tag, self.commitment];
+        let words = [self.tag, self.comm];
         Word::words_as_elements(&words).try_into().unwrap()
     }
 
@@ -299,7 +318,7 @@ impl PrecompileSponge {
     /// Absorbs a precompile commitment into the rate, updating the capacity.
     pub fn absorb(&mut self, commitment: PrecompileCommitment) {
         let mut state =
-            Word::words_as_elements(&[self.capacity, commitment.tag, commitment.commitment])
+            Word::words_as_elements(&[self.capacity, commitment.tag(), commitment.comm_calldata()])
                 .try_into()
                 .unwrap();
         Rpo256::apply_permutation(&mut state);
