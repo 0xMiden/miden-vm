@@ -2,7 +2,7 @@ use miden_air::{
     RowIndex,
     trace::{LOG_PRECOMPILE_LABEL, chiplets::hasher::DIGEST_RANGE, main_trace::MainTrace},
 };
-use miden_core::{Felt, OPCODE_LOGPRECOMPILE, Word, precompile::PrecompileTranscriptState};
+use miden_core::{Felt, OPCODE_LOGPRECOMPILE, precompile::PrecompileTranscriptState};
 
 use super::{
     FieldElement, build_ace_memory_read_element_request, build_ace_memory_read_word_request,
@@ -286,8 +286,8 @@ fn build_log_precompile_capacity_remove<E: FieldElement<BaseField = Felt>>(
 ) -> E {
     // The previous transcript state is the capacity word provided non-deterministically in the
     // helper registers, offset by 1 to account for the hasher address
-    let state_word: Word = [1, 2, 3, 4].map(|idx| main_trace.helper_register(idx, row)).into();
-    let state = PrecompileTranscriptState::from(state_word);
+    let state: PrecompileTranscriptState =
+        [1, 2, 3, 4].map(|idx| main_trace.helper_register(idx, row)).into();
 
     let message = LogPrecompileMessage { state };
     let value = message.value(alphas);
@@ -306,8 +306,8 @@ fn build_log_precompile_capacity_insert<E: FieldElement<BaseField = Felt>>(
     _debugger: &mut BusDebugger<E>,
 ) -> E {
     // The next transcript state was written in the next row as a Word at index 8..12 (reversed)
-    let state_word: Word = [11, 10, 9, 8].map(|idx| main_trace.stack_element(idx, row + 1)).into();
-    let state = PrecompileTranscriptState::from(state_word);
+    let state: PrecompileTranscriptState =
+        [11, 10, 9, 8].map(|idx| main_trace.stack_element(idx, row + 1)).into();
 
     let message = LogPrecompileMessage { state };
     let value = message.value(alphas);

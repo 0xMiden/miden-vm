@@ -379,7 +379,7 @@ impl Deserializable for PublicInputs {
         let stack_inputs = StackInputs::read_from(source)?;
         let stack_outputs = StackOutputs::read_from(source)?;
         // TODO: Read transcript state after recursion supports it.
-        // let precompile_transcript_state = PrecompileTranscriptState::read_from(source)?;
+        // let precompile_transcript_state = Word::read_from(source)?;
         let precompile_transcript_state = PrecompileTranscriptState::default();
 
         Ok(PublicInputs {

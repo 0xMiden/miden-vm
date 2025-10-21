@@ -124,89 +124,15 @@ impl Deserializable for PrecompileRequest {
 // PRECOMPILE TRANSCRIPT TYPES
 // ================================================================================================
 
-/// Newtype representing the precompile transcript state (sponge capacity word).
-#[repr(transparent)]
-#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct PrecompileTranscriptState(Word);
+/// Type alias representing the precompile transcript state (sponge capacity word).
+///
+/// This is simply a [`Word`] used to track the evolving state of the precompile transcript sponge.
+pub type PrecompileTranscriptState = Word;
 
-impl PrecompileTranscriptState {
-    /// Creates a transcript state from the provided word.
-    pub fn new(state: Word) -> Self {
-        Self(state)
-    }
-
-    /// Returns the underlying word representation.
-    pub fn into_word(self) -> Word {
-        self.0
-    }
-}
-
-impl From<Word> for PrecompileTranscriptState {
-    fn from(word: Word) -> Self {
-        Self(word)
-    }
-}
-
-impl From<PrecompileTranscriptState> for Word {
-    fn from(state: PrecompileTranscriptState) -> Self {
-        state.0
-    }
-}
-
-impl From<PrecompileTranscriptState> for [Felt; 4] {
-    fn from(state: PrecompileTranscriptState) -> Self {
-        state.0.into()
-    }
-}
-
-impl Serializable for PrecompileTranscriptState {
-    fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        self.0.write_into(target);
-    }
-}
-
-impl Deserializable for PrecompileTranscriptState {
-    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        Word::read_from(source).map(Self)
-    }
-}
-
-/// Newtype representing the finalized transcript digest.
-#[repr(transparent)]
-#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct PrecompileTranscriptDigest(Word);
-
-impl From<Word> for PrecompileTranscriptDigest {
-    fn from(word: Word) -> Self {
-        Self(word)
-    }
-}
-
-impl From<PrecompileTranscriptDigest> for Word {
-    fn from(digest: PrecompileTranscriptDigest) -> Self {
-        digest.0
-    }
-}
-
-impl From<PrecompileTranscriptDigest> for [Felt; 4] {
-    fn from(digest: PrecompileTranscriptDigest) -> Self {
-        digest.0.into()
-    }
-}
-
-impl Serializable for PrecompileTranscriptDigest {
-    fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        self.0.write_into(target);
-    }
-}
-
-impl Deserializable for PrecompileTranscriptDigest {
-    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        Word::read_from(source).map(Self)
-    }
-}
+/// Type alias representing the finalized transcript digest.
+///
+/// This is simply a [`Word`] representing the final digest of all precompile commitments.
+pub type PrecompileTranscriptDigest = Word;
 
 // PRECOMPILE COMMITMENT
 // ================================================================================================
@@ -396,12 +322,12 @@ impl PrecompileTranscript {
 
     /// Creates a transcript from an existing state (for VM operations like `log_precompile`).
     pub fn from_state(state: PrecompileTranscriptState) -> Self {
-        Self { state: state.into() }
+        Self { state }
     }
 
     /// Returns the current transcript state (capacity word).
     pub fn state(&self) -> PrecompileTranscriptState {
-        PrecompileTranscriptState::from(self.state)
+        self.state
     }
 
     /// Records a precompile commitment into the transcript, updating the state.
@@ -430,7 +356,7 @@ impl PrecompileTranscript {
             .try_into()
             .unwrap();
         Rpo256::apply_permutation(&mut state);
-        PrecompileTranscriptDigest::from(Word::new(state[4..8].try_into().unwrap()))
+        PrecompileTranscriptDigest::new(state[4..8].try_into().unwrap())
     }
 }
 
