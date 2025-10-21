@@ -63,7 +63,8 @@ end
 #! - `ptr_pk`: word-aligned memory address containing 33-byte public key
 #! - `ptr_digest`: word-aligned memory address containing 32-byte digest
 #! - `ptr_sig`: word-aligned memory address containing 66-byte signature
-#! - `COMM`: `Rpo256(Rpo256(Rpo256(pk) || Rpo256(digest)) || Rpo256(sig))`
+#! - `COMM`: commitment to calldata computed as
+#!       `Rpo256(Rpo256(Rpo256(pk) || Rpo256(digest)) || Rpo256(sig))`
 #! - `TAG`: `[ECDSA_VERIFY_EVENT, result, 0, 0]`
 #! - `result`: 1 if signature is valid, 0 if invalid
 export.verify_impl
