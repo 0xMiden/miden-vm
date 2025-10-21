@@ -329,6 +329,11 @@ pub struct PublicInputs {
 impl PublicInputs {
     /// Creates a new instance of `PublicInputs` from program information, stack inputs and outputs,
     /// and the precompile sponge state.
+    ///
+    /// ## TODO:
+    /// The `precompile_sponge` argument is currently not serialized/enforced in recursion.
+    /// It is accepted here to preserve a stable interface as enforcement is introduced in future
+    /// releases.
     pub fn new(
         program_info: ProgramInfo,
         stack_inputs: StackInputs,

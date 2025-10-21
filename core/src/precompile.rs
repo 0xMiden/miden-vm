@@ -137,7 +137,7 @@ impl Deserializable for PrecompileRequest {
 /// - **First element**: The [`EventId`] from the corresponding `EventHandler`
 /// - **Remaining 3 elements**: Available for precompile-specific metadata (e.g., `len_bytes` for
 ///   hash functions to distinguish actual data from padding)
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PrecompileCommitment {
     tag: Word,
     comm: Word,
@@ -325,6 +325,16 @@ impl PrecompileSponge {
         self.capacity = Word::new(state[0..4].try_into().unwrap());
     }
 
+    /// Absorbs a precompile commitment given directly as (`TAG`, `COMM`) words.
+    ///
+    /// This is a convenience for callers that already have the tag and calldata commitment
+    /// without constructing a [`PrecompileCommitment`].
+    pub fn absorb_tag_comm(&mut self, tag: Word, comm: Word) {
+        let mut state = Word::words_as_elements(&[self.capacity, tag, comm]).try_into().unwrap();
+        Rpo256::apply_permutation(&mut state);
+        self.capacity = Word::new(state[0..4].try_into().unwrap());
+    }
+
     /// Squeezes the sponge with zero rate to extract a digest (sequential commitment to all
     /// absorbed requests).
     pub fn finalize(self) -> Word {
@@ -347,17 +357,18 @@ impl From<PrecompileSponge> for Word {
 
 /// Type alias for precompile errors.
 ///
-/// This allows custom error types to be used by precompile verifiers while maintaining
-/// a consistent interface. Similar to EventError, this provides flexibility for
-/// different precompile implementations to define their own specific error types.
+/// Verifiers should return informative, structured errors (e.g., using `thiserror`) so callers
+/// can surface meaningful diagnostics.
 pub type PrecompileError = Box<dyn Error + Send + Sync + 'static>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum PrecompileVerificationError {
-    #[error("no verifier found for request at index {index} with event ID {event_id}")]
+    #[error(
+        "no verifier found for request #{index} (event {event_id}); register a matching verifier in PrecompileVerifierRegistry"
+    )]
     VerifierNotFound { index: usize, event_id: EventId },
 
-    #[error("verification error when verifying request at index {index}, with event ID {event_id}")]
+    #[error("verification error for request #{index} (event {event_id})")]
     PrecompileError {
         index: usize,
         event_id: EventId,

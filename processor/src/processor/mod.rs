@@ -404,6 +404,10 @@ pub trait OperationHelperRegisters {
 
     /// The helper registers for the LogPrecompile operation.
     /// Contains the hasher address and the previous capacity (CAP_PREV).
+    ///
+    /// Layout:
+    /// - `h0` = hasher trace row address at which the permutation starts
+    /// - `h1..h4` = `CAP_PREV[0..3]` (capacity elements in sequential order)
     fn op_log_precompile_registers(addr: Felt, cap_prev: Word) -> [Felt; NUM_USER_OP_HELPERS];
 
     /// The helper registers for the MPVerify and MrUpdate operation.

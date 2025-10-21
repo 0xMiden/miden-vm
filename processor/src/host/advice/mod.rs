@@ -339,6 +339,9 @@ impl AdviceProvider {
     // --------------------------------------------------------------------------------------------
 
     /// Returns a reference to the precompile requests.
+    ///
+    /// Ordering is the same as the order in which requests are issued during execution. This
+    /// ordering is relied upon when recomputing the precompile sponge during verification.
     pub fn precompile_requests(&self) -> &[PrecompileRequest] {
         &self.precompile_requests
     }
@@ -349,6 +352,14 @@ impl AdviceProvider {
         I: IntoIterator<Item = PrecompileRequest>,
     {
         self.precompile_requests.extend(iter);
+    }
+
+    /// Moves all accumulated precompile requests out of this provider, leaving it empty.
+    ///
+    /// Intended for proof packaging, where requests are serialized into the proof and no longer
+    /// needed in the provider after consumption.
+    pub fn take_precompile_requests(&mut self) -> Vec<PrecompileRequest> {
+        core::mem::take(&mut self.precompile_requests)
     }
 
     // MUTATORS

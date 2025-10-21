@@ -1994,7 +1994,8 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
 
     #[inline(always)]
     fn op_log_precompile_registers(addr: Felt, cap_prev: Word) -> [Felt; NUM_USER_OP_HELPERS] {
-        // Helper registers h0-h4 contain: [addr, CAP_PREV[0..3]]
+        // Helper registers layout for log_precompile:
+        // h0-h4 contain: [addr, CAP_PREV[0..3]]
         [addr, cap_prev[0], cap_prev[1], cap_prev[2], cap_prev[3], ZERO]
     }
 }

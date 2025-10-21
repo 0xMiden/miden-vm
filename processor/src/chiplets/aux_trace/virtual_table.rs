@@ -277,8 +277,8 @@ impl core::fmt::Display for LogPrecompileMessage {
 
 /// Removes the previous sponge capacity (`CAP_PREV`) from the virtual table bus.
 ///
-/// Helper registers store `CAP_PREV` at indices 1..=4 (index 0 is the hasher address), which is
-/// why we offset by 1 when reading them here.
+/// Helper register layout for `log_precompile` is codified as:
+/// - `h0` = hasher address, `h1..h4` = `CAP_PREV[0..3]`.
 fn build_log_precompile_capacity_remove<E: FieldElement<BaseField = Felt>>(
     main_trace: &MainTrace,
     row: RowIndex,

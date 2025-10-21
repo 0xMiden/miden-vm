@@ -79,19 +79,10 @@ pub fn verify(
     Ok(security_level)
 }
 
-/// Identical to [`verify`], with additional verification of any precompile requests made during the
-/// VM execution. The resulting precompile digest is returned, which can be compared
-/// against the commitment computed by the VM.
-///
-/// # Returns
-/// Returns a tuple `(security_level, precompile_digest)` where:
-/// - `security_level`: The security level (in bits) of the verified proof
-/// - `precompile_digest`: A [`Word`] containing the finalized digest of all precompile requests,
-///   computed by recomputing and absorbing each precompile commitment into an RPO256 sponge
-///
-/// # Errors
-/// Returns any error produced by [`verify`], as well as any errors resulting from precompile
-/// verification.
+/// Identical to [`verify`], and additionally verifies any precompile requests using the provided
+/// [`PrecompileVerifierRegistry`]. Returns `(security_level, precompile_digest)` where
+/// `precompile_digest` summarizes all verified precompile requests. The digest can be compared to
+/// a program-level commitment if desired; details of public input enforcement may evolve.
 #[tracing::instrument("verify_program", skip_all)]
 pub fn verify_with_precompiles(
     program_info: ProgramInfo,

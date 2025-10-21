@@ -41,7 +41,7 @@ coordinate to maintain a sequential commitment to every precompile invocation.
 
 ## Related reading
 
-- [`log_precompile` operation](./crypto_ops.md#log_precompile) – stack behaviour and messages.
+- [`log_precompile` instruction](../../user_docs/assembly/instruction_reference.md) – stack behaviour and semantics.
 - `PrecompileSponge` implementation (`core/src/precompile.rs`) – sponge details in the codebase.
 - Kernel ROM chiplet initialization pattern (`../chiplets/kernel_rom.md`) – example use of variable‑length public inputs to initialize a chiplet/aux column via the bus.
 
