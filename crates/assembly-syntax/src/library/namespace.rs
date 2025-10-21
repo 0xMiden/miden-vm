@@ -42,7 +42,7 @@ pub enum LibraryNamespaceError {
 #[repr(u8)]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_serde_test_macros::serde_test(winter_serde(true))
+    miden_test_serde_macros::serde_test(winter_serde(true))
 )]
 pub enum LibraryNamespace {
     /// A reserved namespace for kernel modules

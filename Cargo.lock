@@ -1354,7 +1354,7 @@ dependencies = [
  "log",
  "miden-core",
  "miden-debug-types",
- "miden-serde-test-macros",
+ "miden-test-serde-macros",
  "miden-utils-diagnostics",
  "midenc-hir-type",
  "pretty_assertions",
@@ -1380,7 +1380,7 @@ dependencies = [
  "miden-crypto",
  "miden-debug-types",
  "miden-formatting",
- "miden-serde-test-macros",
+ "miden-test-serde-macros",
  "miden-utils-indexing",
  "num-derive",
  "num-traits",
@@ -1466,7 +1466,7 @@ dependencies = [
  "derive_more",
  "miden-assembly-syntax",
  "miden-core",
- "miden-serde-test-macros",
+ "miden-test-serde-macros",
  "proptest",
  "proptest-derive",
  "serde",
@@ -1559,18 +1559,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "miden-serde-test-macros"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "proptest",
- "proptest-derive",
- "quote",
- "serde",
- "syn 1.0.109",
-]
-
-[[package]]
 name = "miden-stdlib"
 version = "0.19.0"
 dependencies = [
@@ -1598,6 +1586,18 @@ dependencies = [
  "thiserror",
  "winter-air",
  "winter-fri",
+]
+
+[[package]]
+name = "miden-test-serde-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "proptest",
+ "proptest-derive",
+ "quote",
+ "serde",
+ "syn 1.0.109",
 ]
 
 [[package]]
