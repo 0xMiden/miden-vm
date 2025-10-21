@@ -207,31 +207,189 @@ impl Arbitrary for MastForest {
             ..Default::default()
         };
 
-        // 1) Generate a Vec<BasicBlockNode> with length in `params.blocks`
+        // Generate nodes in a way that respects topological ordering
         (
-            prop::collection::vec(any_with::<BasicBlockNode>(bb_params), params.blocks.clone()),
-            prop::collection::vec(any::<Decorator>(), params.decorators as usize..=params.decorators as usize)
+            // Generate basic blocks first (they have no dependencies)
+            prop::collection::vec(
+                any_with::<BasicBlockNode>(bb_params.clone()),
+                1..=*params.blocks.end(),
+            ),
+            // Generate decorators
+            prop::collection::vec(
+                any::<Decorator>(),
+                params.decorators as usize..=params.decorators as usize,
+            ),
+            // Generate control flow parameters
+            any::<(usize, usize, usize, usize, usize, usize)>(), // counts for different node types
         )
-            // 2) Map concrete blocks -> build a concrete MastForest
-            .prop_map(move |(blocks, decorators)| {
-                let mut forest = MastForest::new();
+            .prop_flat_map(
+                move |(
+                    basic_blocks,
+                    decorators,
+                    (num_joins, num_splits, num_loops, num_calls, num_externals, num_dyns),
+                )| {
+                    let num_basic_blocks = basic_blocks.len();
 
-                // Pre-populate the decorator ID space so referenced IDs are valid.
-                // Generate all decorator types for more comprehensive testing
-                for decorator in decorators {
+                    // Ensure we have enough basic blocks for parents to reference
+                    let max_parent_nodes = num_basic_blocks.saturating_sub(1);
+                    let num_joins = num_joins.min(max_parent_nodes);
+                    let num_splits = num_splits.min(max_parent_nodes);
+                    let num_loops = num_loops.min(num_basic_blocks);
+                    let num_calls = num_calls.min(num_basic_blocks);
+
+                    // Generate indices for creating parent nodes
+                    (
+                        Just(basic_blocks),
+                        Just(decorators),
+                        Just((
+                            num_joins,
+                            num_splits,
+                            num_loops,
+                            num_calls,
+                            num_externals,
+                            num_dyns,
+                        )),
+                        // Generate indices for join nodes (need 2 children each)
+                        prop::collection::vec(any::<(usize, usize)>(), num_joins..=num_joins)
+                            .prop_map(move |pairs| {
+                                pairs
+                                    .into_iter()
+                                    .map(|(a, b)| (a % num_basic_blocks, b % num_basic_blocks))
+                                    .collect::<Vec<_>>()
+                            }),
+                        // Generate indices for split nodes (need 2 children each)
+                        prop::collection::vec(any::<(usize, usize)>(), num_splits..=num_splits)
+                            .prop_map(move |pairs| {
+                                pairs
+                                    .into_iter()
+                                    .map(|(a, b)| (a % num_basic_blocks, b % num_basic_blocks))
+                                    .collect::<Vec<_>>()
+                            }),
+                        // Generate indices for loop nodes (need 1 child each)
+                        prop::collection::vec(any::<usize>(), num_loops..=num_loops).prop_map(
+                            move |indices| {
+                                indices
+                                    .into_iter()
+                                    .map(|i| i % num_basic_blocks)
+                                    .collect::<Vec<_>>()
+                            },
+                        ),
+                        // Generate indices for call nodes (need 1 child each)
+                        prop::collection::vec(any::<usize>(), num_calls..=num_calls).prop_map(
+                            move |indices| {
+                                indices
+                                    .into_iter()
+                                    .map(|i| i % num_basic_blocks)
+                                    .collect::<Vec<_>>()
+                            },
+                        ),
+                    )
+                },
+            )
+            .prop_map(
+                move |(
+                    basic_blocks,
+                    decorators,
+                    (_num_joins, _num_splits, _num_loops, _num_calls, num_externals, num_dyns),
+                    join_pairs,
+                    split_pairs,
+                    loop_indices,
+                    call_indices,
+                )| {
+                    let mut forest = MastForest::new();
+
+                    // 1) Add all decorators first
+                    for decorator in decorators {
+                        forest.add_decorator(decorator).expect("Failed to add decorator");
+                    }
+
+                    // 2) Add basic blocks and collect their IDs
+                    let mut basic_block_ids = Vec::new();
+                    for block in basic_blocks {
+                        let node_id = forest.add_node(block).expect("Failed to add basic block");
+                        basic_block_ids.push(node_id);
+                    }
+
+                    // 3) Add control flow nodes in topological order (children already exist)
+                    let mut all_node_ids = basic_block_ids.clone();
+
+                    // Add join nodes
+                    for &(left_idx, right_idx) in &join_pairs {
+                        if left_idx < all_node_ids.len() && right_idx < all_node_ids.len() {
+                            let left_id = all_node_ids[left_idx];
+                            let right_id = all_node_ids[right_idx];
+                            if let Ok(join_id) = forest.add_join(left_id, right_id) {
+                                all_node_ids.push(join_id);
+                            }
+                        }
+                    }
+
+                    // Add split nodes
+                    for &(true_idx, false_idx) in &split_pairs {
+                        if true_idx < all_node_ids.len() && false_idx < all_node_ids.len() {
+                            let true_id = all_node_ids[true_idx];
+                            let false_id = all_node_ids[false_idx];
+                            if let Ok(split_id) = forest.add_split(true_id, false_id) {
+                                all_node_ids.push(split_id);
+                            }
+                        }
+                    }
+
+                    // Add loop nodes
+                    for &body_idx in &loop_indices {
+                        if body_idx < all_node_ids.len() {
+                            let body_id = all_node_ids[body_idx];
+                            if let Ok(loop_id) = forest.add_loop(body_id) {
+                                all_node_ids.push(loop_id);
+                            }
+                        }
+                    }
+
+                    // Add call nodes (mix of regular calls and syscalls)
+                    for (i, &callee_idx) in call_indices.iter().enumerate() {
+                        if callee_idx < all_node_ids.len() {
+                            let callee_id = all_node_ids[callee_idx];
+                            let call_id = if i % 3 == 0 {
+                                // Make every 3rd call a syscall
+                                forest
+                                    .add_syscall(callee_id)
+                                    .unwrap_or_else(|_| forest.add_call(callee_id).unwrap())
+                            } else {
+                                forest.add_call(callee_id).unwrap()
+                            };
+                            all_node_ids.push(call_id);
+                        }
+                    }
+
+                    // Add external nodes
+                    for _ in 0..num_externals {
+                        if let Ok(external_id) = forest.add_external(Word::default()) {
+                            all_node_ids.push(external_id);
+                        }
+                    }
+
+                    // Add dyn nodes (mix of dyn and dyncall)
+                    for i in 0..num_dyns {
+                        let dyn_id = if i % 2 == 0 {
+                            forest.add_dyn().unwrap()
+                        } else {
+                            forest.add_dyncall().unwrap()
+                        };
+                        all_node_ids.push(dyn_id);
+                    }
+
+                    // 4) Make some nodes roots (but not all, to test internal nodes)
+                    let num_roots = (all_node_ids.len() / 3).max(1); // Make roughly 1/3 of nodes roots
+                    for (i, &node_id) in all_node_ids.iter().enumerate() {
+                        if i % (all_node_ids.len() / num_roots.max(1)) == 0 {
+                            forest.make_root(node_id);
+                        }
+                    }
+
                     forest
-                        .add_decorator(decorator)
-                        .expect("Failed to add decorator");
-                }
-
-                // Insert the generated blocks into the forest
-                for block in blocks {
-                    let node_id = forest.add_node(block).expect("Failed to add block");
-                    forest.make_root(node_id);
-                }
-
-                forest
-            }).boxed()
+                },
+            )
+            .boxed()
     }
 }
 
