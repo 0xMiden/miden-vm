@@ -70,12 +70,7 @@ impl ExecutionProof {
     // SERIALIZATION / DESERIALIZATION
     // --------------------------------------------------------------------------------------------
 
-    /// Serializes this proof into a vector of bytes.
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        self.write_into(&mut bytes);
-        bytes
-    }
+    // NOTE: Removed manual to_bytes() in favor of Serializable::to_bytes() to avoid duplication.
 
     /// Reads the source bytes, parsing a new proof instance.
     pub fn from_bytes(source: &[u8]) -> Result<Self, DeserializationError> {
