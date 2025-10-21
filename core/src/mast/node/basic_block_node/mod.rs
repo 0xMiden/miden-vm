@@ -785,11 +785,6 @@ impl RawToPaddedPrefix {
         }
 
         // Sentinel for r == raw_ops
-        //
-        // Some decorators have an operation index equal to the length of the
-        // operations array, to ensure they are executed at the end of the block
-        // (since the semantics of the decorator index is that it must be executed
-        // before the operation index it points to).
         v.push(pads_so_far);
         RawToPaddedPrefix(v)
     }
@@ -802,6 +797,13 @@ impl RawToPaddedPrefix {
 }
 
 /// Get the number of padding operations before raw index r.
+///
+/// ## Sentinel Access
+///
+/// Some decorators have an operation index equal to the length of the
+/// operations array, to ensure they are executed at the end of the block
+/// (since the semantics of the decorator index is that it must be executed
+/// before the operation index it points to).
 impl core::ops::Index<usize> for RawToPaddedPrefix {
     type Output = usize;
     #[inline]
@@ -866,11 +868,6 @@ impl PaddedToRawPrefix {
         }
 
         // Sentinel at p == padded_ops
-        //
-        // Some decorators have an operation index equal to the length of the
-        // operations array, to ensure they are executed at the end of the block
-        // (since the semantics of the decorator index is that it must be executed
-        // before the operation index it points to).
         v.push(pads_so_far);
 
         PaddedToRawPrefix(v)
@@ -878,6 +875,13 @@ impl PaddedToRawPrefix {
 }
 
 /// Get the number of padding operations before padded index p.
+///
+/// ## Sentinel Access
+///
+/// Some decorators have an operation index equal to the length of the
+/// operations array, to ensure they are executed at the end of the block
+/// (since the semantics of the decorator index is that it must be executed
+/// before the operation index it points to).
 impl core::ops::Index<usize> for PaddedToRawPrefix {
     type Output = usize;
     #[inline]
