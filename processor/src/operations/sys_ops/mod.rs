@@ -154,9 +154,10 @@ impl Process {
         } else {
             let clk = process.clk();
             let mutations = host.on_event(&process).map_err(|err| {
-                let event = host.resolve_event(event_id).cloned().unwrap_or_else(|| {
-                    EventName::from_string(format!("unknown event (ID: {})", event_id))
-                });
+                let event = host
+                    .resolve_event(event_id)
+                    .cloned()
+                    .unwrap_or_else(|| EventName::unknown(event_id));
                 ExecutionError::event_error(err, event, err_ctx)
             })?;
             self.advice

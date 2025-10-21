@@ -173,11 +173,12 @@ where
         }
 
         // EventError is a `Box` so we can define the error anonymously.
+        // Note: the caller (op_emit) will enrich this error with the event name via resolve_event().
         #[derive(Debug, thiserror::Error)]
-        #[error("no event handler registered for event ID {0}")]
-        struct UnhandledEvent(EventId);
+        #[error("no event handler registered")]
+        struct UnhandledEvent;
 
-        Err(UnhandledEvent(event_id).into())
+        Err(UnhandledEvent.into())
     }
 }
 

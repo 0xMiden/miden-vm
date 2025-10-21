@@ -5,7 +5,7 @@ use core::fmt::{Display, Formatter};
 use serde::{Deserialize, Serialize};
 use winter_utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
 
-use crate::{Felt, utils::hash_string_to_word};
+use crate::{Felt, sys_events::SystemEvent, utils::hash_string_to_word};
 
 // EVENT ID
 // ================================================================================================
@@ -45,6 +45,9 @@ impl EventId {
     ///
     /// This ensures that identical event names always produce the same event ID, while
     /// providing good distribution properties to minimize collisions between different names.
+    ///
+    /// # Panics
+    /// Panics if the computed event ID collides with a reserved system event ID (0-255).
     pub fn from_name(name: impl AsRef<str>) -> Self {
         let digest_word = hash_string_to_word(name.as_ref());
         let event_id = Self(digest_word[0]);
@@ -106,7 +109,7 @@ impl core::hash::Hash for EventId {
 
 impl Display for EventId {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
-        write!(f, "{}", self.0)
+        core::fmt::Display::fmt(&self.0, f)
     }
 }
 
@@ -115,49 +118,105 @@ impl Display for EventId {
 
 /// A human-readable name for an event.
 ///
-/// [`EventName`] is a lightweight wrapper around event name strings, used for:
+/// [`EventName`] is used for:
 /// - Event handler registration (EventId computed from name at registration time)
 /// - Error messages and debugging
 /// - Resolving EventIds back to names via the event registry
 ///
 /// For event identification during execution (e.g., reading from the stack), use [`EventId`]
 /// directly. Names can be looked up via the event registry when needed for error reporting.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+///
+/// The enum has three variants:
+/// - [`Event`](EventName::Event): For named user events, computes EventId from the name hash
+/// - [`System`](EventName::System): For system events (IDs 0-255), preserves the system EventId
+/// - [`Unknown`](EventName::Unknown): For events without registered names, preserves the original EventId
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
     miden_serde_test_macros::serde_test(winter_serde(true))
 )]
-pub struct EventName(Cow<'static, str>);
+pub enum EventName {
+    /// A named event
+    Event(Cow<'static, str>),
+    /// A system event (IDs 0-255)
+    System(EventId),
+    /// An unknown event with only an ID available
+    Unknown(EventId),
+}
 
 impl EventName {
     /// Creates an EventName from a static string.
     ///
     /// This is the primary constructor for compile-time event name constants.
     pub const fn new(name: &'static str) -> Self {
-        Self(Cow::Borrowed(name))
+        Self::Event(Cow::Borrowed(name))
     }
 
     /// Creates an EventName from an owned String.
     ///
     /// Use this for dynamically constructed event names (e.g., in error messages).
     pub fn from_string(name: String) -> Self {
-        Self(Cow::Owned(name))
+        Self::Event(Cow::Owned(name))
+    }
+
+    /// Creates an EventName for an unknown event, preserving its EventId.
+    ///
+    /// This is used when an event has no registered name but we still want to report its ID.
+    /// The returned EventName will display as "unknown" and `to_event_id()` will return the
+    /// original event_id (not a hash of the string "unknown").
+    pub const fn unknown(event_id: EventId) -> Self {
+        Self::Unknown(event_id)
+    }
+
+    /// Creates an EventName for a system event.
+    ///
+    /// System events use their enum discriminant (0-255) as their EventId.
+    pub const fn system(sys_event: SystemEvent) -> Self {
+        Self::System(EventId::from_u64(sys_event as u64))
     }
 
     /// Returns the event name as a string slice.
     pub fn as_str(&self) -> &str {
-        &self.0
+        match self {
+            Self::Event(cow) => cow.as_ref(),
+            Self::System(event_id) => {
+                // Try to convert EventId back to SystemEvent to get the name
+                SystemEvent::try_from(*event_id)
+                    .map(|sys_event| sys_event.name_str())
+                    .unwrap_or("system")
+            },
+            Self::Unknown(_) => "unknown",
+        }
     }
 
+    /// Returns the [`EventId`] for this event name.
+    ///
+    /// - For [`Event`](EventName::Event) events, computes the EventId by hashing the name
+    /// - For [`System`](EventName::System) events, returns the system event ID (0-255)
+    /// - For [`Unknown`](EventName::Unknown) events, returns the preserved EventId
     pub fn to_event_id(&self) -> EventId {
-        EventId::from_name(self.as_str())
+        match self {
+            Self::Event(name) => EventId::from_name(name.as_ref()),
+            Self::System(event_id) => *event_id,
+            Self::Unknown(event_id) => *event_id,
+        }
     }
 }
 
 impl Display for EventName {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
-        write!(f, "{}", self.0)
+        match self {
+            Self::Event(name) => write!(f, "{}", name),
+            Self::System(event_id) => {
+                // Try to convert EventId back to SystemEvent to get the name
+                match SystemEvent::try_from(*event_id) {
+                    Ok(sys_event) => write!(f, "{}", sys_event.name_str()),
+                    Err(_) => write!(f, "system event (ID: {})", event_id),
+                }
+            },
+            Self::Unknown(event_id) => write!(f, "unknown event (ID: {})", event_id),
+        }
     }
 }
 
@@ -178,20 +237,43 @@ impl Deserializable for EventId {
 
 impl Serializable for EventName {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        // Serialize as a length-prefixed string
-        target.write_usize(self.as_str().len());
-        target.write_bytes(self.as_str().as_bytes());
+        match self {
+            Self::Event(name) => {
+                target.write_u8(0);
+                name.write_into(target)
+            },
+            Self::System(event_id) => {
+                target.write_u8(1);
+                event_id.write_into(target);
+            },
+            Self::Unknown(event_id) => {
+                target.write_u8(2);
+                event_id.write_into(target);
+            },
+        }
     }
 }
 
 impl Deserializable for EventName {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let len = source.read_usize()?;
-        let bytes = source.read_vec(len)?;
-        let name = alloc::string::String::from_utf8(bytes).map_err(|_| {
-            DeserializationError::InvalidValue("invalid UTF-8 in event name".into())
-        })?;
-        Ok(Self::from_string(name))
+        let discriminant = source.read_u8()?;
+        match discriminant {
+            0 => {
+                let name = String::read_from(source)?;
+                Ok(Self::from_string(name))
+            },
+            1 => {
+                let event_id = EventId::read_from(source)?;
+                Ok(Self::System(event_id))
+            },
+            2 => {
+                let event_id = EventId::read_from(source)?;
+                Ok(Self::Unknown(event_id))
+            },
+            _ => Err(DeserializationError::InvalidValue(
+                alloc::format!("invalid EventName discriminant: {}", discriminant).into()
+            )),
+        }
     }
 }
 

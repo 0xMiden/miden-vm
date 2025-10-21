@@ -260,10 +260,10 @@ pub enum SystemEvent {
 }
 
 impl SystemEvent {
-    /// Returns the human-readable name of this system event.
+    /// Returns the human-readable name string for this system event.
     ///
     /// System event names are prefixed with `sys::` to distinguish them from user-defined events.
-    pub const fn event_name(&self) -> &'static str {
+    pub const fn name_str(&self) -> &'static str {
         match self {
             Self::MerkleNodeMerge => "sys::merkle_node_merge",
             Self::MerkleNodeToStack => "sys::merkle_node_to_stack",
@@ -282,6 +282,13 @@ impl SystemEvent {
             Self::HqwordToMap => "sys::hqword_to_map",
             Self::HpermToMap => "sys::hperm_to_map",
         }
+    }
+
+    /// Returns the human-readable name of this system event as an [`EventName`].
+    ///
+    /// System event names are prefixed with `sys::` to distinguish them from user-defined events.
+    pub const fn event_name(&self) -> EventName {
+        EventName::system(*self)
     }
 }
 
@@ -323,7 +330,7 @@ impl From<SystemEvent> for EventId {
 
 impl From<SystemEvent> for EventName {
     fn from(system_event: SystemEvent) -> Self {
-        EventName::new(system_event.event_name())
+        system_event.event_name()
     }
 }
 
@@ -359,6 +366,7 @@ impl fmt::Display for SystemEvent {
 #[cfg(test)]
 mod test {
     use super::*;
+    use alloc::string::ToString;
 
     #[test]
     fn test_try_from() {
@@ -409,7 +417,7 @@ mod test {
         for id in 0..=15u64 {
             let event_id = EventId::from_u64(id);
             if let Ok(system_event) = SystemEvent::try_from(event_id) {
-                let name = system_event.event_name();
+                let name = system_event.event_name().to_string();
                 assert!(
                     name.starts_with("sys::"),
                     "System event name should start with 'sys::': {}",
