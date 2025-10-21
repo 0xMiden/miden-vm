@@ -300,7 +300,7 @@ $$
 
 ## LOG_PRECOMPILE
 
-The `log_precompile` operation logs a precompile event by absorbing two user-provided words (`TAG` and `COMM`) into the precompile sponge. Initialization and boundary enforcement are handled via variable‑length public inputs; see [Precompile flow](./precompiles.md) for a high‑level overview. This section concentrates on the stack interaction and bus messages.
+The `log_precompile` operation logs a precompile event by recording two user-provided words (`TAG` and `COMM`) into the precompile transcript (implemented via an RPO sponge). Initialization and boundary enforcement are handled via variable‑length public inputs; see [Precompile flow](./precompiles.md) for a high‑level overview. This section concentrates on the stack interaction and bus messages.
 
 ### Operation Overview
 
@@ -309,23 +309,23 @@ The stack is expected to be arranged as `[COMM, TAG, PAD, ...]`, where
 - `TAG` is a word identifying the precompile, which may contain request-specific metadata,
 - `PAD` is a word that will get overwritten in the next cycle.
 
-Additionally, the processor maintains a persistent precompile sponge capacity word `CAP` that is updated with each `LOG_PRECOMPILE` invocation. This word is provided non-deterministically via helper registers and is denoted `CAP_PREV`. The virtual table bus links each removal to a matching insertion, ensuring a single, consistent capacity sequence.
+Additionally, the processor maintains a persistent precompile transcript state word `CAP` (the sponge capacity) that is updated with each `LOG_PRECOMPILE` invocation. This word is provided non-deterministically via helper registers and is denoted `CAP_PREV`. The virtual table bus links each removal to a matching insertion, ensuring a single, consistent state sequence.
 
 The operation evaluates `[CAP_NEXT, R0, R1] = RPO([CAP_PREV, TAG, COMM])`, with the following stack transition
 
 ```
 Before:  [COMM, TAG, PAD,      ...]
-After:   [R1,            R0,  CAP_NEXT, ...]
+After:   [R1,   R0,  CAP_NEXT, ...]
 ```
 
-The VM updates its internal precompile sponge capacity with `CAP_NEXT` using a bus as we describe below. The rate outputs `R0` and `R1` are transient; together with `CAP_NEXT`, they are typically dropped by the caller immediately after logging.
+The VM updates its internal precompile transcript state (`CAP_NEXT`) using a bus as we describe below. The rate outputs `R0` and `R1` are transient; together with `CAP_NEXT`, they are typically dropped by the caller immediately after logging.
 
 The operation uses the following helper registers:
 - $h_0$: Hasher chiplet row address
-- $h_1, h_2, h_3, h_4$: Previous capacity $\mathsf{CAP}_{prev}$
+- $h_1, h_2, h_3, h_4$: Previous capacity `CAP_PREV`
 
-Note: helper registers expose $\mathsf{CAP}_{prev}$ for bus constraints only; the VM maintains the
-capacity internally between invocations.
+Note: helper registers expose `CAP_PREV` for bus constraints only; the VM maintains the
+transcript state internally between invocations.
 
 ### Bus Communication
 
@@ -333,42 +333,36 @@ capacity internally between invocations.
 
 The following two messages are sent to the hasher chiplet, ensuring the validity of the resulting permutation. Let row $r$ be the cycle where `log_precompile` executes and $s_i$ denote the $i$-th stack column at that row (top of stack is $s_0$). The elements appearing on the bus are:
 
-\[
+$$
 \begin{aligned}
 \mathsf{CAP}^{\text{prev}}_i &= h_{i+1} &&\text{(helper registers)}\\
 \mathsf{TAG}_i &= s_{7-i} &&\text{(stack slots 4..7)}\\
 \mathsf{COMM}_i &= s_{3-i} &&\text{(stack slots 0..3)}
 \end{aligned}
 \qquad i \in \{0,1,2,3\}.
-\]
+$$
 
 The input message therefore reduces the RPO state in the canonical order `[CAP_PREV, TAG, COMM]`:
 
 $$
-v_{\text{input}} = \alpha_0 + \alpha_1 \cdot op_{linhash} + \alpha_2 \cdot h_0
- + \sum_{i=0}^{3} \alpha_{i+3} \cdot \mathsf{CAP}_{\text{prev}}_i
- + \sum_{i=0}^{3} \alpha_{i+7} \cdot \mathsf{TAG}_i
- + \sum_{i=0}^{3} \alpha_{i+11} \cdot \mathsf{COMM}_i.
+v_{\text{input}} = \alpha_0 + \alpha_1 \cdot op_{linhash} + \alpha_2 \cdot h_0 + \sum_{i=0}^{3} \alpha_{i+3} \cdot \mathsf{CAP}_{\text{prev},i} + \sum_{i=0}^{3} \alpha_{i+7} \cdot \mathsf{TAG}_i + \sum_{i=0}^{3} \alpha_{i+11} \cdot \mathsf{COMM}_i.
 $$
 
 Seven rows later, the `op_retstate` response provides the permuted state `[CAP_{next}, R0, R1]`. Denote the stack after the instruction by $s'_i$; the top twelve elements are `[R1, R0, CAP_NEXT]` in reverse order. Thus
 
-\[
+$$
 \begin{aligned}
 \mathsf{R}_1{}_i &= s'_{3-i},\\
 \mathsf{R}_0{}_i &= s'_{7-i},\\
 \mathsf{CAP}^{\text{next}}_i &= s'_{11-i},
 \end{aligned}
 \qquad i \in \{0,1,2,3\},
-\]
+$$
 
 and the response message is
 
-$$
-v_{\text{output}} = \alpha_0 + \alpha_1 \cdot op_{retstate} + \alpha_2 \cdot (h_0 + 7)
- + \sum_{i=0}^{3} \alpha_{i+4} \cdot \mathsf{CAP}^{\text{next}}_i
- + \sum_{i=0}^{3} \alpha_{i+8} \cdot \mathsf{R}_0{}_i
- + \sum_{i=0}^{3} \alpha_{i+12} \cdot \mathsf{R}_1{}_i.
+>$$
+v_{\text{output}} = \alpha_0 + \alpha_1 \cdot op_{retstate} + \alpha_2 \cdot (h_0 + 7) + \sum_{i=0}^{3} \alpha_{i+4} \cdot \mathsf{CAP}^{\text{next}}_i+ \sum_{i=0}^{3} \alpha_{i+8} \cdot \mathsf{R}_0{}_i + \sum_{i=0}^{3} \alpha_{i+12} \cdot \mathsf{R}_1{}_i.
 $$
 
 Using the above values, we can describe the constraint for the chiplet bus column as follows:
@@ -383,7 +377,7 @@ Given the similarity with the `HPERM` opcode which sends the same message, albei
 
 ### Capacity Initialization
 
-Inside the VM, the capacity is tracked via the virtual table bus: each update removes the previous entry before inserting the next one.
+Inside the VM, the transcript state (sponge capacity) is tracked via the virtual table bus: each update removes the previous entry before inserting the next one.
 
 We denote the messages for removing and inserting the message as
 >$$
@@ -399,18 +393,21 @@ The bus constraint is applied to the virtual table column as follows.
 b_{vtable}' \cdot v_{rem} = b_{vtable} \cdot v_{ins}
 $$
 
-To ensure the column accounts for the initial and final capacity, the verifier initializes the bus with variable‑length public inputs (see kernel ROM chiplet). More specifically, it constrains the final value of the bus to be equal to
+To ensure the column accounts for the initial and final transcript state, the verifier initializes the bus with variable‑length public inputs (see kernel ROM chiplet). More specifically, it constrains the first value of the bus to be equal to
+
 >$$
-b_{vtable}_0 = \frac{v_{ins, init}}{v_{rem, last}}
+b_{vtable,0} = \frac{v_{ins, init}}{v_{rem, last}}
 $$
 
-Usually, we initialize the capacity to the empty word `[0,0,0,0]`, though it may also be used to extend an existing running-capacity from a previous execution. The final capacity is provided to the verifier (as a variable‑length public input) and enforced via the boundary constraint.
+Usually, we initialize the transcript state to the empty word `[0,0,0,0]`, though it may also be used to extend an existing running state from a previous execution. The final transcript state is provided to the verifier (as a variable‑length public input) and enforced via the boundary constraint.
 The messages $v_{ins, init}$ and $v_{rem, last}$ are given by
+
 >$$
 v_{ins,init} = \alpha_0 + \alpha_1 \cdot op_{log\_precompile},
 $$
+
 >$$
 v_{rem,last} = \alpha_0 + \alpha_1 \cdot op_{log\_precompile} + \sum_{j=0}^{3} \alpha_{j+2} \cdot \mathsf{CAP\_FINAL}_j.
 $$
 
-The bus records only the sponge capacity; the VM never finalizes the digest internally. Instead, the verifier (or any external consumer) reconstructs the sponge from the recorded requests. By convention, when a digest is required, the sponge is finalized by absorbing two empty words and applying one more permutation—matching the fact that `log_precompile` discards the rate outputs (`R0`, `R1`) after each absorption.
+The bus records only the transcript state (sponge capacity); the VM never finalizes the digest internally. Instead, the verifier (or any external consumer) reconstructs the transcript from the recorded requests. By convention, when a digest is required, the transcript is finalized by absorbing two empty words and applying one more permutation—matching the fact that `log_precompile` discards the rate outputs (`R0`, `R1`) after each absorption.

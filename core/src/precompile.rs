@@ -17,31 +17,31 @@
 //!    - Computes the result non-deterministically using the host
 //!    - Creates a [`PrecompileCommitment`] binding inputs and outputs together
 //!    - Stores a [`PrecompileRequest`] containing the raw input data for later verification
-//!    - Absorbs the commitment into a [`PrecompileSponge`]
+//!    - Records the commitment into a [`PrecompileTranscript`]
 //!
 //! 2. **Request Storage**: All precompile requests are collected and included in the execution
 //!    proof.
 //!
-//! 3. **Proof Generation**: The prover generates a STARK proof of the VM execution. The
-//!    [`PrecompileSponge`] capacity is conceptually a public input, but is not currently enforced
-//!    by the Winterfell backend. Instead, capacity initialization/finality is enforced via
-//!    variable‑length public inputs that seed the relevant auxiliary column during verification.
+//! 3. **Proof Generation**: The prover generates a STARK proof of the VM execution. The final
+//!    [`PrecompileTranscript`] state (sponge capacity) is a public input. The verifier enforces the
+//!    intial (empty) and final state via variable‑length public inputs. TODO: These will be
+//!    enforced after updates to the recursive verifier.
 //!
 //! 4. **Verification**: The verifier:
-//!    - Recomputes each precompile using the stored requests via [`PrecompileVerifier`]
-//!    - Reconstructs the [`PrecompileSponge`] by re-absorbing all commitments in order
-//!    - Verifies the STARK proof (sponge state enforcement to be added in future versions)
+//!    - Recomputes each precompile commitment using the stored requests via [`PrecompileVerifier`]
+//!    - Reconstructs the [`PrecompileTranscript`] by recording all commitments in order
+//!    - Verifies the STARK proof with the final transcript state as public input.
 //!    - Accepts the proof only if precompile verification succeeds and the STARK proof is valid
 //!
 //! # Key Types
 //!
 //! - [`PrecompileRequest`]: Stores the event ID and raw input bytes for a precompile call
 //! - [`PrecompileCommitment`]: A cryptographic commitment to both inputs and outputs, consisting of
-//!   a tag (with event ID and metadata) and a commitment word
+//!   a tag (with event ID and metadata) and a commitment to the request's calldata.
 //! - [`PrecompileVerifier`]: Trait for implementing verification logic for specific precompiles
 //! - [`PrecompileVerifierRegistry`]: Registry mapping event IDs to their verifier implementations
-//! - [`PrecompileSponge`]: An RPO256 sponge that creates a sequential commitment to all precompile
-//!   operations
+//! - [`PrecompileTranscript`]: A transcript (implemented via an RPO256 sponge) that creates a
+//!   sequential commitment to all precompile requests.
 //!
 //! # Example Implementation
 //!
@@ -118,6 +118,93 @@ impl Deserializable for PrecompileRequest {
         let event_id = EventId::read_from(source)?;
         let calldata = Vec::<u8>::read_from(source)?;
         Ok(Self { event_id, calldata })
+    }
+}
+
+// PRECOMPILE TRANSCRIPT TYPES
+// ================================================================================================
+
+/// Newtype representing the precompile transcript state (sponge capacity word).
+#[repr(transparent)]
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct PrecompileTranscriptState(Word);
+
+impl PrecompileTranscriptState {
+    /// Creates a transcript state from the provided word.
+    pub fn new(state: Word) -> Self {
+        Self(state)
+    }
+
+    /// Returns the underlying word representation.
+    pub fn into_word(self) -> Word {
+        self.0
+    }
+}
+
+impl From<Word> for PrecompileTranscriptState {
+    fn from(word: Word) -> Self {
+        Self(word)
+    }
+}
+
+impl From<PrecompileTranscriptState> for Word {
+    fn from(state: PrecompileTranscriptState) -> Self {
+        state.0
+    }
+}
+
+impl From<PrecompileTranscriptState> for [Felt; 4] {
+    fn from(state: PrecompileTranscriptState) -> Self {
+        state.0.into()
+    }
+}
+
+impl Serializable for PrecompileTranscriptState {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.0.write_into(target);
+    }
+}
+
+impl Deserializable for PrecompileTranscriptState {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        Word::read_from(source).map(Self)
+    }
+}
+
+/// Newtype representing the finalized transcript digest.
+#[repr(transparent)]
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct PrecompileTranscriptDigest(Word);
+
+impl From<Word> for PrecompileTranscriptDigest {
+    fn from(word: Word) -> Self {
+        Self(word)
+    }
+}
+
+impl From<PrecompileTranscriptDigest> for Word {
+    fn from(digest: PrecompileTranscriptDigest) -> Self {
+        digest.0
+    }
+}
+
+impl From<PrecompileTranscriptDigest> for [Felt; 4] {
+    fn from(digest: PrecompileTranscriptDigest) -> Self {
+        digest.0.into()
+    }
+}
+
+impl Serializable for PrecompileTranscriptDigest {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.0.write_into(target);
+    }
+}
+
+impl Deserializable for PrecompileTranscriptDigest {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        Word::read_from(source).map(Self)
     }
 }
 
@@ -223,18 +310,18 @@ impl PrecompileVerifierRegistry {
         self.verifiers.is_empty()
     }
 
-    /// Verifies all precompile requests and returns the resulting precompile sponge state after
-    /// absorbing all commitments.
+    /// Verifies all precompile requests and returns the resulting precompile transcript state after
+    /// recording all commitments.
     ///
     /// # Errors
     /// Returns a [`PrecompileVerificationError`] if:
     /// - No verifier is registered for a request's event ID
     /// - A verifier fails to verify its request
-    pub fn deferred_requests_sponge(
+    pub fn requests_transcript(
         &self,
         requests: &[PrecompileRequest],
-    ) -> Result<PrecompileSponge, PrecompileVerificationError> {
-        let mut sponge = PrecompileSponge::new();
+    ) -> Result<PrecompileTranscript, PrecompileVerificationError> {
+        let mut transcript = PrecompileTranscript::new();
         for (index, PrecompileRequest { event_id, calldata: data }) in requests.iter().enumerate() {
             let event_id = *event_id;
             let verifier = self
@@ -244,9 +331,9 @@ impl PrecompileVerifierRegistry {
             let precompile_commitment = verifier.verify(data).map_err(|error| {
                 PrecompileVerificationError::PrecompileError { index, event_id, error }
             })?;
-            sponge.absorb(precompile_commitment);
+            transcript.record(precompile_commitment);
         }
-        Ok(sponge)
+        Ok(transcript)
     }
 }
 
@@ -278,77 +365,72 @@ pub trait PrecompileVerifier: Send + Sync {
     fn verify(&self, calldata: &[u8]) -> Result<PrecompileCommitment, PrecompileError>;
 }
 
-// PRECOMPILE SPONGE
+// PRECOMPILE TRANSCRIPT
 // ================================================================================================
 
-/// An RPO256 sponge for creating a sequential commitment to precompile operations.
+/// Precompile transcript implemented with an RPO256 sponge.
 ///
 /// # Structure
 /// Standard RPO256 sponge: 12 elements = capacity (4 elements) + rate (8 elements)
 ///
 /// # Operation
-/// - **Absorption**: Each precompile commitment is absorbed into the rate, updating the capacity
+/// - **Record**: Each precompile commitment is recorded by absorbing it into the rate, updating the
+///   capacity
 /// - **State**: The evolving capacity tracks all absorbed commitments in order
-/// - **Finalization**: Squeeze with zero rate to extract a digest (the sequential commitment)
+/// - **Finalization**: Squeeze with zero rate to extract a transcript digest (the sequential
+///   commitment)
 ///
 /// # Implementation Note
 /// We store only the 4-element capacity portion between absorptions since the rate is ephemeral.
 #[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
-pub struct PrecompileSponge {
-    /// The capacity portion (4 elements) of the RPO256 sponge state.
-    capacity: Word,
+pub struct PrecompileTranscript {
+    /// The transcript state (capacity portion of the sponge).
+    state: Word,
 }
 
-impl PrecompileSponge {
+impl PrecompileTranscript {
     /// Creates a new sponge with zero capacity.
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Creates a sponge from an existing capacity word (for VM operations like `log_precompile`).
-    pub fn from_capacity(capacity: Word) -> Self {
-        Self { capacity }
+    /// Creates a transcript from an existing state (for VM operations like `log_precompile`).
+    pub fn from_state(state: PrecompileTranscriptState) -> Self {
+        Self { state: state.into() }
     }
 
-    /// Returns the current capacity word.
-    pub fn capacity(&self) -> Word {
-        self.capacity
+    /// Returns the current transcript state (capacity word).
+    pub fn state(&self) -> PrecompileTranscriptState {
+        PrecompileTranscriptState::from(self.state)
     }
 
-    /// Absorbs a precompile commitment into the rate, updating the capacity.
-    pub fn absorb(&mut self, commitment: PrecompileCommitment) {
+    /// Records a precompile commitment into the transcript, updating the state.
+    pub fn record(&mut self, commitment: PrecompileCommitment) {
         let mut state =
-            Word::words_as_elements(&[self.capacity, commitment.tag(), commitment.comm_calldata()])
+            Word::words_as_elements(&[self.state, commitment.tag(), commitment.comm_calldata()])
                 .try_into()
                 .unwrap();
         Rpo256::apply_permutation(&mut state);
-        self.capacity = Word::new(state[0..4].try_into().unwrap());
+        self.state = Word::new(state[0..4].try_into().unwrap());
     }
 
-    /// Absorbs a precompile commitment given directly as (`TAG`, `COMM`) words.
+    /// Records a precompile commitment given directly as (`TAG`, `COMM`) words.
     ///
     /// This is a convenience for callers that already have the tag and calldata commitment
     /// without constructing a [`PrecompileCommitment`].
-    pub fn absorb_tag_comm(&mut self, tag: Word, comm: Word) {
-        let mut state = Word::words_as_elements(&[self.capacity, tag, comm]).try_into().unwrap();
+    pub fn record_tag_comm(&mut self, tag: Word, comm: Word) {
+        let mut state = Word::words_as_elements(&[self.state, tag, comm]).try_into().unwrap();
         Rpo256::apply_permutation(&mut state);
-        self.capacity = Word::new(state[0..4].try_into().unwrap());
+        self.state = Word::new(state[0..4].try_into().unwrap());
     }
 
-    /// Squeezes the sponge with zero rate to extract a digest (sequential commitment to all
-    /// absorbed requests).
-    pub fn finalize(self) -> Word {
-        let mut state = Word::words_as_elements(&[self.capacity, Word::empty(), Word::empty()])
+    /// Finalizes the transcript to a digest (sequential commitment to all recorded requests).
+    pub fn finalize(self) -> PrecompileTranscriptDigest {
+        let mut state = Word::words_as_elements(&[self.state, Word::empty(), Word::empty()])
             .try_into()
             .unwrap();
         Rpo256::apply_permutation(&mut state);
-        Word::new(state[4..8].try_into().unwrap())
-    }
-}
-
-impl From<PrecompileSponge> for Word {
-    fn from(sponge: PrecompileSponge) -> Word {
-        sponge.capacity
+        PrecompileTranscriptDigest::from(Word::new(state[4..8].try_into().unwrap()))
     }
 }
 

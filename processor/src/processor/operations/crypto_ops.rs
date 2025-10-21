@@ -1,7 +1,7 @@
 use miden_air::trace::decoder::NUM_USER_OP_HELPERS;
 use miden_core::{
     Felt, QuadFelt, Word, ZERO, chiplets::hasher::STATE_WIDTH, mast::MastForest,
-    stack::MIN_STACK_DEPTH, utils::range,
+    precompile::PrecompileTranscriptState, stack::MIN_STACK_DEPTH, utils::range,
 };
 
 use crate::{
@@ -223,7 +223,8 @@ pub(super) fn op_log_precompile<P: Processor>(
     let tag = processor.stack().get_word(4);
 
     // Get the current precompile sponge capacity
-    let cap_prev = processor.precompile_capacity();
+    let cap_prev_state = processor.precompile_transcript_state();
+    let cap_prev: Word = cap_prev_state.into();
 
     // Build the full 12-element hasher state for RPO permutation
     // State layout: [CAP_PREV, TAG, COMM]
@@ -241,7 +242,7 @@ pub(super) fn op_log_precompile<P: Processor>(
     let r1: Word = [8, 9, 10, 11].map(|i| output_state[i]).into();
 
     // Update the processor's precompile sponge capacity
-    processor.set_precompile_capacity(cap_next);
+    processor.set_precompile_transcript_state(PrecompileTranscriptState::from(cap_next));
 
     // Write R1, R0, and CAP_NEXT to the stack (top 12 elements).
     // Stack output: [R1, R0, CAP_NEXT, ...]

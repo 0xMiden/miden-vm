@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use miden_air::{RowIndex, trace::chiplets::hasher::HasherState};
-use miden_core::{Kernel, mast::OpBatch};
+use miden_core::{Kernel, mast::OpBatch, precompile::PrecompileTranscriptState};
 
 use super::{
     CHIPLETS_WIDTH, ChipletsTrace, EMPTY_WORD, ExecutionError, Felt, FieldElement, ONE,
@@ -218,7 +218,7 @@ impl Chiplets {
         self,
         trace_len: usize,
         num_rand_rows: usize,
-        precompile_capacity: Word,
+        precompile_transcript_state: PrecompileTranscriptState,
     ) -> ChipletsTrace {
         // make sure that only padding rows will be overwritten by random values
         assert!(self.trace_len() + num_rand_rows <= trace_len, "target trace length too small");
@@ -235,7 +235,7 @@ impl Chiplets {
 
         ChipletsTrace {
             trace,
-            aux_builder: AuxTraceBuilder::new(kernel, ace_hint, precompile_capacity),
+            aux_builder: AuxTraceBuilder::new(kernel, ace_hint, precompile_transcript_state),
         }
     }
 

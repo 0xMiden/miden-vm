@@ -11,7 +11,7 @@ use alloc::{borrow::ToOwned, vec::Vec};
 
 use miden_core::{
     ExtensionOf, ONE, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
-    precompile::PrecompileSponge,
+    precompile::PrecompileTranscriptState,
     utils::{ByteReader, ByteWriter, Deserializable, Serializable},
 };
 use winter_air::{
@@ -65,7 +65,7 @@ pub struct ProcessorAir {
     stack_outputs: StackOutputs,
     program_digest: Word,
     kernel_digests: Vec<Word>,
-    precompile_capacity: Word,
+    precompile_transcript_state: PrecompileTranscriptState,
     constraint_ranges: TransitionConstraintRange,
 }
 
@@ -147,7 +147,7 @@ impl Air for ProcessorAir {
             constraint_ranges,
             program_digest: pub_inputs.program_info.program_hash().to_owned(),
             kernel_digests: pub_inputs.program_info.kernel_procedures().to_owned(),
-            precompile_capacity: pub_inputs.precompile_capacity,
+            precompile_transcript_state: pub_inputs.precompile_transcript_state,
         }
     }
 
@@ -205,7 +205,7 @@ impl Air for ProcessorAir {
             &mut result,
             &self.kernel_digests,
             aux_rand_elements,
-            self.precompile_capacity,
+            self.precompile_transcript_state,
         );
 
         // --- set assertions for the first step --------------------------------------------------
@@ -323,31 +323,27 @@ pub struct PublicInputs {
     program_info: ProgramInfo,
     stack_inputs: StackInputs,
     stack_outputs: StackOutputs,
-    precompile_capacity: Word,
+    precompile_transcript_state: PrecompileTranscriptState,
 }
 
 impl PublicInputs {
     /// Creates a new instance of `PublicInputs` from program information, stack inputs and outputs,
-    /// and the precompile sponge state.
+    /// and the precompile transcript state (capacity of an internal sponge).
     ///
-    /// ## TODO:
-    /// The `precompile_sponge` argument is currently not serialized/enforced in recursion.
-    /// It is accepted here to preserve a stable interface as enforcement is introduced in future
-    /// releases.
+    /// Note: The transcript state is currently not serialized/enforced in recursion.
     pub fn new(
         program_info: ProgramInfo,
         stack_inputs: StackInputs,
         stack_outputs: StackOutputs,
-        _precompile_sponge: PrecompileSponge,
+        _precompile_transcript_state: PrecompileTranscriptState,
     ) -> Self {
-        // TODO: Use precompile_sponge once recursion supports PI capacity.
-        // let precompile_capacity = Word::from(precompile_sponge);
-        let precompile_capacity = Word::empty();
+        // TODO: Use transcript state once recursion supports it.
+        let precompile_transcript_state = PrecompileTranscriptState::default();
         Self {
             program_info,
             stack_inputs,
             stack_outputs,
-            precompile_capacity,
+            precompile_transcript_state,
         }
     }
 }
@@ -357,8 +353,8 @@ impl miden_core::ToElements<Felt> for PublicInputs {
         let mut result = self.stack_inputs.to_vec();
         result.append(&mut self.stack_outputs.to_vec());
         result.append(&mut self.program_info.to_elements());
-        // TODO: Append capacity to PI elements after recursion supports it.
-        // let cap: [Felt; 4] = self.precompile_capacity.into();
+        // TODO: Append transcript state to PI elements after recursion supports it.
+        // let cap: [Felt; 4] = self.precompile_transcript_state.into();
         // result.extend_from_slice(&cap);
         result
     }
@@ -372,8 +368,8 @@ impl Serializable for PublicInputs {
         self.program_info.write_into(target);
         self.stack_inputs.write_into(target);
         self.stack_outputs.write_into(target);
-        // TODO: Serialize capacity after recursion supports it.
-        // self.precompile_capacity.write_into(target);
+        // TODO: Serialize transcript state after recursion supports it.
+        // self.precompile_transcript_state.write_into(target);
     }
 }
 
@@ -382,15 +378,15 @@ impl Deserializable for PublicInputs {
         let program_info = ProgramInfo::read_from(source)?;
         let stack_inputs = StackInputs::read_from(source)?;
         let stack_outputs = StackOutputs::read_from(source)?;
-        // TODO: Read capacity after recursion supports it.
-        // let precompile_capacity = Word::read_from(source)?;
-        let precompile_capacity = Word::default();
+        // TODO: Read transcript state after recursion supports it.
+        // let precompile_transcript_state = PrecompileTranscriptState::read_from(source)?;
+        let precompile_transcript_state = PrecompileTranscriptState::default();
 
         Ok(PublicInputs {
             program_info,
             stack_inputs,
             stack_outputs,
-            precompile_capacity,
+            precompile_transcript_state,
         })
     }
 }

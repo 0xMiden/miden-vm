@@ -117,12 +117,6 @@ pub const RETURN_STATE: Selectors = [ZERO, ZERO, ONE];
 /// `selector = [0 | 0, 0, 1]`, `flag = rev(selector) + 1 = [1, 0, 0 | 0] + 1 = 9`
 pub const RETURN_STATE_LABEL: u8 = 0b1000 + 1;
 
-// --- Log precompile labels ----------------------------------------------------------------------
-
-/// Label for log_precompile capacity messages on the virtual table bus.
-/// TODO: Find better label
-pub const LOG_PRECOMPILE_CAP_LABEL: u8 = 200;
-
 // --- Column accessors in the auxiliary trace ----------------------------------------------------
 
 /// Index of the auxiliary trace column tracking the state of the sibling table.

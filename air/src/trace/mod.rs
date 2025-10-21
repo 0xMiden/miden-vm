@@ -44,6 +44,9 @@ pub const STACK_TRACE_OFFSET: usize = DECODER_TRACE_RANGE.end;
 pub const STACK_TRACE_WIDTH: usize = 19;
 pub const STACK_TRACE_RANGE: Range<usize> = range(STACK_TRACE_OFFSET, STACK_TRACE_WIDTH);
 
+/// Label for log_precompile transcript state messages on the virtual table bus.
+pub const LOG_PRECOMPILE_LABEL: u8 = 200;
+
 // Range check trace
 pub const RANGE_CHECK_TRACE_OFFSET: usize = STACK_TRACE_RANGE.end;
 pub const RANGE_CHECK_TRACE_WIDTH: usize = 2;

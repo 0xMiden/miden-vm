@@ -19,7 +19,10 @@ use winter_verifier::{crypto::MerkleTree, verify as verify_proof};
 mod exports {
     pub use miden_core::{
         Kernel, ProgramInfo, StackInputs, StackOutputs, Word,
-        precompile::{PrecompileError, PrecompileVerificationError, PrecompileVerifierRegistry},
+        precompile::{
+            PrecompileError, PrecompileTranscriptDigest, PrecompileVerificationError,
+            PrecompileVerifierRegistry,
+        },
     };
     pub use winter_verifier::{AcceptableOptions, VerifierError};
     pub mod math {
@@ -79,10 +82,20 @@ pub fn verify(
     Ok(security_level)
 }
 
-/// Identical to [`verify`], and additionally verifies any precompile requests using the provided
-/// [`PrecompileVerifierRegistry`]. Returns `(security_level, precompile_digest)` where
-/// `precompile_digest` summarizes all verified precompile requests. The digest can be compared to
-/// a program-level commitment if desired; details of public input enforcement may evolve.
+/// Identical to [`verify`], with additional verification of any precompile requests made during the
+/// VM execution. The resulting aggregated precompile commitment is returned, which can be compared
+/// against the commitment computed by the VM.
+///
+/// # Returns
+/// Returns a tuple `(security_level, aggregated_commitment)` where:
+/// - `security_level`: The security level (in bits) of the verified proof
+/// - `aggregated_commitment`: A [`Word`] containing the final aggregated commitment to all
+///   precompile requests, computed by recomputing and recording each precompile commitment in a
+///   transcript. This value is the finalized digest of the recomputed precompile transcript.
+///
+/// # Errors
+/// Returns any error produced by [`verify`], as well as any errors resulting from precompile
+/// verification.
 #[tracing::instrument("verify_program", skip_all)]
 pub fn verify_with_precompiles(
     program_info: ProgramInfo,
@@ -90,23 +103,24 @@ pub fn verify_with_precompiles(
     stack_outputs: StackOutputs,
     proof: ExecutionProof,
     precompile_verifiers: &PrecompileVerifierRegistry,
-) -> Result<(u32, Word), VerificationError> {
+) -> Result<(u32, PrecompileTranscriptDigest), VerificationError> {
     // get security level of the proof
     let security_level = proof.security_level();
     let program_hash = *program_info.program_hash();
 
     let (hash_fn, proof, precompile_requests) = proof.into_parts();
 
-    // recompute the precompile sponge by verifying all precompile requests.
+    // recompute the precompile transcript by verifying all precompile requests and recording the
+    // commitments.
     // if no verifiers were provided (e.g. when this function was called from `verify()`),
     // but the proof contained requests anyway, returns a `NoVerifierFound` error.
-    let recomputed_sponge = precompile_verifiers
-        .deferred_requests_sponge(&precompile_requests)
+    let recomputed_transcript = precompile_verifiers
+        .requests_transcript(&precompile_requests)
         .map_err(VerificationError::PrecompileVerificationError)?;
 
-    // build public inputs, explicitly passing the recomputed precompile sponge capacity
+    // build public inputs, explicitly passing the recomputed precompile transcript state
     let pub_inputs =
-        PublicInputs::new(program_info, stack_inputs, stack_outputs, recomputed_sponge);
+        PublicInputs::new(program_info, stack_inputs, stack_outputs, recomputed_transcript.state());
 
     match hash_fn {
         HashFunction::Blake3_192 => {
@@ -151,8 +165,9 @@ pub fn verify_with_precompiles(
     }
     .map_err(|source| VerificationError::ProgramVerificationError(program_hash, source))?;
 
-    // return finalized digest for compatibility (if needed by caller)
-    Ok((security_level, recomputed_sponge.finalize()))
+    // finalize transcript to return the digest
+    let digest = recomputed_transcript.finalize();
+    Ok((security_level, digest))
 }
 
 // ERRORS

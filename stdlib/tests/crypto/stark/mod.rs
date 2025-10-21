@@ -2,7 +2,9 @@ use std::array;
 
 use miden_air::{FieldExtension, HashFunction, PublicInputs};
 use miden_assembly::Assembler;
-use miden_core::{Felt, FieldElement, QuadFelt, WORD_SIZE, Word, ZERO};
+use miden_core::{
+    Felt, FieldElement, QuadFelt, WORD_SIZE, Word, ZERO, precompile::PrecompileTranscriptState,
+};
 use miden_processor::{
     DefaultHost, Program, ProgramInfo,
     crypto::{RandomCoin, RpoRandomCoin},
@@ -19,7 +21,6 @@ mod verifier_recursive;
 
 // Note: Changes to Miden VM may cause this test to fail when some of the assumptions documented
 // in `stdlib/asm/sys/vm/mod.masm` are violated.
-#[ignore]
 #[rstest]
 #[case(None)]
 #[case(Some(KERNEL_EVEN_NUM_PROC))]
@@ -95,7 +96,7 @@ pub fn generate_recursive_verifier_data(
         program_info,
         stack_inputs,
         stack_outputs,
-        miden_core::precompile::PrecompileSponge::new(),
+        PrecompileTranscriptState::default(),
     );
     let (_, proof, _precompile_requests) = proof.into_parts();
     Ok(generate_advice_inputs(proof, pub_inputs).unwrap())

@@ -35,7 +35,7 @@ export.hash_memory
     # => [COMM, TAG, DIGEST_U32[8], ...]
 
     # Log the precompile request for deferred verification
-    # Requires a placeholder word (PAD) so the top 3 words are [COM, TAG, PAD]
+    # Requires a placeholder word (PAD) so the top 3 words are [COMM, TAG, PAD]
     padw movdnw.2
     log_precompile
     dropw dropw dropw
@@ -98,8 +98,7 @@ end
 #! - ptr: word-aligned memory address containing INPUT_U32[len_u32] where len_u32=⌈len_bytes/4⌉
 #! - len_bytes: number of bytes to hash
 #! - COMM: the calldata commitment `Rpo256(Rpo256(INPUT_U32[..]) || Rpo256(DIGEST_U32[..]))` consumed by `log_precompile`
-#! - TAG = [KECCAK_HASH_MEMORY_EVENT, len_bytes, 0, 0] encodes the precompile identifier and the byte length metadata
-#!   as metadata
+#! - TAG = [KECCAK_HASH_MEMORY_EVENT, len_bytes, 0, 0] encodes the precompile identifier and the byte length as metadata
 #! - DIGEST_U32[8] = [d_0, ..., d_7] = Keccak256(INPUT_U8[len_bytes])
 export.hash_memory_impl
     emit.KECCAK_HASH_MEMORY_EVENT

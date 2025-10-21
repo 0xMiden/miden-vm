@@ -13,9 +13,11 @@ use miden_air::ProvingOptions;
 use miden_assembly::Assembler;
 use miden_core::{
     Felt, FieldElement, ProgramInfo,
-    precompile::{PrecompileCommitment, PrecompileVerifier, PrecompileVerifierRegistry},
+    precompile::{
+        PrecompileCommitment, PrecompileTranscript, PrecompileVerifier, PrecompileVerifierRegistry,
+    },
 };
-use miden_crypto::{Word, hash::rpo::Rpo256};
+use miden_crypto::Word;
 use miden_processor::{AdviceInputs, DefaultHost, Program, StackInputs};
 use miden_stdlib::{
     StdLibrary,
@@ -356,21 +358,17 @@ fn test_keccak_hash_1to1_prove_verify() {
     // Check we get the same commitment from the verifier
     let mut precompile_verifiers = PrecompileVerifierRegistry::new();
     precompile_verifiers.register(KECCAK_HASH_MEMORY_EVENT_ID, Arc::new(KeccakPrecompile));
-    let deferred_commitment = precompile_verifiers
-        .deferred_requests_sponge(proof.precompile_requests())
+    let transcript = precompile_verifiers
+        .requests_transcript(proof.precompile_requests())
         .expect("failed to verify");
 
     let expected_commitment = preimage.precompile_commitment();
-    let deferred_commitment_expected = {
-        let elements = [
-            expected_commitment.tag(),
-            expected_commitment.comm_calldata(),
-            Word::empty(),
-            Word::empty(),
-        ];
-        Rpo256::hash_elements(Word::words_as_elements(&elements))
+    let expected_transcript = {
+        let mut transcript = PrecompileTranscript::new();
+        transcript.record(expected_commitment);
+        transcript
     };
-    assert_eq!(deferred_commitment_expected, deferred_commitment.finalize(), "");
+    assert_eq!(transcript, expected_transcript, "");
 
     // Verify the proof with precompiles
     let program_info = ProgramInfo::from(program);
@@ -384,5 +382,5 @@ fn test_keccak_hash_1to1_prove_verify() {
     .expect("proof verification failed");
 
     // Assert that verification succeeds
-    assert_eq!(deferred_commitment_expected, verifier_commitment);
+    assert_eq!(transcript.finalize(), verifier_commitment);
 }

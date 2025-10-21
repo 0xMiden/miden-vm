@@ -68,7 +68,7 @@ pub fn prove(
     // execute the program to create an execution trace
     #[cfg(feature = "std")]
     let now = Instant::now();
-    let trace = miden_processor::execute(
+    let mut trace = miden_processor::execute(
         program,
         stack_inputs.clone(),
         advice_inputs,
@@ -89,7 +89,7 @@ pub fn prove(
     let hash_fn = options.hash_fn();
 
     // extract precompile requests from the trace to include in the proof
-    let precompile_requests = trace.precompile_requests().to_vec();
+    let precompile_requests = trace.take_precompile_requests();
 
     // generate STARK proof
     let proof = match hash_fn {
@@ -230,12 +230,12 @@ where
         );
 
         let program_info = trace.program_info().clone();
-        let final_precompile_sponge = trace.final_precompile_sponge();
+        let final_precompile_transcript = trace.final_precompile_transcript();
         PublicInputs::new(
             program_info,
             self.stack_inputs.clone(),
             self.stack_outputs.clone(),
-            final_precompile_sponge,
+            final_precompile_transcript.state(),
         )
     }
 

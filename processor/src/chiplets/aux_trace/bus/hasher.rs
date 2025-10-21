@@ -178,8 +178,8 @@ pub(super) fn build_hperm_request<E: FieldElement<BaseField = Felt>>(
 
 /// Builds `LOG_PRECOMPILE` requests made to the hash chiplet.
 ///
-/// The operation absorbs `[TAG, COMM]` into the RPO sponge with capacity `CAP_PREV`,
-/// producing output `[CAP_NEXT, R0, R1]`.
+/// The operation absorbs `[TAG, COMM]` into the transcript via an RPO permutation with
+/// capacity `CAP_PREV`, producing output `[CAP_NEXT, R0, R1]`.
 ///
 /// Stack layout (current row):
 /// - `s0..s3`: `COMM[3..0]`

@@ -8,6 +8,7 @@ use miden_core::{
     Felt, ONE, Word, ZERO,
     crypto::merkle::MerklePath,
     mast::{MastForest, MastNodeId, OpBatch},
+    precompile::PrecompileTranscriptState,
     stack::MIN_STACK_DEPTH,
 };
 
@@ -90,10 +91,10 @@ pub struct SystemState {
     /// - For SYSCALL contexts: hash remains from the calling function
     pub fn_hash: Word,
 
-    /// Precompile capacity used for accumulating log_precompile operations
+    /// Precompile transcript state (sponge capacity) used for recording `log_precompile` calls
     /// - Initially [ZERO; 4]
-    /// - Updated with each log_precompile invocation
-    pub precompile_capacity: Word,
+    /// - Updated with each `log_precompile` invocation
+    pub precompile_transcript_state: PrecompileTranscriptState,
 }
 
 impl SystemState {
@@ -105,7 +106,7 @@ impl SystemState {
             fmp: processor.fmp,
             in_syscall: processor.in_syscall,
             fn_hash: processor.caller_hash,
-            precompile_capacity: processor.precompile_sponge.into(),
+            precompile_transcript_state: processor.precompile_transcript.state(),
         }
     }
 }

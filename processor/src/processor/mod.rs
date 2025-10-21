@@ -2,7 +2,10 @@ use miden_air::{
     RowIndex,
     trace::{chiplets::hasher::HasherState, decoder::NUM_USER_OP_HELPERS},
 };
-use miden_core::{Felt, Operation, QuadFelt, Word, crypto::merkle::MerklePath, mast::MastForest};
+use miden_core::{
+    Felt, Operation, QuadFelt, Word, crypto::merkle::MerklePath, mast::MastForest,
+    precompile::PrecompileTranscriptState,
+};
 
 use crate::{
     AdviceError, BaseHost, ContextId, ErrorContext, ExecutionError, MemoryError, ProcessState,
@@ -42,16 +45,15 @@ pub trait Processor: Sized {
     /// Returns a mutable reference to the internal hasher subsystem.
     fn hasher(&mut self) -> &mut Self::Hasher;
 
-    /// Returns the current precompile sponge capacity (CAP).
+    /// Returns the current precompile transcript state (sponge capacity).
     ///
-    /// This capacity is used in `log_precompile` operations to maintain the precompile sponge
-    /// across multiple invocations of the logging instruction.
-    fn precompile_capacity(&self) -> Word;
+    /// Used by `log_precompile` to thread the transcript across invocations.
+    fn precompile_transcript_state(&self) -> PrecompileTranscriptState;
 
-    /// Sets the precompile sponge capacity (CAP) to a new value.
+    /// Sets the precompile transcript state (sponge capacity) to a new value.
     ///
-    /// This is called by `log_precompile` to update the sponge capacity after absorbing new data.
-    fn set_precompile_capacity(&mut self, capacity: Word);
+    /// Called by `log_precompile` after recording a new commitment.
+    fn set_precompile_transcript_state(&mut self, state: PrecompileTranscriptState);
 
     /// Checks that the evaluation of an arithmetic circuit is equal to zero.
     fn op_eval_circuit(

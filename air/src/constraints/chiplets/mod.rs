@@ -1,16 +1,15 @@
 use alloc::vec::Vec;
 
+use miden_core::{Word, precompile::PrecompileTranscriptState};
+
 use super::super::{
     CHIPLETS_OFFSET, EvaluationFrame, Felt, FieldElement, TransitionConstraintDegree,
 };
 use crate::{
-    Assertion, AuxRandElements, IS_FULL_CONSTRAINT_SET, Word,
+    Assertion, AuxRandElements, IS_FULL_CONSTRAINT_SET,
     trace::{
-        CHIPLETS_BUS_AUX_TRACE_OFFSET,
-        chiplets::{
-            hasher::{LOG_PRECOMPILE_CAP_LABEL, P1_COL_IDX},
-            kernel_rom::KERNEL_PROC_INIT_LABEL,
-        },
+        CHIPLETS_BUS_AUX_TRACE_OFFSET, LOG_PRECOMPILE_LABEL,
+        chiplets::{hasher::P1_COL_IDX, kernel_rom::KERNEL_PROC_INIT_LABEL},
     },
     utils::{are_equal, binary_not, is_binary},
 };
@@ -49,7 +48,7 @@ pub fn get_aux_assertions_first_step<E>(
     result: &mut Vec<Assertion<E>>,
     kernel_digests: &[Word],
     aux_rand_elements: &AuxRandElements<E>,
-    precompile_capacity: Word,
+    precompile_transcript_state: PrecompileTranscriptState,
 ) where
     E: FieldElement<BaseField = Felt>,
 {
@@ -62,16 +61,16 @@ pub fn get_aux_assertions_first_step<E>(
 
     if IS_FULL_CONSTRAINT_SET {
         // TODO: Enable in reduced mode after recursive verifier update.
-        // Anchor hasher vtable init against PI-provided capacity (empty/full).
+        // Anchor hasher vtable init against PI-provided transcript state (empty/final).
         let alphas = aux_rand_elements.rand_elements();
-        let capacity: [Felt; 4] = precompile_capacity.into();
-        let label: Felt = Felt::from(LOG_PRECOMPILE_CAP_LABEL);
-        let empty = alphas[0] + alphas[1].mul_base(label);
-        let mut full = empty;
-        for (i, c) in capacity.iter().enumerate() {
-            full += alphas[2 + i].mul_base(*c);
+        let state: [Felt; 4] = precompile_transcript_state.into();
+        let label: Felt = Felt::from(LOG_PRECOMPILE_LABEL);
+        let empty_msg = alphas[0] + alphas[1].mul_base(label);
+        let mut final_msg = empty_msg;
+        for (i, c) in state.iter().enumerate() {
+            final_msg += alphas[2 + i].mul_base(*c);
         }
-        let vtable_init_ratio = empty * full.inv();
+        let vtable_init_ratio = empty_msg * final_msg.inv();
         result.push(Assertion::single(P1_COL_IDX, 0, vtable_init_ratio));
     }
 }

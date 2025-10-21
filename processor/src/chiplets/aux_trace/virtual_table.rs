@@ -1,11 +1,8 @@
 use miden_air::{
     RowIndex,
-    trace::{
-        chiplets::hasher::{self, DIGEST_RANGE},
-        main_trace::MainTrace,
-    },
+    trace::{LOG_PRECOMPILE_LABEL, chiplets::hasher::DIGEST_RANGE, main_trace::MainTrace},
 };
-use miden_core::{Felt, OPCODE_LOGPRECOMPILE, Word};
+use miden_core::{Felt, OPCODE_LOGPRECOMPILE, Word, precompile::PrecompileTranscriptState};
 
 use super::{
     FieldElement, build_ace_memory_read_element_request, build_ace_memory_read_word_request,
@@ -36,17 +33,19 @@ use crate::{
 /// If public inputs are required for other chiplets, it is also possible to use the chiplet bus,
 /// as is done for the kernel ROM chiplet.
 pub struct ChipletsVTableColBuilder {
-    /// Final precompile sponge capacity supplied as a public input to the bus.
-    final_precompile_capacity: Word,
+    /// Final precompile transcript state supplied as a public input to the bus.
+    final_transcript_state: PrecompileTranscriptState,
 }
 
 impl ChipletsVTableColBuilder {
-    pub fn new(final_precompile_capacity: Word) -> Self {
-        // NOTE: This value must match the `precompile_capacity` public input enforced by AIR.
-        // The AIR boundary assertion for the bus column multiplies the kernel ROM init message
-        // and the log_precompile init message derived from this capacity; any mismatch will
-        // cause verification to fail.
-        Self { final_precompile_capacity }
+    /// Auxiliary column builder for the virtual table.
+    ///
+    /// The `final_transcript_state` argument is the state of the transcript after having recorded
+    /// all precompile request. It is used to initialize the multi-set with the initial (empty) and
+    /// final state of the transcript. An AIR constraint enforces the boundary constraint
+    /// referencing the final state provided as a public input by the verifier.
+    pub fn new(final_transcript_state: PrecompileTranscriptState) -> Self {
+        Self { final_transcript_state }
     }
 }
 
@@ -61,7 +60,6 @@ where
         row: RowIndex,
         _debugger: &mut BusDebugger<E>,
     ) -> E {
-        // Check if this is a log_precompile operation
         let op_code = main_trace.get_op_code(row).as_int() as u8;
         let log_precompile_request = if op_code == OPCODE_LOGPRECOMPILE {
             build_log_precompile_capacity_remove(main_trace, row, alphas, _debugger)
@@ -89,7 +87,6 @@ where
         row: RowIndex,
         _debugger: &mut BusDebugger<E>,
     ) -> E {
-        // Check if this is a log_precompile operation - send sponge capacity response
         let op_code = main_trace.get_op_code(row).as_int() as u8;
         let log_precompile_response = if op_code == OPCODE_LOGPRECOMPILE {
             build_log_precompile_capacity_insert(main_trace, row, alphas, _debugger)
@@ -106,7 +103,7 @@ where
         alphas: &[E],
         _debugger: &mut BusDebugger<E>,
     ) -> E {
-        let message = LogPrecompileMessage { capacity: self.final_precompile_capacity };
+        let message = LogPrecompileMessage { state: self.final_transcript_state };
         let value = message.value(alphas);
 
         #[cfg(any(test, feature = "bus-debugger"))]
@@ -121,7 +118,9 @@ where
         alphas: &[E],
         _debugger: &mut BusDebugger<E>,
     ) -> E {
-        let message = LogPrecompileMessage { capacity: Word::empty() };
+        let message = LogPrecompileMessage {
+            state: PrecompileTranscriptState::default(),
+        };
         let value = message.value(alphas);
 
         #[cfg(any(test, feature = "bus-debugger"))]
@@ -248,9 +247,9 @@ where
 // LOG PRECOMPILE MESSAGES
 // ================================================================================================
 
-/// Message for log_precompile sponge capacity tracking on the virtual table bus.
+/// Message for log_precompile transcript-state tracking on the virtual table bus.
 struct LogPrecompileMessage {
-    capacity: Word,
+    state: PrecompileTranscriptState,
 }
 
 impl<E> BusMessage<E> for LogPrecompileMessage
@@ -258,10 +257,10 @@ where
     E: FieldElement<BaseField = Felt>,
 {
     fn value(&self, alphas: &[E]) -> E {
-        let capacity_array: [Felt; 4] = self.capacity.into();
+        let state_elements: [Felt; 4] = self.state.into();
         alphas[0]
-            + alphas[1].mul_base(Felt::from(hasher::LOG_PRECOMPILE_CAP_LABEL))
-            + build_value(&alphas[2..6], capacity_array)
+            + alphas[1].mul_base(Felt::from(LOG_PRECOMPILE_LABEL))
+            + build_value(&alphas[2..6], state_elements)
     }
 
     fn source(&self) -> &str {
@@ -271,11 +270,11 @@ where
 
 impl core::fmt::Display for LogPrecompileMessage {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "{{ capacity: {:?} }}", self.capacity)
+        write!(f, "{{ state: {:?} }}", self.state)
     }
 }
 
-/// Removes the previous sponge capacity (`CAP_PREV`) from the virtual table bus.
+/// Removes the previous transcript state (`CAP_PREV`) from the virtual table bus.
 ///
 /// Helper register layout for `log_precompile` is codified as:
 /// - `h0` = hasher address, `h1..h4` = `CAP_PREV[0..3]`.
@@ -285,11 +284,12 @@ fn build_log_precompile_capacity_remove<E: FieldElement<BaseField = Felt>>(
     alphas: &[E],
     _debugger: &mut BusDebugger<E>,
 ) -> E {
-    // The previous capacity is provided non-deterministically in the helper registers,
-    // offset by 1 to account for the hasher address
-    let capacity: Word = [1, 2, 3, 4].map(|idx| main_trace.helper_register(idx, row)).into();
+    // The previous transcript state is the capacity word provided non-deterministically in the
+    // helper registers, offset by 1 to account for the hasher address
+    let state_word: Word = [1, 2, 3, 4].map(|idx| main_trace.helper_register(idx, row)).into();
+    let state = PrecompileTranscriptState::from(state_word);
 
-    let message = LogPrecompileMessage { capacity };
+    let message = LogPrecompileMessage { state };
     let value = message.value(alphas);
 
     #[cfg(any(test, feature = "bus-debugger"))]
@@ -298,17 +298,18 @@ fn build_log_precompile_capacity_remove<E: FieldElement<BaseField = Felt>>(
     value
 }
 
-/// Inserts the next sponge capacity (`CAP_NEXT`) into the virtual table bus.
+/// Inserts the next transcript state (`CAP_NEXT`) into the virtual table bus.
 fn build_log_precompile_capacity_insert<E: FieldElement<BaseField = Felt>>(
     main_trace: &MainTrace,
     row: RowIndex,
     alphas: &[E],
     _debugger: &mut BusDebugger<E>,
 ) -> E {
-    // The next capacity was written in the next row as a Word at index 8..12 (reversed)
-    let capacity: Word = [11, 10, 9, 8].map(|idx| main_trace.stack_element(idx, row + 1)).into();
+    // The next transcript state was written in the next row as a Word at index 8..12 (reversed)
+    let state_word: Word = [11, 10, 9, 8].map(|idx| main_trace.stack_element(idx, row + 1)).into();
+    let state = PrecompileTranscriptState::from(state_word);
 
-    let message = LogPrecompileMessage { capacity };
+    let message = LogPrecompileMessage { state };
     let value = message.value(alphas);
 
     #[cfg(any(test, feature = "bus-debugger"))]

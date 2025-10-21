@@ -6,7 +6,7 @@ use miden_air::{Felt, RowIndex};
 use miden_core::{
     Decorator, EMPTY_WORD, Program, StackOutputs, WORD_SIZE, Word, ZERO,
     mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
-    precompile::PrecompileSponge,
+    precompile::PrecompileTranscript,
     stack::MIN_STACK_DEPTH,
     utils::range,
 };
@@ -127,8 +127,9 @@ pub struct FastProcessor {
     /// Whether to enable debug statements and tracing.
     in_debug_mode: bool,
 
-    /// Capacity for the RPO sponge used in log_precompile operations.
-    precompile_sponge: PrecompileSponge,
+    /// Transcript used to record commitments via `log_precompile` instruction (implemented via RPO
+    /// sponge).
+    precompile_transcript: PrecompileTranscript,
 }
 
 impl FastProcessor {
@@ -195,7 +196,7 @@ impl FastProcessor {
             call_stack: Vec::new(),
             ace: Ace::default(),
             in_debug_mode,
-            precompile_sponge: PrecompileSponge::new(),
+            precompile_transcript: PrecompileTranscript::new(),
         }
     }
 
@@ -325,9 +326,10 @@ impl FastProcessor {
         let mut tracer = ExecutionTracer::new(fragment_size);
         let execution_output = self.execute_with_tracer(program, host, &mut tracer).await?;
 
-        // Pass the final precompile sponge from execution output to the trace generation context
+        // Pass the final precompile transcript from execution output to the trace generation
+        // context
         let context =
-            tracer.into_trace_generation_context(execution_output.final_precompile_sponge);
+            tracer.into_trace_generation_context(execution_output.final_precompile_transcript);
 
         Ok((execution_output, context))
     }
@@ -346,7 +348,7 @@ impl FastProcessor {
             stack: stack_outputs,
             advice: self.advice,
             memory: self.memory,
-            final_precompile_sponge: self.precompile_sponge,
+            final_precompile_transcript: self.precompile_transcript,
         })
     }
 
@@ -714,13 +716,13 @@ impl FastProcessor {
 // ===============================================================================================
 
 /// The output of a program execution, containing the state of the stack, advice provider,
-/// memory, and final precompile sponge at the end of execution.
+/// memory, and final precompile transcript at the end of execution.
 #[derive(Debug)]
 pub struct ExecutionOutput {
     pub stack: StackOutputs,
     pub advice: AdviceProvider,
     pub memory: Memory,
-    pub final_precompile_sponge: PrecompileSponge,
+    pub final_precompile_transcript: PrecompileTranscript,
 }
 
 // FAST PROCESS STATE

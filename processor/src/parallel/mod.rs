@@ -20,6 +20,7 @@ use miden_air::{
 use miden_core::{
     Felt, Kernel, ONE, OPCODE_PUSH, Operation, QuadFelt, StarkField, WORD_SIZE, Word, ZERO,
     mast::{BasicBlockNode, MastForest, MastNode, MastNodeExt, MastNodeId, OpBatch},
+    precompile::PrecompileTranscriptState,
     stack::MIN_STACK_DEPTH,
     utils::{range, uninit_vector},
 };
@@ -90,7 +91,7 @@ pub fn build_trace(
         kernel_replay,
         hasher_for_chiplet,
         ace_replay,
-        final_precompile_sponge,
+        final_precompile_transcript,
         fragment_size,
     } = trace_generation_context;
 
@@ -145,7 +146,7 @@ pub fn build_trace(
                     chiplets.into_trace(
                         main_trace_len,
                         NUM_RAND_ROWS,
-                        final_precompile_sponge.into(),
+                        final_precompile_transcript.state(),
                     )
                 },
             )
@@ -1786,12 +1787,12 @@ impl Processor for CoreTraceFragmentGenerator {
         &mut self.context.replay.hasher
     }
 
-    fn precompile_capacity(&self) -> Word {
-        self.context.state.system.precompile_capacity
+    fn precompile_transcript_state(&self) -> PrecompileTranscriptState {
+        self.context.state.system.precompile_transcript_state
     }
 
-    fn set_precompile_capacity(&mut self, capacity: Word) {
-        self.context.state.system.precompile_capacity = capacity;
+    fn set_precompile_transcript_state(&mut self, state: PrecompileTranscriptState) {
+        self.context.state.system.precompile_transcript_state = state;
     }
 
     fn op_eval_circuit(
