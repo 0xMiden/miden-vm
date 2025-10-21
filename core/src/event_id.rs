@@ -129,7 +129,8 @@ impl Display for EventId {
 /// The enum has three variants:
 /// - [`Event`](EventName::Event): For named user events, computes EventId from the name hash
 /// - [`System`](EventName::System): For system events (IDs 0-255), preserves the system EventId
-/// - [`Unknown`](EventName::Unknown): For events without registered names, preserves the original EventId
+/// - [`Unknown`](EventName::Unknown): For events without registered names, preserves the original
+///   EventId
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(
@@ -270,9 +271,9 @@ impl Deserializable for EventName {
                 let event_id = EventId::read_from(source)?;
                 Ok(Self::Unknown(event_id))
             },
-            _ => Err(DeserializationError::InvalidValue(
-                alloc::format!("invalid EventName discriminant: {}", discriminant).into()
-            )),
+            _ => Err(DeserializationError::InvalidValue(alloc::format!(
+                "invalid EventName discriminant: {discriminant}"
+            ))),
         }
     }
 }

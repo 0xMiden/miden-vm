@@ -365,8 +365,9 @@ impl fmt::Display for SystemEvent {
 
 #[cfg(test)]
 mod test {
-    use super::*;
     use alloc::string::ToString;
+
+    use super::*;
 
     #[test]
     fn test_try_from() {
