@@ -12,7 +12,7 @@ use miden_core::{
 };
 use miden_debug_types::{SourceContent, SourceLanguage, SourceManager, Uri};
 use miden_utils_testing::{
-    build_test, build_test_by_mode,
+    build_debug_test, build_test, build_test_by_mode,
     crypto::{init_merkle_leaves, init_merkle_store},
 };
 
@@ -1017,4 +1017,45 @@ fn test_assert_messages() {
         "6 |         end",
         "  `----"
     );
+}
+
+// Test the original issue with debug.stack.12 to see if it shows all items
+#[test]
+fn test_debug_stack_issue_2295_original_repeat() {
+    let source = "
+    begin
+        push.4
+        push.8
+        drop
+        drop
+
+        repeat.12
+            push.42
+        end
+
+        debug.stack.12  # <=== should show first 12 elements as 42
+        dropw dropw dropw dropw
+    end";
+
+    // Execute with debug buffer
+    let test = build_debug_test!(source);
+    let (_stack, output) = test.execute_with_debug_buffer().expect("execution failed");
+
+    // Test if debug.stack.12 shows all 12 push.42 items correctly
+    insta::assert_snapshot!(output, @r"
+    Stack state in interval [0, 11] before step 22:
+    ├──  0: 42
+    ├──  1: 42
+    ├──  2: 42
+    ├──  3: 42
+    ├──  4: 42
+    ├──  5: 42
+    ├──  6: 42
+    ├──  7: 42
+    ├──  8: 42
+    ├──  9: 42
+    ├── 10: 42
+    ├── 11: 42
+    └── (16 more items)
+    ");
 }
