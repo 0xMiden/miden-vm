@@ -597,3 +597,93 @@ fn build_expected_stack(word0: Word, word1: Word) -> Vec<u64> {
         word1[0].as_int(),
     ]
 }
+
+// RANDOMIZED ROUND-TRIP TEST
+// =================================================================================================
+
+/// Tests that smt::set followed by smt::get returns the inserted values for random key-value pairs
+/// in a non-empty tree.
+#[test]
+fn test_smt_randomized_round_trip() {
+    const TEST_ROUNDS: usize = 5;
+    const INITIAL_PAIRS: usize = 2;
+    const TEST_PAIRS: usize = 3;
+
+    for test_round in 0..TEST_ROUNDS {
+        // Create a random seed for reproducibility
+        let mut seed = test_round as u64;
+
+        // Build initial SMT with some random key-value pairs
+        let mut initial_pairs = Vec::new();
+        for _ in 0..INITIAL_PAIRS {
+            let key = random_word(&mut seed);
+            let value = random_word(&mut seed);
+            initial_pairs.push((key, value));
+        }
+
+        let mut smt = Smt::with_entries(initial_pairs).unwrap();
+
+        // Generate test key-value pairs to insert and retrieve
+        for _ in 0..TEST_PAIRS {
+            let key = random_word(&mut seed);
+            let value = random_word(&mut seed);
+
+            // Test set operation using the same pattern as existing tests
+            let (set_initial_stack, set_expected_stack, store, advice_map) =
+                prepare_insert_or_set(key, value, &mut smt);
+
+            const SET_SOURCE: &str = "
+                use.std::collections::smt
+                use.std::sys
+
+                begin
+                    # => [V, K, R]
+                    exec.smt::set
+                    # => [V_old, R_new]
+                    exec.sys::truncate_stack
+                end
+            ";
+
+            build_test!(SET_SOURCE, &set_initial_stack, &[], store, advice_map)
+                .expect_stack(&set_expected_stack);
+
+            // Now test getting the value back using smt::get
+            let mut get_stack = Vec::new();
+            append_word_to_vec(&mut get_stack, smt.root());
+            append_word_to_vec(&mut get_stack, key);
+
+            // Build advice inputs for the updated SMT that includes our inserted value
+            let (updated_store, updated_advice_map) = build_advice_inputs(&smt);
+
+            const GET_SOURCE: &str = "
+                use.std::collections::smt
+
+                begin
+                    # => [K, R]
+                    exec.smt::get
+                end
+            ";
+
+            // Build expected result for get operation
+            let expected_get_stack = build_expected_stack(value, smt.root());
+
+            build_test!(GET_SOURCE, &get_stack, &[], updated_store, updated_advice_map)
+                .expect_stack(&expected_get_stack);
+        }
+    }
+}
+
+/// Generates a random word using the provided seed
+fn random_word(seed: &mut u64) -> Word {
+    let mut word = [Felt::new(0); 4];
+    for element in word.iter_mut() {
+        *element = Felt::new(random_u64(seed));
+    }
+    Word::new(word)
+}
+
+/// Generates a random u64 using a simple linear congruential generator
+fn random_u64(seed: &mut u64) -> u64 {
+    *seed = seed.wrapping_mul(1103515245).wrapping_add(12345);
+    *seed
+}
