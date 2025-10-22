@@ -221,7 +221,7 @@ where
 // Ensure `RacyLock` only implements auto-traits when it is sound to do so.
 // `Send` requires ability to move the owned initializer and the (possibly
 // newly allocated) `T` across threads safely.
-unsafe impl<T: Send, F: Send + Fn() -> T> Send for RacyLock<T, F> {}
+unsafe impl<T: Send, F: Send> Send for RacyLock<T, F> {}
 
 // `Sync` requires that shared access through `&self` is safe, which implies
 // both the stored `T` and the initializer `F` can be shared across threads.
