@@ -135,7 +135,7 @@ export.hash_memory_words
   # prepare hasher state (14 cycles)
   dup.2 mul.4 push.0.0.0 padw padw
   # => [C, B, A, start_addr, end_addr, is_odd, ...]
-  
+
   # (4 + 3 * words cycles)
   exec.absorb_double_words_from_memory
   # => [C', B', A', end_addr, end_addr, is_odd, ...]
