@@ -18,10 +18,7 @@ use core::{
 /// See <https://github.com/matklad/once_cell/blob/v1.19.0/src/race.rs#L294>.
 ///
 /// Performs lazy evaluation and can be used for statics.
-pub struct RacyLock<T, F = fn() -> T>
-where
-    F: Fn() -> T,
-{
+pub struct RacyLock<T, F = fn() -> T> {
     inner: AtomicPtr<T>,
     f: F,
 }
