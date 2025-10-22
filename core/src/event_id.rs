@@ -19,8 +19,7 @@ use crate::{Felt, sys_events::SystemEvent, utils::hash_string_to_word};
 /// [`EventId`] contains only the identifier. For events with human-readable names,
 /// use [`EventName`] instead.
 ///
-/// While not enforced by this type, the values 0..256 are reserved for
-/// [`SystemEvent`](crate::sys_events::SystemEvent)s.
+/// Event IDs are derived from event names using blake3 hashing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
@@ -47,18 +46,17 @@ impl EventId {
     /// providing good distribution properties to minimize collisions between different names.
     ///
     /// # Panics
-    /// Panics if the computed event ID collides with a reserved system event ID (0-255).
+    /// Panics if the event name starts with "sys::" as this namespace is reserved for
+    /// [`SystemEvent`]s.
     pub fn from_name(name: impl AsRef<str>) -> Self {
-        let digest_word = hash_string_to_word(name.as_ref());
-        let event_id = Self(digest_word[0]);
-
+        let name_str = name.as_ref();
         assert!(
-            !event_id.is_reserved(),
-            "Event ID with name {} collides with an ID reserved for a system event",
-            name.as_ref()
+            !SystemEvent::is_system_event_name(name_str),
+            "Event name '{}' uses reserved namespace 'sys::' - use SystemEvent instead",
+            name_str
         );
-
-        event_id
+        let digest_word = hash_string_to_word(name_str);
+        Self(digest_word[0])
     }
 
     /// Creates an EventId from a [`Felt`] value (e.g., from the stack).
@@ -81,11 +79,20 @@ impl EventId {
         self.0.as_int()
     }
 
-    /// Returns `true` if this event ID is reserved for a
-    /// [`SystemEvent`](crate::sys_events::SystemEvent).
-    pub const fn is_reserved(&self) -> bool {
-        let value = self.0.as_int();
-        value <= u8::MAX as u64
+    /// Returns `true` if this EventId corresponds to a system event.
+    ///
+    /// System events use the "sys::" namespace and have predefined EventIds that are checked
+    /// against a const lookup table.
+    pub const fn is_system_event(&self) -> bool {
+        let lookup = crate::sys_events::SYSTEM_EVENT_LOOKUP;
+        let mut i = 0;
+        while i < lookup.len() {
+            if self.as_u64() == lookup[i].0.as_u64() {
+                return true;
+            }
+            i += 1;
+        }
+        false
     }
 }
 
@@ -123,101 +130,65 @@ impl Display for EventId {
 /// - Error messages and debugging
 /// - Resolving EventIds back to names via the event registry
 ///
+/// System events use the "sys::" namespace prefix to distinguish them from user-defined events.
+///
 /// For event identification during execution (e.g., reading from the stack), use [`EventId`]
 /// directly. Names can be looked up via the event registry when needed for error reporting.
-///
-/// The enum has three variants:
-/// - [`Event`](EventName::Event): For named user events, computes EventId from the name hash
-/// - [`System`](EventName::System): For system events (IDs 0-255), preserves the system EventId
-/// - [`Unknown`](EventName::Unknown): For events without registered names, preserves the original
-///   EventId
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
     miden_test_serde_macros::serde_test(winter_serde(true))
 )]
-pub enum EventName {
-    /// A named event
-    Event(Cow<'static, str>),
-    /// A system event (IDs 0-255)
-    System(EventId),
-    /// An unknown event with only an ID available
-    Unknown(EventId),
-}
+pub struct EventName(Cow<'static, str>);
 
 impl EventName {
     /// Creates an EventName from a static string.
     ///
     /// This is the primary constructor for compile-time event name constants.
     pub const fn new(name: &'static str) -> Self {
-        Self::Event(Cow::Borrowed(name))
+        Self(Cow::Borrowed(name))
     }
 
     /// Creates an EventName from an owned String.
     ///
     /// Use this for dynamically constructed event names (e.g., in error messages).
     pub fn from_string(name: String) -> Self {
-        Self::Event(Cow::Owned(name))
-    }
-
-    /// Creates an EventName for an unknown event, preserving its EventId.
-    ///
-    /// This is used when an event has no registered name but we still want to report its ID.
-    /// The returned EventName will display as "unknown" and `to_event_id()` will return the
-    /// original event_id (not a hash of the string "unknown").
-    pub const fn unknown(event_id: EventId) -> Self {
-        Self::Unknown(event_id)
-    }
-
-    /// Creates an EventName for a system event.
-    ///
-    /// System events use their enum discriminant (0-255) as their EventId.
-    pub const fn system(sys_event: SystemEvent) -> Self {
-        Self::System(EventId::from_u64(sys_event as u64))
+        Self(Cow::Owned(name))
     }
 
     /// Returns the event name as a string slice.
     pub fn as_str(&self) -> &str {
-        match self {
-            Self::Event(cow) => cow.as_ref(),
-            Self::System(event_id) => {
-                // Try to convert EventId back to SystemEvent to get the name
-                SystemEvent::try_from(*event_id)
-                    .map(|sys_event| sys_event.name_str())
-                    .unwrap_or("system")
-            },
-            Self::Unknown(_) => "unknown",
-        }
+        self.0.as_ref()
+    }
+
+    /// Returns `true` if this event name uses the "sys::" system event namespace.
+    pub fn is_system_event(&self) -> bool {
+        SystemEvent::is_system_event_name(self.as_str())
     }
 
     /// Returns the [`EventId`] for this event name.
     ///
-    /// - For [`Event`](EventName::Event) events, computes the EventId by hashing the name
-    /// - For [`System`](EventName::System) events, returns the system event ID (0-255)
-    /// - For [`Unknown`](EventName::Unknown) events, returns the preserved EventId
+    /// The ID is computed by hashing the name using blake3.
+    ///
+    /// # Panics
+    /// Panics if the event name starts with "sys::" as this namespace is reserved for
+    /// [`SystemEvent`]s. System events should use [`SystemEvent::to_event_id()`] instead.
     pub fn to_event_id(&self) -> EventId {
-        match self {
-            Self::Event(name) => EventId::from_name(name.as_ref()),
-            Self::System(event_id) => *event_id,
-            Self::Unknown(event_id) => *event_id,
-        }
+        EventId::from_name(self.as_str())
     }
 }
 
 impl Display for EventName {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Self::Event(name) => write!(f, "{}", name),
-            Self::System(event_id) => {
-                // Try to convert EventId back to SystemEvent to get the name
-                match SystemEvent::try_from(*event_id) {
-                    Ok(sys_event) => write!(f, "{}", sys_event.name_str()),
-                    Err(_) => write!(f, "system event (ID: {})", event_id),
-                }
-            },
-            Self::Unknown(event_id) => write!(f, "unknown event (ID: {})", event_id),
-        }
+        write!(f, "{}", self.0)
+    }
+}
+
+impl AsRef<str> for EventName {
+    fn as_ref(&self) -> &str {
+        self.0.as_ref()
     }
 }
 
@@ -238,43 +209,15 @@ impl Deserializable for EventId {
 
 impl Serializable for EventName {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        match self {
-            Self::Event(name) => {
-                target.write_u8(0);
-                name.write_into(target)
-            },
-            Self::System(event_id) => {
-                target.write_u8(1);
-                event_id.write_into(target);
-            },
-            Self::Unknown(event_id) => {
-                target.write_u8(2);
-                event_id.write_into(target);
-            },
-        }
+        // Serialize as a string (supports both Borrowed and Owned variants)
+        self.0.as_ref().write_into(target)
     }
 }
 
 impl Deserializable for EventName {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let discriminant = source.read_u8()?;
-        match discriminant {
-            0 => {
-                let name = String::read_from(source)?;
-                Ok(Self::from_string(name))
-            },
-            1 => {
-                let event_id = EventId::read_from(source)?;
-                Ok(Self::System(event_id))
-            },
-            2 => {
-                let event_id = EventId::read_from(source)?;
-                Ok(Self::Unknown(event_id))
-            },
-            _ => Err(DeserializationError::InvalidValue(alloc::format!(
-                "invalid EventName discriminant: {discriminant}"
-            ))),
-        }
+        let name = String::read_from(source)?;
+        Ok(Self::from_string(name))
     }
 }
 
@@ -302,6 +245,7 @@ impl proptest::prelude::Arbitrary for EventName {
             // Static strings (Cow::Borrowed)
             Just(EventName::new("test::static::event")),
             Just(EventName::new("stdlib::handler::example")),
+            Just(EventName::new("user::custom::event")),
             // Dynamic strings (Cow::Owned)
             any::<(u32, u32)>()
                 .prop_map(|(a, b)| EventName::from_string(format!("dynamic::event::{}::{}", a, b))),
@@ -330,10 +274,17 @@ mod tests {
         // Conversion to Felt
         assert_eq!(EventId::from_u64(100).as_felt(), Felt::new(100));
 
-        // Reserved range: 0-255
-        assert!(EventId::from_u64(0).is_reserved());
-        assert!(EventId::from_u64(255).is_reserved());
-        assert!(!EventId::from_u64(256).is_reserved());
+        // Event ID from name
+        let event_id = EventId::from_name("test::event");
+        assert!(event_id.as_u64() > 0);
+
+        // Same name produces same ID
+        let event_id2 = EventId::from_name("test::event");
+        assert_eq!(event_id, event_id2);
+
+        // Different names produce different IDs
+        let event_id3 = EventId::from_name("test::different");
+        assert_ne!(event_id, event_id3);
     }
 
     #[test]
@@ -348,5 +299,52 @@ mod tests {
 
         // Display
         assert_eq!(format!("{}", static_event), "test::event");
+
+        // to_event_id computes hash
+        let event_id = static_event.to_event_id();
+        assert_eq!(event_id, EventId::from_name("test::event"));
+
+        // is_system_event checks namespace
+        assert!(!static_event.is_system_event());
+        assert!(!dynamic_event.is_system_event());
+        let sys_event = EventName::new("sys::test");
+        assert!(sys_event.is_system_event());
+    }
+
+    #[test]
+    #[should_panic(expected = "uses reserved namespace 'sys::'")]
+    fn event_id_from_name_panics_on_sys_prefix() {
+        EventId::from_name("sys::my_event");
+    }
+
+    #[test]
+    #[should_panic(expected = "uses reserved namespace 'sys::'")]
+    fn event_name_to_event_id_panics_on_sys_prefix() {
+        let event = EventName::new("sys::my_event");
+        event.to_event_id();
+    }
+
+    #[test]
+    fn event_id_is_system_event() {
+        // Test that system event IDs are correctly identified
+        for system_event in crate::sys_events::SystemEvent::all() {
+            let event_id = system_event.to_event_id();
+            assert!(
+                event_id.is_system_event(),
+                "SystemEvent {:?} should be identified as a system event",
+                system_event
+            );
+        }
+
+        // Test that user event IDs are not identified as system events
+        let user_event_id = EventId::from_name("user::my_event");
+        assert!(!user_event_id.is_system_event());
+
+        let another_user_event = EventId::from_name("stdlib::crypto::hash");
+        assert!(!another_user_event.is_system_event());
+
+        // Test some arbitrary EventIds
+        assert!(!EventId::from_u64(0).is_system_event());
+        assert!(!EventId::from_u64(12345).is_system_event());
     }
 }

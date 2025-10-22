@@ -112,16 +112,23 @@ impl EventHandlerRegistry {
     /// Registers an [`EventHandler`] with a given event name.
     ///
     /// The [`EventId`] is computed from the event name during registration.
+    ///
+    /// # Errors
+    /// Returns an error if:
+    /// - The event name uses the "sys::" namespace (reserved for system events)
+    /// - A handler with the same event ID is already registered
     pub fn register(
         &mut self,
         event: EventName,
         handler: Arc<dyn EventHandler>,
     ) -> Result<(), ExecutionError> {
+        // Check if the event name uses the reserved system event namespace
+        if event.is_system_event() {
+            return Err(ExecutionError::ReservedEventNamespace { event });
+        }
+
         // Compute EventId from the event name
         let id = event.to_event_id();
-        if id.is_reserved() {
-            return Err(ExecutionError::ReservedEventId { event: event.clone() });
-        }
         match self.handlers.entry(id) {
             Entry::Vacant(e) => e.insert((event, handler)),
             Entry::Occupied(_) => return Err(ExecutionError::DuplicateEventHandler { event }),
