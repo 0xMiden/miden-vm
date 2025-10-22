@@ -258,14 +258,14 @@ proc.insert_into_leaf.8196
     # => [cur_write, K, cur_write, V, i, R]
 
     # *cur_write = K
-    mem_storew dropw
+    mem_storew_be dropw
     # => [cur_write, V, i, R]
 
     add.4 movdn.4 dup.4
     # => [cur_write, V, cur_write, i, R]
 
     # *cur_write = V
-    mem_storew dropw
+    mem_storew_be dropw
     # => [cur_write, i, R, ]
 
     # cur_write = &new_pairs[2]
@@ -412,11 +412,11 @@ proc.remove_in_multi_leaf.8196
     # => [V=EMPTY, key_ptr, K, R]
 
     # Get V_in_leaf from key_ptr+4. We'll need it later. Since we know V is an
-    # empty word, we can reuse that stack space for mem_loadw.
+    # empty word, we can reuse that stack space for mem_loadw_be.
 
     dup.4 add.4
     # => [val_ptr, V=EMPTY, key_ptr, K, R]
-    mem_loadw
+    mem_loadw_be
     # => [V_old, key_ptr, K, R]
 
     # Shift memory from key_ptr+8..end_ptr to key_ptr, removing the (K, V_old) pair in the process.
@@ -497,7 +497,7 @@ proc.replace_in_multi_leaf
 
     padw dup.4
     # => [val_ptr, Z, val_ptr, start_ptr, end_ptr, V, K, R]
-    mem_loadw
+    mem_loadw_be
     # => [V_old, val_ptr, start_ptr, end_ptr, V, K, R]
 
     # Word-align the stack for a moment.
@@ -508,7 +508,7 @@ proc.replace_in_multi_leaf
     # => [V, z, val_ptr, start_ptr, end_ptr, V_old, K, R]
     dup.5
     # => [val_ptr, V, z, val_ptr, start_ptr, end_ptr, V_old, K, R]
-    mem_storew
+    mem_storew_be
     # => [V, z, val_ptr, start_ptr, end_ptr, V_old, K, R]
 
     # Prepare for hash_memory_words
