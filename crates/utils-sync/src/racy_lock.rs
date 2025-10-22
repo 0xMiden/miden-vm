@@ -88,7 +88,7 @@ mod unsound_demo {
     // an unsound `Sync` impl allows concurrent `borrow_mut`, which panics at runtime.
     #[test]
     #[should_panic]
-    fn bad_sync_allows_cross_thread_refcell_borrow_mut_panic() {
+    fn bad_sync_loom_allows_cross_thread_refcell_borrow_mut_panic() {
         let mut builder = Builder::default();
         builder.max_duration = Some(std::time::Duration::from_secs(10));
         builder.check(|| {
