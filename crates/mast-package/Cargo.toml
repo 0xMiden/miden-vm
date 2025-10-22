@@ -37,5 +37,5 @@ serde-untagged = { workspace = true, optional = true }
 thiserror.workspace = true
 
 [dev-dependencies]
-miden-serde-test-macros.workspace = true
+miden-test-serde-macros.workspace = true
 serde_json = { workspace = true }

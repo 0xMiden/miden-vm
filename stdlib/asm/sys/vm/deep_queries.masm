@@ -100,23 +100,23 @@ end
 #! Output: [Y, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr]
 proc.process_main_segment_execution_trace
     # Load the query index
-    dup.4 mem_loadw
+    dup.4 mem_loadw_be
     #=> [index, depth, y, y, query_ptr] where y are "garbage" values here and throughout
 
     # Get commitment to main segment of the execution trace
     movdn.3 movdn.2
     push.0.0
-    exec.constants::main_trace_com_ptr mem_loadw
+    exec.constants::main_trace_com_ptr mem_loadw_be
     #=>[MAIN_TRACE_TREE_ROOT, depth, index, query_ptr]
 
     # Use the commitment to get the leaf and save it
     dup.5 dup.5
     mtree_get
-    exec.constants::tmp3 mem_storew
+    exec.constants::tmp3 mem_storew_be
     adv.push_mapval
     #=>[LEAF_VALUE, MAIN_TRACE_TREE_ROOT, depth, index, query_ptr]
 
-    exec.constants::tmp2 mem_loadw
+    exec.constants::tmp2 mem_loadw_be
     swapw
     #=>[LEAF_VALUE, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr]
 
@@ -132,7 +132,7 @@ proc.process_main_segment_execution_trace
     #=> [Y, L, C, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr]
  
     # Load the leaf value we got using `mtree_get` and compare it against the hash we just computed
-    exec.constants::tmp3 mem_loadw
+    exec.constants::tmp3 mem_loadw_be
     assert_eqw.err=LEAF_VALUE_MISMATCH
 end
 
@@ -160,19 +160,19 @@ end
 #! Output: [Y, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr]
 proc.process_aux_segment_execution_trace
     # Load aux trace commitment and get leaf
-    exec.constants::aux_trace_com_ptr mem_loadw
+    exec.constants::aux_trace_com_ptr mem_loadw_be
 
     # Get the leaf against the auxiliary trace commitment for the current query
     dup.9 dup.9
     mtree_get
-    exec.constants::tmp3 mem_storew
+    exec.constants::tmp3 mem_storew_be
     adv.push_mapval
     #=> [L, R, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr]
 
     # Load the values of the auxiliary segment of the execution trace at the current query
     
     # Set up the stack
-    exec.constants::zero_word_ptr mem_loadw
+    exec.constants::zero_word_ptr mem_loadw_be
     swapw padw
     #=> [Y, Y, C, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr]
 
@@ -181,7 +181,7 @@ proc.process_aux_segment_execution_trace
     #=> [Y, D, C, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr]
 
     # Load the leaf value we got using `mtree_get` and compare it against the hash we just computed
-    exec.constants::tmp3 mem_loadw
+    exec.constants::tmp3 mem_loadw_be
     assert_eqw.err=LEAF_VALUE_MISMATCH
     #=> [Y, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr]
 end
@@ -209,13 +209,13 @@ end
 #! Output: [Y, q_x_at_alpha_1, q_x_at_alpha_0, q_x_at_alpha_1, q_x_at_alpha_0, index, query_ptr]
 proc.process_constraints_composition_poly_trace
     # Load the commitment to the constraint trace
-    exec.constants::composition_poly_com_ptr mem_loadw
+    exec.constants::composition_poly_com_ptr mem_loadw_be
     #=> [R, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr]
 
     # Get the leaf against the commitment
     dup.9 movup.9
     mtree_get
-    exec.constants::tmp3 mem_storew
+    exec.constants::tmp3 mem_storew_be
     adv.push_mapval
     #=>[L, R, ptr_x, ptr_alpha_inv, acc1, acc0, index, query_ptr]
 
@@ -226,7 +226,7 @@ proc.process_constraints_composition_poly_trace
     #=> [Y, L, Y, ptr_x, ptr_alpha_inv, acc1, acc0, index, query_ptr]
 
     # Load the leaf value we got using `mtree_get` and compare it against the hash we just computed
-    exec.constants::tmp3 mem_loadw
+    exec.constants::tmp3 mem_loadw_be
     assert_eqw.err=LEAF_VALUE_MISMATCH
     #=> [Y, ptr_x, ptr_alpha_inv, acc1, acc0, index, query_ptr]
 

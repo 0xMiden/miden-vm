@@ -133,35 +133,11 @@ fn get_nodes_to_remove(
         .collect();
 
     for node in mast_forest.nodes() {
-        match node {
-            MastNode::Join(node) => {
-                if nodes_to_remove.contains(&node.first()) {
-                    nodes_to_remove.remove(&node.first());
-                }
-                if nodes_to_remove.contains(&node.second()) {
-                    nodes_to_remove.remove(&node.second());
-                }
-            },
-            MastNode::Split(node) => {
-                if nodes_to_remove.contains(&node.on_true()) {
-                    nodes_to_remove.remove(&node.on_true());
-                }
-                if nodes_to_remove.contains(&node.on_false()) {
-                    nodes_to_remove.remove(&node.on_false());
-                }
-            },
-            MastNode::Loop(node) => {
-                if nodes_to_remove.contains(&node.body()) {
-                    nodes_to_remove.remove(&node.body());
-                }
-            },
-            MastNode::Call(node) => {
-                if nodes_to_remove.contains(&node.callee()) {
-                    nodes_to_remove.remove(&node.callee());
-                }
-            },
-            MastNode::Block(_) | MastNode::Dyn(_) | MastNode::External(_) => (),
-        }
+        node.for_each_child(|child_id| {
+            if nodes_to_remove.contains(&child_id) {
+                nodes_to_remove.remove(&child_id);
+            }
+        });
     }
 
     nodes_to_remove

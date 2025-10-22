@@ -184,7 +184,7 @@ proc.reduce_variable_length_public_inputs
     #    We store them as [beta0, beta1, alpha0, alpha1] since `horner_eval_ext` requires memory
     #    word-alignment.
     adv_push.4
-    exec.constants::aux_rand_nd_ptr mem_storew
+    exec.constants::aux_rand_nd_ptr mem_storew_be
     # => [alpha1, alpha0, beta1, beta0, ...]
     dropw
     # => [...]
@@ -223,11 +223,11 @@ proc.reduce_kernel_digests
 
     # Store number of kernel procedures digests
     push.0.0 dup.2
-    exec.constants::tmp1 mem_storew
+    exec.constants::tmp1 mem_storew_be
     # => [num_ker_procedures, 0, 0, num_ker_procedures, digests_ptr, ...]
 
     # Load alpha
-    exec.constants::aux_rand_nd_ptr mem_loadw
+    exec.constants::aux_rand_nd_ptr mem_loadw_be
     # => [alpha1, alpha0, beta1, beta0, digests_ptr, ...]
 
     # We will keep [beta0, beta1, alpha0 + op_label, alpha1] on the stack so that we can compute
@@ -262,7 +262,7 @@ proc.reduce_kernel_digests
 
     # Build a boolean flag for the expression `num_ker_procedures > 0`.
     # This will be used to drive the loop reducing the digests
-    exec.constants::tmp1 mem_loadw dup
+    exec.constants::tmp1 mem_loadw_be dup
     push.0
     neq
 
@@ -306,8 +306,8 @@ proc.reduce_kernel_digests
         # => [Y, Y, alpha1, alpha0 + op_label, beta1, beta0, digests_ptr, beta_ptr, 0, 0, term1, term0, ...]
 
         # Subtract 1 from num_ker_digests
-        exec.constants::tmp1 mem_loadw sub.1
-        exec.constants::tmp1 mem_storew
+        exec.constants::tmp1 mem_loadw_be sub.1
+        exec.constants::tmp1 mem_storew_be
 
         # Compute flag to decide on exiting the loop
         dup
@@ -319,7 +319,7 @@ proc.reduce_kernel_digests
     dropw dropw dropw
     # => [digests_ptr, beta_ptr, 0, 0, term1, term0, ...]
     dup exec.constants::tmp2 mem_store
-    exec.constants::tmp1 mem_loadw drop drop drop
+    exec.constants::tmp1 mem_loadw_be drop drop drop
 
     # We now need to multiply all of the reduced values
     # We push the multiplicative identity element, the number of elements to multiply, and a boolean
@@ -357,7 +357,7 @@ proc.reduce_kernel_digests
     push.0.0
     # => [0, 0, inv_prod1, inv_prod0, digests_ptr, var_len_pub_inputs_res_ptr, ...]
     dup.5 add.4 swap.6
-    mem_storew
+    mem_storew_be
     dropw
     # => [digests_ptr, var_len_pub_inputs_res_ptr, ...]
 end

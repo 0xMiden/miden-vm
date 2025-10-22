@@ -64,7 +64,7 @@ winter-utils.workspace = true
 [dev-dependencies]
 criterion = { workspace = true }
 insta.workspace = true
-miden-serde-test-macros.workspace = true
+miden-test-serde-macros.workspace = true
 proptest.workspace = true
 serde_json = { workspace = true }
 winter-rand-utils.workspace = true

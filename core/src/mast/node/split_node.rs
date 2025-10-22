@@ -239,6 +239,14 @@ impl MastNodeExt for SplitNode {
         target.push(self.on_false());
     }
 
+    fn for_each_child<F>(&self, mut f: F)
+    where
+        F: FnMut(MastNodeId),
+    {
+        f(self.on_true());
+        f(self.on_false());
+    }
+
     fn domain(&self) -> Felt {
         Self::DOMAIN
     }

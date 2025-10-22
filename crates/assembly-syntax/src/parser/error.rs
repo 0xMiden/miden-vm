@@ -1,3 +1,6 @@
+// Allow unused assignments - required by miette::Diagnostic derive macro
+#![allow(unused_assignments)]
+
 use alloc::{
     string::{String, ToString},
     vec::Vec,
@@ -320,6 +323,14 @@ pub enum ParsingError {
         #[label("{message}")]
         span: SourceSpan,
         message: String,
+    },
+    #[error("deprecated instruction: `{instruction}` has been removed")]
+    #[diagnostic(help("use `{}` instead", replacement))]
+    DeprecatedInstruction {
+        #[label("this instruction is no longer supported")]
+        span: SourceSpan,
+        instruction: String,
+        replacement: String,
     },
 }
 

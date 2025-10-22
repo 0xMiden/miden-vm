@@ -10,7 +10,7 @@ use miden_utils_testing::{Felt, ONE, ToElements, assert_eq, build_debug_test};
 #[test]
 #[ignore]
 fn test_exec_iter() {
-    let source = "proc.foo.1 loc_store.0 end begin mem_storew.1 dropw push.17 exec.foo end";
+    let source = "proc.foo.1 loc_store.0 end begin mem_storew_be.1 dropw push.17 exec.foo end";
     let mut init_stack: Vec<u64> = Vec::new();
     (1..=16).for_each(|i| {
         init_stack.push(i);
@@ -79,7 +79,7 @@ fn test_exec_iter() {
                     mem_storew1_loc.clone(),
                     "$exec::$main".to_string(),
                     3,
-                    "mem_storew.1".to_string(),
+                    "mem_storew_be.1".to_string(),
                     false,
                 ),
                 1,
@@ -97,7 +97,7 @@ fn test_exec_iter() {
                     mem_storew1_loc.clone(),
                     "$exec::$main".to_string(),
                     3,
-                    "mem_storew.1".to_string(),
+                    "mem_storew_be.1".to_string(),
                     false,
                 ),
                 2,
@@ -115,7 +115,7 @@ fn test_exec_iter() {
                     mem_storew1_loc,
                     "$exec::$main".to_string(),
                     3,
-                    "mem_storew.1".to_string(),
+                    "mem_storew_be.1".to_string(),
                     false,
                 ),
                 3,

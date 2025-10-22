@@ -2,12 +2,8 @@
 members = [
     "air",
     "core",
-    "crates/assembly",
-    "crates/assembly-syntax",
-    "crates/debug/*",
-    "crates/utils/*",
+    "crates/*",
     "miden-vm",
-    "package",
     "processor",
     "prover",
     "stdlib",
@@ -44,16 +40,16 @@ miden-air = { path = "./air", version = "0.19", default-features = false }
 miden-assembly = { path = "./crates/assembly", version = "0.19", default-features = false }
 miden-assembly-syntax = { path = "./crates/assembly-syntax", version = "0.19", default-features = false }
 miden-core = { path = "./core", version = "0.19", default-features = false }
-miden-debug-types = { path = "./crates/debug/types", version = "0.19", default-features = false }
-miden-mast-package = { path = "./package", version = "0.19", default-features = false }
+miden-debug-types = { path = "./crates/debug-types", version = "0.19", default-features = false }
+miden-mast-package = { path = "./crates/mast-package", version = "0.19", default-features = false }
 miden-processor = { path = "./processor", version = "0.19", default-features = false }
-miden-serde-test-macros = { path = "./crates/utils/serde-test-macros", default-features = false }
+miden-test-serde-macros = { path = "./crates/test-serde-macros", default-features = false }
 miden-prover = { path = "./prover", version = "0.19", default-features = false }
 miden-stdlib = { path = "./stdlib", version = "0.19", default-features = false }
-miden-utils-diagnostics = { path = "./crates/utils/diagnostics", version = "0.19", default-features = false }
-miden-utils-indexing = { path = "./crates/utils/indexing", version = "0.19", default-features = false }
-miden-utils-sync = { path = "./crates/utils/sync", version = "0.19", default-features = false }
-miden-utils-testing = { path = "./crates/utils/testing", version = "0.1", package = "miden-test-utils" }
+miden-utils-diagnostics = { path = "./crates/utils-diagnostics", version = "0.19", default-features = false }
+miden-utils-indexing = { path = "./crates/utils-indexing", version = "0.19", default-features = false }
+miden-utils-sync = { path = "./crates/utils-sync", version = "0.19", default-features = false }
+miden-utils-testing = { path = "./crates/test-utils", version = "0.1", package = "miden-test-utils" }
 miden-verifier = { path = "./verifier", version = "0.19", default-features = false }
 
 # Miden crates

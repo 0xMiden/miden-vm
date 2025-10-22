@@ -1,3 +1,6 @@
+// Allow unused assignments - required by miette::Diagnostic derive macro
+#![allow(unused_assignments)]
+
 use miden_core::errors::KernelError;
 
 use crate::{

@@ -20,6 +20,7 @@ pub use miden_core::{
     crypto::merkle::SMT_DEPTH,
     errors::InputError,
     mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
+    precompile::PrecompileRequest,
     sys_events::SystemEvent,
     utils::DeserializationError,
 };
@@ -842,25 +843,62 @@ impl<'a> ProcessState<'a> {
         }
     }
 
-    /// Returns a word starting at the specified element index on the stack.
+    /// Returns a word starting at the specified element index on the stack in big-endian
+    /// (reversed) order.
     ///
     /// The word is formed by taking 4 consecutive elements starting from the specified index.
     /// For example, start_idx=0 creates a word from stack elements 0-3, start_idx=1 creates
     /// a word from elements 1-4, etc.
     ///
-    /// The words are created in reverse order. For a word starting at index N, stack element
-    /// N+3 will be at position 0 of the word, N+2 at position 1, N+1 at position 2, and N
-    /// at position 3.
+    /// In big-endian order, stack element N+3 will be at position 0 of the word, N+2 at
+    /// position 1, N+1 at position 2, and N at position 3. This matches the behavior of
+    /// `mem_loadw_be` where `mem[a+3]` ends up on top of the stack.
     ///
     /// This method can access elements beyond the top 16 positions by using the overflow table.
     /// Creating a word does not change the state of the stack.
     #[inline(always)]
-    pub fn get_stack_word(&self, start_idx: usize) -> Word {
+    pub fn get_stack_word_be(&self, start_idx: usize) -> Word {
         match self {
             ProcessState::Slow(state) => state.stack.get_word(start_idx),
             ProcessState::Fast(state) => state.processor.stack_get_word(start_idx),
             ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
         }
+    }
+
+    /// Returns a word starting at the specified element index on the stack in little-endian
+    /// (memory) order.
+    ///
+    /// The word is formed by taking 4 consecutive elements starting from the specified index.
+    /// For example, start_idx=0 creates a word from stack elements 0-3, start_idx=1 creates
+    /// a word from elements 1-4, etc.
+    ///
+    /// In little-endian order, stack element N will be at position 0 of the word, N+1 at
+    /// position 1, N+2 at position 2, and N+3 at position 3. This matches the behavior of
+    /// `mem_loadw_le` where `mem[a]` ends up on top of the stack.
+    ///
+    /// This method can access elements beyond the top 16 positions by using the overflow table.
+    /// Creating a word does not change the state of the stack.
+    #[inline(always)]
+    pub fn get_stack_word_le(&self, start_idx: usize) -> Word {
+        let mut word = self.get_stack_word_be(start_idx);
+        word.reverse();
+        word
+    }
+
+    /// Returns a word starting at the specified element index on the stack.
+    ///
+    /// This is an alias for [`Self::get_stack_word_be`] for backward compatibility. For new code,
+    /// prefer using the explicit `get_stack_word_be()` or `get_stack_word_le()` to make the
+    /// ordering expectations clear.
+    ///
+    /// See [`Self::get_stack_word_be`] for detailed documentation.
+    #[deprecated(
+        since = "0.19.0",
+        note = "Use `get_stack_word_be()` or `get_stack_word_le()` to make endianness explicit"
+    )]
+    #[inline(always)]
+    pub fn get_stack_word(&self, start_idx: usize) -> Word {
+        self.get_stack_word_be(start_idx)
     }
 
     /// Returns stack state at the current clock cycle. This includes the top 16 items of the

@@ -313,6 +313,13 @@ impl MastNodeExt for CallNode {
         target.push(self.callee());
     }
 
+    fn for_each_child<F>(&self, mut f: F)
+    where
+        F: FnMut(MastNodeId),
+    {
+        f(self.callee());
+    }
+
     fn domain(&self) -> Felt {
         self.domain()
     }

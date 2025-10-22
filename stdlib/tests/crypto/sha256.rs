@@ -40,7 +40,7 @@ fn sha256_hash_memory() {
         # Load input data into memory address 10000, 10004, ...
         mem_load.2 u32assert neq.0
         while.true
-            mem_load.0 mem_storew dropw
+            mem_load.0 mem_storew_be dropw
             mem_load.0 u32assert u32overflowing_add.4 assertz mem_store.0
             mem_load.2 u32assert u32overflowing_sub.1 assertz dup mem_store.2 u32assert neq.0
         end

@@ -59,7 +59,7 @@ thiserror.workspace = true
 
 [dev-dependencies]
 env_logger.workspace = true
-miden-serde-test-macros.workspace = true
+miden-test-serde-macros.workspace = true
 proptest.workspace = true
 pretty_assertions = "1.4"
 serde_json = { workspace = true }

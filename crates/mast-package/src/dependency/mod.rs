@@ -16,7 +16,7 @@ pub(crate) mod resolver;
 #[cfg_attr(feature = "serde", serde(transparent))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_serde_test_macros::serde_test(winter_serde(true))
+    miden_test_serde_macros::serde_test(winter_serde(true))
 )]
 pub struct DependencyName(String);
 
@@ -53,7 +53,7 @@ impl Deserializable for DependencyName {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_serde_test_macros::serde_test(winter_serde(true))
+    miden_test_serde_macros::serde_test(winter_serde(true))
 )]
 pub struct Dependency {
     /// The name of the dependency.

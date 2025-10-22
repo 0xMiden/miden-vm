@@ -132,6 +132,7 @@ pub mod sys_events;
 mod advice;
 pub use advice::map::AdviceMap;
 
+pub mod precompile;
 pub mod utils;
 
 // Re-export indexing functionality from the new standalone crate

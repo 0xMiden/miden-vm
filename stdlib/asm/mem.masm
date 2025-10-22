@@ -28,11 +28,11 @@ export.memcopy_words
   while.true
     # perform read (2 cycles)
     # stack: [a3, a2, a1, a0, -n, read_ptr, write_ptr, ...]
-    dup.5 mem_loadw
+    dup.5 mem_loadw_be
 
     # peform write (2 cycles)
     # stack: [a3, a2, a1, a0, -n, read_ptr, write_ptr, ...]
-    dup.6 mem_storew
+    dup.6 mem_storew_be
 
     # note: the values of `A` are no longer necessary, use 0 to signal its a
     # padding
@@ -138,7 +138,7 @@ export.pipe_words_to_memory.0
     # => [write_ptr, B', write_ptr+4, A, ...]
 
     # save data to memory (1 cycles)
-    mem_storew
+    mem_storew_be
     # => [B', write_ptr+1, A, ...]
 
     # Fix write_ptr position (2 cycles)

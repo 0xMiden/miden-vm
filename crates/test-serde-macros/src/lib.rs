@@ -39,7 +39,7 @@ use syn::{AttributeArgs, Ident, Item, Lit, Meta, MetaList, NestedMeta, Type, par
 ///
 /// Default (Serde tests only):
 /// ```rust
-/// # use miden_serde_test_macros::serde_test;
+/// # use miden_test_serde_macros::serde_test;
 /// # use proptest_derive::Arbitrary;
 /// # use serde::{Deserialize, Serialize};
 /// #[serde_test]
@@ -51,7 +51,7 @@ use syn::{AttributeArgs, Ident, Item, Lit, Meta, MetaList, NestedMeta, Type, par
 ///
 /// Winterfell tests only:
 /// ```rust
-/// # use miden_serde_test_macros::serde_test;
+/// # use miden_test_serde_macros::serde_test;
 /// # use proptest_derive::Arbitrary;
 /// #[serde_test(winter_serde(true), serde_test(false))]
 /// #[derive(Debug, PartialEq, Arbitrary)]
@@ -62,7 +62,7 @@ use syn::{AttributeArgs, Ident, Item, Lit, Meta, MetaList, NestedMeta, Type, par
 ///
 /// Both test types:
 /// ```rust
-/// # use miden_serde_test_macros::serde_test;
+/// # use miden_test_serde_macros::serde_test;
 /// # use proptest_derive::Arbitrary;
 /// # use serde::{Deserialize, Serialize};
 /// #[serde_test(winter_serde(true))]
@@ -75,7 +75,7 @@ use syn::{AttributeArgs, Ident, Item, Lit, Meta, MetaList, NestedMeta, Type, par
 ///
 /// Generic types:
 /// ```rust
-/// # use miden_serde_test_macros::serde_test;
+/// # use miden_test_serde_macros::serde_test;
 /// # use proptest_derive::Arbitrary;
 /// # use serde::{Deserialize, Serialize};
 /// #[serde_test(types(u64, "Vec<u64>"), types(u32, bool))]

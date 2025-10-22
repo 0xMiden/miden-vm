@@ -1,3 +1,6 @@
+// Allow unused assignments - required by miette::Diagnostic derive macro
+#![allow(unused_assignments)]
+
 use alloc::{sync::Arc, vec::Vec};
 
 use miden_air::RowIndex;
@@ -271,6 +274,8 @@ pub enum ExecutionError {
         source_file: Option<Arc<SourceFile>>,
         error: AceError,
     },
+    #[error("execution yielded unexpected precompiles")]
+    UnexpectedPrecompiles,
 }
 
 impl ExecutionError {

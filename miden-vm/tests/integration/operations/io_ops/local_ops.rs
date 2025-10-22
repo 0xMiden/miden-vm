@@ -119,9 +119,9 @@ fn storew_local() {
             loc_storew.0
         end
         begin
-            mem_storew.0
+            mem_storew_be.0
             dropw
-            mem_storew.4
+            mem_storew_be.4
             dropw
             exec.foo
         end";
