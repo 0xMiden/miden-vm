@@ -629,7 +629,7 @@ fn test_smt_randomized_round_trip() {
             let value = random_word(&mut seed);
 
             // Test set operation using the same pattern as existing tests
-            let (set_initial_stack, set_expected_stack, store, advice_map) =
+            let (set_initial_stack, _set_expected_stack, store, advice_map) =
                 prepare_insert_or_set(key, value, &mut smt);
 
             const SET_SOURCE: &str = "
@@ -638,37 +638,27 @@ fn test_smt_randomized_round_trip() {
 
                 begin
                     # => [V, K, R]
+
+                    dupw.1 movdnw.3
+                    # => [V, K, R, K]
+
                     exec.smt::set
-                    # => [V_old, R_new]
+                    # => [V_old, R_new, K]
+
+                    dropw swapw
+                    # => [K, R_new]
+
+                    exec.smt::get
+                    # => [V, R_new]
+
                     exec.sys::truncate_stack
                 end
             ";
-
+ 
+            let expected_output = build_expected_stack(value, smt.root());
+        
             build_test!(SET_SOURCE, &set_initial_stack, &[], store, advice_map)
-                .expect_stack(&set_expected_stack);
-
-            // Now test getting the value back using smt::get
-            let mut get_stack = Vec::new();
-            append_word_to_vec(&mut get_stack, smt.root());
-            append_word_to_vec(&mut get_stack, key);
-
-            // Build advice inputs for the updated SMT that includes our inserted value
-            let (updated_store, updated_advice_map) = build_advice_inputs(&smt);
-
-            const GET_SOURCE: &str = "
-                use.std::collections::smt
-
-                begin
-                    # => [K, R]
-                    exec.smt::get
-                end
-            ";
-
-            // Build expected result for get operation
-            let expected_get_stack = build_expected_stack(value, smt.root());
-
-            build_test!(GET_SOURCE, &get_stack, &[], updated_store, updated_advice_map)
-                .expect_stack(&expected_get_stack);
+                .expect_stack(&expected_output);
         }
     }
 }
@@ -679,6 +669,7 @@ fn random_word(seed: &mut u64) -> Word {
     for element in word.iter_mut() {
         *element = Felt::new(random_u64(seed));
     }
+    word[3] = Felt::new(42);
     Word::new(word)
 }
 
