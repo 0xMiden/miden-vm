@@ -331,7 +331,7 @@ transcript state internally between invocations.
 
 #### Hasher chiplet
 
-The following two messages are sent to the hasher chiplet, ensuring the validity of the resulting permutation. Let row $r$ be the cycle where `log_precompile` executes and $s_i$ denote the $i$-th stack column at that row (top of stack is $s_0$). The elements appearing on the bus are:
+The following two messages are sent to the hasher chiplet, ensuring the validity of the resulting permutation. Let $s_i$ denote the $i$-th stack column at that row (top of stack is $s_0$). The elements appearing on the bus are:
 
 $$
 \begin{aligned}
