@@ -225,7 +225,7 @@ unsafe impl<T: Send, F: Send + Fn() -> T> Send for RacyLock<T, F> {}
 
 // `Sync` requires that shared access through `&self` is safe, which implies
 // both the stored `T` and the initializer `F` can be shared across threads.
-unsafe impl<T: Sync, F: Sync + Fn() -> T> Sync for RacyLock<T, F> {}
+unsafe impl<T: Send + Sync, F: Send> Sync for RacyLock<T, F> {}
 
 #[cfg(test)]
 mod tests {
