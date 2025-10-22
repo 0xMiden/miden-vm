@@ -26,7 +26,7 @@ export.preprocess.16
         dup.5                           #[ptr, Q, num_queries, ptr,..]
         u32wrapping_add.4               #[ptr+4, Q, num_queries, ptr, ..]
         swap.6                          #[ptr, Q, num_queries, ptr+4, ..]
-        mem_storew                      #[Q, num_queries, ptr+4, ..]
+        mem_storew_be                      #[Q, num_queries, ptr+4, ..]
         dup.4
         sub.1                           #[num_queries-1, Q, num_queries, ptr+4, ..]
         swap.5                          #[num_queries, Q, num_queries-1, ptr+4, ..]
@@ -53,7 +53,7 @@ export.preprocess.16
         dup.5
         u32wrapping_add.4
         swap.6
-        mem_storew
+        mem_storew_be
         dup.4
         sub.1
         swap.5
@@ -81,7 +81,7 @@ export.preprocess.16
         dup.5
         u32wrapping_add.4
         swap.6
-        mem_storew
+        mem_storew_be
         dup.4
         sub.1
         swap.5
@@ -108,10 +108,10 @@ export.verify_query_layer.12
     swapdw
     movup.8
     add.4
-    mem_loadw   # load [a0, a1, t_depth, d_size] from layer_ptr + 4
+    mem_loadw_be   # load [a0, a1, t_depth, d_size] from layer_ptr + 4
     swapw
     movup.8
-    mem_loadw   # load C from layer_ptr
+    mem_loadw_be   # load C from layer_ptr
     # => [C, d_size, t_depth, a1, a0, poe, p, e1, e0, layer_ptr, rem_ptr, ...]
 
     # verify Merkle auth path for (index = f_pos, depth = t_depth, Root = C) (19 cycles)
@@ -153,10 +153,10 @@ export.verify_query_layer.12
 
     # load (v7, ..v0) from memory (8 cycles)
     exec.constants::tmp3
-    mem_loadw
+    mem_loadw_be
     swapw
     exec.constants::tmp4
-    mem_loadw
+    mem_loadw_be
     # => [v7, ..., v0, f_pos, d_seg, poe, e1, e0, a1, a0, layer_ptr, rem_ptr, ...]
 
     # fold by 4 (1 cycle)
@@ -220,7 +220,7 @@ export.verify_query_64
     exec.constants::tmp2 mem_store
     # => [rem_ptr, rem_ptr, f_pos, ne1, ne0, rem_ptr, rem_ptr, x, x, x, x, x, x, x, x, ...]
 
-    push.0 exec.constants::tmp1 mem_loadw
+    push.0 exec.constants::tmp1 mem_loadw_be
     # => [P, ne1, ne0, rem_ptr, rem_ptr, x, x, x, x, x, x, x, x, ...]
 
     swapw swapdw
@@ -279,7 +279,7 @@ export.verify_query_128
     exec.constants::tmp2 mem_store
     # => [rem_ptr, rem_ptr, f_pos, ne1, ne0, rem_ptr, rem_ptr, x, x, x, x, x, x, x, x, ...]
 
-    push.0 exec.constants::tmp1 mem_loadw
+    push.0 exec.constants::tmp1 mem_loadw_be
     # => [P, ne1, ne0, rem_ptr, rem_ptr, x, x, x, x, x, x, x, x, ...]
 
     swapw swapdw
@@ -342,13 +342,13 @@ proc.verify_64.4
     # a pointer to the evaluation point and a pointer to the location of the polynomial.
     push.0.0 
     exec.constants::tmp2 exec.constants::get_remainder_poly_address
-    exec.constants::tmp1 mem_storew
+    exec.constants::tmp1 mem_storew_be
     movup.4
 
     while.true
         # load [e0, e1, p, poe] from memory i.e. next query data (7 cycles)
         movup.4
-        mem_loadw
+        mem_loadw_be
         # => [poe, p, e1, e0, layer_ptr, rem_ptr, g, ...]
 
         # we now have everything to verify query p
@@ -420,13 +420,13 @@ proc.verify_128.4
     # a pointer to the evaluation point and a pointer to the location of the polynomial.
     push.0.0 
     exec.constants::tmp2 exec.constants::get_remainder_poly_address
-    exec.constants::tmp1 mem_storew
+    exec.constants::tmp1 mem_storew_be
     movup.4
     
     while.true
         # load [e0, e1, p, poe] from memory i.e. next query data (7 cycles)
         movup.4
-        mem_loadw
+        mem_loadw_be
         # => [poe, p, e1, e0, layer_ptr, rem_ptr, g, ...]
 
         # we now have everything to verify query p

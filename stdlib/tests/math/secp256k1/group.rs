@@ -61,7 +61,7 @@ fn test_secp256k1_point_doubling(src: Point, dst: Point) {
         # --- start asserting X3 ---
         push.0.0.0.0
         movup.4
-        mem_loadw
+        mem_loadw_be
 
         u32assert eq.{}
         assert
@@ -74,7 +74,7 @@ fn test_secp256k1_point_doubling(src: Point, dst: Point) {
 
         push.0.0.0.0
         movup.4
-        mem_loadw
+        mem_loadw_be
 
         u32assert eq.{}
         assert
@@ -89,7 +89,7 @@ fn test_secp256k1_point_doubling(src: Point, dst: Point) {
         # --- start asserting Y3 ---
         push.0.0.0.0
         movup.4
-        mem_loadw
+        mem_loadw_be
 
         u32assert eq.{}
         assert
@@ -102,7 +102,7 @@ fn test_secp256k1_point_doubling(src: Point, dst: Point) {
 
         push.0.0.0.0
         movup.4
-        mem_loadw
+        mem_loadw_be
 
         u32assert eq.{}
         assert
@@ -117,7 +117,7 @@ fn test_secp256k1_point_doubling(src: Point, dst: Point) {
         # --- start asserting Z3 ---
         push.0.0.0.0
         movup.4
-        mem_loadw
+        mem_loadw_be
 
         u32assert eq.{}
         assert
@@ -130,7 +130,7 @@ fn test_secp256k1_point_doubling(src: Point, dst: Point) {
 
         push.0.0.0.0
         movup.4
-        mem_loadw
+        mem_loadw_be
 
         u32assert eq.{}
         assert
@@ -288,7 +288,7 @@ fn test_secp256k1_point_addition(src0: Point, src1: Point, dst: Point) {
         # --- start asserting X3 ---
         push.0.0.0.0
         movup.4
-        mem_loadw
+        mem_loadw_be
 
         u32assert eq.{}
         assert
@@ -301,7 +301,7 @@ fn test_secp256k1_point_addition(src0: Point, src1: Point, dst: Point) {
 
         push.0.0.0.0
         movup.4
-        mem_loadw
+        mem_loadw_be
 
         u32assert eq.{}
         assert
@@ -316,7 +316,7 @@ fn test_secp256k1_point_addition(src0: Point, src1: Point, dst: Point) {
         # --- start asserting Y3 ---
         push.0.0.0.0
         movup.4
-        mem_loadw
+        mem_loadw_be
 
         u32assert eq.{}
         assert
@@ -329,7 +329,7 @@ fn test_secp256k1_point_addition(src0: Point, src1: Point, dst: Point) {
 
         push.0.0.0.0
         movup.4
-        mem_loadw
+        mem_loadw_be
 
         u32assert eq.{}
         assert
@@ -344,7 +344,7 @@ fn test_secp256k1_point_addition(src0: Point, src1: Point, dst: Point) {
         # --- start asserting Z3 ---
         push.0.0.0.0
         movup.4
-        mem_loadw
+        mem_loadw_be
 
         u32assert eq.{}
         assert
@@ -357,7 +357,7 @@ fn test_secp256k1_point_addition(src0: Point, src1: Point, dst: Point) {
 
         push.0.0.0.0
         movup.4
-        mem_loadw
+        mem_loadw_be
 
         u32assert eq.{}
         assert
@@ -513,7 +513,7 @@ fn test_secp256k1_point_multiplication(src_point: Point, scalar: FieldElement, d
         # --- start asserting X ---
         push.0.0.0.0
         movup.4
-        mem_loadw
+        mem_loadw_be
 
         u32assert eq.{}
         assert
@@ -526,7 +526,7 @@ fn test_secp256k1_point_multiplication(src_point: Point, scalar: FieldElement, d
 
         push.0.0.0.0
         movup.4
-        mem_loadw
+        mem_loadw_be
 
         u32assert eq.{}
         assert
@@ -541,7 +541,7 @@ fn test_secp256k1_point_multiplication(src_point: Point, scalar: FieldElement, d
         # --- start asserting Y ---
         push.0.0.0.0
         movup.4
-        mem_loadw
+        mem_loadw_be
 
         u32assert eq.{}
         assert
@@ -554,7 +554,7 @@ fn test_secp256k1_point_multiplication(src_point: Point, scalar: FieldElement, d
 
         push.0.0.0.0
         movup.4
-        mem_loadw
+        mem_loadw_be
 
         u32assert eq.{}
         assert
@@ -569,7 +569,7 @@ fn test_secp256k1_point_multiplication(src_point: Point, scalar: FieldElement, d
         # --- start asserting Z ---
         push.0.0.0.0
         movup.4
-        mem_loadw
+        mem_loadw_be
 
         u32assert eq.{}
         assert
@@ -582,7 +582,7 @@ fn test_secp256k1_point_multiplication(src_point: Point, scalar: FieldElement, d
 
         push.0.0.0.0
         movup.4
-        mem_loadw
+        mem_loadw_be
 
         u32assert eq.{}
         assert
@@ -689,7 +689,7 @@ fn test_secp256k1_generator_multiplication(scalar: FieldElement, point: Point) {
         # --- start asserting X ---
         push.0.0.0.0
         movup.4
-        mem_loadw
+        mem_loadw_be
 
         u32assert eq.{}
         assert
@@ -702,7 +702,7 @@ fn test_secp256k1_generator_multiplication(scalar: FieldElement, point: Point) {
 
         push.0.0.0.0
         movup.4
-        mem_loadw
+        mem_loadw_be
 
         u32assert eq.{}
         assert
@@ -717,7 +717,7 @@ fn test_secp256k1_generator_multiplication(scalar: FieldElement, point: Point) {
         # --- start asserting Y ---
         push.0.0.0.0
         movup.4
-        mem_loadw
+        mem_loadw_be
 
         u32assert eq.{}
         assert
@@ -730,7 +730,7 @@ fn test_secp256k1_generator_multiplication(scalar: FieldElement, point: Point) {
 
         push.0.0.0.0
         movup.4
-        mem_loadw
+        mem_loadw_be
 
         u32assert eq.{}
         assert
@@ -745,7 +745,7 @@ fn test_secp256k1_generator_multiplication(scalar: FieldElement, point: Point) {
         # --- start asserting Z ---
         push.0.0.0.0
         movup.4
-        mem_loadw
+        mem_loadw_be
 
         u32assert eq.{}
         assert
@@ -758,7 +758,7 @@ fn test_secp256k1_generator_multiplication(scalar: FieldElement, point: Point) {
 
         push.0.0.0.0
         movup.4
-        mem_loadw
+        mem_loadw_be
 
         u32assert eq.{}
         assert

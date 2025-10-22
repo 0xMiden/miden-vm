@@ -158,8 +158,8 @@ fn test_hash_even_words() {
     use.std::crypto::hashes::rpo
 
     begin
-        push.1.0.0.0.1000 mem_storew dropw
-        push.0.1.0.0.1004 mem_storew dropw
+        push.1.0.0.0.1000 mem_storew_be dropw
+        push.0.1.0.0.1004 mem_storew_be dropw
 
         push.1008 # end address
         push.1000 # start address
@@ -186,9 +186,9 @@ fn test_hash_odd_words() {
     use.std::crypto::hashes::rpo
 
     begin
-        push.1.0.0.0.1000 mem_storew dropw
-        push.0.1.0.0.1004 mem_storew dropw
-        push.0.0.1.0.1008 mem_storew dropw
+        push.1.0.0.0.1000 mem_storew_be dropw
+        push.0.1.0.0.1004 mem_storew_be dropw
+        push.0.0.1.0.1008 mem_storew_be dropw
 
         push.1012 # end address
         push.1000 # start address
@@ -216,8 +216,8 @@ fn test_absorb_double_words_from_memory() {
     use.std::crypto::hashes::rpo
 
     begin
-        push.1.0.0.0.1000 mem_storew dropw
-        push.0.1.0.0.1004 mem_storew dropw
+        push.1.0.0.0.1000 mem_storew_be dropw
+        push.0.1.0.0.1004 mem_storew_be dropw
 
         push.1008      # end address
         push.1000      # start address
@@ -252,10 +252,10 @@ fn test_hash_memory_double_words() {
 
     begin
         # store four words (two double words) in memory
-        push.1.0.0.0.1000 mem_storew dropw
-        push.0.1.0.0.1004 mem_storew dropw
-        push.0.0.1.0.1008 mem_storew dropw
-        push.0.0.0.1.1012 mem_storew dropw
+        push.1.0.0.0.1000 mem_storew_be dropw
+        push.0.1.0.0.1004 mem_storew_be dropw
+        push.0.0.1.0.1008 mem_storew_be dropw
+        push.0.0.0.1.1012 mem_storew_be dropw
 
         push.1016      # end address
         push.1000      # start address
@@ -310,10 +310,10 @@ fn test_squeeze_digest() {
     use.std::crypto::hashes::rpo
 
     begin
-        push.1.0.0.0.1000 mem_storew dropw
-        push.0.1.0.0.1004 mem_storew dropw
-        push.0.0.1.0.1008 mem_storew dropw
-        push.0.0.0.1.1012 mem_storew dropw
+        push.1.0.0.0.1000 mem_storew_be dropw
+        push.0.1.0.0.1004 mem_storew_be dropw
+        push.0.0.1.0.1008 mem_storew_be dropw
+        push.0.0.0.1.1012 mem_storew_be dropw
 
         push.1016      # end address
         push.1000      # start address
@@ -349,8 +349,8 @@ fn test_copy_digest() {
     use.std::crypto::hashes::rpo
 
     begin
-        push.1.0.0.0.1000 mem_storew dropw
-        push.0.1.0.0.1004 mem_storew dropw
+        push.1.0.0.0.1000 mem_storew_be dropw
+        push.0.1.0.0.1004 mem_storew_be dropw
 
         push.1008      # end address
         push.1000      # start address
@@ -399,8 +399,8 @@ fn test_hash_memory() {
     use.std::crypto::hashes::rpo
 
     begin
-        push.1.2.3.4.1000 mem_storew dropw
-        push.5.0.0.0.1004 mem_storew dropw
+        push.1.2.3.4.1000 mem_storew_be dropw
+        push.5.0.0.0.1004 mem_storew_be dropw
         push.11
 
         push.5.1000
@@ -425,8 +425,8 @@ fn test_hash_memory() {
     use.std::crypto::hashes::rpo
 
     begin
-        push.1.2.3.4.1000 mem_storew dropw
-        push.5.6.7.8.1004 mem_storew dropw
+        push.1.2.3.4.1000 mem_storew_be dropw
+        push.5.6.7.8.1004 mem_storew_be dropw
         push.11
 
         push.8.1000
@@ -451,10 +451,10 @@ fn test_hash_memory() {
     use.std::crypto::hashes::rpo
 
     begin
-        push.1.2.3.4.1000 mem_storew dropw
-        push.5.6.7.8.1004 mem_storew dropw
-        push.9.10.11.12.1008 mem_storew dropw
-        push.13.14.15.0.1012 mem_storew dropw
+        push.1.2.3.4.1000 mem_storew_be dropw
+        push.5.6.7.8.1004 mem_storew_be dropw
+        push.9.10.11.12.1008 mem_storew_be dropw
+        push.13.14.15.0.1012 mem_storew_be dropw
         push.11
 
         push.15.1000

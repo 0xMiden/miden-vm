@@ -67,10 +67,10 @@ end
 #! Input: [max_cycle_len_log, ...]
 #! Output: [...]
 export.set_up_auxiliary_inputs_ace
-    padw exec.constants::composition_coef_ptr mem_loadw
+    padw exec.constants::composition_coef_ptr mem_loadw_be
 
     # z and z^N
-    push.0.0 exec.constants::z_ptr mem_loadw
+    push.0.0 exec.constants::z_ptr mem_loadw_be
     # => [(z_1, z_0)^n, z_1, z_0, alpha1, alpha0, max_cycle_len_log, ...]
 
     exec.constants::get_trace_length_log
@@ -109,18 +109,18 @@ export.set_up_auxiliary_inputs_ace
 
     # Save [z_k_0, z_k_1, g^-2, 0]
     exec.constants::auxiliary_ace_inputs_ptr add.8
-    mem_storew
+    mem_storew_be
     dropw
     # => [0, g^-1, (z_1, z_0)^n, z_1, z_0, alpha1, alpha0, ...]
 
     # Save [(z_0, z_1)^n, g^-1, 0]
     exec.constants::auxiliary_ace_inputs_ptr add.4
-    mem_storew
+    mem_storew_be
     dropw
 
     # Save [alpha0, alpha1, z_0, z_1]
     exec.constants::auxiliary_ace_inputs_ptr
-    mem_storew
+    mem_storew_be
     dropw
     # => [...]
 end
@@ -138,9 +138,9 @@ end
 #! Input: [D3, D2, D1, D0, ...]
 #! Output: [...]
 export.store_dynamically_executed_procedures
-    exec.constants::get_procedure_digest_process_public_inputs_ptr mem_storew dropw
-    exec.constants::get_procedure_digest_process_row_ood_evaluations_ptr mem_storew dropw
-    exec.constants::get_procedure_digest_execute_constraint_evaluation_check_ptr mem_storew dropw
-    exec.constants::get_procedure_digest_compute_deep_composition_polynomial_queries_ptr mem_storew dropw
+    exec.constants::get_procedure_digest_process_public_inputs_ptr mem_storew_be dropw
+    exec.constants::get_procedure_digest_process_row_ood_evaluations_ptr mem_storew_be dropw
+    exec.constants::get_procedure_digest_execute_constraint_evaluation_check_ptr mem_storew_be dropw
+    exec.constants::get_procedure_digest_compute_deep_composition_polynomial_queries_ptr mem_storew_be dropw
     # => [...]
 end

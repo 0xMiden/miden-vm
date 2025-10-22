@@ -28,8 +28,10 @@
 - `after_exit` decorators execute in the correct sequence in External nodes in the Fast processor ([#2247](https://github.com/0xMiden/miden-vm/pull/2247)).
 - Remove O(n log m) iteration in parallel processor (#[2273](https://github.com/0xMiden/miden-vm/pull/2273)).
 - [BREAKING] Add `log_precompile` opcode ([#2147](https://github.com/0xMiden/miden-vm/issues/2147)).
+- [BREAKING] Deprecated `mem_loadw` and `mem_storew` instructions in favor of explicit endianness variants (`mem_loadw_be`, `mem_loadw_le`, `mem_storew_be`, `mem_storew_le`) ([#2186](https://github.com/0xMiden/miden-vm/issues/2186)).
 - [BREAKING] add pre/post decorators to BasicBlockNode fingerprint ([#2267](https://github.com/0xMiden/miden-vm/pull/2267)).
 - [BREAKING] Added explicit endianness methods `get_stack_word_be()` and `get_stack_word_le()` to stack word accessors, deprecated ambiguous `get_stack_word()` ([#2235](https://github.com/0xMiden/miden-vm/issues/2235)).
+- Fix decorator offset bug in `BasicBlockNode` padding ([#2305](https://github.com/0xMiden/miden-vm/pull/2305)).
 
 ## 0.18.2 (2025-10-10)
 

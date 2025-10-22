@@ -42,7 +42,7 @@ export.load_and_horner_eval_ood_frames
 
     # Save the random challenge
     dup.1 dup.1
-    exec.constants::deep_rand_alpha_nd_ptr mem_storew
+    exec.constants::deep_rand_alpha_nd_ptr mem_storew_be
     # => [Y]
 
     # --- Compute Q^z(alpha) --------------------------------------------------
@@ -78,7 +78,7 @@ export.load_and_horner_eval_ood_frames
     movup.3 neg
     movup.3 neg
     push.0.0
-    exec.constants::ood_fixed_term_horner_evaluations_ptr mem_storew
+    exec.constants::ood_fixed_term_horner_evaluations_ptr mem_storew_be
     # => [0, 0, -acc1, -acc0, ood_frame_ptr, alpha_ptr, Y, C, Y]
 
     # --- Compute Q^gz(alpha) -------------------------------------------------

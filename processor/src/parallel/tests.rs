@@ -521,7 +521,7 @@ fn basic_block_program_multiple_batches() -> Program {
 }
 
 /// (join (
-///     (block push(40) mem_storew drop drop drop drop push(40) noop noop)
+///     (block push(40) mem_storew_be drop drop drop drop push(40) noop noop)
 ///     (dyn)
 /// )
 fn dyn_program() -> Program {
@@ -560,7 +560,7 @@ fn dyn_program() -> Program {
 }
 
 /// (join (
-///     (block push(40) mem_storew drop drop drop drop push(40) noop noop)
+///     (block push(40) mem_storew_be drop drop drop drop push(40) noop noop)
 ///     (dyncall)
 /// )
 fn dyncall_program() -> Program {

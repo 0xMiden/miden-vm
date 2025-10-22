@@ -2,12 +2,12 @@
 //!
 //! This module provides utilities for working with u32-indexed vectors in a type-safe manner,
 //! including the `IndexVec` type and related functionality.
-
 #![no_std]
 #![allow(clippy::arithmetic_side_effects)]
 
 extern crate alloc;
 
+#[doc = include_str!("../README.md")]
 use alloc::{collections::BTreeMap, vec, vec::Vec};
 use core::{fmt::Debug, marker::PhantomData, ops};
 

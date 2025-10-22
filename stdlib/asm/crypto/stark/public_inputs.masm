@@ -109,7 +109,7 @@ end
 proc.load_base_store_extension_double_word
     # 1) Load the first 4 base elements from the advice stack and save them temporarily 
     adv_loadw
-    exec.constants::tmp1 mem_storew
+    exec.constants::tmp1 mem_storew_be
 
     # 2) Represent the first 4 base field elements as elements in the quadratic extension field
     swapw
@@ -125,17 +125,17 @@ proc.load_base_store_extension_double_word
     # 3) Save the first 2 extension field elements
     swapw
     dup.12
-    mem_storew
+    mem_storew_be
 
     # 4) Load the second 4 base elements from the advice stack and save them temporarily
     adv_loadw
-    exec.constants::tmp2 mem_storew
+    exec.constants::tmp2 mem_storew_be
     swapw
     # => [0, a3, 0, a2, a7, a6, a5, a4, C, ptr, ...]
 
     # 5) Save the second 2 extension field elements
     dup.12 add.4
-    mem_storew
+    mem_storew_be
 
     
     # 6) Represent the second 4 base field elements as elements in the quadratic extension field
@@ -151,8 +151,8 @@ proc.load_base_store_extension_double_word
     swapw
     dup.12
     add.8
-    mem_storew
-    exec.constants::tmp1 mem_loadw
+    mem_storew_be
+    exec.constants::tmp1 mem_loadw_be
     swapw
 
     # 8) Save the fourth 2 extension field elements
@@ -160,7 +160,7 @@ proc.load_base_store_extension_double_word
     dup.12
     add.16 swap.13
     add.12
-    mem_storew
-    exec.constants::tmp2 mem_loadw
+    mem_storew_be
+    exec.constants::tmp2 mem_loadw_be
     # => [a7, a6, a5, a4, a3, a2, a1, a0, C, ptr, ...]
 end

@@ -75,7 +75,7 @@ export.verify
     # Cycles: 56
     padw
     adv_loadw
-    exec.constants::main_trace_com_ptr mem_storew
+    exec.constants::main_trace_com_ptr mem_storew_be
     # => [main_trace_commitment, is_aux_trace, ...]
     exec.random_coin::reseed
     # => [is_aux_trace, ...]
@@ -94,7 +94,7 @@ export.verify
         # Cycles: 64
         padw
         adv_loadw
-        exec.constants::aux_trace_com_ptr mem_storew
+        exec.constants::aux_trace_com_ptr mem_storew_be
         exec.random_coin::reseed
         # => [...]
     end
@@ -117,7 +117,7 @@ export.verify
     # Cycles: 88 + 18 * log(trace_length)
     padw
     adv_loadw
-    exec.constants::composition_poly_com_ptr mem_storew
+    exec.constants::composition_poly_com_ptr mem_storew_be
     exec.random_coin::reseed
     exec.random_coin::generate_z_zN
     # => [...]

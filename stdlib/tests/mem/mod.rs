@@ -13,11 +13,11 @@ fn test_memcopy_words() {
     use.std::mem
 
     begin
-        push.0.0.0.1.1000 mem_storew dropw
-        push.0.0.1.0.1004 mem_storew dropw
-        push.0.0.1.1.1008 mem_storew dropw
-        push.0.1.0.0.1012 mem_storew dropw
-        push.0.1.0.1.1016 mem_storew dropw
+        push.0.0.0.1.1000 mem_storew_be dropw
+        push.0.0.1.0.1004 mem_storew_be dropw
+        push.0.0.1.1.1008 mem_storew_be dropw
+        push.0.1.0.0.1012 mem_storew_be dropw
+        push.0.1.0.1.1016 mem_storew_be dropw
 
         push.2000.1000.5 exec.mem::memcopy_words
     end

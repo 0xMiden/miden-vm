@@ -372,7 +372,7 @@ mod tests {
 
     #[test]
     fn analyze_test() {
-        let source = "proc.foo.1 loc_store.0 end begin mem_storew.4 dropw push.17 push.1 movdn.2 exec.foo drop end";
+        let source = "proc.foo.1 loc_store.0 end begin mem_storew_be.4 dropw push.17 push.1 movdn.2 exec.foo drop end";
         let stack_inputs = StackInputs::default();
         let advice_inputs = AdviceInputs::default();
         let host = DefaultHost::default();
@@ -384,7 +384,7 @@ mod tests {
                 AsmOpStats::new("drop".to_string(), 1, 1),
                 AsmOpStats::new("dropw".to_string(), 1, 4),
                 AsmOpStats::new("loc_store".to_string(), 1, 4),
-                AsmOpStats::new("mem_storew".to_string(), 1, 2),
+                AsmOpStats::new("mem_storew_be".to_string(), 1, 2),
                 AsmOpStats::new("movdn.2".to_string(), 1, 1),
                 AsmOpStats::new("push".to_string(), 2, 3),
             ],

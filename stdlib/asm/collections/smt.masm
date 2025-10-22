@@ -424,7 +424,7 @@ proc.get_multi_leaf_value.8192
         # => [val_ptr, x, x, x, x, R]
 
         # (1 cycle)
-        mem_loadw
+        mem_loadw_be
         # => [V, R]
     else
         # If the key wasn't found, then the key's value is an empty word.

@@ -218,8 +218,6 @@ pub enum Instruction {
 
     MemLoad,
     MemLoadImm(ImmU32),
-    MemLoadW,
-    MemLoadWImm(ImmU32),
     MemLoadWBe,
     MemLoadWBeImm(ImmU32),
     MemLoadWLe,
@@ -229,8 +227,6 @@ pub enum Instruction {
 
     MemStore,
     MemStoreImm(ImmU32),
-    MemStoreW,
-    MemStoreWImm(ImmU32),
     MemStoreWBe,
     MemStoreWBeImm(ImmU32),
     MemStoreWLe,

@@ -229,8 +229,6 @@ impl PrettyPrint for Instruction {
 
             Self::MemLoad => const_text("mem_load"),
             Self::MemLoadImm(value) => inst_with_imm("mem_load", value),
-            Self::MemLoadW => const_text("mem_loadw"),
-            Self::MemLoadWImm(value) => inst_with_imm("mem_loadw", value),
             Self::MemLoadWBe => const_text("mem_loadw_be"),
             Self::MemLoadWBeImm(value) => inst_with_imm("mem_loadw_be", value),
             Self::MemLoadWLe => const_text("mem_loadw_le"),
@@ -240,8 +238,6 @@ impl PrettyPrint for Instruction {
 
             Self::MemStore => const_text("mem_store"),
             Self::MemStoreImm(value) => inst_with_imm("mem_store", value),
-            Self::MemStoreW => const_text("mem_storew"),
-            Self::MemStoreWImm(value) => inst_with_imm("mem_storew", value),
             Self::MemStoreWBe => const_text("mem_storew_be"),
             Self::MemStoreWBeImm(value) => inst_with_imm("mem_storew_be", value),
             Self::MemStoreWLe => const_text("mem_storew_le"),
