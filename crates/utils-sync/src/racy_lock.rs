@@ -196,10 +196,7 @@ where
     }
 }
 
-impl<T, F> Drop for RacyLock<T, F>
-where
-    F: Fn() -> T,
-{
+impl<T, F> Drop for RacyLock<T, F> {
     /// Drops the underlying pointer.
     fn drop(&mut self) {
         let ptr = *self.inner.get_mut();
