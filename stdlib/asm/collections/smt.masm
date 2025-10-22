@@ -676,9 +676,84 @@ proc.set_multi_leaf.8192
     locaddr.0 movdn.12
     # => [V, K, NV, start_ptr, end_ptr, leaf_size, R]
 
-    exec.insert_or_replace_in_multi_leaf
-end
+    # Prepare for sorted_array::find_key_value
 
+    swapw
+    # => [K, V, NV, start_ptr, end_ptr, leaf_size, R]
+    movupw.2 dropw
+    # => [K, V, start_ptr, end_ptr, leaf_size, R]
+
+    movup.10 drop
+    # => [K, V, start_ptr, end_ptr, R]
+
+    swapw dupw.1
+    # => [K, V, K, start_ptr, end_ptr, R]
+
+    movup.12 movdn.4
+    # => [K, start_ptr, V, K, end_ptr, R]
+
+    movup.13 movdn.5
+    # => [K, start_ptr, end_ptr; V, K, R]
+
+    exec.sorted_array::find_key_value
+    # => [is_key_found, key_ptr, start_ptr, end_ptr; V, K, R]
+    if.true
+        # => [key_ptr, start_ptr, end_ptr, V, K, R]
+
+        # We're replacing or removing an existing value.
+        # To check which, we'll word-align the stack for a moment.
+        push.0
+        # => [X, V, K, R]
+        swapw padw
+        # => [ZERO, V, X, K, R]
+
+        eqw movdn.8
+        # => [ZERO, V, V==EMPTY, 0, key_ptr, start_ptr, end_ptr, K, R]
+
+        dropw
+        # => [V, V==EMPTY, 0, key_ptr, start_ptr, end_ptr, K, R]
+
+        # Drop 0 to word-align the stack.
+        movup.5 drop
+        # => [V, V==EMPTY, key_ptr, start_ptr, end_ptr, V, K, R]
+
+        swapw
+        # => [V==EMPTY, key_ptr, start_ptr, end_ptr, V, K, R]
+
+        if.true
+            exec.remove_in_multi_leaf
+        else
+            exec.replace_in_multi_leaf
+        end
+    else
+        # => [key_ptr, start_ptr, end_ptr, V, K, R]
+
+        # We still need to check if V is empty, which would make this a no-op.
+        push.0
+        # => [X, V, K, R]
+        swapw padw
+        # => [ZERO, V, X, K, R]
+        eqw
+        if.true
+            # No-op case. Clean up the stack.
+
+            # => [ZERO, V, X, K, R]
+            dropw swapw dropw
+            # => [V, K, R]
+            swapw dropw
+            # => [V, R]
+        else
+            # We're inserting a new value in the sorted array.
+
+            # => [ZERO, V, X, K, R]
+            dropw
+            swapw drop
+            # => [key_ptr, start_ptr, end_ptr, V, K, R]
+
+            exec.insert_into_leaf
+        end
+    end
+end
 
 
 # MAX_LEAF_SIZE of key-value pairs + 4 pointers:
@@ -795,86 +870,62 @@ proc.insert_into_leaf.8196
     # => [ZERO, R_new]
 end
 
-proc.insert_or_replace_in_multi_leaf
-    # => [V, K, NV, start_ptr, end_ptr, leaf_size, R]
+proc.replace_in_multi_leaf
+    # => [key_ptr, start_ptr, end_ptr, V, K, R]
 
-    # Prepare for sorted_array::find_key_value
+    add.4
+    # => [val_ptr, start_ptr, end_ptr, V, K, R]
 
+    padw dup.4
+    # => [val_ptr, ZERO, val_ptr, start_ptr, end_ptr, V, K, R]
+    mem_loadw_be
+    # => [V_old, val_ptr, start_ptr, end_ptr, V, K, R]
+
+    # Word-align the stack for a moment.
+    push.0 movdn.4
+    # => [V_old, X, V, K, R]
+
+    swapw.2
+    # => [V, z, val_ptr, start_ptr, end_ptr, V_old, K, R]
+    dup.5
+    # => [val_ptr, V, z, val_ptr, start_ptr, end_ptr, V_old, K, R]
+    mem_storew_be
+    # => [V, z, val_ptr, start_ptr, end_ptr, V_old, K, R]
+
+    # Prepare for hash_memory_words
+
+    dropw
+    # => [z, val_ptr, start_ptr, end_ptr, V_old, K, R]
+    # => [X, V_old, K, R]
+
+    movupw.2
+    # => [K, X, V_old, R]
+
+    movupw.3
+    # => [R, K, X, V_old]
+
+    movupw.2
+    # => [X, R, K, V_old]
+    # => [z, val_ptr, start_ptr, end_ptr, R, K, V_old]
+
+    drop drop
+    # => [start_ptr, end_ptr, R, K, V_old]
+
+    dup.6 # K[3]
+    # => [leaf_index, start_ptr, end_ptr, R, K, V_old]
+
+    movdn.2
+    # => [start_ptr, end_ptr, leaf_index, R; K, V_old]
+
+    exec.hash_and_insert_mem
+    # => [NV_old, R_new; K, V_old]
+
+    dropw
+    # => [R_new, K, V_old]
+    swapw dropw
+    # => [R_new, V_old]
     swapw
-    # => [K, V, NV, start_ptr, end_ptr, leaf_size, R]
-    movupw.2 dropw
-    # => [K, V, start_ptr, end_ptr, leaf_size, R]
-
-    movup.10 drop
-    # => [K, V, start_ptr, end_ptr, R]
-
-    swapw dupw.1
-    # => [K, V, K, start_ptr, end_ptr, R]
-
-    movup.12 movdn.4
-    # => [K, start_ptr, V, K, end_ptr, R]
-
-    movup.13 movdn.5
-    # => [K, start_ptr, end_ptr; V, K, R]
-
-    exec.sorted_array::find_key_value
-    # => [is_key_found, key_ptr, start_ptr, end_ptr; V, K, R]
-    if.true
-        # => [key_ptr, start_ptr, end_ptr, V, K, R]
-
-        # We're replacing or removing an existing value.
-        # To check which, we'll word-align the stack for a moment.
-        push.0
-        # => [X, V, K, R]
-        swapw padw
-        # => [ZERO, V, X, K, R]
-
-        eqw movdn.8
-        # => [ZERO, V, V==EMPTY, 0, key_ptr, start_ptr, end_ptr, K, R]
-
-        dropw
-        # => [V, V==EMPTY, 0, key_ptr, start_ptr, end_ptr, K, R]
-
-        # Drop 0 to word-align the stack.
-        movup.5 drop
-        # => [V, V==EMPTY, key_ptr, start_ptr, end_ptr, V, K, R]
-
-        swapw
-        # => [V==EMPTY, key_ptr, start_ptr, end_ptr, V, K, R]
-
-        if.true
-            exec.remove_in_multi_leaf
-        else
-            exec.replace_in_multi_leaf
-        end
-    else
-        # => [key_ptr, start_ptr, end_ptr, V, K, R]
-
-        # We still need to check if V is empty, which would make this a no-op.
-        push.0
-        # => [X, V, K, R]
-        swapw padw
-        # => [ZERO, V, X, K, R]
-        eqw
-        if.true
-            # No-op case. Clean up the stack.
-
-            # => [ZERO, V, X, K, R]
-            dropw swapw dropw
-            # => [V, K, R]
-            swapw dropw
-            # => [V, R]
-        else
-            # We're inserting a new value in the sorted array.
-
-            # => [ZERO, V, X, K, R]
-            dropw
-            swapw drop
-            # => [key_ptr, start_ptr, end_ptr, V, K, R]
-
-            exec.insert_into_leaf
-        end
-    end
+    # => [V_old, R_new]
 end
 
 # MAX_LEAF_SIZE of key-value pairs + 4 pointers:
@@ -943,68 +994,6 @@ proc.remove_in_multi_leaf.8196
     dropw movupw.2 dropw swapw
     # => [V_old, R_new]
 end
-
-
-proc.replace_in_multi_leaf
-    # => [key_ptr, start_ptr, end_ptr, V, K, R]
-
-    add.4
-    # => [val_ptr, start_ptr, end_ptr, V, K, R]
-
-    padw dup.4
-    # => [val_ptr, ZERO, val_ptr, start_ptr, end_ptr, V, K, R]
-    mem_loadw_be
-    # => [V_old, val_ptr, start_ptr, end_ptr, V, K, R]
-
-    # Word-align the stack for a moment.
-    push.0 movdn.4
-    # => [V_old, X, V, K, R]
-
-    swapw.2
-    # => [V, z, val_ptr, start_ptr, end_ptr, V_old, K, R]
-    dup.5
-    # => [val_ptr, V, z, val_ptr, start_ptr, end_ptr, V_old, K, R]
-    mem_storew_be
-    # => [V, z, val_ptr, start_ptr, end_ptr, V_old, K, R]
-
-    # Prepare for hash_memory_words
-
-    dropw
-    # => [z, val_ptr, start_ptr, end_ptr, V_old, K, R]
-    # => [X, V_old, K, R]
-
-    movupw.2
-    # => [K, X, V_old, R]
-
-    movupw.3
-    # => [R, K, X, V_old]
-
-    movupw.2
-    # => [X, R, K, V_old]
-    # => [z, val_ptr, start_ptr, end_ptr, R, K, V_old]
-
-    drop drop
-    # => [start_ptr, end_ptr, R, K, V_old]
-
-    dup.6 # K[3]
-    # => [leaf_index, start_ptr, end_ptr, R, K, V_old]
-
-    movdn.2
-    # => [start_ptr, end_ptr, leaf_index, R; K, V_old]
-
-    exec.hash_and_insert_mem
-    # => [NV_old, R_new; K, V_old]
-
-    dropw
-    # => [R_new, K, V_old]
-    swapw dropw
-    # => [R_new, V_old]
-    swapw
-    # => [V_old, R_new]
-end
-
-
-
 
 # MEMORY HELPERS
 # =================================================================================================
