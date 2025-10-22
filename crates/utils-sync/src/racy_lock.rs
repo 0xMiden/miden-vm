@@ -26,6 +26,97 @@ where
     f: F,
 }
 
+#[cfg(all(loom, test))]
+mod unsound_demo {
+    use alloc::boxed::Box;
+    use core::{
+        cell::RefCell,
+        ptr,
+        sync::atomic::{AtomicPtr, Ordering},
+    };
+
+    use loom::{hint, model::Builder, sync::Arc, thread};
+
+    // Deliberately unsound lock that ignores `T` in Sync/Send bounds to demonstrate the failure.
+    struct BadLock<T, F: Fn() -> T> {
+        inner: AtomicPtr<T>,
+        f: F,
+    }
+
+    impl<T, F: Fn() -> T> BadLock<T, F> {
+        pub const fn new(f: F) -> Self {
+            Self {
+                inner: AtomicPtr::new(ptr::null_mut()),
+                f,
+            }
+        }
+
+        pub fn force(&self) -> &T {
+            let mut p = self.inner.load(Ordering::Acquire);
+            if p.is_null() {
+                let v = (self.f)();
+                p = Box::into_raw(Box::new(v));
+                if let Err(old) = self.inner.compare_exchange(
+                    ptr::null_mut(),
+                    p,
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                ) {
+                    // Another thread won; drop our allocation and use the existing pointer
+                    drop(unsafe { Box::from_raw(p) });
+                    p = old;
+                }
+            }
+            unsafe { &*p }
+        }
+    }
+
+    impl<T, F: Fn() -> T> Drop for BadLock<T, F> {
+        fn drop(&mut self) {
+            let p = *self.inner.get_mut();
+            if !p.is_null() {
+                drop(unsafe { Box::from_raw(p) });
+            }
+        }
+    }
+
+    // UNSOUND: `Sync` and `Send` do not depend on `T`.
+    unsafe impl<T, F: Fn() -> T + Sync> Sync for BadLock<T, F> {}
+    unsafe impl<T, F: Fn() -> T + Send> Send for BadLock<T, F> {}
+
+    // This test demonstrates the failure mode: sharing `&RefCell<_>` across threads via
+    // an unsound `Sync` impl allows concurrent `borrow_mut`, which panics at runtime.
+    #[test]
+    #[should_panic]
+    fn bad_sync_allows_cross_thread_refcell_borrow_mut_panic() {
+        let mut builder = Builder::default();
+        builder.max_duration = Some(std::time::Duration::from_secs(10));
+        builder.check(|| {
+            let lock = Arc::new(BadLock::new(|| RefCell::new(0u32)));
+            let l1 = lock.clone();
+            let l2 = lock.clone();
+
+            let t1 = thread::spawn(move || {
+                let c1 = l1.force();
+                let _g1 = c1.borrow_mut();
+                // Keep the mutable borrow alive to maximize overlap
+                for _ in 0..100 {
+                    hint::spin_loop();
+                }
+            });
+
+            let t2 = thread::spawn(move || {
+                let c2 = l2.force();
+                // This will panic in schedules where t1 holds the mutable borrow
+                let _g2 = c2.borrow_mut();
+            });
+
+            let _ = t1.join();
+            let _ = t2.join();
+        });
+    }
+}
+
 impl<T, F> RacyLock<T, F>
 where
     F: Fn() -> T,
