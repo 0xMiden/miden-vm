@@ -654,9 +654,9 @@ fn test_smt_randomized_round_trip() {
                     exec.sys::truncate_stack
                 end
             ";
- 
+
             let expected_output = build_expected_stack(value, smt.root());
-        
+
             build_test!(SET_SOURCE, &set_initial_stack, &[], store, advice_map)
                 .expect_stack(&expected_output);
         }
