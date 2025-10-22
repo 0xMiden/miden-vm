@@ -80,29 +80,29 @@ end
 #! Inputs: [start_addr, end_addr, leaf_index, R]
 #! Outputs: [NV_old, R_new]
 proc.hash_and_insert_mem
-    # => [start_addr, end_addr, i, R, ...]
+    # => [start_addr, end_addr, leaf_index, R, ...]
 
     dup.1 dup.1
-    # => [start_addr, end_addr, start_addr, end_addr, i, R, ...]
+    # => [start_addr, end_addr, start_addr, end_addr, leaf_index, R, ...]
 
     exec.rpo::hash_memory_words
-    # => [NV, start_addr, end_addr, i, R, ...]
+    # => [NV, start_addr, end_addr, leaf_index, R, ...]
 
-    # We're already ready for adv.insert_mem.
     adv.insert_mem
+    # => [NV, start_addr, end_addr, leaf_index, R, ...]
 
     # Prepare for mtree_set
     movup.4 drop movup.4 drop
-    # => [NV, i, R, ...]
+    # => [NV, leaf_index, R, ...]
 
     movup.4 movdn.8
-    # => [NV, R, i]
+    # => [NV, R, leaf_index]
 
     swapw movup.8
-    # => [i, R, NV]
+    # => [leaf_index, R, NV]
 
     push.LEAF_DEPTH
-    # => [d, i, R, NV]
+    # => [d, leaf_index, R, NV]
 
     mtree_set
     # => [NV_old, R_new, ...]
@@ -111,8 +111,16 @@ end
 #! Inserts a key-value pair into a leaf currently containing a single, non-empty pair,
 #! converting the leaf to a multi-leaf.
 #!
-#! Inputs: [K_in_leaf, K, V_in_leaf, V, R]
-#! Outputs: [V_in_leaf, R_new]
+#! Inputs: [K_l, K, V_l, V, R]
+#! Outputs: [V_l, R_new]
+#!
+#! where:
+#! - `K_l` is the original key stored in the single-leaf.
+#! - `V_l` is the original value stored in the single-leaf.
+#! - `K` is the new key to insert.
+#! - `V` is the new value to insert.
+#! - `R` is the root of the original SMT.
+#! - `R_new` is the root of the SMT after the insertion.
 proc.insert_single_to_multi_leaf.16
 
     # Pairs in leaves are sorted by key, so we need to compare the new key against the existing
@@ -141,16 +149,16 @@ proc.insert_single_to_multi_leaf.16
 
         # Save K[3], as that is our index `i`.
         dup movdn.12
-        # => [K, V_l, V, i, R]
+        # => [K, V_l, V, leaf_index, R]
 
         loc_storew.8 dropw
-        # => [V_l, V, i, R]
+        # => [V_l, V, leaf_index, R]
 
         loc_storew.4 dropw
-        # => [V, i, R]
+        # => [V, leaf_index, R]
 
         loc_storew.12 dropw
-        # => [i, R]
+        # => [leaf_index, R]
     else
         # => [K_l, K, V_l, V, R]
 
@@ -165,37 +173,42 @@ proc.insert_single_to_multi_leaf.16
 
         # Save K[3], as that is our index `i`.
         dup movdn.12
-        # => [K, V_l, V, i, R]
+        # => [K, V_l, V, leaf_index, R]
 
         loc_storew.0 dropw
-        # => [V_l, V, i, R]
+        # => [V_l, V, leaf_index, R]
 
         loc_storew.12 dropw
-        # => [V, i, R]
+        # => [V, leaf_index, R]
 
         loc_storew.4 dropw
-        # => [i, R]
+        # => [leaf_index, R]
     end
 
-    # => [i, R]
+    # => [leaf_index, R]
 
     # Prepare for hash_memory_words,
     locaddr.12 add.4
     locaddr.0
-    # => [start_addr, end_addr, i, R]
+    # => [start_addr, end_addr, leaf_index, R]
 
     exec.hash_and_insert_mem
     # => [NV_old, R_new]
 
-    # By nature, if an insertion transforms a single-leaf to a multi-leaf, then the old value at
-    # this key is an empty word.
+    # By nature, if an update transforms a single-leaf to a multi-leaf then 
+    # we are inserting a new key at this leaf_index. The old value never existed,
+    # so it must be an empty word.
 
     padw swapw dropw
-    # => [Z, R_new]
+    # => [ZERO, R_new]
 end
 
 
-# MAX_LEAF_SIZE + 4
+# MAX_LEAF_SIZE of key-value pairs + 4 pointers:
+# - pairs_array_start: pointer to the start of the original leaf data
+# - pairs_array_end: pointer to the end of the original leaf data
+# - cur_read: pointer to the current read position in the original leaf data
+# - cur_write: pointer to the current write position
 proc.insert_into_leaf.8196
     # => [key_ptr, start_ptr, end_ptr, V, K, R]
 
@@ -220,7 +233,7 @@ proc.insert_into_leaf.8196
 
     # Save K[3], which is the leaf index `i`.
     dup.5 movdn.9
-    # => [key_ptr, V, K, i, R]
+    # => [key_ptr, V, K, leaf_index, R]
 
     #
     # STEP 1: Copy from pairs_array_start..key_ptr.
@@ -233,44 +246,44 @@ proc.insert_into_leaf.8196
     locaddr.4 loc_store.3
 
     loc_load.2 # cur_read
-    # => [cur_read, key_ptr, V, K, i, R]
+    # => [cur_read, key_ptr, V, K, leaf_index, R]
 
     loc_load.3 # cur_write
-    # => [cur_write, cur_read, key_ptr, V, K, i, R]
+    # => [cur_write, cur_read, key_ptr, V, K, leaf_index, R]
 
     movdn.2
-    # => [cur_read, read_end=key_ptr, cur_write; V, K, i, R]
+    # => [cur_read, read_end=key_ptr, cur_write; V, K, leaf_index, R]
 
     exec.memcopy_word_range_and_advance_ptrs
-    # => [cur_read', cur_write', V, K, i, R]
+    # => [cur_read', cur_write', V, K, leaf_index, R]
     loc_store.2 loc_store.3
 
-    # => [V, K, i, R]
+    # => [V, K, leaf_index, R]
 
     #
     # STEP 2: write (K, V) there.
     #
 
     swapw
-    # => [K, V, i, R]
+    # => [K, V, leaf_index, R]
 
     loc_load.3 movdn.4 dup.4
-    # => [cur_write, K, cur_write, V, i, R]
+    # => [cur_write, K, cur_write, V, leaf_index, R]
 
     # *cur_write = K
     mem_storew_be dropw
-    # => [cur_write, V, i, R]
+    # => [cur_write, V, leaf_index, R]
 
     add.4 movdn.4 dup.4
-    # => [cur_write, V, cur_write, i, R]
+    # => [cur_write, V, cur_write, leaf_index, R]
 
     # *cur_write = V
     mem_storew_be dropw
-    # => [cur_write, i, R, ]
+    # => [cur_write, leaf_index, R, ]
 
     # cur_write = &new_pairs[2]
     add.4 loc_store.3
-    # => [i, R]
+    # => [leaf_index, R]
 
     #
     # STEP 3: copy from cur_read..pairs_array_end
@@ -279,22 +292,22 @@ proc.insert_into_leaf.8196
     loc_load.3 # cur_write
     loc_load.1 # read_end = pairs_array_end
     loc_load.2 # cur_read
-    # => [cur_read, read_end, cur_write, i, R]
+    # => [cur_read, read_end, cur_write, leaf_index, R]
 
     exec.memcopy_word_range_and_advance_ptrs
-    # => [cur_read', cur_write', i, R]
+    # => [cur_read', cur_write', leaf_index, R]
 
     # Prepare for hash_memory_words and mtree_set.
 
     drop
-    # => [cur_write, i, R]
+    # => [cur_write, leaf_index, R]
 
     # end_addr = cur_write
-    # => [end_addr, i, R]
+    # => [end_addr, leaf_index, R]
 
     # start_addr = &LOCALS[4]
     locaddr.4
-    # => [start_addr, end_addr, i, R]
+    # => [start_addr, end_addr, leaf_index, R]
 
     exec.hash_and_insert_mem
     # => [NV_old, R_new]
@@ -302,7 +315,7 @@ proc.insert_into_leaf.8196
     # By nature, if this insertion put a value where there wasn't one, then the
     # old value at this key is an empty word.
     padw swapw dropw
-    # => [Z, R_new]
+    # => [ZERO, R_new]
 end
 
 proc.insert_or_replace_in_multi_leaf
@@ -337,18 +350,16 @@ proc.insert_or_replace_in_multi_leaf
         push.0
         # => [X, V, K, R]
         swapw padw
-        # => [Z, V, X, K, R]
+        # => [ZERO, V, X, K, R]
 
         eqw movdn.8
-        # => [Z, V, V==EMPTY, 0, key_ptr, start_ptr, end_ptr, K, R]
+        # => [ZERO, V, V==EMPTY, 0, key_ptr, start_ptr, end_ptr, K, R]
 
         dropw
         # => [V, V==EMPTY, 0, key_ptr, start_ptr, end_ptr, K, R]
 
-        # Now we can use V==EMPTY for word-aligning the stack instead.
-        # Convenient!
+        # Drop 0 to word-align the stack.
         movup.5 drop
-        # => [V, X, K, R]
         # => [V, V==EMPTY, key_ptr, start_ptr, end_ptr, V, K, R]
 
         swapw
@@ -366,12 +377,12 @@ proc.insert_or_replace_in_multi_leaf
         push.0
         # => [X, V, K, R]
         swapw padw
-        # => [Z, V, X, K, R]
+        # => [ZERO, V, X, K, R]
         eqw
         if.true
             # No-op case. Clean up the stack.
 
-            # => [Z, V, X, K, R]
+            # => [ZERO, V, X, K, R]
             dropw swapw dropw
             # => [V, K, R]
             swapw dropw
@@ -379,7 +390,7 @@ proc.insert_or_replace_in_multi_leaf
         else
             # We're inserting a new value in the sorted array.
 
-            # => [Z, V, X, K, R]
+            # => [ZERO, V, X, K, R]
             dropw
             swapw drop
             # => [key_ptr, start_ptr, end_ptr, V, K, R]
@@ -389,7 +400,11 @@ proc.insert_or_replace_in_multi_leaf
     end
 end
 
-# MAX_LEAF_SIZE + 4
+# MAX_LEAF_SIZE of key-value pairs + 4 pointers:
+# - pairs_array_start: pointer to the start of the original leaf data
+# - pairs_array_end: pointer to the end of the original leaf data
+# - cur_read: pointer to the current read position in the original leaf data
+# - cur_write: pointer to the current write position
 proc.remove_in_multi_leaf.8196
     # => [key_ptr, start_ptr, end_ptr, V=EMPTY, K, R]
 
@@ -440,10 +455,10 @@ proc.remove_in_multi_leaf.8196
 
     # K[3] is the leaf index.
     dup.8
-    # => [i, R, V_old, K]
+    # => [leaf_index, R, V_old, K]
 
     loc_load.3 loc_load.0
-    # => [start_addr, end_addr, i, R; V_old, K]
+    # => [start_addr, end_addr, leaf_index, R; V_old, K]
 
     exec.hash_and_insert_mem
     # => [NV_old, R_new, V_old, K]
@@ -496,7 +511,7 @@ proc.replace_in_multi_leaf
     # => [val_ptr, start_ptr, end_ptr, V, K, R]
 
     padw dup.4
-    # => [val_ptr, Z, val_ptr, start_ptr, end_ptr, V, K, R]
+    # => [val_ptr, ZERO, val_ptr, start_ptr, end_ptr, V, K, R]
     mem_loadw_be
     # => [V_old, val_ptr, start_ptr, end_ptr, V, K, R]
 
@@ -531,10 +546,10 @@ proc.replace_in_multi_leaf
     # => [start_ptr, end_ptr, R, K, V_old]
 
     dup.6 # K[3]
-    # => [i, start_ptr, end_ptr, R, K, V_old]
+    # => [leaf_index, start_ptr, end_ptr, R, K, V_old]
 
     movdn.2
-    # => [start_ptr, end_ptr, i, R; K, V_old]
+    # => [start_ptr, end_ptr, leaf_index, R; K, V_old]
 
     exec.hash_and_insert_mem
     # => [NV_old, R_new; K, V_old]
@@ -978,7 +993,7 @@ proc.get_multi_leaf_value.8192
 
         # (7 cycles)
         drop drop drop padw
-        # => [Z, R]
+        # => [ZERO, R]
     end
 end
 
