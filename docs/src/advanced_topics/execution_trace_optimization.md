@@ -1,10 +1,16 @@
+---
+title: "Execution Trace Optimization"
+sidebar_position: 2
+draft: true
+---
+
 # Execution trace optimization
 
 ## Understanding cycle counts in Miden VM
 
 When we refer to "number of cycles" in most Miden VM documentation, we're specifically referring to the **stack rows** portion of the execution trace. However, the actual proving time is determined by what we call the "true number of cycles," which is the maximum of all trace segment lengths:
 
-- **Stack rows**: One row per VM operation (what `clk` outputs). This corresponds to the System, Program decoder and Operand Stack set of columns from the [execution trace diagram](../design/main.md#execution-trace)
+- **Stack rows**: One row per VM operation (what `clk` outputs). This corresponds to the System, Program decoder and Operand Stack set of columns from the [execution trace diagram](../design/index.md#execution-trace)
 - **Range checker rows**: Added for all u32 and memory operations (no more, no less)
 - **Chiplet rows**: Added when opcodes call specialized chiplets:
   - `hperm` calls the hasher chiplet

@@ -1,0 +1,1046 @@
+/* Import Google Fonts */
+@import url("https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300;1,400;1,500&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Geist:wght@100..900&display=swap");
+
+/* ============================
+   0) SEMANTIC TOKENS (your brand)
+   ============================ */
+
+:root {
+  /* ---- Brand palette (LIGHT) ---- */
+  --color-brand: #ff5500; /* TODO: replace with your primary */
+  --color-brand-600: #ff6a26; /* TODO */
+  --color-brand-700: #e24c00; /* TODO */
+  --color-brand-800: #b63c00; /* TODO */
+  --color-secondary: #102445;
+
+  --color-accent: #1764a8; /* TODO secondary/accent */
+  --color-success: #00871d;
+  --color-warning: #ff5500;
+  --color-danger: #ff0000;
+
+  /* ---- Neutral & Surfaces ---- */
+  --color-bg: #ffffff;
+  --color-surface: #f9f9f9;
+  --color-elevated: color-mix(in oklab, #000 5%, transparent);
+  --color-border: color-mix(in oklab, #000 20%, transparent);
+  --color-text: #363636;
+  --color-muted: color-mix(in oklab, var(--color-text) 70%, transparent);
+  --color-link: var(--color-brand);
+
+  /* ---- Typography ---- */
+  --font-sans: "Geist", ui-sans-serif, system-ui, sans-serif,
+    "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --font-mono: "DM Mono", ui-monospace, SFMono-Regular, Menlo, Consolas,
+    "Liberation Mono", monospace;
+  --font-size-base: 14px;
+  --line-height-base: 150%;
+  --letter-spacing-base: 0;
+
+  /* ---- Radii & Spacing ---- */
+  --radius-xs: 5px;
+  --radius-md: 5px;
+  --radius-lg: 5px;
+  --radius-xl: 5px;
+
+  /* Design system spacing - exact pixel values */
+  --space-4px: 4px; /* Inline code padding */
+  --space-16px: 16px; /* Standard paragraph, list, heading spacing */
+  --space-24px: 24px; /* H1 to first content, H2 to large components, list indent */
+  --space-32px: 32px; /* Section breaks, major structural spacing */
+  --space-40px: 40px; /* Major structural reset (lower bound) */
+  --space-48px: 48px; /* Major structural reset (upper bound) */
+
+  /* Legacy spacing variables for compatibility */
+  --space-1: 0.25rem; /* 4px  */
+  --space-2: 0.5rem; /* 8px  */
+  --space-3: 0.75rem; /* 12px */
+  --space-4: 1rem; /* 16px */
+  --space-5: 1.25rem; /* 20px */
+  --space-6: 1.5rem; /* 24px */
+  --space-8: 2rem; /* 32px */
+  --space-10: 2.5rem; /* 40px */
+
+  /* ---- Shadows ---- */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 6px 16px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 12px 28px rgba(0, 0, 0, 0.12);
+
+  /* ---- Container widths ---- */
+
+  /* Common layout sizes */
+  --navbar-height: 64px;
+
+  /* Docs sidebar width */
+  --doc-sidebar-width: 250px !important;
+}
+
+/* ==========================================
+   1) MAP SEMANTIC → INFIMA (core variables)
+   ========================================== */
+
+:root {
+  /* Brand */
+  --ifm-color-primary: var(--color-brand);
+  --ifm-color-secondary: var(--color-secondary);
+  --ifm-color-primary-dark: var(--color-brand-700);
+  --ifm-color-primary-darker: var(--color-brand-800);
+  --ifm-color-primary-darkest: var(--color-brand-800);
+  --ifm-color-primary-light: var(--color-brand-600);
+  --ifm-color-primary-lighter: var(--color-brand-600);
+  --ifm-color-primary-lightest: var(--color-brand-600);
+
+  /* Text & surfaces */
+  --ifm-color-content: var(--color-text);
+  --ifm-color-content-secondary: var(--color-muted);
+  --ifm-link-color: var(--color-link);
+  --ifm-background-color: var(--color-bg);
+  --ifm-background-surface-color: var(--color-surface);
+
+  /* Typography */
+  --ifm-font-family-base: var(--font-sans);
+  --ifm-font-family-monospace: var(--font-mono);
+  --ifm-font-size-base: var(--font-size-base);
+  --ifm-line-height-base: var(--line-height-base);
+  --ifm-font-weight-base: 400;
+  --ifm-heading-font-weight: 700;
+
+  /* Heading typography specifications */
+  --ifm-h1-font-size: 28px;
+  --ifm-h1-line-height: 32px;
+  --ifm-h2-font-size: 24px;
+  --ifm-h2-line-height: 28px;
+  --ifm-h3-font-size: 20px;
+  --ifm-h3-line-height: 24px;
+  --ifm-h4-font-size: 16px;
+  --ifm-h4-line-height: 16px;
+
+  /* Code typography specifications */
+  --ifm-code-font-size: 14px;
+  --ifm-code-line-height: 150%;
+  --ifm-code-letter-spacing: -2%;
+  --ifm-code-padding-horizontal: 4px;
+  --ifm-code-padding-vertical: 4px;
+
+  /* Layout & spacing */
+  --ifm-spacing-horizontal: var(--space-4);
+  --ifm-global-radius: var(--radius-md);
+
+  /* Component radii (Infima) */
+  --ifm-breadcrumb-border-radius: var(--radius-md);
+  --ifm-button-border-radius: var(--radius-md);
+  --ifm-card-border-radius: var(--radius-md);
+  --ifm-alert-border-radius: var(--radius-md);
+  --ifm-badge-border-radius: var(--radius-md);
+  --ifm-tabs-border-radius: var(--radius-md);
+  --ifm-table-border-radius: var(--radius-md);
+  --ifm-code-border-radius: var(--radius-md);
+
+  /* Sizes */
+  --ifm-container-width: var(--container-width);
+  --ifm-navbar-height: var(--navbar-height);
+  --ifm-menu-link-padding-horizontal: 6px;
+  --ifm-menu-link-padding-vertical: 12px;
+
+  /* Borders & shadows */
+  --ifm-border-color: var(--color-border);
+  --ifm-card-box-shadow: var(--shadow-md);
+  --ifm-global-shadow-lw: var(--shadow-sm);
+  --ifm-global-shadow-md: var(--shadow-md);
+  --ifm-global-shadow-tl: var(--shadow-lg);
+
+  /* Tables */
+  --ifm-table-cell-padding: 0.75rem;
+
+  /* Alerts */
+  --ifm-alert-background-color: var(--color-elevated);
+  --ifm-alert-border-color: var(--color-border);
+
+  /* Breadcrumbs */
+  --ifm-breadcrumb-color-active: var(--color-text);
+  --ifm-breadcrumb-item-background-active: var(--color-elevated);
+}
+
+/* ==========================================
+   2) BASE ELEMENTS
+   ========================================== */
+
+html,
+body {
+  font-family: var(--ifm-font-family-base);
+  font-size: var(--ifm-font-size-base);
+  font-weight: var(--ifm-font-weight-base);
+  line-height: var(--ifm-line-height-base);
+  color: var(--ifm-color-content);
+  background: var(--ifm-background-color);
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Remove underlines from all links by default */
+a {
+  color: var(--ifm-link-color);
+  text-decoration: none;
+}
+
+/* Add underlines only to links within text content */
+p a,
+li a,
+blockquote a,
+.theme-doc-markdown a,
+.markdown a,
+article a,
+main a {
+  text-decoration: underline;
+  text-decoration-color: var(--ifm-link-color);
+  text-underline-offset: 0.2em;
+}
+
+/* Hover effects for text links */
+p a:hover,
+li a:hover,
+blockquote a:hover,
+.theme-doc-markdown a:hover,
+.markdown a:hover,
+article a:hover,
+main a:hover {
+  text-decoration-color: currentColor;
+}
+
+/* Ensure navigation links have no underlines */
+.navbar a,
+.theme-doc-sidebar-container a,
+.menu__link,
+.breadcrumbs__link,
+.pagination-nav__link,
+.table-of-contents a {
+  text-decoration: none !important;
+}
+
+/* Hover effects for navigation links */
+.navbar a:hover,
+.theme-doc-sidebar-container a:hover,
+.menu__link:hover,
+.breadcrumbs__link:hover,
+.pagination-nav__link:hover,
+.table-of-contents a:hover {
+  text-decoration: none !important;
+}
+
+/* Headings - exact design specifications */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--font-sans);
+  letter-spacing: 0em;
+  font-weight: bold;
+}
+
+/* H1: 28px font, 32px line height */
+h1 {
+  font-size: var(--ifm-h1-font-size);
+  line-height: var(--ifm-h1-line-height);
+}
+
+/* H2: 24px font, 28px line height */
+h2 {
+  font-size: var(--ifm-h2-font-size);
+  line-height: var(--ifm-h2-line-height);
+}
+
+/* H3: 20px font, 24px line height */
+h3 {
+  font-size: var(--ifm-h3-font-size);
+  line-height: var(--ifm-h3-line-height);
+}
+
+/* H4: 16px line height */
+h4 {
+  font-size: var(--ifm-h4-font-size);
+  line-height: var(--ifm-h4-line-height);
+}
+
+h5 {
+  font-size: 1.125rem;
+  line-height: 20px;
+}
+
+h6 {
+  font-size: 1rem;
+  text-transform: none;
+  line-height: 16px;
+}
+
+/* Bold text styling */
+strong,
+b {
+  font-weight: 600;
+  color: var(--ifm-color-content);
+}
+
+/* Body/Paragraph: 14px, 130% line height, Regular */
+p {
+  font-size: var(--ifm-font-size-base);
+  line-height: var(--line-height-base);
+  font-weight: 400;
+  letter-spacing: 0em;
+}
+
+/* Links (text): 14px, 130% line height, Semibold */
+a {
+  line-height: 130%;
+}
+
+/* List/Bulletpoints: 14-16px, 150% line height, Regular */
+ul {
+  list-style-type: disc;
+  line-height: 150%;
+}
+
+ul li::marker {
+  color: var(--color-border);
+}
+
+/* Nested unordered lists */
+ul ul {
+  list-style-type: circle;
+}
+
+ul ul ul {
+  list-style-type: square;
+}
+
+/* Ordered lists: 14-16px, 150% line height, Regular */
+ol {
+  list-style-type: decimal;
+  line-height: 150%;
+  font-size: var(--font-size-base);
+  font-weight: 400;
+}
+
+/* Nested ordered lists keep default styling */
+ol ol {
+  list-style-type: lower-alpha;
+}
+
+ol ol ol {
+  list-style-type: lower-roman;
+}
+
+/* Blockquote */
+blockquote {
+  border-left: 3px solid var(--ifm-color-primary);
+  background: var(--ifm-background-surface-color);
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  color: var(--ifm-color-content);
+}
+
+/* Images */
+img {
+  border-radius: var(--radius-md);
+}
+
+/* ==========================================
+   3) NAVBAR & FOOTER (scoped to stable classes)
+   ========================================== */
+
+/* ThemeClassNames.layout.navbar.container */
+.theme-layout-navbar {
+  height: var(--ifm-navbar-height);
+  backdrop-filter: saturate(1.1) blur(8px);
+  border-bottom: 1px solid var(--ifm-border-color) !important;
+  background: color-mix(in oklab, var(--ifm-background-color) 75%, transparent);
+  backdrop-filter: saturate(1.1) blur(8px);
+  box-shadow: none;
+}
+
+/* ThemeClassNames.layout.footer.container */
+.theme-layout-footer {
+  --ifm-footer-background-color: var(--color-elevated);
+  background: var(--ifm-footer-background-color);
+  color: var(--ifm-color-content);
+}
+
+/* ==========================================
+   4) SIDEBAR (Docs)
+   ========================================== */
+
+/* ThemeClassNames.docs.docSidebarContainer */
+.theme-doc-sidebar-container {
+  border-right: 1px solid var(--ifm-border-color) !important;
+  padding: 5px;
+  font-size: 0.875rem; /* Sidebar-specific font size */
+}
+
+/* Main docs content area - wider to fill space */
+.theme-doc-markdown {
+  max-width: 100%; /* Use full available width */
+}
+
+/* ThemeClassNames.docs.docSidebarMenu */
+.theme-doc-sidebar-menu .menu__link {
+  font-family: var(--font-sans);
+  letter-spacing: -2%;
+  border-radius: var(--radius-md);
+  padding: var(--ifm-menu-link-padding-vertical)
+    var(--ifm-menu-link-padding-horizontal);
+}
+
+.theme-doc-sidebar-menu .menu__link--active {
+  color: var(--ifm-color-primary);
+  background: color-mix(
+    in oklab,
+    var(--ifm-background-surface-color) 70%,
+    transparent
+  );
+}
+.theme-doc-sidebar-menu .menu__link--active:hover {
+  background: var(--ifm-background-surface-color);
+}
+
+/* Category collapsible */
+.menu__list-item-collapsible {
+  border-radius: var(--radius-md);
+}
+
+/* ==========================================
+   5) BREADCRUMBS
+   ========================================== */
+
+/* ThemeClassNames.docs.docBreadcrumbs */
+.theme-doc-breadcrumbs .breadcrumbs__link {
+  line-height: 150%;
+  border-radius: var(--radius-md);
+  padding: var(--ifm-menu-link-padding-horizontal)
+    var(--ifm-menu-link-padding-vertical);
+}
+
+.theme-doc-breadcrumbs .breadcrumbs__item--active .breadcrumbs__link {
+  color: var(--ifm-color-primary);
+}
+
+/* ==========================================
+   6) BUTTONS
+   ========================================== */
+
+.button {
+  border-radius: var(--ifm-button-border-radius);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.05);
+  line-height: 150%;
+}
+.button--outline:not(.button--link) {
+  border-color: color-mix(in oklab, var(--ifm-color-primary) 70%, transparent);
+}
+.button--link {
+  color: var(--ifm-link-color);
+}
+
+/* ==========================================
+   7) BADGES
+   ========================================== */
+
+.badge {
+  border-radius: var(--ifm-badge-border-radius);
+  border: 1px solid var(--ifm-border-color);
+  background: var(--ifm-background-surface-color);
+}
+
+/* ==========================================
+   8) ALERTS (Admonitions)
+   ========================================== */
+
+.theme-admonition {
+  display: flex;
+  align-items: flex-start; /* icon aligns with text top */
+  gap: 0.75rem; /* spacing between icon and text */
+  padding: 1rem 1.25rem;
+}
+
+/* ThemeClassNames.common.admonition */
+.theme-admonition.alert {
+  --ifm-alert-background-color: var(--color-elevated);
+  --ifm-alert-border-color: var(--ifm-color-primary);
+  --ifm-alert-background-color-highlight: #fff;
+
+  font-family: var(--font-mono);
+  border: 1px solid var(--color-elevated);
+  border-top: 5px solid var(--ifm-alert-border-color); /* top border accent */
+  border-left: none; /* disable default */
+  border-radius: var(--ifm-alert-border-radius);
+  box-shadow: none;
+  background: var(--ifm-alert-background-color);
+  color: var(--ifm-color-content);
+  /* padding: 1rem 1.25rem; */
+}
+
+/* NOTE */
+.theme-admonition.alert--secondary {
+  --ifm-alert-border-color: #df9f26;
+  border-top-color: #df9f26;
+}
+/* TIP */
+.theme-admonition.alert--success {
+  --ifm-alert-background-color: var(--color-elevated);
+  border-top-color: var(--ifm-color-success) !important;
+}
+/* INFO / IMPORTANT */
+.theme-admonition.alert--info {
+  --ifm-alert-border-color: #1764a8;
+  border-top-color: #1764a8;
+}
+/* WARNING */
+.theme-admonition.alert--warning {
+  --ifm-alert-border-color: var(--color-warning);
+  border-top-color: var(--color-warning);
+}
+
+/* DANGER */
+.theme-admonition.alert--danger {
+  --ifm-alert-border-color: var(--color-danger);
+  border-top-color: var(--color-danger);
+}
+
+.theme-admonition ul li::marker {
+  color: var(--ifm-color-primary);
+}
+
+/* Exclude list margins from alert blocks */
+.theme-admonition ul,
+.theme-admonition ol {
+  margin-top: 0 !important; /* Smaller margins for lists in alert blocks */
+  margin-bottom: 0 !important;
+  padding-left: 1.5rem !important; /* Standard padding for lists in alerts */
+}
+
+/* Nested lists in alert blocks should have no extra margin */
+.theme-admonition ul ul,
+.theme-admonition ol ol,
+.theme-admonition ul ol,
+.theme-admonition ol ul {
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+}
+
+/* VERSION BANNER */
+.theme-doc-version-banner {
+  --ifm-alert-background-color: var(--color-elevated);
+  --ifm-alert-border-color: var(--color-warning);
+
+  font-family: var(--font-mono);
+  border: 1px solid var(--color-elevated);
+  border-top: 6px solid var(--ifm-alert-border-color);
+  border-left: none; /* disable default */
+  color: var(--ifm-color-content);
+}
+
+/* ==========================================
+   9) TABS
+   ========================================== */
+
+/* ThemeClassNames.tabs.container */
+.theme-tabs-container .tabs {
+  --ifm-tabs-padding-vertical: 0.375rem;
+  --ifm-tabs-padding-horizontal: 0.75rem;
+}
+.theme-tabs-container .tabs__item {
+  border-radius: var(--ifm-tabs-border-radius);
+}
+.theme-tabs-container .tabs__item--active {
+  background: var(--ifm-background-surface-color);
+  box-shadow: inset 0 0 0 2px
+    color-mix(in oklab, var(--ifm-color-primary) 24%, transparent);
+}
+
+/* ==========================================
+   10) CARDS
+   ========================================== */
+
+.card {
+  border-radius: var(--ifm-card-border-radius);
+  box-shadow: var(--ifm-card-box-shadow);
+  border: 1px solid var(--ifm-border-color);
+  background: var(--ifm-background-surface-color);
+}
+
+/* ==========================================
+   11) TABLES
+   ========================================== */
+
+/* Apply border radius to the entire table */
+table {
+  border-radius: 5px; /* Adjust this value to change corner rounding */
+}
+
+tbody tr {
+  border-top: none;
+  background: var(--ifm-background-surface-color);
+}
+
+/* =========================
+   12. Code block card + header
+   ========================= */
+
+.theme-code-block {
+  border: 1px solid var(--ifm-border-color);
+  border-radius: 5px;
+  position: relative;
+}
+
+/* Target CSS module class using attribute selector to handle hashed names */
+.theme-code-block [class*="codeBlockTitle"] {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  font-family: var(--font-sans) !important;
+  font-size: 0.875rem !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.02rem !important;
+  color: var(--color-base) !important;
+  border-bottom: 1px solid var(--ifm-border-color) !important;
+}
+
+/* Body */
+.theme-code-block pre {
+  margin: 0;
+  background: color-mix(
+    in oklab,
+    var(--color-surface) 96%,
+    var(--color-bg, #fff)
+  );
+  padding: 16px 18px;
+}
+
+/* Code text - design specifications */
+.theme-code-block code {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  font-family: var(--font-mono);
+  font-size: var(--ifm-code-font-size); /* 14px */
+  line-height: var(--ifm-code-line-height); /* 24px */
+  letter-spacing: var(--ifm-code-letter-spacing); /* -2% */
+  color: var(--color-text);
+}
+
+/* Inline code - design specifications */
+code {
+  font-family: var(--font-mono);
+  font-size: 12px; /* 14px */
+  line-height: 24px; /* 24px */
+  letter-spacing: var(--ifm-code-letter-spacing); /* -2% */
+  font-weight: 400;
+}
+
+/* Highlighted lines / magic comments */
+.token-line.highlighted,
+.code-block-highlighted-line {
+  background: color-mix(in oklab, var(--ifm-color-primary) 12%, transparent);
+}
+
+/* Optional: softer $ prompt tint in bash */
+.theme-code-block[data-language="bash"] pre code .token.operator {
+  opacity: 0.9;
+}
+
+/* Dark tweaks */
+[data-theme="dark"] .theme-code-block .codeBlockTitle {
+  background: color-mix(in oklab, var(--color-surface) 85%, transparent);
+}
+
+/* ==========================================
+   12.1) DETAILS/SUMMARY (Expandable Sections) - styled like code blocks
+   ========================================== */
+
+/* Scope to docs content only */
+.theme-doc-markdown details {
+  border: 1px solid var(--ifm-border-color);
+  border-radius: 5px;
+  background: var(--ifm-background-surface-color);
+  margin: 0.75rem 0 1rem;
+  overflow: hidden; /* crisp rounded corners */
+  padding: 0;
+}
+
+/* The clickable header row */
+.theme-doc-markdown details > summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  font-weight: 500;
+  text-transform: uppercase;
+  font-family: var(--font-sans);
+  line-height: 1.5;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  color: var(--color-text);
+  border-bottom: 1px solid transparent;
+}
+
+/* Hide native disclosure marker */
+.theme-doc-markdown details > summary::marker,
+.theme-doc-markdown details > summary::-webkit-details-marker {
+  display: none;
+  content: "";
+}
+
+/* Custom caret icon */
+.theme-doc-markdown details > summary::before {
+  content: "";
+  width: 3px;
+  height: 3px;
+  flex-shrink: 0;
+  -webkit-mask: url("/img/custom_caret.svg") no-repeat center / contain;
+  mask: url("/img/custom_caret.svg") no-repeat center / contain;
+  background: currentColor;
+  transition: transform 0.15s ease;
+  transform: rotate(0deg);
+  transform-origin: center center; /* Rotate around its own center */
+  opacity: 0.8;
+  position: relative;
+  top: 0;
+}
+
+.theme-doc-markdown details[open] > summary {
+  border-bottom-color: var(--ifm-border-color);
+}
+
+/* Rotate caret when details is open */
+.theme-doc-markdown details[open] > summary::before {
+  transform: rotate(90deg);
+  transform-origin: center center; /* Keep center rotation when open */
+}
+
+/* Body content area */
+.theme-doc-markdown details > :not(summary) {
+  padding: 1rem;
+}
+
+/* Code block inside details (optional polish) */
+.theme-doc-markdown details pre {
+  margin: 0;
+  background: color-mix(in oklab, var(--color-surface) 96%, var(--color-bg));
+  border-radius: 6px;
+}
+
+.theme-doc-markdown details > summary {
+  border-top: none !important;
+  box-shadow: none !important;
+}
+
+[class^="collapsibleContent_"],
+[class*=" collapsibleContent_"] {
+  padding-top: 0 !important;
+  border-top: none !important;
+  box-shadow: none !important;
+}
+
+[class^="collapsibleContent_"]::before,
+[class*=" collapsibleContent_"]::before {
+  display: none !important;
+  content: none !important;
+}
+
+/* ==========================================
+   13) PAGINATION
+   ========================================== */
+
+.pagination-nav__link {
+  border: 1px solid var(--ifm-border-color);
+  border-radius: var(--radius-md);
+  box-shadow: var(--ifm-global-shadow-lw);
+  background: var(--ifm-background-surface-color);
+  transition: all 0.2s ease;
+}
+
+/* Hide "Previous" and "Next" labels */
+.pagination-nav__sublabel {
+  display: none;
+}
+
+/* Main pagination link text - uppercase */
+.pagination-nav__label {
+  text-transform: uppercase;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  font-size: 1.2rem;
+  font-family: var(--font-mono);
+  color: color-mix(in oklab, #292929bf 75%, #000);
+}
+
+/* Arrow text characters (>> and <<) */
+.pagination-nav__link--prev::before,
+.pagination-nav__link--next::after {
+  color: var(--ifm-color-primary) !important;
+  font-weight: 700 !important;
+  font-size: 1.25rem !important;
+}
+
+/* If arrows are in a separate element */
+.pagination-nav__link .pagination-nav__icon,
+.pagination-nav__link--prev .pagination-nav__icon,
+.pagination-nav__link--next .pagination-nav__icon {
+  color: var(--ifm-color-primary) !important;
+}
+
+/* ==========================================
+   14) TOC (right sidebar)
+   ========================================== */
+
+/* TOC links styling */
+.table-of-contents {
+  font-family: var(--font-sans);
+  letter-spacing: 0.01rem;
+  border-left: 1px solid var(--ifm-border-color);
+  padding-left: var(--space-4);
+  font-size: 0.875rem;
+}
+
+.table-of-contents__link {
+  color: var(--color-text);
+  display: block;
+  padding: 4px 0;
+}
+
+.table-of-contents__link--active {
+  color: var(--ifm-color-primary);
+  font-weight: 500;
+}
+
+/* ==========================================
+   15) VERSION INDICATOR STYLING
+   ========================================== */
+
+/* Style the version indicator that appears above page content */
+.theme-doc-version-badge {
+  font-size: 0.75rem !important;
+  font-weight: 600 !important;
+  color: var(--ifm-color-primary) !important;
+  background: color-mix(
+    in oklab,
+    var(--ifm-color-primary) 12%,
+    transparent
+  ) !important;
+  border: 1px solid
+    color-mix(in oklab, var(--ifm-color-primary) 30%, transparent) !important;
+  border-radius: var(--radius-md) !important;
+  /* line-height: 0 !important; */
+  padding-top: 0.37rem !important;
+  display: inline-block !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.05em !important;
+  margin-top: 8px !important;
+  margin-bottom: 8px !important;
+}
+
+/* ==========================================
+   16) LOCAL SEARCH STYLING
+   ========================================== */
+
+/* Local search modal styling - integrate with design system */
+.aa-Panel {
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg);
+}
+
+.aa-Form {
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+}
+
+.aa-Input {
+  font-family: var(--font-sans);
+  font-size: var(--font-size-base);
+  color: var(--color-text);
+  background: transparent;
+}
+
+.aa-Item {
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+}
+
+.aa-Item[aria-selected="true"] {
+  background: var(--color-surface);
+}
+
+.aa-ItemContentTitle {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.aa-ItemContentDescription {
+  font-family: var(--font-sans);
+  color: var(--color-muted);
+}
+
+/* ==========================================
+   17) NUMERED LISTS
+   ========================================== */
+
+/* === DOCUSAURUS "VitePress-style" numbered steps === */
+.steps {
+  counter-reset: step-counter;
+  list-style: none;
+  padding-left: 1.5rem;
+  margin-left: 2.5rem; /* Space for number badges and line */
+  margin-top: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+.steps > ol,
+.steps > ul {
+  list-style: none;
+  margin-left: 0;
+  padding-left: 0;
+}
+.steps li {
+  counter-increment: step-counter;
+  position: relative;
+  margin-bottom: 2rem;
+  min-height: 2rem;
+}
+
+/* Number badge - dynamically aligns with first element */
+.steps li::before {
+  content: counter(step-counter);
+  position: absolute;
+  left: -4rem; /* Align with .steps margin-left */
+  top: 0.15rem; /* Slight offset for visual centering with text baseline */
+  width: 2rem;
+  min-height: 2rem;
+  border-radius: 0px;
+  background: var(--ifm-background-surface-color);
+  color: var(--color-text);
+  font-size: 1rem;
+  font-family: var(--font-mono);
+  padding: 0.3rem 0.4rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--ifm-border-color);
+  z-index: 2;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+/* All headings inside steps get proper spacing */
+.steps li > h1,
+.steps li > h2,
+.steps li > h3,
+.steps li > h4,
+.steps li > h5,
+.steps li > h6 {
+  margin-top: 0rem !important;
+  margin-bottom: 1.5rem !important;
+  line-height: 1.3 !important;
+  padding-top: 0.7rem !important;
+} /* Specific h5 styling (most common) */
+.steps li > h5 {
+  font-size: 1.15rem !important;
+  font-weight: 600 !important;
+} /* Style for all content inside step items */
+.steps li > * {
+  margin-bottom: 1rem;
+}
+.steps li > *:last-child {
+  margin-bottom: 0;
+}
+
+/* Paragraphs right after headings - reduce space */
+.steps li > h1 + p,
+.steps li > h2 + p,
+.steps li > h3 + p,
+.steps li > h4 + p,
+.steps li > h5 + p,
+.steps li > h6 + p {
+  margin-top: -0.75rem;
+}
+
+/* First paragraph without heading */
+.steps li > p:first-child {
+  margin-top: 0;
+} /* Code blocks within steps */
+.steps li pre,
+.steps li .theme-code-block {
+  margin-top: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+/* Lists within steps */
+.steps li ul,
+.steps li ol {
+  margin-top: 0.5rem;
+  margin-bottom: 0.5rem;
+  padding-left: 1.5rem;
+} /* Admonitions within steps */
+.steps li .theme-admonition {
+  margin-top: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+/* ==========================================
+   18) DESIGN SYSTEM SPACING SPECIFICATIONS
+   ========================================== */
+
+/* Apply design system spacing to documentation content */
+.theme-doc-markdown h1 {
+  margin-bottom: var(--space-24px); /* H1 → First content block: 24px */
+}
+
+.theme-doc-markdown h2 {
+  margin-top: var(
+    --space-32px
+  ); /* H2 → previous section (major section break): 32px */
+  margin-bottom: var(--space-16px); /* H2 → Paragraph below: 16px */
+}
+
+.theme-doc-markdown h3 {
+  margin-bottom: var(--space-16px); /* H3 → Paragraph below: 16px */
+}
+
+.theme-doc-markdown h4 {
+  margin-bottom: var(--space-16px); /* H4 → Paragraph below: 16px */
+}
+
+/* Paragraph spacing */
+.theme-doc-markdown p {
+  margin-bottom: var(--space-16px); /* Paragraph → Paragraph: 16px */
+}
+
+/* List spacing */
+.theme-doc-markdown ul,
+.theme-doc-markdown ol {
+  margin-top: var(--space-16px); /* Paragraph → List: 16px */
+  margin-bottom: var(--space-16px); /* List → Next Paragraph: 16px */
+  padding-left: var(--space-24px); /* List indent: 24px */
+}
+
+/* H2 to large components (images, tables, diagrams) */
+.theme-doc-markdown h2 + img,
+.theme-doc-markdown h2 + table,
+.theme-doc-markdown h2 + .theme-admonition {
+  margin-top: var(--space-24px); /* H2 → large component: 24px */
+}
+
+/* Major structural reset for dramatic transitions */
+.theme-doc-markdown > *:first-child {
+  margin-top: 0;
+}
+
+/* Section breaks - ensure consistent spacing between major sections */
+.theme-doc-markdown h1 + h2 {
+  margin-top: var(--space-32px); /* Major section break */
+}

@@ -1,0 +1,4 @@
+label: "Design"
+# Determines where this documentation section appears relative to other sections in the parent folder
+position: 7
+collapsed: true
