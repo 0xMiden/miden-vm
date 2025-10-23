@@ -167,7 +167,7 @@ export.find_key_value
     movdn.6
     # => [KEY, start_ptr, end_ptr, use_half_key]
 
-    exec.find_key_value_inner
+    exec.find_partial_key_value
     # => [is_key_found, key_ptr, start_ptr, end_ptr]
 end
 
@@ -198,7 +198,7 @@ export.find_half_key_value
     movdn.6
     # => [KEY, start_ptr, end_ptr, use_half_key]
 
-    exec.find_key_value_inner
+    exec.find_partial_key_value
     # => [is_key_found, key_ptr, start_ptr, end_ptr]
 end
 
@@ -229,7 +229,7 @@ end
 #!   Key doesn't exist and is smaller than all stored keys: 151 cycles
 #!   Key doesn't exist and is larger than all stored keys: 149 cycles
 #!   Key doesn't exist: 298 cycles
-proc.find_key_value_inner.1
+proc.find_partial_key_value.1
     # Call the non-deterministic lowerbound advisor (5 cycles)
     emit.LOWERBOUND_KEY_VALUE_EVENT
     # => [KEY, start_ptr, end_ptr, use_half_key]
