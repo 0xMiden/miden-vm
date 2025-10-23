@@ -1,6 +1,7 @@
 extern crate alloc;
 
 use alloc::{string::String, vec::Vec};
+
 use miden_core::Felt;
 
 /// Generates MASM code to store field elements sequentially in memory starting at `base_addr`.

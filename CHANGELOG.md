@@ -32,6 +32,7 @@
 - [BREAKING] add pre/post decorators to BasicBlockNode fingerprint ([#2267](https://github.com/0xMiden/miden-vm/pull/2267)).
 - [BREAKING] Added explicit endianness methods `get_stack_word_be()` and `get_stack_word_le()` to stack word accessors, deprecated ambiguous `get_stack_word()` ([#2235](https://github.com/0xMiden/miden-vm/issues/2235)).
 - Fix decorator offset bug in `BasicBlockNode` padding ([#2305](https://github.com/0xMiden/miden-vm/pull/2305)).
+- [BREAKING] Implement ECDSA precompile ([#2277](https://github.com/0xMiden/miden-vm/pull/2277)).
 
 ## 0.18.2 (2025-10-10)
 
