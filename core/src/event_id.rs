@@ -5,7 +5,7 @@ use core::fmt::{Display, Formatter};
 use serde::{Deserialize, Serialize};
 use winter_utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
 
-use crate::{Felt, sys_events::SystemEvent, utils::hash_string_to_word};
+use crate::{Felt, utils::hash_string_to_word};
 
 // EVENT ID
 // ================================================================================================
@@ -44,18 +44,8 @@ impl EventId {
     ///
     /// This ensures that identical event names always produce the same event ID, while
     /// providing good distribution properties to minimize collisions between different names.
-    ///
-    /// # Panics
-    /// Panics if the event name starts with "sys::" as this namespace is reserved for
-    /// [`SystemEvent`]s.
     pub fn from_name(name: impl AsRef<str>) -> Self {
-        let name_str = name.as_ref();
-        assert!(
-            !SystemEvent::is_system_event_name(name_str),
-            "Event name '{}' uses reserved namespace 'sys::' - use SystemEvent instead",
-            name_str
-        );
-        let digest_word = hash_string_to_word(name_str);
+        let digest_word = hash_string_to_word(name.as_ref());
         Self(digest_word[0])
     }
 
@@ -77,22 +67,6 @@ impl EventId {
     /// Returns the underlying `u64` value.
     pub const fn as_u64(&self) -> u64 {
         self.0.as_int()
-    }
-
-    /// Returns `true` if this EventId corresponds to a system event.
-    ///
-    /// System events use the "sys::" namespace and have predefined EventIds that are checked
-    /// against a const lookup table.
-    pub const fn is_system_event(&self) -> bool {
-        let lookup = crate::sys_events::SYSTEM_EVENT_LOOKUP;
-        let mut i = 0;
-        while i < lookup.len() {
-            if self.as_u64() == lookup[i].0.as_u64() {
-                return true;
-            }
-            i += 1;
-        }
-        false
     }
 }
 
@@ -163,18 +137,9 @@ impl EventName {
         self.0.as_ref()
     }
 
-    /// Returns `true` if this event name uses the "sys::" system event namespace.
-    pub fn is_system_event(&self) -> bool {
-        SystemEvent::is_system_event_name(self.as_str())
-    }
-
     /// Returns the [`EventId`] for this event name.
     ///
     /// The ID is computed by hashing the name using blake3.
-    ///
-    /// # Panics
-    /// Panics if the event name starts with "sys::" as this namespace is reserved for
-    /// [`SystemEvent`]s. System events should use [`SystemEvent::to_event_id()`] instead.
     pub fn to_event_id(&self) -> EventId {
         EventId::from_name(self.as_str())
     }
@@ -266,85 +231,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn event_id_basics() {
-        // Constructors
-        assert_eq!(EventId::from_u64(100).as_u64(), 100);
-        assert_eq!(EventId::from_felt(Felt::new(200)).as_u64(), 200);
+    fn event_basics() {
+        // EventId constructors and conversions
+        let id1 = EventId::from_u64(100);
+        assert_eq!(id1.as_u64(), 100);
+        assert_eq!(id1.as_felt(), Felt::new(100));
 
-        // Conversion to Felt
-        assert_eq!(EventId::from_u64(100).as_felt(), Felt::new(100));
+        let id2 = EventId::from_felt(Felt::new(200));
+        assert_eq!(id2.as_u64(), 200);
 
-        // Event ID from name
-        let event_id = EventId::from_name("test::event");
-        assert!(event_id.as_u64() > 0);
+        // EventId from name hashes consistently
+        let id3 = EventId::from_name("test::event");
+        let id4 = EventId::from_name("test::event");
+        assert_eq!(id3, id4);
 
-        // Same name produces same ID
-        let event_id2 = EventId::from_name("test::event");
-        assert_eq!(event_id, event_id2);
+        // EventName constructors and conversions
+        let name1 = EventName::new("static::event");
+        assert_eq!(name1.as_str(), "static::event");
+        assert_eq!(format!("{}", name1), "static::event");
 
-        // Different names produce different IDs
-        let event_id3 = EventId::from_name("test::different");
-        assert_ne!(event_id, event_id3);
-    }
+        let name2 = EventName::from_string("dynamic::event".to_string());
+        assert_eq!(name2.as_str(), "dynamic::event");
 
-    #[test]
-    fn event_name_basics() {
-        // Static constructor
-        let static_event = EventName::new("test::event");
-        assert_eq!(static_event.as_str(), "test::event");
-
-        // Dynamic constructor
-        let dynamic_event = EventName::from_string("dynamic::event".to_string());
-        assert_eq!(dynamic_event.as_str(), "dynamic::event");
-
-        // Display
-        assert_eq!(format!("{}", static_event), "test::event");
-
-        // to_event_id computes hash
-        let event_id = static_event.to_event_id();
-        assert_eq!(event_id, EventId::from_name("test::event"));
-
-        // is_system_event checks namespace
-        assert!(!static_event.is_system_event());
-        assert!(!dynamic_event.is_system_event());
-        let sys_event = EventName::new("sys::test");
-        assert!(sys_event.is_system_event());
-    }
-
-    #[test]
-    #[should_panic(expected = "uses reserved namespace 'sys::'")]
-    fn event_id_from_name_panics_on_sys_prefix() {
-        EventId::from_name("sys::my_event");
-    }
-
-    #[test]
-    #[should_panic(expected = "uses reserved namespace 'sys::'")]
-    fn event_name_to_event_id_panics_on_sys_prefix() {
-        let event = EventName::new("sys::my_event");
-        event.to_event_id();
-    }
-
-    #[test]
-    fn event_id_is_system_event() {
-        // Test that system event IDs are correctly identified
-        for system_event in crate::sys_events::SystemEvent::all() {
-            let event_id = system_event.to_event_id();
-            assert!(
-                event_id.is_system_event(),
-                "SystemEvent {:?} should be identified as a system event",
-                system_event
-            );
-        }
-
-        // Test that user event IDs are not identified as system events
-        let user_event_id = EventId::from_name("user::my_event");
-        assert!(!user_event_id.is_system_event());
-
-        let another_user_event = EventId::from_name("stdlib::crypto::hash");
-        assert!(!another_user_event.is_system_event());
-
-        // Test some arbitrary EventIds
-        assert!(!EventId::from_u64(0).is_system_event());
-        assert!(!EventId::from_u64(12345).is_system_event());
+        // EventName to EventId
+        assert_eq!(name1.to_event_id(), EventId::from_name("static::event"));
     }
 }

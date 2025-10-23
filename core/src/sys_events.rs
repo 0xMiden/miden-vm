@@ -244,91 +244,55 @@ pub enum SystemEvent {
 }
 
 impl SystemEvent {
-    /// Returns the human-readable name string for this system event.
-    ///
-    /// System event names are prefixed with `sys::` to distinguish them from user-defined events.
-    pub const fn name_str(&self) -> &'static str {
-        match self {
-            Self::MerkleNodeMerge => "sys::merkle_node_merge",
-            Self::MerkleNodeToStack => "sys::merkle_node_to_stack",
-            Self::MapValueToStack => "sys::map_value_to_stack",
-            Self::MapValueToStackN => "sys::map_value_to_stack_n",
-            Self::HasMapKey => "sys::has_map_key",
-            Self::Ext2Inv => "sys::ext2_inv",
-            Self::U32Clz => "sys::u32_clz",
-            Self::U32Ctz => "sys::u32_ctz",
-            Self::U32Clo => "sys::u32_clo",
-            Self::U32Cto => "sys::u32_cto",
-            Self::ILog2 => "sys::ilog2",
-            Self::MemToMap => "sys::mem_to_map",
-            Self::HdwordToMap => "sys::hdword_to_map",
-            Self::HdwordToMapWithDomain => "sys::hdword_to_map_with_domain",
-            Self::HqwordToMap => "sys::hqword_to_map",
-            Self::HpermToMap => "sys::hperm_to_map",
-        }
-    }
-
-    /// Returns the human-readable name of this system event as an [`EventName`].
-    ///
-    /// System event names are prefixed with `sys::` to distinguish them from user-defined events.
-    pub const fn event_name(&self) -> EventName {
-        EventName::new(self.name_str())
-    }
-
-    /// Returns the [`EventId`] for this system event.
-    ///
-    /// The ID is looked up from the const SYSTEM_EVENT_LOOKUP table using the enum's discriminant
-    /// as the index. The discriminants are explicitly set to match the array indices.
-    pub const fn to_event_id(&self) -> EventId {
-        SYSTEM_EVENT_LOOKUP[*self as usize].0
-    }
-
-    /// Attempts to convert a name string into a SystemEvent.
-    ///
-    /// Returns `Some(SystemEvent)` if the name matches a known system event, `None` otherwise.
-    ///
-    /// This method only works with full system event names (e.g., "sys::merkle_node_merge").
-    /// To create system event names, use [`SystemEvent::event_name()`] instead.
-    pub fn from_name(name: &str) -> Option<Self> {
-        match name {
-            "sys::merkle_node_merge" => Some(Self::MerkleNodeMerge),
-            "sys::merkle_node_to_stack" => Some(Self::MerkleNodeToStack),
-            "sys::map_value_to_stack" => Some(Self::MapValueToStack),
-            "sys::map_value_to_stack_n" => Some(Self::MapValueToStackN),
-            "sys::has_map_key" => Some(Self::HasMapKey),
-            "sys::ext2_inv" => Some(Self::Ext2Inv),
-            "sys::u32_clz" => Some(Self::U32Clz),
-            "sys::u32_ctz" => Some(Self::U32Ctz),
-            "sys::u32_clo" => Some(Self::U32Clo),
-            "sys::u32_cto" => Some(Self::U32Cto),
-            "sys::ilog2" => Some(Self::ILog2),
-            "sys::mem_to_map" => Some(Self::MemToMap),
-            "sys::hdword_to_map" => Some(Self::HdwordToMap),
-            "sys::hdword_to_map_with_domain" => Some(Self::HdwordToMapWithDomain),
-            "sys::hqword_to_map" => Some(Self::HqwordToMap),
-            "sys::hperm_to_map" => Some(Self::HpermToMap),
-            _ => None,
-        }
-    }
-
     /// Attempts to convert an EventId into a SystemEvent by looking it up in the const table.
     ///
     /// Returns `Some(SystemEvent)` if the ID matches a known system event, `None` otherwise.
     /// This uses a const lookup table with hardcoded EventIds, avoiding runtime hash computation.
     pub const fn from_event_id(event_id: EventId) -> Option<Self> {
-        let lookup = SYSTEM_EVENT_LOOKUP;
+        let lookup = Self::LOOKUP;
         let mut i = 0;
         while i < lookup.len() {
-            if lookup[i].0.as_u64() == event_id.as_u64() {
-                return Some(lookup[i].1);
+            if lookup[i].id.as_u64() == event_id.as_u64() {
+                return Some(lookup[i].event);
             }
             i += 1;
         }
         None
     }
 
+    /// Attempts to convert a name into a SystemEvent by looking it up in the const table.
+    ///
+    /// Returns `Some(SystemEvent)` if the name matches a known system event, `None` otherwise.
+    /// This uses const string comparison against the lookup table.
+    pub const fn from_name(name: &str) -> Option<Self> {
+        let lookup = Self::LOOKUP;
+        let mut i = 0;
+        while i < lookup.len() {
+            if str_eq(name, lookup[i].name) {
+                return Some(lookup[i].event);
+            }
+            i += 1;
+        }
+        None
+    }
+
+    /// Returns the human-readable name of this system event as an [`EventName`].
+    ///
+    /// System event names are prefixed with `sys::` to distinguish them from user-defined events.
+    pub const fn event_name(&self) -> EventName {
+        EventName::new(Self::LOOKUP[*self as usize].name)
+    }
+
+    /// Returns the [`EventId`] for this system event.
+    ///
+    /// The ID is looked up from the const LOOKUP table using the enum's discriminant
+    /// as the index. The discriminants are explicitly set to match the array indices.
+    pub const fn event_id(&self) -> EventId {
+        Self::LOOKUP[*self as usize].id
+    }
+
     /// Returns an array of all system event variants.
-    pub const fn all() -> [Self; 16] {
+    pub const fn all() -> [Self; Self::COUNT] {
         [
             Self::MerkleNodeMerge,
             Self::MerkleNodeToStack,
@@ -348,45 +312,7 @@ impl SystemEvent {
             Self::HpermToMap,
         ]
     }
-
-    /// Returns `true` if the event name uses the "sys::" system event namespace.
-    pub(crate) const fn is_system_event_name(name: &str) -> bool {
-        let bytes = name.as_bytes();
-        bytes.len() >= 5
-            && bytes[0] == b's'
-            && bytes[1] == b'y'
-            && bytes[2] == b's'
-            && bytes[3] == b':'
-            && bytes[4] == b':'
-    }
 }
-
-// SYSTEM EVENT LOOKUP TABLE
-// ================================================================================================
-
-/// Const lookup table mapping [`EventId`] to [`SystemEvent`] for all system events.
-///
-/// This array provides O(n) reverse lookup from event IDs to system events. The EventIds are
-/// hardcoded to avoid runtime initialization and hash computation. The small number of variants
-/// (16) makes linear search fast enough.
-pub(crate) const SYSTEM_EVENT_LOOKUP: [(EventId, SystemEvent); 16] = [
-    (EventId::from_u64(7243907139105902342), SystemEvent::MerkleNodeMerge),
-    (EventId::from_u64(6873007751276594108), SystemEvent::MerkleNodeToStack),
-    (EventId::from_u64(17843484659000820118), SystemEvent::MapValueToStack),
-    (EventId::from_u64(7354377147644073171), SystemEvent::MapValueToStackN),
-    (EventId::from_u64(5642583036089175977), SystemEvent::HasMapKey),
-    (EventId::from_u64(9660728691489438960), SystemEvent::Ext2Inv),
-    (EventId::from_u64(1503707361178382932), SystemEvent::U32Clz),
-    (EventId::from_u64(10656887096526143429), SystemEvent::U32Ctz),
-    (EventId::from_u64(12846584985739176048), SystemEvent::U32Clo),
-    (EventId::from_u64(6773574803673468616), SystemEvent::U32Cto),
-    (EventId::from_u64(7444351342957461231), SystemEvent::ILog2),
-    (EventId::from_u64(5768534446586058686), SystemEvent::MemToMap),
-    (EventId::from_u64(5988159172915333521), SystemEvent::HdwordToMap),
-    (EventId::from_u64(6143777601072385586), SystemEvent::HdwordToMapWithDomain),
-    (EventId::from_u64(11723176702659679401), SystemEvent::HqwordToMap),
-    (EventId::from_u64(6190830263511605775), SystemEvent::HpermToMap),
-];
 
 impl From<SystemEvent> for EventName {
     fn from(system_event: SystemEvent) -> Self {
@@ -404,9 +330,137 @@ impl fmt::Display for SystemEvent {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         const PREFIX_LEN: usize = "sys::".len();
 
-        let (_prefix, rest) = self.name_str().split_at(PREFIX_LEN);
+        let (_prefix, rest) = Self::LOOKUP[*self as usize].name.split_at(PREFIX_LEN);
         write!(f, "{rest}")
     }
+}
+
+// LOOKUP TABLE
+// ================================================================================================
+
+/// An entry in the system event lookup table, containing all metadata for a system event.
+#[derive(Copy, Clone, Debug)]
+pub(crate) struct SystemEventEntry {
+    /// The unique event ID (hash of the name)
+    pub id: EventId,
+    /// The system event variant
+    pub event: SystemEvent,
+    /// The full event name string (e.g., "sys::merkle_node_merge")
+    pub name: &'static str,
+}
+
+impl SystemEvent {
+    /// The total number of system events.
+    pub const COUNT: usize = 16;
+
+    /// Lookup table mapping system events to their metadata.
+    ///
+    /// The enum variant order matches the indices in this table, allowing efficient const
+    /// lookup via array indexing using discriminants.
+    const LOOKUP: [SystemEventEntry; Self::COUNT] = [
+        SystemEventEntry {
+            id: EventId::from_u64(7243907139105902342),
+            event: SystemEvent::MerkleNodeMerge,
+            name: "sys::merkle_node_merge",
+        },
+        SystemEventEntry {
+            id: EventId::from_u64(6873007751276594108),
+            event: SystemEvent::MerkleNodeToStack,
+            name: "sys::merkle_node_to_stack",
+        },
+        SystemEventEntry {
+            id: EventId::from_u64(17843484659000820118),
+            event: SystemEvent::MapValueToStack,
+            name: "sys::map_value_to_stack",
+        },
+        SystemEventEntry {
+            id: EventId::from_u64(7354377147644073171),
+            event: SystemEvent::MapValueToStackN,
+            name: "sys::map_value_to_stack_n",
+        },
+        SystemEventEntry {
+            id: EventId::from_u64(5642583036089175977),
+            event: SystemEvent::HasMapKey,
+            name: "sys::has_map_key",
+        },
+        SystemEventEntry {
+            id: EventId::from_u64(9660728691489438960),
+            event: SystemEvent::Ext2Inv,
+            name: "sys::ext2_inv",
+        },
+        SystemEventEntry {
+            id: EventId::from_u64(1503707361178382932),
+            event: SystemEvent::U32Clz,
+            name: "sys::u32_clz",
+        },
+        SystemEventEntry {
+            id: EventId::from_u64(10656887096526143429),
+            event: SystemEvent::U32Ctz,
+            name: "sys::u32_ctz",
+        },
+        SystemEventEntry {
+            id: EventId::from_u64(12846584985739176048),
+            event: SystemEvent::U32Clo,
+            name: "sys::u32_clo",
+        },
+        SystemEventEntry {
+            id: EventId::from_u64(6773574803673468616),
+            event: SystemEvent::U32Cto,
+            name: "sys::u32_cto",
+        },
+        SystemEventEntry {
+            id: EventId::from_u64(7444351342957461231),
+            event: SystemEvent::ILog2,
+            name: "sys::ilog2",
+        },
+        SystemEventEntry {
+            id: EventId::from_u64(5768534446586058686),
+            event: SystemEvent::MemToMap,
+            name: "sys::mem_to_map",
+        },
+        SystemEventEntry {
+            id: EventId::from_u64(5988159172915333521),
+            event: SystemEvent::HdwordToMap,
+            name: "sys::hdword_to_map",
+        },
+        SystemEventEntry {
+            id: EventId::from_u64(6143777601072385586),
+            event: SystemEvent::HdwordToMapWithDomain,
+            name: "sys::hdword_to_map_with_domain",
+        },
+        SystemEventEntry {
+            id: EventId::from_u64(11723176702659679401),
+            event: SystemEvent::HqwordToMap,
+            name: "sys::hqword_to_map",
+        },
+        SystemEventEntry {
+            id: EventId::from_u64(6190830263511605775),
+            event: SystemEvent::HpermToMap,
+            name: "sys::hperm_to_map",
+        },
+    ];
+}
+
+// HELPERS
+// ================================================================================================
+
+/// Const-compatible string equality check.
+const fn str_eq(a: &str, b: &str) -> bool {
+    let a_bytes = a.as_bytes();
+    let b_bytes = b.as_bytes();
+
+    if a_bytes.len() != b_bytes.len() {
+        return false;
+    }
+
+    let mut i = 0;
+    while i < a_bytes.len() {
+        if a_bytes[i] != b_bytes[i] {
+            return false;
+        }
+        i += 1;
+    }
+    true
 }
 
 #[cfg(test)]
@@ -414,50 +468,64 @@ mod test {
     use super::*;
 
     #[test]
-    fn test_system_event_lookup() {
-        // Verify all system events can be looked up by their event IDs
-        for system_event in SystemEvent::all() {
-            let event_id = system_event.to_event_id();
+    fn test_system_events() {
+        // Comprehensive test verifying consistency between SystemEvent::all() and
+        // SystemEvent::LOOKUP. This ensures all() and LOOKUP are in sync, lookup table has
+        // correct IDs/names, and all variants are covered.
 
-            // Test lookup by ID
-            let looked_up =
-                SystemEvent::from_event_id(event_id).expect("SystemEvent should be found by ID");
-            assert_eq!(looked_up, system_event);
+        // Verify lengths match COUNT
+        assert_eq!(SystemEvent::all().len(), SystemEvent::COUNT);
+        assert_eq!(SystemEvent::LOOKUP.len(), SystemEvent::COUNT);
 
-            // Test lookup by name
-            let name = system_event.name_str();
-            let looked_up_by_name =
-                SystemEvent::from_name(name).expect("SystemEvent should be found by name");
-            assert_eq!(looked_up_by_name, system_event);
-        }
-
-        // Verify all() returns exactly 16 variants
-        assert_eq!(SystemEvent::all().len(), 16);
-    }
-
-    #[test]
-    fn test_system_event_names() {
-        // Test that all system events have names with correct prefix
-        for system_event in SystemEvent::all() {
-            let event_name = system_event.event_name();
-            let name = event_name.as_str();
-            assert!(
-                name.starts_with("sys::"),
-                "System event name should start with 'sys::': {}",
-                name
+        // Iterate through both all() and LOOKUP together, checking all invariants
+        for (i, (event, entry)) in
+            SystemEvent::all().iter().zip(SystemEvent::LOOKUP.iter()).enumerate()
+        {
+            // Verify LOOKUP entry matches the event at the same index
+            assert_eq!(
+                entry.event, *event,
+                "LOOKUP[{}].event ({:?}) doesn't match all()[{}] ({:?})",
+                i, entry.event, i, event
             );
 
-            // Test conversion to EventName
-            let event_name_from_into: EventName = system_event.into();
-            assert_eq!(event_name_from_into.as_str(), name);
-        }
-    }
+            // Verify LOOKUP entry ID matches the computed ID
+            let computed_id = event.event_id();
+            assert_eq!(
+                entry.id,
+                computed_id,
+                "LOOKUP[{}].id is EventId::from_u64({}), but {:?}.to_event_id() returns EventId::from_u64({})",
+                i,
+                entry.id.as_u64(),
+                event,
+                computed_id.as_u64()
+            );
 
-    #[test]
-    fn test_system_event_all_variants_covered() {
-        // Exhaustive match ensures compile-time error when adding new SystemEvent variants
-        // without updating the all() method and other related code
-        for event in SystemEvent::all() {
+            // Verify name has correct "sys::" prefix
+            assert!(
+                entry.name.starts_with("sys::"),
+                "SystemEvent name should start with 'sys::': {}",
+                entry.name
+            );
+
+            // Verify from_event_id lookup works
+            let looked_up =
+                SystemEvent::from_event_id(entry.id).expect("SystemEvent should be found by ID");
+            assert_eq!(looked_up, *event);
+
+            // Verify from_name lookup works
+            let looked_up_by_name =
+                SystemEvent::from_name(entry.name).expect("SystemEvent should be found by name");
+            assert_eq!(looked_up_by_name, *event);
+
+            // Verify EventName conversion works
+            let event_name = event.event_name();
+            assert_eq!(event_name.as_str(), entry.name);
+            assert!(SystemEvent::from_name(event_name.as_str()).is_some());
+            let event_name_from_into: EventName = (*event).into();
+            assert_eq!(event_name_from_into.as_str(), entry.name);
+            assert!(SystemEvent::from_name(event_name_from_into.as_str()).is_some());
+
+            // Exhaustive match to ensure compile-time error when adding new variants
             match event {
                 SystemEvent::MerkleNodeMerge
                 | SystemEvent::MerkleNodeToStack
@@ -477,43 +545,5 @@ mod test {
                 | SystemEvent::HpermToMap => {},
             }
         }
-
-        // Verify all() returns the correct number of variants
-        assert_eq!(SystemEvent::all().len(), 16);
-    }
-
-    #[test]
-    fn test_system_event_lookup_table_correctness() {
-        // This test verifies that the hardcoded EventIds in SYSTEM_EVENT_LOOKUP match
-        // the computed EventIds from to_event_id(). If this test fails, update the
-        // SYSTEM_EVENT_LOOKUP array with the correct EventId values shown in the assertion.
-
-        for (i, (hardcoded_id, system_event)) in SYSTEM_EVENT_LOOKUP.iter().enumerate() {
-            let computed_id = system_event.to_event_id();
-            assert_eq!(
-                *hardcoded_id,
-                computed_id,
-                "Mismatch at index {}: SYSTEM_EVENT_LOOKUP has EventId::from_u64({}), but {:?}.to_event_id() returns EventId::from_u64({})",
-                i,
-                hardcoded_id.as_u64(),
-                system_event,
-                computed_id.as_u64()
-            );
-        }
-    }
-
-    #[test]
-    fn test_is_system_event_name() {
-        // Test valid system event names
-        assert!(SystemEvent::is_system_event_name("sys::merkle_node_merge"));
-        assert!(SystemEvent::is_system_event_name("sys::test"));
-        assert!(SystemEvent::is_system_event_name("sys::"));
-
-        // Test invalid names
-        assert!(!SystemEvent::is_system_event_name("system::event"));
-        assert!(!SystemEvent::is_system_event_name("sy::event"));
-        assert!(!SystemEvent::is_system_event_name("sys:"));
-        assert!(!SystemEvent::is_system_event_name("user::event"));
-        assert!(!SystemEvent::is_system_event_name(""));
     }
 }

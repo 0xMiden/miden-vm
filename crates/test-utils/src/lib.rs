@@ -63,9 +63,9 @@ pub mod rand;
 
 mod test_builders;
 
+use miden_core::sys_events::SystemEvent;
 #[cfg(not(target_family = "wasm"))]
 pub use proptest;
-
 // CONSTANTS
 // ================================================================================================
 
@@ -232,12 +232,13 @@ impl Test {
     /// Add a handler for a specific event when running the `Host`.
     pub fn add_event_handlers(&mut self, handlers: Vec<(EventName, Arc<dyn EventHandler>)>) {
         for (event, handler) in handlers {
-            if event.is_system_event() {
-                panic!("tried to register handler with namespace reserved for system events: sys::")
+            let event_name = event.as_str();
+            if SystemEvent::from_name(event_name).is_some() {
+                panic!("tried to register handler for reserved system event: {event_name}")
             }
             let event_id = event.to_event_id();
             if self.handlers.iter().any(|(e, _)| e.to_event_id() == event_id) {
-                panic!("handler for event '{}' was already added", event.as_str())
+                panic!("handler for event '{event_name}' was already added")
             }
             self.handlers.push((event, handler));
         }

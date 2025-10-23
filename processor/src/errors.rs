@@ -85,9 +85,7 @@ pub enum ExecutionError {
     },
     #[error("attempted to add event handler for '{event}' (already registered)")]
     DuplicateEventHandler { event: EventName },
-    #[error(
-        "attempted to add event handler for '{event}' (namespace 'sys::' is reserved for system events)"
-    )]
+    #[error("attempted to add event handler for '{event}' (reserved system event)")]
     ReservedEventNamespace { event: EventName },
     #[error("assertion failed at clock cycle {clk} with error {}",
       match err_msg {

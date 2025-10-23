@@ -98,7 +98,7 @@ impl BasicBlockBuilder<'_> {
     /// Converts the system event into its corresponding event ID, and adds an `Emit` operation
     /// to the list of basic block operations.
     pub fn push_system_event(&mut self, sys_event: SystemEvent) {
-        let event_id = sys_event.to_event_id();
+        let event_id = sys_event.event_id();
         self.push_ops([Operation::Push(event_id.as_felt()), Operation::Emit, Operation::Drop]);
     }
 }

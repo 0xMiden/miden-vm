@@ -6,7 +6,7 @@ use alloc::{
 };
 use core::{error::Error, fmt, fmt::Debug};
 
-use miden_core::{DebugOptions, EventId, EventName};
+use miden_core::{DebugOptions, EventId, EventName, sys_events::SystemEvent};
 
 use crate::{AdviceMutation, ExecutionError, ProcessState};
 
@@ -115,15 +115,15 @@ impl EventHandlerRegistry {
     ///
     /// # Errors
     /// Returns an error if:
-    /// - The event name uses the "sys::" namespace (reserved for system events)
+    /// - The event is a reserved system event
     /// - A handler with the same event ID is already registered
     pub fn register(
         &mut self,
         event: EventName,
         handler: Arc<dyn EventHandler>,
     ) -> Result<(), ExecutionError> {
-        // Check if the event name uses the reserved system event namespace
-        if event.is_system_event() {
+        // Check if the event is a reserved system event
+        if SystemEvent::from_name(event.as_str()).is_some() {
             return Err(ExecutionError::ReservedEventNamespace { event });
         }
 
