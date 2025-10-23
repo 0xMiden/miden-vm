@@ -146,7 +146,7 @@ end
 
 #! Finds a key in a sorted array of (key, value) word tuples.
 #!
-#! Inputs:  [KEY, start_ptr, end_ptr, use_half_key]
+#! Inputs:  [KEY, start_ptr, end_ptr]
 #! Outputs: [is_key_found, key_ptr, start_ptr, end_ptr]
 #!
 #! # Panics
@@ -204,15 +204,22 @@ end
 
 #! Finds a key in a sorted array of (key, value) word tuples.
 #!
-#! This function will crash if the following conditions aren't met:
-#! - keys must be sorted in non-decreasing order,
-#! - start_ptr must be word-aligned
-#! - end_ptr must be double-word-aligned with the start_ptr:
-#!       `(end_ptr - start_ptr)` must be divisible by 8
-#! - `start_ptr <= end_ptr`
+#! - If use_half_key = 0, then a match on the entire KEY is required.
+#! - If use_half_key = 1, then the KEY's two least significant elements *must* be zeroes and
+#!   upon loading the key for comparison, its two least significant elements are zeroized.
+#!   This effectively means that only a match on the two most significant elements is required.
 #!
 #! Input:  [KEY, start_ptr, end_ptr, use_half_key]
 #! Output: [is_key_found, key_ptr, start_ptr, end_ptr]
+#!
+#! # Panics
+#!
+#! Panics if:
+#! - keys are not sorted in non-decreasing order,
+#! - start_ptr is not word-aligned
+#! - end_ptr is not double-word-aligned with the start_ptr:
+#!     - `(end_ptr - start_ptr)` must be divisible by 8
+#! - `start_ptr > end_ptr`
 #!
 #! TODO: Update cycle counts.
 #!
