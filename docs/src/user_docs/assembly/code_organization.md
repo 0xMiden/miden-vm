@@ -1,3 +1,8 @@
+---
+title: "Code Organization"
+sidebar_position: 2
+---
+
 ## Code organization
 A Miden assembly program is just a sequence of instructions each describing a specific directive or an operation. You can use any combination of whitespace characters to separate one instruction from another.
 
@@ -143,7 +148,7 @@ begin
 end
 ```
 
-In the examples above, we have been referencing the `std::math::u64` module, which is a module in the [Miden Standard Library](../stdlib/main.md). There are a number of useful modules there, that provide a variety of helpful functionality out of the box.
+In the examples above, we have been referencing the `std::math::u64` module, which is a module in the [Miden Standard Library](../stdlib/index.md). There are a number of useful modules there, that provide a variety of helpful functionality out of the box.
 
 If the assembler does not know about the imported modules, assembly will fail. You can register modules with the assembler when instantiating it, either in source form, or precompiled form. See the [miden-assembly docs](https://crates.io/crates/miden-assembly) for details. The assembler will use this information to resolve references to imported procedures during assembly.
 
