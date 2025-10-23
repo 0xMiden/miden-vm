@@ -14,6 +14,8 @@ use miden_crypto::dsa::ecdsa_k256_keccak::SecretKey;
 use miden_stdlib::handlers::ecdsa::{EcdsaPrecompile, EcdsaRequest};
 use rand::{SeedableRng, rngs::StdRng};
 
+use crate::helpers::masm_store_packed_bytes;
+
 // TEST CONSTANTS
 // ================================================================================================
 
@@ -163,30 +165,6 @@ fn generate_invalid_signature_wrong_key() -> EcdsaRequest {
 // MASM GENERATION HELPERS
 // ================================================================================================
 
-/// Generates MASM code to store bytes as packed u32 values at the specified memory address.
-///
-/// Each 4 bytes are packed into a single u32 in little-endian format. Unused bytes in the
-/// final u32 are zero-padded.
-///
-/// # Arguments
-/// * `data` - The byte slice to store
-/// * `base_addr` - Base memory address to start storing at
-///
-/// # Returns
-/// MASM instruction string that stores all packed u32 values sequentially
-fn generate_packed_store_masm(data: &[u8], base_addr: u32) -> String {
-    data.chunks(4)
-        .enumerate()
-        .map(|(i, chunk)| {
-            let mut array = [0u8; 4];
-            array[..chunk.len()].copy_from_slice(chunk);
-            let value = u32::from_le_bytes(array);
-            format!("push.{value} push.{} mem_store", base_addr + i as u32)
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
 /// Generates MASM code to store test data (pk, digest, sig) into memory as packed u32 values.
 ///
 /// Memory layout:
@@ -195,9 +173,9 @@ fn generate_packed_store_masm(data: &[u8], base_addr: u32) -> String {
 /// - Signature: SIG_ADDR (66 bytes)
 fn generate_memory_store_masm(request: &EcdsaRequest) -> String {
     [
-        generate_packed_store_masm(&request.pk().to_bytes(), PK_ADDR),
-        generate_packed_store_masm(request.digest(), DIGEST_ADDR),
-        generate_packed_store_masm(&request.sig().to_bytes(), SIG_ADDR),
+        masm_store_packed_bytes(&request.pk().to_bytes(), PK_ADDR),
+        masm_store_packed_bytes(request.digest(), DIGEST_ADDR),
+        masm_store_packed_bytes(&request.sig().to_bytes(), SIG_ADDR),
     ]
     .join(" ")
 }

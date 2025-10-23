@@ -16,6 +16,8 @@ use miden_stdlib::handlers::keccak256::{
     KECCAK_HASH_MEMORY_EVENT_ID, KECCAK_HASH_MEMORY_EVENT_NAME, KeccakPrecompile, KeccakPreimage,
 };
 
+use crate::helpers::{masm_push_felts, masm_store_felts};
+
 // Test constants
 // ================================================================================================
 
@@ -50,7 +52,8 @@ fn test_keccak_handler(input_u8: &[u8]) {
     let len_bytes = input_u8.len();
     let preimage = KeccakPreimage::new(input_u8.to_vec());
 
-    let memory_stores_source = generate_memory_store_masm(&preimage, INPUT_MEMORY_ADDR);
+    let input_felts = preimage.as_felts();
+    let memory_stores_source = masm_store_felts(&input_felts, INPUT_MEMORY_ADDR);
 
     let source = format!(
         r#"
@@ -91,7 +94,8 @@ fn test_keccak_hash_memory_impl(input_u8: &[u8]) {
     let len_bytes = input_u8.len();
     let preimage = KeccakPreimage::new(input_u8.to_vec());
 
-    let memory_stores_source = generate_memory_store_masm(&preimage, INPUT_MEMORY_ADDR);
+    let input_felts = preimage.as_felts();
+    let memory_stores_source = masm_store_felts(&input_felts, INPUT_MEMORY_ADDR);
 
     let source = format!(
         r#"
@@ -143,7 +147,8 @@ fn test_keccak_hash_memory(input_u8: &[u8]) {
     let len_bytes = input_u8.len();
     let preimage = KeccakPreimage::new(input_u8.to_vec());
 
-    let memory_stores_source = generate_memory_store_masm(&preimage, INPUT_MEMORY_ADDR);
+    let input_felts = preimage.as_felts();
+    let memory_stores_source = masm_store_felts(&input_felts, INPUT_MEMORY_ADDR);
 
     let source = format!(
         r#"
@@ -176,7 +181,8 @@ fn test_keccak_hash_1to1() {
     let input_u8: Vec<u8> = (0..32).collect();
     let preimage = KeccakPreimage::new(input_u8);
 
-    let stack_stores_source = generate_stack_push_masm(&preimage);
+    let input_felts = preimage.as_felts();
+    let stack_stores_source = masm_push_felts(&input_felts);
 
     let source = format!(
         r#"
@@ -206,7 +212,8 @@ fn test_keccak_hash_2to1() {
     let input_u8: Vec<u8> = (0..64).collect();
     let preimage = KeccakPreimage::new(input_u8);
 
-    let stack_stores_source = generate_stack_push_masm(&preimage);
+    let input_felts = preimage.as_felts();
+    let stack_stores_source = masm_push_felts(&input_felts);
 
     let source = format!(
         r#"
@@ -229,44 +236,4 @@ fn test_keccak_hash_2to1() {
     let test = build_debug_test!(source, &[]);
     let digest: Vec<u64> = preimage.digest().as_ref().iter().map(Felt::as_int).collect();
     test.expect_stack(&digest);
-}
-
-// MASM GENERATION HELPERS
-// ================================================================================================
-
-/// Generates MASM code to store packed u32 values into memory.
-///
-/// # Arguments
-/// * `preimage` - The Keccak preimage containing the data to store
-/// * `base_addr` - Base memory address to start storing at
-///
-/// # Returns
-/// MASM instruction string that stores all packed u32 values sequentially
-fn generate_memory_store_masm(preimage: &KeccakPreimage, base_addr: u32) -> String {
-    preimage
-        .as_felts()
-        .into_iter()
-        .enumerate()
-        .map(|(i, value)| format!("push.{value} push.{} mem_store", base_addr + i as u32))
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-/// Generates MASM code to push the input represented as u32 values to the stack.
-///
-/// # Arguments
-/// * `preimage` - The Keccak preimage containing the data to push
-///
-/// # Returns
-/// MASM instruction string that pushes all packed u32 values in reverse order
-/// so that the first element ends up at the top of the stack
-fn generate_stack_push_masm(preimage: &KeccakPreimage) -> String {
-    // Push elements in reverse order so that the first element ends up at the top
-    preimage
-        .as_felts()
-        .into_iter()
-        .rev()
-        .map(|value| format!("push.{value}"))
-        .collect::<Vec<_>>()
-        .join(" ")
 }

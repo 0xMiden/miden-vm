@@ -133,7 +133,7 @@ pub(crate) fn read_memory_packed_u32(
 /// let felts = bytes_to_felts(&bytes);
 /// // Returns: [Felt(0x04030201), Felt(0x00000005)]
 /// ```
-pub fn bytes_to_felts(bytes: &[u8]) -> Vec<Felt> {
+pub fn bytes_to_packed_u32_felts(bytes: &[u8]) -> Vec<Felt> {
     bytes
         .chunks(4)
         .map(|chunk| {

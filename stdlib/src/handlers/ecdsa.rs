@@ -44,7 +44,7 @@ use miden_crypto::{
 };
 use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessState};
 
-use crate::handlers::{bytes_to_felts, read_memory_packed_u32};
+use crate::handlers::{bytes_to_packed_u32_felts, read_memory_packed_u32};
 
 /// Qualified event name for the ECDSA signature verification event.
 pub const ECDSA_VERIFY_EVENT_NAME: &str = "stdlib::crypto::dsa::ecdsa::verify";
@@ -204,16 +204,16 @@ impl EcdsaRequest {
 
         // Convert serialized bytes to field elements and hash
         let pk_comm = {
-            let felts = bytes_to_felts(&self.pk.to_bytes());
+            let felts = bytes_to_packed_u32_felts(&self.pk.to_bytes());
             Rpo256::hash_elements(&felts)
         };
         let digest_comm = {
             // `digest` is a 32‑byte array; hash its u32‑packed representation
-            let felts = bytes_to_felts(&self.digest);
+            let felts = bytes_to_packed_u32_felts(&self.digest);
             Rpo256::hash_elements(&felts)
         };
         let sig_comm = {
-            let felts = bytes_to_felts(&self.sig.to_bytes());
+            let felts = bytes_to_packed_u32_felts(&self.sig.to_bytes());
             Rpo256::hash_elements(&felts)
         };
 
