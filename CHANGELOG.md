@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.18.3 (TBD)
+
+- Implement `sorted_array::find_half_key_value` (#[2268](https://github.com/0xMiden/miden-vm/pull/2268)).
+
 ## 0.18.2 (2025-10-10)
 
 - Place the `FastProcessor` stack on the heap instead of the (OS thread) stack (#[2275](https://github.com/0xMiden/miden-vm/pull/2275)).
