@@ -144,7 +144,19 @@ end
 
 # ===== KEY-VALUE UTILITIES ============================================================================
 
-#! TODO: Docs.
+#! Finds a key in a sorted array of (key, value) word tuples.
+#!
+#! Inputs:  [KEY, start_ptr, end_ptr, use_half_key]
+#! Outputs: [is_key_found, key_ptr, start_ptr, end_ptr]
+#!
+#! # Panics
+#!
+#! Panics if:
+#! - keys are not sorted in non-decreasing order,
+#! - start_ptr is not word-aligned
+#! - end_ptr is not double-word-aligned with the start_ptr:
+#!     - `(end_ptr - start_ptr)` must be divisible by 8
+#! - `start_ptr > end_ptr`
 #!
 #! Inputs: [KEY, start_ptr, end_ptr]
 #! Output: [is_key_found, key_ptr, start_ptr, end_ptr]
@@ -159,15 +171,24 @@ export.find_key_value
     # => [is_key_found, key_ptr, start_ptr, end_ptr]
 end
 
-#! TODO: Docs.
+#! Finds a half-key in a sorted array of (key, value) word tuples.
+#!
+#! Half-key means that, out of the keys in the array, only half of the key - the most significant
+#! element (prefix) and the second most significant element (suffix) - need to match.
 #!
 #! Inputs: [key_prefix, key_suffix, start_ptr, end_ptr]
 #! Output: [is_key_found, key_ptr, start_ptr, end_ptr]
+#!
+#! # Panics
+#!
+#! Panics if:
+#! - keys are not sorted in non-decreasing order,
+#! - start_ptr is not word-aligned
+#! - end_ptr is not double-word-aligned with the start_ptr:
+#!     - `(end_ptr - start_ptr)` must be divisible by 8
+#! - `start_ptr > end_ptr`
 export.find_half_key_value
-    push.0 movdn.2
-    # => [key_prefix, key_suffix, 0, start_ptr, end_ptr]
-
-    push.0 movdn.2
+    push.0 movdn.2 push.0 movdn.2
     # => [key_prefix, key_suffix, 0, 0, start_ptr, end_ptr]
     # => [KEY, start_ptr, end_ptr]
 
@@ -181,9 +202,6 @@ export.find_half_key_value
     # => [is_key_found, key_ptr, start_ptr, end_ptr]
 end
 
-#! TODO: Update cycle counts.
-#! TODO: Avoid local memory.
-#!
 #! Finds a key in a sorted array of (key, value) word tuples.
 #!
 #! This function will crash if the following conditions aren't met:
@@ -195,6 +213,8 @@ end
 #!
 #! Input:  [KEY, start_ptr, end_ptr, use_half_key]
 #! Output: [is_key_found, key_ptr, start_ptr, end_ptr]
+#!
+#! TODO: Update cycle counts.
 #!
 #! Cycles:
 #!   Key exists: 56 cycles
@@ -264,7 +284,7 @@ proc.find_key_value_inner.1
                 dup movdn.5
                 #=> [maybe_key_ptr, KEY, maybe_key_ptr, start_ptr, end_ptr]
 
-                # dereference maybe_key_ptr (7 cycles)
+                # load key (?? cycles)
                 loc_load.0 exec.load_key
                 #=> [FIRST_KEY, KEY, maybe_key_ptr = start_ptr, start_ptr, end_ptr]
 
@@ -315,7 +335,7 @@ proc.find_key_value_inner.1
                 movdn.4 dupw
                 #=> [KEY, KEY, maybe_key_ptr, start_ptr, end_ptr]
 
-                # dereference maybe_key_ptr (8 cycles)
+                # load key (?? cycles)
                 dup.8 loc_load.0 exec.load_key
                 #=> [MAYBE_KEY, KEY, KEY, maybe_key_ptr, start_ptr, end_ptr]
 
@@ -343,6 +363,13 @@ proc.find_key_value_inner.1
     end
 end
 
+#! Loads a key from the pointer.
+#!
+#! If use_half_key is 1, the key is loaded with the two least significant elements set to zero,
+#! e.g.: [key3, key2, 0, 0], while if it is 0, the full key [key3, key2, key1, key0] is loaded.
+#!
+#! This procedure avoids branches as an optimization.
+#!
 #! Inputs:  [use_half_key, key_ptr]
 #! Outputs: [KEY]
 proc.load_key
