@@ -172,7 +172,7 @@ where
             return Ok(mutations);
         }
 
-        // EventError is a `Box` so we can define the error anonymously.
+        // EventError is a `Box<dyn Error>` so we can define the error anonymously.
         #[derive(Debug, thiserror::Error)]
         #[error("no event handler registered")]
         struct UnhandledEvent;
