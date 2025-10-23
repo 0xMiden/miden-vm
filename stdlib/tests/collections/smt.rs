@@ -606,8 +606,12 @@ fn build_expected_stack(word0: Word, word1: Word) -> Vec<u64> {
 #[test]
 fn test_smt_randomized_round_trip() {
     const TEST_ROUNDS: usize = 5;
-    const INITIAL_PAIRS: usize = 2;
-    const TEST_PAIRS: usize = 3;
+    const INITIAL_PAIRS: usize = 3;
+    const TEST_PAIRS: usize = 4;
+    /// Number of unique buckets for key[3]. With 3 buckets and 7 total pairs (3 initial + 4 test),
+    /// we're guaranteed to have at least 3 k-v pairs in one bucket, which exercises multi-leaf
+    /// functionality.
+    const BUCKETS: usize = 3;
 
     for test_round in 0..TEST_ROUNDS {
         // Create a random seed for reproducibility
@@ -616,8 +620,8 @@ fn test_smt_randomized_round_trip() {
         // Build initial SMT with some random key-value pairs
         let mut initial_pairs = Vec::new();
         for _ in 0..INITIAL_PAIRS {
-            let key = random_word(&mut seed);
-            let value = random_word(&mut seed);
+            let key = random_word(&mut seed, BUCKETS);
+            let value = random_word(&mut seed, usize::MAX);
             initial_pairs.push((key, value));
         }
 
@@ -625,8 +629,8 @@ fn test_smt_randomized_round_trip() {
 
         // Generate test key-value pairs to insert and retrieve
         for _ in 0..TEST_PAIRS {
-            let key = random_word(&mut seed);
-            let value = random_word(&mut seed);
+            let key = random_word(&mut seed, BUCKETS);
+            let value = random_word(&mut seed, usize::MAX);
 
             // Test set operation using the same pattern as existing tests
             let (set_initial_stack, _set_expected_stack, store, advice_map) =
@@ -663,13 +667,17 @@ fn test_smt_randomized_round_trip() {
     }
 }
 
-/// Generates a random word using the provided seed
-fn random_word(seed: &mut u64) -> Word {
+/// Generates a random key word with key[3] constrained to one of BUCKETS values.
+/// This ensures keys are distributed across a limited number of buckets, which exercises
+/// multi-leaf functionality in the SMT.
+fn random_word(seed: &mut u64, buckets: usize) -> Word {
     let mut word = [Felt::new(0); 4];
     for element in word.iter_mut() {
         *element = Felt::new(random_u64(seed));
     }
-    word[3] = Felt::new(42);
+    // Constrain key[3] to be one of buckets values
+    let bucket_value = random_u64(seed) % (buckets as u64);
+    word[3] = Felt::new(bucket_value);
     Word::new(word)
 }
 
