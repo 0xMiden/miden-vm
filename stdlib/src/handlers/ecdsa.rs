@@ -219,7 +219,7 @@ impl EcdsaRequest {
 
         let commitment = Rpo256::merge(&[Rpo256::merge(&[pk_comm, digest_comm]), sig_comm]);
 
-        PrecompileCommitment { tag, commitment }
+        PrecompileCommitment::new(tag, commitment)
     }
 }
 

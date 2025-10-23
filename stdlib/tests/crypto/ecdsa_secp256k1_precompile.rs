@@ -13,7 +13,7 @@ use miden_assembly::Assembler;
 use miden_core::{
     Felt, FieldElement, ProgramInfo, Word,
     precompile::{
-        PrecompileCommitment, PrecompileSponge, PrecompileVerifier, PrecompileVerifierRegistry,
+        PrecompileCommitment, PrecompileTranscript, PrecompileVerifier, PrecompileVerifierRegistry,
     },
     utils::Serializable,
 };
@@ -128,7 +128,7 @@ fn test_ecdsa_verify_impl_commitment() {
     assert_eq!(tag[3], Felt::ZERO);
 
     // Commitment and tag must match verifier output
-    let precompile_commitment = PrecompileCommitment { tag, commitment };
+    let precompile_commitment = PrecompileCommitment::new(tag, commitment);
     let verifier_commitment =
         EcdsaPrecompile.verify(&request.to_bytes()).expect("verifier should succeed");
 
@@ -215,7 +215,7 @@ fn test_ecdsa_prove_verify() {
         .verify(proof_request.calldata())
         .expect("verifier should succeed");
     assert_eq!(
-        precompile_commitment.tag,
+        precompile_commitment.tag(),
         Word::from([ECDSA_VERIFY_EVENT_ID.as_felt(), Felt::ONE, Felt::ZERO, Felt::ZERO]),
         "precompile tag should encode [event_id, result, 0, 0]",
     );
@@ -225,18 +225,17 @@ fn test_ecdsa_prove_verify() {
     precompile_verifiers.register(ECDSA_VERIFY_EVENT_ID, Arc::new(EcdsaPrecompile));
 
     // Compute expected deferred commitment
-    let deferred_commitment = precompile_verifiers
-        .deferred_requests_commitment(proof.precompile_requests())
+    let transcript = precompile_verifiers
+        .requests_transcript(proof.precompile_requests())
         .expect("failed to compute deferred commitment");
 
-    let mut expected_sponge = PrecompileSponge::new();
-    expected_sponge.absorb(precompile_commitment);
-    let deferred_commitment_expected = expected_sponge.finalize();
-    assert_eq!(deferred_commitment_expected, deferred_commitment.finalize());
+    let mut expected_transcript = PrecompileTranscript::new();
+    expected_transcript.record(precompile_commitment);
+    assert_eq!(expected_transcript, transcript);
 
     // Verify the proof
     let program_info = ProgramInfo::from(program);
-    let (_, verifier_commitment) = miden_verifier::verify_with_precompiles(
+    let (_, transcript_digest) = miden_verifier::verify_with_precompiles(
         program_info,
         stack_inputs,
         stack_outputs,
@@ -245,10 +244,7 @@ fn test_ecdsa_prove_verify() {
     )
     .expect("proof verification failed");
 
-    assert_eq!(
-        deferred_commitment_expected, verifier_commitment,
-        "verifier commitment should match"
-    );
+    assert_eq!(transcript.finalize(), transcript_digest, "verifier commitment should match");
 }
 
 // TEST DATA GENERATION
