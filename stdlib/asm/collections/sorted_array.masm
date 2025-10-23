@@ -144,47 +144,22 @@ end
 
 # ===== KEY-VALUE UTILITIES ============================================================================
 
-#! TODO: Update docs.
+#! TODO: Docs.
 #!
-#! Finds a key in a sorted array of (key, value) word tuples.
-#!
-#! This function will crash if the following conditions aren't met:
-#! - keys must be sorted in non-decreasing order,
-#! - start_ptr must be word-aligned
-#! - end_ptr must be double-word-aligned with the start_ptr:
-#!       `(end_ptr - start_ptr)` must be divisible by 8
-#! - `start_ptr <= end_ptr`
-#!
-#! Input:  [KEY, start_ptr, end_ptr]
+#! Inputs: [KEY, start_ptr, end_ptr]
 #! Output: [is_key_found, key_ptr, start_ptr, end_ptr]
-#!
-#! Cycles:
-#!   Key exists: 56 cycles
-#!   Key doesn't exist and the array is empty: 25 cycles
-#!   Key doesn't exist and is smaller than all stored keys: 151 cycles
-#!   Key doesn't exist and is larger than all stored keys: 149 cycles
-#!   Key doesn't exist: 298 cycles
 export.find_key_value
-    push.4 movdn.6
-    # => [KEY, start_ptr, end_ptr, key_size = 4]
+    push.0
+    # => [use_half_key = 0, KEY, start_ptr, end_ptr]
 
-    exec.find_partial_key_value
+    movdn.6
+    # => [KEY, start_ptr, end_ptr, use_half_key]
+
+    exec.find_key_value_inner
     # => [is_key_found, key_ptr, start_ptr, end_ptr]
 end
 
-#! TODO: Update docs.
-#!
-#! Finds a key in a sorted array of (key, value) word tuples.
-#!
-#! The procedure finds the key-value pair where the key's elements at indices 2 and 3 match the
-#! provided suffix and prefix, respectively.
-#!
-#! This function will crash if the following conditions aren't met:
-#! - keys must be sorted in non-decreasing order,
-#! - start_ptr must be word-aligned
-#! - end_ptr must be double-word-aligned with the start_ptr:
-#!       `(end_ptr - start_ptr)` must be divisible by 8
-#! - `start_ptr <= end_ptr`
+#! TODO: Docs.
 #!
 #! Inputs: [key_prefix, key_suffix, start_ptr, end_ptr]
 #! Output: [is_key_found, key_ptr, start_ptr, end_ptr]
@@ -196,34 +171,20 @@ export.find_half_key_value
     # => [key_prefix, key_suffix, 0, 0, start_ptr, end_ptr]
     # => [KEY, start_ptr, end_ptr]
 
-    push.2 movdn.6
-    # => [KEY, start_ptr, end_ptr, key_size = 2]
+    push.1
+    # => [use_half_key = 0, KEY, start_ptr, end_ptr]
 
-    exec.find_partial_key_value
+    movdn.6
+    # => [KEY, start_ptr, end_ptr, use_half_key]
+
+    exec.find_key_value_inner
     # => [is_key_found, key_ptr, start_ptr, end_ptr]
 end
 
-#! TODO: Update cycle counts (how?).
-#! TODO: Keep key_size on the stack?
+#! TODO: Update cycle counts.
+#! TODO: Avoid local memory.
 #!
 #! Finds a key in a sorted array of (key, value) word tuples.
-#!
-#! If a match is only required on a part of the KEY, the key_size parameter can be set as follows.
-#! Assume a KEY is laid out as [key3, key2, key1, key0].
-#!
-#! If key_size is 4, then the entry whose key matches the entire KEY is searched for.
-#! If key_size is 3, then the entry whose elements key3, key2 and key1 match the corresponding
-#! elements in KEY is searched for.
-#! If key_size is 2, then the entry whose elements key3 and key2 match the corresponding elements
-#! in KEY is searched for.
-#! If key_size is 1, then the entry whose element key3 matches the corresponding element in KEY is
-#! searched for.
-#!
-#! If key_size != 4, then the provided KEY *must* already be laid out with the unused key elements set to
-#! 0.
-#!
-#! When loading a key from memory, the loaded key's elements that do not need to match are set
-#! to 0 in the same way, before comparing the two keys using word::eq.
 #!
 #! This function will crash if the following conditions aren't met:
 #! - keys must be sorted in non-decreasing order,
@@ -232,7 +193,7 @@ end
 #!       `(end_ptr - start_ptr)` must be divisible by 8
 #! - `start_ptr <= end_ptr`
 #!
-#! Input:  [KEY, start_ptr, end_ptr, key_size]
+#! Input:  [KEY, start_ptr, end_ptr, use_half_key]
 #! Output: [is_key_found, key_ptr, start_ptr, end_ptr]
 #!
 #! Cycles:
@@ -241,12 +202,12 @@ end
 #!   Key doesn't exist and is smaller than all stored keys: 151 cycles
 #!   Key doesn't exist and is larger than all stored keys: 149 cycles
 #!   Key doesn't exist: 298 cycles
-proc.find_partial_key_value.1
+proc.find_key_value_inner.1
     # Call the non-deterministic lowerbound advisor (5 cycles)
     emit.LOWERBOUND_KEY_VALUE_EVENT
-    # => [KEY, start_ptr, end_ptr, key_size]
+    # => [KEY, start_ptr, end_ptr, use_half_key]
 
-    # store key_size for later
+    # store use_half_key for later
     movup.6 loc_store.0
     # => [KEY, start_ptr, end_ptr]
 
@@ -382,71 +343,30 @@ proc.find_partial_key_value.1
     end
 end
 
-#! Loads the KEY at the pointer from memory and conditionally sets its elements to zero.
-#!
-#! Given the KEY laid out as [key3, key2, key1, key0]:
-#!
-#! if key_size == 4: return KEY unchanged
-#! if key_size <= 3 -> is_key_size_3 or is_key_size_2 or is_key_size_1: set key0 = 0
-#! if key_size <= 2 -> is_key_size_2 or is_key_size_1: set key1 = 0
-#! if key_size == 1 -> is_key_size_1: set key2 = 0
-#!
-#! Key sizes outside the range 1..=4 are unsupported.
-#!
-#! Inputs:  [key_size, key_ptr]
+#! Inputs:  [use_half_key, key_ptr]
 #! Outputs: [KEY]
 proc.load_key
-    dup eq.1
-    # => [is_key_size_1, key_size, key_ptr]
+    swap
+    # => [key_ptr, use_half_key]
 
-    dup.1 eq.2
-    # => [is_key_size_2, is_key_size_1, key_size, key_ptr]
+    padw movup.4 mem_loadw
+    # => [FULL_KEY, use_half_key]
 
-    movup.2 eq.3
-    # => [is_key_size_3, is_key_size_2, is_key_size_1, key_ptr]
+    dupw
+    # => [FULL_KEY, FULL_KEY, use_half_key]
 
-    # load key from memory
-    padw movup.7 mem_loadw
-    # => [KEY, is_key_size_3, is_key_size_2, is_key_size_1]
-    # => [[key3, key2, key1, key0], is_key_size_3, is_key_size_2, is_key_size_1]
+    push.0 swap.4 drop
+    # => [[key3, key2, key1, 0], FULL_KEY, use_half_key]
 
-    # --- Handle is_key_size_lt_3 ---
-    movup.3 push.0
-    # => [0, key0, key3, key2, key1, is_key_size_3, is_key_size_2, is_key_size_1]
+    push.0 swap.3 drop
+    # => [[key3, key2, 0, 0], FULL_KEY, use_half_key]
+    # => [HALF_KEY, FULL_KEY, use_half_key]
 
-    dup.7 dup.7 movup.7 or or
-    # => [is_key_size_lt_3, 0, key0, key3, key2, key1, is_key_size_3, is_key_size_2, is_key_size_1]
+    movup.8
+    # => [use_half_key, HALF_KEY, FULL_KEY]
 
-    # if is_key_size_lt_3 0 remains
-    # if !is_key_size_lt_3 key0 remains
-    cdrop
-    # => [key0', key3, key2, key1, is_key_size_2, is_key_size_1]
-
-    # --- Handle is_key_size_lt_2 ---
-    movup.3 push.0
-    # => [0, key1, key0', key3, key2, is_key_size_2, is_key_size_1]
-
-    dup.6 movup.6 or
-    # => [is_key_size_lt_2, 0, key1, key0', key3, key2, is_key_size_1]
-
-    # if is_key_size_lt_2 0 remains
-    # if !is_key_size_lt_2 key1 remains
-    cdrop
-    # => [key1', key0', key3, key2, is_key_size_1]
-
-    # --- Handle is_key_size_1 ---
-
-    movup.3 push.0 movup.5
-    # => [is_key_size_1, 0, key2, key1', key0', key3]
-
-    # if is_key_size_1 0 remains
-    # if !is_key_size_1 key2 remains
-    cdrop
-    # => [key2', key1', key0', key3]
-
-    # --- Reassemble key ---
-
-    movup.3
-    # => [key3, key2', key1', key0']
+    # If use_half_key HALF_KEY remains.
+    # If !use_half_key FULL_KEY remains.
+    cdropw
     # => [KEY]
 end

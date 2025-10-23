@@ -12,6 +12,12 @@ pub const LOWERBOUND_KEY_VALUE_EVENT_NAME: &str =
 pub const LOWERBOUND_ARRAY_EVENT_ID: EventId = EventId::from_u64(2382974753388103136);
 pub const LOWERBOUND_KEY_VALUE_EVENT_ID: EventId = EventId::from_u64(486819235893213157);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum KeySize {
+    Full,
+    Half,
+}
+
 /// Pushes onto the advice stack the first pointer in [start_ptr, end_ptr) such that
 /// `mem[word_ptr] >= KEY` in lexicographic order of words. If all words are < KEY, returns end_ptr.
 /// The array must be sorted in non-decreasing order.
@@ -27,8 +33,7 @@ pub const LOWERBOUND_KEY_VALUE_EVENT_ID: EventId = EventId::from_u64(48681923589
 /// # Errors
 /// Returns an error if the provided word array is not sorted in non-decreasing order.
 pub fn handle_lowerbound_array(process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
-    const KEY_SIZE: u64 = 4;
-    push_lowerbound_result(process, 4, KEY_SIZE)
+    push_lowerbound_result(process, 4, KeySize::Full)
 }
 
 /// Pushes onto the advice stack the first pointer in [start_ptr, end_ptr) such that
@@ -39,11 +44,11 @@ pub fn handle_lowerbound_array(process: &ProcessState) -> Result<Vec<AdviceMutat
 /// This event returns
 ///
 /// Inputs:
-///   Operand stack: [event_id, KEY, start_ptr, end_ptr, key_size, ...]
+///   Operand stack: [event_id, KEY, start_ptr, end_ptr, use_half_key, ...]
 ///   Advice stack: [...]
 ///
 /// Outputs:
-///   Operand stack: [event_id, KEY, start_ptr, end_ptr, key_size, ...]
+///   Operand stack: [event_id, KEY, start_ptr, end_ptr, use_half_key, ...]
 ///   Advice stack: [maybe_key_ptr, was_key_found, ...]
 ///
 /// # Errors
@@ -51,8 +56,17 @@ pub fn handle_lowerbound_array(process: &ProcessState) -> Result<Vec<AdviceMutat
 pub fn handle_lowerbound_key_value(
     process: &ProcessState,
 ) -> Result<Vec<AdviceMutation>, EventError> {
-    let key_size = process.get_stack_item(7).as_int();
-    debug_assert!((1..=4).contains(&key_size), "key_size must be in range 1..=4, found {key_size}");
+    let use_half_key = process.get_stack_item(7);
+    debug_assert!(
+        use_half_key == Felt::ONE || use_half_key == Felt::ZERO,
+        "use_half_key must be bool, was {use_half_key}"
+    );
+
+    let key_size = if use_half_key == Felt::ONE {
+        KeySize::Half
+    } else {
+        KeySize::Full
+    };
 
     push_lowerbound_result(process, 8, key_size)
 }
@@ -65,7 +79,7 @@ const END_ADDR_OFFSET: usize = 6;
 fn push_lowerbound_result(
     process: &ProcessState,
     stride: u32,
-    key_size: u64,
+    key_size: KeySize,
 ) -> Result<Vec<AdviceMutation>, EventError> {
     // only support sorted arrays (stride = 4) and sorted key-value arrays (stride = 8)
     assert!(stride == 4 || stride == 8);
@@ -151,24 +165,21 @@ fn push_lowerbound_result(
 }
 
 trait LexicographicWordExt {
-    fn resize(self, key_size: u64) -> Self;
+    fn resize(self, key_size: KeySize) -> Self;
 }
 
 impl LexicographicWordExt for LexicographicWord {
-    fn resize(self, key_size: u64) -> Self {
-        let mut word = self.into_inner();
+    fn resize(self, key_size: KeySize) -> Self {
+        match key_size {
+            KeySize::Full => self,
+            KeySize::Half => {
+                let mut word = self.into_inner();
+                word[0] = Felt::ZERO;
+                word[1] = Felt::ZERO;
 
-        if key_size <= 3 {
-            word[0] = Felt::ZERO;
+                LexicographicWord::new(word)
+            },
         }
-        if key_size <= 2 {
-            word[1] = Felt::ZERO;
-        }
-        if key_size == 1 {
-            word[2] = Felt::ZERO;
-        }
-
-        LexicographicWord::new(word)
     }
 }
 
