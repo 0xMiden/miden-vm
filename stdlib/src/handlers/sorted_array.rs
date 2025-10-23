@@ -124,9 +124,9 @@ fn push_lowerbound_result(
     // Helper function to get a word from memory and convert it to a LexicographicWord
     let get_word = {
         |addr: u32| {
-            process
-                .get_mem_word(process.ctx(), addr)
-                .map(|word| LexicographicWord::new(word.unwrap_or(Word::empty())).resize(key_size))
+            process.get_mem_word(process.ctx(), addr).map(|word| {
+                LexicographicWord::new(word.unwrap_or(Word::empty())).zeroize_by_key_size(key_size)
+            })
         }
     };
 
@@ -165,11 +165,16 @@ fn push_lowerbound_result(
 }
 
 trait LexicographicWordExt {
-    fn resize(self, key_size: KeySize) -> Self;
+    /// Selectivel zeroizes the felts in a [`LexicographicWord`] based on the provided [`KeySize`].
+    ///
+    /// - If the `key_size` is [`KeySize::Full`], the word is returned untouched.
+    /// - If the `key_size` is [`KeySize::Half`], the word is returned with the two least
+    ///   significant elements zeroized.
+    fn zeroize_by_key_size(self, key_size: KeySize) -> Self;
 }
 
 impl LexicographicWordExt for LexicographicWord {
-    fn resize(self, key_size: KeySize) -> Self {
+    fn zeroize_by_key_size(self, key_size: KeySize) -> Self {
         match key_size {
             KeySize::Full => self,
             KeySize::Half => {
