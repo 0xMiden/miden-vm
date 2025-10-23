@@ -1086,11 +1086,11 @@ fn mem_operations_with_constants() -> TestResult {
         # constant should resolve using mem_load operation
         mem_load.GLOBAL_LOAD_PTR
 
-        # constant should resolve using mem_storew operation
-        mem_storew.GLOBAL_STOREW_PTR
+        # constant should resolve using mem_storew_be operation
+        mem_storew_be.GLOBAL_STOREW_PTR
 
-        # constant should resolve using mem_loadw operation
-        mem_loadw.GLOBAL_LOADW_PTR
+        # constant should resolve using mem_loadw_be operation
+        mem_loadw_be.GLOBAL_LOADW_PTR
     end
     "
         )
@@ -1129,11 +1129,11 @@ fn mem_operations_with_constants() -> TestResult {
         # constant should resolve using mem_load operation
         mem_load.{GLOBAL_LOAD_PTR}
 
-        # constant should resolve using mem_storew operation
-        mem_storew.{GLOBAL_STOREW_PTR}
+        # constant should resolve using mem_storew_be operation
+        mem_storew_be.{GLOBAL_STOREW_PTR}
 
-        # constant should resolve using mem_loadw operation
-        mem_loadw.{GLOBAL_LOADW_PTR}
+        # constant should resolve using mem_loadw_be operation
+        mem_loadw_be.{GLOBAL_LOADW_PTR}
     end
     "
         )
@@ -1213,6 +1213,35 @@ fn const_conversion_failed_to_u32() -> TestResult {
         "  :                  ^^^^^^^^",
         "5 |     end",
         "  `----"
+    );
+    Ok(())
+}
+
+#[test]
+fn deprecated_mem_loadw_instruction() -> TestResult {
+    let context = TestContext::default();
+
+    let source = source_file!(
+        &context,
+        "\
+    begin
+        mem_loadw
+    end
+    "
+    );
+
+    assert_assembler_diagnostic!(
+        context,
+        source,
+        "deprecated instruction: `mem_loadw` has been removed",
+        regex!(r#",-\[test[\d]+:2:9\]"#),
+        "1 | begin",
+        "2 |         mem_loadw",
+        regex!(r#"^ *: *\^+"#),
+        regex!(r#"this instruction is no longer supported"#),
+        "3 |     end",
+        "  `----",
+        regex!(r#"help:.*use.*mem_loadw_be.*instead"#)
     );
     Ok(())
 }

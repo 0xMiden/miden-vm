@@ -1592,15 +1592,15 @@ export.hash_memory.48
     loc_load.8 u32assert u32div.64 loc_store.28
 
     # Set the first byte after the message to 0x80
-    padw loc_load.24 mem_loadw loc_store.32 loc_store.36 loc_store.40 loc_store.44
+    padw loc_load.24 mem_loadw_be loc_store.32 loc_store.36 loc_store.40 loc_store.44
     # Note: We have to `mul.4` here because locals are spread 4 addresses apart.
     locaddr.32 loc_load.20 mul.4 u32wrapping_add dup mem_load loc_load.16 u32wrapping_add swap mem_store
-    loc_load.44 loc_load.40 loc_load.36 loc_load.32 loc_load.24 mem_storew dropw
+    loc_load.44 loc_load.40 loc_load.36 loc_load.32 loc_load.24 mem_storew_be dropw
 
     # Set message length in bits at end of padding
-    padw loc_load.12 mem_loadw
+    padw loc_load.12 mem_loadw_be
     movup.3 drop loc_load.4 u32assert u32overflowing_mul.8 assertz movdn.3
-    loc_load.12 mem_storew dropw
+    loc_load.12 mem_storew_be dropw
 
     # Sha256 init
     push.0x5be0cd19.0x1f83d9ab.0x9b05688c.0x510e527f
@@ -1609,10 +1609,10 @@ export.hash_memory.48
     # Consume sha256 blocks
     loc_load.28 u32assert neq.0
     while.true
-        padw loc_load.0 u32assert u32overflowing_add.12 assertz mem_loadw movdnw.2
-        padw loc_load.0 u32assert u32overflowing_add.8 assertz mem_loadw movdnw.2
-        padw loc_load.0 u32assert u32overflowing_add.4 assertz mem_loadw movdnw.2
-        padw loc_load.0 u32assert u32overflowing_add.0 assertz mem_loadw movdnw.2
+        padw loc_load.0 u32assert u32overflowing_add.12 assertz mem_loadw_be movdnw.2
+        padw loc_load.0 u32assert u32overflowing_add.8 assertz mem_loadw_be movdnw.2
+        padw loc_load.0 u32assert u32overflowing_add.4 assertz mem_loadw_be movdnw.2
+        padw loc_load.0 u32assert u32overflowing_add.0 assertz mem_loadw_be movdnw.2
         exec.prepare_message_schedule_and_consume
 
         loc_load.0 u32assert u32overflowing_add.16 assertz loc_store.0

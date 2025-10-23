@@ -1,5 +1,9 @@
 use alloc::{boxed::Box, vec::Vec};
-use core::{fmt, iter::Peekable, ops::Index, slice::Iter};
+use core::{
+    fmt,
+    iter::{Peekable, repeat_n},
+    slice::Iter,
+};
 
 use miden_crypto::{Felt, Word, ZERO};
 use miden_formatting::prettier::PrettyPrint;
@@ -130,10 +134,10 @@ impl BasicBlockNode {
     // IOW this makes its `decorators` padding-aware, or equivalently "adds" the padding to these
     // decorators
     fn adjust_decorators(decorators: DecoratorList, op_batches: &[OpBatch]) -> DecoratorList {
-        let padding_offsets = DecoratorPaddingOffsets::new(op_batches);
+        let raw2pad = RawToPaddedPrefix::new(op_batches);
         decorators
             .into_iter()
-            .map(|(op_idx, dec_id)| (op_idx + padding_offsets[op_idx], dec_id))
+            .map(|(raw_idx, dec_id)| (raw_idx + raw2pad[raw_idx], dec_id))
             .collect()
     }
 
@@ -558,10 +562,9 @@ pub struct RawDecoratorOpLinkIterator<'a> {
     before: core::slice::Iter<'a, DecoratorId>,
     middle: core::slice::Iter<'a, (usize, DecoratorId)>, // (adjusted_idx, id)
     after: core::slice::Iter<'a, DecoratorId>,
-    padding_offsets: DecoratorPaddingOffsets, // indexable by ORIGINAL idx
-    total_ops: usize,                         // count of RAW ops
+    pad2raw: PaddedToRawPrefix, // indexed by padded indices
+    total_raw_ops: usize,       // count of raw ops
     seg: Segment,
-    probe: usize, // running ORIGINAL idx candidate
 }
 
 impl<'a> RawDecoratorOpLinkIterator<'a> {
@@ -571,24 +574,18 @@ impl<'a> RawDecoratorOpLinkIterator<'a> {
         after_exit: &'a [DecoratorId],
         op_batches: &'a [OpBatch],
     ) -> Self {
-        let padding_offsets = DecoratorPaddingOffsets::new(op_batches);
-
-        let total_ops = padding_offsets.0.len() - padding_offsets.0.last().unwrap_or(&0);
+        let pad2raw = PaddedToRawPrefix::new(op_batches);
+        let raw2pad = RawToPaddedPrefix::new(op_batches);
+        let total_raw_ops = raw2pad.raw_ops();
 
         Self {
             before: before_enter.iter(),
             middle: decorators.iter(),
             after: after_exit.iter(),
-            padding_offsets,
-            total_ops,
+            pad2raw,
+            total_raw_ops,
             seg: Segment::Before,
-            probe: 0,
         }
-    }
-
-    #[inline(always)]
-    fn f(&self, i: usize) -> usize {
-        i + self.padding_offsets[i]
     }
 }
 
@@ -605,25 +602,16 @@ impl<'a> Iterator for RawDecoratorOpLinkIterator<'a> {
                     self.seg = Segment::Middle;
                 },
                 Segment::Middle => {
-                    if let Some(&(adjusted_idx, id)) = self.middle.next() {
-                        // Advance probe until f(probe) == adjusted_idx.
-                        // Because adjusted_idx is nondecreasing across the iterator
-                        // and f(i) is strictly increasing, probe never moves backward
-                        // => O(1) amortized across the whole iteration.
-                        let n = self.padding_offsets.0.len();
-                        while self.probe < n && self.f(self.probe) < adjusted_idx {
-                            self.probe += 1;
-                        }
-
-                        let original_idx = self.probe;
-                        return Some((original_idx, id));
+                    if let Some(&(padded_idx, id)) = self.middle.next() {
+                        let raw_idx = padded_idx - self.pad2raw[padded_idx];
+                        return Some((raw_idx, id));
                     }
                     self.seg = Segment::After;
                 },
                 Segment::After => {
                     if let Some(&id) = self.after.next() {
                         // After-exit decorators attach to the sentinel raw index
-                        return Some((self.total_ops, id));
+                        return Some((self.total_raw_ops, id));
                     }
                     self.seg = Segment::Done;
                 },
@@ -759,62 +747,146 @@ pub(crate) fn validate_decorators(operations_len: usize, decorators: &DecoratorL
     }
 }
 
-// Indexes into an operations-long sequence of decorators. Should not be user-facing.
-//
-// a [`DecoratorList`] is a sequence of (op_idx, decorator_id) tuples such that the op_idx
-// can extend up to and including the length of the operations list it is meant to index into.
-// This is historical behavior meant to allow executing a decorator at the end of a basic block.
-#[doc(hidden)]
-struct DecoratorPaddingOffsets(Vec<usize>);
+/// Raw-indexed prefix: how many paddings strictly before raw index r
+///
+/// This struct provides O(1) lookup for converting raw operation indices to padded indices.
+/// For any raw index r, `raw_to_padded[r] = count of padding ops strictly before raw index r`.
+///
+/// Length: `raw_ops + 1` (includes sentinel entry at `r == raw_ops`)
+/// Usage: `padded_idx = r + raw_to_padded[r]` (addition)
+#[derive(Debug, Clone)]
+pub struct RawToPaddedPrefix(Vec<usize>);
 
-impl DecoratorPaddingOffsets {
-    // Takes a sequence of op_batches including padding and returns a vector of the same length as
-    // the input sequence of operation, where each element counts the number of padding noops
-    // encountered since the start of the sequence.
-    #[must_use]
-    #[doc(hidden)]
-    fn new(op_batches: &[OpBatch]) -> Self {
-        // we build a sequence of per-op padding flags (0 if *not* a padding op, 1 if so)
-        let paddings = op_batches.iter().flat_map(|batch| {
-            (0..batch.num_groups()).flat_map(|group_idx| {
-                let group_len = batch.indptr()[group_idx + 1] - batch.indptr()[group_idx];
-                let padding = batch.padding()[group_idx];
-                if group_len == 0 {
-                    vec![]
-                } else {
-                    let mut v = vec![0usize; group_len];
-                    *v.last_mut().unwrap() = usize::from(padding);
-                    v
-                }
-            })
-        });
-        // incremental sum of all padding flags over the ops
-        let padding_offsets = paddings
-            .scan(0, |state, x| {
-                *state += x;
-                Some(*state)
-            })
-            .collect::<Vec<_>>();
-        Self(padding_offsets)
+impl RawToPaddedPrefix {
+    /// Build a raw-indexed prefix array from op batches.
+    ///
+    /// For each raw index r, records how many padding operations have been inserted before r.
+    /// Includes a sentinel entry at `r == raw_ops`.
+    pub fn new(op_batches: &[OpBatch]) -> Self {
+        let mut v = Vec::new();
+        let mut pads_so_far = 0usize;
+
+        for b in op_batches {
+            let n = b.num_groups();
+            let indptr = b.indptr();
+            let padding = b.padding();
+
+            for g in 0..n {
+                let group_len = indptr[g + 1] - indptr[g];
+                let has_pad = padding[g] as usize;
+                let raw_in_g = group_len - has_pad;
+
+                // For each raw op, record how many paddings were before it.
+                v.extend(repeat_n(pads_so_far, raw_in_g));
+
+                // After the group's raw ops, account for the (optional) padding op.
+                pads_so_far += has_pad; // adds 1 if there is a padding, else 0
+            }
+        }
+
+        // Sentinel for r == raw_ops
+        v.push(pads_so_far);
+        RawToPaddedPrefix(v)
+    }
+
+    /// Get the total number of raw operations (excluding sentinel).
+    #[inline]
+    pub fn raw_ops(&self) -> usize {
+        self.0.len() - 1
     }
 }
 
-#[doc(hidden)]
-impl Index<usize> for DecoratorPaddingOffsets {
+/// Get the number of padding operations before raw index r.
+///
+/// ## Sentinel Access
+///
+/// Some decorators have an operation index equal to the length of the
+/// operations array, to ensure they are executed at the end of the block
+/// (since the semantics of the decorator index is that it must be executed
+/// before the operation index it points to).
+impl core::ops::Index<usize> for RawToPaddedPrefix {
     type Output = usize;
+    #[inline]
+    fn index(&self, idx: usize) -> &Self::Output {
+        &self.0[idx]
+    }
+}
 
-    // Some decorators have an operation index equal to the length of the
-    // operations array, to ensure they are executed at the end of the block
-    // (since the semantics of the decorator index is that it must be executed
-    // before the operation index it points to). The following applies the max
-    // padding offset to them and preserves the invariant that their index is
-    // the new operation list's length.
-    fn index(&self, index: usize) -> &Self::Output {
-        if index == self.0.len() {
-            &self.0[index - 1]
-        } else {
-            &self.0[index]
+/// Padded-indexed prefix: how many paddings strictly before padded index p
+///
+/// This struct provides O(1) lookup for converting padded operation indices to raw indices.
+/// For any padded index p, `padded_to_raw[p] = count of padding ops strictly before padded index
+/// p`.
+///
+/// Length: `padded_ops + 1` (includes sentinel entry at `p == padded_ops`)
+/// Usage: `raw_idx = p - padded_to_raw[p]` (subtraction)
+#[derive(Debug, Clone)]
+pub struct PaddedToRawPrefix(Vec<usize>);
+
+impl PaddedToRawPrefix {
+    /// Build a padded-indexed prefix array from op batches.
+    ///
+    /// Simulates emission of the padded sequence, recording padding count before each position.
+    /// Includes a sentinel entry at `p == padded_ops`.
+    pub fn new(op_batches: &[OpBatch]) -> Self {
+        // Exact capacity to avoid reallocations: sum of per-group lengths across all batches.
+        let padded_ops = op_batches
+            .iter()
+            .map(|b| {
+                let n = b.num_groups();
+                let indptr = b.indptr();
+                indptr[1..=n]
+                    .iter()
+                    .zip(&indptr[..n])
+                    .map(|(end, start)| end - start)
+                    .sum::<usize>()
+            })
+            .sum::<usize>();
+
+        let mut v = Vec::with_capacity(padded_ops + 1);
+        let mut pads_so_far = 0usize;
+
+        for b in op_batches {
+            let n = b.num_groups();
+            let indptr = b.indptr();
+            let padding = b.padding();
+
+            for g in 0..n {
+                let group_len = indptr[g + 1] - indptr[g];
+                let has_pad = padding[g] as usize;
+                let raw_in_g = group_len - has_pad;
+
+                // Emit raw ops of the group.
+                v.extend(repeat_n(pads_so_far, raw_in_g));
+
+                // Emit the optional padding op.
+                if has_pad == 1 {
+                    v.push(pads_so_far);
+                    pads_so_far += 1; // subsequent positions see one more padding before them
+                }
+            }
         }
+
+        // Sentinel at p == padded_ops
+        v.push(pads_so_far);
+
+        PaddedToRawPrefix(v)
+    }
+}
+
+/// Get the number of padding operations before padded index p.
+///
+/// ## Sentinel Access
+///
+/// Some decorators have an operation index equal to the length of the
+/// operations array, to ensure they are executed at the end of the block
+/// (since the semantics of the decorator index is that it must be executed
+/// before the operation index it points to).
+impl core::ops::Index<usize> for PaddedToRawPrefix {
+    type Output = usize;
+    #[inline]
+    fn index(&self, idx: usize) -> &Self::Output {
+        &self.0[idx]
     }
 }
 

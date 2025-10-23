@@ -218,14 +218,14 @@ end
 #!
 #! The info stored is `[lde_size, log(lde_size), lde_g, 0]`.
 export.set_lde_domain_info_word
-    push.LDE_DOMAIN_INFO_PTR mem_storew
+    push.LDE_DOMAIN_INFO_PTR mem_storew_be
 end
 
 #! Load details about the LDE domain.
 #!
 #! The info stored is `[lde_size, log(lde_size), lde_g, 0]`.
 export.get_lde_domain_info_word
-    push.LDE_DOMAIN_INFO_PTR mem_loadw
+    push.LDE_DOMAIN_INFO_PTR mem_loadw_be
 end
 
 export.set_lde_domain_generator
@@ -455,5 +455,5 @@ end
 
 #! Overwrites the top stack word with zeros.
 export.zeroize_stack_word
-    exec.zero_word_ptr mem_loadw
+    exec.zero_word_ptr mem_loadw_be
 end

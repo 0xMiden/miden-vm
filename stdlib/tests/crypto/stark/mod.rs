@@ -199,7 +199,7 @@ fn variable_length_public_inputs(#[case] num_kernel_proc_digests: usize) {
             padw
             exec.constants::ood_evaluations_ptr
             sub.8
-            mem_loadw
+            mem_loadw_be
 
             # 4) Compare with the expected result, including the padding
             push.{reduced_value_inv_0}

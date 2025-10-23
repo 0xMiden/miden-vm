@@ -110,27 +110,27 @@ export.verify.96
     push.0.0.0.0
 
     movup.4
-    mem_loadw
+    mem_loadw_be
     loc_storew.48
 
     movup.4
-    mem_loadw
+    mem_loadw_be
     loc_storew.52
 
     movup.4
-    mem_loadw
+    mem_loadw_be
     loc_storew.56
 
     movup.4
-    mem_loadw
+    mem_loadw_be
     loc_storew.60
 
     movup.4
-    mem_loadw
+    mem_loadw_be
     loc_storew.64
 
     movup.4
-    mem_loadw
+    mem_loadw_be
     loc_storew.68
 
     dropw
@@ -160,27 +160,27 @@ export.verify.96
     push.0.0.0.0
 
     movup.4
-    mem_loadw
+    mem_loadw_be
     loc_storew.0
 
     movup.4
-    mem_loadw
+    mem_loadw_be
     loc_storew.4
 
     movup.4
-    mem_loadw
+    mem_loadw_be
     loc_storew.8
 
     movup.4
-    mem_loadw
+    mem_loadw_be
     loc_storew.12
 
     movup.4
-    mem_loadw
+    mem_loadw_be
     loc_storew.16
 
     movup.4
-    mem_loadw
+    mem_loadw_be
     loc_storew.20
 
     dropw
@@ -212,27 +212,27 @@ export.verify.96
     push.0.0.0.0
 
     movup.4
-    mem_loadw
+    mem_loadw_be
     loc_storew.0
 
     movup.4
-    mem_loadw
+    mem_loadw_be
     loc_storew.4
 
     movup.4
-    mem_loadw
+    mem_loadw_be
     loc_storew.8
 
     movup.4
-    mem_loadw
+    mem_loadw_be
     loc_storew.12
 
     movup.4
-    mem_loadw
+    mem_loadw_be
     loc_storew.16
 
     movup.4
-    mem_loadw
+    mem_loadw_be
     loc_storew.20
 
     push.0.0.0.0

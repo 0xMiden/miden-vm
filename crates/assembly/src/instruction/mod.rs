@@ -386,14 +386,14 @@ impl Assembler {
                 true,
                 span,
             )?,
-            Instruction::MemLoadW | Instruction::MemLoadWBe => {
+            Instruction::MemLoadWBe => {
                 mem_ops::mem_read(block_builder, proc_ctx, None, false, false, span)?
             },
             Instruction::MemLoadWLe => {
                 mem_ops::mem_read(block_builder, proc_ctx, None, false, false, span)?;
                 push_reversew(block_builder);
             },
-            Instruction::MemLoadWImm(v) | Instruction::MemLoadWBeImm(v) => mem_ops::mem_read(
+            Instruction::MemLoadWBeImm(v) => mem_ops::mem_read(
                 block_builder,
                 proc_ctx,
                 Some(v.expect_value()),
@@ -450,7 +450,7 @@ impl Assembler {
                 true,
                 span,
             )?,
-            Instruction::MemStoreW | Instruction::MemStoreWBe => block_builder.push_ops([MStoreW]),
+            Instruction::MemStoreWBe => block_builder.push_ops([MStoreW]),
             Instruction::MemStoreWLe => {
                 block_builder.push_op(MovDn4);
                 push_reversew(block_builder);
@@ -458,16 +458,14 @@ impl Assembler {
                 block_builder.push_op(MStoreW);
                 push_reversew(block_builder);
             },
-            Instruction::MemStoreWImm(v) | Instruction::MemStoreWBeImm(v) => {
-                mem_ops::mem_write_imm(
-                    block_builder,
-                    proc_ctx,
-                    v.expect_value(),
-                    false,
-                    false,
-                    span,
-                )?
-            },
+            Instruction::MemStoreWBeImm(v) => mem_ops::mem_write_imm(
+                block_builder,
+                proc_ctx,
+                v.expect_value(),
+                false,
+                false,
+                span,
+            )?,
             Instruction::MemStoreWLeImm(v) => {
                 push_reversew(block_builder);
                 mem_ops::mem_write_imm(

@@ -28,7 +28,7 @@ begin
     push.104467440737.1
     mem_store
     push.1044674407370.10446744073.10446744073709.10446744073709.1000
-    mem_storew
+    mem_storew_be
 
     debug.mem.1000
     debug.mem.1001

@@ -17,19 +17,19 @@
 proc.initialize_2to1
     push.0xA54FF53A.0x3C6EF372.0xBB67AE85.0x6A09E667
     movup.4
-    mem_storew
+    mem_storew_be
     movup.5
-    mem_storew
+    mem_storew_be
     dropw
 
     push.0x5BE0CD19.0x1F83D9AB.0x9B05688C.0x510E527F
     movup.4
-    mem_storew
+    mem_storew_be
     dropw
 
     push.11.64.0.0
     movup.4
-    mem_storew
+    mem_storew_be
     dropw
 end
 
@@ -53,19 +53,19 @@ end
 proc.initialize_1to1
     push.0xA54FF53A.0x3C6EF372.0xBB67AE85.0x6A09E667
     movup.4
-    mem_storew
+    mem_storew_be
     movup.5
-    mem_storew
+    mem_storew_be
     dropw
 
     push.0x5BE0CD19.0x1F83D9AB.0x9B05688C.0x510E527F
     movup.4
-    mem_storew
+    mem_storew_be
     dropw
 
     push.11.32.0.0
     movup.4
-    mem_storew
+    mem_storew_be
     dropw
 end
 
@@ -189,11 +189,11 @@ proc.columnar_mixing.4
     loc_storew.0
 
     movup.9
-    mem_loadw
+    mem_loadw_be
     movup.8
     push.0.0.0.0
     movup.4
-    mem_loadw
+    mem_loadw_be
 
     movup.8
     dup.5
@@ -224,7 +224,7 @@ proc.columnar_mixing.4
     movup.9
     push.0.0.0.0
     movup.4
-    mem_loadw
+    mem_loadw_be
 
     dup.4
     u32xor
@@ -251,7 +251,7 @@ proc.columnar_mixing.4
     movup.12
     push.0.0.0.0
     movup.4
-    mem_loadw
+    mem_loadw_be
 
     dup.4
     u32wrapping_add
@@ -428,11 +428,11 @@ proc.diagonal_mixing.4
     loc_storew.0
 
     movup.9
-    mem_loadw
+    mem_loadw_be
     movup.8
     push.0.0.0.0
     movup.4
-    mem_loadw
+    mem_loadw_be
 
     movup.8
     dup.6
@@ -463,7 +463,7 @@ proc.diagonal_mixing.4
     movup.9
     push.0.0.0.0
     movup.4
-    mem_loadw
+    mem_loadw_be
 
     movup.3
     dup.4
@@ -490,7 +490,7 @@ proc.diagonal_mixing.4
     movup.12
     push.0.0.0.0
     movup.4
-    mem_loadw
+    mem_loadw_be
 
     movup.2
     dup.7
@@ -683,7 +683,7 @@ proc.round.20
     loc_loadw.0
     swapw
     movup.4
-    mem_storew
+    mem_storew_be
     dropw
 
     repeat.3
@@ -691,7 +691,7 @@ proc.round.20
         movdn.3
         swapw
         movup.4
-        mem_storew
+        mem_storew_be
         dropw
     end
 

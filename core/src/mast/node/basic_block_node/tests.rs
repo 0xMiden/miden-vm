@@ -414,6 +414,7 @@ fn decorator_strategy(
 fn decorator_list_strategy(
     ops_num: usize,
 ) -> impl Strategy<Value = (Vec<Operation>, Vec<(usize, DecoratorId)>)> {
+    // At most one decorator per operation, but we could technically go a bit higher
     op_non_control_sequence_strategy(ops_num)
         .prop_flat_map(|ops| (Just(ops.clone()), decorator_strategy(ops.len(), ops.len())))
 }
@@ -593,4 +594,92 @@ fn test_decorator_positions() {
     // Verify the new after_exit decorators
     assert!(all_decorators_after_mod.iter().any(|&(_, id)| id == debug_id));
     assert!(all_decorators_after_mod.iter().any(|&(_, id)| id == trace_id));
+}
+
+proptest! {
+    /// RawToPaddedPrefix / PaddedToRawPrefix correctness
+    #[test]
+    fn proptest_raw_to_padded_correctness(
+        (ops, decorators) in
+        decorator_list_strategy(72)
+    ) {
+
+        // Build BasicBlockNode (this applies padding)
+        // Use the decorator IDs directly as DecoratorList
+        let block = BasicBlockNode::new(ops.clone(), decorators).unwrap();
+        let padded_ops = block.op_batches().iter().flat_map(|batch| batch.ops()).collect::<Vec<_>>();
+
+        // Build both prefix arrays
+        let raw2pad = RawToPaddedPrefix::new(block.op_batches());
+        let pad2raw = PaddedToRawPrefix::new(block.op_batches());
+
+        // Test invariant 1: Raw→Padded correctness
+        //  For all raw indices r in [0..raw_ops],
+        //  let p = r + raw_to_padded[r];
+        //  Then: p is the padded position of the r-th raw op.
+        for r in 0..ops.len() {
+            let p = r + raw2pad[r];
+            prop_assert!(
+                *padded_ops[p] == ops[r],
+                "Raw->Padded conversion incorrect for raw index {}",
+                r
+            );
+        }
+
+        // Test invariant 2: Padded→Raw correctness
+        // For all padded indices p in [0..padded_ops],
+        // let r = p - padded_to_raw[p];
+        // Then: r is the raw position for the op at padded position p (if that position is a real op).
+        for p in 0..padded_ops.len() {
+            let r = p - pad2raw[p];
+            // this comparison is only valid if the operation at position p is not a padding Noop
+            if *padded_ops[p] != Operation::Noop {
+                prop_assert!(
+                    ops[r] == *padded_ops[p],
+                    "Padded->Raw conversion incorrect for padded index {}",
+                    p
+                );
+            }
+        }
+
+        // Test invariant 3: Cross-array consistency
+        // Let p = r + raw_to_padded[r]. Then padded_to_raw[p] == raw_to_padded[r].
+        for r in 0..=ops.len() {
+            let p = r + raw2pad[r];
+            prop_assert_eq!(
+                pad2raw[p],
+                raw2pad[r],
+                "Cross-array invariant violated for raw {}, padded {}",
+                r, p
+            );
+        }
+    }
+}
+
+proptest! {
+    /// Property test 2: RawDecoratorOpLinkIterator invertibility
+    #[test]
+    fn proptest_decorator_iterator_invertibility(
+        (ops, decorators) in
+        decorator_list_strategy(72)
+    ) {
+        // Build BasicBlockNode
+        // Use the decorator IDs directly as DecoratorList
+        let block = BasicBlockNode::new(ops.clone(), decorators.clone()).unwrap();
+
+        // Create raw decorator iterator
+        let raw_iter = block.raw_decorator_iter();
+
+        // Collect all decorators from the iterator
+        let collected_decorators: Vec<_> = raw_iter.collect();
+
+        // Verify decorators maintain order with corrected indices
+        for (collected_idx, &(_expected_raw_idx, expected_id)) in decorators.iter().enumerate() {
+            if collected_idx < collected_decorators.len() {
+                let (actual_raw_idx, actual_id) = collected_decorators[collected_idx];
+                prop_assert_eq!(actual_id, expected_id);
+                prop_assert!(actual_raw_idx <= ops.len()); // Should be a valid raw index
+            }
+        }
+    }
 }

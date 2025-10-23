@@ -87,7 +87,7 @@ fn test_debug_stack() {
     ├── 18: 0
     ├── 19: 0
     └── (8 more items)
-    Stack state before step 27:
+    Stack state before step 29:
     ├──  0: 4
     ├──  1: 3
     ├──  2: 2

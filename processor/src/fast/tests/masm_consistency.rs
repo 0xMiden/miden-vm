@@ -63,7 +63,7 @@ use super::*;
 #[case(None, "
     proc.foo add end 
     begin 
-        procref.foo mem_storew.100 dropw push.100
+        procref.foo mem_storew_be.100 dropw push.100
         dyncall swap.8 drop 
     end", 
     vec![16_u32.into(); 16]
@@ -74,7 +74,7 @@ use super::*;
     begin 
         push.1 
         if.true 
-            procref.foo mem_storew.100 dropw
+            procref.foo mem_storew_be.100 dropw
             push.100 dyncall
             push.100 dyncall
         else 
@@ -88,7 +88,7 @@ use super::*;
 #[case(None,"
     proc.foo.2 locaddr.0 locaddr.1 swap.8 drop swap.8 drop end
     begin 
-        procref.foo mem_storew.100 dropw push.100
+        procref.foo mem_storew_be.100 dropw push.100
         dyncall
     end", 
     vec![16_u32.into(); 16]
@@ -98,9 +98,9 @@ use super::*;
     proc.foo push.100 mem_store.44 end
     proc.bar mem_load.44 assertz end
     begin 
-        procref.foo mem_storew.100 dropw push.100 dyncall
+        procref.foo mem_storew_be.100 dropw push.100 dyncall
         mem_load.44 assertz 
-        procref.bar mem_storew.104 dropw push.104 dyncall
+        procref.bar mem_storew_be.104 dropw push.104 dyncall
     end", 
     vec![16_u32.into(); 16]
 )]
@@ -110,11 +110,11 @@ use super::*;
     proc.foo mem_load.44 assertz end
     proc.bar 
         push.100 mem_store.44 
-        procref.foo mem_storew.104 dropw push.104 dyncall
+        procref.foo mem_storew_be.104 dropw push.104 dyncall
         mem_load.44 swap.8 drop 
     end
     begin 
-        procref.bar mem_storew.104 dropw push.104 dyncall
+        procref.bar mem_storew_be.104 dropw push.104 dyncall
     end", 
     vec![16_u32.into(); 16]
 )]
@@ -124,7 +124,7 @@ use super::*;
 #[case(None, "
     proc.foo add end 
     begin 
-        procref.foo mem_storew.100 dropw push.100
+        procref.foo mem_storew_be.100 dropw push.100
         dynexec swap.8 drop 
     end", 
     vec![16_u32.into(); 16]
@@ -135,7 +135,7 @@ use super::*;
     begin 
         push.1 
         if.true 
-            procref.foo mem_storew.100 dropw
+            procref.foo mem_storew_be.100 dropw
             push.100 dynexec
             push.100 dynexec
         else 
@@ -149,7 +149,7 @@ use super::*;
 #[case(None,"
     proc.foo.2 locaddr.0 locaddr.1 swap.8 drop swap.8 drop end
     begin 
-        procref.foo mem_storew.100 dropw push.100
+        procref.foo mem_storew_be.100 dropw push.100
         dynexec
     end", 
     vec![16_u32.into(); 16]
@@ -159,9 +159,9 @@ use super::*;
     proc.foo push.100 mem_store.44 end
     proc.bar mem_load.44 sub.100 assertz end
     begin 
-        procref.foo mem_storew.104 dropw push.104 dynexec
+        procref.foo mem_storew_be.104 dropw push.104 dynexec
         mem_load.44 sub.100 assertz 
-        procref.bar mem_storew.108 dropw push.108 dynexec
+        procref.bar mem_storew_be.108 dropw push.108 dynexec
     end", 
     vec![16_u32.into(); 16]
 )]
@@ -183,7 +183,7 @@ use super::*;
 // ---- horner ops --------------------------------
 #[case(None,
     "begin 
-        push.1.2.3.4 mem_storew.40 dropw
+        push.1.2.3.4 mem_storew_be.40 dropw
         horner_eval_base
         end",
     // first 3 addresses in the vec are the alpha_ptr, acc_high and acc_low, respectively.
@@ -193,7 +193,7 @@ use super::*;
 )]
 #[case(None,
     "begin 
-        push.1.2.3.4 mem_storew.40 dropw
+        push.1.2.3.4 mem_storew_be.40 dropw
         horner_eval_ext
         end",
     // first 3 addresses in the vec are the alpha_ptr, acc_high and acc_low, respectively.
