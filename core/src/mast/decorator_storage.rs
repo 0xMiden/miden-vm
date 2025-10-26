@@ -447,7 +447,8 @@ impl<'a> IntoIterator for DecoratedLinks<'a> {
         let remaining = {
             // Add bounds check to prevent panic on empty storage
             if self.start_op >= self.op_indptr_for_dec_idx.len()
-                || self.end_op >= self.op_indptr_for_dec_idx.len() {
+                || self.end_op >= self.op_indptr_for_dec_idx.len()
+            {
                 0
             } else {
                 let s = self.op_indptr_for_dec_idx[self.start_op];
@@ -458,7 +459,8 @@ impl<'a> IntoIterator for DecoratedLinks<'a> {
 
         // Initialize inner range to the first op (if any).
         let (inner_i, inner_end) = if self.start_op < self.end_op
-            && self.start_op + 1 < self.op_indptr_for_dec_idx.len() {
+            && self.start_op + 1 < self.op_indptr_for_dec_idx.len()
+        {
             let s0 = self.op_indptr_for_dec_idx[self.start_op];
             let e0 = self.op_indptr_for_dec_idx[self.start_op + 1];
             (s0, e0)
