@@ -1,4 +1,6 @@
 use proptest::prelude::*;
+#[cfg(feature = "serde")]
+use serde_json;
 
 // Import strategy functions from arbitrary.rs
 pub(super) use super::arbitrary::op_non_control_sequence_strategy;
@@ -751,5 +753,52 @@ fn test_basic_block_fingerprint_uses_forced_digest() {
     assert_ne!(
         fingerprint1, fingerprint2,
         "Fingerprints should be different when digests differ"
+    );
+}
+
+#[cfg(feature = "serde")]
+#[test]
+fn test_basic_block_serde_roundtrip_preserves_decorators() {
+    let mut forest = MastForest::new();
+    let decorator1 = forest.add_decorator(Decorator::Trace(42)).expect("Failed to add decorator");
+    let decorator2 = forest.add_decorator(Decorator::Trace(99)).expect("Failed to add decorator");
+
+    // Create a basic block with decorators
+    let operations = vec![Operation::Add, Operation::Mul, Operation::Eq];
+    let decorators = vec![(1, decorator1), (2, decorator2)]; // Raw indices
+
+    let original_block = BasicBlockNodeBuilder::new(operations.clone(), decorators)
+        .with_before_enter(vec![decorator1])
+        .with_after_exit(vec![decorator2])
+        .build()
+        .expect("Failed to build basic block");
+
+    // Serialize and deserialize
+    let serialized = serde_json::to_string(&original_block).expect("Failed to serialize");
+    let deserialized_block: BasicBlockNode =
+        serde_json::from_str(&serialized).expect("Failed to deserialize");
+
+    // Verify that decorators are preserved
+    assert_eq!(
+        original_block, deserialized_block,
+        "Blocks should be equal after serde roundtrip"
+    );
+    assert_eq!(
+        deserialized_block.before_enter(),
+        &[decorator1],
+        "Before-enter decorators should be preserved"
+    );
+    assert_eq!(
+        deserialized_block.after_exit(),
+        &[decorator2],
+        "After-exit decorators should be preserved"
+    );
+
+    // Verify indexed decorators
+    let original_decorators = original_block.raw_op_indexed_decorators();
+    let deserialized_decorators = deserialized_block.raw_op_indexed_decorators();
+    assert_eq!(
+        original_decorators, deserialized_decorators,
+        "Raw indexed decorators should be preserved"
     );
 }

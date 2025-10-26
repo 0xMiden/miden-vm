@@ -261,6 +261,137 @@ fn test_decorator_storage_after_strip_decorators() {
     assert_eq!(block_decorators, []);
 }
 
+#[test]
+fn test_mast_forest_roundtrip_with_basic_blocks_and_decorators() {
+    use crate::mast::MastNode;
+
+    // Create a forest with multiple basic blocks and complex decorator arrangements
+    let mut original_forest = MastForest::new();
+
+    // Create various decorators
+    let trace_deco_0 = original_forest.add_decorator(Decorator::Trace(0)).unwrap();
+    let trace_deco_1 = original_forest.add_decorator(Decorator::Trace(1)).unwrap();
+    let trace_deco_2 = original_forest.add_decorator(Decorator::Trace(2)).unwrap();
+    let trace_deco_3 = original_forest.add_decorator(Decorator::Trace(3)).unwrap();
+    let trace_deco_4 = original_forest.add_decorator(Decorator::Trace(4)).unwrap();
+
+    // Block 1: Simple block with decorators at different operation indices
+    let operations1 = vec![Operation::Add, Operation::Mul, Operation::Eq];
+    let decorators1 = vec![(0, trace_deco_0), (2, trace_deco_1)];
+    let block1_id = BasicBlockNodeBuilder::new(operations1, decorators1)
+        .with_before_enter(vec![trace_deco_2])
+        .with_after_exit(vec![trace_deco_3])
+        .add_to_forest(&mut original_forest)
+        .unwrap();
+
+    // Block 2: Complex block with multiple decorators at same operation index
+    let operations2 = vec![
+        Operation::Push(Felt::new(1)),
+        Operation::Push(Felt::new(2)),
+        Operation::Mul,
+        Operation::Drop,
+    ];
+    let decorators2 = vec![
+        (0, trace_deco_0),
+        (0, trace_deco_4),
+        (3, trace_deco_1),
+        (3, trace_deco_2),
+        (3, trace_deco_3),
+    ];
+    let block2_id = BasicBlockNodeBuilder::new(operations2, decorators2)
+        .add_to_forest(&mut original_forest)
+        .unwrap();
+
+    // Block 3: Block with no decorators
+    let operations3 = vec![Operation::Incr, Operation::Neg];
+    let decorators3 = vec![];
+    let block3_id = BasicBlockNodeBuilder::new(operations3, decorators3)
+        .add_to_forest(&mut original_forest)
+        .unwrap();
+
+    // Verify original forest structure
+    assert_eq!(original_forest.num_nodes(), 3);
+    assert_eq!(original_forest.decorator_storage.num_nodes(), 3);
+    // Note: DecoratorIndexMapping may deduplicate identical decorators across blocks
+    let original_decorator_count = original_forest.decorator_storage.num_decorator_ids();
+
+    // Serialize the forest to bytes
+    let original_bytes = original_forest.to_bytes();
+
+    // Deserialize back to a new forest
+    let deserialized_forest = MastForest::read_from_bytes(&original_bytes).unwrap();
+
+    // Verify basic forest structure
+    assert_eq!(deserialized_forest.num_nodes(), 3);
+    assert_eq!(deserialized_forest.decorator_storage.num_nodes(), 3);
+    assert_eq!(
+        deserialized_forest.decorator_storage.num_decorator_ids(),
+        original_decorator_count
+    );
+
+    // Verify that the reconstructed forest includes the decorators
+    // This ensures the DecoratorIndexMapping structure in the deserialized forest is not empty
+    assert!(
+        !deserialized_forest.decorator_storage.is_empty(),
+        "Deserialized forest should have decorator storage"
+    );
+
+    // Verify blocks are equivalent (should be equal since both use Linked storage)
+    for &block_id in &[block1_id, block2_id, block3_id] {
+        let original_block = match &original_forest[block_id] {
+            MastNode::Block(block) => block,
+            _ => panic!("Expected block node"),
+        };
+        let deserialized_block = match &deserialized_forest[block_id] {
+            MastNode::Block(block) => block,
+            _ => panic!("Expected block node"),
+        };
+
+        // Blocks should be equal since both are Linked
+        assert_eq!(original_block, deserialized_block);
+
+        // Verify decorator consistency
+        let original_decorators: Vec<_> = original_block.indexed_decorator_iter().collect();
+        let deserialized_decorators: Vec<_> = deserialized_block.indexed_decorator_iter().collect();
+        assert_eq!(original_decorators, deserialized_decorators);
+
+        // Verify before/after decorators
+        assert_eq!(original_block.before_enter(), deserialized_block.before_enter());
+        assert_eq!(original_block.after_exit(), deserialized_block.after_exit());
+    }
+
+    // Test specific decorator arrangements are preserved
+    let deserialized_block1 = match &deserialized_forest[block1_id] {
+        MastNode::Block(block) => block,
+        _ => panic!("Expected block node"),
+    };
+    let deserialized_block2 = match &deserialized_forest[block2_id] {
+        MastNode::Block(block) => block,
+        _ => panic!("Expected block node"),
+    };
+
+    // Block 1: Should have before_enter and after_exit decorators
+    assert_eq!(deserialized_block1.before_enter(), &[trace_deco_2]);
+    assert_eq!(deserialized_block1.after_exit(), &[trace_deco_3]);
+
+    // Block 2: Should have multiple decorators at operation indices 0 and 3
+    let block2_decorators: Vec<_> = deserialized_block2.indexed_decorator_iter().collect();
+    assert_eq!(block2_decorators.len(), 5); // 2 at op 0, 3 at op 3
+
+    // Verify specific decorator positions
+    let mut op0_decorators = Vec::new();
+    let mut op3_decorators = Vec::new();
+    for (op_idx, decorator_id) in block2_decorators {
+        match op_idx {
+            0 => op0_decorators.push(decorator_id),
+            3 => op3_decorators.push(decorator_id),
+            _ => panic!("Unexpected decorator at operation index {}", op_idx),
+        }
+    }
+    assert_eq!(op0_decorators.len(), 2);
+    assert_eq!(op3_decorators.len(), 3);
+}
+
 // HELPER FUNCTIONS
 // --------------------------------------------------------------------------------------------
 

@@ -135,7 +135,6 @@ pub const BATCH_SIZE: usize = 8;
 /// Where `batches` is the concatenation of each `batch` in the basic block, and each batch is 8
 /// field elements (512 bits).
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 pub struct BasicBlockNode {
     /// The primitive operations contained in this basic block.
@@ -145,16 +144,69 @@ pub struct BasicBlockNode {
     /// Multiple batches are used for blocks consisting of more than 72 operations.
     op_batches: Vec<OpBatch>,
     digest: Word,
-    /// This replaces the old `decorators` field
-    /// Note: We will handle serialization for this manually later.
-    #[cfg_attr(feature = "serde", serde(skip))]
+    /// Custom serialization is handled via Serialize/Deserialize impls
     decorators: DecoratorStore,
     /// The rest of the fields (before_enter, after_exit)
-    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Vec::is_empty"))]
     before_enter: Vec<DecoratorId>,
-    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Vec::is_empty"))]
     after_exit: Vec<DecoratorId>,
 }
+
+// ------------------------------------------------------------------------------------------------
+// SERIALIZATION
+// ================================================================================================
+
+/// A serializable proxy struct for BasicBlockNode that always contains owned decorators.
+/// This ensures backward compatibility by always serializing decorators inline.
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Debug)]
+#[allow(dead_code)] // Used in custom Serialize/Deserialize implementations
+struct SerializableBasicBlockNode {
+    op_batches: Vec<OpBatch>,
+    digest: Word,
+    decorators: DecoratorList,
+    before_enter: Vec<DecoratorId>,
+    after_exit: Vec<DecoratorId>,
+}
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for BasicBlockNode {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let decorators = self.raw_op_indexed_decorators();
+        SerializableBasicBlockNode {
+            op_batches: self.op_batches.clone(),
+            digest: self.digest,
+            decorators,
+            before_enter: self.before_enter.clone(),
+            after_exit: self.after_exit.clone(),
+        }
+        .serialize(serializer)
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for BasicBlockNode {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let proxy = SerializableBasicBlockNode::deserialize(deserializer)?;
+        let reflowed_decorators = Self::adjust_decorators(proxy.decorators, &proxy.op_batches);
+        Ok(BasicBlockNode {
+            op_batches: proxy.op_batches,
+            digest: proxy.digest,
+            decorators: DecoratorStore::Owned(reflowed_decorators),
+            before_enter: proxy.before_enter,
+            after_exit: proxy.after_exit,
+        })
+    }
+}
+
+// Note: Custom Serializable/Deserializable implementations can be added later
+// if needed. For now, the serde implementations provide proper serialization
+// support for both Owned and Linked decorator variants.
 
 // ------------------------------------------------------------------------------------------------
 /// Constants

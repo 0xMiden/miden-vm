@@ -54,7 +54,7 @@ mod tests;
 ///
 /// A [`MastForest`] does not have an entrypoint, and hence is not executable. A [`crate::Program`]
 /// can be built from a [`MastForest`] to specify an entrypoint.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 pub struct MastForest {
@@ -76,9 +76,7 @@ pub struct MastForest {
     error_codes: BTreeMap<u64, Arc<str>>,
 
     /// Storage for decorators per operation per node. This is used for efficient access to
-    /// decorators during execution and debugging. It's not serialized as it can be
-    /// reconstructed from the main structure.
-    #[cfg_attr(feature = "serde", serde(skip))]
+    /// decorators during execution and debugging.
     decorator_storage: Arc<DecoratorIndexMapping>,
 }
 
@@ -425,20 +423,6 @@ impl IndexMut<DecoratorId> for MastForest {
         &mut self.decorators[decorator_id]
     }
 }
-
-impl PartialEq for MastForest {
-    fn eq(&self, other: &Self) -> bool {
-        // Compare all fields except decorator_storage, which is skipped during serialization
-        // and can be reconstructed from the main structure
-        self.nodes == other.nodes
-            && self.roots == other.roots
-            && self.decorators == other.decorators
-            && self.advice_map == other.advice_map
-            && self.error_codes == other.error_codes
-    }
-}
-
-impl Eq for MastForest {}
 
 // MAST NODE ID
 // ================================================================================================
