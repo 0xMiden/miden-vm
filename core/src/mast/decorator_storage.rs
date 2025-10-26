@@ -445,13 +445,20 @@ impl<'a> IntoIterator for DecoratedLinks<'a> {
     fn into_iter(self) -> Self::IntoIter {
         // Precompute the exact number of pairs in the node's range.
         let remaining = {
-            let s = self.op_indptr_for_dec_idx[self.start_op];
-            let e = self.op_indptr_for_dec_idx[self.end_op];
-            e - s
+            // Add bounds check to prevent panic on empty storage
+            if self.start_op >= self.op_indptr_for_dec_idx.len()
+                || self.end_op >= self.op_indptr_for_dec_idx.len() {
+                0
+            } else {
+                let s = self.op_indptr_for_dec_idx[self.start_op];
+                let e = self.op_indptr_for_dec_idx[self.end_op];
+                e - s
+            }
         };
 
         // Initialize inner range to the first op (if any).
-        let (inner_i, inner_end) = if self.start_op < self.end_op {
+        let (inner_i, inner_end) = if self.start_op < self.end_op
+            && self.start_op + 1 < self.op_indptr_for_dec_idx.len() {
             let s0 = self.op_indptr_for_dec_idx[self.start_op];
             let e0 = self.op_indptr_for_dec_idx[self.start_op + 1];
             (s0, e0)

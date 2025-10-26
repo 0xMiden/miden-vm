@@ -1392,6 +1392,7 @@ dependencies = [
  "criterion",
  "derive_more",
  "insta",
+ "itertools 0.14.0",
  "miden-crypto",
  "miden-debug-types",
  "miden-formatting",

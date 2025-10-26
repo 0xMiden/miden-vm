@@ -294,8 +294,8 @@ fn operation_or_decorator_iterator() {
     let mut iterator = node.iter();
 
     // operation index 0
-    assert_eq!(iterator.next(), Some(OperationOrDecorator::Decorator(&DecoratorId(0))));
-    assert_eq!(iterator.next(), Some(OperationOrDecorator::Decorator(&DecoratorId(1))));
+    assert_eq!(iterator.next(), Some(OperationOrDecorator::Decorator(DecoratorId(0))));
+    assert_eq!(iterator.next(), Some(OperationOrDecorator::Decorator(DecoratorId(1))));
     assert_eq!(iterator.next(), Some(OperationOrDecorator::Operation(&Operation::Add)));
 
     // operations indices 1, 2
@@ -303,12 +303,12 @@ fn operation_or_decorator_iterator() {
     assert_eq!(iterator.next(), Some(OperationOrDecorator::Operation(&Operation::MovDn2)));
 
     // operation index 3
-    assert_eq!(iterator.next(), Some(OperationOrDecorator::Decorator(&DecoratorId(2))));
+    assert_eq!(iterator.next(), Some(OperationOrDecorator::Decorator(DecoratorId(2))));
     assert_eq!(iterator.next(), Some(OperationOrDecorator::Operation(&Operation::MovDn3)));
 
     // after last operation
-    assert_eq!(iterator.next(), Some(OperationOrDecorator::Decorator(&DecoratorId(3))));
-    assert_eq!(iterator.next(), Some(OperationOrDecorator::Decorator(&DecoratorId(4))));
+    assert_eq!(iterator.next(), Some(OperationOrDecorator::Decorator(DecoratorId(3))));
+    assert_eq!(iterator.next(), Some(OperationOrDecorator::Decorator(DecoratorId(4))));
     assert_eq!(iterator.next(), None);
 }
 
