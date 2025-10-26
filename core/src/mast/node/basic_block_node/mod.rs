@@ -987,10 +987,19 @@ impl BasicBlockNodeBuilder {
 
 impl MastForestContributor for BasicBlockNodeBuilder {
     fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
-        forest
+        let basic_block = self.build()?;
+
+        let decorators_info: Vec<_> = basic_block.indexed_decorator_iter().collect();
+
+        let node_id = forest
             .nodes
-            .push(self.build()?.into())
-            .map_err(|_| MastForestError::TooManyNodes)
+            .push(basic_block.into())
+            .map_err(|_| MastForestError::TooManyNodes)?;
+        forest
+            .decorator_storage
+            .add_decorator_info_for_node(node_id, decorators_info)
+            .map_err(MastForestError::DecoratorError)?;
+        Ok(node_id)
     }
 
     fn fingerprint_for_node(
