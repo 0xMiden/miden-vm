@@ -79,7 +79,7 @@ pub struct MastForest {
     /// decorators during execution and debugging. It's not serialized as it can be
     /// reconstructed from the main structure.
     #[cfg_attr(feature = "serde", serde(skip))]
-    decorator_storage: DecoratorIndexMapping,
+    decorator_storage: Arc<DecoratorIndexMapping>,
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -93,7 +93,7 @@ impl MastForest {
             decorators: IndexVec::new(),
             advice_map: AdviceMap::default(),
             error_codes: BTreeMap::new(),
-            decorator_storage: DecoratorIndexMapping::new(),
+            decorator_storage: Arc::new(DecoratorIndexMapping::new()),
         }
     }
 }
@@ -154,7 +154,7 @@ impl MastForest {
             node.remove_decorators();
         }
         self.decorators = IndexVec::new();
-        self.decorator_storage = DecoratorIndexMapping::new();
+        self.decorator_storage = Arc::new(DecoratorIndexMapping::new());
     }
 
     /// Merges all `forests` into a new [`MastForest`].
@@ -229,7 +229,7 @@ impl MastForest {
         // extract decorator information from the nodes by converting them into builders
         let node_builders =
             nodes_to_add.into_iter().map(|node| node.to_builder()).collect::<Vec<_>>();
-        self.decorator_storage = DecoratorIndexMapping::new();
+        self.decorator_storage = Arc::new(DecoratorIndexMapping::new());
 
         // Add each node to the new MAST forest, making sure to rewrite any outdated internal
         // `MastNodeId`s
