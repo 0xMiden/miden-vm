@@ -6,10 +6,11 @@ use winter_math::FieldElement;
 use winter_rand_utils::prng_array;
 
 use crate::{
-    Decorator, DebugOptions, Felt, Kernel, Operation, ProgramInfo, Word,
+    DebugOptions, Decorator, Felt, Kernel, Operation, ProgramInfo, Word,
     chiplets::hasher,
     mast::{
-        BasicBlockNodeBuilder, DynNode, DynNodeBuilder, MastForest, MastForestContributor, MastNodeExt,
+        BasicBlockNodeBuilder, DynNode, DynNodeBuilder, MastForest, MastForestContributor,
+        MastNodeExt,
     },
     utils::{Deserializable, Serializable},
 };
@@ -81,44 +82,42 @@ fn test_decorator_storage_consistency_with_block_iterator() {
     // Test 1: Compare decorators from forest storage vs block iterator
     let forest_decorators: Vec<_> = forest
         .decorator_storage
-        .decorators_for_node(block_id)
+        .decorator_ids_for_node(block_id)
         .unwrap()
-        .map(|(op_idx, decorators)| (op_idx, decorators.to_vec()))
-        .flat_map(|(op_idx, decorators)| {
-            decorators.into_iter().map(move |dec_id| (op_idx, dec_id))
-        })
+        .flat_map(|(op_idx, decorators)| decorators.iter().map(move |dec_id| (op_idx, *dec_id)))
         .collect();
 
     let block_decorators: Vec<_> = block.indexed_decorator_iter().collect();
 
-    assert_eq!(forest_decorators, block_decorators,
-        "Decorators from forest storage should match block iterator");
+    assert_eq!(
+        forest_decorators, block_decorators,
+        "Decorators from forest storage should match block iterator"
+    );
 
     // Test 2: Verify specific operation decorators match
     for (op_idx, expected_decorator_id) in &decorators {
-        let forest_decos = forest
-            .decorator_storage
-            .decorators_for_operation(block_id, *op_idx)
-            .unwrap();
+        let forest_decos =
+            forest.decorator_storage.decorator_ids_for_operation(block_id, *op_idx).unwrap();
         let block_decos: Vec<_> = block
             .indexed_decorator_iter()
             .filter(|(idx, _)| *idx == *op_idx)
             .map(|(_, id)| id)
             .collect();
 
-        assert_eq!(forest_decos, block_decos,
-            "Decorators for operation {} should match", op_idx);
-        assert_eq!(forest_decos, &[*expected_decorator_id],
-            "Should have correct decorator for operation {}", op_idx);
+        assert_eq!(forest_decos, block_decos, "Decorators for operation {} should match", op_idx);
+        assert_eq!(
+            forest_decos,
+            &[*expected_decorator_id],
+            "Should have correct decorator for operation {}",
+            op_idx
+        );
     }
 
     // Test 3: Verify operations without decorators return empty
     let operations_without_decorators = [1]; // Add operation
     for op_idx in operations_without_decorators {
-        let forest_decos = forest
-            .decorator_storage
-            .decorators_for_operation(block_id, op_idx)
-            .unwrap();
+        let forest_decos =
+            forest.decorator_storage.decorator_ids_for_operation(block_id, op_idx).unwrap();
         let block_decos: Vec<_> = block
             .indexed_decorator_iter()
             .filter(|(idx, _)| *idx == op_idx)
@@ -150,11 +149,8 @@ fn test_decorator_storage_consistency_with_empty_block() {
     };
 
     // Both should have no indexed decorators
-    let forest_decorators: Vec<_> = forest
-        .decorator_storage
-        .decorators_for_node(block_id)
-        .unwrap()
-        .collect();
+    let forest_decorators: Vec<_> =
+        forest.decorator_storage.decorator_ids_for_node(block_id).unwrap().collect();
 
     let block_decorators: Vec<_> = block.indexed_decorator_iter().collect();
 
@@ -190,12 +186,9 @@ fn test_decorator_storage_consistency_with_multiple_blocks() {
     // Verify first block consistency
     let forest_decorators1: Vec<_> = forest
         .decorator_storage
-        .decorators_for_node(block_id1)
+        .decorator_ids_for_node(block_id1)
         .unwrap()
-        .map(|(op_idx, decorators)| (op_idx, decorators.to_vec()))
-        .flat_map(|(op_idx, decorators)| {
-            decorators.into_iter().map(move |dec_id| (op_idx, dec_id))
-        })
+        .flat_map(|(op_idx, decorators)| decorators.iter().map(move |dec_id| (op_idx, *dec_id)))
         .collect();
 
     let block1 = if let crate::mast::MastNode::Block(block) = &forest[block_id1] {
@@ -210,12 +203,9 @@ fn test_decorator_storage_consistency_with_multiple_blocks() {
     // Verify second block consistency
     let forest_decorators2: Vec<_> = forest
         .decorator_storage
-        .decorators_for_node(block_id2)
+        .decorator_ids_for_node(block_id2)
         .unwrap()
-        .map(|(op_idx, decorators)| (op_idx, decorators.to_vec()))
-        .flat_map(|(op_idx, decorators)| {
-            decorators.into_iter().map(move |dec_id| (op_idx, dec_id))
-        })
+        .flat_map(|(op_idx, decorators)| decorators.iter().map(move |dec_id| (op_idx, *dec_id)))
         .collect();
 
     let block2 = if let crate::mast::MastNode::Block(block) = &forest[block_id2] {
@@ -251,7 +241,7 @@ fn test_decorator_storage_after_strip_decorators() {
     // Verify decorators exist initially
     assert!(!forest.decorator_storage.is_empty());
     assert_eq!(forest.decorator_storage.num_nodes(), 1);
-    assert_eq!(forest.decorator_storage.num_decorators(), 2);
+    assert_eq!(forest.decorator_storage.num_decorator_ids(), 2);
 
     // Strip decorators
     forest.strip_decorators();
@@ -259,7 +249,7 @@ fn test_decorator_storage_after_strip_decorators() {
     // Verify decorators are cleared from storage
     assert!(forest.decorator_storage.is_empty());
     assert_eq!(forest.decorator_storage.num_nodes(), 0);
-    assert_eq!(forest.decorator_storage.num_decorators(), 0);
+    assert_eq!(forest.decorator_storage.num_decorator_ids(), 0);
 
     // Verify block also has no decorators after stripping
     let block = if let crate::mast::MastNode::Block(block) = &forest[block_id] {

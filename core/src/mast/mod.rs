@@ -26,12 +26,12 @@ pub use node::{
 use crate::{
     AdviceMap, Decorator, Felt, Idx, LexicographicWord, Word,
     crypto::hash::Hasher,
-    mast::decorator_storage::DecoratorStorageError,
+    mast::decorator_storage::DecoratorIndexError,
     utils::{ByteWriter, DeserializationError, Serializable, hash_string_to_word},
 };
 
 mod decorator_storage;
-pub use decorator_storage::OpIndexedDecoratorStorage;
+pub use decorator_storage::DecoratorIndexMapping;
 mod serialization;
 
 mod merger;
@@ -79,7 +79,7 @@ pub struct MastForest {
     /// decorators during execution and debugging. It's not serialized as it can be
     /// reconstructed from the main structure.
     #[cfg_attr(feature = "serde", serde(skip))]
-    decorator_storage: OpIndexedDecoratorStorage,
+    decorator_storage: DecoratorIndexMapping,
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -93,7 +93,7 @@ impl MastForest {
             decorators: IndexVec::new(),
             advice_map: AdviceMap::default(),
             error_codes: BTreeMap::new(),
-            decorator_storage: OpIndexedDecoratorStorage::new(),
+            decorator_storage: DecoratorIndexMapping::new(),
         }
     }
 }
@@ -154,7 +154,7 @@ impl MastForest {
             node.remove_decorators();
         }
         self.decorators = IndexVec::new();
-        self.decorator_storage = OpIndexedDecoratorStorage::new();
+        self.decorator_storage = DecoratorIndexMapping::new();
     }
 
     /// Merges all `forests` into a new [`MastForest`].
@@ -229,7 +229,7 @@ impl MastForest {
         // extract decorator information from the nodes by converting them into builders
         let node_builders =
             nodes_to_add.into_iter().map(|node| node.to_builder()).collect::<Vec<_>>();
-        self.decorator_storage = OpIndexedDecoratorStorage::new();
+        self.decorator_storage = DecoratorIndexMapping::new();
 
         // Add each node to the new MAST forest, making sure to rewrite any outdated internal
         // `MastNodeId`s
@@ -685,5 +685,5 @@ pub enum MastForestError {
     #[error("advice map key {0} already exists when merging forests")]
     AdviceMapKeyCollisionOnMerge(Word),
     #[error("decorator storage error: {0}")]
-    DecoratorError(DecoratorStorageError),
+    DecoratorError(DecoratorIndexError),
 }
