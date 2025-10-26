@@ -31,7 +31,7 @@ use crate::{
 };
 
 mod decorator_storage;
-pub use decorator_storage::DecoratorIndexMapping;
+pub use decorator_storage::{DecoratedLinks, DecoratedLinksIter, DecoratorIndexMapping};
 mod serialization;
 
 mod merger;

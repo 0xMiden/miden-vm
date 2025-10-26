@@ -4,7 +4,7 @@ use miden_utils_indexing::{Idx, IndexVec};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::mast::{DecoratorId, MastNodeId};
+use crate::mast::{DecoratedOpLink, DecoratorId, MastNodeId};
 
 /// A two-level compressed sparse row (CSR) representation for indexing decorator IDs per
 /// operation per node.
@@ -312,6 +312,20 @@ impl DecoratorIndexMapping {
         }))
     }
 
+    /// Named, zero-alloc view flattened to `(relative_op_idx, DecoratorId)`.
+    pub fn decorator_links_for_node<'a>(
+        &'a self,
+        node: MastNodeId,
+    ) -> Result<DecoratedLinks<'a>, DecoratorIndexError> {
+        let op_range = self.operation_range_for_node(node)?; // [start .. end) in op-pointer space
+        Ok(DecoratedLinks::new(
+            op_range.start,
+            op_range.end,
+            &self.op_indptr_for_dec_ids,
+            &self.decorator_ids,
+        ))
+    }
+
     /// Check if a specific operation within a node has any decorator IDs.
     ///
     /// # Arguments
@@ -361,6 +375,150 @@ impl DecoratorIndexMapping {
 impl Default for DecoratorIndexMapping {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Immutable view over all `(op_idx, DecoratorId)` pairs for a node.
+/// Uses the two-level CSR encoded by `node_indptr_for_op_idx` and `op_indptr_for_dec_idx`.
+pub struct DecoratedLinks<'a> {
+    // Absolute op-pointer index range for this node: [start_op .. end_op)
+    start_op: usize,
+    end_op: usize,
+
+    // CSR arrays (borrowed; not owned)
+    op_indptr_for_dec_idx: &'a [usize], // len = total_ops + 1
+    decorator_indices: &'a [DecoratorId],
+}
+
+impl<'a> DecoratedLinks<'a> {
+    fn new(
+        start_op: usize,
+        end_op: usize,
+        op_indptr_for_dec_idx: &'a [usize],
+        decorator_indices: &'a [DecoratorId],
+    ) -> Self {
+        Self {
+            start_op,
+            end_op,
+            op_indptr_for_dec_idx,
+            decorator_indices,
+        }
+    }
+
+    /// Total number of `(op_idx, DecoratorId)` pairs in this view (exact).
+    #[inline]
+    pub fn len_pairs(&self) -> usize {
+        let s = self.op_indptr_for_dec_idx[self.start_op];
+        let e = self.op_indptr_for_dec_idx[self.end_op];
+        e - s
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.len_pairs() == 0
+    }
+}
+
+/// The concrete, zero-alloc iterator over `(relative_op_idx, DecoratorId)`.
+pub struct DecoratedLinksIter<'a> {
+    // absolute op-pointer indices (into op_indptr_for_dec_idx)
+    cur_op: usize,
+    end_op: usize,
+    base_op: usize, // for relative index = cur_op - base_op
+
+    // inner slice [inner_i .. inner_end) indexes into decorator_indices
+    inner_i: usize,
+    inner_end: usize,
+
+    // borrowed CSR arrays
+    op_indptr_for_dec_idx: &'a [usize],
+    decorator_indices: &'a [DecoratorId],
+
+    // exact count of remaining pairs
+    remaining: usize,
+}
+
+impl<'a> IntoIterator for DecoratedLinks<'a> {
+    type Item = DecoratedOpLink;
+    type IntoIter = DecoratedLinksIter<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        // Precompute the exact number of pairs in the node's range.
+        let remaining = {
+            let s = self.op_indptr_for_dec_idx[self.start_op];
+            let e = self.op_indptr_for_dec_idx[self.end_op];
+            e - s
+        };
+
+        // Initialize inner range to the first op (if any).
+        let (inner_i, inner_end) = if self.start_op < self.end_op {
+            let s0 = self.op_indptr_for_dec_idx[self.start_op];
+            let e0 = self.op_indptr_for_dec_idx[self.start_op + 1];
+            (s0, e0)
+        } else {
+            (0, 0)
+        };
+
+        DecoratedLinksIter {
+            cur_op: self.start_op,
+            end_op: self.end_op,
+            base_op: self.start_op,
+            inner_i,
+            inner_end,
+            op_indptr_for_dec_idx: self.op_indptr_for_dec_idx,
+            decorator_indices: self.decorator_indices,
+            remaining,
+        }
+    }
+}
+
+impl<'a> DecoratedLinksIter<'a> {
+    #[inline]
+    fn advance_outer(&mut self) -> bool {
+        self.cur_op += 1;
+        if self.cur_op >= self.end_op {
+            return false;
+        }
+        let s = self.op_indptr_for_dec_idx[self.cur_op];
+        let e = self.op_indptr_for_dec_idx[self.cur_op + 1];
+        self.inner_i = s;
+        self.inner_end = e;
+        true
+    }
+}
+
+impl<'a> Iterator for DecoratedLinksIter<'a> {
+    type Item = DecoratedOpLink;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        while self.cur_op < self.end_op {
+            // Emit from current op's decorator slice if non-empty
+            if self.inner_i < self.inner_end {
+                let rel_op = self.cur_op - self.base_op; // relative op index within the node
+                let id = self.decorator_indices[self.inner_i];
+                self.inner_i += 1;
+                self.remaining -= 1;
+                return Some((rel_op, id));
+            }
+            // Move to next operation (which might be empty as well)
+            if !self.advance_outer() {
+                break;
+            }
+        }
+        None
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.remaining, Some(self.remaining))
+    }
+}
+
+impl<'a> ExactSizeIterator for DecoratedLinksIter<'a> {
+    #[inline]
+    fn len(&self) -> usize {
+        self.remaining
     }
 }
 
@@ -703,5 +861,19 @@ mod tests {
             storage5.decorator_ids_for_operation(test_node_id(2), 2).unwrap(),
             &[test_decorator_id(2)]
         );
+    }
+
+    #[test]
+    fn test_decorator_links_for_node_flattened() {
+        let storage = create_standard_test_storage();
+        let n0 = MastNodeId::new_unchecked(0);
+        let flat: Vec<_> = storage.decorator_links_for_node(n0).unwrap().into_iter().collect();
+        // Node 0: Op0 -> [0,1], Op1 -> [2]
+        assert_eq!(flat, vec![(0, DecoratorId(0)), (0, DecoratorId(1)), (1, DecoratorId(2)),]);
+
+        let n1 = MastNodeId::new_unchecked(1);
+        let flat1: Vec<_> = storage.decorator_links_for_node(n1).unwrap().into_iter().collect();
+        // Node 1: Op0 -> [3,4,5]
+        assert_eq!(flat1, vec![(0, DecoratorId(3)), (0, DecoratorId(4)), (0, DecoratorId(5)),]);
     }
 }
