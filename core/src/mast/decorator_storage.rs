@@ -6,50 +6,50 @@ use serde::{Deserialize, Serialize};
 
 use crate::mast::{DecoratorId, MastNodeId};
 
-/// A two-level compressed sparse row (CSR) representation for storing decorators per operation per
-/// node.
+/// A two-level compressed sparse row (CSR) representation for indexing decorator IDs per
+/// operation per node.
 ///
-/// This structure provides efficient access to decorators in a hierarchical manner:
+/// This structure provides efficient access to decorator IDs in a hierarchical manner:
 /// 1. First level: Node -> Operations (operations belong to nodes)
-/// 2. Second level: Operation -> Decorators (decorators belong to operations)
+/// 2. Second level: Operation -> Decorator IDs (decorator IDs belong to operations)
 ///
 /// The data layout follows CSR format at both levels:
-/// - `decorator_indices`: Flat storage of all DecoratorId values
-/// - `op_indptr_for_dec_idx`: Pointer indices for operations within decorator_indices
-/// - `node_indptr_for_op_idx`: Pointer indices for nodes within op_indptr_for_dec_idx
+/// - `decorator_ids`: Flat storage of all DecoratorId values
+/// - `op_indptr_for_dec_ids`: Pointer indices for operations within decorator_ids
+/// - `node_indptr_for_op_idx`: Pointer indices for nodes within op_indptr_for_dec_ids
 ///
 /// # Example
 ///
 /// Consider this COO (Coordinate format) representation:
 /// ```text
-/// Node 0, Op 0: [decorator_0, decorator_1]
-/// Node 0, Op 1: [decorator_2]
-/// Node 1, Op 0: [decorator_3, decorator_4, decorator_5]
+/// Node 0, Op 0: [decorator_id_0, decorator_id_1]
+/// Node 0, Op 1: [decorator_id_2]
+/// Node 1, Op 0: [decorator_id_3, decorator_id_4, decorator_id_5]
 /// ```
 ///
 /// This would be stored as:
 /// ```text
-/// decorator_indices:    [0, 1, 2, 3, 4, 5]
-/// op_indptr_for_dec_idx: [0, 2, 3, 6]  // Node 0: ops [0,2], [2,3]; Node 1: ops [3,6]
+/// decorator_ids:         [0, 1, 2, 3, 4, 5]
+/// op_indptr_for_dec_ids: [0, 2, 3, 6]  // Node 0: ops [0,2], [2,3]; Node 1: ops [3,6]
 /// node_indptr_for_op_idx: [0, 2, 3]   // Node 0: [0,2], Node 1: [2,3]
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct OpIndexedDecoratorStorage {
-    /// All the decorator indices per operation per node, in a CSR relationship with
-    /// node_indptr_for_op_indptr and op_indptr_for_dec_idx
-    decorator_indices: Vec<DecoratorId>,
-    /// For the node which operation indices are in op_indptr_for_dec_idx[node_start, node_end],
-    /// the indices of its i-th operation are at decorator_indices[op_indptr_for_dec_idx[node_start
-    /// + i]..op_indptr_for_dec_idx[node_start + i + 1]]
-    op_indptr_for_dec_idx: Vec<usize>,
-    /// The decorated operation indices for the n-th node are at op_indptr_for_dec_idx[n, n+1]
+pub struct DecoratorIndexMapping {
+    /// All the decorator IDs per operation per node, in a CSR relationship with
+    /// node_indptr_for_op_idx and op_indptr_for_dec_ids
+    decorator_ids: Vec<DecoratorId>,
+    /// For the node which operation indices are in op_indptr_for_dec_ids[node_start, node_end],
+    /// the indices of its i-th operation are at decorator_ids[op_indptr_for_dec_ids[node_start
+    /// + i]..op_indptr_for_dec_ids[node_start + i + 1]]
+    op_indptr_for_dec_ids: Vec<usize>,
+    /// The decorated operation indices for the n-th node are at op_indptr_for_dec_ids[n, n+1]
     node_indptr_for_op_idx: IndexVec<MastNodeId, usize>,
 }
 
-/// Error type for DecoratorStorage operations
+/// Error type for decorator index mapping operations
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
-pub enum DecoratorStorageError {
+pub enum DecoratorIndexError {
     /// Node index out of bounds
     #[error("Invalid node index {0:?}")]
     NodeIndex(MastNodeId),
@@ -57,86 +57,92 @@ pub enum DecoratorStorageError {
     #[error("Invalid operation index {operation} for node {node:?}")]
     OperationIndex { node: MastNodeId, operation: usize },
     /// Invalid internal data structure (corrupted pointers)
-    #[error("Invalid internal data structure in DecoratorStorage")]
+    #[error("Invalid internal data structure in DecoratorIndexMapping")]
     InternalStructure,
 }
 
-impl OpIndexedDecoratorStorage {
-    /// Create a new empty DecoratorStorage with the specified capacity.
+impl DecoratorIndexMapping {
+    /// Create a new empty DecoratorIndexMapping with the specified capacity.
     ///
     /// # Arguments
     /// * `nodes_capacity` - Expected number of nodes
     /// * `operations_capacity` - Expected total number of operations across all nodes
-    /// * `decorators_capacity` - Expected total number of decorators across all operations
+    /// * `decorator_ids_capacity` - Expected total number of decorator IDs across all operations
     pub fn with_capacity(
         nodes_capacity: usize,
         operations_capacity: usize,
-        decorators_capacity: usize,
+        decorator_ids_capacity: usize,
     ) -> Self {
         Self {
-            decorator_indices: Vec::with_capacity(decorators_capacity),
-            op_indptr_for_dec_idx: Vec::with_capacity(operations_capacity + 1),
+            decorator_ids: Vec::with_capacity(decorator_ids_capacity),
+            op_indptr_for_dec_ids: Vec::with_capacity(operations_capacity + 1),
             node_indptr_for_op_idx: IndexVec::with_capacity(nodes_capacity + 1),
         }
     }
 
-    /// Create a new empty DecoratorStorage.
+    /// Create a new empty DecoratorIndexMapping.
     pub fn new() -> Self {
         Self::with_capacity(0, 0, 0)
     }
 
-    /// Create a DecoratorStorage from raw CSR components.
+    /// Create a DecoratorIndexMapping from raw CSR components.
     ///
     /// This is useful for deserialization or testing purposes.
     ///
     /// # Arguments
-    /// * `decorator_indices` - Flat storage of all decorator IDs
-    /// * `op_indptr_for_dec_idx` - Pointer indices for operations within decorator_indices
-    /// * `node_indptr_for_op_idx` - Pointer indices for nodes within op_indptr_for_dec_idx
+    /// * `decorator_ids` - Flat storage of all decorator IDs
+    /// * `op_indptr_for_dec_ids` - Pointer indices for operations within decorator_ids
+    /// * `node_indptr_for_op_idx` - Pointer indices for nodes within op_indptr_for_dec_ids
     ///
     /// # Returns
     /// An error if the internal structure is inconsistent.
     pub fn from_components(
-        decorator_indices: Vec<DecoratorId>,
-        op_indptr_for_dec_idx: Vec<usize>,
+        decorator_ids: Vec<DecoratorId>,
+        op_indptr_for_dec_ids: Vec<usize>,
         node_indptr_for_op_idx: IndexVec<MastNodeId, usize>,
-    ) -> Result<Self, DecoratorStorageError> {
+    ) -> Result<Self, DecoratorIndexError> {
         // Validate the structure
-        if op_indptr_for_dec_idx.is_empty() {
-            return Err(DecoratorStorageError::InternalStructure);
+        if op_indptr_for_dec_ids.is_empty() {
+            return Err(DecoratorIndexError::InternalStructure);
         }
 
-        // Check that the last operation pointer doesn't exceed decorator indices length
-        if *op_indptr_for_dec_idx.last().unwrap() > decorator_indices.len() {
-            return Err(DecoratorStorageError::InternalStructure);
+        // Check that the last operation pointer doesn't exceed decorator IDs length
+        let Some(&last_op_ptr) = op_indptr_for_dec_ids.last() else {
+            return Err(DecoratorIndexError::InternalStructure);
+        };
+        if last_op_ptr > decorator_ids.len() {
+            return Err(DecoratorIndexError::InternalStructure);
         }
 
         // Check that node pointers are within bounds of operation pointers
         if node_indptr_for_op_idx.is_empty() {
-            return Err(DecoratorStorageError::InternalStructure);
+            return Err(DecoratorIndexError::InternalStructure);
         }
 
         let node_slice = node_indptr_for_op_idx.as_slice();
-        if *node_slice.last().unwrap() > op_indptr_for_dec_idx.len() - 1 {
-            return Err(DecoratorStorageError::InternalStructure);
+        let Some(&last_node_ptr) = node_slice.last() else {
+            return Err(DecoratorIndexError::InternalStructure);
+        };
+        if last_node_ptr > op_indptr_for_dec_ids.len() - 1 {
+            return Err(DecoratorIndexError::InternalStructure);
         }
 
         // Ensure monotonicity of pointers
-        for window in op_indptr_for_dec_idx.windows(2) {
+        for window in op_indptr_for_dec_ids.windows(2) {
             if window[0] > window[1] {
-                return Err(DecoratorStorageError::InternalStructure);
+                return Err(DecoratorIndexError::InternalStructure);
             }
         }
 
         for window in node_slice.windows(2) {
             if window[0] > window[1] {
-                return Err(DecoratorStorageError::InternalStructure);
+                return Err(DecoratorIndexError::InternalStructure);
             }
         }
 
         Ok(Self {
-            decorator_indices,
-            op_indptr_for_dec_idx,
+            decorator_ids,
+            op_indptr_for_dec_ids,
             node_indptr_for_op_idx,
         })
     }
@@ -154,39 +160,39 @@ impl OpIndexedDecoratorStorage {
         }
     }
 
-    /// Get the total number of decorators across all operations.
-    pub fn num_decorators(&self) -> usize {
-        self.decorator_indices.len()
+    /// Get the total number of decorator IDs across all operations.
+    pub fn num_decorator_ids(&self) -> usize {
+        self.decorator_ids.len()
     }
 
     /// Add decorator information for a node incrementally.
     ///
-    /// This method allows building up the DecoratorStorage structure by adding
-    /// decorators for nodes in sequential order only.
+    /// This method allows building up the DecoratorIndexMapping structure by adding
+    /// decorator IDs for nodes in sequential order only.
     ///
     /// # Arguments
-    /// * `node` - The node ID to add decorators for. Must be the next sequential node.
+    /// * `node` - The node ID to add decorator IDs for. Must be the next sequential node.
     /// * `decorators_info` - Vector of (operation_index, decorator_id) tuples. The operation
     ///   indices should be sorted (as guaranteed by validate_decorators). Operations not present in
-    ///   this vector will have no decorators.
+    ///   this vector will have no decorator IDs.
     ///
     /// # Returns
-    /// Ok(()) if successful, Err(DecoratorStorageError) if the node is not the next sequential
+    /// Ok(()) if successful, Err(DecoratorIndexError) if the node is not the next sequential
     /// node.
     ///
     /// # Behavior
-    /// - Can only add decorators for the next sequential node ID
+    /// - Can only add decorator IDs for the next sequential node ID
     /// - Automatically creates empty operations for gaps in operation indices
     /// - Maintains the two-level CSR structure invariant
     pub fn add_decorator_info_for_node(
         &mut self,
         node: MastNodeId,
         decorators_info: Vec<(usize, DecoratorId)>,
-    ) -> Result<(), DecoratorStorageError> {
+    ) -> Result<(), DecoratorIndexError> {
         // Enforce sequential node ids
         let expected = MastNodeId::new_unchecked(self.num_nodes() as u32);
         if node < expected {
-            return Err(DecoratorStorageError::NodeIndex(node));
+            return Err(DecoratorIndexError::NodeIndex(node));
         }
         // Create empty nodes for gaps in node indices
         for idx in expected.0..node.0 {
@@ -195,7 +201,7 @@ impl OpIndexedDecoratorStorage {
         }
 
         // Start of this node's operations is the current length (do NOT reuse previous sentinel)
-        let op_start = self.op_indptr_for_dec_idx.len();
+        let op_start = self.op_indptr_for_dec_ids.len();
 
         // Maintain node CSR: node_indptr[i] = start index for node i
         if self.node_indptr_for_op_idx.is_empty() {
@@ -216,40 +222,40 @@ impl OpIndexedDecoratorStorage {
             let mut it = decorators_info.into_iter().peekable();
 
             for op in 0..=max_op_idx {
-                // pointer to start of decorators for op
-                self.op_indptr_for_dec_idx.push(self.decorator_indices.len());
+                // pointer to start of decorator IDs for op
+                self.op_indptr_for_dec_ids.push(self.decorator_ids.len());
                 while it.peek().is_some_and(|(i, _)| *i == op) {
-                    self.decorator_indices.push(it.next().unwrap().1);
+                    self.decorator_ids.push(it.next().unwrap().1);
                 }
             }
             // final sentinel for this node
-            self.op_indptr_for_dec_idx.push(self.decorator_indices.len());
+            self.op_indptr_for_dec_ids.push(self.decorator_ids.len());
 
             // Push end pointer for this node (index of last op pointer)
-            let end_ops = self.op_indptr_for_dec_idx.len() - 1;
+            let end_ops = self.op_indptr_for_dec_ids.len() - 1;
             let _ = self.node_indptr_for_op_idx.push(end_ops);
         }
 
         Ok(())
     }
 
-    /// Get the number of decorators for a specific operation within a node.
+    /// Get the number of decorator IDs for a specific operation within a node.
     ///
     /// # Arguments
     /// * `node` - The node ID
     /// * `operation` - The operation index within the node
     ///
     /// # Returns
-    /// The number of decorators for the operation, or an error if indices are invalid.
-    pub fn num_decorators_for_operation(
+    /// The number of decorator IDs for the operation, or an error if indices are invalid.
+    pub fn num_decorator_ids_for_operation(
         &self,
         node: MastNodeId,
         operation: usize,
-    ) -> Result<usize, DecoratorStorageError> {
-        self.decorators_for_operation(node, operation).map(|slice| slice.len())
+    ) -> Result<usize, DecoratorIndexError> {
+        self.decorator_ids_for_operation(node, operation).map(|slice| slice.len())
     }
 
-    /// Get all decorators for a specific operation within a node.
+    /// Get all decorator IDs for a specific operation within a node.
     ///
     /// # Arguments
     /// * `node` - The node ID
@@ -257,11 +263,11 @@ impl OpIndexedDecoratorStorage {
     ///
     /// # Returns
     /// A slice of decorator IDs for the operation, or an error if indices are invalid.
-    pub fn decorators_for_operation(
+    pub fn decorator_ids_for_operation(
         &self,
         node: MastNodeId,
         operation: usize,
-    ) -> Result<&[DecoratorId], DecoratorStorageError> {
+    ) -> Result<&[DecoratorId], DecoratorIndexError> {
         let op_range = self.operation_range_for_node(node)?;
         // that operation does not have listed decorator indices
         if operation >= op_range.len() {
@@ -269,58 +275,58 @@ impl OpIndexedDecoratorStorage {
         }
 
         let op_start_idx = op_range.start + operation;
-        if op_start_idx + 1 >= self.op_indptr_for_dec_idx.len() {
-            return Err(DecoratorStorageError::InternalStructure);
+        if op_start_idx + 1 >= self.op_indptr_for_dec_ids.len() {
+            return Err(DecoratorIndexError::InternalStructure);
         }
 
-        let dec_start = self.op_indptr_for_dec_idx[op_start_idx];
-        let dec_end = self.op_indptr_for_dec_idx[op_start_idx + 1];
+        let dec_start = self.op_indptr_for_dec_ids[op_start_idx];
+        let dec_end = self.op_indptr_for_dec_ids[op_start_idx + 1];
 
-        if dec_start > dec_end || dec_end > self.decorator_indices.len() {
-            return Err(DecoratorStorageError::InternalStructure);
+        if dec_start > dec_end || dec_end > self.decorator_ids.len() {
+            return Err(DecoratorIndexError::InternalStructure);
         }
 
-        Ok(&self.decorator_indices[dec_start..dec_end])
+        Ok(&self.decorator_ids[dec_start..dec_end])
     }
 
-    /// Get an iterator over all operations and their decorators for a given node.
+    /// Get an iterator over all operations and their decorator IDs for a given node.
     ///
     /// # Arguments
     /// * `node` - The node ID
     ///
     /// # Returns
-    /// An iterator yielding (operation_index, decorator_slice) tuples, or an error if the node is
-    /// invalid.
-    pub fn decorators_for_node(
+    /// An iterator yielding (operation_index, decorator_ids_slice) tuples, or an error if the node
+    /// is invalid.
+    pub fn decorator_ids_for_node(
         &self,
         node: MastNodeId,
-    ) -> Result<impl Iterator<Item = (usize, &[DecoratorId])>, DecoratorStorageError> {
+    ) -> Result<impl Iterator<Item = (usize, &[DecoratorId])>, DecoratorIndexError> {
         let op_range = self.operation_range_for_node(node)?;
         let num_ops = op_range.len();
 
         Ok((0..num_ops).map(move |op_idx| {
             let op_start_idx = op_range.start + op_idx;
-            let dec_start = self.op_indptr_for_dec_idx[op_start_idx];
-            let dec_end = self.op_indptr_for_dec_idx[op_start_idx + 1];
-            (op_idx, &self.decorator_indices[dec_start..dec_end])
+            let dec_start = self.op_indptr_for_dec_ids[op_start_idx];
+            let dec_end = self.op_indptr_for_dec_ids[op_start_idx + 1];
+            (op_idx, &self.decorator_ids[dec_start..dec_end])
         }))
     }
 
-    /// Check if a specific operation within a node has any decorators.
+    /// Check if a specific operation within a node has any decorator IDs.
     ///
     /// # Arguments
     /// * `node` - The node ID
     /// * `operation` - The operation index within the node
     ///
     /// # Returns
-    /// True if the operation has at least one decorator, false otherwise, or an error if indices
+    /// True if the operation has at least one decorator ID, false otherwise, or an error if indices
     /// are invalid.
-    pub fn operation_has_decorators(
+    pub fn operation_has_decorator_ids(
         &self,
         node: MastNodeId,
         operation: usize,
-    ) -> Result<bool, DecoratorStorageError> {
-        self.num_decorators_for_operation(node, operation).map(|count| count > 0)
+    ) -> Result<bool, DecoratorIndexError> {
+        self.num_decorator_ids_for_operation(node, operation).map(|count| count > 0)
     }
 
     /// Get the range of operation indices for a given node.
@@ -333,26 +339,26 @@ impl OpIndexedDecoratorStorage {
     fn operation_range_for_node(
         &self,
         node: MastNodeId,
-    ) -> Result<core::ops::Range<usize>, DecoratorStorageError> {
+    ) -> Result<core::ops::Range<usize>, DecoratorIndexError> {
         let node_slice = self.node_indptr_for_op_idx.as_slice();
         let node_idx = node.to_usize();
 
         if node_idx + 1 >= node_slice.len() {
-            return Err(DecoratorStorageError::NodeIndex(node));
+            return Err(DecoratorIndexError::NodeIndex(node));
         }
 
         let start = node_slice[node_idx];
         let end = node_slice[node_idx + 1];
 
-        if start > end || end > self.op_indptr_for_dec_idx.len() {
-            return Err(DecoratorStorageError::InternalStructure);
+        if start > end || end > self.op_indptr_for_dec_ids.len() {
+            return Err(DecoratorIndexError::InternalStructure);
         }
 
         Ok(start..end)
     }
 }
 
-impl Default for OpIndexedDecoratorStorage {
+impl Default for DecoratorIndexMapping {
     fn default() -> Self {
         Self::new()
     }
@@ -374,10 +380,10 @@ mod tests {
         MastNodeId::new_unchecked(value)
     }
 
-    /// Helper to create standard test storage with 2 nodes, 3 operations, 6 decorators
+    /// Helper to create standard test storage with 2 nodes, 3 operations, 6 decorator IDs
     /// Structure: Node 0: Op 0 -> [0, 1], Op 1 -> [2]; Node 1: Op 0 -> [3, 4, 5]
-    fn create_standard_test_storage() -> OpIndexedDecoratorStorage {
-        let decorator_indices = vec![
+    fn create_standard_test_storage() -> DecoratorIndexMapping {
+        let decorator_ids = vec![
             test_decorator_id(0),
             test_decorator_id(1),
             test_decorator_id(2),
@@ -385,15 +391,15 @@ mod tests {
             test_decorator_id(4),
             test_decorator_id(5),
         ];
-        let op_indptr_for_dec_idx = vec![0, 2, 3, 6];
+        let op_indptr_for_dec_ids = vec![0, 2, 3, 6];
         let mut node_indptr_for_op_idx = IndexVec::new();
         let _ = node_indptr_for_op_idx.push(0);
         let _ = node_indptr_for_op_idx.push(2);
         let _ = node_indptr_for_op_idx.push(3);
 
-        OpIndexedDecoratorStorage::from_components(
-            decorator_indices,
-            op_indptr_for_dec_idx,
+        DecoratorIndexMapping::from_components(
+            decorator_ids,
+            op_indptr_for_dec_ids,
             node_indptr_for_op_idx,
         )
         .unwrap()
@@ -402,19 +408,19 @@ mod tests {
     #[test]
     fn test_constructors() {
         // Test new()
-        let storage = OpIndexedDecoratorStorage::new();
+        let storage = DecoratorIndexMapping::new();
         assert_eq!(storage.num_nodes(), 0);
-        assert_eq!(storage.num_decorators(), 0);
+        assert_eq!(storage.num_decorator_ids(), 0);
 
         // Test with_capacity()
-        let storage = OpIndexedDecoratorStorage::with_capacity(10, 20, 30);
+        let storage = DecoratorIndexMapping::with_capacity(10, 20, 30);
         assert_eq!(storage.num_nodes(), 0);
-        assert_eq!(storage.num_decorators(), 0);
+        assert_eq!(storage.num_decorator_ids(), 0);
 
         // Test default()
-        let storage = OpIndexedDecoratorStorage::default();
+        let storage = DecoratorIndexMapping::default();
         assert_eq!(storage.num_nodes(), 0);
-        assert_eq!(storage.num_decorators(), 0);
+        assert_eq!(storage.num_decorator_ids(), 0);
     }
 
     #[test]
@@ -425,73 +431,73 @@ mod tests {
         let storage = create_standard_test_storage();
 
         assert_eq!(storage.num_nodes(), 2);
-        assert_eq!(storage.num_decorators(), 6);
+        assert_eq!(storage.num_decorator_ids(), 6);
     }
 
     #[test]
     fn test_from_components_invalid_structure() {
         // Test with empty operation pointers
-        let result = OpIndexedDecoratorStorage::from_components(vec![], vec![], IndexVec::new());
-        assert_eq!(result, Err(DecoratorStorageError::InternalStructure));
+        let result = DecoratorIndexMapping::from_components(vec![], vec![], IndexVec::new());
+        assert_eq!(result, Err(DecoratorIndexError::InternalStructure));
 
         // Test with operation pointer exceeding decorator indices
-        let result = OpIndexedDecoratorStorage::from_components(
+        let result = DecoratorIndexMapping::from_components(
             vec![test_decorator_id(0)],
             vec![0, 2], // Points to index 2 but we only have 1 decorator
             IndexVec::new(),
         );
-        assert_eq!(result, Err(DecoratorStorageError::InternalStructure));
+        assert_eq!(result, Err(DecoratorIndexError::InternalStructure));
 
         // Test with non-monotonic operation pointers
-        let result = OpIndexedDecoratorStorage::from_components(
+        let result = DecoratorIndexMapping::from_components(
             vec![test_decorator_id(0), test_decorator_id(1)],
             vec![0, 2, 1], // 2 > 1, should be monotonic
             IndexVec::new(),
         );
-        assert_eq!(result, Err(DecoratorStorageError::InternalStructure));
+        assert_eq!(result, Err(DecoratorIndexError::InternalStructure));
     }
 
     #[test]
     fn test_data_access_methods() {
         let storage = create_standard_test_storage();
 
-        // Test decorators_for_operation
-        let decorators = storage.decorators_for_operation(test_node_id(0), 0).unwrap();
+        // Test decorator_ids_for_operation
+        let decorators = storage.decorator_ids_for_operation(test_node_id(0), 0).unwrap();
         assert_eq!(decorators, &[test_decorator_id(0), test_decorator_id(1)]);
 
-        let decorators = storage.decorators_for_operation(test_node_id(0), 1).unwrap();
+        let decorators = storage.decorator_ids_for_operation(test_node_id(0), 1).unwrap();
         assert_eq!(decorators, &[test_decorator_id(2)]);
 
-        let decorators = storage.decorators_for_operation(test_node_id(1), 0).unwrap();
+        let decorators = storage.decorator_ids_for_operation(test_node_id(1), 0).unwrap();
         assert_eq!(decorators, &[test_decorator_id(3), test_decorator_id(4), test_decorator_id(5)]);
 
-        // Test decorators_for_node
-        let decorators: Vec<_> = storage.decorators_for_node(test_node_id(0)).unwrap().collect();
+        // Test decorator_ids_for_node
+        let decorators: Vec<_> = storage.decorator_ids_for_node(test_node_id(0)).unwrap().collect();
         assert_eq!(decorators.len(), 2);
         assert_eq!(decorators[0], (0, &[test_decorator_id(0), test_decorator_id(1)][..]));
         assert_eq!(decorators[1], (1, &[test_decorator_id(2)][..]));
 
-        let decorators: Vec<_> = storage.decorators_for_node(test_node_id(1)).unwrap().collect();
+        let decorators: Vec<_> = storage.decorator_ids_for_node(test_node_id(1)).unwrap().collect();
         assert_eq!(decorators.len(), 1);
         assert_eq!(
             decorators[0],
             (0, &[test_decorator_id(3), test_decorator_id(4), test_decorator_id(5)][..])
         );
 
-        // Test operation_has_decorators
-        assert!(storage.operation_has_decorators(test_node_id(0), 0).unwrap());
-        assert!(storage.operation_has_decorators(test_node_id(0), 1).unwrap());
-        assert!(storage.operation_has_decorators(test_node_id(1), 0).unwrap());
-        assert!(!storage.operation_has_decorators(test_node_id(0), 2).unwrap());
+        // Test operation_has_decorator_ids
+        assert!(storage.operation_has_decorator_ids(test_node_id(0), 0).unwrap());
+        assert!(storage.operation_has_decorator_ids(test_node_id(0), 1).unwrap());
+        assert!(storage.operation_has_decorator_ids(test_node_id(1), 0).unwrap());
+        assert!(!storage.operation_has_decorator_ids(test_node_id(0), 2).unwrap());
 
-        // Test num_decorators_for_operation
-        assert_eq!(storage.num_decorators_for_operation(test_node_id(0), 0).unwrap(), 2);
-        assert_eq!(storage.num_decorators_for_operation(test_node_id(0), 1).unwrap(), 1);
-        assert_eq!(storage.num_decorators_for_operation(test_node_id(1), 0).unwrap(), 3);
-        assert_eq!(storage.num_decorators_for_operation(test_node_id(0), 2).unwrap(), 0);
+        // Test num_decorator_ids_for_operation
+        assert_eq!(storage.num_decorator_ids_for_operation(test_node_id(0), 0).unwrap(), 2);
+        assert_eq!(storage.num_decorator_ids_for_operation(test_node_id(0), 1).unwrap(), 1);
+        assert_eq!(storage.num_decorator_ids_for_operation(test_node_id(1), 0).unwrap(), 3);
+        assert_eq!(storage.num_decorator_ids_for_operation(test_node_id(0), 2).unwrap(), 0);
 
         // Test invalid operation returns empty slice
-        let decorators = storage.decorators_for_operation(test_node_id(0), 2).unwrap();
+        let decorators = storage.decorator_ids_for_operation(test_node_id(0), 2).unwrap();
         assert_eq!(decorators, &[]);
     }
 
@@ -504,7 +510,7 @@ mod tests {
         let _ = node_indptr_for_op_idx.push(0);
         let _ = node_indptr_for_op_idx.push(2);
 
-        let storage = OpIndexedDecoratorStorage::from_components(
+        let storage = DecoratorIndexMapping::from_components(
             decorator_indices,
             op_indptr_for_dec_idx,
             node_indptr_for_op_idx,
@@ -512,21 +518,21 @@ mod tests {
         .unwrap();
 
         assert_eq!(storage.num_nodes(), 1);
-        assert_eq!(storage.num_decorators(), 0);
+        assert_eq!(storage.num_decorator_ids(), 0);
 
         // Empty decorators
-        let decorators = storage.decorators_for_operation(test_node_id(0), 0).unwrap();
+        let decorators = storage.decorator_ids_for_operation(test_node_id(0), 0).unwrap();
         assert_eq!(decorators, &[]);
 
         // Operation has no decorators
-        assert!(!storage.operation_has_decorators(test_node_id(0), 0).unwrap());
+        assert!(!storage.operation_has_decorator_ids(test_node_id(0), 0).unwrap());
     }
 
     #[test]
     fn test_debug_impl() {
-        let storage = OpIndexedDecoratorStorage::new();
+        let storage = DecoratorIndexMapping::new();
         let debug_str = format!("{:?}", storage);
-        assert!(debug_str.contains("DecoratorStorage"));
+        assert!(debug_str.contains("DecoratorIndexMapping"));
     }
 
     #[test]
@@ -545,7 +551,7 @@ mod tests {
         let _ = node_indptr_for_op_idx.push(2);
         let _ = node_indptr_for_op_idx.push(3);
 
-        let storage1 = OpIndexedDecoratorStorage::from_components(
+        let storage1 = DecoratorIndexMapping::from_components(
             decorator_indices.clone(),
             op_indptr_for_dec_idx.clone(),
             node_indptr_for_op_idx.clone(),
@@ -561,7 +567,7 @@ mod tests {
         let _ = different_node_indptr.push(0);
         let _ = different_node_indptr.push(1);
 
-        let storage3 = OpIndexedDecoratorStorage::from_components(
+        let storage3 = DecoratorIndexMapping::from_components(
             different_decorators,
             vec![0, 1],
             different_node_indptr,
@@ -574,7 +580,7 @@ mod tests {
     #[test]
     fn test_add_decorator_info_functionality() {
         // Test 1: Basic multi-node functionality
-        let mut storage = OpIndexedDecoratorStorage::new();
+        let mut storage = DecoratorIndexMapping::new();
 
         // Add decorators for node 0
         let decorators_info = vec![
@@ -585,8 +591,8 @@ mod tests {
         storage.add_decorator_info_for_node(test_node_id(0), decorators_info).unwrap();
 
         assert_eq!(storage.num_nodes(), 1);
-        assert_eq!(storage.num_decorators_for_operation(test_node_id(0), 0).unwrap(), 2);
-        assert_eq!(storage.num_decorators_for_operation(test_node_id(0), 2).unwrap(), 1);
+        assert_eq!(storage.num_decorator_ids_for_operation(test_node_id(0), 0).unwrap(), 2);
+        assert_eq!(storage.num_decorator_ids_for_operation(test_node_id(0), 2).unwrap(), 1);
 
         // Add node 1 with simple decorators
         storage
@@ -594,11 +600,11 @@ mod tests {
             .unwrap();
         assert_eq!(storage.num_nodes(), 2);
 
-        let node1_op0 = storage.decorators_for_operation(test_node_id(1), 0).unwrap();
+        let node1_op0 = storage.decorator_ids_for_operation(test_node_id(1), 0).unwrap();
         assert_eq!(node1_op0, &[test_decorator_id(20)]);
 
         // Test 2: Sequential constraint validation
-        let mut storage2 = OpIndexedDecoratorStorage::new();
+        let mut storage2 = DecoratorIndexMapping::new();
         storage2
             .add_decorator_info_for_node(test_node_id(0), vec![(0, test_decorator_id(10))])
             .unwrap();
@@ -612,16 +618,16 @@ mod tests {
         // Try to add node 0 again - should fail
         let result =
             storage2.add_decorator_info_for_node(test_node_id(0), vec![(0, test_decorator_id(40))]);
-        assert_eq!(result, Err(DecoratorStorageError::NodeIndex(test_node_id(0))));
+        assert_eq!(result, Err(DecoratorIndexError::NodeIndex(test_node_id(0))));
 
         // Test 3: Empty input handling (creates empty nodes with no operations)
-        let mut storage3 = OpIndexedDecoratorStorage::new();
+        let mut storage3 = DecoratorIndexMapping::new();
         let result = storage3.add_decorator_info_for_node(test_node_id(0), vec![]);
         assert_eq!(result, Ok(()));
         assert_eq!(storage3.num_nodes(), 1); // Should create empty node
 
         // Empty node should have no operations (accessing any operation should return empty)
-        let decorators = storage3.decorators_for_operation(test_node_id(0), 0).unwrap();
+        let decorators = storage3.decorator_ids_for_operation(test_node_id(0), 0).unwrap();
         assert_eq!(decorators, &[]);
 
         // Should be able to add next node after empty node
@@ -631,7 +637,7 @@ mod tests {
         assert_eq!(storage3.num_nodes(), 2);
 
         // Test 4: Operations with gaps
-        let mut storage4 = OpIndexedDecoratorStorage::new();
+        let mut storage4 = DecoratorIndexMapping::new();
         let gap_decorators = vec![
             (0, test_decorator_id(10)),
             (0, test_decorator_id(11)), // operation 0 has 2 decorators
@@ -640,18 +646,18 @@ mod tests {
         ];
         storage4.add_decorator_info_for_node(test_node_id(0), gap_decorators).unwrap();
 
-        assert_eq!(storage4.num_decorators_for_operation(test_node_id(0), 0).unwrap(), 2);
-        assert_eq!(storage4.num_decorators_for_operation(test_node_id(0), 1).unwrap(), 0);
-        assert_eq!(storage4.num_decorators_for_operation(test_node_id(0), 2).unwrap(), 0);
-        assert_eq!(storage4.num_decorators_for_operation(test_node_id(0), 3).unwrap(), 1);
-        assert_eq!(storage4.num_decorators_for_operation(test_node_id(0), 4).unwrap(), 1);
+        assert_eq!(storage4.num_decorator_ids_for_operation(test_node_id(0), 0).unwrap(), 2);
+        assert_eq!(storage4.num_decorator_ids_for_operation(test_node_id(0), 1).unwrap(), 0);
+        assert_eq!(storage4.num_decorator_ids_for_operation(test_node_id(0), 2).unwrap(), 0);
+        assert_eq!(storage4.num_decorator_ids_for_operation(test_node_id(0), 3).unwrap(), 1);
+        assert_eq!(storage4.num_decorator_ids_for_operation(test_node_id(0), 4).unwrap(), 1);
 
         // Test accessing operations without decorators returns empty slice
-        let op1_decorators = storage4.decorators_for_operation(test_node_id(0), 1).unwrap();
+        let op1_decorators = storage4.decorator_ids_for_operation(test_node_id(0), 1).unwrap();
         assert_eq!(op1_decorators, &[]);
 
         // Test 5: Your specific use case - mixed empty and non-empty nodes
-        let mut storage5 = OpIndexedDecoratorStorage::new();
+        let mut storage5 = DecoratorIndexMapping::new();
 
         // node 0 with decorators
         storage5
@@ -676,25 +682,25 @@ mod tests {
 
         // Verify node 0: op 0 has [1], op 1 has [0]
         assert_eq!(
-            storage5.decorators_for_operation(test_node_id(0), 0).unwrap(),
+            storage5.decorator_ids_for_operation(test_node_id(0), 0).unwrap(),
             &[test_decorator_id(1)]
         );
         assert_eq!(
-            storage5.decorators_for_operation(test_node_id(0), 1).unwrap(),
+            storage5.decorator_ids_for_operation(test_node_id(0), 1).unwrap(),
             &[test_decorator_id(0)]
         );
 
         // Verify node 1: has no operations at all, any operation access returns empty
-        assert_eq!(storage5.decorators_for_operation(test_node_id(1), 0).unwrap(), &[]);
+        assert_eq!(storage5.decorator_ids_for_operation(test_node_id(1), 0).unwrap(), &[]);
 
         // Verify node 2: op 0 has [], op 1 has [1], op 2 has [2]
-        assert_eq!(storage5.decorators_for_operation(test_node_id(2), 0).unwrap(), &[]);
+        assert_eq!(storage5.decorator_ids_for_operation(test_node_id(2), 0).unwrap(), &[]);
         assert_eq!(
-            storage5.decorators_for_operation(test_node_id(2), 1).unwrap(),
+            storage5.decorator_ids_for_operation(test_node_id(2), 1).unwrap(),
             &[test_decorator_id(1)]
         );
         assert_eq!(
-            storage5.decorators_for_operation(test_node_id(2), 2).unwrap(),
+            storage5.decorator_ids_for_operation(test_node_id(2), 2).unwrap(),
             &[test_decorator_id(2)]
         );
     }
