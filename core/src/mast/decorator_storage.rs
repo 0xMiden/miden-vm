@@ -48,28 +48,17 @@ pub struct OpIndexedDecoratorStorage {
 }
 
 /// Error type for DecoratorStorage operations
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum DecoratorStorageError {
     /// Node index out of bounds
+    #[error("Invalid node index {0:?}")]
     NodeIndex(MastNodeId),
     /// Operation index out of bounds for the given node
+    #[error("Invalid operation index {operation} for node {node:?}")]
     OperationIndex { node: MastNodeId, operation: usize },
     /// Invalid internal data structure (corrupted pointers)
+    #[error("Invalid internal data structure in DecoratorStorage")]
     InternalStructure,
-}
-
-impl core::fmt::Display for DecoratorStorageError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Self::NodeIndex(node) => write!(f, "Invalid node index: {:?}", node),
-            Self::OperationIndex { node, operation } => {
-                write!(f, "Invalid operation index {} for node {:?}", operation, node)
-            },
-            Self::InternalStructure => {
-                write!(f, "Invalid internal data structure in DecoratorStorage")
-            },
-        }
-    }
 }
 
 impl OpIndexedDecoratorStorage {
@@ -152,6 +141,10 @@ impl OpIndexedDecoratorStorage {
         })
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.node_indptr_for_op_idx.is_empty()
+    }
+
     /// Get the number of nodes in this storage.
     pub fn num_nodes(&self) -> usize {
         if self.node_indptr_for_op_idx.is_empty() {
@@ -192,8 +185,13 @@ impl OpIndexedDecoratorStorage {
     ) -> Result<(), DecoratorStorageError> {
         // Enforce sequential node ids
         let expected = MastNodeId::new_unchecked(self.num_nodes() as u32);
-        if node != expected {
+        if node < expected {
             return Err(DecoratorStorageError::NodeIndex(node));
+        }
+        // Create empty nodes for gaps in node indices
+        for idx in expected.0..node.0 {
+            self.add_decorator_info_for_node(MastNodeId::new_unchecked(idx), vec![])
+                .unwrap();
         }
 
         // Start of this node's operations is the current length (do NOT reuse previous sentinel)

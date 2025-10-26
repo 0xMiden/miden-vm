@@ -26,6 +26,7 @@ pub use node::{
 use crate::{
     AdviceMap, Decorator, Felt, Idx, LexicographicWord, Word,
     crypto::hash::Hasher,
+    mast::decorator_storage::DecoratorStorageError,
     utils::{ByteWriter, DeserializationError, Serializable, hash_string_to_word},
 };
 
@@ -53,7 +54,7 @@ mod tests;
 ///
 /// A [`MastForest`] does not have an entrypoint, and hence is not executable. A [`crate::Program`]
 /// can be built from a [`MastForest`] to specify an entrypoint.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 pub struct MastForest {
@@ -73,6 +74,12 @@ pub struct MastForest {
     /// codes, so they are stored in order to provide a useful message to the user in case a error
     /// code is triggered.
     error_codes: BTreeMap<u64, Arc<str>>,
+
+    /// Storage for decorators per operation per node. This is used for efficient access to
+    /// decorators during execution and debugging. It's not serialized as it can be
+    /// reconstructed from the main structure.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    decorator_storage: OpIndexedDecoratorStorage,
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -86,6 +93,7 @@ impl MastForest {
             decorators: IndexVec::new(),
             advice_map: AdviceMap::default(),
             error_codes: BTreeMap::new(),
+            decorator_storage: OpIndexedDecoratorStorage::new(),
         }
     }
 }
@@ -146,6 +154,7 @@ impl MastForest {
             node.remove_decorators();
         }
         self.decorators = IndexVec::new();
+        self.decorator_storage = OpIndexedDecoratorStorage::new();
     }
 
     /// Merges all `forests` into a new [`MastForest`].
@@ -217,15 +226,15 @@ impl MastForest {
         id_remappings: &BTreeMap<MastNodeId, MastNodeId>,
     ) {
         assert!(self.nodes.is_empty());
+        // extract decorator information from the nodes by converting them into builders
+        let node_builders =
+            nodes_to_add.into_iter().map(|node| node.to_builder()).collect::<Vec<_>>();
+        self.decorator_storage = OpIndexedDecoratorStorage::new();
 
         // Add each node to the new MAST forest, making sure to rewrite any outdated internal
         // `MastNodeId`s
-        for live_node in nodes_to_add {
-            live_node
-                .to_builder()
-                .remap_children(id_remappings)
-                .add_to_forest(self)
-                .unwrap();
+        for live_node_builder in node_builders {
+            live_node_builder.remap_children(id_remappings).add_to_forest(self).unwrap();
         }
     }
 
@@ -416,6 +425,20 @@ impl IndexMut<DecoratorId> for MastForest {
         &mut self.decorators[decorator_id]
     }
 }
+
+impl PartialEq for MastForest {
+    fn eq(&self, other: &Self) -> bool {
+        // Compare all fields except decorator_storage, which is skipped during serialization
+        // and can be reconstructed from the main structure
+        self.nodes == other.nodes
+            && self.roots == other.roots
+            && self.decorators == other.decorators
+            && self.advice_map == other.advice_map
+            && self.error_codes == other.error_codes
+    }
+}
+
+impl Eq for MastForest {}
 
 // MAST NODE ID
 // ================================================================================================
@@ -661,4 +684,6 @@ pub enum MastForestError {
     ChildFingerprintMissing(MastNodeId),
     #[error("advice map key {0} already exists when merging forests")]
     AdviceMapKeyCollisionOnMerge(Word),
+    #[error("decorator storage error: {0}")]
+    DecoratorError(DecoratorStorageError),
 }
