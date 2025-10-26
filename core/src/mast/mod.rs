@@ -29,6 +29,8 @@ use crate::{
     utils::{ByteWriter, DeserializationError, Serializable, hash_string_to_word},
 };
 
+mod decorator_storage;
+pub use decorator_storage::OpIndexedDecoratorStorage;
 mod serialization;
 
 mod merger;
