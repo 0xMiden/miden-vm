@@ -11,6 +11,7 @@
 - Extend builder patterns for all `MastNode` types ([#2274](https://github.com/0xMiden/miden-vm/pull/2274)).
 - Further extend builder patterns for all `MastNode` types, replace `enum-dispatch` by our own derivations ([#2291](https://github.com/0xMiden/miden-vm/pull/2291)).
 - Finish builder pattern conversion and delete old `MastNode` mutable APIs ([#2301](https://github.com/0xMiden/miden-vm/pull/2301)).
+- Hoist `BasicBlock` decorator storage to the `MastForest` after insertion in said `MastForest` ([#2310](https://github.com/0xMiden/miden-vm/pull/2310)).
 
 ## 0.19.1 (2025-11-6)
 
