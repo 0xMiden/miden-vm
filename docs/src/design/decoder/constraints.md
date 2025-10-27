@@ -240,11 +240,11 @@ The degree of this constraint is $9$.
 As described [previously](./index.md#block-stack-table), block stack table keeps track of program blocks currently executing on the VM. Thus, whenever the VM starts executing a new block, an entry for this block is added to the block stack table. And when execution of a block completes, it is removed from the block stack table.
 
 Adding and removing entries to/from the block stack table is accomplished as follows:
-* To add an entry, we multiply the value in column $p_1$ by a value representing a tuple `(blk, prnt, is_loop, ctx_next, fmp_next, b0_next, b1_next, fn_hash_next)`
+* To add an entry, we multiply the value in column $p_1$ by a value representing a tuple `(blk, prnt, is_loop, ctx_next, b0_next, b1_next, fn_hash_next)`
 . A constraint to enforce this would look as $p_1' = p_1 \cdot v$, where $v$ is the value representing the row to be added.
-* To remove an entry, we divide the value in column $p_1$ by a value representing a tuple `(blk, prnt, is_loop, ctx_next, fmp_next, b0_next, b1_next, fn_hash_next)`. A constraint to enforce this would look as $p_1' \cdot u = p_1$, where $u$ is the value representing the row to be removed.
+* To remove an entry, we divide the value in column $p_1$ by a value representing a tuple `(blk, prnt, is_loop, ctx_next, b0_next, b1_next, fn_hash_next)`. A constraint to enforce this would look as $p_1' \cdot u = p_1$, where $u$ is the value representing the row to be removed.
 
-> Recall that the columns `ctx_next, fmp_next, b0_next, b1_next, fn_hash_next` are only set on `CALL`, `SYSCALL`, and their corresponding `END` block. Therefore, for simplicity, we will ignore them when documenting all other block types (such that their values are set to `0`).
+> Recall that the columns `ctx_next, b0_next, b1_next, fn_hash_next` are only set on `CALL`, `SYSCALL`, and their corresponding `END` block. Therefore, for simplicity, we will ignore them when documenting all other block types (such that their values are set to `0`).
 
 Before describing the constraints for the block stack table, we first describe how we compute the values to be added and removed from the table for each operation. In the below, for block start operations (`JOIN`, `SPLIT`, `LOOP`, `SPAN`) $a$ refers to the ID of the parent block, and $a'$ refers to the ID of the starting block. For `END` operation, the situation is reversed: $a$ is the ID of the ending block, and $a'$ is the ID of the parent block. For `RESPAN` operation, $a$ refers to the ID of the current operation batch, $a'$ refers to the ID of the next batch, and the parent ID for both batches is set by the prover non-deterministically in register $h_1$.
 
@@ -285,30 +285,30 @@ $$
 v_{dyn} = f_{dyn} \cdot (\alpha_0 + \alpha_1 \cdot a' + \alpha_2 \cdot a) \text{ | degree} = 6
 $$
 
-When a `DYNCALL` operation is executed, row $(a', a, 0, ctx, fmp, b_0, b_1, \mathrm{fnhash}[0..3])$ is added to the block stack table:
+When a `DYNCALL` operation is executed, row $(a', a, 0, ctx, b_0, b_1, \mathrm{fnhash}[0..3])$ is added to the block stack table:
 
 $$
 \begin{align*}
 v_{dyncall} &= f_{dyncall} \cdot (\alpha_0 + \alpha_1 \cdot a + \alpha_2 \cdot a' + \alpha_4 \cdot ctx 
-&+ \alpha_5 \cdot fmp + \alpha_6 \cdot b_0 + \alpha_7 \cdot b_1 + <[\alpha_8, \alpha_{11}], \mathrm{fnhash}[0..3]>) \text{ | degree} = 6
+&+ \alpha_5 \cdot b_0 + \alpha_6 \cdot b_1 + <[\alpha_7, \alpha_{10}], \mathrm{fnhash}[0..3]>) \text{ | degree} = 6
 \end{align*}
 $$
 
-When a `CALL` or `SYSCALL` operation is executed, row $(a', a, 0, ctx, fmp, b_0, b_1, \mathrm{fnhash}[0..3])$ is added to the block stack table:
+When a `CALL` or `SYSCALL` operation is executed, row $(a', a, 0, ctx, b_0, b_1, \mathrm{fnhash}[0..3])$ is added to the block stack table:
 
 $$
 \begin{align*}
 v_{callorsyscall} &= (f_{call} + f_{syscall}) \cdot (\alpha_0 + \alpha_1 \cdot a + \alpha_2 \cdot a' + \alpha_4 \cdot ctx 
-&+ \alpha_5 \cdot fmp + \alpha_6 \cdot b_0 + \alpha_7 \cdot b_1 + <[\alpha_8, \alpha_{11}], \mathrm{fnhash}[0..3]>) \text{ | degree} = 5
+&+ \alpha_5 \cdot b_0 + \alpha_6 \cdot b_1 + <[\alpha_7, \alpha_{10}], \mathrm{fnhash}[0..3]>) \text{ | degree} = 5
 \end{align*}
 $$
 
-When `END` operation is executed, how we construct the row will depend on whether the `IS_CALL` or `IS_SYSCALL` values are set (stored in registers $h_6$ and $h_7$ respectively). If they are not set, then row $(a, a', h_5)$ is removed from the block span table (where $h_5$ contains the `is_loop` flag); otherwise, row $(a ,a', 0, ctx', fmp', b_0', b_1', \mathrm{fnhash}'[0..3])$.
+When `END` operation is executed, how we construct the row will depend on whether the `IS_CALL` or `IS_SYSCALL` values are set (stored in registers $h_6$ and $h_7$ respectively). If they are not set, then row $(a, a', h_5)$ is removed from the block span table (where $h_5$ contains the `is_loop` flag); otherwise, row $(a ,a', 0, ctx', b_0', b_1', \mathrm{fnhash}'[0..3])$.
 
 $$
 \begin{align*}
 u_{endnocall} &=\alpha_0 + \alpha_1 \cdot a + \alpha_2 \cdot a' 
-u_{endcall} &= u_{endnocall} + \alpha_4 \cdot ctx' + \alpha_5 \cdot fmp' + \alpha_6 \cdot b_0' + \alpha_7 \cdot b_1' + <[\alpha_8, \alpha_{11}], \mathrm{fnhash}'[0..3]>
+u_{endcall} &= u_{endnocall} + \alpha_4 \cdot ctx' + \alpha_5 \cdot b_0' + \alpha_6 \cdot b_1' + <[\alpha_7, \alpha_{10}], \mathrm{fnhash}'[0..3]>
 u_{end} &= f_{end} \cdot ((1 - h_6 - h_7) \cdot u_{endnocall} + (h_6 + h_7) \cdot u_{endcall} ) \text{ | degree} = 6
 \end{align*}
 $$

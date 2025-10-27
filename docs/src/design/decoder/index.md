@@ -354,7 +354,7 @@ When the VM executes a `DYN` operation, it does the following:
 5. Performs a stack left shift
     - Above `s16` was pulled from the stack overflow table if present; otherwise set to `0`.
 
-Note that unlike `DYNCALL`, the `fmp`, `ctx`, `in_syscall` and `fn_hash` registers are unchanged.
+Note that unlike `DYNCALL`, the `ctx` and `fn_hash` registers are unchanged.
 
 #### DYNCALL operation
 
@@ -364,7 +364,7 @@ In the above diagram, `blk` is the ID of the *dyn* block which is about to be ex
 
 When the VM executes a `DYNCALL` operation, it does the following:
 
-1. Adds a tuple `(blk, p_addr, 0, ctx, fmp, b_0, b_1, fn_hash[0..3])` to the block stack table.
+1. Adds a tuple `(blk, p_addr, 0, ctx, b_0, b_1, fn_hash[0..3])` to the block stack table.
 2. Sends a memory read request to the memory chiplet, using `s0` as the memory address. The result `hash of callee` is placed in the decoder hasher trace at $h_0, h_1, h_2, h_3$.
 3. Sends a memory write request to the memory chiplet to set address `FMP_ADDR = 2^32 - 1` to `FMP_INIT_VALUE = 2^31` in the new memory context. This initializes the `fmp` in the new context.
 4. Adds the tuple `(blk, hash of callee, 0, 0)` to the block hash table.
@@ -372,7 +372,7 @@ When the VM executes a `DYNCALL` operation, it does the following:
 6. Performs a stack left shift
     - Above `s16` was pulled from the stack overflow table if present; otherwise set to `0`.
 
-Similar to `CALL`, `DYNCALL` resets the `fmp`, sets up a new `ctx`, and sets the `fn_hash` registers to the callee hash. `in_syscall` needs to be 0, since calls are not allowed during a syscall.
+Similar to `CALL`, `DYNCALL` sets up a new `ctx`, and sets the `fn_hash` registers to the callee hash.
 
 #### END operation
 
@@ -389,7 +389,7 @@ In the above diagram, `blk` is the ID of the block which is about to finish exec
 When the VM executes an `END` operation, it does the following:
 
 1. Removes a tuple from the block stack table.
-    - if `f2` or `f3` is set, we remove a row `(blk, prnt, 0, ctx_next, fmp_next, b0_next, b1_next, fn_hash_next[0..4])`
+    - if `f2` or `f3` is set, we remove a row `(blk, prnt, 0, ctx_next, b0_next, b1_next, fn_hash_next[0..4])`
         - in the above, the `x_next` variables denote the column `x` in the next row
     - else, we remove a row `(blk, prnt, f1, 0, 0, 0, 0, 0)`
 2. Removes a tuple `(prnt, current_block_hash, nxt, f0)` from the block hash table, where $nxt=0$ if the next operation is either `END` or `REPEAT`, and $1$ otherwise.
@@ -454,7 +454,7 @@ Before a `CALL` operation, the prover populates $h_0, ..., h_3$ registers with t
 
 - sets the context ID to the next row's CLK value
 - sets the `fn hash` registers to the hash of the callee
-    - This register is what the `caller` instruction uses to return the hash of the caller in a syscall
+    - This register is what the `caller` instruction uses to return the hash of the caller
 - resets the stack `B0` register to 16 (which tracks the current stack depth)
 - resets the overflow address to 0 (which tracks the "address" of the last element added to the overflow table)
     - it is set to 0 to indicate that the overflow table is empty
@@ -465,7 +465,7 @@ In the above diagram, `blk` is the ID of the *call* block which is about to be e
 
 When the VM executes a `CALL` operation, it does the following:
 
-1. Adds a tuple `(blk, prnt, 0, p_ctx, p_fmp, p_b0, p_b1, prnt_fn_hash[0..4])` to the block stack table.
+1. Adds a tuple `(blk, prnt, 0, p_ctx, p_b0, p_b1, prnt_fn_hash[0..4])` to the block stack table.
 2. Initiates a 2-to-1 hash computation in the hash chiplet (as described [here](#simple-2-to-1-hash)) using `blk` as row address in the auxiliary hashing table and $h_0, ..., h_3$ as input values.
 3. Sends a memory write request to the memory chiplet to set address `FMP_ADDR = 2^32 - 1` to `FMP_INIT_VALUE = 2^31` in the new memory context. This initializes the `fmp` in the new context.
 
@@ -488,7 +488,7 @@ In the above diagram, `blk` is the ID of the *syscall* block which is about to b
 
 When the VM executes a `SYSCALL` operation, it does the following:
 
-1. Adds a tuple `(blk, prnt, 0, p_ctx, p_fmp, p_b0, p_b1, prnt_fn_hash[0..4])` to the block stack table.
+1. Adds a tuple `(blk, prnt, 0, p_ctx, p_b0, p_b1, prnt_fn_hash[0..4])` to the block stack table.
 2. Sends a request to the kernel ROM chiplet indicating that `hash of callee` is being accessed.
     - this results in a fault if `hash of callee` does not correspond to the hash of a kernel procedure
 3. Initiates a 2-to-1 hash computation in the hash chiplet (as described [here](#simple-2-to-1-hash)) using `blk` as row address in the auxiliary hashing table and $h_0, ..., h_3$ as input values.
@@ -723,7 +723,7 @@ When this program is executed on the VM, the following happens:
 2. Then, `JOIN` operation for $b_0$ is executed. It adds hashes of $b_1$ and $b_2$ to the block hash table. It also adds an entry for $b_0$ to the block stack table. States of both tables after this step are illustrated below.
 3. Then, *basic* $b_1$ is executed and a sequential hash of its operations is computed. Also, when `SPAN` operation for $b_1$ is executed, an entry for $b_1$ is added to the block stack table. At the end of $b_1$ (when `END` is executed), entries for $b_1$ are removed from both the block hash and block stack tables.
 4. Then, `SPLIT` operation for $b_2$ is executed. It adds an entry for $b_2$ to the block stack table. Also, depending on whether the top of the stack is $1$ or $0$, either hash of $b_3$ or hash of $b_4$ is added to the block hash table. Let's say the top of the stack is $1$. Then, at this point, the block hash and block stack tables will look like in the second picture below.
-5. Then, *basic* $b_3$ is executed and a sequential hash of its instructions is computed. Also, when `SPAN` operation for $b_3` is executed, an entry for $b_3$ is added to the block stack table. At the end of $b_3` (when `END` is executed), entries for $b_3` are removed from both the block hash and block stack tables.
+5. Then, *basic* $b_3$ is executed and a sequential hash of its instructions is computed. Also, when `SPAN` operation for $b_3$ is executed, an entry for $b_3$ is added to the block stack table. At the end of $b_3$ (when `END` is executed), entries for $b_3$ are removed from both the block hash and block stack tables.
 6. Then, `END` operation for $b_2$ is executed. It removes the hash of $b_2$ from the block hash table, and also removes the entry for $b_2$ from the block stack table. The third picture below illustrates the states of block stack and block hash tables after this step.
 7. Then, `END` for $b_0$ is executed, which removes entries for $b_0$ from the block stack and block hash tables. At this point both tables are empty.
 8. Finally, a sequence of `HALT` operations is executed until the length of the trace reaches a power of two.

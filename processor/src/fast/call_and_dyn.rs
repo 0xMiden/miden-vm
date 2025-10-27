@@ -1,6 +1,5 @@
 use alloc::{sync::Arc, vec::Vec};
 
-use miden_air::Felt;
 use miden_core::{
     FMP_ADDR, FMP_INIT_VALUE, Program, ZERO,
     mast::{CallNode, MastForest, MastNodeExt, MastNodeId},
@@ -9,7 +8,7 @@ use miden_core::{
 };
 
 use crate::{
-    AsyncHost, ContextId, ErrorContext, ExecutionError, FMP_MIN, SYSCALL_FMP_MIN,
+    AsyncHost, ContextId, ErrorContext, ExecutionError,
     continuation_stack::ContinuationStack,
     err_ctx,
     fast::{
@@ -60,14 +59,11 @@ impl FastProcessor {
 
             // set the system registers to the syscall context
             self.ctx = ContextId::root();
-            self.fmp = SYSCALL_FMP_MIN.into();
-            self.in_syscall = true;
         } else {
             let new_ctx: ContextId = self.get_next_ctx_id();
 
             // Set the system registers to the callee context.
             self.ctx = new_ctx;
-            self.fmp = Felt::new(FMP_MIN);
             self.caller_hash = callee_hash;
 
             // Initialize the frame pointer in memory for the new context.
@@ -170,7 +166,6 @@ impl FastProcessor {
             self.save_context_and_truncate_stack(tracer);
 
             self.ctx = new_ctx;
-            self.fmp = Felt::new(FMP_MIN);
             self.caller_hash = callee_hash;
 
             // Initialize the frame pointer in memory for the new context.
@@ -285,7 +280,6 @@ impl FastProcessor {
             overflow_stack,
             ctx: self.ctx,
             fn_hash: self.caller_hash,
-            fmp: self.fmp,
         });
 
         tracer.start_context();
@@ -319,8 +313,6 @@ impl FastProcessor {
 
         // restore system parameters
         self.ctx = ctx_info.ctx;
-        self.fmp = ctx_info.fmp;
-        self.in_syscall = false;
         self.caller_hash = ctx_info.fn_hash;
 
         tracer.restore_context();

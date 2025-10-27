@@ -86,7 +86,7 @@ doc: ## Generates & checks documentation
 
 .PHONY: serve-docs
 serve-docs: ## Serves the docs
-	cd docs/external && npm run start:dev
+	mkdir -p docs/external && cd docs/external && npm run start:dev
 
 # -- core knobs (overridable from CLI or by caller targets) --------------------
 # Advanced usage (most users should use pattern rules like 'make test-air'):

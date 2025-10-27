@@ -14,11 +14,7 @@ use miden_debug_types::{SourceFile, SourceSpan};
 use miden_utils_diagnostics::{Diagnostic, miette};
 use winter_prover::ProverError;
 
-use crate::{
-    BaseHost, EventError, MemoryError,
-    host::advice::AdviceError,
-    system::{FMP_MAX, FMP_MIN},
-};
+use crate::{BaseHost, EventError, MemoryError, host::advice::AdviceError};
 // EXECUTION ERROR
 // ================================================================================================
 
@@ -36,9 +32,6 @@ pub enum ExecutionError {
         #[diagnostic_source]
         err: AdviceError,
     },
-    /// This error is caught by the assembler, so we don't need diagnostics here.
-    #[error("instruction `caller` used outside of kernel context")]
-    CallerNotInSyscall,
     #[error("external node with mast root {0} resolved to an external node")]
     CircularExternalNode(Word),
     #[error("exceeded the allowed number of max cycles {0}")]
@@ -102,10 +95,6 @@ pub enum ExecutionError {
     },
     #[error("failed to execute the program for internal reason: {0}")]
     FailedToExecuteProgram(&'static str),
-    #[error(
-        "Updating FMP register from {0} to {1} failed because {1} is outside of {FMP_MIN}..{FMP_MAX}"
-    )]
-    InvalidFmpValue(Felt, Felt),
     #[error("FRI domain segment value cannot exceed 3, but was {0}")]
     InvalidFriDomainSegment(u64),
     #[error("degree-respecting projection is inconsistent: expected {0} but was {1}")]

@@ -264,7 +264,6 @@ impl Process {
         let ctx_info = ExecutionContextInfo::new(
             self.system.ctx(),
             self.system.fn_hash(),
-            self.system.fmp(),
             stack_depth as u32,
             next_overflow_addr,
         );
@@ -313,11 +312,7 @@ impl Process {
 
         // when returning from a function call or a syscall, restore the context of the system
         // registers and the operand stack to what it was prior to the call.
-        self.system.restore_context(
-            ctx_info.parent_ctx,
-            ctx_info.parent_fmp,
-            ctx_info.parent_fn_hash,
-        );
+        self.system.restore_context(ctx_info.parent_ctx, ctx_info.parent_fn_hash);
         self.stack.restore_context(ctx_info.parent_stack_depth as usize);
 
         // the rest of the VM state does not change
@@ -424,7 +419,6 @@ impl Process {
         let ctx_info = ExecutionContextInfo::new(
             self.system.ctx(),
             self.system.fn_hash(),
-            self.system.fmp(),
             stack_depth as u32,
             next_overflow_addr,
         );
@@ -472,11 +466,7 @@ impl Process {
 
         // when returning from a function call, restore the context of the system
         // registers and the operand stack to what it was prior to the call.
-        self.system.restore_context(
-            ctx_info.parent_ctx,
-            ctx_info.parent_fmp,
-            ctx_info.parent_fn_hash,
-        );
+        self.system.restore_context(ctx_info.parent_ctx, ctx_info.parent_fn_hash);
         self.stack.restore_context(ctx_info.parent_stack_depth as usize);
 
         self.execute_op(Operation::Noop, program, host)

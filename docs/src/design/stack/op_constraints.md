@@ -78,7 +78,7 @@ This group contains $32$ operations which do not shift the stack (this is almost
 | `INV`     |     $3$      |   `000_0011`    |  [Field ops](./field_ops.md)  |     $7$     |
 | `INCR`    |     $4$      |   `000_0100`    |  [Field ops](./field_ops.md)  |     $7$     |
 | `NOT`     |     $5$      |   `000_0101`    |  [Field ops](./field_ops.md)  |     $7$     |
-| `FMPADD`  |     $6$      |   `000_0110`    | [System ops](./system_ops.md) |     $7$     |
+| `<unused>`|     $6$      |   `000_0110`    |                               |     $7$     |
 | `MLOAD`   |     $7$      |   `000_0111`    |    [I/O ops](./io_ops.md)     |     $7$     |
 | `SWAP`    |     $8$      |   `000_1000`    |  [Stack ops](./stack_ops.md)  |     $7$     |
 | `CALLER`  |     $9$      |   `000_1001`    | [System ops](./system_ops.md) |     $7$     |
@@ -125,7 +125,7 @@ This group contains $16$ operations which shift the stack to the left (i.e., rem
 | `MLOADW`    |     $44$     |   `010_1100`    |    [I/O ops](./io_ops.md)     |     $7$     |
 | `MSTORE`    |     $45$     |   `010_1101`    |    [I/O ops](./io_ops.md)     |     $7$     |
 | `MSTOREW`   |     $46$     |   `010_1110`    |    [I/O ops](./io_ops.md)     |     $7$     |
-| `FMPUPDATE` |     $47$     |   `010_1111`    | [System ops](./system_ops.md) |     $7$     |
+| `<unused>`  |     $47$     |   `010_1111`    |                               |     $7$     |
 
 ### Right stack shift operations
 This group contains $16$ operations which shift the stack to the right (i.e., push a new item onto the stack). Most of right-shift operations are contained in this group. Since the op flag degree for these operations is $7$, constraints for these operations cannot exceed degree $2$.

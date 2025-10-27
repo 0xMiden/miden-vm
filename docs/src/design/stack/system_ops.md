@@ -34,34 +34,6 @@ $$
 The effect on the rest of the stack is:
 * **Left shift** starting from position $1$.
 
-## FMPADD
-The `FMPADD` operation pops an element off the stack, adds the current value of the `fmp` register to it, and pushes the result back onto the stack. The diagram below illustrates this graphically.
-
-![fmpadd](../../img/design/stack/system_ops/FMPADD.png)
-
-Stack transition for this operation must satisfy the following constraints:
-
-$$
-s_0' - (s_0 + fmp) = 0 \text{ | degree} = 1
-$$
-
-The effect on the rest of the stack is:
-* **No change** starting from position $1$.
-
-## FMPUPDATE
-The `FMPUPDATE` operation pops an element off the stack and adds it to the current value of the `fmp` register. The diagram below illustrates this graphically.
-
-![fmpupdate](../../img/design/stack/system_ops/FMPUPDATE.png)
-
-The stack transition for this operation must follow the following constraint:
-
-$$
-fmp' - (fmp + s_0) = 0 \text{ | degree} = 1
-$$
-
-The effect on the rest of the stack is:
-* **Left shift** starting from position $1$.
-
 ## CLK
 The `CLK` operation pushes the current value of the clock cycle onto the stack. The diagram below illustrates this graphically.
 

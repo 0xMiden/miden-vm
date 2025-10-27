@@ -20,7 +20,6 @@ pub struct VmState {
     pub ctx: ContextId,
     pub op: Option<Operation>,
     pub asmop: Option<AsmOpInfo>,
-    pub fmp: Felt,
     pub stack: Vec<Felt>,
     pub memory: Vec<(MemoryAddress, Felt)>,
 }
@@ -30,7 +29,7 @@ impl fmt::Display for VmState {
         let stack: Vec<u64> = self.stack.iter().map(|x| x.as_int()).collect();
         write!(
             f,
-            "clk={}{}{}, fmp={}, stack={stack:?}, memory={:?}",
+            "clk={}{}{}, stack={stack:?}, memory={:?}",
             self.clk,
             match self.op {
                 Some(op) => format!(", op={op}"),
@@ -40,7 +39,6 @@ impl fmt::Display for VmState {
                 Some(op) => format!(", {op}"),
                 None => "".to_string(),
             },
-            self.fmp,
             self.memory
         )
     }
@@ -164,7 +162,6 @@ impl VmStateIterator {
             ctx,
             op,
             asmop,
-            fmp: self.system.get_fmp_at(self.clk),
             stack: self.stack.get_state_at(self.clk),
             memory: self.chiplets.memory.get_state_at(ctx, self.clk),
         });
@@ -235,7 +232,6 @@ impl Iterator for VmStateIterator {
             ctx,
             op,
             asmop,
-            fmp: self.system.get_fmp_at(self.clk),
             stack: self.stack.get_state_at(self.clk),
             memory: self.chiplets.memory.get_state_at(ctx, self.clk),
         }));

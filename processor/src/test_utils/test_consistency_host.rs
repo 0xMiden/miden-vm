@@ -15,7 +15,6 @@ use crate::{
 pub struct ProcessStateSnapshot {
     clk: u32,
     ctx: u32,
-    fmp: u64,
     stack_state: Vec<Felt>,
     stack_words: [Word; 4],
     mem_state: Vec<(crate::MemoryAddress, Felt)>,
@@ -26,7 +25,6 @@ impl From<&ProcessState<'_>> for ProcessStateSnapshot {
         ProcessStateSnapshot {
             clk: state.clk().into(),
             ctx: state.ctx().into(),
-            fmp: state.fmp(),
             stack_state: state.get_stack_state(),
             stack_words: [
                 state.get_stack_word_be(0),

@@ -758,8 +758,8 @@ pub fn push_inputs(inputs: &[u64]) -> String {
 /// Helper function to get column name for debugging
 pub fn get_column_name(col_idx: usize) -> String {
     use miden_air::trace::{
-        CLK_COL_IDX, CTX_COL_IDX, DECODER_TRACE_OFFSET, FMP_COL_IDX, FN_HASH_OFFSET,
-        IN_SYSCALL_COL_IDX, RANGE_CHECK_TRACE_OFFSET, STACK_TRACE_OFFSET,
+        CLK_COL_IDX, CTX_COL_IDX, DECODER_TRACE_OFFSET, FN_HASH_OFFSET, RANGE_CHECK_TRACE_OFFSET,
+        STACK_TRACE_OFFSET,
         decoder::{
             ADDR_COL_IDX, GROUP_COUNT_COL_IDX, HASHER_STATE_OFFSET, IN_SPAN_COL_IDX,
             NUM_HASHER_COLUMNS, NUM_OP_BATCH_FLAGS, NUM_OP_BITS, NUM_OP_BITS_EXTRA_COLS,
@@ -771,9 +771,7 @@ pub fn get_column_name(col_idx: usize) -> String {
     match col_idx {
         // System columns
         CLK_COL_IDX => "clk".to_string(),
-        FMP_COL_IDX => "fmp".to_string(),
         CTX_COL_IDX => "ctx".to_string(),
-        IN_SYSCALL_COL_IDX => "in_syscall".to_string(),
         i if (FN_HASH_OFFSET..FN_HASH_OFFSET + 4).contains(&i) => {
             format!("fn_hash[{}]", i - FN_HASH_OFFSET)
         },

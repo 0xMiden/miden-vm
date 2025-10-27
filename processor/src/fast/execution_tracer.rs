@@ -301,7 +301,6 @@ impl ExecutionTracer {
                     ExecutionContextInfo::new(
                         processor.ctx,
                         processor.caller_hash,
-                        processor.fmp,
                         processor.stack_depth(),
                         overflow_addr,
                     )
@@ -337,7 +336,6 @@ impl ExecutionTracer {
                         ExecutionContextInfo::new(
                             processor.ctx,
                             processor.caller_hash,
-                            processor.fmp,
                             stack_depth_after_drop,
                             overflow_addr,
                         )
@@ -495,7 +493,6 @@ impl Tracer for ExecutionTracer {
                     self.record_execution_context(ExecutionContextSystemInfo {
                         parent_ctx: ctx_info.parent_ctx,
                         parent_fn_hash: ctx_info.parent_fn_hash,
-                        parent_fmp: ctx_info.parent_fmp,
                     });
                 }
             },

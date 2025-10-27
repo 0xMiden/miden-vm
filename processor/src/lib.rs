@@ -44,8 +44,8 @@ pub(crate) mod processor;
 mod operations;
 
 mod system;
+pub use system::ContextId;
 use system::System;
-pub use system::{ContextId, FMP_MIN, SYSCALL_FMP_MIN};
 
 #[cfg(test)]
 mod test_utils;
@@ -820,16 +820,6 @@ impl<'a> ProcessState<'a> {
         match self {
             ProcessState::Slow(state) => state.system.ctx(),
             ProcessState::Fast(state) => state.processor.ctx,
-            ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
-        }
-    }
-
-    /// Returns the current value of the free memory pointer.
-    #[inline(always)]
-    pub fn fmp(&self) -> u64 {
-        match self {
-            ProcessState::Slow(state) => state.system.fmp().as_int(),
-            ProcessState::Fast(state) => state.processor.fmp.as_int(),
             ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
         }
     }
