@@ -1,16 +1,25 @@
 ---
-source: assembly/src/tests.rs
+source: crates/assembly/src/tests.rs
 expression: program
 ---
 begin
     join
-        trace(0)
-        if.true
-            basic_block trace(1) push(42) noop trace(2) end
-        else
-            basic_block trace(3) push(22) noop trace(3) end
+        join
+            basic_block
+                push(2147483648)
+                push(4294967294)
+                mstore
+                drop
+                noop
+                trace(0)
+            end
+            if.true
+                basic_block trace(1) push(42) noop trace(2) end
+            else
+                basic_block trace(3) push(22) noop trace(3) end
+            end
+            trace(4)
         end
-        trace(4)
         if.true
             basic_block trace(1) push(42) noop trace(2) end
         else

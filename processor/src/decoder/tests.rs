@@ -12,14 +12,13 @@ use miden_air::trace::{
     },
 };
 use miden_core::{
-    EMPTY_WORD, EventId, ONE, Program, WORD_SIZE, ZERO, assert_matches,
+    EMPTY_WORD, EventId, ONE, Program, WORD_SIZE, ZERO,
     mast::{
-        BasicBlockNode, CallNode, DynNode, JoinNode, MastForest, MastNode, MastNodeExt, MastNodeId,
+        BasicBlockNode, CallNode, DynNode, JoinNode, MastForest, MastNode, MastNodeExt,
         OP_BATCH_SIZE,
     },
 };
 use miden_utils_testing::rand::rand_value;
-use rstest::rstest;
 
 use super::{
     super::{
@@ -27,7 +26,7 @@ use super::{
     },
     build_op_group,
 };
-use crate::{AdviceInputs, DefaultHost, ExecutionError, NoopEventHandler};
+use crate::{AdviceInputs, DefaultHost, NoopEventHandler};
 
 // CONSTANTS
 // ================================================================================================
@@ -1434,53 +1433,6 @@ fn dyn_block() {
         assert_eq!(ONE, trace[OP_BITS_EXTRA_COLS_RANGE.start + 1][i]);
         assert_eq!(program_hash, get_hasher_state1(&trace, i));
     }
-}
-
-/// Tests that call, dyncall and syscall are disallowed in a syscall context
-#[rstest]
-#[case(Operation::Dyncall)]
-#[case(Operation::Call)]
-#[case(Operation::SysCall)]
-fn calls_in_syscall(#[case] op: Operation) {
-    let mut process = Process::new(
-        Kernel::default(),
-        StackInputs::default(),
-        AdviceInputs::default(),
-        ExecutionOptions::default(),
-    );
-    // set `in_syscall` flag to true
-    process.system.start_syscall();
-
-    let program = {
-        let mut mast_forest = MastForest::new();
-
-        // add dummy block
-        mast_forest.add_block(vec![Operation::Add], Vec::new()).unwrap();
-
-        let node: MastNode = match op {
-            Operation::Dyncall => DynNode::new_dyncall().into(),
-            Operation::Call => {
-                CallNode::new(MastNodeId::from_u32_safe(0, &mast_forest).unwrap(), &mast_forest)
-                    .unwrap()
-                    .into()
-            },
-            Operation::SysCall => CallNode::new_syscall(
-                MastNodeId::from_u32_safe(0, &mast_forest).unwrap(),
-                &mast_forest,
-            )
-            .unwrap()
-            .into(),
-            _ => unreachable!(),
-        };
-
-        let call_node_id = mast_forest.add_node(node).unwrap();
-        mast_forest.make_root(call_node_id);
-
-        Program::new(mast_forest.into(), call_node_id)
-    };
-
-    let err = process.execute(&program, &mut DefaultHost::default());
-    assert_matches!(err, Err(ExecutionError::CallInSyscall(_)));
 }
 
 // HELPER REGISTERS TESTS

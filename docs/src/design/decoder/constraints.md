@@ -143,10 +143,10 @@ $$
 In the above, $a$ represents the address value in the decoder which corresponds to the hasher chiplet address at which the hasher was initialized (or the last absorption took place).  As such, $a + 7$ corresponds to the hasher chiplet address at which the result is returned.
 
 $$
-f_{ctrli} = f_{join} + f_{split} + f_{loop} + f_{call} \text{ | degree} = 5
+f_{ctrli} = f_{join} + f_{split} + f_{loop} \text{ | degree} = 5
 $$
 
-In the above, $f_{ctrli}$ is set to $1$ when a control flow operation that signifies the initialization of a control block is being executed on the VM (only those control blocks that don't do any concurrent requests to the chiplets but).  Otherwise, it is set to $0$. An exception is made for the `DYN`, `DYNCALL`, and `SYSCALL` operations, since although they initialize a control block, they also run another concurrent bus request, and so are handled separately. 
+In the above, $f_{ctrli}$ is set to $1$ when a control flow operation that signifies the initialization of a control block is being executed on the VM (only those control blocks that don't do any concurrent requests to the chiplets bus).  Otherwise, it is set to $0$. An exception is made for the `DYN`, `DYNCALL`, `CALL` and `SYSCALL` operations, since although they initialize a control block, they also run another concurrent bus request, and so are handled separately. 
 
 $$
 d = \sum_{b=0}^6(b_i \cdot 2^i)
@@ -156,7 +156,7 @@ In the above, $d$ represents the opcode value of the opcode being executed on th
 
 Using the above variables, we define operation values as described below.
 
-When a control block initializer operation (`JOIN`, `SPLIT`, `LOOP`, `CALL`) is executed, a new hasher is initialized and the contents of $h_0, ..., h_7$ are absorbed into the hasher. As mentioned above, the opcode value $d$ is populated in the second capacity register via the $\alpha_5$ term.
+When a control block initializer operation (`JOIN`, `SPLIT`, `LOOP`) is executed, a new hasher is initialized and the contents of $h_0, ..., h_7$ are absorbed into the hasher. As mentioned above, the opcode value $d$ is populated in the second capacity register via the $\alpha_5$ term.
 
 $$
 u_{ctrli} = f_{ctrli} \cdot (h_{init} + \alpha_5 \cdot d) \text{ | degree} = 6
@@ -171,12 +171,24 @@ $$
 In the above, $op_{krom}$ is the unique [operation label](../chiplets/index.md#operation-labels) of the kernel procedure call operation. The values $h_0, h_1, h_2, h_3$ contain the root hash of the procedure being called, which is the procedure that must be requested from the kernel ROM chiplet.
 
 $$
-u_{syscall} = f_{syscall} \cdot (h_{init} + \alpha_5 \cdot d) \cdot k_{proc} \text{ | degree} = 7
+u_{syscall} = f_{syscall} \cdot (h_{init} + \alpha_5 \cdot d) \cdot k_{proc} \text{ | degree} = 6
 $$
 
 The above value sends both the hash initialization request and the kernel procedure access request to the chiplets bus when the `SYSCALL` operation is executed.
 
-Similar to `SYSCALL`, `DYN` and `DYNCALL` are handled separately, since in addition to communicating with the hash chiplet they must also issue a memory read operation for the hash of the procedure being called. 
+Similar to `SYSCALL`, `CALL` is handled separately, since in addition to communicating with the hash chiplet, it must also initialize the frame memory pointer (stored in memory at constant address `fmpaddr` with constant value `fmpinit`):
+
+$$
+m_{fmpwrite} = \alpha_0 + \alpha_1 \cdot m_{writeele} + \alpha_2 \cdot ctx' + \alpha_3 \cdot fmpaddr + \alpha_4 \cdot clk + alpha_5 \cdot fmpinit
+$$
+
+In the above, $m_{fmpwrite}$ represents a "write element" memory request equivalent to `mem[fmpaddr] = fmpinit` (in pseudo-code) in the new memory context (*i.e.* the memory context of the callee). Currently $fmpaddr = 2^{32} - 1$, and $fmpinit = 2^{31}$.
+
+$$
+u_{call} = f_{call} \cdot (h_{init} + \alpha_5 \cdot d) \cdot m_{fmpwrite} \text{ | degree} = 6
+$$
+
+Similar to `SYSCALL` and `CALL`, `DYN` and `DYNCALL` are handled separately, since in addition to communicating with the hash chiplet they must also issue a memory read operation for the hash of the procedure being called. 
 
 $$
 h_{dynordyncall} = \alpha_0 + \alpha_1 \cdot m_{bp} + \alpha_2 \cdot a' 
@@ -187,10 +199,13 @@ m_{dynordyncall} = \alpha_0 + \alpha_1 \cdot m_{read} + \alpha_2 \cdot ctx + \al
 $$
 
 $$
-u_{dynordyncall} = (f_{dyn} + f_{dyncall}) (h_{dynordyncall} \cdot m_{dynordyncall})
+u_{dyn} = f_{dyn} \cdot h_{dynordyncall} \cdot m_{dynordyncall} \text{ | degree} = 7
+$$
+$$
+u_{dyncall} = f_{dyncall} \cdot h_{dynordyncall} \cdot m_{dynordyncall} \cdot m_{fmpwrite} \text{ | degree} = 8
 $$
 
-In the above, $h_{dynordyncall}$ can be thought of as $h_{init}$, but where the values used for the hasher decoder trace registers is all 0's. $m_{dynordyncall}$ represents a memory read request from memory address $s_0$ (the top stack element), where the result is placed in the first half of the decoder hasher trace, and where $m_{read}$ is a label that represents a memory read request.
+In the above, $h_{dynordyncall}$ can be thought of as $h_{init}$, but where the values used for the hasher decoder trace registers is all 0's. $m_{dynordyncall}$ represents a memory read request from memory address $s_0$ (the top stack element), where the result is placed in the first half of the decoder hasher trace, and where $m_{read}$ is a label that represents a memory element read request. Note that similar to `CALL`, `DYNCALL` also creates a new memory context, and hence must also initialize the `fmp`.
 
 When `SPAN` operation is executed, a new hasher is initialized and contents of $h_0, ..., h_7$ are absorbed into the hasher. The number of operation groups to be hashed is padded to a multiple of the rate width ($8$) and so the $\alpha_4$ is set to 0:
 
@@ -213,13 +228,13 @@ $$
 Using the above definitions, we can describe the constraint for computing block hashes as follows:
 
 > $$
-> b_{chip}' \cdot (u_{ctrli} + u_{syscall} + u_{dynordyncall} + u_{span} + u_{respan} + u_{end} + 
+> b_{chip}' \cdot (u_{ctrli} + u_{syscall} + u_{dynordyncall} + u_{span} + u_{respan} + u_{end} + \\
 > 1 - (f_{ctrli} + f_{syscall} + f_{dyn} + f_{dyncall} + f_{span} + f_{respan} + f_{end})) = b_{chip}
 > $$
 
 We need to add $1$ and subtract the sum of the relevant operation flags to ensure that when none of the flags is set to $1$, the above constraint reduces to $b_{chip}' = b_{chip}$.
 
-The degree of this constraint is $8$.
+The degree of this constraint is $9$.
 
 ## Block stack table constraints
 As described [previously](./index.md#block-stack-table), block stack table keeps track of program blocks currently executing on the VM. Thus, whenever the VM starts executing a new block, an entry for this block is added to the block stack table. And when execution of a block completes, it is removed from the block stack table.

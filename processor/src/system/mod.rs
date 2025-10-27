@@ -21,6 +21,7 @@ mod tests;
 // address in a given context, regardless of which memory segment it belongs to.
 
 /// Memory addresses for procedure locals start at 2^30.
+/// DEPRECATED: use FMP_INIT_VALUE instead.
 pub const FMP_MIN: u64 = 2_u64.pow(30);
 /// Memory address for procedure locals within a SYSCALL starts at 2^31.
 pub const SYSCALL_FMP_MIN: u32 = 2_u32.pow(31);

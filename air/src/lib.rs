@@ -125,7 +125,7 @@ impl Air for ProcessorAir {
         let num_aux_assertions = if IS_FULL_CONSTRAINT_SET {
             stack::NUM_AUX_ASSERTIONS + range::NUM_AUX_ASSERTIONS + 1
         } else {
-            3 + 1  // kernel_rom + range + vtable
+            3 + 1 // kernel_rom + range + vtable
         };
 
         // Create the context and set the number of transition constraint exemptions to two; this

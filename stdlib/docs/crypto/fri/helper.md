@@ -2,8 +2,6 @@
 ## std::crypto::fri::helper
 | Procedure | Description |
 | ----------- | ------------- |
-| load_fri_remainder_poly_max_degree_plus_1_half | Loads FRI remainder polynomial of degree strictly less than `(max_degree + 1) / 2`.<br /> |
-| load_fri_remainder_poly_max_degree_plus_1 | Loads FRI remainder polynomial of degree strictly less than `max_degree + 1`.<br /> |
 | evaluate_fri_remainder_poly_max_degree_plus_1_half | Evaluates FRI remainder polynomial of degree strictly less than `(max_degree + 1) / 2`.<br /> |
 | evaluate_fri_remainder_poly_max_degree_plus_1 | Evaluates FRI remainder polynomial of degree strictly less than `max_degree + 1`.<br /> |
 | generate_fri_parameters | Compute the number of FRI layers given log2 of the size of LDE domain. It also computes the<br />LDE domain generator and, from it, the trace generator and store these for later use.<br /><br />Input: [...]<br />Output: [num_fri_layers, ...]<br />Cycles: 45<br /> |

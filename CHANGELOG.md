@@ -8,6 +8,7 @@
 - Added `std::mem::pipe_double_words_preimage_to_memory`, a version of `pipe_preimage_to_memory` optimized for pairs of words ([#2048](https://github.com/0xMiden/miden-vm/pull/2048)).
 - Added missing endianness-aware memory instructions (`mem_loadw_be`, `mem_loadw_le`, `mem_storew_be`, `mem_storew_le`) to Instruction Reference documentation ([#2285](https://github.com/0xMiden/miden-vm/issues/2285)).
 - Made `miden-vm analyze` output analysis even if execution ultimately errored. ([#2204](https://github.com/0xMiden/miden-vm/pull/2204)).
+- Allow `CALL` and `DYNCALL` from a syscall context ([#2296](https://github.com/0xMiden/miden-vm/pull/2296))
 
 #### Changes
 

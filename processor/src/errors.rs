@@ -37,9 +37,6 @@ pub enum ExecutionError {
         err: AdviceError,
     },
     /// This error is caught by the assembler, so we don't need diagnostics here.
-    #[error("illegal use of instruction {0} while inside a syscall")]
-    CallInSyscall(&'static str),
-    /// This error is caught by the assembler, so we don't need diagnostics here.
     #[error("instruction `caller` used outside of kernel context")]
     CallerNotInSyscall,
     #[error("external node with mast root {0} resolved to an external node")]

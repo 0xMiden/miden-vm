@@ -47,35 +47,22 @@ In Miden Assembly, it is used to execute procedures without switching execution 
 
 A _kernel_ defines a set of procedures which can be invoked from user contexts to be executed in the root context. Miden assembly programs are always compiled against some kernel. The default kernel is empty - i.e., it does not contain any procedures. To compile a program against a non-empty kernel, the kernel needs to be specified when instantiating the [Miden Assembler](https://crates.io/crates/miden-assembly).
 
-A kernel can be defined similarly to a regular [library module](./code_organization.md#library-modules) - i.e., it can have internal and exported procedures. However, there are some small differences between what procedures can do in a kernel module vs. what they can do in a regular library module. Specifically:
-
-- Procedures in a kernel module cannot use `call`, `dyncall` or `syscall` instructions. This means that creating a new context from within a `syscall` is not possible.
-- Unlike procedures in regular library modules, procedures in a kernel module can use the `caller` instruction. This instruction puts the hash of the procedure which initiated the parent context onto the stack.
+A kernel can be defined similarly to a regular [library module](./code_organization.md#library-modules) - i.e., it can have internal and exported procedures. However, there are some small differences between what procedures can do in a kernel module vs. what they can do in a regular library module. Specifically, unlike procedures in regular library modules, procedures in a kernel module can use the `caller` instruction. This instruction puts the hash of the procedure which initiated the parent context onto the stack.
 
 ### Memory layout
 
 As mentioned earlier, procedures executed within a given context can access memory only of that context. This is true for both memory reads and memory writes.
 
-Address space of every context is the same: the smallest accessible address is $0$ and the largest accessible address is $2^{32} - 1$. Any code executed in a given context has access to its entire address space. However, by convention, we assign different meanings to different regions of the address space.
+Address space of every context is the same: the smallest accessible address is $0$ and the largest accessible address is $2^{32} - 1$. Any code executed in a given context has access to its entire address space. However, by convention, we separate the memory into 2 distinct regions:
 
-For user contexts we have the following:
+- The first $2^{31}$ addresses are assumed to be global memory, freely usable by programs.
+- All addresses including and above $2^{31}$ are reserved for procedure locals (i.e., via the `exec` instruction).
 
-- The first $2^{30}$ addresses are assumed to be global memory.
-- The next $2^{30}$ addresses are reserved for memory locals of procedures executed in the same context (i.e., via the `exec` instruction).
-- The remaining address space has no special meaning.
+> Note that the highest accessible address ($2^{32} - 1$) is reserved by the VM to store the frame memory pointer.
 
-![user memory layout](../../img/user_docs/assembly/execution_contexts/user_mem_layout.png)
+![memory layout](../../img/user_docs/assembly/execution_contexts/mem_layout.png)
 
-For the root context we have the following:
-
-- The first $2^{30}$ addresses are assumed to be global memory.
-- The next $2^{30}$ addresses are reserved for memory locals of procedures executed in the root context.
-- The next $2^{30}$ addresses are reserved for memory locals of procedures executed from within a `syscall`.
-- The remaining address space has no special meaning.
-
-![root memory layout](../../img/user_docs/assembly/execution_contexts/root_mem_layout.png)
-
-For both types of contexts, writing directly into regions of memory reserved for procedure locals is not advisable. Instead, `loc_load`, `loc_store` and other similar dedicated instructions should be used to access procedure locals.
+Writing directly into memory at an address including and above $2^{31}$ is not advisable. Instead, `loc_load`, `loc_store` and other similar dedicated instructions should be used to access procedure locals.
 
 ### Example
 
@@ -117,11 +104,11 @@ Execution of the above program proceeds as follows:
 
 1. The VM starts executing instructions immediately following the `begin` statement. These instructions are executed in the _root_ context (let's call this context `ctx0`).
 2. When `call.foo` is executed, a new context is created (`ctx1`). Memory in this context is isolated from `ctx0`. Additionally, any elements on the stack beyond the top 16 are hidden from `foo`.
-3. Instructions executed inside `foo` can access memory of `ctx1` only. The address of the first procedure local in `foo` (e.g., accessed via `loc_load.0`) is $2^{30}$.
-4. When `call.bar` is executed, a new context is created (`ctx2`). The stack depth is set to 16 again, and any instruction executed in this context can access memory of `ctx2` only. The first procedure local of `bar` is also located at address $2^{30}$.
+3. Instructions executed inside `foo` can access memory of `ctx1` only. The address of the first procedure local in `foo` (e.g., accessed via `loc_load.0`) is $2^{31}$.
+4. When `call.bar` is executed, a new context is created (`ctx2`). The stack depth is set to 16 again, and any instruction executed in this context can access memory of `ctx2` only. The first procedure local of `bar` is also located at address $2^{31}$.
 5. When `syscall.baz` is executed, the execution moves back into the root context. That is, instructions executed inside `baz` have access to the memory of `ctx0`. The first procedure local of `baz` is located at address $2^{31}$. When `baz` starts executing, the stack depth is again set to 16.
 6. When `caller` is executed inside `baz`, the first 4 elements of the stack are populated with the hash of `bar` since `baz` was invoked from `bar`'s context.
 7. Once `baz` returns, execution moves back to `ctx2`, and then, when `bar` returns, execution moves back to `ctx1`. We assume that instructions executed right before each procedure returns ensure that the stack depth is exactly 16 right before procedure's end.
-8. Next, when `exec.bar` is executed, `bar` is executed again, but this time it is executed in the same context as `foo`. Thus, it can access memory of `ctx1`. Moreover, the stack depth is not changed, and thus, `bar` can access the entire stack of `foo`. Lastly, this first procedure local of `bar` now will be at address $2^{30} + 3$ (since the first 3 locals in this context are reserved for `foo`).
+8. Next, when `exec.bar` is executed, `bar` is executed again, but this time it is executed in the same context as `foo`. Thus, it can access memory of `ctx1`. Moreover, the stack depth is not changed, and thus, `bar` can access the entire stack of `foo`. Lastly, this first procedure local of `bar` now will be at address $2^{31} + 3$ (since the first 3 locals in this context are reserved for `foo`).
 9. When `syscall.baz` is executed the second time, execution moves into the root context again. However, now, when `caller` is executed inside `baz`, the first 4 elements of the stack are populated with the hash of `foo` (not `bar`). This happens because this time around `bar` does not have its own context and `baz` is invoked from `foo`'s context.
 10. Finally, when `baz` returns, execution moves back to `ctx1`, and then as `bar` and `foo` return, back to `ctx0`, and the program terminates.

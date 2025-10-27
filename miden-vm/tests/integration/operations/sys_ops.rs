@@ -28,7 +28,7 @@ fn assert_with_code() {
     expect_exec_error_matches!(
         test,
         ExecutionError::FailedAssertion{ clk, err_code, .. }
-        if clk == RowIndex::from(2) && err_code == code
+        if clk == RowIndex::from(6) && err_code == code
     );
 }
 
@@ -41,7 +41,7 @@ fn assert_fail() {
     expect_exec_error_matches!(
         test,
         ExecutionError::FailedAssertion{ clk, err_code, .. }
-        if clk == RowIndex::from(2) && err_code == ZERO
+        if clk == RowIndex::from(6) && err_code == ZERO
     );
 }
 
@@ -65,7 +65,7 @@ fn assert_eq_fail() {
     expect_exec_error_matches!(
         test,
         ExecutionError::FailedAssertion{ clk, err_code, err_msg, label: _, source_file: _ }
-        if clk == RowIndex::from(3) && err_code == ZERO && err_msg.is_none()
+        if clk == RowIndex::from(7) && err_code == ZERO && err_msg.is_none()
     );
 
     let test = build_op_test!(asm_op, &[1, 4]);
@@ -73,7 +73,7 @@ fn assert_eq_fail() {
     expect_exec_error_matches!(
         test,
         ExecutionError::FailedAssertion{ clk, err_code, err_msg, label: _, source_file: _ }
-        if clk == RowIndex::from(3) && err_code == ZERO && err_msg.is_none()
+        if clk == RowIndex::from(7) && err_code == ZERO && err_msg.is_none()
     );
 }
 
