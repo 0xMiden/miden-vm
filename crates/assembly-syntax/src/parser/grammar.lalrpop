@@ -136,8 +136,12 @@ extern {
         "locaddr" => Token::Locaddr,
         "loc_load" => Token::LocLoad,
         "loc_loadw" => Token::LocLoadw,
+        "loc_loadw_be" => Token::LocLoadwBe,
+        "loc_loadw_le" => Token::LocLoadwLe,
         "loc_store" => Token::LocStore,
         "loc_storew" => Token::LocStorew,
+        "loc_storew_be" => Token::LocStorewBe,
+        "loc_storew_le" => Token::LocStorewLe,
         "lt" => Token::Lt,
         "lte" => Token::Lte,
         "mem" => Token::Mem,
@@ -1519,9 +1523,29 @@ InstWithU32Immediate: Instruction = {
 InstWithLocalIndex: Instruction = {
     "locaddr" <i:Imm<U16>> => Instruction::Locaddr(i),
     "loc_load" <i:Imm<U16>> => Instruction::LocLoad(i),
-    "loc_loadw" <i:Imm<U16>> => Instruction::LocLoadW(i),
+    <l:@L> "loc_loadw" <i:Imm<U16>> <r:@R> =>? {
+        Err(ParseError::User {
+            error: ParsingError::DeprecatedInstruction {
+                span: span!(source_id, l, r),
+                instruction: "loc_loadw".to_string(),
+                replacement: "loc_loadw_be".to_string(),
+            },
+        })
+    },
+    "loc_loadw_be" <i:Imm<U16>> => Instruction::LocLoadWBe(i),
+    "loc_loadw_le" <i:Imm<U16>> => Instruction::LocLoadWLe(i),
     "loc_store" <i:Imm<U16>> => Instruction::LocStore(i),
-    "loc_storew" <i:Imm<U16>> => Instruction::LocStoreW(i)
+    <l:@L> "loc_storew" <i:Imm<U16>> <r:@R> =>? {
+        Err(ParseError::User {
+            error: ParsingError::DeprecatedInstruction {
+                span: span!(source_id, l, r),
+                instruction: "loc_storew".to_string(),
+                replacement: "loc_storew_be".to_string(),
+            },
+        })
+    },
+    "loc_storew_be" <i:Imm<U16>> => Instruction::LocStoreWBe(i),
+    "loc_storew_le" <i:Imm<U16>> => Instruction::LocStoreWLe(i)
 }
 
 #[inline]
@@ -2130,8 +2154,12 @@ Opcode: &'static str = {
     "locaddr" => "locaddr",
     "loc_load" => "loc_load",
     "loc_loadw" => "loc_loadw",
+    "loc_loadw_be" => "loc_loadw_be",
+    "loc_loadw_le" => "loc_loadw_le",
     "loc_store" => "loc_store",
     "loc_storew" => "loc_storew",
+    "loc_storew_be" => "loc_storew_be",
+    "loc_storew_le" => "loc_storew_le",
     "lt" => "lt",
     "lte" => "lte",
     "mem" => "mem",

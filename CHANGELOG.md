@@ -31,6 +31,7 @@
 - Remove O(n log m) iteration in parallel processor (#[2273](https://github.com/0xMiden/miden-vm/pull/2273)).
 - [BREAKING] `BaseHost` now exposes `resolve_event` so hosts can provide event names for diagnostics. Unify `SystemEvent` ID derivation ([#2150](https://github.com/0xMiden/miden-vm/issues/2150)).
 - [BREAKING] Deprecated `mem_loadw` and `mem_storew` instructions in favor of explicit endianness variants (`mem_loadw_be`, `mem_loadw_le`, `mem_storew_be`, `mem_storew_le`) ([#2186](https://github.com/0xMiden/miden-vm/issues/2186)).
+- [BREAKING] Deprecated `loc_loadw` and `loc_storew` instructions in favor of explicit endianness variants (`loc_loadw_be`, `loc_loadw_le`, `loc_storew_be`, `loc_storew_le`).
 - [BREAKING] add pre/post decorators to BasicBlockNode fingerprint ([#2267](https://github.com/0xMiden/miden-vm/pull/2267)).
 - [BREAKING] Added explicit endianness methods `get_stack_word_be()` and `get_stack_word_le()` to stack word accessors, deprecated ambiguous `get_stack_word()` ([#2235](https://github.com/0xMiden/miden-vm/issues/2235)).
 - Fix decorator offset bug in `BasicBlockNode` padding ([#2305](https://github.com/0xMiden/miden-vm/pull/2305)).

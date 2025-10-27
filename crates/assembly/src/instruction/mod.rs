@@ -423,7 +423,7 @@ impl Assembler {
                 true,
                 span,
             )?,
-            Instruction::LocLoadW(v) => {
+            Instruction::LocLoadWBe(v) => {
                 let local_addr = v.expect_value();
                 if !local_addr.is_multiple_of(WORD_SIZE as u16) {
                     return Err(RelatedLabel::error("invalid local word index")
@@ -443,6 +443,28 @@ impl Assembler {
                     false,
                     instruction.span(),
                 )?
+            },
+            Instruction::LocLoadWLe(v) => {
+                let local_addr = v.expect_value();
+                if !local_addr.is_multiple_of(WORD_SIZE as u16) {
+                    return Err(RelatedLabel::error("invalid local word index")
+                        .with_help("the index to a local word must be a multiple of 4")
+                        .with_labeled_span(v.span(), "this index is not word-aligned")
+                        .with_source_file(
+                            proc_ctx.source_manager().get(proc_ctx.span().source_id()).ok(),
+                        )
+                        .into());
+                }
+
+                mem_ops::mem_read(
+                    block_builder,
+                    proc_ctx,
+                    Some(local_addr as u32),
+                    true,
+                    false,
+                    instruction.span(),
+                )?;
+                push_reversew(block_builder)
             },
             Instruction::MemStore => block_builder.push_ops([MStore, Drop]),
             Instruction::MemStoreImm(v) => mem_ops::mem_write_imm(
@@ -489,7 +511,7 @@ impl Assembler {
                 true,
                 span,
             )?,
-            Instruction::LocStoreW(v) => {
+            Instruction::LocStoreWBe(v) => {
                 let local_addr = v.expect_value();
                 if !local_addr.is_multiple_of(WORD_SIZE as u16) {
                     return Err(RelatedLabel::error("invalid local word index")
@@ -509,6 +531,29 @@ impl Assembler {
                     false,
                     span,
                 )?
+            },
+            Instruction::LocStoreWLe(v) => {
+                let local_addr = v.expect_value();
+                if !local_addr.is_multiple_of(WORD_SIZE as u16) {
+                    return Err(RelatedLabel::error("invalid local word index")
+                        .with_help("the index to a local word must be a multiple of 4")
+                        .with_labeled_span(v.span(), "this index is not word-aligned")
+                        .with_source_file(
+                            proc_ctx.source_manager().get(proc_ctx.span().source_id()).ok(),
+                        )
+                        .into());
+                }
+
+                push_reversew(block_builder);
+                mem_ops::mem_write_imm(
+                    block_builder,
+                    proc_ctx,
+                    local_addr as u32,
+                    true,
+                    false,
+                    span,
+                )?;
+                push_reversew(block_builder)
             },
             Instruction::SysEvent(system_event) => {
                 block_builder.push_system_event(system_event.into())

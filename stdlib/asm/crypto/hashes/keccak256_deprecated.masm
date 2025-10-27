@@ -2117,7 +2117,7 @@ proc.chi.16
     mem_loadw_be
 
     push.0.0.0.0
-    loc_loadw.4
+    loc_loadw_be.4
 
     movup.4
     u32xor
@@ -2148,7 +2148,7 @@ proc.chi.16
     mem_loadw_be
 
     push.0.0.0.0
-    loc_loadw.8
+    loc_loadw_be.8
 
     movup.4
     u32xor
@@ -2179,7 +2179,7 @@ proc.chi.16
     mem_loadw_be
 
     push.0.0.0.0
-    loc_loadw.12
+    loc_loadw_be.12
 
     movup.4
     u32xor
@@ -2255,7 +2255,7 @@ proc.chi.16
     movup.3
     movup.3
 
-    loc_storew.4
+    loc_storew_be.4
 
     movup.6
     add.4
@@ -2317,7 +2317,7 @@ proc.chi.16
     movup.7
     movup.7
 
-    loc_storew.8
+    loc_storew_be.8
     dropw
 
     u32not
@@ -2336,13 +2336,13 @@ proc.chi.16
     movdn.3
     movdn.3
 
-    loc_storew.12
+    loc_storew_be.12
 
     dup.4
     mem_loadw_be
 
     push.0.0.0.0
-    loc_loadw.4
+    loc_loadw_be.4
 
     movup.4
     u32xor
@@ -2373,7 +2373,7 @@ proc.chi.16
     mem_loadw_be
 
     push.0.0.0.0
-    loc_loadw.8
+    loc_loadw_be.8
 
     movup.4
     u32xor
@@ -2404,7 +2404,7 @@ proc.chi.16
     mem_loadw_be
 
     push.0.0.0.0
-    loc_loadw.12
+    loc_loadw_be.12
 
     movup.4
     u32xor
@@ -2451,7 +2451,7 @@ proc.chi.16
     swap
 
     push.0.0
-    loc_storew.4
+    loc_storew_be.4
 
     movup.6
     add.4
@@ -2499,7 +2499,7 @@ proc.chi.16
     movup.3
     movup.3
 
-    loc_storew.8
+    loc_storew_be.8
 
     movup.6
     sub.8
@@ -2561,7 +2561,7 @@ proc.chi.16
     movup.3
     movup.3
 
-    loc_storew.12
+    loc_storew_be.12
 
     movup.4
     sub.4
@@ -2571,7 +2571,7 @@ proc.chi.16
     mem_loadw_be
 
     push.0.0.0.0
-    loc_loadw.4
+    loc_loadw_be.4
 
     movup.4
     u32xor
@@ -2602,7 +2602,7 @@ proc.chi.16
     mem_loadw_be
 
     push.0.0.0.0
-    loc_loadw.8
+    loc_loadw_be.8
 
     movup.4
     u32xor
@@ -2633,7 +2633,7 @@ proc.chi.16
     mem_loadw_be
 
     push.0.0.0.0
-    loc_loadw.12
+    loc_loadw_be.12
 
     movup.4
     u32xor
@@ -2715,7 +2715,7 @@ proc.chi.16
     movup.3
     movup.3
 
-    loc_storew.4
+    loc_storew_be.4
 
     movup.6
     add.4
@@ -2777,7 +2777,7 @@ proc.chi.16
     movup.7
     movup.7
 
-    loc_storew.8
+    loc_storew_be.8
     dropw
 
     u32not
@@ -2796,13 +2796,13 @@ proc.chi.16
     movdn.3
     movdn.3
 
-    loc_storew.12
+    loc_storew_be.12
 
     dup.4
     mem_loadw_be
 
     push.0.0.0.0
-    loc_loadw.4
+    loc_loadw_be.4
 
     movup.4
     u32xor
@@ -2833,7 +2833,7 @@ proc.chi.16
     mem_loadw_be
 
     push.0.0.0.0
-    loc_loadw.8
+    loc_loadw_be.8
 
     movup.4
     u32xor
@@ -2864,7 +2864,7 @@ proc.chi.16
     mem_loadw_be
 
     push.0.0.0.0
-    loc_loadw.12
+    loc_loadw_be.12
 
     movup.4
     u32xor
@@ -3496,8 +3496,8 @@ export.hash.52
 
     # prapare keccak256 digest from state
     push.0.0.0.0
-    loc_loadw.4
+    loc_loadw_be.4
     push.0.0.0.0
-    loc_loadw.0
+    loc_loadw_be.0
     exec.to_digest
 end

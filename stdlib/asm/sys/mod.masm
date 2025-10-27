@@ -11,7 +11,7 @@
 #! Cycles: 17 + 11 * overflow_words, where `overflow_words` is the number of words needed to drop.
 export.truncate_stack.4
     # save the first word to memory and bring elements to be dropped to the top of the stack
-    loc_storew.0 dropw movupw.3
+    loc_storew_be.0 dropw movupw.3
     # => [X, B, C, D, ...]
 
     # until stack depth greater than 16, keep dropping extra elements
@@ -25,7 +25,7 @@ export.truncate_stack.4
     # => [X, B, C, D, ...]
 
     # bring the previously saved word back onto the stack
-    loc_loadw.0
+    loc_loadw_be.0
     # => [A, B, C, D, ...]
 end
 
