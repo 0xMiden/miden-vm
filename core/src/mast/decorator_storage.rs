@@ -1,6 +1,8 @@
 use alloc::vec::Vec;
 
 use miden_utils_indexing::{Idx, IndexVec};
+#[cfg(feature = "arbitrary")]
+use proptest::prelude::{Arbitrary, BoxedStrategy};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -35,6 +37,7 @@ use crate::mast::{DecoratedOpLink, DecoratorId, MastNodeId};
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 pub struct DecoratorIndexMapping {
     /// All the decorator IDs per operation per node, in a CSR relationship with
     /// node_indptr_for_op_idx and op_indptr_for_dec_ids
@@ -528,6 +531,66 @@ impl<'a> ExactSizeIterator for DecoratedLinksIter<'a> {
     #[inline]
     fn len(&self) -> usize {
         self.remaining
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+impl Arbitrary for DecoratorIndexMapping {
+    type Parameters = proptest::collection::SizeRange;
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(size: Self::Parameters) -> Self::Strategy {
+        use proptest::{collection::vec, prelude::*};
+
+        // Generate small, controlled structures to avoid infinite loops
+        // Keep node and operation counts small and bounded, always at least 1
+        (1usize..40, 1usize..=72) // (max_nodes, max_ops_per_node)
+            .prop_flat_map(move |(max_nodes, max_ops_per_node)| {
+                vec(
+                    // Generate (node_id, op_id, decorator_id) with bounded values
+                    (0..max_nodes, 0..max_ops_per_node, any::<u32>()),
+                    size.clone(), // Limit total entries to size
+                )
+                .prop_map(move |coo_data| {
+                    // Build the DecoratorIndexMapping incrementally
+                    let mut mapping = DecoratorIndexMapping::new();
+
+                    // Group by node_id, then by op_id to maintain sorted order
+                    use alloc::collections::BTreeMap;
+                    let mut node_to_ops: BTreeMap<u32, BTreeMap<u32, Vec<u32>>> = BTreeMap::new();
+
+                    for (node_id, op_id, decorator_id) in coo_data {
+                        node_to_ops
+                            .entry(node_id as u32)
+                            .or_default()
+                            .entry(op_id as u32)
+                            .or_default()
+                            .push(decorator_id);
+                    }
+
+                    // Add nodes in order to satisfy sequential constraint
+                    for (node_id, ops_map) in node_to_ops {
+                        let mut decorators_info: Vec<(usize, DecoratorId)> = Vec::new();
+                        for (op_id, decorator_ids) in ops_map {
+                            for decorator_id in decorator_ids {
+                                decorators_info.push((op_id as usize, DecoratorId(decorator_id)));
+                            }
+                        }
+                        // Sort by operation index to meet add_decorator_info_for_node requirements
+                        decorators_info.sort_by_key(|(op_idx, _)| *op_idx);
+
+                        mapping
+                            .add_decorator_info_for_node(
+                                MastNodeId::new_unchecked(node_id),
+                                decorators_info,
+                            )
+                            .unwrap();
+                    }
+
+                    mapping
+                })
+            })
+            .boxed()
     }
 }
 
