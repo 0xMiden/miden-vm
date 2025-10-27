@@ -75,9 +75,9 @@ pub struct MastForest {
     /// code is triggered.
     error_codes: BTreeMap<u64, Arc<str>>,
 
-    /// Storage for decorators per operation per node. This is used for efficient access to
-    /// decorators during execution and debugging.
-    decorator_storage: Arc<DecoratorIndexMapping>,
+    /// Provides efficient access to decorators per operation per node during execution and
+    /// debugging.
+    decorator_storage: DecoratorIndexMapping,
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -91,7 +91,7 @@ impl MastForest {
             decorators: IndexVec::new(),
             advice_map: AdviceMap::default(),
             error_codes: BTreeMap::new(),
-            decorator_storage: Arc::new(DecoratorIndexMapping::new()),
+            decorator_storage: DecoratorIndexMapping::new(),
         }
     }
 }
@@ -152,7 +152,7 @@ impl MastForest {
             node.remove_decorators();
         }
         self.decorators = IndexVec::new();
-        self.decorator_storage = Arc::new(DecoratorIndexMapping::new());
+        self.decorator_storage = DecoratorIndexMapping::new();
     }
 
     /// Merges all `forests` into a new [`MastForest`].
@@ -226,8 +226,8 @@ impl MastForest {
         assert!(self.nodes.is_empty());
         // extract decorator information from the nodes by converting them into builders
         let node_builders =
-            nodes_to_add.into_iter().map(|node| node.to_builder()).collect::<Vec<_>>();
-        self.decorator_storage = Arc::new(DecoratorIndexMapping::new());
+            nodes_to_add.into_iter().map(|node| node.to_builder(self)).collect::<Vec<_>>();
+        self.decorator_storage = DecoratorIndexMapping::new();
 
         // Add each node to the new MAST forest, making sure to rewrite any outdated internal
         // `MastNodeId`s
@@ -366,6 +366,70 @@ impl MastForest {
 
     pub fn decorators(&self) -> &[Decorator] {
         self.decorators.as_slice()
+    }
+
+    /// Returns decorator indices for a specific operation within a node.
+    ///
+    /// This is the primary accessor for reading decorators from the centralized storage.
+    /// Returns a slice of decorator IDs for the given operation.
+    #[inline(always)]
+    pub fn decorator_indices_for_op(&self, node_id: MastNodeId, local_op_idx: usize) -> &[DecoratorId] {
+        self.decorator_storage
+            .decorator_ids_for_operation(node_id, local_op_idx)
+            .unwrap_or(&[])
+    }
+
+    /// Returns an iterator over decorator references for a specific operation within a node.
+    ///
+    /// This is the preferred method for accessing decorators, as it provides direct
+    /// references to the decorator objects.
+    #[inline(always)]
+    pub fn decorators_for_op<'a>(
+        &'a self,
+        node_id: MastNodeId,
+        local_op_idx: usize,
+    ) -> impl Iterator<Item = &'a Decorator> + 'a {
+        self.decorator_indices_for_op(node_id, local_op_idx)
+            .iter()
+            .map(move |&decorator_id| &self.decorators[decorator_id])
+    }
+
+    /// Returns decorator links for a node, including operation indices.
+    ///
+    /// This provides a flattened view of all decorators for a node with their operation indices.
+    #[inline(always)]
+    pub fn decorator_links_for_node<'a>(
+        &'a self,
+        node_id: MastNodeId,
+    ) -> Result<DecoratedLinks<'a>, DecoratorIndexError> {
+        self.decorator_storage.decorator_links_for_node(node_id)
+    }
+
+    /// Returns all decorator IDs for a node as an iterator of (operation_idx, decorator_id) tuples.
+    #[inline(always)]
+    pub fn decorator_ids_for_node<'a>(
+        &'a self,
+        node_id: MastNodeId,
+    ) -> impl Iterator<Item = (usize, DecoratorId)> + 'a {
+        self.decorator_storage
+            .decorator_ids_for_node(node_id)
+            .into_iter()
+            .flat_map(|iter| iter.map(move |(op_idx, dec_ids)| {
+                dec_ids.iter().map(move |&dec_id| (op_idx, dec_id))
+            }))
+            .flatten()
+    }
+
+    /// Returns before/after decorators for a node (these are stored in the node itself).
+    ///
+    /// Note: before_enter and after_exit decorators are stored in the BasicBlockNode itself,
+    /// not in the centralized storage. This method accesses the node to retrieve them.
+    pub fn node_before_after_decorators(&self, node_id: MastNodeId) -> (&[DecoratorId], &[DecoratorId]) {
+        if let Some(MastNode::Block(block)) = self.nodes.get(node_id) {
+            (block.before_enter(), block.after_exit())
+        } else {
+            (&[], &[])
+        }
     }
 
     pub fn advice_map(&self) -> &AdviceMap {
@@ -667,8 +731,6 @@ impl<'de> serde::Deserialize<'de> for MastForest {
 
         let proxy = MastForestProxy::deserialize(deserializer)?;
 
-        let node_builders = proxy.nodes.into_iter().map(|old_node| old_node.to_builder());
-
         // Convert the proxy back to a MastForest, but start with empty decorator storage
         // since we'll rebuild it with the new nodes
         let mut forest = MastForest {
@@ -679,6 +741,8 @@ impl<'de> serde::Deserialize<'de> for MastForest {
             error_codes: proxy.error_codes,
             decorator_storage: Arc::new(DecoratorIndexMapping::new()), // Start fresh
         };
+
+        let node_builders: Vec<_> = proxy.nodes.into_iter().map(|old_node| old_node.to_builder(&forest)).collect();
 
         // Create remappings - BTreeMap doesn't have reserve, but it will grow efficiently
         let mut id_remappings = BTreeMap::new();

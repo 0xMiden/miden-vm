@@ -78,7 +78,7 @@ pub trait MastNodeExt {
     /// Converts this node into its corresponding builder, reusing allocated data where possible.
     type Builder: MastForestContributor;
 
-    fn to_builder(self) -> Self::Builder;
+    fn to_builder(self, forest: &MastForest) -> Self::Builder;
 }
 
 // MAST NODE
@@ -216,7 +216,10 @@ pub trait MastNodeErrorContext: Send + Sync {
     ///
     /// The index is only meaningful for [`BasicBlockNode`]s, where it corresponds to the index of
     /// the operation in the basic block to which the decorator is attached.
-    fn decorators(&self) -> impl Iterator<Item = DecoratedOpLink>;
+    fn decorators<'a>(
+        &'a self,
+        forest: &'a MastForest,
+    ) -> impl Iterator<Item = DecoratedOpLink> + 'a;
 
     // PROVIDED METHODS
     // -------------------------------------------------------------------------------------------
@@ -236,7 +239,7 @@ pub trait MastNodeErrorContext: Send + Sync {
             // If a target operation index is provided, return the assembly op associated with that
             // operation.
             Some(target_op_idx) => {
-                for (op_idx, decorator_id) in self.decorators() {
+                for (op_idx, decorator_id) in self.decorators(mast_forest) {
                     if let Some(Decorator::AsmOp(assembly_op)) =
                         mast_forest.get_decorator_by_id(decorator_id)
                     {
@@ -254,7 +257,7 @@ pub trait MastNodeErrorContext: Send + Sync {
             },
             // If no target operation index is provided, return the first assembly op found.
             None => {
-                for (_, decorator_id) in self.decorators() {
+                for (_, decorator_id) in self.decorators(mast_forest) {
                     if let Some(Decorator::AsmOp(assembly_op)) =
                         mast_forest.get_decorator_by_id(decorator_id)
                     {

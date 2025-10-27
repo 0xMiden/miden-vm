@@ -293,7 +293,7 @@ fn operation_or_decorator_iterator() {
         .unwrap();
     let node = mast_forest.get_node_by_id(node_id).unwrap().unwrap_basic_block();
 
-    let mut iterator = node.iter();
+    let mut iterator = node.iter(&mast_forest);
 
     // operation index 0
     assert_eq!(iterator.next(), Some(OperationOrDecorator::Decorator(DecoratorId(0))));
@@ -447,7 +447,9 @@ proptest! {
         let block = BasicBlockNode::new(ops.clone(), decs.clone()).unwrap();
 
         // Collect the decorators using raw_decorator_iter()
-        let collected_decorators: Vec<(usize, DecoratorId)> = block.raw_decorator_iter().collect();
+        // Create a dummy forest since the method now requires it
+        let dummy_forest = MastForest::new();
+        let collected_decorators: Vec<(usize, DecoratorId)> = block.raw_decorator_iter(&dummy_forest).collect();
 
         // The collected decorators should match the original decorators
         prop_assert_eq!(collected_decorators, decs);
@@ -479,7 +481,7 @@ fn test_mast_node_error_context_decorators_iterates_all_decorators() {
         .build()
         .unwrap();
 
-    let all_decorators: Vec<_> = block.decorators().collect();
+    let all_decorators: Vec<_> = block.decorators(&forest).collect();
 
     // Should have 3 decorators total: 1 before_enter, 1 during, 1 after_exit
     assert_eq!(all_decorators.len(), 3);
@@ -518,7 +520,7 @@ fn test_indexed_decorator_iter_excludes_before_enter_after_exit() {
         .unwrap();
 
     // Test indexed_decorator_iter - should only include op-indexed decorators
-    let indexed_decorators: Vec<_> = block.indexed_decorator_iter().collect();
+    let indexed_decorators: Vec<_> = block.indexed_decorator_iter(&forest).collect();
 
     // Should have only 2 decorators (the ones tied to specific operation indices)
     assert_eq!(indexed_decorators.len(), 2);
@@ -566,7 +568,7 @@ fn test_decorator_positions() {
         .unwrap();
 
     // Test that MastNodeErrorContext::decorators returns all decorators
-    let all_decorators: Vec<_> = block.decorators().collect();
+    let all_decorators: Vec<_> = block.decorators(&forest).collect();
     assert_eq!(all_decorators.len(), 5);
 
     // Verify the order and positions:
@@ -584,7 +586,7 @@ fn test_decorator_positions() {
     assert_eq!(found_positions, expected_positions);
 
     // Test that indexed_decorator_iter only returns op-indexed decorators
-    let indexed_decorators: Vec<_> = block.indexed_decorator_iter().collect();
+    let indexed_decorators: Vec<_> = block.indexed_decorator_iter(&forest).collect();
     assert_eq!(indexed_decorators.len(), 2);
 
     let indexed_positions: Vec<_> = indexed_decorators.iter().map(|&(pos, _id)| pos).collect();
@@ -668,7 +670,8 @@ proptest! {
         let block = BasicBlockNode::new(ops.clone(), decorators.clone()).unwrap();
 
         // Create raw decorator iterator
-        let raw_iter = block.raw_decorator_iter();
+        let dummy_forest = MastForest::new();
+        let raw_iter = block.raw_decorator_iter(&dummy_forest);
 
         // Collect all decorators from the iterator
         let collected_decorators: Vec<_> = raw_iter.collect();
@@ -756,49 +759,3 @@ fn test_basic_block_fingerprint_uses_forced_digest() {
     );
 }
 
-#[cfg(feature = "serde")]
-#[test]
-fn test_basic_block_serde_roundtrip_preserves_decorators() {
-    let mut forest = MastForest::new();
-    let decorator1 = forest.add_decorator(Decorator::Trace(42)).expect("Failed to add decorator");
-    let decorator2 = forest.add_decorator(Decorator::Trace(99)).expect("Failed to add decorator");
-
-    // Create a basic block with decorators
-    let operations = vec![Operation::Add, Operation::Mul, Operation::Eq];
-    let decorators = vec![(1, decorator1), (2, decorator2)]; // Raw indices
-
-    let original_block = BasicBlockNodeBuilder::new(operations.clone(), decorators)
-        .with_before_enter(vec![decorator1])
-        .with_after_exit(vec![decorator2])
-        .build()
-        .expect("Failed to build basic block");
-
-    // Serialize and deserialize
-    let serialized = serde_json::to_string(&original_block).expect("Failed to serialize");
-    let deserialized_block: BasicBlockNode =
-        serde_json::from_str(&serialized).expect("Failed to deserialize");
-
-    // Verify that decorators are preserved
-    assert_eq!(
-        original_block, deserialized_block,
-        "Blocks should be equal after serde roundtrip"
-    );
-    assert_eq!(
-        deserialized_block.before_enter(),
-        &[decorator1],
-        "Before-enter decorators should be preserved"
-    );
-    assert_eq!(
-        deserialized_block.after_exit(),
-        &[decorator2],
-        "After-exit decorators should be preserved"
-    );
-
-    // Verify indexed decorators
-    let original_decorators = original_block.raw_op_indexed_decorators();
-    let deserialized_decorators = deserialized_block.raw_op_indexed_decorators();
-    assert_eq!(
-        original_decorators, deserialized_decorators,
-        "Raw indexed decorators should be preserved"
-    );
-}

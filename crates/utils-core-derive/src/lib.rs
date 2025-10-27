@@ -223,12 +223,12 @@ fn generate_to_builder_method(
         };
 
         quote! {
-            #enum_name::#variant(#field) => #builder_type::#builder_variant_name(#field.to_builder())
+            #enum_name::#variant(#field) => #builder_type::#builder_variant_name(#field.to_builder(forest))
         }
     });
 
     quote! {
-        fn to_builder(self) -> Self::Builder {
+        fn to_builder(self, forest: &crate::mast::MastForest) -> Self::Builder {
             match self {
                 #(#match_arms),*
             }
