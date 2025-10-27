@@ -10,6 +10,10 @@ use miden_air::{
                 MR_UPDATE_OLD_LABEL, NUM_ROUNDS, RETURN_HASH_LABEL, RETURN_STATE_LABEL,
             },
         },
+        log_precompile::{
+            HELPER_ADDR_IDX, HELPER_CAP_PREV_RANGE, STACK_CAP_NEXT_RANGE, STACK_COMM_RANGE,
+            STACK_R0_RANGE, STACK_R1_RANGE, STACK_TAG_RANGE,
+        },
         main_trace::MainTrace,
     },
 };
@@ -200,21 +204,52 @@ pub(super) fn build_log_precompile_request<E: FieldElement<BaseField = Felt>>(
     _debugger: &mut BusDebugger<E>,
 ) -> E {
     // Read helper registers
-    let addr = main_trace.helper_register(0, row);
+    let addr = main_trace.helper_register(HELPER_ADDR_IDX, row);
 
     // Input state [CAP_PREV, TAG, COMM]
     // Helper registers store capacity in sequential order [e0, e1, e2, e3]
-    let cap_prev: Word = [1, 2, 3, 4].map(|idx| main_trace.helper_register(idx, row)).into();
+    let cap_prev = Word::from([
+        main_trace.helper_register(HELPER_CAP_PREV_RANGE.start, row),
+        main_trace.helper_register(HELPER_CAP_PREV_RANGE.start + 1, row),
+        main_trace.helper_register(HELPER_CAP_PREV_RANGE.start + 2, row),
+        main_trace.helper_register(HELPER_CAP_PREV_RANGE.start + 3, row),
+    ]);
+
     // Stack stores words in big-endian order: stack[0..3] = [e3, e2, e1, e0]
     // Therefore we read in reverse order to reconstruct the word correctly
-    let comm: Word = [3, 2, 1, 0].map(|idx| main_trace.stack_element(idx, row)).into();
-    let tag: Word = [7, 6, 5, 4].map(|idx| main_trace.stack_element(idx, row)).into();
+    let comm = Word::from([
+        main_trace.stack_element(STACK_COMM_RANGE.end - 1, row),
+        main_trace.stack_element(STACK_COMM_RANGE.end - 2, row),
+        main_trace.stack_element(STACK_COMM_RANGE.end - 3, row),
+        main_trace.stack_element(STACK_COMM_RANGE.end - 4, row),
+    ]);
+    let tag = Word::from([
+        main_trace.stack_element(STACK_TAG_RANGE.end - 1, row),
+        main_trace.stack_element(STACK_TAG_RANGE.end - 2, row),
+        main_trace.stack_element(STACK_TAG_RANGE.end - 3, row),
+        main_trace.stack_element(STACK_TAG_RANGE.end - 4, row),
+    ]);
     let state_input = [cap_prev, tag, comm];
 
     // Output state [CAP_NEXT, R0, R1]
-    let r1: Word = [3, 2, 1, 0].map(|idx| main_trace.stack_element(idx, row + 1)).into();
-    let r0: Word = [7, 6, 5, 4].map(|idx| main_trace.stack_element(idx, row + 1)).into();
-    let cap_next: Word = [11, 10, 9, 8].map(|idx| main_trace.stack_element(idx, row + 1)).into();
+    let r1 = Word::from([
+        main_trace.stack_element(STACK_R1_RANGE.end - 1, row + 1),
+        main_trace.stack_element(STACK_R1_RANGE.end - 2, row + 1),
+        main_trace.stack_element(STACK_R1_RANGE.end - 3, row + 1),
+        main_trace.stack_element(STACK_R1_RANGE.end - 4, row + 1),
+    ]);
+    let r0 = Word::from([
+        main_trace.stack_element(STACK_R0_RANGE.end - 1, row + 1),
+        main_trace.stack_element(STACK_R0_RANGE.end - 2, row + 1),
+        main_trace.stack_element(STACK_R0_RANGE.end - 3, row + 1),
+        main_trace.stack_element(STACK_R0_RANGE.end - 4, row + 1),
+    ]);
+    let cap_next = Word::from([
+        main_trace.stack_element(STACK_CAP_NEXT_RANGE.end - 1, row + 1),
+        main_trace.stack_element(STACK_CAP_NEXT_RANGE.end - 2, row + 1),
+        main_trace.stack_element(STACK_CAP_NEXT_RANGE.end - 3, row + 1),
+        main_trace.stack_element(STACK_CAP_NEXT_RANGE.end - 4, row + 1),
+    ]);
     let state_output = [cap_next, r0, r1];
 
     let input_req = HasherMessage {

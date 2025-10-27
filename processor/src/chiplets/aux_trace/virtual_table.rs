@@ -1,6 +1,11 @@
 use miden_air::{
     RowIndex,
-    trace::{LOG_PRECOMPILE_LABEL, chiplets::hasher::DIGEST_RANGE, main_trace::MainTrace},
+    trace::{
+        LOG_PRECOMPILE_LABEL,
+        chiplets::hasher::DIGEST_RANGE,
+        log_precompile::{HELPER_CAP_PREV_RANGE, STACK_CAP_NEXT_RANGE},
+        main_trace::MainTrace,
+    },
 };
 use miden_core::{Felt, OPCODE_LOGPRECOMPILE, precompile::PrecompileTranscriptState};
 
@@ -12,17 +17,6 @@ use crate::{
     debug::{BusDebugger, BusMessage},
     trace::AuxColumnBuilder,
 };
-
-// CONSTANTS
-// ================================================================================================
-
-/// Offset in helper registers where CAP_PREV (previous transcript capacity) is stored.
-/// Helper register 0 contains the hasher address; CAP_PREV occupies registers 1..5.
-const HELPER_REG_CAP_OFFSET: usize = 1;
-
-/// Base offset in the stack where CAP_NEXT (next transcript capacity) is written.
-/// CAP_NEXT is a 4-element word stored at stack indices 8..12 (read in reverse order).
-const STACK_CAP_BASE: usize = 8;
 
 // CHIPLETS VIRTUAL TABLE
 // ================================================================================================
@@ -298,13 +292,12 @@ fn build_log_precompile_capacity_remove<E: FieldElement<BaseField = Felt>>(
 ) -> E {
     // The previous transcript state is the capacity word provided non-deterministically in the
     // helper registers, offset by 1 to account for the hasher address
-    let state: PrecompileTranscriptState = [
-        main_trace.helper_register(HELPER_REG_CAP_OFFSET, row),
-        main_trace.helper_register(HELPER_REG_CAP_OFFSET + 1, row),
-        main_trace.helper_register(HELPER_REG_CAP_OFFSET + 2, row),
-        main_trace.helper_register(HELPER_REG_CAP_OFFSET + 3, row),
-    ]
-    .into();
+    let state = PrecompileTranscriptState::from([
+        main_trace.helper_register(HELPER_CAP_PREV_RANGE.start, row),
+        main_trace.helper_register(HELPER_CAP_PREV_RANGE.start + 1, row),
+        main_trace.helper_register(HELPER_CAP_PREV_RANGE.start + 2, row),
+        main_trace.helper_register(HELPER_CAP_PREV_RANGE.start + 3, row),
+    ]);
 
     let message = LogPrecompileMessage { state };
     let value = message.value(alphas);
@@ -322,12 +315,12 @@ fn build_log_precompile_capacity_insert<E: FieldElement<BaseField = Felt>>(
     alphas: &[E],
     _debugger: &mut BusDebugger<E>,
 ) -> E {
-    // The next transcript state was written in the next row as a Word at index 8..12 (reversed)
+    // The next transcript state was written in the next row as a Word at index 11..8 (reversed)
     let state: PrecompileTranscriptState = [
-        main_trace.stack_element(STACK_CAP_BASE + 3, row + 1),
-        main_trace.stack_element(STACK_CAP_BASE + 2, row + 1),
-        main_trace.stack_element(STACK_CAP_BASE + 1, row + 1),
-        main_trace.stack_element(STACK_CAP_BASE, row + 1),
+        main_trace.stack_element(STACK_CAP_NEXT_RANGE.end - 1, row + 1),
+        main_trace.stack_element(STACK_CAP_NEXT_RANGE.end - 2, row + 1),
+        main_trace.stack_element(STACK_CAP_NEXT_RANGE.end - 3, row + 1),
+        main_trace.stack_element(STACK_CAP_NEXT_RANGE.end - 4, row + 1),
     ]
     .into();
 

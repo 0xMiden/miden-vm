@@ -1,4 +1,4 @@
-use miden_air::trace::chiplets::hasher::HasherState;
+use miden_air::trace::chiplets::hasher::{HasherState, STATE_WIDTH};
 use miden_core::mast::MastForest;
 
 use super::{ExecutionError, Operation, Process};
@@ -237,14 +237,13 @@ impl Process {
         .into();
         self.pc_transcript_state = cap_next;
 
-        // Write the output to stack (top 12 elements): [R1, R0, CAP_NEXT] from top to bottom
-        // The output_state array [CAP_NEXT, R0, R1] is written in reverse via (11-i) indexing
-        for (i, elt) in output_state.iter().enumerate() {
-            self.stack.set(11 - i, *elt);
+        // Write the output to stack (top 12 elements) in reverse order: [R1, R0, CAP_NEXT].
+        for i in 0..STATE_WIDTH {
+            self.stack.set(i, output_state[STATE_WIDTH - 1 - i]);
         }
 
         // Copy state for the rest of the stack
-        self.stack.copy_state(12);
+        self.stack.copy_state(STATE_WIDTH);
 
         Ok(())
     }
