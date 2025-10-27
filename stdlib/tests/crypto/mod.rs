@@ -5,6 +5,7 @@ mod blake3;
 mod circuit_evaluation;
 mod ecdsa_secp256k1;
 mod ecdsa_secp256k1_deprecated;
+mod eddsa_ed25519;
 mod elgamal;
 mod fri;
 mod keccak256;

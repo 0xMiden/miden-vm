@@ -10,6 +10,7 @@ use miden_processor::ProcessState;
 pub(crate) const BYTES_PER_U32: usize = size_of::<u32>();
 
 pub mod ecdsa;
+pub mod eddsa25519;
 pub mod falcon_div;
 pub mod keccak256;
 pub mod smt_peek;
