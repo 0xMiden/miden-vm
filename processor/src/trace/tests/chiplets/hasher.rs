@@ -455,7 +455,8 @@ pub fn b_chip_log_precompile() {
     };
     // Stack inputs are specified deepest-first: [1,2,3,4,5,6,7,8]. The VM reverses them at
     // initialization, so the live stack holds [8,7,6,5,4,3,2,1] with 8 on top. Because
-    // `stack.get_word` returns words in little-endian order, `COMM` is read as
+    // `stack.get_word` collects elements in reverse order from the stack slots (i.e.,
+    // [stack[3], stack[2], stack[1], stack[0]]), `COMM` is read as
     // [5,6,7,8] from stack slots 0-3 and `TAG` as [1,2,3,4] from slots 4-7.
     let stack = vec![1, 2, 3, 4, 5, 6, 7, 8];
     let trace = build_trace_from_program(&program, &stack);

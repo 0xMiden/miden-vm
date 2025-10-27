@@ -86,13 +86,9 @@ pub mod log_precompile {
     // The hasher permutation uses a 12-element state. For `log_precompile` the state is interpreted
     // differently for the input (`[CAP_PREV, TAG, COMM]`) and output (`[CAP_NEXT, R0, R1]`) words.
 
-    pub const STATE_CAP_PREV_RANGE: Range<usize> = range(0, CAPACITY_LEN);
-    pub const STATE_TAG_RANGE: Range<usize> = range(STATE_CAP_PREV_RANGE.end, DIGEST_LEN);
-    pub const STATE_COMM_RANGE: Range<usize> = range(STATE_TAG_RANGE.end, DIGEST_LEN);
-
-    pub const STATE_CAP_NEXT_RANGE: Range<usize> = STATE_CAP_PREV_RANGE;
-    pub const STATE_R0_RANGE: Range<usize> = STATE_TAG_RANGE;
-    pub const STATE_R1_RANGE: Range<usize> = STATE_COMM_RANGE;
+    pub const STATE_CAP_RANGE: Range<usize> = range(0, CAPACITY_LEN);
+    pub const STATE_R0_RANGE: Range<usize> = range(STATE_CAP_RANGE.end, DIGEST_LEN);
+    pub const STATE_R1_RANGE: Range<usize> = range(STATE_R0_RANGE.end, DIGEST_LEN);
 }
 
 // Range check trace

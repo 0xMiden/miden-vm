@@ -1,15 +1,11 @@
-use miden_air::trace::chiplets::hasher::{HasherState, STATE_WIDTH};
+use miden_air::trace::{
+    chiplets::hasher::{HasherState, STATE_WIDTH},
+    log_precompile::STATE_CAP_RANGE,
+};
 use miden_core::mast::MastForest;
 
 use super::{ExecutionError, Operation, Process};
 use crate::{ErrorContext, Felt, Word};
-
-// CONSTANTS
-// ================================================================================================
-
-/// Offset constants for extracting words from RPO permutation output state.
-/// The output state layout is [CAP_NEXT, R0, R1] where each is a 4-element word.
-const CAP_NEXT_START: usize = 0;
 
 // CRYPTOGRAPHIC OPERATIONS
 // ================================================================================================
@@ -228,13 +224,12 @@ impl Process {
         );
 
         // Update the processor's precompile sponge capacity with CAP_NEXT
-        let cap_next: Word = [
-            output_state[CAP_NEXT_START],
-            output_state[CAP_NEXT_START + 1],
-            output_state[CAP_NEXT_START + 2],
-            output_state[CAP_NEXT_START + 3],
-        ]
-        .into();
+        let cap_next = Word::from([
+            output_state[STATE_CAP_RANGE.start],
+            output_state[STATE_CAP_RANGE.start + 1],
+            output_state[STATE_CAP_RANGE.start + 2],
+            output_state[STATE_CAP_RANGE.start + 3],
+        ]);
         self.pc_transcript_state = cap_next;
 
         // Write the output to stack (top 12 elements) in reverse order: [R1, R0, CAP_NEXT].

@@ -1,4 +1,7 @@
-use miden_air::trace::{decoder::NUM_USER_OP_HELPERS, log_precompile::STATE_CAP_NEXT_RANGE};
+use miden_air::trace::{
+    decoder::NUM_USER_OP_HELPERS,
+    log_precompile::{STATE_CAP_RANGE, STATE_R0_RANGE, STATE_R1_RANGE},
+};
 use miden_core::{
     Felt, QuadFelt, Word, ZERO, chiplets::hasher::STATE_WIDTH, mast::MastForest,
     stack::MIN_STACK_DEPTH, utils::range,
@@ -230,16 +233,16 @@ pub(super) fn op_log_precompile<P: Processor>(
 
     // Build the full 12-element hasher state for RPO permutation
     // State layout: [CAP_PREV, TAG, COMM]
-    let mut hasher_state: [Felt; 12] = [ZERO; 12];
-    hasher_state[0..4].copy_from_slice(cap_prev.as_slice());
-    hasher_state[4..8].copy_from_slice(tag.as_slice());
-    hasher_state[8..12].copy_from_slice(comm.as_slice());
+    let mut hasher_state: [Felt; STATE_WIDTH] = [ZERO; 12];
+    hasher_state[STATE_CAP_RANGE].copy_from_slice(cap_prev.as_slice());
+    hasher_state[STATE_R0_RANGE].copy_from_slice(tag.as_slice());
+    hasher_state[STATE_R1_RANGE].copy_from_slice(comm.as_slice());
 
     // Perform the RPO permutation
     let (addr, output_state) = processor.hasher().permute(hasher_state);
 
     // Extract CAP_NEXT (first 4 elements), R0 (next 4 elements), R1 (last 4 elements)
-    let cap_next: Word = output_state[STATE_CAP_NEXT_RANGE.clone()]
+    let cap_next: Word = output_state[STATE_CAP_RANGE.clone()]
         .try_into()
         .expect("cap_next slice has length 4");
 

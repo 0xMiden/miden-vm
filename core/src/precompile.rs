@@ -307,7 +307,8 @@ pub trait PrecompileVerifier: Send + Sync {
 ///   commitment)
 ///
 /// # Implementation Note
-/// We store only the 4-element capacity portion between absorptions since the rate is ephemeral.
+/// We store only the 4-element capacity portion between absorptions since since the rate is always
+/// overwritten when absorbing blocks that are a multiple of the rate width.
 #[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
 pub struct PrecompileTranscript {
     /// The transcript state (capacity portion of the sponge).
