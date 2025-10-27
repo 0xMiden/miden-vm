@@ -20,6 +20,7 @@ use crate::handlers::{
     eddsa25519::{EDDSA25519_VERIFY_EVENT_NAME, EddsaPrecompile},
     falcon_div::{FALCON_DIV_EVENT_NAME, handle_falcon_div},
     keccak256::{KECCAK_HASH_MEMORY_EVENT_NAME, KeccakPrecompile},
+    sha2_512::{SHA2_512_HASH_MEMORY_EVENT_NAME, Sha512Precompile},
     smt_peek::{SMT_PEEK_EVENT_NAME, handle_smt_peek},
     sorted_array::{
         LOWERBOUND_ARRAY_EVENT_NAME, LOWERBOUND_KEY_VALUE_EVENT_NAME, handle_lowerbound_array,
@@ -75,6 +76,7 @@ impl StdLibrary {
     pub fn handlers(&self) -> Vec<(EventName, Arc<dyn EventHandler>)> {
         vec![
             (KECCAK_HASH_MEMORY_EVENT_NAME, Arc::new(KeccakPrecompile)),
+            (SHA2_512_HASH_MEMORY_EVENT_NAME, Arc::new(Sha512Precompile)),
             (ECDSA_VERIFY_EVENT_NAME, Arc::new(EcdsaPrecompile)),
             (EDDSA25519_VERIFY_EVENT_NAME, Arc::new(EddsaPrecompile)),
             (SMT_PEEK_EVENT_NAME, Arc::new(handle_smt_peek)),
@@ -90,6 +92,7 @@ impl StdLibrary {
     pub fn verifier_registry(&self) -> PrecompileVerifierRegistry {
         PrecompileVerifierRegistry::new()
             .with_verifier(&KECCAK_HASH_MEMORY_EVENT_NAME, Arc::new(KeccakPrecompile))
+            .with_verifier(&SHA2_512_HASH_MEMORY_EVENT_NAME, Arc::new(Sha512Precompile))
             .with_verifier(&ECDSA_VERIFY_EVENT_NAME, Arc::new(EcdsaPrecompile))
             .with_verifier(&EDDSA25519_VERIFY_EVENT_NAME, Arc::new(EddsaPrecompile))
     }

@@ -34,6 +34,17 @@ Internally, the result of the computation is provided non-deterministically. The
 | hash_1to1   | Computes Keccak256 hash of a single 256-bit input.<br /><br />Input: `[INPUT_U32[8], ...]`<br />Output: `[DIGEST_U32[8], ...]`<br /><br />Where<br />- `DIGEST_U32[8] = [d_0, ..., d_7] = Keccak256(INPUT_U8[32])`<br />- `INPUT_U32[8] = [i_0, ..., i_7] = [INPUT_LO, INPUT_HI] ~ INPUT_U8[32]` with `u32` packing<br />                                                                                                                                                                          |
 | hash_2to1   | Merges two 256-bit digests via Keccak256 hash.<br /><br />Input: `[INPUT_L_U32[8], INPUT_R_U32[8], ...]`<br />Output: `[DIGEST_U32[8], ...]`<br /><br />Where<br />- `INPUT_L_U32[8] = [l_0, ..., l_7] = [INPUT_L_LO, INPUT_L_HI] ~ INPUT_L_U8[32]`<br />- `INPUT_R_U32[8] = [r_0, ..., r_7] = [INPUT_R_LO, INPUT_R_HI] ~ INPUT_R_U8[32]`<br />- `DIGEST_U32[8] = [d_0, ..., d_7] = Keccak256(INPUT_L_U8[32] \|\| INPUT_R_U8[32])`<br />                                                           |
 
+## SHA2-512
+Module `std::crypto::hashes::sha2_512` contains procedures for computing hashes using the SHA2‑512 hash function.
+
+Data representation and u32/u8 packing conventions are the same as in Keccak256. The only difference is the digest size: SHA2‑512 digests are 64 bytes, represented as `DIGEST_U32[16] = [d_0, ..., d_15]`.
+
+Internally, the result of the computation is provided non‑deterministically via a precompile. The VM records this computation so that it can be verified externally.
+
+| Procedure   | Description |
+|-------------|-------------|
+| hash_memory | Computes SHA2‑512 hash of data stored in memory.<br /><br />Input: `[ptr, len_bytes, ...]`<br />Output: `[DIGEST_U32[16], ...]`<br /><br />Where:<br />- `ptr`: word‑aligned memory address containing `INPUT_U32[len_u32]` where `len_u32=⌈len_bytes/4⌉`<br />- `len_bytes`: number of bytes to hash<br />- `INPUT_U32[len_u32] ~ INPUT_U8[len_bytes]` with u32 packing (unused bytes in final u32 must be 0)<br />- `DIGEST_U32[16] = [d_0, ..., d_15] = SHA2_512(INPUT_U8[len_bytes])` |
+
 ## SHA256
 Module `std::crypto::hashes::sha256` contains procedures for computing hashes using [SHA256](https://en.wikipedia.org/wiki/SHA-2) hash function. The input and output elements are assumed to contain one 32-bit value per element.
 

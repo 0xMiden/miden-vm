@@ -10,4 +10,5 @@ mod fri;
 mod keccak256;
 mod rpo;
 mod sha256;
+mod sha2_512;
 mod stark;
