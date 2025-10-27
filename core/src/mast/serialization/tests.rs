@@ -534,7 +534,7 @@ fn mast_forest_basic_block_serialization_no_decorator_duplication() {
     );
 
     // Verify that the op-indexed decorator is only in the indexed decorator list
-    let indexed_decorators: Vec<_> = deserialized_block.indexed_decorator_iter().collect();
+    let indexed_decorators: Vec<_> = deserialized_block.indexed_decorator_iter(&forest).collect();
     assert_eq!(indexed_decorators.len(), 1, "Should have exactly one op-indexed decorator");
     assert_eq!(indexed_decorators[0].1, op_deco, "Op-indexed decorator should be preserved");
 
@@ -549,7 +549,7 @@ fn mast_forest_basic_block_serialization_no_decorator_duplication() {
     );
 
     // Verify that all decorators() method returns all decorators (this is the full iterator)
-    let all_decorators: Vec<_> = deserialized_block.decorators().collect();
+    let all_decorators: Vec<_> = deserialized_block.decorators(&forest).collect();
     assert_eq!(all_decorators.len(), 3, "decorators() should return all 3 decorators");
 
     // Verify the order: before_enter, op-indexed, after_exit

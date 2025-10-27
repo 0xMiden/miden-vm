@@ -141,7 +141,7 @@ impl Serializable for MastForest {
                     let ops_offset = basic_block_data_builder.encode_basic_block(basic_block);
 
                     basic_block_decorators
-                        .push((mast_node_id, basic_block.raw_op_indexed_decorators()));
+                        .push((mast_node_id, basic_block.raw_op_indexed_decorators(self)));
 
                     ops_offset
                 } else {

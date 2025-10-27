@@ -833,7 +833,7 @@ impl Assembler {
                         let first_repeat_builder = block_builder.mast_forest_builder()
                             [repeat_node_id]
                             .clone()
-                            .to_builder()
+                            .to_builder(block_builder.mast_forest_builder().mast_forest())
                             .with_before_enter(decorator_ids);
                         let first_repeat_node_id = block_builder
                             .mast_forest_builder_mut()

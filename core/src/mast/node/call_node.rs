@@ -71,7 +71,10 @@ impl CallNode {
 }
 
 impl MastNodeErrorContext for CallNode {
-    fn decorators(&self) -> impl Iterator<Item = DecoratedOpLink> {
+    fn decorators<'a>(
+        &'a self,
+        _forest: &'a MastForest,
+    ) -> impl Iterator<Item = DecoratedOpLink> + 'a {
         self.before_enter.iter().chain(&self.after_exit).copied().enumerate()
     }
 }
@@ -239,7 +242,7 @@ impl MastNodeExt for CallNode {
 
     type Builder = CallNodeBuilder;
 
-    fn to_builder(self) -> Self::Builder {
+    fn to_builder(self, _forest: &MastForest) -> Self::Builder {
         let builder = if self.is_syscall {
             CallNodeBuilder::new_syscall(self.callee)
         } else {

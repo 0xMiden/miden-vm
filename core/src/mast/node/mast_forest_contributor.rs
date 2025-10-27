@@ -388,7 +388,7 @@ mod round_trip_tests {
 
         // perform round-trip
         let join_node = forest.get_node_by_id(join_id).unwrap().clone();
-        let rebuilt_node = join_node.clone().to_builder().build(&forest).unwrap();
+        let rebuilt_node = join_node.clone().to_builder(&forest).build(&forest).unwrap();
 
         assert_eq!(join_node, rebuilt_node);
 
