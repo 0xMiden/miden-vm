@@ -44,11 +44,11 @@ pub fn handle_lowerbound_array(process: &ProcessState) -> Result<Vec<AdviceMutat
 /// This event returns
 ///
 /// Inputs:
-///   Operand stack: [event_id, KEY, start_ptr, end_ptr, use_half_key, ...]
+///   Operand stack: [event_id, KEY, start_ptr, end_ptr, use_full_key, ...]
 ///   Advice stack: [...]
 ///
 /// Outputs:
-///   Operand stack: [event_id, KEY, start_ptr, end_ptr, use_half_key, ...]
+///   Operand stack: [event_id, KEY, start_ptr, end_ptr, use_full_key, ...]
 ///   Advice stack: [maybe_key_ptr, was_key_found, ...]
 ///
 /// # Errors
@@ -56,16 +56,16 @@ pub fn handle_lowerbound_array(process: &ProcessState) -> Result<Vec<AdviceMutat
 pub fn handle_lowerbound_key_value(
     process: &ProcessState,
 ) -> Result<Vec<AdviceMutation>, EventError> {
-    let use_half_key = process.get_stack_item(7);
-    debug_assert!(
-        use_half_key == Felt::ONE || use_half_key == Felt::ZERO,
-        "use_half_key must be bool, was {use_half_key}"
-    );
+    let use_full_key = process.get_stack_item(7);
 
-    let key_size = if use_half_key == Felt::ONE {
-        KeySize::Half
-    } else {
-        KeySize::Full
+    let key_size = match use_full_key.as_int() {
+        0 => KeySize::Half,
+        1 => KeySize::Full,
+        _ => {
+            return Err(EventError::from(alloc::format!(
+                "use_full_key must be 0 or 1, was {use_full_key}"
+            )));
+        },
     };
 
     push_lowerbound_result(process, 8, key_size)
@@ -124,9 +124,9 @@ fn push_lowerbound_result(
     // Helper function to get a word from memory and convert it to a LexicographicWord
     let get_word = {
         |addr: u32| {
-            process.get_mem_word(process.ctx(), addr).map(|word| {
-                LexicographicWord::new(word.unwrap_or(Word::empty())).zeroize_by_key_size(key_size)
-            })
+            process
+                .get_mem_word(process.ctx(), addr)
+                .map(|word| word_to_search_key(word.unwrap_or_default(), key_size))
         }
     };
 
@@ -164,27 +164,20 @@ fn push_lowerbound_result(
     ])])
 }
 
-trait LexicographicWordExt {
-    /// Selectivel zeroizes the felts in a [`LexicographicWord`] based on the provided [`KeySize`].
-    ///
-    /// - If the `key_size` is [`KeySize::Full`], the word is returned untouched.
-    /// - If the `key_size` is [`KeySize::Half`], the word is returned with the two least
-    ///   significant elements zeroized.
-    fn zeroize_by_key_size(self, key_size: KeySize) -> Self;
-}
+/// Selectively zeroizes the felts in a [`Word`] based on the provided [`KeySize`].
+///
+/// - If the `key_size` is [`KeySize::Full`], the word is returned untouched.
+/// - If the `key_size` is [`KeySize::Half`], the word is returned with the two least significant
+///   elements zeroized.
+fn word_to_search_key(mut word: Word, key_size: KeySize) -> LexicographicWord {
+    match key_size {
+        KeySize::Full => LexicographicWord::new(word),
+        KeySize::Half => {
+            word[0] = Felt::ZERO;
+            word[1] = Felt::ZERO;
 
-impl LexicographicWordExt for LexicographicWord {
-    fn zeroize_by_key_size(self, key_size: KeySize) -> Self {
-        match key_size {
-            KeySize::Full => self,
-            KeySize::Half => {
-                let mut word = self.into_inner();
-                word[0] = Felt::ZERO;
-                word[1] = Felt::ZERO;
-
-                LexicographicWord::new(word)
-            },
-        }
+            LexicographicWord::new(word)
+        },
     }
 }
 

@@ -161,11 +161,11 @@ end
 #! Inputs: [KEY, start_ptr, end_ptr]
 #! Output: [is_key_found, key_ptr, start_ptr, end_ptr]
 export.find_key_value
-    push.0
-    # => [use_half_key = 0, KEY, start_ptr, end_ptr]
+    push.1
+    # => [use_full_key = 1, KEY, start_ptr, end_ptr]
 
     movdn.6
-    # => [KEY, start_ptr, end_ptr, use_half_key]
+    # => [KEY, start_ptr, end_ptr, use_full_key]
 
     exec.find_partial_key_value
     # => [is_key_found, key_ptr, start_ptr, end_ptr]
@@ -192,11 +192,11 @@ export.find_half_key_value
     # => [key_prefix, key_suffix, 0, 0, start_ptr, end_ptr]
     # => [KEY, start_ptr, end_ptr]
 
-    push.1
-    # => [use_half_key = 0, KEY, start_ptr, end_ptr]
+    push.0
+    # => [use_full_key = 0, KEY, start_ptr, end_ptr]
 
     movdn.6
-    # => [KEY, start_ptr, end_ptr, use_half_key]
+    # => [KEY, start_ptr, end_ptr, use_full_key]
 
     exec.find_partial_key_value
     # => [is_key_found, key_ptr, start_ptr, end_ptr]
@@ -204,12 +204,12 @@ end
 
 #! Finds a key in a sorted array of (key, value) word tuples.
 #!
-#! - If use_half_key = 0, then a match on the entire KEY is required.
-#! - If use_half_key = 1, then the KEY's two least significant elements *must* be zeroes and
+#! - If use_full_key = 1, then a match on the entire KEY is required.
+#! - If use_full_key = 0, then the KEY's two least significant elements *must* be zeroes and
 #!   upon loading the key for comparison, its two least significant elements are zeroized.
 #!   This effectively means that only a match on the two most significant elements is required.
 #!
-#! Input:  [KEY, start_ptr, end_ptr, use_half_key]
+#! Input:  [KEY, start_ptr, end_ptr, use_full_key]
 #! Output: [is_key_found, key_ptr, start_ptr, end_ptr]
 #!
 #! # Panics
@@ -232,9 +232,9 @@ end
 proc.find_partial_key_value.1
     # Call the non-deterministic lowerbound advisor (5 cycles)
     emit.LOWERBOUND_KEY_VALUE_EVENT
-    # => [KEY, start_ptr, end_ptr, use_half_key]
+    # => [KEY, start_ptr, end_ptr, use_full_key]
 
-    # store use_half_key for later
+    # store use_full_key for later
     movup.6 loc_store.0
     # => [KEY, start_ptr, end_ptr]
 
@@ -372,35 +372,20 @@ end
 
 #! Loads a key from the pointer.
 #!
-#! If use_half_key is 1, the key is loaded with the two least significant elements set to zero,
-#! e.g.: [key3, key2, 0, 0], while if it is 0, the full key [key3, key2, key1, key0] is loaded.
+#! If use_full_key is 0, the key is loaded with the two least significant elements set to zero,
+#! e.g.: [key3, key2, 0, 0], while if it is 1, the full key [key3, key2, key1, key0] is loaded.
 #!
 #! This procedure avoids branches as an optimization.
 #!
-#! Inputs:  [use_half_key, key_ptr]
+#! Inputs:  [use_full_key, key_ptr]
 #! Outputs: [KEY]
 proc.load_key
-    swap
-    # => [key_ptr, use_half_key]
+    padw movup.5 mem_loadw
+    # => [FULL_KEY, use_full_key]
 
-    padw movup.4 mem_loadw
-    # => [FULL_KEY, use_half_key]
-
-    dupw
-    # => [FULL_KEY, FULL_KEY, use_half_key]
-
-    push.0 swap.4 drop
-    # => [[key3, key2, key1, 0], FULL_KEY, use_half_key]
-
-    push.0 swap.3 drop
-    # => [[key3, key2, 0, 0], FULL_KEY, use_half_key]
-    # => [HALF_KEY, FULL_KEY, use_half_key]
-
-    movup.8
-    # => [use_half_key, HALF_KEY, FULL_KEY]
-
-    # If use_half_key HALF_KEY remains.
-    # If !use_half_key FULL_KEY remains.
-    cdropw
+    # multiply the two least significant elements by use_full_key
+    movup.3 dup.4 mul
+    movup.3 movup.4 mul
+    movup.3 movup.3
     # => [KEY]
 end
