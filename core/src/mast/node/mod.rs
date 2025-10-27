@@ -8,8 +8,6 @@ pub use basic_block_node::{
 };
 use derive_more::From;
 use miden_utils_core_derive::MastNodeExt;
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 
 mod call_node;
 pub use call_node::{CallNode, CallNodeBuilder};
@@ -85,7 +83,6 @@ pub trait MastNodeExt {
 // ================================================================================================
 
 #[derive(Debug, Clone, PartialEq, Eq, MastNodeExt, From)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[mast_node_ext(builder = "MastNodeBuilder")]
 pub enum MastNode {
     Block(BasicBlockNode),
