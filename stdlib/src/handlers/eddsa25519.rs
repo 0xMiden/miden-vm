@@ -22,8 +22,6 @@ use miden_crypto::{
 };
 use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessState};
 
-
-
 use crate::handlers::{MemoryReadError, bytes_to_packed_u32_felts, read_memory_packed_u32};
 
 // CONSTANTS

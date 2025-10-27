@@ -13,6 +13,7 @@ pub mod ecdsa;
 pub mod eddsa25519;
 pub mod falcon_div;
 pub mod keccak256;
+pub mod sha2_512;
 pub mod smt_peek;
 pub mod sorted_array;
 pub mod u64_div;

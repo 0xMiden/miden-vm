@@ -39,6 +39,7 @@ miden-processor.workspace = true
 miden-utils-sync.workspace = true
 
 # External dependencies
+sha2.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
@@ -55,7 +56,6 @@ rand = { version = "0.9", default-features = false }
 rand_chacha = { version = "0.9", default-features = false }
 rstest = "0.26"
 serde_json.workspace = true
-sha2 = "0.10"
 sha3 = "0.10"
 winter-air.workspace = true
 winter-fri.workspace = true

@@ -12,4 +12,5 @@ mod keccak256;
 mod keccak256_deprecated;
 mod rpo;
 mod sha256;
+mod sha2_512;
 mod stark;
