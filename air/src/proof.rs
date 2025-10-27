@@ -20,7 +20,7 @@ use winter_air::proof::Proof;
 pub struct ExecutionProof {
     pub proof: Proof,
     pub hash_fn: HashFunction,
-    pub precompile_requests: Vec<PrecompileRequest>,
+    pub pc_requests: Vec<PrecompileRequest>,
 }
 
 impl ExecutionProof {
@@ -32,9 +32,9 @@ impl ExecutionProof {
     pub const fn new(
         proof: Proof,
         hash_fn: HashFunction,
-        precompile_requests: Vec<PrecompileRequest>,
+        pc_requests: Vec<PrecompileRequest>,
     ) -> Self {
-        Self { proof, hash_fn, precompile_requests }
+        Self { proof, hash_fn, pc_requests }
     }
 
     // PUBLIC ACCESSORS
@@ -52,7 +52,7 @@ impl ExecutionProof {
 
     /// Returns the list of precompile requests made during the execution of the program.
     pub fn precompile_requests(&self) -> &[PrecompileRequest] {
-        &self.precompile_requests
+        &self.pc_requests
     }
 
     /// Returns conjectured security level of this proof in bits.
@@ -88,7 +88,7 @@ impl ExecutionProof {
 
     /// Returns components of this execution proof.
     pub fn into_parts(self) -> (HashFunction, Proof, Vec<PrecompileRequest>) {
-        (self.hash_fn, self.proof, self.precompile_requests)
+        (self.hash_fn, self.proof, self.pc_requests)
     }
 }
 
@@ -177,7 +177,7 @@ impl Serializable for ExecutionProof {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         self.proof.write_into(target);
         self.hash_fn.write_into(target);
-        self.precompile_requests.write_into(target);
+        self.pc_requests.write_into(target);
     }
 }
 
@@ -185,9 +185,9 @@ impl Deserializable for ExecutionProof {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let proof = Proof::read_from(source)?;
         let hash_fn = HashFunction::read_from(source)?;
-        let precompile_requests = Vec::<PrecompileRequest>::read_from(source)?;
+        let pc_requests = Vec::<PrecompileRequest>::read_from(source)?;
 
-        Ok(ExecutionProof { proof, hash_fn, precompile_requests })
+        Ok(ExecutionProof { proof, hash_fn, pc_requests })
     }
 }
 
@@ -203,7 +203,7 @@ impl ExecutionProof {
         ExecutionProof {
             proof: Proof::new_dummy(),
             hash_fn: HashFunction::Blake3_192,
-            precompile_requests: Vec::new(),
+            pc_requests: Vec::new(),
         }
     }
 }

@@ -57,13 +57,13 @@ impl Processor for FastProcessor {
     }
 
     #[inline(always)]
-    fn precompile_transcript_state(&self) -> PrecompileTranscriptState {
-        self.precompile_transcript.state()
+    fn pc_transcript_state(&self) -> PrecompileTranscriptState {
+        self.pc_transcript.state()
     }
 
     #[inline(always)]
-    fn set_precompile_transcript_state(&mut self, state: PrecompileTranscriptState) {
-        self.precompile_transcript = PrecompileTranscript::from_state(state);
+    fn set_pc_transcript_state(&mut self, state: PrecompileTranscriptState) {
+        self.pc_transcript = PrecompileTranscript::from_state(state);
     }
 
     /// Checks that the evaluation of an arithmetic circuit is equal to zero.

@@ -4,8 +4,8 @@ use miden_assembly_syntax::{
 };
 use miden_core::{Felt, Operation::*};
 
-use super::{BasicBlockBuilder, push_felt, push_u32_value};
-use crate::ProcedureContext;
+use super::{BasicBlockBuilder, push_u32_value};
+use crate::{ProcedureContext, fmp::push_offset_fmp_sequence};
 
 // INSTRUCTION PARSERS
 // ================================================================================================
@@ -117,8 +117,8 @@ pub fn mem_write_imm(
 // HELPER FUNCTIONS
 // ================================================================================================
 
-/// Appends a sequence of operations to the span needed for converting procedure local index to
-/// absolute memory address. This consists in calculating the offset of the local value from the
+/// Appends a sequence of operations to the basic block needed for converting procedure local index
+/// to absolute memory address. This consists in calculating the offset of the local value from the
 /// frame pointer and pushing the result onto the stack.
 ///
 /// This operation takes:
@@ -183,9 +183,8 @@ pub fn local_to_absolute_addr(
         );
     }
 
-    let fmp_offset_of_local = num_proc_locals - index_of_local;
-    push_felt(block_builder, -Felt::from(fmp_offset_of_local));
-    block_builder.push_op(FmpAdd);
+    let fmp_offset_of_local = -Felt::from(num_proc_locals - index_of_local);
+    block_builder.push_ops(push_offset_fmp_sequence(fmp_offset_of_local));
 
     Ok(())
 }

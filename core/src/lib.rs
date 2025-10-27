@@ -125,7 +125,7 @@ pub mod stack;
 pub use stack::{StackInputs, StackOutputs};
 
 mod event_id;
-pub use event_id::EventId;
+pub use event_id::{EventId, EventName};
 
 pub mod sys_events;
 
@@ -139,3 +139,13 @@ pub mod utils;
 pub use miden_utils_indexing::{
     DenseIdMap, Idx, IndexVec, IndexedVecError, LookupByIdx, newtype_id,
 };
+
+// CONSTANTS
+// ================================================================================================
+
+/// The initial value for the frame pointer, corresponding to the start address for procedure
+/// locals.
+pub const FMP_INIT_VALUE: Felt = Felt::new(2_u64.pow(31));
+
+/// The address where the frame pointer is stored in memory.
+pub const FMP_ADDR: Felt = Felt::new(u32::MAX as u64 - 1_u64);

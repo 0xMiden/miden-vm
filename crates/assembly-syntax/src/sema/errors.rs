@@ -137,20 +137,6 @@ pub enum SemanticAnalysisError {
         #[label]
         span: SourceSpan,
     },
-    #[error("invalid syscall: cannot make a syscall from within the kernel")]
-    #[diagnostic(help("syscalls are only valid outside the kernel, you should use exec instead"))]
-    SyscallInKernel {
-        #[label]
-        span: SourceSpan,
-    },
-    #[error("invalid call: kernel modules cannot make calls to external procedures")]
-    #[diagnostic(help(
-        "this call is being made from a kernel module, and may only refer to local procedures"
-    ))]
-    CallInKernel {
-        #[label]
-        span: SourceSpan,
-    },
     #[error("invalid instruction usage: 'caller' is only valid in kernel modules")]
     #[diagnostic()]
     CallerInKernel {

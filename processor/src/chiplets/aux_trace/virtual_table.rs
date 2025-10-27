@@ -1,6 +1,11 @@
 use miden_air::{
     RowIndex,
-    trace::{LOG_PRECOMPILE_LABEL, chiplets::hasher::DIGEST_RANGE, main_trace::MainTrace},
+    trace::{
+        LOG_PRECOMPILE_LABEL,
+        chiplets::hasher::DIGEST_RANGE,
+        log_precompile::{HELPER_CAP_PREV_RANGE, STACK_CAP_NEXT_RANGE},
+        main_trace::MainTrace,
+    },
 };
 use miden_core::{Felt, OPCODE_LOGPRECOMPILE, precompile::PrecompileTranscriptState};
 
@@ -12,6 +17,9 @@ use crate::{
     debug::{BusDebugger, BusMessage},
     trace::AuxColumnBuilder,
 };
+
+// CHIPLETS VIRTUAL TABLE
+// ================================================================================================
 
 /// Describes how to construct the execution trace of the chiplets virtual table auxiliary trace
 /// column. This column enables communication between the different chiplets, in particular:
@@ -61,7 +69,7 @@ where
         _debugger: &mut BusDebugger<E>,
     ) -> E {
         let op_code = main_trace.get_op_code(row).as_int() as u8;
-        let log_precompile_request = if op_code == OPCODE_LOGPRECOMPILE {
+        let log_pc_request = if op_code == OPCODE_LOGPRECOMPILE {
             build_log_precompile_capacity_remove(main_trace, row, alphas, _debugger)
         } else {
             E::ONE
@@ -75,9 +83,7 @@ where
             E::ONE
         };
 
-        chiplets_vtable_remove_sibling(main_trace, alphas, row)
-            * request_ace
-            * log_precompile_request
+        chiplets_vtable_remove_sibling(main_trace, alphas, row) * request_ace * log_pc_request
     }
 
     fn get_responses_at(
@@ -88,13 +94,13 @@ where
         _debugger: &mut BusDebugger<E>,
     ) -> E {
         let op_code = main_trace.get_op_code(row).as_int() as u8;
-        let log_precompile_response = if op_code == OPCODE_LOGPRECOMPILE {
+        let log_pc_response = if op_code == OPCODE_LOGPRECOMPILE {
             build_log_precompile_capacity_insert(main_trace, row, alphas, _debugger)
         } else {
             E::ONE
         };
 
-        chiplets_vtable_add_sibling(main_trace, alphas, row) * log_precompile_response
+        chiplets_vtable_add_sibling(main_trace, alphas, row) * log_pc_response
     }
 
     fn init_requests(
@@ -286,8 +292,12 @@ fn build_log_precompile_capacity_remove<E: FieldElement<BaseField = Felt>>(
 ) -> E {
     // The previous transcript state is the capacity word provided non-deterministically in the
     // helper registers, offset by 1 to account for the hasher address
-    let state: PrecompileTranscriptState =
-        [1, 2, 3, 4].map(|idx| main_trace.helper_register(idx, row)).into();
+    let state = PrecompileTranscriptState::from([
+        main_trace.helper_register(HELPER_CAP_PREV_RANGE.start, row),
+        main_trace.helper_register(HELPER_CAP_PREV_RANGE.start + 1, row),
+        main_trace.helper_register(HELPER_CAP_PREV_RANGE.start + 2, row),
+        main_trace.helper_register(HELPER_CAP_PREV_RANGE.start + 3, row),
+    ]);
 
     let message = LogPrecompileMessage { state };
     let value = message.value(alphas);
@@ -305,9 +315,14 @@ fn build_log_precompile_capacity_insert<E: FieldElement<BaseField = Felt>>(
     alphas: &[E],
     _debugger: &mut BusDebugger<E>,
 ) -> E {
-    // The next transcript state was written in the next row as a Word at index 8..12 (reversed)
-    let state: PrecompileTranscriptState =
-        [11, 10, 9, 8].map(|idx| main_trace.stack_element(idx, row + 1)).into();
+    // The next transcript state was written in the next row as a Word at index 11..8 (reversed)
+    let state: PrecompileTranscriptState = [
+        main_trace.stack_element(STACK_CAP_NEXT_RANGE.end - 1, row + 1),
+        main_trace.stack_element(STACK_CAP_NEXT_RANGE.end - 2, row + 1),
+        main_trace.stack_element(STACK_CAP_NEXT_RANGE.end - 3, row + 1),
+        main_trace.stack_element(STACK_CAP_NEXT_RANGE.end - 4, row + 1),
+    ]
+    .into();
 
     let message = LogPrecompileMessage { state };
     let value = message.value(alphas);

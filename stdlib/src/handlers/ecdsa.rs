@@ -33,7 +33,7 @@
 use alloc::{vec, vec::Vec};
 
 use miden_core::{
-    EventId,
+    EventName,
     precompile::{PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileVerifier},
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
@@ -47,10 +47,7 @@ use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessState};
 use crate::handlers::{bytes_to_packed_u32_felts, read_memory_packed_u32};
 
 /// Qualified event name for the ECDSA signature verification event.
-pub const ECDSA_VERIFY_EVENT_NAME: &str = "stdlib::crypto::dsa::ecdsa::verify";
-/// Constant Event ID for the ECDSA verification event, derived via
-/// `EventId::from_name(ECDSA_VERIFY_EVENT_NAME)`
-pub const ECDSA_VERIFY_EVENT_ID: EventId = EventId::from_u64(7877366289282707984);
+pub const ECDSA_VERIFY_EVENT_NAME: EventName = EventName::new("stdlib::crypto::dsa::ecdsa::verify");
 
 const PUBLIC_KEY_LEN_BYTES: usize = 33;
 const MESSAGE_DIGEST_LEN_BYTES: usize = 32;
@@ -178,7 +175,7 @@ impl EcdsaRequest {
     pub fn as_precompile_request(&self) -> PrecompileRequest {
         let mut calldata = Vec::with_capacity(PRECOMPILE_REQUEST_LEN);
         self.write_into(&mut calldata);
-        PrecompileRequest::new(ECDSA_VERIFY_EVENT_ID, calldata)
+        PrecompileRequest::new(ECDSA_VERIFY_EVENT_NAME.to_event_id(), calldata)
     }
 
     /// Performs ECDSA signature verification and returns the result.
@@ -200,7 +197,7 @@ impl EcdsaRequest {
     pub fn as_precompile_commitment(&self) -> PrecompileCommitment {
         // Compute tag: [event_id, result, 0, 0]
         let result = self.result().into();
-        let tag = [ECDSA_VERIFY_EVENT_ID.as_felt(), result, ZERO, ZERO].into();
+        let tag = [ECDSA_VERIFY_EVENT_NAME.to_event_id().as_felt(), result, ZERO, ZERO].into();
 
         // Convert serialized bytes to field elements and hash
         let pk_comm = {
@@ -285,15 +282,4 @@ pub(crate) enum EcdsaError {
         #[source]
         source: DeserializationError,
     },
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_event_id() {
-        let expected_event_id = EventId::from_name(ECDSA_VERIFY_EVENT_NAME);
-        assert_eq!(ECDSA_VERIFY_EVENT_ID, expected_event_id);
-    }
 }

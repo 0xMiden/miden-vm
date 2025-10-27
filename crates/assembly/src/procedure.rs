@@ -19,6 +19,7 @@ use crate::{
 pub struct ProcedureContext {
     source_manager: Arc<dyn SourceManager>,
     gid: GlobalProcedureIndex,
+    is_program_entrypoint: bool,
     span: SourceSpan,
     name: QualifiedProcedureName,
     signature: Option<Arc<FunctionType>>,
@@ -32,6 +33,7 @@ pub struct ProcedureContext {
 impl ProcedureContext {
     pub fn new(
         gid: GlobalProcedureIndex,
+        is_program_entrypoint: bool,
         name: QualifiedProcedureName,
         visibility: Visibility,
         signature: Option<Arc<FunctionType>>,
@@ -41,6 +43,7 @@ impl ProcedureContext {
         Self {
             source_manager,
             gid,
+            is_program_entrypoint,
             span: name.span(),
             name,
             visibility,
@@ -67,6 +70,10 @@ impl ProcedureContext {
 impl ProcedureContext {
     pub fn id(&self) -> GlobalProcedureIndex {
         self.gid
+    }
+
+    pub fn is_program_entrypoint(&self) -> bool {
+        self.is_program_entrypoint
     }
 
     pub fn name(&self) -> &QualifiedProcedureName {

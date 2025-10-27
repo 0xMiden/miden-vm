@@ -36,7 +36,7 @@ fn adv_push_invalid() {
         test,
         ExecutionError::AdviceError {
             err: AdviceError::StackReadFailed, clk, ..
-        } if clk == RowIndex::from(2),
+        } if clk == RowIndex::from(6),
     )
 }
 
@@ -62,7 +62,7 @@ fn adv_loadw_invalid() {
         test,
         ExecutionError::AdviceError {
             err: AdviceError::StackReadFailed, clk, ..
-        } if clk == RowIndex::from(2),
+        } if clk == RowIndex::from(6),
     );
 }
 

@@ -94,7 +94,7 @@ pub struct SystemState {
     /// Precompile transcript state (sponge capacity) used for recording `log_precompile` calls
     /// - Initially [ZERO; 4]
     /// - Updated with each `log_precompile` invocation
-    pub precompile_transcript_state: PrecompileTranscriptState,
+    pub pc_transcript_state: PrecompileTranscriptState,
 }
 
 impl SystemState {
@@ -106,7 +106,7 @@ impl SystemState {
             fmp: processor.fmp,
             in_syscall: processor.in_syscall,
             fn_hash: processor.caller_hash,
-            precompile_transcript_state: processor.precompile_transcript.state(),
+            pc_transcript_state: processor.pc_transcript.state(),
         }
     }
 }

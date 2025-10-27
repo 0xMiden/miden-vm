@@ -3,7 +3,7 @@ use std::sync::Arc;
 use miden_air::ProvingOptions;
 use miden_assembly::Assembler;
 use miden_core::{
-    EventId, Felt, ProgramInfo, Word,
+    EventId, EventName, Felt, ProgramInfo, Word,
     precompile::{
         PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileTranscript,
         PrecompileVerifier, PrecompileVerifierRegistry,
@@ -49,7 +49,7 @@ fn log_precompile_request_procedure() {
     // `log_precompile` instruction, records the deferred request, and yields the expected
     // precompile sponge update. We run both direct execution (debug test) and a full
     // prove/verify cycle to exercise the deferred-request commitment path end-to-end.
-    const EVENT_NAME: &str = "test::sys::log_precompile";
+    const EVENT_NAME: EventName = EventName::new("test::sys::log_precompile");
     let event_id = EventId::from_name(EVENT_NAME);
     let calldata = vec![1u8, 2, 3, 4];
 
@@ -73,7 +73,7 @@ fn log_precompile_request_procedure() {
     let handler = DummyLogPrecompileHandler { event_id, calldata: calldata.clone() };
 
     let mut test = build_debug_test!(&source, &[]);
-    test.add_event_handler(event_id, handler.clone());
+    test.add_event_handler(EVENT_NAME, handler.clone());
 
     let trace = test.execute().expect("failed to execute log_precompile test");
 
@@ -104,7 +104,7 @@ fn log_precompile_request_procedure() {
     let mut host = DefaultHost::default();
     let stdlib = StdLibrary::default();
     host.load_library(&stdlib).expect("failed to load stdlib into host");
-    host.register_handler(event_id, Arc::new(handler.clone()))
+    host.register_handler(EVENT_NAME, Arc::new(handler.clone()))
         .expect("failed to register dummy handler");
 
     let options = ProvingOptions::with_96_bit_security(miden_air::HashFunction::Blake3_192);

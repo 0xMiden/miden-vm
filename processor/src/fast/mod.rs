@@ -129,7 +129,7 @@ pub struct FastProcessor {
 
     /// Transcript used to record commitments via `log_precompile` instruction (implemented via RPO
     /// sponge).
-    precompile_transcript: PrecompileTranscript,
+    pc_transcript: PrecompileTranscript,
 }
 
 impl FastProcessor {
@@ -196,7 +196,7 @@ impl FastProcessor {
             call_stack: Vec::new(),
             ace: Ace::default(),
             in_debug_mode,
-            precompile_transcript: PrecompileTranscript::new(),
+            pc_transcript: PrecompileTranscript::new(),
         }
     }
 
@@ -328,8 +328,7 @@ impl FastProcessor {
 
         // Pass the final precompile transcript from execution output to the trace generation
         // context
-        let context =
-            tracer.into_trace_generation_context(execution_output.final_precompile_transcript);
+        let context = tracer.into_trace_generation_context(execution_output.final_pc_transcript);
 
         Ok((execution_output, context))
     }
@@ -348,7 +347,7 @@ impl FastProcessor {
             stack: stack_outputs,
             advice: self.advice,
             memory: self.memory,
-            final_precompile_transcript: self.precompile_transcript,
+            final_pc_transcript: self.pc_transcript,
         })
     }
 
@@ -722,7 +721,7 @@ pub struct ExecutionOutput {
     pub stack: StackOutputs,
     pub advice: AdviceProvider,
     pub memory: Memory,
-    pub final_precompile_transcript: PrecompileTranscript,
+    pub final_pc_transcript: PrecompileTranscript,
 }
 
 // FAST PROCESS STATE

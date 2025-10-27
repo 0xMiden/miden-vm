@@ -26,7 +26,7 @@ The maximum allowed constraint degree in Miden VM is $9$. If a constraint degree
 ## VM components
 Miden VM consists of several interconnected components, each providing a specific set of functionality. These components are:
 
-* **System**, which is responsible for managing system data, including the current VM cycle (`clk`), the free memory pointer (`fmp`) used for specifying the region of memory available to procedure locals, and the current and parent execution contexts.
+* **System**, which is responsible for managing system data, including the current VM cycle (`clk`), and the current and parent execution contexts.
 * **Program decoder**, which is responsible for computing a commitment to the executing program and converting the program into a sequence of operations executed by the VM.
 * **Operand stack**, which is a push-down stack which provides operands for all operations executed by the VM.
 * **Range checker**, which is responsible for providing 16-bit range checks needed by other components.

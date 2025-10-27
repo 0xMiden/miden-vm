@@ -170,9 +170,12 @@ fn parse_module_with_ast(label: &str, file_path: &Path) -> io::Result<DocPayload
     // Extract procedures and their documentation
     let mut procedures = Vec::new();
     for export in module.procedures() {
-        let name = export.name().to_string();
-        let docs = export.docs().map(|d| d.to_string());
-        procedures.push((name, docs));
+        // Only include exported procedures (skip private procedures)
+        if export.visibility().is_exported() {
+            let name = export.name().to_string();
+            let docs = export.docs().map(|d| d.to_string());
+            procedures.push((name, docs));
+        }
     }
 
     Ok((module_docs, procedures))

@@ -91,7 +91,7 @@ pub fn build_trace(
         kernel_replay,
         hasher_for_chiplet,
         ace_replay,
-        final_precompile_transcript,
+        final_pc_transcript,
         fragment_size,
     } = trace_generation_context;
 
@@ -142,13 +142,7 @@ pub fn build_trace(
                         NUM_RAND_ROWS,
                     )
                 },
-                || {
-                    chiplets.into_trace(
-                        main_trace_len,
-                        NUM_RAND_ROWS,
-                        final_precompile_transcript.state(),
-                    )
-                },
+                || chiplets.into_trace(main_trace_len, NUM_RAND_ROWS, final_pc_transcript.state()),
             )
         },
     );
@@ -1787,12 +1781,12 @@ impl Processor for CoreTraceFragmentGenerator {
         &mut self.context.replay.hasher
     }
 
-    fn precompile_transcript_state(&self) -> PrecompileTranscriptState {
-        self.context.state.system.precompile_transcript_state
+    fn pc_transcript_state(&self) -> PrecompileTranscriptState {
+        self.context.state.system.pc_transcript_state
     }
 
-    fn set_precompile_transcript_state(&mut self, state: PrecompileTranscriptState) {
-        self.context.state.system.precompile_transcript_state = state;
+    fn set_pc_transcript_state(&mut self, state: PrecompileTranscriptState) {
+        self.context.state.system.pc_transcript_state = state;
     }
 
     fn op_eval_circuit(

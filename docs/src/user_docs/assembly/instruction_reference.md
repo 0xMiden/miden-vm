@@ -227,14 +227,14 @@ Memory is 0-initialized. Addresses are absolute `[0, 2^32)`. Locals are stored a
 
 #### Procedure Locals (Context-Specific)
 
-Locals are not 0-initialized. Max $2^{16}$ locals per procedure, $2^{30}$ total. Rounded up to multiple of 4.
+Locals are not 0-initialized. Max $2^{16}$ locals per procedure, $2^{31} - 1$ total. Rounded up to multiple of 4.
 
 | Instruction    | Stack Input      | Stack Output | Cycles | Notes                                                                                          |
 | -------------- | ---------------- | ------------ | ------ | ---------------------------------------------------------------------------------------------- |
-| `loc_load.i`   | `[ ... ]`        | `[v, ... ]`  | 3-4    | `v ← local[i]`. Pushes element from local memory at index `i`.                                 |
-| `loc_loadw.i`  | `[0,0,0,0, ...]` | `[A, ... ]`  | 3-4    | `A ← local[i..i+3]`. Reads word, `local[i+3]` is top of stack. Fails if `i` not multiple of 4. |
-| `loc_store.i`  | `[v, ... ]`      | `[ ... ]`    | 4-5    | `local[i] ← v`. Pops `v` to local memory at index `i`.                                         |
-| `loc_storew.i` | `[A, ... ]`      | `[A, ... ]`  | 3-4    | `local[i..i+3] ← A`. Stores word, top stack element at `local[i+3]`.                           |
+| `loc_load.i`   | `[ ... ]`        | `[v, ... ]`  | 5-6    | `v ← local[i]`. Pushes element from local memory at index `i`.                                 |
+| `loc_loadw.i`  | `[0,0,0,0, ...]` | `[A, ... ]`  | 5-6    | `A ← local[i..i+3]`. Reads word, `local[i+3]` is top of stack. Fails if `i` not multiple of 4. |
+| `loc_store.i`  | `[v, ... ]`      | `[ ... ]`    | 6-7    | `local[i] ← v`. Pops `v` to local memory at index `i`.                                         |
+| `loc_storew.i` | `[A, ... ]`      | `[A, ... ]`  | 5-6    | `local[i..i+3] ← A`. Stores word, top stack element at `local[i+3]`.                           |
 
 ## Cryptographic Operations
 

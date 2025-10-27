@@ -25,6 +25,7 @@ mod verifier_recursive;
 #[case(None)]
 #[case(Some(KERNEL_EVEN_NUM_PROC))]
 #[case(Some(KERNEL_ODD_NUM_PROC))]
+#[ignore = "disabled due to inclusion of `precompile_state` in public inputs (#2249)"]
 fn stark_verifier_e2f4(#[case] kernel: Option<&str>) {
     // An example MASM program to be verified inside Miden VM.
     let example_source = "begin

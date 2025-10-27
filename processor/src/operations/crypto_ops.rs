@@ -1,8 +1,15 @@
-use miden_air::trace::chiplets::hasher::HasherState;
+use miden_air::trace::chiplets::hasher::{HasherState, STATE_WIDTH};
 use miden_core::mast::MastForest;
 
 use super::{ExecutionError, Operation, Process};
 use crate::{ErrorContext, Felt, Word};
+
+// CONSTANTS
+// ================================================================================================
+
+/// Offset constants for extracting words from RPO permutation output state.
+/// The output state layout is [CAP_NEXT, R0, R1] where each is a 4-element word.
+const CAP_NEXT_START: usize = 0;
 
 // CRYPTOGRAPHIC OPERATIONS
 // ================================================================================================
@@ -204,7 +211,7 @@ impl Process {
         // Read TAG and COMM from stack, and CAP_PREV from the processor state
         let comm = self.stack.get_word(0);
         let tag = self.stack.get_word(4);
-        let cap_prev = self.precompile_transcript_state;
+        let cap_prev = self.pc_transcript_state;
 
         let input_state: HasherState = {
             let input_state_words = [cap_prev, tag, comm];
@@ -221,17 +228,22 @@ impl Process {
         );
 
         // Update the processor's precompile sponge capacity with CAP_NEXT
-        let cap_next =
-            Word::from([output_state[0], output_state[1], output_state[2], output_state[3]]);
-        self.precompile_transcript_state = cap_next;
+        let cap_next: Word = [
+            output_state[CAP_NEXT_START],
+            output_state[CAP_NEXT_START + 1],
+            output_state[CAP_NEXT_START + 2],
+            output_state[CAP_NEXT_START + 3],
+        ]
+        .into();
+        self.pc_transcript_state = cap_next;
 
-        // Write the output [CAP_NEXT, R0, R1] to the stack (top 12 elements) in reverse order
-        for (i, elt) in output_state.iter().enumerate() {
-            self.stack.set(11 - i, *elt);
+        // Write the output to stack (top 12 elements) in reverse order: [R1, R0, CAP_NEXT].
+        for i in 0..STATE_WIDTH {
+            self.stack.set(i, output_state[STATE_WIDTH - 1 - i]);
         }
 
         // Copy state for the rest of the stack
-        self.stack.copy_state(12);
+        self.stack.copy_state(STATE_WIDTH);
 
         Ok(())
     }

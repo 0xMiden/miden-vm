@@ -13,7 +13,7 @@ use miden_core::{
     precompile::{PrecompileCommitment, PrecompileVerifier},
 };
 use miden_stdlib::handlers::keccak256::{
-    KECCAK_HASH_MEMORY_EVENT_ID, KECCAK_HASH_MEMORY_EVENT_NAME, KeccakPrecompile, KeccakPreimage,
+    KECCAK_HASH_MEMORY_EVENT_NAME, KeccakPrecompile, KeccakPreimage,
 };
 
 use crate::helpers::{masm_push_felts, masm_store_felts};
@@ -135,7 +135,7 @@ fn test_keccak_hash_memory_impl(input_u8: &[u8]) {
 
     let deferred = output.advice_provider().precompile_requests().to_vec();
     assert_eq!(deferred.len(), 1, "expected a single deferred request");
-    assert_eq!(deferred[0].event_id(), KECCAK_HASH_MEMORY_EVENT_ID);
+    assert_eq!(deferred[0].event_id(), KECCAK_HASH_MEMORY_EVENT_NAME.to_event_id());
     assert_eq!(deferred[0].calldata(), preimage.as_ref());
     assert_eq!(deferred[0], preimage.into());
 

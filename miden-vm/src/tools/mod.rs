@@ -343,9 +343,9 @@ impl AsmOpStats {
 
 #[cfg(test)]
 mod tests {
-
     use miden_processor::{ChipletsLengths, DefaultHost, TraceLenSummary};
     use miden_vm::Assembler;
+    use pretty_assertions::assert_eq;
 
     use super::{AsmOpStats, ExecutionDetails, StackInputs, *};
 
@@ -383,15 +383,15 @@ mod tests {
             asm_op_stats: vec![
                 AsmOpStats::new("drop".to_string(), 1, 1),
                 AsmOpStats::new("dropw".to_string(), 1, 4),
-                AsmOpStats::new("loc_store".to_string(), 1, 4),
+                AsmOpStats::new("loc_store".to_string(), 1, 6),
                 AsmOpStats::new("mem_storew_be".to_string(), 1, 2),
                 AsmOpStats::new("movdn.2".to_string(), 1, 1),
                 AsmOpStats::new("push".to_string(), 2, 3),
             ],
             trace_len_summary: TraceLenSummary::new(
-                21,
+                38,
                 39,
-                ChipletsLengths::from_parts(8, 0, 2, 0),
+                ChipletsLengths::from_parts(16, 0, 8, 0),
             ),
             error: None,
         };

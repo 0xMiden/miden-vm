@@ -107,7 +107,7 @@ fn test_diagnostic_advice_map_key_not_found_1() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "advice provider error at clock cycle 4",
+        "advice provider error at clock cycle 8",
         "value for key 0x0000000000000000000000000000000001000000000000000200000000000000 not present in the advice map",
         regex!(r#",-\[test[\d]+:3:31\]"#),
         " 2 |         begin",
@@ -129,7 +129,7 @@ fn test_diagnostic_advice_map_key_not_found_2() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "advice provider error at clock cycle 4",
+        "advice provider error at clock cycle 8",
         "value for key 0x0000000000000000000000000000000001000000000000000200000000000000 not present in the advice map",
         regex!(r#",-\[test[\d]+:3:31\]"#),
         " 2 |         begin",
@@ -154,7 +154,7 @@ fn test_diagnostic_advice_stack_read_failed() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "advice provider error at clock cycle 2",
+        "advice provider error at clock cycle 6",
         "stack read failed",
         regex!(r#",-\[test[\d]+:3:18\]"#),
         " 2 |         begin",
@@ -179,7 +179,7 @@ fn test_diagnostic_divide_by_zero_1() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "division by zero at clock cycle 1",
+        "division by zero at clock cycle 5",
         regex!(r#",-\[test[\d]+:3:21\]"#),
         " 2 |         begin",
         " 3 |             trace.2 div",
@@ -200,7 +200,7 @@ fn test_diagnostic_divide_by_zero_2() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "division by zero at clock cycle 1",
+        "division by zero at clock cycle 5",
         regex!(r#",-\[test[\d]+:3:21\]"#),
         " 2 |         begin",
         " 3 |             trace.2 u32div",
@@ -272,7 +272,7 @@ fn test_diagnostic_failed_assertion() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "assertion failed at clock cycle 5 with error code: 0",
+        "assertion failed at clock cycle 9 with error code: 0",
         regex!(r#",-\[test[\d]+:4:13\]"#),
         " 3 |             push.1.2",
         " 4 |             assertz",
@@ -293,7 +293,7 @@ fn test_diagnostic_failed_assertion() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "assertion failed at clock cycle 5 with error message: some error message",
+        "assertion failed at clock cycle 9 with error message: some error message",
         regex!(r#",-\[test[\d]+:4:13\]"#),
         " 3 |             push.1.2",
         " 4 |             assertz.err=\"some error message\"",
@@ -315,7 +315,7 @@ fn test_diagnostic_failed_assertion() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "assertion failed at clock cycle 5 with error message: some error message",
+        "assertion failed at clock cycle 9 with error message: some error message",
         regex!(r#",-\[test[\d]+:5:13\]"#),
         " 4 |             push.1.2",
         " 5 |             assertz.err=ERR_MSG",
@@ -421,7 +421,7 @@ fn test_diagnostic_invalid_merkle_tree_node_index() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "advice provider error at clock cycle 2",
+        "advice provider error at clock cycle 6",
         "provided node index 16 is out of bounds for a merkle tree node at depth 4",
         regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
@@ -510,7 +510,7 @@ fn test_diagnostic_log_argument_zero() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "attempted to calculate integer logarithm with zero argument at clock cycle 2",
+        "attempted to calculate integer logarithm with zero argument at clock cycle 6",
         regex!(r#",-\[test[\d]+:3:21\]"#),
         " 2 |         begin",
         " 3 |             trace.2 ilog2",
@@ -537,7 +537,7 @@ fn test_diagnostic_unaligned_word_access() {
 
     assert_diagnostic_lines!(
         err,
-        "word memory access at address 3 in context 0 is unaligned at clock cycle 3",
+        "word memory access at address 3 in context 0 is unaligned at clock cycle 7",
         regex!(r#",-\[test[\d]+:4:22\]"#),
         " 3 |         begin",
         " 4 |             exec.foo mem_storew_be.3",
@@ -559,7 +559,7 @@ fn test_diagnostic_unaligned_word_access() {
 
     assert_diagnostic_lines!(
         err,
-        "word memory access at address 3 in context 0 is unaligned at clock cycle 2",
+        "word memory access at address 3 in context 0 is unaligned at clock cycle 6",
         regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
         " 3 |             mem_loadw_be.3",
@@ -689,7 +689,7 @@ fn test_diagnostic_merkle_store_lookup_failed() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "advice provider error at clock cycle 2",
+        "advice provider error at clock cycle 6",
         "failed to lookup value in Merkle store",
         "|",
         "`-> node Word([1, 0, 0, 0]) with index `depth=10, value=0` not found",
@@ -1020,15 +1020,13 @@ fn test_assert_messages() {
 }
 
 // Test the original issue with debug.stack.12 to see if it shows all items
+//
+// Updated in 2296: removed the 4 initial instructions, which are now inserted by the assembler for
+// initializing the FMP.
 #[test]
 fn test_debug_stack_issue_2295_original_repeat() {
     let source = "
     begin
-        push.4
-        push.8
-        drop
-        drop
-
         repeat.12
             push.42
         end

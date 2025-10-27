@@ -366,9 +366,10 @@ When the VM executes a `DYNCALL` operation, it does the following:
 
 1. Adds a tuple `(blk, p_addr, 0, ctx, fmp, b_0, b_1, fn_hash[0..3])` to the block stack table.
 2. Sends a memory read request to the memory chiplet, using `s0` as the memory address. The result `hash of callee` is placed in the decoder hasher trace at $h_0, h_1, h_2, h_3$.
-3. Adds the tuple `(blk, hash of callee, 0, 0)` to the block hash table.
-4. Initiates a 2-to-1 hash computation in the hash chiplet (as described [here](#simple-2-to-1-hash)) using `blk` as row address in the auxiliary hashing table and `[ZERO; 8]` as input values.
-5. Performs a stack left shift
+3. Sends a memory write request to the memory chiplet to set address `FMP_ADDR = 2^32 - 1` to `FMP_INIT_VALUE = 2^31` in the new memory context. This initializes the `fmp` in the new context.
+4. Adds the tuple `(blk, hash of callee, 0, 0)` to the block hash table.
+5. Initiates a 2-to-1 hash computation in the hash chiplet (as described [here](#simple-2-to-1-hash)) using `blk` as row address in the auxiliary hashing table and `[ZERO; 8]` as input values.
+6. Performs a stack left shift
     - Above `s16` was pulled from the stack overflow table if present; otherwise set to `0`.
 
 Similar to `CALL`, `DYNCALL` resets the `fmp`, sets up a new `ctx`, and sets the `fn_hash` registers to the callee hash. `in_syscall` needs to be 0, since calls are not allowed during a syscall.
@@ -451,7 +452,6 @@ Recall that the purpose of a `CALL` operation is to execute a procedure in a new
 
 Before a `CALL` operation, the prover populates $h_0, ..., h_3$ registers with the hash of the procedure being called. In the next row, the prover 
 
-- resets the FMP register (free memory pointer), 
 - sets the context ID to the next row's CLK value
 - sets the `fn hash` registers to the hash of the callee
     - This register is what the `caller` instruction uses to return the hash of the caller in a syscall
@@ -467,6 +467,7 @@ When the VM executes a `CALL` operation, it does the following:
 
 1. Adds a tuple `(blk, prnt, 0, p_ctx, p_fmp, p_b0, p_b1, prnt_fn_hash[0..4])` to the block stack table.
 2. Initiates a 2-to-1 hash computation in the hash chiplet (as described [here](#simple-2-to-1-hash)) using `blk` as row address in the auxiliary hashing table and $h_0, ..., h_3$ as input values.
+3. Sends a memory write request to the memory chiplet to set address `FMP_ADDR = 2^32 - 1` to `FMP_INIT_VALUE = 2^31` in the new memory context. This initializes the `fmp` in the new context.
 
 #### SYSCALL operation
 
@@ -474,7 +475,6 @@ Similarly to the `CALL` operation, a `SYSCALL` changes the execution context. Ho
 
 Before a `SYSCALL` operation, the prover populates $h_0, ..., h_3$ registers with the hash of the procedure being called. In the next row, the prover 
 
-- resets the FMP register (free memory pointer), 
 - sets the context ID to 0,
 - does NOT modify the `fn hash` register
     - Hence, the `fn hash` register contains the procedure hash of the caller, to be accessed by the `caller` instruction,

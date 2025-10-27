@@ -12,13 +12,14 @@ use miden_assembly_syntax::{
     library::LibraryExport,
 };
 use miden_core::{
-    AssemblyOp, Decorator, Felt, Kernel, Operation, Program, WORD_SIZE, Word,
+    AssemblyOp, Decorator, Kernel, Operation, Program, Word,
     mast::{DecoratorId, MastNodeExt, MastNodeId},
 };
 
 use crate::{
     GlobalProcedureIndex, ModuleIndex, Procedure, ProcedureContext,
     basic_block_builder::{BasicBlockBuilder, BasicBlockOrDecorators},
+    fmp::{fmp_end_frame_sequence, fmp_initialization_sequence, fmp_start_frame_sequence},
     linker::{
         CallerInfo, LinkLibrary, LinkLibraryKind, Linker, LinkerError, ModuleLink, ProcedureLink,
         ResolvedTarget,
@@ -468,7 +469,10 @@ impl Assembler {
 
                 for (proc_idx, fqn) in ast_module.exported_procedures() {
                     let gid = module_idx + proc_idx;
-                    self.compile_subgraph(gid, &mut mast_forest_builder)?;
+                    self.compile_subgraph(
+                        SubgraphRoot::not_as_entrypoint(gid),
+                        &mut mast_forest_builder,
+                    )?;
 
                     let node = mast_forest_builder
                         .get_procedure(gid)
@@ -540,7 +544,7 @@ impl Assembler {
         mast_forest_builder
             .merge_advice_map(self.linker[module_index].unwrap_ast().advice_map())?;
 
-        self.compile_subgraph(entrypoint, &mut mast_forest_builder)?;
+        self.compile_subgraph(SubgraphRoot::with_entrypoint(entrypoint), &mut mast_forest_builder)?;
         let entry_node_id = mast_forest_builder
             .get_procedure(entrypoint)
             .expect("compilation succeeded but root not found in cache")
@@ -563,12 +567,12 @@ impl Assembler {
     /// Returns an error if any of the provided Miden Assembly is invalid.
     fn compile_subgraph(
         &mut self,
-        root: GlobalProcedureIndex,
+        root: SubgraphRoot,
         mast_forest_builder: &mut MastForestBuilder,
     ) -> Result<(), Report> {
         let mut worklist: Vec<GlobalProcedureIndex> = self
             .linker
-            .topological_sort_from_root(root)
+            .topological_sort_from_root(root.proc_id)
             .map_err(|cycle| {
                 let iter = cycle.into_node_ids();
                 let mut nodes = Vec::with_capacity(iter.len());
@@ -585,13 +589,14 @@ impl Assembler {
 
         assert!(!worklist.is_empty());
 
-        self.process_graph_worklist(&mut worklist, mast_forest_builder)
+        self.process_graph_worklist(&mut worklist, &root, mast_forest_builder)
     }
 
     /// Compiles all procedures in the `worklist`.
     fn process_graph_worklist(
         &mut self,
         worklist: &mut Vec<GlobalProcedureIndex>,
+        root: &SubgraphRoot,
         mast_forest_builder: &mut MastForestBuilder,
     ) -> Result<(), Report> {
         // Process the topological ordering in reverse order (bottom-up), so that
@@ -620,8 +625,12 @@ impl Assembler {
                         name: proc.name().clone(),
                     };
                     let signature = self.linker.resolve_signature(procedure_gid)?;
+                    let is_program_entrypoint =
+                        root.is_program_entrypoint && root.proc_id == procedure_gid;
+
                     let pctx = ProcedureContext::new(
                         procedure_gid,
+                        is_program_entrypoint,
                         name,
                         proc.visibility(),
                         signature,
@@ -649,8 +658,12 @@ impl Assembler {
                         module: module.path().clone(),
                         name: proc_alias.name().clone(),
                     };
+                    // A program entrypoint is never an alias
+                    let is_program_entrypoint = false;
+
                     let mut pctx = ProcedureContext::new(
                         procedure_gid,
+                        is_program_entrypoint,
                         name,
                         ast::Visibility::Public,
                         None,
@@ -697,21 +710,24 @@ impl Assembler {
 
         let wrapper_proc = self.linker.get_procedure_unsafe(gid);
         let proc = wrapper_proc.unwrap_ast().unwrap_procedure();
-        let proc_body_id = if num_locals > 0 {
-            // For procedures with locals, we need to update fmp register before and after the
-            // procedure body is executed. Specifically:
-            // - to allocate procedure locals we need to increment fmp by the number of locals
-            //   (rounded up to the word size), and
-            // - to deallocate procedure locals we need to decrement it by the same amount.
-            let locals_frame = Felt::from(num_locals.next_multiple_of(WORD_SIZE as u16));
-            let wrapper = BodyWrapper {
-                prologue: vec![Operation::Push(locals_frame), Operation::FmpUpdate],
-                epilogue: vec![Operation::Push(-locals_frame), Operation::FmpUpdate],
-            };
-            self.compile_body(proc.iter(), &mut proc_ctx, Some(wrapper), mast_forest_builder)?
+        let body_wrapper = if proc_ctx.is_program_entrypoint() {
+            assert!(num_locals == 0, "program entrypoint cannot have locals");
+
+            Some(BodyWrapper {
+                prologue: fmp_initialization_sequence(),
+                epilogue: Vec::new(),
+            })
+        } else if num_locals > 0 {
+            Some(BodyWrapper {
+                prologue: fmp_start_frame_sequence(num_locals),
+                epilogue: fmp_end_frame_sequence(num_locals),
+            })
         } else {
-            self.compile_body(proc.iter(), &mut proc_ctx, None, mast_forest_builder)?
+            None
         };
+
+        let proc_body_id =
+            self.compile_body(proc.iter(), &mut proc_ctx, body_wrapper, mast_forest_builder)?;
 
         let proc_body_node = mast_forest_builder
             .get_mast_node(proc_body_id)
@@ -1036,6 +1052,25 @@ impl Assembler {
 
 // HELPERS
 // ================================================================================================
+
+/// Information about the root of a subgraph to be compiled.
+///
+/// `is_program_entrypoint` is true if the root procedure is the entrypoint of an executable
+/// program.
+struct SubgraphRoot {
+    proc_id: GlobalProcedureIndex,
+    is_program_entrypoint: bool,
+}
+
+impl SubgraphRoot {
+    fn with_entrypoint(proc_id: GlobalProcedureIndex) -> Self {
+        Self { proc_id, is_program_entrypoint: true }
+    }
+
+    fn not_as_entrypoint(proc_id: GlobalProcedureIndex) -> Self {
+        Self { proc_id, is_program_entrypoint: false }
+    }
+}
 
 /// Contains a set of operations which need to be executed before and after a sequence of AST
 /// nodes (i.e., code body).

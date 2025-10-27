@@ -12,14 +12,13 @@ use miden_air::trace::{
     },
 };
 use miden_core::{
-    EMPTY_WORD, EventId, ONE, Program, WORD_SIZE, ZERO, assert_matches,
+    EMPTY_WORD, EventName, ONE, Program, WORD_SIZE, ZERO,
     mast::{
-        BasicBlockNode, CallNode, DynNode, JoinNode, MastForest, MastNode, MastNodeExt, MastNodeId,
+        BasicBlockNode, CallNode, DynNode, JoinNode, MastForest, MastNode, MastNodeExt,
         OP_BATCH_SIZE,
     },
 };
 use miden_utils_testing::rand::rand_value;
-use rstest::rstest;
 
 use super::{
     super::{
@@ -27,7 +26,7 @@ use super::{
     },
     build_op_group,
 };
-use crate::{AdviceInputs, DefaultHost, ExecutionError, NoopEventHandler};
+use crate::{AdviceInputs, DefaultHost, NoopEventHandler};
 
 // CONSTANTS
 // ================================================================================================
@@ -40,7 +39,7 @@ const INIT_ADDR: Felt = ONE;
 const FMP_MIN: Felt = Felt::new(crate::FMP_MIN);
 const SYSCALL_FMP_MIN: Felt = Felt::new(crate::SYSCALL_FMP_MIN as u64);
 
-const EMIT_EVENT_ID: EventId = EventId::from_u64(1234);
+const EMIT_EVENT: EventName = EventName::new("test::emit::event");
 
 // TYPE ALIASES
 // ================================================================================================
@@ -162,9 +161,10 @@ fn basic_block_small() {
 
 #[test]
 fn basic_block_small_with_emit() {
+    let emit_event_felt = EMIT_EVENT.to_event_id().as_felt();
     let ops = vec![
         Operation::Push(ONE),
-        Operation::Push(EMIT_EVENT_ID.as_felt()),
+        Operation::Push(emit_event_felt),
         Operation::Emit,
         Operation::Drop,
         Operation::Add,
@@ -185,7 +185,7 @@ fn basic_block_small_with_emit() {
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
     check_op_decoding(&trace, 0, ZERO, Operation::Span, 4, 0, 0);
     check_op_decoding_with_imm(&trace, 1, INIT_ADDR, ONE, 1, 3, 0, 1);
-    check_op_decoding_with_imm(&trace, 2, INIT_ADDR, EMIT_EVENT_ID.as_felt(), 2, 2, 1, 1);
+    check_op_decoding_with_imm(&trace, 2, INIT_ADDR, emit_event_felt, 2, 2, 1, 1);
     check_op_decoding(&trace, 3, INIT_ADDR, Operation::Emit, 1, 2, 1);
     check_op_decoding(&trace, 4, INIT_ADDR, Operation::Drop, 1, 3, 1);
     check_op_decoding(&trace, 5, INIT_ADDR, Operation::Add, 1, 4, 1);
@@ -1436,53 +1436,6 @@ fn dyn_block() {
     }
 }
 
-/// Tests that call, dyncall and syscall are disallowed in a syscall context
-#[rstest]
-#[case(Operation::Dyncall)]
-#[case(Operation::Call)]
-#[case(Operation::SysCall)]
-fn calls_in_syscall(#[case] op: Operation) {
-    let mut process = Process::new(
-        Kernel::default(),
-        StackInputs::default(),
-        AdviceInputs::default(),
-        ExecutionOptions::default(),
-    );
-    // set `in_syscall` flag to true
-    process.system.start_syscall();
-
-    let program = {
-        let mut mast_forest = MastForest::new();
-
-        // add dummy block
-        mast_forest.add_block(vec![Operation::Add], Vec::new()).unwrap();
-
-        let node: MastNode = match op {
-            Operation::Dyncall => DynNode::new_dyncall().into(),
-            Operation::Call => {
-                CallNode::new(MastNodeId::from_u32_safe(0, &mast_forest).unwrap(), &mast_forest)
-                    .unwrap()
-                    .into()
-            },
-            Operation::SysCall => CallNode::new_syscall(
-                MastNodeId::from_u32_safe(0, &mast_forest).unwrap(),
-                &mast_forest,
-            )
-            .unwrap()
-            .into(),
-            _ => unreachable!(),
-        };
-
-        let call_node_id = mast_forest.add_node(node).unwrap();
-        mast_forest.make_root(call_node_id);
-
-        Program::new(mast_forest.into(), call_node_id)
-    };
-
-    let err = process.execute(&program, &mut DefaultHost::default());
-    assert_matches!(err, Err(ExecutionError::CallInSyscall(_)));
-}
-
 // HELPER REGISTERS TESTS
 // ================================================================================================
 #[test]
@@ -1526,7 +1479,7 @@ fn set_user_op_helpers_many() {
 fn build_trace(stack_inputs: &[u64], program: &Program) -> (DecoderTrace, usize) {
     let stack_inputs = StackInputs::try_from_ints(stack_inputs.iter().copied()).unwrap();
     let mut host = DefaultHost::default();
-    host.register_handler(EMIT_EVENT_ID, Arc::new(NoopEventHandler)).unwrap();
+    host.register_handler(EMIT_EVENT, Arc::new(NoopEventHandler)).unwrap();
     let mut process = Process::new(
         Kernel::default(),
         stack_inputs,

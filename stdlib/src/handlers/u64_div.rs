@@ -5,16 +5,13 @@
 
 use alloc::{vec, vec::Vec};
 
-use miden_core::EventId;
+use miden_core::EventName;
 use miden_processor::{AdviceMutation, EventError, ProcessState};
 
 use crate::handlers::u64_to_u32_elements;
 
-/// Qualified event name for the `u64_div` event.
-pub const U64_DIV_EVENT_NAME: &str = "stdlib::math::u64::u64_div";
-/// Constant Event ID for the `u64_div` event, derived via
-/// `EventId::from_name(U64_DIV_EVENT_NAME)`.
-pub const U64_DIV_EVENT_ID: EventId = EventId::from_u64(16308489928383702680);
+/// Event name for the u64_div operation.
+pub const U64_DIV_EVENT_NAME: EventName = EventName::new("stdlib::math::u64::u64_div");
 
 /// U64_DIV system event handler.
 ///
@@ -114,15 +111,4 @@ pub enum U64DivError {
     /// Value is not a valid u32.
     #[error("value {value} at {position} is not a valid u32")]
     NotU32Value { value: u64, position: &'static str },
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_event_id() {
-        let expected_event_id = EventId::from_name(U64_DIV_EVENT_NAME);
-        assert_eq!(U64_DIV_EVENT_ID, expected_event_id);
-    }
 }

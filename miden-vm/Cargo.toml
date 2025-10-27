@@ -99,6 +99,7 @@ escargot = "0.5"
 miden-utils-testing.workspace = true
 num-bigint = "0.4"
 predicates = "3.1"
+pretty_assertions = "1.4"
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 winter-fri.workspace = true
 rand_chacha = "0.9"
