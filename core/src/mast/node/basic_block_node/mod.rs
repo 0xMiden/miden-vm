@@ -228,9 +228,20 @@ impl BasicBlockNode {
             },
             DecoratorStore::Linked { id } => {
                 // For linked nodes, borrow from forest storage
-                let view = forest
+                // Check if the node has any decorators at all
+                let has_decorators = forest
                     .decorator_links_for_node(*id)
-                    .expect("decorators for linked nodes should be available");
+                    .map(|links| links.into_iter().next().is_some())
+                    .unwrap_or(false);
+
+                if !has_decorators {
+                    let num_ops = self.num_operations() as usize;
+                    return DecoratorOpLinkIterator::from_slice_iters(&[], &[], &[], num_ops);
+                }
+
+                let view = forest.decorator_links_for_node(*id).expect(
+                    "linked node decorators should be available; forest may be inconsistent",
+                );
 
                 DecoratorOpLinkIterator::from_linked(
                     &[],
@@ -276,9 +287,24 @@ impl BasicBlockNode {
             },
             DecoratorStore::Linked { id } => {
                 // For linked nodes, borrow from forest storage
-                let view = forest
+                // Check if the node has any decorators at all
+                let has_decorators = forest
                     .decorator_links_for_node(*id)
-                    .expect("decorators for linked nodes should be available");
+                    .map(|links| links.into_iter().next().is_some())
+                    .unwrap_or(false);
+
+                if !has_decorators {
+                    return RawDecoratorOpLinkIterator::from_slice_iters(
+                        &self.before_enter,
+                        &[],
+                        &self.after_exit,
+                        &self.op_batches,
+                    );
+                }
+
+                let view = forest.decorator_links_for_node(*id).expect(
+                    "linked node decorators should be available; forest may be inconsistent",
+                );
 
                 RawDecoratorOpLinkIterator::from_linked(
                     &self.before_enter,
@@ -310,15 +336,17 @@ impl BasicBlockNode {
                     .collect()
             },
             DecoratorStore::Linked { id } => {
-                // For linked nodes, borrow from forest storage
                 let pad2raw = PaddedToRawPrefix::new(self.op_batches());
-                forest
-                    .decorator_ids_for_node(*id)
-                    .flat_map(|(padded_idx, dec_id)| {
-                        let raw_idx = padded_idx - pad2raw[padded_idx];
-                        Some((raw_idx, dec_id))
-                    })
-                    .collect()
+                match forest.decorator_links_for_node(*id) {
+                    Ok(links) => links
+                        .into_iter()
+                        .map(|(padded_idx, dec_id)| {
+                            let raw_idx = padded_idx - pad2raw[padded_idx];
+                            (raw_idx, dec_id)
+                        })
+                        .collect(),
+                    Err(_) => Vec::new(), // Return empty if error
+                }
             },
         }
     }
@@ -341,7 +369,10 @@ impl BasicBlockNode {
             DecoratorStore::Owned(decorators) => decorators.len(),
             DecoratorStore::Linked { id } => {
                 // For linked nodes, count from forest storage
-                forest.decorator_ids_for_node(*id).count()
+                forest
+                    .decorator_links_for_node(*id)
+                    .map(|links| links.into_iter().count())
+                    .unwrap_or(0)
             },
         };
 
@@ -359,6 +390,45 @@ impl BasicBlockNode {
         forest: &'a MastForest,
     ) -> impl Iterator<Item = OperationOrDecorator<'a>> + 'a {
         OperationOrDecoratorIterator::new_with_forest(self, forest)
+    }
+
+    /// Performs semantic equality comparison with another BasicBlockNode.
+    ///
+    /// This method compares two blocks for logical equality by comparing:
+    /// - Operations (exact equality)
+    /// - Before-enter decorators (by ID)
+    /// - After-exit decorators (by ID)
+    /// - Operation-indexed decorators (by iterating and comparing their contents)
+    ///
+    /// Unlike the derived PartialEq, this method works correctly with both owned and linked
+    /// decorator storage by accessing the actual decorator data from the forest when needed.
+    pub fn semantic_eq(&self, other: &BasicBlockNode, forest: &MastForest) -> bool {
+        // Compare operations by collecting and comparing
+        let self_ops: Vec<_> = self.operations().collect();
+        let other_ops: Vec<_> = other.operations().collect();
+        if self_ops != other_ops {
+            return false;
+        }
+
+        // Compare before-enter decorators
+        if self.before_enter() != other.before_enter() {
+            return false;
+        }
+
+        // Compare after-exit decorators
+        if self.after_exit() != other.after_exit() {
+            return false;
+        }
+
+        // Compare operation-indexed decorators by collecting and comparing
+        let self_decorators: Vec<_> = self.indexed_decorator_iter(forest).collect();
+        let other_decorators: Vec<_> = other.indexed_decorator_iter(forest).collect();
+
+        if self_decorators != other_decorators {
+            return false;
+        }
+
+        true
     }
 }
 
@@ -378,9 +448,9 @@ impl MastNodeErrorContext for BasicBlockNode {
             ),
             DecoratorStore::Linked { id } => {
                 // For linked nodes, borrow from forest storage
-                let view = forest
-                    .decorator_links_for_node(*id)
-                    .expect("decorators for linked nodes should be available");
+                let view = forest.decorator_links_for_node(*id).expect(
+                    "linked node decorators should be available; forest may be inconsistent",
+                );
                 DecoratorOpLinkIterator::from_linked(
                     &self.before_enter,
                     view.into_iter(),

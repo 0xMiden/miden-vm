@@ -127,9 +127,18 @@ fn mast_forest_merge_remap() {
     let (merged, root_maps) = MastForest::merge([&forest_a, &forest_b]).unwrap();
 
     assert_eq!(merged.nodes().len(), 4);
-    assert_eq!(merged.nodes()[0], block_foo().build().unwrap().into());
+
+    // Check that the first node is semantically equal to the expected foo block
+    let expected_foo_block = block_foo().build().unwrap();
+    assert_matches!(&merged.nodes()[0], MastNode::Block(merged_block)
+        if merged_block.semantic_eq(&expected_foo_block, &merged));
+
     assert_matches!(&merged.nodes()[1], MastNode::Call(call_node) if 0u32 == u32::from(call_node.callee()));
-    assert_eq!(merged.nodes()[2], block_bar().build().unwrap().into());
+
+    // Check that the third node is semantically equal to the expected bar block
+    let expected_bar_block = block_bar().build().unwrap();
+    assert_matches!(&merged.nodes()[2], MastNode::Block(merged_block)
+        if merged_block.semantic_eq(&expected_bar_block, &merged));
     assert_matches!(&merged.nodes()[3], MastNode::Call(call_node) if 2u32 == u32::from(call_node.callee()));
 
     assert_eq!(u32::from(root_maps.map_root(0, &id_call_a).unwrap()), 1u32);
@@ -207,7 +216,12 @@ fn mast_forest_merge_replace_external() {
 
     for (merged, root_map) in [(merged_ab, root_maps_ab), (merged_ba, root_maps_ba)] {
         assert_eq!(merged.nodes().len(), 2);
-        assert_eq!(merged.nodes()[0], block_foo().build().unwrap().into());
+
+        // Check that the first node is semantically equal to the expected foo block
+        let expected_foo_block = block_foo().build().unwrap();
+        assert_matches!(&merged.nodes()[0], MastNode::Block(merged_block)
+            if merged_block.semantic_eq(&expected_foo_block, &merged));
+
         assert_matches!(&merged.nodes()[1], MastNode::Call(call_node) if 0u32 == u32::from(call_node.callee()));
         // The only root node should be the call node.
         assert_eq!(merged.roots.len(), 1);
