@@ -211,7 +211,7 @@ impl Process {
         // Read TAG and COMM from stack, and CAP_PREV from the processor state
         let comm = self.stack.get_word(0);
         let tag = self.stack.get_word(4);
-        let cap_prev = self.precompile_transcript_state;
+        let cap_prev = self.pc_transcript_state;
 
         let input_state: HasherState = {
             let input_state_words = [cap_prev, tag, comm];
@@ -235,7 +235,7 @@ impl Process {
             output_state[CAP_NEXT_START + 3],
         ]
         .into();
-        self.precompile_transcript_state = cap_next;
+        self.pc_transcript_state = cap_next;
 
         // Write the output to stack (top 12 elements): [R1, R0, CAP_NEXT] from top to bottom
         // The output_state array [CAP_NEXT, R0, R1] is written in reverse via (11-i) indexing

@@ -65,7 +65,7 @@ pub struct ProcessorAir {
     stack_outputs: StackOutputs,
     program_digest: Word,
     kernel_digests: Vec<Word>,
-    precompile_transcript_state: PrecompileTranscriptState,
+    pc_transcript_state: PrecompileTranscriptState,
     constraint_ranges: TransitionConstraintRange,
 }
 
@@ -147,7 +147,7 @@ impl Air for ProcessorAir {
             constraint_ranges,
             program_digest: pub_inputs.program_info.program_hash().to_owned(),
             kernel_digests: pub_inputs.program_info.kernel_procedures().to_owned(),
-            precompile_transcript_state: pub_inputs.precompile_transcript_state,
+            pc_transcript_state: pub_inputs.pc_transcript_state,
         }
     }
 
@@ -205,7 +205,7 @@ impl Air for ProcessorAir {
             &mut result,
             &self.kernel_digests,
             aux_rand_elements,
-            self.precompile_transcript_state,
+            self.pc_transcript_state,
         );
 
         // --- set assertions for the first step --------------------------------------------------
@@ -323,7 +323,7 @@ pub struct PublicInputs {
     program_info: ProgramInfo,
     stack_inputs: StackInputs,
     stack_outputs: StackOutputs,
-    precompile_transcript_state: PrecompileTranscriptState,
+    pc_transcript_state: PrecompileTranscriptState,
 }
 
 impl PublicInputs {
@@ -333,13 +333,13 @@ impl PublicInputs {
         program_info: ProgramInfo,
         stack_inputs: StackInputs,
         stack_outputs: StackOutputs,
-        precompile_transcript_state: PrecompileTranscriptState,
+        pc_transcript_state: PrecompileTranscriptState,
     ) -> Self {
         Self {
             program_info,
             stack_inputs,
             stack_outputs,
-            precompile_transcript_state,
+            pc_transcript_state,
         }
     }
 }
@@ -349,7 +349,7 @@ impl miden_core::ToElements<Felt> for PublicInputs {
         let mut result = self.stack_inputs.to_vec();
         result.append(&mut self.stack_outputs.to_vec());
         result.append(&mut self.program_info.to_elements());
-        let pc_state: [Felt; 4] = self.precompile_transcript_state.into();
+        let pc_state: [Felt; 4] = self.pc_transcript_state.into();
         result.extend_from_slice(&pc_state);
         result
     }
@@ -363,7 +363,7 @@ impl Serializable for PublicInputs {
         self.program_info.write_into(target);
         self.stack_inputs.write_into(target);
         self.stack_outputs.write_into(target);
-        self.precompile_transcript_state.write_into(target);
+        self.pc_transcript_state.write_into(target);
     }
 }
 
@@ -372,13 +372,13 @@ impl Deserializable for PublicInputs {
         let program_info = ProgramInfo::read_from(source)?;
         let stack_inputs = StackInputs::read_from(source)?;
         let stack_outputs = StackOutputs::read_from(source)?;
-        let precompile_transcript_state = Word::read_from(source)?;
+        let pc_transcript_state = Word::read_from(source)?;
 
         Ok(PublicInputs {
             program_info,
             stack_inputs,
             stack_outputs,
-            precompile_transcript_state,
+            pc_transcript_state,
         })
     }
 }

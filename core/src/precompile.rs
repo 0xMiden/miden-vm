@@ -351,6 +351,13 @@ impl PrecompileTranscript {
     }
 
     /// Finalizes the transcript to a digest (sequential commitment to all recorded requests).
+    ///
+    /// # Details
+    /// The output is equivalent to the sequential hash of all [`PrecompileCommitment`]s, followed
+    /// by two empty words. This is because
+    /// - Each commitment is represented as two words, a multiple of the rate.
+    /// - The initial capacity is set to the zero word since we absord full double words when
+    ///   calling `record` or `finalize`.
     pub fn finalize(self) -> PrecompileTranscriptDigest {
         let mut state = Word::words_as_elements(&[self.state, Word::empty(), Word::empty()])
             .try_into()

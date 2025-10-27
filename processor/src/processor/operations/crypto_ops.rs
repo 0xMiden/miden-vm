@@ -235,7 +235,7 @@ pub(super) fn op_log_precompile<P: Processor>(
     let tag = processor.stack().get_word(4);
 
     // Get the current precompile sponge capacity
-    let cap_prev = processor.precompile_transcript_state();
+    let cap_prev = processor.pc_transcript_state();
 
     // Build the full 12-element hasher state for RPO permutation
     // State layout: [CAP_PREV, TAG, COMM]
@@ -271,7 +271,7 @@ pub(super) fn op_log_precompile<P: Processor>(
     .into();
 
     // Update the processor's precompile sponge capacity
-    processor.set_precompile_transcript_state(cap_next);
+    processor.set_pc_transcript_state(cap_next);
 
     // Write R1, R0, and CAP_NEXT to the stack (top 12 elements).
     // Stack output: [R1, R0, CAP_NEXT, ...]

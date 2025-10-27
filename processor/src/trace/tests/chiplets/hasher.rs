@@ -491,36 +491,36 @@ pub fn b_chip_log_precompile() {
     // CAP_PREV comes from helper registers and defaults to [0,0,0,0].
     // TAG = [1,2,3,4] is drawn via `stack.get_word(4)`.
     // COMM = [5,6,7,8] is drawn via `stack.get_word(0)`.
-    let log_precompile_state = init_state_from_words(
+    let log_pc_state = init_state_from_words(
         &[Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)].into(),
         &[Felt::new(5), Felt::new(6), Felt::new(7), Felt::new(8)].into(),
     );
 
-    let log_precompile_init = build_expected(
+    let log_pc_init = build_expected(
         &alphas,
         LINEAR_HASH_LABEL,
-        log_precompile_state,
+        log_pc_state,
         [ZERO; STATE_WIDTH],
         Felt::new((HASH_CYCLE_LEN + 1) as u64),
         ZERO,
     );
     // request the log_precompile initialization.
-    expected *= log_precompile_init.inv();
+    expected *= log_pc_init.inv();
 
     // Compute the output state by applying the permutation
-    let mut log_precompile_output_state = log_precompile_state;
-    apply_permutation(&mut log_precompile_output_state);
+    let mut log_pc_output_state = log_pc_state;
+    apply_permutation(&mut log_pc_output_state);
 
-    let log_precompile_result = build_expected(
+    let log_pc_result = build_expected(
         &alphas,
         RETURN_STATE_LABEL,
-        log_precompile_output_state,
+        log_pc_output_state,
         [ZERO; STATE_WIDTH],
         Felt::new((2 * HASH_CYCLE_LEN) as u64),
         ZERO,
     );
     // request the log_precompile result.
-    expected *= log_precompile_result.inv();
+    expected *= log_pc_result.inv();
     assert_eq!(expected, b_chip[2]);
 
     // at cycle 2 the result of the span hash is requested by the decoder

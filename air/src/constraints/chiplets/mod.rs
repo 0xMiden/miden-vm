@@ -6,7 +6,7 @@ use super::super::{
     CHIPLETS_OFFSET, EvaluationFrame, Felt, FieldElement, TransitionConstraintDegree,
 };
 use crate::{
-    Assertion, AuxRandElements, IS_FULL_CONSTRAINT_SET,
+    Assertion, AuxRandElements,
     trace::{
         CHIPLETS_BUS_AUX_TRACE_OFFSET, LOG_PRECOMPILE_LABEL,
         chiplets::{hasher::P1_COL_IDX, kernel_rom::KERNEL_PROC_INIT_LABEL},
@@ -48,7 +48,7 @@ pub fn get_aux_assertions_first_step<E>(
     result: &mut Vec<Assertion<E>>,
     kernel_digests: &[Word],
     aux_rand_elements: &AuxRandElements<E>,
-    precompile_transcript_state: PrecompileTranscriptState,
+    pc_transcript_state: PrecompileTranscriptState,
 ) where
     E: FieldElement<BaseField = Felt>,
 {
@@ -61,7 +61,7 @@ pub fn get_aux_assertions_first_step<E>(
 
     // Anchor hasher vtable init against PI-provided transcript state (empty/final).
     let alphas = aux_rand_elements.rand_elements();
-    let state: [Felt; 4] = precompile_transcript_state.into();
+    let state: [Felt; 4] = pc_transcript_state.into();
     let label: Felt = Felt::from(LOG_PRECOMPILE_LABEL);
     let empty_msg = alphas[0] + alphas[1].mul_base(label);
     let mut final_msg = empty_msg;

@@ -75,7 +75,7 @@ where
         _debugger: &mut BusDebugger<E>,
     ) -> E {
         let op_code = main_trace.get_op_code(row).as_int() as u8;
-        let log_precompile_request = if op_code == OPCODE_LOGPRECOMPILE {
+        let log_pc_request = if op_code == OPCODE_LOGPRECOMPILE {
             build_log_precompile_capacity_remove(main_trace, row, alphas, _debugger)
         } else {
             E::ONE
@@ -89,9 +89,7 @@ where
             E::ONE
         };
 
-        chiplets_vtable_remove_sibling(main_trace, alphas, row)
-            * request_ace
-            * log_precompile_request
+        chiplets_vtable_remove_sibling(main_trace, alphas, row) * request_ace * log_pc_request
     }
 
     fn get_responses_at(
@@ -102,13 +100,13 @@ where
         _debugger: &mut BusDebugger<E>,
     ) -> E {
         let op_code = main_trace.get_op_code(row).as_int() as u8;
-        let log_precompile_response = if op_code == OPCODE_LOGPRECOMPILE {
+        let log_pc_response = if op_code == OPCODE_LOGPRECOMPILE {
             build_log_precompile_capacity_insert(main_trace, row, alphas, _debugger)
         } else {
             E::ONE
         };
 
-        chiplets_vtable_add_sibling(main_trace, alphas, row) * log_precompile_response
+        chiplets_vtable_add_sibling(main_trace, alphas, row) * log_pc_response
     }
 
     fn init_requests(

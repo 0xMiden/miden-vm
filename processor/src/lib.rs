@@ -241,7 +241,7 @@ pub struct Process {
     max_cycles: u32,
     enable_tracing: bool,
     /// Precompile transcript state (sponge capacity) used by `log_precompile`.
-    precompile_transcript_state: PrecompileTranscriptState,
+    pc_transcript_state: PrecompileTranscriptState,
 }
 
 #[cfg(any(test, feature = "testing"))]
@@ -255,7 +255,7 @@ pub struct Process {
     pub max_cycles: u32,
     pub enable_tracing: bool,
     /// Precompile transcript state (sponge capacity) used by `log_precompile`.
-    pub precompile_transcript_state: PrecompileTranscriptState,
+    pub pc_transcript_state: PrecompileTranscriptState,
 }
 
 impl Process {
@@ -301,7 +301,7 @@ impl Process {
             chiplets: Chiplets::new(kernel),
             max_cycles: execution_options.max_cycles(),
             enable_tracing: execution_options.enable_tracing(),
-            precompile_transcript_state: PrecompileTranscriptState::default(),
+            pc_transcript_state: PrecompileTranscriptState::default(),
         }
     }
 
@@ -746,7 +746,7 @@ impl Process {
             self.stack,
             self.range,
             self.chiplets,
-            self.precompile_transcript_state,
+            self.pc_transcript_state,
         )
     }
 }
