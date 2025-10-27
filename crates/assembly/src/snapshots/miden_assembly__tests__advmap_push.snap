@@ -14,7 +14,7 @@ begin
         push(2)
         noop
         noop
-        push(2)
+        push(17843484659000820118)
         emit
         drop
         assert(0)

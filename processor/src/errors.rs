@@ -5,7 +5,7 @@ use alloc::{sync::Arc, vec::Vec};
 
 use miden_air::RowIndex;
 use miden_core::{
-    EventId, Felt, QuadFelt, Word,
+    EventId, EventName, Felt, QuadFelt, Word,
     mast::{DecoratorId, MastForest, MastNodeErrorContext, MastNodeId},
     stack::MIN_STACK_DEPTH,
     utils::to_hex,
@@ -65,7 +65,10 @@ pub enum ExecutionError {
         source_file: Option<Arc<SourceFile>>,
         digest: Word,
     },
-    #[error("error during processing of event with id {event_id:?} in on_event handler")]
+    #[error("error during processing of event {}", match event_name {
+        Some(name) => format!("'{}' (ID: {})", name, event_id),
+        None => format!("with ID: {}", event_id),
+    })]
     #[diagnostic()]
     EventError {
         #[label]
@@ -73,13 +76,14 @@ pub enum ExecutionError {
         #[source_code]
         source_file: Option<Arc<SourceFile>>,
         event_id: EventId,
+        event_name: Option<EventName>,
         #[source]
         error: EventError,
     },
-    #[error("attempted to add event handler with previously inserted id: {id:?}")]
-    DuplicateEventHandler { id: EventId },
-    #[error("attempted to add event handler with reseved id: {id:?}")]
-    ReservedEventId { id: EventId },
+    #[error("attempted to add event handler for '{event}' (already registered)")]
+    DuplicateEventHandler { event: EventName },
+    #[error("attempted to add event handler for '{event}' (reserved system event)")]
+    ReservedEventNamespace { event: EventName },
     #[error("assertion failed at clock cycle {clk} with error {}",
       match err_msg {
         Some(msg) => format!("message: {msg}"),
@@ -301,10 +305,21 @@ impl ExecutionError {
         Self::DynamicNodeNotFound { label, source_file, digest }
     }
 
-    pub fn event_error(error: EventError, event_id: EventId, err_ctx: &impl ErrorContext) -> Self {
+    pub fn event_error(
+        error: EventError,
+        event_id: EventId,
+        event_name: Option<EventName>,
+        err_ctx: &impl ErrorContext,
+    ) -> Self {
         let (label, source_file) = err_ctx.label_and_source_file();
 
-        Self::EventError { label, source_file, event_id, error }
+        Self::EventError {
+            label,
+            source_file,
+            event_id,
+            event_name,
+            error,
+        }
     }
 
     pub fn failed_assertion(

@@ -8,7 +8,7 @@ begin
         push(4294967294)
         mstore
         drop
-        push(4)
+        push(5642583036089175977)
         emit
         drop
         assert(0)

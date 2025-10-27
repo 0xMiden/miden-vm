@@ -21,10 +21,7 @@ use miden_crypto::Word;
 use miden_processor::{AdviceInputs, DefaultHost, Program, StackInputs};
 use miden_stdlib::{
     StdLibrary,
-    handlers::keccak256::{
-        KECCAK_HASH_MEMORY_EVENT_ID, KECCAK_HASH_MEMORY_EVENT_NAME, KeccakPrecompile,
-        KeccakPreimage,
-    },
+    handlers::keccak256::{KECCAK_HASH_MEMORY_EVENT_NAME, KeccakPrecompile, KeccakPreimage},
 };
 // Test constants
 // ================================================================================================
@@ -145,7 +142,7 @@ fn test_keccak_hash_memory_impl(input_u8: &[u8]) {
     assert_eq!(
         tag,
         Word::from([
-            KECCAK_HASH_MEMORY_EVENT_ID.as_felt(),
+            KECCAK_HASH_MEMORY_EVENT_NAME.to_event_id().as_felt(),
             Felt::new(len_bytes as u64),
             Felt::ZERO,
             Felt::ZERO
@@ -357,7 +354,8 @@ fn test_keccak_hash_1to1_prove_verify() {
 
     // Check we get the same commitment from the verifier
     let mut precompile_verifiers = PrecompileVerifierRegistry::new();
-    precompile_verifiers.register(KECCAK_HASH_MEMORY_EVENT_ID, Arc::new(KeccakPrecompile));
+    precompile_verifiers
+        .register(KECCAK_HASH_MEMORY_EVENT_NAME.to_event_id(), Arc::new(KeccakPrecompile));
     let transcript = precompile_verifiers
         .requests_transcript(proof.precompile_requests())
         .expect("failed to verify");
