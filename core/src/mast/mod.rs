@@ -373,7 +373,11 @@ impl MastForest {
     /// This is the primary accessor for reading decorators from the centralized storage.
     /// Returns a slice of decorator IDs for the given operation.
     #[inline(always)]
-    pub fn decorator_indices_for_op(&self, node_id: MastNodeId, local_op_idx: usize) -> &[DecoratorId] {
+    pub fn decorator_indices_for_op(
+        &self,
+        node_id: MastNodeId,
+        local_op_idx: usize,
+    ) -> &[DecoratorId] {
         self.decorator_storage
             .decorator_ids_for_operation(node_id, local_op_idx)
             .unwrap_or(&[])
@@ -403,33 +407,6 @@ impl MastForest {
         node_id: MastNodeId,
     ) -> Result<DecoratedLinks<'a>, DecoratorIndexError> {
         self.decorator_storage.decorator_links_for_node(node_id)
-    }
-
-    /// Returns all decorator IDs for a node as an iterator of (operation_idx, decorator_id) tuples.
-    #[inline(always)]
-    pub fn decorator_ids_for_node<'a>(
-        &'a self,
-        node_id: MastNodeId,
-    ) -> impl Iterator<Item = (usize, DecoratorId)> + 'a {
-        self.decorator_storage
-            .decorator_ids_for_node(node_id)
-            .into_iter()
-            .flat_map(|iter| iter.map(move |(op_idx, dec_ids)| {
-                dec_ids.iter().map(move |&dec_id| (op_idx, dec_id))
-            }))
-            .flatten()
-    }
-
-    /// Returns before/after decorators for a node (these are stored in the node itself).
-    ///
-    /// Note: before_enter and after_exit decorators are stored in the BasicBlockNode itself,
-    /// not in the centralized storage. This method accesses the node to retrieve them.
-    pub fn node_before_after_decorators(&self, node_id: MastNodeId) -> (&[DecoratorId], &[DecoratorId]) {
-        if let Some(MastNode::Block(block)) = self.nodes.get(node_id) {
-            (block.before_enter(), block.after_exit())
-        } else {
-            (&[], &[])
-        }
     }
 
     pub fn advice_map(&self) -> &AdviceMap {
@@ -710,67 +687,6 @@ pub fn error_code_from_msg(msg: impl AsRef<str>) -> Felt {
     hash_string_to_word(msg.as_ref())[0]
 }
 
-// SERDE IMPLEMENTATIONS
-// ================================================================================================
-
-#[cfg(feature = "serde")]
-impl<'de> serde::Deserialize<'de> for MastForest {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        // First, deserialize using a proxy struct that has the same structure as MastForest
-        #[derive(serde::Deserialize)]
-        struct MastForestProxy {
-            nodes: IndexVec<MastNodeId, MastNode>,
-            roots: Vec<MastNodeId>,
-            decorators: IndexVec<DecoratorId, Decorator>,
-            advice_map: AdviceMap,
-            error_codes: BTreeMap<u64, Arc<str>>,
-        }
-
-        let proxy = MastForestProxy::deserialize(deserializer)?;
-
-        // Convert the proxy back to a MastForest, but start with empty decorator storage
-        // since we'll rebuild it with the new nodes
-        let mut forest = MastForest {
-            nodes: IndexVec::new(), // Start empty
-            roots: Vec::new(),      // Start empty, will be remapped
-            decorators: proxy.decorators,
-            advice_map: proxy.advice_map,
-            error_codes: proxy.error_codes,
-            decorator_storage: Arc::new(DecoratorIndexMapping::new()), // Start fresh
-        };
-
-        let node_builders: Vec<_> = proxy.nodes.into_iter().map(|old_node| old_node.to_builder(&forest)).collect();
-
-        // Create remappings - BTreeMap doesn't have reserve, but it will grow efficiently
-        let mut id_remappings = BTreeMap::new();
-
-        // Re-add all nodes using the builders to create Linked decorators
-        for (old_index, builder) in node_builders.into_iter().enumerate() {
-            let old_id = MastNodeId::new_unchecked(old_index as u32);
-            let new_id = builder.add_to_forest_relaxed(&mut forest).map_err(|e| {
-                serde::de::Error::custom(format!("Failed to re-add node to forest: {}", e))
-            })?;
-            id_remappings.insert(old_id, new_id);
-        }
-
-        // Remap the roots to use the new node IDs
-        forest.roots.reserve(proxy.roots.len());
-        for old_root_id in proxy.roots {
-            let new_root_id = id_remappings.get(&old_root_id).ok_or_else(|| {
-                serde::de::Error::custom(format!(
-                    "Missing remapping for root node {:?}",
-                    old_root_id
-                ))
-            })?;
-            forest.roots.push(*new_root_id);
-        }
-
-        Ok(forest)
-    }
-}
 
 // MAST FOREST ERROR
 // ================================================================================================

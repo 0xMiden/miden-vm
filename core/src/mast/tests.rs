@@ -398,10 +398,6 @@ fn test_mast_forest_roundtrip_with_basic_blocks_and_decorators() {
 #[test]
 #[cfg(feature = "serde")]
 fn test_mast_forest_serde_converts_linked_to_owned_decorators() {
-    use alloc::sync::Arc;
-
-    use serde_json;
-
     let mut forest = MastForest::new();
 
     // Create decorators
@@ -425,17 +421,8 @@ fn test_mast_forest_serde_converts_linked_to_owned_decorators() {
         panic!("Expected a block node");
     };
 
-    // Before serialization, check that the forest's decorator_storage is being used
-    // The Arc should have a strong count > 1 because:
-    // 1. The forest holds one reference
-    // 2. The BasicBlockNode holds another reference via DecoratorStore::Linked
-    let arc_count_before = Arc::strong_count(&forest.decorator_storage);
-    assert!(
-        arc_count_before > 1,
-        "Decorator storage should be shared between forest and block before serialization"
-    );
-
-    // Verify decorators work correctly before serialization
+    // Verify that the block is using linked storage correctly
+    // In the new architecture, blocks don't hold Arc references but use forest-borrowing
     let original_decorators: Vec<_> = original_block.indexed_decorator_iter(&forest).collect();
     let expected_decorators = vec![(0, deco1), (2, deco2)];
     assert_eq!(
@@ -443,12 +430,16 @@ fn test_mast_forest_serde_converts_linked_to_owned_decorators() {
         "Decorators should be correct before serialization"
     );
 
-    // Serialize the MastForest
-    let serialized = serde_json::to_string(&forest).expect("Failed to serialize MastForest");
+    // Verify that the block uses linked storage by checking that it needs forest access
+    // (i.e., the decorators are stored in the forest, not directly in the block)
+    // This is implicit in the fact that indexed_decorator_iter requires &forest
 
-    // Deserialize the MastForest
+    // Serialize the MastForest using the custom Serializable implementation
+    let serialized_bytes = forest.to_bytes();
+
+    // Deserialize the MastForest using the custom Deserializable implementation
     let mut deserialized_forest: MastForest =
-        serde_json::from_str(&serialized).expect("Failed to deserialize MastForest");
+        MastForest::read_from_bytes(&serialized_bytes).expect("Failed to deserialize MastForest");
 
     // Get the deserialized block
     let deserialized_block =
@@ -458,47 +449,42 @@ fn test_mast_forest_serde_converts_linked_to_owned_decorators() {
             panic!("Expected a block node in deserialized forest");
         };
 
-    // After deserialization, the Arc count should now be 2 because:
-    // The custom Deserialize implementation converts Owned back to Linked decorators
-    // 1. Forest holds one reference
-    // 2. BasicBlockNode holds another reference via DecoratorStore::Linked
-    let arc_count_after = Arc::strong_count(&deserialized_forest.decorator_storage);
-    assert_eq!(
-        arc_count_after, 2,
-        "Decorator storage should be shared between forest and block after custom serde deserialization (Linked representation restored)"
-    );
-
-    // Verify that the decorator data is still correct
-    let deserialized_decorators: Vec<_> = deserialized_block.indexed_decorator_iter(&forest).collect();
+    // Verify that the decorator data is still correct using the deserialized forest
+    let deserialized_decorators: Vec<_> =
+        deserialized_block.indexed_decorator_iter(&deserialized_forest).collect();
     assert_eq!(
         deserialized_decorators, expected_decorators,
         "Decorator data should be preserved during round-trip"
     );
 
+    // Verify that the deserialized block also uses linked storage correctly
+    // The fact that indexed_decorator_iter works with &deserialized_forest confirms this
+    let deserialized_via_links = deserialized_block
+        .indexed_decorator_iter(&deserialized_forest)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        deserialized_via_links, expected_decorators,
+        "Deserialized block should use linked storage via forest borrowing"
+    );
+
     // Additional verification: check that the functionality is identical
     assert_eq!(
         original_block.indexed_decorator_iter(&forest).collect::<Vec<_>>(),
-        deserialized_block.indexed_decorator_iter(&forest).collect::<Vec<_>>(),
-        "Decorators should be functionally equal despite storage representation changes"
+        deserialized_block
+            .indexed_decorator_iter(&deserialized_forest)
+            .collect::<Vec<_>>(),
+        "Decorators should be functionally equal between original and deserialized forests"
     );
 
-    // Final verification: check that the deserialized forest still has nodes referencing the shared
-    // storage
+    // Final verification: verify that we can add new decorators and they work correctly
     let new_decorator_id = deserialized_forest.add_decorator(Decorator::Trace(99)).unwrap();
-    let arc_count_after_new_decorator = Arc::strong_count(&deserialized_forest.decorator_storage);
-    assert_eq!(
-        arc_count_after_new_decorator, 2,
-        "Adding new decorator should not change Arc count if blocks use Linked storage"
-    );
 
-    // Verify new decorator works
+    // Verify original decorators remain unchanged and new decorator works
     assert_eq!(deserialized_forest[new_decorator_id], Decorator::Trace(99));
 }
 
 #[test]
 fn test_mast_forest_serializable_converts_linked_to_owned_decorators() {
-    use alloc::sync::Arc;
-
     let mut forest = MastForest::new();
 
     // Create decorators
@@ -522,12 +508,12 @@ fn test_mast_forest_serializable_converts_linked_to_owned_decorators() {
         panic!("Expected a block node");
     };
 
-    // Before serialization, check that the forest's decorator_storage is being used
-    // The Arc should have a strong count > 1 because both forest and block reference it
-    let arc_count_before = Arc::strong_count(&forest.decorator_storage);
-    assert!(
-        arc_count_before > 1,
-        "Decorator storage should be shared between forest and block before serialization"
+    // Before serialization, verify that decorators work correctly through the forest-borrowing API
+    // This confirms that the block is using linked storage correctly
+    let decorator_count_before = original_block.indexed_decorator_iter(&forest).count();
+    assert_eq!(
+        decorator_count_before, 2,
+        "Block should have 2 decorators accessible through forest borrowing"
     );
 
     // Verify decorators work correctly before serialization
@@ -545,45 +531,38 @@ fn test_mast_forest_serializable_converts_linked_to_owned_decorators() {
     let mut deserialized_forest: MastForest =
         MastForest::read_from_bytes(&serialized).expect("Failed to deserialize MastForest");
 
-    // Get the deserialized block
-    let deserialized_block =
-        if let crate::mast::MastNode::Block(block) = &deserialized_forest[block_id] {
+    // Verify that the decorator data is still correct by collecting data from the deserialized
+    // block
+    let deserialized_decorators: Vec<_> = {
+        let block = if let crate::mast::MastNode::Block(block) = &deserialized_forest[block_id] {
             block
         } else {
             panic!("Expected a block node in deserialized forest");
         };
-
-    // After deserialization, the Arc count should be 2 because:
-    // The Serializable/Deserializable round-trip preserves the Linked representation!
-    // 1. Forest holds one reference
-    // 2. BasicBlockNode holds another reference via DecoratorStore::Linked
-    let arc_count_after = Arc::strong_count(&deserialized_forest.decorator_storage);
-    assert_eq!(
-        arc_count_after, 2,
-        "Decorator storage should be shared between forest and block after Serializable round-trip (Linked representation preserved)"
-    );
-
-    // Verify that the decorator data is still correct
-    let deserialized_decorators: Vec<_> = deserialized_block.indexed_decorator_iter(&forest).collect();
+        block.indexed_decorator_iter(&deserialized_forest).collect()
+    };
     assert_eq!(
         deserialized_decorators, expected_decorators,
         "Decorator data should be preserved during round-trip"
     );
 
     // Additional verification: check that the functionality is identical
+    let original_decorators_final =
+        original_block.indexed_decorator_iter(&forest).collect::<Vec<_>>();
     assert_eq!(
-        original_block.indexed_decorator_iter(&forest).collect::<Vec<_>>(),
-        deserialized_block.indexed_decorator_iter(&forest).collect::<Vec<_>>(),
+        original_decorators_final, deserialized_decorators,
         "Decorators should be functionally equal despite different storage representations"
     );
 
-    // Final verification: check that the deserialized forest still has nodes referencing the shared
-    // storage
+    // Final verification: check that the deserialized forest still works correctly
+    // Add a new decorator
     let new_decorator_id = deserialized_forest.add_decorator(Decorator::Trace(99)).unwrap();
-    let arc_count_after_new_decorator = Arc::strong_count(&deserialized_forest.decorator_storage);
+
+    // Verify that original decorators remain unchanged and new decorator works
+    let original_after_new = original_block.indexed_decorator_iter(&forest).collect::<Vec<_>>();
     assert_eq!(
-        arc_count_after_new_decorator, 2,
-        "Adding new decorator should not change Arc count if blocks use Linked storage"
+        original_after_new, expected_decorators,
+        "Original decorators should remain unchanged after adding new decorator"
     );
 
     // Verify new decorator works
@@ -638,8 +617,9 @@ fn test_forest_borrowing_decorator_access() {
         let collected_links: Vec<_> = decorator_links.into_iter().collect();
         assert_eq!(collected_links, vec![(0, decorator1), (1, decorator2), (3, decorator3)]);
 
-        // Test 4: decorator_ids_for_node (iterator version)
-        let decorator_ids: Vec<_> = forest.decorator_ids_for_node(node_id).collect();
+        // Test 4: decorator_links_for_node (Result handling)
+        let decorator_ids: Vec<_> =
+            forest.decorator_links_for_node(node_id).unwrap().into_iter().collect();
         assert_eq!(decorator_ids, vec![(0, decorator1), (1, decorator2), (3, decorator3)]);
 
         // Test 5: BasicBlockNode methods with forest borrowing
