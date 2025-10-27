@@ -17,6 +17,7 @@ use miden_utils_sync::LazyLock;
 use crate::handlers::{
     bytes_to_packed_u32_felts,
     ecdsa::{ECDSA_VERIFY_EVENT_NAME, EcdsaPrecompile},
+    eddsa25519::{EDDSA25519_VERIFY_EVENT_NAME, EddsaPrecompile},
     falcon_div::{FALCON_DIV_EVENT_NAME, handle_falcon_div},
     keccak256::{KECCAK_HASH_MEMORY_EVENT_NAME, KeccakPrecompile},
     smt_peek::{SMT_PEEK_EVENT_NAME, handle_smt_peek},
@@ -75,6 +76,7 @@ impl StdLibrary {
         vec![
             (KECCAK_HASH_MEMORY_EVENT_NAME, Arc::new(KeccakPrecompile)),
             (ECDSA_VERIFY_EVENT_NAME, Arc::new(EcdsaPrecompile)),
+            (EDDSA25519_VERIFY_EVENT_NAME, Arc::new(EddsaPrecompile)),
             (SMT_PEEK_EVENT_NAME, Arc::new(handle_smt_peek)),
             (U64_DIV_EVENT_NAME, Arc::new(handle_u64_div)),
             (FALCON_DIV_EVENT_NAME, Arc::new(handle_falcon_div)),
@@ -89,6 +91,7 @@ impl StdLibrary {
         PrecompileVerifierRegistry::new()
             .with_verifier(&KECCAK_HASH_MEMORY_EVENT_NAME, Arc::new(KeccakPrecompile))
             .with_verifier(&ECDSA_VERIFY_EVENT_NAME, Arc::new(EcdsaPrecompile))
+            .with_verifier(&EDDSA25519_VERIFY_EVENT_NAME, Arc::new(EddsaPrecompile))
     }
 }
 
