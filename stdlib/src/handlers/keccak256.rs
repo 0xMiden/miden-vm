@@ -33,7 +33,7 @@ use miden_core::{
 use miden_crypto::hash::{keccak::Keccak256, rpo::Rpo256};
 use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessState};
 
-use crate::handlers::read_memory_packed_u32;
+use crate::handlers::{BYTES_PER_U32, bytes_to_packed_u32_felts, read_memory_packed_u32};
 
 /// Event name for the keccak256 hash_memory operation.
 pub const KECCAK_HASH_MEMORY_EVENT_NAME: EventName =
@@ -110,7 +110,7 @@ impl KeccakFeltDigest {
     pub fn from_bytes(bytes: &[u8]) -> Self {
         assert_eq!(bytes.len(), 32, "input must be 32 bytes");
         let packed: [u32; 8] = array::from_fn(|i| {
-            let limbs = array::from_fn(|j| bytes[4 * i + j]);
+            let limbs = array::from_fn(|j| bytes[BYTES_PER_U32 * i + j]);
             u32::from_le_bytes(limbs)
         });
         Self(packed.map(Felt::from))
@@ -154,15 +154,7 @@ impl KeccakPreimage {
     ///
     /// Produces the same u32‑packed format expected by RPO hashing in MASM wrappers.
     pub fn as_felts(&self) -> Vec<Felt> {
-        self.as_ref()
-            .chunks(4)
-            .map(|bytes| {
-                // Pack up to 4 bytes into a u32 in little-endian format
-                let mut packed = [0u8; 4];
-                packed[..bytes.len()].copy_from_slice(bytes);
-                Felt::from(u32::from_le_bytes(packed))
-            })
-            .collect()
+        bytes_to_packed_u32_felts(self.as_ref())
     }
 
     /// Computes the RPO hash of the input data in field element format.

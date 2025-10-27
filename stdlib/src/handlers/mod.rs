@@ -1,7 +1,13 @@
 use alloc::vec::Vec;
+use core::mem::size_of;
 
-use miden_core::Felt;
+use miden_core::{Felt, WORD_SIZE};
 use miden_processor::ProcessState;
+
+/// Number of bytes packed into each u32 field element.
+///
+/// Used for converting between byte arrays and u32-packed field elements in memory.
+pub(crate) const BYTES_PER_U32: usize = size_of::<u32>();
 
 pub mod ecdsa;
 pub mod falcon_div;
@@ -61,12 +67,12 @@ pub(crate) fn read_memory_packed_u32(
     len_bytes: usize,
 ) -> Result<Vec<u8>, MemoryReadError> {
     // Validate word alignment
-    if !start.is_multiple_of(4) {
+    if !start.is_multiple_of(WORD_SIZE as u64) {
         return Err(MemoryReadError::UnalignedAddress { address: start });
     }
 
     // Calculate number of field elements to read
-    let len_felt = len_bytes.div_ceil(4);
+    let len_felt = len_bytes.div_ceil(BYTES_PER_U32);
     let end = start
         .checked_add(len_felt as u64)
         .ok_or(MemoryReadError::AddressOverflow { start, len_bytes })?;
@@ -80,7 +86,7 @@ pub(crate) fn read_memory_packed_u32(
         .map_err(|_| MemoryReadError::AddressOverflow { start, len_bytes })?;
 
     // Read field elements and unpack to bytes
-    let len_padded = len_bytes.next_multiple_of(4);
+    let len_padded = len_bytes.next_multiple_of(WORD_SIZE);
 
     // Allocate buffer with 4-byte alignment
     let mut out = Vec::with_capacity(len_padded);
@@ -135,10 +141,10 @@ pub(crate) fn read_memory_packed_u32(
 /// ```
 pub fn bytes_to_packed_u32_felts(bytes: &[u8]) -> Vec<Felt> {
     bytes
-        .chunks(4)
+        .chunks(BYTES_PER_U32)
         .map(|chunk| {
             // Pack up to 4 bytes into a u32 in little-endian format
-            let mut packed = [0u8; 4];
+            let mut packed = [0u8; WORD_SIZE];
             packed[..chunk.len()].copy_from_slice(chunk);
             Felt::from(u32::from_le_bytes(packed))
         })

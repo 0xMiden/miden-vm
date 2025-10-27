@@ -96,7 +96,7 @@ fn log_precompile_request_procedure() {
     let program: Program = Assembler::default()
         .with_dynamic_library(StdLibrary::default())
         .expect("failed to load stdlib")
-        .assemble_program(source.clone())
+        .assemble_program(source)
         .expect("failed to assemble log_precompile fixture");
 
     let stack_inputs = StackInputs::default();
