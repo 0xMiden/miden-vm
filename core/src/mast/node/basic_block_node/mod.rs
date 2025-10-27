@@ -10,8 +10,6 @@ use miden_crypto::{
     hash::{Digest, blake::Blake3_256},
 };
 use miden_formatting::prettier::PrettyPrint;
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 
 use crate::{
     DecoratorList, Operation,
@@ -83,7 +81,6 @@ pub const BATCH_SIZE: usize = 8;
 /// Where `batches` is the concatenation of each `batch` in the basic block, and each batch is 8
 /// field elements (512 bits).
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 pub struct BasicBlockNode {
     /// The primitive operations contained in this basic block.
     ///

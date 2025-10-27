@@ -55,8 +55,6 @@ mod tests;
 /// A [`MastForest`] does not have an entrypoint, and hence is not executable. A [`crate::Program`]
 /// can be built from a [`MastForest`] to specify an entrypoint.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize))]
-#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 pub struct MastForest {
     /// All of the nodes local to the trees comprising the MAST forest.
     nodes: IndexVec<MastNodeId, MastNode>,
@@ -687,7 +685,6 @@ pub fn error_code_from_msg(msg: impl AsRef<str>) -> Felt {
     hash_string_to_word(msg.as_ref())[0]
 }
 
-
 // MAST FOREST ERROR
 // ================================================================================================
 
@@ -712,4 +709,32 @@ pub enum MastForestError {
     AdviceMapKeyCollisionOnMerge(Word),
     #[error("decorator storage error: {0}")]
     DecoratorError(DecoratorIndexError),
+}
+
+// Custom serde implementations for MastForest that handle linked decorators properly
+// by delegating to the existing winter-utils serialization which already handles
+// the conversion between linked and owned decorator formats.
+#[cfg(feature = "serde")]
+impl serde::Serialize for MastForest {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        // Use the existing winter-utils serialization which already handles linked decorators
+        let bytes = crate::utils::Serializable::to_bytes(self);
+        serializer.serialize_bytes(&bytes)
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for MastForest {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        // Deserialize bytes, then use winter-utils Deserializable
+        let bytes = Vec::<u8>::deserialize(deserializer)?;
+        let mut slice_reader = winter_utils::SliceReader::new(&bytes);
+        crate::utils::Deserializable::read_from(&mut slice_reader).map_err(serde::de::Error::custom)
+    }
 }

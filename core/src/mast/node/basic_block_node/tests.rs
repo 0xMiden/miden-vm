@@ -1,6 +1,4 @@
 use proptest::prelude::*;
-#[cfg(feature = "serde")]
-use serde_json;
 
 // Import strategy functions from arbitrary.rs
 pub(super) use super::arbitrary::op_non_control_sequence_strategy;
@@ -758,4 +756,3 @@ fn test_basic_block_fingerprint_uses_forced_digest() {
         "Fingerprints should be different when digests differ"
     );
 }
-

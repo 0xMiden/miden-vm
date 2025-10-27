@@ -664,7 +664,7 @@ fn should_merge(is_procedure: bool, num_op_batches: usize) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use miden_core::{Operation, mast::MastNodeErrorContext};
+    use miden_core::Operation;
 
     use super::*;
 
