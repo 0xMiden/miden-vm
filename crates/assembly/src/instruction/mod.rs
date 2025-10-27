@@ -4,9 +4,12 @@ use miden_assembly_syntax::{
     diagnostics::{RelatedLabel, Report},
     parser::{IntValue, PushValue},
 };
-use miden_core::{Decorator, Felt, ONE, Operation, WORD_SIZE, ZERO, mast::MastNodeId};
+use miden_core::{Decorator, Felt, Operation, WORD_SIZE, ZERO, mast::MastNodeId};
 
-use crate::{Assembler, ProcedureContext, ast::InvokeKind, basic_block_builder::BasicBlockBuilder};
+use crate::{
+    Assembler, ProcedureContext, ast::InvokeKind, basic_block_builder::BasicBlockBuilder,
+    push_value_ops,
+};
 
 mod adv_ops;
 mod crypto_ops;
@@ -635,16 +638,7 @@ fn push_u32_value(span_builder: &mut BasicBlockBuilder, value: u32) {
 /// When the value is 0, PUSH operation is replaced with PAD. When the value is 1, PUSH operation
 /// is replaced with PAD INCR because in most cases this will be more efficient than doing a PUSH.
 fn push_felt(span_builder: &mut BasicBlockBuilder, value: Felt) {
-    use Operation::*;
-
-    if value == ZERO {
-        span_builder.push_op(Pad);
-    } else if value == ONE {
-        span_builder.push_op(Pad);
-        span_builder.push_op(Incr);
-    } else {
-        span_builder.push_op(Push(value));
-    }
+    span_builder.push_ops(push_value_ops(value));
 }
 
 /// Helper function that appends operations to reverse the order of the top 4 elements

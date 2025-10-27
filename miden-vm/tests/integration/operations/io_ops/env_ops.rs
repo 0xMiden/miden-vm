@@ -1,9 +1,8 @@
 use miden_core::{
-    Operation,
+    FMP_INIT_VALUE, Operation,
     mast::{CallNode, MastForest, MastNode, MastNodeExt},
 };
 use miden_debug_types::{SourceLanguage, SourceManager};
-use miden_processor::FMP_MIN;
 use miden_utils_testing::{MIN_STACK_DEPTH, StackInputs, Test, Word, build_op_test, build_test};
 
 use super::TRUNCATE_STACK_PROC;
@@ -47,6 +46,8 @@ fn sdepth() {
 
 #[test]
 fn locaddr() {
+    const FMP_INIT_VALUE_U64: u64 = FMP_INIT_VALUE.as_int();
+
     // --- locaddr returns expected address -------------------------------------------------------
     let source = "
         proc.foo.5
@@ -61,7 +62,7 @@ fn locaddr() {
     let test = build_test!(source, &[10]);
     // Note: internally, we round 5 up to 8 for word-aligned purposes, so the local addresses are
     // offset from 8 rather than 5.
-    test.expect_stack(&[FMP_MIN + 7, FMP_MIN + 3, 10]);
+    test.expect_stack(&[FMP_INIT_VALUE_U64 + 7, FMP_INIT_VALUE_U64 + 3, 10]);
 
     // --- accessing mem via locaddr updates the correct variables --------------------------------
     let source = "
@@ -108,14 +109,14 @@ fn locaddr() {
 
     let test = build_test!(source, &[10]);
     test.expect_stack(&[
-        FMP_MIN + 8,
-        FMP_MIN + 4,
-        FMP_MIN,
-        FMP_MIN + 4,
-        FMP_MIN + 16,
-        FMP_MIN + 12,
-        FMP_MIN + 8,
-        FMP_MIN,
+        FMP_INIT_VALUE_U64 + 8,
+        FMP_INIT_VALUE_U64 + 4,
+        FMP_INIT_VALUE_U64,
+        FMP_INIT_VALUE_U64 + 4,
+        FMP_INIT_VALUE_U64 + 16,
+        FMP_INIT_VALUE_U64 + 12,
+        FMP_INIT_VALUE_U64 + 8,
+        FMP_INIT_VALUE_U64,
         10,
     ]);
 
@@ -207,7 +208,7 @@ fn build_bar_hash() -> [u64; 4] {
 #[test]
 fn clk() {
     let test = build_op_test!("clk");
-    test.expect_stack(&[2]);
+    test.expect_stack(&[6]);
 
     let source = "
         proc.foo
@@ -222,5 +223,5 @@ fn clk() {
         end";
 
     let test = build_test!(source, &[]);
-    test.expect_stack(&[3, 4, 5]);
+    test.expect_stack(&[7, 4, 5]);
 }

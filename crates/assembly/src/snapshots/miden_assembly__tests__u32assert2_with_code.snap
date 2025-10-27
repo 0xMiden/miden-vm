@@ -1,11 +1,16 @@
 ---
-source: assembly/src/tests.rs
+source: crates/assembly/src/tests.rs
 expression: program
 ---
 begin
     basic_block
+        push(2147483648)
+        push(4294967294)
+        mstore
+        drop
         u32assert2(0)
         u32assert2(15491226248792286710)
         u32assert2(15491226248792286710)
+        noop
     end
 end

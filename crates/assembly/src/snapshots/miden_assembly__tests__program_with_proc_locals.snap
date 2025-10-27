@@ -1,24 +1,44 @@
 ---
-source: assembly/src/tests.rs
+source: crates/assembly/src/tests.rs
 expression: program
 ---
 begin
     basic_block
+        push(2147483648)
+        push(4294967294)
+        mstore
+        drop
         push(10)
         push(9)
         push(8)
         push(4)
-        fmpupdate
+        noop
+        noop
+        push(4294967294)
+        mload
+        add
+        push(4294967294)
+        mstore
+        drop
         push(18446744069414584317)
-        fmpadd
+        push(4294967294)
+        mload
+        add
         mstore
         drop
         add
         push(18446744069414584317)
-        fmpadd
+        push(4294967294)
+        mload
+        add
         mload
         mul
         push(18446744069414584317)
-        fmpupdate
+        push(4294967294)
+        mload
+        add
+        push(4294967294)
+        mstore
+        drop
     end
 end

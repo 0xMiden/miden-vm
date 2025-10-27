@@ -1,14 +1,19 @@
+---
+title: "Field Operations"
+sidebar_position: 4
+---
+
 # Field Operations
 In this section we describe the AIR constraints for Miden VM field operations (i.e., arithmetic operations over field elements).
 
 ## ADD
 Assume $a$ and $b$ are the elements at the top of the stack. The `ADD` operation computes $c \leftarrow (a + b)$. The diagram below illustrates this graphically.
 
-![add](../../assets/design/stack/field_operations/ADD.png)
+![add](../../img/design/stack/field_operations/ADD.png)
 
 Stack transition for this operation must satisfy the following constraints:
 
->$$
+$$
 s_0' - (s_0 + s_1) = 0 \text{ | degree} = 1
 $$
 
@@ -18,11 +23,11 @@ The effect on the rest of the stack is:
 ## NEG
 Assume $a$ is the element at the top of the stack. The `NEG` operation computes $b \leftarrow (-a)$. The diagram below illustrates this graphically.
 
-![neg](../../assets/design/stack/field_operations/NEG.png)
+![neg](../../img/design/stack/field_operations/NEG.png)
 
 Stack transition for this operation must satisfy the following constraints:
 
->$$
+$$
 s_0' + s_0 = 0 \text{ | degree} = 1
 $$
 
@@ -32,11 +37,11 @@ The effect on the rest of the stack is:
 ## MUL
 Assume $a$ and $b$ are the elements at the top of the stack. The `MUL` operation computes $c \leftarrow (a \cdot b)$. The diagram below illustrates this graphically.
 
-![mul](../../assets/design/stack/field_operations/MUL.png)
+![mul](../../img/design/stack/field_operations/MUL.png)
 
 Stack transition for this operation must satisfy the following constraints:
 
->$$
+$$
 s_0' - s_0 \cdot s_1 = 0 \text{ | degree} = 2
 $$
 
@@ -46,11 +51,11 @@ The effect on the rest of the stack is:
 ## INV
 Assume $a$ is the element at the top of the stack. The `INV` operation computes $b \leftarrow (a^{-1})$. The diagram below illustrates this graphically.
 
-![inv](../../assets/design/stack/field_operations/INV.png)
+![inv](../../img/design/stack/field_operations/INV.png)
 
 Stack transition for this operation must satisfy the following constraints:
 
->$$
+$$
 1 - s_0' \cdot s_0 = 0 \text{ | degree} = 2
 $$
 
@@ -62,11 +67,11 @@ The effect on the rest of the stack is:
 ## INCR
 Assume $a$ is the element at the top of the stack. The `INCR` operation computes $b \leftarrow (a+1)$. The diagram below illustrates this graphically.
 
-![incr](../../assets/design/stack/field_operations/INCR.png)
+![incr](../../img/design/stack/field_operations/INCR.png)
 
 Stack transition for this operation must satisfy the following constraints:
 
->$$
+$$
 s_0' - (s_0 + 1) = 0 \text{ | degree} = 1
 $$
 
@@ -76,15 +81,15 @@ The effect on the rest of the stack is:
 ## NOT
 Assume $a$ is a binary value at the top of the stack. The `NOT` operation computes $b \leftarrow (\lnot a)$. The diagram below illustrates this graphically.
 
-![not](../../assets/design/stack/field_operations/NOT.png)
+![not](../../img/design/stack/field_operations/NOT.png)
 
 Stack transition for this operation must satisfy the following constraints:
 
->$$
+$$
 s_0^2 - s_0 = 0 \text{ | degree} = 2
 $$
 
->$$
+$$
 s_0' - (1 - s_0) = 0 \text{ | degree} = 1
 $$
 
@@ -96,15 +101,15 @@ The effect on the rest of the stack is:
 ## AND
 Assume $a$ and $b$ are binary values at the top of the stack. The `AND` operation computes $c \leftarrow (a \land b)$. The diagram below illustrates this graphically.
 
-![and](../../assets/design/stack/field_operations/AND.png)
+![and](../../img/design/stack/field_operations/AND.png)
 
 Stack transition for this operation must satisfy the following constraints:
 
->$$
+$$
 s_i^2 - s_i = 0 \text{ for } i \in \{0, 1\} \text{ | degree} = 2
 $$
 
->$$
+$$
 s_0' - s_0 \cdot s_1 = 0 \text{ | degree} = 2
 $$
 
@@ -116,15 +121,15 @@ The effect on the rest of the stack is:
 ## OR
 Assume $a$ and $b$ are binary values at the top of the stack. The `OR` operation computes $c \leftarrow (a \lor b)$ The diagram below illustrates this graphically.
 
-![or](../../assets/design/stack/field_operations/OR.png)
+![or](../../img/design/stack/field_operations/OR.png)
 
 Stack transition for this operation must satisfy the following constraints:
 
->$$
+$$
 s_i^2 - s_i = 0 \text{ for } i \in \{0, 1\} \text{ | degree} = 2
 $$
 
->$$
+$$
 s_{0}' - (s_{1} + s_{0} - s_{1} \cdot s_{0}) = 0 \text{ | degree} = 2
 $$
 
@@ -136,15 +141,15 @@ The effect on the rest of the stack is:
 ## EQ
 Assume $a$ and $b$ are the elements at the top of the stack. The `EQ` operation computes $c$ such that $c = 1$ if $a = b$, and $0$ otherwise. The diagram below illustrates this graphically.
 
-![eq](../../assets/design/stack/field_operations/EQ.png)
+![eq](../../img/design/stack/field_operations/EQ.png)
 
 Stack transition for this operation must satisfy the following constraints:
 
->$$
+$$
 s_0' \cdot (s_0 - s_1) = 0 \text{ | degree} = 2
 $$
 
->$$
+$$
 s_0' - (1 - (s_0 - s_1) \cdot h_0) = 0 \text{ | degree} = 2
 $$
 
@@ -158,15 +163,15 @@ The effect on the rest of the stack is:
 ## EQZ
 Assume $a$ is the element at the top of the stack. The `EQZ` operation computes $b$ such that $b = 1$ if $a = 0$, and $0$ otherwise. The diagram below illustrates this graphically.
 
-![eqz](../../assets/design/stack/field_operations/EQZ.png)
+![eqz](../../img/design/stack/field_operations/EQZ.png)
 
 Stack transition for this operation must satisfy the following constraints:
 
->$$
+$$
 s_0' \cdot s_0 = 0 \text{ | degree} = 2
 $$
 
->$$
+$$
 s_0' - (1 - s_0 \cdot h_0) = 0 \text{ | degree} = 2
 $$
 
@@ -182,7 +187,7 @@ The `EXPACC` operation computes one round of the expression $base^{exp}$. It is 
 
 It pops $4$ elements from the top of the stack, performs a single round of exponent aggregation, and pushes the resulting $4$ values onto the stack. The diagram below illustrates this graphically.
 
-![expacc](../../assets/design/stack/field_operations/EXPACC.png)
+![expacc](../../img/design/stack/field_operations/EXPACC.png)
 
 Expacc is based on the observation that the exponentiation of a number can be computed by repeatedly squaring the base and multiplying those powers of the base by the accumulator, for the powers of the base which correspond to the exponent's bits which are set to 1.
 
@@ -192,31 +197,31 @@ Stack transition for this operation must satisfy the following constraints:
 
 `bit'` should be a binary.
 
->$$
+$$
 s_0'^{2} - s_0' = 0 \text{ | degree} = 2
 $$
 
 The `base` in the next frame should be the square of the `base` in the current frame.
 
->$$
+$$
 s_1' - s_1^{2} = 0 \text{ | degree} = 2
 $$
 
 The value `val` in the helper register is computed correctly using the `bit` and `exp` in next and current frame respectively.
 
->$$
+$$
 h_0 - ((s_1 - 1) * s_0' + 1) = 0 \text{ | degree} = 2
 $$
 
 The `acc` in the next frame is the product of `val` and `acc` in the current frame.
 
->$$
+$$
 s_2' - s_2 * h_0 = 0 \text{ | degree} = 2
 $$
 
 `exp` in the next frame is half of `exp` in the current frame (accounting for even/odd).
 
->$$
+$$
 s_3' - (s_3 * 2 + s_0')  = 0 \text{ | degree} = 1
 $$
 
@@ -226,31 +231,31 @@ The effect on the rest of the stack is:
 ## EXT2MUL
 The `EXT2MUL` operation pops top $4$ values from the top of the stack, performs multiplication between the two extension field elements, and pushes the resulting $4$ values onto the stack. The diagram below illustrates this graphically.
 
-![ext2mul](../../assets/design/stack/field_operations/EXT2MUL.png)
+![ext2mul](../../img/design/stack/field_operations/EXT2MUL.png)
 
 Stack transition for this operation must satisfy the following constraints:
 
 The first stack element should be unchanged in the next frame.
 
->$$
+$$
 s_0' - s_0 = 0 \text{ | degree} = 1
 $$
 
 The second stack element should be unchanged in the next frame.
 
->$$
+$$
 s_1' - s_1 = 0 \text{ | degree} = 1
 $$
 
 The third stack element should satisfy the following constraint.
 
->$$
+$$
 s_2' - (s_0 + s_1) \cdot (s_2 + s_3) + s_0 \cdot s_2 = 0 \text{ | degree} = 2
 $$
 
 The fourth stack element should satisfy the following constraint.
 
->$$
+$$
 s_3' - s_1 \cdot s_3 + 2 \cdot s_0 \cdot s_2 = 0 \text{ | degree} = 2
 $$
 

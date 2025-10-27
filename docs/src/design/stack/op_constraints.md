@@ -1,3 +1,8 @@
+---
+title: "Stack Operation Constraints"
+sidebar_position: 2
+---
+
 # Stack operation constraints
 
 In addition to the constraints described in the previous section, we need to impose constraints to check that each VM operation is executed correctly.
@@ -7,7 +12,7 @@ For this purpose the VM exposes a set of operation-specific flags. These flags a
 To describe how operation-specific constraints work, let's use an example with `DUP` operation. This  operation pushes a copy of the top stack item onto the stack. The constraints we need to impose for this operation are as follows:
 
 $$
-f_{dup} \cdot (s'_0 - s_0) = 0 \\
+f_{dup} \cdot (s'_0 - s_0) = 0 
 f_{dup} \cdot (s'_{i+1} - s_i) = 0 \ \text{ for } i \in [0, 15)
 $$
 
@@ -16,7 +21,7 @@ The first constraint enforces that the top stack item in the next row is the sam
 Let's write similar constraints for `DUP1` operation, which pushes a copy of the second stack item onto the stack:
 
 $$
-f_{dup1} \cdot (s'_0 - s_1) = 0 \\
+f_{dup1} \cdot (s'_0 - s_1) = 0 
 f_{dup1} \cdot (s'_{i+1} - s_i) = 0 \ \text{ for } i \in [0, 15)
 $$
 
@@ -29,7 +34,7 @@ As mentioned above, operation flags are used as selectors to enforce operation-s
 
 Operation flags are mutually exclusive. That is, if one flag is set to $1$, all other flags are set to $0$. Also, one of the flags is always guaranteed to be set to $1$.
 
-To compute values of operation flags we use _op bits_ registers located in the [decoder](../decoder/main.md#decoder-trace). These registers contain binary representations of operation codes (opcodes). Each opcode consists of $7$ bits, and thus, there are $7$ _op bits_ registers. We denote these registers as $b_0, ..., b_6$. The values are computed by multiplying the op bit registers in various combinations. Notice that binary encoding down below is showed in big-endian order, so the flag bits correspond to the reverse order of the _op bits_ registers, from $b_6$ to $b_0$.
+To compute values of operation flags we use _op bits_ registers located in the [decoder](../decoder/index.md#decoder-trace). These registers contain binary representations of operation codes (opcodes). Each opcode consists of $7$ bits, and thus, there are $7$ _op bits_ registers. We denote these registers as $b_0, ..., b_6$. The values are computed by multiplying the op bit registers in various combinations. Notice that binary encoding down below is showed in big-endian order, so the flag bits correspond to the reverse order of the _op bits_ registers, from $b_6$ to $b_0$.
 
 For example, the value of the flag for `NOOP`, which is encoded as `0000000`, is computed as follows:
 
@@ -166,7 +171,7 @@ The degree of this flag is $3$, which is acceptable for a selector for degree $5
 
 As mentioned previously, the last bit of the opcode is not used in computation of the flag for these operations. We force this bit to always be set to $0$ with the following constraint:
 
->$$
+$$
 b_6 \cdot (1 - b_5) \cdot (1 - b_4) \cdot b_0 = 0 \text{ | degree} = 4
 $$
 
@@ -183,15 +188,15 @@ This group contains operations which require constraints with degree up to $3$. 
 | `MPVERIFY`    |     $81$     |   `101_0001`    |     [Crypto ops](./crypto_ops.md)      |     $5$     |
 | `PIPE`        |     $82$     |   `101_0010`    |         [I/O ops](./io_ops.md)         |     $5$     |
 | `MSTREAM`     |     $83$     |   `101_0011`    |         [I/O ops](./io_ops.md)         |     $5$     |
-| `SPLIT`       |     $84$     |   `101_0100`    | [Flow control ops](../decoder/main.md) |     $5$     |
-| `LOOP`        |     $85$     |   `101_0101`    | [Flow control ops](../decoder/main.md) |     $5$     |
-| `SPAN`        |     $86$     |   `101_0110`    | [Flow control ops](../decoder/main.md) |     $5$     |
-| `JOIN`        |     $87$     |   `101_0111`    | [Flow control ops](../decoder/main.md) |     $5$     |
-| `DYN`         |     $88$     |   `101_1000`    | [Flow control ops](../decoder/main.md) |     $5$     |
+| `SPLIT`       |     $84$     |   `101_0100`    | [Flow control ops](../decoder/index.md) |     $5$     |
+| `LOOP`        |     $85$     |   `101_0101`    | [Flow control ops](../decoder/index.md) |     $5$     |
+| `SPAN`        |     $86$     |   `101_0110`    | [Flow control ops](../decoder/index.md) |     $5$     |
+| `JOIN`        |     $87$     |   `101_0111`    | [Flow control ops](../decoder/index.md) |     $5$     |
+| `DYN`         |     $88$     |   `101_1000`    | [Flow control ops](../decoder/index.md) |     $5$     |
 | `HORNEREXT`   |     $89$     |   `101_1001`    |     [Crypto ops](./crypto_ops.md)      |     $5$     |
 | `<unused>`    |     $90$     |   `101_1010`    |                                        |     $5$     |
 | `PUSH`        |     $91$     |   `101_1011`    |         [I/O ops](./io_ops.md)         |     $5$     |
-| `DYNCALL`     |     $92$     |   `101_1100`    | [Flow control ops](../decoder/main.md) |     $5$     |
+| `DYNCALL`     |     $92$     |   `101_1100`    | [Flow control ops](../decoder/index.md) |     $5$     |
 | `EVALCIRCUIT` |     $93$     |   `101_1101`    |     [Crypto ops](./crypto_ops.md)      |     $5$     |
 | `<unused>`    |     $94$     |   `101_1110`    |                                        |     $5$     |
 | `<unused>`    |     $95$     |   `101_1111`    |                                        |     $5$     |
@@ -201,7 +206,7 @@ Note that the `SPLIT` and `LOOP` operations are grouped together under the commo
 
 Also, we need to make sure that `extra` register $e_0$, which is used to reduce the flag degree by $2$, is set to $1$ when $b_6 = 1$, $b_5 = 0$, and $b_4 = 1$:
 
->$$
+$$
 e_0 - b_6 \cdot (1 - b_5) \cdot b_4 = 0 \text{ | degree} = 3
 $$
 
@@ -212,26 +217,26 @@ This group contains operations which require constraints with degree up to $5$.
 | ------------ | :----------: | :-------------: | :------------------------------------: | :---------: |
 | `MRUPDATE`   |     $96$     |   `110_0000`    |     [Crypto ops](./crypto_ops.md)      |     $4$     |
 | `HORNERBASE` |    $100$     |   `110_0100`    |     [Crypto ops](./crypto_ops.md)      |     $4$     |
-| `SYSCALL`    |    $104$     |   `110_1000`    | [Flow control ops](../decoder/main.md) |     $4$     |
-| `CALL`       |    $108$     |   `110_1100`    | [Flow control ops](../decoder/main.md) |     $4$     |
-| `END`        |    $112$     |   `111_0000`    | [Flow control ops](../decoder/main.md) |     $4$     |
-| `REPEAT`     |    $116$     |   `111_0100`    | [Flow control ops](../decoder/main.md) |     $4$     |
-| `RESPAN`     |    $120$     |   `111_1000`    | [Flow control ops](../decoder/main.md) |     $4$     |
-| `HALT`       |    $124$     |   `111_1100`    | [Flow control ops](../decoder/main.md) |     $4$     |
+| `SYSCALL`    |    $104$     |   `110_1000`    | [Flow control ops](../decoder/index.md) |     $4$     |
+| `CALL`       |    $108$     |   `110_1100`    | [Flow control ops](../decoder/index.md) |     $4$     |
+| `END`        |    $112$     |   `111_0000`    | [Flow control ops](../decoder/index.md) |     $4$     |
+| `REPEAT`     |    $116$     |   `111_0100`    | [Flow control ops](../decoder/index.md) |     $4$     |
+| `RESPAN`     |    $120$     |   `111_1000`    | [Flow control ops](../decoder/index.md) |     $4$     |
+| `HALT`       |    $124$     |   `111_1100`    | [Flow control ops](../decoder/index.md) |     $4$     |
 
 As mentioned previously, the last two bits of the opcode are not used in computation of the flag for these operations. We force these bits to always be set to $0$ with the following constraints:
 
->$$
+$$
 b_6 \cdot b_5 \cdot b_0 = 0 \text{ | degree} = 3
 $$
 
->$$
+$$
 b_6 \cdot b_5 \cdot b_1 = 0 \text{ | degree} = 3
 $$
 
 Also, we need to make sure that `extra` register $e_1$, which is used to reduce the flag degree by $1$, is set to $1$ when both $b_6$ and $b_5$ columns are set to $1$:
 
->$$
+$$
 e_1 - b_6 \cdot b_5 = 0 \text{ | degree} = 2
 $$
 

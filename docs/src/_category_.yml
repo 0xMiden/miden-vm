@@ -1,0 +1,4 @@
+label: "Virtual Machine"
+# Determines where this documentation section appears relative to other sections on the main documentation page (which is the parent of this folder in the miden-docs repository)
+position: 7
+collapsed: true
