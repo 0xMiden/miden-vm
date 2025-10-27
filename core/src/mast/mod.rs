@@ -55,7 +55,7 @@ mod tests;
 /// A [`MastForest`] does not have an entrypoint, and hence is not executable. A [`crate::Program`]
 /// can be built from a [`MastForest`] to specify an entrypoint.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize))]
 #[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 pub struct MastForest {
     /// All of the nodes local to the trees comprising the MAST forest.
@@ -644,6 +644,68 @@ impl Serializable for DecoratorId {
 pub fn error_code_from_msg(msg: impl AsRef<str>) -> Felt {
     // hash the message and return 0th felt of the resulting Word
     hash_string_to_word(msg.as_ref())[0]
+}
+
+// SERDE IMPLEMENTATIONS
+// ================================================================================================
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for MastForest {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        // First, deserialize using a proxy struct that has the same structure as MastForest
+        #[derive(serde::Deserialize)]
+        struct MastForestProxy {
+            nodes: IndexVec<MastNodeId, MastNode>,
+            roots: Vec<MastNodeId>,
+            decorators: IndexVec<DecoratorId, Decorator>,
+            advice_map: AdviceMap,
+            error_codes: BTreeMap<u64, Arc<str>>,
+        }
+
+        let proxy = MastForestProxy::deserialize(deserializer)?;
+
+        let node_builders = proxy.nodes.into_iter().map(|old_node| old_node.to_builder());
+
+        // Convert the proxy back to a MastForest, but start with empty decorator storage
+        // since we'll rebuild it with the new nodes
+        let mut forest = MastForest {
+            nodes: IndexVec::new(), // Start empty
+            roots: Vec::new(),      // Start empty, will be remapped
+            decorators: proxy.decorators,
+            advice_map: proxy.advice_map,
+            error_codes: proxy.error_codes,
+            decorator_storage: Arc::new(DecoratorIndexMapping::new()), // Start fresh
+        };
+
+        // Create remappings - BTreeMap doesn't have reserve, but it will grow efficiently
+        let mut id_remappings = BTreeMap::new();
+
+        // Re-add all nodes using the builders to create Linked decorators
+        for (old_index, builder) in node_builders.into_iter().enumerate() {
+            let old_id = MastNodeId::new_unchecked(old_index as u32);
+            let new_id = builder.add_to_forest_relaxed(&mut forest).map_err(|e| {
+                serde::de::Error::custom(format!("Failed to re-add node to forest: {}", e))
+            })?;
+            id_remappings.insert(old_id, new_id);
+        }
+
+        // Remap the roots to use the new node IDs
+        forest.roots.reserve(proxy.roots.len());
+        for old_root_id in proxy.roots {
+            let new_root_id = id_remappings.get(&old_root_id).ok_or_else(|| {
+                serde::de::Error::custom(format!(
+                    "Missing remapping for root node {:?}",
+                    old_root_id
+                ))
+            })?;
+            forest.roots.push(*new_root_id);
+        }
+
+        Ok(forest)
+    }
 }
 
 // MAST FOREST ERROR
