@@ -221,14 +221,12 @@ end
 #!     - `(end_ptr - start_ptr)` must be divisible by 8
 #! - `start_ptr > end_ptr`
 #!
-#! TODO: Update cycle counts.
-#!
 #! Cycles:
-#!   Key exists: 56 cycles
+#!   Key exists: 70 cycles
 #!   Key doesn't exist and the array is empty: 25 cycles
-#!   Key doesn't exist and is smaller than all stored keys: 151 cycles
-#!   Key doesn't exist and is larger than all stored keys: 149 cycles
-#!   Key doesn't exist: 298 cycles
+#!   Key doesn't exist and is smaller than all stored keys: 166 cycles
+#!   Key doesn't exist and is larger than all stored keys: 162 cycles
+#!   Key doesn't exist: 322 cycles
 proc.find_partial_key_value.1
     # Call the non-deterministic lowerbound advisor (5 cycles)
     emit.LOWERBOUND_KEY_VALUE_EVENT
@@ -253,7 +251,7 @@ proc.find_partial_key_value.1
         dup dup.6 sub u32mod.8 assertz.err="lowerbound_key_value invariant: key_ptr must be double-word aligned with start_ptr"
         #=> [maybe_key_ptr, KEY, start_ptr, end_ptr]
 
-        # dereference maybe_key_ptr (8 cycles)
+        # dereference maybe_key_ptr (22 cycles)
         dup movdn.5
         #=> [maybe_key_ptr, KEY, maybe_key_ptr, start_ptr, end_ptr]
 
@@ -288,10 +286,10 @@ proc.find_partial_key_value.1
                 # assert `the key at start_ptr > KEY`
                 #=> [maybe_key_ptr = start_ptr, KEY, start_ptr, end_ptr]
 
+                # load key (22 cycles)
                 dup movdn.5
                 #=> [maybe_key_ptr, KEY, maybe_key_ptr, start_ptr, end_ptr]
 
-                # load key (?? cycles)
                 loc_load.0 exec.load_key
                 #=> [FIRST_KEY, KEY, maybe_key_ptr = start_ptr, start_ptr, end_ptr]
 
@@ -312,7 +310,7 @@ proc.find_partial_key_value.1
 
                 #=> [maybe_key_ptr = end_ptr, KEY, start_ptr, end_ptr]
 
-                # fetch the last key in the array (10 cycles)
+                # fetch the last key in the array (23 cycles)
                 dup movdn.5 sub.8
                 #=> [maybe_key_ptr-8, KEY, maybe_key_ptr, start_ptr, end_ptr]
 
@@ -342,7 +340,7 @@ proc.find_partial_key_value.1
                 movdn.4 dupw
                 #=> [KEY, KEY, maybe_key_ptr, start_ptr, end_ptr]
 
-                # load key (?? cycles)
+                # load key (21 cycles)
                 dup.8 loc_load.0 exec.load_key
                 #=> [MAYBE_KEY, KEY, KEY, maybe_key_ptr, start_ptr, end_ptr]
 
@@ -351,7 +349,7 @@ proc.find_partial_key_value.1
                 assert.err="lowerbound_key_value invariant: MAYBE_KEY not greater than KEY"
                 #=> [KEY, maybe_key_ptr, start_ptr, end_ptr]
 
-                # dereference `maybe_key_ptr-8` (previous key) (11 cycles)
+                # dereference `maybe_key_ptr-8` (previous key) (22 cycles)
                 dup.4 sub.8
                 #=> [maybe_key_ptr-8, KEY, maybe_key_ptr, start_ptr, end_ptr]
 
@@ -379,6 +377,8 @@ end
 #!
 #! Inputs:  [use_full_key, key_ptr]
 #! Outputs: [KEY]
+#!
+#! Cycles: 16
 proc.load_key
     padw movup.5 mem_loadw
     # => [FULL_KEY, use_full_key]
