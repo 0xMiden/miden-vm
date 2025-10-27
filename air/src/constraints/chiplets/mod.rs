@@ -59,20 +59,17 @@ pub fn get_aux_assertions_first_step<E>(
         reduced_kernel_digests.inv(),
     ));
 
-    if IS_FULL_CONSTRAINT_SET {
-        // TODO: Enable in reduced mode after recursive verifier update.
-        // Anchor hasher vtable init against PI-provided transcript state (empty/final).
-        let alphas = aux_rand_elements.rand_elements();
-        let state: [Felt; 4] = precompile_transcript_state.into();
-        let label: Felt = Felt::from(LOG_PRECOMPILE_LABEL);
-        let empty_msg = alphas[0] + alphas[1].mul_base(label);
-        let mut final_msg = empty_msg;
-        for (i, c) in state.iter().enumerate() {
-            final_msg += alphas[2 + i].mul_base(*c);
-        }
-        let vtable_init_ratio = empty_msg * final_msg.inv();
-        result.push(Assertion::single(P1_COL_IDX, 0, vtable_init_ratio));
+    // Anchor hasher vtable init against PI-provided transcript state (empty/final).
+    let alphas = aux_rand_elements.rand_elements();
+    let state: [Felt; 4] = precompile_transcript_state.into();
+    let label: Felt = Felt::from(LOG_PRECOMPILE_LABEL);
+    let empty_msg = alphas[0] + alphas[1].mul_base(label);
+    let mut final_msg = empty_msg;
+    for (i, c) in state.iter().enumerate() {
+        final_msg += alphas[2 + i].mul_base(*c);
     }
+    let vtable_init_ratio = empty_msg * final_msg.inv();
+    result.push(Assertion::single(P1_COL_IDX, 0, vtable_init_ratio));
 }
 
 // CHIPLETS TRANSITION CONSTRAINTS

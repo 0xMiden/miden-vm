@@ -121,11 +121,11 @@ impl Air for ProcessorAir {
         };
 
         // Define the number of boundary constraints for the auxiliary execution trace segment.
-        // TODO: Re-enable vtable boundary in reduced mode after recursive verifier update.
+        // Includes vtable boundary constraint for precompile transcript validation.
         let num_aux_assertions = if IS_FULL_CONSTRAINT_SET {
             stack::NUM_AUX_ASSERTIONS + range::NUM_AUX_ASSERTIONS + 1
         } else {
-            3
+            3 + 1  // kernel_rom + range + vtable
         };
 
         // Create the context and set the number of transition constraint exemptions to two; this
@@ -329,16 +329,12 @@ pub struct PublicInputs {
 impl PublicInputs {
     /// Creates a new instance of `PublicInputs` from program information, stack inputs and outputs,
     /// and the precompile transcript state (capacity of an internal sponge).
-    ///
-    /// Note: The transcript state is currently not serialized/enforced in recursion.
     pub fn new(
         program_info: ProgramInfo,
         stack_inputs: StackInputs,
         stack_outputs: StackOutputs,
-        _precompile_transcript_state: PrecompileTranscriptState,
+        precompile_transcript_state: PrecompileTranscriptState,
     ) -> Self {
-        // TODO: Use transcript state once recursion supports it.
-        let precompile_transcript_state = PrecompileTranscriptState::default();
         Self {
             program_info,
             stack_inputs,
@@ -353,9 +349,8 @@ impl miden_core::ToElements<Felt> for PublicInputs {
         let mut result = self.stack_inputs.to_vec();
         result.append(&mut self.stack_outputs.to_vec());
         result.append(&mut self.program_info.to_elements());
-        // TODO: Append transcript state to PI elements after recursion supports it.
-        // let cap: [Felt; 4] = self.precompile_transcript_state.into();
-        // result.extend_from_slice(&cap);
+        let pc_state: [Felt; 4] = self.precompile_transcript_state.into();
+        result.extend_from_slice(&pc_state);
         result
     }
 }
@@ -368,8 +363,7 @@ impl Serializable for PublicInputs {
         self.program_info.write_into(target);
         self.stack_inputs.write_into(target);
         self.stack_outputs.write_into(target);
-        // TODO: Serialize transcript state after recursion supports it.
-        // self.precompile_transcript_state.write_into(target);
+        self.precompile_transcript_state.write_into(target);
     }
 }
 
@@ -378,9 +372,7 @@ impl Deserializable for PublicInputs {
         let program_info = ProgramInfo::read_from(source)?;
         let stack_inputs = StackInputs::read_from(source)?;
         let stack_outputs = StackOutputs::read_from(source)?;
-        // TODO: Read transcript state after recursion supports it.
-        // let precompile_transcript_state = Word::read_from(source)?;
-        let precompile_transcript_state = PrecompileTranscriptState::default();
+        let precompile_transcript_state = Word::read_from(source)?;
 
         Ok(PublicInputs {
             program_info,

@@ -13,6 +13,18 @@ use crate::{
     },
 };
 
+// CONSTANTS
+// ================================================================================================
+
+/// Offset constants for extracting words from RPO permutation output state.
+/// The output state layout is [CAP_NEXT, R0, R1] where each is a 4-element word.
+const CAP_NEXT_START: usize = 0;
+const R0_START: usize = 4;
+const R1_START: usize = 8;
+
+// CRYPTOGRAPHIC OPERATIONS
+// ================================================================================================
+
 /// Performs a hash permutation operation.
 /// Applies Rescue Prime Optimized permutation to the top 12 elements of the stack.
 #[inline(always)]
@@ -236,9 +248,27 @@ pub(super) fn op_log_precompile<P: Processor>(
     let (addr, output_state) = processor.hasher().permute(hasher_state);
 
     // Extract CAP_NEXT (first 4 elements), R0 (next 4 elements), R1 (last 4 elements)
-    let cap_next: Word = [0, 1, 2, 3].map(|i| output_state[i]).into();
-    let r0: Word = [4, 5, 6, 7].map(|i| output_state[i]).into();
-    let r1: Word = [8, 9, 10, 11].map(|i| output_state[i]).into();
+    let cap_next: Word = [
+        output_state[CAP_NEXT_START],
+        output_state[CAP_NEXT_START + 1],
+        output_state[CAP_NEXT_START + 2],
+        output_state[CAP_NEXT_START + 3],
+    ]
+    .into();
+    let r0: Word = [
+        output_state[R0_START],
+        output_state[R0_START + 1],
+        output_state[R0_START + 2],
+        output_state[R0_START + 3],
+    ]
+    .into();
+    let r1: Word = [
+        output_state[R1_START],
+        output_state[R1_START + 1],
+        output_state[R1_START + 2],
+        output_state[R1_START + 3],
+    ]
+    .into();
 
     // Update the processor's precompile sponge capacity
     processor.set_precompile_transcript_state(cap_next);

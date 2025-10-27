@@ -4,6 +4,13 @@ use miden_core::mast::MastForest;
 use super::{ExecutionError, Operation, Process};
 use crate::{ErrorContext, Felt, Word};
 
+// CONSTANTS
+// ================================================================================================
+
+/// Offset constants for extracting words from RPO permutation output state.
+/// The output state layout is [CAP_NEXT, R0, R1] where each is a 4-element word.
+const CAP_NEXT_START: usize = 0;
+
 // CRYPTOGRAPHIC OPERATIONS
 // ================================================================================================
 
@@ -221,11 +228,17 @@ impl Process {
         );
 
         // Update the processor's precompile sponge capacity with CAP_NEXT
-        let cap_next =
-            Word::from([output_state[0], output_state[1], output_state[2], output_state[3]]);
+        let cap_next: Word = [
+            output_state[CAP_NEXT_START],
+            output_state[CAP_NEXT_START + 1],
+            output_state[CAP_NEXT_START + 2],
+            output_state[CAP_NEXT_START + 3],
+        ]
+        .into();
         self.precompile_transcript_state = cap_next;
 
-        // Write the output [CAP_NEXT, R0, R1] to the stack (top 12 elements) in reverse order
+        // Write the output to stack (top 12 elements): [R1, R0, CAP_NEXT] from top to bottom
+        // The output_state array [CAP_NEXT, R0, R1] is written in reverse via (11-i) indexing
         for (i, elt) in output_state.iter().enumerate() {
             self.stack.set(11 - i, *elt);
         }
