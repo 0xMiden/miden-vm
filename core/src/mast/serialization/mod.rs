@@ -51,7 +51,7 @@ use string_table::StringTable;
 use super::{DecoratedOpLink, DecoratorId, MastForest, MastNode, MastNodeId};
 use crate::{
     AdviceMap,
-    mast::{MastForestContributor, MastNodeBuilder, node::MastNodeExt},
+    mast::{MastForestContributor, MastNodeBuilder},
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
@@ -130,11 +130,17 @@ impl Serializable for MastForest {
             .iter()
             .enumerate()
             .map(|(mast_node_id, mast_node)| {
-                if !mast_node.before_enter(self).is_empty() {
-                    before_enter_decorators.push((mast_node_id, mast_node.before_enter(self).to_vec()));
+                let node_id = MastNodeId::new_unchecked(mast_node_id as u32);
+
+                // Use centralized NodeDecoratorStorage for node-level decorators
+                let before_decorators = self.node_decorator_storage.get_before_decorators(node_id);
+                if !before_decorators.is_empty() {
+                    before_enter_decorators.push((mast_node_id, before_decorators.to_vec()));
                 }
-                if !mast_node.after_exit(self).is_empty() {
-                    after_exit_decorators.push((mast_node_id, mast_node.after_exit(self).to_vec()));
+
+                let after_decorators = self.node_decorator_storage.get_after_decorators(node_id);
+                if !after_decorators.is_empty() {
+                    after_exit_decorators.push((mast_node_id, after_decorators.to_vec()));
                 }
 
                 let ops_offset = if let MastNode::Block(basic_block) = mast_node {

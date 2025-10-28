@@ -534,7 +534,8 @@ fn mast_forest_basic_block_serialization_no_decorator_duplication() {
     );
 
     // Verify that the op-indexed decorator is only in the indexed decorator list
-    let indexed_decorators: Vec<_> = deserialized_block.indexed_decorator_iter(&deserialized).collect();
+    let indexed_decorators: Vec<_> =
+        deserialized_block.indexed_decorator_iter(&deserialized).collect();
     assert_eq!(indexed_decorators.len(), 1, "Should have exactly one op-indexed decorator");
     assert_eq!(indexed_decorators[0].1, op_deco, "Op-indexed decorator should be preserved");
 

@@ -93,7 +93,8 @@ impl NodeDecoratorStorage {
         self.node_indptr_for_before[node_id] = start_pos;
 
         // Update the end pointer (which is the start for the next node)
-        self.node_indptr_for_before[MastNodeId::new_unchecked((node_id.to_usize() + 1) as u32)] = before_end;
+        self.node_indptr_for_before[MastNodeId::new_unchecked((node_id.to_usize() + 1) as u32)] =
+            before_end;
 
         // Get the start position for this node's after_exit decorators
         let after_start_pos = self.after_exit_decorators.len();
@@ -106,7 +107,8 @@ impl NodeDecoratorStorage {
         self.node_indptr_for_after[node_id] = after_start_pos;
 
         // Update the end pointer (which is the start for the next node)
-        self.node_indptr_for_after[MastNodeId::new_unchecked((node_id.to_usize() + 1) as u32)] = after_end;
+        self.node_indptr_for_after[MastNodeId::new_unchecked((node_id.to_usize() + 1) as u32)] =
+            after_end;
     }
 
     /// Gets the before_enter decorators for a given node.

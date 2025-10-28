@@ -358,8 +358,14 @@ fn test_mast_forest_roundtrip_with_basic_blocks_and_decorators() {
         assert_eq!(original_decorators, deserialized_decorators);
 
         // Verify before/after decorators
-        assert_eq!(original_block.before_enter(&original_forest), deserialized_block.before_enter(&deserialized_forest));
-        assert_eq!(original_block.after_exit(&original_forest), deserialized_block.after_exit(&deserialized_forest));
+        assert_eq!(
+            original_block.before_enter(&original_forest),
+            deserialized_block.before_enter(&deserialized_forest)
+        );
+        assert_eq!(
+            original_block.after_exit(&original_forest),
+            deserialized_block.after_exit(&deserialized_forest)
+        );
     }
 
     // Test specific decorator arrangements are preserved
