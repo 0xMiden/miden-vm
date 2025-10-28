@@ -523,18 +523,18 @@ fn mast_forest_basic_block_serialization_no_decorator_duplication() {
 
     // Verify that each decorator appears exactly once in the deserialized structure
     assert_eq!(
-        deserialized_block.before_enter(),
+        deserialized_block.before_enter(&deserialized),
         &[before_enter_deco],
         "before_enter decorator should appear exactly once"
     );
     assert_eq!(
-        deserialized_block.after_exit(),
+        deserialized_block.after_exit(&deserialized),
         &[after_exit_deco],
         "after_exit decorator should appear exactly once"
     );
 
     // Verify that the op-indexed decorator is only in the indexed decorator list
-    let indexed_decorators: Vec<_> = deserialized_block.indexed_decorator_iter(&forest).collect();
+    let indexed_decorators: Vec<_> = deserialized_block.indexed_decorator_iter(&deserialized).collect();
     assert_eq!(indexed_decorators.len(), 1, "Should have exactly one op-indexed decorator");
     assert_eq!(indexed_decorators[0].1, op_deco, "Op-indexed decorator should be preserved");
 

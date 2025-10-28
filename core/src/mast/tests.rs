@@ -358,8 +358,8 @@ fn test_mast_forest_roundtrip_with_basic_blocks_and_decorators() {
         assert_eq!(original_decorators, deserialized_decorators);
 
         // Verify before/after decorators
-        assert_eq!(original_block.before_enter(), deserialized_block.before_enter());
-        assert_eq!(original_block.after_exit(), deserialized_block.after_exit());
+        assert_eq!(original_block.before_enter(&original_forest), deserialized_block.before_enter(&deserialized_forest));
+        assert_eq!(original_block.after_exit(&original_forest), deserialized_block.after_exit(&deserialized_forest));
     }
 
     // Test specific decorator arrangements are preserved
@@ -373,8 +373,8 @@ fn test_mast_forest_roundtrip_with_basic_blocks_and_decorators() {
     };
 
     // Block 1: Should have before_enter and after_exit decorators
-    assert_eq!(deserialized_block1.before_enter(), &[trace_deco_2]);
-    assert_eq!(deserialized_block1.after_exit(), &[trace_deco_3]);
+    assert_eq!(deserialized_block1.before_enter(&deserialized_forest), &[trace_deco_2]);
+    assert_eq!(deserialized_block1.after_exit(&deserialized_forest), &[trace_deco_3]);
 
     // Block 2: Should have multiple decorators at operation indices 0 and 3
     let block2_decorators: Vec<_> =

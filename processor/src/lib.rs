@@ -340,7 +340,7 @@ impl Process {
             .get_node_by_id(node_id)
             .ok_or(ExecutionError::MastNodeNotFoundInForest { node_id })?;
 
-        for &decorator_id in node.before_enter() {
+        for &decorator_id in node.before_enter(program) {
             self.execute_decorator(&program[decorator_id], host)?;
         }
 
@@ -370,7 +370,7 @@ impl Process {
             },
         }
 
-        for &decorator_id in node.after_exit() {
+        for &decorator_id in node.after_exit(program) {
             self.execute_decorator(&program[decorator_id], host)?;
         }
 

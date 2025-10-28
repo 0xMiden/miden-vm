@@ -45,10 +45,10 @@ pub trait MastNodeExt {
     fn digest(&self) -> Word;
 
     /// Returns the decorators to be executed before this node is executed.
-    fn before_enter(&self) -> &[DecoratorId];
+    fn before_enter<'a>(&'a self, forest: &'a MastForest) -> &'a [DecoratorId];
 
     /// Returns the decorators to be executed after this node is executed.
-    fn after_exit(&self) -> &[DecoratorId];
+    fn after_exit<'a>(&'a self, forest: &'a MastForest) -> &'a [DecoratorId];
 
     /// Removes all decorators from this node.
     fn remove_decorators(&mut self);
@@ -82,7 +82,7 @@ pub trait MastNodeExt {
 // MAST NODE
 // ================================================================================================
 
-#[derive(Debug, Clone, PartialEq, Eq, MastNodeExt, From)]
+#[derive(Debug, Clone, PartialEq, Eq, From, MastNodeExt)]
 #[mast_node_ext(builder = "MastNodeBuilder")]
 pub enum MastNode {
     Block(BasicBlockNode),

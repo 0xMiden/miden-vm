@@ -304,8 +304,8 @@ impl MastForestMerger {
             decorators.iter().copied().map(map_decorator_id).collect()
         };
 
-        let before_enter_decorators = map_decorators(src.before_enter())?;
-        let after_exit_decorators = map_decorators(src.after_exit())?;
+        let before_enter_decorators = map_decorators(src.before_enter(original_forest))?;
+        let after_exit_decorators = map_decorators(src.after_exit(original_forest))?;
 
         let mapped_builder = match src {
             MastNode::Join(join_node) => {

@@ -395,12 +395,12 @@ impl BasicBlockNode {
         }
 
         // Compare before-enter decorators
-        if self.before_enter() != other.before_enter() {
+        if self.before_enter(forest) != other.before_enter(forest) {
             return false;
         }
 
         // Compare after-exit decorators
-        if self.after_exit() != other.after_exit() {
+        if self.after_exit(forest) != other.after_exit(forest) {
             return false;
         }
 
@@ -478,26 +478,22 @@ impl MastNodeExt for BasicBlockNode {
         self.digest
     }
 
-    fn before_enter(&self) -> &[DecoratorId] {
+    fn before_enter<'a>(&'a self, forest: &'a MastForest) -> &'a [DecoratorId] {
         match &self.decorators {
             DecoratorStore::Owned { before_enter, .. } => before_enter,
-            DecoratorStore::Linked { .. } => {
-                // For linked nodes, we need to get the decorators from the forest
-                // Since the trait doesn't provide forest access, we return empty for now
-                // This will be addressed in a future update to the trait design
-                &[]
+            DecoratorStore::Linked { id } => {
+                // For linked nodes, get the decorators from the forest's NodeDecoratorStorage
+                forest.node_decorator_storage.get_before_decorators(*id)
             },
         }
     }
 
-    fn after_exit(&self) -> &[DecoratorId] {
+    fn after_exit<'a>(&'a self, forest: &'a MastForest) -> &'a [DecoratorId] {
         match &self.decorators {
             DecoratorStore::Owned { after_exit, .. } => after_exit,
-            DecoratorStore::Linked { .. } => {
-                // For linked nodes, we need to get the decorators from the forest
-                // Since the trait doesn't provide forest access, we return empty for now
-                // This will be addressed in a future update to the trait design
-                &[]
+            DecoratorStore::Linked { id } => {
+                // For linked nodes, get the decorators from the forest's NodeDecoratorStorage
+                forest.node_decorator_storage.get_after_decorators(*id)
             },
         }
     }
@@ -922,8 +918,8 @@ impl<'a> OperationOrDecoratorIterator<'a> {
         Self {
             node,
             forest: Some(forest),
-            before: node.before_enter().iter(),
-            after: node.after_exit().iter(),
+            before: node.before_enter(forest).iter(),
+            after: node.after_exit(forest).iter(),
             batch_index: 0,
             op_index_in_batch: 0,
             op_index: 0,

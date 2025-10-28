@@ -91,7 +91,7 @@ impl PrettyPrint for SplitNodePrettyPrint<'_> {
         let pre_decorators = {
             let mut pre_decorators = self
                 .split_node
-                .before_enter()
+                .before_enter(self.mast_forest)
                 .iter()
                 .map(|&decorator_id| self.mast_forest[decorator_id].render())
                 .reduce(|acc, doc| acc + const_text(" ") + doc)
@@ -106,7 +106,7 @@ impl PrettyPrint for SplitNodePrettyPrint<'_> {
         let post_decorators = {
             let mut post_decorators = self
                 .split_node
-                .after_exit()
+                .after_exit(self.mast_forest)
                 .iter()
                 .map(|&decorator_id| self.mast_forest[decorator_id].render())
                 .reduce(|acc, doc| acc + const_text(" ") + doc)
@@ -156,12 +156,12 @@ impl MastNodeExt for SplitNode {
     }
 
     /// Returns the decorators to be executed before this node is executed.
-    fn before_enter(&self) -> &[DecoratorId] {
+    fn before_enter<'a>(&'a self, _forest: &'a MastForest) -> &'a [DecoratorId] {
         &self.before_enter
     }
 
     /// Returns the decorators to be executed after this node is executed.
-    fn after_exit(&self) -> &[DecoratorId] {
+    fn after_exit<'a>(&'a self, _forest: &'a MastForest) -> &'a [DecoratorId] {
         &self.after_exit
     }
 
