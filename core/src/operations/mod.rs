@@ -117,6 +117,7 @@ pub(super) mod opcode_constants {
     pub const OPCODE_PUSH: u8           = 0b0101_1011;
     pub const OPCODE_DYNCALL: u8        = 0b0101_1100;
     pub const OPCODE_EVALCIRCUIT: u8    = 0b0101_1101;
+    pub const OPCODE_CRYPTOSTREAM: u8   = 0b0101_1110;  // TODO: swap with HORNERBASE (0x64) once HORNERBASE constraints are reduced to degree ≤4
 
     pub const OPCODE_MRUPDATE: u8       = 0b0110_0000;
     pub const OPCODE_HORNERBASE: u8     = 0b0110_0100;
@@ -523,6 +524,25 @@ pub enum Operation {
     /// - All other stack elements remain the same.
     Pipe = OPCODE_PIPE,
 
+    /// Encrypts data from source memory to destination memory using the RPO sponge keystream.
+    ///
+    /// The operation works as follows:
+    /// - The source memory address is retrieved from the 13th stack element (position 12).
+    /// - The destination memory address is retrieved from the 14th stack element (position 13).
+    /// - Two consecutive words (8 elements) are loaded from source memory.
+    /// - Each element is added to the corresponding element in the rate (top 8 stack elements).
+    /// - The resulting ciphertext is written to destination memory.
+    /// - The top 8 elements of the stack are updated with the ciphertext (becomes new rate).
+    /// - Elements 8-11 (capacity) remain unchanged.
+    /// - Source address (position 12) is incremented by 8.
+    /// - Destination address (position 13) is incremented by 8.
+    /// - All other stack elements remain the same.
+    ///
+    /// This instruction is designed for AEAD encryption using the RPO hash function as a stream
+    /// cipher. After this operation, an application of `hperm` is expected in order to refresh
+    /// the keystream for the next block.
+    CryptoStream = OPCODE_CRYPTOSTREAM,
+
     // ----- cryptographic operations ------------------------------------------------------------
     /// Performs a Rescue Prime Optimized permutation on the top 3 words of the operand stack,
     /// where the top 2 words are the rate (words C and B), the deepest word is the capacity (word
@@ -783,6 +803,7 @@ impl fmt::Display for Operation {
 
             Self::MStream => write!(f, "mstream"),
             Self::Pipe => write!(f, "pipe"),
+            Self::CryptoStream => write!(f, "crypto_stream"),
 
             Self::Emit => write!(f, "emit"),
 
@@ -899,6 +920,7 @@ impl Serializable for Operation {
             | Operation::MStore
             | Operation::MStream
             | Operation::Pipe
+            | Operation::CryptoStream
             | Operation::HPerm
             | Operation::MrUpdate
             | Operation::FriE2F4
@@ -995,6 +1017,7 @@ impl Deserializable for Operation {
             OPCODE_MPVERIFY => Self::MpVerify(Felt::read_from(source)?),
             OPCODE_PIPE => Self::Pipe,
             OPCODE_MSTREAM => Self::MStream,
+            OPCODE_CRYPTOSTREAM => Self::CryptoStream,
             OPCODE_SPLIT => Self::Split,
             OPCODE_LOOP => Self::Loop,
             OPCODE_SPAN => Self::Span,

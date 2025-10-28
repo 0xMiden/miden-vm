@@ -1,3 +1,4 @@
+use miden_processor::{ExecutionError, MemoryError};
 use miden_utils_testing::{
     Felt, build_expected_hash, build_expected_perm, build_op_test,
     crypto::{MerkleTree, NodeIndex, init_merkle_leaf, init_merkle_store},
@@ -256,4 +257,66 @@ fn mtree_update() {
 
     let test = build_op_test!(asm_op, &stack_inputs, &[], store.clone());
     test.expect_stack(&final_stack);
+}
+
+#[test]
+fn crypto_stream_basic() {
+    // Test crypto_stream instruction by setting up plaintext in memory,
+    // a keystream on stack, and verifying encryption works correctly
+
+    let asm_op = "
+        # Initialize memory with plaintext [1,2,3,4,5,6,7,8] at address 1000
+        push.1.2.3.4 push.1000 mem_storew_be dropw
+        push.5.6.7.8 push.1004 mem_storew_be dropw
+
+        # Setup stack: [rate(8), capacity(4), src, dst]
+        # Rate is keystream [1,2,3,4,5,6,7,8]
+        push.2000           # dst_ptr
+        push.1000           # src_ptr
+        push.0.0.0.0        # capacity
+        push.1.2.3.4        # rate[0-3]
+        push.5.6.7.8        # rate[4-7]
+
+        crypto_stream
+
+        # Verify ciphertext written to memory
+        padw push.1000 mem_loadw_be
+        push.2000 mem_loadw_be
+    ";
+
+    let test = build_op_test!(asm_op, &[]);
+    let stack = test.get_last_stack_state();
+
+    // Expected: plaintext + keystream
+    // [1,2,3,4] + [1,2,3,4] = [2,4,6,8]
+    // [5,6,7,8] + [5,6,7,8] = [10,12,14,16]
+
+    let c2 = [stack[3], stack[2], stack[1], stack[0]];
+    let c1 = [stack[7], stack[6], stack[5], stack[4]];
+
+    assert_eq!(c2, [Felt::new(2), Felt::new(4), Felt::new(6), Felt::new(8)]);
+    assert_eq!(c1, [Felt::new(10), Felt::new(12), Felt::new(14), Felt::new(16)]);
+}
+
+#[test]
+fn crypto_stream_rejects_in_place() {
+    let asm_op = "
+        push.1.2.3.4 push.1000 mem_storew_be dropw
+        push.5.6.7.8 push.1004 mem_storew_be dropw
+
+        push.1000           # dst_ptr (in-place)
+        push.1000           # src_ptr
+        push.0.0.0.0        # capacity
+        push.1.2.3.4        # rate[0-3]
+        push.5.6.7.8        # rate[4-7]
+
+        crypto_stream
+    ";
+
+    let test = build_op_test!(asm_op, &[]);
+    let err = test.execute().expect_err("crypto_stream should reject in-place encryption");
+    assert!(matches!(
+        err,
+        ExecutionError::MemoryError(MemoryError::IllegalMemoryAccess { .. })
+    ));
 }

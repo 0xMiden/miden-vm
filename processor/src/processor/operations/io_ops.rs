@@ -1,7 +1,9 @@
+use core::convert::TryFrom;
+
 use miden_air::Felt;
 
 use crate::{
-    ErrorContext, ExecutionError,
+    ErrorContext, ExecutionError, MemoryError,
     fast::Tracer,
     processor::{
         AdviceProviderInterface, MemoryInterface, Processor, StackInterface, SystemInterface,
@@ -252,6 +254,112 @@ pub(super) fn op_pipe<P: Processor>(
 
     // increment the address by 8 (2 words)
     processor.stack().set(MEM_ADDR_STACK_IDX, addr_first_word + DOUBLE_WORD_SIZE);
+
+    Ok(())
+}
+
+#[inline(always)]
+pub(super) fn op_crypto_stream<P: Processor>(
+    processor: &mut P,
+    err_ctx: &impl ErrorContext,
+    tracer: &mut impl Tracer,
+) -> Result<(), ExecutionError> {
+    /// WORD_SIZE, but as a `Felt`.
+    const WORD_SIZE_FELT: Felt = Felt::new(4);
+    /// The size of a double-word.
+    const DOUBLE_WORD_SIZE: Felt = Felt::new(8);
+
+    // Stack layout: [rate(8), capacity(4), src_ptr, dst_ptr, ...]
+    const SRC_PTR_IDX: usize = 12;
+    const DST_PTR_IDX: usize = 13;
+
+    let ctx = processor.system().ctx();
+    let clk = processor.system().clk();
+
+    // Get source and destination pointers
+    let src_addr = processor.stack().get(SRC_PTR_IDX);
+    let dst_addr = processor.stack().get(DST_PTR_IDX);
+
+    if src_addr == dst_addr {
+        let addr_u64 = src_addr.as_int();
+        let addr = match u32::try_from(addr_u64) {
+            Ok(addr) => addr,
+            Err(_) => {
+                return Err(ExecutionError::MemoryError(
+                    MemoryError::address_out_of_bounds(addr_u64, err_ctx),
+                ));
+            },
+        };
+
+        return Err(ExecutionError::MemoryError(MemoryError::IllegalMemoryAccess {
+            ctx,
+            addr,
+            clk: Felt::from(clk),
+        }));
+    }
+
+    // Load plaintext from source memory (2 words = 8 elements)
+    let src_addr_word2 = src_addr + WORD_SIZE_FELT;
+    let plaintext_word1 = processor
+        .memory()
+        .read_word(ctx, src_addr, clk, err_ctx)
+        .map_err(ExecutionError::MemoryError)?;
+    tracer.record_memory_read_word(plaintext_word1, src_addr, ctx, clk);
+
+    let plaintext_word2 = processor
+        .memory()
+        .read_word(ctx, src_addr_word2, clk, err_ctx)
+        .map_err(ExecutionError::MemoryError)?;
+    tracer.record_memory_read_word(plaintext_word2, src_addr_word2, ctx, clk);
+
+    // Get rate (keystream) from stack[0..7]
+    let rate = [
+        processor.stack().get(7),
+        processor.stack().get(6),
+        processor.stack().get(5),
+        processor.stack().get(4),
+        processor.stack().get(3),
+        processor.stack().get(2),
+        processor.stack().get(1),
+        processor.stack().get(0),
+    ];
+
+    // Encrypt: ciphertext = plaintext + rate (element-wise addition in field)
+    let ciphertext_word1 = [
+        plaintext_word1[0] + rate[0],
+        plaintext_word1[1] + rate[1],
+        plaintext_word1[2] + rate[2],
+        plaintext_word1[3] + rate[3],
+    ];
+    let ciphertext_word2 = [
+        plaintext_word2[0] + rate[4],
+        plaintext_word2[1] + rate[5],
+        plaintext_word2[2] + rate[6],
+        plaintext_word2[3] + rate[7],
+    ];
+
+    // Write ciphertext to destination memory
+    let dst_addr_word2 = dst_addr + WORD_SIZE_FELT;
+    processor
+        .memory()
+        .write_word(ctx, dst_addr, clk, ciphertext_word1.into(), err_ctx)
+        .map_err(ExecutionError::MemoryError)?;
+    tracer.record_memory_write_word(ciphertext_word1.into(), dst_addr, ctx, clk);
+
+    processor
+        .memory()
+        .write_word(ctx, dst_addr_word2, clk, ciphertext_word2.into(), err_ctx)
+        .map_err(ExecutionError::MemoryError)?;
+    tracer.record_memory_write_word(ciphertext_word2.into(), dst_addr_word2, ctx, clk);
+
+    // Update stack[0..7] with ciphertext (becomes new rate for next hperm)
+    // Stack order is reversed: stack[0] = top
+    processor.stack().set_word(0, &ciphertext_word2.into());
+    processor.stack().set_word(4, &ciphertext_word1.into());
+
+    // Increment pointers by 8 (2 words)
+    processor.stack().set(SRC_PTR_IDX, src_addr + DOUBLE_WORD_SIZE);
+    processor.stack().set(DST_PTR_IDX, dst_addr + DOUBLE_WORD_SIZE);
 
     Ok(())
 }
