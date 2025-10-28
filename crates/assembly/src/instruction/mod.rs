@@ -1,5 +1,5 @@
 use miden_assembly_syntax::{
-    ast::Instruction,
+    ast::{ImmU16, Instruction},
     debuginfo::{Span, Spanned},
     diagnostics::{RelatedLabel, Report},
     parser::{IntValue, PushValue},
@@ -424,42 +424,22 @@ impl Assembler {
                 span,
             )?,
             Instruction::LocLoadWBe(v) => {
-                let local_addr = v.expect_value();
-                if !local_addr.is_multiple_of(WORD_SIZE as u16) {
-                    return Err(RelatedLabel::error("invalid local word index")
-                        .with_help("the index to a local word must be a multiple of 4")
-                        .with_labeled_span(v.span(), "this index is not word-aligned")
-                        .with_source_file(
-                            proc_ctx.source_manager().get(proc_ctx.span().source_id()).ok(),
-                        )
-                        .into());
-                }
-
+                let local_addr = validate_local_word_alignment(v, proc_ctx)?;
                 mem_ops::mem_read(
                     block_builder,
                     proc_ctx,
-                    Some(local_addr as u32),
+                    Some(local_addr),
                     true,
                     false,
                     instruction.span(),
                 )?
             },
             Instruction::LocLoadWLe(v) => {
-                let local_addr = v.expect_value();
-                if !local_addr.is_multiple_of(WORD_SIZE as u16) {
-                    return Err(RelatedLabel::error("invalid local word index")
-                        .with_help("the index to a local word must be a multiple of 4")
-                        .with_labeled_span(v.span(), "this index is not word-aligned")
-                        .with_source_file(
-                            proc_ctx.source_manager().get(proc_ctx.span().source_id()).ok(),
-                        )
-                        .into());
-                }
-
+                let local_addr = validate_local_word_alignment(v, proc_ctx)?;
                 mem_ops::mem_read(
                     block_builder,
                     proc_ctx,
-                    Some(local_addr as u32),
+                    Some(local_addr),
                     true,
                     false,
                     instruction.span(),
@@ -512,47 +492,13 @@ impl Assembler {
                 span,
             )?,
             Instruction::LocStoreWBe(v) => {
-                let local_addr = v.expect_value();
-                if !local_addr.is_multiple_of(WORD_SIZE as u16) {
-                    return Err(RelatedLabel::error("invalid local word index")
-                        .with_help("the index to a local word must be a multiple of 4")
-                        .with_labeled_span(v.span(), "this index is not word-aligned")
-                        .with_source_file(
-                            proc_ctx.source_manager().get(proc_ctx.span().source_id()).ok(),
-                        )
-                        .into());
-                }
-
-                mem_ops::mem_write_imm(
-                    block_builder,
-                    proc_ctx,
-                    local_addr as u32,
-                    true,
-                    false,
-                    span,
-                )?
+                let local_addr = validate_local_word_alignment(v, proc_ctx)?;
+                mem_ops::mem_write_imm(block_builder, proc_ctx, local_addr, true, false, span)?
             },
             Instruction::LocStoreWLe(v) => {
-                let local_addr = v.expect_value();
-                if !local_addr.is_multiple_of(WORD_SIZE as u16) {
-                    return Err(RelatedLabel::error("invalid local word index")
-                        .with_help("the index to a local word must be a multiple of 4")
-                        .with_labeled_span(v.span(), "this index is not word-aligned")
-                        .with_source_file(
-                            proc_ctx.source_manager().get(proc_ctx.span().source_id()).ok(),
-                        )
-                        .into());
-                }
-
+                let local_addr = validate_local_word_alignment(v, proc_ctx)?;
                 push_reversew(block_builder);
-                mem_ops::mem_write_imm(
-                    block_builder,
-                    proc_ctx,
-                    local_addr as u32,
-                    true,
-                    false,
-                    span,
-                )?;
+                mem_ops::mem_write_imm(block_builder, proc_ctx, local_addr, true, false, span)?;
                 push_reversew(block_builder)
             },
             Instruction::SysEvent(system_event) => {
@@ -687,7 +633,7 @@ fn push_felt(span_builder: &mut BasicBlockBuilder, value: Felt) {
 }
 
 /// Helper function that appends operations to reverse the order of the top 4 elements
-/// on the stack, used for big-endian memory instructions.
+/// on the stack, used for little-endian memory instructions.
 ///
 /// The instruction takes 3 cycles to execute and transforms the stack as follows:
 /// [a, b, c, d, ...] -> [d, c, b, a, ...].
@@ -695,4 +641,22 @@ fn push_reversew(block_builder: &mut BasicBlockBuilder) {
     use Operation::*;
 
     block_builder.push_ops([MovDn3, Swap, MovUp2]);
+}
+
+/// Helper function that validates a local word address is properly word-aligned.
+///
+/// Returns the validated address as u32 or an error if the address is not a multiple of 4.
+fn validate_local_word_alignment(
+    local_addr: &ImmU16,
+    proc_ctx: &ProcedureContext,
+) -> Result<u32, Report> {
+    let addr = local_addr.expect_value();
+    if !addr.is_multiple_of(WORD_SIZE as u16) {
+        return Err(RelatedLabel::error("invalid local word index")
+            .with_help("the index to a local word must be a multiple of 4")
+            .with_labeled_span(local_addr.span(), "this index is not word-aligned")
+            .with_source_file(proc_ctx.source_manager().get(proc_ctx.span().source_id()).ok())
+            .into());
+    }
+    Ok(addr as u32)
 }
