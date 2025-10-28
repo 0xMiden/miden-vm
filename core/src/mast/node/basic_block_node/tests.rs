@@ -727,7 +727,11 @@ fn test_basic_block_digest_forcing_with_decorators() {
         &[decorator_id],
         "Before-enter decorators should be preserved"
     );
-    assert_eq!(node.after_exit(&forest), &[decorator_id], "After-exit decorators should be preserved");
+    assert_eq!(
+        node.after_exit(&forest),
+        &[decorator_id],
+        "After-exit decorators should be preserved"
+    );
 }
 
 #[test]
