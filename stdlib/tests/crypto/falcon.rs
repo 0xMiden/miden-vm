@@ -385,7 +385,7 @@ fn generate_data_probabilistic_product_test(
     } else {
         to_elements(h.clone())
     };
-    polynomials.extend(to_elements(s2.clone()));
+    polynomials.extend(to_elements(s2));
     polynomials.extend(pi.iter().map(|a| Felt::new(*a)));
 
     // get the challenge point and push it to the advice stack
@@ -398,7 +398,7 @@ fn generate_data_probabilistic_product_test(
     advice_stack.extend_from_slice(&polynomials);
 
     // compute hash of h and place it on the stack.
-    let binding = Rpo256::hash_elements(&to_elements(h.clone()));
+    let binding = Rpo256::hash_elements(&to_elements(h));
     let h_hash = binding.as_elements();
     let h_hash_copy: Vec<u64> = h_hash.iter().map(|felt| (*felt).into()).collect();
     let operand_stack = vec![h_hash_copy[0], h_hash_copy[1], h_hash_copy[2], h_hash_copy[3]];

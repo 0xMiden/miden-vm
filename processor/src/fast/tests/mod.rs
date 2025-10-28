@@ -343,7 +343,7 @@ fn test_external_node_decorator_sequencing() {
 
     // Add a decorator to the lib forest to track execution inside the external node
     let lib_decorator = Decorator::Trace(2);
-    let lib_decorator_id = lib_forest.add_decorator(lib_decorator.clone()).unwrap();
+    let lib_decorator_id = lib_forest.add_decorator(lib_decorator).unwrap();
 
     let lib_operations = [Operation::Push(1_u32.into()), Operation::Add];
     // Attach the decorator to the first operation (index 0)
@@ -355,8 +355,8 @@ fn test_external_node_decorator_sequencing() {
     let mut main_forest = MastForest::new();
     let before_decorator = Decorator::Trace(1);
     let after_decorator = Decorator::Trace(3);
-    let before_id = main_forest.add_decorator(before_decorator.clone()).unwrap();
-    let after_id = main_forest.add_decorator(after_decorator.clone()).unwrap();
+    let before_id = main_forest.add_decorator(before_decorator).unwrap();
+    let after_id = main_forest.add_decorator(after_decorator).unwrap();
 
     let mut external_node = ExternalNode::new(lib_forest[lib_block_id].digest());
     external_node.append_before_enter(&[before_id]);

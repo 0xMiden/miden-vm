@@ -359,9 +359,9 @@ mod tests {
         let leaves_b = init_leaves(&[100, 101, 102, 103]);
         let leaves_c = init_leaves(&[0, 1, 2, 3, 100, 101, 102, 103, 8, 9, 10, 11, 12, 13, 14, 15]);
 
-        let tree_a = MerkleTree::new(leaves_a.clone()).unwrap();
-        let tree_b = MerkleTree::new(leaves_b.clone()).unwrap();
-        let tree_c = MerkleTree::new(leaves_c.clone()).unwrap();
+        let tree_a = MerkleTree::new(leaves_a).unwrap();
+        let tree_b = MerkleTree::new(leaves_b).unwrap();
+        let tree_c = MerkleTree::new(leaves_c).unwrap();
 
         // appends only the input trees to the Merkle store
         let mut store = MerkleStore::default();
