@@ -130,11 +130,11 @@ impl Serializable for MastForest {
             .iter()
             .enumerate()
             .map(|(mast_node_id, mast_node)| {
-                if !mast_node.before_enter().is_empty() {
-                    before_enter_decorators.push((mast_node_id, mast_node.before_enter().to_vec()));
+                if !mast_node.before_enter(self).is_empty() {
+                    before_enter_decorators.push((mast_node_id, mast_node.before_enter(self).to_vec()));
                 }
-                if !mast_node.after_exit().is_empty() {
-                    after_exit_decorators.push((mast_node_id, mast_node.after_exit().to_vec()));
+                if !mast_node.after_exit(self).is_empty() {
+                    after_exit_decorators.push((mast_node_id, mast_node.after_exit(self).to_vec()));
                 }
 
                 let ops_offset = if let MastNode::Block(basic_block) = mast_node {

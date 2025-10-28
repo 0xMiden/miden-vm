@@ -439,7 +439,7 @@ fn mast_forest_merge_decorators() {
             .iter()
             .filter(|node| {
                 if let MastNode::Loop(loop_node) = node {
-                    loop_node.after_exit() == [merged_deco0, merged_deco2]
+                    loop_node.after_exit(&merged) == [merged_deco0, merged_deco2]
                 } else {
                     false
                 }
@@ -455,7 +455,7 @@ fn mast_forest_merge_decorators() {
             .iter()
             .filter(|node| {
                 if let MastNode::Loop(loop_node) = node {
-                    loop_node.after_exit() == [merged_deco1, merged_deco3]
+                    loop_node.after_exit(&merged) == [merged_deco1, merged_deco3]
                 } else {
                     false
                 }

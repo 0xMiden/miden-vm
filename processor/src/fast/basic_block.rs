@@ -37,7 +37,7 @@ impl FastProcessor {
         );
 
         // Execute decorators that should be executed before entering the node
-        self.execute_before_enter_decorators(node_id, program, host)?;
+        self.execute_before_enter_decorators(node_id, current_forest, host)?;
 
         // Corresponds to the row inserted for the BASIC BLOCK operation added to the trace.
         self.increment_clk(tracer);
@@ -119,7 +119,7 @@ impl FastProcessor {
             self.execute_decorator(decorator, host)?;
         }
 
-        self.execute_after_exit_decorators(node_id, program, host)
+        self.execute_after_exit_decorators(node_id, current_forest, host)
     }
 
     #[inline(always)]

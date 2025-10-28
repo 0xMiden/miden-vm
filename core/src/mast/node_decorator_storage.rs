@@ -75,58 +75,38 @@ impl NodeDecoratorStorage {
         before: &[DecoratorId],
         after: &[DecoratorId],
     ) {
-        // Ensure the IndexVec can accommodate this node_id + 1 for the sentinel pointer
-        while self.node_indptr_for_before.len() <= node_id.to_usize() {
-            let current_len = self.before_enter_decorators.len();
-            let _ = self.node_indptr_for_before.push(current_len);
-
-            let current_len = self.after_exit_decorators.len();
-            let _ = self.node_indptr_for_after.push(current_len);
+        // For CSR, we need to ensure there's always a sentinel pointer at node_id + 1
+        let required_len = node_id.to_usize() + 2; // +1 for the node itself, +1 for sentinel
+        while self.node_indptr_for_before.len() < required_len {
+            let _ = self.node_indptr_for_before.push(self.before_enter_decorators.len());
+            let _ = self.node_indptr_for_after.push(self.after_exit_decorators.len());
         }
 
-        // Handle before_enter decorators using CSR pattern
-        if self.node_indptr_for_before.is_empty() {
-            // First node: just set the start pointer
-            self.node_indptr_for_before[MastNodeId::new_unchecked(0)] = 0;
-        } else if node_id.to_usize() > 0 {
-            // Overwrite the previous end pointer to become this node's start pointer
-            let prev_node = MastNodeId::new_unchecked((node_id.to_usize() - 1) as u32);
-            self.node_indptr_for_before[prev_node] = self.before_enter_decorators.len();
-        }
+        // Get the start position for this node's decorators
+        let start_pos = self.before_enter_decorators.len();
 
         // Add before_enter decorators
-        let _before_start = self.before_enter_decorators.len();
         self.before_enter_decorators.extend_from_slice(before);
         let before_end = self.before_enter_decorators.len();
 
-        // Push new end pointer for this node
-        if self.node_indptr_for_before.len() > node_id.to_usize() {
-            self.node_indptr_for_before[node_id] = before_end;
-        } else {
-            let _ = self.node_indptr_for_before.push(before_end);
-        }
+        // Update the start pointer for this node (overwrite existing)
+        self.node_indptr_for_before[node_id] = start_pos;
 
-        // Handle after_exit decorators using CSR pattern
-        if self.node_indptr_for_after.is_empty() {
-            // First node: just set the start pointer
-            self.node_indptr_for_after[MastNodeId::new_unchecked(0)] = 0;
-        } else if node_id.to_usize() > 0 {
-            // Overwrite the previous end pointer to become this node's start pointer
-            let prev_node = MastNodeId::new_unchecked((node_id.to_usize() - 1) as u32);
-            self.node_indptr_for_after[prev_node] = self.after_exit_decorators.len();
-        }
+        // Update the end pointer (which is the start for the next node)
+        self.node_indptr_for_before[MastNodeId::new_unchecked((node_id.to_usize() + 1) as u32)] = before_end;
+
+        // Get the start position for this node's after_exit decorators
+        let after_start_pos = self.after_exit_decorators.len();
 
         // Add after_exit decorators
-        let _after_start = self.after_exit_decorators.len();
         self.after_exit_decorators.extend_from_slice(after);
         let after_end = self.after_exit_decorators.len();
 
-        // Push new end pointer for this node
-        if self.node_indptr_for_after.len() > node_id.to_usize() {
-            self.node_indptr_for_after[node_id] = after_end;
-        } else {
-            let _ = self.node_indptr_for_after.push(after_end);
-        }
+        // Update the start pointer for this node (overwrite existing)
+        self.node_indptr_for_after[node_id] = after_start_pos;
+
+        // Update the end pointer (which is the start for the next node)
+        self.node_indptr_for_after[MastNodeId::new_unchecked((node_id.to_usize() + 1) as u32)] = after_end;
     }
 
     /// Gets the before_enter decorators for a given node.
