@@ -71,7 +71,7 @@ pub fn mem_read(
 /// - mem_store.b:
 ///   - 4 cycles if b = 1
 ///   - 3 cycles if b != 1
-/// - mem_storew.b:
+/// - mem_storew_be.b:
 ///   - 3 cycles if b = 1
 ///   - 2 cycles if b != 1
 /// - loc_store.b:
