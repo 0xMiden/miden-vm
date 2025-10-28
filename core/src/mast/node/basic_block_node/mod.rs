@@ -25,13 +25,7 @@ pub use op_batch::OpBatch;
 use op_batch::OpBatchAccumulator;
 
 use super::{MastForestContributor, MastNodeErrorContext, MastNodeExt};
-
-// Since we can't derive Default with an Arc, implement it manually.
-impl Default for DecoratorStore {
-    fn default() -> Self {
-        Self::Owned(DecoratorList::new())
-    }
-}
+use crate::mast::DecoratorStore;
 
 #[cfg(any(test, feature = "arbitrary"))]
 pub mod arbitrary;
@@ -89,22 +83,9 @@ pub struct BasicBlockNode {
     /// Multiple batches are used for blocks consisting of more than 72 operations.
     op_batches: Vec<OpBatch>,
     digest: Word,
+    /// Stores both operation-level and node-level decorators
     /// Custom serialization is handled via Serialize/Deserialize impls
     decorators: DecoratorStore,
-    /// The rest of the fields (before_enter, after_exit)
-    before_enter: Vec<DecoratorId>,
-    after_exit: Vec<DecoratorId>,
-}
-
-/// A data structure for storing op-indexed decorators for a basic block.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DecoratorStore {
-    /// The decorators are owned by this block. This is the case for blocks
-    /// which have not yet been inserted into a MAST forest.
-    Owned(DecoratorList),
-    /// The decorators are stored in a MAST forest and can be accessed via
-    /// this block's ID. All decorator reads borrow from the forest's storage.
-    Linked { id: MastNodeId },
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -146,9 +127,11 @@ impl BasicBlockNode {
         Ok(Self {
             op_batches,
             digest,
-            decorators: DecoratorStore::Owned(reflowed_decorators),
-            before_enter: Vec::new(),
-            after_exit: Vec::new(),
+            decorators: DecoratorStore::Owned {
+                decorators: reflowed_decorators,
+                before_enter: Vec::new(),
+                after_exit: Vec::new(),
+            },
         })
     }
 
@@ -214,7 +197,7 @@ impl BasicBlockNode {
         forest: &'a MastForest,
     ) -> DecoratorOpLinkIterator<'a> {
         match &self.decorators {
-            DecoratorStore::Owned(decorators) => {
+            DecoratorStore::Owned { decorators, .. } => {
                 // For owned decorators, use the existing logic
                 DecoratorOpLinkIterator::from_slice_iters(
                     &[],
@@ -273,12 +256,12 @@ impl BasicBlockNode {
         forest: &'a MastForest,
     ) -> RawDecoratorOpLinkIterator<'a> {
         match &self.decorators {
-            DecoratorStore::Owned(decorators) => {
+            DecoratorStore::Owned { decorators, before_enter, after_exit } => {
                 // For owned decorators, use the existing logic
                 RawDecoratorOpLinkIterator::from_slice_iters(
-                    &self.before_enter,
+                    before_enter,
                     decorators,
-                    &self.after_exit,
+                    after_exit,
                     &self.op_batches,
                 )
             },
@@ -292,9 +275,9 @@ impl BasicBlockNode {
 
                 if !has_decorators {
                     return RawDecoratorOpLinkIterator::from_slice_iters(
-                        &self.before_enter,
                         &[],
-                        &self.after_exit,
+                        &[],
+                        &[],
                         &self.op_batches,
                     );
                 }
@@ -303,10 +286,14 @@ impl BasicBlockNode {
                     "linked node decorators should be available; forest may be inconsistent",
                 );
 
+                // Get node-level decorators from NodeDecoratorStorage
+                let before_enter = forest.node_decorator_storage.get_before_decorators(*id);
+                let after_exit = forest.node_decorator_storage.get_after_decorators(*id);
+
                 RawDecoratorOpLinkIterator::from_linked(
-                    &self.before_enter,
+                    before_enter,
                     view.into_iter(),
-                    &self.after_exit,
+                    after_exit,
                     &self.op_batches,
                 )
             },
@@ -327,7 +314,7 @@ impl BasicBlockNode {
     /// Stores decorators with raw operation indices for serialization.
     pub fn raw_op_indexed_decorators(&self, forest: &MastForest) -> Vec<(usize, DecoratorId)> {
         match &self.decorators {
-            DecoratorStore::Owned(decorators) => {
+            DecoratorStore::Owned { decorators, .. } => {
                 // For owned decorators, use the existing logic
                 RawDecoratorOpLinkIterator::from_slice_iters(&[], decorators, &[], &self.op_batches)
                     .collect()
@@ -363,7 +350,7 @@ impl BasicBlockNode {
     pub fn num_operations_and_decorators(&self, forest: &MastForest) -> u32 {
         let num_ops: usize = self.num_operations() as usize;
         let num_decorators = match &self.decorators {
-            DecoratorStore::Owned(decorators) => decorators.len(),
+            DecoratorStore::Owned { decorators, .. } => decorators.len(),
             DecoratorStore::Linked { id } => {
                 // For linked nodes, count from forest storage
                 forest
@@ -437,21 +424,28 @@ impl MastNodeErrorContext for BasicBlockNode {
         forest: &'a MastForest,
     ) -> impl Iterator<Item = DecoratedOpLink> + 'a {
         match &self.decorators {
-            DecoratorStore::Owned(decorators) => DecoratorOpLinkIterator::from_slice_iters(
-                &self.before_enter,
-                decorators,
-                &self.after_exit,
-                self.num_operations() as usize,
-            ),
+            DecoratorStore::Owned { decorators, before_enter, after_exit } => {
+                DecoratorOpLinkIterator::from_slice_iters(
+                    before_enter,
+                    decorators,
+                    after_exit,
+                    self.num_operations() as usize,
+                )
+            },
             DecoratorStore::Linked { id } => {
                 // For linked nodes, borrow from forest storage
                 let view = forest.decorator_links_for_node(*id).expect(
                     "linked node decorators should be available; forest may be inconsistent",
                 );
+
+                // Get node-level decorators from NodeDecoratorStorage
+                let before_enter = forest.node_decorator_storage.get_before_decorators(*id);
+                let after_exit = forest.node_decorator_storage.get_after_decorators(*id);
+
                 DecoratorOpLinkIterator::from_linked(
-                    &self.before_enter,
+                    before_enter,
                     view.into_iter(),
-                    &self.after_exit,
+                    after_exit,
                     self.num_operations() as usize,
                 )
             },
@@ -485,18 +479,36 @@ impl MastNodeExt for BasicBlockNode {
     }
 
     fn before_enter(&self) -> &[DecoratorId] {
-        &self.before_enter
+        match &self.decorators {
+            DecoratorStore::Owned { before_enter, .. } => before_enter,
+            DecoratorStore::Linked { .. } => {
+                // For linked nodes, we need to get the decorators from the forest
+                // Since the trait doesn't provide forest access, we return empty for now
+                // This will be addressed in a future update to the trait design
+                &[]
+            },
+        }
     }
 
     fn after_exit(&self) -> &[DecoratorId] {
-        &self.after_exit
+        match &self.decorators {
+            DecoratorStore::Owned { after_exit, .. } => after_exit,
+            DecoratorStore::Linked { .. } => {
+                // For linked nodes, we need to get the decorators from the forest
+                // Since the trait doesn't provide forest access, we return empty for now
+                // This will be addressed in a future update to the trait design
+                &[]
+            },
+        }
     }
 
     /// Removes all decorators from this node.
     fn remove_decorators(&mut self) {
-        self.decorators = DecoratorStore::Owned(Vec::new());
-        self.before_enter.truncate(0);
-        self.after_exit.truncate(0);
+        self.decorators = DecoratorStore::Owned {
+            decorators: Vec::new(),
+            before_enter: Vec::new(),
+            after_exit: Vec::new(),
+        };
     }
 
     fn to_display<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn fmt::Display + 'a> {
@@ -532,9 +544,19 @@ impl MastNodeExt for BasicBlockNode {
         let operations: Vec<Operation> = self.raw_operations().cloned().collect();
         let un_adjusted_decorators = self.raw_op_indexed_decorators(forest);
 
+        let (before_enter, after_exit) = match self.decorators {
+            DecoratorStore::Owned { before_enter, after_exit, .. } => (before_enter, after_exit),
+            DecoratorStore::Linked { id } => {
+                // For linked nodes, get the decorators from the forest's NodeDecoratorStorage
+                let before_enter = forest.node_decorator_storage.get_before_decorators(id).to_vec();
+                let after_exit = forest.node_decorator_storage.get_after_decorators(id).to_vec();
+                (before_enter, after_exit)
+            },
+        };
+
         BasicBlockNodeBuilder::new(operations, un_adjusted_decorators)
-            .with_before_enter(self.before_enter)
-            .with_after_exit(self.after_exit)
+            .with_before_enter(before_enter)
+            .with_after_exit(after_exit)
     }
 }
 
@@ -913,7 +935,7 @@ impl<'a> OperationOrDecoratorIterator<'a> {
     #[inline]
     fn next_decorator_if_due(&mut self) -> Option<OperationOrDecorator<'a>> {
         match &self.node.decorators {
-            DecoratorStore::Owned(decorators) => {
+            DecoratorStore::Owned { decorators, .. } => {
                 // Simple case for owned decorators - use index lookup
                 if let Some((op_idx, deco)) = decorators.get(self.decorator_list_next_index)
                     && *op_idx == self.op_index
@@ -1254,9 +1276,11 @@ impl BasicBlockNodeBuilder {
         Ok(BasicBlockNode {
             op_batches,
             digest,
-            decorators: DecoratorStore::Owned(reflowed_decorators),
-            before_enter: self.before_enter,
-            after_exit: self.after_exit,
+            decorators: DecoratorStore::Owned {
+                decorators: reflowed_decorators,
+                before_enter: self.before_enter.clone(),
+                after_exit: self.after_exit.clone(),
+            },
         })
     }
 }
@@ -1291,9 +1315,12 @@ impl MastForestContributor for BasicBlockNodeBuilder {
         let BasicBlockNode {
             op_batches,
             digest,
-            decorators: DecoratorStore::Owned(decorators_info),
-            before_enter,
-            after_exit,
+            decorators:
+                DecoratorStore::Owned {
+                    decorators: decorators_info,
+                    before_enter,
+                    after_exit,
+                },
         } = basic_block
         else {
             unreachable!("BasicBlockBuilder::build() should always return owned decorators");
@@ -1323,8 +1350,6 @@ impl MastForestContributor for BasicBlockNodeBuilder {
                 op_batches,
                 digest,
                 decorators: DecoratorStore::Linked { id: future_node_id },
-                before_enter,
-                after_exit,
             }))
             .map_err(|_| MastForestError::TooManyNodes)?;
 
