@@ -274,10 +274,13 @@ impl BasicBlockNode {
                     .unwrap_or(false);
 
                 if !has_decorators {
+                    // No operation-level decorators, but still need node-level decorators
+                    let before_enter = forest.node_decorator_storage.get_before_decorators(*id);
+                    let after_exit = forest.node_decorator_storage.get_after_decorators(*id);
                     return RawDecoratorOpLinkIterator::from_slice_iters(
+                        before_enter,
                         &[],
-                        &[],
-                        &[],
+                        after_exit,
                         &self.op_batches,
                     );
                 }
