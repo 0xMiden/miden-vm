@@ -1308,6 +1308,13 @@ impl MastForestContributor for BasicBlockNodeBuilder {
             .add_decorator_info_for_node(future_node_id, decorators_info)
             .map_err(MastForestError::DecoratorError)?;
 
+        // Add node-level decorators to the centralized NodeDecoratorStorage for efficient access
+        forest.node_decorator_storage.add_node_decorators(
+            future_node_id,
+            &before_enter,
+            &after_exit,
+        );
+
         // Create the node in the forest with Linked variant from the start
         // Move the data directly without intermediate cloning
         let node_id = forest

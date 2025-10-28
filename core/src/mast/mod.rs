@@ -32,6 +32,13 @@ use crate::{
 
 mod decorator_storage;
 pub use decorator_storage::{DecoratedLinks, DecoratedLinksIter, DecoratorIndexMapping};
+
+mod node_decorator_storage;
+pub use node_decorator_storage::NodeDecoratorStorage;
+
+mod decorator_store;
+pub use decorator_store::DecoratorStore;
+
 mod serialization;
 
 mod merger;
@@ -76,6 +83,10 @@ pub struct MastForest {
     /// Provides efficient access to decorators per operation per node during execution and
     /// debugging.
     decorator_storage: DecoratorIndexMapping,
+
+    /// Storage for node-level decorators (before_enter and after_exit). This uses CSR format
+    /// for efficient storage and access of node-level decorators.
+    node_decorator_storage: NodeDecoratorStorage,
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -90,6 +101,7 @@ impl MastForest {
             advice_map: AdviceMap::default(),
             error_codes: BTreeMap::new(),
             decorator_storage: DecoratorIndexMapping::new(),
+            node_decorator_storage: NodeDecoratorStorage::new(),
         }
     }
 }
@@ -226,6 +238,7 @@ impl MastForest {
         let node_builders =
             nodes_to_add.into_iter().map(|node| node.to_builder(self)).collect::<Vec<_>>();
         self.decorator_storage = DecoratorIndexMapping::new();
+        self.node_decorator_storage = crate::mast::NodeDecoratorStorage::new();
 
         // Add each node to the new MAST forest, making sure to rewrite any outdated internal
         // `MastNodeId`s
