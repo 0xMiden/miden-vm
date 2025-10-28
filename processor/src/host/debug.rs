@@ -4,7 +4,7 @@ use alloc::{
 };
 use core::{fmt, ops::RangeInclusive};
 
-use miden_core::DebugOptions;
+use miden_core::{DebugOptions, FMP_ADDR};
 
 use crate::{DebugHandler, ExecutionError, Felt, ProcessState};
 
@@ -215,7 +215,13 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
         range: RangeInclusive<u16>,
         num_locals: u32,
     ) -> fmt::Result {
-        let local_memory_offset = process.fmp() as u32 - num_locals;
+        let local_memory_offset = {
+            let fmp = process
+                .get_mem_value(process.ctx(), FMP_ADDR.as_int() as u32)
+                .expect("FMP address is empty");
+
+            fmp.as_int() as u32 - num_locals
+        };
 
         let start = *range.start() as u32;
         let end = *range.end() as u32;

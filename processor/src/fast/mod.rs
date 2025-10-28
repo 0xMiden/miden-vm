@@ -11,8 +11,7 @@ use miden_core::{
 };
 
 use crate::{
-    AdviceInputs, AdviceProvider, AsyncHost, ContextId, ErrorContext, ExecutionError, FMP_MIN,
-    ProcessState,
+    AdviceInputs, AdviceProvider, AsyncHost, ContextId, ErrorContext, ExecutionError, ProcessState,
     chiplets::Ace,
     continuation_stack::{Continuation, ContinuationStack},
     fast::execution_tracer::{ExecutionTracer, TraceGenerationContext},
@@ -99,12 +98,6 @@ pub struct FastProcessor {
     /// The current context ID.
     pub(super) ctx: ContextId,
 
-    /// The free memory pointer.
-    pub(super) fmp: Felt,
-
-    /// Whether we are currently in a syscall.
-    in_syscall: bool,
-
     /// The hash of the function that called into the current context, or `[ZERO, ZERO, ZERO,
     /// ZERO]` if we are in the first context (i.e. when `call_stack` is empty).
     pub(super) caller_hash: Word,
@@ -184,8 +177,6 @@ impl FastProcessor {
             stack_bot_idx: stack_top_idx - MIN_STACK_DEPTH,
             clk: 0_u32.into(),
             ctx: 0_u32.into(),
-            fmp: Felt::new(FMP_MIN),
-            in_syscall: false,
             caller_hash: EMPTY_WORD,
             memory: Memory::new(),
             call_stack: Vec::new(),
@@ -741,5 +732,4 @@ struct ExecutionContextInfo {
     overflow_stack: Vec<Felt>,
     ctx: ContextId,
     fn_hash: Word,
-    fmp: Felt,
 }

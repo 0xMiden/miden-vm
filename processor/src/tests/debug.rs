@@ -1,3 +1,4 @@
+use miden_core::FMP_INIT_VALUE;
 use miden_utils_testing::build_debug_test;
 
 // STACK DEBUGGING TESTS
@@ -42,7 +43,7 @@ fn test_debug_stack() {
     let (_stack, output) = test.execute_with_debug_buffer().expect("execution failed");
 
     insta::assert_snapshot!(output, @r"
-    Stack state before step 1:
+    Stack state before step 5:
     ├──  0: 4
     ├──  1: 3
     ├──  2: 2
@@ -59,13 +60,13 @@ fn test_debug_stack() {
     ├── 13: 0
     ├── 14: 0
     └── 15: 0
-    Stack state in interval [0, 3] before step 1:
+    Stack state in interval [0, 3] before step 5:
     ├── 0: 4
     ├── 1: 3
     ├── 2: 2
     ├── 3: 1
     └── (12 more items)
-    Stack state in interval [0, 19] before step 15:
+    Stack state in interval [0, 19] before step 22:
     ├──  0: 42
     ├──  1: 42
     ├──  2: 42
@@ -87,7 +88,7 @@ fn test_debug_stack() {
     ├── 18: 0
     ├── 19: 0
     └── (8 more items)
-    Stack state before step 29:
+    Stack state before step 34:
     ├──  0: 4
     ├──  1: 3
     ├──  2: 2
@@ -108,7 +109,7 @@ fn test_debug_stack() {
     ├── 17: EMPTY
     ├── 18: EMPTY
     └── 19: EMPTY
-    Stack state in interval [0, 6] before step 30:
+    Stack state in interval [0, 6] before step 35:
     ├── 0: 5
     ├── 1: 4
     ├── 2: 3
@@ -117,7 +118,7 @@ fn test_debug_stack() {
     ├── 5: 0
     ├── 6: 0
     └── (10 more items)
-    Stack state before step 36:
+    Stack state before step 44:
     ├──  0: 0
     ├──  1: 0
     ├──  2: 0
@@ -160,17 +161,21 @@ fn test_debug_mem() {
     let (_stack, output) = test.execute_with_debug_buffer().expect("execution failed");
 
     insta::assert_snapshot!(output, @r"
-    Memory state before step 11 for the context 0:
+    Memory state before step 15 for the context 0:
     ├── 0x00000000: 1
     ├── 0x00000001: 2
     ├── 0x00000002: 3
-    └── 0x00000003: 0
-    Memory state before step 11 for the context 0 at address 0x00000002: 3
-    Memory state before step 11 for the context 0 at address 0x00000006: EMPTY
-    Memory state before step 11 for the context 0 in the interval [1, 2]:
+    ├── 0x00000003: 0
+    ├── 0xfffffffc: 0
+    ├── 0xfffffffd: 0
+    ├── 0xfffffffe: 2147483648
+    └── 0xffffffff: 0
+    Memory state before step 15 for the context 0 at address 0x00000002: 3
+    Memory state before step 15 for the context 0 at address 0x00000006: EMPTY
+    Memory state before step 15 for the context 0 in the interval [1, 2]:
     ├── 0x00000001: 2
     └── 0x00000002: 3
-    Memory state before step 15 for the context 0:
+    Memory state before step 21 for the context 0:
     ├── 0x00000000: 1
     ├── 0x00000001: 2
     ├── 0x00000002: 3
@@ -178,13 +183,17 @@ fn test_debug_mem() {
     ├── 0x00000004: 5
     ├── 0x00000005: 0
     ├── 0x00000006: 0
-    └── 0x00000007: 0
-    Memory state before step 15 for the context 0 in the interval [2, 5]:
+    ├── 0x00000007: 0
+    ├── 0xfffffffc: 0
+    ├── 0xfffffffd: 0
+    ├── 0xfffffffe: 2147483648
+    └── 0xffffffff: 0
+    Memory state before step 21 for the context 0 in the interval [2, 5]:
     ├── 0x00000002: 3
     ├── 0x00000003: 0
     ├── 0x00000004: 5
     └── 0x00000005: 0
-    Memory state before step 15 for the context 0 in the interval [12, 14]:
+    Memory state before step 21 for the context 0 in the interval [12, 14]:
     ├── 0x0000000c: EMPTY
     ├── 0x0000000d: EMPTY
     └── 0x0000000e: EMPTY
@@ -193,8 +202,15 @@ fn test_debug_mem() {
 
 #[test]
 fn test_debug_local() {
+    const FMP_INIT_VALUE_U64: u64 = FMP_INIT_VALUE.as_int();
+
     let stack_inputs = [5, 3, 2, 1];
-    let local_addr_4 = 0x40000006;
+    // Computed as follows:
+    // - fmp starts at FMP_INIT_VALUE
+    // - "+ 8": find the `fmp` value for the `test` procedure (6 locals, which gets rounded up to 8)
+    // - "- 6": find the address of the 0th local (we have 6 locals, so we subtract 6)
+    // - "+ 4": get the address of the 4th local
+    let local_addr_4 = FMP_INIT_VALUE_U64 + 8 - 6 + 4;
     let source = format!(
         "
         proc.test.6
@@ -230,51 +246,59 @@ fn test_debug_local() {
     let (_stack, output) = test.execute_with_debug_buffer().expect("execution failed");
 
     insta::assert_snapshot!(output, @r"
-    Memory state before step 25 for the context 0:
-    ├── 0x40000000: 0
-    ├── 0x40000001: 0
-    ├── 0x40000002: 1
-    ├── 0x40000003: 2
-    ├── 0x40000004: 3
-    ├── 0x40000005: 0
-    ├── 0x40000006: 42
-    └── 0x40000007: 0
-    State of procedure locals [0, 5] before step 25:
+    Memory state before step 43 for the context 0:
+    ├── 0x80000000: 0
+    ├── 0x80000001: 0
+    ├── 0x80000002: 1
+    ├── 0x80000003: 2
+    ├── 0x80000004: 3
+    ├── 0x80000005: 0
+    ├── 0x80000006: 42
+    ├── 0x80000007: 0
+    ├── 0xfffffffc: 0
+    ├── 0xfffffffd: 0
+    ├── 0xfffffffe: 2147483656
+    └── 0xffffffff: 0
+    State of procedure locals [0, 5] before step 43:
     ├── 0: 1
     ├── 1: 2
     ├── 2: 3
     ├── 3: 0
     ├── 4: 42
     └── 5: 0
-    State of procedure local 2 before step 25: 3
-    State of procedure local 4 before step 25: 42
-    State of procedure locals [1, 2] before step 25:
+    State of procedure local 2 before step 43: 3
+    State of procedure local 4 before step 43: 42
+    State of procedure locals [1, 2] before step 43:
     ├── 1: 2
     └── 2: 3
-    State of procedure locals [0, 5] before step 29:
+    State of procedure locals [0, 5] before step 50:
     ├── 0: 1
     ├── 1: 2
     ├── 2: 3
     ├── 3: 0
     ├── 4: 5
     └── 5: 0
-    State of procedure local 4 before step 29: 5
-    State of procedure local 6 before step 29: EMPTY
-    State of procedure locals [2, 6] before step 29:
+    State of procedure local 4 before step 50: 5
+    State of procedure local 6 before step 50: EMPTY
+    State of procedure locals [2, 6] before step 50:
     ├── 2: 3
     ├── 3: 0
     ├── 4: 5
     ├── 5: 0
     └── 6: EMPTY
-    Memory state before step 34 for the context 0:
-    ├── 0x40000000: 0
-    ├── 0x40000001: 0
-    ├── 0x40000002: 1
-    ├── 0x40000003: 2
-    ├── 0x40000004: 3
-    ├── 0x40000005: 0
-    ├── 0x40000006: 5
-    └── 0x40000007: 0
+    Memory state before step 58 for the context 0:
+    ├── 0x80000000: 0
+    ├── 0x80000001: 0
+    ├── 0x80000002: 1
+    ├── 0x80000003: 2
+    ├── 0x80000004: 3
+    ├── 0x80000005: 0
+    ├── 0x80000006: 5
+    ├── 0x80000007: 0
+    ├── 0xfffffffc: 0
+    ├── 0xfffffffd: 0
+    ├── 0xfffffffe: 2147483648
+    └── 0xffffffff: 0
     ");
 }
 
@@ -325,7 +349,7 @@ fn test_debug_adv_stack() {
     let (_stack, output) = test.execute_with_debug_buffer().expect("execution failed");
 
     insta::assert_snapshot!(output, @r"
-    Advice stack state before step 1:
+    Advice stack state before step 5:
     ├── 0: 8
     ├── 1: 7
     ├── 2: 6
@@ -334,11 +358,11 @@ fn test_debug_adv_stack() {
     ├── 5: 3
     ├── 6: 2
     └── 7: 1
-    Advice stack state in interval [0, 1] before step 1:
+    Advice stack state in interval [0, 1] before step 5:
     ├── 0: 8
     ├── 1: 7
     └── (6 more items)
-    Advice stack state before step 1:
+    Advice stack state before step 5:
     ├── 0: 8
     ├── 1: 7
     ├── 2: 6
@@ -347,7 +371,7 @@ fn test_debug_adv_stack() {
     ├── 5: 3
     ├── 6: 2
     └── 7: 1
-    Advice stack state before step 1:
+    Advice stack state before step 5:
     ├── 0: 8
     ├── 1: 7
     ├── 2: 6
@@ -358,12 +382,12 @@ fn test_debug_adv_stack() {
     ├── 7: 1
     ├── 8: EMPTY
     └── 9: EMPTY
-    Advice stack state before step 6:
+    Advice stack state before step 10:
     ├── 0: 4
     ├── 1: 3
     ├── 2: 2
     └── 3: 1
-    Stack state in interval [0, 8] before step 6:
+    Stack state in interval [0, 8] before step 10:
     ├── 0: 5
     ├── 1: 6
     ├── 2: 7
@@ -374,7 +398,7 @@ fn test_debug_adv_stack() {
     ├── 7: 1
     ├── 8: 0
     └── (11 more items)
-    Stack state in interval [0, 5] before step 23:
+    Stack state in interval [0, 5] before step 27:
     ├── 0: 4
     ├── 1: 4
     ├── 2: 3
@@ -382,11 +406,11 @@ fn test_debug_adv_stack() {
     ├── 4: 1
     ├── 5: 0
     └── (11 more items)
-    Advice stack state before step 23:
+    Advice stack state before step 27:
     ├── 0: 3
     ├── 1: 2
     └── 2: 1
-    Stack state in interval [0, 6] before step 28:
+    Stack state in interval [0, 6] before step 32:
     ├── 0: 1
     ├── 1: 2
     ├── 2: 3
@@ -395,6 +419,6 @@ fn test_debug_adv_stack() {
     ├── 5: 1
     ├── 6: 0
     └── (12 more items)
-    Advice stack empty before step 45.
+    Advice stack empty before step 49.
     ");
 }

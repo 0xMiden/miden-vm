@@ -10,7 +10,7 @@ use miden_utils_testing::build_test;
 use rstest::rstest;
 
 use super::*;
-use crate::{DefaultHost, Process, system::FMP_MAX};
+use crate::{DefaultHost, Process};
 
 mod advice_provider;
 mod all_ops;
@@ -92,78 +92,6 @@ fn test_reset_stack_in_buffer_from_restore_context() {
 
     let test = build_test!(&asm, &initial_stack);
     test.expect_stack(&final_stack);
-}
-
-#[test]
-fn test_fmp_add() {
-    let mut host = DefaultHost::default();
-
-    // set the initial FMP to a different value than the default
-    let initial_fmp = Felt::new(FMP_MIN + 4);
-    let stack_inputs = vec![1_u32.into(), 2_u32.into(), 3_u32.into()];
-    let program = simple_program_with_ops(vec![Operation::FmpAdd]);
-
-    let mut processor = FastProcessor::new(&stack_inputs);
-    processor.fmp = initial_fmp;
-
-    let stack_outputs = processor.execute_sync(&program, &mut host).unwrap();
-
-    // Check that the top of the stack is the sum of the initial FMP and the top of the stack input
-    let expected_top = initial_fmp + stack_inputs[2];
-    assert_eq!(stack_outputs.stack_truncated(1)[0], expected_top);
-}
-
-#[test]
-fn test_fmp_update() {
-    let mut host = DefaultHost::default();
-
-    // set the initial FMP to a different value than the default
-    let initial_fmp = Felt::new(FMP_MIN + 4);
-    let stack_inputs = vec![5_u32.into()];
-    let program = simple_program_with_ops(vec![Operation::FmpUpdate]);
-
-    let mut processor = FastProcessor::new(&stack_inputs);
-    processor.fmp = initial_fmp;
-
-    let stack_outputs = processor.execute_sync_mut(&program, &mut host).unwrap();
-
-    // Check that the FMP is updated correctly
-    let expected_fmp = initial_fmp + stack_inputs[0];
-    assert_eq!(processor.fmp, expected_fmp);
-
-    // Check that the top of the stack is popped correctly
-    assert_eq!(stack_outputs.stack_truncated(0).len(), 0);
-}
-
-#[test]
-fn test_fmp_update_fail() {
-    let mut host = DefaultHost::default();
-
-    // set the initial FMP to a value close to FMP_MAX
-    let initial_fmp = Felt::new(FMP_MAX - 4);
-    let stack_inputs = vec![5_u32.into()];
-    let program = simple_program_with_ops(vec![Operation::FmpUpdate]);
-
-    let mut processor = FastProcessor::new(&stack_inputs);
-    processor.fmp = initial_fmp;
-
-    let err = processor.execute_sync(&program, &mut host).unwrap_err();
-
-    // Check that the error is due to the FMP exceeding FMP_MAX
-    assert_matches!(err, ExecutionError::InvalidFmpValue(_, _));
-
-    // set the initial FMP to a value close to FMP_MIN
-    let initial_fmp = Felt::new(FMP_MIN + 4);
-    let stack_inputs = vec![-Felt::new(5_u64)];
-    let program = simple_program_with_ops(vec![Operation::FmpUpdate]);
-
-    let mut processor = FastProcessor::new(&stack_inputs);
-    processor.fmp = initial_fmp;
-
-    let err = processor.execute_sync(&program, &mut host).unwrap_err();
-
-    // Check that the error is due to the FMP being less than FMP_MIN
-    assert_matches!(err, ExecutionError::InvalidFmpValue(_, _));
 }
 
 /// Tests that a syscall fails when the syscall target is not in the kernel.

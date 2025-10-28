@@ -33,7 +33,7 @@ pub(super) mod opcode_constants {
     pub const OPCODE_INV: u8            = 0b0000_0011;
     pub const OPCODE_INCR: u8           = 0b0000_0100;
     pub const OPCODE_NOT: u8            = 0b0000_0101;
-    pub const OPCODE_FMPADD: u8         = 0b0000_0110;
+    /* unused                             0b0000_0110 */
     pub const OPCODE_MLOAD: u8          = 0b0000_0111;
     pub const OPCODE_SWAP: u8           = 0b0000_1000;
     pub const OPCODE_CALLER: u8         = 0b0000_1001;
@@ -76,7 +76,7 @@ pub(super) mod opcode_constants {
     pub const OPCODE_MLOADW: u8         = 0b0010_1100;
     pub const OPCODE_MSTORE: u8         = 0b0010_1101;
     pub const OPCODE_MSTOREW: u8        = 0b0010_1110;
-    pub const OPCODE_FMPUPDATE: u8      = 0b0010_1111;
+    /* unused                             0b0010_1111 */
 
     pub const OPCODE_PAD: u8            = 0b0011_0000;
     pub const OPCODE_DUP0: u8           = 0b0011_0001;
@@ -145,13 +145,6 @@ pub enum Operation {
     /// The internal value specifies an error code associated with the error in case when the
     /// execution fails.
     Assert(Felt) = OPCODE_ASSERT,
-
-    /// Pops an element off the stack, adds the current value of the `fmp` register to it, and
-    /// pushes the result back onto the stack.
-    FmpAdd = OPCODE_FMPADD,
-
-    /// Pops an element off the stack and adds it to the current value of `fmp` register.
-    FmpUpdate = OPCODE_FMPUPDATE,
 
     /// Pushes the current depth of the stack onto the stack.
     SDepth = OPCODE_SDEPTH,
@@ -673,9 +666,6 @@ impl fmt::Display for Operation {
             Self::Noop => write!(f, "noop"),
             Self::Assert(err_code) => write!(f, "assert({err_code})"),
 
-            Self::FmpAdd => write!(f, "fmpadd"),
-            Self::FmpUpdate => write!(f, "fmpupdate"),
-
             Self::SDepth => write!(f, "sdepth"),
             Self::Caller => write!(f, "caller"),
 
@@ -817,8 +807,6 @@ impl Serializable for Operation {
             // modification to the `Operation` enum, we get a compile error here. This
             // should help us remember to properly encode/decode each operation variant.
             Operation::Noop
-            | Operation::FmpAdd
-            | Operation::FmpUpdate
             | Operation::SDepth
             | Operation::Caller
             | Operation::Clk
@@ -920,7 +908,6 @@ impl Deserializable for Operation {
             OPCODE_INV => Self::Inv,
             OPCODE_INCR => Self::Incr,
             OPCODE_NOT => Self::Not,
-            OPCODE_FMPADD => Self::FmpAdd,
             OPCODE_MLOAD => Self::MLoad,
             OPCODE_SWAP => Self::Swap,
             OPCODE_CALLER => Self::Caller,
@@ -963,7 +950,6 @@ impl Deserializable for Operation {
             OPCODE_MLOADW => Self::MLoadW,
             OPCODE_MSTORE => Self::MStore,
             OPCODE_MSTOREW => Self::MStoreW,
-            OPCODE_FMPUPDATE => Self::FmpUpdate,
 
             OPCODE_PAD => Self::Pad,
             OPCODE_DUP0 => Self::Dup0,

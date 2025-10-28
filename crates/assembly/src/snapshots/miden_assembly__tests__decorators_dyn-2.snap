@@ -1,9 +1,22 @@
 ---
-source: assembly/src/tests.rs
+source: crates/assembly/src/tests.rs
 expression: program
 ---
 begin
-    trace(0) trace(1) trace(2) trace(3) trace(4)
-    dyn
+    join
+        basic_block
+            push(2147483648)
+            push(4294967294)
+            mstore
+            drop
+            noop
+            trace(0)
+            trace(1)
+            trace(2)
+            trace(3)
+            trace(4)
+        end
+        dyn
+    end
     trace(5) trace(6) trace(7) trace(8) trace(9)
 end

@@ -44,8 +44,8 @@ pub(crate) mod processor;
 mod operations;
 
 mod system;
+pub use system::ContextId;
 use system::System;
-pub use system::{ContextId, FMP_MIN, SYSCALL_FMP_MIN};
 
 #[cfg(test)]
 mod test_utils;
@@ -463,12 +463,6 @@ impl Process {
         program: &MastForest,
         host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
-        // call or syscall are not allowed inside a syscall
-        if self.system.in_syscall() {
-            let instruction = if call_node.is_syscall() { "syscall" } else { "call" };
-            return Err(ExecutionError::CallInSyscall(instruction));
-        }
-
         // if this is a syscall, make sure the call target exists in the kernel
         if call_node.is_syscall() {
             let callee = program.get_node_by_id(call_node.callee()).ok_or_else(|| {
@@ -479,7 +473,7 @@ impl Process {
         }
         let err_ctx = err_ctx!(program, call_node, host);
 
-        self.start_call_node(call_node, program, host)?;
+        self.start_call_node(call_node, program, host, &err_ctx)?;
         self.execute_mast_node(call_node.callee(), program, host)?;
         self.end_call_node(call_node, program, host, &err_ctx)
     }
@@ -495,11 +489,6 @@ impl Process {
         program: &MastForest,
         host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
-        // dyn calls are not allowed inside a syscall
-        if node.is_dyncall() && self.system.in_syscall() {
-            return Err(ExecutionError::CallInSyscall("dyncall"));
-        }
-
         let err_ctx = err_ctx!(program, node, host);
 
         let callee_hash = if node.is_dyncall() {
@@ -817,16 +806,6 @@ impl<'a> ProcessState<'a> {
         match self {
             ProcessState::Slow(state) => state.system.ctx(),
             ProcessState::Fast(state) => state.processor.ctx,
-            ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
-        }
-    }
-
-    /// Returns the current value of the free memory pointer.
-    #[inline(always)]
-    pub fn fmp(&self) -> u64 {
-        match self {
-            ProcessState::Slow(state) => state.system.fmp().as_int(),
-            ProcessState::Fast(state) => state.processor.fmp.as_int(),
             ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
         }
     }

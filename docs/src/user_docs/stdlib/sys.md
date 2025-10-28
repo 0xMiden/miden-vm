@@ -1,3 +1,8 @@
+---
+title: "System Procedures"
+sidebar_position: 7
+---
+
 # System procedures
 Module `std::sys` contains a set of system-level utility procedures.
 

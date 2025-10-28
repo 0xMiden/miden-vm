@@ -53,7 +53,7 @@ miden-utils-testing = { path = "./crates/test-utils", version = "0.1", package =
 miden-verifier = { path = "./verifier", version = "0.19", default-features = false }
 
 # Miden crates
-miden-crypto = { version = "0.17", default-features = false }
+miden-crypto = { version = "0.18", default-features = false }
 miden-formatting = { version = "0.1", default-features = false }
 midenc-hir-type = { version = "0.4", default-features = false }
 

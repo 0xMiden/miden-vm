@@ -31,8 +31,10 @@ export.find_word
 
     if.true
         # assert `start_ptr <= maybe_value_ptr < end_ptr` (15 cycles)
-        dup dup.6 u32assert2 u32gte assert.err="lowerbound_array invariant: maybe_value_ptr < start_ptr"
-        dup dup.7 u32assert2 u32lt assert.err="lowerbound_array invariant: maybe_value_ptr >= end_ptr"
+        dup dup.6 u32assert2.err="maybe_value_ptr is not u32"
+        u32gte assert.err="lowerbound_array invariant: maybe_value_ptr < start_ptr"
+        dup dup.7 u32assert2.err="maybe_value_ptr is not u32"
+        u32lt assert.err="lowerbound_array invariant: maybe_value_ptr >= end_ptr"
         #=> [maybe_value_ptr, VALUE, start_ptr, end_ptr]
 
         # dereference maybe_value_ptr (8 cycles)
@@ -144,43 +146,119 @@ end
 
 #! Finds a key in a sorted array of (key, value) word tuples.
 #!
-#! This function will crash if the following conditions aren't met:
-#! - keys must be sorted in non-decreasing order,
-#! - start_ptr must be word-aligned
-#! - end_ptr must be double-word-aligned with the start_ptr:
-#!       `(end_ptr - start_ptr)` must be divisible by 8
-#! - `start_ptr <= end_ptr`
+#! Inputs:  [KEY, start_ptr, end_ptr]
+#! Outputs: [is_key_found, key_ptr, start_ptr, end_ptr]
 #!
-#! Input:  [KEY, start_ptr, end_ptr]
+#! # Panics
+#!
+#! Panics if:
+#! - keys are not sorted in non-decreasing order,
+#! - start_ptr is not word-aligned
+#! - end_ptr is not double-word-aligned with the start_ptr:
+#!     - `(end_ptr - start_ptr)` must be divisible by 8
+#! - `start_ptr > end_ptr`
+#!
+#! Inputs: [KEY, start_ptr, end_ptr]
+#! Output: [is_key_found, key_ptr, start_ptr, end_ptr]
+export.find_key_value
+    push.1
+    # => [use_full_key = 1, KEY, start_ptr, end_ptr]
+
+    movdn.6
+    # => [KEY, start_ptr, end_ptr, use_full_key]
+
+    exec.find_partial_key_value
+    # => [is_key_found, key_ptr, start_ptr, end_ptr]
+end
+
+#! Finds a half-key in a sorted array of (key, value) word tuples.
+#!
+#! Half-key means that, out of the keys in the array, only half of the key - the most significant
+#! element (prefix) and the second most significant element (suffix) - need to match.
+#!
+#! Inputs: [key_prefix, key_suffix, start_ptr, end_ptr]
 #! Output: [is_key_found, key_ptr, start_ptr, end_ptr]
 #!
+#! # Panics
+#!
+#! Panics if:
+#! - keys are not sorted in non-decreasing order,
+#! - start_ptr is not word-aligned
+#! - end_ptr is not double-word-aligned with the start_ptr:
+#!     - `(end_ptr - start_ptr)` must be divisible by 8
+#! - `start_ptr > end_ptr`
+export.find_half_key_value
+    push.0 movdn.2 push.0 movdn.2
+    # => [key_prefix, key_suffix, 0, 0, start_ptr, end_ptr]
+    # => [KEY, start_ptr, end_ptr]
+
+    push.0
+    # => [use_full_key = 0, KEY, start_ptr, end_ptr]
+
+    movdn.6
+    # => [KEY, start_ptr, end_ptr, use_full_key]
+
+    exec.find_partial_key_value
+    # => [is_key_found, key_ptr, start_ptr, end_ptr]
+end
+
+#! Finds a key in a sorted array of (key, value) word tuples.
+#!
+#! - If use_full_key = 1, then a match on the entire KEY is required.
+#! - If use_full_key = 0, then the KEY's two least significant elements *must* be zeroes and
+#!   upon loading the key for comparison, its two least significant elements are zeroized.
+#!   This effectively means that only a match on the two most significant elements is required.
+#!
+#! Input:  [KEY, start_ptr, end_ptr, use_full_key]
+#! Output: [is_key_found, key_ptr, start_ptr, end_ptr]
+#!
+#! # Panics
+#!
+#! Panics if:
+#! - keys are not sorted in non-decreasing order,
+#! - start_ptr is not word-aligned
+#! - end_ptr is not double-word-aligned with the start_ptr:
+#!     - `(end_ptr - start_ptr)` must be divisible by 8
+#! - `start_ptr > end_ptr`
+#!
 #! Cycles:
-#!   Key exists: 56 cycles
+#!   Key exists: 70 cycles
 #!   Key doesn't exist and the array is empty: 25 cycles
-#!   Key doesn't exist and is smaller than all stored keys: 151 cycles
-#!   Key doesn't exist and is larger than all stored keys: 149 cycles
-#!   Key doesn't exist: 298 cycles
-export.find_key_value
+#!   Key doesn't exist and is smaller than all stored keys: 166 cycles
+#!   Key doesn't exist and is larger than all stored keys: 162 cycles
+#!   Key doesn't exist: 322 cycles
+proc.find_partial_key_value.1
     # Call the non-deterministic lowerbound advisor (5 cycles)
     emit.LOWERBOUND_KEY_VALUE_EVENT
+    # => [KEY, start_ptr, end_ptr, use_full_key]
+
+    # store use_full_key for later
+    movup.6 loc_store.0
+    # => [KEY, start_ptr, end_ptr]
+
     adv_push.2
     #=> [was_key_found, maybe_key_ptr, KEY, start_ptr, end_ptr]
 
     if.true
-        # assert `start_ptr <= maybe_value_ptr < end_ptr` (15 cycles)
-        dup dup.6 u32assert2 u32gte assert.err="lowerbound_key_value invariant: maybe_key_ptr < start_ptr"
-        dup dup.7 u32assert2 u32lt assert.err="lowerbound_key_value invariant: maybe_key_ptr >= end_ptr"
+        # assert `start_ptr <= maybe_key_ptr < end_ptr` (15 cycles)
+        dup dup.6 u32assert2.err="maybe_key_ptr is not u32"
+        u32gte assert.err="lowerbound_key_value invariant: maybe_key_ptr < start_ptr"
+        dup dup.7 u32assert2.err="maybe_key_ptr is not u32"
+        u32lt assert.err="lowerbound_key_value invariant: maybe_key_ptr >= end_ptr"
         #=> [maybe_key_ptr, KEY, start_ptr, end_ptr]
 
         # make sure maybe_key_ptr is pointing to a key, not value (10 cycles)
         dup dup.6 sub u32mod.8 assertz.err="lowerbound_key_value invariant: key_ptr must be double-word aligned with start_ptr"
         #=> [maybe_key_ptr, KEY, start_ptr, end_ptr]
 
-        # dereference maybe_key_ptr (8 cycles)
-        dup movdn.5 padw movup.4 mem_loadw_be
+        # dereference maybe_key_ptr (22 cycles)
+        dup movdn.5
+        #=> [maybe_key_ptr, KEY, maybe_key_ptr, start_ptr, end_ptr]
+
+        loc_load.0 exec.load_key
         #=> [MAYBE_KEY, KEY, maybe_key_ptr, start_ptr, end_ptr]
 
-        # check if it matches the requested VALUE (15 cycles)
+        # check if it matches the requested KEY (15 cycles)
         exec.word::eq
         dup assert.err="lowerbound_key_value invariant: key_ptr not pointing to KEY"
         #=> [is_key_found, maybe_key_ptr, start_ptr, end_ptr]
@@ -208,11 +286,11 @@ export.find_key_value
                 # assert `the key at start_ptr > KEY`
                 #=> [maybe_key_ptr = start_ptr, KEY, start_ptr, end_ptr]
 
-                movdn.4
-                #=> [KEY, maybe_key_ptr, start_ptr, end_ptr]
-                
-                # dereference maybe_key_ptr (7 cycles)
-                dup.4 padw movup.4 mem_loadw_be
+                # load key (22 cycles)
+                dup movdn.5
+                #=> [maybe_key_ptr, KEY, maybe_key_ptr, start_ptr, end_ptr]
+
+                loc_load.0 exec.load_key
                 #=> [FIRST_KEY, KEY, maybe_key_ptr = start_ptr, start_ptr, end_ptr]
 
                 # there was no match, the first map element must be larger than KEY
@@ -232,8 +310,11 @@ export.find_key_value
 
                 #=> [maybe_key_ptr = end_ptr, KEY, start_ptr, end_ptr]
 
-                # fetch the last key in the array (10 cycles)
-                dup movdn.5 sub.8 padw movup.4 mem_loadw_be
+                # fetch the last key in the array (23 cycles)
+                dup movdn.5 sub.8
+                #=> [maybe_key_ptr-8, KEY, maybe_key_ptr, start_ptr, end_ptr]
+
+                loc_load.0 exec.load_key
                 #=> [LAST_KEY, KEY, maybe_key_ptr = end_ptr, start_ptr, end_ptr]
 
                 # there was no match, the last map element must be smaller than KEY
@@ -252,22 +333,27 @@ export.find_key_value
                 #=> [maybe_key_ptr, KEY, start_ptr, end_ptr]
 
                 # make sure maybe_key_ptr is pointing to a key, not value (10 cycles)
-                dup dup.6 sub u32assert2 u32mod.8 assertz.err="lowerbound_key_value invariant: key_ptr must be double-word aligned with start_ptr"
+                dup dup.6 sub u32assert2.err="maybe_key_ptr is not u32"
+                u32mod.8 assertz.err="lowerbound_key_value invariant: key_ptr must be double-word aligned with start_ptr"
 
                 # Duplicate KEY word (5 cycles)
                 movdn.4 dupw
                 #=> [KEY, KEY, maybe_key_ptr, start_ptr, end_ptr]
 
-                # dereference maybe_key_ptr (8 cycles)
-                padw dup.12 mem_loadw_be
+                # load key (21 cycles)
+                dup.8 loc_load.0 exec.load_key
                 #=> [MAYBE_KEY, KEY, KEY, maybe_key_ptr, start_ptr, end_ptr]
-                
+
                 # there was no match, `*maybe_key_ptr` must be larger than KEY (123 cycles)
                 exec.word::lt
                 assert.err="lowerbound_key_value invariant: MAYBE_KEY not greater than KEY"
+                #=> [KEY, maybe_key_ptr, start_ptr, end_ptr]
 
-                # dereference `maybe_key_ptr-8` (previous key) (11 cycles)
-                padw dup.8 sub.8 mem_loadw_be
+                # dereference `maybe_key_ptr-8` (previous key) (22 cycles)
+                dup.4 sub.8
+                #=> [maybe_key_ptr-8, KEY, maybe_key_ptr, start_ptr, end_ptr]
+
+                loc_load.0 exec.load_key
                 #=> [MAYBE_KEY_PREV, KEY, maybe_key_ptr, start_ptr, end_ptr]
                 
                 # there was no match, `*(maybe_key_ptr-8)` must be smaller than KEY (119 cycles)
@@ -280,4 +366,26 @@ export.find_key_value
             end
         end
     end
+end
+
+#! Loads a key from the pointer.
+#!
+#! If use_full_key is 0, the key is loaded with the two least significant elements set to zero,
+#! e.g.: [key3, key2, 0, 0], while if it is 1, the full key [key3, key2, key1, key0] is loaded.
+#!
+#! This procedure avoids branches as an optimization.
+#!
+#! Inputs:  [use_full_key, key_ptr]
+#! Outputs: [KEY]
+#!
+#! Cycles: 16
+proc.load_key
+    padw movup.5 mem_loadw_be
+    # => [FULL_KEY, use_full_key]
+
+    # multiply the two least significant elements by use_full_key
+    movup.3 dup.4 mul
+    movup.3 movup.4 mul
+    movup.3 movup.3
+    # => [KEY]
 end

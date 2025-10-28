@@ -84,9 +84,9 @@ lint: format fix clippy ## Runs all linting tasks at once (Clippy, fixing, forma
 doc: ## Generates & checks documentation
 	$(WARNINGS) $(BUILDDOCS) cargo doc ${ALL_FEATURES_BUT_ASYNC} --keep-going --release
 
-.PHONY: book
-book: ## Builds the book & serves documentation site
-	mdbook serve --open docs
+.PHONY: serve-docs
+serve-docs: ## Serves the docs
+	mkdir -p docs/external && cd docs/external && npm run start:dev
 
 # -- core knobs (overridable from CLI or by caller targets) --------------------
 # Advanced usage (most users should use pattern rules like 'make test-air'):
