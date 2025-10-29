@@ -87,8 +87,8 @@ pub mod log_precompile {
     // differently for the input (`[CAP_PREV, TAG, COMM]`) and output (`[CAP_NEXT, R0, R1]`) words.
 
     pub const STATE_CAP_RANGE: Range<usize> = range(0, CAPACITY_LEN);
-    pub const STATE_R0_RANGE: Range<usize> = range(STATE_CAP_RANGE.end, DIGEST_LEN);
-    pub const STATE_R1_RANGE: Range<usize> = range(STATE_R0_RANGE.end, DIGEST_LEN);
+    pub const STATE_RATE_0_RANGE: Range<usize> = range(STATE_CAP_RANGE.end, DIGEST_LEN);
+    pub const STATE_RATE_1_RANGE: Range<usize> = range(STATE_RATE_0_RANGE.end, DIGEST_LEN);
 }
 
 // Range check trace

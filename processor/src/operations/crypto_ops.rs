@@ -1,6 +1,6 @@
 use miden_air::trace::{
     chiplets::hasher::{HasherState, STATE_WIDTH},
-    log_precompile::{STATE_CAP_RANGE, STATE_R0_RANGE},
+    log_precompile::STATE_CAP_RANGE,
 };
 use miden_core::mast::MastForest;
 
