@@ -39,7 +39,7 @@ Miden VM consists of several interconnected components, each providing a specifi
 The above components are connected via **buses**, which are implemented using [lookup arguments](./lookups/index.md). We also use [multiset check lookups](./lookups/multiset.md) internally within components to describe **virtual tables**.
 
 ## VM execution trace
-The execution trace of Miden VM consists of $73$ main trace columns, $2$ buses, and $5$ virtual tables, as shown in the diagram below.
+The execution trace of Miden VM consists of $71$ main trace columns, $2$ buses, and $5$ virtual tables, as shown in the diagram below.
 
 ![vm_trace.png](../img/design/vm_trace.png)
 
