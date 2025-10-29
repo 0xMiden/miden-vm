@@ -165,6 +165,7 @@ impl Process {
 
             Operation::MStream => self.op_mstream(err_ctx)?,
             Operation::Pipe => self.op_pipe(err_ctx)?,
+            Operation::CryptoStream => self.op_crypto_stream(err_ctx)?,
 
             // ----- cryptographic operations -----------------------------------------------------
             Operation::HPerm => self.op_hperm()?,
