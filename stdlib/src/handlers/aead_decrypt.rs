@@ -7,7 +7,7 @@
 
 use alloc::{vec, vec::Vec};
 
-use miden_core::{EventId, FieldElement, Word};
+use miden_core::{EventName, FieldElement, Word};
 use miden_crypto::aead::{
     DataType,
     aead_rpo::{AuthTag, EncryptedData, Nonce, SecretKey},
@@ -15,11 +15,7 @@ use miden_crypto::aead::{
 use miden_processor::{AdviceMutation, EventError, ProcessState};
 
 /// Qualified event name for the AEAD decrypt event.
-pub const AEAD_DECRYPT_EVENT_NAME: &str = "stdlib::crypto::aead::decrypt";
-
-/// Constant Event ID for the AEAD decrypt event.
-/// Computed via `EventId::from_name(AEAD_DECRYPT_EVENT_NAME)`
-pub const AEAD_DECRYPT_EVENT_ID: EventId = EventId::from_u64(12034814376348458125);
+pub const AEAD_DECRYPT_EVENT_NAME: EventName = EventName::new("stdlib::crypto::aead::decrypt");
 
 /// Event handler for AEAD decryption.
 ///
@@ -176,9 +172,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_compute_event_id() {
-        let expected_event_id = EventId::from_name(AEAD_DECRYPT_EVENT_NAME);
-        // This will fail and show us the correct value
-        assert_eq!(AEAD_DECRYPT_EVENT_ID, expected_event_id);
+    fn test_event_name() {
+        assert_eq!(AEAD_DECRYPT_EVENT_NAME.as_str(), "stdlib::crypto::aead::decrypt");
     }
 }

@@ -12,10 +12,10 @@ use miden_processor::{EventHandler, HostLibrary};
 use miden_utils_sync::LazyLock;
 
 use crate::handlers::{
-    aead_decrypt::{AEAD_DECRYPT_EVENT_ID, handle_aead_decrypt},
-    falcon_div::{FALCON_DIV_EVENT_ID, handle_falcon_div},
-    keccak256::{KECCAK_HASH_MEMORY_EVENT_ID, KeccakPrecompile},
-    smt_peek::{SMT_PEEK_EVENT_ID, handle_smt_peek},
+    aead_decrypt::{AEAD_DECRYPT_EVENT_NAME, handle_aead_decrypt},
+    falcon_div::{FALCON_DIV_EVENT_NAME, handle_falcon_div},
+    keccak256::{KECCAK_HASH_MEMORY_EVENT_NAME, KeccakPrecompile},
+    smt_peek::{SMT_PEEK_EVENT_NAME, handle_smt_peek},
     sorted_array::{
         LOWERBOUND_ARRAY_EVENT_NAME, LOWERBOUND_KEY_VALUE_EVENT_NAME, handle_lowerbound_array,
         handle_lowerbound_key_value,
@@ -69,13 +69,13 @@ impl StdLibrary {
     /// List of all `EventHandlers` required to run all of the standard library.
     pub fn handlers(&self) -> Vec<(EventName, Arc<dyn EventHandler>)> {
         vec![
-            (AEAD_DECRYPT_EVENT_ID, Arc::new(handle_aead_decrypt)),
-            (KECCAK_HASH_MEMORY_EVENT_ID, Arc::new(KeccakPrecompile)),
-            (SMT_PEEK_EVENT_ID, Arc::new(handle_smt_peek)),
-            (U64_DIV_EVENT_ID, Arc::new(handle_u64_div)),
-            (FALCON_DIV_EVENT_ID, Arc::new(handle_falcon_div)),
-            (LOWERBOUND_ARRAY_EVENT_ID, Arc::new(handle_lowerbound_array)),
-            (LOWERBOUND_KEY_VALUE_EVENT_ID, Arc::new(handle_lowerbound_key_value)),
+            (AEAD_DECRYPT_EVENT_NAME, Arc::new(handle_aead_decrypt)),
+            (KECCAK_HASH_MEMORY_EVENT_NAME, Arc::new(KeccakPrecompile)),
+            (SMT_PEEK_EVENT_NAME, Arc::new(handle_smt_peek)),
+            (U64_DIV_EVENT_NAME, Arc::new(handle_u64_div)),
+            (FALCON_DIV_EVENT_NAME, Arc::new(handle_falcon_div)),
+            (LOWERBOUND_ARRAY_EVENT_NAME, Arc::new(handle_lowerbound_array)),
+            (LOWERBOUND_KEY_VALUE_EVENT_NAME, Arc::new(handle_lowerbound_key_value)),
         ]
     }
 
