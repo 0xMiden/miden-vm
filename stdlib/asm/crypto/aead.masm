@@ -14,6 +14,9 @@ use.std::crypto::hashes::rpo
 
 const.AEAD_DECRYPT_EVENT=event("stdlib::crypto::aead::decrypt")
 
+# Procedures
+# ================================================================================================
+
 #! Initializes the AEAD state with a key and nonce.
 #!
 #! This procedure sets up the RPO sponge for AEAD operations. The key and nonce
@@ -64,9 +67,15 @@ end
 #! - nonce is the initialization vector (4 elements)
 #! - key is the encryption key (4 elements)
 #! - src_ptr points to plaintext in memory (must be word-aligned, divisible by 4)
-#! - dst_ptr points to where ciphertext should be written (must be word-aligned)
-#! - num_blocks is the number of 8-element blocks including padding
-#! - tag is the authentication tag (4 elements from first rate word)
+#! - dst_ptr points to where ciphertext will be written (must be word-aligned)
+#! - num_blocks is the number of 8-element data blocks (including padding, excluding tag)
+#! - tag is the authentication tag returned on stack (4 elements)
+#!
+#! Memory Layout:
+#! - Input at src_ptr: [plaintext_block_0(8), plaintext_block_1(8), ..., plaintext_block_n(8)]
+#! - Output at dst_ptr: [ciphertext_block_0(8), ciphertext_block_1(8), ..., ciphertext_block_n(8)]
+#! - Note: Caller should write the returned tag to memory at dst_ptr + (num_blocks * 8)
+#!   to create standard AEAD ciphertext format: [ciphertext_blocks..., tag(4)]
 #!
 #! Memory Requirements:
 #! - Plaintext must be at word-aligned addresses (addr % 4 == 0)
@@ -81,6 +90,11 @@ end
 #! - Empty plaintext requires a single padding block [1,0,0,0,0,0,0,0]
 export.encrypt
     # Stack: [nonce(4), key(4), src_ptr, dst_ptr, num_blocks, ...]
+
+    # Input validation note: This procedure does not validate num_blocks or alignment.
+    # Alignment errors are caught by the VM memory subsystem. Incorrect num_blocks
+    # will cause the procedure to encrypt the wrong amount of data, but this is safe -
+    # the resulting tag will authenticate whatever was actually encrypted.
 
     exec.init_state
     # => [rate(8), capacity(4), src_ptr, dst_ptr, num_blocks, ...]
@@ -135,32 +149,39 @@ export.encrypt
     # => [rate[3], rate[2], rate[1], rate[0], ...]
 end
 
-#! Decrypts ciphertext using non-deterministic advice and verifies authenticity.
+#! Decrypts and authenticates ciphertext using non-deterministic advice.
 #!
-#! This procedure implements decryption through a verification approach:
-#! 1. Emits event for host to decrypt ciphertext and provide plaintext via advice
-#! 2. Loads claimed plaintext from advice into dst_ptr
-#! 3. Re-encrypts plaintext to compute authentication tag
-#! 4. Returns computed tag for caller to verify against expected tag
+#! This procedure implements AEAD decryption with automatic tag verification:
+#! 1. Reads authentication tag from memory at src_ptr + (num_blocks * 8)
+#! 2. Emits event for host to decrypt ciphertext and provide plaintext via advice
+#! 3. Loads claimed plaintext from advice into dst_ptr
+#! 4. Re-encrypts plaintext to compute authentication tag
+#! 5. Compares computed tag with tag from ciphertext
+#! 6. Halts execution with assertion failure if tags don't match
 #!
 #! The security relies on the tag being a cryptographic commitment to both plaintext
 #! and ciphertext. For a fixed (key, nonce) pair, the deterministic keystream creates
 #! a bijection between plaintext and ciphertext, so the tag uniquely commits to both.
 #!
 #! Input: [nonce(4), key(4), src_ptr, dst_ptr, num_blocks, ...]
-#! Output: [tag(4), ...]
+#! Output: [] (empty stack on success, halts on failure)
 #!
 #! Where:
 #! - nonce is the initialization vector (4 elements)
 #! - key is the decryption key (4 elements)
-#! - src_ptr points to ciphertext in memory (must be word-aligned)
+#! - src_ptr points to ciphertext + tag in memory (must be word-aligned)
 #! - dst_ptr points to where plaintext will be written (must be word-aligned)
-#! - num_blocks is the number of 8-element blocks including padding
-#! - tag is the computed authentication tag (4 elements)
+#! - num_blocks is the number of 8-element data blocks (including padding, excluding tag)
+#!
+#! Memory Layout:
+#! - Input at src_ptr: [ciphertext_block_0(8), ..., ciphertext_block_n(8), tag(4)]
+#!   The tag word is located at address: src_ptr + (num_blocks * 8)
+#! - Output at dst_ptr: [plaintext_block_0(8), ..., plaintext_block_n(8)]
+#!   Note: Plaintext includes padding; caller must remove if needed
 #!
 #! Event: Emits AEAD_DECRYPT event with (nonce, key, src_ptr, dst_ptr, num_blocks)
 #! The host event handler must:
-#! - Read ciphertext from memory at src_ptr
+#! - Read ciphertext from memory at src_ptr (num_blocks * 8 elements)
 #! - Decrypt using reference implementation
 #! - Insert plaintext into advice map (keyed by nonce)
 #!
@@ -168,29 +189,59 @@ end
 #! - Same as encrypt: word-aligned addresses, contiguous blocks
 #! - src_ptr and dst_ptr MUST be different (in-place operation not supported)
 #!
-#! Verification:
-#! Caller must compare returned tag with expected tag. If they match, the plaintext
-#! at dst_ptr is authentic. If they don't match, decryption has failed.
+#! Security:
+#! - Tag verification is performed automatically within this procedure
+#! - Execution halts with assertion failure if tags don't match
+#! - If execution completes successfully, the plaintext at dst_ptr is authenticated
+#! - This design ensures that unauthenticated plaintext cannot be used
+#!
+#! Non-Determinism Soundness:
+#! This procedure uses non-deterministic advice to obtain the plaintext, which is sound
+#! because:
+#! 1. The prover provides claimed plaintext via advice (untrusted input)
+#! 2. The procedure re-encrypts the claimed plaintext with the same (key, nonce)
+#! 3. Due to deterministic encryption, the same plaintext produces the same ciphertext
+#! 4. The computed tag cryptographically commits to both plaintext and ciphertext
+#! 5. Comparing tags verifies that the claimed plaintext is the unique plaintext that
+#!    encrypts to the given ciphertext under the given (key, nonce)
+#! 6. A malicious prover cannot provide incorrect plaintext without causing tag mismatch
+#!
+#! This approach is secure because the tag acts as a cryptographic commitment, and the
+#! deterministic keystream creates a bijection between plaintext and ciphertext spaces.
+#! The prover cannot cheat: any deviation from the correct plaintext results in a
+#! different tag, causing the assertion to fail and halting execution.
 #!
 #! Note: This procedure does NOT remove padding. The caller must handle padding removal.
 export.decrypt
     # Stack: [nonce(4), key(4), src_ptr, dst_ptr, num_blocks, ...]
 
+    # Input validation note: This procedure does not validate num_blocks or alignment.
+    # Alignment errors are caught by the VM memory subsystem. Incorrect num_blocks
+    # values are caught by tag verification - if num_blocks doesn't match what was
+    # used during encryption, the tag comparison will fail and execution will halt.
+
+    # Compute the pointer to the tag for later use
+    dup.10 mul.8
+    dup.9
+    add
+    movdn.11
+    # => [nonce(4), key(4), src_ptr, dst_ptr, num_blocks, tag_ptr, ...]
+
     # Emit event to trigger host-side decryption
     emit.AEAD_DECRYPT_EVENT
-    # => [nonce(4), key(4), src_ptr, dst_ptr, num_blocks, ...]
+    # => [nonce(4), key(4), src_ptr, dst_ptr, num_blocks, tag_ptr, ...]
 
     # Push nonce onto advice stack to use as map key for loading plaintext
     adv.push_mapval
     # This pushes the plaintext elements from advice map onto advice stack
-    # => [nonce(4), key(4), src_ptr, dst_ptr, num_blocks, ...]
+    # => [nonce(4), key(4), src_ptr, dst_ptr, num_blocks, tag_ptr, ...]
 
-    # Get dst_ptr and num_words
-    dup.8  # dst_ptr
+    # Get dst_ptr
+    dup.9  # dst_ptr
     dup.11 # num_blocks
     swap
-    # => [dst_ptr, num_blocks, nonce(4), key(4), src_ptr, dst_ptr, num_blocks, ...]
-  
+    # => [dst_ptr, num_blocks, nonce(4), key(4), src_ptr, dst_ptr, num_blocks, tag_ptr, ...]
+
     padw padw padw
 
     dup.13 neq.0
@@ -201,16 +252,22 @@ export.decrypt
         movdn.13 dup.13
         neq.0
     end
+
     dropw dropw dropw
-    # => [dst_ptr + num_blocks, 0, nonce(4), key(4), src_ptr, dst_ptr, num_blocks, ...]
+    # => [dst_ptr + num_blocks, 0, nonce(4), key(4), src_ptr, dst_ptr, num_blocks, tag_ptr, ...]
     drop drop
-    # => [nonce(4), key(4), src_ptr, dst_ptr, num_blocks, ...]
+    # => [nonce(4), key(4), src_ptr, dst_ptr, num_blocks, tag_ptr, ...]
 
     # Now swap src_ptr and dst_ptr to call encrypt on the plaintext
-    movup.9 movup.9 swap movdn.8 movdn.8
-    # => [nonce(4), key(4), dst_ptr, src_ptr, num_blocks, ...]
+    movup.9 movup.9 swap movdn.9 movdn.9
+    # => [nonce(4), key(4), dst_ptr, src_ptr, num_blocks, tag_ptr, ...]
 
     # Call encrypt to compute tag
     exec.encrypt
-    # => [tag(4), ...]
+    # => [tag(4), tag_ptr, ...]
+
+    # Compare with the authentication tag that is attached to the ciphertext
+    padw movup.8 mem_loadw_be
+    eqw assert
+    dropw dropw
 end

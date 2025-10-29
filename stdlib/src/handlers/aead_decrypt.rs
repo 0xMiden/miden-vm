@@ -7,10 +7,9 @@
 
 use alloc::{vec, vec::Vec};
 
-use miden_core::{EventId, Felt, Word};
-use miden_crypto::{aead::aead_rpo::SecretKey, hash::rpo::Rpo256};
+use miden_core::{EventId, Word};
+use miden_crypto::aead::aead_rpo::{Nonce, SecretKey};
 use miden_processor::{AdviceMutation, EventError, ProcessState};
-use libc_print::libc_println;
 
 /// Qualified event name for the AEAD decrypt event.
 pub const AEAD_DECRYPT_EVENT_NAME: &str = "stdlib::crypto::aead::decrypt";
@@ -22,11 +21,35 @@ pub const AEAD_DECRYPT_EVENT_ID: EventId = EventId::from_u64(1203481437634845812
 /// Event handler for AEAD decryption.
 ///
 /// This handler is called when the VM emits an AEAD_DECRYPT_EVENT. It:
-/// 1. Reads the ciphertext from memory at src_ptr
+/// 1. Reads the ciphertext from memory at src_ptr (num_blocks * 8 elements)
 /// 2. Decrypts using the provided key and nonce via the reference implementation
-/// 3. Inserts the plaintext into the advice map (keyed by nonce)
+/// 3. Inserts the plaintext (with padding) into the advice map (keyed by nonce)
+///
+/// Memory layout at src_ptr: [ciphertext_blocks..., tag(4)]
+/// - The tag is located at src_ptr + (num_blocks * 8)
+/// - Only the ciphertext blocks are read by this handler (not the tag)
+///
+/// The MASM decrypt procedure will then:
+/// 1. Load the plaintext from advice and write it to dst_ptr
+/// 2. Re-encrypt the plaintext to compute an authentication tag
+/// 3. Read the expected tag from src_ptr + (num_blocks * 8)
+/// 4. Compare computed tag with expected tag and halt if they don't match
+///
+/// Security: This handler provides plaintext via non-deterministic advice. The MASM
+/// procedure MUST verify the authentication tag to ensure the plaintext is authentic.
+/// The tag verification is automatic and mandatory in the MASM decrypt procedure.
+///
+/// Non-determinism soundness: Using advice for decryption is cryptographically sound
+/// because the MASM procedure re-encrypts the claimed plaintext and verifies the tag.
+/// The deterministic encryption creates a bijection between plaintext and ciphertext,
+/// so the tag uniquely commits to both. A malicious prover cannot provide incorrect
+/// plaintext without causing a tag mismatch, which halts execution.
 pub fn handle_aead_decrypt(process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
     // Stack: [nonce(4), key(4), src_ptr, dst_ptr, num_blocks, ...]
+    // where:
+    //   src_ptr = ciphertext + tag location (input)
+    //   dst_ptr = plaintext destination (output)
+    //   num_blocks = number of data blocks (excluding tag word)
 
     // Read parameters from stack
     // Note: Stack position 0 contains the Event ID when the handler is called,
@@ -50,16 +73,9 @@ pub fn handle_aead_decrypt(process: &ProcessState) -> Result<Vec<AdviceMutation>
     let _dst_ptr = process.get_stack_item(10).as_int(); // Not needed for decryption
     let num_blocks = process.get_stack_item(11).as_int();
 
-    libc_println!("Event handler - nonce: {:?}", nonce_word);
-    libc_println!("Event handler - key: {:?}", key_word);
-    libc_println!("Event handler - src_ptr: {}", src_ptr);
-    libc_println!("Event handler - dst_ptr: {}", _dst_ptr);
-    libc_println!("Event handler - num_blocks: {}", num_blocks);
-
     // Read ciphertext from memory (num_blocks * 8 elements)
     let num_elements = (num_blocks * 8) as usize;
     let mut ciphertext = Vec::with_capacity(num_elements);
-libc_println!("src_ptr handler {:?}", src_ptr);
     let ctx = process.ctx();
     for i in 0..num_elements {
         let addr = (src_ptr + i as u64) as u32;
@@ -71,56 +87,18 @@ libc_println!("src_ptr handler {:?}", src_ptr);
         })?;
         ciphertext.push(value);
     }
-libc_println!("ciphertext handler {:?}", ciphertext);
+
     // Convert to reference implementation types
-    let _secret_key = SecretKey::from_elements(key_word.into()); // kept for future reference
+    let secret_key = SecretKey::from_elements(key_word.into());
+    let nonce = Nonce::from(nonce_word);
 
-    // Manually decrypt the ciphertext using the AEAD algorithm
-    // This follows the same logic as SecretKey::decrypt_elements but without tag verification
-    // (tag verification happens in MASM after re-encryption)
-
-    const RATE_WIDTH: usize = 8;
-    const STATE_WIDTH: usize = 12;
-
-    // Initialize sponge state: [key(4), nonce(4), capacity(4)]
-    let mut state = [Felt::new(0); STATE_WIDTH];
-    let key_elements: [Felt; 4] = key_word.into();
-    let nonce_elements: [Felt; 4] = nonce_word.into();
-
-    state[0..4].copy_from_slice(&key_elements);
-    state[4..8].copy_from_slice(&nonce_elements);
-    // capacity elements [8..12] remain zero (no domain separator)
-
-    // Process associated data padding [1,0,0,0,0,0,0,0] (empty AD)
-    Rpo256::apply_permutation(&mut state);
-    state[8] += Felt::new(1); // add 1 to first capacity element
-    state[0] = Felt::new(1);  // overwrite rate with AD padding
-    for i in 1..8 {
-        state[i] = Felt::new(0);
-    }
-
-    // Decrypt each 8-element block
-    let mut plaintext = Vec::with_capacity(num_elements);
-
-    for chunk in ciphertext.chunks(RATE_WIDTH) {
-        // Apply permutation to generate keystream
-        Rpo256::apply_permutation(&mut state);
-
-        // Squeeze the keystream (rate portion)
-        let keystream: [Felt; 8] = [
-            state[0], state[1], state[2], state[3],
-            state[4], state[5], state[6], state[7],
-        ];
-
-        // Decrypt: plaintext = ciphertext - keystream
-        for (i, &ciphertext_felt) in chunk.iter().enumerate() {
-            let plaintext_felt = ciphertext_felt - keystream[i];
-            plaintext.push(plaintext_felt);
-        }
-
-        // Update rate portion with ciphertext for next iteration
-        state[0..chunk.len()].copy_from_slice(chunk);
-    }
+    // Decrypt using the reference implementation (no tag verification)
+    // Tag verification happens in MASM after re-encryption
+    let plaintext = secret_key
+        .decrypt_elements_no_verify(&ciphertext, &nonce, &[])
+        .map_err(|e| AeadDecryptError::DecryptionFailed {
+            reason: alloc::format!("decryption failed: {:?}", e),
+        })?;
 
     // Insert plaintext into advice map with key = nonce (4 elements)
     // Create an AdviceMap from the iterator
@@ -143,7 +121,6 @@ enum AeadDecryptError {
 
     /// Decryption failed.
     #[error("decryption failed: {reason}")]
-    #[allow(dead_code)]
     DecryptionFailed { reason: alloc::string::String },
 }
 
