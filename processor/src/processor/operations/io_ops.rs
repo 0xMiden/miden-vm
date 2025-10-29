@@ -285,9 +285,9 @@ pub(super) fn op_crypto_stream<P: Processor>(
         let addr = match u32::try_from(addr_u64) {
             Ok(addr) => addr,
             Err(_) => {
-                return Err(ExecutionError::MemoryError(
-                    MemoryError::address_out_of_bounds(addr_u64, err_ctx),
-                ));
+                return Err(ExecutionError::MemoryError(MemoryError::address_out_of_bounds(
+                    addr_u64, err_ctx,
+                )));
             },
         };
 

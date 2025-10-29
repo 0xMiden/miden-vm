@@ -133,9 +133,6 @@ impl Stack {
     /// # Errors
     /// Returns an error if the overflow table is not empty at the current clock cycle.
     pub fn build_stack_outputs(&self) -> Result<StackOutputs, ExecutionError> {
-        let mut stack_items = Vec::with_capacity(self.active_depth);
-        let _res = self.trace.append_state_into(&mut stack_items, self.clk);
-        std::println!("stack outputs {:?}", stack_items);
         if self.overflow.total_num_elements() != 0 {
             return Err(ExecutionError::OutputStackOverflow(self.overflow.total_num_elements()));
         }

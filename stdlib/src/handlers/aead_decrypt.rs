@@ -7,8 +7,11 @@
 
 use alloc::{vec, vec::Vec};
 
-use miden_core::{EventId, Word};
-use miden_crypto::aead::aead_rpo::{Nonce, SecretKey};
+use miden_core::{EventId, FieldElement, Word};
+use miden_crypto::aead::{
+    DataType,
+    aead_rpo::{AuthTag, EncryptedData, Nonce, SecretKey},
+};
 use miden_processor::{AdviceMutation, EventError, ProcessState};
 
 /// Qualified event name for the AEAD decrypt event.
@@ -20,36 +23,48 @@ pub const AEAD_DECRYPT_EVENT_ID: EventId = EventId::from_u64(1203481437634845812
 
 /// Event handler for AEAD decryption.
 ///
-/// This handler is called when the VM emits an AEAD_DECRYPT_EVENT. It:
-/// 1. Reads the ciphertext from memory at src_ptr (num_blocks * 8 elements)
-/// 2. Decrypts using the provided key and nonce via the reference implementation
-/// 3. Inserts the plaintext (with padding) into the advice map (keyed by nonce)
+/// This handler is called when the VM emits an AEAD_DECRYPT_EVENT. It reads the full
+/// ciphertext (including padding block) and tag from memory, performs decryption and
+/// tag verification using the reference implementation, then provides the plaintext
+/// via the advice map.
 ///
-/// Memory layout at src_ptr: [ciphertext_blocks..., tag(4)]
-/// - The tag is located at src_ptr + (num_blocks * 8)
-/// - Only the ciphertext blocks are read by this handler (not the tag)
+/// Process:
+/// 1. Reads full ciphertext from memory at src_ptr ((num_blocks + 1) * 8 elements)
+/// 2. Reads authentication tag from memory at src_ptr + (num_blocks + 1) * 8
+/// 3. Constructs EncryptedData and decrypts using the reference implementation
+/// 4. Tag verification is performed by the reference implementation decrypt method
+/// 5. Extracts only the data blocks (first num_blocks * 8 elements) from plaintext
+/// 6. Inserts the data blocks (WITHOUT padding) into the advice map (keyed by nonce)
+///
+/// Memory layout at src_ptr:
+/// - [ciphertext_blocks(num_blocks * 8), encrypted_padding(8), tag(4)]
+/// - This handler reads ALL elements: data blocks + padding + tag
 ///
 /// The MASM decrypt procedure will then:
-/// 1. Load the plaintext from advice and write it to dst_ptr
-/// 2. Re-encrypt the plaintext to compute an authentication tag
-/// 3. Read the expected tag from src_ptr + (num_blocks * 8)
+/// 1. Load the plaintext data blocks from advice and write to dst_ptr
+/// 2. Call encrypt which reads the data blocks and adds padding automatically
+/// 3. Re-encrypt data + padding to compute authentication tag
 /// 4. Compare computed tag with expected tag and halt if they don't match
 ///
-/// Security: This handler provides plaintext via non-deterministic advice. The MASM
-/// procedure MUST verify the authentication tag to ensure the plaintext is authentic.
-/// The tag verification is automatic and mandatory in the MASM decrypt procedure.
+/// Security: Tag verification happens TWICE in this design:
+/// 1. Once in this event handler (via reference implementation)
+/// 2. Once in the MASM decrypt procedure (via re-encryption)
+///
+/// Both verifications must pass for execution to succeed. The double verification
+/// provides defense in depth and ensures cryptographic soundness.
 ///
 /// Non-determinism soundness: Using advice for decryption is cryptographically sound
-/// because the MASM procedure re-encrypts the claimed plaintext and verifies the tag.
-/// The deterministic encryption creates a bijection between plaintext and ciphertext,
-/// so the tag uniquely commits to both. A malicious prover cannot provide incorrect
-/// plaintext without causing a tag mismatch, which halts execution.
+/// because:
+/// 1. The event handler verifies the tag before providing plaintext
+/// 2. The MASM procedure re-verifies the tag via re-encryption
+/// 3. The deterministic encryption creates a bijection between plaintext and ciphertext
+/// 4. A malicious prover cannot provide incorrect plaintext without causing tag mismatch
 pub fn handle_aead_decrypt(process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
     // Stack: [nonce(4), key(4), src_ptr, dst_ptr, num_blocks, ...]
     // where:
-    //   src_ptr = ciphertext + tag location (input)
+    //   src_ptr = ciphertext + encrypted_padding + tag location (input)
     //   dst_ptr = plaintext destination (output)
-    //   num_blocks = number of data blocks (excluding tag word)
+    //   num_blocks = number of plaintext data blocks (NO padding)
 
     // Read parameters from stack
     // Note: Stack position 0 contains the Event ID when the handler is called,
@@ -73,37 +88,66 @@ pub fn handle_aead_decrypt(process: &ProcessState) -> Result<Vec<AdviceMutation>
     let _dst_ptr = process.get_stack_item(10).as_int(); // Not needed for decryption
     let num_blocks = process.get_stack_item(11).as_int();
 
-    // Read ciphertext from memory (num_blocks * 8 elements)
-    let num_elements = (num_blocks * 8) as usize;
-    let mut ciphertext = Vec::with_capacity(num_elements);
+    // Read full ciphertext from memory including padding block
+    // Total: (num_blocks + 1) * 8 elements (data blocks + padding block)
+    let num_ciphertext_elements = ((num_blocks + 1) * 8) as usize;
+    let mut ciphertext = Vec::with_capacity(num_ciphertext_elements);
     let ctx = process.ctx();
-    for i in 0..num_elements {
+    for i in 0..num_ciphertext_elements {
         let addr = (src_ptr + i as u64) as u32;
-        let value = process.get_mem_value(ctx, addr).ok_or_else(|| {
-            AeadDecryptError::MemoryReadFailed {
-                addr,
-                reason: alloc::string::String::from("memory read returned None"),
-            }
-        })?;
+        let value =
+            process
+                .get_mem_value(ctx, addr)
+                .ok_or_else(|| AeadDecryptError::MemoryReadFailed {
+                    addr,
+                    reason: alloc::string::String::from("memory read returned None"),
+                })?;
         ciphertext.push(value);
+    }
+
+    // Read the authentication tag (4 elements at src_ptr + (num_blocks + 1) * 8)
+    let tag_addr = (src_ptr + (num_blocks + 1) * 8) as u32;
+    let mut tag_elements = [miden_core::Felt::ZERO; 4];
+    for i in 0..4 {
+        let addr = tag_addr + i as u32;
+        let value =
+            process
+                .get_mem_value(ctx, addr)
+                .ok_or_else(|| AeadDecryptError::MemoryReadFailed {
+                    addr,
+                    reason: alloc::string::String::from("tag read returned None"),
+                })?;
+        tag_elements[i as usize] = value;
     }
 
     // Convert to reference implementation types
     let secret_key = SecretKey::from_elements(key_word.into());
     let nonce = Nonce::from(nonce_word);
+    let auth_tag = AuthTag::new(tag_elements);
 
-    // Decrypt using the reference implementation (no tag verification)
-    // Tag verification happens in MASM after re-encryption
-    let plaintext = secret_key
-        .decrypt_elements_no_verify(&ciphertext, &nonce, &[])
-        .map_err(|e| AeadDecryptError::DecryptionFailed {
+    // Construct EncryptedData
+    let encrypted_data =
+        EncryptedData::from_parts(DataType::Elements, ciphertext, auth_tag, nonce.clone());
+
+    // Decrypt using the standard reference implementation
+    // This performs tag verification internally
+    let plaintext_with_padding = secret_key.decrypt_elements(&encrypted_data).map_err(|e| {
+        AeadDecryptError::DecryptionFailed {
             reason: alloc::format!("decryption failed: {:?}", e),
-        })?;
+        }
+    })?;
 
-    // Insert plaintext into advice map with key = nonce (4 elements)
+    // Extract only the data blocks (without padding) to insert into advice
+    // The MASM encrypt procedure will add padding automatically during re-encryption
+    let data_blocks_count = (num_blocks * 8) as usize;
+    let plaintext_data: Vec<_> =
+        plaintext_with_padding.into_iter().take(data_blocks_count).collect();
+
+    // Insert plaintext data (WITHOUT padding) into advice map with key = nonce (4 elements)
+    // The padding will be added by the MASM encrypt procedure during re-encryption
     // Create an AdviceMap from the iterator
     let advice_map: miden_core::AdviceMap =
-        core::iter::once((nonce_word, plaintext)).collect();
+        core::iter::once((nonce_word, plaintext_data)).collect();
     let advice_map_mutation = AdviceMutation::extend_map(advice_map);
 
     Ok(vec![advice_map_mutation])

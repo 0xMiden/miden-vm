@@ -203,7 +203,8 @@ impl Process {
     /// 6. Incrementing both source and destination pointers by 8
     ///
     /// Stack transition:
-    /// [rate(8), cap(4), src_ptr, dst_ptr, ...] -> [ciphertext(8), cap(4), src_ptr+8, dst_ptr+8, ...]
+    /// [rate(8), cap(4), src_ptr, dst_ptr, ...] -> [ciphertext(8), cap(4), src_ptr+8, dst_ptr+8,
+    /// ...]
     pub(super) fn op_crypto_stream(
         &mut self,
         err_ctx: &impl ErrorContext,
@@ -231,9 +232,9 @@ impl Process {
             let addr = match u32::try_from(addr_u64) {
                 Ok(addr) => addr,
                 Err(_) => {
-                    return Err(ExecutionError::MemoryError(
-                        MemoryError::address_out_of_bounds(addr_u64, err_ctx),
-                    ));
+                    return Err(ExecutionError::MemoryError(MemoryError::address_out_of_bounds(
+                        addr_u64, err_ctx,
+                    )));
                 },
             };
 
@@ -289,12 +290,7 @@ impl Process {
 
         // Update stack[0..7] with ciphertext (becomes new rate for next hperm)
         // Elements are in reverse order on stack (stack[0] is top)
-        for (i, &elem) in ciphertext_words
-            .iter()
-            .flat_map(|word| word.iter())
-            .rev()
-            .enumerate()
-        {
+        for (i, &elem) in ciphertext_words.iter().flat_map(|word| word.iter()).rev().enumerate() {
             self.stack.set(i, elem);
         }
 
@@ -305,12 +301,10 @@ impl Process {
         }
 
         // Update source pointer: src_ptr + 8
-        self.stack
-            .set(SRC_PTR_IDX, src_ptr + Felt::from((WORD_SIZE * 2) as u32));
+        self.stack.set(SRC_PTR_IDX, src_ptr + Felt::from((WORD_SIZE * 2) as u32));
 
         // Update destination pointer: dst_ptr + 8
-        self.stack
-            .set(DST_PTR_IDX, dst_ptr + Felt::from((WORD_SIZE * 2) as u32));
+        self.stack.set(DST_PTR_IDX, dst_ptr + Felt::from((WORD_SIZE * 2) as u32));
 
         // Copy the rest of the stack (position 14 onwards)
         self.stack.copy_state(14);

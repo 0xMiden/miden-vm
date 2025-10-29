@@ -6,6 +6,9 @@
 #! 2. Absorb associated data padding (currently [1,0,0,0,0,0,0,0])
 #! 3. Process plaintext blocks using `crypto_stream` + `hperm`
 #! 4. Generate authentication tag from final sponge state
+#!
+#! Note: Associated data (AD) is currently NOT supported. Only empty AD is handled,
+#! which is represented by the padding block [1,0,0,0,0,0,0,0].
 
 use.std::crypto::hashes::rpo
 
@@ -45,20 +48,42 @@ export.init_state
     # => [rate(8), capacity(4), ...]
 end
 
+#! Processes associated data (AD) for AEAD.
+#!
+#! Currently, associated data is NOT supported, so this procedure only adds the padding block
+#! for empty associated data: [1,0,0,0,0,0,0,0] (note: element order on stack is reversed)
+#!
+#! Input: [rate(8), capacity(4), ...]
+#! Output: [AD_padding(8), capacity(4), ...]
+#!
+#! Stack layout on input:
+#! - rate(8) = [r7, r6, r5, r4, r3, r2, r1, r0]  (8 elements from initialization)
+#! - capacity(4) = [c3, c2, c1, c0]  (4 elements)
+#!
+#! This procedure replaces the rate with the AD padding block and increments the first
+#! capacity element (domain separation).
 proc.process_ad
-    # Replace rate with AD padding [0,0,0,0,1,0,0,0] (empty AD with padding)
-    # Note: AD is currently not supported, so we only add the padding block
+    # Drop the existing rate (8 elements)
     dropw dropw
+    # => [capacity(4), ...]
+
+    # Increment first capacity element for domain separation
     movup.3 add.1 movdn.3
-    push.1.0.0.0
-    padw
-    # => [AD_padding(8), capacity(4), ...]
+    # => [capacity'(4), ...]  where capacity'[0] = capacity[0] + 1
+
+    # Push AD padding block [1,0,0,0,0,0,0,0] onto stack
+    # Note: stack order is reversed, so we push [0,0,0,0] then [1,0,0,0]
+    push.1.0.0.0  # First word [1,0,0,0]
+    padw          # Second word [0,0,0,0] (padw pushes 4 zeros)
+    # => [AD_padding(8), capacity'(4), ...]
+    # AD_padding = [0, 0, 0, 0, 1, 0, 0, 0] in actual order
 end
 
-#! Encrypts multiple blocks from memory using the crypto_stream instruction.
+#! Encrypts plaintext data from memory using the crypto_stream instruction.
 #!
-#! This is the main encryption procedure that processes an entire message.
-#! The message must include proper padding as the last block.
+#! This procedure encrypts plaintext and automatically adds a padding block at the end.
+#! The padding block [1, 0, 0, 0, 0, 0, 0, 0] is written to memory and encrypted, ensuring
+#! proper AEAD formatting without requiring the caller to handle padding manually.
 #!
 #! Input: [nonce(4), key(4), src_ptr, dst_ptr, num_blocks, ...]
 #! Output: [tag(4), ...]
@@ -68,14 +93,20 @@ end
 #! - key is the encryption key (4 elements)
 #! - src_ptr points to plaintext in memory (must be word-aligned, divisible by 4)
 #! - dst_ptr points to where ciphertext will be written (must be word-aligned)
-#! - num_blocks is the number of 8-element data blocks (including padding, excluding tag)
+#! - num_blocks is the number of 8-element plaintext data blocks (NO padding included)
 #! - tag is the authentication tag returned on stack (4 elements)
 #!
 #! Memory Layout:
-#! - Input at src_ptr: [plaintext_block_0(8), plaintext_block_1(8), ..., plaintext_block_n(8)]
-#! - Output at dst_ptr: [ciphertext_block_0(8), ciphertext_block_1(8), ..., ciphertext_block_n(8)]
-#! - Note: Caller should write the returned tag to memory at dst_ptr + (num_blocks * 8)
-#!   to create standard AEAD ciphertext format: [ciphertext_blocks..., tag(4)]
+#! - Input at src_ptr: [plaintext_block_0(8), ..., plaintext_block_n(8)]
+#!   Length: num_blocks * 8 elements (must be multiple of 8)
+#!
+#! - Output at dst_ptr: [ciphertext_block_0(8), ..., ciphertext_block_n(8), encrypted_padding(8)]
+#!   Length: (num_blocks + 1) * 8 elements
+#!   The padding block is automatically added and encrypted
+#!
+#! - Standard format: Caller should write tag after ciphertext to create:
+#!   [ciphertext_blocks(num_blocks * 8), encrypted_padding(8), tag(4)]
+#!   Tag location: dst_ptr + (num_blocks + 1) * 8
 #!
 #! Memory Requirements:
 #! - Plaintext must be at word-aligned addresses (addr % 4 == 0)
@@ -84,10 +115,11 @@ end
 #! - src_ptr and dst_ptr MUST be different (in-place encryption not supported)
 #!   This is because crypto_stream reads and writes in the same clock cycle
 #!
-#! Padding Requirements:
-#! - Plaintext must always be padded with [1, 0, 0, ...] to make length multiple of 8
-#! - The padding block must be included in num_blocks
-#! - Empty plaintext requires a single padding block [1,0,0,0,0,0,0,0]
+#! Padding:
+#! - Padding is AUTOMATIC - caller should NOT pad the plaintext
+#! - The procedure writes [1, 0, 0, 0, 0, 0, 0, 0] to dst_ptr + (num_blocks * 8)
+#! - This padding block is then encrypted along with the data
+#! - For empty plaintext (num_blocks = 0), only the padding block is encrypted
 export.encrypt
     # Stack: [nonce(4), key(4), src_ptr, dst_ptr, num_blocks, ...]
 
@@ -100,6 +132,7 @@ export.encrypt
     # => [rate(8), capacity(4), src_ptr, dst_ptr, num_blocks, ...]
 
     exec.process_ad
+    # => [AD_padding(8), capacity(4), src_ptr, dst_ptr, num_blocks, ...]
 
     # Move num_blocks to accessible position
     movup.14
@@ -134,34 +167,71 @@ export.encrypt
     drop
     # => [rate(8), capacity(4), src_ptr_final, dst_ptr_final, ...]
 
+    # Write padding block [1,0,0,0,0,0,0,0] to memory at dst_ptr_final
+    # This padding block will be encrypted along with the data
+
+    dup.12
+    # => [dst_ptr_final, rate(8), capacity(4), src_ptr_final, dst_ptr_final, ...]
+
+    # Write first word [1,0,0,0] to dst_ptr_final
+    push.1.0.0.0
+    # => [1, 0, 0, 0, dst_ptr_final, rate(8), capacity(4), src_ptr_final, dst_ptr_final, ...]
+    dup.4
+    # => [dst_ptr_final, 1, 0, 0, 0, dst_ptr_final, rate(8), capacity(4), src_ptr_final, dst_ptr_final, ...]
+    mem_storew_be dropw
+    # => [dst_ptr_final, rate(8), capacity(4), src_ptr_final, dst_ptr_final, ...]
+
+    # Write second word [0,0,0,0] to dst_ptr_final + 4
+    padw
+    # => [0, 0, 0, 0, dst_ptr_final, rate(8), capacity(4), src_ptr_final, dst_ptr_final, ...]
+    movup.4 add.4
+    # => [dst_ptr_final+4, 0, 0, 0, 0, rate(8), capacity(4), src_ptr_final, dst_ptr_final, ...]
+    mem_storew_be dropw
+    # => [rate(8), capacity(4), src_ptr_final, dst_ptr_final, ...]
+
+    # Encrypt the padding block using crypto_stream
+    # Apply permutation to refresh keystream
+    hperm
+    # => [rate'(8), capacity'(4), src_ptr_final, dst_ptr_final, ...]
+
+    # Encrypt the padding block at dst_ptr_final
+    crypto_stream
+    # => [encrypted_padding(8), capacity'(4), src_ptr_final+8, dst_ptr_final+8, ...]
+
     # Generate authentication tag from current sponge state
     # Apply final permutation
     hperm
     # => [rate_final(8), capacity_final(4), src_ptr_final, dst_ptr_final, ...]
 
     # Extract the authentication tag (first word of rate)
-    # dropw removes rate[7..4], swapw swaps rate[3..0] with capacity, dropw removes capacity
-    dropw swapw dropw
-    # => [rate[3], rate[2], rate[1], rate[0], src_ptr_final, dst_ptr_final, ...]
+    dropw       # Drop rate[7..4]
+    # => [rate[3], rate[2], rate[1], rate[0], capacity(4), src_ptr_final, dst_ptr_final, ...]
 
-    # Clean up stack - drop the two pointers (at positions 4 and 5)
+    swapw       # Swap rate[3..0] with capacity
+    # => [capacity(4), rate[3], rate[2], rate[1], rate[0], src_ptr_final, dst_ptr_final, ...]
+
+    dropw       # Drop capacity
+    # => [rate[3], rate[2], rate[1], rate[0], src_ptr_final, dst_ptr_final, ...]
+    # This is the authentication tag: tag = rate[3..0]
+
+    # Clean up stack - remove the two pointers
     movup.4 drop movup.4 drop
-    # => [rate[3], rate[2], rate[1], rate[0], ...]
+    # => [tag(4), ...]
 end
 
 #! Decrypts and authenticates ciphertext using non-deterministic advice.
 #!
-#! This procedure implements AEAD decryption with automatic tag verification:
-#! 1. Reads authentication tag from memory at src_ptr + (num_blocks * 8)
-#! 2. Emits event for host to decrypt ciphertext and provide plaintext via advice
-#! 3. Loads claimed plaintext from advice into dst_ptr
-#! 4. Re-encrypts plaintext to compute authentication tag
-#! 5. Compares computed tag with tag from ciphertext
-#! 6. Halts execution with assertion failure if tags don't match
+#! This procedure implements AEAD decryption with automatic tag verification and
+#! automatic padding handling. It mirrors the encrypt procedure's padding behavior.
 #!
-#! The security relies on the tag being a cryptographic commitment to both plaintext
-#! and ciphertext. For a fixed (key, nonce) pair, the deterministic keystream creates
-#! a bijection between plaintext and ciphertext, so the tag uniquely commits to both.
+#! Decryption Flow:
+#! 1. Computes tag location: src_ptr + (num_blocks + 1) * 8
+#! 2. Emits event for host to decrypt ciphertext (data blocks + padding block)
+#! 3. Loads plaintext data blocks from advice into dst_ptr (num_blocks * 8 elements)
+#! 4. Calls encrypt which reads data blocks and adds padding automatically
+#! 5. Re-encrypts data + padding to compute authentication tag
+#! 6. Compares computed tag with tag from memory at src_ptr + (num_blocks + 1) * 8
+#! 7. Halts execution with assertion failure if tags don't match
 #!
 #! Input: [nonce(4), key(4), src_ptr, dst_ptr, num_blocks, ...]
 #! Output: [] (empty stack on success, halts on failure)
@@ -169,47 +239,58 @@ end
 #! Where:
 #! - nonce is the initialization vector (4 elements)
 #! - key is the decryption key (4 elements)
-#! - src_ptr points to ciphertext + tag in memory (must be word-aligned)
-#! - dst_ptr points to where plaintext will be written (must be word-aligned)
-#! - num_blocks is the number of 8-element data blocks (including padding, excluding tag)
+#! - src_ptr points to ciphertext + encrypted_padding + tag in memory (word-aligned)
+#! - dst_ptr points to where plaintext will be written (word-aligned)
+#! - num_blocks is the number of 8-element plaintext data blocks (NO padding)
 #!
 #! Memory Layout:
-#! - Input at src_ptr: [ciphertext_block_0(8), ..., ciphertext_block_n(8), tag(4)]
-#!   The tag word is located at address: src_ptr + (num_blocks * 8)
-#! - Output at dst_ptr: [plaintext_block_0(8), ..., plaintext_block_n(8)]
-#!   Note: Plaintext includes padding; caller must remove if needed
+#! - Input at src_ptr: [ciphertext_blocks(num_blocks * 8), encrypted_padding(8), tag(4)]
+#!   The encrypted padding is at: src_ptr + (num_blocks * 8)
+#!   The tag is at: src_ptr + (num_blocks + 1) * 8
+#!
+#! - Output at dst_ptr: [plaintext_block_0(8), ..., plaintext_block_n(8), padding(8)]
+#!   Length: (num_blocks + 1) * 8 elements
+#!   The padding block [1, 0, 0, 0, 0, 0, 0, 0] is automatically written
+#!   Caller can ignore or remove the padding block if needed
 #!
 #! Event: Emits AEAD_DECRYPT event with (nonce, key, src_ptr, dst_ptr, num_blocks)
 #! The host event handler must:
-#! - Read ciphertext from memory at src_ptr (num_blocks * 8 elements)
-#! - Decrypt using reference implementation
-#! - Insert plaintext into advice map (keyed by nonce)
+#! - Read full ciphertext from memory at src_ptr ((num_blocks + 1) * 8 elements)
+#! - Read authentication tag from memory at src_ptr + (num_blocks + 1) * 8
+#! - Decrypt and verify tag using reference implementation
+#! - Extract only data blocks (first num_blocks * 8 elements) from decrypted plaintext
+#! - Insert data blocks (WITHOUT padding) into advice map (keyed by nonce)
 #!
 #! Memory Requirements:
 #! - Same as encrypt: word-aligned addresses, contiguous blocks
 #! - src_ptr and dst_ptr MUST be different (in-place operation not supported)
 #!
 #! Security:
-#! - Tag verification is performed automatically within this procedure
-#! - Execution halts with assertion failure if tags don't match
+#! - Tag verification happens TWICE:
+#!   1. In the event handler via reference implementation
+#!   2. In this MASM procedure via re-encryption
+#! - Execution halts with assertion failure if either verification fails
 #! - If execution completes successfully, the plaintext at dst_ptr is authenticated
-#! - This design ensures that unauthenticated plaintext cannot be used
+#! - Double verification provides defense in depth
 #!
 #! Non-Determinism Soundness:
 #! This procedure uses non-deterministic advice to obtain the plaintext, which is sound
 #! because:
-#! 1. The prover provides claimed plaintext via advice (untrusted input)
-#! 2. The procedure re-encrypts the claimed plaintext with the same (key, nonce)
-#! 3. Due to deterministic encryption, the same plaintext produces the same ciphertext
-#! 4. The computed tag cryptographically commits to both plaintext and ciphertext
-#! 5. Comparing tags verifies that the claimed plaintext is the unique plaintext that
+#! 1. The event handler verifies the tag before providing plaintext via advice
+#! 2. The prover provides claimed plaintext via advice (untrusted input)
+#! 3. This procedure re-encrypts the claimed plaintext with the same (key, nonce)
+#! 4. Due to deterministic encryption, the same plaintext produces the same ciphertext
+#! 5. The computed tag cryptographically commits to both plaintext and ciphertext
+#! 6. Comparing tags verifies that the claimed plaintext is the unique plaintext that
 #!    encrypts to the given ciphertext under the given (key, nonce)
-#! 6. A malicious prover cannot provide incorrect plaintext without causing tag mismatch
+#! 7. A malicious prover cannot provide incorrect plaintext without causing tag mismatch
 #!
-#! This approach is secure because the tag acts as a cryptographic commitment, and the
-#! deterministic keystream creates a bijection between plaintext and ciphertext spaces.
-#! The prover cannot cheat: any deviation from the correct plaintext results in a
-#! different tag, causing the assertion to fail and halting execution.
+#! This approach is secure because:
+#! - The event handler provides first-level verification (tag check)
+#! - The MASM procedure provides second-level verification (re-encryption + tag check)
+#! - The tag acts as a cryptographic commitment
+#! - The deterministic keystream creates a bijection between plaintext and ciphertext
+#! - Any deviation from correct plaintext causes assertion failure
 #!
 #! Note: This procedure does NOT remove padding. The caller must handle padding removal.
 export.decrypt
@@ -221,7 +302,8 @@ export.decrypt
     # used during encryption, the tag comparison will fail and execution will halt.
 
     # Compute the pointer to the tag for later use
-    dup.10 mul.8
+    # tag is at src_ptr + (num_blocks + 1) * 8 because of automatic padding block
+    dup.10 add.1 mul.8
     dup.9
     add
     movdn.11
@@ -234,40 +316,54 @@ export.decrypt
     # Push nonce onto advice stack to use as map key for loading plaintext
     adv.push_mapval
     # This pushes the plaintext elements from advice map onto advice stack
+    # The advice contains data blocks only (no padding) - padding is added by encrypt
     # => [nonce(4), key(4), src_ptr, dst_ptr, num_blocks, tag_ptr, ...]
 
-    # Get dst_ptr
-    dup.9  # dst_ptr
-    dup.11 # num_blocks
+    # Prepare to load plaintext data blocks from advice
+    dup.9   # dst_ptr
+    dup.11  # num_blocks
     swap
     # => [dst_ptr, num_blocks, nonce(4), key(4), src_ptr, dst_ptr, num_blocks, tag_ptr, ...]
 
+    # Setup for adv_pipe loop (requires 3 words on stack)
     padw padw padw
+    # => [0(4), 0(4), 0(4), dst_ptr, num_blocks, nonce(4), key(4), src_ptr, dst_ptr, num_blocks, tag_ptr, ...]
 
     dup.13 neq.0
+    # => [continue?, 0(4), 0(4), 0(4), dst_ptr, num_blocks, nonce(4), ...]
 
+    # Load plaintext data blocks from advice using adv_pipe
     while.true
-        adv_pipe
-        movup.13 sub.1
-        movdn.13 dup.13
+        adv_pipe  # Reads 8 elements from advice, writes to dst_ptr, increments dst_ptr by 8
+        # => [0(4), 0(4), 0(4), dst_ptr+8, num_blocks, nonce(4), key(4), src_ptr, dst_ptr, num_blocks, tag_ptr, ...]
+
+        movup.13 sub.1  # Decrement counter
+        movdn.13 dup.13 # Move counter back and check if more blocks remain
         neq.0
     end
 
+    # Clean up adv_pipe working area
     dropw dropw dropw
-    # => [dst_ptr + num_blocks, 0, nonce(4), key(4), src_ptr, dst_ptr, num_blocks, tag_ptr, ...]
+    # => [dst_ptr_final, 0, nonce(4), key(4), src_ptr, dst_ptr, num_blocks, tag_ptr, ...]
     drop drop
     # => [nonce(4), key(4), src_ptr, dst_ptr, num_blocks, tag_ptr, ...]
 
-    # Now swap src_ptr and dst_ptr to call encrypt on the plaintext
+    # Swap src_ptr and dst_ptr to call encrypt on the plaintext
+    # This will re-encrypt the data blocks (adding padding automatically) to compute tag
     movup.9 movup.9 swap movdn.9 movdn.9
     # => [nonce(4), key(4), dst_ptr, src_ptr, num_blocks, tag_ptr, ...]
 
-    # Call encrypt to compute tag
+    # Re-encrypt plaintext to compute authentication tag
     exec.encrypt
-    # => [tag(4), tag_ptr, ...]
+    # => [computed_tag(4), tag_ptr, ...]
 
-    # Compare with the authentication tag that is attached to the ciphertext
-    padw movup.8 mem_loadw_be
-    eqw assert
-    dropw dropw
+    # Verify computed tag matches expected tag from ciphertext
+    padw            # Prepare stack for loading expected tag
+    movup.8         # Get tag_ptr
+    mem_loadw_be    # Load expected tag from memory
+    # => [expected_tag(4), 0(4), computed_tag(4), ...]
+
+    eqw assert      # Assert tags match (halts if different)
+    dropw dropw     # Clean up stack
+    # => []
 end

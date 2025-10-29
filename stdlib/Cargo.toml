@@ -40,7 +40,6 @@ miden-utils-sync.workspace = true
 
 # External dependencies
 thiserror.workspace = true
-libc-print = "0.1.23"
 
 [dev-dependencies]
 blake3.workspace = true
@@ -60,7 +59,6 @@ sha2 = "0.10"
 sha3 = "0.10"
 winter-air.workspace = true
 winter-fri.workspace = true
-libc-print = "0.1.23"
 
 [build-dependencies]
 env_logger.workspace = true

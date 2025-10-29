@@ -1278,15 +1278,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "58f929b4d672ea937a23a1ab494143d968337a5f47e56d0815df1e0890ddf174"
 
 [[package]]
-name = "libc-print"
-version = "0.1.23"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a4a660208db49e35faf57b37484350f1a61072f2a5becf0592af6015d9ddd4b0"
-dependencies = [
- "libc",
-]
-
-[[package]]
 name = "libm"
 version = "0.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1462,12 +1453,12 @@ dependencies = [
 
 [[package]]
 name = "miden-crypto"
-version = "0.18.0"
+version = "0.19.0"
+source = "git+https://github.com/0xMiden/crypto.git?branch=al-aead-constructors#5ec586ce05ddf4c004608d75135687675af7b0bc"
 dependencies = [
  "blake3",
  "cc",
  "chacha20poly1305",
- "curve25519-dalek",
  "ed25519-dalek",
  "flume",
  "glob",
@@ -1481,7 +1472,6 @@ dependencies = [
  "rand_core 0.9.3",
  "rand_hc",
  "serde",
- "sha2",
  "sha3",
  "subtle",
  "thiserror",
@@ -1493,7 +1483,8 @@ dependencies = [
 
 [[package]]
 name = "miden-crypto-derive"
-version = "0.1.0"
+version = "0.19.0"
+source = "git+https://github.com/0xMiden/crypto.git?branch=al-aead-constructors#5ec586ce05ddf4c004608d75135687675af7b0bc"
 dependencies = [
  "quote",
  "syn 2.0.106",
@@ -1642,7 +1633,6 @@ dependencies = [
  "criterion",
  "env_logger",
  "fs-err",
- "libc-print",
  "miden-air",
  "miden-assembly",
  "miden-core",
