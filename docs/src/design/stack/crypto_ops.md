@@ -309,9 +309,9 @@ The `log_precompile` operation logs a precompile event by recording two user-pro
 
 ### Operation Overview
 
-The stack is expected to be arranged as `[COMM, TAG, PAD, ...]`, where
-- `COMM` is the precompile commitment to the calldata (precompile-specific),
-- `TAG` is a word identifying the precompile, which may contain request-specific metadata,
+The stack is expected to be arranged as `[COMM, TAG, PAD, ...]`. See [Precompiles](./precompiles.md#core-data) for a thorough explanation of the precompile commitment model. In brief:
+- `TAG` encodes the precompile's event ID (first element) along with metadata or simple outputs (remaining elements),
+- `COMM` commits to the precompile inputs (and may include outputs for long results),
 - `PAD` is a word that will get overwritten in the next cycle.
 
 Additionally, the processor maintains a persistent precompile transcript state word `CAP` (the sponge capacity) that is updated with each `LOG_PRECOMPILE` invocation. This word is provided non-deterministically via helper registers and is denoted `CAP_PREV`. The virtual table bus links each removal to a matching insertion, ensuring a single, consistent state sequence.
