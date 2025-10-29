@@ -123,8 +123,7 @@ impl EddsaRequest {
     }
 
     pub fn result(&self) -> bool {
-        true
-        // verify_with_k_digest(&self.pk, self.k_digest, &self.sig)
+        self.pk.verify_with_unchecked_k(self.k_digest, &self.sig).is_ok()
     }
 
     pub fn as_precompile_commitment(&self) -> PrecompileCommitment {

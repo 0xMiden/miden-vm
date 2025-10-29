@@ -113,7 +113,7 @@ impl Sha512Preimage {
 
     pub fn digest(&self) -> Sha512FeltDigest {
         let hash = Sha512::digest(self.as_ref());
-        Sha512FeltDigest::from_bytes(hash.as_slice())
+        Sha512FeltDigest::from_bytes(&hash)
     }
 
     pub fn precompile_commitment(&self) -> PrecompileCommitment {

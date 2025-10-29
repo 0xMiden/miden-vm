@@ -58,7 +58,6 @@ export.hash_memory_impl.24
     # Load digest from advice stack (16 u32 limbs)
     locaddr.0
     exec.rpo::init_no_padding
-    debug.adv_stack
     # => [ZERO, ZERO, ZERO, digest_ptr, COMM_INPUT, TAG, ...]
     repeat.2
         adv_pipe
@@ -77,12 +76,12 @@ export.hash_memory_impl.24
     # => [COMM, TAG, ...]
 
     # Reload digest limbs from locals, placing them after COMM and TAG
-    padw loc_loadw.12 reversew
+    padw loc_loadw_le.12
     movdnw.2
-    padw loc_loadw.8 reversew
+    padw loc_loadw_le.8
     movdnw.2
-    padw loc_loadw.4 reversew
+    padw loc_loadw_le.4
     movdnw.2
-    padw loc_loadw.0 reversew
+    padw loc_loadw_le.0
     movdnw.2
 end
