@@ -9,6 +9,11 @@
 
 use.std::crypto::hashes::rpo
 
+# Constants
+# ================================================================================================
+
+const.AEAD_DECRYPT_EVENT=event("stdlib::crypto::aead::decrypt")
+
 #! Initializes the AEAD state with a key and nonce.
 #!
 #! This procedure sets up the RPO sponge for AEAD operations. The key and nonce
@@ -128,4 +133,84 @@ export.encrypt
     # Clean up stack - drop the two pointers (at positions 4 and 5)
     movup.4 drop movup.4 drop
     # => [rate[3], rate[2], rate[1], rate[0], ...]
+end
+
+#! Decrypts ciphertext using non-deterministic advice and verifies authenticity.
+#!
+#! This procedure implements decryption through a verification approach:
+#! 1. Emits event for host to decrypt ciphertext and provide plaintext via advice
+#! 2. Loads claimed plaintext from advice into dst_ptr
+#! 3. Re-encrypts plaintext to compute authentication tag
+#! 4. Returns computed tag for caller to verify against expected tag
+#!
+#! The security relies on the tag being a cryptographic commitment to both plaintext
+#! and ciphertext. For a fixed (key, nonce) pair, the deterministic keystream creates
+#! a bijection between plaintext and ciphertext, so the tag uniquely commits to both.
+#!
+#! Input: [nonce(4), key(4), src_ptr, dst_ptr, num_blocks, ...]
+#! Output: [tag(4), ...]
+#!
+#! Where:
+#! - nonce is the initialization vector (4 elements)
+#! - key is the decryption key (4 elements)
+#! - src_ptr points to ciphertext in memory (must be word-aligned)
+#! - dst_ptr points to where plaintext will be written (must be word-aligned)
+#! - num_blocks is the number of 8-element blocks including padding
+#! - tag is the computed authentication tag (4 elements)
+#!
+#! Event: Emits AEAD_DECRYPT event with (nonce, key, src_ptr, dst_ptr, num_blocks)
+#! The host event handler must:
+#! - Read ciphertext from memory at src_ptr
+#! - Decrypt using reference implementation
+#! - Insert plaintext into advice map (keyed by nonce)
+#!
+#! Memory Requirements:
+#! - Same as encrypt: word-aligned addresses, contiguous blocks
+#! - src_ptr and dst_ptr MUST be different (in-place operation not supported)
+#!
+#! Verification:
+#! Caller must compare returned tag with expected tag. If they match, the plaintext
+#! at dst_ptr is authentic. If they don't match, decryption has failed.
+#!
+#! Note: This procedure does NOT remove padding. The caller must handle padding removal.
+export.decrypt
+    # Stack: [nonce(4), key(4), src_ptr, dst_ptr, num_blocks, ...]
+
+    # Emit event to trigger host-side decryption
+    emit.AEAD_DECRYPT_EVENT
+    # => [nonce(4), key(4), src_ptr, dst_ptr, num_blocks, ...]
+
+    # Push nonce onto advice stack to use as map key for loading plaintext
+    adv.push_mapval
+    # This pushes the plaintext elements from advice map onto advice stack
+    # => [nonce(4), key(4), src_ptr, dst_ptr, num_blocks, ...]
+
+    # Get dst_ptr and num_words
+    dup.8  # dst_ptr
+    dup.11 # num_blocks
+    swap
+    # => [dst_ptr, num_blocks, nonce(4), key(4), src_ptr, dst_ptr, num_blocks, ...]
+  
+    padw padw padw
+
+    dup.13 neq.0
+
+    while.true
+        adv_pipe
+        movup.13 sub.1
+        movdn.13 dup.13
+        neq.0
+    end
+    dropw dropw dropw
+    # => [dst_ptr + num_blocks, 0, nonce(4), key(4), src_ptr, dst_ptr, num_blocks, ...]
+    drop drop
+    # => [nonce(4), key(4), src_ptr, dst_ptr, num_blocks, ...]
+
+    # Now swap src_ptr and dst_ptr to call encrypt on the plaintext
+    movup.9 movup.9 swap movdn.8 movdn.8
+    # => [nonce(4), key(4), dst_ptr, src_ptr, num_blocks, ...]
+
+    # Call encrypt to compute tag
+    exec.encrypt
+    # => [tag(4), ...]
 end

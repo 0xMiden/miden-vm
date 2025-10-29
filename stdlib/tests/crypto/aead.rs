@@ -5,8 +5,7 @@ use rand_chacha::ChaCha20Rng;
 
 #[test]
 fn test_encrypt_with_known_values() {
-
-     let seed = [1_u8; 32];
+    let seed = [2_u8; 32];
     let mut rng = ChaCha20Rng::from_seed(seed);
 
     let key = SecretKey::with_rng(&mut rng);
@@ -17,15 +16,18 @@ fn test_encrypt_with_known_values() {
         Felt::new(14), Felt::new(15), Felt::new(16), Felt::new(17),
     ];
 
-    let _encrypted = key.encrypt_elements_with_nonce(&plaintext, &[], nonce)
+    let encrypted = key
+        .encrypt_elements_with_nonce(&plaintext, &[], nonce)
         .expect("Encryption failed");
 
-    println!("encrypted {:?}", _encrypted);
-    // TODO: add From<Word> to Nonce and SecretKey
+    // Extract values from the reference implementation
+    let expected_tag = encrypted.auth_tag().to_elements();
+    let key_elements = key.to_elements();
+    let nonce_elements: [Felt; 4] = encrypted.nonce().clone().into();
+    let ciphertext = encrypted.ciphertext();
 
-    // Test vectors generated from reference implementation (seed [1; 32])
-
-    let source = "
+    // Build MASM test dynamically with extracted values
+    let source = format!("
     use.std::crypto::aead
 
     begin
@@ -35,27 +37,149 @@ fn test_encrypt_with_known_values() {
         push.1.0.0.0     push.1008 mem_storew_be dropw
         push.0.0.0.0     push.1012 mem_storew_be dropw
 
-        # Encrypt 2 blocks (plaintext + padding) with known key and nonce
-        # Build stack bottom-up for: [nonce(4), key(4), src, dst, num_blocks]
-        push.2           # num_blocks = 2 (one for plaintext, one for padding)
+        # Encrypt 2 blocks (plaintext + padding) with key and nonce from reference
+        push.2           # num_blocks = 2
         push.2000        # dst_ptr
         push.1000        # src_ptr
-        push.14156542307456850632.12122666295810984288.13249238539525561139.4050451889537540096     # key
-        push.13322508296688745832.13895135492789763118.11360277986885815498.937678706176150946       # nonce
+        push.{}.{}.{}.{}     # key
+        push.{}.{}.{}.{}     # nonce
 
         exec.aead::encrypt
 
         # Result: [tag(4), ...]
-        # Push expected tag and compare
-        push.9098967459671825806.12781258358417089247.381767408146379879.2129799113505984489
-
-        # Stack is now: [expected_tag(4), actual_tag(4), ...]
-        # Compare the two words
+        # Verify tag
+        push.{}.{}.{}.{}
         eqw assert
         dropw dropw
-    end
-    ";
 
-    let test = build_test!(source, &[]);
+        # Verify all 4 ciphertext words
+        push.2000 mem_loadw_be
+        push.{}.{}.{}.{} eqw assert dropw dropw
+
+        push.2004 mem_loadw_be
+        push.{}.{}.{}.{} eqw assert dropw dropw
+
+        push.2008 mem_loadw_be
+        push.{}.{}.{}.{} eqw assert dropw dropw
+
+        push.2012 mem_loadw_be
+        push.{}.{}.{}.{} eqw assert dropw dropw
+    end
+    ",
+        key_elements[0].as_int(), key_elements[1].as_int(),
+        key_elements[2].as_int(), key_elements[3].as_int(),
+        nonce_elements[0].as_int(), nonce_elements[1].as_int(),
+        nonce_elements[2].as_int(), nonce_elements[3].as_int(),
+        expected_tag[0].as_int(), expected_tag[1].as_int(),
+        expected_tag[2].as_int(), expected_tag[3].as_int(),
+        // Ciphertext word 0 - push in original order
+        ciphertext[0].as_int(), ciphertext[1].as_int(),
+        ciphertext[2].as_int(), ciphertext[3].as_int(),
+        // Ciphertext word 1
+        ciphertext[4].as_int(), ciphertext[5].as_int(),
+        ciphertext[6].as_int(), ciphertext[7].as_int(),
+        // Ciphertext word 2
+        ciphertext[8].as_int(), ciphertext[9].as_int(),
+        ciphertext[10].as_int(), ciphertext[11].as_int(),
+        // Ciphertext word 3
+        ciphertext[12].as_int(), ciphertext[13].as_int(),
+        ciphertext[14].as_int(), ciphertext[15].as_int(),
+    );
+
+    let test = build_test!(source.as_str(), &[]);
     test.execute().expect("Execution failed");
+}
+
+#[test]
+fn test_decrypt_with_known_values() {
+    let seed = [3_u8; 32];
+    let mut rng = ChaCha20Rng::from_seed(seed);
+
+    let key = SecretKey::with_rng(&mut rng);
+    let nonce = Nonce::with_rng(&mut rng);
+
+    let plaintext = vec![
+        Felt::new(10), Felt::new(11), Felt::new(12), Felt::new(13),
+        Felt::new(14), Felt::new(15), Felt::new(16), Felt::new(17),
+    ];
+println!("key source {:?}", key);
+println!("nonce source {:?}", nonce);
+    // Encrypt to get ciphertext and tag
+    let encrypted = key
+        .encrypt_elements_with_nonce(&plaintext, &[], nonce)
+        .expect("Encryption failed");
+
+    let expected_tag = encrypted.auth_tag().to_elements();
+    let key_elements = key.to_elements();
+    let nonce_elements: [Felt; 4] = encrypted.nonce().clone().into();
+    let ciphertext = encrypted.ciphertext();
+println!("ciphertext source {:?}", ciphertext);
+
+    // Build MASM test for decryption
+    let source = format!("
+    use.std::crypto::aead
+
+    begin
+        # Store ciphertext at address 1000
+        push.{}.{}.{}.{} push.1000 mem_storew_be dropw
+        push.{}.{}.{}.{} push.1004 mem_storew_be dropw
+        push.{}.{}.{}.{} push.1008 mem_storew_be dropw
+        push.{}.{}.{}.{} push.1012 mem_storew_be dropw
+
+        # Decrypt: [nonce(4), key(4), src_ptr, dst_ptr, num_blocks]
+        push.2           # num_blocks = 2
+        push.2000        # dst_ptr (where plaintext will be written)
+        push.1000        # src_ptr (ciphertext location)
+        push.{}.{}.{}.{}     # key
+        push.{}.{}.{}.{}     # nonce
+
+        exec.aead::decrypt
+end
+proc.izjij
+        # Result: [tag(4), ...]
+        # Verify computed tag matches expected tag
+        push.{}.{}.{}.{}
+        eqw assert
+        dropw dropw
+
+        # Verify decrypted plaintext matches original
+        push.2000 mem_loadw_be
+        push.10.11.12.13 eqw assert dropw dropw
+
+        push.2004 mem_loadw_be
+        push.14.15.16.17 eqw assert dropw dropw
+
+        # Verify padding block [1,0,0,0,0,0,0,0]
+        push.2008 mem_loadw_be
+        push.1.0.0.0 eqw assert dropw dropw
+
+        push.2012 mem_loadw_be
+        push.0.0.0.0 eqw assert dropw dropw
+    end
+    ",
+        // Ciphertext word 0
+        ciphertext[0].as_int(), ciphertext[1].as_int(),
+        ciphertext[2].as_int(), ciphertext[3].as_int(),
+        // Ciphertext word 1
+        ciphertext[4].as_int(), ciphertext[5].as_int(),
+        ciphertext[6].as_int(), ciphertext[7].as_int(),
+        // Ciphertext word 2
+        ciphertext[8].as_int(), ciphertext[9].as_int(),
+        ciphertext[10].as_int(), ciphertext[11].as_int(),
+        // Ciphertext word 3
+        ciphertext[12].as_int(), ciphertext[13].as_int(),
+        ciphertext[14].as_int(), ciphertext[15].as_int(),
+        // Key
+        key_elements[0].as_int(), key_elements[1].as_int(),
+        key_elements[2].as_int(), key_elements[3].as_int(),
+        // Nonce
+        nonce_elements[0].as_int(), nonce_elements[1].as_int(),
+        nonce_elements[2].as_int(), nonce_elements[3].as_int(),
+        // Expected tag
+        expected_tag[0].as_int(), expected_tag[1].as_int(),
+        expected_tag[2].as_int(), expected_tag[3].as_int(),
+    );
+
+    let test = build_test!(source.as_str(), &[]);
+    test.execute().expect("Decryption test failed");
 }

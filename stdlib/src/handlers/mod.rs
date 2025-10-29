@@ -1,5 +1,6 @@
 use miden_core::Felt;
 
+pub mod aead_decrypt;
 pub mod falcon_div;
 pub mod keccak256;
 pub mod smt_peek;
