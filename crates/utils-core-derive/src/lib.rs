@@ -137,16 +137,16 @@ fn generate_method_impl_for_trait_method(
             }
         },
         "before_enter" => quote! {
-            fn before_enter(&self) -> &[crate::mast::DecoratorId] {
+            fn before_enter<'a>(&'a self, forest: &'a crate::mast::MastForest) -> &'a [crate::mast::DecoratorId] {
                 match self {
-                    #(#enum_name::#variant_names(field) => field.before_enter()),*
+                    #(#enum_name::#variant_names(field) => field.before_enter(forest)),*
                 }
             }
         },
         "after_exit" => quote! {
-            fn after_exit(&self) -> &[crate::mast::DecoratorId] {
+            fn after_exit<'a>(&'a self, forest: &'a crate::mast::MastForest) -> &'a [crate::mast::DecoratorId] {
                 match self {
-                    #(#enum_name::#variant_names(field) => field.after_exit()),*
+                    #(#enum_name::#variant_names(field) => field.after_exit(forest)),*
                 }
             }
         },

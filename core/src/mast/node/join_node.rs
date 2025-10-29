@@ -9,7 +9,7 @@ use super::{MastForestContributor, MastNodeErrorContext, MastNodeExt};
 use crate::{
     Idx, OPCODE_JOIN,
     chiplets::hasher,
-    mast::{DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId},
+    mast::{DecoratedOpLink, DecoratorId, DecoratorStore, MastForest, MastForestError, MastNodeId},
     prettier::PrettyPrint,
 };
 
@@ -50,7 +50,7 @@ impl JoinNode {
 impl MastNodeErrorContext for JoinNode {
     fn decorators<'a>(
         &'a self,
-        _forest: &'a MastForest,
+        forest: &'a MastForest,
     ) -> impl Iterator<Item = DecoratedOpLink> + 'a {
         // Use the decorator_store for efficient O(1) decorator access
         let before_enter = self.decorator_store.before_enter(forest);
@@ -145,6 +145,41 @@ impl fmt::Display for JoinNodePrettyPrint<'_> {
     }
 }
 
+// SEMANTIC EQUALITY (FOR TESTING)
+// ================================================================================================
+
+#[cfg(test)]
+impl JoinNode {
+    /// Checks if two JoinNodes are semantically equal (i.e., they represent the same join
+    /// operation).
+    ///
+    /// Unlike the derived PartialEq, this method works correctly with both owned and linked
+    /// decorator storage by accessing the actual decorator data from the forest when needed.
+    pub fn semantic_eq(&self, other: &JoinNode, forest: &MastForest) -> bool {
+        // Compare children
+        if self.first() != other.first() || self.second() != other.second() {
+            return false;
+        }
+
+        // Compare digests
+        if self.digest() != other.digest() {
+            return false;
+        }
+
+        // Compare before-enter decorators
+        if self.before_enter(forest) != other.before_enter(forest) {
+            return false;
+        }
+
+        // Compare after-exit decorators
+        if self.after_exit(forest) != other.after_exit(forest) {
+            return false;
+        }
+
+        true
+    }
+}
+
 // MAST NODE TRAIT IMPLEMENTATION
 // ================================================================================================
 
@@ -210,8 +245,23 @@ impl MastNodeExt for JoinNode {
 
     type Builder = JoinNodeBuilder;
 
-    fn to_builder(self, _forest: &MastForest) -> Self::Builder {
-        JoinNodeBuilder::new(self.children)
+    fn to_builder(self, forest: &MastForest) -> Self::Builder {
+        // Extract decorators from decorator_store if in Owned state
+        match self.decorator_store {
+            DecoratorStore::Owned { before_enter, after_exit, .. } => {
+                let mut builder = JoinNodeBuilder::new(self.children);
+                builder = builder.with_before_enter(before_enter).with_after_exit(after_exit);
+                builder
+            },
+            DecoratorStore::Linked { id } => {
+                // Extract decorators from forest storage when in Linked state
+                let before_enter = forest.node_decorator_storage.get_before_decorators(id).to_vec();
+                let after_exit = forest.node_decorator_storage.get_after_decorators(id).to_vec();
+                let mut builder = JoinNodeBuilder::new(self.children);
+                builder = builder.with_before_enter(before_enter).with_after_exit(after_exit);
+                builder
+            },
+        }
     }
 }
 

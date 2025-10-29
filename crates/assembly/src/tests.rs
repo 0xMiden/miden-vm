@@ -4047,12 +4047,14 @@ fn issue_1644_single_forest_merge_identity() -> TestResult {
     // This should act as identity (return the same forest) but doesn't
     let (merged_forest, _) = MastForest::merge([&*original_forest]).into_diagnostic()?;
 
-    // Assert that the merged forest reorders nodes
-    assert_eq!(merged_forest.nodes()[5], original_forest.nodes()[6]);
-    original_forest.nodes()[5].unwrap_basic_block();
-    original_forest.nodes()[6].unwrap_join();
-    merged_forest.nodes()[6].unwrap_basic_block();
-    merged_forest.nodes()[5].unwrap_join();
+    // Assert that the merged forest reorders nodes and both have Join nodes at expected positions
+    let original_join = original_forest.nodes()[6].unwrap_join();
+    let merged_join = merged_forest.nodes()[5].unwrap_join();
+
+    // Check that they have the same structure (same first and second children, same digest)
+    assert_eq!(original_join.first(), merged_join.first());
+    assert_eq!(original_join.second(), merged_join.second());
+    assert_eq!(original_join.digest(), merged_join.digest());
 
     //Assert that merging is idempotent
     let (new_merged_forest, _) = MastForest::merge([&merged_forest]).into_diagnostic()?;

@@ -13,7 +13,7 @@ use super::{MastForestContributor, MastNodeErrorContext, MastNodeExt};
 use crate::{
     Idx, OPCODE_CALL, OPCODE_SYSCALL,
     chiplets::hasher,
-    mast::{DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId},
+    mast::{DecoratedOpLink, DecoratorId, DecoratorStore, MastForest, MastForestError, MastNodeId},
 };
 
 // CALL NODE
@@ -70,7 +70,7 @@ impl CallNode {
 impl MastNodeErrorContext for CallNode {
     fn decorators<'a>(
         &'a self,
-        _forest: &'a MastForest,
+        forest: &'a MastForest,
     ) -> impl Iterator<Item = DecoratedOpLink> + 'a {
         // Use the decorator_store for efficient O(1) decorator access
         let before_enter = self.decorator_store.before_enter(forest);
@@ -373,6 +373,10 @@ impl CallNodeBuilder {
             callee: self.callee,
             is_syscall: self.is_syscall,
             digest,
+            decorator_store: DecoratorStore::new_owned_with_decorators(
+                self.before_enter,
+                self.after_exit,
+            ),
         })
     }
 }
@@ -513,13 +517,31 @@ impl CallNodeBuilder {
             panic!("Digest is required for deserialization")
         };
 
-        let node = CallNode {
-            callee: self.callee,
-            is_syscall: self.is_syscall,
-            digest,
-        };
+        let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
 
-        forest.nodes.push(node.into()).map_err(|_| MastForestError::TooManyNodes)
+        // Store node-level decorators in the centralized NodeDecoratorStorage for efficient access
+        forest.node_decorator_storage.add_node_decorators(
+            future_node_id,
+            &self.before_enter,
+            &self.after_exit,
+        );
+
+        // Create the node in the forest with Linked variant from the start
+        // Move the data directly without intermediate cloning
+        let node_id = forest
+            .nodes
+            .push(
+                CallNode {
+                    callee: self.callee,
+                    is_syscall: self.is_syscall,
+                    digest,
+                    decorator_store: DecoratorStore::Linked { id: future_node_id },
+                }
+                .into(),
+            )
+            .map_err(|_| MastForestError::TooManyNodes)?;
+
+        Ok(node_id)
     }
 }
 

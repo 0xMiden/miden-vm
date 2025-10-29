@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use super::{MastForestContributor, MastNodeErrorContext, MastNodeExt};
 use crate::{
     OPCODE_DYN, OPCODE_DYNCALL,
-    mast::{DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId},
+    mast::{DecoratedOpLink, DecoratorId, DecoratorStore, MastForest, MastForestError, MastNodeId},
 };
 
 // DYN NODE
@@ -54,7 +54,7 @@ impl DynNode {
 impl MastNodeErrorContext for DynNode {
     fn decorators<'a>(
         &'a self,
-        _forest: &'a MastForest,
+        forest: &'a MastForest,
     ) -> impl Iterator<Item = DecoratedOpLink> + 'a {
         // Use the decorator_store for efficient O(1) decorator access
         let before_enter = self.decorator_store.before_enter(forest);
@@ -213,11 +213,30 @@ impl MastNodeExt for DynNode {
 
     type Builder = DynNodeBuilder;
 
-    fn to_builder(self, _forest: &MastForest) -> Self::Builder {
-        if self.is_dyncall {
-            DynNodeBuilder::new_dyncall()
-        } else {
-            DynNodeBuilder::new_dyn()
+    fn to_builder(self, forest: &MastForest) -> Self::Builder {
+        // Extract decorators from decorator_store if in Owned state
+        match self.decorator_store {
+            DecoratorStore::Owned { before_enter, after_exit, .. } => {
+                let mut builder = if self.is_dyncall {
+                    DynNodeBuilder::new_dyncall()
+                } else {
+                    DynNodeBuilder::new_dyn()
+                };
+                builder = builder.with_before_enter(before_enter).with_after_exit(after_exit);
+                builder
+            },
+            DecoratorStore::Linked { id } => {
+                // Extract decorators from forest storage when in Linked state
+                let before_enter = forest.node_decorator_storage.get_before_decorators(id).to_vec();
+                let after_exit = forest.node_decorator_storage.get_after_decorators(id).to_vec();
+                let mut builder = if self.is_dyncall {
+                    DynNodeBuilder::new_dyncall()
+                } else {
+                    DynNodeBuilder::new_dyn()
+                };
+                builder = builder.with_before_enter(before_enter).with_after_exit(after_exit);
+                builder
+            },
         }
     }
 }
@@ -440,9 +459,41 @@ impl DynNodeBuilder {
         self,
         forest: &mut MastForest,
     ) -> Result<MastNodeId, MastForestError> {
-        // DynNode doesn't have child dependencies, so relaxed validation is the same
-        // as normal validation. We delegate to the normal method for consistency.
-        self.add_to_forest(forest)
+        let node = self.build();
+
+        let DynNode {
+            is_dyncall,
+            digest,
+            decorator_store: DecoratorStore::Owned { before_enter, after_exit, .. },
+        } = node
+        else {
+            unreachable!("DynNodeBuilder::build() should always return owned decorators");
+        };
+
+        let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
+
+        // Store node-level decorators in the centralized NodeDecoratorStorage for efficient access
+        forest.node_decorator_storage.add_node_decorators(
+            future_node_id,
+            &before_enter,
+            &after_exit,
+        );
+
+        // Create the node in the forest with Linked variant from the start
+        // Move the data directly without intermediate cloning
+        let node_id = forest
+            .nodes
+            .push(
+                DynNode {
+                    is_dyncall,
+                    digest,
+                    decorator_store: DecoratorStore::Linked { id: future_node_id },
+                }
+                .into(),
+            )
+            .map_err(|_| MastForestError::TooManyNodes)?;
+
+        Ok(node_id)
     }
 }
 

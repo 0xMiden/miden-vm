@@ -10,7 +10,7 @@ use super::{MastForestContributor, MastNodeErrorContext, MastNodeExt};
 use crate::{
     Idx, OPCODE_LOOP,
     chiplets::hasher,
-    mast::{DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId},
+    mast::{DecoratedOpLink, DecoratorId, DecoratorStore, MastForest, MastForestError, MastNodeId},
 };
 
 // LOOP NODE
@@ -47,7 +47,7 @@ impl LoopNode {
 impl MastNodeErrorContext for LoopNode {
     fn decorators<'a>(
         &'a self,
-        _forest: &'a MastForest,
+        forest: &'a MastForest,
     ) -> impl Iterator<Item = DecoratedOpLink> + 'a {
         // Use the decorator_store for efficient O(1) decorator access
         let before_enter = self.decorator_store.before_enter(forest);
@@ -195,8 +195,23 @@ impl MastNodeExt for LoopNode {
 
     type Builder = LoopNodeBuilder;
 
-    fn to_builder(self, _forest: &MastForest) -> Self::Builder {
-        LoopNodeBuilder::new(self.body)
+    fn to_builder(self, forest: &MastForest) -> Self::Builder {
+        // Extract decorators from decorator_store if in Owned state
+        match self.decorator_store {
+            DecoratorStore::Owned { before_enter, after_exit, .. } => {
+                let mut builder = LoopNodeBuilder::new(self.body);
+                builder = builder.with_before_enter(before_enter).with_after_exit(after_exit);
+                builder
+            },
+            DecoratorStore::Linked { id } => {
+                // Extract decorators from forest storage when in Linked state
+                let before_enter = forest.node_decorator_storage.get_before_decorators(id).to_vec();
+                let after_exit = forest.node_decorator_storage.get_after_decorators(id).to_vec();
+                let mut builder = LoopNodeBuilder::new(self.body);
+                builder = builder.with_before_enter(before_enter).with_after_exit(after_exit);
+                builder
+            },
+        }
     }
 }
 

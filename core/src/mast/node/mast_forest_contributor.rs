@@ -367,8 +367,8 @@ mod round_trip_tests {
     use crate::{
         Operation, Word,
         mast::{
-            BasicBlockNodeBuilder, JoinNodeBuilder, MastForest, MastNodeBuilder, MastNodeExt,
-            node::mast_forest_contributor::MastForestContributor,
+            BasicBlockNodeBuilder, JoinNodeBuilder, MastForest, MastNode, MastNodeBuilder,
+            MastNodeExt, node::mast_forest_contributor::MastForestContributor,
         },
     };
 
@@ -390,7 +390,13 @@ mod round_trip_tests {
         let join_node = forest.get_node_by_id(join_id).unwrap().clone();
         let rebuilt_node = join_node.clone().to_builder(&forest).build(&forest).unwrap();
 
-        assert_eq!(join_node, rebuilt_node);
+        // Use semantic equality to handle decorator store state differences
+        match (&join_node, &rebuilt_node) {
+            (MastNode::Join(original), MastNode::Join(rebuilt)) => {
+                assert!(original.semantic_eq(rebuilt, &forest));
+            },
+            _ => panic!("Both nodes should be Join nodes"),
+        }
 
         // Test digest forcing
         let forced_join_digest =

@@ -10,7 +10,9 @@ use miden_formatting::{
 use serde::{Deserialize, Serialize};
 
 use super::{MastForestContributor, MastNodeErrorContext, MastNodeExt};
-use crate::mast::{DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId};
+use crate::mast::{
+    DecoratedOpLink, DecoratorId, DecoratorStore, MastForest, MastForestError, MastNodeId,
+};
 
 // EXTERNAL NODE
 // ================================================================================================
@@ -34,7 +36,7 @@ pub struct ExternalNode {
 impl MastNodeErrorContext for ExternalNode {
     fn decorators<'a>(
         &'a self,
-        _forest: &'a MastForest,
+        forest: &'a MastForest,
     ) -> impl Iterator<Item = DecoratedOpLink> + 'a {
         // Use the decorator_store for efficient O(1) decorator access
         let before_enter = self.decorator_store.before_enter(forest);
@@ -196,8 +198,23 @@ impl MastNodeExt for ExternalNode {
 
     type Builder = ExternalNodeBuilder;
 
-    fn to_builder(self, _forest: &MastForest) -> Self::Builder {
-        ExternalNodeBuilder::new(self.digest)
+    fn to_builder(self, forest: &MastForest) -> Self::Builder {
+        // Extract decorators from decorator_store if in Owned state
+        match self.decorator_store {
+            DecoratorStore::Owned { before_enter, after_exit, .. } => {
+                let mut builder = ExternalNodeBuilder::new(self.digest);
+                builder = builder.with_before_enter(before_enter).with_after_exit(after_exit);
+                builder
+            },
+            DecoratorStore::Linked { id } => {
+                // Extract decorators from forest storage when in Linked state
+                let before_enter = forest.node_decorator_storage.get_before_decorators(id).to_vec();
+                let after_exit = forest.node_decorator_storage.get_after_decorators(id).to_vec();
+                let mut builder = ExternalNodeBuilder::new(self.digest);
+                builder = builder.with_before_enter(before_enter).with_after_exit(after_exit);
+                builder
+            },
+        }
     }
 }
 
