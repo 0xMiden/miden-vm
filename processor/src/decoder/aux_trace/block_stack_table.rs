@@ -92,7 +92,6 @@ fn get_block_stack_table_end_multiplicand<E: FieldElement<BaseField = Felt>>(
 
     let elements = if main_trace.is_call_flag(i) == ONE || main_trace.is_syscall_flag(i) == ONE {
         let parent_ctx = main_trace.ctx(i + 1);
-        let parent_fmp = main_trace.fmp(i + 1);
         let parent_stack_depth = main_trace.stack_depth(i + 1);
         let parent_next_overflow_addr = main_trace.parent_overflow_address(i + 1);
         let parent_fn_hash = main_trace.fn_hash(i + 1);
@@ -103,7 +102,6 @@ fn get_block_stack_table_end_multiplicand<E: FieldElement<BaseField = Felt>>(
             parent_id,
             is_loop,
             parent_ctx,
-            parent_fmp,
             parent_stack_depth,
             parent_next_overflow_addr,
             parent_fn_hash[0],
@@ -112,7 +110,7 @@ fn get_block_stack_table_end_multiplicand<E: FieldElement<BaseField = Felt>>(
             parent_fn_hash[3],
         ]
     } else {
-        let mut result = [ZERO; 12];
+        let mut result = [ZERO; 11];
         result[0] = ONE;
         result[1] = block_id;
         result[2] = parent_id;
@@ -147,7 +145,6 @@ fn get_block_stack_table_inclusion_multiplicand<E: FieldElement<BaseField = Felt
     };
     let elements = if op_code == OPCODE_CALL || op_code == OPCODE_SYSCALL {
         let parent_ctx = main_trace.ctx(i);
-        let parent_fmp = main_trace.fmp(i);
         let parent_stack_depth = main_trace.stack_depth(i);
         let parent_next_overflow_addr = main_trace.parent_overflow_address(i);
         let parent_fn_hash = main_trace.fn_hash(i);
@@ -157,7 +154,6 @@ fn get_block_stack_table_inclusion_multiplicand<E: FieldElement<BaseField = Felt
             parent_id,
             is_loop,
             parent_ctx,
-            parent_fmp,
             parent_stack_depth,
             parent_next_overflow_addr,
             parent_fn_hash[0],
@@ -172,7 +168,6 @@ fn get_block_stack_table_inclusion_multiplicand<E: FieldElement<BaseField = Felt
         // in the next row (the first row of the new execution context); the values placed here are
         // the values that will be restored when the new execution context terminates.
         let parent_ctx = main_trace.ctx(i);
-        let parent_fmp = main_trace.fmp(i);
         let parent_stack_depth = main_trace.decoder_hasher_state_element(4, i);
         let parent_next_overflow_addr = main_trace.decoder_hasher_state_element(5, i);
         let parent_fn_hash = main_trace.fn_hash(i);
@@ -182,7 +177,6 @@ fn get_block_stack_table_inclusion_multiplicand<E: FieldElement<BaseField = Felt
             parent_id,
             is_loop,
             parent_ctx,
-            parent_fmp,
             parent_stack_depth,
             parent_next_overflow_addr,
             parent_fn_hash[0],
@@ -191,7 +185,7 @@ fn get_block_stack_table_inclusion_multiplicand<E: FieldElement<BaseField = Felt
             parent_fn_hash[3],
         ]
     } else {
-        let mut result = [ZERO; 12];
+        let mut result = [ZERO; 11];
         result[0] = ONE;
         result[1] = block_id;
         result[2] = parent_id;

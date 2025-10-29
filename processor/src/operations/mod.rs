@@ -56,9 +56,6 @@ impl Process {
             Operation::Noop => self.stack.copy_state(0),
             Operation::Assert(err_code) => self.op_assert(err_code, program, host, err_ctx)?,
 
-            Operation::FmpAdd => self.op_fmpadd()?,
-            Operation::FmpUpdate => self.op_fmpupdate()?,
-
             Operation::SDepth => self.op_sdepth()?,
             Operation::Caller => self.op_caller()?,
 

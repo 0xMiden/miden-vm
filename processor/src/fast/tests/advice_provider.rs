@@ -13,13 +13,13 @@ fn test_advice_provider() {
 
     let program_source = "
     proc.truncate_stack.4
-        loc_storew.0 dropw movupw.3
+        loc_storew_be.0 dropw movupw.3
         sdepth neq.16
         while.true
             dropw movupw.3
             sdepth neq.16
         end
-        loc_loadw.0
+        loc_loadw_be.0
     end
 
     # mainly used to break basic blocks

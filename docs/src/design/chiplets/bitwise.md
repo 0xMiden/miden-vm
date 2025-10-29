@@ -1,3 +1,8 @@
+---
+title: "Bitwise Chiplet"
+sidebar_position: 3
+---
+
 # Bitwise chiplet
 
 In this note we describe how to compute bitwise AND and XOR operations on 32-bit values and the constraints required for proving correct execution.
@@ -18,7 +23,7 @@ To compute bitwise operations for multi-bit values, we will decompose the values
 
 To perform this operation we will use a table with 12 columns, and computing a single AND or XOR operation will require 8 table rows. We will also rely on two periodic columns as shown below.
 
-![bitwise_execution_trace](../../assets/design/chiplets/bitwise/bitwise_execution_trace.png)
+![bitwise_execution_trace](../../img/design/chiplets/bitwise/bitwise_execution_trace.png)
 
 In the above, the columns have the following meanings:
 
@@ -57,46 +62,46 @@ The Bitwise chiplet supports two operations with the following operation selecto
 The constraints must require that the selectors be binary and stay the same throughout the cycle:
 
 > $$
-s^2 - s = 0 \text{ | degree} = 2
-$$
+> s^2 - s = 0 \text{ | degree} = 2
+> $$
 
 > $$
-k_1 \cdot (s' - s) = 0 \text{ | degree} = 2
-$$
+> k_1 \cdot (s' - s) = 0 \text{ | degree} = 2
+> $$
 
 ### Input decomposition
 
 We need to make sure that inputs $a$ and $b$ are decomposed correctly into their individual bits. To do this, first, we need to make sure that columns $a_0$, $a_1$, $a_2$, $a_3$, $b_0$, $b_1$, $b_2$, $b_3$, can contain only binary values ($0$ or $1$). This can be accomplished with the following constraints (for $i$ ranging between $0$ and $3$):
 
 > $$
-a_i^2 - a_i = 0 \text{ | degree} = 2
-$$
+> a_i^2 - a_i = 0 \text{ | degree} = 2
+> $$
 
 > $$
-b_i^2 - b_i = 0 \text{ | degree} = 2
-$$
+> b_i^2 - b_i = 0 \text{ | degree} = 2
+> $$
 
 Then, we need to make sure that on the first row of every 8-row cycle, the values in the columns $a$ and $b$ are exactly equal to the aggregation of binary values contained in the individual bit columns $a_i$, and $b_i$. This can be enforced with the following constraints:
 
 > $$
-k_0 \cdot \left(a - \sum_{i=0}^3(2^i \cdot a_i)\right) = 0 \text{ | degree} = 2
-$$
+> k_0 \cdot \left(a - \sum_{i=0}^3(2^i \cdot a_i)\right) = 0 \text{ | degree} = 2
+> $$
 
 > $$
-k_0 \cdot \left(b - \sum_{i=0}^3(2^i \cdot b_i)\right) = 0 \text{ | degree} = 2
-$$
+> k_0 \cdot \left(b - \sum_{i=0}^3(2^i \cdot b_i)\right) = 0 \text{ | degree} = 2
+> $$
 
 The above constraints enforce that when $k_0 = 1$, $a = \sum_{i=0}^3(2^i \cdot a_i)$ and $b = \sum_{i=0}^3(2^i \cdot b_i)$.
 
 Lastly, we need to make sure that for all rows in an 8-row cycle except for the last one, the values in $a$ and $b$ columns are increased by the values contained in the individual bit columns $a_i$ and $b_i$. Denoting $a$ as the value of column $a$ in the current row, and $a'$ as the value of column $a$ in the next row, we can enforce these conditions as follows:
 
 > $$
-k_1 \cdot \left(a' - \left(a \cdot 16 + \sum_{i=0}^3(2^i \cdot a'_i)\right)\right) = 0 \text{ | degree} = 2
-$$
+> k_1 \cdot \left(a' - \left(a \cdot 16 + \sum_{i=0}^3(2^i \cdot a'_i)\right)\right) = 0 \text{ | degree} = 2
+> $$
 
 > $$
-k_1 \cdot \left(b' - \left(b \cdot 16 + \sum_{i=0}^3(2^i \cdot b'_i)\right)\right) = 0 \text{ | degree} = 2
-$$
+> k_1 \cdot \left(b' - \left(b \cdot 16 + \sum_{i=0}^3(2^i \cdot b'_i)\right)\right) = 0 \text{ | degree} = 2
+> $$
 
 The above constraints enforce that when $k_1 = 1$ , $a' = 16 \cdot a + \sum_{i=0}^3(2^i \cdot a'_i)$ and $b' = 16 \cdot b + \sum_{i=0}^3(2^i \cdot b'_i)$.
 
@@ -104,27 +109,27 @@ The above constraints enforce that when $k_1 = 1$ , $a' = 16 \cdot a + \sum_{i=0
 
 To ensure correct aggregation of operations over individual bits, first we need to ensure that in the first row, the aggregated output value of the previous row should be 0.
 > $$
-k_0 \cdot z_p = 0 \text{ | degree} = 2
-$$
+> k_0 \cdot z_p = 0 \text{ | degree} = 2
+> $$
 
 Next, we need to ensure that for each row except the last, the aggregated output value must equal the previous aggregated output value in the next row.
 > $$
-k_1 \cdot \left(z - z'_p\right) = 0 \text{ | degree} = 2
-$$
+> k_1 \cdot \left(z - z'_p\right) = 0 \text{ | degree} = 2
+> $$
 
 Lastly, we need to ensure that for all rows the value in the $z$ column is computed by multiplying the previous output value (from the $z_p$ column in the current row) by 16 and then adding it to the bitwise operation applied to the row's set of bits of $a$ and $b$. The entire constraint must also be multiplied by the operation selector flag to ensure it is only applied for the appropriate operation.
 
 For `U32AND`, this is enforced with the following constraint:
 
 > $$
-(1 - s) \cdot \left(z -(z_p \cdot 16 + \sum_{i=0}^3(2^i \cdot a_i \cdot b_i))\right) = 0 \text{ | degree} = 3
-$$
+> (1 - s) \cdot \left(z -(z_p \cdot 16 + \sum_{i=0}^3(2^i \cdot a_i \cdot b_i))\right) = 0 \text{ | degree} = 3
+> $$
 
 For `U32XOR`, this is enforced with the following constraint:
 
 > $$
-s \cdot \left(z -(z_p \cdot 16 + \sum_{i=0}^3(2^i \cdot (a_i + b_i - 2 \cdot a_i \cdot b_i)))\right) = 0 \text{ | degree} = 3
-$$
+> s \cdot \left(z -(z_p \cdot 16 + \sum_{i=0}^3(2^i \cdot (a_i + b_i - 2 \cdot a_i \cdot b_i)))\right) = 0 \text{ | degree} = 3
+> $$
 
 ## Chiplets bus constraints
 
@@ -134,7 +139,7 @@ $$
 u = \alpha_0 + \alpha_1 \cdot op_{bit} + \alpha_2 \cdot a + \alpha_3 \cdot b + \alpha_4 \cdot z
 $$
 
-Where, $op_{bit}$ is the unique [operation label](./main.md#operation-labels) of the bitwise operation.
+Where, $op_{bit}$ is the unique [operation label](./index.md#operation-labels) of the bitwise operation.
 
 The request side of the constraint for the bitwise operation is described in the [stack bitwise operation section](../stack/u32_ops.md#u32and).
 
@@ -157,5 +162,5 @@ The above ensures that when $1 - k_1 = 0$ (which is true for all rows in the 8-r
 The response side of the bus communication can be enforced with the following constraint:
 
 > $$
-b'_{chip} = b_{chip} \cdot (v_i \cdot m_i + 1 - m_i) \text{ | degree} = 4
-$$
+> b'_{chip} = b_{chip} \cdot (v_i \cdot m_i + 1 - m_i) \text{ | degree} = 4
+> $$

@@ -6,7 +6,6 @@ extern crate alloc;
 extern crate std;
 
 use alloc::{
-    collections::BTreeMap,
     format,
     string::{String, ToString},
     sync::Arc,
@@ -27,7 +26,7 @@ pub use miden_core::{
     stack::MIN_STACK_DEPTH,
     utils::{IntoBytes, ToElements, group_slice_elements},
 };
-use miden_core::{EventId, ProgramInfo, chiplets::hasher::apply_permutation};
+use miden_core::{EventName, ProgramInfo, chiplets::hasher::apply_permutation};
 pub use miden_processor::{
     AdviceInputs, AdviceProvider, BaseHost, ContextId, ExecutionError, ExecutionOptions,
     ExecutionTrace, Process, ProcessState, VmStateIterator,
@@ -64,9 +63,9 @@ pub mod rand;
 
 mod test_builders;
 
+use miden_core::sys_events::SystemEvent;
 #[cfg(not(target_family = "wasm"))]
 pub use proptest;
-
 // CONSTANTS
 // ================================================================================================
 
@@ -76,13 +75,13 @@ pub const U32_BOUND: u64 = u32::MAX as u64 + 1;
 /// A source code of the `truncate_stack` procedure.
 pub const TRUNCATE_STACK_PROC: &str = "
 proc.truncate_stack.4
-    loc_storew.0 dropw movupw.3
+    loc_storew_be.0 dropw movupw.3
     sdepth neq.16
     while.true
         dropw movupw.3
         sdepth neq.16
     end
-    loc_loadw.0
+    loc_loadw_be.0
 end
 ";
 
@@ -179,7 +178,7 @@ pub struct Test {
     pub advice_inputs: AdviceInputs,
     pub in_debug_mode: bool,
     pub libraries: Vec<Library>,
-    pub handlers: BTreeMap<EventId, Arc<dyn EventHandler>>,
+    pub handlers: Vec<(EventName, Arc<dyn EventHandler>)>,
     pub add_modules: Vec<(LibraryPath, String)>,
 }
 
@@ -215,7 +214,7 @@ impl Test {
             advice_inputs: AdviceInputs::default(),
             in_debug_mode,
             libraries: Vec::default(),
-            handlers: BTreeMap::default(),
+            handlers: Vec::new(),
             add_modules: Vec::default(),
         }
     }
@@ -226,19 +225,22 @@ impl Test {
     }
 
     /// Add a handler for a specific event when running the `Host`.
-    pub fn add_event_handler(&mut self, id: EventId, handler: impl EventHandler) {
-        self.add_event_handlers(vec![(id, Arc::new(handler))]);
+    pub fn add_event_handler(&mut self, event: EventName, handler: impl EventHandler) {
+        self.add_event_handlers(vec![(event, Arc::new(handler))]);
     }
 
     /// Add a handler for a specific event when running the `Host`.
-    pub fn add_event_handlers(&mut self, handlers: Vec<(EventId, Arc<dyn EventHandler>)>) {
-        for (id, handler) in handlers {
-            if id.is_reserved() {
-                panic!("tried to register handler with ID reserved for system events")
+    pub fn add_event_handlers(&mut self, handlers: Vec<(EventName, Arc<dyn EventHandler>)>) {
+        for (event, handler) in handlers {
+            let event_name = event.as_str();
+            if SystemEvent::from_name(event_name).is_some() {
+                panic!("tried to register handler for reserved system event: {event_name}")
             }
-            if self.handlers.insert(id, handler).is_some() {
-                panic!("handler with id {id} was already added")
+            let event_id = event.to_event_id();
+            if self.handlers.iter().any(|(e, _)| e.to_event_id() == event_id) {
+                panic!("handler for event '{event_name}' was already added")
             }
+            self.handlers.push((event, handler));
         }
     }
 
@@ -549,8 +551,8 @@ impl Test {
         for library in &self.libraries {
             host.load_library(library.mast_forest()).unwrap();
         }
-        for (id, handler) in &self.handlers {
-            host.register_handler(*id, handler.clone()).unwrap();
+        for (event, handler) in &self.handlers {
+            host.register_handler(event.clone(), handler.clone()).unwrap();
         }
 
         (program, host)
@@ -756,8 +758,8 @@ pub fn push_inputs(inputs: &[u64]) -> String {
 /// Helper function to get column name for debugging
 pub fn get_column_name(col_idx: usize) -> String {
     use miden_air::trace::{
-        CLK_COL_IDX, CTX_COL_IDX, DECODER_TRACE_OFFSET, FMP_COL_IDX, FN_HASH_OFFSET,
-        IN_SYSCALL_COL_IDX, RANGE_CHECK_TRACE_OFFSET, STACK_TRACE_OFFSET,
+        CLK_COL_IDX, CTX_COL_IDX, DECODER_TRACE_OFFSET, FN_HASH_OFFSET, RANGE_CHECK_TRACE_OFFSET,
+        STACK_TRACE_OFFSET,
         decoder::{
             ADDR_COL_IDX, GROUP_COUNT_COL_IDX, HASHER_STATE_OFFSET, IN_SPAN_COL_IDX,
             NUM_HASHER_COLUMNS, NUM_OP_BATCH_FLAGS, NUM_OP_BITS, NUM_OP_BITS_EXTRA_COLS,
@@ -769,9 +771,7 @@ pub fn get_column_name(col_idx: usize) -> String {
     match col_idx {
         // System columns
         CLK_COL_IDX => "clk".to_string(),
-        FMP_COL_IDX => "fmp".to_string(),
         CTX_COL_IDX => "ctx".to_string(),
-        IN_SYSCALL_COL_IDX => "in_syscall".to_string(),
         i if (FN_HASH_OFFSET..FN_HASH_OFFSET + 4).contains(&i) => {
             format!("fn_hash[{}]", i - FN_HASH_OFFSET)
         },

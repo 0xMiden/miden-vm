@@ -164,9 +164,6 @@ impl Air for ProcessorAir {
         let mut result = vec![Assertion::single(CLK_COL_IDX, 0, ZERO)];
 
         if IS_FULL_CONSTRAINT_SET {
-            // first value of fmp is 2^30
-            result.push(Assertion::single(FMP_COL_IDX, 0, Felt::new(2u64.pow(30))));
-
             // add initial assertions for the stack.
             stack::get_assertions_first_step(&mut result, &*self.stack_inputs);
 

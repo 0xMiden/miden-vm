@@ -20,18 +20,16 @@ pub const MIN_TRACE_LEN: usize = 64;
 // ------------------------------------------------------------------------------------------------
 
 //      system          decoder           stack      range checks       chiplets
-//    (8 columns)     (24 columns)    (19 columns)    (2 columns)     (20 columns)
+//    (6 columns)     (24 columns)    (19 columns)    (2 columns)     (20 columns)
 // ├───────────────┴───────────────┴───────────────┴───────────────┴─────────────────┤
 
 pub const SYS_TRACE_OFFSET: usize = 0;
-pub const SYS_TRACE_WIDTH: usize = 8;
+pub const SYS_TRACE_WIDTH: usize = 6;
 pub const SYS_TRACE_RANGE: Range<usize> = range(SYS_TRACE_OFFSET, SYS_TRACE_WIDTH);
 
 pub const CLK_COL_IDX: usize = SYS_TRACE_OFFSET;
-pub const FMP_COL_IDX: usize = SYS_TRACE_OFFSET + 1;
-pub const CTX_COL_IDX: usize = SYS_TRACE_OFFSET + 2;
-pub const IN_SYSCALL_COL_IDX: usize = SYS_TRACE_OFFSET + 3;
-pub const FN_HASH_OFFSET: usize = SYS_TRACE_OFFSET + 4;
+pub const CTX_COL_IDX: usize = SYS_TRACE_OFFSET + 1;
+pub const FN_HASH_OFFSET: usize = SYS_TRACE_OFFSET + 2;
 pub const FN_HASH_RANGE: Range<usize> = range(FN_HASH_OFFSET, 4);
 
 // decoder trace

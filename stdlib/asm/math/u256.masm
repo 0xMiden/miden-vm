@@ -248,29 +248,29 @@ end
 #! where c = (a * b) % 2^256, and a0, b0, and c0 are least significant 32-bit limbs of a, b, and c respectively.
 export.mul_unsafe.24
     # Memory storing setup
-    loc_storew.0
+    loc_storew_be.0
     dropw
     # b[5-8] at 0
-    loc_storew.4
+    loc_storew_be.4
     # b[0-4] at 1
     push.0 dropw
     # b[0] at top of stack, followed by a[0-7]
     movdn.8
-    loc_storew.8
+    loc_storew_be.8
     # a[0-4] at 2
     swapw
-    loc_storew.12
+    loc_storew_be.12
     # a[5-8] at 3
     padw
-    loc_storew.16
-    loc_storew.20
+    loc_storew_be.16
+    loc_storew_be.20
     # p at 4 and 5
 
     # b[0]
     dropw
     swapw
     push.0.0.0.0
-    loc_loadw.16
+    loc_loadw_be.16
     movdnw.2
     movup.12
 
@@ -279,10 +279,10 @@ export.mul_unsafe.24
     movdn.9
     movdn.9
     swapw
-    loc_storew.16
+    loc_storew_be.16
     dropw
     push.0.0.0.0
-    loc_loadw.20
+    loc_loadw_be.20
     swapw
     movup.9
     movup.9
@@ -315,21 +315,21 @@ export.mul_unsafe.24
     exec.mulstep
 
     drop
-    loc_storew.20
+    loc_storew_be.20
     dropw
 
     # b[1]
     push.0.0.0.0
-    loc_loadw.16
+    loc_loadw_be.16
     push.0.0.0.0
-    loc_loadw.20
+    loc_loadw_be.20
     movup.7
     dropw
     push.0.0.0.0
-    loc_loadw.12 push.0.0.0.0
-    loc_loadw.8 # load the xs
+    loc_loadw_be.12 push.0.0.0.0
+    loc_loadw_be.8 # load the xs
     push.0.0.0.0
-    loc_loadw.4
+    loc_loadw_be.4
     movup.2
     movdn.3
     push.0 dropw # only need b[1]
@@ -341,15 +341,15 @@ export.mul_unsafe.24
     swapw
     movdn.3
     push.0.0.0.0
-    loc_loadw.16
+    loc_loadw_be.16
     push.0 dropw # only need p[0]
     movdn.3
     # save p[0-3] to memory, not needed any more
-    loc_storew.16
+    loc_storew_be.16
     dropw
 
     push.0.0.0.0
-    loc_loadw.20
+    loc_loadw_be.20
     movup.3
     drop
     swapw
@@ -379,22 +379,22 @@ export.mul_unsafe.24
     drop
     swap
     drop
-    loc_storew.20
+    loc_storew_be.20
     dropw
 
     # b[2]
     push.0.0.0.0
-    loc_loadw.16
+    loc_loadw_be.16
     push.0.0.0.0
-    loc_loadw.20
+    loc_loadw_be.20
     movup.7
     movup.7
     dropw
     push.0.0.0.0
-    loc_loadw.12 push.0.0.0.0
-    loc_loadw.8 # load the xs
+    loc_loadw_be.12 push.0.0.0.0
+    loc_loadw_be.8 # load the xs
     push.0.0.0.0
-    loc_loadw.4
+    loc_loadw_be.4
     swap
     movdn.3
     push.0 dropw # only need b[1]
@@ -407,15 +407,15 @@ export.mul_unsafe.24
     movdn.3
     movdn.3
     push.0.0.0.0
-    loc_loadw.16
+    loc_loadw_be.16
     drop drop
     movdn.3
     movdn.3
-    loc_storew.16
+    loc_storew_be.16
     dropw
 
     push.0.0.0.0
-    loc_loadw.20
+    loc_loadw_be.20
     movup.3
     movup.3
     drop
@@ -440,23 +440,23 @@ export.mul_unsafe.24
     swap drop
     movdn.3
     drop drop drop
-    loc_storew.20
+    loc_storew_be.20
     dropw
 
     # b[3]
     push.0.0.0.0
-    loc_loadw.16
+    loc_loadw_be.16
     push.0.0.0.0
-    loc_loadw.20
+    loc_loadw_be.20
 
     movup.7 movup.7 movup.7
     dropw
     push.0.0.0.0
-    loc_loadw.12 push.0.0.0.0
-    loc_loadw.8
+    loc_loadw_be.12 push.0.0.0.0
+    loc_loadw_be.8
 
     push.0.0.0.0
-    loc_loadw.4
+    loc_loadw_be.4
     movdn.3
     push.0 dropw
 
@@ -468,14 +468,14 @@ export.mul_unsafe.24
     swapw
     movup.3
     push.0.0.0.0
-    loc_loadw.16
+    loc_loadw_be.16
     drop
     movup.3
 
-    loc_storew.16
+    loc_storew_be.16
     dropw
     push.0.0.0.0
-    loc_loadw.20
+    loc_loadw_be.20
     movdn.3
     push.0 dropw
     swapw
@@ -494,12 +494,12 @@ export.mul_unsafe.24
 
     # b[4]
     push.0.0.0.0
-    loc_loadw.12 push.0.0.0.0
-    loc_loadw.8 # load the xs
+    loc_loadw_be.12 push.0.0.0.0
+    loc_loadw_be.8 # load the xs
     # OPTIM: don't need a[4-7], but can't use mulstep4 if we don't load
 
     push.0.0.0.0
-    loc_loadw.0
+    loc_loadw_be.0
     push.0 dropw # b[4]
 
     exec.mulstep4
@@ -507,9 +507,9 @@ export.mul_unsafe.24
 
     # b[5]
     push.0.0.0.0
-    loc_loadw.12
+    loc_loadw_be.12
     push.0.0.0.0
-    loc_loadw.0
+    loc_loadw_be.0
     movup.2 movdn.3
     push.0 dropw
     movup.7
@@ -537,9 +537,9 @@ export.mul_unsafe.24
 
     # b[6]
     push.0.0.0.0
-    loc_loadw.12
+    loc_loadw_be.12
     push.0.0.0.0
-    loc_loadw.0
+    loc_loadw_be.0
     swap
     movdn.3
     push.0 dropw
@@ -561,9 +561,9 @@ export.mul_unsafe.24
 
     # b[7]
     push.0.0.0.0
-    loc_loadw.12
+    loc_loadw_be.12
     push.0.0.0.0
-    loc_loadw.0
+    loc_loadw_be.0
 
     movdn.3 push.0 dropw
     movup.4
@@ -576,6 +576,6 @@ export.mul_unsafe.24
     drop drop drop
 
     push.0.0.0.0
-    loc_loadw.16
+    loc_loadw_be.16
     swapw
 end

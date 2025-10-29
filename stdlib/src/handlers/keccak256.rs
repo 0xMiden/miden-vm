@@ -27,17 +27,15 @@ use alloc::{vec, vec::Vec};
 use core::array;
 
 use miden_core::{
-    EventId, Felt, Word, ZERO,
+    EventName, Felt, Word, ZERO,
     precompile::{PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileVerifier},
 };
 use miden_crypto::hash::{keccak::Keccak256, rpo::Rpo256};
 use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessState};
 
-/// Qualified event name for the `hash_memory` event.
-pub const KECCAK_HASH_MEMORY_EVENT_NAME: &str = "stdlib::hash::keccak256::hash_memory";
-/// Constant Event ID for the `hash_memory` event, derived via
-/// `EventId::from_name(KECCAK_HASH_MEMORY_EVENT_NAME)`
-pub const KECCAK_HASH_MEMORY_EVENT_ID: EventId = EventId::from_u64(5779517439479051634);
+/// Event name for the keccak256 hash_memory operation.
+pub const KECCAK_HASH_MEMORY_EVENT_NAME: EventName =
+    EventName::new("stdlib::hash::keccak256::hash_memory");
 
 pub struct KeccakPrecompile;
 
@@ -288,10 +286,10 @@ impl KeccakPreimage {
     }
 
     /// Returns the tag used to identify the commitment to the precompile. defined as
-    /// `[KECCAK_HASH_MEMORY_EVENT_ID, preimage_u8.len(), 0, 0]`.
+    /// `[event_id, preimage_u8.len(), 0, 0]` where event_id is computed from the event name.
     fn precompile_tag(&self) -> Word {
         [
-            KECCAK_HASH_MEMORY_EVENT_ID.as_felt(),
+            KECCAK_HASH_MEMORY_EVENT_NAME.to_event_id().as_felt(),
             Felt::new(self.as_ref().len() as u64),
             ZERO,
             ZERO,
@@ -302,7 +300,8 @@ impl KeccakPreimage {
 
 impl From<KeccakPreimage> for PrecompileRequest {
     fn from(preimage: KeccakPreimage) -> Self {
-        PrecompileRequest::new(KECCAK_HASH_MEMORY_EVENT_ID, preimage.into_inner())
+        let event_id = KECCAK_HASH_MEMORY_EVENT_NAME.to_event_id();
+        PrecompileRequest::new(event_id, preimage.into_inner())
     }
 }
 
@@ -350,12 +349,6 @@ pub enum KeccakError {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_event_id() {
-        let expected_event_id = EventId::from_name(KECCAK_HASH_MEMORY_EVENT_NAME);
-        assert_eq!(KECCAK_HASH_MEMORY_EVENT_ID, expected_event_id);
-    }
 
     // KECCAK FELT DIGEST TESTS
     // ============================================================================================

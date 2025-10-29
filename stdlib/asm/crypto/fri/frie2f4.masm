@@ -330,7 +330,7 @@ proc.verify_64.4
 
     # store [query_ptr, layer_ptr, rem_ptr, g] to keep track of all queries
     # (3 cycles)
-    loc_storew.0
+    loc_storew_be.0
 
     # [(query_ptr == layer_ptr), query_ptr, layer_ptr, rem_ptr, g]
     # (4 cycles)
@@ -358,9 +358,9 @@ proc.verify_64.4
         # => [x, x, x, x, x, x, x, x, x, x, x, x, g, ...]
         dropw drop
         # => [x, x, x, x, x, x, x, g, ...]
-        loc_loadw.0   # load [query_ptr, layer_ptr, rem_ptr, g]
+        loc_loadw_be.0   # load [query_ptr, layer_ptr, rem_ptr, g]
         add.4
-        loc_storew.0  # store [query_ptr + 4, layer_ptr, rem_ptr, g]
+        loc_storew_be.0  # store [query_ptr + 4, layer_ptr, rem_ptr, g]
         swapw
         # => [x, x, x, x, query_ptr + 4, layer_ptr, rem_ptr, g, ...]
         dup.5
@@ -408,7 +408,7 @@ proc.verify_128.4
 
     # store [query_ptr, layer_ptr, rem_ptr, g] to keep track of all queries
     # (3 cycles)
-    loc_storew.0
+    loc_storew_be.0
 
     # [(query_ptr == layer_ptr), query_ptr, layer_ptr, rem_ptr, g]
     # (4 cycles)
@@ -436,9 +436,9 @@ proc.verify_128.4
         # => [x, x, x, x, x, x, x, x, x, x, x, x, g, ...]
         dropw drop
         # => [x, x, x, x, x, x, x, g, ...]
-        loc_loadw.0   # load [query_ptr, layer_ptr, rem_ptr, g]
+        loc_loadw_be.0   # load [query_ptr, layer_ptr, rem_ptr, g]
         add.4
-        loc_storew.0  # store [query_ptr + 4, layer_ptr, rem_ptr, g]
+        loc_storew_be.0  # store [query_ptr + 4, layer_ptr, rem_ptr, g]
         swapw
         # => [x, x, x, x, query_ptr + 4, layer_ptr, rem_ptr, g, ...]
         dup.5

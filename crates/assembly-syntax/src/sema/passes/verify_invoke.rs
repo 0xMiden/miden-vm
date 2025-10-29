@@ -87,10 +87,6 @@ impl VisitMut for VerifyInvokeTargets<'_> {
         result
     }
     fn visit_mut_syscall(&mut self, target: &mut InvocationTarget) -> ControlFlow<()> {
-        if self.module.is_in_kernel() {
-            self.analyzer
-                .error(SemanticAnalysisError::SyscallInKernel { span: target.span() });
-        }
         match target {
             // Syscalls to a local name will be rewritten to refer to implicit exports of the
             // kernel module.
@@ -126,9 +122,6 @@ impl VisitMut for VerifyInvokeTargets<'_> {
         ControlFlow::Continue(())
     }
     fn visit_mut_call(&mut self, target: &mut InvocationTarget) -> ControlFlow<()> {
-        if self.module.is_in_kernel() {
-            self.analyzer.error(SemanticAnalysisError::CallInKernel { span: target.span() });
-        }
         self.visit_mut_invoke_target(target)?;
         self.invoked.insert(Invoke::new(InvokeKind::Call, target.clone()));
         ControlFlow::Continue(())

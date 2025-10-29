@@ -1,8 +1,8 @@
 use core::ops::ControlFlow;
 
 use miden_air::trace::{
-    CLK_COL_IDX, CTX_COL_IDX, DECODER_TRACE_OFFSET, FMP_COL_IDX, FN_HASH_OFFSET,
-    IN_SYSCALL_COL_IDX, STACK_TRACE_OFFSET, SYS_TRACE_WIDTH,
+    CLK_COL_IDX, CTX_COL_IDX, DECODER_TRACE_OFFSET, FN_HASH_OFFSET, STACK_TRACE_OFFSET,
+    SYS_TRACE_WIDTH,
     decoder::{
         ADDR_COL_IDX, GROUP_COUNT_COL_IDX, HASHER_STATE_OFFSET, IN_SPAN_COL_IDX,
         NUM_OP_BATCH_FLAGS, NUM_OP_BITS, OP_BATCH_FLAGS_OFFSET, OP_BITS_EXTRA_COLS_OFFSET,
@@ -89,13 +89,7 @@ impl CoreTraceFragmentGenerator {
         let mut new_system_rows = [ZERO; SYS_TRACE_WIDTH];
 
         new_system_rows[CLK_COL_IDX] = Felt::from(self.context.state.system.clk + 1); // clk
-        new_system_rows[FMP_COL_IDX] = self.context.state.system.fmp; // fmp
         new_system_rows[CTX_COL_IDX] = Felt::from(self.context.state.system.ctx); // ctx
-        new_system_rows[IN_SYSCALL_COL_IDX] = if self.context.state.system.in_syscall {
-            ONE
-        } else {
-            ZERO
-        }; // in_syscall flag
         new_system_rows[FN_HASH_OFFSET] = self.context.state.system.fn_hash[0]; // fn_hash[0]
         new_system_rows[FN_HASH_OFFSET + 1] = self.context.state.system.fn_hash[1]; // fn_hash[1]
         new_system_rows[FN_HASH_OFFSET + 2] = self.context.state.system.fn_hash[2]; // fn_hash[2]

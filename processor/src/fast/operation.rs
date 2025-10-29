@@ -160,11 +160,6 @@ impl SystemInterface for FastProcessor {
     }
 
     #[inline(always)]
-    fn in_syscall(&self) -> bool {
-        self.in_syscall
-    }
-
-    #[inline(always)]
     fn clk(&self) -> RowIndex {
         self.clk
     }
@@ -172,16 +167,6 @@ impl SystemInterface for FastProcessor {
     #[inline(always)]
     fn ctx(&self) -> ContextId {
         self.ctx
-    }
-
-    #[inline(always)]
-    fn fmp(&self) -> Felt {
-        self.fmp
-    }
-
-    #[inline(always)]
-    fn set_fmp(&mut self, new_fmp: Felt) {
-        self.fmp = new_fmp;
     }
 }
 

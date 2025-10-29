@@ -19,13 +19,13 @@ macro_rules! build_op_test {
     ($op_str:expr) => {{
         let source = format!("
 proc.truncate_stack.4
-    loc_storew.0 dropw movupw.3
+    loc_storew_be.0 dropw movupw.3
     sdepth neq.16
     while.true
         dropw movupw.3
         sdepth neq.16
     end
-    loc_loadw.0
+    loc_loadw_be.0
 end
 
 begin {} exec.truncate_stack end",
@@ -36,13 +36,13 @@ begin {} exec.truncate_stack end",
     ($op_str:expr, $($tail:tt)+) => {{
         let source = format!("
 proc.truncate_stack.4
-    loc_storew.0 dropw movupw.3
+    loc_storew_be.0 dropw movupw.3
     sdepth neq.16
     while.true
         dropw movupw.3
         sdepth neq.16
     end
-    loc_loadw.0
+    loc_loadw_be.0
 end
 
 begin {} exec.truncate_stack end",
@@ -131,7 +131,7 @@ macro_rules! build_test_by_mode {
             advice_inputs,
             in_debug_mode: $in_debug_mode,
             libraries: ::alloc::vec::Vec::default(),
-            handlers: ::alloc::collections::BTreeMap::default(),
+            handlers: ::alloc::vec::Vec::new(),
             add_modules: ::alloc::vec::Vec::default(),
         }
     }};
@@ -162,7 +162,7 @@ macro_rules! build_test_by_mode {
             advice_inputs,
             in_debug_mode: $in_debug_mode,
             libraries: ::alloc::vec::Vec::default(),
-            handlers: ::alloc::collections::BTreeMap::default(),
+            handlers: ::alloc::vec::Vec::new(),
             add_modules: ::alloc::vec::Vec::default(),
         }
     }};
@@ -198,7 +198,7 @@ macro_rules! build_test_by_mode {
             advice_inputs,
             in_debug_mode: $in_debug_mode,
             libraries: ::alloc::vec::Vec::default(),
-            handlers: ::alloc::collections::BTreeMap::default(),
+            handlers: ::alloc::vec::Vec::new(),
             add_modules: ::alloc::vec::Vec::default(),
         }
     }};
@@ -236,7 +236,7 @@ macro_rules! build_test_by_mode {
             advice_inputs,
             in_debug_mode: $in_debug_mode,
             libraries: ::alloc::vec::Vec::default(),
-            handlers: ::alloc::collections::BTreeMap::default(),
+            handlers: ::alloc::vec::Vec::new(),
             add_modules: ::alloc::vec::Vec::default(),
         }
     }};

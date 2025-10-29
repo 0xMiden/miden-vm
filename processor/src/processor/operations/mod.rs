@@ -42,8 +42,6 @@ pub(super) fn execute_sync_op(
         Operation::Assert(err_code) => {
             sys_ops::op_assert(processor, *err_code, host, current_forest, err_ctx, tracer)?
         },
-        Operation::FmpAdd => sys_ops::op_fmpadd(processor),
-        Operation::FmpUpdate => sys_ops::op_fmpupdate(processor, tracer)?,
         Operation::SDepth => sys_ops::op_sdepth(processor, tracer)?,
         Operation::Caller => sys_ops::op_caller(processor)?,
         Operation::Clk => sys_ops::op_clk(processor, tracer)?,

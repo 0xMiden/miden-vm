@@ -80,20 +80,11 @@ pub trait SystemInterface {
     /// called the currently executing procedure.
     fn caller_hash(&self) -> Word;
 
-    /// Returns true if the processor is currently executing a syscall, false otherwise.
-    fn in_syscall(&self) -> bool;
-
     /// Returns the current clock cycle.
     fn clk(&self) -> RowIndex;
 
     /// Returns the current context ID.
     fn ctx(&self) -> ContextId;
-
-    /// Returns the current value of the FMP register.
-    fn fmp(&self) -> Felt;
-
-    /// Sets the FMP register to a new value.
-    fn set_fmp(&mut self, new_fmp: Felt);
 }
 
 /// We model the stack as a slice of `Felt` values, where the top of the stack is at the last index

@@ -1391,6 +1391,7 @@ dependencies = [
  "env_logger",
  "insta",
  "log",
+ "miden-assembly",
  "miden-assembly-syntax",
  "miden-core",
  "miden-mast-package",
@@ -1483,8 +1484,9 @@ dependencies = [
 
 [[package]]
 name = "miden-crypto-derive"
-version = "0.19.0"
-source = "git+https://github.com/0xMiden/crypto.git?branch=al-aead-constructors#5ec586ce05ddf4c004608d75135687675af7b0bc"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6d3b266500c6fe3584dacc773285a6e8c70b367b7ec0316fb17632a47f98b397"
 dependencies = [
  "quote",
  "syn 2.0.106",
@@ -1746,6 +1748,7 @@ dependencies = [
  "miden-verifier",
  "num-bigint",
  "predicates",
+ "pretty_assertions",
  "rand_chacha",
  "rustyline",
  "serde",
