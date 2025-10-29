@@ -891,6 +891,7 @@ impl<'input> Token<'input> {
                 | Token::Cdrop
                 | Token::Cdropw
                 | Token::Clk
+                | Token::CryptoStream
                 | Token::Cswap
                 | Token::Cswapw
                 | Token::Debug
