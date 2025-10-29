@@ -493,20 +493,20 @@ proc.insert_single_to_multi_leaf.16
         #  8..12: K
         # 12..16: V
 
-        loc_storew.0 dropw
+        loc_storew_be.0 dropw
         # => [K, V_l, V, R]
 
         # Save K[3], as that is our index `i`.
         dup movdn.12
         # => [K, V_l, V, leaf_index, R]
 
-        loc_storew.8 dropw
+        loc_storew_be.8 dropw
         # => [V_l, V, leaf_index, R]
 
-        loc_storew.4 dropw
+        loc_storew_be.4 dropw
         # => [V, leaf_index, R]
 
-        loc_storew.12 dropw
+        loc_storew_be.12 dropw
         # => [leaf_index, R]
     else
         # => [K_l, K, V_l, V, R]
@@ -517,20 +517,20 @@ proc.insert_single_to_multi_leaf.16
         #  8..12: K_in_leaf
         # 12..16: V_in_leaf
 
-        loc_storew.8 dropw
+        loc_storew_be.8 dropw
         # => [K, V_l, V, R]
 
         # Save K[3], as that is our index `i`.
         dup movdn.12
         # => [K, V_l, V, leaf_index, R]
 
-        loc_storew.0 dropw
+        loc_storew_be.0 dropw
         # => [V_l, V, leaf_index, R]
 
-        loc_storew.12 dropw
+        loc_storew_be.12 dropw
         # => [V, leaf_index, R]
 
-        loc_storew.4 dropw
+        loc_storew_be.4 dropw
         # => [leaf_index, R]
     end
 
