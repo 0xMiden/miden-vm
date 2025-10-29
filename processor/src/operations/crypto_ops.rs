@@ -1,6 +1,6 @@
 use miden_air::trace::{
     chiplets::hasher::{HasherState, STATE_WIDTH},
-    log_precompile::STATE_CAP_RANGE,
+    log_precompile::{STATE_CAP_RANGE, STATE_R0_RANGE},
 };
 use miden_core::mast::MastForest;
 
@@ -232,7 +232,10 @@ impl Process {
         ]);
         self.pc_transcript_state = cap_next;
 
-        // Write the output to stack (top 12 elements) in reverse order: [R1, R0, CAP_NEXT].
+        // The output state is represented as 3 words [CAP_NEXT[0..3], R0[0..3], R1[0..3]].
+        // In the next row, we overwrite the top 3 words with [R1[3..0], R0[3..0], CAP_NEXT[3..0]],
+        // which is just the reversal of the original output state.
+        // This matches the semantics of hperm when writing the next hasher to the stack.
         for i in 0..STATE_WIDTH {
             self.stack.set(i, output_state[STATE_WIDTH - 1 - i]);
         }
