@@ -48,12 +48,12 @@ pub trait Processor: Sized {
     /// Returns the current precompile transcript state (sponge capacity).
     ///
     /// Used by `log_precompile` to thread the transcript across invocations.
-    fn pc_transcript_state(&self) -> PrecompileTranscriptState;
+    fn precompile_transcript_state(&self) -> PrecompileTranscriptState;
 
     /// Sets the precompile transcript state (sponge capacity) to a new value.
     ///
     /// Called by `log_precompile` after recording a new commitment.
-    fn set_pc_transcript_state(&mut self, state: PrecompileTranscriptState);
+    fn set_precompile_transcript_state(&mut self, state: PrecompileTranscriptState);
 
     /// Checks that the evaluation of an arithmetic circuit is equal to zero.
     fn op_eval_circuit(

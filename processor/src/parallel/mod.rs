@@ -1756,11 +1756,11 @@ impl Processor for CoreTraceFragmentGenerator {
         &mut self.context.replay.hasher
     }
 
-    fn pc_transcript_state(&self) -> PrecompileTranscriptState {
+    fn precompile_transcript_state(&self) -> PrecompileTranscriptState {
         self.context.state.system.pc_transcript_state
     }
 
-    fn set_pc_transcript_state(&mut self, state: PrecompileTranscriptState) {
+    fn set_precompile_transcript_state(&mut self, state: PrecompileTranscriptState) {
         self.context.state.system.pc_transcript_state = state;
     }
 

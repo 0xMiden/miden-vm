@@ -57,12 +57,12 @@ impl Processor for FastProcessor {
     }
 
     #[inline(always)]
-    fn pc_transcript_state(&self) -> PrecompileTranscriptState {
+    fn precompile_transcript_state(&self) -> PrecompileTranscriptState {
         self.pc_transcript.state()
     }
 
     #[inline(always)]
-    fn set_pc_transcript_state(&mut self, state: PrecompileTranscriptState) {
+    fn set_precompile_transcript_state(&mut self, state: PrecompileTranscriptState) {
         self.pc_transcript = PrecompileTranscript::from_state(state);
     }
 
