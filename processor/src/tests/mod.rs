@@ -718,7 +718,7 @@ fn test_diagnostic_no_mast_forest_with_procedure() {
     ";
         let uri = Uri::from("src.masm");
         let content = SourceContent::new(SourceLanguage::Masm, uri.clone(), src);
-        let source_file = source_manager.load_from_raw_parts(uri.clone(), content);
+        let source_file = source_manager.load_from_raw_parts(uri, content);
         Module::parse(
             LibraryPath::new(module_name).unwrap(),
             miden_assembly::ast::ModuleKind::Library,

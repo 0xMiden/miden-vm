@@ -198,7 +198,7 @@ pub fn read_modules_from_dir(
 
     let mut modules = BTreeMap::default();
 
-    let walker = WalkModules::new(namespace.clone(), dir)
+    let walker = WalkModules::new(namespace, dir)
         .into_diagnostic()
         .wrap_err_with(|| format!("failed to load modules from '{}'", dir.display()))?;
     for entry in walker {

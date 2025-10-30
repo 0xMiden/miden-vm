@@ -105,7 +105,7 @@ impl TestConsistencyHost {
     /// Creates a new TestConsistencyHost with a kernel forest for full consistency testing.
     pub fn with_kernel_forest(kernel_forest: Arc<MastForest>) -> Self {
         let mut store = MemMastForestStore::default();
-        store.insert(kernel_forest.clone());
+        store.insert(kernel_forest);
         Self {
             trace_collector: TraceCollector::new(),
             snapshots: BTreeMap::new(),

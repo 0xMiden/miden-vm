@@ -47,7 +47,7 @@ fn advice_map_loaded_before_execution() {
     let key = Word::new([ONE, ONE, ONE, ONE]);
     let value = vec![ONE, ONE];
 
-    let mut mast_forest = mast_forest.clone();
+    let mut mast_forest = mast_forest;
     mast_forest.advice_map_mut().insert(key, value);
     let program_with_advice_map =
         Program::new(mast_forest.into(), program_without_advice_map.entrypoint());

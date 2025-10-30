@@ -343,7 +343,7 @@ impl DefaultSourceManagerImpl {
         self.files
             .push(file_clone)
             .expect("system limit: source manager has exhausted its supply of source ids");
-        self.uris.insert(uri.clone(), id);
+        self.uris.insert(uri, id);
         file
     }
 

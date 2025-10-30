@@ -1037,7 +1037,7 @@ impl Assembler {
                         "linker failed to validate syscall correctly: {}",
                         Report::new(LinkerError::InvalidSysCallTarget {
                             span,
-                            source_file: current_source_file.clone(),
+                            source_file: current_source_file,
                             callee: proc.fully_qualified_name().clone().into(),
                         })
                     )

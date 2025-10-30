@@ -51,7 +51,7 @@ fn fri_fold4_ext2_remainder64() {
     for partial_tree in &partial_trees {
         store.extend(partial_tree.inner_nodes());
     }
-    let test = build_test!(source, &[domain_generator], &advice_stack, store, advice_map.clone());
+    let test = build_test!(source, &[domain_generator], &advice_stack, store, advice_map);
 
     test.expect_stack(&[]);
 }
@@ -99,7 +99,7 @@ fn fri_fold4_ext2_remainder128() {
     for partial_tree in &partial_trees {
         store.extend(partial_tree.inner_nodes());
     }
-    let test = build_test!(source, &[domain_generator], &advice_stack, store, advice_map.clone());
+    let test = build_test!(source, &[domain_generator], &advice_stack, store, advice_map);
 
     test.expect_stack(&[]);
 }

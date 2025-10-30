@@ -443,7 +443,7 @@ fn mast_forest_merge_external_node_reference_with_decorator() {
     let trace = Decorator::Trace(1);
 
     // Build Forest A
-    let deco = forest_a.add_decorator(trace.clone()).unwrap();
+    let deco = forest_a.add_decorator(trace).unwrap();
 
     let mut foo_node_a = block_foo();
     foo_node_a.append_before_enter(&[deco]);
@@ -512,8 +512,8 @@ fn mast_forest_merge_external_node_with_decorator() {
     let trace2 = Decorator::Trace(2);
 
     // Build Forest A
-    let deco1 = forest_a.add_decorator(trace1.clone()).unwrap();
-    let deco2 = forest_a.add_decorator(trace2.clone()).unwrap();
+    let deco1 = forest_a.add_decorator(trace1).unwrap();
+    let deco2 = forest_a.add_decorator(trace2).unwrap();
 
     let mut external_node_a = ExternalNode::new(block_foo().digest());
     external_node_a.append_before_enter(&[deco1]);
@@ -584,7 +584,7 @@ fn mast_forest_merge_external_node_and_referenced_node_have_decorators() {
     let trace2 = Decorator::Trace(2);
 
     // Build Forest A
-    let deco1_a = forest_a.add_decorator(trace1.clone()).unwrap();
+    let deco1_a = forest_a.add_decorator(trace1).unwrap();
 
     let mut external_node_a = ExternalNode::new(block_foo().digest());
     external_node_a.append_before_enter(&[deco1_a]);
@@ -594,7 +594,7 @@ fn mast_forest_merge_external_node_and_referenced_node_have_decorators() {
 
     // Build Forest B
     let mut forest_b = MastForest::new();
-    let deco2_b = forest_b.add_decorator(trace2.clone()).unwrap();
+    let deco2_b = forest_b.add_decorator(trace2).unwrap();
 
     let mut foo_node_b = block_foo();
     foo_node_b.append_before_enter(&[deco2_b]);
@@ -661,7 +661,7 @@ fn mast_forest_merge_multiple_external_nodes_with_decorator() {
 
     // Build Forest A
     let deco1_a = forest_a.add_decorator(trace1.clone()).unwrap();
-    let deco2_a = forest_a.add_decorator(trace2.clone()).unwrap();
+    let deco2_a = forest_a.add_decorator(trace2).unwrap();
 
     let mut external_node_a = ExternalNode::new(block_foo().digest());
     external_node_a.append_before_enter(&[deco1_a]);
@@ -774,8 +774,8 @@ fn mast_forest_merge_invalid_decorator_index() {
 
     // Build Forest A
     let mut forest_a = MastForest::new();
-    let deco1_a = forest_a.add_decorator(trace1.clone()).unwrap();
-    let deco2_a = forest_a.add_decorator(trace2.clone()).unwrap();
+    let deco1_a = forest_a.add_decorator(trace1).unwrap();
+    let deco2_a = forest_a.add_decorator(trace2).unwrap();
     let id_bar_a = forest_a.add_node(block_bar()).unwrap();
 
     forest_a.make_root(id_bar_a);
@@ -829,7 +829,7 @@ fn mast_forest_merge_advice_maps_collision() {
     forest_a.make_root(id_call_a);
     let key_a = Word::new([Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)]);
     let value_a = vec![ONE, ONE];
-    forest_a.advice_map_mut().insert(key_a, value_a.clone());
+    forest_a.advice_map_mut().insert(key_a, value_a);
 
     let mut forest_b = MastForest::new();
     let id_bar = forest_b.add_node(block_bar()).unwrap();
@@ -838,7 +838,7 @@ fn mast_forest_merge_advice_maps_collision() {
     // The key collides with key_a in the forest_a.
     let key_b = key_a;
     let value_b = vec![Felt::new(2), Felt::new(2)];
-    forest_b.advice_map_mut().insert(key_b, value_b.clone());
+    forest_b.advice_map_mut().insert(key_b, value_b);
 
     let err = MastForest::merge([&forest_a, &forest_b]).unwrap_err();
     assert_matches!(err, MastForestError::AdviceMapKeyCollisionOnMerge(_));

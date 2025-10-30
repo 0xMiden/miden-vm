@@ -358,7 +358,7 @@ proptest! {
     /// - If no groups available, both operation and immediate move to next batch
     #[test]
     fn test_immediate_value_placement(ops in op_non_control_sequence_strategy(50)) {
-        let (batches, _) = super::batch_and_hash_ops(ops.clone());
+        let (batches, _) = super::batch_and_hash_ops(ops);
 
         for batch in batches {
             let mut op_idx_in_group = 0;
@@ -428,7 +428,7 @@ proptest! {
         (ops, decs) in decorator_list_strategy(20)
     ) {
         // Create a basic block with the generated operations and decorators
-        let block = BasicBlockNode::new(ops.clone(), decs.clone()).unwrap();
+        let block = BasicBlockNode::new(ops, decs.clone()).unwrap();
 
         // Collect the decorators using raw_decorator_iter()
         let collected_decorators: Vec<(usize, DecoratorId)> = block.raw_decorator_iter().collect();
@@ -452,9 +452,9 @@ fn test_mast_node_error_context_decorators_iterates_all_decorators() {
     let op_deco = Decorator::Trace(2);
     let after_exit_deco = Decorator::Trace(3);
 
-    let before_enter_id = forest.add_decorator(before_enter_deco.clone()).unwrap();
-    let op_id = forest.add_decorator(op_deco.clone()).unwrap();
-    let after_exit_id = forest.add_decorator(after_exit_deco.clone()).unwrap();
+    let before_enter_id = forest.add_decorator(before_enter_deco).unwrap();
+    let op_id = forest.add_decorator(op_deco).unwrap();
+    let after_exit_id = forest.add_decorator(after_exit_deco).unwrap();
 
     // Create a basic block with all types of decorators
     let mut block = BasicBlockNode::new(operations, vec![(1, op_id)]).unwrap();
@@ -487,10 +487,10 @@ fn test_indexed_decorator_iter_excludes_before_enter_after_exit() {
     let op_deco2 = Decorator::Trace(3);
     let after_exit_deco = Decorator::Trace(4);
 
-    let before_enter_id = forest.add_decorator(before_enter_deco.clone()).unwrap();
-    let op_id1 = forest.add_decorator(op_deco1.clone()).unwrap();
-    let op_id2 = forest.add_decorator(op_deco2.clone()).unwrap();
-    let after_exit_id = forest.add_decorator(after_exit_deco.clone()).unwrap();
+    let before_enter_id = forest.add_decorator(before_enter_deco).unwrap();
+    let op_id1 = forest.add_decorator(op_deco1).unwrap();
+    let op_id2 = forest.add_decorator(op_deco2).unwrap();
+    let after_exit_id = forest.add_decorator(after_exit_deco).unwrap();
 
     // Create a basic block with all types of decorators
     let mut block = BasicBlockNode::new(operations, vec![(0, op_id1), (1, op_id2)]).unwrap();
@@ -526,8 +526,8 @@ fn test_decorator_positions() {
     let trace_deco = Decorator::Trace(42);
     let debug_deco = Decorator::Trace(999);
 
-    let trace_id = forest.add_decorator(trace_deco.clone()).unwrap();
-    let debug_id = forest.add_decorator(debug_deco.clone()).unwrap();
+    let trace_id = forest.add_decorator(trace_deco).unwrap();
+    let debug_id = forest.add_decorator(debug_deco).unwrap();
 
     // Create a basic block with complex operations
     let operations = vec![
@@ -538,8 +538,7 @@ fn test_decorator_positions() {
         Operation::Mul,
     ];
 
-    let mut block =
-        BasicBlockNode::new(operations.clone(), vec![(2, trace_id), (4, debug_id)]).unwrap();
+    let mut block = BasicBlockNode::new(operations, vec![(2, trace_id), (4, debug_id)]).unwrap();
 
     // Add before_enter and after_exit decorators
     block.append_before_enter(&[trace_id, debug_id]);

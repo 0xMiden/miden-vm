@@ -79,7 +79,7 @@ pub fn fri_prove_verify_fold4_ext2(trace_length_e: usize) -> Result<FriResult, V
     let max_degree = trace_length - 1;
     let result = verify_proof(
         proof.clone(),
-        commitments.clone(),
+        commitments,
         &evaluations,
         max_degree,
         trace_length * lde_blowup,
@@ -151,7 +151,7 @@ fn verify_proof(
 ) -> Result<((Vec<PartialMerkleTree>, AdvMap), Vec<u64>, Vec<u64>), VerifierError> {
     let mut channel = MidenFriVerifierChannel::<QuadFelt, MidenHasher>::new(
         proof,
-        commitments.clone(),
+        commitments,
         domain_size,
         options.folding_factor(),
     )
@@ -403,7 +403,7 @@ impl UnBatch<QuadFelt, MidenHasher> for MidenFriVerifierChannel<QuadFelt, MidenH
         domain_size: usize,
         layer_commitments: Vec<Word>,
     ) -> (Vec<PartialMerkleTree>, Vec<(Word, Vec<Felt>)>) {
-        let queries = self.layer_queries().clone();
+        let queries = self.layer_queries();
         let mut current_domain_size = domain_size;
         let mut positions = positions_.to_vec();
         let depth = layer_commitments.len() - 1;

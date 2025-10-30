@@ -55,7 +55,6 @@ itertools = { version = "0.14", default-features = false, features = ["use_alloc
 miden-assembly.workspace = true
 miden-utils-testing.workspace = true
 insta.workspace = true
-logtest = { version = "2.0", default-features = false }
 pretty_assertions = "1.4"
 rstest = { version = "0.26" }
 winter-fri.workspace = true

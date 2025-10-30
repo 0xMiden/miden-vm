@@ -473,7 +473,7 @@ fn decoder_p2_split_false() {
     let mut mast_forest = MastForest::new();
 
     let basic_block_1 = BasicBlockNode::new(vec![Operation::Mul], Vec::new()).unwrap();
-    let basic_block_1_id = mast_forest.add_node(basic_block_1.clone()).unwrap();
+    let basic_block_1_id = mast_forest.add_node(basic_block_1).unwrap();
 
     let basic_block_2 = BasicBlockNode::new(vec![Operation::Add], Vec::new()).unwrap();
     let basic_block_2_id = mast_forest.add_node(basic_block_2.clone()).unwrap();

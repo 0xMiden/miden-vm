@@ -635,7 +635,7 @@ mod tests {
             (8, block1_decorator3), // Decorator for Push(3) at index 8
         ];
 
-        let block1_id = builder.ensure_block(block1_ops.clone(), block1_decorators).unwrap();
+        let block1_id = builder.ensure_block(block1_ops, block1_decorators).unwrap();
 
         // Sanity check the test itself makes sense
         let block1 = builder.mast_forest[block1_id].get_basic_block().unwrap().clone();
@@ -654,7 +654,7 @@ mod tests {
             (1, block2_decorator2), // Decorator for Mul
         ]; // [push mul] [3]
 
-        let block2_id = builder.ensure_block(block2_ops.clone(), block2_decorators).unwrap();
+        let block2_id = builder.ensure_block(block2_ops, block2_decorators).unwrap();
 
         // Merge the blocks
         let merged_blocks = builder.merge_basic_blocks(&[block1_id, block2_id]).unwrap();

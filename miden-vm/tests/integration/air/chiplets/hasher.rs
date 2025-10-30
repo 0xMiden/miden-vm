@@ -26,7 +26,7 @@ fn mtree_get() {
 
     let index = 3usize;
     let (leaves, store) = init_merkle_store(&[1, 2, 3, 4, 5, 6, 7, 8]);
-    let tree = MerkleTree::new(leaves.clone()).unwrap();
+    let tree = MerkleTree::new(leaves).unwrap();
 
     let stack_inputs = [
         tree.root()[0].as_int(),
@@ -81,8 +81,8 @@ fn mtree_merge() {
 
     let leaves_a = init_merkle_store(&[1, 2, 3, 4, 5, 6, 7, 8]).0;
     let leaves_b = init_merkle_store(&[9, 10, 11, 12, 13, 14, 15, 16]).0;
-    let tree_a = MerkleTree::new(leaves_a.clone()).unwrap();
-    let tree_b = MerkleTree::new(leaves_b.clone()).unwrap();
+    let tree_a = MerkleTree::new(leaves_a).unwrap();
+    let tree_b = MerkleTree::new(leaves_b).unwrap();
     let root_a = tree_a.root();
     let root_b = tree_b.root();
     let root_merged = Rpo256::merge(&[root_a, root_b]);

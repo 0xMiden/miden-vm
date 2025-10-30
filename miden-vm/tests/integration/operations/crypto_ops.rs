@@ -217,7 +217,7 @@ fn mtree_update() {
     let tree = MerkleTree::new(leaves.clone()).unwrap();
 
     let new_node = init_merkle_leaf(9);
-    let mut new_leaves = leaves.clone();
+    let mut new_leaves = leaves;
     new_leaves[index] = new_node;
     let new_tree = MerkleTree::new(new_leaves).unwrap();
 
@@ -254,6 +254,6 @@ fn mtree_update() {
         new_tree.root()[0].as_int(),
     ];
 
-    let test = build_op_test!(asm_op, &stack_inputs, &[], store.clone());
+    let test = build_op_test!(asm_op, &stack_inputs, &[], store);
     test.expect_stack(&final_stack);
 }
