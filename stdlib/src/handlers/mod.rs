@@ -85,7 +85,9 @@ pub(crate) fn read_memory_packed_u32(
         .map_err(|_| MemoryReadError::AddressOverflow { start, len_bytes })?;
 
     // Read field elements and unpack to bytes
-    let len_padded = len_bytes.next_multiple_of(WORD_SIZE);
+    let len_padded = len_bytes
+        .checked_next_multiple_of(BYTES_PER_U32)
+        .ok_or(MemoryReadError::AddressOverflow { start, len_bytes })?;
 
     // Allocate buffer with 4-byte alignment
     let mut out = Vec::with_capacity(len_padded);
