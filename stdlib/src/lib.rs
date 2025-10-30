@@ -7,7 +7,7 @@ extern crate alloc;
 use alloc::{sync::Arc, vec, vec::Vec};
 
 use miden_assembly::{Library, mast::MastForest, utils::Deserializable};
-use miden_core::{EventId, EventName, Felt, Word, precompile::PrecompileVerifier};
+use miden_core::{EventId, EventName, Felt, Word, precompile::PrecompileVerifier, precompile_ids::SupportedPrecompile};
 use miden_processor::{EventHandler, HostLibrary};
 use miden_utils_sync::LazyLock;
 
@@ -79,8 +79,18 @@ impl StdLibrary {
 
     /// List of all `PrecompileVerifier` required to verify precompile requests.
     pub fn verifiers(&self) -> Vec<(EventId, Arc<dyn PrecompileVerifier>)> {
-        let keccak_event_id = KECCAK_HASH_MEMORY_EVENT_NAME.to_event_id();
+        let keccak_event_id = SupportedPrecompile::KeccakHashMemory.to_event_id();
         vec![(keccak_event_id, Arc::new(KeccakPrecompile))]
+    }
+
+    /// Constructs a fixed precompile verifier registry for the current VM version.
+    #[cfg(feature = "std")]
+    pub fn precompile_registry(&self) -> miden_core::precompile::PrecompileVerifierRegistry {
+        let mut reg = miden_core::precompile::PrecompileVerifierRegistry::new();
+        for (id, verifier) in self.verifiers() {
+            reg.register(id, verifier);
+        }
+        reg
     }
 }
 
