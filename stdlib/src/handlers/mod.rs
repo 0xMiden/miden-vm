@@ -145,7 +145,7 @@ pub fn bytes_to_packed_u32_felts(bytes: &[u8]) -> Vec<Felt> {
         .chunks(BYTES_PER_U32)
         .map(|chunk| {
             // Pack up to 4 bytes into a u32 in little-endian format
-            let mut packed = [0u8; WORD_SIZE];
+            let mut packed = [0u8; BYTES_PER_U32];
             packed[..chunk.len()].copy_from_slice(chunk);
             Felt::from(u32::from_le_bytes(packed))
         })
