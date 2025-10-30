@@ -40,9 +40,6 @@ impl SplitNode {
     pub const DOMAIN: Felt = Felt::new(OPCODE_SPLIT as u64);
 }
 
-/// Constructors
-impl SplitNode {}
-
 /// Public accessors
 impl SplitNode {
     /// Returns the ID of the node which is to be executed if the top of the stack is `1`.

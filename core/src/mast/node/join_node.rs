@@ -36,9 +36,6 @@ impl JoinNode {
     pub const DOMAIN: Felt = Felt::new(OPCODE_JOIN as u64);
 }
 
-/// Constructors
-impl JoinNode {}
-
 /// Public accessors
 impl JoinNode {
     /// Returns the ID of the node that is to be executed first.

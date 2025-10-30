@@ -40,9 +40,6 @@ impl LoopNode {
     pub const DOMAIN: Felt = Felt::new(OPCODE_LOOP as u64);
 }
 
-/// Constructors
-impl LoopNode {}
-
 impl LoopNode {
     /// Returns the ID of the node presenting the body of the loop.
     pub fn body(&self) -> MastNodeId {
