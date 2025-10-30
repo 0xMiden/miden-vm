@@ -9,6 +9,7 @@ use miden_processor::ProcessState;
 /// Used for converting between byte arrays and u32-packed field elements in memory.
 pub(crate) const BYTES_PER_U32: usize = size_of::<u32>();
 
+pub mod ecdsa;
 pub mod falcon_div;
 pub mod keccak256;
 pub mod smt_peek;
