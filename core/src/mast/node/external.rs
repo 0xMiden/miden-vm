@@ -33,17 +33,6 @@ pub struct ExternalNode {
     after_exit: Vec<DecoratorId>,
 }
 
-impl ExternalNode {
-    /// Returns a new [`ExternalNode`] instantiated with the specified procedure hash.
-    pub(in crate::mast) fn new(procedure_hash: Word) -> Self {
-        Self {
-            digest: procedure_hash,
-            before_enter: Vec::new(),
-            after_exit: Vec::new(),
-        }
-    }
-}
-
 impl MastNodeErrorContext for ExternalNode {
     fn decorators(&self) -> impl Iterator<Item = DecoratedOpLink> {
         self.before_enter.iter().chain(&self.after_exit).copied().enumerate()
@@ -156,16 +145,6 @@ impl MastNodeExt for ExternalNode {
         &self.after_exit
     }
 
-    /// Sets the list of decorators to be executed before this node.
-    fn append_before_enter(&mut self, decorator_ids: &[DecoratorId]) {
-        self.before_enter.extend_from_slice(decorator_ids);
-    }
-
-    /// Sets the list of decorators to be executed after this node.
-    fn append_after_exit(&mut self, decorator_ids: &[DecoratorId]) {
-        self.after_exit.extend_from_slice(decorator_ids);
-    }
-
     /// Removes all decorators from this node.
     fn remove_decorators(&mut self) {
         self.before_enter.truncate(0);
@@ -245,16 +224,6 @@ impl MastForestContributor for ExternalNodeBuilder {
             .map_err(|_| MastForestError::TooManyNodes)
     }
 
-    fn with_before_enter(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
-        self.before_enter = decorators.into();
-        self
-    }
-
-    fn with_after_exit(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
-        self.after_exit = decorators.into();
-        self
-    }
-
     fn fingerprint_for_node(
         &self,
         forest: &MastForest,
@@ -272,9 +241,64 @@ impl MastForestContributor for ExternalNodeBuilder {
         )
     }
 
-    fn remap_children(self, _remapping: &crate::mast::Remapping) -> Self {
+    fn remap_children(
+        self,
+        _remapping: &impl crate::LookupByIdx<crate::mast::MastNodeId, crate::mast::MastNodeId>,
+    ) -> Self {
         // ExternalNode has no children to remap, so return self unchanged
         self
+    }
+
+    fn with_before_enter(mut self, decorators: impl Into<Vec<crate::mast::DecoratorId>>) -> Self {
+        self.before_enter = decorators.into();
+        self
+    }
+
+    fn with_after_exit(mut self, decorators: impl Into<Vec<crate::mast::DecoratorId>>) -> Self {
+        self.after_exit = decorators.into();
+        self
+    }
+
+    fn append_before_enter(
+        &mut self,
+        decorators: impl IntoIterator<Item = crate::mast::DecoratorId>,
+    ) {
+        self.before_enter.extend(decorators);
+    }
+
+    fn append_after_exit(
+        &mut self,
+        decorators: impl IntoIterator<Item = crate::mast::DecoratorId>,
+    ) {
+        self.after_exit.extend(decorators);
+    }
+
+    fn with_digest(mut self, digest: crate::Word) -> Self {
+        self.digest = digest;
+        self
+    }
+}
+
+impl ExternalNodeBuilder {
+    /// Add this node to a forest using relaxed validation.
+    ///
+    /// This method is used during deserialization where nodes may reference child nodes
+    /// that haven't been added to the forest yet. The child node IDs have already been
+    /// validated against the expected final node count during the `try_into_mast_node_builder`
+    /// step, so we can safely skip validation here.
+    ///
+    /// Note: This is not part of the `MastForestContributor` trait because it's only
+    /// intended for internal use during deserialization.
+    ///
+    /// For ExternalNode, this is equivalent to the normal `add_to_forest` since external nodes
+    /// don't have child nodes to validate.
+    pub(in crate::mast) fn add_to_forest_relaxed(
+        self,
+        forest: &mut MastForest,
+    ) -> Result<MastNodeId, MastForestError> {
+        // ExternalNode doesn't have child dependencies, so relaxed validation is the same
+        // as normal validation. We delegate to the normal method for consistency.
+        self.add_to_forest(forest)
     }
 }
 

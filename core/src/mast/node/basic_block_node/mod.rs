@@ -107,7 +107,8 @@ impl BasicBlockNode {
     ///
     /// Returns an error if:
     /// - `operations` vector is empty.
-    pub(in crate::mast) fn new(
+    #[cfg(any(test, feature = "arbitrary"))]
+    pub(crate) fn new(
         operations: Vec<Operation>,
         decorators: DecoratorList,
     ) -> Result<Self, MastForestError> {
@@ -144,24 +145,6 @@ impl BasicBlockNode {
             .into_iter()
             .map(|(raw_idx, dec_id)| (raw_idx + raw2pad[raw_idx], dec_id))
             .collect()
-    }
-
-    /// Returns a new [`BasicBlockNode`] from values that are assumed to be correct.
-    /// Should only be used when the source of the inputs is trusted (e.g. deserialization).
-    pub(in crate::mast) fn new_unsafe(
-        operations: Vec<Operation>,
-        decorators: DecoratorList,
-        digest: Word,
-    ) -> Self {
-        assert!(!operations.is_empty());
-        let op_batches = batch_ops(operations);
-        Self {
-            op_batches,
-            digest,
-            decorators,
-            before_enter: Vec::new(),
-            after_exit: Vec::new(),
-        }
     }
 }
 
@@ -225,6 +208,14 @@ impl BasicBlockNode {
         )
     }
 
+    /// Returns only the raw op-indexed decorators (without before_enter/after_exit)
+    /// with indices based on raw operations.
+    ///
+    /// This is used for serialization to store decorators with raw operation indices.
+    pub fn raw_op_indexed_decorators(&self) -> Vec<(usize, DecoratorId)> {
+        RawDecoratorOpLinkIterator::new(&[], &self.decorators, &[], &self.op_batches).collect()
+    }
+
     /// Returns an iterator over the operations in the order in which they appear in the program.
     pub fn operations(&self) -> impl Iterator<Item = &Operation> {
         self.op_batches.iter().flat_map(|batch| batch.ops())
@@ -250,16 +241,6 @@ impl BasicBlockNode {
     /// the program.
     pub fn iter(&self) -> impl Iterator<Item = OperationOrDecorator<'_>> {
         OperationOrDecoratorIterator::new(self)
-    }
-}
-
-//-------------------------------------------------------------------------------------------------
-/// Mutators
-impl BasicBlockNode {
-    /// Used to initialize decorators for the [`BasicBlockNode`]. Replaces the existing decorators
-    /// with the given ['DecoratorList'].
-    pub(in crate::mast) fn set_decorators(&mut self, decorator_list: DecoratorList) {
-        self.decorators = decorator_list;
     }
 }
 
@@ -308,16 +289,6 @@ impl MastNodeExt for BasicBlockNode {
 
     fn after_exit(&self) -> &[DecoratorId] {
         &self.after_exit
-    }
-
-    /// Sets the provided list of decorators to be executed before this node.
-    fn append_before_enter(&mut self, decorator_ids: &[DecoratorId]) {
-        self.before_enter.extend_from_slice(decorator_ids);
-    }
-
-    /// Sets the provided list of decorators to be executed after this node.
-    fn append_after_exit(&mut self, decorator_ids: &[DecoratorId]) {
-        self.after_exit.extend_from_slice(decorator_ids);
     }
 
     /// Removes all decorators from this node.
@@ -742,7 +713,7 @@ pub(crate) fn validate_decorators(operations_len: usize, decorators: &DecoratorL
         for i in 0..(decorators.len() - 1) {
             debug_assert!(decorators[i + 1].0 >= decorators[i].0, "unsorted decorators list");
         }
-        // assert the last index in decorator list is less than operations vector length
+        // assert the last index in decorator list is less than or equal to operations vector length
         debug_assert!(
             operations_len >= decorators.last().expect("empty decorators list").0,
             "last op index in decorator list should be less than or equal to the number of ops"
@@ -942,6 +913,7 @@ pub struct BasicBlockNodeBuilder {
     decorators: DecoratorList,
     before_enter: Vec<DecoratorId>,
     after_exit: Vec<DecoratorId>,
+    digest: Option<Word>,
 }
 
 impl BasicBlockNodeBuilder {
@@ -952,7 +924,14 @@ impl BasicBlockNodeBuilder {
             decorators,
             before_enter: Vec::new(),
             after_exit: Vec::new(),
+            digest: None,
         }
+    }
+
+    /// Used to initialize decorators for the [`BasicBlockNodeBuilder`]. Replaces the existing
+    /// decorators with the given ['DecoratorList'].
+    pub(crate) fn set_decorators(&mut self, decorators: DecoratorList) {
+        self.decorators = decorators;
     }
 
     /// Builds the BasicBlockNode with the specified decorators.
@@ -965,10 +944,13 @@ impl BasicBlockNodeBuilder {
         #[cfg(debug_assertions)]
         validate_decorators(self.operations.len(), &self.decorators);
 
-        let (op_batches, digest) = batch_and_hash_ops(self.operations);
+        let (op_batches, computed_digest) = batch_and_hash_ops(self.operations);
         // the prior line may have inserted some padding Noops in the op_batches
         // the decorator mapping should still point to the correct operation when that happens
         let reflowed_decorators = BasicBlockNode::adjust_decorators(self.decorators, &op_batches);
+
+        // Use the forced digest if provided, otherwise use the computed digest
+        let digest = self.digest.unwrap_or(computed_digest);
 
         Ok(BasicBlockNode {
             op_batches,
@@ -977,6 +959,29 @@ impl BasicBlockNodeBuilder {
             before_enter: self.before_enter,
             after_exit: self.after_exit,
         })
+    }
+}
+
+impl BasicBlockNodeBuilder {
+    /// Add this node to a forest using relaxed validation.
+    ///
+    /// This method is used during deserialization where nodes may reference child nodes
+    /// that haven't been added to the forest yet. The child node IDs have already been
+    /// validated against the expected final node count during the `try_into_mast_node_builder`
+    /// step, so we can safely skip validation here.
+    ///
+    /// Note: This is not part of the `MastForestContributor` trait because it's only
+    /// intended for internal use during deserialization.
+    ///
+    /// For BasicBlockNode, this is equivalent to the normal `add_to_forest` since basic blocks
+    /// don't have child nodes to validate.
+    pub(in crate::mast) fn add_to_forest_relaxed(
+        self,
+        forest: &mut MastForest,
+    ) -> Result<MastNodeId, MastForestError> {
+        // BasicBlockNode doesn't have child dependencies, so relaxed validation is the same
+        // as normal validation. We delegate to the normal method for consistency.
+        self.add_to_forest(forest)
     }
 }
 
@@ -996,8 +1001,9 @@ impl MastForestContributor for BasicBlockNodeBuilder {
         // For BasicBlockNode, we need to implement custom logic because BasicBlock has special
         // decorator handling with operation indices that other nodes don't have
 
-        // Compute digest
-        let (op_batches, digest) = batch_and_hash_ops(self.operations.clone());
+        // Compute digest - use forced digest if available, otherwise compute normally
+        let (op_batches, computed_digest) = batch_and_hash_ops(self.operations.clone());
+        let digest = self.digest.unwrap_or(computed_digest);
 
         // Hash before_enter decorators first
         let mut bytes_to_hash = Vec::new();
@@ -1049,7 +1055,10 @@ impl MastForestContributor for BasicBlockNodeBuilder {
         }
     }
 
-    fn remap_children(self, _remapping: &crate::mast::Remapping) -> Self {
+    fn remap_children(
+        self,
+        _remapping: &impl crate::LookupByIdx<crate::mast::MastNodeId, crate::mast::MastNodeId>,
+    ) -> Self {
         // BasicBlockNode has no children to remap
         self
     }
@@ -1061,6 +1070,25 @@ impl MastForestContributor for BasicBlockNodeBuilder {
 
     fn with_after_exit(mut self, decorators: impl Into<Vec<crate::mast::DecoratorId>>) -> Self {
         self.after_exit = decorators.into();
+        self
+    }
+
+    fn append_before_enter(
+        &mut self,
+        decorators: impl IntoIterator<Item = crate::mast::DecoratorId>,
+    ) {
+        self.before_enter.extend(decorators);
+    }
+
+    fn append_after_exit(
+        &mut self,
+        decorators: impl IntoIterator<Item = crate::mast::DecoratorId>,
+    ) {
+        self.after_exit.extend(decorators);
+    }
+
+    fn with_digest(mut self, digest: crate::Word) -> Self {
+        self.digest = Some(digest);
         self
     }
 }

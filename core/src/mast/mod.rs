@@ -99,16 +99,6 @@ impl MastForest {
         self.decorators.push(decorator).map_err(|_| MastForestError::TooManyDecorators)
     }
 
-    /// Adds a node to the forest, and returns the associated [`MastNodeId`].
-    ///
-    /// Adding two duplicate nodes will result in two distinct returned [`MastNodeId`]s.
-    pub(crate) fn add_node(
-        &mut self,
-        node: impl Into<MastNode>,
-    ) -> Result<MastNodeId, MastForestError> {
-        self.nodes.push(node.into()).map_err(|_| MastForestError::TooManyNodes)
-    }
-
     /// Marks the given [`MastNodeId`] as being the root of a procedure.
     ///
     /// If the specified node is already marked as a root, this will have no effect.
@@ -146,14 +136,6 @@ impl MastForest {
         self.remap_and_add_nodes(retained_nodes, &id_remappings);
         self.remap_and_add_roots(old_root_ids, &id_remappings);
         id_remappings
-    }
-
-    pub fn append_before_enter(&mut self, node_id: MastNodeId, decorator_ids: &[DecoratorId]) {
-        self[node_id].append_before_enter(decorator_ids)
-    }
-
-    pub fn append_after_exit(&mut self, node_id: MastNodeId, decorator_ids: &[DecoratorId]) {
-        self[node_id].append_after_exit(decorator_ids)
     }
 
     /// Removes all decorators from this MAST forest.
@@ -598,13 +580,20 @@ impl DecoratorId {
         value: u32,
         mast_forest: &MastForest,
     ) -> Result<Self, DeserializationError> {
-        if (value as usize) < mast_forest.decorators.len() {
+        Self::from_u32_bounded(value, mast_forest.decorators.len())
+    }
+
+    /// Returns a new `DecoratorId` with the provided inner value, or an error if the provided
+    /// `value` is greater than or equal to `bound`.
+    ///
+    /// For use in deserialization when the bound is known without needing the full MastForest.
+    pub fn from_u32_bounded(value: u32, bound: usize) -> Result<Self, DeserializationError> {
+        if (value as usize) < bound {
             Ok(Self(value))
         } else {
             Err(DeserializationError::InvalidValue(format!(
-                "Invalid deserialized MAST decorator id '{}', but only {} decorators in the forest",
-                value,
-                mast_forest.decorators.len(),
+                "Invalid deserialized MAST decorator id '{}', but allows only {} decorators",
+                value, bound,
             )))
         }
     }

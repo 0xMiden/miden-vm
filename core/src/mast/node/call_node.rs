@@ -47,82 +47,6 @@ impl CallNode {
 }
 
 //-------------------------------------------------------------------------------------------------
-/// Constructors
-impl CallNode {
-    /// Returns a new [`CallNode`] instantiated with the specified callee.
-    pub(in crate::mast) fn new(
-        callee: MastNodeId,
-        mast_forest: &MastForest,
-    ) -> Result<Self, MastForestError> {
-        if callee.to_usize() >= mast_forest.nodes.len() {
-            return Err(MastForestError::NodeIdOverflow(callee, mast_forest.nodes.len()));
-        }
-        let digest = {
-            let callee_digest = mast_forest[callee].digest();
-
-            hasher::merge_in_domain(&[callee_digest, Word::default()], Self::CALL_DOMAIN)
-        };
-
-        Ok(Self {
-            callee,
-            is_syscall: false,
-            digest,
-            before_enter: Vec::new(),
-            after_exit: Vec::new(),
-        })
-    }
-
-    /// Returns a new [`CallNode`] from values that are assumed to be correct.
-    /// Should only be used when the source of the inputs is trusted (e.g. deserialization).
-    pub(in crate::mast) fn new_unsafe(callee: MastNodeId, digest: Word) -> Self {
-        Self {
-            callee,
-            is_syscall: false,
-            digest,
-            before_enter: Vec::new(),
-            after_exit: Vec::new(),
-        }
-    }
-
-    /// Returns a new [`CallNode`] instantiated with the specified callee and marked as a kernel
-    /// call.
-    #[allow(dead_code)]
-    pub(in crate::mast) fn new_syscall(
-        callee: MastNodeId,
-        mast_forest: &MastForest,
-    ) -> Result<Self, MastForestError> {
-        if callee.to_usize() >= mast_forest.nodes.len() {
-            return Err(MastForestError::NodeIdOverflow(callee, mast_forest.nodes.len()));
-        }
-        let digest = {
-            let callee_digest = mast_forest[callee].digest();
-
-            hasher::merge_in_domain(&[callee_digest, Word::default()], Self::SYSCALL_DOMAIN)
-        };
-
-        Ok(Self {
-            callee,
-            is_syscall: true,
-            digest,
-            before_enter: Vec::new(),
-            after_exit: Vec::new(),
-        })
-    }
-
-    /// Returns a new syscall [`CallNode`] from values that are assumed to be correct.
-    /// Should only be used when the source of the inputs is trusted (e.g. deserialization).
-    pub(in crate::mast) fn new_syscall_unsafe(callee: MastNodeId, digest: Word) -> Self {
-        Self {
-            callee,
-            is_syscall: true,
-            digest,
-            before_enter: Vec::new(),
-            after_exit: Vec::new(),
-        }
-    }
-}
-
-//-------------------------------------------------------------------------------------------------
 /// Public accessors
 impl CallNode {
     /// Returns the ID of the node to be invoked by this call node.
@@ -279,16 +203,6 @@ impl MastNodeExt for CallNode {
         &self.after_exit
     }
 
-    /// Sets the list of decorators to be executed before this node.
-    fn append_before_enter(&mut self, decorator_ids: &[DecoratorId]) {
-        self.before_enter.extend_from_slice(decorator_ids);
-    }
-
-    /// Sets the list of decorators to be executed after this node.
-    fn append_after_exit(&mut self, decorator_ids: &[DecoratorId]) {
-        self.after_exit.extend_from_slice(decorator_ids);
-    }
-
     /// Removes all decorators from this node.
     fn remove_decorators(&mut self) {
         self.before_enter.truncate(0);
@@ -342,6 +256,7 @@ pub struct CallNodeBuilder {
     is_syscall: bool,
     before_enter: Vec<DecoratorId>,
     after_exit: Vec<DecoratorId>,
+    digest: Option<Word>,
 }
 
 impl CallNodeBuilder {
@@ -352,6 +267,7 @@ impl CallNodeBuilder {
             is_syscall: false,
             before_enter: Vec::new(),
             after_exit: Vec::new(),
+            digest: None,
         }
     }
 
@@ -362,6 +278,7 @@ impl CallNodeBuilder {
             is_syscall: true,
             before_enter: Vec::new(),
             after_exit: Vec::new(),
+            digest: None,
         }
     }
 
@@ -370,7 +287,11 @@ impl CallNodeBuilder {
         if self.callee.to_usize() >= mast_forest.nodes.len() {
             return Err(MastForestError::NodeIdOverflow(self.callee, mast_forest.nodes.len()));
         }
-        let digest = {
+
+        // Use the forced digest if provided, otherwise compute the digest
+        let digest = if let Some(forced_digest) = self.digest {
+            forced_digest
+        } else {
             let callee_digest = mast_forest[self.callee].digest();
             let domain = if self.is_syscall {
                 CallNode::SYSCALL_DOMAIN
@@ -411,8 +332,10 @@ impl MastForestContributor for CallNodeBuilder {
             &self.before_enter,
             &self.after_exit,
             &[self.callee],
-            // Compute digest the same way as in build()
-            {
+            // Use the forced digest if available, otherwise compute the digest
+            if let Some(forced_digest) = self.digest {
+                forced_digest
+            } else {
                 let callee_digest = forest[self.callee].digest();
                 let domain = if self.is_syscall {
                     CallNode::SYSCALL_DOMAIN
@@ -428,12 +351,16 @@ impl MastForestContributor for CallNodeBuilder {
         )
     }
 
-    fn remap_children(self, remapping: &crate::mast::Remapping) -> Self {
+    fn remap_children(
+        self,
+        remapping: &impl crate::LookupByIdx<crate::mast::MastNodeId, crate::mast::MastNodeId>,
+    ) -> Self {
         CallNodeBuilder {
-            callee: self.callee.remap(remapping),
+            callee: *remapping.get(self.callee).unwrap_or(&self.callee),
             is_syscall: self.is_syscall,
             before_enter: self.before_enter,
             after_exit: self.after_exit,
+            digest: self.digest,
         }
     }
 
@@ -445,6 +372,57 @@ impl MastForestContributor for CallNodeBuilder {
     fn with_after_exit(mut self, decorators: impl Into<Vec<crate::mast::DecoratorId>>) -> Self {
         self.after_exit = decorators.into();
         self
+    }
+
+    fn append_before_enter(
+        &mut self,
+        decorators: impl IntoIterator<Item = crate::mast::DecoratorId>,
+    ) {
+        self.before_enter.extend(decorators);
+    }
+
+    fn append_after_exit(
+        &mut self,
+        decorators: impl IntoIterator<Item = crate::mast::DecoratorId>,
+    ) {
+        self.after_exit.extend(decorators);
+    }
+
+    fn with_digest(mut self, digest: crate::Word) -> Self {
+        self.digest = Some(digest);
+        self
+    }
+}
+
+impl CallNodeBuilder {
+    /// Add this node to a forest using relaxed validation.
+    ///
+    /// This method is used during deserialization where nodes may reference child nodes
+    /// that haven't been added to the forest yet. The child node IDs have already been
+    /// validated against the expected final node count during the `try_into_mast_node_builder`
+    /// step, so we can safely skip validation here.
+    ///
+    /// Note: This is not part of the `MastForestContributor` trait because it's only
+    /// intended for internal use during deserialization.
+    pub(in crate::mast) fn add_to_forest_relaxed(
+        self,
+        forest: &mut MastForest,
+    ) -> Result<MastNodeId, MastForestError> {
+        // Use the forced digest if provided, otherwise use a default digest
+        // The actual digest computation will be handled when the forest is complete
+        let Some(digest) = self.digest else {
+            panic!("Digest is required for deserialization")
+        };
+
+        let node = CallNode {
+            callee: self.callee,
+            is_syscall: self.is_syscall,
+            digest,
+            before_enter: self.before_enter,
+            after_exit: self.after_exit,
+        };
+
+        forest.nodes.push(node.into()).map_err(|_| MastForestError::TooManyNodes)
     }
 }
 

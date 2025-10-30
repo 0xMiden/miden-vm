@@ -39,42 +39,6 @@ impl LoopNode {
     pub const DOMAIN: Felt = Felt::new(OPCODE_LOOP as u64);
 }
 
-/// Constructors
-impl LoopNode {
-    /// Returns a new [`LoopNode`] instantiated with the specified body node.
-    pub(in crate::mast) fn new(
-        body: MastNodeId,
-        mast_forest: &MastForest,
-    ) -> Result<Self, MastForestError> {
-        if body.to_usize() >= mast_forest.nodes.len() {
-            return Err(MastForestError::NodeIdOverflow(body, mast_forest.nodes.len()));
-        }
-        let digest = {
-            let body_hash = mast_forest[body].digest();
-
-            hasher::merge_in_domain(&[body_hash, Word::default()], Self::DOMAIN)
-        };
-
-        Ok(Self {
-            body,
-            digest,
-            before_enter: Vec::new(),
-            after_exit: Vec::new(),
-        })
-    }
-
-    /// Returns a new [`LoopNode`] from values that are assumed to be correct.
-    /// Should only be used when the source of the inputs is trusted (e.g. deserialization).
-    pub(in crate::mast) fn new_unsafe(body: MastNodeId, digest: Word) -> Self {
-        Self {
-            body,
-            digest,
-            before_enter: Vec::new(),
-            after_exit: Vec::new(),
-        }
-    }
-}
-
 impl LoopNode {
     /// Returns the ID of the node presenting the body of the loop.
     pub fn body(&self) -> MastNodeId {
@@ -187,15 +151,6 @@ impl MastNodeExt for LoopNode {
     fn after_exit(&self) -> &[DecoratorId] {
         &self.after_exit
     }
-    /// Sets the list of decorators to be executed before this node.
-    fn append_before_enter(&mut self, decorator_ids: &[DecoratorId]) {
-        self.before_enter.extend_from_slice(decorator_ids);
-    }
-
-    /// Sets the list of decorators to be executed after this node.
-    fn append_after_exit(&mut self, decorator_ids: &[DecoratorId]) {
-        self.after_exit.extend_from_slice(decorator_ids);
-    }
 
     /// Removes all decorators from this node.
     fn remove_decorators(&mut self) {
@@ -246,6 +201,7 @@ pub struct LoopNodeBuilder {
     body: MastNodeId,
     before_enter: Vec<DecoratorId>,
     after_exit: Vec<DecoratorId>,
+    digest: Option<Word>,
 }
 
 impl LoopNodeBuilder {
@@ -255,6 +211,7 @@ impl LoopNodeBuilder {
             body,
             before_enter: Vec::new(),
             after_exit: Vec::new(),
+            digest: None,
         }
     }
 
@@ -263,7 +220,11 @@ impl LoopNodeBuilder {
         if self.body.to_usize() >= mast_forest.nodes.len() {
             return Err(MastForestError::NodeIdOverflow(self.body, mast_forest.nodes.len()));
         }
-        let digest = {
+
+        // Use the forced digest if provided, otherwise compute the digest
+        let digest = if let Some(forced_digest) = self.digest {
+            forced_digest
+        } else {
             let body_hash = mast_forest[self.body].digest();
 
             hasher::merge_in_domain(&[body_hash, Word::default()], LoopNode::DOMAIN)
@@ -286,16 +247,6 @@ impl MastForestContributor for LoopNodeBuilder {
             .map_err(|_| MastForestError::TooManyNodes)
     }
 
-    fn with_before_enter(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
-        self.before_enter = decorators.into();
-        self
-    }
-
-    fn with_after_exit(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
-        self.after_exit = decorators.into();
-        self
-    }
-
     fn fingerprint_for_node(
         &self,
         forest: &MastForest,
@@ -308,8 +259,10 @@ impl MastForestContributor for LoopNodeBuilder {
             &self.before_enter,
             &self.after_exit,
             &[self.body],
-            // Compute digest the same way as in build()
-            {
+            // Use the forced digest if available, otherwise compute the digest
+            if let Some(forced_digest) = self.digest {
+                forced_digest
+            } else {
                 let body_hash = forest[self.body].digest();
 
                 crate::chiplets::hasher::merge_in_domain(
@@ -320,12 +273,76 @@ impl MastForestContributor for LoopNodeBuilder {
         )
     }
 
-    fn remap_children(self, remapping: &crate::mast::Remapping) -> Self {
+    fn remap_children(
+        self,
+        remapping: &impl crate::LookupByIdx<crate::mast::MastNodeId, crate::mast::MastNodeId>,
+    ) -> Self {
         LoopNodeBuilder {
-            body: self.body.remap(remapping),
+            body: *remapping.get(self.body).unwrap_or(&self.body),
             before_enter: self.before_enter,
             after_exit: self.after_exit,
+            digest: self.digest,
         }
+    }
+
+    fn with_before_enter(mut self, decorators: impl Into<Vec<crate::mast::DecoratorId>>) -> Self {
+        self.before_enter = decorators.into();
+        self
+    }
+
+    fn with_after_exit(mut self, decorators: impl Into<Vec<crate::mast::DecoratorId>>) -> Self {
+        self.after_exit = decorators.into();
+        self
+    }
+
+    fn append_before_enter(
+        &mut self,
+        decorators: impl IntoIterator<Item = crate::mast::DecoratorId>,
+    ) {
+        self.before_enter.extend(decorators);
+    }
+
+    fn append_after_exit(
+        &mut self,
+        decorators: impl IntoIterator<Item = crate::mast::DecoratorId>,
+    ) {
+        self.after_exit.extend(decorators);
+    }
+
+    fn with_digest(mut self, digest: crate::Word) -> Self {
+        self.digest = Some(digest);
+        self
+    }
+}
+
+impl LoopNodeBuilder {
+    /// Add this node to a forest using relaxed validation.
+    ///
+    /// This method is used during deserialization where nodes may reference child nodes
+    /// that haven't been added to the forest yet. The child node IDs have already been
+    /// validated against the expected final node count during the `try_into_mast_node_builder`
+    /// step, so we can safely skip validation here.
+    ///
+    /// Note: This is not part of the `MastForestContributor` trait because it's only
+    /// intended for internal use during deserialization.
+    pub(in crate::mast) fn add_to_forest_relaxed(
+        self,
+        forest: &mut MastForest,
+    ) -> Result<MastNodeId, MastForestError> {
+        // Use the forced digest if provided, otherwise use a default digest
+        // The actual digest computation will be handled when the forest is complete
+        let Some(digest) = self.digest else {
+            panic!("Digest is required for deserialization")
+        };
+
+        let node = LoopNode {
+            body: self.body,
+            digest,
+            before_enter: self.before_enter,
+            after_exit: self.after_exit,
+        };
+
+        forest.nodes.push(node.into()).map_err(|_| MastForestError::TooManyNodes)
     }
 }
 

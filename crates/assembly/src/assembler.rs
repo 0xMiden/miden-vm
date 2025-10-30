@@ -8,12 +8,15 @@ use miden_assembly_syntax::{
         types::FunctionType,
     },
     debuginfo::{DefaultSourceManager, SourceManager, SourceSpan, Spanned},
-    diagnostics::{RelatedLabel, Report},
+    diagnostics::{IntoDiagnostic, RelatedLabel, Report},
     library::LibraryExport,
 };
 use miden_core::{
     AssemblyOp, Decorator, Kernel, Operation, Program, Word,
-    mast::{DecoratorId, MastForestContributor, MastNodeExt, MastNodeId},
+    mast::{
+        DecoratorId, LoopNodeBuilder, MastForestContributor, MastNodeExt, MastNodeId,
+        SplitNodeBuilder,
+    },
 };
 
 use crate::{
@@ -761,7 +764,8 @@ impl Assembler {
                         } else if let Some(decorator_ids) = block_builder.drain_decorators() {
                             block_builder
                                 .mast_forest_builder_mut()
-                                .append_before_enter(node_id, &decorator_ids);
+                                .append_before_enter(node_id, decorator_ids)
+                                .into_diagnostic()?;
                         }
 
                         body_node_ids.push(node_id);
@@ -786,12 +790,9 @@ impl Assembler {
                         block_builder.mast_forest_builder_mut(),
                     )?;
 
-                    let split_node_id =
-                        block_builder.mast_forest_builder_mut().ensure_split(then_blk, else_blk)?;
+                    let mut split_builder = SplitNodeBuilder::new([then_blk, else_blk]);
                     if let Some(decorator_ids) = block_builder.drain_decorators() {
-                        block_builder
-                            .mast_forest_builder_mut()
-                            .append_before_enter(split_node_id, &decorator_ids)
+                        split_builder.append_before_enter(decorator_ids);
                     }
 
                     // Add an assembly operation decorator to the if node in debug mode.
@@ -806,10 +807,11 @@ impl Assembler {
                         let decorator_id = block_builder
                             .mast_forest_builder_mut()
                             .ensure_decorator(Decorator::AsmOp(op))?;
-                        block_builder
-                            .mast_forest_builder_mut()
-                            .append_before_enter(split_node_id, &[decorator_id]);
+                        split_builder.append_before_enter([decorator_id]);
                     }
+
+                    let split_node_id =
+                        block_builder.mast_forest_builder_mut().ensure_node(split_builder)?;
 
                     body_node_ids.push(split_node_id);
                 },
@@ -853,19 +855,15 @@ impl Assembler {
                         body_node_ids.push(basic_block_id);
                     }
 
-                    let loop_node_id = {
-                        let loop_body_node_id = self.compile_body(
-                            body.iter(),
-                            proc_ctx,
-                            None,
-                            block_builder.mast_forest_builder_mut(),
-                        )?;
-                        block_builder.mast_forest_builder_mut().ensure_loop(loop_body_node_id)?
-                    };
+                    let loop_body_node_id = self.compile_body(
+                        body.iter(),
+                        proc_ctx,
+                        None,
+                        block_builder.mast_forest_builder_mut(),
+                    )?;
+                    let mut loop_builder = LoopNodeBuilder::new(loop_body_node_id);
                     if let Some(decorator_ids) = block_builder.drain_decorators() {
-                        block_builder
-                            .mast_forest_builder_mut()
-                            .append_before_enter(loop_node_id, &decorator_ids)
+                        loop_builder.append_before_enter(decorator_ids);
                     }
 
                     // Add an assembly operation decorator to the loop node in debug mode.
@@ -880,10 +878,11 @@ impl Assembler {
                         let decorator_id = block_builder
                             .mast_forest_builder_mut()
                             .ensure_decorator(Decorator::AsmOp(op))?;
-                        block_builder
-                            .mast_forest_builder_mut()
-                            .append_before_enter(loop_node_id, &[decorator_id]);
+                        loop_builder.append_before_enter([decorator_id]);
                     }
+
+                    let loop_node_id =
+                        block_builder.mast_forest_builder_mut().ensure_node(loop_builder)?;
 
                     body_node_ids.push(loop_node_id);
                 },
@@ -920,14 +919,16 @@ impl Assembler {
                 ));
             }
 
-            mast_forest_builder.ensure_block(vec![Operation::Noop], Vec::new())?
+            mast_forest_builder.ensure_block(vec![Operation::Noop], Vec::new(), vec![], vec![])?
         } else {
             mast_forest_builder.join_nodes(body_node_ids)?
         };
 
         // Make sure that any post decorators are added at the end of the procedure body
         if let Some(post_decorator_ids) = maybe_post_decorators {
-            mast_forest_builder.append_after_exit(procedure_body_id, &post_decorator_ids);
+            mast_forest_builder
+                .append_after_exit(procedure_body_id, post_decorator_ids)
+                .into_diagnostic()?;
         }
 
         Ok(procedure_body_id)

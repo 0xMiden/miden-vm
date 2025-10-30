@@ -4,8 +4,8 @@ use proptest::prelude::*;
 pub(super) use super::arbitrary::op_non_control_sequence_strategy;
 use super::*;
 use crate::{
-    Decorator, ONE,
-    mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor},
+    Decorator, Felt, ONE, Word,
+    mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, MastNodeExt},
 };
 
 #[test]
@@ -557,12 +557,11 @@ fn test_decorator_positions() {
     ];
 
     // Create a basic block with complex operations using builder pattern
-    let mut block =
-        BasicBlockNodeBuilder::new(operations.clone(), vec![(2, trace_id), (4, debug_id)])
-            .with_before_enter(vec![trace_id, debug_id])
-            .with_after_exit(vec![trace_id])
-            .build()
-            .unwrap();
+    let block = BasicBlockNodeBuilder::new(operations.clone(), vec![(2, trace_id), (4, debug_id)])
+        .with_before_enter(vec![trace_id, debug_id])
+        .with_after_exit(vec![trace_id])
+        .build()
+        .unwrap();
 
     // Test that MastNodeErrorContext::decorators returns all decorators
     let all_decorators: Vec<_> = block.decorators().collect();
@@ -593,26 +592,6 @@ fn test_decorator_positions() {
     assert_eq!(indexed_positions, expected_indexed_positions);
     assert!(!indexed_positions.contains(&0)); // No before_enter
     assert!(!indexed_positions.contains(&5)); // No after_exit
-
-    // Test that the block preserves all decorator types after modification
-    block.append_before_enter(&[]);
-    block.append_after_exit(&[]);
-
-    let all_decorators_after_mod: Vec<_> = block.decorators().collect();
-    assert_eq!(
-        all_decorators_after_mod.len(),
-        5,
-        "Expected 5 decorators, got {:?}. All decorators: {:?}",
-        all_decorators_after_mod.len(),
-        all_decorators_after_mod.iter().collect::<Vec<_>>()
-    );
-
-    // Verify the new before_enter decorator
-    assert!(all_decorators_after_mod.iter().any(|&(_, id)| id == debug_id));
-
-    // Verify the new after_exit decorators
-    assert!(all_decorators_after_mod.iter().any(|&(_, id)| id == debug_id));
-    assert!(all_decorators_after_mod.iter().any(|&(_, id)| id == trace_id));
 }
 
 proptest! {
@@ -701,4 +680,76 @@ proptest! {
             }
         }
     }
+}
+
+// DIGEST FORCING TESTS
+// ================================================================================
+
+#[test]
+fn test_basic_block_node_digest_forcing() {
+    let operations = vec![Operation::Add, Operation::Mul];
+    let builder1 = BasicBlockNodeBuilder::new(operations.clone(), vec![]);
+
+    // Build normally
+    let node1 = builder1.build().expect("Failed to build basic block node");
+    let normal_digest = node1.digest();
+
+    // Build with forced digest
+    let forced_digest = Word::new([Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)]);
+    let builder2 = BasicBlockNodeBuilder::new(operations, vec![]).with_digest(forced_digest);
+    let node2 = builder2.build().expect("Failed to build basic block node with forced digest");
+
+    assert_ne!(normal_digest, forced_digest, "Normal and forced digests should be different");
+    assert_eq!(node2.digest(), forced_digest, "Forced digest should be used");
+}
+
+#[test]
+fn test_basic_block_digest_forcing_with_decorators() {
+    let mut forest = MastForest::new();
+    let decorator_id = forest.add_decorator(Decorator::Trace(42)).expect("Failed to add decorator");
+
+    let operations = vec![Operation::Add];
+    let forced_digest = Word::new([Felt::new(13), Felt::new(14), Felt::new(15), Felt::new(16)]);
+
+    let builder = BasicBlockNodeBuilder::new(operations, vec![])
+        .with_before_enter(vec![decorator_id])
+        .with_after_exit(vec![decorator_id])
+        .with_digest(forced_digest);
+
+    let node = builder.build().expect("Failed to build node with forced digest");
+
+    assert_eq!(node.digest(), forced_digest, "Digest should be forced");
+    assert_eq!(
+        node.before_enter(),
+        &[decorator_id],
+        "Before-enter decorators should be preserved"
+    );
+    assert_eq!(node.after_exit(), &[decorator_id], "After-exit decorators should be preserved");
+}
+
+#[test]
+fn test_basic_block_fingerprint_uses_forced_digest() {
+    let mut forest = MastForest::new();
+    let decorator_id = forest.add_decorator(Decorator::Trace(99)).expect("Failed to add decorator");
+
+    let operations = vec![Operation::Mul];
+    let forced_digest = Word::new([Felt::new(17), Felt::new(18), Felt::new(19), Felt::new(20)]);
+
+    let builder1 = BasicBlockNodeBuilder::new(operations.clone(), vec![])
+        .with_before_enter(vec![decorator_id]);
+    let builder2 = BasicBlockNodeBuilder::new(operations, vec![])
+        .with_before_enter(vec![decorator_id])
+        .with_digest(forced_digest);
+
+    let fingerprint1 = builder1
+        .fingerprint_for_node(&forest, &crate::IndexVec::new())
+        .expect("Failed to compute fingerprint1");
+    let fingerprint2 = builder2
+        .fingerprint_for_node(&forest, &crate::IndexVec::new())
+        .expect("Failed to compute fingerprint2");
+
+    assert_ne!(
+        fingerprint1, fingerprint2,
+        "Fingerprints should be different when digests differ"
+    );
 }

@@ -166,7 +166,7 @@ impl BasicBlockBuilder<'_> {
     }
 }
 
-/// Span Constructors
+/// Basic Block Constructors
 impl BasicBlockBuilder<'_> {
     /// Creates and returns a new basic block node from the operations and decorators currently in
     /// this builder.
@@ -182,7 +182,8 @@ impl BasicBlockBuilder<'_> {
             let ops = self.ops.drain(..).collect();
             let decorators = self.decorators.drain(..).collect();
 
-            let basic_block_node_id = self.mast_forest_builder.ensure_block(ops, decorators)?;
+            let basic_block_node_id =
+                self.mast_forest_builder.ensure_block(ops, decorators, vec![], vec![])?;
 
             Ok(Some(basic_block_node_id))
         } else {

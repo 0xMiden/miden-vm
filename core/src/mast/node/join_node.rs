@@ -35,46 +35,6 @@ impl JoinNode {
     pub const DOMAIN: Felt = Felt::new(OPCODE_JOIN as u64);
 }
 
-/// Constructors
-impl JoinNode {
-    /// Returns a new [`JoinNode`] instantiated with the specified children nodes.
-    pub(in crate::mast) fn new(
-        children: [MastNodeId; 2],
-        mast_forest: &MastForest,
-    ) -> Result<Self, MastForestError> {
-        let forest_len = mast_forest.nodes.len();
-        if children[0].to_usize() >= forest_len {
-            return Err(MastForestError::NodeIdOverflow(children[0], forest_len));
-        } else if children[1].to_usize() >= forest_len {
-            return Err(MastForestError::NodeIdOverflow(children[1], forest_len));
-        }
-        let digest = {
-            let left_child_hash = mast_forest[children[0]].digest();
-            let right_child_hash = mast_forest[children[1]].digest();
-
-            hasher::merge_in_domain(&[left_child_hash, right_child_hash], JoinNode::DOMAIN)
-        };
-
-        Ok(Self {
-            children,
-            digest,
-            before_enter: Vec::new(),
-            after_exit: Vec::new(),
-        })
-    }
-
-    /// Returns a new [`JoinNode`] from values that are assumed to be correct.
-    /// Should only be used when the source of the inputs is trusted (e.g. deserialization).
-    pub(in crate::mast) fn new_unsafe(children: [MastNodeId; 2], digest: Word) -> Self {
-        Self {
-            children,
-            digest,
-            before_enter: Vec::new(),
-            after_exit: Vec::new(),
-        }
-    }
-}
-
 /// Public accessors
 impl JoinNode {
     /// Returns the ID of the node that is to be executed first.
@@ -204,15 +164,6 @@ impl MastNodeExt for JoinNode {
     fn after_exit(&self) -> &[DecoratorId] {
         &self.after_exit
     }
-    /// Sets the list of decorators to be executed before this node.
-    fn append_before_enter(&mut self, decorator_ids: &[DecoratorId]) {
-        self.before_enter.extend_from_slice(decorator_ids);
-    }
-
-    /// Sets the list of decorators to be executed after this node.
-    fn append_after_exit(&mut self, decorator_ids: &[DecoratorId]) {
-        self.after_exit.extend_from_slice(decorator_ids);
-    }
 
     /// Removes all decorators from this node.
     fn remove_decorators(&mut self) {
@@ -265,6 +216,7 @@ pub struct JoinNodeBuilder {
     children: [MastNodeId; 2],
     before_enter: Vec<DecoratorId>,
     after_exit: Vec<DecoratorId>,
+    digest: Option<Word>,
 }
 
 impl JoinNodeBuilder {
@@ -274,6 +226,7 @@ impl JoinNodeBuilder {
             children,
             before_enter: Vec::new(),
             after_exit: Vec::new(),
+            digest: None,
         }
     }
 
@@ -285,7 +238,11 @@ impl JoinNodeBuilder {
         } else if self.children[1].to_usize() >= forest_len {
             return Err(MastForestError::NodeIdOverflow(self.children[1], forest_len));
         }
-        let digest = {
+
+        // Use the forced digest if provided, otherwise compute the digest
+        let digest = if let Some(forced_digest) = self.digest {
+            forced_digest
+        } else {
             let left_child_hash = mast_forest[self.children[0]].digest();
             let right_child_hash = mast_forest[self.children[1]].digest();
 
@@ -309,16 +266,6 @@ impl MastForestContributor for JoinNodeBuilder {
             .map_err(|_| MastForestError::TooManyNodes)
     }
 
-    fn with_before_enter(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
-        self.before_enter = decorators.into();
-        self
-    }
-
-    fn with_after_exit(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
-        self.after_exit = decorators.into();
-        self
-    }
-
     fn fingerprint_for_node(
         &self,
         forest: &MastForest,
@@ -331,8 +278,10 @@ impl MastForestContributor for JoinNodeBuilder {
             &self.before_enter,
             &self.after_exit,
             &self.children,
-            // Compute digest the same way as in build()
-            {
+            // Use the forced digest if available, otherwise compute the digest
+            if let Some(forced_digest) = self.digest {
+                forced_digest
+            } else {
                 let left_child_hash = forest[self.children[0]].digest();
                 let right_child_hash = forest[self.children[1]].digest();
 
@@ -344,12 +293,79 @@ impl MastForestContributor for JoinNodeBuilder {
         )
     }
 
-    fn remap_children(self, remapping: &crate::mast::Remapping) -> Self {
+    fn remap_children(
+        self,
+        remapping: &impl crate::LookupByIdx<crate::mast::MastNodeId, crate::mast::MastNodeId>,
+    ) -> Self {
         JoinNodeBuilder {
-            children: [self.children[0].remap(remapping), self.children[1].remap(remapping)],
+            children: [
+                *remapping.get(self.children[0]).unwrap_or(&self.children[0]),
+                *remapping.get(self.children[1]).unwrap_or(&self.children[1]),
+            ],
             before_enter: self.before_enter,
             after_exit: self.after_exit,
+            digest: self.digest,
         }
+    }
+
+    fn with_before_enter(mut self, decorators: impl Into<Vec<crate::mast::DecoratorId>>) -> Self {
+        self.before_enter = decorators.into();
+        self
+    }
+
+    fn with_after_exit(mut self, decorators: impl Into<Vec<crate::mast::DecoratorId>>) -> Self {
+        self.after_exit = decorators.into();
+        self
+    }
+
+    fn append_before_enter(
+        &mut self,
+        decorators: impl IntoIterator<Item = crate::mast::DecoratorId>,
+    ) {
+        self.before_enter.extend(decorators);
+    }
+
+    fn append_after_exit(
+        &mut self,
+        decorators: impl IntoIterator<Item = crate::mast::DecoratorId>,
+    ) {
+        self.after_exit.extend(decorators);
+    }
+
+    fn with_digest(mut self, digest: crate::Word) -> Self {
+        self.digest = Some(digest);
+        self
+    }
+}
+
+impl JoinNodeBuilder {
+    /// Add this node to a forest using relaxed validation.
+    ///
+    /// This method is used during deserialization where nodes may reference child nodes
+    /// that haven't been added to the forest yet. The child node IDs have already been
+    /// validated against the expected final node count during the `try_into_mast_node_builder`
+    /// step, so we can safely skip validation here.
+    ///
+    /// Note: This is not part of the `MastForestContributor` trait because it's only
+    /// intended for internal use during deserialization.
+    pub(in crate::mast) fn add_to_forest_relaxed(
+        self,
+        forest: &mut MastForest,
+    ) -> Result<MastNodeId, MastForestError> {
+        // Use the forced digest if provided, otherwise use a default digest
+        // The actual digest computation will be handled when the forest is complete
+        let Some(digest) = self.digest else {
+            panic!("Digest is required for deserialization")
+        };
+
+        let node = JoinNode {
+            children: self.children,
+            digest,
+            before_enter: self.before_enter,
+            after_exit: self.after_exit,
+        };
+
+        forest.nodes.push(node.into()).map_err(|_| MastForestError::TooManyNodes)
     }
 }
 

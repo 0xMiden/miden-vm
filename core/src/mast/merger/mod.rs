@@ -5,9 +5,9 @@ use miden_crypto::hash::blake::Blake3Digest;
 use crate::{
     DenseIdMap, IndexVec,
     mast::{
-        BasicBlockNode, CallNode, DecoratorId, DynNode, ExternalNode, JoinNode, LoopNode,
-        MastForest, MastForestError, MastNode, MastNodeFingerprint, MastNodeId,
-        MultiMastForestIteratorItem, MultiMastForestNodeIter, SplitNode, node::MastNodeExt,
+        BasicBlockNodeBuilder, DecoratorId, DynNodeBuilder, ExternalNodeBuilder, MastForest,
+        MastForestContributor, MastForestError, MastNode, MastNodeBuilder, MastNodeFingerprint,
+        MastNodeId, MultiMastForestIteratorItem, MultiMastForestNodeIter, node::MastNodeExt,
     },
 };
 
@@ -127,7 +127,7 @@ impl MastForestMerger {
         for item in iterator {
             match item {
                 MultiMastForestIteratorItem::Node { forest_idx, node_id } => {
-                    let node = &forests[forest_idx][node_id];
+                    let node = forests[forest_idx][node_id].clone();
                     self.merge_node(forest_idx, node_id, node)?;
                 },
                 MultiMastForestIteratorItem::ExternalNodeReplacement {
@@ -203,7 +203,7 @@ impl MastForestMerger {
         &mut self,
         forest_idx: usize,
         merging_id: MastNodeId,
-        node: &MastNode,
+        node: MastNode,
     ) -> Result<(), MastForestError> {
         // We need to remap the node prior to computing the MastNodeFingerprint.
         //
@@ -216,16 +216,14 @@ impl MastForestMerger {
         // will be present in the node id mapping since the DFS iteration guarantees
         // that all children of this `node` have been processed before this node and
         // their indices have been added to the mappings.
-        let remapped_node = self.remap_node(forest_idx, node)?;
+        let remapped_builder = self.build_with_remapped_children(
+            node,
+            &self.node_id_mappings[forest_idx],
+            &self.decorator_id_mappings[forest_idx],
+        )?;
 
-        let node_fingerprint = MastNodeFingerprint::from_mast_node(
-            &self.mast_forest,
-            &self.hash_by_node_id,
-            &remapped_node,
-        )
-        .expect(
-            "hash_by_node_id should contain the fingerprints of all children of `remapped_node`",
-        );
+        let node_fingerprint =
+            remapped_builder.fingerprint_for_node(&self.mast_forest, &self.hash_by_node_id)?;
 
         match self.lookup_node_by_fingerprint(&node_fingerprint) {
             Some(matching_node_id) => {
@@ -235,8 +233,8 @@ impl MastForestMerger {
             },
             None => {
                 // If no node with a matching fingerprint exists, then the merging node is
-                // unique and we can add it to the merged forest.
-                let new_node_id = self.mast_forest.add_node(remapped_node)?;
+                // unique and we can add it to the merged forest using builders.
+                let new_node_id = remapped_builder.add_to_forest(&mut self.mast_forest)?;
                 self.node_id_mappings[forest_idx].insert(merging_id, new_node_id);
 
                 // We need to update the indices with the newly inserted nodes
@@ -278,27 +276,8 @@ impl MastForestMerger {
         Ok(())
     }
 
-    /// Remaps a nodes' potentially contained children and decorators to their new IDs according to
-    /// the given maps.
-    fn remap_node(&self, forest_idx: usize, node: &MastNode) -> Result<MastNode, MastForestError> {
-        self.build_node_with_remapped_children(
-            node,
-            &self.node_id_mappings[forest_idx],
-            &self.decorator_id_mappings[forest_idx],
-        )
-    }
-
     // HELPERS
     // ================================================================================================
-
-    /// Remaps a child node ID using the node ID map, returning the original ID if not found.
-    fn remap_child(
-        &self,
-        child_id: MastNodeId,
-        nmap: &DenseIdMap<MastNodeId, MastNodeId>,
-    ) -> MastNodeId {
-        nmap.get(child_id).expect("every node id should have an entry")
-    }
 
     /// Returns the ID of the node in the merged forest that matches the given
     /// fingerprint, if any.
@@ -307,12 +286,12 @@ impl MastForestMerger {
     }
 
     /// Builds a new node with remapped children and decorators using the provided mappings.
-    fn build_node_with_remapped_children(
+    fn build_with_remapped_children(
         &self,
-        src: &MastNode,
+        src: MastNode,
         nmap: &DenseIdMap<MastNodeId, MastNodeId>,
         dmap: &DenseIdMap<DecoratorId, DecoratorId>,
-    ) -> Result<MastNode, MastForestError> {
+    ) -> Result<MastNodeBuilder, MastForestError> {
         let map_decorator_id = |decorator_id: DecoratorId| {
             dmap.get(decorator_id)
                 .ok_or_else(|| MastForestError::DecoratorIdOverflow(decorator_id, dmap.len()))
@@ -322,59 +301,72 @@ impl MastForestMerger {
             decorators.iter().copied().map(map_decorator_id).collect()
         };
 
-        let mut mapped_node: MastNode = match src {
-            MastNode::Join(join_node) => {
-                let first = self.remap_child(join_node.first(), nmap);
-                let second = self.remap_child(join_node.second(), nmap);
+        let before_enter_decorators = map_decorators(src.before_enter())?;
+        let after_exit_decorators = map_decorators(src.after_exit())?;
 
-                JoinNode::new([first, second], &self.mast_forest)
-                    .expect("JoinNode children should have been mapped to a lower index")
-                    .into()
+        let mapped_builder = match src {
+            MastNode::Join(join_node) => {
+                let builder = join_node
+                    .to_builder()
+                    .remap_children(nmap)
+                    .with_before_enter(before_enter_decorators)
+                    .with_after_exit(after_exit_decorators);
+                MastNodeBuilder::Join(builder)
             },
             MastNode::Split(split_node) => {
-                let if_branch = self.remap_child(split_node.on_true(), nmap);
-                let else_branch = self.remap_child(split_node.on_false(), nmap);
-
-                SplitNode::new([if_branch, else_branch], &self.mast_forest)
-                    .expect("SplitNode children should have been mapped to a lower index")
-                    .into()
+                let builder = split_node
+                    .to_builder()
+                    .remap_children(nmap)
+                    .with_before_enter(before_enter_decorators)
+                    .with_after_exit(after_exit_decorators);
+                MastNodeBuilder::Split(builder)
             },
             MastNode::Loop(loop_node) => {
-                let body = self.remap_child(loop_node.body(), nmap);
-                LoopNode::new(body, &self.mast_forest)
-                    .expect("LoopNode children should have been mapped to a lower index")
-                    .into()
+                let builder = loop_node
+                    .to_builder()
+                    .remap_children(nmap)
+                    .with_before_enter(before_enter_decorators)
+                    .with_after_exit(after_exit_decorators);
+                MastNodeBuilder::Loop(builder)
             },
             MastNode::Call(call_node) => {
-                let callee = self.remap_child(call_node.callee(), nmap);
-                CallNode::new(callee, &self.mast_forest)
-                    .expect("CallNode children should have been mapped to a lower index")
-                    .into()
+                let builder = call_node
+                    .to_builder()
+                    .remap_children(nmap)
+                    .with_before_enter(before_enter_decorators)
+                    .with_after_exit(after_exit_decorators);
+                MastNodeBuilder::Call(builder)
             },
-            MastNode::Block(basic_block_node) => BasicBlockNode::new(
-                basic_block_node.operations().copied().collect(),
-                basic_block_node
-                    .indexed_decorator_iter()
-                    .map(|(idx, decorator_id)| {
-                        let mapped_decorator = map_decorator_id(decorator_id)?;
-                        Ok((idx, mapped_decorator))
-                    })
-                    .collect::<Result<Vec<_>, _>>()?,
-            )
-            .expect("previously valid BasicBlockNode should still be valid")
-            .into(),
-            MastNode::Dyn(_) => DynNode::new_dyn().into(),
-            MastNode::External(external_node) => ExternalNode::new(external_node.digest()).into(),
+            MastNode::Block(basic_block_node) => {
+                let builder = BasicBlockNodeBuilder::new(
+                    basic_block_node.operations().copied().collect(),
+                    basic_block_node
+                        .indexed_decorator_iter()
+                        .map(|(idx, decorator_id)| {
+                            let mapped_decorator = map_decorator_id(decorator_id)?;
+                            Ok((idx, mapped_decorator))
+                        })
+                        .collect::<Result<Vec<_>, _>>()?,
+                )
+                .with_before_enter(before_enter_decorators)
+                .with_after_exit(after_exit_decorators);
+                MastNodeBuilder::BasicBlock(builder)
+            },
+            MastNode::Dyn(_) => {
+                let builder = DynNodeBuilder::new_dyn()
+                    .with_before_enter(before_enter_decorators)
+                    .with_after_exit(after_exit_decorators);
+                MastNodeBuilder::Dyn(builder)
+            },
+            MastNode::External(external_node) => {
+                let builder = ExternalNodeBuilder::new(external_node.digest())
+                    .with_before_enter(before_enter_decorators)
+                    .with_after_exit(after_exit_decorators);
+                MastNodeBuilder::External(builder)
+            },
         };
 
-        // Decorators must be handled specially for basic block nodes.
-        // For other node types we can handle it centrally.
-        {
-            mapped_node.append_before_enter(&map_decorators(src.before_enter())?);
-            mapped_node.append_after_exit(&map_decorators(src.after_exit())?);
-        }
-
-        Ok(mapped_node)
+        Ok(mapped_builder)
     }
 }
 
