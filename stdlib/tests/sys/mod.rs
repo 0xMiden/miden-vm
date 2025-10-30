@@ -82,9 +82,9 @@ fn log_precompile_request_procedure() {
     assert_eq!(requests[0].event_id(), event_id);
     assert_eq!(requests[0].calldata(), calldata.as_slice());
 
-    let registry = PrecompileVerifierRegistry::new()
+    let verifier_registry = PrecompileVerifierRegistry::new()
         .with_verifier(&EVENT_NAME, Arc::new(DummyLogPrecompileVerifier { commitment }));
-    let transcript = registry
+    let transcript = verifier_registry
         .requests_transcript(requests)
         .expect("failed to recompute deferred commitment");
 
