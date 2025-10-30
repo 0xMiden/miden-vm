@@ -218,6 +218,7 @@ impl MastForestMerger {
         // that all children of this `node` have been processed before this node and
         // their indices have been added to the mappings.
         let remapped_builder = self.build_with_remapped_children(
+            merging_id,
             node,
             original_forests[forest_idx],
             &self.node_id_mappings[forest_idx],
@@ -290,6 +291,7 @@ impl MastForestMerger {
     /// Builds a new node with remapped children and decorators using the provided mappings.
     fn build_with_remapped_children(
         &self,
+        merging_id: MastNodeId,
         src: MastNode,
         original_forest: &MastForest,
         nmap: &DenseIdMap<MastNodeId, MastNodeId>,
@@ -304,8 +306,13 @@ impl MastForestMerger {
             decorators.iter().copied().map(map_decorator_id).collect()
         };
 
-        let before_enter_decorators = map_decorators(src.before_enter())?;
-        let after_exit_decorators = map_decorators(src.after_exit())?;
+        // Get decorators from centralized storage instead of from the node itself
+        let before_enter_decorators = map_decorators(
+            original_forest.node_decorator_storage.get_before_decorators(merging_id),
+        )?;
+        let after_exit_decorators = map_decorators(
+            original_forest.node_decorator_storage.get_after_decorators(merging_id),
+        )?;
 
         let mapped_builder = match src {
             MastNode::Join(join_node) => {

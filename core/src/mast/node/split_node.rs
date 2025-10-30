@@ -10,7 +10,7 @@ use super::{MastForestContributor, MastNodeErrorContext, MastNodeExt};
 use crate::{
     Idx, OPCODE_SPLIT,
     chiplets::hasher,
-    mast::{DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId},
+    mast::{DecoratedOpLink, DecoratorId, DecoratorStore, MastForest, MastForestError, MastNodeId},
 };
 
 // SPLIT NODE
@@ -27,10 +27,7 @@ use crate::{
 pub struct SplitNode {
     branches: [MastNodeId; 2],
     digest: Word,
-    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Vec::is_empty"))]
-    before_enter: Vec<DecoratorId>,
-    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Vec::is_empty"))]
-    after_exit: Vec<DecoratorId>,
+    decorator_store: DecoratorStore,
 }
 
 /// Constants
@@ -55,9 +52,17 @@ impl SplitNode {
 impl MastNodeErrorContext for SplitNode {
     fn decorators<'a>(
         &'a self,
-        _forest: &'a MastForest,
+        forest: &'a MastForest,
     ) -> impl Iterator<Item = DecoratedOpLink> + 'a {
-        self.before_enter.iter().chain(&self.after_exit).copied().enumerate()
+        // Use the decorator_store for efficient O(1) decorator access
+        let before_enter = self.decorator_store.before_enter(forest);
+        let after_exit = self.decorator_store.after_exit(forest);
+
+        // Convert decorators to DecoratedOpLink tuples
+        before_enter
+            .iter()
+            .map(|&deco_id| (0, deco_id))
+            .chain(after_exit.iter().map(|&deco_id| (1, deco_id)))
     }
 }
 
@@ -90,7 +95,7 @@ impl PrettyPrint for SplitNodePrettyPrint<'_> {
         let pre_decorators = {
             let mut pre_decorators = self
                 .split_node
-                .before_enter()
+                .before_enter(self.mast_forest)
                 .iter()
                 .map(|&decorator_id| self.mast_forest[decorator_id].render())
                 .reduce(|acc, doc| acc + const_text(" ") + doc)
@@ -105,7 +110,7 @@ impl PrettyPrint for SplitNodePrettyPrint<'_> {
         let post_decorators = {
             let mut post_decorators = self
                 .split_node
-                .after_exit()
+                .after_exit(self.mast_forest)
                 .iter()
                 .map(|&decorator_id| self.mast_forest[decorator_id].render())
                 .reduce(|acc, doc| acc + const_text(" ") + doc)
@@ -155,19 +160,18 @@ impl MastNodeExt for SplitNode {
     }
 
     /// Returns the decorators to be executed before this node is executed.
-    fn before_enter(&self) -> &[DecoratorId] {
-        &self.before_enter
+    fn before_enter<'a>(&'a self, forest: &'a MastForest) -> &'a [DecoratorId] {
+        self.decorator_store.before_enter(forest)
     }
 
     /// Returns the decorators to be executed after this node is executed.
-    fn after_exit(&self) -> &[DecoratorId] {
-        &self.after_exit
+    fn after_exit<'a>(&'a self, forest: &'a MastForest) -> &'a [DecoratorId] {
+        self.decorator_store.after_exit(forest)
     }
 
     /// Removes all decorators from this node.
     fn remove_decorators(&mut self) {
-        self.before_enter.truncate(0);
-        self.after_exit.truncate(0);
+        self.decorator_store.remove_decorators();
     }
 
     fn to_display<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn fmt::Display + 'a> {
@@ -201,10 +205,23 @@ impl MastNodeExt for SplitNode {
 
     type Builder = SplitNodeBuilder;
 
-    fn to_builder(self, _forest: &MastForest) -> Self::Builder {
-        SplitNodeBuilder::new(self.branches)
-            .with_before_enter(self.before_enter)
-            .with_after_exit(self.after_exit)
+    fn to_builder(self, forest: &MastForest) -> Self::Builder {
+        // Extract decorators from decorator_store if in Owned state
+        match self.decorator_store {
+            DecoratorStore::Owned { before_enter, after_exit, .. } => {
+                let mut builder = SplitNodeBuilder::new(self.branches);
+                builder = builder.with_before_enter(before_enter).with_after_exit(after_exit);
+                builder
+            },
+            DecoratorStore::Linked { id } => {
+                // Extract decorators from forest storage when in Linked state
+                let before_enter = forest.node_decorator_storage.get_before_decorators(id).to_vec();
+                let after_exit = forest.node_decorator_storage.get_after_decorators(id).to_vec();
+                let mut builder = SplitNodeBuilder::new(self.branches);
+                builder = builder.with_before_enter(before_enter).with_after_exit(after_exit);
+                builder
+            },
+        }
     }
 }
 
@@ -251,18 +268,52 @@ impl SplitNodeBuilder {
         Ok(SplitNode {
             branches: self.branches,
             digest,
-            before_enter: self.before_enter,
-            after_exit: self.after_exit,
+            decorator_store: DecoratorStore::new_owned_with_decorators(
+                self.before_enter,
+                self.after_exit,
+            ),
         })
     }
 }
 
 impl MastForestContributor for SplitNodeBuilder {
     fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
-        forest
+        let node = self.build(forest)?;
+
+        let SplitNode {
+            branches,
+            digest,
+            decorator_store: DecoratorStore::Owned { before_enter, after_exit, .. },
+        } = node
+        else {
+            unreachable!("SplitNodeBuilder::build() should always return owned decorators");
+        };
+
+        // Determine the node ID that will be assigned
+        let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
+
+        // Store node-level decorators in the centralized NodeDecoratorStorage for efficient access
+        forest.node_decorator_storage.add_node_decorators(
+            future_node_id,
+            &before_enter,
+            &after_exit,
+        );
+
+        // Create the node in the forest with Linked variant from the start
+        // Move the data directly without intermediate cloning
+        let node_id = forest
             .nodes
-            .push(self.build(forest)?.into())
-            .map_err(|_| MastForestError::TooManyNodes)
+            .push(
+                SplitNode {
+                    branches,
+                    digest,
+                    decorator_store: DecoratorStore::Linked { id: future_node_id },
+                }
+                .into(),
+            )
+            .map_err(|_| MastForestError::TooManyNodes)?;
+
+        Ok(node_id)
     }
 
     fn fingerprint_for_node(
@@ -357,14 +408,30 @@ impl SplitNodeBuilder {
             panic!("Digest is required for deserialization")
         };
 
-        let node = SplitNode {
-            branches: self.branches,
-            digest,
-            before_enter: self.before_enter,
-            after_exit: self.after_exit,
-        };
+        let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
 
-        forest.nodes.push(node.into()).map_err(|_| MastForestError::TooManyNodes)
+        // Store node-level decorators in the centralized NodeDecoratorStorage for efficient access
+        forest.node_decorator_storage.add_node_decorators(
+            future_node_id,
+            &self.before_enter,
+            &self.after_exit,
+        );
+
+        // Create the node in the forest with Linked variant from the start
+        // Move the data directly without intermediate cloning
+        let node_id = forest
+            .nodes
+            .push(
+                SplitNode {
+                    branches: self.branches,
+                    digest,
+                    decorator_store: DecoratorStore::Linked { id: future_node_id },
+                }
+                .into(),
+            )
+            .map_err(|_| MastForestError::TooManyNodes)?;
+
+        Ok(node_id)
     }
 }
 

@@ -17,21 +17,24 @@ mod node;
 pub use node::arbitrary;
 pub use node::{
     BasicBlockNode, BasicBlockNodeBuilder, CallNode, CallNodeBuilder, DecoratedOpLink,
-    DecoratorOpLinkIterator, DynNode, DynNodeBuilder, ExternalNode, ExternalNodeBuilder, JoinNode,
-    JoinNodeBuilder, LoopNode, LoopNodeBuilder, MastForestContributor, MastNode, MastNodeBuilder,
-    MastNodeErrorContext, MastNodeExt, OP_BATCH_SIZE, OP_GROUP_SIZE, OpBatch, OperationOrDecorator,
-    SplitNode, SplitNodeBuilder,
+    DecoratorOpLinkIterator, DecoratorStore, DynNode, DynNodeBuilder, ExternalNode,
+    ExternalNodeBuilder, JoinNode, JoinNodeBuilder, LoopNode, LoopNodeBuilder,
+    MastForestContributor, MastNode, MastNodeBuilder, MastNodeErrorContext, MastNodeExt,
+    OP_BATCH_SIZE, OP_GROUP_SIZE, OpBatch, OperationOrDecorator, SplitNode, SplitNodeBuilder,
 };
 
 use crate::{
     AdviceMap, Decorator, Felt, Idx, LexicographicWord, Word,
     crypto::hash::Hasher,
-    mast::decorator_storage::DecoratorIndexError,
     utils::{ByteWriter, DeserializationError, Serializable, hash_string_to_word},
 };
 
-mod decorator_storage;
-pub use decorator_storage::{DecoratedLinks, DecoratedLinksIter, DecoratorIndexMapping};
+mod debuginfo;
+pub use debuginfo::{
+    DecoratedLinks, DecoratedLinksIter, DecoratorIndexError, DecoratorIndexMapping,
+    NodeDecoratorStorage,
+};
+
 mod serialization;
 
 mod merger;
@@ -76,6 +79,10 @@ pub struct MastForest {
     /// Provides efficient access to decorators per operation per node during execution and
     /// debugging.
     decorator_storage: DecoratorIndexMapping,
+
+    /// Storage for node-level decorators (before_enter and after_exit). This uses CSR format
+    /// for efficient storage and access of node-level decorators.
+    node_decorator_storage: NodeDecoratorStorage,
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -90,6 +97,7 @@ impl MastForest {
             advice_map: AdviceMap::default(),
             error_codes: BTreeMap::new(),
             decorator_storage: DecoratorIndexMapping::new(),
+            node_decorator_storage: NodeDecoratorStorage::new(),
         }
     }
 }
@@ -226,6 +234,7 @@ impl MastForest {
         let node_builders =
             nodes_to_add.into_iter().map(|node| node.to_builder(self)).collect::<Vec<_>>();
         self.decorator_storage = DecoratorIndexMapping::new();
+        self.node_decorator_storage = crate::mast::NodeDecoratorStorage::new();
 
         // Add each node to the new MAST forest, making sure to rewrite any outdated internal
         // `MastNodeId`s

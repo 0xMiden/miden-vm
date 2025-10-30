@@ -439,7 +439,7 @@ fn mast_forest_merge_decorators() {
             .iter()
             .filter(|node| {
                 if let MastNode::Loop(loop_node) = node {
-                    loop_node.after_exit() == [merged_deco0, merged_deco2]
+                    loop_node.after_exit(&merged) == [merged_deco0, merged_deco2]
                 } else {
                     false
                 }
@@ -455,7 +455,7 @@ fn mast_forest_merge_decorators() {
             .iter()
             .filter(|node| {
                 if let MastNode::Loop(loop_node) = node {
-                    loop_node.after_exit() == [merged_deco1, merged_deco3]
+                    loop_node.after_exit(&merged) == [merged_deco1, merged_deco3]
                 } else {
                     false
                 }
@@ -960,11 +960,11 @@ fn mast_forest_merge_op_indexed_decorators_preservation() {
     // Check all nodes for decorator references
     for node in &merged.nodes {
         // Count before_enter decorators
-        for &deco_id in node.before_enter() {
+        for &deco_id in node.before_enter(&merged) {
             *decorator_ref_counts.entry(deco_id).or_insert(0) += 1;
         }
         // Count after_exit decorators
-        for &deco_id in node.after_exit() {
+        for &deco_id in node.after_exit(&merged) {
             *decorator_ref_counts.entry(deco_id).or_insert(0) += 1;
         }
         // Count op-indexed decorators if it's a basic block
@@ -992,7 +992,7 @@ fn mast_forest_merge_op_indexed_decorators_preservation() {
     if let MastNode::Block(block_a) = &merged[mapped_root_a] {
         // Check before_enter decorators (note: includes both before_enter_a and shared_deco_a)
         assert_eq!(
-            block_a.before_enter(),
+            block_a.before_enter(&merged),
             &[merged_before_enter_a, merged_shared],
             "Forest A's before_enter decorators should be preserved (including shared decorator)"
         );
@@ -1015,7 +1015,7 @@ fn mast_forest_merge_op_indexed_decorators_preservation() {
 
         // Check after_exit decorators
         assert_eq!(
-            block_a.after_exit(),
+            block_a.after_exit(&merged),
             &[merged_after_exit_a],
             "Forest A's after_exit decorator should be preserved"
         );
@@ -1028,7 +1028,7 @@ fn mast_forest_merge_op_indexed_decorators_preservation() {
     if let MastNode::Block(block_b) = &merged[mapped_root_b] {
         // Check before_enter decorators (note: includes both before_enter_b and shared_deco_b)
         assert_eq!(
-            block_b.before_enter(),
+            block_b.before_enter(&merged),
             &[merged_before_enter_b, merged_shared],
             "Forest B's before_enter decorators should be preserved (including shared decorator)"
         );
@@ -1051,7 +1051,7 @@ fn mast_forest_merge_op_indexed_decorators_preservation() {
 
         // Check after_exit decorators (note: includes both after_exit_b and unique_b)
         assert_eq!(
-            block_b.after_exit(),
+            block_b.after_exit(&merged),
             &[merged_after_exit_b, merged_unique_b],
             "Forest B's after_exit decorators should be preserved (including unique decorator)"
         );

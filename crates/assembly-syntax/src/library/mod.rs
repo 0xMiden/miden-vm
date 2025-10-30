@@ -2,7 +2,7 @@ use alloc::{collections::BTreeMap, string::String, sync::Arc, vec::Vec};
 
 use miden_core::{
     AdviceMap, Kernel, Word,
-    mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, MastNodeExt, MastNodeId},
+    mast::{MastForest, MastNodeExt, MastNodeId},
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 use midenc_hir_type::{FunctionType, Type};
@@ -873,7 +873,10 @@ impl proptest::prelude::Arbitrary for Library {
 
                 // Create a simple node for each export
                 for (export_name, export) in exports.iter_mut() {
-                    use miden_core::Operation;
+                    use miden_core::{
+                        Operation,
+                        mast::{BasicBlockNodeBuilder, MastForestContributor},
+                    };
 
                     // Ensure the export name matches the exported procedure, as the Arbitrary
                     // impl will generate different paths for each
