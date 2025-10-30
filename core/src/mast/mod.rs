@@ -62,9 +62,6 @@ pub struct MastForest {
     /// Roots of procedures defined within this MAST forest.
     roots: Vec<MastNodeId>,
 
-    /// All the decorators included in the MAST forest.
-    decorators: IndexVec<DecoratorId, Decorator>,
-
     /// Advice map to be loaded into the VM prior to executing procedures from this MAST forest.
     advice_map: AdviceMap,
 
@@ -72,6 +69,9 @@ pub struct MastForest {
     /// codes, so they are stored in order to provide a useful message to the user in case a error
     /// code is triggered.
     error_codes: BTreeMap<u64, Arc<str>>,
+
+    /// All the decorators included in the MAST forest.
+    decorators: IndexVec<DecoratorId, Decorator>,
 
     /// Provides efficient access to decorators per operation per node during execution and
     /// debugging.
