@@ -212,8 +212,8 @@ impl PrecompileVerifierRegistry {
     /// * `requests` - Slice of precompile requests to verify
     ///
     /// # Errors
-    /// Returns a [`PrecompileVerificationError`] if:
-    /// - No verifier is registered for a request's event ID
+/// Returns a [`PrecompileVerificationError`] if:
+/// - The request's event ID is not supported by this VM version
     /// - A verifier fails to verify its request
     pub fn deferred_requests_commitment(
         &self,
@@ -224,7 +224,7 @@ impl PrecompileVerifierRegistry {
             let event_id = *event_id;
             let verifier = self
                 .get(event_id)
-                .ok_or(PrecompileVerificationError::VerifierNotFound { index, event_id })?;
+                .ok_or(PrecompileVerificationError::UnsupportedPrecompile { index, event_id })?;
 
             let precompile_commitment = verifier.verify(data).map_err(|error| {
                 PrecompileVerificationError::PrecompileError { index, event_id, error }
@@ -329,8 +329,8 @@ pub type PrecompileError = Box<dyn Error + Send + Sync + 'static>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum PrecompileVerificationError {
-    #[error("no verifier found for request at index {index} with event ID {event_id}")]
-    VerifierNotFound { index: usize, event_id: EventId },
+    #[error("unsupported or deprecated precompile at index {index} with event ID {event_id}")]
+    UnsupportedPrecompile { index: usize, event_id: EventId },
 
     #[error("verification error when verifying request at index {index}, with event ID {event_id}")]
     PrecompileError {
