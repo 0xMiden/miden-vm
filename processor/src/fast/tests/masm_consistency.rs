@@ -183,7 +183,7 @@ use super::*;
 // ---- horner ops --------------------------------
 #[case(None,
     "begin 
-        push.1.2.3.4 mem_storew_be.40 dropw
+        push.1.2.0.0 mem_storew_be.40 dropw
         horner_eval_base
         end",
     // first 3 addresses in the vec are the alpha_ptr, acc_high and acc_low, respectively.
@@ -193,7 +193,7 @@ use super::*;
 )]
 #[case(None,
     "begin 
-        push.1.2.3.4 mem_storew_be.40 dropw
+        push.1.2.0.0 mem_storew_be.40 dropw
         horner_eval_ext
         end",
     // first 3 addresses in the vec are the alpha_ptr, acc_high and acc_low, respectively.
