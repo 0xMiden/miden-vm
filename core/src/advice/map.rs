@@ -26,6 +26,10 @@ use crate::{
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(winter_serde(true))
+)]
 pub struct AdviceMap(BTreeMap<Word, Arc<[Felt]>>);
 
 /// Pair representing a key-value entry in an [`AdviceMap`]

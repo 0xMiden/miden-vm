@@ -1,9 +1,18 @@
 ---
-source: assembly/src/tests.rs
+source: crates/assembly/src/tests.rs
 expression: program
 ---
 begin
-    trace(0)
-    external.0xe776df8dc02329acc43a09fe8e510b44a87dfd876e375ad383891470ece4f6de
+    join
+        basic_block
+            push(2147483648)
+            push(4294967294)
+            mstore
+            drop
+            noop
+            trace(0)
+        end
+        external.0xe776df8dc02329acc43a09fe8e510b44a87dfd876e375ad383891470ece4f6de
+    end
     trace(1)
 end

@@ -1,18 +1,21 @@
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 
+#[cfg(any(test, feature = "testing"))]
+pub use miden_assembly_syntax::parser;
 use miden_assembly_syntax::{
     Library, LibraryPath, Parse, ParseOptions, Word,
-    ast::{Form, Module, ModuleKind},
-    debuginfo::{DefaultSourceManager, SourceFile, SourceManager},
+    ast::{Module, ModuleKind},
+    debuginfo::{DefaultSourceManager, SourceManager},
     diagnostics::{
         Report,
         reporting::{ReportHandlerOpts, set_hook},
     },
 };
 pub use miden_assembly_syntax::{
-    assert_diagnostic, assert_diagnostic_lines, parse_module, parser, regex, source_file,
-    testing::Pattern,
+    assert_diagnostic, assert_diagnostic_lines, parse_module, regex, source_file, testing::Pattern,
 };
+#[cfg(feature = "testing")]
+use miden_assembly_syntax::{ast::Form, debuginfo::SourceFile};
 use miden_core::Program;
 
 use crate::assembler::Assembler;
@@ -79,6 +82,7 @@ impl TestContext {
     ///
     /// This does not run semantic analysis, or construct a [Module] from the parsed
     /// forms, and is largely intended for low-level testing of the parser.
+    #[cfg(feature = "testing")]
     #[track_caller]
     pub fn parse_forms(&self, source: Arc<SourceFile>) -> Result<Vec<Form>, Report> {
         parser::parse_forms(source.clone()).map_err(|err| Report::new(err).with_source_code(source))

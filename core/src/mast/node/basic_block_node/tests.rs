@@ -1,107 +1,9 @@
 use proptest::prelude::*;
 
+// Import strategy functions from arbitrary.rs
+pub(super) use super::arbitrary::op_non_control_sequence_strategy;
 use super::*;
 use crate::{Decorator, ONE, mast::MastForest};
-
-// Helper function to generate random felt values
-fn any_felt() -> impl Strategy<Value = Felt> {
-    any::<u64>().prop_map(Felt::new)
-}
-
-// Strategy for operations without immediate values (non-control flow)
-fn op_no_imm_strategy() -> impl Strategy<Value = Operation> {
-    prop_oneof![
-        Just(Operation::Add),
-        Just(Operation::Mul),
-        Just(Operation::Neg),
-        Just(Operation::Inv),
-        Just(Operation::Incr),
-        Just(Operation::And),
-        Just(Operation::Or),
-        Just(Operation::Not),
-        Just(Operation::Eq),
-        Just(Operation::Eqz),
-        Just(Operation::Drop),
-        Just(Operation::Pad),
-        Just(Operation::Swap),
-        Just(Operation::SwapW),
-        Just(Operation::SwapW2),
-        Just(Operation::SwapW3),
-        Just(Operation::SwapDW),
-        Just(Operation::MovUp2),
-        Just(Operation::MovUp3),
-        Just(Operation::MovUp4),
-        Just(Operation::MovUp5),
-        Just(Operation::MovUp6),
-        Just(Operation::MovUp7),
-        Just(Operation::MovUp8),
-        Just(Operation::MovDn2),
-        Just(Operation::MovDn3),
-        Just(Operation::MovDn4),
-        Just(Operation::MovDn5),
-        Just(Operation::MovDn6),
-        Just(Operation::MovDn7),
-        Just(Operation::MovDn8),
-        Just(Operation::CSwap),
-        Just(Operation::CSwapW),
-        Just(Operation::Dup0),
-        Just(Operation::Dup1),
-        Just(Operation::Dup2),
-        Just(Operation::Dup3),
-        Just(Operation::Dup4),
-        Just(Operation::Dup5),
-        Just(Operation::Dup6),
-        Just(Operation::Dup7),
-        Just(Operation::Dup9),
-        Just(Operation::Dup11),
-        Just(Operation::Dup13),
-        Just(Operation::Dup15),
-        Just(Operation::MLoad),
-        Just(Operation::MStore),
-        Just(Operation::MLoadW),
-        Just(Operation::MStoreW),
-        Just(Operation::MStream),
-        Just(Operation::Pipe),
-        Just(Operation::AdvPop),
-        Just(Operation::AdvPopW),
-        Just(Operation::U32split),
-        Just(Operation::U32add),
-        Just(Operation::U32sub),
-        Just(Operation::U32mul),
-        Just(Operation::U32div),
-        Just(Operation::U32and),
-        Just(Operation::U32xor),
-        Just(Operation::U32add3),
-        Just(Operation::U32madd),
-        Just(Operation::FmpAdd),
-        Just(Operation::FmpUpdate),
-        Just(Operation::SDepth),
-        Just(Operation::Caller),
-        Just(Operation::Clk),
-        Just(Operation::Emit),
-        Just(Operation::Ext2Mul),
-        Just(Operation::Expacc),
-        Just(Operation::HPerm),
-        // Note: We exclude Assert here because it has an immediate value (error code)
-    ]
-}
-
-// Strategy for operations with immediate values
-fn op_with_imm_strategy() -> impl Strategy<Value = Operation> {
-    prop_oneof![any_felt().prop_map(Operation::Push)]
-}
-
-// Strategy for all non-control flow operations
-fn op_non_control_strategy() -> impl Strategy<Value = Operation> {
-    prop_oneof![op_no_imm_strategy(), op_with_imm_strategy(),]
-}
-
-// Strategy for sequences of operations
-pub(super) fn op_non_control_sequence_strategy(
-    max_length: usize,
-) -> impl Strategy<Value = Vec<Operation>> {
-    prop::collection::vec(op_non_control_strategy(), 1..=max_length)
-}
 
 #[test]
 fn batch_ops_1() {
@@ -512,6 +414,7 @@ fn decorator_strategy(
 fn decorator_list_strategy(
     ops_num: usize,
 ) -> impl Strategy<Value = (Vec<Operation>, Vec<(usize, DecoratorId)>)> {
+    // At most one decorator per operation, but we could technically go a bit higher
     op_non_control_sequence_strategy(ops_num)
         .prop_flat_map(|ops| (Just(ops.clone()), decorator_strategy(ops.len(), ops.len())))
 }
@@ -525,18 +428,258 @@ proptest! {
         (ops, decs) in decorator_list_strategy(20)
     ) {
         // Create a basic block with the generated operations and decorators
-        let block = BasicBlockNode::new(ops.clone(), Some(decs.clone())).unwrap();
+        let block = BasicBlockNode::new(ops.clone(), decs.clone()).unwrap();
 
         // Collect the decorators using raw_decorator_iter()
-        let collected_decorators: Vec<(usize, &DecoratorId)> = block.raw_decorator_iter().collect();
-
-        // Convert to owned DecoratorId for comparison
-        let collected_owned: Vec<(usize, DecoratorId)> = collected_decorators
-            .into_iter()
-            .map(|(idx, &decorator_id)| (idx, decorator_id))
-            .collect();
+        let collected_decorators: Vec<(usize, DecoratorId)> = block.raw_decorator_iter().collect();
 
         // The collected decorators should match the original decorators
-        prop_assert_eq!(collected_owned, decs);
+        prop_assert_eq!(collected_decorators, decs);
+    }
+}
+
+// Tests for the basic block decorator functionality added to support before_enter and after_exit
+// decorators.
+// --------------------------------------------------------------------------------------------
+
+#[test]
+fn test_mast_node_error_context_decorators_iterates_all_decorators() {
+    let mut forest = MastForest::new();
+    let operations = vec![Operation::Add, Operation::Mul];
+
+    // Create decorators for before_enter, during operations, and after_exit
+    let before_enter_deco = Decorator::Trace(1);
+    let op_deco = Decorator::Trace(2);
+    let after_exit_deco = Decorator::Trace(3);
+
+    let before_enter_id = forest.add_decorator(before_enter_deco.clone()).unwrap();
+    let op_id = forest.add_decorator(op_deco.clone()).unwrap();
+    let after_exit_id = forest.add_decorator(after_exit_deco.clone()).unwrap();
+
+    // Create a basic block with all types of decorators
+    let mut block = BasicBlockNode::new(operations, vec![(1, op_id)]).unwrap();
+    block.append_before_enter(&[before_enter_id]);
+    block.append_after_exit(&[after_exit_id]);
+
+    let all_decorators: Vec<_> = block.decorators().collect();
+
+    // Should have 3 decorators total: 1 before_enter, 1 during, 1 after_exit
+    assert_eq!(all_decorators.len(), 3);
+
+    // Check that before_enter decorator appears first (at op index 0)
+    assert_eq!(all_decorators[0], (0, before_enter_id));
+
+    // Check that op decorator appears at the correct position (op index 1)
+    assert_eq!(all_decorators[1], (1, op_id));
+
+    // Check that after_exit decorator appears last (at op index = total_ops)
+    assert_eq!(all_decorators[2], (2, after_exit_id));
+}
+
+#[test]
+fn test_indexed_decorator_iter_excludes_before_enter_after_exit() {
+    let mut forest = MastForest::new();
+    let operations = vec![Operation::Add, Operation::Mul];
+
+    // Create decorators
+    let before_enter_deco = Decorator::Trace(1);
+    let op_deco1 = Decorator::Trace(2);
+    let op_deco2 = Decorator::Trace(3);
+    let after_exit_deco = Decorator::Trace(4);
+
+    let before_enter_id = forest.add_decorator(before_enter_deco.clone()).unwrap();
+    let op_id1 = forest.add_decorator(op_deco1.clone()).unwrap();
+    let op_id2 = forest.add_decorator(op_deco2.clone()).unwrap();
+    let after_exit_id = forest.add_decorator(after_exit_deco.clone()).unwrap();
+
+    // Create a basic block with all types of decorators
+    let mut block = BasicBlockNode::new(operations, vec![(0, op_id1), (1, op_id2)]).unwrap();
+    block.append_before_enter(&[before_enter_id]);
+    block.append_after_exit(&[after_exit_id]);
+
+    // Test indexed_decorator_iter - should only include op-indexed decorators
+    let indexed_decorators: Vec<_> = block.indexed_decorator_iter().collect();
+
+    // Should have only 2 decorators (the ones tied to specific operation indices)
+    assert_eq!(indexed_decorators.len(), 2);
+
+    // Should NOT include before_enter decorator
+    assert!(!indexed_decorators.iter().any(|&(_, id)| id == before_enter_id));
+
+    // Should NOT include after_exit decorator
+    assert!(!indexed_decorators.iter().any(|&(_, id)| id == after_exit_id));
+
+    // Should include the operation-indexed decorators
+    let mut indexed_ids: Vec<_> = indexed_decorators.iter().map(|&(_, id)| id).collect();
+    indexed_ids.sort();
+    let mut expected_op_ids = vec![op_id1, op_id2];
+    expected_op_ids.sort();
+
+    assert_eq!(indexed_ids, expected_op_ids);
+}
+
+#[test]
+fn test_decorator_positions() {
+    let mut forest = MastForest::new();
+
+    // Create multiple types of decorators
+    let trace_deco = Decorator::Trace(42);
+    let debug_deco = Decorator::Trace(999);
+
+    let trace_id = forest.add_decorator(trace_deco.clone()).unwrap();
+    let debug_id = forest.add_decorator(debug_deco.clone()).unwrap();
+
+    // Create a basic block with complex operations
+    let operations = vec![
+        Operation::Push(Felt::new(1)),
+        Operation::Push(Felt::new(2)),
+        Operation::Add,
+        Operation::Push(Felt::new(3)),
+        Operation::Mul,
+    ];
+
+    let mut block =
+        BasicBlockNode::new(operations.clone(), vec![(2, trace_id), (4, debug_id)]).unwrap();
+
+    // Add before_enter and after_exit decorators
+    block.append_before_enter(&[trace_id, debug_id]);
+    block.append_after_exit(&[trace_id]);
+
+    // Test that MastNodeErrorContext::decorators returns all decorators
+    let all_decorators: Vec<_> = block.decorators().collect();
+    assert_eq!(all_decorators.len(), 5);
+
+    // Verify the order and positions:
+    // 1. before_enter decorators at position 0
+    // 2. op-indexed decorators at their respective positions
+    // 3. after_exit decorators at position = total_ops
+    let mut found_positions = Vec::new();
+
+    for (pos, _id) in &all_decorators {
+        found_positions.push(*pos);
+    }
+
+    let mut expected_positions = vec![0, 0, 2, 4, 5]; // total_ops = 5
+    expected_positions.sort();
+    assert_eq!(found_positions, expected_positions);
+
+    // Test that indexed_decorator_iter only returns op-indexed decorators
+    let indexed_decorators: Vec<_> = block.indexed_decorator_iter().collect();
+    assert_eq!(indexed_decorators.len(), 2);
+
+    let indexed_positions: Vec<_> = indexed_decorators.iter().map(|&(pos, _id)| pos).collect();
+    let mut expected_indexed_positions = vec![2, 4];
+    expected_indexed_positions.sort();
+
+    assert_eq!(indexed_positions, expected_indexed_positions);
+    assert!(!indexed_positions.contains(&0)); // No before_enter
+    assert!(!indexed_positions.contains(&5)); // No after_exit
+
+    // Test that the block preserves all decorator types after modification
+    block.append_before_enter(&[]);
+    block.append_after_exit(&[]);
+
+    let all_decorators_after_mod: Vec<_> = block.decorators().collect();
+    assert_eq!(
+        all_decorators_after_mod.len(),
+        5,
+        "Expected 5 decorators, got {:?}. All decorators: {:?}",
+        all_decorators_after_mod.len(),
+        all_decorators_after_mod.iter().collect::<Vec<_>>()
+    );
+
+    // Verify the new before_enter decorator
+    assert!(all_decorators_after_mod.iter().any(|&(_, id)| id == debug_id));
+
+    // Verify the new after_exit decorators
+    assert!(all_decorators_after_mod.iter().any(|&(_, id)| id == debug_id));
+    assert!(all_decorators_after_mod.iter().any(|&(_, id)| id == trace_id));
+}
+
+proptest! {
+    /// RawToPaddedPrefix / PaddedToRawPrefix correctness
+    #[test]
+    fn proptest_raw_to_padded_correctness(
+        (ops, decorators) in
+        decorator_list_strategy(72)
+    ) {
+
+        // Build BasicBlockNode (this applies padding)
+        // Use the decorator IDs directly as DecoratorList
+        let block = BasicBlockNode::new(ops.clone(), decorators).unwrap();
+        let padded_ops = block.op_batches().iter().flat_map(|batch| batch.ops()).collect::<Vec<_>>();
+
+        // Build both prefix arrays
+        let raw2pad = RawToPaddedPrefix::new(block.op_batches());
+        let pad2raw = PaddedToRawPrefix::new(block.op_batches());
+
+        // Test invariant 1: Raw→Padded correctness
+        //  For all raw indices r in [0..raw_ops],
+        //  let p = r + raw_to_padded[r];
+        //  Then: p is the padded position of the r-th raw op.
+        for r in 0..ops.len() {
+            let p = r + raw2pad[r];
+            prop_assert!(
+                *padded_ops[p] == ops[r],
+                "Raw->Padded conversion incorrect for raw index {}",
+                r
+            );
+        }
+
+        // Test invariant 2: Padded→Raw correctness
+        // For all padded indices p in [0..padded_ops],
+        // let r = p - padded_to_raw[p];
+        // Then: r is the raw position for the op at padded position p (if that position is a real op).
+        for p in 0..padded_ops.len() {
+            let r = p - pad2raw[p];
+            // this comparison is only valid if the operation at position p is not a padding Noop
+            if *padded_ops[p] != Operation::Noop {
+                prop_assert!(
+                    ops[r] == *padded_ops[p],
+                    "Padded->Raw conversion incorrect for padded index {}",
+                    p
+                );
+            }
+        }
+
+        // Test invariant 3: Cross-array consistency
+        // Let p = r + raw_to_padded[r]. Then padded_to_raw[p] == raw_to_padded[r].
+        for r in 0..=ops.len() {
+            let p = r + raw2pad[r];
+            prop_assert_eq!(
+                pad2raw[p],
+                raw2pad[r],
+                "Cross-array invariant violated for raw {}, padded {}",
+                r, p
+            );
+        }
+    }
+}
+
+proptest! {
+    /// Property test 2: RawDecoratorOpLinkIterator invertibility
+    #[test]
+    fn proptest_decorator_iterator_invertibility(
+        (ops, decorators) in
+        decorator_list_strategy(72)
+    ) {
+        // Build BasicBlockNode
+        // Use the decorator IDs directly as DecoratorList
+        let block = BasicBlockNode::new(ops.clone(), decorators.clone()).unwrap();
+
+        // Create raw decorator iterator
+        let raw_iter = block.raw_decorator_iter();
+
+        // Collect all decorators from the iterator
+        let collected_decorators: Vec<_> = raw_iter.collect();
+
+        // Verify decorators maintain order with corrected indices
+        for (collected_idx, &(_expected_raw_idx, expected_id)) in decorators.iter().enumerate() {
+            if collected_idx < collected_decorators.len() {
+                let (actual_raw_idx, actual_id) = collected_decorators[collected_idx];
+                prop_assert_eq!(actual_id, expected_id);
+                prop_assert!(actual_raw_idx <= ops.len()); // Should be a valid raw index
+            }
+        }
     }
 }

@@ -6,7 +6,7 @@ on:
     inputs:
       fail-fast:
         required: false
-        default: true
+        default: false
         type: boolean
   schedule:
     # runs once a day at 01:00 UTC (adjust as needed)

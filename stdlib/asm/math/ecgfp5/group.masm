@@ -230,21 +230,21 @@ end
 #! Read point addition section ( on page 8 ) of https://ia.cr/2022/274
 #! For reference implementation see https://github.com/pornin/ecgfp5/blob/ce059c6/python/ecGFp5.py#L1228-L1255
 export.add.40
-    loc_storew.0
+    loc_storew_be.0
     dropw
     loc_store.4 # cached x1
 
-    loc_storew.8
+    loc_storew_be.8
     dropw
     loc_store.12 # cached y1
 
     loc_store.16 # cached inf1
 
-    loc_storew.20
+    loc_storew_be.20
     dropw
     loc_store.24 # cached x2
 
-    loc_storew.28
+    loc_storew_be.28
     dropw
     loc_store.32 # cached y2
 
@@ -252,11 +252,11 @@ export.add.40
 
     loc_load.24
     push.0.0.0.0
-    loc_loadw.20 # bring x2
+    loc_loadw_be.20 # bring x2
 
     loc_load.4
     push.0.0.0.0
-    loc_loadw.0 # bring x1
+    loc_loadw_be.0 # bring x1
 
     exec.base_field::eq
     dup
@@ -264,7 +264,7 @@ export.add.40
     if.true
         loc_load.4
         push.0.0.0.0
-        loc_loadw.0 # bring x1
+        loc_loadw_be.0 # bring x1
 
         exec.base_field::square
 
@@ -280,11 +280,11 @@ export.add.40
     else
         loc_load.12
         push.0.0.0.0
-        loc_loadw.8 # bring y1
+        loc_loadw_be.8 # bring y1
 
         loc_load.32
         push.0.0.0.0
-        loc_loadw.28 # bring y2
+        loc_loadw_be.28 # bring y2
 
         exec.base_field::sub
     end # = λ0
@@ -294,7 +294,7 @@ export.add.40
     if.true
         loc_load.12
         push.0.0.0.0
-        loc_loadw.8 # bring y1
+        loc_loadw_be.8 # bring y1
 
         repeat.5
             movup.4
@@ -303,11 +303,11 @@ export.add.40
     else
         loc_load.4
         push.0.0.0.0
-        loc_loadw.0 # bring x1
+        loc_loadw_be.0 # bring x1
 
         loc_load.24
         push.0.0.0.0
-        loc_loadw.20 # bring x2
+        loc_loadw_be.20 # bring x2
 
         exec.base_field::sub
     end # = λ1
@@ -326,11 +326,11 @@ export.add.40
 
     loc_load.24
     push.0.0.0.0
-    loc_loadw.20 # bring x2
+    loc_loadw_be.20 # bring x2
 
     loc_load.4
     push.0.0.0.0
-    loc_loadw.0 # bring x1
+    loc_loadw_be.0 # bring x1
 
     exec.base_field::add
 
@@ -346,7 +346,7 @@ export.add.40
 
     loc_load.4
     push.0.0.0.0
-    loc_loadw.0 # bring x1
+    loc_loadw_be.0 # bring x1
 
     exec.base_field::sub
 
@@ -358,7 +358,7 @@ export.add.40
 
     loc_load.12
     push.0.0.0.0
-    loc_loadw.8 # bring y1
+    loc_loadw_be.8 # bring y1
 
     repeat.5
         movup.9
@@ -370,11 +370,11 @@ export.add.40
 
     loc_load.12
     push.0.0.0.0
-    loc_loadw.8 # bring y1
+    loc_loadw_be.8 # bring y1
 
     loc_load.32
     push.0.0.0.0
-    loc_loadw.28 # bring y2
+    loc_loadw_be.28 # bring y2
 
     exec.base_field::neq
 
@@ -386,7 +386,7 @@ export.add.40
 
     loc_load.32
     push.0.0.0.0
-    loc_loadw.28 # bring y2
+    loc_loadw_be.28 # bring y2
 
     loc_load.16 # bring inf1
 
@@ -403,7 +403,7 @@ export.add.40
 
     loc_load.12
     push.0.0.0.0
-    loc_loadw.8 # bring y1
+    loc_loadw_be.8 # bring y1
 
     loc_load.36 # bring inf2
 
@@ -426,7 +426,7 @@ export.add.40
 
     loc_load.24
     push.0.0.0.0
-    loc_loadw.20 # bring x2
+    loc_loadw_be.20 # bring x2
 
     loc_load.16 # bring inf1
 
@@ -443,7 +443,7 @@ export.add.40
 
     loc_load.4
     push.0.0.0.0
-    loc_loadw.0 # bring x1
+    loc_loadw_be.0 # bring x1
 
     loc_load.36 # bring inf2
 
@@ -493,11 +493,11 @@ end
 #! Read point addition section ( on page 8 ) of https://ia.cr/2022/274
 #! For reference implementation see https://github.com/pornin/ecgfp5/blob/ce059c6/python/ecGFp5.py#L1270-L1280
 export.double.20
-    loc_storew.0
+    loc_storew_be.0
     dropw
     loc_store.4 # cached x
 
-    loc_storew.8
+    loc_storew_be.8
     dropw
     loc_store.12 # cached y
 
@@ -505,7 +505,7 @@ export.double.20
 
     loc_load.12
     push.0.0.0.0
-    loc_loadw.8 # bring y
+    loc_loadw_be.8 # bring y
 
     repeat.5
         movup.4
@@ -514,7 +514,7 @@ export.double.20
 
     loc_load.4
     push.0.0.0.0
-    loc_loadw.0 # bring x
+    loc_loadw_be.0 # bring x
 
     exec.base_field::square
 
@@ -532,7 +532,7 @@ export.double.20
 
     loc_load.4
     push.0.0.0.0
-    loc_loadw.0 # bring x
+    loc_loadw_be.0 # bring x
 
     repeat.5
         movup.4
@@ -552,7 +552,7 @@ export.double.20
 
     loc_load.4
     push.0.0.0.0
-    loc_loadw.0 # bring x
+    loc_loadw_be.0 # bring x
 
     exec.base_field::sub
 
@@ -564,7 +564,7 @@ export.double.20
 
     loc_load.12
     push.0.0.0.0
-    loc_loadw.8 # bring y
+    loc_loadw_be.8 # bring y
 
     repeat.5
         movup.9
@@ -605,24 +605,24 @@ end
 #!
 #! See https://github.com/itzmeanjan/secp256k1/blob/cbbe199/point.py#L174-L186 for source of inpiration.
 export.mul.40
-    loc_storew.0
+    loc_storew_be.0
     dropw
     loc_store.4 # cached base_x
 
-    loc_storew.8
+    loc_storew_be.8
     dropw
     loc_store.12 # cached base_y
 
     loc_store.16 # cached base_inf
 
     push.0.0.0.0
-    loc_storew.20
+    loc_storew_be.20
     dropw
     push.0
     loc_store.24 # initialize and cache res_x
 
     push.0.0.0.0
-    loc_storew.28
+    loc_storew_be.28
     dropw
     push.0
     loc_store.32 # initialize and cache res_y
@@ -642,31 +642,31 @@ export.mul.40
 
                 loc_load.12
                 push.0.0.0.0
-                loc_loadw.8
+                loc_loadw_be.8
 
                 loc_load.4
                 push.0.0.0.0
-                loc_loadw.0
+                loc_loadw_be.0
 
                 # bring res
                 loc_load.36
 
                 loc_load.32
                 push.0.0.0.0
-                loc_loadw.28
+                loc_loadw_be.28
 
                 loc_load.24
                 push.0.0.0.0
-                loc_loadw.20
+                loc_loadw_be.20
 
                 exec.add
 
                 # write back res
-                loc_storew.20
+                loc_storew_be.20
                 dropw
                 loc_store.24
 
-                loc_storew.28
+                loc_storew_be.28
                 dropw
                 loc_store.32
 
@@ -678,20 +678,20 @@ export.mul.40
 
             loc_load.12
             push.0.0.0.0
-            loc_loadw.8
+            loc_loadw_be.8
 
             loc_load.4
             push.0.0.0.0
-            loc_loadw.0
+            loc_loadw_be.0
 
             exec.double
 
             # write back base
-            loc_storew.0
+            loc_storew_be.0
             dropw
             loc_store.4
 
-            loc_storew.8
+            loc_storew_be.8
             dropw
             loc_store.12
 
@@ -708,11 +708,11 @@ export.mul.40
 
     loc_load.32
     push.0.0.0.0
-    loc_loadw.28
+    loc_loadw_be.28
 
     loc_load.24
     push.0.0.0.0
-    loc_loadw.20
+    loc_loadw_be.20
 end
 
 #! Given a 319 -bit scalar ( say e ) on stack, this routine computes elliptic curve point
@@ -742,23 +742,23 @@ end
 #!
 #! See https://github.com/itzmeanjan/secp256k1/blob/cbbe199/point.py#L174-L186 for source of inpiration.
 export.gen_mul.32
-    loc_storew.0
+    loc_storew_be.0
     dropw
-    loc_storew.4
+    loc_storew_be.4
     dropw
     push.0.0
     movup.3
     movup.3
-    loc_storew.8
+    loc_storew_be.8
     dropw # cache 319 -bit scalar, having 10 limbs, each of 32 -bit width
 
     push.0.0.0.0.0
-    loc_storew.12
+    loc_storew_be.12
     dropw
     loc_store.16 # initialize and cache res_x
 
     push.0.0.0.0.0
-    loc_storew.20
+    loc_storew_be.20
     dropw
     loc_store.24 # initialize and cache res_y
 
@@ -1090,7 +1090,7 @@ export.gen_mul.32
         repeat.4 # process 4 consecutive 32 -bit limbs
             repeat.32 # process each 32 -bit limb
                 push.0.0.0.0
-                loc_loadw.0
+                loc_loadw_be.0
 
                 dup
                 push.1
@@ -1099,7 +1099,7 @@ export.gen_mul.32
 
                 u32shr.1
 
-                loc_storew.0
+                loc_storew_be.0
                 dropw
 
                 if.true
@@ -1109,20 +1109,20 @@ export.gen_mul.32
 
                     loc_load.24
                     push.0.0.0.0
-                    loc_loadw.20
+                    loc_loadw_be.20
 
                     loc_load.16
                     push.0.0.0.0
-                    loc_loadw.12
+                    loc_loadw_be.12
 
                     exec.add
 
                     # write back res
-                    loc_storew.12
+                    loc_storew_be.12
                     dropw
                     loc_store.16
 
-                    loc_storew.20
+                    loc_storew_be.20
                     dropw
                     loc_store.24
 
@@ -1136,26 +1136,26 @@ export.gen_mul.32
             end
 
             push.0.0.0.0
-            loc_loadw.0
+            loc_loadw_be.0
 
             drop
             push.0
             movdn.3
 
-            loc_storew.0
+            loc_storew_be.0
             dropw
         end
 
         push.0.0.0.0
-        loc_loadw.4
-        loc_storew.0
+        loc_loadw_be.4
+        loc_storew_be.0
         dropw
     end
 
     repeat.2 # process last 2 limbs of scalar
         repeat.32 # process each of last two 32 -bit limbs
             push.0.0.0.0
-            loc_loadw.8
+            loc_loadw_be.8
 
             dup
             push.1
@@ -1164,7 +1164,7 @@ export.gen_mul.32
 
             u32shr.1
 
-            loc_storew.8
+            loc_storew_be.8
             dropw
 
             if.true
@@ -1174,20 +1174,20 @@ export.gen_mul.32
 
                 loc_load.24
                 push.0.0.0.0
-                loc_loadw.20
+                loc_loadw_be.20
 
                 loc_load.16
                 push.0.0.0.0
-                loc_loadw.12
+                loc_loadw_be.12
 
                 exec.add
 
                 # write back res
-                loc_storew.12
+                loc_storew_be.12
                 dropw
                 loc_store.16
 
-                loc_storew.20
+                loc_storew_be.20
                 dropw
                 loc_store.24
 
@@ -1201,13 +1201,13 @@ export.gen_mul.32
         end
 
         push.0.0.0.0
-        loc_loadw.8
+        loc_loadw_be.8
 
         drop
         push.0
         movdn.3
 
-        loc_storew.8
+        loc_storew_be.8
         dropw
     end
 
@@ -1216,9 +1216,9 @@ export.gen_mul.32
 
     loc_load.24
     push.0.0.0.0
-    loc_loadw.20
+    loc_loadw_be.20
 
     loc_load.16
     push.0.0.0.0
-    loc_loadw.12
+    loc_loadw_be.12
 end

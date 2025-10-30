@@ -279,6 +279,80 @@ fn simple_syscall_2() {
     test.prove_and_verify(vec![2, 2, 3, 2, 1], false);
 }
 
+/// Tests that `CALL`ing from a syscall context works correctly, especially in terms of properly
+/// handling the fmp (through procedure locals).
+///
+/// The flow is as follows:
+/// new_ctx (program) -> first_kernel_entry (syscall) -> userland (call) -> second_kernel_entry
+/// (syscall)
+#[test]
+fn call_in_syscall() {
+    let kernel_source = "
+        # USER CONTEXT FUNCTIONS (i.e. not 0)
+        # ====================================================================================
+
+        proc.userland.4
+            # Ensure that the memory locals are fresh before we write to them
+            loc_loadw_be.0 assertz assertz assertz assertz
+
+            # Write to memory locals, which should not affect context 0 memory
+            push.5.6.7.8 loc_storew_be.0 dropw
+
+            # Syscall back into context 0
+            syscall.second_kernel_entry
+
+            # Ensure that procedure locals were untouched
+            loc_loadw_be.0 push.5.6.7.8 assert_eqw
+        end
+
+        # CONTEXT 0 FUNCTIONS
+        # ====================================================================================
+
+        export.second_kernel_entry.4
+            # Ensure that the memory locals are fresh before we write to them
+            loc_loadw_be.0 assertz assertz assertz assertz
+
+            # Write to procedure locals. We will later ensure that this write didn't affect procedure locals
+            # in first_kernel_entry.
+            push.9.10.11.12 loc_storew_be.0 dropw
+        end
+
+        export.first_kernel_entry.4
+            # Ensure that the memory locals are fresh before we write to them
+            loc_loadw_be.0 assertz assertz assertz assertz
+
+            # Write to memory locals. We will ensure at the end that these values are still present
+            push.1.2.3.4 loc_storew_be.0 dropw
+
+            # Call userland, which will syscall back into context 0
+            call.userland
+
+            # Ensure that procedure locals were untouched
+            loc_loadw_be.0 push.1.2.3.4 assert_eqw
+        end
+    ";
+
+    let program_source = "
+        proc.new_ctx
+            syscall.first_kernel_entry
+        end
+
+        begin
+            # Call into a new context which will syscall back into context 0.
+            call.new_ctx
+        end";
+
+    let mut test = Test::new(&format!("test{}", line!()), program_source, false);
+    test.kernel_source = Some(test.source_manager.load(
+        SourceLanguage::Masm,
+        format!("kernel{}", line!()).into(),
+        kernel_source.to_string(),
+    ));
+    test.expect_stack(&[]);
+
+    test.prove_and_verify(Vec::new(), false);
+}
+
 /// Tests that syscalling back into context 0 uses a different overflow table with each call.
 #[test]
 fn root_context_separate_overflows() {
@@ -336,7 +410,7 @@ fn simple_dyn_exec() {
             movdn.4
 
             # use dynexec to call foo again via its hash, which is stored at memory location 40
-            mem_storew.40 dropw
+            mem_storew_be.40 dropw
             push.40
             dynexec
         end";
@@ -383,10 +457,10 @@ fn dynexec_with_procref() {
     end
 
     begin
-        procref.foo mem_storew.40 dropw push.40
+        procref.foo mem_storew_be.40 dropw push.40
         dynexec
 
-        procref.module::func mem_storew.40 dropw push.40
+        procref.module::func mem_storew_be.40 dropw push.40
         dynexec
 
         dup
@@ -432,7 +506,7 @@ fn simple_dyncall() {
             movdn.4
 
             # use dyncall to call foo again via its hash, which is on the stack
-            mem_storew.40 dropw
+            mem_storew_be.40 dropw
             push.40
             dyncall
 
@@ -506,7 +580,7 @@ fn dyncall_with_syscall_and_caller() {
             push.1 push.2 push.3 push.4 padw
 
             # Prepare dyncall
-            procref.bar mem_storew.40 dropw push.40
+            procref.bar mem_storew_be.40 dropw push.40
             dyncall
 
             # Truncate stack

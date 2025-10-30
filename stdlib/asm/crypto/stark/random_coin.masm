@@ -41,7 +41,7 @@ end
 #! Output: [R1, ...]
 #! Cycles: 6
 export.get_rate_1
-    padw exec.constants::r1_ptr mem_loadw
+    padw exec.constants::r1_ptr mem_loadw_be
 end
 
 #! Store the first half of the rate portion of the random coin state.
@@ -50,7 +50,7 @@ end
 #! Output: [...]
 #! Cycles: 6
 export.set_rate_1
-    exec.constants::r1_ptr mem_storew dropw
+    exec.constants::r1_ptr mem_storew_be dropw
 end
 
 #! Return the second half of the rate portion of the random coin state
@@ -63,7 +63,7 @@ end
 #! Output: [R2, ...]
 #! Cycles: 6
 export.get_rate_2
-    padw exec.constants::r2_ptr mem_loadw
+    padw exec.constants::r2_ptr mem_loadw_be
 end
 
 #! Store the second half of the rate portion of the random coin state.
@@ -72,7 +72,7 @@ end
 #! Output: [...]
 #! Cycles: 6
 export.set_rate_2
-    exec.constants::r2_ptr mem_storew dropw
+    exec.constants::r2_ptr mem_storew_be dropw
 end
 
 #! Return the capacity portion of the random coin state
@@ -85,7 +85,7 @@ end
 #! Output: [C, ...]
 #! Cycles: 6
 export.get_capacity
-    padw exec.constants::c_ptr mem_loadw
+    padw exec.constants::c_ptr mem_loadw_be
 end
 
 #! Set the capacity portion of the random coin state.
@@ -94,7 +94,7 @@ end
 #! Output: [...]
 #! Cycles: 6
 export.set_capacity
-    exec.constants::c_ptr mem_storew dropw
+    exec.constants::c_ptr mem_storew_be dropw
 end
 
 #! Load the random coin state on the stack.
@@ -140,10 +140,10 @@ export.init_seed
     # starting from address 2^32 - 1 in decreasing order to hold constants that are used throughout
     # the `verify` procedure.
     padw
-    exec.constants::zero_word_ptr mem_storew
-    exec.constants::c_ptr mem_storew
-    exec.constants::r1_ptr mem_storew
-    exec.constants::r2_ptr mem_storew
+    exec.constants::zero_word_ptr mem_storew_be
+    exec.constants::c_ptr mem_storew_be
+    exec.constants::r1_ptr mem_storew_be
+    exec.constants::r2_ptr mem_storew_be
     dropw
     #=> [log(trace_length), num_queries, grinding, num_constraints, trace_info, num_fixed_len_pi, ...]
 
@@ -282,11 +282,11 @@ export.reseed
 
     # Save the new state to memory
     # --------------------------------------------------------------------------------------------
-    exec.constants::r2_ptr mem_storew
+    exec.constants::r2_ptr mem_storew_be
     dropw
-    exec.constants::r1_ptr mem_storew
+    exec.constants::r1_ptr mem_storew_be
     dropw
-    exec.constants::c_ptr mem_storew
+    exec.constants::c_ptr mem_storew_be
     dropw
     # => [...] (18 cycles)
 end
@@ -308,11 +308,11 @@ end
 #! Output: [...]
 #! Cycles: 20
 export.generate_aux_randomness
-    padw exec.constants::r1_ptr mem_loadw
-    exec.constants::aux_rand_elem_ptr mem_storew
+    padw exec.constants::r1_ptr mem_loadw_be
+    exec.constants::aux_rand_elem_ptr mem_storew_be
     #=> [beta1, beta0, alpha1, alpha0, ...]
 
-    padw exec.constants::aux_rand_nd_ptr mem_loadw
+    padw exec.constants::aux_rand_nd_ptr mem_loadw_be
     # => [alpha1, alpha0, beta1, beta0, beta1, beta0, alpha1, alpha0, ...]
 
     movup.6 assert_eq
@@ -331,9 +331,9 @@ end
 #! Cycles: 13
 export.generate_constraint_composition_coefficients
     exec.constants::composition_coef_ptr
-    padw exec.constants::r1_ptr mem_loadw
+    padw exec.constants::r1_ptr mem_loadw_be
     # => [y, y, alpha1, alpha0, compos_coef_ptr, ...] where y is a "garbage" value
-    movup.4 mem_storew dropw
+    movup.4 mem_storew_be dropw
     #=> [...]
 end
 
@@ -346,10 +346,10 @@ end
 #! Output: [...]
 #! Cycles: 22
 export.generate_deep_composition_random_coefficients
-    padw exec.constants::r1_ptr mem_loadw
+    padw exec.constants::r1_ptr mem_loadw_be
     # => [y, y, alpha1, alpha0, ...] where y is a "garbage" value
     push.0.0
-    exec.constants::deep_rand_alpha_nd_ptr mem_loadw
+    exec.constants::deep_rand_alpha_nd_ptr mem_loadw_be
     drop drop
     # => [alpha1_nd, alpha0_nd, alpha1, alpha0, ...] where y is a "garbage" value
 
@@ -357,7 +357,7 @@ export.generate_deep_composition_random_coefficients
     dup.2 assert_eq
     push.0.0
     exec.constants::deep_rand_coef_ptr
-    mem_storew
+    mem_storew_be
     dropw
     #=> [...]
 end
@@ -376,7 +376,7 @@ end
 #! Cycles: 21 + 10 * log(N)
 export.generate_z_zN
     # Load z (first two felts of the random coin state) and log trace length N
-    exec.constants::r1_ptr mem_loadw
+    exec.constants::r1_ptr mem_loadw_be
     drop drop
     exec.constants::get_trace_length_log
     # => [log(trace_len), z_1, z_0, ...]
@@ -399,7 +399,7 @@ export.generate_z_zN
     # => [(z_1, z_0)^n, z_1, z_0, ...]
 
     # Store z and z^N
-    exec.constants::z_ptr mem_storew
+    exec.constants::z_ptr mem_storew_be
     dropw
 end
 
@@ -426,7 +426,7 @@ proc.generate_four_integers
 
     # Store and update pointer
     dup.8 add.4 swap.9  # [ptr, r, depth, r0_hi, 0, R1, ptr + 4, mask, depth, ...]
-    mem_storew
+    mem_storew_be
     dropw               # [R1, ptr + 4, mask, depth, ...]
 
     # Get the second random felt
@@ -439,7 +439,7 @@ proc.generate_four_integers
 
     # Store and update pointer
     dup.8 add.4 swap.9  # [ptr, r, depth, r1_hi, 0, R1, ptr+8, mask, depth, ...]
-    mem_storew
+    mem_storew_be
     dropw               # [R1, ptr + 8, mask, depth, ...]
 
     # Get the third random felt
@@ -452,7 +452,7 @@ proc.generate_four_integers
 
     # Store and update pointer
     dup.8 add.4 swap.9
-    mem_storew
+    mem_storew_be
     dropw
 
     # Get the fourth random felt
@@ -465,7 +465,7 @@ proc.generate_four_integers
 
     # Store and update pointer
     dup.8 add.4 swap.9
-    mem_storew
+    mem_storew_be
     dropw
 end
 
@@ -491,7 +491,7 @@ proc.generate_three_integers
 
     # Store and update pointer
     dup.8 add.4 swap.9  # [ptr, r, depth, r0_hi, 0, R1, ptr + 4, mask, depth, ...]
-    mem_storew
+    mem_storew_be
     dropw               # [R1, ptr + 4, mask, depth, ...]
 
     # Get the second random felt
@@ -504,7 +504,7 @@ proc.generate_three_integers
 
     # Store and update pointer
     dup.8 add.4 swap.9  # [ptr, r, depth, r1_hi, 0, R1, ptr + 4, mask, depth, ...]
-    mem_storew
+    mem_storew_be
     dropw               # [R1, ptr + 4, mask, depth, ...]
 
     # Get the third random felt
@@ -517,7 +517,7 @@ proc.generate_three_integers
 
     # Store and update pointer
     dup.8 add.4 swap.9
-    mem_storew
+    mem_storew_be
     dropw
 end
 
@@ -561,26 +561,26 @@ export.generate_list_indices
 
 
     # Load the second half of the rate portion of the state of the random coin.
-    exec.constants::r2_ptr mem_loadw
+    exec.constants::r2_ptr mem_loadw_be
     #=> [R2, query_ptr+12, mask, depth, num_queries, ...]
     exec.generate_four_integers
     #=> [R2, query_ptr+26, mask, depth, num_queries, ..., ...]
 
     # Squeeze
-    exec.constants::c_ptr mem_loadw
+    exec.constants::c_ptr mem_loadw_be
     exec.get_rate_1
     exec.get_rate_2
     hperm
     #=> [R2', R1, C, query_ptr+26, mask, depth, num_queries, ...]
 
     # Save the new state
-    exec.constants::r2_ptr mem_storew
+    exec.constants::r2_ptr mem_storew_be
     dropw
     # => [R1, C]
-    exec.constants::r1_ptr mem_storew
+    exec.constants::r1_ptr mem_storew_be
     swapw
     # => [C, R1]
-    exec.constants::c_ptr mem_storew
+    exec.constants::c_ptr mem_storew_be
     dropw
     #=> [R1, query_ptr+26, mask, depth, num_queries, ...]
 
@@ -611,25 +611,25 @@ export.generate_list_indices
         exec.generate_four_integers
         #=> [X, query_ptr'+16, mask, depth, num_remaining_iterations, remainder, ...]
 
-        exec.constants::r2_ptr mem_loadw
+        exec.constants::r2_ptr mem_loadw_be
         exec.generate_four_integers
         #=> [R2, query_ptr'+32, mask, depth, num_remaining_iterations, remainder, ...]
 
         # Squeeze
-        exec.constants::c_ptr mem_loadw
+        exec.constants::c_ptr mem_loadw_be
         exec.get_rate_1
         exec.get_rate_2
         hperm
         #=> [R2, R1, C, query_ptr'+32, mask, depth, num_remaining_iterations, remainder, ...]
 
         # Save the new state
-        exec.constants::r2_ptr mem_storew
+        exec.constants::r2_ptr mem_storew_be
         dropw
         #=> [R1, C, query_ptr'+32, mask, depth, num_remaining_iterations, remainder, ...]
-        exec.constants::r1_ptr mem_storew
+        exec.constants::r1_ptr mem_storew_be
         swapw
         #=> [C, R1, query_ptr'+32, mask, depth, num_remaining_iterations, remainder, ...]
-        exec.constants::c_ptr mem_storew
+        exec.constants::c_ptr mem_storew_be
         dropw
         #=> [R1, query_ptr'+32, mask, depth, num_remaining_iterations, remainder, ...]
 
@@ -649,7 +649,7 @@ export.generate_list_indices
     #=> [R1, query_ptr', mask, depth, num_queries, ...]
 
     ### Load the second half of the rate portion of the state of the random coin.
-    padw exec.constants::r2_ptr mem_loadw
+    padw exec.constants::r2_ptr mem_loadw_be
     #=> [R2, R1, query_ptr, mask, depth, num_queries, ...]
 
     ### Iterate over remainder
@@ -668,7 +668,7 @@ export.generate_list_indices
 
         # Store and update pointer
         dup.11 add.4 swap.12  # [ptr, r, depth, r0_hi, 0, R2, r3, r2, r1, ptr + 4, mask, depth, num_queries, ...]
-        mem_storew
+        mem_storew_be
         drop drop drop               # [x, R2, r3, r2, r1, ptr + 1, mask, depth, num_queries, ...]
         dup.11 sub.1 swap.12
         #=> [num_queries, x, R2, r3, r2, r1, ptr + 1, mask, depth, num_queries-1, ...]
@@ -712,16 +712,16 @@ export.check_pow
 
     # Load the second half of rate portion and apply the permutation
     padw
-    exec.constants::r2_ptr mem_loadw
+    exec.constants::r2_ptr mem_loadw_be
     hperm
     #=> [R2, R1, C, mask, ...]
 
     # Save the new random coin state
-    exec.constants::r2_ptr mem_storew
+    exec.constants::r2_ptr mem_storew_be
     dropw
-    exec.constants::r1_ptr mem_storew
+    exec.constants::r1_ptr mem_storew_be
     swapw
-    exec.constants::c_ptr mem_storew
+    exec.constants::c_ptr mem_storew_be
     dropw
     drop drop drop
     #=> [R10, mask]

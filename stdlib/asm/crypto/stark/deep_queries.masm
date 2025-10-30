@@ -25,7 +25,7 @@ proc.compute_denominators
     movdn.3
     #=> [lde_size, depth, 0, x, Y, index, ...]
     push.0
-    exec.constants::tmp1 mem_loadw
+    exec.constants::tmp1 mem_loadw_be
     #=> [-z0, -gz0, -gz1, -z1, x, Y, index, ...]
 
     dup.4 add
@@ -103,7 +103,7 @@ export.prepare_stack_deep_queries_computation
     exec.constants::get_fri_queries_address
     # => [query_ptr, ...]
 
-    padw exec.constants::ood_fixed_term_horner_evaluations_ptr mem_loadw
+    padw exec.constants::ood_fixed_term_horner_evaluations_ptr mem_loadw_be
     # => [q_gz_1, q_gz_0, q_z_1, q_z_0, query_ptr, ...]
     # => [W, query_ptr, ...] where W is [q_gz_1, q_gz_0, q_z_1, q_z_0]
 
@@ -118,11 +118,11 @@ export.prepare_stack_deep_queries_computation
     push.0.0
     exec.constants::deep_rand_alpha_nd_ptr
     exec.constants::current_trace_row_ptr
-    exec.constants::tmp2 mem_storew
+    exec.constants::tmp2 mem_storew_be
 
     # Compute the negations of z and gz where z is the OOD point
     # We do it here as this computation is common to all queries.
-    exec.constants::z_ptr mem_loadw
+    exec.constants::z_ptr mem_loadw_be
     # => [zN_1, zN_0, z1, z0, query_ptr, query_end_ptr, W, query_ptr, ...]
     drop drop
     neg swap neg  
@@ -136,7 +136,7 @@ export.prepare_stack_deep_queries_computation
     swap
     # => [-z0, -gz0, -gz1, -z1, query_ptr, query_end_ptr, W, query_ptr, ...]
     # Save to temporary location `tmp1` for later use when computing the denominators
-    exec.constants::tmp1 mem_storew
+    exec.constants::tmp1 mem_storew_be
     # => [Y, query_ptr, query_end_ptr, W, query_ptr, ...]
 end
 
@@ -184,7 +184,7 @@ export.compute_deep_query
         ##
         ## Cycles: 5
         dup.4 add.4 swap.5
-        mem_storew
+        mem_storew_be
         #=> [poe, index, eval1, eval0, query_ptr+1, query_end_ptr, W, query_ptr, ...]
 
         ## c) Prepare stack for next iteration

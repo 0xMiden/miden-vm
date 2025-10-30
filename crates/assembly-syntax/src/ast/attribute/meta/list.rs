@@ -13,6 +13,10 @@ use crate::ast::Ident;
 /// Represents the metadata of a named list [crate::ast::Attribute], i.e. `@name(item0, .., itemN)`
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(winter_serde(true))
+)]
 pub struct MetaList {
     #[cfg_attr(feature = "serde", serde(skip, default))]
     pub span: SourceSpan,

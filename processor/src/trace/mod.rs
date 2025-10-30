@@ -7,7 +7,11 @@ use miden_air::trace::{
     decoder::{NUM_USER_OP_HELPERS, USER_OP_HELPERS_OFFSET},
     main_trace::MainTrace,
 };
-use miden_core::{ProgramInfo, StackInputs, StackOutputs, Word, ZERO, stack::MIN_STACK_DEPTH};
+use miden_core::{
+    Kernel, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
+    precompile::{PrecompileRequest, PrecompileTranscript},
+    stack::MIN_STACK_DEPTH,
+};
 use winter_prover::{EvaluationFrame, Trace, TraceInfo, crypto::RandomCoin};
 
 use super::{
@@ -17,6 +21,7 @@ use super::{
     range::AuxTraceBuilder as RangeCheckerAuxTraceBuilder,
     stack::AuxTraceBuilder as StackAuxTraceBuilder,
 };
+use crate::fast::ExecutionOutput;
 
 mod utils;
 pub use utils::{AuxColumnBuilder, ChipletsLengths, TraceFragment, TraceLenSummary};
@@ -60,6 +65,7 @@ pub struct ExecutionTrace {
     stack_outputs: StackOutputs,
     advice: AdviceProvider,
     trace_len_summary: TraceLenSummary,
+    final_pc_transcript: PrecompileTranscript,
 }
 
 impl ExecutionTrace {
@@ -84,7 +90,8 @@ impl ExecutionTrace {
         let kernel = process.kernel().clone();
         let program_info = ProgramInfo::new(program_hash, kernel);
         let advice = mem::take(&mut process.advice);
-        let (main_trace, aux_trace_builders, trace_len_summary) = finalize_trace(process, rng);
+        let (main_trace, aux_trace_builders, trace_len_summary, final_pc_transcript) =
+            finalize_trace(process, rng);
         let trace_info = TraceInfo::new_multi_segment(
             PADDED_TRACE_WIDTH,
             AUX_TRACE_WIDTH,
@@ -102,6 +109,37 @@ impl ExecutionTrace {
             stack_outputs,
             advice,
             trace_len_summary,
+            final_pc_transcript,
+        }
+    }
+
+    pub fn new_from_parts(
+        program_hash: Word,
+        kernel: Kernel,
+        execution_output: ExecutionOutput,
+        main_trace: MainTrace,
+        aux_trace_builders: AuxTraceBuilders,
+        trace_len_summary: TraceLenSummary,
+    ) -> Self {
+        let program_info = ProgramInfo::new(program_hash, kernel);
+        let trace_info = TraceInfo::new_multi_segment(
+            PADDED_TRACE_WIDTH,
+            AUX_TRACE_WIDTH,
+            AUX_TRACE_RAND_ELEMENTS,
+            main_trace.num_rows(),
+            vec![],
+        );
+
+        Self {
+            meta: Vec::new(),
+            trace_info,
+            aux_trace_builders,
+            main_trace,
+            program_info,
+            stack_outputs: execution_output.stack,
+            advice: execution_output.advice,
+            trace_len_summary,
+            final_pc_transcript: execution_output.final_pc_transcript,
         }
     }
 
@@ -121,6 +159,24 @@ impl ExecutionTrace {
     /// Returns outputs of the program execution which resulted in this execution trace.
     pub fn stack_outputs(&self) -> &StackOutputs {
         &self.stack_outputs
+    }
+
+    /// Returns the precompile requests generated during program execution.
+    pub fn precompile_requests(&self) -> &[PrecompileRequest] {
+        self.advice.precompile_requests()
+    }
+
+    /// Moves all accumulated precompile requests out of the trace, leaving it empty.
+    ///
+    /// Intended for proof packaging, where requests are serialized into the proof and no longer
+    /// needed in the trace after consumption.
+    pub fn take_precompile_requests(&mut self) -> Vec<PrecompileRequest> {
+        self.advice.take_precompile_requests()
+    }
+
+    /// Returns the final precompile transcript after executing all precompile requests.
+    pub fn final_precompile_transcript(&self) -> PrecompileTranscript {
+        self.final_pc_transcript
     }
 
     /// Returns the initial state of the top 16 stack registers.
@@ -203,7 +259,9 @@ impl ExecutionTrace {
     #[cfg(test)]
     pub fn test_finalize_trace(process: Process) -> (MainTrace, AuxTraceBuilders, TraceLenSummary) {
         let rng = RpoRandomCoin::new(EMPTY_WORD);
-        finalize_trace(process, rng)
+        let (main_trace, aux_trace_builders, trace_len_summary, _final_pc_transcript) =
+            finalize_trace(process, rng);
+        (main_trace, aux_trace_builders, trace_len_summary)
     }
 
     pub fn build_aux_trace<E>(&self, rand_elements: &[E]) -> Option<ColMatrix<E>>
@@ -289,8 +347,9 @@ impl Trace for ExecutionTrace {
 fn finalize_trace(
     process: Process,
     mut rng: RpoRandomCoin,
-) -> (MainTrace, AuxTraceBuilders, TraceLenSummary) {
-    let (system, decoder, stack, mut range, chiplets) = process.into_parts();
+) -> (MainTrace, AuxTraceBuilders, TraceLenSummary, PrecompileTranscript) {
+    let (system, decoder, stack, mut range, chiplets, final_capacity) = process.into_parts();
+    let final_pc_transcript = PrecompileTranscript::from_state(final_capacity);
 
     let clk = system.clk();
 
@@ -324,7 +383,7 @@ fn finalize_trace(
     let system_trace = system.into_trace(trace_len, NUM_RAND_ROWS);
     let decoder_trace = decoder.into_trace(trace_len, NUM_RAND_ROWS);
     let stack_trace = stack.into_trace(trace_len, NUM_RAND_ROWS);
-    let chiplets_trace = chiplets.into_trace(trace_len, NUM_RAND_ROWS);
+    let chiplets_trace = chiplets.into_trace(trace_len, NUM_RAND_ROWS, final_capacity);
 
     // Combine the range trace segment using the support lookup table
     let range_check_trace = range.into_trace_with_table(range_table_len, trace_len, NUM_RAND_ROWS);
@@ -357,5 +416,5 @@ fn finalize_trace(
 
     let main_trace = MainTrace::new(ColMatrix::new(trace), clk);
 
-    (main_trace, aux_trace_hints, trace_len_summary)
+    (main_trace, aux_trace_hints, trace_len_summary, final_pc_transcript)
 }

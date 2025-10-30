@@ -20,13 +20,15 @@ pub use miden_core::{
     crypto::merkle::SMT_DEPTH,
     errors::InputError,
     mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
+    precompile::{PrecompileRequest, PrecompileTranscriptState},
     sys_events::SystemEvent,
     utils::DeserializationError,
 };
 use miden_core::{
-    Decorator, DecoratorIdIterator, FieldElement,
+    Decorator, FieldElement,
     mast::{
-        BasicBlockNode, CallNode, DynNode, ExternalNode, JoinNode, LoopNode, OpBatch, SplitNode,
+        BasicBlockNode, CallNode, DecoratorOpLinkIterator, DynNode, ExternalNode, JoinNode,
+        LoopNode, OpBatch, SplitNode,
     },
 };
 use miden_debug_types::SourceSpan;
@@ -36,13 +38,17 @@ pub(crate) mod continuation_stack;
 
 pub mod fast;
 use fast::FastProcessState;
+pub mod parallel;
 pub(crate) mod processor;
 
 mod operations;
 
 mod system;
+pub use system::ContextId;
 use system::System;
-pub use system::{ContextId, FMP_MIN, SYSCALL_FMP_MIN};
+
+#[cfg(test)]
+mod test_utils;
 
 pub(crate) mod decoder;
 use decoder::Decoder;
@@ -54,11 +60,13 @@ mod range;
 use range::RangeChecker;
 
 mod host;
+
 pub use host::{
     AdviceMutation, AsyncHost, BaseHost, FutureMaybeSend, MastForestStore, MemMastForestStore,
     SyncHost,
     advice::{AdviceError, AdviceInputs, AdviceProvider},
-    default::{DefaultDebugHandler, DefaultHost, HostLibrary},
+    debug::DefaultDebugHandler,
+    default::{DefaultHost, HostLibrary},
     handlers::{DebugHandler, EventError, EventHandler, EventHandlerRegistry, NoopEventHandler},
 };
 
@@ -232,6 +240,8 @@ pub struct Process {
     chiplets: Chiplets,
     max_cycles: u32,
     enable_tracing: bool,
+    /// Precompile transcript state (sponge capacity) used by `log_precompile`.
+    pc_transcript_state: PrecompileTranscriptState,
 }
 
 #[cfg(any(test, feature = "testing"))]
@@ -244,6 +254,8 @@ pub struct Process {
     pub chiplets: Chiplets,
     pub max_cycles: u32,
     pub enable_tracing: bool,
+    /// Precompile transcript state (sponge capacity) used by `log_precompile`.
+    pub pc_transcript_state: PrecompileTranscriptState,
 }
 
 impl Process {
@@ -289,6 +301,7 @@ impl Process {
             chiplets: Chiplets::new(kernel),
             max_cycles: execution_options.max_cycles(),
             enable_tracing: execution_options.enable_tracing(),
+            pc_transcript_state: PrecompileTranscriptState::default(),
         }
     }
 
@@ -455,12 +468,6 @@ impl Process {
         program: &MastForest,
         host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
-        // call or syscall are not allowed inside a syscall
-        if self.system.in_syscall() {
-            let instruction = if call_node.is_syscall() { "syscall" } else { "call" };
-            return Err(ExecutionError::CallInSyscall(instruction));
-        }
-
         // if this is a syscall, make sure the call target exists in the kernel
         if call_node.is_syscall() {
             let callee = program.get_node_by_id(call_node.callee()).ok_or_else(|| {
@@ -471,7 +478,7 @@ impl Process {
         }
         let err_ctx = err_ctx!(program, call_node, host);
 
-        self.start_call_node(call_node, program, host)?;
+        self.start_call_node(call_node, program, host, &err_ctx)?;
         self.execute_mast_node(call_node.callee(), program, host)?;
         self.end_call_node(call_node, program, host, &err_ctx)
     }
@@ -487,11 +494,6 @@ impl Process {
         program: &MastForest,
         host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
-        // dyn calls are not allowed inside a syscall
-        if node.is_dyncall() && self.system.in_syscall() {
-            return Err(ExecutionError::CallInSyscall("dyncall"));
-        }
-
         let err_ctx = err_ctx!(program, node, host);
 
         let callee_hash = if node.is_dyncall() {
@@ -547,7 +549,7 @@ impl Process {
         self.start_basic_block_node(basic_block, program, host)?;
 
         let mut op_offset = 0;
-        let mut decorator_ids = basic_block.decorator_iter();
+        let mut decorator_ids = basic_block.indexed_decorator_iter();
 
         // execute the first operation batch
         self.execute_op_batch(
@@ -583,7 +585,7 @@ impl Process {
         // can happen for decorators appearing after all operations in a block. these decorators
         // are executed after BASIC BLOCK is closed to make sure the VM clock cycle advances beyond
         // the last clock cycle of the BASIC BLOCK ops.
-        for &decorator_id in decorator_ids {
+        for (_, decorator_id) in decorator_ids {
             let decorator = program
                 .get_decorator_by_id(decorator_id)
                 .ok_or(ExecutionError::DecoratorNotFoundInForest { decorator_id })?;
@@ -594,7 +596,7 @@ impl Process {
     }
 
     /// Executes all operations in an [OpBatch]. This also ensures that all alignment rules are
-    /// satisfied by executing NOOPs as needed. Specifically:   
+    /// satisfied by executing NOOPs as needed. Specifically:
     /// - If an operation group ends with an operation carrying an immediate value, a NOOP is
     ///   executed after it.
     /// - If the number of groups in a batch is not a power of 2, NOOPs are executed (one per group)
@@ -604,7 +606,7 @@ impl Process {
         &mut self,
         basic_block: &BasicBlockNode,
         batch: &OpBatch,
-        decorators: &mut DecoratorIdIterator,
+        decorators: &mut DecoratorOpLinkIterator,
         op_offset: usize,
         program: &MastForest,
         host: &mut impl SyncHost,
@@ -621,7 +623,7 @@ impl Process {
 
         // execute operations in the batch one by one
         for (i, &op) in batch.ops().iter().enumerate() {
-            while let Some(&decorator_id) = decorators.next_filtered(i + op_offset) {
+            while let Some((_, decorator_id)) = decorators.next_filtered(i + op_offset) {
                 let decorator = program
                     .get_decorator_by_id(decorator_id)
                     .ok_or(ExecutionError::DecoratorNotFoundInForest { decorator_id })?;
@@ -735,8 +737,17 @@ impl Process {
         self.chiplets.kernel_rom.kernel()
     }
 
-    pub fn into_parts(self) -> (System, Decoder, Stack, RangeChecker, Chiplets) {
-        (self.system, self.decoder, self.stack, self.range, self.chiplets)
+    pub fn into_parts(
+        self,
+    ) -> (System, Decoder, Stack, RangeChecker, Chiplets, PrecompileTranscriptState) {
+        (
+            self.system,
+            self.decoder,
+            self.stack,
+            self.range,
+            self.chiplets,
+            self.pc_transcript_state,
+        )
     }
 }
 
@@ -813,16 +824,6 @@ impl<'a> ProcessState<'a> {
         }
     }
 
-    /// Returns the current value of the free memory pointer.
-    #[inline(always)]
-    pub fn fmp(&self) -> u64 {
-        match self {
-            ProcessState::Slow(state) => state.system.fmp().as_int(),
-            ProcessState::Fast(state) => state.processor.fmp.as_int(),
-            ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
-        }
-    }
-
     /// Returns the value located at the specified position on the stack at the current clock cycle.
     ///
     /// This method can access elements beyond the top 16 positions by using the overflow table.
@@ -835,25 +836,62 @@ impl<'a> ProcessState<'a> {
         }
     }
 
-    /// Returns a word starting at the specified element index on the stack.
+    /// Returns a word starting at the specified element index on the stack in big-endian
+    /// (reversed) order.
     ///
     /// The word is formed by taking 4 consecutive elements starting from the specified index.
     /// For example, start_idx=0 creates a word from stack elements 0-3, start_idx=1 creates
     /// a word from elements 1-4, etc.
     ///
-    /// The words are created in reverse order. For a word starting at index N, stack element
-    /// N+3 will be at position 0 of the word, N+2 at position 1, N+1 at position 2, and N
-    /// at position 3.
+    /// In big-endian order, stack element N+3 will be at position 0 of the word, N+2 at
+    /// position 1, N+1 at position 2, and N at position 3. This matches the behavior of
+    /// `mem_loadw_be` where `mem[a+3]` ends up on top of the stack.
     ///
     /// This method can access elements beyond the top 16 positions by using the overflow table.
     /// Creating a word does not change the state of the stack.
     #[inline(always)]
-    pub fn get_stack_word(&self, start_idx: usize) -> Word {
+    pub fn get_stack_word_be(&self, start_idx: usize) -> Word {
         match self {
             ProcessState::Slow(state) => state.stack.get_word(start_idx),
             ProcessState::Fast(state) => state.processor.stack_get_word(start_idx),
             ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
         }
+    }
+
+    /// Returns a word starting at the specified element index on the stack in little-endian
+    /// (memory) order.
+    ///
+    /// The word is formed by taking 4 consecutive elements starting from the specified index.
+    /// For example, start_idx=0 creates a word from stack elements 0-3, start_idx=1 creates
+    /// a word from elements 1-4, etc.
+    ///
+    /// In little-endian order, stack element N will be at position 0 of the word, N+1 at
+    /// position 1, N+2 at position 2, and N+3 at position 3. This matches the behavior of
+    /// `mem_loadw_le` where `mem[a]` ends up on top of the stack.
+    ///
+    /// This method can access elements beyond the top 16 positions by using the overflow table.
+    /// Creating a word does not change the state of the stack.
+    #[inline(always)]
+    pub fn get_stack_word_le(&self, start_idx: usize) -> Word {
+        let mut word = self.get_stack_word_be(start_idx);
+        word.reverse();
+        word
+    }
+
+    /// Returns a word starting at the specified element index on the stack.
+    ///
+    /// This is an alias for [`Self::get_stack_word_be`] for backward compatibility. For new code,
+    /// prefer using the explicit `get_stack_word_be()` or `get_stack_word_le()` to make the
+    /// ordering expectations clear.
+    ///
+    /// See [`Self::get_stack_word_be`] for detailed documentation.
+    #[deprecated(
+        since = "0.19.0",
+        note = "Use `get_stack_word_be()` or `get_stack_word_le()` to make endianness explicit"
+    )]
+    #[inline(always)]
+    pub fn get_stack_word(&self, start_idx: usize) -> Word {
+        self.get_stack_word_be(start_idx)
     }
 
     /// Returns stack state at the current clock cycle. This includes the top 16 items of the

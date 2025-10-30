@@ -6,7 +6,7 @@ use miden_core::{Felt, ONE, Word, ZERO, utils::range};
 
 use super::{
     super::ColMatrix,
-    CHIPLETS_OFFSET, CLK_COL_IDX, CTX_COL_IDX, DECODER_TRACE_OFFSET, FMP_COL_IDX, FN_HASH_OFFSET,
+    CHIPLETS_OFFSET, CLK_COL_IDX, CTX_COL_IDX, DECODER_TRACE_OFFSET, FN_HASH_OFFSET,
     STACK_TRACE_OFFSET,
     chiplets::{
         BITWISE_A_COL_IDX, BITWISE_B_COL_IDX, BITWISE_OUTPUT_COL_IDX, HASHER_NODE_INDEX_COL_IDX,
@@ -79,11 +79,6 @@ impl MainTrace {
     /// Returns the value of the clk column at row i.
     pub fn clk(&self, i: RowIndex) -> Felt {
         self.columns.get_column(CLK_COL_IDX)[i]
-    }
-
-    /// Returns the value of the fmp column at row i.
-    pub fn fmp(&self, i: RowIndex) -> Felt {
-        self.columns.get_column(FMP_COL_IDX)[i]
     }
 
     /// Returns the value of the ctx column at row i.

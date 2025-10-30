@@ -17,14 +17,14 @@ fn mem_store() {
 
 #[test]
 fn mem_loadw() {
-    let asm_op = "mem_loadw.0";
+    let asm_op = "mem_loadw_be.0";
 
     build_op_test!(asm_op).prove_and_verify(vec![], false);
 }
 
 #[test]
 fn mem_storew() {
-    let asm_op = "mem_storew.0";
+    let asm_op = "mem_storew_be.0";
     let pub_inputs = vec![1, 2, 3, 4];
 
     build_op_test!(asm_op, &pub_inputs).prove_and_verify(pub_inputs, false);
@@ -32,7 +32,7 @@ fn mem_storew() {
 
 #[test]
 fn write_read() {
-    let source = "begin mem_storew.0 mem_loadw.0 swapw end";
+    let source = "begin mem_storew_be.0 mem_loadw_be.0 swapw end";
 
     let pub_inputs = vec![4, 3, 2, 1];
 
@@ -44,8 +44,8 @@ fn update() {
     let source = "
     begin
         push.0.0.0.0
-        mem_loadw.0
-        mem_storew.0
+        mem_loadw_be.0
+        mem_storew_be.0
         swapw dropw
     end";
     let pub_inputs = vec![8, 7, 6, 5, 4, 3, 2, 1];
@@ -55,7 +55,7 @@ fn update() {
 
 #[test]
 fn incr_write_addr() {
-    let source = "begin mem_storew.0 mem_storew.4 end";
+    let source = "begin mem_storew_be.0 mem_storew_be.4 end";
     let pub_inputs = vec![4, 3, 2, 1];
 
     build_test!(source, &pub_inputs).prove_and_verify(pub_inputs, false);

@@ -21,6 +21,7 @@ use crate::{
     Assembler, Library, LibraryNamespace, LibraryPath, ModuleParser,
     ast::{Ident, Module, ModuleKind, ProcedureName, QualifiedProcedureName},
     diagnostics::{IntoDiagnostic, Report},
+    fmp::fmp_initialization_sequence,
     mast_forest_builder::MastForestBuilder,
     report,
     testing::{TestContext, assert_diagnostic_lines, parse_module, regex, source_file},
@@ -1069,11 +1070,11 @@ fn mem_operations_with_constants() -> TestResult {
         # constant should resolve using loc_load operation
         loc_load.PROC_LOC_LOAD_PTR
 
-        # constant should resolve using loc_storew operation
-        loc_storew.PROC_LOC_STOREW_PTR
+        # constant should resolve using loc_storew_be operation
+        loc_storew_be.PROC_LOC_STOREW_PTR
 
-        # constant should resolve using loc_loadw opeartion
-        loc_loadw.PROC_LOC_LOADW_PTR
+        # constant should resolve using loc_loadw_be opeartion
+        loc_loadw_be.PROC_LOC_LOADW_PTR
     end
 
     begin
@@ -1086,11 +1087,11 @@ fn mem_operations_with_constants() -> TestResult {
         # constant should resolve using mem_load operation
         mem_load.GLOBAL_LOAD_PTR
 
-        # constant should resolve using mem_storew operation
-        mem_storew.GLOBAL_STOREW_PTR
+        # constant should resolve using mem_storew_be operation
+        mem_storew_be.GLOBAL_STOREW_PTR
 
-        # constant should resolve using mem_loadw operation
-        mem_loadw.GLOBAL_LOADW_PTR
+        # constant should resolve using mem_loadw_be operation
+        mem_loadw_be.GLOBAL_LOADW_PTR
     end
     "
         )
@@ -1112,11 +1113,11 @@ fn mem_operations_with_constants() -> TestResult {
         # constant should resolve using loc_load operation
         loc_load.{PROC_LOC_LOAD_PTR}
 
-        # constant should resolve using loc_storew operation
-        loc_storew.{PROC_LOC_STOREW_PTR}
+        # constant should resolve using loc_storew_be operation
+        loc_storew_be.{PROC_LOC_STOREW_PTR}
 
-        # constant should resolve using loc_loadw opeartion
-        loc_loadw.{PROC_LOC_LOADW_PTR}
+        # constant should resolve using loc_loadw_be opeartion
+        loc_loadw_be.{PROC_LOC_LOADW_PTR}
     end
 
     begin
@@ -1129,11 +1130,11 @@ fn mem_operations_with_constants() -> TestResult {
         # constant should resolve using mem_load operation
         mem_load.{GLOBAL_LOAD_PTR}
 
-        # constant should resolve using mem_storew operation
-        mem_storew.{GLOBAL_STOREW_PTR}
+        # constant should resolve using mem_storew_be operation
+        mem_storew_be.{GLOBAL_STOREW_PTR}
 
-        # constant should resolve using mem_loadw operation
-        mem_loadw.{GLOBAL_LOADW_PTR}
+        # constant should resolve using mem_loadw_be operation
+        mem_loadw_be.{GLOBAL_LOADW_PTR}
     end
     "
         )
@@ -1213,6 +1214,99 @@ fn const_conversion_failed_to_u32() -> TestResult {
         "  :                  ^^^^^^^^",
         "5 |     end",
         "  `----"
+    );
+    Ok(())
+}
+
+#[test]
+fn deprecated_mem_loadw_instruction() -> TestResult {
+    let context = TestContext::default();
+
+    let source = source_file!(
+        &context,
+        "\
+    begin
+        mem_loadw
+    end
+    "
+    );
+
+    assert_assembler_diagnostic!(
+        context,
+        source,
+        "deprecated instruction: `mem_loadw` has been removed",
+        regex!(r#",-\[test[\d]+:2:9\]"#),
+        "1 | begin",
+        "2 |         mem_loadw",
+        regex!(r#"^ *: *\^+"#),
+        regex!(r#"this instruction is no longer supported"#),
+        "3 |     end",
+        "  `----",
+        regex!(r#"help:.*use.*mem_loadw_be.*instead"#)
+    );
+    Ok(())
+}
+
+#[test]
+fn deprecated_loc_loadw_instruction() -> TestResult {
+    let context = TestContext::default();
+
+    let source = source_file!(
+        &context,
+        "\
+    proc.foo.8
+        loc_loadw.0
+    end
+    begin
+        exec.foo
+    end
+    "
+    );
+
+    assert_assembler_diagnostic!(
+        context,
+        source,
+        "deprecated instruction: `loc_loadw` has been removed",
+        regex!(r#",-\[test[\d]+:2:9\]"#),
+        "1 | proc.foo.8",
+        "2 |         loc_loadw.0",
+        regex!(r#"^ *: *\^+"#),
+        regex!(r#"this instruction is no longer supported"#),
+        "3 |     end",
+        "  `----",
+        regex!(r#"help:.*use.*loc_loadw_be.*instead"#)
+    );
+    Ok(())
+}
+
+#[test]
+fn deprecated_loc_storew_instruction() -> TestResult {
+    let context = TestContext::default();
+
+    let source = source_file!(
+        &context,
+        "\
+    proc.foo.8
+        loc_storew.0
+    end
+    begin
+        exec.foo
+    end
+    "
+    );
+
+    assert_assembler_diagnostic!(
+        context,
+        source,
+        "deprecated instruction: `loc_storew` has been removed",
+        regex!(r#",-\[test[\d]+:2:9\]"#),
+        "1 | proc.foo.8",
+        "2 |         loc_storew.0",
+        regex!(r#"^ *: *\^+"#),
+        regex!(r#"this instruction is no longer supported"#),
+        "3 |     end",
+        "  `----",
+        regex!(r#"help:.*use.*loc_storew_be.*instead"#)
     );
     Ok(())
 }
@@ -1867,7 +1961,13 @@ fn ensure_correct_procedure_selection_on_collision() -> TestResult {
         MastNodeId::from_u32_safe(0_u32, program.mast_forest().as_ref()).unwrap();
 
     let (exec_f_node_id, exec_g_node_id) = {
-        let split_node_id = program.entrypoint();
+        let split_node_id = {
+            // Note: the program starts with a join node, which joins:
+            // - left: the fmp initialization sequence,
+            // - right: the actual entrypoint of the program (the if statement).
+            let root_join_id = program.entrypoint();
+            program.mast_forest()[root_join_id].unwrap_join().second()
+        };
         let split_node = &program.mast_forest()[split_node_id].unwrap_split();
 
         (split_node.on_true(), split_node.on_false())
@@ -3435,8 +3535,9 @@ fn nested_blocks() -> Result<(), Report> {
     // contains the MAST nodes for the kernel after a call to
     // `Assembler::with_kernel_from_module()`.
     let syscall_foo_node_id = {
-        let kernel_foo_node_id =
-            expected_mast_forest_builder.ensure_block(vec![Operation::Add], None).unwrap();
+        let kernel_foo_node_id = expected_mast_forest_builder
+            .ensure_block(vec![Operation::Add], Vec::new())
+            .unwrap();
 
         expected_mast_forest_builder.ensure_syscall(kernel_foo_node_id).unwrap()
     };
@@ -3481,26 +3582,30 @@ fn nested_blocks() -> Result<(), Report> {
 
     // basic block representing foo::bar.baz procedure
     let exec_foo_bar_baz_node_id = expected_mast_forest_builder
-        .ensure_block(vec![Operation::Push(29_u32.into())], None)
+        .ensure_block(vec![Operation::Push(29_u32.into())], Vec::new())
+        .unwrap();
+
+    let fmp_initialization = expected_mast_forest_builder
+        .ensure_block(fmp_initialization_sequence(), Vec::new())
         .unwrap();
 
     let before = expected_mast_forest_builder
-        .ensure_block(vec![Operation::Push(2u32.into())], None)
+        .ensure_block(vec![Operation::Push(2u32.into())], Vec::new())
         .unwrap();
 
     let r#true1 = expected_mast_forest_builder
-        .ensure_block(vec![Operation::Push(3u32.into())], None)
+        .ensure_block(vec![Operation::Push(3u32.into())], Vec::new())
         .unwrap();
     let r#false1 = expected_mast_forest_builder
-        .ensure_block(vec![Operation::Push(5u32.into())], None)
+        .ensure_block(vec![Operation::Push(5u32.into())], Vec::new())
         .unwrap();
     let r#if1 = expected_mast_forest_builder.ensure_split(r#true1, r#false1).unwrap();
 
     let r#true3 = expected_mast_forest_builder
-        .ensure_block(vec![Operation::Push(7u32.into())], None)
+        .ensure_block(vec![Operation::Push(7u32.into())], Vec::new())
         .unwrap();
     let r#false3 = expected_mast_forest_builder
-        .ensure_block(vec![Operation::Push(11u32.into())], None)
+        .ensure_block(vec![Operation::Push(11u32.into())], Vec::new())
         .unwrap();
     let r#true2 = expected_mast_forest_builder.ensure_split(r#true3, r#false3).unwrap();
 
@@ -3512,14 +3617,14 @@ fn nested_blocks() -> Result<(), Report> {
                     Operation::Push(19u32.into()),
                     Operation::Push(23u32.into()),
                 ],
-                None,
+                Vec::new(),
             )
             .unwrap();
 
         expected_mast_forest_builder.ensure_loop(body_node_id).unwrap()
     };
     let push_13_basic_block_id = expected_mast_forest_builder
-        .ensure_block(vec![Operation::Push(13u32.into())], None)
+        .ensure_block(vec![Operation::Push(13u32.into())], Vec::new())
         .unwrap();
 
     let r#false2 = expected_mast_forest_builder
@@ -3528,12 +3633,20 @@ fn nested_blocks() -> Result<(), Report> {
     let nested = expected_mast_forest_builder.ensure_split(r#true2, r#false2).unwrap();
 
     let combined_node_id = expected_mast_forest_builder
-        .join_nodes(vec![before, r#if1, nested, exec_foo_bar_baz_node_id, syscall_foo_node_id])
+        .join_nodes(vec![
+            fmp_initialization,
+            before,
+            r#if1,
+            nested,
+            exec_foo_bar_baz_node_id,
+            syscall_foo_node_id,
+        ])
         .unwrap();
 
-    let mut expected_mast_forest = expected_mast_forest_builder.build().0;
-    expected_mast_forest.make_root(combined_node_id);
-    let expected_program = Program::new(expected_mast_forest.into(), combined_node_id);
+    let (mut expected_mast_forest, node_remapping) = expected_mast_forest_builder.build();
+    expected_mast_forest.make_root(node_remapping[&combined_node_id]);
+    let expected_program =
+        Program::new(expected_mast_forest.into(), node_remapping[&combined_node_id]);
     assert_eq!(expected_program.hash(), program.hash());
 
     // also check that the program has the right number of procedures (which excludes the dummy
@@ -3705,16 +3818,26 @@ fn duplicate_nodes() {
 
     let mut expected_mast_forest = MastForest::new();
 
-    let mul_basic_block_id = expected_mast_forest.add_block(vec![Operation::Mul], None).unwrap();
+    let fmp_initialization = expected_mast_forest
+        .add_block(fmp_initialization_sequence(), Vec::new())
+        .unwrap();
 
-    let add_basic_block_id = expected_mast_forest.add_block(vec![Operation::Add], None).unwrap();
+    let mul_basic_block_id =
+        expected_mast_forest.add_block(vec![Operation::Mul], Vec::new()).unwrap();
+
+    let add_basic_block_id =
+        expected_mast_forest.add_block(vec![Operation::Add], Vec::new()).unwrap();
 
     // inner split: `if.true add else mul end`
     let inner_split_id =
         expected_mast_forest.add_split(add_basic_block_id, mul_basic_block_id).unwrap();
 
-    // root: outer split
-    let root_id = expected_mast_forest.add_split(mul_basic_block_id, inner_split_id).unwrap();
+    // outer split
+    let outer_split_id =
+        expected_mast_forest.add_split(mul_basic_block_id, inner_split_id).unwrap();
+
+    // root
+    let root_id = expected_mast_forest.add_join(fmp_initialization, outer_split_id).unwrap();
 
     expected_mast_forest.make_root(root_id);
 

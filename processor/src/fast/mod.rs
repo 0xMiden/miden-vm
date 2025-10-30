@@ -6,19 +6,19 @@ use miden_air::{Felt, RowIndex};
 use miden_core::{
     Decorator, EMPTY_WORD, Program, StackOutputs, WORD_SIZE, Word, ZERO,
     mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
+    precompile::PrecompileTranscript,
     stack::MIN_STACK_DEPTH,
     utils::range,
 };
 
 use crate::{
-    AdviceInputs, AdviceProvider, AsyncHost, ContextId, ErrorContext, ExecutionError, FMP_MIN,
-    ProcessState,
+    AdviceInputs, AdviceProvider, AsyncHost, ContextId, ErrorContext, ExecutionError, ProcessState,
     chiplets::Ace,
     continuation_stack::{Continuation, ContinuationStack},
-    fast::{execution_tracer::ExecutionTracer, trace_state::TraceFragmentContext},
+    fast::execution_tracer::{ExecutionTracer, TraceGenerationContext},
 };
 
-mod execution_tracer;
+pub mod execution_tracer;
 mod memory;
 mod operation;
 pub mod trace_state;
@@ -52,9 +52,6 @@ const STACK_BUFFER_SIZE: usize = 6850;
 /// 0's that were generated automatically to keep the stack depth at 16. In practice, if this
 /// occurs, it is most likely a bug.
 const INITIAL_STACK_TOP_IDX: usize = 250;
-
-/// The number of rows per core trace fragment.
-pub const NUM_ROWS_PER_CORE_FRAGMENT: usize = 1024;
 
 /// A fast processor which doesn't generate any trace.
 ///
@@ -102,12 +99,6 @@ pub struct FastProcessor {
     /// The current context ID.
     pub(super) ctx: ContextId,
 
-    /// The free memory pointer.
-    pub(super) fmp: Felt,
-
-    /// Whether we are currently in a syscall.
-    in_syscall: bool,
-
     /// The hash of the function that called into the current context, or `[ZERO, ZERO, ZERO,
     /// ZERO]` if we are in the first context (i.e. when `call_stack` is empty).
     pub(super) caller_hash: Word,
@@ -128,6 +119,10 @@ pub struct FastProcessor {
 
     /// Whether to enable debug statements and tracing.
     in_debug_mode: bool,
+
+    /// Transcript used to record commitments via `log_precompile` instruction (implemented via RPO
+    /// sponge).
+    pc_transcript: PrecompileTranscript,
 }
 
 impl FastProcessor {
@@ -187,13 +182,12 @@ impl FastProcessor {
             stack_bot_idx: stack_top_idx - MIN_STACK_DEPTH,
             clk: 0_u32.into(),
             ctx: 0_u32.into(),
-            fmp: Felt::new(FMP_MIN),
-            in_syscall: false,
             caller_hash: EMPTY_WORD,
             memory: Memory::new(),
             call_stack: Vec::new(),
             ace: Ace::default(),
             in_debug_mode,
+            pc_transcript: PrecompileTranscript::new(),
         }
     }
 
@@ -313,16 +307,21 @@ impl FastProcessor {
     }
 
     /// Executes the given program and returns the stack outputs, the advice provider, and
-    /// information for building the trace.
+    /// context necessary to build the trace.
     pub async fn execute_for_trace(
         self,
         program: &Program,
         host: &mut impl AsyncHost,
-    ) -> Result<(ExecutionOutput, Vec<TraceFragmentContext>), ExecutionError> {
-        let mut tracer = ExecutionTracer::default();
+        fragment_size: usize,
+    ) -> Result<(ExecutionOutput, TraceGenerationContext), ExecutionError> {
+        let mut tracer = ExecutionTracer::new(fragment_size);
         let execution_output = self.execute_with_tracer(program, host, &mut tracer).await?;
 
-        Ok((execution_output, tracer.into_fragment_contexts()))
+        // Pass the final precompile transcript from execution output to the trace generation
+        // context
+        let context = tracer.into_trace_generation_context(execution_output.final_pc_transcript);
+
+        Ok((execution_output, context))
     }
 
     /// Executes the given program with the provided tracer and returns the stack outputs, and the
@@ -339,6 +338,7 @@ impl FastProcessor {
             stack: stack_outputs,
             advice: self.advice,
             memory: self.memory,
+            final_pc_transcript: self.pc_transcript,
         })
     }
 
@@ -469,6 +469,11 @@ impl FastProcessor {
                     host,
                     tracer,
                 )?,
+                Continuation::FinishExternal(node_id) => {
+                    // Execute after_exit decorators when returning from an external node
+                    // Note: current_forest should already be restored by EnterForest continuation
+                    self.execute_after_exit_decorators(node_id, &current_forest, host)?;
+                },
                 Continuation::EnterForest(previous_forest) => {
                     // Restore the previous forest
                     current_forest = previous_forest;
@@ -675,11 +680,12 @@ impl FastProcessor {
         self,
         program: &Program,
         host: &mut impl AsyncHost,
-    ) -> Result<(ExecutionOutput, Vec<TraceFragmentContext>), ExecutionError> {
+        fragment_size: usize,
+    ) -> Result<(ExecutionOutput, TraceGenerationContext), ExecutionError> {
         // Create a new Tokio runtime and block on the async execution
         let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
 
-        rt.block_on(self.execute_for_trace(program, host))
+        rt.block_on(self.execute_for_trace(program, host, fragment_size))
     }
 
     /// Similar to [Self::execute_sync], but allows mutable access to the processor.
@@ -699,13 +705,14 @@ impl FastProcessor {
 // EXECUTION OUTPUT
 // ===============================================================================================
 
-/// The output of a program execution, containing the state of the stack, advice provider, and
-/// memory at the end of the execution.
+/// The output of a program execution, containing the state of the stack, advice provider,
+/// memory, and final precompile transcript at the end of execution.
 #[derive(Debug)]
 pub struct ExecutionOutput {
     pub stack: StackOutputs,
     pub advice: AdviceProvider,
     pub memory: Memory,
+    pub final_pc_transcript: PrecompileTranscript,
 }
 
 // FAST PROCESS STATE
@@ -737,5 +744,4 @@ struct ExecutionContextInfo {
     overflow_stack: Vec<Felt>,
     ctx: ContextId,
     fn_hash: Word,
-    fmp: Felt,
 }

@@ -229,25 +229,23 @@ impl PrettyPrint for Instruction {
 
             Self::MemLoad => const_text("mem_load"),
             Self::MemLoadImm(value) => inst_with_imm("mem_load", value),
-            Self::MemLoadW => const_text("mem_loadw"),
-            Self::MemLoadWImm(value) => inst_with_imm("mem_loadw", value),
             Self::MemLoadWBe => const_text("mem_loadw_be"),
             Self::MemLoadWBeImm(value) => inst_with_imm("mem_loadw_be", value),
             Self::MemLoadWLe => const_text("mem_loadw_le"),
             Self::MemLoadWLeImm(value) => inst_with_imm("mem_loadw_le", value),
             Self::LocLoad(value) => inst_with_imm("loc_load", value),
-            Self::LocLoadW(value) => inst_with_imm("loc_loadw", value),
+            Self::LocLoadWBe(value) => inst_with_imm("loc_loadw_be", value),
+            Self::LocLoadWLe(value) => inst_with_imm("loc_loadw_le", value),
 
             Self::MemStore => const_text("mem_store"),
             Self::MemStoreImm(value) => inst_with_imm("mem_store", value),
-            Self::MemStoreW => const_text("mem_storew"),
-            Self::MemStoreWImm(value) => inst_with_imm("mem_storew", value),
             Self::MemStoreWBe => const_text("mem_storew_be"),
             Self::MemStoreWBeImm(value) => inst_with_imm("mem_storew_be", value),
             Self::MemStoreWLe => const_text("mem_storew_le"),
             Self::MemStoreWLeImm(value) => inst_with_imm("mem_storew_le", value),
             Self::LocStore(value) => inst_with_imm("loc_store", value),
-            Self::LocStoreW(value) => inst_with_imm("loc_storew", value),
+            Self::LocStoreWBe(value) => inst_with_imm("loc_storew_be", value),
+            Self::LocStoreWLe(value) => inst_with_imm("loc_storew_le", value),
 
             Self::MemStream => const_text("mem_stream"),
             Self::AdvPipe => const_text("adv_pipe"),
@@ -274,6 +272,7 @@ impl PrettyPrint for Instruction {
             Self::HornerBase => const_text("horner_eval_base"),
             Self::HornerExt => const_text("horner_eval_ext"),
             Self::EvalCircuit => const_text("eval_circuit"),
+            Self::LogPrecompile => const_text("log_precompile"),
 
             // ----- exec / call ------------------------------------------------------------------
             Self::Exec(InvocationTarget::MastRoot(root)) => flatten(

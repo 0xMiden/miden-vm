@@ -76,7 +76,7 @@ fn test_mmr_get_single_peak() -> Result<(), MerkleError> {
 
             begin
                 push.{num_leaves} push.1000 mem_store # leaves count
-                adv_push.4 push.1004 mem_storew dropw # MMR single peak
+                adv_push.4 push.1004 mem_storew_be dropw # MMR single peak
 
                 push.1000 push.{pos} exec.mmr::get
 
@@ -136,8 +136,8 @@ fn test_mmr_get_two_peaks() -> Result<(), MerkleError> {
 
             begin
                 push.{num_leaves} push.1000 mem_store # leaves count
-                adv_push.4 push.1004 mem_storew dropw # MMR first peak
-                adv_push.4 push.1008 mem_storew dropw # MMR second peak
+                adv_push.4 push.1004 mem_storew_be dropw # MMR first peak
+                adv_push.4 push.1008 mem_storew_be dropw # MMR second peak
 
                 push.1000 push.{absolute_pos} exec.mmr::get
 
@@ -186,7 +186,7 @@ fn test_mmr_tree_with_one_element() -> Result<(), MerkleError> {
 
         begin
             push.{num_leaves} push.1000 mem_store # leaves count
-            adv_push.4 push.1004 mem_storew dropw # MMR first peak
+            adv_push.4 push.1004 mem_storew_be dropw # MMR first peak
 
             push.1000 push.{pos} exec.mmr::get
 
@@ -212,9 +212,9 @@ fn test_mmr_tree_with_one_element() -> Result<(), MerkleError> {
 
         begin
             push.{num_leaves} push.1000 mem_store # leaves count
-            adv_push.4 push.1004 mem_storew dropw # MMR first peak
-            adv_push.4 push.1008 mem_storew dropw # MMR second peak
-            adv_push.4 push.1012 mem_storew dropw # MMR third peak
+            adv_push.4 push.1004 mem_storew_be dropw # MMR first peak
+            adv_push.4 push.1008 mem_storew_be dropw # MMR second peak
+            adv_push.4 push.1012 mem_storew_be dropw # MMR third peak
 
             push.1000 push.{pos} exec.mmr::get
 

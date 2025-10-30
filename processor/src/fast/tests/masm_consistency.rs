@@ -63,7 +63,7 @@ use super::*;
 #[case(None, "
     proc.foo add end 
     begin 
-        procref.foo mem_storew.100 dropw push.100
+        procref.foo mem_storew_be.100 dropw push.100
         dyncall swap.8 drop 
     end", 
     vec![16_u32.into(); 16]
@@ -74,7 +74,7 @@ use super::*;
     begin 
         push.1 
         if.true 
-            procref.foo mem_storew.100 dropw
+            procref.foo mem_storew_be.100 dropw
             push.100 dyncall
             push.100 dyncall
         else 
@@ -88,7 +88,7 @@ use super::*;
 #[case(None,"
     proc.foo.2 locaddr.0 locaddr.1 swap.8 drop swap.8 drop end
     begin 
-        procref.foo mem_storew.100 dropw push.100
+        procref.foo mem_storew_be.100 dropw push.100
         dyncall
     end", 
     vec![16_u32.into(); 16]
@@ -98,9 +98,9 @@ use super::*;
     proc.foo push.100 mem_store.44 end
     proc.bar mem_load.44 assertz end
     begin 
-        procref.foo mem_storew.100 dropw push.100 dyncall
+        procref.foo mem_storew_be.100 dropw push.100 dyncall
         mem_load.44 assertz 
-        procref.bar mem_storew.104 dropw push.104 dyncall
+        procref.bar mem_storew_be.104 dropw push.104 dyncall
     end", 
     vec![16_u32.into(); 16]
 )]
@@ -110,11 +110,11 @@ use super::*;
     proc.foo mem_load.44 assertz end
     proc.bar 
         push.100 mem_store.44 
-        procref.foo mem_storew.104 dropw push.104 dyncall
+        procref.foo mem_storew_be.104 dropw push.104 dyncall
         mem_load.44 swap.8 drop 
     end
     begin 
-        procref.bar mem_storew.104 dropw push.104 dyncall
+        procref.bar mem_storew_be.104 dropw push.104 dyncall
     end", 
     vec![16_u32.into(); 16]
 )]
@@ -124,7 +124,7 @@ use super::*;
 #[case(None, "
     proc.foo add end 
     begin 
-        procref.foo mem_storew.100 dropw push.100
+        procref.foo mem_storew_be.100 dropw push.100
         dynexec swap.8 drop 
     end", 
     vec![16_u32.into(); 16]
@@ -135,7 +135,7 @@ use super::*;
     begin 
         push.1 
         if.true 
-            procref.foo mem_storew.100 dropw
+            procref.foo mem_storew_be.100 dropw
             push.100 dynexec
             push.100 dynexec
         else 
@@ -149,7 +149,7 @@ use super::*;
 #[case(None,"
     proc.foo.2 locaddr.0 locaddr.1 swap.8 drop swap.8 drop end
     begin 
-        procref.foo mem_storew.100 dropw push.100
+        procref.foo mem_storew_be.100 dropw push.100
         dynexec
     end", 
     vec![16_u32.into(); 16]
@@ -159,9 +159,9 @@ use super::*;
     proc.foo push.100 mem_store.44 end
     proc.bar mem_load.44 sub.100 assertz end
     begin 
-        procref.foo mem_storew.104 dropw push.104 dynexec
+        procref.foo mem_storew_be.104 dropw push.104 dynexec
         mem_load.44 sub.100 assertz 
-        procref.bar mem_storew.108 dropw push.108 dynexec
+        procref.bar mem_storew_be.108 dropw push.108 dynexec
     end", 
     vec![16_u32.into(); 16]
 )]
@@ -182,8 +182,8 @@ use super::*;
 )]
 // ---- horner ops --------------------------------
 #[case(None,
-    "begin 
-        push.1.2.3.4 mem_storew.40 dropw
+    "begin
+        push.1.2.3.4 mem_storew_be.40 dropw
         horner_eval_base
         end",
     // first 3 addresses in the vec are the alpha_ptr, acc_high and acc_low, respectively.
@@ -191,9 +191,17 @@ use super::*;
         8_u32.into(), 9_u32.into(), 10_u32.into(), 11_u32.into(), 12_u32.into(), 13_u32.into(),
         14_u32.into(), 15_u32.into(), 16_u32.into()]
 )]
+// ---- log precompile ops --------------------------------
+#[case(None,
+    "begin
+        log_precompile
+        end",
+    vec![1_u32.into(), 2_u32.into(), 3_u32.into(), 4_u32.into(),
+         5_u32.into(), 6_u32.into(), 7_u32.into(), 8_u32.into()],
+)]
 #[case(None,
     "begin 
-        push.1.2.3.4 mem_storew.40 dropw
+        push.1.2.3.4 mem_storew_be.40 dropw
         horner_eval_ext
         end",
     // first 3 addresses in the vec are the alpha_ptr, acc_high and acc_low, respectively.
@@ -341,4 +349,52 @@ fn test_masm_errors_consistency(
     let slow_stack_outputs = slow_processor.execute(&program, &mut host).unwrap_err();
 
     assert_eq!(fast_stack_outputs.to_string(), slow_stack_outputs.to_string());
+}
+
+/// Tests that `log_precompile` correctly computes the RPO permutation and updates the stack.
+///
+/// This test verifies:
+/// 1. The RPO permutation is applied correctly to [CAP_PREV, TAG, COMM]
+/// 2. The stack is updated with [R0, R1, CAP_NEXT] as expected
+/// 3. The capacity is properly initialized to [0,0,0,0] for the first call
+#[test]
+fn test_log_precompile_correctness() {
+    use miden_core::crypto::hash::Rpo256;
+
+    // Stack inputs: [1,2,3,4,5,6,7,8] (provided to both processors)
+    // Taking into account big-endian encoding, the stack is [COMM, TAG]
+    let stack_inputs = [1, 2, 3, 4, 5, 6, 7, 8].map(Felt::new);
+    let cap_prev = Word::empty();
+    let tag: Word = [1, 2, 3, 4].map(Felt::new).into();
+    let comm_calldata: Word = [5, 6, 7, 8].map(Felt::new).into();
+
+    // Compute expected output using RPO permutation
+    // Input state: [CAP_PREV, TAG, COMM], with CAP_PREV = [0,0,0,0]
+    let mut hasher_state = [ZERO; 12];
+    hasher_state[0..4].copy_from_slice(cap_prev.as_slice());
+    hasher_state[4..8].copy_from_slice(tag.as_slice());
+    hasher_state[8..12].copy_from_slice(comm_calldata.as_slice());
+
+    // Apply RPO permutation
+    Rpo256::apply_permutation(&mut hasher_state);
+
+    // Execute the program
+    let program_source = "begin log_precompile end";
+    let program = {
+        let source_manager = Arc::new(DefaultSourceManager::default());
+        Assembler::new(source_manager).assemble_program(program_source).unwrap()
+    };
+
+    let mut host = DefaultHost::default();
+    let processor = FastProcessor::new(&stack_inputs);
+    let stack_outputs = processor.execute_sync(&program, &mut host).unwrap();
+
+    // Verify stack outputs: [R1, R0, CAP_NEXT, ...]
+    let r1 = stack_outputs.get_stack_word_be(0).unwrap();
+    let r0 = stack_outputs.get_stack_word_be(4).unwrap();
+    let cap_next = stack_outputs.get_stack_word_be(8).unwrap();
+
+    assert_eq!(&hasher_state[0..4], cap_next.as_slice(), "CAP_NEXT on stack mismatch");
+    assert_eq!(&hasher_state[4..8], r0.as_slice(), "R0 on stack mismatch");
+    assert_eq!(&hasher_state[8..12], r1.as_slice(), "R1 on stack mismatch");
 }

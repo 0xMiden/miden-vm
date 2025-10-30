@@ -38,7 +38,7 @@ export.find_word
         #=> [maybe_value_ptr, VALUE, start_ptr, end_ptr]
 
         # dereference maybe_value_ptr (8 cycles)
-        dup movdn.5 padw movup.4 mem_loadw
+        dup movdn.5 padw movup.4 mem_loadw_be
         #=> [MAYBE_VALUE, VALUE, maybe_value_ptr, start_ptr, end_ptr]
 
         # check if it matches the requested VALUE (15 cycles)
@@ -75,7 +75,7 @@ export.find_word
                 #=> [VALUE, maybe_value_ptr, start_ptr, end_ptr]
 
                 # dereference maybe_value_ptr (7 cycles)
-                dup.4 padw movup.4 mem_loadw
+                dup.4 padw movup.4 mem_loadw_be
                 #=> [FIRST_WORD, VALUE, maybe_value_ptr = start_ptr, start_ptr, end_ptr]
 
                 # there was no match, the first array element must be larger than VALUE
@@ -96,7 +96,7 @@ export.find_word
                 #=> [maybe_value_ptr = end_ptr, VALUE, start_ptr, end_ptr]
 
                 # fetch the last word in the array (10 cycles)
-                dup movdn.5 sub.4 padw movup.4 mem_loadw
+                dup movdn.5 sub.4 padw movup.4 mem_loadw_be
                 #=> [LAST_WORD, VALUE, maybe_value_ptr = end_ptr, start_ptr, end_ptr]
 
                 # there was no match, the last array element must be smaller than VALUE
@@ -119,7 +119,7 @@ export.find_word
                 #=> [VALUE, VALUE, maybe_value_ptr, start_ptr, end_ptr]
 
                 # dereference maybe_value_ptr (8 cycles)
-                padw dup.12 mem_loadw
+                padw dup.12 mem_loadw_be
                 #=> [MAYBE_VALUE, VALUE, VALUE, maybe_value_ptr, start_ptr, end_ptr]
                 
                 # there was no match, MAYBE_VALUE must be larger than VALUE (123 cycles)
@@ -127,7 +127,7 @@ export.find_word
                 assert.err="lowerbound_array invariant: *maybe_value_ptr not greater than VALUE"
 
                 # dereference `maybe_value_ptr-4` (11 cycles)
-                padw dup.8 sub.4 mem_loadw
+                padw dup.8 sub.4 mem_loadw_be
                 #=> [MAYBE_VALUE_PREV, VALUE, maybe_value_ptr, start_ptr, end_ptr]
                 
                 # there was no match, MAYBE_VALUE_PREV must be smaller than VALUE (119 cycles)
@@ -380,7 +380,7 @@ end
 #!
 #! Cycles: 16
 proc.load_key
-    padw movup.5 mem_loadw
+    padw movup.5 mem_loadw_be
     # => [FULL_KEY, use_full_key]
 
     # multiply the two least significant elements by use_full_key

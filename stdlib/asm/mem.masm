@@ -28,11 +28,11 @@ export.memcopy_words
   while.true
     # perform read (2 cycles)
     # stack: [a3, a2, a1, a0, -n, read_ptr, write_ptr, ...]
-    dup.5 mem_loadw
+    dup.5 mem_loadw_be
 
     # peform write (2 cycles)
     # stack: [a3, a2, a1, a0, -n, read_ptr, write_ptr, ...]
-    dup.6 mem_storew
+    dup.6 mem_storew_be
 
     # note: the values of `A` are no longer necessary, use 0 to signal its a
     # padding
@@ -65,11 +65,11 @@ end
 #!     - C,B are the rate portion of the state
 #! - The value `words = end_ptr - write_ptr` must be positive and a multiple of 8
 #!
-#! Cycles: 10 + 9 * word_pairs
+#! Cycles: 9 + 6 * word_pairs
 export.pipe_double_words_to_memory.0
   dup.13 dup.13 neq # (4 cycles)
 
-  # loop until write_ptr reaches end_ptr (9 cycles per iteration + 1)
+  # loop until write_ptr reaches end_ptr (6 cycles per iteration + 1)
   # LOOP: [b, C, B, A, write_ptr, end_ptr, ...]
   while.true
     adv_pipe hperm # (2 cycles)
@@ -138,7 +138,7 @@ export.pipe_words_to_memory.0
     # => [write_ptr, B', write_ptr+4, A, ...]
 
     # save data to memory (1 cycles)
-    mem_storew
+    mem_storew_be
     # => [B', write_ptr+1, A, ...]
 
     # Fix write_ptr position (2 cycles)
@@ -178,4 +178,42 @@ export.pipe_preimage_to_memory.0
   # Check the COM (10 cycles)
   assert_eqw
   # => [write_ptr', ...]
+end
+
+#! Moves an even number of words from the advice stack to memory and asserts
+#! that their sequential hash matches a given commitment.
+#!
+#! Input: [num_words, write_ptr, COM, ...]
+#! Output: [write_ptr', ...]
+#!
+#! Cycles: 56 + 3 * num_words / 2
+export.pipe_double_words_preimage_to_memory
+  # Assert precondition (8 cycles).
+  dup is_odd assertz.err="pipe_double_words_preimage_to_memory: num_words must be even"
+  # => [num_words, write_ptr, COM, ...]
+
+  # Compute and move end_ptr (5 cycles)
+  mul.4 dup.1 add swap
+  # => [write_ptr, end_ptr, COM, ...]
+
+  # Setup the initial hasher state, which starts with a capacity word `A`.
+  # For us, the capacity word is entirely empty.
+  # (12 cycles).
+  exec.rpo::init_no_padding
+  # => [C, B, A, write_ptr, end_ptr, COM, ...]
+
+  # (9 + 3 * num_words cycles)
+  # (e.g., 25 cycles for 4 words)
+  exec.pipe_double_words_to_memory
+  # => [C, B, A, write_ptr', COM, ...]
+
+  # Leave just the digest on the stack (9 cycles).
+  exec.rpo::squeeze_digest
+  # => [B, write_ptr', COM, ...]
+
+  # Move write_ptr out of the way so we can assert the commitment (2 cycles).
+  movup.4 movdn.8
+
+  # Assert the commitment (11 cycles).
+  assert_eqw.err="pipe_double_words_preimage_to_memory: COM does not match"
 end

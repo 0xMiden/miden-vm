@@ -1,3 +1,8 @@
+---
+title: "Cryptographic Operations"
+sidebar_position: 8
+---
+
 # Cryptographic operations
 In this section we describe the AIR constraints for Miden VM cryptographic operations.
 
@@ -8,7 +13,7 @@ Thus, to describe AIR constraints for the cryptographic operations, we need to d
 ## HPERM
 The `HPERM` operation applies Rescue Prime Optimized permutation to the top $12$ elements of the stack. The stack is assumed to be arranged so that the $8$ elements of the rate are at the top of the stack. The capacity word follows, with the number of elements to be hashed at the deepest position in stack. The diagram below illustrates this graphically.
 
-![hperm](../../assets/design/stack/crypto_ops/HPERM.png)
+![hperm](../../img/design/stack/crypto_ops/HPERM.png)
 
 In the above, $r$ (located in the helper register $h_0$) is the row address from the hash chiplet set by the prover non-deterministically.
 
@@ -22,11 +27,11 @@ $$
 v_{output} = \alpha_0 + \alpha_1 \cdot op_{retstate} + \alpha_2 \cdot (h_0 + 7) + \sum_{j=0}^{11} (\alpha_{j+4} \cdot s_{11-j}')
 $$
 
-In the above, $op_{linhash}$ and $op_{retstate}$ are the unique [operation labels](../chiplets/main.md#operation-labels) for initiating a linear hash and reading the full state of the hasher respectively. Also note that the term for $\alpha_3$ is missing from the above expressions because for Rescue Prime Optimized permutation computation the index column is expected to be set to $0$.
+In the above, $op_{linhash}$ and $op_{retstate}$ are the unique [operation labels](../chiplets/index.md#operation-labels) for initiating a linear hash and reading the full state of the hasher respectively. Also note that the term for $\alpha_3$ is missing from the above expressions because for Rescue Prime Optimized permutation computation the index column is expected to be set to $0$.
 
 Using the above values, we can describe the constraint for the chiplet bus column as follows:
 
->$$
+$$
 b_{chip}' \cdot v_{input} \cdot v_{output} = b_{chip} \text{ | degree} = 3
 $$
 
@@ -46,7 +51,7 @@ Prior to the operation, the stack is expected to be arranged as follows (from th
 
 The Merkle path itself is expected to be provided by the prover non-deterministically (via the advice provider). If the prover is not able to provide the required path, the operation fails. Otherwise, the state of the stack does not change. The diagram below illustrates this graphically.
 
-![mpverify](../../assets/design/stack/crypto_ops/MPVERIFY.png)
+![mpverify](../../img/design/stack/crypto_ops/MPVERIFY.png)
 
 In the above, $r$ (located in the helper register $h_0$) is the row address from the hash chiplet set by the prover non-deterministically.
 
@@ -60,11 +65,11 @@ $$
 v_{output} = \alpha_0 + \alpha_1 \cdot op_{rethash} + \alpha_2 \cdot (h_0 + 8 \cdot s_4 - 1) + \sum_{j=0}^3\alpha_{j + 8} \cdot s_{9 - j}
 $$
 
-In the above, $op_{mpver}$ and $op_{rethash}$ are the unique [operation labels](../chiplets/main.md#operation-labels) for initiating a Merkle path verification computation and reading the hash result respectively. The sum expression for inputs computes the value of the leaf node, while the sum expression for the output computes the value of the tree root.
+In the above, $op_{mpver}$ and $op_{rethash}$ are the unique [operation labels](../chiplets/index.md#operation-labels) for initiating a Merkle path verification computation and reading the hash result respectively. The sum expression for inputs computes the value of the leaf node, while the sum expression for the output computes the value of the tree root.
 
 Using the above values, we can describe the constraint for the chiplet bus column as follows:
 
->$$
+$$
 b_{chip}' \cdot v_{input} \cdot v_{output} = b_{chip} \text{ | degree} = 3
 $$
 
@@ -85,7 +90,7 @@ The stack is expected to be arranged as follows (from the top):
 
 The Merkle path for the node is expected to be provided by the prover non-deterministically (via merkle sets). At the end of the operation, the old node value is replaced with the new root value computed based on the provided path. Everything else on the stack remains the same. The diagram below illustrates this graphically.
 
-![mrupdate](../../assets/design/stack/crypto_ops/MRUPDATE.png)
+![mrupdate](../../img/design/stack/crypto_ops/MRUPDATE.png)
 
 In the above, $r$ (located in the helper register $h_0$) is the row address from the hash chiplet set by the prover non-deterministically.
 
@@ -109,11 +114,11 @@ $$
 
 In the above, the first two expressions correspond to inputs and outputs for verifying the Merkle path between the old node value and the old tree root, while the last two expressions correspond to inputs and outputs for verifying the Merkle path between the new node value and the new tree root. The hash chiplet ensures the same set of sibling nodes are used in both of these computations.
 
-The $op_{mruold}$, $op_{mrunew}$, and $op_{rethash}$ are the unique [operation labels](../chiplets/main.md#operation-labels) used by the above computations.
+The $op_{mruold}$, $op_{mrunew}$, and $op_{rethash}$ are the unique [operation labels](../chiplets/index.md#operation-labels) used by the above computations.
 
 > $$
-b_{chip}' \cdot v_{inputold} \cdot v_{outputold} \cdot v_{inputnew} \cdot v_{outputnew} = b_{chip} \text{ | degree} = 5
-$$
+> b_{chip}' \cdot v_{inputold} \cdot v_{outputold} \cdot v_{inputnew} \cdot v_{outputnew} = b_{chip} \text{ | degree} = 5
+> $$
 
 The above constraint enforces that the specified input and output rows for both, the old and the new node/root combinations, must be present in the trace of the hash chiplet, and that they must be exactly $8 \cdot d - 1$ rows apart, where $d$ is the depth of the node. It also ensures that the computation for the old node/root combination is immediately followed by the computation for the new node/root combination.
 
@@ -134,7 +139,7 @@ The stack for the operation is expected to be arranged as follows:
 
 The diagram below illustrates stack transition for `FRIE2F4` operation.
 
-![frie2f4](../../assets/design/stack/crypto_ops/FRIE2F4.png)
+![frie2f4](../../img/design/stack/crypto_ops/FRIE2F4.png)
 
 At the high-level, the operation does the following:
 - Computes the domain value $x$ based on values of $poe$ and $d\_seg$.
@@ -166,7 +171,7 @@ The stack for the operation is expected to be arranged as follows:
 
 The diagram below illustrates the stack transition for `HORNERBASE` operation.
 
-![horner_eval_base](../../assets/design/stack/crypto_ops/HORNERBASE.png)
+![horner_eval_base](../../img/design/stack/crypto_ops/HORNERBASE.png)
 
 After calling the operation:
 - Helper registers $h_i$ will contain the values $[\alpha_0, \alpha_1, k_0, k_1, \mathsf{tmp}_0, \mathsf{tmp}_1]$.
@@ -174,31 +179,31 @@ After calling the operation:
 
 More specifically, the stack transition for this operation must satisfy the following constraints:
 
->$$
+$$
 \begin{align*}
-    \mathsf{tmp}_0 &= \mathsf{acc}_0 \cdot \alpha_0^4 - 8 \cdot \mathsf{acc}_1 \cdot \alpha_0^3 \cdot \alpha_1 - 12 \cdot \mathsf{acc}_0 \cdot \alpha_0^2 \cdot \alpha_1^2 \\ 
-    &- 12 \cdot \mathsf{acc}_1 \cdot \alpha_0^2 \cdot \alpha_1^2 - 8 \cdot \mathsf{acc}_0 \cdot \alpha_0 \cdot \alpha_1^3 \\ 
-    &+ 8 \cdot \mathsf{acc}_1\cdot\alpha_0\cdot\alpha_1^3 + 2\cdot\mathsf{acc}_0\cdot\alpha_1^4 \\ 
-    &+ 6\cdot\mathsf{acc}_1\cdot\alpha_1^4 + s_7\cdot\alpha_0^3 - 6 \cdot s_7\cdot\alpha_0\cdot\alpha_1^2 \\ 
+    \mathsf{tmp}_0 &= \mathsf{acc}_0 \cdot \alpha_0^4 - 8 \cdot \mathsf{acc}_1 \cdot \alpha_0^3 \cdot \alpha_1 - 12 \cdot \mathsf{acc}_0 \cdot \alpha_0^2 \cdot \alpha_1^2  
+    &- 12 \cdot \mathsf{acc}_1 \cdot \alpha_0^2 \cdot \alpha_1^2 - 8 \cdot \mathsf{acc}_0 \cdot \alpha_0 \cdot \alpha_1^3  
+    &+ 8 \cdot \mathsf{acc}_1\cdot\alpha_0\cdot\alpha_1^3 + 2\cdot\mathsf{acc}_0\cdot\alpha_1^4  
+    &+ 6\cdot\mathsf{acc}_1\cdot\alpha_1^4 + s_7\cdot\alpha_0^3 - 6 \cdot s_7\cdot\alpha_0\cdot\alpha_1^2  
     &- 2 \cdot s_7\cdot\alpha_1^3 + s_6\cdot\alpha_0^2 - 2\cdot s_6\cdot\alpha_1^2 + s_5\cdot\alpha_0 + s_4  \text{ | degree} = 5
 \end{align*}
 $$
 
->$$
+$$
 \begin{align*}
-\mathsf{tmp}_1 &= \mathsf{acc}_1 \cdot \alpha_0^4 + 4 \cdot \mathsf{acc}_0 \cdot \alpha_0^3 \cdot \alpha_1 + 4 \cdot \mathsf{acc}_1 \cdot \alpha_0^3 \cdot \alpha_1 \\ &+ 6 \cdot \mathsf{acc}_0 \cdot \alpha_0^2 \cdot \alpha_1^2 - 6 \cdot \mathsf{acc}_1 \cdot \alpha_0^2 \cdot \alpha_1^2 \\ &- 4 \cdot \mathsf{acc}_0 \cdot \alpha_0\cdot\alpha_1^3 - 12 \cdot \mathsf{acc}_1 \cdot \alpha_0 \cdot \alpha_1^3 \\ & - 3 \cdot\mathsf{acc}_0 \cdot \alpha_1^4 - \mathsf{acc}_1 \cdot \alpha_1^4 + 3 \cdot s_7 \cdot \alpha_0^2\cdot\alpha_1 \\ &+ 3 \cdot s_7 \cdot \alpha_0\cdot\alpha_1^2 - s_7   \cdot\alpha_1^3 + 2\cdot s_6\cdot\alpha_0\cdot\alpha_1 + s_6\cdot\alpha_1^2 + s_5\cdot\alpha_1  \text{ | degree} = 5
+\mathsf{tmp}_1 &= \mathsf{acc}_1 \cdot \alpha_0^4 + 4 \cdot \mathsf{acc}_0 \cdot \alpha_0^3 \cdot \alpha_1 + 4 \cdot \mathsf{acc}_1 \cdot \alpha_0^3 \cdot \alpha_1  &+ 6 \cdot \mathsf{acc}_0 \cdot \alpha_0^2 \cdot \alpha_1^2 - 6 \cdot \mathsf{acc}_1 \cdot \alpha_0^2 \cdot \alpha_1^2  &- 4 \cdot \mathsf{acc}_0 \cdot \alpha_0\cdot\alpha_1^3 - 12 \cdot \mathsf{acc}_1 \cdot \alpha_0 \cdot \alpha_1^3  & - 3 \cdot\mathsf{acc}_0 \cdot \alpha_1^4 - \mathsf{acc}_1 \cdot \alpha_1^4 + 3 \cdot s_7 \cdot \alpha_0^2\cdot\alpha_1  &+ 3 \cdot s_7 \cdot \alpha_0\cdot\alpha_1^2 - s_7   \cdot\alpha_1^3 + 2\cdot s_6\cdot\alpha_0\cdot\alpha_1 + s_6\cdot\alpha_1^2 + s_5\cdot\alpha_1  \text{ | degree} = 5
 \end{align*}
 $$
 
->$$
+$$
 \begin{align*}
-\mathsf{acc}_0^{'} &= \mathsf{tmp}_0\cdot\alpha_0^4 - 8 \cdot\mathsf{tmp}_1\cdot\alpha_0^3\cdot\alpha_1 - 12 \cdot\mathsf{tmp}_0\cdot\alpha_0^2\cdot\alpha_1^2  \\ &- 12\cdot\mathsf{tmp}_1\cdot\alpha_0^2\cdot\alpha_1^2 - 8\cdot\mathsf{tmp}_0\cdot\alpha_0\cdot\alpha_1^3 + 8\cdot\mathsf{tmp}_1\cdot\alpha_0\cdot\alpha_1^3 \\ &+ 2\cdot\mathsf{tmp}_0\cdot\alpha_1^4 + 6\cdot\mathsf{tmp}_1\cdot\alpha_1^4 +  s_3\cdot\alpha_0^3 - 6\cdot s_3\cdot\alpha_0\cdot\alpha_1^2 \\ &- 2\cdot s_3\cdot\alpha_1^3 +  s_2\cdot\alpha_0^2 - 2\cdot s_2\cdot\alpha_1^2 +  s_1\cdot\alpha_0 + s_0  \text{ | degree} = 5
+\mathsf{acc}_0^{'} &= \mathsf{tmp}_0\cdot\alpha_0^4 - 8 \cdot\mathsf{tmp}_1\cdot\alpha_0^3\cdot\alpha_1 - 12 \cdot\mathsf{tmp}_0\cdot\alpha_0^2\cdot\alpha_1^2   &- 12\cdot\mathsf{tmp}_1\cdot\alpha_0^2\cdot\alpha_1^2 - 8\cdot\mathsf{tmp}_0\cdot\alpha_0\cdot\alpha_1^3 + 8\cdot\mathsf{tmp}_1\cdot\alpha_0\cdot\alpha_1^3  &+ 2\cdot\mathsf{tmp}_0\cdot\alpha_1^4 + 6\cdot\mathsf{tmp}_1\cdot\alpha_1^4 +  s_3\cdot\alpha_0^3 - 6\cdot s_3\cdot\alpha_0\cdot\alpha_1^2  &- 2\cdot s_3\cdot\alpha_1^3 +  s_2\cdot\alpha_0^2 - 2\cdot s_2\cdot\alpha_1^2 +  s_1\cdot\alpha_0 + s_0  \text{ | degree} = 5
 \end{align*}
 $$
 
->$$
+$$
 \begin{align*}
-\mathsf{acc}_1^{'} &= \mathsf{tmp}_1\cdot\alpha_0^4 + 4\cdot\mathsf{tmp}_0\cdot\alpha_0^3\cdot\alpha_1 + 4\cdot\mathsf{tmp}_1\cdot\alpha_0^3\cdot\alpha_1 + 6\cdot\mathsf{tmp}_0\cdot\alpha_0^2\cdot\alpha_1^2 \\ &- 6\cdot\mathsf{tmp}_1\cdot\alpha_0^2\cdot\alpha_1^2 - 4 \cdot \mathsf{tmp}_0\cdot\alpha_0\cdot\alpha_1^3 -12\cdot\mathsf{tmp}_1\cdot\alpha_0\cdot\alpha_1^3 \\ &- 3\cdot\mathsf{tmp}_0\cdot\alpha_1^4 - \mathsf{tmp}_1\cdot\alpha_1^4 + 3\cdot s_3\cdot\alpha_0^2\cdot\alpha_1 \\ &+ 3\cdot s_3\cdot\alpha_0\cdot\alpha_1^2 -  s_3\cdot\alpha_1^3 + 2\cdot s_2\cdot\alpha_0\cdot\alpha_1 +  s_2\cdot\alpha_1^2 +  s_1\cdot\alpha_1  \text{ | degree} = 5
+\mathsf{acc}_1^{'} &= \mathsf{tmp}_1\cdot\alpha_0^4 + 4\cdot\mathsf{tmp}_0\cdot\alpha_0^3\cdot\alpha_1 + 4\cdot\mathsf{tmp}_1\cdot\alpha_0^3\cdot\alpha_1 + 6\cdot\mathsf{tmp}_0\cdot\alpha_0^2\cdot\alpha_1^2  &- 6\cdot\mathsf{tmp}_1\cdot\alpha_0^2\cdot\alpha_1^2 - 4 \cdot \mathsf{tmp}_0\cdot\alpha_0\cdot\alpha_1^3 -12\cdot\mathsf{tmp}_1\cdot\alpha_0\cdot\alpha_1^3  &- 3\cdot\mathsf{tmp}_0\cdot\alpha_1^4 - \mathsf{tmp}_1\cdot\alpha_1^4 + 3\cdot s_3\cdot\alpha_0^2\cdot\alpha_1  &+ 3\cdot s_3\cdot\alpha_0\cdot\alpha_1^2 -  s_3\cdot\alpha_1^3 + 2\cdot s_2\cdot\alpha_0\cdot\alpha_1 +  s_2\cdot\alpha_1^2 +  s_1\cdot\alpha_1  \text{ | degree} = 5
 \end{align*}
 $$
 
@@ -226,7 +231,7 @@ The stack for the operation is expected to be arranged as follows:
 
 The diagram below illustrates the stack transition for `HORNEREXT` operation.
 
-![horner_eval_ext](../../assets/design/stack/crypto_ops/HORNEREXT.png)
+![horner_eval_ext](../../img/design/stack/crypto_ops/HORNEREXT.png)
 
 After calling the operation:
 - Helper registers $h_i$ will contain the values $[\alpha_0, \alpha_1, k_0, k_1, \mathsf{tmp}_0, \mathsf{tmp}_1]$.
@@ -234,27 +239,27 @@ After calling the operation:
 
 More specifically, the stack transition for this operation must satisfy the following constraints:
 
->$$
+$$
 \begin{align*}
-\mathsf{tmp}_0 &= \mathsf{acc}_0\cdot \alpha_0^2 - 4\cdot \mathsf{acc}_1\cdot \alpha_0\cdot \alpha_1 - 2\cdot \mathsf{acc}_0\cdot \alpha_1^2 \\ &- 2\cdot \mathsf{acc}_1\cdot \alpha_1^2 + s_6\cdot \alpha_0 -2\cdot s_7\cdot \alpha_1 + s_4  \text{ | degree} = 3
+\mathsf{tmp}_0 &= \mathsf{acc}_0\cdot \alpha_0^2 - 4\cdot \mathsf{acc}_1\cdot \alpha_0\cdot \alpha_1 - 2\cdot \mathsf{acc}_0\cdot \alpha_1^2  &- 2\cdot \mathsf{acc}_1\cdot \alpha_1^2 + s_6\cdot \alpha_0 -2\cdot s_7\cdot \alpha_1 + s_4  \text{ | degree} = 3
 \end{align*}
 $$
 
->$$
+$$
 \begin{align*}
-\mathsf{tmp}_1 &= \mathsf{acc}_1\cdot \alpha_0^2 + 2\cdot \mathsf{acc}_0\cdot \alpha_0\cdot \alpha_1 + 2\cdot \mathsf{acc}_1\cdot \alpha_0\cdot \alpha_1 \\ &+ \mathsf{acc}_0\cdot \alpha_1^2 - \mathsf{acc}_1\cdot \alpha_1^2 + s_7\cdot \alpha_0 + s_6\cdot \alpha_1 + s_7\cdot \alpha_1 + s_5  \text{ | degree} = 3
+\mathsf{tmp}_1 &= \mathsf{acc}_1\cdot \alpha_0^2 + 2\cdot \mathsf{acc}_0\cdot \alpha_0\cdot \alpha_1 + 2\cdot \mathsf{acc}_1\cdot \alpha_0\cdot \alpha_1  &+ \mathsf{acc}_0\cdot \alpha_1^2 - \mathsf{acc}_1\cdot \alpha_1^2 + s_7\cdot \alpha_0 + s_6\cdot \alpha_1 + s_7\cdot \alpha_1 + s_5  \text{ | degree} = 3
 \end{align*}
 $$
 
->$$
+$$
 \begin{align*}
-\mathsf{acc}_0^{'} &= \mathsf{tmp}_0\cdot \alpha_0^2 - 4\cdot \mathsf{tmp}_1\cdot \alpha_0\cdot \alpha_1 - 2\cdot \mathsf{tmp}_0\cdot \alpha_1^2 \\& - 2\cdot \mathsf{tmp}_1\cdot \alpha_1^2 + s_2\cdot \alpha_0 - 2\cdot s_3\cdot \alpha_1 + s_0  \text{ | degree} = 3
+\mathsf{acc}_0^{'} &= \mathsf{tmp}_0\cdot \alpha_0^2 - 4\cdot \mathsf{tmp}_1\cdot \alpha_0\cdot \alpha_1 - 2\cdot \mathsf{tmp}_0\cdot \alpha_1^2 & - 2\cdot \mathsf{tmp}_1\cdot \alpha_1^2 + s_2\cdot \alpha_0 - 2\cdot s_3\cdot \alpha_1 + s_0  \text{ | degree} = 3
 \end{align*}
 $$
 
->$$
+$$
 \begin{align*}
-\mathsf{acc}_1^{'} &= \mathsf{tmp}_1\cdot \alpha_0^2 + 2\cdot \mathsf{tmp}_0\cdot \alpha_0\cdot \alpha_1 + 2\cdot \mathsf{tmp}_1\cdot \alpha_0\cdot \alpha_1 \\& + \mathsf{tmp}_0\cdot \alpha_1^2 - \mathsf{tmp}_1\cdot \alpha_1^2 + s_3\cdot \alpha_0 + s_2\cdot \alpha_1 + s_3\cdot \alpha_1 + s_1  \text{ | degree} = 3
+\mathsf{acc}_1^{'} &= \mathsf{tmp}_1\cdot \alpha_0^2 + 2\cdot \mathsf{tmp}_0\cdot \alpha_0\cdot \alpha_1 + 2\cdot \mathsf{tmp}_1\cdot \alpha_0\cdot \alpha_1 & + \mathsf{tmp}_0\cdot \alpha_1^2 - \mathsf{tmp}_1\cdot \alpha_1^2 + s_3\cdot \alpha_0 + s_2\cdot \alpha_1 + s_3\cdot \alpha_1 + s_1  \text{ | degree} = 3
 \end{align*}
 $$
 
@@ -278,7 +283,7 @@ The stack is expected to be arranged as follows (from the top):
 
 The diagram below illustrates this graphically.
 
-![evalcircuit](../../assets/design/stack/crypto_ops/EVALCIRCUIT.png)
+![evalcircuit](../../img/design/stack/crypto_ops/EVALCIRCUIT.png)
 
 Calling the operation has no effect on the stack or on helper registers. Instead, the operation makes a request to the `ACE` chiplet using the chiplets' bus. More precisely, let 
 
@@ -287,13 +292,129 @@ v_{ace} = \alpha_0 + \mathsf{ACE\_LABEL}\cdot\alpha_1 + ctx \cdot\alpha_2 + ptr\
 $$
 
 where:
-- $\mathsf{ACE\_LABEL}$ is the unique [operation labels](../chiplets/main.md#operation-labels) for initiating a circuit evaluation request to the ACE chiplet,
+- $\mathsf{ACE\_LABEL}$ is the unique [operation labels](../chiplets/index.md#operation-labels) for initiating a circuit evaluation request to the ACE chiplet,
 - $ctx$ is the memory context from which the operation was initiated,
 - $clk$ is the clock cycle at which the operation was initiated,
 - $ptr$, $n_{read}$ and $n_{eval}$ are as above.
 
 Then, using the above value, we can describe the constraint for the chiplets' bus column as follows:
 
->$$
+$$
 b_{chip}' \cdot v_{ace} = b_{chip} \text{ | degree} = 2
 $$
+
+## LOG_PRECOMPILE
+
+The `log_precompile` operation logs a precompile event by recording two user-provided words (`TAG` and `COMM`) into the precompile transcript (implemented via an RPO sponge). Initialization and boundary enforcement are handled via variable‑length public inputs; see [Precompile flow](./precompiles.md) for a high‑level overview. This section concentrates on the stack interaction and bus messages.
+
+### Operation Overview
+
+The stack is expected to be arranged as `[COMM, TAG, PAD, ...]`. See [Precompiles](./precompiles.md#core-data) for a thorough explanation of the precompile commitment model. In brief:
+- `TAG` encodes the precompile's event ID (first element) along with metadata or simple outputs (remaining elements),
+- `COMM` commits to the precompile inputs (and may include outputs for long results),
+- `PAD` is a word that will get overwritten in the next cycle.
+
+Additionally, the processor maintains a persistent precompile transcript state word `CAP` (the sponge capacity) that is updated with each `LOG_PRECOMPILE` invocation. This word is provided non-deterministically via helper registers and is denoted `CAP_PREV`. The virtual table bus links each removal to a matching insertion, ensuring a single, consistent state sequence.
+
+The operation evaluates `[CAP_NEXT, R0, R1] = RPO([CAP_PREV, TAG, COMM])`, with the following stack transition
+
+```
+Before:  [COMM, TAG, PAD,      ...]
+After:   [R1,   R0,  CAP_NEXT, ...]
+```
+
+The VM updates its internal precompile transcript state (`CAP_NEXT`) using a bus as we describe below. The rate outputs `R0` and `R1` are transient; together with `CAP_NEXT`, they are typically dropped by the caller immediately after logging.
+
+The operation uses the following helper registers:
+- $h_0$: Hasher chiplet row address
+- $h_1, h_2, h_3, h_4$: Previous capacity `CAP_PREV`
+
+Note: helper registers expose `CAP_PREV` for bus constraints only; the VM maintains the
+transcript state internally between invocations.
+
+### Bus Communication
+
+#### Hasher chiplet
+
+The following two messages are sent to the hasher chiplet, ensuring the validity of the resulting permutation. Let $s_i$ denote the $i$-th stack column at that row (top of stack is $s_0$). The elements appearing on the bus are:
+
+$$
+\begin{aligned}
+\mathsf{CAP}^{\text{prev}}_i &= h_{i+1} &&\text{(helper registers)}\\
+\mathsf{TAG}_i &= s_{7-i} &&\text{(stack slots 4..7)}\\
+\mathsf{COMM}_i &= s_{3-i} &&\text{(stack slots 0..3)}
+\end{aligned}
+\qquad i \in \{0,1,2,3\}.
+$$
+
+The input message therefore reduces the RPO state in the canonical order `[CAP_PREV, TAG, COMM]`:
+
+$$
+v_{\text{input}} = \alpha_0 + \alpha_1 \cdot op_{linhash} + \alpha_2 \cdot h_0 + \sum_{i=0}^{3} \alpha_{i+3} \cdot \mathsf{CAP}_{\text{prev},i} + \sum_{i=0}^{3} \alpha_{i+7} \cdot \mathsf{TAG}_i + \sum_{i=0}^{3} \alpha_{i+11} \cdot \mathsf{COMM}_i.
+$$
+
+Seven rows later, the `op_retstate` response provides the permuted state `[CAP_{next}, R0, R1]`. Denote the stack after the instruction by $s'_i$; the top twelve elements are `[R1, R0, CAP_NEXT]` in reverse order. Thus
+
+$$
+\begin{aligned}
+\mathsf{R}_1{}_i &= s'_{3-i},\\
+\mathsf{R}_0{}_i &= s'_{7-i},\\
+\mathsf{CAP}^{\text{next}}_i &= s'_{11-i},
+\end{aligned}
+\qquad i \in \{0,1,2,3\},
+$$
+
+and the response message is
+
+$$
+v_{\text{output}} = \alpha_0 + \alpha_1 \cdot op_{retstate} + \alpha_2 \cdot (h_0 + 7) + \sum_{i=0}^{3} \alpha_{i+4} \cdot \mathsf{CAP}^{\text{next}}_i+ \sum_{i=0}^{3} \alpha_{i+8} \cdot \mathsf{R}_0{}_i + \sum_{i=0}^{3} \alpha_{i+12} \cdot \mathsf{R}_1{}_i.
+$$
+
+Using the above values, we can describe the constraint for the chiplet bus column as follows:
+
+$$
+b_{chip}' \cdot v_{input} \cdot v_{output} = b_{chip}
+$$
+
+The above constraint enforces that the specified input and output rows must be present in the trace of the hash chiplet, and that they must be exactly 7 rows apart. The RPO permutation outputs `[CAP, R0, R1]`; on the stack, the VM stores these words as `[R1, R0, CAP]`.
+
+Given the similarity with the `HPERM` opcode which sends the same message, albeit from different variables in the trace, it should be possible to combine the bus constraint in a way that avoids increasing the degree of the overall bus expression.
+
+### Capacity Initialization
+
+Inside the VM, the transcript state (sponge capacity) is tracked via the virtual table bus: each update removes the previous entry before inserting the next one.
+
+We denote the messages for removing and inserting the message as
+
+$$
+v_{rem} = \alpha_0 + \alpha_1 \cdot op_{log\_precompile} + \sum_{j=0}^{3} \alpha_{j+2} \cdot \mathsf{CAP\_PREV}_j
+$$
+
+$$
+v_{ins} = \alpha_0 + \alpha_1 \cdot op_{log\_precompile} + \sum_{j=0}^{3} \alpha_{j+2} \cdot \mathsf{CAP\_NEXT}_j
+$$
+
+The bus constraint is applied to the virtual table column as follows.
+
+$$
+b_{vtable}' \cdot v_{rem} = b_{vtable} \cdot v_{ins}
+$$
+
+To ensure the column accounts for the initial and final transcript state, the verifier initializes the bus with variable‑length public inputs (see kernel ROM chiplet). More specifically, it constrains the first value of the bus to be equal to
+
+$$
+b_{vtable,0} = \frac{v_{ins, init}}{v_{rem, last}}
+$$
+
+Usually, we initialize the transcript state to the empty word `[0,0,0,0]`, though it may also be used to extend an existing running state from a previous execution. The final transcript state is provided to the verifier (as a variable‑length public input) and enforced via the boundary constraint.
+The messages $v_{ins, init}$ and $v_{rem, last}$ are given by
+
+$$
+v_{ins,init} = \alpha_0 + \alpha_1 \cdot op_{log\_precompile},
+$$
+
+$$
+v_{rem,last} = \alpha_0 + \alpha_1 \cdot op_{log\_precompile} + \sum_{j=0}^{3} \alpha_{j+2} \cdot \mathsf{CAP\_FINAL}_j.
+$$
+
+The bus records only the transcript state (sponge capacity); the VM never finalizes the digest internally. Instead, the verifier (or any external consumer) reconstructs the transcript from the recorded requests. By convention, when a digest is required, the transcript is finalized by absorbing two empty words and applying one more permutation—matching the fact that `log_precompile` discards the rate outputs (`R0`, `R1`) after each absorption.

@@ -324,6 +324,14 @@ pub enum ParsingError {
         span: SourceSpan,
         message: String,
     },
+    #[error("deprecated instruction: `{instruction}` has been removed")]
+    #[diagnostic(help("use `{}` instead", replacement))]
+    DeprecatedInstruction {
+        #[label("this instruction is no longer supported")]
+        span: SourceSpan,
+        instruction: String,
+        replacement: String,
+    },
 }
 
 impl ParsingError {

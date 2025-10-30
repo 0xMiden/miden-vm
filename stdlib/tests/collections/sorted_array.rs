@@ -22,9 +22,9 @@ fn test_sorted_array_find_word() {
             {TRUNCATE_STACK_PROC}
 
             begin
-                push.8456.415.4922.593 mem_storew.100 dropw
-                push.8675.5816.5458.2767 mem_storew.104 dropw
-                push.3015.7211.2002.5143 mem_storew.108 dropw
+                push.8456.415.4922.593 mem_storew_be.100 dropw
+                push.8675.5816.5458.2767 mem_storew_be.104 dropw
+                push.3015.7211.2002.5143 mem_storew_be.108 dropw
 
                 push.112 push.100 push.[{key}]
 
@@ -71,9 +71,9 @@ fn test_unsorted_array_find_word_fails() {
 
         begin
             # these words are NOT in ascending order, must fail
-            push.8675.5816.5458.2767 mem_storew.100 dropw
-            push.8456.415.4922.593 mem_storew.104 dropw
-            push.3015.7211.2002.5143 mem_storew.108 dropw
+            push.8675.5816.5458.2767 mem_storew_be.100 dropw
+            push.8456.415.4922.593 mem_storew_be.104 dropw
+            push.3015.7211.2002.5143 mem_storew_be.108 dropw
 
             push.112 push.100 push.[8675,5816,5458,2767]
 
@@ -112,14 +112,14 @@ fn test_sorted_key_value_array_find_key() {
             {TRUNCATE_STACK_PROC}
 
             begin
-                push.8456.415.4922.593 mem_storew.100 dropw
-                push.8595.8794.8303.7256 mem_storew.104 dropw
+                push.8456.415.4922.593 mem_storew_be.100 dropw
+                push.8595.8794.8303.7256 mem_storew_be.104 dropw
 
-                push.3348.6058.5470.2813 mem_storew.108 dropw
-                push.3015.7211.2002.5143 mem_storew.112 dropw
+                push.3348.6058.5470.2813 mem_storew_be.108 dropw
+                push.3015.7211.2002.5143 mem_storew_be.112 dropw
 
-                push.7513.7106.9944.7176 mem_storew.116 dropw
-                push.4942.5573.1077.1968 mem_storew.120 dropw
+                push.7513.7106.9944.7176 mem_storew_be.116 dropw
+                push.4942.5573.1077.1968 mem_storew_be.120 dropw
 
                 push.124 push.100 push.[{key}]
 
@@ -154,14 +154,14 @@ fn test_sorted_key_value_array_find_half_key() {
             {TRUNCATE_STACK_PROC}
 
             begin
-                push.9.9.3.4 mem_storew.100 dropw
-                push.5.5.5.5 mem_storew.104 dropw
+                push.9.9.3.4 mem_storew_be.100 dropw
+                push.5.5.5.5 mem_storew_be.104 dropw
 
-                push.10.11.12.13 mem_storew.108 dropw
-                push.3.3.3.3 mem_storew.112 dropw
+                push.10.11.12.13 mem_storew_be.108 dropw
+                push.3.3.3.3 mem_storew_be.112 dropw
 
-                push.1.1.1.103 mem_storew.116 dropw
-                push.8.8.8.8 mem_storew.120 dropw
+                push.1.1.1.103 mem_storew_be.116 dropw
+                push.8.8.8.8 mem_storew_be.120 dropw
 
                 push.124 push.100 push.{key_suffix} push.{key_prefix}
 
@@ -208,14 +208,14 @@ fn test_unsorted_key_value_find_key_fails() {
 
         begin
             # these keys are NOT in ascending order, must fail
-            push.8675.5816.5458.2767 mem_storew.100 dropw
-            push.4942.5573.1077.1968 mem_storew.104 dropw
+            push.8675.5816.5458.2767 mem_storew_be.100 dropw
+            push.4942.5573.1077.1968 mem_storew_be.104 dropw
 
-            push.8456.415.4922.593 mem_storew.108 dropw
-            push.3015.7211.2002.5143 mem_storew.112 dropw
+            push.8456.415.4922.593 mem_storew_be.108 dropw
+            push.3015.7211.2002.5143 mem_storew_be.112 dropw
 
-            push.3015.7211.2002.5143 mem_storew.116 dropw
-            push.8595.8794.8303.7256 mem_storew.120 dropw
+            push.3015.7211.2002.5143 mem_storew_be.116 dropw
+            push.8595.8794.8303.7256 mem_storew_be.120 dropw
 
             push.124 push.100 push.[8675,5816,5458,2767]
 
@@ -239,13 +239,13 @@ fn test_misaligned_key_value_find_key_fails() {
 
         begin
             # last value is missing
-            push.8456.415.4922.593 mem_storew.100 dropw
-            push.8595.8794.8303.7256 mem_storew.104 dropw
+            push.8456.415.4922.593 mem_storew_be.100 dropw
+            push.8595.8794.8303.7256 mem_storew_be.104 dropw
 
-            push.3348.6058.5470.2813 mem_storew.108 dropw
-            push.3015.7211.2002.5143 mem_storew.112 dropw
+            push.3348.6058.5470.2813 mem_storew_be.108 dropw
+            push.3015.7211.2002.5143 mem_storew_be.112 dropw
 
-            push.7513.7106.9944.7176 mem_storew.116 dropw
+            push.7513.7106.9944.7176 mem_storew_be.116 dropw
 
             push.120 push.100 push.[8675,5816,5458,2767]
 

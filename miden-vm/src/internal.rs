@@ -264,7 +264,9 @@ impl InputFile {
 
     /// Parse a `Word` from a hex string.
     pub fn parse_word(word_hex: &str) -> Result<Word, String> {
-        let word_value = &word_hex[2..];
+        let Some(word_value) = word_hex.strip_prefix("0x") else {
+            return Err(format!("failed to decode `Word` from hex {word_hex} - missing 0x prefix"));
+        };
         let mut word_data = [0u8; 32];
         hex::decode_to_slice(word_value, &mut word_data)
             .map_err(|e| format!("failed to decode `Word` from hex {word_hex} - {e}"))?;
@@ -364,5 +366,42 @@ mod tests {
         let inputs: InputFile = serde_json::from_str(program_with_merkle_tree).unwrap();
         let merkle_store = inputs.parse_merkle_store().unwrap();
         assert!(merkle_store.is_some());
+    }
+
+    #[test]
+    fn test_parse_word_missing_0x_prefix() {
+        let result = InputFile::parse_word(
+            "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("missing 0x prefix"));
+    }
+
+    #[test]
+    fn test_parse_word_edge_cases() {
+        // Empty string
+        let result = InputFile::parse_word("");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("missing 0x prefix"));
+
+        // Just "0x" without hex data
+        let result = InputFile::parse_word("0x");
+        assert!(result.is_err());
+
+        // Too short hex (less than 64 chars after 0x)
+        let result = InputFile::parse_word("0x123");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_word_valid_hex() {
+        let valid_hex = "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
+        let result = InputFile::parse_word(valid_hex);
+        assert!(result.is_ok());
+
+        // Test that the parsed word is not zero word
+        let word = result.unwrap();
+        let zero_word = Word::from([ZERO; 4]);
+        assert_ne!(word, zero_word);
     }
 }

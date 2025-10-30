@@ -8,9 +8,9 @@ use serde::{Deserialize, Serialize};
 
 use super::{MastNodeErrorContext, MastNodeExt};
 use crate::{
-    OPCODE_LOOP,
+    Idx, OPCODE_LOOP,
     chiplets::hasher,
-    mast::{DecoratorId, MastForest, MastForestError, MastNodeId, Remapping},
+    mast::{DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId, Remapping},
 };
 
 // LOOP NODE
@@ -43,7 +43,7 @@ impl LoopNode {
 impl LoopNode {
     /// Returns a new [`LoopNode`] instantiated with the specified body node.
     pub fn new(body: MastNodeId, mast_forest: &MastForest) -> Result<Self, MastForestError> {
-        if body.as_usize() >= mast_forest.nodes.len() {
+        if body.to_usize() >= mast_forest.nodes.len() {
             return Err(MastForestError::NodeIdOverflow(body, mast_forest.nodes.len()));
         }
         let digest = {
@@ -80,7 +80,7 @@ impl LoopNode {
 }
 
 impl MastNodeErrorContext for LoopNode {
-    fn decorators(&self) -> impl Iterator<Item = (usize, DecoratorId)> {
+    fn decorators(&self) -> impl Iterator<Item = DecoratedOpLink> {
         self.before_enter.iter().chain(&self.after_exit).copied().enumerate()
     }
 }
@@ -220,6 +220,13 @@ impl MastNodeExt for LoopNode {
 
     fn append_children_to(&self, target: &mut Vec<MastNodeId>) {
         target.push(self.body());
+    }
+
+    fn for_each_child<F>(&self, mut f: F)
+    where
+        F: FnMut(MastNodeId),
+    {
+        f(self.body());
     }
 
     fn domain(&self) -> Felt {

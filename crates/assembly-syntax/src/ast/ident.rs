@@ -54,6 +54,10 @@ pub enum CaseKindError {
 /// guaranteed globally, but generally holds within a given module. In the future we may make these
 /// actually interned strings with a global interner, but for now it is simply best-effort.
 #[derive(Clone)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(winter_serde(true))
+)]
 pub struct Ident {
     /// The source span associated with this identifier.
     ///

@@ -133,35 +133,11 @@ fn get_nodes_to_remove(
         .collect();
 
     for node in mast_forest.nodes() {
-        match node {
-            MastNode::Join(node) => {
-                if nodes_to_remove.contains(&node.first()) {
-                    nodes_to_remove.remove(&node.first());
-                }
-                if nodes_to_remove.contains(&node.second()) {
-                    nodes_to_remove.remove(&node.second());
-                }
-            },
-            MastNode::Split(node) => {
-                if nodes_to_remove.contains(&node.on_true()) {
-                    nodes_to_remove.remove(&node.on_true());
-                }
-                if nodes_to_remove.contains(&node.on_false()) {
-                    nodes_to_remove.remove(&node.on_false());
-                }
-            },
-            MastNode::Loop(node) => {
-                if nodes_to_remove.contains(&node.body()) {
-                    nodes_to_remove.remove(&node.body());
-                }
-            },
-            MastNode::Call(node) => {
-                if nodes_to_remove.contains(&node.callee()) {
-                    nodes_to_remove.remove(&node.callee());
-                }
-            },
-            MastNode::Block(_) | MastNode::Dyn(_) | MastNode::External(_) => (),
-        }
+        node.for_each_child(|child_id| {
+            if nodes_to_remove.contains(&child_id) {
+                nodes_to_remove.remove(&child_id);
+            }
+        });
     }
 
     nodes_to_remove
@@ -348,7 +324,7 @@ impl MastForestBuilder {
                 basic_block_node.num_op_batches(),
             ) {
                 for (op_idx, decorator) in basic_block_node.raw_decorator_iter() {
-                    decorators.push((op_idx + operations.len(), *decorator));
+                    decorators.push((op_idx + operations.len(), decorator));
                 }
                 for batch in basic_block_node.op_batches() {
                     operations.extend(batch.raw_ops());
@@ -359,8 +335,7 @@ impl MastForestBuilder {
                 if !operations.is_empty() {
                     let block_ops = core::mem::take(&mut operations);
                     let block_decorators = core::mem::take(&mut decorators);
-                    let merged_basic_block_id =
-                        self.ensure_block(block_ops, Some(block_decorators))?;
+                    let merged_basic_block_id = self.ensure_block(block_ops, block_decorators)?;
 
                     merged_basic_blocks.push(merged_basic_block_id);
                 }
@@ -372,7 +347,7 @@ impl MastForestBuilder {
         self.merged_basic_block_ids.extend(contiguous_basic_block_ids.iter());
 
         if !operations.is_empty() || !decorators.is_empty() {
-            let merged_basic_block = self.ensure_block(operations, Some(decorators))?;
+            let merged_basic_block = self.ensure_block(operations, decorators)?;
             merged_basic_blocks.push(merged_basic_block);
         }
 
@@ -431,7 +406,7 @@ impl MastForestBuilder {
     pub fn ensure_block(
         &mut self,
         operations: Vec<Operation>,
-        decorators: Option<DecoratorList>,
+        decorators: DecoratorList,
     ) -> Result<MastNodeId, Report> {
         let block = BasicBlockNode::new(operations, decorators)
             .into_diagnostic()
@@ -660,7 +635,7 @@ mod tests {
             (8, block1_decorator3), // Decorator for Push(3) at index 8
         ];
 
-        let block1_id = builder.ensure_block(block1_ops.clone(), Some(block1_decorators)).unwrap();
+        let block1_id = builder.ensure_block(block1_ops.clone(), block1_decorators).unwrap();
 
         // Sanity check the test itself makes sense
         let block1 = builder.mast_forest[block1_id].get_basic_block().unwrap().clone();
@@ -679,7 +654,7 @@ mod tests {
             (1, block2_decorator2), // Decorator for Mul
         ]; // [push mul] [3]
 
-        let block2_id = builder.ensure_block(block2_ops.clone(), Some(block2_decorators)).unwrap();
+        let block2_id = builder.ensure_block(block2_ops.clone(), block2_decorators).unwrap();
 
         // Merge the blocks
         let merged_blocks = builder.merge_basic_blocks(&[block1_id, block2_id]).unwrap();

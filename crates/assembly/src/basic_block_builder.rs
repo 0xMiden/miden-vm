@@ -2,7 +2,7 @@ use alloc::{borrow::Borrow, string::ToString, sync::Arc, vec::Vec};
 
 use miden_assembly_syntax::{ast::Instruction, debuginfo::Span, diagnostics::Report};
 use miden_core::{
-    AssemblyOp, Decorator, DecoratorList, EventId, Felt, Operation,
+    AssemblyOp, Decorator, DecoratorList, Felt, Operation,
     mast::{DecoratorId, MastNodeId},
     sys_events::SystemEvent,
 };
@@ -98,7 +98,7 @@ impl BasicBlockBuilder<'_> {
     /// Converts the system event into its corresponding event ID, and adds an `Emit` operation
     /// to the list of basic block operations.
     pub fn push_system_event(&mut self, sys_event: SystemEvent) {
-        let event_id: EventId = sys_event.into();
+        let event_id = sys_event.event_id();
         self.push_ops([Operation::Push(event_id.as_felt()), Operation::Emit, Operation::Drop]);
     }
 }
@@ -180,11 +180,7 @@ impl BasicBlockBuilder<'_> {
     pub fn make_basic_block(&mut self) -> Result<Option<MastNodeId>, Report> {
         if !self.ops.is_empty() {
             let ops = self.ops.drain(..).collect();
-            let decorators = if !self.decorators.is_empty() {
-                Some(self.decorators.drain(..).collect())
-            } else {
-                None
-            };
+            let decorators = self.decorators.drain(..).collect();
 
             let basic_block_node_id = self.mast_forest_builder.ensure_block(ops, decorators)?;
 

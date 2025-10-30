@@ -10,7 +10,7 @@ use miden_formatting::{
 use serde::{Deserialize, Serialize};
 
 use super::{MastNodeErrorContext, MastNodeExt};
-use crate::mast::{DecoratorId, MastForest, MastNodeId, Remapping};
+use crate::mast::{DecoratedOpLink, DecoratorId, MastForest, MastNodeId, Remapping};
 
 // EXTERNAL NODE
 // ================================================================================================
@@ -45,7 +45,7 @@ impl ExternalNode {
 }
 
 impl MastNodeErrorContext for ExternalNode {
-    fn decorators(&self) -> impl Iterator<Item = (usize, DecoratorId)> {
+    fn decorators(&self) -> impl Iterator<Item = DecoratedOpLink> {
         self.before_enter.iter().chain(&self.after_exit).copied().enumerate()
     }
 }
@@ -190,6 +190,13 @@ impl MastNodeExt for ExternalNode {
 
     fn append_children_to(&self, _target: &mut Vec<MastNodeId>) {
         // No children for external nodes
+    }
+
+    fn for_each_child<F>(&self, _f: F)
+    where
+        F: FnMut(MastNodeId),
+    {
+        // ExternalNode has no children
     }
 
     fn domain(&self) -> Felt {

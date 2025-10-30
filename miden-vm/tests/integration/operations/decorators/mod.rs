@@ -9,7 +9,6 @@ use miden_processor::{
 use miden_prover::Word;
 
 mod advice;
-mod asmop;
 mod events;
 
 // TEST HOST

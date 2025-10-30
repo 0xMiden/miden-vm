@@ -107,7 +107,7 @@ end
 export.load_fri_layer_commitments
     # We need to store the current FRI layer LDE domain size and its logarithm.
     padw exec.constants::get_lde_domain_info_word 
-    exec.constants::tmp1 mem_storew
+    exec.constants::tmp1 mem_storew_be
     # => [Y, ...] where `Y` is as "garbage" word
 
     # Address containing the first layer commitment
@@ -128,7 +128,7 @@ export.load_fri_layer_commitments
         dup.5
         add.4
         swap.6
-        mem_storew
+        mem_storew_be
         #=> [COM, num_layers, ptr_layer + 4, y, y, ...]
 
         # Reseed
@@ -139,7 +139,7 @@ export.load_fri_layer_commitments
         exec.random_coin::get_rate_1
         #=> [R1, ZERO, num_layers, ptr_layer + 4, y, y, ... ]
         push.0.0
-        exec.constants::tmp1 mem_loadw
+        exec.constants::tmp1 mem_loadw_be
         # => [lde_size, log2(lde_size), lde_generator, 0, a1, a0, Y, num_layers, ptr_layer + 4, y, y, ...]
 
         # Compute and save to memory new lde_size and its new logarithm
@@ -147,7 +147,7 @@ export.load_fri_layer_commitments
         swap
         sub.2
         swap
-        exec.constants::tmp1 mem_storew
+        exec.constants::tmp1 mem_storew_be
         # => [lde_size / 4, log2(lde_size) - 2, lde_generator, 0, a1, a0, num_layers, ptr_layer + 4, y, y, ...]
 
         # Move the pointer higher up the stack
@@ -161,7 +161,7 @@ export.load_fri_layer_commitments
         dup.5
         add.4
         swap.6
-        mem_storew
+        mem_storew_be
         swapw
         # => [num_layers, ptr_layer + 8, y, y, lde_size / 4, log2(lde_size) - 2, a1, a0, ...]
 
@@ -193,7 +193,7 @@ export.load_and_verify_remainder
     # Load remainder commitment and save it at `TMP1`
     padw
     adv_loadw
-    exec.constants::tmp1 mem_storew
+    exec.constants::tmp1 mem_storew_be
     #=> [COM, ...]
 
     # Reseed with remainder commitment
@@ -227,7 +227,7 @@ export.load_and_verify_remainder
         exec.load_fri_remainder_poly_max_degree_plus_1_half
 
         # Compare Remainder_poly_com with the read commitment
-        exec.constants::tmp1 mem_loadw
+        exec.constants::tmp1 mem_loadw_be
         movup.4
         assert_eq
         movup.3
@@ -248,7 +248,7 @@ export.load_and_verify_remainder
         # => [Y, Remainder_poly_com, Y, remainder_poly_ptr, remainder_size, y, y]
 
         # Compare Remainder_poly_com with the read commitment
-        exec.constants::tmp1 mem_loadw
+        exec.constants::tmp1 mem_loadw_be
         movup.4
         assert_eq
         movup.3

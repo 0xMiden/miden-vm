@@ -10,15 +10,13 @@ pub mod tests;
 // ================================================================================================
 
 /// The number of unique transition constraints in the system operations.
-pub const NUM_CONSTRAINTS: usize = 3;
+pub const NUM_CONSTRAINTS: usize = 1;
 
 /// The degrees of constraints in the individual constraints of the system ops.
 pub const CONSTRAINT_DEGREES: [usize; NUM_CONSTRAINTS] = [
     // Given it is a degree 7 operation, 7 is added to all the individual constraints
     // degree.
     8, // constraint for ASSERT operation.
-    8, // constraint for FMPADD operation.
-    8, // constraint for FMPUPDATE operation.
 ];
 
 // SYSTEM OPERATIONS TRANSITION CONSTRAINTS
@@ -48,12 +46,6 @@ pub fn enforce_constraints<E: FieldElement>(
     // enforces assert operation constraints.
     index += enforce_assert_constraints(frame, result, op_flag.assert());
 
-    // enforces fmpadd operation constraints.
-    index += enforce_fmpadd_constraints(frame, &mut result[index..], op_flag.fmpadd());
-
-    // enforces fmpupdate operation constraints.
-    index += enforce_fmpupdate_constraints(frame, &mut result[index..], op_flag.fmpupdate());
-
     index
 }
 
@@ -70,40 +62,6 @@ pub fn enforce_assert_constraints<E: FieldElement>(
 ) -> usize {
     // Enforces the first element in the current frame to ONE.
     result[0] = op_flag * are_equal(frame.stack_item(0), E::ONE);
-
-    1
-}
-
-/// Enforces unique constraints of the FMPADD operation.
-///
-/// The FMPADD operation increments the top element in the stack by `fmp` register value. Therefore,
-/// the following constraints are enforced:
-/// - The first element in the next frame should be equal to the addition of the first element in
-///   the current frame and the fmp value. s0` - (s0 + fmp) = 0
-pub fn enforce_fmpadd_constraints<E: FieldElement>(
-    frame: &EvaluationFrame<E>,
-    result: &mut [E],
-    op_flag: E,
-) -> usize {
-    // Enforces the first element in the next frame is incremented by fmp value.
-    result[0] = op_flag * are_equal(frame.stack_item(0) + frame.fmp(), frame.stack_item_next(0));
-
-    1
-}
-
-/// Enforces constraints of the FMPUPDATE operation.
-///
-/// The FMPUPDATE operation increments the fmp register value by the first element value in the
-/// current trace. Therefore, the following constraints are enforced:
-/// - The fmp register value in the next frame should be equal to the sum of the fmp register value
-///   and the top stack element in the current frame. fmp` - (s0 + fmp) = 0.
-pub fn enforce_fmpupdate_constraints<E: FieldElement>(
-    frame: &EvaluationFrame<E>,
-    result: &mut [E],
-    op_flag: E,
-) -> usize {
-    // Enforces the fmp register value is incremented by the first element value in current frame.
-    result[0] = op_flag * are_equal(frame.fmp() + frame.stack_item(0), frame.fmp_next());
 
     1
 }

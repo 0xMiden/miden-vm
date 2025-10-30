@@ -1,7 +1,11 @@
+use miden_air::trace::{
+    chiplets::hasher::{HasherState, STATE_WIDTH},
+    log_precompile::STATE_CAP_RANGE,
+};
 use miden_core::mast::MastForest;
 
 use super::{ExecutionError, Operation, Process};
-use crate::{ErrorContext, Felt};
+use crate::{ErrorContext, Felt, Word};
 
 // CRYPTOGRAPHIC OPERATIONS
 // ================================================================================================
@@ -183,6 +187,61 @@ impl Process {
             self.stack.set(i, value);
         }
         self.stack.copy_state(4);
+
+        Ok(())
+    }
+
+    /// Logs a precompile event by absorbing TAG and COMM into the precompile sponge
+    /// capacity.
+    ///
+    /// Stack transition:
+    /// `[COMM, TAG, PAD, ...] -> [R1, R0, CAP_NEXT, ...]`
+    ///
+    /// Where:
+    /// - The hasher computes: `[CAP_NEXT, R0, R1] = Rpo([CAP_PREV, TAG, COMM])`
+    /// - `CAP_PREV` is the previous sponge capacity provided non-deterministically via helper
+    ///   registers.
+    /// - The VM stack stores each 4-element word in reverse element order, so the top of the stack
+    ///   exposes the elements of `R1` first, followed by the elements of `R0`, then `CAP_NEXT`.
+    pub(super) fn op_log_precompile(&mut self) -> Result<(), ExecutionError> {
+        // Read TAG and COMM from stack, and CAP_PREV from the processor state
+        let comm = self.stack.get_word(0);
+        let tag = self.stack.get_word(4);
+        let cap_prev = self.pc_transcript_state;
+
+        let input_state: HasherState = {
+            let input_state_words = [cap_prev, tag, comm];
+            Word::words_as_elements(&input_state_words).try_into().unwrap()
+        };
+
+        // Perform the RPO permutation, with output state [CAP_NEXT, R0, R1]
+        let (addr, output_state) = self.chiplets.hasher.permute(input_state);
+
+        // Save the hasher address and CAP_PREV in helper registers
+        self.decoder.set_user_op_helpers(
+            Operation::LogPrecompile,
+            &[addr, cap_prev[0], cap_prev[1], cap_prev[2], cap_prev[3]],
+        );
+
+        // Update the processor's precompile sponge capacity with CAP_NEXT
+        let cap_next = Word::from([
+            output_state[STATE_CAP_RANGE.start],
+            output_state[STATE_CAP_RANGE.start + 1],
+            output_state[STATE_CAP_RANGE.start + 2],
+            output_state[STATE_CAP_RANGE.start + 3],
+        ]);
+        self.pc_transcript_state = cap_next;
+
+        // The output state is represented as 3 words [CAP_NEXT[0..3], R0[0..3], R1[0..3]].
+        // In the next row, we overwrite the top 3 words with [R1[3..0], R0[3..0], CAP_NEXT[3..0]],
+        // which is just the reversal of the original output state.
+        // This matches the semantics of hperm when writing the next hasher to the stack.
+        for i in 0..STATE_WIDTH {
+            self.stack.set(i, output_state[STATE_WIDTH - 1 - i]);
+        }
+
+        // Copy state for the rest of the stack
+        self.stack.copy_state(STATE_WIDTH);
 
         Ok(())
     }

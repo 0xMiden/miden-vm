@@ -1,11 +1,16 @@
 use alloc::vec::Vec;
 
+use miden_core::{Word, precompile::PrecompileTranscriptState};
+
 use super::super::{
     CHIPLETS_OFFSET, EvaluationFrame, Felt, FieldElement, TransitionConstraintDegree,
 };
 use crate::{
-    Assertion, AuxRandElements, Word,
-    trace::{CHIPLETS_BUS_AUX_TRACE_OFFSET, chiplets::kernel_rom::KERNEL_PROC_INIT_LABEL},
+    Assertion, AuxRandElements,
+    trace::{
+        CHIPLETS_BUS_AUX_TRACE_OFFSET, LOG_PRECOMPILE_LABEL,
+        chiplets::{hasher::P1_COL_IDX, kernel_rom::KERNEL_PROC_INIT_LABEL},
+    },
     utils::{are_equal, binary_not, is_binary},
 };
 
@@ -43,6 +48,7 @@ pub fn get_aux_assertions_first_step<E>(
     result: &mut Vec<Assertion<E>>,
     kernel_digests: &[Word],
     aux_rand_elements: &AuxRandElements<E>,
+    pc_transcript_state: PrecompileTranscriptState,
 ) where
     E: FieldElement<BaseField = Felt>,
 {
@@ -52,6 +58,18 @@ pub fn get_aux_assertions_first_step<E>(
         0,
         reduced_kernel_digests.inv(),
     ));
+
+    // Anchor hasher vtable init against PI-provided transcript state (empty/final).
+    let alphas = aux_rand_elements.rand_elements();
+    let state: [Felt; 4] = pc_transcript_state.into();
+    let label: Felt = Felt::from(LOG_PRECOMPILE_LABEL);
+    let empty_msg = alphas[0] + alphas[1].mul_base(label);
+    let mut final_msg = empty_msg;
+    for (i, c) in state.iter().enumerate() {
+        final_msg += alphas[2 + i].mul_base(*c);
+    }
+    let vtable_init_ratio = empty_msg * final_msg.inv();
+    result.push(Assertion::single(P1_COL_IDX, 0, vtable_init_ratio));
 }
 
 // CHIPLETS TRANSITION CONSTRAINTS

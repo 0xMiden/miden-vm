@@ -7,16 +7,13 @@
 use alloc::{format, string::String, vec, vec::Vec};
 
 use miden_core::{
-    EventId, Felt, WORD_SIZE, Word,
+    EventName, Felt, WORD_SIZE, Word,
     crypto::merkle::{EmptySubtreeRoots, SMT_DEPTH, Smt},
 };
 use miden_processor::{AdviceMutation, EventError, ProcessState};
 
-/// Qualified event name for the `smt_peek` event.
-pub const SMT_PEEK_EVENT_NAME: &str = "stdlib::collections::smt::smt_peek";
-/// Constant Event ID for the `smt_peek` event, derived via
-/// `EventId::from_name(SMT_PEEK_EVENT_NAME)`.
-pub const SMT_PEEK_EVENT_ID: EventId = EventId::from_u64(3580205917336794987);
+/// Event name for the smt_peek operation.
+pub const SMT_PEEK_EVENT_NAME: EventName = EventName::new("stdlib::collections::smt::smt_peek");
 
 /// SMT_PEEK system event handler.
 ///
@@ -41,8 +38,8 @@ pub const SMT_PEEK_EVENT_ID: EventId = EventId::from_u64(3580205917336794987);
 pub fn handle_smt_peek(process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
     let empty_leaf = EmptySubtreeRoots::entry(SMT_DEPTH, SMT_DEPTH);
     // fetch the arguments from the operand stack
-    let key = process.get_stack_word(1);
-    let root = process.get_stack_word(5);
+    let key = process.get_stack_word_be(1);
+    let root = process.get_stack_word_be(5);
 
     // get the node from the SMT for the specified key; this node can be either a leaf node,
     // or a root of an empty subtree at the returned depth
@@ -121,15 +118,4 @@ pub enum SmtPeekError {
     /// SMT node preimage has invalid length.
     #[error("invalid SMT node preimage length for node {node:?}: got {preimage_len}, expected multiple of {}", WORD_SIZE * 2)]
     InvalidSmtNodePreimage { node: Word, preimage_len: usize },
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_event_id() {
-        let expected_event_id = EventId::from_name(SMT_PEEK_EVENT_NAME);
-        assert_eq!(SMT_PEEK_EVENT_ID, expected_event_id);
-    }
 }

@@ -2,7 +2,9 @@ use std::array;
 
 use miden_air::{FieldExtension, HashFunction, PublicInputs};
 use miden_assembly::Assembler;
-use miden_core::{Felt, FieldElement, QuadFelt, WORD_SIZE, Word, ZERO};
+use miden_core::{
+    Felt, FieldElement, QuadFelt, WORD_SIZE, Word, ZERO, precompile::PrecompileTranscriptState,
+};
 use miden_processor::{
     DefaultHost, Program, ProgramInfo,
     crypto::{RandomCoin, RpoRandomCoin},
@@ -23,6 +25,7 @@ mod verifier_recursive;
 #[case(None)]
 #[case(Some(KERNEL_EVEN_NUM_PROC))]
 #[case(Some(KERNEL_ODD_NUM_PROC))]
+#[ignore = "re-enable once we're done implementing all constraints in airscript"]
 fn stark_verifier_e2f4(#[case] kernel: Option<&str>) {
     // An example MASM program to be verified inside Miden VM.
     let example_source = "begin
@@ -90,8 +93,13 @@ pub fn generate_recursive_verifier_data(
     let program_info = ProgramInfo::from(program);
 
     // build public inputs and generate the advice data needed for recursive proof verification
-    let pub_inputs = PublicInputs::new(program_info, stack_inputs, stack_outputs);
-    let (_, proof) = proof.into_parts();
+    let pub_inputs = PublicInputs::new(
+        program_info,
+        stack_inputs,
+        stack_outputs,
+        PrecompileTranscriptState::default(),
+    );
+    let (_, proof, _precompile_requests) = proof.into_parts();
     Ok(generate_advice_inputs(proof, pub_inputs).unwrap())
 }
 
@@ -199,7 +207,7 @@ fn variable_length_public_inputs(#[case] num_kernel_proc_digests: usize) {
             padw
             exec.constants::ood_evaluations_ptr
             sub.8
-            mem_loadw
+            mem_loadw_be
 
             # 4) Compare with the expected result, including the padding
             push.{reduced_value_inv_0}

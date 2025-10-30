@@ -35,6 +35,7 @@ thiserror.workspace = true
 miden-core.workspace = true
 winter-air.workspace = true
 winter-prover.workspace = true
+miden-utils-indexing.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true

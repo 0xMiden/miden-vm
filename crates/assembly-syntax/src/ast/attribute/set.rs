@@ -16,6 +16,10 @@ use crate::ast::Ident;
 /// types produce an error if they are declared multiple times on the same item.
 #[derive(Default, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(winter_serde(true))
+)]
 pub struct AttributeSet {
     /// The attributes in this set.
     ///

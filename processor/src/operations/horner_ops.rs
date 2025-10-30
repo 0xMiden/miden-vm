@@ -459,7 +459,7 @@ mod tests {
                 padw
                 adv_loadw
                 push.1000
-                mem_storew
+                mem_storew_be
                 dropw
 
                 # Execute
@@ -518,7 +518,7 @@ mod tests {
                 padw
                 adv_loadw
                 push.1000
-                mem_storew
+                mem_storew_be
                 dropw
 
                 # Execute

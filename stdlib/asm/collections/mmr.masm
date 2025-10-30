@@ -53,7 +53,7 @@ export.get
   # stack: [peak_ptr, relative_pos, depth, ...]
 
   # load the target peak (6 cycles)
-  padw movup.4 mem_loadw
+  padw movup.4 mem_loadw_be
   # stack: [P, relative_pos, depth, ...]
 
   # find the tree depth (2 cycles)
@@ -263,7 +263,7 @@ export.add
 
   while.true # (39 cycles)
     # load peak (4 cycles)
-    dup.9 sub.4 mem_loadw
+    dup.9 sub.4 mem_loadw_be
     # => [PEAK, EL, -num_merges, mmr_end]
 
     # merge the nodes (17 cycles)
@@ -271,7 +271,7 @@ export.add
     # => [EL', -num_merges, mmr_end]
 
     # erase existing peak (6 cycles)
-    padw dup.9 mem_storew
+    padw dup.9 mem_storew_be
     # => [PAD, EL', -num_merges, mmr_end]
 
     # update control (7 cycles)
@@ -288,7 +288,7 @@ export.add
   # =>: [EL, -num_merges+1, mmr_end-4]
 
   # save the new peak (2 cycles)
-  movup.5 mem_storew
+  movup.5 mem_storew_be
   # =>: [EL, -num_merges+1]
 
   # clean stack (5 cycles)

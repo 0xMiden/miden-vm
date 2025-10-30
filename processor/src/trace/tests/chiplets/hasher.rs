@@ -56,7 +56,7 @@ pub fn b_chip_span() {
         let mut mast_forest = MastForest::new();
 
         let basic_block_id =
-            mast_forest.add_block(vec![Operation::Add, Operation::Mul], None).unwrap();
+            mast_forest.add_block(vec![Operation::Add, Operation::Mul], Vec::new()).unwrap();
         mast_forest.make_root(basic_block_id);
 
         Program::new(mast_forest.into(), basic_block_id)
@@ -129,7 +129,7 @@ pub fn b_chip_span_with_respan() {
         let mut mast_forest = MastForest::new();
 
         let (ops, _) = build_span_with_respan_ops();
-        let basic_block_id = mast_forest.add_block(ops, None).unwrap();
+        let basic_block_id = mast_forest.add_block(ops, Vec::new()).unwrap();
         mast_forest.make_root(basic_block_id);
 
         Program::new(mast_forest.into(), basic_block_id)
@@ -221,8 +221,8 @@ pub fn b_chip_merge() {
     let program = {
         let mut mast_forest = MastForest::new();
 
-        let t_branch_id = mast_forest.add_block(vec![Operation::Add], None).unwrap();
-        let f_branch_id = mast_forest.add_block(vec![Operation::Mul], None).unwrap();
+        let t_branch_id = mast_forest.add_block(vec![Operation::Add], Vec::new()).unwrap();
+        let f_branch_id = mast_forest.add_block(vec![Operation::Mul], Vec::new()).unwrap();
         let split_id = mast_forest.add_split(t_branch_id, f_branch_id).unwrap();
         mast_forest.make_root(split_id);
 
@@ -336,7 +336,7 @@ pub fn b_chip_permutation() {
     let program = {
         let mut mast_forest = MastForest::new();
 
-        let basic_block_id = mast_forest.add_block(vec![Operation::HPerm], None).unwrap();
+        let basic_block_id = mast_forest.add_block(vec![Operation::HPerm], Vec::new()).unwrap();
         mast_forest.make_root(basic_block_id);
 
         Program::new(mast_forest.into(), basic_block_id)
@@ -434,6 +434,133 @@ pub fn b_chip_permutation() {
 
     // The value in b_chip should be ONE now and for the rest of the trace.
     for row in 16..trace.length() - NUM_RAND_ROWS {
+        assert_eq!(ONE, b_chip[row]);
+    }
+}
+
+/// Tests the generation of the `b_chip` bus column when the hasher performs a log_precompile
+/// operation requested by the stack. The operation absorbs TAG and COMM into an RPO
+/// sponge with capacity CAP_PREV, producing (CAP_NEXT, R0, R1).
+#[test]
+#[allow(clippy::needless_range_loop)]
+pub fn b_chip_log_precompile() {
+    let program = {
+        let mut mast_forest = MastForest::new();
+
+        let basic_block_id =
+            mast_forest.add_block(vec![Operation::LogPrecompile], Vec::new()).unwrap();
+        mast_forest.make_root(basic_block_id);
+
+        Program::new(mast_forest.into(), basic_block_id)
+    };
+    // Stack inputs are specified deepest-first: [1,2,3,4,5,6,7,8]. The VM reverses them at
+    // initialization, so the live stack holds [8,7,6,5,4,3,2,1] with 8 on top. Because
+    // `stack.get_word` collects elements in reverse order from the stack slots (i.e.,
+    // [stack[3], stack[2], stack[1], stack[0]]), `COMM` is read as
+    // [5,6,7,8] from stack slots 0-3 and `TAG` as [1,2,3,4] from slots 4-7.
+    let stack = vec![1, 2, 3, 4, 5, 6, 7, 8];
+    let trace = build_trace_from_program(&program, &stack);
+
+    let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
+    let aux_columns = trace.build_aux_trace(&alphas).unwrap();
+    let b_chip = aux_columns.get_column(CHIPLETS_BUS_AUX_TRACE_OFFSET);
+
+    assert_eq!(trace.length(), b_chip.len());
+    assert_eq!(ONE, b_chip[0]);
+
+    let mut expected = ONE;
+
+    // at cycle 0 the following are added for inclusion in the next row:
+    // - the initialization of the span hash is requested by the decoder
+    // - the initialization of the span hash is provided by the hasher
+
+    // initialize the request state.
+    let mut span_state = [ZERO; STATE_WIDTH];
+    fill_state_from_decoder_with_domain(&trace, &mut span_state, 0.into());
+    // request the initialization of the span hash
+    let span_init =
+        build_expected(&alphas, LINEAR_HASH_LABEL, span_state, [ZERO; STATE_WIDTH], ONE, ZERO);
+    expected *= span_init.inv();
+    // provide the initialization of the span hash
+    expected *= build_expected_from_trace(&trace, &alphas, 0.into());
+    assert_eq!(expected, b_chip[1]);
+
+    // at cycle 1 log_precompile is executed and the initialization and result of the hash are both
+    // requested by the stack.
+
+    // Build the input state: [CAP_PREV, TAG, COMM]
+    // CAP_PREV comes from helper registers and defaults to [0,0,0,0].
+    // TAG = [1,2,3,4] is drawn via `stack.get_word(4)`.
+    // COMM = [5,6,7,8] is drawn via `stack.get_word(0)`.
+    let log_pc_state = init_state_from_words(
+        &[Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)].into(),
+        &[Felt::new(5), Felt::new(6), Felt::new(7), Felt::new(8)].into(),
+    );
+
+    let log_pc_init = build_expected(
+        &alphas,
+        LINEAR_HASH_LABEL,
+        log_pc_state,
+        [ZERO; STATE_WIDTH],
+        Felt::new((HASH_CYCLE_LEN + 1) as u64),
+        ZERO,
+    );
+    // request the log_precompile initialization.
+    expected *= log_pc_init.inv();
+
+    // Compute the output state by applying the permutation
+    let mut log_pc_output_state = log_pc_state;
+    apply_permutation(&mut log_pc_output_state);
+
+    let log_pc_result = build_expected(
+        &alphas,
+        RETURN_STATE_LABEL,
+        log_pc_output_state,
+        [ZERO; STATE_WIDTH],
+        Felt::new((2 * HASH_CYCLE_LEN) as u64),
+        ZERO,
+    );
+    // request the log_precompile result.
+    expected *= log_pc_result.inv();
+    assert_eq!(expected, b_chip[2]);
+
+    // at cycle 2 the result of the span hash is requested by the decoder
+    apply_permutation(&mut span_state);
+    let span_result = build_expected(
+        &alphas,
+        RETURN_HASH_LABEL,
+        span_state,
+        [ZERO; STATE_WIDTH],
+        Felt::new(HASH_CYCLE_LEN as u64),
+        ZERO,
+    );
+    expected *= span_result.inv();
+    assert_eq!(expected, b_chip[3]);
+
+    // Nothing changes when there is no communication with the hash chiplet.
+    for row in 4..HASH_CYCLE_LEN {
+        assert_eq!(expected, b_chip[row]);
+    }
+
+    // at cycle 7 the result of the span hash is provided by the hasher
+    expected *= build_expected_from_trace(&trace, &alphas, (HASH_CYCLE_LEN - 1).into());
+    assert_eq!(expected, b_chip[HASH_CYCLE_LEN]);
+
+    // at cycle 8 the initialization of the log_precompile hash is provided by the hasher
+    expected *= build_expected_from_trace(&trace, &alphas, HASH_CYCLE_LEN.into());
+    assert_eq!(expected, b_chip[HASH_CYCLE_LEN + 1]);
+
+    // Nothing changes when there is no communication with the hash chiplet.
+    for row in (HASH_CYCLE_LEN + 2)..(2 * HASH_CYCLE_LEN) {
+        assert_eq!(expected, b_chip[row]);
+    }
+
+    // at cycle 15 the result of the log_precompile hash is provided by the hasher
+    expected *= build_expected_from_trace(&trace, &alphas, (2 * HASH_CYCLE_LEN - 1).into());
+    assert_eq!(expected, b_chip[2 * HASH_CYCLE_LEN]);
+
+    // The value in b_chip should be ONE now and for the rest of the trace.
+    for row in (2 * HASH_CYCLE_LEN)..trace.length() - NUM_RAND_ROWS {
         assert_eq!(ONE, b_chip[row]);
     }
 }

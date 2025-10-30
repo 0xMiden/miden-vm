@@ -1,16 +1,15 @@
 use alloc::{vec, vec::Vec};
 
-use miden_core::{EventId, Felt, FieldElement, LexicographicWord, Word};
+use miden_core::{EventName, Felt, FieldElement, LexicographicWord, Word};
 use miden_processor::{AdviceMutation, EventError, MemoryError, ProcessState};
 
-/// Qualified event names for `lowerbound` events.
-pub const LOWERBOUND_ARRAY_EVENT_NAME: &str = "stdlib::collections::sorted_array::lowerbound_array";
-pub const LOWERBOUND_KEY_VALUE_EVENT_NAME: &str =
-    "stdlib::collections::sorted_array::lowerbound_key_value";
+/// Event name for the lowerbound_array operation.
+pub const LOWERBOUND_ARRAY_EVENT_NAME: EventName =
+    EventName::new("stdlib::collections::sorted_array::lowerbound_array");
 
-/// Constant Event ID for `lowerbound` events, derived via `EventId::from_name(EVENT_NAME)`.
-pub const LOWERBOUND_ARRAY_EVENT_ID: EventId = EventId::from_u64(2382974753388103136);
-pub const LOWERBOUND_KEY_VALUE_EVENT_ID: EventId = EventId::from_u64(486819235893213157);
+/// Event name for the lowerbound_key_value operation.
+pub const LOWERBOUND_KEY_VALUE_EVENT_NAME: EventName =
+    EventName::new("stdlib::collections::sorted_array::lowerbound_key_value");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum KeySize {
@@ -85,7 +84,7 @@ fn push_lowerbound_result(
     assert!(stride == 4 || stride == 8);
 
     // Read inputs from the stack
-    let key = LexicographicWord::new(process.get_stack_word(KEY_OFFSET));
+    let key = LexicographicWord::new(process.get_stack_word_be(KEY_OFFSET));
     let addr_range = process.get_mem_addr_range(START_ADDR_OFFSET, END_ADDR_OFFSET)?;
 
     // Validate the start_addr is word-aligned (multiple of 4)
@@ -202,18 +201,4 @@ pub enum SortedArrayError {
     /// Last key or value is an incomplete word.
     #[error("key-value array must have size divisible by 4 or 8, but was {size}")]
     InvalidKeyValueRange { size: u32 },
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_event_id() {
-        let expected_event_id = EventId::from_name(LOWERBOUND_ARRAY_EVENT_NAME);
-        assert_eq!(LOWERBOUND_ARRAY_EVENT_ID, expected_event_id);
-
-        let expected_event_id = EventId::from_name(LOWERBOUND_KEY_VALUE_EVENT_NAME);
-        assert_eq!(LOWERBOUND_KEY_VALUE_EVENT_ID, expected_event_id);
-    }
 }

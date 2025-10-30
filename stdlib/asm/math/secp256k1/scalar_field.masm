@@ -251,9 +251,9 @@ end
 #!
 #! See https://github.com/itzmeanjan/secp256k1/blob/6e5e654823a073add7d62b21ed88e9de9bb06869/field/scalar_field_utils.py#L101-L225
 export.mul.8
-  loc_storew.0
+  loc_storew_be.0
   swapw
-  loc_storew.4
+  loc_storew_be.4
   swapw
 
   exec.u256xu32
@@ -274,9 +274,9 @@ export.mul.8
 
   movup.9
   push.0.0.0.0
-  loc_loadw.4
+  loc_loadw_be.4
   push.0.0.0.0
-  loc_loadw.0
+  loc_loadw_be.0
 
   exec.u256xu32
   exec.u288_add_u256
@@ -284,9 +284,9 @@ export.mul.8
 
   movup.9
   push.0.0.0.0
-  loc_loadw.4
+  loc_loadw_be.4
   push.0.0.0.0
-  loc_loadw.0
+  loc_loadw_be.0
 
   exec.u256xu32
   exec.u288_add_u256
@@ -294,9 +294,9 @@ export.mul.8
 
   movup.9
   push.0.0.0.0
-  loc_loadw.4
+  loc_loadw_be.4
   push.0.0.0.0
-  loc_loadw.0
+  loc_loadw_be.0
 
   exec.u256xu32
   exec.u288_add_u256
@@ -304,9 +304,9 @@ export.mul.8
 
   movup.9
   push.0.0.0.0
-  loc_loadw.4
+  loc_loadw_be.4
   push.0.0.0.0
-  loc_loadw.0
+  loc_loadw_be.0
 
   exec.u256xu32
   exec.u288_add_u256
@@ -314,9 +314,9 @@ export.mul.8
 
   movup.9
   push.0.0.0.0
-  loc_loadw.4
+  loc_loadw_be.4
   push.0.0.0.0
-  loc_loadw.0
+  loc_loadw_be.0
 
   exec.u256xu32
   exec.u288_add_u256
@@ -324,9 +324,9 @@ export.mul.8
 
   movup.9
   push.0.0.0.0
-  loc_loadw.4
+  loc_loadw_be.4
   push.0.0.0.0
-  loc_loadw.0
+  loc_loadw_be.0
 
   exec.u256xu32
   exec.u288_add_u256
@@ -334,9 +334,9 @@ export.mul.8
 
   movup.9
   push.0.0.0.0
-  loc_loadw.4
+  loc_loadw_be.4
   push.0.0.0.0
-  loc_loadw.0
+  loc_loadw_be.0
 
   exec.u256xu32
   exec.u288_add_u256
@@ -440,15 +440,15 @@ end
 export.inv.16
   # cache result initial value ( = 1, in Montgomery form )
   push.0.0.0.1.1162945305.1354194884.1076732275.801750719
-  loc_storew.0
+  loc_storew_be.0
   dropw
-  loc_storew.4
+  loc_storew_be.4
   dropw
 
   # cache base
-  loc_storew.8
+  loc_storew_be.8
   dropw
-  loc_storew.12
+  loc_storew_be.12
   dropw
 
   push.3493216575.3218235020.2940772411.3132021990.4294967294.4294967295.4294967295.4294967295
@@ -456,15 +456,15 @@ export.inv.16
   repeat.8
     repeat.32
       push.0.0.0.0.0.0.0.0
-      loc_loadw.4
+      loc_loadw_be.4
       swapw
-      loc_loadw.0
+      loc_loadw_be.0
 
       exec.sqr
 
-      loc_storew.0
+      loc_storew_be.0
       dropw
-      loc_storew.4
+      loc_storew_be.4
       dropw
 
       dup
@@ -472,21 +472,21 @@ export.inv.16
       if.true
         push.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0
 
-        loc_loadw.12
+        loc_loadw_be.12
         swapw
-        loc_loadw.8
+        loc_loadw_be.8
 
         swapdw
 
-        loc_loadw.4
+        loc_loadw_be.4
         swapw
-        loc_loadw.0
+        loc_loadw_be.0
 
         exec.mul
 
-        loc_storew.0
+        loc_storew_be.0
         dropw
-        loc_storew.4
+        loc_storew_be.4
         dropw
       end
 
@@ -497,7 +497,7 @@ export.inv.16
   end
 
   push.0.0.0.0.0.0.0.0
-  loc_loadw.4
+  loc_loadw_be.4
   swapw
-  loc_loadw.0
+  loc_loadw_be.0
 end

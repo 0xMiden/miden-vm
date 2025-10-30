@@ -118,6 +118,10 @@ type Components = smallvec::SmallVec<[Ident; 1]>;
 
 /// Path to a module or a procedure.
 #[derive(Default, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(
+    all(feature = "arbitrary", test),
+    miden_test_serde_macros::serde_test(winter_serde(true))
+)]
 pub struct LibraryPath {
     inner: Arc<LibraryPathInner>,
 }

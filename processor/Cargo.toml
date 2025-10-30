@@ -27,7 +27,7 @@ std = [
     "winter-prover/std",
     "thiserror/std",
 ]
-testing = ["miden-air/testing", "tokio"]
+testing = ["miden-air/testing"]
 # Removes proper error context from the error messages. Enable in production builds that need
 # maximal performance.
 no_err_ctx = []
@@ -40,21 +40,23 @@ miden-air.workspace = true
 miden-core.workspace = true
 miden-debug-types.workspace = true
 miden-utils-diagnostics.workspace = true
+miden-utils-indexing.workspace = true
 
 # External dependencies
 paste.workspace = true
+rayon = { version = "1.10", default-features = false }
 tracing.workspace = true
 thiserror.workspace = true
-# For `testing`
-tokio = { workspace = true, features = ["rt"], optional = true }
+tokio = { workspace = true, features = ["rt"] }
 winter-prover.workspace = true
+itertools = { version = "0.14", default-features = false, features = ["use_alloc"] }
 
 [dev-dependencies]
 miden-assembly.workspace = true
 miden-utils-testing.workspace = true
+insta.workspace = true
 logtest = { version = "2.0", default-features = false }
 pretty_assertions = "1.4"
 rstest = { version = "0.26" }
-tokio = { workspace = true, features = ["rt"] }
 winter-fri.workspace = true
 winter-utils.workspace = true
