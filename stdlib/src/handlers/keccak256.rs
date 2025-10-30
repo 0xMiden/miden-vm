@@ -29,6 +29,7 @@ use core::array;
 use miden_core::{
     EventName, Felt, Word, ZERO,
     precompile::{PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileVerifier},
+    precompile_ids::SupportedPrecompile,
 };
 use miden_crypto::hash::{keccak::Keccak256, rpo::Rpo256};
 use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessState};
@@ -286,10 +287,10 @@ impl KeccakPreimage {
     }
 
     /// Returns the tag used to identify the commitment to the precompile. defined as
-    /// `[event_id, preimage_u8.len(), 0, 0]` where event_id is computed from the event name.
+    /// `[event_id, preimage_u8.len(), 0, 0]` where event_id is the versioned discriminant.
     fn precompile_tag(&self) -> Word {
         [
-            KECCAK_HASH_MEMORY_EVENT_NAME.to_event_id().as_felt(),
+            SupportedPrecompile::KeccakHashMemory.to_event_id().as_felt(),
             Felt::new(self.as_ref().len() as u64),
             ZERO,
             ZERO,
@@ -300,7 +301,7 @@ impl KeccakPreimage {
 
 impl From<KeccakPreimage> for PrecompileRequest {
     fn from(preimage: KeccakPreimage) -> Self {
-        let event_id = KECCAK_HASH_MEMORY_EVENT_NAME.to_event_id();
+        let event_id = SupportedPrecompile::KeccakHashMemory.to_event_id();
         PrecompileRequest::new(event_id, preimage.into_inner())
     }
 }
