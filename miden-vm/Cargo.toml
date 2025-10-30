@@ -80,6 +80,8 @@ miden-prover.workspace = true
 miden-mast-package.workspace = true
 miden-stdlib.workspace = true
 miden-verifier.workspace = true
+winter-maybe-async.workspace = true
+pollster = "0.4"
 
 # External dependencies
 blake3.workspace = true
