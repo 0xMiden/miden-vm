@@ -80,3 +80,4 @@ winter-prover = { version = "0.13", default-features = false }
 winter-rand-utils = "0.13"
 winter-utils = { version = "0.13", default-features = false }
 winter-verifier = { version = "0.13", default-features = false }
+winter-maybe-async = { version = "0.13", default-features = false }
