@@ -382,7 +382,7 @@ impl MastForestBuilder {
     /// Note that only one copy of nodes that have the same MAST root and decorators is added to the
     /// MAST forest; two nodes that have the same MAST root and decorators will have the same
     /// [`MastNodeId`].
-    pub fn ensure_node(&mut self, node: impl Into<MastNode>) -> Result<MastNodeId, Report> {
+    pub(crate) fn ensure_node(&mut self, node: impl Into<MastNode>) -> Result<MastNodeId, Report> {
         let node: MastNode = node.into();
         let node_fingerprint = self.fingerprint_for_node(&node);
 

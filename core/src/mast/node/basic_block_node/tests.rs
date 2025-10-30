@@ -3,7 +3,10 @@ use proptest::prelude::*;
 // Import strategy functions from arbitrary.rs
 pub(super) use super::arbitrary::op_non_control_sequence_strategy;
 use super::*;
-use crate::{Decorator, ONE, mast::MastForest};
+use crate::{
+    Decorator, ONE,
+    mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor},
+};
 
 #[test]
 fn batch_ops_1() {
@@ -274,7 +277,18 @@ fn operation_or_decorator_iterator() {
         (4, Decorator::Trace(4)), // ID: 4
     ];
 
-    let node_id = mast_forest.add_block_with_raw_decorators(operations, decorators).unwrap();
+    // Convert raw decorators to decorator list by adding them to the forest first
+    let decorator_list: Vec<(usize, crate::mast::DecoratorId)> = decorators
+        .into_iter()
+        .map(|(idx, decorator)| -> Result<(usize, crate::mast::DecoratorId), crate::mast::MastForestError> {
+            let decorator_id = mast_forest.add_decorator(decorator)?;
+            Ok((idx, decorator_id))
+        })
+        .collect::<Result<Vec<_>, _>>().unwrap();
+
+    let node_id = BasicBlockNodeBuilder::new(operations, decorator_list)
+        .add_to_forest(&mut mast_forest)
+        .unwrap();
     let node = mast_forest.get_node_by_id(node_id).unwrap().unwrap_basic_block();
 
     let mut iterator = node.iter();

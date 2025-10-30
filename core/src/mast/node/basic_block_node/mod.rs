@@ -20,7 +20,7 @@ mod op_batch;
 pub use op_batch::OpBatch;
 use op_batch::OpBatchAccumulator;
 
-use super::{MastNodeErrorContext, MastNodeExt};
+use super::{MastForestContributor, MastNodeErrorContext, MastNodeExt};
 
 #[cfg(any(test, feature = "arbitrary"))]
 pub mod arbitrary;
@@ -253,7 +253,7 @@ impl BasicBlockNode {
 impl BasicBlockNode {
     /// Used to initialize decorators for the [`BasicBlockNode`]. Replaces the existing decorators
     /// with the given ['DecoratorList'].
-    pub fn set_decorators(&mut self, decorator_list: DecoratorList) {
+    pub(in crate::mast) fn set_decorators(&mut self, decorator_list: DecoratorList) {
         self.decorators = decorator_list;
     }
 }
@@ -922,6 +922,7 @@ fn batch_ops(ops: Vec<Operation>) -> Vec<OpBatch> {
 
 // ------------------------------------------------------------------------------------------------
 /// Builder for creating [`BasicBlockNode`] instances with decorators.
+#[derive(Debug)]
 pub struct BasicBlockNodeBuilder {
     operations: Vec<Operation>,
     decorators: DecoratorList,
@@ -974,5 +975,14 @@ impl BasicBlockNodeBuilder {
             before_enter: self.before_enter,
             after_exit: self.after_exit,
         })
+    }
+}
+
+impl MastForestContributor for BasicBlockNodeBuilder {
+    fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
+        forest
+            .nodes
+            .push(self.build()?.into())
+            .map_err(|_| MastForestError::TooManyNodes)
     }
 }
