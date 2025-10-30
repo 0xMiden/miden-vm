@@ -3,8 +3,10 @@ use alloc::vec::Vec;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::{DecoratorId, MastNodeId};
-use crate::{Idx, IndexVec};
+use crate::{
+    Idx, IndexVec,
+    mast::{DecoratorId, MastNodeId},
+};
 
 /// A CSR (Compressed Sparse Row) representation for storing node-level decorators (before_enter and
 /// after_exit).
@@ -19,10 +21,14 @@ use crate::{Idx, IndexVec};
 /// - `node_indptr_for_before`: Pointer indices for nodes within before_enter_decorators
 /// - `node_indptr_for_after`: Pointer indices for nodes within after_exit_decorators
 ///
-/// For node i, its before_enter decorators are at:
+/// For node `i`, its before_enter decorators are at:
+/// ```text
 /// before_enter_decorators[node_indptr_for_before[i]..node_indptr_for_before[i+1]]
+/// ```
 /// And its after_exit decorators are at:
+/// ```text
 /// after_exit_decorators[node_indptr_for_after[i]..node_indptr_for_after[i+1]]
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct NodeDecoratorStorage {
@@ -30,11 +36,15 @@ pub struct NodeDecoratorStorage {
     pub before_enter_decorators: Vec<DecoratorId>,
     /// All `after_exit` decorators, concatenated across all nodes.
     pub after_exit_decorators: Vec<DecoratorId>,
-    /// Index pointers for before_enter decorators: the range for node i is
+    /// Index pointers for before_enter decorators: the range for node `i` is
+    /// ```text
     /// node_indptr_for_before[i]..node_indptr_for_before[i+1]
+    /// ```
     pub node_indptr_for_before: IndexVec<MastNodeId, usize>,
-    /// Index pointers for after_exit decorators: the range for node i is
+    /// Index pointers for after_exit decorators: the range for node `i` is
+    /// ```text
     /// node_indptr_for_after[i]..node_indptr_for_after[i+1]
+    /// ```
     pub node_indptr_for_after: IndexVec<MastNodeId, usize>,
 }
 

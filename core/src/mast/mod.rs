@@ -17,27 +17,23 @@ mod node;
 pub use node::arbitrary;
 pub use node::{
     BasicBlockNode, BasicBlockNodeBuilder, CallNode, CallNodeBuilder, DecoratedOpLink,
-    DecoratorOpLinkIterator, DynNode, DynNodeBuilder, ExternalNode, ExternalNodeBuilder, JoinNode,
-    JoinNodeBuilder, LoopNode, LoopNodeBuilder, MastForestContributor, MastNode, MastNodeBuilder,
-    MastNodeErrorContext, MastNodeExt, OP_BATCH_SIZE, OP_GROUP_SIZE, OpBatch, OperationOrDecorator,
-    SplitNode, SplitNodeBuilder,
+    DecoratorOpLinkIterator, DecoratorStore, DynNode, DynNodeBuilder, ExternalNode,
+    ExternalNodeBuilder, JoinNode, JoinNodeBuilder, LoopNode, LoopNodeBuilder,
+    MastForestContributor, MastNode, MastNodeBuilder, MastNodeErrorContext, MastNodeExt,
+    OP_BATCH_SIZE, OP_GROUP_SIZE, OpBatch, OperationOrDecorator, SplitNode, SplitNodeBuilder,
 };
 
 use crate::{
     AdviceMap, Decorator, Felt, Idx, LexicographicWord, Word,
     crypto::hash::Hasher,
-    mast::decorator_storage::DecoratorIndexError,
     utils::{ByteWriter, DeserializationError, Serializable, hash_string_to_word},
 };
 
-mod decorator_storage;
-pub use decorator_storage::{DecoratedLinks, DecoratedLinksIter, DecoratorIndexMapping};
-
-mod node_decorator_storage;
-pub use node_decorator_storage::NodeDecoratorStorage;
-
-mod decorator_store;
-pub use decorator_store::DecoratorStore;
+mod debuginfo;
+pub use debuginfo::{
+    DecoratedLinks, DecoratedLinksIter, DecoratorIndexError, DecoratorIndexMapping,
+    NodeDecoratorStorage,
+};
 
 mod serialization;
 

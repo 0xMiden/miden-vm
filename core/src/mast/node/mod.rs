@@ -34,6 +34,9 @@ pub use loop_node::{LoopNode, LoopNodeBuilder};
 mod mast_forest_contributor;
 pub use mast_forest_contributor::{MastForestContributor, MastNodeBuilder};
 
+mod decorator_store;
+pub use decorator_store::DecoratorStore;
+
 use super::DecoratorId;
 use crate::{
     AssemblyOp, Decorator,
