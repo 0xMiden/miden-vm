@@ -291,11 +291,11 @@ fn operation_or_decorator_iterator() {
         .unwrap();
     let node = mast_forest.get_node_by_id(node_id).unwrap().unwrap_basic_block();
 
-    let mut iterator = node.iter();
+    let mut iterator = node.iter(&mast_forest);
 
     // operation index 0
-    assert_eq!(iterator.next(), Some(OperationOrDecorator::Decorator(&DecoratorId(0))));
-    assert_eq!(iterator.next(), Some(OperationOrDecorator::Decorator(&DecoratorId(1))));
+    assert_eq!(iterator.next(), Some(OperationOrDecorator::Decorator(DecoratorId(0))));
+    assert_eq!(iterator.next(), Some(OperationOrDecorator::Decorator(DecoratorId(1))));
     assert_eq!(iterator.next(), Some(OperationOrDecorator::Operation(&Operation::Add)));
 
     // operations indices 1, 2
@@ -303,12 +303,12 @@ fn operation_or_decorator_iterator() {
     assert_eq!(iterator.next(), Some(OperationOrDecorator::Operation(&Operation::MovDn2)));
 
     // operation index 3
-    assert_eq!(iterator.next(), Some(OperationOrDecorator::Decorator(&DecoratorId(2))));
+    assert_eq!(iterator.next(), Some(OperationOrDecorator::Decorator(DecoratorId(2))));
     assert_eq!(iterator.next(), Some(OperationOrDecorator::Operation(&Operation::MovDn3)));
 
     // after last operation
-    assert_eq!(iterator.next(), Some(OperationOrDecorator::Decorator(&DecoratorId(3))));
-    assert_eq!(iterator.next(), Some(OperationOrDecorator::Decorator(&DecoratorId(4))));
+    assert_eq!(iterator.next(), Some(OperationOrDecorator::Decorator(DecoratorId(3))));
+    assert_eq!(iterator.next(), Some(OperationOrDecorator::Decorator(DecoratorId(4))));
     assert_eq!(iterator.next(), None);
 }
 
@@ -445,7 +445,9 @@ proptest! {
         let block = BasicBlockNode::new(ops.clone(), decs.clone()).unwrap();
 
         // Collect the decorators using raw_decorator_iter()
-        let collected_decorators: Vec<(usize, DecoratorId)> = block.raw_decorator_iter().collect();
+        // Create a dummy forest since the method now requires it
+        let dummy_forest = MastForest::new();
+        let collected_decorators: Vec<(usize, DecoratorId)> = block.raw_decorator_iter(&dummy_forest).collect();
 
         // The collected decorators should match the original decorators
         prop_assert_eq!(collected_decorators, decs);
@@ -477,7 +479,7 @@ fn test_mast_node_error_context_decorators_iterates_all_decorators() {
         .build()
         .unwrap();
 
-    let all_decorators: Vec<_> = block.decorators().collect();
+    let all_decorators: Vec<_> = block.decorators(&forest).collect();
 
     // Should have 3 decorators total: 1 before_enter, 1 during, 1 after_exit
     assert_eq!(all_decorators.len(), 3);
@@ -516,7 +518,7 @@ fn test_indexed_decorator_iter_excludes_before_enter_after_exit() {
         .unwrap();
 
     // Test indexed_decorator_iter - should only include op-indexed decorators
-    let indexed_decorators: Vec<_> = block.indexed_decorator_iter().collect();
+    let indexed_decorators: Vec<_> = block.indexed_decorator_iter(&forest).collect();
 
     // Should have only 2 decorators (the ones tied to specific operation indices)
     assert_eq!(indexed_decorators.len(), 2);
@@ -564,7 +566,7 @@ fn test_decorator_positions() {
         .unwrap();
 
     // Test that MastNodeErrorContext::decorators returns all decorators
-    let all_decorators: Vec<_> = block.decorators().collect();
+    let all_decorators: Vec<_> = block.decorators(&forest).collect();
     assert_eq!(all_decorators.len(), 5);
 
     // Verify the order and positions:
@@ -582,7 +584,7 @@ fn test_decorator_positions() {
     assert_eq!(found_positions, expected_positions);
 
     // Test that indexed_decorator_iter only returns op-indexed decorators
-    let indexed_decorators: Vec<_> = block.indexed_decorator_iter().collect();
+    let indexed_decorators: Vec<_> = block.indexed_decorator_iter(&forest).collect();
     assert_eq!(indexed_decorators.len(), 2);
 
     let indexed_positions: Vec<_> = indexed_decorators.iter().map(|&(pos, _id)| pos).collect();
@@ -666,7 +668,8 @@ proptest! {
         let block = BasicBlockNode::new(ops.clone(), decorators.clone()).unwrap();
 
         // Create raw decorator iterator
-        let raw_iter = block.raw_decorator_iter();
+        let dummy_forest = MastForest::new();
+        let raw_iter = block.raw_decorator_iter(&dummy_forest);
 
         // Collect all decorators from the iterator
         let collected_decorators: Vec<_> = raw_iter.collect();

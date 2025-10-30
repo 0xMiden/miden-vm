@@ -46,7 +46,7 @@ pub struct MastForestBuilder {
     /// The MAST forest being built by this builder; this MAST forest is up-to-date - i.e., all
     /// nodes added to the MAST forest builder are also immediately added to the underlying MAST
     /// forest.
-    mast_forest: MastForest,
+    pub(crate) mast_forest: MastForest,
     /// A map of all procedures added to the MAST forest indexed by their global procedure ID.
     /// This includes all local, exported, and re-exported procedures. In case multiple procedures
     /// with the same digest are added to the MAST forest builder, only the first procedure is
@@ -100,6 +100,11 @@ impl MastForestBuilder {
             statically_linked_mast: Arc::new(statically_linked_mast),
             ..Self::default()
         })
+    }
+
+    /// Returns a reference to the underlying [`MastForest`].
+    pub fn mast_forest(&self) -> &MastForest {
+        &self.mast_forest
     }
 
     /// Removes the unused nodes that were created as part of the assembly process, and returns the
@@ -317,15 +322,15 @@ impl MastForestBuilder {
         for &basic_block_id in contiguous_basic_block_ids {
             // It is safe to unwrap here, since we already checked that all IDs in
             // `contiguous_basic_block_ids` are `BasicBlockNode`s
-            let basic_block_node =
-                self.mast_forest[basic_block_id].get_basic_block().unwrap().clone();
+            let basic_block_node = self.mast_forest[basic_block_id].get_basic_block().unwrap();
 
             // check if the block should be merged with other blocks
             if should_merge(
                 self.mast_forest.is_procedure_root(basic_block_id),
                 basic_block_node.num_op_batches(),
             ) {
-                for (op_idx, decorator) in basic_block_node.raw_decorator_iter() {
+                // Use forest-borrowing to get decorators from linked nodes
+                for (op_idx, decorator) in basic_block_node.raw_decorator_iter(&self.mast_forest) {
                     decorators.push((op_idx + operations.len(), decorator));
                 }
                 for batch in basic_block_node.op_batches() {
@@ -529,7 +534,7 @@ impl MastForestBuilder {
             for old_id in SubtreeIterator::new(&root_id, &self.statically_linked_mast.clone()) {
                 let builder = self.statically_linked_mast[old_id]
                     .clone()
-                    .to_builder()
+                    .to_builder(&self.statically_linked_mast)
                     .remap_children(&self.statically_linked_mast_remapping);
                 let new_id = self.ensure_node(builder)?;
                 self.statically_linked_mast_remapping.insert(old_id, new_id);
@@ -550,7 +555,7 @@ impl MastForestBuilder {
         decorator_ids: Vec<DecoratorId>,
     ) -> Result<(), MastForestError> {
         // Extract the existing node and convert it to a builder
-        let mut decorated_builder = self.mast_forest[node_id].clone().to_builder();
+        let mut decorated_builder = self.mast_forest[node_id].clone().to_builder(&self.mast_forest);
         decorated_builder.append_before_enter(decorator_ids);
         let new_node_fingerprint =
             decorated_builder.fingerprint_for_node(&self.mast_forest, &self.hash_by_node_id)?;
@@ -567,7 +572,7 @@ impl MastForestBuilder {
         decorator_ids: Vec<DecoratorId>,
     ) -> Result<(), MastForestError> {
         // Extract the existing node and convert it to a builder
-        let mut decorated_builder = self.mast_forest[node_id].clone().to_builder();
+        let mut decorated_builder = self.mast_forest[node_id].clone().to_builder(&self.mast_forest);
         decorated_builder.append_after_exit(decorator_ids);
         let new_node_fingerprint =
             decorated_builder.fingerprint_for_node(&self.mast_forest, &self.hash_by_node_id)?;
@@ -659,7 +664,7 @@ fn should_merge(is_procedure: bool, num_op_batches: usize) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use miden_core::{Operation, mast::MastNodeErrorContext};
+    use miden_core::Operation;
 
     use super::*;
 
@@ -731,8 +736,8 @@ mod tests {
         assert_eq!(merged_blocks.len(), 1);
         let merged_block_id = merged_blocks[0];
 
-        // Get the merged block
-        let merged_block = builder.mast_forest[merged_block_id].get_basic_block().unwrap().clone();
+        // Get the merged block from the forest (don't clone to preserve Linked decorators)
+        let merged_block = builder.mast_forest[merged_block_id].get_basic_block().unwrap();
 
         // Merged block: two groups
         // [push drop drop drop drop drop drop push noop] [1] [2] [push push mul] [3] [4] [noop]
@@ -743,8 +748,10 @@ mod tests {
         // For block2: operation 0 -> Trace(4), operation 1 -> Trace(5)
 
         // Check each decorator in the merged block
-        let decorators = merged_block.decorators();
-        assert_eq!(merged_block.decorators().count(), 5); // 3 from block1 + 2 from block2
+        let decorators = merged_block.indexed_decorator_iter(&builder.mast_forest);
+        let decorator_count = merged_block.indexed_decorator_iter(&builder.mast_forest).count();
+
+        assert_eq!(decorator_count, 5); // 3 from block1 + 2 from block2
 
         // Create a map to track which trace values we've found
         let mut found_traces = std::collections::HashSet::new();

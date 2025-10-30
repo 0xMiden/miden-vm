@@ -10,14 +10,13 @@ use miden_crypto::{
     hash::{Digest, blake::Blake3_256},
 };
 use miden_formatting::prettier::PrettyPrint;
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 
 use crate::{
     DecoratorList, Operation,
     chiplets::hasher,
     mast::{
-        DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeFingerprint, MastNodeId,
+        DecoratedLinksIter, DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNode,
+        MastNodeFingerprint, MastNodeId,
     },
 };
 
@@ -26,6 +25,13 @@ pub use op_batch::OpBatch;
 use op_batch::OpBatchAccumulator;
 
 use super::{MastForestContributor, MastNodeErrorContext, MastNodeExt};
+
+// Since we can't derive Default with an Arc, implement it manually.
+impl Default for DecoratorStore {
+    fn default() -> Self {
+        Self::Owned(DecoratorList::new())
+    }
+}
 
 #[cfg(any(test, feature = "arbitrary"))]
 pub mod arbitrary;
@@ -75,8 +81,6 @@ pub const BATCH_SIZE: usize = 8;
 /// Where `batches` is the concatenation of each `batch` in the basic block, and each batch is 8
 /// field elements (512 bits).
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 pub struct BasicBlockNode {
     /// The primitive operations contained in this basic block.
     ///
@@ -85,13 +89,27 @@ pub struct BasicBlockNode {
     /// Multiple batches are used for blocks consisting of more than 72 operations.
     op_batches: Vec<OpBatch>,
     digest: Word,
-    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Vec::is_empty"))]
-    decorators: DecoratorList,
-    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Vec::is_empty"))]
+    /// Custom serialization is handled via Serialize/Deserialize impls
+    decorators: DecoratorStore,
+    /// The rest of the fields (before_enter, after_exit)
     before_enter: Vec<DecoratorId>,
-    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Vec::is_empty"))]
     after_exit: Vec<DecoratorId>,
 }
+
+/// A data structure for storing op-indexed decorators for a basic block.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DecoratorStore {
+    /// The decorators are owned by this block. This is the case for blocks
+    /// which have not yet been inserted into a MAST forest.
+    Owned(DecoratorList),
+    /// The decorators are stored in a MAST forest and can be accessed via
+    /// this block's ID. All decorator reads borrow from the forest's storage.
+    Linked { id: MastNodeId },
+}
+
+// ------------------------------------------------------------------------------------------------
+// SERIALIZATION
+// ================================================================================================
 
 // ------------------------------------------------------------------------------------------------
 /// Constants
@@ -128,7 +146,7 @@ impl BasicBlockNode {
         Ok(Self {
             op_batches,
             digest,
-            decorators: reflowed_decorators,
+            decorators: DecoratorStore::Owned(reflowed_decorators),
             before_enter: Vec::new(),
             after_exit: Vec::new(),
         })
@@ -184,12 +202,52 @@ impl BasicBlockNode {
     /// Returns a [`DecoratorOpLinkIterator`] which allows us to iterate through the decorator list
     /// of this basic block node while executing operation batches of this basic block node.
     ///
+    /// This method borrows from the forest's storage, avoiding unnecessary Arc clones and providing
+    /// efficient access to decorators.
+    ///
     /// This iterator is intended for e.g. processor consumption, as such a component iterates
     /// differently through block operations: contrarily to e.g. the implementation of
     /// [`MastNodeErrorContext`] this does not include the `before_enter` or `after_exit`
     /// decorators.
-    pub fn indexed_decorator_iter(&self) -> DecoratorOpLinkIterator<'_> {
-        DecoratorOpLinkIterator::new(&[], &self.decorators, &[], self.num_operations() as usize)
+    pub fn indexed_decorator_iter<'a>(
+        &'a self,
+        forest: &'a MastForest,
+    ) -> DecoratorOpLinkIterator<'a> {
+        match &self.decorators {
+            DecoratorStore::Owned(decorators) => {
+                // For owned decorators, use the existing logic
+                DecoratorOpLinkIterator::from_slice_iters(
+                    &[],
+                    decorators,
+                    &[],
+                    self.num_operations() as usize,
+                )
+            },
+            DecoratorStore::Linked { id } => {
+                // For linked nodes, borrow from forest storage
+                // Check if the node has any decorators at all
+                let has_decorators = forest
+                    .decorator_links_for_node(*id)
+                    .map(|links| links.into_iter().next().is_some())
+                    .unwrap_or(false);
+
+                if !has_decorators {
+                    let num_ops = self.num_operations() as usize;
+                    return DecoratorOpLinkIterator::from_slice_iters(&[], &[], &[], num_ops);
+                }
+
+                let view = forest.decorator_links_for_node(*id).expect(
+                    "linked node decorators should be available; forest may be inconsistent",
+                );
+
+                DecoratorOpLinkIterator::from_linked(
+                    &[],
+                    view.into_iter(),
+                    &[],
+                    self.num_operations() as usize,
+                )
+            },
+        }
     }
 
     /// Returns an iterator which allows us to iterate through the decorator list of
@@ -198,22 +256,96 @@ impl BasicBlockNode {
     ///
     /// Though this adjusts the indexation of op-indexed decorators, this iterator returns all
     /// decorators of the [`BasicBlockNode`] in the order in which they appear in the program.
+    /// This includes `before_enter`, op-indexed decorators, and after_exit.
+    ///
+    /// Returns an iterator which allows us to iterate through the decorator list of
+    /// this basic block node with op indexes aligned to the "raw" (un-padded)) op
+    /// batches of the basic block node.
+    ///
+    /// This method borrows from the forest's storage, avoiding unnecessary Arc clones and
+    /// providing efficient access to decorators.
+    ///
+    /// Though this adjusts the indexation of op-indexed decorators, this iterator returns all
+    /// decorators of the [`BasicBlockNode`] in the order in which they appear in the program.
     /// This includes `before_enter`, op-indexed decorators, and after_exit`.
-    pub fn raw_decorator_iter(&self) -> RawDecoratorOpLinkIterator<'_> {
-        RawDecoratorOpLinkIterator::new(
-            &self.before_enter,
-            &self.decorators,
-            &self.after_exit,
-            &self.op_batches,
-        )
+    pub fn raw_decorator_iter<'a>(
+        &'a self,
+        forest: &'a MastForest,
+    ) -> RawDecoratorOpLinkIterator<'a> {
+        match &self.decorators {
+            DecoratorStore::Owned(decorators) => {
+                // For owned decorators, use the existing logic
+                RawDecoratorOpLinkIterator::from_slice_iters(
+                    &self.before_enter,
+                    decorators,
+                    &self.after_exit,
+                    &self.op_batches,
+                )
+            },
+            DecoratorStore::Linked { id } => {
+                // For linked nodes, borrow from forest storage
+                // Check if the node has any decorators at all
+                let has_decorators = forest
+                    .decorator_links_for_node(*id)
+                    .map(|links| links.into_iter().next().is_some())
+                    .unwrap_or(false);
+
+                if !has_decorators {
+                    return RawDecoratorOpLinkIterator::from_slice_iters(
+                        &self.before_enter,
+                        &[],
+                        &self.after_exit,
+                        &self.op_batches,
+                    );
+                }
+
+                let view = forest.decorator_links_for_node(*id).expect(
+                    "linked node decorators should be available; forest may be inconsistent",
+                );
+
+                RawDecoratorOpLinkIterator::from_linked(
+                    &self.before_enter,
+                    view.into_iter(),
+                    &self.after_exit,
+                    &self.op_batches,
+                )
+            },
+        }
     }
 
     /// Returns only the raw op-indexed decorators (without before_enter/after_exit)
     /// with indices based on raw operations.
     ///
-    /// This is used for serialization to store decorators with raw operation indices.
-    pub fn raw_op_indexed_decorators(&self) -> Vec<(usize, DecoratorId)> {
-        RawDecoratorOpLinkIterator::new(&[], &self.decorators, &[], &self.op_batches).collect()
+    /// Stores decorators with raw operation indices for serialization.
+    ///
+    /// Returns only the raw op-indexed decorators (without before_enter/after_exit)
+    /// with indices based on raw operations.
+    ///
+    /// This method borrows from the forest's storage, avoiding unnecessary Arc clones and
+    /// providing efficient access to decorators.
+    ///
+    /// Stores decorators with raw operation indices for serialization.
+    pub fn raw_op_indexed_decorators(&self, forest: &MastForest) -> Vec<(usize, DecoratorId)> {
+        match &self.decorators {
+            DecoratorStore::Owned(decorators) => {
+                // For owned decorators, use the existing logic
+                RawDecoratorOpLinkIterator::from_slice_iters(&[], decorators, &[], &self.op_batches)
+                    .collect()
+            },
+            DecoratorStore::Linked { id } => {
+                let pad2raw = PaddedToRawPrefix::new(self.op_batches());
+                match forest.decorator_links_for_node(*id) {
+                    Ok(links) => links
+                        .into_iter()
+                        .map(|(padded_idx, dec_id)| {
+                            let raw_idx = padded_idx - pad2raw[padded_idx];
+                            (raw_idx, dec_id)
+                        })
+                        .collect(),
+                    Err(_) => Vec::new(), // Return empty if error
+                }
+            },
+        }
     }
 
     /// Returns an iterator over the operations in the order in which they appear in the program.
@@ -228,9 +360,18 @@ impl BasicBlockNode {
     }
 
     /// Returns the total number of operations and decorators in this basic block.
-    pub fn num_operations_and_decorators(&self) -> u32 {
+    pub fn num_operations_and_decorators(&self, forest: &MastForest) -> u32 {
         let num_ops: usize = self.num_operations() as usize;
-        let num_decorators = self.decorators.len();
+        let num_decorators = match &self.decorators {
+            DecoratorStore::Owned(decorators) => decorators.len(),
+            DecoratorStore::Linked { id } => {
+                // For linked nodes, count from forest storage
+                forest
+                    .decorator_links_for_node(*id)
+                    .map(|links| links.into_iter().count())
+                    .unwrap_or(0)
+            },
+        };
 
         (num_ops + num_decorators)
             .try_into()
@@ -239,22 +380,82 @@ impl BasicBlockNode {
 
     /// Returns an iterator over all operations and decorator, in the order in which they appear in
     /// the program.
-    pub fn iter(&self) -> impl Iterator<Item = OperationOrDecorator<'_>> {
-        OperationOrDecoratorIterator::new(self)
+    ///
+    /// This method requires access to the forest to properly handle linked nodes.
+    pub fn iter<'a>(
+        &'a self,
+        forest: &'a MastForest,
+    ) -> impl Iterator<Item = OperationOrDecorator<'a>> + 'a {
+        OperationOrDecoratorIterator::new_with_forest(self, forest)
+    }
+
+    /// Performs semantic equality comparison with another BasicBlockNode.
+    ///
+    /// This method compares two blocks for logical equality by comparing:
+    /// - Operations (exact equality)
+    /// - Before-enter decorators (by ID)
+    /// - After-exit decorators (by ID)
+    /// - Operation-indexed decorators (by iterating and comparing their contents)
+    ///
+    /// Unlike the derived PartialEq, this method works correctly with both owned and linked
+    /// decorator storage by accessing the actual decorator data from the forest when needed.
+    pub fn semantic_eq(&self, other: &BasicBlockNode, forest: &MastForest) -> bool {
+        // Compare operations by collecting and comparing
+        let self_ops: Vec<_> = self.operations().collect();
+        let other_ops: Vec<_> = other.operations().collect();
+        if self_ops != other_ops {
+            return false;
+        }
+
+        // Compare before-enter decorators
+        if self.before_enter() != other.before_enter() {
+            return false;
+        }
+
+        // Compare after-exit decorators
+        if self.after_exit() != other.after_exit() {
+            return false;
+        }
+
+        // Compare operation-indexed decorators by collecting and comparing
+        let self_decorators: Vec<_> = self.indexed_decorator_iter(forest).collect();
+        let other_decorators: Vec<_> = other.indexed_decorator_iter(forest).collect();
+
+        if self_decorators != other_decorators {
+            return false;
+        }
+
+        true
     }
 }
 
+#[allow(refining_impl_trait_reachable)]
 impl MastNodeErrorContext for BasicBlockNode {
-    /// This iterator returns all decorators of the [`BasicBlockNode`] in the order in which they
-    /// appear in the program. This includes `before_enter`, op-indexed decorators, and
-    /// `after_exit`.
-    fn decorators(&self) -> impl Iterator<Item = DecoratedOpLink> {
-        DecoratorOpLinkIterator::new(
-            &self.before_enter,
-            &self.decorators,
-            &self.after_exit,
-            self.num_operations() as usize,
-        )
+    /// Returns all decorators in program order: before_enter, op-indexed, after_exit.
+    fn decorators<'a>(
+        &'a self,
+        forest: &'a MastForest,
+    ) -> impl Iterator<Item = DecoratedOpLink> + 'a {
+        match &self.decorators {
+            DecoratorStore::Owned(decorators) => DecoratorOpLinkIterator::from_slice_iters(
+                &self.before_enter,
+                decorators,
+                &self.after_exit,
+                self.num_operations() as usize,
+            ),
+            DecoratorStore::Linked { id } => {
+                // For linked nodes, borrow from forest storage
+                let view = forest.decorator_links_for_node(*id).expect(
+                    "linked node decorators should be available; forest may be inconsistent",
+                );
+                DecoratorOpLinkIterator::from_linked(
+                    &self.before_enter,
+                    view.into_iter(),
+                    &self.after_exit,
+                    self.num_operations() as usize,
+                )
+            },
+        }
     }
 }
 
@@ -293,7 +494,7 @@ impl MastNodeExt for BasicBlockNode {
 
     /// Removes all decorators from this node.
     fn remove_decorators(&mut self) {
-        self.decorators.truncate(0);
+        self.decorators = DecoratorStore::Owned(Vec::new());
         self.before_enter.truncate(0);
         self.after_exit.truncate(0);
     }
@@ -327,11 +528,9 @@ impl MastNodeExt for BasicBlockNode {
 
     type Builder = BasicBlockNodeBuilder;
 
-    fn to_builder(self) -> Self::Builder {
+    fn to_builder(self, forest: &MastForest) -> Self::Builder {
         let operations: Vec<Operation> = self.raw_operations().cloned().collect();
-        let un_adjusted_decorators =
-            RawDecoratorOpLinkIterator::new(&[], &self.decorators, &[], self.op_batches())
-                .collect();
+        let un_adjusted_decorators = self.raw_op_indexed_decorators(forest);
 
         BasicBlockNodeBuilder::new(operations, un_adjusted_decorators)
             .with_before_enter(self.before_enter)
@@ -354,10 +553,10 @@ impl PrettyPrint for BasicBlockNodePrettyPrint<'_> {
             + const_text(" ")
             + self.
                 block_node
-                .iter()
+                .iter(self.mast_forest)
                 .map(|op_or_dec| match op_or_dec {
                     OperationOrDecorator::Operation(op) => op.render(),
-                    OperationOrDecorator::Decorator(&decorator_id) => self.mast_forest[decorator_id].render(),
+                    OperationOrDecorator::Decorator(decorator_id) => self.mast_forest[decorator_id].render(),
                 })
                 .reduce(|acc, doc| acc + const_text(" ") + doc)
                 .unwrap_or_default()
@@ -378,10 +577,10 @@ impl PrettyPrint for BasicBlockNodePrettyPrint<'_> {
                 + nl()
                 + self
                     .block_node
-                    .iter()
+                    .iter(self.mast_forest)
                     .map(|op_or_dec| match op_or_dec {
                         OperationOrDecorator::Operation(op) => op.render(),
-                        OperationOrDecorator::Decorator(&decorator_id) => self.mast_forest[decorator_id].render(),
+                        OperationOrDecorator::Decorator(decorator_id) => self.mast_forest[decorator_id].render(),
                     })
                     .reduce(|acc, doc| acc + nl() + doc)
                     .unwrap_or_default(),
@@ -399,6 +598,11 @@ impl fmt::Display for BasicBlockNodePrettyPrint<'_> {
     }
 }
 
+enum Mid<'a> {
+    Slice(core::iter::Peekable<core::slice::Iter<'a, (usize, DecoratorId)>>),
+    Linked(core::iter::Peekable<DecoratedLinksIter<'a>>),
+}
+
 // DECORATOR ITERATION
 // ================================================================================================
 
@@ -409,7 +613,7 @@ impl fmt::Display for BasicBlockNodePrettyPrint<'_> {
 /// standard (padded) representation of a basic block.
 pub struct DecoratorOpLinkIterator<'a> {
     before: Peekable<Iter<'a, DecoratorId>>,
-    middle: Peekable<Iter<'a, (usize, DecoratorId)>>,
+    middle: Mid<'a>,
     after: Peekable<Iter<'a, DecoratorId>>,
     total_ops: usize,
     seg: Segment,
@@ -424,18 +628,54 @@ enum Segment {
 }
 
 impl<'a> DecoratorOpLinkIterator<'a> {
-    pub fn new(
+    pub fn from_slice_iters(
         before_enter: &'a [DecoratorId],
-        decorators: &'a DecoratorList,
+        decorators: &'a [DecoratedOpLink],
         after_exit: &'a [DecoratorId],
         total_operations: usize,
     ) -> Self {
         Self {
             before: before_enter.iter().peekable(),
-            middle: decorators.iter().peekable(),
+            middle: Mid::Slice(decorators.iter().peekable()),
             after: after_exit.iter().peekable(),
             total_ops: total_operations,
             seg: Segment::Before,
+        }
+    }
+
+    pub fn from_linked(
+        before_enter: &'a [DecoratorId],
+        decorators: DecoratedLinksIter<'a>,
+        after_exit: &'a [DecoratorId],
+        total_operations: usize,
+    ) -> Self {
+        Self {
+            before: before_enter.iter().peekable(),
+            middle: Mid::Linked(decorators.into_iter().peekable()),
+            after: after_exit.iter().peekable(),
+            total_ops: total_operations,
+            seg: Segment::Before,
+        }
+    }
+
+    fn middle_next(&mut self) -> Option<(usize, DecoratorId)> {
+        match &mut self.middle {
+            Mid::Slice(slice_iter) => slice_iter.next().copied(),
+            Mid::Linked(linked_iter) => linked_iter.next(),
+        }
+    }
+
+    fn middle_peek(&mut self) -> Option<&(usize, DecoratorId)> {
+        match &mut self.middle {
+            Mid::Slice(slice_iter) => slice_iter.peek().copied(),
+            Mid::Linked(linked_iter) => linked_iter.peek(),
+        }
+    }
+
+    fn middle_len(&self) -> usize {
+        match self.middle {
+            Mid::Slice(ref slice_iter) => slice_iter.len(),
+            Mid::Linked(ref linked_iter) => linked_iter.len(),
         }
     }
 
@@ -461,8 +701,8 @@ impl<'a> DecoratorOpLinkIterator<'a> {
                     self.seg = Segment::Middle;
                 },
                 Segment::Middle => {
-                    if let Some(&(p, _)) = self.middle.peek() {
-                        should_yield = pos == *p;
+                    if let Some(&(p, _)) = self.middle_peek() {
+                        should_yield = pos == p;
                         break 'segwalk;
                     }
                     self.seg = Segment::After;
@@ -497,7 +737,7 @@ impl<'a> Iterator for DecoratorOpLinkIterator<'a> {
                     self.seg = Segment::Middle;
                 },
                 Segment::Middle => {
-                    if let Some(&(pos, id)) = self.middle.next() {
+                    if let Some((pos, id)) = self.middle_next() {
                         return Some((pos, id));
                     }
                     self.seg = Segment::After;
@@ -517,7 +757,7 @@ impl<'a> Iterator for DecoratorOpLinkIterator<'a> {
 impl<'a> ExactSizeIterator for DecoratorOpLinkIterator<'a> {
     #[inline]
     fn len(&self) -> usize {
-        self.before.len() + self.middle.len() + self.after.len()
+        self.before.len() + self.middle_len() + self.after.len()
     }
 }
 
@@ -534,17 +774,22 @@ impl<'a> ExactSizeIterator for DecoratorOpLinkIterator<'a> {
 /// "removes" the padding of these decorators
 pub struct RawDecoratorOpLinkIterator<'a> {
     before: core::slice::Iter<'a, DecoratorId>,
-    middle: core::slice::Iter<'a, (usize, DecoratorId)>, // (adjusted_idx, id)
+    middle: RawMid<'a>,
     after: core::slice::Iter<'a, DecoratorId>,
     pad2raw: PaddedToRawPrefix, // indexed by padded indices
     total_raw_ops: usize,       // count of raw ops
     seg: Segment,
 }
 
+enum RawMid<'a> {
+    Slice(core::iter::Peekable<core::slice::Iter<'a, (usize, DecoratorId)>>),
+    Linked(core::iter::Peekable<DecoratedLinksIter<'a>>),
+}
+
 impl<'a> RawDecoratorOpLinkIterator<'a> {
-    pub fn new(
+    pub fn from_slice_iters(
         before_enter: &'a [DecoratorId],
-        decorators: &'a DecoratorList, // contains adjusted indices
+        decorators: &'a [(usize, DecoratorId)], // contains adjusted indices
         after_exit: &'a [DecoratorId],
         op_batches: &'a [OpBatch],
     ) -> Self {
@@ -554,11 +799,38 @@ impl<'a> RawDecoratorOpLinkIterator<'a> {
 
         Self {
             before: before_enter.iter(),
-            middle: decorators.iter(),
+            middle: RawMid::Slice(decorators.iter().peekable()),
             after: after_exit.iter(),
             pad2raw,
             total_raw_ops,
             seg: Segment::Before,
+        }
+    }
+
+    pub fn from_linked(
+        before_enter: &'a [DecoratorId],
+        decorators: DecoratedLinksIter<'a>,
+        after_exit: &'a [DecoratorId],
+        op_batches: &'a [OpBatch],
+    ) -> Self {
+        let pad2raw = PaddedToRawPrefix::new(op_batches);
+        let raw2pad = RawToPaddedPrefix::new(op_batches);
+        let total_raw_ops = raw2pad.raw_ops();
+
+        Self {
+            before: before_enter.iter(),
+            middle: RawMid::Linked(decorators.into_iter().peekable()),
+            after: after_exit.iter(),
+            pad2raw,
+            total_raw_ops,
+            seg: Segment::Before,
+        }
+    }
+
+    fn middle_next(&mut self) -> Option<(usize, DecoratorId)> {
+        match &mut self.middle {
+            RawMid::Slice(slice_iter) => slice_iter.next().copied(),
+            RawMid::Linked(linked_iter) => linked_iter.next(),
         }
     }
 }
@@ -576,7 +848,7 @@ impl<'a> Iterator for RawDecoratorOpLinkIterator<'a> {
                     self.seg = Segment::Middle;
                 },
                 Segment::Middle => {
-                    if let Some(&(padded_idx, id)) = self.middle.next() {
+                    if let Some((padded_idx, id)) = self.middle_next() {
                         let raw_idx = padded_idx - self.pad2raw[padded_idx];
                         return Some((raw_idx, id));
                     }
@@ -602,11 +874,12 @@ impl<'a> Iterator for RawDecoratorOpLinkIterator<'a> {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum OperationOrDecorator<'a> {
     Operation(&'a Operation),
-    Decorator(&'a DecoratorId),
+    Decorator(DecoratorId),
 }
 
 struct OperationOrDecoratorIterator<'a> {
     node: &'a BasicBlockNode,
+    forest: Option<&'a MastForest>,
 
     // extra segments
     before: core::slice::Iter<'a, DecoratorId>,
@@ -623,9 +896,10 @@ struct OperationOrDecoratorIterator<'a> {
 }
 
 impl<'a> OperationOrDecoratorIterator<'a> {
-    fn new(node: &'a BasicBlockNode) -> Self {
+    fn new_with_forest(node: &'a BasicBlockNode, forest: &'a MastForest) -> Self {
         Self {
             node,
+            forest: Some(forest),
             before: node.before_enter().iter(),
             after: node.after_exit().iter(),
             batch_index: 0,
@@ -638,13 +912,36 @@ impl<'a> OperationOrDecoratorIterator<'a> {
 
     #[inline]
     fn next_decorator_if_due(&mut self) -> Option<OperationOrDecorator<'a>> {
-        if let Some((op_idx, deco)) = self.node.decorators.get(self.decorator_list_next_index)
-            && *op_idx == self.op_index
-        {
-            self.decorator_list_next_index += 1;
-            Some(OperationOrDecorator::Decorator(deco))
-        } else {
-            None
+        match &self.node.decorators {
+            DecoratorStore::Owned(decorators) => {
+                // Simple case for owned decorators - use index lookup
+                if let Some((op_idx, deco)) = decorators.get(self.decorator_list_next_index)
+                    && *op_idx == self.op_index
+                {
+                    self.decorator_list_next_index += 1;
+                    Some(OperationOrDecorator::Decorator(*deco))
+                } else {
+                    None
+                }
+            },
+            DecoratorStore::Linked { id } => {
+                // For linked nodes, use forest access if available
+                if let Some(forest) = self.forest {
+                    // Get decorators for the current operation from the forest
+                    let decorator_ids = forest.decorator_indices_for_op(*id, self.op_index);
+
+                    if self.decorator_list_next_index < decorator_ids.len() {
+                        let decorator_id = decorator_ids[self.decorator_list_next_index];
+                        self.decorator_list_next_index += 1;
+                        Some(OperationOrDecorator::Decorator(decorator_id))
+                    } else {
+                        None
+                    }
+                } else {
+                    // No forest access available, can't retrieve decorators
+                    None
+                }
+            },
         }
     }
 }
@@ -657,7 +954,7 @@ impl<'a> Iterator for OperationOrDecoratorIterator<'a> {
             match self.seg {
                 Segment::Before => {
                     if let Some(id) = self.before.next() {
-                        return Some(OperationOrDecorator::Decorator(id));
+                        return Some(OperationOrDecorator::Decorator(*id));
                     }
                     self.seg = Segment::Middle;
                 },
@@ -673,6 +970,8 @@ impl<'a> Iterator for OperationOrDecoratorIterator<'a> {
                         if let Some(op) = batch.ops.get(self.op_index_in_batch) {
                             self.op_index_in_batch += 1;
                             self.op_index += 1;
+                            // Reset decorator index when moving to a new operation
+                            self.decorator_list_next_index = 0;
                             return Some(OperationOrDecorator::Operation(op));
                         } else {
                             // advance to next batch and retry
@@ -689,7 +988,7 @@ impl<'a> Iterator for OperationOrDecoratorIterator<'a> {
 
                 Segment::After => {
                     if let Some(id) = self.after.next() {
-                        return Some(OperationOrDecorator::Decorator(id));
+                        return Some(OperationOrDecorator::Decorator(*id));
                     }
                     self.seg = Segment::Done;
                 },
@@ -955,7 +1254,7 @@ impl BasicBlockNodeBuilder {
         Ok(BasicBlockNode {
             op_batches,
             digest,
-            decorators: reflowed_decorators,
+            decorators: DecoratorStore::Owned(reflowed_decorators),
             before_enter: self.before_enter,
             after_exit: self.after_exit,
         })
@@ -987,10 +1286,43 @@ impl BasicBlockNodeBuilder {
 
 impl MastForestContributor for BasicBlockNodeBuilder {
     fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
+        let basic_block = self.build()?;
+
+        let BasicBlockNode {
+            op_batches,
+            digest,
+            decorators: DecoratorStore::Owned(decorators_info),
+            before_enter,
+            after_exit,
+        } = basic_block
+        else {
+            unreachable!("BasicBlockBuilder::build() should always return owned decorators");
+        };
+
+        // Determine the node ID that will be assigned
+        let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
+
+        // Add decorator info to the forest storage
         forest
+            .decorator_storage
+            .add_decorator_info_for_node(future_node_id, decorators_info)
+            .map_err(MastForestError::DecoratorError)?;
+
+        // Create the node in the forest with Linked variant from the start
+        // Move the data directly without intermediate cloning
+        let node_id = forest
             .nodes
-            .push(self.build()?.into())
-            .map_err(|_| MastForestError::TooManyNodes)
+            .push(MastNode::Block(BasicBlockNode {
+                op_batches: op_batches.to_vec(),
+                digest,
+                decorators: DecoratorStore::Linked { id: future_node_id },
+                before_enter,
+                after_exit,
+            }))
+            .map_err(|_| MastForestError::TooManyNodes)?;
+
+        // The decorator info was already added to forest storage, so we're done
+        Ok(node_id)
     }
 
     fn fingerprint_for_node(
@@ -1002,7 +1334,7 @@ impl MastForestContributor for BasicBlockNodeBuilder {
         // decorator handling with operation indices that other nodes don't have
 
         // Compute digest - use forced digest if available, otherwise compute normally
-        let (op_batches, computed_digest) = batch_and_hash_ops(self.operations.clone());
+        let (_op_batches, computed_digest) = batch_and_hash_ops(self.operations.clone());
         let digest = self.digest.unwrap_or(computed_digest);
 
         // Hash before_enter decorators first
@@ -1013,9 +1345,21 @@ impl MastForestContributor for BasicBlockNodeBuilder {
 
         // Hash op-indexed decorators using the same logic as node.indexed_decorator_iter()
         #[cfg(debug_assertions)]
-        validate_decorators(self.operations.len(), &self.decorators);
-        let adjusted_decorators =
-            BasicBlockNode::adjust_decorators(self.decorators.clone(), &op_batches);
+        {
+            let decorators = self.decorators.clone();
+            validate_decorators(self.operations.len(), &decorators);
+        }
+        // For BasicBlockNodeBuilder, convert from padded to raw indices
+        let (op_batches, _) = batch_and_hash_ops(self.operations.clone());
+        let pad2raw = PaddedToRawPrefix::new(&op_batches);
+        let adjusted_decorators: Vec<(usize, DecoratorId)> = self
+            .decorators
+            .iter()
+            .map(|(padded_idx, decorator_id)| {
+                let raw_idx = padded_idx - pad2raw[*padded_idx];
+                (raw_idx, *decorator_id)
+            })
+            .collect();
         for (raw_op_idx, decorator_id) in adjusted_decorators.iter() {
             bytes_to_hash.extend(raw_op_idx.to_le_bytes());
             bytes_to_hash.extend(forest[*decorator_id].fingerprint().as_bytes());

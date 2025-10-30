@@ -127,9 +127,18 @@ fn mast_forest_merge_remap() {
     let (merged, root_maps) = MastForest::merge([&forest_a, &forest_b]).unwrap();
 
     assert_eq!(merged.nodes().len(), 4);
-    assert_eq!(merged.nodes()[0], block_foo().build().unwrap().into());
+
+    // Check that the first node is semantically equal to the expected foo block
+    let expected_foo_block = block_foo().build().unwrap();
+    assert_matches!(&merged.nodes()[0], MastNode::Block(merged_block)
+        if merged_block.semantic_eq(&expected_foo_block, &merged));
+
     assert_matches!(&merged.nodes()[1], MastNode::Call(call_node) if 0u32 == u32::from(call_node.callee()));
-    assert_eq!(merged.nodes()[2], block_bar().build().unwrap().into());
+
+    // Check that the third node is semantically equal to the expected bar block
+    let expected_bar_block = block_bar().build().unwrap();
+    assert_matches!(&merged.nodes()[2], MastNode::Block(merged_block)
+        if merged_block.semantic_eq(&expected_bar_block, &merged));
     assert_matches!(&merged.nodes()[3], MastNode::Call(call_node) if 2u32 == u32::from(call_node.callee()));
 
     assert_eq!(u32::from(root_maps.map_root(0, &id_call_a).unwrap()), 1u32);
@@ -207,7 +216,12 @@ fn mast_forest_merge_replace_external() {
 
     for (merged, root_map) in [(merged_ab, root_maps_ab), (merged_ba, root_maps_ba)] {
         assert_eq!(merged.nodes().len(), 2);
-        assert_eq!(merged.nodes()[0], block_foo().build().unwrap().into());
+
+        // Check that the first node is semantically equal to the expected foo block
+        let expected_foo_block = block_foo().build().unwrap();
+        assert_matches!(&merged.nodes()[0], MastNode::Block(merged_block)
+            if merged_block.semantic_eq(&expected_foo_block, &merged));
+
         assert_matches!(&merged.nodes()[1], MastNode::Call(call_node) if 0u32 == u32::from(call_node.callee()));
         // The only root node should be the call node.
         assert_eq!(merged.roots.len(), 1);
@@ -414,7 +428,7 @@ fn mast_forest_merge_decorators() {
     };
 
     assert_eq!(
-        &merged_foo_block.decorators().collect::<Vec<_>>()[..],
+        &merged_foo_block.decorators(&merged).collect::<Vec<_>>()[..],
         &[(0, merged_deco1), (0, merged_deco2)]
     );
 
@@ -831,4 +845,228 @@ fn mast_forest_merge_advice_maps_collision() {
 
     let err = MastForest::merge([&forest_a, &forest_b]).unwrap_err();
     assert_matches!(err, MastForestError::AdviceMapKeyCollisionOnMerge(_));
+}
+
+// Forest A:
+//   - Block with op-indexed decorators at operations [0, 1]
+//   - Before-enter and after-exit decorators
+// Forest B:
+//   - Block with op-indexed decorators at operations [0, 2]
+//   - Before-enter and after-exit decorators
+//   - One decorator duplicated from Forest A
+//   - Some decorators unique to B
+#[test]
+fn mast_forest_merge_op_indexed_decorators_preservation() {
+    // Build Forest A with diverse decorators
+    let mut forest_a = MastForest::new();
+
+    // Create decorators for Forest A
+    let before_enter_a = forest_a.add_decorator(Decorator::Trace(0)).unwrap();
+    let op0_a = forest_a.add_decorator(Decorator::Trace(1)).unwrap();
+    let op1_a = forest_a.add_decorator(Decorator::Trace(2)).unwrap();
+    let after_exit_a = forest_a.add_decorator(Decorator::Trace(3)).unwrap();
+    let shared_deco_a = forest_a.add_decorator(Decorator::Trace(99)).unwrap(); // Will be deduped
+
+    // Create a block with multiple operations and op-indexed decorators
+    let ops_a = vec![Operation::Add, Operation::Mul, Operation::Or];
+    let block_id_a = BasicBlockNodeBuilder::new(
+        ops_a.clone(),
+        vec![(0, op0_a), (1, op1_a)], // Op-indexed decorators
+    )
+    .with_before_enter(vec![before_enter_a, shared_deco_a]) // Use shared decorator
+    .with_after_exit(vec![after_exit_a])
+    .add_to_forest(&mut forest_a)
+    .unwrap();
+
+    forest_a.make_root(block_id_a);
+
+    // Build Forest B with some overlapping and some new decorators
+    let mut forest_b = MastForest::new();
+
+    // Create decorators for Forest B (note: Trace(99) matches shared_deco from A)
+    let before_enter_b = forest_b.add_decorator(Decorator::Trace(10)).unwrap();
+    let op0_b = forest_b.add_decorator(Decorator::Trace(11)).unwrap();
+    let op2_b = forest_b.add_decorator(Decorator::Trace(12)).unwrap();
+    let after_exit_b = forest_b.add_decorator(Decorator::Trace(13)).unwrap();
+    let shared_deco_b = forest_b.add_decorator(Decorator::Trace(99)).unwrap(); // Same value as Forest A
+    let unique_b = forest_b.add_decorator(Decorator::Trace(20)).unwrap();
+
+    let ops_b = vec![Operation::Add, Operation::Mul, Operation::Or];
+    let block_id_b = BasicBlockNodeBuilder::new(
+        ops_b.clone(),
+        vec![(0, op0_b), (2, op2_b)], // Op-indexed decorators at different positions
+    )
+    .with_before_enter(vec![before_enter_b, shared_deco_b]) // Use shared decorator
+    .with_after_exit(vec![after_exit_b, unique_b]) // Use unique decorator
+    .add_to_forest(&mut forest_b)
+    .unwrap();
+
+    forest_b.make_root(block_id_b);
+
+    // Perform the merge
+    let (merged, root_maps) = MastForest::merge([&forest_a, &forest_b]).unwrap();
+
+    // Helper to find a decorator's ID in the merged forest
+    let find_decorator = |trace_value: u32| {
+        let idx = merged
+            .decorators
+            .iter()
+            .enumerate()
+            .find_map(|(id, deco)| {
+                if let Decorator::Trace(v) = deco {
+                    if *v == trace_value { Some(id) } else { None }
+                } else {
+                    None
+                }
+            })
+            .expect("decorator not found");
+        DecoratorId::from_u32_safe(idx as u32, &merged).unwrap()
+    };
+
+    // Find all decorator IDs in merged forest
+    let merged_before_enter_a = find_decorator(0);
+    let merged_op0_a = find_decorator(1);
+    let merged_op1_a = find_decorator(2);
+    let merged_after_exit_a = find_decorator(3);
+    let merged_shared = find_decorator(99);
+    let merged_before_enter_b = find_decorator(10);
+    let merged_op0_b = find_decorator(11);
+    let merged_op2_b = find_decorator(12);
+    let merged_after_exit_b = find_decorator(13);
+    let merged_unique_b = find_decorator(20);
+
+    // Verify that shared decorator appears only once in merged forest
+    assert!(
+        merged
+            .decorators
+            .iter()
+            .enumerate()
+            .find_map(|(i, deco)| {
+                if let Decorator::Trace(v) = deco
+                    && i > merged_shared.0 as usize
+                {
+                    if *v == 99 { Some(i) } else { None }
+                } else {
+                    None
+                }
+            })
+            .is_none(),
+        "Shared decorator should map to single ID"
+    );
+
+    // Count how many times each decorator appears in the merged forest
+    let mut decorator_ref_counts = alloc::collections::BTreeMap::new();
+
+    // Check all nodes for decorator references
+    for node in &merged.nodes {
+        // Count before_enter decorators
+        for &deco_id in node.before_enter() {
+            *decorator_ref_counts.entry(deco_id).or_insert(0) += 1;
+        }
+        // Count after_exit decorators
+        for &deco_id in node.after_exit() {
+            *decorator_ref_counts.entry(deco_id).or_insert(0) += 1;
+        }
+        // Count op-indexed decorators if it's a basic block
+        if let MastNode::Block(block) = node {
+            for (_, deco_id) in block.indexed_decorator_iter(&merged) {
+                *decorator_ref_counts.entry(deco_id).or_insert(0) += 1;
+            }
+        }
+    }
+
+    // Verify all decorators are referenced at least once (no orphans)
+    for (i, decorator) in merged.decorators.iter().enumerate() {
+        let deco_id = DecoratorId::from_u32_safe(i as u32, &merged).unwrap();
+        let ref_count = decorator_ref_counts.get(&deco_id).unwrap_or(&0);
+        if ref_count == &0 {
+            panic!(
+                "Decorator at index {} (value: {:?}) is not referenced anywhere in the merged forest (orphan)",
+                i, decorator
+            );
+        }
+    }
+
+    // Verify op-indexed decorators are correctly preserved for Forest A's block
+    let mapped_root_a = root_maps.map_root(0, &block_id_a).unwrap();
+    if let MastNode::Block(block_a) = &merged[mapped_root_a] {
+        // Check before_enter decorators (note: includes both before_enter_a and shared_deco_a)
+        assert_eq!(
+            block_a.before_enter(),
+            &[merged_before_enter_a, merged_shared],
+            "Forest A's before_enter decorators should be preserved (including shared decorator)"
+        );
+
+        // Check op-indexed decorators at correct positions
+        let indexed_decs: alloc::collections::BTreeMap<usize, DecoratorId> =
+            block_a.indexed_decorator_iter(&merged).collect();
+
+        assert_eq!(
+            indexed_decs.get(&0),
+            Some(&merged_op0_a),
+            "Forest A's op[0] decorator should be preserved at position 0"
+        );
+        assert_eq!(
+            indexed_decs.get(&1),
+            Some(&merged_op1_a),
+            "Forest A's op[1] decorator should be preserved at position 1"
+        );
+        assert_eq!(indexed_decs.get(&2), None, "Forest A's block doesn't have op[2] decorator");
+
+        // Check after_exit decorators
+        assert_eq!(
+            block_a.after_exit(),
+            &[merged_after_exit_a],
+            "Forest A's after_exit decorator should be preserved"
+        );
+    } else {
+        panic!("Expected a basic block node");
+    }
+
+    // Verify op-indexed decorators are correctly preserved for Forest B's block
+    let mapped_root_b = root_maps.map_root(1, &block_id_b).unwrap();
+    if let MastNode::Block(block_b) = &merged[mapped_root_b] {
+        // Check before_enter decorators (note: includes both before_enter_b and shared_deco_b)
+        assert_eq!(
+            block_b.before_enter(),
+            &[merged_before_enter_b, merged_shared],
+            "Forest B's before_enter decorators should be preserved (including shared decorator)"
+        );
+
+        // Check op-indexed decorators at correct positions
+        let indexed_decs: alloc::collections::BTreeMap<usize, DecoratorId> =
+            block_b.indexed_decorator_iter(&merged).collect();
+
+        assert_eq!(
+            indexed_decs.get(&0),
+            Some(&merged_op0_b),
+            "Forest B's op[0] decorator should be preserved at position 0"
+        );
+        assert_eq!(indexed_decs.get(&1), None, "Forest B's block doesn't have op[1] decorator");
+        assert_eq!(
+            indexed_decs.get(&2),
+            Some(&merged_op2_b),
+            "Forest B's op[2] decorator should be preserved at position 2"
+        );
+
+        // Check after_exit decorators (note: includes both after_exit_b and unique_b)
+        assert_eq!(
+            block_b.after_exit(),
+            &[merged_after_exit_b, merged_unique_b],
+            "Forest B's after_exit decorators should be preserved (including unique decorator)"
+        );
+    } else {
+        panic!("Expected a basic block node");
+    }
+
+    // Verify the shared decorator (Trace(99)) is deduped and referenced correctly
+    let shared_ref_count = decorator_ref_counts.get(&merged_shared).unwrap_or(&0);
+    assert!(shared_ref_count > &0, "Shared decorator should be referenced at least once");
+
+    // Verify no decorator was lost or orphaned
+    assert_eq!(
+        decorator_ref_counts.len(),
+        merged.decorators.len(),
+        "Every decorator in merged forest should be referenced at least once (no orphans)"
+    );
 }

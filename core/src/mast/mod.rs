@@ -26,9 +26,12 @@ pub use node::{
 use crate::{
     AdviceMap, Decorator, Felt, Idx, LexicographicWord, Word,
     crypto::hash::Hasher,
+    mast::decorator_storage::DecoratorIndexError,
     utils::{ByteWriter, DeserializationError, Serializable, hash_string_to_word},
 };
 
+mod decorator_storage;
+pub use decorator_storage::{DecoratedLinks, DecoratedLinksIter, DecoratorIndexMapping};
 mod serialization;
 
 mod merger;
@@ -52,17 +55,12 @@ mod tests;
 /// A [`MastForest`] does not have an entrypoint, and hence is not executable. A [`crate::Program`]
 /// can be built from a [`MastForest`] to specify an entrypoint.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 pub struct MastForest {
     /// All of the nodes local to the trees comprising the MAST forest.
     nodes: IndexVec<MastNodeId, MastNode>,
 
     /// Roots of procedures defined within this MAST forest.
     roots: Vec<MastNodeId>,
-
-    /// All the decorators included in the MAST forest.
-    decorators: IndexVec<DecoratorId, Decorator>,
 
     /// Advice map to be loaded into the VM prior to executing procedures from this MAST forest.
     advice_map: AdviceMap,
@@ -71,6 +69,13 @@ pub struct MastForest {
     /// codes, so they are stored in order to provide a useful message to the user in case a error
     /// code is triggered.
     error_codes: BTreeMap<u64, Arc<str>>,
+
+    /// All the decorators included in the MAST forest.
+    decorators: IndexVec<DecoratorId, Decorator>,
+
+    /// Provides efficient access to decorators per operation per node during execution and
+    /// debugging.
+    decorator_storage: DecoratorIndexMapping,
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -84,6 +89,7 @@ impl MastForest {
             decorators: IndexVec::new(),
             advice_map: AdviceMap::default(),
             error_codes: BTreeMap::new(),
+            decorator_storage: DecoratorIndexMapping::new(),
         }
     }
 }
@@ -144,6 +150,7 @@ impl MastForest {
             node.remove_decorators();
         }
         self.decorators = IndexVec::new();
+        self.decorator_storage = DecoratorIndexMapping::new();
     }
 
     /// Merges all `forests` into a new [`MastForest`].
@@ -215,15 +222,15 @@ impl MastForest {
         id_remappings: &BTreeMap<MastNodeId, MastNodeId>,
     ) {
         assert!(self.nodes.is_empty());
+        // extract decorator information from the nodes by converting them into builders
+        let node_builders =
+            nodes_to_add.into_iter().map(|node| node.to_builder(self)).collect::<Vec<_>>();
+        self.decorator_storage = DecoratorIndexMapping::new();
 
         // Add each node to the new MAST forest, making sure to rewrite any outdated internal
         // `MastNodeId`s
-        for live_node in nodes_to_add {
-            live_node
-                .to_builder()
-                .remap_children(id_remappings)
-                .add_to_forest(self)
-                .unwrap();
+        for live_node_builder in node_builders {
+            live_node_builder.remap_children(id_remappings).add_to_forest(self).unwrap();
         }
     }
 
@@ -357,6 +364,47 @@ impl MastForest {
 
     pub fn decorators(&self) -> &[Decorator] {
         self.decorators.as_slice()
+    }
+
+    /// Returns decorator indices for a specific operation within a node.
+    ///
+    /// This is the primary accessor for reading decorators from the centralized storage.
+    /// Returns a slice of decorator IDs for the given operation.
+    #[inline(always)]
+    pub fn decorator_indices_for_op(
+        &self,
+        node_id: MastNodeId,
+        local_op_idx: usize,
+    ) -> &[DecoratorId] {
+        self.decorator_storage
+            .decorator_ids_for_operation(node_id, local_op_idx)
+            .unwrap_or(&[])
+    }
+
+    /// Returns an iterator over decorator references for a specific operation within a node.
+    ///
+    /// This is the preferred method for accessing decorators, as it provides direct
+    /// references to the decorator objects.
+    #[inline(always)]
+    pub fn decorators_for_op<'a>(
+        &'a self,
+        node_id: MastNodeId,
+        local_op_idx: usize,
+    ) -> impl Iterator<Item = &'a Decorator> + 'a {
+        self.decorator_indices_for_op(node_id, local_op_idx)
+            .iter()
+            .map(move |&decorator_id| &self.decorators[decorator_id])
+    }
+
+    /// Returns decorator links for a node, including operation indices.
+    ///
+    /// This provides a flattened view of all decorators for a node with their operation indices.
+    #[inline(always)]
+    pub fn decorator_links_for_node<'a>(
+        &'a self,
+        node_id: MastNodeId,
+    ) -> Result<DecoratedLinks<'a>, DecoratorIndexError> {
+        self.decorator_storage.decorator_links_for_node(node_id)
     }
 
     pub fn advice_map(&self) -> &AdviceMap {
@@ -659,4 +707,34 @@ pub enum MastForestError {
     ChildFingerprintMissing(MastNodeId),
     #[error("advice map key {0} already exists when merging forests")]
     AdviceMapKeyCollisionOnMerge(Word),
+    #[error("decorator storage error: {0}")]
+    DecoratorError(DecoratorIndexError),
+}
+
+// Custom serde implementations for MastForest that handle linked decorators properly
+// by delegating to the existing winter-utils serialization which already handles
+// the conversion between linked and owned decorator formats.
+#[cfg(feature = "serde")]
+impl serde::Serialize for MastForest {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        // Use the existing winter-utils serialization which already handles linked decorators
+        let bytes = crate::utils::Serializable::to_bytes(self);
+        serializer.serialize_bytes(&bytes)
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for MastForest {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        // Deserialize bytes, then use winter-utils Deserializable
+        let bytes = Vec::<u8>::deserialize(deserializer)?;
+        let mut slice_reader = winter_utils::SliceReader::new(&bytes);
+        crate::utils::Deserializable::read_from(&mut slice_reader).map_err(serde::de::Error::custom)
+    }
 }

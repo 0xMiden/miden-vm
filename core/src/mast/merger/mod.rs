@@ -128,7 +128,7 @@ impl MastForestMerger {
             match item {
                 MultiMastForestIteratorItem::Node { forest_idx, node_id } => {
                     let node = forests[forest_idx][node_id].clone();
-                    self.merge_node(forest_idx, node_id, node)?;
+                    self.merge_node(forest_idx, node_id, node, &forests)?;
                 },
                 MultiMastForestIteratorItem::ExternalNodeReplacement {
                     // forest index of the node which replaces the external node
@@ -204,6 +204,7 @@ impl MastForestMerger {
         forest_idx: usize,
         merging_id: MastNodeId,
         node: MastNode,
+        original_forests: &[&MastForest],
     ) -> Result<(), MastForestError> {
         // We need to remap the node prior to computing the MastNodeFingerprint.
         //
@@ -218,6 +219,7 @@ impl MastForestMerger {
         // their indices have been added to the mappings.
         let remapped_builder = self.build_with_remapped_children(
             node,
+            original_forests[forest_idx],
             &self.node_id_mappings[forest_idx],
             &self.decorator_id_mappings[forest_idx],
         )?;
@@ -289,6 +291,7 @@ impl MastForestMerger {
     fn build_with_remapped_children(
         &self,
         src: MastNode,
+        original_forest: &MastForest,
         nmap: &DenseIdMap<MastNodeId, MastNodeId>,
         dmap: &DenseIdMap<DecoratorId, DecoratorId>,
     ) -> Result<MastNodeBuilder, MastForestError> {
@@ -307,7 +310,7 @@ impl MastForestMerger {
         let mapped_builder = match src {
             MastNode::Join(join_node) => {
                 let builder = join_node
-                    .to_builder()
+                    .to_builder(&self.mast_forest)
                     .remap_children(nmap)
                     .with_before_enter(before_enter_decorators)
                     .with_after_exit(after_exit_decorators);
@@ -315,7 +318,7 @@ impl MastForestMerger {
             },
             MastNode::Split(split_node) => {
                 let builder = split_node
-                    .to_builder()
+                    .to_builder(&self.mast_forest)
                     .remap_children(nmap)
                     .with_before_enter(before_enter_decorators)
                     .with_after_exit(after_exit_decorators);
@@ -323,7 +326,7 @@ impl MastForestMerger {
             },
             MastNode::Loop(loop_node) => {
                 let builder = loop_node
-                    .to_builder()
+                    .to_builder(&self.mast_forest)
                     .remap_children(nmap)
                     .with_before_enter(before_enter_decorators)
                     .with_after_exit(after_exit_decorators);
@@ -331,7 +334,7 @@ impl MastForestMerger {
             },
             MastNode::Call(call_node) => {
                 let builder = call_node
-                    .to_builder()
+                    .to_builder(&self.mast_forest)
                     .remap_children(nmap)
                     .with_before_enter(before_enter_decorators)
                     .with_after_exit(after_exit_decorators);
@@ -341,7 +344,7 @@ impl MastForestMerger {
                 let builder = BasicBlockNodeBuilder::new(
                     basic_block_node.operations().copied().collect(),
                     basic_block_node
-                        .indexed_decorator_iter()
+                        .indexed_decorator_iter(original_forest)
                         .map(|(idx, decorator_id)| {
                             let mapped_decorator = map_decorator_id(decorator_id)?;
                             Ok((idx, mapped_decorator))
