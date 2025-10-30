@@ -82,8 +82,8 @@ fn log_precompile_request_procedure() {
     assert_eq!(requests[0].event_id(), event_id);
     assert_eq!(requests[0].calldata(), calldata.as_slice());
 
-    let mut registry = PrecompileVerifierRegistry::new();
-    registry.register(event_id, Arc::new(DummyLogPrecompileVerifier { commitment }));
+    let registry = PrecompileVerifierRegistry::new()
+        .with_verifier(&EVENT_NAME, Arc::new(DummyLogPrecompileVerifier { commitment }));
     let transcript = registry
         .requests_transcript(requests)
         .expect("failed to recompute deferred commitment");
@@ -120,8 +120,8 @@ fn log_precompile_request_procedure() {
     // Proof should include the single deferred request that we expect.
     assert_eq!(proof.precompile_requests().len(), 1);
 
-    let mut verifier_registry = PrecompileVerifierRegistry::new();
-    verifier_registry.register(event_id, Arc::new(DummyLogPrecompileVerifier { commitment }));
+    let verifier_registry = PrecompileVerifierRegistry::new()
+        .with_verifier(&EVENT_NAME, Arc::new(DummyLogPrecompileVerifier { commitment }));
     let verifier_transcript = verifier_registry
         .requests_transcript(proof.precompile_requests())
         .expect("failed to recompute deferred commitment (proof)");
