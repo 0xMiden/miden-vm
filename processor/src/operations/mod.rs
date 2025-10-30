@@ -174,6 +174,7 @@ impl Process {
             Operation::HornerBase => self.op_horner_eval_base(err_ctx)?,
             Operation::HornerExt => self.op_horner_eval_ext(err_ctx)?,
             Operation::EvalCircuit => self.op_eval_circuit(err_ctx)?,
+            Operation::LogPrecompile => self.op_log_precompile()?,
         }
 
         self.advance_clock()?;

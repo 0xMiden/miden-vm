@@ -2,7 +2,10 @@ use miden_air::{
     RowIndex,
     trace::{chiplets::hasher::HasherState, decoder::NUM_USER_OP_HELPERS},
 };
-use miden_core::{Felt, Operation, QuadFelt, Word, crypto::merkle::MerklePath, mast::MastForest};
+use miden_core::{
+    Felt, Operation, QuadFelt, Word, crypto::merkle::MerklePath, mast::MastForest,
+    precompile::PrecompileTranscriptState,
+};
 
 use crate::{
     AdviceError, BaseHost, ContextId, ErrorContext, ExecutionError, MemoryError, ProcessState,
@@ -41,6 +44,16 @@ pub trait Processor: Sized {
 
     /// Returns a mutable reference to the internal hasher subsystem.
     fn hasher(&mut self) -> &mut Self::Hasher;
+
+    /// Returns the current precompile transcript state (sponge capacity).
+    ///
+    /// Used by `log_precompile` to thread the transcript across invocations.
+    fn precompile_transcript_state(&self) -> PrecompileTranscriptState;
+
+    /// Sets the precompile transcript state (sponge capacity) to a new value.
+    ///
+    /// Called by `log_precompile` after recording a new commitment.
+    fn set_precompile_transcript_state(&mut self, state: PrecompileTranscriptState);
 
     /// Checks that the evaluation of an arithmetic circuit is equal to zero.
     fn op_eval_circuit(
@@ -381,6 +394,14 @@ pub trait OperationHelperRegisters {
 
     /// The helper registers for the HPerm operation.
     fn op_hperm_registers(addr: Felt) -> [Felt; NUM_USER_OP_HELPERS];
+
+    /// The helper registers for the LogPrecompile operation.
+    /// Contains the hasher address and the previous capacity (CAP_PREV).
+    ///
+    /// Layout:
+    /// - `h0` = hasher trace row address at which the permutation starts
+    /// - `h1..h4` = `CAP_PREV[0..3]` (capacity elements in sequential order)
+    fn op_log_precompile_registers(addr: Felt, cap_prev: Word) -> [Felt; NUM_USER_OP_HELPERS];
 
     /// The helper registers for the MPVerify and MrUpdate operation.
     fn op_merkle_path_registers(addr: Felt) -> [Felt; NUM_USER_OP_HELPERS];

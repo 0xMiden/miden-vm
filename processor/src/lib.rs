@@ -20,7 +20,7 @@ pub use miden_core::{
     crypto::merkle::SMT_DEPTH,
     errors::InputError,
     mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
-    precompile::PrecompileRequest,
+    precompile::{PrecompileRequest, PrecompileTranscriptState},
     sys_events::SystemEvent,
     utils::DeserializationError,
 };
@@ -240,6 +240,8 @@ pub struct Process {
     chiplets: Chiplets,
     max_cycles: u32,
     enable_tracing: bool,
+    /// Precompile transcript state (sponge capacity) used by `log_precompile`.
+    pc_transcript_state: PrecompileTranscriptState,
 }
 
 #[cfg(any(test, feature = "testing"))]
@@ -252,6 +254,8 @@ pub struct Process {
     pub chiplets: Chiplets,
     pub max_cycles: u32,
     pub enable_tracing: bool,
+    /// Precompile transcript state (sponge capacity) used by `log_precompile`.
+    pub pc_transcript_state: PrecompileTranscriptState,
 }
 
 impl Process {
@@ -297,6 +301,7 @@ impl Process {
             chiplets: Chiplets::new(kernel),
             max_cycles: execution_options.max_cycles(),
             enable_tracing: execution_options.enable_tracing(),
+            pc_transcript_state: PrecompileTranscriptState::default(),
         }
     }
 
@@ -732,8 +737,17 @@ impl Process {
         self.chiplets.kernel_rom.kernel()
     }
 
-    pub fn into_parts(self) -> (System, Decoder, Stack, RangeChecker, Chiplets) {
-        (self.system, self.decoder, self.stack, self.range, self.chiplets)
+    pub fn into_parts(
+        self,
+    ) -> (System, Decoder, Stack, RangeChecker, Chiplets, PrecompileTranscriptState) {
+        (
+            self.system,
+            self.decoder,
+            self.stack,
+            self.range,
+            self.chiplets,
+            self.pc_transcript_state,
+        )
     }
 }
 

@@ -20,6 +20,7 @@ use miden_air::{
 use miden_core::{
     Felt, Kernel, ONE, OPCODE_PUSH, Operation, QuadFelt, StarkField, WORD_SIZE, Word, ZERO,
     mast::{BasicBlockNode, MastForest, MastNode, MastNodeExt, MastNodeId, OpBatch},
+    precompile::PrecompileTranscriptState,
     stack::MIN_STACK_DEPTH,
     utils::{range, uninit_vector},
 };
@@ -89,6 +90,7 @@ pub fn build_trace(
         kernel_replay,
         hasher_for_chiplet,
         ace_replay,
+        final_pc_transcript,
         fragment_size,
     } = trace_generation_context;
 
@@ -139,7 +141,7 @@ pub fn build_trace(
                         NUM_RAND_ROWS,
                     )
                 },
-                || chiplets.into_trace(main_trace_len, NUM_RAND_ROWS),
+                || chiplets.into_trace(main_trace_len, NUM_RAND_ROWS, final_pc_transcript.state()),
             )
         },
     );
@@ -1754,6 +1756,14 @@ impl Processor for CoreTraceFragmentGenerator {
         &mut self.context.replay.hasher
     }
 
+    fn precompile_transcript_state(&self) -> PrecompileTranscriptState {
+        self.context.state.system.pc_transcript_state
+    }
+
+    fn set_precompile_transcript_state(&mut self, state: PrecompileTranscriptState) {
+        self.context.state.system.pc_transcript_state = state;
+    }
+
     fn op_eval_circuit(
         &mut self,
         err_ctx: &impl ErrorContext,
@@ -1938,6 +1948,13 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
             acc_tmp.base_element(0),
             acc_tmp.base_element(1),
         ]
+    }
+
+    #[inline(always)]
+    fn op_log_precompile_registers(addr: Felt, cap_prev: Word) -> [Felt; NUM_USER_OP_HELPERS] {
+        // Helper registers layout for log_precompile:
+        // h0-h4 contain: [addr, CAP_PREV[0..3]]
+        [addr, cap_prev[0], cap_prev[1], cap_prev[2], cap_prev[3], ZERO]
     }
 }
 

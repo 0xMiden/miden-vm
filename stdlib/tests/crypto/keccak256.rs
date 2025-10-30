@@ -13,9 +13,11 @@ use miden_air::ProvingOptions;
 use miden_assembly::Assembler;
 use miden_core::{
     Felt, FieldElement, ProgramInfo,
-    precompile::{PrecompileCommitment, PrecompileVerifier, PrecompileVerifierRegistry},
+    precompile::{
+        PrecompileCommitment, PrecompileTranscript, PrecompileVerifier, PrecompileVerifierRegistry,
+    },
 };
-use miden_crypto::{Word, hash::rpo::Rpo256};
+use miden_crypto::Word;
 use miden_processor::{AdviceInputs, DefaultHost, Program, StackInputs};
 use miden_stdlib::{
     StdLibrary,
@@ -130,7 +132,7 @@ fn test_keccak_hash_memory_impl(input_u8: &[u8]) {
     let stack = output.stack_outputs();
     let commitment = stack.get_stack_word_be(0).unwrap();
     let tag = stack.get_stack_word_be(4).unwrap();
-    let precompile_commitment = PrecompileCommitment { tag, commitment };
+    let precompile_commitment = PrecompileCommitment::new(tag, commitment);
     assert_eq!(
         precompile_commitment,
         preimage.precompile_commitment(),
@@ -299,7 +301,7 @@ fn test_keccak_hash_1to1_prove_verify() {
     // Generate memory stores for the input data
     let memory_stores_source = generate_memory_store_masm(&preimage, INPUT_MEMORY_ADDR);
 
-    // MASM program that uses hash_memory_impl to get the commitment on stack
+    // MASM program that logs the precompile (via hash_memory) and computes the digest
     let source = format!(
         r#"
             use.std::crypto::hashes::keccak256
@@ -313,11 +315,11 @@ fn test_keccak_hash_1to1_prove_verify() {
                 push.32.{INPUT_MEMORY_ADDR}
                 # => [ptr, len_bytes, ...]
 
-                # Call hash_memory_impl to get commitment and digest
-                exec.keccak256::hash_memory_impl
-                # => [COMM, TAG, DIGEST_U32[8], ...]
+                # Call hash_memory (wrapper) to log precompile and compute digest
+                exec.keccak256::hash_memory
+                # => [DIGEST_U32[8], ...]
 
-                # Truncate stack to leave only the commitment and 15 more elements
+                # Truncate stack to ensure fixed-size outputs
                 exec.sys::truncate_stack
             end
             "#,
@@ -350,37 +352,21 @@ fn test_keccak_hash_1to1_prove_verify() {
     )
     .expect("failed to generate proof");
 
-    // Verify that the commitment on the stack matches the expected precompile commitment
-    let expected_commitment = preimage.precompile_commitment();
-    let stack_commitment = stack_outputs.get_stack_word_be(0).unwrap();
-    let stack_tag = stack_outputs.get_stack_word_be(4).unwrap();
-    let precompile_commitment = PrecompileCommitment {
-        tag: stack_tag,
-        commitment: stack_commitment,
-    };
-    assert_eq!(
-        precompile_commitment, expected_commitment,
-        "commitment on stack does not match expected precompile commitment"
-    );
-
     // Check we get the same commitment from the verifier
     let mut precompile_verifiers = PrecompileVerifierRegistry::new();
     precompile_verifiers
         .register(KECCAK_HASH_MEMORY_EVENT_NAME.to_event_id(), Arc::new(KeccakPrecompile));
-    let deferred_commitment = precompile_verifiers
-        .deferred_requests_commitment(proof.precompile_requests())
+    let transcript = precompile_verifiers
+        .requests_transcript(proof.precompile_requests())
         .expect("failed to verify");
 
-    let deferred_commitment_expected = {
-        let elements = [
-            precompile_commitment.tag,
-            precompile_commitment.commitment,
-            Word::empty(),
-            Word::empty(),
-        ];
-        Rpo256::hash_elements(Word::words_as_elements(&elements))
+    let expected_commitment = preimage.precompile_commitment();
+    let expected_transcript = {
+        let mut transcript = PrecompileTranscript::new();
+        transcript.record(expected_commitment);
+        transcript
     };
-    assert_eq!(deferred_commitment_expected, deferred_commitment, "");
+    assert_eq!(transcript, expected_transcript, "");
 
     // Verify the proof with precompiles
     let program_info = ProgramInfo::from(program);
@@ -394,8 +380,5 @@ fn test_keccak_hash_1to1_prove_verify() {
     .expect("proof verification failed");
 
     // Assert that verification succeeds
-    assert_eq!(
-        deferred_commitment_expected, verifier_commitment,
-        "verifier did not produce the same commitment"
-    );
+    assert_eq!(transcript.finalize(), verifier_commitment);
 }

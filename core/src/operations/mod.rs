@@ -114,6 +114,7 @@ pub(super) mod opcode_constants {
     pub const OPCODE_JOIN: u8           = 0b0101_0111;
     pub const OPCODE_DYN: u8            = 0b0101_1000;
     pub const OPCODE_HORNEREXT: u8      = 0b0101_1001;
+    pub const OPCODE_LOGPRECOMPILE: u8  = 0b0101_1010;
     pub const OPCODE_PUSH: u8           = 0b0101_1011;
     pub const OPCODE_DYNCALL: u8        = 0b0101_1100;
     pub const OPCODE_EVALCIRCUIT: u8    = 0b0101_1101;
@@ -607,6 +608,10 @@ pub enum Operation {
     /// Evaluates an arithmetic circuit given a pointer to its description in memory, the number
     /// of arithmetic gates, and the sum of the input and constant gates.
     EvalCircuit = OPCODE_EVALCIRCUIT,
+
+    /// Logs a precompile event. This instruction is used to signal that a precompile computation
+    /// was requested.
+    LogPrecompile = OPCODE_LOGPRECOMPILE,
 }
 
 impl Operation {
@@ -786,6 +791,7 @@ impl fmt::Display for Operation {
             Self::HornerBase => write!(f, "horner_eval_base"),
             Self::HornerExt => write!(f, "horner_eval_ext"),
             Self::EvalCircuit => write!(f, "eval_circuit"),
+            Self::LogPrecompile => write!(f, "log_precompile"),
         }
     }
 }
@@ -892,7 +898,8 @@ impl Serializable for Operation {
             | Operation::FriE2F4
             | Operation::HornerBase
             | Operation::HornerExt
-            | Operation::EvalCircuit => (),
+            | Operation::EvalCircuit
+            | Operation::LogPrecompile => (),
         }
     }
 }
@@ -989,6 +996,7 @@ impl Deserializable for Operation {
             OPCODE_DYNCALL => Self::Dyncall,
             OPCODE_HORNERBASE => Self::HornerBase,
             OPCODE_HORNEREXT => Self::HornerExt,
+            OPCODE_LOGPRECOMPILE => Self::LogPrecompile,
             OPCODE_EVALCIRCUIT => Self::EvalCircuit,
 
             OPCODE_MRUPDATE => Self::MrUpdate,
