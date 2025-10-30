@@ -127,6 +127,7 @@ pub use stack::{StackInputs, StackOutputs};
 mod event_id;
 pub use event_id::{EventId, EventName};
 
+pub mod precompile_ids;
 pub mod sys_events;
 
 mod advice;
