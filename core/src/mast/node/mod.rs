@@ -6,7 +6,8 @@ pub use basic_block_node::{
     BATCH_SIZE as OP_BATCH_SIZE, BasicBlockNode, BasicBlockNodeBuilder, DecoratorOpLinkIterator,
     GROUP_SIZE as OP_GROUP_SIZE, OpBatch, OperationOrDecorator,
 };
-use miden_utils_core_derive::{FromVariant, MastNodeExt};
+use derive_more::From;
+use miden_utils_core_derive::MastNodeExt;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -89,7 +90,7 @@ pub trait MastNodeExt {
 // MAST NODE
 // ================================================================================================
 
-#[derive(Debug, Clone, PartialEq, Eq, MastNodeExt, FromVariant)]
+#[derive(Debug, Clone, PartialEq, Eq, MastNodeExt, From)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[mast_node_ext(builder = "MastNodeBuilder")]
 pub enum MastNode {

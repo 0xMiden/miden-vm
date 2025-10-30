@@ -5,7 +5,6 @@
 //! - `MastNodeExt` derive macro: generates MastNodeExt trait implementations for enums
 //! - `MastForestContributor` derive macro: generates MastForestContributor trait implementations
 //!   for enums
-//! - `FromVariant` derive macro: generates `From<VariantType> for EnumType` implementations
 //!
 //! This crate provides enum dispatch functionality with:
 //! - Zero-cost enum dispatch without external dependencies
@@ -296,44 +295,6 @@ pub fn derive_mast_forest_contributor(input: TokenStream) -> TokenStream {
     TokenStream::from(trait_impl)
 }
 
-/// Derive From implementations for converting each variant type to the enum.
-#[proc_macro_derive(FromVariant)]
-pub fn derive_from_variant(input: TokenStream) -> TokenStream {
-    let input = parse_macro_input!(input as DeriveInput);
-
-    let enum_name = &input.ident;
-    let generics = &input.generics;
-
-    // Parse the data to ensure it's an enum
-    let enum_data = match &input.data {
-        Data::Enum(data) => data,
-        _ => panic!("FromVariant can only be derived for enums"),
-    };
-
-    // Extract variant information
-    let variants: Vec<_> = enum_data.variants.iter().collect();
-    let variant_names: Vec<_> = variants.iter().map(|v| &v.ident).collect();
-    let variant_types: Vec<_> = variants.iter().map(|v| extract_variant_type(v)).collect();
-
-    // Generate From implementations
-    let from_impls =
-        variant_names.iter().zip(variant_types.iter()).map(|(variant, variant_type)| {
-            quote! {
-                impl From<#variant_type> for #enum_name #generics {
-                    fn from(node: #variant_type) -> Self {
-                        #enum_name::#variant(node)
-                    }
-                }
-            }
-        });
-
-    let expanded = quote! {
-        #(#from_impls)*
-    };
-
-    TokenStream::from(expanded)
-}
-
 /// Generate MastForestContributor trait implementation for enum dispatch
 fn generate_mast_forest_contributor_impl(
     enum_name: &Ident,
@@ -419,21 +380,6 @@ fn extract_single_field(variant: &Variant) -> Ident {
             // For unnamed fields, we need to create a variable name
             // We'll use "node" as the field name in the generated code
             Ident::new("node", Span::call_site())
-        },
-        _ => panic!(
-            "Each variant must have exactly one unnamed field, but {:?} does not",
-            variant.ident
-        ),
-    }
-}
-
-/// Extract the type of the single field from a variant (e.g., BasicBlockNode from
-/// Block(BasicBlockNode))
-fn extract_variant_type(variant: &Variant) -> Type {
-    match &variant.fields {
-        Fields::Unnamed(fields) if fields.unnamed.len() == 1 => {
-            // Return the type of the single unnamed field
-            fields.unnamed[0].ty.clone()
         },
         _ => panic!(
             "Each variant must have exactly one unnamed field, but {:?} does not",

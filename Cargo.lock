@@ -1390,6 +1390,7 @@ name = "miden-core"
 version = "0.20.0"
 dependencies = [
  "criterion",
+ "derive_more",
  "insta",
  "miden-crypto",
  "miden-debug-types",
