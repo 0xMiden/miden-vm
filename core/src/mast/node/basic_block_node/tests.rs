@@ -274,8 +274,8 @@ fn operation_or_decorator_iterator() {
         (4, Decorator::Trace(4)), // ID: 4
     ];
 
-    let node =
-        BasicBlockNode::new_with_raw_decorators(operations, decorators, &mut mast_forest).unwrap();
+    let node_id = mast_forest.add_block_with_raw_decorators(operations, decorators).unwrap();
+    let node = mast_forest.get_node_by_id(node_id).unwrap().unwrap_basic_block();
 
     let mut iterator = node.iter();
 
@@ -456,10 +456,12 @@ fn test_mast_node_error_context_decorators_iterates_all_decorators() {
     let op_id = forest.add_decorator(op_deco.clone()).unwrap();
     let after_exit_id = forest.add_decorator(after_exit_deco.clone()).unwrap();
 
-    // Create a basic block with all types of decorators
-    let mut block = BasicBlockNode::new(operations, vec![(1, op_id)]).unwrap();
-    block.append_before_enter(&[before_enter_id]);
-    block.append_after_exit(&[after_exit_id]);
+    // Create a basic block with all types of decorators using builder pattern
+    let block = BasicBlockNodeBuilder::new(operations, vec![(1, op_id)])
+        .with_before_enter(vec![before_enter_id])
+        .with_after_exit(vec![after_exit_id])
+        .build()
+        .unwrap();
 
     let all_decorators: Vec<_> = block.decorators().collect();
 
@@ -492,10 +494,12 @@ fn test_indexed_decorator_iter_excludes_before_enter_after_exit() {
     let op_id2 = forest.add_decorator(op_deco2.clone()).unwrap();
     let after_exit_id = forest.add_decorator(after_exit_deco.clone()).unwrap();
 
-    // Create a basic block with all types of decorators
-    let mut block = BasicBlockNode::new(operations, vec![(0, op_id1), (1, op_id2)]).unwrap();
-    block.append_before_enter(&[before_enter_id]);
-    block.append_after_exit(&[after_exit_id]);
+    // Create a basic block with all types of decorators using builder pattern
+    let block = BasicBlockNodeBuilder::new(operations, vec![(0, op_id1), (1, op_id2)])
+        .with_before_enter(vec![before_enter_id])
+        .with_after_exit(vec![after_exit_id])
+        .build()
+        .unwrap();
 
     // Test indexed_decorator_iter - should only include op-indexed decorators
     let indexed_decorators: Vec<_> = block.indexed_decorator_iter().collect();
@@ -538,12 +542,13 @@ fn test_decorator_positions() {
         Operation::Mul,
     ];
 
+    // Create a basic block with complex operations using builder pattern
     let mut block =
-        BasicBlockNode::new(operations.clone(), vec![(2, trace_id), (4, debug_id)]).unwrap();
-
-    // Add before_enter and after_exit decorators
-    block.append_before_enter(&[trace_id, debug_id]);
-    block.append_after_exit(&[trace_id]);
+        BasicBlockNodeBuilder::new(operations.clone(), vec![(2, trace_id), (4, debug_id)])
+            .with_before_enter(vec![trace_id, debug_id])
+            .with_after_exit(vec![trace_id])
+            .build()
+            .unwrap();
 
     // Test that MastNodeErrorContext::decorators returns all decorators
     let all_decorators: Vec<_> = block.decorators().collect();

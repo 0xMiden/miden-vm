@@ -42,7 +42,10 @@ impl LoopNode {
 /// Constructors
 impl LoopNode {
     /// Returns a new [`LoopNode`] instantiated with the specified body node.
-    pub fn new(body: MastNodeId, mast_forest: &MastForest) -> Result<Self, MastForestError> {
+    pub(in crate::mast) fn new(
+        body: MastNodeId,
+        mast_forest: &MastForest,
+    ) -> Result<Self, MastForestError> {
         if body.to_usize() >= mast_forest.nodes.len() {
             return Err(MastForestError::NodeIdOverflow(body, mast_forest.nodes.len()));
         }
@@ -62,7 +65,7 @@ impl LoopNode {
 
     /// Returns a new [`LoopNode`] from values that are assumed to be correct.
     /// Should only be used when the source of the inputs is trusted (e.g. deserialization).
-    pub fn new_unsafe(body: MastNodeId, digest: Word) -> Self {
+    pub(in crate::mast) fn new_unsafe(body: MastNodeId, digest: Word) -> Self {
         Self {
             body,
             digest,
@@ -231,5 +234,55 @@ impl MastNodeExt for LoopNode {
 
     fn domain(&self) -> Felt {
         Self::DOMAIN
+    }
+}
+
+// ------------------------------------------------------------------------------------------------
+/// Builder for creating [`LoopNode`] instances with decorators.
+pub struct LoopNodeBuilder {
+    body: MastNodeId,
+    before_enter: Vec<DecoratorId>,
+    after_exit: Vec<DecoratorId>,
+}
+
+impl LoopNodeBuilder {
+    /// Creates a new builder for a LoopNode with the specified body.
+    pub fn new(body: MastNodeId) -> Self {
+        Self {
+            body,
+            before_enter: Vec::new(),
+            after_exit: Vec::new(),
+        }
+    }
+
+    /// Adds decorators to be executed before this node.
+    pub fn with_before_enter(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
+        self.before_enter = decorators.into();
+        self
+    }
+
+    /// Adds decorators to be executed after this node.
+    pub fn with_after_exit(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
+        self.after_exit = decorators.into();
+        self
+    }
+
+    /// Builds the LoopNode with the specified decorators.
+    pub fn build(self, mast_forest: &MastForest) -> Result<LoopNode, MastForestError> {
+        if self.body.to_usize() >= mast_forest.nodes.len() {
+            return Err(MastForestError::NodeIdOverflow(self.body, mast_forest.nodes.len()));
+        }
+        let digest = {
+            let body_hash = mast_forest[self.body].digest();
+
+            hasher::merge_in_domain(&[body_hash, Word::default()], LoopNode::DOMAIN)
+        };
+
+        Ok(LoopNode {
+            body: self.body,
+            digest,
+            before_enter: self.before_enter,
+            after_exit: self.after_exit,
+        })
     }
 }

@@ -7,7 +7,10 @@ use miden_core::{
     ONE, Operation, ZERO,
     chiplets::hasher,
     crypto::merkle::{MerkleTree, NodeIndex},
-    mast::{MastForest, MastNode, MastNodeExt},
+    mast::{
+        BasicBlockNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForest, MastNode, MastNodeExt,
+        SplitNodeBuilder,
+    },
 };
 use miden_utils_testing::rand::rand_array;
 
@@ -16,7 +19,6 @@ use super::{
     MerklePath, RETURN_HASH, RETURN_STATE, Selectors, TRACE_WIDTH, TraceFragment,
     init_state_from_words,
 };
-use crate::{BasicBlockNode, JoinNode, LoopNode, SplitNode};
 
 // LINEAR HASH TESTS
 // ================================================================================================
@@ -250,19 +252,23 @@ fn hash_memoization_control_blocks() {
 
     let mut mast_forest = MastForest::new();
 
-    let t_branch = BasicBlockNode::new(vec![Operation::Push(ZERO)], Vec::new()).unwrap();
+    let t_branch = BasicBlockNodeBuilder::new(vec![Operation::Push(ZERO)], Vec::new())
+        .build()
+        .unwrap();
     let t_branch_id = mast_forest.add_node(t_branch.clone()).unwrap();
 
-    let f_branch = BasicBlockNode::new(vec![Operation::Push(ONE)], Vec::new()).unwrap();
+    let f_branch = BasicBlockNodeBuilder::new(vec![Operation::Push(ONE)], Vec::new())
+        .build()
+        .unwrap();
     let f_branch_id = mast_forest.add_node(f_branch.clone()).unwrap();
 
-    let split1 = SplitNode::new([t_branch_id, f_branch_id], &mast_forest).unwrap();
+    let split1 = SplitNodeBuilder::new([t_branch_id, f_branch_id]).build(&mast_forest).unwrap();
     let split1_id = mast_forest.add_node(split1.clone()).unwrap();
 
-    let split2 = SplitNode::new([t_branch_id, f_branch_id], &mast_forest).unwrap();
+    let split2 = SplitNodeBuilder::new([t_branch_id, f_branch_id]).build(&mast_forest).unwrap();
     let split2_id = mast_forest.add_node(split2.clone()).unwrap();
 
-    let join_node = JoinNode::new([split1_id, split2_id], &mast_forest).unwrap();
+    let join_node = JoinNodeBuilder::new([split1_id, split2_id]).build(&mast_forest).unwrap();
     let _join_node_id = mast_forest.add_node(join_node.clone()).unwrap();
 
     let mut hasher = Hasher::default();
@@ -353,9 +359,12 @@ fn hash_memoization_control_blocks() {
 #[test]
 fn hash_memoization_basic_blocks() {
     // --- basic block with 1 batch ----------------------------------------------------------------
-    let basic_block =
-        BasicBlockNode::new(vec![Operation::Push(Felt::new(10)), Operation::Drop], Vec::new())
-            .unwrap();
+    let basic_block = BasicBlockNodeBuilder::new(
+        vec![Operation::Push(Felt::new(10)), Operation::Drop],
+        Vec::new(),
+    )
+    .build()
+    .unwrap();
 
     hash_memoization_basic_blocks_check(basic_block.into());
 
@@ -398,7 +407,7 @@ fn hash_memoization_basic_blocks() {
         Operation::Drop,
         Operation::Drop,
     ];
-    let basic_block = BasicBlockNode::new(ops, Vec::new()).unwrap();
+    let basic_block = BasicBlockNodeBuilder::new(ops, Vec::new()).build().unwrap();
 
     hash_memoization_basic_blocks_check(basic_block.into());
 }
@@ -427,16 +436,20 @@ fn hash_memoization_basic_blocks_check(basic_block: MastNode) {
         .add_block(vec![Operation::Pad, Operation::Eq, Operation::Not], Vec::new())
         .unwrap();
 
-    let loop_block = LoopNode::new(loop_body_id, &mast_forest).unwrap();
+    let loop_block = LoopNodeBuilder::new(loop_body_id).build(&mast_forest).unwrap();
     let loop_block_id = mast_forest.add_node(loop_block.clone()).unwrap();
 
-    let join2_block = JoinNode::new([basic_block_1_id, loop_block_id], &mast_forest).unwrap();
+    let join2_block = JoinNodeBuilder::new([basic_block_1_id, loop_block_id])
+        .build(&mast_forest)
+        .unwrap();
     let join2_block_id = mast_forest.add_node(join2_block.clone()).unwrap();
 
     let basic_block_2 = basic_block;
     let basic_block_2_id = mast_forest.add_node(basic_block_2.clone()).unwrap();
 
-    let join1_block = JoinNode::new([join2_block_id, basic_block_2_id], &mast_forest).unwrap();
+    let join1_block = JoinNodeBuilder::new([join2_block_id, basic_block_2_id])
+        .build(&mast_forest)
+        .unwrap();
 
     let mut hasher = Hasher::default();
     let h1: [Felt; DIGEST_LEN] = join2_block

@@ -4,7 +4,7 @@ use miden_air::ExecutionOptions;
 use miden_assembly::{Assembler, DefaultSourceManager};
 use miden_core::{
     Decorator, Kernel, ONE, Operation, StackInputs, assert_matches,
-    mast::{BasicBlockNode, ExternalNode, MastForest},
+    mast::{ExternalNodeBuilder, MastForest},
 };
 use miden_utils_testing::build_test;
 use rstest::rstest;
@@ -347,9 +347,9 @@ fn test_external_node_decorator_sequencing() {
 
     let lib_operations = [Operation::Push(1_u32.into()), Operation::Add];
     // Attach the decorator to the first operation (index 0)
-    let lib_block =
-        BasicBlockNode::new(lib_operations.to_vec(), vec![(0, lib_decorator_id)]).unwrap();
-    let lib_block_id = lib_forest.add_node(lib_block).unwrap();
+    let lib_block_id = lib_forest
+        .add_block(lib_operations.to_vec(), vec![(0, lib_decorator_id)])
+        .unwrap();
     lib_forest.make_root(lib_block_id);
 
     let mut main_forest = MastForest::new();
@@ -358,9 +358,10 @@ fn test_external_node_decorator_sequencing() {
     let before_id = main_forest.add_decorator(before_decorator.clone()).unwrap();
     let after_id = main_forest.add_decorator(after_decorator.clone()).unwrap();
 
-    let mut external_node = ExternalNode::new(lib_forest[lib_block_id].digest());
-    external_node.append_before_enter(&[before_id]);
-    external_node.append_after_exit(&[after_id]);
+    let external_node = ExternalNodeBuilder::new(lib_forest[lib_block_id].digest())
+        .with_before_enter([before_id])
+        .with_after_exit([after_id])
+        .build();
     let external_id = main_forest.add_node(external_node).unwrap();
     main_forest.make_root(external_id);
 

@@ -16,9 +16,10 @@ mod node;
 #[cfg(any(test, feature = "arbitrary"))]
 pub use node::arbitrary;
 pub use node::{
-    BasicBlockNode, CallNode, DecoratedOpLink, DecoratorOpLinkIterator, DynNode, ExternalNode,
-    JoinNode, LoopNode, MastNode, MastNodeErrorContext, MastNodeExt, OP_BATCH_SIZE, OP_GROUP_SIZE,
-    OpBatch, OperationOrDecorator, SplitNode,
+    BasicBlockNode, BasicBlockNodeBuilder, CallNode, CallNodeBuilder, DecoratedOpLink,
+    DecoratorOpLinkIterator, DynNode, DynNodeBuilder, ExternalNode, ExternalNodeBuilder, JoinNode,
+    JoinNodeBuilder, LoopNode, LoopNodeBuilder, MastNode, MastNodeErrorContext, MastNodeExt,
+    OP_BATCH_SIZE, OP_GROUP_SIZE, OpBatch, OperationOrDecorator, SplitNode, SplitNodeBuilder,
 };
 
 use crate::{
@@ -287,8 +288,16 @@ impl MastForest {
         operations: Vec<Operation>,
         decorators: Vec<(usize, Decorator)>,
     ) -> Result<MastNodeId, MastForestError> {
-        let block = BasicBlockNode::new_with_raw_decorators(operations, decorators, self)?;
-        self.add_node(block)
+        // Convert raw decorators to decorator list by adding them to the forest first
+        let decorator_list: Vec<(usize, DecoratorId)> = decorators
+            .into_iter()
+            .map(|(idx, decorator)| -> Result<(usize, DecoratorId), MastForestError> {
+                let decorator_id = self.add_decorator(decorator)?;
+                Ok((idx, decorator_id))
+            })
+            .collect::<Result<Vec<_>, MastForestError>>()?;
+
+        self.add_block(operations, decorator_list)
     }
 }
 

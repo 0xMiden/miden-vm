@@ -102,7 +102,7 @@ impl BasicBlockNode {
     ///
     /// Returns an error if:
     /// - `operations` vector is empty.
-    pub fn new(
+    pub(in crate::mast) fn new(
         operations: Vec<Operation>,
         decorators: DecoratorList,
     ) -> Result<Self, MastForestError> {
@@ -143,7 +143,11 @@ impl BasicBlockNode {
 
     /// Returns a new [`BasicBlockNode`] from values that are assumed to be correct.
     /// Should only be used when the source of the inputs is trusted (e.g. deserialization).
-    pub fn new_unsafe(operations: Vec<Operation>, decorators: DecoratorList, digest: Word) -> Self {
+    pub(in crate::mast) fn new_unsafe(
+        operations: Vec<Operation>,
+        decorators: DecoratorList,
+        digest: Word,
+    ) -> Self {
         assert!(!operations.is_empty());
         let op_batches = batch_ops(operations);
         Self {
@@ -153,21 +157,6 @@ impl BasicBlockNode {
             before_enter: Vec::new(),
             after_exit: Vec::new(),
         }
-    }
-
-    /// Returns a new [`BasicBlockNode`] instantiated with the specified operations and decorators.
-    #[cfg(test)]
-    pub fn new_with_raw_decorators(
-        operations: Vec<Operation>,
-        decorators: Vec<(usize, crate::Decorator)>,
-        mast_forest: &mut crate::mast::MastForest,
-    ) -> Result<Self, MastForestError> {
-        let mut decorator_list = Vec::new();
-        for (idx, decorator) in decorators {
-            decorator_list.push((idx, mast_forest.add_decorator(decorator)?));
-        }
-
-        Self::new(operations, decorator_list)
     }
 }
 
@@ -929,4 +918,61 @@ fn batch_ops(ops: Vec<Operation>) -> Vec<OpBatch> {
     }
 
     batches
+}
+
+// ------------------------------------------------------------------------------------------------
+/// Builder for creating [`BasicBlockNode`] instances with decorators.
+pub struct BasicBlockNodeBuilder {
+    operations: Vec<Operation>,
+    decorators: DecoratorList,
+    before_enter: Vec<DecoratorId>,
+    after_exit: Vec<DecoratorId>,
+}
+
+impl BasicBlockNodeBuilder {
+    /// Creates a new builder for a BasicBlockNode with the specified operations and decorators.
+    pub fn new(operations: Vec<Operation>, decorators: DecoratorList) -> Self {
+        Self {
+            operations,
+            decorators,
+            before_enter: Vec::new(),
+            after_exit: Vec::new(),
+        }
+    }
+
+    /// Adds decorators to be executed before this node.
+    pub fn with_before_enter(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
+        self.before_enter = decorators.into();
+        self
+    }
+
+    /// Adds decorators to be executed after this node.
+    pub fn with_after_exit(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
+        self.after_exit = decorators.into();
+        self
+    }
+
+    /// Builds the BasicBlockNode with the specified decorators.
+    pub fn build(self) -> Result<BasicBlockNode, MastForestError> {
+        if self.operations.is_empty() {
+            return Err(MastForestError::EmptyBasicBlock);
+        }
+
+        // Validate decorators list (only in debug mode).
+        #[cfg(debug_assertions)]
+        validate_decorators(self.operations.len(), &self.decorators);
+
+        let (op_batches, digest) = batch_and_hash_ops(self.operations);
+        // the prior line may have inserted some padding Noops in the op_batches
+        // the decorator mapping should still point to the correct operation when that happens
+        let reflowed_decorators = BasicBlockNode::adjust_decorators(self.decorators, &op_batches);
+
+        Ok(BasicBlockNode {
+            op_batches,
+            digest,
+            decorators: reflowed_decorators,
+            before_enter: self.before_enter,
+            after_exit: self.after_exit,
+        })
+    }
 }
