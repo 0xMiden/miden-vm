@@ -33,6 +33,8 @@ miden-stdlib.workspace = true
 miden-verifier.workspace = true
 test-case = "3.2"
 winter-prover.workspace = true
+winter-maybe-async.workspace = true
+pollster = "0.4"
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 pretty_assertions = { version = "1.4", default-features = false, features = [
