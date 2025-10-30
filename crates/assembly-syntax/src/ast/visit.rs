@@ -308,9 +308,8 @@ where
         U32ShrImm(imm) | U32ShlImm(imm) | U32RotrImm(imm) | U32RotlImm(imm) | AdvPush(imm) => {
             visitor.visit_immediate_u8(imm)
         },
-        Locaddr(imm) | LocLoad(imm) | LocLoadW(imm) | LocStore(imm) | LocStoreW(imm) => {
-            visitor.visit_immediate_u16(imm)
-        },
+        Locaddr(imm) | LocLoad(imm) | LocLoadWBe(imm) | LocLoadWLe(imm) | LocStore(imm)
+        | LocStoreWBe(imm) | LocStoreWLe(imm) => visitor.visit_immediate_u16(imm),
         AssertWithError(code)
         | AssertEqWithError(code)
         | AssertEqwWithError(code)
@@ -765,9 +764,8 @@ where
         U32ShrImm(imm) | U32ShlImm(imm) | U32RotrImm(imm) | U32RotlImm(imm) | AdvPush(imm) => {
             visitor.visit_mut_immediate_u8(imm)
         },
-        Locaddr(imm) | LocLoad(imm) | LocLoadW(imm) | LocStore(imm) | LocStoreW(imm) => {
-            visitor.visit_mut_immediate_u16(imm)
-        },
+        Locaddr(imm) | LocLoad(imm) | LocLoadWBe(imm) | LocLoadWLe(imm) | LocStore(imm)
+        | LocStoreWBe(imm) | LocStoreWLe(imm) => visitor.visit_mut_immediate_u16(imm),
         AssertWithError(code)
         | AssertEqWithError(code)
         | AssertEqwWithError(code)

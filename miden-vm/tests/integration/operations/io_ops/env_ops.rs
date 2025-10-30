@@ -74,7 +74,7 @@ fn locaddr() {
             dropw
             loc_load.0
             push.0.0.0.0
-            loc_loadw.4
+            loc_loadw_be.4
         end
         begin
             exec.foo
@@ -129,7 +129,7 @@ fn locaddr() {
             mem_storew_be
             dropw
             push.0.0.0.0
-            loc_loadw.4
+            loc_loadw_be.4
             loc_load.0
         end
         proc.bar.8

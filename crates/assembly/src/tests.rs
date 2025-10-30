@@ -1070,11 +1070,11 @@ fn mem_operations_with_constants() -> TestResult {
         # constant should resolve using loc_load operation
         loc_load.PROC_LOC_LOAD_PTR
 
-        # constant should resolve using loc_storew operation
-        loc_storew.PROC_LOC_STOREW_PTR
+        # constant should resolve using loc_storew_be operation
+        loc_storew_be.PROC_LOC_STOREW_PTR
 
-        # constant should resolve using loc_loadw opeartion
-        loc_loadw.PROC_LOC_LOADW_PTR
+        # constant should resolve using loc_loadw_be opeartion
+        loc_loadw_be.PROC_LOC_LOADW_PTR
     end
 
     begin
@@ -1113,11 +1113,11 @@ fn mem_operations_with_constants() -> TestResult {
         # constant should resolve using loc_load operation
         loc_load.{PROC_LOC_LOAD_PTR}
 
-        # constant should resolve using loc_storew operation
-        loc_storew.{PROC_LOC_STOREW_PTR}
+        # constant should resolve using loc_storew_be operation
+        loc_storew_be.{PROC_LOC_STOREW_PTR}
 
-        # constant should resolve using loc_loadw opeartion
-        loc_loadw.{PROC_LOC_LOADW_PTR}
+        # constant should resolve using loc_loadw_be opeartion
+        loc_loadw_be.{PROC_LOC_LOADW_PTR}
     end
 
     begin
@@ -1243,6 +1243,70 @@ fn deprecated_mem_loadw_instruction() -> TestResult {
         "3 |     end",
         "  `----",
         regex!(r#"help:.*use.*mem_loadw_be.*instead"#)
+    );
+    Ok(())
+}
+
+#[test]
+fn deprecated_loc_loadw_instruction() -> TestResult {
+    let context = TestContext::default();
+
+    let source = source_file!(
+        &context,
+        "\
+    proc.foo.8
+        loc_loadw.0
+    end
+    begin
+        exec.foo
+    end
+    "
+    );
+
+    assert_assembler_diagnostic!(
+        context,
+        source,
+        "deprecated instruction: `loc_loadw` has been removed",
+        regex!(r#",-\[test[\d]+:2:9\]"#),
+        "1 | proc.foo.8",
+        "2 |         loc_loadw.0",
+        regex!(r#"^ *: *\^+"#),
+        regex!(r#"this instruction is no longer supported"#),
+        "3 |     end",
+        "  `----",
+        regex!(r#"help:.*use.*loc_loadw_be.*instead"#)
+    );
+    Ok(())
+}
+
+#[test]
+fn deprecated_loc_storew_instruction() -> TestResult {
+    let context = TestContext::default();
+
+    let source = source_file!(
+        &context,
+        "\
+    proc.foo.8
+        loc_storew.0
+    end
+    begin
+        exec.foo
+    end
+    "
+    );
+
+    assert_assembler_diagnostic!(
+        context,
+        source,
+        "deprecated instruction: `loc_storew` has been removed",
+        regex!(r#",-\[test[\d]+:2:9\]"#),
+        "1 | proc.foo.8",
+        "2 |         loc_storew.0",
+        regex!(r#"^ *: *\^+"#),
+        regex!(r#"this instruction is no longer supported"#),
+        "3 |     end",
+        "  `----",
+        regex!(r#"help:.*use.*loc_storew_be.*instead"#)
     );
     Ok(())
 }

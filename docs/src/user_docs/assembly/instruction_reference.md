@@ -173,7 +173,7 @@ Instructions for moving data between the stack and other sources like program co
 | -------------- | ------------ | ------------ | ------ | --------------------------------------------------------------------------------------------------------------------------- |
 | `clk`          | `[ ... ]`    | `[t, ... ]`  | 1      | Pushes current clock cycle `t`.                                                                                             |
 | `sdepth`       | `[ ... ]`    | `[d, ... ]`  | 1      | Pushes current stack depth `d`.                                                                                             |
-| `caller`       | `[A, b,...]` | `[H, b,...]` | 1      | Overwrites top 4 stack items with hash `H` of the function that called into the current context, or initiated the current `SYSCALL`. Returns `[0, 0, 0, 0]` when in context 0 and not servicing a `SYSCALL`. |
+| `caller`       | `[A, b,...]` | `[H, b,...]` | 1      | In context 0, overwrites the top 4 stack items with hash `H` of the function that syscall'd into the current context, or `[0, 0, 0, 0]` when not servicing a `SYSCALL`. In any other context, `H` corresponds to the hash of the function that entered the current context. |
 | `locaddr.i`    | `[ ... ]`    | `[a, ... ]`  | 2      | Pushes absolute memory address `a` of local memory at index `i`.                                                            |
 | `procref.name` | `[ ... ]`    | `[A, ... ]`  | 4      | Pushes MAST root `A` of procedure `name`.                                                                                   |
 
@@ -213,28 +213,28 @@ Memory is 0-initialized. Addresses are absolute `[0, 2^32)`. Locals are stored a
 
 #### Absolute Addressing
 
-| Instruction                              | Stack Input          | Stack Output     | Cycles       | Notes                                                                                                                                                                                                                 |
-| ---------------------------------------- | -------------------- | ---------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `mem_load` <br /> `mem_load.a`           | `[a, ... ]`          | `[v, ... ]`      | 1 <br /> 2   | `v ← mem[a]`. Pushes element from `mem[a]`. If `a` on stack, it's popped. Fails if `a >= 2^32`.                                                                                                                       |
-| `mem_loadw` <br /> `mem_loadw.a`         | `[a, 0,0,0,0,...]`   | `[A, ... ]`      | 1 <br /> 2   | `A ← mem[a..a+3]` (word). Overwrites top 4 stack elements (`mem[a+3]` is top). If `a` on stack, it's popped. Fails if `a >= 2^32` or `a` not multiple of 4.                                                           |
-| `mem_loadw_be` <br /> `mem_loadw_be.a`   | `[a, 0,0,0,0,...]`   | `[A, ... ]`      | 1 <br /> 2   | `A ← mem[a..a+3]` (word, big-endian). Overwrites top 4 stack elements (`mem[a+3]` is top). Equivalent to `mem_loadw`. If `a` on stack, it's popped. Fails if `a >= 2^32` or `a` not multiple of 4.                    |
-| `mem_loadw_le` <br /> `mem_loadw_le.a`   | `[a, 0,0,0,0,...]`   | `[A, ... ]`      | 4 <br /> 5   | `A ← mem[a..a+3]` (word, little-endian). Overwrites top 4 stack elements (`mem[a]` is top). Equivalent to `mem_loadw reversew`. If `a` on stack, it's popped. Fails if `a >= 2^32` or `a` not multiple of 4.          |
-| `mem_store` <br /> `mem_store.a`         | `[a, v, ... ]`       | `[ ... ]`        | 2 <br /> 3-4 | `mem[a] ← v`. Pops `v` to `mem[a]`. If `a` on stack, it's popped. Fails if `a >= 2^32`.                                                                                                                               |
-| `mem_storew` <br /> `mem_storew.a`       | `[a, A, ... ]`       | `[A, ... ]`      | 1 <br /> 2-3 | `mem[a..a+3] ← A`. Stores word `A` (top stack element at `mem[a+3]`). If `a` on stack, it's popped. Fails if `a >= 2^32` or `a` not multiple of 4.                                                                    |
-| `mem_storew_be` <br /> `mem_storew_be.a` | `[a, A, ... ]`       | `[A, ... ]`      | 1 <br /> 2-3 | `mem[a..a+3] ← A`. Stores word `A` in big-endian order (top stack element at `mem[a+3]`). Equivalent to `mem_storew`. If `a` on stack, it's popped. Fails if `a >= 2^32` or `a` not multiple of 4.                    |
-| `mem_storew_le` <br /> `mem_storew_le.a` | `[a, A, ... ]`       | `[A, ... ]`      | 9 <br /> 8-9 | `mem[a..a+3] ← A`. Stores word `A` in little-endian order (top stack element at `mem[a]`). Equivalent to `reversew mem_storew reversew`. If `a` on stack, it's popped. Fails if `a >= 2^32` or `a` not multiple of 4. |
-| `mem_stream`                             | `[C, B, A, a, ... ]` | `[E,D,A,a',...]` | 1            | `[E,D] ← [mem[a..a+3], mem[a+4..a+7]]`. `a' ← a+8`. Reads 2 sequential words from memory to top of stack.                                                                                                             |
+| Instruction                              | Stack Input          | Stack Output     | Cycles       | Notes                                                                                                                                                                                                                    |
+| ---------------------------------------- | -------------------- | ---------------- | ------------ |--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `mem_load` <br /> `mem_load.a`           | `[a, ... ]`          | `[v, ... ]`      | 1 <br /> 2   | `v ← mem[a]`. Pushes element from `mem[a]`. If `a` on stack, it's popped. Fails if `a >= 2^32`.                                                                                                                          |
+| `mem_loadw_be` <br /> `mem_loadw_be.a`   | `[a, 0,0,0,0,...]`   | `[A, ... ]`      | 1 <br /> 2   | `A ← mem[a..a+3]` (word, big-endian). Overwrites top 4 stack elements (`mem[a+3]` is top). If `a` on stack, it's popped. Fails if `a >= 2^32` or `a` not multiple of 4.                                                  |
+| `mem_loadw_le` <br /> `mem_loadw_le.a`   | `[a, 0,0,0,0,...]`   | `[A, ... ]`      | 4 <br /> 5   | `A ← mem[a..a+3]` (word, little-endian). Overwrites top 4 stack elements (`mem[a]` is top). Equivalent to `mem_loadw_be reversew`. If `a` on stack, it's popped. Fails if `a >= 2^32` or `a` not multiple of 4.          |
+| `mem_store` <br /> `mem_store.a`         | `[a, v, ... ]`       | `[ ... ]`        | 2 <br /> 3-4 | `mem[a] ← v`. Pops `v` to `mem[a]`. If `a` on stack, it's popped. Fails if `a >= 2^32`.                                                                                                                                  |
+| `mem_storew_be` <br /> `mem_storew_be.a` | `[a, A, ... ]`       | `[A, ... ]`      | 1 <br /> 2-3 | `mem[a..a+3] ← A`. Stores word `A` in big-endian order (top stack element at `mem[a+3]`). If `a` on stack, it's popped. Fails if `a >= 2^32` or `a` not multiple of 4.                                                   |
+| `mem_storew_le` <br /> `mem_storew_le.a` | `[a, A, ... ]`       | `[A, ... ]`      | 9 <br /> 8-9 | `mem[a..a+3] ← A`. Stores word `A` in little-endian order (top stack element at `mem[a]`). Equivalent to `reversew mem_storew_be reversew`. If `a` on stack, it's popped. Fails if `a >= 2^32` or `a` not multiple of 4. |
+| `mem_stream`                             | `[C, B, A, a, ... ]` | `[E,D,A,a',...]` | 1            | `[E,D] ← [mem[a..a+3], mem[a+4..a+7]]`. `a' ← a+8`. Reads 2 sequential words from memory to top of stack.                                                                                                                |
 
 #### Procedure Locals (Context-Specific)
 
 Locals are not 0-initialized. Max $2^{16}$ locals per procedure, $2^{31} - 1$ total. Rounded up to multiple of 4.
 
-| Instruction    | Stack Input      | Stack Output | Cycles | Notes                                                                                          |
-| -------------- | ---------------- | ------------ | ------ | ---------------------------------------------------------------------------------------------- |
-| `loc_load.i`   | `[ ... ]`        | `[v, ... ]`  | 5-6    | `v ← local[i]`. Pushes element from local memory at index `i`.                                 |
-| `loc_loadw.i`  | `[0,0,0,0, ...]` | `[A, ... ]`  | 5-6    | `A ← local[i..i+3]`. Reads word, `local[i+3]` is top of stack. Fails if `i` not multiple of 4. |
-| `loc_store.i`  | `[v, ... ]`      | `[ ... ]`    | 6-7    | `local[i] ← v`. Pops `v` to local memory at index `i`.                                         |
-| `loc_storew.i` | `[A, ... ]`      | `[A, ... ]`  | 5-6    | `local[i..i+3] ← A`. Stores word, top stack element at `local[i+3]`.                           |
+| Instruction       | Stack Input      | Stack Output | Cycles | Notes                                                                                                         |
+| ----------------- | ---------------- | ------------ | ------ | ------------------------------------------------------------------------------------------------------------- |
+| `loc_load.i`      | `[ ... ]`        | `[v, ... ]`  | 5-6    | `v ← local[i]`. Pushes element from local memory at index `i`.                                                |
+| `loc_loadw_be.i`  | `[0,0,0,0, ...]` | `[A, ... ]`  | 5-6    | `A ← local[i..i+3]`. Reads word in big-endian order, `local[i+3]` is top of stack. Fails if `i` not multiple of 4. |
+| `loc_loadw_le.i`  | `[0,0,0,0, ...]` | `[A, ... ]`  | 9-10   | `A ← local[i..i+3]`. Reads word in little-endian order, `local[i]` is top of stack. Equivalent to `loc_loadw_be reversew`. Fails if `i` not multiple of 4. |
+| `loc_store.i`     | `[v, ... ]`      | `[ ... ]`    | 6-7    | `local[i] ← v`. Pops `v` to local memory at index `i`.                                                        |
+| `loc_storew_be.i` | `[A, ... ]`      | `[A, ... ]`  | 5-6    | `local[i..i+3] ← A`. Stores word in big-endian order, top stack element at `local[i+3]`.                      |
+| `loc_storew_le.i` | `[A, ... ]`      | `[A, ... ]`  | 13-14  | `local[i..i+3] ← A`. Stores word in little-endian order, top stack element at `local[i]`. Equivalent to `reversew loc_storew_be reversew`. |
 
 ## Cryptographic Operations
 

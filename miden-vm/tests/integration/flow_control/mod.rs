@@ -293,16 +293,16 @@ fn call_in_syscall() {
 
         proc.userland.4
             # Ensure that the memory locals are fresh before we write to them
-            loc_loadw.0 assertz assertz assertz assertz
+            loc_loadw_be.0 assertz assertz assertz assertz
 
             # Write to memory locals, which should not affect context 0 memory
-            push.5.6.7.8 loc_storew.0 dropw
+            push.5.6.7.8 loc_storew_be.0 dropw
 
             # Syscall back into context 0
             syscall.second_kernel_entry
 
             # Ensure that procedure locals were untouched
-            loc_loadw.0 push.5.6.7.8 assert_eqw
+            loc_loadw_be.0 push.5.6.7.8 assert_eqw
         end
 
         # CONTEXT 0 FUNCTIONS
@@ -310,25 +310,25 @@ fn call_in_syscall() {
 
         export.second_kernel_entry.4
             # Ensure that the memory locals are fresh before we write to them
-            loc_loadw.0 assertz assertz assertz assertz
+            loc_loadw_be.0 assertz assertz assertz assertz
 
             # Write to procedure locals. We will later ensure that this write didn't affect procedure locals
             # in first_kernel_entry.
-            push.9.10.11.12 loc_storew.0 dropw
+            push.9.10.11.12 loc_storew_be.0 dropw
         end
 
         export.first_kernel_entry.4
             # Ensure that the memory locals are fresh before we write to them
-            loc_loadw.0 assertz assertz assertz assertz
+            loc_loadw_be.0 assertz assertz assertz assertz
 
             # Write to memory locals. We will ensure at the end that these values are still present
-            push.1.2.3.4 loc_storew.0 dropw
+            push.1.2.3.4 loc_storew_be.0 dropw
 
             # Call userland, which will syscall back into context 0
             call.userland
 
             # Ensure that procedure locals were untouched
-            loc_loadw.0 push.1.2.3.4 assert_eqw
+            loc_loadw_be.0 push.1.2.3.4 assert_eqw
         end
     ";
 
