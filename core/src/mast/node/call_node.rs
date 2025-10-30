@@ -47,10 +47,6 @@ impl CallNode {
 }
 
 //-------------------------------------------------------------------------------------------------
-/// Constructors
-impl CallNode {}
-
-//-------------------------------------------------------------------------------------------------
 /// Public accessors
 impl CallNode {
     /// Returns the ID of the node to be invoked by this call node.
