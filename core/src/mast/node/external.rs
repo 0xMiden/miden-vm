@@ -10,9 +10,7 @@ use miden_formatting::{
 use serde::{Deserialize, Serialize};
 
 use super::{MastForestContributor, MastNodeErrorContext, MastNodeExt};
-use crate::mast::{
-    DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId, Remapping,
-};
+use crate::mast::{DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId};
 
 // EXTERNAL NODE
 // ================================================================================================
@@ -182,10 +180,6 @@ impl MastNodeExt for ExternalNode {
         Box::new(ExternalNode::to_pretty_print(self, mast_forest))
     }
 
-    fn remap_children(&self, _remapping: &Remapping) -> Self {
-        self.clone()
-    }
-
     fn has_children(&self) -> bool {
         false
     }
@@ -203,6 +197,14 @@ impl MastNodeExt for ExternalNode {
 
     fn domain(&self) -> Felt {
         panic!("Can't fetch domain for an `External` node.")
+    }
+
+    type Builder = ExternalNodeBuilder;
+
+    fn to_builder(self) -> Self::Builder {
+        ExternalNodeBuilder::new(self.digest)
+            .with_before_enter(self.before_enter)
+            .with_after_exit(self.after_exit)
     }
 }
 
@@ -225,18 +227,6 @@ impl ExternalNodeBuilder {
         }
     }
 
-    /// Adds decorators to be executed before this node.
-    pub fn with_before_enter(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
-        self.before_enter = decorators.into();
-        self
-    }
-
-    /// Adds decorators to be executed after this node.
-    pub fn with_after_exit(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
-        self.after_exit = decorators.into();
-        self
-    }
-
     /// Builds the ExternalNode with the specified decorators.
     pub fn build(self) -> ExternalNode {
         ExternalNode {
@@ -253,5 +243,88 @@ impl MastForestContributor for ExternalNodeBuilder {
             .nodes
             .push(self.build().into())
             .map_err(|_| MastForestError::TooManyNodes)
+    }
+
+    fn with_before_enter(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
+        self.before_enter = decorators.into();
+        self
+    }
+
+    fn with_after_exit(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
+        self.after_exit = decorators.into();
+        self
+    }
+
+    fn fingerprint_for_node(
+        &self,
+        forest: &MastForest,
+        _hash_by_node_id: &impl crate::LookupByIdx<MastNodeId, crate::mast::MastNodeFingerprint>,
+    ) -> Result<crate::mast::MastNodeFingerprint, MastForestError> {
+        // ExternalNode has no children, so we don't need hash_by_node_id
+        // Use the fingerprint_from_parts helper function with empty children array
+        crate::mast::node_fingerprint::fingerprint_from_parts(
+            forest,
+            _hash_by_node_id,
+            &self.before_enter,
+            &self.after_exit,
+            &[],         // ExternalNode has no children
+            self.digest, // ExternalNodeBuilder stores the digest directly
+        )
+    }
+
+    fn remap_children(self, _remapping: &crate::mast::Remapping) -> Self {
+        // ExternalNode has no children to remap, so return self unchanged
+        self
+    }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl proptest::prelude::Arbitrary for ExternalNodeBuilder {
+    type Parameters = ExternalNodeBuilderParams;
+    type Strategy = proptest::strategy::BoxedStrategy<Self>;
+
+    fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
+        use proptest::prelude::*;
+
+        (
+            any::<[u64; 4]>().prop_map(|[a, b, c, d]| {
+                miden_crypto::Word::new([
+                    miden_crypto::Felt::new(a),
+                    miden_crypto::Felt::new(b),
+                    miden_crypto::Felt::new(c),
+                    miden_crypto::Felt::new(d),
+                ])
+            }),
+            proptest::collection::vec(
+                super::arbitrary::decorator_id_strategy(params.max_decorator_id_u32),
+                0..=params.max_decorators,
+            ),
+            proptest::collection::vec(
+                super::arbitrary::decorator_id_strategy(params.max_decorator_id_u32),
+                0..=params.max_decorators,
+            ),
+        )
+            .prop_map(|(digest, before_enter, after_exit)| {
+                Self::new(digest).with_before_enter(before_enter).with_after_exit(after_exit)
+            })
+            .boxed()
+    }
+}
+
+/// Parameters for generating ExternalNodeBuilder instances
+#[cfg(any(test, feature = "arbitrary"))]
+#[derive(Clone, Debug)]
+pub struct ExternalNodeBuilderParams {
+    pub max_decorators: usize,
+    pub max_decorator_id_u32: u32,
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl Default for ExternalNodeBuilderParams {
+    fn default() -> Self {
+        Self {
+            max_decorators: 4,
+            max_decorator_id_u32: 10,
+        }
     }
 }

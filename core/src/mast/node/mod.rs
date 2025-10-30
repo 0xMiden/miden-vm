@@ -6,7 +6,8 @@ pub use basic_block_node::{
     BATCH_SIZE as OP_BATCH_SIZE, BasicBlockNode, BasicBlockNodeBuilder, DecoratorOpLinkIterator,
     GROUP_SIZE as OP_GROUP_SIZE, OpBatch, OperationOrDecorator,
 };
-use enum_dispatch::enum_dispatch;
+use derive_more::From;
+use miden_utils_core_derive::MastNodeExt;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -33,15 +34,14 @@ pub use basic_block_node::arbitrary;
 pub use loop_node::{LoopNode, LoopNodeBuilder};
 
 mod mast_forest_contributor;
-pub use mast_forest_contributor::MastForestContributor;
+pub use mast_forest_contributor::{MastForestContributor, MastNodeBuilder};
 
 use super::DecoratorId;
 use crate::{
     AssemblyOp, Decorator,
-    mast::{MastForest, MastNodeId, Remapping},
+    mast::{MastForest, MastNodeId},
 };
 
-#[enum_dispatch]
 pub trait MastNodeExt {
     /// Returns a commitment/hash of the node.
     fn digest(&self) -> Word;
@@ -67,9 +67,6 @@ pub trait MastNodeExt {
     /// Returns a pretty printer for this node.
     fn to_pretty_print<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn PrettyPrint + 'a>;
 
-    /// Remap the node children to their new positions indicated by the given [`Remapping`].
-    fn remap_children(&self, remapping: &Remapping) -> Self;
-
     /// Returns true if the this node has children.
     fn has_children(&self) -> bool;
 
@@ -83,14 +80,19 @@ pub trait MastNodeExt {
 
     /// Returns the domain of this node.
     fn domain(&self) -> Felt;
+
+    /// Converts this node into its corresponding builder, reusing allocated data where possible.
+    type Builder: MastForestContributor;
+
+    fn to_builder(self) -> Self::Builder;
 }
 
 // MAST NODE
 // ================================================================================================
 
-#[enum_dispatch(MastNodeExt)]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, MastNodeExt, From)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[mast_node_ext(builder = "MastNodeBuilder")]
 pub enum MastNode {
     Block(BasicBlockNode),
     Join(JoinNode),

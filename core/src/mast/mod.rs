@@ -18,7 +18,7 @@ pub use node::arbitrary;
 pub use node::{
     BasicBlockNode, BasicBlockNodeBuilder, CallNode, CallNodeBuilder, DecoratedOpLink,
     DecoratorOpLinkIterator, DynNode, DynNodeBuilder, ExternalNode, ExternalNodeBuilder, JoinNode,
-    JoinNodeBuilder, LoopNode, LoopNodeBuilder, MastForestContributor, MastNode,
+    JoinNodeBuilder, LoopNode, LoopNodeBuilder, MastForestContributor, MastNode, MastNodeBuilder,
     MastNodeErrorContext, MastNodeExt, OP_BATCH_SIZE, OP_GROUP_SIZE, OpBatch, OperationOrDecorator,
     SplitNode, SplitNodeBuilder,
 };
@@ -102,7 +102,10 @@ impl MastForest {
     /// Adds a node to the forest, and returns the associated [`MastNodeId`].
     ///
     /// Adding two duplicate nodes will result in two distinct returned [`MastNodeId`]s.
-    pub fn add_node(&mut self, node: impl Into<MastNode>) -> Result<MastNodeId, MastForestError> {
+    pub(crate) fn add_node(
+        &mut self,
+        node: impl Into<MastNode>,
+    ) -> Result<MastNodeId, MastForestError> {
         self.nodes.push(node.into()).map_err(|_| MastForestError::TooManyNodes)
     }
 
@@ -234,53 +237,11 @@ impl MastForest {
         // Add each node to the new MAST forest, making sure to rewrite any outdated internal
         // `MastNodeId`s
         for live_node in nodes_to_add {
-            match &live_node {
-                MastNode::Join(join_node) => {
-                    let first_child =
-                        id_remappings.get(&join_node.first()).copied().unwrap_or(join_node.first());
-                    let second_child = id_remappings
-                        .get(&join_node.second())
-                        .copied()
-                        .unwrap_or(join_node.second());
-
-                    JoinNodeBuilder::new([first_child, second_child]).add_to_forest(self).unwrap();
-                },
-                MastNode::Split(split_node) => {
-                    let on_true_child = id_remappings
-                        .get(&split_node.on_true())
-                        .copied()
-                        .unwrap_or(split_node.on_true());
-                    let on_false_child = id_remappings
-                        .get(&split_node.on_false())
-                        .copied()
-                        .unwrap_or(split_node.on_false());
-
-                    SplitNodeBuilder::new([on_true_child, on_false_child])
-                        .add_to_forest(self)
-                        .unwrap();
-                },
-                MastNode::Loop(loop_node) => {
-                    let body_id =
-                        id_remappings.get(&loop_node.body()).copied().unwrap_or(loop_node.body());
-
-                    LoopNodeBuilder::new(body_id).add_to_forest(self).unwrap();
-                },
-                MastNode::Call(call_node) => {
-                    let callee_id = id_remappings
-                        .get(&call_node.callee())
-                        .copied()
-                        .unwrap_or(call_node.callee());
-
-                    if call_node.is_syscall() {
-                        CallNodeBuilder::new_syscall(callee_id).add_to_forest(self).unwrap();
-                    } else {
-                        CallNodeBuilder::new(callee_id).add_to_forest(self).unwrap();
-                    }
-                },
-                MastNode::Block(_) | MastNode::Dyn(_) | MastNode::External(_) => {
-                    self.add_node(live_node).unwrap();
-                },
-            }
+            live_node
+                .to_builder()
+                .remap_children(id_remappings)
+                .add_to_forest(self)
+                .unwrap();
         }
     }
 

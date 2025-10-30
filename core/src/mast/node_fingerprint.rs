@@ -125,7 +125,7 @@ impl MastNodeFingerprint {
     }
 }
 
-fn fingerprint_from_parts(
+pub fn fingerprint_from_parts(
     forest: &MastForest,
     hash_by_node_id: &impl LookupByIdx<MastNodeId, MastNodeFingerprint>,
     before_enter_ids: &[DecoratorId],
@@ -182,7 +182,7 @@ mod tests {
     use super::*;
     use crate::{
         Decorator, Felt, Operation,
-        mast::{BasicBlockNode, MastNode, node::BasicBlockNodeBuilder},
+        mast::{BasicBlockNode, MastForestContributor, MastNode, node::BasicBlockNodeBuilder},
     };
 
     /// Creates a basic block with the given operations

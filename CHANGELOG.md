@@ -43,6 +43,7 @@
 - Implement `sorted_array::find_half_key_value` (#[2268](https://github.com/0xMiden/miden-vm/pull/2268)).
 - [BREAKING] Added builder patterns for all `MastNode` types, made naked constructors module-private ([#2259](https://github.com/0xMiden/miden-vm/pull/2259)).
 - Extend builder patterns for all `MastNode` types ([#2274](https://github.com/0xMiden/miden-vm/pull/2274)).
+- Further extend builder patterns for all `MastNode` types, replace `enum-dispatch` by our own derivations ([#2291](https://github.com/0xMiden/miden-vm/pull/2291)).
 
 ## 0.18.2 (2025-10-10)
 

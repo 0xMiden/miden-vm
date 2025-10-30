@@ -9,8 +9,9 @@ use miden_core::{
     AdviceMap, Decorator, DecoratorList, Felt, Operation, Word,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DecoratorFingerprint, DecoratorId, DynNodeBuilder,
-        ExternalNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForest, MastNode, MastNodeExt,
-        MastNodeFingerprint, MastNodeId, Remapping, SplitNodeBuilder, SubtreeIterator,
+        ExternalNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForest, MastForestContributor,
+        MastNode, MastNodeExt, MastNodeFingerprint, MastNodeId, Remapping, SplitNodeBuilder,
+        SubtreeIterator,
     },
 };
 
@@ -382,17 +383,20 @@ impl MastForestBuilder {
     /// Note that only one copy of nodes that have the same MAST root and decorators is added to the
     /// MAST forest; two nodes that have the same MAST root and decorators will have the same
     /// [`MastNodeId`].
-    pub(crate) fn ensure_node(&mut self, node: impl Into<MastNode>) -> Result<MastNodeId, Report> {
-        let node: MastNode = node.into();
-        let node_fingerprint = self.fingerprint_for_node(&node);
+    pub(crate) fn ensure_node(
+        &mut self,
+        builder: impl MastForestContributor,
+    ) -> Result<MastNodeId, Report> {
+        let node_fingerprint = builder
+            .fingerprint_for_node(&self.mast_forest, &self.hash_by_node_id)
+            .expect("hash_by_node_id should contain the fingerprints of all children of `node`");
 
         if let Some(node_id) = self.node_id_by_fingerprint.get(&node_fingerprint) {
             // node already exists in the forest; return previously assigned id
             Ok(*node_id)
         } else {
-            let new_node_id = self
-                .mast_forest
-                .add_node(node)
+            let new_node_id = builder
+                .add_to_forest(&mut self.mast_forest)
                 .into_diagnostic()
                 .wrap_err("assembler failed to add new node")?;
             self.node_id_by_fingerprint.insert(node_fingerprint, new_node_id);
@@ -408,10 +412,7 @@ impl MastForestBuilder {
         operations: Vec<Operation>,
         decorators: DecoratorList,
     ) -> Result<MastNodeId, Report> {
-        let block = BasicBlockNodeBuilder::new(operations, decorators)
-            .build()
-            .into_diagnostic()
-            .wrap_err("assembler failed to add new basic block node")?;
+        let block = BasicBlockNodeBuilder::new(operations, decorators);
         self.ensure_node(block)
     }
 
@@ -421,10 +422,7 @@ impl MastForestBuilder {
         left_child: MastNodeId,
         right_child: MastNodeId,
     ) -> Result<MastNodeId, Report> {
-        let join = JoinNodeBuilder::new([left_child, right_child])
-            .build(&self.mast_forest)
-            .into_diagnostic()
-            .wrap_err("assembler failed to add new join node")?;
+        let join = JoinNodeBuilder::new([left_child, right_child]);
         self.ensure_node(join)
     }
 
@@ -434,48 +432,36 @@ impl MastForestBuilder {
         if_branch: MastNodeId,
         else_branch: MastNodeId,
     ) -> Result<MastNodeId, Report> {
-        let split = SplitNodeBuilder::new([if_branch, else_branch])
-            .build(&self.mast_forest)
-            .into_diagnostic()
-            .wrap_err("assembler failed to add new split node")?;
+        let split = SplitNodeBuilder::new([if_branch, else_branch]);
         self.ensure_node(split)
     }
 
     /// Adds a loop node to the forest, and returns the [`MastNodeId`] associated with it.
     pub fn ensure_loop(&mut self, body: MastNodeId) -> Result<MastNodeId, Report> {
-        let loop_node = LoopNodeBuilder::new(body)
-            .build(&self.mast_forest)
-            .into_diagnostic()
-            .wrap_err("assembler failed to add new loop node")?;
+        let loop_node = LoopNodeBuilder::new(body);
         self.ensure_node(loop_node)
     }
 
     /// Adds a call node to the forest, and returns the [`MastNodeId`] associated with it.
     pub fn ensure_call(&mut self, callee: MastNodeId) -> Result<MastNodeId, Report> {
-        let call = CallNodeBuilder::new(callee)
-            .build(&self.mast_forest)
-            .into_diagnostic()
-            .wrap_err("assembler failed to add new call node")?;
+        let call = CallNodeBuilder::new(callee);
         self.ensure_node(call)
     }
 
     /// Adds a syscall node to the forest, and returns the [`MastNodeId`] associated with it.
     pub fn ensure_syscall(&mut self, callee: MastNodeId) -> Result<MastNodeId, Report> {
-        let syscall = CallNodeBuilder::new_syscall(callee)
-            .build(&self.mast_forest)
-            .into_diagnostic()
-            .wrap_err("assembler failed to add new syscall node")?;
+        let syscall = CallNodeBuilder::new_syscall(callee);
         self.ensure_node(syscall)
     }
 
     /// Adds a dyn node to the forest, and returns the [`MastNodeId`] associated with it.
     pub fn ensure_dyn(&mut self) -> Result<MastNodeId, Report> {
-        self.ensure_node(DynNodeBuilder::new_dyn().build())
+        self.ensure_node(DynNodeBuilder::new_dyn())
     }
 
     /// Adds a dyncall node to the forest, and returns the [`MastNodeId`] associated with it.
     pub fn ensure_dyncall(&mut self) -> Result<MastNodeId, Report> {
-        self.ensure_node(DynNodeBuilder::new_dyncall().build())
+        self.ensure_node(DynNodeBuilder::new_dyncall())
     }
 
     /// Adds a node corresponding to the given MAST root, according to how it is linked.
@@ -486,14 +472,16 @@ impl MastForestBuilder {
     pub fn ensure_external_link(&mut self, mast_root: Word) -> Result<MastNodeId, Report> {
         if let Some(root_id) = self.statically_linked_mast.find_procedure_root(mast_root) {
             for old_id in SubtreeIterator::new(&root_id, &self.statically_linked_mast.clone()) {
-                let node = self.statically_linked_mast[old_id]
+                let builder = self.statically_linked_mast[old_id]
+                    .clone()
+                    .to_builder()
                     .remap_children(&self.statically_linked_mast_remapping);
-                let new_id = self.ensure_node(node)?;
+                let new_id = self.ensure_node(builder)?;
                 self.statically_linked_mast_remapping.insert(old_id, new_id);
             }
             Ok(root_id.remap(&self.statically_linked_mast_remapping))
         } else {
-            self.ensure_node(ExternalNodeBuilder::new(mast_root).build())
+            self.ensure_node(ExternalNodeBuilder::new(mast_root))
         }
     }
 

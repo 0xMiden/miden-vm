@@ -10,7 +10,7 @@ use super::{MastForestContributor, MastNodeErrorContext, MastNodeExt};
 use crate::{
     Idx, OPCODE_LOOP,
     chiplets::hasher,
-    mast::{DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId, Remapping},
+    mast::{DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId},
 };
 
 // LOOP NODE
@@ -211,12 +211,6 @@ impl MastNodeExt for LoopNode {
         Box::new(LoopNode::to_pretty_print(self, mast_forest))
     }
 
-    fn remap_children(&self, remapping: &Remapping) -> Self {
-        let mut node = self.clone();
-        node.body = node.body.remap(remapping);
-        node
-    }
-
     fn has_children(&self) -> bool {
         true
     }
@@ -234,6 +228,14 @@ impl MastNodeExt for LoopNode {
 
     fn domain(&self) -> Felt {
         Self::DOMAIN
+    }
+
+    type Builder = LoopNodeBuilder;
+
+    fn to_builder(self) -> Self::Builder {
+        LoopNodeBuilder::new(self.body)
+            .with_before_enter(self.before_enter)
+            .with_after_exit(self.after_exit)
     }
 }
 
@@ -254,18 +256,6 @@ impl LoopNodeBuilder {
             before_enter: Vec::new(),
             after_exit: Vec::new(),
         }
-    }
-
-    /// Adds decorators to be executed before this node.
-    pub fn with_before_enter(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
-        self.before_enter = decorators.into();
-        self
-    }
-
-    /// Adds decorators to be executed after this node.
-    pub fn with_after_exit(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
-        self.after_exit = decorators.into();
-        self
     }
 
     /// Builds the LoopNode with the specified decorators.
@@ -294,5 +284,91 @@ impl MastForestContributor for LoopNodeBuilder {
             .nodes
             .push(self.build(forest)?.into())
             .map_err(|_| MastForestError::TooManyNodes)
+    }
+
+    fn with_before_enter(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
+        self.before_enter = decorators.into();
+        self
+    }
+
+    fn with_after_exit(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
+        self.after_exit = decorators.into();
+        self
+    }
+
+    fn fingerprint_for_node(
+        &self,
+        forest: &MastForest,
+        hash_by_node_id: &impl crate::LookupByIdx<MastNodeId, crate::mast::MastNodeFingerprint>,
+    ) -> Result<crate::mast::MastNodeFingerprint, MastForestError> {
+        // Use the fingerprint_from_parts helper function
+        crate::mast::node_fingerprint::fingerprint_from_parts(
+            forest,
+            hash_by_node_id,
+            &self.before_enter,
+            &self.after_exit,
+            &[self.body],
+            // Compute digest the same way as in build()
+            {
+                let body_hash = forest[self.body].digest();
+
+                crate::chiplets::hasher::merge_in_domain(
+                    &[body_hash, miden_crypto::Word::default()],
+                    LoopNode::DOMAIN,
+                )
+            },
+        )
+    }
+
+    fn remap_children(self, remapping: &crate::mast::Remapping) -> Self {
+        LoopNodeBuilder {
+            body: self.body.remap(remapping),
+            before_enter: self.before_enter,
+            after_exit: self.after_exit,
+        }
+    }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl proptest::prelude::Arbitrary for LoopNodeBuilder {
+    type Parameters = LoopNodeBuilderParams;
+    type Strategy = proptest::strategy::BoxedStrategy<Self>;
+
+    fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
+        use proptest::prelude::*;
+
+        (
+            any::<crate::mast::MastNodeId>(),
+            proptest::collection::vec(
+                super::arbitrary::decorator_id_strategy(params.max_decorator_id_u32),
+                0..=params.max_decorators,
+            ),
+            proptest::collection::vec(
+                super::arbitrary::decorator_id_strategy(params.max_decorator_id_u32),
+                0..=params.max_decorators,
+            ),
+        )
+            .prop_map(|(body, before_enter, after_exit)| {
+                Self::new(body).with_before_enter(before_enter).with_after_exit(after_exit)
+            })
+            .boxed()
+    }
+}
+
+/// Parameters for generating LoopNodeBuilder instances
+#[cfg(any(test, feature = "arbitrary"))]
+#[derive(Clone, Debug)]
+pub struct LoopNodeBuilderParams {
+    pub max_decorators: usize,
+    pub max_decorator_id_u32: u32,
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl Default for LoopNodeBuilderParams {
+    fn default() -> Self {
+        Self {
+            max_decorators: 4,
+            max_decorator_id_u32: 10,
+        }
     }
 }

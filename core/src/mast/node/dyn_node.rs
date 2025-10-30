@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use super::{MastForestContributor, MastNodeErrorContext, MastNodeExt};
 use crate::{
     OPCODE_DYN, OPCODE_DYNCALL,
-    mast::{DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId, Remapping},
+    mast::{DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNodeId},
 };
 
 // DYN NODE
@@ -227,10 +227,6 @@ impl MastNodeExt for DynNode {
         Box::new(DynNode::to_pretty_print(self, mast_forest))
     }
 
-    fn remap_children(&self, _remapping: &Remapping) -> Self {
-        self.clone()
-    }
-
     fn has_children(&self) -> bool {
         false
     }
@@ -248,6 +244,18 @@ impl MastNodeExt for DynNode {
 
     fn domain(&self) -> Felt {
         self.domain()
+    }
+
+    type Builder = DynNodeBuilder;
+
+    fn to_builder(self) -> Self::Builder {
+        if self.is_dyncall {
+            DynNodeBuilder::new_dyncall()
+        } else {
+            DynNodeBuilder::new_dyn()
+        }
+        .with_before_enter(self.before_enter)
+        .with_after_exit(self.after_exit)
     }
 }
 
@@ -279,18 +287,6 @@ impl DynNodeBuilder {
         }
     }
 
-    /// Adds decorators to be executed before this node.
-    pub fn with_before_enter(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
-        self.before_enter = decorators.into();
-        self
-    }
-
-    /// Adds decorators to be executed after this node.
-    pub fn with_after_exit(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
-        self.after_exit = decorators.into();
-        self
-    }
-
     /// Builds the DynNode with the specified decorators.
     pub fn build(self) -> DynNode {
         DynNode {
@@ -307,6 +303,102 @@ impl MastForestContributor for DynNodeBuilder {
             .nodes
             .push(self.build().into())
             .map_err(|_| MastForestError::TooManyNodes)
+    }
+
+    fn with_before_enter(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
+        self.before_enter = decorators.into();
+        self
+    }
+
+    fn with_after_exit(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
+        self.after_exit = decorators.into();
+        self
+    }
+
+    fn fingerprint_for_node(
+        &self,
+        forest: &MastForest,
+        _hash_by_node_id: &impl crate::LookupByIdx<MastNodeId, crate::mast::MastNodeFingerprint>,
+    ) -> Result<crate::mast::MastNodeFingerprint, MastForestError> {
+        // DynNode has no children, so we don't need hash_by_node_id
+        // Use the fingerprint_from_parts helper function with empty children array
+        crate::mast::node_fingerprint::fingerprint_from_parts(
+            forest,
+            _hash_by_node_id,
+            &self.before_enter,
+            &self.after_exit,
+            &[], // DynNode has no children
+            // Use the same hardcoded digest values as in DynNode::digest()
+            if self.is_dyncall {
+                miden_crypto::Word::new([
+                    miden_crypto::Felt::new(8751004906421739448),
+                    miden_crypto::Felt::new(13469709002495534233),
+                    miden_crypto::Felt::new(12584249374630430826),
+                    miden_crypto::Felt::new(7624899870831503004),
+                ])
+            } else {
+                miden_crypto::Word::new([
+                    miden_crypto::Felt::new(8115106948140260551),
+                    miden_crypto::Felt::new(13491227816952616836),
+                    miden_crypto::Felt::new(15015806788322198710),
+                    miden_crypto::Felt::new(16575543461540527115),
+                ])
+            },
+        )
+    }
+
+    fn remap_children(self, _remapping: &crate::mast::Remapping) -> Self {
+        // DynNode has no children to remap, so return self unchanged
+        self
+    }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl proptest::prelude::Arbitrary for DynNodeBuilder {
+    type Parameters = DynNodeBuilderParams;
+    type Strategy = proptest::strategy::BoxedStrategy<Self>;
+
+    fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
+        use proptest::prelude::*;
+
+        (
+            any::<bool>(),
+            proptest::collection::vec(
+                super::arbitrary::decorator_id_strategy(params.max_decorator_id_u32),
+                0..=params.max_decorators,
+            ),
+            proptest::collection::vec(
+                super::arbitrary::decorator_id_strategy(params.max_decorator_id_u32),
+                0..=params.max_decorators,
+            ),
+        )
+            .prop_map(|(is_dyncall, before_enter, after_exit)| {
+                let builder = if is_dyncall {
+                    Self::new_dyncall()
+                } else {
+                    Self::new_dyn()
+                };
+                builder.with_before_enter(before_enter).with_after_exit(after_exit)
+            })
+            .boxed()
+    }
+}
+
+/// Parameters for generating DynNodeBuilder instances
+#[cfg(any(test, feature = "arbitrary"))]
+#[derive(Clone, Debug)]
+pub struct DynNodeBuilderParams {
+    pub max_decorators: usize,
+    pub max_decorator_id_u32: u32,
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl Default for DynNodeBuilderParams {
+    fn default() -> Self {
+        Self {
+            max_decorators: 4,
+            max_decorator_id_u32: 10,
+        }
     }
 }
 
