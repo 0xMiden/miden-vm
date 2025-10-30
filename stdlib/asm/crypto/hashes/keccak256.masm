@@ -1,4 +1,4 @@
-use.std::mem
+use.std::sys
 use.std::word
 use.std::crypto::hashes::rpo
 
@@ -35,10 +35,7 @@ export.hash_memory
     # => [COMM, TAG, DIGEST_U32[8], ...]
 
     # Log the precompile request for deferred verification
-    # Requires a placeholder word (PAD) so the top 3 words are [COMM, TAG, PAD]
-    padw movdnw.2
-    log_precompile
-    dropw dropw dropw
+    exec.sys::log_precompile_request
     # => [DIGEST_U32[8], ...]
 end
 

@@ -33,3 +33,16 @@ end
 export.drop_stack_top
     dropw dropw dropw dropw
 end
+
+#! Logs a precompile commitment and removes the helper words produced by `log_precompile`.
+#!
+#! Input: `[COMM, TAG, ...]`
+#! Output: Stack without the three helper words `[R1, R0, CAP_NEXT]`.
+#! Cycles: 1 (plus cost of the underlying `log_precompile` instruction).
+export.log_precompile_request
+    padw movdnw.2
+    # => [COMM, TAG, PAD, ...]
+    log_precompile
+    # => [R1, R0, CAP_NEXT, ...]
+    dropw dropw dropw
+end
