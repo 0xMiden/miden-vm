@@ -306,11 +306,7 @@ impl Linker {
         log::debug!(target: "linker", "adding pre-assembled module {} to module graph", module.path());
 
         let module_path = module.path();
-        let is_duplicate =
-            self.is_pending(module_path) || self.find_module_index(module_path).is_some();
-        if is_duplicate {
-            return Err(LinkerError::DuplicateModule { path: module_path.clone() });
-        }
+        self.ensure_not_duplicate(module_path)?;
 
         let module_index = self.next_module_id();
         for (proc_index, proc) in module.procedures() {
@@ -354,11 +350,7 @@ impl Linker {
         log::debug!(target: "linker", "adding unprocessed module {}", module.path());
         let module_path = module.path();
 
-        let is_duplicate =
-            self.is_pending(module_path) || self.find_module_index(module_path).is_some();
-        if is_duplicate {
-            return Err(LinkerError::DuplicateModule { path: module_path.clone() });
-        }
+        self.ensure_not_duplicate(module_path)?;
 
         let module_index = self.next_module_id();
         self.modules.push(None);
@@ -368,6 +360,14 @@ impl Linker {
 
     fn is_pending(&self, path: &LibraryPath) -> bool {
         self.pending.iter().any(|m| m.module.path() == path)
+    }
+
+    fn ensure_not_duplicate(&self, path: &LibraryPath) -> Result<(), LinkerError> {
+        if self.is_pending(path) || self.find_module_index(path).is_some() {
+            Err(LinkerError::DuplicateModule { path: path.clone() })
+        } else {
+            Ok(())
+        }
     }
 
     #[inline]
