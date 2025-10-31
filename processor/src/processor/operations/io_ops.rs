@@ -264,9 +264,7 @@ pub(super) fn op_crypto_stream<P: Processor>(
     err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
 ) -> Result<(), ExecutionError> {
-    /// WORD_SIZE, but as a `Felt`.
     const WORD_SIZE_FELT: Felt = Felt::new(4);
-    /// The size of a double-word.
     const DOUBLE_WORD_SIZE: Felt = Felt::new(8);
 
     // Stack layout: [rate(8), capacity(4), src_ptr, dst_ptr, ...]

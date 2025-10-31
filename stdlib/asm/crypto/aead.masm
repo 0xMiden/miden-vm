@@ -335,7 +335,7 @@ export.decrypt
     # Load plaintext data blocks from advice using adv_pipe
     while.true
         adv_pipe  # Reads 8 elements from advice, writes to dst_ptr, increments dst_ptr by 8
-        # => [0(4), 0(4), 0(4), dst_ptr+8, num_blocks, nonce(4), key(4), src_ptr, dst_ptr, num_blocks, tag_ptr, ...]
+        # => [DATA1(4), DATA0(4), 0(4), dst_ptr+8, num_blocks, nonce(4), key(4), src_ptr, dst_ptr, num_blocks, tag_ptr, ...]
 
         movup.13 sub.1  # Decrement counter
         movdn.13 dup.13 # Move counter back and check if more blocks remain
@@ -361,7 +361,7 @@ export.decrypt
     padw            # Prepare stack for loading expected tag
     movup.8         # Get tag_ptr
     mem_loadw_be    # Load expected tag from memory
-    # => [expected_tag(4), 0(4), computed_tag(4), ...]
+    # => [expected_tag(4), computed_tag(4), ...]
 
     eqw assert      # Assert tags match (halts if different)
     dropw dropw     # Clean up stack

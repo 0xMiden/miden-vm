@@ -46,63 +46,35 @@ fn test_encrypt_with_known_values() {
         push.1           # num_blocks = 1
         push.2000        # dst_ptr
         push.1000        # src_ptr
-        push.{}.{}.{}.{}     # key
-        push.{}.{}.{}.{}     # nonce
+        push.{key_elements:?}     # key
+        push.{nonce_elements:?}     # nonce
 
         exec.aead::encrypt
 
         # Result: [tag(4), ...]
         # Verify tag
-        push.{}.{}.{}.{}
+        push.{expected_tag:?}
         eqw assert
         dropw dropw
 
         # Verify all 4 ciphertext words
         push.2000 mem_loadw_be
-        push.{}.{}.{}.{} eqw assert dropw dropw
+        push.{ciphertext_0:?} eqw assert dropw dropw
 
         push.2004 mem_loadw_be
-        push.{}.{}.{}.{} eqw assert dropw dropw
+        push.{ciphertext_1:?} eqw assert dropw dropw
 
         push.2008 mem_loadw_be
-        push.{}.{}.{}.{} eqw assert dropw dropw
+        push.{ciphertext_2:?} eqw assert dropw dropw
 
         push.2012 mem_loadw_be
-        push.{}.{}.{}.{} eqw assert dropw dropw
+        push.{ciphertext_3:?} eqw assert dropw dropw
     end
     ",
-        key_elements[0].as_int(),
-        key_elements[1].as_int(),
-        key_elements[2].as_int(),
-        key_elements[3].as_int(),
-        nonce_elements[0].as_int(),
-        nonce_elements[1].as_int(),
-        nonce_elements[2].as_int(),
-        nonce_elements[3].as_int(),
-        expected_tag[0].as_int(),
-        expected_tag[1].as_int(),
-        expected_tag[2].as_int(),
-        expected_tag[3].as_int(),
-        // Ciphertext word 0 - push in original order
-        ciphertext[0].as_int(),
-        ciphertext[1].as_int(),
-        ciphertext[2].as_int(),
-        ciphertext[3].as_int(),
-        // Ciphertext word 1
-        ciphertext[4].as_int(),
-        ciphertext[5].as_int(),
-        ciphertext[6].as_int(),
-        ciphertext[7].as_int(),
-        // Ciphertext word 2
-        ciphertext[8].as_int(),
-        ciphertext[9].as_int(),
-        ciphertext[10].as_int(),
-        ciphertext[11].as_int(),
-        // Ciphertext word 3
-        ciphertext[12].as_int(),
-        ciphertext[13].as_int(),
-        ciphertext[14].as_int(),
-        ciphertext[15].as_int(),
+        ciphertext_0 = &ciphertext[0..4],
+        ciphertext_1 = &ciphertext[4..8],
+        ciphertext_2 = &ciphertext[8..12],
+        ciphertext_3 = &ciphertext[12..16],
     );
 
     let test = build_test!(source.as_str(), &[]);
@@ -145,20 +117,20 @@ fn test_decrypt_with_known_values() {
 
     begin
         # Store ciphertext at address 1000 (data + padding + tag)
-        push.{}.{}.{}.{} push.1000 mem_storew_be dropw
-        push.{}.{}.{}.{} push.1004 mem_storew_be dropw
-        push.{}.{}.{}.{} push.1008 mem_storew_be dropw
-        push.{}.{}.{}.{} push.1012 mem_storew_be dropw
+        push.{ciphertext_0:?} push.1000 mem_storew_be dropw
+        push.{ciphertext_1:?} push.1004 mem_storew_be dropw
+        push.{ciphertext_2:?} push.1008 mem_storew_be dropw
+        push.{ciphertext_3:?} push.1012 mem_storew_be dropw
 
         # Store the tag at address 1016
-        push.{}.{}.{}.{} push.1016 mem_storew_be dropw
+        push.{expected_tag:?} push.1016 mem_storew_be dropw
 
         # Decrypt: [nonce(4), key(4), src_ptr, dst_ptr, num_blocks]
         push.1           # num_blocks = 1 (data blocks only, padding is automatic)
         push.2000        # dst_ptr (where plaintext will be written)
         push.1000        # src_ptr (ciphertext location)
-        push.{}.{}.{}.{}     # key
-        push.{}.{}.{}.{}     # nonce
+        push.{key_elements:?}     # key
+        push.{nonce_elements:?}     # nonce
 
         exec.aead::decrypt
         # => [tag(4), ...]
@@ -178,41 +150,10 @@ fn test_decrypt_with_known_values() {
         push.0.0.0.0 eqw assert dropw dropw
     end
     ",
-        // Ciphertext word 0
-        ciphertext[0].as_int(),
-        ciphertext[1].as_int(),
-        ciphertext[2].as_int(),
-        ciphertext[3].as_int(),
-        // Ciphertext word 1
-        ciphertext[4].as_int(),
-        ciphertext[5].as_int(),
-        ciphertext[6].as_int(),
-        ciphertext[7].as_int(),
-        // Ciphertext word 2
-        ciphertext[8].as_int(),
-        ciphertext[9].as_int(),
-        ciphertext[10].as_int(),
-        ciphertext[11].as_int(),
-        // Ciphertext word 3
-        ciphertext[12].as_int(),
-        ciphertext[13].as_int(),
-        ciphertext[14].as_int(),
-        ciphertext[15].as_int(),
-        // Ciphertext tag
-        expected_tag[0].as_int(),
-        expected_tag[1].as_int(),
-        expected_tag[2].as_int(),
-        expected_tag[3].as_int(),
-        // Key
-        key_elements[0].as_int(),
-        key_elements[1].as_int(),
-        key_elements[2].as_int(),
-        key_elements[3].as_int(),
-        // Nonce
-        nonce_elements[0].as_int(),
-        nonce_elements[1].as_int(),
-        nonce_elements[2].as_int(),
-        nonce_elements[3].as_int(),
+        ciphertext_0 = &ciphertext[0..4],
+        ciphertext_1 = &ciphertext[4..8],
+        ciphertext_2 = &ciphertext[8..12],
+        ciphertext_3 = &ciphertext[12..16],
     );
 
     let test = build_test!(source.as_str(), &[]);
@@ -256,60 +197,29 @@ fn test_decrypt_with_wrong_key() {
 
     begin
         # Store ciphertext at address 1000
-        push.{}.{}.{}.{} push.1000 mem_storew_be dropw
-        push.{}.{}.{}.{} push.1004 mem_storew_be dropw
-        push.{}.{}.{}.{} push.1008 mem_storew_be dropw
-        push.{}.{}.{}.{} push.1012 mem_storew_be dropw
+        push.{ciphertext_0:?} push.1000 mem_storew_be dropw
+        push.{ciphertext_1:?} push.1004 mem_storew_be dropw
+        push.{ciphertext_2:?} push.1008 mem_storew_be dropw
+        push.{ciphertext_3:?} push.1012 mem_storew_be dropw
 
         # Store the tag
-        push.{}.{}.{}.{} push.1016 mem_storew_be dropw
+        push.{expected_tag:?} push.1016 mem_storew_be dropw
 
         # Decrypt with WRONG KEY - should fail assertion
         push.2           # num_blocks = 2
         push.2000        # dst_ptr (where plaintext will be written)
         push.1000        # src_ptr (ciphertext location)
-        push.{}.{}.{}.{}     # WRONG KEY!
-        push.{}.{}.{}.{}     # nonce
+        push.{wrong_key_elements:?}     # WRONG KEY!
+        push.{nonce_elements:?}     # nonce
 
         exec.aead::decrypt
         # Should fail with assertion error before reaching here
     end
     ",
-        // Ciphertext word 0
-        ciphertext[0].as_int(),
-        ciphertext[1].as_int(),
-        ciphertext[2].as_int(),
-        ciphertext[3].as_int(),
-        // Ciphertext word 1
-        ciphertext[4].as_int(),
-        ciphertext[5].as_int(),
-        ciphertext[6].as_int(),
-        ciphertext[7].as_int(),
-        // Ciphertext word 2
-        ciphertext[8].as_int(),
-        ciphertext[9].as_int(),
-        ciphertext[10].as_int(),
-        ciphertext[11].as_int(),
-        // Ciphertext word 3
-        ciphertext[12].as_int(),
-        ciphertext[13].as_int(),
-        ciphertext[14].as_int(),
-        ciphertext[15].as_int(),
-        // Tag
-        expected_tag[0].as_int(),
-        expected_tag[1].as_int(),
-        expected_tag[2].as_int(),
-        expected_tag[3].as_int(),
-        // WRONG Key
-        wrong_key_elements[0].as_int(),
-        wrong_key_elements[1].as_int(),
-        wrong_key_elements[2].as_int(),
-        wrong_key_elements[3].as_int(),
-        // Nonce
-        nonce_elements[0].as_int(),
-        nonce_elements[1].as_int(),
-        nonce_elements[2].as_int(),
-        nonce_elements[3].as_int(),
+        ciphertext_0 = &ciphertext[0..4],
+        ciphertext_1 = &ciphertext[4..8],
+        ciphertext_2 = &ciphertext[8..12],
+        ciphertext_3 = &ciphertext[12..16],
     );
 
     let test = build_test!(source.as_str(), &[]);

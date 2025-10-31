@@ -531,9 +531,7 @@ pub enum Operation {
     /// - Destination address (position 13) is incremented by 8.
     /// - All other stack elements remain the same.
     ///
-    /// This instruction is designed for AEAD encryption using the RPO hash function as a stream
-    /// cipher. After this operation, an application of `hperm` is expected in order to refresh
-    /// the keystream for the next block.
+    /// After this operation, `hperm` should be applied to refresh the keystream for the next block.
     CryptoStream = OPCODE_CRYPTOSTREAM,
 
     // ----- cryptographic operations ------------------------------------------------------------
