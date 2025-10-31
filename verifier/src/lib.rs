@@ -19,7 +19,10 @@ use winter_verifier::{crypto::MerkleTree, verify as verify_proof};
 mod exports {
     pub use miden_core::{
         Kernel, ProgramInfo, StackInputs, StackOutputs, Word,
-        precompile::{PrecompileError, PrecompileVerificationError, PrecompileVerifierRegistry},
+        precompile::{
+            PrecompileError, PrecompileTranscriptDigest, PrecompileVerificationError,
+            PrecompileVerifierRegistry,
+        },
     };
     pub use winter_verifier::{AcceptableOptions, VerifierError};
     pub mod math {
@@ -87,8 +90,8 @@ pub fn verify(
 /// Returns a tuple `(security_level, aggregated_commitment)` where:
 /// - `security_level`: The security level (in bits) of the verified proof
 /// - `aggregated_commitment`: A [`Word`] containing the final aggregated commitment to all
-///   precompile requests, computed by recomputing and absorbing each precompile commitment into an
-///   RPO256 sponge
+///   precompile requests, computed by recomputing and recording each precompile commitment in a
+///   transcript. This value is the finalized digest of the recomputed precompile transcript.
 ///
 /// # Errors
 /// Returns any error produced by [`verify`], as well as any errors resulting from precompile
@@ -100,22 +103,24 @@ pub fn verify_with_precompiles(
     stack_outputs: StackOutputs,
     proof: ExecutionProof,
     precompile_verifiers: &PrecompileVerifierRegistry,
-) -> Result<(u32, Word), VerificationError> {
+) -> Result<(u32, PrecompileTranscriptDigest), VerificationError> {
     // get security level of the proof
     let security_level = proof.security_level();
     let program_hash = *program_info.program_hash();
 
-    // build public inputs and try to verify the proof
-    let pub_inputs = PublicInputs::new(program_info, stack_inputs, stack_outputs);
     let (hash_fn, proof, precompile_requests) = proof.into_parts();
 
-    // TODO: Check that this corresponds to the commitment output by the VM
-    // compute the commitment to the list of all precompile requests.
+    // recompute the precompile transcript by verifying all precompile requests and recording the
+    // commitments.
     // if no verifiers were provided (e.g. when this function was called from `verify()`),
     // but the proof contained requests anyway, returns a `NoVerifierFound` error.
-    let requests_commitment = precompile_verifiers
-        .deferred_requests_commitment(&precompile_requests)
+    let recomputed_transcript = precompile_verifiers
+        .requests_transcript(&precompile_requests)
         .map_err(VerificationError::PrecompileVerificationError)?;
+
+    // build public inputs, explicitly passing the recomputed precompile transcript state
+    let pub_inputs =
+        PublicInputs::new(program_info, stack_inputs, stack_outputs, recomputed_transcript.state());
 
     match hash_fn {
         HashFunction::Blake3_192 => {
@@ -160,7 +165,9 @@ pub fn verify_with_precompiles(
     }
     .map_err(|source| VerificationError::ProgramVerificationError(program_hash, source))?;
 
-    Ok((security_level, requests_commitment))
+    // finalize transcript to return the digest
+    let digest = recomputed_transcript.finalize();
+    Ok((security_level, digest))
 }
 
 // ERRORS

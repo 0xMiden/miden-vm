@@ -62,7 +62,7 @@ pub struct VmStateIterator {
 
 impl VmStateIterator {
     pub fn new(process: Process, result: Result<StackOutputs, ExecutionError>) -> Self {
-        let (system, decoder, stack, mut range, chiplets) = process.into_parts();
+        let (system, decoder, stack, mut range, chiplets, _final_pc_state) = process.into_parts();
         let trace_len_summary = Self::build_trace_len_summary(&system, &mut range, &chiplets);
 
         Self {

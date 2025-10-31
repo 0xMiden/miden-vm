@@ -10,6 +10,10 @@ use miden_air::{
                 MR_UPDATE_OLD_LABEL, NUM_ROUNDS, RETURN_HASH_LABEL, RETURN_STATE_LABEL,
             },
         },
+        log_precompile::{
+            HELPER_ADDR_IDX, HELPER_CAP_PREV_RANGE, STACK_CAP_NEXT_RANGE, STACK_COMM_RANGE,
+            STACK_R0_RANGE, STACK_R1_RANGE, STACK_TAG_RANGE,
+        },
         main_trace::MainTrace,
     },
 };
@@ -20,6 +24,7 @@ use miden_core::{
 
 use super::get_op_label;
 use crate::{
+    Word,
     chiplets::aux_trace::build_value,
     debug::{BusDebugger, BusMessage},
 };
@@ -162,6 +167,105 @@ pub(super) fn build_hperm_request<E: FieldElement<BaseField = Felt>>(
             s1_nxt, s0_nxt,
         ],
         source: "hperm output",
+    };
+
+    let combined_value = input_req.value(alphas) * output_req.value(alphas);
+
+    #[cfg(any(test, feature = "bus-debugger"))]
+    {
+        _debugger.add_request(alloc::boxed::Box::new(input_req), alphas);
+        _debugger.add_request(alloc::boxed::Box::new(output_req), alphas);
+    }
+
+    combined_value
+}
+
+/// Builds `LOG_PRECOMPILE` requests made to the hash chiplet.
+///
+/// The operation absorbs `[TAG, COMM]` into the transcript via an RPO permutation with
+/// capacity `CAP_PREV`, producing output `[CAP_NEXT, R0, R1]`.
+///
+/// Stack layout (current row):
+/// - `s0..s3`: `COMM[3..0]`
+/// - `s4..s7`: `TAG[3..0]`
+///
+/// Helper registers (current row):
+/// - `h0`: hasher address
+/// - `h1..h4`: `CAP_PREV[0..3]`
+///
+/// Stack layout (next row):
+/// - `s0..s3`: `R1[3..0]`
+/// - `s4..s7`: `R0[3..0]`
+/// - `s8..s11`: `CAP_NEXT[3..0]`
+pub(super) fn build_log_precompile_request<E: FieldElement<BaseField = Felt>>(
+    main_trace: &MainTrace,
+    alphas: &[E],
+    row: RowIndex,
+    _debugger: &mut BusDebugger<E>,
+) -> E {
+    // Read helper registers
+    let addr = main_trace.helper_register(HELPER_ADDR_IDX, row);
+
+    // Input state [CAP_PREV, TAG, COMM]
+    // Helper registers store capacity in sequential order [e0, e1, e2, e3]
+    let cap_prev = Word::from([
+        main_trace.helper_register(HELPER_CAP_PREV_RANGE.start, row),
+        main_trace.helper_register(HELPER_CAP_PREV_RANGE.start + 1, row),
+        main_trace.helper_register(HELPER_CAP_PREV_RANGE.start + 2, row),
+        main_trace.helper_register(HELPER_CAP_PREV_RANGE.start + 3, row),
+    ]);
+
+    // Stack stores words in big-endian order: stack[0..3] = [e3, e2, e1, e0]
+    // Therefore we read in reverse order to reconstruct the word correctly
+    let comm = Word::from([
+        main_trace.stack_element(STACK_COMM_RANGE.end - 1, row),
+        main_trace.stack_element(STACK_COMM_RANGE.end - 2, row),
+        main_trace.stack_element(STACK_COMM_RANGE.end - 3, row),
+        main_trace.stack_element(STACK_COMM_RANGE.end - 4, row),
+    ]);
+    let tag = Word::from([
+        main_trace.stack_element(STACK_TAG_RANGE.end - 1, row),
+        main_trace.stack_element(STACK_TAG_RANGE.end - 2, row),
+        main_trace.stack_element(STACK_TAG_RANGE.end - 3, row),
+        main_trace.stack_element(STACK_TAG_RANGE.end - 4, row),
+    ]);
+    let state_input = [cap_prev, tag, comm];
+
+    // Output state [CAP_NEXT, R0, R1]
+    let r1 = Word::from([
+        main_trace.stack_element(STACK_R1_RANGE.end - 1, row + 1),
+        main_trace.stack_element(STACK_R1_RANGE.end - 2, row + 1),
+        main_trace.stack_element(STACK_R1_RANGE.end - 3, row + 1),
+        main_trace.stack_element(STACK_R1_RANGE.end - 4, row + 1),
+    ]);
+    let r0 = Word::from([
+        main_trace.stack_element(STACK_R0_RANGE.end - 1, row + 1),
+        main_trace.stack_element(STACK_R0_RANGE.end - 2, row + 1),
+        main_trace.stack_element(STACK_R0_RANGE.end - 3, row + 1),
+        main_trace.stack_element(STACK_R0_RANGE.end - 4, row + 1),
+    ]);
+    let cap_next = Word::from([
+        main_trace.stack_element(STACK_CAP_NEXT_RANGE.end - 1, row + 1),
+        main_trace.stack_element(STACK_CAP_NEXT_RANGE.end - 2, row + 1),
+        main_trace.stack_element(STACK_CAP_NEXT_RANGE.end - 3, row + 1),
+        main_trace.stack_element(STACK_CAP_NEXT_RANGE.end - 4, row + 1),
+    ]);
+    let state_output = [cap_next, r0, r1];
+
+    let input_req = HasherMessage {
+        transition_label: Felt::from(LINEAR_HASH_LABEL + 16),
+        addr_next: addr,
+        node_index: ZERO,
+        hasher_state: Word::words_as_elements(&state_input).try_into().unwrap(),
+        source: "log_precompile input",
+    };
+
+    let output_req = HasherMessage {
+        transition_label: Felt::from(RETURN_STATE_LABEL + 32),
+        addr_next: addr + Felt::new(7),
+        node_index: ZERO,
+        hasher_state: Word::words_as_elements(&state_output).try_into().unwrap(),
+        source: "log_precompile output",
     };
 
     let combined_value = input_req.value(alphas) * output_req.value(alphas);

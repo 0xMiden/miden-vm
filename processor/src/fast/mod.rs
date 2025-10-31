@@ -6,6 +6,7 @@ use miden_air::{Felt, RowIndex};
 use miden_core::{
     Decorator, EMPTY_WORD, Program, StackOutputs, WORD_SIZE, Word, ZERO,
     mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
+    precompile::PrecompileTranscript,
     stack::MIN_STACK_DEPTH,
     utils::range,
 };
@@ -118,6 +119,10 @@ pub struct FastProcessor {
 
     /// Whether to enable debug statements and tracing.
     in_debug_mode: bool,
+
+    /// Transcript used to record commitments via `log_precompile` instruction (implemented via RPO
+    /// sponge).
+    pc_transcript: PrecompileTranscript,
 }
 
 impl FastProcessor {
@@ -182,6 +187,7 @@ impl FastProcessor {
             call_stack: Vec::new(),
             ace: Ace::default(),
             in_debug_mode,
+            pc_transcript: PrecompileTranscript::new(),
         }
     }
 
@@ -311,7 +317,11 @@ impl FastProcessor {
         let mut tracer = ExecutionTracer::new(fragment_size);
         let execution_output = self.execute_with_tracer(program, host, &mut tracer).await?;
 
-        Ok((execution_output, tracer.into_trace_generation_context()))
+        // Pass the final precompile transcript from execution output to the trace generation
+        // context
+        let context = tracer.into_trace_generation_context(execution_output.final_pc_transcript);
+
+        Ok((execution_output, context))
     }
 
     /// Executes the given program with the provided tracer and returns the stack outputs, and the
@@ -328,6 +338,7 @@ impl FastProcessor {
             stack: stack_outputs,
             advice: self.advice,
             memory: self.memory,
+            final_pc_transcript: self.pc_transcript,
         })
     }
 
@@ -694,13 +705,14 @@ impl FastProcessor {
 // EXECUTION OUTPUT
 // ===============================================================================================
 
-/// The output of a program execution, containing the state of the stack, advice provider, and
-/// memory at the end of the execution.
+/// The output of a program execution, containing the state of the stack, advice provider,
+/// memory, and final precompile transcript at the end of execution.
 #[derive(Debug)]
 pub struct ExecutionOutput {
     pub stack: StackOutputs,
     pub advice: AdviceProvider,
     pub memory: Memory,
+    pub final_pc_transcript: PrecompileTranscript,
 }
 
 // FAST PROCESS STATE

@@ -146,11 +146,7 @@ impl KeccakFeltDigest {
         Self(packed.map(Felt::from))
     }
 
-    /// Creates an commitment of the digest using Rpo256.
-    ///
-    /// When the digest is popped from the advice stack, it appears as
-    /// `[d_0, ..., d_7]` on the operand stack. In masm, the `hmerge` operation computes
-    /// `Rpo256([d_7, ..., d_0])`, so we reverse the order here to match that behavior.
+    /// Creates a commitment of the digest using Rpo256 over `[d_0, ..., d_7]`.
     pub fn to_commitment(&self) -> Word {
         Rpo256::hash_elements(&self.0)
     }
@@ -280,9 +276,9 @@ impl KeccakPreimage {
     /// commitments tracked during execution by the [`EventHandler`]. The double RPO hash binds
     /// input and output together, preventing tampering.
     pub fn precompile_commitment(&self) -> PrecompileCommitment {
-        let commitment = Rpo256::merge(&[self.input_commitment(), self.digest().to_commitment()]);
         let tag = self.precompile_tag();
-        PrecompileCommitment { tag, commitment }
+        let comm = Rpo256::merge(&[self.input_commitment(), self.digest().to_commitment()]);
+        PrecompileCommitment::new(tag, comm)
     }
 
     /// Returns the tag used to identify the commitment to the precompile. defined as
@@ -546,10 +542,10 @@ mod tests {
         assert_eq!(digest.to_commitment(), expected_digest_commitment);
 
         // Test precompile commitment (double hash)
-        let expected_precompile_commitment = PrecompileCommitment {
-            tag: preimage.precompile_tag(),
-            commitment: Rpo256::merge(&[preimage.input_commitment(), digest.to_commitment()]),
-        };
+        let expected_precompile_commitment = PrecompileCommitment::new(
+            preimage.precompile_tag(),
+            Rpo256::merge(&[preimage.input_commitment(), digest.to_commitment()]),
+        );
 
         assert_eq!(preimage.precompile_commitment(), expected_precompile_commitment);
     }
