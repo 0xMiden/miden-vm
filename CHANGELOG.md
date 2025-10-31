@@ -11,6 +11,7 @@
 - Made `miden-vm analyze` output analysis even if execution ultimately errored. ([#2204](https://github.com/0xMiden/miden-vm/pull/2204)).
 - Allow `CALL` and `DYNCALL` from a syscall context ([#2296](https://github.com/0xMiden/miden-vm/pull/2296))
 - Remove operations `FmpUpdate` and `FmpAdd`, as well as columns `fmp` and `in_syscall` ([#2308](https://github.com/0xMiden/miden-vm/pull/2308))
+- Reduce the constraints degree of `HORNERBASE` ([#2328](https://github.com/0xMiden/miden-vm/pull/2328))
 
 #### Changes
 
