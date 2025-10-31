@@ -158,11 +158,11 @@ The effect on the rest of the stack is:
 
 ## HORNERBASE
 The `HORNERBASE` operation performs $8$ steps of the Horner method for evaluating a polynomial with coefficients over the base field at a point in the quadratic extension field. More precisely, it performs the following updates to the accumulator on the stack
-    $$\mathsf{tmp0} = ((\mathsf{acc} \cdot \alpha + c_7) \cdot \alpha) + c_6$$
+    $$\mathsf{tmp0} = ((\mathsf{acc} \cdot \alpha + c_0) \cdot \alpha) + c_1$$
 
-   $$\mathsf{tmp1} = ((((\mathsf{tmp0} \cdot \alpha) + c_5) \cdot \alpha + c_4) \cdot \alpha) + c_3$$
+   $$\mathsf{tmp1} = ((((\mathsf{tmp0} \cdot \alpha) + c_2) \cdot \alpha + c_3) \cdot \alpha) + c_4$$
 
-   $$\mathsf{acc}^{'} = ((((\mathsf{tmp1} \cdot \alpha + c_2) \cdot \alpha + c_1) \cdot \alpha) + c_0)$$
+   $$\mathsf{acc}^{'} = ((((\mathsf{tmp1} \cdot \alpha + c_5) \cdot \alpha + c_6) \cdot \alpha) + c_7)$$
 where $c_i$ are the coefficients of the polynomial, $\alpha$ the evaluation point, $\mathsf{acc}$ the current accumulator value, and $\mathsf{acc}^{'}$ the updated accumulator value.
 
 The stack for the operation is expected to be arranged as follows:

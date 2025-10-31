@@ -20,13 +20,13 @@ impl Process {
     /// the base field using a 3-level computation to reduce constraint degree.
     ///
     /// The computation is broken into 3 levels:
-    /// - Level 1: tmp0 = (acc * α + c₇) * α + c₆
-    /// - Level 2: tmp1 = ((tmp0 * α + c₅) * α + c₄) * α + c₃
-    /// - Level 3: acc' = ((tmp1 * α + c₂) * α + c₁) * α + c₀
+    /// - Level 1: tmp0 = (acc * α + c₀) * α + c₁
+    /// - Level 2: tmp1 = ((tmp0 * α + c₂) * α + c₃) * α + c₄
+    /// - Level 3: acc' = ((tmp1 * α + c₅) * α + c₆) * α + c₇
     ///
     /// In other words, the instruction computes the evaluation at alpha of the polynomial:
     ///
-    /// P(X) := c₇ * X^7 + c₆ * X^6 + ... + c₁ * X + c₀
+    /// P(X) := c₀ * X^7 + c₁ * X^6 + c₂ * X^5 + c₃ * X^4 + c₄ * X^3 + c₅ * X^2 + c₆ * X + c₇
     ///
     /// The instruction can be used to compute the evaluation of polynomials of arbitrary degree
     /// by repeated invocations interleaved with any operation that loads the next batch of 8
@@ -67,29 +67,29 @@ impl Process {
     ) -> Result<(), ExecutionError> {
         // read the values of the coefficients, over the base field, from the stack
         let coef = self.get_coeff_as_base_elements();
+        let c7 = QuadFelt::from(coef[0]);
+        let c6 = QuadFelt::from(coef[1]);
+        let c5 = QuadFelt::from(coef[2]);
+        let c4 = QuadFelt::from(coef[3]);
+        let c3 = QuadFelt::from(coef[4]);
+        let c2 = QuadFelt::from(coef[5]);
+        let c1 = QuadFelt::from(coef[6]);
+        let c0 = QuadFelt::from(coef[7]);
 
         // read the evaluation point alpha from memory
         let alpha = self.get_evaluation_point_elements(err_ctx)?;
 
-        let c0 = QuadFelt::from(coef[0]);
-        let c1 = QuadFelt::from(coef[1]);
-        let c2 = QuadFelt::from(coef[2]);
-        let c3 = QuadFelt::from(coef[3]);
-        let c4 = QuadFelt::from(coef[4]);
-        let c5 = QuadFelt::from(coef[5]);
-        let c6 = QuadFelt::from(coef[6]);
-        let c7 = QuadFelt::from(coef[7]);
-
+        // read the current accumulator
         let acc = self.get_accumulator();
 
-        // Level 1: tmp0 = (acc * α + c₇) * α + c₆
-        let tmp0 = (acc * alpha + c7) * alpha + c6;
+        // Level 1: tmp0 = (acc * α + c₀) * α + c₁
+        let tmp0 = (acc * alpha + c0) * alpha + c1;
 
-        // Level 2: tmp1 = ((tmp0 * α + c₅) * α + c₄) * α + c₃
-        let tmp1 = ((tmp0 * alpha + c5) * alpha + c4) * alpha + c3;
+        // Level 2: tmp1 = ((tmp0 * α + c₂) * α + c₃) * α + c₄
+        let tmp1 = ((tmp0 * alpha + c2) * alpha + c3) * alpha + c4;
 
-        // Level 3: acc' = ((tmp1 * α + c₂) * α + c₁) * α + c₀
-        let acc_new = ((tmp1 * alpha + c2) * alpha + c1) * alpha + c0;
+        // Level 3: acc' = ((tmp1 * α + c₅) * α + c₆) * α + c₇
+        let acc_new = ((tmp1 * alpha + c5) * alpha + c6) * alpha + c7;
 
         // copy over the stack state to the next cycle changing only the accumulator values
         self.stack.copy_state(0);
@@ -125,7 +125,7 @@ impl Process {
     /// acc_tmp = (acc * alpha + c0) * alpha + c1
     ///
     ///
-    /// In other words, the intsruction computes the evaluation at alpha of the polynomial
+    /// In other words, the instruction computes the evaluation at alpha of the polynomial
     ///
     /// P(X) := c0 * X^3 + c1 * X^2 + c2 * X + c3
     ///
@@ -152,8 +152,8 @@ impl Process {
     ///
     /// Here:
     ///
-    /// 1. ci for i in 0..=4 stands for the the value of the i-th coefficient in the current batch
-    ///    of 4 extension field coefficients of the polynomial.
+    /// 1. ci for i in 0..=3 stands for the value of the i-th coefficient in the current batch of 4
+    ///    extension field coefficients of the polynomial.
     /// 2. (acc0, acc1) stands for an extension field element accumulating the values of the Horner
     ///    evaluation procedure. (acc0', acc1') is the updated value of this accumulator.
     /// 3. alpha_addr is the memory address of the evaluation point i.e., alpha.
@@ -358,23 +358,23 @@ mod tests {
 
         let alpha = QuadFelt::new(alpha_mem_word[0], alpha_mem_word[1]);
 
-        let c0 = QuadFelt::from(stack_state[0]);
-        let c1 = QuadFelt::from(stack_state[1]);
-        let c2 = QuadFelt::from(stack_state[2]);
-        let c3 = QuadFelt::from(stack_state[3]);
-        let c4 = QuadFelt::from(stack_state[4]);
-        let c5 = QuadFelt::from(stack_state[5]);
-        let c6 = QuadFelt::from(stack_state[6]);
-        let c7 = QuadFelt::from(stack_state[7]);
+        let c7 = QuadFelt::from(stack_state[0]);
+        let c6 = QuadFelt::from(stack_state[1]);
+        let c5 = QuadFelt::from(stack_state[2]);
+        let c4 = QuadFelt::from(stack_state[3]);
+        let c3 = QuadFelt::from(stack_state[4]);
+        let c2 = QuadFelt::from(stack_state[5]);
+        let c1 = QuadFelt::from(stack_state[6]);
+        let c0 = QuadFelt::from(stack_state[7]);
 
-        // Level 1: tmp0 = (acc * α + c₇) * α + c₆
-        let tmp0 = (acc_old * alpha + c7) * alpha + c6;
+        // Level 1: tmp0 = (acc * α + c₀) * α + c₁
+        let tmp0 = (acc_old * alpha + c0) * alpha + c1;
 
-        // Level 2: tmp1 = ((tmp0 * α + c₅) * α + c₄) * α + c₃
-        let tmp1 = ((tmp0 * alpha + c5) * alpha + c4) * alpha + c3;
+        // Level 2: tmp1 = ((tmp0 * α + c₂) * α + c₃) * α + c₄
+        let tmp1 = ((tmp0 * alpha + c2) * alpha + c3) * alpha + c4;
 
-        // Level 3: acc' = ((tmp1 * α + c₂) * α + c₁) * α + c₀
-        let acc_new = ((tmp1 * alpha + c2) * alpha + c1) * alpha + c0;
+        // Level 3: acc' = ((tmp1 * α + c₅) * α + c₆) * α + c₇
+        let acc_new = ((tmp1 * alpha + c5) * alpha + c6) * alpha + c7;
 
         assert_eq!(acc_new.to_base_elements()[1], stack_state[ACC_HIGH_INDEX]);
         assert_eq!(acc_new.to_base_elements()[0], stack_state[ACC_LOW_INDEX]);
