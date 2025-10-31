@@ -347,6 +347,10 @@ impl OpBatchAccumulator {
         {
             // This guarantees the range (within ops) spanned by an immediate value is 0
             self.indptr[uninit_group_idx] = self.ops.len();
+            // Prevent underflow: if we've reached group_idx, stop before decrementing
+            if uninit_group_idx == self.group_idx {
+                break;
+            }
             uninit_group_idx -= 1;
         }
     }
