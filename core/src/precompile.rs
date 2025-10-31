@@ -24,8 +24,7 @@
 //!
 //! 3. **Proof Generation**: The prover generates a STARK proof of the VM execution. The final
 //!    [`PrecompileTranscript`] state (sponge capacity) is a public input. The verifier enforces the
-//!    initial (empty) and final state via variable‑length public inputs. TODO(#2045): These will be
-//!    enforced after updates to the recursive verifier.
+//!    initial (empty) and final state via variable‑length public inputs.
 //!
 //! 4. **Verification**: The verifier:
 //!    - Recomputes each precompile commitment using the stored requests via [`PrecompileVerifier`]
