@@ -166,7 +166,7 @@ The `HORNERBASE` operation performs $8$ steps of the Horner method for evaluatin
 where $c_i$ are the coefficients of the polynomial, $\alpha$ the evaluation point, $\mathsf{acc}$ the current accumulator value, and $\mathsf{acc}^{'}$ the updated accumulator value.
 
 The stack for the operation is expected to be arranged as follows:
-- The first $8$ stack elements are the $8$ base field elements $c_0,\ldots , c_7$ representing the current 8-element batch of coefficients for the polynomial being evaluated.
+- The first $8$ stack elements (positions 0-7) are the $8$ base field elements representing the current 8-element batch of coefficients for the polynomial being evaluated, arranged as $[c_7, c_6, c_5, c_4, c_3, c_2, c_1, c_0]$ where $c_7$ is at position 0.
 - The next $5$ stack elements are irrelevant for the operation and unaffected by it.
 - The next stack element contains the memory address `alpha_ptr` pointing to the evaluation point $\alpha = (\alpha_0, \alpha_1)$. The operation reads $\alpha_0$ from `alpha_ptr` and $\alpha_1$ from `alpha_ptr + 1`.
 - The next $2$ stack elements contain the value of the current accumulator $\textsf{acc} = (\textsf{acc}_0, \textsf{acc}_1)$.
@@ -184,43 +184,23 @@ More specifically, the stack transition for this operation must satisfy the foll
 $$
 \begin{align*}
     \mathsf{tmp0}_0 &= s_1 + s_0 \cdot \alpha_0 + s_{15} \cdot (\alpha_0^2 - 2 \cdot \alpha_1^2)  \\
-    &\quad - 2 \cdot s_{14} \cdot (2 \cdot \alpha_0 \cdot \alpha_1 + \alpha_1^2)  \; \text{ | degree} = 3
-\end{align*}
-$$
-
-$$
-\begin{align*}
+    &\quad - 2 \cdot s_{14} \cdot (2 \cdot \alpha_0 \cdot \alpha_1 + \alpha_1^2)  \; \text{ | degree} = 3 \\
+    \\
     \mathsf{tmp0}_1 &= s_0 \cdot \alpha_1 + s_{14} \cdot (\alpha_0^2 + 2 \cdot \alpha_0 \cdot \alpha_1 - \alpha_1^2) \\
-    &\quad + s_{15} \cdot (2 \cdot \alpha_0 \cdot \alpha_1 + \alpha_1^2) \; \text{ | degree} = 3
-\end{align*}
-$$
-
-$$
-\begin{align*}
+    &\quad + s_{15} \cdot (2 \cdot \alpha_0 \cdot \alpha_1 + \alpha_1^2) \; \text{ | degree} = 3 \\
+    \\
 \mathsf{tmp1}_0 &= s_4 + s_3 \cdot \alpha_0 + s_2 \cdot (\alpha_0^2 - 2 \cdot \alpha_1^2)  \\
     &\quad + \mathsf{tmp0}_0 \cdot (\alpha_0^3 - 6 \cdot \alpha_0 \cdot \alpha_1^2 - 2 \cdot \alpha_1^3)  \\
-    &\quad + \mathsf{tmp0}_1 \cdot (2 \cdot \alpha_1^3 - 6 \cdot \alpha_0 \cdot \alpha_1^2 - 6 \cdot \alpha_0^2 \cdot \alpha_1)  \; \text{ | degree} = 4
-\end{align*}
-$$
-
-$$
-\begin{align*}
+    &\quad + \mathsf{tmp0}_1 \cdot (2 \cdot \alpha_1^3 - 6 \cdot \alpha_0 \cdot \alpha_1^2 - 6 \cdot \alpha_0^2 \cdot \alpha_1)  \; \text{ | degree} = 4 \\
+    \\
 \mathsf{tmp1}_1 &= \alpha_1 \cdot s_3 + s_2 \cdot (\alpha_1^2 + 2 \cdot \alpha_0 \cdot \alpha_1)  \\
     &\quad + \mathsf{tmp0}_1 \cdot (-3 \cdot \alpha_1^3 - 3 \cdot \alpha_0 \cdot \alpha_1^2 + 3 \cdot \alpha_0^2 \cdot \alpha_1 + \alpha_0^3)  \\
-    &\quad + \mathsf{tmp0}_0 \cdot (-\alpha_1^3 + 3 \cdot \alpha_0 \cdot \alpha_1^2 + 3 \cdot \alpha_0^2 \cdot \alpha_1)  \; \text{ | degree} = 4
-\end{align*}
-$$
-
-$$
-\begin{align*}
+    &\quad + \mathsf{tmp0}_0 \cdot (-\alpha_1^3 + 3 \cdot \alpha_0 \cdot \alpha_1^2 + 3 \cdot \alpha_0^2 \cdot \alpha_1)  \; \text{ | degree} = 4 \\
+    \\
 \mathsf{acc}_0^{'} &= s_7 + s_6 \cdot \alpha_0 + s_5 \cdot (\alpha_0^2 - 2 \cdot \alpha_1^2)  \\
     &\quad + \mathsf{tmp1}_0 \cdot (\alpha_0^3 - 6 \cdot \alpha_0 \cdot \alpha_1^2 - 2 \cdot \alpha_1^3)  \\
-    &\quad + \mathsf{tmp1}_1 \cdot (2 \cdot \alpha_1^3 - 6 \cdot \alpha_0 \cdot \alpha_1^2 - 6 \cdot \alpha_0^2 \cdot \alpha_1)  \; \text{ | degree} = 4
-\end{align*}
-$$
-
-$$
-\begin{align*}
+    &\quad + \mathsf{tmp1}_1 \cdot (2 \cdot \alpha_1^3 - 6 \cdot \alpha_0 \cdot \alpha_1^2 - 6 \cdot \alpha_0^2 \cdot \alpha_1)  \; \text{ | degree} = 4 \\
+    \\
 \mathsf{acc}_1^{'} &= \alpha_1 \cdot s_6 + s_5 \cdot (\alpha_1^2 + 2 \cdot \alpha_0 \cdot \alpha_1)  \\
     &\quad + \mathsf{tmp1}_1 \cdot (-3 \cdot \alpha_1^3 - 3 \cdot \alpha_0 \cdot \alpha_1^2 + 3 \cdot \alpha_0^2 \cdot \alpha_1 + \alpha_0^3)  \\
     &\quad + \mathsf{tmp1}_0 \cdot (-\alpha_1^3 + 3 \cdot \alpha_0 \cdot \alpha_1^2 + 3 \cdot \alpha_0^2 \cdot \alpha_1)  \; \text{ | degree} = 4

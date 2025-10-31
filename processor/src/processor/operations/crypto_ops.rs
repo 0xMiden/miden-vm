@@ -179,29 +179,31 @@ pub(super) fn op_horner_eval_base<P: Processor>(
     };
 
     // Read the coefficients from the stack (top 8 elements)
+    // Stack layout: [c7, c6, c5, c4, c3, c2, c1, c0, ...]
+    // Note: with the coefficient ordering, stack[0]=c7, stack[7]=c0
     let coef: [Felt; 8] = core::array::from_fn(|i| processor.stack().get(i));
 
-    let c0 = QuadFelt::from(coef[0]);
-    let c1 = QuadFelt::from(coef[1]);
-    let c2 = QuadFelt::from(coef[2]);
-    let c3 = QuadFelt::from(coef[3]);
-    let c4 = QuadFelt::from(coef[4]);
-    let c5 = QuadFelt::from(coef[5]);
-    let c6 = QuadFelt::from(coef[6]);
-    let c7 = QuadFelt::from(coef[7]);
+    let c7 = QuadFelt::from(coef[0]);
+    let c6 = QuadFelt::from(coef[1]);
+    let c5 = QuadFelt::from(coef[2]);
+    let c4 = QuadFelt::from(coef[3]);
+    let c3 = QuadFelt::from(coef[4]);
+    let c2 = QuadFelt::from(coef[5]);
+    let c1 = QuadFelt::from(coef[6]);
+    let c0 = QuadFelt::from(coef[7]);
 
     // Read the current accumulator
     let acc =
         QuadFelt::new(processor.stack().get(ACC_LOW_INDEX), processor.stack().get(ACC_HIGH_INDEX));
 
-    // Level 1: tmp0 = (acc * α + c₇) * α + c₆
-    let tmp0 = (acc * alpha + c7) * alpha + c6;
+    // Level 1: tmp0 = (acc * α + c₀) * α + c₁
+    let tmp0 = (acc * alpha + c0) * alpha + c1;
 
-    // Level 2: tmp1 = ((tmp0 * α + c₅) * α + c₄) * α + c₃
-    let tmp1 = ((tmp0 * alpha + c5) * alpha + c4) * alpha + c3;
+    // Level 2: tmp1 = ((tmp0 * α + c₂) * α + c₃) * α + c₄
+    let tmp1 = ((tmp0 * alpha + c2) * alpha + c3) * alpha + c4;
 
-    // Level 3: acc' = ((tmp1 * α + c₂) * α + c₁) * α + c₀
-    let acc_new = ((tmp1 * alpha + c2) * alpha + c1) * alpha + c0;
+    // Level 3: acc' = ((tmp1 * α + c₅) * α + c₆) * α + c₇
+    let acc_new = ((tmp1 * alpha + c5) * alpha + c6) * alpha + c7;
 
     // Update the accumulator values on the stack
     let acc_new_base_elements = acc_new.to_base_elements();
