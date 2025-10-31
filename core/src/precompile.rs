@@ -24,8 +24,7 @@
 //!
 //! 3. **Proof Generation**: The prover generates a STARK proof of the VM execution. The final
 //!    [`PrecompileTranscript`] state (sponge capacity) is a public input. The verifier enforces the
-//!    initial (empty) and final state via variable‑length public inputs. TODO(#2045): These will be
-//!    enforced after updates to the recursive verifier.
+//!    initial (empty) and final state via variable‑length public inputs.
 //!
 //! 4. **Verification**: The verifier:
 //!    - Recomputes each precompile commitment using the stored requests via [`PrecompileVerifier`]
@@ -63,7 +62,7 @@ use miden_crypto::{Felt, Word, hash::rpo::Rpo256};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    EventId,
+    EventId, EventName,
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
@@ -197,12 +196,12 @@ impl PrecompileCommitment {
 
 /// Registry of precompile verifiers.
 ///
-/// This struct maintains a map of event IDs to their corresponding verifiers.
+/// This struct maintains a map of event IDs to their corresponding event names and verifiers.
 /// It is used to verify precompile requests during proof verification.
 #[derive(Default, Clone)]
 pub struct PrecompileVerifierRegistry {
-    /// Map of event IDs to their corresponding verifiers
-    verifiers: BTreeMap<EventId, Arc<dyn PrecompileVerifier>>,
+    /// Map of event IDs to their corresponding event names and verifiers
+    verifiers: BTreeMap<EventId, (EventName, Arc<dyn PrecompileVerifier>)>,
 }
 
 impl PrecompileVerifierRegistry {
@@ -211,29 +210,23 @@ impl PrecompileVerifierRegistry {
         Self { verifiers: BTreeMap::new() }
     }
 
-    /// Registers a verifier for the specified event ID.
-    pub fn register(&mut self, event_id: EventId, verifier: Arc<dyn PrecompileVerifier>) {
-        self.verifiers.insert(event_id, verifier);
+    /// Returns a new registry that includes the supplied verifier in addition to existing ones.
+    pub fn with_verifier(
+        mut self,
+        event_name: &EventName,
+        verifier: Arc<dyn PrecompileVerifier>,
+    ) -> Self {
+        let event_id = event_name.to_event_id();
+        self.verifiers.insert(event_id, (event_name.clone(), verifier));
+        self
     }
 
-    /// Gets a verifier for the specified event ID.
-    pub fn get(&self, event_id: EventId) -> Option<&dyn PrecompileVerifier> {
-        self.verifiers.get(&event_id).map(|v| v.as_ref())
-    }
-
-    /// Returns true if a verifier is registered for the specified event ID.
-    pub fn contains(&self, event_id: EventId) -> bool {
-        self.verifiers.contains_key(&event_id)
-    }
-
-    /// Returns the number of registered verifiers.
-    pub fn len(&self) -> usize {
-        self.verifiers.len()
-    }
-
-    /// Returns true if no verifiers are registered.
-    pub fn is_empty(&self) -> bool {
-        self.verifiers.is_empty()
+    /// Merges another registry into this one, overwriting any conflicting event IDs with the other
+    /// registry's verifiers.
+    pub fn merge(&mut self, other: &Self) {
+        for (event_id, (event_name, verifier)) in other.verifiers.iter() {
+            self.verifiers.insert(*event_id, (event_name.clone(), verifier.clone()));
+        }
     }
 
     /// Verifies all precompile requests and returns the resulting precompile transcript state after
@@ -248,14 +241,17 @@ impl PrecompileVerifierRegistry {
         requests: &[PrecompileRequest],
     ) -> Result<PrecompileTranscript, PrecompileVerificationError> {
         let mut transcript = PrecompileTranscript::new();
-        for (index, PrecompileRequest { event_id, calldata: data }) in requests.iter().enumerate() {
-            let event_id = *event_id;
-            let verifier = self
-                .get(event_id)
-                .ok_or(PrecompileVerificationError::VerifierNotFound { index, event_id })?;
+        for (index, PrecompileRequest { event_id, calldata }) in requests.iter().enumerate() {
+            let (event_name, verifier) = self.verifiers.get(event_id).ok_or(
+                PrecompileVerificationError::VerifierNotFound { index, event_id: *event_id },
+            )?;
 
-            let precompile_commitment = verifier.verify(data).map_err(|error| {
-                PrecompileVerificationError::PrecompileError { index, event_id, error }
+            let precompile_commitment = verifier.verify(calldata).map_err(|error| {
+                PrecompileVerificationError::PrecompileError {
+                    index,
+                    event_name: event_name.clone(),
+                    error,
+                }
             })?;
             transcript.record(precompile_commitment);
         }
@@ -341,16 +337,6 @@ impl PrecompileTranscript {
         self.state = Word::new(state[0..4].try_into().unwrap());
     }
 
-    /// Records a precompile commitment given directly as (`TAG`, `COMM`) words.
-    ///
-    /// This is a convenience for callers that already have the tag and calldata commitment
-    /// without constructing a [`PrecompileCommitment`].
-    pub fn record_tag_comm(&mut self, tag: Word, comm: Word) {
-        let mut state = Word::words_as_elements(&[self.state, tag, comm]).try_into().unwrap();
-        Rpo256::apply_permutation(&mut state);
-        self.state = Word::new(state[0..4].try_into().unwrap());
-    }
-
     /// Finalizes the transcript to a digest (sequential commitment to all recorded requests).
     ///
     /// # Details
@@ -379,15 +365,13 @@ pub type PrecompileError = Box<dyn Error + Send + Sync + 'static>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum PrecompileVerificationError {
-    #[error(
-        "no verifier found for request #{index} (event {event_id}); register a matching verifier in PrecompileVerifierRegistry"
-    )]
+    #[error("no verifier found for request #{index} for event with ID: {event_id}")]
     VerifierNotFound { index: usize, event_id: EventId },
 
-    #[error("verification error for request #{index} (event {event_id})")]
+    #[error("verification error for request #{index} for event '{event_name}'")]
     PrecompileError {
         index: usize,
-        event_id: EventId,
+        event_name: EventName,
         #[source]
         error: PrecompileError,
     },

@@ -56,7 +56,7 @@ impl VerifyCmd {
 
         // verify proof
         let stack_outputs = outputs_data.stack_outputs().map_err(Report::msg)?;
-        miden_verifier::verify(program_info, stack_inputs, stack_outputs, proof)
+        miden_vm::verify(program_info, stack_inputs, stack_outputs, proof)
             .into_diagnostic()
             .wrap_err("Program failed verification!")?;
 

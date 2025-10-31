@@ -245,15 +245,20 @@ pub(super) fn op_log_precompile<P: Processor>(
     let cap_next: Word = output_state[STATE_CAP_RANGE.clone()]
         .try_into()
         .expect("cap_next slice has length 4");
+    let r0: Word = output_state[STATE_RATE_0_RANGE.clone()]
+        .try_into()
+        .expect("r0 slice has length 4");
+    let r1: Word = output_state[STATE_RATE_1_RANGE.clone()]
+        .try_into()
+        .expect("r1 slice has length 4");
 
     // Update the processor's precompile sponge capacity
     processor.set_precompile_transcript_state(cap_next);
 
     // Write the output to the stack (top 12 elements): [R1, R0, CAP_NEXT, ...]
-    // The stack stores elements in reverse order relative to the permutation output.
-    for i in 0..STATE_WIDTH {
-        processor.stack().set(i, output_state[STATE_WIDTH - 1 - i]);
-    }
+    processor.stack().set_word(0, &r1);
+    processor.stack().set_word(4, &r0);
+    processor.stack().set_word(8, &cap_next);
 
     // Record the hasher permutation for trace generation
     tracer.record_hasher_permute(hasher_state, output_state);
