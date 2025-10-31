@@ -183,25 +183,25 @@ More specifically, the stack transition for this operation must satisfy the foll
 
 $$
 \begin{align*}
-    \mathsf{tmp0}_0 &= s_1 + s_0 \cdot \alpha_0 + s_{15} \cdot (\alpha_0^2 - 2 \cdot \alpha_1^2)  \\
+    \mathsf{tmp0}_0 &= s_6 + s_7 \cdot \alpha_0 + s_{15} \cdot (\alpha_0^2 - 2 \cdot \alpha_1^2)  \\
     &\quad - 2 \cdot s_{14} \cdot (2 \cdot \alpha_0 \cdot \alpha_1 + \alpha_1^2)  \; \text{ | degree} = 3 \\
     \\
-    \mathsf{tmp0}_1 &= s_0 \cdot \alpha_1 + s_{14} \cdot (\alpha_0^2 + 2 \cdot \alpha_0 \cdot \alpha_1 - \alpha_1^2) \\
+    \mathsf{tmp0}_1 &= s_7 \cdot \alpha_1 + s_{14} \cdot (\alpha_0^2 + 2 \cdot \alpha_0 \cdot \alpha_1 - \alpha_1^2) \\
     &\quad + s_{15} \cdot (2 \cdot \alpha_0 \cdot \alpha_1 + \alpha_1^2) \; \text{ | degree} = 3 \\
     \\
-\mathsf{tmp1}_0 &= s_4 + s_3 \cdot \alpha_0 + s_2 \cdot (\alpha_0^2 - 2 \cdot \alpha_1^2)  \\
+\mathsf{tmp1}_0 &= s_3 + s_4 \cdot \alpha_0 + s_5 \cdot (\alpha_0^2 - 2 \cdot \alpha_1^2)  \\
     &\quad + \mathsf{tmp0}_0 \cdot (\alpha_0^3 - 6 \cdot \alpha_0 \cdot \alpha_1^2 - 2 \cdot \alpha_1^3)  \\
     &\quad + \mathsf{tmp0}_1 \cdot (2 \cdot \alpha_1^3 - 6 \cdot \alpha_0 \cdot \alpha_1^2 - 6 \cdot \alpha_0^2 \cdot \alpha_1)  \; \text{ | degree} = 4 \\
     \\
-\mathsf{tmp1}_1 &= \alpha_1 \cdot s_3 + s_2 \cdot (\alpha_1^2 + 2 \cdot \alpha_0 \cdot \alpha_1)  \\
+\mathsf{tmp1}_1 &= \alpha_1 \cdot s_4 + s_5 \cdot (\alpha_1^2 + 2 \cdot \alpha_0 \cdot \alpha_1)  \\
     &\quad + \mathsf{tmp0}_1 \cdot (-3 \cdot \alpha_1^3 - 3 \cdot \alpha_0 \cdot \alpha_1^2 + 3 \cdot \alpha_0^2 \cdot \alpha_1 + \alpha_0^3)  \\
     &\quad + \mathsf{tmp0}_0 \cdot (-\alpha_1^3 + 3 \cdot \alpha_0 \cdot \alpha_1^2 + 3 \cdot \alpha_0^2 \cdot \alpha_1)  \; \text{ | degree} = 4 \\
     \\
-\mathsf{acc}_0^{'} &= s_7 + s_6 \cdot \alpha_0 + s_5 \cdot (\alpha_0^2 - 2 \cdot \alpha_1^2)  \\
+\mathsf{acc}_0^{'} &= s_0 + s_1 \cdot \alpha_0 + s_2 \cdot (\alpha_0^2 - 2 \cdot \alpha_1^2)  \\
     &\quad + \mathsf{tmp1}_0 \cdot (\alpha_0^3 - 6 \cdot \alpha_0 \cdot \alpha_1^2 - 2 \cdot \alpha_1^3)  \\
     &\quad + \mathsf{tmp1}_1 \cdot (2 \cdot \alpha_1^3 - 6 \cdot \alpha_0 \cdot \alpha_1^2 - 6 \cdot \alpha_0^2 \cdot \alpha_1)  \; \text{ | degree} = 4 \\
     \\
-\mathsf{acc}_1^{'} &= \alpha_1 \cdot s_6 + s_5 \cdot (\alpha_1^2 + 2 \cdot \alpha_0 \cdot \alpha_1)  \\
+\mathsf{acc}_1^{'} &= \alpha_1 \cdot s_1 + s_2 \cdot (\alpha_1^2 + 2 \cdot \alpha_0 \cdot \alpha_1)  \\
     &\quad + \mathsf{tmp1}_1 \cdot (-3 \cdot \alpha_1^3 - 3 \cdot \alpha_0 \cdot \alpha_1^2 + 3 \cdot \alpha_0^2 \cdot \alpha_1 + \alpha_0^3)  \\
     &\quad + \mathsf{tmp1}_0 \cdot (-\alpha_1^3 + 3 \cdot \alpha_0 \cdot \alpha_1^2 + 3 \cdot \alpha_0^2 \cdot \alpha_1)  \; \text{ | degree} = 4
 \end{align*}
