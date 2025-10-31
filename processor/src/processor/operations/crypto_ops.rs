@@ -3,7 +3,7 @@ use miden_air::trace::{
     log_precompile::{STATE_CAP_RANGE, STATE_RATE_0_RANGE, STATE_RATE_1_RANGE},
 };
 use miden_core::{
-    Felt, ONE, QuadFelt, ZERO, chiplets::hasher::STATE_WIDTH, mast::MastForest,
+    Felt, ONE, QuadFelt, Word, ZERO, chiplets::hasher::STATE_WIDTH, mast::MastForest,
     stack::MIN_STACK_DEPTH, utils::range,
 };
 
