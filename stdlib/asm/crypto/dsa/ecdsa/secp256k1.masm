@@ -1,285 +1,105 @@
-use.std::math::secp256k1::base_field
-use.std::math::secp256k1::scalar_field
-use.std::math::secp256k1::group
+use.std::crypto::hashes::rpo
+use.std::sys
 
-#! Given an ECDSA public key ( in projective coordinate system i.e. each secp256k1 curve point
-#! is represented in terms of X, Y, Z coordinates ), hashed message h ( a 256 -bit element represented
-#! in Montgomery form ) and an ECDSA signature, represented in terms of (r, s) s.t. each of them are
-#! represented in Montgomery form, this routine attempts to verify the ECDSA signature.
+# ENCODING CONVENTIONS
+# ================================================================================================
+#
+# This module uses the following notation for data representation:
+# - Byte arrays are stored in memory as packed u32 values in little-endian format
+# - Each u32 represents 4 bytes: u32 = u32::from_le_bytes([b0, b1, b2, b3])
+# - Unused bytes in the final u32 must be set to zero
+# - Memory addresses must be word-aligned (divisible by 4)
+
+# Constants
+# ================================================================================================
+
+const.ECDSA_VERIFY_EVENT=event("stdlib::crypto::dsa::ecdsa::verify")
+
+const.PK_LEN_FELTS=9     # 33.div_ceil(4)
+const.DIGEST_LEN_FELTS=8 # 32.div_ceil(4)
+const.SIG_LEN_FELTS=17   # 66.div_ceil(4)
+
+# PROCEDURES
+# ================================================================================================
+
+#! Verifies an ECDSA signature over the secp256k1 curve.
 #!
-#! Expected stack state
+#! This procedure uses deferred verification via a precompile. The actual cryptographic
+#! verification is performed by the host, and the result is provided via the advice stack.
 #!
-#! [X, Y, Z, h, r, s, ...] i.e. total 48 elements on stack top
+#! Input: `[pk_ptr, digest_ptr, sig_ptr, ...]`
+#! Output: `[result, ...]`
 #!
-#! X -> x0, x1, x2, x3, x4, x5, x6, x7 ( secp256k1 base field element, in Montgomery form )
-#! Y -> y0, y1, y2, y3, y4, y5, y6, y7 ( secp256k1 base field element, in Montgomery form )
-#! Z -> z0, z1, z2, z3, z4, z5, z6, z7 ( secp256k1 base field element, in Montgomery form )
-#! h -> h0, h1, h2, h3, h4, h5, h6, h7 ( secp256k1 scalar field element, in Montgomery form )
-#! r -> r0, r1, r2, r3, r4, r5, r6, r7 ( secp256k1 scalar field element, in Montgomery form )
-#! s -> s0, s1, s2, s3, s4, s5, s6, s7 ( secp256k1 scalar field element, in Montgomery form )
+#! Where:
+#! - `pk_ptr`: word-aligned memory address containing the 33-byte compressed secp256k1 public key
+#! - `digest_ptr`: word-aligned memory address containing the 32-byte message digest
+#! - `sig_ptr`: word-aligned memory address containing the 66-byte signature
+#! - `result`: 1 if the signature is valid, 0 if invalid
 #!
-#! Final stack state
+#! All data must be stored in memory as packed u32 values (little-endian), with unused bytes
+#! in the final u32 set to zero.
+export.verify
+    exec.verify_impl
+    # => [COMM, TAG, result, ...]
+
+    # Log the precompile request for deferred verification
+    exec.sys::log_precompile_request
+    # => [result, ...]
+end
+
+# INTERNAL PROCEDURES
+# ================================================================================================
+
+#! Internal implementation of ECDSA signature verification via deferred computation.
 #!
-#! [ ... ]
+#! Emits an event to trigger the precompile handler, reads the verification result from
+#! the advice stack, and computes the commitment and tag for tracking deferred verification.
 #!
-#! If verification fails, program execution will be aborted.
+#! This procedure mimics the `ecdsa_secp256k1::PublicKey::verify_prehash()` function from
+#! `miden-crypto`, which takes a pre-hashed message that the caller must provide
+#! (e.g. obtained using the keccak256 precompile).
 #!
-#! See https://github.com/itzmeanjan/secp256k1/blob/37b339db3e03d24c2977399eb8896ef515ebb09b/ecdsa/verify.py#L11-L45
-export.verify.96
-    # cache pub_key
-    loc_storew_be.0
-    dropw
-    loc_storew_be.4
-    dropw
-    loc_storew_be.8
-    dropw
-    loc_storew_be.12
-    dropw
-    loc_storew_be.16
-    dropw
-    loc_storew_be.20
-    dropw
+#! Input: `[pk_ptr, digest_ptr, sig_ptr, ...]`
+#! Output: `[COMM, TAG, result, ...]`
+#!
+#! Where:
+#! - `pk_ptr`: word-aligned memory address containing 33-byte public key
+#! - `digest_ptr`: word-aligned memory address containing 32-byte digest
+#! - `sig_ptr`: word-aligned memory address containing 66-byte signature
+#! - `COMM`: commitment to calldata computed as
+#!       `Rpo256(Rpo256(Rpo256(pk) || Rpo256(digest)) || Rpo256(sig))`
+#! - `TAG`: `[ECDSA_VERIFY_EVENT, result, 0, 0]`
+#! - `result`: 1 if signature is valid, 0 if invalid
+export.verify_impl
+    emit.ECDSA_VERIFY_EVENT
+    # => [pk_ptr, digest_ptr, sig_ptr, ...]
 
-    # cache h
-    loc_storew_be.24
-    dropw
-    loc_storew_be.28
-    dropw
+    # Read verification result from advice stack (provided by the host)
+    adv_push.1
+    # => [result, pk_ptr, digest_ptr, sig_ptr, ...]
 
-    # cache r
-    loc_storew_be.32
-    dropw
-    loc_storew_be.36
-    dropw
+    # Compute commitment: COMM = Rpo256(Rpo256(Rpo256(pk) || Rpo256(digest)) || Rpo256(sig))
+    # Compute COMM_PK = Rpo256(pk)
+    push.PK_LEN_FELTS movup.2 exec.rpo::hash_memory
+    # => [COMM_PK, result, digest_ptr, sig_ptr]
 
-    # Only s lives on stack
-    # Invert s, over secp256k1 scalar field
-    exec.scalar_field::inv
+    # Compute COMM_DIGEST = Rpo256(digest_bytes)
+    push.DIGEST_LEN_FELTS movup.6 exec.rpo::hash_memory
+    # => [COMM_DIGEST, COMM_PK, result, sig_ptr]
 
-    dupw.1
-    dupw.1
+    # Merge COMM_PK and COMM_DIGEST into COMM_PK_DIGEST = Rpo256(Rpo256(pk) || Rpo256(digest))
+    hmerge
+    # => [COMM_PK_DIGEST, result, sig_ptr]
 
-    # on stack [s^-1, s^-1, ...]
+    # Compute COMM_SIG = Rpo256(sig_bytes)
+    push.SIG_LEN_FELTS movup.6 exec.rpo::hash_memory
+    # => [COMM_SIG, COMM_PK_DIGEST, result]
 
-    push.0.0.0.0.0.0.0.0
+    # Merge into final commitment COMM = Rpo256(COMM_PK_DIGEST || COMM_SIG)
+    hmerge
+    # => [COMM, result]
 
-    # load h
-    loc_loadw_be.28
-    swapw
-    loc_loadw_be.24
-
-    # compute h * s^-1
-    exec.scalar_field::mul
-    exec.scalar_field::from_mont
-
-    # cache h * s^-1
-    loc_storew_be.24
-    swapw
-    loc_storew_be.28
-
-    # load r
-    loc_loadw_be.36
-    swapw
-    loc_loadw_be.32
-
-    # compute r * s^-1
-    exec.scalar_field::mul
-    exec.scalar_field::from_mont
-
-    # cache r * s^-1
-    loc_storew_be.40
-    dropw
-    loc_storew_be.44
-    dropw
-
-    locaddr.68
-    locaddr.64
-    locaddr.60
-    locaddr.56
-    locaddr.52
-    locaddr.48
-
-    push.0.0.0.0.0.0.0.0
-    loc_loadw_be.28
-    swapw
-    loc_loadw_be.24
-
-    # compute G * ((h * s^-1) mod N) = P0
-    exec.group::gen_mul
-
-    push.0.0.0.0
-
-    movup.4
-    mem_loadw_be
-    loc_storew_be.48
-
-    movup.4
-    mem_loadw_be
-    loc_storew_be.52
-
-    movup.4
-    mem_loadw_be
-    loc_storew_be.56
-
-    movup.4
-    mem_loadw_be
-    loc_storew_be.60
-
-    movup.4
-    mem_loadw_be
-    loc_storew_be.64
-
-    movup.4
-    mem_loadw_be
-    loc_storew_be.68
-
-    dropw
-
-    locaddr.92
-    locaddr.88
-    locaddr.84
-    locaddr.80
-    locaddr.76
-    locaddr.72
-
-    push.0.0.0.0.0.0.0.0
-    loc_loadw_be.44
-    swapw
-    loc_loadw_be.40
-
-    locaddr.20
-    locaddr.16
-    locaddr.12
-    locaddr.8
-    locaddr.4
-    locaddr.0
-
-    # compute pkey * ((r * s^-1) mod N) = P1
-    exec.group::mul
-
-    push.0.0.0.0
-
-    movup.4
-    mem_loadw_be
-    loc_storew_be.0
-
-    movup.4
-    mem_loadw_be
-    loc_storew_be.4
-
-    movup.4
-    mem_loadw_be
-    loc_storew_be.8
-
-    movup.4
-    mem_loadw_be
-    loc_storew_be.12
-
-    movup.4
-    mem_loadw_be
-    loc_storew_be.16
-
-    movup.4
-    mem_loadw_be
-    loc_storew_be.20
-
-    dropw
-
-    locaddr.92
-    locaddr.88
-    locaddr.84
-    locaddr.80
-    locaddr.76
-    locaddr.72
-
-    locaddr.68
-    locaddr.64
-    locaddr.60
-    locaddr.56
-    locaddr.52
-    locaddr.48
-
-    locaddr.20
-    locaddr.16
-    locaddr.12
-    locaddr.8
-    locaddr.4
-    locaddr.0
-
-    # compute P0 + P1 = P2
-    exec.group::add
-
-    push.0.0.0.0
-
-    movup.4
-    mem_loadw_be
-    loc_storew_be.0
-
-    movup.4
-    mem_loadw_be
-    loc_storew_be.4
-
-    movup.4
-    mem_loadw_be
-    loc_storew_be.8
-
-    movup.4
-    mem_loadw_be
-    loc_storew_be.12
-
-    movup.4
-    mem_loadw_be
-    loc_storew_be.16
-
-    movup.4
-    mem_loadw_be
-    loc_storew_be.20
-
-    push.0.0.0.0
-    loc_loadw_be.20
-    swapw
-    loc_loadw_be.16
-
-    exec.base_field::inv
-
-    push.0.0.0.0.0.0.0.0
-    loc_loadw_be.4
-    swapw
-    loc_loadw_be.0
-
-    # compute r' ( in radix-2^32 form )
-    exec.base_field::mul
-    exec.base_field::from_mont
-
-    push.0.0.0.0.0.0.0.0
-    loc_loadw_be.36
-    swapw
-    loc_loadw_be.32
-
-    # compute r ( in radix-2^32 form )
-    exec.scalar_field::from_mont
-
-    # check if r == r'
-    movup.8
-    assert_eq
-
-    movup.7
-    assert_eq
-
-    movup.6
-    assert_eq
-
-    movup.5
-    assert_eq
-
-    movup.4
-    assert_eq
-
-    movup.3
-    assert_eq
-
-    movup.2
-    assert_eq
-
-    assert_eq
+    # Create TAG = [ECDSA_VERIFY_EVENT, result, 0, 0]
+    push.ECDSA_VERIFY_EVENT dup.5 push.0.0 swapw
+    # => [COMM, TAG, result]
 end

@@ -39,6 +39,7 @@
 - Fix decorator offset bug in `BasicBlockNode` padding ([#2305](https://github.com/0xMiden/miden-vm/pull/2305)).
 - [BREAKING] Update miden-crypto dependency to v0.18 (#[2311](https://github.com/0xMiden/miden-vm/pull/2311))
 - [BREAKING] Refined precompile verification plumbing ([#2325](https://github.com/0xMiden/miden-vm/pull/2325)).
+- [BREAKING] Implement ECDSA precompile ([#2277](https://github.com/0xMiden/miden-vm/pull/2277)).
 
 ## 0.18.3 (2025-10-27)
 
