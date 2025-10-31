@@ -1,4 +1,4 @@
-use miden_core::{Felt, FieldElement, Operation, QuadFelt};
+use miden_core::{Felt, FieldElement, ONE, Operation, QuadFelt};
 
 use crate::{ExecutionError, Process, errors::ErrorContext};
 
@@ -17,22 +17,19 @@ impl Process {
     // --------------------------------------------------------------------------------------------
 
     /// Performs 8 steps of the Horner evaluation method on a polynomial with coefficients over
-    /// the base field, i.e., it computes
+    /// the base field using a 3-level computation to reduce constraint degree.
     ///
-    /// acc' = (((acc_tmp * alpha + c4) * alpha + c5) * alpha + c6) * alpha + c7
+    /// The computation is broken into 3 levels:
+    /// - Level 1: tmp0 = (acc * α + c₀) * α + c₁
+    /// - Level 2: tmp1 = ((tmp0 * α + c₂) * α + c₃) * α + c₄
+    /// - Level 3: acc' = ((tmp1 * α + c₅) * α + c₆) * α + c₇
     ///
-    /// where
+    /// In other words, the instruction computes the evaluation at alpha of the polynomial:
     ///
-    /// acc_tmp := (((acc * alpha + c0) * alpha + c1) * alpha + c2) * alpha + c3
+    /// P(X) := c₀ * X^7 + c₁ * X^6 + c₂ * X^5 + c₃ * X^4 + c₄ * X^3 + c₅ * X^2 + c₆ * X + c₇
     ///
-    ///
-    /// In other words, the intsruction computes the evaluation at alpha of the polynomial
-    ///
-    /// P(X) := c0 * X^7 + c1 * X^6 + ... + c6 * X + c7
-    ///
-    /// As can be seen from the two equations defining acc', the instruction can be used in order
-    /// to compute the evaluation of polynomials of arbitrary degree by repeated invocations of
-    /// the same instruction interleaved with any operation that loads the next batch of 8
+    /// The instruction can be used to compute the evaluation of polynomials of arbitrary degree
+    /// by repeated invocations interleaved with any operation that loads the next batch of 8
     /// coefficients on the top of the operand stack, i.e., `mem_stream` or `adv_pipe`.
     ///
     /// The stack transition of the instruction can be visualized as follows:
@@ -57,35 +54,42 @@ impl Process {
     ///    of 8 coefficients of the polynomial.
     /// 2. (acc0, acc1) stands for an extension field element accumulating the values of the Horner
     ///    evaluation procedure. (acc0', acc1') is the updated value of this accumulator.
-    /// 3. alpha_addr is the memory address of the evaluation point i.e., alpha.
+    /// 3. alpha_addr is the memory address pointing to the evaluation point α. The operation reads
+    ///    α₀ from alpha_addr and α₁ from alpha_addr + 1.
     ///
-    /// The instruction also makes use of the helper registers to hold the value of
-    /// alpha = (alpha0, alpha1) during the course of its execution.
-    /// The helper registers are also used in order to hold the second half of the memory word
-    /// containing (alpha0, alpha1), as well as the temporary values acc_tmp.
+    /// The instruction uses helper registers to store intermediate values:
+    /// - h₀, h₁: evaluation point α = (α₀, α₁)
+    /// - h₂, h₃: Level 2 intermediate result tmp1
+    /// - h₄, h₅: Level 1 intermediate result tmp0
     pub(super) fn op_horner_eval_base(
         &mut self,
         err_ctx: &impl ErrorContext,
     ) -> Result<(), ExecutionError> {
         // read the values of the coefficients, over the base field, from the stack
         let coef = self.get_coeff_as_base_elements();
+        let c7 = QuadFelt::from(coef[0]);
+        let c6 = QuadFelt::from(coef[1]);
+        let c5 = QuadFelt::from(coef[2]);
+        let c4 = QuadFelt::from(coef[3]);
+        let c3 = QuadFelt::from(coef[4]);
+        let c2 = QuadFelt::from(coef[5]);
+        let c1 = QuadFelt::from(coef[6]);
+        let c0 = QuadFelt::from(coef[7]);
 
         // read the evaluation point alpha from memory
-        // we also read the second half of the memory word containing alpha
-        let (alpha, k0, k1) = self.get_evaluation_point(err_ctx)?;
+        let alpha = self.get_evaluation_point_elements(err_ctx)?;
 
-        // compute the temporary and updated accumulator values
-        let acc_old = self.get_accumulator();
-        let acc_tmp = coef
-            .iter()
-            .rev()
-            .take(4)
-            .fold(acc_old, |acc, coef| QuadFelt::from(*coef) + alpha * acc);
-        let acc_new = coef
-            .iter()
-            .rev()
-            .skip(4)
-            .fold(acc_tmp, |acc, coef| QuadFelt::from(*coef) + alpha * acc);
+        // read the current accumulator
+        let acc = self.get_accumulator();
+
+        // Level 1: tmp0 = (acc * α + c₀) * α + c₁
+        let tmp0 = (acc * alpha + c0) * alpha + c1;
+
+        // Level 2: tmp1 = ((tmp0 * α + c₂) * α + c₃) * α + c₄
+        let tmp1 = ((tmp0 * alpha + c2) * alpha + c3) * alpha + c4;
+
+        // Level 3: acc' = ((tmp1 * α + c₅) * α + c₆) * α + c₇
+        let acc_new = ((tmp1 * alpha + c5) * alpha + c6) * alpha + c7;
 
         // copy over the stack state to the next cycle changing only the accumulator values
         self.stack.copy_state(0);
@@ -93,15 +97,18 @@ impl Process {
         self.stack.set(ACC_LOW_INDEX, acc_new.to_base_elements()[0]);
 
         // set the helper registers
+        // h₀, h₁: evaluation point α
+        // h₂, h₃: intermediate result tmp1 (Level 2)
+        // h₄, h₅: intermediate result tmp0 (Level 1)
         self.decoder.set_user_op_helpers(
             Operation::HornerBase,
             &[
                 alpha.base_element(0),
                 alpha.base_element(1),
-                k0,
-                k1,
-                acc_tmp.base_element(0),
-                acc_tmp.base_element(1),
+                tmp1.base_element(0),
+                tmp1.base_element(1),
+                tmp0.base_element(0),
+                tmp0.base_element(1),
             ],
         );
 
@@ -118,7 +125,7 @@ impl Process {
     /// acc_tmp = (acc * alpha + c0) * alpha + c1
     ///
     ///
-    /// In other words, the intsruction computes the evaluation at alpha of the polynomial
+    /// In other words, the instruction computes the evaluation at alpha of the polynomial
     ///
     /// P(X) := c0 * X^3 + c1 * X^2 + c2 * X + c3
     ///
@@ -145,8 +152,8 @@ impl Process {
     ///
     /// Here:
     ///
-    /// 1. ci for i in 0..=4 stands for the the value of the i-th coefficient in the current batch
-    ///    of 4 extension field coefficients of the polynomial.
+    /// 1. ci for i in 0..=3 stands for the value of the i-th coefficient in the current batch of 4
+    ///    extension field coefficients of the polynomial.
     /// 2. (acc0, acc1) stands for an extension field element accumulating the values of the Horner
     ///    evaluation procedure. (acc0', acc1') is the updated value of this accumulator.
     /// 3. alpha_addr is the memory address of the evaluation point i.e., alpha.
@@ -178,7 +185,7 @@ impl Process {
 
         // set the helper registers
         self.decoder.set_user_op_helpers(
-            Operation::HornerBase,
+            Operation::HornerExt,
             &[
                 alpha.base_element(0),
                 alpha.base_element(1),
@@ -226,6 +233,27 @@ impl Process {
             QuadFelt::new(c2_0, c2_1),
             QuadFelt::new(c3_0, c3_1),
         ]
+    }
+
+    /// Returns the evaluation point.
+    fn get_evaluation_point_elements(
+        &mut self,
+        err_ctx: &impl ErrorContext,
+    ) -> Result<QuadFelt, ExecutionError> {
+        let ctx = self.system.ctx();
+        let addr = self.stack.get(ALPHA_ADDR_INDEX);
+        let alpha_0 = self
+            .chiplets
+            .memory
+            .read(ctx, addr, self.system.clk(), err_ctx)
+            .map_err(ExecutionError::MemoryError)?;
+        let alpha_1 = self
+            .chiplets
+            .memory
+            .read(ctx, addr + ONE, self.system.clk(), err_ctx)
+            .map_err(ExecutionError::MemoryError)?;
+
+        Ok(QuadFelt::new(alpha_0, alpha_1))
     }
 
     /// Returns the evaluation point.
@@ -292,9 +320,9 @@ mod tests {
         // --- setup memory -----------------------------------------------------------------------
         let ctx = ContextId::root();
 
-        // Note: the first 2 elements of `alpha` are the actual evaluation point, the other 2 are
-        // junk.
-        let alpha_mem_word = rand_array::<Felt, 4>();
+        // Memory format requirement: [α₀, α₁, 0, 0]
+        let alpha: [Felt; 2] = rand_array();
+        let alpha_mem_word = [alpha[0], alpha[1], ZERO, ZERO];
         process
             .chiplets
             .memory
@@ -330,19 +358,23 @@ mod tests {
 
         let alpha = QuadFelt::new(alpha_mem_word[0], alpha_mem_word[1]);
 
-        let acc_tmp = stack_state
-            .iter()
-            .take(8)
-            .rev()
-            .take(4)
-            .fold(acc_old, |acc, coef| QuadFelt::from(*coef) + alpha * acc);
+        let c7 = QuadFelt::from(stack_state[0]);
+        let c6 = QuadFelt::from(stack_state[1]);
+        let c5 = QuadFelt::from(stack_state[2]);
+        let c4 = QuadFelt::from(stack_state[3]);
+        let c3 = QuadFelt::from(stack_state[4]);
+        let c2 = QuadFelt::from(stack_state[5]);
+        let c1 = QuadFelt::from(stack_state[6]);
+        let c0 = QuadFelt::from(stack_state[7]);
 
-        let acc_new = stack_state
-            .iter()
-            .take(8)
-            .rev()
-            .skip(4)
-            .fold(acc_tmp, |acc, coef| QuadFelt::from(*coef) + alpha * acc);
+        // Level 1: tmp0 = (acc * α + c₀) * α + c₁
+        let tmp0 = (acc_old * alpha + c0) * alpha + c1;
+
+        // Level 2: tmp1 = ((tmp0 * α + c₂) * α + c₃) * α + c₄
+        let tmp1 = ((tmp0 * alpha + c2) * alpha + c3) * alpha + c4;
+
+        // Level 3: acc' = ((tmp1 * α + c₅) * α + c₆) * α + c₇
+        let acc_new = ((tmp1 * alpha + c5) * alpha + c6) * alpha + c7;
 
         assert_eq!(acc_new.to_base_elements()[1], stack_state[ACC_HIGH_INDEX]);
         assert_eq!(acc_new.to_base_elements()[0], stack_state[ACC_LOW_INDEX]);
@@ -355,10 +387,10 @@ mod tests {
         let helper_reg_expected = [
             alpha_mem_word[0],
             alpha_mem_word[1],
-            alpha_mem_word[2],
-            alpha_mem_word[3],
-            acc_tmp.base_element(0),
-            acc_tmp.base_element(1),
+            tmp1.base_element(0),
+            tmp1.base_element(1),
+            tmp0.base_element(0),
+            tmp0.base_element(1),
         ];
         assert_eq!(helper_reg_expected, process.decoder.get_user_op_helpers());
     }
@@ -385,7 +417,9 @@ mod tests {
         // --- setup memory -----------------------------------------------------------------------
         let ctx = ContextId::root();
 
-        let alpha_mem_word = rand_array::<Felt, 4>();
+        // Memory format requirement: [α₀, α₁, 0, 0]
+        let alpha: [Felt; 2] = rand_array();
+        let alpha_mem_word = [alpha[0], alpha[1], ZERO, ZERO];
         process
             .chiplets
             .memory
@@ -399,7 +433,7 @@ mod tests {
             .unwrap();
         process.execute_op(Operation::Noop, program, &mut host).unwrap();
 
-        // --- execute HORNER_BASE operation ------------------------------------------------------
+        // --- execute HORNER_EXT operation -------------------------------------------------------
         process.execute_op(Operation::HornerExt, program, &mut host).unwrap();
 
         // --- check that the top 8 stack elements were not affected ------------------------------

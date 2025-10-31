@@ -8,8 +8,9 @@ use hasher::{
 };
 use kernel::{KernelRomMessage, build_kernel_chiplet_responses};
 use memory::{
-    build_horner_eval_request, build_mem_mload_mstore_request, build_mem_mloadw_mstorew_request,
-    build_memory_chiplet_responses, build_mstream_request, build_pipe_request,
+    build_hornerbase_eval_request, build_hornerext_eval_request, build_mem_mload_mstore_request,
+    build_mem_mloadw_mstorew_request, build_memory_chiplet_responses, build_mstream_request,
+    build_pipe_request,
 };
 use miden_air::{
     RowIndex,
@@ -130,8 +131,8 @@ where
                 row,
                 debugger,
             ),
-            OPCODE_HORNERBASE => build_horner_eval_request(main_trace, alphas, row, debugger),
-            OPCODE_HORNEREXT => build_horner_eval_request(main_trace, alphas, row, debugger),
+            OPCODE_HORNERBASE => build_hornerbase_eval_request(main_trace, alphas, row, debugger),
+            OPCODE_HORNEREXT => build_hornerext_eval_request(main_trace, alphas, row, debugger),
             OPCODE_MSTREAM => build_mstream_request(main_trace, alphas, row, debugger),
             OPCODE_HPERM => build_hperm_request(main_trace, alphas, row, debugger),
             OPCODE_LOGPRECOMPILE => build_log_precompile_request(main_trace, alphas, row, debugger),
