@@ -266,28 +266,22 @@ end
 #! - src_ptr and dst_ptr MUST be different (in-place operation not supported)
 #!
 #! Security:
-#! - Tag verification happens TWICE:
-#!   1. In the event handler via reference implementation
-#!   2. In this MASM procedure via re-encryption
-#! - Execution halts with assertion failure if either verification fails
+#! - Tag verification happens in the MASM procedure via re-encryption
+#! - Execution halts with assertion failure if tag verification fails
 #! - If execution completes successfully, the plaintext at dst_ptr is authenticated
-#! - Double verification provides defense in depth
 #!
 #! Non-Determinism Soundness:
 #! This procedure uses non-deterministic advice to obtain the plaintext, which is sound
 #! because:
-#! 1. The event handler verifies the tag before providing plaintext via advice
-#! 2. The prover provides claimed plaintext via advice (untrusted input)
-#! 3. This procedure re-encrypts the claimed plaintext with the same (key, nonce)
-#! 4. Due to deterministic encryption, the same plaintext produces the same ciphertext
-#! 5. The computed tag cryptographically commits to both plaintext and ciphertext
-#! 6. Comparing tags verifies that the claimed plaintext is the unique plaintext that
+#! 1. The prover provides claimed plaintext via advice (untrusted input)
+#! 2. This procedure re-encrypts the claimed plaintext with the same (key, nonce)
+#! 3. Due to deterministic encryption, the same plaintext produces the same ciphertext
+#! 4. The computed tag cryptographically commits to both plaintext and ciphertext
+#! 5. Comparing tags verifies that the claimed plaintext is the unique plaintext that
 #!    encrypts to the given ciphertext under the given (key, nonce)
-#! 7. A malicious prover cannot provide incorrect plaintext without causing tag mismatch
 #!
 #! This approach is secure because:
-#! - The event handler provides first-level verification (tag check)
-#! - The MASM procedure provides second-level verification (re-encryption + tag check)
+#! - The MASM procedure verifies the tag when calling the encryption procedure
 #! - The tag acts as a cryptographic commitment
 #! - The deterministic keystream creates a bijection between plaintext and ciphertext
 #! - Any deviation from correct plaintext causes assertion failure
