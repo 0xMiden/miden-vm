@@ -46,8 +46,8 @@ impl FastProcessor {
         } else if condition == ZERO {
             continuation_stack.push_start_node(split_node.on_false());
         } else {
-            let err_ctx = err_ctx!(current_forest, split_node, host);
-            return Err(ExecutionError::not_binary_value_if(condition, &err_ctx));
+            err_ctx!(current_forest, split_node, host);
+            return Err(ExecutionError::not_binary_value_if(condition, &()));
         };
 
         // Corresponds to the row inserted for the SPLIT operation added
