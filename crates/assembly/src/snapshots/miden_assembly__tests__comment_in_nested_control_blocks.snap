@@ -1,11 +1,20 @@
 ---
-source: assembly/src/tests.rs
+source: crates/assembly/src/tests.rs
 expression: program
 ---
 begin
     join
         join
-            basic_block pad incr push(2) noop end
+            basic_block
+                push(2147483648)
+                push(4294967294)
+                mstore
+                drop
+                pad
+                incr
+                push(2)
+                noop
+            end
             if.true
                 join
                     basic_block add end

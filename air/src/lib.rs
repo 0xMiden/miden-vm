@@ -11,6 +11,7 @@ use alloc::{borrow::ToOwned, vec::Vec};
 
 use miden_core::{
     ExtensionOf, ONE, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
+    precompile::PrecompileTranscriptState,
     utils::{ByteReader, ByteWriter, Deserializable, Serializable},
 };
 use winter_air::{
@@ -64,6 +65,7 @@ pub struct ProcessorAir {
     stack_outputs: StackOutputs,
     program_digest: Word,
     kernel_digests: Vec<Word>,
+    pc_transcript_state: PrecompileTranscriptState,
     constraint_ranges: TransitionConstraintRange,
 }
 
@@ -119,10 +121,11 @@ impl Air for ProcessorAir {
         };
 
         // Define the number of boundary constraints for the auxiliary execution trace segment.
+        // Includes vtable boundary constraint for precompile transcript validation.
         let num_aux_assertions = if IS_FULL_CONSTRAINT_SET {
-            stack::NUM_AUX_ASSERTIONS + range::NUM_AUX_ASSERTIONS
+            stack::NUM_AUX_ASSERTIONS + range::NUM_AUX_ASSERTIONS + 1
         } else {
-            3
+            3 + 1 // kernel_rom + range + vtable
         };
 
         // Create the context and set the number of transition constraint exemptions to two; this
@@ -144,6 +147,7 @@ impl Air for ProcessorAir {
             constraint_ranges,
             program_digest: pub_inputs.program_info.program_hash().to_owned(),
             kernel_digests: pub_inputs.program_info.kernel_procedures().to_owned(),
+            pc_transcript_state: pub_inputs.pc_transcript_state,
         }
     }
 
@@ -164,9 +168,6 @@ impl Air for ProcessorAir {
         let mut result = vec![Assertion::single(CLK_COL_IDX, 0, ZERO)];
 
         if IS_FULL_CONSTRAINT_SET {
-            // first value of fmp is 2^30
-            result.push(Assertion::single(FMP_COL_IDX, 0, Felt::new(2u64.pow(30))));
-
             // add initial assertions for the stack.
             stack::get_assertions_first_step(&mut result, &*self.stack_inputs);
 
@@ -201,6 +202,7 @@ impl Air for ProcessorAir {
             &mut result,
             &self.kernel_digests,
             aux_rand_elements,
+            self.pc_transcript_state,
         );
 
         // --- set assertions for the first step --------------------------------------------------
@@ -318,18 +320,23 @@ pub struct PublicInputs {
     program_info: ProgramInfo,
     stack_inputs: StackInputs,
     stack_outputs: StackOutputs,
+    pc_transcript_state: PrecompileTranscriptState,
 }
 
 impl PublicInputs {
+    /// Creates a new instance of `PublicInputs` from program information, stack inputs and outputs,
+    /// and the precompile transcript state (capacity of an internal sponge).
     pub fn new(
         program_info: ProgramInfo,
         stack_inputs: StackInputs,
         stack_outputs: StackOutputs,
+        pc_transcript_state: PrecompileTranscriptState,
     ) -> Self {
         Self {
             program_info,
             stack_inputs,
             stack_outputs,
+            pc_transcript_state,
         }
     }
 }
@@ -339,6 +346,8 @@ impl miden_core::ToElements<Felt> for PublicInputs {
         let mut result = self.stack_inputs.to_vec();
         result.append(&mut self.stack_outputs.to_vec());
         result.append(&mut self.program_info.to_elements());
+        let pc_state: [Felt; 4] = self.pc_transcript_state.into();
+        result.extend_from_slice(&pc_state);
         result
     }
 }
@@ -351,6 +360,7 @@ impl Serializable for PublicInputs {
         self.program_info.write_into(target);
         self.stack_inputs.write_into(target);
         self.stack_outputs.write_into(target);
+        self.pc_transcript_state.write_into(target);
     }
 }
 
@@ -359,11 +369,13 @@ impl Deserializable for PublicInputs {
         let program_info = ProgramInfo::read_from(source)?;
         let stack_inputs = StackInputs::read_from(source)?;
         let stack_outputs = StackOutputs::read_from(source)?;
+        let pc_transcript_state = Word::read_from(source)?;
 
         Ok(PublicInputs {
             program_info,
             stack_inputs,
             stack_outputs,
+            pc_transcript_state,
         })
     }
 }

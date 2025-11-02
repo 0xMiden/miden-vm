@@ -99,27 +99,27 @@ export.hash_to_point.8
     movdn.12
 
     # Store MSG for later absorption
-    loc_storew.4 dropw
+    loc_storew_be.4 dropw
 
     # Absorb the nonce
     padw movdnw.2
     hperm
 
     # Absorb the message
-    swapw loc_loadw.4 swapw hperm
+    swapw loc_loadw_be.4 swapw hperm
 
     # Squeeze the coefficients and save them
     repeat.63
         swapw dup.12
-        mem_storew
+        mem_storew_be
         swapw dup.12 add.8 swap.13 add.4
-        mem_storew
+        mem_storew_be
         hperm
     end
 
     # Save the last remaining coefficients
-    dup.12 add.4 mem_storew dropw
-    movup.8 mem_storew dropw
+    dup.12 add.4 mem_storew_be dropw
+    movup.8 mem_storew_be dropw
 
     # Clean up the stack
     dropw
@@ -168,7 +168,7 @@ export.load_h_s2_and_product.8
 
     ## b) Save PK to later compare it with the hash of the h polynomial
     swapw
-    loc_storew.0
+    loc_storew_be.0
     # => [PK, ptr, tau_inv_ptr, acc1, acc0, ...]
 
     ## c) Prepare the capacity portion of the state of the hasher
@@ -187,7 +187,7 @@ export.load_h_s2_and_product.8
     adv_push.2 
     dup.1 dup.1 ext2inv
     movup.3 movup.3
-    loc_storew.4
+    loc_storew_be.4
     # => [tau1, tau0, tau_inv1, tau_inv0, Y, 0, 0, 0, 0, ptr, tau_inv_ptr, acc1, acc0, ...]
 
     # 2) Load the coefficients of the h polynomial and evaluate it at tau_inv
@@ -218,7 +218,7 @@ export.load_h_s2_and_product.8
     # => [Y, D, C, ptr, tau_inv_ptr, acc1, acc0, ...] where D is the digest expected to be PK
 
     # 3) Load PK, the saved claimed hash of h, and compare hashes
-    loc_loadw.0
+    loc_loadw_be.0
     assert_eqw
     # => [C, ptr, tau_inv_ptr, h(tau)_1, h(tau)_0, ...]
 
@@ -281,7 +281,7 @@ export.load_h_s2_and_product.8
 
     ## b) Load from memory the challenge we got from the advice stack and assert equality between
     ##    the two challenges
-    loc_loadw.4
+    loc_loadw_be.4
     dup.4 assert_eq
     dup.4 assert_eq
     drop drop
@@ -450,17 +450,17 @@ export.compute_s1_norm_sq
         # load the next four pi_i
         padw
         dup.4
-        mem_loadw
+        mem_loadw_be
 
         # load the next four pi_{i+512}
         padw
         dup.8 add.512
-        mem_loadw
+        mem_loadw_be
 
         # load the next four c_i
         padw
         dup.12 add.MEMORY_POINTER_OFFSET_OF_HASH_TO_POINT_POLY_FROM_PRODUCT_POLY
-        mem_loadw
+        mem_loadw_be
         #=> [C, PI_{i+512}, PI, pi_ptr, ...]
 
         # 2) Compute the squared norm of (i + 0)-th coefficient of s1
@@ -549,7 +549,7 @@ export.compute_s2_norm_sq
     repeat.128
         padw
         dup.4
-        mem_loadw
+        mem_loadw_be
         # => [c3, c2, c1, c0, s2_ptr, ...] where ci are coefficients of s2
 
         exec.norm_sq

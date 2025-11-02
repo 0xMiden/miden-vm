@@ -51,7 +51,7 @@ mod tests;
 /// can be built from a [`MastForest`] to specify an entrypoint.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(all(feature = "arbitrary", test), miden_serde_test_macros::serde_test)]
+#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 pub struct MastForest {
     /// All of the nodes local to the trees comprising the MAST forest.
     nodes: IndexVec<MastNodeId, MastNode>,
@@ -557,7 +557,7 @@ impl IndexMut<DecoratorId> for MastForest {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
-#[cfg_attr(all(feature = "arbitrary", test), miden_serde_test_macros::serde_test)]
+#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 pub struct MastNodeId(u32);
 
 /// Operations that mutate a MAST often produce this mapping between old and new NodeIds.

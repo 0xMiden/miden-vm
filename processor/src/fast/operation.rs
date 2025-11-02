@@ -5,6 +5,7 @@ use miden_air::{
 use miden_core::{
     QuadFelt, WORD_SIZE, Word, ZERO,
     crypto::{hash::Rpo256, merkle::MerklePath},
+    precompile::{PrecompileTranscript, PrecompileTranscriptState},
 };
 
 use crate::{
@@ -53,6 +54,16 @@ impl Processor for FastProcessor {
     #[inline(always)]
     fn system(&mut self) -> &mut Self::System {
         self
+    }
+
+    #[inline(always)]
+    fn precompile_transcript_state(&self) -> PrecompileTranscriptState {
+        self.pc_transcript.state()
+    }
+
+    #[inline(always)]
+    fn set_precompile_transcript_state(&mut self, state: PrecompileTranscriptState) {
+        self.pc_transcript = PrecompileTranscript::from_state(state);
     }
 
     /// Checks that the evaluation of an arithmetic circuit is equal to zero.
@@ -160,11 +171,6 @@ impl SystemInterface for FastProcessor {
     }
 
     #[inline(always)]
-    fn in_syscall(&self) -> bool {
-        self.in_syscall
-    }
-
-    #[inline(always)]
     fn clk(&self) -> RowIndex {
         self.clk
     }
@@ -172,16 +178,6 @@ impl SystemInterface for FastProcessor {
     #[inline(always)]
     fn ctx(&self) -> ContextId {
         self.ctx
-    }
-
-    #[inline(always)]
-    fn fmp(&self) -> Felt {
-        self.fmp
-    }
-
-    #[inline(always)]
-    fn set_fmp(&mut self, new_fmp: Felt) {
-        self.fmp = new_fmp;
     }
 }
 
@@ -362,6 +358,11 @@ impl OperationHelperRegisters for NoopHelperRegisters {
 
     #[inline(always)]
     fn op_hperm_registers(_addr: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
+        DEFAULT_HELPERS
+    }
+
+    #[inline(always)]
+    fn op_log_precompile_registers(_addr: Felt, _cap_prev: Word) -> [Felt; NUM_USER_OP_HELPERS] {
         DEFAULT_HELPERS
     }
 

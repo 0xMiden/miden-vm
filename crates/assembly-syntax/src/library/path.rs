@@ -120,7 +120,7 @@ type Components = smallvec::SmallVec<[Ident; 1]>;
 #[derive(Default, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_serde_test_macros::serde_test(winter_serde(true))
+    miden_test_serde_macros::serde_test(winter_serde(true))
 )]
 pub struct LibraryPath {
     inner: Arc<LibraryPathInner>,

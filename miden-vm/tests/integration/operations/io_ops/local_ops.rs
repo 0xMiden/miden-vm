@@ -68,7 +68,7 @@ fn pop_local() {
 fn loadw_local() {
     let source = "
         proc.foo.4
-            loc_loadw.0
+            loc_loadw_be.0
         end
         begin
             exec.foo
@@ -94,14 +94,14 @@ fn storew_local() {
         {TRUNCATE_STACK_PROC}
 
         proc.foo.8
-            loc_storew.0
+            loc_storew_be.0
             swapw
-            loc_storew.4
+            loc_storew_be.4
             swapw
             push.0.0.0.0
-            loc_loadw.0
+            loc_loadw_be.0
             push.0.0.0.0
-            loc_loadw.4
+            loc_loadw_be.4
         end
         begin
             exec.foo
@@ -116,12 +116,12 @@ fn storew_local() {
     // --- test existing memory is not affected ---------------------------------------------------
     let source = "
         proc.foo.8
-            loc_storew.0
+            loc_storew_be.0
         end
         begin
-            mem_storew.0
+            mem_storew_be.0
             dropw
-            mem_storew.4
+            mem_storew_be.4
             dropw
             exec.foo
         end";
@@ -157,10 +157,10 @@ fn inverse_operations() {
     // --- popw and pushw are inverse operations, so the stack should be left unchanged -----------
     let source = "
         proc.foo.4
-            loc_storew.0
+            loc_storew_be.0
             dropw
             push.0.0.0.0
-            loc_loadw.0
+            loc_loadw_be.0
         end
 
         begin
@@ -177,8 +177,8 @@ fn inverse_operations() {
     // --- storew and loadw are inverse operations, so the stack should be left unchanged ---------
     let source = "
         proc.foo.4
-            loc_storew.0
-            loc_loadw.0
+            loc_storew_be.0
+            loc_loadw_be.0
         end
 
         begin
@@ -197,7 +197,7 @@ fn read_after_write() {
     // --- write to memory first, then test read with push --------------------------------------
     let source = "
         proc.foo.4
-            loc_storew.0
+            loc_storew_be.0
             loc_load.0
         end
         begin
@@ -211,9 +211,9 @@ fn read_after_write() {
     // --- write to memory first, then test read with pushw --------------------------------------
     let source = "
         proc.foo.4
-            loc_storew.0
+            loc_storew_be.0
             push.0.0.0.0
-            loc_loadw.0
+            loc_loadw_be.0
         end
         begin
             exec.foo
@@ -226,9 +226,9 @@ fn read_after_write() {
     // --- write to memory first, then test read with loadw --------------------------------------
     let source = "
         proc.foo.4
-            loc_storew.0
+            loc_storew_be.0
             dropw
-            loc_loadw.0
+            loc_loadw_be.0
         end
         begin
             exec.foo
@@ -264,15 +264,15 @@ fn nested_procedures() {
     // --- test nested procedures - popw/pushw ----------------------------------------------------
     let source = "
         proc.foo.4
-            loc_storew.0
+            loc_storew_be.0
             dropw
         end
         proc.bar.4
-            loc_storew.0
+            loc_storew_be.0
             dropw
             exec.foo
             push.0.0.0.0
-            loc_loadw.0
+            loc_loadw_be.0
         end
         begin
             exec.bar
@@ -287,12 +287,12 @@ fn nested_procedures() {
     let source = "
         proc.foo.4
             push.0 push.0
-            loc_storew.0
+            loc_storew_be.0
         end
         proc.bar.4
-            loc_storew.0
+            loc_storew_be.0
             exec.foo
-            loc_loadw.0
+            loc_loadw_be.0
         end
         begin
             exec.bar

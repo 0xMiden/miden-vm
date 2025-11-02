@@ -1,7 +1,19 @@
 ---
-source: assembly/src/tests.rs
+source: crates/assembly/src/tests.rs
 expression: program
 ---
 begin
-    basic_block push(2) push(3) add push(3) push(7) mul noop noop noop end
+    basic_block
+        push(2147483648)
+        push(4294967294)
+        mstore
+        drop
+        push(2)
+        push(3)
+        add
+        push(3)
+        noop
+        push(7)
+        mul
+    end
 end

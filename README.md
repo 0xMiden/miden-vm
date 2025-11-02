@@ -180,5 +180,10 @@ StarkWare's STARK tutorial:
 
 - [STARK 101](https://starkware.co/stark-101/)
 
+## Documentation
+
+The documentation in the `docs/` folder is built using Docusaurus and is automatically absorbed into the main [miden-docs](https://github.com/0xMiden/miden-docs) repository for the main documentation website. Changes to the `next` branch trigger an automated deployment workflow. The docs folder requires npm packages to be installed before building.
+
 ## Licensing
+
 Any contribution intentionally submitted for inclusion in this repository, as defined in the Apache-2.0 license, shall be dual licensed under the [MIT](./LICENSE-MIT) and [Apache 2.0](./LICENSE-APACHE) licenses, without any additional terms or conditions.

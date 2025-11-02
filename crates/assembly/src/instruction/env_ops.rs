@@ -4,7 +4,7 @@ use miden_assembly_syntax::{
     Felt,
     ast::Immediate,
     debuginfo::{SourceSpan, Spanned},
-    diagnostics::{RelatedLabel, Report},
+    diagnostics::Report,
     parser::{ParsingError, WordValue},
 };
 use miden_core::Operation::*;
@@ -95,23 +95,8 @@ pub fn locaddr(
     local_to_absolute_addr(block_builder, proc_ctx, index, proc_ctx.num_locals(), true, instr_span)
 }
 
-/// Appends CALLER operation to the span which puts the hash of the function which initiated the
-/// current SYSCALL onto the stack.
-///
-/// # Errors
-/// Returns an error if the instruction is being executed outside of kernel context.
-pub fn caller(
-    block_builder: &mut BasicBlockBuilder,
-    proc_ctx: &ProcedureContext,
-    source_span: SourceSpan,
-) -> Result<(), Report> {
-    if !proc_ctx.is_kernel() {
-        return Err(RelatedLabel::error("invalid use of 'caller' instruction outside of kernel")
-            .with_help("the 'caller' instruction is only allowed in procedures defined in a kernel")
-            .with_labeled_span(source_span, "occurs here")
-            .with_source_file(proc_ctx.source_manager().get(source_span.source_id()).ok())
-            .into());
-    }
+/// Appends CALLER operation to the span which puts the hash of the function which created the
+/// latest execution context.
+pub fn caller(block_builder: &mut BasicBlockBuilder) {
     block_builder.push_op(Caller);
-    Ok(())
 }

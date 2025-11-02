@@ -39,20 +39,20 @@ export.double.48
   dup.3
   push.0.0.0.0
   movup.4
-  mem_loadw
+  mem_loadw_be
   dup.6
   push.0.0.0.0
   movup.4
-  mem_loadw         # y -coordinate on stack top
+  mem_loadw_be         # y -coordinate on stack top
 
   dupw.1
   dupw.1            # repeated y -coordinate
 
   exec.base_field::mul # = t0
 
-  loc_storew.0
+  loc_storew_be.0
   swapw
-  loc_storew.4
+  loc_storew_be.4
   swapw             # cache t0
 
   dupw.1
@@ -70,44 +70,44 @@ export.double.48
 
   exec.base_field::add # = z3
 
-  loc_storew.8
+  loc_storew_be.8
   dropw
-  loc_storew.12
+  loc_storew_be.12
   dropw             # cache z3
 
   dup.5
   push.0.0.0.0
   movup.4
-  mem_loadw
+  mem_loadw_be
   dup.8
   push.0.0.0.0
   movup.4
-  mem_loadw         # z -coordinate on stack top
+  mem_loadw_be         # z -coordinate on stack top
 
   dup.11
   push.0.0.0.0
   movup.4
-  mem_loadw
+  mem_loadw_be
   dup.14
   push.0.0.0.0
   movup.4
-  mem_loadw         # y -coordinate on stack top
+  mem_loadw_be         # y -coordinate on stack top
 
   exec.base_field::mul # = t1
 
-  loc_storew.16
+  loc_storew_be.16
   dropw
-  loc_storew.20
+  loc_storew_be.20
   dropw             # cache t1
 
   dup.5
   push.0.0.0.0
   movup.4
-  mem_loadw
+  mem_loadw_be
   dup.8
   push.0.0.0.0
   movup.4
-  mem_loadw         # z -coordinate on stack top
+  mem_loadw_be         # z -coordinate on stack top
 
   dupw.1
   dupw.1            # repeated z
@@ -119,61 +119,61 @@ export.double.48
 
   exec.base_field::mul # = t2
 
-  loc_storew.24
+  loc_storew_be.24
   swapw
-  loc_storew.28    # cache t2
+  loc_storew_be.28    # cache t2
   swapw
 
   push.0.0.0.0
-  loc_loadw.12
+  loc_loadw_be.12
   push.0.0.0.0
-  loc_loadw.8     # = z3
+  loc_loadw_be.8     # = z3
 
   exec.base_field::mul # = x3
 
-  loc_storew.32
+  loc_storew_be.32
   dropw
-  loc_storew.36
+  loc_storew_be.36
   dropw             # cache x3
 
   push.0.0.0.0
-  loc_loadw.28
+  loc_loadw_be.28
   push.0.0.0.0
-  loc_loadw.24     # = t2
+  loc_loadw_be.24     # = t2
 
   push.0.0.0.0
-  loc_loadw.4
+  loc_loadw_be.4
   push.0.0.0.0
-  loc_loadw.0     # = t0
+  loc_loadw_be.0     # = t0
 
   exec.base_field::add # = y3
 
-  loc_storew.40
+  loc_storew_be.40
   dropw
-  loc_storew.44
+  loc_storew_be.44
   dropw           # cache y3
 
   push.0.0.0.0
-  loc_loadw.20
+  loc_loadw_be.20
   push.0.0.0.0
-  loc_loadw.16     # = t1
+  loc_loadw_be.16     # = t1
 
   push.0.0.0.0
-  loc_loadw.12
+  loc_loadw_be.12
   push.0.0.0.0
-  loc_loadw.8     # = z3
+  loc_loadw_be.8     # = z3
 
   exec.base_field::mul # = z3
 
-  loc_storew.8
+  loc_storew_be.8
   dropw
-  loc_storew.12
+  loc_storew_be.12
   dropw             # cache z3
 
   push.0.0.0.0
-  loc_loadw.28
+  loc_loadw_be.28
   push.0.0.0.0
-  loc_loadw.24     # = t2
+  loc_loadw_be.24     # = t2
 
   dupw.1
   dupw.1            # repeated t2
@@ -181,67 +181,67 @@ export.double.48
   exec.base_field::add # = t1
 
   push.0.0.0.0
-  loc_loadw.28
+  loc_loadw_be.28
   push.0.0.0.0
-  loc_loadw.24     # = t2
+  loc_loadw_be.24     # = t2
 
   exec.base_field::add # = t2
 
   push.0.0.0.0
-  loc_loadw.4
+  loc_loadw_be.4
   push.0.0.0.0
-  loc_loadw.0     # = t0
+  loc_loadw_be.0     # = t0
 
   exec.base_field::sub # = t0
 
-  loc_storew.0
+  loc_storew_be.0
   swapw
-  loc_storew.4
+  loc_storew_be.4
   swapw             # cache t0
 
   push.0.0.0.0
-  loc_loadw.44
+  loc_loadw_be.44
   push.0.0.0.0
-  loc_loadw.40    # = y3
+  loc_loadw_be.40    # = y3
 
   exec.base_field::mul # = y3
 
   push.0.0.0.0
-  loc_loadw.36
+  loc_loadw_be.36
   push.0.0.0.0
-  loc_loadw.32     # = x3
+  loc_loadw_be.32     # = x3
 
   exec.base_field::add # = y3
 
-  loc_storew.40
+  loc_storew_be.40
   dropw
-  loc_storew.44
+  loc_storew_be.44
   dropw            # cache y3
 
   dup.3
   push.0.0.0.0
   movup.4
-  mem_loadw
+  mem_loadw_be
   dup.6
   push.0.0.0.0
   movup.4
-  mem_loadw         # y -coordinate on stack top
+  mem_loadw_be         # y -coordinate on stack top
 
   dup.9
   push.0.0.0.0
   movup.4
-  mem_loadw
+  mem_loadw_be
   dup.12
   push.0.0.0.0
   movup.4
-  mem_loadw         # x -coordinate on stack top
+  mem_loadw_be         # x -coordinate on stack top
 
   exec.base_field::mul # = t1
 
   push.0.0.0.0
-  loc_loadw.4
+  loc_loadw_be.4
   push.0.0.0.0
-  loc_loadw.0     # = t0
+  loc_loadw_be.0     # = t0
 
   exec.base_field::mul # = x3
 
@@ -250,9 +250,9 @@ export.double.48
 
   exec.base_field::add # = x3
 
-  loc_storew.32
+  loc_storew_be.32
   dropw
-  loc_storew.36
+  loc_storew_be.36
   dropw             # cache x3
 
   dropw
@@ -261,44 +261,44 @@ export.double.48
 
   dup
   push.0.0.0.0
-  loc_loadw.32
+  loc_loadw_be.32
   movup.4
-  mem_storew
+  mem_storew_be
   dropw              # write x3[0..4] to memory
 
   dup.1
   push.0.0.0.0
-  loc_loadw.36
+  loc_loadw_be.36
   movup.4
-  mem_storew
+  mem_storew_be
   dropw              # write x3[4..8] to memory
 
   dup.2
   push.0.0.0.0
-  loc_loadw.40
+  loc_loadw_be.40
   movup.4
-  mem_storew
+  mem_storew_be
   dropw              # write y3[0..4] to memory
 
   dup.3
   push.0.0.0.0
-  loc_loadw.44
+  loc_loadw_be.44
   movup.4
-  mem_storew
+  mem_storew_be
   dropw              # write y3[4..8] to memory
 
   dup.4
   push.0.0.0.0
-  loc_loadw.8
+  loc_loadw_be.8
   movup.4
-  mem_storew
+  mem_storew_be
   dropw              # write z3[0..4] to memory
 
   dup.5
   push.0.0.0.0
-  loc_loadw.12
+  loc_loadw_be.12
   movup.4
-  mem_storew
+  mem_storew_be
   dropw              # write z3[4..8] to memory
 end
 
@@ -339,28 +339,28 @@ export.add.64
 
   push.0.0.0.0
   movup.4
-  mem_loadw
+  mem_loadw_be
   movup.4
   push.0.0.0.0
   movup.4
-  mem_loadw # x2 on stack top
+  mem_loadw_be # x2 on stack top
 
   dup.8
   dup.10
 
   push.0.0.0.0
   movup.4
-  mem_loadw
+  mem_loadw_be
   movup.4
   push.0.0.0.0
   movup.4
-  mem_loadw # x1 on stack top
+  mem_loadw_be # x1 on stack top
 
   exec.base_field::mul # = t0
 
-  loc_storew.0
+  loc_storew_be.0
   dropw
-  loc_storew.4
+  loc_storew_be.4
   dropw        # cache t0
 
   dup.8
@@ -368,28 +368,28 @@ export.add.64
 
   push.0.0.0.0
   movup.4
-  mem_loadw
+  mem_loadw_be
   movup.4
   push.0.0.0.0
   movup.4
-  mem_loadw # y2 on stack top
+  mem_loadw_be # y2 on stack top
 
   dup.10
   dup.12
 
   push.0.0.0.0
   movup.4
-  mem_loadw
+  mem_loadw_be
   movup.4
   push.0.0.0.0
   movup.4
-  mem_loadw # y1 on stack top
+  mem_loadw_be # y1 on stack top
 
   exec.base_field::mul # = t1
 
-  loc_storew.8
+  loc_storew_be.8
   dropw
-  loc_storew.12
+  loc_storew_be.12
   dropw        # cache t1
 
   dup.10
@@ -397,28 +397,28 @@ export.add.64
 
   push.0.0.0.0
   movup.4
-  mem_loadw
+  mem_loadw_be
   movup.4
   push.0.0.0.0
   movup.4
-  mem_loadw # z2 on stack top
+  mem_loadw_be # z2 on stack top
 
   dup.12
   dup.14
 
   push.0.0.0.0
   movup.4
-  mem_loadw
+  mem_loadw_be
   movup.4
   push.0.0.0.0
   movup.4
-  mem_loadw # z1 on stack top
+  mem_loadw_be # z1 on stack top
 
   exec.base_field::mul # = t2
 
-  loc_storew.16
+  loc_storew_be.16
   dropw
-  loc_storew.20
+  loc_storew_be.20
   dropw        # cache t2
 
   dup.2
@@ -426,28 +426,28 @@ export.add.64
 
   push.0.0.0.0
   movup.4
-  mem_loadw
+  mem_loadw_be
   movup.4
   push.0.0.0.0
   movup.4
-  mem_loadw # y1 on stack top
+  mem_loadw_be # y1 on stack top
 
   dup.8
   dup.10
 
   push.0.0.0.0
   movup.4
-  mem_loadw
+  mem_loadw_be
   movup.4
   push.0.0.0.0
   movup.4
-  mem_loadw # x1 on stack top
+  mem_loadw_be # x1 on stack top
 
   exec.base_field::add # = t3
 
-  loc_storew.24
+  loc_storew_be.24
   dropw
-  loc_storew.28
+  loc_storew_be.28
   dropw        # cache t3
 
   dup.8
@@ -455,11 +455,11 @@ export.add.64
 
   push.0.0.0.0
   movup.4
-  mem_loadw
+  mem_loadw_be
   movup.4
   push.0.0.0.0
   movup.4
-  mem_loadw # y2 on stack top
+  mem_loadw_be # y2 on stack top
 
   dup.15
   dup.15
@@ -467,48 +467,48 @@ export.add.64
 
   push.0.0.0.0
   movup.4
-  mem_loadw
+  mem_loadw_be
   movup.4
   push.0.0.0.0
   movup.4
-  mem_loadw # x2 on stack top
+  mem_loadw_be # x2 on stack top
 
   exec.base_field::add # = t4
 
   push.0.0.0.0
-  loc_loadw.28
+  loc_loadw_be.28
   push.0.0.0.0
-  loc_loadw.24 # t3 loaded back
+  loc_loadw_be.24 # t3 loaded back
 
   exec.base_field::mul # = t3
 
-  loc_storew.24
+  loc_storew_be.24
   dropw
-  loc_storew.28
+  loc_storew_be.28
   dropw        # cache t3
 
   push.0.0.0.0
-  loc_loadw.12
+  loc_loadw_be.12
   push.0.0.0.0
-  loc_loadw.8 # t1 loaded back
+  loc_loadw_be.8 # t1 loaded back
 
   push.0.0.0.0
-  loc_loadw.4
+  loc_loadw_be.4
   push.0.0.0.0
-  loc_loadw.0 # t0 loaded back
+  loc_loadw_be.0 # t0 loaded back
 
   exec.base_field::add # = t4
 
   push.0.0.0.0
-  loc_loadw.28
+  loc_loadw_be.28
   push.0.0.0.0
-  loc_loadw.24 # t3 loaded back
+  loc_loadw_be.24 # t3 loaded back
 
   exec.base_field::sub # = t3
 
-  loc_storew.24
+  loc_storew_be.24
   dropw
-  loc_storew.28
+  loc_storew_be.28
   dropw        # cache t3
 
   dup.2
@@ -516,28 +516,28 @@ export.add.64
 
   push.0.0.0.0
   movup.4
-  mem_loadw
+  mem_loadw_be
   movup.4
   push.0.0.0.0
   movup.4
-  mem_loadw # y1 on stack top
+  mem_loadw_be # y1 on stack top
 
   dup.12
   dup.14
 
   push.0.0.0.0
   movup.4
-  mem_loadw
+  mem_loadw_be
   movup.4
   push.0.0.0.0
   movup.4
-  mem_loadw # z1 on stack top
+  mem_loadw_be # z1 on stack top
 
   exec.base_field::add # = t4
 
-  loc_storew.32
+  loc_storew_be.32
   dropw
-  loc_storew.36
+  loc_storew_be.36
   dropw        # cache t4
 
   dup.11
@@ -548,59 +548,59 @@ export.add.64
 
   push.0.0.0.0
   movup.4
-  mem_loadw
+  mem_loadw_be
   movup.4
   push.0.0.0.0
   movup.4
-  mem_loadw # y2 on stack top
+  mem_loadw_be # y2 on stack top
 
   movup.8
   movup.9
 
   push.0.0.0.0
   movup.4
-  mem_loadw
+  mem_loadw_be
   movup.4
   push.0.0.0.0
   movup.4
-  mem_loadw # z2 on stack top
+  mem_loadw_be # z2 on stack top
 
   exec.base_field::add # = x3
 
   push.0.0.0.0
-  loc_loadw.36
+  loc_loadw_be.36
   push.0.0.0.0
-  loc_loadw.32 # t4 loaded back
+  loc_loadw_be.32 # t4 loaded back
 
   exec.base_field::mul # = t4
 
-  loc_storew.32
+  loc_storew_be.32
   dropw
-  loc_storew.36
+  loc_storew_be.36
   dropw        # cache t4
 
   push.0.0.0.0
-  loc_loadw.20
+  loc_loadw_be.20
   push.0.0.0.0
-  loc_loadw.16 # t2 loaded back
+  loc_loadw_be.16 # t2 loaded back
 
   push.0.0.0.0
-  loc_loadw.12
+  loc_loadw_be.12
   push.0.0.0.0
-  loc_loadw.8 # t1 loaded back
+  loc_loadw_be.8 # t1 loaded back
 
   exec.base_field::add # = x3
 
   push.0.0.0.0
-  loc_loadw.36
+  loc_loadw_be.36
   push.0.0.0.0
-  loc_loadw.32 # t4 loaded back
+  loc_loadw_be.32 # t4 loaded back
 
   exec.base_field::sub # = t4
 
-  loc_storew.32
+  loc_storew_be.32
   dropw
-  loc_storew.36
+  loc_storew_be.36
   dropw        # cache t4
 
   dup.4
@@ -608,28 +608,28 @@ export.add.64
 
   push.0.0.0.0
   movup.4
-  mem_loadw
+  mem_loadw_be
   movup.4
   push.0.0.0.0
   movup.4
-  mem_loadw # z1 on stack top
+  mem_loadw_be # z1 on stack top
 
   dup.8
   dup.10
 
   push.0.0.0.0
   movup.4
-  mem_loadw
+  mem_loadw_be
   movup.4
   push.0.0.0.0
   movup.4
-  mem_loadw # x1 on stack top
+  mem_loadw_be # x1 on stack top
 
   exec.base_field::add # = x3
 
-  loc_storew.40
+  loc_storew_be.40
   dropw
-  loc_storew.44
+  loc_storew_be.44
   dropw       # cache x3
 
   dup.10
@@ -637,11 +637,11 @@ export.add.64
 
   push.0.0.0.0
   movup.4
-  mem_loadw
+  mem_loadw_be
   movup.4
   push.0.0.0.0
   movup.4
-  mem_loadw # z2 on stack top
+  mem_loadw_be # z2 on stack top
 
   dup.15
   dup.15
@@ -649,253 +649,253 @@ export.add.64
 
   push.0.0.0.0
   movup.4
-  mem_loadw
+  mem_loadw_be
   movup.4
   push.0.0.0.0
   movup.4
-  mem_loadw # x2 on stack top
+  mem_loadw_be # x2 on stack top
 
   exec.base_field::add # = y3
 
   push.0.0.0.0
-  loc_loadw.44
+  loc_loadw_be.44
   push.0.0.0.0
-  loc_loadw.40 # x3 loaded back
+  loc_loadw_be.40 # x3 loaded back
 
   exec.base_field::mul # = x3
 
-  loc_storew.40
+  loc_storew_be.40
   dropw
-  loc_storew.44
+  loc_storew_be.44
   dropw       # cache x3
 
   push.0.0.0.0
-  loc_loadw.20
+  loc_loadw_be.20
   push.0.0.0.0
-  loc_loadw.16 # t2 loaded back
+  loc_loadw_be.16 # t2 loaded back
 
   push.0.0.0.0
-  loc_loadw.4
+  loc_loadw_be.4
   push.0.0.0.0
-  loc_loadw.0 # t0 loaded back
+  loc_loadw_be.0 # t0 loaded back
 
   exec.base_field::add # = y3
 
   push.0.0.0.0
-  loc_loadw.44
+  loc_loadw_be.44
   push.0.0.0.0
-  loc_loadw.40 # x3 loaded back
+  loc_loadw_be.40 # x3 loaded back
 
   exec.base_field::sub # = y3
 
-  loc_storew.48
+  loc_storew_be.48
   dropw
-  loc_storew.52
+  loc_storew_be.52
   dropw       # cache y3
 
   push.0.0.0.0
-  loc_loadw.4
+  loc_loadw_be.4
   push.0.0.0.0
-  loc_loadw.0 # t0 loaded back
+  loc_loadw_be.0 # t0 loaded back
 
   dupw.1
   dupw.1
 
   exec.base_field::add # = x3
 
-  loc_storew.40
+  loc_storew_be.40
   swapw
-  loc_storew.44
+  loc_storew_be.44
   swapw # cache x3
 
   push.0.0.0.0
-  loc_loadw.4
+  loc_loadw_be.4
   push.0.0.0.0
-  loc_loadw.0 # t0 loaded back
+  loc_loadw_be.0 # t0 loaded back
 
   exec.base_field::add # = t0
 
-  loc_storew.0
+  loc_storew_be.0
   dropw
-  loc_storew.4
+  loc_storew_be.4
   dropw        # cache t0
 
   push.0.0.0.0
   push.0.0.21.20517 # b3 on stack top
 
   push.0.0.0.0
-  loc_loadw.20
+  loc_loadw_be.20
   push.0.0.0.0
-  loc_loadw.16 # t2 loaded back
+  loc_loadw_be.16 # t2 loaded back
 
   exec.base_field::mul # = t2
 
-  loc_storew.16
+  loc_storew_be.16
   swapw
-  loc_storew.20
+  loc_storew_be.20
   swapw # cache t2
 
   push.0.0.0.0
-  loc_loadw.12
+  loc_loadw_be.12
   push.0.0.0.0
-  loc_loadw.8 # t1 loaded back
+  loc_loadw_be.8 # t1 loaded back
 
   exec.base_field::add # = z3
 
-  loc_storew.56
+  loc_storew_be.56
   dropw
-  loc_storew.60
+  loc_storew_be.60
   dropw       # cache z3
 
   push.0.0.0.0
-  loc_loadw.20
+  loc_loadw_be.20
   push.0.0.0.0
-  loc_loadw.16 # t2 loaded back
+  loc_loadw_be.16 # t2 loaded back
 
   push.0.0.0.0
-  loc_loadw.12
+  loc_loadw_be.12
   push.0.0.0.0
-  loc_loadw.8 # t1 loaded back
+  loc_loadw_be.8 # t1 loaded back
 
   exec.base_field::sub # = t1
 
-  loc_storew.8
+  loc_storew_be.8
   dropw
-  loc_storew.12
+  loc_storew_be.12
   dropw        # cache t1
 
   push.0.0.0.0
   push.0.0.21.20517 # b3 on stack top
 
   push.0.0.0.0
-  loc_loadw.52
+  loc_loadw_be.52
   push.0.0.0.0
-  loc_loadw.48 # y3 loaded back
+  loc_loadw_be.48 # y3 loaded back
 
   exec.base_field::mul # = y3
 
-  loc_storew.48
+  loc_storew_be.48
   swapw
-  loc_storew.52
+  loc_storew_be.52
   swapw # cache y3
 
   push.0.0.0.0
-  loc_loadw.36
+  loc_loadw_be.36
   push.0.0.0.0
-  loc_loadw.32 # t4 loaded back
+  loc_loadw_be.32 # t4 loaded back
 
   exec.base_field::mul # = x3
 
-  loc_storew.40
+  loc_storew_be.40
   dropw
-  loc_storew.44
+  loc_storew_be.44
   dropw       # cache x3
 
   push.0.0.0.0
-  loc_loadw.12
+  loc_loadw_be.12
   push.0.0.0.0
-  loc_loadw.8 # t1 loaded back
+  loc_loadw_be.8 # t1 loaded back
 
   push.0.0.0.0
-  loc_loadw.28
+  loc_loadw_be.28
   push.0.0.0.0
-  loc_loadw.24 # t3 loaded back
+  loc_loadw_be.24 # t3 loaded back
 
   exec.base_field::mul # = t2
 
   push.0.0.0.0
-  loc_loadw.44
+  loc_loadw_be.44
   push.0.0.0.0
-  loc_loadw.40 # x3 loaded back
+  loc_loadw_be.40 # x3 loaded back
 
   exec.base_field::neg
   exec.base_field::add # = x3
 
-  loc_storew.40
+  loc_storew_be.40
   dropw
-  loc_storew.44
+  loc_storew_be.44
   dropw       # cache x3
 
   push.0.0.0.0
-  loc_loadw.4
+  loc_loadw_be.4
   push.0.0.0.0
-  loc_loadw.0 # t0 loaded back
+  loc_loadw_be.0 # t0 loaded back
 
   push.0.0.0.0
-  loc_loadw.52
+  loc_loadw_be.52
   push.0.0.0.0
-  loc_loadw.48 # y3 loaded back
+  loc_loadw_be.48 # y3 loaded back
 
   exec.base_field::mul # = y3
 
-  loc_storew.48
+  loc_storew_be.48
   dropw
-  loc_storew.52
+  loc_storew_be.52
   dropw       # cache y3
 
   push.0.0.0.0
-  loc_loadw.60
+  loc_loadw_be.60
   push.0.0.0.0
-  loc_loadw.56 # z3 loaded back
+  loc_loadw_be.56 # z3 loaded back
 
   push.0.0.0.0
-  loc_loadw.12
+  loc_loadw_be.12
   push.0.0.0.0
-  loc_loadw.8 # t1 loaded back
+  loc_loadw_be.8 # t1 loaded back
 
   exec.base_field::mul # = t1
 
   push.0.0.0.0
-  loc_loadw.52
+  loc_loadw_be.52
   push.0.0.0.0
-  loc_loadw.48 # y3 loaded back
+  loc_loadw_be.48 # y3 loaded back
 
   exec.base_field::add # = y3
 
-  loc_storew.48
+  loc_storew_be.48
   dropw
-  loc_storew.52
+  loc_storew_be.52
   dropw       # cache y3
 
   push.0.0.0.0
-  loc_loadw.28
+  loc_loadw_be.28
   push.0.0.0.0
-  loc_loadw.24 # t3 loaded back
+  loc_loadw_be.24 # t3 loaded back
 
   push.0.0.0.0
-  loc_loadw.4
+  loc_loadw_be.4
   push.0.0.0.0
-  loc_loadw.0 # t0 loaded back
+  loc_loadw_be.0 # t0 loaded back
 
   exec.base_field::mul # = t0
 
-  loc_storew.0
+  loc_storew_be.0
   dropw
-  loc_storew.4
+  loc_storew_be.4
   dropw        # cache t0
 
   push.0.0.0.0
-  loc_loadw.36
+  loc_loadw_be.36
   push.0.0.0.0
-  loc_loadw.32 # t4 loaded back
+  loc_loadw_be.32 # t4 loaded back
 
   push.0.0.0.0
-  loc_loadw.60
+  loc_loadw_be.60
   push.0.0.0.0
-  loc_loadw.56 # z3 loaded back
+  loc_loadw_be.56 # z3 loaded back
 
   exec.base_field::mul # = z3
 
   push.0.0.0.0
-  loc_loadw.4
+  loc_loadw_be.4
   push.0.0.0.0
-  loc_loadw.0 # t0 loaded back
+  loc_loadw_be.0 # t0 loaded back
 
   exec.base_field::add # = z3
 
-  loc_storew.56
+  loc_storew_be.56
   dropw
-  loc_storew.60
+  loc_storew_be.60
   dropw       # cache z3
 
   dropw
@@ -903,39 +903,39 @@ export.add.64
   dropw
 
   push.0.0.0.0
-  loc_loadw.40
+  loc_loadw_be.40
   dup.4
-  mem_storew
+  mem_storew_be
   dropw              # write x3[0..4] to memory
 
   push.0.0.0.0
-  loc_loadw.44
+  loc_loadw_be.44
   dup.5
-  mem_storew
+  mem_storew_be
   dropw              # write x3[4..8] to memory
 
   push.0.0.0.0
-  loc_loadw.48
+  loc_loadw_be.48
   dup.6
-  mem_storew
+  mem_storew_be
   dropw              # write y3[0..4] to memory
 
   push.0.0.0.0
-  loc_loadw.52
+  loc_loadw_be.52
   dup.7
-  mem_storew
+  mem_storew_be
   dropw              # write y3[4..8] to memory
 
   push.0.0.0.0
-  loc_loadw.56
+  loc_loadw_be.56
   dup.8
-  mem_storew
+  mem_storew_be
   dropw              # write z3[0..4] to memory
 
   push.0.0.0.0
-  loc_loadw.60
+  loc_loadw_be.60
   dup.9
-  mem_storew
+  mem_storew_be
   dropw              # write z3[4..8] to memory
 end
 
@@ -982,46 +982,46 @@ export.mul.72
   push.0.0.0.0
 
   movup.4
-  mem_loadw
-  loc_storew.0
+  mem_loadw_be
+  loc_storew_be.0
 
   movup.4
-  mem_loadw
-  loc_storew.4
+  mem_loadw_be
+  loc_storew_be.4
 
   movup.4
-  mem_loadw
-  loc_storew.8
+  mem_loadw_be
+  loc_storew_be.8
 
   movup.4
-  mem_loadw
-  loc_storew.12
+  mem_loadw_be
+  loc_storew_be.12
 
   movup.4
-  mem_loadw
-  loc_storew.16
+  mem_loadw_be
+  loc_storew_be.16
 
   movup.4
-  mem_loadw
-  loc_storew.20
+  mem_loadw_be
+  loc_storew_be.20
 
   dropw
 
   # initialize `res` ( with group identity )
   # See https://github.com/itzmeanjan/secp256k1/blob/d23ea7d/point.py#L40-L45
   push.0.0.0.0
-  loc_storew.24
-  loc_storew.28
+  loc_storew_be.24
+  loc_storew_be.28
   dropw
 
   push.0.0.1.977
-  loc_storew.32
+  loc_storew_be.32
   dropw
   push.0.0.0.0
-  loc_storew.36
+  loc_storew_be.36
 
-  loc_storew.40
-  loc_storew.44
+  loc_storew_be.40
+  loc_storew_be.44
 
   dropw
 
@@ -1062,28 +1062,28 @@ export.mul.72
         push.0.0.0.0
 
         movup.4
-        mem_loadw
-        loc_storew.24
+        mem_loadw_be
+        loc_storew_be.24
 
         movup.4
-        mem_loadw
-        loc_storew.28
+        mem_loadw_be
+        loc_storew_be.28
 
         movup.4
-        mem_loadw
-        loc_storew.32
+        mem_loadw_be
+        loc_storew_be.32
 
         movup.4
-        mem_loadw
-        loc_storew.36
+        mem_loadw_be
+        loc_storew_be.36
 
         movup.4
-        mem_loadw
-        loc_storew.40
+        mem_loadw_be
+        loc_storew_be.40
 
         movup.4
-        mem_loadw
-        loc_storew.44
+        mem_loadw_be
+        loc_storew_be.44
 
         dropw
       end
@@ -1110,28 +1110,28 @@ export.mul.72
       push.0.0.0.0
 
       movup.4
-      mem_loadw
-      loc_storew.0
+      mem_loadw_be
+      loc_storew_be.0
 
       movup.4
-      mem_loadw
-      loc_storew.4
+      mem_loadw_be
+      loc_storew_be.4
 
       movup.4
-      mem_loadw
-      loc_storew.8
+      mem_loadw_be
+      loc_storew_be.8
 
       movup.4
-      mem_loadw
-      loc_storew.12
+      mem_loadw_be
+      loc_storew_be.12
 
       movup.4
-      mem_loadw
-      loc_storew.16
+      mem_loadw_be
+      loc_storew_be.16
 
       movup.4
-      mem_loadw
-      loc_storew.20
+      mem_loadw_be
+      loc_storew_be.20
 
       dropw
 
@@ -1144,29 +1144,29 @@ export.mul.72
   # write resulting point to provided output memory addresses
   push.0.0.0.0
 
-  loc_loadw.24
+  loc_loadw_be.24
   dup.4
-  mem_storew
+  mem_storew_be
 
-  loc_loadw.28
+  loc_loadw_be.28
   dup.5
-  mem_storew
+  mem_storew_be
 
-  loc_loadw.32
+  loc_loadw_be.32
   dup.6
-  mem_storew
+  mem_storew_be
 
-  loc_loadw.36
+  loc_loadw_be.36
   dup.7
-  mem_storew
+  mem_storew_be
 
-  loc_loadw.40
+  loc_loadw_be.40
   dup.8
-  mem_storew
+  mem_storew_be
 
-  loc_loadw.44
+  loc_loadw_be.44
   dup.9
-  mem_storew
+  mem_storew_be
 
   dropw
 end
@@ -1209,29 +1209,29 @@ export.gen_mul.80
   # identity point of group (0, 1, 0) in projective coordinate
   # see https://github.com/itzmeanjan/secp256k1/blob/d23ea7d/point.py#L40-L45
   push.0.0.0.0
-  loc_storew.0
+  loc_storew_be.0
   dropw
   push.0.0.0.0
-  loc_storew.4
+  loc_storew_be.4
   dropw        # init & cache res_X
 
   push.0.0.1.977
-  loc_storew.8
+  loc_storew_be.8
   dropw
   push.0.0.0.0
-  loc_storew.12
+  loc_storew_be.12
   dropw         # init & cache res_Y
 
   push.0.0.0.0
-  loc_storew.16
+  loc_storew_be.16
   dropw
   push.0.0.0.0
-  loc_storew.20
+  loc_storew_be.20
   dropw         # init & cache res_Z
 
-  loc_storew.72
+  loc_storew_be.72
   dropw
-  loc_storew.76
+  loc_storew_be.76
   dropw
 
   # push (2^255)G into stack
@@ -3286,27 +3286,27 @@ export.gen_mul.80
     repeat.4
       repeat.32
         push.0.0.0.0
-        loc_loadw.72
+        loc_loadw_be.72
         dup
         push.1
         u32and
         movdn.4
         u32shr.1
-        loc_storew.72
+        loc_storew_be.72
         dropw
 
         if.true
-          loc_storew.48
+          loc_storew_be.48
           dropw
-          loc_storew.52
+          loc_storew_be.52
           dropw
-          loc_storew.56
+          loc_storew_be.56
           dropw
-          loc_storew.60
+          loc_storew_be.60
           dropw
-          loc_storew.64
+          loc_storew_be.64
           dropw
-          loc_storew.68
+          loc_storew_be.68
           dropw
 
           locaddr.44
@@ -3335,20 +3335,20 @@ export.gen_mul.80
           drop
           drop
 
-          loc_loadw.24
-          loc_storew.0
-          loc_loadw.28
-          loc_storew.4
+          loc_loadw_be.24
+          loc_storew_be.0
+          loc_loadw_be.28
+          loc_storew_be.4
 
-          loc_loadw.32
-          loc_storew.8
-          loc_loadw.36
-          loc_storew.12
+          loc_loadw_be.32
+          loc_storew_be.8
+          loc_loadw_be.36
+          loc_storew_be.12
 
-          loc_loadw.40
-          loc_storew.16
-          loc_loadw.44
-          loc_storew.20
+          loc_loadw_be.40
+          loc_storew_be.16
+          loc_loadw_be.44
+          loc_storew_be.20
 
           dropw
         else
@@ -3359,57 +3359,57 @@ export.gen_mul.80
       end
 
       push.0.0.0.0
-      loc_loadw.72
+      loc_loadw_be.72
       movdn.3
-      loc_storew.72
+      loc_storew_be.72
       dropw
     end
 
     push.0.0.0.0
-    loc_loadw.76
-    loc_storew.72
+    loc_loadw_be.76
+    loc_storew_be.72
     dropw
   end
 
   dup
   push.0.0.0.0
-  loc_loadw.0
+  loc_loadw_be.0
   movup.4
-  mem_storew
+  mem_storew_be
   dropw              # write x[0..4] to memory
 
   dup.1
   push.0.0.0.0
-  loc_loadw.4
+  loc_loadw_be.4
   movup.4
-  mem_storew
+  mem_storew_be
   dropw              # write x[4..8] to memory
 
   dup.2
   push.0.0.0.0
-  loc_loadw.8
+  loc_loadw_be.8
   movup.4
-  mem_storew
+  mem_storew_be
   dropw              # write y[0..4] to memory
 
   dup.3
   push.0.0.0.0
-  loc_loadw.12
+  loc_loadw_be.12
   movup.4
-  mem_storew
+  mem_storew_be
   dropw              # write y[4..8] to memory
 
   dup.4
   push.0.0.0.0
-  loc_loadw.16
+  loc_loadw_be.16
   movup.4
-  mem_storew
+  mem_storew_be
   dropw              # write z[0..4] to memory
 
   dup.5
   push.0.0.0.0
-  loc_loadw.20
+  loc_loadw_be.20
   movup.4
-  mem_storew
+  mem_storew_be
   dropw              # write z[4..8] to memory
 end

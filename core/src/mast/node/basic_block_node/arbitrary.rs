@@ -74,8 +74,6 @@ pub fn op_no_imm_strategy() -> impl Strategy<Value = Operation> {
         Just(Operation::U32xor),
         Just(Operation::U32add3),
         Just(Operation::U32madd),
-        Just(Operation::FmpAdd),
-        Just(Operation::FmpUpdate),
         Just(Operation::SDepth),
         Just(Operation::Caller),
         Just(Operation::Clk),

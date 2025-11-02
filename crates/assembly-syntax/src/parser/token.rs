@@ -108,7 +108,7 @@ impl crate::prettier::PrettyPrint for PushValue {
 #[cfg_attr(feature = "serde", serde(transparent))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_serde_test_macros::serde_test(winter_serde(true))
+    miden_test_serde_macros::serde_test(winter_serde(true))
 )]
 pub struct WordValue(pub [Felt; 4]);
 
@@ -207,7 +207,7 @@ impl Deserializable for WordValue {
 #[cfg_attr(feature = "serde", serde(untagged))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_serde_test_macros::serde_test(winter_serde(true))
+    miden_test_serde_macros::serde_test(winter_serde(true))
 )]
 pub enum IntValue {
     /// A tiny value
@@ -482,6 +482,7 @@ pub enum Token<'input> {
     HasMapkey,
     HornerBase,
     HornerExt,
+    LogPrecompile,
     Hperm,
     Hmerge,
     I1,
@@ -498,8 +499,12 @@ pub enum Token<'input> {
     Locaddr,
     LocLoad,
     LocLoadw,
+    LocLoadwBe,
+    LocLoadwLe,
     LocStore,
     LocStorew,
+    LocStorewBe,
+    LocStorewLe,
     Lt,
     Lte,
     Mem,
@@ -716,8 +721,12 @@ impl fmt::Display for Token<'_> {
             Token::Locaddr => write!(f, "locaddr"),
             Token::LocLoad => write!(f, "loc_load"),
             Token::LocLoadw => write!(f, "loc_loadw"),
+            Token::LocLoadwBe => write!(f, "loc_loadw_be"),
+            Token::LocLoadwLe => write!(f, "loc_loadw_le"),
             Token::LocStore => write!(f, "loc_store"),
             Token::LocStorew => write!(f, "loc_storew"),
+            Token::LocStorewBe => write!(f, "loc_storew_be"),
+            Token::LocStorewLe => write!(f, "loc_storew_le"),
             Token::Lt => write!(f, "lt"),
             Token::Lte => write!(f, "lte"),
             Token::Mem => write!(f, "mem"),
@@ -753,6 +762,7 @@ impl fmt::Display for Token<'_> {
             Token::Push => write!(f, "push"),
             Token::HornerBase => write!(f, "horner_eval_base"),
             Token::HornerExt => write!(f, "horner_eval_ext"),
+            Token::LogPrecompile => write!(f, "log_precompile"),
             Token::Repeat => write!(f, "repeat"),
             Token::Reversew => write!(f, "reversew"),
             Token::Reversedw => write!(f, "reversedw"),
@@ -926,8 +936,12 @@ impl<'input> Token<'input> {
                 | Token::Locaddr
                 | Token::LocLoad
                 | Token::LocLoadw
+                | Token::LocLoadwBe
+                | Token::LocLoadwLe
                 | Token::LocStore
                 | Token::LocStorew
+                | Token::LocStorewBe
+                | Token::LocStorewLe
                 | Token::Lt
                 | Token::Lte
                 | Token::Mem
@@ -1118,8 +1132,12 @@ impl<'input> Token<'input> {
         ("locaddr", Token::Locaddr),
         ("loc_load", Token::LocLoad),
         ("loc_loadw", Token::LocLoadw),
+        ("loc_loadw_be", Token::LocLoadwBe),
+        ("loc_loadw_le", Token::LocLoadwLe),
         ("loc_store", Token::LocStore),
         ("loc_storew", Token::LocStorew),
+        ("loc_storew_be", Token::LocStorewBe),
+        ("loc_storew_le", Token::LocStorewLe),
         ("lt", Token::Lt),
         ("lte", Token::Lte),
         ("mem", Token::Mem),
@@ -1155,6 +1173,7 @@ impl<'input> Token<'input> {
         ("pub", Token::Pub),
         ("horner_eval_base", Token::HornerBase),
         ("horner_eval_ext", Token::HornerExt),
+        ("log_precompile", Token::LogPrecompile),
         ("repeat", Token::Repeat),
         ("reversew", Token::Reversew),
         ("reversedw", Token::Reversedw),

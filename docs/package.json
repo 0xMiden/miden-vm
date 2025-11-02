@@ -1,0 +1,23 @@
+{
+  "name": "@miden/docs-dev",
+  "private": true,
+  "scripts": {
+    "start:dev": "docusaurus start --port 3000 --host 0.0.0.0",
+    "build:dev": "docusaurus build",
+    "serve:dev": "docusaurus serve build"
+  },
+  "dependencies": {
+    "@docusaurus/core": "3.8.1",
+    "@docusaurus/preset-classic": "3.8.1",
+    "@docusaurus/theme-mermaid": "^3.8.1",
+    "@mdx-js/react": "^3.1.1",
+    "katex": "^0.16.22",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "rehype-katex": "^7",
+    "remark-math": "^6"
+  },
+  "devDependencies": {
+    "@cmfcmf/docusaurus-search-local": "^2.0.0"
+  }
+}

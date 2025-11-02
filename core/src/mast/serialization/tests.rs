@@ -18,8 +18,6 @@ fn confirm_operation_and_decorator_structure() {
     match Operation::Noop {
         Operation::Noop => (),
         Operation::Assert(_) => (),
-        Operation::FmpAdd => (),
-        Operation::FmpUpdate => (),
         Operation::SDepth => (),
         Operation::Caller => (),
         Operation::Clk => (),
@@ -109,6 +107,7 @@ fn confirm_operation_and_decorator_structure() {
         Operation::HornerExt => (),
         Operation::EvalCircuit => (),
         Operation::Emit => (),
+        Operation::LogPrecompile => (),
     };
 
     match Decorator::Trace(0) {
@@ -133,8 +132,6 @@ fn serialize_deserialize_all_nodes() {
         let operations = vec![
             Operation::Noop,
             Operation::Assert(Felt::from(42u32)),
-            Operation::FmpAdd,
-            Operation::FmpUpdate,
             Operation::SDepth,
             Operation::Caller,
             Operation::Clk,

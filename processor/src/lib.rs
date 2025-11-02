@@ -20,7 +20,7 @@ pub use miden_core::{
     crypto::merkle::SMT_DEPTH,
     errors::InputError,
     mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
-    precompile::PrecompileRequest,
+    precompile::{PrecompileRequest, PrecompileTranscriptState},
     sys_events::SystemEvent,
     utils::DeserializationError,
 };
@@ -44,8 +44,8 @@ pub(crate) mod processor;
 mod operations;
 
 mod system;
+pub use system::ContextId;
 use system::System;
-pub use system::{ContextId, FMP_MIN, SYSCALL_FMP_MIN};
 
 #[cfg(test)]
 mod test_utils;
@@ -240,6 +240,8 @@ pub struct Process {
     chiplets: Chiplets,
     max_cycles: u32,
     enable_tracing: bool,
+    /// Precompile transcript state (sponge capacity) used by `log_precompile`.
+    pc_transcript_state: PrecompileTranscriptState,
 }
 
 #[cfg(any(test, feature = "testing"))]
@@ -252,6 +254,8 @@ pub struct Process {
     pub chiplets: Chiplets,
     pub max_cycles: u32,
     pub enable_tracing: bool,
+    /// Precompile transcript state (sponge capacity) used by `log_precompile`.
+    pub pc_transcript_state: PrecompileTranscriptState,
 }
 
 impl Process {
@@ -297,6 +301,7 @@ impl Process {
             chiplets: Chiplets::new(kernel),
             max_cycles: execution_options.max_cycles(),
             enable_tracing: execution_options.enable_tracing(),
+            pc_transcript_state: PrecompileTranscriptState::default(),
         }
     }
 
@@ -457,12 +462,6 @@ impl Process {
         program: &MastForest,
         host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
-        // call or syscall are not allowed inside a syscall
-        if self.system.in_syscall() {
-            let instruction = if call_node.is_syscall() { "syscall" } else { "call" };
-            return Err(ExecutionError::CallInSyscall(instruction));
-        }
-
         // if this is a syscall, make sure the call target exists in the kernel
         if call_node.is_syscall() {
             let callee = program.get_node_by_id(call_node.callee()).ok_or_else(|| {
@@ -473,7 +472,7 @@ impl Process {
         }
         err_ctx!(program, call_node, host);
 
-        self.start_call_node(call_node, program, host)?;
+        self.start_call_node(call_node, program, host, &err_ctx)?;
         self.execute_mast_node(call_node.callee(), program, host)?;
         self.end_call_node(call_node, program, host, &())
     }
@@ -489,12 +488,7 @@ impl Process {
         program: &MastForest,
         host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
-        // dyn calls are not allowed inside a syscall
-        if node.is_dyncall() && self.system.in_syscall() {
-            return Err(ExecutionError::CallInSyscall("dyncall"));
-        }
-
-        err_ctx!(program, node, host);
+        let err_ctx = err_ctx!(program, node, host);
 
         let callee_hash = if node.is_dyncall() {
             self.start_dyncall_node(node, &())?
@@ -737,8 +731,17 @@ impl Process {
         self.chiplets.kernel_rom.kernel()
     }
 
-    pub fn into_parts(self) -> (System, Decoder, Stack, RangeChecker, Chiplets) {
-        (self.system, self.decoder, self.stack, self.range, self.chiplets)
+    pub fn into_parts(
+        self,
+    ) -> (System, Decoder, Stack, RangeChecker, Chiplets, PrecompileTranscriptState) {
+        (
+            self.system,
+            self.decoder,
+            self.stack,
+            self.range,
+            self.chiplets,
+            self.pc_transcript_state,
+        )
     }
 }
 
@@ -811,16 +814,6 @@ impl<'a> ProcessState<'a> {
         match self {
             ProcessState::Slow(state) => state.system.ctx(),
             ProcessState::Fast(state) => state.processor.ctx,
-            ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
-        }
-    }
-
-    /// Returns the current value of the free memory pointer.
-    #[inline(always)]
-    pub fn fmp(&self) -> u64 {
-        match self {
-            ProcessState::Slow(state) => state.system.fmp().as_int(),
-            ProcessState::Fast(state) => state.processor.fmp.as_int(),
             ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
         }
     }

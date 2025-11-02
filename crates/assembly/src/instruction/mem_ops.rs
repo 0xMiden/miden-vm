@@ -4,15 +4,16 @@ use miden_assembly_syntax::{
 };
 use miden_core::{Felt, Operation::*};
 
-use super::{BasicBlockBuilder, push_felt, push_u32_value};
-use crate::ProcedureContext;
+use super::{BasicBlockBuilder, push_u32_value};
+use crate::{ProcedureContext, fmp::push_offset_fmp_sequence};
 
 // INSTRUCTION PARSERS
 // ================================================================================================
 
 /// Appends operations to the span needed to execute a memory read instruction. This includes
 /// reading a single element or an entire word from either local or global memory. Specifically,
-/// this handles mem_load, mem_loadw, loc_load, and loc_loadw instructions.
+/// this handles mem_load, mem_loadw_be, mem_loadw_le, loc_load, loc_loadw_be, and loc_loadw_le
+/// instructions.
 ///
 /// VM cycles per operation:
 /// - mem_load(w): 1 cycle
@@ -63,20 +64,20 @@ pub fn mem_read(
 
 /// Appends operations to the span needed to execute a memory write instruction with an immediate
 /// address. This includes writing a single element or an entire word into either local or global
-/// memory. Specifically, this handles mem_store, mem_storew, loc_store, and loc_storew
-/// instructions.
+/// memory. Specifically, this handles mem_store, mem_storew_be, mem_storew_le, loc_store,
+/// loc_storew_be, and loc_storew_le instructions.
 ///
 /// VM cycles per operation:
 /// - mem_store.b:
 ///   - 4 cycles if b = 1
 ///   - 3 cycles if b != 1
-/// - mem_storew.b:
+/// - mem_storew_be.b:
 ///   - 3 cycles if b = 1
 ///   - 2 cycles if b != 1
 /// - loc_store.b:
 ///   - 5 cycles if b = 1
 ///   - 4 cycles if b != 1
-/// - loc_storew.b:
+/// - loc_storew_be.b:
 ///   - 4 cycles if b = 1
 ///   - 3 cycles if b != 1
 ///
@@ -117,8 +118,8 @@ pub fn mem_write_imm(
 // HELPER FUNCTIONS
 // ================================================================================================
 
-/// Appends a sequence of operations to the span needed for converting procedure local index to
-/// absolute memory address. This consists in calculating the offset of the local value from the
+/// Appends a sequence of operations to the basic block needed for converting procedure local index
+/// to absolute memory address. This consists in calculating the offset of the local value from the
 /// frame pointer and pushing the result onto the stack.
 ///
 /// This operation takes:
@@ -183,9 +184,8 @@ pub fn local_to_absolute_addr(
         );
     }
 
-    let fmp_offset_of_local = num_proc_locals - index_of_local;
-    push_felt(block_builder, -Felt::from(fmp_offset_of_local));
-    block_builder.push_op(FmpAdd);
+    let fmp_offset_of_local = -Felt::from(num_proc_locals - index_of_local);
+    block_builder.push_ops(push_offset_fmp_sequence(fmp_offset_of_local));
 
     Ok(())
 }

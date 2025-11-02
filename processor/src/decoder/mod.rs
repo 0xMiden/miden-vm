@@ -13,7 +13,7 @@ use miden_air::{
 #[cfg(test)]
 use miden_core::mast::OP_GROUP_SIZE;
 use miden_core::{
-    AssemblyOp,
+    AssemblyOp, FMP_ADDR, FMP_INIT_VALUE,
     mast::{
         BasicBlockNode, CallNode, DynNode, JoinNode, LoopNode, MastForest, MastNodeExt,
         OP_BATCH_SIZE, SplitNode,
@@ -233,6 +233,7 @@ impl Process {
         node: &CallNode,
         program: &MastForest,
         host: &mut H,
+        err_ctx: &impl ErrorContext,
     ) -> Result<(), ExecutionError> {
         // use the hasher to compute the hash of the CALL or SYSCALL block; the row address
         // returned by the hasher is used as the ID of the block; the result of the hash is
@@ -263,7 +264,6 @@ impl Process {
         let ctx_info = ExecutionContextInfo::new(
             self.system.ctx(),
             self.system.fn_hash(),
-            self.system.fmp(),
             stack_depth as u32,
             next_overflow_addr,
         );
@@ -274,6 +274,18 @@ impl Process {
         } else {
             self.system.start_call_or_dyncall(callee_hash);
             self.decoder.start_call(callee_hash, addr, ctx_info);
+
+            // Initialize the fmp for the new context in memory.
+            self.chiplets
+                .memory
+                .write(
+                    self.system.get_next_ctx_id(),
+                    FMP_ADDR,
+                    self.system.clk(),
+                    FMP_INIT_VALUE,
+                    err_ctx,
+                )
+                .map_err(ExecutionError::MemoryError)?;
         }
 
         // the rest of the VM state does not change
@@ -300,11 +312,7 @@ impl Process {
 
         // when returning from a function call or a syscall, restore the context of the system
         // registers and the operand stack to what it was prior to the call.
-        self.system.restore_context(
-            ctx_info.parent_ctx,
-            ctx_info.parent_fmp,
-            ctx_info.parent_fn_hash,
-        );
+        self.system.restore_context(ctx_info.parent_ctx, ctx_info.parent_fn_hash);
         self.stack.restore_context(ctx_info.parent_stack_depth as usize);
 
         // the rest of the VM state does not change
@@ -374,6 +382,18 @@ impl Process {
             .read_word(self.system.ctx(), mem_addr, self.system.clk(), err_ctx)
             .map_err(ExecutionError::MemoryError)?;
 
+        // Initialize the fmp for the new context in memory.
+        self.chiplets
+            .memory
+            .write(
+                self.system.get_next_ctx_id(),
+                FMP_ADDR,
+                self.system.clk(),
+                FMP_INIT_VALUE,
+                err_ctx,
+            )
+            .map_err(ExecutionError::MemoryError)?;
+
         // Note: other functions end in "executing a Noop", which
         // 1. ensures trace capacity,
         // 2. copies the stack over to the next row,
@@ -399,7 +419,6 @@ impl Process {
         let ctx_info = ExecutionContextInfo::new(
             self.system.ctx(),
             self.system.fn_hash(),
-            self.system.fmp(),
             stack_depth as u32,
             next_overflow_addr,
         );
@@ -447,11 +466,7 @@ impl Process {
 
         // when returning from a function call, restore the context of the system
         // registers and the operand stack to what it was prior to the call.
-        self.system.restore_context(
-            ctx_info.parent_ctx,
-            ctx_info.parent_fmp,
-            ctx_info.parent_fn_hash,
-        );
+        self.system.restore_context(ctx_info.parent_ctx, ctx_info.parent_fn_hash);
         self.stack.restore_context(ctx_info.parent_stack_depth as usize);
 
         self.execute_op(Operation::Noop, program, host)

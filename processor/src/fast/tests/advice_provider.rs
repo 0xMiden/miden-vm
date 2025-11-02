@@ -13,13 +13,13 @@ fn test_advice_provider() {
 
     let program_source = "
     proc.truncate_stack.4
-        loc_storew.0 dropw movupw.3
+        loc_storew_be.0 dropw movupw.3
         sdepth neq.16
         while.true
             dropw movupw.3
             sdepth neq.16
         end
-        loc_loadw.0
+        loc_loadw_be.0
     end
 
     # mainly used to break basic blocks
@@ -120,11 +120,11 @@ fn test_advice_provider() {
         trace.12
 
         # Check that dyncalls are handled correctly
-        procref.dyncall_me mem_storew.4 dropw push.4 dyncall trace.13
-        procref.will_syscall mem_storew.8 dropw push.8 dyncall trace.14
+        procref.dyncall_me mem_storew_be.4 dropw push.4 dyncall trace.13
+        procref.will_syscall mem_storew_be.8 dropw push.8 dyncall trace.14
 
         # Check that dynexecs are handled correctly
-        procref.dynexec_me mem_storew.4 dropw push.4 dynexec trace.15
+        procref.dynexec_me mem_storew_be.4 dropw push.4 dynexec trace.15
 
         # Check that control flow operations are handled correctly
         exec.control_flow

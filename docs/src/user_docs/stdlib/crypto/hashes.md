@@ -1,3 +1,8 @@
+---
+title: "Cryptographic Hashes"
+sidebar_position: 3
+---
+
 # Cryptographic hashes
 Namespace `std::crypto::hashes` contains modules for commonly used cryptographic hash functions.
 

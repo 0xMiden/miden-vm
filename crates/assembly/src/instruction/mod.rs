@@ -1,12 +1,15 @@
 use miden_assembly_syntax::{
-    ast::Instruction,
+    ast::{ImmU16, Instruction},
     debuginfo::{Span, Spanned},
     diagnostics::{RelatedLabel, Report},
     parser::{IntValue, PushValue},
 };
-use miden_core::{Decorator, Felt, ONE, Operation, WORD_SIZE, ZERO, mast::MastNodeId};
+use miden_core::{Decorator, Felt, Operation, WORD_SIZE, ZERO, mast::MastNodeId};
 
-use crate::{Assembler, ProcedureContext, ast::InvokeKind, basic_block_builder::BasicBlockBuilder};
+use crate::{
+    Assembler, ProcedureContext, ast::InvokeKind, basic_block_builder::BasicBlockBuilder,
+    push_value_ops,
+};
 
 mod adv_ops;
 mod crypto_ops;
@@ -363,7 +366,7 @@ impl Assembler {
             },
             Instruction::PushFeltList(imms) => env_ops::push_many(imms, block_builder),
             Instruction::Sdepth => block_builder.push_op(SDepth),
-            Instruction::Caller => env_ops::caller(block_builder, proc_ctx, instruction.span())?,
+            Instruction::Caller => env_ops::caller(block_builder),
             Instruction::Clk => block_builder.push_op(Clk),
             Instruction::AdvPipe => block_builder.push_op(Pipe),
             Instruction::AdvPush(n) => {
@@ -386,14 +389,14 @@ impl Assembler {
                 true,
                 span,
             )?,
-            Instruction::MemLoadW | Instruction::MemLoadWBe => {
+            Instruction::MemLoadWBe => {
                 mem_ops::mem_read(block_builder, proc_ctx, None, false, false, span)?
             },
             Instruction::MemLoadWLe => {
                 mem_ops::mem_read(block_builder, proc_ctx, None, false, false, span)?;
                 push_reversew(block_builder);
             },
-            Instruction::MemLoadWImm(v) | Instruction::MemLoadWBeImm(v) => mem_ops::mem_read(
+            Instruction::MemLoadWBeImm(v) => mem_ops::mem_read(
                 block_builder,
                 proc_ctx,
                 Some(v.expect_value()),
@@ -420,26 +423,28 @@ impl Assembler {
                 true,
                 span,
             )?,
-            Instruction::LocLoadW(v) => {
-                let local_addr = v.expect_value();
-                if !local_addr.is_multiple_of(WORD_SIZE as u16) {
-                    return Err(RelatedLabel::error("invalid local word index")
-                        .with_help("the index to a local word must be a multiple of 4")
-                        .with_labeled_span(v.span(), "this index is not word-aligned")
-                        .with_source_file(
-                            proc_ctx.source_manager().get(proc_ctx.span().source_id()).ok(),
-                        )
-                        .into());
-                }
-
+            Instruction::LocLoadWBe(v) => {
+                let local_addr = validate_local_word_alignment(v, proc_ctx)?;
                 mem_ops::mem_read(
                     block_builder,
                     proc_ctx,
-                    Some(local_addr as u32),
+                    Some(local_addr),
                     true,
                     false,
                     instruction.span(),
                 )?
+            },
+            Instruction::LocLoadWLe(v) => {
+                let local_addr = validate_local_word_alignment(v, proc_ctx)?;
+                mem_ops::mem_read(
+                    block_builder,
+                    proc_ctx,
+                    Some(local_addr),
+                    true,
+                    false,
+                    instruction.span(),
+                )?;
+                push_reversew(block_builder)
             },
             Instruction::MemStore => block_builder.push_ops([MStore, Drop]),
             Instruction::MemStoreImm(v) => mem_ops::mem_write_imm(
@@ -450,7 +455,7 @@ impl Assembler {
                 true,
                 span,
             )?,
-            Instruction::MemStoreW | Instruction::MemStoreWBe => block_builder.push_ops([MStoreW]),
+            Instruction::MemStoreWBe => block_builder.push_ops([MStoreW]),
             Instruction::MemStoreWLe => {
                 block_builder.push_op(MovDn4);
                 push_reversew(block_builder);
@@ -458,16 +463,14 @@ impl Assembler {
                 block_builder.push_op(MStoreW);
                 push_reversew(block_builder);
             },
-            Instruction::MemStoreWImm(v) | Instruction::MemStoreWBeImm(v) => {
-                mem_ops::mem_write_imm(
-                    block_builder,
-                    proc_ctx,
-                    v.expect_value(),
-                    false,
-                    false,
-                    span,
-                )?
-            },
+            Instruction::MemStoreWBeImm(v) => mem_ops::mem_write_imm(
+                block_builder,
+                proc_ctx,
+                v.expect_value(),
+                false,
+                false,
+                span,
+            )?,
             Instruction::MemStoreWLeImm(v) => {
                 push_reversew(block_builder);
                 mem_ops::mem_write_imm(
@@ -488,26 +491,15 @@ impl Assembler {
                 true,
                 span,
             )?,
-            Instruction::LocStoreW(v) => {
-                let local_addr = v.expect_value();
-                if !local_addr.is_multiple_of(WORD_SIZE as u16) {
-                    return Err(RelatedLabel::error("invalid local word index")
-                        .with_help("the index to a local word must be a multiple of 4")
-                        .with_labeled_span(v.span(), "this index is not word-aligned")
-                        .with_source_file(
-                            proc_ctx.source_manager().get(proc_ctx.span().source_id()).ok(),
-                        )
-                        .into());
-                }
-
-                mem_ops::mem_write_imm(
-                    block_builder,
-                    proc_ctx,
-                    local_addr as u32,
-                    true,
-                    false,
-                    span,
-                )?
+            Instruction::LocStoreWBe(v) => {
+                let local_addr = validate_local_word_alignment(v, proc_ctx)?;
+                mem_ops::mem_write_imm(block_builder, proc_ctx, local_addr, true, false, span)?
+            },
+            Instruction::LocStoreWLe(v) => {
+                let local_addr = validate_local_word_alignment(v, proc_ctx)?;
+                push_reversew(block_builder);
+                mem_ops::mem_write_imm(block_builder, proc_ctx, local_addr, true, false, span)?;
+                push_reversew(block_builder)
             },
             Instruction::SysEvent(system_event) => {
                 block_builder.push_system_event(system_event.into())
@@ -530,9 +522,8 @@ impl Assembler {
             Instruction::FriExt2Fold4 => block_builder.push_op(FriE2F4),
             Instruction::HornerBase => block_builder.push_op(HornerBase),
             Instruction::HornerExt => block_builder.push_op(HornerExt),
-            Instruction::EvalCircuit => {
-                block_builder.push_op(Operation::EvalCircuit);
-            },
+            Instruction::EvalCircuit => block_builder.push_op(EvalCircuit),
+            Instruction::LogPrecompile => block_builder.push_op(LogPrecompile),
 
             // ----- exec/call instructions -------------------------------------------------------
             Instruction::Exec(callee) => {
@@ -637,20 +628,11 @@ fn push_u32_value(span_builder: &mut BasicBlockBuilder, value: u32) {
 /// When the value is 0, PUSH operation is replaced with PAD. When the value is 1, PUSH operation
 /// is replaced with PAD INCR because in most cases this will be more efficient than doing a PUSH.
 fn push_felt(span_builder: &mut BasicBlockBuilder, value: Felt) {
-    use Operation::*;
-
-    if value == ZERO {
-        span_builder.push_op(Pad);
-    } else if value == ONE {
-        span_builder.push_op(Pad);
-        span_builder.push_op(Incr);
-    } else {
-        span_builder.push_op(Push(value));
-    }
+    span_builder.push_ops(push_value_ops(value));
 }
 
 /// Helper function that appends operations to reverse the order of the top 4 elements
-/// on the stack, used for big-endian memory instructions.
+/// on the stack, used for little-endian memory instructions.
 ///
 /// The instruction takes 3 cycles to execute and transforms the stack as follows:
 /// [a, b, c, d, ...] -> [d, c, b, a, ...].
@@ -658,4 +640,22 @@ fn push_reversew(block_builder: &mut BasicBlockBuilder) {
     use Operation::*;
 
     block_builder.push_ops([MovDn3, Swap, MovUp2]);
+}
+
+/// Helper function that validates a local word address is properly word-aligned.
+///
+/// Returns the validated address as u32 or an error if the address is not a multiple of 4.
+fn validate_local_word_alignment(
+    local_addr: &ImmU16,
+    proc_ctx: &ProcedureContext,
+) -> Result<u32, Report> {
+    let addr = local_addr.expect_value();
+    if !addr.is_multiple_of(WORD_SIZE as u16) {
+        return Err(RelatedLabel::error("invalid local word index")
+            .with_help("the index to a local word must be a multiple of 4")
+            .with_labeled_span(local_addr.span(), "this index is not word-aligned")
+            .with_source_file(proc_ctx.source_manager().get(proc_ctx.span().source_id()).ok())
+            .into());
+    }
+    Ok(addr as u32)
 }

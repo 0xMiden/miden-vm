@@ -8,6 +8,7 @@ use miden_core::{
     Felt, ONE, Word, ZERO,
     crypto::merkle::MerklePath,
     mast::{MastForest, MastNodeId, OpBatch},
+    precompile::PrecompileTranscriptState,
     stack::MIN_STACK_DEPTH,
 };
 
@@ -78,17 +79,16 @@ pub struct SystemState {
     /// Execution context ID - starts at 0 (root context), changes on CALL/SYSCALL operations
     pub ctx: ContextId,
 
-    /// Free memory pointer - initially set to 2^30, used for local memory offsets
-    pub fmp: Felt,
-
-    /// Flag indicating whether currently executing within a SYSCALL block
-    pub in_syscall: bool,
-
     /// Hash of the function that initiated the current execution context
     /// - For root context: [ZERO; 4]
     /// - For CALL/DYNCALL contexts: hash of the called function
     /// - For SYSCALL contexts: hash remains from the calling function
     pub fn_hash: Word,
+
+    /// Precompile transcript state (sponge capacity) used for recording `log_precompile` calls
+    /// - Initially [ZERO; 4]
+    /// - Updated with each `log_precompile` invocation
+    pub pc_transcript_state: PrecompileTranscriptState,
 }
 
 impl SystemState {
@@ -97,9 +97,8 @@ impl SystemState {
         Self {
             clk: processor.clk,
             ctx: processor.ctx,
-            fmp: processor.fmp,
-            in_syscall: processor.in_syscall,
             fn_hash: processor.caller_hash,
+            pc_transcript_state: processor.pc_transcript.state(),
         }
     }
 }
@@ -407,7 +406,6 @@ pub struct NodeEndData {
 pub struct ExecutionContextSystemInfo {
     pub parent_ctx: ContextId,
     pub parent_fn_hash: Word,
-    pub parent_fmp: Felt,
 }
 
 // MAST FOREST RESOLUTION REPLAY

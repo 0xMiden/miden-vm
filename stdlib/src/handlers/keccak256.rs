@@ -27,17 +27,15 @@ use alloc::{vec, vec::Vec};
 use core::array;
 
 use miden_core::{
-    EventId, Felt, Word, ZERO,
+    EventName, Felt, Word, ZERO,
     precompile::{PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileVerifier},
 };
 use miden_crypto::hash::{keccak::Keccak256, rpo::Rpo256};
 use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessState};
 
-/// Qualified event name for the `hash_memory` event.
-pub const KECCAK_HASH_MEMORY_EVENT_NAME: &str = "stdlib::hash::keccak256::hash_memory";
-/// Constant Event ID for the `hash_memory` event, derived via
-/// `EventId::from_name(KECCAK_HASH_MEMORY_EVENT_NAME)`
-pub const KECCAK_HASH_MEMORY_EVENT_ID: EventId = EventId::from_u64(5779517439479051634);
+/// Event name for the keccak256 hash_memory operation.
+pub const KECCAK_HASH_MEMORY_EVENT_NAME: EventName =
+    EventName::new("stdlib::hash::keccak256::hash_memory");
 
 pub struct KeccakPrecompile;
 
@@ -148,11 +146,7 @@ impl KeccakFeltDigest {
         Self(packed.map(Felt::from))
     }
 
-    /// Creates an commitment of the digest using Rpo256.
-    ///
-    /// When the digest is popped from the advice stack, it appears as
-    /// `[d_0, ..., d_7]` on the operand stack. In masm, the `hmerge` operation computes
-    /// `Rpo256([d_7, ..., d_0])`, so we reverse the order here to match that behavior.
+    /// Creates a commitment of the digest using Rpo256 over `[d_0, ..., d_7]`.
     pub fn to_commitment(&self) -> Word {
         Rpo256::hash_elements(&self.0)
     }
@@ -282,16 +276,16 @@ impl KeccakPreimage {
     /// commitments tracked during execution by the [`EventHandler`]. The double RPO hash binds
     /// input and output together, preventing tampering.
     pub fn precompile_commitment(&self) -> PrecompileCommitment {
-        let commitment = Rpo256::merge(&[self.input_commitment(), self.digest().to_commitment()]);
         let tag = self.precompile_tag();
-        PrecompileCommitment { tag, commitment }
+        let comm = Rpo256::merge(&[self.input_commitment(), self.digest().to_commitment()]);
+        PrecompileCommitment::new(tag, comm)
     }
 
     /// Returns the tag used to identify the commitment to the precompile. defined as
-    /// `[KECCAK_HASH_MEMORY_EVENT_ID, preimage_u8.len(), 0, 0]`.
+    /// `[event_id, preimage_u8.len(), 0, 0]` where event_id is computed from the event name.
     fn precompile_tag(&self) -> Word {
         [
-            KECCAK_HASH_MEMORY_EVENT_ID.as_felt(),
+            KECCAK_HASH_MEMORY_EVENT_NAME.to_event_id().as_felt(),
             Felt::new(self.as_ref().len() as u64),
             ZERO,
             ZERO,
@@ -302,7 +296,8 @@ impl KeccakPreimage {
 
 impl From<KeccakPreimage> for PrecompileRequest {
     fn from(preimage: KeccakPreimage) -> Self {
-        PrecompileRequest::new(KECCAK_HASH_MEMORY_EVENT_ID, preimage.into_inner())
+        let event_id = KECCAK_HASH_MEMORY_EVENT_NAME.to_event_id();
+        PrecompileRequest::new(event_id, preimage.into_inner())
     }
 }
 
@@ -350,12 +345,6 @@ pub enum KeccakError {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_event_id() {
-        let expected_event_id = EventId::from_name(KECCAK_HASH_MEMORY_EVENT_NAME);
-        assert_eq!(KECCAK_HASH_MEMORY_EVENT_ID, expected_event_id);
-    }
 
     // KECCAK FELT DIGEST TESTS
     // ============================================================================================
@@ -553,10 +542,10 @@ mod tests {
         assert_eq!(digest.to_commitment(), expected_digest_commitment);
 
         // Test precompile commitment (double hash)
-        let expected_precompile_commitment = PrecompileCommitment {
-            tag: preimage.precompile_tag(),
-            commitment: Rpo256::merge(&[preimage.input_commitment(), digest.to_commitment()]),
-        };
+        let expected_precompile_commitment = PrecompileCommitment::new(
+            preimage.precompile_tag(),
+            Rpo256::merge(&[preimage.input_commitment(), digest.to_commitment()]),
+        );
 
         assert_eq!(preimage.precompile_commitment(), expected_precompile_commitment);
     }

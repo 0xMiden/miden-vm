@@ -1,3 +1,8 @@
+---
+title: "Range Checker"
+sidebar_position: 4
+---
+
 # Range Checker
 
 Miden VM relies very heavily on 16-bit range-checks (checking if a value of a field element is between $0$ and $2^{16}$). For example, most of the [u32 operations](./stack/u32_ops.md) need to perform between two and four 16-bit range-checks per operation. Similarly, operations involving memory (e.g. load and store) require two 16-bit range-checks per operation.
@@ -8,7 +13,7 @@ Thus, it is very important for the VM to be able to perform a large number of 16
 
 First, let's define a construction for the simplest possible 8-bit range-check. This can be done with a single column as illustrated below.
 
-![rc_8_bit_range_check](../assets/design/range/rc_8_bit_range_check.png)
+![rc_8_bit_range_check](../img/design/range/rc_8_bit_range_check.png)
 
 For this to work as a range-check we need to enforce a few constraints on this column:
 
@@ -49,7 +54,7 @@ We can get rid of both requirements by including the _multiplicity_ of the value
 
 Let's add one more column $m$ to our table to keep track of how many times each value should be range-checked.
 
-![rc_8_bit_logup](../assets/design/range/rc_8_bit_logup.png)
+![rc_8_bit_logup](../img/design/range/rc_8_bit_logup.png)
 
 The transition constraint for $b$ is now as follows:
 
@@ -67,7 +72,7 @@ Additionally, the constraint degree has not increased versus the naive approach,
 
 To support 16-bit range checks, let's try to extend the idea of the 8-bit table. Our 16-bit table would look like so (the only difference is that column $v$ now has to end with value $65535$):
 
-![rc_16_bit_logup](../assets/design/range/rc_16_bit_logup.png)
+![rc_16_bit_logup](../img/design/range/rc_16_bit_logup.png)
 
 While this works, it is rather wasteful. In the worst case, we'd need to enumerate over 65K values, most of which we may not actually need. It would be nice if we could "skip over" the values that we don't want. One way to do this could be to add bridge rows between two values to be range checked and add constraints to enforce the consistency of the gap between these bridge rows.
 
@@ -102,7 +107,7 @@ This construction is implemented in Miden with the following requirements, capab
 ### Requirements
 
 - 2 columns of the main trace: $m, v$, where $v$ contains the value being range-checked and $m$ is the number of times the value is checked (its multiplicity).
-- 1 [bus](./lookups/main.md#communication-buses-in-miden-vm) $b_{range}$ to ensure that the range checks performed in the range checker match those requested by other VM components (the [stack](./stack/u32_ops.md#range-checks) and the [memory chiplet](./chiplets/memory.md)).
+- 1 [bus](./lookups/index.md#communication-buses-in-miden-vm) $b_{range}$ to ensure that the range checks performed in the range checker match those requested by other VM components (the [stack](./stack/u32_ops.md#range-checks) and the [memory chiplet](./chiplets/memory.md)).
 
 ### Capabilities
 
@@ -115,22 +120,22 @@ The construction gives us the following capabilities:
 
 The range checker's execution trace looks as follows:
 
-![rc_with_bridge_rows.png](../assets/design/range/rc_with_bridge_rows.png)
+![rc_with_bridge_rows.png](../img/design/range/rc_with_bridge_rows.png)
 
 The columns have the following meanings:
 - $m$ is the multiplicity column that indicates the number of times the value in that row should be range checked (included into the computation of the logarithmic derivative).
 - $v$ contains the values to be range checked.
   - These values go from $0$ to $65535$. Values must either stay the same or increase by powers of 3 less than or equal to $3^7$.
-  - The final 2 rows of the 16-bit section of the trace must both equal $65535$. The extra value of $65535$ is required in order to [pad the trace](./lookups/main.md#length-of-auxiliary-columns-for-lookup-arguments) so the [$b_{range}$](#communication-bus) bus column can be computed correctly.
+  - The final 2 rows of the 16-bit section of the trace must both equal $65535$. The extra value of $65535$ is required in order to [pad the trace](./lookups/index.md#length-of-auxiliary-columns-for-lookup-arguments) so the [$b_{range}$](#communication-bus) bus column can be computed correctly.
 
 ### Execution trace constraints
 
 First, we need to constrain that the consecutive values in the range checker are either the same or differ by powers of 3 that are less than or equal to $3^7$.
 
 > $$
-\Delta v \cdot (\Delta v - 1)  \cdot (\Delta v - 3)  \cdot (\Delta v - 9)  \cdot (\Delta v - 27)  \cdot (\Delta v - 81) \\
-\cdot (\Delta v - 243)  \cdot (\Delta v - 729)  \cdot (\Delta v - 2187) = 0 \text{ | degree} = 9
-$$
+> \Delta v \cdot (\Delta v - 1)  \cdot (\Delta v - 3)  \cdot (\Delta v - 9)  \cdot (\Delta v - 27)  \cdot (\Delta v - 81) 
+> \cdot (\Delta v - 243)  \cdot (\Delta v - 729)  \cdot (\Delta v - 2187) = 0 \text{ | degree} = 9
+> $$
 
 In addition to the transition constraints described above, we also need to enforce the following boundary constraints:
 
@@ -139,7 +144,7 @@ In addition to the transition constraints described above, we also need to enfor
 
 ### Communication bus
 
-$b_{range}$ is the [bus](./lookups/main.md#communication-buses-in-miden-vm) that connects components which require 16-bit range checks to the values in the range checker. The bus constraints are defined by the components that use it to communicate.
+$b_{range}$ is the [bus](./lookups/index.md#communication-buses-in-miden-vm) that connects components which require 16-bit range checks to the values in the range checker. The bus constraints are defined by the components that use it to communicate.
 
 Requests are sent to the range checker bus by the following components:
 - The Stack sends requests for 16-bit range checks during some [`u32` operations](./stack/u32_ops.md#range-checks).
@@ -148,8 +153,8 @@ Requests are sent to the range checker bus by the following components:
 Responses are provided by the range checker using the transition constraint for the LogUp construction described above.
 
 > $$
-b'_{range} = b_{range} + \frac{m}{(\alpha - v)} \text{ | degree} = 2
-$$
+> b'_{range} = b_{range} + \frac{m}{(\alpha - v)} \text{ | degree} = 2
+> $$
 
 To describe the complete transition constraint for the bus, we'll define the following variables:
 
@@ -159,8 +164,8 @@ To describe the complete transition constraint for the bus, we'll define the fol
 - $m_0, m_1$: the values for which range checks are requested from the memory chiplet when $f_{mem}$ is set.
 
 > $$
-b'_{range} = b_{range} + \frac{m}{(\alpha - v)} - \frac{f_{stack}}{(\alpha - s_0)} - \frac{f_{stack}}{(\alpha - s_1)} - \frac{f_{stack}}{(\alpha - s_2)} - \frac{f_{stack}}{(\alpha - s_3)} \\ - \frac{f_{mem}}{(\alpha - m_0)} - \frac{f_{mem}}{(\alpha - m_1)} \text{ | degree} = 9
-$$
+> b'_{range} = b_{range} + \frac{m}{(\alpha - v)} - \frac{f_{stack}}{(\alpha - s_0)} - \frac{f_{stack}}{(\alpha - s_1)} - \frac{f_{stack}}{(\alpha - s_2)} - \frac{f_{stack}}{(\alpha - s_3)}  - \frac{f_{mem}}{(\alpha - m_0)} - \frac{f_{mem}}{(\alpha - m_1)} \text{ | degree} = 9
+> $$
 
 As previously mentioned, constraints cannot include divisions, so the actual constraint which is applied will be the equivalent expression in which all denominators have been multiplied through, which is degree 9.
 

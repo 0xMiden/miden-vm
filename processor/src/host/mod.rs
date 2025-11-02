@@ -2,8 +2,8 @@ use alloc::{sync::Arc, vec::Vec};
 use core::future::Future;
 
 use miden_core::{
-    AdviceMap, DebugOptions, Felt, Word, crypto::merkle::InnerNodeInfo, mast::MastForest,
-    precompile::PrecompileRequest,
+    AdviceMap, DebugOptions, EventId, EventName, Felt, Word, crypto::merkle::InnerNodeInfo,
+    mast::MastForest, precompile::PrecompileRequest,
 };
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 
@@ -92,6 +92,14 @@ pub trait BaseHost {
 
     /// Handles the failure of the assertion instruction.
     fn on_assert_failed(&mut self, _process: &ProcessState, _err_code: Felt) {}
+
+    /// Returns the [`EventName`] registered for the provided [`EventId`], if any.
+    ///
+    /// Hosts that maintain an event registry can override this method to surface human-readable
+    /// names for diagnostics. The default implementation returns `None`.
+    fn resolve_event(&self, _event_id: EventId) -> Option<&EventName> {
+        None
+    }
 }
 
 /// Defines an interface by which the VM can interact with the host.
@@ -114,6 +122,12 @@ pub trait SyncHost: BaseHost {
     /// The event ID is available at the top of the stack (position 0) when this handler is called.
     /// This allows the handler to access both the event ID and any additional context data that
     /// may have been pushed onto the stack prior to the emit operation.
+    ///
+    /// ## Implementation notes
+    /// - Extract the event ID via `EventId::from_felt(process.get_stack_item(0))`
+    /// - Return errors without event names or IDs - the p will enrich them via
+    ///   [`BaseHost::resolve_event()`]
+    /// - System events (IDs 0-255) are handled by the VM before calling this method
     fn on_event(&mut self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError>;
 }
 
@@ -138,6 +152,12 @@ pub trait AsyncHost: BaseHost {
     /// The event ID is available at the top of the stack (position 0) when this handler is called.
     /// This allows the handler to access both the event ID and any additional context data that
     /// may have been pushed onto the stack prior to the emit operation.
+    ///
+    /// ## Implementation notes
+    /// - Extract the event ID via `EventId::from_felt(process.get_stack_item(0))`
+    /// - Return errors without event names or IDs - the caller will enrich them via
+    ///   [`BaseHost::resolve_event()`]
+    /// - System events (IDs 0-255) are handled by the VM before calling this method
     fn on_event(
         &mut self,
         process: &ProcessState<'_>,

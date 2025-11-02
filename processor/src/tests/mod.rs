@@ -12,7 +12,7 @@ use miden_core::{
 };
 use miden_debug_types::{SourceContent, SourceLanguage, SourceManager, Uri};
 use miden_utils_testing::{
-    build_test, build_test_by_mode,
+    build_debug_test, build_test, build_test_by_mode,
     crypto::{init_merkle_leaves, init_merkle_store},
 };
 
@@ -107,7 +107,7 @@ fn test_diagnostic_advice_map_key_not_found_1() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "advice provider error at clock cycle 4",
+        "advice provider error at clock cycle 8",
         "value for key 0x0000000000000000000000000000000001000000000000000200000000000000 not present in the advice map",
         regex!(r#",-\[test[\d]+:3:31\]"#),
         " 2 |         begin",
@@ -129,7 +129,7 @@ fn test_diagnostic_advice_map_key_not_found_2() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "advice provider error at clock cycle 4",
+        "advice provider error at clock cycle 8",
         "value for key 0x0000000000000000000000000000000001000000000000000200000000000000 not present in the advice map",
         regex!(r#",-\[test[\d]+:3:31\]"#),
         " 2 |         begin",
@@ -154,7 +154,7 @@ fn test_diagnostic_advice_stack_read_failed() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "advice provider error at clock cycle 2",
+        "advice provider error at clock cycle 6",
         "stack read failed",
         regex!(r#",-\[test[\d]+:3:18\]"#),
         " 2 |         begin",
@@ -179,7 +179,7 @@ fn test_diagnostic_divide_by_zero_1() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "division by zero at clock cycle 1",
+        "division by zero at clock cycle 5",
         regex!(r#",-\[test[\d]+:3:21\]"#),
         " 2 |         begin",
         " 3 |             trace.2 div",
@@ -200,7 +200,7 @@ fn test_diagnostic_divide_by_zero_2() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "division by zero at clock cycle 1",
+        "division by zero at clock cycle 5",
         regex!(r#",-\[test[\d]+:3:21\]"#),
         " 2 |         begin",
         " 3 |             trace.2 u32div",
@@ -272,7 +272,7 @@ fn test_diagnostic_failed_assertion() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "assertion failed at clock cycle 5 with error code: 0",
+        "assertion failed at clock cycle 9 with error code: 0",
         regex!(r#",-\[test[\d]+:4:13\]"#),
         " 3 |             push.1.2",
         " 4 |             assertz",
@@ -293,7 +293,7 @@ fn test_diagnostic_failed_assertion() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "assertion failed at clock cycle 5 with error message: some error message",
+        "assertion failed at clock cycle 9 with error message: some error message",
         regex!(r#",-\[test[\d]+:4:13\]"#),
         " 3 |             push.1.2",
         " 4 |             assertz.err=\"some error message\"",
@@ -315,7 +315,7 @@ fn test_diagnostic_failed_assertion() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "assertion failed at clock cycle 5 with error message: some error message",
+        "assertion failed at clock cycle 9 with error message: some error message",
         regex!(r#",-\[test[\d]+:5:13\]"#),
         " 4 |             push.1.2",
         " 5 |             assertz.err=ERR_MSG",
@@ -421,7 +421,7 @@ fn test_diagnostic_invalid_merkle_tree_node_index() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "advice provider error at clock cycle 2",
+        "advice provider error at clock cycle 6",
         "provided node index 16 is out of bounds for a merkle tree node at depth 4",
         regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
@@ -476,7 +476,7 @@ fn test_diagnostic_invalid_stack_depth_on_return_dyncall() {
         end
 
         begin
-            procref.foo mem_storew.100 dropw push.100
+            procref.foo mem_storew_be.100 dropw push.100
             dyncall
         end";
 
@@ -486,7 +486,7 @@ fn test_diagnostic_invalid_stack_depth_on_return_dyncall() {
         err,
         "when returning from a call or dyncall, stack depth must be 16, but was 17",
         regex!(r#",-\[test[\d]+:8:13\]"#),
-        " 7 |             procref.foo mem_storew.100 dropw push.100",
+        " 7 |             procref.foo mem_storew_be.100 dropw push.100",
         " 8 |             dyncall",
         "   :             ^^^|^^^",
         "   :                `-- when returning from this call site",
@@ -510,7 +510,7 @@ fn test_diagnostic_log_argument_zero() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "attempted to calculate integer logarithm with zero argument at clock cycle 2",
+        "attempted to calculate integer logarithm with zero argument at clock cycle 6",
         regex!(r#",-\[test[\d]+:3:21\]"#),
         " 2 |         begin",
         " 3 |             trace.2 ilog2",
@@ -525,11 +525,11 @@ fn test_diagnostic_log_argument_zero() {
 
 #[test]
 fn test_diagnostic_unaligned_word_access() {
-    // mem_storew
+    // mem_storew_be
     let source = "
         proc.foo add end
         begin
-            exec.foo mem_storew.3
+            exec.foo mem_storew_be.3
         end";
 
     let build_test = build_test_by_mode!(true, source, &[1, 2, 3, 4]);
@@ -537,21 +537,21 @@ fn test_diagnostic_unaligned_word_access() {
 
     assert_diagnostic_lines!(
         err,
-        "word memory access at address 3 in context 0 is unaligned at clock cycle 3",
+        "word memory access at address 3 in context 0 is unaligned at clock cycle 7",
         regex!(r#",-\[test[\d]+:4:22\]"#),
         " 3 |         begin",
-        " 4 |             exec.foo mem_storew.3",
-        "   :                      ^^^^^^|^^^^^",
-        "   :                            `-- tried to access memory address 3",
+        " 4 |             exec.foo mem_storew_be.3",
+        "   :                      ^^^^^^^|^^^^^^^",
+        "   :                             `-- tried to access memory address 3",
         " 5 |         end",
         "   `----",
         "  help: ensure that the memory address accessed is aligned to a word boundary (it is a multiple of 4)"
     );
 
-    // mem_loadw
+    // mem_loadw_be
     let source = "
         begin
-            mem_loadw.3
+            mem_loadw_be.3
         end";
 
     let build_test = build_test_by_mode!(true, source, &[1, 2, 3, 4]);
@@ -559,12 +559,12 @@ fn test_diagnostic_unaligned_word_access() {
 
     assert_diagnostic_lines!(
         err,
-        "word memory access at address 3 in context 0 is unaligned at clock cycle 2",
+        "word memory access at address 3 in context 0 is unaligned at clock cycle 6",
         regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
-        " 3 |             mem_loadw.3",
-        "   :             ^^^^^|^^^^^",
-        "   :                  `-- tried to access memory address 3",
+        " 3 |             mem_loadw_be.3",
+        "   :             ^^^^^^^|^^^^^^",
+        "   :                    `-- tried to access memory address 3",
         " 4 |         end",
         "   `----",
         "  help: ensure that the memory address accessed is aligned to a word boundary (it is a multiple of 4)"
@@ -593,10 +593,10 @@ fn test_diagnostic_address_out_of_bounds() {
         "   `----"
     );
 
-    // mem_storew
+    // mem_storew_be
     let source = "
         begin
-            mem_storew
+            mem_storew_be
         end";
 
     let build_test = build_test_by_mode!(true, source, &[u32::MAX as u64 + 1_u64]);
@@ -607,7 +607,7 @@ fn test_diagnostic_address_out_of_bounds() {
         "memory address cannot exceed 2^32 but was 4294967296",
         regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
-        " 3 |             mem_storew",
+        " 3 |             mem_storew_be",
         "   :             ^^^^^^^^^^",
         " 4 |         end",
         "   `----"
@@ -633,10 +633,10 @@ fn test_diagnostic_address_out_of_bounds() {
         "   `----"
     );
 
-    // mem_loadw
+    // mem_loadw_be
     let source = "
         begin
-            swap swap mem_loadw push.1 drop
+            swap swap mem_loadw_be push.1 drop
         end";
 
     let build_test = build_test_by_mode!(true, source, &[u32::MAX as u64 + 1_u64]);
@@ -647,7 +647,7 @@ fn test_diagnostic_address_out_of_bounds() {
         "memory address cannot exceed 2^32 but was 4294967296",
         regex!(r#",-\[test[\d]+:3:23\]"#),
         " 2 |         begin",
-        " 3 |             swap swap mem_loadw push.1 drop",
+        " 3 |             swap swap mem_loadw_be push.1 drop",
         "   :                       ^^^^^^^^^",
         " 4 |         end",
         "   `----"
@@ -689,7 +689,7 @@ fn test_diagnostic_merkle_store_lookup_failed() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "advice provider error at clock cycle 2",
+        "advice provider error at clock cycle 6",
         "failed to lookup value in Merkle store",
         "|",
         "`-> node Word([1, 0, 0, 0]) with index `depth=10, value=0` not found",
@@ -1017,4 +1017,43 @@ fn test_assert_messages() {
         "6 |         end",
         "  `----"
     );
+}
+
+// Test the original issue with debug.stack.12 to see if it shows all items
+//
+// Updated in 2296: removed the 4 initial instructions, which are now inserted by the assembler for
+// initializing the FMP.
+#[test]
+fn test_debug_stack_issue_2295_original_repeat() {
+    let source = "
+    begin
+        repeat.12
+            push.42
+        end
+
+        debug.stack.12  # <=== should show first 12 elements as 42
+        dropw dropw dropw dropw
+    end";
+
+    // Execute with debug buffer
+    let test = build_debug_test!(source);
+    let (_stack, output) = test.execute_with_debug_buffer().expect("execution failed");
+
+    // Test if debug.stack.12 shows all 12 push.42 items correctly
+    insta::assert_snapshot!(output, @r"
+    Stack state in interval [0, 11] before step 22:
+    ├──  0: 42
+    ├──  1: 42
+    ├──  2: 42
+    ├──  3: 42
+    ├──  4: 42
+    ├──  5: 42
+    ├──  6: 42
+    ├──  7: 42
+    ├──  8: 42
+    ├──  9: 42
+    ├── 10: 42
+    ├── 11: 42
+    └── (16 more items)
+    ");
 }

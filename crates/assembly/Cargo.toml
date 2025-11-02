@@ -36,6 +36,11 @@ smallvec.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+# NOTE: We add miden-assembly as a dev-dependency with the "testing" feature to ensure that
+# testing-specific functionality is available during test runs. This is a workaround since
+# cargo doesn't currently support enabling test-related features automatically.
+# See: https://github.com/rust-lang/cargo/issues/2911#issuecomment-1483256987
+miden-assembly = { path = ".", default-features = false, features = ["testing"] }
 miden-mast-package = { workspace = true, features = ["arbitrary"] }
 miden-stdlib = { path = "../../stdlib", default-features = false }
 insta.workspace = true

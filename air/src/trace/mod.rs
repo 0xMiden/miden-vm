@@ -20,18 +20,16 @@ pub const MIN_TRACE_LEN: usize = 64;
 // ------------------------------------------------------------------------------------------------
 
 //      system          decoder           stack      range checks       chiplets
-//    (8 columns)     (24 columns)    (19 columns)    (2 columns)     (20 columns)
+//    (6 columns)     (24 columns)    (19 columns)    (2 columns)     (20 columns)
 // ├───────────────┴───────────────┴───────────────┴───────────────┴─────────────────┤
 
 pub const SYS_TRACE_OFFSET: usize = 0;
-pub const SYS_TRACE_WIDTH: usize = 8;
+pub const SYS_TRACE_WIDTH: usize = 6;
 pub const SYS_TRACE_RANGE: Range<usize> = range(SYS_TRACE_OFFSET, SYS_TRACE_WIDTH);
 
 pub const CLK_COL_IDX: usize = SYS_TRACE_OFFSET;
-pub const FMP_COL_IDX: usize = SYS_TRACE_OFFSET + 1;
-pub const CTX_COL_IDX: usize = SYS_TRACE_OFFSET + 2;
-pub const IN_SYSCALL_COL_IDX: usize = SYS_TRACE_OFFSET + 3;
-pub const FN_HASH_OFFSET: usize = SYS_TRACE_OFFSET + 4;
+pub const CTX_COL_IDX: usize = SYS_TRACE_OFFSET + 1;
+pub const FN_HASH_OFFSET: usize = SYS_TRACE_OFFSET + 2;
 pub const FN_HASH_RANGE: Range<usize> = range(FN_HASH_OFFSET, 4);
 
 // decoder trace
@@ -43,6 +41,55 @@ pub const DECODER_TRACE_RANGE: Range<usize> = range(DECODER_TRACE_OFFSET, DECODE
 pub const STACK_TRACE_OFFSET: usize = DECODER_TRACE_RANGE.end;
 pub const STACK_TRACE_WIDTH: usize = 19;
 pub const STACK_TRACE_RANGE: Range<usize> = range(STACK_TRACE_OFFSET, STACK_TRACE_WIDTH);
+
+/// Label for log_precompile transcript state messages on the virtual table bus.
+pub const LOG_PRECOMPILE_LABEL: u8 = miden_core::OPCODE_LOGPRECOMPILE;
+
+pub mod log_precompile {
+    use core::ops::Range;
+
+    use miden_core::utils::range;
+
+    use super::chiplets::hasher::{CAPACITY_LEN, DIGEST_LEN};
+
+    // HELPER REGISTER LAYOUT
+    // --------------------------------------------------------------------------------------------
+
+    /// Decoder helper register index where the hasher address is stored for `log_precompile`.
+    pub const HELPER_ADDR_IDX: usize = 0;
+    /// Decoder helper register offset where `CAP_PREV` begins; spans four consecutive registers.
+    pub const HELPER_CAP_PREV_OFFSET: usize = 1;
+    /// Range covering the four helper registers holding `CAP_PREV`.
+    pub const HELPER_CAP_PREV_RANGE: Range<usize> = range(HELPER_CAP_PREV_OFFSET, CAPACITY_LEN);
+
+    // STACK LAYOUT (TOP OF STACK)
+    // --------------------------------------------------------------------------------------------
+    // After executing `log_precompile`, the top 12 stack elements contain `[R1, R0, CAP_NEXT]`
+    // (each a 4-element word) in big-endian order.
+
+    pub const STACK_R1_BASE: usize = 0;
+    pub const STACK_R1_RANGE: Range<usize> = range(STACK_R1_BASE, DIGEST_LEN);
+
+    pub const STACK_R0_BASE: usize = STACK_R1_RANGE.end;
+    pub const STACK_R0_RANGE: Range<usize> = range(STACK_R0_BASE, DIGEST_LEN);
+
+    pub const STACK_CAP_NEXT_BASE: usize = STACK_R0_RANGE.end;
+    pub const STACK_CAP_NEXT_RANGE: Range<usize> = range(STACK_CAP_NEXT_BASE, CAPACITY_LEN);
+
+    /// Stack range containing `COMM` prior to executing `log_precompile`.
+    pub const STACK_COMM_RANGE: Range<usize> = STACK_R1_RANGE;
+    /// Stack range containing `TAG` prior to executing `log_precompile`.
+    pub const STACK_TAG_RANGE: Range<usize> = STACK_R0_RANGE;
+
+    // HASHER STATE LAYOUT
+    // --------------------------------------------------------------------------------------------
+    // The hasher permutation uses a 12-element state. For `log_precompile` the state is interpreted
+    // differently for the input (`[CAP_PREV, TAG, COMM]`) and output (`[CAP_NEXT, R0, R1]`) words.
+
+    pub const STATE_CAP_RANGE: Range<usize> = range(0, CAPACITY_LEN);
+    pub const STATE_RATE_0_RANGE: Range<usize> = range(STATE_CAP_RANGE.end, DIGEST_LEN);
+    pub const STATE_RATE_1_RANGE: Range<usize> = range(STATE_RATE_0_RANGE.end, DIGEST_LEN);
+}
 
 // Range check trace
 pub const RANGE_CHECK_TRACE_OFFSET: usize = STACK_TRACE_RANGE.end;

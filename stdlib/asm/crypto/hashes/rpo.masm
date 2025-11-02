@@ -148,7 +148,7 @@ export.hash_memory_words
   if.true
     # start_addr and end_addr are equal after calling `absorb_double_words_from_memory`, and both 
     # point to the last element. Load the last word (6 cycles)
-    dropw dup.9 mem_loadw
+    dropw dup.9 mem_loadw_be
     # => [D, A', end_addr, end_addr, ...]
 
     # set the padding and compute the permutation (5 cycles)
