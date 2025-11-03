@@ -1,12 +1,9 @@
-use miden_core::Felt;
+use miden_core::{Felt, WORD_SIZE};
 use miden_processor::ProcessState;
 
 pub mod aead_decrypt;
 use alloc::vec::Vec;
 use core::mem::size_of;
-
-use miden_core::{Felt, WORD_SIZE};
-use miden_processor::ProcessState;
 
 /// Number of bytes packed into each u32 field element.
 ///
@@ -72,6 +69,8 @@ pub(crate) fn read_memory_region(
     // Read all elements in the range from the current execution context
     let ctx = process.ctx();
     (start_addr..end_addr).map(|addr| process.get_mem_value(ctx, addr)).collect()
+}
+
 /// Reads packed u32 values from memory and returns them as a byte vector.
 ///
 /// This function reads field elements from memory where each element contains a u32 value

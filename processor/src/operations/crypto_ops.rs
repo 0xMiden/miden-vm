@@ -5,7 +5,7 @@ use miden_air::trace::{
 use miden_core::mast::MastForest;
 
 use super::{ExecutionError, Operation, Process};
-use crate::{ErrorContext, Felt, Word};
+use crate::{ErrorContext, Felt, MemoryError, Word};
 
 // CRYPTOGRAPHIC OPERATIONS
 // ================================================================================================
@@ -318,6 +318,10 @@ impl Process {
 
         // Copy the rest of the stack (position 14 onwards)
         self.stack.copy_state(14);
+
+        Ok(())
+    }
+
     /// Logs a precompile event by absorbing TAG and COMM into the precompile sponge
     /// capacity.
     ///
