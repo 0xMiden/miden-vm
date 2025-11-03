@@ -83,7 +83,7 @@ miden-verifier.workspace = true
 
 # External dependencies
 blake3.workspace = true
-clap = { version = "4.4", features = ["derive"], optional = true }
+clap = { version = "4.5", features = ["derive"], optional = true }
 hex = { version = "0.4", optional = true }
 rustyline = { version = "17.0", default-features = false, optional = true }
 serde = { workspace = true, optional = true }
@@ -93,14 +93,14 @@ tracing-subscriber = { version = "0.3", optional = true, features = ["std", "env
 tracing-forest = { version = "0.2", optional = true, features = ["ansi", "smallvec"] }
 
 [dev-dependencies]
-assert_cmd = "2.0"
+assert_cmd = { version = "2.1" }
 criterion = { workspace = true, features = ["async_tokio"] }
-escargot = "0.5"
+escargot = { version = "0.5" }
 miden-utils-testing.workspace = true
-num-bigint = "0.4"
-predicates = "3.1"
-pretty_assertions = "1.4"
+num-bigint = { version = "0.4" }
+predicates = { version = "3.1" }
+pretty_assertions = { version = "1.4" }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 winter-fri.workspace = true
-rand_chacha = "0.9"
-walkdir = "2.5"
+rand_chacha = { version = "0.9" }
+walkdir = { version = "2.5" }

@@ -12,6 +12,7 @@ homepage.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 edition.workspace = true
+exclude = ["*.snap"]
 
 [lib]
 bench = false

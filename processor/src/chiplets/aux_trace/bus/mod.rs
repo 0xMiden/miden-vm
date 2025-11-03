@@ -2,8 +2,9 @@ use ace::{build_ace_chiplet_requests, build_ace_chiplet_responses};
 use bitwise::{build_bitwise_chiplet_responses, build_bitwise_request};
 use hasher::{
     ControlBlockRequestMessage, build_control_block_request, build_end_block_request,
-    build_hasher_chiplet_responses, build_hperm_request, build_mpverify_request,
-    build_mrupdate_request, build_respan_block_request, build_span_block_request,
+    build_hasher_chiplet_responses, build_hperm_request, build_log_precompile_request,
+    build_mpverify_request, build_mrupdate_request, build_respan_block_request,
+    build_span_block_request,
 };
 use kernel::{KernelRomMessage, build_kernel_chiplet_responses};
 use memory::{
@@ -25,10 +26,10 @@ use miden_air::{
 };
 use miden_core::{
     Kernel, ONE, OPCODE_CALL, OPCODE_DYN, OPCODE_DYNCALL, OPCODE_END, OPCODE_EVALCIRCUIT,
-    OPCODE_HORNERBASE, OPCODE_HORNEREXT, OPCODE_HPERM, OPCODE_JOIN, OPCODE_LOOP, OPCODE_MLOAD,
-    OPCODE_MLOADW, OPCODE_MPVERIFY, OPCODE_MRUPDATE, OPCODE_MSTORE, OPCODE_MSTOREW, OPCODE_MSTREAM,
-    OPCODE_PIPE, OPCODE_RESPAN, OPCODE_SPAN, OPCODE_SPLIT, OPCODE_SYSCALL, OPCODE_U32AND,
-    OPCODE_U32XOR, ZERO,
+    OPCODE_HORNERBASE, OPCODE_HORNEREXT, OPCODE_HPERM, OPCODE_JOIN, OPCODE_LOGPRECOMPILE,
+    OPCODE_LOOP, OPCODE_MLOAD, OPCODE_MLOADW, OPCODE_MPVERIFY, OPCODE_MRUPDATE, OPCODE_MSTORE,
+    OPCODE_MSTOREW, OPCODE_MSTREAM, OPCODE_PIPE, OPCODE_RESPAN, OPCODE_SPAN, OPCODE_SPLIT,
+    OPCODE_SYSCALL, OPCODE_U32AND, OPCODE_U32XOR, ZERO,
 };
 
 use super::{Felt, FieldElement};
@@ -133,6 +134,7 @@ where
             OPCODE_HORNEREXT => build_horner_eval_request(main_trace, alphas, row, debugger),
             OPCODE_MSTREAM => build_mstream_request(main_trace, alphas, row, debugger),
             OPCODE_HPERM => build_hperm_request(main_trace, alphas, row, debugger),
+            OPCODE_LOGPRECOMPILE => build_log_precompile_request(main_trace, alphas, row, debugger),
             OPCODE_MPVERIFY => build_mpverify_request(main_trace, alphas, row, debugger),
             OPCODE_MRUPDATE => build_mrupdate_request(main_trace, alphas, row, debugger),
             OPCODE_PIPE => build_pipe_request(main_trace, alphas, row, debugger),

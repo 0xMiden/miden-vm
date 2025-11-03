@@ -257,7 +257,7 @@ fn copy_merkle_node_to_adv_stack(
 
     let node = process
         .advice_provider()
-        .get_tree_node(root, &depth, &index)
+        .get_tree_node(root, depth, index)
         .map_err(|err| ExecutionError::advice_error(err, process.clk(), err_ctx))?;
 
     process.advice_provider_mut().push_stack_word(&node);
