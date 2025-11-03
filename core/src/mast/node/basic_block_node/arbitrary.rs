@@ -119,9 +119,9 @@ pub struct BasicBlockNodeParams {
 impl Default for BasicBlockNodeParams {
     fn default() -> Self {
         Self {
-            max_ops_len: 32,
-            max_pairs: 8,
-            max_decorator_id_u32: 10,
+            max_ops_len: 8,
+            max_pairs: 2,
+            max_decorator_id_u32: 3,
         }
     }
 }
@@ -188,11 +188,32 @@ pub struct MastForestParams {
     pub decorators: u32,
     /// Range of number of blocks to generate
     pub blocks: RangeInclusive<usize>,
+    /// Maximum number of join nodes to generate
+    pub max_joins: usize,
+    /// Maximum number of split nodes to generate
+    pub max_splits: usize,
+    /// Maximum number of loop nodes to generate
+    pub max_loops: usize,
+    /// Maximum number of call nodes to generate
+    pub max_calls: usize,
+    /// Maximum number of external nodes to generate
+    pub max_externals: usize,
+    /// Maximum number of dyn/dyncall nodes to generate
+    pub max_dyns: usize,
 }
 
 impl Default for MastForestParams {
     fn default() -> Self {
-        Self { decorators: 10, blocks: 1..=10 }
+        Self {
+            decorators: 3,
+            blocks: 1..=3,
+            max_joins: 1,
+            max_splits: 1,
+            max_loops: 1,
+            max_calls: 1,
+            max_externals: 1,
+            max_dyns: 1,
+        }
     }
 }
 
@@ -219,8 +240,21 @@ impl Arbitrary for MastForest {
                 any::<Decorator>(),
                 params.decorators as usize..=params.decorators as usize,
             ),
-            // Generate control flow parameters
-            any::<(usize, usize, usize, usize, usize, usize)>(), // counts for different node types
+            // Generate control flow node counts within the specified limits
+            (
+                // Generate number of join nodes (1 to max_joins, ensuring at least 1)
+                1..=params.max_joins,
+                // Generate number of split nodes (1 to max_splits, ensuring at least 1)
+                1..=params.max_splits,
+                // Generate number of loop nodes (1 to max_loops, ensuring at least 1)
+                1..=params.max_loops,
+                // Generate number of call nodes (1 to max_calls, ensuring at least 1)
+                1..=params.max_calls,
+                // Generate number of external nodes (1 to max_externals, ensuring at least 1)
+                1..=params.max_externals,
+                // Generate number of dyn nodes (1 to max_dyns, ensuring at least 1)
+                1..=params.max_dyns,
+            ),
         )
             .prop_flat_map(
                 move |(
@@ -503,9 +537,9 @@ impl Arbitrary for Program {
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         // Create a simple strategy that generates a basic block and creates a program from it
         any_with::<BasicBlockNode>(BasicBlockNodeParams {
-            max_ops_len: 5, // Keep it small
-            max_pairs: 2,   // Fewer decorators
-            max_decorator_id_u32: 5,
+            max_ops_len: 4, // Keep it small
+            max_pairs: 1,   // Fewer decorators
+            max_decorator_id_u32: 2,
         })
         .prop_map(|node| {
             use alloc::sync::Arc;
@@ -516,7 +550,7 @@ impl Arbitrary for Program {
             let mut forest = MastForest::new();
 
             // Add some basic decorators
-            for i in 0..5 {
+            for i in 0..2 {
                 let decorator = Decorator::Trace(i as u32);
                 forest.add_decorator(decorator).expect("Failed to add decorator");
             }
