@@ -270,7 +270,7 @@ impl proptest::prelude::Arbitrary for SplitNode {
             .prop_map(|(true_branch, false_branch, digest_array)| {
                 // Use new_unsafe since we're generating arbitrary nodes
                 // The digest is also arbitrary since we can't compute it without a MastForest
-                let digest = Word::new([Felt::new(digest_array[0]), Felt::new(digest_array[1]), Felt::new(digest_array[2]), Felt::new(digest_array[3])]);
+                let digest = Word::from(digest_array.map(Felt::new));
                 SplitNode::new_unsafe([true_branch, false_branch], digest)
             })
             .no_shrink()  // Pure random values, no meaningful shrinking pattern

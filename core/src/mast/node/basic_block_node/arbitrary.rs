@@ -317,6 +317,21 @@ impl Arbitrary for MastForest {
                                     .collect::<Vec<_>>()
                             },
                         ),
+                        // Generate digests for external nodes
+                        prop::collection::vec(any::<[u64; 4]>(), num_externals..=num_externals)
+                            .prop_map(move |digests| {
+                                digests
+                                    .into_iter()
+                                    .map(|[a, b, c, d]| {
+                                        Word::from([
+                                            Felt::new(a),
+                                            Felt::new(b),
+                                            Felt::new(c),
+                                            Felt::new(d),
+                                        ])
+                                    })
+                                    .collect::<Vec<_>>()
+                            }),
                     )
                 },
             )
@@ -324,11 +339,12 @@ impl Arbitrary for MastForest {
                 move |(
                     basic_blocks,
                     decorators,
-                    (_num_joins, _num_splits, _num_loops, _num_calls, num_externals, num_dyns),
+                    (_num_joins, _num_splits, _num_loops, _num_calls, _num_externals, num_dyns),
                     join_pairs,
                     split_pairs,
                     loop_indices,
                     call_indices,
+                    external_digests,
                 )| {
                     let mut forest = MastForest::new();
 
@@ -396,8 +412,8 @@ impl Arbitrary for MastForest {
                     }
 
                     // Add external nodes
-                    for _ in 0..num_externals {
-                        if let Ok(external_id) = forest.add_external(Word::default()) {
+                    for digest in external_digests {
+                        if let Ok(external_id) = forest.add_external(digest) {
                             all_node_ids.push(external_id);
                         }
                     }

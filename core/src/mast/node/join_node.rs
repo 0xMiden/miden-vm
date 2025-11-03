@@ -275,7 +275,7 @@ impl proptest::prelude::Arbitrary for JoinNode {
             .prop_map(|(first_child, second_child, digest_array)| {
                 // Use new_unsafe since we're generating arbitrary nodes
                 // The digest is also arbitrary since we can't compute it without a MastForest
-                let digest = Word::new([Felt::new(digest_array[0]), Felt::new(digest_array[1]), Felt::new(digest_array[2]), Felt::new(digest_array[3])]);
+                let digest = Word::from(digest_array.map(Felt::new));
                 JoinNode::new_unsafe([first_child, second_child], digest)
             })
             .no_shrink()  // Pure random values, no meaningful shrinking pattern

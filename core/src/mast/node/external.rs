@@ -220,7 +220,7 @@ impl proptest::prelude::Arbitrary for ExternalNode {
         // Generate a random Word to use as the procedure hash/digest
         any::<[u64; 4]>()
             .prop_map(|[a, b, c, d]| {
-                let word = Word::new([Felt::new(a), Felt::new(b), Felt::new(c), Felt::new(d)]);
+                let word = Word::from([Felt::new(a), Felt::new(b), Felt::new(c), Felt::new(d)]);
                 ExternalNode::new(word)
             })
             .no_shrink()  // Pure random values, no meaningful shrinking pattern
