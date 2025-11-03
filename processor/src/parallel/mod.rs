@@ -1,4 +1,4 @@
-use alloc::{boxed::Box, vec::Vec};
+use alloc::{boxed::Box, string::ToString, vec::Vec};
 use core::{mem::MaybeUninit, ops::ControlFlow};
 
 use itertools::Itertools;
@@ -81,7 +81,7 @@ pub fn build_trace(
     trace_generation_context: TraceGenerationContext,
     program_hash: Word,
     kernel: Kernel,
-) -> ExecutionTrace {
+) -> Result<ExecutionTrace, ExecutionError> {
     let TraceGenerationContext {
         core_trace_contexts,
         range_checker_replay,
@@ -102,11 +102,11 @@ pub fn build_trace(
         kernel_replay,
         hasher_for_chiplet,
         ace_replay,
-    );
+    )?;
 
     let range_checker = initialize_range_checker(range_checker_replay, &chiplets);
 
-    let fragments = generate_core_trace_fragments(core_trace_contexts, fragment_size);
+    let fragments = generate_core_trace_fragments(core_trace_contexts, fragment_size)?;
 
     // Calculate trace length
     let core_trace_len = {
@@ -146,6 +146,8 @@ pub fn build_trace(
         },
     );
 
+    let core_trace_columns = core_trace_columns?;
+
     // Padding to make the number of columns a multiple of 8 i.e., the RPO permutation rate
     let padding = vec![vec![ZERO; main_trace_len]; PADDED_TRACE_WIDTH - TRACE_WIDTH];
 
@@ -182,14 +184,14 @@ pub fn build_trace(
         stack: StackAuxTraceBuilder,
     };
 
-    ExecutionTrace::new_from_parts(
+    Ok(ExecutionTrace::new_from_parts(
         program_hash,
         kernel,
         execution_output,
         main_trace,
         aux_trace_builders,
         trace_len_summary,
-    )
+    ))
 }
 
 fn compute_main_trace_length(
@@ -210,7 +212,7 @@ fn compute_main_trace_length(
 fn generate_core_trace_fragments(
     core_trace_contexts: Vec<CoreTraceFragmentContext>,
     fragment_size: usize,
-) -> Vec<CoreTraceFragment> {
+) -> Result<Vec<CoreTraceFragment>, ExecutionError> {
     // Save the first stack top for initialization
     let first_stack_top = if let Some(first_context) = core_trace_contexts.first() {
         first_context.state.stack.stack_top.to_vec()
@@ -229,17 +231,18 @@ fn generate_core_trace_fragments(
     ];
 
     // Build the core trace fragments in parallel
-    let fragment_results: Vec<(
-        CoreTraceFragment,
-        [Felt; STACK_TRACE_WIDTH],
-        [Felt; SYS_TRACE_WIDTH],
-    )> = core_trace_contexts
+    let fragment_results: Result<
+        Vec<(CoreTraceFragment, [Felt; STACK_TRACE_WIDTH], [Felt; SYS_TRACE_WIDTH])>,
+        ExecutionError,
+    > = core_trace_contexts
         .into_par_iter()
         .map(|trace_state| {
             let main_trace_generator = CoreTraceFragmentGenerator::new(trace_state, fragment_size);
             main_trace_generator.generate_fragment()
         })
         .collect();
+
+    let fragment_results = fragment_results?;
 
     // Separate fragments, stack_rows, and system_rows
     let mut fragments = Vec::new();
@@ -263,17 +266,27 @@ fn generate_core_trace_fragments(
         &first_system_state,
     );
 
-    append_halt_opcode_row(
-        fragments.last_mut().expect("expected at least one trace fragment"),
-        system_rows.last().expect(
-            "system_rows should not be empty, which indicates that there are no trace fragments",
-        ),
-        stack_rows.last().expect(
-            "stack_rows should not be empty, which indicates that there are no trace fragments",
-        ),
-    );
+    let last_fragment = fragments.last_mut().ok_or_else(|| {
+        ExecutionError::trace_generation_error("expected at least one trace fragment".to_string())
+    })?;
 
-    fragments
+    let last_system_row = system_rows.last().ok_or_else(|| {
+        ExecutionError::trace_generation_error(
+            "system_rows should not be empty, which indicates that there are no trace fragments"
+                .to_string(),
+        )
+    })?;
+
+    let last_stack_row = stack_rows.last().ok_or_else(|| {
+        ExecutionError::trace_generation_error(
+            "stack_rows should not be empty, which indicates that there are no trace fragments"
+                .to_string(),
+        )
+    })?;
+
+    append_halt_opcode_row(last_fragment, last_system_row, last_stack_row);
+
+    Ok(fragments)
 }
 
 /// Fixes up the stack and system rows in fragments by initializing the first row of each fragment
@@ -427,7 +440,7 @@ fn initialize_chiplets(
     kernel_replay: KernelReplay,
     hasher_for_chiplet: HasherRequestReplay,
     ace_replay: AceReplay,
-) -> Chiplets {
+) -> Result<Chiplets, ExecutionError> {
     let mut chiplets = Chiplets::new(kernel);
 
     // populate hasher chiplet
@@ -455,16 +468,18 @@ fn initialize_chiplets(
     for (bitwise_op, a, b) in bitwise {
         match bitwise_op {
             BitwiseOp::U32And => {
-                chiplets
-                    .bitwise
-                    .u32and(a, b, &())
-                    .expect("bitwise AND operation failed when populating chiplet");
+                chiplets.bitwise.u32and(a, b, &()).map_err(|e| {
+                    ExecutionError::trace_generation_error(format!(
+                        "bitwise AND operation failed when populating chiplet: {e:?}"
+                    ))
+                })?;
             },
             BitwiseOp::U32Xor => {
-                chiplets
-                    .bitwise
-                    .u32xor(a, b, &())
-                    .expect("bitwise XOR operation failed when populating chiplet");
+                chiplets.bitwise.u32xor(a, b, &()).map_err(|e| {
+                    ExecutionError::trace_generation_error(format!(
+                        "bitwise XOR operation failed when populating chiplet: {e:?}"
+                    ))
+                })?;
             },
         }
     }
@@ -502,32 +517,39 @@ fn initialize_chiplets(
         [elements_written, words_written, elements_read, words_read]
             .into_iter()
             .kmerge_by(|a, b| a.clk() < b.clk())
-            .for_each(|mem_access| match mem_access {
-                MemoryAccess::ReadElement(addr, ctx, clk) => {
-                    chiplets
-                        .memory
-                        .read(ctx, addr, clk, &())
-                        .expect("memory read element failed when populating chiplet");
-                },
-                MemoryAccess::WriteElement(addr, element, ctx, clk) => {
-                    chiplets
-                        .memory
-                        .write(ctx, addr, clk, element, &())
-                        .expect("memory write element failed when populating chiplet");
-                },
-                MemoryAccess::ReadWord(addr, ctx, clk) => {
-                    chiplets
-                        .memory
-                        .read_word(ctx, addr, clk, &())
-                        .expect("memory read word failed when populating chiplet");
-                },
-                MemoryAccess::WriteWord(addr, word, ctx, clk) => {
-                    chiplets
-                        .memory
-                        .write_word(ctx, addr, clk, word, &())
-                        .expect("memory write word failed when populating chiplet");
-                },
-            });
+            .try_for_each(|mem_access| -> Result<(), ExecutionError> {
+                match mem_access {
+                    MemoryAccess::ReadElement(addr, ctx, clk) => {
+                        chiplets.memory.read(ctx, addr, clk, &()).map_err(|e| {
+                            ExecutionError::trace_generation_error(format!(
+                                "memory read element failed when populating chiplet: {e:?}"
+                            ))
+                        })?;
+                    },
+                    MemoryAccess::WriteElement(addr, element, ctx, clk) => {
+                        chiplets.memory.write(ctx, addr, clk, element, &()).map_err(|e| {
+                            ExecutionError::trace_generation_error(format!(
+                                "memory write element failed when populating chiplet: {e:?}"
+                            ))
+                        })?;
+                    },
+                    MemoryAccess::ReadWord(addr, ctx, clk) => {
+                        chiplets.memory.read_word(ctx, addr, clk, &()).map_err(|e| {
+                            ExecutionError::trace_generation_error(format!(
+                                "memory read word failed when populating chiplet: {e:?}"
+                            ))
+                        })?;
+                    },
+                    MemoryAccess::WriteWord(addr, word, ctx, clk) => {
+                        chiplets.memory.write_word(ctx, addr, clk, word, &()).map_err(|e| {
+                            ExecutionError::trace_generation_error(format!(
+                                "memory write word failed when populating chiplet: {e:?}"
+                            ))
+                        })?;
+                    },
+                }
+                Ok(())
+            })?;
 
         enum MemoryAccess {
             ReadElement(Felt, ContextId, RowIndex),
@@ -555,19 +577,25 @@ fn initialize_chiplets(
 
     // populate kernel ROM
     for proc_hash in kernel_replay.into_iter() {
-        chiplets
-            .kernel_rom
-            .access_proc(proc_hash, &())
-            .expect("kernel proc access failed when populating chiplet");
+        chiplets.kernel_rom.access_proc(proc_hash, &()).map_err(|e| {
+            ExecutionError::trace_generation_error(format!(
+                "kernel proc access failed when populating chiplet: {e:?}"
+            ))
+        })?;
     }
 
-    chiplets
+    Ok(chiplets)
 }
 
 /// Combines multiple CoreTraceFragments into core trace columns
-fn combine_fragments(fragments: Vec<CoreTraceFragment>, trace_len: usize) -> Vec<Vec<Felt>> {
+fn combine_fragments(
+    fragments: Vec<CoreTraceFragment>,
+    trace_len: usize,
+) -> Result<Vec<Vec<Felt>>, ExecutionError> {
     if fragments.is_empty() {
-        panic!("Cannot combine empty fragments vector");
+        return Err(ExecutionError::trace_generation_error(
+            "Cannot combine empty fragments vector".to_string(),
+        ));
     }
 
     // Calculate total number of rows from fragments
@@ -612,7 +640,7 @@ fn combine_fragments(fragments: Vec<CoreTraceFragment>, trace_len: usize) -> Vec
         batch_inversion(&core_trace_columns[STACK_TRACE_OFFSET + H0_COL_IDX]);
 
     // Return the core trace columns
-    core_trace_columns
+    Ok(core_trace_columns)
 }
 
 /// Pads the trace columns from `total_program_rows` rows to `trace_len` rows.
@@ -826,21 +854,24 @@ impl CoreTraceFragmentGenerator {
     /// Processes a single checkpoint into a CoreTraceFragment
     pub fn generate_fragment(
         mut self,
-    ) -> (CoreTraceFragment, [Felt; STACK_TRACE_WIDTH], [Felt; SYS_TRACE_WIDTH]) {
+    ) -> Result<
+        (CoreTraceFragment, [Felt; STACK_TRACE_WIDTH], [Felt; SYS_TRACE_WIDTH]),
+        ExecutionError,
+    > {
         let execution_state = self.context.initial_execution_state.clone();
         // Execute fragment generation and always finalize at the end
-        let _ = self.execute_fragment_generation(execution_state);
+        self.execute_fragment_generation(execution_state)?;
         let final_stack_rows = self.stack_rows.unwrap_or([ZERO; STACK_TRACE_WIDTH]);
         let final_system_rows = self.system_rows.unwrap_or([ZERO; SYS_TRACE_WIDTH]);
         let fragment = self.finalize_fragment();
-        (fragment, final_stack_rows, final_system_rows)
+        Ok((fragment, final_stack_rows, final_system_rows))
     }
 
     /// Internal method that performs fragment generation with automatic early returns
     fn execute_fragment_generation(
         &mut self,
         execution_state: NodeExecutionState,
-    ) -> ControlFlow<()> {
+    ) -> Result<ControlFlow<()>, ExecutionError> {
         let initial_mast_forest = self.context.initial_mast_forest.clone();
 
         // Finish the current node given its execution state
@@ -848,20 +879,29 @@ impl CoreTraceFragmentGenerator {
             NodeExecutionState::BasicBlock { node_id, batch_index, op_idx_in_batch } => {
                 let basic_block_node = {
                     let mast_node =
-                        initial_mast_forest.get_node_by_id(node_id).expect("node should exist");
-                    mast_node.get_basic_block().expect("Expected a basic block node")
+                        initial_mast_forest.get_node_by_id(node_id).ok_or_else(|| {
+                            ExecutionError::trace_generation_error(format!(
+                                "node {node_id} should exist in MAST forest"
+                            ))
+                        })?;
+                    mast_node.get_basic_block().ok_or_else(|| {
+                        ExecutionError::trace_generation_error(format!(
+                            "Expected a basic block node, but node {node_id} is not a basic block"
+                        ))
+                    })?
                 };
 
                 let op_batches = basic_block_node.op_batches();
-                assert!(
-                    batch_index < op_batches.len(),
-                    "Batch index out of bounds: {batch_index} >= {}",
-                    op_batches.len()
-                );
+                if batch_index >= op_batches.len() {
+                    return Err(ExecutionError::trace_generation_error(format!(
+                        "Batch index out of bounds: {batch_index} >= {}",
+                        op_batches.len()
+                    )));
+                }
 
                 // Initialize the span context for the current basic block
                 self.span_context =
-                    Some(initialize_span_context(basic_block_node, batch_index, op_idx_in_batch));
+                    Some(initialize_span_context(basic_block_node, batch_index, op_idx_in_batch)?);
 
                 // Execute remaining operations in the specified batch
                 {
@@ -875,13 +915,13 @@ impl CoreTraceFragmentGenerator {
 
                 // Execute remaining batches
                 for op_batch in op_batches.iter().skip(batch_index + 1) {
-                    self.respan(op_batch)?;
+                    propagate_control_flow(self.respan(op_batch))?;
 
                     self.execute_op_batch(op_batch, None, &initial_mast_forest)?;
                 }
 
                 // Add END trace row to complete the basic block
-                self.add_span_end_trace_row(basic_block_node)?;
+                propagate_control_flow(self.add_span_end_trace_row(basic_block_node))?;
             },
             NodeExecutionState::Start(node_id) => {
                 self.execute_mast_node(node_id, &initial_mast_forest)?;
@@ -889,8 +929,16 @@ impl CoreTraceFragmentGenerator {
             NodeExecutionState::Respan { node_id, batch_index } => {
                 let basic_block_node = {
                     let mast_node =
-                        initial_mast_forest.get_node_by_id(node_id).expect("node should exist");
-                    mast_node.get_basic_block().expect("Expected a basic block node")
+                        initial_mast_forest.get_node_by_id(node_id).ok_or_else(|| {
+                            ExecutionError::trace_generation_error(format!(
+                                "node {node_id} should exist in MAST forest"
+                            ))
+                        })?;
+                    mast_node.get_basic_block().ok_or_else(|| {
+                        ExecutionError::trace_generation_error(format!(
+                            "Expected a basic block node, but node {node_id} is not a basic block"
+                        ))
+                    })?
                 };
                 let current_batch = &basic_block_node.op_batches()[batch_index];
 
@@ -911,30 +959,34 @@ impl CoreTraceFragmentGenerator {
 
                 // Execute remaining batches
                 for op_batch in basic_block_node.op_batches().iter().skip(batch_index) {
-                    self.respan(op_batch)?;
+                    propagate_control_flow(self.respan(op_batch))?;
 
                     self.execute_op_batch(op_batch, None, &initial_mast_forest)?;
                 }
 
                 // Add END trace row to complete the basic block
-                self.add_span_end_trace_row(basic_block_node)?;
+                propagate_control_flow(self.add_span_end_trace_row(basic_block_node))?;
             },
             NodeExecutionState::LoopRepeat(node_id) => {
                 // TODO(plafer): merge with the `Continuation::FinishLoop` case
                 let loop_node = initial_mast_forest
                     .get_node_by_id(node_id)
-                    .expect("node should exist")
+                    .ok_or_else(|| {
+                        ExecutionError::trace_generation_error(format!(
+                            "node {node_id} should exist in MAST forest"
+                        ))
+                    })?
                     .unwrap_loop();
 
                 let mut condition = self.get(0);
                 self.decrement_size(&mut NoopTracer);
 
                 while condition == ONE {
-                    self.add_loop_repeat_trace_row(
+                    propagate_control_flow(self.add_loop_repeat_trace_row(
                         loop_node,
                         &initial_mast_forest,
                         self.context.state.decoder.current_addr,
-                    )?;
+                    ))?;
 
                     self.execute_mast_node(loop_node.body(), &initial_mast_forest)?;
 
@@ -946,20 +998,23 @@ impl CoreTraceFragmentGenerator {
                 //
                 // Note that we don't confirm that the condition is properly ZERO here, as
                 // the FastProcessor already ran that check.
-                self.add_end_trace_row(loop_node.digest())?;
+                propagate_control_flow(self.add_end_trace_row(loop_node.digest()))?;
             },
             // TODO(plafer): there's a big overlap between `NodeExecutionPhase::End` and
             // `Continuation::Finish*`. We can probably reconcile.
             NodeExecutionState::End(node_id) => {
-                let mast_node =
-                    initial_mast_forest.get_node_by_id(node_id).expect("node should exist");
+                let mast_node = initial_mast_forest.get_node_by_id(node_id).ok_or_else(|| {
+                    ExecutionError::trace_generation_error(format!(
+                        "node {node_id} should exist in MAST forest"
+                    ))
+                })?;
 
                 match mast_node {
                     MastNode::Join(join_node) => {
-                        self.add_end_trace_row(join_node.digest())?;
+                        propagate_control_flow(self.add_end_trace_row(join_node.digest()))?;
                     },
                     MastNode::Split(split_node) => {
-                        self.add_end_trace_row(split_node.digest())?;
+                        propagate_control_flow(self.add_end_trace_row(split_node.digest()))?;
                     },
                     MastNode::Loop(loop_node) => {
                         let (ended_node_addr, flags) = self.update_decoder_state_on_node_end();
@@ -969,12 +1024,16 @@ impl CoreTraceFragmentGenerator {
                             self.decrement_size(&mut NoopTracer);
                         }
 
-                        self.add_end_trace_row_impl(loop_node.digest(), flags, ended_node_addr)?;
+                        propagate_control_flow(self.add_end_trace_row_impl(
+                            loop_node.digest(),
+                            flags,
+                            ended_node_addr,
+                        ))?;
                     },
                     MastNode::Call(call_node) => {
                         let ctx_info = self.context.replay.block_stack.replay_execution_context();
                         self.restore_context_from_replay(&ctx_info);
-                        self.add_end_trace_row(call_node.digest())?;
+                        propagate_control_flow(self.add_end_trace_row(call_node.digest()))?;
                     },
                     MastNode::Dyn(dyn_node) => {
                         if dyn_node.is_dyncall() {
@@ -982,15 +1041,17 @@ impl CoreTraceFragmentGenerator {
                                 self.context.replay.block_stack.replay_execution_context();
                             self.restore_context_from_replay(&ctx_info);
                         }
-                        self.add_end_trace_row(dyn_node.digest())?;
+                        propagate_control_flow(self.add_end_trace_row(dyn_node.digest()))?;
                     },
                     MastNode::Block(basic_block_node) => {
-                        self.add_span_end_trace_row(basic_block_node)?;
+                        propagate_control_flow(self.add_span_end_trace_row(basic_block_node))?;
                     },
                     MastNode::External(_external_node) => {
                         // External nodes don't generate trace rows directly, and hence will never
                         // show up in the END execution state.
-                        panic!("Unexpected external node in END execution state")
+                        return Err(ExecutionError::trace_generation_error(
+                            "Unexpected external node in END execution state".to_string(),
+                        ));
                     },
                 }
             },
@@ -1005,30 +1066,40 @@ impl CoreTraceFragmentGenerator {
                     self.execute_mast_node(node_id, &current_forest)?;
                 },
                 Continuation::FinishJoin(node_id) => {
-                    let mast_node =
-                        current_forest.get_node_by_id(node_id).expect("node should exist");
-                    self.add_end_trace_row(mast_node.digest())?;
+                    let mast_node = current_forest.get_node_by_id(node_id).ok_or_else(|| {
+                        ExecutionError::trace_generation_error(format!(
+                            "node {node_id} should exist in MAST forest"
+                        ))
+                    })?;
+                    propagate_control_flow(self.add_end_trace_row(mast_node.digest()))?;
                 },
                 Continuation::FinishSplit(node_id) => {
-                    let mast_node =
-                        current_forest.get_node_by_id(node_id).expect("node should exist");
-                    self.add_end_trace_row(mast_node.digest())?;
+                    let mast_node = current_forest.get_node_by_id(node_id).ok_or_else(|| {
+                        ExecutionError::trace_generation_error(format!(
+                            "node {node_id} should exist in MAST forest"
+                        ))
+                    })?;
+                    propagate_control_flow(self.add_end_trace_row(mast_node.digest()))?;
                 },
                 Continuation::FinishLoop(node_id) => {
                     let loop_node = current_forest
                         .get_node_by_id(node_id)
-                        .expect("node should exist")
+                        .ok_or_else(|| {
+                            ExecutionError::trace_generation_error(format!(
+                                "node {node_id} should exist in MAST forest"
+                            ))
+                        })?
                         .unwrap_loop();
 
                     let mut condition = self.get(0);
                     self.decrement_size(&mut NoopTracer);
 
                     while condition == ONE {
-                        self.add_loop_repeat_trace_row(
+                        propagate_control_flow(self.add_loop_repeat_trace_row(
                             loop_node,
                             &current_forest,
                             self.context.state.decoder.current_addr,
-                        )?;
+                        ))?;
 
                         self.execute_mast_node(loop_node.body(), &current_forest)?;
 
@@ -1040,30 +1111,35 @@ impl CoreTraceFragmentGenerator {
                     //
                     // Note that we don't confirm that the condition is properly ZERO here, as
                     // the FastProcessor already ran that check.
-                    self.add_end_trace_row(loop_node.digest())?;
+                    propagate_control_flow(self.add_end_trace_row(loop_node.digest()))?;
                 },
                 Continuation::FinishCall(node_id) => {
-                    let mast_node =
-                        current_forest.get_node_by_id(node_id).expect("node should exist");
+                    let mast_node = current_forest.get_node_by_id(node_id).ok_or_else(|| {
+                        ExecutionError::trace_generation_error(format!(
+                            "node {node_id} should exist in MAST forest"
+                        ))
+                    })?;
 
                     // Restore context
                     let ctx_info = self.context.replay.block_stack.replay_execution_context();
                     self.restore_context_from_replay(&ctx_info);
 
                     // write END row to trace
-                    self.add_end_trace_row(mast_node.digest())?;
+                    propagate_control_flow(self.add_end_trace_row(mast_node.digest()))?;
                 },
                 Continuation::FinishDyn(node_id) => {
-                    let dyn_node = current_forest
-                        .get_node_by_id(node_id)
-                        .expect("node should exist")
-                        .unwrap_dyn();
+                    let dyn_node = current_forest.get_node_by_id(node_id).ok_or_else(|| {
+                        ExecutionError::trace_generation_error(format!(
+                            "node {node_id} should exist in MAST forest"
+                        ))
+                    })?;
+                    let dyn_node = dyn_node.unwrap_dyn();
                     if dyn_node.is_dyncall() {
                         let ctx_info = self.context.replay.block_stack.replay_execution_context();
                         self.restore_context_from_replay(&ctx_info);
                     }
 
-                    self.add_end_trace_row(dyn_node.digest())?;
+                    propagate_control_flow(self.add_end_trace_row(dyn_node.digest()))?;
                 },
                 Continuation::FinishExternal(_node_id) => {
                     // Execute after_exit decorators when returning from an external node
@@ -1079,33 +1155,38 @@ impl CoreTraceFragmentGenerator {
         }
 
         // All nodes completed without filling the fragment
-        ControlFlow::Continue(())
+        Ok(ControlFlow::Continue(()))
     }
 
     fn execute_mast_node(
         &mut self,
         node_id: MastNodeId,
         current_forest: &MastForest,
-    ) -> ControlFlow<()> {
-        let mast_node = current_forest.get_node_by_id(node_id).expect("node should exist");
+    ) -> Result<ControlFlow<()>, ExecutionError> {
+        let mast_node = current_forest.get_node_by_id(node_id).ok_or_else(|| {
+            ExecutionError::trace_generation_error(format!(
+                "node {node_id} should exist in MAST forest"
+            ))
+        })?;
 
         match mast_node {
             MastNode::Block(basic_block_node) => {
                 self.update_decoder_state_on_node_start();
 
                 let num_groups_left_in_block = Felt::from(basic_block_node.num_op_groups() as u32);
-                let first_op_batch = basic_block_node
-                    .op_batches()
-                    .first()
-                    .expect("Basic block should have at least one op batch");
+                let first_op_batch = basic_block_node.op_batches().first().ok_or_else(|| {
+                    ExecutionError::trace_generation_error(
+                        "Basic block should have at least one op batch".to_string(),
+                    )
+                })?;
 
                 // 1. Add SPAN start trace row
-                self.add_span_start_trace_row(
+                propagate_control_flow(self.add_span_start_trace_row(
                     first_op_batch,
                     num_groups_left_in_block,
                     // TODO(plafer): remove as parameter? (and same for all other start methods)
                     self.context.state.decoder.parent_addr,
-                )?;
+                ))?;
 
                 // Initialize the span context for the current basic block. After SPAN operation is
                 // executed, we decrement the number of remaining groups by 1 because executing
@@ -1122,33 +1203,36 @@ impl CoreTraceFragmentGenerator {
 
                 // Execute first op batch
                 {
-                    let first_op_batch =
-                        op_batches.first().expect("Basic block should have at least one op batch");
+                    let first_op_batch = op_batches.first().ok_or_else(|| {
+                        ExecutionError::trace_generation_error(
+                            "Basic block should have at least one op batch".to_string(),
+                        )
+                    })?;
                     self.execute_op_batch(first_op_batch, None, current_forest)?;
                 }
 
                 // Execute the rest of the op batches
                 for op_batch in op_batches.iter().skip(1) {
                     // 3. Add RESPAN trace row between batches
-                    self.respan(op_batch)?;
+                    propagate_control_flow(self.respan(op_batch))?;
 
                     self.execute_op_batch(op_batch, None, current_forest)?;
                 }
 
                 // 4. Add END trace row
-                self.add_span_end_trace_row(basic_block_node)?;
+                propagate_control_flow(self.add_span_end_trace_row(basic_block_node))?;
 
-                ControlFlow::Continue(())
+                Ok(ControlFlow::Continue(()))
             },
             MastNode::Join(join_node) => {
                 self.update_decoder_state_on_node_start();
 
                 // 1. Add "start JOIN" row
-                self.add_join_start_trace_row(
+                propagate_control_flow(self.add_join_start_trace_row(
                     join_node,
                     current_forest,
                     self.context.state.decoder.parent_addr,
-                )?;
+                ))?;
 
                 // 2. Execute first child
                 self.execute_mast_node(join_node.first(), current_forest)?;
@@ -1157,7 +1241,11 @@ impl CoreTraceFragmentGenerator {
                 self.execute_mast_node(join_node.second(), current_forest)?;
 
                 // 4. Add "end JOIN" row
-                self.add_end_trace_row(join_node.digest())
+                match self.add_end_trace_row(join_node.digest()) {
+                    ControlFlow::Break(()) => return Ok(ControlFlow::Break(())),
+                    ControlFlow::Continue(()) => {},
+                }
+                Ok(ControlFlow::Continue(()))
             },
             MastNode::Split(split_node) => {
                 self.update_decoder_state_on_node_start();
@@ -1166,11 +1254,11 @@ impl CoreTraceFragmentGenerator {
                 self.decrement_size(&mut NoopTracer);
 
                 // 1. Add "start SPLIT" row
-                self.add_split_start_trace_row(
+                propagate_control_flow(self.add_split_start_trace_row(
                     split_node,
                     current_forest,
                     self.context.state.decoder.parent_addr,
-                )?;
+                ))?;
 
                 // 2. Execute the appropriate branch based on the stack top value
                 if condition == ONE {
@@ -1180,7 +1268,11 @@ impl CoreTraceFragmentGenerator {
                 }
 
                 // 3. Add "end SPLIT" row
-                self.add_end_trace_row(split_node.digest())
+                match self.add_end_trace_row(split_node.digest()) {
+                    ControlFlow::Break(()) => return Ok(ControlFlow::Break(())),
+                    ControlFlow::Continue(()) => {},
+                }
+                Ok(ControlFlow::Continue(()))
             },
             MastNode::Loop(loop_node) => {
                 self.update_decoder_state_on_node_start();
@@ -1191,11 +1283,11 @@ impl CoreTraceFragmentGenerator {
                 self.decrement_size(&mut NoopTracer);
 
                 // 1. Add "start LOOP" row
-                self.add_loop_start_trace_row(
+                propagate_control_flow(self.add_loop_start_trace_row(
                     loop_node,
                     current_forest,
                     self.context.state.decoder.parent_addr,
-                )?;
+                ))?;
 
                 // 2. Loop while condition is true
                 //
@@ -1209,11 +1301,11 @@ impl CoreTraceFragmentGenerator {
                 }
 
                 while condition == ONE {
-                    self.add_loop_repeat_trace_row(
+                    propagate_control_flow(self.add_loop_repeat_trace_row(
                         loop_node,
                         current_forest,
                         self.context.state.decoder.current_addr,
-                    )?;
+                    ))?;
 
                     self.execute_mast_node(loop_node.body(), current_forest)?;
 
@@ -1225,7 +1317,11 @@ impl CoreTraceFragmentGenerator {
                 //
                 // Note that we don't confirm that the condition is properly ZERO here, as the
                 // FastProcessor already ran that check.
-                self.add_end_trace_row(loop_node.digest())
+                match self.add_end_trace_row(loop_node.digest()) {
+                    ControlFlow::Break(()) => return Ok(ControlFlow::Break(())),
+                    ControlFlow::Continue(()) => {},
+                }
+                Ok(ControlFlow::Continue(()))
             },
             MastNode::Call(call_node) => {
                 self.update_decoder_state_on_node_start();
@@ -1242,11 +1338,11 @@ impl CoreTraceFragmentGenerator {
                 }
 
                 // Add "start CALL/SYSCALL" row
-                self.add_call_start_trace_row(
+                propagate_control_flow(self.add_call_start_trace_row(
                     call_node,
                     current_forest,
                     self.context.state.decoder.parent_addr,
-                )?;
+                ))?;
 
                 // Execute the callee
                 self.execute_mast_node(call_node.callee(), current_forest)?;
@@ -1256,7 +1352,11 @@ impl CoreTraceFragmentGenerator {
                 self.restore_context_from_replay(&ctx_info);
 
                 // 2. Add "end CALL/SYSCALL" row
-                self.add_end_trace_row(call_node.digest())
+                match self.add_end_trace_row(call_node.digest()) {
+                    ControlFlow::Break(()) => return Ok(ControlFlow::Break(())),
+                    ControlFlow::Continue(()) => {},
+                }
+                Ok(ControlFlow::Continue(()))
             },
             MastNode::Dyn(dyn_node) => {
                 self.update_decoder_state_on_node_start();
@@ -1283,18 +1383,18 @@ impl CoreTraceFragmentGenerator {
                         ContextId::from(self.context.state.system.clk + 1); // New context ID
                     self.context.state.system.fn_hash = callee_hash;
 
-                    self.add_dyncall_start_trace_row(
+                    propagate_control_flow(self.add_dyncall_start_trace_row(
                         self.context.state.decoder.parent_addr,
                         callee_hash,
                         ctx_info,
-                    )?;
+                    ))?;
                 } else {
                     // Pop the memory address off the stack, and write the DYN trace row
                     self.decrement_size(&mut NoopTracer);
-                    self.add_dyn_start_trace_row(
+                    propagate_control_flow(self.add_dyn_start_trace_row(
                         self.context.state.decoder.parent_addr,
                         callee_hash,
-                    )?;
+                    ))?;
                 };
 
                 // 2. Execute the callee
@@ -1315,7 +1415,11 @@ impl CoreTraceFragmentGenerator {
                 }
 
                 // 3. Add "end DYN/DYNCALL" row
-                self.add_end_trace_row(dyn_node.digest())
+                match self.add_end_trace_row(dyn_node.digest()) {
+                    ControlFlow::Break(()) => return Ok(ControlFlow::Break(())),
+                    ControlFlow::Continue(()) => {},
+                }
+                Ok(ControlFlow::Continue(()))
             },
             MastNode::External(_) => {
                 let (resolved_node_id, resolved_forest) =
@@ -1379,7 +1483,7 @@ impl CoreTraceFragmentGenerator {
         batch: &OpBatch,
         start_op_idx: Option<usize>,
         current_forest: &MastForest,
-    ) -> ControlFlow<()> {
+    ) -> Result<ControlFlow<()>, ExecutionError> {
         let start_op_idx = start_op_idx.unwrap_or(0);
         let end_indices = batch.end_indices();
 
@@ -1396,22 +1500,20 @@ impl CoreTraceFragmentGenerator {
                     // Note that the `op_idx_in_block` is only used in case of error, so we set it
                     // to 0.
                     // TODO(plafer): remove op_idx_in_block from u32_sub's error?
-                    self.execute_sync_op(
-                        op,
-                        0,
-                        current_forest,
-                        &mut NoopHost,
-                        &(),
-                        &mut NoopTracer,
-                    )
-                    // The assumption here is that the computation was done by the FastProcessor,
-                    // and so all operations in the program are valid and can be executed
-                    // successfully.
-                    .expect("operation should execute successfully")
+                    self.execute_sync_op(op, 0, current_forest, &mut NoopHost, &(), &mut NoopTracer)
+                        .map_err(|e| {
+                            ExecutionError::trace_generation_error(format!(
+                                "operation should execute successfully: {e:?}"
+                            ))
+                        })?
                 };
 
                 // write the operation to the trace
-                self.add_operation_trace_row(*op, op_idx_in_group, user_op_helpers)?;
+                propagate_control_flow(self.add_operation_trace_row(
+                    *op,
+                    op_idx_in_group,
+                    user_op_helpers,
+                ))?;
             }
 
             // if we executed all operations in a group and haven't reached the end of the batch
@@ -1419,21 +1521,25 @@ impl CoreTraceFragmentGenerator {
             if op_idx_in_batch + 1 == end_indices[op_group_idx]
                 && let Some(next_op_group_idx) = batch.next_op_group_index(op_group_idx)
             {
-                self.start_op_group(batch.groups()[next_op_group_idx]);
+                self.start_op_group(batch.groups()[next_op_group_idx])?;
             }
         }
 
-        ControlFlow::Continue(())
+        Ok(ControlFlow::Continue(()))
     }
 
     /// Starts decoding a new operation group.
-    pub fn start_op_group(&mut self, op_group: Felt) {
-        let ctx = self.span_context.as_mut().expect("not in span");
+    pub fn start_op_group(&mut self, op_group: Felt) -> Result<(), ExecutionError> {
+        let ctx = self
+            .span_context
+            .as_mut()
+            .ok_or_else(|| ExecutionError::trace_generation_error("not in span".to_string()))?;
 
         // reset the current group value and decrement the number of left groups by ONE
         debug_assert_eq!(ZERO, ctx.group_ops_left, "not all ops executed in current group");
         ctx.group_ops_left = op_group;
         ctx.num_groups_left -= ONE;
+        Ok(())
     }
 
     /// Finalizes and returns the built fragment, truncating any unused rows if necessary.
@@ -1511,6 +1617,15 @@ impl CoreTraceFragmentGenerator {
 // HELPERS
 // ===============================================================================================
 
+/// Helper to propagate ControlFlow early exit from methods that return ControlFlow<()>
+/// in functions that return Result<ControlFlow<()>, ExecutionError>
+fn propagate_control_flow(cf: ControlFlow<()>) -> Result<ControlFlow<()>, ExecutionError> {
+    match cf {
+        ControlFlow::Break(()) => Ok(ControlFlow::Break(())),
+        ControlFlow::Continue(()) => Ok(ControlFlow::Continue(())),
+    }
+}
+
 /// Given that a trace fragment can start executing from the middle of a basic block, we need to
 /// initialize the `BasicBlockContext` correctly to reflect the state of the decoder at that point.
 /// This function does that initialization.
@@ -1526,11 +1641,15 @@ fn initialize_span_context(
     basic_block_node: &BasicBlockNode,
     batch_index: usize,
     op_idx_in_batch: usize,
-) -> BasicBlockContext {
+) -> Result<BasicBlockContext, ExecutionError> {
     let op_batches = basic_block_node.op_batches();
     let (current_op_group_idx, op_idx_in_group) = op_batches[batch_index]
         .op_idx_in_batch_to_group(op_idx_in_batch)
-        .expect("invalid batch");
+        .ok_or_else(|| {
+            ExecutionError::trace_generation_error(format!(
+                "invalid batch: batch_index={batch_index}, op_idx_in_batch={op_idx_in_batch}"
+            ))
+        })?;
 
     let group_ops_left = {
         // Note: this here relies on NOOP's opcode to be 0, since `current_op_group_idx` could point
@@ -1584,7 +1703,7 @@ fn initialize_span_context(
         Felt::from((total_groups - groups_consumed) as u32)
     };
 
-    BasicBlockContext { group_ops_left, num_groups_left }
+    Ok(BasicBlockContext { group_ops_left, num_groups_left })
 }
 
 // REQUIRED METHODS
