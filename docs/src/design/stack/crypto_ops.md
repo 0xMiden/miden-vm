@@ -157,13 +157,15 @@ The effect on the rest of the stack is:
 * **Left shift** starting from position $16$.
 
 ## HORNERBASE
-The `HORNERBASE` operation performs $8$ steps of the Horner method for evaluating a polynomial with coefficients over the base field at a point in the quadratic extension field. More precisely, it performs the following updates to the accumulator on the stack
-    $$\mathsf{tmp0} = ((\mathsf{acc} \cdot \alpha + c_0) \cdot \alpha) + c_1$$
-
-   $$\mathsf{tmp1} = ((((\mathsf{tmp0} \cdot \alpha) + c_2) \cdot \alpha + c_3) \cdot \alpha) + c_4$$
-
-   $$\mathsf{acc}^{'} = ((((\mathsf{tmp1} \cdot \alpha + c_5) \cdot \alpha + c_6) \cdot \alpha) + c_7)$$
-where $c_i$ are the coefficients of the polynomial, $\alpha$ the evaluation point, $\mathsf{acc}$ the current accumulator value, and $\mathsf{acc}^{'}$ the updated accumulator value.
+The `HORNERBASE` operation performs $8$ steps of the Horner method for evaluating a polynomial with coefficients over the base field at a point in the quadratic extension field. More precisely, it performs the following updates to the accumulator on the stack:
+$$
+\begin{align*}
+\mathsf{tmp0}    &= ((\mathsf{acc} \cdot \alpha + c_0) \cdot \alpha) + c_1 \\
+\mathsf{tmp1}    &= ((((\mathsf{tmp0} \cdot \alpha) + c_2) \cdot \alpha + c_3) \cdot \alpha) + c_4 \\
+\mathsf{acc}^{'} &= ((((\mathsf{tmp1} \cdot \alpha + c_5) \cdot \alpha + c_6) \cdot \alpha) + c_7)
+\end{align*}
+$$
+where $c_i$ are the coefficients of the polynomial, $\alpha$ the evaluation point, $\mathsf{acc}$ the current accumulator value, $\mathsf{acc}^{'}$ the updated accumulator value, and $\mathsf{tmp0}$, $\mathsf{tmp1}$ are helper variables used for constraint degree reduction.
 
 The stack for the operation is expected to be arranged as follows:
 - The first $8$ stack elements (positions 0-7) are the $8$ base field elements representing the current 8-element batch of coefficients for the polynomial being evaluated, arranged as $[c_7, c_6, c_5, c_4, c_3, c_2, c_1, c_0]$ where $c_7$ is at position 0.
