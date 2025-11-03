@@ -328,32 +328,34 @@ pub(super) fn op_crypto_stream<P: Processor>(
         plaintext_word1[1] + rate[1],
         plaintext_word1[2] + rate[2],
         plaintext_word1[3] + rate[3],
-    ];
+    ]
+    .into();
     let ciphertext_word2 = [
         plaintext_word2[0] + rate[4],
         plaintext_word2[1] + rate[5],
         plaintext_word2[2] + rate[6],
         plaintext_word2[3] + rate[7],
-    ];
+    ]
+    .into();
 
     // Write ciphertext to destination memory
     let dst_addr_word2 = dst_addr + WORD_SIZE_FELT;
     processor
         .memory()
-        .write_word(ctx, dst_addr, clk, ciphertext_word1.into(), err_ctx)
+        .write_word(ctx, dst_addr, clk, ciphertext_word1, err_ctx)
         .map_err(ExecutionError::MemoryError)?;
-    tracer.record_memory_write_word(ciphertext_word1.into(), dst_addr, ctx, clk);
+    tracer.record_memory_write_word(ciphertext_word1, dst_addr, ctx, clk);
 
     processor
         .memory()
-        .write_word(ctx, dst_addr_word2, clk, ciphertext_word2.into(), err_ctx)
+        .write_word(ctx, dst_addr_word2, clk, ciphertext_word2, err_ctx)
         .map_err(ExecutionError::MemoryError)?;
-    tracer.record_memory_write_word(ciphertext_word2.into(), dst_addr_word2, ctx, clk);
+    tracer.record_memory_write_word(ciphertext_word2, dst_addr_word2, ctx, clk);
 
     // Update stack[0..7] with ciphertext (becomes new rate for next hperm)
     // Stack order is reversed: stack[0] = top
-    processor.stack().set_word(0, &ciphertext_word2.into());
-    processor.stack().set_word(4, &ciphertext_word1.into());
+    processor.stack().set_word(0, &ciphertext_word2);
+    processor.stack().set_word(4, &ciphertext_word1);
 
     // Increment pointers by 8 (2 words)
     processor.stack().set(SRC_PTR_IDX, src_addr + DOUBLE_WORD_SIZE);

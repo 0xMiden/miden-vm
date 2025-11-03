@@ -2,12 +2,12 @@
 //!
 //! This module provides an event handler for decrypting AEAD ciphertext using non-deterministic
 //! advice. When the VM emits an AEAD_DECRYPT_EVENT, this handler reads the ciphertext from memory,
-//! performs decryption using the reference implementation, and inserts the plaintext into the
-//! advice map for the MASM decrypt procedure to load.
+//! performs decryption using the reference implementation, and pushes the plaintext onto the
+//! advice stack for the MASM decrypt procedure to load.
 
 use alloc::{vec, vec::Vec};
 
-use miden_core::{AdviceMap, EventName};
+use miden_core::EventName;
 use miden_crypto::aead::{
     DataType, EncryptionError,
     aead_rpo::{AuthTag, EncryptedData, Nonce, SecretKey},
@@ -23,21 +23,21 @@ pub const AEAD_DECRYPT_EVENT_NAME: EventName = EventName::new("stdlib::crypto::a
 ///
 /// This handler is called when the VM emits an AEAD_DECRYPT_EVENT. It reads the full
 /// ciphertext (including padding block) and tag from memory, performs decryption and
-/// tag verification using AEAD-RPO, then provides the plaintext via the advice map.
+/// tag verification using AEAD-RPO, then pushes the plaintext onto the advice stack.
 ///
 /// Process:
 /// 1. Reads full ciphertext from memory at src_ptr ((num_blocks + 1) * 8 elements)
 /// 2. Reads authentication tag from memory at src_ptr + (num_blocks + 1) * 8
 /// 3. Constructs EncryptedData and decrypts using AEAD-RPO
 /// 4. Extracts only the data blocks (first num_blocks * 8 elements) from plaintext
-/// 5. Inserts the data blocks (WITHOUT padding) into the advice map (keyed by nonce)
+/// 5. Pushes the data blocks (WITHOUT padding) onto the advice stack in reverse order
 ///
 /// Memory layout at src_ptr:
 /// - [ciphertext_blocks(num_blocks * 8), encrypted_padding(8), tag(4)]
 /// - This handler reads ALL elements: data blocks + padding + tag
 ///
 /// The MASM decrypt procedure will then:
-/// 1. Load the plaintext data blocks from advice and write to dst_ptr
+/// 1. Load the plaintext data blocks from advice stack and write to dst_ptr using adv_pipe
 /// 2. Call encrypt which reads the data blocks and adds padding automatically
 /// 3. Re-encrypt data + padding to compute authentication tag
 /// 4. Compare computed tag with expected tag and halt if they don't match
@@ -45,8 +45,8 @@ pub const AEAD_DECRYPT_EVENT_NAME: EventName = EventName::new("stdlib::crypto::a
 /// Non-determinism soundness: Using advice for decryption is cryptographically sound
 /// because:
 /// 1. The MASM procedure re-verifies the tag when decrypting
-/// 3. The deterministic encryption creates a bijection between plaintext and ciphertext
-/// 4. A malicious prover cannot then provide incorrect plaintext without causing tag mismatch
+/// 2. The deterministic encryption creates a bijection between plaintext and ciphertext
+/// 3. A malicious prover cannot provide incorrect plaintext without causing tag mismatch
 pub fn handle_aead_decrypt(process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
     // Stack: [event_id, nonce(4), key(4), src_ptr, dst_ptr, num_blocks, ...]
     // where:
@@ -64,26 +64,29 @@ pub fn handle_aead_decrypt(process: &ProcessState) -> Result<Vec<AdviceMutation>
     let src_ptr = process.get_stack_item(9).as_int();
     let num_blocks = process.get_stack_item(11).as_int();
 
-    let ctx = process.ctx();
-
     // Read ciphertext from memory: (num_blocks + 1) * 8 elements (data + padding)
     let num_ciphertext_elements = (num_blocks + 1) * 8;
-    let ciphertext = read_memory_region(process, ctx, src_ptr, num_ciphertext_elements).ok_or(
+    let ciphertext = read_memory_region(process, src_ptr, num_ciphertext_elements).ok_or(
         AeadDecryptError::MemoryReadFailed {
             addr: src_ptr,
             len: num_ciphertext_elements,
         },
     )?;
 
-    // Read authentication tag: 4 elements immediately after ciphertext
+    // Read authentication tag: 4 elements (1 word) immediately after ciphertext
     let tag_ptr = src_ptr + num_ciphertext_elements;
-    let tag_vec = read_memory_region(process, ctx, tag_ptr, 4)
+    let tag_addr: u32 = tag_ptr
+        .try_into()
+        .ok()
         .ok_or(AeadDecryptError::MemoryReadFailed { addr: tag_ptr, len: 4 })?;
 
-    // Convert tag vector to array
-    let tag_elements: [miden_core::Felt; 4] = tag_vec
-        .try_into()
-        .map_err(|_| AeadDecryptError::MemoryReadFailed { addr: tag_ptr, len: 4 })?;
+    let ctx = process.ctx();
+    let tag_word = process
+        .get_mem_word(ctx, tag_addr)
+        .map_err(|_| AeadDecryptError::MemoryReadFailed { addr: tag_ptr, len: 4 })?
+        .ok_or(AeadDecryptError::MemoryReadFailed { addr: tag_ptr, len: 4 })?;
+
+    let tag_elements: [miden_core::Felt; 4] = tag_word.into();
 
     // Convert to reference implementation types
     let secret_key = SecretKey::from_elements(key_word.into());
@@ -98,18 +101,19 @@ pub fn handle_aead_decrypt(process: &ProcessState) -> Result<Vec<AdviceMutation>
     // This performs tag verification internally
     let plaintext_with_padding = secret_key.decrypt_elements(&encrypted_data)?;
 
-    // Extract only the data blocks (without padding) to insert into advice
+    // Extract only the data blocks (without padding) to push onto advice stack
     // The MASM encrypt procedure will add padding automatically during re-encryption
     let data_blocks_count = (num_blocks * 8) as usize;
-    let plaintext_data = plaintext_with_padding[..data_blocks_count].to_vec();
+    let mut plaintext_data = plaintext_with_padding;
+    plaintext_data.truncate(data_blocks_count);
 
-    // Insert plaintext data (WITHOUT padding) into advice map with key = nonce (4 elements)
+    // Push plaintext data (WITHOUT padding) onto advice stack
     // The padding will be added by the MASM encrypt procedure during re-encryption
-    // Create an AdviceMap from the iterator
-    let advice_map: AdviceMap = core::iter::once((nonce_word, plaintext_data)).collect();
-    let advice_map_mutation = AdviceMutation::extend_map(advice_map);
+    // Note: We push in reverse order so adv_pipe reads them in forward order
+    plaintext_data.reverse();
+    let advice_stack_mutation = AdviceMutation::extend_stack(plaintext_data);
 
-    Ok(vec![advice_map_mutation])
+    Ok(vec![advice_stack_mutation])
 }
 
 // ERROR HANDLING

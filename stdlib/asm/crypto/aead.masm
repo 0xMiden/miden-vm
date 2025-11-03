@@ -138,12 +138,12 @@ export.encrypt
     movup.14
     # => [num_blocks, rate(8), capacity(4), src_ptr, dst_ptr, ...]
 
-    # Encrypt each block using crypto_stream
+    # Encrypt each block using `hperm + crypto_stream`
     dup neq.0
     while.true
 
         # Decrement the counter
-        push.1 sub
+        sub.1
         # => [num_blocks-1, rate(8), capacity(4), src_ptr, dst_ptr, ...]
 
         # Move counter out of the way
@@ -154,7 +154,7 @@ export.encrypt
         hperm
         # => [rate'(8), capacity'(4), src_ptr, dst_ptr, num_blocks-1, ...]
 
-        # Call crypto_stream instruction
+        # Call crypto_stream
         crypto_stream
         # => [ciphertext(8), capacity'(4), src_ptr+8, dst_ptr+8, num_blocks-1, ...]
 
@@ -203,16 +203,9 @@ export.encrypt
     hperm
     # => [rate_final(8), capacity_final(4), src_ptr_final, dst_ptr_final, ...]
 
-    # Extract the authentication tag (first word of rate)
-    dropw       # Drop rate[7..4]
-    # => [rate[3], rate[2], rate[1], rate[0], capacity(4), src_ptr_final, dst_ptr_final, ...]
-
-    swapw       # Swap rate[3..0] with capacity
-    # => [capacity(4), rate[3], rate[2], rate[1], rate[0], src_ptr_final, dst_ptr_final, ...]
-
-    dropw       # Drop capacity
-    # => [rate[3], rate[2], rate[1], rate[0], src_ptr_final, dst_ptr_final, ...]
-    # This is the authentication tag: tag = rate[3..0]
+    # Extract the authentication tag (first word of rate) using rpo::squeeze_digest
+    exec.rpo::squeeze_digest
+    # => [tag(4), src_ptr_final, dst_ptr_final, ...]
 
     # Clean up stack - remove the two pointers
     movup.4 drop movup.4 drop
@@ -304,35 +297,31 @@ export.decrypt
     # => [nonce(4), key(4), src_ptr, dst_ptr, num_blocks, tag_ptr, ...]
 
     # Emit event to trigger host-side decryption
+    # The event handler will push plaintext data blocks onto the advice stack
     emit.AEAD_DECRYPT_EVENT
     # => [nonce(4), key(4), src_ptr, dst_ptr, num_blocks, tag_ptr, ...]
+    # Advice stack now contains: plaintext data blocks (no padding) in reverse order compatible
+    # with adv_pipe
 
-    # Push nonce onto advice stack to use as map key for loading plaintext
-    adv.push_mapval
-    # This pushes the plaintext elements from advice map onto advice stack
-    # The advice contains data blocks only (no padding) - padding is added by encrypt
-    # => [nonce(4), key(4), src_ptr, dst_ptr, num_blocks, tag_ptr, ...]
-
-    # Prepare to load plaintext data blocks from advice
-    dup.9   # dst_ptr
-    dup.11  # num_blocks
-    swap
+    # Prepare to load plaintext data blocks from advice stack
+    dup.10   # num_blocks
+    dup.10   # dst_ptr
     # => [dst_ptr, num_blocks, nonce(4), key(4), src_ptr, dst_ptr, num_blocks, tag_ptr, ...]
 
-    # Setup for adv_pipe loop (requires 3 words on stack)
+    # Setup for adv_pipe loop
     padw padw padw
     # => [0(4), 0(4), 0(4), dst_ptr, num_blocks, nonce(4), key(4), src_ptr, dst_ptr, num_blocks, tag_ptr, ...]
 
     dup.13 neq.0
     # => [continue?, 0(4), 0(4), 0(4), dst_ptr, num_blocks, nonce(4), ...]
 
-    # Load plaintext data blocks from advice using adv_pipe
+    # Load plaintext data blocks from advice stack
     while.true
         adv_pipe  # Reads 8 elements from advice, writes to dst_ptr, increments dst_ptr by 8
         # => [DATA1(4), DATA0(4), 0(4), dst_ptr+8, num_blocks, nonce(4), key(4), src_ptr, dst_ptr, num_blocks, tag_ptr, ...]
 
-        movup.13 sub.1  # Decrement counter
-        movdn.13 dup.13 # Move counter back and check if more blocks remain
+        movup.13 sub.1        # Duplicate counter, decrement it
+        dup movdn.14          # Duplicate and move decremented value down to overwrite old counter
         neq.0
     end
 
@@ -357,7 +346,7 @@ export.decrypt
     mem_loadw_be    # Load expected tag from memory
     # => [expected_tag(4), computed_tag(4), ...]
 
-    eqw assert      # Assert tags match (halts if different)
+    eqw assert.err="AEAD tag mismatch"
     dropw dropw     # Clean up stack
     # => []
 end

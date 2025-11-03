@@ -519,17 +519,18 @@ pub enum Operation {
 
     /// Encrypts data from source memory to destination memory using the RPO sponge keystream.
     ///
-    /// The operation works as follows:
-    /// - The source memory address is retrieved from the 13th stack element (position 12).
-    /// - The destination memory address is retrieved from the 14th stack element (position 13).
-    /// - Two consecutive words (8 elements) are loaded from source memory.
-    /// - Each element is added to the corresponding element in the rate (top 8 stack elements).
-    /// - The resulting ciphertext is written to destination memory.
-    /// - The top 8 elements of the stack are updated with the ciphertext (becomes new rate).
-    /// - Elements 8-11 (capacity) remain unchanged.
-    /// - Source address (position 12) is incremented by 8.
-    /// - Destination address (position 13) is incremented by 8.
-    /// - All other stack elements remain the same.
+    /// Two consecutive words (8 elements) are loaded from source memory, each element is added
+    /// to the corresponding element in the rate (top 8 stack elements), and the resulting
+    /// ciphertext is written to destination memory and replaces the rate. Source and destination
+    /// addresses are incremented by 8.
+    ///
+    /// Stack transition:
+    /// ```text
+    /// [rate(8), cap(4), src, dst, ...]
+    ///     ↓
+    /// [ct(8), cap(4), src+8, dst+8, ...]
+    /// ```
+    /// where `ct = mem[src] + rate`.
     ///
     /// After this operation, `hperm` should be applied to refresh the keystream for the next block.
     CryptoStream = OPCODE_CRYPTOSTREAM,
