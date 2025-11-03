@@ -87,7 +87,7 @@ impl Process {
         // the path is expected to be of the specified depth.
         let path = self
             .advice
-            .get_merkle_path(root, &depth, &index)
+            .get_merkle_path(root, depth, index)
             .map_err(|err| ExecutionError::advice_error(err, self.system.clk(), err_ctx))?;
 
         // use hasher to compute the Merkle root of the path
@@ -164,7 +164,7 @@ impl Process {
         // whole sub-tree to this node.
         let (path, _) = self
             .advice
-            .update_merkle_node(old_root, &depth, &index, new_node)
+            .update_merkle_node(old_root, depth, index, new_node)
             .map_err(|err| ExecutionError::advice_error(err, self.system.clk(), err_ctx))?;
 
         assert_eq!(path.len(), depth.as_int() as usize);

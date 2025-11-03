@@ -229,8 +229,8 @@ pub trait AdviceProviderInterface {
     fn get_merkle_path(
         &self,
         root: Word,
-        depth: &Felt,
-        index: &Felt,
+        depth: Felt,
+        index: Felt,
     ) -> Result<Option<MerklePath>, AdviceError>;
 
     /// Updates a node at the specified depth and index in a Merkle tree with the specified root;
@@ -243,8 +243,8 @@ pub trait AdviceProviderInterface {
     fn update_merkle_node(
         &mut self,
         root: Word,
-        depth: &Felt,
-        index: &Felt,
+        depth: Felt,
+        index: Felt,
         value: Word,
     ) -> Result<Option<MerklePath>, AdviceError>;
 }

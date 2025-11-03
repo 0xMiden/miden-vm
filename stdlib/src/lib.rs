@@ -7,11 +7,12 @@ extern crate alloc;
 use alloc::{sync::Arc, vec, vec::Vec};
 
 use miden_assembly::{Library, mast::MastForest, utils::Deserializable};
-use miden_core::{EventId, EventName, Felt, Word, precompile::PrecompileVerifier};
+use miden_core::{EventName, Felt, Word, precompile::PrecompileVerifierRegistry};
 use miden_processor::{EventHandler, HostLibrary};
 use miden_utils_sync::LazyLock;
 
 use crate::handlers::{
+    ecdsa::{ECDSA_VERIFY_EVENT_NAME, EcdsaPrecompile},
     falcon_div::{FALCON_DIV_EVENT_NAME, handle_falcon_div},
     keccak256::{KECCAK_HASH_MEMORY_EVENT_NAME, KeccakPrecompile},
     smt_peek::{SMT_PEEK_EVENT_NAME, handle_smt_peek},
@@ -69,6 +70,7 @@ impl StdLibrary {
     pub fn handlers(&self) -> Vec<(EventName, Arc<dyn EventHandler>)> {
         vec![
             (KECCAK_HASH_MEMORY_EVENT_NAME, Arc::new(KeccakPrecompile)),
+            (ECDSA_VERIFY_EVENT_NAME, Arc::new(EcdsaPrecompile)),
             (SMT_PEEK_EVENT_NAME, Arc::new(handle_smt_peek)),
             (U64_DIV_EVENT_NAME, Arc::new(handle_u64_div)),
             (FALCON_DIV_EVENT_NAME, Arc::new(handle_falcon_div)),
@@ -77,10 +79,12 @@ impl StdLibrary {
         ]
     }
 
-    /// List of all `PrecompileVerifier` required to verify precompile requests.
-    pub fn verifiers(&self) -> Vec<(EventId, Arc<dyn PrecompileVerifier>)> {
-        let keccak_event_id = KECCAK_HASH_MEMORY_EVENT_NAME.to_event_id();
-        vec![(keccak_event_id, Arc::new(KeccakPrecompile))]
+    /// Returns a [`PrecompileVerifierRegistry`] containing all verifiers required to validate
+    /// standard library precompile requests.
+    pub fn verifier_registry(&self) -> PrecompileVerifierRegistry {
+        PrecompileVerifierRegistry::new()
+            .with_verifier(&KECCAK_HASH_MEMORY_EVENT_NAME, Arc::new(KeccakPrecompile))
+            .with_verifier(&ECDSA_VERIFY_EVENT_NAME, Arc::new(EcdsaPrecompile))
     }
 }
 

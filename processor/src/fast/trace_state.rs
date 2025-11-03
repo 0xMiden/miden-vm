@@ -671,8 +671,8 @@ impl AdviceProviderInterface for AdviceReplay {
     fn get_merkle_path(
         &self,
         _root: Word,
-        _depth: &Felt,
-        _index: &Felt,
+        _depth: Felt,
+        _index: Felt,
     ) -> Result<Option<MerklePath>, AdviceError> {
         Ok(None)
     }
@@ -681,8 +681,8 @@ impl AdviceProviderInterface for AdviceReplay {
     fn update_merkle_node(
         &mut self,
         _root: Word,
-        _depth: &Felt,
-        _index: &Felt,
+        _depth: Felt,
+        _index: Felt,
         _value: Word,
     ) -> Result<Option<MerklePath>, AdviceError> {
         Ok(None)

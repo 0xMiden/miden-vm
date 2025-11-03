@@ -2,7 +2,7 @@ use alloc::{collections::btree_map::Entry, vec::Vec};
 
 use miden_core::{
     AdviceMap, Felt, Word,
-    crypto::merkle::{InnerNodeInfo, MerklePath, MerkleStore, NodeIndex},
+    crypto::merkle::{InnerNodeInfo, MerkleError, MerklePath, MerkleStore, NodeIndex},
     precompile::PrecompileRequest,
 };
 
@@ -50,7 +50,7 @@ pub struct AdviceProvider {
 }
 
 impl AdviceProvider {
-    /// Apply the mutations given in order to the `AdviceProvider`.
+    /// Applies the mutations given in order to the `AdviceProvider`.
     pub fn apply_mutations(
         &mut self,
         mutations: impl IntoIterator<Item = AdviceMutation>,
@@ -245,16 +245,33 @@ impl AdviceProvider {
     /// - The specified depth is either zero or greater than the depth of the Merkle tree identified
     ///   by the specified root.
     /// - Value of the node at the specified depth and index is not known to this advice provider.
-    pub fn get_tree_node(
+    pub fn get_tree_node(&self, root: Word, depth: Felt, index: Felt) -> Result<Word, AdviceError> {
+        let index = NodeIndex::from_elements(&depth, &index)
+            .map_err(|_| AdviceError::InvalidMerkleTreeNodeIndex { depth, index })?;
+        self.store.get_node(root, index).map_err(AdviceError::MerkleStoreLookupFailed)
+    }
+
+    /// Returns true if a path to a node at the specified depth and index in a Merkle tree with the
+    /// specified root exists in this Merkle store.
+    ///
+    /// # Errors
+    /// Returns an error if accessing the Merkle store fails.
+    pub fn has_merkle_path(
         &self,
         root: Word,
-        depth: &Felt,
-        index: &Felt,
-    ) -> Result<Word, AdviceError> {
-        let index = NodeIndex::from_elements(depth, index).map_err(|_| {
-            AdviceError::InvalidMerkleTreeNodeIndex { depth: *depth, index: *index }
-        })?;
-        self.store.get_node(root, index).map_err(AdviceError::MerkleStoreLookupFailed)
+        depth: Felt,
+        index: Felt,
+    ) -> Result<bool, AdviceError> {
+        let index = NodeIndex::from_elements(&depth, &index)
+            .map_err(|_| AdviceError::InvalidMerkleTreeNodeIndex { depth, index })?;
+
+        // TODO: switch to `MerkleStore::has_path()` once this method is implemented
+        match self.store.get_path(root, index) {
+            Ok(_) => Ok(true),
+            Err(MerkleError::RootNotInStore(..)) => Ok(false),
+            Err(MerkleError::NodeIndexNotFoundInStore(..)) => Ok(false),
+            Err(err) => Err(AdviceError::MerkleStoreLookupFailed(err)),
+        }
     }
 
     /// Returns a path to a node at the specified depth and index in a Merkle tree with the
@@ -269,12 +286,11 @@ impl AdviceProvider {
     pub fn get_merkle_path(
         &self,
         root: Word,
-        depth: &Felt,
-        index: &Felt,
+        depth: Felt,
+        index: Felt,
     ) -> Result<MerklePath, AdviceError> {
-        let index = NodeIndex::from_elements(depth, index).map_err(|_| {
-            AdviceError::InvalidMerkleTreeNodeIndex { depth: *depth, index: *index }
-        })?;
+        let index = NodeIndex::from_elements(&depth, &index)
+            .map_err(|_| AdviceError::InvalidMerkleTreeNodeIndex { depth, index })?;
         self.store
             .get_path(root, index)
             .map(|value| value.path)
@@ -297,13 +313,12 @@ impl AdviceProvider {
     pub fn update_merkle_node(
         &mut self,
         root: Word,
-        depth: &Felt,
-        index: &Felt,
+        depth: Felt,
+        index: Felt,
         value: Word,
     ) -> Result<(MerklePath, Word), AdviceError> {
-        let node_index = NodeIndex::from_elements(depth, index).map_err(|_| {
-            AdviceError::InvalidMerkleTreeNodeIndex { depth: *depth, index: *index }
-        })?;
+        let node_index = NodeIndex::from_elements(&depth, &index)
+            .map_err(|_| AdviceError::InvalidMerkleTreeNodeIndex { depth, index })?;
         self.store
             .set_node(root, node_index, value)
             .map(|root| (root.path, root.root))
@@ -414,8 +429,8 @@ impl AdviceProviderInterface for AdviceProvider {
     fn get_merkle_path(
         &self,
         root: Word,
-        depth: &Felt,
-        index: &Felt,
+        depth: Felt,
+        index: Felt,
     ) -> Result<Option<MerklePath>, AdviceError> {
         self.get_merkle_path(root, depth, index).map(Some)
     }
@@ -424,8 +439,8 @@ impl AdviceProviderInterface for AdviceProvider {
     fn update_merkle_node(
         &mut self,
         root: Word,
-        depth: &Felt,
-        index: &Felt,
+        depth: Felt,
+        index: Felt,
         value: Word,
     ) -> Result<Option<MerklePath>, AdviceError> {
         self.update_merkle_node(root, depth, index, value).map(|(path, _)| Some(path))

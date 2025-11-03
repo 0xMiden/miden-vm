@@ -11,6 +11,7 @@ homepage.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 edition.workspace = true
+publish = false
 
 [features]
 default = ["std"]
@@ -35,11 +36,9 @@ test-case = "3.2"
 winter-prover.workspace = true
 
 [target.'cfg(target_family = "wasm")'.dependencies]
-pretty_assertions = { version = "1.4", default-features = false, features = [
-    "alloc",
-] }
+pretty_assertions = { version = "1.4", default-features = false, features = ["alloc"] }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
-pretty_assertions = "1.4"
+pretty_assertions = { version = "1.4" }
 proptest.workspace = true
 winter-rand-utils.workspace = true
