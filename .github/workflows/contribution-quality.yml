@@ -71,7 +71,7 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           else
             case "$assoc" in
-              OWNER|CONTRIBUTOR|COLLABORATOR) echo "skip=true"  >> "$GITHUB_OUTPUT" ;;
+              OWNER|COLLABORATOR|MEMBER) echo "skip=true"  >> "$GITHUB_OUTPUT" ;;
               *)                         echo "skip=false" >> "$GITHUB_OUTPUT" ;;
             esac
             [ "$draft" = "true" ] && echo "skip=true" >> "$GITHUB_OUTPUT" || true
