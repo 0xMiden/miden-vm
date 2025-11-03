@@ -645,7 +645,8 @@ impl Test {
             trace_fragment_contexts,
             program.hash(),
             program.kernel().clone(),
-        );
+        )
+        .unwrap();
 
         // Compare the main trace columns
         for col_idx in 0..miden_air::trace::PADDED_TRACE_WIDTH {
