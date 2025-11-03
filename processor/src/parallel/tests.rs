@@ -290,6 +290,7 @@ fn test_trace_generation_at_fragment_boundaries(
             program.hash(),
             program.kernel().clone(),
         )
+        .unwrap()
     };
 
     let trace_from_single_fragment = {
@@ -307,6 +308,7 @@ fn test_trace_generation_at_fragment_boundaries(
             program.hash(),
             program.kernel().clone(),
         )
+        .unwrap()
     };
 
     // Ensure that the trace generated from multiple fragments is identical to the one generated
