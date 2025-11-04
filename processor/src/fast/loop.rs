@@ -6,7 +6,7 @@ use miden_core::{
 };
 
 use crate::{
-    AsyncHost, ExecutionError,
+    AsyncHost, ExecutionError, OperationError,
     continuation_stack::ContinuationStack,
     err_ctx,
     fast::{FastProcessor, Tracer, trace_state::NodeExecutionState},
@@ -70,7 +70,10 @@ impl FastProcessor {
             self.execute_after_exit_decorators(current_node_id, current_forest, host)?;
         } else {
             let err_ctx = err_ctx!(current_forest, loop_node, host);
-            return Err(ExecutionError::not_binary_value_loop(condition, &err_ctx));
+            return Err(ExecutionError::from_operation(
+                &err_ctx,
+                OperationError::not_binary_value_loop(condition),
+            ));
         }
         Ok(())
     }
@@ -122,7 +125,10 @@ impl FastProcessor {
             self.execute_after_exit_decorators(current_node_id, current_forest, host)?;
         } else {
             let err_ctx = err_ctx!(current_forest, loop_node, host);
-            return Err(ExecutionError::not_binary_value_loop(condition, &err_ctx));
+            return Err(ExecutionError::from_operation(
+                &err_ctx,
+                OperationError::not_binary_value_loop(condition),
+            ));
         }
         Ok(())
     }

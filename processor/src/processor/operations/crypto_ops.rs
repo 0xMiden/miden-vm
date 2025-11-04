@@ -8,7 +8,7 @@ use miden_core::{
 };
 
 use crate::{
-    ErrorContext, ExecutionError,
+    ErrorContext, ExecutionError, OperationError,
     fast::Tracer,
     processor::{
         AdviceProviderInterface, HasherInterface, MemoryInterface, OperationHelperRegisters,
@@ -61,10 +61,9 @@ pub(super) fn op_mpverify<P: Processor>(
     let root = processor.stack().get_word(6);
 
     // get a Merkle path from the advice provider for the specified root and node index
-    let path = processor
-        .advice_provider()
-        .get_merkle_path(root, depth, index)
-        .map_err(|err| ExecutionError::advice_error(err, clk, err_ctx))?;
+    let path = processor.advice_provider().get_merkle_path(root, depth, index).map_err(|err| {
+        ExecutionError::from_operation(err_ctx, OperationError::advice_error(err, clk))
+    })?;
 
     tracer.record_hasher_build_merkle_root(node, path.as_ref(), index, root);
 
@@ -73,8 +72,9 @@ pub(super) fn op_mpverify<P: Processor>(
         // If the hasher doesn't compute the same root (using the same path),
         // then it means that `node` is not the value currently in the tree at `index`
         let err_msg = program.resolve_error_message(err_code);
-        ExecutionError::merkle_path_verification_failed(
-            node, index, root, err_code, err_msg, err_ctx,
+        ExecutionError::from_operation(
+            err_ctx,
+            OperationError::merkle_path_verification_failed(node, index, root, err_code, err_msg),
         )
     })?;
 
@@ -103,7 +103,9 @@ pub(super) fn op_mrupdate<P: Processor>(
     let path = processor
         .advice_provider()
         .update_merkle_node(claimed_old_root, depth, index, new_value)
-        .map_err(|err| ExecutionError::advice_error(err, clk, err_ctx))?;
+        .map_err(|err| {
+            ExecutionError::from_operation(err_ctx, OperationError::advice_error(err, clk))
+        })?;
 
     if let Some(path) = &path {
         // TODO(plafer): return error instead of asserting
@@ -117,13 +119,15 @@ pub(super) fn op_mrupdate<P: Processor>(
         path.as_ref(),
         index,
         || {
-            ExecutionError::merkle_path_verification_failed(
-                old_value,
-                index,
-                claimed_old_root,
-                ZERO,
-                None,
+            ExecutionError::from_operation(
                 err_ctx,
+                OperationError::merkle_path_verification_failed(
+                    old_value,
+                    index,
+                    claimed_old_root,
+                    ZERO,
+                    None,
+                ),
             )
         },
     )?;

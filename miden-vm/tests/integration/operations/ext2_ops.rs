@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use miden_core::{FieldElement, QuadFelt};
 use miden_utils_testing::{build_op_test, rand::rand_value};
 

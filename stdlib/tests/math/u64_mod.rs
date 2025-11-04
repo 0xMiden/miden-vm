@@ -1,7 +1,7 @@
 use core::cmp;
 
 use miden_core::assert_matches;
-use miden_processor::ExecutionError;
+use miden_processor::{ExecutionError, OperationError};
 use miden_stdlib::handlers::u64_div::{U64_DIV_EVENT_NAME, U64DivError};
 use miden_utils_testing::{
     Felt, TRUNCATE_STACK_PROC, U32_BOUND, ZERO, expect_exec_error_matches, proptest::prelude::*,
@@ -596,7 +596,10 @@ fn ensure_div_doesnt_crash() {
     let err = test.execute();
     match err {
         Ok(_) => panic!("expected an error"),
-        Err(ExecutionError::EventError { error, .. }) => {
+        Err(ExecutionError::OperationError {
+            err: OperationError::EventError { error, .. },
+            ..
+        }) => {
             let u64_div_error = error.downcast_ref::<U64DivError>().expect("Expected U64DivError");
             assert_matches!(
                 u64_div_error,
@@ -618,7 +621,10 @@ fn ensure_div_doesnt_crash() {
     let err = test.execute();
     match err {
         Ok(_) => panic!("expected an error"),
-        Err(ExecutionError::EventError { error, .. }) => {
+        Err(ExecutionError::OperationError {
+            err: OperationError::EventError { error, .. },
+            ..
+        }) => {
             let u64_div_error = error.downcast_ref::<U64DivError>().expect("Expected U64DivError");
             assert_matches!(
                 u64_div_error,
@@ -727,7 +733,10 @@ fn checked_and_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::NotU32Values{ values, err_code, label: _, source_file: _ } if
+        ExecutionError::OperationError {
+            err: OperationError::NotU32Values { values, err_code },
+            ..
+        } if
             values.len() == 2 &&
             values.contains(&Felt::new(a0)) &&
             values.contains(&Felt::new(b0)) &&
@@ -773,7 +782,10 @@ fn checked_or_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::NotU32Values{ values, err_code, label: _, source_file: _ } if
+        ExecutionError::OperationError {
+            err: OperationError::NotU32Values { values, err_code },
+            ..
+        } if
             values.len() == 2 &&
             values.contains(&Felt::new(a0)) &&
             values.contains(&Felt::new(b0)) &&
@@ -819,7 +831,10 @@ fn checked_xor_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::NotU32Values{ values, err_code, label: _, source_file: _ } if
+        ExecutionError::OperationError {
+            err: OperationError::NotU32Values { values, err_code },
+            ..
+        } if
             values.len() == 2 &&
             values.contains(&Felt::new(a0)) &&
             values.contains(&Felt::new(b0)) &&

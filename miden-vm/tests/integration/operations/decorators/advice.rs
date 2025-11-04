@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use miden_core::Felt;
 use miden_prover::Word;
 use miden_utils_testing::{build_test, crypto::MerkleStore};

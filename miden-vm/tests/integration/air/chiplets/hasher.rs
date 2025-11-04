@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use miden_utils_testing::{
     Word, build_op_test,
     crypto::{MerkleStore, MerkleTree, Rpo256, init_merkle_leaf, init_merkle_store},

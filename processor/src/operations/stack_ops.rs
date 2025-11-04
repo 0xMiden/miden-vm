@@ -1,5 +1,5 @@
 use super::{ExecutionError, MIN_STACK_DEPTH, Process};
-use crate::{ErrorContext, ZERO};
+use crate::{ErrorContext, ZERO, errors::OperationError};
 
 impl Process {
     // STACK MANIPULATION
@@ -242,7 +242,12 @@ impl Process {
                 self.stack.set(0, a);
                 self.stack.set(1, b);
             },
-            _ => return Err(ExecutionError::not_binary_value_op(c, err_ctx)),
+            _ => {
+                return Err(ExecutionError::from_operation(
+                    err_ctx,
+                    OperationError::not_binary_value_op(c),
+                ));
+            },
         }
 
         self.stack.shift_left(3);
@@ -286,7 +291,12 @@ impl Process {
                 self.stack.set(6, b2);
                 self.stack.set(7, b3);
             },
-            _ => return Err(ExecutionError::not_binary_value_op(c, err_ctx)),
+            _ => {
+                return Err(ExecutionError::from_operation(
+                    err_ctx,
+                    OperationError::not_binary_value_op(c),
+                ));
+            },
         }
 
         self.stack.shift_left(9);

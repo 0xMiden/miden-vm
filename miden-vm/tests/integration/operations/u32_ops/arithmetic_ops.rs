@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use miden_processor::{ExecutionError, RowIndex};
 use miden_utils_testing::{
     U32_BOUND, build_op_test, expect_exec_error_matches, proptest::prelude::*, rand::rand_value,

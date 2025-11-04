@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use miden_utils_testing::{build_op_test, build_test};
 
 /// Range checks the result of 1 + 1. This results in 2 range checks, one for each 16-bit limb of

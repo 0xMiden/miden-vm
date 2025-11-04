@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use std::sync::Arc;
 
 use miden_core::DebugOptions;

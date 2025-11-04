@@ -24,7 +24,10 @@ use miden_core::{
 use super::{
     EMPTY_WORD, ExecutionError, Felt, MIN_TRACE_LEN, ONE, OpBatch, Operation, Process, Word, ZERO,
 };
-use crate::{SyncHost, errors::ErrorContext};
+use crate::{
+    SyncHost,
+    errors::{ErrorContext, OperationError},
+};
 
 mod trace;
 use trace::DecoderTrace;
@@ -303,7 +306,10 @@ impl Process {
         // when a CALL block ends, stack depth must be exactly 16
         let stack_depth = self.stack.depth();
         if stack_depth > MIN_STACK_DEPTH {
-            return Err(ExecutionError::invalid_stack_depth_on_return(stack_depth, err_ctx));
+            return Err(ExecutionError::from_operation(
+                err_ctx,
+                OperationError::invalid_stack_depth_on_return(stack_depth),
+            ));
         }
 
         // this appends a row with END operation to the decoder trace; the returned value contains
@@ -456,7 +462,10 @@ impl Process {
         // when a DYNCALL block ends, stack depth must be exactly 16
         let stack_depth = self.stack.depth();
         if stack_depth > MIN_STACK_DEPTH {
-            return Err(ExecutionError::invalid_stack_depth_on_return(stack_depth, err_ctx));
+            return Err(ExecutionError::from_operation(
+                err_ctx,
+                OperationError::invalid_stack_depth_on_return(stack_depth),
+            ));
         }
 
         // this appends a row with END operation to the decoder trace. when the END operation is

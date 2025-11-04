@@ -6,7 +6,7 @@ use super::{
     super::utils::{split_element, split_u32_into_u16},
     ExecutionError, Felt, FieldElement, Operation, Process,
 };
-use crate::{ErrorContext, ZERO};
+use crate::{ErrorContext, ZERO, errors::OperationError};
 
 const U32_MAX: u64 = u32::MAX as u64;
 
@@ -26,7 +26,10 @@ macro_rules! require_u32_operands {
             )*
 
             if !invalid_values.is_empty() {
-                return Err(ExecutionError::not_u32_values(invalid_values, $errno, $err_ctx));
+                return Err(ExecutionError::from_operation(
+                    $err_ctx,
+                    OperationError::not_u32_values(invalid_values, $errno),
+                ));
             }
             // Return tuple of operands based on indices
             ($([<_operand_ $idx>].as_int()),*)
@@ -161,7 +164,10 @@ impl Process {
         let (b, a) = require_u32_operands!(self.stack, [0, 1], err_ctx);
 
         if b == 0 {
-            return Err(ExecutionError::divide_by_zero(self.system.clk(), err_ctx));
+            return Err(ExecutionError::from_operation(
+                err_ctx,
+                OperationError::divide_by_zero(self.system.clk()),
+            ));
         }
 
         let q = a / b;
@@ -253,7 +259,7 @@ mod tests {
         super::{Felt, Operation},
         Process, split_u32_into_u16,
     };
-    use crate::{DefaultHost, ExecutionError, StackInputs, ZERO};
+    use crate::{DefaultHost, ExecutionError, OperationError, StackInputs, ZERO};
 
     // CASTING OPERATIONS
     // --------------------------------------------------------------------------------------------
@@ -319,7 +325,11 @@ mod tests {
             process.execute_op(Operation::U32assert2(Felt::from(123u32)), program, &mut host);
         assert!(result.is_err());
 
-        if let Err(ExecutionError::NotU32Values { values, err_code, .. }) = result {
+        if let Err(ExecutionError::OperationError {
+            err: OperationError::NotU32Values { values, err_code },
+            ..
+        }) = result
+        {
             assert_eq!(err_code, Felt::from(123u32));
             assert_eq!(values.len(), 2);
             // Values are collected in stack order: stack[0] (top) first, then stack[1]
@@ -343,7 +353,11 @@ mod tests {
             process.execute_op(Operation::U32assert2(Felt::from(456u32)), program, &mut host);
         assert!(result.is_err());
 
-        if let Err(ExecutionError::NotU32Values { values, err_code, .. }) = result {
+        if let Err(ExecutionError::OperationError {
+            err: OperationError::NotU32Values { values, err_code },
+            ..
+        }) = result
+        {
             assert_eq!(err_code, Felt::from(456u32));
             assert_eq!(values.len(), 1);
             assert_eq!(values[0].as_int(), 4294967297u64);
@@ -365,7 +379,11 @@ mod tests {
             process.execute_op(Operation::U32assert2(Felt::from(789u32)), program, &mut host);
         assert!(result.is_err());
 
-        if let Err(ExecutionError::NotU32Values { values, err_code, .. }) = result {
+        if let Err(ExecutionError::OperationError {
+            err: OperationError::NotU32Values { values, err_code },
+            ..
+        }) = result
+        {
             assert_eq!(err_code, Felt::from(789u32));
             assert_eq!(values.len(), 1);
             assert_eq!(values[0].as_int(), 4294967296u64);

@@ -8,7 +8,6 @@ use miden_air::{
         MEMORY_WRITE, TRACE_WIDTH as MEMORY_TRACE_WIDTH,
     },
 };
-use miden_assembly::SourceSpan;
 use miden_core::{WORD_SIZE, Word, assert_matches};
 
 use super::{
@@ -122,13 +121,7 @@ fn mem_read_word_unaligned() {
 
     assert_matches!(
         ret,
-        Err(MemoryError::UnalignedWordAccess {
-            addr: _,
-            ctx: _,
-            clk: _,
-            label: SourceSpan::UNKNOWN,
-            source_file: None
-        })
+        Err(MemoryError::UnalignedWordAccess { addr: _, ctx: _, clk: _ })
     );
 }
 
@@ -272,13 +265,7 @@ fn mem_write_word_unaligned() {
 
     assert_matches!(
         ret,
-        Err(MemoryError::UnalignedWordAccess {
-            addr: _,
-            ctx: _,
-            clk: _,
-            label: SourceSpan::UNKNOWN,
-            source_file: None
-        })
+        Err(MemoryError::UnalignedWordAccess { addr: _, ctx: _, clk: _ })
     );
 }
 

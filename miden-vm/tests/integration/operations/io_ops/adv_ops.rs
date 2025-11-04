@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use miden_core::{Felt, chiplets::hasher::apply_permutation, utils::ToElements};
 use miden_processor::{AdviceError, ExecutionError, RowIndex};
 use miden_utils_testing::expect_exec_error_matches;

@@ -10,7 +10,7 @@ use miden_utils_testing::build_test;
 use rstest::rstest;
 
 use super::*;
-use crate::{DefaultHost, Process};
+use crate::{DefaultHost, OperationError, Process};
 
 mod advice_provider;
 mod all_ops;
@@ -117,7 +117,10 @@ fn test_syscall_fail() {
     // Check that the error is due to the syscall target not being in the kernel
     assert_matches!(
         err,
-        ExecutionError::SyscallTargetNotInKernel { label: _, source_file: _, proc_root: _ }
+        ExecutionError::OperationError {
+            err: OperationError::SyscallTargetNotInKernel { .. },
+            ..
+        }
     );
 }
 
@@ -146,7 +149,13 @@ fn test_assert() {
         let err = processor.execute_sync(&program, &mut host).unwrap_err();
 
         // Check that the error is due to a failed assertion
-        assert_matches!(err, ExecutionError::FailedAssertion { .. });
+        assert_matches!(
+            err,
+            ExecutionError::OperationError {
+                err: OperationError::FailedAssertion { .. },
+                ..
+            }
+        );
     }
 }
 

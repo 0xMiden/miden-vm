@@ -79,7 +79,7 @@ use trace::TraceFragment;
 pub use trace::{ChipletsLengths, ExecutionTrace, NUM_RAND_ROWS, TraceLenSummary};
 
 mod errors;
-pub use errors::{ErrorContext, ErrorContextImpl, ExecutionError};
+pub use errors::{ErrorContext, ErrorContextImpl, ExecutionError, OperationError};
 
 pub mod utils;
 
@@ -318,9 +318,12 @@ impl Process {
             return Err(ExecutionError::ProgramAlreadyExecuted);
         }
 
-        self.advice
-            .extend_map(program.mast_forest().advice_map())
-            .map_err(|err| ExecutionError::advice_error(err, RowIndex::from(0), &()))?;
+        self.advice.extend_map(program.mast_forest().advice_map()).map_err(|err| {
+            ExecutionError::from_operation(
+                &(),
+                OperationError::advice_error(err, RowIndex::from(0)),
+            )
+        })?;
 
         self.execute_mast_node(program.entrypoint(), &program.mast_forest().clone(), host)?;
 
@@ -412,7 +415,10 @@ impl Process {
             self.execute_mast_node(node.on_false(), program, host)?;
         } else {
             let err_ctx = err_ctx!(program, node, host);
-            return Err(ExecutionError::not_binary_value_if(condition, &err_ctx));
+            return Err(ExecutionError::from_operation(
+                &err_ctx,
+                OperationError::not_binary_value_if(condition),
+            ));
         }
 
         self.end_split_node(node, program, host)
@@ -445,7 +451,10 @@ impl Process {
 
             if self.stack.peek() != ZERO {
                 let err_ctx = err_ctx!(program, node, host);
-                return Err(ExecutionError::not_binary_value_loop(self.stack.peek(), &err_ctx));
+                return Err(ExecutionError::from_operation(
+                    &err_ctx,
+                    OperationError::not_binary_value_loop(self.stack.peek()),
+                ));
             }
 
             // end the LOOP block and drop the condition from the stack
@@ -456,7 +465,10 @@ impl Process {
             self.end_loop_node(node, false, program, host)
         } else {
             let err_ctx = err_ctx!(program, node, host);
-            Err(ExecutionError::not_binary_value_loop(condition, &err_ctx))
+            Err(ExecutionError::from_operation(
+                &err_ctx,
+                OperationError::not_binary_value_loop(condition),
+            ))
         }
     }
 
@@ -508,24 +520,33 @@ impl Process {
         match program.find_procedure_root(callee_hash) {
             Some(callee_id) => self.execute_mast_node(callee_id, program, host)?,
             None => {
-                let mast_forest = host
-                    .get_mast_forest(&callee_hash)
-                    .ok_or_else(|| ExecutionError::dynamic_node_not_found(callee_hash, &err_ctx))?;
+                let mast_forest = host.get_mast_forest(&callee_hash).ok_or_else(|| {
+                    ExecutionError::from_operation(
+                        &err_ctx,
+                        OperationError::dynamic_node_not_found(callee_hash),
+                    )
+                })?;
 
                 // We limit the parts of the program that can be called externally to procedure
                 // roots, even though MAST doesn't have that restriction.
-                let root_id = mast_forest
-                    .find_procedure_root(callee_hash)
-                    .ok_or(ExecutionError::malfored_mast_forest_in_host(callee_hash, &()))?;
+                let root_id = mast_forest.find_procedure_root(callee_hash).ok_or_else(|| {
+                    ExecutionError::from_operation(
+                        &(),
+                        OperationError::malformed_mast_forest_in_host(callee_hash),
+                    )
+                })?;
 
                 // Merge the advice map of this forest into the advice provider.
                 // Note that the map may be merged multiple times if a different procedure from the
                 // same forest is called.
                 // For now, only compiled libraries contain non-empty advice maps, so for most
                 // cases, this call will be cheap.
-                self.advice
-                    .extend_map(mast_forest.advice_map())
-                    .map_err(|err| ExecutionError::advice_error(err, self.system.clk(), &()))?;
+                self.advice.extend_map(mast_forest.advice_map()).map_err(|err| {
+                    ExecutionError::from_operation(
+                        &(),
+                        OperationError::advice_error(err, self.system.clk()),
+                    )
+                })?;
 
                 self.execute_mast_node(root_id, &mast_forest, host)?
             },
@@ -702,15 +723,21 @@ impl Process {
     ) -> Result<(MastNodeId, Arc<MastForest>), ExecutionError> {
         let node_digest = external_node.digest();
 
-        let mast_forest = host
-            .get_mast_forest(&node_digest)
-            .ok_or(ExecutionError::no_mast_forest_with_procedure(node_digest, &()))?;
+        let mast_forest = host.get_mast_forest(&node_digest).ok_or_else(|| {
+            ExecutionError::from_operation(
+                &(),
+                OperationError::no_mast_forest_with_procedure(node_digest),
+            )
+        })?;
 
         // We limit the parts of the program that can be called externally to procedure
         // roots, even though MAST doesn't have that restriction.
-        let root_id = mast_forest
-            .find_procedure_root(node_digest)
-            .ok_or(ExecutionError::malfored_mast_forest_in_host(node_digest, &()))?;
+        let root_id = mast_forest.find_procedure_root(node_digest).ok_or_else(|| {
+            ExecutionError::from_operation(
+                &(),
+                OperationError::malformed_mast_forest_in_host(node_digest),
+            )
+        })?;
 
         // if the node that we got by looking up an external reference is also an External
         // node, we are about to enter into an infinite loop - so, return an error
@@ -723,9 +750,12 @@ impl Process {
         // forest is called.
         // For now, only compiled libraries contain non-empty advice maps, so for most cases,
         // this call will be cheap.
-        self.advice
-            .extend_map(mast_forest.advice_map())
-            .map_err(|err| ExecutionError::advice_error(err, self.system.clk(), &()))?;
+        self.advice.extend_map(mast_forest.advice_map()).map_err(|err| {
+            ExecutionError::from_operation(
+                &(),
+                OperationError::advice_error(err, self.system.clk()),
+            )
+        })?;
 
         Ok((root_id, mast_forest))
     }
@@ -942,10 +972,10 @@ impl<'a> ProcessState<'a> {
         let end_addr = self.get_stack_item(end_idx).as_int();
 
         if start_addr > u32::MAX as u64 {
-            return Err(MemoryError::address_out_of_bounds(start_addr, &()));
+            return Err(MemoryError::address_out_of_bounds(start_addr));
         }
         if end_addr > u32::MAX as u64 {
-            return Err(MemoryError::address_out_of_bounds(end_addr, &()));
+            return Err(MemoryError::address_out_of_bounds(end_addr));
         }
 
         if start_addr > end_addr {
@@ -990,24 +1020,35 @@ pub(crate) fn add_error_ctx_to_external_error(
     match result {
         Ok(_) => Ok(()),
         // Add context information to any errors coming from executing an `ExternalNode`
-        Err(err) => match err {
-            ExecutionError::NoMastForestWithProcedure { label, source_file: _, root_digest }
-            | ExecutionError::MalformedMastForestInHost { label, source_file: _, root_digest } => {
+        Err(execution_error) => match execution_error {
+            ExecutionError::OperationError { label, source_file: _, err: ref op_err }
+                if matches!(
+                    op_err,
+                    OperationError::NoMastForestWithProcedure { .. }
+                        | OperationError::MalformedMastForestInHost { .. }
+                ) =>
+            {
                 if label == SourceSpan::UNKNOWN {
-                    let err_with_ctx =
-                        ExecutionError::no_mast_forest_with_procedure(root_digest, &err_ctx);
-                    Err(err_with_ctx)
+                    let root_digest = match op_err {
+                        OperationError::NoMastForestWithProcedure { root_digest } => *root_digest,
+                        OperationError::MalformedMastForestInHost { root_digest } => *root_digest,
+                        _ => unreachable!(),
+                    };
+                    Err(ExecutionError::from_operation(
+                        &err_ctx,
+                        OperationError::no_mast_forest_with_procedure(root_digest),
+                    ))
                 } else {
                     // If the source span was already populated, just return the error as-is. This
                     // would occur when a call deeper down the call stack was responsible for the
                     // error.
-                    Err(err)
+                    Err(execution_error)
                 }
             },
 
             _ => {
                 // do nothing
-                Err(err)
+                Err(execution_error)
             },
         },
     }

@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use alloc::sync::Arc;
 
 use miden_assembly::{Assembler, LibraryPath, Report, ast::ModuleKind};

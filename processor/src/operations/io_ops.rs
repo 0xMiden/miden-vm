@@ -1,7 +1,7 @@
 use miden_core::WORD_SIZE;
 
 use super::{ExecutionError, Felt, Process};
-use crate::errors::ErrorContext;
+use crate::errors::{ErrorContext, OperationError};
 
 // INPUT / OUTPUT OPERATIONS
 // ================================================================================================
@@ -211,10 +211,9 @@ impl Process {
         let addr_second_word = addr_first_word + Felt::from(WORD_SIZE as u32);
 
         // pop two words from the advice stack
-        let words = self
-            .advice
-            .pop_stack_dword()
-            .map_err(|err| ExecutionError::advice_error(err, clk, err_ctx))?;
+        let words = self.advice.pop_stack_dword().map_err(|err| {
+            ExecutionError::from_operation(err_ctx, OperationError::advice_error(err, clk))
+        })?;
 
         // write the words memory
         self.chiplets
@@ -255,10 +254,12 @@ impl Process {
     /// # Errors
     /// Returns an error if the advice stack is empty.
     pub(super) fn op_advpop(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
-        let value = self
-            .advice
-            .pop_stack()
-            .map_err(|err| ExecutionError::advice_error(err, self.system.clk(), err_ctx))?;
+        let value = self.advice.pop_stack().map_err(|err| {
+            ExecutionError::from_operation(
+                err_ctx,
+                OperationError::advice_error(err, self.system.clk()),
+            )
+        })?;
         self.stack.set(0, value);
         self.stack.shift_right(0);
         Ok(())
@@ -270,10 +271,12 @@ impl Process {
     /// # Errors
     /// Returns an error if the advice stack contains fewer than four elements.
     pub(super) fn op_advpopw(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
-        let word = self
-            .advice
-            .pop_stack_word()
-            .map_err(|err| ExecutionError::advice_error(err, self.system.clk(), err_ctx))?;
+        let word = self.advice.pop_stack_word().map_err(|err| {
+            ExecutionError::from_operation(
+                err_ctx,
+                OperationError::advice_error(err, self.system.clk()),
+            )
+        })?;
 
         self.stack.set(0, word[3]);
         self.stack.set(1, word[2]);

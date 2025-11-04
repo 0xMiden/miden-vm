@@ -37,7 +37,7 @@ use crate::{
         AuxTraceBuilder as DecoderAuxTraceBuilder, BasicBlockContext,
         block_stack::ExecutionContextInfo,
     },
-    errors::AceError,
+    errors::{AceError, OperationError},
     fast::{
         ExecutionOutput, NoopTracer, Tracer,
         execution_tracer::TraceGenerationContext,
@@ -1981,9 +1981,9 @@ fn eval_circuit_fast_(
 
     let num_wires = num_vars + num_eval;
     if num_wires > MAX_NUM_ACE_WIRES as u64 {
-        return Err(ExecutionError::failed_arithmetic_evaluation(
+        return Err(ExecutionError::from_operation(
             err_ctx,
-            AceError::TooManyWires(num_wires),
+            OperationError::failed_arithmetic_evaluation(AceError::TooManyWires(num_wires)),
         ));
     }
 
@@ -1991,15 +1991,19 @@ fn eval_circuit_fast_(
     // quadratic extension field elements while instructions are encoded as base field elements.
     // Hence we can pack 2 variables and 4 instructions per word.
     if !num_vars.is_multiple_of(2) || num_vars == 0 {
-        return Err(ExecutionError::failed_arithmetic_evaluation(
+        return Err(ExecutionError::from_operation(
             err_ctx,
-            AceError::NumVarIsNotWordAlignedOrIsEmpty(num_vars),
+            OperationError::failed_arithmetic_evaluation(
+                AceError::NumVarIsNotWordAlignedOrIsEmpty(num_vars),
+            ),
         ));
     }
     if !num_eval.is_multiple_of(4) || num_eval == 0 {
-        return Err(ExecutionError::failed_arithmetic_evaluation(
+        return Err(ExecutionError::from_operation(
             err_ctx,
-            AceError::NumEvalIsNotWordAlignedOrIsEmpty(num_eval),
+            OperationError::failed_arithmetic_evaluation(
+                AceError::NumEvalIsNotWordAlignedOrIsEmpty(num_eval),
+            ),
         ));
     }
 
@@ -2035,9 +2039,9 @@ fn eval_circuit_fast_(
 
     // Ensure the circuit evaluated to zero.
     if !evaluation_context.output_value().is_some_and(|eval| eval == QuadFelt::ZERO) {
-        return Err(ExecutionError::failed_arithmetic_evaluation(
+        return Err(ExecutionError::from_operation(
             err_ctx,
-            AceError::CircuitNotEvaluateZero,
+            OperationError::failed_arithmetic_evaluation(AceError::CircuitNotEvaluateZero),
         ));
     }
 

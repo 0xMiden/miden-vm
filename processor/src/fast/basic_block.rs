@@ -7,7 +7,7 @@ use miden_core::{
 };
 
 use crate::{
-    AsyncHost, ErrorContext, ExecutionError,
+    AsyncHost, ErrorContext, ExecutionError, OperationError,
     continuation_stack::ContinuationStack,
     err_ctx,
     fast::{FastProcessor, Tracer, trace_state::NodeExecutionState},
@@ -213,11 +213,14 @@ impl FastProcessor {
             let clk = process.clk();
             let mutations = host.on_event(&process).await.map_err(|err| {
                 let event_name = host.resolve_event(event_id).cloned();
-                ExecutionError::event_error(err, event_id, event_name, err_ctx)
+                ExecutionError::from_operation(
+                    err_ctx,
+                    OperationError::event_error(err, event_id, event_name),
+                )
             })?;
-            self.advice
-                .apply_mutations(mutations)
-                .map_err(|err| ExecutionError::advice_error(err, clk, err_ctx))?;
+            self.advice.apply_mutations(mutations).map_err(|err| {
+                ExecutionError::from_operation(err_ctx, OperationError::advice_error(err, clk))
+            })?;
             Ok(())
         }
     }

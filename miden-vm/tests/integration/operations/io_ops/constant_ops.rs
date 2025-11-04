@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use miden_utils_testing::proptest::prelude::*;
 
 use super::build_op_test;

@@ -4,8 +4,8 @@ use miden_air::{Felt, ProvingOptions, RowIndex};
 use miden_assembly::{Assembler, utils::Serializable};
 use miden_core::{EventName, StarkField, ZERO};
 use miden_processor::{
-    AdviceInputs, AdviceMutation, DefaultHost, EventError, ExecutionError, ProcessState, Program,
-    ProgramInfo, StackInputs, crypto::RpoRandomCoin,
+    AdviceInputs, AdviceMutation, DefaultHost, EventError, ExecutionError, OperationError,
+    ProcessState, Program, ProgramInfo, StackInputs, crypto::RpoRandomCoin,
 };
 use miden_stdlib::{StdLibrary, falcon_sign};
 use miden_utils_testing::{
@@ -203,7 +203,10 @@ fn test_falcon512_probabilistic_product_failure() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::FailedAssertion{clk, err_code, err_msg, label: _, source_file: _ }
+        ExecutionError::OperationError {
+            err: OperationError::FailedAssertion { clk, err_code, err_msg },
+            ..
+        }
         if clk == RowIndex::from(3202) && err_code == ZERO && err_msg.is_none()
     );
 }

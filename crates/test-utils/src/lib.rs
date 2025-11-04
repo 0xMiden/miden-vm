@@ -366,6 +366,7 @@ impl Test {
     /// Internally, this also checks that the slow and fast processors agree on the stack
     /// outputs.
     #[track_caller]
+    #[allow(clippy::result_large_err)]
     pub fn execute(&self) -> Result<ExecutionTrace, ExecutionError> {
         let (program, host) = self.get_program_and_host();
         let mut host = host.with_source_manager(self.source_manager.clone());
@@ -400,6 +401,7 @@ impl Test {
 
     /// Compiles the test's source to a Program and executes it with the tests inputs. Returns the
     /// process once execution is finished.
+    #[allow(clippy::result_large_err)]
     pub fn execute_process(&self) -> Result<(Process, DefaultHost), ExecutionError> {
         let (program, host) = self.get_program_and_host();
         let mut host = host.with_source_manager(self.source_manager.clone());
@@ -424,6 +426,7 @@ impl Test {
     /// the [`StackOutputs`] and a [`String`] containing all debug output.
     ///
     /// If the execution fails, the output is printed `stderr`.
+    #[allow(clippy::result_large_err)]
     pub fn execute_with_debug_buffer(&self) -> Result<(StackOutputs, String), ExecutionError> {
         let debug_handler = DefaultDebugHandler::new(BufferWriter::default());
 

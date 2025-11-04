@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use miden_core::{EventName, mast};
 use miden_processor::{ExecutionError, NoopEventHandler, RowIndex, ZERO};
 use miden_utils_testing::{build_op_test, expect_exec_error_matches};

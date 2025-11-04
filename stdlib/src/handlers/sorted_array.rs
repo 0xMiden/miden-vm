@@ -93,7 +93,6 @@ fn push_lowerbound_result(
             addr_range.start,
             process.ctx(),
             Felt::from(process.clk()),
-            &(),
         )
         .into());
     }

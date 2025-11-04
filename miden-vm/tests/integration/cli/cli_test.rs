@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use std::{fs, path::Path};
 
 use assert_cmd::prelude::*;

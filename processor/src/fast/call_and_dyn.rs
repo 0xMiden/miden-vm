@@ -8,7 +8,7 @@ use miden_core::{
 };
 
 use crate::{
-    AsyncHost, ContextId, ErrorContext, ExecutionError,
+    AsyncHost, ContextId, ErrorContext, ExecutionError, OperationError,
     continuation_stack::ContinuationStack,
     err_ctx,
     fast::{
@@ -53,7 +53,10 @@ impl FastProcessor {
         if call_node.is_syscall() {
             // check if the callee is in the kernel
             if !program.kernel().contains_proc(callee_hash) {
-                return Err(ExecutionError::syscall_target_not_in_kernel(callee_hash, &err_ctx));
+                return Err(ExecutionError::from_operation(
+                    &err_ctx,
+                    OperationError::syscall_target_not_in_kernel(callee_hash),
+                ));
             }
             tracer.record_kernel_proc_access(callee_hash);
 
@@ -191,7 +194,12 @@ impl FastProcessor {
                     .load_mast_forest(
                         callee_hash,
                         host,
-                        ExecutionError::dynamic_node_not_found,
+                        |digest, ctx| {
+                            ExecutionError::from_operation(
+                                ctx,
+                                OperationError::dynamic_node_not_found(digest),
+                            )
+                        },
                         &err_ctx,
                     )
                     .await?;
@@ -300,7 +308,10 @@ impl FastProcessor {
     ) -> Result<(), ExecutionError> {
         // when a call/dyncall/syscall node ends, stack depth must be exactly 16.
         if self.stack_size() > MIN_STACK_DEPTH {
-            return Err(ExecutionError::invalid_stack_depth_on_return(self.stack_size(), err_ctx));
+            return Err(ExecutionError::from_operation(
+                err_ctx,
+                OperationError::invalid_stack_depth_on_return(self.stack_size()),
+            ));
         }
 
         let ctx_info = self

@@ -5,7 +5,7 @@ use miden_air::trace::{
 use miden_core::mast::MastForest;
 
 use super::{ExecutionError, Operation, Process};
-use crate::{ErrorContext, Felt, Word};
+use crate::{ErrorContext, Felt, Word, errors::OperationError};
 
 // CRYPTOGRAPHIC OPERATIONS
 // ================================================================================================
@@ -85,10 +85,12 @@ impl Process {
 
         // get a Merkle path from the advice provider for the specified root and node index.
         // the path is expected to be of the specified depth.
-        let path = self
-            .advice
-            .get_merkle_path(root, depth, index)
-            .map_err(|err| ExecutionError::advice_error(err, self.system.clk(), err_ctx))?;
+        let path = self.advice.get_merkle_path(root, depth, index).map_err(|err| {
+            ExecutionError::from_operation(
+                err_ctx,
+                OperationError::advice_error(err, self.system.clk()),
+            )
+        })?;
 
         // use hasher to compute the Merkle root of the path
         let (addr, computed_root) = self.chiplets.hasher.build_merkle_root(node, &path, index);
@@ -101,8 +103,11 @@ impl Process {
             // If the hasher chiplet doesn't compute the same root (using the same path),
             // then it means that `node` is not the value currently in the tree at `index`
             let err_msg = program.resolve_error_message(err_code);
-            return Err(ExecutionError::merkle_path_verification_failed(
-                node, index, root, err_code, err_msg, err_ctx,
+            return Err(ExecutionError::from_operation(
+                err_ctx,
+                OperationError::merkle_path_verification_failed(
+                    node, index, root, err_code, err_msg,
+                ),
             ));
         }
 
@@ -162,10 +167,15 @@ impl Process {
         // get a Merkle path to it. the length of the returned path is expected to match the
         // specified depth. if the new node is the root of a tree, this instruction will append the
         // whole sub-tree to this node.
-        let (path, _) = self
-            .advice
-            .update_merkle_node(old_root, depth, index, new_node)
-            .map_err(|err| ExecutionError::advice_error(err, self.system.clk(), err_ctx))?;
+        let (path, _) =
+            self.advice
+                .update_merkle_node(old_root, depth, index, new_node)
+                .map_err(|err| {
+                    ExecutionError::from_operation(
+                        err_ctx,
+                        OperationError::advice_error(err, self.system.clk()),
+                    )
+                })?;
 
         assert_eq!(path.len(), depth.as_int() as usize);
 

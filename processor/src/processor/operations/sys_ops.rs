@@ -1,7 +1,7 @@
 use miden_core::{Felt, ONE, mast::MastForest};
 
 use crate::{
-    BaseHost, ErrorContext, ExecutionError,
+    BaseHost, ErrorContext, ExecutionError, OperationError,
     fast::Tracer,
     processor::{Processor, StackInterface, SystemInterface},
 };
@@ -23,7 +23,10 @@ pub(super) fn op_assert<P: Processor>(
         let process = &mut processor.state();
         host.on_assert_failed(process, err_code);
         let err_msg = program.resolve_error_message(err_code);
-        return Err(ExecutionError::failed_assertion(process.clk(), err_code, err_msg, err_ctx));
+        return Err(ExecutionError::from_operation(
+            err_ctx,
+            OperationError::failed_assertion(process.clk(), err_code, err_msg),
+        ));
     }
     processor.stack().decrement_size(tracer);
     Ok(())

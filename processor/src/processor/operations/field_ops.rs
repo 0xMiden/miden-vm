@@ -2,7 +2,7 @@ use miden_air::trace::decoder::NUM_USER_OP_HELPERS;
 use miden_core::{Felt, FieldElement, ONE, ZERO};
 
 use crate::{
-    ErrorContext, ExecutionError,
+    ErrorContext, ExecutionError, OperationError,
     fast::Tracer,
     operations::utils::assert_binary,
     processor::{OperationHelperRegisters, Processor, StackInterface, SystemInterface},
@@ -42,7 +42,10 @@ pub(super) fn op_inv<P: Processor>(
 ) -> Result<(), ExecutionError> {
     let top = processor.stack().get_mut(0);
     if (*top) == ZERO {
-        return Err(ExecutionError::divide_by_zero(processor.system().clk(), err_ctx));
+        return Err(ExecutionError::from_operation(
+            err_ctx,
+            OperationError::divide_by_zero(processor.system().clk()),
+        ));
     }
     *top = top.inv();
     Ok(())
@@ -118,7 +121,10 @@ pub(super) fn op_not<P: Processor>(
     } else if *top == ONE {
         *top = ZERO;
     } else {
-        return Err(ExecutionError::not_binary_value_op(*top, err_ctx));
+        return Err(ExecutionError::from_operation(
+            err_ctx,
+            OperationError::not_binary_value_op(*top),
+        ));
     }
     Ok(())
 }

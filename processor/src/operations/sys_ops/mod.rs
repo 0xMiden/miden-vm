@@ -2,7 +2,9 @@ use miden_core::{EventId, Felt, mast::MastForest, sys_events::SystemEvent};
 
 use super::{super::ONE, ExecutionError, Process};
 use crate::{
-    SyncHost, errors::ErrorContext, operations::sys_ops::sys_event_handlers::handle_system_event,
+    SyncHost,
+    errors::{ErrorContext, OperationError},
+    operations::sys_ops::sys_event_handlers::handle_system_event,
 };
 
 pub(crate) mod sys_event_handlers;
@@ -29,11 +31,9 @@ impl Process {
             let process = &mut self.state();
             host.on_assert_failed(process, err_code);
             let err_msg = program.resolve_error_message(err_code);
-            return Err(ExecutionError::failed_assertion(
-                process.clk(),
-                err_code,
-                err_msg,
+            return Err(ExecutionError::from_operation(
                 err_ctx,
+                OperationError::failed_assertion(process.clk(), err_code, err_msg),
             ));
         }
         self.stack.shift_left(1);
@@ -111,11 +111,14 @@ impl Process {
             let clk = process.clk();
             let mutations = host.on_event(&process).map_err(|err| {
                 let event_name = host.resolve_event(event_id).cloned();
-                ExecutionError::event_error(err, event_id, event_name, err_ctx)
+                ExecutionError::from_operation(
+                    err_ctx,
+                    OperationError::event_error(err, event_id, event_name),
+                )
             })?;
-            self.advice
-                .apply_mutations(mutations)
-                .map_err(|err| ExecutionError::advice_error(err, clk, err_ctx))?;
+            self.advice.apply_mutations(mutations).map_err(|err| {
+                ExecutionError::from_operation(err_ctx, OperationError::advice_error(err, clk))
+            })?;
             Ok(())
         }
     }

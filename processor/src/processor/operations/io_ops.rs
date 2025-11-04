@@ -1,7 +1,7 @@
 use miden_air::Felt;
 
 use crate::{
-    ErrorContext, ExecutionError,
+    ErrorContext, ExecutionError, OperationError,
     fast::Tracer,
     processor::{
         AdviceProviderInterface, MemoryInterface, Processor, StackInterface, SystemInterface,
@@ -14,10 +14,12 @@ pub(super) fn op_advpop<P: Processor>(
     err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
 ) -> Result<(), ExecutionError> {
-    let value = processor
-        .advice_provider()
-        .pop_stack()
-        .map_err(|err| ExecutionError::advice_error(err, processor.system().clk(), err_ctx))?;
+    let value = processor.advice_provider().pop_stack().map_err(|err| {
+        ExecutionError::from_operation(
+            err_ctx,
+            OperationError::advice_error(err, processor.system().clk()),
+        )
+    })?;
     tracer.record_advice_pop_stack(value);
 
     processor.stack().increment_size(tracer)?;
@@ -32,10 +34,12 @@ pub(super) fn op_advpopw<P: Processor>(
     err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
 ) -> Result<(), ExecutionError> {
-    let word = processor
-        .advice_provider()
-        .pop_stack_word()
-        .map_err(|err| ExecutionError::advice_error(err, processor.system().clk(), err_ctx))?;
+    let word = processor.advice_provider().pop_stack_word().map_err(|err| {
+        ExecutionError::from_operation(
+            err_ctx,
+            OperationError::advice_error(err, processor.system().clk()),
+        )
+    })?;
     tracer.record_advice_pop_stack_word(word);
 
     processor.stack().set_word(0, &word);
@@ -217,10 +221,9 @@ pub(super) fn op_pipe<P: Processor>(
     let addr_second_word = addr_first_word + WORD_SIZE_FELT;
 
     // pop two words from the advice stack
-    let words = processor
-        .advice_provider()
-        .pop_stack_dword()
-        .map_err(|err| ExecutionError::advice_error(err, clk, err_ctx))?;
+    let words = processor.advice_provider().pop_stack_dword().map_err(|err| {
+        ExecutionError::from_operation(err_ctx, OperationError::advice_error(err, clk))
+    })?;
     tracer.record_advice_pop_stack_dword(words);
 
     // write the words to memory

@@ -5,7 +5,7 @@ use miden_core::{Felt, ZERO};
 use paste::paste;
 
 use crate::{
-    ErrorContext, ExecutionError,
+    ErrorContext, ExecutionError, OperationError,
     fast::Tracer,
     processor::{OperationHelperRegisters, Processor, StackInterface, SystemInterface},
     utils::split_element,
@@ -29,7 +29,10 @@ macro_rules! require_u32_operands {
             )*
 
             if !invalid_values.is_empty() {
-                return Err(ExecutionError::not_u32_values(invalid_values, $errno, $err_ctx));
+                return Err(ExecutionError::from_operation(
+                    $err_ctx,
+                    OperationError::not_u32_values(invalid_values, $errno),
+                ));
             }
             // Return tuple of operands based on indices
             ($([<operand_ $idx>]),*)
@@ -190,7 +193,10 @@ pub(super) fn op_u32div<P: Processor>(
     };
 
     if denominator == 0 {
-        return Err(ExecutionError::divide_by_zero(processor.system().clk(), err_ctx));
+        return Err(ExecutionError::from_operation(
+            err_ctx,
+            OperationError::divide_by_zero(processor.system().clk()),
+        ));
     }
 
     // a/b = n*q + r for some n>=0 and 0<=r<b

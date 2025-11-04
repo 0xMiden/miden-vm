@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use super::{TRUNCATE_STACK_PROC, build_test};
 
 // PUSHING VALUES ONTO THE STACK (PUSH)

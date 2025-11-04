@@ -3,7 +3,7 @@ use alloc::collections::BTreeMap;
 use miden_air::{RowIndex, trace::chiplets::kernel_rom::TRACE_WIDTH};
 
 use super::{ExecutionError, Felt, Kernel, TraceFragment, Word as Digest};
-use crate::ErrorContext;
+use crate::{ErrorContext, errors::OperationError};
 
 #[cfg(test)]
 mod tests;
@@ -79,10 +79,12 @@ impl KernelRom {
         err_ctx: &impl ErrorContext,
     ) -> Result<(), ExecutionError> {
         let proc_hash_bytes: ProcHashBytes = proc_hash.into();
-        let access_info = self
-            .access_map
-            .get_mut(&proc_hash_bytes)
-            .ok_or(ExecutionError::syscall_target_not_in_kernel(proc_hash, err_ctx))?;
+        let access_info = self.access_map.get_mut(&proc_hash_bytes).ok_or_else(|| {
+            ExecutionError::from_operation(
+                err_ctx,
+                OperationError::syscall_target_not_in_kernel(proc_hash),
+            )
+        })?;
 
         self.trace_len += 1;
         access_info.num_accesses += 1;

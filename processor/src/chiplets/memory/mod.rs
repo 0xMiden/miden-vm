@@ -166,12 +166,12 @@ impl Memory {
         ctx: ContextId,
         addr: Felt,
         clk: RowIndex,
-        err_ctx: &impl ErrorContext,
+        _err_ctx: &impl ErrorContext,
     ) -> Result<Felt, MemoryError> {
         let addr: u32 = addr
             .as_int()
             .try_into()
-            .map_err(|_| MemoryError::address_out_of_bounds(addr.as_int(), err_ctx))?;
+            .map_err(|_| MemoryError::address_out_of_bounds(addr.as_int()))?;
         self.num_trace_rows += 1;
         self.trace.entry(ctx).or_default().read(ctx, addr, Felt::from(clk))
     }
@@ -190,14 +190,14 @@ impl Memory {
         ctx: ContextId,
         addr: Felt,
         clk: RowIndex,
-        err_ctx: &impl ErrorContext,
+        _err_ctx: &impl ErrorContext,
     ) -> Result<Word, MemoryError> {
         let addr: u32 = addr
             .as_int()
             .try_into()
-            .map_err(|_| MemoryError::address_out_of_bounds(addr.as_int(), err_ctx))?;
+            .map_err(|_| MemoryError::address_out_of_bounds(addr.as_int()))?;
         if !addr.is_multiple_of(WORD_SIZE as u32) {
-            return Err(MemoryError::unaligned_word_access(addr, ctx, clk.into(), err_ctx));
+            return Err(MemoryError::unaligned_word_access(addr, ctx, clk.into()));
         }
 
         self.num_trace_rows += 1;
@@ -215,12 +215,12 @@ impl Memory {
         addr: Felt,
         clk: RowIndex,
         value: Felt,
-        err_ctx: &impl ErrorContext,
+        _err_ctx: &impl ErrorContext,
     ) -> Result<(), MemoryError> {
         let addr: u32 = addr
             .as_int()
             .try_into()
-            .map_err(|_| MemoryError::address_out_of_bounds(addr.as_int(), err_ctx))?;
+            .map_err(|_| MemoryError::address_out_of_bounds(addr.as_int()))?;
         self.num_trace_rows += 1;
         self.trace.entry(ctx).or_default().write(ctx, addr, Felt::from(clk), value)
     }
@@ -237,14 +237,14 @@ impl Memory {
         addr: Felt,
         clk: RowIndex,
         value: Word,
-        err_ctx: &impl ErrorContext,
+        _err_ctx: &impl ErrorContext,
     ) -> Result<(), MemoryError> {
         let addr: u32 = addr
             .as_int()
             .try_into()
-            .map_err(|_| MemoryError::address_out_of_bounds(addr.as_int(), err_ctx))?;
+            .map_err(|_| MemoryError::address_out_of_bounds(addr.as_int()))?;
         if !addr.is_multiple_of(WORD_SIZE as u32) {
-            return Err(MemoryError::unaligned_word_access(addr, ctx, clk.into(), err_ctx));
+            return Err(MemoryError::unaligned_word_access(addr, ctx, clk.into()));
         }
 
         self.num_trace_rows += 1;

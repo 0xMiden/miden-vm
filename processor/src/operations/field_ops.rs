@@ -1,7 +1,7 @@
 use miden_core::{ONE, Operation, ZERO};
 
 use super::{ExecutionError, Felt, FieldElement, Process, utils::assert_binary};
-use crate::ErrorContext;
+use crate::{ErrorContext, errors::OperationError};
 
 // FIELD OPERATIONS
 // ================================================================================================
@@ -46,7 +46,10 @@ impl Process {
     pub(super) fn op_inv(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
         let a = self.stack.get(0);
         if a == ZERO {
-            return Err(ExecutionError::divide_by_zero(self.system.clk(), err_ctx));
+            return Err(ExecutionError::from_operation(
+                err_ctx,
+                OperationError::divide_by_zero(self.system.clk()),
+            ));
         }
 
         self.stack.set(0, a.inv());

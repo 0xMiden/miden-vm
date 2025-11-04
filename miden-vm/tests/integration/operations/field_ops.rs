@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use miden_assembly::testing::regex;
 use miden_processor::{ExecutionError, RowIndex};
 use miden_utils_testing::{

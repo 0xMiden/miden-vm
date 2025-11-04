@@ -5,7 +5,10 @@ use miden_core::{
     sys_events::SystemEvent,
 };
 
-use crate::{ExecutionError, ProcessState, errors::ErrorContext};
+use crate::{
+    ExecutionError, ProcessState,
+    errors::{ErrorContext, OperationError},
+};
 
 /// The offset of the domain value on the stack in the `hdword_to_map_with_domain` system event.
 /// Offset accounts for the event ID at position 0 on the stack.
@@ -70,10 +73,9 @@ fn insert_mem_values_into_adv_map(
     }
 
     let key = process.get_stack_word_be(1);
-    process
-        .advice_provider_mut()
-        .insert_into_map(key, values)
-        .map_err(|err| ExecutionError::advice_error(err, process.clk(), err_ctx))
+    process.advice_provider_mut().insert_into_map(key, values).map_err(|err| {
+        ExecutionError::from_operation(err_ctx, OperationError::advice_error(err, process.clk()))
+    })
 }
 
 /// Reads two words from the operand stack and inserts them into the advice map under the key
@@ -104,10 +106,9 @@ fn insert_hdword_into_adv_map(
     values.extend_from_slice(&Into::<[Felt; WORD_SIZE]>::into(word1));
     values.extend_from_slice(&Into::<[Felt; WORD_SIZE]>::into(word0));
 
-    process
-        .advice_provider_mut()
-        .insert_into_map(key, values)
-        .map_err(|err| ExecutionError::advice_error(err, process.clk(), err_ctx))
+    process.advice_provider_mut().insert_into_map(key, values).map_err(|err| {
+        ExecutionError::from_operation(err_ctx, OperationError::advice_error(err, process.clk()))
+    })
 }
 
 /// Reads four words from the operand stack and inserts them into the advice map under the key
@@ -143,10 +144,9 @@ fn insert_hqword_into_adv_map(
     values.extend_from_slice(&Into::<[Felt; WORD_SIZE]>::into(word1));
     values.extend_from_slice(&Into::<[Felt; WORD_SIZE]>::into(word0));
 
-    process
-        .advice_provider_mut()
-        .insert_into_map(key, values)
-        .map_err(|err| ExecutionError::advice_error(err, process.clk(), err_ctx))
+    process.advice_provider_mut().insert_into_map(key, values).map_err(|err| {
+        ExecutionError::from_operation(err_ctx, OperationError::advice_error(err, process.clk()))
+    })
 }
 
 /// Reads three words from the operand stack and inserts the top two words into the advice map
@@ -192,10 +192,9 @@ fn insert_hperm_into_adv_map(
             .expect("failed to extract digest from state"),
     );
 
-    process
-        .advice_provider_mut()
-        .insert_into_map(key, values)
-        .map_err(|err| ExecutionError::advice_error(err, process.clk(), err_ctx))
+    process.advice_provider_mut().insert_into_map(key, values).map_err(|err| {
+        ExecutionError::from_operation(err_ctx, OperationError::advice_error(err, process.clk()))
+    })
 }
 
 /// Creates a new Merkle tree in the advice provider by combining Merkle trees with the
@@ -221,10 +220,9 @@ fn merge_merkle_nodes(
     let rhs = process.get_stack_word_be(1);
 
     // perform the merge
-    process
-        .advice_provider_mut()
-        .merge_roots(lhs, rhs)
-        .map_err(|err| ExecutionError::advice_error(err, process.clk(), err_ctx))?;
+    process.advice_provider_mut().merge_roots(lhs, rhs).map_err(|err| {
+        ExecutionError::from_operation(err_ctx, OperationError::advice_error(err, process.clk()))
+    })?;
 
     Ok(())
 }
@@ -255,10 +253,9 @@ fn copy_merkle_node_to_adv_stack(
     let index = process.get_stack_item(2);
     let root = process.get_stack_word_be(3);
 
-    let node = process
-        .advice_provider()
-        .get_tree_node(root, depth, index)
-        .map_err(|err| ExecutionError::advice_error(err, process.clk(), err_ctx))?;
+    let node = process.advice_provider().get_tree_node(root, depth, index).map_err(|err| {
+        ExecutionError::from_operation(err_ctx, OperationError::advice_error(err, process.clk()))
+    })?;
 
     process.advice_provider_mut().push_stack_word(&node);
 
@@ -287,10 +284,9 @@ fn copy_map_value_to_adv_stack(
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
     let key = process.get_stack_word_be(1);
-    process
-        .advice_provider_mut()
-        .push_from_map(key, include_len)
-        .map_err(|err| ExecutionError::advice_error(err, process.clk(), err_ctx))?;
+    process.advice_provider_mut().push_from_map(key, include_len).map_err(|err| {
+        ExecutionError::from_operation(err_ctx, OperationError::advice_error(err, process.clk()))
+    })?;
 
     Ok(())
 }
@@ -338,7 +334,10 @@ fn push_ext2_inv_result(
 
     let element = QuadFelt::new(coef0, coef1);
     if element == QuadFelt::ZERO {
-        return Err(ExecutionError::divide_by_zero(process.clk(), err_ctx));
+        return Err(ExecutionError::from_operation(
+            err_ctx,
+            OperationError::divide_by_zero(process.clk()),
+        ));
     }
     let result = element.inv().to_base_elements();
 
@@ -423,7 +422,10 @@ fn push_ilog2(
 ) -> Result<(), ExecutionError> {
     let n = process.get_stack_item(1).as_int();
     if n == 0 {
-        return Err(ExecutionError::log_argument_zero(process.clk(), err_ctx));
+        return Err(ExecutionError::from_operation(
+            err_ctx,
+            OperationError::log_argument_zero(process.clk()),
+        ));
     }
     let ilog2 = Felt::from(n.ilog2());
     process.advice_provider_mut().push_stack(ilog2);
@@ -442,10 +444,9 @@ fn push_transformed_stack_top(
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
     let stack_top = process.get_stack_item(1);
-    let stack_top: u32 = stack_top
-        .as_int()
-        .try_into()
-        .map_err(|_| ExecutionError::not_u32_value(stack_top, ZERO, err_ctx))?;
+    let stack_top: u32 = stack_top.as_int().try_into().map_err(|_| {
+        ExecutionError::from_operation(err_ctx, OperationError::not_u32_value(stack_top, ZERO))
+    })?;
     let transformed_stack_top = f(stack_top);
     process.advice_provider_mut().push_stack(transformed_stack_top);
     Ok(())
