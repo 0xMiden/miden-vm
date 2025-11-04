@@ -23,7 +23,7 @@ fn bitwise_and() {
     let a = rand_u32();
     let b = rand_u32();
 
-    let result = bitwise.u32and(a, b, &()).unwrap();
+    let result = bitwise.u32and(a, b).unwrap();
     assert_eq!(a.as_int() & b.as_int(), result.as_int());
 
     // --- check generated trace ----------------------------------------------
@@ -67,7 +67,7 @@ fn bitwise_xor() {
     let a = rand_u32();
     let b = rand_u32();
 
-    let result = bitwise.u32xor(a, b, &()).unwrap();
+    let result = bitwise.u32xor(a, b).unwrap();
     assert_eq!(a.as_int() ^ b.as_int(), result.as_int());
 
     // --- check generated trace ----------------------------------------------
@@ -112,15 +112,15 @@ fn bitwise_multiple() {
     let b = [rand_u32(), rand_u32(), rand_u32()];
 
     // first operation: AND
-    let result0 = bitwise.u32and(a[0], b[0], &()).unwrap();
+    let result0 = bitwise.u32and(a[0], b[0]).unwrap();
     assert_eq!(a[0].as_int() & b[0].as_int(), result0.as_int());
 
     // second operation: XOR
-    let result1 = bitwise.u32xor(a[1], b[1], &()).unwrap();
+    let result1 = bitwise.u32xor(a[1], b[1]).unwrap();
     assert_eq!(a[1].as_int() ^ b[1].as_int(), result1.as_int());
 
     // third operation: AND
-    let result2 = bitwise.u32and(a[2], b[2], &()).unwrap();
+    let result2 = bitwise.u32and(a[2], b[2]).unwrap();
     assert_eq!(a[2].as_int() & b[2].as_int(), result2.as_int());
 
     // --- check generated trace ----------------------------------------------

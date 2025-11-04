@@ -457,13 +457,13 @@ fn initialize_chiplets(
             BitwiseOp::U32And => {
                 chiplets
                     .bitwise
-                    .u32and(a, b, &())
+                    .u32and(a, b)
                     .expect("bitwise AND operation failed when populating chiplet");
             },
             BitwiseOp::U32Xor => {
                 chiplets
                     .bitwise
-                    .u32xor(a, b, &())
+                    .u32xor(a, b)
                     .expect("bitwise XOR operation failed when populating chiplet");
             },
         }

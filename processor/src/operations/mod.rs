@@ -97,17 +97,19 @@ impl Process {
             Operation::Ext2Mul => self.op_ext2mul()?,
 
             // ----- u32 operations ---------------------------------------------------------------
-            Operation::U32split => self.op_u32split()?,
-            Operation::U32add => self.op_u32add(err_ctx)?,
-            Operation::U32add3 => self.op_u32add3(err_ctx)?,
-            Operation::U32sub => self.op_u32sub(err_ctx)?,
-            Operation::U32mul => self.op_u32mul(err_ctx)?,
-            Operation::U32madd => self.op_u32madd(err_ctx)?,
-            Operation::U32div => self.op_u32div(err_ctx)?,
+            Operation::U32split => wrap_operation(self.op_u32split(), err_ctx)?,
+            Operation::U32add => wrap_operation(self.op_u32add(), err_ctx)?,
+            Operation::U32add3 => wrap_operation(self.op_u32add3(), err_ctx)?,
+            Operation::U32sub => wrap_operation(self.op_u32sub(), err_ctx)?,
+            Operation::U32mul => wrap_operation(self.op_u32mul(), err_ctx)?,
+            Operation::U32madd => wrap_operation(self.op_u32madd(), err_ctx)?,
+            Operation::U32div => wrap_operation(self.op_u32div(), err_ctx)?,
 
-            Operation::U32and => self.op_u32and(err_ctx)?,
-            Operation::U32xor => self.op_u32xor(err_ctx)?,
-            Operation::U32assert2(err_code) => self.op_u32assert2(err_code, err_ctx)?,
+            Operation::U32and => wrap_operation(self.op_u32and(), err_ctx)?,
+            Operation::U32xor => wrap_operation(self.op_u32xor(), err_ctx)?,
+            Operation::U32assert2(err_code) => {
+                wrap_operation(self.op_u32assert2(err_code), err_ctx)?
+            },
 
             // ----- stack manipulation -----------------------------------------------------------
             Operation::Pad => self.op_pad()?,
