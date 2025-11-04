@@ -118,7 +118,7 @@ pub(super) mod opcode_constants {
     pub const OPCODE_PUSH: u8           = 0b0101_1011;
     pub const OPCODE_DYNCALL: u8        = 0b0101_1100;
     pub const OPCODE_EVALCIRCUIT: u8    = 0b0101_1101;
-    pub const OPCODE_CRYPTOSTREAM: u8   = 0b0101_1110;  // TODO: swap with HORNERBASE (0x64) once HORNERBASE constraints are reduced to degree ≤4
+    pub const OPCODE_CRYPTOSTREAM: u8   = 0b0101_1110;
 
     pub const OPCODE_MRUPDATE: u8       = 0b0110_0000;
     pub const OPCODE_HORNERBASE: u8     = 0b0110_0100;
@@ -531,7 +531,7 @@ pub enum Operation {
     ///     ↓
     /// [ct(8), cap(4), src+8, dst+8, ...]
     /// ```
-    /// where `ct = mem[src] + rate`.
+    /// where `ct = mem[src..src+8] + rate`, where addition is element-wise.
     ///
     /// After this operation, `hperm` should be applied to refresh the keystream for the next block.
     CryptoStream = OPCODE_CRYPTOSTREAM,
