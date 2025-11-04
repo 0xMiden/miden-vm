@@ -506,25 +506,25 @@ fn initialize_chiplets(
                 MemoryAccess::ReadElement(addr, ctx, clk) => {
                     chiplets
                         .memory
-                        .read(ctx, addr, clk, &())
+                        .read(ctx, addr, clk)
                         .expect("memory read element failed when populating chiplet");
                 },
                 MemoryAccess::WriteElement(addr, element, ctx, clk) => {
                     chiplets
                         .memory
-                        .write(ctx, addr, clk, element, &())
+                        .write(ctx, addr, clk, element)
                         .expect("memory write element failed when populating chiplet");
                 },
                 MemoryAccess::ReadWord(addr, ctx, clk) => {
                     chiplets
                         .memory
-                        .read_word(ctx, addr, clk, &())
+                        .read_word(ctx, addr, clk)
                         .expect("memory read word failed when populating chiplet");
                 },
                 MemoryAccess::WriteWord(addr, word, ctx, clk) => {
                     chiplets
                         .memory
-                        .write_word(ctx, addr, clk, word, &())
+                        .write_word(ctx, addr, clk, word)
                         .expect("memory write word failed when populating chiplet");
                 },
             });
@@ -2020,7 +2020,7 @@ fn eval_circuit_fast_(
     for _ in 0..num_read_rows {
         let word = processor
             .memory()
-            .read_word(ctx, ptr, clk, err_ctx)
+            .read_word(ctx, ptr, clk)
             .map_err(ExecutionError::MemoryError)?;
         tracer.record_memory_read_word(word, ptr, ctx, clk);
         evaluation_context.do_read(ptr, word)?;
@@ -2028,10 +2028,8 @@ fn eval_circuit_fast_(
     }
     // perform EVAL operations
     for _ in 0..num_eval_rows {
-        let instruction = processor
-            .memory()
-            .read_element(ctx, ptr, err_ctx)
-            .map_err(ExecutionError::MemoryError)?;
+        let instruction =
+            processor.memory().read_element(ctx, ptr).map_err(ExecutionError::MemoryError)?;
         tracer.record_memory_read_element(instruction, ptr, ctx, clk);
         evaluation_context.do_eval(ptr, instruction, err_ctx)?;
         ptr += PTR_OFFSET_ELEM;

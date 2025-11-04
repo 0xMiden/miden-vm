@@ -164,14 +164,14 @@ pub(super) fn execute_sync_op(
 
         // ----- input / output ---------------------------------------------------------------
         Operation::Push(value) => stack_ops::op_push(processor, *value, tracer)?,
-        Operation::AdvPop => io_ops::op_advpop(processor, err_ctx, tracer)?,
-        Operation::AdvPopW => io_ops::op_advpopw(processor, err_ctx, tracer)?,
-        Operation::MLoadW => io_ops::op_mloadw(processor, err_ctx, tracer)?,
-        Operation::MStoreW => io_ops::op_mstorew(processor, err_ctx, tracer)?,
-        Operation::MLoad => io_ops::op_mload(processor, err_ctx, tracer)?,
-        Operation::MStore => io_ops::op_mstore(processor, err_ctx, tracer)?,
-        Operation::MStream => io_ops::op_mstream(processor, err_ctx, tracer)?,
-        Operation::Pipe => io_ops::op_pipe(processor, err_ctx, tracer)?,
+        Operation::AdvPop => wrap_operation(io_ops::op_advpop(processor, tracer), err_ctx)?,
+        Operation::AdvPopW => wrap_operation(io_ops::op_advpopw(processor, tracer), err_ctx)?,
+        Operation::MLoadW => wrap_operation(io_ops::op_mloadw(processor, tracer), err_ctx)?,
+        Operation::MStoreW => wrap_operation(io_ops::op_mstorew(processor, tracer), err_ctx)?,
+        Operation::MLoad => wrap_operation(io_ops::op_mload(processor, tracer), err_ctx)?,
+        Operation::MStore => wrap_operation(io_ops::op_mstore(processor, tracer), err_ctx)?,
+        Operation::MStream => wrap_operation(io_ops::op_mstream(processor, tracer), err_ctx)?,
+        Operation::Pipe => wrap_operation(io_ops::op_pipe(processor, tracer), err_ctx)?,
 
         // ----- cryptographic operations -----------------------------------------------------
         Operation::HPerm => {

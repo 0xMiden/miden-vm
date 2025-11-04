@@ -16,7 +16,7 @@ use super::{
     EMPTY_WORD, Felt, FieldElement, ONE, RangeChecker, TraceFragment, Word,
     utils::{split_element_u32_into_u16, split_u32_into_u16},
 };
-use crate::{MemoryAddress, errors::ErrorContext, system::ContextId};
+use crate::{MemoryAddress, system::ContextId};
 
 mod errors;
 pub use errors::MemoryError;
@@ -161,13 +161,7 @@ impl Memory {
     /// # Errors
     /// - Returns an error if the address is equal or greater than 2^32.
     /// - Returns an error if the same address is accessed more than once in the same clock cycle.
-    pub fn read(
-        &mut self,
-        ctx: ContextId,
-        addr: Felt,
-        clk: RowIndex,
-        _err_ctx: &impl ErrorContext,
-    ) -> Result<Felt, MemoryError> {
+    pub fn read(&mut self, ctx: ContextId, addr: Felt, clk: RowIndex) -> Result<Felt, MemoryError> {
         let addr: u32 = addr
             .as_int()
             .try_into()
@@ -190,7 +184,6 @@ impl Memory {
         ctx: ContextId,
         addr: Felt,
         clk: RowIndex,
-        _err_ctx: &impl ErrorContext,
     ) -> Result<Word, MemoryError> {
         let addr: u32 = addr
             .as_int()
@@ -215,7 +208,6 @@ impl Memory {
         addr: Felt,
         clk: RowIndex,
         value: Felt,
-        _err_ctx: &impl ErrorContext,
     ) -> Result<(), MemoryError> {
         let addr: u32 = addr
             .as_int()
@@ -237,7 +229,6 @@ impl Memory {
         addr: Felt,
         clk: RowIndex,
         value: Word,
-        _err_ctx: &impl ErrorContext,
     ) -> Result<(), MemoryError> {
         let addr: u32 = addr
             .as_int()

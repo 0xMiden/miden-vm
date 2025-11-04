@@ -1,7 +1,7 @@
 use miden_core::WORD_SIZE;
 
 use super::{ExecutionError, Felt, Process};
-use crate::errors::{ErrorContext, OperationError};
+use crate::errors::OperationError;
 
 // INPUT / OUTPUT OPERATIONS
 // ================================================================================================
@@ -35,13 +35,13 @@ impl Process {
     ///
     /// # Errors
     /// - Returns an error if the address is not aligned to a word boundary.
-    pub(super) fn op_mloadw(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
+    pub(super) fn op_mloadw(&mut self) -> Result<(), OperationError> {
         // get the address from the stack and read the word from current memory context
         let mut word: [Felt; WORD_SIZE] = self
             .chiplets
             .memory
-            .read_word(self.system.ctx(), self.stack.get(0), self.system.clk(), err_ctx)
-            .map_err(ExecutionError::MemoryError)?
+            .read_word(self.system.ctx(), self.stack.get(0), self.system.clk())
+            .map_err(OperationError::from)?
             .into();
         word.reverse();
 
@@ -62,12 +62,12 @@ impl Process {
     ///   initialized to ZEROs, and thus, if the specified address has never been written to, the
     ///   ZERO element is returned.
     /// - The element retrieved from memory is pushed to the top of the stack.
-    pub(super) fn op_mload(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
+    pub(super) fn op_mload(&mut self) -> Result<(), OperationError> {
         let element = self
             .chiplets
             .memory
-            .read(self.system.ctx(), self.stack.get(0), self.system.clk(), err_ctx)
-            .map_err(ExecutionError::MemoryError)?;
+            .read(self.system.ctx(), self.stack.get(0), self.system.clk())
+            .map_err(OperationError::from)?;
 
         self.stack.set(0, element);
         self.stack.copy_state(1);
@@ -86,7 +86,7 @@ impl Process {
     ///
     /// # Errors
     /// - Returns an error if the address is not aligned to a word boundary.
-    pub(super) fn op_mstorew(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
+    pub(super) fn op_mstorew(&mut self) -> Result<(), OperationError> {
         // get the address from the stack and build the word to be saved from the stack values
         let addr = self.stack.get(0);
 
@@ -96,8 +96,8 @@ impl Process {
         // write the word to memory and get the previous word
         self.chiplets
             .memory
-            .write_word(self.system.ctx(), addr, self.system.clk(), word.into(), err_ctx)
-            .map_err(ExecutionError::MemoryError)?;
+            .write_word(self.system.ctx(), addr, self.system.clk(), word.into())
+            .map_err(OperationError::from)?;
 
         // reverse the order of the memory word & update the stack state
         for (i, &value) in word.iter().rev().enumerate() {
@@ -116,7 +116,7 @@ impl Process {
     ///   from the stack.
     ///
     /// Thus, the net result of the operation is that the stack is shifted left by one item.
-    pub(super) fn op_mstore(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
+    pub(super) fn op_mstore(&mut self) -> Result<(), OperationError> {
         // get the address and the value from the stack
         let ctx = self.system.ctx();
         let addr = self.stack.get(0);
@@ -125,8 +125,8 @@ impl Process {
         // write the value to the memory and get the previous word
         self.chiplets
             .memory
-            .write(ctx, addr, self.system.clk(), value, err_ctx)
-            .map_err(ExecutionError::MemoryError)?;
+            .write(ctx, addr, self.system.clk(), value)
+            .map_err(OperationError::from)?;
 
         // update the stack state
         self.stack.shift_left(1);
@@ -147,7 +147,7 @@ impl Process {
     ///
     /// # Errors
     /// - Returns an error if the address is not aligned to a word boundary.
-    pub(super) fn op_mstream(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
+    pub(super) fn op_mstream(&mut self) -> Result<(), OperationError> {
         const MEM_ADDR_STACK_IDX: usize = 12;
 
         let ctx = self.system.ctx();
@@ -159,12 +159,12 @@ impl Process {
         let words = [
             self.chiplets
                 .memory
-                .read_word(ctx, addr_first_word, clk, err_ctx)
-                .map_err(ExecutionError::MemoryError)?,
+                .read_word(ctx, addr_first_word, clk)
+                .map_err(OperationError::from)?,
             self.chiplets
                 .memory
-                .read_word(ctx, addr_second_word, clk, err_ctx)
-                .map_err(ExecutionError::MemoryError)?,
+                .read_word(ctx, addr_second_word, clk)
+                .map_err(OperationError::from)?,
         ];
 
         // replace the stack elements with the elements from memory (in stack order)
@@ -201,7 +201,7 @@ impl Process {
     ///
     /// # Errors
     /// - Returns an error if the address is not aligned to a word boundary.
-    pub(super) fn op_pipe(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
+    pub(super) fn op_pipe(&mut self) -> Result<(), OperationError> {
         const MEM_ADDR_STACK_IDX: usize = 12;
 
         // get the address from position 12 on the stack
@@ -211,19 +211,20 @@ impl Process {
         let addr_second_word = addr_first_word + Felt::from(WORD_SIZE as u32);
 
         // pop two words from the advice stack
-        let words = self.advice.pop_stack_dword().map_err(|err| {
-            ExecutionError::from_operation(err_ctx, OperationError::advice_error(err, clk))
-        })?;
+        let words = self
+            .advice
+            .pop_stack_dword()
+            .map_err(|err| OperationError::advice_error(err, clk))?;
 
         // write the words memory
         self.chiplets
             .memory
-            .write_word(ctx, addr_first_word, clk, words[0], err_ctx)
-            .map_err(ExecutionError::MemoryError)?;
+            .write_word(ctx, addr_first_word, clk, words[0])
+            .map_err(OperationError::from)?;
         self.chiplets
             .memory
-            .write_word(ctx, addr_second_word, clk, words[1], err_ctx)
-            .map_err(ExecutionError::MemoryError)?;
+            .write_word(ctx, addr_second_word, clk, words[1])
+            .map_err(OperationError::from)?;
 
         // replace the elements on the stack with the word elements (in stack order)
         for (i, &adv_value) in words.iter().flat_map(|word| word.iter()).rev().enumerate() {
@@ -253,13 +254,11 @@ impl Process {
     ///
     /// # Errors
     /// Returns an error if the advice stack is empty.
-    pub(super) fn op_advpop(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
-        let value = self.advice.pop_stack().map_err(|err| {
-            ExecutionError::from_operation(
-                err_ctx,
-                OperationError::advice_error(err, self.system.clk()),
-            )
-        })?;
+    pub(super) fn op_advpop(&mut self) -> Result<(), OperationError> {
+        let value = self
+            .advice
+            .pop_stack()
+            .map_err(|err| OperationError::advice_error(err, self.system.clk()))?;
         self.stack.set(0, value);
         self.stack.shift_right(0);
         Ok(())
@@ -270,13 +269,11 @@ impl Process {
     ///
     /// # Errors
     /// Returns an error if the advice stack contains fewer than four elements.
-    pub(super) fn op_advpopw(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
-        let word = self.advice.pop_stack_word().map_err(|err| {
-            ExecutionError::from_operation(
-                err_ctx,
-                OperationError::advice_error(err, self.system.clk()),
-            )
-        })?;
+    pub(super) fn op_advpopw(&mut self) -> Result<(), OperationError> {
+        let word = self
+            .advice
+            .pop_stack_word()
+            .map_err(|err| OperationError::advice_error(err, self.system.clk()))?;
 
         self.stack.set(0, word[3]);
         self.stack.set(1, word[2]);
@@ -301,7 +298,7 @@ mod tests {
         super::{MIN_STACK_DEPTH, Operation},
         Felt, Process,
     };
-    use crate::{ContextId, DefaultHost, ExecutionError, MemoryError, SyncHost};
+    use crate::{ContextId, DefaultHost, MemoryError, OperationError, SyncHost};
 
     #[test]
     fn op_push() {
@@ -692,10 +689,10 @@ mod tests {
 
         // emulate reading and writing in the same clock cycle
         process.ensure_trace_capacity();
-        process.op_mload(&()).unwrap();
+        process.op_mload().unwrap();
         assert_matches!(
-            process.op_mstore(&()),
-            Err(ExecutionError::MemoryError(MemoryError::IllegalMemoryAccess {
+            process.op_mstore(),
+            Err(OperationError::MemoryError(MemoryError::IllegalMemoryAccess {
                 ctx: _,
                 addr: _,
                 clk: _
@@ -711,10 +708,10 @@ mod tests {
 
         // emulate reading and writing in the same clock cycle
         process.ensure_trace_capacity();
-        process.op_mstore(&()).unwrap();
+        process.op_mstore().unwrap();
         assert_matches!(
-            process.op_mstore(&()),
-            Err(ExecutionError::MemoryError(MemoryError::IllegalMemoryAccess {
+            process.op_mstore(),
+            Err(OperationError::MemoryError(MemoryError::IllegalMemoryAccess {
                 ctx: _,
                 addr: _,
                 clk: _
@@ -730,8 +727,8 @@ mod tests {
 
         // emulate reading in the same clock cycle
         process.ensure_trace_capacity();
-        process.op_mload(&()).unwrap();
-        process.op_mload(&()).unwrap();
+        process.op_mload().unwrap();
+        process.op_mload().unwrap();
     }
 
     // HELPER METHODS

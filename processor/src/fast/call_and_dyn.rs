@@ -71,7 +71,7 @@ impl FastProcessor {
 
             // Initialize the frame pointer in memory for the new context.
             self.memory
-                .write_element(new_ctx, FMP_ADDR, FMP_INIT_VALUE, &err_ctx)
+                .write_element(new_ctx, FMP_ADDR, FMP_INIT_VALUE)
                 .map_err(ExecutionError::MemoryError)?;
             tracer.record_memory_write_element(FMP_INIT_VALUE, FMP_ADDR, new_ctx, self.clk);
         }
@@ -149,7 +149,7 @@ impl FastProcessor {
             let mem_addr = self.stack_get(0);
             let word = self
                 .memory
-                .read_word(self.ctx, mem_addr, self.clk, &err_ctx)
+                .read_word(self.ctx, mem_addr, self.clk)
                 .map_err(ExecutionError::MemoryError)?;
             tracer.record_memory_read_word(word, mem_addr, self.ctx, self.clk);
 
@@ -173,7 +173,7 @@ impl FastProcessor {
 
             // Initialize the frame pointer in memory for the new context.
             self.memory
-                .write_element(new_ctx, FMP_ADDR, FMP_INIT_VALUE, &err_ctx)
+                .write_element(new_ctx, FMP_ADDR, FMP_INIT_VALUE)
                 .map_err(ExecutionError::MemoryError)?;
             tracer.record_memory_write_element(FMP_INIT_VALUE, FMP_ADDR, new_ctx, self.clk);
         };

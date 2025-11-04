@@ -50,10 +50,7 @@ fn test_mloadw_success() {
     // load the contents of address 40
     {
         let mut processor = FastProcessor::new(&[addr]);
-        processor
-            .memory
-            .write_word(ctx, addr, dummy_clk, word_at_addr.into(), &())
-            .unwrap();
+        processor.memory.write_word(ctx, addr, dummy_clk, word_at_addr.into()).unwrap();
 
         let program = simple_program_with_ops(vec![Operation::MLoadW]);
         let stack_outputs = processor.execute_sync_mut(&program, &mut host).unwrap();
@@ -68,10 +65,7 @@ fn test_mloadw_success() {
     // load the contents of address 100 (should yield the ZERO word)
     {
         let mut processor = FastProcessor::new(&[100_u32.into()]);
-        processor
-            .memory
-            .write_word(ctx, addr, dummy_clk, word_at_addr.into(), &())
-            .unwrap();
+        processor.memory.write_word(ctx, addr, dummy_clk, word_at_addr.into()).unwrap();
 
         let program = simple_program_with_ops(vec![Operation::MLoadW]);
         let stack_outputs = processor.execute_sync_mut(&program, &mut host).unwrap();
@@ -100,7 +94,7 @@ fn test_mstorew_success() {
     processor.execute_sync_mut(&program, &mut host).unwrap();
 
     // Ensure that the memory was correctly modified
-    assert_eq!(processor.memory.read_word(ctx, addr, clk, &()).unwrap(), word_to_store.into());
+    assert_eq!(processor.memory.read_word(ctx, addr, clk).unwrap(), word_to_store.into());
 }
 
 #[rstest]
@@ -121,7 +115,7 @@ fn test_mstore_success(#[case] addr: u32, #[case] value_to_store: u32) {
 
     // Ensure that the memory was correctly modified
     let word_addr = addr - (addr % WORD_SIZE as u32);
-    let word = processor.memory.read_word(ctx, word_addr.into(), clk, &()).unwrap();
+    let word = processor.memory.read_word(ctx, word_addr.into(), clk).unwrap();
     assert_eq!(word[addr as usize % WORD_SIZE], value_to_store);
 }
 
@@ -141,7 +135,7 @@ fn test_mload_success(#[case] addr_to_access: u32) {
     let mut processor = FastProcessor::new(&[addr_to_access.into()]);
     processor
         .memory
-        .write_word(ctx, addr_with_word.into(), dummy_clk, word_at_addr.into(), &())
+        .write_word(ctx, addr_with_word.into(), dummy_clk, word_at_addr.into())
         .unwrap();
 
     let program = simple_program_with_ops(vec![Operation::MLoad]);
@@ -172,13 +166,10 @@ fn test_mstream() {
         FastProcessor::new(&stack_init)
     };
     // Store values at addresses 40 and 44
+    processor.memory.write_word(ctx, addr.into(), clk, word_at_addr_40).unwrap();
     processor
         .memory
-        .write_word(ctx, addr.into(), clk, word_at_addr_40, &())
-        .unwrap();
-    processor
-        .memory
-        .write_word(ctx, (addr + 4).into(), clk, word_at_addr_44, &())
+        .write_word(ctx, (addr + 4).into(), clk, word_at_addr_44)
         .unwrap();
 
     let program = simple_program_with_ops(vec![Operation::MStream]);

@@ -13,7 +13,7 @@ use miden_core::{
 };
 
 use crate::{
-    AdviceError, ContextId, ErrorContext, ExecutionError,
+    AdviceError, ContextId, ExecutionError,
     chiplets::CircuitEvaluation,
     continuation_stack::ContinuationStack,
     fast::FastProcessor,
@@ -551,12 +551,7 @@ impl MemoryWritesReplay {
 }
 
 impl MemoryInterface for MemoryReadsReplay {
-    fn read_element(
-        &mut self,
-        _ctx: ContextId,
-        addr: Felt,
-        _err_ctx: &impl ErrorContext,
-    ) -> Result<Felt, crate::MemoryError> {
+    fn read_element(&mut self, _ctx: ContextId, addr: Felt) -> Result<Felt, crate::MemoryError> {
         Ok(self.replay_read_element(addr))
     }
 
@@ -565,7 +560,6 @@ impl MemoryInterface for MemoryReadsReplay {
         _ctx: ContextId,
         addr: Felt,
         _clk: RowIndex,
-        _err_ctx: &impl ErrorContext,
     ) -> Result<Word, crate::MemoryError> {
         Ok(self.replay_read_word(addr))
     }
@@ -575,7 +569,6 @@ impl MemoryInterface for MemoryReadsReplay {
         _ctx: ContextId,
         _addr: Felt,
         _element: Felt,
-        _err_ctx: &impl ErrorContext,
     ) -> Result<(), crate::MemoryError> {
         Ok(())
     }
@@ -586,7 +579,6 @@ impl MemoryInterface for MemoryReadsReplay {
         _addr: Felt,
         _clk: RowIndex,
         _word: Word,
-        _err_ctx: &impl ErrorContext,
     ) -> Result<(), crate::MemoryError> {
         Ok(())
     }

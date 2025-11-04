@@ -236,7 +236,7 @@ impl Process {
         node: &CallNode,
         program: &MastForest,
         host: &mut H,
-        err_ctx: &impl ErrorContext,
+        _err_ctx: &impl ErrorContext,
     ) -> Result<(), ExecutionError> {
         // use the hasher to compute the hash of the CALL or SYSCALL block; the row address
         // returned by the hasher is used as the ID of the block; the result of the hash is
@@ -281,13 +281,7 @@ impl Process {
             // Initialize the fmp for the new context in memory.
             self.chiplets
                 .memory
-                .write(
-                    self.system.get_next_ctx_id(),
-                    FMP_ADDR,
-                    self.system.clk(),
-                    FMP_INIT_VALUE,
-                    err_ctx,
-                )
+                .write(self.system.get_next_ctx_id(), FMP_ADDR, self.system.clk(), FMP_INIT_VALUE)
                 .map_err(ExecutionError::MemoryError)?;
         }
 
@@ -337,7 +331,7 @@ impl Process {
         dyn_node: &DynNode,
         program: &MastForest,
         host: &mut H,
-        err_ctx: &impl ErrorContext,
+        _err_ctx: &impl ErrorContext,
     ) -> Result<Word, ExecutionError> {
         debug_assert!(!dyn_node.is_dyncall());
 
@@ -347,7 +341,7 @@ impl Process {
         let callee_hash = self
             .chiplets
             .memory
-            .read_word(self.system.ctx(), mem_addr, self.system.clk(), err_ctx)
+            .read_word(self.system.ctx(), mem_addr, self.system.clk())
             .map_err(ExecutionError::MemoryError)?;
 
         let (addr, hashed_block) = self.chiplets.hasher.hash_control_block(
@@ -375,7 +369,7 @@ impl Process {
     pub(super) fn start_dyncall_node(
         &mut self,
         dyn_node: &DynNode,
-        err_ctx: &impl ErrorContext,
+        _err_ctx: &impl ErrorContext,
     ) -> Result<Word, ExecutionError> {
         debug_assert!(dyn_node.is_dyncall());
 
@@ -385,19 +379,13 @@ impl Process {
         let callee_hash = self
             .chiplets
             .memory
-            .read_word(self.system.ctx(), mem_addr, self.system.clk(), err_ctx)
+            .read_word(self.system.ctx(), mem_addr, self.system.clk())
             .map_err(ExecutionError::MemoryError)?;
 
         // Initialize the fmp for the new context in memory.
         self.chiplets
             .memory
-            .write(
-                self.system.get_next_ctx_id(),
-                FMP_ADDR,
-                self.system.clk(),
-                FMP_INIT_VALUE,
-                err_ctx,
-            )
+            .write(self.system.get_next_ctx_id(), FMP_ADDR, self.system.clk(), FMP_INIT_VALUE)
             .map_err(ExecutionError::MemoryError)?;
 
         // Note: other functions end in "executing a Noop", which

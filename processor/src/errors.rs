@@ -122,6 +122,8 @@ pub enum OperationError {
         err_code: Felt,
         err_msg: Option<Arc<str>>,
     },
+    #[error("failed to execute the program for internal reason: {reason}")]
+    FailedToExecuteProgram { reason: &'static str },
     #[error("division by zero at clock cycle {clk}")]
     DivideByZero { clk: RowIndex },
     #[error(
@@ -215,6 +217,10 @@ impl OperationError {
 
     pub fn failed_assertion(clk: RowIndex, err_code: Felt, err_msg: Option<Arc<str>>) -> Self {
         Self::FailedAssertion { clk, err_code, err_msg }
+    }
+
+    pub fn failed_to_execute_program(reason: &'static str) -> Self {
+        Self::FailedToExecuteProgram { reason }
     }
 
     pub fn invalid_stack_depth_on_return(depth: usize) -> Self {

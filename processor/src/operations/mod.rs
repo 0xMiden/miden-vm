@@ -156,17 +156,17 @@ impl Process {
             // ----- input / output ---------------------------------------------------------------
             Operation::Push(value) => self.op_push(value)?,
 
-            Operation::AdvPop => self.op_advpop(err_ctx)?,
-            Operation::AdvPopW => self.op_advpopw(err_ctx)?,
+            Operation::AdvPop => wrap_operation(self.op_advpop(), err_ctx)?,
+            Operation::AdvPopW => wrap_operation(self.op_advpopw(), err_ctx)?,
 
-            Operation::MLoadW => self.op_mloadw(err_ctx)?,
-            Operation::MStoreW => self.op_mstorew(err_ctx)?,
+            Operation::MLoadW => wrap_operation(self.op_mloadw(), err_ctx)?,
+            Operation::MStoreW => wrap_operation(self.op_mstorew(), err_ctx)?,
 
-            Operation::MLoad => self.op_mload(err_ctx)?,
-            Operation::MStore => self.op_mstore(err_ctx)?,
+            Operation::MLoad => wrap_operation(self.op_mload(), err_ctx)?,
+            Operation::MStore => wrap_operation(self.op_mstore(), err_ctx)?,
 
-            Operation::MStream => self.op_mstream(err_ctx)?,
-            Operation::Pipe => self.op_pipe(err_ctx)?,
+            Operation::MStream => wrap_operation(self.op_mstream(), err_ctx)?,
+            Operation::Pipe => wrap_operation(self.op_pipe(), err_ctx)?,
 
             // ----- cryptographic operations -----------------------------------------------------
             Operation::HPerm => self.op_hperm()?,

@@ -954,9 +954,7 @@ impl<'a> ProcessState<'a> {
     pub fn get_mem_word(&self, ctx: ContextId, addr: u32) -> Result<Option<Word>, MemoryError> {
         match self {
             ProcessState::Slow(state) => state.chiplets.memory.get_word(ctx, addr),
-            ProcessState::Fast(state) => {
-                state.processor.memory.read_word_impl(ctx, addr, None, &())
-            },
+            ProcessState::Fast(state) => state.processor.memory.read_word_impl(ctx, addr, None),
             ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
         }
     }

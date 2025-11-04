@@ -233,14 +233,14 @@ impl Process {
     /// the evaluation point.
     fn get_evaluation_point(
         &mut self,
-        err_ctx: &impl ErrorContext,
+        _err_ctx: &impl ErrorContext,
     ) -> Result<(QuadFelt, Felt, Felt), ExecutionError> {
         let ctx = self.system.ctx();
         let addr = self.stack.get(ALPHA_ADDR_INDEX);
         let word = self
             .chiplets
             .memory
-            .read_word(ctx, addr, self.system.clk(), err_ctx)
+            .read_word(ctx, addr, self.system.clk())
             .map_err(ExecutionError::MemoryError)?;
         let alpha_0 = word[0];
         let alpha_1 = word[1];
@@ -303,7 +303,6 @@ mod tests {
                 inputs[2].as_int().try_into().expect("Shouldn't fail by construction"),
                 process.system.clk(),
                 alpha_mem_word.into(),
-                &(),
             )
             .unwrap();
         process.execute_op(Operation::Noop, program, &mut host).unwrap();
@@ -394,7 +393,6 @@ mod tests {
                 inputs[2].as_int().try_into().expect("Shouldn't fail by construction"),
                 process.system.clk(),
                 alpha_mem_word.into(),
-                &(),
             )
             .unwrap();
         process.execute_op(Operation::Noop, program, &mut host).unwrap();

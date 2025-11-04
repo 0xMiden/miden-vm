@@ -27,32 +27,31 @@ fn mem_init() {
 
 #[test]
 fn mem_read() {
-    let error_context = ();
     let mut mem = Memory::default();
 
     // read a value from address 0; clk = 1
     let addr0 = ZERO;
-    let value = mem.read(ContextId::root(), addr0, 1.into(), &error_context).unwrap();
+    let value = mem.read(ContextId::root(), addr0, 1.into()).unwrap();
     assert_eq!(ZERO, value);
     assert_eq!(1, mem.num_accessed_words());
     assert_eq!(1, mem.trace_len());
 
     // read a value from address 3; clk = 2
     let addr3 = Felt::from(3_u32);
-    let value = mem.read(ContextId::root(), addr3, 2.into(), &error_context).unwrap();
+    let value = mem.read(ContextId::root(), addr3, 2.into()).unwrap();
     assert_eq!(ZERO, value);
     assert_eq!(1, mem.num_accessed_words());
     assert_eq!(2, mem.trace_len());
 
     // read a value from address 0 again; clk = 3
-    let value = mem.read(ContextId::root(), addr0, 3.into(), &error_context).unwrap();
+    let value = mem.read(ContextId::root(), addr0, 3.into()).unwrap();
     assert_eq!(ZERO, value);
     assert_eq!(1, mem.num_accessed_words());
     assert_eq!(3, mem.trace_len());
 
     // read a value from address 2; clk = 4
     let addr2 = Felt::from(2_u32);
-    let value = mem.read(ContextId::root(), addr2, 4.into(), &error_context).unwrap();
+    let value = mem.read(ContextId::root(), addr2, 4.into()).unwrap();
     assert_eq!(ZERO, value);
     assert_eq!(1, mem.num_accessed_words());
     assert_eq!(4, mem.trace_len());
@@ -117,20 +116,19 @@ fn mem_read_word_unaligned() {
     let addr = ONE;
     let clk = 1.into();
     let ctx = ContextId::root();
-    let ret = mem.read_word(ctx, addr, clk, &());
+    let ret = mem.read_word(ctx, addr, clk);
 
     assert_matches!(ret, Err(MemoryError::UnalignedWordAccess { addr: _, ctx: _, clk: _ }));
 }
 
 #[test]
 fn mem_write() {
-    let error_context = ();
     let mut mem = Memory::default();
 
     // write a value into address 0; clk = 1
     let addr0 = 0_u32;
     let word1 = [ONE, ZERO, ZERO, ZERO].into();
-    mem.write_word(ContextId::root(), addr0.into(), 1.into(), word1, &()).unwrap();
+    mem.write_word(ContextId::root(), addr0.into(), 1.into(), word1).unwrap();
     assert_eq!(word1, mem.get_word(ContextId::root(), addr0).unwrap().unwrap());
     assert_eq!(1, mem.num_accessed_words());
     assert_eq!(1, mem.trace_len());
@@ -138,8 +136,7 @@ fn mem_write() {
     // write a value into address 2; clk = 2
     let addr2 = 2_u32;
     let value5 = Felt::new(5);
-    mem.write(ContextId::root(), addr2.into(), 2.into(), value5, &error_context)
-        .unwrap();
+    mem.write(ContextId::root(), addr2.into(), 2.into(), value5).unwrap();
     assert_eq!(value5, mem.get_value(ContextId::root(), addr2).unwrap());
     assert_eq!(1, mem.num_accessed_words());
     assert_eq!(2, mem.trace_len());
@@ -147,8 +144,7 @@ fn mem_write() {
     // write a value into address 1; clk = 3
     let addr1 = 1_u32;
     let value7 = Felt::new(7);
-    mem.write(ContextId::root(), addr1.into(), 3.into(), value7, &error_context)
-        .unwrap();
+    mem.write(ContextId::root(), addr1.into(), 3.into(), value7).unwrap();
     assert_eq!(value7, mem.get_value(ContextId::root(), addr1).unwrap());
     assert_eq!(1, mem.num_accessed_words());
     assert_eq!(3, mem.trace_len());
@@ -156,8 +152,7 @@ fn mem_write() {
     // write a value into address 3; clk = 4
     let addr3 = 3_u32;
     let value9 = Felt::new(9);
-    mem.write(ContextId::root(), addr3.into(), 4.into(), value9, &error_context)
-        .unwrap();
+    mem.write(ContextId::root(), addr3.into(), 4.into(), value9).unwrap();
     assert_eq!(value9, mem.get_value(ContextId::root(), addr3).unwrap());
     assert_eq!(1, mem.num_accessed_words());
     assert_eq!(4, mem.trace_len());
@@ -165,16 +160,14 @@ fn mem_write() {
     // write a word into address 4; clk = 5
     let addr4 = 4_u32;
     let word1234 = Word::from([1_u32, 2, 3, 4]);
-    mem.write_word(ContextId::root(), addr4.into(), 5.into(), word1234, &())
-        .unwrap();
+    mem.write_word(ContextId::root(), addr4.into(), 5.into(), word1234).unwrap();
     assert_eq!(word1234, mem.get_word(ContextId::root(), addr4).unwrap().unwrap());
     assert_eq!(2, mem.num_accessed_words());
     assert_eq!(5, mem.trace_len());
 
     // write a word into address 0; clk = 6
     let word5678 = Word::from([5_u32, 6, 7, 8]);
-    mem.write_word(ContextId::root(), addr0.into(), 6.into(), word5678, &())
-        .unwrap();
+    mem.write_word(ContextId::root(), addr0.into(), 6.into(), word5678).unwrap();
     assert_eq!(word5678, mem.get_word(ContextId::root(), addr0).unwrap().unwrap());
     assert_eq!(2, mem.num_accessed_words());
     assert_eq!(6, mem.trace_len());
@@ -258,7 +251,7 @@ fn mem_write_word_unaligned() {
     let word1 = [ONE, ZERO, ZERO, ZERO].into();
     let clk = 1.into();
     let ctx = ContextId::root();
-    let ret = mem.write_word(ctx, addr, clk, word1, &());
+    let ret = mem.write_word(ctx, addr, clk, word1);
 
     assert_matches!(ret, Err(MemoryError::UnalignedWordAccess { addr: _, ctx: _, clk: _ }));
 }
@@ -266,46 +259,44 @@ fn mem_write_word_unaligned() {
 /// Tests that values written are properly read back.
 #[test]
 fn mem_write_read() {
-    let error_context = ();
     let mut mem = Memory::default();
     let mut clk: RowIndex = 1.into();
 
     // write [1,2,3,4] starting at address 0; clk = 1
     let word1234 = Word::from([1_u32, 2, 3, 4]);
-    mem.write_word(ContextId::root(), ZERO, clk, word1234, &error_context).unwrap();
+    mem.write_word(ContextId::root(), ZERO, clk, word1234).unwrap();
     clk += 1_u32;
 
     // read individual values from addresses 3,2,1,0; clk = 2,3,4,5
-    let value_read = mem.read(ContextId::root(), 3_u32.into(), clk, &error_context).unwrap();
+    let value_read = mem.read(ContextId::root(), 3_u32.into(), clk).unwrap();
     assert_eq!(value_read, 4_u32.into());
     clk += 1_u32;
-    let value_read = mem.read(ContextId::root(), 2_u32.into(), clk, &error_context).unwrap();
+    let value_read = mem.read(ContextId::root(), 2_u32.into(), clk).unwrap();
     assert_eq!(value_read, 3_u32.into());
     clk += 1_u32;
-    let value_read = mem.read(ContextId::root(), 1_u32.into(), clk, &error_context).unwrap();
+    let value_read = mem.read(ContextId::root(), 1_u32.into(), clk).unwrap();
     assert_eq!(value_read, 2_u32.into());
     clk += 1_u32;
-    let value_read = mem.read(ContextId::root(), ZERO, clk, &error_context).unwrap();
+    let value_read = mem.read(ContextId::root(), ZERO, clk).unwrap();
     assert_eq!(value_read, 1_u32.into());
     clk += 1_u32;
 
     // read word from address 0; clk = 6
-    let word_read = mem.read_word(ContextId::root(), ZERO, clk, &error_context).unwrap();
+    let word_read = mem.read_word(ContextId::root(), ZERO, clk).unwrap();
     assert_eq!(word_read, word1234);
     clk += 1_u32;
 
     // write 42 into address 2; clk = 7
-    mem.write(ContextId::root(), 2_u32.into(), clk, 42_u32.into(), &error_context)
-        .unwrap();
+    mem.write(ContextId::root(), 2_u32.into(), clk, 42_u32.into()).unwrap();
     clk += 1_u32;
 
     // read element from address 2; clk = 8
-    let value_read = mem.read(ContextId::root(), 2_u32.into(), clk, &error_context).unwrap();
+    let value_read = mem.read(ContextId::root(), 2_u32.into(), clk).unwrap();
     assert_eq!(value_read, 42_u32.into());
     clk += 1_u32;
 
     // read word from address 0; clk = 9
-    let word_read = mem.read_word(ContextId::root(), ZERO, clk, &error_context).unwrap();
+    let word_read = mem.read_word(ContextId::root(), ZERO, clk).unwrap();
     assert_eq!(word_read, Word::from([1_u32, 2, 42, 4]));
     clk += 1_u32;
 
@@ -424,11 +415,11 @@ fn mem_get_state_at() {
     // Write word starting at (ctx = 0, addr = 40) at clk = 1.
     // This means that mem[40..43] is set at the beginning of clk = 2
     let word1234 = Word::from([1_u32, 2, 3, 4]);
-    mem.write_word(ContextId::root(), addr_start.into(), 1.into(), word1234, &())
+    mem.write_word(ContextId::root(), addr_start.into(), 1.into(), word1234)
         .unwrap();
 
     let word4567 = Word::from([4_u32, 5, 6, 7]);
-    mem.write_word(ContextId::root(), addr_start.into(), 2.into(), word4567, &())
+    mem.write_word(ContextId::root(), addr_start.into(), 2.into(), word4567)
         .unwrap();
 
     // Check memory state at clk = 2

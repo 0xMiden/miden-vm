@@ -152,7 +152,7 @@ pub(super) fn op_mrupdate<P: Processor>(
 #[inline(always)]
 pub(super) fn op_horner_eval_base<P: Processor>(
     processor: &mut P,
-    err_ctx: &impl ErrorContext,
+    _err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
 ) -> Result<[Felt; NUM_USER_OP_HELPERS], ExecutionError> {
     // Constants from the original implementation
@@ -171,7 +171,7 @@ pub(super) fn op_horner_eval_base<P: Processor>(
         let addr = processor.stack().get(ALPHA_ADDR_INDEX);
         let word = processor
             .memory()
-            .read_word(ctx, addr, clk, err_ctx)
+            .read_word(ctx, addr, clk)
             .map_err(ExecutionError::MemoryError)?;
         tracer.record_memory_read_word(
             word,
@@ -278,7 +278,7 @@ pub(super) fn op_log_precompile<P: Processor>(
 #[inline(always)]
 pub(super) fn op_horner_eval_ext<P: Processor>(
     processor: &mut P,
-    err_ctx: &impl ErrorContext,
+    _err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
 ) -> Result<[Felt; NUM_USER_OP_HELPERS], ExecutionError> {
     // Constants from the original implementation
@@ -303,7 +303,7 @@ pub(super) fn op_horner_eval_ext<P: Processor>(
         let addr = processor.stack().get(ALPHA_ADDR_INDEX);
         let word = processor
             .memory()
-            .read_word(ctx, addr, clk, err_ctx)
+            .read_word(ctx, addr, clk)
             .map_err(ExecutionError::MemoryError)?;
         tracer.record_memory_read_word(
             word,
