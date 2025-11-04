@@ -225,6 +225,12 @@ $$
 \end{aligned}
 $$
 
+Using the above values, we can describe the constraint for the memory bus column as follows:
+
+$$
+b_{mem}' = b_{mem} \cdot u_{mem,0} \cdot u_{mem,1} \text{ | degree} = 3
+$$
+
 The effect on the rest of the stack is:
 * **No change.**
 ## HORNEREXT
@@ -281,6 +287,12 @@ The `HORNEREXT` makes one memory access request:
 
 $$
 u_{mem} = \alpha_0 + \alpha_1 \cdot op_{mem\_readword} + \alpha_2 \cdot ctx + \alpha_3 \cdot s_{13} + \alpha_4 \cdot clk + \alpha_{5} \cdot h_{0} + \alpha_{6} \cdot h_{1} + \alpha_{7} \cdot h_{3} + \alpha_{8} \cdot h_{4}
+$$
+
+Using the above value, we can describe the constraint for the memory bus column as follows:
+
+$$
+b_{mem}' = b_{mem} \cdot u_{mem} \text{ | degree} = 2
 $$
 
 ## EVALCIRCUIT

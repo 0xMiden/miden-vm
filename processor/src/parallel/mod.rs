@@ -1934,7 +1934,23 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
     }
 
     #[inline(always)]
-    fn op_horner_eval_registers(
+    fn op_horner_eval_base_registers(
+        alpha: QuadFelt,
+        tmp0: QuadFelt,
+        tmp1: QuadFelt,
+    ) -> [Felt; NUM_USER_OP_HELPERS] {
+        [
+            alpha.base_element(0),
+            alpha.base_element(1),
+            tmp1.to_base_elements()[0],
+            tmp1.to_base_elements()[1],
+            tmp0.to_base_elements()[0],
+            tmp0.to_base_elements()[1],
+        ]
+    }
+
+    #[inline(always)]
+    fn op_horner_eval_ext_registers(
         alpha: QuadFelt,
         k0: Felt,
         k1: Felt,

@@ -211,76 +211,7 @@ pub(super) fn op_horner_eval_base<P: Processor>(
     processor.stack().set(ACC_LOW_INDEX, acc_new_base_elements[0]);
 
     // Return the user operation helpers
-    Ok([
-        alpha.to_base_elements()[0],
-        alpha.to_base_elements()[1],
-        tmp1.to_base_elements()[0],
-        tmp1.to_base_elements()[1],
-        tmp0.to_base_elements()[0],
-        tmp0.to_base_elements()[1],
-    ])
-}
-
-// LOG PRECOMPILE OPERATION
-// ================================================================================================
-
-/// Logs a precompile event by absorbing `TAG` and `COMM` into the precompile sponge
-/// capacity.
-///
-/// Stack transition:
-/// `[COMM, TAG, PAD, ...] -> [R1, R0, CAP_NEXT, ...]`
-///
-/// Where:
-/// - The hasher computes: `[CAP_NEXT, R0, R1] = Rpo([CAP_PREV, TAG, COMM])`
-/// - `CAP_PREV` is the previous sponge capacity provided non-deterministically via helper
-///   registers.
-#[inline(always)]
-pub(super) fn op_log_precompile<P: Processor>(
-    processor: &mut P,
-    tracer: &mut impl Tracer,
-) -> [Felt; NUM_USER_OP_HELPERS] {
-    // Read TAG and COMM from stack
-    let comm = processor.stack().get_word(0);
-    let tag = processor.stack().get_word(4);
-
-    // Get the current precompile sponge capacity
-    let cap_prev = processor.precompile_transcript_state();
-
-    // Build the full 12-element hasher state for RPO permutation
-    // State layout: [CAP_PREV, TAG, COMM]
-    let mut hasher_state: [Felt; STATE_WIDTH] = [ZERO; 12];
-    hasher_state[STATE_CAP_RANGE].copy_from_slice(cap_prev.as_slice());
-    hasher_state[STATE_RATE_0_RANGE].copy_from_slice(tag.as_slice());
-    hasher_state[STATE_RATE_1_RANGE].copy_from_slice(comm.as_slice());
-
-    // Perform the RPO permutation
-    let (addr, output_state) = processor.hasher().permute(hasher_state);
-
-    // Extract CAP_NEXT (first 4 elements), R0 (next 4 elements), R1 (last 4 elements)
-    let cap_next: Word = output_state[STATE_CAP_RANGE.clone()]
-        .try_into()
-        .expect("cap_next slice has length 4");
-    let r0: Word = output_state[STATE_RATE_0_RANGE.clone()]
-        .try_into()
-        .expect("r0 slice has length 4");
-    let r1: Word = output_state[STATE_RATE_1_RANGE.clone()]
-        .try_into()
-        .expect("r1 slice has length 4");
-
-    // Update the processor's precompile sponge capacity
-    processor.set_precompile_transcript_state(cap_next);
-
-    // Write the output to the stack (top 12 elements): [R1, R0, CAP_NEXT, ...]
-    processor.stack().set_word(0, &r1);
-    processor.stack().set_word(4, &r0);
-    processor.stack().set_word(8, &cap_next);
-
-    // Record the hasher permutation for trace generation
-    tracer.record_hasher_permute(hasher_state, output_state);
-
-    // Return helper registers containing the hasher address and CAP_PREV
-    // Convert cap_prev Word to array for the helper registers
-    P::HelperRegisters::op_log_precompile_registers(addr, cap_prev)
+    Ok(P::HelperRegisters::op_horner_eval_base_registers(alpha, tmp0, tmp1))
 }
 
 /// Evaluates a polynomial using Horner's method (extension field).
@@ -344,5 +275,67 @@ pub(super) fn op_horner_eval_ext<P: Processor>(
     processor.stack().set(ACC_LOW_INDEX, acc_new_base_elements[0]);
 
     // Return the user operation helpers
-    Ok(P::HelperRegisters::op_horner_eval_registers(alpha, k0, k1, acc_tmp))
+    Ok(P::HelperRegisters::op_horner_eval_ext_registers(alpha, k0, k1, acc_tmp))
+}
+
+// LOG PRECOMPILE OPERATION
+// ================================================================================================
+
+/// Logs a precompile event by absorbing `TAG` and `COMM` into the precompile sponge
+/// capacity.
+///
+/// Stack transition:
+/// `[COMM, TAG, PAD, ...] -> [R1, R0, CAP_NEXT, ...]`
+///
+/// Where:
+/// - The hasher computes: `[CAP_NEXT, R0, R1] = Rpo([CAP_PREV, TAG, COMM])`
+/// - `CAP_PREV` is the previous sponge capacity provided non-deterministically via helper
+///   registers.
+#[inline(always)]
+pub(super) fn op_log_precompile<P: Processor>(
+    processor: &mut P,
+    tracer: &mut impl Tracer,
+) -> [Felt; NUM_USER_OP_HELPERS] {
+    // Read TAG and COMM from stack
+    let comm = processor.stack().get_word(0);
+    let tag = processor.stack().get_word(4);
+
+    // Get the current precompile sponge capacity
+    let cap_prev = processor.precompile_transcript_state();
+
+    // Build the full 12-element hasher state for RPO permutation
+    // State layout: [CAP_PREV, TAG, COMM]
+    let mut hasher_state: [Felt; STATE_WIDTH] = [ZERO; 12];
+    hasher_state[STATE_CAP_RANGE].copy_from_slice(cap_prev.as_slice());
+    hasher_state[STATE_RATE_0_RANGE].copy_from_slice(tag.as_slice());
+    hasher_state[STATE_RATE_1_RANGE].copy_from_slice(comm.as_slice());
+
+    // Perform the RPO permutation
+    let (addr, output_state) = processor.hasher().permute(hasher_state);
+
+    // Extract CAP_NEXT (first 4 elements), R0 (next 4 elements), R1 (last 4 elements)
+    let cap_next: Word = output_state[STATE_CAP_RANGE.clone()]
+        .try_into()
+        .expect("cap_next slice has length 4");
+    let r0: Word = output_state[STATE_RATE_0_RANGE.clone()]
+        .try_into()
+        .expect("r0 slice has length 4");
+    let r1: Word = output_state[STATE_RATE_1_RANGE.clone()]
+        .try_into()
+        .expect("r1 slice has length 4");
+
+    // Update the processor's precompile sponge capacity
+    processor.set_precompile_transcript_state(cap_next);
+
+    // Write the output to the stack (top 12 elements): [R1, R0, CAP_NEXT, ...]
+    processor.stack().set_word(0, &r1);
+    processor.stack().set_word(4, &r0);
+    processor.stack().set_word(8, &cap_next);
+
+    // Record the hasher permutation for trace generation
+    tracer.record_hasher_permute(hasher_state, output_state);
+
+    // Return helper registers containing the hasher address and CAP_PREV
+    // Convert cap_prev Word to array for the helper registers
+    P::HelperRegisters::op_log_precompile_registers(addr, cap_prev)
 }
