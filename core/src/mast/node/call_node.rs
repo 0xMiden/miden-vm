@@ -398,7 +398,7 @@ impl MastForestContributor for CallNodeBuilder {
         // Determine the node ID that will be assigned
         let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
 
-        // Store node-level decorators in the centralized NodeDecoratorStorage for efficient access
+        // Store node-level decorators in the centralized NodeToDecoratorIds for efficient access
         forest.node_decorator_storage.add_node_decorators(
             future_node_id,
             &before_enter,
@@ -519,7 +519,7 @@ impl CallNodeBuilder {
 
         let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
 
-        // Store node-level decorators in the centralized NodeDecoratorStorage for efficient access
+        // Store node-level decorators in the centralized NodeToDecoratorIds for efficient access
         forest.node_decorator_storage.add_node_decorators(
             future_node_id,
             &self.before_enter,

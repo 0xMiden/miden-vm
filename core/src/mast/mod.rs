@@ -31,8 +31,7 @@ use crate::{
 
 mod debuginfo;
 pub use debuginfo::{
-    DecoratedLinks, DecoratedLinksIter, DecoratorIndexError, DecoratorIndexMapping,
-    NodeDecoratorStorage,
+    DecoratedLinks, DecoratedLinksIter, DecoratorIndexError, NodeToDecoratorIds, OpToDecoratorIds,
 };
 
 mod serialization;
@@ -78,11 +77,11 @@ pub struct MastForest {
 
     /// Provides efficient access to decorators per operation per node during execution and
     /// debugging.
-    decorator_storage: DecoratorIndexMapping,
+    op_decorator_storage: OpToDecoratorIds,
 
     /// Storage for node-level decorators (before_enter and after_exit). This uses CSR format
     /// for efficient storage and access of node-level decorators.
-    node_decorator_storage: NodeDecoratorStorage,
+    node_decorator_storage: NodeToDecoratorIds,
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -96,8 +95,8 @@ impl MastForest {
             decorators: IndexVec::new(),
             advice_map: AdviceMap::default(),
             error_codes: BTreeMap::new(),
-            decorator_storage: DecoratorIndexMapping::new(),
-            node_decorator_storage: NodeDecoratorStorage::new(),
+            op_decorator_storage: OpToDecoratorIds::new(),
+            node_decorator_storage: NodeToDecoratorIds::new(),
         }
     }
 }
@@ -158,7 +157,7 @@ impl MastForest {
             node.remove_decorators();
         }
         self.decorators = IndexVec::new();
-        self.decorator_storage = DecoratorIndexMapping::new();
+        self.op_decorator_storage = OpToDecoratorIds::new();
     }
 
     /// Merges all `forests` into a new [`MastForest`].
@@ -233,8 +232,8 @@ impl MastForest {
         // extract decorator information from the nodes by converting them into builders
         let node_builders =
             nodes_to_add.into_iter().map(|node| node.to_builder(self)).collect::<Vec<_>>();
-        self.decorator_storage = DecoratorIndexMapping::new();
-        self.node_decorator_storage = crate::mast::NodeDecoratorStorage::new();
+        self.op_decorator_storage = OpToDecoratorIds::new();
+        self.node_decorator_storage = NodeToDecoratorIds::new();
 
         // Add each node to the new MAST forest, making sure to rewrite any outdated internal
         // `MastNodeId`s
@@ -385,7 +384,7 @@ impl MastForest {
         node_id: MastNodeId,
         local_op_idx: usize,
     ) -> &[DecoratorId] {
-        self.decorator_storage
+        self.op_decorator_storage
             .decorator_ids_for_operation(node_id, local_op_idx)
             .unwrap_or(&[])
     }
@@ -413,7 +412,7 @@ impl MastForest {
         &'a self,
         node_id: MastNodeId,
     ) -> Result<DecoratedLinks<'a>, DecoratorIndexError> {
-        self.decorator_storage.decorator_links_for_node(node_id)
+        self.op_decorator_storage.decorator_links_for_node(node_id)
     }
 
     pub fn advice_map(&self) -> &AdviceMap {

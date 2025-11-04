@@ -132,7 +132,7 @@ impl Serializable for MastForest {
             .map(|(mast_node_id, mast_node)| {
                 let node_id = MastNodeId::new_unchecked(mast_node_id as u32);
 
-                // Use centralized NodeDecoratorStorage for node-level decorators
+                // Use centralized NodeToDecoratorIds for node-level decorators
                 let before_decorators = self.node_decorator_storage.get_before_decorators(node_id);
                 if !before_decorators.is_empty() {
                     before_enter_decorators.push((mast_node_id, before_decorators.to_vec()));

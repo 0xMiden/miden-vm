@@ -51,7 +51,7 @@ use crate::mast::{DecoratedOpLink, DecoratorId, MastNodeId};
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
-pub struct DecoratorIndexMapping {
+pub struct OpToDecoratorIds {
     /// All the decorator IDs per operation per node, in a CSR relationship with
     /// node_indptr_for_op_idx and op_indptr_for_dec_ids
     decorator_ids: Vec<DecoratorId>,
@@ -78,12 +78,12 @@ pub enum DecoratorIndexError {
     #[error("Invalid operation index {operation} for node {node:?}")]
     OperationIndex { node: MastNodeId, operation: usize },
     /// Invalid internal data structure (corrupted pointers)
-    #[error("Invalid internal data structure in DecoratorIndexMapping")]
+    #[error("Invalid internal data structure in OpToDecoratorIds")]
     InternalStructure,
 }
 
-impl DecoratorIndexMapping {
-    /// Create a new empty DecoratorIndexMapping with the specified capacity.
+impl OpToDecoratorIds {
+    /// Create a new empty OpToDecoratorIds with the specified capacity.
     ///
     /// # Arguments
     /// * `nodes_capacity` - Expected number of nodes
@@ -101,12 +101,12 @@ impl DecoratorIndexMapping {
         }
     }
 
-    /// Create a new empty DecoratorIndexMapping.
+    /// Create a new empty OpToDecoratorIds.
     pub fn new() -> Self {
         Self::with_capacity(0, 0, 0)
     }
 
-    /// Create a DecoratorIndexMapping from raw CSR components.
+    /// Create a OpToDecoratorIds from raw CSR components.
     ///
     /// This is useful for deserialization or testing purposes where you need to reconstruct
     /// the data structure from its raw components.
@@ -209,7 +209,7 @@ impl DecoratorIndexMapping {
 
     /// Add decorator information for a node incrementally.
     ///
-    /// This method allows building up the DecoratorIndexMapping structure by adding
+    /// This method allows building up the OpToDecoratorIds structure by adding
     /// decorator IDs for nodes in sequential order only.
     ///
     /// # Arguments
@@ -420,7 +420,7 @@ impl DecoratorIndexMapping {
     }
 }
 
-impl Default for DecoratorIndexMapping {
+impl Default for OpToDecoratorIds {
     fn default() -> Self {
         Self::new()
     }
@@ -595,7 +595,7 @@ impl<'a> ExactSizeIterator for DecoratedLinksIter<'a> {
 }
 
 #[cfg(feature = "arbitrary")]
-impl Arbitrary for DecoratorIndexMapping {
+impl Arbitrary for OpToDecoratorIds {
     type Parameters = proptest::collection::SizeRange;
     type Strategy = BoxedStrategy<Self>;
 
@@ -612,8 +612,8 @@ impl Arbitrary for DecoratorIndexMapping {
                     size.clone(), // Limit total entries to size
                 )
                 .prop_map(move |coo_data| {
-                    // Build the DecoratorIndexMapping incrementally
-                    let mut mapping = DecoratorIndexMapping::new();
+                    // Build the OpToDecoratorIds incrementally
+                    let mut mapping = OpToDecoratorIds::new();
 
                     // Group by node_id, then by op_id to maintain sorted order
                     use alloc::collections::BTreeMap;
@@ -672,7 +672,7 @@ mod tests {
 
     /// Helper to create standard test storage with 2 nodes, 3 operations, 6 decorator IDs
     /// Structure: Node 0: Op 0 -> [0, 1], Op 1 -> [2]; Node 1: Op 0 -> [3, 4, 5]
-    fn create_standard_test_storage() -> DecoratorIndexMapping {
+    fn create_standard_test_storage() -> OpToDecoratorIds {
         let decorator_ids = vec![
             test_decorator_id(0),
             test_decorator_id(1),
@@ -687,7 +687,7 @@ mod tests {
         let _ = node_indptr_for_op_idx.push(2);
         let _ = node_indptr_for_op_idx.push(3);
 
-        DecoratorIndexMapping::from_components(
+        OpToDecoratorIds::from_components(
             decorator_ids,
             op_indptr_for_dec_ids,
             node_indptr_for_op_idx,
@@ -698,17 +698,17 @@ mod tests {
     #[test]
     fn test_constructors() {
         // Test new()
-        let storage = DecoratorIndexMapping::new();
+        let storage = OpToDecoratorIds::new();
         assert_eq!(storage.num_nodes(), 0);
         assert_eq!(storage.num_decorator_ids(), 0);
 
         // Test with_capacity()
-        let storage = DecoratorIndexMapping::with_capacity(10, 20, 30);
+        let storage = OpToDecoratorIds::with_capacity(10, 20, 30);
         assert_eq!(storage.num_nodes(), 0);
         assert_eq!(storage.num_decorator_ids(), 0);
 
         // Test default()
-        let storage = DecoratorIndexMapping::default();
+        let storage = OpToDecoratorIds::default();
         assert_eq!(storage.num_nodes(), 0);
         assert_eq!(storage.num_decorator_ids(), 0);
     }
@@ -727,11 +727,11 @@ mod tests {
     #[test]
     fn test_from_components_invalid_structure() {
         // Test with empty operation pointers
-        let result = DecoratorIndexMapping::from_components(vec![], vec![], IndexVec::new());
+        let result = OpToDecoratorIds::from_components(vec![], vec![], IndexVec::new());
         assert_eq!(result, Err(DecoratorIndexError::InternalStructure));
 
         // Test with operation pointer exceeding decorator indices
-        let result = DecoratorIndexMapping::from_components(
+        let result = OpToDecoratorIds::from_components(
             vec![test_decorator_id(0)],
             vec![0, 2], // Points to index 2 but we only have 1 decorator
             IndexVec::new(),
@@ -739,7 +739,7 @@ mod tests {
         assert_eq!(result, Err(DecoratorIndexError::InternalStructure));
 
         // Test with non-monotonic operation pointers
-        let result = DecoratorIndexMapping::from_components(
+        let result = OpToDecoratorIds::from_components(
             vec![test_decorator_id(0), test_decorator_id(1)],
             vec![0, 2, 1], // 2 > 1, should be monotonic
             IndexVec::new(),
@@ -803,7 +803,7 @@ mod tests {
             let _ = node_indptr_for_op_idx.push(0);
             let _ = node_indptr_for_op_idx.push(2);
 
-            let storage = DecoratorIndexMapping::from_components(
+            let storage = OpToDecoratorIds::from_components(
                 decorator_indices,
                 op_indptr_for_dec_idx,
                 node_indptr_for_op_idx,
@@ -824,7 +824,7 @@ mod tests {
         // Test 2: Empty nodes created via add_decorator_info_for_node (original
         // test_decorator_ids_for_node_with_empty_nodes)
         {
-            let mut storage = DecoratorIndexMapping::new();
+            let mut storage = OpToDecoratorIds::new();
 
             // Add node 0 with no decorators (empty node)
             storage.add_decorator_info_for_node(test_node_id(0), vec![]).unwrap();
@@ -856,9 +856,9 @@ mod tests {
 
     #[test]
     fn test_debug_impl() {
-        let storage = DecoratorIndexMapping::new();
+        let storage = OpToDecoratorIds::new();
         let debug_str = format!("{:?}", storage);
-        assert!(debug_str.contains("DecoratorIndexMapping"));
+        assert!(debug_str.contains("OpToDecoratorIds"));
     }
 
     #[test]
@@ -877,7 +877,7 @@ mod tests {
         let _ = node_indptr_for_op_idx.push(2);
         let _ = node_indptr_for_op_idx.push(3);
 
-        let storage1 = DecoratorIndexMapping::from_components(
+        let storage1 = OpToDecoratorIds::from_components(
             decorator_indices.clone(),
             op_indptr_for_dec_idx.clone(),
             node_indptr_for_op_idx.clone(),
@@ -893,7 +893,7 @@ mod tests {
         let _ = different_node_indptr.push(0);
         let _ = different_node_indptr.push(1);
 
-        let storage3 = DecoratorIndexMapping::from_components(
+        let storage3 = OpToDecoratorIds::from_components(
             different_decorators,
             vec![0, 1],
             different_node_indptr,
@@ -906,7 +906,7 @@ mod tests {
     #[test]
     fn test_add_decorator_info_functionality() {
         // Test 1: Basic multi-node functionality
-        let mut storage = DecoratorIndexMapping::new();
+        let mut storage = OpToDecoratorIds::new();
 
         // Add decorators for node 0
         let decorators_info = vec![
@@ -930,7 +930,7 @@ mod tests {
         assert_eq!(node1_op0, &[test_decorator_id(20)]);
 
         // Test 2: Sequential constraint validation
-        let mut storage2 = DecoratorIndexMapping::new();
+        let mut storage2 = OpToDecoratorIds::new();
         storage2
             .add_decorator_info_for_node(test_node_id(0), vec![(0, test_decorator_id(10))])
             .unwrap();
@@ -947,7 +947,7 @@ mod tests {
         assert_eq!(result, Err(DecoratorIndexError::NodeIndex(test_node_id(0))));
 
         // Test 3: Empty input handling (creates empty nodes with no operations)
-        let mut storage3 = DecoratorIndexMapping::new();
+        let mut storage3 = OpToDecoratorIds::new();
         let result = storage3.add_decorator_info_for_node(test_node_id(0), vec![]);
         assert_eq!(result, Ok(()));
         assert_eq!(storage3.num_nodes(), 1); // Should create empty node
@@ -963,7 +963,7 @@ mod tests {
         assert_eq!(storage3.num_nodes(), 2);
 
         // Test 4: Operations with gaps
-        let mut storage4 = DecoratorIndexMapping::new();
+        let mut storage4 = OpToDecoratorIds::new();
         let gap_decorators = vec![
             (0, test_decorator_id(10)),
             (0, test_decorator_id(11)), // operation 0 has 2 decorators
@@ -983,7 +983,7 @@ mod tests {
         assert_eq!(op1_decorators, &[]);
 
         // Test 5: Your specific use case - mixed empty and non-empty nodes
-        let mut storage5 = DecoratorIndexMapping::new();
+        let mut storage5 = OpToDecoratorIds::new();
 
         // node 0 with decorators
         storage5
@@ -1037,7 +1037,7 @@ mod tests {
         // This consolidates test_decorator_ids_for_node_mixed_scenario and
         // test_decorated_links_overflow_bug
 
-        let mut storage = DecoratorIndexMapping::new();
+        let mut storage = OpToDecoratorIds::new();
 
         // Set up mixed scenario: some nodes have decorators, some don't
         // Node 0: Has decorators
@@ -1133,10 +1133,10 @@ mod tests {
     #[cfg(feature = "arbitrary")]
     proptest! {
         /// Property test that verifies decorator_links_for_node always produces a valid iterator
-        /// that can be fully consumed without panicking for any DecoratorIndexMapping.
+        /// that can be fully consumed without panicking for any OpToDecoratorIds.
         #[test]
         fn decorator_links_for_node_always_iterates_complete(
-            mapping in any::<DecoratorIndexMapping>()
+            mapping in any::<OpToDecoratorIds>()
         ) {
             // Skip empty mappings since they have no nodes to test
             if mapping.num_nodes() == 0 {

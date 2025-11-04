@@ -12,7 +12,7 @@ use crate::{
 /// after_exit).
 ///
 /// This structure provides efficient storage for before_enter and after_exit decorators across all
-/// nodes in a MastForest, using a similar CSR pattern to DecoratorIndexMapping but for node-level
+/// nodes in a MastForest, using a similar CSR pattern to OpToDecoratorIds but for node-level
 /// decorators.
 ///
 /// The data layout follows CSR format:
@@ -31,7 +31,7 @@ use crate::{
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct NodeDecoratorStorage {
+pub struct NodeToDecoratorIds {
     /// All `before_enter` decorators, concatenated across all nodes.
     pub before_enter_decorators: Vec<DecoratorId>,
     /// All `after_exit` decorators, concatenated across all nodes.
@@ -48,8 +48,8 @@ pub struct NodeDecoratorStorage {
     pub node_indptr_for_after: IndexVec<MastNodeId, usize>,
 }
 
-impl NodeDecoratorStorage {
-    /// Creates a new empty `NodeDecoratorStorage`.
+impl NodeToDecoratorIds {
+    /// Creates a new empty `NodeToDecoratorIds`.
     pub fn new() -> Self {
         Self {
             before_enter_decorators: Vec::new(),
@@ -59,7 +59,7 @@ impl NodeDecoratorStorage {
         }
     }
 
-    /// Creates a new empty `NodeDecoratorStorage` with specified capacity.
+    /// Creates a new empty `NodeToDecoratorIds` with specified capacity.
     pub fn with_capacity(
         nodes_capacity: usize,
         before_decorators_capacity: usize,
@@ -205,7 +205,7 @@ impl NodeDecoratorStorage {
     }
 }
 
-impl Default for NodeDecoratorStorage {
+impl Default for NodeToDecoratorIds {
     fn default() -> Self {
         Self::new()
     }

@@ -289,7 +289,7 @@ impl BasicBlockNode {
                     "linked node decorators should be available; forest may be inconsistent",
                 );
 
-                // Get node-level decorators from NodeDecoratorStorage
+                // Get node-level decorators from NodeToDecoratorIds
                 let before_enter = forest.node_decorator_storage.get_before_decorators(*id);
                 let after_exit = forest.node_decorator_storage.get_after_decorators(*id);
 
@@ -441,7 +441,7 @@ impl MastNodeErrorContext for BasicBlockNode {
                     "linked node decorators should be available; forest may be inconsistent",
                 );
 
-                // Get node-level decorators from NodeDecoratorStorage
+                // Get node-level decorators from NodeToDecoratorIds
                 let before_enter = forest.node_decorator_storage.get_before_decorators(*id);
                 let after_exit = forest.node_decorator_storage.get_after_decorators(*id);
 
@@ -485,7 +485,7 @@ impl MastNodeExt for BasicBlockNode {
         match &self.decorators {
             DecoratorStore::Owned { before_enter, .. } => before_enter,
             DecoratorStore::Linked { id } => {
-                // For linked nodes, get the decorators from the forest's NodeDecoratorStorage
+                // For linked nodes, get the decorators from the forest's NodeToDecoratorIds
                 forest.node_decorator_storage.get_before_decorators(*id)
             },
         }
@@ -495,7 +495,7 @@ impl MastNodeExt for BasicBlockNode {
         match &self.decorators {
             DecoratorStore::Owned { after_exit, .. } => after_exit,
             DecoratorStore::Linked { id } => {
-                // For linked nodes, get the decorators from the forest's NodeDecoratorStorage
+                // For linked nodes, get the decorators from the forest's NodeToDecoratorIds
                 forest.node_decorator_storage.get_after_decorators(*id)
             },
         }
@@ -546,7 +546,7 @@ impl MastNodeExt for BasicBlockNode {
         let (before_enter, after_exit) = match self.decorators {
             DecoratorStore::Owned { before_enter, after_exit, .. } => (before_enter, after_exit),
             DecoratorStore::Linked { id } => {
-                // For linked nodes, get the decorators from the forest's NodeDecoratorStorage
+                // For linked nodes, get the decorators from the forest's NodeToDecoratorIds
                 let before_enter = forest.node_decorator_storage.get_before_decorators(id).to_vec();
                 let after_exit = forest.node_decorator_storage.get_after_decorators(id).to_vec();
                 (before_enter, after_exit)
@@ -1330,11 +1330,11 @@ impl MastForestContributor for BasicBlockNodeBuilder {
 
         // Add decorator info to the forest storage
         forest
-            .decorator_storage
+            .op_decorator_storage
             .add_decorator_info_for_node(future_node_id, decorators_info)
             .map_err(MastForestError::DecoratorError)?;
 
-        // Add node-level decorators to the centralized NodeDecoratorStorage for efficient access
+        // Add node-level decorators to the centralized NodeToDecoratorIds for efficient access
         forest.node_decorator_storage.add_node_decorators(
             future_node_id,
             &before_enter,

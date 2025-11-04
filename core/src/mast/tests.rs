@@ -81,7 +81,7 @@ fn test_decorator_storage_consistency_with_block_iterator() {
 
     // Test 1: Compare decorators from forest storage vs block iterator
     let forest_decorators: Vec<_> = forest
-        .decorator_storage
+        .op_decorator_storage
         .decorator_ids_for_node(block_id)
         .unwrap()
         .flat_map(|(op_idx, decorators)| decorators.iter().map(move |dec_id| (op_idx, *dec_id)))
@@ -96,8 +96,10 @@ fn test_decorator_storage_consistency_with_block_iterator() {
 
     // Test 2: Verify specific operation decorators match
     for (op_idx, expected_decorator_id) in &decorators {
-        let forest_decos =
-            forest.decorator_storage.decorator_ids_for_operation(block_id, *op_idx).unwrap();
+        let forest_decos = forest
+            .op_decorator_storage
+            .decorator_ids_for_operation(block_id, *op_idx)
+            .unwrap();
         let block_decos: Vec<_> = block
             .indexed_decorator_iter(&forest)
             .filter(|(idx, _)| *idx == *op_idx)
@@ -116,8 +118,10 @@ fn test_decorator_storage_consistency_with_block_iterator() {
     // Test 3: Verify operations without decorators return empty
     let operations_without_decorators = [1]; // Add operation
     for op_idx in operations_without_decorators {
-        let forest_decos =
-            forest.decorator_storage.decorator_ids_for_operation(block_id, op_idx).unwrap();
+        let forest_decos = forest
+            .op_decorator_storage
+            .decorator_ids_for_operation(block_id, op_idx)
+            .unwrap();
         let block_decos: Vec<_> = block
             .indexed_decorator_iter(&forest)
             .filter(|(idx, _)| *idx == op_idx)
@@ -150,7 +154,7 @@ fn test_decorator_storage_consistency_with_empty_block() {
 
     // Both should have no indexed decorators
     let forest_decorators: Vec<_> =
-        forest.decorator_storage.decorator_ids_for_node(block_id).unwrap().collect();
+        forest.op_decorator_storage.decorator_ids_for_node(block_id).unwrap().collect();
 
     let block_decorators: Vec<_> = block.indexed_decorator_iter(&forest).collect();
 
@@ -185,7 +189,7 @@ fn test_decorator_storage_consistency_with_multiple_blocks() {
 
     // Verify first block consistency
     let forest_decorators1: Vec<_> = forest
-        .decorator_storage
+        .op_decorator_storage
         .decorator_ids_for_node(block_id1)
         .unwrap()
         .flat_map(|(op_idx, decorators)| decorators.iter().map(move |dec_id| (op_idx, *dec_id)))
@@ -202,7 +206,7 @@ fn test_decorator_storage_consistency_with_multiple_blocks() {
 
     // Verify second block consistency
     let forest_decorators2: Vec<_> = forest
-        .decorator_storage
+        .op_decorator_storage
         .decorator_ids_for_node(block_id2)
         .unwrap()
         .flat_map(|(op_idx, decorators)| decorators.iter().map(move |dec_id| (op_idx, *dec_id)))
@@ -218,7 +222,7 @@ fn test_decorator_storage_consistency_with_multiple_blocks() {
     assert_eq!(forest_decorators2, block_decorators2);
 
     // Verify the decorator storage has the correct number of nodes
-    assert_eq!(forest.decorator_storage.num_nodes(), 2);
+    assert_eq!(forest.op_decorator_storage.num_nodes(), 2);
 }
 
 #[test]
@@ -239,17 +243,17 @@ fn test_decorator_storage_after_strip_decorators() {
         .unwrap();
 
     // Verify decorators exist initially
-    assert!(!forest.decorator_storage.is_empty());
-    assert_eq!(forest.decorator_storage.num_nodes(), 1);
-    assert_eq!(forest.decorator_storage.num_decorator_ids(), 2);
+    assert!(!forest.op_decorator_storage.is_empty());
+    assert_eq!(forest.op_decorator_storage.num_nodes(), 1);
+    assert_eq!(forest.op_decorator_storage.num_decorator_ids(), 2);
 
     // Strip decorators
     forest.strip_decorators();
 
     // Verify decorators are cleared from storage
-    assert!(forest.decorator_storage.is_empty());
-    assert_eq!(forest.decorator_storage.num_nodes(), 0);
-    assert_eq!(forest.decorator_storage.num_decorator_ids(), 0);
+    assert!(forest.op_decorator_storage.is_empty());
+    assert_eq!(forest.op_decorator_storage.num_nodes(), 0);
+    assert_eq!(forest.op_decorator_storage.num_decorator_ids(), 0);
 
     // Verify block also has no decorators after stripping
     let block = if let crate::mast::MastNode::Block(block) = &forest[block_id] {
@@ -311,9 +315,9 @@ fn test_mast_forest_roundtrip_with_basic_blocks_and_decorators() {
 
     // Verify original forest structure
     assert_eq!(original_forest.num_nodes(), 3);
-    assert_eq!(original_forest.decorator_storage.num_nodes(), 3);
-    // Note: DecoratorIndexMapping may deduplicate identical decorators across blocks
-    let original_decorator_count = original_forest.decorator_storage.num_decorator_ids();
+    assert_eq!(original_forest.op_decorator_storage.num_nodes(), 3);
+    // Note: OpToDecoratorIds may deduplicate identical decorators across blocks
+    let original_decorator_count = original_forest.op_decorator_storage.num_decorator_ids();
 
     // Serialize the forest to bytes
     let original_bytes = original_forest.to_bytes();
@@ -323,16 +327,16 @@ fn test_mast_forest_roundtrip_with_basic_blocks_and_decorators() {
 
     // Verify basic forest structure
     assert_eq!(deserialized_forest.num_nodes(), 3);
-    assert_eq!(deserialized_forest.decorator_storage.num_nodes(), 3);
+    assert_eq!(deserialized_forest.op_decorator_storage.num_nodes(), 3);
     assert_eq!(
-        deserialized_forest.decorator_storage.num_decorator_ids(),
+        deserialized_forest.op_decorator_storage.num_decorator_ids(),
         original_decorator_count
     );
 
     // Verify that the reconstructed forest includes the decorators
-    // This ensures the DecoratorIndexMapping structure in the deserialized forest is not empty
+    // This ensures the OpToDecoratorIds structure in the deserialized forest is not empty
     assert!(
-        !deserialized_forest.decorator_storage.is_empty(),
+        !deserialized_forest.op_decorator_storage.is_empty(),
         "Deserialized forest should have decorator storage"
     );
 
@@ -651,8 +655,8 @@ fn test_forest_borrowing_decorator_access() {
     }
 
     // Verify decorator storage is properly populated (no Arc wrapping anymore)
-    assert!(!forest.decorator_storage.is_empty(), "Decorator storage should be populated");
-    assert_eq!(forest.decorator_storage.num_nodes(), 1, "Should have 1 node with decorators");
+    assert!(!forest.op_decorator_storage.is_empty(), "Decorator storage should be populated");
+    assert_eq!(forest.op_decorator_storage.num_nodes(), 1, "Should have 1 node with decorators");
 }
 
 // HELPER FUNCTIONS

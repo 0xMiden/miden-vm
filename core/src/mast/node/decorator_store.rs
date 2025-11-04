@@ -85,7 +85,7 @@ impl DecoratorStore {
                 after_exit.clear();
             },
             DecoratorStore::Linked { .. } => {
-                // No-op: decorators are managed by NodeDecoratorStorage
+                // No-op: decorators are managed by NodeToDecoratorIds
             },
         }
     }
