@@ -1,7 +1,7 @@
 use miden_core::{mast::MastForest, stack::MIN_STACK_DEPTH};
 
 use super::{ExecutionError, Felt, FieldElement, Operation, Process, SyncHost};
-use crate::errors::ErrorContext;
+use crate::errors::{ErrorContext, OperationError};
 
 mod circuit_eval;
 mod crypto_ops;
@@ -78,20 +78,20 @@ impl Process {
             Operation::Halt => unreachable!("control flow operation"),
 
             // ----- field operations -------------------------------------------------------------
-            Operation::Add => self.op_add()?,
-            Operation::Neg => self.op_neg()?,
-            Operation::Mul => self.op_mul()?,
-            Operation::Inv => self.op_inv(err_ctx)?,
-            Operation::Incr => self.op_incr()?,
+            Operation::Add => wrap_operation(self.op_add(), err_ctx)?,
+            Operation::Neg => wrap_operation(self.op_neg(), err_ctx)?,
+            Operation::Mul => wrap_operation(self.op_mul(), err_ctx)?,
+            Operation::Inv => wrap_operation(self.op_inv(), err_ctx)?,
+            Operation::Incr => wrap_operation(self.op_incr(), err_ctx)?,
 
-            Operation::And => self.op_and(err_ctx)?,
-            Operation::Or => self.op_or(err_ctx)?,
-            Operation::Not => self.op_not(err_ctx)?,
+            Operation::And => wrap_operation(self.op_and(), err_ctx)?,
+            Operation::Or => wrap_operation(self.op_or(), err_ctx)?,
+            Operation::Not => wrap_operation(self.op_not(), err_ctx)?,
 
-            Operation::Eq => self.op_eq()?,
-            Operation::Eqz => self.op_eqz()?,
+            Operation::Eq => wrap_operation(self.op_eq(), err_ctx)?,
+            Operation::Eqz => wrap_operation(self.op_eqz(), err_ctx)?,
 
-            Operation::Expacc => self.op_expacc()?,
+            Operation::Expacc => wrap_operation(self.op_expacc(), err_ctx)?,
 
             // ----- ext2 operations --------------------------------------------------------------
             Operation::Ext2Mul => self.op_ext2mul()?,
@@ -194,6 +194,13 @@ impl Process {
         self.system.ensure_trace_capacity();
         self.stack.ensure_trace_capacity();
     }
+}
+
+fn wrap_operation<T>(
+    result: Result<T, OperationError>,
+    err_ctx: &impl ErrorContext,
+) -> Result<T, ExecutionError> {
+    result.map_err(|err| ExecutionError::from_operation(err_ctx, err))
 }
 
 #[cfg(test)]

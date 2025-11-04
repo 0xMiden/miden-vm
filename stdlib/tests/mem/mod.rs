@@ -1,5 +1,7 @@
 use miden_core::{Word, assert_matches};
-use miden_processor::{AdviceInputs, ContextId, DefaultHost, ExecutionError, OperationError, Program};
+use miden_processor::{
+    AdviceInputs, ContextId, DefaultHost, ExecutionError, OperationError, Program,
+};
 use miden_utils_testing::{
     ExecutionOptions, ONE, Process, StackInputs, ZERO, build_expected_hash, build_expected_perm,
     felt_slice_to_ints,

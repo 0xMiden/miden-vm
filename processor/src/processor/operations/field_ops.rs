@@ -2,7 +2,7 @@ use miden_air::trace::decoder::NUM_USER_OP_HELPERS;
 use miden_core::{Felt, FieldElement, ONE, ZERO};
 
 use crate::{
-    ErrorContext, ExecutionError, OperationError,
+    OperationError,
     fast::Tracer,
     operations::utils::assert_binary,
     processor::{OperationHelperRegisters, Processor, StackInterface, SystemInterface},
@@ -11,8 +11,11 @@ use crate::{
 /// Pops two elements off the stack, adds them together, and pushes the result back onto the
 /// stack.
 #[inline(always)]
-pub(super) fn op_add<P: Processor>(processor: &mut P, tracer: &mut impl Tracer) {
-    pop2_applyfn_push(processor, |a, b| Ok(a + b), tracer).unwrap()
+pub(super) fn op_add<P: Processor>(
+    processor: &mut P,
+    tracer: &mut impl Tracer,
+) -> Result<(), OperationError> {
+    pop2_applyfn_push(processor, |a, b| Ok(a + b), tracer)
 }
 
 /// Pops an element off the stack, computes its additive inverse, and pushes the result back
@@ -26,8 +29,11 @@ pub(super) fn op_neg<P: Processor>(processor: &mut P) {
 /// Pops two elements off the stack, multiplies them, and pushes the result back onto the
 /// stack.
 #[inline(always)]
-pub(super) fn op_mul<P: Processor>(processor: &mut P, tracer: &mut impl Tracer) {
-    pop2_applyfn_push(processor, |a, b| Ok(a * b), tracer).unwrap();
+pub(super) fn op_mul<P: Processor>(
+    processor: &mut P,
+    tracer: &mut impl Tracer,
+) -> Result<(), OperationError> {
+    pop2_applyfn_push(processor, |a, b| Ok(a * b), tracer)
 }
 
 /// Pops an element off the stack, computes its multiplicative inverse, and pushes the result
@@ -36,16 +42,10 @@ pub(super) fn op_mul<P: Processor>(processor: &mut P, tracer: &mut impl Tracer) 
 /// # Errors
 /// Returns an error if the value on the top of the stack is ZERO.
 #[inline(always)]
-pub(super) fn op_inv<P: Processor>(
-    processor: &mut P,
-    err_ctx: &impl ErrorContext,
-) -> Result<(), ExecutionError> {
+pub(super) fn op_inv<P: Processor>(processor: &mut P) -> Result<(), OperationError> {
     let top = processor.stack().get_mut(0);
     if (*top) == ZERO {
-        return Err(ExecutionError::from_operation(
-            err_ctx,
-            OperationError::divide_by_zero(processor.system().clk()),
-        ));
+        return Err(OperationError::divide_by_zero(processor.system().clk()));
     }
     *top = top.inv();
     Ok(())
@@ -66,14 +66,13 @@ pub(super) fn op_incr<P: Processor>(processor: &mut P) {
 #[inline(always)]
 pub(super) fn op_and<P: Processor>(
     processor: &mut P,
-    err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
-) -> Result<(), ExecutionError> {
+) -> Result<(), OperationError> {
     pop2_applyfn_push(
         processor,
         |a, b| {
-            assert_binary(b, err_ctx)?;
-            assert_binary(a, err_ctx)?;
+            let b = assert_binary(b)?;
+            let a = assert_binary(a)?;
 
             if a == ONE && b == ONE { Ok(ONE) } else { Ok(ZERO) }
         },
@@ -90,14 +89,13 @@ pub(super) fn op_and<P: Processor>(
 #[inline(always)]
 pub(super) fn op_or<P: Processor>(
     processor: &mut P,
-    err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
-) -> Result<(), ExecutionError> {
+) -> Result<(), OperationError> {
     pop2_applyfn_push(
         processor,
         |a, b| {
-            assert_binary(b, err_ctx)?;
-            assert_binary(a, err_ctx)?;
+            let b = assert_binary(b)?;
+            let a = assert_binary(a)?;
 
             if a == ONE || b == ONE { Ok(ONE) } else { Ok(ZERO) }
         },
@@ -111,20 +109,14 @@ pub(super) fn op_or<P: Processor>(
 /// # Errors
 /// Returns an error if the value on the top of the stack is not a binary value.
 #[inline(always)]
-pub(super) fn op_not<P: Processor>(
-    processor: &mut P,
-    err_ctx: &impl ErrorContext,
-) -> Result<(), ExecutionError> {
+pub(super) fn op_not<P: Processor>(processor: &mut P) -> Result<(), OperationError> {
     let top = processor.stack().get_mut(0);
     if *top == ZERO {
         *top = ONE;
     } else if *top == ONE {
         *top = ZERO;
     } else {
-        return Err(ExecutionError::from_operation(
-            err_ctx,
-            OperationError::not_binary_value_op(*top),
-        ));
+        return Err(OperationError::not_binary_value_op(*top));
     }
     Ok(())
 }
@@ -239,9 +231,9 @@ pub(super) fn op_ext2mul<P: Processor>(processor: &mut P) {
 #[inline(always)]
 fn pop2_applyfn_push<P: Processor>(
     processor: &mut P,
-    f: impl FnOnce(Felt, Felt) -> Result<Felt, ExecutionError>,
+    f: impl FnOnce(Felt, Felt) -> Result<Felt, OperationError>,
     tracer: &mut impl Tracer,
-) -> Result<(), ExecutionError> {
+) -> Result<(), OperationError> {
     let b = processor.stack().get(0);
     let a = processor.stack().get(1);
 

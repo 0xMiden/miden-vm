@@ -1,7 +1,7 @@
 use miden_core::{ONE, Operation, ZERO};
 
-use super::{ExecutionError, Felt, FieldElement, Process, utils::assert_binary};
-use crate::{ErrorContext, errors::OperationError};
+use super::{Felt, FieldElement, Process, utils::assert_binary};
+use crate::errors::OperationError;
 
 // FIELD OPERATIONS
 // ================================================================================================
@@ -11,7 +11,7 @@ impl Process {
     // --------------------------------------------------------------------------------------------
     /// Pops two elements off the stack, adds them together, and pushes the result back onto the
     /// stack.
-    pub(super) fn op_add(&mut self) -> Result<(), ExecutionError> {
+    pub(super) fn op_add(&mut self) -> Result<(), OperationError> {
         let b = self.stack.get(0);
         let a = self.stack.get(1);
         self.stack.set(0, a + b);
@@ -21,7 +21,7 @@ impl Process {
 
     /// Pops an element off the stack, computes its additive inverse, and pushes the result back
     /// onto the stack.
-    pub(super) fn op_neg(&mut self) -> Result<(), ExecutionError> {
+    pub(super) fn op_neg(&mut self) -> Result<(), OperationError> {
         let a = self.stack.get(0);
         self.stack.set(0, -a);
         self.stack.copy_state(1);
@@ -30,7 +30,7 @@ impl Process {
 
     /// Pops two elements off the stack, multiplies them, and pushes the result back onto the
     /// stack.
-    pub(super) fn op_mul(&mut self) -> Result<(), ExecutionError> {
+    pub(super) fn op_mul(&mut self) -> Result<(), OperationError> {
         let b = self.stack.get(0);
         let a = self.stack.get(1);
         self.stack.set(0, a * b);
@@ -43,13 +43,10 @@ impl Process {
     ///
     /// # Errors
     /// Returns an error if the value on the top of the stack is ZERO.
-    pub(super) fn op_inv(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
+    pub(super) fn op_inv(&mut self) -> Result<(), OperationError> {
         let a = self.stack.get(0);
         if a == ZERO {
-            return Err(ExecutionError::from_operation(
-                err_ctx,
-                OperationError::divide_by_zero(self.system.clk()),
-            ));
+            return Err(OperationError::divide_by_zero(self.system.clk()));
         }
 
         self.stack.set(0, a.inv());
@@ -58,7 +55,7 @@ impl Process {
     }
 
     /// Pops an element off the stack, adds ONE to it, and pushes the result back onto the stack.
-    pub(super) fn op_incr(&mut self) -> Result<(), ExecutionError> {
+    pub(super) fn op_incr(&mut self) -> Result<(), OperationError> {
         let a = self.stack.get(0);
         self.stack.set(0, a + ONE);
         self.stack.copy_state(1);
@@ -74,9 +71,9 @@ impl Process {
     /// # Errors
     /// Returns an error if either of the two elements on the top of the stack is not a binary
     /// value.
-    pub(super) fn op_and(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
-        let b = assert_binary(self.stack.get(0), err_ctx)?;
-        let a = assert_binary(self.stack.get(1), err_ctx)?;
+    pub(super) fn op_and(&mut self) -> Result<(), OperationError> {
+        let b = assert_binary(self.stack.get(0))?;
+        let a = assert_binary(self.stack.get(1))?;
         if a == ONE && b == ONE {
             self.stack.set(0, ONE);
         } else {
@@ -92,9 +89,9 @@ impl Process {
     /// # Errors
     /// Returns an error if either of the two elements on the top of the stack is not a binary
     /// value.
-    pub(super) fn op_or(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
-        let b = assert_binary(self.stack.get(0), err_ctx)?;
-        let a = assert_binary(self.stack.get(1), err_ctx)?;
+    pub(super) fn op_or(&mut self) -> Result<(), OperationError> {
+        let b = assert_binary(self.stack.get(0))?;
+        let a = assert_binary(self.stack.get(1))?;
         if a == ONE || b == ONE {
             self.stack.set(0, ONE);
         } else {
@@ -109,8 +106,8 @@ impl Process {
     ///
     /// # Errors
     /// Returns an error if the value on the top of the stack is not a binary value.
-    pub(super) fn op_not(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
-        let a = assert_binary(self.stack.get(0), err_ctx)?;
+    pub(super) fn op_not(&mut self) -> Result<(), OperationError> {
+        let a = assert_binary(self.stack.get(0))?;
         self.stack.set(0, ONE - a);
         self.stack.copy_state(1);
         Ok(())
@@ -121,7 +118,7 @@ impl Process {
 
     /// Pops two elements off the stack and compares them. If the elements are equal, pushes ONE
     /// onto the stack, otherwise pushes ZERO onto the stack.
-    pub(super) fn op_eq(&mut self) -> Result<(), ExecutionError> {
+    pub(super) fn op_eq(&mut self) -> Result<(), OperationError> {
         let b = self.stack.get(0);
         let a = self.stack.get(1);
 
@@ -148,7 +145,7 @@ impl Process {
 
     /// Pops an element off the stack and compares it to ZERO. If the element is ZERO, pushes ONE
     /// onto the stack, otherwise pushes ZERO onto the stack.
-    pub(super) fn op_eqz(&mut self) -> Result<(), ExecutionError> {
+    pub(super) fn op_eqz(&mut self) -> Result<(), OperationError> {
         let a = self.stack.get(0);
 
         // helper variable provided by the prover. If the top element is zero, then, h0 can be set
@@ -195,7 +192,7 @@ impl Process {
     /// `base_acc` in `result_acc` when `base_acc = b` and when `base_acc = b^4`, which occurs on
     /// the first and third iterations (corresponding to the `1` bits in the binary representation
     /// of 5).
-    pub(super) fn op_expacc(&mut self) -> Result<(), ExecutionError> {
+    pub(super) fn op_expacc(&mut self) -> Result<(), OperationError> {
         let old_base_acc = self.stack.get(1);
         let old_result_acc = self.stack.get(2);
         let old_exp = self.stack.get(3);

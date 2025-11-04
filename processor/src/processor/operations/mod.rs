@@ -2,7 +2,7 @@ use miden_air::trace::decoder::NUM_USER_OP_HELPERS;
 use miden_core::{Felt, Operation, mast::MastForest};
 
 use crate::{
-    BaseHost, ErrorContext, ExecutionError,
+    BaseHost, ErrorContext, ExecutionError, OperationError,
     fast::Tracer,
     processor::{Processor, StackInterface},
 };
@@ -65,14 +65,14 @@ pub(super) fn execute_sync_op(
         Operation::Halt => unreachable!("control flow operation"),
 
         // ----- field operations -------------------------------------------------------------
-        Operation::Add => field_ops::op_add(processor, tracer),
+        Operation::Add => wrap_operation(field_ops::op_add(processor, tracer), err_ctx)?,
         Operation::Neg => field_ops::op_neg(processor),
-        Operation::Mul => field_ops::op_mul(processor, tracer),
-        Operation::Inv => field_ops::op_inv(processor, err_ctx)?,
+        Operation::Mul => wrap_operation(field_ops::op_mul(processor, tracer), err_ctx)?,
+        Operation::Inv => wrap_operation(field_ops::op_inv(processor), err_ctx)?,
         Operation::Incr => field_ops::op_incr(processor),
-        Operation::And => field_ops::op_and(processor, err_ctx, tracer)?,
-        Operation::Or => field_ops::op_or(processor, err_ctx, tracer)?,
-        Operation::Not => field_ops::op_not(processor, err_ctx)?,
+        Operation::And => wrap_operation(field_ops::op_and(processor, tracer), err_ctx)?,
+        Operation::Or => wrap_operation(field_ops::op_or(processor, tracer), err_ctx)?,
+        Operation::Not => wrap_operation(field_ops::op_not(processor), err_ctx)?,
         Operation::Eq => {
             let eq_helpers = field_ops::op_eq(processor, tracer);
             user_op_helpers = Some(eq_helpers);
@@ -209,4 +209,11 @@ pub(super) fn execute_sync_op(
     }
 
     Ok(user_op_helpers)
+}
+
+fn wrap_operation<T>(
+    result: Result<T, OperationError>,
+    err_ctx: &impl ErrorContext,
+) -> Result<T, ExecutionError> {
+    result.map_err(|err| ExecutionError::from_operation(err_ctx, err))
 }
