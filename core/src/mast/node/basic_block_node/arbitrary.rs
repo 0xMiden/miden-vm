@@ -182,6 +182,28 @@ impl Arbitrary for BasicBlockNode {
 // ---------- Optional: MastForest strategy (behind feature gate) ----------
 
 /// Parameters for generating MastForest instances
+///
+/// # Execution Compatibility
+///
+/// Generated forests will only be executable if certain node types are excluded:
+/// - **Syscalls**: Require matching kernel procedures. Set `max_syscalls = 0` for executable
+///   forests.
+/// - **Externals**: Use random digests that won't match valid procedures. Set `max_externals = 0`
+///   for executable forests.
+/// - **Dyn nodes**: Leave junk on the stack and cannot execute properly. Set `max_dyns = 0` for
+///   executable forests.
+///
+/// The default parameters create executable forests by setting all three of the above to 0.
+///
+/// # Non-executable Forests
+///
+/// If you want to generate forests for testing assembly or parsing without execution:
+/// - Set `max_syscalls > 0` to include syscall nodes
+/// - Set `max_externals > 0` to include external nodes
+/// - Set `max_dyns > 0` to include dynamic nodes
+///
+/// These forests are useful for testing MAST structure and serialization but will fail during
+/// execution.
 #[derive(Clone, Debug)]
 pub struct MastForestParams {
     /// Number of decorators to generate
@@ -196,9 +218,22 @@ pub struct MastForestParams {
     pub max_loops: usize,
     /// Maximum number of call nodes to generate
     pub max_calls: usize,
+    /// Maximum number of syscall nodes to generate
+    ///
+    /// **Warning**: Syscalls require a properly configured kernel with matching procedure hashes.
+    /// Generated syscalls use random procedure digests and will not execute without providing
+    /// a matching kernel. Set to 0 for executable forests.
+    pub max_syscalls: usize,
     /// Maximum number of external nodes to generate
+    ///
+    /// **Warning**: External nodes use random digests that won't correspond to valid procedures.
+    /// Any program with external nodes will fail to execute. Set to 0 for executable forests.
     pub max_externals: usize,
     /// Maximum number of dyn/dyncall nodes to generate
+    ///
+    /// **Warning**: Dyn nodes leave junk on the stack and cannot execute properly.
+    /// These nodes are primarily for testing MAST structure, not execution. Set to 0 for
+    /// executable forests.
     pub max_dyns: usize,
 }
 
@@ -211,8 +246,9 @@ impl Default for MastForestParams {
             max_splits: 1,
             max_loops: 1,
             max_calls: 1,
-            max_externals: 1,
-            max_dyns: 1,
+            max_syscalls: 0,  // Default to 0 for executable forests
+            max_externals: 0, // Default to 0 for executable forests
+            max_dyns: 0,      // Default to 0 for executable forests
         }
     }
 }
@@ -221,6 +257,51 @@ impl Arbitrary for MastForest {
     type Parameters = MastForestParams;
     type Strategy = BoxedStrategy<Self>;
 
+    /// Generates a MastForest with the specified parameters.
+    ///
+    /// # Generated Forest Properties
+    ///
+    /// - **Basic blocks**: Always generated (1..=blocks.end()) with operations and decorators
+    /// - **Control flow nodes**: Generated according to max_* parameters, may be 0
+    /// - **Root nodes**: ~1/3 of generated nodes are marked as roots
+    ///
+    /// # Execution Limitations
+    ///
+    /// Generated forests may not be executable depending on parameters:
+    ///
+    /// ## Syscalls (`max_syscalls`)
+    /// - Generated syscalls reference random procedure digests
+    /// - Execution requires a kernel containing matching procedure hashes
+    /// - For executable forests, set `max_syscalls = 0`
+    ///
+    /// ## External Nodes (`max_externals`)
+    /// - Generated with random digests that won't match valid procedures
+    /// - Any program with external nodes will fail during execution
+    /// - For executable forests, set `max_externals = 0`
+    ///
+    /// ## Dynamic Nodes (`max_dyns`)
+    /// - Dyn and dyncall nodes leave junk on the stack
+    /// - These nodes cannot execute properly in practice
+    /// - For executable forests, set `max_dyns = 0`
+    ///
+    /// # Example Usage
+    ///
+    /// ```rust
+    /// use miden_core::mast::{MastForest, arbitrary::MastForestParams};
+    /// use proptest::arbitrary::Arbitrary;
+    ///
+    /// // Generate executable forest (default)
+    /// let forest = MastForest::arbitrary_with(MastForestParams::default());
+    ///
+    /// // Generate forest with non-executable nodes for testing
+    /// let params = MastForestParams {
+    ///     max_syscalls: 2,
+    ///     max_externals: 1,
+    ///     max_dyns: 1,
+    ///     ..Default::default()
+    /// };
+    /// let forest = MastForest::arbitrary_with(params);
+    /// ```
     fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
         // BasicBlockNode generation must reference decorator IDs in [0, decorators)
         let bb_params = BasicBlockNodeParams {
@@ -242,25 +323,35 @@ impl Arbitrary for MastForest {
             ),
             // Generate control flow node counts within the specified limits
             (
-                // Generate number of join nodes (1 to max_joins, ensuring at least 1)
-                1..=params.max_joins,
-                // Generate number of split nodes (1 to max_splits, ensuring at least 1)
-                1..=params.max_splits,
-                // Generate number of loop nodes (1 to max_loops, ensuring at least 1)
-                1..=params.max_loops,
-                // Generate number of call nodes (1 to max_calls, ensuring at least 1)
-                1..=params.max_calls,
-                // Generate number of external nodes (1 to max_externals, ensuring at least 1)
-                1..=params.max_externals,
-                // Generate number of dyn nodes (1 to max_dyns, ensuring at least 1)
-                1..=params.max_dyns,
+                // Generate number of join nodes (0 to max_joins)
+                0..=params.max_joins,
+                // Generate number of split nodes (0 to max_splits)
+                0..=params.max_splits,
+                // Generate number of loop nodes (0 to max_loops)
+                0..=params.max_loops,
+                // Generate number of call nodes (0 to max_calls)
+                0..=params.max_calls,
+                // Generate number of syscall nodes (0 to max_syscalls)
+                0..=params.max_syscalls,
+                // Generate number of external nodes (0 to max_externals)
+                0..=params.max_externals,
+                // Generate number of dyn nodes (0 to max_dyns)
+                0..=params.max_dyns,
             ),
         )
             .prop_flat_map(
                 move |(
                     basic_blocks,
                     decorators,
-                    (num_joins, num_splits, num_loops, num_calls, num_externals, num_dyns),
+                    (
+                        num_joins,
+                        num_splits,
+                        num_loops,
+                        num_calls,
+                        num_syscalls,
+                        num_externals,
+                        num_dyns,
+                    ),
                 )| {
                     let num_basic_blocks = basic_blocks.len();
 
@@ -270,6 +361,7 @@ impl Arbitrary for MastForest {
                     let num_splits = num_splits.min(max_parent_nodes);
                     let num_loops = num_loops.min(num_basic_blocks);
                     let num_calls = num_calls.min(num_basic_blocks);
+                    let num_syscalls = num_syscalls.min(num_basic_blocks);
 
                     // Generate indices for creating parent nodes
                     (
@@ -280,6 +372,7 @@ impl Arbitrary for MastForest {
                             num_splits,
                             num_loops,
                             num_calls,
+                            num_syscalls,
                             num_externals,
                             num_dyns,
                         )),
@@ -317,6 +410,14 @@ impl Arbitrary for MastForest {
                                     .collect::<Vec<_>>()
                             },
                         ),
+                        // Generate indices for syscall nodes (need 1 child each)
+                        prop::collection::vec(any::<usize>(), num_syscalls..=num_syscalls)
+                            .prop_map(move |indices| {
+                                indices
+                                    .into_iter()
+                                    .map(|i| i % num_basic_blocks)
+                                    .collect::<Vec<_>>()
+                            }),
                         // Generate digests for external nodes
                         prop::collection::vec(any::<[u64; 4]>(), num_externals..=num_externals)
                             .prop_map(move |digests| {
@@ -339,11 +440,20 @@ impl Arbitrary for MastForest {
                 move |(
                     basic_blocks,
                     decorators,
-                    (_num_joins, _num_splits, _num_loops, _num_calls, _num_externals, num_dyns),
+                    (
+                        _num_joins,
+                        _num_splits,
+                        _num_loops,
+                        _num_calls,
+                        _num_syscalls,
+                        _num_externals,
+                        num_dyns,
+                    ),
                     join_pairs,
                     split_pairs,
                     loop_indices,
                     call_indices,
+                    syscall_indices,
                     external_digests,
                 )| {
                     let mut forest = MastForest::new();
@@ -395,23 +505,28 @@ impl Arbitrary for MastForest {
                         }
                     }
 
-                    // Add call nodes (mix of regular calls and syscalls)
-                    for (i, &callee_idx) in call_indices.iter().enumerate() {
+                    // Add call nodes
+                    for &callee_idx in &call_indices {
                         if callee_idx < all_node_ids.len() {
                             let callee_id = all_node_ids[callee_idx];
-                            let call_id = if i % 3 == 0 {
-                                // Make every 3rd call a syscall
-                                forest
-                                    .add_syscall(callee_id)
-                                    .unwrap_or_else(|_| forest.add_call(callee_id).unwrap())
-                            } else {
-                                forest.add_call(callee_id).unwrap()
-                            };
+                            let call_id = forest.add_call(callee_id).unwrap();
                             all_node_ids.push(call_id);
                         }
                     }
 
+                    // Add syscall nodes
+                    // WARNING: These use random procedure digests and will not execute without a
+                    // matching kernel
+                    for &callee_idx in &syscall_indices {
+                        if callee_idx < all_node_ids.len() {
+                            let callee_id = all_node_ids[callee_idx];
+                            let syscall_id = forest.add_syscall(callee_id).unwrap();
+                            all_node_ids.push(syscall_id);
+                        }
+                    }
+
                     // Add external nodes
+                    // WARNING: These use random digests that won't match any valid procedures
                     for digest in external_digests {
                         if let Ok(external_id) = forest.add_external(digest) {
                             all_node_ids.push(external_id);
@@ -419,6 +534,7 @@ impl Arbitrary for MastForest {
                     }
 
                     // Add dyn nodes (mix of dyn and dyncall)
+                    // WARNING: These leave junk on the stack and cannot execute properly
                     for i in 0..num_dyns {
                         let dyn_id = if i % 2 == 0 {
                             forest.add_dyn().unwrap()
