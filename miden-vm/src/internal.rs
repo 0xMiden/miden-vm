@@ -109,26 +109,30 @@ impl InputFile {
 
     /// Parse advice inputs from the input file.
     pub fn parse_advice_inputs(&self) -> Result<AdviceInputs, String> {
-        let mut advice_inputs = AdviceInputs::default();
-
         let stack = self
             .parse_advice_stack()
             .map_err(|e| format!("failed to parse advice provider: {e}"))?;
-        advice_inputs = advice_inputs.with_stack_values(stack).map_err(|e| e.to_string())?;
 
-        if let Some(map) = self
+        let advice_inputs =
+            AdviceInputs::default().with_stack_values(stack).map_err(|e| e.to_string())?;
+
+        let advice_inputs = if let Some(map) = self
             .parse_advice_map()
             .map_err(|e| format!("failed to parse advice provider: {e}"))?
         {
-            advice_inputs = advice_inputs.with_map(map);
-        }
+            advice_inputs.with_map(map)
+        } else {
+            advice_inputs
+        };
 
-        if let Some(merkle_store) = self
+        let advice_inputs = if let Some(merkle_store) = self
             .parse_merkle_store()
             .map_err(|e| format!("failed to parse advice provider: {e}"))?
         {
-            advice_inputs = advice_inputs.with_merkle_store(merkle_store);
-        }
+            advice_inputs.with_merkle_store(merkle_store)
+        } else {
+            advice_inputs
+        };
 
         Ok(advice_inputs)
     }
