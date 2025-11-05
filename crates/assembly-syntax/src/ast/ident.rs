@@ -224,6 +224,12 @@ impl FromStr for Ident {
     }
 }
 
+impl From<Ident> for miden_utils_diagnostics::miette::SourceSpan {
+    fn from(value: Ident) -> Self {
+        value.span.into()
+    }
+}
+
 #[cfg(feature = "serde")]
 impl serde::Serialize for Ident {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>

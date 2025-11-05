@@ -96,7 +96,12 @@ macro_rules! parse_module {
             concat!("test", line!()).into(),
             ::alloc::string::String::from($source),
         );
-        $crate::ast::Module::parse(path, $crate::ast::ModuleKind::Library, source_file)
-            .expect("failed to parse module")
+        $crate::ast::Module::parse(
+            path,
+            $crate::ast::ModuleKind::Library,
+            source_file,
+            $context.source_manager(),
+        )
+        .expect("failed to parse module")
     }};
 }

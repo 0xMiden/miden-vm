@@ -91,7 +91,7 @@ pub trait Parse: Sized {
     ///
     /// See [`Parse::parse_with_options`] for more details.
     #[inline]
-    fn parse(self, source_manager: &dyn SourceManager) -> Result<Box<Module>, Report> {
+    fn parse(self, source_manager: Arc<dyn SourceManager>) -> Result<Box<Module>, Report> {
         self.parse_with_options(source_manager, ParseOptions::default())
     }
 
@@ -104,7 +104,7 @@ pub trait Parse: Sized {
     /// See the documentation for [`ParseOptions`] to see how parsing can be configured.
     fn parse_with_options(
         self,
-        source_manager: &dyn SourceManager,
+        source_manager: Arc<dyn SourceManager>,
         options: ParseOptions,
     ) -> Result<Box<Module>, Report>;
 }
@@ -116,7 +116,7 @@ impl Parse for Module {
     #[inline(always)]
     fn parse_with_options(
         self,
-        source_manager: &dyn SourceManager,
+        source_manager: Arc<dyn SourceManager>,
         options: ParseOptions,
     ) -> Result<Box<Module>, Report> {
         Box::new(self).parse_with_options(source_manager, options)
@@ -127,7 +127,7 @@ impl Parse for &Module {
     #[inline(always)]
     fn parse_with_options(
         self,
-        source_manager: &dyn SourceManager,
+        source_manager: Arc<dyn SourceManager>,
         options: ParseOptions,
     ) -> Result<Box<Module>, Report> {
         Box::new(self.clone()).parse_with_options(source_manager, options)
@@ -137,7 +137,7 @@ impl Parse for &Module {
 impl Parse for Box<Module> {
     fn parse_with_options(
         mut self,
-        _source_manager: &dyn SourceManager,
+        _source_manager: Arc<dyn SourceManager>,
         options: ParseOptions,
     ) -> Result<Box<Module>, Report> {
         let actual = self.kind();
@@ -159,7 +159,7 @@ impl Parse for Arc<Module> {
     #[inline(always)]
     fn parse_with_options(
         self,
-        source_manager: &dyn SourceManager,
+        source_manager: Arc<dyn SourceManager>,
         options: ParseOptions,
     ) -> Result<Box<Module>, Report> {
         Box::new(Arc::unwrap_or_clone(self)).parse_with_options(source_manager, options)
@@ -172,7 +172,7 @@ impl Parse for Arc<Module> {
 impl Parse for Arc<SourceFile> {
     fn parse_with_options(
         self,
-        source_manager: &dyn SourceManager,
+        source_manager: Arc<dyn SourceManager>,
         options: ParseOptions,
     ) -> Result<Box<Module>, Report> {
         let source_file = source_manager.copy_into(&self);
@@ -188,7 +188,7 @@ impl Parse for Arc<SourceFile> {
         };
         let mut parser = Module::parser(options.kind);
         parser.set_warnings_as_errors(options.warnings_as_errors);
-        parser.parse(path, source_file)
+        parser.parse(path, source_file, source_manager)
     }
 }
 
@@ -196,7 +196,7 @@ impl Parse for &str {
     #[inline(always)]
     fn parse_with_options(
         self,
-        source_manager: &dyn SourceManager,
+        source_manager: Arc<dyn SourceManager>,
         options: ParseOptions,
     ) -> Result<Box<Module>, Report> {
         self.to_string().into_boxed_str().parse_with_options(source_manager, options)
@@ -207,7 +207,7 @@ impl Parse for &String {
     #[inline(always)]
     fn parse_with_options(
         self,
-        source_manager: &dyn SourceManager,
+        source_manager: Arc<dyn SourceManager>,
         options: ParseOptions,
     ) -> Result<Box<Module>, Report> {
         self.clone().into_boxed_str().parse_with_options(source_manager, options)
@@ -217,7 +217,7 @@ impl Parse for &String {
 impl Parse for String {
     fn parse_with_options(
         self,
-        source_manager: &dyn SourceManager,
+        source_manager: Arc<dyn SourceManager>,
         options: ParseOptions,
     ) -> Result<Box<Module>, Report> {
         self.into_boxed_str().parse_with_options(source_manager, options)
@@ -227,7 +227,7 @@ impl Parse for String {
 impl Parse for Box<str> {
     fn parse_with_options(
         self,
-        source_manager: &dyn SourceManager,
+        source_manager: Arc<dyn SourceManager>,
         options: ParseOptions,
     ) -> Result<Box<Module>, Report> {
         let path = options.path.as_deref().unwrap_or_else(|| match options.kind {
@@ -240,7 +240,7 @@ impl Parse for Box<str> {
         parser.set_warnings_as_errors(options.warnings_as_errors);
         let content = SourceContent::new(SourceLanguage::Masm, name.clone(), self);
         let source_file = source_manager.load_from_raw_parts(name, content);
-        parser.parse(path, source_file)
+        parser.parse(path, source_file, source_manager)
     }
 }
 
@@ -248,7 +248,7 @@ impl Parse for Cow<'_, str> {
     #[inline(always)]
     fn parse_with_options(
         self,
-        source_manager: &dyn SourceManager,
+        source_manager: Arc<dyn SourceManager>,
         options: ParseOptions,
     ) -> Result<Box<Module>, Report> {
         self.into_owned().into_boxed_str().parse_with_options(source_manager, options)
@@ -262,7 +262,7 @@ impl Parse for &[u8] {
     #[inline]
     fn parse_with_options(
         self,
-        source_manager: &dyn SourceManager,
+        source_manager: Arc<dyn SourceManager>,
         options: ParseOptions,
     ) -> Result<Box<Module>, Report> {
         core::str::from_utf8(self)
@@ -279,7 +279,7 @@ impl Parse for Vec<u8> {
     #[inline]
     fn parse_with_options(
         self,
-        source_manager: &dyn SourceManager,
+        source_manager: Arc<dyn SourceManager>,
         options: ParseOptions,
     ) -> Result<Box<Module>, Report> {
         String::from_utf8(self)
@@ -298,7 +298,7 @@ impl Parse for Box<[u8]> {
     #[inline(always)]
     fn parse_with_options(
         self,
-        source_manager: &dyn SourceManager,
+        source_manager: Arc<dyn SourceManager>,
         options: ParseOptions,
     ) -> Result<Box<Module>, Report> {
         Vec::from(self).parse_with_options(source_manager, options)
@@ -311,7 +311,7 @@ where
 {
     fn parse_with_options(
         self,
-        source_manager: &dyn SourceManager,
+        source_manager: Arc<dyn SourceManager>,
         options: ParseOptions,
     ) -> Result<Box<Module>, Report> {
         let path = match options.path {
@@ -338,7 +338,7 @@ where
         let source_file = source_manager.load_from_raw_parts(name, content);
         let mut parser = Module::parser(options.kind);
         parser.set_warnings_as_errors(options.warnings_as_errors);
-        parser.parse(path, source_file)
+        parser.parse(path, source_file, source_manager)
     }
 }
 
@@ -349,7 +349,7 @@ where
 impl Parse for &std::path::Path {
     fn parse_with_options(
         self,
-        source_manager: &dyn SourceManager,
+        source_manager: Arc<dyn SourceManager>,
         options: ParseOptions,
     ) -> Result<Box<Module>, Report> {
         use std::path::Component;
@@ -397,7 +397,7 @@ impl Parse for &std::path::Path {
             .into_diagnostic()
             .wrap_err("source manager is unable to load file")?;
         let mut parser = Module::parser(options.kind);
-        parser.parse(path, source_file)
+        parser.parse(path, source_file, source_manager)
     }
 }
 
@@ -406,7 +406,7 @@ impl Parse for std::path::PathBuf {
     #[inline(always)]
     fn parse_with_options(
         self,
-        source_manager: &dyn SourceManager,
+        source_manager: Arc<dyn SourceManager>,
         options: ParseOptions,
     ) -> Result<Box<Module>, Report> {
         self.as_path().parse_with_options(source_manager, options)

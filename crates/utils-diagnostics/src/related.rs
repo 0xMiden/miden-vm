@@ -14,7 +14,7 @@ use super::{Diagnostic, Label, LabeledSpan, Report, Severity, SourceCode};
 /// original error. A related label can have a distinct severity, its own message, and its own
 /// sub-labels, and may reference code in a completely different source file that the original
 /// error.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RelatedLabel {
     /// The severity for this related label
     pub severity: Severity,

@@ -4,7 +4,7 @@ mod advice_map_entry;
 mod alias;
 mod attribute;
 mod block;
-mod constants;
+pub mod constants;
 mod docstring;
 mod form;
 pub(crate) mod ident;

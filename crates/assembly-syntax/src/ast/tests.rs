@@ -24,15 +24,15 @@ macro_rules! id {
 
 macro_rules! path {
     ($path:literal) => {
-        Span::unknown(PathBuf::new($path).expect("invalid path"))
+        Span::unknown(PathBuf::new($path).expect("invalid path").into())
     };
 
     ($path:ident) => {
-        Span::unknown(PathBuf::new(stringify!($path)).expect("invalid path"))
+        Span::unknown(PathBuf::new(stringify!($path)).expect("invalid path").into())
     };
 
     ($path:ty) => {
-        Span::unknown(PathBuf::new(stringify!($path)).expect("invalid path"))
+        Span::unknown(PathBuf::new(stringify!($path)).expect("invalid path").into())
     };
 }
 
@@ -1381,14 +1381,20 @@ end
     let context = SyntaxTestContext::default();
     let source = source_file!(&context, source);
 
-    let module = Module::parse(Path::exec_path(), ModuleKind::Executable, source)
-        .unwrap_or_else(|err| panic!("{err}"));
+    let module =
+        Module::parse(Path::exec_path(), ModuleKind::Executable, source, context.source_manager())
+            .unwrap_or_else(|err| panic!("{err}"));
 
     let formatted = module.to_string();
     let expected = "\
 #! module doc
 #!
 #! with spaces
+
+#! constant doc
+#!
+#! with spaces
+const DEFAULT_CONST = 100
 
 #! Perform `a + b`, `n` times
 #!
@@ -1453,10 +1459,16 @@ end
     let context = SyntaxTestContext::default();
     let source = source_file!(&context, source);
 
-    let module = Module::parse(Path::exec_path(), ModuleKind::Executable, source).unwrap();
+    let module =
+        Module::parse(Path::exec_path(), ModuleKind::Executable, source, context.source_manager())
+            .unwrap();
 
     let formatted = module.to_string();
     let expected = "\
+const A = [2,3,4,5]
+
+const B = [2,3,4,5]
+
 begin
     push.[2,3,4,5]
     push.[2,3,4,5]
@@ -1490,8 +1502,9 @@ end"#
     // Instead of the usual macro that does only parsing we need to use this
     // parse function that also performs the semantic analysis to realize that
     // the constant is of the wrong type.
-    let error = Module::parse(Path::exec_path(), ModuleKind::Executable, source)
-        .expect_err("expected diagnostic to be raised, but parsing succeeded");
+    let error =
+        Module::parse(Path::exec_path(), ModuleKind::Executable, source, context.source_manager())
+            .expect_err("expected diagnostic to be raised, but parsing succeeded");
 
     assert_diagnostic_lines!(
         error,
@@ -1501,7 +1514,8 @@ end"#
         regex!(r#",-\[test[\d]+:4:15\]"#),
         "3 | begin",
         "4 |     mem_store.A",
-        "  :               ^",
+        "  :               |",
+        "  :               `-- expected u32",
         "5 | end",
         "  `----",
         r#" help: this constant does not resolve to a value of the right type"#

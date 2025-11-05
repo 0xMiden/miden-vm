@@ -8,11 +8,17 @@ use super::{Iter, PathBuf, PathComponent, PathError, StartsWith};
 use crate::ast::Ident;
 
 /// A borrowed reference to a subset of a path, e.g. another [Path] or a [PathBuf]
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
 pub struct Path {
     /// A view into the selected components of the path, i.e. the parts delimited by `::`
     inner: str,
+}
+
+impl fmt::Debug for Path {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(&self.inner, f)
+    }
 }
 
 #[cfg(feature = "serde")]
