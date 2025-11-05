@@ -459,8 +459,9 @@ pub fn b_chip_log_precompile() {
     let program = {
         let mut mast_forest = MastForest::new();
 
-        let basic_block_id =
-            mast_forest.add_block(vec![Operation::LogPrecompile], Vec::new()).unwrap();
+        let basic_block_id = BasicBlockNodeBuilder::new(vec![Operation::LogPrecompile], Vec::new())
+            .add_to_forest(&mut mast_forest)
+            .unwrap();
         mast_forest.make_root(basic_block_id);
 
         Program::new(mast_forest.into(), basic_block_id)

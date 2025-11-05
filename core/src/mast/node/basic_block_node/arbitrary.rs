@@ -6,7 +6,10 @@ use proptest::{arbitrary::Arbitrary, prelude::*};
 use super::*;
 use crate::{
     AdviceMap, AssemblyOp, DebugOptions, Decorator, Felt, Kernel, Operation, Program, Word,
-    mast::DecoratorId,
+    mast::{
+        CallNodeBuilder, DecoratorId, DynNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder,
+        LoopNodeBuilder, SplitNodeBuilder,
+    },
 };
 
 // Strategy for operations without immediate values (non-control flow)
@@ -478,7 +481,9 @@ impl Arbitrary for MastForest {
                         if left_idx < all_node_ids.len() && right_idx < all_node_ids.len() {
                             let left_id = all_node_ids[left_idx];
                             let right_id = all_node_ids[right_idx];
-                            if let Ok(join_id) = forest.add_join(left_id, right_id) {
+                            if let Ok(join_id) =
+                                JoinNodeBuilder::new([left_id, right_id]).add_to_forest(&mut forest)
+                            {
                                 all_node_ids.push(join_id);
                             }
                         }
@@ -489,7 +494,9 @@ impl Arbitrary for MastForest {
                         if true_idx < all_node_ids.len() && false_idx < all_node_ids.len() {
                             let true_id = all_node_ids[true_idx];
                             let false_id = all_node_ids[false_idx];
-                            if let Ok(split_id) = forest.add_split(true_id, false_id) {
+                            if let Ok(split_id) = SplitNodeBuilder::new([true_id, false_id])
+                                .add_to_forest(&mut forest)
+                            {
                                 all_node_ids.push(split_id);
                             }
                         }
@@ -499,7 +506,9 @@ impl Arbitrary for MastForest {
                     for &body_idx in &loop_indices {
                         if body_idx < all_node_ids.len() {
                             let body_id = all_node_ids[body_idx];
-                            if let Ok(loop_id) = forest.add_loop(body_id) {
+                            if let Ok(loop_id) =
+                                LoopNodeBuilder::new(body_id).add_to_forest(&mut forest)
+                            {
                                 all_node_ids.push(loop_id);
                             }
                         }
@@ -509,7 +518,8 @@ impl Arbitrary for MastForest {
                     for &callee_idx in &call_indices {
                         if callee_idx < all_node_ids.len() {
                             let callee_id = all_node_ids[callee_idx];
-                            let call_id = forest.add_call(callee_id).unwrap();
+                            let call_id =
+                                CallNodeBuilder::new(callee_id).add_to_forest(&mut forest).unwrap();
                             all_node_ids.push(call_id);
                         }
                     }
@@ -520,7 +530,9 @@ impl Arbitrary for MastForest {
                     for &callee_idx in &syscall_indices {
                         if callee_idx < all_node_ids.len() {
                             let callee_id = all_node_ids[callee_idx];
-                            let syscall_id = forest.add_syscall(callee_id).unwrap();
+                            let syscall_id = CallNodeBuilder::new_syscall(callee_id)
+                                .add_to_forest(&mut forest)
+                                .unwrap();
                             all_node_ids.push(syscall_id);
                         }
                     }
@@ -528,7 +540,9 @@ impl Arbitrary for MastForest {
                     // Add external nodes
                     // WARNING: These use random digests that won't match any valid procedures
                     for digest in external_digests {
-                        if let Ok(external_id) = forest.add_external(digest) {
+                        if let Ok(external_id) =
+                            ExternalNodeBuilder::new(digest).add_to_forest(&mut forest)
+                        {
                             all_node_ids.push(external_id);
                         }
                     }
@@ -537,9 +551,9 @@ impl Arbitrary for MastForest {
                     // WARNING: These leave junk on the stack and cannot execute properly
                     for i in 0..num_dyns {
                         let dyn_id = if i % 2 == 0 {
-                            forest.add_dyn().unwrap()
+                            DynNodeBuilder::new_dyn().add_to_forest(&mut forest).unwrap()
                         } else {
-                            forest.add_dyncall().unwrap()
+                            DynNodeBuilder::new_dyncall().add_to_forest(&mut forest).unwrap()
                         };
                         all_node_ids.push(dyn_id);
                     }
