@@ -1,24 +1,24 @@
-use super::{ExecutionError, MIN_STACK_DEPTH, Process};
-use crate::{ErrorContext, ZERO, errors::OperationError};
+use super::{MIN_STACK_DEPTH, Process};
+use crate::{ZERO, errors::OperationError};
 
 impl Process {
     // STACK MANIPULATION
     // --------------------------------------------------------------------------------------------
     /// Pushes a ZERO onto the stack.
-    pub(super) fn op_pad(&mut self) -> Result<(), ExecutionError> {
+    pub(super) fn op_pad(&mut self) -> Result<(), OperationError> {
         self.stack.set(0, ZERO);
         self.stack.shift_right(0);
         Ok(())
     }
 
     /// Removes the top element off the stack.
-    pub(super) fn op_drop(&mut self) -> Result<(), ExecutionError> {
+    pub(super) fn op_drop(&mut self) -> Result<(), OperationError> {
         self.stack.shift_left(1);
         Ok(())
     }
 
     /// Pushes the copy the n-th item onto the stack. n is 0-based.
-    pub(super) fn op_dup(&mut self, n: usize) -> Result<(), ExecutionError> {
+    pub(super) fn op_dup(&mut self, n: usize) -> Result<(), OperationError> {
         let value = self.stack.get(n);
         self.stack.set(0, value);
         self.stack.shift_right(0);
@@ -26,7 +26,7 @@ impl Process {
     }
 
     /// Swaps stack elements 0 and 1.
-    pub(super) fn op_swap(&mut self) -> Result<(), ExecutionError> {
+    pub(super) fn op_swap(&mut self) -> Result<(), OperationError> {
         let a = self.stack.get(0);
         let b = self.stack.get(1);
         self.stack.set(0, b);
@@ -36,7 +36,7 @@ impl Process {
     }
 
     /// Swaps stack elements 0, 1, 2, and 3 with elements 4, 5, 6, and 7.
-    pub(super) fn op_swapw(&mut self) -> Result<(), ExecutionError> {
+    pub(super) fn op_swapw(&mut self) -> Result<(), OperationError> {
         let a0 = self.stack.get(0);
         let a1 = self.stack.get(1);
         let a2 = self.stack.get(2);
@@ -60,7 +60,7 @@ impl Process {
     }
 
     /// Swaps stack elements 0, 1, 2, and 3 with elements 8, 9, 10, and 11.
-    pub(super) fn op_swapw2(&mut self) -> Result<(), ExecutionError> {
+    pub(super) fn op_swapw2(&mut self) -> Result<(), OperationError> {
         let a0 = self.stack.get(0);
         let a1 = self.stack.get(1);
         let a2 = self.stack.get(2);
@@ -92,7 +92,7 @@ impl Process {
     }
 
     /// Swaps stack elements 0, 1, 2, and 3, with elements 12, 13, 14, and 15.
-    pub(super) fn op_swapw3(&mut self) -> Result<(), ExecutionError> {
+    pub(super) fn op_swapw3(&mut self) -> Result<(), OperationError> {
         let a0 = self.stack.get(0);
         let a1 = self.stack.get(1);
         let a2 = self.stack.get(2);
@@ -137,7 +137,7 @@ impl Process {
     ///
     /// Input: [D, C, B, A, ...]
     /// Output: [B, A, D, C, ...]
-    pub(super) fn op_swapdw(&mut self) -> Result<(), ExecutionError> {
+    pub(super) fn op_swapdw(&mut self) -> Result<(), OperationError> {
         let a0 = self.stack.get(0);
         let a1 = self.stack.get(1);
         let a2 = self.stack.get(2);
@@ -181,7 +181,7 @@ impl Process {
     /// Moves n-th element to the top of the stack. n is 0-based.
     ///
     /// Elements between 0 and n are shifted right by one slot.
-    pub(super) fn op_movup(&mut self, n: usize) -> Result<(), ExecutionError> {
+    pub(super) fn op_movup(&mut self, n: usize) -> Result<(), OperationError> {
         debug_assert!(n < MIN_STACK_DEPTH - 1, "n too large");
 
         // move the nth value to the top of the stack
@@ -202,7 +202,7 @@ impl Process {
     /// Moves element 0 to the n-th position on the stack. n is 0-based.
     ///
     /// Elements between 0 and n are shifted left by one slot.
-    pub(super) fn op_movdn(&mut self, n: usize) -> Result<(), ExecutionError> {
+    pub(super) fn op_movdn(&mut self, n: usize) -> Result<(), OperationError> {
         debug_assert!(n < MIN_STACK_DEPTH - 1, "n too large");
 
         // move the value at the top of the stack to the nth position
@@ -228,7 +228,7 @@ impl Process {
     ///
     /// # Errors
     /// Returns an error if the top element of the stack is neither 0 nor 1.
-    pub(super) fn op_cswap(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
+    pub(super) fn op_cswap(&mut self) -> Result<(), OperationError> {
         let c = self.stack.get(0);
         let b = self.stack.get(1);
         let a = self.stack.get(2);
@@ -243,10 +243,7 @@ impl Process {
                 self.stack.set(1, b);
             },
             _ => {
-                return Err(ExecutionError::from_operation(
-                    err_ctx,
-                    OperationError::not_binary_value_op(c),
-                ));
+                return Err(OperationError::not_binary_value_op(c));
             },
         }
 
@@ -259,7 +256,7 @@ impl Process {
     ///
     /// # Errors
     /// Returns an error if the top element of the stack is neither 0 nor 1.
-    pub(super) fn op_cswapw(&mut self, err_ctx: &impl ErrorContext) -> Result<(), ExecutionError> {
+    pub(super) fn op_cswapw(&mut self) -> Result<(), OperationError> {
         let c = self.stack.get(0);
         let b0 = self.stack.get(1);
         let b1 = self.stack.get(2);
@@ -292,10 +289,7 @@ impl Process {
                 self.stack.set(7, b3);
             },
             _ => {
-                return Err(ExecutionError::from_operation(
-                    err_ctx,
-                    OperationError::not_binary_value_op(c),
-                ));
+                return Err(OperationError::not_binary_value_op(c));
             },
         }
 

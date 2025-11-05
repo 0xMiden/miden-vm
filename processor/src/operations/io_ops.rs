@@ -1,6 +1,6 @@
 use miden_core::WORD_SIZE;
 
-use super::{ExecutionError, Felt, Process};
+use super::{Felt, Process};
 use crate::errors::OperationError;
 
 // INPUT / OUTPUT OPERATIONS
@@ -13,7 +13,7 @@ impl Process {
     /// Pushes the provided value onto the stack.
     ///
     /// The original stack is shifted to the right by one item.
-    pub(super) fn op_push(&mut self, value: Felt) -> Result<(), ExecutionError> {
+    pub(super) fn op_push(&mut self, value: Felt) -> Result<(), OperationError> {
         self.stack.set(0, value);
         self.stack.shift_right(0);
         Ok(())

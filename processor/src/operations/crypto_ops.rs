@@ -4,8 +4,8 @@ use miden_air::trace::{
 };
 use miden_core::mast::MastForest;
 
-use super::{ExecutionError, Operation, Process};
-use crate::{ErrorContext, Felt, Word, errors::OperationError};
+use super::{Operation, Process};
+use crate::{Felt, Word, errors::OperationError};
 
 // CRYPTOGRAPHIC OPERATIONS
 // ================================================================================================
@@ -19,7 +19,7 @@ impl Process {
     ///
     /// Stack transition:
     /// [C, B, A, ...] -> [F, E, D, ...]
-    pub(super) fn op_hperm(&mut self) -> Result<(), ExecutionError> {
+    pub(super) fn op_hperm(&mut self) -> Result<(), OperationError> {
         let input_state = [
             self.stack.get(11),
             self.stack.get(10),
@@ -73,8 +73,7 @@ impl Process {
         &mut self,
         err_code: Felt,
         program: &MastForest,
-        err_ctx: &impl ErrorContext,
-    ) -> Result<(), ExecutionError> {
+    ) -> Result<(), OperationError> {
         // read node value, depth, index and root value from the stack
         let node =
             [self.stack.get(3), self.stack.get(2), self.stack.get(1), self.stack.get(0)].into();
@@ -85,12 +84,10 @@ impl Process {
 
         // get a Merkle path from the advice provider for the specified root and node index.
         // the path is expected to be of the specified depth.
-        let path = self.advice.get_merkle_path(root, depth, index).map_err(|err| {
-            ExecutionError::from_operation(
-                err_ctx,
-                OperationError::advice_error(err, self.system.clk()),
-            )
-        })?;
+        let path = self
+            .advice
+            .get_merkle_path(root, depth, index)
+            .map_err(|err| OperationError::advice_error(err, self.system.clk()))?;
 
         // use hasher to compute the Merkle root of the path
         let (addr, computed_root) = self.chiplets.hasher.build_merkle_root(node, &path, index);
@@ -103,11 +100,8 @@ impl Process {
             // If the hasher chiplet doesn't compute the same root (using the same path),
             // then it means that `node` is not the value currently in the tree at `index`
             let err_msg = program.resolve_error_message(err_code);
-            return Err(ExecutionError::from_operation(
-                err_ctx,
-                OperationError::merkle_path_verification_failed(
-                    node, index, root, err_code, err_msg,
-                ),
+            return Err(OperationError::merkle_path_verification_failed(
+                node, index, root, err_code, err_msg,
             ));
         }
 
@@ -149,10 +143,7 @@ impl Process {
     ///
     /// # Panics
     /// Panics if the computed old root does not match the input root provided via the stack.
-    pub(super) fn op_mrupdate(
-        &mut self,
-        err_ctx: &impl ErrorContext,
-    ) -> Result<(), ExecutionError> {
+    pub(super) fn op_mrupdate(&mut self) -> Result<(), OperationError> {
         // read old node value, depth, index, tree root and new node values from the stack
         let old_node =
             [self.stack.get(3), self.stack.get(2), self.stack.get(1), self.stack.get(0)].into();
@@ -167,15 +158,10 @@ impl Process {
         // get a Merkle path to it. the length of the returned path is expected to match the
         // specified depth. if the new node is the root of a tree, this instruction will append the
         // whole sub-tree to this node.
-        let (path, _) =
-            self.advice
-                .update_merkle_node(old_root, depth, index, new_node)
-                .map_err(|err| {
-                    ExecutionError::from_operation(
-                        err_ctx,
-                        OperationError::advice_error(err, self.system.clk()),
-                    )
-                })?;
+        let (path, _) = self
+            .advice
+            .update_merkle_node(old_root, depth, index, new_node)
+            .map_err(|err| OperationError::advice_error(err, self.system.clk()))?;
 
         assert_eq!(path.len(), depth.as_int() as usize);
 
@@ -213,7 +199,7 @@ impl Process {
     ///   registers.
     /// - The VM stack stores each 4-element word in reverse element order, so the top of the stack
     ///   exposes the elements of `R1` first, followed by the elements of `R0`, then `CAP_NEXT`.
-    pub(super) fn op_log_precompile(&mut self) -> Result<(), ExecutionError> {
+    pub(super) fn op_log_precompile(&mut self) -> Result<(), OperationError> {
         // Read TAG and COMM from stack, and CAP_PREV from the processor state
         let comm = self.stack.get_word(0);
         let tag = self.stack.get_word(4);

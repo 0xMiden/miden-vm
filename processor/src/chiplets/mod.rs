@@ -4,8 +4,8 @@ use miden_air::{RowIndex, trace::chiplets::hasher::HasherState};
 use miden_core::{Kernel, mast::OpBatch, precompile::PrecompileTranscriptState};
 
 use super::{
-    CHIPLETS_WIDTH, ChipletsTrace, EMPTY_WORD, ExecutionError, Felt, FieldElement, ONE,
-    RangeChecker, TraceFragment, Word, ZERO, crypto::MerklePath, utils,
+    CHIPLETS_WIDTH, ChipletsTrace, EMPTY_WORD, Felt, FieldElement, ONE, RangeChecker,
+    TraceFragment, Word, ZERO, crypto::MerklePath, utils,
 };
 
 mod bitwise;

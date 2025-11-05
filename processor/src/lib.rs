@@ -486,7 +486,10 @@ impl Process {
                 ExecutionError::MastNodeNotFoundInForest { node_id: call_node.callee() }
             })?;
             let err_ctx = err_ctx!(program, call_node, host);
-            self.chiplets.kernel_rom.access_proc(callee.digest(), &err_ctx)?;
+            self.chiplets
+                .kernel_rom
+                .access_proc(callee.digest())
+                .map_err(|err| ExecutionError::from_operation(&err_ctx, err))?;
         }
         let err_ctx = err_ctx!(program, call_node, host);
 

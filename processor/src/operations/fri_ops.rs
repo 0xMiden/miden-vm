@@ -1,6 +1,7 @@
 use miden_core::{ExtensionOf, FieldElement, ONE, QuadFelt, StarkField, ZERO};
 
-use super::{ExecutionError, Felt, Operation, Process};
+use super::{Felt, Operation, Process};
+use crate::errors::OperationError;
 
 // CONSTANTS
 // ================================================================================================
@@ -52,7 +53,7 @@ impl Process {
     /// elements of the stack at the next state for degree reduction purposes. Thus, once the
     /// operation has been executed, the top 10 elements of the stack can be considered to be
     /// "garbage".
-    pub(super) fn op_fri_ext2fold4(&mut self) -> Result<(), ExecutionError> {
+    pub(super) fn op_fri_ext2fold4(&mut self) -> Result<(), OperationError> {
         // --- read all relevant variables from the stack ---------------------
         let query_values = self.get_query_values();
         let f_pos = self.get_folded_position();
@@ -64,12 +65,12 @@ impl Process {
 
         // --- make sure the previous folding was done correctly --------------
         if d_seg > 3 {
-            return Err(ExecutionError::InvalidFriDomainSegment(d_seg));
+            return Err(OperationError::InvalidFriDomainSegment(d_seg));
         }
 
         let d_seg = d_seg as usize;
         if query_values[d_seg] != prev_value {
-            return Err(ExecutionError::InvalidFriLayerFolding(prev_value, query_values[d_seg]));
+            return Err(OperationError::InvalidFriLayerFolding(prev_value, query_values[d_seg]));
         }
 
         // --- fold query values ----------------------------------------------

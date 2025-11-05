@@ -42,10 +42,6 @@ pub enum ExecutionError {
     ReservedEventNamespace { event: EventName },
     #[error("failed to execute the program for internal reason: {0}")]
     FailedToExecuteProgram(&'static str),
-    #[error("FRI domain segment value cannot exceed 3, but was {0}")]
-    InvalidFriDomainSegment(u64),
-    #[error("degree-respecting projection is inconsistent: expected {0} but was {1}")]
-    InvalidFriLayerFolding(QuadFelt, QuadFelt),
     #[error("node id {node_id} does not exist in MAST forest")]
     MastNodeNotFoundInForest { node_id: MastNodeId },
     #[error("stack should have at most {MIN_STACK_DEPTH} elements at the end of program execution, but had {} elements", MIN_STACK_DEPTH + .0)]
@@ -190,6 +186,10 @@ pub enum OperationError {
         #[source]
         error: AceError,
     },
+    #[error("FRI domain segment value cannot exceed 3, but was {0}")]
+    InvalidFriDomainSegment(u64),
+    #[error("degree-respecting projection is inconsistent: expected {0} but was {1}")]
+    InvalidFriLayerFolding(QuadFelt, QuadFelt),
     #[error(transparent)]
     MemoryError(#[from] MemoryError),
 }

@@ -2,7 +2,7 @@ use miden_air::trace::decoder::NUM_USER_OP_HELPERS;
 use miden_core::{ExtensionOf, Felt, FieldElement, ONE, QuadFelt, StarkField, ZERO};
 
 use crate::{
-    ExecutionError,
+    OperationError,
     fast::Tracer,
     processor::{OperationHelperRegisters, Processor, StackInterface},
 };
@@ -11,7 +11,7 @@ use crate::{
 pub(super) fn op_fri_ext2fold4<P: Processor>(
     processor: &mut P,
     tracer: &mut impl Tracer,
-) -> Result<[Felt; NUM_USER_OP_HELPERS], ExecutionError> {
+) -> Result<[Felt; NUM_USER_OP_HELPERS], OperationError> {
     // --- read all relevant variables from the stack ---------------------
     let query_values = get_query_values(processor);
     let folded_pos = processor.stack().get(8);
@@ -36,12 +36,12 @@ pub(super) fn op_fri_ext2fold4<P: Processor>(
 
     // --- make sure the previous folding was done correctly --------------
     if domain_segment > 3 {
-        return Err(ExecutionError::InvalidFriDomainSegment(domain_segment));
+        return Err(OperationError::InvalidFriDomainSegment(domain_segment));
     }
 
     let d_seg = domain_segment as usize;
     if query_values[d_seg] != prev_value {
-        return Err(ExecutionError::InvalidFriLayerFolding(prev_value, query_values[d_seg]));
+        return Err(OperationError::InvalidFriLayerFolding(prev_value, query_values[d_seg]));
     }
 
     // --- fold query values ----------------------------------------------
