@@ -21,9 +21,10 @@ pub(super) fn op_add<P: Processor>(
 /// Pops an element off the stack, computes its additive inverse, and pushes the result back
 /// onto the stack.
 #[inline(always)]
-pub(super) fn op_neg<P: Processor>(processor: &mut P) {
+pub(super) fn op_neg<P: Processor>(processor: &mut P) -> Result<(), OperationError> {
     let element = processor.stack().get(0);
     processor.stack().set(0, -element);
+    Ok(())
 }
 
 /// Pops two elements off the stack, multiplies them, and pushes the result back onto the
@@ -53,8 +54,9 @@ pub(super) fn op_inv<P: Processor>(processor: &mut P) -> Result<(), OperationErr
 
 /// Pops an element off the stack, adds ONE to it, and pushes the result back onto the stack.
 #[inline(always)]
-pub(super) fn op_incr<P: Processor>(processor: &mut P) {
+pub(super) fn op_incr<P: Processor>(processor: &mut P) -> Result<(), OperationError> {
     *processor.stack().get_mut(0) += ONE;
+    Ok(())
 }
 
 /// Pops two elements off the stack, computes their boolean AND, and pushes the result back
@@ -210,7 +212,7 @@ pub(super) fn op_expacc<P: Processor>(processor: &mut P) -> [Felt; NUM_USER_OP_H
 /// the first and second positions on the stack, c1 and c2 to the third and fourth positions,
 /// and leaves the rest of the stack unchanged.
 #[inline(always)]
-pub(super) fn op_ext2mul<P: Processor>(processor: &mut P) {
+pub(super) fn op_ext2mul<P: Processor>(processor: &mut P) -> Result<(), OperationError> {
     const TWO: Felt = Felt::new(2);
     let [a0, a1, b0, b1] = processor.stack().get_word(0).into();
 
@@ -219,6 +221,7 @@ pub(super) fn op_ext2mul<P: Processor>(processor: &mut P) {
     let b0_times_a0 = b0 * a0;
     processor.stack().set(2, (b0 + b1) * (a1 + a0) - b0_times_a0);
     processor.stack().set(3, b0_times_a0 - TWO * b1 * a1);
+    Ok(())
 }
 
 // HELPERS

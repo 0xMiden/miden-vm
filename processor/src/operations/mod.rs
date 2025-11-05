@@ -94,7 +94,7 @@ impl Process {
             Operation::Expacc => wrap_operation(self.op_expacc(), err_ctx)?,
 
             // ----- ext2 operations --------------------------------------------------------------
-            Operation::Ext2Mul => self.op_ext2mul()?,
+            Operation::Ext2Mul => wrap_operation(self.op_ext2mul(), err_ctx)?,
 
             // ----- u32 operations ---------------------------------------------------------------
             Operation::U32split => wrap_operation(self.op_u32split(), err_ctx)?,

@@ -25,8 +25,9 @@ impl Process {
         let ptr = self.stack.get(0);
         let ctx = self.system.ctx();
         let clk = self.system.clk();
-        let circuit_evaluation = eval_circuit(ctx, ptr, clk, num_read, num_eval, &mut self.chiplets.memory)
-            .map_err(OperationError::failed_arithmetic_evaluation)?;
+        let circuit_evaluation =
+            eval_circuit(ctx, ptr, clk, num_read, num_eval, &mut self.chiplets.memory)
+                .map_err(OperationError::failed_arithmetic_evaluation)?;
         self.chiplets.ace.add_circuit_evaluation(clk, circuit_evaluation);
 
         self.stack.copy_state(0);

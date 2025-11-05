@@ -8,7 +8,7 @@ use miden_core::{
 };
 
 use crate::{
-    ErrorContext, ExecutionError, OperationError,
+    OperationError,
     fast::Tracer,
     processor::{
         AdviceProviderInterface, HasherInterface, MemoryInterface, OperationHelperRegisters,
@@ -49,9 +49,8 @@ pub(super) fn op_mpverify<P: Processor>(
     processor: &mut P,
     err_code: Felt,
     program: &MastForest,
-    err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
-) -> Result<[Felt; NUM_USER_OP_HELPERS], ExecutionError> {
+) -> Result<[Felt; NUM_USER_OP_HELPERS], OperationError> {
     let clk = processor.system().clk();
 
     // read node value, depth, index and root value from the stack
@@ -61,9 +60,10 @@ pub(super) fn op_mpverify<P: Processor>(
     let root = processor.stack().get_word(6);
 
     // get a Merkle path from the advice provider for the specified root and node index
-    let path = processor.advice_provider().get_merkle_path(root, depth, index).map_err(|err| {
-        ExecutionError::from_operation(err_ctx, OperationError::advice_error(err, clk))
-    })?;
+    let path = processor
+        .advice_provider()
+        .get_merkle_path(root, depth, index)
+        .map_err(|err| OperationError::advice_error(err, clk))?;
 
     tracer.record_hasher_build_merkle_root(node, path.as_ref(), index, root);
 
@@ -72,10 +72,7 @@ pub(super) fn op_mpverify<P: Processor>(
         // If the hasher doesn't compute the same root (using the same path),
         // then it means that `node` is not the value currently in the tree at `index`
         let err_msg = program.resolve_error_message(err_code);
-        ExecutionError::from_operation(
-            err_ctx,
-            OperationError::merkle_path_verification_failed(node, index, root, err_code, err_msg),
-        )
+        OperationError::merkle_path_verification_failed(node, index, root, err_code, err_msg)
     })?;
 
     Ok(P::HelperRegisters::op_merkle_path_registers(addr))
@@ -84,9 +81,8 @@ pub(super) fn op_mpverify<P: Processor>(
 #[inline(always)]
 pub(super) fn op_mrupdate<P: Processor>(
     processor: &mut P,
-    err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
-) -> Result<[Felt; NUM_USER_OP_HELPERS], ExecutionError> {
+) -> Result<[Felt; NUM_USER_OP_HELPERS], OperationError> {
     let clk = processor.system().clk();
 
     // read old node value, depth, index, tree root and new node values from the stack
@@ -103,9 +99,7 @@ pub(super) fn op_mrupdate<P: Processor>(
     let path = processor
         .advice_provider()
         .update_merkle_node(claimed_old_root, depth, index, new_value)
-        .map_err(|err| {
-            ExecutionError::from_operation(err_ctx, OperationError::advice_error(err, clk))
-        })?;
+        .map_err(|err| OperationError::advice_error(err, clk))?;
 
     if let Some(path) = &path {
         // TODO(plafer): return error instead of asserting
@@ -119,15 +113,12 @@ pub(super) fn op_mrupdate<P: Processor>(
         path.as_ref(),
         index,
         || {
-            ExecutionError::from_operation(
-                err_ctx,
-                OperationError::merkle_path_verification_failed(
-                    old_value,
-                    index,
-                    claimed_old_root,
-                    ZERO,
-                    None,
-                ),
+            OperationError::merkle_path_verification_failed(
+                old_value,
+                index,
+                claimed_old_root,
+                ZERO,
+                None,
             )
         },
     )?;
@@ -152,9 +143,8 @@ pub(super) fn op_mrupdate<P: Processor>(
 #[inline(always)]
 pub(super) fn op_horner_eval_base<P: Processor>(
     processor: &mut P,
-    _err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
-) -> Result<[Felt; NUM_USER_OP_HELPERS], ExecutionError> {
+) -> Result<[Felt; NUM_USER_OP_HELPERS], OperationError> {
     // Constants from the original implementation
     const ALPHA_ADDR_INDEX: usize = 13;
     const ACC_HIGH_INDEX: usize = 14;
@@ -169,10 +159,7 @@ pub(super) fn op_horner_eval_base<P: Processor>(
     // Read the evaluation point alpha from memory
     let (alpha, k0, k1) = {
         let addr = processor.stack().get(ALPHA_ADDR_INDEX);
-        let word = processor
-            .memory()
-            .read_word(ctx, addr, clk)
-            .map_err(ExecutionError::MemoryError)?;
+        let word = processor.memory().read_word(ctx, addr, clk).map_err(OperationError::from)?;
         tracer.record_memory_read_word(
             word,
             addr,
@@ -278,9 +265,8 @@ pub(super) fn op_log_precompile<P: Processor>(
 #[inline(always)]
 pub(super) fn op_horner_eval_ext<P: Processor>(
     processor: &mut P,
-    _err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
-) -> Result<[Felt; NUM_USER_OP_HELPERS], ExecutionError> {
+) -> Result<[Felt; NUM_USER_OP_HELPERS], OperationError> {
     // Constants from the original implementation
     const ALPHA_ADDR_INDEX: usize = 13;
     const ACC_HIGH_INDEX: usize = 14;
@@ -301,10 +287,7 @@ pub(super) fn op_horner_eval_ext<P: Processor>(
     // Read the evaluation point alpha from memory
     let (alpha, k0, k1) = {
         let addr = processor.stack().get(ALPHA_ADDR_INDEX);
-        let word = processor
-            .memory()
-            .read_word(ctx, addr, clk)
-            .map_err(ExecutionError::MemoryError)?;
+        let word = processor.memory().read_word(ctx, addr, clk).map_err(OperationError::from)?;
         tracer.record_memory_read_word(
             word,
             addr,

@@ -8,8 +8,8 @@ use miden_core::{
 };
 
 use crate::{
-    AdviceError, BaseHost, ContextId, ErrorContext, ExecutionError, MemoryError, ProcessState,
-    fast::Tracer, processor::operations::execute_sync_op,
+    AdviceError, BaseHost, ContextId, ErrorContext, ExecutionError, MemoryError, OperationError,
+    ProcessState, fast::Tracer, processor::operations::execute_sync_op,
 };
 
 mod operations;
@@ -306,8 +306,8 @@ pub trait HasherInterface {
         value: Word,
         path: Option<&MerklePath>,
         index: Felt,
-        on_err: impl FnOnce() -> ExecutionError,
-    ) -> Result<Felt, ExecutionError>;
+        on_err: impl FnOnce() -> OperationError,
+    ) -> Result<Felt, OperationError>;
 
     /// Verifies that the `claimed_old_root` is indeed the root of a Merkle tree containing
     /// `old_value` at the specified `index`, and computes a new Merkle root after updating the node
@@ -329,8 +329,8 @@ pub trait HasherInterface {
         new_value: Word,
         path: Option<&MerklePath>,
         index: Felt,
-        on_err: impl FnOnce() -> ExecutionError,
-    ) -> Result<(Felt, Word), ExecutionError>;
+        on_err: impl FnOnce() -> OperationError,
+    ) -> Result<(Felt, Word), OperationError>;
 }
 
 /// Trait for computing helper registers for operations.
