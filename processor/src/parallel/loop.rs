@@ -7,7 +7,7 @@ use miden_core::{
 
 use super::{CoreTraceFragmentGenerator, trace_builder::OperationTraceConfig};
 
-impl CoreTraceFragmentGenerator {
+impl<'a> CoreTraceFragmentGenerator<'a> {
     /// Adds a trace row for the start of a LOOP operation.
     pub fn add_loop_start_trace_row(
         &mut self,

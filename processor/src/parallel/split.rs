@@ -9,7 +9,7 @@ use miden_core::{
 
 use super::{CoreTraceFragmentGenerator, trace_builder::OperationTraceConfig};
 
-impl CoreTraceFragmentGenerator {
+impl<'a> CoreTraceFragmentGenerator<'a> {
     /// Adds a trace row for the start of a SPLIT operation.
     ///
     /// This is a convenience method that calls `add_split_trace_row` with `TraceRowType::Start`.

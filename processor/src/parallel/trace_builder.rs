@@ -26,7 +26,7 @@ pub struct OperationTraceConfig {
     pub addr: Felt,
 }
 
-impl CoreTraceFragmentGenerator {
+impl<'a> CoreTraceFragmentGenerator<'a> {
     // TODO(plafer): move in a different file (when we merge all the other control flow ones)
     pub fn add_end_trace_row(&mut self, node_digest: Word) -> ControlFlow<()> {
         // Pop the block from stack and use its info for END operations
@@ -81,7 +81,7 @@ impl CoreTraceFragmentGenerator {
         if let Some(system_rows) = self.system_rows {
             // Write buffered system rows to the trace at current row
             for (i, &value) in system_rows.iter().enumerate() {
-                self.fragment.columns[i][row_idx] = value;
+                self.fragment[i][row_idx] = value;
             }
         }
 
@@ -102,51 +102,43 @@ impl CoreTraceFragmentGenerator {
     /// Populates the decoder trace columns with operation-specific data
     fn populate_decoder_trace_columns(&mut self, row_idx: usize, config: &OperationTraceConfig) {
         // Block address
-        self.fragment.columns[DECODER_TRACE_OFFSET + ADDR_COL_IDX][row_idx] = config.addr;
+        self.fragment[DECODER_TRACE_OFFSET + ADDR_COL_IDX][row_idx] = config.addr;
 
         // Decompose operation into bits
         let opcode = config.opcode;
         for i in 0..NUM_OP_BITS {
             let bit = Felt::from((opcode >> i) & 1);
-            self.fragment.columns[DECODER_TRACE_OFFSET + OP_BITS_OFFSET + i][row_idx] = bit;
+            self.fragment[DECODER_TRACE_OFFSET + OP_BITS_OFFSET + i][row_idx] = bit;
         }
 
         // Hasher state
         let (first_hash, second_hash) = config.hasher_state;
-        self.fragment.columns[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET][row_idx] = first_hash[0]; // hasher[0]
-        self.fragment.columns[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 1][row_idx] =
-            first_hash[1]; // hasher[1]
-        self.fragment.columns[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 2][row_idx] =
-            first_hash[2]; // hasher[2]
-        self.fragment.columns[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 3][row_idx] =
-            first_hash[3]; // hasher[3]
-        self.fragment.columns[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 4][row_idx] =
-            second_hash[0]; // hasher[4]
-        self.fragment.columns[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 5][row_idx] =
-            second_hash[1]; // hasher[5]
-        self.fragment.columns[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 6][row_idx] =
-            second_hash[2]; // hasher[6]
-        self.fragment.columns[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 7][row_idx] =
-            second_hash[3]; // hasher[7]
+        self.fragment[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET][row_idx] = first_hash[0]; // hasher[0]
+        self.fragment[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 1][row_idx] = first_hash[1]; // hasher[1]
+        self.fragment[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 2][row_idx] = first_hash[2]; // hasher[2]
+        self.fragment[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 3][row_idx] = first_hash[3]; // hasher[3]
+        self.fragment[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 4][row_idx] = second_hash[0]; // hasher[4]
+        self.fragment[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 5][row_idx] = second_hash[1]; // hasher[5]
+        self.fragment[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 6][row_idx] = second_hash[2]; // hasher[6]
+        self.fragment[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 7][row_idx] = second_hash[3]; // hasher[7]
 
         // Remaining decoder trace columns (identical for all control flow operations)
-        self.fragment.columns[DECODER_TRACE_OFFSET + OP_INDEX_COL_IDX][row_idx] = ZERO;
-        self.fragment.columns[DECODER_TRACE_OFFSET + GROUP_COUNT_COL_IDX][row_idx] = ZERO;
-        self.fragment.columns[DECODER_TRACE_OFFSET + IN_SPAN_COL_IDX][row_idx] = ZERO;
+        self.fragment[DECODER_TRACE_OFFSET + OP_INDEX_COL_IDX][row_idx] = ZERO;
+        self.fragment[DECODER_TRACE_OFFSET + GROUP_COUNT_COL_IDX][row_idx] = ZERO;
+        self.fragment[DECODER_TRACE_OFFSET + IN_SPAN_COL_IDX][row_idx] = ZERO;
 
         // Batch flag columns - all 0 for control flow operations
         for i in 0..NUM_OP_BATCH_FLAGS {
-            self.fragment.columns[DECODER_TRACE_OFFSET + OP_BATCH_FLAGS_OFFSET + i][row_idx] = ZERO;
+            self.fragment[DECODER_TRACE_OFFSET + OP_BATCH_FLAGS_OFFSET + i][row_idx] = ZERO;
         }
 
         // Extra bit columns
-        let bit6 = self.fragment.columns[DECODER_TRACE_OFFSET + OP_BITS_OFFSET + 6][row_idx];
-        let bit5 = self.fragment.columns[DECODER_TRACE_OFFSET + OP_BITS_OFFSET + 5][row_idx];
-        let bit4 = self.fragment.columns[DECODER_TRACE_OFFSET + OP_BITS_OFFSET + 4][row_idx];
-        self.fragment.columns[DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET][row_idx] =
+        let bit6 = self.fragment[DECODER_TRACE_OFFSET + OP_BITS_OFFSET + 6][row_idx];
+        let bit5 = self.fragment[DECODER_TRACE_OFFSET + OP_BITS_OFFSET + 5][row_idx];
+        let bit4 = self.fragment[DECODER_TRACE_OFFSET + OP_BITS_OFFSET + 4][row_idx];
+        self.fragment[DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET][row_idx] =
             bit6 * (ONE - bit5) * bit4;
-        self.fragment.columns[DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET + 1][row_idx] =
-            bit6 * bit5;
+        self.fragment[DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET + 1][row_idx] = bit6 * bit5;
     }
 
     /// Populates the stack trace columns
@@ -157,7 +149,7 @@ impl CoreTraceFragmentGenerator {
         if let Some(stack_rows) = self.stack_rows {
             // Write buffered stack rows to the trace at current row
             for (i, &value) in stack_rows.iter().enumerate() {
-                self.fragment.columns[STACK_TRACE_OFFSET + i][row_idx] = value;
+                self.fragment[STACK_TRACE_OFFSET + i][row_idx] = value;
             }
         }
 
