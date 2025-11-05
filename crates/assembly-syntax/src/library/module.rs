@@ -5,12 +5,7 @@ use midenc_hir_type::FunctionType;
 
 use crate::{
     Path, Word,
-    ast::{
-        self, AttributeSet, ConstantValue, GlobalItemIndex, Ident, ItemIndex,
-        LocalSymbolResolutionError, LocalSymbolResolver, ProcedureName, SymbolResolution,
-        TypeResolver,
-    },
-    debuginfo::{SourceSpan, Span, Spanned},
+    ast::{self, AttributeSet, ConstantValue, Ident, ItemIndex, ProcedureName},
 };
 
 // MODULE INFO
@@ -26,16 +21,6 @@ impl ModuleInfo {
     /// Returns a new [`ModuleInfo`] instantiated library path.
     pub fn new(path: Arc<Path>) -> Self {
         Self { path, items: Vec::new() }
-    }
-
-    /// Get a type resolver for this module
-    pub fn type_resolver(&self) -> impl TypeResolver<LocalSymbolResolutionError> {
-        ModuleInfoTypeResolver::new(self)
-    }
-
-    /// Get a local symbol resolver for this module
-    pub fn resolver(&self) -> LocalSymbolResolver {
-        LocalSymbolResolver::from(self)
     }
 
     /// Adds a procedure to the module.
@@ -195,52 +180,4 @@ pub struct ConstantInfo {
 pub struct TypeInfo {
     pub name: Ident,
     pub ty: ast::types::Type,
-}
-
-struct ModuleInfoTypeResolver<'a> {
-    module: &'a ModuleInfo,
-    resolver: LocalSymbolResolver,
-}
-
-impl<'a> ModuleInfoTypeResolver<'a> {
-    pub fn new(module: &'a ModuleInfo) -> Self {
-        let resolver = module.resolver();
-        Self { module, resolver }
-    }
-}
-
-impl TypeResolver<LocalSymbolResolutionError> for ModuleInfoTypeResolver<'_> {
-    fn get_type(
-        &self,
-        context: SourceSpan,
-        _gid: GlobalItemIndex,
-    ) -> Result<ast::types::Type, LocalSymbolResolutionError> {
-        Err(LocalSymbolResolutionError::UndefinedSymbol { span: context })
-    }
-    fn get_local_type(
-        &self,
-        context: SourceSpan,
-        id: ItemIndex,
-    ) -> Result<Option<ast::types::Type>, LocalSymbolResolutionError> {
-        let item = self.module.get_item_by_index(id).unwrap();
-        match item {
-            ItemInfo::Type(ty) => Ok(Some(ty.ty.clone())),
-            item @ (ItemInfo::Constant(_) | ItemInfo::Procedure(_)) => Err(self
-                .resolve_local_failed(LocalSymbolResolutionError::InvalidSymbolType {
-                    expected: "type",
-                    span: context,
-                    actual: item.name().span(),
-                })),
-        }
-    }
-    #[inline(always)]
-    fn resolve_local_failed(&self, err: LocalSymbolResolutionError) -> LocalSymbolResolutionError {
-        err
-    }
-    fn resolve_type_ref(
-        &self,
-        path: Span<&Path>,
-    ) -> Result<Option<SymbolResolution>, LocalSymbolResolutionError> {
-        self.resolver.resolve_path(path)
-    }
 }

@@ -10,13 +10,13 @@ use alloc::{
 };
 
 use miden_core::{Word, crypto::hash::Rpo256};
-use miden_debug_types::{SourceFile, Span, Spanned};
+use miden_debug_types::{SourceFile, SourceManager, Span, Spanned};
 use smallvec::SmallVec;
 
-use self::passes::{ConstEvalVisitor, VerifyInvokeTargets};
 pub use self::{
     context::AnalysisContext,
     errors::{SemanticAnalysisError, SyntaxError},
+    passes::{ConstEvalVisitor, VerifyInvokeTargets},
 };
 use crate::{ast::*, parser::WordValue};
 
@@ -36,8 +36,9 @@ pub fn analyze(
     path: &Path,
     forms: Vec<Form>,
     warnings_as_errors: bool,
+    source_manager: Arc<dyn SourceManager>,
 ) -> Result<Box<Module>, SyntaxError> {
-    let mut analyzer = AnalysisContext::new(source.clone());
+    let mut analyzer = AnalysisContext::new(source.clone(), source_manager);
     analyzer.set_warnings_as_errors(warnings_as_errors);
 
     let mut module = Box::new(Module::new(kind, path).with_span(source.source_span()));
@@ -65,20 +66,23 @@ pub fn analyze(
                 // Ensure the constants defined by the enum are made known to the analyzer
                 for variant in ty.variants() {
                     let Variant { span, name, discriminant, .. } = variant;
-                    analyzer.define_constant(Constant {
-                        span: *span,
-                        docs: None,
-                        visibility: ty.visibility(),
-                        name: name.clone(),
-                        value: discriminant.clone(),
-                    })?;
+                    analyzer.define_constant(
+                        &mut module,
+                        Constant {
+                            span: *span,
+                            docs: None,
+                            visibility: ty.visibility(),
+                            name: name.clone(),
+                            value: discriminant.clone(),
+                        },
+                    );
                 }
 
                 // Defer definition of the enum until we discover all constants
                 enums.push(ty.with_docs(docs.take()));
             },
             Form::Constant(constant) => {
-                analyzer.define_constant(constant.with_docs(docs.take()))?;
+                analyzer.define_constant(&mut module, constant.with_docs(docs.take()));
             },
             Form::Alias(item) if item.visibility().is_public() => match kind {
                 ModuleKind::Kernel if module.is_kernel() => {
@@ -152,11 +156,14 @@ pub fn analyze(
     visit_items(&mut module, &mut analyzer)?;
 
     // Check unused imports
+    // TODO(pauls): This warning is temporarily disabled until we rework how symbol usage is tracked
+    /*
     for import in module.aliases() {
         if !import.is_used() {
             analyzer.error(SemanticAnalysisError::UnusedImport { span: import.span() });
         }
     }
+     */
 
     analyzer.into_result().map(move |_| module)
 }
@@ -168,7 +175,7 @@ pub fn analyze(
 /// of a module graph and global program analysis to perform any remaining transformations.
 fn visit_items(module: &mut Module, analyzer: &mut AnalysisContext) -> Result<(), SyntaxError> {
     let is_kernel = module.is_kernel();
-    let locals = BTreeSet::from_iter(module.items().map(|p| p.name().clone()));
+    let locals = BTreeSet::from_iter(module.items().iter().map(|p| p.name().clone()));
     let mut items = VecDeque::from(core::mem::take(&mut module.items));
     while let Some(item) = items.pop_front() {
         match item {
@@ -179,9 +186,16 @@ fn visit_items(module: &mut Module, analyzer: &mut AnalysisContext) -> Result<()
                 }
 
                 // Evaluate all named immediates to their concrete values
+                log::debug!(target: "const-eval", "visiting procedure {}", procedure.name());
                 {
                     let mut visitor = ConstEvalVisitor::new(analyzer);
                     let _ = visitor.visit_mut_procedure(&mut procedure);
+                    if let Err(errs) = visitor.into_result() {
+                        for err in errs {
+                            log::error!(target: "const-eval", "error found in procedure {}: {err}", procedure.name());
+                            analyzer.error(err);
+                        }
+                    }
                 }
 
                 // Next, verify invoke targets:
@@ -190,6 +204,7 @@ fn visit_items(module: &mut Module, analyzer: &mut AnalysisContext) -> Result<()
                 // * Mark imports as used if they have at least one call to a procedure defined in
                 //   that module
                 // * Verify that all external callees have a matching import
+                log::debug!(target: "verify-invoke", "visiting procedure {}", procedure.name());
                 {
                     let mut visitor = VerifyInvokeTargets::new(
                         analyzer,
@@ -223,7 +238,8 @@ fn define_alias(
     module: &mut Module,
     context: &mut AnalysisContext,
 ) -> Result<(), SyntaxError> {
-    if let Err(err) = module.define_alias(item) {
+    let name = item.name().clone();
+    if let Err(err) = module.define_alias(item, context.source_manager()) {
         match err {
             SemanticAnalysisError::SymbolConflict { .. } => {
                 // Proceed anyway, to try and capture more errors
@@ -237,6 +253,8 @@ fn define_alias(
         }
     }
 
+    context.register_imported_name(name);
+
     Ok(())
 }
 
@@ -246,7 +264,7 @@ fn define_procedure(
     context: &mut AnalysisContext,
 ) -> Result<(), SyntaxError> {
     let name = procedure.name().clone();
-    if let Err(err) = module.define_procedure(procedure) {
+    if let Err(err) = module.define_procedure(procedure, context.source_manager()) {
         match err {
             SemanticAnalysisError::SymbolConflict { .. } => {
                 // Proceed anyway, to try and capture more errors
@@ -284,7 +302,7 @@ fn add_advice_map_entry(
         entry.name.clone(),
         ConstantExpr::Word(Span::new(entry.span, WordValue(*key))),
     );
-    context.define_constant(cst)?;
+    context.define_constant(module, cst);
     match module.advice_map.get(&key) {
         Some(_) => {
             context.error(SemanticAnalysisError::AdvMapKeyAlreadyDefined { span: entry.span });

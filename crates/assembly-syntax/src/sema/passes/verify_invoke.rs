@@ -1,4 +1,4 @@
-use alloc::collections::BTreeSet;
+use alloc::{boxed::Box, collections::BTreeSet};
 use core::ops::ControlFlow;
 
 use miden_debug_types::{SourceSpan, Span, Spanned};
@@ -48,10 +48,9 @@ impl<'a> VerifyInvokeTargets<'a> {
 impl VerifyInvokeTargets<'_> {
     fn resolve_local(&mut self, name: &Ident) -> ControlFlow<()> {
         if !self.procedures.contains(name) {
-            self.analyzer.error(SemanticAnalysisError::SymbolUndefined {
-                span: name.span(),
-                symbol: name.clone(),
-            });
+            self.analyzer.error(SemanticAnalysisError::SymbolResolutionError(Box::new(
+                SymbolResolutionError::undefined(name.span(), &self.analyzer.source_manager()),
+            )));
         }
         ControlFlow::Continue(())
     }

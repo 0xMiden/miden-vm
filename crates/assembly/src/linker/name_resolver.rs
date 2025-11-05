@@ -1,33 +1,20 @@
-// Allow unused assignments - required by miette::Diagnostic derive macro
-#![allow(unused_assignments)]
+use core::ops::ControlFlow;
 
-use alloc::{borrow::Cow, boxed::Box, collections::BTreeSet, sync::Arc, vec::Vec};
+use alloc::{borrow::Cow, boxed::Box, collections::BTreeSet, sync::Arc};
 
 use miden_assembly_syntax::{
     ast::{
-        AliasTarget, InvocationTarget, InvokeKind, ItemIndex, LocalSymbolResolutionError, Path,
-        SymbolResolution, TypeResolver, types,
+        AliasTarget, InvocationTarget, InvokeKind, Path, SymbolResolution, SymbolResolutionError,
     },
-    debuginfo::{SourceFile, SourceSpan, Span, Spanned},
-    diagnostics::{Diagnostic, RelatedLabel, miette},
+    debuginfo::{SourceManager, SourceSpan, Span, Spanned},
+    diagnostics::RelatedLabel,
 };
 
-use super::{Linker, ModuleLink, PreLinkModule};
+use super::Linker;
 use crate::{GlobalItemIndex, LinkerError, ModuleIndex};
 
 // HELPER STRUCTS
 // ================================================================================================
-
-/// The bare minimum information needed about a module in order to include it in name resolution.
-///
-/// We use this to represent information about pending modules that are not yet in the module graph
-/// of the linker, but that we need to include in name resolution in order to be able to fully
-/// resolve all names for a given set of modules.
-struct ThinModule {
-    index: ModuleIndex,
-    path: Arc<Path>,
-    resolver: crate::ast::LocalSymbolResolver,
-}
 
 /// Represents the context in which symbols should be resolved.
 ///
@@ -68,108 +55,6 @@ impl SymbolResolutionContext {
     }
 }
 
-#[derive(Debug, thiserror::Error, Diagnostic)]
-pub enum SymbolResolutionError {
-    #[error("undefined symbol reference")]
-    #[diagnostic(help("maybe you are missing an import?"))]
-    UndefinedSymbol {
-        #[label("this symbol path could not be resolved")]
-        span: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
-    },
-    #[error("invalid symbol reference")]
-    #[diagnostic(help(
-        "references to a subpath of an imported symbol require the imported item to be a module"
-    ))]
-    InvalidAliasTarget {
-        #[label("this reference specifies a subpath relative to an import")]
-        span: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
-        #[related]
-        relative_to: Option<RelatedLabel>,
-    },
-    #[error("invalid symbol path")]
-    #[diagnostic(help("all ancestors of a path must be modules"))]
-    InvalidSubPath {
-        #[label("this path specifies a subpath relative to another item")]
-        span: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
-        #[related]
-        relative_to: Option<RelatedLabel>,
-    },
-    #[error("invalid symbol reference: wrong type")]
-    #[diagnostic()]
-    InvalidSymbolType {
-        expected: &'static str,
-        #[label("expected this symbol to reference a {expected} item")]
-        span: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
-        #[related]
-        actual: Option<RelatedLabel>,
-    },
-}
-
-impl SymbolResolutionError {
-    pub fn from_local(err: LocalSymbolResolutionError, linker: &Linker) -> Self {
-        match err {
-            LocalSymbolResolutionError::UndefinedSymbol { span } => {
-                let source_file = linker.source_manager.get(span.source_id()).ok();
-                Self::UndefinedSymbol { span, source_file }
-            },
-            LocalSymbolResolutionError::InvalidAliasTarget { referer, span } => {
-                let referer_source_file = linker.source_manager.get(referer.source_id()).ok();
-                let source_file = linker.source_manager.get(span.source_id()).ok();
-                Self::InvalidAliasTarget {
-                    span,
-                    source_file,
-                    relative_to: Some(
-                        RelatedLabel::advice(
-                            "this reference specifies a subpath relative to an import",
-                        )
-                        .with_labeled_span(
-                            referer,
-                            "this reference specifies a subpath relative to an import",
-                        )
-                        .with_source_file(referer_source_file),
-                    ),
-                }
-            },
-            LocalSymbolResolutionError::InvalidSubPath { span, relative_to } => {
-                let relative_to_source_file =
-                    linker.source_manager.get(relative_to.source_id()).ok();
-                let source_file = linker.source_manager.get(span.source_id()).ok();
-                Self::InvalidSubPath {
-                    span,
-                    source_file,
-                    relative_to: Some(
-                        RelatedLabel::advice("but this item is not a module")
-                            .with_labeled_span(relative_to, "but this item is not a module")
-                            .with_source_file(relative_to_source_file),
-                    ),
-                }
-            },
-            LocalSymbolResolutionError::InvalidSymbolType { expected, span, actual } => {
-                let actual_source_file = linker.source_manager.get(actual.source_id()).ok();
-                let source_file = linker.source_manager.get(span.source_id()).ok();
-                Self::InvalidSymbolType {
-                    expected,
-                    span,
-                    source_file,
-                    actual: Some(
-                        RelatedLabel::advice("but the symbol resolved to this item")
-                            .with_labeled_span(actual, "but the symbol resolved to this item")
-                            .with_source_file(actual_source_file),
-                    ),
-                }
-            },
-        }
-    }
-}
-
 // SYMBOL RESOLVER
 // ================================================================================================
 
@@ -186,33 +71,27 @@ impl SymbolResolutionError {
 pub struct SymbolResolver<'a> {
     /// The graph containing already-compiled and partially-resolved modules.
     graph: &'a Linker,
-    /// The set of modules which are being added to `graph`, but which have not been fully
-    /// processed yet.
-    pending: Vec<ThinModule>,
 }
 
 impl<'a> SymbolResolver<'a> {
     /// Create a new [SymbolResolver] for the provided [Linker].
     pub fn new(graph: &'a Linker) -> Self {
-        Self { graph, pending: vec![] }
+        Self { graph }
     }
 
-    /// Add a module to the set of "pending" modules this resolver will consult when doing
-    /// resolution.
-    ///
-    /// Pending modules are those which are being added to the underlying module graph, but which
-    /// have not been processed yet. When resolving symbols we may need to visit those modules to
-    /// determine the location of the actual definition, but they do not need to be fully
-    /// validated/processed to do so.
-    ///
-    /// This is typically called when we begin processing the pending modules, by adding those we
-    /// have not yet processed to the resolver, as we resolve symbols for each module in the set.
-    pub fn push_pending(&mut self, module: &PreLinkModule) {
-        self.pending.push(ThinModule {
-            index: module.module_index,
-            path: module.module.path().to_path_buf().into_boxed_path().into(),
-            resolver: module.module.resolver(),
-        });
+    #[inline(always)]
+    pub fn source_manager(&self) -> &dyn SourceManager {
+        &self.graph.source_manager
+    }
+
+    #[inline(always)]
+    pub fn source_manager_arc(&self) -> Arc<dyn SourceManager> {
+        self.graph.source_manager.clone()
+    }
+
+    #[inline(always)]
+    pub(crate) fn linker(&self) -> &Linker {
+        self.graph
     }
 
     /// Resolve `target`, a possibly-resolved symbol reference, to a [SymbolResolution], using
@@ -278,19 +157,21 @@ impl<'a> SymbolResolver<'a> {
     ) -> Result<SymbolResolution, LinkerError> {
         log::debug!(target: "name-resolver::path", "resolving path '{path}' (absolute = {})", path.is_absolute());
         if let Some(symbol) = path.as_ident() {
+            log::debug!(target: "name-resolver::path", "resolving path '{symbol}' as local symbol");
             return self.resolve(context, Span::new(path.span(), &symbol));
         }
 
         // Try to resolve the path to a module first, if the context indicates it is not an
         // explicit invocation target
-        if context.kind.is_none()
-            && let Some(id) = self.get_module_index_by_path(path.inner())
-        {
-            log::debug!(target: "name-resolver::path", "resolved '{path}' to module id '{id}'");
-            return Ok(SymbolResolution::Module {
-                id,
-                path: Span::new(context.span, self.module_path(id).to_path_buf().into()),
-            });
+        if context.kind.is_none() {
+            log::debug!(target: "name-resolver::path", "attempting to resolve '{path}' as module path");
+            if let Some(id) = self.get_module_index_by_path(path.inner()) {
+                log::debug!(target: "name-resolver::path", "resolved '{path}' to module id '{id}'");
+                return Ok(SymbolResolution::Module {
+                    id,
+                    path: Span::new(context.span, self.module_path(id).to_path_buf().into()),
+                });
+            }
         }
 
         // The path must refer to an item, so resolve the item
@@ -301,7 +182,7 @@ impl<'a> SymbolResolver<'a> {
             log::debug!(target: "name-resolver::path", "resolving path as '{subpath}' relative to '{ns}'");
             // Check if the first component of the namespace was previously imported
             match self.resolve_import(context, Span::new(path.span(), ns))? {
-                Some(SymbolResolution::Exact { gid, path }) => {
+                SymbolResolution::Exact { gid, path } => {
                     if subpath.is_empty() {
                         log::debug!(target: "name-resolver::path", "resolved '{ns}' to imported item '{path}'");
                         Ok(SymbolResolution::Exact { gid, path })
@@ -319,7 +200,7 @@ impl<'a> SymbolResolver<'a> {
                         .into())
                     }
                 },
-                Some(SymbolResolution::MastRoot(digest)) => {
+                SymbolResolution::MastRoot(digest) => {
                     if subpath.is_empty() {
                         log::debug!(target: "name-resolver::path", "resolved '{ns}' to imported procedure '{digest}'");
                         Ok(SymbolResolution::MastRoot(digest))
@@ -337,7 +218,7 @@ impl<'a> SymbolResolver<'a> {
                         .into())
                     }
                 },
-                Some(SymbolResolution::Module { id, path: module_path }) => {
+                SymbolResolution::Module { id, path: module_path } => {
                     log::debug!(target: "name-resolver::path", "resolved '{ns}' to imported module '{module_path}'");
                     if subpath.is_empty() {
                         return Ok(SymbolResolution::Module { id, path: module_path });
@@ -352,15 +233,7 @@ impl<'a> SymbolResolver<'a> {
                     };
                     self.resolve_path(&context, Span::new(span, path.as_path()))
                 },
-                Some(SymbolResolution::Local(_) | SymbolResolution::External(_)) => unreachable!(),
-                None => {
-                    log::debug!(target: "name-resolver::path", "could not resolve '{ns}' to an import, falling back to global search");
-                    // Treat the path as fully-qualified and attempt to resolve it as a module
-                    // first, then as an item if no such module exists
-                    let span = path.span();
-                    let path = path.to_absolute();
-                    self.find(context, Span::new(span, &path))
-                },
+                SymbolResolution::Local(_) | SymbolResolution::External(_) => unreachable!(),
             }
         }
     }
@@ -372,8 +245,8 @@ impl<'a> SymbolResolver<'a> {
         symbol: Span<&str>,
     ) -> Result<SymbolResolution, LinkerError> {
         log::debug!(target: "name-resolver::resolve", "resolving symbol '{symbol}'");
-        match self.resolve_local(context, symbol.inner()).map_err(Box::new)? {
-            Some(SymbolResolution::Local(index)) if context.in_syscall() => {
+        match self.resolve_local(context, symbol.inner())? {
+            SymbolResolution::Local(index) if context.in_syscall() => {
                 log::debug!(target: "name-resolver::resolve", "resolved symbol to local item '{index}'");
                 let gid = GlobalItemIndex {
                     module: self.graph.kernel_index.unwrap(),
@@ -384,7 +257,7 @@ impl<'a> SymbolResolver<'a> {
                     path: Span::new(index.span(), self.item_path(gid)),
                 })
             },
-            Some(SymbolResolution::Local(index)) => {
+            SymbolResolution::Local(index) => {
                 log::debug!(target: "name-resolver::resolve", "resolved symbol to local item '{index}'");
                 let gid = GlobalItemIndex {
                     module: context.module,
@@ -395,7 +268,7 @@ impl<'a> SymbolResolver<'a> {
                     path: Span::new(index.span(), self.item_path(gid)),
                 })
             },
-            Some(SymbolResolution::External(fqn)) => match self.find(context, fqn.as_deref())? {
+            SymbolResolution::External(fqn) => match self.find(context, fqn.as_deref())? {
                 resolution @ (SymbolResolution::Exact { .. } | SymbolResolution::Module { .. }) => {
                     log::debug!(target: "name-resolver::resolve", "resolved '{symbol}' via '{fqn}': {resolution:?}");
                     Ok(resolution)
@@ -404,7 +277,7 @@ impl<'a> SymbolResolver<'a> {
                 | SymbolResolution::Local(_)
                 | SymbolResolution::MastRoot(_) => unreachable!(),
             },
-            Some(SymbolResolution::MastRoot(digest)) => {
+            SymbolResolution::MastRoot(digest) => {
                 log::debug!(target: "name-resolver::resolve", "resolved '{symbol}' to digest {digest}");
                 match self.graph.get_procedure_index_by_digest(&digest) {
                     Some(gid) => Ok(SymbolResolution::Exact {
@@ -414,25 +287,10 @@ impl<'a> SymbolResolver<'a> {
                     None => Ok(SymbolResolution::MastRoot(digest)),
                 }
             },
-            Some(res @ (SymbolResolution::Exact { .. } | SymbolResolution::Module { .. })) => {
+            res @ (SymbolResolution::Exact { .. } | SymbolResolution::Module { .. }) => {
                 log::debug!(target: "name-resolver::resolve", "resolved '{symbol}': {res:?}");
                 Ok(res)
             },
-            None => Err(LinkerError::Failed {
-                labels: vec![
-                    RelatedLabel::error("undefined procedure")
-                        .with_source_file(
-                            self.graph.source_manager.get(symbol.span().source_id()).ok(),
-                        )
-                        .with_labeled_span(symbol.span(), "unable to resolve this name locally"),
-                    RelatedLabel::advice("related item")
-                        .with_source_file(
-                            self.graph.source_manager.get(context.span.source_id()).ok(),
-                        )
-                        .with_labeled_span(context.span, "reference was resolved from here"),
-                ]
-                .into(),
-            }),
         }
     }
 
@@ -441,141 +299,73 @@ impl<'a> SymbolResolver<'a> {
         &self,
         context: &SymbolResolutionContext,
         symbol: Span<&str>,
-    ) -> Result<Option<SymbolResolution>, LinkerError> {
+    ) -> Result<SymbolResolution, LinkerError> {
         log::debug!(target: "name-resolver::import", "resolving import '{symbol}' from module index {}", context.module);
-        let caller_index = context.module.as_usize();
-        if let Some(caller_module) = self.graph.modules[caller_index].as_ref() {
-            match caller_module {
-                ModuleLink::Ast(module) => {
-                    log::debug!(target: "name-resolver::import", "context is ast module '{}'", module.path());
-                    let found = module.resolve(symbol.inner()).map_err(|err| {
-                        Box::new(SymbolResolutionError::from_local(err, self.graph))
-                    })?;
-                    log::debug!(target: "name-resolver::import", "local resolution for '{symbol}': {found:?}");
-                    match found {
-                        Some(SymbolResolution::External(path)) => {
-                            let context = SymbolResolutionContext {
-                                span: symbol.span(),
-                                module: context.module,
-                                kind: None,
-                            };
-                            self.resolve_path(&context, path.as_deref()).map(Some)
-                        },
-                        Some(SymbolResolution::Local(item)) => {
-                            let gid = context.module + item.into_inner();
-                            Ok(Some(SymbolResolution::Exact {
-                                gid,
-                                path: Span::new(item.span(), self.item_path(gid)),
-                            }))
-                        },
-                        Some(SymbolResolution::MastRoot(digest)) => {
-                            match self.graph.get_procedure_index_by_digest(&digest) {
-                                Some(gid) => Ok(Some(SymbolResolution::Exact {
-                                    gid,
-                                    path: Span::new(digest.span(), self.item_path(gid)),
-                                })),
-                                None => Ok(Some(SymbolResolution::MastRoot(digest))),
-                            }
-                        },
-                        res @ Some(
-                            SymbolResolution::Exact { .. } | SymbolResolution::Module { .. },
-                        ) => Ok(res),
-                        None => Ok(None),
-                    }
-                },
-                ModuleLink::Info(module) => {
-                    log::debug!(target: "name-resolver::import", "context is a compiled module '{}'", module.path());
-                    Ok(module.get_item_index_by_name(symbol.inner()).map(|idx| {
-                        let gid = context.module + idx;
-                        let path = self.item_path(gid);
-                        log::debug!(target: "name-resolver::import", "local resolution for '{symbol}': {path} @ {gid}");
-                        SymbolResolution::Exact {
-                            gid,
-                            path: Span::new(symbol.span(), path),
-                        }
-                    }))
-                },
-            }
-        } else {
-            let pending_index = self.pending_index(context.module);
-            let pending = &self.pending[pending_index];
-            log::debug!(target: "name-resolver::import", "context is a pending module '{}'", &pending.path);
-            let found = pending
-                .resolver
-                .resolve(symbol.inner())
-                .map_err(|err| Box::new(SymbolResolutionError::from_local(err, self.graph)))?;
-            log::debug!(target: "name-resolver::import", "local resolution for '{symbol}': {found:?}");
-            match found {
-                Some(SymbolResolution::External(path)) => {
-                    let context = SymbolResolutionContext {
-                        span: symbol.span(),
-                        module: context.module,
-                        kind: None,
-                    };
-                    self.resolve_path(&context, path.as_deref()).map(Some)
-                },
-                Some(SymbolResolution::Local(item)) => {
-                    let gid = context.module + item.into_inner();
-                    Ok(Some(SymbolResolution::Exact {
+        let module = &self.graph[context.module];
+        log::debug!(target: "name-resolver::import", "context source type is '{:?}'", module.source);
+
+        let found = module.resolve(symbol, self)?;
+        log::debug!(target: "name-resolver::import", "local resolution for '{symbol}': {found:?}");
+        match found {
+            SymbolResolution::External(path) => {
+                let context = SymbolResolutionContext {
+                    span: symbol.span(),
+                    module: context.module,
+                    kind: None,
+                };
+                self.resolve_path(&context, path.as_deref())
+            },
+            SymbolResolution::Local(item) => {
+                let gid = context.module + item.into_inner();
+                Ok(SymbolResolution::Exact {
+                    gid,
+                    path: Span::new(item.span(), self.item_path(gid)),
+                })
+            },
+            SymbolResolution::MastRoot(digest) => {
+                match self.graph.get_procedure_index_by_digest(&digest) {
+                    Some(gid) => Ok(SymbolResolution::Exact {
                         gid,
-                        path: Span::new(item.span(), self.item_path(gid)),
-                    }))
-                },
-                Some(SymbolResolution::MastRoot(digest)) => {
-                    match self.graph.get_procedure_index_by_digest(&digest) {
-                        Some(gid) => Ok(Some(SymbolResolution::Exact {
-                            gid,
-                            path: Span::new(digest.span(), self.item_path(gid)),
-                        })),
-                        None => Ok(Some(SymbolResolution::MastRoot(digest))),
-                    }
-                },
-                res @ Some(SymbolResolution::Exact { .. } | SymbolResolution::Module { .. }) => {
-                    Ok(res)
-                },
-                None => Ok(None),
-            }
+                        path: Span::new(digest.span(), self.item_path(gid)),
+                    }),
+                    None => Ok(SymbolResolution::MastRoot(digest)),
+                }
+            },
+            res @ (SymbolResolution::Exact { .. } | SymbolResolution::Module { .. }) => Ok(res),
         }
     }
 
-    fn resolve_local(
+    pub fn resolve_local(
         &self,
         context: &SymbolResolutionContext,
         symbol: &str,
-    ) -> Result<Option<SymbolResolution>, SymbolResolutionError> {
+    ) -> Result<SymbolResolution, Box<SymbolResolutionError>> {
         let module = if context.in_syscall() {
             // Resolve local names relative to the kernel
             match self.graph.kernel_index {
                 Some(kernel) => kernel,
-                None => return Ok(None),
+                None => {
+                    return Err(Box::new(SymbolResolutionError::UndefinedSymbol {
+                        span: context.span,
+                        source_file: self.source_manager().get(context.span.source_id()).ok(),
+                    }));
+                },
             }
         } else {
             context.module
         };
-        self.resolve_local_with_index(module, symbol)
+        self.resolve_local_with_index(module, Span::new(context.span, symbol))
     }
 
     fn resolve_local_with_index(
         &self,
         module: ModuleIndex,
-        symbol: &str,
-    ) -> Result<Option<SymbolResolution>, SymbolResolutionError> {
-        let module_index = module.as_usize();
-        log::debug!(target: "name-resolver::local", "resolving '{symbol}' in module {}", self.module_path(module));
-        if let Some(module) = self.graph.modules[module_index].as_ref() {
-            log::debug!(target: "name-resolver::local", "context module has been linked");
-            module
-                .resolve(symbol)
-                .map_err(|err| SymbolResolutionError::from_local(err, self.graph))
-        } else {
-            log::debug!(target: "name-resolver::local", "context module is pending");
-            let pending_index = self.pending_index(module);
-            log::debug!(target: "name-resolver", "resolving in pending module {pending_index} ({})", &self.pending[pending_index].path);
-            self.pending[pending_index]
-                .resolver
-                .resolve(symbol)
-                .map_err(|err| SymbolResolutionError::from_local(err, self.graph))
-        }
+        symbol: Span<&str>,
+    ) -> Result<SymbolResolution, Box<SymbolResolutionError>> {
+        let module = &self.graph[module];
+        log::debug!(target: "name-resolver::local", "resolving '{symbol}' in module {}", &module.path);
+        log::debug!(target: "name-resolver::local", "module status: {:?}", &module.status());
+        module.resolve(symbol, self)
     }
 
     /// Resolve `callee` to its concrete definition, returning the corresponding
@@ -600,210 +390,250 @@ impl<'a> SymbolResolver<'a> {
         let mut resolving = path.map(|p| Arc::<Path>::from(p.to_path_buf()));
         let mut visited = BTreeSet::default();
         loop {
-            log::debug!(target: "name-resolver::find", "resolving {} of {resolving} from {} ({})", current_context.display_kind(), &current_context.module, self.module_path(current_context.module));
+            let current_module_path = self.module_path(current_context.module);
+            log::debug!(target: "name-resolver::find", "resolving {} of {resolving} from {} ({current_module_path})", current_context.display_kind(), &current_context.module);
 
             let (resolving_symbol, resolving_parent) = resolving.split_last().unwrap();
+            let resolving_symbol = Span::new(resolving.span(), resolving_symbol);
 
-            // Try to resolve as a module first, if the context indicates this is not an explicit
-            // invocation
-            if context.kind.is_none()
-                && let Some(id) = self
-                    .find_module_index(current_context.module, resolving.as_deref())
-                    .map_err(Box::new)?
+            // Handle trivial case where we are resolving the current module path in the context of
+            // that module.
+            if current_module_path == &**resolving {
+                return Ok(SymbolResolution::Module {
+                    id: current_context.module,
+                    path: resolving,
+                });
+            }
+
+            // Handle the case where we are resolving a symbol in the current module
+            if resolving_parent == current_module_path {
+                match self.find_local(
+                    &current_context,
+                    resolving_symbol,
+                    resolving.inner().clone(),
+                    &mut visited,
+                ) {
+                    ControlFlow::Break(result) => break result,
+                    ControlFlow::Continue(LocalFindResult { context, resolving: next }) => {
+                        current_context = Cow::Owned(context);
+                        resolving = next;
+                        continue;
+                    },
+                }
+            }
+
+            // There are three possibilities at this point
+            //
+            // 1. `resolving` refers to a module, and that is how we will resolve it
+            // 2. `resolving` refers to an item, so we need to resolve `resolving_parent` to a
+            //     module first, then resolve `resolving_symbol` relative to that module.
+            // 3. `resolving` refers to an undefined symbol
+
+            // First, check if `resolving` refers to a module in the global module table
+            if let Some(id) =
+                self.find_module_index(current_context.module, resolving.as_deref())?
             {
+                log::debug!(target: "name-resolver::find", "resolved '{resolving}' to module {id} ({})", self.module_path(id));
                 return Ok(SymbolResolution::Module {
                     id,
                     path: Span::new(resolving.span(), self.module_path(id).to_path_buf().into()),
                 });
             }
 
-            // We either must treat the path as an item, or we failed to resolve it as a module, so
-            // the path must be resolved as a nested item or alias, but it may also simply be
-            // a reference to an undefined module. If we can't find the expected parent module,
-            // then treat the whole path as an undefined item reference, the expected type is
-            // determined by the resolution context
+            // We must assume that `resolving` is an item path, so we resolve `resolving_parent` as
+            // a module first, and proceed from there.
+            log::debug!(target: "name-resolver::find", "resolving '{resolving_parent}' from {} ({current_module_path})", current_context.module);
             let module_index = self
                 .find_module_index(
                     current_context.module,
                     Span::new(resolving.span(), resolving_parent),
-                )
-                .map_err(Box::new)?
+                )?
                 .ok_or_else(|| {
-                    if current_context.kind.is_none() {
-                        LinkerError::UndefinedModule {
-                            span: current_context.span,
-                            source_file: self
-                                .graph
-                                .source_manager
-                                .get(current_context.span.source_id())
-                                .ok(),
-                            path: (*resolving).clone(),
-                        }
-                    } else {
-                        LinkerError::UndefinedSymbol {
-                            span: current_context.span,
-                            source_file: self
-                                .graph
-                                .source_manager
-                                .get(current_context.span.source_id())
-                                .ok(),
-                            path: (*resolving).clone(),
-                        }
+                    // If we couldn't resolve `resolving_parent` as a module either, then
+                    // `resolving` must be an undefined symbol path.
+                    LinkerError::UndefinedModule {
+                        span: current_context.span,
+                        source_file: self
+                            .graph
+                            .source_manager
+                            .get(current_context.span.source_id())
+                            .ok(),
+                        path: (*resolving).clone(),
                     }
                 })?;
-            log::debug!(target: "name-resolver::find", "resolved {resolving_parent} to module {module_index} ({})", self.module_path(module_index));
+            log::debug!(target: "name-resolver::find", "resolved '{resolving_parent}' to module {module_index} ({})", self.module_path(module_index));
 
             log::debug!(target: "name-resolver::find", "resolving {resolving_symbol} in module {resolving_parent}");
-            let resolved = self
-                .resolve_local_with_index(module_index, resolving_symbol)
-                .map_err(Box::new)?;
-            match resolved {
-                Some(SymbolResolution::Local(index)) => {
-                    log::debug!(target: "name-resolver::find", "resolved {resolving_symbol} to local item {index}");
-                    let gid = GlobalItemIndex {
-                        module: module_index,
-                        index: index.into_inner(),
-                    };
-                    if context.in_syscall() && self.graph.kernel_index != Some(module_index) {
-                        break Err(LinkerError::InvalidSysCallTarget {
-                            span: current_context.span,
-                            source_file: self
-                                .graph
-                                .source_manager
-                                .get(current_context.span.source_id())
-                                .ok(),
-                            callee: resolving.into_inner(),
-                        });
-                    }
-                    break Ok(SymbolResolution::Exact {
-                        gid,
-                        path: Span::new(index.span(), self.item_path(gid)),
-                    });
-                },
-                Some(SymbolResolution::External(fqn)) => {
-                    log::debug!(target: "name-resolver::find", "resolved {resolving_symbol} to external procedure name {fqn}");
-                    // If we see that we're about to enter an infinite resolver loop because of a
-                    // recursive alias, return an error
-                    if !visited.insert(fqn.clone()) {
-                        break Err(LinkerError::Failed {
-                            labels: vec![
-                                RelatedLabel::error("recursive alias")
-                                    .with_source_file(self.graph.source_manager.get(fqn.span().source_id()).ok())
-                                    .with_labeled_span(fqn.span(), "occurs because this import causes import resolution to loop back on itself"),
-                                RelatedLabel::advice("recursive alias")
-                                    .with_source_file(self.graph.source_manager.get(context.span.source_id()).ok())
-                                    .with_labeled_span(context.span, "as a result of resolving this procedure reference"),
-                            ].into(),
-                        });
-                    }
-                    current_context = Cow::Owned(SymbolResolutionContext {
-                        span: fqn.span(),
-                        module: module_index,
-                        kind: current_context.kind,
-                    });
-                    resolving = fqn;
-                },
-                Some(SymbolResolution::MastRoot(ref digest)) => {
-                    log::debug!(target: "name-resolver::find", "resolved {} to MAST root {digest}", resolving.last().unwrap());
-                    if let Some(gid) = self.graph.get_procedure_index_by_digest(digest) {
-                        break Ok(SymbolResolution::Exact {
-                            gid,
-                            path: Span::new(digest.span(), self.item_path(gid)),
-                        });
-                    }
-                    // This is a phantom procedure - we know its root, but do not have its
-                    // definition
-                    break Err(LinkerError::Failed {
-                        labels: vec![
-                            RelatedLabel::error("undefined procedure")
-                                .with_source_file(
-                                    self.graph.source_manager.get(context.span.source_id()).ok(),
-                                )
-                                .with_labeled_span(
-                                    context.span,
-                                    "unable to resolve this reference to its definition",
-                                ),
-                            RelatedLabel::error("name resolution cannot proceed")
-                                .with_source_file(
-                                    self.graph
-                                        .source_manager
-                                        .get(resolving.span().source_id())
-                                        .ok(),
-                                )
-                                .with_labeled_span(
-                                    resolving.span(),
-                                    "this name cannot be resolved",
-                                ),
-                        ]
-                        .into(),
-                    });
-                },
-                Some(res @ (SymbolResolution::Exact { .. } | SymbolResolution::Module { .. })) => {
-                    break Ok(res);
-                },
-                None if context.in_syscall() => {
-                    log::debug!(target: "name-resolver::find", "unable to resolve {resolving_symbol}");
-                    if self.graph.has_nonempty_kernel() {
-                        // No kernel, so this invoke is invalid anyway
-                        break Err(LinkerError::Failed {
-                            labels: vec![
-                                RelatedLabel::error("undefined kernel procedure")
-                                    .with_source_file(self.graph.source_manager.get(context.span.source_id()).ok())
-                                    .with_labeled_span(context.span, "unable to resolve this reference to a procedure in the current kernel"),
-                                RelatedLabel::error("invalid syscall")
-                                    .with_source_file(self.graph.source_manager.get(resolving.span().source_id()).ok())
-                                    .with_labeled_span(
-                                        resolving.span(),
-                                        "this name cannot be resolved, because the assembler has an empty kernel",
-                                    ),
-                            ].into()
-                        });
-                    } else {
-                        // No such kernel procedure
-                        break Err(LinkerError::Failed {
-                            labels: vec![
-                                RelatedLabel::error("undefined kernel procedure")
-                                    .with_source_file(self.graph.source_manager.get(context.span.source_id()).ok())
-                                    .with_labeled_span(context.span, "unable to resolve this reference to a procedure in the current kernel"),
-                                RelatedLabel::error("name resolution cannot proceed")
-                                    .with_source_file(self.graph.source_manager.get(resolving.span().source_id()).ok())
-                                    .with_labeled_span(
-                                        resolving.span(),
-                                        "this name cannot be resolved",
-                                    ),
-                            ].into()
-                        });
-                    }
-                },
-                None => {
-                    log::debug!(target: "name-resolver::find", "unable to resolve {resolving_symbol}");
-                    // No such procedure known to `module`
-                    break Err(LinkerError::Failed {
-                        labels: vec![
-                            RelatedLabel::error("undefined procedure")
-                                .with_source_file(
-                                    self.graph.source_manager.get(context.span.source_id()).ok(),
-                                )
-                                .with_labeled_span(
-                                    context.span,
-                                    "unable to resolve this reference to its definition",
-                                ),
-                            RelatedLabel::error("name resolution cannot proceed")
-                                .with_source_file(
-                                    self.graph
-                                        .source_manager
-                                        .get(resolving.span().source_id())
-                                        .ok(),
-                                )
-                                .with_labeled_span(
-                                    resolving.span(),
-                                    "this name cannot be resolved",
-                                ),
-                        ]
-                        .into(),
-                    });
+            let context = SymbolResolutionContext {
+                module: module_index,
+                span: current_context.span,
+                kind: current_context.kind,
+            };
+            match self.find_local(
+                &context,
+                resolving_symbol,
+                resolving.inner().clone(),
+                &mut visited,
+            ) {
+                ControlFlow::Break(result) => break result,
+                ControlFlow::Continue(LocalFindResult { context, resolving: next }) => {
+                    current_context = Cow::Owned(context);
+                    resolving = next;
                 },
             }
+        }
+    }
+
+    fn find_local(
+        &self,
+        context: &SymbolResolutionContext,
+        symbol: Span<&str>,
+        resolving: Arc<Path>,
+        visited: &mut BTreeSet<Span<Arc<Path>>>,
+    ) -> ControlFlow<Result<SymbolResolution, LinkerError>, LocalFindResult> {
+        let resolved = self.resolve_local_with_index(context.module, symbol);
+        match resolved {
+            Ok(SymbolResolution::Local(index)) => {
+                log::debug!(target: "name-resolver::find", "resolved {symbol} to local item {index}");
+                let gid = GlobalItemIndex {
+                    module: context.module,
+                    index: index.into_inner(),
+                };
+                if context.in_syscall() && self.graph.kernel_index != Some(context.module) {
+                    return ControlFlow::Break(Err(LinkerError::InvalidSysCallTarget {
+                        span: context.span,
+                        source_file: self.graph.source_manager.get(context.span.source_id()).ok(),
+                        callee: resolving,
+                    }));
+                }
+                ControlFlow::Break(Ok(SymbolResolution::Exact {
+                    gid,
+                    path: Span::new(index.span(), self.item_path(gid)),
+                }))
+            },
+            Ok(SymbolResolution::External(fqn)) => {
+                log::debug!(target: "name-resolver::find", "resolved {symbol} to external path {fqn}");
+                // If we see that we're about to enter an infinite resolver loop because of a
+                // recursive alias, return an error
+                if !visited.insert(fqn.clone()) {
+                    ControlFlow::Break(Err(LinkerError::Failed {
+                                    labels: vec![
+                                        RelatedLabel::error("recursive alias")
+                                            .with_source_file(self.graph.source_manager.get(fqn.span().source_id()).ok())
+                                            .with_labeled_span(fqn.span(), "occurs because this import causes import resolution to loop back on itself"),
+                                        RelatedLabel::advice("recursive alias")
+                                            .with_source_file(self.graph.source_manager.get(context.span.source_id()).ok())
+                                            .with_labeled_span(context.span, "as a result of resolving this procedure reference"),
+                                    ].into(),
+                                }))
+                } else {
+                    ControlFlow::Continue(LocalFindResult {
+                        context: SymbolResolutionContext {
+                            span: fqn.span(),
+                            module: context.module,
+                            kind: context.kind,
+                        },
+                        resolving: fqn,
+                    })
+                }
+            },
+            Ok(SymbolResolution::MastRoot(ref digest)) => {
+                log::debug!(target: "name-resolver::find", "resolved {symbol} to MAST root {digest}");
+                if let Some(gid) = self.graph.get_procedure_index_by_digest(digest) {
+                    ControlFlow::Break(Ok(SymbolResolution::Exact {
+                        gid,
+                        path: Span::new(digest.span(), self.item_path(gid)),
+                    }))
+                } else {
+                    // This is a phantom procedure - we know its root, but do not have its
+                    // definition
+                    ControlFlow::Break(Err(LinkerError::Failed {
+                        labels: vec![
+                            RelatedLabel::error("undefined procedure")
+                                .with_source_file(
+                                    self.graph.source_manager.get(context.span.source_id()).ok(),
+                                )
+                                .with_labeled_span(
+                                    context.span,
+                                    "unable to resolve this reference to its definition",
+                                ),
+                            RelatedLabel::error("name resolution cannot proceed")
+                                .with_source_file(
+                                    self.graph.source_manager.get(symbol.span().source_id()).ok(),
+                                )
+                                .with_labeled_span(symbol.span(), "this name cannot be resolved"),
+                        ]
+                        .into(),
+                    }))
+                }
+            },
+            Ok(res @ (SymbolResolution::Exact { .. } | SymbolResolution::Module { .. })) => {
+                ControlFlow::Break(Ok(res))
+            },
+            Err(err) if context.in_syscall() => {
+                if let SymbolResolutionError::UndefinedSymbol { .. } = &*err {
+                    log::debug!(target: "name-resolver::find", "unable to resolve {symbol}");
+                    if self.graph.has_nonempty_kernel() {
+                        // No kernel, so this invoke is invalid anyway
+                        ControlFlow::Break(Err(LinkerError::Failed {
+                                        labels: vec![
+                                            RelatedLabel::error("undefined kernel procedure")
+                                                .with_source_file(self.graph.source_manager.get(context.span.source_id()).ok())
+                                                .with_labeled_span(context.span, "unable to resolve this reference to a procedure in the current kernel"),
+                                            RelatedLabel::error("invalid syscall")
+                                                .with_source_file(self.graph.source_manager.get(symbol.span().source_id()).ok())
+                                                .with_labeled_span(
+                                                    symbol.span(),
+                                                    "this name cannot be resolved, because the assembler has an empty kernel",
+                                                ),
+                                        ].into()
+                                    }))
+                    } else {
+                        // No such kernel procedure
+                        ControlFlow::Break(Err(LinkerError::Failed {
+                                        labels: vec![
+                                            RelatedLabel::error("undefined kernel procedure")
+                                                .with_source_file(self.graph.source_manager.get(context.span.source_id()).ok())
+                                                .with_labeled_span(context.span, "unable to resolve this reference to a procedure in the current kernel"),
+                                            RelatedLabel::error("name resolution cannot proceed")
+                                                .with_source_file(self.graph.source_manager.get(symbol.span().source_id()).ok())
+                                                .with_labeled_span(
+                                                    symbol.span(),
+                                                    "this name cannot be resolved",
+                                                ),
+                                        ].into()
+                                    }))
+                    }
+                } else {
+                    ControlFlow::Break(Err(LinkerError::SymbolResolution(err)))
+                }
+            },
+            Err(err) => {
+                if matches!(&*err, SymbolResolutionError::UndefinedSymbol { .. }) {
+                    log::debug!(target: "name-resolver::find", "unable to resolve {symbol}");
+                    // No such procedure known to `module`
+                    ControlFlow::Break(Err(LinkerError::Failed {
+                        labels: vec![
+                            RelatedLabel::error("undefined item")
+                                .with_source_file(
+                                    self.graph.source_manager.get(context.span.source_id()).ok(),
+                                )
+                                .with_labeled_span(
+                                    context.span,
+                                    "unable to resolve this reference to its definition",
+                                ),
+                            RelatedLabel::error("name resolution cannot proceed")
+                                .with_source_file(
+                                    self.graph.source_manager.get(symbol.span().source_id()).ok(),
+                                )
+                                .with_labeled_span(symbol.span(), "this name cannot be resolved"),
+                        ]
+                        .into(),
+                    }))
+                } else {
+                    ControlFlow::Break(Err(LinkerError::SymbolResolution(err)))
+                }
+            },
         }
     }
 
@@ -812,171 +642,76 @@ impl<'a> SymbolResolver<'a> {
         &self,
         src: ModuleIndex,
         path: Span<&Path>,
-    ) -> Result<Option<ModuleIndex>, SymbolResolutionError> {
-        log::debug!(target: "name-resolver", "looking up module index for {path} relative to {src}");
+    ) -> Result<Option<ModuleIndex>, Box<SymbolResolutionError>> {
+        log::debug!(target: "name-resolver", "looking up module index for {path} in context of {src}");
         let found = self.get_module_index_by_path(path.inner());
         if found.is_some() {
             return Ok(found);
         }
 
-        log::debug!(target: "name-resolver", "{path} is not in the global symbol table");
+        if path.is_absolute() {
+            log::debug!(target: "name-resolver", "{path} is not in the global module table, must be an item path");
+            return Ok(None);
+        }
+
+        log::debug!(target: "name-resolver", "{path} is not in the global module table");
         log::debug!(target: "name-resolver", "checking if {path} is resolvable via imports in {src}");
         // The path might be relative to a local import/alias, so attempt to resolve it as such
         // relative to `src`, but only if `name` is a path with a single component
-        let resolved_item = match self.graph.modules[src.as_usize()].as_ref() {
-            Some(ModuleLink::Ast(module)) => module
-                .resolve_path(path)
-                .map_err(|err| SymbolResolutionError::from_local(err, self.graph))?,
-            Some(_) => return Ok(None),
-            None => {
-                let pending_index = self.pending_index(src);
-                self.pending[pending_index]
-                    .resolver
-                    .resolve_path(path)
-                    .map_err(|err| SymbolResolutionError::from_local(err, self.graph))?
-            },
-        };
-
+        let src_module = &self.graph[src];
+        let resolved_item = src_module.resolve_path(path, self)?;
         match resolved_item {
-            Some(SymbolResolution::External(path)) => {
+            SymbolResolution::External(path) => {
                 let path = path.to_absolute();
                 Ok(self.get_module_index_by_path(&path))
             },
-            Some(SymbolResolution::Local(item)) => {
-                let err = LocalSymbolResolutionError::InvalidSymbolType {
-                    expected: "module",
-                    span: path.span(),
-                    actual: item.span(),
-                };
-                Err(SymbolResolutionError::from_local(err, self.graph))
+            SymbolResolution::Local(item) => {
+                Err(Box::new(SymbolResolutionError::invalid_symbol_type(
+                    path.span(),
+                    "module",
+                    item.span(),
+                    self.source_manager(),
+                )))
             },
-            Some(SymbolResolution::MastRoot(item)) => {
-                let err = LocalSymbolResolutionError::InvalidSymbolType {
-                    expected: "module",
-                    span: path.span(),
-                    actual: item.span(),
-                };
-                Err(SymbolResolutionError::from_local(err, self.graph))
+            SymbolResolution::MastRoot(item) => {
+                Err(Box::new(SymbolResolutionError::invalid_symbol_type(
+                    path.span(),
+                    "module",
+                    item.span(),
+                    self.source_manager(),
+                )))
             },
-            Some(SymbolResolution::Exact { gid, .. }) => Ok(Some(gid.module)),
-            Some(SymbolResolution::Module { id, .. }) => Ok(Some(id)),
-            None => Ok(None),
+            SymbolResolution::Exact { gid, .. } => Ok(Some(gid.module)),
+            SymbolResolution::Module { id, .. } => Ok(Some(id)),
         }
     }
 
     fn get_module_index_by_path(&self, path: &Path) -> Option<ModuleIndex> {
         let path = path.to_absolute();
         log::debug!(target: "name-resolver", "looking up module index for global symbol {path}");
-        self.graph
-            .modules
-            .iter()
-            .enumerate()
-            .filter_map(|(idx, m)| m.as_ref().map(|m| (ModuleIndex::new(idx), m.path())))
-            .chain(self.pending.iter().map(|m| (m.index, m.path.as_ref())))
-            .find(|(_, p)| *p == path.as_ref())
-            .map(|(idx, _)| idx)
+        self.graph.modules.iter().find_map(|m| {
+            log::debug!(target: "name-resolver::get_module_index_by_path", "checking against {}: {}", &m.path, path.as_ref() == m.path.as_ref());
+            if path.as_ref() == m.path.as_ref() {
+                Some(m.id)
+            } else {
+                None
+            }
+        })
     }
 
+    #[inline]
     pub fn module_path(&self, module: ModuleIndex) -> &Path {
-        let module_index = module.as_usize();
-        if let Some(module) = self.graph.modules[module_index].as_ref() {
-            module.path()
-        } else {
-            &self.pending[self.pending_index(module)].path
-        }
+        &self.graph[module].path
     }
 
     pub fn item_path(&self, item: GlobalItemIndex) -> Arc<Path> {
-        let module_index = item.module.as_usize();
-        if let Some(module) = self.graph.modules[module_index].as_ref() {
-            let path = module.path();
-            let symbol = module.get(item.index).name().clone();
-            path.join(symbol).into_boxed_path().into()
-        } else {
-            let pending = &self.pending[self.pending_index(item.module)];
-            let path = &pending.path;
-            let symbol = pending.resolver.get_item_name(item.index).clone();
-            path.join(symbol).into_boxed_path().into()
-        }
-    }
-
-    fn pending_index(&self, index: ModuleIndex) -> usize {
-        self.pending
-            .iter()
-            .position(|p| p.index == index)
-            .expect("invalid pending module index")
+        let module = &self.graph[item.module];
+        let name = &module.symbols[item.index.as_usize()].name;
+        module.path.join(name).into()
     }
 }
 
-pub(super) struct SymbolTypeResolver<'a, 'linker: 'a> {
-    resolver: &'a SymbolResolver<'linker>,
-    context: &'a SymbolResolutionContext,
-}
-
-impl<'a, 'linker: 'a> SymbolTypeResolver<'a, 'linker> {
-    pub fn new(
-        context: &'a SymbolResolutionContext,
-        resolver: &'a SymbolResolver<'linker>,
-    ) -> Self {
-        Self { resolver, context }
-    }
-}
-
-impl<'a, 'linker: 'a> TypeResolver<LinkerError> for SymbolTypeResolver<'a, 'linker> {
-    fn get_local_type(
-        &self,
-        context: SourceSpan,
-        id: ItemIndex,
-    ) -> Result<Option<types::Type>, LinkerError> {
-        let module_index = self.context.module.as_usize();
-        if let Some(module) = self.resolver.graph.modules[module_index].as_ref() {
-            match module {
-                ModuleLink::Ast(module) => module
-                    .type_resolver()
-                    .get_local_type(context, id)
-                    .map_err(|err| self.resolve_local_failed(err)),
-                ModuleLink::Info(module) => module
-                    .type_resolver()
-                    .get_local_type(context, id)
-                    .map_err(|err| self.resolve_local_failed(err)),
-            }
-        } else {
-            // We can't resolve types from pending modules
-            Ok(None)
-        }
-    }
-    fn get_type(
-        &self,
-        context: SourceSpan,
-        gid: GlobalItemIndex,
-    ) -> Result<types::Type, LinkerError> {
-        if let Some(module) = self.resolver.graph.modules[gid.module.as_usize()].as_ref() {
-            let result = match module {
-                ModuleLink::Ast(module) => module
-                    .type_resolver()
-                    .get_local_type(context, gid.index)
-                    .map_err(|err| self.resolve_local_failed(err)),
-                ModuleLink::Info(module) => module
-                    .type_resolver()
-                    .get_local_type(context, gid.index)
-                    .map_err(|err| self.resolve_local_failed(err)),
-            }?;
-
-            if let Some(ty) = result {
-                return Ok(ty);
-            }
-        }
-
-        Err(Box::new(SymbolResolutionError::UndefinedSymbol {
-            span: context,
-            source_file: self.resolver.graph.source_manager.get(context.source_id()).ok(),
-        })
-        .into())
-    }
-    fn resolve_local_failed(&self, err: LocalSymbolResolutionError) -> LinkerError {
-        Box::new(SymbolResolutionError::from_local(err, self.resolver.graph)).into()
-    }
-    fn resolve_type_ref(&self, ty: Span<&Path>) -> Result<Option<SymbolResolution>, LinkerError> {
-        self.resolver.resolve_path(self.context, ty).map(Some)
-    }
+struct LocalFindResult {
+    context: SymbolResolutionContext,
+    resolving: Span<Arc<Path>>,
 }

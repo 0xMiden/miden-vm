@@ -1,13 +1,13 @@
 // Allow unused assignments - required by miette::Diagnostic derive macro
 #![allow(unused_assignments)]
 
-use alloc::{sync::Arc, vec::Vec};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::fmt;
 
 use miden_debug_types::{SourceFile, SourceSpan};
 use miden_utils_diagnostics::{Diagnostic, miette};
 
-use crate::ast::Ident;
+use crate::ast::{SymbolResolutionError, constants::ConstEvalError};
 
 /// The high-level error type for all semantic analysis errors.
 ///
@@ -101,16 +101,6 @@ pub enum SemanticAnalysisError {
         span: SourceSpan,
         #[label("previously defined here")]
         prev_span: SourceSpan,
-    },
-    #[error("invalid symbol reference")]
-    #[diagnostic()]
-    SymbolResolutionError(#[from] crate::ast::LocalSymbolResolutionError),
-    #[error("symbol undefined: '{symbol}' not in scope")]
-    #[diagnostic(help("are you missing an import?"))]
-    SymbolUndefined {
-        #[label]
-        span: SourceSpan,
-        symbol: Ident,
     },
     #[error("unused import")]
     #[diagnostic(severity(Warning), help("this import is never used and can be safely removed"))]
@@ -213,33 +203,24 @@ pub enum SemanticAnalysisError {
         #[label]
         span: SourceSpan,
     },
-    #[error("invalid constant")]
-    #[diagnostic(help("this constant does not resolve to a value of the right type"))]
-    InvalidConstant {
-        #[label]
-        span: SourceSpan,
-    },
-    #[error("constant evaluation failed")]
-    #[diagnostic(help("this constant cannot be evaluated, due to operands of incorrect type"))]
-    InvalidConstExprOperand {
-        #[label]
-        span: SourceSpan,
-        #[label("expected this operand to produce an integer value, but it does not")]
-        operand: SourceSpan,
-    },
-    #[error("constant evaluation terminated due to infinite recursion")]
-    #[diagnostic(help("dependencies between constants must form an acyclic graph"))]
-    ConstEvalCycle {
-        #[label("occurs while evaluating this expression")]
-        start: SourceSpan,
-        #[label("cycle occurs because we attempt to eval this constant recursively")]
-        detected: SourceSpan,
-    },
     #[error("advmap key already defined")]
+    #[diagnostic()]
     AdvMapKeyAlreadyDefined {
         #[label]
         span: SourceSpan,
     },
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    ConstEvalError(#[from] ConstEvalError),
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    SymbolResolutionError(#[from] Box<SymbolResolutionError>),
+}
+
+impl From<SymbolResolutionError> for SemanticAnalysisError {
+    fn from(value: SymbolResolutionError) -> Self {
+        Self::SymbolResolutionError(Box::new(value))
+    }
 }
 
 /// Represents a system limit that was exceeded

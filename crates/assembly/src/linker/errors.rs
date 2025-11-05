@@ -5,12 +5,11 @@ use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 
 use miden_assembly_syntax::{
     Felt, Path,
+    ast::{SymbolResolutionError, constants::ConstEvalError},
     debuginfo::{SourceFile, SourceSpan},
-    diagnostics::{Diagnostic, RelatedLabel, miette},
+    diagnostics::{Diagnostic, RelatedError, RelatedLabel, miette},
 };
 use miden_core::{FieldElement, utils::to_hex};
-
-use super::name_resolver::SymbolResolutionError;
 
 // LINKER ERROR
 // ================================================================================================
@@ -25,6 +24,15 @@ pub enum LinkerError {
     #[error(transparent)]
     #[diagnostic(transparent)]
     SymbolResolution(#[from] Box<SymbolResolutionError>),
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    ConstEval(#[from] Box<ConstEvalError>),
+    #[error("linking failed")]
+    #[diagnostic(help("see diagnostics for details"))]
+    Related {
+        #[related]
+        errors: Box<[RelatedError]>,
+    },
     #[error("linking failed")]
     #[diagnostic(help("see diagnostics for details"))]
     Failed {
@@ -100,4 +108,26 @@ pub enum LinkerError {
         #[source_code]
         source_file: Option<Arc<SourceFile>>,
     },
+    #[error("invalid constant reference")]
+    #[diagnostic(help("the item this path resolves to is not a constant definition"))]
+    InvalidConstantRef {
+        #[label]
+        span: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<SourceFile>>,
+    },
+}
+
+impl From<SymbolResolutionError> for LinkerError {
+    #[inline]
+    fn from(value: SymbolResolutionError) -> Self {
+        Self::SymbolResolution(Box::new(value))
+    }
+}
+
+impl From<ConstEvalError> for LinkerError {
+    #[inline]
+    fn from(value: ConstEvalError) -> Self {
+        Self::ConstEval(Box::new(value))
+    }
 }

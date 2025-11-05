@@ -99,6 +99,9 @@ pub trait Visit<T = ()> {
     fn visit_type_alias(&mut self, ty: &TypeAlias) -> ControlFlow<T> {
         visit_type_alias(self, ty)
     }
+    fn visit_type_expr(&mut self, ty: &TypeExpr) -> ControlFlow<T> {
+        visit_type_expr(self, ty)
+    }
     fn visit_enum(&mut self, ty: &EnumType) -> ControlFlow<T> {
         visit_enum(self, ty)
     }
@@ -182,6 +185,12 @@ where
     }
     fn visit_type_decl(&mut self, ty: &TypeDecl) -> ControlFlow<T> {
         (**self).visit_type_decl(ty)
+    }
+    fn visit_type_alias(&mut self, ty: &TypeAlias) -> ControlFlow<T> {
+        (**self).visit_type_alias(ty)
+    }
+    fn visit_type_expr(&mut self, ty: &TypeExpr) -> ControlFlow<T> {
+        (**self).visit_type_expr(ty)
     }
     fn visit_enum(&mut self, ty: &EnumType) -> ControlFlow<T> {
         (**self).visit_enum(ty)
@@ -296,8 +305,15 @@ where
     }
 }
 
+pub fn visit_type_alias<V, T>(visitor: &mut V, ty: &TypeAlias) -> ControlFlow<T>
+where
+    V: ?Sized + Visit<T>,
+{
+    visitor.visit_type_expr(&ty.ty)
+}
+
 #[inline(always)]
-pub fn visit_type_alias<V, T>(_visitor: &mut V, _ty: &TypeAlias) -> ControlFlow<T>
+pub fn visit_type_expr<V, T>(_visitor: &mut V, _ty: &TypeExpr) -> ControlFlow<T>
 where
     V: ?Sized + Visit<T>,
 {
@@ -606,6 +622,9 @@ pub trait VisitMut<T = ()> {
     fn visit_mut_type_alias(&mut self, ty: &mut TypeAlias) -> ControlFlow<T> {
         visit_mut_type_alias(self, ty)
     }
+    fn visit_mut_type_expr(&mut self, ty: &mut TypeExpr) -> ControlFlow<T> {
+        visit_mut_type_expr(self, ty)
+    }
     fn visit_mut_enum(&mut self, ty: &mut EnumType) -> ControlFlow<T> {
         visit_mut_enum(self, ty)
     }
@@ -689,6 +708,12 @@ where
     }
     fn visit_mut_type_decl(&mut self, ty: &mut TypeDecl) -> ControlFlow<T> {
         (**self).visit_mut_type_decl(ty)
+    }
+    fn visit_mut_type_alias(&mut self, ty: &mut TypeAlias) -> ControlFlow<T> {
+        (**self).visit_mut_type_alias(ty)
+    }
+    fn visit_mut_type_expr(&mut self, ty: &mut TypeExpr) -> ControlFlow<T> {
+        (**self).visit_mut_type_expr(ty)
     }
     fn visit_mut_enum(&mut self, ty: &mut EnumType) -> ControlFlow<T> {
         (**self).visit_mut_enum(ty)
@@ -803,8 +828,15 @@ where
     }
 }
 
+pub fn visit_mut_type_alias<V, T>(visitor: &mut V, ty: &mut TypeAlias) -> ControlFlow<T>
+where
+    V: ?Sized + VisitMut<T>,
+{
+    visitor.visit_mut_type_expr(&mut ty.ty)
+}
+
 #[inline(always)]
-pub fn visit_mut_type_alias<V, T>(_visitor: &mut V, _ty: &mut TypeAlias) -> ControlFlow<T>
+pub fn visit_mut_type_expr<V, T>(_visitor: &mut V, _ty: &mut TypeExpr) -> ControlFlow<T>
 where
     V: ?Sized + VisitMut<T>,
 {
