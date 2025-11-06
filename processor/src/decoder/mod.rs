@@ -236,7 +236,7 @@ impl Process {
         node: &CallNode,
         program: &MastForest,
         host: &mut H,
-        _err_ctx: &impl ErrorContext,
+        err_ctx: &impl ErrorContext,
     ) -> Result<(), ExecutionError> {
         // use the hasher to compute the hash of the CALL or SYSCALL block; the row address
         // returned by the hasher is used as the ID of the block; the result of the hash is
@@ -282,7 +282,9 @@ impl Process {
             self.chiplets
                 .memory
                 .write(self.system.get_next_ctx_id(), FMP_ADDR, self.system.clk(), FMP_INIT_VALUE)
-                .map_err(ExecutionError::MemoryError)?;
+                .map_err(|err| {
+                    ExecutionError::from_operation(err_ctx, OperationError::MemoryError(err))
+                })?;
         }
 
         // the rest of the VM state does not change
@@ -331,7 +333,7 @@ impl Process {
         dyn_node: &DynNode,
         program: &MastForest,
         host: &mut H,
-        _err_ctx: &impl ErrorContext,
+        err_ctx: &impl ErrorContext,
     ) -> Result<Word, ExecutionError> {
         debug_assert!(!dyn_node.is_dyncall());
 
@@ -342,7 +344,9 @@ impl Process {
             .chiplets
             .memory
             .read_word(self.system.ctx(), mem_addr, self.system.clk())
-            .map_err(ExecutionError::MemoryError)?;
+            .map_err(|err| {
+                ExecutionError::from_operation(err_ctx, OperationError::MemoryError(err))
+            })?;
 
         let (addr, hashed_block) = self.chiplets.hasher.hash_control_block(
             EMPTY_WORD,
@@ -380,13 +384,17 @@ impl Process {
             .chiplets
             .memory
             .read_word(self.system.ctx(), mem_addr, self.system.clk())
-            .map_err(ExecutionError::MemoryError)?;
+            .map_err(|err| {
+                ExecutionError::from_operation(err_ctx, OperationError::MemoryError(err))
+            })?;
 
         // Initialize the fmp for the new context in memory.
         self.chiplets
             .memory
             .write(self.system.get_next_ctx_id(), FMP_ADDR, self.system.clk(), FMP_INIT_VALUE)
-            .map_err(ExecutionError::MemoryError)?;
+            .map_err(|err| {
+                ExecutionError::from_operation(err_ctx, OperationError::MemoryError(err))
+            })?;
 
         // Note: other functions end in "executing a Noop", which
         // 1. ensures trace capacity,

@@ -159,7 +159,10 @@ pub(super) fn op_horner_eval_base<P: Processor>(
     // Read the evaluation point alpha from memory
     let (alpha, k0, k1) = {
         let addr = processor.stack().get(ALPHA_ADDR_INDEX);
-        let word = processor.memory().read_word(ctx, addr, clk).map_err(OperationError::from)?;
+        let word = processor
+            .memory()
+            .read_word(ctx, addr, clk)
+            .map_err(OperationError::MemoryError)?;
         tracer.record_memory_read_word(
             word,
             addr,
@@ -287,7 +290,10 @@ pub(super) fn op_horner_eval_ext<P: Processor>(
     // Read the evaluation point alpha from memory
     let (alpha, k0, k1) = {
         let addr = processor.stack().get(ALPHA_ADDR_INDEX);
-        let word = processor.memory().read_word(ctx, addr, clk).map_err(OperationError::from)?;
+        let word = processor
+            .memory()
+            .read_word(ctx, addr, clk)
+            .map_err(OperationError::MemoryError)?;
         tracer.record_memory_read_word(
             word,
             addr,

@@ -70,9 +70,9 @@ impl FastProcessor {
             self.caller_hash = callee_hash;
 
             // Initialize the frame pointer in memory for the new context.
-            self.memory
-                .write_element(new_ctx, FMP_ADDR, FMP_INIT_VALUE)
-                .map_err(ExecutionError::MemoryError)?;
+            self.memory.write_element(new_ctx, FMP_ADDR, FMP_INIT_VALUE).map_err(|err| {
+                ExecutionError::from_operation(&err_ctx, OperationError::MemoryError(err))
+            })?;
             tracer.record_memory_write_element(FMP_INIT_VALUE, FMP_ADDR, new_ctx, self.clk);
         }
 
@@ -147,10 +147,9 @@ impl FastProcessor {
         // address.
         let callee_hash = {
             let mem_addr = self.stack_get(0);
-            let word = self
-                .memory
-                .read_word(self.ctx, mem_addr, self.clk)
-                .map_err(ExecutionError::MemoryError)?;
+            let word = self.memory.read_word(self.ctx, mem_addr, self.clk).map_err(|err| {
+                ExecutionError::from_operation(&err_ctx, OperationError::MemoryError(err))
+            })?;
             tracer.record_memory_read_word(word, mem_addr, self.ctx, self.clk);
 
             word
@@ -172,9 +171,9 @@ impl FastProcessor {
             self.caller_hash = callee_hash;
 
             // Initialize the frame pointer in memory for the new context.
-            self.memory
-                .write_element(new_ctx, FMP_ADDR, FMP_INIT_VALUE)
-                .map_err(ExecutionError::MemoryError)?;
+            self.memory.write_element(new_ctx, FMP_ADDR, FMP_INIT_VALUE).map_err(|err| {
+                ExecutionError::from_operation(&err_ctx, OperationError::MemoryError(err))
+            })?;
             tracer.record_memory_write_element(FMP_INIT_VALUE, FMP_ADDR, new_ctx, self.clk);
         };
 
