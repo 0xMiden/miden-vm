@@ -1,10 +1,8 @@
 use miden_core::{EventId, Felt, mast::MastForest, sys_events::SystemEvent};
 
-use super::{super::ONE, ExecutionError, Process};
+use super::{super::ONE, Process};
 use crate::{
-    SyncHost,
-    errors::{ErrorContext, OperationError},
-    operations::sys_ops::sys_event_handlers::handle_system_event,
+    SyncHost, errors::OperationError, operations::sys_ops::sys_event_handlers::handle_system_event,
 };
 
 pub(crate) mod sys_event_handlers;
@@ -87,12 +85,7 @@ impl Process {
 
     /// Forwards the emitted event id to the host. Reads the event ID from the top of the stack
     /// without consuming it.
-    /// TODO: Return OpErr
-    pub(super) fn op_emit<H>(
-        &mut self,
-        host: &mut H,
-        err_ctx: &impl ErrorContext,
-    ) -> Result<(), ExecutionError>
+    pub(super) fn op_emit<H>(&mut self, host: &mut H) -> Result<(), OperationError>
     where
         H: SyncHost,
     {
@@ -104,19 +97,15 @@ impl Process {
         // If it's a system event, handle it directly. Otherwise, forward it to the host.
         if let Some(system_event) = SystemEvent::from_event_id(event_id) {
             handle_system_event(&mut process, system_event)
-                .map_err(|err| ExecutionError::from_operation(err_ctx, err))
         } else {
             let clk = process.clk();
             let mutations = host.on_event(&process).map_err(|err| {
                 let event_name = host.resolve_event(event_id).cloned();
-                ExecutionError::from_operation(
-                    err_ctx,
-                    OperationError::event_error(err, event_id, event_name),
-                )
+                OperationError::event_error(err, event_id, event_name)
             })?;
-            self.advice.apply_mutations(mutations).map_err(|err| {
-                ExecutionError::from_operation(err_ctx, OperationError::advice_error(err, clk))
-            })?;
+            self.advice
+                .apply_mutations(mutations)
+                .map_err(|err| OperationError::advice_error(err, clk))?;
             Ok(())
         }
     }

@@ -3,7 +3,7 @@ use core::fmt::{self, Display};
 
 use miden_air::RowIndex;
 
-use super::{EMPTY_WORD, ExecutionError, Felt, FieldElement, SysTrace, Word, ZERO};
+use super::{EMPTY_WORD, Felt, FieldElement, OperationError, SysTrace, Word, ZERO};
 
 #[cfg(test)]
 mod tests;
@@ -91,13 +91,12 @@ impl System {
     // --------------------------------------------------------------------------------------------
 
     /// Increments the clock cycle.
-    /// TODO: Return OpErr
-    pub fn advance_clock(&mut self, max_cycles: u32) -> Result<(), ExecutionError> {
+    pub fn advance_clock(&mut self, max_cycles: u32) -> Result<(), OperationError> {
         self.clk += 1_u32;
 
         // Check that maximum number of cycles is not exceeded.
         if self.clk.as_u32() > max_cycles {
-            return Err(ExecutionError::CycleLimitExceeded(max_cycles));
+            return Err(OperationError::cycle_limit_exceeded(max_cycles));
         }
 
         let clk: usize = self.clk.into();

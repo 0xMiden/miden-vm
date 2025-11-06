@@ -63,7 +63,7 @@ impl Process {
             Operation::Caller => wrap_operation(self.op_caller(), err_ctx)?,
 
             Operation::Clk => wrap_operation(self.op_clk(), err_ctx)?,
-            Operation::Emit => self.op_emit(host, err_ctx)?,
+            Operation::Emit => wrap_operation(self.op_emit(host), err_ctx)?,
 
             // ----- flow control operations ------------------------------------------------------
             // control flow operations are never executed directly
@@ -184,14 +184,13 @@ impl Process {
             Operation::LogPrecompile => wrap_operation(self.op_log_precompile(), err_ctx)?,
         }
 
-        self.advance_clock()?;
+        wrap_operation(self.advance_clock(), err_ctx)?;
 
         Ok(())
     }
 
     /// Increments the clock cycle for all components of the process.
-    /// TODO: Return OpErr
-    pub(super) fn advance_clock(&mut self) -> Result<(), ExecutionError> {
+    pub(super) fn advance_clock(&mut self) -> Result<(), OperationError> {
         self.system.advance_clock(self.max_cycles)?;
         self.stack.advance_clock();
         Ok(())

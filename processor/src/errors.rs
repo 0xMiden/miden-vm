@@ -127,6 +127,8 @@ pub enum OperationError {
     )]
     // TODO: restore label "when returning from this call site"
     InvalidStackDepthOnReturn { depth: usize },
+    #[error("exceeded the allowed number of max cycles {max_cycles}")]
+    CycleLimitExceeded { max_cycles: u32 },
     #[error("attempted to calculate integer logarithm with zero argument at clock cycle {clk}")]
     LogArgumentZero { clk: RowIndex },
     #[error("malformed signature key: {key_type}")]
@@ -217,6 +219,10 @@ impl OperationError {
 
     pub fn failed_assertion(clk: RowIndex, err_code: Felt, err_msg: Option<Arc<str>>) -> Self {
         Self::FailedAssertion { clk, err_code, err_msg }
+    }
+
+    pub fn cycle_limit_exceeded(max_cycles: u32) -> Self {
+        Self::CycleLimitExceeded { max_cycles }
     }
 
     pub fn failed_to_execute_program(reason: &'static str) -> Self {

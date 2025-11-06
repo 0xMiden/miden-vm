@@ -369,7 +369,7 @@ impl Process {
     pub(super) fn start_dyncall_node(
         &mut self,
         dyn_node: &DynNode,
-        _err_ctx: &impl ErrorContext,
+        err_ctx: &impl ErrorContext,
     ) -> Result<Word, ExecutionError> {
         debug_assert!(dyn_node.is_dyncall());
 
@@ -420,7 +420,8 @@ impl Process {
         self.system.start_call_or_dyncall(callee_hash);
         self.decoder.start_dyncall(addr, callee_hash, ctx_info);
 
-        self.advance_clock()?;
+        self.advance_clock()
+            .map_err(|err| ExecutionError::from_operation(err_ctx, err))?;
 
         Ok(callee_hash)
     }
