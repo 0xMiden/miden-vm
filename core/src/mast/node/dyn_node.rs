@@ -223,9 +223,9 @@ impl proptest::prelude::Arbitrary for DynNode {
         any::<bool>()
             .prop_map(|is_dyncall| {
                 if is_dyncall {
-                    DynNode::new_dyncall()
+                    DynNodeBuilder::new_dyncall().build()
                 } else {
-                    DynNode::new_dyn()
+                    DynNodeBuilder::new_dyn().build()
                 }
             })
             .no_shrink()  // Pure random values, no meaningful shrinking pattern

@@ -221,10 +221,15 @@ impl proptest::prelude::Arbitrary for SplitNode {
         // Generate two MastNodeId values and digest for the children
         (any::<MastNodeId>(), any::<MastNodeId>(), any::<[u64; 4]>())
             .prop_map(|(true_branch, false_branch, digest_array)| {
-                // Use new_unsafe since we're generating arbitrary nodes
-                // The digest is also arbitrary since we can't compute it without a MastForest
+                // Generate a random digest
                 let digest = Word::from(digest_array.map(Felt::new));
-                SplitNode::new_unsafe([true_branch, false_branch], digest)
+                // Construct directly to avoid MastForest validation for arbitrary data
+                SplitNode {
+                    branches: [true_branch, false_branch],
+                    digest,
+                    before_enter: Vec::new(),
+                    after_exit: Vec::new(),
+                }
             })
             .no_shrink()  // Pure random values, no meaningful shrinking pattern
             .boxed()

@@ -204,7 +204,7 @@ impl proptest::prelude::Arbitrary for ExternalNode {
         any::<[u64; 4]>()
             .prop_map(|[a, b, c, d]| {
                 let word = Word::from([Felt::new(a), Felt::new(b), Felt::new(c), Felt::new(d)]);
-                ExternalNode::new(word)
+                ExternalNodeBuilder::new(word).build()
             })
             .no_shrink()  // Pure random values, no meaningful shrinking pattern
             .boxed()

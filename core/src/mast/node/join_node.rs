@@ -225,10 +225,15 @@ impl proptest::prelude::Arbitrary for JoinNode {
         // Generate two MastNodeId values and digest for the children
         (any::<MastNodeId>(), any::<MastNodeId>(), any::<[u64; 4]>())
             .prop_map(|(first_child, second_child, digest_array)| {
-                // Use new_unsafe since we're generating arbitrary nodes
-                // The digest is also arbitrary since we can't compute it without a MastForest
+                // Generate a random digest
                 let digest = Word::from(digest_array.map(Felt::new));
-                JoinNode::new_unsafe([first_child, second_child], digest)
+                // Construct directly to avoid MastForest validation for arbitrary data
+                JoinNode {
+                    children: [first_child, second_child],
+                    digest,
+                    before_enter: Vec::new(),
+                    after_exit: Vec::new(),
+                }
             })
             .no_shrink()  // Pure random values, no meaningful shrinking pattern
             .boxed()

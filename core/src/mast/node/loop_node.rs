@@ -210,10 +210,15 @@ impl proptest::prelude::Arbitrary for LoopNode {
         // Generate one MastNodeId value and digest for the body
         (any::<MastNodeId>(), any::<[u64; 4]>())
             .prop_map(|(body, digest_array)| {
-                // Use new_unsafe since we're generating arbitrary nodes
-                // The digest is also arbitrary since we can't compute it without a MastForest
+                // Generate a random digest
                 let digest = Word::from(digest_array.map(Felt::new));
-                LoopNode::new_unsafe(body, digest)
+                // Construct directly to avoid MastForest validation for arbitrary data
+                LoopNode {
+                    body,
+                    digest,
+                    before_enter: Vec::new(),
+                    after_exit: Vec::new(),
+                }
             })
             .no_shrink()  // Pure random values, no meaningful shrinking pattern
             .boxed()

@@ -264,12 +264,16 @@ impl proptest::prelude::Arbitrary for CallNode {
         // Generate callee, digest, and whether it's a syscall
         (any::<MastNodeId>(), any::<[u64; 4]>(), any::<bool>())
             .prop_map(|(callee, digest_array, is_syscall)| {
-                // Use new_unsafe since we're generating arbitrary nodes
-                // The digest is also arbitrary since we can't compute it without a MastForest
+                // Generate a random digest
                 let digest = Word::from(digest_array.map(Felt::new));
-                let mut node = CallNode::new_unsafe(callee, digest);
-                node.is_syscall = is_syscall;
-                node
+                // Construct directly to avoid MastForest validation for arbitrary data
+                CallNode {
+                    callee,
+                    is_syscall,
+                    digest,
+                    before_enter: Vec::new(),
+                    after_exit: Vec::new(),
+                }
             })
             .no_shrink()  // Pure random values, no meaningful shrinking pattern
             .boxed()
