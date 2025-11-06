@@ -93,6 +93,16 @@ pub enum OperationError {
         hex = .digest.to_hex()
     )]
     DynamicNodeNotFound { digest: Word },
+    #[error("failed to read callee hash for dynamic call")]
+    DynCalleeRead {
+        #[source]
+        err: MemoryError,
+    },
+    #[error("failed to initialise frame pointer for dynamic call")]
+    DynFrameInit {
+        #[source]
+        err: MemoryError,
+    },
     #[error(
         "error during processing of event {}",
         match event_name {
@@ -207,6 +217,14 @@ impl OperationError {
 
     pub fn dynamic_node_not_found(digest: Word) -> Self {
         Self::DynamicNodeNotFound { digest }
+    }
+
+    pub fn dyn_callee_read(err: MemoryError) -> Self {
+        Self::DynCalleeRead { err }
+    }
+
+    pub fn dyn_frame_init(err: MemoryError) -> Self {
+        Self::DynFrameInit { err }
     }
 
     pub fn event_error(

@@ -283,7 +283,7 @@ impl Process {
                 .memory
                 .write(self.system.get_next_ctx_id(), FMP_ADDR, self.system.clk(), FMP_INIT_VALUE)
                 .map_err(|err| {
-                    ExecutionError::from_operation(err_ctx, OperationError::MemoryError(err))
+                    ExecutionError::from_operation(err_ctx, OperationError::dyn_frame_init(err))
                 })?;
         }
 
@@ -345,7 +345,7 @@ impl Process {
             .memory
             .read_word(self.system.ctx(), mem_addr, self.system.clk())
             .map_err(|err| {
-                ExecutionError::from_operation(err_ctx, OperationError::MemoryError(err))
+                ExecutionError::from_operation(err_ctx, OperationError::dyn_callee_read(err))
             })?;
 
         let (addr, hashed_block) = self.chiplets.hasher.hash_control_block(
@@ -385,7 +385,7 @@ impl Process {
             .memory
             .read_word(self.system.ctx(), mem_addr, self.system.clk())
             .map_err(|err| {
-                ExecutionError::from_operation(err_ctx, OperationError::MemoryError(err))
+                ExecutionError::from_operation(err_ctx, OperationError::dyn_callee_read(err))
             })?;
 
         // Initialize the fmp for the new context in memory.
@@ -393,7 +393,7 @@ impl Process {
             .memory
             .write(self.system.get_next_ctx_id(), FMP_ADDR, self.system.clk(), FMP_INIT_VALUE)
             .map_err(|err| {
-                ExecutionError::from_operation(err_ctx, OperationError::MemoryError(err))
+                ExecutionError::from_operation(err_ctx, OperationError::dyn_frame_init(err))
             })?;
 
         // Note: other functions end in "executing a Noop", which
