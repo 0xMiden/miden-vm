@@ -22,8 +22,7 @@ impl Process {
         err_code: Felt,
         program: &MastForest,
         host: &mut H,
-        err_ctx: &impl ErrorContext,
-    ) -> Result<(), ExecutionError>
+    ) -> Result<(), OperationError>
     where
         H: SyncHost,
     {
@@ -31,10 +30,7 @@ impl Process {
             let process = &mut self.state();
             host.on_assert_failed(process, err_code);
             let err_msg = program.resolve_error_message(err_code);
-            return Err(ExecutionError::from_operation(
-                err_ctx,
-                OperationError::failed_assertion(process.clk(), err_code, err_msg),
-            ));
+            return Err(OperationError::failed_assertion(process.clk(), err_code, err_msg));
         }
         self.stack.shift_left(1);
         Ok(())
@@ -45,7 +41,7 @@ impl Process {
 
     /// Pushes the current depth of the stack (the depth before this operation is executed) onto
     /// the stack.
-    pub(super) fn op_sdepth(&mut self) -> Result<(), ExecutionError> {
+    pub(super) fn op_sdepth(&mut self) -> Result<(), OperationError> {
         let stack_depth = self.stack.depth();
         self.stack.set(0, Felt::new(stack_depth as u64));
         self.stack.shift_right(0);
@@ -60,7 +56,7 @@ impl Process {
     ///
     /// # Errors
     /// Returns an error if the VM is not currently executing a SYSCALL block.
-    pub(super) fn op_caller(&mut self) -> Result<(), ExecutionError> {
+    pub(super) fn op_caller(&mut self) -> Result<(), OperationError> {
         let fn_hash = self.system.fn_hash();
 
         self.stack.set(0, fn_hash[3]);
@@ -79,7 +75,7 @@ impl Process {
     /// Pushes the current value of the clock cycle counter onto the stack. The clock cycle starts
     /// at 0 and is incremented with every operation executed by the VM, including control flow
     /// operations such as GRUOP, END etc.
-    pub(super) fn op_clk(&mut self) -> Result<(), ExecutionError> {
+    pub(super) fn op_clk(&mut self) -> Result<(), OperationError> {
         let clk = self.system.clk();
         self.stack.set(0, Felt::from(clk));
         self.stack.shift_right(0);

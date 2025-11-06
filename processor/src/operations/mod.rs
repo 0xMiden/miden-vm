@@ -54,12 +54,14 @@ impl Process {
         match op {
             // ----- system operations ------------------------------------------------------------
             Operation::Noop => self.stack.copy_state(0),
-            Operation::Assert(err_code) => self.op_assert(err_code, program, host, err_ctx)?,
+            Operation::Assert(err_code) => {
+                wrap_operation(self.op_assert(err_code, program, host), err_ctx)?
+            },
 
-            Operation::SDepth => self.op_sdepth()?,
-            Operation::Caller => self.op_caller()?,
+            Operation::SDepth => wrap_operation(self.op_sdepth(), err_ctx)?,
+            Operation::Caller => wrap_operation(self.op_caller(), err_ctx)?,
 
-            Operation::Clk => self.op_clk()?,
+            Operation::Clk => wrap_operation(self.op_clk(), err_ctx)?,
             Operation::Emit => self.op_emit(host, err_ctx)?,
 
             // ----- flow control operations ------------------------------------------------------
