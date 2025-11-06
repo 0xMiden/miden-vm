@@ -134,7 +134,12 @@ enum AeadDecryptError {
 // TESTS
 // ================================================================================================
 
-#[test]
-fn test_event_name() {
-    assert_eq!(AEAD_DECRYPT_EVENT_NAME.as_str(), "stdlib::crypto::aead::decrypt");
+#[cfg(test)]
+mod tests {
+    use crate::handlers::aead_decrypt::AEAD_DECRYPT_EVENT_NAME;
+
+    #[test]
+    fn test_event_name() {
+        assert_eq!(AEAD_DECRYPT_EVENT_NAME.as_str(), "stdlib::crypto::aead::decrypt");
+    }
 }
