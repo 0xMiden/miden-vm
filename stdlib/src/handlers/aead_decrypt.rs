@@ -2,8 +2,8 @@
 //!
 //! This module provides an event handler for decrypting AEAD ciphertext using non-deterministic
 //! advice. When the VM emits an AEAD_DECRYPT_EVENT, this handler reads the ciphertext from memory,
-//! performs decryption using the reference implementation, and pushes the plaintext onto the
-//! advice stack for the MASM decrypt procedure to load.
+//! performs decryption using the AEAD-RPO scheme, and pushes the plaintext onto the advice stack
+//! for the MASM decrypt procedure to load.
 
 use alloc::{vec, vec::Vec};
 
