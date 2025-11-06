@@ -12,6 +12,43 @@ export.reverse
     reversew
 end
 
+# CONVERSION UTILITIES
+#! Writes the components of a word to memory as eight u32 limbs in little-endian order.
+#!
+#! Inputs:  [w3, w2, w1, w0, out_ptr, ...]
+#! Outputs: [...]
+#!
+#! Where:
+#! - `w*` are the felts of the input word. Each felt is split into a low and high 32-bit limb.
+#! - `out_ptr` is an element address in memory.
+#! - Memory layout after the call: `[w0_lo, w0_hi, w1_lo, w1_hi, w2_lo, w2_hi, w3_lo, w3_hi]`.
+#!
+#! Cycles: 8 * (split + store pair) ~= 176
+export.store_word_u32s_le
+    reversew
+    # => [w0, w1, w2, w3, out_ptr, ...]
+
+    u32split
+    # => [w0_hi, w0_lo, w1, w2, w3, out_ptr, ...]
+
+    movup.2 u32split
+    # => [w1_hi, w1_lo, w0_hi, w0_lo, w2, w3, out_ptr, ...]
+
+    # Store w0 and w1 limbs, then drop them from the stack
+    dup.6 mem_storew_be dropw
+    # => [w2, w3, out_ptr, ...]
+
+    u32split
+    # => [w2_hi, w2_lo, w3, out_ptr, ...]
+
+    movup.2 u32split
+    # => [w3_hi, w3_lo, w2_hi, w2_lo, out_ptr, ...]
+
+    # Store w2 and w3 limbs at out_ptr+4
+    movup.4 add.4 mem_storew_be dropw
+    # => [...]
+end
+
 # COMPARISON OPERATIONS
 #! Returns a boolean indicating whether the input word is [0, 0, 0, 0].
 #!

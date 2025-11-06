@@ -121,3 +121,45 @@ fn test_preserving_eq() {
         build_test!(SOURCE, &operand_stack).expect_stack(&expected);
     }
 }
+
+#[test]
+fn store_word_u32s_le_stores_limbs() {
+    const PTR: u32 = 256;
+    const W0: u64 = 0x1234567890abcdef;
+    const W1: u64 = 0x0000000200000001;
+    const W2: u64 = 0xffffffff00000000;
+    const W3: u64 = 0x00000000ffffffff;
+
+    fn limbs(value: u64) -> (u64, u64) {
+        (value & 0xffff_ffff, value >> 32)
+    }
+
+    let (w0_lo, w0_hi) = limbs(W0);
+    let (w1_lo, w1_hi) = limbs(W1);
+    let (w2_lo, w2_hi) = limbs(W2);
+    let (w3_lo, w3_hi) = limbs(W3);
+
+    let source = format!(
+        "
+        use.std::word
+
+        begin
+            push.{ptr}
+            push.{w0}
+            push.{w1}
+            push.{w2}
+            push.{w3}
+            exec.word::store_word_u32s_le
+        end
+    ",
+        ptr = PTR,
+        w0 = W0,
+        w1 = W1,
+        w2 = W2,
+        w3 = W3,
+    );
+
+    let expected_mem = [w0_lo, w0_hi, w1_lo, w1_hi, w2_lo, w2_hi, w3_lo, w3_hi];
+
+    build_test!(&source).expect_stack_and_memory(&[], PTR, &expected_mem);
+}

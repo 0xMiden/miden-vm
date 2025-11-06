@@ -7,11 +7,15 @@ extern crate alloc;
 use alloc::{sync::Arc, vec, vec::Vec};
 
 use miden_assembly::{Library, mast::MastForest, utils::Deserializable};
-use miden_core::{EventName, Felt, Word, precompile::PrecompileVerifierRegistry};
+use miden_core::{
+    EventName, Felt, Word, precompile::PrecompileVerifierRegistry, utils::Serializable,
+};
+use miden_crypto::dsa::ecdsa_k256_keccak::SecretKey;
 use miden_processor::{EventHandler, HostLibrary};
 use miden_utils_sync::LazyLock;
 
 use crate::handlers::{
+    bytes_to_packed_u32_felts,
     ecdsa::{ECDSA_VERIFY_EVENT_NAME, EcdsaPrecompile},
     falcon_div::{FALCON_DIV_EVENT_NAME, handle_falcon_div},
     keccak256::{KECCAK_HASH_MEMORY_EVENT_NAME, KeccakPrecompile},
@@ -97,6 +101,27 @@ impl Default for StdLibrary {
         });
         STDLIB.clone()
     }
+}
+
+/// Signs the provided message with the supplied secret key and returns the encoded calldata
+/// expected by `stdlib::crypto::dsa::ecdsa::verify_ecdsa_k256_keccak`.
+///
+/// 1. The compressed secp256k1 public key encoded as 9 packed-u32 felts (33 bytes total).
+/// 2. The ECDSA signature encoded as 17 packed-u32 felts (66 bytes total).
+///
+/// The two chunks are concatenated as `[PK[9] || SIG[17]]` so they can be streamed straight to
+/// the advice provider before invoking `verify_ecdsa_k256_keccak`.
+pub fn ecdsa_sign(sk: &SecretKey, msg: Word) -> Vec<Felt> {
+    let mut out = Vec::new();
+    let pk = sk.public_key();
+    let pk_bytes = pk.to_bytes();
+    out.extend(bytes_to_packed_u32_felts(&pk_bytes));
+
+    let sig = sk.sign(msg);
+    let sig_bytes = sig.to_bytes();
+    out.extend(bytes_to_packed_u32_felts(&sig_bytes));
+
+    out
 }
 
 // FALCON SIGNATURE

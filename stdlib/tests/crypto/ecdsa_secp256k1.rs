@@ -6,14 +6,18 @@
 //! - Both valid and invalid signatures are handled correctly
 
 use miden_core::{
-    Felt, FieldElement,
+    EventName, Felt, FieldElement, Word,
     precompile::{PrecompileCommitment, PrecompileVerifier},
-    utils::Serializable,
+    utils::{Deserializable, Serializable},
 };
-use miden_crypto::dsa::ecdsa_k256_keccak::SecretKey;
-use miden_stdlib::handlers::{
-    bytes_to_packed_u32_felts,
-    ecdsa::{EcdsaPrecompile, EcdsaRequest},
+use miden_crypto::{dsa::ecdsa_k256_keccak::SecretKey, hash::rpo::Rpo256};
+use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessState};
+use miden_stdlib::{
+    ecdsa_sign,
+    handlers::{
+        bytes_to_packed_u32_felts,
+        ecdsa::{EcdsaPrecompile, EcdsaRequest},
+    },
 };
 use rand::{SeedableRng, rngs::StdRng};
 
@@ -26,7 +30,7 @@ const PK_ADDR: u32 = 128;
 const DIGEST_ADDR: u32 = 192;
 const SIG_ADDR: u32 = 256;
 
-// TESTS
+// TESTS PRECOMPILE
 // ================================================================================================
 
 #[test]
@@ -133,13 +137,82 @@ fn test_ecdsa_verify_impl_commitment() {
     }
 }
 
+// TESTS SIGN+VERIFY
+// ================================================================================================
+
+const EVENT_ECDSA_SIG_TO_STACK: EventName = EventName::new("test::ecdsa::sig_to_stack");
+
+struct EcdsaSignatureHandler {
+    secret_key_bytes: Vec<u8>,
+}
+
+impl EcdsaSignatureHandler {
+    fn new(secret_key: &SecretKey) -> Self {
+        Self { secret_key_bytes: secret_key.to_bytes() }
+    }
+}
+
+impl EventHandler for EcdsaSignatureHandler {
+    fn on_event(&self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
+        let provided_pk_rpo = process.get_stack_word_be(1);
+        let secret_key =
+            SecretKey::read_from_bytes(&self.secret_key_bytes).expect("invalid test secret key");
+        let pk_commitment = {
+            let pk = secret_key.public_key();
+            let pk_felts = bytes_to_packed_u32_felts(&pk.to_bytes());
+            Rpo256::hash_elements(&pk_felts)
+        };
+        assert_eq!(
+            provided_pk_rpo, pk_commitment,
+            "public key commitment mismatch: expected {:?}, got {:?}",
+            pk_commitment, provided_pk_rpo
+        );
+
+        let message = process.get_stack_word_be(5);
+        let calldata = ecdsa_sign(&secret_key, message);
+
+        Ok(vec![AdviceMutation::extend_stack(calldata.into_iter().rev())])
+    }
+}
+
+#[test]
+fn test_ecdsa_verify_bis_wrapper() {
+    let mut rng = StdRng::seed_from_u64(19260817);
+    let secret_key = SecretKey::with_rng(&mut rng);
+    let public_key = secret_key.public_key();
+    let message = Word::from([Felt::new(11), Felt::new(22), Felt::new(33), Felt::new(44)]);
+
+    let pk_commitment = {
+        let pk_felts = bytes_to_packed_u32_felts(&public_key.to_bytes());
+        Rpo256::hash_elements(&pk_felts)
+    };
+
+    let source = format!(
+        "
+        use.std::crypto::dsa::ecdsa::secp256k1
+
+        begin
+            push.{message} push.{pk_commitment}
+            debug.stack
+            emit.event(\"{EVENT_ECDSA_SIG_TO_STACK}\")
+            exec.secp256k1::verify_ecdsa_k256_keccak
+        end
+        ",
+    );
+
+    let mut test = build_debug_test!(&source);
+    test.add_event_handler(EVENT_ECDSA_SIG_TO_STACK, EcdsaSignatureHandler::new(&secret_key));
+
+    test.expect_stack(&[]);
+}
+
 // TEST DATA GENERATION
 // ================================================================================================
 
 /// Generates a valid signature using deterministic seed
 fn generate_valid_signature() -> EcdsaRequest {
     let mut rng = StdRng::seed_from_u64(42);
-    let mut secret_key = SecretKey::with_rng(&mut rng);
+    let secret_key = SecretKey::with_rng(&mut rng);
     let pk = secret_key.public_key();
 
     // Use a simple deterministic digest
@@ -157,7 +230,7 @@ fn generate_invalid_signature_wrong_key() -> EcdsaRequest {
 
     // Create a different key for signing
     let mut rng2 = StdRng::seed_from_u64(123);
-    let mut secret_key2 = SecretKey::with_rng(&mut rng2);
+    let secret_key2 = SecretKey::with_rng(&mut rng2);
 
     let digest = [1u8; 32];
     let sig = secret_key2.sign_prehash(digest);

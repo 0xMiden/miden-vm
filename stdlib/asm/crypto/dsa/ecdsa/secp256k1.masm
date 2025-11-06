@@ -1,5 +1,7 @@
+use.std::crypto::hashes::keccak256
 use.std::crypto::hashes::rpo
 use.std::sys
+use.std::word
 
 # ENCODING CONVENTIONS
 # ================================================================================================
@@ -22,10 +24,76 @@ const.SIG_LEN_FELTS=17   # 66.div_ceil(4)
 # PROCEDURES
 # ================================================================================================
 
-#! Verifies an ECDSA signature over the secp256k1 curve.
+#! Verifies an secp256k1 ECDSA signature compatible with `miden-crypto::ecdsa_k256_keccak`.
 #!
-#! This procedure uses deferred verification via a precompile. The actual cryptographic
-#! verification is performed by the host, and the result is provided via the advice stack.
+#! This wrapper mirrors the materialization performed in `miden-crypto::ecdsa_k256_keccak`: given
+#! a public key commitment and the original message, it reconstructs the calldata expected by the
+#! precompile (public key bytes, Keccak256(message), signature). The public key and signature are
+#! supplied via the advice stack, and can be obtained with the `ecdsa_k256_keccak` function.
+#!
+#! Inputs:
+#!   Operand stack: [PK_COMM, MSG, ...]
+#!   Advice stack:  [PK[9] | SIG_BYTES[17] | ...]
+#! Outputs:
+#!   Operand stack: []
+#!   Advice stack:  []
+#!
+#! Local memory layout (element addresses):
+#!   - locaddr[0 ..9 ] : compressed public key (33 bytes packed as 9 felts)
+#!   - locaddr[12..20] : message bytes (MSG written as eight u32 limbs)
+#!   - locaddr[20..28] : keccak256(message) digest (8 felts)
+#!   - locaddr[28..45] : signature (66 bytes packed as 17 felts)
+#!
+#! The procedure traps if the public key in the advice stack does not hash to `PK_COMM`;
+#! otherwise it returns cleanly after emitting the deferred verification request.
+export.verify_ecdsa_k256_keccak.48
+    # Load the compressed public key (9 felts) into local memory at locaddr.[0..9]
+    adv_push.4 loc_storew_be.0
+    adv_loadw  loc_storew_be.4 dropw
+    adv_push.1 loc_store.8
+
+    # Compute the expected commitment and ensure it matches the provided PK_COMM
+    push.PK_LEN_FELTS locaddr.0 exec.rpo::hash_memory
+    assert_eqw.err="invalid public key commitment"
+    # => [MSG, ...]
+
+    # Materialize the message bytes at locaddr.[12..20]
+    locaddr.12 movdn.4 exec.word::store_word_u32s_le
+    # [...]
+
+    # Hash the 32-byte message with Keccak256
+    push.32 locaddr.12 exec.keccak256::hash_memory
+    # => [DIGEST[0..8], ...]
+
+    # Store the resulting digest at locaddr.[20..28]
+    loc_storew_le.20 dropw
+    loc_storew_le.24
+    # => [DIGEST[4..8], ...]
+
+    # store the signature (17 felts) provided via advice at locaddr.[28..45]
+    adv_loadw  loc_storew_be.28
+    adv_loadw  loc_storew_be.32
+    adv_loadw  loc_storew_be.36
+    adv_loadw  loc_storew_be.40 dropw
+    adv_push.1 loc_store.44
+    # => [...]
+
+    # Invoke the deferred verification precompile with in-memory calldata
+    locaddr.28
+    locaddr.20
+    locaddr.0
+    # => [pk_ptr, digest_ptr, sig_ptr]
+    exec.verify
+    # => [result, ...]
+    assert.err="ECDSA signature verification failed"
+end
+
+#! Verifies an ECDSA signature with pre-hashed message using deferred execution.
+#!
+#! The caller provides the public key, the pre-hashed message digest, and the signature data in
+#! memory. This routine forwards the request to the host precompile and returns the boolean result.
+#! In typical flows the digest is obtained from `keccak256::hash_memory`, but any 32-byte prehash
+#! is accepted.
 #!
 #! Input: `[pk_ptr, digest_ptr, sig_ptr, ...]`
 #! Output: `[result, ...]`
