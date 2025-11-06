@@ -1,7 +1,7 @@
 // Allow unused assignments - required by miette::Diagnostic derive macro
 #![allow(unused_assignments)]
 
-use alloc::{sync::Arc, vec::Vec};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 
 use miden_air::RowIndex;
 use miden_core::{
@@ -104,6 +104,15 @@ pub enum OperationError {
         err: MemoryError,
     },
     #[error(
+        "dynamic call into callee with root {hex} failed",
+        hex = .callee.to_hex()
+    )]
+    DynReturn {
+        callee: Word,
+        #[source]
+        err: Box<OperationError>,
+    },
+    #[error(
         "error during processing of event {}",
         match event_name {
             Some(name) => format!("'{}' (ID: {})", name, event_id),
@@ -202,8 +211,11 @@ pub enum OperationError {
     InvalidFriDomainSegment(u64),
     #[error("degree-respecting projection is inconsistent: expected {0} but was {1}")]
     InvalidFriLayerFolding(QuadFelt, QuadFelt),
-    #[error(transparent)]
-    MemoryError(#[source] MemoryError),
+    #[error("{err}")]
+    MemoryError {
+        #[source]
+        err: MemoryError,
+    },
 }
 
 impl OperationError {
@@ -225,6 +237,14 @@ impl OperationError {
 
     pub fn dyn_frame_init(err: MemoryError) -> Self {
         Self::DynFrameInit { err }
+    }
+
+    pub fn memory_error(err: MemoryError) -> Self {
+        Self::MemoryError { err }
+    }
+
+    pub fn dyn_return(callee: Word, err: OperationError) -> Self {
+        Self::DynReturn { callee, err: Box::new(err) }
     }
 
     pub fn event_error(

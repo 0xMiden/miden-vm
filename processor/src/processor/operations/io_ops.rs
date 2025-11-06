@@ -60,7 +60,7 @@ pub(super) fn op_mloadw<P: Processor>(
     let word = processor
         .memory()
         .read_word(ctx, addr, clk)
-        .map_err(OperationError::MemoryError)?;
+        .map_err(OperationError::memory_error)?;
     tracer.record_memory_read_word(word, addr, processor.system().ctx(), processor.system().clk());
 
     processor.stack().set_word(0, &word);
@@ -83,7 +83,7 @@ pub(super) fn op_mstorew<P: Processor>(
     processor
         .memory()
         .write_word(ctx, addr, clk, word)
-        .map_err(OperationError::MemoryError)?;
+        .map_err(OperationError::memory_error)?;
     tracer.record_memory_write_word(word, addr, processor.system().ctx(), processor.system().clk());
 
     Ok(())
@@ -100,7 +100,7 @@ pub(super) fn op_mload<P: Processor>(
     let element = processor
         .memory()
         .read_element(ctx, addr)
-        .map_err(OperationError::MemoryError)?;
+        .map_err(OperationError::memory_error)?;
     tracer.record_memory_read_element(
         element,
         addr,
@@ -127,7 +127,7 @@ pub(super) fn op_mstore<P: Processor>(
     processor
         .memory()
         .write_element(ctx, addr, value)
-        .map_err(OperationError::MemoryError)?;
+        .map_err(OperationError::memory_error)?;
     tracer.record_memory_write_element(
         value,
         addr,
@@ -162,7 +162,7 @@ pub(super) fn op_mstream<P: Processor>(
         let first_word = processor
             .memory()
             .read_word(ctx, addr_first_word, clk)
-            .map_err(OperationError::MemoryError)?;
+            .map_err(OperationError::memory_error)?;
         tracer.record_memory_read_word(
             first_word,
             addr_first_word,
@@ -173,7 +173,7 @@ pub(super) fn op_mstream<P: Processor>(
         let second_word = processor
             .memory()
             .read_word(ctx, addr_second_word, clk)
-            .map_err(OperationError::MemoryError)?;
+            .map_err(OperationError::memory_error)?;
         tracer.record_memory_read_word(
             second_word,
             addr_second_word,
@@ -224,7 +224,7 @@ pub(super) fn op_pipe<P: Processor>(
     processor
         .memory()
         .write_word(ctx, addr_first_word, clk, words[0])
-        .map_err(OperationError::MemoryError)?;
+        .map_err(OperationError::memory_error)?;
     tracer.record_memory_write_word(
         words[0],
         addr_first_word,
@@ -235,7 +235,7 @@ pub(super) fn op_pipe<P: Processor>(
     processor
         .memory()
         .write_word(ctx, addr_second_word, clk, words[1])
-        .map_err(OperationError::MemoryError)?;
+        .map_err(OperationError::memory_error)?;
     tracer.record_memory_write_word(
         words[1],
         addr_second_word,

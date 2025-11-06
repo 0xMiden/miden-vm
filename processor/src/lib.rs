@@ -520,8 +520,8 @@ impl Process {
         // if the callee is not in the program's MAST forest, try to find a MAST forest for it in
         // the host (corresponding to an external library loaded in the host); if none are
         // found, return an error.
-        match program.find_procedure_root(callee_hash) {
-            Some(callee_id) => self.execute_mast_node(callee_id, program, host)?,
+        let dyn_result = match program.find_procedure_root(callee_hash) {
+            Some(callee_id) => self.execute_mast_node(callee_id, program, host),
             None => {
                 let mast_forest = host.get_mast_forest(&callee_hash).ok_or_else(|| {
                     ExecutionError::from_operation(
@@ -551,8 +551,20 @@ impl Process {
                     )
                 })?;
 
-                self.execute_mast_node(root_id, &mast_forest, host)?
+                self.execute_mast_node(root_id, &mast_forest, host)
             },
+        };
+
+        if let Err(err) = dyn_result {
+            return match err {
+                ExecutionError::OperationError { err: op_err, .. } => {
+                    Err(ExecutionError::from_operation(
+                        &err_ctx,
+                        OperationError::dyn_return(callee_hash, op_err),
+                    ))
+                },
+                other => Err(other),
+            };
         }
 
         if node.is_dyncall() {

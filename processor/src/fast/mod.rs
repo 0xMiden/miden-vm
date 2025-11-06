@@ -12,8 +12,8 @@ use miden_core::{
 };
 
 use crate::{
-    AdviceInputs, AdviceProvider, AsyncHost, ContextId, ErrorContext, ExecutionError,
-    OperationError, ProcessState,
+    AdviceInputs, AdviceProvider, AsyncHost, ContextId, ExecutionError, OperationError,
+    ProcessState,
     chiplets::Ace,
     continuation_stack::{Continuation, ContinuationStack},
     fast::execution_tracer::{ExecutionTracer, TraceGenerationContext},
