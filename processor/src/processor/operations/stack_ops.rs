@@ -29,10 +29,41 @@ pub(super) fn op_pad<P: Processor>(
     Ok(())
 }
 
+/// Removes the top element from the stack.
+#[inline(always)]
+pub(super) fn op_drop<P: Processor>(
+    processor: &mut P,
+    tracer: &mut impl Tracer,
+) -> Result<(), OperationError> {
+    processor.stack().decrement_size(tracer);
+    Ok(())
+}
+
 /// Swaps the top two elements of the stack.
 #[inline(always)]
 pub(super) fn op_swap<P: Processor>(processor: &mut P) -> Result<(), OperationError> {
     processor.stack().swap(0, 1);
+    Ok(())
+}
+
+/// Swaps the top word with the word immediately below it.
+#[inline(always)]
+pub(super) fn op_swapw<P: Processor>(processor: &mut P) -> Result<(), OperationError> {
+    processor.stack().swapw_nth(1);
+    Ok(())
+}
+
+/// Swaps the top word with the word two positions below it.
+#[inline(always)]
+pub(super) fn op_swapw2<P: Processor>(processor: &mut P) -> Result<(), OperationError> {
+    processor.stack().swapw_nth(2);
+    Ok(())
+}
+
+/// Swaps the top word with the word three positions below it.
+#[inline(always)]
+pub(super) fn op_swapw3<P: Processor>(processor: &mut P) -> Result<(), OperationError> {
+    processor.stack().swapw_nth(3);
     Ok(())
 }
 
@@ -63,6 +94,20 @@ pub(super) fn dup_nth<P: Processor>(
     processor.stack().increment_size(tracer).map_err(map_stack_error)?;
     processor.stack().set(0, to_dup);
 
+    Ok(())
+}
+
+/// Moves the n-th element to the top of the stack without changing stack size.
+#[inline(always)]
+pub(super) fn op_movup<P: Processor>(processor: &mut P, n: usize) -> Result<(), OperationError> {
+    processor.stack().rotate_left(n + 1);
+    Ok(())
+}
+
+/// Moves the top element to the n-th position on the stack without changing stack size.
+#[inline(always)]
+pub(super) fn op_movdn<P: Processor>(processor: &mut P, n: usize) -> Result<(), OperationError> {
+    processor.stack().rotate_right(n + 1);
     Ok(())
 }
 

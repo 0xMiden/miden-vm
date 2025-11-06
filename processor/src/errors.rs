@@ -191,7 +191,7 @@ pub enum OperationError {
     #[error("degree-respecting projection is inconsistent: expected {0} but was {1}")]
     InvalidFriLayerFolding(QuadFelt, QuadFelt),
     #[error(transparent)]
-    MemoryError(#[from] MemoryError),
+    MemoryError(#[source] MemoryError),
 }
 
 impl OperationError {

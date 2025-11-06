@@ -91,6 +91,7 @@ impl System {
     // --------------------------------------------------------------------------------------------
 
     /// Increments the clock cycle.
+    /// TODO: Return OpErr
     pub fn advance_clock(&mut self, max_cycles: u32) -> Result<(), ExecutionError> {
         self.clk += 1_u32;
 

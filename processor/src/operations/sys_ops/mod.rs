@@ -87,6 +87,7 @@ impl Process {
 
     /// Forwards the emitted event id to the host. Reads the event ID from the top of the stack
     /// without consuming it.
+    /// TODO: Return OpErr
     pub(super) fn op_emit<H>(
         &mut self,
         host: &mut H,

@@ -2,9 +2,7 @@ use miden_air::trace::decoder::NUM_USER_OP_HELPERS;
 use miden_core::{Felt, Operation, mast::MastForest};
 
 use crate::{
-    BaseHost, ErrorContext, ExecutionError, OperationError,
-    fast::Tracer,
-    processor::{Processor, StackInterface},
+    BaseHost, ErrorContext, ExecutionError, OperationError, fast::Tracer, processor::Processor,
 };
 
 mod crypto_ops;
@@ -131,7 +129,7 @@ pub(super) fn execute_sync_op(
 
         // ----- stack manipulation -----------------------------------------------------------
         Operation::Pad => wrap_operation(stack_ops::op_pad(processor, tracer), err_ctx)?,
-        Operation::Drop => processor.stack().decrement_size(tracer),
+        Operation::Drop => wrap_operation(stack_ops::op_drop(processor, tracer), err_ctx)?,
         Operation::Dup0 => wrap_operation(stack_ops::dup_nth(processor, 0, tracer), err_ctx)?,
         Operation::Dup1 => wrap_operation(stack_ops::dup_nth(processor, 1, tracer), err_ctx)?,
         Operation::Dup2 => wrap_operation(stack_ops::dup_nth(processor, 2, tracer), err_ctx)?,
@@ -145,24 +143,24 @@ pub(super) fn execute_sync_op(
         Operation::Dup13 => wrap_operation(stack_ops::dup_nth(processor, 13, tracer), err_ctx)?,
         Operation::Dup15 => wrap_operation(stack_ops::dup_nth(processor, 15, tracer), err_ctx)?,
         Operation::Swap => wrap_operation(stack_ops::op_swap(processor), err_ctx)?,
-        Operation::SwapW => processor.stack().swapw_nth(1),
-        Operation::SwapW2 => processor.stack().swapw_nth(2),
-        Operation::SwapW3 => processor.stack().swapw_nth(3),
+        Operation::SwapW => wrap_operation(stack_ops::op_swapw(processor), err_ctx)?,
+        Operation::SwapW2 => wrap_operation(stack_ops::op_swapw2(processor), err_ctx)?,
+        Operation::SwapW3 => wrap_operation(stack_ops::op_swapw3(processor), err_ctx)?,
         Operation::SwapDW => wrap_operation(stack_ops::op_swap_double_word(processor), err_ctx)?,
-        Operation::MovUp2 => processor.stack().rotate_left(3),
-        Operation::MovUp3 => processor.stack().rotate_left(4),
-        Operation::MovUp4 => processor.stack().rotate_left(5),
-        Operation::MovUp5 => processor.stack().rotate_left(6),
-        Operation::MovUp6 => processor.stack().rotate_left(7),
-        Operation::MovUp7 => processor.stack().rotate_left(8),
-        Operation::MovUp8 => processor.stack().rotate_left(9),
-        Operation::MovDn2 => processor.stack().rotate_right(3),
-        Operation::MovDn3 => processor.stack().rotate_right(4),
-        Operation::MovDn4 => processor.stack().rotate_right(5),
-        Operation::MovDn5 => processor.stack().rotate_right(6),
-        Operation::MovDn6 => processor.stack().rotate_right(7),
-        Operation::MovDn7 => processor.stack().rotate_right(8),
-        Operation::MovDn8 => processor.stack().rotate_right(9),
+        Operation::MovUp2 => wrap_operation(stack_ops::op_movup(processor, 2), err_ctx)?,
+        Operation::MovUp3 => wrap_operation(stack_ops::op_movup(processor, 3), err_ctx)?,
+        Operation::MovUp4 => wrap_operation(stack_ops::op_movup(processor, 4), err_ctx)?,
+        Operation::MovUp5 => wrap_operation(stack_ops::op_movup(processor, 5), err_ctx)?,
+        Operation::MovUp6 => wrap_operation(stack_ops::op_movup(processor, 6), err_ctx)?,
+        Operation::MovUp7 => wrap_operation(stack_ops::op_movup(processor, 7), err_ctx)?,
+        Operation::MovUp8 => wrap_operation(stack_ops::op_movup(processor, 8), err_ctx)?,
+        Operation::MovDn2 => wrap_operation(stack_ops::op_movdn(processor, 2), err_ctx)?,
+        Operation::MovDn3 => wrap_operation(stack_ops::op_movdn(processor, 3), err_ctx)?,
+        Operation::MovDn4 => wrap_operation(stack_ops::op_movdn(processor, 4), err_ctx)?,
+        Operation::MovDn5 => wrap_operation(stack_ops::op_movdn(processor, 5), err_ctx)?,
+        Operation::MovDn6 => wrap_operation(stack_ops::op_movdn(processor, 6), err_ctx)?,
+        Operation::MovDn7 => wrap_operation(stack_ops::op_movdn(processor, 7), err_ctx)?,
+        Operation::MovDn8 => wrap_operation(stack_ops::op_movdn(processor, 8), err_ctx)?,
         Operation::CSwap => wrap_operation(stack_ops::op_cswap(processor, tracer), err_ctx)?,
         Operation::CSwapW => wrap_operation(stack_ops::op_cswapw(processor, tracer), err_ctx)?,
 

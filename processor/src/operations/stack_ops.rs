@@ -242,9 +242,7 @@ impl Process {
                 self.stack.set(0, a);
                 self.stack.set(1, b);
             },
-            _ => {
-                return Err(OperationError::not_binary_value_op(c));
-            },
+            _ => return Err(OperationError::not_binary_value_op(c)),
         }
 
         self.stack.shift_left(3);
@@ -288,9 +286,7 @@ impl Process {
                 self.stack.set(6, b2);
                 self.stack.set(7, b3);
             },
-            _ => {
-                return Err(OperationError::not_binary_value_op(c));
-            },
+            _ => return Err(OperationError::not_binary_value_op(c)),
         }
 
         self.stack.shift_left(9);

@@ -40,6 +40,7 @@ impl Process {
     ///
     /// This method also takes an error context as an argument, which is used to construct helpful
     /// error messages in case of an error.
+    /// TODO: Return OpErr remove err ctx
     pub(super) fn execute_op_with_error_ctx(
         &mut self,
         op: Operation,
@@ -189,6 +190,7 @@ impl Process {
     }
 
     /// Increments the clock cycle for all components of the process.
+    /// TODO: Return OpErr
     pub(super) fn advance_clock(&mut self) -> Result<(), ExecutionError> {
         self.system.advance_clock(self.max_cycles)?;
         self.stack.advance_clock();
