@@ -3,7 +3,7 @@ use alloc::sync::Arc;
 use miden_core::mast::{ExternalNode, MastForest, MastNodeExt, MastNodeId};
 
 use crate::{
-    AsyncHost, ExecutionError, OperationError,
+    AsyncHost, ExecutionError,
     continuation_stack::ContinuationStack,
     fast::{FastProcessor, Tracer},
 };
@@ -55,7 +55,7 @@ impl FastProcessor {
             .load_mast_forest(
                 external_node.digest(),
                 host,
-                OperationError::no_mast_forest_with_procedure,
+                false, // External nodes are not dyncall
             )
             .await
             .map_err(|err| ExecutionError::from_operation(&(), err))?;

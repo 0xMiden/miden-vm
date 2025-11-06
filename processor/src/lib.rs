@@ -526,7 +526,7 @@ impl Process {
                 let mast_forest = host.get_mast_forest(&callee_hash).ok_or_else(|| {
                     ExecutionError::from_operation(
                         &err_ctx,
-                        OperationError::dynamic_node_not_found(callee_hash),
+                        OperationError::dyn_forest_not_found(callee_hash, node.is_dyncall()),
                     )
                 })?;
 
@@ -534,8 +534,8 @@ impl Process {
                 // roots, even though MAST doesn't have that restriction.
                 let root_id = mast_forest.find_procedure_root(callee_hash).ok_or_else(|| {
                     ExecutionError::from_operation(
-                        &(),
-                        OperationError::malformed_mast_forest_in_host(callee_hash),
+                        &err_ctx,
+                        OperationError::dyn_malformed_forest(callee_hash, node.is_dyncall()),
                     )
                 })?;
 
@@ -546,7 +546,7 @@ impl Process {
                 // cases, this call will be cheap.
                 self.advice.extend_map(mast_forest.advice_map()).map_err(|err| {
                     ExecutionError::from_operation(
-                        &(),
+                        &err_ctx,
                         OperationError::advice_error(err, self.system.clk()),
                     )
                 })?;
@@ -560,7 +560,7 @@ impl Process {
                 ExecutionError::OperationError { err: op_err, .. } => {
                     Err(ExecutionError::from_operation(
                         &err_ctx,
-                        OperationError::dyn_return(callee_hash, op_err),
+                        OperationError::dyn_return(callee_hash, op_err, node.is_dyncall()),
                     ))
                 },
                 other => Err(other),

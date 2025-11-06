@@ -27,7 +27,6 @@ pub enum ExecutionError {
         label: SourceSpan,
         #[source_code]
         source_file: Option<Arc<SourceFile>>,
-        #[source]
         err: OperationError,
     },
     #[error("external node with mast root {0} resolved to an external node")]
@@ -93,24 +92,47 @@ pub enum OperationError {
         hex = .digest.to_hex()
     )]
     DynamicNodeNotFound { digest: Word },
-    #[error("failed to read callee hash for dynamic call")]
+    #[error("failed to read callee hash for dynamic {}", if *.is_dyncall { "call" } else { "execution" })]
     DynCalleeRead {
         #[source]
         err: MemoryError,
+        is_dyncall: bool,
     },
-    #[error("failed to initialise frame pointer for dynamic call")]
+    #[error("failed to initialise frame pointer for dynamic {}", if *.is_dyncall { "call" } else { "execution" })]
     DynFrameInit {
         #[source]
         err: MemoryError,
+        is_dyncall: bool,
     },
     #[error(
-        "dynamic call into callee with root {hex} failed",
+        "dynamic {} into callee with root {hex} failed",
+        if *.is_dyncall { "call" } else { "execution" },
         hex = .callee.to_hex()
     )]
     DynReturn {
         callee: Word,
         #[source]
         err: Box<OperationError>,
+        is_dyncall: bool,
+    },
+    #[error("procedure with root {hex} not found in any MAST forest", hex = .callee.to_hex())]
+    DynForestNotFound {
+        callee: Word,
+        is_dyncall: bool,
+    },
+    #[error("MAST forest for procedure {hex} is malformed (no matching root)", hex = .callee.to_hex())]
+    DynMalformedForest {
+        callee: Word,
+        is_dyncall: bool,
+    },
+    #[error(
+        "invalid stack depth on return from dynamic {}: expected {MIN_STACK_DEPTH}, got {actual}",
+        if *.is_dyncall { "call" } else { "execution" }
+    )]
+    DynInvalidStackDepthOnReturn {
+        callee: Word,
+        actual: usize,
+        is_dyncall: bool,
     },
     #[error(
         "error during processing of event {}",
@@ -211,11 +233,8 @@ pub enum OperationError {
     InvalidFriDomainSegment(u64),
     #[error("degree-respecting projection is inconsistent: expected {0} but was {1}")]
     InvalidFriLayerFolding(QuadFelt, QuadFelt),
-    #[error("{err}")]
-    MemoryError {
-        #[source]
-        err: MemoryError,
-    },
+    #[error(transparent)]
+    MemoryError { err: MemoryError },
 }
 
 impl OperationError {
@@ -231,20 +250,32 @@ impl OperationError {
         Self::DynamicNodeNotFound { digest }
     }
 
-    pub fn dyn_callee_read(err: MemoryError) -> Self {
-        Self::DynCalleeRead { err }
+    pub fn dyn_callee_read(err: MemoryError, is_dyncall: bool) -> Self {
+        Self::DynCalleeRead { err, is_dyncall }
     }
 
-    pub fn dyn_frame_init(err: MemoryError) -> Self {
-        Self::DynFrameInit { err }
+    pub fn dyn_frame_init(err: MemoryError, is_dyncall: bool) -> Self {
+        Self::DynFrameInit { err, is_dyncall }
+    }
+
+    pub fn dyn_return(callee: Word, err: OperationError, is_dyncall: bool) -> Self {
+        Self::DynReturn { callee, err: Box::new(err), is_dyncall }
+    }
+
+    pub fn dyn_forest_not_found(callee: Word, is_dyncall: bool) -> Self {
+        Self::DynForestNotFound { callee, is_dyncall }
+    }
+
+    pub fn dyn_malformed_forest(callee: Word, is_dyncall: bool) -> Self {
+        Self::DynMalformedForest { callee, is_dyncall }
+    }
+
+    pub fn dyn_invalid_stack_depth_on_return(callee: Word, actual: usize, is_dyncall: bool) -> Self {
+        Self::DynInvalidStackDepthOnReturn { callee, actual, is_dyncall }
     }
 
     pub fn memory_error(err: MemoryError) -> Self {
         Self::MemoryError { err }
-    }
-
-    pub fn dyn_return(callee: Word, err: OperationError) -> Self {
-        Self::DynReturn { callee, err: Box::new(err) }
     }
 
     pub fn event_error(

@@ -1,7 +1,7 @@
 use alloc::{sync::Arc, vec::Vec};
 
 use miden_core::{
-    FMP_ADDR, FMP_INIT_VALUE, Program, ZERO,
+    FMP_ADDR, FMP_INIT_VALUE, Program, Word, ZERO,
     mast::{CallNode, MastForest, MastNodeExt, MastNodeId},
     stack::MIN_STACK_DEPTH,
     utils::range,
@@ -71,7 +71,7 @@ impl FastProcessor {
 
             // Initialize the frame pointer in memory for the new context.
             self.memory.write_element(new_ctx, FMP_ADDR, FMP_INIT_VALUE).map_err(|err| {
-                ExecutionError::from_operation(&err_ctx, OperationError::dyn_frame_init(err))
+                ExecutionError::from_operation(&err_ctx, OperationError::dyn_frame_init(err, false))
             })?;
             tracer.record_memory_write_element(FMP_INIT_VALUE, FMP_ADDR, new_ctx, self.clk);
         }
@@ -110,7 +110,8 @@ impl FastProcessor {
         // context of the
         // system registers and the operand stack to what it was prior
         // to the call.
-        self.restore_context(tracer, &err_ctx)?;
+        let callee_hash = current_forest[call_node.callee()].digest();
+        self.restore_context(tracer, &err_ctx, callee_hash, false)?;
 
         // Corresponds to the row inserted for the END operation added to the trace.
         self.increment_clk(tracer);
@@ -148,7 +149,7 @@ impl FastProcessor {
         let callee_hash = {
             let mem_addr = self.stack_get(0);
             let word = self.memory.read_word(self.ctx, mem_addr, self.clk).map_err(|err| {
-                ExecutionError::from_operation(&err_ctx, OperationError::dyn_callee_read(err))
+                ExecutionError::from_operation(&err_ctx, OperationError::dyn_callee_read(err, dyn_node.is_dyncall()))
             })?;
             tracer.record_memory_read_word(word, mem_addr, self.ctx, self.clk);
 
@@ -172,7 +173,7 @@ impl FastProcessor {
 
             // Initialize the frame pointer in memory for the new context.
             self.memory.write_element(new_ctx, FMP_ADDR, FMP_INIT_VALUE).map_err(|err| {
-                ExecutionError::from_operation(&err_ctx, OperationError::dyn_frame_init(err))
+                ExecutionError::from_operation(&err_ctx, OperationError::dyn_frame_init(err, true))
             })?;
             tracer.record_memory_write_element(FMP_INIT_VALUE, FMP_ADDR, new_ctx, self.clk);
         };
@@ -190,7 +191,7 @@ impl FastProcessor {
             },
             None => {
                 let (root_id, new_forest) = self
-                    .load_mast_forest(callee_hash, host, OperationError::dynamic_node_not_found)
+                    .load_mast_forest(callee_hash, host, dyn_node.is_dyncall())
                     .await
                     .map_err(|err| ExecutionError::from_operation(&err_ctx, err))?;
                 tracer.record_mast_forest_resolution(root_id, &new_forest);
@@ -234,7 +235,7 @@ impl FastProcessor {
         let err_ctx = err_ctx!(current_forest, dyn_node, host);
         // For dyncall, restore the context.
         if dyn_node.is_dyncall() {
-            self.restore_context(tracer, &err_ctx)?;
+            self.restore_context(tracer, &err_ctx, dyn_node.digest(), true)?;
         }
 
         // Corresponds to the row inserted for the END operation added to
@@ -295,12 +296,14 @@ impl FastProcessor {
         &mut self,
         tracer: &mut impl Tracer,
         err_ctx: &impl ErrorContext,
+        callee_hash: Word,
+        is_dyncall: bool,
     ) -> Result<(), ExecutionError> {
         // when a call/dyncall/syscall node ends, stack depth must be exactly 16.
         if self.stack_size() > MIN_STACK_DEPTH {
             return Err(ExecutionError::from_operation(
                 err_ctx,
-                OperationError::invalid_stack_depth_on_return(self.stack_size()),
+                OperationError::dyn_invalid_stack_depth_on_return(callee_hash, self.stack_size(), is_dyncall),
             ));
         }
 
