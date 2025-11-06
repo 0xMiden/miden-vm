@@ -190,18 +190,9 @@ impl FastProcessor {
             },
             None => {
                 let (root_id, new_forest) = self
-                    .load_mast_forest(
-                        callee_hash,
-                        host,
-                        |digest, ctx| {
-                            ExecutionError::from_operation(
-                                ctx,
-                                OperationError::dynamic_node_not_found(digest),
-                            )
-                        },
-                        &err_ctx,
-                    )
-                    .await?;
+                    .load_mast_forest(callee_hash, host, OperationError::dynamic_node_not_found)
+                    .await
+                    .map_err(|err| ExecutionError::from_operation(&err_ctx, err))?;
                 tracer.record_mast_forest_resolution(root_id, &new_forest);
 
                 // Push current forest to the continuation stack so that we can return to it

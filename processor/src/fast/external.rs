@@ -55,15 +55,10 @@ impl FastProcessor {
             .load_mast_forest(
                 external_node.digest(),
                 host,
-                |digest, ctx| {
-                    ExecutionError::from_operation(
-                        ctx,
-                        OperationError::no_mast_forest_with_procedure(digest),
-                    )
-                },
-                &(),
+                OperationError::no_mast_forest_with_procedure,
             )
-            .await?;
+            .await
+            .map_err(|err| ExecutionError::from_operation(&(), err))?;
 
         // if the node that we got by looking up an external reference is also an External
         // node, we are about to enter into an infinite loop - so, return an error

@@ -570,38 +570,31 @@ impl FastProcessor {
         tracer.increment_clk();
     }
 
-    async fn load_mast_forest<E>(
+    async fn load_mast_forest(
         &mut self,
         node_digest: Word,
         host: &mut impl AsyncHost,
-        get_mast_forest_failed: impl Fn(Word, &E) -> ExecutionError,
-        err_ctx: &E,
-    ) -> Result<(MastNodeId, Arc<MastForest>), ExecutionError>
-    where
-        E: ErrorContext,
-    {
+        get_mast_forest_failed: impl Fn(Word) -> OperationError,
+    ) -> Result<(MastNodeId, Arc<MastForest>), OperationError> {
         let mast_forest = host
             .get_mast_forest(&node_digest)
             .await
-            .ok_or_else(|| get_mast_forest_failed(node_digest, err_ctx))?;
+            .ok_or_else(|| get_mast_forest_failed(node_digest))?;
 
         // We limit the parts of the program that can be called externally to procedure
         // roots, even though MAST doesn't have that restriction.
-        let root_id = mast_forest.find_procedure_root(node_digest).ok_or_else(|| {
-            ExecutionError::from_operation(
-                err_ctx,
-                OperationError::malformed_mast_forest_in_host(node_digest),
-            )
-        })?;
+        let root_id = mast_forest
+            .find_procedure_root(node_digest)
+            .ok_or_else(|| OperationError::malformed_mast_forest_in_host(node_digest))?;
 
         // Merge the advice map of this forest into the advice provider.
         // Note that the map may be merged multiple times if a different procedure from the same
         // forest is called.
         // For now, only compiled libraries contain non-empty advice maps, so for most cases,
         // this call will be cheap.
-        self.advice.extend_map(mast_forest.advice_map()).map_err(|err| {
-            ExecutionError::from_operation(err_ctx, OperationError::advice_error(err, self.clk))
-        })?;
+        self.advice
+            .extend_map(mast_forest.advice_map())
+            .map_err(|err| OperationError::advice_error(err, self.clk))?;
 
         Ok((root_id, mast_forest))
     }
