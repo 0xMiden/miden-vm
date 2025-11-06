@@ -286,8 +286,7 @@ impl proptest::prelude::Arbitrary for JoinNode {
                 JoinNode {
                     children: [first_child, second_child],
                     digest,
-                    before_enter: Vec::new(),
-                    after_exit: Vec::new(),
+                    decorator_store: DecoratorStore::default(),
                 }
             })
             .no_shrink()  // Pure random values, no meaningful shrinking pattern

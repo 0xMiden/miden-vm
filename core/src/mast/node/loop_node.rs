@@ -236,8 +236,7 @@ impl proptest::prelude::Arbitrary for LoopNode {
                 LoopNode {
                     body,
                     digest,
-                    before_enter: Vec::new(),
-                    after_exit: Vec::new(),
+                    decorator_store: DecoratorStore::default(),
                 }
             })
             .no_shrink()  // Pure random values, no meaningful shrinking pattern

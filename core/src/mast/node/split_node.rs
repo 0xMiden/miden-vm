@@ -247,8 +247,7 @@ impl proptest::prelude::Arbitrary for SplitNode {
                 SplitNode {
                     branches: [true_branch, false_branch],
                     digest,
-                    before_enter: Vec::new(),
-                    after_exit: Vec::new(),
+                    decorator_store: DecoratorStore::default(),
                 }
             })
             .no_shrink()  // Pure random values, no meaningful shrinking pattern
