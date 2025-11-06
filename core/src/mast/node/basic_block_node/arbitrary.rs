@@ -119,9 +119,9 @@ pub struct BasicBlockNodeParams {
 impl Default for BasicBlockNodeParams {
     fn default() -> Self {
         Self {
-            max_ops_len: 32,
-            max_pairs: 8,
-            max_decorator_id_u32: 10,
+            max_ops_len: 8,
+            max_pairs: 2,
+            max_decorator_id_u32: 3,
         }
     }
 }
@@ -182,17 +182,74 @@ impl Arbitrary for BasicBlockNode {
 // ---------- Optional: MastForest strategy (behind feature gate) ----------
 
 /// Parameters for generating MastForest instances
+///
+/// # Execution Compatibility
+///
+/// Generated forests will only be executable if certain node types are excluded:
+/// - **Syscalls**: Require matching kernel procedures. Set `max_syscalls = 0` for executable
+///   forests.
+/// - **Externals**: Use random digests that won't match valid procedures. Set `max_externals = 0`
+///   for executable forests.
+/// - **Dyn nodes**: Leave junk on the stack and cannot execute properly. Set `max_dyns = 0` for
+///   executable forests.
+///
+/// The default parameters create executable forests by setting all three of the above to 0.
+///
+/// # Non-executable Forests
+///
+/// If you want to generate forests for testing assembly or parsing without execution:
+/// - Set `max_syscalls > 0` to include syscall nodes
+/// - Set `max_externals > 0` to include external nodes
+/// - Set `max_dyns > 0` to include dynamic nodes
+///
+/// These forests are useful for testing MAST structure and serialization but will fail during
+/// execution.
 #[derive(Clone, Debug)]
 pub struct MastForestParams {
     /// Number of decorators to generate
     pub decorators: u32,
     /// Range of number of blocks to generate
     pub blocks: RangeInclusive<usize>,
+    /// Maximum number of join nodes to generate
+    pub max_joins: usize,
+    /// Maximum number of split nodes to generate
+    pub max_splits: usize,
+    /// Maximum number of loop nodes to generate
+    pub max_loops: usize,
+    /// Maximum number of call nodes to generate
+    pub max_calls: usize,
+    /// Maximum number of syscall nodes to generate
+    ///
+    /// **Warning**: Syscalls require a properly configured kernel with matching procedure hashes.
+    /// Generated syscalls use random procedure digests and will not execute without providing
+    /// a matching kernel. Set to 0 for executable forests.
+    pub max_syscalls: usize,
+    /// Maximum number of external nodes to generate
+    ///
+    /// **Warning**: External nodes use random digests that won't correspond to valid procedures.
+    /// Any program with external nodes will fail to execute. Set to 0 for executable forests.
+    pub max_externals: usize,
+    /// Maximum number of dyn/dyncall nodes to generate
+    ///
+    /// **Warning**: Dyn nodes leave junk on the stack and cannot execute properly.
+    /// These nodes are primarily for testing MAST structure, not execution. Set to 0 for
+    /// executable forests.
+    pub max_dyns: usize,
 }
 
 impl Default for MastForestParams {
     fn default() -> Self {
-        Self { decorators: 10, blocks: 1..=10 }
+        Self {
+            decorators: 3,
+            blocks: 1..=3,
+            max_joins: 1,
+            max_splits: 1,
+            max_loops: 1,
+            max_calls: 1,
+            max_syscalls: 0,  // Default to 0 for executable forests
+            max_externals: 0, // Default to 0 for executable forests
+            max_dyns: 0,      // Default to 0 for executable forests
+        }
     }
 }
 
@@ -200,6 +257,51 @@ impl Arbitrary for MastForest {
     type Parameters = MastForestParams;
     type Strategy = BoxedStrategy<Self>;
 
+    /// Generates a MastForest with the specified parameters.
+    ///
+    /// # Generated Forest Properties
+    ///
+    /// - **Basic blocks**: Always generated (1..=blocks.end()) with operations and decorators
+    /// - **Control flow nodes**: Generated according to max_* parameters, may be 0
+    /// - **Root nodes**: ~1/3 of generated nodes are marked as roots
+    ///
+    /// # Execution Limitations
+    ///
+    /// Generated forests may not be executable depending on parameters:
+    ///
+    /// ## Syscalls (`max_syscalls`)
+    /// - Generated syscalls reference random procedure digests
+    /// - Execution requires a kernel containing matching procedure hashes
+    /// - For executable forests, set `max_syscalls = 0`
+    ///
+    /// ## External Nodes (`max_externals`)
+    /// - Generated with random digests that won't match valid procedures
+    /// - Any program with external nodes will fail during execution
+    /// - For executable forests, set `max_externals = 0`
+    ///
+    /// ## Dynamic Nodes (`max_dyns`)
+    /// - Dyn and dyncall nodes leave junk on the stack
+    /// - These nodes cannot execute properly in practice
+    /// - For executable forests, set `max_dyns = 0`
+    ///
+    /// # Example Usage
+    ///
+    /// ```rust
+    /// use miden_core::mast::{MastForest, arbitrary::MastForestParams};
+    /// use proptest::arbitrary::Arbitrary;
+    ///
+    /// // Generate executable forest (default)
+    /// let forest = MastForest::arbitrary_with(MastForestParams::default());
+    ///
+    /// // Generate forest with non-executable nodes for testing
+    /// let params = MastForestParams {
+    ///     max_syscalls: 2,
+    ///     max_externals: 1,
+    ///     max_dyns: 1,
+    ///     ..Default::default()
+    /// };
+    /// let forest = MastForest::arbitrary_with(params);
+    /// ```
     fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
         // BasicBlockNode generation must reference decorator IDs in [0, decorators)
         let bb_params = BasicBlockNodeParams {
@@ -207,31 +309,253 @@ impl Arbitrary for MastForest {
             ..Default::default()
         };
 
-        // 1) Generate a Vec<BasicBlockNode> with length in `params.blocks`
+        // Generate nodes in a way that respects topological ordering
         (
-            prop::collection::vec(any_with::<BasicBlockNode>(bb_params), params.blocks.clone()),
-            prop::collection::vec(any::<Decorator>(), params.decorators as usize..=params.decorators as usize)
+            // Generate basic blocks first (they have no dependencies)
+            prop::collection::vec(
+                any_with::<BasicBlockNode>(bb_params.clone()),
+                1..=*params.blocks.end(),
+            ),
+            // Generate decorators
+            prop::collection::vec(
+                any::<Decorator>(),
+                params.decorators as usize..=params.decorators as usize,
+            ),
+            // Generate control flow node counts within the specified limits
+            (
+                // Generate number of join nodes (0 to max_joins)
+                0..=params.max_joins,
+                // Generate number of split nodes (0 to max_splits)
+                0..=params.max_splits,
+                // Generate number of loop nodes (0 to max_loops)
+                0..=params.max_loops,
+                // Generate number of call nodes (0 to max_calls)
+                0..=params.max_calls,
+                // Generate number of syscall nodes (0 to max_syscalls)
+                0..=params.max_syscalls,
+                // Generate number of external nodes (0 to max_externals)
+                0..=params.max_externals,
+                // Generate number of dyn nodes (0 to max_dyns)
+                0..=params.max_dyns,
+            ),
         )
-            // 2) Map concrete blocks -> build a concrete MastForest
-            .prop_map(move |(blocks, decorators)| {
-                let mut forest = MastForest::new();
+            .prop_flat_map(
+                move |(
+                    basic_blocks,
+                    decorators,
+                    (
+                        num_joins,
+                        num_splits,
+                        num_loops,
+                        num_calls,
+                        num_syscalls,
+                        num_externals,
+                        num_dyns,
+                    ),
+                )| {
+                    let num_basic_blocks = basic_blocks.len();
 
-                // Pre-populate the decorator ID space so referenced IDs are valid.
-                // Generate all decorator types for more comprehensive testing
-                for decorator in decorators {
+                    // Ensure we have enough basic blocks for parents to reference
+                    let max_parent_nodes = num_basic_blocks.saturating_sub(1);
+                    let num_joins = num_joins.min(max_parent_nodes);
+                    let num_splits = num_splits.min(max_parent_nodes);
+                    let num_loops = num_loops.min(num_basic_blocks);
+                    let num_calls = num_calls.min(num_basic_blocks);
+                    let num_syscalls = num_syscalls.min(num_basic_blocks);
+
+                    // Generate indices for creating parent nodes
+                    (
+                        Just(basic_blocks),
+                        Just(decorators),
+                        Just((
+                            num_joins,
+                            num_splits,
+                            num_loops,
+                            num_calls,
+                            num_syscalls,
+                            num_externals,
+                            num_dyns,
+                        )),
+                        // Generate indices for join nodes (need 2 children each)
+                        prop::collection::vec(any::<(usize, usize)>(), num_joins..=num_joins)
+                            .prop_map(move |pairs| {
+                                pairs
+                                    .into_iter()
+                                    .map(|(a, b)| (a % num_basic_blocks, b % num_basic_blocks))
+                                    .collect::<Vec<_>>()
+                            }),
+                        // Generate indices for split nodes (need 2 children each)
+                        prop::collection::vec(any::<(usize, usize)>(), num_splits..=num_splits)
+                            .prop_map(move |pairs| {
+                                pairs
+                                    .into_iter()
+                                    .map(|(a, b)| (a % num_basic_blocks, b % num_basic_blocks))
+                                    .collect::<Vec<_>>()
+                            }),
+                        // Generate indices for loop nodes (need 1 child each)
+                        prop::collection::vec(any::<usize>(), num_loops..=num_loops).prop_map(
+                            move |indices| {
+                                indices
+                                    .into_iter()
+                                    .map(|i| i % num_basic_blocks)
+                                    .collect::<Vec<_>>()
+                            },
+                        ),
+                        // Generate indices for call nodes (need 1 child each)
+                        prop::collection::vec(any::<usize>(), num_calls..=num_calls).prop_map(
+                            move |indices| {
+                                indices
+                                    .into_iter()
+                                    .map(|i| i % num_basic_blocks)
+                                    .collect::<Vec<_>>()
+                            },
+                        ),
+                        // Generate indices for syscall nodes (need 1 child each)
+                        prop::collection::vec(any::<usize>(), num_syscalls..=num_syscalls)
+                            .prop_map(move |indices| {
+                                indices
+                                    .into_iter()
+                                    .map(|i| i % num_basic_blocks)
+                                    .collect::<Vec<_>>()
+                            }),
+                        // Generate digests for external nodes
+                        prop::collection::vec(any::<[u64; 4]>(), num_externals..=num_externals)
+                            .prop_map(move |digests| {
+                                digests
+                                    .into_iter()
+                                    .map(|[a, b, c, d]| {
+                                        Word::from([
+                                            Felt::new(a),
+                                            Felt::new(b),
+                                            Felt::new(c),
+                                            Felt::new(d),
+                                        ])
+                                    })
+                                    .collect::<Vec<_>>()
+                            }),
+                    )
+                },
+            )
+            .prop_map(
+                move |(
+                    basic_blocks,
+                    decorators,
+                    (
+                        _num_joins,
+                        _num_splits,
+                        _num_loops,
+                        _num_calls,
+                        _num_syscalls,
+                        _num_externals,
+                        num_dyns,
+                    ),
+                    join_pairs,
+                    split_pairs,
+                    loop_indices,
+                    call_indices,
+                    syscall_indices,
+                    external_digests,
+                )| {
+                    let mut forest = MastForest::new();
+
+                    // 1) Add all decorators first
+                    for decorator in decorators {
+                        forest.add_decorator(decorator).expect("Failed to add decorator");
+                    }
+
+                    // 2) Add basic blocks and collect their IDs
+                    let mut basic_block_ids = Vec::new();
+                    for block in basic_blocks {
+                        let node_id = forest.add_node(block).expect("Failed to add basic block");
+                        basic_block_ids.push(node_id);
+                    }
+
+                    // 3) Add control flow nodes in topological order (children already exist)
+                    let mut all_node_ids = basic_block_ids.clone();
+
+                    // Add join nodes
+                    for &(left_idx, right_idx) in &join_pairs {
+                        if left_idx < all_node_ids.len() && right_idx < all_node_ids.len() {
+                            let left_id = all_node_ids[left_idx];
+                            let right_id = all_node_ids[right_idx];
+                            if let Ok(join_id) = forest.add_join(left_id, right_id) {
+                                all_node_ids.push(join_id);
+                            }
+                        }
+                    }
+
+                    // Add split nodes
+                    for &(true_idx, false_idx) in &split_pairs {
+                        if true_idx < all_node_ids.len() && false_idx < all_node_ids.len() {
+                            let true_id = all_node_ids[true_idx];
+                            let false_id = all_node_ids[false_idx];
+                            if let Ok(split_id) = forest.add_split(true_id, false_id) {
+                                all_node_ids.push(split_id);
+                            }
+                        }
+                    }
+
+                    // Add loop nodes
+                    for &body_idx in &loop_indices {
+                        if body_idx < all_node_ids.len() {
+                            let body_id = all_node_ids[body_idx];
+                            if let Ok(loop_id) = forest.add_loop(body_id) {
+                                all_node_ids.push(loop_id);
+                            }
+                        }
+                    }
+
+                    // Add call nodes
+                    for &callee_idx in &call_indices {
+                        if callee_idx < all_node_ids.len() {
+                            let callee_id = all_node_ids[callee_idx];
+                            let call_id = forest.add_call(callee_id).unwrap();
+                            all_node_ids.push(call_id);
+                        }
+                    }
+
+                    // Add syscall nodes
+                    // WARNING: These use random procedure digests and will not execute without a
+                    // matching kernel
+                    for &callee_idx in &syscall_indices {
+                        if callee_idx < all_node_ids.len() {
+                            let callee_id = all_node_ids[callee_idx];
+                            let syscall_id = forest.add_syscall(callee_id).unwrap();
+                            all_node_ids.push(syscall_id);
+                        }
+                    }
+
+                    // Add external nodes
+                    // WARNING: These use random digests that won't match any valid procedures
+                    for digest in external_digests {
+                        if let Ok(external_id) = forest.add_external(digest) {
+                            all_node_ids.push(external_id);
+                        }
+                    }
+
+                    // Add dyn nodes (mix of dyn and dyncall)
+                    // WARNING: These leave junk on the stack and cannot execute properly
+                    for i in 0..num_dyns {
+                        let dyn_id = if i % 2 == 0 {
+                            forest.add_dyn().unwrap()
+                        } else {
+                            forest.add_dyncall().unwrap()
+                        };
+                        all_node_ids.push(dyn_id);
+                    }
+
+                    // 4) Make some nodes roots (but not all, to test internal nodes)
+                    let num_roots = (all_node_ids.len() / 3).max(1); // Make roughly 1/3 of nodes roots
+                    for (i, &node_id) in all_node_ids.iter().enumerate() {
+                        if i % (all_node_ids.len() / num_roots.max(1)) == 0 {
+                            forest.make_root(node_id);
+                        }
+                    }
+
                     forest
-                        .add_decorator(decorator)
-                        .expect("Failed to add decorator");
-                }
-
-                // Insert the generated blocks into the forest
-                for block in blocks {
-                    let node_id = forest.add_node(block).expect("Failed to add block");
-                    forest.make_root(node_id);
-                }
-
-                forest
-            }).boxed()
+                },
+            )
+            .boxed()
     }
 }
 
@@ -345,9 +669,9 @@ impl Arbitrary for Program {
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         // Create a simple strategy that generates a basic block and creates a program from it
         any_with::<BasicBlockNode>(BasicBlockNodeParams {
-            max_ops_len: 5, // Keep it small
-            max_pairs: 2,   // Fewer decorators
-            max_decorator_id_u32: 5,
+            max_ops_len: 4, // Keep it small
+            max_pairs: 1,   // Fewer decorators
+            max_decorator_id_u32: 2,
         })
         .prop_map(|node| {
             use alloc::sync::Arc;
@@ -358,7 +682,7 @@ impl Arbitrary for Program {
             let mut forest = MastForest::new();
 
             // Add some basic decorators
-            for i in 0..5 {
+            for i in 0..2 {
                 let decorator = Decorator::Trace(i as u32);
                 forest.add_decorator(decorator).expect("Failed to add decorator");
             }

@@ -24,6 +24,7 @@ use crate::{
 /// fails.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 pub struct LoopNode {
     body: MastNodeId,
     digest: Word,
@@ -232,4 +233,31 @@ impl MastNodeExt for LoopNode {
     fn domain(&self) -> Felt {
         Self::DOMAIN
     }
+}
+
+// ARBITRARY IMPLEMENTATION
+// ================================================================================================
+
+#[cfg(all(feature = "arbitrary", test))]
+impl proptest::prelude::Arbitrary for LoopNode {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        use proptest::prelude::*;
+
+        use crate::Felt;
+
+        // Generate one MastNodeId value and digest for the body
+        (any::<MastNodeId>(), any::<[u64; 4]>())
+            .prop_map(|(body, digest_array)| {
+                // Use new_unsafe since we're generating arbitrary nodes
+                // The digest is also arbitrary since we can't compute it without a MastForest
+                let digest = Word::from(digest_array.map(Felt::new));
+                LoopNode::new_unsafe(body, digest)
+            })
+            .no_shrink()  // Pure random values, no meaningful shrinking pattern
+            .boxed()
+    }
+
+    type Strategy = proptest::prelude::BoxedStrategy<Self>;
 }

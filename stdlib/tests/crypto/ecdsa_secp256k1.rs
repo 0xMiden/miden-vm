@@ -139,7 +139,7 @@ fn test_ecdsa_verify_impl_commitment() {
 /// Generates a valid signature using deterministic seed
 fn generate_valid_signature() -> EcdsaRequest {
     let mut rng = StdRng::seed_from_u64(42);
-    let mut secret_key = SecretKey::with_rng(&mut rng);
+    let secret_key = SecretKey::with_rng(&mut rng);
     let pk = secret_key.public_key();
 
     // Use a simple deterministic digest
@@ -157,7 +157,7 @@ fn generate_invalid_signature_wrong_key() -> EcdsaRequest {
 
     // Create a different key for signing
     let mut rng2 = StdRng::seed_from_u64(123);
-    let mut secret_key2 = SecretKey::with_rng(&mut rng2);
+    let secret_key2 = SecretKey::with_rng(&mut rng2);
 
     let digest = [1u8; 32];
     let sig = secret_key2.sign_prehash(digest);

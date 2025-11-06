@@ -20,6 +20,7 @@ use crate::{
 /// first child first and the second child second.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 pub struct JoinNode {
     children: [MastNodeId; 2],
     digest: Word,
@@ -255,4 +256,31 @@ impl MastNodeExt for JoinNode {
     fn domain(&self) -> Felt {
         Self::DOMAIN
     }
+}
+
+// ARBITRARY IMPLEMENTATION
+// ================================================================================================
+
+#[cfg(all(feature = "arbitrary", test))]
+impl proptest::prelude::Arbitrary for JoinNode {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        use proptest::prelude::*;
+
+        use crate::Felt;
+
+        // Generate two MastNodeId values and digest for the children
+        (any::<MastNodeId>(), any::<MastNodeId>(), any::<[u64; 4]>())
+            .prop_map(|(first_child, second_child, digest_array)| {
+                // Use new_unsafe since we're generating arbitrary nodes
+                // The digest is also arbitrary since we can't compute it without a MastForest
+                let digest = Word::from(digest_array.map(Felt::new));
+                JoinNode::new_unsafe([first_child, second_child], digest)
+            })
+            .no_shrink()  // Pure random values, no meaningful shrinking pattern
+            .boxed()
+    }
+
+    type Strategy = proptest::prelude::BoxedStrategy<Self>;
 }

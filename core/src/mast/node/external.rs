@@ -25,6 +25,7 @@ use crate::mast::{DecoratedOpLink, DecoratorId, MastForest, MastNodeId, Remappin
 /// node can be swapped with the actual subtree that it represents without changing the MAST root.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 pub struct ExternalNode {
     digest: Word,
     #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Vec::is_empty"))]
@@ -202,4 +203,29 @@ impl MastNodeExt for ExternalNode {
     fn domain(&self) -> Felt {
         panic!("Can't fetch domain for an `External` node.")
     }
+}
+
+// ARBITRARY IMPLEMENTATION
+// ================================================================================================
+
+#[cfg(all(feature = "arbitrary", test))]
+impl proptest::prelude::Arbitrary for ExternalNode {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        use proptest::prelude::*;
+
+        use crate::Felt;
+
+        // Generate a random Word to use as the procedure hash/digest
+        any::<[u64; 4]>()
+            .prop_map(|[a, b, c, d]| {
+                let word = Word::from([Felt::new(a), Felt::new(b), Felt::new(c), Felt::new(d)]);
+                ExternalNode::new(word)
+            })
+            .no_shrink()  // Pure random values, no meaningful shrinking pattern
+            .boxed()
+    }
+
+    type Strategy = proptest::prelude::BoxedStrategy<Self>;
 }

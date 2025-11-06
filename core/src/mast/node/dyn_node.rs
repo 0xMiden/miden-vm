@@ -18,6 +18,7 @@ use crate::{
 /// A Dyn node specifies that the node to be executed next is defined dynamically via the stack.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 pub struct DynNode {
     is_dyncall: bool,
     #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Vec::is_empty"))]
@@ -249,6 +250,32 @@ impl MastNodeExt for DynNode {
     fn domain(&self) -> Felt {
         self.domain()
     }
+}
+
+// ARBITRARY IMPLEMENTATION
+// ================================================================================================
+
+#[cfg(all(feature = "arbitrary", test))]
+impl proptest::prelude::Arbitrary for DynNode {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        use proptest::prelude::*;
+
+        // Generate whether it's a dyncall or dynexec
+        any::<bool>()
+            .prop_map(|is_dyncall| {
+                if is_dyncall {
+                    DynNode::new_dyncall()
+                } else {
+                    DynNode::new_dyn()
+                }
+            })
+            .no_shrink()  // Pure random values, no meaningful shrinking pattern
+            .boxed()
+    }
+
+    type Strategy = proptest::prelude::BoxedStrategy<Self>;
 }
 
 #[cfg(test)]

@@ -25,8 +25,6 @@ Each chiplet is identified within the Chiplets module by one or more chiplet sel
 
 The result is an execution trace of 18 trace columns, which allows space for the widest chiplet component (the hash chiplet) and a column to select for it.
 
-_**Note**: The following diagram is outdated (see [issue #1829](https://github.com/0xMiden/miden-vm/issues/1829))._
-
 ![chiplets](../../img/design/chiplets/chiplets.png)
 
 During the finalization of the overall execution trace, the chiplets' traces (including internal selectors) are appended to the trace of the Chiplets module one after another, as pictured. Thus, when one chiplet's trace ends, the trace of the next chiplet starts in the subsequent row.
