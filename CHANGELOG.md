@@ -1,6 +1,7 @@
 # Changelog
 
 ## 0.20.0 (TBD)
+- Added AEAD implementation in the VM using `crypto_stream` instruction ([#2322](https://github.com/0xMiden/miden-vm/pull/2322)).
 
 #### Enhancements
 
