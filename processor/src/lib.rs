@@ -388,13 +388,14 @@ impl Process {
         program: &MastForest,
         host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
-        self.start_join_node(node, program, host)?;
+        let err_ctx = err_ctx!(program, node, host);
+        self.start_join_node(node, program, host, &err_ctx)?;
 
         // execute first and then second child of the join block
         self.execute_mast_node(node.first(), program, host)?;
         self.execute_mast_node(node.second(), program, host)?;
 
-        self.end_join_node(node, program, host)
+        self.end_join_node(node, program, host, &err_ctx)
     }
 
     /// Executes the specified [SplitNode].
@@ -405,8 +406,10 @@ impl Process {
         program: &MastForest,
         host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
+        let err_ctx = err_ctx!(program, node, host);
+
         // start the SPLIT block; this also pops the stack and returns the popped element
-        let condition = self.start_split_node(node, program, host)?;
+        let condition = self.start_split_node(node, program, host, &err_ctx)?;
 
         // execute either the true or the false branch of the split block based on the condition
         if condition == ONE {
@@ -414,14 +417,13 @@ impl Process {
         } else if condition == ZERO {
             self.execute_mast_node(node.on_false(), program, host)?;
         } else {
-            let err_ctx = err_ctx!(program, node, host);
             return Err(ExecutionError::from_operation(
                 &err_ctx,
                 OperationError::not_binary_value_if(condition),
             ));
         }
 
-        self.end_split_node(node, program, host)
+        self.end_split_node(node, program, host, &err_ctx)
     }
 
     /// Executes the specified [LoopNode].
@@ -432,8 +434,10 @@ impl Process {
         program: &MastForest,
         host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
+        let err_ctx = err_ctx!(program, node, host);
+
         // start the LOOP block; this also pops the stack and returns the popped element
-        let condition = self.start_loop_node(node, program, host)?;
+        let condition = self.start_loop_node(node, program, host, &err_ctx)?;
 
         // if the top of the stack is ONE, execute the loop body; otherwise skip the loop body
         if condition == ONE {
@@ -446,12 +450,11 @@ impl Process {
             while self.stack.peek() == ONE {
                 self.decoder.repeat();
                 self.execute_op(Operation::Drop, program, host)
-                    .map_err(|err| ExecutionError::from_operation(&(), err))?;
+                    .map_err(|err| ExecutionError::from_operation(&err_ctx, err))?;
                 self.execute_mast_node(node.body(), program, host)?;
             }
 
             if self.stack.peek() != ZERO {
-                let err_ctx = err_ctx!(program, node, host);
                 return Err(ExecutionError::from_operation(
                     &err_ctx,
                     OperationError::not_binary_value_loop(self.stack.peek()),
@@ -459,13 +462,12 @@ impl Process {
             }
 
             // end the LOOP block and drop the condition from the stack
-            self.end_loop_node(node, true, program, host)
+            self.end_loop_node(node, true, program, host, &err_ctx)
         } else if condition == ZERO {
             // end the LOOP block, but don't drop the condition from the stack because it was
             // already dropped when we started the LOOP block
-            self.end_loop_node(node, false, program, host)
+            self.end_loop_node(node, false, program, host, &err_ctx)
         } else {
-            let err_ctx = err_ctx!(program, node, host);
             Err(ExecutionError::from_operation(
                 &err_ctx,
                 OperationError::not_binary_value_loop(condition),
@@ -571,7 +573,7 @@ impl Process {
         if node.is_dyncall() {
             self.end_dyncall_node(node, program, host, &err_ctx)
         } else {
-            self.end_dyn_node(node, program, host)
+            self.end_dyn_node(node, program, host, &err_ctx)
         }
     }
 
@@ -583,7 +585,8 @@ impl Process {
         program: &MastForest,
         host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
-        self.start_basic_block_node(basic_block, program, host)?;
+        let err_ctx = err_ctx!(program, basic_block, host);
+        self.start_basic_block_node(basic_block, program, host, &err_ctx)?;
 
         let mut op_offset = 0;
         let mut decorator_ids = basic_block.indexed_decorator_iter();
@@ -605,7 +608,7 @@ impl Process {
         for op_batch in basic_block.op_batches().iter().skip(1) {
             self.respan(op_batch);
             self.execute_op(Operation::Noop, program, host)
-                .map_err(|err| ExecutionError::from_operation(&(), err))?;
+                .map_err(|err| ExecutionError::from_operation(&err_ctx, err))?;
             self.execute_op_batch(
                 basic_block,
                 op_batch,
@@ -617,7 +620,7 @@ impl Process {
             op_offset += op_batch.ops().len();
         }
 
-        self.end_basic_block_node(basic_block, program, host)?;
+        self.end_basic_block_node(basic_block, program, host, &err_ctx)?;
 
         // execute any decorators which have not been executed during span ops execution; this
         // can happen for decorators appearing after all operations in a block. these decorators

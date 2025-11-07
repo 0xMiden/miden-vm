@@ -63,6 +63,7 @@ impl Process {
         node: &JoinNode,
         program: &MastForest,
         host: &mut H,
+        err_ctx: &impl ErrorContext,
     ) -> Result<(), ExecutionError> {
         // use the hasher to compute the hash of the JOIN block; the row address returned by the
         // hasher is used as the ID of the block; the result of the hash is expected to be in
@@ -89,7 +90,7 @@ impl Process {
         // trace. when JOIN operation is executed, the rest of the VM state does not change
         self.decoder.start_join(child1_hash, child2_hash, addr);
         self.execute_op(Operation::Noop, program, host)
-            .map_err(|err| ExecutionError::from_operation(&(), err))
+            .map_err(|err| ExecutionError::from_operation(err_ctx, err))
     }
 
     ///  Ends decoding of a JOIN node.
@@ -98,13 +99,14 @@ impl Process {
         node: &JoinNode,
         program: &MastForest,
         host: &mut H,
+        err_ctx: &impl ErrorContext,
     ) -> Result<(), ExecutionError> {
         // this appends a row with END operation to the decoder trace. when END operation is
         // executed the rest of the VM state does not change
         self.decoder.end_control_block(node.digest());
 
         self.execute_op(Operation::Noop, program, host)
-            .map_err(|err| ExecutionError::from_operation(&(), err))
+            .map_err(|err| ExecutionError::from_operation(err_ctx, err))
     }
 
     // SPLIT NODE
@@ -117,6 +119,7 @@ impl Process {
         node: &SplitNode,
         program: &MastForest,
         host: &mut H,
+        err_ctx: &impl ErrorContext,
     ) -> Result<Felt, ExecutionError> {
         let condition = self.stack.peek();
 
@@ -144,7 +147,7 @@ impl Process {
         // trace. we also pop the value off the top of the stack and return it.
         self.decoder.start_split(child1_hash, child2_hash, addr);
         self.execute_op(Operation::Drop, program, host)
-            .map_err(|err| ExecutionError::from_operation(&(), err))?;
+            .map_err(|err| ExecutionError::from_operation(err_ctx, err))?;
         Ok(condition)
     }
 
@@ -154,13 +157,14 @@ impl Process {
         block: &SplitNode,
         program: &MastForest,
         host: &mut H,
+        err_ctx: &impl ErrorContext,
     ) -> Result<(), ExecutionError> {
         // this appends a row with END operation to the decoder trace. when END operation is
         // executed the rest of the VM state does not change
         self.decoder.end_control_block(block.digest());
 
         self.execute_op(Operation::Noop, program, host)
-            .map_err(|err| ExecutionError::from_operation(&(), err))
+            .map_err(|err| ExecutionError::from_operation(err_ctx, err))
     }
 
     // LOOP NODE
@@ -173,6 +177,7 @@ impl Process {
         node: &LoopNode,
         program: &MastForest,
         host: &mut H,
+        err_ctx: &impl ErrorContext,
     ) -> Result<Felt, ExecutionError> {
         let condition = self.stack.peek();
 
@@ -201,7 +206,7 @@ impl Process {
         // followed by an END operation.
         self.decoder.start_loop(body_hash, addr, condition);
         self.execute_op(Operation::Drop, program, host)
-            .map_err(|err| ExecutionError::from_operation(&(), err))?;
+            .map_err(|err| ExecutionError::from_operation(err_ctx, err))?;
         Ok(condition)
     }
 
@@ -213,6 +218,7 @@ impl Process {
         pop_stack: bool,
         program: &MastForest,
         host: &mut H,
+        err_ctx: &impl ErrorContext,
     ) -> Result<(), ExecutionError> {
         // this appends a row with END operation to the decoder trace.
         self.decoder.end_control_block(node.digest());
@@ -227,10 +233,10 @@ impl Process {
             debug_assert_eq!(ZERO, self.stack.peek());
 
             self.execute_op(Operation::Drop, program, host)
-                .map_err(|err| ExecutionError::from_operation(&(), err))
+                .map_err(|err| ExecutionError::from_operation(err_ctx, err))
         } else {
             self.execute_op(Operation::Noop, program, host)
-                .map_err(|err| ExecutionError::from_operation(&(), err))
+                .map_err(|err| ExecutionError::from_operation(err_ctx, err))
         }
     }
 
@@ -299,7 +305,7 @@ impl Process {
 
         // the rest of the VM state does not change
         self.execute_op(Operation::Noop, program, host)
-            .map_err(|err| ExecutionError::from_operation(&(), err))
+            .map_err(|err| ExecutionError::from_operation(err_ctx, err))
     }
 
     /// Ends decoding of a CALL or a SYSCALL block.
@@ -330,7 +336,7 @@ impl Process {
 
         // the rest of the VM state does not change
         self.execute_op(Operation::Noop, program, host)
-            .map_err(|err| ExecutionError::from_operation(&(), err))
+            .map_err(|err| ExecutionError::from_operation(err_ctx, err))
     }
 
     // DYN NODE
@@ -373,7 +379,7 @@ impl Process {
 
         // Pop the memory address off the stack.
         self.execute_op(Operation::Drop, program, host)
-            .map_err(|err| ExecutionError::from_operation(&(), err))?;
+            .map_err(|err| ExecutionError::from_operation(err_ctx, err))?;
 
         Ok(callee_hash)
     }
@@ -453,13 +459,14 @@ impl Process {
         dyn_node: &DynNode,
         program: &MastForest,
         host: &mut H,
+        err_ctx: &impl ErrorContext,
     ) -> Result<(), ExecutionError> {
         // this appends a row with END operation to the decoder trace. when the END operation is
         // executed the rest of the VM state does not change
         self.decoder.end_control_block(dyn_node.digest());
 
         self.execute_op(Operation::Noop, program, host)
-            .map_err(|err| ExecutionError::from_operation(&(), err))
+            .map_err(|err| ExecutionError::from_operation(err_ctx, err))
     }
 
     /// Ends decoding of a DYNCALL node.
@@ -494,7 +501,7 @@ impl Process {
         self.stack.restore_context(ctx_info.parent_stack_depth as usize);
 
         self.execute_op(Operation::Noop, program, host)
-            .map_err(|err| ExecutionError::from_operation(&(), err))
+            .map_err(|err| ExecutionError::from_operation(err_ctx, err))
     }
 
     // BASIC BLOCK NODE
@@ -506,6 +513,7 @@ impl Process {
         basic_block: &BasicBlockNode,
         program: &MastForest,
         host: &mut H,
+        err_ctx: &impl ErrorContext,
     ) -> Result<(), ExecutionError> {
         // use the hasher to compute the hash of the BASIC BLOCK; the row address returned by the
         // hasher is used as the ID of the block; hash of a BASIC BLOCK is computed by sequentially
@@ -525,7 +533,7 @@ impl Process {
         self.decoder
             .start_basic_block(&op_batches[0], Felt::new(num_op_groups as u64), addr);
         self.execute_op(Operation::Noop, program, host)
-            .map_err(|err| ExecutionError::from_operation(&(), err))
+            .map_err(|err| ExecutionError::from_operation(err_ctx, err))
     }
 
     /// Ends decoding a BASIC BLOCK node.
@@ -534,13 +542,14 @@ impl Process {
         block: &BasicBlockNode,
         program: &MastForest,
         host: &mut H,
+        err_ctx: &impl ErrorContext,
     ) -> Result<(), ExecutionError> {
         // this appends a row with END operation to the decoder trace. when END operation is
         // executed the rest of the VM state does not change
         self.decoder.end_basic_block(block.digest());
 
         self.execute_op(Operation::Noop, program, host)
-            .map_err(|err| ExecutionError::from_operation(&(), err))
+            .map_err(|err| ExecutionError::from_operation(err_ctx, err))
     }
 
     /// Continues decoding a BASIC BLOCK by absorbing the next batch of operations.
