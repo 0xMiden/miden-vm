@@ -1,0 +1,39 @@
+---
+source: air/src/trace/tests.rs
+expression: layout
+---
+DECODER TRACE LAYOUT
+======================
+
+Hasher State:
+  Offset: 8
+  Number of columns: 8
+  Range: 8..16
+
+Operation Bits:
+  Offset: 1
+  Number of bits: 7
+  Range: 1..8
+
+Operation Bits Extra Columns (for degree reduction):
+  Offset: 22
+  Number of columns: 2
+  Range: 22..24
+
+User Operation Helpers:
+  Offset: 10
+  Number of helpers: 6
+
+Operation Batch Flags:
+  Offset: 19
+  Number of flags: 3
+  Range: 19..22
+
+Column Indices:
+  - In span column: 16
+  - Group count column: 17
+  - Operation index column: 18
+  - Is loop body flag: 12
+  - Is loop flag: 13
+  - Is call flag: 14
+  - Is syscall flag: 15
