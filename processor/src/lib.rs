@@ -321,7 +321,7 @@ impl Process {
         self.advice.extend_map(program.mast_forest().advice_map()).map_err(|err| {
             ExecutionError::from_operation(
                 &(),
-                OperationError::advice_error(err, RowIndex::from(0)),
+                OperationError::ProgramInitializationFailed(err),
             )
         })?;
 

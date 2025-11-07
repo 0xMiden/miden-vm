@@ -1,7 +1,7 @@
 use miden_core::{Felt, ONE, mast::MastForest};
 
 use crate::{
-    BaseHost, ExecutionError, OperationError,
+    BaseHost, OperationError,
     fast::Tracer,
     processor::{Processor, StackInterface, SystemInterface},
 };
@@ -35,7 +35,7 @@ pub(super) fn op_sdepth<P: Processor>(
     tracer: &mut impl Tracer,
 ) -> Result<(), OperationError> {
     let depth = processor.stack().depth();
-    processor.stack().increment_size(tracer).map_err(map_stack_error)?;
+    processor.stack().increment_size(tracer)?;
     processor.stack().set(0, depth.into());
 
     Ok(())
@@ -57,18 +57,8 @@ pub(super) fn op_clk<P: Processor>(
     tracer: &mut impl Tracer,
 ) -> Result<(), OperationError> {
     let clk: Felt = processor.system().clk().into();
-    processor.stack().increment_size(tracer).map_err(map_stack_error)?;
+    processor.stack().increment_size(tracer)?;
     processor.stack().set(0, clk);
 
     Ok(())
-}
-
-fn map_stack_error(err: ExecutionError) -> OperationError {
-    match err {
-        ExecutionError::OperationError { err, .. } => err,
-        ExecutionError::FailedToExecuteProgram(reason) => {
-            OperationError::failed_to_execute_program(reason)
-        },
-        _ => OperationError::failed_to_execute_program("stack operation failed"),
-    }
 }

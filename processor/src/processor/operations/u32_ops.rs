@@ -5,7 +5,7 @@ use miden_core::{Felt, ZERO};
 use paste::paste;
 
 use crate::{
-    ExecutionError, OperationError,
+    OperationError,
     fast::Tracer,
     processor::{OperationHelperRegisters, Processor, StackInterface, SystemInterface},
     utils::split_element,
@@ -50,7 +50,7 @@ pub(super) fn op_u32split<P: Processor>(
     };
     tracer.record_u32_range_checks(processor.system().clk(), top_lo, top_hi);
 
-    processor.stack().increment_size(tracer).map_err(map_stack_error)?;
+    processor.stack().increment_size(tracer)?;
     processor.stack().set(0, top_hi);
     processor.stack().set(1, top_lo);
 
@@ -256,14 +256,4 @@ pub(super) fn op_u32assert2<P: Processor>(
     // Stack remains unchanged for assert operations
 
     Ok(P::HelperRegisters::op_u32assert2_registers(first, second))
-}
-
-fn map_stack_error(err: ExecutionError) -> OperationError {
-    match err {
-        ExecutionError::OperationError { err, .. } => err,
-        ExecutionError::FailedToExecuteProgram(reason) => {
-            OperationError::failed_to_execute_program(reason)
-        },
-        _ => OperationError::failed_to_execute_program("stack operation failed"),
-    }
 }

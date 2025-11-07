@@ -28,7 +28,7 @@ use rayon::prelude::*;
 use winter_prover::{crypto::RandomCoin, math::batch_inversion};
 
 use crate::{
-    ChipletsLengths, ColMatrix, ContextId, ExecutionError, ExecutionTrace, ProcessState,
+    ChipletsLengths, ColMatrix, ContextId, ExecutionTrace, ProcessState,
     TraceLenSummary,
     chiplets::{Chiplets, CircuitEvaluation, MAX_NUM_ACE_WIRES, PTR_OFFSET_ELEM, PTR_OFFSET_WORD},
     continuation_stack::Continuation,
@@ -1681,7 +1681,7 @@ impl StackInterface for CoreTraceFragmentGenerator {
         self.context.state.stack.stack_top[rotation_bot_index] = new_stack_bot_element;
     }
 
-    fn increment_size(&mut self, _tracer: &mut impl Tracer) -> Result<(), ExecutionError> {
+    fn increment_size(&mut self, _tracer: &mut impl Tracer) -> Result<(), OperationError> {
         const SENTINEL_VALUE: Felt = Felt::new(Felt::MODULUS - 1);
 
         // push the last element on the overflow table
@@ -1771,7 +1771,7 @@ impl Processor for CoreTraceFragmentGenerator {
 
         let _circuit_evaluation =
             eval_circuit_fast_(ctx, ptr, self.system().clk(), num_read, num_eval, self, tracer)
-                .map_err(OperationError::failed_arithmetic_evaluation)?;
+                .map_err(OperationError::AceChipError)?;
 
         Ok(())
     }
@@ -1995,7 +1995,7 @@ fn eval_circuit_fast_(
         let word = processor
             .memory()
             .read_word(ctx, ptr, clk)
-            .map_err(|_| AceError::FailedMemoryRead)?;
+            .map_err(AceError::FailedMemoryRead)?;
         tracer.record_memory_read_word(word, ptr, ctx, clk);
         evaluation_context.do_read(ptr, word)?;
         ptr += PTR_OFFSET_WORD;
@@ -2005,7 +2005,7 @@ fn eval_circuit_fast_(
         let instruction = processor
             .memory()
             .read_element(ctx, ptr)
-            .map_err(|_| AceError::FailedMemoryRead)?;
+            .map_err(AceError::FailedMemoryRead)?;
         tracer.record_memory_read_element(instruction, ptr, ctx, clk);
         evaluation_context.do_eval(ptr, instruction)?;
         ptr += PTR_OFFSET_ELEM;

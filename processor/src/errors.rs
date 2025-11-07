@@ -88,6 +88,8 @@ pub enum OperationError {
         #[source]
         err: AdviceError,
     },
+    #[error("program initialization failed")]
+    ProgramInitializationFailed(#[source] AdviceError),
     #[error(
         "failed to execute the dynamic code block provided by the stack with root {hex}; the block could not be found",
         hex = .digest.to_hex()
@@ -218,19 +220,16 @@ pub enum OperationError {
         hex = to_hex(proc_root.as_bytes())
     )]
     SyscallTargetNotInKernel { proc_root: Word },
-    #[error("failed to execute arithmetic circuit evaluation operation: {error}")]
+    #[error("failed to execute arithmetic circuit evaluation operation: {0}")]
     // TODO: restore label "this call failed"
-    AceChipError {
-        #[source]
-        error: AceError,
-    },
+    AceChipError(#[source] AceError),
     #[error("FRI domain segment value cannot exceed 3, but was {0}")]
     InvalidFriDomainSegment(u64),
     #[error("degree-respecting projection is inconsistent: expected {0} but was {1}")]
     InvalidFriLayerFolding(QuadFelt, QuadFelt),
     // NOTE: MemoryError needs Diagnostic attributes with help text - restore at end of refactor
     #[error(transparent)]
-    MemoryError { err: MemoryError },
+    MemoryError(MemoryError),
 }
 
 impl OperationError {
@@ -272,10 +271,6 @@ impl OperationError {
         is_dyncall: bool,
     ) -> Self {
         Self::DynInvalidStackDepthOnReturn { callee, actual, is_dyncall }
-    }
-
-    pub fn memory_error(err: MemoryError) -> Self {
-        Self::MemoryError { err }
     }
 
     pub fn event_error(
@@ -363,10 +358,6 @@ impl OperationError {
     pub fn syscall_target_not_in_kernel(proc_root: Word) -> Self {
         Self::SyscallTargetNotInKernel { proc_root }
     }
-
-    pub fn failed_arithmetic_evaluation(error: AceError) -> Self {
-        Self::AceChipError { error }
-    }
 }
 
 // ACE ERROR
@@ -381,7 +372,7 @@ pub enum AceError {
     #[error("circuit does not evaluate to zero")]
     CircuitNotEvaluateZero,
     #[error("failed to read from memory")]
-    FailedMemoryRead,
+    FailedMemoryRead(#[source] MemoryError),
     #[error("failed to decode instruction")]
     FailedDecodeInstruction,
     #[error("failed to read from the wiring bus")]

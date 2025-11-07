@@ -162,7 +162,7 @@ pub(super) fn op_horner_eval_base<P: Processor>(
         let word = processor
             .memory()
             .read_word(ctx, addr, clk)
-            .map_err(OperationError::memory_error)?;
+            .map_err(OperationError::MemoryError)?;
         tracer.record_memory_read_word(
             word,
             addr,
@@ -293,7 +293,7 @@ pub(super) fn op_horner_eval_ext<P: Processor>(
         let word = processor
             .memory()
             .read_word(ctx, addr, clk)
-            .map_err(OperationError::memory_error)?;
+            .map_err(OperationError::MemoryError)?;
         tracer.record_memory_read_word(
             word,
             addr,

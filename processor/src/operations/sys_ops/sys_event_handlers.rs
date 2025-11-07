@@ -56,7 +56,7 @@ pub fn handle_system_event(
 /// - `end_addr` is greater than or equal to 2^32.
 /// - `start_addr` > `end_addr`.
 fn insert_mem_values_into_adv_map(process: &mut ProcessState) -> Result<(), OperationError> {
-    let addr_range = process.get_mem_addr_range(5, 6).map_err(OperationError::memory_error)?;
+    let addr_range = process.get_mem_addr_range(5, 6).map_err(OperationError::MemoryError)?;
     let ctx = process.ctx();
 
     let mut values = Vec::with_capacity(addr_range.len() * WORD_SIZE);

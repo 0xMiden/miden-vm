@@ -359,7 +359,7 @@ impl FastProcessor {
 
         // Merge the program's advice map into the advice provider
         self.advice.extend_map(current_forest.advice_map()).map_err(|err| {
-            ExecutionError::from_operation(&(), OperationError::advice_error(err, self.clk))
+            ExecutionError::from_operation(&(), OperationError::ProgramInitializationFailed(err))
         })?;
 
         while let Some(continuation) = continuation_stack.pop_continuation() {

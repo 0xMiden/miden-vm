@@ -1,7 +1,7 @@
 use alloc::{sync::Arc, vec::Vec};
 
 use miden_core::{
-    FMP_ADDR, FMP_INIT_VALUE, Program, Word, ZERO,
+    FMP_ADDR, FMP_INIT_VALUE, Program, ZERO,
     mast::{CallNode, MastForest, MastNodeExt, MastNodeId},
     stack::MIN_STACK_DEPTH,
     utils::range,
@@ -110,8 +110,7 @@ impl FastProcessor {
         // context of the
         // system registers and the operand stack to what it was prior
         // to the call.
-        let callee_hash = current_forest[call_node.callee()].digest();
-        self.restore_context(tracer, &err_ctx, callee_hash, false)?;
+        self.restore_context(tracer, &err_ctx)?;
 
         // Corresponds to the row inserted for the END operation added to the trace.
         self.increment_clk(tracer);
@@ -238,7 +237,7 @@ impl FastProcessor {
         let err_ctx = err_ctx!(current_forest, dyn_node, host);
         // For dyncall, restore the context.
         if dyn_node.is_dyncall() {
-            self.restore_context(tracer, &err_ctx, dyn_node.digest(), true)?;
+            self.restore_context(tracer, &err_ctx)?;
         }
 
         // Corresponds to the row inserted for the END operation added to
@@ -299,18 +298,12 @@ impl FastProcessor {
         &mut self,
         tracer: &mut impl Tracer,
         err_ctx: &impl ErrorContext,
-        callee_hash: Word,
-        is_dyncall: bool,
     ) -> Result<(), ExecutionError> {
         // when a call/dyncall/syscall node ends, stack depth must be exactly 16.
         if self.stack_size() > MIN_STACK_DEPTH {
             return Err(ExecutionError::from_operation(
                 err_ctx,
-                OperationError::dyn_invalid_stack_depth_on_return(
-                    callee_hash,
-                    self.stack_size(),
-                    is_dyncall,
-                ),
+                OperationError::invalid_stack_depth_on_return(self.stack_size()),
             ));
         }
 

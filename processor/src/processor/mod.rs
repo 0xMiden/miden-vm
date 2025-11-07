@@ -8,7 +8,7 @@ use miden_core::{
 };
 
 use crate::{
-    AdviceError, BaseHost, ContextId, ExecutionError, MemoryError, OperationError, ProcessState,
+    AdviceError, BaseHost, ContextId, MemoryError, OperationError, ProcessState,
     fast::Tracer, processor::operations::execute_sync_op,
 };
 
@@ -183,7 +183,7 @@ pub trait StackInterface {
     /// It is guaranteed that any operation that calls `increment_size()` will subsequently
     /// call `write(0)` or `write_word(0)` to write an element to that position on the
     /// stack.
-    fn increment_size(&mut self, tracer: &mut impl Tracer) -> Result<(), ExecutionError>;
+    fn increment_size(&mut self, tracer: &mut impl Tracer) -> Result<(), OperationError>;
 
     /// Decrements the stack size by one, removing the top element from the stack.
     ///

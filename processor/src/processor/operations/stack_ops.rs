@@ -1,7 +1,7 @@
 use miden_core::{Felt, ZERO};
 
 use crate::{
-    ExecutionError, OperationError,
+    OperationError,
     fast::Tracer,
     processor::{Processor, StackInterface},
 };
@@ -13,7 +13,7 @@ pub(super) fn op_push<P: Processor>(
     element: Felt,
     tracer: &mut impl Tracer,
 ) -> Result<(), OperationError> {
-    processor.stack().increment_size(tracer).map_err(map_stack_error)?;
+    processor.stack().increment_size(tracer)?;
     processor.stack().set(0, element);
     Ok(())
 }
@@ -24,7 +24,7 @@ pub(super) fn op_pad<P: Processor>(
     processor: &mut P,
     tracer: &mut impl Tracer,
 ) -> Result<(), OperationError> {
-    processor.stack().increment_size(tracer).map_err(map_stack_error)?;
+    processor.stack().increment_size(tracer)?;
     processor.stack().set(0, ZERO);
     Ok(())
 }
@@ -91,7 +91,7 @@ pub(super) fn dup_nth<P: Processor>(
     tracer: &mut impl Tracer,
 ) -> Result<(), OperationError> {
     let to_dup = processor.stack().get(n);
-    processor.stack().increment_size(tracer).map_err(map_stack_error)?;
+    processor.stack().increment_size(tracer)?;
     processor.stack().set(0, to_dup);
 
     Ok(())
@@ -160,14 +160,4 @@ pub(super) fn op_cswapw<P: Processor>(
     }
 
     Ok(())
-}
-
-fn map_stack_error(err: ExecutionError) -> OperationError {
-    match err {
-        ExecutionError::OperationError { err, .. } => err,
-        ExecutionError::FailedToExecuteProgram(reason) => {
-            OperationError::failed_to_execute_program(reason)
-        },
-        _ => OperationError::failed_to_execute_program("stack operation failed"),
-    }
 }

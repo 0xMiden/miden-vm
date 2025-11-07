@@ -41,7 +41,7 @@ impl Process {
             .chiplets
             .memory
             .read_word(self.system.ctx(), self.stack.get(0), self.system.clk())
-            .map_err(OperationError::memory_error)?
+            .map_err(OperationError::MemoryError)?
             .into();
         word.reverse();
 
@@ -67,7 +67,7 @@ impl Process {
             .chiplets
             .memory
             .read(self.system.ctx(), self.stack.get(0), self.system.clk())
-            .map_err(OperationError::memory_error)?;
+            .map_err(OperationError::MemoryError)?;
 
         self.stack.set(0, element);
         self.stack.copy_state(1);
@@ -97,7 +97,7 @@ impl Process {
         self.chiplets
             .memory
             .write_word(self.system.ctx(), addr, self.system.clk(), word.into())
-            .map_err(OperationError::memory_error)?;
+            .map_err(OperationError::MemoryError)?;
 
         // reverse the order of the memory word & update the stack state
         for (i, &value) in word.iter().rev().enumerate() {
@@ -126,7 +126,7 @@ impl Process {
         self.chiplets
             .memory
             .write(ctx, addr, self.system.clk(), value)
-            .map_err(OperationError::memory_error)?;
+            .map_err(OperationError::MemoryError)?;
 
         // update the stack state
         self.stack.shift_left(1);
@@ -160,11 +160,11 @@ impl Process {
             self.chiplets
                 .memory
                 .read_word(ctx, addr_first_word, clk)
-                .map_err(OperationError::memory_error)?,
+                .map_err(OperationError::MemoryError)?,
             self.chiplets
                 .memory
                 .read_word(ctx, addr_second_word, clk)
-                .map_err(OperationError::memory_error)?,
+                .map_err(OperationError::MemoryError)?,
         ];
 
         // replace the stack elements with the elements from memory (in stack order)
@@ -220,11 +220,11 @@ impl Process {
         self.chiplets
             .memory
             .write_word(ctx, addr_first_word, clk, words[0])
-            .map_err(OperationError::memory_error)?;
+            .map_err(OperationError::MemoryError)?;
         self.chiplets
             .memory
             .write_word(ctx, addr_second_word, clk, words[1])
-            .map_err(OperationError::memory_error)?;
+            .map_err(OperationError::MemoryError)?;
 
         // replace the elements on the stack with the word elements (in stack order)
         for (i, &adv_value) in words.iter().flat_map(|word| word.iter()).rev().enumerate() {
@@ -692,9 +692,7 @@ mod tests {
         process.op_mload().unwrap();
         assert_matches!(
             process.op_mstore(),
-            Err(OperationError::MemoryError {
-                err: MemoryError::IllegalMemoryAccess { ctx: _, addr: _, clk: _ }
-            })
+            Err(OperationError::MemoryError(MemoryError::IllegalMemoryAccess { ctx: _, addr: _, clk: _ }))
         );
     }
 
@@ -709,9 +707,7 @@ mod tests {
         process.op_mstore().unwrap();
         assert_matches!(
             process.op_mstore(),
-            Err(OperationError::MemoryError {
-                err: MemoryError::IllegalMemoryAccess { ctx: _, addr: _, clk: _ }
-            })
+            Err(OperationError::MemoryError(MemoryError::IllegalMemoryAccess { ctx: _, addr: _, clk: _ }))
         );
     }
 

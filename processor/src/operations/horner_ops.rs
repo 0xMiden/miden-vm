@@ -232,7 +232,7 @@ impl Process {
             .chiplets
             .memory
             .read_word(ctx, addr, self.system.clk())
-            .map_err(OperationError::memory_error)?;
+            .map_err(OperationError::MemoryError)?;
         let alpha_0 = word[0];
         let alpha_1 = word[1];
 
