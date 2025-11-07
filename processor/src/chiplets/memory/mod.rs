@@ -165,7 +165,7 @@ impl Memory {
         let addr: u32 = addr
             .as_int()
             .try_into()
-            .map_err(|_| MemoryError::address_out_of_bounds(addr.as_int()))?;
+            .map_err(|_| MemoryError::AddressOutOfBounds { addr: addr.as_int() })?;
         self.num_trace_rows += 1;
         self.trace.entry(ctx).or_default().read(ctx, addr, Felt::from(clk))
     }
@@ -188,9 +188,9 @@ impl Memory {
         let addr: u32 = addr
             .as_int()
             .try_into()
-            .map_err(|_| MemoryError::address_out_of_bounds(addr.as_int()))?;
+            .map_err(|_| MemoryError::AddressOutOfBounds { addr: addr.as_int() })?;
         if !addr.is_multiple_of(WORD_SIZE as u32) {
-            return Err(MemoryError::unaligned_word_access(addr, ctx, clk.into()));
+            return Err(MemoryError::UnalignedWordAccess { addr, ctx, clk: clk.into() });
         }
 
         self.num_trace_rows += 1;
@@ -212,7 +212,7 @@ impl Memory {
         let addr: u32 = addr
             .as_int()
             .try_into()
-            .map_err(|_| MemoryError::address_out_of_bounds(addr.as_int()))?;
+            .map_err(|_| MemoryError::AddressOutOfBounds { addr: addr.as_int() })?;
         self.num_trace_rows += 1;
         self.trace.entry(ctx).or_default().write(ctx, addr, Felt::from(clk), value)
     }
@@ -233,9 +233,9 @@ impl Memory {
         let addr: u32 = addr
             .as_int()
             .try_into()
-            .map_err(|_| MemoryError::address_out_of_bounds(addr.as_int()))?;
+            .map_err(|_| MemoryError::AddressOutOfBounds { addr: addr.as_int() })?;
         if !addr.is_multiple_of(WORD_SIZE as u32) {
-            return Err(MemoryError::unaligned_word_access(addr, ctx, clk.into()));
+            return Err(MemoryError::UnalignedWordAccess { addr, ctx, clk: clk.into() });
         }
 
         self.num_trace_rows += 1;

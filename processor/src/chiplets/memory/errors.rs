@@ -25,13 +25,3 @@ pub enum MemoryError {
     #[error("word access at memory address {addr} in context {ctx} is unaligned")]
     UnalignedWordAccessNoClk { addr: u32, ctx: ContextId },
 }
-
-impl MemoryError {
-    pub fn unaligned_word_access(addr: u32, ctx: ContextId, clk: Felt) -> Self {
-        MemoryError::UnalignedWordAccess { addr, ctx, clk }
-    }
-
-    pub fn address_out_of_bounds(addr: u64) -> Self {
-        MemoryError::AddressOutOfBounds { addr }
-    }
-}

@@ -89,11 +89,11 @@ fn push_lowerbound_result(
 
     // Validate the start_addr is word-aligned (multiple of 4)
     if addr_range.start % 4 != 0 {
-        return Err(MemoryError::unaligned_word_access(
-            addr_range.start,
-            process.ctx(),
-            Felt::from(process.clk()),
-        )
+        return Err(MemoryError::UnalignedWordAccess {
+            addr: addr_range.start,
+            ctx: process.ctx(),
+            clk: Felt::from(process.clk()),
+        }
         .into());
     }
 

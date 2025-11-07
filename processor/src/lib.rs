@@ -976,10 +976,10 @@ impl<'a> ProcessState<'a> {
         let end_addr = self.get_stack_item(end_idx).as_int();
 
         if start_addr > u32::MAX as u64 {
-            return Err(MemoryError::address_out_of_bounds(start_addr));
+            return Err(MemoryError::AddressOutOfBounds { addr: start_addr });
         }
         if end_addr > u32::MAX as u64 {
-            return Err(MemoryError::address_out_of_bounds(end_addr));
+            return Err(MemoryError::AddressOutOfBounds { addr: end_addr });
         }
 
         if start_addr > end_addr {
