@@ -1,0 +1,34 @@
+---
+source: air/src/trace/tests.rs
+expression: layout
+---
+ALL CHIPLET COLUMN RANGES
+================================
+
+Chiplet Selector Counts:
+  - Hasher selectors: 1
+  - Bitwise selectors: 2
+  - Memory selectors: 3
+  - ACE selectors: 4
+  - Kernel ROM selectors: 5
+
+Hasher Chiplet:
+  Trace offset: 52
+  Selector range: 52..55
+  State range: 55..67
+  Capacity range: 55..59
+  Rate range: 59..67
+  Node index: 67
+
+Bitwise Chiplet:
+  Trace offset: 53
+  Selector index: 53
+  Input A range: 56..60
+  Input B range: 60..64
+  Trace range: 53..66
+
+Memory Chiplet:
+  Trace offset: 54
+  Value range: 61..65
+
+Note: All column indices are relative to the main trace (not relative to the chiplet trace).
