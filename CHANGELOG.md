@@ -4,6 +4,8 @@
 
 #### Enhancements
 
+- Added new `memcopy_felts` procedure for the `std::mem` module. ([#2352](https://github.com/0xMiden/miden-vm/pull/2352)).
+
 #### Changes
 
 - Added missing implementations of `proptest::Arbitrary` for non-`BasicBlockNode` variants of `MastNode` ([#2335](https://github.com/0xMiden/miden-vm/pull/2335)).
