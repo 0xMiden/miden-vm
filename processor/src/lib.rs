@@ -1,5 +1,4 @@
 #![no_std]
-#![allow(clippy::result_large_err)]
 
 #[macro_use]
 extern crate alloc;
@@ -419,8 +418,7 @@ impl Process {
         } else if condition == ZERO {
             self.execute_mast_node(node.on_false(), program, host)?;
         } else {
-            return Err(ExecutionError::from_operation(
-                &err_ctx,
+            return Err(err_ctx.wrap_op_err(
                 OperationError::NotBinaryValueIf { value: condition },
                 clk_before_start,
             ));
@@ -457,14 +455,13 @@ impl Process {
             while self.stack.peek() == ONE {
                 self.decoder.repeat();
                 self.execute_op(Operation::Drop, program, host).map_err(|err| {
-                    ExecutionError::from_operation(&err_ctx, err, self.system.clk())
+                    err_ctx.wrap_op_err(err, self.system.clk())
                 })?;
                 self.execute_mast_node(node.body(), program, host)?;
             }
 
             if self.stack.peek() != ZERO {
-                return Err(ExecutionError::from_operation(
-                    &err_ctx,
+                return Err(err_ctx.wrap_op_err(
                     OperationError::NotBinaryValueLoop { value: self.stack.peek() },
                     self.system.clk(),
                 ));
@@ -477,8 +474,7 @@ impl Process {
             // already dropped when we started the LOOP block
             self.end_loop_node(node, false, program, host, &err_ctx)
         } else {
-            Err(ExecutionError::from_operation(
-                &err_ctx,
+            Err(err_ctx.wrap_op_err(
                 OperationError::NotBinaryValueLoop { value: condition },
                 clk_before_start,
             ))
@@ -502,7 +498,7 @@ impl Process {
             self.chiplets
                 .kernel_rom
                 .access_proc(callee.digest())
-                .map_err(|err| ExecutionError::from_operation(&err_ctx, err, self.system.clk()))?;
+                .map_err(|err| err_ctx.wrap_op_err(err, self.system.clk()))?;
         }
         let err_ctx = err_ctx!(program, call_node, host);
 
@@ -542,8 +538,7 @@ impl Process {
             Some(callee_id) => self.execute_mast_node(callee_id, program, host)?,
             None => {
                 let mast_forest = host.get_mast_forest(&callee_hash).ok_or_else(|| {
-                    ExecutionError::from_operation(
-                        &err_ctx,
+                    err_ctx.wrap_op_err(
                         OperationError::DynamicNodeNotFound { digest: callee_hash },
                         clk_before_start,
                     )
@@ -552,8 +547,7 @@ impl Process {
                 // We limit the parts of the program that can be called externally to procedure
                 // roots, even though MAST doesn't have that restriction.
                 let root_id = mast_forest.find_procedure_root(callee_hash).ok_or_else(|| {
-                    ExecutionError::from_operation(
-                        &err_ctx,
+                    err_ctx.wrap_op_err(
                         OperationError::MalformedMastForestInHost { root_digest: callee_hash },
                         clk_before_start,
                     )
@@ -565,8 +559,7 @@ impl Process {
                 // For now, only compiled libraries contain non-empty advice maps, so for most
                 // cases, this call will be cheap.
                 self.advice.extend_map(mast_forest.advice_map()).map_err(|err| {
-                    ExecutionError::from_operation(
-                        &err_ctx,
+                    err_ctx.wrap_op_err(
                         OperationError::AdviceError(err),
                         self.system.clk(),
                     )
@@ -614,7 +607,7 @@ impl Process {
         for op_batch in basic_block.op_batches().iter().skip(1) {
             self.respan(op_batch);
             self.execute_op(Operation::Noop, program, host)
-                .map_err(|err| ExecutionError::from_operation(&err_ctx, err, self.system.clk()))?;
+                .map_err(|err| err_ctx.wrap_op_err(err, self.system.clk()))?;
             self.execute_op_batch(
                 basic_block,
                 op_batch,
@@ -681,7 +674,7 @@ impl Process {
             let err_ctx = err_ctx!(program, basic_block, host, i + op_offset);
             self.decoder.execute_user_op(op, op_idx);
             self.execute_op(op, program, host)
-                .map_err(|err| ExecutionError::from_operation(&err_ctx, err, self.system.clk()))?;
+                .map_err(|err| err_ctx.wrap_op_err(err, self.system.clk()))?;
 
             // if the operation carries an immediate value, the value is stored at the next group
             // pointer; so, we advance the pointer to the following group
@@ -751,8 +744,7 @@ impl Process {
         let node_digest = external_node.digest();
 
         let mast_forest = host.get_mast_forest(&node_digest).ok_or_else(|| {
-            ExecutionError::from_operation(
-                &(),
+            ().wrap_op_err(
                 OperationError::NoMastForestWithProcedure { root_digest: node_digest },
                 self.system.clk(),
             )
@@ -761,8 +753,7 @@ impl Process {
         // We limit the parts of the program that can be called externally to procedure
         // roots, even though MAST doesn't have that restriction.
         let root_id = mast_forest.find_procedure_root(node_digest).ok_or_else(|| {
-            ExecutionError::from_operation(
-                &(),
+            ().wrap_op_err(
                 OperationError::MalformedMastForestInHost { root_digest: node_digest },
                 self.system.clk(),
             )
@@ -780,7 +771,7 @@ impl Process {
         // For now, only compiled libraries contain non-empty advice maps, so for most cases,
         // this call will be cheap.
         self.advice.extend_map(mast_forest.advice_map()).map_err(|err| {
-            ExecutionError::from_operation(&(), OperationError::AdviceError(err), self.system.clk())
+            ().wrap_op_err(OperationError::AdviceError(err), self.system.clk())
         })?;
 
         Ok((root_id, mast_forest))
@@ -1062,8 +1053,7 @@ pub(crate) fn add_error_ctx_to_external_error(
                         OperationError::MalformedMastForestInHost { root_digest } => *root_digest,
                         _ => unreachable!(),
                     };
-                    Err(ExecutionError::from_operation(
-                        &err_ctx,
+                    Err(err_ctx.wrap_op_err(
                         OperationError::NoMastForestWithProcedure { root_digest },
                         clk,
                     ))

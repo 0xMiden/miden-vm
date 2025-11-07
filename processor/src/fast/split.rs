@@ -9,6 +9,7 @@ use crate::{
     AsyncHost, ExecutionError, OperationError,
     continuation_stack::ContinuationStack,
     err_ctx,
+    errors::ErrorContext,
     fast::{FastProcessor, Tracer, trace_state::NodeExecutionState},
 };
 
@@ -47,8 +48,7 @@ impl FastProcessor {
             continuation_stack.push_start_node(split_node.on_false());
         } else {
             let err_ctx = err_ctx!(current_forest, split_node, host);
-            return Err(ExecutionError::from_operation(
-                &err_ctx,
+            return Err(err_ctx.wrap_op_err(
                 OperationError::NotBinaryValueIf { value: condition },
                 self.clk,
             ));

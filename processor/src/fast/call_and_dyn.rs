@@ -53,8 +53,7 @@ impl FastProcessor {
         if call_node.is_syscall() {
             // check if the callee is in the kernel
             if !program.kernel().contains_proc(callee_hash) {
-                return Err(ExecutionError::from_operation(
-                    &err_ctx,
+                return Err(err_ctx.wrap_op_err(
                     OperationError::SyscallTargetNotInKernel { proc_root: callee_hash },
                     self.clk,
                 ));
@@ -72,7 +71,7 @@ impl FastProcessor {
 
             // Initialize the frame pointer in memory for the new context.
             self.memory.write_element(new_ctx, FMP_ADDR, FMP_INIT_VALUE).map_err(|err| {
-                ExecutionError::from_operation(&err_ctx, OperationError::MemoryError(err), self.clk)
+                err_ctx.wrap_op_err(OperationError::MemoryError(err), self.clk)
             })?;
             tracer.record_memory_write_element(FMP_INIT_VALUE, FMP_ADDR, new_ctx, self.clk);
         }
@@ -149,7 +148,7 @@ impl FastProcessor {
         let callee_hash = {
             let mem_addr = self.stack_get(0);
             let word = self.memory.read_word(self.ctx, mem_addr, self.clk).map_err(|err| {
-                ExecutionError::from_operation(&err_ctx, OperationError::MemoryError(err), self.clk)
+                err_ctx.wrap_op_err(OperationError::MemoryError(err), self.clk)
             })?;
             tracer.record_memory_read_word(word, mem_addr, self.ctx, self.clk);
 
@@ -173,7 +172,7 @@ impl FastProcessor {
 
             // Initialize the frame pointer in memory for the new context.
             self.memory.write_element(new_ctx, FMP_ADDR, FMP_INIT_VALUE).map_err(|err| {
-                ExecutionError::from_operation(&err_ctx, OperationError::MemoryError(err), self.clk)
+                err_ctx.wrap_op_err(OperationError::MemoryError(err), self.clk)
             })?;
             tracer.record_memory_write_element(FMP_INIT_VALUE, FMP_ADDR, new_ctx, self.clk);
         };
@@ -195,7 +194,7 @@ impl FastProcessor {
                         OperationError::DynamicNodeNotFound { digest }
                     })
                     .await
-                    .map_err(|err| ExecutionError::from_operation(&err_ctx, err, self.clk))?;
+                    .map_err(|err| err_ctx.wrap_op_err(err, self.clk))?;
                 tracer.record_mast_forest_resolution(root_id, &new_forest);
 
                 // Push current forest to the continuation stack so that we can return to it
@@ -301,8 +300,7 @@ impl FastProcessor {
     ) -> Result<(), ExecutionError> {
         // when a call/dyncall/syscall node ends, stack depth must be exactly 16.
         if self.stack_size() > MIN_STACK_DEPTH {
-            return Err(ExecutionError::from_operation(
-                err_ctx,
+            return Err(err_ctx.wrap_op_err(
                 OperationError::InvalidStackDepthOnReturn { depth: self.stack_size() },
                 self.clk,
             ));

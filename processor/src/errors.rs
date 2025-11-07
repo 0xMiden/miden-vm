@@ -21,7 +21,7 @@
 //!    operation implementation is context-free and focuses purely on the error condition.
 //!
 //! 2. **Boundaries wrap with context** - Error context is added at boundaries where it's available
-//!    (decoders, fast processor, basic block executors) using [`ExecutionError::from_operation`].
+//!    (decoders, fast processor, basic block executors) using [`ErrorContext::wrap_op_err`].
 //!
 //! 3. **Errors propagate naturally** - No intermediate rewrapping. When a dyncall or call fails
 //!    during callee execution, the error bubbles up with its original source context preserved,
@@ -46,7 +46,7 @@
 //! // 2. Boundary (adds context)
 //! let err_ctx = err_ctx!(program, node, op_idx);
 //! self.execute_op(op)
-//!     .map_err(|err| ExecutionError::from_operation(&err_ctx, err))?;
+//!     .map_err(|err| err_ctx.wrap_op_err(err, self.clk))?;
 //! ```
 //!
 //! ## Error Context Feature Flag
@@ -108,18 +108,6 @@ pub enum ExecutionError {
     ProverError(#[source] ProverError),
     #[error("execution yielded unexpected precompiles")]
     UnexpectedPrecompiles,
-}
-
-impl ExecutionError {
-    pub fn from_operation(err_ctx: &impl ErrorContext, err: OperationError, clk: RowIndex) -> Self {
-        let (label, source_file) = err_ctx.label_and_source_file();
-        Self::OperationError {
-            clk,
-            label,
-            source_file,
-            err: Box::new(err),
-        }
-    }
 }
 
 impl AsRef<dyn Diagnostic> for ExecutionError {
@@ -341,6 +329,17 @@ pub trait ErrorContext {
     ///
     /// Note that `SourceSpan::UNKNOWN` will be returned to indicate an empty span.
     fn label_and_source_file(&self) -> (SourceSpan, Option<Arc<SourceFile>>);
+
+    /// Wraps an operation error with context information to create an execution error.
+    fn wrap_op_err(&self, err: OperationError, clk: RowIndex) -> ExecutionError {
+        let (label, source_file) = self.label_and_source_file();
+        ExecutionError::OperationError {
+            clk,
+            label,
+            source_file,
+            err: Box::new(err),
+        }
+    }
 }
 
 /// Context information to be used when reporting errors.

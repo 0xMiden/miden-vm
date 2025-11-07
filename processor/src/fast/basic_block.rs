@@ -10,6 +10,7 @@ use crate::{
     AsyncHost, ExecutionError, OperationError,
     continuation_stack::ContinuationStack,
     err_ctx,
+    errors::ErrorContext,
     fast::{FastProcessor, Tracer, trace_state::NodeExecutionState},
     operations::sys_ops::sys_event_handlers::handle_system_event,
     processor::Processor,
@@ -172,11 +173,11 @@ impl FastProcessor {
                     Operation::Emit => self
                         .op_emit(host)
                         .await
-                        .map_err(|err| ExecutionError::from_operation(&err_ctx, err, self.clk))?,
+                        .map_err(|err| err_ctx.wrap_op_err(err, self.clk))?,
                     _ => {
                         // if the operation is not an Emit, we execute it normally
                         self.execute_sync_op(op, op_idx_in_block, program, host, tracer).map_err(
-                            |err| ExecutionError::from_operation(&err_ctx, err, self.clk),
+                            |err| err_ctx.wrap_op_err(err, self.clk),
                         )?;
                     },
                 }

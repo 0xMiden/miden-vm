@@ -58,7 +58,6 @@ pub use winter_prover::{Proof, crypto::MerkleTree as MerkleTreeVC};
 /// Returns an error if program execution or STARK proof generation fails for any reason.
 #[instrument("prove_program", skip_all)]
 #[maybe_async]
-#[allow(clippy::result_large_err)]
 pub fn prove(
     program: &Program,
     stack_inputs: StackInputs,

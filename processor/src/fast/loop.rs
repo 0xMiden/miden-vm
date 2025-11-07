@@ -9,6 +9,7 @@ use crate::{
     AsyncHost, ExecutionError, OperationError,
     continuation_stack::ContinuationStack,
     err_ctx,
+    errors::ErrorContext,
     fast::{FastProcessor, Tracer, trace_state::NodeExecutionState},
 };
 
@@ -70,8 +71,7 @@ impl FastProcessor {
             self.execute_after_exit_decorators(current_node_id, current_forest, host)?;
         } else {
             let err_ctx = err_ctx!(current_forest, loop_node, host);
-            return Err(ExecutionError::from_operation(
-                &err_ctx,
+            return Err(err_ctx.wrap_op_err(
                 OperationError::NotBinaryValueLoop { value: condition },
                 self.clk,
             ));
@@ -126,8 +126,7 @@ impl FastProcessor {
             self.execute_after_exit_decorators(current_node_id, current_forest, host)?;
         } else {
             let err_ctx = err_ctx!(current_forest, loop_node, host);
-            return Err(ExecutionError::from_operation(
-                &err_ctx,
+            return Err(err_ctx.wrap_op_err(
                 OperationError::NotBinaryValueLoop { value: condition },
                 self.clk,
             ));
