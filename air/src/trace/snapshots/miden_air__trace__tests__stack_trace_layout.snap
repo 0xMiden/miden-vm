@@ -1,0 +1,15 @@
+---
+source: air/src/trace/tests.rs
+expression: layout
+---
+STACK TRACE LAYOUT
+====================
+
+Stack Top:
+  Offset: 0
+
+Helper Columns:
+  Number of helper columns: 3
+  - b0 column (stack depth): 16
+  - b1 column (overflow table address): 17
+  - h0 column (1 / (b0 - 16)): 18
