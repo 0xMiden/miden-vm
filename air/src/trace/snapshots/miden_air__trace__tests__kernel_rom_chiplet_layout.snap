@@ -1,0 +1,14 @@
+---
+source: air/src/trace/tests.rs
+expression: layout
+---
+KERNEL ROM CHIPLET LAYOUT
+================================
+
+Chiplet Selectors:
+  Number of kernel ROM selectors: 5
+
+Other Constants:
+  Trace width: 5
+  Kernel procedure call label: 16
+  Kernel procedure init label: 48
