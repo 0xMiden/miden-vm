@@ -692,7 +692,11 @@ mod tests {
         process.op_mload().unwrap();
         assert_matches!(
             process.op_mstore(),
-            Err(OperationError::MemoryError(MemoryError::IllegalMemoryAccess { ctx: _, addr: _, clk: _ }))
+            Err(OperationError::MemoryError(MemoryError::IllegalMemoryAccess {
+                ctx: _,
+                addr: _,
+                clk: _
+            }))
         );
     }
 
@@ -707,7 +711,11 @@ mod tests {
         process.op_mstore().unwrap();
         assert_matches!(
             process.op_mstore(),
-            Err(OperationError::MemoryError(MemoryError::IllegalMemoryAccess { ctx: _, addr: _, clk: _ }))
+            Err(OperationError::MemoryError(MemoryError::IllegalMemoryAccess {
+                ctx: _,
+                addr: _,
+                clk: _
+            }))
         );
     }
 

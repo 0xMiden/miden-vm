@@ -1,7 +1,61 @@
 // Allow unused assignments - required by miette::Diagnostic derive macro
 #![allow(unused_assignments)]
 
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
+//! # Error Architecture
+//!
+//! This module implements a two-tier error boundary pattern that separates "what went wrong"
+//! (logical error semantics) from "where it went wrong" (diagnostic source context).
+//!
+//! ## Error Types
+//!
+//! - **[`OperationError`]**: Context-free errors from operations. Contains runtime data (clock
+//!   cycles, values, addresses) but NO source locations. Returned by all operation implementations.
+//!
+//! - **[`ExecutionError`]**: User-facing errors with source spans and file references. Either wraps
+//!   an `OperationError` with source context via the `OperationError` variant, or represents
+//!   program-level errors (e.g., `CycleLimitExceeded`, `ProgramAlreadyExecuted`).
+//!
+//! ## Design Principles
+//!
+//! 1. **Operations return `OperationError`** - No error context threading through signatures. Each
+//!    operation implementation is context-free and focuses purely on the error condition.
+//!
+//! 2. **Boundaries wrap with context** - Error context is added at boundaries where it's available
+//!    (decoders, fast processor, basic block executors) using [`ExecutionError::from_operation`].
+//!
+//! 3. **Errors propagate naturally** - No intermediate rewrapping. When a dyncall or call fails
+//!    during callee execution, the error bubbles up with its original source context preserved,
+//!    pointing to the actual failing instruction, not the call site.
+//!
+//! 4. **Subsystem errors appear in `OperationError` only** - Errors from chiplets ([`MemoryError`],
+//!    [`AceError`]) are wrapped in `OperationError` at chiplet boundaries, then wrapped again in
+//!    `ExecutionError` at operation boundaries. This creates a consistent error chain without
+//!    ambiguity.
+//!
+//! ## Example Flow
+//!
+//! ```text
+//! // 1. Operation (context-free)
+//! fn op_u32add(&mut self) -> Result<(), OperationError> {
+//!     if !is_valid {
+//!         return Err(OperationError::NotU32Values { values, err_code });
+//!     }
+//!     Ok(())
+//! }
+//!
+//! // 2. Boundary (adds context)
+//! let err_ctx = err_ctx!(program, node, op_idx);
+//! self.execute_op(op)
+//!     .map_err(|err| ExecutionError::from_operation(&err_ctx, err))?;
+//! ```
+//!
+//! ## Error Context Feature Flag
+//!
+//! The `no_err_ctx` feature flag allows compile-time elimination of error context for
+//! performance-critical builds. When enabled, the `err_ctx!()` macro expands to `()` and all
+//! context operations become no-ops.
+
+use alloc::{sync::Arc, vec::Vec};
 
 use miden_air::RowIndex;
 use miden_core::{
@@ -49,8 +103,6 @@ pub enum ExecutionError {
     ProgramAlreadyExecuted,
     #[error("proof generation failed")]
     ProverError(#[source] ProverError),
-    #[error(transparent)]
-    MemoryError(MemoryError),
     #[error("execution yielded unexpected precompiles")]
     UnexpectedPrecompiles,
 }
@@ -96,17 +148,6 @@ pub enum OperationError {
     )]
     DynamicNodeNotFound { digest: Word },
     #[error(
-        "dynamic {} into callee with root {hex} failed",
-        if *.is_dyncall { "call" } else { "execution" },
-        hex = .callee.to_hex()
-    )]
-    DynReturn {
-        callee: Word,
-        #[source]
-        err: Box<OperationError>,
-        is_dyncall: bool,
-    },
-    #[error(
         "error during processing of event {}",
         match event_name {
             Some(name) => format!("'{}' (ID: {})", name, event_id),
@@ -138,14 +179,16 @@ pub enum OperationError {
     #[error(
         "when returning from a call or dyncall, stack depth must be {MIN_STACK_DEPTH}, but was {depth}"
     )]
-    // TODO: restore label "when returning from this call site"
+    // NOTE: Diagnostic label "when returning from this call site" will be restored
+    // when implementing OperationDiagnostic trait (deferred).
     InvalidStackDepthOnReturn { depth: usize },
     #[error("exceeded the allowed number of max cycles {max_cycles}")]
     CycleLimitExceeded { max_cycles: u32 },
     #[error("attempted to calculate integer logarithm with zero argument at clock cycle {clk}")]
     LogArgumentZero { clk: RowIndex },
     #[error("malformed signature key: {key_type}")]
-    // TODO: restore help "the secret key associated with the provided public key is malformed"
+    // NOTE: Diagnostic help "the secret key associated with the provided public key is malformed"
+    // will be restored when implementing OperationDiagnostic trait (deferred).
     MalformedSignatureKey { key_type: &'static str },
     #[error(
         "MAST forest in host indexed by procedure root {root_digest} doesn't contain that root"
@@ -174,8 +217,9 @@ pub enum OperationError {
     #[error("operation expected a binary value, but got {value}")]
     NotBinaryValueOp { value: Felt },
     #[error("loop condition must be a binary value, but got {value}")]
-    // TODO: restore help "this could happen either when first entering the loop, or any subsequent
-    // iteration"
+    // NOTE: Diagnostic help "this could happen either when first entering the loop, or any
+    // subsequent iteration" will be restored when implementing OperationDiagnostic trait
+    // (deferred).
     NotBinaryValueLoop { value: Felt },
     #[error("operation expected u32 values, but got values: {values:?} (error code: {err_code})")]
     NotU32Values { values: Vec<Felt>, err_code: Felt },
@@ -196,7 +240,8 @@ pub enum OperationError {
     )]
     SyscallTargetNotInKernel { proc_root: Word },
     #[error("failed to execute arithmetic circuit evaluation operation: {0}")]
-    // TODO: restore label "this call failed"
+    // NOTE: Diagnostic label "this call failed" will be restored when implementing
+    // OperationDiagnostic trait (deferred).
     AceChipError(#[source] AceError),
     #[error("FRI domain segment value cannot exceed 3, but was {0}")]
     InvalidFriDomainSegment(u64),
@@ -208,10 +253,6 @@ pub enum OperationError {
 }
 
 impl OperationError {
-    pub fn dyn_return(callee: Word, err: OperationError, is_dyncall: bool) -> Self {
-        Self::DynReturn { callee, err: Box::new(err), is_dyncall }
-    }
-
     pub fn merkle_path_verification_failed(
         value: Word,
         index: Felt,

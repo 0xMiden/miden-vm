@@ -8,8 +8,8 @@ use miden_core::{
 };
 
 use crate::{
-    AdviceError, BaseHost, ContextId, MemoryError, OperationError, ProcessState,
-    fast::Tracer, processor::operations::execute_sync_op,
+    AdviceError, BaseHost, ContextId, MemoryError, OperationError, ProcessState, fast::Tracer,
+    processor::operations::execute_sync_op,
 };
 
 mod operations;

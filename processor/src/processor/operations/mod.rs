@@ -1,7 +1,11 @@
 use miden_air::trace::decoder::NUM_USER_OP_HELPERS;
 use miden_core::{Felt, Operation, mast::MastForest};
 
-use crate::{BaseHost, OperationError, fast::Tracer, processor::Processor};
+use crate::{
+    BaseHost, OperationError,
+    fast::Tracer,
+    processor::{Processor, StackInterface},
+};
 
 mod crypto_ops;
 mod field_ops;
@@ -60,11 +64,11 @@ pub(super) fn execute_sync_op(
         Operation::Halt => unreachable!("control flow operation"),
 
         // ----- field operations -------------------------------------------------------------
-        Operation::Add => field_ops::op_add(processor, tracer)?,
-        Operation::Neg => field_ops::op_neg(processor)?,
-        Operation::Mul => field_ops::op_mul(processor, tracer)?,
+        Operation::Add => field_ops::op_add(processor, tracer),
+        Operation::Neg => field_ops::op_neg(processor),
+        Operation::Mul => field_ops::op_mul(processor, tracer),
         Operation::Inv => field_ops::op_inv(processor)?,
-        Operation::Incr => field_ops::op_incr(processor)?,
+        Operation::Incr => field_ops::op_incr(processor),
         Operation::And => field_ops::op_and(processor, tracer)?,
         Operation::Or => field_ops::op_or(processor, tracer)?,
         Operation::Not => field_ops::op_not(processor)?,
@@ -82,7 +86,7 @@ pub(super) fn execute_sync_op(
         },
 
         // ----- ext2 operations --------------------------------------------------------------
-        Operation::Ext2Mul => field_ops::op_ext2mul(processor)?,
+        Operation::Ext2Mul => field_ops::op_ext2mul(processor),
 
         // ----- u32 operations ---------------------------------------------------------------
         Operation::U32split => {
@@ -122,7 +126,7 @@ pub(super) fn execute_sync_op(
 
         // ----- stack manipulation -----------------------------------------------------------
         Operation::Pad => stack_ops::op_pad(processor, tracer)?,
-        Operation::Drop => stack_ops::op_drop(processor, tracer)?,
+        Operation::Drop => processor.stack().decrement_size(tracer),
         Operation::Dup0 => stack_ops::dup_nth(processor, 0, tracer)?,
         Operation::Dup1 => stack_ops::dup_nth(processor, 1, tracer)?,
         Operation::Dup2 => stack_ops::dup_nth(processor, 2, tracer)?,
@@ -135,25 +139,25 @@ pub(super) fn execute_sync_op(
         Operation::Dup11 => stack_ops::dup_nth(processor, 11, tracer)?,
         Operation::Dup13 => stack_ops::dup_nth(processor, 13, tracer)?,
         Operation::Dup15 => stack_ops::dup_nth(processor, 15, tracer)?,
-        Operation::Swap => stack_ops::op_swap(processor)?,
-        Operation::SwapW => stack_ops::op_swapw(processor)?,
-        Operation::SwapW2 => stack_ops::op_swapw2(processor)?,
-        Operation::SwapW3 => stack_ops::op_swapw3(processor)?,
-        Operation::SwapDW => stack_ops::op_swap_double_word(processor)?,
-        Operation::MovUp2 => stack_ops::op_movup(processor, 2)?,
-        Operation::MovUp3 => stack_ops::op_movup(processor, 3)?,
-        Operation::MovUp4 => stack_ops::op_movup(processor, 4)?,
-        Operation::MovUp5 => stack_ops::op_movup(processor, 5)?,
-        Operation::MovUp6 => stack_ops::op_movup(processor, 6)?,
-        Operation::MovUp7 => stack_ops::op_movup(processor, 7)?,
-        Operation::MovUp8 => stack_ops::op_movup(processor, 8)?,
-        Operation::MovDn2 => stack_ops::op_movdn(processor, 2)?,
-        Operation::MovDn3 => stack_ops::op_movdn(processor, 3)?,
-        Operation::MovDn4 => stack_ops::op_movdn(processor, 4)?,
-        Operation::MovDn5 => stack_ops::op_movdn(processor, 5)?,
-        Operation::MovDn6 => stack_ops::op_movdn(processor, 6)?,
-        Operation::MovDn7 => stack_ops::op_movdn(processor, 7)?,
-        Operation::MovDn8 => stack_ops::op_movdn(processor, 8)?,
+        Operation::Swap => stack_ops::op_swap(processor),
+        Operation::SwapW => processor.stack().swapw_nth(1),
+        Operation::SwapW2 => processor.stack().swapw_nth(2),
+        Operation::SwapW3 => processor.stack().swapw_nth(3),
+        Operation::SwapDW => stack_ops::op_swap_double_word(processor),
+        Operation::MovUp2 => processor.stack().rotate_left(3),
+        Operation::MovUp3 => processor.stack().rotate_left(4),
+        Operation::MovUp4 => processor.stack().rotate_left(5),
+        Operation::MovUp5 => processor.stack().rotate_left(6),
+        Operation::MovUp6 => processor.stack().rotate_left(7),
+        Operation::MovUp7 => processor.stack().rotate_left(8),
+        Operation::MovUp8 => processor.stack().rotate_left(9),
+        Operation::MovDn2 => processor.stack().rotate_right(3),
+        Operation::MovDn3 => processor.stack().rotate_right(4),
+        Operation::MovDn4 => processor.stack().rotate_right(5),
+        Operation::MovDn5 => processor.stack().rotate_right(6),
+        Operation::MovDn6 => processor.stack().rotate_right(7),
+        Operation::MovDn7 => processor.stack().rotate_right(8),
+        Operation::MovDn8 => processor.stack().rotate_right(9),
         Operation::CSwap => stack_ops::op_cswap(processor, tracer)?,
         Operation::CSwapW => stack_ops::op_cswapw(processor, tracer)?,
 

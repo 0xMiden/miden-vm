@@ -28,8 +28,7 @@ use rayon::prelude::*;
 use winter_prover::{crypto::RandomCoin, math::batch_inversion};
 
 use crate::{
-    ChipletsLengths, ColMatrix, ContextId, ExecutionTrace, ProcessState,
-    TraceLenSummary,
+    ChipletsLengths, ColMatrix, ContextId, ExecutionTrace, ProcessState, TraceLenSummary,
     chiplets::{Chiplets, CircuitEvaluation, MAX_NUM_ACE_WIRES, PTR_OFFSET_ELEM, PTR_OFFSET_WORD},
     continuation_stack::Continuation,
     crypto::RpoRandomCoin,
@@ -2002,10 +2001,8 @@ fn eval_circuit_fast_(
     }
     // perform EVAL operations
     for _ in 0..num_eval_rows {
-        let instruction = processor
-            .memory()
-            .read_element(ctx, ptr)
-            .map_err(AceError::FailedMemoryRead)?;
+        let instruction =
+            processor.memory().read_element(ctx, ptr).map_err(AceError::FailedMemoryRead)?;
         tracer.record_memory_read_element(instruction, ptr, ctx, clk);
         evaluation_context.do_eval(ptr, instruction)?;
         ptr += PTR_OFFSET_ELEM;
