@@ -62,7 +62,9 @@ fn locaddr() {
     let test = build_test!(source, &[10]);
     // Note: internally, we round 5 up to 8 for word-aligned purposes, so the local addresses are
     // offset from 8 rather than 5.
-    test.expect_stack(&[FMP_INIT_VALUE_U64 + 7, FMP_INIT_VALUE_U64 + 3, 10]);
+    // locaddr.0 → fmp - (8 - 0) = fmp - 8 → FMP_INIT_VALUE + 0
+    // locaddr.4 → fmp - (8 - 4) = fmp - 4 → FMP_INIT_VALUE + 4
+    test.expect_stack(&[FMP_INIT_VALUE_U64 + 4, FMP_INIT_VALUE_U64 + 0, 10]);
 
     // --- accessing mem via locaddr updates the correct variables --------------------------------
     let source = "
