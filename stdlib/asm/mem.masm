@@ -30,7 +30,7 @@ export.memcopy_words
     # stack: [a3, a2, a1, a0, -n, read_ptr, write_ptr, ...]
     dup.5 mem_loadw_be
 
-    # peform write (2 cycles)
+    # perform write (2 cycles)
     # stack: [a3, a2, a1, a0, -n, read_ptr, write_ptr, ...]
     dup.6 mem_storew_be
 
@@ -52,6 +52,50 @@ export.memcopy_words
   # clean stack (7 cycles)
   # stack: [...]
   dropw drop drop drop
+end
+
+#! Copies `n` felts from `read_ptr` to `write_ptr`.
+#!
+#! Inputs:  [n, read_ptr, write_ptr]
+#! Outputs: []
+#!
+#! Where:
+#! - n is the number of felts which should be copied.
+#! - read_ptr is the memory pointer where the felts to copy are stored.
+#! - write_ptr is the memory pointer where the felts will be copied.
+#!
+#! Total cycles: 7 + 14n
+export.memcopy_felts
+    # The loop variable is changed with an `add` instead of `sub` because the former uses one fewer 
+    # cycle. So here the counter is negated. (1 cycle)
+    neg
+    # => [-n, read_ptr, write_ptr]
+
+    # check the loop condition (3 cycles)
+    dup neq.0
+    # => [loop_flag, -n, read_ptr, write_ptr]
+
+    while.true
+        # perform read (2 cycles)
+        dup.1 mem_load
+        # => [value_to_store, -n, read_ptr, write_ptr]
+
+        # perform write (3 cycles)
+        dup.3 mem_store
+        # => [-n, read_ptr, write_ptr]
+
+        # update the counters (6 cycles)
+        add.1 movup.2 add.1 movup.2 add.1 movup.2
+        # => [-n+1, read_ptr+1, write_ptr+1]
+
+        # check the loop condition (3 cycles)
+        dup neq.0
+        # => [loop_flag, -n+1, read_ptr+1, write_ptr+1]
+    end
+    # => [n = 0, read_ptr + n, write_ptr + n]
+
+    # clean stack (3 cycles)
+    drop drop drop
 end
 
 #! Copies an even number of words from the advice_stack to memory.
