@@ -358,9 +358,9 @@ impl FastProcessor {
         let mut current_forest = program.mast_forest().clone();
 
         // Merge the program's advice map into the advice provider
-        self.advice.extend_map(current_forest.advice_map()).map_err(|err| {
-            ExecutionError::from_operation(&(), OperationError::ProgramInitializationFailed(err))
-        })?;
+        self.advice
+            .extend_map(current_forest.advice_map())
+            .map_err(ExecutionError::ProgramInitializationFailed)?;
 
         while let Some(continuation) = continuation_stack.pop_continuation() {
             match continuation {
@@ -574,11 +574,12 @@ impl FastProcessor {
         &mut self,
         node_digest: Word,
         host: &mut impl AsyncHost,
-        _is_dyncall: bool,
+        forest_not_found: impl FnOnce(Word) -> OperationError,
     ) -> Result<(MastNodeId, Arc<MastForest>), OperationError> {
-        let mast_forest = host.get_mast_forest(&node_digest).await.ok_or_else(|| {
-            OperationError::NoMastForestWithProcedure { root_digest: node_digest }
-        })?;
+        let mast_forest = host
+            .get_mast_forest(&node_digest)
+            .await
+            .ok_or_else(|| forest_not_found(node_digest))?;
 
         // We limit the parts of the program that can be called externally to procedure
         // roots, even though MAST doesn't have that restriction.

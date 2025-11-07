@@ -101,6 +101,8 @@ pub enum ExecutionError {
     OutputStackOverflow(usize),
     #[error("a program has already been executed in this process")]
     ProgramAlreadyExecuted,
+    #[error("program initialization failed")]
+    ProgramInitializationFailed(#[source] AdviceError),
     #[error("proof generation failed")]
     ProverError(#[source] ProverError),
     #[error("execution yielded unexpected precompiles")]
@@ -140,8 +142,6 @@ pub enum OperationError {
         #[source]
         err: AdviceError,
     },
-    #[error("program initialization failed")]
-    ProgramInitializationFailed(#[source] AdviceError),
     #[error(
         "failed to execute the dynamic code block provided by the stack with root {hex}; the block could not be found",
         hex = .digest.to_hex()

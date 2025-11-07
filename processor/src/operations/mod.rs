@@ -23,21 +23,7 @@ use super::Kernel;
 
 impl Process {
     /// Executes the specified operation.
-    ///
-    /// This method doesn't take an error context as an argument, and therefore cannot construct
-    /// helpful error messages. It is currently only used by tests, or internally in the decoder to
-    /// call `Noop` or `Drop`.
     pub(super) fn execute_op(
-        &mut self,
-        op: Operation,
-        program: &MastForest,
-        host: &mut impl SyncHost,
-    ) -> Result<(), OperationError> {
-        self.execute_op_with_error_ctx(op, program, host)
-    }
-
-    /// Executes the specified operation.
-    pub(super) fn execute_op_with_error_ctx(
         &mut self,
         op: Operation,
         program: &MastForest,

@@ -318,9 +318,9 @@ impl Process {
             return Err(ExecutionError::ProgramAlreadyExecuted);
         }
 
-        self.advice.extend_map(program.mast_forest().advice_map()).map_err(|err| {
-            ExecutionError::from_operation(&(), OperationError::ProgramInitializationFailed(err))
-        })?;
+        self.advice
+            .extend_map(program.mast_forest().advice_map())
+            .map_err(ExecutionError::ProgramInitializationFailed)?;
 
         self.execute_mast_node(program.entrypoint(), &program.mast_forest().clone(), host)?;
 
@@ -526,7 +526,7 @@ impl Process {
                 let mast_forest = host.get_mast_forest(&callee_hash).ok_or_else(|| {
                     ExecutionError::from_operation(
                         &err_ctx,
-                        OperationError::NoMastForestWithProcedure { root_digest: callee_hash },
+                        OperationError::DynamicNodeNotFound { digest: callee_hash },
                     )
                 })?;
 
@@ -659,7 +659,7 @@ impl Process {
             // decode and execute the operation
             let err_ctx = err_ctx!(program, basic_block, host, i + op_offset);
             self.decoder.execute_user_op(op, op_idx);
-            self.execute_op_with_error_ctx(op, program, host)
+            self.execute_op(op, program, host)
                 .map_err(|err| ExecutionError::from_operation(&err_ctx, err))?;
 
             // if the operation carries an immediate value, the value is stored at the next group

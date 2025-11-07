@@ -190,7 +190,9 @@ impl FastProcessor {
             },
             None => {
                 let (root_id, new_forest) = self
-                    .load_mast_forest(callee_hash, host, dyn_node.is_dyncall())
+                    .load_mast_forest(callee_hash, host, |digest| {
+                        OperationError::DynamicNodeNotFound { digest }
+                    })
                     .await
                     .map_err(|err| ExecutionError::from_operation(&err_ctx, err))?;
                 tracer.record_mast_forest_resolution(root_id, &new_forest);
