@@ -1,5 +1,3 @@
-#![allow(clippy::result_large_err)]
-
 use alloc::sync::Arc;
 
 use miden_core::{
@@ -177,8 +175,9 @@ impl FastProcessor {
                         .map_err(|err| ExecutionError::from_operation(&err_ctx, err, self.clk))?,
                     _ => {
                         // if the operation is not an Emit, we execute it normally
-                        self.execute_sync_op(op, op_idx_in_block, program, host, tracer)
-                            .map_err(|err| ExecutionError::from_operation(&err_ctx, err, self.clk))?;
+                        self.execute_sync_op(op, op_idx_in_block, program, host, tracer).map_err(
+                            |err| ExecutionError::from_operation(&err_ctx, err, self.clk),
+                        )?;
                     },
                 }
             }
@@ -216,9 +215,7 @@ impl FastProcessor {
                 let event_name = host.resolve_event(event_id).cloned();
                 OperationError::EventError { event_id, event_name, error: err }
             })?;
-            self.advice
-                .apply_mutations(mutations)
-                .map_err(OperationError::AdviceError)?;
+            self.advice.apply_mutations(mutations).map_err(OperationError::AdviceError)?;
             Ok(())
         }
     }

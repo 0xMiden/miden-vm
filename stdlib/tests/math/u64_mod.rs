@@ -596,18 +596,20 @@ fn ensure_div_doesnt_crash() {
     let err = test.execute();
     match err {
         Ok(_) => panic!("expected an error"),
-        Err(ExecutionError::OperationError {
-            err: OperationError::EventError { error, .. },
-            ..
-        }) => {
-            let u64_div_error = error.downcast_ref::<U64DivError>().expect("Expected U64DivError");
-            assert_matches!(
-                u64_div_error,
-                U64DivError::NotU32Value {
-                    value: 4294967296,
-                    position: "divisor_lo"
-                }
-            );
+        Err(ExecutionError::OperationError { ref err, .. }) => {
+            if let OperationError::EventError { error, .. } = err.as_ref() {
+                let u64_div_error =
+                    error.downcast_ref::<U64DivError>().expect("Expected U64DivError");
+                assert_matches!(
+                    u64_div_error,
+                    U64DivError::NotU32Value {
+                        value: 4294967296,
+                        position: "divisor_lo"
+                    }
+                );
+            } else {
+                panic!("Expected EventError");
+            }
         },
         Err(err) => panic!("Unexpected error type: {:?}", err),
     }
@@ -621,18 +623,20 @@ fn ensure_div_doesnt_crash() {
     let err = test.execute();
     match err {
         Ok(_) => panic!("expected an error"),
-        Err(ExecutionError::OperationError {
-            err: OperationError::EventError { error, .. },
-            ..
-        }) => {
-            let u64_div_error = error.downcast_ref::<U64DivError>().expect("Expected U64DivError");
-            assert_matches!(
-                u64_div_error,
-                U64DivError::NotU32Value {
-                    value: 4294967296,
-                    position: "dividend_lo"
-                }
-            );
+        Err(ExecutionError::OperationError { ref err, .. }) => {
+            if let OperationError::EventError { error, .. } = err.as_ref() {
+                let u64_div_error =
+                    error.downcast_ref::<U64DivError>().expect("Expected U64DivError");
+                assert_matches!(
+                    u64_div_error,
+                    U64DivError::NotU32Value {
+                        value: 4294967296,
+                        position: "dividend_lo"
+                    }
+                );
+            } else {
+                panic!("Expected EventError");
+            }
         },
         Err(err) => panic!("Unexpected error type: {:?}", err),
     }
@@ -733,14 +737,12 @@ fn checked_and_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError {
-            err: OperationError::NotU32Values { values, err_code },
-            ..
-        } if
-            values.len() == 2 &&
-            values.contains(&Felt::new(a0)) &&
-            values.contains(&Felt::new(b0)) &&
-            err_code == ZERO
+        ExecutionError::OperationError { ref err, .. }
+        if matches!(err.as_ref(), OperationError::NotU32Values { values, err_code }
+            if values.len() == 2 &&
+                values.contains(&Felt::new(a0)) &&
+                values.contains(&Felt::new(b0)) &&
+                *err_code == ZERO)
     );
 }
 
@@ -782,14 +784,12 @@ fn checked_or_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError {
-            err: OperationError::NotU32Values { values, err_code },
-            ..
-        } if
-            values.len() == 2 &&
-            values.contains(&Felt::new(a0)) &&
-            values.contains(&Felt::new(b0)) &&
-            err_code == ZERO
+        ExecutionError::OperationError { ref err, .. }
+        if matches!(err.as_ref(), OperationError::NotU32Values { values, err_code }
+            if values.len() == 2 &&
+                values.contains(&Felt::new(a0)) &&
+                values.contains(&Felt::new(b0)) &&
+                *err_code == ZERO)
     );
 }
 
@@ -831,14 +831,12 @@ fn checked_xor_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError {
-            err: OperationError::NotU32Values { values, err_code },
-            ..
-        } if
-            values.len() == 2 &&
-            values.contains(&Felt::new(a0)) &&
-            values.contains(&Felt::new(b0)) &&
-            err_code == ZERO
+        ExecutionError::OperationError { ref err, .. }
+        if matches!(err.as_ref(), OperationError::NotU32Values { values, err_code }
+            if values.len() == 2 &&
+                values.contains(&Felt::new(a0)) &&
+                values.contains(&Felt::new(b0)) &&
+                *err_code == ZERO)
     );
 }
 

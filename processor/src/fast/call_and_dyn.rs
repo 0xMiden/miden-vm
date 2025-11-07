@@ -1,5 +1,3 @@
-#![allow(clippy::result_large_err)]
-
 use alloc::{sync::Arc, vec::Vec};
 
 use miden_core::{

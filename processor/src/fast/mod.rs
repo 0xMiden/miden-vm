@@ -1,5 +1,3 @@
-#![allow(clippy::result_large_err)]
-
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::cmp::min;
 

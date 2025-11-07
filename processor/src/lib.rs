@@ -1,5 +1,3 @@
-#![allow(clippy::result_large_err)]
-
 #![no_std]
 
 #[macro_use]
@@ -457,8 +455,9 @@ impl Process {
             // which drops the condition from the stack
             while self.stack.peek() == ONE {
                 self.decoder.repeat();
-                self.execute_op(Operation::Drop, program, host)
-                    .map_err(|err| ExecutionError::from_operation(&err_ctx, err, self.system.clk()))?;
+                self.execute_op(Operation::Drop, program, host).map_err(|err| {
+                    ExecutionError::from_operation(&err_ctx, err, self.system.clk())
+                })?;
                 self.execute_mast_node(node.body(), program, host)?;
             }
 
@@ -524,8 +523,9 @@ impl Process {
     ) -> Result<(), ExecutionError> {
         let err_ctx = err_ctx!(program, node, host);
 
-        // HACK: capture clock before start_dyn_node/start_dyncall_node increment it via Drop operation
-        // This ensures slow/fast path report the same clock cycle for node not found errors
+        // HACK: capture clock before start_dyn_node/start_dyncall_node increment it via Drop
+        // operation This ensures slow/fast path report the same clock cycle for node not
+        // found errors
         let clk_before_start = self.system.clk();
 
         let callee_hash = if node.is_dyncall() {
@@ -779,11 +779,7 @@ impl Process {
         // For now, only compiled libraries contain non-empty advice maps, so for most cases,
         // this call will be cheap.
         self.advice.extend_map(mast_forest.advice_map()).map_err(|err| {
-            ExecutionError::from_operation(
-                &(),
-                OperationError::AdviceError(err),
-                self.system.clk(),
-            )
+            ExecutionError::from_operation(&(), OperationError::AdviceError(err), self.system.clk())
         })?;
 
         Ok((root_id, mast_forest))
@@ -1048,15 +1044,19 @@ pub(crate) fn add_error_ctx_to_external_error(
         Ok(_) => Ok(()),
         // Add context information to any errors coming from executing an `ExternalNode`
         Err(execution_error) => match execution_error {
-            ExecutionError::OperationError { label, source_file: _, err: ref op_err, clk }
-                if matches!(
-                    op_err,
-                    OperationError::NoMastForestWithProcedure { .. }
-                        | OperationError::MalformedMastForestInHost { .. }
-                ) =>
+            ExecutionError::OperationError {
+                label,
+                source_file: _,
+                err: ref op_err,
+                clk,
+            } if matches!(
+                &**op_err,
+                OperationError::NoMastForestWithProcedure { .. }
+                    | OperationError::MalformedMastForestInHost { .. }
+            ) =>
             {
                 if label == SourceSpan::UNKNOWN {
-                    let root_digest = match op_err {
+                    let root_digest = match &**op_err {
                         OperationError::NoMastForestWithProcedure { root_digest } => *root_digest,
                         OperationError::MalformedMastForestInHost { root_digest } => *root_digest,
                         _ => unreachable!(),

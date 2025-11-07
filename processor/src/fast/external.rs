@@ -52,11 +52,9 @@ impl FastProcessor {
         host: &mut impl AsyncHost,
     ) -> Result<(MastNodeId, Arc<MastForest>), ExecutionError> {
         let (root_id, mast_forest) = self
-            .load_mast_forest(
-                external_node.digest(),
-                host,
-                |root_digest| OperationError::NoMastForestWithProcedure { root_digest },
-            )
+            .load_mast_forest(external_node.digest(), host, |root_digest| {
+                OperationError::NoMastForestWithProcedure { root_digest }
+            })
             .await
             .map_err(|err| ExecutionError::from_operation(&(), err, self.clk))?;
 

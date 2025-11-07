@@ -117,10 +117,8 @@ fn test_syscall_fail() {
     // Check that the error is due to the syscall target not being in the kernel
     assert_matches!(
         err,
-        ExecutionError::OperationError {
-            err: OperationError::SyscallTargetNotInKernel { .. },
-            ..
-        }
+        ExecutionError::OperationError { ref err, .. }
+            if matches!(err.as_ref(), OperationError::SyscallTargetNotInKernel { .. })
     );
 }
 
@@ -151,10 +149,8 @@ fn test_assert() {
         // Check that the error is due to a failed assertion
         assert_matches!(
             err,
-            ExecutionError::OperationError {
-                err: OperationError::FailedAssertion { .. },
-                ..
-            }
+            ExecutionError::OperationError { ref err, .. }
+                if matches!(err.as_ref(), OperationError::FailedAssertion { .. })
         );
     }
 }

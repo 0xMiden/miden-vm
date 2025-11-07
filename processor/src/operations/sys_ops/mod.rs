@@ -102,9 +102,7 @@ impl Process {
                 let event_name = host.resolve_event(event_id).cloned();
                 OperationError::EventError { event_id, event_name, error: err }
             })?;
-            self.advice
-                .apply_mutations(mutations)
-                .map_err(OperationError::AdviceError)?;
+            self.advice.apply_mutations(mutations).map_err(OperationError::AdviceError)?;
             Ok(())
         }
     }

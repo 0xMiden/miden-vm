@@ -164,10 +164,7 @@ fn test_mstream() {
     };
     // Store values at addresses 40 and 44
     processor.memory.write_word(ctx, addr.into(), word_at_addr_40).unwrap();
-    processor
-        .memory
-        .write_word(ctx, (addr + 4).into(), word_at_addr_44)
-        .unwrap();
+    processor.memory.write_word(ctx, (addr + 4).into(), word_at_addr_44).unwrap();
 
     let program = simple_program_with_ops(vec![Operation::MStream]);
     let stack_outputs = processor.execute_sync_mut(&program, &mut host).unwrap();

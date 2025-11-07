@@ -1,7 +1,5 @@
 // Allow unused assignments - required by miette::Diagnostic derive macro
 #![allow(unused_assignments)]
-// Allow large error types - detailed error information is more important than size optimization
-#![allow(clippy::result_large_err)]
 
 //! # Error Architecture
 //!
@@ -57,7 +55,7 @@
 //! performance-critical builds. When enabled, the `err_ctx!()` macro expands to `()` and all
 //! context operations become no-ops.
 
-use alloc::{sync::Arc, vec::Vec};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 
 use miden_air::RowIndex;
 use miden_core::{
@@ -84,7 +82,7 @@ pub enum ExecutionError {
         label: SourceSpan,
         #[source_code]
         source_file: Option<Arc<SourceFile>>,
-        err: OperationError,
+        err: Box<OperationError>,
     },
     #[error("external node with mast root {0} resolved to an external node")]
     CircularExternalNode(Word),
@@ -115,7 +113,12 @@ pub enum ExecutionError {
 impl ExecutionError {
     pub fn from_operation(err_ctx: &impl ErrorContext, err: OperationError, clk: RowIndex) -> Self {
         let (label, source_file) = err_ctx.label_and_source_file();
-        Self::OperationError { clk, label, source_file, err }
+        Self::OperationError {
+            clk,
+            label,
+            source_file,
+            err: Box::new(err),
+        }
     }
 
     pub fn from_operation_with_label(
@@ -124,7 +127,12 @@ impl ExecutionError {
         err: OperationError,
         clk: RowIndex,
     ) -> Self {
-        Self::OperationError { clk, label, source_file, err }
+        Self::OperationError {
+            clk,
+            label,
+            source_file,
+            err: Box::new(err),
+        }
     }
 }
 
@@ -215,7 +223,9 @@ pub enum OperationError {
     #[error("operation expected a binary value, but got {value}")]
     NotBinaryValueOp { value: Felt },
     #[error("loop condition must be a binary value, but got {value}")]
-    #[diagnostic(help("this could happen either when first entering the loop, or any subsequent iteration"))]
+    #[diagnostic(help(
+        "this could happen either when first entering the loop, or any subsequent iteration"
+    ))]
     NotBinaryValueLoop { value: Felt },
     #[error("operation expected u32 values, but got values: {values:?} (error code: {err_code})")]
     NotU32Values { values: Vec<Felt>, err_code: Felt },

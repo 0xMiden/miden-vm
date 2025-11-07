@@ -13,10 +13,7 @@ pub(super) fn op_advpop<P: Processor>(
     processor: &mut P,
     tracer: &mut impl Tracer,
 ) -> Result<(), OperationError> {
-    let value = processor
-        .advice_provider()
-        .pop_stack()
-        .map_err(OperationError::AdviceError)?;
+    let value = processor.advice_provider().pop_stack().map_err(OperationError::AdviceError)?;
     tracer.record_advice_pop_stack(value);
 
     processor.stack().increment_size(tracer)?;

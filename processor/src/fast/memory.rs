@@ -177,10 +177,7 @@ fn split_addr(addr: u32) -> (u32, u32) {
 /// - Returns an error if the provided address is not word-aligned.
 /// - Returns an error if the provided address is out-of-bounds.
 #[inline(always)]
-fn enforce_word_aligned_addr(
-    ctx: ContextId,
-    addr: u32,
-) -> Result<u32, MemoryError> {
+fn enforce_word_aligned_addr(ctx: ContextId, addr: u32) -> Result<u32, MemoryError> {
     if !addr.is_multiple_of(WORD_SIZE as u32) {
         return Err(MemoryError::UnalignedWordAccess { addr, ctx });
     }

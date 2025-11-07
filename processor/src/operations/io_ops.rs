@@ -211,10 +211,7 @@ impl Process {
         let addr_second_word = addr_first_word + Felt::from(WORD_SIZE as u32);
 
         // pop two words from the advice stack
-        let words = self
-            .advice
-            .pop_stack_dword()
-            .map_err(OperationError::AdviceError)?;
+        let words = self.advice.pop_stack_dword().map_err(OperationError::AdviceError)?;
 
         // write the words memory
         self.chiplets
@@ -255,10 +252,7 @@ impl Process {
     /// # Errors
     /// Returns an error if the advice stack is empty.
     pub(super) fn op_advpop(&mut self) -> Result<(), OperationError> {
-        let value = self
-            .advice
-            .pop_stack()
-            .map_err(OperationError::AdviceError)?;
+        let value = self.advice.pop_stack().map_err(OperationError::AdviceError)?;
         self.stack.set(0, value);
         self.stack.shift_right(0);
         Ok(())
@@ -270,10 +264,7 @@ impl Process {
     /// # Errors
     /// Returns an error if the advice stack contains fewer than four elements.
     pub(super) fn op_advpopw(&mut self) -> Result<(), OperationError> {
-        let word = self
-            .advice
-            .pop_stack_word()
-            .map_err(OperationError::AdviceError)?;
+        let word = self.advice.pop_stack_word().map_err(OperationError::AdviceError)?;
 
         self.stack.set(0, word[3]);
         self.stack.set(1, word[2]);
