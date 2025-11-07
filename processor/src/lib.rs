@@ -1,4 +1,5 @@
 #![no_std]
+#![allow(clippy::result_large_err)]
 
 #[macro_use]
 extern crate alloc;
@@ -1050,13 +1051,13 @@ pub(crate) fn add_error_ctx_to_external_error(
                 err: ref op_err,
                 clk,
             } if matches!(
-                &**op_err,
+                op_err.as_ref(),
                 OperationError::NoMastForestWithProcedure { .. }
                     | OperationError::MalformedMastForestInHost { .. }
             ) =>
             {
                 if label == SourceSpan::UNKNOWN {
-                    let root_digest = match &**op_err {
+                    let root_digest = match op_err.as_ref() {
                         OperationError::NoMastForestWithProcedure { root_digest } => *root_digest,
                         OperationError::MalformedMastForestInHost { root_digest } => *root_digest,
                         _ => unreachable!(),

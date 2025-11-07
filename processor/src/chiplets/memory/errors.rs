@@ -9,7 +9,7 @@ use crate::ContextId;
 pub enum MemoryError {
     #[error("memory address cannot exceed 2^32 but was {addr}")]
     AddressOutOfBounds { addr: u64 },
-    #[error("memory address {addr} in context {ctx} was accessed multiple times in the same cycle")]
+    #[error("memory address {addr} in context {ctx} was  read and written, or written twice, in the same cycle")]
     IllegalMemoryAccess { ctx: ContextId, addr: u32 },
     #[error(
         "memory range start address cannot exceed end address, but was ({start_addr}, {end_addr})"

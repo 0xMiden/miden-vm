@@ -1,4 +1,3 @@
-#![cfg(feature = "integration-tests")]
 use miden_assembly::testing::regex;
 use miden_utils_testing::{
     MIN_STACK_DEPTH, WORD_SIZE, assert_assembler_diagnostic, assert_diagnostic_lines,

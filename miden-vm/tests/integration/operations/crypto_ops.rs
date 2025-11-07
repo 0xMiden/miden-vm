@@ -1,4 +1,3 @@
-#![cfg(feature = "integration-tests")]
 use miden_utils_testing::{
     Felt, build_expected_hash, build_expected_perm, build_op_test,
     crypto::{MerkleTree, NodeIndex, init_merkle_leaf, init_merkle_store},

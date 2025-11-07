@@ -1,4 +1,3 @@
-#![cfg(feature = "integration-tests")]
 mod crypto_ops;
 mod decorators;
 mod ext2_ops;

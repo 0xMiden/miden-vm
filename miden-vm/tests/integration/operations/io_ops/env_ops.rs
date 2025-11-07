@@ -1,4 +1,3 @@
-#![cfg(feature = "integration-tests")]
 use miden_core::{
     FMP_INIT_VALUE, Operation,
     mast::{CallNode, MastForest, MastNode, MastNodeExt},

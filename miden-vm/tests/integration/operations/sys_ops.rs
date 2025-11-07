@@ -1,4 +1,3 @@
-#![cfg(feature = "integration-tests")]
 use miden_core::{EventName, mast};
 use miden_processor::{ExecutionError, NoopEventHandler, OperationError, RowIndex, ZERO};
 use miden_utils_testing::{build_op_test, expect_exec_error_matches};
@@ -28,8 +27,9 @@ fn assert_with_code() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { clk, label: _, source_file: _, err: OperationError::FailedAssertion { err_code, .. } }
-        if clk == RowIndex::from(6) && err_code == code
+        ExecutionError::OperationError { clk, ref err, .. }
+        if clk == RowIndex::from(6)
+            && matches!(err.as_ref(), OperationError::FailedAssertion { err_code, .. } if *err_code == code)
     );
 }
 
@@ -41,8 +41,9 @@ fn assert_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { clk, label: _, source_file: _, err: OperationError::FailedAssertion { err_code, .. } }
-        if clk == RowIndex::from(6) && err_code == ZERO
+        ExecutionError::OperationError { clk, ref err, .. }
+        if clk == RowIndex::from(6)
+            && matches!(err.as_ref(), OperationError::FailedAssertion { err_code, .. } if *err_code == ZERO)
     );
 }
 
@@ -65,16 +66,20 @@ fn assert_eq_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { clk, label: _, source_file: _, err: OperationError::FailedAssertion { err_code, err_msg } }
-        if clk == RowIndex::from(7) && err_code == ZERO && err_msg.is_none()
+        ExecutionError::OperationError { clk, ref err, .. }
+        if clk == RowIndex::from(7)
+            && matches!(err.as_ref(), OperationError::FailedAssertion { err_code, err_msg }
+                if *err_code == ZERO && err_msg.is_none())
     );
 
     let test = build_op_test!(asm_op, &[1, 4]);
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { clk, label: _, source_file: _, err: OperationError::FailedAssertion { err_code, err_msg } }
-        if clk == RowIndex::from(7) && err_code == ZERO && err_msg.is_none()
+        ExecutionError::OperationError { clk, ref err, .. }
+        if clk == RowIndex::from(7)
+            && matches!(err.as_ref(), OperationError::FailedAssertion { err_code, err_msg }
+                if *err_code == ZERO && err_msg.is_none())
     );
 }
 

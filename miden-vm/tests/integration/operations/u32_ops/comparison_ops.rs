@@ -1,4 +1,3 @@
-#![cfg(feature = "integration-tests")]
 use core::cmp::Ordering;
 
 use miden_utils_testing::{build_op_test, proptest::prelude::*, rand::rand_value};

@@ -1,4 +1,3 @@
-#![cfg(feature = "integration-tests")]
 use miden_utils_testing::{build_op_test, build_test};
 
 #[test]

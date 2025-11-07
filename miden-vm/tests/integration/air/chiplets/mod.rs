@@ -1,4 +1,3 @@
-#![cfg(feature = "integration-tests")]
 use miden_utils_testing::{build_test, rand::rand_vector};
 
 mod bitwise;

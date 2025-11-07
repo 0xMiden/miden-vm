@@ -1,4 +1,3 @@
-#![cfg(feature = "integration-tests")]
 use miden_core::{Felt, chiplets::hasher::apply_permutation, utils::ToElements};
 use miden_processor::{AdviceError, ExecutionError, OperationError, RowIndex};
 use miden_utils_testing::expect_exec_error_matches;
@@ -36,8 +35,9 @@ fn adv_push_invalid() {
     expect_exec_error_matches!(
         test,
         ExecutionError::OperationError {
-            clk, label: _, source_file: _, err: OperationError::AdviceError(AdviceError::StackReadFailed)
-        } if clk == RowIndex::from(6),
+            clk, ref err, ..
+        } if clk == RowIndex::from(6)
+            && matches!(err.as_ref(), OperationError::AdviceError(AdviceError::StackReadFailed)),
     )
 }
 
@@ -62,8 +62,9 @@ fn adv_loadw_invalid() {
     expect_exec_error_matches!(
         test,
         ExecutionError::OperationError {
-            clk, label: _, source_file: _, err: OperationError::AdviceError(AdviceError::StackReadFailed)
-        } if clk == RowIndex::from(6),
+            clk, ref err, ..
+        } if clk == RowIndex::from(6)
+            && matches!(err.as_ref(), OperationError::AdviceError(AdviceError::StackReadFailed)),
     );
 }
 

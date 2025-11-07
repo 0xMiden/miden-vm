@@ -1,4 +1,3 @@
-#![cfg(feature = "integration-tests")]
 use miden_assembly::Assembler;
 use miden_processor::{AdviceInputs, ExecutionOptions, Program};
 use miden_prover::StackInputs;

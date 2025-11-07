@@ -1,4 +1,3 @@
-#![cfg(feature = "integration-tests")]
 use miden_utils_testing::{
     Felt, FieldElement, TRUNCATE_STACK_PROC, build_test, push_inputs, rand::rand_array,
 };

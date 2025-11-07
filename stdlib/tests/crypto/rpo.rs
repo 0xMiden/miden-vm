@@ -20,7 +20,7 @@ fn test_invalid_end_addr() {
     expect_exec_error_matches!(
         test,
         ExecutionError::OperationError {
-            clk, label: _, source_file: _, ref err
+            clk, ref err, ..
         }
         if clk == RowIndex::from(24)
             && matches!(err.as_ref(), OperationError::FailedAssertion { err_code, err_msg }

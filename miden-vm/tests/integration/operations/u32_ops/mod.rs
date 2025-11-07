@@ -1,4 +1,3 @@
-#![cfg(feature = "integration-tests")]
 use miden_processor::{ExecutionError, OperationError};
 use miden_utils_testing::{
     Felt, U32_BOUND, ZERO, build_op_test, expect_exec_error_matches, prop_randw,
@@ -19,10 +18,11 @@ pub fn test_input_out_of_bounds(asm_op: &str) {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { label: _, source_file: _, err: OperationError::NotU32Values { values, err_code }, .. } if
+        ExecutionError::OperationError { ref err, .. }
+            if matches!(err.as_ref(), OperationError::NotU32Values { values, err_code } if
             values.len() == 1 &&
             values[0] == Felt::new(U32_BOUND) &&
-            err_code == ZERO
+            *err_code == ZERO)
     );
 }
 
@@ -40,10 +40,11 @@ pub fn test_inputs_out_of_bounds(asm_op: &str, input_count: usize) {
 
         expect_exec_error_matches!(
             test,
-            ExecutionError::NotU32Values{ values, err_code, label: _, source_file: _ } if
+            ExecutionError::OperationError { ref err, .. }
+            if matches!(err.as_ref(), OperationError::NotU32Values { values, err_code } if
                 values.len() == 1 &&
                 values[0] == Felt::new(U32_BOUND) &&
-                err_code == ZERO
+                *err_code == ZERO)
         );
     }
 }
