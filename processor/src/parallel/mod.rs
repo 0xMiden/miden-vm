@@ -1401,7 +1401,6 @@ impl CoreTraceFragmentGenerator {
                         0,
                         current_forest,
                         &mut NoopHost,
-                        &(),
                         &mut NoopTracer,
                     )
                     // The assumption here is that the computation was done by the FastProcessor,

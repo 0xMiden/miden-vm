@@ -1,7 +1,7 @@
 use miden_core::{mast::MastForest, stack::MIN_STACK_DEPTH};
 
-use super::{ExecutionError, Felt, FieldElement, Operation, Process, SyncHost};
-use crate::errors::{ErrorContext, OperationError};
+use super::{Felt, FieldElement, Operation, Process, SyncHost};
+use crate::errors::OperationError;
 
 mod circuit_eval;
 mod crypto_ops;
@@ -32,22 +32,17 @@ impl Process {
         op: Operation,
         program: &MastForest,
         host: &mut impl SyncHost,
-    ) -> Result<(), ExecutionError> {
-        self.execute_op_with_error_ctx(op, program, host, &())
+    ) -> Result<(), OperationError> {
+        self.execute_op_with_error_ctx(op, program, host)
     }
 
     /// Executes the specified operation.
-    ///
-    /// This method also takes an error context as an argument, which is used to construct helpful
-    /// error messages in case of an error.
-    /// TODO: Return OpErr remove err ctx
     pub(super) fn execute_op_with_error_ctx(
         &mut self,
         op: Operation,
         program: &MastForest,
         host: &mut impl SyncHost,
-        err_ctx: &impl ErrorContext,
-    ) -> Result<(), ExecutionError> {
+    ) -> Result<(), OperationError> {
         // make sure there is enough memory allocated to hold the execution trace
         self.ensure_trace_capacity();
 
@@ -56,14 +51,14 @@ impl Process {
             // ----- system operations ------------------------------------------------------------
             Operation::Noop => self.stack.copy_state(0),
             Operation::Assert(err_code) => {
-                wrap_operation(self.op_assert(err_code, program, host), err_ctx)?
+                self.op_assert(err_code, program, host)?
             },
 
-            Operation::SDepth => wrap_operation(self.op_sdepth(), err_ctx)?,
-            Operation::Caller => wrap_operation(self.op_caller(), err_ctx)?,
+            Operation::SDepth => self.op_sdepth()?,
+            Operation::Caller => self.op_caller()?,
 
-            Operation::Clk => wrap_operation(self.op_clk(), err_ctx)?,
-            Operation::Emit => wrap_operation(self.op_emit(host), err_ctx)?,
+            Operation::Clk => self.op_clk()?,
+            Operation::Emit => self.op_emit(host)?,
 
             // ----- flow control operations ------------------------------------------------------
             // control flow operations are never executed directly
@@ -81,110 +76,110 @@ impl Process {
             Operation::Halt => unreachable!("control flow operation"),
 
             // ----- field operations -------------------------------------------------------------
-            Operation::Add => wrap_operation(self.op_add(), err_ctx)?,
-            Operation::Neg => wrap_operation(self.op_neg(), err_ctx)?,
-            Operation::Mul => wrap_operation(self.op_mul(), err_ctx)?,
-            Operation::Inv => wrap_operation(self.op_inv(), err_ctx)?,
-            Operation::Incr => wrap_operation(self.op_incr(), err_ctx)?,
+            Operation::Add => self.op_add()?,
+            Operation::Neg => self.op_neg()?,
+            Operation::Mul => self.op_mul()?,
+            Operation::Inv => self.op_inv()?,
+            Operation::Incr => self.op_incr()?,
 
-            Operation::And => wrap_operation(self.op_and(), err_ctx)?,
-            Operation::Or => wrap_operation(self.op_or(), err_ctx)?,
-            Operation::Not => wrap_operation(self.op_not(), err_ctx)?,
+            Operation::And => self.op_and()?,
+            Operation::Or => self.op_or()?,
+            Operation::Not => self.op_not()?,
 
-            Operation::Eq => wrap_operation(self.op_eq(), err_ctx)?,
-            Operation::Eqz => wrap_operation(self.op_eqz(), err_ctx)?,
+            Operation::Eq => self.op_eq()?,
+            Operation::Eqz => self.op_eqz()?,
 
-            Operation::Expacc => wrap_operation(self.op_expacc(), err_ctx)?,
+            Operation::Expacc => self.op_expacc()?,
 
             // ----- ext2 operations --------------------------------------------------------------
-            Operation::Ext2Mul => wrap_operation(self.op_ext2mul(), err_ctx)?,
+            Operation::Ext2Mul => self.op_ext2mul()?,
 
             // ----- u32 operations ---------------------------------------------------------------
-            Operation::U32split => wrap_operation(self.op_u32split(), err_ctx)?,
-            Operation::U32add => wrap_operation(self.op_u32add(), err_ctx)?,
-            Operation::U32add3 => wrap_operation(self.op_u32add3(), err_ctx)?,
-            Operation::U32sub => wrap_operation(self.op_u32sub(), err_ctx)?,
-            Operation::U32mul => wrap_operation(self.op_u32mul(), err_ctx)?,
-            Operation::U32madd => wrap_operation(self.op_u32madd(), err_ctx)?,
-            Operation::U32div => wrap_operation(self.op_u32div(), err_ctx)?,
+            Operation::U32split => self.op_u32split()?,
+            Operation::U32add => self.op_u32add()?,
+            Operation::U32add3 => self.op_u32add3()?,
+            Operation::U32sub => self.op_u32sub()?,
+            Operation::U32mul => self.op_u32mul()?,
+            Operation::U32madd => self.op_u32madd()?,
+            Operation::U32div => self.op_u32div()?,
 
-            Operation::U32and => wrap_operation(self.op_u32and(), err_ctx)?,
-            Operation::U32xor => wrap_operation(self.op_u32xor(), err_ctx)?,
+            Operation::U32and => self.op_u32and()?,
+            Operation::U32xor => self.op_u32xor()?,
             Operation::U32assert2(err_code) => {
-                wrap_operation(self.op_u32assert2(err_code), err_ctx)?
+                self.op_u32assert2(err_code)?
             },
 
             // ----- stack manipulation -----------------------------------------------------------
-            Operation::Pad => wrap_operation(self.op_pad(), err_ctx)?,
-            Operation::Drop => wrap_operation(self.op_drop(), err_ctx)?,
+            Operation::Pad => self.op_pad()?,
+            Operation::Drop => self.op_drop()?,
 
-            Operation::Dup0 => wrap_operation(self.op_dup(0), err_ctx)?,
-            Operation::Dup1 => wrap_operation(self.op_dup(1), err_ctx)?,
-            Operation::Dup2 => wrap_operation(self.op_dup(2), err_ctx)?,
-            Operation::Dup3 => wrap_operation(self.op_dup(3), err_ctx)?,
-            Operation::Dup4 => wrap_operation(self.op_dup(4), err_ctx)?,
-            Operation::Dup5 => wrap_operation(self.op_dup(5), err_ctx)?,
-            Operation::Dup6 => wrap_operation(self.op_dup(6), err_ctx)?,
-            Operation::Dup7 => wrap_operation(self.op_dup(7), err_ctx)?,
-            Operation::Dup9 => wrap_operation(self.op_dup(9), err_ctx)?,
-            Operation::Dup11 => wrap_operation(self.op_dup(11), err_ctx)?,
-            Operation::Dup13 => wrap_operation(self.op_dup(13), err_ctx)?,
-            Operation::Dup15 => wrap_operation(self.op_dup(15), err_ctx)?,
+            Operation::Dup0 => self.op_dup(0)?,
+            Operation::Dup1 => self.op_dup(1)?,
+            Operation::Dup2 => self.op_dup(2)?,
+            Operation::Dup3 => self.op_dup(3)?,
+            Operation::Dup4 => self.op_dup(4)?,
+            Operation::Dup5 => self.op_dup(5)?,
+            Operation::Dup6 => self.op_dup(6)?,
+            Operation::Dup7 => self.op_dup(7)?,
+            Operation::Dup9 => self.op_dup(9)?,
+            Operation::Dup11 => self.op_dup(11)?,
+            Operation::Dup13 => self.op_dup(13)?,
+            Operation::Dup15 => self.op_dup(15)?,
 
-            Operation::Swap => wrap_operation(self.op_swap(), err_ctx)?,
-            Operation::SwapW => wrap_operation(self.op_swapw(), err_ctx)?,
-            Operation::SwapW2 => wrap_operation(self.op_swapw2(), err_ctx)?,
-            Operation::SwapW3 => wrap_operation(self.op_swapw3(), err_ctx)?,
-            Operation::SwapDW => wrap_operation(self.op_swapdw(), err_ctx)?,
+            Operation::Swap => self.op_swap()?,
+            Operation::SwapW => self.op_swapw()?,
+            Operation::SwapW2 => self.op_swapw2()?,
+            Operation::SwapW3 => self.op_swapw3()?,
+            Operation::SwapDW => self.op_swapdw()?,
 
-            Operation::MovUp2 => wrap_operation(self.op_movup(2), err_ctx)?,
-            Operation::MovUp3 => wrap_operation(self.op_movup(3), err_ctx)?,
-            Operation::MovUp4 => wrap_operation(self.op_movup(4), err_ctx)?,
-            Operation::MovUp5 => wrap_operation(self.op_movup(5), err_ctx)?,
-            Operation::MovUp6 => wrap_operation(self.op_movup(6), err_ctx)?,
-            Operation::MovUp7 => wrap_operation(self.op_movup(7), err_ctx)?,
-            Operation::MovUp8 => wrap_operation(self.op_movup(8), err_ctx)?,
+            Operation::MovUp2 => self.op_movup(2)?,
+            Operation::MovUp3 => self.op_movup(3)?,
+            Operation::MovUp4 => self.op_movup(4)?,
+            Operation::MovUp5 => self.op_movup(5)?,
+            Operation::MovUp6 => self.op_movup(6)?,
+            Operation::MovUp7 => self.op_movup(7)?,
+            Operation::MovUp8 => self.op_movup(8)?,
 
-            Operation::MovDn2 => wrap_operation(self.op_movdn(2), err_ctx)?,
-            Operation::MovDn3 => wrap_operation(self.op_movdn(3), err_ctx)?,
-            Operation::MovDn4 => wrap_operation(self.op_movdn(4), err_ctx)?,
-            Operation::MovDn5 => wrap_operation(self.op_movdn(5), err_ctx)?,
-            Operation::MovDn6 => wrap_operation(self.op_movdn(6), err_ctx)?,
-            Operation::MovDn7 => wrap_operation(self.op_movdn(7), err_ctx)?,
-            Operation::MovDn8 => wrap_operation(self.op_movdn(8), err_ctx)?,
+            Operation::MovDn2 => self.op_movdn(2)?,
+            Operation::MovDn3 => self.op_movdn(3)?,
+            Operation::MovDn4 => self.op_movdn(4)?,
+            Operation::MovDn5 => self.op_movdn(5)?,
+            Operation::MovDn6 => self.op_movdn(6)?,
+            Operation::MovDn7 => self.op_movdn(7)?,
+            Operation::MovDn8 => self.op_movdn(8)?,
 
-            Operation::CSwap => wrap_operation(self.op_cswap(), err_ctx)?,
-            Operation::CSwapW => wrap_operation(self.op_cswapw(), err_ctx)?,
+            Operation::CSwap => self.op_cswap()?,
+            Operation::CSwapW => self.op_cswapw()?,
 
             // ----- input / output ---------------------------------------------------------------
-            Operation::Push(value) => wrap_operation(self.op_push(value), err_ctx)?,
+            Operation::Push(value) => self.op_push(value)?,
 
-            Operation::AdvPop => wrap_operation(self.op_advpop(), err_ctx)?,
-            Operation::AdvPopW => wrap_operation(self.op_advpopw(), err_ctx)?,
+            Operation::AdvPop => self.op_advpop()?,
+            Operation::AdvPopW => self.op_advpopw()?,
 
-            Operation::MLoadW => wrap_operation(self.op_mloadw(), err_ctx)?,
-            Operation::MStoreW => wrap_operation(self.op_mstorew(), err_ctx)?,
+            Operation::MLoadW => self.op_mloadw()?,
+            Operation::MStoreW => self.op_mstorew()?,
 
-            Operation::MLoad => wrap_operation(self.op_mload(), err_ctx)?,
-            Operation::MStore => wrap_operation(self.op_mstore(), err_ctx)?,
+            Operation::MLoad => self.op_mload()?,
+            Operation::MStore => self.op_mstore()?,
 
-            Operation::MStream => wrap_operation(self.op_mstream(), err_ctx)?,
-            Operation::Pipe => wrap_operation(self.op_pipe(), err_ctx)?,
+            Operation::MStream => self.op_mstream()?,
+            Operation::Pipe => self.op_pipe()?,
 
             // ----- cryptographic operations -----------------------------------------------------
-            Operation::HPerm => wrap_operation(self.op_hperm(), err_ctx)?,
+            Operation::HPerm => self.op_hperm()?,
             Operation::MpVerify(err_code) => {
-                wrap_operation(self.op_mpverify(err_code, program), err_ctx)?
+                self.op_mpverify(err_code, program)?
             },
-            Operation::MrUpdate => wrap_operation(self.op_mrupdate(), err_ctx)?,
-            Operation::FriE2F4 => wrap_operation(self.op_fri_ext2fold4(), err_ctx)?,
-            Operation::HornerBase => wrap_operation(self.op_horner_eval_base(), err_ctx)?,
-            Operation::HornerExt => wrap_operation(self.op_horner_eval_ext(), err_ctx)?,
-            Operation::EvalCircuit => wrap_operation(self.op_eval_circuit(), err_ctx)?,
-            Operation::LogPrecompile => wrap_operation(self.op_log_precompile(), err_ctx)?,
+            Operation::MrUpdate => self.op_mrupdate()?,
+            Operation::FriE2F4 => self.op_fri_ext2fold4()?,
+            Operation::HornerBase => self.op_horner_eval_base()?,
+            Operation::HornerExt => self.op_horner_eval_ext()?,
+            Operation::EvalCircuit => self.op_eval_circuit()?,
+            Operation::LogPrecompile => self.op_log_precompile()?,
         }
 
-        wrap_operation(self.advance_clock(), err_ctx)?;
+        self.advance_clock()?;
 
         Ok(())
     }
@@ -201,13 +196,6 @@ impl Process {
         self.system.ensure_trace_capacity();
         self.stack.ensure_trace_capacity();
     }
-}
-
-fn wrap_operation<T>(
-    result: Result<T, OperationError>,
-    err_ctx: &impl ErrorContext,
-) -> Result<T, ExecutionError> {
-    result.map_err(|err| ExecutionError::from_operation(err_ctx, err))
 }
 
 #[cfg(test)]

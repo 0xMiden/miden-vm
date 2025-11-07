@@ -2,7 +2,7 @@ use miden_air::trace::decoder::NUM_USER_OP_HELPERS;
 use miden_core::{Felt, Operation, mast::MastForest};
 
 use crate::{
-    BaseHost, ErrorContext, ExecutionError, OperationError, fast::Tracer, processor::Processor,
+    BaseHost, OperationError, fast::Tracer, processor::Processor,
 };
 
 mod crypto_ops;
@@ -27,9 +27,8 @@ pub(super) fn execute_sync_op(
     op_idx_in_block: usize,
     current_forest: &MastForest,
     host: &mut impl BaseHost,
-    err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
-) -> Result<Option<[Felt; NUM_USER_OP_HELPERS]>, ExecutionError> {
+) -> Result<Option<[Felt; NUM_USER_OP_HELPERS]>, OperationError> {
     let mut user_op_helpers = None;
 
     match op {
@@ -37,13 +36,10 @@ pub(super) fn execute_sync_op(
         Operation::Noop => {
             // do nothing
         },
-        Operation::Assert(err_code) => wrap_operation(
-            sys_ops::op_assert(processor, *err_code, host, current_forest, tracer),
-            err_ctx,
-        )?,
-        Operation::SDepth => wrap_operation(sys_ops::op_sdepth(processor, tracer), err_ctx)?,
-        Operation::Caller => wrap_operation(sys_ops::op_caller(processor), err_ctx)?,
-        Operation::Clk => wrap_operation(sys_ops::op_clk(processor, tracer), err_ctx)?,
+        Operation::Assert(err_code) => sys_ops::op_assert(processor, *err_code, host, current_forest, tracer)?,
+        Operation::SDepth => sys_ops::op_sdepth(processor, tracer)?,
+        Operation::Caller => sys_ops::op_caller(processor)?,
+        Operation::Clk => sys_ops::op_clk(processor, tracer)?,
         Operation::Emit => {
             panic!("emit instruction requires async, so is not supported by execute_op()")
         },
@@ -64,14 +60,14 @@ pub(super) fn execute_sync_op(
         Operation::Halt => unreachable!("control flow operation"),
 
         // ----- field operations -------------------------------------------------------------
-        Operation::Add => wrap_operation(field_ops::op_add(processor, tracer), err_ctx)?,
-        Operation::Neg => wrap_operation(field_ops::op_neg(processor), err_ctx)?,
-        Operation::Mul => wrap_operation(field_ops::op_mul(processor, tracer), err_ctx)?,
-        Operation::Inv => wrap_operation(field_ops::op_inv(processor), err_ctx)?,
-        Operation::Incr => wrap_operation(field_ops::op_incr(processor), err_ctx)?,
-        Operation::And => wrap_operation(field_ops::op_and(processor, tracer), err_ctx)?,
-        Operation::Or => wrap_operation(field_ops::op_or(processor, tracer), err_ctx)?,
-        Operation::Not => wrap_operation(field_ops::op_not(processor), err_ctx)?,
+        Operation::Add => field_ops::op_add(processor, tracer)?,
+        Operation::Neg => field_ops::op_neg(processor)?,
+        Operation::Mul => field_ops::op_mul(processor, tracer)?,
+        Operation::Inv => field_ops::op_inv(processor)?,
+        Operation::Incr => field_ops::op_incr(processor)?,
+        Operation::And => field_ops::op_and(processor, tracer)?,
+        Operation::Or => field_ops::op_or(processor, tracer)?,
+        Operation::Not => field_ops::op_not(processor)?,
         Operation::Eq => {
             let eq_helpers = field_ops::op_eq(processor, tracer);
             user_op_helpers = Some(eq_helpers);
@@ -86,96 +82,96 @@ pub(super) fn execute_sync_op(
         },
 
         // ----- ext2 operations --------------------------------------------------------------
-        Operation::Ext2Mul => wrap_operation(field_ops::op_ext2mul(processor), err_ctx)?,
+        Operation::Ext2Mul => field_ops::op_ext2mul(processor)?,
 
         // ----- u32 operations ---------------------------------------------------------------
         Operation::U32split => {
             let u32split_helpers =
-                wrap_operation(u32_ops::op_u32split(processor, tracer), err_ctx)?;
+                u32_ops::op_u32split(processor, tracer)?;
             user_op_helpers = Some(u32split_helpers);
         },
         Operation::U32add => {
-            let u32add_helpers = wrap_operation(u32_ops::op_u32add(processor, tracer), err_ctx)?;
+            let u32add_helpers = u32_ops::op_u32add(processor, tracer)?;
             user_op_helpers = Some(u32add_helpers);
         },
         Operation::U32add3 => {
-            let u32add3_helpers = wrap_operation(u32_ops::op_u32add3(processor, tracer), err_ctx)?;
+            let u32add3_helpers = u32_ops::op_u32add3(processor, tracer)?;
             user_op_helpers = Some(u32add3_helpers);
         },
         Operation::U32sub => {
             let u32sub_helpers =
-                wrap_operation(u32_ops::op_u32sub(processor, op_idx_in_block, tracer), err_ctx)?;
+                u32_ops::op_u32sub(processor, op_idx_in_block, tracer)?;
             user_op_helpers = Some(u32sub_helpers);
         },
         Operation::U32mul => {
-            let u32mul_helpers = wrap_operation(u32_ops::op_u32mul(processor, tracer), err_ctx)?;
+            let u32mul_helpers = u32_ops::op_u32mul(processor, tracer)?;
             user_op_helpers = Some(u32mul_helpers);
         },
         Operation::U32madd => {
-            let u32madd_helpers = wrap_operation(u32_ops::op_u32madd(processor, tracer), err_ctx)?;
+            let u32madd_helpers = u32_ops::op_u32madd(processor, tracer)?;
             user_op_helpers = Some(u32madd_helpers);
         },
         Operation::U32div => {
-            let u32div_helpers = wrap_operation(u32_ops::op_u32div(processor, tracer), err_ctx)?;
+            let u32div_helpers = u32_ops::op_u32div(processor, tracer)?;
             user_op_helpers = Some(u32div_helpers);
         },
-        Operation::U32and => wrap_operation(u32_ops::op_u32and(processor, tracer), err_ctx)?,
-        Operation::U32xor => wrap_operation(u32_ops::op_u32xor(processor, tracer), err_ctx)?,
+        Operation::U32and => u32_ops::op_u32and(processor, tracer)?,
+        Operation::U32xor => u32_ops::op_u32xor(processor, tracer)?,
         Operation::U32assert2(err_code) => {
             let u32assert2_helpers =
-                wrap_operation(u32_ops::op_u32assert2(processor, *err_code, tracer), err_ctx)?;
+                u32_ops::op_u32assert2(processor, *err_code, tracer)?;
             user_op_helpers = Some(u32assert2_helpers);
         },
 
         // ----- stack manipulation -----------------------------------------------------------
-        Operation::Pad => wrap_operation(stack_ops::op_pad(processor, tracer), err_ctx)?,
-        Operation::Drop => wrap_operation(stack_ops::op_drop(processor, tracer), err_ctx)?,
-        Operation::Dup0 => wrap_operation(stack_ops::dup_nth(processor, 0, tracer), err_ctx)?,
-        Operation::Dup1 => wrap_operation(stack_ops::dup_nth(processor, 1, tracer), err_ctx)?,
-        Operation::Dup2 => wrap_operation(stack_ops::dup_nth(processor, 2, tracer), err_ctx)?,
-        Operation::Dup3 => wrap_operation(stack_ops::dup_nth(processor, 3, tracer), err_ctx)?,
-        Operation::Dup4 => wrap_operation(stack_ops::dup_nth(processor, 4, tracer), err_ctx)?,
-        Operation::Dup5 => wrap_operation(stack_ops::dup_nth(processor, 5, tracer), err_ctx)?,
-        Operation::Dup6 => wrap_operation(stack_ops::dup_nth(processor, 6, tracer), err_ctx)?,
-        Operation::Dup7 => wrap_operation(stack_ops::dup_nth(processor, 7, tracer), err_ctx)?,
-        Operation::Dup9 => wrap_operation(stack_ops::dup_nth(processor, 9, tracer), err_ctx)?,
-        Operation::Dup11 => wrap_operation(stack_ops::dup_nth(processor, 11, tracer), err_ctx)?,
-        Operation::Dup13 => wrap_operation(stack_ops::dup_nth(processor, 13, tracer), err_ctx)?,
-        Operation::Dup15 => wrap_operation(stack_ops::dup_nth(processor, 15, tracer), err_ctx)?,
-        Operation::Swap => wrap_operation(stack_ops::op_swap(processor), err_ctx)?,
-        Operation::SwapW => wrap_operation(stack_ops::op_swapw(processor), err_ctx)?,
-        Operation::SwapW2 => wrap_operation(stack_ops::op_swapw2(processor), err_ctx)?,
-        Operation::SwapW3 => wrap_operation(stack_ops::op_swapw3(processor), err_ctx)?,
-        Operation::SwapDW => wrap_operation(stack_ops::op_swap_double_word(processor), err_ctx)?,
-        Operation::MovUp2 => wrap_operation(stack_ops::op_movup(processor, 2), err_ctx)?,
-        Operation::MovUp3 => wrap_operation(stack_ops::op_movup(processor, 3), err_ctx)?,
-        Operation::MovUp4 => wrap_operation(stack_ops::op_movup(processor, 4), err_ctx)?,
-        Operation::MovUp5 => wrap_operation(stack_ops::op_movup(processor, 5), err_ctx)?,
-        Operation::MovUp6 => wrap_operation(stack_ops::op_movup(processor, 6), err_ctx)?,
-        Operation::MovUp7 => wrap_operation(stack_ops::op_movup(processor, 7), err_ctx)?,
-        Operation::MovUp8 => wrap_operation(stack_ops::op_movup(processor, 8), err_ctx)?,
-        Operation::MovDn2 => wrap_operation(stack_ops::op_movdn(processor, 2), err_ctx)?,
-        Operation::MovDn3 => wrap_operation(stack_ops::op_movdn(processor, 3), err_ctx)?,
-        Operation::MovDn4 => wrap_operation(stack_ops::op_movdn(processor, 4), err_ctx)?,
-        Operation::MovDn5 => wrap_operation(stack_ops::op_movdn(processor, 5), err_ctx)?,
-        Operation::MovDn6 => wrap_operation(stack_ops::op_movdn(processor, 6), err_ctx)?,
-        Operation::MovDn7 => wrap_operation(stack_ops::op_movdn(processor, 7), err_ctx)?,
-        Operation::MovDn8 => wrap_operation(stack_ops::op_movdn(processor, 8), err_ctx)?,
-        Operation::CSwap => wrap_operation(stack_ops::op_cswap(processor, tracer), err_ctx)?,
-        Operation::CSwapW => wrap_operation(stack_ops::op_cswapw(processor, tracer), err_ctx)?,
+        Operation::Pad => stack_ops::op_pad(processor, tracer)?,
+        Operation::Drop => stack_ops::op_drop(processor, tracer)?,
+        Operation::Dup0 => stack_ops::dup_nth(processor, 0, tracer)?,
+        Operation::Dup1 => stack_ops::dup_nth(processor, 1, tracer)?,
+        Operation::Dup2 => stack_ops::dup_nth(processor, 2, tracer)?,
+        Operation::Dup3 => stack_ops::dup_nth(processor, 3, tracer)?,
+        Operation::Dup4 => stack_ops::dup_nth(processor, 4, tracer)?,
+        Operation::Dup5 => stack_ops::dup_nth(processor, 5, tracer)?,
+        Operation::Dup6 => stack_ops::dup_nth(processor, 6, tracer)?,
+        Operation::Dup7 => stack_ops::dup_nth(processor, 7, tracer)?,
+        Operation::Dup9 => stack_ops::dup_nth(processor, 9, tracer)?,
+        Operation::Dup11 => stack_ops::dup_nth(processor, 11, tracer)?,
+        Operation::Dup13 => stack_ops::dup_nth(processor, 13, tracer)?,
+        Operation::Dup15 => stack_ops::dup_nth(processor, 15, tracer)?,
+        Operation::Swap => stack_ops::op_swap(processor)?,
+        Operation::SwapW => stack_ops::op_swapw(processor)?,
+        Operation::SwapW2 => stack_ops::op_swapw2(processor)?,
+        Operation::SwapW3 => stack_ops::op_swapw3(processor)?,
+        Operation::SwapDW => stack_ops::op_swap_double_word(processor)?,
+        Operation::MovUp2 => stack_ops::op_movup(processor, 2)?,
+        Operation::MovUp3 => stack_ops::op_movup(processor, 3)?,
+        Operation::MovUp4 => stack_ops::op_movup(processor, 4)?,
+        Operation::MovUp5 => stack_ops::op_movup(processor, 5)?,
+        Operation::MovUp6 => stack_ops::op_movup(processor, 6)?,
+        Operation::MovUp7 => stack_ops::op_movup(processor, 7)?,
+        Operation::MovUp8 => stack_ops::op_movup(processor, 8)?,
+        Operation::MovDn2 => stack_ops::op_movdn(processor, 2)?,
+        Operation::MovDn3 => stack_ops::op_movdn(processor, 3)?,
+        Operation::MovDn4 => stack_ops::op_movdn(processor, 4)?,
+        Operation::MovDn5 => stack_ops::op_movdn(processor, 5)?,
+        Operation::MovDn6 => stack_ops::op_movdn(processor, 6)?,
+        Operation::MovDn7 => stack_ops::op_movdn(processor, 7)?,
+        Operation::MovDn8 => stack_ops::op_movdn(processor, 8)?,
+        Operation::CSwap => stack_ops::op_cswap(processor, tracer)?,
+        Operation::CSwapW => stack_ops::op_cswapw(processor, tracer)?,
 
         // ----- input / output ---------------------------------------------------------------
         Operation::Push(value) => {
-            wrap_operation(stack_ops::op_push(processor, *value, tracer), err_ctx)?
+            stack_ops::op_push(processor, *value, tracer)?
         },
-        Operation::AdvPop => wrap_operation(io_ops::op_advpop(processor, tracer), err_ctx)?,
-        Operation::AdvPopW => wrap_operation(io_ops::op_advpopw(processor, tracer), err_ctx)?,
-        Operation::MLoadW => wrap_operation(io_ops::op_mloadw(processor, tracer), err_ctx)?,
-        Operation::MStoreW => wrap_operation(io_ops::op_mstorew(processor, tracer), err_ctx)?,
-        Operation::MLoad => wrap_operation(io_ops::op_mload(processor, tracer), err_ctx)?,
-        Operation::MStore => wrap_operation(io_ops::op_mstore(processor, tracer), err_ctx)?,
-        Operation::MStream => wrap_operation(io_ops::op_mstream(processor, tracer), err_ctx)?,
-        Operation::Pipe => wrap_operation(io_ops::op_pipe(processor, tracer), err_ctx)?,
+        Operation::AdvPop => io_ops::op_advpop(processor, tracer)?,
+        Operation::AdvPopW => io_ops::op_advpopw(processor, tracer)?,
+        Operation::MLoadW => io_ops::op_mloadw(processor, tracer)?,
+        Operation::MStoreW => io_ops::op_mstorew(processor, tracer)?,
+        Operation::MLoad => io_ops::op_mload(processor, tracer)?,
+        Operation::MStore => io_ops::op_mstore(processor, tracer)?,
+        Operation::MStream => io_ops::op_mstream(processor, tracer)?,
+        Operation::Pipe => io_ops::op_pipe(processor, tracer)?,
 
         // ----- cryptographic operations -----------------------------------------------------
         Operation::HPerm => {
@@ -183,34 +179,31 @@ pub(super) fn execute_sync_op(
             user_op_helpers = Some(hperm_helpers);
         },
         Operation::MpVerify(err_code) => {
-            let mpverify_helpers = wrap_operation(
-                crypto_ops::op_mpverify(processor, *err_code, current_forest, tracer),
-                err_ctx,
-            )?;
+            let mpverify_helpers = crypto_ops::op_mpverify(processor, *err_code, current_forest, tracer)?;
             user_op_helpers = Some(mpverify_helpers);
         },
         Operation::MrUpdate => {
             let mrupdate_helpers =
-                wrap_operation(crypto_ops::op_mrupdate(processor, tracer), err_ctx)?;
+                crypto_ops::op_mrupdate(processor, tracer)?;
             user_op_helpers = Some(mrupdate_helpers);
         },
         Operation::FriE2F4 => {
             let frie2f4_helpers =
-                wrap_operation(fri_ops::op_fri_ext2fold4(processor, tracer), err_ctx)?;
+                fri_ops::op_fri_ext2fold4(processor, tracer)?;
             user_op_helpers = Some(frie2f4_helpers);
         },
         Operation::HornerBase => {
             let horner_base_helpers =
-                wrap_operation(crypto_ops::op_horner_eval_base(processor, tracer), err_ctx)?;
+                crypto_ops::op_horner_eval_base(processor, tracer)?;
             user_op_helpers = Some(horner_base_helpers);
         },
         Operation::HornerExt => {
             let horner_ext_helpers =
-                wrap_operation(crypto_ops::op_horner_eval_ext(processor, tracer), err_ctx)?;
+                crypto_ops::op_horner_eval_ext(processor, tracer)?;
             user_op_helpers = Some(horner_ext_helpers);
         },
         Operation::EvalCircuit => {
-            wrap_operation(processor.op_eval_circuit(tracer), err_ctx)?;
+            processor.op_eval_circuit(tracer)?;
         },
         Operation::LogPrecompile => {
             let log_precompile_helpers = crypto_ops::op_log_precompile(processor, tracer);
@@ -219,11 +212,4 @@ pub(super) fn execute_sync_op(
     }
 
     Ok(user_op_helpers)
-}
-
-fn wrap_operation<T>(
-    result: Result<T, OperationError>,
-    err_ctx: &impl ErrorContext,
-) -> Result<T, ExecutionError> {
-    result.map_err(|err| ExecutionError::from_operation(err_ctx, err))
 }

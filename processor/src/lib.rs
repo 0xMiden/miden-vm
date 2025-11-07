@@ -445,7 +445,8 @@ impl Process {
             // which drops the condition from the stack
             while self.stack.peek() == ONE {
                 self.decoder.repeat();
-                self.execute_op(Operation::Drop, program, host)?;
+                self.execute_op(Operation::Drop, program, host)
+                    .map_err(|err| ExecutionError::from_operation(&(), err))?;
                 self.execute_mast_node(node.body(), program, host)?;
             }
 
@@ -603,7 +604,8 @@ impl Process {
         // of the stack
         for op_batch in basic_block.op_batches().iter().skip(1) {
             self.respan(op_batch);
-            self.execute_op(Operation::Noop, program, host)?;
+            self.execute_op(Operation::Noop, program, host)
+                .map_err(|err| ExecutionError::from_operation(&(), err))?;
             self.execute_op_batch(
                 basic_block,
                 op_batch,
@@ -669,7 +671,8 @@ impl Process {
             // decode and execute the operation
             let err_ctx = err_ctx!(program, basic_block, host, i + op_offset);
             self.decoder.execute_user_op(op, op_idx);
-            self.execute_op_with_error_ctx(op, program, host, &err_ctx)?;
+            self.execute_op_with_error_ctx(op, program, host)
+                .map_err(|err| ExecutionError::from_operation(&err_ctx, err))?;
 
             // if the operation carries an immediate value, the value is stored at the next group
             // pointer; so, we advance the pointer to the following group
