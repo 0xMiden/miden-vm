@@ -70,7 +70,13 @@ pub(super) fn op_mpverify<P: Processor>(
         // If the hasher doesn't compute the same root (using the same path),
         // then it means that `node` is not the value currently in the tree at `index`
         let err_msg = program.resolve_error_message(err_code);
-        OperationError::merkle_path_verification_failed(node, index, root, err_code, err_msg)
+        OperationError::MerklePathVerificationFailed {
+            value: node,
+            index,
+            root,
+            err_code,
+            err_msg,
+        }
     })?;
 
     Ok(P::HelperRegisters::op_merkle_path_registers(addr))
@@ -108,14 +114,12 @@ pub(super) fn op_mrupdate<P: Processor>(
         new_value,
         path.as_ref(),
         index,
-        || {
-            OperationError::merkle_path_verification_failed(
-                old_value,
-                index,
-                claimed_old_root,
-                ZERO,
-                None,
-            )
+        || OperationError::MerklePathVerificationFailed {
+            value: old_value,
+            index,
+            root: claimed_old_root,
+            err_code: ZERO,
+            err_msg: None,
         },
     )?;
     tracer.record_hasher_update_merkle_root(

@@ -100,9 +100,13 @@ impl Process {
             // If the hasher chiplet doesn't compute the same root (using the same path),
             // then it means that `node` is not the value currently in the tree at `index`
             let err_msg = program.resolve_error_message(err_code);
-            return Err(OperationError::merkle_path_verification_failed(
-                node, index, root, err_code, err_msg,
-            ));
+            return Err(OperationError::MerklePathVerificationFailed {
+                value: node,
+                index,
+                root,
+                err_code,
+                err_msg,
+            });
         }
 
         // The same state is copied over to the next clock cycle with no changes.

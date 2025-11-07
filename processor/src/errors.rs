@@ -120,20 +120,6 @@ impl ExecutionError {
             err: Box::new(err),
         }
     }
-
-    pub fn from_operation_with_label(
-        label: SourceSpan,
-        source_file: Option<Arc<SourceFile>>,
-        err: OperationError,
-        clk: RowIndex,
-    ) -> Self {
-        Self::OperationError {
-            clk,
-            label,
-            source_file,
-            err: Box::new(err),
-        }
-    }
 }
 
 impl AsRef<dyn Diagnostic> for ExecutionError {
@@ -151,9 +137,12 @@ pub enum OperationError {
     #[diagnostic(transparent)]
     AdviceError(AdviceError),
     #[error(
-        "failed to execute the dynamic code block provided by the stack with root {hex}; the block could not be found",
+        "dynamic execution failed: code block with root {hex} not found in program",
         hex = .digest.to_hex()
     )]
+    #[diagnostic(help(
+        "dynexec/dyncall requires the target code block to be included in the MAST forest. Ensure the procedure was compiled into the program"
+    ))]
     DynamicNodeNotFound { digest: Word },
     #[error(
         "error during processing of event {}",
@@ -175,23 +164,34 @@ pub enum OperationError {
             None => format!("code: {err_code}"),
         }
     )]
+    #[diagnostic(help(
+        "assertions validate program invariants. Review the assertion condition and ensure all prerequisites are met"
+    ))]
     FailedAssertion {
         err_code: Felt,
         err_msg: Option<Arc<str>>,
     },
-    #[error("stack overflow: exceeded maximum stack depth")]
+    #[error("stack overflow: maximum stack depth exceeded")]
+    #[diagnostic(help(
+        "the operand stack has a maximum depth limit. Use fewer nested operations or store intermediate values in memory"
+    ))]
     StackOverflow,
     #[error("division by zero")]
+    #[diagnostic(help(
+        "ensure the divisor (second stack element) is non-zero before division or modulo operations"
+    ))]
     DivideByZero,
     #[error(
         "when returning from a call or dyncall, stack depth must be {MIN_STACK_DEPTH}, but was {depth}"
     )]
-    // NOTE: Diagnostic label "when returning from this call site" will be restored
-    // when implementing OperationDiagnostic trait (deferred).
+    #[diagnostic(help(
+        "ensure the callee procedure returns with exactly {MIN_STACK_DEPTH} elements on the stack"
+    ))]
     InvalidStackDepthOnReturn { depth: usize },
     #[error("exceeded the allowed number of max cycles {max_cycles}")]
     CycleLimitExceeded { max_cycles: u32 },
-    #[error("attempted to calculate integer logarithm with zero argument")]
+    #[error("logarithm of zero is undefined")]
+    #[diagnostic(help("ensure the argument to ilog2 is greater than zero"))]
     LogArgumentZero,
     #[error("malformed signature key: {key_type}")]
     #[diagnostic(help("the secret key associated with the provided public key is malformed"))]
@@ -218,9 +218,13 @@ pub enum OperationError {
         err_code: Felt,
         err_msg: Option<Arc<str>>,
     },
-    #[error("if statement expected a binary value on top of the stack, but got {value}")]
+    #[error("conditional operation requires binary value (0 or 1), but stack top contains {value}")]
+    #[diagnostic(help(
+        "use u32assert2 or comparison operations to ensure stack top is 0 or 1 before conditional operations"
+    ))]
     NotBinaryValueIf { value: Felt },
-    #[error("operation expected a binary value, but got {value}")]
+    #[error("operation requires binary value (0 or 1), but got {value}")]
+    #[diagnostic(help("use u32assert2 or comparison operations to ensure the operand is 0 or 1"))]
     NotBinaryValueOp { value: Felt },
     #[error("loop condition must be a binary value, but got {value}")]
     #[diagnostic(help(
@@ -239,13 +243,16 @@ pub enum OperationError {
     )]
     SmtNodePreImageNotValid { node: Word, preimage_len: usize },
     #[error(
-        "syscall failed: procedure with root {hex} was not found in the kernel",
+        "syscall target not found: procedure {hex} is not in the kernel",
         hex = to_hex(proc_root.as_bytes())
     )]
+    #[diagnostic(help(
+        "syscalls can only invoke procedures that were compiled into the kernel. Check that the target procedure is part of the kernel module"
+    ))]
     SyscallTargetNotInKernel { proc_root: Word },
-    #[error("failed to execute arithmetic circuit evaluation operation: {0}")]
-    // NOTE: Diagnostic label "this call failed" could be added as a custom label in the future.
-    AceChipError(#[source] AceError),
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    AceChipError(AceError),
     #[error("FRI domain segment value cannot exceed 3, but was {0}")]
     InvalidFriDomainSegment(u64),
     #[error("degree-respecting projection is inconsistent: expected {0} but was {1}")]
@@ -255,28 +262,23 @@ pub enum OperationError {
     MemoryError(MemoryError),
 }
 
-impl OperationError {
-    pub fn merkle_path_verification_failed(
-        value: Word,
-        index: Felt,
-        root: Word,
-        err_code: Felt,
-        err_msg: Option<Arc<str>>,
-    ) -> Self {
-        Self::MerklePathVerificationFailed { value, index, root, err_code, err_msg }
-    }
-}
-
 // ACE ERROR
 // ================================================================================================
 
 #[derive(Debug, thiserror::Error, Diagnostic)]
 pub enum AceError {
-    #[error("num of variables should be word aligned and non-zero but was {0}")]
+    #[error("invalid variable count {0}: must be word-aligned (multiple of 4) and non-zero")]
+    #[diagnostic(help(
+        "ACE circuits require variable counts that are multiples of 4 to align with word boundaries"
+    ))]
     NumVarIsNotWordAlignedOrIsEmpty(u64),
-    #[error("num of evaluation gates should be word aligned and non-zero but was {0}")]
+    #[error("invalid evaluation gate count {0}: must be word-aligned (multiple of 4) and non-zero")]
+    #[diagnostic(help("ACE circuits require evaluation gate counts that are multiples of 4"))]
     NumEvalIsNotWordAlignedOrIsEmpty(u64),
-    #[error("circuit does not evaluate to zero")]
+    #[error("arithmetic circuit constraint failed: circuit does not evaluate to zero")]
+    #[diagnostic(help(
+        "the provided witness values do not satisfy the circuit constraints. Verify the circuit definition and witness generation"
+    ))]
     CircuitNotEvaluateZero,
     #[error("failed to read from memory")]
     FailedMemoryRead(#[source] MemoryError),
@@ -284,7 +286,8 @@ pub enum AceError {
     FailedDecodeInstruction,
     #[error("failed to read from the wiring bus")]
     FailedWireBusRead,
-    #[error("num of wires must be less than 2^30 but was {0}")]
+    #[error("wire count {0} exceeds maximum limit of 2^30")]
+    #[diagnostic(help("reduce circuit complexity or split into multiple smaller circuits"))]
     TooManyWires(u64),
 }
 
