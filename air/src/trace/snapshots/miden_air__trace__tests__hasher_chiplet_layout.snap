@@ -1,0 +1,34 @@
+---
+source: air/src/trace/tests.rs
+expression: layout
+---
+HASHER CHIPLET LAYOUT
+==========================
+
+Chiplet Selectors:
+  Number of hasher selectors: 1
+  Trace offset: 52
+  Selector column range: 52..55
+
+Hasher State:
+  State width: 12
+  State column range: 55..67
+
+Capacity Portion (RPO):
+  Capacity length: 4
+  Capacity column range: 55..59
+  Capacity domain index: 1
+  Note: The capacity portion contains the first 4 elements of the 
+        hasher state, located at columns 55..59 in the main trace.
+
+Rate Portion (RPO):
+  Rate length: 8
+  Rate column range: 59..67
+
+Other Constants:
+  Digest length: 4
+  Number of rounds: 7
+  Hash cycle length: 8
+  Number of selectors: 3
+  Hasher trace width: 16
+  Node index column: 67
