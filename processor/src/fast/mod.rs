@@ -594,7 +594,7 @@ impl FastProcessor {
         // this call will be cheap.
         self.advice
             .extend_map(mast_forest.advice_map())
-            .map_err(|err| OperationError::AdviceError { clk: self.clk, err })?;
+            .map_err(|err| OperationError::AdviceError(err))?;
 
         Ok((root_id, mast_forest))
     }

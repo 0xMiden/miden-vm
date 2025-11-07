@@ -172,11 +172,11 @@ impl FastProcessor {
                     Operation::Emit => self
                         .op_emit(host)
                         .await
-                        .map_err(|err| ExecutionError::from_operation(&err_ctx, err))?,
+                        .map_err(|err| ExecutionError::from_operation(&err_ctx, err, self.clk))?,
                     _ => {
                         // if the operation is not an Emit, we execute it normally
                         self.execute_sync_op(op, op_idx_in_block, program, host, tracer)
-                            .map_err(|err| ExecutionError::from_operation(&err_ctx, err))?;
+                            .map_err(|err| ExecutionError::from_operation(&err_ctx, err, self.clk))?;
                     },
                 }
             }
@@ -217,7 +217,7 @@ impl FastProcessor {
             })?;
             self.advice
                 .apply_mutations(mutations)
-                .map_err(|err| OperationError::AdviceError { clk, err })?;
+                .map_err(|err| OperationError::AdviceError(err))?;
             Ok(())
         }
     }

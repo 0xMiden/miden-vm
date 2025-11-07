@@ -58,7 +58,7 @@ impl FastProcessor {
                 |root_digest| OperationError::NoMastForestWithProcedure { root_digest },
             )
             .await
-            .map_err(|err| ExecutionError::from_operation(&(), err))?;
+            .map_err(|err| ExecutionError::from_operation(&(), err, self.clk))?;
 
         // if the node that we got by looking up an external reference is also an External
         // node, we are about to enter into an infinite loop - so, return an error

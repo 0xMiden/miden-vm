@@ -405,6 +405,10 @@ impl Process {
     ) -> Result<(), ExecutionError> {
         let err_ctx = err_ctx!(program, node, host);
 
+        // HACK: capture clock before start_split_node increments it via Drop operation
+        // This ensures slow/fast path report the same clock cycle for initial condition errors
+        let clk_before_start = self.system.clk();
+
         // start the SPLIT block; this also pops the stack and returns the popped element
         let condition = self.start_split_node(node, program, host, &err_ctx)?;
 
@@ -417,6 +421,7 @@ impl Process {
             return Err(ExecutionError::from_operation(
                 &err_ctx,
                 OperationError::NotBinaryValueIf { value: condition },
+                clk_before_start,
             ));
         }
 
@@ -433,6 +438,10 @@ impl Process {
     ) -> Result<(), ExecutionError> {
         let err_ctx = err_ctx!(program, node, host);
 
+        // HACK: capture clock before start_loop_node increments it via Drop operation
+        // This ensures slow/fast path report the same clock cycle for initial condition errors
+        let clk_before_start = self.system.clk();
+
         // start the LOOP block; this also pops the stack and returns the popped element
         let condition = self.start_loop_node(node, program, host, &err_ctx)?;
 
@@ -447,7 +456,7 @@ impl Process {
             while self.stack.peek() == ONE {
                 self.decoder.repeat();
                 self.execute_op(Operation::Drop, program, host)
-                    .map_err(|err| ExecutionError::from_operation(&err_ctx, err))?;
+                    .map_err(|err| ExecutionError::from_operation(&err_ctx, err, self.system.clk()))?;
                 self.execute_mast_node(node.body(), program, host)?;
             }
 
@@ -455,6 +464,7 @@ impl Process {
                 return Err(ExecutionError::from_operation(
                     &err_ctx,
                     OperationError::NotBinaryValueLoop { value: self.stack.peek() },
+                    self.system.clk(),
                 ));
             }
 
@@ -468,6 +478,7 @@ impl Process {
             Err(ExecutionError::from_operation(
                 &err_ctx,
                 OperationError::NotBinaryValueLoop { value: condition },
+                clk_before_start,
             ))
         }
     }
@@ -489,7 +500,7 @@ impl Process {
             self.chiplets
                 .kernel_rom
                 .access_proc(callee.digest())
-                .map_err(|err| ExecutionError::from_operation(&err_ctx, err))?;
+                .map_err(|err| ExecutionError::from_operation(&err_ctx, err, self.system.clk()))?;
         }
         let err_ctx = err_ctx!(program, call_node, host);
 
@@ -511,6 +522,10 @@ impl Process {
     ) -> Result<(), ExecutionError> {
         let err_ctx = err_ctx!(program, node, host);
 
+        // HACK: capture clock before start_dyn_node/start_dyncall_node increment it via Drop operation
+        // This ensures slow/fast path report the same clock cycle for node not found errors
+        let clk_before_start = self.system.clk();
+
         let callee_hash = if node.is_dyncall() {
             self.start_dyncall_node(node, &err_ctx)?
         } else {
@@ -527,6 +542,7 @@ impl Process {
                     ExecutionError::from_operation(
                         &err_ctx,
                         OperationError::DynamicNodeNotFound { digest: callee_hash },
+                        clk_before_start,
                     )
                 })?;
 
@@ -536,6 +552,7 @@ impl Process {
                     ExecutionError::from_operation(
                         &err_ctx,
                         OperationError::MalformedMastForestInHost { root_digest: callee_hash },
+                        clk_before_start,
                     )
                 })?;
 
@@ -547,7 +564,8 @@ impl Process {
                 self.advice.extend_map(mast_forest.advice_map()).map_err(|err| {
                     ExecutionError::from_operation(
                         &err_ctx,
-                        OperationError::AdviceError { clk: self.system.clk(), err },
+                        OperationError::AdviceError(err),
+                        self.system.clk(),
                     )
                 })?;
 
@@ -593,7 +611,7 @@ impl Process {
         for op_batch in basic_block.op_batches().iter().skip(1) {
             self.respan(op_batch);
             self.execute_op(Operation::Noop, program, host)
-                .map_err(|err| ExecutionError::from_operation(&err_ctx, err))?;
+                .map_err(|err| ExecutionError::from_operation(&err_ctx, err, self.system.clk()))?;
             self.execute_op_batch(
                 basic_block,
                 op_batch,
@@ -660,7 +678,7 @@ impl Process {
             let err_ctx = err_ctx!(program, basic_block, host, i + op_offset);
             self.decoder.execute_user_op(op, op_idx);
             self.execute_op(op, program, host)
-                .map_err(|err| ExecutionError::from_operation(&err_ctx, err))?;
+                .map_err(|err| ExecutionError::from_operation(&err_ctx, err, self.system.clk()))?;
 
             // if the operation carries an immediate value, the value is stored at the next group
             // pointer; so, we advance the pointer to the following group
@@ -733,6 +751,7 @@ impl Process {
             ExecutionError::from_operation(
                 &(),
                 OperationError::NoMastForestWithProcedure { root_digest: node_digest },
+                self.system.clk(),
             )
         })?;
 
@@ -742,6 +761,7 @@ impl Process {
             ExecutionError::from_operation(
                 &(),
                 OperationError::MalformedMastForestInHost { root_digest: node_digest },
+                self.system.clk(),
             )
         })?;
 
@@ -759,7 +779,8 @@ impl Process {
         self.advice.extend_map(mast_forest.advice_map()).map_err(|err| {
             ExecutionError::from_operation(
                 &(),
-                OperationError::AdviceError { clk: self.system.clk(), err },
+                OperationError::AdviceError(err),
+                self.system.clk(),
             )
         })?;
 
@@ -1025,7 +1046,7 @@ pub(crate) fn add_error_ctx_to_external_error(
         Ok(_) => Ok(()),
         // Add context information to any errors coming from executing an `ExternalNode`
         Err(execution_error) => match execution_error {
-            ExecutionError::OperationError { label, source_file: _, err: ref op_err }
+            ExecutionError::OperationError { label, source_file: _, err: ref op_err, clk }
                 if matches!(
                     op_err,
                     OperationError::NoMastForestWithProcedure { .. }
@@ -1041,6 +1062,7 @@ pub(crate) fn add_error_ctx_to_external_error(
                     Err(ExecutionError::from_operation(
                         &err_ctx,
                         OperationError::NoMastForestWithProcedure { root_digest },
+                        clk,
                     ))
                 } else {
                     // If the source span was already populated, just return the error as-is. This

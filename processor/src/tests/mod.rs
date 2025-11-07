@@ -108,7 +108,6 @@ fn test_diagnostic_advice_map_key_not_found_1() {
     assert_diagnostic_lines!(
         err,
         "advice provider error at clock cycle 8",
-        "value for key 0x0000000000000000000000000000000001000000000000000200000000000000 not present in the advice map",
         regex!(r#",-\[test[\d]+:3:31\]"#),
         " 2 |         begin",
         " 3 |             swap swap trace.2 adv.push_mapval",
@@ -130,7 +129,6 @@ fn test_diagnostic_advice_map_key_not_found_2() {
     assert_diagnostic_lines!(
         err,
         "advice provider error at clock cycle 8",
-        "value for key 0x0000000000000000000000000000000001000000000000000200000000000000 not present in the advice map",
         regex!(r#",-\[test[\d]+:3:31\]"#),
         " 2 |         begin",
         " 3 |             swap swap trace.2 adv.push_mapvaln",
@@ -155,7 +153,6 @@ fn test_diagnostic_advice_stack_read_failed() {
     assert_diagnostic_lines!(
         err,
         "advice provider error at clock cycle 6",
-        "stack read failed",
         regex!(r#",-\[test[\d]+:3:18\]"#),
         " 2 |         begin",
         " 3 |             swap adv_push.1 trace.2",
@@ -272,7 +269,7 @@ fn test_diagnostic_failed_assertion() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "assertion failed at clock cycle 9 with error code: 0",
+        "assertion failed with error code: 0 at clock cycle 9",
         regex!(r#",-\[test[\d]+:4:13\]"#),
         " 3 |             push.1.2",
         " 4 |             assertz",
@@ -293,7 +290,7 @@ fn test_diagnostic_failed_assertion() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "assertion failed at clock cycle 9 with error message: some error message",
+        "assertion failed with error message: some error message at clock cycle 9",
         regex!(r#",-\[test[\d]+:4:13\]"#),
         " 3 |             push.1.2",
         " 4 |             assertz.err=\"some error message\"",
@@ -315,7 +312,7 @@ fn test_diagnostic_failed_assertion() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "assertion failed at clock cycle 9 with error message: some error message",
+        "assertion failed with error message: some error message at clock cycle 9",
         regex!(r#",-\[test[\d]+:5:13\]"#),
         " 4 |             push.1.2",
         " 5 |             assertz.err=ERR_MSG",
@@ -422,7 +419,6 @@ fn test_diagnostic_invalid_merkle_tree_node_index() {
     assert_diagnostic_lines!(
         err,
         "advice provider error at clock cycle 6",
-        "provided node index 16 is out of bounds for a merkle tree node at depth 4",
         regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
         " 3 |             mtree_get",
@@ -454,12 +450,11 @@ fn test_diagnostic_invalid_stack_depth_on_return_call() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "when returning from a call or dyncall, stack depth must be 16, but was 17",
+        "when returning from a call or dyncall, stack depth must be 16, but was 17 at clock cycle 13",
         regex!(r#",-\[test[\d]+:7:21\]"#),
         " 6 |         begin",
         " 7 |             trace.2 call.foo",
-        "   :                     ^^^^|^^^",
-        "   :                         `-- when returning from this call site",
+        "   :                     ^^^^^^^^",
         " 8 |         end",
         "   `----"
     );
@@ -484,12 +479,11 @@ fn test_diagnostic_invalid_stack_depth_on_return_dyncall() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "when returning from a call or dyncall, stack depth must be 16, but was 17",
+        "when returning from a call or dyncall, stack depth must be 16, but was 17 at clock cycle 28",
         regex!(r#",-\[test[\d]+:8:13\]"#),
         " 7 |             procref.foo mem_storew_be.100 dropw push.100",
         " 8 |             dyncall",
-        "   :             ^^^|^^^",
-        "   :                `-- when returning from this call site",
+        "   :             ^^^^^^^",
         " 9 |         end",
         "   `----"
     );
@@ -537,15 +531,13 @@ fn test_diagnostic_unaligned_word_access() {
 
     assert_diagnostic_lines!(
         err,
-        "word memory access at address 3 in context 0 is unaligned at clock cycle 7",
+        "memory error at clock cycle 7",
         regex!(r#",-\[test[\d]+:4:22\]"#),
         " 3 |         begin",
         " 4 |             exec.foo mem_storew_be.3",
-        "   :                      ^^^^^^^|^^^^^^^",
-        "   :                             `-- tried to access memory address 3",
+        "   :                      ^^^^^^^^^^^^^^^",
         " 5 |         end",
-        "   `----",
-        "  help: ensure that the memory address accessed is aligned to a word boundary (it is a multiple of 4)"
+        "   `----"
     );
 
     // mem_loadw_be
@@ -559,15 +551,13 @@ fn test_diagnostic_unaligned_word_access() {
 
     assert_diagnostic_lines!(
         err,
-        "word memory access at address 3 in context 0 is unaligned at clock cycle 6",
+        "memory error at clock cycle 6",
         regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
         " 3 |             mem_loadw_be.3",
-        "   :             ^^^^^^^|^^^^^^",
-        "   :                    `-- tried to access memory address 3",
+        "   :             ^^^^^^^^^^^^^^",
         " 4 |         end",
-        "   `----",
-        "  help: ensure that the memory address accessed is aligned to a word boundary (it is a multiple of 4)"
+        "   `----"
     );
 }
 
@@ -584,7 +574,7 @@ fn test_diagnostic_address_out_of_bounds() {
 
     assert_diagnostic_lines!(
         err,
-        "memory address cannot exceed 2^32 but was 4294967296",
+        "memory error at clock cycle 5",
         regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
         " 3 |             mem_store",
@@ -604,7 +594,7 @@ fn test_diagnostic_address_out_of_bounds() {
 
     assert_diagnostic_lines!(
         err,
-        "memory address cannot exceed 2^32 but was 4294967296",
+        "memory error at clock cycle 5",
         regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
         " 3 |             mem_storew_be",
@@ -624,7 +614,7 @@ fn test_diagnostic_address_out_of_bounds() {
 
     assert_diagnostic_lines!(
         err,
-        "memory address cannot exceed 2^32 but was 4294967296",
+        "memory error at clock cycle 7",
         regex!(r#",-\[test[\d]+:3:23\]"#),
         " 2 |         begin",
         " 3 |             swap swap mem_load push.1 drop",
@@ -644,11 +634,11 @@ fn test_diagnostic_address_out_of_bounds() {
 
     assert_diagnostic_lines!(
         err,
-        "memory address cannot exceed 2^32 but was 4294967296",
+        "memory error at clock cycle 7",
         regex!(r#",-\[test[\d]+:3:23\]"#),
         " 2 |         begin",
         " 3 |             swap swap mem_loadw_be push.1 drop",
-        "   :                       ^^^^^^^^^",
+        "   :                       ^^^^^^^^^^^^",
         " 4 |         end",
         "   `----"
     );
@@ -690,9 +680,6 @@ fn test_diagnostic_merkle_store_lookup_failed() {
     assert_diagnostic_lines!(
         err,
         "advice provider error at clock cycle 6",
-        "failed to lookup value in Merkle store",
-        "|",
-        "`-> node Word([1, 0, 0, 0]) with index `depth=10, value=0` not found",
         regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
         " 3 |             mtree_set",
@@ -803,14 +790,13 @@ fn test_diagnostic_not_binary_value_loop_node() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "loop condition must be a binary value, but got 2",
+        "loop condition must be a binary value, but got 2 at clock cycle 8",
         regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
         " 3 |             while.true swap dup end",
         "   :             ^^^^^^^^^^^^^^^^^^^^^^^",
         " 4 |         end",
-        "   `----",
-        "  help: this could happen either when first entering the loop, or any subsequent iteration"
+        "   `----"
     );
 }
 

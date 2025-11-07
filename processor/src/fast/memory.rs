@@ -185,14 +185,7 @@ fn enforce_word_aligned_addr(
     clk: Option<RowIndex>,
 ) -> Result<u32, MemoryError> {
     if !addr.is_multiple_of(WORD_SIZE as u32) {
-        return match clk {
-            Some(clk) => Err(MemoryError::UnalignedWordAccess {
-                addr,
-                ctx,
-                clk: Felt::from(clk.as_u32()),
-            }),
-            None => Err(MemoryError::UnalignedWordAccessNoClk { addr, ctx }),
-        };
+        return Err(MemoryError::UnalignedWordAccess { addr, ctx });
     }
 
     Ok(addr)

@@ -157,7 +157,7 @@ impl Process {
         let (b, a) = require_u32_operands!(self.stack, [0, 1]);
 
         if b == 0 {
-            return Err(OperationError::DivideByZero { clk: self.system.clk() });
+            return Err(OperationError::DivideByZero);
         }
 
         let q = a / b;

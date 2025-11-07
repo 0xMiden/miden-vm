@@ -22,7 +22,7 @@ pub(super) fn op_assert<P: Processor>(
         let process = &mut processor.state();
         host.on_assert_failed(process, err_code);
         let err_msg = program.resolve_error_message(err_code);
-        return Err(OperationError::FailedAssertion { clk: process.clk(), err_code, err_msg });
+        return Err(OperationError::FailedAssertion { err_code, err_msg });
     }
     processor.stack().decrement_size(tracer);
     Ok(())

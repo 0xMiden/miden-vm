@@ -5,7 +5,7 @@ use crate::{
     OperationError,
     fast::Tracer,
     operations::utils::assert_binary,
-    processor::{OperationHelperRegisters, Processor, StackInterface, SystemInterface},
+    processor::{OperationHelperRegisters, Processor, StackInterface},
 };
 
 /// Pops two elements off the stack, adds them together, and pushes the result back onto the
@@ -39,7 +39,7 @@ pub(super) fn op_mul<P: Processor>(processor: &mut P, tracer: &mut impl Tracer) 
 pub(super) fn op_inv<P: Processor>(processor: &mut P) -> Result<(), OperationError> {
     let top = processor.stack().get_mut(0);
     if (*top) == ZERO {
-        return Err(OperationError::DivideByZero { clk: processor.system().clk() });
+        return Err(OperationError::DivideByZero);
     }
     *top = top.inv();
     Ok(())

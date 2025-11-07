@@ -1,6 +1,6 @@
 #![cfg(feature = "integration-tests")]
 use miden_assembly::testing::regex;
-use miden_processor::{ExecutionError, RowIndex};
+use miden_processor::{ExecutionError, OperationError, RowIndex};
 use miden_utils_testing::{
     Felt, FieldElement, ONE, StarkField, WORD_SIZE, ZERO, assert_assembler_diagnostic,
     assert_diagnostic_lines, build_op_test, expect_exec_error_matches, prop_randw,
@@ -216,7 +216,7 @@ fn div_fail() {
     let test = build_op_test!(asm_op, &[1, 0]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::DivideByZero{ clk:value, label: _, source_file: _ } if value == RowIndex::from(6)
+        ExecutionError::OperationError { clk: value, label: _, source_file: _, err: OperationError::DivideByZero } if value == RowIndex::from(6)
     );
 }
 
@@ -283,7 +283,7 @@ fn inv_fail() {
 
     // --- test no inv on 0 -----------------------------------------------------------------------
     let test = build_op_test!(asm_op, &[0]);
-    expect_exec_error_matches!(test, ExecutionError::DivideByZero{clk: row_idx, label: _, source_file: _ } if row_idx == RowIndex::from(6));
+    expect_exec_error_matches!(test, ExecutionError::OperationError { clk: row_idx, label: _, source_file: _, err: OperationError::DivideByZero } if row_idx == RowIndex::from(6));
 
     let asm_op = "inv.1";
 
@@ -325,8 +325,8 @@ fn pow2_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::FailedAssertion{clk, err_code, err_msg, label: _, source_file: _ }
-        if clk == RowIndex::from(21) && err_code == ZERO && err_msg.is_none()
+        ExecutionError::OperationError { clk: clk_value, label: _, source_file: _, err: OperationError::FailedAssertion { err_code, err_msg } }
+        if clk_value == RowIndex::from(21) && err_code == ZERO && err_msg.is_none()
     );
 }
 
@@ -357,8 +357,8 @@ fn exp_bits_length_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::FailedAssertion{clk, err_code, err_msg, label: _, source_file: _ }
-        if clk == RowIndex::from(23) && err_code == ZERO && err_msg.is_none()
+        ExecutionError::OperationError { clk: clk_val, label: _, source_file: _, err: OperationError::FailedAssertion { err_code, err_msg } }
+        if clk_val == RowIndex::from(23) && err_code == ZERO && err_msg.is_none()
     );
 
     //---------------------- exp containing more than 64 bits -------------------------------------
@@ -408,7 +408,7 @@ fn ilog2_fail() {
     let test = build_op_test!(asm_op, &[0]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::LogArgumentZero{ clk: row_idx, label: _, source_file: _ } if row_idx == RowIndex::from(7)
+        ExecutionError::OperationError { clk: row_idx, label: _, source_file: _, err: OperationError::LogArgumentZero } if row_idx == RowIndex::from(7)
     );
 }
 

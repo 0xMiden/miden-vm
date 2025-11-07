@@ -184,7 +184,7 @@ pub(super) fn op_u32div<P: Processor>(
     };
 
     if denominator == 0 {
-        return Err(OperationError::DivideByZero { clk: processor.system().clk() });
+        return Err(OperationError::DivideByZero);
     }
 
     // a/b = n*q + r for some n>=0 and 0<=r<b

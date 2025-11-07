@@ -214,7 +214,7 @@ impl Process {
         let words = self
             .advice
             .pop_stack_dword()
-            .map_err(|err| OperationError::AdviceError { clk, err })?;
+            .map_err(|err| OperationError::AdviceError(err))?;
 
         // write the words memory
         self.chiplets
@@ -258,7 +258,7 @@ impl Process {
         let value = self
             .advice
             .pop_stack()
-            .map_err(|err| OperationError::AdviceError { clk: self.system.clk(), err })?;
+            .map_err(|err| OperationError::AdviceError(err))?;
         self.stack.set(0, value);
         self.stack.shift_right(0);
         Ok(())
@@ -273,7 +273,7 @@ impl Process {
         let word = self
             .advice
             .pop_stack_word()
-            .map_err(|err| OperationError::AdviceError { clk: self.system.clk(), err })?;
+            .map_err(|err| OperationError::AdviceError(err))?;
 
         self.stack.set(0, word[3]);
         self.stack.set(1, word[2]);
@@ -694,8 +694,7 @@ mod tests {
             process.op_mstore(),
             Err(OperationError::MemoryError(MemoryError::IllegalMemoryAccess {
                 ctx: _,
-                addr: _,
-                clk: _
+                addr: _
             }))
         );
     }
@@ -713,8 +712,7 @@ mod tests {
             process.op_mstore(),
             Err(OperationError::MemoryError(MemoryError::IllegalMemoryAccess {
                 ctx: _,
-                addr: _,
-                clk: _
+                addr: _
             }))
         );
     }

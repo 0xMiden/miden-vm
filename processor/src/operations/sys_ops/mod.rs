@@ -28,7 +28,7 @@ impl Process {
             let process = &mut self.state();
             host.on_assert_failed(process, err_code);
             let err_msg = program.resolve_error_message(err_code);
-            return Err(OperationError::FailedAssertion { clk: process.clk(), err_code, err_msg });
+            return Err(OperationError::FailedAssertion { err_code, err_msg });
         }
         self.stack.shift_left(1);
         Ok(())
@@ -105,7 +105,7 @@ impl Process {
             })?;
             self.advice
                 .apply_mutations(mutations)
-                .map_err(|err| OperationError::AdviceError { clk, err })?;
+                .map_err(|err| OperationError::AdviceError(err))?;
             Ok(())
         }
     }

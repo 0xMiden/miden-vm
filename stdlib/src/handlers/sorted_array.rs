@@ -92,7 +92,6 @@ fn push_lowerbound_result(
         return Err(MemoryError::UnalignedWordAccess {
             addr: addr_range.start,
             ctx: process.ctx(),
-            clk: Felt::from(process.clk()),
         }
         .into());
     }

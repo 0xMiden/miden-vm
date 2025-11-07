@@ -73,6 +73,7 @@ impl FastProcessor {
             return Err(ExecutionError::from_operation(
                 &err_ctx,
                 OperationError::NotBinaryValueLoop { value: condition },
+                self.clk,
             ));
         }
         Ok(())
@@ -128,6 +129,7 @@ impl FastProcessor {
             return Err(ExecutionError::from_operation(
                 &err_ctx,
                 OperationError::NotBinaryValueLoop { value: condition },
+                self.clk,
             ));
         }
         Ok(())

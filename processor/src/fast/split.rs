@@ -50,6 +50,7 @@ impl FastProcessor {
             return Err(ExecutionError::from_operation(
                 &err_ctx,
                 OperationError::NotBinaryValueIf { value: condition },
+                self.clk,
             ));
         };
 

@@ -74,9 +74,10 @@ use crate::{BaseHost, EventError, MemoryError, host::advice::AdviceError};
 
 #[derive(Debug, thiserror::Error, Diagnostic)]
 pub enum ExecutionError {
-    #[error("{err}")]
+    #[error("{err} at clock cycle {clk}")]
     #[diagnostic()]
     OperationError {
+        clk: RowIndex,
         #[label]
         label: SourceSpan,
         #[source_code]
@@ -110,17 +111,18 @@ pub enum ExecutionError {
 }
 
 impl ExecutionError {
-    pub fn from_operation(err_ctx: &impl ErrorContext, err: OperationError) -> Self {
+    pub fn from_operation(err_ctx: &impl ErrorContext, err: OperationError, clk: RowIndex) -> Self {
         let (label, source_file) = err_ctx.label_and_source_file();
-        Self::OperationError { label, source_file, err }
+        Self::OperationError { clk, label, source_file, err }
     }
 
     pub fn from_operation_with_label(
         label: SourceSpan,
         source_file: Option<Arc<SourceFile>>,
         err: OperationError,
+        clk: RowIndex,
     ) -> Self {
-        Self::OperationError { label, source_file, err }
+        Self::OperationError { clk, label, source_file, err }
     }
 }
 
@@ -136,12 +138,8 @@ impl AsRef<dyn Diagnostic> for ExecutionError {
 #[derive(Debug, thiserror::Error)]
 pub enum OperationError {
     // NOTE: AdviceError has Diagnostic attributes with help text - restore at end of refactor
-    #[error("advice provider error at clock cycle {clk}")]
-    AdviceError {
-        clk: RowIndex,
-        #[source]
-        err: AdviceError,
-    },
+    #[error("advice provider error")]
+    AdviceError(#[source] AdviceError),
     #[error(
         "failed to execute the dynamic code block provided by the stack with root {hex}; the block could not be found",
         hex = .digest.to_hex()
@@ -161,21 +159,20 @@ pub enum OperationError {
         error: EventError,
     },
     #[error(
-        "assertion failed at clock cycle {clk} with error {}",
+        "assertion failed with error {}",
         match err_msg {
             Some(msg) => format!("message: {msg}"),
             None => format!("code: {err_code}"),
         }
     )]
     FailedAssertion {
-        clk: RowIndex,
         err_code: Felt,
         err_msg: Option<Arc<str>>,
     },
     #[error("stack overflow: exceeded maximum stack depth")]
     StackOverflow,
-    #[error("division by zero at clock cycle {clk}")]
-    DivideByZero { clk: RowIndex },
+    #[error("division by zero")]
+    DivideByZero,
     #[error(
         "when returning from a call or dyncall, stack depth must be {MIN_STACK_DEPTH}, but was {depth}"
     )]
@@ -184,8 +181,8 @@ pub enum OperationError {
     InvalidStackDepthOnReturn { depth: usize },
     #[error("exceeded the allowed number of max cycles {max_cycles}")]
     CycleLimitExceeded { max_cycles: u32 },
-    #[error("attempted to calculate integer logarithm with zero argument at clock cycle {clk}")]
-    LogArgumentZero { clk: RowIndex },
+    #[error("attempted to calculate integer logarithm with zero argument")]
+    LogArgumentZero,
     #[error("malformed signature key: {key_type}")]
     // NOTE: Diagnostic help "the secret key associated with the provided public key is malformed"
     // will be restored when implementing OperationDiagnostic trait (deferred).
@@ -223,10 +220,8 @@ pub enum OperationError {
     NotBinaryValueLoop { value: Felt },
     #[error("operation expected u32 values, but got values: {values:?} (error code: {err_code})")]
     NotU32Values { values: Vec<Felt>, err_code: Felt },
-    #[error(
-        "Operand stack input is {input} but it is expected to fit in a u32 at clock cycle {clk}"
-    )]
-    NotU32StackValue { clk: RowIndex, input: u64 },
+    #[error("operand stack input is {input} but it is expected to fit in a u32")]
+    NotU32StackValue { input: u64 },
     #[error("smt node {node_hex} not found", node_hex = to_hex(node.as_bytes()))]
     SmtNodeNotFound { node: Word },
     #[error(
@@ -248,8 +243,8 @@ pub enum OperationError {
     #[error("degree-respecting projection is inconsistent: expected {0} but was {1}")]
     InvalidFriLayerFolding(QuadFelt, QuadFelt),
     // NOTE: MemoryError needs Diagnostic attributes with help text - restore at end of refactor
-    #[error(transparent)]
-    MemoryError(MemoryError),
+    #[error("memory error")]
+    MemoryError(#[source] MemoryError),
 }
 
 impl OperationError {

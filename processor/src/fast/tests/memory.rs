@@ -17,7 +17,7 @@ fn test_memory_word_access_alignment() {
             .unwrap_err();
         assert_eq!(
             err.to_string(),
-            "word memory access at address 43 in context 0 is unaligned at clock cycle 1"
+            "memory error at clock cycle 1"
         );
     }
 
@@ -34,7 +34,7 @@ fn test_memory_word_access_alignment() {
             .unwrap_err();
         assert_eq!(
             err.to_string(),
-            "word memory access at address 43 in context 0 is unaligned at clock cycle 1"
+            "memory error at clock cycle 1"
         );
     }
 }
