@@ -16,6 +16,8 @@ pub use main_trace::{MainTrace, MainTraceRow};
 
 mod aux_trace;
 pub use aux_trace::AuxTraceBuilder;
+#[cfg(test)]
+mod tests;
 
 // CONSTANTS
 // ================================================================================================
