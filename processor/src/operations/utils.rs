@@ -5,7 +5,7 @@ use crate::{ONE, ZERO, errors::OperationError};
 #[inline(always)]
 pub fn assert_binary(value: Felt) -> Result<Felt, OperationError> {
     if value != ZERO && value != ONE {
-        Err(OperationError::not_binary_value_op(value))
+        Err(OperationError::NotBinaryValueOp { value })
     } else {
         Ok(value)
     }

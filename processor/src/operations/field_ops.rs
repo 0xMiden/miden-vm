@@ -46,7 +46,7 @@ impl Process {
     pub(super) fn op_inv(&mut self) -> Result<(), OperationError> {
         let a = self.stack.get(0);
         if a == ZERO {
-            return Err(OperationError::divide_by_zero(self.system.clk()));
+            return Err(OperationError::DivideByZero { clk: self.system.clk() });
         }
 
         self.stack.set(0, a.inv());

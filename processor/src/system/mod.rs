@@ -96,7 +96,7 @@ impl System {
 
         // Check that maximum number of cycles is not exceeded.
         if self.clk.as_u32() > max_cycles {
-            return Err(OperationError::cycle_limit_exceeded(max_cycles));
+            return Err(OperationError::CycleLimitExceeded { max_cycles });
         }
 
         let clk: usize = self.clk.into();

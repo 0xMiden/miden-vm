@@ -16,7 +16,7 @@ pub(super) fn op_advpop<P: Processor>(
     let value = processor
         .advice_provider()
         .pop_stack()
-        .map_err(|err| OperationError::advice_error(err, processor.system().clk()))?;
+        .map_err(|err| OperationError::AdviceError { clk: processor.system().clk(), err })?;
     tracer.record_advice_pop_stack(value);
 
     processor.stack().increment_size(tracer)?;
@@ -33,7 +33,7 @@ pub(super) fn op_advpopw<P: Processor>(
     let word = processor
         .advice_provider()
         .pop_stack_word()
-        .map_err(|err| OperationError::advice_error(err, processor.system().clk()))?;
+        .map_err(|err| OperationError::AdviceError { clk: processor.system().clk(), err })?;
     tracer.record_advice_pop_stack_word(word);
 
     processor.stack().set_word(0, &word);
@@ -212,7 +212,7 @@ pub(super) fn op_pipe<P: Processor>(
     let words = processor
         .advice_provider()
         .pop_stack_dword()
-        .map_err(|err| OperationError::advice_error(err, clk))?;
+        .map_err(|err| OperationError::AdviceError { clk, err })?;
     tracer.record_advice_pop_stack_dword(words);
 
     // write the words to memory

@@ -419,7 +419,7 @@ impl Process {
         } else {
             return Err(ExecutionError::from_operation(
                 &err_ctx,
-                OperationError::not_binary_value_if(condition),
+                OperationError::NotBinaryValueIf { value: condition },
             ));
         }
 
@@ -457,7 +457,7 @@ impl Process {
             if self.stack.peek() != ZERO {
                 return Err(ExecutionError::from_operation(
                     &err_ctx,
-                    OperationError::not_binary_value_loop(self.stack.peek()),
+                    OperationError::NotBinaryValueLoop { value: self.stack.peek() },
                 ));
             }
 
@@ -470,7 +470,7 @@ impl Process {
         } else {
             Err(ExecutionError::from_operation(
                 &err_ctx,
-                OperationError::not_binary_value_loop(condition),
+                OperationError::NotBinaryValueLoop { value: condition },
             ))
         }
     }
@@ -529,7 +529,7 @@ impl Process {
                 let mast_forest = host.get_mast_forest(&callee_hash).ok_or_else(|| {
                     ExecutionError::from_operation(
                         &err_ctx,
-                        OperationError::dyn_forest_not_found(callee_hash, node.is_dyncall()),
+                        OperationError::NoMastForestWithProcedure { root_digest: callee_hash },
                     )
                 })?;
 
@@ -538,7 +538,7 @@ impl Process {
                 let root_id = mast_forest.find_procedure_root(callee_hash).ok_or_else(|| {
                     ExecutionError::from_operation(
                         &err_ctx,
-                        OperationError::dyn_malformed_forest(callee_hash, node.is_dyncall()),
+                        OperationError::MalformedMastForestInHost { root_digest: callee_hash },
                     )
                 })?;
 
@@ -550,7 +550,7 @@ impl Process {
                 self.advice.extend_map(mast_forest.advice_map()).map_err(|err| {
                     ExecutionError::from_operation(
                         &err_ctx,
-                        OperationError::advice_error(err, self.system.clk()),
+                        OperationError::AdviceError { clk: self.system.clk(), err },
                     )
                 })?;
 
@@ -747,7 +747,7 @@ impl Process {
         let mast_forest = host.get_mast_forest(&node_digest).ok_or_else(|| {
             ExecutionError::from_operation(
                 &(),
-                OperationError::no_mast_forest_with_procedure(node_digest),
+                OperationError::NoMastForestWithProcedure { root_digest: node_digest },
             )
         })?;
 
@@ -756,7 +756,7 @@ impl Process {
         let root_id = mast_forest.find_procedure_root(node_digest).ok_or_else(|| {
             ExecutionError::from_operation(
                 &(),
-                OperationError::malformed_mast_forest_in_host(node_digest),
+                OperationError::MalformedMastForestInHost { root_digest: node_digest },
             )
         })?;
 
@@ -774,7 +774,7 @@ impl Process {
         self.advice.extend_map(mast_forest.advice_map()).map_err(|err| {
             ExecutionError::from_operation(
                 &(),
-                OperationError::advice_error(err, self.system.clk()),
+                OperationError::AdviceError { clk: self.system.clk(), err },
             )
         })?;
 
@@ -1055,7 +1055,7 @@ pub(crate) fn add_error_ctx_to_external_error(
                     };
                     Err(ExecutionError::from_operation(
                         &err_ctx,
-                        OperationError::no_mast_forest_with_procedure(root_digest),
+                        OperationError::NoMastForestWithProcedure { root_digest },
                     ))
                 } else {
                     // If the source span was already populated, just return the error as-is. This

@@ -26,7 +26,7 @@ macro_rules! require_u32_operands {
             )*
 
             if !invalid_values.is_empty() {
-                return Err(OperationError::not_u32_values(invalid_values, $errno));
+                return Err(OperationError::NotU32Values { values: invalid_values, err_code: $errno });
             }
             // Return tuple of operands based on indices
             ($([<_operand_ $idx>].as_int()),*)
@@ -157,7 +157,7 @@ impl Process {
         let (b, a) = require_u32_operands!(self.stack, [0, 1]);
 
         if b == 0 {
-            return Err(OperationError::divide_by_zero(self.system.clk()));
+            return Err(OperationError::DivideByZero { clk: self.system.clk() });
         }
 
         let q = a / b;

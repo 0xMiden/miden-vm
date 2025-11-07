@@ -29,7 +29,7 @@ macro_rules! require_u32_operands {
             )*
 
             if !invalid_values.is_empty() {
-                return Err(OperationError::not_u32_values(invalid_values, $errno));
+                return Err(OperationError::NotU32Values { values: invalid_values, err_code: $errno });
             }
             // Return tuple of operands based on indices
             ($([<operand_ $idx>]),*)
@@ -184,7 +184,7 @@ pub(super) fn op_u32div<P: Processor>(
     };
 
     if denominator == 0 {
-        return Err(OperationError::divide_by_zero(processor.system().clk()));
+        return Err(OperationError::DivideByZero { clk: processor.system().clk() });
     }
 
     // a/b = n*q + r for some n>=0 and 0<=r<b

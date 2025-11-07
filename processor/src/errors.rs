@@ -95,18 +95,6 @@ pub enum OperationError {
         hex = .digest.to_hex()
     )]
     DynamicNodeNotFound { digest: Word },
-    #[error("failed to read callee hash for dynamic {}", if *.is_dyncall { "call" } else { "execution" })]
-    DynCalleeRead {
-        #[source]
-        err: MemoryError,
-        is_dyncall: bool,
-    },
-    #[error("failed to initialise frame pointer for dynamic {}", if *.is_dyncall { "call" } else { "execution" })]
-    DynFrameInit {
-        #[source]
-        err: MemoryError,
-        is_dyncall: bool,
-    },
     #[error(
         "dynamic {} into callee with root {hex} failed",
         if *.is_dyncall { "call" } else { "execution" },
@@ -116,19 +104,6 @@ pub enum OperationError {
         callee: Word,
         #[source]
         err: Box<OperationError>,
-        is_dyncall: bool,
-    },
-    #[error("procedure with root {hex} not found in any MAST forest", hex = .callee.to_hex())]
-    DynForestNotFound { callee: Word, is_dyncall: bool },
-    #[error("MAST forest for procedure {hex} is malformed (no matching root)", hex = .callee.to_hex())]
-    DynMalformedForest { callee: Word, is_dyncall: bool },
-    #[error(
-        "invalid stack depth on return from dynamic {}: expected {MIN_STACK_DEPTH}, got {actual}",
-        if *.is_dyncall { "call" } else { "execution" }
-    )]
-    DynInvalidStackDepthOnReturn {
-        callee: Word,
-        actual: usize,
         is_dyncall: bool,
     },
     #[error(
@@ -156,8 +131,8 @@ pub enum OperationError {
         err_code: Felt,
         err_msg: Option<Arc<str>>,
     },
-    #[error("failed to execute the program for internal reason: {reason}")]
-    FailedToExecuteProgram { reason: &'static str },
+    #[error("stack overflow: exceeded maximum stack depth")]
+    StackOverflow,
     #[error("division by zero at clock cycle {clk}")]
     DivideByZero { clk: RowIndex },
     #[error(
@@ -233,80 +208,8 @@ pub enum OperationError {
 }
 
 impl OperationError {
-    pub fn advice_error(err: AdviceError, clk: RowIndex) -> Self {
-        Self::AdviceError { clk, err }
-    }
-
-    pub fn divide_by_zero(clk: RowIndex) -> Self {
-        Self::DivideByZero { clk }
-    }
-
-    pub fn dynamic_node_not_found(digest: Word) -> Self {
-        Self::DynamicNodeNotFound { digest }
-    }
-
-    pub fn dyn_callee_read(err: MemoryError, is_dyncall: bool) -> Self {
-        Self::DynCalleeRead { err, is_dyncall }
-    }
-
-    pub fn dyn_frame_init(err: MemoryError, is_dyncall: bool) -> Self {
-        Self::DynFrameInit { err, is_dyncall }
-    }
-
     pub fn dyn_return(callee: Word, err: OperationError, is_dyncall: bool) -> Self {
         Self::DynReturn { callee, err: Box::new(err), is_dyncall }
-    }
-
-    pub fn dyn_forest_not_found(callee: Word, is_dyncall: bool) -> Self {
-        Self::DynForestNotFound { callee, is_dyncall }
-    }
-
-    pub fn dyn_malformed_forest(callee: Word, is_dyncall: bool) -> Self {
-        Self::DynMalformedForest { callee, is_dyncall }
-    }
-
-    pub fn dyn_invalid_stack_depth_on_return(
-        callee: Word,
-        actual: usize,
-        is_dyncall: bool,
-    ) -> Self {
-        Self::DynInvalidStackDepthOnReturn { callee, actual, is_dyncall }
-    }
-
-    pub fn event_error(
-        error: EventError,
-        event_id: EventId,
-        event_name: Option<EventName>,
-    ) -> Self {
-        Self::EventError { event_id, event_name, error }
-    }
-
-    pub fn failed_assertion(clk: RowIndex, err_code: Felt, err_msg: Option<Arc<str>>) -> Self {
-        Self::FailedAssertion { clk, err_code, err_msg }
-    }
-
-    pub fn cycle_limit_exceeded(max_cycles: u32) -> Self {
-        Self::CycleLimitExceeded { max_cycles }
-    }
-
-    pub fn failed_to_execute_program(reason: &'static str) -> Self {
-        Self::FailedToExecuteProgram { reason }
-    }
-
-    pub fn invalid_stack_depth_on_return(depth: usize) -> Self {
-        Self::InvalidStackDepthOnReturn { depth }
-    }
-
-    pub fn log_argument_zero(clk: RowIndex) -> Self {
-        Self::LogArgumentZero { clk }
-    }
-
-    pub fn malformed_mast_forest_in_host(root_digest: Word) -> Self {
-        Self::MalformedMastForestInHost { root_digest }
-    }
-
-    pub fn malformed_signature_key(key_type: &'static str) -> Self {
-        Self::MalformedSignatureKey { key_type }
     }
 
     pub fn merkle_path_verification_failed(
@@ -317,46 +220,6 @@ impl OperationError {
         err_msg: Option<Arc<str>>,
     ) -> Self {
         Self::MerklePathVerificationFailed { value, index, root, err_code, err_msg }
-    }
-
-    pub fn no_mast_forest_with_procedure(root_digest: Word) -> Self {
-        Self::NoMastForestWithProcedure { root_digest }
-    }
-
-    pub fn not_binary_value_if(value: Felt) -> Self {
-        Self::NotBinaryValueIf { value }
-    }
-
-    pub fn not_binary_value_op(value: Felt) -> Self {
-        Self::NotBinaryValueOp { value }
-    }
-
-    pub fn not_binary_value_loop(value: Felt) -> Self {
-        Self::NotBinaryValueLoop { value }
-    }
-
-    pub fn not_u32_value(value: Felt, err_code: Felt) -> Self {
-        Self::NotU32Values { values: vec![value], err_code }
-    }
-
-    pub fn not_u32_values(values: Vec<Felt>, err_code: Felt) -> Self {
-        Self::NotU32Values { values, err_code }
-    }
-
-    pub fn input_not_u32(clk: RowIndex, input: u64) -> Self {
-        Self::NotU32StackValue { clk, input }
-    }
-
-    pub fn smt_node_not_found(node: Word) -> Self {
-        Self::SmtNodeNotFound { node }
-    }
-
-    pub fn smt_node_preimage_not_valid(node: Word, preimage_len: usize) -> Self {
-        Self::SmtNodePreImageNotValid { node, preimage_len }
-    }
-
-    pub fn syscall_target_not_in_kernel(proc_root: Word) -> Self {
-        Self::SyscallTargetNotInKernel { proc_root }
     }
 }
 

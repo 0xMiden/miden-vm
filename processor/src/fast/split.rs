@@ -49,7 +49,7 @@ impl FastProcessor {
             let err_ctx = err_ctx!(current_forest, split_node, host);
             return Err(ExecutionError::from_operation(
                 &err_ctx,
-                OperationError::not_binary_value_if(condition),
+                OperationError::NotBinaryValueIf { value: condition },
             ));
         };
 

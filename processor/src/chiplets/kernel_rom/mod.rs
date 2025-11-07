@@ -78,7 +78,7 @@ impl KernelRom {
         let access_info = self
             .access_map
             .get_mut(&proc_hash_bytes)
-            .ok_or_else(|| OperationError::syscall_target_not_in_kernel(proc_hash))?;
+            .ok_or_else(|| OperationError::SyscallTargetNotInKernel { proc_root: proc_hash })?;
 
         self.trace_len += 1;
         access_info.num_accesses += 1;

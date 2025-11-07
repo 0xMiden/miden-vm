@@ -46,7 +46,7 @@ pub(super) fn op_mul<P: Processor>(
 pub(super) fn op_inv<P: Processor>(processor: &mut P) -> Result<(), OperationError> {
     let top = processor.stack().get_mut(0);
     if (*top) == ZERO {
-        return Err(OperationError::divide_by_zero(processor.system().clk()));
+        return Err(OperationError::DivideByZero { clk: processor.system().clk() });
     }
     *top = top.inv();
     Ok(())
@@ -118,7 +118,7 @@ pub(super) fn op_not<P: Processor>(processor: &mut P) -> Result<(), OperationErr
     } else if *top == ONE {
         *top = ZERO;
     } else {
-        return Err(OperationError::not_binary_value_op(*top));
+        return Err(OperationError::NotBinaryValueOp { value: *top });
     }
     Ok(())
 }

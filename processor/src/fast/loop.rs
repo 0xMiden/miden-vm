@@ -72,7 +72,7 @@ impl FastProcessor {
             let err_ctx = err_ctx!(current_forest, loop_node, host);
             return Err(ExecutionError::from_operation(
                 &err_ctx,
-                OperationError::not_binary_value_loop(condition),
+                OperationError::NotBinaryValueLoop { value: condition },
             ));
         }
         Ok(())
@@ -127,7 +127,7 @@ impl FastProcessor {
             let err_ctx = err_ctx!(current_forest, loop_node, host);
             return Err(ExecutionError::from_operation(
                 &err_ctx,
-                OperationError::not_binary_value_loop(condition),
+                OperationError::NotBinaryValueLoop { value: condition },
             ));
         }
         Ok(())

@@ -213,11 +213,11 @@ impl FastProcessor {
             let clk = process.clk();
             let mutations = host.on_event(&process).await.map_err(|err| {
                 let event_name = host.resolve_event(event_id).cloned();
-                OperationError::event_error(err, event_id, event_name)
+                OperationError::EventError { event_id, event_name, error: err }
             })?;
             self.advice
                 .apply_mutations(mutations)
-                .map_err(|err| OperationError::advice_error(err, clk))?;
+                .map_err(|err| OperationError::AdviceError { clk, err })?;
             Ok(())
         }
     }

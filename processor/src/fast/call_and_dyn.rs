@@ -55,7 +55,7 @@ impl FastProcessor {
             if !program.kernel().contains_proc(callee_hash) {
                 return Err(ExecutionError::from_operation(
                     &err_ctx,
-                    OperationError::syscall_target_not_in_kernel(callee_hash),
+                    OperationError::SyscallTargetNotInKernel { proc_root: callee_hash },
                 ));
             }
             tracer.record_kernel_proc_access(callee_hash);
@@ -71,7 +71,7 @@ impl FastProcessor {
 
             // Initialize the frame pointer in memory for the new context.
             self.memory.write_element(new_ctx, FMP_ADDR, FMP_INIT_VALUE).map_err(|err| {
-                ExecutionError::from_operation(&err_ctx, OperationError::dyn_frame_init(err, false))
+                ExecutionError::from_operation(&err_ctx, OperationError::MemoryError(err))
             })?;
             tracer.record_memory_write_element(FMP_INIT_VALUE, FMP_ADDR, new_ctx, self.clk);
         }
@@ -148,10 +148,7 @@ impl FastProcessor {
         let callee_hash = {
             let mem_addr = self.stack_get(0);
             let word = self.memory.read_word(self.ctx, mem_addr, self.clk).map_err(|err| {
-                ExecutionError::from_operation(
-                    &err_ctx,
-                    OperationError::dyn_callee_read(err, dyn_node.is_dyncall()),
-                )
+                ExecutionError::from_operation(&err_ctx, OperationError::MemoryError(err))
             })?;
             tracer.record_memory_read_word(word, mem_addr, self.ctx, self.clk);
 
@@ -175,7 +172,7 @@ impl FastProcessor {
 
             // Initialize the frame pointer in memory for the new context.
             self.memory.write_element(new_ctx, FMP_ADDR, FMP_INIT_VALUE).map_err(|err| {
-                ExecutionError::from_operation(&err_ctx, OperationError::dyn_frame_init(err, true))
+                ExecutionError::from_operation(&err_ctx, OperationError::MemoryError(err))
             })?;
             tracer.record_memory_write_element(FMP_INIT_VALUE, FMP_ADDR, new_ctx, self.clk);
         };
@@ -303,7 +300,7 @@ impl FastProcessor {
         if self.stack_size() > MIN_STACK_DEPTH {
             return Err(ExecutionError::from_operation(
                 err_ctx,
-                OperationError::invalid_stack_depth_on_return(self.stack_size()),
+                OperationError::InvalidStackDepthOnReturn { depth: self.stack_size() },
             ));
         }
 
