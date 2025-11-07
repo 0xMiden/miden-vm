@@ -1,3 +1,5 @@
+#![allow(clippy::result_large_err)]
+
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::cmp::min;
 
@@ -594,7 +596,7 @@ impl FastProcessor {
         // this call will be cheap.
         self.advice
             .extend_map(mast_forest.advice_map())
-            .map_err(|err| OperationError::AdviceError(err))?;
+            .map_err(OperationError::AdviceError)?;
 
         Ok((root_id, mast_forest))
     }

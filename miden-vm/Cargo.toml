@@ -54,7 +54,6 @@ default = ["std"]
 executable = ["dep:hex", "dep:clap", "dep:rustyline", "dep:tracing-subscriber", "internal", "serde", "std"]
 metal = ["miden-prover/metal", "std"]
 serde = ["dep:serde", "dep:serde_json"]
-integration-tests = []
 std = [
     "hex?/std",
     "miden-assembly/std",

@@ -1,3 +1,6 @@
+// Allow unused assignments - required by thiserror and Diagnostic derive macros
+#![allow(unused_assignments)]
+
 use miden_utils_diagnostics::{Diagnostic, miette};
 
 use crate::ContextId;

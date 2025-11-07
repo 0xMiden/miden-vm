@@ -1,5 +1,7 @@
 // Allow unused assignments - required by miette::Diagnostic derive macro
 #![allow(unused_assignments)]
+// Allow large error types - detailed error information is more important than size optimization
+#![allow(clippy::result_large_err)]
 
 //! # Error Architecture
 //!

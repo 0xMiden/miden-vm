@@ -104,7 +104,7 @@ impl Process {
             })?;
             self.advice
                 .apply_mutations(mutations)
-                .map_err(|err| OperationError::AdviceError(err))?;
+                .map_err(OperationError::AdviceError)?;
             Ok(())
         }
     }

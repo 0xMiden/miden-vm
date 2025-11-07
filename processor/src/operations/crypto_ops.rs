@@ -87,7 +87,7 @@ impl Process {
         let path = self
             .advice
             .get_merkle_path(root, depth, index)
-            .map_err(|err| OperationError::AdviceError(err))?;
+            .map_err(OperationError::AdviceError)?;
 
         // use hasher to compute the Merkle root of the path
         let (addr, computed_root) = self.chiplets.hasher.build_merkle_root(node, &path, index);
@@ -161,7 +161,7 @@ impl Process {
         let (path, _) = self
             .advice
             .update_merkle_node(old_root, depth, index, new_node)
-            .map_err(|err| OperationError::AdviceError(err))?;
+            .map_err(OperationError::AdviceError)?;
 
         assert_eq!(path.len(), depth.as_int() as usize);
 

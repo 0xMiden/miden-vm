@@ -1,3 +1,5 @@
+#![allow(clippy::result_large_err)]
+
 use alloc::sync::Arc;
 
 use miden_core::{
@@ -216,7 +218,7 @@ impl FastProcessor {
             })?;
             self.advice
                 .apply_mutations(mutations)
-                .map_err(|err| OperationError::AdviceError(err))?;
+                .map_err(OperationError::AdviceError)?;
             Ok(())
         }
     }

@@ -69,7 +69,7 @@ fn insert_mem_values_into_adv_map(process: &mut ProcessState) -> Result<(), Oper
     process
         .advice_provider_mut()
         .insert_into_map(key, values)
-        .map_err(|err| OperationError::AdviceError(err))
+        .map_err(OperationError::AdviceError)
 }
 
 /// Reads two words from the operand stack and inserts them into the advice map under the key
@@ -102,7 +102,7 @@ fn insert_hdword_into_adv_map(
     process
         .advice_provider_mut()
         .insert_into_map(key, values)
-        .map_err(|err| OperationError::AdviceError(err))
+        .map_err(OperationError::AdviceError)
 }
 
 /// Reads four words from the operand stack and inserts them into the advice map under the key
@@ -138,7 +138,7 @@ fn insert_hqword_into_adv_map(process: &mut ProcessState) -> Result<(), Operatio
     process
         .advice_provider_mut()
         .insert_into_map(key, values)
-        .map_err(|err| OperationError::AdviceError(err))
+        .map_err(OperationError::AdviceError)
 }
 
 /// Reads three words from the operand stack and inserts the top two words into the advice map
@@ -184,7 +184,7 @@ fn insert_hperm_into_adv_map(process: &mut ProcessState) -> Result<(), Operation
     process
         .advice_provider_mut()
         .insert_into_map(key, values)
-        .map_err(|err| OperationError::AdviceError(err))
+        .map_err(OperationError::AdviceError)
 }
 
 /// Creates a new Merkle tree in the advice provider by combining Merkle trees with the
@@ -210,7 +210,7 @@ fn merge_merkle_nodes(process: &mut ProcessState) -> Result<(), OperationError> 
     process
         .advice_provider_mut()
         .merge_roots(lhs, rhs)
-        .map_err(|err| OperationError::AdviceError(err))?;
+        .map_err(OperationError::AdviceError)?;
 
     Ok(())
 }
@@ -241,7 +241,7 @@ fn copy_merkle_node_to_adv_stack(process: &mut ProcessState) -> Result<(), Opera
     let node = process
         .advice_provider()
         .get_tree_node(root, depth, index)
-        .map_err(|err| OperationError::AdviceError(err))?;
+        .map_err(OperationError::AdviceError)?;
 
     process.advice_provider_mut().push_stack_word(&node);
 
@@ -272,7 +272,7 @@ fn copy_map_value_to_adv_stack(
     process
         .advice_provider_mut()
         .push_from_map(key, include_len)
-        .map_err(|err| OperationError::AdviceError(err))?;
+        .map_err(OperationError::AdviceError)?;
 
     Ok(())
 }
