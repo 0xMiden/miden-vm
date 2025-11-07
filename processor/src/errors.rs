@@ -113,7 +113,12 @@ pub enum ExecutionError {
 impl ExecutionError {
     pub fn from_operation(err_ctx: &impl ErrorContext, err: OperationError, clk: RowIndex) -> Self {
         let (label, source_file) = err_ctx.label_and_source_file();
-        Self::OperationError { clk, label, source_file, err: Box::new(err) }
+        Self::OperationError {
+            clk,
+            label,
+            source_file,
+            err: Box::new(err),
+        }
     }
 
     pub fn from_operation_with_label(
@@ -122,7 +127,12 @@ impl ExecutionError {
         err: OperationError,
         clk: RowIndex,
     ) -> Self {
-        Self::OperationError { clk, label, source_file, err: Box::new(err) }
+        Self::OperationError {
+            clk,
+            label,
+            source_file,
+            err: Box::new(err),
+        }
     }
 }
 
