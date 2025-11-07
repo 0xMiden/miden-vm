@@ -50,9 +50,7 @@ impl Process {
         match op {
             // ----- system operations ------------------------------------------------------------
             Operation::Noop => self.stack.copy_state(0),
-            Operation::Assert(err_code) => {
-                self.op_assert(err_code, program, host)?
-            },
+            Operation::Assert(err_code) => self.op_assert(err_code, program, host)?,
 
             Operation::SDepth => self.op_sdepth()?,
             Operation::Caller => self.op_caller()?,
@@ -105,9 +103,7 @@ impl Process {
 
             Operation::U32and => self.op_u32and()?,
             Operation::U32xor => self.op_u32xor()?,
-            Operation::U32assert2(err_code) => {
-                self.op_u32assert2(err_code)?
-            },
+            Operation::U32assert2(err_code) => self.op_u32assert2(err_code)?,
 
             // ----- stack manipulation -----------------------------------------------------------
             Operation::Pad => self.op_pad()?,
@@ -168,9 +164,7 @@ impl Process {
 
             // ----- cryptographic operations -----------------------------------------------------
             Operation::HPerm => self.op_hperm()?,
-            Operation::MpVerify(err_code) => {
-                self.op_mpverify(err_code, program)?
-            },
+            Operation::MpVerify(err_code) => self.op_mpverify(err_code, program)?,
             Operation::MrUpdate => self.op_mrupdate()?,
             Operation::FriE2F4 => self.op_fri_ext2fold4()?,
             Operation::HornerBase => self.op_horner_eval_base()?,

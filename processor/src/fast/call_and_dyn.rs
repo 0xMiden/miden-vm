@@ -149,7 +149,10 @@ impl FastProcessor {
         let callee_hash = {
             let mem_addr = self.stack_get(0);
             let word = self.memory.read_word(self.ctx, mem_addr, self.clk).map_err(|err| {
-                ExecutionError::from_operation(&err_ctx, OperationError::dyn_callee_read(err, dyn_node.is_dyncall()))
+                ExecutionError::from_operation(
+                    &err_ctx,
+                    OperationError::dyn_callee_read(err, dyn_node.is_dyncall()),
+                )
             })?;
             tracer.record_memory_read_word(word, mem_addr, self.ctx, self.clk);
 
@@ -303,7 +306,11 @@ impl FastProcessor {
         if self.stack_size() > MIN_STACK_DEPTH {
             return Err(ExecutionError::from_operation(
                 err_ctx,
-                OperationError::dyn_invalid_stack_depth_on_return(callee_hash, self.stack_size(), is_dyncall),
+                OperationError::dyn_invalid_stack_depth_on_return(
+                    callee_hash,
+                    self.stack_size(),
+                    is_dyncall,
+                ),
             ));
         }
 

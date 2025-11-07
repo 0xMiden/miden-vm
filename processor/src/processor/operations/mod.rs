@@ -1,9 +1,7 @@
 use miden_air::trace::decoder::NUM_USER_OP_HELPERS;
 use miden_core::{Felt, Operation, mast::MastForest};
 
-use crate::{
-    BaseHost, OperationError, fast::Tracer, processor::Processor,
-};
+use crate::{BaseHost, OperationError, fast::Tracer, processor::Processor};
 
 mod crypto_ops;
 mod field_ops;
@@ -36,7 +34,9 @@ pub(super) fn execute_sync_op(
         Operation::Noop => {
             // do nothing
         },
-        Operation::Assert(err_code) => sys_ops::op_assert(processor, *err_code, host, current_forest, tracer)?,
+        Operation::Assert(err_code) => {
+            sys_ops::op_assert(processor, *err_code, host, current_forest, tracer)?
+        },
         Operation::SDepth => sys_ops::op_sdepth(processor, tracer)?,
         Operation::Caller => sys_ops::op_caller(processor)?,
         Operation::Clk => sys_ops::op_clk(processor, tracer)?,
@@ -86,8 +86,7 @@ pub(super) fn execute_sync_op(
 
         // ----- u32 operations ---------------------------------------------------------------
         Operation::U32split => {
-            let u32split_helpers =
-                u32_ops::op_u32split(processor, tracer)?;
+            let u32split_helpers = u32_ops::op_u32split(processor, tracer)?;
             user_op_helpers = Some(u32split_helpers);
         },
         Operation::U32add => {
@@ -99,8 +98,7 @@ pub(super) fn execute_sync_op(
             user_op_helpers = Some(u32add3_helpers);
         },
         Operation::U32sub => {
-            let u32sub_helpers =
-                u32_ops::op_u32sub(processor, op_idx_in_block, tracer)?;
+            let u32sub_helpers = u32_ops::op_u32sub(processor, op_idx_in_block, tracer)?;
             user_op_helpers = Some(u32sub_helpers);
         },
         Operation::U32mul => {
@@ -118,8 +116,7 @@ pub(super) fn execute_sync_op(
         Operation::U32and => u32_ops::op_u32and(processor, tracer)?,
         Operation::U32xor => u32_ops::op_u32xor(processor, tracer)?,
         Operation::U32assert2(err_code) => {
-            let u32assert2_helpers =
-                u32_ops::op_u32assert2(processor, *err_code, tracer)?;
+            let u32assert2_helpers = u32_ops::op_u32assert2(processor, *err_code, tracer)?;
             user_op_helpers = Some(u32assert2_helpers);
         },
 
@@ -161,9 +158,7 @@ pub(super) fn execute_sync_op(
         Operation::CSwapW => stack_ops::op_cswapw(processor, tracer)?,
 
         // ----- input / output ---------------------------------------------------------------
-        Operation::Push(value) => {
-            stack_ops::op_push(processor, *value, tracer)?
-        },
+        Operation::Push(value) => stack_ops::op_push(processor, *value, tracer)?,
         Operation::AdvPop => io_ops::op_advpop(processor, tracer)?,
         Operation::AdvPopW => io_ops::op_advpopw(processor, tracer)?,
         Operation::MLoadW => io_ops::op_mloadw(processor, tracer)?,
@@ -179,27 +174,24 @@ pub(super) fn execute_sync_op(
             user_op_helpers = Some(hperm_helpers);
         },
         Operation::MpVerify(err_code) => {
-            let mpverify_helpers = crypto_ops::op_mpverify(processor, *err_code, current_forest, tracer)?;
+            let mpverify_helpers =
+                crypto_ops::op_mpverify(processor, *err_code, current_forest, tracer)?;
             user_op_helpers = Some(mpverify_helpers);
         },
         Operation::MrUpdate => {
-            let mrupdate_helpers =
-                crypto_ops::op_mrupdate(processor, tracer)?;
+            let mrupdate_helpers = crypto_ops::op_mrupdate(processor, tracer)?;
             user_op_helpers = Some(mrupdate_helpers);
         },
         Operation::FriE2F4 => {
-            let frie2f4_helpers =
-                fri_ops::op_fri_ext2fold4(processor, tracer)?;
+            let frie2f4_helpers = fri_ops::op_fri_ext2fold4(processor, tracer)?;
             user_op_helpers = Some(frie2f4_helpers);
         },
         Operation::HornerBase => {
-            let horner_base_helpers =
-                crypto_ops::op_horner_eval_base(processor, tracer)?;
+            let horner_base_helpers = crypto_ops::op_horner_eval_base(processor, tracer)?;
             user_op_helpers = Some(horner_base_helpers);
         },
         Operation::HornerExt => {
-            let horner_ext_helpers =
-                crypto_ops::op_horner_eval_ext(processor, tracer)?;
+            let horner_ext_helpers = crypto_ops::op_horner_eval_ext(processor, tracer)?;
             user_op_helpers = Some(horner_ext_helpers);
         },
         Operation::EvalCircuit => {

@@ -169,10 +169,10 @@ impl FastProcessor {
             {
                 let err_ctx = err_ctx!(program, basic_block, host, op_idx_in_block);
                 match op {
-                    Operation::Emit => {
-                        self.op_emit(host).await
-                            .map_err(|err| ExecutionError::from_operation(&err_ctx, err))?
-                    },
+                    Operation::Emit => self
+                        .op_emit(host)
+                        .await
+                        .map_err(|err| ExecutionError::from_operation(&err_ctx, err))?,
                     _ => {
                         // if the operation is not an Emit, we execute it normally
                         self.execute_sync_op(op, op_idx_in_block, program, host, tracer)
@@ -202,10 +202,7 @@ impl FastProcessor {
     }
 
     #[inline(always)]
-    async fn op_emit(
-        &mut self,
-        host: &mut impl AsyncHost,
-    ) -> Result<(), OperationError> {
+    async fn op_emit(&mut self, host: &mut impl AsyncHost) -> Result<(), OperationError> {
         let mut process = self.state();
         let event_id = EventId::from_felt(process.get_stack_item(0));
 
@@ -218,9 +215,9 @@ impl FastProcessor {
                 let event_name = host.resolve_event(event_id).cloned();
                 OperationError::event_error(err, event_id, event_name)
             })?;
-            self.advice.apply_mutations(mutations).map_err(|err| {
-                OperationError::advice_error(err, clk)
-            })?;
+            self.advice
+                .apply_mutations(mutations)
+                .map_err(|err| OperationError::advice_error(err, clk))?;
             Ok(())
         }
     }

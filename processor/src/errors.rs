@@ -117,15 +117,9 @@ pub enum OperationError {
         is_dyncall: bool,
     },
     #[error("procedure with root {hex} not found in any MAST forest", hex = .callee.to_hex())]
-    DynForestNotFound {
-        callee: Word,
-        is_dyncall: bool,
-    },
+    DynForestNotFound { callee: Word, is_dyncall: bool },
     #[error("MAST forest for procedure {hex} is malformed (no matching root)", hex = .callee.to_hex())]
-    DynMalformedForest {
-        callee: Word,
-        is_dyncall: bool,
-    },
+    DynMalformedForest { callee: Word, is_dyncall: bool },
     #[error(
         "invalid stack depth on return from dynamic {}: expected {MIN_STACK_DEPTH}, got {actual}",
         if *.is_dyncall { "call" } else { "execution" }
@@ -272,7 +266,11 @@ impl OperationError {
         Self::DynMalformedForest { callee, is_dyncall }
     }
 
-    pub fn dyn_invalid_stack_depth_on_return(callee: Word, actual: usize, is_dyncall: bool) -> Self {
+    pub fn dyn_invalid_stack_depth_on_return(
+        callee: Word,
+        actual: usize,
+        is_dyncall: bool,
+    ) -> Self {
         Self::DynInvalidStackDepthOnReturn { callee, actual, is_dyncall }
     }
 

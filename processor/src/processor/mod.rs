@@ -8,8 +8,8 @@ use miden_core::{
 };
 
 use crate::{
-    AdviceError, BaseHost, ContextId, ExecutionError, MemoryError, OperationError,
-    ProcessState, fast::Tracer, processor::operations::execute_sync_op,
+    AdviceError, BaseHost, ContextId, ExecutionError, MemoryError, OperationError, ProcessState,
+    fast::Tracer, processor::operations::execute_sync_op,
 };
 
 mod operations;
@@ -56,10 +56,7 @@ pub trait Processor: Sized {
     fn set_precompile_transcript_state(&mut self, state: PrecompileTranscriptState);
 
     /// Checks that the evaluation of an arithmetic circuit is equal to zero.
-    fn op_eval_circuit(
-        &mut self,
-        tracer: &mut impl Tracer,
-    ) -> Result<(), OperationError>;
+    fn op_eval_circuit(&mut self, tracer: &mut impl Tracer) -> Result<(), OperationError>;
 
     // -------------------------------------------------------------------------------------------
     // PROVIDED METHODS

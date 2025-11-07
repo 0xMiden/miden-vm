@@ -88,7 +88,8 @@ impl Process {
         // start decoding the JOIN block; this appends a row with JOIN operation to the decoder
         // trace. when JOIN operation is executed, the rest of the VM state does not change
         self.decoder.start_join(child1_hash, child2_hash, addr);
-        self.execute_op(Operation::Noop, program, host).map_err(|err| ExecutionError::from_operation(&(), err))
+        self.execute_op(Operation::Noop, program, host)
+            .map_err(|err| ExecutionError::from_operation(&(), err))
     }
 
     ///  Ends decoding of a JOIN node.
@@ -102,7 +103,8 @@ impl Process {
         // executed the rest of the VM state does not change
         self.decoder.end_control_block(node.digest());
 
-        self.execute_op(Operation::Noop, program, host).map_err(|err| ExecutionError::from_operation(&(), err))
+        self.execute_op(Operation::Noop, program, host)
+            .map_err(|err| ExecutionError::from_operation(&(), err))
     }
 
     // SPLIT NODE
@@ -157,7 +159,8 @@ impl Process {
         // executed the rest of the VM state does not change
         self.decoder.end_control_block(block.digest());
 
-        self.execute_op(Operation::Noop, program, host).map_err(|err| ExecutionError::from_operation(&(), err))
+        self.execute_op(Operation::Noop, program, host)
+            .map_err(|err| ExecutionError::from_operation(&(), err))
     }
 
     // LOOP NODE
@@ -223,9 +226,11 @@ impl Process {
             #[cfg(debug_assertions)]
             debug_assert_eq!(ZERO, self.stack.peek());
 
-            self.execute_op(Operation::Drop, program, host).map_err(|err| ExecutionError::from_operation(&(), err))
+            self.execute_op(Operation::Drop, program, host)
+                .map_err(|err| ExecutionError::from_operation(&(), err))
         } else {
-            self.execute_op(Operation::Noop, program, host).map_err(|err| ExecutionError::from_operation(&(), err))
+            self.execute_op(Operation::Noop, program, host)
+                .map_err(|err| ExecutionError::from_operation(&(), err))
         }
     }
 
@@ -285,12 +290,16 @@ impl Process {
                 .memory
                 .write(self.system.get_next_ctx_id(), FMP_ADDR, self.system.clk(), FMP_INIT_VALUE)
                 .map_err(|err| {
-                    ExecutionError::from_operation(err_ctx, OperationError::dyn_frame_init(err, false))
+                    ExecutionError::from_operation(
+                        err_ctx,
+                        OperationError::dyn_frame_init(err, false),
+                    )
                 })?;
         }
 
         // the rest of the VM state does not change
-        self.execute_op(Operation::Noop, program, host).map_err(|err| ExecutionError::from_operation(&(), err))
+        self.execute_op(Operation::Noop, program, host)
+            .map_err(|err| ExecutionError::from_operation(&(), err))
     }
 
     /// Ends decoding of a CALL or a SYSCALL block.
@@ -320,7 +329,8 @@ impl Process {
         self.stack.restore_context(ctx_info.parent_stack_depth as usize);
 
         // the rest of the VM state does not change
-        self.execute_op(Operation::Noop, program, host).map_err(|err| ExecutionError::from_operation(&(), err))
+        self.execute_op(Operation::Noop, program, host)
+            .map_err(|err| ExecutionError::from_operation(&(), err))
     }
 
     // DYN NODE
@@ -448,7 +458,8 @@ impl Process {
         // executed the rest of the VM state does not change
         self.decoder.end_control_block(dyn_node.digest());
 
-        self.execute_op(Operation::Noop, program, host).map_err(|err| ExecutionError::from_operation(&(), err))
+        self.execute_op(Operation::Noop, program, host)
+            .map_err(|err| ExecutionError::from_operation(&(), err))
     }
 
     /// Ends decoding of a DYNCALL node.
@@ -482,7 +493,8 @@ impl Process {
         self.system.restore_context(ctx_info.parent_ctx, ctx_info.parent_fn_hash);
         self.stack.restore_context(ctx_info.parent_stack_depth as usize);
 
-        self.execute_op(Operation::Noop, program, host).map_err(|err| ExecutionError::from_operation(&(), err))
+        self.execute_op(Operation::Noop, program, host)
+            .map_err(|err| ExecutionError::from_operation(&(), err))
     }
 
     // BASIC BLOCK NODE
@@ -512,7 +524,8 @@ impl Process {
         let num_op_groups = basic_block.num_op_groups();
         self.decoder
             .start_basic_block(&op_batches[0], Felt::new(num_op_groups as u64), addr);
-        self.execute_op(Operation::Noop, program, host).map_err(|err| ExecutionError::from_operation(&(), err))
+        self.execute_op(Operation::Noop, program, host)
+            .map_err(|err| ExecutionError::from_operation(&(), err))
     }
 
     /// Ends decoding a BASIC BLOCK node.
@@ -526,7 +539,8 @@ impl Process {
         // executed the rest of the VM state does not change
         self.decoder.end_basic_block(block.digest());
 
-        self.execute_op(Operation::Noop, program, host).map_err(|err| ExecutionError::from_operation(&(), err))
+        self.execute_op(Operation::Noop, program, host)
+            .map_err(|err| ExecutionError::from_operation(&(), err))
     }
 
     /// Continues decoding a BASIC BLOCK by absorbing the next batch of operations.

@@ -88,10 +88,7 @@ impl Processor for FastProcessor {
     /// Note that we do not record any memory reads in this operation (through a
     /// [crate::fast::Tracer]), because the parallel trace generation skips the circuit
     /// evaluation completely.
-    fn op_eval_circuit(
-        &mut self,
-        tracer: &mut impl Tracer,
-    ) -> Result<(), OperationError> {
+    fn op_eval_circuit(&mut self, tracer: &mut impl Tracer) -> Result<(), OperationError> {
         let num_eval = self.stack_get(2);
         let num_read = self.stack_get(1);
         let ptr = self.stack_get(0);

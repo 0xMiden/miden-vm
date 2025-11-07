@@ -28,8 +28,8 @@ use rayon::prelude::*;
 use winter_prover::{crypto::RandomCoin, math::batch_inversion};
 
 use crate::{
-    ChipletsLengths, ColMatrix, ContextId, ExecutionError, ExecutionTrace,
-    ProcessState, TraceLenSummary,
+    ChipletsLengths, ColMatrix, ContextId, ExecutionError, ExecutionTrace, ProcessState,
+    TraceLenSummary,
     chiplets::{Chiplets, CircuitEvaluation, MAX_NUM_ACE_WIRES, PTR_OFFSET_ELEM, PTR_OFFSET_WORD},
     continuation_stack::Continuation,
     crypto::RpoRandomCoin,
@@ -1763,10 +1763,7 @@ impl Processor for CoreTraceFragmentGenerator {
         self.context.state.system.pc_transcript_state = state;
     }
 
-    fn op_eval_circuit(
-        &mut self,
-        tracer: &mut impl Tracer,
-    ) -> Result<(), OperationError> {
+    fn op_eval_circuit(&mut self, tracer: &mut impl Tracer) -> Result<(), OperationError> {
         let num_eval = self.stack().get(2);
         let num_read = self.stack().get(1);
         let ptr = self.stack().get(0);
