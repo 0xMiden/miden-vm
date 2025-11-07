@@ -249,7 +249,7 @@ mod tests {
         super::{Felt, Operation},
         Process, split_u32_into_u16,
     };
-    use crate::{DefaultHost, ExecutionError, OperationError, StackInputs, ZERO};
+    use crate::{DefaultHost, OperationError, StackInputs, ZERO};
 
     // CASTING OPERATIONS
     // --------------------------------------------------------------------------------------------
@@ -315,11 +315,7 @@ mod tests {
             process.execute_op(Operation::U32assert2(Felt::from(123u32)), program, &mut host);
         assert!(result.is_err());
 
-        if let Err(ExecutionError::OperationError {
-            err: OperationError::NotU32Values { values, err_code },
-            ..
-        }) = result
-        {
+        if let Err(OperationError::NotU32Values { values, err_code }) = result {
             assert_eq!(err_code, Felt::from(123u32));
             assert_eq!(values.len(), 2);
             // Values are collected in stack order: stack[0] (top) first, then stack[1]
@@ -343,11 +339,7 @@ mod tests {
             process.execute_op(Operation::U32assert2(Felt::from(456u32)), program, &mut host);
         assert!(result.is_err());
 
-        if let Err(ExecutionError::OperationError {
-            err: OperationError::NotU32Values { values, err_code },
-            ..
-        }) = result
-        {
+        if let Err(OperationError::NotU32Values { values, err_code }) = result {
             assert_eq!(err_code, Felt::from(456u32));
             assert_eq!(values.len(), 1);
             assert_eq!(values[0].as_int(), 4294967297u64);
@@ -369,11 +361,7 @@ mod tests {
             process.execute_op(Operation::U32assert2(Felt::from(789u32)), program, &mut host);
         assert!(result.is_err());
 
-        if let Err(ExecutionError::OperationError {
-            err: OperationError::NotU32Values { values, err_code },
-            ..
-        }) = result
-        {
+        if let Err(OperationError::NotU32Values { values, err_code }) = result {
             assert_eq!(err_code, Felt::from(789u32));
             assert_eq!(values.len(), 1);
             assert_eq!(values[0].as_int(), 4294967296u64);
