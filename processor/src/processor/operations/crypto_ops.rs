@@ -51,8 +51,6 @@ pub(super) fn op_mpverify<P: Processor>(
     program: &MastForest,
     tracer: &mut impl Tracer,
 ) -> Result<[Felt; NUM_USER_OP_HELPERS], OperationError> {
-    let clk = processor.system().clk();
-
     // read node value, depth, index and root value from the stack
     let node = processor.stack().get_word(0);
     let depth = processor.stack().get(4);
@@ -83,8 +81,6 @@ pub(super) fn op_mrupdate<P: Processor>(
     processor: &mut P,
     tracer: &mut impl Tracer,
 ) -> Result<[Felt; NUM_USER_OP_HELPERS], OperationError> {
-    let clk = processor.system().clk();
-
     // read old node value, depth, index, tree root and new node values from the stack
     let old_value = processor.stack().get_word(0);
     let depth = processor.stack().get(4);

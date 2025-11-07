@@ -1,7 +1,8 @@
+use miden_utils_diagnostics::{Diagnostic, miette};
 
 use crate::ContextId;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, Diagnostic)]
 pub enum MemoryError {
     #[error("memory address cannot exceed 2^32 but was {addr}")]
     AddressOutOfBounds { addr: u64 },
@@ -14,7 +15,6 @@ pub enum MemoryError {
     )]
     InvalidMemoryRange { start_addr: u64, end_addr: u64 },
     #[error("word memory access at address {addr} in context {ctx} is unaligned")]
-    // NOTE: Diagnostic help "ensure that the memory address accessed is aligned to a word boundary
-    // (it is a multiple of 4)" will be restored when implementing OperationDiagnostic trait (deferred).
+    #[diagnostic(help("ensure that the memory address accessed is aligned to a word boundary (it is a multiple of 4)"))]
     UnalignedWordAccess { addr: u32, ctx: ContextId },
 }

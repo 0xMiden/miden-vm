@@ -135,11 +135,11 @@ impl AsRef<dyn Diagnostic> for ExecutionError {
 // OPERATION ERROR
 // ================================================================================================
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, Diagnostic)]
 pub enum OperationError {
-    // NOTE: AdviceError has Diagnostic attributes with help text - restore at end of refactor
-    #[error("advice provider error")]
-    AdviceError(#[source] AdviceError),
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    AdviceError(AdviceError),
     #[error(
         "failed to execute the dynamic code block provided by the stack with root {hex}; the block could not be found",
         hex = .digest.to_hex()
@@ -184,8 +184,7 @@ pub enum OperationError {
     #[error("attempted to calculate integer logarithm with zero argument")]
     LogArgumentZero,
     #[error("malformed signature key: {key_type}")]
-    // NOTE: Diagnostic help "the secret key associated with the provided public key is malformed"
-    // will be restored when implementing OperationDiagnostic trait (deferred).
+    #[diagnostic(help("the secret key associated with the provided public key is malformed"))]
     MalformedSignatureKey { key_type: &'static str },
     #[error(
         "MAST forest in host indexed by procedure root {root_digest} doesn't contain that root"
@@ -214,9 +213,7 @@ pub enum OperationError {
     #[error("operation expected a binary value, but got {value}")]
     NotBinaryValueOp { value: Felt },
     #[error("loop condition must be a binary value, but got {value}")]
-    // NOTE: Diagnostic help "this could happen either when first entering the loop, or any
-    // subsequent iteration" will be restored when implementing OperationDiagnostic trait
-    // (deferred).
+    #[diagnostic(help("this could happen either when first entering the loop, or any subsequent iteration"))]
     NotBinaryValueLoop { value: Felt },
     #[error("operation expected u32 values, but got values: {values:?} (error code: {err_code})")]
     NotU32Values { values: Vec<Felt>, err_code: Felt },
@@ -235,16 +232,15 @@ pub enum OperationError {
     )]
     SyscallTargetNotInKernel { proc_root: Word },
     #[error("failed to execute arithmetic circuit evaluation operation: {0}")]
-    // NOTE: Diagnostic label "this call failed" will be restored when implementing
-    // OperationDiagnostic trait (deferred).
+    // NOTE: Diagnostic label "this call failed" could be added as a custom label in the future.
     AceChipError(#[source] AceError),
     #[error("FRI domain segment value cannot exceed 3, but was {0}")]
     InvalidFriDomainSegment(u64),
     #[error("degree-respecting projection is inconsistent: expected {0} but was {1}")]
     InvalidFriLayerFolding(QuadFelt, QuadFelt),
-    // NOTE: MemoryError needs Diagnostic attributes with help text - restore at end of refactor
-    #[error("memory error")]
-    MemoryError(#[source] MemoryError),
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    MemoryError(MemoryError),
 }
 
 impl OperationError {
@@ -262,7 +258,7 @@ impl OperationError {
 // ACE ERROR
 // ================================================================================================
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, Diagnostic)]
 pub enum AceError {
     #[error("num of variables should be word aligned and non-zero but was {0}")]
     NumVarIsNotWordAlignedOrIsEmpty(u64),

@@ -40,10 +40,10 @@ impl Memory {
         &self,
         ctx: ContextId,
         addr: Felt,
-        clk: RowIndex,
+        _clk: RowIndex,
     ) -> Result<Word, MemoryError> {
         let addr = clean_addr(addr)?;
-        let word = self.read_word_impl(ctx, addr, Some(clk))?.unwrap_or(EMPTY_WORD);
+        let word = self.read_word_impl(ctx, addr)?.unwrap_or(EMPTY_WORD);
 
         Ok(word)
     }
@@ -87,10 +87,9 @@ impl Memory {
         &mut self,
         ctx: ContextId,
         addr: Felt,
-        clk: RowIndex,
         word: Word,
     ) -> Result<(), MemoryError> {
-        let addr = enforce_word_aligned_addr(ctx, clean_addr(addr)?, Some(clk))?;
+        let addr = enforce_word_aligned_addr(ctx, clean_addr(addr)?)?;
         self.memory.insert((ctx, addr), word);
 
         Ok(())
@@ -140,9 +139,8 @@ impl Memory {
         &self,
         ctx: ContextId,
         addr: u32,
-        clk: Option<RowIndex>,
     ) -> Result<Option<Word>, MemoryError> {
-        let addr = enforce_word_aligned_addr(ctx, addr, clk)?;
+        let addr = enforce_word_aligned_addr(ctx, addr)?;
         let word = self.memory.get(&(ctx, addr)).copied();
 
         Ok(word)
@@ -182,7 +180,6 @@ fn split_addr(addr: u32) -> (u32, u32) {
 fn enforce_word_aligned_addr(
     ctx: ContextId,
     addr: u32,
-    clk: Option<RowIndex>,
 ) -> Result<u32, MemoryError> {
     if !addr.is_multiple_of(WORD_SIZE as u32) {
         return Err(MemoryError::UnalignedWordAccess { addr, ctx });
@@ -218,9 +215,9 @@ impl MemoryInterface for Memory {
         &mut self,
         ctx: ContextId,
         addr: Felt,
-        clk: RowIndex,
+        _clk: RowIndex,
         word: Word,
     ) -> Result<(), MemoryError> {
-        self.write_word(ctx, addr, clk, word)
+        self.write_word(ctx, addr, word)
     }
 }

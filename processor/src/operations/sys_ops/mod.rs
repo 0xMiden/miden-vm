@@ -98,7 +98,6 @@ impl Process {
         if let Some(system_event) = SystemEvent::from_event_id(event_id) {
             handle_system_event(&mut process, system_event)
         } else {
-            let clk = process.clk();
             let mutations = host.on_event(&process).map_err(|err| {
                 let event_name = host.resolve_event(event_id).cloned();
                 OperationError::EventError { event_id, event_name, error: err }
