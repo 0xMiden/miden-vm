@@ -208,7 +208,9 @@ impl DecoratorIndexMapping {
 
         // Maintain node CSR: node_indptr[i] = start index for node i
         if self.node_indptr_for_op_idx.is_empty() {
-            let _ = self.node_indptr_for_op_idx.push(op_start);
+            self.node_indptr_for_op_idx
+                .push(op_start)
+                .map_err(|_| DecoratorIndexError::OperationIndex { node, operation: op_start })?;
         } else {
             // Overwrite the previous "end" slot to become this node's start
             let last = MastNodeId::new_unchecked((self.node_indptr_for_op_idx.len() - 1) as u32);
@@ -218,7 +220,9 @@ impl DecoratorIndexMapping {
         if decorators_info.is_empty() {
             // Empty node: no operations at all, just set the end pointer equal to start
             // This creates a node with an empty operations range
-            let _ = self.node_indptr_for_op_idx.push(op_start);
+            self.node_indptr_for_op_idx
+                .push(op_start)
+                .map_err(|_| DecoratorIndexError::OperationIndex { node, operation: op_start })?;
         } else {
             // Build op->decorator CSR for this node
             let max_op_idx = decorators_info.last().unwrap().0; // input is sorted by op index
@@ -236,7 +240,9 @@ impl DecoratorIndexMapping {
 
             // Push end pointer for this node (index of last op pointer)
             let end_ops = self.op_indptr_for_dec_ids.len() - 1;
-            let _ = self.node_indptr_for_op_idx.push(end_ops);
+            self.node_indptr_for_op_idx
+                .push(end_ops)
+                .map_err(|_| DecoratorIndexError::OperationIndex { node, operation: end_ops })?;
         }
 
         Ok(())
