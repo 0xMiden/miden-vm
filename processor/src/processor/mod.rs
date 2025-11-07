@@ -58,9 +58,8 @@ pub trait Processor: Sized {
     /// Checks that the evaluation of an arithmetic circuit is equal to zero.
     fn op_eval_circuit(
         &mut self,
-        err_ctx: &impl ErrorContext,
         tracer: &mut impl Tracer,
-    ) -> Result<(), ExecutionError>;
+    ) -> Result<(), OperationError>;
 
     // -------------------------------------------------------------------------------------------
     // PROVIDED METHODS

@@ -9,7 +9,7 @@ use miden_core::{
 };
 
 use crate::{
-    AdviceProvider, ContextId, ErrorContext, ExecutionError, OperationError, ProcessState,
+    AdviceProvider, ContextId, ExecutionError, OperationError, ProcessState,
     chiplets::{CircuitEvaluation, MAX_NUM_ACE_WIRES, PTR_OFFSET_ELEM, PTR_OFFSET_WORD},
     errors::AceError,
     fast::{FastProcessor, STACK_BUFFER_SIZE, Tracer, memory::Memory},
@@ -90,21 +90,15 @@ impl Processor for FastProcessor {
     /// evaluation completely.
     fn op_eval_circuit(
         &mut self,
-        err_ctx: &impl ErrorContext,
         tracer: &mut impl Tracer,
-    ) -> Result<(), ExecutionError> {
+    ) -> Result<(), OperationError> {
         let num_eval = self.stack_get(2);
         let num_read = self.stack_get(1);
         let ptr = self.stack_get(0);
         let ctx = self.ctx;
         let circuit_evaluation =
             eval_circuit_fast_(ctx, ptr, self.clk, num_read, num_eval, &mut self.memory, tracer)
-                .map_err(|err| {
-                    ExecutionError::from_operation(
-                        err_ctx,
-                        OperationError::failed_arithmetic_evaluation(err),
-                    )
-                })?;
+                .map_err(OperationError::failed_arithmetic_evaluation)?;
         self.ace.add_circuit_evaluation(self.clk, circuit_evaluation.clone());
         tracer.record_circuit_evaluation(self.clk, circuit_evaluation);
 

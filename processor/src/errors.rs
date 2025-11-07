@@ -81,6 +81,7 @@ impl AsRef<dyn Diagnostic> for ExecutionError {
 
 #[derive(Debug, thiserror::Error)]
 pub enum OperationError {
+    // NOTE: AdviceError has Diagnostic attributes with help text - restore at end of refactor
     #[error("advice provider error at clock cycle {clk}")]
     AdviceError {
         clk: RowIndex,
@@ -233,6 +234,7 @@ pub enum OperationError {
     InvalidFriDomainSegment(u64),
     #[error("degree-respecting projection is inconsistent: expected {0} but was {1}")]
     InvalidFriLayerFolding(QuadFelt, QuadFelt),
+    // NOTE: MemoryError needs Diagnostic attributes with help text - restore at end of refactor
     #[error(transparent)]
     MemoryError { err: MemoryError },
 }

@@ -28,7 +28,7 @@ use rayon::prelude::*;
 use winter_prover::{crypto::RandomCoin, math::batch_inversion};
 
 use crate::{
-    ChipletsLengths, ColMatrix, ContextId, ErrorContext, ExecutionError, ExecutionTrace,
+    ChipletsLengths, ColMatrix, ContextId, ExecutionError, ExecutionTrace,
     ProcessState, TraceLenSummary,
     chiplets::{Chiplets, CircuitEvaluation, MAX_NUM_ACE_WIRES, PTR_OFFSET_ELEM, PTR_OFFSET_WORD},
     continuation_stack::Continuation,
@@ -1766,9 +1766,8 @@ impl Processor for CoreTraceFragmentGenerator {
 
     fn op_eval_circuit(
         &mut self,
-        err_ctx: &impl ErrorContext,
         tracer: &mut impl Tracer,
-    ) -> Result<(), ExecutionError> {
+    ) -> Result<(), OperationError> {
         let num_eval = self.stack().get(2);
         let num_read = self.stack().get(1);
         let ptr = self.stack().get(0);
@@ -1776,12 +1775,7 @@ impl Processor for CoreTraceFragmentGenerator {
 
         let _circuit_evaluation =
             eval_circuit_fast_(ctx, ptr, self.system().clk(), num_read, num_eval, self, tracer)
-                .map_err(|err| {
-                    ExecutionError::from_operation(
-                        err_ctx,
-                        OperationError::failed_arithmetic_evaluation(err),
-                    )
-                })?;
+                .map_err(OperationError::failed_arithmetic_evaluation)?;
 
         Ok(())
     }
