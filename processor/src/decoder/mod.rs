@@ -90,7 +90,7 @@ impl Process {
         // trace. when JOIN operation is executed, the rest of the VM state does not change
         self.decoder.start_join(child1_hash, child2_hash, addr);
         self.execute_op(Operation::Noop, program, host)
-            .map_err(|err| err_ctx.wrap_op_err(err, self.system.clk()))
+            .map_err(|err| err_ctx.wrap_op_err(err))
     }
 
     ///  Ends decoding of a JOIN node.
@@ -106,7 +106,7 @@ impl Process {
         self.decoder.end_control_block(node.digest());
 
         self.execute_op(Operation::Noop, program, host)
-            .map_err(|err| err_ctx.wrap_op_err(err, self.system.clk()))
+            .map_err(|err| err_ctx.wrap_op_err(err))
     }
 
     // SPLIT NODE
@@ -147,7 +147,7 @@ impl Process {
         // trace. we also pop the value off the top of the stack and return it.
         self.decoder.start_split(child1_hash, child2_hash, addr);
         self.execute_op(Operation::Drop, program, host)
-            .map_err(|err| err_ctx.wrap_op_err(err, self.system.clk()))?;
+            .map_err(|err| err_ctx.wrap_op_err(err))?;
         Ok(condition)
     }
 
@@ -164,7 +164,7 @@ impl Process {
         self.decoder.end_control_block(block.digest());
 
         self.execute_op(Operation::Noop, program, host)
-            .map_err(|err| err_ctx.wrap_op_err(err, self.system.clk()))
+            .map_err(|err| err_ctx.wrap_op_err(err))
     }
 
     // LOOP NODE
@@ -206,7 +206,7 @@ impl Process {
         // followed by an END operation.
         self.decoder.start_loop(body_hash, addr, condition);
         self.execute_op(Operation::Drop, program, host)
-            .map_err(|err| err_ctx.wrap_op_err(err, self.system.clk()))?;
+            .map_err(|err| err_ctx.wrap_op_err(err))?;
         Ok(condition)
     }
 
@@ -233,10 +233,10 @@ impl Process {
             debug_assert_eq!(ZERO, self.stack.peek());
 
             self.execute_op(Operation::Drop, program, host)
-                .map_err(|err| err_ctx.wrap_op_err(err, self.system.clk()))
+                .map_err(|err| err_ctx.wrap_op_err(err))
         } else {
             self.execute_op(Operation::Noop, program, host)
-                .map_err(|err| err_ctx.wrap_op_err(err, self.system.clk()))
+                .map_err(|err| err_ctx.wrap_op_err(err))
         }
     }
 
@@ -298,14 +298,13 @@ impl Process {
                 .map_err(|err| {
                     err_ctx.wrap_op_err(
                         OperationError::MemoryError(err),
-                        self.system.clk(),
                     )
                 })?;
         }
 
         // the rest of the VM state does not change
         self.execute_op(Operation::Noop, program, host)
-            .map_err(|err| err_ctx.wrap_op_err(err, self.system.clk()))
+            .map_err(|err| err_ctx.wrap_op_err(err))
     }
 
     /// Ends decoding of a CALL or a SYSCALL block.
@@ -321,7 +320,6 @@ impl Process {
         if stack_depth > MIN_STACK_DEPTH {
             return Err(err_ctx.wrap_op_err(
                 OperationError::InvalidStackDepthOnReturn { depth: stack_depth },
-                self.system.clk(),
             ));
         }
 
@@ -336,7 +334,7 @@ impl Process {
 
         // the rest of the VM state does not change
         self.execute_op(Operation::Noop, program, host)
-            .map_err(|err| err_ctx.wrap_op_err(err, self.system.clk()))
+            .map_err(|err| err_ctx.wrap_op_err(err))
     }
 
     // DYN NODE
@@ -365,7 +363,6 @@ impl Process {
             .map_err(|err| {
                 err_ctx.wrap_op_err(
                     OperationError::MemoryError(err),
-                    self.system.clk(),
                 )
             })?;
 
@@ -382,7 +379,7 @@ impl Process {
 
         // Pop the memory address off the stack.
         self.execute_op(Operation::Drop, program, host)
-            .map_err(|err| err_ctx.wrap_op_err(err, self.system.clk()))?;
+            .map_err(|err| err_ctx.wrap_op_err(err))?;
 
         Ok(callee_hash)
     }
@@ -409,7 +406,6 @@ impl Process {
             .map_err(|err| {
                 err_ctx.wrap_op_err(
                     OperationError::MemoryError(err),
-                    self.system.clk(),
                 )
             })?;
 
@@ -420,7 +416,6 @@ impl Process {
             .map_err(|err| {
                 err_ctx.wrap_op_err(
                     OperationError::MemoryError(err),
-                    self.system.clk(),
                 )
             })?;
 
@@ -457,7 +452,7 @@ impl Process {
         self.decoder.start_dyncall(addr, callee_hash, ctx_info);
 
         self.advance_clock()
-            .map_err(|err| err_ctx.wrap_op_err(err, self.system.clk()))?;
+            .map_err(|err| err_ctx.wrap_op_err(err))?;
 
         Ok(callee_hash)
     }
@@ -475,7 +470,7 @@ impl Process {
         self.decoder.end_control_block(dyn_node.digest());
 
         self.execute_op(Operation::Noop, program, host)
-            .map_err(|err| err_ctx.wrap_op_err(err, self.system.clk()))
+            .map_err(|err| err_ctx.wrap_op_err(err))
     }
 
     /// Ends decoding of a DYNCALL node.
@@ -491,7 +486,6 @@ impl Process {
         if stack_depth > MIN_STACK_DEPTH {
             return Err(err_ctx.wrap_op_err(
                 OperationError::InvalidStackDepthOnReturn { depth: stack_depth },
-                self.system.clk(),
             ));
         }
 
@@ -506,7 +500,7 @@ impl Process {
         self.stack.restore_context(ctx_info.parent_stack_depth as usize);
 
         self.execute_op(Operation::Noop, program, host)
-            .map_err(|err| err_ctx.wrap_op_err(err, self.system.clk()))
+            .map_err(|err| err_ctx.wrap_op_err(err))
     }
 
     // BASIC BLOCK NODE
@@ -538,7 +532,7 @@ impl Process {
         self.decoder
             .start_basic_block(&op_batches[0], Felt::new(num_op_groups as u64), addr);
         self.execute_op(Operation::Noop, program, host)
-            .map_err(|err| err_ctx.wrap_op_err(err, self.system.clk()))
+            .map_err(|err| err_ctx.wrap_op_err(err))
     }
 
     /// Ends decoding a BASIC BLOCK node.
@@ -554,7 +548,7 @@ impl Process {
         self.decoder.end_basic_block(block.digest());
 
         self.execute_op(Operation::Noop, program, host)
-            .map_err(|err| err_ctx.wrap_op_err(err, self.system.clk()))
+            .map_err(|err| err_ctx.wrap_op_err(err))
     }
 
     /// Continues decoding a BASIC BLOCK by absorbing the next batch of operations.

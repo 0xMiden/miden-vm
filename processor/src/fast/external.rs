@@ -1,11 +1,10 @@
-use alloc::sync::Arc;
+use alloc::{boxed::Box, sync::Arc};
 
 use miden_core::mast::{ExternalNode, MastForest, MastNodeExt, MastNodeId};
 
 use crate::{
     AsyncHost, ExecutionError, OperationError,
     continuation_stack::ContinuationStack,
-    errors::ErrorContext,
     fast::{FastProcessor, Tracer},
 };
 
@@ -57,7 +56,12 @@ impl FastProcessor {
                 OperationError::NoMastForestWithProcedure { root_digest }
             })
             .await
-            .map_err(|err| ().wrap_op_err(err, self.clk))?;
+            .map_err(|err| ExecutionError::OperationError {
+                clk: self.clk,
+                label: miden_debug_types::SourceSpan::UNKNOWN,
+                source_file: None,
+                err: Box::new(err),
+            })?;
 
         // if the node that we got by looking up an external reference is also an External
         // node, we are about to enter into an infinite loop - so, return an error

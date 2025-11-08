@@ -44,9 +44,9 @@
 //! }
 //!
 //! // 2. Boundary (adds context)
-//! let err_ctx = err_ctx!(program, node, op_idx);
+//! let err_ctx = err_ctx!(program, node, host, op_idx, self.clk);
 //! self.execute_op(op)
-//!     .map_err(|err| err_ctx.wrap_op_err(err, self.clk))?;
+//!     .map_err(|err| err_ctx.wrap_op_err(err))?;
 //! ```
 //!
 //! ## Error Context Feature Flag
@@ -289,17 +289,17 @@ pub enum AceError {
 /// is enabled.
 ///
 /// Usage:
-/// - `err_ctx!(mast_forest, node, source_manager)` - creates basic error context
-/// - `err_ctx!(mast_forest, node, source_manager, op_idx)` - creates error context with operation
+/// - `err_ctx!(mast_forest, node, source_manager, clk)` - creates basic error context
+/// - `err_ctx!(mast_forest, node, source_manager, op_idx, clk)` - creates error context with operation
 ///   index
 #[cfg(not(feature = "no_err_ctx"))]
 #[macro_export]
 macro_rules! err_ctx {
-    ($mast_forest:expr, $node:expr, $host:expr) => {
-        $crate::errors::ErrorContextImpl::new($mast_forest, $node, $host)
+    ($mast_forest:expr, $node:expr, $host:expr, $clk:expr) => {
+        $crate::errors::ErrorContextImpl::new($mast_forest, $node, $host, $clk)
     };
-    ($mast_forest:expr, $node:expr, $host:expr, $op_idx:expr) => {
-        $crate::errors::ErrorContextImpl::new_with_op_idx($mast_forest, $node, $host, $op_idx)
+    ($mast_forest:expr, $node:expr, $host:expr, $op_idx:expr, $clk:expr) => {
+        $crate::errors::ErrorContextImpl::new_with_op_idx($mast_forest, $node, $host, $op_idx, $clk)
     };
 }
 
@@ -310,14 +310,14 @@ macro_rules! err_ctx {
 /// is enabled.
 ///
 /// Usage:
-/// - `err_ctx!(mast_forest, node, source_manager)` - creates basic error context
-/// - `err_ctx!(mast_forest, node, source_manager, op_idx)` - creates error context with operation
+/// - `err_ctx!(mast_forest, node, source_manager, clk)` - creates basic error context
+/// - `err_ctx!(mast_forest, node, source_manager, op_idx, clk)` - creates error context with operation
 ///   index
 #[cfg(feature = "no_err_ctx")]
 #[macro_export]
 macro_rules! err_ctx {
-    ($mast_forest:expr, $node:expr, $host:expr) => {{ () }};
-    ($mast_forest:expr, $node:expr, $host:expr, $op_idx:expr) => {{ () }};
+    ($mast_forest:expr, $node:expr, $host:expr, $clk:expr) => {{ () }};
+    ($mast_forest:expr, $node:expr, $host:expr, $op_idx:expr, $clk:expr) => {{ () }};
 }
 
 /// Trait defining the interface for error context providers.
@@ -330,11 +330,14 @@ pub trait ErrorContext {
     /// Note that `SourceSpan::UNKNOWN` will be returned to indicate an empty span.
     fn label_and_source_file(&self) -> (SourceSpan, Option<Arc<SourceFile>>);
 
+    /// Returns the clock cycle associated with this error context.
+    fn clk(&self) -> RowIndex;
+
     /// Wraps an operation error with context information to create an execution error.
-    fn wrap_op_err(&self, err: OperationError, clk: RowIndex) -> ExecutionError {
+    fn wrap_op_err(&self, err: OperationError) -> ExecutionError {
         let (label, source_file) = self.label_and_source_file();
         ExecutionError::OperationError {
-            clk,
+            clk: self.clk(),
             label,
             source_file,
             err: Box::new(err),
@@ -346,6 +349,7 @@ pub trait ErrorContext {
 pub struct ErrorContextImpl {
     label: SourceSpan,
     source_file: Option<Arc<SourceFile>>,
+    clk: RowIndex,
 }
 
 impl ErrorContextImpl {
@@ -354,10 +358,11 @@ impl ErrorContextImpl {
         mast_forest: &MastForest,
         node: &impl MastNodeErrorContext,
         host: &impl BaseHost,
+        clk: RowIndex,
     ) -> Self {
         let (label, source_file) =
             Self::precalc_label_and_source_file(None, mast_forest, node, host);
-        Self { label, source_file }
+        Self { label, source_file, clk }
     }
 
     #[allow(dead_code)]
@@ -366,11 +371,12 @@ impl ErrorContextImpl {
         node: &impl MastNodeErrorContext,
         host: &impl BaseHost,
         op_idx: usize,
+        clk: RowIndex,
     ) -> Self {
         let op_idx = op_idx.into();
         let (label, source_file) =
             Self::precalc_label_and_source_file(op_idx, mast_forest, node, host);
-        Self { label, source_file }
+        Self { label, source_file, clk }
     }
 
     fn precalc_label_and_source_file(
@@ -392,11 +398,19 @@ impl ErrorContext for ErrorContextImpl {
     fn label_and_source_file(&self) -> (SourceSpan, Option<Arc<SourceFile>>) {
         (self.label, self.source_file.clone())
     }
+
+    fn clk(&self) -> RowIndex {
+        self.clk
+    }
 }
 
 impl ErrorContext for () {
     fn label_and_source_file(&self) -> (SourceSpan, Option<Arc<SourceFile>>) {
         (SourceSpan::UNKNOWN, None)
+    }
+
+    fn clk(&self) -> RowIndex {
+        RowIndex::from(0)
     }
 }
 

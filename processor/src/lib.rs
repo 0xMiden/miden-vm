@@ -6,7 +6,7 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-use alloc::{sync::Arc, vec::Vec};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::fmt::{Display, LowerHex};
 
 use miden_air::trace::{
@@ -350,14 +350,14 @@ impl Process {
             MastNode::Split(node) => self.execute_split_node(node, program, host)?,
             MastNode::Loop(node) => self.execute_loop_node(node, program, host)?,
             MastNode::Call(node) => {
-                let err_ctx = err_ctx!(program, node, host);
+                let err_ctx = err_ctx!(program, node, host, self.system.clk());
                 add_error_ctx_to_external_error(
                     self.execute_call_node(node, program, host),
                     err_ctx,
                 )?
             },
             MastNode::Dyn(node) => {
-                let err_ctx = err_ctx!(program, node, host);
+                let err_ctx = err_ctx!(program, node, host, self.system.clk());
                 add_error_ctx_to_external_error(
                     self.execute_dyn_node(node, program, host),
                     err_ctx,
@@ -385,7 +385,7 @@ impl Process {
         program: &MastForest,
         host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
-        let err_ctx = err_ctx!(program, node, host);
+        let err_ctx = err_ctx!(program, node, host, self.system.clk());
         self.start_join_node(node, program, host, &err_ctx)?;
 
         // execute first and then second child of the join block
@@ -403,11 +403,10 @@ impl Process {
         program: &MastForest,
         host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
-        let err_ctx = err_ctx!(program, node, host);
-
-        // HACK: capture clock before start_split_node increments it via Drop operation
-        // This ensures slow/fast path report the same clock cycle for initial condition errors
+        // Capture clock before start_split_node increments it via Drop operation.
+        // This ensures slow/fast path report the same clock cycle for initial condition errors.
         let clk_before_start = self.system.clk();
+        let err_ctx = err_ctx!(program, node, host, clk_before_start);
 
         // start the SPLIT block; this also pops the stack and returns the popped element
         let condition = self.start_split_node(node, program, host, &err_ctx)?;
@@ -420,7 +419,6 @@ impl Process {
         } else {
             return Err(err_ctx.wrap_op_err(
                 OperationError::NotBinaryValueIf { value: condition },
-                clk_before_start,
             ));
         }
 
@@ -435,11 +433,10 @@ impl Process {
         program: &MastForest,
         host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
-        let err_ctx = err_ctx!(program, node, host);
-
-        // HACK: capture clock before start_loop_node increments it via Drop operation
-        // This ensures slow/fast path report the same clock cycle for initial condition errors
+        // Capture clock before start_loop_node increments it via Drop operation.
+        // This ensures slow/fast path report the same clock cycle for initial condition errors.
         let clk_before_start = self.system.clk();
+        let err_ctx = err_ctx!(program, node, host, clk_before_start);
 
         // start the LOOP block; this also pops the stack and returns the popped element
         let condition = self.start_loop_node(node, program, host, &err_ctx)?;
@@ -455,15 +452,17 @@ impl Process {
             while self.stack.peek() == ONE {
                 self.decoder.repeat();
                 self.execute_op(Operation::Drop, program, host).map_err(|err| {
-                    err_ctx.wrap_op_err(err, self.system.clk())
+                    err_ctx.wrap_op_err(err)
                 })?;
                 self.execute_mast_node(node.body(), program, host)?;
             }
 
             if self.stack.peek() != ZERO {
-                return Err(err_ctx.wrap_op_err(
+                // Create a new error context with current clock for this error, not the one from
+                // the start of the loop. This ensures consistency with the fast processor.
+                let err_ctx_for_repeat = err_ctx!(program, node, host, self.system.clk());
+                return Err(err_ctx_for_repeat.wrap_op_err(
                     OperationError::NotBinaryValueLoop { value: self.stack.peek() },
-                    self.system.clk(),
                 ));
             }
 
@@ -476,7 +475,6 @@ impl Process {
         } else {
             Err(err_ctx.wrap_op_err(
                 OperationError::NotBinaryValueLoop { value: condition },
-                clk_before_start,
             ))
         }
     }
@@ -494,16 +492,20 @@ impl Process {
             let callee = program.get_node_by_id(call_node.callee()).ok_or_else(|| {
                 ExecutionError::MastNodeNotFoundInForest { node_id: call_node.callee() }
             })?;
-            let err_ctx = err_ctx!(program, call_node, host);
+            let err_ctx = err_ctx!(program, call_node, host, self.system.clk());
             self.chiplets
                 .kernel_rom
                 .access_proc(callee.digest())
-                .map_err(|err| err_ctx.wrap_op_err(err, self.system.clk()))?;
+                .map_err(|err| err_ctx.wrap_op_err(err))?;
         }
-        let err_ctx = err_ctx!(program, call_node, host);
+        let err_ctx = err_ctx!(program, call_node, host, self.system.clk());
 
         self.start_call_node(call_node, program, host, &err_ctx)?;
         self.execute_mast_node(call_node.callee(), program, host)?;
+
+        // Create a new error context for end_call_node with the current clock, since errors
+        // at the end of the call should report the clock at that point, not at the start.
+        let err_ctx = err_ctx!(program, call_node, host, self.system.clk());
         self.end_call_node(call_node, program, host, &err_ctx)
     }
 
@@ -518,12 +520,10 @@ impl Process {
         program: &MastForest,
         host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
-        let err_ctx = err_ctx!(program, node, host);
-
-        // HACK: capture clock before start_dyn_node/start_dyncall_node increment it via Drop
-        // operation This ensures slow/fast path report the same clock cycle for node not
-        // found errors
+        // Capture clock before start_dyn_node/start_dyncall_node increment it via Drop operation.
+        // This ensures slow/fast path report the same clock cycle for node not found errors.
         let clk_before_start = self.system.clk();
+        let err_ctx = err_ctx!(program, node, host, clk_before_start);
 
         let callee_hash = if node.is_dyncall() {
             self.start_dyncall_node(node, &err_ctx)?
@@ -540,7 +540,6 @@ impl Process {
                 let mast_forest = host.get_mast_forest(&callee_hash).ok_or_else(|| {
                     err_ctx.wrap_op_err(
                         OperationError::DynamicNodeNotFound { digest: callee_hash },
-                        clk_before_start,
                     )
                 })?;
 
@@ -549,7 +548,6 @@ impl Process {
                 let root_id = mast_forest.find_procedure_root(callee_hash).ok_or_else(|| {
                     err_ctx.wrap_op_err(
                         OperationError::MalformedMastForestInHost { root_digest: callee_hash },
-                        clk_before_start,
                     )
                 })?;
 
@@ -561,7 +559,6 @@ impl Process {
                 self.advice.extend_map(mast_forest.advice_map()).map_err(|err| {
                     err_ctx.wrap_op_err(
                         OperationError::AdviceError(err),
-                        self.system.clk(),
                     )
                 })?;
 
@@ -569,6 +566,9 @@ impl Process {
             },
         }
 
+        // Create a new error context for end_dyn/dyncall_node with the current clock, since errors
+        // at the end should report the clock at that point, not at the start.
+        let err_ctx = err_ctx!(program, node, host, self.system.clk());
         if node.is_dyncall() {
             self.end_dyncall_node(node, program, host, &err_ctx)
         } else {
@@ -584,7 +584,7 @@ impl Process {
         program: &MastForest,
         host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
-        let err_ctx = err_ctx!(program, basic_block, host);
+        let err_ctx = err_ctx!(program, basic_block, host, self.system.clk());
         self.start_basic_block_node(basic_block, program, host, &err_ctx)?;
 
         let mut op_offset = 0;
@@ -607,7 +607,7 @@ impl Process {
         for op_batch in basic_block.op_batches().iter().skip(1) {
             self.respan(op_batch);
             self.execute_op(Operation::Noop, program, host)
-                .map_err(|err| err_ctx.wrap_op_err(err, self.system.clk()))?;
+                .map_err(|err| err_ctx.wrap_op_err(err))?;
             self.execute_op_batch(
                 basic_block,
                 op_batch,
@@ -671,10 +671,10 @@ impl Process {
             }
 
             // decode and execute the operation
-            let err_ctx = err_ctx!(program, basic_block, host, i + op_offset);
+            let err_ctx = err_ctx!(program, basic_block, host, i + op_offset, self.system.clk());
             self.decoder.execute_user_op(op, op_idx);
             self.execute_op(op, program, host)
-                .map_err(|err| err_ctx.wrap_op_err(err, self.system.clk()))?;
+                .map_err(|err| err_ctx.wrap_op_err(err))?;
 
             // if the operation carries an immediate value, the value is stored at the next group
             // pointer; so, we advance the pointer to the following group
@@ -744,19 +744,23 @@ impl Process {
         let node_digest = external_node.digest();
 
         let mast_forest = host.get_mast_forest(&node_digest).ok_or_else(|| {
-            ().wrap_op_err(
-                OperationError::NoMastForestWithProcedure { root_digest: node_digest },
-                self.system.clk(),
-            )
+            ExecutionError::OperationError {
+                clk: self.system.clk(),
+                label: miden_debug_types::SourceSpan::UNKNOWN,
+                source_file: None,
+                err: Box::new(OperationError::NoMastForestWithProcedure { root_digest: node_digest }),
+            }
         })?;
 
         // We limit the parts of the program that can be called externally to procedure
         // roots, even though MAST doesn't have that restriction.
         let root_id = mast_forest.find_procedure_root(node_digest).ok_or_else(|| {
-            ().wrap_op_err(
-                OperationError::MalformedMastForestInHost { root_digest: node_digest },
-                self.system.clk(),
-            )
+            ExecutionError::OperationError {
+                clk: self.system.clk(),
+                label: miden_debug_types::SourceSpan::UNKNOWN,
+                source_file: None,
+                err: Box::new(OperationError::MalformedMastForestInHost { root_digest: node_digest }),
+            }
         })?;
 
         // if the node that we got by looking up an external reference is also an External
@@ -771,7 +775,12 @@ impl Process {
         // For now, only compiled libraries contain non-empty advice maps, so for most cases,
         // this call will be cheap.
         self.advice.extend_map(mast_forest.advice_map()).map_err(|err| {
-            ().wrap_op_err(OperationError::AdviceError(err), self.system.clk())
+            ExecutionError::OperationError {
+                clk: self.system.clk(),
+                label: miden_debug_types::SourceSpan::UNKNOWN,
+                source_file: None,
+                err: Box::new(OperationError::AdviceError(err)),
+            }
         })?;
 
         Ok((root_id, mast_forest))
@@ -1053,10 +1062,13 @@ pub(crate) fn add_error_ctx_to_external_error(
                         OperationError::MalformedMastForestInHost { root_digest } => *root_digest,
                         _ => unreachable!(),
                     };
-                    Err(err_ctx.wrap_op_err(
-                        OperationError::NoMastForestWithProcedure { root_digest },
-                        clk,
-                    ))
+                    let (label, source_file) = err_ctx.label_and_source_file();
+                    Err(ExecutionError::OperationError {
+                        clk,  // Preserve original clock from the error
+                        label,
+                        source_file,
+                        err: Box::new(OperationError::NoMastForestWithProcedure { root_digest }),
+                    })
                 } else {
                     // If the source span was already populated, just return the error as-is. This
                     // would occur when a call deeper down the call stack was responsible for the

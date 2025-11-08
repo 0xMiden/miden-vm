@@ -25,6 +25,10 @@ impl FastProcessor {
         host: &mut impl AsyncHost,
         tracer: &mut impl Tracer,
     ) -> Result<(), ExecutionError> {
+        // Capture clock at the start for error reporting consistency with slow processor.
+        // This ensures initial condition errors report the same clock cycle in both paths.
+        let clk_at_start = self.clk;
+
         tracer.start_clock_cycle(
             self,
             NodeExecutionState::Start(node_id),
@@ -47,10 +51,9 @@ impl FastProcessor {
         } else if condition == ZERO {
             continuation_stack.push_start_node(split_node.on_false());
         } else {
-            let err_ctx = err_ctx!(current_forest, split_node, host);
+            let err_ctx = err_ctx!(current_forest, split_node, host, clk_at_start);
             return Err(err_ctx.wrap_op_err(
                 OperationError::NotBinaryValueIf { value: condition },
-                self.clk,
             ));
         };
 

@@ -168,16 +168,16 @@ impl FastProcessor {
             // whereas all the other operations are synchronous (resulting in a significant
             // performance improvement).
             {
-                let err_ctx = err_ctx!(program, basic_block, host, op_idx_in_block);
+                let err_ctx = err_ctx!(program, basic_block, host, op_idx_in_block, self.clk);
                 match op {
                     Operation::Emit => self
                         .op_emit(host)
                         .await
-                        .map_err(|err| err_ctx.wrap_op_err(err, self.clk))?,
+                        .map_err(|err| err_ctx.wrap_op_err(err))?,
                     _ => {
                         // if the operation is not an Emit, we execute it normally
                         self.execute_sync_op(op, op_idx_in_block, program, host, tracer).map_err(
-                            |err| err_ctx.wrap_op_err(err, self.clk),
+                            |err| err_ctx.wrap_op_err(err),
                         )?;
                     },
                 }
