@@ -28,7 +28,9 @@ sed_i() {
   if sed --version >/dev/null 2>&1; then
     sed -i "$@"
   else
-    sed -i '' "$@"
+    local expr=$1
+    shift
+    sed -i '' "$expr" "$@"
   fi
 }
 
@@ -143,7 +145,7 @@ done < <(
 if [[ -n "$failed_packages" ]]; then
   echo "MSRV CHECK FAILED"
   echo ""
-  echo "The following packages have incorrect MSRV settings:$failed_packages"
+  echo "The following packages have incorrect MSRV settings: $failed_packages"
   echo ""
   echo "Please fix the rust-version fields in the affected Cargo.toml files as shown above."
   exit 1
