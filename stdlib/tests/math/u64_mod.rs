@@ -596,7 +596,10 @@ fn ensure_div_doesnt_crash() {
     let err = test.execute();
     match err {
         Ok(_) => panic!("expected an error"),
-        Err(ExecutionError::OperationError { ref err, .. }) => {
+        Err(
+            ExecutionError::OperationError { ref err, .. }
+            | ExecutionError::OperationErrorNoContext { ref err, .. },
+        ) => {
             if let OperationError::EventError { error, .. } = err.as_ref() {
                 let u64_div_error =
                     error.downcast_ref::<U64DivError>().expect("Expected U64DivError");
@@ -623,7 +626,10 @@ fn ensure_div_doesnt_crash() {
     let err = test.execute();
     match err {
         Ok(_) => panic!("expected an error"),
-        Err(ExecutionError::OperationError { ref err, .. }) => {
+        Err(
+            ExecutionError::OperationError { ref err, .. }
+            | ExecutionError::OperationErrorNoContext { ref err, .. },
+        ) => {
             if let OperationError::EventError { error, .. } = err.as_ref() {
                 let u64_div_error =
                     error.downcast_ref::<U64DivError>().expect("Expected U64DivError");
@@ -737,7 +743,7 @@ fn checked_and_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { ref err, .. }
+        ExecutionError::OperationError { ref err, .. } | ExecutionError::OperationErrorNoContext { ref err, .. }
         if matches!(err.as_ref(), OperationError::NotU32Values { values, err_code }
             if values.len() == 2 &&
                 values.contains(&Felt::new(a0)) &&
@@ -784,7 +790,7 @@ fn checked_or_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { ref err, .. }
+        ExecutionError::OperationError { ref err, .. } | ExecutionError::OperationErrorNoContext { ref err, .. }
         if matches!(err.as_ref(), OperationError::NotU32Values { values, err_code }
             if values.len() == 2 &&
                 values.contains(&Felt::new(a0)) &&
@@ -831,7 +837,7 @@ fn checked_xor_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { ref err, .. }
+        ExecutionError::OperationError { ref err, .. } | ExecutionError::OperationErrorNoContext { ref err, .. }
         if matches!(err.as_ref(), OperationError::NotU32Values { values, err_code }
             if values.len() == 2 &&
                 values.contains(&Felt::new(a0)) &&

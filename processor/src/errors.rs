@@ -125,9 +125,9 @@ impl AsRef<dyn Diagnostic> for ExecutionError {
 
 #[derive(Debug, thiserror::Error, Diagnostic)]
 pub enum OperationError {
-    #[error(transparent)]
-    #[diagnostic(transparent)]
-    AdviceError(AdviceError),
+    #[error("advice error")]
+    #[diagnostic()]
+    AdviceError(#[source] AdviceError),
     #[error("external node with mast root {0} resolved to an external node")]
     CircularExternalNode(Word),
     #[error("decorator id {0} does not exist in MAST forest")]
@@ -255,9 +255,9 @@ pub enum OperationError {
     InvalidFriDomainSegment(u64),
     #[error("degree-respecting projection is inconsistent: expected {0} but was {1}")]
     InvalidFriLayerFolding(QuadFelt, QuadFelt),
-    #[error(transparent)]
-    #[diagnostic(transparent)]
-    MemoryError(MemoryError),
+    #[error("memory error")]
+    #[diagnostic()]
+    MemoryError(#[source] MemoryError),
 }
 
 // ACE ERROR

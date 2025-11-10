@@ -2,7 +2,9 @@ use alloc::sync::Arc;
 
 use miden_assembly::{Assembler, DefaultSourceManager};
 use miden_core::{ONE, Program, assert_matches};
-use miden_processor::{AdviceError, AdviceInputs, ExecutionOptions, MastForest, OperationError};
+use miden_processor::{
+    AdviceError, AdviceInputs, ExecutionError, ExecutionOptions, MastForest, OperationError,
+};
 use miden_prover::{StackInputs, Word};
 use miden_vm::DefaultHost;
 
@@ -33,7 +35,7 @@ fn advice_map_loaded_before_execution() {
         Err(e) => {
             assert_matches!(
                 e,
-                miden_prover::ExecutionError::OperationError { ref err, .. }
+                ExecutionError::OperationError { ref err, ..  } | ExecutionError::OperationErrorNoContext { ref err, ..  }
                     if matches!(err.as_ref(), OperationError::AdviceError(AdviceError::MapKeyNotFound { .. }))
             );
         },

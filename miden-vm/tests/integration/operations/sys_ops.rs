@@ -27,7 +27,7 @@ fn assert_with_code() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { clk, ref err, .. }
+        ExecutionError::OperationError { clk, ref err, ..  } | ExecutionError::OperationErrorNoContext { clk, ref err, ..  }
         if clk == RowIndex::from(6)
             && matches!(err.as_ref(), OperationError::FailedAssertion { err_code, .. } if *err_code == code)
     );
@@ -41,7 +41,7 @@ fn assert_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { clk, ref err, .. }
+        ExecutionError::OperationError { clk, ref err, ..  } | ExecutionError::OperationErrorNoContext { clk, ref err, ..  }
         if clk == RowIndex::from(6)
             && matches!(err.as_ref(), OperationError::FailedAssertion { err_code, .. } if *err_code == ZERO)
     );
@@ -66,7 +66,7 @@ fn assert_eq_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { clk, ref err, .. }
+        ExecutionError::OperationError { clk, ref err, ..  } | ExecutionError::OperationErrorNoContext { clk, ref err, ..  }
         if clk == RowIndex::from(7)
             && matches!(err.as_ref(), OperationError::FailedAssertion { err_code, err_msg }
                 if *err_code == ZERO && err_msg.is_none())
@@ -76,7 +76,7 @@ fn assert_eq_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { clk, ref err, .. }
+        ExecutionError::OperationError { clk, ref err, ..  } | ExecutionError::OperationErrorNoContext { clk, ref err, ..  }
         if clk == RowIndex::from(7)
             && matches!(err.as_ref(), OperationError::FailedAssertion { err_code, err_msg }
                 if *err_code == ZERO && err_msg.is_none())

@@ -18,7 +18,7 @@ pub fn test_input_out_of_bounds(asm_op: &str) {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { ref err, .. }
+        ExecutionError::OperationError { ref err, ..  } | ExecutionError::OperationErrorNoContext { ref err, ..  }
             if matches!(err.as_ref(), OperationError::NotU32Values { values, err_code } if
             values.len() == 1 &&
             values[0] == Felt::new(U32_BOUND) &&
@@ -40,7 +40,7 @@ pub fn test_inputs_out_of_bounds(asm_op: &str, input_count: usize) {
 
         expect_exec_error_matches!(
             test,
-            ExecutionError::OperationError { ref err, .. }
+            ExecutionError::OperationError { ref err, ..  } | ExecutionError::OperationErrorNoContext { ref err, ..  }
             if matches!(err.as_ref(), OperationError::NotU32Values { values, err_code } if
                 values.len() == 1 &&
                 values[0] == Felt::new(U32_BOUND) &&

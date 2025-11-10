@@ -74,8 +74,8 @@ impl FastProcessor {
             // Execute decorators that should be executed after exiting the node
             self.execute_after_exit_decorators(current_node_id, current_forest, host)?;
         } else {
-            return OperationError::NotBinaryValueLoop(condition)
-                .map_exec_err(&err_ctx!(current_forest, loop_node, host, clk_at_start));
+            let err_ctx = err_ctx!(current_forest, loop_node, host, clk_at_start);
+            return OperationError::NotBinaryValueLoop(condition).map_exec_err(&err_ctx);
         }
         Ok(())
     }
@@ -90,9 +90,6 @@ impl FastProcessor {
         host: &mut impl AsyncHost,
         tracer: &mut impl Tracer,
     ) -> Result<(), ExecutionError> {
-        // Capture clock at the start for error reporting consistency.
-        let clk_at_start = self.clk;
-
         // This happens after loop body execution
         // Check condition again to see if we should continue looping
         let condition = self.stack_get(0);
@@ -129,7 +126,7 @@ impl FastProcessor {
             self.increment_clk(tracer);
             self.execute_after_exit_decorators(current_node_id, current_forest, host)?;
         } else {
-            let err_ctx = err_ctx!(current_forest, loop_node, host, clk_at_start);
+            let err_ctx = err_ctx!(current_forest, loop_node, host, self.clk);
             return OperationError::NotBinaryValueLoop(condition).map_exec_err(&err_ctx);
         }
         Ok(())

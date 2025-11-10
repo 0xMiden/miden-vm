@@ -69,7 +69,7 @@ fn faulty_condition_from_loop() {
     let test = build_test!(source, &[10]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { ref err, .. }
+        ExecutionError::OperationError { ref err, ..  } | ExecutionError::OperationErrorNoContext { ref err, ..  }
             if matches!(err.as_ref(), OperationError::NotBinaryValueLoop(_))
     );
 }
@@ -163,7 +163,7 @@ fn local_fn_call() {
     let build_test = build_test!(source, &[1, 2]);
     expect_exec_error_matches!(
         build_test,
-        ExecutionError::OperationError { ref err, .. }
+        ExecutionError::OperationError { ref err, ..  } | ExecutionError::OperationErrorNoContext { ref err, ..  }
             if matches!(err.as_ref(), OperationError::InvalidStackDepthOnReturn(17))
     );
 

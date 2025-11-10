@@ -103,7 +103,7 @@ fn u32assert_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { ref err, .. }
+        ExecutionError::OperationError { ref err, ..  } | ExecutionError::OperationErrorNoContext { ref err, ..  }
             if matches!(err.as_ref(), OperationError::NotU32Values { values, err_code } if
             values.len() == 1 &&
             values[0] == Felt::new(equal) &&
@@ -115,7 +115,7 @@ fn u32assert_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { ref err, .. }
+        ExecutionError::OperationError { ref err, ..  } | ExecutionError::OperationErrorNoContext { ref err, ..  }
             if matches!(err.as_ref(), OperationError::NotU32Values { values, err_code } if
             values.len() == 1 &&
             values[0] == Felt::new(larger) &&
@@ -150,7 +150,7 @@ fn u32assert2_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { ref err, .. }
+        ExecutionError::OperationError { ref err, ..  } | ExecutionError::OperationErrorNoContext { ref err, ..  }
             if matches!(err.as_ref(), OperationError::NotU32Values { values, err_code } if
             values.len() == 2 &&
             values[0] == Felt::new(value_b) &&
@@ -165,7 +165,7 @@ fn u32assert2_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { ref err, .. }
+        ExecutionError::OperationError { ref err, ..  } | ExecutionError::OperationErrorNoContext { ref err, ..  }
             if matches!(err.as_ref(), OperationError::NotU32Values { values, err_code } if
             values.len() == 1 &&
             values[0] == Felt::new(value_a) &&
@@ -179,7 +179,7 @@ fn u32assert2_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { ref err, .. }
+        ExecutionError::OperationError { ref err, ..  } | ExecutionError::OperationErrorNoContext { ref err, ..  }
             if matches!(err.as_ref(), OperationError::NotU32Values { values, err_code } if
             values.len() == 1 &&
             values[0] == Felt::new(value_b) &&
@@ -211,7 +211,7 @@ fn u32assertw_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { ref err, .. }
+        ExecutionError::OperationError { ref err, ..  } | ExecutionError::OperationErrorNoContext { ref err, ..  }
             if matches!(err.as_ref(), OperationError::NotU32Values { values, err_code } if
             values.len() == 2 &&
             values.iter().all(|v| *v == Felt::new(U32_BOUND)) &&

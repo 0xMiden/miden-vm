@@ -36,6 +36,8 @@ fn adv_push_invalid() {
         test,
         ExecutionError::OperationError {
             clk, ref err, ..
+        } | ExecutionError::OperationErrorNoContext {
+            clk, ref err, ..
         } if clk == RowIndex::from(6)
             && matches!(err.as_ref(), OperationError::AdviceError(AdviceError::StackReadFailed)),
     )
@@ -62,6 +64,8 @@ fn adv_loadw_invalid() {
     expect_exec_error_matches!(
         test,
         ExecutionError::OperationError {
+            clk, ref err, ..
+        } | ExecutionError::OperationErrorNoContext {
             clk, ref err, ..
         } if clk == RowIndex::from(6)
             && matches!(err.as_ref(), OperationError::AdviceError(AdviceError::StackReadFailed)),

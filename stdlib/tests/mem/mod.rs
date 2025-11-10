@@ -290,7 +290,7 @@ fn test_pipe_double_words_preimage_to_memory_invalid_preimage() {
     let execution_result = build_test!(four_words, operand_stack, &advice_stack).execute();
     assert_matches!(
         execution_result,
-        Err(ExecutionError::OperationError { ref err, .. })
+        Err(ExecutionError::OperationError { ref err, ..  } | ExecutionError::OperationErrorNoContext { ref err, ..  })
             if matches!(err.as_ref(), OperationError::FailedAssertion { .. })
     );
 }
@@ -317,7 +317,7 @@ fn test_pipe_double_words_preimage_to_memory_invalid_count() {
     let execution_result = build_test!(three_words, operand_stack, &advice_stack).execute();
     assert_matches!(
         execution_result,
-        Err(ExecutionError::OperationError { ref err, .. })
+        Err(ExecutionError::OperationError { ref err, ..  } | ExecutionError::OperationErrorNoContext { ref err, ..  })
             if matches!(err.as_ref(), OperationError::FailedAssertion { .. })
     );
 }

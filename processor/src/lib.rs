@@ -6,7 +6,7 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use alloc::{sync::Arc, vec::Vec};
 use core::fmt::{Display, LowerHex};
 
 use miden_air::trace::{
@@ -364,7 +364,9 @@ impl Process {
                 )?
             },
             MastNode::External(external_node) => {
-                let (root_id, mast_forest) = self.resolve_external_node(external_node, host)?;
+                let err_ctx = err_ctx!(program, external_node, host, self.system.clk());
+                let (root_id, mast_forest) =
+                    self.resolve_external_node(external_node, host).map_exec_err(&err_ctx)?;
 
                 self.execute_mast_node(root_id, &mast_forest, host)?;
             },
@@ -405,8 +407,7 @@ impl Process {
     ) -> Result<(), ExecutionError> {
         // Capture clock before start_split_node increments it via Drop operation.
         // This ensures slow/fast path report the same clock cycle for initial condition errors.
-        let clk_before_start = self.system.clk();
-        let err_ctx = err_ctx!(program, node, host, clk_before_start);
+        let err_ctx = err_ctx!(program, node, host, self.system.clk());
 
         // start the SPLIT block; this also pops the stack and returns the popped element
         let condition = self.start_split_node(node, program, host, &err_ctx)?;
@@ -433,8 +434,7 @@ impl Process {
     ) -> Result<(), ExecutionError> {
         // Capture clock before start_loop_node increments it via Drop operation.
         // This ensures slow/fast path report the same clock cycle for initial condition errors.
-        let clk_before_start = self.system.clk();
-        let err_ctx = err_ctx!(program, node, host, clk_before_start);
+        let err_ctx = err_ctx!(program, node, host, self.system.clk());
 
         // start the LOOP block; this also pops the stack and returns the popped element
         let condition = self.start_loop_node(node, program, host, &err_ctx)?;
@@ -456,9 +456,9 @@ impl Process {
             if self.stack.peek() != ZERO {
                 // Create a new error context with current clock for this error, not the one from
                 // the start of the loop. This ensures consistency with the fast processor.
-                let err_ctx_for_repeat = err_ctx!(program, node, host, self.system.clk());
+                let err_ctx = err_ctx!(program, node, host, self.system.clk());
                 return OperationError::NotBinaryValueLoop(self.stack.peek())
-                    .map_exec_err(&err_ctx_for_repeat);
+                    .map_exec_err(&err_ctx);
             }
 
             // end the LOOP block and drop the condition from the stack
@@ -613,12 +613,11 @@ impl Process {
         // are executed after BASIC BLOCK is closed to make sure the VM clock cycle advances beyond
         // the last clock cycle of the BASIC BLOCK ops.
         for (_, decorator_id) in decorator_ids {
-            let decorator = program.get_decorator_by_id(decorator_id).ok_or(
-                ExecutionError::OperationErrorNoContext {
-                    clk: self.system.clk(),
-                    err: Box::new(OperationError::DecoratorNotFoundInForest(decorator_id)),
-                },
-            )?;
+            let decorator_err_ctx = err_ctx!(program, basic_block, host, self.system.clk());
+            let decorator = program
+                .get_decorator_by_id(decorator_id)
+                .ok_or(OperationError::DecoratorNotFoundInForest(decorator_id))
+                .map_exec_err(&decorator_err_ctx)?;
             self.execute_decorator(decorator, host)?;
         }
 
@@ -654,12 +653,12 @@ impl Process {
         // execute operations in the batch one by one
         for (i, &op) in batch.ops().iter().enumerate() {
             while let Some((_, decorator_id)) = decorators.next_filtered(i + op_offset) {
-                let decorator = program.get_decorator_by_id(decorator_id).ok_or(
-                    ExecutionError::OperationErrorNoContext {
-                        clk: self.system.clk(),
-                        err: Box::new(OperationError::DecoratorNotFoundInForest(decorator_id)),
-                    },
-                )?;
+                let decorator_err_ctx =
+                    err_ctx!(program, basic_block, host, i + op_offset, self.system.clk());
+                let decorator = program
+                    .get_decorator_by_id(decorator_id)
+                    .ok_or(OperationError::DecoratorNotFoundInForest(decorator_id))
+                    .map_exec_err(&decorator_err_ctx)?;
                 self.execute_decorator(decorator, host)?;
             }
 
@@ -732,36 +731,23 @@ impl Process {
         &mut self,
         external_node: &ExternalNode,
         host: &impl SyncHost,
-    ) -> Result<(MastNodeId, Arc<MastForest>), ExecutionError> {
+    ) -> Result<(MastNodeId, Arc<MastForest>), OperationError> {
         let node_digest = external_node.digest();
 
-        let mast_forest = host.get_mast_forest(&node_digest).ok_or_else(|| {
-            ExecutionError::OperationErrorNoContext {
-                clk: self.system.clk(),
-                err: Box::new(OperationError::NoMastForestWithProcedure {
-                    root_digest: node_digest,
-                }),
-            }
-        })?;
+        let mast_forest = host
+            .get_mast_forest(&node_digest)
+            .ok_or(OperationError::NoMastForestWithProcedure { root_digest: node_digest })?;
 
         // We limit the parts of the program that can be called externally to procedure
         // roots, even though MAST doesn't have that restriction.
-        let root_id = mast_forest.find_procedure_root(node_digest).ok_or_else(|| {
-            ExecutionError::OperationErrorNoContext {
-                clk: self.system.clk(),
-                err: Box::new(OperationError::MalformedMastForestInHost {
-                    root_digest: node_digest,
-                }),
-            }
-        })?;
+        let root_id = mast_forest
+            .find_procedure_root(node_digest)
+            .ok_or(OperationError::MalformedMastForestInHost { root_digest: node_digest })?;
 
         // if the node that we got by looking up an external reference is also an External
         // node, we are about to enter into an infinite loop - so, return an error
         if mast_forest[root_id].is_external() {
-            return Err(ExecutionError::OperationErrorNoContext {
-                clk: self.system.clk(),
-                err: Box::new(OperationError::CircularExternalNode(node_digest)),
-            });
+            return Err(OperationError::CircularExternalNode(node_digest));
         }
 
         // Merge the advice map of this forest into the advice provider.
@@ -769,14 +755,9 @@ impl Process {
         // forest is called.
         // For now, only compiled libraries contain non-empty advice maps, so for most cases,
         // this call will be cheap.
-        self.advice.extend_map(mast_forest.advice_map()).map_err(|err| {
-            ExecutionError::OperationError {
-                clk: self.system.clk(),
-                label: miden_debug_types::SourceSpan::UNKNOWN,
-                source_file: None,
-                err: Box::new(OperationError::AdviceError(err)),
-            }
-        })?;
+        self.advice
+            .extend_map(mast_forest.advice_map())
+            .map_err(OperationError::AdviceError)?;
 
         Ok((root_id, mast_forest))
     }

@@ -205,6 +205,8 @@ fn test_falcon512_probabilistic_product_failure() {
         test,
         ExecutionError::OperationError {
             clk, ref err, ..
+        } | ExecutionError::OperationErrorNoContext {
+            clk, ref err, ..
         }
         if clk == RowIndex::from(3202)
             && matches!(err.as_ref(), OperationError::FailedAssertion { err_code, err_msg }

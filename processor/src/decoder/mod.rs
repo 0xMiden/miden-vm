@@ -313,8 +313,7 @@ impl Process {
         // when a CALL block ends, stack depth must be exactly 16
         let stack_depth = self.stack.depth();
         if stack_depth > MIN_STACK_DEPTH {
-            return OperationError::InvalidStackDepthOnReturn(stack_depth)
-                .map_exec_err(err_ctx);
+            return OperationError::InvalidStackDepthOnReturn(stack_depth).map_exec_err(err_ctx);
         }
 
         // this appends a row with END operation to the decoder trace; the returned value contains
@@ -465,8 +464,7 @@ impl Process {
         // when a DYNCALL block ends, stack depth must be exactly 16
         let stack_depth = self.stack.depth();
         if stack_depth > MIN_STACK_DEPTH {
-            return OperationError::InvalidStackDepthOnReturn(stack_depth)
-                .map_exec_err(err_ctx);
+            return OperationError::InvalidStackDepthOnReturn(stack_depth).map_exec_err(err_ctx);
         }
 
         // this appends a row with END operation to the decoder trace. when the END operation is

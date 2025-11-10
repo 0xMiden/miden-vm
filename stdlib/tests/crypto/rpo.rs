@@ -21,6 +21,8 @@ fn test_invalid_end_addr() {
         test,
         ExecutionError::OperationError {
             clk, ref err, ..
+        } | ExecutionError::OperationErrorNoContext {
+            clk, ref err, ..
         }
         if clk == RowIndex::from(24)
             && matches!(err.as_ref(), OperationError::FailedAssertion { err_code, err_msg }

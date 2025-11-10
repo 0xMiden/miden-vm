@@ -443,7 +443,7 @@ fn u32div_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { clk: value, ref err, ..} if value == RowIndex::from(6) && matches!(err.as_ref(), OperationError::DivideByZero)
+        ExecutionError::OperationError { clk: value, ref err, .. } | ExecutionError::OperationErrorNoContext { clk: value, ref err, .. } if value == RowIndex::from(6) && matches!(err.as_ref(), OperationError::DivideByZero)
     );
 }
 
@@ -485,7 +485,7 @@ fn u32mod_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { clk: value, ref err, ..} if value == RowIndex::from(6) && matches!(err.as_ref(), OperationError::DivideByZero)
+        ExecutionError::OperationError { clk: value, ref err, .. } | ExecutionError::OperationErrorNoContext { clk: value, ref err, .. } if value == RowIndex::from(6) && matches!(err.as_ref(), OperationError::DivideByZero)
     );
 }
 
@@ -532,7 +532,7 @@ fn u32divmod_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { clk: value, ref err, ..} if value == RowIndex::from(6) && matches!(err.as_ref(), OperationError::DivideByZero)
+        ExecutionError::OperationError { clk: value, ref err, .. } | ExecutionError::OperationErrorNoContext { clk: value, ref err, .. } if value == RowIndex::from(6) && matches!(err.as_ref(), OperationError::DivideByZero)
     );
 }
 

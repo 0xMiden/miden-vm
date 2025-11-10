@@ -81,7 +81,7 @@ fn u32and_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { ref err, .. }
+        ExecutionError::OperationError { ref err, ..  } | ExecutionError::OperationErrorNoContext { ref err, ..  }
             if matches!(err.as_ref(), OperationError::NotU32Values { values, err_code } if *values == vec![Felt::new(U32_BOUND)] && *err_code == ZERO)
     );
 
@@ -89,7 +89,7 @@ fn u32and_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { ref err, .. }
+        ExecutionError::OperationError { ref err, ..  } | ExecutionError::OperationErrorNoContext { ref err, ..  }
             if matches!(err.as_ref(), OperationError::NotU32Values { values, err_code } if *values == vec![Felt::new(U32_BOUND)] && *err_code == ZERO)
     );
 }
@@ -166,7 +166,7 @@ fn u32or_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { ref err, .. }
+        ExecutionError::OperationError { ref err, ..  } | ExecutionError::OperationErrorNoContext { ref err, ..  }
             if matches!(err.as_ref(), OperationError::NotU32Values { values, err_code } if *values == vec![Felt::new(U32_BOUND)] && *err_code == ZERO)
     );
 
@@ -174,7 +174,7 @@ fn u32or_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { ref err, .. }
+        ExecutionError::OperationError { ref err, ..  } | ExecutionError::OperationErrorNoContext { ref err, ..  }
             if matches!(err.as_ref(), OperationError::NotU32Values { values, err_code } if *values == vec![Felt::new(U32_BOUND)] && *err_code == ZERO)
     );
 }
@@ -250,7 +250,7 @@ fn u32xor_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { ref err, .. }
+        ExecutionError::OperationError { ref err, ..  } | ExecutionError::OperationErrorNoContext { ref err, ..  }
             if matches!(err.as_ref(), OperationError::NotU32Values { values, err_code } if *values == vec![Felt::new(U32_BOUND)] && *err_code == ZERO)
     );
 
@@ -258,7 +258,7 @@ fn u32xor_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::OperationError { ref err, .. }
+        ExecutionError::OperationError { ref err, ..  } | ExecutionError::OperationErrorNoContext { ref err, ..  }
             if matches!(err.as_ref(), OperationError::NotU32Values { values, err_code } if *values == vec![Felt::new(U32_BOUND)] && *err_code == ZERO)
     );
 }
