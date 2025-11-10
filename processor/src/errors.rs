@@ -58,9 +58,11 @@
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 
 use miden_air::RowIndex;
+#[cfg(not(feature = "no_err_ctx"))]
+use miden_core::mast::MastNodeErrorContext;
 use miden_core::{
     EventId, EventName, Felt, QuadFelt, Word,
-    mast::{DecoratorId, MastForest, MastNodeErrorContext, MastNodeId},
+    mast::{DecoratorId, MastForest, MastNodeId},
     stack::MIN_STACK_DEPTH,
     utils::to_hex,
 };
@@ -290,174 +292,12 @@ pub enum AceError {
 }
 
 // ERROR CONTEXT
-// ===============================================================================================
-
-/// Trait defining the interface for error context providers.
-///
-/// This trait provides a common interface for error context functionality. Implementations
-/// can either eagerly pre-compute source information (like [`ErrorContextImpl`]) or lazily
-/// resolve it on demand (like [`OpErrorContext`]).
-pub trait ErrorContext {
-    /// Returns the label and source file associated with the error context, if available.
-    ///
-    /// Returns `None` when source context is not available (e.g., when executing code
-    /// without debug information).
-    ///
-    /// # Note
-    ///
-    /// This method may be expensive for lazy implementations that defer source resolution.
-    /// It should typically only be called in error paths.
-    fn label_and_source_file(&self) -> Option<(SourceSpan, Option<Arc<SourceFile>>)>;
-
-    /// Resolves source location using the provided host.
-    ///
-    /// This method is provided for lazy error context implementations that need access
-    /// to the host to resolve source locations. The default implementation delegates to
-    /// `label_and_source_file()` for backwards compatibility.
-    ///
-    /// # Arguments
-    ///
-    /// * `host` - The host for resolving source locations
-    ///
-    /// # Note
-    ///
-    /// This method may be expensive and should typically only be called in error paths.
-    fn resolve_source(
-        &self,
-        host: &impl BaseHost,
-    ) -> Option<(SourceSpan, Option<Arc<SourceFile>>)> {
-        let _ = host; // Suppress unused parameter warning for default impl
-        self.label_and_source_file()
-    }
-
-    /// Returns the clock cycle associated with this error context.
-    ///
-    /// This is always cheap to access.
-    fn clk(&self) -> RowIndex;
-
-    /// Wraps an operation error with context information to create an execution error.
-    ///
-    /// Creates `ExecutionError::OperationError` when context is available, or
-    /// `ExecutionError::OperationErrorNoContext` when context is missing.
-    ///
-    /// This method uses `label_and_source_file()` for backwards compatibility.
-    /// For new lazy implementations, use `wrap_op_err_with_host()` instead.
-    fn wrap_op_err(&self, err: OperationError) -> ExecutionError {
-        match self.label_and_source_file() {
-            Some((label, source_file)) => ExecutionError::OperationError {
-                clk: self.clk(),
-                label,
-                source_file,
-                err: Box::new(err),
-            },
-            None => ExecutionError::OperationErrorNoContext { clk: self.clk(), err: Box::new(err) },
-        }
-    }
-
-    /// Wraps an operation error with context information, using host for resolution.
-    ///
-    /// This is the preferred method for lazy error contexts that defer source resolution
-    /// until the error path. Creates `ExecutionError::OperationError` when context is
-    /// available, or `ExecutionError::OperationErrorNoContext` when context is missing.
-    ///
-    /// # Arguments
-    ///
-    /// * `host` - The host for resolving source locations
-    /// * `err` - The operation error to wrap
-    fn wrap_op_err_with_host(&self, host: &impl BaseHost, err: OperationError) -> ExecutionError {
-        match self.resolve_source(host) {
-            Some((label, source_file)) => ExecutionError::OperationError {
-                clk: self.clk(),
-                label,
-                source_file,
-                err: Box::new(err),
-            },
-            None => ExecutionError::OperationErrorNoContext { clk: self.clk(), err: Box::new(err) },
-        }
-    }
-}
-
-/// Context information to be used when reporting errors.
-pub struct ErrorContextImpl {
-    label: SourceSpan,
-    source_file: Option<Arc<SourceFile>>,
-    clk: RowIndex,
-}
-
-impl ErrorContextImpl {
-    #[allow(dead_code)]
-    pub fn new(
-        mast_forest: &MastForest,
-        node: &impl MastNodeErrorContext,
-        host: &impl BaseHost,
-        clk: RowIndex,
-    ) -> Self {
-        let (label, source_file) =
-            Self::precalc_label_and_source_file(None, mast_forest, node, host);
-        Self { label, source_file, clk }
-    }
-
-    #[allow(dead_code)]
-    pub fn new_with_op_idx(
-        mast_forest: &MastForest,
-        node: &impl MastNodeErrorContext,
-        host: &impl BaseHost,
-        op_idx: usize,
-        clk: RowIndex,
-    ) -> Self {
-        let op_idx = op_idx.into();
-        let (label, source_file) =
-            Self::precalc_label_and_source_file(op_idx, mast_forest, node, host);
-        Self { label, source_file, clk }
-    }
-
-    fn precalc_label_and_source_file(
-        op_idx: Option<usize>,
-        mast_forest: &MastForest,
-        node: &impl MastNodeErrorContext,
-        host: &impl BaseHost,
-    ) -> (SourceSpan, Option<Arc<SourceFile>>) {
-        node.get_assembly_op(mast_forest, op_idx)
-            .and_then(|assembly_op| assembly_op.location())
-            .map_or_else(
-                || (SourceSpan::UNKNOWN, None),
-                |location| host.get_label_and_source_file(location),
-            )
-    }
-}
-
-impl ErrorContext for ErrorContextImpl {
-    fn label_and_source_file(&self) -> Option<(SourceSpan, Option<Arc<SourceFile>>)> {
-        if self.label == SourceSpan::UNKNOWN {
-            None
-        } else {
-            Some((self.label, self.source_file.clone()))
-        }
-    }
-
-    fn clk(&self) -> RowIndex {
-        self.clk
-    }
-}
-
-impl ErrorContext for () {
-    fn label_and_source_file(&self) -> Option<(SourceSpan, Option<Arc<SourceFile>>)> {
-        None
-    }
-
-    fn clk(&self) -> RowIndex {
-        RowIndex::from(0)
-    }
-}
-
-// LAZY ERROR CONTEXT
 // ================================================================================================
 
 /// Lightweight error context handle for lazy source location resolution.
 ///
-/// Unlike [`ErrorContextImpl`] which eagerly pre-computes source information, this struct
-/// stores only references and scalars needed to resolve error context later (in the error path).
-/// This avoids the cost of MAST traversal and host lookups on the hot success path.
+/// This struct stores only references and scalars needed to resolve error context later (in the
+/// error path). This avoids the cost of MAST traversal and host lookups on the hot success path.
 ///
 /// # Performance
 ///
@@ -498,6 +338,7 @@ pub struct OpErrorContext<'a> {
     _phantom: core::marker::PhantomData<&'a ()>,
 }
 
+#[cfg(not(feature = "no_err_ctx"))]
 impl<'a> OpErrorContext<'a> {
     /// Create context for node-level errors (no specific operation index).
     ///
@@ -513,18 +354,10 @@ impl<'a> OpErrorContext<'a> {
     /// # Performance
     ///
     /// This is a cheap operation - just stores references and scalars. No MAST traversal
-    /// or host lookups occur until `label_and_source_file()` is called (in error path).
+    /// or host lookups occur until `resolve_source()` is called (in error path).
     #[inline]
     pub fn new(program: &'a MastForest, node_id: MastNodeId, clk: RowIndex) -> Self {
-        #[cfg(not(feature = "no_err_ctx"))]
-        {
-            Self { clk, program, node_id, op_idx: None }
-        }
-
-        #[cfg(feature = "no_err_ctx")]
-        {
-            Self { clk, _phantom: core::marker::PhantomData }
-        }
+        Self { clk, program, node_id, op_idx: None }
     }
 
     /// Create context for operation-level errors (specific operation in node).
@@ -542,7 +375,7 @@ impl<'a> OpErrorContext<'a> {
     /// # Performance
     ///
     /// This is a cheap operation - just stores references and scalars. No MAST traversal
-    /// or host lookups occur until `label_and_source_file()` is called (in error path).
+    /// or host lookups occur until `resolve_source()` is called (in error path).
     #[inline]
     pub fn with_op(
         program: &'a MastForest,
@@ -550,60 +383,75 @@ impl<'a> OpErrorContext<'a> {
         op_idx: usize,
         clk: RowIndex,
     ) -> Self {
-        #[cfg(not(feature = "no_err_ctx"))]
-        {
-            Self {
-                clk,
-                program,
-                node_id,
-                op_idx: Some(op_idx),
-            }
-        }
-
-        #[cfg(feature = "no_err_ctx")]
-        {
-            Self { clk, _phantom: core::marker::PhantomData }
+        Self {
+            clk,
+            program,
+            node_id,
+            op_idx: Some(op_idx),
         }
     }
 }
 
-#[cfg(not(feature = "no_err_ctx"))]
-impl<'a> ErrorContext for OpErrorContext<'a> {
+#[cfg(feature = "no_err_ctx")]
+impl<'a> OpErrorContext<'a> {
+    /// Create context for node-level errors (no specific operation index).
+    ///
+    /// When the `no_err_ctx` feature is enabled, this just stores the clock cycle.
+    ///
+    /// # Arguments
+    ///
+    /// * `program` - The MAST forest (ignored in no_err_ctx build)
+    /// * `node_id` - ID of the node (ignored in no_err_ctx build)
+    /// * `clk` - Clock cycle when the error occurred
     #[inline]
-    fn clk(&self) -> RowIndex {
+    pub fn new(_program: &'a MastForest, _node_id: MastNodeId, clk: RowIndex) -> Self {
+        Self { clk, _phantom: core::marker::PhantomData }
+    }
+
+    /// Create context for operation-level errors (specific operation in node).
+    ///
+    /// When the `no_err_ctx` feature is enabled, this just stores the clock cycle.
+    ///
+    /// # Arguments
+    ///
+    /// * `program` - The MAST forest (ignored in no_err_ctx build)
+    /// * `node_id` - ID of the node (ignored in no_err_ctx build)
+    /// * `op_idx` - Index of the operation (ignored in no_err_ctx build)
+    /// * `clk` - Clock cycle when the error occurred
+    #[inline]
+    pub fn with_op(
+        _program: &'a MastForest,
+        _node_id: MastNodeId,
+        _op_idx: usize,
+        clk: RowIndex,
+    ) -> Self {
+        Self { clk, _phantom: core::marker::PhantomData }
+    }
+}
+
+#[cfg(not(feature = "no_err_ctx"))]
+impl<'a> OpErrorContext<'a> {
+    /// Returns the clock cycle associated with this error context.
+    ///
+    /// This is always cheap to access.
+    #[inline]
+    pub fn clk(&self) -> RowIndex {
         self.clk
     }
 
-    fn label_and_source_file(&self) -> Option<(SourceSpan, Option<Arc<SourceFile>>)> {
-        // For backwards compatibility, but this won't have full source resolution.
-        // Callers should use resolve_source() with a host instead.
-        use miden_core::mast::MastNode;
-
-        let node = self.program.get_node_by_id(self.node_id)?;
-
-        if let Some(op_idx) = self.op_idx {
-            // Operation-level error: get specific operation's location
-            // Need to dispatch through the enum to access MastNodeErrorContext methods
-            let assembly_op = match node {
-                MastNode::Block(n) => n.get_assembly_op(self.program, Some(op_idx)),
-                MastNode::Join(n) => n.get_assembly_op(self.program, Some(op_idx)),
-                MastNode::Split(n) => n.get_assembly_op(self.program, Some(op_idx)),
-                MastNode::Loop(n) => n.get_assembly_op(self.program, Some(op_idx)),
-                MastNode::Call(n) => n.get_assembly_op(self.program, Some(op_idx)),
-                MastNode::Dyn(n) => n.get_assembly_op(self.program, Some(op_idx)),
-                MastNode::External(n) => n.get_assembly_op(self.program, Some(op_idx)),
-            }?;
-            let _location = assembly_op.location()?;
-            // Without host, we can't fully resolve - just return UNKNOWN span
-            // Callers should use resolve_source() with a host for full resolution
-            Some((SourceSpan::UNKNOWN, None))
-        } else {
-            // Node-level error: no operation-specific location available
-            None
-        }
-    }
-
-    fn resolve_source(
+    /// Resolves source location using the provided host.
+    ///
+    /// Returns `None` when source context is not available (e.g., when executing code
+    /// without debug information).
+    ///
+    /// # Arguments
+    ///
+    /// * `host` - The host for resolving source locations
+    ///
+    /// # Note
+    ///
+    /// This method may be expensive and should typically only be called in error paths.
+    pub fn resolve_source(
         &self,
         host: &impl BaseHost,
     ) -> Option<(SourceSpan, Option<Arc<SourceFile>>)> {
@@ -636,26 +484,74 @@ impl<'a> ErrorContext for OpErrorContext<'a> {
 
         Some((label, source_file))
     }
+
+    /// Wraps an operation error with context information to create an execution error.
+    ///
+    /// Creates `ExecutionError::OperationError` when context is available, or
+    /// `ExecutionError::OperationErrorNoContext` when context is missing.
+    ///
+    /// # Arguments
+    ///
+    /// * `host` - The host for resolving source locations
+    /// * `err` - The operation error to wrap
+    pub fn wrap_op_err_with_host(
+        &self,
+        host: &impl BaseHost,
+        err: OperationError,
+    ) -> ExecutionError {
+        match self.resolve_source(host) {
+            Some((label, source_file)) => ExecutionError::OperationError {
+                clk: self.clk(),
+                label,
+                source_file,
+                err: Box::new(err),
+            },
+            None => ExecutionError::OperationErrorNoContext { clk: self.clk(), err: Box::new(err) },
+        }
+    }
 }
 
 #[cfg(feature = "no_err_ctx")]
-impl<'a> ErrorContext for OpErrorContext<'a> {
+impl<'a> OpErrorContext<'a> {
+    /// Returns the clock cycle associated with this error context.
+    ///
+    /// This is always cheap to access.
     #[inline]
-    fn clk(&self) -> RowIndex {
+    pub fn clk(&self) -> RowIndex {
         self.clk
     }
 
+    /// Resolves source location using the provided host.
+    ///
+    /// When the `no_err_ctx` feature is enabled, this always returns `None`.
+    ///
+    /// # Arguments
+    ///
+    /// * `host` - The host for resolving source locations (ignored)
     #[inline]
-    fn label_and_source_file(&self) -> Option<(SourceSpan, Option<Arc<SourceFile>>)> {
-        None // Always no context in no_err_ctx build
-    }
-
-    #[inline]
-    fn resolve_source(
+    pub fn resolve_source(
         &self,
         _host: &impl BaseHost,
     ) -> Option<(SourceSpan, Option<Arc<SourceFile>>)> {
         None // Always no context in no_err_ctx build
+    }
+
+    /// Wraps an operation error with context information to create an execution error.
+    ///
+    /// When the `no_err_ctx` feature is enabled, this always creates
+    /// `ExecutionError::OperationErrorNoContext`.
+    ///
+    /// # Arguments
+    ///
+    /// * `host` - The host for resolving source locations (ignored)
+    /// * `err` - The operation error to wrap
+    #[inline]
+    pub fn wrap_op_err_with_host(
+        &self,
+        _host: &impl BaseHost,
+        err: OperationError,
+    ) -> ExecutionError {
+        ExecutionError::OperationErrorNoContext { clk: self.clk(), err: Box::new(err) }
     }
 }
 
@@ -681,24 +577,10 @@ pub trait ResultOpErrExt<T> {
     fn map_exec_err_no_ctx(self, clk: RowIndex) -> Result<T, ExecutionError>;
 
     /// Converts `Result<T, OperationError>` to `Result<T, ExecutionError>` by wrapping the error
-    /// using the provided error context.
-    ///
-    /// This automatically attaches source location information when available.
-    ///
-    /// # Example
-    /// ```ignore
-    /// program.get_node_by_id(node_id)
-    ///     .ok_or(OperationError::MastNodeNotFoundInForest { node_id })
-    ///     .map_exec_err(&err_ctx)?;
-    /// ```
-    fn map_exec_err(self, err_ctx: &impl ErrorContext) -> Result<T, ExecutionError>;
-
-    /// Converts `Result<T, OperationError>` to `Result<T, ExecutionError>` by wrapping the error
     /// using the provided error context and host.
     ///
-    /// This is the preferred method for lazy error contexts (like [`OpErrorContext`]) that defer
-    /// source resolution until the error path. It enables full source location resolution including
-    /// source file information.
+    /// This method uses [`OpErrorContext`] which defers source resolution until the error path,
+    /// enabling full source location resolution including source file information.
     ///
     /// # Arguments
     ///
@@ -713,7 +595,7 @@ pub trait ResultOpErrExt<T> {
     /// ```
     fn map_exec_err_with_host(
         self,
-        err_ctx: &impl ErrorContext,
+        err_ctx: &OpErrorContext,
         host: &impl BaseHost,
     ) -> Result<T, ExecutionError>;
 }
@@ -725,14 +607,9 @@ impl<T> ResultOpErrExt<T> for Result<T, OperationError> {
     }
 
     #[inline]
-    fn map_exec_err(self, err_ctx: &impl ErrorContext) -> Result<T, ExecutionError> {
-        self.map_err(|err| err_ctx.wrap_op_err(err))
-    }
-
-    #[inline]
     fn map_exec_err_with_host(
         self,
-        err_ctx: &impl ErrorContext,
+        err_ctx: &OpErrorContext,
         host: &impl BaseHost,
     ) -> Result<T, ExecutionError> {
         self.map_err(|err| err_ctx.wrap_op_err_with_host(host, err))
@@ -746,14 +623,9 @@ impl<T> ResultOpErrExt<T> for OperationError {
     }
 
     #[inline]
-    fn map_exec_err(self, err_ctx: &impl ErrorContext) -> Result<T, ExecutionError> {
-        Err(err_ctx.wrap_op_err(self))
-    }
-
-    #[inline]
     fn map_exec_err_with_host(
         self,
-        err_ctx: &impl ErrorContext,
+        err_ctx: &OpErrorContext,
         host: &impl BaseHost,
     ) -> Result<T, ExecutionError> {
         Err(err_ctx.wrap_op_err_with_host(host, self))

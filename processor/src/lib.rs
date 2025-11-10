@@ -78,9 +78,7 @@ use trace::TraceFragment;
 pub use trace::{ChipletsLengths, ExecutionTrace, NUM_RAND_ROWS, TraceLenSummary};
 
 mod errors;
-pub use errors::{
-    ErrorContext, ErrorContextImpl, ExecutionError, OpErrorContext, OperationError, ResultOpErrExt,
-};
+pub use errors::{ExecutionError, OpErrorContext, OperationError, ResultOpErrExt};
 
 pub mod utils;
 
@@ -373,7 +371,7 @@ impl Process {
                 let err_ctx = OpErrorContext::new(program, node_id, self.system.clk());
                 add_error_ctx_to_external_error(
                     self.execute_call_node(node, node_id, program, host, &err_ctx),
-                    err_ctx,
+                    &err_ctx,
                     host,
                 )?
             },
@@ -385,7 +383,7 @@ impl Process {
                 let err_ctx = OpErrorContext::new(program, node_id, clk_before_start);
                 add_error_ctx_to_external_error(
                     self.execute_dyn_node(node, node_id, program, host, &err_ctx),
-                    err_ctx,
+                    &err_ctx,
                     host,
                 )?
             },
@@ -413,7 +411,7 @@ impl Process {
         node: &JoinNode,
         program: &MastForest,
         host: &mut impl SyncHost,
-        err_ctx: &impl ErrorContext,
+        err_ctx: &OpErrorContext,
     ) -> Result<(), ExecutionError> {
         self.start_join_node(node, program, host, err_ctx)?;
 
@@ -431,7 +429,7 @@ impl Process {
         node: &SplitNode,
         program: &MastForest,
         host: &mut impl SyncHost,
-        err_ctx: &impl ErrorContext,
+        err_ctx: &OpErrorContext,
     ) -> Result<(), ExecutionError> {
         // start the SPLIT block; this also pops the stack and returns the popped element
         let condition = self.start_split_node(node, program, host, err_ctx)?;
@@ -457,7 +455,7 @@ impl Process {
         node_id: MastNodeId,
         program: &MastForest,
         host: &mut impl SyncHost,
-        err_ctx: &impl ErrorContext,
+        err_ctx: &OpErrorContext,
     ) -> Result<(), ExecutionError> {
         // start the LOOP block; this also pops the stack and returns the popped element
         let condition = self.start_loop_node(node, program, host, err_ctx)?;
@@ -504,7 +502,7 @@ impl Process {
         node_id: MastNodeId,
         program: &MastForest,
         host: &mut impl SyncHost,
-        err_ctx: &impl ErrorContext,
+        err_ctx: &OpErrorContext,
     ) -> Result<(), ExecutionError> {
         // if this is a syscall, make sure the call target exists in the kernel
         if call_node.is_syscall() {
@@ -538,7 +536,7 @@ impl Process {
         node_id: MastNodeId,
         program: &MastForest,
         host: &mut impl SyncHost,
-        err_ctx: &impl ErrorContext,
+        err_ctx: &OpErrorContext,
     ) -> Result<(), ExecutionError> {
         let callee_hash = if node.is_dyncall() {
             self.start_dyncall_node(node, host, err_ctx)?
@@ -596,7 +594,7 @@ impl Process {
         node_id: MastNodeId,
         program: &MastForest,
         host: &mut impl SyncHost,
-        err_ctx: &impl ErrorContext,
+        err_ctx: &OpErrorContext,
     ) -> Result<(), ExecutionError> {
         self.start_basic_block_node(basic_block, program, host, err_ctx)?;
 
@@ -1035,7 +1033,7 @@ impl<'a> From<&'a mut Process> for ProcessState<'a> {
 /// proper error context.
 pub(crate) fn add_error_ctx_to_external_error(
     result: Result<(), ExecutionError>,
-    err_ctx: impl ErrorContext,
+    err_ctx: &OpErrorContext,
     host: &impl SyncHost,
 ) -> Result<(), ExecutionError> {
     match result {
