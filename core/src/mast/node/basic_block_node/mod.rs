@@ -502,15 +502,6 @@ impl MastNodeExt for BasicBlockNode {
         }
     }
 
-    /// Removes all decorators from this node.
-    fn remove_decorators(&mut self) {
-        self.decorators = DecoratorStore::Owned {
-            decorators: Vec::new(),
-            before_enter: Vec::new(),
-            after_exit: Vec::new(),
-        };
-    }
-
     fn to_display<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn fmt::Display + 'a> {
         Box::new(BasicBlockNode::to_display(self, mast_forest))
     }

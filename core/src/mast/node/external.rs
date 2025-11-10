@@ -164,11 +164,6 @@ impl MastNodeExt for ExternalNode {
         self.decorator_store.after_exit(forest)
     }
 
-    /// Removes all decorators from this node.
-    fn remove_decorators(&mut self) {
-        self.decorator_store.remove_decorators();
-    }
-
     fn to_display<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn fmt::Display + 'a> {
         Box::new(ExternalNode::to_display(self, mast_forest))
     }

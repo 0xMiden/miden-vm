@@ -153,11 +153,10 @@ impl MastForest {
 
     /// Removes all decorators from this MAST forest.
     pub fn strip_decorators(&mut self) {
-        for node in self.nodes.iter_mut() {
-            node.remove_decorators();
-        }
+        // Clear all decorator storage
         self.decorators = IndexVec::new();
         self.op_decorator_storage = OpToDecoratorIds::new();
+        self.node_decorator_storage.clear();
     }
 
     /// Merges all `forests` into a new [`MastForest`].

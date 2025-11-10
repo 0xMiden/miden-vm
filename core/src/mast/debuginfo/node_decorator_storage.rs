@@ -182,18 +182,6 @@ impl NodeToDecoratorIds {
         }
     }
 
-    /// Removes all decorators for a given node.
-    ///
-    /// # Arguments
-    /// * `_node_id` - The ID of the node to remove decorators for
-    ///
-    /// Note: This operation is not supported in the CSR structure as it would require
-    /// shifting all subsequent data. This method is a no-op.
-    pub fn remove_decorators(&mut self, _node_id: MastNodeId) {
-        // For CSR structure, removing individual node decorators is not supported
-        // as it would require shifting all subsequent data. This is a no-op.
-    }
-
     /// Clears all decorators and mappings.
     pub fn clear(&mut self) {
         self.before_enter_decorators.clear();

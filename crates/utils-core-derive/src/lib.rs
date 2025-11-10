@@ -109,7 +109,6 @@ fn get_mast_node_ext_methods() -> Vec<&'static str> {
         "digest",
         "before_enter",
         "after_exit",
-        "remove_decorators",
         "to_display",
         "to_pretty_print",
         "has_children",
@@ -147,13 +146,6 @@ fn generate_method_impl_for_trait_method(
             fn after_exit<'a>(&'a self, forest: &'a crate::mast::MastForest) -> &'a [crate::mast::DecoratorId] {
                 match self {
                     #(#enum_name::#variant_names(field) => field.after_exit(forest)),*
-                }
-            }
-        },
-        "remove_decorators" => quote! {
-            fn remove_decorators(&mut self) {
-                match self {
-                    #(#enum_name::#variant_names(field) => field.remove_decorators()),*
                 }
             }
         },

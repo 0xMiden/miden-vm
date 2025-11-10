@@ -76,17 +76,4 @@ impl DecoratorStore {
     pub fn is_linked(&self) -> bool {
         matches!(self, DecoratorStore::Linked { .. })
     }
-
-    /// Remove all decorators (no-op for Linked state as decorators are managed centrally)
-    pub fn remove_decorators(&mut self) {
-        match self {
-            DecoratorStore::Owned { before_enter, after_exit, .. } => {
-                before_enter.clear();
-                after_exit.clear();
-            },
-            DecoratorStore::Linked { .. } => {
-                // No-op: decorators are managed by NodeToDecoratorIds
-            },
-        }
-    }
 }

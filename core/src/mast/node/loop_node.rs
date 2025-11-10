@@ -161,11 +161,6 @@ impl MastNodeExt for LoopNode {
         self.decorator_store.after_exit(forest)
     }
 
-    /// Removes all decorators from this node.
-    fn remove_decorators(&mut self) {
-        self.decorator_store.remove_decorators();
-    }
-
     fn to_display<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn fmt::Display + 'a> {
         Box::new(LoopNode::to_display(self, mast_forest))
     }

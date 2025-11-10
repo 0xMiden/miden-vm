@@ -53,9 +53,6 @@ pub trait MastNodeExt {
     /// Returns the decorators to be executed after this node is executed.
     fn after_exit<'a>(&'a self, forest: &'a MastForest) -> &'a [DecoratorId];
 
-    /// Removes all decorators from this node.
-    fn remove_decorators(&mut self);
-
     /// Returns a display formatter for this node.
     fn to_display<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn fmt::Display + 'a>;
 
