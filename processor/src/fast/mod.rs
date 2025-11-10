@@ -510,7 +510,7 @@ impl FastProcessor {
             .get_node_by_id(node_id)
             .expect("internal error: node id {node_id} not found in current forest");
 
-        for &decorator_id in node.before_enter() {
+        for &decorator_id in node.before_enter(current_forest) {
             self.execute_decorator(&current_forest[decorator_id], host)?;
         }
 
@@ -528,7 +528,7 @@ impl FastProcessor {
             .get_node_by_id(node_id)
             .expect("internal error: node id {node_id} not found in current forest");
 
-        for &decorator_id in node.after_exit() {
+        for &decorator_id in node.after_exit(current_forest) {
             self.execute_decorator(&current_forest[decorator_id], host)?;
         }
 

@@ -873,15 +873,21 @@ impl proptest::prelude::Arbitrary for Library {
 
                 // Create a simple node for each export
                 for (export_name, export) in exports.iter_mut() {
-                    use miden_core::Operation;
+                    use miden_core::{
+                        Operation,
+                        mast::{BasicBlockNodeBuilder, MastForestContributor},
+                    };
 
                     // Ensure the export name matches the exported procedure, as the Arbitrary
                     // impl will generate different paths for each
                     export.name = export_name.clone();
 
-                    let node_id = mast_forest
-                        .add_block(vec![Operation::Add, Operation::Mul], Vec::new())
-                        .unwrap();
+                    let node_id = BasicBlockNodeBuilder::new(
+                        vec![Operation::Add, Operation::Mul],
+                        Vec::new(),
+                    )
+                    .add_to_forest(&mut mast_forest)
+                    .unwrap();
                     nodes.push((export.node, node_id));
                 }
 

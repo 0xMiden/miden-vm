@@ -38,14 +38,14 @@ impl FastProcessor {
         );
 
         // Execute decorators that should be executed before entering the node
-        self.execute_before_enter_decorators(node_id, program, host)?;
+        self.execute_before_enter_decorators(node_id, current_forest, host)?;
 
         // Corresponds to the row inserted for the BASIC BLOCK operation added to the trace.
         self.increment_clk(tracer);
 
         let mut batch_offset_in_block = 0;
         let mut op_batches = basic_block_node.op_batches().iter();
-        let mut decorator_ids = basic_block_node.indexed_decorator_iter();
+        let mut decorator_ids = basic_block_node.indexed_decorator_iter(current_forest);
 
         // execute first op batch
         if let Some(first_op_batch) = op_batches.next() {
@@ -122,7 +122,7 @@ impl FastProcessor {
             self.execute_decorator(decorator, host)?;
         }
 
-        self.execute_after_exit_decorators(node_id, program, host)
+        self.execute_after_exit_decorators(node_id, current_forest, host)
     }
 
     #[inline(always)]

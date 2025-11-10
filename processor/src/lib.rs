@@ -340,7 +340,7 @@ impl Process {
             .ok_or(OperationError::MastNodeNotFoundInForest(node_id))
             .map_exec_err_no_ctx(self.system.clk())?;
 
-        for &decorator_id in node.before_enter() {
+        for &decorator_id in node.before_enter(program) {
             self.execute_decorator(&program[decorator_id], host)?;
         }
 
@@ -372,7 +372,7 @@ impl Process {
             },
         }
 
-        for &decorator_id in node.after_exit() {
+        for &decorator_id in node.after_exit(program) {
             self.execute_decorator(&program[decorator_id], host)?;
         }
 
@@ -576,7 +576,7 @@ impl Process {
         self.start_basic_block_node(basic_block, program, host, &err_ctx)?;
 
         let mut op_offset = 0;
-        let mut decorator_ids = basic_block.indexed_decorator_iter();
+        let mut decorator_ids = basic_block.indexed_decorator_iter(program);
 
         // execute the first operation batch
         self.execute_op_batch(
