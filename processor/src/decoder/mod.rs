@@ -70,12 +70,12 @@ impl Process {
         // row addr + 7.
         let child1_hash = program
             .get_node_by_id(node.first())
-            .ok_or(OperationError::MastNodeNotFoundInForest { node_id: node.first() })
+            .ok_or(OperationError::MastNodeNotFoundInForest(node.first()))
             .map_exec_err(err_ctx)?
             .digest();
         let child2_hash = program
             .get_node_by_id(node.second())
-            .ok_or(OperationError::MastNodeNotFoundInForest { node_id: node.second() })
+            .ok_or(OperationError::MastNodeNotFoundInForest(node.second()))
             .map_exec_err(err_ctx)?
             .digest();
 
@@ -128,12 +128,12 @@ impl Process {
         // row addr + 7.
         let child1_hash = program
             .get_node_by_id(node.on_true())
-            .ok_or(OperationError::MastNodeNotFoundInForest { node_id: node.on_true() })
+            .ok_or(OperationError::MastNodeNotFoundInForest(node.on_true()))
             .map_exec_err(err_ctx)?
             .digest();
         let child2_hash = program
             .get_node_by_id(node.on_false())
-            .ok_or(OperationError::MastNodeNotFoundInForest { node_id: node.on_false() })
+            .ok_or(OperationError::MastNodeNotFoundInForest(node.on_false()))
             .map_exec_err(err_ctx)?
             .digest();
         let (addr, hashed_block) = self.chiplets.hasher.hash_control_block(
@@ -187,7 +187,7 @@ impl Process {
         // row addr + 7.
         let body_hash = program
             .get_node_by_id(node.body())
-            .ok_or(OperationError::MastNodeNotFoundInForest { node_id: node.body() })
+            .ok_or(OperationError::MastNodeNotFoundInForest(node.body()))
             .map_exec_err(err_ctx)?
             .digest();
 
@@ -254,7 +254,7 @@ impl Process {
         // expected to be in row addr + 7.
         let callee_hash = program
             .get_node_by_id(node.callee())
-            .ok_or(OperationError::MastNodeNotFoundInForest { node_id: node.callee() })
+            .ok_or(OperationError::MastNodeNotFoundInForest(node.callee()))
             .map_exec_err(err_ctx)?
             .digest();
 
@@ -313,7 +313,7 @@ impl Process {
         // when a CALL block ends, stack depth must be exactly 16
         let stack_depth = self.stack.depth();
         if stack_depth > MIN_STACK_DEPTH {
-            return OperationError::InvalidStackDepthOnReturn { depth: stack_depth }
+            return OperationError::InvalidStackDepthOnReturn(stack_depth)
                 .map_exec_err(err_ctx);
         }
 
@@ -465,7 +465,7 @@ impl Process {
         // when a DYNCALL block ends, stack depth must be exactly 16
         let stack_depth = self.stack.depth();
         if stack_depth > MIN_STACK_DEPTH {
-            return OperationError::InvalidStackDepthOnReturn { depth: stack_depth }
+            return OperationError::InvalidStackDepthOnReturn(stack_depth)
                 .map_exec_err(err_ctx);
         }
 

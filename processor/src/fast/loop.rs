@@ -74,7 +74,7 @@ impl FastProcessor {
             // Execute decorators that should be executed after exiting the node
             self.execute_after_exit_decorators(current_node_id, current_forest, host)?;
         } else {
-            return OperationError::NotBinaryValueLoop { value: condition }
+            return OperationError::NotBinaryValueLoop(condition)
                 .map_exec_err(&err_ctx!(current_forest, loop_node, host, clk_at_start));
         }
         Ok(())
@@ -130,7 +130,7 @@ impl FastProcessor {
             self.execute_after_exit_decorators(current_node_id, current_forest, host)?;
         } else {
             let err_ctx = err_ctx!(current_forest, loop_node, host, clk_at_start);
-            return OperationError::NotBinaryValueLoop { value: condition }.map_exec_err(&err_ctx);
+            return OperationError::NotBinaryValueLoop(condition).map_exec_err(&err_ctx);
         }
         Ok(())
     }

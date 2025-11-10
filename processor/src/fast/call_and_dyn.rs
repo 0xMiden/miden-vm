@@ -46,7 +46,7 @@ impl FastProcessor {
 
         let callee_hash = current_forest
             .get_node_by_id(call_node.callee())
-            .ok_or(OperationError::MastNodeNotFoundInForest { node_id: call_node.callee() })
+            .ok_or(OperationError::MastNodeNotFoundInForest(call_node.callee()))
             .map_exec_err(&err_ctx)?
             .digest();
 
@@ -304,7 +304,7 @@ impl FastProcessor {
     ) -> Result<(), ExecutionError> {
         // when a call/dyncall/syscall node ends, stack depth must be exactly 16.
         if self.stack_size() > MIN_STACK_DEPTH {
-            return OperationError::InvalidStackDepthOnReturn { depth: self.stack_size() }
+            return OperationError::InvalidStackDepthOnReturn(self.stack_size())
                 .map_exec_err(err_ctx);
         }
 

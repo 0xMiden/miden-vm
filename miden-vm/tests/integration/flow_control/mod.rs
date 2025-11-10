@@ -70,7 +70,7 @@ fn faulty_condition_from_loop() {
     expect_exec_error_matches!(
         test,
         ExecutionError::OperationError { ref err, .. }
-            if matches!(err.as_ref(), OperationError::NotBinaryValueLoop { value: _ })
+            if matches!(err.as_ref(), OperationError::NotBinaryValueLoop(_))
     );
 }
 
@@ -164,7 +164,7 @@ fn local_fn_call() {
     expect_exec_error_matches!(
         build_test,
         ExecutionError::OperationError { ref err, .. }
-            if matches!(err.as_ref(), OperationError::InvalidStackDepthOnReturn { depth: 17 })
+            if matches!(err.as_ref(), OperationError::InvalidStackDepthOnReturn(17))
     );
 
     let inputs = (1_u64..18).collect::<Vec<_>>();

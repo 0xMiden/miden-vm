@@ -96,10 +96,10 @@ pub enum ExecutionError {
     },
     #[error("exceeded the allowed number of max cycles {0}")]
     CycleLimitExceeded(u32),
-    #[error("attempted to add event handler for '{event}' (already registered)")]
-    DuplicateEventHandler { event: EventName },
-    #[error("attempted to add event handler for '{event}' (reserved system event)")]
-    ReservedEventNamespace { event: EventName },
+    #[error("attempted to add event handler for '{0}' (already registered)")]
+    DuplicateEventHandler(EventName),
+    #[error("attempted to add event handler for '{0}' (reserved system event)")]
+    ReservedEventNamespace(EventName),
     #[error("failed to execute the program for internal reason: {0}")]
     FailedToExecuteProgram(&'static str),
     #[error("stack should have at most {MIN_STACK_DEPTH} elements at the end of program execution, but had {} elements", MIN_STACK_DEPTH + .0)]
@@ -130,10 +130,10 @@ pub enum OperationError {
     AdviceError(AdviceError),
     #[error("external node with mast root {0} resolved to an external node")]
     CircularExternalNode(Word),
-    #[error("decorator id {decorator_id} does not exist in MAST forest")]
-    DecoratorNotFoundInForest { decorator_id: DecoratorId },
-    #[error("node id {node_id} does not exist in MAST forest")]
-    MastNodeNotFoundInForest { node_id: MastNodeId },
+    #[error("decorator id {0} does not exist in MAST forest")]
+    DecoratorNotFoundInForest(DecoratorId),
+    #[error("node id {0} does not exist in MAST forest")]
+    MastNodeNotFoundInForest(MastNodeId),
     #[error("no MAST forest contains the procedure with root digest {root_digest}")]
     NoMastForestWithProcedure { root_digest: Word },
     #[error(
@@ -186,12 +186,12 @@ pub enum OperationError {
     ))]
     DivideByZero,
     #[error(
-        "when returning from a call or dyncall, stack depth must be {MIN_STACK_DEPTH}, but was {depth}"
+        "when returning from a call or dyncall, stack depth must be {MIN_STACK_DEPTH}, but was {0}"
     )]
     #[diagnostic(help(
         "ensure the callee procedure returns with exactly {MIN_STACK_DEPTH} elements on the stack"
     ))]
-    InvalidStackDepthOnReturn { depth: usize },
+    InvalidStackDepthOnReturn(usize),
     #[error("exceeded the allowed number of max cycles {max_cycles}")]
     CycleLimitExceeded { max_cycles: u32 },
     #[error("logarithm of zero is undefined")]
@@ -216,23 +216,23 @@ pub enum OperationError {
         err_code: Felt,
         err_msg: Option<Arc<str>>,
     },
-    #[error("conditional operation requires binary value (0 or 1), but stack top contains {value}")]
+    #[error("conditional operation requires binary value (0 or 1), but stack top contains {0}")]
     #[diagnostic(help(
         "use u32assert2 or comparison operations to ensure stack top is 0 or 1 before conditional operations"
     ))]
-    NotBinaryValueIf { value: Felt },
-    #[error("operation requires binary value (0 or 1), but got {value}")]
+    NotBinaryValueIf(Felt),
+    #[error("operation requires binary value (0 or 1), but got {0}")]
     #[diagnostic(help("use u32assert2 or comparison operations to ensure the operand is 0 or 1"))]
-    NotBinaryValueOp { value: Felt },
-    #[error("loop condition must be a binary value, but got {value}")]
+    NotBinaryValueOp(Felt),
+    #[error("loop condition must be a binary value, but got {0}")]
     #[diagnostic(help(
         "this could happen either when first entering the loop, or any subsequent iteration"
     ))]
-    NotBinaryValueLoop { value: Felt },
+    NotBinaryValueLoop(Felt),
     #[error("operation expected u32 values, but got values: {values:?} (error code: {err_code})")]
     NotU32Values { values: Vec<Felt>, err_code: Felt },
-    #[error("operand stack input is {input} but it is expected to fit in a u32")]
-    NotU32StackValue { input: u64 },
+    #[error("operand stack input is {0} but it is expected to fit in a u32")]
+    NotU32StackValue(u64),
     #[error("smt node {node_hex} not found", node_hex = to_hex(node.as_bytes()))]
     SmtNodeNotFound { node: Word },
     #[error(

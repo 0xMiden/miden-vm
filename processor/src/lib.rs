@@ -337,7 +337,7 @@ impl Process {
     ) -> Result<(), ExecutionError> {
         let node = program
             .get_node_by_id(node_id)
-            .ok_or(OperationError::MastNodeNotFoundInForest { node_id })
+            .ok_or(OperationError::MastNodeNotFoundInForest(node_id))
             .map_exec_err_no_ctx(self.system.clk())?;
 
         for &decorator_id in node.before_enter() {
@@ -417,7 +417,7 @@ impl Process {
         } else if condition == ZERO {
             self.execute_mast_node(node.on_false(), program, host)?;
         } else {
-            return OperationError::NotBinaryValueIf { value: condition }.map_exec_err(&err_ctx);
+            return OperationError::NotBinaryValueIf(condition).map_exec_err(&err_ctx);
         }
 
         self.end_split_node(node, program, host, &err_ctx)
@@ -457,7 +457,7 @@ impl Process {
                 // Create a new error context with current clock for this error, not the one from
                 // the start of the loop. This ensures consistency with the fast processor.
                 let err_ctx_for_repeat = err_ctx!(program, node, host, self.system.clk());
-                return OperationError::NotBinaryValueLoop { value: self.stack.peek() }
+                return OperationError::NotBinaryValueLoop(self.stack.peek())
                     .map_exec_err(&err_ctx_for_repeat);
             }
 
@@ -468,7 +468,7 @@ impl Process {
             // already dropped when we started the LOOP block
             self.end_loop_node(node, false, program, host, &err_ctx)
         } else {
-            OperationError::NotBinaryValueLoop { value: condition }.map_exec_err(&err_ctx)
+            OperationError::NotBinaryValueLoop(condition).map_exec_err(&err_ctx)
         }
     }
 
@@ -485,7 +485,7 @@ impl Process {
             let err_ctx = err_ctx!(program, call_node, host, self.system.clk());
             let callee = program
                 .get_node_by_id(call_node.callee())
-                .ok_or(OperationError::MastNodeNotFoundInForest { node_id: call_node.callee() })
+                .ok_or(OperationError::MastNodeNotFoundInForest(call_node.callee()))
                 .map_exec_err(&err_ctx)?;
             self.chiplets.kernel_rom.access_proc(callee.digest()).map_exec_err(&err_ctx)?;
         }
@@ -616,7 +616,7 @@ impl Process {
             let decorator = program.get_decorator_by_id(decorator_id).ok_or(
                 ExecutionError::OperationErrorNoContext {
                     clk: self.system.clk(),
-                    err: Box::new(OperationError::DecoratorNotFoundInForest { decorator_id }),
+                    err: Box::new(OperationError::DecoratorNotFoundInForest(decorator_id)),
                 },
             )?;
             self.execute_decorator(decorator, host)?;
@@ -657,7 +657,7 @@ impl Process {
                 let decorator = program.get_decorator_by_id(decorator_id).ok_or(
                     ExecutionError::OperationErrorNoContext {
                         clk: self.system.clk(),
-                        err: Box::new(OperationError::DecoratorNotFoundInForest { decorator_id }),
+                        err: Box::new(OperationError::DecoratorNotFoundInForest(decorator_id)),
                     },
                 )?;
                 self.execute_decorator(decorator, host)?;

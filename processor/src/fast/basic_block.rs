@@ -116,7 +116,7 @@ impl FastProcessor {
         for (_, decorator_id) in decorator_ids {
             let decorator = program
                 .get_decorator_by_id(decorator_id)
-                .ok_or(OperationError::DecoratorNotFoundInForest { decorator_id })
+                .ok_or(OperationError::DecoratorNotFoundInForest(decorator_id))
                 .map_exec_err_no_ctx(self.clk)?;
             self.execute_decorator(decorator, host)?;
         }
@@ -150,7 +150,7 @@ impl FastProcessor {
             while let Some((_, decorator_id)) = decorators.next_filtered(op_idx_in_block) {
                 let decorator = program
                     .get_decorator_by_id(decorator_id)
-                    .ok_or(OperationError::DecoratorNotFoundInForest { decorator_id })
+                    .ok_or(OperationError::DecoratorNotFoundInForest(decorator_id))
                     .map_exec_err_no_ctx(self.clk)?;
                 self.execute_decorator(decorator, host)?;
             }

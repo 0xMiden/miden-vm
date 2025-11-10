@@ -441,7 +441,7 @@ fn not_fail() {
     expect_exec_error_matches!(
         test,
         ExecutionError::OperationError { ref err, .. }
-            if matches!(err.as_ref(), OperationError::NotBinaryValueOp { value } if *value == Felt::new(2_u64))
+            if matches!(err.as_ref(), OperationError::NotBinaryValueOp(value) if *value == Felt::new(2_u64))
     );
 }
 
@@ -471,21 +471,21 @@ fn and_fail() {
     expect_exec_error_matches!(
         test,
         ExecutionError::OperationError { ref err, .. }
-            if matches!(err.as_ref(), OperationError::NotBinaryValueOp { value } if *value == Felt::new(3_u64))
+            if matches!(err.as_ref(), OperationError::NotBinaryValueOp(value) if *value == Felt::new(3_u64))
     );
 
     let test = build_op_test!(asm_op, &[2, 0]);
     expect_exec_error_matches!(
         test,
         ExecutionError::OperationError { ref err, .. }
-            if matches!(err.as_ref(), OperationError::NotBinaryValueOp { value } if *value == Felt::new(2_u64))
+            if matches!(err.as_ref(), OperationError::NotBinaryValueOp(value) if *value == Felt::new(2_u64))
     );
 
     let test = build_op_test!(asm_op, &[0, 2]);
     expect_exec_error_matches!(
         test,
         ExecutionError::OperationError { ref err, .. }
-            if matches!(err.as_ref(), OperationError::NotBinaryValueOp { value } if *value == Felt::new(2_u64))
+            if matches!(err.as_ref(), OperationError::NotBinaryValueOp(value) if *value == Felt::new(2_u64))
     );
 }
 
@@ -516,7 +516,7 @@ fn or_fail() {
     expect_exec_error_matches!(
         test,
         ExecutionError::OperationError { ref err, .. }
-            if matches!(err.as_ref(), OperationError::NotBinaryValueOp { value } if *value == expected_value)
+            if matches!(err.as_ref(), OperationError::NotBinaryValueOp(value) if *value == expected_value)
     );
 
     let expected_value = Felt::new(2);
@@ -524,14 +524,14 @@ fn or_fail() {
     expect_exec_error_matches!(
         test,
         ExecutionError::OperationError { ref err, .. }
-            if matches!(err.as_ref(), OperationError::NotBinaryValueOp { value } if *value == expected_value)
+            if matches!(err.as_ref(), OperationError::NotBinaryValueOp(value) if *value == expected_value)
     );
 
     let test = build_op_test!(asm_op, &[0, 2]);
     expect_exec_error_matches!(
         test,
         ExecutionError::OperationError { ref err, .. }
-            if matches!(err.as_ref(), OperationError::NotBinaryValueOp { value } if *value == expected_value)
+            if matches!(err.as_ref(), OperationError::NotBinaryValueOp(value) if *value == expected_value)
     );
 }
 
@@ -562,21 +562,21 @@ fn xor_fail() {
     expect_exec_error_matches!(
         test,
         ExecutionError::OperationError { ref err, .. }
-            if matches!(err.as_ref(), OperationError::NotBinaryValueOp { value } if *value == expected_value)
+            if matches!(err.as_ref(), OperationError::NotBinaryValueOp(value) if *value == expected_value)
     );
 
     let test = build_op_test!(asm_op, &[2, 0]);
     expect_exec_error_matches!(
         test,
         ExecutionError::OperationError { ref err, .. }
-            if matches!(err.as_ref(), OperationError::NotBinaryValueOp { value } if *value == expected_value)
+            if matches!(err.as_ref(), OperationError::NotBinaryValueOp(value) if *value == expected_value)
     );
 
     let test = build_op_test!(asm_op, &[0, 2]);
     expect_exec_error_matches!(
         test,
         ExecutionError::OperationError { ref err, .. }
-            if matches!(err.as_ref(), OperationError::NotBinaryValueOp { value } if *value == expected_value)
+            if matches!(err.as_ref(), OperationError::NotBinaryValueOp(value) if *value == expected_value)
     );
 }
 

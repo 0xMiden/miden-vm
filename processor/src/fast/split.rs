@@ -52,7 +52,7 @@ impl FastProcessor {
             continuation_stack.push_start_node(split_node.on_false());
         } else {
             let err_ctx = err_ctx!(current_forest, split_node, host, clk_at_start);
-            return OperationError::NotBinaryValueIf { value: condition }.map_exec_err(&err_ctx);
+            return OperationError::NotBinaryValueIf(condition).map_exec_err(&err_ctx);
         };
 
         // Corresponds to the row inserted for the SPLIT operation added

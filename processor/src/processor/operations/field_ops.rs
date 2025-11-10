@@ -110,7 +110,7 @@ pub(super) fn op_not<P: Processor>(processor: &mut P) -> Result<(), OperationErr
     } else if *top == ONE {
         *top = ZERO;
     } else {
-        return Err(OperationError::NotBinaryValueOp { value: *top });
+        return Err(OperationError::NotBinaryValueOp(*top));
     }
     Ok(())
 }

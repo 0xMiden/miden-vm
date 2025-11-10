@@ -81,7 +81,7 @@ pub(super) fn op_cswap<P: Processor>(
             processor.stack().swap(0, 1);
         },
         _ => {
-            return Err(OperationError::NotBinaryValueOp { value: condition });
+            return Err(OperationError::NotBinaryValueOp(condition));
         },
     }
 
@@ -108,7 +108,7 @@ pub(super) fn op_cswapw<P: Processor>(
             processor.stack().swap(3, 7);
         },
         _ => {
-            return Err(OperationError::NotBinaryValueOp { value: condition });
+            return Err(OperationError::NotBinaryValueOp(condition));
         },
     }
 
