@@ -26,7 +26,7 @@ use super::{
 };
 use crate::{
     SyncHost,
-    errors::{OpErrorContext, OperationError, ResultOpErrExt},
+    errors::{ErrorContext, OperationError, OperationResultExt},
 };
 
 mod trace;
@@ -63,7 +63,7 @@ impl Process {
         node: &JoinNode,
         program: &MastForest,
         host: &mut H,
-        err_ctx: &OpErrorContext,
+        err_ctx: &ErrorContext,
     ) -> Result<(), ExecutionError> {
         // use the hasher to compute the hash of the JOIN block; the row address returned by the
         // hasher is used as the ID of the block; the result of the hash is expected to be in
@@ -101,7 +101,7 @@ impl Process {
         node: &JoinNode,
         program: &MastForest,
         host: &mut H,
-        err_ctx: &OpErrorContext,
+        err_ctx: &ErrorContext,
     ) -> Result<(), ExecutionError> {
         // this appends a row with END operation to the decoder trace. when END operation is
         // executed the rest of the VM state does not change
@@ -121,7 +121,7 @@ impl Process {
         node: &SplitNode,
         program: &MastForest,
         host: &mut H,
-        err_ctx: &OpErrorContext,
+        err_ctx: &ErrorContext,
     ) -> Result<Felt, ExecutionError> {
         let condition = self.stack.peek();
 
@@ -161,7 +161,7 @@ impl Process {
         block: &SplitNode,
         program: &MastForest,
         host: &mut H,
-        err_ctx: &OpErrorContext,
+        err_ctx: &ErrorContext,
     ) -> Result<(), ExecutionError> {
         // this appends a row with END operation to the decoder trace. when END operation is
         // executed the rest of the VM state does not change
@@ -181,7 +181,7 @@ impl Process {
         node: &LoopNode,
         program: &MastForest,
         host: &mut H,
-        err_ctx: &OpErrorContext,
+        err_ctx: &ErrorContext,
     ) -> Result<Felt, ExecutionError> {
         let condition = self.stack.peek();
 
@@ -223,7 +223,7 @@ impl Process {
         pop_stack: bool,
         program: &MastForest,
         host: &mut H,
-        err_ctx: &OpErrorContext,
+        err_ctx: &ErrorContext,
     ) -> Result<(), ExecutionError> {
         // this appends a row with END operation to the decoder trace.
         self.decoder.end_control_block(node.digest());
@@ -254,7 +254,7 @@ impl Process {
         node: &CallNode,
         program: &MastForest,
         host: &mut H,
-        err_ctx: &OpErrorContext,
+        err_ctx: &ErrorContext,
     ) -> Result<(), ExecutionError> {
         // use the hasher to compute the hash of the CALL or SYSCALL block; the row address
         // returned by the hasher is used as the ID of the block; the result of the hash is
@@ -316,7 +316,7 @@ impl Process {
         node: &CallNode,
         program: &MastForest,
         host: &mut H,
-        err_ctx: &OpErrorContext,
+        err_ctx: &ErrorContext,
     ) -> Result<(), ExecutionError> {
         // when a CALL block ends, stack depth must be exactly 16
         let stack_depth = self.stack.depth();
@@ -351,7 +351,7 @@ impl Process {
         dyn_node: &DynNode,
         program: &MastForest,
         host: &mut H,
-        err_ctx: &OpErrorContext,
+        err_ctx: &ErrorContext,
     ) -> Result<Word, ExecutionError> {
         debug_assert!(!dyn_node.is_dyncall());
 
@@ -392,7 +392,7 @@ impl Process {
         &mut self,
         dyn_node: &DynNode,
         host: &mut H,
-        err_ctx: &OpErrorContext,
+        err_ctx: &ErrorContext,
     ) -> Result<Word, ExecutionError> {
         debug_assert!(dyn_node.is_dyncall());
 
@@ -456,7 +456,7 @@ impl Process {
         dyn_node: &DynNode,
         program: &MastForest,
         host: &mut H,
-        err_ctx: &OpErrorContext,
+        err_ctx: &ErrorContext,
     ) -> Result<(), ExecutionError> {
         // this appends a row with END operation to the decoder trace. when the END operation is
         // executed the rest of the VM state does not change
@@ -472,7 +472,7 @@ impl Process {
         dyn_node: &DynNode,
         program: &MastForest,
         host: &mut H,
-        err_ctx: &OpErrorContext,
+        err_ctx: &ErrorContext,
     ) -> Result<(), ExecutionError> {
         // when a DYNCALL block ends, stack depth must be exactly 16
         let stack_depth = self.stack.depth();
@@ -504,7 +504,7 @@ impl Process {
         basic_block: &BasicBlockNode,
         program: &MastForest,
         host: &mut H,
-        err_ctx: &OpErrorContext,
+        err_ctx: &ErrorContext,
     ) -> Result<(), ExecutionError> {
         // use the hasher to compute the hash of the BASIC BLOCK; the row address returned by the
         // hasher is used as the ID of the block; hash of a BASIC BLOCK is computed by sequentially
@@ -533,7 +533,7 @@ impl Process {
         block: &BasicBlockNode,
         program: &MastForest,
         host: &mut H,
-        err_ctx: &OpErrorContext,
+        err_ctx: &ErrorContext,
     ) -> Result<(), ExecutionError> {
         // this appends a row with END operation to the decoder trace. when END operation is
         // executed the rest of the VM state does not change

@@ -8,7 +8,7 @@ use miden_core::{
 use crate::{
     AsyncHost, ExecutionError, OperationError,
     continuation_stack::ContinuationStack,
-    errors::{OpErrorContext, ResultOpErrExt},
+    errors::{ErrorContext, OperationResultExt},
     fast::{FastProcessor, Tracer, trace_state::NodeExecutionState},
 };
 
@@ -50,7 +50,7 @@ impl FastProcessor {
         } else if condition == ZERO {
             continuation_stack.push_start_node(split_node.on_false());
         } else {
-            let err_ctx = OpErrorContext::new(current_forest, node_id, clk_at_start);
+            let err_ctx = ErrorContext::new(current_forest, node_id, clk_at_start);
             return OperationError::NotBinaryValueIf(condition)
                 .map_exec_err_with_host(&err_ctx, host);
         };

@@ -5,7 +5,7 @@ use miden_core::mast::{ExternalNode, MastForest, MastNodeExt, MastNodeId};
 use crate::{
     AsyncHost, ExecutionError, OperationError,
     continuation_stack::ContinuationStack,
-    errors::ResultOpErrExt,
+    errors::OperationResultExt,
     fast::{FastProcessor, Tracer},
 };
 

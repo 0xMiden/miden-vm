@@ -312,20 +312,20 @@ pub enum AceError {
 /// # Examples
 ///
 /// ```ignore
-/// use miden_processor::{OpErrorContext, ResultOpErrExt};
+/// use miden_processor::{ErrorContext, OperationResultExt};
 ///
 /// // Node-level error (no specific operation)
-/// let ctx = OpErrorContext::new(program, node_id, clk);
+/// let ctx = ErrorContext::new(program, node_id, clk);
 /// some_operation()
 ///     .map_exec_err(&ctx)?;
 ///
 /// // Operation-level error (specific op index)
-/// let ctx = OpErrorContext::with_op(program, node_id, op_idx, clk);
+/// let ctx = ErrorContext::with_op(program, node_id, op_idx, clk);
 /// execute_operation()
 ///     .map_exec_err(&ctx)?;
 /// ```
 #[cfg(not(feature = "no_err_ctx"))]
-pub struct OpErrorContext<'a> {
+pub struct ErrorContext<'a> {
     clk: RowIndex,
     program: &'a MastForest,
     node_id: MastNodeId,
@@ -333,13 +333,13 @@ pub struct OpErrorContext<'a> {
 }
 
 #[cfg(feature = "no_err_ctx")]
-pub struct OpErrorContext<'a> {
+pub struct ErrorContext<'a> {
     clk: RowIndex,
     _phantom: core::marker::PhantomData<&'a ()>,
 }
 
 #[cfg(not(feature = "no_err_ctx"))]
-impl<'a> OpErrorContext<'a> {
+impl<'a> ErrorContext<'a> {
     /// Create context for node-level errors (no specific operation index).
     ///
     /// Use this for errors that occur at the node boundary (e.g., node not found,
@@ -393,7 +393,7 @@ impl<'a> OpErrorContext<'a> {
 }
 
 #[cfg(feature = "no_err_ctx")]
-impl<'a> OpErrorContext<'a> {
+impl<'a> ErrorContext<'a> {
     /// Create context for node-level errors (no specific operation index).
     ///
     /// When the `no_err_ctx` feature is enabled, this just stores the clock cycle.
@@ -430,7 +430,7 @@ impl<'a> OpErrorContext<'a> {
 }
 
 #[cfg(not(feature = "no_err_ctx"))]
-impl<'a> OpErrorContext<'a> {
+impl<'a> ErrorContext<'a> {
     /// Returns the clock cycle associated with this error context.
     ///
     /// This is always cheap to access.
@@ -512,7 +512,7 @@ impl<'a> OpErrorContext<'a> {
 }
 
 #[cfg(feature = "no_err_ctx")]
-impl<'a> OpErrorContext<'a> {
+impl<'a> ErrorContext<'a> {
     /// Returns the clock cycle associated with this error context.
     ///
     /// This is always cheap to access.
@@ -562,7 +562,7 @@ impl<'a> OpErrorContext<'a> {
 ///
 /// This trait provides convenient methods to wrap `OperationError` in `ExecutionError` using
 /// either explicit context information or error context providers.
-pub trait ResultOpErrExt<T> {
+pub trait OperationResultExt<T> {
     /// Converts `Result<T, OperationError>` to `Result<T, ExecutionError>` by wrapping the error
     /// in `ExecutionError::OperationErrorNoContext` with the given clock cycle.
     ///
@@ -579,7 +579,7 @@ pub trait ResultOpErrExt<T> {
     /// Converts `Result<T, OperationError>` to `Result<T, ExecutionError>` by wrapping the error
     /// using the provided error context and host.
     ///
-    /// This method uses [`OpErrorContext`] which defers source resolution until the error path,
+    /// This method uses [`ErrorContext`] which defers source resolution until the error path,
     /// enabling full source location resolution including source file information.
     ///
     /// # Arguments
@@ -589,18 +589,18 @@ pub trait ResultOpErrExt<T> {
     ///
     /// # Example
     /// ```ignore
-    /// let ctx = OpErrorContext::with_op(program, node_id, op_idx, clk);
+    /// let ctx = ExecutionSiteContext::with_op(program, node_id, op_idx, clk);
     /// some_operation()
     ///     .map_exec_err_with_host(&ctx, host)?;
     /// ```
     fn map_exec_err_with_host(
         self,
-        err_ctx: &OpErrorContext,
+        err_ctx: &ErrorContext,
         host: &impl BaseHost,
     ) -> Result<T, ExecutionError>;
 }
 
-impl<T> ResultOpErrExt<T> for Result<T, OperationError> {
+impl<T> OperationResultExt<T> for Result<T, OperationError> {
     #[inline]
     fn map_exec_err_no_ctx(self, clk: RowIndex) -> Result<T, ExecutionError> {
         self.map_err(|err| ExecutionError::OperationErrorNoContext { clk, err: Box::new(err) })
@@ -609,14 +609,14 @@ impl<T> ResultOpErrExt<T> for Result<T, OperationError> {
     #[inline]
     fn map_exec_err_with_host(
         self,
-        err_ctx: &OpErrorContext,
+        err_ctx: &ErrorContext,
         host: &impl BaseHost,
     ) -> Result<T, ExecutionError> {
         self.map_err(|err| err_ctx.wrap_op_err_with_host(host, err))
     }
 }
 
-impl<T> ResultOpErrExt<T> for OperationError {
+impl<T> OperationResultExt<T> for OperationError {
     #[inline]
     fn map_exec_err_no_ctx(self, clk: RowIndex) -> Result<T, ExecutionError> {
         Err(ExecutionError::OperationErrorNoContext { clk, err: Box::new(self) })
@@ -625,7 +625,7 @@ impl<T> ResultOpErrExt<T> for OperationError {
     #[inline]
     fn map_exec_err_with_host(
         self,
-        err_ctx: &OpErrorContext,
+        err_ctx: &ErrorContext,
         host: &impl BaseHost,
     ) -> Result<T, ExecutionError> {
         Err(err_ctx.wrap_op_err_with_host(host, self))

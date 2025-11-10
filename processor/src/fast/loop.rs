@@ -8,7 +8,7 @@ use miden_core::{
 use crate::{
     AsyncHost, ExecutionError, OperationError,
     continuation_stack::ContinuationStack,
-    errors::{OpErrorContext, ResultOpErrExt},
+    errors::{ErrorContext, OperationResultExt},
     fast::{FastProcessor, Tracer, trace_state::NodeExecutionState},
 };
 
@@ -73,7 +73,7 @@ impl FastProcessor {
             // Execute decorators that should be executed after exiting the node
             self.execute_after_exit_decorators(current_node_id, current_forest, host)?;
         } else {
-            let err_ctx = OpErrorContext::new(current_forest, current_node_id, clk_at_start);
+            let err_ctx = ErrorContext::new(current_forest, current_node_id, clk_at_start);
             return OperationError::NotBinaryValueLoop(condition)
                 .map_exec_err_with_host(&err_ctx, host);
         }
@@ -126,7 +126,7 @@ impl FastProcessor {
             self.increment_clk(tracer);
             self.execute_after_exit_decorators(current_node_id, current_forest, host)?;
         } else {
-            let err_ctx = OpErrorContext::new(current_forest, current_node_id, self.clk);
+            let err_ctx = ErrorContext::new(current_forest, current_node_id, self.clk);
             return OperationError::NotBinaryValueLoop(condition)
                 .map_exec_err_with_host(&err_ctx, host);
         }

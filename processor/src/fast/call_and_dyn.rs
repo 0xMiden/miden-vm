@@ -10,7 +10,7 @@ use miden_core::{
 use crate::{
     AsyncHost, ContextId, ExecutionError, OperationError,
     continuation_stack::ContinuationStack,
-    errors::{OpErrorContext, ResultOpErrExt},
+    errors::{ErrorContext, OperationResultExt},
     fast::{
         ExecutionContextInfo, FastProcessor, INITIAL_STACK_TOP_IDX, STACK_BUFFER_SIZE, Tracer,
         trace_state::NodeExecutionState,
@@ -41,7 +41,7 @@ impl FastProcessor {
         // Execute decorators that should be executed before entering the node
         self.execute_before_enter_decorators(current_node_id, current_forest, host)?;
 
-        let err_ctx = OpErrorContext::new(current_forest, current_node_id, self.clk);
+        let err_ctx = ErrorContext::new(current_forest, current_node_id, self.clk);
 
         let callee_hash = current_forest
             .get_node_by_id(call_node.callee())
@@ -104,7 +104,7 @@ impl FastProcessor {
             current_forest,
         );
 
-        let err_ctx = OpErrorContext::new(current_forest, node_id, self.clk);
+        let err_ctx = ErrorContext::new(current_forest, node_id, self.clk);
         // when returning from a function call or a syscall, restore the
         // context of the
         // system registers and the operand stack to what it was prior
@@ -140,7 +140,7 @@ impl FastProcessor {
         // added to the trace.
         let dyn_node = current_forest[current_node_id].unwrap_dyn();
 
-        let err_ctx = OpErrorContext::new(current_forest, current_node_id, self.clk);
+        let err_ctx = ErrorContext::new(current_forest, current_node_id, self.clk);
 
         // Retrieve callee hash from memory, using stack top as the memory
         // address.
@@ -235,7 +235,7 @@ impl FastProcessor {
         );
 
         let dyn_node = current_forest[node_id].unwrap_dyn();
-        let err_ctx = OpErrorContext::new(current_forest, node_id, self.clk);
+        let err_ctx = ErrorContext::new(current_forest, node_id, self.clk);
         // For dyncall, restore the context.
         if dyn_node.is_dyncall() {
             self.restore_context(tracer).map_exec_err_with_host(&err_ctx, host)?;

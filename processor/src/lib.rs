@@ -78,7 +78,7 @@ use trace::TraceFragment;
 pub use trace::{ChipletsLengths, ExecutionTrace, NUM_RAND_ROWS, TraceLenSummary};
 
 mod errors;
-pub use errors::{ExecutionError, OpErrorContext, OperationError, ResultOpErrExt};
+pub use errors::{ExecutionError, ErrorContext, OperationError, OperationResultExt};
 
 pub mod utils;
 
@@ -346,29 +346,29 @@ impl Process {
 
         match node {
             MastNode::Block(node) => {
-                let err_ctx = OpErrorContext::new(program, node_id, self.system.clk());
+                let err_ctx = ErrorContext::new(program, node_id, self.system.clk());
                 self.execute_basic_block_node(node, node_id, program, host, &err_ctx)?
             },
             MastNode::Join(node) => {
-                let err_ctx = OpErrorContext::new(program, node_id, self.system.clk());
+                let err_ctx = ErrorContext::new(program, node_id, self.system.clk());
                 self.execute_join_node(node, program, host, &err_ctx)?
             },
             MastNode::Split(node) => {
                 // Capture clock before start_split_node increments it via Drop operation.
                 // This ensures slow/fast path report the same clock cycle for initial condition
                 // errors.
-                let err_ctx = OpErrorContext::new(program, node_id, self.system.clk());
+                let err_ctx = ErrorContext::new(program, node_id, self.system.clk());
                 self.execute_split_node(node, program, host, &err_ctx)?
             },
             MastNode::Loop(node) => {
                 // Capture clock before start_loop_node increments it via Drop operation.
                 // This ensures slow/fast path report the same clock cycle for initial condition
                 // errors.
-                let err_ctx = OpErrorContext::new(program, node_id, self.system.clk());
+                let err_ctx = ErrorContext::new(program, node_id, self.system.clk());
                 self.execute_loop_node(node, node_id, program, host, &err_ctx)?
             },
             MastNode::Call(node) => {
-                let err_ctx = OpErrorContext::new(program, node_id, self.system.clk());
+                let err_ctx = ErrorContext::new(program, node_id, self.system.clk());
                 add_error_ctx_to_external_error(
                     self.execute_call_node(node, node_id, program, host, &err_ctx),
                     &err_ctx,
@@ -380,7 +380,7 @@ impl Process {
                 // operation. This ensures slow/fast path report the same clock
                 // cycle for node not found errors.
                 let clk_before_start = self.system.clk();
-                let err_ctx = OpErrorContext::new(program, node_id, clk_before_start);
+                let err_ctx = ErrorContext::new(program, node_id, clk_before_start);
                 add_error_ctx_to_external_error(
                     self.execute_dyn_node(node, node_id, program, host, &err_ctx),
                     &err_ctx,
@@ -388,7 +388,7 @@ impl Process {
                 )?
             },
             MastNode::External(external_node) => {
-                let err_ctx = OpErrorContext::new(program, node_id, self.system.clk());
+                let err_ctx = ErrorContext::new(program, node_id, self.system.clk());
                 let (root_id, mast_forest) = self
                     .resolve_external_node(external_node, host)
                     .map_exec_err_with_host(&err_ctx, host)?;
@@ -411,7 +411,7 @@ impl Process {
         node: &JoinNode,
         program: &MastForest,
         host: &mut impl SyncHost,
-        err_ctx: &OpErrorContext,
+        err_ctx: &ErrorContext,
     ) -> Result<(), ExecutionError> {
         self.start_join_node(node, program, host, err_ctx)?;
 
@@ -429,7 +429,7 @@ impl Process {
         node: &SplitNode,
         program: &MastForest,
         host: &mut impl SyncHost,
-        err_ctx: &OpErrorContext,
+        err_ctx: &ErrorContext,
     ) -> Result<(), ExecutionError> {
         // start the SPLIT block; this also pops the stack and returns the popped element
         let condition = self.start_split_node(node, program, host, err_ctx)?;
@@ -455,7 +455,7 @@ impl Process {
         node_id: MastNodeId,
         program: &MastForest,
         host: &mut impl SyncHost,
-        err_ctx: &OpErrorContext,
+        err_ctx: &ErrorContext,
     ) -> Result<(), ExecutionError> {
         // start the LOOP block; this also pops the stack and returns the popped element
         let condition = self.start_loop_node(node, program, host, err_ctx)?;
@@ -478,7 +478,7 @@ impl Process {
             if self.stack.peek() != ZERO {
                 // Create a new error context with current clock for this error, not the one from
                 // the start of the loop. This ensures consistency with the fast processor.
-                let err_ctx = OpErrorContext::new(program, node_id, self.system.clk());
+                let err_ctx = ErrorContext::new(program, node_id, self.system.clk());
                 return OperationError::NotBinaryValueLoop(self.stack.peek())
                     .map_exec_err_with_host(&err_ctx, host);
             }
@@ -502,7 +502,7 @@ impl Process {
         node_id: MastNodeId,
         program: &MastForest,
         host: &mut impl SyncHost,
-        err_ctx: &OpErrorContext,
+        err_ctx: &ErrorContext,
     ) -> Result<(), ExecutionError> {
         // if this is a syscall, make sure the call target exists in the kernel
         if call_node.is_syscall() {
@@ -521,7 +521,7 @@ impl Process {
 
         // Create a new error context for end_call_node with the current clock, since errors
         // at the end of the call should report the clock at that point, not at the start.
-        let err_ctx = OpErrorContext::new(program, node_id, self.system.clk());
+        let err_ctx = ErrorContext::new(program, node_id, self.system.clk());
         self.end_call_node(call_node, program, host, &err_ctx)
     }
 
@@ -536,7 +536,7 @@ impl Process {
         node_id: MastNodeId,
         program: &MastForest,
         host: &mut impl SyncHost,
-        err_ctx: &OpErrorContext,
+        err_ctx: &ErrorContext,
     ) -> Result<(), ExecutionError> {
         let callee_hash = if node.is_dyncall() {
             self.start_dyncall_node(node, host, err_ctx)?
@@ -578,7 +578,7 @@ impl Process {
 
         // Create a new error context for end_dyn/dyncall_node with the current clock, since errors
         // at the end should report the clock at that point, not at the start.
-        let err_ctx = OpErrorContext::new(program, node_id, self.system.clk());
+        let err_ctx = ErrorContext::new(program, node_id, self.system.clk());
         if node.is_dyncall() {
             self.end_dyncall_node(node, program, host, &err_ctx)
         } else {
@@ -594,7 +594,7 @@ impl Process {
         node_id: MastNodeId,
         program: &MastForest,
         host: &mut impl SyncHost,
-        err_ctx: &OpErrorContext,
+        err_ctx: &ErrorContext,
     ) -> Result<(), ExecutionError> {
         self.start_basic_block_node(basic_block, program, host, err_ctx)?;
 
@@ -630,7 +630,7 @@ impl Process {
         // are executed after BASIC BLOCK is closed to make sure the VM clock cycle advances beyond
         // the last clock cycle of the BASIC BLOCK ops.
         for (_, decorator_id) in decorator_ids {
-            let decorator_err_ctx = OpErrorContext::new(program, node_id, self.system.clk());
+            let decorator_err_ctx = ErrorContext::new(program, node_id, self.system.clk());
             let decorator = program
                 .get_decorator_by_id(decorator_id)
                 .ok_or(OperationError::DecoratorNotFoundInForest(decorator_id))
@@ -671,7 +671,7 @@ impl Process {
         for (i, &op) in batch.ops().iter().enumerate() {
             while let Some((_, decorator_id)) = decorators.next_filtered(i + op_offset) {
                 let decorator_err_ctx =
-                    OpErrorContext::with_op(program, node_id, i + op_offset, self.system.clk());
+                    ErrorContext::with_op(program, node_id, i + op_offset, self.system.clk());
                 let decorator = program
                     .get_decorator_by_id(decorator_id)
                     .ok_or(OperationError::DecoratorNotFoundInForest(decorator_id))
@@ -681,7 +681,7 @@ impl Process {
 
             // decode and execute the operation
             let err_ctx =
-                OpErrorContext::with_op(program, node_id, i + op_offset, self.system.clk());
+                ErrorContext::with_op(program, node_id, i + op_offset, self.system.clk());
             self.decoder.execute_user_op(op, op_idx);
             self.execute_op(op, program, host).map_exec_err_with_host(&err_ctx, host)?;
 
@@ -1033,7 +1033,7 @@ impl<'a> From<&'a mut Process> for ProcessState<'a> {
 /// proper error context.
 pub(crate) fn add_error_ctx_to_external_error(
     result: Result<(), ExecutionError>,
-    err_ctx: &OpErrorContext,
+    err_ctx: &ErrorContext,
     host: &impl SyncHost,
 ) -> Result<(), ExecutionError> {
     match result {
