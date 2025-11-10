@@ -1,0 +1,17 @@
+# xclippy: Enforces strict linting to prevent redundant clones and other issues
+#
+# Due to Cargo alias limitations with feature flags, the lint flags are applied
+# at call-site rather than in the alias itself. This ensures consistent behavior
+# across Makefile and CI.
+#
+# Enforced lint flags (applied in Makefile and CI):
+# - -Dwarnings: Treat all warnings as errors
+# - -Dclippy::all: Enable all clippy lints
+# - -Wclippy::redundant_clone: Warn on redundant clones (prevents re-introduction of this PR's fixes)
+
+[alias]
+xclippy = [
+    "clippy",
+    "--workspace",
+    "--all-targets",
+]

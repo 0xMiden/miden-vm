@@ -57,7 +57,7 @@ FEATURES_verifier        :=
 
 .PHONY: clippy
 clippy: ## Runs Clippy with configs
-	cargo +nightly clippy --workspace --all-targets ${ALL_FEATURES_BUT_ASYNC} -- -D warnings
+	cargo +nightly xclippy ${ALL_FEATURES_BUT_ASYNC} -- -Dwarnings -Dclippy::all -Wclippy::redundant_clone
 
 
 .PHONY: fix

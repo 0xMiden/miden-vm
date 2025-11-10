@@ -1,16 +1,12 @@
 # Runs linting related jobs.
-
 name: lint
-
 permissions:
   contents: read
-
 on:
   push:
     branches: [main, next]
   pull_request:
     types: [opened, reopened, synchronize]
-
 jobs:
   clippy:
     name: clippy nightly on ubuntu-latest
@@ -21,8 +17,7 @@ jobs:
         run: |
           rustup update --no-self-update nightly
           rustup +nightly component add clippy
-          make clippy
-
+          cargo +nightly xclippy --features concurrent,executable,metal,testing,with-debug-info,internal -- -Dwarnings -Dclippy::all -Wclippy::redundant_clone
   rustfmt:
     name: rustfmt check nightly on ubuntu-latest
     runs-on: ubuntu-latest
@@ -33,7 +28,6 @@ jobs:
           rustup update --no-self-update nightly
           rustup +nightly component add rustfmt
           make format-check
-
   doc:
     name: doc stable on ubuntu-latest
     runs-on: ubuntu-latest
