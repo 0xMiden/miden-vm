@@ -1,6 +1,6 @@
 use miden_processor::{ExecutionError, OperationError};
 use miden_utils_testing::{
-    Felt, U32_BOUND, ZERO, build_op_test, expect_exec_error_matches, prop_randw,
+    Felt, U32_BOUND, ZERO, build_op_test, expect_op_error_matches, prop_randw,
 };
 
 mod arithmetic_ops;
@@ -16,13 +16,12 @@ mod conversion_ops;
 pub fn test_input_out_of_bounds(asm_op: &str) {
     let test = build_op_test!(asm_op, &[U32_BOUND]);
 
-    expect_exec_error_matches!(
+    expect_op_error_matches!(
         test,
-        ExecutionError::OperationError { ref err, ..  } | ExecutionError::OperationErrorNoContext { ref err, ..  }
-            if matches!(err.as_ref(), OperationError::NotU32Values { values, err_code } if
+        OperationError::NotU32Values { values, err_code } if
             values.len() == 1 &&
             values[0] == Felt::new(U32_BOUND) &&
-            *err_code == ZERO)
+            *err_code == ZERO
     );
 }
 
@@ -38,13 +37,12 @@ pub fn test_inputs_out_of_bounds(asm_op: &str, input_count: usize) {
 
         let test = build_op_test!(asm_op, &i_inputs);
 
-        expect_exec_error_matches!(
+        expect_op_error_matches!(
             test,
-            ExecutionError::OperationError { ref err, ..  } | ExecutionError::OperationErrorNoContext { ref err, ..  }
-            if matches!(err.as_ref(), OperationError::NotU32Values { values, err_code } if
+            OperationError::NotU32Values { values, err_code } if
                 values.len() == 1 &&
                 values[0] == Felt::new(U32_BOUND) &&
-                *err_code == ZERO)
+                *err_code == ZERO
         );
     }
 }

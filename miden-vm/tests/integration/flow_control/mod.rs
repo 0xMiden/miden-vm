@@ -5,7 +5,7 @@ use miden_debug_types::{SourceLanguage, SourceManager};
 use miden_processor::{ExecutionError, OperationError};
 use miden_prover::Word;
 use miden_stdlib::StdLibrary;
-use miden_utils_testing::{StackInputs, Test, build_test, expect_exec_error_matches, push_inputs};
+use miden_utils_testing::{StackInputs, Test, build_test, expect_op_error_matches, push_inputs};
 use miden_vm::Module;
 
 // SIMPLE FLOW CONTROL TESTS
@@ -67,11 +67,7 @@ fn faulty_condition_from_loop() {
         end";
 
     let test = build_test!(source, &[10]);
-    expect_exec_error_matches!(
-        test,
-        ExecutionError::OperationError { ref err, ..  } | ExecutionError::OperationErrorNoContext { ref err, ..  }
-            if matches!(err.as_ref(), OperationError::NotBinaryValueLoop(_))
-    );
+    expect_op_error_matches!(test, OperationError::NotBinaryValueLoop(_));
 }
 
 #[test]
@@ -161,11 +157,7 @@ fn local_fn_call() {
         end";
 
     let build_test = build_test!(source, &[1, 2]);
-    expect_exec_error_matches!(
-        build_test,
-        ExecutionError::OperationError { ref err, ..  } | ExecutionError::OperationErrorNoContext { ref err, ..  }
-            if matches!(err.as_ref(), OperationError::InvalidStackDepthOnReturn(17))
-    );
+    expect_op_error_matches!(build_test, OperationError::InvalidStackDepthOnReturn(17));
 
     let inputs = (1_u64..18).collect::<Vec<_>>();
 

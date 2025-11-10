@@ -1,6 +1,6 @@
 use miden_processor::{ExecutionError, OperationError, RowIndex};
 use miden_utils_testing::{
-    U32_BOUND, build_op_test, expect_exec_error_matches, proptest::prelude::*, rand::rand_value,
+    U32_BOUND, build_op_test, expect_op_error_matches, proptest::prelude::*, rand::rand_value,
 };
 
 // U32 OPERATIONS TESTS - MANUAL - ARITHMETIC OPERATIONS
@@ -441,10 +441,7 @@ fn u32div_fail() {
     // should fail if b == 0.
     let test = build_op_test!(asm_op, &[1, 0]);
 
-    expect_exec_error_matches!(
-        test,
-        ExecutionError::OperationError { clk: value, ref err, .. } | ExecutionError::OperationErrorNoContext { clk: value, ref err, .. } if value == RowIndex::from(6) && matches!(err.as_ref(), OperationError::DivideByZero)
-    );
+    expect_op_error_matches!(test, clk = RowIndex::from(6), OperationError::DivideByZero);
 }
 
 #[test]
@@ -483,10 +480,7 @@ fn u32mod_fail() {
     // should fail if b == 0
     let test = build_op_test!(asm_op, &[1, 0]);
 
-    expect_exec_error_matches!(
-        test,
-        ExecutionError::OperationError { clk: value, ref err, .. } | ExecutionError::OperationErrorNoContext { clk: value, ref err, .. } if value == RowIndex::from(6) && matches!(err.as_ref(), OperationError::DivideByZero)
-    );
+    expect_op_error_matches!(test, clk = RowIndex::from(6), OperationError::DivideByZero);
 }
 
 #[test]
@@ -530,10 +524,7 @@ fn u32divmod_fail() {
     // should fail if b == 0.
     let test = build_op_test!(asm_op, &[1, 0]);
 
-    expect_exec_error_matches!(
-        test,
-        ExecutionError::OperationError { clk: value, ref err, .. } | ExecutionError::OperationErrorNoContext { clk: value, ref err, .. } if value == RowIndex::from(6) && matches!(err.as_ref(), OperationError::DivideByZero)
-    );
+    expect_op_error_matches!(test, clk = RowIndex::from(6), OperationError::DivideByZero);
 }
 
 // U32 OPERATIONS TESTS - RANDOMIZED - ARITHMETIC OPERATIONS

@@ -1,6 +1,6 @@
 use miden_processor::{ExecutionError, OperationError};
 use miden_utils_testing::{
-    Felt, StarkField, U32_BOUND, WORD_SIZE, ZERO, build_op_test, expect_exec_error_matches,
+    Felt, StarkField, U32_BOUND, WORD_SIZE, ZERO, build_op_test, expect_op_error_matches,
     proptest::prelude::*, rand::rand_value,
 };
 
@@ -101,25 +101,23 @@ fn u32assert_fail() {
     // --- test when a = 2^32 ---------------------------------------------------------------------
     let test = build_op_test!(asm_op, &[equal]);
 
-    expect_exec_error_matches!(
+    expect_op_error_matches!(
         test,
-        ExecutionError::OperationError { ref err, ..  } | ExecutionError::OperationErrorNoContext { ref err, ..  }
-            if matches!(err.as_ref(), OperationError::NotU32Values { values, err_code } if
+        OperationError::NotU32Values { values, err_code } if
             values.len() == 1 &&
             values[0] == Felt::new(equal) &&
-            *err_code == ZERO)
+            *err_code == ZERO
     );
 
     // --- test when a > 2^32 ---------------------------------------------------------------------
     let test = build_op_test!(asm_op, &[larger]);
 
-    expect_exec_error_matches!(
+    expect_op_error_matches!(
         test,
-        ExecutionError::OperationError { ref err, ..  } | ExecutionError::OperationErrorNoContext { ref err, ..  }
-            if matches!(err.as_ref(), OperationError::NotU32Values { values, err_code } if
+        OperationError::NotU32Values { values, err_code } if
             values.len() == 1 &&
             values[0] == Felt::new(larger) &&
-            *err_code == ZERO)
+            *err_code == ZERO
     );
 }
 
@@ -148,14 +146,13 @@ fn u32assert2_fail() {
     let value_b = value_a + 2; // 4294967299
     let test = build_op_test!(asm_op, &[value_a, value_b]);
 
-    expect_exec_error_matches!(
+    expect_op_error_matches!(
         test,
-        ExecutionError::OperationError { ref err, ..  } | ExecutionError::OperationErrorNoContext { ref err, ..  }
-            if matches!(err.as_ref(), OperationError::NotU32Values { values, err_code } if
+        OperationError::NotU32Values { values, err_code } if
             values.len() == 2 &&
             values[0] == Felt::new(value_b) &&
             values[1] == Felt::new(value_a) &&
-            *err_code == ZERO)
+            *err_code == ZERO
     );
 
     // -------- Case 2: a > 2^32 and b < 2^32 ---------------------------------------------------
@@ -163,13 +160,12 @@ fn u32assert2_fail() {
     let value_b = 1_u64; // 1 (valid)
     let test = build_op_test!(asm_op, &[value_a, value_b]);
 
-    expect_exec_error_matches!(
+    expect_op_error_matches!(
         test,
-        ExecutionError::OperationError { ref err, ..  } | ExecutionError::OperationErrorNoContext { ref err, ..  }
-            if matches!(err.as_ref(), OperationError::NotU32Values { values, err_code } if
+        OperationError::NotU32Values { values, err_code } if
             values.len() == 1 &&
             values[0] == Felt::new(value_a) &&
-            *err_code == ZERO)
+            *err_code == ZERO
     );
 
     // --------- Case 3: a < 2^32 and b > 2^32 --------------------------------------------------
@@ -177,13 +173,12 @@ fn u32assert2_fail() {
     let value_a = 1_u64; // 1 (valid)
     let test = build_op_test!(asm_op, &[value_a, value_b]);
 
-    expect_exec_error_matches!(
+    expect_op_error_matches!(
         test,
-        ExecutionError::OperationError { ref err, ..  } | ExecutionError::OperationErrorNoContext { ref err, ..  }
-            if matches!(err.as_ref(), OperationError::NotU32Values { values, err_code } if
+        OperationError::NotU32Values { values, err_code } if
             values.len() == 1 &&
             values[0] == Felt::new(value_b) &&
-            *err_code == ZERO)
+            *err_code == ZERO
     );
 }
 
@@ -209,13 +204,12 @@ fn u32assertw_fail() {
     // first 2 values before failing. This is why we expect only 2 values in the error.
     let test = build_op_test!(asm_op, &[U32_BOUND; WORD_SIZE]);
 
-    expect_exec_error_matches!(
+    expect_op_error_matches!(
         test,
-        ExecutionError::OperationError { ref err, ..  } | ExecutionError::OperationErrorNoContext { ref err, ..  }
-            if matches!(err.as_ref(), OperationError::NotU32Values { values, err_code } if
+        OperationError::NotU32Values { values, err_code } if
             values.len() == 2 &&
             values.iter().all(|v| *v == Felt::new(U32_BOUND)) &&
-            *err_code == ZERO)
+            *err_code == ZERO
     );
 }
 

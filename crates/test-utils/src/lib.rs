@@ -111,13 +111,39 @@ assertion failed (expected assembly error, but got a different type):
 /// Asserts that running the given execution test will result in the expected error.
 #[cfg(all(feature = "std", not(target_family = "wasm")))]
 #[macro_export]
-macro_rules! expect_exec_error_matches {
+macro_rules! expect_op_error_matches {
     ($test:expr, $(|)? $( $pattern:pat_param )|+ $( if $guard: expr )? $(,)?) => {
+        $crate::expect_op_error_matches!(
+            @run
+            $test,
+            core::option::Option::<::miden_processor::RowIndex>::None,
+            $( $pattern )|+ $( if $guard )?
+        )
+    };
+    ($test:expr, clk = $expected_clk:expr, $(|)? $( $pattern:pat_param )|+ $( if $guard: expr )? $(,)?) => {
+        $crate::expect_op_error_matches!(
+            @run
+            $test,
+            core::option::Option::Some($expected_clk),
+            $( $pattern )|+ $( if $guard )?
+        )
+    };
+    (@run $test:expr, $expected_clk:expr, $(|)? $( $pattern:pat_param )|+ $( if $guard: expr )?) => {{
         match $test.execute() {
             Ok(_) => panic!("expected execution to fail @ {}:{}", file!(), line!()),
-            Err(error) => ::miden_core::assert_matches!(error, $( $pattern )|+ $( if $guard )?),
+            Err(
+                ::miden_processor::ExecutionError::OperationError { clk, err, .. }
+                | ::miden_processor::ExecutionError::OperationErrorNoContext { clk, err, .. },
+            ) => {
+                if let Some(expected) = $expected_clk {
+                    assert_eq!(clk, expected, "unexpected clock cycle");
+                }
+                let op_err = err.as_ref();
+                ::miden_core::assert_matches!(op_err, $( $pattern )|+ $( if $guard )?);
+            },
+            Err(other) => panic!("expected operation error, got {other:?}"),
         }
-    };
+    }};
 }
 
 /// Like [miden_assembly::testing::assert_diagnostic], but matches each non-empty line of the

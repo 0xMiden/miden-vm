@@ -1,6 +1,6 @@
 use miden_core::{EventName, mast};
 use miden_processor::{ExecutionError, NoopEventHandler, OperationError, RowIndex, ZERO};
-use miden_utils_testing::{build_op_test, expect_exec_error_matches};
+use miden_utils_testing::{build_op_test, expect_op_error_matches};
 
 // SYSTEM OPS ASSERTIONS - MANUAL TESTS
 // ================================================================================================
@@ -25,11 +25,10 @@ fn assert_with_code() {
 
     let code = mast::error_code_from_msg("123");
 
-    expect_exec_error_matches!(
+    expect_op_error_matches!(
         test,
-        ExecutionError::OperationError { clk, ref err, ..  } | ExecutionError::OperationErrorNoContext { clk, ref err, ..  }
-        if clk == RowIndex::from(6)
-            && matches!(err.as_ref(), OperationError::FailedAssertion { err_code, .. } if *err_code == code)
+        clk = RowIndex::from(6),
+        OperationError::FailedAssertion { err_code, .. } if *err_code == code
     );
 }
 
@@ -39,11 +38,10 @@ fn assert_fail() {
 
     let test = build_op_test!(asm_op, &[2]);
 
-    expect_exec_error_matches!(
+    expect_op_error_matches!(
         test,
-        ExecutionError::OperationError { clk, ref err, ..  } | ExecutionError::OperationErrorNoContext { clk, ref err, ..  }
-        if clk == RowIndex::from(6)
-            && matches!(err.as_ref(), OperationError::FailedAssertion { err_code, .. } if *err_code == ZERO)
+        clk = RowIndex::from(6),
+        OperationError::FailedAssertion { err_code, .. } if *err_code == ZERO
     );
 }
 
@@ -64,22 +62,20 @@ fn assert_eq_fail() {
 
     let test = build_op_test!(asm_op, &[2, 1]);
 
-    expect_exec_error_matches!(
+    expect_op_error_matches!(
         test,
-        ExecutionError::OperationError { clk, ref err, ..  } | ExecutionError::OperationErrorNoContext { clk, ref err, ..  }
-        if clk == RowIndex::from(7)
-            && matches!(err.as_ref(), OperationError::FailedAssertion { err_code, err_msg }
-                if *err_code == ZERO && err_msg.is_none())
+        clk = RowIndex::from(7),
+        OperationError::FailedAssertion { err_code, err_msg }
+            if *err_code == ZERO && err_msg.is_none()
     );
 
     let test = build_op_test!(asm_op, &[1, 4]);
 
-    expect_exec_error_matches!(
+    expect_op_error_matches!(
         test,
-        ExecutionError::OperationError { clk, ref err, ..  } | ExecutionError::OperationErrorNoContext { clk, ref err, ..  }
-        if clk == RowIndex::from(7)
-            && matches!(err.as_ref(), OperationError::FailedAssertion { err_code, err_msg }
-                if *err_code == ZERO && err_msg.is_none())
+        clk = RowIndex::from(7),
+        OperationError::FailedAssertion { err_code, err_msg }
+            if *err_code == ZERO && err_msg.is_none()
     );
 }
 

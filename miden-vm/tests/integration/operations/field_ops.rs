@@ -2,7 +2,7 @@ use miden_assembly::testing::regex;
 use miden_processor::{ExecutionError, OperationError, RowIndex};
 use miden_utils_testing::{
     Felt, FieldElement, ONE, StarkField, WORD_SIZE, ZERO, assert_assembler_diagnostic,
-    assert_diagnostic_lines, build_op_test, expect_exec_error_matches, prop_randw,
+    assert_diagnostic_lines, build_op_test, expect_op_error_matches, prop_randw,
     proptest::prelude::*, rand::rand_value,
 };
 
@@ -213,11 +213,7 @@ fn div_fail() {
 
     // --- test divide by zero --------------------------------------------------------------------
     let test = build_op_test!(asm_op, &[1, 0]);
-    expect_exec_error_matches!(
-        test,
-        ExecutionError::OperationError { clk: value, ref err, ..  } | ExecutionError::OperationErrorNoContext { clk: value, ref err, ..  }
-            if value == RowIndex::from(6) && matches!(err.as_ref(), OperationError::DivideByZero)
-    );
+    expect_op_error_matches!(test, clk = RowIndex::from(6), OperationError::DivideByZero);
 }
 
 #[test]
@@ -283,7 +279,7 @@ fn inv_fail() {
 
     // --- test no inv on 0 -----------------------------------------------------------------------
     let test = build_op_test!(asm_op, &[0]);
-    expect_exec_error_matches!(test, ExecutionError::OperationError { clk: row_idx, ref err, .. } | ExecutionError::OperationErrorNoContext { clk: row_idx, ref err, .. } if row_idx == RowIndex::from(6) && matches!(err.as_ref(), OperationError::DivideByZero));
+    expect_op_error_matches!(test, clk = RowIndex::from(6), OperationError::DivideByZero);
 
     let asm_op = "inv.1";
 
@@ -323,12 +319,11 @@ fn pow2_fail() {
 
     let test = build_op_test!(asm_op, &[value]);
 
-    expect_exec_error_matches!(
+    expect_op_error_matches!(
         test,
-        ExecutionError::OperationError { clk: clk_value, ref err, ..  } | ExecutionError::OperationErrorNoContext { clk: clk_value, ref err, ..  }
-        if clk_value == RowIndex::from(21)
-            && matches!(err.as_ref(), OperationError::FailedAssertion { err_code, err_msg }
-                if *err_code == ZERO && err_msg.is_none())
+        clk = RowIndex::from(21),
+        OperationError::FailedAssertion { err_code, err_msg }
+            if *err_code == ZERO && err_msg.is_none()
     );
 }
 
@@ -357,12 +352,11 @@ fn exp_bits_length_fail() {
 
     let test = build_op_test!(build_asm_op(9), &[base, pow]);
 
-    expect_exec_error_matches!(
+    expect_op_error_matches!(
         test,
-        ExecutionError::OperationError { clk: clk_val, ref err, ..  } | ExecutionError::OperationErrorNoContext { clk: clk_val, ref err, ..  }
-        if clk_val == RowIndex::from(23)
-            && matches!(err.as_ref(), OperationError::FailedAssertion { err_code, err_msg }
-                if *err_code == ZERO && err_msg.is_none())
+        clk = RowIndex::from(23),
+        OperationError::FailedAssertion { err_code, err_msg }
+            if *err_code == ZERO && err_msg.is_none()
     );
 
     //---------------------- exp containing more than 64 bits -------------------------------------
@@ -410,11 +404,7 @@ fn ilog2_fail() {
     let asm_op = "ilog2";
 
     let test = build_op_test!(asm_op, &[0]);
-    expect_exec_error_matches!(
-        test,
-        ExecutionError::OperationError { clk: row_idx, ref err, ..  } | ExecutionError::OperationErrorNoContext { clk: row_idx, ref err, ..  }
-            if row_idx == RowIndex::from(7) && matches!(err.as_ref(), OperationError::LogArgumentZero)
-    );
+    expect_op_error_matches!(test, clk = RowIndex::from(7), OperationError::LogArgumentZero);
 }
 
 // FIELD OPS BOOLEAN - MANUAL TESTS
@@ -438,10 +428,9 @@ fn not_fail() {
     // --- test value > 1 --------------------------------------------------------------------
     let test = build_op_test!(asm_op, &[2]);
 
-    expect_exec_error_matches!(
+    expect_op_error_matches!(
         test,
-        ExecutionError::OperationError { ref err, ..  } | ExecutionError::OperationErrorNoContext { ref err, ..  }
-            if matches!(err.as_ref(), OperationError::NotBinaryValueOp(value) if *value == Felt::new(2_u64))
+        OperationError::NotBinaryValueOp(value) if *value == Felt::new(2_u64)
     );
 }
 
@@ -468,24 +457,21 @@ fn and_fail() {
 
     // --- test value > 1 --------------------------------------------------------------------
     let test = build_op_test!(asm_op, &[2, 3]);
-    expect_exec_error_matches!(
+    expect_op_error_matches!(
         test,
-        ExecutionError::OperationError { ref err, ..  } | ExecutionError::OperationErrorNoContext { ref err, ..  }
-            if matches!(err.as_ref(), OperationError::NotBinaryValueOp(value) if *value == Felt::new(3_u64))
+        OperationError::NotBinaryValueOp(value) if *value == Felt::new(3_u64)
     );
 
     let test = build_op_test!(asm_op, &[2, 0]);
-    expect_exec_error_matches!(
+    expect_op_error_matches!(
         test,
-        ExecutionError::OperationError { ref err, ..  } | ExecutionError::OperationErrorNoContext { ref err, ..  }
-            if matches!(err.as_ref(), OperationError::NotBinaryValueOp(value) if *value == Felt::new(2_u64))
+        OperationError::NotBinaryValueOp(value) if *value == Felt::new(2_u64)
     );
 
     let test = build_op_test!(asm_op, &[0, 2]);
-    expect_exec_error_matches!(
+    expect_op_error_matches!(
         test,
-        ExecutionError::OperationError { ref err, ..  } | ExecutionError::OperationErrorNoContext { ref err, ..  }
-            if matches!(err.as_ref(), OperationError::NotBinaryValueOp(value) if *value == Felt::new(2_u64))
+        OperationError::NotBinaryValueOp(value) if *value == Felt::new(2_u64)
     );
 }
 
@@ -513,25 +499,22 @@ fn or_fail() {
     // --- test value > 1 --------------------------------------------------------------------
     let expected_value = Felt::new(3);
     let test = build_op_test!(asm_op, &[2, 3]);
-    expect_exec_error_matches!(
+    expect_op_error_matches!(
         test,
-        ExecutionError::OperationError { ref err, ..  } | ExecutionError::OperationErrorNoContext { ref err, ..  }
-            if matches!(err.as_ref(), OperationError::NotBinaryValueOp(value) if *value == expected_value)
+        OperationError::NotBinaryValueOp(value) if *value == expected_value
     );
 
     let expected_value = Felt::new(2);
     let test = build_op_test!(asm_op, &[2, 0]);
-    expect_exec_error_matches!(
+    expect_op_error_matches!(
         test,
-        ExecutionError::OperationError { ref err, ..  } | ExecutionError::OperationErrorNoContext { ref err, ..  }
-            if matches!(err.as_ref(), OperationError::NotBinaryValueOp(value) if *value == expected_value)
+        OperationError::NotBinaryValueOp(value) if *value == expected_value
     );
 
     let test = build_op_test!(asm_op, &[0, 2]);
-    expect_exec_error_matches!(
+    expect_op_error_matches!(
         test,
-        ExecutionError::OperationError { ref err, ..  } | ExecutionError::OperationErrorNoContext { ref err, ..  }
-            if matches!(err.as_ref(), OperationError::NotBinaryValueOp(value) if *value == expected_value)
+        OperationError::NotBinaryValueOp(value) if *value == expected_value
     );
 }
 
@@ -559,24 +542,21 @@ fn xor_fail() {
     let expected_value = Felt::new(2);
     // --- test value > 1 --------------------------------------------------------------------
     let test = build_op_test!(asm_op, &[2, 3]);
-    expect_exec_error_matches!(
+    expect_op_error_matches!(
         test,
-        ExecutionError::OperationError { ref err, ..  } | ExecutionError::OperationErrorNoContext { ref err, ..  }
-            if matches!(err.as_ref(), OperationError::NotBinaryValueOp(value) if *value == expected_value)
+        OperationError::NotBinaryValueOp(value) if *value == expected_value
     );
 
     let test = build_op_test!(asm_op, &[2, 0]);
-    expect_exec_error_matches!(
+    expect_op_error_matches!(
         test,
-        ExecutionError::OperationError { ref err, ..  } | ExecutionError::OperationErrorNoContext { ref err, ..  }
-            if matches!(err.as_ref(), OperationError::NotBinaryValueOp(value) if *value == expected_value)
+        OperationError::NotBinaryValueOp(value) if *value == expected_value
     );
 
     let test = build_op_test!(asm_op, &[0, 2]);
-    expect_exec_error_matches!(
+    expect_op_error_matches!(
         test,
-        ExecutionError::OperationError { ref err, ..  } | ExecutionError::OperationErrorNoContext { ref err, ..  }
-            if matches!(err.as_ref(), OperationError::NotBinaryValueOp(value) if *value == expected_value)
+        OperationError::NotBinaryValueOp(value) if *value == expected_value
     );
 }
 

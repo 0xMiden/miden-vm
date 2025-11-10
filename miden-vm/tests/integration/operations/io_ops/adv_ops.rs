@@ -1,6 +1,6 @@
 use miden_core::{Felt, chiplets::hasher::apply_permutation, utils::ToElements};
 use miden_processor::{AdviceError, ExecutionError, OperationError, RowIndex};
-use miden_utils_testing::expect_exec_error_matches;
+use miden_utils_testing::expect_op_error_matches;
 
 use super::{TRUNCATE_STACK_PROC, build_op_test, build_test};
 
@@ -32,15 +32,11 @@ fn adv_push() {
 fn adv_push_invalid() {
     // attempting to read from empty advice stack should throw an error
     let test = build_op_test!("adv_push.1");
-    expect_exec_error_matches!(
+    expect_op_error_matches!(
         test,
-        ExecutionError::OperationError {
-            clk, ref err, ..
-        } | ExecutionError::OperationErrorNoContext {
-            clk, ref err, ..
-        } if clk == RowIndex::from(6)
-            && matches!(err.as_ref(), OperationError::AdviceError(AdviceError::StackReadFailed)),
-    )
+        clk = RowIndex::from(6),
+        OperationError::AdviceError(AdviceError::StackReadFailed)
+    );
 }
 
 // OVERWRITING VALUES ON THE STACK (LOAD)
@@ -61,14 +57,10 @@ fn adv_loadw() {
 fn adv_loadw_invalid() {
     // attempting to read from empty advice stack should throw an error
     let test = build_op_test!("adv_loadw", &[0, 0, 0, 0]);
-    expect_exec_error_matches!(
+    expect_op_error_matches!(
         test,
-        ExecutionError::OperationError {
-            clk, ref err, ..
-        } | ExecutionError::OperationErrorNoContext {
-            clk, ref err, ..
-        } if clk == RowIndex::from(6)
-            && matches!(err.as_ref(), OperationError::AdviceError(AdviceError::StackReadFailed)),
+        clk = RowIndex::from(6),
+        OperationError::AdviceError(AdviceError::StackReadFailed)
     );
 }
 

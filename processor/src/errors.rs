@@ -451,10 +451,7 @@ impl<'a> ErrorContext<'a> {
     /// # Note
     ///
     /// This method may be expensive and should typically only be called in error paths.
-    pub fn resolve_source(
-        &self,
-        host: &impl BaseHost,
-    ) -> Option<(SourceSpan, Option<Arc<SourceFile>>)> {
+    pub fn resolve(&self, host: &impl BaseHost) -> Option<(SourceSpan, Option<Arc<SourceFile>>)> {
         // Expensive work happens here, but only in error path.
         // This defers MAST traversal and host lookups until we actually need the error.
         use miden_core::mast::MastNode;
@@ -485,7 +482,7 @@ impl<'a> ErrorContext<'a> {
         Some((label, source_file))
     }
 
-    /// Wraps an operation error with context information to create an execution error.
+    /// Converts an operation error into an execution error with source context.
     ///
     /// Creates `ExecutionError::OperationError` when context is available, or
     /// `ExecutionError::OperationErrorNoContext` when context is missing.
@@ -493,13 +490,9 @@ impl<'a> ErrorContext<'a> {
     /// # Arguments
     ///
     /// * `host` - The host for resolving source locations
-    /// * `err` - The operation error to wrap
-    pub fn wrap_op_err_with_host(
-        &self,
-        host: &impl BaseHost,
-        err: OperationError,
-    ) -> ExecutionError {
-        match self.resolve_source(host) {
+    /// * `err` - The operation error to convert
+    pub fn into_exec_err(&self, host: &impl BaseHost, err: OperationError) -> ExecutionError {
+        match self.resolve(host) {
             Some((label, source_file)) => ExecutionError::OperationError {
                 clk: self.clk(),
                 label,
@@ -529,14 +522,11 @@ impl<'a> ErrorContext<'a> {
     ///
     /// * `host` - The host for resolving source locations (ignored)
     #[inline]
-    pub fn resolve_source(
-        &self,
-        _host: &impl BaseHost,
-    ) -> Option<(SourceSpan, Option<Arc<SourceFile>>)> {
+    pub fn resolve(&self, _host: &impl BaseHost) -> Option<(SourceSpan, Option<Arc<SourceFile>>)> {
         None // Always no context in no_err_ctx build
     }
 
-    /// Wraps an operation error with context information to create an execution error.
+    /// Converts an operation error into an execution error with source context.
     ///
     /// When the `no_err_ctx` feature is enabled, this always creates
     /// `ExecutionError::OperationErrorNoContext`.
@@ -544,13 +534,9 @@ impl<'a> ErrorContext<'a> {
     /// # Arguments
     ///
     /// * `host` - The host for resolving source locations (ignored)
-    /// * `err` - The operation error to wrap
+    /// * `err` - The operation error to convert
     #[inline]
-    pub fn wrap_op_err_with_host(
-        &self,
-        _host: &impl BaseHost,
-        err: OperationError,
-    ) -> ExecutionError {
+    pub fn into_exec_err(&self, _host: &impl BaseHost, err: OperationError) -> ExecutionError {
         ExecutionError::OperationErrorNoContext { clk: self.clk(), err: Box::new(err) }
     }
 }
@@ -561,7 +547,7 @@ impl<'a> ErrorContext<'a> {
 /// Extension trait for `Result<T, OperationError>` to simplify conversion to `ExecutionError`.
 ///
 /// This trait provides convenient methods to wrap `OperationError` in `ExecutionError` using
-/// either explicit context information or error context providers.
+/// either error context (with host) or just a clock cycle (for cases without source context).
 pub trait OperationResultExt<T> {
     /// Converts `Result<T, OperationError>` to `Result<T, ExecutionError>` by wrapping the error
     /// in `ExecutionError::OperationErrorNoContext` with the given clock cycle.
@@ -589,11 +575,11 @@ pub trait OperationResultExt<T> {
     ///
     /// # Example
     /// ```ignore
-    /// let ctx = ExecutionSiteContext::with_op(program, node_id, op_idx, clk);
+    /// let ctx = ErrorContext::with_op(program, node_id, op_idx, clk);
     /// some_operation()
-    ///     .map_exec_err_with_host(&ctx, host)?;
+    ///     .map_exec_err(&ctx, host)?;
     /// ```
-    fn map_exec_err_with_host(
+    fn map_exec_err(
         self,
         err_ctx: &ErrorContext,
         host: &impl BaseHost,
@@ -607,12 +593,12 @@ impl<T> OperationResultExt<T> for Result<T, OperationError> {
     }
 
     #[inline]
-    fn map_exec_err_with_host(
+    fn map_exec_err(
         self,
         err_ctx: &ErrorContext,
         host: &impl BaseHost,
     ) -> Result<T, ExecutionError> {
-        self.map_err(|err| err_ctx.wrap_op_err_with_host(host, err))
+        self.map_err(|err| err_ctx.into_exec_err(host, err))
     }
 }
 
@@ -623,12 +609,12 @@ impl<T> OperationResultExt<T> for OperationError {
     }
 
     #[inline]
-    fn map_exec_err_with_host(
+    fn map_exec_err(
         self,
         err_ctx: &ErrorContext,
         host: &impl BaseHost,
     ) -> Result<T, ExecutionError> {
-        Err(err_ctx.wrap_op_err_with_host(host, self))
+        Err(err_ctx.into_exec_err(host, self))
     }
 }
 

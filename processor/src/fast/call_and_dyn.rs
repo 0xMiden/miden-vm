@@ -46,7 +46,7 @@ impl FastProcessor {
         let callee_hash = current_forest
             .get_node_by_id(call_node.callee())
             .ok_or(OperationError::MastNodeNotFoundInForest(call_node.callee()))
-            .map_exec_err_with_host(&err_ctx, host)?
+            .map_exec_err(&err_ctx, host)?
             .digest();
 
         self.save_context_and_truncate_stack(tracer);
@@ -55,7 +55,7 @@ impl FastProcessor {
             // check if the callee is in the kernel
             if !program.kernel().contains_proc(callee_hash) {
                 return OperationError::SyscallTargetNotInKernel { proc_root: callee_hash }
-                    .map_exec_err_with_host(&err_ctx, host);
+                    .map_exec_err(&err_ctx, host);
             }
             tracer.record_kernel_proc_access(callee_hash);
 
@@ -72,7 +72,7 @@ impl FastProcessor {
             self.memory
                 .write_element(new_ctx, FMP_ADDR, FMP_INIT_VALUE)
                 .map_err(OperationError::MemoryError)
-                .map_exec_err_with_host(&err_ctx, host)?;
+                .map_exec_err(&err_ctx, host)?;
             tracer.record_memory_write_element(FMP_INIT_VALUE, FMP_ADDR, new_ctx, self.clk);
         }
 
@@ -109,7 +109,7 @@ impl FastProcessor {
         // context of the
         // system registers and the operand stack to what it was prior
         // to the call.
-        self.restore_context(tracer).map_exec_err_with_host(&err_ctx, host)?;
+        self.restore_context(tracer).map_exec_err(&err_ctx, host)?;
 
         // Corresponds to the row inserted for the END operation added to the trace.
         self.increment_clk(tracer);
@@ -150,7 +150,7 @@ impl FastProcessor {
                 .memory
                 .read_word(self.ctx, mem_addr, self.clk)
                 .map_err(OperationError::MemoryError)
-                .map_exec_err_with_host(&err_ctx, host)?;
+                .map_exec_err(&err_ctx, host)?;
             tracer.record_memory_read_word(word, mem_addr, self.ctx, self.clk);
 
             word
@@ -175,7 +175,7 @@ impl FastProcessor {
             self.memory
                 .write_element(new_ctx, FMP_ADDR, FMP_INIT_VALUE)
                 .map_err(OperationError::MemoryError)
-                .map_exec_err_with_host(&err_ctx, host)?;
+                .map_exec_err(&err_ctx, host)?;
             tracer.record_memory_write_element(FMP_INIT_VALUE, FMP_ADDR, new_ctx, self.clk);
         };
 
@@ -196,7 +196,7 @@ impl FastProcessor {
                         OperationError::DynamicNodeNotFound { digest }
                     })
                     .await
-                    .map_exec_err_with_host(&err_ctx, host)?;
+                    .map_exec_err(&err_ctx, host)?;
                 tracer.record_mast_forest_resolution(root_id, &new_forest);
 
                 // Push current forest to the continuation stack so that we can return to it
@@ -238,7 +238,7 @@ impl FastProcessor {
         let err_ctx = ErrorContext::new(current_forest, node_id, self.clk);
         // For dyncall, restore the context.
         if dyn_node.is_dyncall() {
-            self.restore_context(tracer).map_exec_err_with_host(&err_ctx, host)?;
+            self.restore_context(tracer).map_exec_err(&err_ctx, host)?;
         }
 
         // Corresponds to the row inserted for the END operation added to

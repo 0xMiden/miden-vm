@@ -74,8 +74,7 @@ impl FastProcessor {
             self.execute_after_exit_decorators(current_node_id, current_forest, host)?;
         } else {
             let err_ctx = ErrorContext::new(current_forest, current_node_id, clk_at_start);
-            return OperationError::NotBinaryValueLoop(condition)
-                .map_exec_err_with_host(&err_ctx, host);
+            return OperationError::NotBinaryValueLoop(condition).map_exec_err(&err_ctx, host);
         }
         Ok(())
     }
@@ -127,8 +126,7 @@ impl FastProcessor {
             self.execute_after_exit_decorators(current_node_id, current_forest, host)?;
         } else {
             let err_ctx = ErrorContext::new(current_forest, current_node_id, self.clk);
-            return OperationError::NotBinaryValueLoop(condition)
-                .map_exec_err_with_host(&err_ctx, host);
+            return OperationError::NotBinaryValueLoop(condition).map_exec_err(&err_ctx, host);
         }
         Ok(())
     }

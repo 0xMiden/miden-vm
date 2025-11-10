@@ -117,7 +117,7 @@ impl FastProcessor {
             let decorator = program
                 .get_decorator_by_id(decorator_id)
                 .ok_or(OperationError::DecoratorNotFoundInForest(decorator_id))
-                .map_exec_err_with_host(&err_ctx, host)?;
+                .map_exec_err(&err_ctx, host)?;
             self.execute_decorator(decorator, host)?;
         }
 
@@ -153,7 +153,7 @@ impl FastProcessor {
                 let decorator = program
                     .get_decorator_by_id(decorator_id)
                     .ok_or(OperationError::DecoratorNotFoundInForest(decorator_id))
-                    .map_exec_err_with_host(&decorator_err_ctx, host)?;
+                    .map_exec_err(&decorator_err_ctx, host)?;
                 self.execute_decorator(decorator, host)?;
             }
 
@@ -174,13 +174,11 @@ impl FastProcessor {
             {
                 let err_ctx = ErrorContext::with_op(program, node_id, op_idx_in_block, self.clk);
                 match op {
-                    Operation::Emit => {
-                        self.op_emit(host).await.map_exec_err_with_host(&err_ctx, host)?
-                    },
+                    Operation::Emit => self.op_emit(host).await.map_exec_err(&err_ctx, host)?,
                     _ => {
                         // if the operation is not an Emit, we execute it normally
                         self.execute_sync_op(op, op_idx_in_block, program, host, tracer)
-                            .map_exec_err_with_host(&err_ctx, host)?;
+                            .map_exec_err(&err_ctx, host)?;
                     },
                 }
             }

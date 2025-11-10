@@ -78,7 +78,7 @@ use trace::TraceFragment;
 pub use trace::{ChipletsLengths, ExecutionTrace, NUM_RAND_ROWS, TraceLenSummary};
 
 mod errors;
-pub use errors::{ExecutionError, ErrorContext, OperationError, OperationResultExt};
+pub use errors::{ErrorContext, ExecutionError, OperationError, OperationResultExt};
 
 pub mod utils;
 
@@ -389,9 +389,8 @@ impl Process {
             },
             MastNode::External(external_node) => {
                 let err_ctx = ErrorContext::new(program, node_id, self.system.clk());
-                let (root_id, mast_forest) = self
-                    .resolve_external_node(external_node, host)
-                    .map_exec_err_with_host(&err_ctx, host)?;
+                let (root_id, mast_forest) =
+                    self.resolve_external_node(external_node, host).map_exec_err(&err_ctx, host)?;
 
                 self.execute_mast_node(root_id, &mast_forest, host)?;
             },
@@ -440,8 +439,7 @@ impl Process {
         } else if condition == ZERO {
             self.execute_mast_node(node.on_false(), program, host)?;
         } else {
-            return OperationError::NotBinaryValueIf(condition)
-                .map_exec_err_with_host(err_ctx, host);
+            return OperationError::NotBinaryValueIf(condition).map_exec_err(err_ctx, host);
         }
 
         self.end_split_node(node, program, host, err_ctx)
@@ -470,8 +468,7 @@ impl Process {
             // which drops the condition from the stack
             while self.stack.peek() == ONE {
                 self.decoder.repeat();
-                self.execute_op(Operation::Drop, program, host)
-                    .map_exec_err_with_host(err_ctx, host)?;
+                self.execute_op(Operation::Drop, program, host).map_exec_err(err_ctx, host)?;
                 self.execute_mast_node(node.body(), program, host)?;
             }
 
@@ -480,7 +477,7 @@ impl Process {
                 // the start of the loop. This ensures consistency with the fast processor.
                 let err_ctx = ErrorContext::new(program, node_id, self.system.clk());
                 return OperationError::NotBinaryValueLoop(self.stack.peek())
-                    .map_exec_err_with_host(&err_ctx, host);
+                    .map_exec_err(&err_ctx, host);
             }
 
             // end the LOOP block and drop the condition from the stack
@@ -490,7 +487,7 @@ impl Process {
             // already dropped when we started the LOOP block
             self.end_loop_node(node, false, program, host, err_ctx)
         } else {
-            OperationError::NotBinaryValueLoop(condition).map_exec_err_with_host(err_ctx, host)
+            OperationError::NotBinaryValueLoop(condition).map_exec_err(err_ctx, host)
         }
     }
 
@@ -509,11 +506,11 @@ impl Process {
             let callee = program
                 .get_node_by_id(call_node.callee())
                 .ok_or(OperationError::MastNodeNotFoundInForest(call_node.callee()))
-                .map_exec_err_with_host(err_ctx, host)?;
+                .map_exec_err(err_ctx, host)?;
             self.chiplets
                 .kernel_rom
                 .access_proc(callee.digest())
-                .map_exec_err_with_host(err_ctx, host)?;
+                .map_exec_err(err_ctx, host)?;
         }
 
         self.start_call_node(call_node, program, host, err_ctx)?;
@@ -553,14 +550,14 @@ impl Process {
                 let mast_forest = host
                     .get_mast_forest(&callee_hash)
                     .ok_or(OperationError::DynamicNodeNotFound { digest: callee_hash })
-                    .map_exec_err_with_host(err_ctx, host)?;
+                    .map_exec_err(err_ctx, host)?;
 
                 // We limit the parts of the program that can be called externally to procedure
                 // roots, even though MAST doesn't have that restriction.
                 let root_id = mast_forest
                     .find_procedure_root(callee_hash)
                     .ok_or(OperationError::MalformedMastForestInHost { root_digest: callee_hash })
-                    .map_exec_err_with_host(err_ctx, host)?;
+                    .map_exec_err(err_ctx, host)?;
 
                 // Merge the advice map of this forest into the advice provider.
                 // Note that the map may be merged multiple times if a different procedure from the
@@ -570,7 +567,7 @@ impl Process {
                 self.advice
                     .extend_map(mast_forest.advice_map())
                     .map_err(OperationError::AdviceError)
-                    .map_exec_err_with_host(err_ctx, host)?;
+                    .map_exec_err(err_ctx, host)?;
 
                 self.execute_mast_node(root_id, &mast_forest, host)?
             },
@@ -617,8 +614,7 @@ impl Process {
         // of the stack
         for op_batch in basic_block.op_batches().iter().skip(1) {
             self.respan(op_batch);
-            self.execute_op(Operation::Noop, program, host)
-                .map_exec_err_with_host(err_ctx, host)?;
+            self.execute_op(Operation::Noop, program, host).map_exec_err(err_ctx, host)?;
             self.execute_op_batch(node_id, op_batch, &mut decorator_ids, op_offset, program, host)?;
             op_offset += op_batch.ops().len();
         }
@@ -634,7 +630,7 @@ impl Process {
             let decorator = program
                 .get_decorator_by_id(decorator_id)
                 .ok_or(OperationError::DecoratorNotFoundInForest(decorator_id))
-                .map_exec_err_with_host(&decorator_err_ctx, host)?;
+                .map_exec_err(&decorator_err_ctx, host)?;
             self.execute_decorator(decorator, host)?;
         }
 
@@ -675,15 +671,14 @@ impl Process {
                 let decorator = program
                     .get_decorator_by_id(decorator_id)
                     .ok_or(OperationError::DecoratorNotFoundInForest(decorator_id))
-                    .map_exec_err_with_host(&decorator_err_ctx, host)?;
+                    .map_exec_err(&decorator_err_ctx, host)?;
                 self.execute_decorator(decorator, host)?;
             }
 
             // decode and execute the operation
-            let err_ctx =
-                ErrorContext::with_op(program, node_id, i + op_offset, self.system.clk());
+            let err_ctx = ErrorContext::with_op(program, node_id, i + op_offset, self.system.clk());
             self.decoder.execute_user_op(op, op_idx);
-            self.execute_op(op, program, host).map_exec_err_with_host(&err_ctx, host)?;
+            self.execute_op(op, program, host).map_exec_err(&err_ctx, host)?;
 
             // if the operation carries an immediate value, the value is stored at the next group
             // pointer; so, we advance the pointer to the following group
@@ -1040,7 +1035,7 @@ pub(crate) fn add_error_ctx_to_external_error(
         Ok(_) => Ok(()),
         // Convert OperationErrorNoContext to OperationError by adding source context
         Err(ExecutionError::OperationErrorNoContext { clk, err }) => {
-            match err_ctx.resolve_source(host) {
+            match err_ctx.resolve(host) {
                 Some((label, source_file)) => {
                     Err(ExecutionError::OperationError { clk, label, source_file, err })
                 },
