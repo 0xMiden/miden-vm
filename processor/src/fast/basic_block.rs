@@ -114,10 +114,11 @@ impl FastProcessor {
         // executed after BASIC BLOCK is closed to make sure the VM clock cycle advances beyond the
         // last clock cycle of the BASIC BLOCK ops.
         for (_, decorator_id) in decorator_ids {
+            let decorator_err_ctx = err_ctx!(program, basic_block_node, host, self.clk);
             let decorator = program
                 .get_decorator_by_id(decorator_id)
                 .ok_or(OperationError::DecoratorNotFoundInForest(decorator_id))
-                .map_exec_err_no_ctx(self.clk)?;
+                .map_exec_err(&decorator_err_ctx)?;
             self.execute_decorator(decorator, host)?;
         }
 
@@ -148,10 +149,12 @@ impl FastProcessor {
         for (op_idx_in_batch, op) in batch.ops().iter().enumerate() {
             let op_idx_in_block = batch_offset_in_block + op_idx_in_batch;
             while let Some((_, decorator_id)) = decorators.next_filtered(op_idx_in_block) {
+                let decorator_err_ctx =
+                    err_ctx!(program, basic_block, host, op_idx_in_block, self.clk);
                 let decorator = program
                     .get_decorator_by_id(decorator_id)
                     .ok_or(OperationError::DecoratorNotFoundInForest(decorator_id))
-                    .map_exec_err_no_ctx(self.clk)?;
+                    .map_exec_err(&decorator_err_ctx)?;
                 self.execute_decorator(decorator, host)?;
             }
 
