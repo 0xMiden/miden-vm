@@ -48,6 +48,9 @@ use crate::mast::{DecoratedOpLink, DecoratorId, MastNodeId};
 /// op_indptr_for_dec_ids: [0, 2, 3, 6]  // Node 0: ops [0,2], [2,3]; Node 1: ops [3,6]
 /// node_indptr_for_op_idx: [0, 2, 3]   // Node 0: [0,2], Node 1: [2,3]
 /// ```
+///
+/// See the unit test `test_csr_and_coo_produce_same_elements` for a comprehensive example
+/// demonstrating how this encoding works and verifying round-trip conversion from COO to CSR.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
@@ -64,7 +67,7 @@ pub struct OpToDecoratorIds {
     /// ```
     op_indptr_for_dec_ids: Vec<usize>,
     /// The decorated operation indices for the n-th node are at
-    /// `op_indptr_for_dec_ids[n..n+1]`
+    /// `op_indptr_for_dec_ids[node_indptr_for_op_idx[n]..node_indptr_for_op_idx[n+1]]`
     node_indptr_for_op_idx: IndexVec<MastNodeId, usize>,
 }
 
@@ -1128,6 +1131,125 @@ mod tests {
         let flat1: Vec<_> = storage.decorator_links_for_node(n1).unwrap().into_iter().collect();
         // Node 1: Op0 -> [3,4,5]
         assert_eq!(flat1, vec![(0, DecoratorId(3)), (0, DecoratorId(4)), (0, DecoratorId(5)),]);
+    }
+
+    #[test]
+    /// This test verifies that the CSR encoding described in the OpToDecoratorIds struct
+    /// documentation correctly represents COO data. It also validates all accessor methods
+    /// work as expected. Keep this test in sync with the documentation example (adding nodes
+    /// to this test if you add nodes to the documentation example, and vice versa).
+    fn test_csr_and_coo_produce_same_elements() {
+        // Build a COO representation manually
+        let coo_data = vec![
+            // Node 0
+            (MastNodeId::new_unchecked(0), 0, DecoratorId(10)),
+            (MastNodeId::new_unchecked(0), 0, DecoratorId(11)),
+            (MastNodeId::new_unchecked(0), 1, DecoratorId(12)),
+            (MastNodeId::new_unchecked(0), 2, DecoratorId(13)),
+            // Node 1
+            (MastNodeId::new_unchecked(1), 0, DecoratorId(20)),
+            (MastNodeId::new_unchecked(1), 2, DecoratorId(21)),
+            (MastNodeId::new_unchecked(1), 2, DecoratorId(22)),
+            // Node 2 (empty node, should still work)
+            // Node 3
+            (MastNodeId::new_unchecked(3), 0, DecoratorId(30)),
+        ];
+
+        // Build COO representation as a HashMap for easy lookup during verification
+        let mut coo_map: std::collections::HashMap<(MastNodeId, usize), Vec<DecoratorId>> =
+            std::collections::HashMap::new();
+        for (node, op_idx, decorator_id) in &coo_data {
+            coo_map.entry((*node, *op_idx)).or_default().push(*decorator_id);
+        }
+
+        // Build CSR representation using the builder API
+        let mut csr_storage = OpToDecoratorIds::new();
+
+        // Node 0: Op0 -> [10,11], Op1 -> [12], Op2 -> [13]
+        csr_storage
+            .add_decorator_info_for_node(
+                MastNodeId::new_unchecked(0),
+                vec![
+                    (0, DecoratorId(10)),
+                    (0, DecoratorId(11)),
+                    (1, DecoratorId(12)),
+                    (2, DecoratorId(13)),
+                ],
+            )
+            .unwrap();
+
+        // Node 1: Op0 -> [20], Op2 -> [21,22]
+        csr_storage
+            .add_decorator_info_for_node(
+                MastNodeId::new_unchecked(1),
+                vec![(0, DecoratorId(20)), (2, DecoratorId(21)), (2, DecoratorId(22))],
+            )
+            .unwrap();
+
+        // Node 2: empty
+        csr_storage
+            .add_decorator_info_for_node(MastNodeId::new_unchecked(2), vec![])
+            .unwrap();
+
+        // Node 3: Op0 -> [30]
+        csr_storage
+            .add_decorator_info_for_node(MastNodeId::new_unchecked(3), vec![(0, DecoratorId(30))])
+            .unwrap();
+
+        // Verify that CSR and COO produce the same elements
+        for node_idx in 0..4 {
+            let node_id = MastNodeId::new_unchecked(node_idx);
+
+            // Get all operations for this node from CSR
+            let op_range = csr_storage.operation_range_for_node(node_id).unwrap();
+            let num_ops = op_range.len();
+
+            // For each operation in this node
+            for op_idx in 0..num_ops {
+                // Get decorator IDs from CSR
+                let csr_decorator_ids =
+                    csr_storage.decorator_ids_for_operation(node_id, op_idx).unwrap();
+
+                // Get decorator IDs from COO map
+                let coo_key = (node_id, op_idx);
+                let coo_decorator_ids =
+                    coo_map.get(&coo_key).map_or(&[] as &[DecoratorId], |v| v.as_slice());
+
+                // They should be the same
+                assert_eq!(
+                    csr_decorator_ids, coo_decorator_ids,
+                    "CSR and COO should produce the same decorator IDs for node {:?}, op {}",
+                    node_id, op_idx
+                );
+            }
+        }
+
+        // Also verify using the flattened iterator approach
+        for node_idx in 0..4 {
+            let node_id = MastNodeId::new_unchecked(node_idx);
+
+            // Get flattened view from CSR
+            let csr_flat: Vec<(usize, DecoratorId)> =
+                csr_storage.decorator_links_for_node(node_id).unwrap().into_iter().collect();
+
+            // Build expected from COO map
+            let mut expected_flat = Vec::new();
+            for ((node, op_idx), decorator_ids) in &coo_map {
+                if *node == node_id {
+                    for decorator_id in decorator_ids {
+                        expected_flat.push((*op_idx, *decorator_id));
+                    }
+                }
+            }
+            // Sort by operation index then decorator ID for consistent comparison
+            expected_flat.sort_by_key(|(op_idx, dec_id)| (*op_idx, u32::from(*dec_id)));
+
+            assert_eq!(
+                csr_flat, expected_flat,
+                "Flattened CSR and COO should produce the same elements for node {:?}",
+                node_id
+            );
+        }
     }
 
     #[cfg(feature = "arbitrary")]
