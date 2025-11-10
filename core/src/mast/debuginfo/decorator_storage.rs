@@ -878,8 +878,8 @@ mod tests {
         node_indptr_for_op_idx.push(3).expect("test setup: IndexVec capacity exceeded");
 
         let storage1 = OpToDecoratorIds::from_components(
-            decorator_indices.clone(),
-            op_indptr_for_dec_idx.clone(),
+            decorator_indices,
+            op_indptr_for_dec_idx,
             node_indptr_for_op_idx.clone(),
         )
         .unwrap();

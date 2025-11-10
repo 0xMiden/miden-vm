@@ -68,7 +68,7 @@ fn test_decorator_storage_consistency_with_block_iterator() {
     ];
 
     // Add block to forest using BasicBlockNodeBuilder
-    let block_id = BasicBlockNodeBuilder::new(operations.clone(), decorators.clone())
+    let block_id = BasicBlockNodeBuilder::new(operations, decorators.clone())
         .add_to_forest(&mut forest)
         .unwrap();
 
@@ -141,7 +141,7 @@ fn test_decorator_storage_consistency_with_empty_block() {
     let operations = vec![Operation::Push(Felt::new(1)), Operation::Add];
 
     // Add block to forest using BasicBlockNodeBuilder with no decorators
-    let block_id = BasicBlockNodeBuilder::new(operations.clone(), vec![])
+    let block_id = BasicBlockNodeBuilder::new(operations, vec![])
         .add_to_forest(&mut forest)
         .unwrap();
 
@@ -420,7 +420,7 @@ fn test_mast_forest_serde_converts_linked_to_owned_decorators() {
     let decorators = vec![(0, deco1), (2, deco2)];
 
     // Add block to forest - this will create Linked decorators
-    let block_id = BasicBlockNodeBuilder::new(operations.clone(), decorators.clone())
+    let block_id = BasicBlockNodeBuilder::new(operations, decorators)
         .add_to_forest(&mut forest)
         .unwrap();
 
@@ -507,7 +507,7 @@ fn test_mast_forest_serializable_converts_linked_to_owned_decorators() {
     let decorators = vec![(0, deco1), (2, deco2)];
 
     // Add block to forest - this will create Linked decorators
-    let block_id = BasicBlockNodeBuilder::new(operations.clone(), decorators.clone())
+    let block_id = BasicBlockNodeBuilder::new(operations, decorators)
         .add_to_forest(&mut forest)
         .unwrap();
 

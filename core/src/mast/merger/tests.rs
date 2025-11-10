@@ -780,7 +780,7 @@ fn mast_forest_merge_invalid_decorator_index() {
     let mut forest_a = MastForest::new();
     let deco1_a = forest_a.add_decorator(trace1).unwrap();
     let deco2_a = forest_a.add_decorator(trace2).unwrap();
-    let id_bar_a = forest_a.add_node(block_bar()).unwrap();
+    let id_bar_a = block_bar().add_to_forest(&mut forest_a).unwrap();
 
     forest_a.make_root(id_bar_a);
 
@@ -870,7 +870,7 @@ fn mast_forest_merge_op_indexed_decorators_preservation() {
     // Create a block with multiple operations and op-indexed decorators
     let ops_a = vec![Operation::Add, Operation::Mul, Operation::Or];
     let block_id_a = BasicBlockNodeBuilder::new(
-        ops_a.clone(),
+        ops_a,
         vec![(0, op0_a), (1, op1_a)], // Op-indexed decorators
     )
     .with_before_enter(vec![before_enter_a, shared_deco_a]) // Use shared decorator
@@ -893,7 +893,7 @@ fn mast_forest_merge_op_indexed_decorators_preservation() {
 
     let ops_b = vec![Operation::Add, Operation::Mul, Operation::Or];
     let block_id_b = BasicBlockNodeBuilder::new(
-        ops_b.clone(),
+        ops_b,
         vec![(0, op0_b), (2, op2_b)], // Op-indexed decorators at different positions
     )
     .with_before_enter(vec![before_enter_b, shared_deco_b]) // Use shared decorator

@@ -104,7 +104,7 @@ fn log_precompile_request_procedure() {
     let mut host = DefaultHost::default();
     let stdlib = StdLibrary::default();
     host.load_library(&stdlib).expect("failed to load stdlib into host");
-    host.register_handler(EVENT_NAME, Arc::new(handler.clone()))
+    host.register_handler(EVENT_NAME, Arc::new(handler))
         .expect("failed to register dummy handler");
 
     let options = ProvingOptions::with_96_bit_security(miden_air::HashFunction::Blake3_192);

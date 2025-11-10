@@ -316,7 +316,7 @@ impl Arbitrary for MastForest {
         (
             // Generate basic blocks first (they have no dependencies)
             prop::collection::vec(
-                any_with::<BasicBlockNode>(bb_params.clone()),
+                any_with::<BasicBlockNode>(bb_params),
                 1..=*params.blocks.end(),
             ),
             // Generate decorators

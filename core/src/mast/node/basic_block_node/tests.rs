@@ -559,7 +559,7 @@ fn test_decorator_positions() {
     ];
 
     // Create a basic block with complex operations using builder pattern
-    let block = BasicBlockNodeBuilder::new(operations.clone(), vec![(2, trace_id), (4, debug_id)])
+    let block = BasicBlockNodeBuilder::new(operations, vec![(2, trace_id), (4, debug_id)])
         .with_before_enter(vec![trace_id, debug_id])
         .with_after_exit(vec![trace_id])
         .build()

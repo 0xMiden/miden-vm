@@ -451,7 +451,7 @@ fn hash_memoization_basic_blocks_check(
         .unwrap();
     let join2_block = mast_forest[join2_block_id].clone();
 
-    let basic_block_2_id = BasicBlockNodeBuilder::new(operations.clone(), decorators.clone())
+    let basic_block_2_id = BasicBlockNodeBuilder::new(operations, decorators)
         .add_to_forest(&mut mast_forest)
         .unwrap();
     let basic_block_2 = mast_forest[basic_block_2_id].clone();

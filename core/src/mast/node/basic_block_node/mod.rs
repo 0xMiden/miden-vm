@@ -1279,7 +1279,7 @@ impl BasicBlockNodeBuilder {
             decorators: DecoratorStore::Owned {
                 decorators: reflowed_decorators,
                 before_enter: self.before_enter.clone(),
-                after_exit: self.after_exit.clone(),
+                after_exit: self.after_exit,
             },
         })
     }

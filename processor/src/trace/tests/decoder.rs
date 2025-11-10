@@ -513,8 +513,8 @@ fn decoder_p2_split_false() {
     let basic_block_2_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
         .add_to_forest(&mut mast_forest)
         .unwrap();
-    let _basic_block_1 = mast_forest[basic_block_1_id];
-    let basic_block_2 = mast_forest[basic_block_2_id];
+    let _basic_block_1 = mast_forest[basic_block_1_id].clone();
+    let basic_block_2 = mast_forest[basic_block_2_id].clone();
 
     let split_id = SplitNodeBuilder::new([basic_block_1_id, basic_block_2_id])
         .add_to_forest(&mut mast_forest)
