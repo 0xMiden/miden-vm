@@ -12,7 +12,8 @@ use crate::{ProcedureContext, fmp::push_offset_fmp_sequence};
 
 /// Appends operations to the span needed to execute a memory read instruction. This includes
 /// reading a single element or an entire word from either local or global memory. Specifically,
-/// this handles mem_load, mem_loadw, loc_load, and loc_loadw instructions.
+/// this handles mem_load, mem_loadw_be, mem_loadw_le, loc_load, loc_loadw_be, and loc_loadw_le
+/// instructions.
 ///
 /// VM cycles per operation:
 /// - mem_load(w): 1 cycle
@@ -63,20 +64,20 @@ pub fn mem_read(
 
 /// Appends operations to the span needed to execute a memory write instruction with an immediate
 /// address. This includes writing a single element or an entire word into either local or global
-/// memory. Specifically, this handles mem_store, mem_storew, loc_store, and loc_storew
-/// instructions.
+/// memory. Specifically, this handles mem_store, mem_storew_be, mem_storew_le, loc_store,
+/// loc_storew_be, and loc_storew_le instructions.
 ///
 /// VM cycles per operation:
 /// - mem_store.b:
 ///   - 4 cycles if b = 1
 ///   - 3 cycles if b != 1
-/// - mem_storew.b:
+/// - mem_storew_be.b:
 ///   - 3 cycles if b = 1
 ///   - 2 cycles if b != 1
 /// - loc_store.b:
 ///   - 5 cycles if b = 1
 ///   - 4 cycles if b != 1
-/// - loc_storew.b:
+/// - loc_storew_be.b:
 ///   - 4 cycles if b = 1
 ///   - 3 cycles if b != 1
 ///

@@ -8,6 +8,7 @@ use miden_core::{
         BasicBlockNode, JoinNode, LoopNode, MastForest, MastNode, MastNodeExt, MastNodeId,
         SplitNode,
     },
+    precompile::PrecompileTranscript,
     stack::MIN_STACK_DEPTH,
 };
 
@@ -56,6 +57,9 @@ pub struct TraceGenerationContext {
     pub hasher_for_chiplet: HasherRequestReplay,
     pub kernel_replay: KernelReplay,
     pub ace_replay: AceReplay,
+
+    /// The final precompile transcript at the end of execution.
+    pub final_pc_transcript: PrecompileTranscript,
 
     /// The number of rows per core trace fragment, except for the last fragment which may be
     /// shorter.
@@ -138,7 +142,13 @@ impl ExecutionTracer {
 
     /// Convert the `ExecutionTracer` into a [TraceGenerationContext] using the data accumulated
     /// during execution.
-    pub fn into_trace_generation_context(mut self) -> TraceGenerationContext {
+    ///
+    /// The `final_pc_transcript` parameter represents the final precompile transcript at
+    /// the end of execution, which is needed for the auxiliary trace column builder.
+    pub fn into_trace_generation_context(
+        mut self,
+        final_pc_transcript: PrecompileTranscript,
+    ) -> TraceGenerationContext {
         // If there is an ongoing trace state being built, finish it
         self.finish_current_fragment_context();
 
@@ -150,6 +160,7 @@ impl ExecutionTracer {
             kernel_replay: self.kernel,
             hasher_for_chiplet: self.hasher_for_chiplet,
             ace_replay: self.ace,
+            final_pc_transcript,
             fragment_size: self.fragment_size,
         }
     }

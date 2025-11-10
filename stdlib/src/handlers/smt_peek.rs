@@ -45,7 +45,7 @@ pub fn handle_smt_peek(process: &ProcessState) -> Result<Vec<AdviceMutation>, Ev
     // or a root of an empty subtree at the returned depth
     let node = process
         .advice_provider()
-        .get_tree_node(root, &Felt::new(SMT_DEPTH as u64), &key[3])
+        .get_tree_node(root, Felt::new(SMT_DEPTH as u64), key[3])
         .map_err(|err| SmtPeekError::AdviceProviderError {
             message: format!("Failed to get tree node: {}", err),
         })?;

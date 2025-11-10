@@ -194,7 +194,7 @@ This group contains operations which require constraints with degree up to $3$. 
 | `JOIN`        |     $87$     |   `101_0111`    | [Flow control ops](../decoder/index.md) |     $5$     |
 | `DYN`         |     $88$     |   `101_1000`    | [Flow control ops](../decoder/index.md) |     $5$     |
 | `HORNEREXT`   |     $89$     |   `101_1001`    |     [Crypto ops](./crypto_ops.md)      |     $5$     |
-| `<unused>`    |     $90$     |   `101_1010`    |                                        |     $5$     |
+| `LOGPRECOMPILE` |     $90$     |   `101_1010`    | [Crypto ops](./crypto_ops.md#log_precompile) |     $5$     |
 | `PUSH`        |     $91$     |   `101_1011`    |         [I/O ops](./io_ops.md)         |     $5$     |
 | `DYNCALL`     |     $92$     |   `101_1100`    | [Flow control ops](../decoder/index.md) |     $5$     |
 | `EVALCIRCUIT` |     $93$     |   `101_1101`    |     [Crypto ops](./crypto_ops.md)      |     $5$     |

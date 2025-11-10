@@ -186,7 +186,7 @@ proc.columnar_mixing.4
     movup.5
     movup.4
 
-    loc_storew.0
+    loc_storew_be.0
 
     movup.9
     mem_loadw_be
@@ -297,7 +297,7 @@ proc.columnar_mixing.4
 
     movupw.3
     push.0.0.0.0
-    loc_loadw.0
+    loc_loadw_be.0
     swapw
 
     movup.4
@@ -425,7 +425,7 @@ proc.diagonal_mixing.4
     movup.5
     movup.4
 
-    loc_storew.0
+    loc_storew_be.0
 
     movup.9
     mem_loadw_be
@@ -536,7 +536,7 @@ proc.diagonal_mixing.4
 
     movupw.3
     push.0.0.0.0
-    loc_loadw.0
+    loc_loadw_be.0
     swapw
 
     movup.4
@@ -659,17 +659,17 @@ end
 #! i.e. mixed state matrix lives in memory addresses {state0_3_addr, state4_7_addr, state8_11_addr, state12_15_addr},
 #! which were provided, on stack top, while invoking this routine.
 proc.round.20
-    loc_storew.0
+    loc_storew_be.0
 
     exec.columnar_mixing
 
-    loc_storew.4
+    loc_storew_be.4
     dropw
-    loc_storew.8
+    loc_storew_be.8
     dropw
-    loc_storew.12
+    loc_storew_be.12
     dropw
-    loc_storew.16
+    loc_storew_be.16
     dropw
 
     locaddr.16
@@ -680,7 +680,7 @@ proc.round.20
     exec.diagonal_mixing
 
     push.0.0.0.0
-    loc_loadw.0
+    loc_loadw_be.0
     swapw
     movup.4
     mem_storew_be
@@ -722,7 +722,7 @@ end
 #! which were provided, on stack top, while invoking this routine. So updated state matrix can be read by caller routine, by reading
 #! the content of memory addresses where state was provided as routine input.
 proc.compress.4
-    loc_storew.0
+    loc_storew_be.0
     dropw
 
     # apply first 6 rounds of mixing
@@ -733,14 +733,14 @@ proc.compress.4
         end
 
         push.0.0.0.0
-        loc_loadw.0
+        loc_loadw_be.0
         exec.round
         exec.permute_msg_words
     end
 
     # round 7 ( last round, so no message word permutation required )
     push.0.0.0.0
-    loc_loadw.0
+    loc_loadw_be.0
     exec.round
 end
 
@@ -777,13 +777,13 @@ export.hash_2to1.16
     exec.compress
 
     push.0.0.0.0
-    loc_loadw.12
+    loc_loadw_be.12
     push.0.0.0.0
-    loc_loadw.8
+    loc_loadw_be.8
     push.0.0.0.0
-    loc_loadw.4
+    loc_loadw_be.4
     push.0.0.0.0
-    loc_loadw.0
+    loc_loadw_be.0
 
     exec.finalize
 end
@@ -825,13 +825,13 @@ export.hash_1to1.16
     exec.compress
 
     push.0.0.0.0
-    loc_loadw.12
+    loc_loadw_be.12
     push.0.0.0.0
-    loc_loadw.8
+    loc_loadw_be.8
     push.0.0.0.0
-    loc_loadw.4
+    loc_loadw_be.4
     push.0.0.0.0
-    loc_loadw.0
+    loc_loadw_be.0
 
     exec.finalize
 end

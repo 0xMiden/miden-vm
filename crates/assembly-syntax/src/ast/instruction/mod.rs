@@ -223,7 +223,8 @@ pub enum Instruction {
     MemLoadWLe,
     MemLoadWLeImm(ImmU32),
     LocLoad(ImmU16),
-    LocLoadW(ImmU16),
+    LocLoadWBe(ImmU16),
+    LocLoadWLe(ImmU16),
 
     MemStore,
     MemStoreImm(ImmU32),
@@ -232,7 +233,8 @@ pub enum Instruction {
     MemStoreWLe,
     MemStoreWLeImm(ImmU32),
     LocStore(ImmU16),
-    LocStoreW(ImmU16),
+    LocStoreWBe(ImmU16),
+    LocStoreWLe(ImmU16),
 
     MemStream,
     AdvPipe,
@@ -257,6 +259,7 @@ pub enum Instruction {
     HornerBase,
     HornerExt,
     EvalCircuit,
+    LogPrecompile,
 
     // ----- exec / call -------------------------------------------------------------------------
     Exec(InvocationTarget),

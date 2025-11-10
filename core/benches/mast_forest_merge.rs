@@ -41,6 +41,13 @@ fn bench_merge_varied_sizes(c: &mut Criterion) {
         let gen_params = MastForestParams {
             decorators: 32,                                // IDs in [0, 32)
             blocks: blocks_per_forest..=blocks_per_forest, // fixed size per forest
+            max_joins: blocks_per_forest.min(8),
+            max_splits: blocks_per_forest.min(8),
+            max_loops: blocks_per_forest.min(4),
+            max_calls: blocks_per_forest.min(4),
+            max_syscalls: 0, // Disabled for executable benchmark forests
+            max_externals: blocks_per_forest.min(2),
+            max_dyns: blocks_per_forest.min(2),
         };
 
         // Pre-generate inputs (excluded from timing).

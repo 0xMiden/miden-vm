@@ -1,6 +1,9 @@
 use miden_core::{
     FMP_INIT_VALUE, Operation,
-    mast::{CallNode, MastForest, MastNode, MastNodeExt},
+    mast::{
+        BasicBlockNodeBuilder, CallNodeBuilder, MastForest, MastForestContributor, MastNode,
+        MastNodeExt,
+    },
 };
 use miden_debug_types::{SourceLanguage, SourceManager};
 use miden_utils_testing::{MIN_STACK_DEPTH, StackInputs, Test, Word, build_op_test, build_test};
@@ -74,7 +77,7 @@ fn locaddr() {
             dropw
             loc_load.0
             push.0.0.0.0
-            loc_loadw.4
+            loc_loadw_be.4
         end
         begin
             exec.foo
@@ -129,7 +132,7 @@ fn locaddr() {
             mem_storew_be
             dropw
             push.0.0.0.0
-            loc_loadw.4
+            loc_loadw_be.4
             loc_load.0
         end
         proc.bar.8
@@ -190,9 +193,12 @@ fn caller() {
 fn build_bar_hash() -> [u64; 4] {
     let mut mast_forest = MastForest::new();
 
-    let foo_root_id = mast_forest.add_block(vec![Operation::Caller], Vec::new()).unwrap();
+    let foo_root_id = BasicBlockNodeBuilder::new(vec![Operation::Caller], Vec::new())
+        .add_to_forest(&mut mast_forest)
+        .unwrap();
 
-    let bar_root: MastNode = CallNode::new_syscall(foo_root_id, &mast_forest).unwrap().into();
+    let bar_root: MastNode =
+        CallNodeBuilder::new_syscall(foo_root_id).build(&mast_forest).unwrap().into();
     let bar_hash: Word = bar_root.digest();
     [
         bar_hash[0].as_int(),

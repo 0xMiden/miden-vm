@@ -308,9 +308,8 @@ where
         U32ShrImm(imm) | U32ShlImm(imm) | U32RotrImm(imm) | U32RotlImm(imm) | AdvPush(imm) => {
             visitor.visit_immediate_u8(imm)
         },
-        Locaddr(imm) | LocLoad(imm) | LocLoadW(imm) | LocStore(imm) | LocStoreW(imm) => {
-            visitor.visit_immediate_u16(imm)
-        },
+        Locaddr(imm) | LocLoad(imm) | LocLoadWBe(imm) | LocLoadWLe(imm) | LocStore(imm)
+        | LocStoreWBe(imm) | LocStoreWLe(imm) => visitor.visit_immediate_u16(imm),
         AssertWithError(code)
         | AssertEqWithError(code)
         | AssertEqwWithError(code)
@@ -366,7 +365,7 @@ where
         | PushFeltList(_) | Sdepth | Caller | Clk | MemLoad | MemLoadWBe | MemLoadWLe
         | MemStore | MemStoreWBe | MemStoreWLe | MemStream | AdvPipe | AdvLoadW | Hash | HMerge
         | HPerm | MTreeGet | MTreeSet | MTreeMerge | MTreeVerify | FriExt2Fold4 | DynExec
-        | DynCall | Breakpoint | HornerBase | HornerExt | EvalCircuit | Emit => {
+        | DynCall | Breakpoint | HornerBase | HornerExt | EvalCircuit | LogPrecompile | Emit => {
             ControlFlow::Continue(())
         },
     }
@@ -765,9 +764,8 @@ where
         U32ShrImm(imm) | U32ShlImm(imm) | U32RotrImm(imm) | U32RotlImm(imm) | AdvPush(imm) => {
             visitor.visit_mut_immediate_u8(imm)
         },
-        Locaddr(imm) | LocLoad(imm) | LocLoadW(imm) | LocStore(imm) | LocStoreW(imm) => {
-            visitor.visit_mut_immediate_u16(imm)
-        },
+        Locaddr(imm) | LocLoad(imm) | LocLoadWBe(imm) | LocLoadWLe(imm) | LocStore(imm)
+        | LocStoreWBe(imm) | LocStoreWLe(imm) => visitor.visit_mut_immediate_u16(imm),
         AssertWithError(code)
         | AssertEqWithError(code)
         | AssertEqwWithError(code)
@@ -823,7 +821,7 @@ where
         | PushFeltList(_) | Sdepth | Caller | Clk | MemLoad | MemLoadWBe | MemLoadWLe
         | MemStore | MemStoreWBe | MemStoreWLe | MemStream | AdvPipe | AdvLoadW | Hash | HMerge
         | HPerm | MTreeGet | MTreeSet | MTreeMerge | MTreeVerify | FriExt2Fold4 | DynExec
-        | DynCall | Breakpoint | HornerBase | HornerExt | EvalCircuit | Emit => {
+        | DynCall | Breakpoint | HornerBase | HornerExt | EvalCircuit | LogPrecompile | Emit => {
             ControlFlow::Continue(())
         },
     }

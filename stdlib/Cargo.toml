@@ -48,19 +48,19 @@ miden-air.workspace = true
 miden-processor = { workspace = true, features = ["testing"] }
 miden-utils-testing.workspace = true
 miden-verifier.workspace = true
-num = "0.4"
-num-bigint = "0.4"
-pretty_assertions = "1.4"
+num = { version = "0.4" }
+num-bigint = { version = "0.4" }
+pretty_assertions = { version = "1.4" }
 rand = { version = "0.9", default-features = false }
 rand_chacha = { version = "0.9", default-features = false }
-rstest = "0.26"
+rstest = { version = "0.26" }
 serde_json.workspace = true
-sha2 = "0.10"
-sha3 = "0.10"
+sha2 = { version = "0.10" }
+sha3 = { version = "0.10" }
 winter-air.workspace = true
 winter-fri.workspace = true
 
 [build-dependencies]
 env_logger.workspace = true
-fs-err = "3.0"
+fs-err = { version = "3.1" }
 miden-assembly = { workspace = true, features = ["std"] }

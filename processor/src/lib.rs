@@ -20,7 +20,7 @@ pub use miden_core::{
     crypto::merkle::SMT_DEPTH,
     errors::InputError,
     mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
-    precompile::PrecompileRequest,
+    precompile::{PrecompileRequest, PrecompileTranscriptState},
     sys_events::SystemEvent,
     utils::DeserializationError,
 };
@@ -240,6 +240,8 @@ pub struct Process {
     chiplets: Chiplets,
     max_cycles: u32,
     enable_tracing: bool,
+    /// Precompile transcript state (sponge capacity) used by `log_precompile`.
+    pc_transcript_state: PrecompileTranscriptState,
 }
 
 #[cfg(any(test, feature = "testing"))]
@@ -252,6 +254,8 @@ pub struct Process {
     pub chiplets: Chiplets,
     pub max_cycles: u32,
     pub enable_tracing: bool,
+    /// Precompile transcript state (sponge capacity) used by `log_precompile`.
+    pub pc_transcript_state: PrecompileTranscriptState,
 }
 
 impl Process {
@@ -297,6 +301,7 @@ impl Process {
             chiplets: Chiplets::new(kernel),
             max_cycles: execution_options.max_cycles(),
             enable_tracing: execution_options.enable_tracing(),
+            pc_transcript_state: PrecompileTranscriptState::default(),
         }
     }
 
@@ -335,7 +340,7 @@ impl Process {
             .get_node_by_id(node_id)
             .ok_or(ExecutionError::MastNodeNotFoundInForest { node_id })?;
 
-        for &decorator_id in node.before_enter() {
+        for &decorator_id in node.before_enter(program) {
             self.execute_decorator(&program[decorator_id], host)?;
         }
 
@@ -365,7 +370,7 @@ impl Process {
             },
         }
 
-        for &decorator_id in node.after_exit() {
+        for &decorator_id in node.after_exit(program) {
             self.execute_decorator(&program[decorator_id], host)?;
         }
 
@@ -544,7 +549,7 @@ impl Process {
         self.start_basic_block_node(basic_block, program, host)?;
 
         let mut op_offset = 0;
-        let mut decorator_ids = basic_block.indexed_decorator_iter();
+        let mut decorator_ids = basic_block.indexed_decorator_iter(program);
 
         // execute the first operation batch
         self.execute_op_batch(
@@ -732,8 +737,17 @@ impl Process {
         self.chiplets.kernel_rom.kernel()
     }
 
-    pub fn into_parts(self) -> (System, Decoder, Stack, RangeChecker, Chiplets) {
-        (self.system, self.decoder, self.stack, self.range, self.chiplets)
+    pub fn into_parts(
+        self,
+    ) -> (System, Decoder, Stack, RangeChecker, Chiplets, PrecompileTranscriptState) {
+        (
+            self.system,
+            self.decoder,
+            self.stack,
+            self.range,
+            self.chiplets,
+            self.pc_transcript_state,
+        )
     }
 }
 

@@ -23,6 +23,10 @@ permissions:
 
 jobs:
   gate:
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.head.repo.fork == true)
     runs-on: ubuntu-latest
     env:
       DISPATCH_PR_NUMBER: ${{ inputs.pr_number }}
@@ -71,7 +75,7 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           else
             case "$assoc" in
-              OWNER|CONTRIBUTOR|COLLABORATOR) echo "skip=true"  >> "$GITHUB_OUTPUT" ;;
+              OWNER|COLLABORATOR|MEMBER) echo "skip=true"  >> "$GITHUB_OUTPUT" ;;
               *)                         echo "skip=false" >> "$GITHUB_OUTPUT" ;;
             esac
             [ "$draft" = "true" ] && echo "skip=true" >> "$GITHUB_OUTPUT" || true

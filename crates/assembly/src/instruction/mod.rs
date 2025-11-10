@@ -1,5 +1,7 @@
+use alloc::vec::Vec;
+
 use miden_assembly_syntax::{
-    ast::Instruction,
+    ast::{ImmU16, Instruction},
     debuginfo::{Span, Spanned},
     diagnostics::{RelatedLabel, Report},
     parser::{IntValue, PushValue},
@@ -31,47 +33,54 @@ impl Assembler {
         block_builder: &mut BasicBlockBuilder,
         proc_ctx: &mut ProcedureContext,
     ) -> Result<Option<MastNodeId>, Report> {
-        // if the assembler is in debug mode, start tracking the instruction about to be executed;
-        // this will allow us to map the instruction to the sequence of operations which were
-        // executed as a part of this instruction.
+        // Determine whether this instruction can create a new node
+        let can_create_node = matches!(
+            instruction.inner(),
+            Instruction::Call(_)
+                | Instruction::SysCall(_)
+                | Instruction::DynExec
+                | Instruction::DynCall
+        );
+
+        // Always collect decorators into a single Vec; it will remain empty if not needed.
+        let mut decorators = Vec::new();
+
         if self.in_debug_mode() {
+            // if the assembler is in debug mode, start tracking the instruction about to be
+            // executed; this will allow us to map the instruction to the sequence of
+            // operations which were executed as a part of this instruction.
             block_builder.track_instruction(instruction, proc_ctx)?;
-        }
 
-        let new_node_id = self.compile_instruction_impl(instruction, block_builder, proc_ctx)?;
-
-        if self.in_debug_mode() {
-            // compute and update the cycle count of the instruction which just finished executing
-            let maybe_asm_op_id = block_builder.set_instruction_cycle_count();
-
-            if let Some(node_id) = new_node_id {
-                // New node was created, so we are done building the current block. We then want to
-                // add the assembly operation to the new node - for example call, dyncall, if/else
-                // statements, loops, etc. However, `exec` instructions are compiled away and not
-                // added to the trace, so we should ignore them. Theoretically, we
-                // could probably add them anyways, but it currently breaks the
-                // `VmStateIterator`.
-                if !matches!(instruction.inner(), &Instruction::Exec(_)) {
-                    let asm_op_id = maybe_asm_op_id.expect("no asmop decorator");
-
-                    // set the cycle count to 1
-                    {
-                        let assembly_op = &mut block_builder.mast_forest_builder_mut()[asm_op_id];
-                        if let Decorator::AsmOp(assembly_op) = assembly_op {
-                            assembly_op.set_num_cycles(1);
-                        } else {
-                            panic!("expected AsmOp decorator");
-                        }
-                    }
-
-                    block_builder
-                        .mast_forest_builder_mut()
-                        .append_before_enter(node_id, &[asm_op_id]);
+            // New node is being created, so we are done building the current block. We then want to
+            // add the assembly operation to the new node - for example call, dyncall, if/else
+            // statements, loops, etc. However, `exec` instructions are compiled away and not
+            // added to the trace, so we should ignore them. Theoretically, we
+            // could probably add them anyways, but it currently breaks the
+            // `VmStateIterator`.
+            if can_create_node
+                && !matches!(instruction.inner(), Instruction::Exec(_))
+                && let Some(asm_op_id) = block_builder.set_instruction_cycle_count()
+            {
+                // Set the cycle count for this assembly op to 1
+                let assembly_op = &mut block_builder.mast_forest_builder_mut()[asm_op_id];
+                match assembly_op {
+                    Decorator::AsmOp(op) => op.set_num_cycles(1),
+                    _ => panic!("expected AsmOp decorator"),
                 }
+                decorators.push(asm_op_id);
             }
         }
 
-        Ok(new_node_id)
+        // Compile the instruction, passing the decorators (which may be empty).
+        let opt_new_node_id =
+            self.compile_instruction_impl(instruction, block_builder, proc_ctx, decorators)?;
+
+        // If we’re in debug mode but didn’t create a node, set the cycle count after compilation.
+        if self.in_debug_mode() && !can_create_node {
+            let _ = block_builder.set_instruction_cycle_count();
+        }
+
+        Ok(opt_new_node_id)
     }
 
     fn compile_instruction_impl(
@@ -79,6 +88,7 @@ impl Assembler {
         instruction: &Span<Instruction>,
         block_builder: &mut BasicBlockBuilder,
         proc_ctx: &mut ProcedureContext,
+        before_enter: Vec<miden_core::mast::DecoratorId>,
     ) -> Result<Option<MastNodeId>, Report> {
         use Operation::*;
 
@@ -423,26 +433,28 @@ impl Assembler {
                 true,
                 span,
             )?,
-            Instruction::LocLoadW(v) => {
-                let local_addr = v.expect_value();
-                if !local_addr.is_multiple_of(WORD_SIZE as u16) {
-                    return Err(RelatedLabel::error("invalid local word index")
-                        .with_help("the index to a local word must be a multiple of 4")
-                        .with_labeled_span(v.span(), "this index is not word-aligned")
-                        .with_source_file(
-                            proc_ctx.source_manager().get(proc_ctx.span().source_id()).ok(),
-                        )
-                        .into());
-                }
-
+            Instruction::LocLoadWBe(v) => {
+                let local_addr = validate_local_word_alignment(v, proc_ctx)?;
                 mem_ops::mem_read(
                     block_builder,
                     proc_ctx,
-                    Some(local_addr as u32),
+                    Some(local_addr),
                     true,
                     false,
                     instruction.span(),
                 )?
+            },
+            Instruction::LocLoadWLe(v) => {
+                let local_addr = validate_local_word_alignment(v, proc_ctx)?;
+                mem_ops::mem_read(
+                    block_builder,
+                    proc_ctx,
+                    Some(local_addr),
+                    true,
+                    false,
+                    instruction.span(),
+                )?;
+                push_reversew(block_builder)
             },
             Instruction::MemStore => block_builder.push_ops([MStore, Drop]),
             Instruction::MemStoreImm(v) => mem_ops::mem_write_imm(
@@ -489,26 +501,15 @@ impl Assembler {
                 true,
                 span,
             )?,
-            Instruction::LocStoreW(v) => {
-                let local_addr = v.expect_value();
-                if !local_addr.is_multiple_of(WORD_SIZE as u16) {
-                    return Err(RelatedLabel::error("invalid local word index")
-                        .with_help("the index to a local word must be a multiple of 4")
-                        .with_labeled_span(v.span(), "this index is not word-aligned")
-                        .with_source_file(
-                            proc_ctx.source_manager().get(proc_ctx.span().source_id()).ok(),
-                        )
-                        .into());
-                }
-
-                mem_ops::mem_write_imm(
-                    block_builder,
-                    proc_ctx,
-                    local_addr as u32,
-                    true,
-                    false,
-                    span,
-                )?
+            Instruction::LocStoreWBe(v) => {
+                let local_addr = validate_local_word_alignment(v, proc_ctx)?;
+                mem_ops::mem_write_imm(block_builder, proc_ctx, local_addr, true, false, span)?
+            },
+            Instruction::LocStoreWLe(v) => {
+                let local_addr = validate_local_word_alignment(v, proc_ctx)?;
+                push_reversew(block_builder);
+                mem_ops::mem_write_imm(block_builder, proc_ctx, local_addr, true, false, span)?;
+                push_reversew(block_builder)
             },
             Instruction::SysEvent(system_event) => {
                 block_builder.push_system_event(system_event.into())
@@ -531,9 +532,8 @@ impl Assembler {
             Instruction::FriExt2Fold4 => block_builder.push_op(FriE2F4),
             Instruction::HornerBase => block_builder.push_op(HornerBase),
             Instruction::HornerExt => block_builder.push_op(HornerExt),
-            Instruction::EvalCircuit => {
-                block_builder.push_op(Operation::EvalCircuit);
-            },
+            Instruction::EvalCircuit => block_builder.push_op(EvalCircuit),
+            Instruction::LogPrecompile => block_builder.push_op(LogPrecompile),
 
             // ----- exec/call instructions -------------------------------------------------------
             Instruction::Exec(callee) => {
@@ -543,6 +543,7 @@ impl Assembler {
                         callee,
                         proc_ctx.id(),
                         block_builder.mast_forest_builder_mut(),
+                        before_enter,
                     )
                     .map(Into::into);
             },
@@ -553,6 +554,7 @@ impl Assembler {
                         callee,
                         proc_ctx.id(),
                         block_builder.mast_forest_builder_mut(),
+                        before_enter,
                     )
                     .map(Into::into);
             },
@@ -563,11 +565,16 @@ impl Assembler {
                         callee,
                         proc_ctx.id(),
                         block_builder.mast_forest_builder_mut(),
+                        before_enter,
                     )
                     .map(Into::into);
             },
-            Instruction::DynExec => return self.dynexec(block_builder.mast_forest_builder_mut()),
-            Instruction::DynCall => return self.dyncall(block_builder.mast_forest_builder_mut()),
+            Instruction::DynExec => {
+                return self.dynexec(block_builder.mast_forest_builder_mut(), before_enter);
+            },
+            Instruction::DynCall => {
+                return self.dyncall(block_builder.mast_forest_builder_mut(), before_enter);
+            },
             Instruction::ProcRef(callee) => self.procref(callee, proc_ctx.id(), block_builder)?,
 
             // ----- debug decorators -------------------------------------------------------------
@@ -642,7 +649,7 @@ fn push_felt(span_builder: &mut BasicBlockBuilder, value: Felt) {
 }
 
 /// Helper function that appends operations to reverse the order of the top 4 elements
-/// on the stack, used for big-endian memory instructions.
+/// on the stack, used for little-endian memory instructions.
 ///
 /// The instruction takes 3 cycles to execute and transforms the stack as follows:
 /// [a, b, c, d, ...] -> [d, c, b, a, ...].
@@ -650,4 +657,22 @@ fn push_reversew(block_builder: &mut BasicBlockBuilder) {
     use Operation::*;
 
     block_builder.push_ops([MovDn3, Swap, MovUp2]);
+}
+
+/// Helper function that validates a local word address is properly word-aligned.
+///
+/// Returns the validated address as u32 or an error if the address is not a multiple of 4.
+fn validate_local_word_alignment(
+    local_addr: &ImmU16,
+    proc_ctx: &ProcedureContext,
+) -> Result<u32, Report> {
+    let addr = local_addr.expect_value();
+    if !addr.is_multiple_of(WORD_SIZE as u16) {
+        return Err(RelatedLabel::error("invalid local word index")
+            .with_help("the index to a local word must be a multiple of 4")
+            .with_labeled_span(local_addr.span(), "this index is not word-aligned")
+            .with_source_file(proc_ctx.source_manager().get(proc_ctx.span().source_id()).ok())
+            .into());
+    }
+    Ok(addr as u32)
 }

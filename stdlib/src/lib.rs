@@ -7,11 +7,16 @@ extern crate alloc;
 use alloc::{sync::Arc, vec, vec::Vec};
 
 use miden_assembly::{Library, mast::MastForest, utils::Deserializable};
-use miden_core::{EventId, EventName, Felt, Word, precompile::PrecompileVerifier};
+use miden_core::{
+    EventName, Felt, Word, precompile::PrecompileVerifierRegistry, utils::Serializable,
+};
+use miden_crypto::dsa::ecdsa_k256_keccak;
 use miden_processor::{EventHandler, HostLibrary};
 use miden_utils_sync::LazyLock;
 
 use crate::handlers::{
+    bytes_to_packed_u32_felts,
+    ecdsa::{ECDSA_VERIFY_EVENT_NAME, EcdsaPrecompile},
     falcon_div::{FALCON_DIV_EVENT_NAME, handle_falcon_div},
     keccak256::{KECCAK_HASH_MEMORY_EVENT_NAME, KeccakPrecompile},
     smt_peek::{SMT_PEEK_EVENT_NAME, handle_smt_peek},
@@ -69,6 +74,7 @@ impl StdLibrary {
     pub fn handlers(&self) -> Vec<(EventName, Arc<dyn EventHandler>)> {
         vec![
             (KECCAK_HASH_MEMORY_EVENT_NAME, Arc::new(KeccakPrecompile)),
+            (ECDSA_VERIFY_EVENT_NAME, Arc::new(EcdsaPrecompile)),
             (SMT_PEEK_EVENT_NAME, Arc::new(handle_smt_peek)),
             (U64_DIV_EVENT_NAME, Arc::new(handle_u64_div)),
             (FALCON_DIV_EVENT_NAME, Arc::new(handle_falcon_div)),
@@ -77,10 +83,12 @@ impl StdLibrary {
         ]
     }
 
-    /// List of all `PrecompileVerifier` required to verify precompile requests.
-    pub fn verifiers(&self) -> Vec<(EventId, Arc<dyn PrecompileVerifier>)> {
-        let keccak_event_id = KECCAK_HASH_MEMORY_EVENT_NAME.to_event_id();
-        vec![(keccak_event_id, Arc::new(KeccakPrecompile))]
+    /// Returns a [`PrecompileVerifierRegistry`] containing all verifiers required to validate
+    /// standard library precompile requests.
+    pub fn verifier_registry(&self) -> PrecompileVerifierRegistry {
+        PrecompileVerifierRegistry::new()
+            .with_verifier(&KECCAK_HASH_MEMORY_EVENT_NAME, Arc::new(KeccakPrecompile))
+            .with_verifier(&ECDSA_VERIFY_EVENT_NAME, Arc::new(EcdsaPrecompile))
     }
 }
 
@@ -93,6 +101,56 @@ impl Default for StdLibrary {
         });
         STDLIB.clone()
     }
+}
+
+// ECDSA SIGNATURE
+// ================================================================================================
+
+/// Signs the provided message with the supplied secret key and encodes this signature and the
+/// associated public key into a vector of field elements in the format expected by
+/// `stdlib::crypto::dsa::ecdsa::secp256k1::verify_ecdsa_k256_keccak` procedure.
+///
+/// See [encode_ecdsa_signature()] for more info.
+pub fn ecdsa_sign(sk: &ecdsa_k256_keccak::SecretKey, msg: Word) -> Vec<Felt> {
+    let pk = sk.public_key();
+    let sig = sk.sign(msg);
+    encode_ecdsa_signature(&pk, &sig)
+}
+
+/// Infers the pubic key from the provided signature and message, and encodes this public key and
+/// signature into a vector of field elements in the format expected by
+/// `stdlib::crypto::dsa::ecdsa::secp256k1::verify_ecdsa_k256_keccak` procedure.
+///
+/// See [encode_ecdsa_signature()] for more info.
+///
+/// # Errors
+/// Returns an error if key recovery from signature and message fails.
+pub fn prepare_ecdsa_signature(
+    msg: Word,
+    sig: &ecdsa_k256_keccak::Signature,
+) -> Result<Vec<Felt>, ecdsa_k256_keccak::PublicKeyError> {
+    let pk = ecdsa_k256_keccak::PublicKey::recover_from(msg, sig)?;
+    Ok(encode_ecdsa_signature(&pk, sig))
+}
+
+/// Encodes the provided public key and signature into a vector of field elements in the format
+/// expected by `stdlib::crypto::dsa::ecdsa::secp256k1::verify_ecdsa_k256_keccak` procedure.
+///
+/// 1. The compressed secp256k1 public key encoded as 9 packed-u32 felts (33 bytes total).
+/// 2. The ECDSA signature encoded as 17 packed-u32 felts (66 bytes total).
+///
+/// The two chunks are concatenated as `[PK[9] || SIG[17]]` so they can be streamed straight to
+/// the advice provider before invoking `secp256k1::verify_ecdsa_k256_keccak`.
+pub fn encode_ecdsa_signature(
+    pk: &ecdsa_k256_keccak::PublicKey,
+    sig: &ecdsa_k256_keccak::Signature,
+) -> Vec<Felt> {
+    let mut out = Vec::new();
+    let pk_bytes = pk.to_bytes();
+    out.extend(bytes_to_packed_u32_felts(&pk_bytes));
+    let sig_bytes = sig.to_bytes();
+    out.extend(bytes_to_packed_u32_felts(&sig_bytes));
+    out
 }
 
 // FALCON SIGNATURE
