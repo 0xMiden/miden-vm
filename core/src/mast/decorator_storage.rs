@@ -137,6 +137,7 @@ impl DecoratorIndexMapping {
     /// - Last value in `node_indptr_for_op_idx` must be <= `op_indptr_for_dec_ids.len() - 1`
     /// - Both `op_indptr_for_dec_ids` and `node_indptr_for_op_idx` must be strictly monotonic (each
     ///   successive value must be >= the previous one)
+    #[cfg(test)]
     pub fn from_components(
         decorator_ids: Vec<DecoratorId>,
         op_indptr_for_dec_ids: Vec<usize>,
