@@ -84,10 +84,6 @@ impl Processor for FastProcessor {
     ///
     /// Stack transition:
     /// [ptr, num_read, num_eval, ...] -> [ptr, num_read, num_eval, ...]
-    ///
-    /// Note that we do not record any memory reads in this operation (through a
-    /// [crate::fast::Tracer]), because the parallel trace generation skips the circuit
-    /// evaluation completely.
     fn op_eval_circuit(
         &mut self,
         err_ctx: &impl ErrorContext,
