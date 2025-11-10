@@ -1,9 +1,5 @@
 use alloc::{boxed::Box, vec::Vec};
-use core::{
-    fmt,
-    iter::{Peekable, repeat_n},
-    slice::Iter,
-};
+use core::{fmt, iter::repeat_n, slice::Iter};
 
 use miden_crypto::{
     Felt, Word, ZERO,
@@ -612,8 +608,8 @@ impl fmt::Display for BasicBlockNodePrettyPrint<'_> {
 }
 
 enum Mid<'a> {
-    Slice(core::iter::Peekable<core::slice::Iter<'a, (usize, DecoratorId)>>),
-    Linked(core::iter::Peekable<DecoratedLinksIter<'a>>),
+    Slice(core::slice::Iter<'a, (usize, DecoratorId)>),
+    Linked(DecoratedLinksIter<'a>),
 }
 
 // DECORATOR ITERATION
@@ -625,9 +621,9 @@ enum Mid<'a> {
 /// This lets the caller iterate through a Decorator list with indexes that match the
 /// standard (padded) representation of a basic block.
 pub struct DecoratorOpLinkIterator<'a> {
-    before: Peekable<Iter<'a, DecoratorId>>,
+    before: Iter<'a, DecoratorId>,
     middle: Mid<'a>,
-    after: Peekable<Iter<'a, DecoratorId>>,
+    after: Iter<'a, DecoratorId>,
     total_ops: usize,
     seg: Segment,
 }
@@ -648,9 +644,9 @@ impl<'a> DecoratorOpLinkIterator<'a> {
         total_operations: usize,
     ) -> Self {
         Self {
-            before: before_enter.iter().peekable(),
-            middle: Mid::Slice(decorators.iter().peekable()),
-            after: after_exit.iter().peekable(),
+            before: before_enter.iter(),
+            middle: Mid::Slice(decorators.iter()),
+            after: after_exit.iter(),
             total_ops: total_operations,
             seg: Segment::Before,
         }
@@ -663,9 +659,9 @@ impl<'a> DecoratorOpLinkIterator<'a> {
         total_operations: usize,
     ) -> Self {
         Self {
-            before: before_enter.iter().peekable(),
-            middle: Mid::Linked(decorators.into_iter().peekable()),
-            after: after_exit.iter().peekable(),
+            before: before_enter.iter(),
+            middle: Mid::Linked(decorators.into_iter()),
+            after: after_exit.iter(),
             total_ops: total_operations,
             seg: Segment::Before,
         }
@@ -678,62 +674,11 @@ impl<'a> DecoratorOpLinkIterator<'a> {
         }
     }
 
-    fn middle_peek(&mut self) -> Option<&(usize, DecoratorId)> {
-        match &mut self.middle {
-            Mid::Slice(slice_iter) => slice_iter.peek().copied(),
-            Mid::Linked(linked_iter) => linked_iter.peek(),
-        }
-    }
-
     fn middle_len(&self) -> usize {
         match self.middle {
             Mid::Slice(ref slice_iter) => slice_iter.len(),
             Mid::Linked(ref linked_iter) => linked_iter.len(),
         }
-    }
-
-    /// Optional: yield only if the next item corresponds to the given op index.
-    /// - before_enter items map to op 0
-    /// - middle items use their stored position
-    /// - after_exit items map to `total_ops`
-    //
-    // Some decorators are pegged on an operation index equal to the total number of
-    // operations since decorators are meant to be executed before the operation
-    // they are attached to. This allows them to be executed after the last
-    // operation has been executed.
-    #[inline]
-    pub fn next_filtered(&mut self, pos: usize) -> Option<(usize, DecoratorId)> {
-        let should_yield: bool;
-        'segwalk: loop {
-            match self.seg {
-                Segment::Before => {
-                    if self.before.peek().is_some() {
-                        should_yield = pos == 0;
-                        break 'segwalk;
-                    }
-                    self.seg = Segment::Middle;
-                },
-                Segment::Middle => {
-                    if let Some(&(p, _)) = self.middle_peek() {
-                        should_yield = pos == p;
-                        break 'segwalk;
-                    }
-                    self.seg = Segment::After;
-                },
-                Segment::After => {
-                    if self.after.peek().is_some() {
-                        should_yield = pos == self.total_ops;
-                        break 'segwalk;
-                    }
-                    self.seg = Segment::Done;
-                },
-                Segment::Done => {
-                    should_yield = false;
-                    break 'segwalk;
-                },
-            }
-        }
-        if should_yield { self.next() } else { None }
     }
 }
 
@@ -795,8 +740,8 @@ pub struct RawDecoratorOpLinkIterator<'a> {
 }
 
 enum RawMid<'a> {
-    Slice(core::iter::Peekable<core::slice::Iter<'a, (usize, DecoratorId)>>),
-    Linked(core::iter::Peekable<DecoratedLinksIter<'a>>),
+    Slice(core::slice::Iter<'a, (usize, DecoratorId)>),
+    Linked(DecoratedLinksIter<'a>),
 }
 
 impl<'a> RawDecoratorOpLinkIterator<'a> {
@@ -812,7 +757,7 @@ impl<'a> RawDecoratorOpLinkIterator<'a> {
 
         Self {
             before: before_enter.iter(),
-            middle: RawMid::Slice(decorators.iter().peekable()),
+            middle: RawMid::Slice(decorators.iter()),
             after: after_exit.iter(),
             pad2raw,
             total_raw_ops,
@@ -832,7 +777,7 @@ impl<'a> RawDecoratorOpLinkIterator<'a> {
 
         Self {
             before: before_enter.iter(),
-            middle: RawMid::Linked(decorators.into_iter().peekable()),
+            middle: RawMid::Linked(decorators.into_iter()),
             after: after_exit.iter(),
             pad2raw,
             total_raw_ops,

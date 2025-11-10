@@ -27,8 +27,7 @@ pub use miden_core::{
 use miden_core::{
     Decorator, FieldElement,
     mast::{
-        BasicBlockNode, CallNode, DecoratorOpLinkIterator, DynNode, ExternalNode, JoinNode,
-        LoopNode, OpBatch, SplitNode,
+        BasicBlockNode, CallNode, DynNode, ExternalNode, JoinNode, LoopNode, OpBatch, SplitNode,
     },
 };
 use miden_debug_types::SourceSpan;
@@ -345,7 +344,7 @@ impl Process {
         }
 
         match node {
-            MastNode::Block(node) => self.execute_basic_block_node(node, program, host)?,
+            MastNode::Block(node) => self.execute_basic_block_node(node_id, node, program, host)?,
             MastNode::Join(node) => self.execute_join_node(node, program, host)?,
             MastNode::Split(node) => self.execute_split_node(node, program, host)?,
             MastNode::Loop(node) => self.execute_loop_node(node, program, host)?,
@@ -539,9 +538,14 @@ impl Process {
     }
 
     /// Executes the specified [BasicBlockNode].
+    ///
+    /// # Arguments
+    /// * `node_id` - The ID of this basic block node in the `program` MAST forest. This should
+    ///   match the ID in `basic_block.decorators` when it's `Linked`.
     #[inline(always)]
     fn execute_basic_block_node(
         &mut self,
+        node_id: MastNodeId,
         basic_block: &BasicBlockNode,
         program: &MastForest,
         host: &mut impl SyncHost,
@@ -549,13 +553,12 @@ impl Process {
         self.start_basic_block_node(basic_block, program, host)?;
 
         let mut op_offset = 0;
-        let mut decorator_ids = basic_block.indexed_decorator_iter(program);
 
         // execute the first operation batch
         self.execute_op_batch(
+            node_id,
             basic_block,
             &basic_block.op_batches()[0],
-            &mut decorator_ids,
             op_offset,
             program,
             host,
@@ -568,14 +571,7 @@ impl Process {
         for op_batch in basic_block.op_batches().iter().skip(1) {
             self.respan(op_batch);
             self.execute_op(Operation::Noop, program, host)?;
-            self.execute_op_batch(
-                basic_block,
-                op_batch,
-                &mut decorator_ids,
-                op_offset,
-                program,
-                host,
-            )?;
+            self.execute_op_batch(node_id, basic_block, op_batch, op_offset, program, host)?;
             op_offset += op_batch.ops().len();
         }
 
@@ -585,7 +581,10 @@ impl Process {
         // can happen for decorators appearing after all operations in a block. these decorators
         // are executed after BASIC BLOCK is closed to make sure the VM clock cycle advances beyond
         // the last clock cycle of the BASIC BLOCK ops.
-        for (_, decorator_id) in decorator_ids {
+        // For the linked case, check for decorators at an operation index beyond the last operation
+        let num_ops = basic_block.num_operations() as usize;
+        let decorator_ids = program.decorator_indices_for_op(node_id, num_ops);
+        for &decorator_id in decorator_ids {
             let decorator = program
                 .get_decorator_by_id(decorator_id)
                 .ok_or(ExecutionError::DecoratorNotFoundInForest { decorator_id })?;
@@ -604,9 +603,9 @@ impl Process {
     #[inline(always)]
     fn execute_op_batch(
         &mut self,
+        node_id: MastNodeId,
         basic_block: &BasicBlockNode,
         batch: &OpBatch,
-        decorators: &mut DecoratorOpLinkIterator,
         op_offset: usize,
         program: &MastForest,
         host: &mut impl SyncHost,
@@ -623,7 +622,10 @@ impl Process {
 
         // execute operations in the batch one by one
         for (i, &op) in batch.ops().iter().enumerate() {
-            while let Some((_, decorator_id)) = decorators.next_filtered(i + op_offset) {
+            // Use the forest's decorator storage to get decorator IDs for this operation
+            let current_op_idx = i + op_offset;
+            let decorator_ids = program.decorator_indices_for_op(node_id, current_op_idx);
+            for &decorator_id in decorator_ids {
                 let decorator = program
                     .get_decorator_by_id(decorator_id)
                     .ok_or(ExecutionError::DecoratorNotFoundInForest { decorator_id })?;
