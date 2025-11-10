@@ -16,9 +16,22 @@ use crate::mast::{DecoratedOpLink, DecoratorId, MastNodeId};
 /// 2. Second level: Operation -> Decorator IDs (decorator IDs belong to operations)
 ///
 /// The data layout follows CSR format at both levels:
-/// - `decorator_ids`: Flat storage of all DecoratorId values
-/// - `op_indptr_for_dec_ids`: Pointer indices for operations within decorator_ids
-/// - `node_indptr_for_op_idx`: Pointer indices for nodes within op_indptr_for_dec_ids
+///
+/// - `decorator_ids` contains all the DecoratorId values in a single flat array. These are the
+///   actual decorator identifiers that need to be accessed. We store them contiguously to minimize
+///   memory overhead and improve cache locality when iterating.
+///
+/// - `op_indptr_for_dec_ids` stores pointer indices that map operations to their position within
+///   the `decorator_ids` array. For each operation, it contains the start index where that
+///   operation's decorator IDs begin in the flat storage.
+///
+/// - `node_indptr_for_op_idx` stores pointer indices that map nodes to their position within the
+///   `op_indptr_for_dec_ids` array. For each node, it contains the start index where that node's
+///   operation pointers begin.
+///
+/// Together, these three arrays form a two-level index structure that allows efficient
+/// lookup of decorator IDs for any operation in any node, while minimizing memory usage
+/// for sparse decorator data.
 ///
 /// # Example
 ///
@@ -42,11 +55,16 @@ pub struct DecoratorIndexMapping {
     /// All the decorator IDs per operation per node, in a CSR relationship with
     /// node_indptr_for_op_idx and op_indptr_for_dec_ids
     decorator_ids: Vec<DecoratorId>,
-    /// For the node which operation indices are in op_indptr_for_dec_ids[node_start, node_end],
-    /// the indices of its i-th operation are at decorator_ids[op_indptr_for_dec_ids[node_start
-    /// + i]..op_indptr_for_dec_ids[node_start + i + 1]]
+    /// For the node whose operation indices are in
+    /// `op_indptr_for_dec_ids[node_start..node_end]`,
+    /// the indices of its i-th operation are at:
+    /// ```text
+    /// decorator_ids[op_indptr_for_dec_ids[node_start + i]..
+    ///               op_indptr_for_dec_ids[node_start + i + 1]]
+    /// ```
     op_indptr_for_dec_ids: Vec<usize>,
-    /// The decorated operation indices for the n-th node are at op_indptr_for_dec_ids[n, n+1]
+    /// The decorated operation indices for the n-th node are at
+    /// `op_indptr_for_dec_ids[n..n+1]`
     node_indptr_for_op_idx: IndexVec<MastNodeId, usize>,
 }
 
@@ -90,15 +108,35 @@ impl DecoratorIndexMapping {
 
     /// Create a DecoratorIndexMapping from raw CSR components.
     ///
-    /// This is useful for deserialization or testing purposes.
+    /// This is useful for deserialization or testing purposes where you need to reconstruct
+    /// the data structure from its raw components.
     ///
     /// # Arguments
-    /// * `decorator_ids` - Flat storage of all decorator IDs
-    /// * `op_indptr_for_dec_ids` - Pointer indices for operations within decorator_ids
-    /// * `node_indptr_for_op_idx` - Pointer indices for nodes within op_indptr_for_dec_ids
+    /// * `decorator_ids` - Flat storage of all decorator IDs. These are the actual decorator
+    ///   identifiers that will be accessed through the index structure.
+    /// * `op_indptr_for_dec_ids` - Pointer indices for operations within decorator_ids. These must
+    ///   be monotonically increasing and within bounds of `decorator_ids`. The slice must not be
+    ///   empty, and the first element must be 0.
+    /// * `node_indptr_for_op_idx` - Pointer indices for nodes within op_indptr_for_dec_ids. These
+    ///   must be monotonically increasing and within bounds of `op_indptr_for_dec_ids`. The slice
+    ///   must not be empty, and the first element must be 0.
     ///
     /// # Returns
-    /// An error if the internal structure is inconsistent.
+    /// An error if the internal structure is inconsistent. Common issues that cause errors:
+    /// - Empty `op_indptr_for_dec_ids` or `node_indptr_for_op_idx` vectors
+    /// - Non-zero first element in either pointer array
+    /// - Decreasing pointer values (pointers must be monotonically non-decreasing)
+    /// - Pointer values that exceed the bounds of the arrays they index into
+    /// - Invalid ranges (start > end) in any pointer window
+    ///
+    /// # Validation Restrictions
+    /// The following constraints are enforced between components:
+    /// - `op_indptr_for_dec_ids` length must be >= 1 (for the sentinel)
+    /// - `node_indptr_for_op_idx` length must be >= 1 (for the sentinel)
+    /// - Last value in `op_indptr_for_dec_ids` must be <= `decorator_ids.len()`
+    /// - Last value in `node_indptr_for_op_idx` must be <= `op_indptr_for_dec_ids.len() - 1`
+    /// - Both `op_indptr_for_dec_ids` and `node_indptr_for_op_idx` must be strictly monotonic (each
+    ///   successive value must be >= the previous one)
     pub fn from_components(
         decorator_ids: Vec<DecoratorId>,
         op_indptr_for_dec_ids: Vec<usize>,
