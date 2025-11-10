@@ -2,6 +2,110 @@ use.std::crypto::hashes::rpo
 
 # ===== MEMORY FUNCTIONS ==========================================================================
 
+#! Copies `n` felts from `read_ptr` to `write_ptr`.
+#!
+#! If possible, this procedure will copy word-aligned words internally using `memcopy_words`,
+#! decreasing the total number of cycles required to make a copy.
+#!
+#! It is advised to copy small chunks of memory using `memcopy_felts` instead, since it won't have a
+#! computation logic overhead.
+#!
+#! Inputs:  [n, read_ptr, write_ptr]
+#! Outputs: []
+#!
+#! Where:
+#! - n is the number of felts which should be copied.
+#! - read_ptr is the memory pointer where the felts to copy are stored.
+#! - write_ptr is the memory pointer where the felts will be copied.
+#!
+#! Panics if:
+#! - read_ptr and write_ptr are not a u32 values.
+#!
+#! Total cycles: 
+export.memcopy
+    # check whether the difference between `read_ptr` and `write_ptr` is 4, otherwise these pointers 
+    # will never be simultaneously word-alined, so we won't be able to use `memcopy_words`
+    movdn.2 u32assert2.err="memory addresses must be valid u32 values"
+    # => [read_ptr, write_ptr, n]
+
+    # Compute the remainders of dividing read_ptr and write_ptr by 4. Subtract them to get the 
+    # "alignment flag".
+    dup.1 u32mod.4 dup.1 u32mod.4 dup.1 eq
+    # => [alignment_flag, write_ptr%4, read_ptr, write_ptr, n]
+
+    if.true
+        # if read pointer and write pointer are word-aligned between each other, we will be able to
+        # use `memcopy_words` in the cycle to optimize the copy
+        # => [write_ptr%4, read_ptr, write_ptr, n]
+
+        ### "prefix" handling #####################################################################
+
+        # if the current read pointer (and write pointer, since now they are in "sync") is not 
+        # word-aligned and we need to copy at least the (4 - write_ptr%4) values (so 
+        # n >= (4 - write_ptr%4), meaning we have enough values to copy to make pointers 
+        # word-aligned), use `memcopy_felts_internal` to copy values until it become word-aligned
+        dup neq.0
+        # => [is_not_word_aligned, write_ptr%4, read_ptr, write_ptr, n]
+
+        push.4 movup.2 sub
+        # => [4 - write_ptr%4, is_not_word_aligned, read_ptr, write_ptr, n] 
+        
+        dup dup.5 u32lte
+        # => [(4 - write_ptr%4) <= 4, 4 - write_ptr%4, is_not_word_aligned, read_ptr, write_ptr, n]
+
+        swap movdn.2 and
+        # => [should_handle_prefix, 4 - write_ptr%4, read_ptr, write_ptr, n]
+
+        if.true
+            # in that case 4 - write_ptr%4 is the number of values we should copy until pointers
+            # become word-aligned
+            # => [4 - write_ptr%4, read_ptr, write_ptr, n]
+
+            dup movdn.3
+            # => [4 - write_ptr%4, read_ptr, write_ptr, 4 - write_ptr%4, n]
+
+            exec.memcopy_felts_internal
+            # => [0, wa_read_ptr, wa_write_ptr, 4 - write_ptr%4, n]
+
+            # update the total number of values left to copy
+            drop movup.3 movup.3 sub
+            # => [n', wa_read_ptr, wa_write_ptr]
+        else
+            drop movup.2
+            # => [n, read_ptr, write_ptr]
+        end
+        # => [n', read_ptr', write_ptr']
+
+        # on that stage we either have word-aligned read and write pointers (if.true case or if 
+        # these pointers were word-aligned initially) or non-word-aligned pointers, but with `n`
+        # less than the number of values required to make pointers word-aligned (e.g. pointer is 
+        # 1001, but n = 2)
+
+        ### "words" handling ######################################################################
+
+        # get the number of words we should handle and the number of remaining felt values
+        u32divmod.4
+        # => [values_left, num_words, read_ptr', write_ptr']
+
+        movdn.3 exec.memcopy_words_internal
+        # => [0, read_ptr'', write_ptr'', values_left]
+
+        ### "suffix" handling #####################################################################
+
+        # handle the remaining values
+        drop movup.2 exec.memcopy_felts
+        # => []
+    else
+        # if read pointer and write pointer are not word-aligned between each other, use 
+        # `memcopy_felts` to copy values one-by-one
+        # => [write_ptr%4, read_ptr, write_ptr, n]
+
+        drop movup.2 exec.memcopy_felts
+        # => []
+    end
+    # => []
+end
+
 #! Copies `n` words from `read_ptr` to `write_ptr`.
 #!
 #! `read_ptr` and `write_ptr` pointers *must be* word-aligned.
@@ -16,51 +120,76 @@ use.std::crypto::hashes::rpo
 #!
 #! Total cycles: 15 + 16 * num_words
 export.memcopy_words
-  # The loop variable is changed with an add instead of sub because the former
-  # uses one fewer cycle. So here the counter is negated. (1 cycles)
-  # stack: [-n, read_ptr, write_ptr, ...]
-  neg
+    exec.memcopy_words_internal
+    # => [0, read_ptr + 4n, write_ptr + 4n]
+    
+    # clean the stack (3 cycles)
+    drop drop drop
+    # => []
+end
 
-  # Pad the stack because mem_load overwrites it (4 cycles)
-  # stack: [0, 0, 0, 0, -n, read_ptr, write_ptr, ...]
-  padw
+#! Copies `n` words from `read_ptr` to `write_ptr`.
+#!
+#! `read_ptr` and `write_ptr` pointers *must be* word-aligned.
+#!
+#! Inputs:  [n, read_ptr, write_ptr]
+#! Outputs: [0, read_ptr + 4n, write_ptr + 4n]
+#!
+#! Where:
+#! - n is the number of words which should be copied.
+#! - read_ptr is the memory pointer where the words to copy are stored.
+#! - write_ptr is the memory pointer where the words will be copied.
+#!
+#! Total cycles: 12 + 16 * num_words
+proc.memcopy_words_internal
+    # The loop variable is changed with an add instead of sub because the former
+    # uses one fewer cycle. So here the counter is negated. (1 cycles)
+    # stack: [-n, read_ptr, write_ptr, ...]
+    neg
 
-  # check loop condition (3 cycles)
-  # stack: [b, 0, 0, 0, 0, -n, read_ptr, write_ptr, ...]
-  dup.4 neq.0
+    # Pad the stack because mem_load overwrites it (4 cycles)
+    # stack: [0, 0, 0, 0, -n, read_ptr, write_ptr, ...]
+    padw
 
-  # LOOP: [0, 0, 0, 0, -n, read_ptr, write_ptr, ...]
-  # while(n!=0) (16 cycles)
-  while.true
-    # perform read (2 cycles)
-    # stack: [a3, a2, a1, a0, -n, read_ptr, write_ptr, ...]
-    dup.5 mem_loadw_be
+    # check loop condition (3 cycles)
+    # stack: [b, 0, 0, 0, 0, -n, read_ptr, write_ptr, ...]
+    dup.4 neq.0
 
-    # perform write (2 cycles)
-    # stack: [a3, a2, a1, a0, -n, read_ptr, write_ptr, ...]
-    dup.6 mem_storew_be
+    # LOOP: [0, 0, 0, 0, -n, read_ptr, write_ptr, ...]
+    # while(n!=0) (16 cycles)
+    while.true
+        # perform read (2 cycles)
+        # stack: [a3, a2, a1, a0, -n, read_ptr, write_ptr, ...]
+        dup.5 mem_loadw_be
 
-    # note: the values of `A` are no longer necessary, use 0 to signal its a
-    # padding
-    # stack: [-n, read_ptr, write_ptr, x, 0, 0, 0, 0, ...]
-    swapw
+        # perform write (2 cycles)
+        # stack: [a3, a2, a1, a0, -n, read_ptr, write_ptr, ...]
+        dup.6 mem_storew_be
 
-    # stack: [-n+1, read_ptr+4, write_ptr+4, x, 0, 0, 0, 0, ...]
-    # update counters (9 cycles)
-    add.1 movup.3 movup.3 add.4 movup.3 add.4 movup.3
+        # note: the values of `A` are no longer necessary, use 0 to signal its a
+        # padding
+        # stack: [-n, read_ptr, write_ptr, x, 0, 0, 0, 0, ...]
+        swapw
 
-    # stack: [0, 0, 0, 0, -n+1, read_ptr+4, write_ptr+4, x, ...]
-    swapw
+        # stack: [-n+1, read_ptr+4, write_ptr+4, x, 0, 0, 0, 0, ...]
+        # update counters (9 cycles)
+        add.1 movup.3 movup.3 add.4 movup.3 add.4 movup.3
 
-    dup.4 neq.0 # while(n!=0) (3 cycles)
-  end
+        # stack: [0, 0, 0, 0, -n+1, read_ptr+4, write_ptr+4, x, ...]
+        swapw
 
-  # clean stack (7 cycles)
-  # stack: [...]
-  dropw drop drop drop
+        dup.4 neq.0 # while(n!=0) (3 cycles)
+    end
+
+    # clean stack (4 cycles)
+    dropw
+    # => [-n+n = 0, read_ptr + 4n, write_ptr + 4n]
 end
 
 #! Copies `n` felts from `read_ptr` to `write_ptr`.
+#!
+#! It is advised to copy big chunks of memory using `memcopy` instead, since it will handle the 
+#! memory more efficiently.
 #!
 #! Inputs:  [n, read_ptr, write_ptr]
 #! Outputs: []
@@ -72,6 +201,26 @@ end
 #!
 #! Total cycles: 7 + 14 * num_felts
 export.memcopy_felts
+    exec.memcopy_felts_internal
+    # => [n = 0, read_ptr + n, write_ptr + n]
+
+    # clean stack (3 cycles)
+    drop drop drop
+    # => []
+end
+
+#! Copies `n` felts from `read_ptr` to `write_ptr`.
+#!
+#! Inputs:  [n, read_ptr, write_ptr]
+#! Outputs: [n = 0, read_ptr + n, write_ptr + n]
+#!
+#! Where:
+#! - n is the number of felts which should be copied.
+#! - read_ptr is the memory pointer where the felts to copy are stored.
+#! - write_ptr is the memory pointer where the felts will be copied.
+#!
+#! Total cycles: 4 + 14 * num_felts
+proc.memcopy_felts_internal
     # The loop variable is changed with an `add` instead of `sub` because the former uses one fewer 
     # cycle. So here the counter is negated. (1 cycle)
     neg
@@ -99,9 +248,6 @@ export.memcopy_felts
         # => [loop_flag, -n+1, read_ptr+1, write_ptr+1]
     end
     # => [n = 0, read_ptr + n, write_ptr + n]
-
-    # clean stack (3 cycles)
-    drop drop drop
 end
 
 #! Copies an even number of words from the advice_stack to memory, computing their permutation.
