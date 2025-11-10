@@ -88,8 +88,12 @@ impl NodeToDecoratorIds {
         // For CSR, we need to ensure there's always a sentinel pointer at node_id + 1
         let required_len = node_id.to_usize() + 2; // +1 for the node itself, +1 for sentinel
         while self.node_indptr_for_before.len() < required_len {
-            let _ = self.node_indptr_for_before.push(self.before_enter_decorators.len());
-            let _ = self.node_indptr_for_after.push(self.after_exit_decorators.len());
+            self.node_indptr_for_before
+                .push(self.before_enter_decorators.len())
+                .expect("node_indptr_for_before capacity exceeded: MAST forest has too many nodes");
+            self.node_indptr_for_after
+                .push(self.after_exit_decorators.len())
+                .expect("node_indptr_for_after capacity exceeded: MAST forest has too many nodes");
         }
 
         // Get the start position for this node's decorators
@@ -167,10 +171,14 @@ impl NodeToDecoratorIds {
 
         // Add final sentinel pointers if needed
         if self.node_indptr_for_before.len() == max_len {
-            let _ = self.node_indptr_for_before.push(self.before_enter_decorators.len());
+            self.node_indptr_for_before
+                .push(self.before_enter_decorators.len())
+                .expect("node_indptr_for_before capacity exceeded: MAST forest has too many nodes");
         }
         if self.node_indptr_for_after.len() == max_len {
-            let _ = self.node_indptr_for_after.push(self.after_exit_decorators.len());
+            self.node_indptr_for_after
+                .push(self.after_exit_decorators.len())
+                .expect("node_indptr_for_after capacity exceeded: MAST forest has too many nodes");
         }
     }
 

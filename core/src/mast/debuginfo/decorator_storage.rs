@@ -683,9 +683,9 @@ mod tests {
         ];
         let op_indptr_for_dec_ids = vec![0, 2, 3, 6];
         let mut node_indptr_for_op_idx = IndexVec::new();
-        let _ = node_indptr_for_op_idx.push(0);
-        let _ = node_indptr_for_op_idx.push(2);
-        let _ = node_indptr_for_op_idx.push(3);
+        node_indptr_for_op_idx.push(0).expect("test setup: IndexVec capacity exceeded");
+        node_indptr_for_op_idx.push(2).expect("test setup: IndexVec capacity exceeded");
+        node_indptr_for_op_idx.push(3).expect("test setup: IndexVec capacity exceeded");
 
         OpToDecoratorIds::from_components(
             decorator_ids,
@@ -800,8 +800,8 @@ mod tests {
             let decorator_indices = vec![];
             let op_indptr_for_dec_idx = vec![0, 0, 0]; // 2 operations, both empty
             let mut node_indptr_for_op_idx = IndexVec::new();
-            let _ = node_indptr_for_op_idx.push(0);
-            let _ = node_indptr_for_op_idx.push(2);
+            node_indptr_for_op_idx.push(0).expect("test setup: IndexVec capacity exceeded");
+            node_indptr_for_op_idx.push(2).expect("test setup: IndexVec capacity exceeded");
 
             let storage = OpToDecoratorIds::from_components(
                 decorator_indices,
@@ -873,9 +873,9 @@ mod tests {
         ];
         let op_indptr_for_dec_idx = vec![0, 2, 3, 6];
         let mut node_indptr_for_op_idx = IndexVec::new();
-        let _ = node_indptr_for_op_idx.push(0);
-        let _ = node_indptr_for_op_idx.push(2);
-        let _ = node_indptr_for_op_idx.push(3);
+        node_indptr_for_op_idx.push(0).expect("test setup: IndexVec capacity exceeded");
+        node_indptr_for_op_idx.push(2).expect("test setup: IndexVec capacity exceeded");
+        node_indptr_for_op_idx.push(3).expect("test setup: IndexVec capacity exceeded");
 
         let storage1 = OpToDecoratorIds::from_components(
             decorator_indices.clone(),
@@ -890,8 +890,8 @@ mod tests {
         // Modify one and ensure they're no longer equal
         let different_decorators = vec![test_decorator_id(10)];
         let mut different_node_indptr = IndexVec::new();
-        let _ = different_node_indptr.push(0);
-        let _ = different_node_indptr.push(1);
+        different_node_indptr.push(0).expect("test setup: IndexVec capacity exceeded");
+        different_node_indptr.push(1).expect("test setup: IndexVec capacity exceeded");
 
         let storage3 = OpToDecoratorIds::from_components(
             different_decorators,
