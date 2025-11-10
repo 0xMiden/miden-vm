@@ -389,6 +389,7 @@ impl BasicBlockNode {
     ///
     /// Unlike the derived PartialEq, this method works correctly with both owned and linked
     /// decorator storage by accessing the actual decorator data from the forest when needed.
+    #[cfg(test)]
     pub fn semantic_eq(&self, other: &BasicBlockNode, forest: &MastForest) -> bool {
         // Compare operations by collecting and comparing
         let self_ops: Vec<_> = self.operations().collect();

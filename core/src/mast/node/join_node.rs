@@ -155,6 +155,7 @@ impl JoinNode {
     ///
     /// Unlike the derived PartialEq, this method works correctly with both owned and linked
     /// decorator storage by accessing the actual decorator data from the forest when needed.
+    #[cfg(test)]
     pub fn semantic_eq(&self, other: &JoinNode, forest: &MastForest) -> bool {
         // Compare children
         if self.first() != other.first() || self.second() != other.second() {
