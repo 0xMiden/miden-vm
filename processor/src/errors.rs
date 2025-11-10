@@ -292,44 +292,6 @@ pub enum AceError {
 // ERROR CONTEXT
 // ===============================================================================================
 
-/// Constructs an error context for the given node in the MAST forest.
-///
-/// When the `no_err_ctx` feature is disabled, this macro returns a proper error context; otherwise,
-/// it returns `()`. That is, this macro is designed to be zero-cost when the `no_err_ctx` feature
-/// is enabled.
-///
-/// Usage:
-/// - `err_ctx!(mast_forest, node, source_manager, clk)` - creates basic error context
-/// - `err_ctx!(mast_forest, node, source_manager, op_idx, clk)` - creates error context with
-///   operation index
-#[cfg(not(feature = "no_err_ctx"))]
-#[macro_export]
-macro_rules! err_ctx {
-    ($mast_forest:expr, $node:expr, $host:expr, $clk:expr) => {
-        $crate::errors::ErrorContextImpl::new($mast_forest, $node, $host, $clk)
-    };
-    ($mast_forest:expr, $node:expr, $host:expr, $op_idx:expr, $clk:expr) => {
-        $crate::errors::ErrorContextImpl::new_with_op_idx($mast_forest, $node, $host, $op_idx, $clk)
-    };
-}
-
-/// Constructs an error context for the given node in the MAST forest.
-///
-/// When the `no_err_ctx` feature is disabled, this macro returns a proper error context; otherwise,
-/// it returns `()`. That is, this macro is designed to be zero-cost when the `no_err_ctx` feature
-/// is enabled.
-///
-/// Usage:
-/// - `err_ctx!(mast_forest, node, source_manager, clk)` - creates basic error context
-/// - `err_ctx!(mast_forest, node, source_manager, op_idx, clk)` - creates error context with
-///   operation index
-#[cfg(feature = "no_err_ctx")]
-#[macro_export]
-macro_rules! err_ctx {
-    ($mast_forest:expr, $node:expr, $host:expr, $clk:expr) => {{ () }};
-    ($mast_forest:expr, $node:expr, $host:expr, $op_idx:expr, $clk:expr) => {{ () }};
-}
-
 /// Trait defining the interface for error context providers.
 ///
 /// This trait provides a common interface for error context functionality. Implementations
