@@ -113,12 +113,12 @@ impl FastProcessor {
         // happen for decorators appearing after all operations in a block. these decorators are
         // executed after BASIC BLOCK is closed to make sure the VM clock cycle advances beyond the
         // last clock cycle of the BASIC BLOCK ops.
+        let err_ctx = err_ctx!(program, basic_block_node, host, self.clk);
         for (_, decorator_id) in decorator_ids {
-            let decorator_err_ctx = err_ctx!(program, basic_block_node, host, self.clk);
             let decorator = program
                 .get_decorator_by_id(decorator_id)
                 .ok_or(OperationError::DecoratorNotFoundInForest(decorator_id))
-                .map_exec_err(&decorator_err_ctx)?;
+                .map_exec_err(&err_ctx)?;
             self.execute_decorator(decorator, host)?;
         }
 
