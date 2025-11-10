@@ -360,7 +360,10 @@ pub trait ErrorContext {
     /// # Note
     ///
     /// This method may be expensive and should typically only be called in error paths.
-    fn resolve_source(&self, host: &impl BaseHost) -> Option<(SourceSpan, Option<Arc<SourceFile>>)> {
+    fn resolve_source(
+        &self,
+        host: &impl BaseHost,
+    ) -> Option<(SourceSpan, Option<Arc<SourceFile>>)> {
         let _ = host; // Suppress unused parameter warning for default impl
         self.label_and_source_file()
     }
@@ -399,11 +402,7 @@ pub trait ErrorContext {
     ///
     /// * `host` - The host for resolving source locations
     /// * `err` - The operation error to wrap
-    fn wrap_op_err_with_host(
-        &self,
-        host: &impl BaseHost,
-        err: OperationError,
-    ) -> ExecutionError {
+    fn wrap_op_err_with_host(&self, host: &impl BaseHost, err: OperationError) -> ExecutionError {
         match self.resolve_source(host) {
             Some((label, source_file)) => ExecutionError::OperationError {
                 clk: self.clk(),
@@ -557,20 +556,12 @@ impl<'a> OpErrorContext<'a> {
     pub fn new(program: &'a MastForest, node_id: MastNodeId, clk: RowIndex) -> Self {
         #[cfg(not(feature = "no_err_ctx"))]
         {
-            Self {
-                clk,
-                program,
-                node_id,
-                op_idx: None,
-            }
+            Self { clk, program, node_id, op_idx: None }
         }
 
         #[cfg(feature = "no_err_ctx")]
         {
-            Self {
-                clk,
-                _phantom: core::marker::PhantomData,
-            }
+            Self { clk, _phantom: core::marker::PhantomData }
         }
     }
 
@@ -609,10 +600,7 @@ impl<'a> OpErrorContext<'a> {
 
         #[cfg(feature = "no_err_ctx")]
         {
-            Self {
-                clk,
-                _phantom: core::marker::PhantomData,
-            }
+            Self { clk, _phantom: core::marker::PhantomData }
         }
     }
 }
@@ -653,34 +641,38 @@ impl<'a> ErrorContext for OpErrorContext<'a> {
         }
     }
 
-    fn resolve_source(&self, host: &impl BaseHost) -> Option<(SourceSpan, Option<Arc<SourceFile>>)> {
+    fn resolve_source(
+        &self,
+        host: &impl BaseHost,
+    ) -> Option<(SourceSpan, Option<Arc<SourceFile>>)> {
         // Expensive work happens here, but only in error path.
         // This defers MAST traversal and host lookups until we actually need the error.
         use miden_core::mast::MastNode;
 
         let node = self.program.get_node_by_id(self.node_id)?;
 
-        if let Some(op_idx) = self.op_idx {
-            // Operation-level error: get specific operation's location
-            // Need to dispatch through the enum to access MastNodeErrorContext methods
-            let assembly_op = match node {
-                MastNode::Block(n) => n.get_assembly_op(self.program, Some(op_idx)),
-                MastNode::Join(n) => n.get_assembly_op(self.program, Some(op_idx)),
-                MastNode::Split(n) => n.get_assembly_op(self.program, Some(op_idx)),
-                MastNode::Loop(n) => n.get_assembly_op(self.program, Some(op_idx)),
-                MastNode::Call(n) => n.get_assembly_op(self.program, Some(op_idx)),
-                MastNode::Dyn(n) => n.get_assembly_op(self.program, Some(op_idx)),
-                MastNode::External(n) => n.get_assembly_op(self.program, Some(op_idx)),
-            }?;
-            let location = assembly_op.location()?;
-            // Now we can properly resolve the label and source file via the host
-            let (label, source_file) = host.get_label_and_source_file(location);
-            Some((label, source_file))
-        } else {
-            // Node-level error: no operation-specific location available
-            // Future: Could try to get node's overall location if available
-            None
+        // Try to get assembly op location - use op_idx if available, otherwise try None
+        // (node-level)
+        let assembly_op = match node {
+            MastNode::Block(n) => n.get_assembly_op(self.program, self.op_idx),
+            MastNode::Join(n) => n.get_assembly_op(self.program, self.op_idx),
+            MastNode::Split(n) => n.get_assembly_op(self.program, self.op_idx),
+            MastNode::Loop(n) => n.get_assembly_op(self.program, self.op_idx),
+            MastNode::Call(n) => n.get_assembly_op(self.program, self.op_idx),
+            MastNode::Dyn(n) => n.get_assembly_op(self.program, self.op_idx),
+            MastNode::External(n) => n.get_assembly_op(self.program, self.op_idx),
+        }?;
+
+        let location = assembly_op.location()?;
+        // Now we can properly resolve the label and source file via the host
+        let (label, source_file) = host.get_label_and_source_file(location);
+
+        // If the span is unknown/default and there's no source file, treat as unavailable
+        if label == SourceSpan::default() && source_file.is_none() {
+            return None;
         }
+
+        Some((label, source_file))
     }
 }
 
@@ -697,7 +689,10 @@ impl<'a> ErrorContext for OpErrorContext<'a> {
     }
 
     #[inline]
-    fn resolve_source(&self, _host: &impl BaseHost) -> Option<(SourceSpan, Option<Arc<SourceFile>>)> {
+    fn resolve_source(
+        &self,
+        _host: &impl BaseHost,
+    ) -> Option<(SourceSpan, Option<Arc<SourceFile>>)> {
         None // Always no context in no_err_ctx build
     }
 }

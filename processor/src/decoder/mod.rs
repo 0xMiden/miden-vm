@@ -71,12 +71,12 @@ impl Process {
         let child1_hash = program
             .get_node_by_id(node.first())
             .ok_or(OperationError::MastNodeNotFoundInForest(node.first()))
-            .map_exec_err(err_ctx)?
+            .map_exec_err_with_host(err_ctx, host)?
             .digest();
         let child2_hash = program
             .get_node_by_id(node.second())
             .ok_or(OperationError::MastNodeNotFoundInForest(node.second()))
-            .map_exec_err(err_ctx)?
+            .map_exec_err_with_host(err_ctx, host)?
             .digest();
 
         let (addr, hashed_block) = self.chiplets.hasher.hash_control_block(
@@ -91,7 +91,8 @@ impl Process {
         // start decoding the JOIN block; this appends a row with JOIN operation to the decoder
         // trace. when JOIN operation is executed, the rest of the VM state does not change
         self.decoder.start_join(child1_hash, child2_hash, addr);
-        self.execute_op(Operation::Noop, program, host).map_exec_err(err_ctx)
+        self.execute_op(Operation::Noop, program, host)
+            .map_exec_err_with_host(err_ctx, host)
     }
 
     ///  Ends decoding of a JOIN node.
@@ -106,7 +107,8 @@ impl Process {
         // executed the rest of the VM state does not change
         self.decoder.end_control_block(node.digest());
 
-        self.execute_op(Operation::Noop, program, host).map_exec_err(err_ctx)
+        self.execute_op(Operation::Noop, program, host)
+            .map_exec_err_with_host(err_ctx, host)
     }
 
     // SPLIT NODE
@@ -129,12 +131,12 @@ impl Process {
         let child1_hash = program
             .get_node_by_id(node.on_true())
             .ok_or(OperationError::MastNodeNotFoundInForest(node.on_true()))
-            .map_exec_err(err_ctx)?
+            .map_exec_err_with_host(err_ctx, host)?
             .digest();
         let child2_hash = program
             .get_node_by_id(node.on_false())
             .ok_or(OperationError::MastNodeNotFoundInForest(node.on_false()))
-            .map_exec_err(err_ctx)?
+            .map_exec_err_with_host(err_ctx, host)?
             .digest();
         let (addr, hashed_block) = self.chiplets.hasher.hash_control_block(
             child1_hash,
@@ -148,7 +150,8 @@ impl Process {
         // start decoding the SPLIT block. this appends a row with SPLIT operation to the decoder
         // trace. we also pop the value off the top of the stack and return it.
         self.decoder.start_split(child1_hash, child2_hash, addr);
-        self.execute_op(Operation::Drop, program, host).map_exec_err(err_ctx)?;
+        self.execute_op(Operation::Drop, program, host)
+            .map_exec_err_with_host(err_ctx, host)?;
         Ok(condition)
     }
 
@@ -164,7 +167,8 @@ impl Process {
         // executed the rest of the VM state does not change
         self.decoder.end_control_block(block.digest());
 
-        self.execute_op(Operation::Noop, program, host).map_exec_err(err_ctx)
+        self.execute_op(Operation::Noop, program, host)
+            .map_exec_err_with_host(err_ctx, host)
     }
 
     // LOOP NODE
@@ -188,7 +192,7 @@ impl Process {
         let body_hash = program
             .get_node_by_id(node.body())
             .ok_or(OperationError::MastNodeNotFoundInForest(node.body()))
-            .map_exec_err(err_ctx)?
+            .map_exec_err_with_host(err_ctx, host)?
             .digest();
 
         let (addr, hashed_block) = self.chiplets.hasher.hash_control_block(
@@ -206,7 +210,8 @@ impl Process {
         // basically, if the top of the stack is ZERO, a LOOP operation should be immediately
         // followed by an END operation.
         self.decoder.start_loop(body_hash, addr, condition);
-        self.execute_op(Operation::Drop, program, host).map_exec_err(err_ctx)?;
+        self.execute_op(Operation::Drop, program, host)
+            .map_exec_err_with_host(err_ctx, host)?;
         Ok(condition)
     }
 
@@ -232,9 +237,11 @@ impl Process {
             #[cfg(debug_assertions)]
             debug_assert_eq!(ZERO, self.stack.peek());
 
-            self.execute_op(Operation::Drop, program, host).map_exec_err(err_ctx)
+            self.execute_op(Operation::Drop, program, host)
+                .map_exec_err_with_host(err_ctx, host)
         } else {
-            self.execute_op(Operation::Noop, program, host).map_exec_err(err_ctx)
+            self.execute_op(Operation::Noop, program, host)
+                .map_exec_err_with_host(err_ctx, host)
         }
     }
 
@@ -255,7 +262,7 @@ impl Process {
         let callee_hash = program
             .get_node_by_id(node.callee())
             .ok_or(OperationError::MastNodeNotFoundInForest(node.callee()))
-            .map_exec_err(err_ctx)?
+            .map_exec_err_with_host(err_ctx, host)?
             .digest();
 
         let (addr, hashed_block) = self.chiplets.hasher.hash_control_block(
@@ -295,11 +302,12 @@ impl Process {
                 .memory
                 .write(self.system.get_next_ctx_id(), FMP_ADDR, self.system.clk(), FMP_INIT_VALUE)
                 .map_err(OperationError::MemoryError)
-                .map_exec_err(err_ctx)?;
+                .map_exec_err_with_host(err_ctx, host)?;
         }
 
         // the rest of the VM state does not change
-        self.execute_op(Operation::Noop, program, host).map_exec_err(err_ctx)
+        self.execute_op(Operation::Noop, program, host)
+            .map_exec_err_with_host(err_ctx, host)
     }
 
     /// Ends decoding of a CALL or a SYSCALL block.
@@ -313,7 +321,8 @@ impl Process {
         // when a CALL block ends, stack depth must be exactly 16
         let stack_depth = self.stack.depth();
         if stack_depth > MIN_STACK_DEPTH {
-            return OperationError::InvalidStackDepthOnReturn(stack_depth).map_exec_err(err_ctx);
+            return OperationError::InvalidStackDepthOnReturn(stack_depth)
+                .map_exec_err_with_host(err_ctx, host);
         }
 
         // this appends a row with END operation to the decoder trace; the returned value contains
@@ -326,7 +335,8 @@ impl Process {
         self.stack.restore_context(ctx_info.parent_stack_depth as usize);
 
         // the rest of the VM state does not change
-        self.execute_op(Operation::Noop, program, host).map_exec_err(err_ctx)
+        self.execute_op(Operation::Noop, program, host)
+            .map_exec_err_with_host(err_ctx, host)
     }
 
     // DYN NODE
@@ -353,7 +363,7 @@ impl Process {
             .memory
             .read_word(self.system.ctx(), mem_addr, self.system.clk())
             .map_err(OperationError::MemoryError)
-            .map_exec_err(err_ctx)?;
+            .map_exec_err_with_host(err_ctx, host)?;
 
         let (addr, hashed_block) = self.chiplets.hasher.hash_control_block(
             EMPTY_WORD,
@@ -367,7 +377,8 @@ impl Process {
         self.decoder.start_dyn(addr, callee_hash);
 
         // Pop the memory address off the stack.
-        self.execute_op(Operation::Drop, program, host).map_exec_err(err_ctx)?;
+        self.execute_op(Operation::Drop, program, host)
+            .map_exec_err_with_host(err_ctx, host)?;
 
         Ok(callee_hash)
     }
@@ -377,9 +388,10 @@ impl Process {
     /// Note: even though we will write the callee hash to h[0..4] for the chiplets bus and block
     /// hash table, and the stack helper registers to h[4..5], the issued hash request is still
     /// hash([ZERO; 8]).
-    pub(super) fn start_dyncall_node(
+    pub(super) fn start_dyncall_node<H: SyncHost>(
         &mut self,
         dyn_node: &DynNode,
+        host: &mut H,
         err_ctx: &impl ErrorContext,
     ) -> Result<Word, ExecutionError> {
         debug_assert!(dyn_node.is_dyncall());
@@ -392,14 +404,14 @@ impl Process {
             .memory
             .read_word(self.system.ctx(), mem_addr, self.system.clk())
             .map_err(OperationError::MemoryError)
-            .map_exec_err(err_ctx)?;
+            .map_exec_err_with_host(err_ctx, host)?;
 
         // Initialize the fmp for the new context in memory.
         self.chiplets
             .memory
             .write(self.system.get_next_ctx_id(), FMP_ADDR, self.system.clk(), FMP_INIT_VALUE)
             .map_err(OperationError::MemoryError)
-            .map_exec_err(err_ctx)?;
+            .map_exec_err_with_host(err_ctx, host)?;
 
         // Note: other functions end in "executing a Noop", which
         // 1. ensures trace capacity,
@@ -433,7 +445,7 @@ impl Process {
         self.system.start_call_or_dyncall(callee_hash);
         self.decoder.start_dyncall(addr, callee_hash, ctx_info);
 
-        self.advance_clock().map_exec_err(err_ctx)?;
+        self.advance_clock().map_exec_err_with_host(err_ctx, host)?;
 
         Ok(callee_hash)
     }
@@ -450,7 +462,8 @@ impl Process {
         // executed the rest of the VM state does not change
         self.decoder.end_control_block(dyn_node.digest());
 
-        self.execute_op(Operation::Noop, program, host).map_exec_err(err_ctx)
+        self.execute_op(Operation::Noop, program, host)
+            .map_exec_err_with_host(err_ctx, host)
     }
 
     /// Ends decoding of a DYNCALL node.
@@ -464,7 +477,8 @@ impl Process {
         // when a DYNCALL block ends, stack depth must be exactly 16
         let stack_depth = self.stack.depth();
         if stack_depth > MIN_STACK_DEPTH {
-            return OperationError::InvalidStackDepthOnReturn(stack_depth).map_exec_err(err_ctx);
+            return OperationError::InvalidStackDepthOnReturn(stack_depth)
+                .map_exec_err_with_host(err_ctx, host);
         }
 
         // this appends a row with END operation to the decoder trace. when the END operation is
@@ -477,7 +491,8 @@ impl Process {
         self.system.restore_context(ctx_info.parent_ctx, ctx_info.parent_fn_hash);
         self.stack.restore_context(ctx_info.parent_stack_depth as usize);
 
-        self.execute_op(Operation::Noop, program, host).map_exec_err(err_ctx)
+        self.execute_op(Operation::Noop, program, host)
+            .map_exec_err_with_host(err_ctx, host)
     }
 
     // BASIC BLOCK NODE
@@ -508,7 +523,8 @@ impl Process {
         let num_op_groups = basic_block.num_op_groups();
         self.decoder
             .start_basic_block(&op_batches[0], Felt::new(num_op_groups as u64), addr);
-        self.execute_op(Operation::Noop, program, host).map_exec_err(err_ctx)
+        self.execute_op(Operation::Noop, program, host)
+            .map_exec_err_with_host(err_ctx, host)
     }
 
     /// Ends decoding a BASIC BLOCK node.
@@ -523,7 +539,8 @@ impl Process {
         // executed the rest of the VM state does not change
         self.decoder.end_basic_block(block.digest());
 
-        self.execute_op(Operation::Noop, program, host).map_exec_err(err_ctx)
+        self.execute_op(Operation::Noop, program, host)
+            .map_exec_err_with_host(err_ctx, host)
     }
 
     /// Continues decoding a BASIC BLOCK by absorbing the next batch of operations.

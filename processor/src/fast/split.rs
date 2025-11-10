@@ -8,8 +8,7 @@ use miden_core::{
 use crate::{
     AsyncHost, ExecutionError, OperationError,
     continuation_stack::ContinuationStack,
-    err_ctx,
-    errors::ResultOpErrExt,
+    errors::{OpErrorContext, ResultOpErrExt},
     fast::{FastProcessor, Tracer, trace_state::NodeExecutionState},
 };
 
@@ -51,8 +50,9 @@ impl FastProcessor {
         } else if condition == ZERO {
             continuation_stack.push_start_node(split_node.on_false());
         } else {
-            let err_ctx = err_ctx!(current_forest, split_node, host, clk_at_start);
-            return OperationError::NotBinaryValueIf(condition).map_exec_err(&err_ctx);
+            let err_ctx = OpErrorContext::new(current_forest, node_id, clk_at_start);
+            return OperationError::NotBinaryValueIf(condition)
+                .map_exec_err_with_host(&err_ctx, host);
         };
 
         // Corresponds to the row inserted for the SPLIT operation added

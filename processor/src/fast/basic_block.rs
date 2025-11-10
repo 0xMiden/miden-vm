@@ -9,8 +9,7 @@ use miden_core::{
 use crate::{
     AsyncHost, ExecutionError, OperationError,
     continuation_stack::ContinuationStack,
-    err_ctx,
-    errors::ResultOpErrExt,
+    errors::{OpErrorContext, ResultOpErrExt},
     fast::{FastProcessor, Tracer, trace_state::NodeExecutionState},
     operations::sys_ops::sys_event_handlers::handle_system_event,
     processor::Processor,
@@ -113,12 +112,12 @@ impl FastProcessor {
         // happen for decorators appearing after all operations in a block. these decorators are
         // executed after BASIC BLOCK is closed to make sure the VM clock cycle advances beyond the
         // last clock cycle of the BASIC BLOCK ops.
-        let err_ctx = err_ctx!(program, basic_block_node, host, self.clk);
+        let err_ctx = OpErrorContext::new(program, node_id, self.clk);
         for (_, decorator_id) in decorator_ids {
             let decorator = program
                 .get_decorator_by_id(decorator_id)
                 .ok_or(OperationError::DecoratorNotFoundInForest(decorator_id))
-                .map_exec_err(&err_ctx)?;
+                .map_exec_err_with_host(&err_ctx, host)?;
             self.execute_decorator(decorator, host)?;
         }
 
@@ -129,7 +128,7 @@ impl FastProcessor {
     #[allow(clippy::too_many_arguments)]
     async fn execute_op_batch(
         &mut self,
-        basic_block: &BasicBlockNode,
+        _basic_block: &BasicBlockNode,
         node_id: MastNodeId,
         batch: &OpBatch,
         batch_index: usize,
@@ -150,11 +149,11 @@ impl FastProcessor {
             let op_idx_in_block = batch_offset_in_block + op_idx_in_batch;
             while let Some((_, decorator_id)) = decorators.next_filtered(op_idx_in_block) {
                 let decorator_err_ctx =
-                    err_ctx!(program, basic_block, host, op_idx_in_block, self.clk);
+                    OpErrorContext::with_op(program, node_id, op_idx_in_block, self.clk);
                 let decorator = program
                     .get_decorator_by_id(decorator_id)
                     .ok_or(OperationError::DecoratorNotFoundInForest(decorator_id))
-                    .map_exec_err(&decorator_err_ctx)?;
+                    .map_exec_err_with_host(&decorator_err_ctx, host)?;
                 self.execute_decorator(decorator, host)?;
             }
 
@@ -173,13 +172,15 @@ impl FastProcessor {
             // whereas all the other operations are synchronous (resulting in a significant
             // performance improvement).
             {
-                let err_ctx = err_ctx!(program, basic_block, host, op_idx_in_block, self.clk);
+                let err_ctx = OpErrorContext::with_op(program, node_id, op_idx_in_block, self.clk);
                 match op {
-                    Operation::Emit => self.op_emit(host).await.map_exec_err(&err_ctx)?,
+                    Operation::Emit => {
+                        self.op_emit(host).await.map_exec_err_with_host(&err_ctx, host)?
+                    },
                     _ => {
                         // if the operation is not an Emit, we execute it normally
                         self.execute_sync_op(op, op_idx_in_block, program, host, tracer)
-                            .map_exec_err(&err_ctx)?;
+                            .map_exec_err_with_host(&err_ctx, host)?;
                     },
                 }
             }
