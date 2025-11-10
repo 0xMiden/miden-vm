@@ -1,4 +1,5 @@
 use super::*;
+use crate::MemoryError;
 
 #[test]
 fn test_memory_word_access_alignment() {
@@ -15,9 +16,14 @@ fn test_memory_word_access_alignment() {
         let err = FastProcessor::new(&[43_u32.into()])
             .execute_sync(&program, &mut host)
             .unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            "word memory access at address 43 in context 0 is unaligned at clock cycle 1"
+        assert_matches!(
+            err,
+            ExecutionError::OperationErrorNoContext { clk, ref err }
+                if clk == RowIndex::from(1) &&
+                   matches!(
+                       err.as_ref(),
+                       OperationError::MemoryError(MemoryError::UnalignedWordAccess { .. })
+                   )
         );
     }
 
@@ -32,9 +38,14 @@ fn test_memory_word_access_alignment() {
         let err = FastProcessor::new(&[43_u32.into()])
             .execute_sync(&program, &mut host)
             .unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            "word memory access at address 43 in context 0 is unaligned at clock cycle 1"
+        assert_matches!(
+            err,
+            ExecutionError::OperationErrorNoContext { clk, ref err }
+                if clk == RowIndex::from(1) &&
+                   matches!(
+                       err.as_ref(),
+                       OperationError::MemoryError(MemoryError::UnalignedWordAccess { .. })
+                   )
         );
     }
 }

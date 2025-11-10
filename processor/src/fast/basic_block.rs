@@ -10,7 +10,7 @@ use crate::{
     AsyncHost, ExecutionError, OperationError,
     continuation_stack::ContinuationStack,
     err_ctx,
-    errors::ErrorContext,
+    errors::ResultOpErrExt,
     fast::{FastProcessor, Tracer, trace_state::NodeExecutionState},
     operations::sys_ops::sys_event_handlers::handle_system_event,
     processor::Processor,
@@ -116,7 +116,8 @@ impl FastProcessor {
         for (_, decorator_id) in decorator_ids {
             let decorator = program
                 .get_decorator_by_id(decorator_id)
-                .ok_or(ExecutionError::DecoratorNotFoundInForest { decorator_id })?;
+                .ok_or(OperationError::DecoratorNotFoundInForest { decorator_id })
+                .map_exec_err_no_ctx(self.clk)?;
             self.execute_decorator(decorator, host)?;
         }
 
@@ -149,7 +150,8 @@ impl FastProcessor {
             while let Some((_, decorator_id)) = decorators.next_filtered(op_idx_in_block) {
                 let decorator = program
                     .get_decorator_by_id(decorator_id)
-                    .ok_or(ExecutionError::DecoratorNotFoundInForest { decorator_id })?;
+                    .ok_or(OperationError::DecoratorNotFoundInForest { decorator_id })
+                    .map_exec_err_no_ctx(self.clk)?;
                 self.execute_decorator(decorator, host)?;
             }
 
@@ -170,15 +172,11 @@ impl FastProcessor {
             {
                 let err_ctx = err_ctx!(program, basic_block, host, op_idx_in_block, self.clk);
                 match op {
-                    Operation::Emit => self
-                        .op_emit(host)
-                        .await
-                        .map_err(|err| err_ctx.wrap_op_err(err))?,
+                    Operation::Emit => self.op_emit(host).await.map_exec_err(&err_ctx)?,
                     _ => {
                         // if the operation is not an Emit, we execute it normally
-                        self.execute_sync_op(op, op_idx_in_block, program, host, tracer).map_err(
-                            |err| err_ctx.wrap_op_err(err),
-                        )?;
+                        self.execute_sync_op(op, op_idx_in_block, program, host, tracer)
+                            .map_exec_err(&err_ctx)?;
                     },
                 }
             }

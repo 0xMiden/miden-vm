@@ -115,9 +115,10 @@ fn test_syscall_fail() {
     let err = processor.execute_sync(&program, &mut host).unwrap_err();
 
     // Check that the error is due to the syscall target not being in the kernel
+    // This creates OperationErrorNoContext because the test program has no source info
     assert_matches!(
         err,
-        ExecutionError::OperationError { ref err, .. }
+        ExecutionError::OperationErrorNoContext { ref err, .. }
             if matches!(err.as_ref(), OperationError::SyscallTargetNotInKernel { .. })
     );
 }
@@ -147,9 +148,10 @@ fn test_assert() {
         let err = processor.execute_sync(&program, &mut host).unwrap_err();
 
         // Check that the error is due to a failed assertion
+        // This creates OperationErrorNoContext because the fast processor doesn't have source info
         assert_matches!(
             err,
-            ExecutionError::OperationError { ref err, .. }
+            ExecutionError::OperationErrorNoContext { ref err, .. }
                 if matches!(err.as_ref(), OperationError::FailedAssertion { .. })
         );
     }

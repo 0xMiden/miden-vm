@@ -129,14 +129,31 @@ fn test_basic_block(
             assert_eq!(fast_stack_outputs, slow_stack_outputs);
         },
         (Err(fast_error), Err(slow_error)) => {
-            assert_eq!(fast_error.to_string(), slow_error.to_string());
-
             // Make sure that we're not getting an output stack overflow error, as it indicates that
             // the sequence of operations makes the stack end with a non-16 depth, and doesn't tell
             // us if the stack outputs are actually the same.
             if matches!(fast_error, ExecutionError::OutputStackOverflow(_)) {
                 panic!("we don't want to be testing this output stack overflow error");
             }
+
+            // Extract the underlying OperationError and clock cycle, ignoring source context
+            let (fast_clk, fast_op_err) = match fast_error {
+                ExecutionError::OperationError { clk, err, .. } => (clk, err),
+                ExecutionError::OperationErrorNoContext { clk, err } => (clk, err),
+                _ => panic!("Fast processor produced unexpected error type: {:?}", fast_error),
+            };
+            let (slow_clk, slow_op_err) = match slow_error {
+                ExecutionError::OperationError { clk, err, .. } => (clk, err),
+                ExecutionError::OperationErrorNoContext { clk, err } => (clk, err),
+                _ => panic!("Slow processor produced unexpected error type: {:?}", slow_error),
+            };
+
+            assert_eq!(fast_clk, slow_clk, "clock cycles should match");
+            assert_eq!(
+                format!("{:?}", fast_op_err.as_ref()),
+                format!("{:?}", slow_op_err.as_ref()),
+                "operation error payloads should match"
+            );
         },
         _ => panic!(
             "Fast processor: {:?}. Slow processor: {:?}",

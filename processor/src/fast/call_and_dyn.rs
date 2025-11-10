@@ -11,6 +11,7 @@ use crate::{
     AsyncHost, ContextId, ErrorContext, ExecutionError, OperationError,
     continuation_stack::ContinuationStack,
     err_ctx,
+    errors::ResultOpErrExt,
     fast::{
         ExecutionContextInfo, FastProcessor, INITIAL_STACK_TOP_IDX, STACK_BUFFER_SIZE, Tracer,
         trace_state::NodeExecutionState,
@@ -45,7 +46,8 @@ impl FastProcessor {
 
         let callee_hash = current_forest
             .get_node_by_id(call_node.callee())
-            .ok_or(ExecutionError::MastNodeNotFoundInForest { node_id: call_node.callee() })?
+            .ok_or(OperationError::MastNodeNotFoundInForest { node_id: call_node.callee() })
+            .map_exec_err(&err_ctx)?
             .digest();
 
         self.save_context_and_truncate_stack(tracer);
@@ -53,9 +55,8 @@ impl FastProcessor {
         if call_node.is_syscall() {
             // check if the callee is in the kernel
             if !program.kernel().contains_proc(callee_hash) {
-                return Err(err_ctx.wrap_op_err(
-                    OperationError::SyscallTargetNotInKernel { proc_root: callee_hash },
-                ));
+                return OperationError::SyscallTargetNotInKernel { proc_root: callee_hash }
+                    .map_exec_err(&err_ctx);
             }
             tracer.record_kernel_proc_access(callee_hash);
 
@@ -69,9 +70,10 @@ impl FastProcessor {
             self.caller_hash = callee_hash;
 
             // Initialize the frame pointer in memory for the new context.
-            self.memory.write_element(new_ctx, FMP_ADDR, FMP_INIT_VALUE).map_err(|err| {
-                err_ctx.wrap_op_err(OperationError::MemoryError(err))
-            })?;
+            self.memory
+                .write_element(new_ctx, FMP_ADDR, FMP_INIT_VALUE)
+                .map_err(OperationError::MemoryError)
+                .map_exec_err(&err_ctx)?;
             tracer.record_memory_write_element(FMP_INIT_VALUE, FMP_ADDR, new_ctx, self.clk);
         }
 
@@ -146,9 +148,11 @@ impl FastProcessor {
         // address.
         let callee_hash = {
             let mem_addr = self.stack_get(0);
-            let word = self.memory.read_word(self.ctx, mem_addr, self.clk).map_err(|err| {
-                err_ctx.wrap_op_err(OperationError::MemoryError(err))
-            })?;
+            let word = self
+                .memory
+                .read_word(self.ctx, mem_addr, self.clk)
+                .map_err(OperationError::MemoryError)
+                .map_exec_err(&err_ctx)?;
             tracer.record_memory_read_word(word, mem_addr, self.ctx, self.clk);
 
             word
@@ -170,9 +174,10 @@ impl FastProcessor {
             self.caller_hash = callee_hash;
 
             // Initialize the frame pointer in memory for the new context.
-            self.memory.write_element(new_ctx, FMP_ADDR, FMP_INIT_VALUE).map_err(|err| {
-                err_ctx.wrap_op_err(OperationError::MemoryError(err))
-            })?;
+            self.memory
+                .write_element(new_ctx, FMP_ADDR, FMP_INIT_VALUE)
+                .map_err(OperationError::MemoryError)
+                .map_exec_err(&err_ctx)?;
             tracer.record_memory_write_element(FMP_INIT_VALUE, FMP_ADDR, new_ctx, self.clk);
         };
 
@@ -193,7 +198,7 @@ impl FastProcessor {
                         OperationError::DynamicNodeNotFound { digest }
                     })
                     .await
-                    .map_err(|err| err_ctx.wrap_op_err(err))?;
+                    .map_exec_err(&err_ctx)?;
                 tracer.record_mast_forest_resolution(root_id, &new_forest);
 
                 // Push current forest to the continuation stack so that we can return to it
@@ -299,9 +304,8 @@ impl FastProcessor {
     ) -> Result<(), ExecutionError> {
         // when a call/dyncall/syscall node ends, stack depth must be exactly 16.
         if self.stack_size() > MIN_STACK_DEPTH {
-            return Err(err_ctx.wrap_op_err(
-                OperationError::InvalidStackDepthOnReturn { depth: self.stack_size() },
-            ));
+            return OperationError::InvalidStackDepthOnReturn { depth: self.stack_size() }
+                .map_exec_err(err_ctx);
         }
 
         let ctx_info = self

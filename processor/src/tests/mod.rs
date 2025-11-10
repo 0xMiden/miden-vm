@@ -1,5 +1,5 @@
 /// Tests in this file make sure that diagnostics presented to the user are as expected.
-use alloc::string::ToString;
+use alloc::{string::ToString, sync::Arc};
 
 use miden_assembly::{
     Assembler, DefaultSourceManager, LibraryPath,
@@ -10,7 +10,8 @@ use miden_core::{
     AdviceMap,
     crypto::merkle::{MerkleStore, MerkleTree},
 };
-use miden_debug_types::{SourceContent, SourceLanguage, SourceManager, Uri};
+use miden_debug_types::{SourceContent, SourceFile, SourceLanguage, SourceManager, Uri};
+use miden_utils_diagnostics::reporting::PrintDiagnostic;
 use miden_utils_testing::{
     build_debug_test, build_test, build_test_by_mode,
     crypto::{init_merkle_leaves, init_merkle_store},
@@ -487,6 +488,204 @@ fn test_diagnostic_invalid_stack_depth_on_return_dyncall() {
         " 9 |         end",
         "   `----"
     );
+}
+
+// Missing Source Diagnostics Helpers
+// ------------------------------------------------------------------------------------------------
+
+struct MissingSourceArtifacts {
+    program: Program,
+    library: miden_assembly::Library,
+    program_source: Arc<SourceFile>,
+    layer1_source: Arc<SourceFile>,
+    layer2_source: Arc<SourceFile>,
+}
+
+fn build_missing_source_artifacts() -> MissingSourceArtifacts {
+    let library_source_manager = Arc::new(DefaultSourceManager::default());
+
+    let layer2_uri = Uri::from("nested-layer2.masm");
+    let layer2_src = "
+        export.fail
+            push.0
+            ilog2
+        end
+    ";
+    let layer2_content = SourceContent::new(SourceLanguage::Masm, layer2_uri.clone(), layer2_src);
+    let layer2_source =
+        library_source_manager.load_from_raw_parts(layer2_uri.clone(), layer2_content);
+    let layer2_module = Module::parse(
+        LibraryPath::new("nested::layer2").unwrap(),
+        miden_assembly::ast::ModuleKind::Library,
+        layer2_source.clone(),
+    )
+    .unwrap();
+
+    let layer1_uri = Uri::from("nested-layer1.masm");
+    let layer1_src = "
+        use.nested::layer2
+
+        export.entry
+            call.layer2::fail
+        end
+    ";
+    let layer1_content = SourceContent::new(SourceLanguage::Masm, layer1_uri.clone(), layer1_src);
+    let layer1_source =
+        library_source_manager.load_from_raw_parts(layer1_uri.clone(), layer1_content);
+    let layer1_module = Module::parse(
+        LibraryPath::new("nested::layer1").unwrap(),
+        miden_assembly::ast::ModuleKind::Library,
+        layer1_source.clone(),
+    )
+    .unwrap();
+
+    let library = Assembler::new(library_source_manager.clone())
+        .with_debug_mode(true)
+        .assemble_library([layer1_module, layer2_module])
+        .unwrap();
+
+    let program_source_manager = Arc::new(DefaultSourceManager::default());
+    let program_uri = Uri::from("nested-main.masm");
+    let program_src = "
+        use.nested::layer1
+
+        begin
+            procref.layer1::entry mem_storew_be.0 dropw push.0
+            dyncall
+        end
+    ";
+    let program_content =
+        SourceContent::new(SourceLanguage::Masm, program_uri.clone(), program_src);
+    let program_source =
+        program_source_manager.load_from_raw_parts(program_uri.clone(), program_content);
+
+    let assembler = Assembler::new(program_source_manager.clone())
+        .with_debug_mode(true)
+        .with_dynamic_library(&library)
+        .unwrap();
+    let program = assembler.assemble_program(program_source.clone()).unwrap();
+
+    MissingSourceArtifacts {
+        program,
+        library,
+        program_source,
+        layer1_source,
+        layer2_source,
+    }
+}
+
+fn execute_missing_source_scenario(
+    include_program_source: bool,
+    include_layer1_source: bool,
+    include_layer2_source: bool,
+) -> ExecutionError {
+    let MissingSourceArtifacts {
+        program,
+        library,
+        program_source,
+        layer1_source,
+        layer2_source,
+    } = build_missing_source_artifacts();
+
+    let host_source_manager = Arc::new(DefaultSourceManager::default());
+    if include_program_source {
+        host_source_manager.copy_into(&program_source);
+    }
+    if include_layer1_source {
+        host_source_manager.copy_into(&layer1_source);
+    }
+    if include_layer2_source {
+        host_source_manager.copy_into(&layer2_source);
+    }
+
+    let mut host = DefaultHost::default().with_source_manager(host_source_manager.clone());
+    host.load_library(library.mast_forest()).unwrap();
+
+    let mut process = Process::new(
+        Kernel::default(),
+        StackInputs::default(),
+        AdviceInputs::default(),
+        ExecutionOptions::default().with_debugging(true),
+    );
+
+    process.execute(&program, &mut host).expect_err("expected error")
+}
+
+// ------------------------------------------------------------------------------------------------
+
+#[test]
+fn test_missing_source_only_innermost_layer() {
+    let err = execute_missing_source_scenario(true, true, false);
+    let diagnostic = format!("{}", PrintDiagnostic::new_without_color(&err));
+    std::eprintln!("{diagnostic}");
+
+    assert!(
+        diagnostic.contains("logarithm of zero is undefined"),
+        "expected logarithm error in diagnostic: {diagnostic}"
+    );
+    assert!(
+        diagnostic.contains("call.layer2::fail"),
+        "expected call site context when layer2 source is missing: {diagnostic}"
+    );
+
+    match err {
+        ExecutionError::OperationError { source_file: Some(_), .. } => (),
+        other => panic!("expected operation error with call-site context, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_missing_source_last_two_layers() {
+    let err = execute_missing_source_scenario(true, false, false);
+    let diagnostic = format!("{}", PrintDiagnostic::new_without_color(&err));
+    std::eprintln!("{diagnostic}");
+
+    assert!(
+        diagnostic.contains("logarithm of zero is undefined"),
+        "expected logarithm error in diagnostic: {diagnostic}"
+    );
+    assert!(
+        diagnostic.contains("dyncall"),
+        "expected outer dyncall context when both library layers are missing: {diagnostic}"
+    );
+    assert!(
+        !diagnostic.contains("call.layer2::fail"),
+        "did not expect inner call context when layer1 source is missing: {diagnostic}"
+    );
+
+    match err {
+        ExecutionError::OperationError { source_file: Some(_), .. } => (),
+        other => panic!("expected operation error with outer context, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_missing_source_all_layers() {
+    let err = execute_missing_source_scenario(false, false, false);
+    let diagnostic = format!("{}", PrintDiagnostic::new_without_color(&err));
+    std::eprintln!("{diagnostic}");
+
+    assert!(
+        diagnostic.contains("logarithm of zero is undefined"),
+        "expected logarithm error in diagnostic: {diagnostic}"
+    );
+    assert!(
+        diagnostic.contains("source location information is not available"),
+        "expected help text about missing source: {diagnostic}"
+    );
+    assert!(
+        !diagnostic.contains("call.layer2::fail"),
+        "did not expect call site context when all sources are missing: {diagnostic}"
+    );
+    assert!(
+        !diagnostic.contains("dyncall"),
+        "did not expect dyncall context when all sources are missing: {diagnostic}"
+    );
+
+    match err {
+        ExecutionError::OperationErrorNoContext { .. } => (),
+        other => panic!("expected operation error without context, got {other:?}"),
+    }
 }
 
 // LogArgumentZero

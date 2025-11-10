@@ -74,7 +74,7 @@ use crate::{BaseHost, EventError, MemoryError, host::advice::AdviceError};
 
 #[derive(Debug, thiserror::Error, Diagnostic)]
 pub enum ExecutionError {
-    #[error("{err} at clock cycle {clk}")]
+    #[error("operation error at clock cycle {clk}")]
     #[diagnostic()]
     OperationError {
         clk: RowIndex,
@@ -82,22 +82,26 @@ pub enum ExecutionError {
         label: SourceSpan,
         #[source_code]
         source_file: Option<Arc<SourceFile>>,
+        #[source]
         err: Box<OperationError>,
     },
-    #[error("external node with mast root {0} resolved to an external node")]
-    CircularExternalNode(Word),
+    #[error("operation error at clock cycle {clk} (source location unavailable)")]
+    #[diagnostic(help(
+        "this error occurred during execution, but source location information is not available. This typically happens when loading external MAST forests without debug information"
+    ))]
+    OperationErrorNoContext {
+        clk: RowIndex,
+        #[source]
+        err: Box<OperationError>,
+    },
     #[error("exceeded the allowed number of max cycles {0}")]
     CycleLimitExceeded(u32),
-    #[error("decorator id {decorator_id} does not exist in MAST forest")]
-    DecoratorNotFoundInForest { decorator_id: DecoratorId },
     #[error("attempted to add event handler for '{event}' (already registered)")]
     DuplicateEventHandler { event: EventName },
     #[error("attempted to add event handler for '{event}' (reserved system event)")]
     ReservedEventNamespace { event: EventName },
     #[error("failed to execute the program for internal reason: {0}")]
     FailedToExecuteProgram(&'static str),
-    #[error("node id {node_id} does not exist in MAST forest")]
-    MastNodeNotFoundInForest { node_id: MastNodeId },
     #[error("stack should have at most {MIN_STACK_DEPTH} elements at the end of program execution, but had {} elements", MIN_STACK_DEPTH + .0)]
     OutputStackOverflow(usize),
     #[error("a program has already been executed in this process")]
@@ -124,6 +128,18 @@ pub enum OperationError {
     #[error(transparent)]
     #[diagnostic(transparent)]
     AdviceError(AdviceError),
+    #[error("external node with mast root {0} resolved to an external node")]
+    CircularExternalNode(Word),
+    #[error("decorator id {decorator_id} does not exist in MAST forest")]
+    DecoratorNotFoundInForest { decorator_id: DecoratorId },
+    #[error("node id {node_id} does not exist in MAST forest")]
+    MastNodeNotFoundInForest { node_id: MastNodeId },
+    #[error("no MAST forest contains the procedure with root digest {root_digest}")]
+    NoMastForestWithProcedure { root_digest: Word },
+    #[error(
+        "MAST forest in host indexed by procedure root {root_digest} doesn't contain that root"
+    )]
+    MalformedMastForestInHost { root_digest: Word },
     #[error(
         "dynamic execution failed: code block with root {hex} not found in program",
         hex = .digest.to_hex()
@@ -184,12 +200,6 @@ pub enum OperationError {
     #[error("malformed signature key: {key_type}")]
     #[diagnostic(help("the secret key associated with the provided public key is malformed"))]
     MalformedSignatureKey { key_type: &'static str },
-    #[error(
-        "MAST forest in host indexed by procedure root {root_digest} doesn't contain that root"
-    )]
-    MalformedMastForestInHost { root_digest: Word },
-    #[error("no MAST forest contains the procedure with root digest {root_digest}")]
-    NoMastForestWithProcedure { root_digest: Word },
     #[error(
         "merkle path verification failed for value {value} at index {index} in the Merkle tree with root {root} (error {err})",
         value = to_hex(value.as_bytes()),
@@ -290,8 +300,8 @@ pub enum AceError {
 ///
 /// Usage:
 /// - `err_ctx!(mast_forest, node, source_manager, clk)` - creates basic error context
-/// - `err_ctx!(mast_forest, node, source_manager, op_idx, clk)` - creates error context with operation
-///   index
+/// - `err_ctx!(mast_forest, node, source_manager, op_idx, clk)` - creates error context with
+///   operation index
 #[cfg(not(feature = "no_err_ctx"))]
 #[macro_export]
 macro_rules! err_ctx {
@@ -311,8 +321,8 @@ macro_rules! err_ctx {
 ///
 /// Usage:
 /// - `err_ctx!(mast_forest, node, source_manager, clk)` - creates basic error context
-/// - `err_ctx!(mast_forest, node, source_manager, op_idx, clk)` - creates error context with operation
-///   index
+/// - `err_ctx!(mast_forest, node, source_manager, op_idx, clk)` - creates error context with
+///   operation index
 #[cfg(feature = "no_err_ctx")]
 #[macro_export]
 macro_rules! err_ctx {
@@ -325,22 +335,28 @@ macro_rules! err_ctx {
 /// This trait contains the same methods as `ErrorContext` to provide a common
 /// interface for error context functionality.
 pub trait ErrorContext {
-    /// Returns the label and source file associated with the error context, if any.
+    /// Returns the label and source file associated with the error context, if available.
     ///
-    /// Note that `SourceSpan::UNKNOWN` will be returned to indicate an empty span.
-    fn label_and_source_file(&self) -> (SourceSpan, Option<Arc<SourceFile>>);
+    /// Returns `None` when source context is not available (e.g., when executing code
+    /// without debug information).
+    fn label_and_source_file(&self) -> Option<(SourceSpan, Option<Arc<SourceFile>>)>;
 
     /// Returns the clock cycle associated with this error context.
     fn clk(&self) -> RowIndex;
 
     /// Wraps an operation error with context information to create an execution error.
+    ///
+    /// Creates `ExecutionError::OperationError` when context is available, or
+    /// `ExecutionError::OperationErrorNoContext` when context is missing.
     fn wrap_op_err(&self, err: OperationError) -> ExecutionError {
-        let (label, source_file) = self.label_and_source_file();
-        ExecutionError::OperationError {
-            clk: self.clk(),
-            label,
-            source_file,
-            err: Box::new(err),
+        match self.label_and_source_file() {
+            Some((label, source_file)) => ExecutionError::OperationError {
+                clk: self.clk(),
+                label,
+                source_file,
+                err: Box::new(err),
+            },
+            None => ExecutionError::OperationErrorNoContext { clk: self.clk(), err: Box::new(err) },
         }
     }
 }
@@ -395,8 +411,12 @@ impl ErrorContextImpl {
 }
 
 impl ErrorContext for ErrorContextImpl {
-    fn label_and_source_file(&self) -> (SourceSpan, Option<Arc<SourceFile>>) {
-        (self.label, self.source_file.clone())
+    fn label_and_source_file(&self) -> Option<(SourceSpan, Option<Arc<SourceFile>>)> {
+        if self.label == SourceSpan::UNKNOWN {
+            None
+        } else {
+            Some((self.label, self.source_file.clone()))
+        }
     }
 
     fn clk(&self) -> RowIndex {
@@ -405,12 +425,71 @@ impl ErrorContext for ErrorContextImpl {
 }
 
 impl ErrorContext for () {
-    fn label_and_source_file(&self) -> (SourceSpan, Option<Arc<SourceFile>>) {
-        (SourceSpan::UNKNOWN, None)
+    fn label_and_source_file(&self) -> Option<(SourceSpan, Option<Arc<SourceFile>>)> {
+        None
     }
 
     fn clk(&self) -> RowIndex {
         RowIndex::from(0)
+    }
+}
+
+// RESULT EXTENSION
+// ================================================================================================
+
+/// Extension trait for `Result<T, OperationError>` to simplify conversion to `ExecutionError`.
+///
+/// This trait provides convenient methods to wrap `OperationError` in `ExecutionError` using
+/// either explicit context information or error context providers.
+pub trait ResultOpErrExt<T> {
+    /// Converts `Result<T, OperationError>` to `Result<T, ExecutionError>` by wrapping the error
+    /// in `ExecutionError::OperationErrorNoContext` with the given clock cycle.
+    ///
+    /// Use this when error context is not available (e.g., loading external MAST forests).
+    ///
+    /// # Example
+    /// ```ignore
+    /// program.get_node_by_id(node_id)
+    ///     .ok_or(OperationError::MastNodeNotFoundInForest { node_id })
+    ///     .map_exec_err_no_ctx(self.system.clk())?;
+    /// ```
+    fn map_exec_err_no_ctx(self, clk: RowIndex) -> Result<T, ExecutionError>;
+
+    /// Converts `Result<T, OperationError>` to `Result<T, ExecutionError>` by wrapping the error
+    /// using the provided error context.
+    ///
+    /// This automatically attaches source location information when available.
+    ///
+    /// # Example
+    /// ```ignore
+    /// program.get_node_by_id(node_id)
+    ///     .ok_or(OperationError::MastNodeNotFoundInForest { node_id })
+    ///     .map_exec_err(&err_ctx)?;
+    /// ```
+    fn map_exec_err(self, err_ctx: &impl ErrorContext) -> Result<T, ExecutionError>;
+}
+
+impl<T> ResultOpErrExt<T> for Result<T, OperationError> {
+    #[inline]
+    fn map_exec_err_no_ctx(self, clk: RowIndex) -> Result<T, ExecutionError> {
+        self.map_err(|err| ExecutionError::OperationErrorNoContext { clk, err: Box::new(err) })
+    }
+
+    #[inline]
+    fn map_exec_err(self, err_ctx: &impl ErrorContext) -> Result<T, ExecutionError> {
+        self.map_err(|err| err_ctx.wrap_op_err(err))
+    }
+}
+
+impl<T> ResultOpErrExt<T> for OperationError {
+    #[inline]
+    fn map_exec_err_no_ctx(self, clk: RowIndex) -> Result<T, ExecutionError> {
+        Err(ExecutionError::OperationErrorNoContext { clk, err: Box::new(self) })
+    }
+
+    #[inline]
+    fn map_exec_err(self, err_ctx: &impl ErrorContext) -> Result<T, ExecutionError> {
+        Err(err_ctx.wrap_op_err(self))
     }
 }
 

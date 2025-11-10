@@ -9,7 +9,7 @@ use crate::{
     AsyncHost, ExecutionError, OperationError,
     continuation_stack::ContinuationStack,
     err_ctx,
-    errors::ErrorContext,
+    errors::ResultOpErrExt,
     fast::{FastProcessor, Tracer, trace_state::NodeExecutionState},
 };
 
@@ -74,10 +74,8 @@ impl FastProcessor {
             // Execute decorators that should be executed after exiting the node
             self.execute_after_exit_decorators(current_node_id, current_forest, host)?;
         } else {
-            let err_ctx = err_ctx!(current_forest, loop_node, host, clk_at_start);
-            return Err(err_ctx.wrap_op_err(
-                OperationError::NotBinaryValueLoop { value: condition },
-            ));
+            return OperationError::NotBinaryValueLoop { value: condition }
+                .map_exec_err(&err_ctx!(current_forest, loop_node, host, clk_at_start));
         }
         Ok(())
     }
@@ -132,9 +130,7 @@ impl FastProcessor {
             self.execute_after_exit_decorators(current_node_id, current_forest, host)?;
         } else {
             let err_ctx = err_ctx!(current_forest, loop_node, host, clk_at_start);
-            return Err(err_ctx.wrap_op_err(
-                OperationError::NotBinaryValueLoop { value: condition },
-            ));
+            return OperationError::NotBinaryValueLoop { value: condition }.map_exec_err(&err_ctx);
         }
         Ok(())
     }
