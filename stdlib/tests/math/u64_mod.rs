@@ -4,7 +4,7 @@ use miden_core::assert_matches;
 use miden_processor::{ExecutionError, OperationError};
 use miden_stdlib::handlers::u64_div::{U64_DIV_EVENT_NAME, U64DivError};
 use miden_utils_testing::{
-    Felt, TRUNCATE_STACK_PROC, U32_BOUND, ZERO, expect_exec_error_matches, proptest::prelude::*,
+    Felt, TRUNCATE_STACK_PROC, U32_BOUND, ZERO, expect_op_error_matches, proptest::prelude::*,
     rand::rand_value,
 };
 
@@ -741,14 +741,13 @@ fn checked_and_fail() {
 
     let test = build_test!(source, &[a0, a1, b0, b1]);
 
-    expect_exec_error_matches!(
+    expect_op_error_matches!(
         test,
-        ExecutionError::OperationError { ref err, .. } | ExecutionError::OperationErrorNoContext { ref err, .. }
-        if matches!(err.as_ref(), OperationError::NotU32Values { values, err_code }
-            if values.len() == 2 &&
-                values.contains(&Felt::new(a0)) &&
-                values.contains(&Felt::new(b0)) &&
-                *err_code == ZERO)
+        OperationError::NotU32Values { values, err_code }
+            if values.len() == 2
+                && values.contains(&Felt::new(a0))
+                && values.contains(&Felt::new(b0))
+                && *err_code == ZERO
     );
 }
 
@@ -788,14 +787,13 @@ fn checked_or_fail() {
 
     let test = build_test!(source, &[a0, a1, b0, b1]);
 
-    expect_exec_error_matches!(
+    expect_op_error_matches!(
         test,
-        ExecutionError::OperationError { ref err, .. } | ExecutionError::OperationErrorNoContext { ref err, .. }
-        if matches!(err.as_ref(), OperationError::NotU32Values { values, err_code }
-            if values.len() == 2 &&
-                values.contains(&Felt::new(a0)) &&
-                values.contains(&Felt::new(b0)) &&
-                *err_code == ZERO)
+        OperationError::NotU32Values { values, err_code }
+            if values.len() == 2
+                && values.contains(&Felt::new(a0))
+                && values.contains(&Felt::new(b0))
+                && *err_code == ZERO
     );
 }
 
@@ -835,14 +833,13 @@ fn checked_xor_fail() {
 
     let test = build_test!(source, &[a0, a1, b0, b1]);
 
-    expect_exec_error_matches!(
+    expect_op_error_matches!(
         test,
-        ExecutionError::OperationError { ref err, .. } | ExecutionError::OperationErrorNoContext { ref err, .. }
-        if matches!(err.as_ref(), OperationError::NotU32Values { values, err_code }
-            if values.len() == 2 &&
-                values.contains(&Felt::new(a0)) &&
-                values.contains(&Felt::new(b0)) &&
-                *err_code == ZERO)
+        OperationError::NotU32Values { values, err_code }
+            if values.len() == 2
+                && values.contains(&Felt::new(a0))
+                && values.contains(&Felt::new(b0))
+                && *err_code == ZERO
     );
 }
 

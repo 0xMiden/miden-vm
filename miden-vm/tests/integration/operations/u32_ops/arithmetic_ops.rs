@@ -1,4 +1,4 @@
-use miden_processor::{ExecutionError, OperationError, RowIndex};
+use miden_processor::{OperationError, RowIndex};
 use miden_utils_testing::{
     U32_BOUND, build_op_test, expect_op_error_matches, proptest::prelude::*, rand::rand_value,
 };

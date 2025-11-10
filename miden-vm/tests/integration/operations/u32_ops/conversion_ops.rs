@@ -1,4 +1,4 @@
-use miden_processor::{ExecutionError, OperationError};
+use miden_processor::OperationError;
 use miden_utils_testing::{
     Felt, StarkField, U32_BOUND, WORD_SIZE, ZERO, build_op_test, expect_op_error_matches,
     proptest::prelude::*, rand::rand_value,

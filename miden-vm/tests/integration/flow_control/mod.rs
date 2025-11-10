@@ -2,7 +2,7 @@ use alloc::sync::Arc;
 
 use miden_assembly::{Assembler, LibraryPath, Report, ast::ModuleKind};
 use miden_debug_types::{SourceLanguage, SourceManager};
-use miden_processor::{ExecutionError, OperationError};
+use miden_processor::OperationError;
 use miden_prover::Word;
 use miden_stdlib::StdLibrary;
 use miden_utils_testing::{StackInputs, Test, build_test, expect_op_error_matches, push_inputs};

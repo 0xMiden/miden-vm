@@ -4,7 +4,7 @@ use miden_air::{Felt, ProvingOptions, RowIndex};
 use miden_assembly::{Assembler, utils::Serializable};
 use miden_core::{EventName, StarkField, ZERO};
 use miden_processor::{
-    AdviceInputs, AdviceMutation, DefaultHost, EventError, ExecutionError, OperationError,
+    AdviceInputs, AdviceMutation, DefaultHost, EventError, OperationError,
     ProcessState, Program, ProgramInfo, StackInputs, crypto::RpoRandomCoin,
 };
 use miden_stdlib::{StdLibrary, falcon_sign};
@@ -14,7 +14,7 @@ use miden_utils_testing::{
         MerkleStore, Rpo256,
         rpo_falcon512::{Polynomial, SecretKey},
     },
-    expect_exec_error_matches,
+    expect_op_error_matches,
     proptest::proptest,
     rand::rand_value,
 };
@@ -201,16 +201,11 @@ fn test_falcon512_probabilistic_product_failure() {
 
     let test = build_test!(PROBABILISTIC_PRODUCT_SOURCE, &operand_stack, &advice_stack);
 
-    expect_exec_error_matches!(
+    expect_op_error_matches!(
         test,
-        ExecutionError::OperationError {
-            clk, ref err, ..
-        } | ExecutionError::OperationErrorNoContext {
-            clk, ref err, ..
-        }
-        if clk == RowIndex::from(3202)
-            && matches!(err.as_ref(), OperationError::FailedAssertion { err_code, err_msg }
-                if *err_code == ZERO && err_msg.is_none())
+        clk = RowIndex::from(3202),
+        OperationError::FailedAssertion { err_code, err_msg }
+            if *err_code == ZERO && err_msg.is_none()
     );
 }
 

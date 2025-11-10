@@ -1,6 +1,6 @@
 use miden_air::RowIndex;
-use miden_processor::{ExecutionError, OperationError, ZERO};
-use miden_utils_testing::{build_expected_hash, build_expected_perm, expect_exec_error_matches};
+use miden_processor::{OperationError, ZERO};
+use miden_utils_testing::{build_expected_hash, build_expected_perm, expect_op_error_matches};
 
 #[test]
 fn test_invalid_end_addr() {
@@ -17,16 +17,11 @@ fn test_invalid_end_addr() {
     ";
     let test = build_test!(empty_range, &[]);
 
-    expect_exec_error_matches!(
+    expect_op_error_matches!(
         test,
-        ExecutionError::OperationError {
-            clk, ref err, ..
-        } | ExecutionError::OperationErrorNoContext {
-            clk, ref err, ..
-        }
-        if clk == RowIndex::from(24)
-            && matches!(err.as_ref(), OperationError::FailedAssertion { err_code, err_msg }
-                if *err_code == ZERO && err_msg.is_none())
+        clk = RowIndex::from(24),
+        OperationError::FailedAssertion { err_code, err_msg }
+            if *err_code == ZERO && err_msg.is_none()
     );
 }
 

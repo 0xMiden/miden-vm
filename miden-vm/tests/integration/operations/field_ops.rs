@@ -1,5 +1,5 @@
 use miden_assembly::testing::regex;
-use miden_processor::{ExecutionError, OperationError, RowIndex};
+use miden_processor::{OperationError, RowIndex};
 use miden_utils_testing::{
     Felt, FieldElement, ONE, StarkField, WORD_SIZE, ZERO, assert_assembler_diagnostic,
     assert_diagnostic_lines, build_op_test, expect_op_error_matches, prop_randw,

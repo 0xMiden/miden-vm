@@ -1,5 +1,5 @@
 use miden_core::{Felt, chiplets::hasher::apply_permutation, utils::ToElements};
-use miden_processor::{AdviceError, ExecutionError, OperationError, RowIndex};
+use miden_processor::{AdviceError, OperationError, RowIndex};
 use miden_utils_testing::expect_op_error_matches;
 
 use super::{TRUNCATE_STACK_PROC, build_op_test, build_test};

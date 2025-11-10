@@ -1,5 +1,5 @@
 use miden_core::{EventName, mast};
-use miden_processor::{ExecutionError, NoopEventHandler, OperationError, RowIndex, ZERO};
+use miden_processor::{NoopEventHandler, OperationError, RowIndex, ZERO};
 use miden_utils_testing::{build_op_test, expect_op_error_matches};
 
 // SYSTEM OPS ASSERTIONS - MANUAL TESTS
