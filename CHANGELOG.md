@@ -6,6 +6,7 @@
 
 #### Changes
 
+- Removed unused `logtest` dependency and 49 redundant clone operations; added xclippy linting to prevent reintroduction ([#2317](https://github.com/0xMiden/miden-vm/pull/2317)).
 - Added missing implementations of `proptest::Arbitrary` for non-`BasicBlockNode` variants of `MastNode` ([#2335](https://github.com/0xMiden/miden-vm/pull/2335)).
 - [BREAKING] Added builder patterns for all `MastNode` types, made naked constructors module-private ([#2259](https://github.com/0xMiden/miden-vm/pull/2259)).
 - Extend builder patterns for all `MastNode` types ([#2274](https://github.com/0xMiden/miden-vm/pull/2274)).
