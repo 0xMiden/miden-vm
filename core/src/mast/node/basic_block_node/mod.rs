@@ -380,7 +380,7 @@ impl BasicBlockNode {
     /// the program.
     ///
     /// This method requires access to the forest to properly handle linked nodes.
-    pub fn iter<'a>(
+    fn iter<'a>(
         &'a self,
         forest: &'a MastForest,
     ) -> impl Iterator<Item = OperationOrDecorator<'a>> + 'a {
@@ -426,9 +426,13 @@ impl BasicBlockNode {
 
         true
     }
+
+    /// Return the MastNodeId of this `BasicBlockNode`, if in `Linked` state
+    pub fn linked_id(&self) -> Option<MastNodeId> {
+        self.decorators.linked_id()
+    }
 }
 
-#[allow(refining_impl_trait_reachable)]
 impl MastNodeErrorContext for BasicBlockNode {
     /// Returns all decorators in program order: before_enter, op-indexed, after_exit.
     fn decorators<'a>(

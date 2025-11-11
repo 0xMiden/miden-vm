@@ -555,14 +555,7 @@ impl Process {
         let mut op_offset = 0;
 
         // execute the first operation batch
-        self.execute_op_batch(
-            node_id,
-            basic_block,
-            &basic_block.op_batches()[0],
-            op_offset,
-            program,
-            host,
-        )?;
+        self.execute_op_batch(basic_block, &basic_block.op_batches()[0], op_offset, program, host)?;
         op_offset += basic_block.op_batches()[0].ops().len();
 
         // if the span contains more operation batches, execute them. each additional batch is
@@ -571,7 +564,7 @@ impl Process {
         for op_batch in basic_block.op_batches().iter().skip(1) {
             self.respan(op_batch);
             self.execute_op(Operation::Noop, program, host)?;
-            self.execute_op_batch(node_id, basic_block, op_batch, op_offset, program, host)?;
+            self.execute_op_batch(basic_block, op_batch, op_offset, program, host)?;
             op_offset += op_batch.ops().len();
         }
 
@@ -603,7 +596,6 @@ impl Process {
     #[inline(always)]
     fn execute_op_batch(
         &mut self,
-        node_id: MastNodeId,
         basic_block: &BasicBlockNode,
         batch: &OpBatch,
         op_offset: usize,
@@ -619,6 +611,11 @@ impl Process {
         // because the processor requires the number of groups to be either 1, 2, 4, or 8; if
         // the actual number of groups is smaller, we'll pad the batch with NOOPs at the end
         let num_batch_groups = batch.num_groups().next_power_of_two();
+
+        // Get the node ID once since it doesn't change within the loop
+        let node_id = basic_block
+            .linked_id()
+            .expect("basic block node should be linked when executing operations");
 
         // execute operations in the batch one by one
         for (i, &op) in batch.ops().iter().enumerate() {

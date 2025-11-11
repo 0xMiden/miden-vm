@@ -52,7 +52,6 @@ impl FastProcessor {
         // execute first op batch
         if let Some(first_op_batch) = op_batches.next() {
             self.execute_op_batch(
-                node_id,
                 basic_block_node,
                 first_op_batch,
                 0,
@@ -84,7 +83,6 @@ impl FastProcessor {
             }
 
             self.execute_op_batch(
-                node_id,
                 basic_block_node,
                 op_batch,
                 batch_index,
@@ -130,7 +128,6 @@ impl FastProcessor {
     #[allow(clippy::too_many_arguments)]
     async fn execute_op_batch(
         &mut self,
-        node_id: MastNodeId,
         basic_block: &BasicBlockNode,
         batch: &OpBatch,
         batch_index: usize,
@@ -150,6 +147,9 @@ impl FastProcessor {
             let op_idx_in_block = batch_offset_in_block + op_idx_in_batch;
 
             // Use the forest's decorator storage to get decorator IDs for this operation
+            let node_id = basic_block
+                .linked_id()
+                .expect("basic block node should be linked when executing operations");
             let decorator_ids = current_forest.decorator_indices_for_op(node_id, op_idx_in_block);
             for &decorator_id in decorator_ids {
                 let decorator = program
