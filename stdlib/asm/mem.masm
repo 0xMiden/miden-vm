@@ -4,11 +4,11 @@ use.std::crypto::hashes::rpo
 
 #! Copies `n` felts from `read_ptr` to `write_ptr`.
 #!
-#! If possible, this procedure will copy word-aligned words internally using `memcopy_words`,
-#! decreasing the total number of cycles required to make a copy.
+#! If possible, this procedure will copy word-aligned words internally using `memcopy_words` 
+#! procedure, decreasing the total number of cycles required to make a copy.
 #!
-#! It is advised to copy small chunks of memory using `memcopy_felts` instead, since it won't have a
-#! computation logic overhead.
+#! It is advised to copy small chunks of memory using `memcopy_felts` procedure instead, since it
+#! won't have a computation logic overhead.
 #!
 #! Inputs:  [n, read_ptr, write_ptr]
 #! Outputs: []
@@ -29,6 +29,7 @@ use.std::crypto::hashes::rpo
 #!     the number of felts required to make the read (and write) pointer word-aligned
 #!   - words handling: 15 + 16 * num_words
 #!   - suffix handling: 9 + 14 * num_remaining_felts
+#!     - in total: 66 + 14 * num_prefix_felts + 16 * num_words + 14 * num_suffix_felts
 export.memcopy
     # check whether the difference between `read_ptr` and `write_ptr` is 4, otherwise these pointers 
     # will never be simultaneously word-alined, so we won't be able to use `memcopy_words`
@@ -195,8 +196,8 @@ end
 
 #! Copies `n` felts from `read_ptr` to `write_ptr`.
 #!
-#! It is advised to copy big chunks of memory using `memcopy` instead, since it will handle the 
-#! memory more efficiently.
+#! It is advised to copy big chunks of memory using `memcopy` procedure instead, since it will 
+#! handle the memory more efficiently.
 #!
 #! Inputs:  [n, read_ptr, write_ptr]
 #! Outputs: []
