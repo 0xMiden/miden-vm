@@ -21,16 +21,23 @@ use.std::crypto::hashes::rpo
 #! Panics if:
 #! - read_ptr and write_ptr are not a u32 values.
 #!
-#! Total cycles: 
+#! Total cycles:
+#! - if read and write pointers are mutually unaligned: 23 + 14 * num_felts
+#! - if read and write pointers are mutually aligned, it's equal to the sum of:
+#!   - prologue: 14 cycles
+#!   - prefix handling (worst case): 28 + 14 * num_felts_to_next_wa, where num_felts_to_next_wa is 
+#!     the number of felts required to make the read (and write) pointer word-aligned
+#!   - words handling: 15 + 16 * num_words
+#!   - suffix handling: 9 + 14 * num_remaining_felts
 export.memcopy
     # check whether the difference between `read_ptr` and `write_ptr` is 4, otherwise these pointers 
     # will never be simultaneously word-alined, so we won't be able to use `memcopy_words`
-    movdn.2 u32assert2.err="memory addresses must be valid u32 values"
+    movdn.2 u32assert2.err="memory addresses must be valid u32 values" # 2 cycles
     # => [read_ptr, write_ptr, n]
 
-    # Compute the remainders of dividing read_ptr and write_ptr by 4. Subtract them to get the 
+    # Compute the remainders of dividing read_ptr and write_ptr by 4. Compare them to get the 
     # "alignment flag".
-    dup.1 u32mod.4 dup.1 u32mod.4 dup.1 eq
+    dup.1 u32mod.4 dup.1 u32mod.4 dup.1 eq # 12 cycles
     # => [alignment_flag, write_ptr%4, read_ptr, write_ptr, n]
 
     if.true
@@ -40,20 +47,20 @@ export.memcopy
 
         ### "prefix" handling #####################################################################
 
-        # if the current read pointer (and write pointer, since now they are in "sync") is not 
-        # word-aligned and we need to copy at least the (4 - write_ptr%4) values (so 
-        # n >= (4 - write_ptr%4), meaning we have enough values to copy to make pointers 
+        # if the current read pointer (and write pointer, since now they are in "sync") is not
+        # word-aligned and we need to copy at least the (4 - write_ptr%4) values (so
+        # n >= (4 - write_ptr%4), meaning we have enough values to copy to make pointers
         # word-aligned), use `memcopy_felts_internal` to copy values until it become word-aligned
-        dup neq.0
+        dup neq.0 # 3 cycles
         # => [is_not_word_aligned, write_ptr%4, read_ptr, write_ptr, n]
 
-        push.4 movup.2 sub
+        push.4 movup.2 sub # 4 cycles
         # => [4 - write_ptr%4, is_not_word_aligned, read_ptr, write_ptr, n] 
         
-        dup dup.5 u32lte
+        dup dup.5 u32lte # 7 cycles
         # => [(4 - write_ptr%4) <= 4, 4 - write_ptr%4, is_not_word_aligned, read_ptr, write_ptr, n]
 
-        swap movdn.2 and
+        swap movdn.2 and # 3 cycles
         # => [should_handle_prefix, 4 - write_ptr%4, read_ptr, write_ptr, n]
 
         if.true
@@ -61,17 +68,17 @@ export.memcopy
             # become word-aligned
             # => [4 - write_ptr%4, read_ptr, write_ptr, n]
 
-            dup movdn.3
+            dup movdn.3 # 2 cycles
             # => [4 - write_ptr%4, read_ptr, write_ptr, 4 - write_ptr%4, n]
 
-            exec.memcopy_felts_internal
+            exec.memcopy_felts_internal # 4 + 14 * num_felts_to_next_alignment
             # => [0, wa_read_ptr, wa_write_ptr, 4 - write_ptr%4, n]
 
             # update the total number of values left to copy
-            drop movup.3 movup.3 sub
+            drop movup.3 movup.3 sub # 5 cycles
             # => [n', wa_read_ptr, wa_write_ptr]
         else
-            drop movup.2
+            drop movup.2 # 2 cycles
             # => [n, read_ptr, write_ptr]
         end
         # => [n', read_ptr', write_ptr']
@@ -84,23 +91,23 @@ export.memcopy
         ### "words" handling ######################################################################
 
         # get the number of words we should handle and the number of remaining felt values
-        u32divmod.4
+        u32divmod.4 # 2 cycles
         # => [values_left, num_words, read_ptr', write_ptr']
 
-        movdn.3 exec.memcopy_words_internal
+        movdn.3 exec.memcopy_words_internal # 13 + 16 * num_words
         # => [0, read_ptr'', write_ptr'', values_left]
 
         ### "suffix" handling #####################################################################
 
         # handle the remaining values
-        drop movup.2 exec.memcopy_felts
+        drop movup.2 exec.memcopy_felts # 9 + 14 * num_felts
         # => []
     else
         # if read pointer and write pointer are not word-aligned between each other, use 
         # `memcopy_felts` to copy values one-by-one
         # => [write_ptr%4, read_ptr, write_ptr, n]
 
-        drop movup.2 exec.memcopy_felts
+        drop movup.2 exec.memcopy_felts # 9 + 14 * num_felts
         # => []
     end
     # => []
