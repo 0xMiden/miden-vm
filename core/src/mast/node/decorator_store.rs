@@ -76,4 +76,12 @@ impl DecoratorStore {
     pub fn is_linked(&self) -> bool {
         matches!(self, DecoratorStore::Linked { .. })
     }
+
+    /// Get the node ID if this store is in the Linked state
+    pub fn linked_id(&self) -> Option<MastNodeId> {
+        match self {
+            DecoratorStore::Linked { id } => Some(*id),
+            DecoratorStore::Owned { .. } => None,
+        }
+    }
 }

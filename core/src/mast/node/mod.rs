@@ -73,6 +73,10 @@ pub trait MastNodeExt {
     /// Returns the domain of this node.
     fn domain(&self) -> Felt;
 
+    /// Verifies that this node is stored at the ID in its decorators field in the forest.
+    #[cfg(debug_assertions)]
+    fn verify_node_in_forest(&self, forest: &MastForest);
+
     /// Converts this node into its corresponding builder, reusing allocated data where possible.
     type Builder: MastForestContributor;
 

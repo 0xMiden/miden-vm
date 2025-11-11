@@ -171,11 +171,15 @@ impl MastNodeExt for DynNode {
 
     /// Returns the decorators to be executed before this node is executed.
     fn before_enter<'a>(&'a self, forest: &'a MastForest) -> &'a [DecoratorId] {
+        #[cfg(debug_assertions)]
+        self.verify_node_in_forest(forest);
         self.decorator_store.before_enter(forest)
     }
 
     /// Returns the decorators to be executed after this node is executed.
     fn after_exit<'a>(&'a self, forest: &'a MastForest) -> &'a [DecoratorId] {
+        #[cfg(debug_assertions)]
+        self.verify_node_in_forest(forest);
         self.decorator_store.after_exit(forest)
     }
 
@@ -232,6 +236,25 @@ impl MastNodeExt for DynNode {
                 builder = builder.with_before_enter(before_enter).with_after_exit(after_exit);
                 builder
             },
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    fn verify_node_in_forest(&self, forest: &MastForest) {
+        if let Some(id) = self.decorator_store.linked_id() {
+            // Verify that this node is the one stored at the given ID in the forest
+            let self_ptr = self as *const Self;
+            let forest_node = &forest.nodes[id];
+            let forest_node_ptr = match forest_node {
+                crate::mast::MastNode::Dyn(dyn_node) => dyn_node as *const DynNode as *const (),
+                _ => panic!("Node type mismatch at {:?}", id),
+            };
+            let self_as_void = self_ptr as *const ();
+            debug_assert_eq!(
+                self_as_void, forest_node_ptr,
+                "Node pointer mismatch: expected node at {:?} to be self",
+                id
+            );
         }
     }
 }

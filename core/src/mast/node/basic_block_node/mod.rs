@@ -203,6 +203,10 @@ impl BasicBlockNode {
                 )
             },
             DecoratorStore::Linked { id } => {
+                // This is usedin MastForestMerger::merge_nodes, which strips the `MastForest` of
+                // some nodes before remapping decorators, so calling
+                // verify_node_in_forest will not work here.
+
                 // For linked nodes, borrow from forest storage
                 // Check if the node has any decorators at all
                 let has_decorators = forest
@@ -262,6 +266,8 @@ impl BasicBlockNode {
                 )
             },
             DecoratorStore::Linked { id } => {
+                #[cfg(debug_assertions)]
+                self.verify_node_in_forest(forest);
                 // For linked nodes, borrow from forest storage
                 // Check if the node has any decorators at all
                 let has_decorators = forest
@@ -319,6 +325,10 @@ impl BasicBlockNode {
                     .collect()
             },
             DecoratorStore::Linked { id } => {
+                // This is usedin MastForest::remove_nodes, which strips the `MastForest` of its
+                // nodes before remapping decorators, so calling
+                // verify_node_in_forest will not work here.
+
                 let pad2raw = PaddedToRawPrefix::new(self.op_batches());
                 match forest.decorator_links_for_node(*id) {
                     Ok(links) => links
@@ -351,6 +361,8 @@ impl BasicBlockNode {
         let num_decorators = match &self.decorators {
             DecoratorStore::Owned { decorators, .. } => decorators.len(),
             DecoratorStore::Linked { id } => {
+                #[cfg(debug_assertions)]
+                self.verify_node_in_forest(forest);
                 // For linked nodes, count from forest storage
                 forest
                     .decorator_links_for_node(*id)
@@ -483,6 +495,8 @@ impl MastNodeExt for BasicBlockNode {
             DecoratorStore::Owned { before_enter, .. } => before_enter,
             DecoratorStore::Linked { id } => {
                 // For linked nodes, get the decorators from the forest's NodeToDecoratorIds
+                #[cfg(debug_assertions)]
+                self.verify_node_in_forest(forest);
                 forest.node_decorator_storage.get_before_decorators(*id)
             },
         }
@@ -493,6 +507,8 @@ impl MastNodeExt for BasicBlockNode {
             DecoratorStore::Owned { after_exit, .. } => after_exit,
             DecoratorStore::Linked { id } => {
                 // For linked nodes, get the decorators from the forest's NodeToDecoratorIds
+                #[cfg(debug_assertions)]
+                self.verify_node_in_forest(forest);
                 forest.node_decorator_storage.get_after_decorators(*id)
             },
         }
@@ -544,6 +560,25 @@ impl MastNodeExt for BasicBlockNode {
         BasicBlockNodeBuilder::new(operations, un_adjusted_decorators)
             .with_before_enter(before_enter)
             .with_after_exit(after_exit)
+    }
+
+    #[cfg(debug_assertions)]
+    fn verify_node_in_forest(&self, forest: &MastForest) {
+        if let DecoratorStore::Linked { id } = &self.decorators {
+            // Verify that this node is the one stored at the given ID in the forest
+            let self_ptr = self as *const Self;
+            let forest_node = &forest.nodes[*id];
+            let forest_node_ptr = match forest_node {
+                MastNode::Block(block_node) => block_node as *const BasicBlockNode as *const (),
+                _ => panic!("Node type mismatch at {:?}", id),
+            };
+            let self_as_void = self_ptr as *const ();
+            debug_assert_eq!(
+                self_as_void, forest_node_ptr,
+                "Node pointer mismatch: expected node at {:?} to be self",
+                id
+            );
+        }
     }
 }
 
@@ -1219,9 +1254,7 @@ impl BasicBlockNodeBuilder {
             },
         })
     }
-}
 
-impl BasicBlockNodeBuilder {
     /// Add this node to a forest using relaxed validation.
     ///
     /// This method is used during deserialization where nodes may reference child nodes

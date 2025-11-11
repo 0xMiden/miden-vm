@@ -211,6 +211,27 @@ impl MastNodeExt for ExternalNode {
             },
         }
     }
+
+    #[cfg(debug_assertions)]
+    fn verify_node_in_forest(&self, forest: &MastForest) {
+        if let Some(id) = self.decorator_store.linked_id() {
+            // Verify that this node is the one stored at the given ID in the forest
+            let self_ptr = self as *const Self;
+            let forest_node = &forest.nodes[id];
+            let forest_node_ptr = match forest_node {
+                crate::mast::MastNode::External(external) => {
+                    external as *const ExternalNode as *const ()
+                },
+                _ => panic!("Node type mismatch at {:?}", id),
+            };
+            let self_as_void = self_ptr as *const ();
+            debug_assert_eq!(
+                self_as_void, forest_node_ptr,
+                "Node pointer mismatch: expected node at {:?} to be self",
+                id
+            );
+        }
+    }
 }
 
 // ARBITRARY IMPLEMENTATION

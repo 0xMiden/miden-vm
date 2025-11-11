@@ -387,11 +387,11 @@ mod round_trip_tests {
         let join_id = join_builder1.add_to_forest(&mut forest).unwrap();
 
         // perform round-trip
-        let join_node = forest.get_node_by_id(join_id).unwrap().clone();
+        let join_node = forest.get_node_by_id(join_id).unwrap();
         let rebuilt_node = join_node.clone().to_builder(&forest).build(&forest).unwrap();
 
         // Use semantic equality to handle decorator store state differences
-        match (&join_node, &rebuilt_node) {
+        match (join_node, &rebuilt_node) {
             (MastNode::Join(original), MastNode::Join(rebuilt)) => {
                 assert!(original.semantic_eq(rebuilt, &forest));
             },
