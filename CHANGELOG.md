@@ -5,6 +5,7 @@
 #### Enhancements
 
 - Added new `memcopy_felts` procedure for the `std::mem` module. ([#2352](https://github.com/0xMiden/miden-vm/pull/2352)).
+- Added new `memcopy` procedure for the `std::mem` module. ([#2361](https://github.com/0xMiden/miden-vm/pull/2361)).
 
 #### Changes
 
