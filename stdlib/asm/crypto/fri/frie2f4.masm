@@ -1,5 +1,5 @@
-use.std::crypto::stark::constants
-use.std::crypto::fri::helper
+use std::crypto::stark::constants
+use std::crypto::fri::helper
 
 #! Stores the layer commitments C followed by [d_size, t_depth, a1, a0] and [poe, p, e1, e0] where:
 #! 1) d_size is the domain size divided by 4 of the domain corresponding to C.
@@ -9,7 +9,8 @@ use.std::crypto::fri::helper
 #!  g being the initial domain generator.
 #! TODO: This pre-processing function should in fact compute d_size and t_depth for each C
 #! starting from the original domain size.
-export.preprocess.16
+@locals(16)
+pub proc preprocess
     adv_push.1
     # => [num_queries, g, ...]
     exec.constants::fri_com_ptr
@@ -102,7 +103,8 @@ end
 #! Output: [is_not_last_layer, layer_ptr+8, layer_ptr+8, poe^4, f_pos, ne1, ne0, layer_ptr+8, rem_ptr, x, x, x, x, x, x, x, x, ...]
 #!
 #! Cycles: 83
-export.verify_query_layer.12
+@locals(12)
+pub proc verify_query_layer
 
     # load layer commitment C as well as [a0, a1, t_depth, d_size] (7 cycles)
     swapdw
@@ -168,12 +170,12 @@ export.verify_query_layer.12
     # => [x, x, layer_ptr + 8, poe^4, f_pos, ne1, ne0, rem_ptr, x, x, x, x, x, x, x, x, ...]
     dup.2     # [layer_ptr+8, x, x, layer_ptr+8, poe^4, f_pos, ne1, ne0, rem_ptr, ]
     movdn.7   # [x, x, layer_ptr+8, poe^4, f_pos, ne1, ne0, layer_ptr+8, rem_ptr, ...]
-    drop      
+    drop
     drop      # [layer_ptr+8, poe^4, f_pos, ne1, ne0, layer_ptr+8, rem_ptr, ...]
     dup       # [layer_ptr+8, layer_ptr+8, poe^4, f_pos, ne1, ne0, layer_ptr+8, rem_ptr, ...]
     dup.7     # [rem_ptr, layer_ptr+8, layer_ptr+8, poe^4, f_pos, ne1, ne0, layer_ptr+8, rem_ptr, ...]
     dup.1     # [layer_ptr+8, rem_ptr, layer_ptr+8, layer_ptr+8, poe^4, f_pos, ne1, ne0, layer_ptr+8, rem_ptr, ...]
-    neq       
+    neq
     # => [is_not_last_layer, layer_ptr+8, layer_ptr+8, poe^4, f_pos, ne1, ne0, layer_ptr+8, rem_ptr, x, x, x, x, x, x, x, x, ...]
 end
 
@@ -195,7 +197,7 @@ end
 #! - rem_ptr is the memory address of the remainder polynomial.
 #!
 #! Cycles: 107 + num_layers * 83
-export.verify_query_64
+pub proc verify_query_64
 
     # prepare stack to be in a form that leverages the fri_ext2fold4 instruction output stack state
     # (16 cycles)
@@ -254,7 +256,7 @@ end
 #! - rem_ptr is the memory address of the remainder polynomial.
 #!
 #! Cycles: 140 + num_layers * 83
-export.verify_query_128
+pub proc verify_query_128
 
     # prepare stack to be in a form that leverages the fri_ext2fold4 instruction output stack state
     # (16 cycles)
@@ -285,7 +287,7 @@ export.verify_query_128
     swapw swapdw
     # => [x, x, x, x, x, x, x, x, ne1, ne0, rem_ptr, rem_ptr, P, ...]
 
-    exec.helper::evaluate_fri_remainder_poly_max_degree_plus_1    
+    exec.helper::evaluate_fri_remainder_poly_max_degree_plus_1
     # => [x, x, x, x, x, x, x, x, ne1, ne0, rem_ptr, rem_ptr, P, ...]
     swapdw
     # => [ne1, ne0, rem_ptr, rem_ptr, P, x, x, x, x, x, x, x, x, ...]
@@ -326,7 +328,8 @@ end
 #! 2. layer_ptr - 1 points to the last (e0, e1, p, poe) tuple.
 #!
 #! Cycles: 24 + num_queries * (107 + num_layers * 83)
-proc.verify_64.4
+@locals(4)
+proc verify_64
 
     # store [query_ptr, layer_ptr, rem_ptr, g] to keep track of all queries
     # (3 cycles)
@@ -340,7 +343,7 @@ proc.verify_64.4
 
     # Save a word containing a fresh accumulator for Horner evaluating the remainder polynomial,
     # a pointer to the evaluation point and a pointer to the location of the polynomial.
-    push.0.0 
+    push.0.0
     exec.constants::tmp2 exec.constants::get_remainder_poly_address
     exec.constants::tmp1 mem_storew_be
     movup.4
@@ -404,7 +407,8 @@ end
 #! 2. layer_ptr - 1 points to the last (e0, e1, p, poe) tuple.
 #!
 #! Cycles: 24 + num_queries * (140 + num_layers * 83)
-proc.verify_128.4
+@locals(4)
+proc verify_128
 
     # store [query_ptr, layer_ptr, rem_ptr, g] to keep track of all queries
     # (3 cycles)
@@ -418,11 +422,11 @@ proc.verify_128.4
 
     # Save a word containing a fresh accumulator for Horner evaluating the remainder polynomial,
     # a pointer to the evaluation point and a pointer to the location of the polynomial.
-    push.0.0 
+    push.0.0
     exec.constants::tmp2 exec.constants::get_remainder_poly_address
     exec.constants::tmp1 mem_storew_be
     movup.4
-    
+
     while.true
         # load [e0, e1, p, poe] from memory i.e. next query data (7 cycles)
         movup.4
@@ -457,12 +461,11 @@ end
 #! Input:  [...]
 #! Output: [...]
 #!
-#! Cycles: 
+#! Cycles:
 #!
 #!  Polynomial degree less than 64: 24 + num_queries * (107 + num_layers * 83)
 #!  Polynomial degree less than 128: 24 + num_queries * (140 + num_layers * 83)
-export.verify
-
+pub proc verify
     # Get domain generator and pointer to the remainder codeword
     # (4 cycles)
     exec.constants::get_lde_domain_generator
@@ -479,7 +482,7 @@ export.verify
     exec.constants::get_fri_queries_address
     # => [query_ptr, fri_layer_ptr, remainder_poly_ptr, g, ...]
 
-    
+
     exec.constants::get_remainder_poly_size
     exec.helper::get_fri_remainder_poly_max_degree_plus_1_half
     eq

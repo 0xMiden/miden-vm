@@ -8,8 +8,8 @@ fn circuit_evaluation_prove_verify() {
 
     let source = format!(
         "
-    const.NUM_READ_ROWS=4
-    const.NUM_EVAL_ROWS=4
+    const NUM_READ_ROWS = 4
+    const NUM_EVAL_ROWS = 4
 
     begin
        repeat.{num_repetitions}
@@ -24,7 +24,7 @@ fn circuit_evaluation_prove_verify() {
 
             # Set up the inputs to the arithmetic circuit evaluation op and execute it
             push.NUM_EVAL_ROWS push.NUM_READ_ROWS push.{pointer}
-            eval_circuit 
+            eval_circuit
 
             # Clean up the stack
             drop drop drop

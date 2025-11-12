@@ -1,12 +1,12 @@
-use.std::crypto::fri::frie2f4
-use.std::crypto::fri::helper
+use std::crypto::fri::frie2f4
+use std::crypto::fri::helper
 
-use.std::crypto::stark::deep_queries
-use.std::crypto::stark::random_coin
-use.std::crypto::stark::ood_frames
-use.std::crypto::stark::public_inputs
-use.std::crypto::stark::constants
-use.std::crypto::stark::utils
+use std::crypto::stark::deep_queries
+use std::crypto::stark::random_coin
+use std::crypto::stark::ood_frames
+use std::crypto::stark::public_inputs
+use std::crypto::stark::constants
+use std::crypto::stark::utils
 
 #! Verifies a STARK proof.
 #!
@@ -40,13 +40,13 @@ use.std::crypto::stark::utils
 #!
 #! Inputs:  [D3, D2, D1, D0, log(trace_length), num_queries, grinding, num_constraints, trace_info, num_fixed_len_pi, is_aux_trace]
 #! Outputs: []
-export.verify
+pub proc verify
 
     #==============================================================================================
     #       I)  Hash proof context and hash-&-load public inputs
     #==============================================================================================
 
-    # Store digests of dynamically executed procedures 
+    # Store digests of dynamically executed procedures
     exec.utils::store_dynamically_executed_procedures
     # => [log(trace_length), num_queries, grinding, num_constraints, trace_info, num_fixed_len_pi, is_aux_trace, ...]
 

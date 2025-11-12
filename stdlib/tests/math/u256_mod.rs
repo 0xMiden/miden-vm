@@ -10,9 +10,9 @@ fn mul_unsafe() {
     let b = rand_u256();
 
     let source = "
-        use.std::math::u256
+        use std::math::u256
         begin
-            exec.u256::mul_unsafe
+            exec.u256::wrapping_mul
             swapdw dropw dropw
         end";
 

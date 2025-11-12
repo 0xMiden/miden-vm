@@ -1,32 +1,32 @@
-use.std::crypto::hashes::rpo
-use.std::crypto::stark::constants
-use.std::crypto::stark::utils
+use std::crypto::hashes::rpo
+use std::crypto::stark::constants
+use std::crypto::stark::utils
 
 # CONSTANTS
 # =================================================================================================
 
 # Number of constraints, both boundary and transitional
-const.NUM_CONSTRAINTS=6
+const NUM_CONSTRAINTS = 6
 
 # Number of inputs to the constraint evaluation circuit
-const.NUM_INPUTS_CIRCUIT=244
+const NUM_INPUTS_CIRCUIT = 244
 
 # Number of evaluation gates in the constraint evaluation circuit
-const.NUM_EVAL_GATES_CIRCUIT=108
+const NUM_EVAL_GATES_CIRCUIT = 108
 
 # Max cycle length for periodic columns
-const.MAX_CYCLE_LEN_LOG=3
+const MAX_CYCLE_LEN_LOG = 3
 
 # --- constant getters --------------------------------------------------------
 
-proc.get_num_constraints
+proc get_num_constraints
     push.NUM_CONSTRAINTS
 end
 
 # ERRORS
 # =================================================================================================
 
-const.ERR_FAILED_TO_LOAD_CIRCUIT_DESCRIPTION="failed to load the circuit description for the constraints evaluation check"
+const ERR_FAILED_TO_LOAD_CIRCUIT_DESCRIPTION = "failed to load the circuit description for the constraints evaluation check"
 
 
 # CONSTRAINT EVALUATION CHECKER
@@ -44,7 +44,7 @@ const.ERR_FAILED_TO_LOAD_CIRCUIT_DESCRIPTION="failed to load the circuit descrip
 #!
 #! Inputs:  []
 #! Outputs: []
-export.execute_constraint_evaluation_check
+pub proc execute_constraint_evaluation_check()
     # Compute and store at the appropriate memory location the auxiliary inputs needed by
     # the arithmetic circuit.
     push.MAX_CYCLE_LEN_LOG
@@ -78,7 +78,7 @@ end
 #!
 #! Inputs:  []
 #! Outputs: []
-proc.load_ace_circuit_description
+proc load_ace_circuit_description
     push.CIRCUIT_COMMITMENT
     adv.push_mapval
     exec.constants::get_arithmetic_circuit_ptr
@@ -97,7 +97,7 @@ end
 # CONSTRAINT EVALUATION CIRCUIT DESCRIPTION
 # =================================================================================================
 
-adv_map.CIRCUIT_COMMITMENT=[
+adv_map CIRCUIT_COMMITMENT = [
     1,
     0,
     0,

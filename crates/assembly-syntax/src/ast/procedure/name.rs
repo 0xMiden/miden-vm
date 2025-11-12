@@ -5,19 +5,15 @@ use alloc::{
 use core::{
     fmt,
     hash::{Hash, Hasher},
+    ops::Deref,
     str::FromStr,
 };
 
-use miden_core::utils::{
-    ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
-};
 use miden_debug_types::{SourceSpan, Span, Spanned};
 use miden_utils_diagnostics::{IntoDiagnostic, Report, miette};
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 
 use crate::{
-    LibraryNamespace, LibraryPath,
+    Path, PathBuf,
     ast::{CaseKindError, Ident, IdentError},
 };
 
@@ -25,40 +21,105 @@ use crate::{
 // ================================================================================================
 
 /// Represents a qualified procedure name, e.g. `std::math::u64::add`, parsed into it's
-/// constituent [LibraryPath] and [ProcedureName] components.
+/// constituent [Path] and [ProcedureName] components.
 ///
 /// A qualified procedure name can be context-sensitive, i.e. the module path might refer
 /// to an imported
 #[derive(Clone)]
 #[cfg_attr(feature = "arbitrary", derive(proptest_derive::Arbitrary))]
-#[cfg_attr(
-    all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(winter_serde(true))
-)]
 pub struct QualifiedProcedureName {
     /// The source span associated with this identifier.
     #[cfg_attr(feature = "arbitrary", proptest(value = "SourceSpan::default()"))]
-    pub span: SourceSpan,
-    /// The module path for this procedure.
-    pub module: LibraryPath,
-    /// The name of the procedure.
-    pub name: ProcedureName,
+    span: SourceSpan,
+    #[cfg_attr(
+        feature = "arbitrary",
+        proptest(strategy = "crate::arbitrary::path::path_random_length(2)")
+    )]
+    path: Arc<Path>,
 }
 
 impl QualifiedProcedureName {
     /// Create a new [QualifiedProcedureName] with the given fully-qualified module path
     /// and procedure name.
-    pub fn new(module: LibraryPath, name: ProcedureName) -> Self {
-        Self {
-            span: SourceSpan::default(),
-            module,
-            name,
-        }
+    pub fn new(module: impl AsRef<Path>, name: ProcedureName) -> Self {
+        let span = name.span();
+        let path = module.as_ref().join(name).into();
+        Self { span, path }
     }
 
-    /// Returns the namespace of this fully-qualified procedure name.
-    pub fn namespace(&self) -> &LibraryNamespace {
-        self.module.namespace()
+    #[inline(always)]
+    pub fn with_span(mut self, span: SourceSpan) -> Self {
+        self.span = span;
+        self
+    }
+
+    /// Get the module/namespace of this procedure
+    pub fn namespace(&self) -> &Path {
+        self.path.parent().unwrap()
+    }
+
+    /// Get the name of this procedure as a `str`
+    pub fn name(&self) -> &str {
+        self.path.last().unwrap()
+    }
+
+    /// Get this [QualifiedProcedureName] as a [Path]
+    #[inline]
+    pub fn as_path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Get this [QualifiedProcedureName] as a `Span<&Path>`
+    #[inline]
+    pub fn to_spanned_path(&self) -> Span<&Path> {
+        Span::new(self.span, self.as_path())
+    }
+
+    #[inline]
+    pub fn into_inner(self) -> Arc<Path> {
+        self.path
+    }
+}
+
+impl Deref for QualifiedProcedureName {
+    type Target = Path;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        &self.path
+    }
+}
+
+impl From<Arc<Path>> for QualifiedProcedureName {
+    fn from(path: Arc<Path>) -> Self {
+        assert!(path.parent().is_some());
+        Self { span: SourceSpan::default(), path }
+    }
+}
+
+impl From<PathBuf> for QualifiedProcedureName {
+    fn from(path: PathBuf) -> Self {
+        assert!(path.parent().is_some());
+        Self {
+            span: SourceSpan::default(),
+            path: path.into(),
+        }
+    }
+}
+
+impl From<&Path> for QualifiedProcedureName {
+    fn from(path: &Path) -> Self {
+        assert!(path.parent().is_some());
+        Self {
+            span: SourceSpan::default(),
+            path: path.to_path_buf().into(),
+        }
+    }
+}
+
+impl From<QualifiedProcedureName> for Arc<Path> {
+    fn from(value: QualifiedProcedureName) -> Self {
+        value.path
     }
 }
 
@@ -66,14 +127,15 @@ impl FromStr for QualifiedProcedureName {
     type Err = Report;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.rsplit_once("::") {
-            None => Err(Report::msg("invalid fully-qualified procedure name, expected namespace")),
-            Some((path, name)) => {
-                let name = name.parse::<ProcedureName>().into_diagnostic()?;
-                let path = path.parse::<LibraryPath>().into_diagnostic()?;
-                Ok(Self::new(path, name))
-            },
+        let path = PathBuf::new(s).into_diagnostic()?;
+        if path.parent().is_none() {
+            return Err(Report::msg("invalid procedure path: must be qualified with a namespace"));
         }
+        ProcedureName::validate(path.last().unwrap()).into_diagnostic()?;
+        Ok(Self {
+            span: SourceSpan::default(),
+            path: path.into(),
+        })
     }
 }
 
@@ -97,13 +159,13 @@ impl Eq for QualifiedProcedureName {}
 
 impl PartialEq for QualifiedProcedureName {
     fn eq(&self, other: &Self) -> bool {
-        self.name == other.name && self.module == other.module
+        self.path == other.path
     }
 }
 
 impl Ord for QualifiedProcedureName {
     fn cmp(&self, other: &Self) -> core::cmp::Ordering {
-        self.module.cmp(&other.module).then_with(|| self.name.cmp(&other.name))
+        self.path.cmp(&other.path)
     }
 }
 
@@ -127,10 +189,7 @@ impl Spanned for QualifiedProcedureName {
 
 impl fmt::Debug for QualifiedProcedureName {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("FullyQualifiedProcedureName")
-            .field("module", &self.module)
-            .field("name", &self.name)
-            .finish()
+        f.debug_struct("QualifiedProcedureName").field("path", &self.path).finish()
     }
 }
 
@@ -144,119 +203,7 @@ impl crate::prettier::PrettyPrint for QualifiedProcedureName {
 
 impl fmt::Display for QualifiedProcedureName {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}::{}", &self.module, &self.name)
-    }
-}
-
-impl Serializable for QualifiedProcedureName {
-    fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        self.module.write_into(target);
-        self.name.write_into(target);
-    }
-}
-
-impl Deserializable for QualifiedProcedureName {
-    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let module = LibraryPath::read_from(source)?;
-        let name = ProcedureName::read_from(source)?;
-        Ok(Self::new(module, name))
-    }
-}
-
-#[cfg(feature = "serde")]
-impl serde::Serialize for QualifiedProcedureName {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        if serializer.is_human_readable() {
-            let name = format!("{}", self);
-            serializer.serialize_str(&name)
-        } else {
-            use serde::ser::SerializeStruct;
-
-            let mut builder = serializer.serialize_struct("QualifiedProcedureName", 2)?;
-            builder.serialize_field("module", &self.module)?;
-            builder.serialize_field("name", &self.name)?;
-            builder.end()
-        }
-    }
-}
-
-#[cfg(feature = "serde")]
-impl<'de> serde::Deserialize<'de> for QualifiedProcedureName {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        use serde::de::Visitor;
-
-        if deserializer.is_human_readable() {
-            let name = <&'de str as serde::Deserialize>::deserialize(deserializer)?;
-            return Self::from_str(name).map_err(serde::de::Error::custom);
-        }
-
-        #[derive(Deserialize)]
-        #[serde(field_identifier, rename_all = "lowercase")]
-        enum Field {
-            Module,
-            Name,
-        }
-
-        struct QualifiedProcedureNameVisitor;
-        impl<'de> Visitor<'de> for QualifiedProcedureNameVisitor {
-            type Value = QualifiedProcedureName;
-
-            fn expecting(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
-                formatter.write_str("struct QualifiedProcedureName")
-            }
-
-            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
-            where
-                A: serde::de::SeqAccess<'de>,
-            {
-                let module = seq
-                    .next_element()?
-                    .ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
-                let name = seq
-                    .next_element()?
-                    .ok_or_else(|| serde::de::Error::invalid_length(1, &self))?;
-                Ok(QualifiedProcedureName::new(module, name))
-            }
-
-            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
-            where
-                A: serde::de::MapAccess<'de>,
-            {
-                let mut module = None;
-                let mut name = None;
-                while let Some(key) = map.next_key()? {
-                    match key {
-                        Field::Module => {
-                            if module.is_some() {
-                                return Err(serde::de::Error::duplicate_field("module"));
-                            }
-                            module = Some(map.next_value()?);
-                        },
-                        Field::Name => {
-                            if name.is_some() {
-                                return Err(serde::de::Error::duplicate_field("name"));
-                            }
-                            name = Some(map.next_value()?);
-                        },
-                    }
-                }
-                let module = module.ok_or_else(|| serde::de::Error::missing_field("module"))?;
-                let name = name.ok_or_else(|| serde::de::Error::missing_field("name"))?;
-                Ok(QualifiedProcedureName::new(module, name))
-            }
-        }
-
-        deserializer.deserialize_struct(
-            "QualifiedProcedureName",
-            &["module", "name"],
-            QualifiedProcedureNameVisitor,
-        )
+        fmt::Display::fmt(&self.path, f)
     }
 }
 
@@ -278,38 +225,32 @@ impl<'de> serde::Deserialize<'de> for QualifiedProcedureName {
 ///
 /// ```masm,ignore
 /// # All ASCII alphanumeric, bare identifier
-/// proc.foo
+/// proc foo
 ///   ...
 /// end
 ///
 /// # All ASCII alphanumeric, leading underscore
-/// proc._foo
+/// proc _foo
 ///   ...
 /// end
 ///
 /// # A symbol which contains `::`, which would be treated as a namespace operator, so requires
 /// # quoting
-/// proc."std::foo"
+/// proc "std::foo"
 ///   ...
 /// end
 ///
 /// # A complex procedure name representing a monomorphized Rust function, requires quoting
-/// proc."alloc::alloc::box_free::<dyn alloc::boxed::FnBox<(), Output = ()>>"
+/// proc "alloc::alloc::box_free::<dyn alloc::boxed::FnBox<(), Output = ()>>"
 ///   ...
 /// end
 /// ```
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "serde", serde(transparent))]
-#[cfg_attr(
-    all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(winter_serde(true))
-)]
 pub struct ProcedureName(Ident);
 
 impl ProcedureName {
     /// Reserved name for a main procedure.
-    pub const MAIN_PROC_NAME: &'static str = "$main";
+    pub const MAIN_PROC_NAME: &'static str = Ident::MAIN;
 
     /// Creates a [ProcedureName] from `name`.
     pub fn new(name: impl AsRef<str>) -> Result<Self, IdentError> {
@@ -352,6 +293,11 @@ impl ProcedureName {
     /// Returns a string reference for this procedure name.
     pub fn as_str(&self) -> &str {
         self.as_ref()
+    }
+
+    /// Returns the underlying [Ident] representation
+    pub fn as_ident(&self) -> Ident {
+        self.0.clone()
     }
 }
 
@@ -416,9 +362,16 @@ impl AsRef<str> for ProcedureName {
     }
 }
 
+impl From<ProcedureName> for Ident {
+    #[inline(always)]
+    fn from(name: ProcedureName) -> Self {
+        name.0
+    }
+}
+
 impl PartialEq<str> for ProcedureName {
     fn eq(&self, other: &str) -> bool {
-        self.0.as_ref() == other
+        self.0.as_str() == other
     }
 }
 
@@ -439,7 +392,15 @@ impl FromStr for ProcedureName {
     type Err = IdentError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut chars = s.char_indices().peekable();
+        let extracted = Self::validate(s)?;
+
+        Ok(Self(Ident::from_raw_parts(Span::unknown(extracted.into()))))
+    }
+}
+
+impl ProcedureName {
+    fn validate(name: &str) -> Result<&str, IdentError> {
+        let mut chars = name.char_indices().peekable();
 
         // peek the first char
         match chars.peek() {
@@ -451,15 +412,15 @@ impl FromStr for ProcedureName {
                     chars.all(|(_, char)| is_valid_unquoted_identifier_char(char));
 
                 if all_chars_valid {
-                    return Ok(Self(Ident::from_raw_parts(Span::unknown(s.into()))));
+                    return Ok(name);
                 } else {
-                    return Err(IdentError::InvalidChars { ident: s.into() });
+                    return Err(IdentError::InvalidChars { ident: name.into() });
                 }
             },
             Some((_, c)) if c.is_ascii_uppercase() => {
                 return Err(IdentError::Casing(CaseKindError::Snake));
             },
-            Some(_) => return Err(IdentError::InvalidChars { ident: s.into() }),
+            Some(_) => return Err(IdentError::InvalidChars { ident: name.into() }),
         };
 
         // parsing the qouted identifier
@@ -467,43 +428,27 @@ impl FromStr for ProcedureName {
             match char {
                 '"' => {
                     if chars.next().is_some() {
-                        return Err(IdentError::InvalidChars { ident: s.into() });
+                        return Err(IdentError::InvalidChars { ident: name.into() });
                     }
-                    let token = &s[0..pos];
-                    return Ok(Self(Ident::from_raw_parts(Span::unknown(token.into()))));
+                    return Ok(&name[1..pos]);
                 },
                 c => {
                     // if char is not alphanumeric or asciigraphic then return err
                     if !(c.is_alphanumeric() || c.is_ascii_graphic()) {
-                        return Err(IdentError::InvalidChars { ident: s.into() });
+                        return Err(IdentError::InvalidChars { ident: name.into() });
                     }
                 },
             }
         }
 
         // if while loop has not returned then the qoute was not closed
-        Err(IdentError::InvalidChars { ident: s.into() })
+        Err(IdentError::InvalidChars { ident: name.into() })
     }
 }
 
 // FROM STR HELPER
 fn is_valid_unquoted_identifier_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '$' | '.')
-}
-
-impl Serializable for ProcedureName {
-    fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        self.as_str().write_into(target)
-    }
-}
-
-impl Deserializable for ProcedureName {
-    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let str: String = source.read()?;
-        let proc_name = ProcedureName::new(str)
-            .map_err(|e| DeserializationError::InvalidValue(e.to_string()))?;
-        Ok(proc_name)
-    }
 }
 
 // ARBITRARY IMPLEMENTATION
@@ -515,13 +460,13 @@ impl proptest::prelude::Arbitrary for ProcedureName {
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         use proptest::prelude::*;
-        // see https://doc.rust-lang.org/rustc/symbol-mangling/v0.html#symbol-grammar-summary
-        let all_possible_chars_in_mangled_name =
-            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.$";
-        let mangled_rustc_name = ProcedureName::new(all_possible_chars_in_mangled_name).unwrap();
-        let plain = ProcedureName::new("user_func").unwrap();
-        let wasm_cm_style = ProcedureName::new("kebab-case-func").unwrap();
-        prop_oneof![Just(mangled_rustc_name), Just(plain), Just(wasm_cm_style)].boxed()
+
+        prop_oneof![
+            1 => crate::arbitrary::ident::ident_any_random_length(),
+            2 => crate::arbitrary::ident::bare_ident_any_random_length(),
+        ]
+        .prop_map(ProcedureName)
+        .boxed()
     }
 
     type Strategy = proptest::prelude::BoxedStrategy<Self>;

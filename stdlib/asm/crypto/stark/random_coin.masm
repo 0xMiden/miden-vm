@@ -1,7 +1,7 @@
 #! Disclaimer: most of the procedures in this file assume that the input pointers are word-aligned.
 
-use.std::crypto::stark::constants
-use.std::crypto::stark::utils
+use std::crypto::stark::constants
+use std::crypto::stark::utils
 
 
 #! Helper procedure to compute addition of two words component-wise.
@@ -9,7 +9,7 @@ use.std::crypto::stark::utils
 #! Output: [c3, c2, c1, c0]
 #!
 #! Cycles: 16
-proc.add_two_words
+proc add_two_words
     movup.3
     movup.7
     add
@@ -40,7 +40,7 @@ end
 #! Input: [...]
 #! Output: [R1, ...]
 #! Cycles: 6
-export.get_rate_1
+pub proc get_rate_1
     padw exec.constants::r1_ptr mem_loadw_be
 end
 
@@ -49,7 +49,7 @@ end
 #! Input: [R1, ...]
 #! Output: [...]
 #! Cycles: 6
-export.set_rate_1
+pub proc set_rate_1
     exec.constants::r1_ptr mem_storew_be dropw
 end
 
@@ -62,7 +62,7 @@ end
 #! Input: [...]
 #! Output: [R2, ...]
 #! Cycles: 6
-export.get_rate_2
+pub proc get_rate_2
     padw exec.constants::r2_ptr mem_loadw_be
 end
 
@@ -71,7 +71,7 @@ end
 #! Input: [R2, ...]
 #! Output: [...]
 #! Cycles: 6
-export.set_rate_2
+pub proc set_rate_2
     exec.constants::r2_ptr mem_storew_be dropw
 end
 
@@ -84,7 +84,7 @@ end
 #! Input: [...]
 #! Output: [C, ...]
 #! Cycles: 6
-export.get_capacity
+pub proc get_capacity
     padw exec.constants::c_ptr mem_loadw_be
 end
 
@@ -93,7 +93,7 @@ end
 #! Input: [C, ...]
 #! Output: [...]
 #! Cycles: 6
-export.set_capacity
+pub proc set_capacity
     exec.constants::c_ptr mem_storew_be dropw
 end
 
@@ -102,7 +102,7 @@ end
 #! Input: [...]
 #! Output: [R2, R1, C, ...]
 #! Cycles: 18
-export.load_random_coin_state
+pub proc load_random_coin_state
     exec.get_capacity
     exec.get_rate_1
     exec.get_rate_2
@@ -113,7 +113,7 @@ end
 #! Input: [R2, R1, C, ...]
 #! Output: [...]
 #! Cycles: 18
-export.store_random_coin_state
+pub proc store_random_coin_state
     exec.set_rate_2
     exec.set_rate_1
     exec.set_capacity
@@ -128,7 +128,7 @@ end
 #! Input: [log(trace_length), num_queries, grinding, num_constraints, trace_info, num_fixed_len_pi, ...]
 #! Output: [C, ...]
 #! Cycles: 210
-export.init_seed
+pub proc init_seed
 
     # Save the parameters in memory for later use
     dup exec.constants::set_trace_length_log
@@ -232,7 +232,7 @@ end
 #!
 #! Input: [trace_length, num_queries, grinding, num_constraints, trace_info, ...]
 #! Output:  [num_queries, grinding, proof_options, num_constraints, modulus1, modulus0, trace_length, trace_info, ...]
-proc.build_proof_context
+proc build_proof_context
     ## trace layout info, which is the concatenation as u8-s of:
     ## 1. main segment width
     ## 2. num auxiliary segments, which always 1
@@ -263,7 +263,7 @@ end
 #! Input: [DATA, ...]
 #! Ouput: [...]
 #! Cycles: 54
-export.reseed
+pub proc reseed
     # Load previous state and update it
     # --------------------------------------------------------------------------------------------
     exec.get_rate_1
@@ -307,7 +307,7 @@ end
 #! Input: [...]
 #! Output: [...]
 #! Cycles: 20
-export.generate_aux_randomness
+pub proc generate_aux_randomness
     padw exec.constants::r1_ptr mem_loadw_be
     exec.constants::aux_rand_elem_ptr mem_storew_be
     #=> [beta1, beta0, alpha1, alpha0, ...]
@@ -329,7 +329,7 @@ end
 #! Input: [...]
 #! Output: [...]
 #! Cycles: 13
-export.generate_constraint_composition_coefficients
+pub proc generate_constraint_composition_coefficients
     exec.constants::composition_coef_ptr
     padw exec.constants::r1_ptr mem_loadw_be
     # => [y, y, alpha1, alpha0, compos_coef_ptr, ...] where y is a "garbage" value
@@ -345,7 +345,7 @@ end
 #! Input: [...]
 #! Output: [...]
 #! Cycles: 22
-export.generate_deep_composition_random_coefficients
+pub proc generate_deep_composition_random_coefficients
     padw exec.constants::r1_ptr mem_loadw_be
     # => [y, y, alpha1, alpha0, ...] where y is a "garbage" value
     push.0.0
@@ -374,7 +374,7 @@ end
 #! Output: [...]
 #! Note: The top word on the stack is consumed by this procedure.
 #! Cycles: 21 + 10 * log(N)
-export.generate_z_zN
+pub proc generate_z_zN
     # Load z (first two felts of the random coin state) and log trace length N
     exec.constants::r1_ptr mem_loadw_be
     drop drop
@@ -415,7 +415,7 @@ end
 # Output:[R, ptr+16, mask, depth, ...]
 #
 # Cycles: 100
-proc.generate_four_integers
+proc generate_four_integers
     # Get the first random felt
     dup.3               # [r0, R1, ptr, mask, depth, ...]
     u32split swap       # [r0_lo, r0_hi, R1, ptr, mask, depth, ...]
@@ -480,7 +480,7 @@ end
 # Output:[R, ptr + 12, mask, depth, ...]
 #
 # Cycles: 75
-proc.generate_three_integers
+proc generate_three_integers
     # Get the second random felt
     dup.2               # [r0, R1, ptr, mask, depth, ...]
     u32split swap       # [r0_lo, r0_hi, R1, ptr, mask, depth, ...]
@@ -535,7 +535,7 @@ end
 #! in the rate portion of the state is discarded.
 #! NOTE: The cycles count can be estimated, using the fact that r < 8, via the more compact formula
 #!  470 + 236 * (num_queries / 8)
-export.generate_list_indices
+pub proc generate_list_indices
     # Get the number of query indices we need to generate and the address to where we need
     # to store them at.
     exec.constants::get_number_queries
@@ -689,7 +689,7 @@ end
 #! Input: [...]
 #! Output: [...]
 #! Cycles: 73
-export.check_pow
+pub proc check_pow
     # Load the grinding factor
     exec.constants::get_grinding_factor
 

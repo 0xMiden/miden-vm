@@ -1,4 +1,5 @@
-proc.foo.2
+@locals(2)
+proc foo
     push.11
     loc_store.0
     push.101
@@ -12,7 +13,8 @@ proc.foo.2
     # will fail: debug.local.1.65540
 end
 
-proc.bar.2
+@locals(2)
+proc bar
     push.21
     loc_store.0
     push.121
@@ -39,7 +41,7 @@ begin
 
     exec.foo
     exec.bar
-    
+
     # Clean stack
     dropw
 end

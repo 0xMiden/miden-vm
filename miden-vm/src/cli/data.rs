@@ -6,7 +6,7 @@ use std::{
 };
 
 use miden_assembly::{
-    Assembler, DefaultSourceManager, Library, LibraryNamespace, SourceManager,
+    Assembler, DefaultSourceManager, Library, Path as LibraryPath, SourceManager,
     ast::{Module, ModuleKind},
     diagnostics::{Report, WrapErr},
     report,
@@ -138,7 +138,7 @@ where
         let path = path.as_ref();
         let mut parser = Module::parser(ModuleKind::Executable);
         let ast = parser
-            .parse_file(LibraryNamespace::Exec.into(), path, &source_manager)
+            .parse_file(LibraryPath::exec_path(), path, &source_manager)
             .wrap_err_with(|| format!("Failed to parse program file `{}`", path.display()))?;
 
         Ok(Self { ast, source_manager })

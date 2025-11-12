@@ -246,18 +246,16 @@ pub fn falcon_sign(_pk_sk: &[Felt], _msg: Word) -> Option<Vec<Felt>> {
 
 #[cfg(test)]
 mod tests {
-    use miden_assembly::LibraryPath;
+    use miden_assembly::Path;
 
     use super::*;
 
     #[test]
     fn test_compile() {
-        let path = "std::math::u64::overflowing_add".parse::<LibraryPath>().unwrap();
+        let path = Path::new("::std::math::u64::overflowing_add");
         let stdlib = StdLibrary::default();
         let exists = stdlib.0.module_infos().any(|module| {
-            module
-                .procedures()
-                .any(|(_, proc)| module.path().clone().append(&proc.name).unwrap() == path)
+            module.procedures().any(|(_, proc)| &module.path().join(&proc.name) == path)
         });
 
         assert!(exists);

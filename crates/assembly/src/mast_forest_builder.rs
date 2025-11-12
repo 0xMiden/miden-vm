@@ -5,16 +5,18 @@ use alloc::{
 };
 use core::ops::{Index, IndexMut};
 
+#[cfg(test)]
+use miden_core::mast::{LoopNodeBuilder, SplitNodeBuilder};
 use miden_core::{
     AdviceMap, Decorator, DecoratorList, Felt, Operation, Word,
     mast::{
-        BasicBlockNode, CallNode, DecoratorFingerprint, DecoratorId, DynNode, ExternalNode,
-        JoinNode, LoopNode, MastForest, MastNode, MastNodeExt, MastNodeFingerprint, MastNodeId,
-        Remapping, SplitNode, SubtreeIterator,
+        BasicBlockNodeBuilder, CallNodeBuilder, DecoratorFingerprint, DecoratorId, DynNodeBuilder,
+        ExternalNodeBuilder, JoinNodeBuilder, MastForest, MastForestContributor, MastForestError,
+        MastNode, MastNodeExt, MastNodeFingerprint, MastNodeId, Remapping, SubtreeIterator,
     },
 };
 
-use super::{GlobalProcedureIndex, LinkerError, Procedure};
+use super::{GlobalItemIndex, LinkerError, Procedure};
 use crate::{
     Library,
     diagnostics::{IntoDiagnostic, Report, WrapErr},
@@ -44,16 +46,16 @@ pub struct MastForestBuilder {
     /// The MAST forest being built by this builder; this MAST forest is up-to-date - i.e., all
     /// nodes added to the MAST forest builder are also immediately added to the underlying MAST
     /// forest.
-    mast_forest: MastForest,
+    pub(crate) mast_forest: MastForest,
     /// A map of all procedures added to the MAST forest indexed by their global procedure ID.
     /// This includes all local, exported, and re-exported procedures. In case multiple procedures
     /// with the same digest are added to the MAST forest builder, only the first procedure is
     /// added to the map, and all subsequent insertions are ignored.
-    procedures: BTreeMap<GlobalProcedureIndex, Procedure>,
+    procedures: BTreeMap<GlobalItemIndex, Procedure>,
     /// A map from procedure MAST root to its global procedure index. Similar to the `procedures`
     /// map, this map contains only the first inserted procedure for procedures with the same MAST
     /// root.
-    proc_gid_by_mast_root: BTreeMap<Word, GlobalProcedureIndex>,
+    proc_gid_by_mast_root: BTreeMap<Word, GlobalItemIndex>,
     /// A map of MAST node fingerprints to their corresponding positions in the MAST forest.
     node_id_by_fingerprint: BTreeMap<MastNodeFingerprint, MastNodeId>,
     /// The reverse mapping of `node_id_by_fingerprint`. This map caches the fingerprints of all
@@ -98,6 +100,11 @@ impl MastForestBuilder {
             statically_linked_mast: Arc::new(statically_linked_mast),
             ..Self::default()
         })
+    }
+
+    /// Returns a reference to the underlying [`MastForest`].
+    pub fn mast_forest(&self) -> &MastForest {
+        &self.mast_forest
     }
 
     /// Removes the unused nodes that were created as part of the assembly process, and returns the
@@ -149,7 +156,7 @@ impl MastForestBuilder {
     /// Returns a reference to the procedure with the specified [`GlobalProcedureIndex`], or None
     /// if such a procedure is not present in this MAST forest builder.
     #[inline(always)]
-    pub fn get_procedure(&self, gid: GlobalProcedureIndex) -> Option<&Procedure> {
+    pub fn get_procedure(&self, gid: GlobalItemIndex) -> Option<&Procedure> {
         self.procedures.get(&gid)
     }
 
@@ -178,7 +185,7 @@ impl MastForestBuilder {
     /// no effect.
     pub fn insert_procedure(
         &mut self,
-        gid: GlobalProcedureIndex,
+        gid: GlobalItemIndex,
         procedure: Procedure,
     ) -> Result<(), Report> {
         // Check if an entry is already in this cache slot.
@@ -212,8 +219,8 @@ impl MastForestBuilder {
             let is_valid =
                 !mismatched_locals || core::cmp::min(cached_locals, procedure_locals) == 0;
             if !is_valid {
-                let first = cached.fully_qualified_name();
-                let second = procedure.fully_qualified_name();
+                let first = cached.path();
+                let second = procedure.path();
                 return Err(report!(
                     "two procedures found with same mast root, but conflicting definitions ('{}' and '{}')",
                     first,
@@ -254,7 +261,7 @@ impl MastForestBuilder {
             while let (Some(left), Some(right)) =
                 (source_mast_node_iter.next(), source_mast_node_iter.next())
             {
-                let join_mast_node_id = self.ensure_join(left, right)?;
+                let join_mast_node_id = self.ensure_join(left, right, vec![], vec![])?;
 
                 node_ids.push(join_mast_node_id);
             }
@@ -315,15 +322,15 @@ impl MastForestBuilder {
         for &basic_block_id in contiguous_basic_block_ids {
             // It is safe to unwrap here, since we already checked that all IDs in
             // `contiguous_basic_block_ids` are `BasicBlockNode`s
-            let basic_block_node =
-                self.mast_forest[basic_block_id].get_basic_block().unwrap().clone();
+            let basic_block_node = self.mast_forest[basic_block_id].get_basic_block().unwrap();
 
             // check if the block should be merged with other blocks
             if should_merge(
                 self.mast_forest.is_procedure_root(basic_block_id),
                 basic_block_node.num_op_batches(),
             ) {
-                for (op_idx, decorator) in basic_block_node.raw_decorator_iter() {
+                // Use forest-borrowing to get decorators from linked nodes
+                for (op_idx, decorator) in basic_block_node.raw_decorator_iter(&self.mast_forest) {
                     decorators.push((op_idx + operations.len(), decorator));
                 }
                 for batch in basic_block_node.op_batches() {
@@ -335,7 +342,8 @@ impl MastForestBuilder {
                 if !operations.is_empty() {
                     let block_ops = core::mem::take(&mut operations);
                     let block_decorators = core::mem::take(&mut decorators);
-                    let merged_basic_block_id = self.ensure_block(block_ops, block_decorators)?;
+                    let merged_basic_block_id =
+                        self.ensure_block(block_ops, block_decorators, vec![], vec![])?;
 
                     merged_basic_blocks.push(merged_basic_block_id);
                 }
@@ -347,7 +355,7 @@ impl MastForestBuilder {
         self.merged_basic_block_ids.extend(contiguous_basic_block_ids.iter());
 
         if !operations.is_empty() || !decorators.is_empty() {
-            let merged_basic_block = self.ensure_block(operations, decorators)?;
+            let merged_basic_block = self.ensure_block(operations, decorators, vec![], vec![])?;
             merged_basic_blocks.push(merged_basic_block);
         }
 
@@ -382,17 +390,20 @@ impl MastForestBuilder {
     /// Note that only one copy of nodes that have the same MAST root and decorators is added to the
     /// MAST forest; two nodes that have the same MAST root and decorators will have the same
     /// [`MastNodeId`].
-    pub fn ensure_node(&mut self, node: impl Into<MastNode>) -> Result<MastNodeId, Report> {
-        let node: MastNode = node.into();
-        let node_fingerprint = self.fingerprint_for_node(&node);
+    pub(crate) fn ensure_node(
+        &mut self,
+        builder: impl MastForestContributor,
+    ) -> Result<MastNodeId, Report> {
+        let node_fingerprint = builder
+            .fingerprint_for_node(&self.mast_forest, &self.hash_by_node_id)
+            .expect("hash_by_node_id should contain the fingerprints of all children of `node`");
 
         if let Some(node_id) = self.node_id_by_fingerprint.get(&node_fingerprint) {
             // node already exists in the forest; return previously assigned id
             Ok(*node_id)
         } else {
-            let new_node_id = self
-                .mast_forest
-                .add_node(node)
+            let new_node_id = builder
+                .add_to_forest(&mut self.mast_forest)
                 .into_diagnostic()
                 .wrap_err("assembler failed to add new node")?;
             self.node_id_by_fingerprint.insert(node_fingerprint, new_node_id);
@@ -407,10 +418,12 @@ impl MastForestBuilder {
         &mut self,
         operations: Vec<Operation>,
         decorators: DecoratorList,
+        before_enter: Vec<DecoratorId>,
+        after_exit: Vec<DecoratorId>,
     ) -> Result<MastNodeId, Report> {
-        let block = BasicBlockNode::new(operations, decorators)
-            .into_diagnostic()
-            .wrap_err("assembler failed to add new basic block node")?;
+        let block = BasicBlockNodeBuilder::new(operations, decorators)
+            .with_before_enter(before_enter)
+            .with_after_exit(after_exit);
         self.ensure_node(block)
     }
 
@@ -419,57 +432,96 @@ impl MastForestBuilder {
         &mut self,
         left_child: MastNodeId,
         right_child: MastNodeId,
+        before_enter: Vec<DecoratorId>,
+        after_exit: Vec<DecoratorId>,
     ) -> Result<MastNodeId, Report> {
-        let join = JoinNode::new([left_child, right_child], &self.mast_forest)
-            .into_diagnostic()
-            .wrap_err("assembler failed to add new join node")?;
+        let join = JoinNodeBuilder::new([left_child, right_child])
+            .with_before_enter(before_enter)
+            .with_after_exit(after_exit);
         self.ensure_node(join)
     }
 
+    /// Adds a call node to the forest, and returns the [`MastNodeId`] associated with it.
+    pub fn ensure_call(
+        &mut self,
+        callee: MastNodeId,
+        before_enter: Vec<DecoratorId>,
+        after_exit: Vec<DecoratorId>,
+    ) -> Result<MastNodeId, Report> {
+        let call = CallNodeBuilder::new(callee)
+            .with_before_enter(before_enter)
+            .with_after_exit(after_exit);
+        self.ensure_node(call)
+    }
+
     /// Adds a split node to the forest, and returns the [`MastNodeId`] associated with it.
+    // Kept for giving tests some consistency
+    #[cfg(test)]
     pub fn ensure_split(
         &mut self,
-        if_branch: MastNodeId,
-        else_branch: MastNodeId,
+        left_child: MastNodeId,
+        right_child: MastNodeId,
+        before_enter: Vec<DecoratorId>,
+        after_exit: Vec<DecoratorId>,
     ) -> Result<MastNodeId, Report> {
-        let split = SplitNode::new([if_branch, else_branch], &self.mast_forest)
-            .into_diagnostic()
-            .wrap_err("assembler failed to add new split node")?;
+        let split = SplitNodeBuilder::new([left_child, right_child])
+            .with_before_enter(before_enter)
+            .with_after_exit(after_exit);
         self.ensure_node(split)
     }
 
     /// Adds a loop node to the forest, and returns the [`MastNodeId`] associated with it.
-    pub fn ensure_loop(&mut self, body: MastNodeId) -> Result<MastNodeId, Report> {
-        let loop_node = LoopNode::new(body, &self.mast_forest)
-            .into_diagnostic()
-            .wrap_err("assembler failed to add new loop node")?;
+    // Kept for giving tests some consistency
+    #[cfg(test)]
+    pub fn ensure_loop(
+        &mut self,
+        body: MastNodeId,
+        before_enter: Vec<DecoratorId>,
+        after_exit: Vec<DecoratorId>,
+    ) -> Result<MastNodeId, Report> {
+        let loop_node = LoopNodeBuilder::new(body)
+            .with_before_enter(before_enter)
+            .with_after_exit(after_exit);
         self.ensure_node(loop_node)
     }
 
-    /// Adds a call node to the forest, and returns the [`MastNodeId`] associated with it.
-    pub fn ensure_call(&mut self, callee: MastNodeId) -> Result<MastNodeId, Report> {
-        let call = CallNode::new(callee, &self.mast_forest)
-            .into_diagnostic()
-            .wrap_err("assembler failed to add new call node")?;
-        self.ensure_node(call)
-    }
-
     /// Adds a syscall node to the forest, and returns the [`MastNodeId`] associated with it.
-    pub fn ensure_syscall(&mut self, callee: MastNodeId) -> Result<MastNodeId, Report> {
-        let syscall = CallNode::new_syscall(callee, &self.mast_forest)
-            .into_diagnostic()
-            .wrap_err("assembler failed to add new syscall node")?;
+    pub fn ensure_syscall(
+        &mut self,
+        callee: MastNodeId,
+        before_enter: Vec<DecoratorId>,
+        after_exit: Vec<DecoratorId>,
+    ) -> Result<MastNodeId, Report> {
+        let syscall = CallNodeBuilder::new_syscall(callee)
+            .with_after_exit(after_exit)
+            .with_before_enter(before_enter);
         self.ensure_node(syscall)
     }
 
     /// Adds a dyn node to the forest, and returns the [`MastNodeId`] associated with it.
-    pub fn ensure_dyn(&mut self) -> Result<MastNodeId, Report> {
-        self.ensure_node(DynNode::new_dyn())
+    pub fn ensure_dyn(
+        &mut self,
+        before_enter: Vec<DecoratorId>,
+        after_exit: Vec<DecoratorId>,
+    ) -> Result<MastNodeId, Report> {
+        self.ensure_node(
+            DynNodeBuilder::new_dyn()
+                .with_after_exit(after_exit)
+                .with_before_enter(before_enter),
+        )
     }
 
     /// Adds a dyncall node to the forest, and returns the [`MastNodeId`] associated with it.
-    pub fn ensure_dyncall(&mut self) -> Result<MastNodeId, Report> {
-        self.ensure_node(DynNode::new_dyncall())
+    pub fn ensure_dyncall(
+        &mut self,
+        before_enter: Vec<DecoratorId>,
+        after_exit: Vec<DecoratorId>,
+    ) -> Result<MastNodeId, Report> {
+        self.ensure_node(
+            DynNodeBuilder::new_dyncall()
+                .with_after_exit(after_exit)
+                .with_before_enter(before_enter),
+        )
     }
 
     /// Adds a node corresponding to the given MAST root, according to how it is linked.
@@ -480,14 +532,16 @@ impl MastForestBuilder {
     pub fn ensure_external_link(&mut self, mast_root: Word) -> Result<MastNodeId, Report> {
         if let Some(root_id) = self.statically_linked_mast.find_procedure_root(mast_root) {
             for old_id in SubtreeIterator::new(&root_id, &self.statically_linked_mast.clone()) {
-                let node = self.statically_linked_mast[old_id]
+                let builder = self.statically_linked_mast[old_id]
+                    .clone()
+                    .to_builder(&self.statically_linked_mast)
                     .remap_children(&self.statically_linked_mast_remapping);
-                let new_id = self.ensure_node(node)?;
+                let new_id = self.ensure_node(builder)?;
                 self.statically_linked_mast_remapping.insert(old_id, new_id);
             }
             Ok(root_id.remap(&self.statically_linked_mast_remapping))
         } else {
-            self.ensure_node(ExternalNode::new(mast_root))
+            self.ensure_node(ExternalNodeBuilder::new(mast_root))
         }
     }
 
@@ -495,27 +549,42 @@ impl MastForestBuilder {
     ///
     /// If other decorators are already present, the new decorators are added to the end of the
     /// list.
-    pub fn append_before_enter(&mut self, node_id: MastNodeId, decorator_ids: &[DecoratorId]) {
-        self.mast_forest[node_id].append_before_enter(decorator_ids);
+    pub fn append_before_enter(
+        &mut self,
+        node_id: MastNodeId,
+        decorator_ids: Vec<DecoratorId>,
+    ) -> Result<(), MastForestError> {
+        // Extract the existing node and convert it to a builder
+        let mut decorated_builder = self.mast_forest[node_id].clone().to_builder(&self.mast_forest);
+        decorated_builder.append_before_enter(decorator_ids);
+        let new_node_fingerprint =
+            decorated_builder.fingerprint_for_node(&self.mast_forest, &self.hash_by_node_id)?;
+        self.mast_forest[node_id] = decorated_builder.build(&self.mast_forest)?;
 
-        let new_node_fingerprint = self.fingerprint_for_node(&self[node_id]);
         self.hash_by_node_id.insert(node_id, new_node_fingerprint);
+        self.node_id_by_fingerprint.insert(new_node_fingerprint, node_id);
+        Ok(())
     }
 
-    pub fn append_after_exit(&mut self, node_id: MastNodeId, decorator_ids: &[DecoratorId]) {
-        self.mast_forest[node_id].append_after_exit(decorator_ids);
+    pub fn append_after_exit(
+        &mut self,
+        node_id: MastNodeId,
+        decorator_ids: Vec<DecoratorId>,
+    ) -> Result<(), MastForestError> {
+        // Extract the existing node and convert it to a builder
+        let mut decorated_builder = self.mast_forest[node_id].clone().to_builder(&self.mast_forest);
+        decorated_builder.append_after_exit(decorator_ids);
+        let new_node_fingerprint =
+            decorated_builder.fingerprint_for_node(&self.mast_forest, &self.hash_by_node_id)?;
+        self.mast_forest[node_id] = decorated_builder.build(&self.mast_forest)?;
 
-        let new_node_fingerprint = self.fingerprint_for_node(&self[node_id]);
         self.hash_by_node_id.insert(node_id, new_node_fingerprint);
+        self.node_id_by_fingerprint.insert(new_node_fingerprint, node_id);
+        Ok(())
     }
 }
 
 impl MastForestBuilder {
-    fn fingerprint_for_node(&self, node: &MastNode) -> MastNodeFingerprint {
-        MastNodeFingerprint::from_mast_node(&self.mast_forest, &self.hash_by_node_id, node)
-            .expect("hash_by_node_id should contain the fingerprints of all children of `node`")
-    }
-
     /// Registers an error message in the MAST Forest and returns the
     /// corresponding error code as a Felt.
     pub fn register_error(&mut self, msg: Arc<str>) -> Felt {
@@ -595,7 +664,7 @@ fn should_merge(is_procedure: bool, num_op_batches: usize) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use miden_core::{Operation, mast::MastNodeErrorContext};
+    use miden_core::Operation;
 
     use super::*;
 
@@ -635,7 +704,9 @@ mod tests {
             (8, block1_decorator3), // Decorator for Push(3) at index 8
         ];
 
-        let block1_id = builder.ensure_block(block1_ops.clone(), block1_decorators).unwrap();
+        let block1_id = builder
+            .ensure_block(block1_ops.clone(), block1_decorators, vec![], vec![])
+            .unwrap();
 
         // Sanity check the test itself makes sense
         let block1 = builder.mast_forest[block1_id].get_basic_block().unwrap().clone();
@@ -654,7 +725,9 @@ mod tests {
             (1, block2_decorator2), // Decorator for Mul
         ]; // [push mul] [3]
 
-        let block2_id = builder.ensure_block(block2_ops.clone(), block2_decorators).unwrap();
+        let block2_id = builder
+            .ensure_block(block2_ops.clone(), block2_decorators, vec![], vec![])
+            .unwrap();
 
         // Merge the blocks
         let merged_blocks = builder.merge_basic_blocks(&[block1_id, block2_id]).unwrap();
@@ -663,8 +736,8 @@ mod tests {
         assert_eq!(merged_blocks.len(), 1);
         let merged_block_id = merged_blocks[0];
 
-        // Get the merged block
-        let merged_block = builder.mast_forest[merged_block_id].get_basic_block().unwrap().clone();
+        // Get the merged block from the forest (don't clone to preserve Linked decorators)
+        let merged_block = builder.mast_forest[merged_block_id].get_basic_block().unwrap();
 
         // Merged block: two groups
         // [push drop drop drop drop drop drop push noop] [1] [2] [push push mul] [3] [4] [noop]
@@ -675,8 +748,10 @@ mod tests {
         // For block2: operation 0 -> Trace(4), operation 1 -> Trace(5)
 
         // Check each decorator in the merged block
-        let decorators = merged_block.decorators();
-        assert_eq!(merged_block.decorators().count(), 5); // 3 from block1 + 2 from block2
+        let decorators = merged_block.indexed_decorator_iter(&builder.mast_forest);
+        let decorator_count = merged_block.indexed_decorator_iter(&builder.mast_forest).count();
+
+        assert_eq!(decorator_count, 5); // 3 from block1 + 2 from block2
 
         // Create a map to track which trace values we've found
         let mut found_traces = std::collections::HashSet::new();

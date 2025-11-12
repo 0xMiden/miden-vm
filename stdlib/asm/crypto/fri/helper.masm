@@ -1,51 +1,51 @@
-use.std::crypto::stark::random_coin
-use.std::crypto::stark::constants
+use std::crypto::stark::random_coin
+use std::crypto::stark::constants
 
 # CONSTANTS
 # =================================================================================================
 
 # General constants
-const.FRI_REMAINDER_CODEWORD_MAX_SIZE_HALF=512
-const.FRI_REMAINDER_CODEWORD_MAX_SIZE=1024
-const.FRI_REMAINDER_CODEWORD_MAX_SIZE_HALF_LOG=9
-const.FRI_REMAINDER_CODEWORD_MAX_SIZE_LOG=10
-const.FRI_REMAINDER_POLY_MAX_DEGREE_PLUS_1_HALF=64
-const.FRI_REMAINDER_POLY_MAX_DEGREE_PLUS_1=128
+const FRI_REMAINDER_CODEWORD_MAX_SIZE_HALF = 512
+const FRI_REMAINDER_CODEWORD_MAX_SIZE = 1024
+const FRI_REMAINDER_CODEWORD_MAX_SIZE_HALF_LOG = 9
+const FRI_REMAINDER_CODEWORD_MAX_SIZE_LOG = 10
+const FRI_REMAINDER_POLY_MAX_DEGREE_PLUS_1_HALF = 64
+const FRI_REMAINDER_POLY_MAX_DEGREE_PLUS_1 = 128
 
 # CONSTANTS GETTERS
 # =================================================================================================
 
-export.get_fri_remainder_codeword_max_size 
+pub proc get_fri_remainder_codeword_max_size
     push.FRI_REMAINDER_CODEWORD_MAX_SIZE
 end
 
-export.get_fri_remainder_poly_max_degree_plus_1_half
+pub proc get_fri_remainder_poly_max_degree_plus_1_half
     push.FRI_REMAINDER_POLY_MAX_DEGREE_PLUS_1_HALF
 end
 
-export.get_fri_remainder_poly_max_degree_plus_1
+pub proc get_fri_remainder_poly_max_degree_plus_1
     push.FRI_REMAINDER_POLY_MAX_DEGREE_PLUS_1
 end
 
-# HELPERS 
+# HELPERS
 # =================================================================================================
 
 #! Loads FRI remainder polynomial of degree strictly less than `(max_degree + 1) / 2`.
-proc.load_fri_remainder_poly_max_degree_plus_1_half
+proc load_fri_remainder_poly_max_degree_plus_1_half
     repeat.16
         adv_pipe hperm
     end
 end
 
 #! Loads FRI remainder polynomial of degree strictly less than `max_degree + 1`.
-proc.load_fri_remainder_poly_max_degree_plus_1
+proc load_fri_remainder_poly_max_degree_plus_1
     repeat.32
         adv_pipe hperm
     end
 end
 
 #! Evaluates FRI remainder polynomial of degree strictly less than `(max_degree + 1) / 2`.
-export.evaluate_fri_remainder_poly_max_degree_plus_1_half
+pub proc evaluate_fri_remainder_poly_max_degree_plus_1_half
     repeat.16
         mem_stream
         horner_eval_ext
@@ -53,7 +53,7 @@ export.evaluate_fri_remainder_poly_max_degree_plus_1_half
 end
 
 #! Evaluates FRI remainder polynomial of degree strictly less than `max_degree + 1`.
-export.evaluate_fri_remainder_poly_max_degree_plus_1
+pub proc evaluate_fri_remainder_poly_max_degree_plus_1
     repeat.32
         mem_stream
         horner_eval_ext
@@ -66,7 +66,7 @@ end
 #! Input: [...]
 #! Output: [num_fri_layers, ...]
 #! Cycles: 45
-export.generate_fri_parameters
+pub proc generate_fri_parameters
     # Load FRI verifier data
     padw exec.constants::get_lde_domain_info_word
     #=> [lde_size, log(lde_size), lde_g, 0, ...] (6 cycles)
@@ -104,9 +104,9 @@ end
 #! Input: [...]
 #! Output: [...]
 #! Cycles: 21 + 83 * num_fri_layers
-export.load_fri_layer_commitments
+pub proc load_fri_layer_commitments
     # We need to store the current FRI layer LDE domain size and its logarithm.
-    padw exec.constants::get_lde_domain_info_word 
+    padw exec.constants::get_lde_domain_info_word
     exec.constants::tmp1 mem_storew_be
     # => [Y, ...] where `Y` is as "garbage" word
 
@@ -189,7 +189,7 @@ end
 #!     than 64: 157
 #!  2- Remainder polynomial of degree less
 #!     than 128: 191
-export.load_and_verify_remainder
+pub proc load_and_verify_remainder
     # Load remainder commitment and save it at `TMP1`
     padw
     adv_loadw
@@ -235,7 +235,7 @@ export.load_and_verify_remainder
         movup.2
         assert_eq
         assert_eq
-        
+
     else
         # Remainder polynomial degree less than 128
         push.0.0.0.0
@@ -256,7 +256,7 @@ export.load_and_verify_remainder
         movup.2
         assert_eq
         assert_eq
-        
+
     end
     dropw dropw
     #=> [...]
@@ -272,7 +272,7 @@ end
 #! Output: [...]
 #!
 #! Cycles: 7
-export.compute_query_pointer
+pub proc compute_query_pointer
     exec.constants::fri_com_ptr
     exec.constants::get_number_queries
     mul.4

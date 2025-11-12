@@ -8,7 +8,7 @@
 #! Outputs: [d, c, b, a, ...]
 #!
 #! Cycles: 3
-export.reverse
+pub proc reverse(input: word) -> word
     reversew
 end
 
@@ -24,7 +24,7 @@ end
 #! - Memory layout after the call: `[w0_lo, w0_hi, w1_lo, w1_hi, w2_lo, w2_hi, w3_lo, w3_hi]`.
 #!
 #! Cycles: 8 * (split + store pair) ~= 176
-export.store_word_u32s_le
+pub proc store_word_u32s_le
     reversew
     # => [w0, w1, w2, w3, out_ptr, ...]
 
@@ -60,7 +60,7 @@ end
 #! - is_empty_word is a boolean indicating whether INPUT_WORD is all zeros.
 #!
 #! Cycles: 10
-export.eqz
+pub proc eqz(input: word) -> i1
     eq.0
     repeat.3
         swap eq.0 and
@@ -78,7 +78,7 @@ end
 #! - is_empty_word is a boolean indicating whether INPUT_WORD is all zeros.
 #!
 #! Cycles: 11
-export.testz
+pub proc testz(input: word) -> (i1, word)
     repeat.4
         dup.3 eq.0
     end
@@ -112,7 +112,7 @@ end
 #! Outputs: [is_lhs_greater]
 #!
 #! Cycles: 117
-export.gt
+pub proc gt(rhs: word, lhs: word) -> i1
     # => [r_3, r_2, r_1, r_0, l_3, l_2, l_1, l_0]
     exec.arrange_words_adjacent
     # => [l_3, r_3, l_2, r_2, l_1, r_1, l_0, r_0]
@@ -161,7 +161,7 @@ end
 #! Outputs: [is_lhs_greater_or_equal]
 #!
 #! Cycles: 118
-export.gte
+pub proc gte(rhs: word, lhs: word) -> i1
     exec.lt
     not
 end
@@ -177,7 +177,7 @@ end
 #! Outputs: [is_lhs_lesser]
 #!
 #! Cycles: 117
-export.lt
+pub proc lt(rhs: word, lhs: word) -> i1
     exec.arrange_words_adjacent
     # => [l_3, r_3, l_2, r_2, l_1, r_1, l_0, r_0]
 
@@ -225,7 +225,7 @@ end
 #! Outputs: [is_lhs_less_or_equal]
 #!
 #! Cycles: 118
-export.lte
+pub proc lte(rhs: word, lhs: word) -> i1
     exec.gt
     not
 end
@@ -240,7 +240,7 @@ end
 #! Outputs: [lhs_eq_rhs]
 #!
 #! Cycles: 13
-export.eq
+pub proc eq(rhs: word, lhs: word) -> i1
     # => [l0, l1, l2, l3, r0, r1, r2, r3]
 
     movup.4 eq swap
@@ -265,7 +265,7 @@ end
 #! Outputs: [lhs_eq_rhs, RHS, LHS]
 #!
 #! Cycles: 15
-export.test_eq
+pub proc test_eq(rhs: word, lhs: word) -> (i1, word, word)
     dup.7 dup.4 eq
     dup.7 dup.4 eq and
     dup.6 dup.3 eq and
@@ -281,7 +281,7 @@ end
 #! Outputs: [word2_3, word1_3, word2_2, word1_2, word2_1, word1_1, word2_0, word1_0]
 #!
 #! Cycles: 8
-proc.arrange_words_adjacent
+proc arrange_words_adjacent
     # => [1_3, 1_2, 1_1, 1_0, 2_3, 2_2, 2_1, 2_0]
 
     movup.3 movup.7

@@ -1,18 +1,18 @@
-use.std::crypto::hashes::rpo
+use std::crypto::hashes::rpo
 
-use.std::sys::vm::deep_queries
-use.std::sys::vm::constraints_eval
-use.std::sys::vm::ood_frames
-use.std::sys::vm::public_inputs
+use std::sys::vm::deep_queries
+use std::sys::vm::constraints_eval
+use std::sys::vm::ood_frames
+use std::sys::vm::public_inputs
 
-use.std::crypto::stark::verifier
+use std::crypto::stark::verifier
 
 # Indicates the existence of auxiliary trace segment.
-const.IS_AUX_TRACE=1
+const IS_AUX_TRACE = 1
 
 # Main segment width is 80 (0x50) and there are 1 (0x01) auxiliary segments
 # of width 8 (0x08) using 16 (0x10) random extension field elements
-const.TRACE_INFO=0x50010810
+const TRACE_INFO = 0x50010810
 
 #! Verifies a STARK proof attesting to the correct execution of a program in the Miden VM.
 #!
@@ -39,7 +39,7 @@ const.TRACE_INFO=0x50010810
 #!
 #!  1- If log(trace_length) is even, then num_fri_layers = (log(trace_length) - 6) / 2, where 6 = log2(64),
 #!  2- If log(trace_length) is odd, then num_fri_layers = (log(trace_length) - 7) / 2, where 7 = log2(128).
-export.verify_proof
+pub proc verify_proof
     # --- Get constants -------------------------------------------------------
 
     # Flag indicating the existence of auxiliary trace

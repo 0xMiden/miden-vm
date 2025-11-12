@@ -1,17 +1,17 @@
-use.std::crypto::stark::constants
+use std::crypto::stark::constants
 
 #! Takes a query index and computes x := offset * domain_gen^index. It also computes the denominators
 #! (x - z) and (x - gz).
 #!
 #! Input: [Y, Y, index, ...]
-#! Output: [Z, Y, x, index, ...]  
+#! Output: [Z, Y, x, index, ...]
 #!
 #! where:
 #! - Z := [-gz1, x -gz0, -z1, x - z0]
 #! - Y is a "garbage" word
 #!
 #! Cycles: 58
-proc.compute_denominators
+proc compute_denominators
     # Compute x = offset * domain_gen^index
     exec.constants::get_lde_domain_info_word
     #=> [lde_size, depth, domain_gen, 0, Y, index, ...]
@@ -51,7 +51,7 @@ end
 #! 2. W is [q_gz_1, q_gz_0, q_z_1, q_z_0]
 #!
 #! Cycles: 62
-proc.divide_and_add
+proc divide_and_add
     swapw
     #=> [X, Z, Y, W, query_ptr, ...]
     dupw.3
@@ -99,7 +99,7 @@ end
 #!    storing the computed FRI queries,
 #! 4. `W` is the word `[q_z_0, q_z_1, q_gz_0, q_gz_1]` where `q_z = (q_z_0, q_z_1)` and
 #!    `q_gz = (q_gz_0, q_gz_1)` represent the constant terms across all FRI queries computations.
-export.prepare_stack_deep_queries_computation
+pub proc prepare_stack_deep_queries_computation
     exec.constants::get_fri_queries_address
     # => [query_ptr, ...]
 
@@ -125,7 +125,7 @@ export.prepare_stack_deep_queries_computation
     exec.constants::z_ptr mem_loadw_be
     # => [zN_1, zN_0, z1, z0, query_ptr, query_end_ptr, W, query_ptr, ...]
     drop drop
-    neg swap neg  
+    neg swap neg
     # => [-z0, -z1, query_ptr, query_end_ptr, W, query_ptr, ...]
     dup.1 exec.constants::get_trace_domain_generator mul
     # => [-gz1, -z0, -z1, query_ptr, query_end_ptr, W, query_ptr, ...]
@@ -147,7 +147,7 @@ end
 #!
 #! where:
 #! 1. `Y` is a garbage word,
-#! 2. `X` is `[q_x_at_alpha_0, q_x_at_alpha_1, q_x_at_alpha_0, q_x_at_alpha_1]` where 
+#! 2. `X` is `[q_x_at_alpha_0, q_x_at_alpha_1, q_x_at_alpha_0, q_x_at_alpha_1]` where
 #!    `q_x = (q_x_0, q_x_1)` is the variable part of the query,
 #! 3. `index` is the query index in the FRI domain,
 #! 4. `query_ptr` is a pointer to the memory region from where the query indices will be fetched
@@ -157,7 +157,7 @@ end
 #! 6. `W` is the word `[q_z_0, q_z_1, q_gz_0, q_gz_1]` where `q_z = (q_z_0, q_z_1)` and
 #!    `q_gz = (q_gz_0, q_gz_1)` represent the constant terms across all FRI queries computations.
 #! 7. `?` is a binary flag indicating if there are further queries to process.
-export.compute_deep_query
+pub proc compute_deep_query
         # 1) Compute x := offset * domain_gen^index and denominators (x - z) and (x - gz)
         #
         # Cycles: 58
@@ -199,7 +199,7 @@ end
 #!
 #! Input: [...]
 #! Output: [...]
-proc.compute_deep_composition_polynomial_queries
+proc compute_deep_composition_polynomial_queries
     # Prepare the stack for the core procedure computing the queries
     exec.prepare_stack_deep_queries_computation
     # => [Y, query_ptr, query_end_ptr, W, query_ptr]

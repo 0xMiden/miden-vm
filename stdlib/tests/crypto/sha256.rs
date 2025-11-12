@@ -22,7 +22,7 @@ fn sha256_hash_memory() {
 
     let source = format!(
         "
-    use.std::crypto::hashes::sha256
+    use std::crypto::hashes::sha256
 
     begin
         # push inputs on the stack
@@ -72,7 +72,7 @@ fn sha256_hash_memory() {
 #[test]
 fn sha256_2_to_1_hash() {
     let source = "
-    use.std::crypto::hashes::sha256
+    use std::crypto::hashes::sha256
 
     begin
         exec.sha256::hash_2to1
@@ -107,7 +107,7 @@ fn sha256_2_to_1_hash() {
 #[test]
 fn sha256_1_to_1_hash() {
     let source = "
-    use.std::crypto::hashes::sha256
+    use std::crypto::hashes::sha256
 
     begin
         exec.sha256::hash_1to1

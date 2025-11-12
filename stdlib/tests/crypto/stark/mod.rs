@@ -48,7 +48,7 @@ fn stark_verifier_e2f4(#[case] kernel: Option<&str>) {
 
     // Verify inside Miden VM
     let source = "
-        use.std::sys::vm
+        use std::sys::vm
         begin
             exec.vm::verify_proof
         end
@@ -177,9 +177,9 @@ fn variable_length_public_inputs(#[case] num_kernel_proc_digests: usize) {
 
     let source = format!(
         "
-        use.std::crypto::stark::random_coin
-        use.std::crypto::stark::constants
-        use.std::sys::vm::public_inputs
+        use std::crypto::stark::random_coin
+        use std::crypto::stark::constants
+        use std::sys::vm::public_inputs
 
         begin
             # 1) Initialize the FS transcript
@@ -318,29 +318,29 @@ fn reduce_digest(digest: &[u64], alpha: QuadFelt, beta: QuadFelt) -> QuadFelt {
 // ===============================================================================================
 
 const KERNEL_ODD_NUM_PROC: &str = r#"
-        export.foo
+        pub proc foo
             add
         end
-        export.bar
+        pub proc bar
             div
         end
-        export.baz
+        pub proc baz
             mul
         end"#;
 
 const KERNEL_EVEN_NUM_PROC: &str = r#"
-        export.foo
+        pub proc foo
             add
         end
-        export.bar
+        pub proc bar
             div
         end"#;
 
 const TEST_RANDOM_INDICES_GENERATION: &str = r#"
-        const.QUERY_ADDRESS=1024
+        const QUERY_ADDRESS = 1024
 
-        use.std::crypto::stark::random_coin
-        use.std::crypto::stark::constants
+        use std::crypto::stark::random_coin
+        use std::crypto::stark::constants
 
         begin
             exec.constants::set_lde_domain_size

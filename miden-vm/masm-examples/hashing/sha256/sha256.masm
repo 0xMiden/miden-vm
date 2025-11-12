@@ -1,11 +1,11 @@
-use.std::crypto::hashes::sha256
+use std::crypto::hashes::sha256
 
 begin
-    # hash_2to1 pops top 16 elements (64 bytes) from the stack, compute their hash and puts the 
+    # hash_2to1 pops top 16 elements (64 bytes) from the stack, compute their hash and puts the
     # resulting 8 elements (32 bytes) back to the stack.
     exec.sha256::hash_2to1
 
-    # Check the correctness of the hashing result by comparing it with precomputed correct values. 
+    # Check the correctness of the hashing result by comparing it with precomputed correct values.
     # This hash is a result of applying a sha256 hashing function to the binary value consisting of
     # only ones.
     push.0x85E1D1F7.0x8643E4A2.0x2DAD7274.0x1F764AAD.0xBA3EEB20.0xF1D30600.0x294E9E0D.0x8667E718

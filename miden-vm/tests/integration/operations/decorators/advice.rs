@@ -230,8 +230,6 @@ fn advice_insert_hdword() {
 #[test]
 fn advice_insert_hqword() {
     let source: &str = "
-    use.std::sys
-
     begin
         # stack: [11, 12, 13, 14, 21, 22, 23, 24, 31, 32, 33, 34, 41, 42, 43, 44]
 

@@ -1,7 +1,7 @@
-use.std::crypto::stark::constants
+use std::crypto::stark::constants
 
 #! Processes the public inputs.
-#! 
+#!
 #! This involves:
 #!
 #! 1. Loading from the advice stack the fixed-length public inputs and storing them in memory
@@ -9,7 +9,7 @@ use.std::crypto::stark::constants
 #! 2. Loading from the advice stack the variable-length public inputs, storing them temporarily
 #! in memory, and then reducing them to an element in the challenge field using the auxiliary
 #! randomness. This reduced value is then used to impose a boundary condition on the relevant
-#! auxiliary column. 
+#! auxiliary column.
 #!
 #! Note that the fixed length public inputs are stored as extension field elements while
 #! the variable length ones are stored as base field elements.
@@ -49,7 +49,7 @@ use.std::crypto::stark::constants
 #!
 #! Input: [C, ...]
 #! Output: [...]
-proc.process_public_inputs
+proc process_public_inputs
     exec.constants::get_procedure_digest_process_public_inputs_ptr dynexec
 end
 
@@ -71,7 +71,7 @@ end
 #!
 #! Input: [num_var_len_pi_groups, num_fixed_len_pi, ...]
 #! Output: [...]
-proc.compute_and_store_public_inputs_address
+proc compute_and_store_public_inputs_address
     # 1) Get a pointer to where OOD evaluations are stored
     exec.constants::ood_evaluations_ptr
     # => [ood_evals_ptr, num_var_len_pi_groups, num_fixed_len_pi, ...]
@@ -89,7 +89,7 @@ proc.compute_and_store_public_inputs_address
     # 3) Compute the pointer to the public inputs
     #
     # We need to account for the fact that fixed-length public inputs are stored as extension field
-    # elements. 
+    # elements.
     dup
     movup.2
     mul.2
@@ -106,8 +106,8 @@ end
 #!
 #! Input: [Y, Y, C, ptr, ...]
 #! Output: [A1, A0, C, ptr + 16, ..]
-proc.load_base_store_extension_double_word
-    # 1) Load the first 4 base elements from the advice stack and save them temporarily 
+proc load_base_store_extension_double_word
+    # 1) Load the first 4 base elements from the advice stack and save them temporarily
     adv_loadw
     exec.constants::tmp1 mem_storew_be
 
@@ -137,7 +137,7 @@ proc.load_base_store_extension_double_word
     dup.12 add.4
     mem_storew_be
 
-    
+
     # 6) Represent the second 4 base field elements as elements in the quadratic extension field
     exec.constants::zeroize_stack_word
     # => [0, 0, 0, 0, a7, a6, a5, a4, C, ptr, ...]

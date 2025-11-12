@@ -122,6 +122,13 @@ impl<T> Span<T> {
         Self { span: Default::default(), spanned }
     }
 
+    /// Consume this [Span] and get a new one with `span` as the underlying source span
+    #[inline]
+    pub fn with_span(mut self, span: SourceSpan) -> Self {
+        self.span = span;
+        self
+    }
+
     /// Gets the associated [SourceSpan] for this spanned item.
     #[inline(always)]
     pub const fn span(&self) -> SourceSpan {
@@ -198,8 +205,20 @@ impl<T> Span<T> {
     }
 }
 
-impl<T: Borrow<str>, S: Borrow<T>> Borrow<T> for Span<S> {
+impl<T> Borrow<T> for Span<T> {
     fn borrow(&self) -> &T {
+        &self.spanned
+    }
+}
+
+impl<T: Borrow<str>> Borrow<str> for Span<T> {
+    fn borrow(&self) -> &str {
+        self.spanned.borrow()
+    }
+}
+
+impl<U, T: Borrow<[U]>> Borrow<[U]> for Span<T> {
+    fn borrow(&self) -> &[U] {
         self.spanned.borrow()
     }
 }

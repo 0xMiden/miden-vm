@@ -1,7 +1,13 @@
 use alloc::{string::String, sync::Arc};
 use std::string::ToString;
 
-use miden_core::{Kernel, Operation, Program, mast::MastForest};
+use miden_core::{
+    Kernel, Operation, Program,
+    mast::{
+        BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, ExternalNodeBuilder,
+        JoinNodeBuilder, LoopNodeBuilder, MastForest, MastForestContributor, SplitNodeBuilder,
+    },
+};
 use miden_utils_testing::get_column_name;
 use pretty_assertions::assert_eq;
 use rstest::{fixture, rstest};
@@ -354,8 +360,8 @@ fn test_trace_generation_at_fragment_boundaries(
 /// Creates a library with a single procedure containing just a SWAP operation.
 fn create_simple_library() -> HostLibrary {
     let mut mast_forest = MastForest::new();
-    let swap_block = mast_forest
-        .add_block(vec![Operation::Swap, Operation::Swap], Vec::new())
+    let swap_block = BasicBlockNodeBuilder::new(vec![Operation::Swap, Operation::Swap], Vec::new())
+        .add_to_forest(&mut mast_forest)
         .unwrap();
     mast_forest.make_root(swap_block);
     HostLibrary::from(Arc::new(mast_forest))
@@ -368,13 +374,23 @@ fn create_simple_library() -> HostLibrary {
 fn join_program() -> Program {
     let mut program = MastForest::new();
 
-    let basic_block_mul = program.add_block(vec![Operation::Mul], Vec::new()).unwrap();
-    let basic_block_add = program.add_block(vec![Operation::Add], Vec::new()).unwrap();
-    let basic_block_swap = program.add_block(vec![Operation::Swap], Vec::new()).unwrap();
+    let basic_block_mul = BasicBlockNodeBuilder::new(vec![Operation::Mul], Vec::new())
+        .add_to_forest(&mut program)
+        .unwrap();
+    let basic_block_add = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        .add_to_forest(&mut program)
+        .unwrap();
+    let basic_block_swap = BasicBlockNodeBuilder::new(vec![Operation::Swap], Vec::new())
+        .add_to_forest(&mut program)
+        .unwrap();
 
-    let target_join_node = program.add_join(basic_block_add, basic_block_swap).unwrap();
+    let target_join_node = JoinNodeBuilder::new([basic_block_add, basic_block_swap])
+        .add_to_forest(&mut program)
+        .unwrap();
 
-    let root_join_node = program.add_join(basic_block_mul, target_join_node).unwrap();
+    let root_join_node = JoinNodeBuilder::new([basic_block_mul, target_join_node])
+        .add_to_forest(&mut program)
+        .unwrap();
     program.make_root(root_join_node);
 
     Program::new(Arc::new(program), root_join_node)
@@ -389,16 +405,26 @@ fn split_program() -> Program {
 
     let root_join_node = {
         let basic_block_swap_swap =
-            program.add_block(vec![Operation::Swap, Operation::Swap], Vec::new()).unwrap();
+            BasicBlockNodeBuilder::new(vec![Operation::Swap, Operation::Swap], Vec::new())
+                .add_to_forest(&mut program)
+                .unwrap();
 
         let target_split_node = {
-            let basic_block_add = program.add_block(vec![Operation::Add], Vec::new()).unwrap();
-            let basic_block_swap = program.add_block(vec![Operation::Swap], Vec::new()).unwrap();
+            let basic_block_add = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+                .add_to_forest(&mut program)
+                .unwrap();
+            let basic_block_swap = BasicBlockNodeBuilder::new(vec![Operation::Swap], Vec::new())
+                .add_to_forest(&mut program)
+                .unwrap();
 
-            program.add_split(basic_block_add, basic_block_swap).unwrap()
+            SplitNodeBuilder::new([basic_block_add, basic_block_swap])
+                .add_to_forest(&mut program)
+                .unwrap()
         };
 
-        program.add_join(basic_block_swap_swap, target_split_node).unwrap()
+        JoinNodeBuilder::new([basic_block_swap_swap, target_split_node])
+            .add_to_forest(&mut program)
+            .unwrap()
     };
 
     program.make_root(root_join_node);
@@ -414,16 +440,22 @@ fn loop_program() -> Program {
 
     let root_join_node = {
         let basic_block_swap_swap =
-            program.add_block(vec![Operation::Swap, Operation::Swap], Vec::new()).unwrap();
+            BasicBlockNodeBuilder::new(vec![Operation::Swap, Operation::Swap], Vec::new())
+                .add_to_forest(&mut program)
+                .unwrap();
 
         let target_loop_node = {
             let basic_block_pad_drop =
-                program.add_block(vec![Operation::Pad, Operation::Drop], Vec::new()).unwrap();
+                BasicBlockNodeBuilder::new(vec![Operation::Pad, Operation::Drop], Vec::new())
+                    .add_to_forest(&mut program)
+                    .unwrap();
 
-            program.add_loop(basic_block_pad_drop).unwrap()
+            LoopNodeBuilder::new(basic_block_pad_drop).add_to_forest(&mut program).unwrap()
         };
 
-        program.add_join(basic_block_swap_swap, target_loop_node).unwrap()
+        JoinNodeBuilder::new([basic_block_swap_swap, target_loop_node])
+            .add_to_forest(&mut program)
+            .unwrap()
     };
 
     program.make_root(root_join_node);
@@ -439,11 +471,16 @@ fn call_program() -> Program {
 
     let root_join_node = {
         let basic_block_swap_swap =
-            program.add_block(vec![Operation::Swap, Operation::Swap], Vec::new()).unwrap();
+            BasicBlockNodeBuilder::new(vec![Operation::Swap, Operation::Swap], Vec::new())
+                .add_to_forest(&mut program)
+                .unwrap();
 
-        let target_call_node = program.add_call(basic_block_swap_swap).unwrap();
+        let target_call_node =
+            CallNodeBuilder::new(basic_block_swap_swap).add_to_forest(&mut program).unwrap();
 
-        program.add_join(basic_block_swap_swap, target_call_node).unwrap()
+        JoinNodeBuilder::new([basic_block_swap_swap, target_call_node])
+            .add_to_forest(&mut program)
+            .unwrap()
     };
 
     program.make_root(root_join_node);
@@ -460,11 +497,17 @@ fn syscall_program() -> Program {
     let (root_join_node, kernel_proc_digest) = {
         // In this test, we also include this procedure in the kernel so that it can be syscall'ed.
         let basic_block_swap_swap =
-            program.add_block(vec![Operation::Swap, Operation::Swap], Vec::new()).unwrap();
+            BasicBlockNodeBuilder::new(vec![Operation::Swap, Operation::Swap], Vec::new())
+                .add_to_forest(&mut program)
+                .unwrap();
 
-        let target_call_node = program.add_syscall(basic_block_swap_swap).unwrap();
+        let target_call_node = CallNodeBuilder::new_syscall(basic_block_swap_swap)
+            .add_to_forest(&mut program)
+            .unwrap();
 
-        let root_join_node = program.add_join(basic_block_swap_swap, target_call_node).unwrap();
+        let root_join_node = JoinNodeBuilder::new([basic_block_swap_swap, target_call_node])
+            .add_to_forest(&mut program)
+            .unwrap();
 
         (root_join_node, program[basic_block_swap_swap].digest())
     };
@@ -486,12 +529,19 @@ fn basic_block_program_small() -> Program {
     let mut program = MastForest::new();
 
     let root_join_node = {
-        let target_basic_block = program
-            .add_block(vec![Operation::Swap, Operation::Push(42_u32.into())], Vec::new())
+        let target_basic_block = BasicBlockNodeBuilder::new(
+            vec![Operation::Swap, Operation::Push(42_u32.into())],
+            Vec::new(),
+        )
+        .add_to_forest(&mut program)
+        .unwrap();
+        let basic_block_drop = BasicBlockNodeBuilder::new(vec![Operation::Drop], Vec::new())
+            .add_to_forest(&mut program)
             .unwrap();
-        let basic_block_drop = program.add_block(vec![Operation::Drop], Vec::new()).unwrap();
 
-        program.add_join(target_basic_block, basic_block_drop).unwrap()
+        JoinNodeBuilder::new([target_basic_block, basic_block_drop])
+            .add_to_forest(&mut program)
+            .unwrap()
     };
 
     program.make_root(root_join_node);
@@ -510,10 +560,16 @@ fn basic_block_program_multiple_batches() -> Program {
 
     let root_join_node = {
         let target_basic_block =
-            program.add_block(vec![Operation::Swap; NUM_SWAPS], Vec::new()).unwrap();
-        let basic_block_drop = program.add_block(vec![Operation::Drop], Vec::new()).unwrap();
+            BasicBlockNodeBuilder::new(vec![Operation::Swap; NUM_SWAPS], Vec::new())
+                .add_to_forest(&mut program)
+                .unwrap();
+        let basic_block_drop = BasicBlockNodeBuilder::new(vec![Operation::Drop], Vec::new())
+            .add_to_forest(&mut program)
+            .unwrap();
 
-        program.add_join(target_basic_block, basic_block_drop).unwrap()
+        JoinNodeBuilder::new([target_basic_block, basic_block_drop])
+            .add_to_forest(&mut program)
+            .unwrap()
     };
 
     program.make_root(root_join_node);
@@ -530,30 +586,34 @@ fn dyn_program() -> Program {
     let mut program = MastForest::new();
 
     let root_join_node = {
-        let basic_block = program
-            .add_block(
-                vec![
-                    Operation::Push(HASH_ADDR),
-                    Operation::MStoreW,
-                    Operation::Drop,
-                    Operation::Drop,
-                    Operation::Drop,
-                    Operation::Drop,
-                    Operation::Push(HASH_ADDR),
-                ],
-                Vec::new(),
-            )
-            .unwrap();
+        let basic_block = BasicBlockNodeBuilder::new(
+            vec![
+                Operation::Push(HASH_ADDR),
+                Operation::MStoreW,
+                Operation::Drop,
+                Operation::Drop,
+                Operation::Drop,
+                Operation::Drop,
+                Operation::Push(HASH_ADDR),
+            ],
+            Vec::new(),
+        )
+        .add_to_forest(&mut program)
+        .unwrap();
 
-        let dyn_node = program.add_dyn().unwrap();
+        let dyn_node = DynNodeBuilder::new_dyn().add_to_forest(&mut program).unwrap();
 
-        program.add_join(basic_block, dyn_node).unwrap()
+        JoinNodeBuilder::new([basic_block, dyn_node])
+            .add_to_forest(&mut program)
+            .unwrap()
     };
     program.make_root(root_join_node);
 
     // Add the procedure that DYN will call. Its digest needs to be put on the stack at the start of
     // the program (stored in `DYN_TARGET_PROC_HASH`).
-    let target = program.add_block(vec![Operation::Swap], Vec::new()).unwrap();
+    let target = BasicBlockNodeBuilder::new(vec![Operation::Swap], Vec::new())
+        .add_to_forest(&mut program)
+        .unwrap();
     program.make_root(target);
 
     Program::new(Arc::new(program), root_join_node)
@@ -569,30 +629,34 @@ fn dyncall_program() -> Program {
     let mut program = MastForest::new();
 
     let root_join_node = {
-        let basic_block = program
-            .add_block(
-                vec![
-                    Operation::Push(HASH_ADDR),
-                    Operation::MStoreW,
-                    Operation::Drop,
-                    Operation::Drop,
-                    Operation::Drop,
-                    Operation::Drop,
-                    Operation::Push(HASH_ADDR),
-                ],
-                Vec::new(),
-            )
-            .unwrap();
+        let basic_block = BasicBlockNodeBuilder::new(
+            vec![
+                Operation::Push(HASH_ADDR),
+                Operation::MStoreW,
+                Operation::Drop,
+                Operation::Drop,
+                Operation::Drop,
+                Operation::Drop,
+                Operation::Push(HASH_ADDR),
+            ],
+            Vec::new(),
+        )
+        .add_to_forest(&mut program)
+        .unwrap();
 
-        let dyncall_node = program.add_dyncall().unwrap();
+        let dyncall_node = DynNodeBuilder::new_dyncall().add_to_forest(&mut program).unwrap();
 
-        program.add_join(basic_block, dyncall_node).unwrap()
+        JoinNodeBuilder::new([basic_block, dyncall_node])
+            .add_to_forest(&mut program)
+            .unwrap()
     };
     program.make_root(root_join_node);
 
     // Add the procedure that DYN will call. Its digest needs to be put on the stack at the start of
     // the program (stored in `DYN_TARGET_PROC_HASH`).
-    let target = program.add_block(vec![Operation::Swap], Vec::new()).unwrap();
+    let target = BasicBlockNodeBuilder::new(vec![Operation::Swap], Vec::new())
+        .add_to_forest(&mut program)
+        .unwrap();
     program.make_root(target);
 
     Program::new(Arc::new(program), root_join_node)
@@ -609,11 +673,17 @@ fn external_program() -> Program {
 
     let root_join_node = {
         let basic_block_pad_drop =
-            program.add_block(vec![Operation::Pad, Operation::Drop], Vec::new()).unwrap();
+            BasicBlockNodeBuilder::new(vec![Operation::Pad, Operation::Drop], Vec::new())
+                .add_to_forest(&mut program)
+                .unwrap();
 
-        let external_node = program.add_external(EXTERNAL_LIB_PROC_DIGEST).unwrap();
+        let external_node = ExternalNodeBuilder::new(EXTERNAL_LIB_PROC_DIGEST)
+            .add_to_forest(&mut program)
+            .unwrap();
 
-        program.add_join(basic_block_pad_drop, external_node).unwrap()
+        JoinNodeBuilder::new([basic_block_pad_drop, external_node])
+            .add_to_forest(&mut program)
+            .unwrap()
     };
 
     program.make_root(root_join_node);

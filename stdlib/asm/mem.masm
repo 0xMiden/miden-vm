@@ -1,4 +1,4 @@
-use.std::crypto::hashes::rpo
+use std::crypto::hashes::rpo
 
 # ===== MEMORY FUNCTIONS ==========================================================================
 
@@ -15,7 +15,7 @@ use.std::crypto::hashes::rpo
 #! - write_ptr is the memory pointer where the words will be copied.
 #!
 #! Total cycles: 15 + 16 * num_words
-export.memcopy_words
+pub proc memcopy_words
   # The loop variable is changed with an add instead of sub because the former
   # uses one fewer cycle. So here the counter is negated. (1 cycles)
   # stack: [-n, read_ptr, write_ptr, ...]
@@ -71,7 +71,7 @@ end
 #! - write_ptr is the memory pointer where the felts will be copied.
 #!
 #! Total cycles: 7 + 14 * num_felts
-export.memcopy_felts
+pub proc memcopy_felts
     # The loop variable is changed with an `add` instead of `sub` because the former uses one fewer 
     # cycle. So here the counter is negated. (1 cycle)
     neg
@@ -90,7 +90,7 @@ export.memcopy_felts
         dup.3 mem_store
         # => [-n, read_ptr, write_ptr]
 
-        # update the counters (6 cycles)
+        # update the pointers and the counter (6 cycles)
         add.1 movup.2 add.1 movup.2 add.1 movup.2
         # => [-n+1, read_ptr+1, write_ptr+1]
 
@@ -118,7 +118,7 @@ end
 #! Notice that the `end_ptr - write_ptr` value must be positive and a multiple of 8.
 #!
 #! Total cycles: 9 + 6 * num_word_pairs
-export.pipe_double_words_to_memory.0
+pub proc pipe_double_words_to_memory
   dup.13 dup.13 neq # (4 cycles)
 
   # loop until write_ptr reaches end_ptr (6 cycles per iteration + 1)
@@ -150,7 +150,7 @@ end
 #! Total cycles:
 #!  - Even `num_words`: 43 + 9 * num_words / 2
 #!  - Odd `num_words`: 60 + 9 * round_down(num_words / 2)
-export.pipe_words_to_memory.0
+pub proc pipe_words_to_memory
   # check if there is an odd number of words (6 cycles)
   dup is_odd
   # => [is_odd, num_words, write_ptr, ...]
@@ -231,7 +231,7 @@ end
 #! Total cycles:
 #!  - Even `num_words`: 62 + 9 * num_words / 2
 #!  - Odd `num_words`: 79 + 9 * round_down(num_words / 2)
-export.pipe_preimage_to_memory.0
+pub proc pipe_preimage_to_memory
   # Copies the advice stack data to memory
   exec.pipe_words_to_memory
   # => [C, B, A, write_ptr', COMMITMENT, ...]
@@ -263,7 +263,7 @@ end
 #!   with.
 #!
 #! Total cycles: 56 + 3 * num_words / 2
-export.pipe_double_words_preimage_to_memory
+pub proc pipe_double_words_preimage_to_memory
   # Assert precondition (8 cycles).
   dup is_odd assertz.err="pipe_double_words_preimage_to_memory: num_words must be even"
   # => [num_words, write_ptr, COMMITMENT, ...]

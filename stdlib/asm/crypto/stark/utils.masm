@@ -1,12 +1,12 @@
-use.std::crypto::stark::constants
-use.std::crypto::hashes::rpo
+use std::crypto::stark::constants
+use std::crypto::hashes::rpo
 
 #! Compute the LDE domain generator from the log2 of its size.
 #!
 #! Input: [log2(domain_size), ..]
 #! Output: [domain_gen, ..]
 #! Cycles: 63
-export.compute_lde_generator
+pub proc compute_lde_generator
     push.32
     swap
     sub
@@ -23,7 +23,7 @@ end
 #! Output: [log(trace_length), num_queries, grinding, ...]
 #!
 #! Cycles: 45
-export.validate_inputs
+pub proc validate_inputs
     # 1) Assert that all inputs are u32 so that we can use u32 operations in what follows
     push.0
     dupw
@@ -66,7 +66,7 @@ end
 #!
 #! Input: [max_cycle_len_log, ...]
 #! Output: [...]
-export.set_up_auxiliary_inputs_ace
+pub proc set_up_auxiliary_inputs_ace
     padw exec.constants::composition_coef_ptr mem_loadw_be
 
     # z and z^N
@@ -129,7 +129,7 @@ end
 #!
 #! Input: [...]
 #! Output: [...]
-proc.execute_constraint_evaluation_check
+proc execute_constraint_evaluation_check
     exec.constants::get_procedure_digest_execute_constraint_evaluation_check_ptr dynexec
 end
 
@@ -137,7 +137,7 @@ end
 #!
 #! Input: [D3, D2, D1, D0, ...]
 #! Output: [...]
-export.store_dynamically_executed_procedures
+pub proc store_dynamically_executed_procedures
     exec.constants::get_procedure_digest_process_public_inputs_ptr mem_storew_be dropw
     exec.constants::get_procedure_digest_process_row_ood_evaluations_ptr mem_storew_be dropw
     exec.constants::get_procedure_digest_execute_constraint_evaluation_check_ptr mem_storew_be dropw
