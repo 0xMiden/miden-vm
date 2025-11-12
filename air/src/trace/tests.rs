@@ -6,6 +6,8 @@
 //!
 //! The documentation can reference this test when explaining the VM's trace structure.
 
+use std::vec::Vec;
+
 use crate::trace::{
     chiplets::{
         ace, bitwise, hasher, kernel_rom, memory,
@@ -172,14 +174,14 @@ Operation Batch Flags:
   Number of flags: {NUM_OP_BATCH_FLAGS}
   Range: {OP_BATCH_FLAGS_RANGE:?}
 
-Column Indices:
-  - In span column: {IN_SPAN_COL_IDX}
-  - Group count column: {GROUP_COUNT_COL_IDX}
-  - Operation index column: {OP_INDEX_COL_IDX}
-  - Is loop body flag: {IS_LOOP_BODY_FLAG_COL_IDX}
-  - Is loop flag: {IS_LOOP_FLAG_COL_IDX}
-  - Is call flag: {IS_CALL_FLAG_COL_IDX}
-  - Is syscall flag: {IS_SYSCALL_FLAG_COL_IDX}
+Column Indices (ordered by index):
+  - {IS_LOOP_BODY_FLAG_COL_IDX}: Is loop body flag
+  - {IS_LOOP_FLAG_COL_IDX}: Is loop flag
+  - {IS_CALL_FLAG_COL_IDX}: Is call flag
+  - {IS_SYSCALL_FLAG_COL_IDX}: Is syscall flag
+  - {IN_SPAN_COL_IDX}: In span column
+  - {GROUP_COUNT_COL_IDX}: Group count column
+  - {OP_INDEX_COL_IDX}: Operation index column
 "#
     );
 
@@ -233,8 +235,6 @@ Capacity Portion (RPO):
   Capacity length: {}
   Capacity column range: {HASHER_CAPACITY_COL_RANGE:?}
   Capacity domain index: {}
-  Note: The capacity portion contains the first {} elements of the 
-        hasher state, located at columns {HASHER_CAPACITY_COL_RANGE:?} in the main trace.
 
 Rate Portion (RPO):
   Rate length: {}
@@ -251,7 +251,6 @@ Other Constants:
         hasher::STATE_WIDTH,
         hasher::CAPACITY_LEN,
         hasher::CAPACITY_DOMAIN_IDX,
-        hasher::CAPACITY_LEN,
         hasher::RATE_LEN,
         hasher::DIGEST_LEN,
         hasher::NUM_ROUNDS,
@@ -313,25 +312,21 @@ fn document_memory_chiplet_layout() {
 Chiplet Selectors:
   Number of memory selectors: {NUM_MEMORY_SELECTORS}
   Trace offset: {MEMORY_TRACE_OFFSET}
-
-Column Indices:
-  - Is read column: {MEMORY_IS_READ_COL_IDX}
-  - Is word access column: {MEMORY_IS_WORD_ACCESS_COL_IDX}
-  - Context column: {MEMORY_CTX_COL_IDX}
-  - Word column: {MEMORY_WORD_COL_IDX}
-  - Index 0 column: {MEMORY_IDX0_COL_IDX}
-  - Index 1 column: {MEMORY_IDX1_COL_IDX}
-  - Clock column: {MEMORY_CLK_COL_IDX}
-  - Delta 0 column: {MEMORY_D0_COL_IDX}
-  - Delta 1 column: {MEMORY_D1_COL_IDX}
-  - Delta inverse column: {MEMORY_D_INV_COL_IDX}
-  - Same context and word flag: {MEMORY_FLAG_SAME_CONTEXT_AND_WORD}
-
-Value Columns:
-  Value column range: {MEMORY_V_COL_RANGE:?}
-
-Other Constants:
   Trace width: {}
+
+Column Indices (ordered by index):
+  - {MEMORY_IS_READ_COL_IDX}: Is read column
+  - {MEMORY_IS_WORD_ACCESS_COL_IDX}: Is word access column
+  - {MEMORY_CTX_COL_IDX}: Context column
+  - {MEMORY_WORD_COL_IDX}: Word column
+  - {MEMORY_IDX0_COL_IDX}: Index 0 column
+  - {MEMORY_IDX1_COL_IDX}: Index 1 column
+  - {MEMORY_CLK_COL_IDX}: Clock column
+  - {MEMORY_V_COL_RANGE:?}: Value columns
+  - {MEMORY_D0_COL_IDX}: Delta 0 column
+  - {MEMORY_D1_COL_IDX}: Delta 1 column
+  - {MEMORY_D_INV_COL_IDX}: Delta inverse column
+  - {MEMORY_FLAG_SAME_CONTEXT_AND_WORD}: Same context and word flag
 "#,
         memory::TRACE_WIDTH
     );
@@ -342,6 +337,35 @@ Other Constants:
 /// Documents ACE chiplet column ranges and offsets.
 #[test]
 fn document_ace_chiplet_layout() {
+    // Collect all column indices with their labels, sorted by index
+    let mut columns = vec![
+        (ace::SELECTOR_START_IDX, "Selector start"),
+        (ace::SELECTOR_BLOCK_IDX, "Selector block"),
+        (ace::CTX_IDX, "Context"),
+        (ace::PTR_IDX, "Pointer"),
+        (ace::CLK_IDX, "Clock"),
+        (ace::EVAL_OP_IDX, "Eval operation"),
+        (ace::ID_0_IDX, "ID 0"),
+        (ace::V_0_0_IDX, "Value 0_0"),
+        (ace::V_0_1_IDX, "Value 0_1"),
+        (ace::ID_1_IDX, "ID 1"),
+        (ace::V_1_0_IDX, "Value 1_0"),
+        (ace::V_1_1_IDX, "Value 1_1"),
+        (ace::ID_2_IDX, "ID 2"),
+        (ace::READ_NUM_EVAL_IDX, "Read num eval"),
+        (ace::V_2_0_IDX, "Value 2_0"),
+        (ace::V_2_1_IDX, "Value 2_1"),
+        (ace::M_1_IDX, "Multiplicity 1"),
+        (ace::M_0_IDX, "Multiplicity 0"),
+    ];
+    columns.sort_by_key(|(idx, _)| *idx);
+
+    let column_list = columns
+        .iter()
+        .map(|(idx, label)| format!("  - {}: {}", idx, label))
+        .collect::<Vec<_>>()
+        .join("\n");
+
     let layout = format!(
         r#"ACE CHIPLET LAYOUT
 =====================
@@ -349,53 +373,16 @@ fn document_ace_chiplet_layout() {
 Chiplet Selectors:
   Number of ACE selectors: {NUM_ACE_SELECTORS}
 
-Column Indices:
-  - Selector start index: {}
-  - Selector block index: {}
-  - Context index: {}
-  - Pointer index: {}
-  - Clock index: {}
-  - Eval operation index: {}
-  - ID 0 index: {}
-  - ID 1 index: {}
-  - ID 2 index: {}
-  - Value 0_0 index: {}
-  - Value 0_1 index: {}
-  - Value 1_0 index: {}
-  - Value 1_1 index: {}
-  - Value 2_0 index: {}
-  - Value 2_1 index: {}
-  - Multiplicity 0 index: {}
-  - Multiplicity 1 index: {}
-  - Read num eval index: {}
+Column Indices (ordered by index):
+{column_list}
 
 Other Constants:
   Number of columns: {}
   ACE init label: {}
-  Instruction ID1 offset: {}
   Instruction ID2 offset: {}
 "#,
-        ace::SELECTOR_START_IDX,
-        ace::SELECTOR_BLOCK_IDX,
-        ace::CTX_IDX,
-        ace::PTR_IDX,
-        ace::CLK_IDX,
-        ace::EVAL_OP_IDX,
-        ace::ID_0_IDX,
-        ace::ID_1_IDX,
-        ace::ID_2_IDX,
-        ace::V_0_0_IDX,
-        ace::V_0_1_IDX,
-        ace::V_1_0_IDX,
-        ace::V_1_1_IDX,
-        ace::V_2_0_IDX,
-        ace::V_2_1_IDX,
-        ace::M_0_IDX,
-        ace::M_1_IDX,
-        ace::READ_NUM_EVAL_IDX,
         ace::ACE_CHIPLET_NUM_COLS,
         ace::ACE_INIT_LABEL.as_int(),
-        ace::ACE_INSTRUCTION_ID1_OFFSET.as_int(),
         ace::ACE_INSTRUCTION_ID2_OFFSET.as_int()
     );
 
@@ -414,8 +401,8 @@ Chiplet Selectors:
 
 Other Constants:
   Trace width: {}
-  Kernel procedure call label: {}
-  Kernel procedure init label: {}
+  Kernel procedure call label: 0b001111 + 1 ({})
+  Kernel procedure init label: 0b101111 + 1 ({})
 "#,
         kernel_rom::TRACE_WIDTH,
         kernel_rom::KERNEL_PROC_CALL_LABEL.as_int(),
@@ -431,6 +418,15 @@ Other Constants:
 /// to understand how chiplets are laid out within the main trace.
 #[test]
 fn document_all_chiplet_column_ranges() {
+    let hasher_selector_width = HASHER_SELECTOR_COL_RANGE.end - HASHER_SELECTOR_COL_RANGE.start;
+    let hasher_state_width = HASHER_STATE_COL_RANGE.end - HASHER_STATE_COL_RANGE.start;
+    let hasher_capacity_width = HASHER_CAPACITY_COL_RANGE.end - HASHER_CAPACITY_COL_RANGE.start;
+    let hasher_rate_width = HASHER_RATE_COL_RANGE.end - HASHER_RATE_COL_RANGE.start;
+    let bitwise_a_width = BITWISE_A_COL_RANGE.end - BITWISE_A_COL_RANGE.start;
+    let bitwise_b_width = BITWISE_B_COL_RANGE.end - BITWISE_B_COL_RANGE.start;
+    let bitwise_trace_width = BITWISE_TRACE_RANGE.end - BITWISE_TRACE_RANGE.start;
+    let memory_v_width = MEMORY_V_COL_RANGE.end - MEMORY_V_COL_RANGE.start;
+
     let layout = format!(
         r#"ALL CHIPLET COLUMN RANGES
 ================================
@@ -444,22 +440,22 @@ Chiplet Selector Counts:
 
 Hasher Chiplet:
   Trace offset: {HASHER_TRACE_OFFSET}
-  Selector range: {HASHER_SELECTOR_COL_RANGE:?}
-  State range: {HASHER_STATE_COL_RANGE:?}
-  Capacity range: {HASHER_CAPACITY_COL_RANGE:?}
-  Rate range: {HASHER_RATE_COL_RANGE:?}
+  Selector range: {HASHER_SELECTOR_COL_RANGE:?} (width {hasher_selector_width})
+  State range: {HASHER_STATE_COL_RANGE:?} (width {hasher_state_width})
+  Capacity range: {HASHER_CAPACITY_COL_RANGE:?} (width {hasher_capacity_width})
+  Rate range: {HASHER_RATE_COL_RANGE:?} (width {hasher_rate_width})
   Node index: {HASHER_NODE_INDEX_COL_IDX}
 
 Bitwise Chiplet:
   Trace offset: {BITWISE_TRACE_OFFSET}
   Selector index: {BITWISE_SELECTOR_COL_IDX}
-  Input A range: {BITWISE_A_COL_RANGE:?}
-  Input B range: {BITWISE_B_COL_RANGE:?}
-  Trace range: {BITWISE_TRACE_RANGE:?}
+  Input A range: {BITWISE_A_COL_RANGE:?} (width {bitwise_a_width})
+  Input B range: {BITWISE_B_COL_RANGE:?} (width {bitwise_b_width})
+  Trace range: {BITWISE_TRACE_RANGE:?} (width {bitwise_trace_width})
 
 Memory Chiplet:
   Trace offset: {MEMORY_TRACE_OFFSET}
-  Value range: {MEMORY_V_COL_RANGE:?}
+  Value range: {MEMORY_V_COL_RANGE:?} (width {memory_v_width})
 
 Note: All column indices are relative to the main trace (not relative to the chiplet trace).
 "#
