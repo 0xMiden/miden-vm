@@ -15,20 +15,20 @@ Chiplet Selector Counts:
 Hasher Chiplet:
   Trace offset: 52
   Selector range: 52..55 (width 3)
-  State range: 55..67
-  Capacity range: 55..59
-  Rate range: 59..67
+  State range: 55..67 (width 12)
+  Capacity range: 55..59 (width 4)
+  Rate range: 59..67 (width 8)
   Node index: 67
 
 Bitwise Chiplet:
   Trace offset: 53
   Selector index: 53
-  Input A range: 56..60
-  Input B range: 60..64
-  Trace range: 53..66
+  Input A range: 56..60 (width 4)
+  Input B range: 60..64 (width 4)
+  Trace range: 53..66 (width 13)
 
 Memory Chiplet:
   Trace offset: 54
-  Value range: 61..65
+  Value range: 61..65 (width 4)
 
 Note: All column indices are relative to the main trace (not relative to the chiplet trace).
