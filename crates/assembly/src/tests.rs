@@ -4184,3 +4184,37 @@ end"#
     insta::assert_snapshot!(program);
     Ok(())
 }
+
+#[test]
+fn test_assembler_debug_info_conditional() {
+    let context = TestContext::default();
+    let source = r#"
+    pub proc foo
+        push.1 push.2 add
+    end
+    "#;
+
+    let module = parse_module!(&context, "test::foo", source);
+
+    // Test 1: Default assembler (not in debug mode) should not include debug info
+    let assembler = Assembler::default();
+    let library = assembler.assemble_library([module.clone()]).unwrap();
+    let mast_forest = library.mast_forest();
+
+    // Debug info should NOT be present when not in debug mode
+    assert!(
+        mast_forest.decorators().is_empty(),
+        "Debug info should not be present when assembler is not in debug mode"
+    );
+
+    // Test 2: Assembler in debug mode should include debug info
+    let assembler = Assembler::default().with_debug_mode(true);
+    let library = assembler.assemble_library([module]).unwrap();
+    let mast_forest = library.mast_forest();
+
+    // Debug info should be present when in debug mode
+    assert!(
+        !mast_forest.decorators().is_empty(),
+        "Debug info should be present when assembler is in debug mode"
+    );
+}
