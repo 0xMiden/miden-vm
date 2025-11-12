@@ -332,12 +332,28 @@ impl Chiplets {
             }
         }
 
-        // fill the fragments with the execution trace from each chiplet
-        // TODO: this can be parallelized to fill the traces in multiple threads
-        hasher.fill_trace(&mut hasher_fragment);
-        bitwise.fill_trace(&mut bitwise_fragment);
-        memory.fill_trace(&mut memory_fragment);
-        kernel_rom.fill_trace(&mut kernel_rom_fragment);
+        // fill the fragments with the execution trace from each chiplet in parallel
+        // The chiplets are independent and can be processed concurrently
+
+        // Fill independent chiplets in parallel: hasher, bitwise, memory, kernel_rom
+        // Note: ACE must be processed separately since it returns a value
+        // Use ThreadPool::install() to prevent nested parallelism from column operations
+        rayon::scope(|s| {
+            s.spawn(move |_| {
+                hasher.fill_trace(&mut hasher_fragment);
+            });
+            s.spawn(move |_| {
+                bitwise.fill_trace(&mut bitwise_fragment);
+            });
+            s.spawn(move |_| {
+                memory.fill_trace(&mut memory_fragment);
+            });
+            s.spawn(move |_| {
+                kernel_rom.fill_trace(&mut kernel_rom_fragment);
+            });
+        });
+
+        // Process ACE chiplet separately as it returns ace_sections
         let ace_sections = ace.fill_trace(&mut ace_fragment);
         AceHints::new(ace_start, ace_sections)
     }
