@@ -1,7 +1,7 @@
 use std::{fs, path::Path, sync::Arc};
 
 use miden_assembly::{
-    DefaultSourceManager,
+    Assembler, DefaultSourceManager,
     diagnostics::{IntoDiagnostic, Report, WrapErr},
 };
 use miden_mast_package::{MastArtifact, Package};
@@ -30,10 +30,44 @@ pub fn get_masm_program(
     path: &Path,
     libraries: &Libraries,
     debug_on: bool,
+    kernel_file: Option<&Path>,
 ) -> Result<(miden_core::Program, Arc<DefaultSourceManager>), Report> {
     let debug_mode = if debug_on { Debug::On } else { Debug::Off };
     let program_file = ProgramFile::read(path)?;
-    let program = program_file.compile(debug_mode, &libraries.libraries)?;
+    let source_manager = program_file.source_manager().clone();
 
-    Ok((program, program_file.source_manager().clone()))
+    // If kernel is provided, compile it and use it when compiling the program
+    let program = if let Some(kernel_path) = kernel_file {
+        // Compile the kernel from the file
+        let kernel_lib = Assembler::default()
+            .with_debug_mode(matches!(debug_mode, Debug::On))
+            .assemble_kernel(kernel_path)
+            .wrap_err_with(|| {
+                format!("Failed to compile kernel from `{}`", kernel_path.display())
+            })?;
+
+        // Create assembler with kernel
+        let mut assembler = Assembler::with_kernel(source_manager.clone(), kernel_lib)
+            .with_debug_mode(matches!(debug_mode, Debug::On));
+
+        // Link standard library
+        assembler
+            .link_dynamic_library(miden_stdlib::StdLibrary::default())
+            .wrap_err("Failed to load stdlib")?;
+
+        // Link user libraries
+        for library in &libraries.libraries {
+            assembler.link_dynamic_library(library).wrap_err("Failed to load libraries")?;
+        }
+
+        // Compile the program
+        assembler
+            .assemble_program(program_file.ast())
+            .wrap_err("Failed to compile program")?
+    } else {
+        // No kernel, use the standard compilation path
+        program_file.compile(debug_mode, &libraries.libraries)?
+    };
+
+    Ok((program, source_manager))
 }
