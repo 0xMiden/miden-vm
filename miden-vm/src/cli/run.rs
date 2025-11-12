@@ -50,6 +50,10 @@ pub struct RunCmd {
     /// Disable debug instructions (release mode)
     #[arg(short = 'r', long = "release")]
     release: bool,
+
+    /// Path to a kernel assembly file (.masm) to compile and configure for the VM
+    #[arg(long = "kernel", value_parser)]
+    kernel_file: Option<PathBuf>,
 }
 
 impl RunCmd {
@@ -169,9 +173,23 @@ fn run_masm_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
     // load libraries from files
     let libraries = Libraries::new(&params.library_paths)?;
 
+    // validate kernel file if provided
+    if let Some(ref kernel_path) = params.kernel_file {
+        if !kernel_path.is_file() {
+            return Err(Report::msg(format!(
+                "Kernel file `{}` must be a file.",
+                kernel_path.display()
+            )));
+        }
+    }
+
     // load program from file and compile
-    let (program, source_manager) =
-        get_masm_program(&params.program_file, &libraries, !params.release)?;
+    let (program, source_manager) = get_masm_program(
+        &params.program_file,
+        &libraries,
+        !params.release,
+        params.kernel_file.as_deref(),
+    )?;
     let input_data = InputFile::read(&params.input_file, &params.program_file)?;
 
     let execution_options = ExecutionOptions::new(
