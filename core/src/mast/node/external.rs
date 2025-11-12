@@ -203,8 +203,10 @@ impl MastNodeExt for ExternalNode {
             },
             DecoratorStore::Linked { id } => {
                 // Extract decorators from forest storage when in Linked state
-                let before_enter = forest.node_decorator_storage.get_before_decorators(id).to_vec();
-                let after_exit = forest.node_decorator_storage.get_after_decorators(id).to_vec();
+                let before_enter =
+                    forest.debug_info.node_decorator_storage.get_before_decorators(id).to_vec();
+                let after_exit =
+                    forest.debug_info.node_decorator_storage.get_after_decorators(id).to_vec();
                 let mut builder = ExternalNodeBuilder::new(self.digest);
                 builder = builder.with_before_enter(before_enter).with_after_exit(after_exit);
                 builder
@@ -306,7 +308,7 @@ impl MastForestContributor for ExternalNodeBuilder {
         let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
 
         // Store node-level decorators in the centralized NodeToDecoratorIds for efficient access
-        forest.node_decorator_storage.add_node_decorators(
+        forest.debug_info.node_decorator_storage.add_node_decorators(
             future_node_id,
             &before_enter,
             &after_exit,
@@ -413,7 +415,7 @@ impl ExternalNodeBuilder {
         let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
 
         // Store node-level decorators in the centralized NodeToDecoratorIds for efficient access
-        forest.node_decorator_storage.add_node_decorators(
+        forest.debug_info.node_decorator_storage.add_node_decorators(
             future_node_id,
             &before_enter,
             &after_exit,

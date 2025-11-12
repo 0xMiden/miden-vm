@@ -57,7 +57,7 @@ impl DecoratorStore {
         match self {
             DecoratorStore::Owned { before_enter, .. } => before_enter,
             DecoratorStore::Linked { id } => {
-                forest.node_decorator_storage.get_before_decorators(*id)
+                forest.debug_info.node_decorator_storage.get_before_decorators(*id)
             },
         }
     }
@@ -67,7 +67,7 @@ impl DecoratorStore {
         match self {
             DecoratorStore::Owned { after_exit, .. } => after_exit,
             DecoratorStore::Linked { id } => {
-                forest.node_decorator_storage.get_after_decorators(*id)
+                forest.debug_info.node_decorator_storage.get_after_decorators(*id)
             },
         }
     }
