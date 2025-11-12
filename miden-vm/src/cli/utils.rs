@@ -1,7 +1,7 @@
 use std::{fs, path::Path, sync::Arc};
 
 use miden_assembly::{
-    Assembler, DefaultSourceManager,
+    Assembler, DefaultSourceManager, KernelLibrary,
     diagnostics::{IntoDiagnostic, Report, WrapErr},
 };
 use miden_mast_package::{MastArtifact, Package};
@@ -38,13 +38,55 @@ pub fn get_masm_program(
 
     // If kernel is provided, compile it and use it when compiling the program
     let program = if let Some(kernel_path) = kernel_file {
-        // Compile the kernel from the file
-        let kernel_lib = Assembler::default()
-            .with_debug_mode(matches!(debug_mode, Debug::On))
-            .assemble_kernel(kernel_path)
-            .wrap_err_with(|| {
-                format!("Failed to compile kernel from `{}`", kernel_path.display())
-            })?;
+        // Determine file type based on extension
+        let ext = kernel_path
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+
+        // Load kernel from .masp package or compile from .masm source
+        let kernel_lib = match ext.as_str() {
+            "masp" => {
+                // Load kernel from package file
+                let bytes = fs::read(kernel_path)
+                    .into_diagnostic()
+                    .wrap_err_with(|| format!("Failed to read kernel package `{}`", kernel_path.display()))?;
+                let package = Package::read_from_bytes(&bytes)
+                    .into_diagnostic()
+                    .wrap_err_with(|| format!("Failed to deserialize kernel package `{}`", kernel_path.display()))?;
+                
+                match package.into_mast_artifact() {
+                    MastArtifact::Library(lib) => {
+                        let library = Arc::try_unwrap(lib).unwrap_or_else(|arc| (*arc).clone());
+                        KernelLibrary::try_from(library)
+                            .map_err(|err| Report::msg(format!("Failed to convert library to kernel: {err}")))
+                            .wrap_err_with(|| format!("The package `{}` is not a valid kernel package", kernel_path.display()))?
+                    },
+                    MastArtifact::Executable(_) => {
+                        return Err(Report::msg(format!(
+                            "Kernel package `{}` contains a program, not a kernel library",
+                            kernel_path.display()
+                        )));
+                    },
+                }
+            },
+            "masm" => {
+                // Compile kernel from assembly source
+                Assembler::default()
+                    .with_debug_mode(matches!(debug_mode, Debug::On))
+                    .assemble_kernel(kernel_path)
+                    .wrap_err_with(|| {
+                        format!("Failed to compile kernel from `{}`", kernel_path.display())
+                    })?
+            },
+            _ => {
+                return Err(Report::msg(format!(
+                    "Kernel file `{}` must have a .masm or .masp extension",
+                    kernel_path.display()
+                )));
+            },
+        };
 
         // Create assembler with kernel
         let mut assembler = Assembler::with_kernel(source_manager.clone(), kernel_lib)
