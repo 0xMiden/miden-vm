@@ -277,8 +277,10 @@ impl BasicBlockNode {
 
                 if !has_decorators {
                     // No operation-level decorators, but still need node-level decorators
-                    let before_enter = forest.node_decorator_storage.get_before_decorators(*id);
-                    let after_exit = forest.node_decorator_storage.get_after_decorators(*id);
+                    let before_enter =
+                        forest.debug_info.node_decorator_storage.get_before_decorators(*id);
+                    let after_exit =
+                        forest.debug_info.node_decorator_storage.get_after_decorators(*id);
                     return RawDecoratorOpLinkIterator::from_slice_iters(
                         before_enter,
                         &[],
@@ -292,8 +294,9 @@ impl BasicBlockNode {
                 );
 
                 // Get node-level decorators from NodeToDecoratorIds
-                let before_enter = forest.node_decorator_storage.get_before_decorators(*id);
-                let after_exit = forest.node_decorator_storage.get_after_decorators(*id);
+                let before_enter =
+                    forest.debug_info.node_decorator_storage.get_before_decorators(*id);
+                let after_exit = forest.debug_info.node_decorator_storage.get_after_decorators(*id);
 
                 RawDecoratorOpLinkIterator::from_linked(
                     before_enter,
@@ -455,8 +458,9 @@ impl MastNodeErrorContext for BasicBlockNode {
                 );
 
                 // Get node-level decorators from NodeToDecoratorIds
-                let before_enter = forest.node_decorator_storage.get_before_decorators(*id);
-                let after_exit = forest.node_decorator_storage.get_after_decorators(*id);
+                let before_enter =
+                    forest.debug_info.node_decorator_storage.get_before_decorators(*id);
+                let after_exit = forest.debug_info.node_decorator_storage.get_after_decorators(*id);
 
                 DecoratorOpLinkIterator::from_linked(
                     before_enter,
@@ -501,7 +505,7 @@ impl MastNodeExt for BasicBlockNode {
                 // For linked nodes, get the decorators from the forest's NodeToDecoratorIds
                 #[cfg(debug_assertions)]
                 self.verify_node_in_forest(forest);
-                forest.node_decorator_storage.get_before_decorators(*id)
+                forest.debug_info.node_decorator_storage.get_before_decorators(*id)
             },
         }
     }
@@ -513,7 +517,7 @@ impl MastNodeExt for BasicBlockNode {
                 // For linked nodes, get the decorators from the forest's NodeToDecoratorIds
                 #[cfg(debug_assertions)]
                 self.verify_node_in_forest(forest);
-                forest.node_decorator_storage.get_after_decorators(*id)
+                forest.debug_info.node_decorator_storage.get_after_decorators(*id)
             },
         }
     }
@@ -555,8 +559,10 @@ impl MastNodeExt for BasicBlockNode {
             DecoratorStore::Owned { before_enter, after_exit, .. } => (before_enter, after_exit),
             DecoratorStore::Linked { id } => {
                 // For linked nodes, get the decorators from the forest's NodeToDecoratorIds
-                let before_enter = forest.node_decorator_storage.get_before_decorators(id).to_vec();
-                let after_exit = forest.node_decorator_storage.get_after_decorators(id).to_vec();
+                let before_enter =
+                    forest.debug_info.node_decorator_storage.get_before_decorators(id).to_vec();
+                let after_exit =
+                    forest.debug_info.node_decorator_storage.get_after_decorators(id).to_vec();
                 (before_enter, after_exit)
             },
         };
@@ -1304,12 +1310,13 @@ impl MastForestContributor for BasicBlockNodeBuilder {
 
         // Add decorator info to the forest storage
         forest
+            .debug_info
             .op_decorator_storage
             .add_decorator_info_for_node(future_node_id, decorators_info)
             .map_err(MastForestError::DecoratorError)?;
 
         // Add node-level decorators to the centralized NodeToDecoratorIds for efficient access
-        forest.node_decorator_storage.add_node_decorators(
+        forest.debug_info.node_decorator_storage.add_node_decorators(
             future_node_id,
             &before_enter,
             &after_exit,

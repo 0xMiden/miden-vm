@@ -31,7 +31,8 @@ use crate::{
 
 mod debuginfo;
 pub use debuginfo::{
-    DecoratedLinks, DecoratedLinksIter, DecoratorIndexError, NodeToDecoratorIds, OpToDecoratorIds,
+    DebugInfo, DecoratedLinks, DecoratedLinksIter, DecoratorIndexError, NodeToDecoratorIds,
+    OpToDecoratorIds,
 };
 
 mod serialization;
@@ -67,21 +68,9 @@ pub struct MastForest {
     /// Advice map to be loaded into the VM prior to executing procedures from this MAST forest.
     advice_map: AdviceMap,
 
-    /// A map from error codes to error messages. Error messages cannot be recovered from error
-    /// codes, so they are stored in order to provide a useful message to the user in case a error
-    /// code is triggered.
-    error_codes: BTreeMap<u64, Arc<str>>,
-
-    /// All the decorators included in the MAST forest.
-    decorators: IndexVec<DecoratorId, Decorator>,
-
-    /// Provides efficient access to decorators per operation per node during execution and
-    /// debugging.
-    op_decorator_storage: OpToDecoratorIds,
-
-    /// Storage for node-level decorators (before_enter and after_exit). This uses CSR format
-    /// for efficient storage and access of node-level decorators.
-    node_decorator_storage: NodeToDecoratorIds,
+    /// Debug information including decorators and error codes.
+    /// Always present (as per issue #1821), but can be empty for stripped builds.
+    debug_info: DebugInfo,
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -92,11 +81,8 @@ impl MastForest {
         Self {
             nodes: IndexVec::new(),
             roots: Vec::new(),
-            decorators: IndexVec::new(),
             advice_map: AdviceMap::default(),
-            error_codes: BTreeMap::new(),
-            op_decorator_storage: OpToDecoratorIds::new(),
-            node_decorator_storage: NodeToDecoratorIds::new(),
+            debug_info: DebugInfo::new(),
         }
     }
 }
@@ -109,7 +95,10 @@ impl MastForest {
 
     /// Adds a decorator to the forest, and returns the associated [`DecoratorId`].
     pub fn add_decorator(&mut self, decorator: Decorator) -> Result<DecoratorId, MastForestError> {
-        self.decorators.push(decorator).map_err(|_| MastForestError::TooManyDecorators)
+        self.debug_info
+            .decorators
+            .push(decorator)
+            .map_err(|_| MastForestError::TooManyDecorators)
     }
 
     /// Marks the given [`MastNodeId`] as being the root of a procedure.
@@ -153,10 +142,8 @@ impl MastForest {
 
     /// Removes all decorators from this MAST forest.
     pub fn strip_decorators(&mut self) {
-        // Clear all decorator storage
-        self.decorators = IndexVec::new();
-        self.op_decorator_storage = OpToDecoratorIds::new();
-        self.node_decorator_storage.clear();
+        // Clear all debug info (decorators and error codes)
+        self.debug_info.strip();
     }
 
     /// Merges all `forests` into a new [`MastForest`].
@@ -231,8 +218,8 @@ impl MastForest {
         // extract decorator information from the nodes by converting them into builders
         let node_builders =
             nodes_to_add.into_iter().map(|node| node.to_builder(self)).collect::<Vec<_>>();
-        self.op_decorator_storage = OpToDecoratorIds::new();
-        self.node_decorator_storage = NodeToDecoratorIds::new();
+        self.debug_info.op_decorator_storage = OpToDecoratorIds::new();
+        self.debug_info.node_decorator_storage = NodeToDecoratorIds::new();
 
         // Add each node to the new MAST forest, making sure to rewrite any outdated internal
         // `MastNodeId`s
@@ -295,7 +282,7 @@ impl MastForest {
     /// This is the fallible version of indexing (e.g. `mast_forest[decorator_id]`).
     #[inline(always)]
     pub fn get_decorator_by_id(&self, decorator_id: DecoratorId) -> Option<&Decorator> {
-        self.decorators.get(decorator_id)
+        self.debug_info.decorators.get(decorator_id)
     }
 
     /// Returns the [`MastNode`] associated with the provided [`MastNodeId`] if valid, or else
@@ -370,7 +357,7 @@ impl MastForest {
     }
 
     pub fn decorators(&self) -> &[Decorator] {
-        self.decorators.as_slice()
+        self.debug_info.decorators.as_slice()
     }
 
     /// Returns decorator indices for a specific operation within a node.
@@ -383,7 +370,8 @@ impl MastForest {
         node_id: MastNodeId,
         local_op_idx: usize,
     ) -> &[DecoratorId] {
-        self.op_decorator_storage
+        self.debug_info
+            .op_decorator_storage
             .decorator_ids_for_operation(node_id, local_op_idx)
             .unwrap_or(&[])
     }
@@ -400,7 +388,7 @@ impl MastForest {
     ) -> impl Iterator<Item = &'a Decorator> + 'a {
         self.decorator_indices_for_op(node_id, local_op_idx)
             .iter()
-            .map(move |&decorator_id| &self.decorators[decorator_id])
+            .map(move |&decorator_id| &self.debug_info.decorators[decorator_id])
     }
 
     /// Returns decorator links for a node, including operation indices.
@@ -411,7 +399,7 @@ impl MastForest {
         &'a self,
         node_id: MastNodeId,
     ) -> Result<DecoratedLinks<'a>, DecoratorIndexError> {
-        self.op_decorator_storage.decorator_links_for_node(node_id)
+        self.debug_info.op_decorator_storage.decorator_links_for_node(node_id)
     }
 
     pub fn advice_map(&self) -> &AdviceMap {
@@ -427,14 +415,14 @@ impl MastForest {
     pub fn register_error(&mut self, msg: Arc<str>) -> Felt {
         let code: Felt = error_code_from_msg(&msg);
         // we use u64 as keys for the map
-        self.error_codes.insert(code.as_int(), msg);
+        self.debug_info.error_codes.insert(code.as_int(), msg);
         code
     }
 
     /// Given an error code as a Felt, resolves it to its corresponding error message.
     pub fn resolve_error_message(&self, code: Felt) -> Option<Arc<str>> {
         let key = u64::from(code);
-        self.error_codes.get(&key).cloned()
+        self.debug_info.error_codes.get(&key).cloned()
     }
 }
 
@@ -459,14 +447,14 @@ impl Index<DecoratorId> for MastForest {
 
     #[inline(always)]
     fn index(&self, decorator_id: DecoratorId) -> &Self::Output {
-        &self.decorators[decorator_id]
+        &self.debug_info.decorators[decorator_id]
     }
 }
 
 impl IndexMut<DecoratorId> for MastForest {
     #[inline(always)]
     fn index_mut(&mut self, decorator_id: DecoratorId) -> &mut Self::Output {
-        &mut self.decorators[decorator_id]
+        &mut self.debug_info.decorators[decorator_id]
     }
 }
 
@@ -635,7 +623,7 @@ impl DecoratorId {
         value: u32,
         mast_forest: &MastForest,
     ) -> Result<Self, DeserializationError> {
-        Self::from_u32_bounded(value, mast_forest.decorators.len())
+        Self::from_u32_bounded(value, mast_forest.debug_info.decorators.len())
     }
 
     /// Returns a new `DecoratorId` with the provided inner value, or an error if the provided
