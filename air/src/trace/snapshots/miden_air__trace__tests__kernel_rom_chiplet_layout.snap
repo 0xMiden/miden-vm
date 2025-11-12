@@ -10,5 +10,5 @@ Chiplet Selectors:
 
 Other Constants:
   Trace width: 5
-  Kernel procedure call label: 16
-  Kernel procedure init label: 48
+  Kernel procedure call label: 0b001111 + 1 (16)
+  Kernel procedure init label: 0b101111 + 1 (48)
