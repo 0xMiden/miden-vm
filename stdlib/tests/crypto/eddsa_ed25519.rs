@@ -9,14 +9,21 @@
 use core::convert::TryFrom;
 
 use miden_core::{
-    Felt, FieldElement, Word,
+    EventName, Felt, FieldElement, Word,
     precompile::{PrecompileCommitment, PrecompileVerifier},
-    utils::Serializable,
+    utils::{Deserializable, Serializable},
 };
-use miden_crypto::dsa::eddsa_25519::{PublicKey, SecretKey, Signature};
-use miden_stdlib::handlers::{
-    bytes_to_packed_u32_felts,
-    eddsa25519::{EddsaPrecompile, EddsaRequest},
+use miden_crypto::{
+    dsa::eddsa_25519::{PublicKey, SecretKey, Signature},
+    hash::rpo::Rpo256,
+};
+use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessState};
+use miden_stdlib::{
+    eddsa_sign,
+    handlers::{
+        bytes_to_packed_u32_felts,
+        eddsa25519::{EddsaPrecompile, EddsaRequest},
+    },
 };
 use rand::{SeedableRng, rngs::StdRng};
 use sha2::{Digest, Sha512};
@@ -207,7 +214,7 @@ fn test_eddsa_verify_with_message() {
                     {memory_stores}
 
                     push.{SIG_ADDR}.{MSG_ADDR}.{PK_ADDR}
-                    exec.ed25519::verify
+                    exec.ed25519::verify_with_unchecked_k_digest
 
                     exec.sys::truncate_stack
                 end
@@ -225,6 +232,76 @@ fn test_eddsa_verify_with_message() {
         assert_eq!(deferred.len(), 1, "expected one deferred request");
         assert_eq!(deferred[0], request.as_precompile_request());
     }
+}
+
+// TESTS HIGH-LEVEL WRAPPER
+// ================================================================================================
+
+const EVENT_EDDSA_SIG_TO_STACK: EventName = EventName::new("test::eddsa::sig_to_stack");
+
+struct EddsaSignatureHandler {
+    secret_key_bytes: Vec<u8>,
+}
+
+impl EddsaSignatureHandler {
+    fn new(secret_key: &SecretKey) -> Self {
+        Self {
+            secret_key_bytes: secret_key.to_bytes().to_vec(),
+        }
+    }
+}
+
+impl EventHandler for EddsaSignatureHandler {
+    fn on_event(&self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
+        let provided_pk_rpo = process.get_stack_word_be(1);
+        let secret_key =
+            SecretKey::read_from_bytes(&self.secret_key_bytes).expect("invalid test secret key");
+        let pk_commitment = {
+            let pk = secret_key.public_key();
+            let pk_felts = bytes_to_packed_u32_felts(&pk.to_bytes());
+            Rpo256::hash_elements(&pk_felts)
+        };
+        assert_eq!(
+            provided_pk_rpo, pk_commitment,
+            "public key commitment mismatch: expected {:?}, got {:?}",
+            pk_commitment, provided_pk_rpo
+        );
+
+        let message = process.get_stack_word_be(5);
+        let calldata = eddsa_sign(&secret_key, message);
+
+        Ok(vec![AdviceMutation::extend_stack(calldata.into_iter().rev())])
+    }
+}
+
+#[test]
+fn test_eddsa_verify_high_level_wrapper() {
+    let mut rng = StdRng::seed_from_u64(19260817);
+    let secret_key = SecretKey::with_rng(&mut rng);
+    let public_key = secret_key.public_key();
+    let message = Word::from([Felt::new(11), Felt::new(22), Felt::new(33), Felt::new(44)]);
+
+    let pk_commitment = {
+        let pk_felts = bytes_to_packed_u32_felts(&public_key.to_bytes());
+        Rpo256::hash_elements(&pk_felts)
+    };
+
+    let source = format!(
+        "
+        use.std::crypto::dsa::eddsa::ed25519
+
+        begin
+            push.{message} push.{pk_commitment}
+            emit.event(\"{EVENT_EDDSA_SIG_TO_STACK}\")
+            exec.ed25519::verify_eddsa_ed25519_sha512
+        end
+        ",
+    );
+
+    let mut test = build_debug_test!(&source);
+    test.add_event_handler(EVENT_EDDSA_SIG_TO_STACK, EddsaSignatureHandler::new(&secret_key));
+
+    test.expect_stack(&[]);
 }
 
 // TEST DATA GENERATION

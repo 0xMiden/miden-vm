@@ -61,15 +61,12 @@ export.hash_memory_impl.24
     # => [ZERO, ZERO, ZERO, digest_ptr, COMM_INPUT, TAG, ...]
     repeat.2
         adv_pipe
-        debug.stack.8
-        debug.mem
         hperm
     end
     exec.rpo::squeeze_digest
     # => [COMM_DIGEST, digest_ptr, COMM_INPUT, TAG, ...]
     movup.4 drop
     # => [COMM_DIGEST, COMM_INPUT, TAG, ...]
-    debug.stack
 
     # Merge COMM_INPUT and COMM_DIGEST to compute COMM = RPO(COMM_INPUT | COMM_DIGEST)
     hmerge

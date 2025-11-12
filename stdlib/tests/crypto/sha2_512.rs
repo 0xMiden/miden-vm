@@ -57,7 +57,7 @@ fn test_sha512_handler(bytes: &[u8]) {
     let test = build_debug_test!(source, &[]);
     let output = test.execute().unwrap();
 
-    let advice_stack = output.advice_provider().stack();
+    let advice_stack: Vec<_> = output.advice_provider().stack().iter().rev().copied().collect();
     assert_eq!(advice_stack, preimage.digest().as_ref());
 
     let deferred = output.advice_provider().precompile_requests().to_vec();
