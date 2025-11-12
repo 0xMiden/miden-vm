@@ -290,7 +290,8 @@ impl Process {
         advice_inputs: AdviceInputs,
         execution_options: ExecutionOptions,
     ) -> Self {
-        let in_debug_mode = execution_options.enable_debugging();
+        let in_debug_mode =
+            execution_options.enable_debugging() || execution_options.enable_tracing();
         Self {
             advice: advice_inputs.into(),
             system: System::new(execution_options.expected_cycles() as usize),
