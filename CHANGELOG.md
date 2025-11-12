@@ -16,6 +16,7 @@
 - [BREAKING] Make argument order of `Assembler::compile_and_statically_link_from_dir` consistent with `Assembler::assemble_library_from_dir`
 - [BREAKING] Renamed `Library::get_procedure_root_by_name` to `Library::get_procedure_root_by_path`
 - Streamline MastNode APIs and remove redundant parameters from `execute_op_batch` functions ([#2360](https://github.com/0xMiden/miden-vm/pull/2360)).
+- Consolidate debug information into `DebugInfo` struct ([#1776](https://github.com/0xMiden/miden-vm/issues/1776)).
 
 ## 0.19.1 (2025-11-6)
 

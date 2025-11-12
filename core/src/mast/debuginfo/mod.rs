@@ -1,3 +1,45 @@
+//! Debug information management for MAST forests.
+//!
+//! This module provides the [`DebugInfo`] struct which consolidates all debug-related
+//! information for a MAST forest in a single location. This includes:
+//!
+//! - All decorators (debug, trace, and assembly operation metadata)
+//! - Operation-indexed decorator mappings for efficient lookup
+//! - Node-level decorator storage (before_enter/after_exit)
+//! - Error code mappings for descriptive error messages
+//!
+//! The debug info is always available at the `MastForest` level (as per issue #1821),
+//! but may be conditionally included during assembly to maintain backward compatibility.
+//! Decorators are only executed when the processor is running in debug mode, allowing
+//! debug information to be available for debugging and error reporting without
+//! impacting performance in production execution.
+//!
+//! # Debug Mode Semantics
+//!
+//! Debug mode is controlled via [`ExecutionOptions`](air::options::ExecutionOptions):
+//! - `with_debugging(true)` enables debug mode explicitly
+//! - `with_tracing()` automatically enables debug mode (tracing requires debug info)
+//! - By default, debug mode is disabled for maximum performance
+//!
+//! When debug mode is disabled:
+//! - Debug decorators are not executed
+//! - Trace decorators are not executed
+//! - Assembly operation decorators are not recorded
+//! - before_enter/after_exit decorators are not executed
+//!
+//! When debug mode is enabled:
+//! - All decorator types are executed according to their semantics
+//! - Debug decorators trigger host callbacks for breakpoints
+//! - Trace decorators trigger host callbacks for tracing
+//! - Assembly operation decorators provide source mapping information
+//! - before_enter/after_exit decorators execute around node execution
+//!
+//! # Production Builds
+//!
+//! The `DebugInfo` can be stripped for production builds using the [`strip()`](Self::strip)
+//! method, which removes decorators while preserving critical information. This allows
+//! backward compatibility while enabling size optimization for deployment.
+
 use alloc::{collections::BTreeMap, sync::Arc};
 
 use miden_utils_indexing::IndexVec;
