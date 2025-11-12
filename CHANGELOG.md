@@ -21,6 +21,7 @@
 - [BREAKING] Renamed `Library::get_procedure_root_by_name` to `Library::get_procedure_root_by_path`
 - Streamline MastNode APIs and remove redundant parameters from `execute_op_batch` functions ([#2360](https://github.com/0xMiden/miden-vm/pull/2360)).
 - [BREAKING] Standardized hash function naming: renamed `hash_2to1` → `merge` and `hash_1to1` → `hash` across all hash modules (blake3, sha256, keccak256, rpo) ([#2381](https://github.com/0xMiden/miden-vm/pull/2381)).
+- Consolidate debug information into `DebugInfo` struct ([#1776](https://github.com/0xMiden/miden-vm/issues/1776)).
 
 ## 0.19.1 (2025-11-6)
 
