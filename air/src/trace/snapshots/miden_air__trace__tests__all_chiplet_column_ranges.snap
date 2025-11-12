@@ -14,7 +14,7 @@ Chiplet Selector Counts:
 
 Hasher Chiplet:
   Trace offset: 52
-  Selector range: 52..55
+  Selector range: 52..55 (width 3)
   State range: 55..67
   Capacity range: 55..59
   Rate range: 59..67
