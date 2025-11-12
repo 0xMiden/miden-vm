@@ -18,8 +18,6 @@ Capacity Portion (RPO):
   Capacity length: 4
   Capacity column range: 55..59
   Capacity domain index: 1
-  Note: The capacity portion contains the first 4 elements of the 
-        hasher state, located at columns 55..59 in the main trace.
 
 Rate Portion (RPO):
   Rate length: 8
