@@ -7,17 +7,17 @@
 
 use core::convert::TryFrom;
 
+use crate::helpers::masm_store_felts;
 use miden_core::{
     Felt, FieldElement, Word,
     precompile::{PrecompileCommitment, PrecompileVerifier},
     utils::Serializable,
 };
 use miden_crypto::dsa::eddsa_25519::{PublicKey, SecretKey, Signature};
+use miden_stdlib::handlers::bytes_to_packed_u32_felts;
 use miden_stdlib::handlers::eddsa25519::{EddsaPrecompile, EddsaRequest};
 use rand::{SeedableRng, rngs::StdRng};
 use sha2::{Digest, Sha512};
-
-use crate::helpers::masm_store_packed_bytes;
 
 // TEST CONSTANTS
 // ================================================================================================
@@ -167,10 +167,14 @@ fn compute_k_digest(pk: &PublicKey, message: Word, sig: &Signature) -> [u8; 64] 
 // ================================================================================================
 
 fn generate_memory_store_masm(request: &EddsaRequest) -> String {
+    let pk_felts = bytes_to_packed_u32_felts(&request.pk().to_bytes());
+    let k_digest_felts = bytes_to_packed_u32_felts(&request.k_digest().to_bytes());
+    let sig_felts = bytes_to_packed_u32_felts(&request.sig().to_bytes());
+
     [
-        masm_store_packed_bytes(&request.pk().to_bytes(), PK_ADDR),
-        masm_store_packed_bytes(request.k_digest(), K_DIGEST_ADDR),
-        masm_store_packed_bytes(&request.sig().to_bytes(), SIG_ADDR),
+        masm_store_felts(&pk_felts, PK_ADDR),
+        masm_store_felts(&k_digest_felts, K_DIGEST_ADDR),
+        masm_store_felts(&sig_felts, SIG_ADDR),
     ]
     .join(" ")
 }
