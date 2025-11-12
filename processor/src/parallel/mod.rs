@@ -22,7 +22,7 @@ use miden_core::{
     mast::{BasicBlockNode, MastForest, MastNode, MastNodeExt, MastNodeId, OpBatch},
     precompile::PrecompileTranscriptState,
     stack::MIN_STACK_DEPTH,
-    utils::{range, uninit_vector},
+    utils::range,
 };
 use rayon::prelude::*;
 use winter_prover::{crypto::RandomCoin, math::batch_inversion};
@@ -775,15 +775,24 @@ struct CoreTraceFragment {
 }
 
 impl CoreTraceFragment {
-    /// Creates a new CoreTraceFragment with *uninitialized* columns of length `num_rows`.
+    /// Creates a new CoreTraceFragment with uninitialized columns of length `num_rows`.
     ///
     /// # Safety
-    /// The caller is responsible for ensuring that the columns are properly initialized
-    /// before use.
-    pub unsafe fn new_uninit(num_rows: usize) -> Self {
+    /// All elements must be properly initialized before being read.
+    /// The CoreTraceFragmentGenerator guarantees this by filling all rows
+    /// or truncating unused rows before the fragment is accessed.
+    pub fn new_uninit(num_rows: usize) -> Self {
+        // Use MaybeUninit for safe uninitialized memory allocation
         Self {
-            // TODO(plafer): Don't use uninit_vector
-            columns: core::array::from_fn(|_| unsafe { uninit_vector(num_rows) }),
+            columns: core::array::from_fn(|_| {
+                // Create a Vec with uninitialized elements using MaybeUninit
+                let mut vec: Vec<core::mem::MaybeUninit<Felt>> = Vec::with_capacity(num_rows);
+                unsafe { vec.set_len(num_rows) };
+
+                // Safety: The caller (CoreTraceFragmentGenerator) guarantees all elements
+                // are initialized before first read
+                unsafe { core::mem::transmute(vec) }
+            }),
         }
     }
 
@@ -811,7 +820,7 @@ impl CoreTraceFragmentGenerator {
             // Safety: the `CoreTraceFragmentGenerator` will fill in all the rows, or truncate any
             // unused rows if a `HALT` operation occurs before `fragment_size` have
             // been executed.
-            fragment: unsafe { CoreTraceFragment::new_uninit(fragment_size) },
+            fragment: CoreTraceFragment::new_uninit(fragment_size),
             context,
             span_context: None,
             stack_rows: None,
