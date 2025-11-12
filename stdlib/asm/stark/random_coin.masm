@@ -1,7 +1,7 @@
 #! Disclaimer: most of the procedures in this file assume that the input pointers are word-aligned.
 
-use std::crypto::stark::constants
-use std::crypto::stark::utils
+use std::stark::constants
+use std::stark::utils
 
 
 #! Helper procedure to compute addition of two words component-wise.

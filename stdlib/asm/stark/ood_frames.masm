@@ -1,6 +1,6 @@
-use std::crypto::stark::constants
+use std::stark::constants
 use std::crypto::hashes::rpo
-use std::crypto::stark::random_coin
+use std::stark::random_coin
 
 #! Loads the execution trace and the quotient trace evaluation frames.
 #!
@@ -34,7 +34,7 @@ pub proc load_and_horner_eval_ood_frames
     # by the verifier, we use non-determinism to generate it before doing so. This is done so that
     # we can hash, memory store and Horner evaluate in parallel.
     # The check for the correctness of the use of this non-determinism is checked in
-    # `std::crypto::stark::random_coin::generate_deep_composition_random_coefficients`
+    # `std::stark::random_coin::generate_deep_composition_random_coefficients`
 
     ## Load the random challenge non-deterministically
     adv_push.2

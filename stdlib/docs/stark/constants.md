@@ -1,5 +1,5 @@
 
-## std::crypto::stark::constants
+## std::stark::constants
 | Procedure | Description |
 | ----------- | ------------- |
 | set_lde_domain_info_word | Store details about the LDE domain.<br /><br />The info stored is `[lde_size, log(lde_size), lde_g, 0]`.<br /> |

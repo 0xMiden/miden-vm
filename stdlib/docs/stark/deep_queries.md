@@ -1,5 +1,5 @@
 
-## std::crypto::stark::deep_queries
+## std::stark::deep_queries
 | Procedure | Description |
 | ----------- | ------------- |
 | prepare_stack_deep_queries_computation | Prepares the stack for the computation of the DEEP composition polynomial FRI queries.<br /><br />It also performs some pre-computations that are common to all queries as an optimization.<br /><br />Input: [...]<br />Output: [Y, query_ptr, query_end_ptr, W, query_ptr, ...]<br /><br />where:<br /><br />1. `Y` is a garbage word,<br />2. `query_ptr` is a pointer to the memory region from where the query indices will be fetched<br />and to where the computed FRI queries will be stored in a word-aligned manner,<br />3. `query_end_ptr` is a memory pointer used to indicate the end of the memory region used in<br />storing the computed FRI queries,<br />4. `W` is the word `[q_z_0, q_z_1, q_gz_0, q_gz_1]` where `q_z = (q_z_0, q_z_1)` and<br />`q_gz = (q_gz_0, q_gz_1)` represent the constant terms across all FRI queries computations.<br /> |

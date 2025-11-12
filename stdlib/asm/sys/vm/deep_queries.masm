@@ -1,5 +1,5 @@
-use std::crypto::stark::constants
-use std::crypto::stark::deep_queries
+use std::stark::constants
+use std::stark::deep_queries
 
 # ERRORS
 # =================================================================================================

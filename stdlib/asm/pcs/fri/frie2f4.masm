@@ -1,5 +1,5 @@
-use std::crypto::stark::constants
-use std::crypto::fri::helper
+use std::stark::constants
+use std::pcs::fri::helper
 
 #! Stores the layer commitments C followed by [d_size, t_depth, a1, a0] and [poe, p, e1, e0] where:
 #! 1) d_size is the domain size divided by 4 of the domain corresponding to C.

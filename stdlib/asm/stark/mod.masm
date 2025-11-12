@@ -1,4 +1,4 @@
-use std::crypto::stark::verifier
+use std::stark::verifier
 
 #! Verifies a STARK proof.
 #!

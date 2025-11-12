@@ -1,4 +1,4 @@
-use std::crypto::stark::constants
+use std::stark::constants
 use std::crypto::hashes::rpo
 
 #! Compute the LDE domain generator from the log2 of its size.

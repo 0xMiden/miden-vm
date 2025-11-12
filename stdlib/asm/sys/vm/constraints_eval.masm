@@ -1,6 +1,6 @@
 use std::crypto::hashes::rpo
-use std::crypto::stark::constants
-use std::crypto::stark::utils
+use std::stark::constants
+use std::stark::utils
 
 # CONSTANTS
 # =================================================================================================

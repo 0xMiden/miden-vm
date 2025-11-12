@@ -1,6 +1,6 @@
-use std::crypto::stark::constants
-use std::crypto::stark::random_coin
-use std::crypto::stark::public_inputs
+use std::stark::constants
+use std::stark::random_coin
+use std::stark::public_inputs
 
 use std::crypto::hashes::rpo
 

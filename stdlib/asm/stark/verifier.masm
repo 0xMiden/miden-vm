@@ -1,12 +1,12 @@
-use std::crypto::fri::frie2f4
-use std::crypto::fri::helper
+use std::pcs::fri::frie2f4
+use std::pcs::fri::helper
 
-use std::crypto::stark::deep_queries
-use std::crypto::stark::random_coin
-use std::crypto::stark::ood_frames
-use std::crypto::stark::public_inputs
-use std::crypto::stark::constants
-use std::crypto::stark::utils
+use std::stark::deep_queries
+use std::stark::random_coin
+use std::stark::ood_frames
+use std::stark::public_inputs
+use std::stark::constants
+use std::stark::utils
 
 #! Verifies a STARK proof.
 #!

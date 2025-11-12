@@ -177,8 +177,8 @@ fn variable_length_public_inputs(#[case] num_kernel_proc_digests: usize) {
 
     let source = format!(
         "
-        use std::crypto::stark::random_coin
-        use std::crypto::stark::constants
+        use std::stark::random_coin
+        use std::stark::constants
         use std::sys::vm::public_inputs
 
         begin
@@ -339,8 +339,8 @@ const KERNEL_EVEN_NUM_PROC: &str = r#"
 const TEST_RANDOM_INDICES_GENERATION: &str = r#"
         const QUERY_ADDRESS = 1024
 
-        use std::crypto::stark::random_coin
-        use std::crypto::stark::constants
+        use std::stark::random_coin
+        use std::stark::constants
 
         begin
             exec.constants::set_lde_domain_size

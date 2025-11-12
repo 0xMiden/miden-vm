@@ -11,7 +11,7 @@ pub use verifier_fri_e2f4::*;
 #[test]
 fn fri_fold4_ext2_remainder64() {
     let source = "
-        use std::crypto::fri::frie2f4
+        use std::pcs::fri::frie2f4
 
         begin
             exec.frie2f4::preprocess
@@ -59,7 +59,7 @@ fn fri_fold4_ext2_remainder64() {
 #[test]
 fn fri_fold4_ext2_remainder128() {
     let source = "
-        use std::crypto::fri::frie2f4
+        use std::pcs::fri::frie2f4
 
         begin
             exec.frie2f4::preprocess

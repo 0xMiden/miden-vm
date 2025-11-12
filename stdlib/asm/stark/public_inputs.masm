@@ -1,4 +1,4 @@
-use std::crypto::stark::constants
+use std::stark::constants
 
 #! Processes the public inputs.
 #!

@@ -1,5 +1,5 @@
 
-## std::crypto::fri::frie2f4
+## std::pcs::fri::frie2f4
 | Procedure | Description |
 | ----------- | ------------- |
 | preprocess | Stores the layer commitments C followed by [d_size, t_depth, a1, a0] and [poe, p, e1, e0] where:<br />1) d_size is the domain size divided by 4 of the domain corresponding to C.<br />2) t_depth is the tree depth of the Merkle tree with commitment C.<br />3) (a0, a1) is the folding challenge to create the next layer.<br />4) p is the query index and (e0, e1) is the evaluation at the first layer and poe is g^p with<br />g being the initial domain generator.<br />TODO: This pre-processing function should in fact compute d_size and t_depth for each C<br />starting from the original domain size.<br /> |

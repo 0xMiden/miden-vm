@@ -1,4 +1,4 @@
 
-## std::crypto::stark::public_inputs
+## std::stark::public_inputs
 | Procedure | Description |
 | ----------- | ------------- |

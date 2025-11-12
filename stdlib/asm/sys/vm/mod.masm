@@ -5,7 +5,7 @@ use std::sys::vm::constraints_eval
 use std::sys::vm::ood_frames
 use std::sys::vm::public_inputs
 
-use std::crypto::stark::verifier
+use std::stark::verifier
 
 # Indicates the existence of auxiliary trace segment.
 const IS_AUX_TRACE = 1

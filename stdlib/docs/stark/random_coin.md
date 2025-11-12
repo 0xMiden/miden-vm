@@ -1,7 +1,7 @@
 Disclaimer: most of the procedures in this file assume that the input pointers are word-aligned.<br />
 
 
-## std::crypto::stark::random_coin
+## std::stark::random_coin
 | Procedure | Description |
 | ----------- | ------------- |
 | get_rate_1 | Return the first half of the rate portion of the random coin state<br /><br />The random coin uses RPO to generate data. The RPO state is composed of 3<br />words, 2 words for the rate, and 1 word for the capacity. This procedure<br />returns the first word of the RPO state.<br /><br />Input: [...]<br />Output: [R1, ...]<br />Cycles: 6<br /> |

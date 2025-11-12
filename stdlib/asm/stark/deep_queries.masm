@@ -1,4 +1,4 @@
-use std::crypto::stark::constants
+use std::stark::constants
 
 #! Takes a query index and computes x := offset * domain_gen^index. It also computes the denominators
 #! (x - z) and (x - gz).
