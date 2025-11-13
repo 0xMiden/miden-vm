@@ -441,6 +441,7 @@ pub enum Token<'input> {
     AdvPush,
     AdvStack,
     PushMapval,
+    PushMapvalCount,
     PushMapvaln,
     PushMtnode,
     And,
@@ -666,6 +667,7 @@ impl fmt::Display for Token<'_> {
             Token::AdvPipe => write!(f, "adv_pipe"),
             Token::AdvPush => write!(f, "adv_push"),
             Token::PushMapval => write!(f, "push_mapval"),
+            Token::PushMapvalCount => write!(f, "push_mapval_count"),
             Token::PushMapvaln => write!(f, "push_mapvaln"),
             Token::PushMtnode => write!(f, "push_mtnode"),
             Token::And => write!(f, "and"),
@@ -897,6 +899,7 @@ impl<'input> Token<'input> {
                 | Token::AdvPush
                 | Token::AdvStack
                 | Token::PushMapval
+                | Token::PushMapvalCount
                 | Token::PushMapvaln
                 | Token::PushMtnode
                 | Token::And
@@ -1078,6 +1081,7 @@ impl<'input> Token<'input> {
         ("adv_push", Token::AdvPush),
         ("adv_stack", Token::AdvStack),
         ("push_mapval", Token::PushMapval),
+        ("push_mapval_count", Token::PushMapvalCount),
         ("push_mapvaln", Token::PushMapvaln),
         ("push_mtnode", Token::PushMtnode),
         ("and", Token::And),
