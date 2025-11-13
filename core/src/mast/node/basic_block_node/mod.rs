@@ -203,7 +203,7 @@ impl BasicBlockNode {
                 )
             },
             DecoratorStore::Linked { id } => {
-                // This is usedin MastForestMerger::merge_nodes, which strips the `MastForest` of
+                // This is used in MastForestMerger::merge_nodes, which strips the `MastForest` of
                 // some nodes before remapping decorators, so calling
                 // verify_node_in_forest will not work here.
 
@@ -325,7 +325,7 @@ impl BasicBlockNode {
                     .collect()
             },
             DecoratorStore::Linked { id } => {
-                // This is usedin MastForest::remove_nodes, which strips the `MastForest` of its
+                // This is used in MastForest::remove_nodes, which strips the `MastForest` of its
                 // nodes before remapping decorators, so calling
                 // verify_node_in_forest will not work here.
 
