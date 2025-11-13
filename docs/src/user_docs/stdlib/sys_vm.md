@@ -7,6 +7,8 @@ sidebar_position: 8
 
 Namespace `std::sys::vm` contains low-level helper procedures that are primarily intended for use by the Miden VM recursive verifier.
 
+## Modules
+
 | Module | Description |
 | --- | --- |
 | `std::sys::vm::constraints_eval` | Procedures that perform the constraints evaluation check and manage its associated parameters. |
