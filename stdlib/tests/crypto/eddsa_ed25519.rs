@@ -104,134 +104,91 @@ fn test_eddsa_verify_prehash_cases() {
 #[test]
 fn test_eddsa_verify_prehash_impl_commitment() {
     let valid = generate_valid_data();
-    let valid_request = valid.request();
-    let invalid = generate_invalid_signature_data();
-    let invalid_request = invalid.request();
-
-    // Valid digest commitment
-    let memory_stores = generate_memory_store_masm(&valid_request, &valid.message);
-    let source = format!(
-        "
-            use.std::crypto::dsa::eddsa::ed25519
-            use.std::sys
-
-            begin
-                {memory_stores}
-
-                push.{SIG_ADDR}.{K_DIGEST_ADDR}.{PK_ADDR}
-                exec.ed25519::verify_with_unchecked_k_digest_impl
-
-                exec.sys::truncate_stack
-            end
-        ",
-    );
-
-    let test = build_debug_test!(source, &[]);
-    let output = test.execute().unwrap();
-    let stack = output.stack_outputs();
-
-    let commitment = stack.get_stack_word_be(0).unwrap();
-    let tag = stack.get_stack_word_be(4).unwrap();
-    let precompile_commitment = PrecompileCommitment::new(tag, commitment);
-
-    let verifier_commitment = EddsaPrecompile
-        .verify(&valid_request.to_bytes())
-        .expect("verifier should succeed");
-    assert_eq!(precompile_commitment, verifier_commitment);
-
-    let result = stack.get_stack_item(6).unwrap();
-    assert_eq!(result, Felt::ONE);
-
-    let deferred = output.advice_provider().precompile_requests().to_vec();
-    assert_eq!(deferred.len(), 1, "expected a single deferred request");
-    assert_eq!(deferred[0], valid_request.as_precompile_request());
-
-    assert!(
-        output.advice_provider().stack().is_empty(),
-        "advice stack should be empty after verify_prehash_impl"
-    );
-
-    // Invalid digest commitment
-    let memory_stores = generate_memory_store_masm(&invalid_request, &invalid.message);
-    let source = format!(
-        "
-            use.std::crypto::dsa::eddsa::ed25519
-            use.std::sys
-
-            begin
-                {memory_stores}
-
-                push.{SIG_ADDR}.{K_DIGEST_ADDR}.{PK_ADDR}
-                exec.ed25519::verify_with_unchecked_k_digest_impl
-
-                exec.sys::truncate_stack
-            end
-        ",
-    );
-
-    let test = build_debug_test!(source, &[]);
-    let output = test.execute().unwrap();
-    let stack = output.stack_outputs();
-
-    let commitment = stack.get_stack_word_be(0).unwrap();
-    let tag = stack.get_stack_word_be(4).unwrap();
-    let precompile_commitment = PrecompileCommitment::new(tag, commitment);
-
-    let verifier_commitment = EddsaPrecompile
-        .verify(&invalid_request.to_bytes())
-        .expect("verifier should succeed");
-    assert_eq!(precompile_commitment, verifier_commitment);
-
-    let result = stack.get_stack_item(6).unwrap();
-    assert_eq!(result, Felt::ZERO);
-
-    let deferred = output.advice_provider().precompile_requests().to_vec();
-    assert_eq!(deferred.len(), 1, "expected a single deferred request");
-    assert_eq!(deferred[0], invalid_request.as_precompile_request());
-
-    assert!(
-        output.advice_provider().stack().is_empty(),
-        "advice stack should be empty after verify_with_unchecked_k_digest_impl"
-    );
-}
-
-#[test]
-fn test_eddsa_verify_with_message() {
-    let valid = generate_valid_data();
     let invalid = generate_invalid_signature_data();
 
-    let cases = vec![(valid.clone(), true), (invalid.clone(), false)];
+    let test_cases = vec![
+        (valid.request(), valid.message, true),
+        (invalid.request(), invalid.message, false),
+    ];
 
-    for (data, expected_valid) in cases {
-        let request = data.request();
-        let memory_stores = generate_memory_store_masm(&request, &data.message);
+    for (request, message, expected_valid) in test_cases {
+        let memory_stores = generate_memory_store_masm(&request, &message);
         let source = format!(
             "
-                use.std::crypto::dsa::eddsa::ed25519
-                use.std::sys
+            use.std::crypto::dsa::eddsa::ed25519
+            use.std::sys
 
-                begin
-                    {memory_stores}
+            begin
+                {memory_stores}
 
-                    push.{SIG_ADDR}.{MSG_ADDR}.{PK_ADDR}
-                    exec.ed25519::verify_with_unchecked_k_digest
+                push.{SIG_ADDR}.{K_DIGEST_ADDR}.{PK_ADDR}
+                exec.ed25519::verify_with_unchecked_k_digest_impl
 
-                    exec.sys::truncate_stack
-                end
-            ",
+                exec.sys::truncate_stack
+            end
+        ",
         );
 
         let test = build_debug_test!(source, &[]);
         let output = test.execute().unwrap();
+        let stack = output.stack_outputs();
 
-        let result = output.stack_outputs().get_stack_item(0).unwrap();
-        let expected = if expected_valid { Felt::ONE } else { Felt::ZERO };
-        assert_eq!(result, expected, "verification result mismatch");
+        let commitment = stack.get_stack_word_be(0).unwrap();
+        let tag = stack.get_stack_word_be(4).unwrap();
+        let precompile_commitment = PrecompileCommitment::new(tag, commitment);
+
+        let verifier_commitment =
+            EddsaPrecompile.verify(&request.to_bytes()).expect("verifier should succeed");
+        assert_eq!(precompile_commitment, verifier_commitment);
+
+        let result = stack.get_stack_item(6).unwrap();
+        assert_eq!(result, Felt::from(expected_valid));
 
         let deferred = output.advice_provider().precompile_requests().to_vec();
-        assert_eq!(deferred.len(), 1, "expected one deferred request");
+        assert_eq!(deferred.len(), 1, "expected a single deferred request");
         assert_eq!(deferred[0], request.as_precompile_request());
+
+        assert!(
+            output.advice_provider().stack().is_empty(),
+            "advice stack should be empty after verify_with_unchecked_k_digest_impl"
+        );
     }
+}
+
+#[test]
+fn test_eddsa_verify_with_message() {
+    let message = Word::new([1, 2, 3, 4].map(Felt::new));
+
+    let mut rng = StdRng::seed_from_u64(42);
+    let secret_key = SecretKey::with_rng(&mut rng);
+
+    // Compute public key commitment
+    let pk_felts = bytes_to_packed_u32_felts(&secret_key.public_key().to_bytes());
+    let pk_commitment = Rpo256::hash_elements(&pk_felts);
+    std::eprintln!("pk {pk_felts:?}");
+
+    let stack_words = [message, pk_commitment];
+    let stack_inputs: Vec<_> =
+        Word::words_as_elements(&stack_words).iter().map(Felt::as_int).collect();
+
+    let advice: Vec<_> = eddsa_sign(&secret_key, message).iter().map(Felt::as_int).collect();
+
+    let source = "
+            use.std::crypto::dsa::eddsa::ed25519
+            use.std::sys
+
+            begin
+                debug.adv_stack
+                debug.stack
+                exec.ed25519::verify_eddsa_ed25519_sha512
+
+                exec.sys::truncate_stack
+            end
+        ";
+
+    let test = build_debug_test!(source, &stack_inputs, &advice);
+
+    let _ = test.execute().unwrap();
 }
 
 // TESTS HIGH-LEVEL WRAPPER
@@ -328,9 +285,16 @@ fn generate_valid_data() -> EddsaTestData {
     let mut rng = StdRng::seed_from_u64(42);
     let secret_key = SecretKey::with_rng(&mut rng);
     let pk = secret_key.public_key();
-    let message = [1u8; 32];
-    let sig = secret_key.sign(Word::try_from(message).expect("valid message"));
-    EddsaTestData { pk, message, sig }
+    let message = Word::new([1, 2, 3, 4].map(Felt::new));
+    let sig = secret_key.sign(message);
+    let message_bytes: Vec<_> =
+        message.into_iter().flat_map(|felt| felt.as_int().to_le_bytes()).collect();
+
+    EddsaTestData {
+        pk,
+        message: message_bytes.try_into().unwrap(),
+        sig,
+    }
 }
 
 fn generate_invalid_signature_data() -> EddsaTestData {

@@ -95,7 +95,6 @@ export.verify_eddsa_ed25519_sha512.72
 
     # Compute k_digest = SHA-512(R || PK || MSG) over 96 bytes
     push.96 locaddr.32 exec.sha2_512::hash_memory
-    #debug.stack
     # => [DIGEST[16], ...]
 
     # Store the digest at locaddr[48..63] (16 felts = 64 bytes)
@@ -225,23 +224,23 @@ export.verify_with_unchecked_k_digest_impl
     adv_push.1
     # => [result, pk_ptr, k_digest_ptr, sig_ptr, ...]
 
-    # Compute COMM_PK = Rpo256(pk)
+    # Compute COMM_PK = rpo::hash_memory(pk_ptr, PK_LEN_FELTS)
     push.PK_LEN_FELTS movup.2 exec.rpo::hash_memory
     # => [COMM_PK, result, k_digest_ptr, sig_ptr]
 
-    # Compute COMM_K = Rpo256(k_digest)
+    # Compute COMM_K = rpo::hash_memory(k_digest_ptr, K_DIGEST_LEN_FELTS)
     push.K_DIGEST_LEN_FELTS movup.6 exec.rpo::hash_memory
     # => [COMM_K, COMM_PK, result, sig_ptr]
 
-    # Merge COMM_PK and COMM_K into COMM_PK_K = Rpo256(Rpo256(pk) || Rpo256(k_digest))
+    # Merge COMM_PK and COMM_K into COMM_PK_K = hmerge(COMM_PK, COMM_K)
     hmerge
     # => [COMM_PK_K, result, sig_ptr]
 
-    # Compute COMM_SIG = Rpo256(signature)
+    # Compute COMM_SIG = rpo::hash_memory(sig_ptr, SIG_LEN_FELTS)
     push.SIG_LEN_FELTS movup.6 exec.rpo::hash_memory
     # => [COMM_SIG, COMM_PK_K, result]
 
-    # Merge into final commitment COMM = Rpo256(COMM_PK_K || COMM_SIG)
+    # Merge into final commitment COMM = hmerge(COMM_PK_K, COMM_SIG)
     hmerge
     # => [COMM, result]
 
@@ -256,54 +255,42 @@ end
 #! Output: `[result, ...]`
 proc.verify_miden_crypto.28
     # Preserve signature pointer for the final verifier call.
-    dup
-    movdn.7
+    dup movdn.7
     # => [sig_ptr, pk_ptr, msg3, msg2, msg1, msg0, sig_ptr, ...]
 
     # Preserve public key pointer for the final verifier call.
-    dup.1
-    movdn.8
+    dup.1 movdn.8
     # => [sig_ptr, pk_ptr, msg3, msg2, msg1, msg0, sig_ptr, pk_ptr, ...]
 
     # Copy R (first 32 bytes of the signature) into locals starting at `locaddr.0`.
-    locaddr.0
     # => [write_ptr, sig_ptr, pk_ptr, msg3, msg2, msg1, msg0, sig_ptr, pk_ptr, ...]
-    exec.copy_two_words_from_memory
+    locaddr.0 exec.copy_two_words_from_memory
     # => [write_ptr + 8, pk_ptr, msg3, msg2, msg1, msg0, sig_ptr, pk_ptr, ...]
 
     # Copy the public key bytes immediately after R.
     exec.copy_two_words_from_memory
     # => [write_ptr + 16, msg3, msg2, msg1, msg0, sig_ptr, pk_ptr, ...]
 
-    # Append the message word to the staged preimage.
-    mem_storew_be
-    dropw
-    # => [sig_ptr_copy, pk_ptr_copy, ...]
+    # Append the message word to the staged preimage at write_ptr + 16.
+    mem_storew_be dropw
+    # => [sig_ptr, pk_ptr, ...]
 
     # Hash the 96-byte preimage with SHA2-512.
-    locaddr.0
-    push.96
-    swap
+    locaddr.0 push.96 swap
     exec.sha2_512::hash_memory
-    # => [DIGEST_U32[16], sig_ptr_copy, pk_ptr_copy]
+    # => [DIGEST_U32[16], sig_ptr, pk_ptr]
 
     # Write the digest back to the start of the local buffer (indices 0..15).
     locaddr.0
-    loc_store.24 drop
-    # => [DIGEST_U32[16], sig_ptr_copy, pk_ptr_copy]
+    # => [k_digest_ptr, DIGEST_U32[0..16], sig_ptr, pk_ptr]
     repeat.4
-        loc_load.24
-        mem_storew_be
-        dropw
-        loc_load.24 push.1 add loc_store.24 drop
+        dup add.4 movdn.6
+        mem_storew_be dropw
     end
-    # => [sig_ptr_copy, pk_ptr_copy]
+    # => [sig_ptr, pk_ptr]
 
     # Arrange arguments as [pk_ptr, k_digest_ptr, sig_ptr] and invoke the verifier.
-    swap
-    # => [pk_ptr_copy, sig_ptr_copy]
-    locaddr.0
-    swap
-    # => [pk_ptr_copy, k_digest_ptr, sig_ptr_copy]
+    swap locaddr.0 swap
+    # => [pk_ptr, k_digest_ptr, sig_ptr]
     exec.verify_with_unchecked_k_digest
 end

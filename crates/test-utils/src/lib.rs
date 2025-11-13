@@ -12,7 +12,6 @@ use alloc::{
     vec,
     vec::Vec,
 };
-use std::eprintln;
 
 use miden_assembly::{KernelLibrary, Library, Parse, diagnostics::reporting::PrintDiagnostic};
 pub use miden_assembly::{
@@ -533,7 +532,10 @@ impl Test {
     pub fn get_last_stack_state(&self) -> StackOutputs {
         let trace = self
             .execute()
-            .inspect_err(|err| eprintln!("{}", PrintDiagnostic::new_without_color(err)))
+            .inspect_err(|err| {
+                #[cfg(feature = "std")]
+                std::eprintln!("{}", PrintDiagnostic::new_without_color(err))
+            })
             .expect("failed to execute");
 
         trace.last_stack_state()
