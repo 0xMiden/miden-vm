@@ -24,6 +24,62 @@ pub struct VerifierData {
     pub advice_map: Vec<(Word, Vec<Felt>)>,
 }
 
+/// Generates advice inputs required for recursive STARK proof verification in Miden VM.
+///
+/// During the course of its execution, the recursive verifier will make use of non-deterministic
+/// advice data through the advice provider.
+/// In what follows is a description of the expected layout per component of the advice provider.
+/// We also include the expected layout of the operand stack for completness.
+///
+/// # Operand Stack Layout
+///
+/// ```
+/// | Position | Content           | Size (in Felt) | Description                      |
+/// | -------- | ----------------- | -------------- | -------------------------------- |
+/// | 0        | grinding_factor   | 1              | Proof-of-work difficulty in bits |
+/// | 1        | num_queries       | 1              | Number of FRI queries            |
+/// | 2        | trace_length_log2 | 1              | Log2 of execution trace length   |
+/// ```
+///
+/// # Advice Stack Layout
+///
+/// ```
+/// | Position | Content                | Size (in Felt) | Description                                           |
+/// | -------- | ---------------------- | -------------- | ----------------------------------------------------- |
+/// | 0        | variable_len_pi_size   | 1              | Size of variable length PI in Felt                    |
+/// | 1-n      | public_inputs_data     | varies         | Input/output stacks + Program digest + kernel digests |
+/// | n+1-n+4  | aux_randomness         | 4              | β = (β₀, β₁), ɑ = (ɑ₀, ɑ₁)                            |
+/// | n+5      | num_kernel_procedures  | 1              | Count of kernel procedure digests                     |
+/// | n+6-m    | trace_commitments      | 4 or 8         | Main/auxiliary trace segment commitments              |
+/// | m+1-p    | constraint_commitment  | 4              | Constraint composition commitment                     |
+/// | p+1-p+2  | alpha_deep_randomness  | 2              | Deep composition randomness                           |
+/// | p+3-q    | ood_evaluations        | varies         | Out-of-domain trace and constraint evals              |
+/// | q+1-r    | fri_commitments        | varies         | FRI layer commitment digests                          |
+/// | r+1-s    | fri_remainder_poly     | varies         | FRI remainder polynomial coefficients                 |
+/// | s+1      | pow_nonce              | 1              | Proof-of-work nonce                                   |
+/// ```
+///
+/// # Advice Merkle Store Content
+///
+/// ```
+/// |         Merkle trees         |
+/// | ---------------------------- |
+/// | Main trace segment tree      |
+/// | Auxiliary trace segment tree |
+/// | Constraint composition tree  |
+/// | FRI layers commitment trees  |
+/// ```
+///
+/// # Advice Map Layout
+///
+/// ```
+/// | Key (Word)                                               | Value (Vec<Felt>)                   |
+/// | -------------------------------------------------------- | ----------------------------------- |
+/// | Leaf hash of main trace segment tree at query index      | Main trace evaluations              |
+/// | Leaf hash of auxiliary trace segment tree at query index | Auxiliary trace evaluations         |
+/// | Leaf hash of constraint composition tree at query index  | Constraint evaluations              |
+/// | FRI layer evaluations at folded query index              | FRI codeword evaluations on a coset |
+/// ```
 pub fn generate_advice_inputs(
     proof: Proof,
     pub_inputs: <ProcessorAir as Air>::PublicInputs,
@@ -39,9 +95,9 @@ pub fn generate_advice_inputs(
     // note that since we are padding the fixed length inputs, in our case the program digest, to
     // be double-word aligned, we have to subtract `2 * WORD_SIZE` instead of `WORD_SIZE` for
     // the program digest
-    let digests_elements = num_elements_pi - MIN_STACK_DEPTH * 2 - 2 * WORD_SIZE;
-    assert_eq!(digests_elements % WORD_SIZE, 0);
-    let num_kernel_procedures_digests = digests_elements / (2 * WORD_SIZE);
+    let variable_len_pi_size = num_elements_pi - MIN_STACK_DEPTH * 2 - 2 * WORD_SIZE;
+    assert_eq!(variable_len_pi_size % WORD_SIZE, 0);
+    let num_kernel_procedures_digests = variable_len_pi_size / (2 * WORD_SIZE);
 
     // we need to provide the following instance specific data through the operand stack
     let initial_stack = vec![
@@ -53,7 +109,7 @@ pub fn generate_advice_inputs(
     // build a seed for the public coin; the initial seed is the hash of public inputs and proof
     // context, but as the protocol progresses, the coin will be reseeded with the info received
     // from the prover
-    let mut advice_stack = vec![digests_elements as u64];
+    let mut advice_stack = vec![variable_len_pi_size as u64];
     let mut public_coin_seed = proof.context.to_elements();
     public_coin_seed.extend_from_slice(&pub_inputs_elements);
 
