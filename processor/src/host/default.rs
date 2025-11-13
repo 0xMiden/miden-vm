@@ -6,8 +6,9 @@ use miden_debug_types::{
 };
 
 use crate::{
-    AdviceMutation, AsyncHost, BaseHost, DebugHandler, EventHandler, EventHandlerRegistry,
-    ExecutionError, MastForestStore, MemMastForestStore, ProcessState, SyncHost,
+    AdviceMutation, AssertError, AsyncHost, BaseHost, DebugError, DebugHandler, EventHandler,
+    EventHandlerRegistry, ExecutionError, MastForestStore, MemMastForestStore, ProcessState,
+    SyncHost, TraceError,
     host::{EventError, FutureMaybeSend, debug::DefaultDebugHandler},
 };
 
@@ -136,20 +137,22 @@ where
         &mut self,
         process: &mut ProcessState,
         options: &DebugOptions,
-    ) -> Result<(), ExecutionError> {
+    ) -> Result<(), DebugError> {
         self.debug_handler.on_debug(process, options)
     }
 
-    fn on_trace(
-        &mut self,
-        process: &mut ProcessState,
-        trace_id: u32,
-    ) -> Result<(), ExecutionError> {
+    fn on_trace(&mut self, process: &mut ProcessState, trace_id: u32) -> Result<(), TraceError> {
         self.debug_handler.on_trace(process, trace_id)
     }
 
     /// Handles the failure of the assertion instruction.
-    fn on_assert_failed(&mut self, _process: &ProcessState, _err_code: Felt) {}
+    fn on_assert_failed(
+        &mut self,
+        _process: &ProcessState,
+        _err_code: Felt,
+    ) -> Option<AssertError> {
+        None
+    }
 
     fn resolve_event(&self, event_id: EventId) -> Option<&EventName> {
         self.event_handlers.resolve_event(event_id)

@@ -27,14 +27,10 @@ impl Process {
     {
         if self.stack.get(0) != ONE {
             let process = &mut self.state();
-            host.on_assert_failed(process, err_code);
+            let clk = process.clk();
+            let err = host.on_assert_failed(process, err_code);
             let err_msg = program.resolve_error_message(err_code);
-            return Err(ExecutionError::failed_assertion(
-                process.clk(),
-                err_code,
-                err_msg,
-                err_ctx,
-            ));
+            return Err(ExecutionError::failed_assertion(clk, err_code, err_msg, err, err_ctx));
         }
         self.stack.shift_left(1);
         Ok(())
