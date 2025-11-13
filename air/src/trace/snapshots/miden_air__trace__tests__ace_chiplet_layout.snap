@@ -1,0 +1,34 @@
+---
+source: air/src/trace/tests.rs
+expression: layout
+---
+ACE CHIPLET LAYOUT
+=====================
+
+Chiplet Selectors:
+  Number of ACE selectors: 4
+
+Column Indices (ordered by index):
+  - 0: Selector start
+  - 1: Selector block
+  - 2: Context
+  - 3: Pointer
+  - 4: Clock
+  - 5: Eval operation
+  - 6: ID 0
+  - 7: Value 0_0
+  - 8: Value 0_1
+  - 9: ID 1
+  - 10: Value 1_0
+  - 11: Value 1_1
+  - 12: ID 2
+  - 12: Read num eval
+  - 13: Value 2_0
+  - 14: Value 2_1
+  - 14: Multiplicity 1
+  - 15: Multiplicity 0
+
+Other Constants:
+  Number of columns: 16
+  ACE init label: 8
+  Instruction ID2 offset: 1152921504606846976
