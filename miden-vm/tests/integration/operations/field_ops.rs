@@ -324,7 +324,7 @@ fn pow2_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::FailedAssertion{clk, err_code, err_msg, label: _, source_file: _ }
+        ExecutionError::FailedAssertion{clk, err_code, err_msg, .. }
         if clk == RowIndex::from(21) && err_code == ZERO && err_msg.is_none()
     );
 }
@@ -356,7 +356,7 @@ fn exp_bits_length_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::FailedAssertion{clk, err_code, err_msg, label: _, source_file: _ }
+        ExecutionError::FailedAssertion{clk, err_code, err_msg, .. }
         if clk == RowIndex::from(23) && err_code == ZERO && err_msg.is_none()
     );
 

@@ -14,7 +14,10 @@ use miden_debug_types::{SourceFile, SourceSpan};
 use miden_utils_diagnostics::{Diagnostic, miette};
 use winter_prover::ProverError;
 
-use crate::{BaseHost, EventError, MemoryError, host::advice::AdviceError};
+use crate::{
+    AssertError, BaseHost, DebugError, EventError, MemoryError, TraceError,
+    host::advice::AdviceError,
+};
 // EXECUTION ERROR
 // ================================================================================================
 
@@ -38,6 +41,19 @@ pub enum ExecutionError {
     CycleLimitExceeded(u32),
     #[error("decorator id {decorator_id} does not exist in MAST forest")]
     DecoratorNotFoundInForest { decorator_id: DecoratorId },
+    #[error("debug handler error at clock cycle {clk}: {err}")]
+    DebugHandlerError {
+        clk: RowIndex,
+        #[source]
+        err: DebugError,
+    },
+    #[error("trace handler error at clock cycle {clk} for trace ID {trace_id}: {err}")]
+    TraceHandlerError {
+        clk: RowIndex,
+        trace_id: u32,
+        #[source]
+        err: TraceError,
+    },
     #[error("division by zero at clock cycle {clk}")]
     #[diagnostic()]
     DivideByZero {
@@ -92,6 +108,8 @@ pub enum ExecutionError {
         clk: RowIndex,
         err_code: Felt,
         err_msg: Option<Arc<str>>,
+        #[source]
+        err: Option<AssertError>,
     },
     #[error("failed to execute the program for internal reason: {0}")]
     FailedToExecuteProgram(&'static str),
@@ -315,6 +333,7 @@ impl ExecutionError {
         clk: RowIndex,
         err_code: Felt,
         err_msg: Option<Arc<str>>,
+        err: Option<AssertError>,
         err_ctx: &impl ErrorContext,
     ) -> Self {
         let (label, source_file) = err_ctx.label_and_source_file();
@@ -325,6 +344,7 @@ impl ExecutionError {
             clk,
             err_code,
             err_msg,
+            err,
         }
     }
 
