@@ -112,13 +112,13 @@ impl FastProcessor {
         // happen for decorators appearing after all operations in a block. these decorators are
         // executed after BASIC BLOCK is closed to make sure the VM clock cycle advances beyond the
         // last clock cycle of the BASIC BLOCK ops.
-        let err_ctx = ErrorContext::new(program, node_id, self.clk);
         for (_, decorator_id) in decorator_ids {
             let decorator = program
                 .get_decorator_by_id(decorator_id)
                 .ok_or(OperationError::DecoratorNotFoundInForest(decorator_id))
-                .map_exec_err(&err_ctx, host)?;
-            self.execute_decorator(decorator, host)?;
+                .map_exec_err(&ErrorContext::new(program, node_id), host, self.clk)?;
+            self.execute_decorator(decorator, host)
+                .map_exec_err(&ErrorContext::new(program, node_id), host, self.clk)?;
         }
 
         self.execute_after_exit_decorators(node_id, current_forest, host)
@@ -148,13 +148,12 @@ impl FastProcessor {
         for (op_idx_in_batch, op) in batch.ops().iter().enumerate() {
             let op_idx_in_block = batch_offset_in_block + op_idx_in_batch;
             while let Some((_, decorator_id)) = decorators.next_filtered(op_idx_in_block) {
-                let decorator_err_ctx =
-                    ErrorContext::with_op(program, node_id, op_idx_in_block, self.clk);
                 let decorator = program
                     .get_decorator_by_id(decorator_id)
                     .ok_or(OperationError::DecoratorNotFoundInForest(decorator_id))
-                    .map_exec_err(&decorator_err_ctx, host)?;
-                self.execute_decorator(decorator, host)?;
+                    .map_exec_err(&ErrorContext::with_op(program, node_id, op_idx_in_block), host, self.clk)?;
+                self.execute_decorator(decorator, host)
+                    .map_exec_err(&ErrorContext::with_op(program, node_id, op_idx_in_block), host, self.clk)?;
             }
 
             // if in trace mode, check if we need to record a trace state before executing the
@@ -171,16 +170,14 @@ impl FastProcessor {
             // Note: we handle the `Emit` operation separately, because it is an async operation,
             // whereas all the other operations are synchronous (resulting in a significant
             // performance improvement).
-            {
-                let err_ctx = ErrorContext::with_op(program, node_id, op_idx_in_block, self.clk);
-                match op {
-                    Operation::Emit => self.op_emit(host).await.map_exec_err(&err_ctx, host)?,
-                    _ => {
-                        // if the operation is not an Emit, we execute it normally
-                        self.execute_sync_op(op, op_idx_in_block, program, host, tracer)
-                            .map_exec_err(&err_ctx, host)?;
-                    },
-                }
+            match op {
+                Operation::Emit => self.op_emit(host).await
+                    .map_exec_err(&ErrorContext::with_op(program, node_id, op_idx_in_block), host, self.clk)?,
+                _ => {
+                    // if the operation is not an Emit, we execute it normally
+                    self.execute_sync_op(op, op_idx_in_block, program, host, tracer)
+                        .map_exec_err(&ErrorContext::with_op(program, node_id, op_idx_in_block), host, self.clk)?;
+                },
             }
 
             // if the operation carries an immediate value, the value is stored at the next group

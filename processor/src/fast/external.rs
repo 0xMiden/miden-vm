@@ -5,7 +5,7 @@ use miden_core::mast::{ExternalNode, MastForest, MastNodeExt, MastNodeId};
 use crate::{
     AsyncHost, ExecutionError, OperationError,
     continuation_stack::ContinuationStack,
-    errors::OperationResultExt,
+    errors::{ErrorContext, OperationResultExt},
     fast::{FastProcessor, Tracer},
 };
 
@@ -24,8 +24,10 @@ impl FastProcessor {
         self.execute_before_enter_decorators(external_node_id, current_forest, host)?;
 
         let external_node = current_forest[external_node_id].unwrap_external();
-        let (resolved_node_id, new_mast_forest) =
-            self.resolve_external_node(external_node, host).await?;
+        let (resolved_node_id, new_mast_forest) = self
+            .resolve_external_node(external_node, host)
+            .await
+            .map_exec_err(&ErrorContext::new(current_forest, external_node_id), host, self.clk)?;
 
         tracer.record_mast_forest_resolution(resolved_node_id, &new_mast_forest);
 
@@ -51,19 +53,17 @@ impl FastProcessor {
         &mut self,
         external_node: &ExternalNode,
         host: &mut impl AsyncHost,
-    ) -> Result<(MastNodeId, Arc<MastForest>), ExecutionError> {
+    ) -> Result<(MastNodeId, Arc<MastForest>), OperationError> {
         let (root_id, mast_forest) = self
             .load_mast_forest(external_node.digest(), host, |root_digest| {
                 OperationError::NoMastForestWithProcedure { root_digest }
             })
-            .await
-            .map_exec_err_no_ctx(self.clk)?;
+            .await?;
 
         // if the node that we got by looking up an external reference is also an External
         // node, we are about to enter into an infinite loop - so, return an error
         if mast_forest[root_id].is_external() {
-            return OperationError::CircularExternalNode(external_node.digest())
-                .map_exec_err_no_ctx(self.clk);
+            return Err(OperationError::CircularExternalNode(external_node.digest()));
         }
 
         Ok((root_id, mast_forest))

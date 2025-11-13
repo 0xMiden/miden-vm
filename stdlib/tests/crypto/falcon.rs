@@ -4,8 +4,8 @@ use miden_air::{Felt, ProvingOptions, RowIndex};
 use miden_assembly::{Assembler, utils::Serializable};
 use miden_core::{EventName, StarkField, ZERO};
 use miden_processor::{
-    AdviceInputs, AdviceMutation, DefaultHost, EventError, OperationError,
-    ProcessState, Program, ProgramInfo, StackInputs, crypto::RpoRandomCoin,
+    AdviceInputs, AdviceMutation, DefaultHost, EventError, OperationError, ProcessState, Program,
+    ProgramInfo, StackInputs, crypto::RpoRandomCoin,
 };
 use miden_stdlib::{StdLibrary, falcon_sign};
 use miden_utils_testing::{

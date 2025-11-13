@@ -24,10 +24,6 @@ impl FastProcessor {
         host: &mut impl AsyncHost,
         tracer: &mut impl Tracer,
     ) -> Result<(), ExecutionError> {
-        // Capture clock at the start for error reporting consistency with slow processor.
-        // This ensures initial condition errors report the same clock cycle in both paths.
-        let clk_at_start = self.clk;
-
         tracer.start_clock_cycle(
             self,
             NodeExecutionState::Start(current_node_id),
@@ -73,8 +69,8 @@ impl FastProcessor {
             // Execute decorators that should be executed after exiting the node
             self.execute_after_exit_decorators(current_node_id, current_forest, host)?;
         } else {
-            let err_ctx = ErrorContext::new(current_forest, current_node_id, clk_at_start);
-            return OperationError::NotBinaryValueLoop(condition).map_exec_err(&err_ctx, host);
+            return OperationError::NotBinaryValueLoop(condition)
+                .map_exec_err(&ErrorContext::new(current_forest, current_node_id), host, self.clk);
         }
         Ok(())
     }
@@ -125,8 +121,8 @@ impl FastProcessor {
             self.increment_clk(tracer);
             self.execute_after_exit_decorators(current_node_id, current_forest, host)?;
         } else {
-            let err_ctx = ErrorContext::new(current_forest, current_node_id, self.clk);
-            return OperationError::NotBinaryValueLoop(condition).map_exec_err(&err_ctx, host);
+            return OperationError::NotBinaryValueLoop(condition)
+                .map_exec_err(&ErrorContext::new(current_forest, current_node_id), host, self.clk);
         }
         Ok(())
     }

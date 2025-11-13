@@ -12,10 +12,11 @@ use miden_core::{
 };
 
 use crate::{
-    AdviceInputs, AdviceProvider, AsyncHost, ContextId, ExecutionError, OperationError,
-    ProcessState,
+    AdviceInputs, AdviceProvider, AsyncHost, ContextId, ErrorContext, ExecutionError,
+    OperationError, ProcessState,
     chiplets::Ace,
     continuation_stack::{Continuation, ContinuationStack},
+    errors::OperationResultExt,
     fast::execution_tracer::{ExecutionTracer, TraceGenerationContext},
 };
 
@@ -380,39 +381,47 @@ impl FastProcessor {
                             )
                             .await?
                         },
-                        MastNode::Join(join_node) => self.start_join_node(
-                            join_node,
-                            node_id,
-                            &current_forest,
-                            &mut continuation_stack,
-                            host,
-                            tracer,
-                        )?,
-                        MastNode::Split(split_node) => self.start_split_node(
-                            split_node,
-                            node_id,
-                            &current_forest,
-                            &mut continuation_stack,
-                            host,
-                            tracer,
-                        )?,
-                        MastNode::Loop(loop_node) => self.start_loop_node(
-                            loop_node,
-                            node_id,
-                            &current_forest,
-                            &mut continuation_stack,
-                            host,
-                            tracer,
-                        )?,
-                        MastNode::Call(call_node) => self.start_call_node(
-                            call_node,
-                            node_id,
-                            program,
-                            &current_forest,
-                            &mut continuation_stack,
-                            host,
-                            tracer,
-                        )?,
+                        MastNode::Join(join_node) => {
+                            self.start_join_node(
+                                join_node,
+                                node_id,
+                                &current_forest,
+                                &mut continuation_stack,
+                                host,
+                                tracer,
+                            )?
+                        },
+                        MastNode::Split(split_node) => {
+                            self.start_split_node(
+                                split_node,
+                                node_id,
+                                &current_forest,
+                                &mut continuation_stack,
+                                host,
+                                tracer,
+                            )?
+                        },
+                        MastNode::Loop(loop_node) => {
+                            self.start_loop_node(
+                                loop_node,
+                                node_id,
+                                &current_forest,
+                                &mut continuation_stack,
+                                host,
+                                tracer,
+                            )?
+                        },
+                        MastNode::Call(call_node) => {
+                            self.start_call_node(
+                                call_node,
+                                node_id,
+                                program,
+                                &current_forest,
+                                &mut continuation_stack,
+                                host,
+                                tracer,
+                            )?
+                        },
                         MastNode::Dyn(_) => {
                             self.start_dyn_node(
                                 node_id,
@@ -435,41 +444,51 @@ impl FastProcessor {
                         },
                     }
                 },
-                Continuation::FinishJoin(node_id) => self.finish_join_node(
-                    node_id,
-                    &current_forest,
-                    &mut continuation_stack,
-                    host,
-                    tracer,
-                )?,
-                Continuation::FinishSplit(node_id) => self.finish_split_node(
-                    node_id,
-                    &current_forest,
-                    &mut continuation_stack,
-                    host,
-                    tracer,
-                )?,
-                Continuation::FinishLoop(node_id) => self.finish_loop_node(
-                    node_id,
-                    &current_forest,
-                    &mut continuation_stack,
-                    host,
-                    tracer,
-                )?,
-                Continuation::FinishCall(node_id) => self.finish_call_node(
-                    node_id,
-                    &current_forest,
-                    &mut continuation_stack,
-                    host,
-                    tracer,
-                )?,
-                Continuation::FinishDyn(node_id) => self.finish_dyn_node(
-                    node_id,
-                    &current_forest,
-                    &mut continuation_stack,
-                    host,
-                    tracer,
-                )?,
+                Continuation::FinishJoin(node_id) => {
+                    self.finish_join_node(
+                        node_id,
+                        &current_forest,
+                        &mut continuation_stack,
+                        host,
+                        tracer,
+                    )?
+                },
+                Continuation::FinishSplit(node_id) => {
+                    self.finish_split_node(
+                        node_id,
+                        &current_forest,
+                        &mut continuation_stack,
+                        host,
+                        tracer,
+                    )?
+                },
+                Continuation::FinishLoop(node_id) => {
+                    self.finish_loop_node(
+                        node_id,
+                        &current_forest,
+                        &mut continuation_stack,
+                        host,
+                        tracer,
+                    )?
+                },
+                Continuation::FinishCall(node_id) => {
+                    self.finish_call_node(
+                        node_id,
+                        &current_forest,
+                        &mut continuation_stack,
+                        host,
+                        tracer,
+                    )?
+                },
+                Continuation::FinishDyn(node_id) => {
+                    self.finish_dyn_node(
+                        node_id,
+                        &current_forest,
+                        &mut continuation_stack,
+                        host,
+                        tracer,
+                    )?
+                },
                 Continuation::FinishExternal(node_id) => {
                     // Execute after_exit decorators when returning from an external node
                     // Note: current_forest should already be restored by EnterForest continuation
@@ -508,10 +527,16 @@ impl FastProcessor {
     ) -> Result<(), ExecutionError> {
         let node = current_forest
             .get_node_by_id(node_id)
-            .expect("internal error: node id {node_id} not found in current forest");
+            .ok_or(OperationError::MastNodeNotFoundInForest(node_id))
+            .map_exec_err(&ErrorContext::new(current_forest, node_id), host, self.clk)?;
 
         for &decorator_id in node.before_enter(current_forest) {
-            self.execute_decorator(&current_forest[decorator_id], host)?;
+            let decorator = current_forest
+                .get_decorator_by_id(decorator_id)
+                .ok_or(OperationError::DecoratorNotFoundInForest(decorator_id))
+                .map_exec_err(&ErrorContext::new(current_forest, node_id), host, self.clk)?;
+            self.execute_decorator(decorator, host)
+                .map_exec_err(&ErrorContext::new(current_forest, node_id), host, self.clk)?;
         }
 
         Ok(())
@@ -526,10 +551,16 @@ impl FastProcessor {
     ) -> Result<(), ExecutionError> {
         let node = current_forest
             .get_node_by_id(node_id)
-            .expect("internal error: node id {node_id} not found in current forest");
+            .ok_or(OperationError::MastNodeNotFoundInForest(node_id))
+            .map_exec_err(&ErrorContext::new(current_forest, node_id), host, self.clk)?;
 
         for &decorator_id in node.after_exit(current_forest) {
-            self.execute_decorator(&current_forest[decorator_id], host)?;
+            let decorator = current_forest
+                .get_decorator_by_id(decorator_id)
+                .ok_or(OperationError::DecoratorNotFoundInForest(decorator_id))
+                .map_exec_err(&ErrorContext::new(current_forest, node_id), host, self.clk)?;
+            self.execute_decorator(decorator, host)
+                .map_exec_err(&ErrorContext::new(current_forest, node_id), host, self.clk)?;
         }
 
         Ok(())
@@ -540,12 +571,13 @@ impl FastProcessor {
         &mut self,
         decorator: &Decorator,
         host: &mut impl AsyncHost,
-    ) -> Result<(), ExecutionError> {
+    ) -> Result<(), OperationError> {
         match decorator {
             Decorator::Debug(options) => {
                 if self.in_debug_mode {
                     let process = &mut self.state();
-                    host.on_debug(process, options)?;
+                    host.on_debug(process, options)
+                        .map_err(|err| OperationError::DecoErr(Box::new(err)))?;
                 }
             },
             Decorator::AsmOp(_assembly_op) => {
@@ -553,7 +585,8 @@ impl FastProcessor {
             },
             Decorator::Trace(id) => {
                 let process = &mut self.state();
-                host.on_trace(process, *id)?;
+                host.on_trace(process, *id)
+                    .map_err(|err| OperationError::DecoErr(Box::new(err)))?;
             },
         };
         Ok(())

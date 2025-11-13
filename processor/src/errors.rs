@@ -130,6 +130,9 @@ pub enum OperationError {
     #[error("advice error")]
     #[diagnostic()]
     AdviceError(#[source] AdviceError),
+    #[error("decorator execution failed")]
+    #[diagnostic(transparent)]
+    DecoErr(Box<ExecutionError>),
     #[error("external node with mast root {0} resolved to an external node")]
     CircularExternalNode(Word),
     #[error("decorator id {0} does not exist in MAST forest")]
@@ -326,7 +329,6 @@ pub enum AceError {
 /// ```
 #[cfg(not(feature = "no_err_ctx"))]
 pub struct ErrorContext<'a> {
-    clk: RowIndex,
     program: &'a MastForest,
     node_id: MastNodeId,
     op_idx: Option<usize>,
@@ -334,7 +336,6 @@ pub struct ErrorContext<'a> {
 
 #[cfg(feature = "no_err_ctx")]
 pub struct ErrorContext<'a> {
-    clk: RowIndex,
     _phantom: core::marker::PhantomData<&'a ()>,
 }
 
@@ -349,15 +350,14 @@ impl<'a> ErrorContext<'a> {
     ///
     /// * `program` - The MAST forest containing the node
     /// * `node_id` - ID of the node where the error occurred
-    /// * `clk` - Clock cycle when the error occurred
     ///
     /// # Performance
     ///
     /// This is a cheap operation - just stores references and scalars. No MAST traversal
     /// or host lookups occur until `resolve_source()` is called (in error path).
     #[inline]
-    pub fn new(program: &'a MastForest, node_id: MastNodeId, clk: RowIndex) -> Self {
-        Self { clk, program, node_id, op_idx: None }
+    pub fn new(program: &'a MastForest, node_id: MastNodeId) -> Self {
+        Self { program, node_id, op_idx: None }
     }
 
     /// Create context for operation-level errors (specific operation in node).
@@ -370,7 +370,6 @@ impl<'a> ErrorContext<'a> {
     /// * `program` - The MAST forest containing the node
     /// * `node_id` - ID of the node containing the operation
     /// * `op_idx` - Index of the operation within the node
-    /// * `clk` - Clock cycle when the error occurred
     ///
     /// # Performance
     ///
@@ -381,10 +380,8 @@ impl<'a> ErrorContext<'a> {
         program: &'a MastForest,
         node_id: MastNodeId,
         op_idx: usize,
-        clk: RowIndex,
     ) -> Self {
         Self {
-            clk,
             program,
             node_id,
             op_idx: Some(op_idx),
@@ -396,49 +393,38 @@ impl<'a> ErrorContext<'a> {
 impl<'a> ErrorContext<'a> {
     /// Create context for node-level errors (no specific operation index).
     ///
-    /// When the `no_err_ctx` feature is enabled, this just stores the clock cycle.
+    /// When the `no_err_ctx` feature is enabled, this is a no-op.
     ///
     /// # Arguments
     ///
     /// * `program` - The MAST forest (ignored in no_err_ctx build)
     /// * `node_id` - ID of the node (ignored in no_err_ctx build)
-    /// * `clk` - Clock cycle when the error occurred
     #[inline]
-    pub fn new(_program: &'a MastForest, _node_id: MastNodeId, clk: RowIndex) -> Self {
-        Self { clk, _phantom: core::marker::PhantomData }
+    pub fn new(_program: &'a MastForest, _node_id: MastNodeId) -> Self {
+        Self { _phantom: core::marker::PhantomData }
     }
 
     /// Create context for operation-level errors (specific operation in node).
     ///
-    /// When the `no_err_ctx` feature is enabled, this just stores the clock cycle.
+    /// When the `no_err_ctx` feature is enabled, this is a no-op.
     ///
     /// # Arguments
     ///
     /// * `program` - The MAST forest (ignored in no_err_ctx build)
     /// * `node_id` - ID of the node (ignored in no_err_ctx build)
     /// * `op_idx` - Index of the operation (ignored in no_err_ctx build)
-    /// * `clk` - Clock cycle when the error occurred
     #[inline]
     pub fn with_op(
         _program: &'a MastForest,
         _node_id: MastNodeId,
         _op_idx: usize,
-        clk: RowIndex,
     ) -> Self {
-        Self { clk, _phantom: core::marker::PhantomData }
+        Self { _phantom: core::marker::PhantomData }
     }
 }
 
 #[cfg(not(feature = "no_err_ctx"))]
 impl<'a> ErrorContext<'a> {
-    /// Returns the clock cycle associated with this error context.
-    ///
-    /// This is always cheap to access.
-    #[inline]
-    pub fn clk(&self) -> RowIndex {
-        self.clk
-    }
-
     /// Resolves source location using the provided host.
     ///
     /// Returns `None` when source context is not available (e.g., when executing code
@@ -491,29 +477,50 @@ impl<'a> ErrorContext<'a> {
     ///
     /// * `host` - The host for resolving source locations
     /// * `err` - The operation error to convert
-    pub fn into_exec_err(&self, host: &impl BaseHost, err: OperationError) -> ExecutionError {
-        match self.resolve(host) {
-            Some((label, source_file)) => ExecutionError::OperationError {
-                clk: self.clk(),
-                label,
-                source_file,
-                err: Box::new(err),
+    /// * `clk` - Clock cycle when the error occurred
+    pub fn into_exec_err(
+        &self,
+        host: &impl BaseHost,
+        err: OperationError,
+        clk: RowIndex,
+    ) -> ExecutionError {
+        match err {
+            OperationError::DecoErr(inner) => self.enrich_exec_err(host, *inner),
+            other => match self.resolve(host) {
+                Some((label, source_file)) => ExecutionError::OperationError {
+                    clk,
+                    label,
+                    source_file,
+                    err: Box::new(other),
+                },
+                None => ExecutionError::OperationErrorNoContext {
+                    clk,
+                    err: Box::new(other),
+                },
             },
-            None => ExecutionError::OperationErrorNoContext { clk: self.clk(), err: Box::new(err) },
+        }
+    }
+
+    #[inline]
+    pub fn enrich_exec_err(
+        &self,
+        host: &impl BaseHost,
+        err: ExecutionError,
+    ) -> ExecutionError {
+        match err {
+            ExecutionError::OperationErrorNoContext { clk, err } => match self.resolve(host) {
+                Some((label, source_file)) => {
+                    ExecutionError::OperationError { clk, label, source_file, err }
+                },
+                None => ExecutionError::OperationErrorNoContext { clk, err },
+            },
+            other => other,
         }
     }
 }
 
 #[cfg(feature = "no_err_ctx")]
 impl<'a> ErrorContext<'a> {
-    /// Returns the clock cycle associated with this error context.
-    ///
-    /// This is always cheap to access.
-    #[inline]
-    pub fn clk(&self) -> RowIndex {
-        self.clk
-    }
-
     /// Resolves source location using the provided host.
     ///
     /// When the `no_err_ctx` feature is enabled, this always returns `None`.
@@ -535,9 +542,19 @@ impl<'a> ErrorContext<'a> {
     ///
     /// * `host` - The host for resolving source locations (ignored)
     /// * `err` - The operation error to convert
+    /// * `clk` - Clock cycle when the error occurred
     #[inline]
-    pub fn into_exec_err(&self, _host: &impl BaseHost, err: OperationError) -> ExecutionError {
-        ExecutionError::OperationErrorNoContext { clk: self.clk(), err: Box::new(err) }
+    pub fn into_exec_err(&self, _host: &impl BaseHost, err: OperationError, clk: RowIndex) -> ExecutionError {
+        ExecutionError::OperationErrorNoContext { clk, err: Box::new(err) }
+    }
+
+    #[inline]
+    pub fn enrich_exec_err(
+        &self,
+        _host: &impl BaseHost,
+        err: ExecutionError,
+    ) -> ExecutionError {
+        err
     }
 }
 
@@ -572,24 +589,29 @@ pub trait OperationResultExt<T> {
     ///
     /// * `err_ctx` - Error context handle (cheap to construct)
     /// * `host` - Host for resolving source locations (only used in error path)
+    /// * `clk` - Clock cycle when the error occurred
     ///
     /// # Example
     /// ```ignore
-    /// let ctx = ErrorContext::with_op(program, node_id, op_idx, clk);
+    /// let ctx = ErrorContext::with_op(program, node_id, op_idx);
     /// some_operation()
-    ///     .map_exec_err(&ctx, host)?;
+    ///     .map_exec_err(&ctx, host, self.clk)?;
     /// ```
     fn map_exec_err(
         self,
         err_ctx: &ErrorContext,
         host: &impl BaseHost,
+        clk: RowIndex,
     ) -> Result<T, ExecutionError>;
 }
 
 impl<T> OperationResultExt<T> for Result<T, OperationError> {
     #[inline]
     fn map_exec_err_no_ctx(self, clk: RowIndex) -> Result<T, ExecutionError> {
-        self.map_err(|err| ExecutionError::OperationErrorNoContext { clk, err: Box::new(err) })
+        self.map_err(|err| match err {
+            OperationError::DecoErr(inner) => *inner,
+            other => ExecutionError::OperationErrorNoContext { clk, err: Box::new(other) },
+        })
     }
 
     #[inline]
@@ -597,15 +619,19 @@ impl<T> OperationResultExt<T> for Result<T, OperationError> {
         self,
         err_ctx: &ErrorContext,
         host: &impl BaseHost,
+        clk: RowIndex,
     ) -> Result<T, ExecutionError> {
-        self.map_err(|err| err_ctx.into_exec_err(host, err))
+        self.map_err(|err| err_ctx.into_exec_err(host, err, clk))
     }
 }
 
 impl<T> OperationResultExt<T> for OperationError {
     #[inline]
     fn map_exec_err_no_ctx(self, clk: RowIndex) -> Result<T, ExecutionError> {
-        Err(ExecutionError::OperationErrorNoContext { clk, err: Box::new(self) })
+        match self {
+            OperationError::DecoErr(inner) => Err(*inner),
+            other => Err(ExecutionError::OperationErrorNoContext { clk, err: Box::new(other) }),
+        }
     }
 
     #[inline]
@@ -613,8 +639,9 @@ impl<T> OperationResultExt<T> for OperationError {
         self,
         err_ctx: &ErrorContext,
         host: &impl BaseHost,
+        clk: RowIndex,
     ) -> Result<T, ExecutionError> {
-        Err(err_ctx.into_exec_err(host, self))
+        Err(err_ctx.into_exec_err(host, self, clk))
     }
 }
 

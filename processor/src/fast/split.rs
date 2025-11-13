@@ -24,10 +24,6 @@ impl FastProcessor {
         host: &mut impl AsyncHost,
         tracer: &mut impl Tracer,
     ) -> Result<(), ExecutionError> {
-        // Capture clock at the start for error reporting consistency with slow processor.
-        // This ensures initial condition errors report the same clock cycle in both paths.
-        let clk_at_start = self.clk;
-
         tracer.start_clock_cycle(
             self,
             NodeExecutionState::Start(node_id),
@@ -50,8 +46,8 @@ impl FastProcessor {
         } else if condition == ZERO {
             continuation_stack.push_start_node(split_node.on_false());
         } else {
-            let err_ctx = ErrorContext::new(current_forest, node_id, clk_at_start);
-            return OperationError::NotBinaryValueIf(condition).map_exec_err(&err_ctx, host);
+            return OperationError::NotBinaryValueIf(condition)
+                .map_exec_err(&ErrorContext::new(current_forest, node_id), host, self.clk);
         };
 
         // Corresponds to the row inserted for the SPLIT operation added
