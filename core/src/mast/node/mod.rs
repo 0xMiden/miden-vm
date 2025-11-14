@@ -242,7 +242,7 @@ pub trait MastNodeErrorContext: Send + Sync {
             Some(target_op_idx) => {
                 for (op_idx, decorator_id) in self.decorators(mast_forest) {
                     if let Some(Decorator::AsmOp(assembly_op)) =
-                        mast_forest.get_decorator_by_id(decorator_id)
+                        mast_forest.decorator_by_id(decorator_id)
                     {
                         // when an instruction compiles down to multiple operations, only the first
                         // operation is associated with the assembly op. We need to check if the
@@ -260,7 +260,7 @@ pub trait MastNodeErrorContext: Send + Sync {
             None => {
                 for (_, decorator_id) in self.decorators(mast_forest) {
                     if let Some(Decorator::AsmOp(assembly_op)) =
-                        mast_forest.get_decorator_by_id(decorator_id)
+                        mast_forest.decorator_by_id(decorator_id)
                     {
                         return Some(assembly_op);
                     }

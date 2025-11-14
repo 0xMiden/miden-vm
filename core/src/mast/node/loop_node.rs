@@ -207,10 +207,8 @@ impl MastNodeExt for LoopNode {
             },
             DecoratorStore::Linked { id } => {
                 // Extract decorators from forest storage when in Linked state
-                let before_enter =
-                    forest.debug_info.node_decorator_storage.get_before_decorators(id).to_vec();
-                let after_exit =
-                    forest.debug_info.node_decorator_storage.get_after_decorators(id).to_vec();
+                let before_enter = forest.before_enter_decorators(id).to_vec();
+                let after_exit = forest.after_exit_decorators(id).to_vec();
                 let mut builder = LoopNodeBuilder::new(self.body);
                 builder = builder.with_before_enter(before_enter).with_after_exit(after_exit);
                 builder
@@ -333,11 +331,9 @@ impl MastForestContributor for LoopNodeBuilder {
         let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
 
         // Store node-level decorators in the centralized NodeToDecoratorIds for efficient access
-        forest.debug_info.node_decorator_storage.add_node_decorators(
-            future_node_id,
-            &before_enter,
-            &after_exit,
-        );
+        forest
+            .debug_info
+            .add_node_decorators(future_node_id, &before_enter, &after_exit);
 
         // Create the node in the forest with Linked variant from the start
         // Move the data directly without intermediate cloning
@@ -447,11 +443,9 @@ impl LoopNodeBuilder {
         let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
 
         // Store node-level decorators in the centralized NodeToDecoratorIds for efficient access
-        forest.debug_info.node_decorator_storage.add_node_decorators(
-            future_node_id,
-            &self.before_enter,
-            &self.after_exit,
-        );
+        forest
+            .debug_info
+            .add_node_decorators(future_node_id, &self.before_enter, &self.after_exit);
 
         // Create the node in the forest with Linked variant from the start
         // Move the data directly without intermediate cloning

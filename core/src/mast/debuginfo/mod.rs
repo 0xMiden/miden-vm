@@ -42,7 +42,7 @@
 
 use alloc::{collections::BTreeMap, sync::Arc};
 
-use miden_utils_indexing::IndexVec;
+use miden_utils_indexing::{Idx, IndexVec};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -66,16 +66,16 @@ pub use node_decorator_storage::NodeToDecoratorIds;
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DebugInfo {
     /// All decorators in the MAST forest.
-    pub decorators: IndexVec<DecoratorId, Decorator>,
+    decorators: IndexVec<DecoratorId, Decorator>,
 
     /// Efficient access to decorators per operation per node.
-    pub op_decorator_storage: OpToDecoratorIds,
+    op_decorator_storage: OpToDecoratorIds,
 
     /// Efficient storage for node-level decorators (before_enter and after_exit).
-    pub node_decorator_storage: NodeToDecoratorIds,
+    node_decorator_storage: NodeToDecoratorIds,
 
     /// Maps error codes to error messages.
-    pub error_codes: BTreeMap<u64, Arc<str>>,
+    error_codes: BTreeMap<u64, Arc<str>>,
 }
 
 impl DebugInfo {
@@ -108,6 +108,91 @@ impl DebugInfo {
         }
     }
 
+    /// Returns all decorators as a slice.
+    pub fn decorators(&self) -> &[Decorator] {
+        self.decorators.as_slice()
+    }
+
+    /// Returns the decorator with the given ID, if it exists.
+    pub fn decorator(&self, decorator_id: DecoratorId) -> Option<&Decorator> {
+        self.decorators.get(decorator_id)
+    }
+
+    /// Returns the decorator with the given ID, if it exists (mutable).
+    pub fn decorator_mut(&mut self, decorator_id: DecoratorId) -> Option<&mut Decorator> {
+        if decorator_id.to_usize() < self.decorators.len() {
+            Some(&mut self.decorators[decorator_id])
+        } else {
+            None
+        }
+    }
+
+    /// Returns the before-enter decorators for the given node.
+    pub fn before_enter_decorators(&self, node_id: crate::mast::MastNodeId) -> &[DecoratorId] {
+        self.node_decorator_storage.get_before_decorators(node_id)
+    }
+
+    /// Returns the after-exit decorators for the given node.
+    pub fn after_exit_decorators(&self, node_id: crate::mast::MastNodeId) -> &[DecoratorId] {
+        self.node_decorator_storage.get_after_decorators(node_id)
+    }
+
+    /// Returns the number of decorators.
+    pub fn num_decorators(&self) -> usize {
+        self.decorators.len()
+    }
+
+    /// Returns the operation decorator storage.
+    pub fn op_decorator_storage(&self) -> &OpToDecoratorIds {
+        &self.op_decorator_storage
+    }
+
+    /// Returns the operation decorator storage mutably.
+    pub fn op_decorator_storage_mut(&mut self) -> &mut OpToDecoratorIds {
+        &mut self.op_decorator_storage
+    }
+
+    /// Returns the node decorator storage.
+    pub fn node_decorator_storage(&self) -> &NodeToDecoratorIds {
+        &self.node_decorator_storage
+    }
+
+    /// Returns the node decorator storage mutably.
+    pub fn node_decorator_storage_mut(&mut self) -> &mut NodeToDecoratorIds {
+        &mut self.node_decorator_storage
+    }
+
+    /// Inserts an error code with its message.
+    pub fn insert_error_code(&mut self, code: u64, msg: Arc<str>) {
+        self.error_codes.insert(code, msg);
+    }
+
+    /// Returns an error message by code.
+    pub fn error_message(&self, code: u64) -> Option<Arc<str>> {
+        self.error_codes.get(&code).cloned()
+    }
+
+    /// Returns an iterator over error codes.
+    pub fn error_codes(&self) -> impl Iterator<Item = (&u64, &Arc<str>)> {
+        self.error_codes.iter()
+    }
+
+    /// Clears all error codes.
+    pub fn clear_error_codes(&mut self) {
+        self.error_codes.clear();
+    }
+
+    /// Adds node-level decorators (before_enter and after_exit) for the given node.
+    pub fn add_node_decorators(
+        &mut self,
+        node_id: crate::mast::MastNodeId,
+        before_enter: &[crate::mast::DecoratorId],
+        after_exit: &[crate::mast::DecoratorId],
+    ) {
+        self.node_decorator_storage
+            .add_node_decorators(node_id, before_enter, after_exit);
+    }
+
     /// Strips all debug information, removing decorators and error codes.
     /// This is used for release builds where debug info is not needed.
     pub fn strip(&mut self) {
@@ -120,6 +205,40 @@ impl DebugInfo {
     /// Returns true if this DebugInfo has no decorators or error codes.
     pub fn is_empty(&self) -> bool {
         self.decorators.is_empty() && self.error_codes.is_empty()
+    }
+
+    /// Returns a mutable reference to the decorators vector.
+    pub fn decorators_mut(&mut self) -> &mut IndexVec<DecoratorId, Decorator> {
+        &mut self.decorators
+    }
+
+    /// Returns a mutable reference to the error codes map.
+    pub fn error_codes_mut(&mut self) -> &mut BTreeMap<u64, Arc<str>> {
+        &mut self.error_codes
+    }
+
+    /// Returns decorators for a specific operation within a node.
+    pub fn decorators_for_operation(
+        &self,
+        node_id: crate::mast::MastNodeId,
+        local_op_idx: usize,
+    ) -> &[DecoratorId] {
+        self.op_decorator_storage
+            .decorator_ids_for_operation(node_id, local_op_idx)
+            .unwrap_or(&[])
+    }
+
+    /// Returns decorator links for a node, including operation indices.
+    pub fn decorator_links_for_node(
+        &self,
+        node_id: crate::mast::MastNodeId,
+    ) -> Result<DecoratedLinks<'_>, DecoratorIndexError> {
+        self.op_decorator_storage.decorator_links_for_node(node_id)
+    }
+
+    /// Clears the node decorator storage.
+    pub fn clear_node_decorator_storage(&mut self) {
+        self.node_decorator_storage.clear();
     }
 }
 

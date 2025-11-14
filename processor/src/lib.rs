@@ -580,7 +580,7 @@ impl Process {
         let decorator_ids = program.decorator_indices_for_op(node_id, num_ops);
         for &decorator_id in decorator_ids {
             let decorator = program
-                .get_decorator_by_id(decorator_id)
+                .decorator_by_id(decorator_id)
                 .ok_or(ExecutionError::DecoratorNotFoundInForest { decorator_id })?;
             self.execute_decorator(decorator, host)?;
         }
@@ -625,7 +625,7 @@ impl Process {
             let decorator_ids = program.decorator_indices_for_op(node_id, current_op_idx);
             for &decorator_id in decorator_ids {
                 let decorator = program
-                    .get_decorator_by_id(decorator_id)
+                    .decorator_by_id(decorator_id)
                     .ok_or(ExecutionError::DecoratorNotFoundInForest { decorator_id })?;
                 self.execute_decorator(decorator, host)?;
             }
