@@ -165,9 +165,10 @@ impl MastForestMerger {
 
     fn merge_decorators(&mut self, other_forest: &MastForest) -> Result<(), MastForestError> {
         let mut decorator_id_remapping =
-            DenseIdMap::with_len(other_forest.debug_info.decorators.len());
+            DenseIdMap::with_len(other_forest.debug_info.decorators().len());
 
-        for (merging_id, merging_decorator) in other_forest.debug_info.decorators.iter().enumerate()
+        for (merging_id, merging_decorator) in
+            other_forest.debug_info.decorators().iter().enumerate()
         {
             let merging_decorator_hash = merging_decorator.fingerprint();
             let new_decorator_id = if let Some(existing_decorator) =
@@ -199,8 +200,8 @@ impl MastForestMerger {
     fn merge_error_codes(&mut self, other_forest: &MastForest) -> Result<(), MastForestError> {
         self.mast_forest
             .debug_info
-            .error_codes
-            .extend(other_forest.debug_info.error_codes.clone());
+            .error_codes_mut()
+            .extend(other_forest.debug_info.error_codes().map(|(k, v)| (*k, v.clone())));
         Ok(())
     }
 
@@ -312,18 +313,10 @@ impl MastForestMerger {
         };
 
         // Get decorators from centralized storage instead of from the node itself
-        let before_enter_decorators = map_decorators(
-            original_forest
-                .debug_info
-                .node_decorator_storage
-                .get_before_decorators(merging_id),
-        )?;
-        let after_exit_decorators = map_decorators(
-            original_forest
-                .debug_info
-                .node_decorator_storage
-                .get_after_decorators(merging_id),
-        )?;
+        let before_enter_decorators =
+            map_decorators(original_forest.before_enter_decorators(merging_id))?;
+        let after_exit_decorators =
+            map_decorators(original_forest.after_exit_decorators(merging_id))?;
 
         let mapped_builder = match src {
             MastNode::Join(join_node) => {
