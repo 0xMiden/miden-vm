@@ -14,7 +14,7 @@
 #! Initialized stack state is written back to provided memory addresses.
 #!
 #! Functionally this routine is equivalent to https://github.com/itzmeanjan/blake3/blob/f07d32e/include/blake3.hpp#!L1709-L1713
-proc.initialize_2to1
+proc initialize_2to1
     push.0xA54FF53A.0x3C6EF372.0xBB67AE85.0x6A09E667
     movup.4
     mem_storew_be
@@ -50,7 +50,7 @@ end
 #!
 #! Functionally this routine is equivalent to https://github.com/itzmeanjan/blake3/blob/f07d32e/include/blake3.hpp#!L1709-L1713
 #! with only difference being value of BLOCK_LEN = 32
-proc.initialize_1to1
+proc initialize_1to1
     push.0xA54FF53A.0x3C6EF372.0xBB67AE85.0x6A09E667
     movup.4
     mem_storew_be
@@ -81,7 +81,7 @@ end
 #!
 #! See https://github.com/itzmeanjan/blake3/blob/f07d32ec10cbc8a10663b7e6539e0b1dab3e453b/include/blake3.hpp#!L1623-L1639
 #! and https://github.com/0xMiden/miden-vm/pull/313#!discussion_r922627984
-proc.permute_msg_words
+proc permute_msg_words
     movdn.7
     movup.5
     movdn.2
@@ -118,7 +118,7 @@ end
 #! See https://github.com/BLAKE3-team/BLAKE3/blob/da4c792/reference_impl/reference_impl.rs#!L116-L119 ,
 #! you'll notice I've skipped executing second statement in loop body of above hyperlinked implementation,
 #! that's because it doesn't dictate what output of 2-to-1 hash will be.
-proc.finalize
+proc finalize
     movup.8
     u32xor
 
@@ -177,7 +177,8 @@ end
 #! [state0, state1, state2, state3, state4, state5, state6, state7, state8, state9, state10, state11, state12, state13, state14, state15]
 #!
 #! i.e. whole blake3 state is placed on stack ( in order ).
-proc.columnar_mixing.4
+@locals(4)
+proc columnar_mixing
     swapw.2
     swapw
 
@@ -416,7 +417,8 @@ end
 #! [state0, state1, state2, state3, state4, state5, state6, state7, state8, state9, state10, state11, state12, state13, state14, state15]
 #!
 #! i.e. whole blake3 state is placed on stack ( in order ).
-proc.diagonal_mixing.4
+@locals(4)
+proc diagonal_mixing
     swapw.2
     swapw
 
@@ -658,7 +660,8 @@ end
 #!
 #! i.e. mixed state matrix lives in memory addresses {state0_3_addr, state4_7_addr, state8_11_addr, state12_15_addr},
 #! which were provided, on stack top, while invoking this routine.
-proc.round.20
+@locals(20)
+proc round
     loc_storew_be.0
 
     exec.columnar_mixing
@@ -721,7 +724,8 @@ end
 #! i.e. 7 -round mixed state matrix lives in memory addresses {state0_3_addr, state4_7_addr, state8_11_addr, state12_15_addr},
 #! which were provided, on stack top, while invoking this routine. So updated state matrix can be read by caller routine, by reading
 #! the content of memory addresses where state was provided as routine input.
-proc.compress.4
+@locals(4)
+proc compress
     loc_storew_be.0
     dropw
 
@@ -757,7 +761,8 @@ end
 #! [dig0, dig1, dig2, dig3, dig4, dig5, dig6, dig7, ...]
 #!
 #! dig`i` -> 32 -bit digest word | i ∈ [0, 8)
-export.hash_2to1.16
+@locals(16)
+pub proc hash_2to1
     locaddr.12
     locaddr.8
     locaddr.4
@@ -801,7 +806,8 @@ end
 #! [dig0, dig1, dig2, dig3, dig4, dig5, dig6, dig7, ...]
 #!
 #! dig`i` -> 32 -bit digest word | i ∈ [0, 8)
-export.hash_1to1.16
+@locals(16)
+pub proc hash_1to1
     # Pad 32 -bytes input message with zero bytes to make
     # 64 -bytes, which is processed same as 2-to-1 hashing
     push.0.0.0.0.0.0.0.0

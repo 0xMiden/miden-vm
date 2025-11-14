@@ -10,12 +10,13 @@ struct Point([FieldElement; 3]);
 fn test_secp256k1_point_doubling(src: Point, dst: Point) {
     let source = format!(
         "
-    use.std::math::secp256k1::group
+    use std::math::secp256k1::group
 
     # Given a point of secp256k1 elliptic curve, this routine first computes
     # point doubling of that point in projective coordinate & then asserts
     # each coordinate limb-by-limb for ensuring correctness.
-    proc.point_doubling_test_wrapper.48
+    @locals(48)
+    proc point_doubling_test_wrapper
         # push X -coordinate to memory
         push.{}.{}.{}.{}
         loc_storew_be.0
@@ -206,12 +207,13 @@ fn test_secp256k1_point_doubling(src: Point, dst: Point) {
 fn test_secp256k1_point_addition(src0: Point, src1: Point, dst: Point) {
     let source = format!(
         "
-    use.std::math::secp256k1::group
+    use std::math::secp256k1::group
 
     # Given two points of secp256k1 elliptic curve ( twice ), this routine first computes
     # point addition of them in projective coordinate & then asserts each coordinate
     # limb-by-limb for ensuring correctness.
-    proc.point_addition_test_wrapper.72
+    @locals(72)
+    proc point_addition_test_wrapper
         # push X1 -coordinate to memory
         push.{}.{}.{}.{}
         loc_storew_be.0
@@ -457,12 +459,13 @@ fn test_secp256k1_point_addition(src0: Point, src1: Point, dst: Point) {
 fn test_secp256k1_point_multiplication(src_point: Point, scalar: FieldElement, dst_point: Point) {
     let source = format!(
         "
-    use.std::math::secp256k1::group
+    use std::math::secp256k1::group
 
     # Given an elliptic curve point ( in projective coordinate system ) and a 256 -bit scalar
     # in radix-2^32 form ( i.e. 8 limbs, each of 32 -bit width ), this routine first multiplies
     # the EC point with provided scalar and then asserts for correctness with known answer.
-    proc.point_multiplication_test_wrapper.52
+    @locals(52)
+    proc point_multiplication_test_wrapper
         # resulting point
         locaddr.44
         locaddr.40
@@ -665,12 +668,13 @@ fn test_secp256k1_point_multiplication(src_point: Point, scalar: FieldElement, d
 fn test_secp256k1_generator_multiplication(scalar: FieldElement, point: Point) {
     let source = format!(
         "
-    use.std::math::secp256k1::group
+    use std::math::secp256k1::group
 
     # Given a 256 -bit scalar in radix-2^32 form ( i.e. 8 limbs, each of 32 -bit width ),
     # this routine first multiplies the secp256k1 generator point with provided scalar and
     # then asserts for correctness with known answer.
-    proc.generator_multiplication_test_wrapper.48
+    @locals(48)
+    proc generator_multiplication_test_wrapper
         # resulting point
         locaddr.44
         locaddr.40

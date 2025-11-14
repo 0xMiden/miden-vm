@@ -1,4 +1,6 @@
-export.add_unsafe
+pub type u256 = struct { hi: u128, lo: u128 }
+
+pub proc wrapping_add(rhs: u256, lhs: u256) -> u256
     swapw.3
     movup.3
     movup.7
@@ -30,7 +32,7 @@ export.add_unsafe
     drop
 end
 
-export.sub_unsafe
+pub proc wrapping_sub(rhs: u256, lhs: u256) -> u256
     swapw.3
     movup.3
     movup.7
@@ -89,7 +91,7 @@ export.sub_unsafe
     drop
 end
 
-export.and
+pub proc and(rhs: u256, lhs: u256) -> u256
     swapw.3
     movup.3
     movup.7
@@ -118,7 +120,7 @@ export.and
     u32and
 end
 
-export.or
+pub proc or(rhs: u256, lhs: u256) -> u256
     swapw.3
     movup.3
     movup.7
@@ -147,7 +149,7 @@ export.or
     u32or
 end
 
-export.xor
+pub proc xor(rhs: u256, lhs: u256) -> u256
     swapw.3
     movup.3
     movup.7
@@ -176,7 +178,7 @@ export.xor
     u32xor
 end
 
-export.iszero_unsafe
+pub proc eqz(rhs: u256, lhs: u256) -> i1
     eq.0
     repeat.7
         swap
@@ -185,7 +187,7 @@ export.iszero_unsafe
     end
 end
 
-export.eq_unsafe
+pub proc eq(rhs: u256, lhs: u256) -> i1
     swapw.3
     eqw
     movdn.8
@@ -201,7 +203,7 @@ end
 
 # ===== MULTIPLICATION ============================================================================
 
-proc.mulstep
+proc mulstep
     movdn.2
     u32overflowing_madd
     movdn.2
@@ -210,7 +212,7 @@ proc.mulstep
     add
 end
 
-proc.mulstep4
+proc mulstep4
     movup.12
     dup.1
     movup.10
@@ -246,7 +248,8 @@ end
 #! Stack transition looks as follows:
 #! [b7, b6, b5, b4, b3, b2, b1, b0, a7, a6, a5, a4, a3, a2, a1, a0, ...] -> [c7, c6, c5, c4, c3, c2, c1, c0, ...]
 #! where c = (a * b) % 2^256, and a0, b0, and c0 are least significant 32-bit limbs of a, b, and c respectively.
-export.mul_unsafe.24
+@locals(24)
+pub proc wrapping_mul(rhs: u256, lhs: u256) -> u256
     # Memory storing setup
     loc_storew_be.0
     dropw

@@ -6,7 +6,7 @@ use miden_utils_testing::{build_expected_hash, build_expected_perm, expect_exec_
 fn test_invalid_end_addr() {
     // end_addr can not be smaller than start_addr
     let empty_range = "
-    use.std::crypto::hashes::rpo
+    use std::crypto::hashes::rpo
 
     begin
         push.0999 # end address
@@ -28,7 +28,7 @@ fn test_invalid_end_addr() {
 fn test_hash_empty() {
     // computes the hash for 8 consecutive zeros using mem_stream directly
     let two_zeros_mem_stream = "
-    use.std::crypto::hashes::rpo
+    use std::crypto::hashes::rpo
 
     begin
         # mem_stream state
@@ -52,7 +52,7 @@ fn test_hash_empty() {
 
     // checks the hash compute from 8 zero elements is the same when using hash_memory_words
     let two_zeros = "
-    use.std::crypto::hashes::rpo
+    use std::crypto::hashes::rpo
 
     begin
         push.1008 # end address
@@ -72,7 +72,7 @@ fn test_hash_empty() {
 fn test_single_iteration() {
     // computes the hash of 1 using mem_stream
     let one_memstream = "
-    use.std::crypto::hashes::rpo
+    use std::crypto::hashes::rpo
 
     begin
         # insert 1 to memory
@@ -101,7 +101,7 @@ fn test_single_iteration() {
     // Note: This is testing the hashing of two words, so no padding is added
     // here
     let one_element = "
-    use.std::crypto::hashes::rpo
+    use std::crypto::hashes::rpo
 
     begin
         # insert 1 to memory
@@ -133,7 +133,7 @@ fn test_hash_one_word() {
 
     // checks the hash of 1 is the same when using hash_memory_words
     let one_element = "
-    use.std::crypto::hashes::rpo
+    use std::crypto::hashes::rpo
 
     begin
         push.1.1000 mem_store # push data to memory
@@ -155,7 +155,7 @@ fn test_hash_one_word() {
 fn test_hash_even_words() {
     // checks the hash of two words
     let even_words = "
-    use.std::crypto::hashes::rpo
+    use std::crypto::hashes::rpo
 
     begin
         push.1.0.0.0.1000 mem_storew_be dropw
@@ -183,7 +183,7 @@ fn test_hash_even_words() {
 fn test_hash_odd_words() {
     // checks the hash of three words
     let odd_words = "
-    use.std::crypto::hashes::rpo
+    use std::crypto::hashes::rpo
 
     begin
         push.1.0.0.0.1000 mem_storew_be dropw
@@ -212,8 +212,8 @@ fn test_hash_odd_words() {
 #[test]
 fn test_absorb_double_words_from_memory() {
     let even_words = "
-    use.std::sys
-    use.std::crypto::hashes::rpo
+    use std::sys
+    use std::crypto::hashes::rpo
 
     begin
         push.1.0.0.0.1000 mem_storew_be dropw
@@ -247,8 +247,8 @@ fn test_absorb_double_words_from_memory() {
 fn test_hash_memory_double_words() {
     // test the standard case
     let double_words = "
-    use.std::sys
-    use.std::crypto::hashes::rpo
+    use std::sys
+    use std::crypto::hashes::rpo
 
     begin
         # store four words (two double words) in memory
@@ -282,8 +282,8 @@ fn test_hash_memory_double_words() {
 
     // test the corner case when the end pointer equals to the start pointer
     let empty_double_words = r#"
-    use.std::sys
-    use.std::crypto::hashes::rpo
+    use std::sys
+    use std::crypto::hashes::rpo
 
     begin
         push.1000.1000 # start and end addresses
@@ -307,7 +307,7 @@ fn test_hash_memory_double_words() {
 #[test]
 fn test_squeeze_digest() {
     let even_words = "
-    use.std::crypto::hashes::rpo
+    use std::crypto::hashes::rpo
 
     begin
         push.1.0.0.0.1000 mem_storew_be dropw
@@ -345,8 +345,8 @@ fn test_squeeze_digest() {
 #[test]
 fn test_copy_digest() {
     let copy_digest = r#"
-    use.std::sys
-    use.std::crypto::hashes::rpo
+    use std::sys
+    use std::crypto::hashes::rpo
 
     begin
         push.1.0.0.0.1000 mem_storew_be dropw
@@ -396,7 +396,7 @@ fn test_copy_digest() {
 fn test_hash_memory() {
     // hash fewer than 8 elements
     let compute_inputs_hash_5 = "
-    use.std::crypto::hashes::rpo
+    use std::crypto::hashes::rpo
 
     begin
         push.1.2.3.4.1000 mem_storew_be dropw
@@ -422,7 +422,7 @@ fn test_hash_memory() {
 
     // hash exactly 8 elements
     let compute_inputs_hash_8 = "
-    use.std::crypto::hashes::rpo
+    use std::crypto::hashes::rpo
 
     begin
         push.1.2.3.4.1000 mem_storew_be dropw
@@ -448,7 +448,7 @@ fn test_hash_memory() {
 
     // hash more than 8 elements
     let compute_inputs_hash_15 = "
-    use.std::crypto::hashes::rpo
+    use std::crypto::hashes::rpo
 
     begin
         push.1.2.3.4.1000 mem_storew_be dropw
@@ -482,8 +482,8 @@ fn test_hash_memory() {
 fn test_hash_memory_empty() {
     // absorb_double_words_from_memory
     let source = "
-    use.std::sys
-    use.std::crypto::hashes::rpo
+    use std::sys
+    use std::crypto::hashes::rpo
 
     begin
         push.1000      # end address
@@ -505,7 +505,7 @@ fn test_hash_memory_empty() {
 
     // hash_memory_words
     let source = "
-    use.std::crypto::hashes::rpo
+    use std::crypto::hashes::rpo
 
     begin
         push.1000 # end address
@@ -522,7 +522,7 @@ fn test_hash_memory_empty() {
 
     // hash_memory
     let source = "
-    use.std::crypto::hashes::rpo
+    use std::crypto::hashes::rpo
 
     begin
         push.0    # number of elements to hash

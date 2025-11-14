@@ -21,15 +21,15 @@ impl fmt::Debug for DisplayModuleGraph<'_> {
                 |(module_index, m)| {
                     match m {
                         ModuleLink::Ast(m) => m
-                            .procedures()
+                            .items()
                             .enumerate()
                             .filter_map(move |(i, export)| {
                                 if matches!(export, Export::Alias(_)) {
                                     None
                                 } else {
-                                    let gid = GlobalProcedureIndex {
+                                    let gid = GlobalItemIndex {
                                         module: ModuleIndex::new(module_index),
-                                        index: ProcedureIndex::new(i),
+                                        index: ItemIndex::new(i),
                                     };
                                     let out_edges = self.0.callgraph.out_edges(gid);
                                     Some(DisplayModuleGraphNodeWithEdges { gid, out_edges })
@@ -37,11 +37,11 @@ impl fmt::Debug for DisplayModuleGraph<'_> {
                             })
                             .collect::<Vec<_>>(),
                         ModuleLink::Info(m) => m
-                            .procedures()
-                            .map(|(proc_index, _proc)| {
-                                let gid = GlobalProcedureIndex {
+                            .items()
+                            .map(|(index, _item)| {
+                                let gid = GlobalItemIndex {
                                     module: ModuleIndex::new(module_index),
-                                    index: proc_index,
+                                    index,
                                 };
 
                                 let out_edges = self.0.callgraph.out_edges(gid);
@@ -67,29 +67,29 @@ impl fmt::Debug for DisplayModuleGraphNodes<'_> {
 
                     match m {
                         ModuleLink::Ast(m) => m
-                            .procedures()
+                            .items()
                             .enumerate()
-                            .filter_map(move |(proc_index, export)| {
+                            .filter_map(move |(index, export)| {
                                 if matches!(export, Export::Alias(_)) {
                                     None
                                 } else {
                                     Some(DisplayModuleGraphNode {
                                         module: module_index,
-                                        index: ProcedureIndex::new(proc_index),
+                                        index: ItemIndex::new(index),
                                         path: m.path(),
-                                        proc_name: export.name(),
+                                        name: export.name(),
                                         ty: GraphNodeType::Ast,
                                     })
                                 }
                             })
                             .collect::<Vec<_>>(),
                         ModuleLink::Info(m) => m
-                            .procedures()
-                            .map(|(proc_index, proc)| DisplayModuleGraphNode {
+                            .items()
+                            .map(|(index, item)| DisplayModuleGraphNode {
                                 module: module_index,
-                                index: proc_index,
+                                index,
                                 path: m.path(),
-                                proc_name: &proc.name,
+                                name: item.name(),
                                 ty: GraphNodeType::Compiled,
                             })
                             .collect::<Vec<_>>(),
@@ -109,9 +109,9 @@ enum GraphNodeType {
 #[doc(hidden)]
 struct DisplayModuleGraphNode<'a> {
     module: ModuleIndex,
-    index: ProcedureIndex,
-    path: &'a LibraryPath,
-    proc_name: &'a ProcedureName,
+    index: ItemIndex,
+    path: &'a Path,
+    name: &'a ast::Ident,
     ty: GraphNodeType,
 }
 
@@ -120,7 +120,7 @@ impl fmt::Debug for DisplayModuleGraphNode<'_> {
         f.debug_struct("Node")
             .field("id", &format_args!("{}:{}", &self.module.as_usize(), &self.index.as_usize()))
             .field("module", &self.path)
-            .field("name", &self.proc_name)
+            .field("name", &self.name)
             .field("type", &self.ty)
             .finish()
     }
@@ -128,8 +128,8 @@ impl fmt::Debug for DisplayModuleGraphNode<'_> {
 
 #[doc(hidden)]
 struct DisplayModuleGraphNodeWithEdges<'a> {
-    gid: GlobalProcedureIndex,
-    out_edges: &'a [GlobalProcedureIndex],
+    gid: GlobalItemIndex,
+    out_edges: &'a [GlobalItemIndex],
 }
 
 impl fmt::Debug for DisplayModuleGraphNodeWithEdges<'_> {

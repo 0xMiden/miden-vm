@@ -1,11 +1,9 @@
+use alloc::sync::Arc;
 use core::fmt;
 
 use miden_debug_types::{SourceSpan, Span, Spanned};
 
-use crate::{
-    LibraryPath, Word,
-    ast::{Ident, ProcedureName},
-};
+use crate::{Path, Word, ast::Ident};
 
 // INVOKE
 // ================================================================================================
@@ -72,23 +70,27 @@ pub enum InvocationTarget {
     /// valid.
     MastRoot(Span<Word>),
     /// A locally-defined procedure.
-    ProcedureName(ProcedureName),
-    /// A context-sensitive procedure path, which references the name of an import in the
-    /// containing module.
-    ProcedurePath { name: ProcedureName, module: Ident },
-    /// A fully-resolved procedure path, which refers to a specific externally-defined procedure
-    /// with its full path.
-    AbsoluteProcedurePath { name: ProcedureName, path: LibraryPath },
+    Symbol(Ident),
+    /// An externally-defined procedure.
+    Path(Span<Arc<Path>>),
+}
+
+impl InvocationTarget {
+    pub fn unwrap_path(&self) -> &Path {
+        match self {
+            Self::Symbol(name) => name.as_ref(),
+            Self::Path(path) => path.inner().as_ref(),
+            Self::MastRoot(_) => panic!("expected invocation target to be a path"),
+        }
+    }
 }
 
 impl Spanned for InvocationTarget {
     fn span(&self) -> SourceSpan {
         match self {
             Self::MastRoot(spanned) => spanned.span(),
-            Self::ProcedureName(spanned) => spanned.span(),
-            Self::ProcedurePath { name, .. } | Self::AbsoluteProcedurePath { name, .. } => {
-                name.span()
-            },
+            Self::Symbol(spanned) => spanned.span(),
+            Self::Path(spanned) => spanned.span(),
         }
     }
 }
@@ -101,9 +103,8 @@ impl crate::prettier::PrettyPrint for InvocationTarget {
 
         match self {
             Self::MastRoot(digest) => display(DisplayHex(digest.as_bytes().as_slice())),
-            Self::ProcedureName(name) => display(name),
-            Self::ProcedurePath { name, module } => display(format_args!("{module}::{name}")),
-            Self::AbsoluteProcedurePath { name, path } => display(format_args!("::{path}::{name}")),
+            Self::Symbol(name) => display(name),
+            Self::Path(path) => display(path),
         }
     }
 }

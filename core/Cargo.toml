@@ -49,10 +49,12 @@ testing = ["arbitrary" ]
 miden-crypto.workspace = true
 miden-debug-types.workspace = true
 miden-formatting.workspace = true
+miden-utils-core-derive.workspace = true
 miden-utils-indexing.workspace = true
 
 # External dependencies
-enum_dispatch = { version =  "0.3" }
+derive_more.workspace = true
+itertools.workspace = true
 num-derive = { version = "0.4", default-features = false }
 num-traits = { version = "0.2", default-features = false }
 proptest = { workspace = true, optional = true }

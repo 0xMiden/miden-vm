@@ -2,7 +2,7 @@ use alloc::sync::Arc;
 
 use miden_core::{
     EventId, Operation,
-    mast::{BasicBlockNode, DecoratorOpLinkIterator, MastForest, MastNodeId, OpBatch},
+    mast::{BasicBlockNode, MastForest, MastNodeId, OpBatch},
     sys_events::SystemEvent,
 };
 
@@ -17,6 +17,10 @@ use crate::{
 
 impl FastProcessor {
     /// Execute the given basic block node.
+    ///
+    /// # Arguments
+    /// * `node_id` - The ID of this basic block node in the `current_forest` MAST forest. This
+    ///   should match the ID in `basic_block_node.decorators` when it's `Linked`.
     #[allow(clippy::too_many_arguments)]
     #[inline(always)]
     pub(super) async fn execute_basic_block_node(
@@ -37,23 +41,20 @@ impl FastProcessor {
         );
 
         // Execute decorators that should be executed before entering the node
-        self.execute_before_enter_decorators(node_id, program, host)?;
+        self.execute_before_enter_decorators(node_id, current_forest, host)?;
 
         // Corresponds to the row inserted for the BASIC BLOCK operation added to the trace.
         self.increment_clk(tracer);
 
         let mut batch_offset_in_block = 0;
         let mut op_batches = basic_block_node.op_batches().iter();
-        let mut decorator_ids = basic_block_node.indexed_decorator_iter();
 
         // execute first op batch
         if let Some(first_op_batch) = op_batches.next() {
             self.execute_op_batch(
                 basic_block_node,
-                node_id,
                 first_op_batch,
                 0,
-                &mut decorator_ids,
                 batch_offset_in_block,
                 program,
                 host,
@@ -83,10 +84,8 @@ impl FastProcessor {
 
             self.execute_op_batch(
                 basic_block_node,
-                node_id,
                 op_batch,
                 batch_index,
-                &mut decorator_ids,
                 batch_offset_in_block,
                 program,
                 host,
@@ -112,14 +111,17 @@ impl FastProcessor {
         // happen for decorators appearing after all operations in a block. these decorators are
         // executed after BASIC BLOCK is closed to make sure the VM clock cycle advances beyond the
         // last clock cycle of the BASIC BLOCK ops.
-        for (_, decorator_id) in decorator_ids {
+        // For the linked case, check for decorators at an operation index beyond the last operation
+        let num_ops = basic_block_node.num_operations() as usize;
+        let decorator_ids = current_forest.decorator_indices_for_op(node_id, num_ops);
+        for &decorator_id in decorator_ids {
             let decorator = program
                 .get_decorator_by_id(decorator_id)
                 .ok_or(ExecutionError::DecoratorNotFoundInForest { decorator_id })?;
             self.execute_decorator(decorator, host)?;
         }
 
-        self.execute_after_exit_decorators(node_id, program, host)
+        self.execute_after_exit_decorators(node_id, current_forest, host)
     }
 
     #[inline(always)]
@@ -127,10 +129,8 @@ impl FastProcessor {
     async fn execute_op_batch(
         &mut self,
         basic_block: &BasicBlockNode,
-        node_id: MastNodeId,
         batch: &OpBatch,
         batch_index: usize,
-        decorators: &mut DecoratorOpLinkIterator<'_>,
         batch_offset_in_block: usize,
         program: &MastForest,
         host: &mut impl AsyncHost,
@@ -145,7 +145,13 @@ impl FastProcessor {
         // execute operations in the batch one by one
         for (op_idx_in_batch, op) in batch.ops().iter().enumerate() {
             let op_idx_in_block = batch_offset_in_block + op_idx_in_batch;
-            while let Some((_, decorator_id)) = decorators.next_filtered(op_idx_in_block) {
+
+            // Use the forest's decorator storage to get decorator IDs for this operation
+            let node_id = basic_block
+                .linked_id()
+                .expect("basic block node should be linked when executing operations");
+            let decorator_ids = current_forest.decorator_indices_for_op(node_id, op_idx_in_block);
+            for &decorator_id in decorator_ids {
                 let decorator = program
                     .get_decorator_by_id(decorator_id)
                     .ok_or(ExecutionError::DecoratorNotFoundInForest { decorator_id })?;

@@ -30,6 +30,7 @@ impl proptest::arbitrary::Arbitrary for DependencyName {
         let chars = proptest::char::range('a', 'z');
         proptest::collection::vec(chars, 4..32)
             .prop_map(|chars| Self(String::from_iter(chars)))
+            .no_shrink()  // Pure random strings, no meaningful shrinking pattern
             .boxed()
     }
 }

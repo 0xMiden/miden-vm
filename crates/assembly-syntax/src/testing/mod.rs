@@ -90,7 +90,7 @@ macro_rules! assert_diagnostic_lines {
 #[macro_export]
 macro_rules! parse_module {
     ($context:expr, $path:literal, $source:expr) => {{
-        let path = $crate::LibraryPath::new($path).expect("invalid library path");
+        let path = $crate::Path::new($path).to_absolute();
         let source_file = $context.source_manager().load(
             $crate::debuginfo::SourceLanguage::Masm,
             concat!("test", line!()).into(),

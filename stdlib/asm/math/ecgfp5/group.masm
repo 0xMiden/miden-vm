@@ -1,4 +1,4 @@
-use.std::math::ecgfp5::base_field
+use std::math::ecgfp5::base_field
 
 #! Given an encoded elliptic curve point `w` s.t. it's expressed using
 #! an element ∈ GF(p^5) | p = 2^64 - 2^32 + 1, this routine verifies whether
@@ -20,7 +20,7 @@ use.std::math::ecgfp5::base_field
 #!
 #! See https://github.com/pornin/ecgfp5/blob/ce059c6/python/ecGFp5.py#L1043-L1052
 #! for reference implementation
-export.validate
+pub proc validate
     repeat.5
         dup.4
     end
@@ -68,7 +68,7 @@ end
 #!
 #! See https://github.com/pornin/ecgfp5/blob/ce059c6/python/ecGFp5.py#L1022-L1041
 #! for reference implementation
-export.decode
+pub proc decode
     repeat.5
         dup.4
     end
@@ -189,7 +189,7 @@ end
 #!
 #! See https://github.com/pornin/ecgfp5/blob/ce059c6/python/ecGFp5.py#L1214-L1216
 #! for reference implementation.
-export.encode
+pub proc encode
     push.0.0.0.0.6148914689804861441 # = a/ 3
 
     exec.base_field::sub # = (a/ 3) - x
@@ -229,7 +229,8 @@ end
 #!
 #! Read point addition section ( on page 8 ) of https://ia.cr/2022/274
 #! For reference implementation see https://github.com/pornin/ecgfp5/blob/ce059c6/python/ecGFp5.py#L1228-L1255
-export.add.40
+@locals(40)
+pub proc add
     loc_storew_be.0
     dropw
     loc_store.4 # cached x1
@@ -492,7 +493,8 @@ end
 #!
 #! Read point addition section ( on page 8 ) of https://ia.cr/2022/274
 #! For reference implementation see https://github.com/pornin/ecgfp5/blob/ce059c6/python/ecGFp5.py#L1270-L1280
-export.double.20
+@locals(20)
+pub proc double
     loc_storew_be.0
     dropw
     loc_store.4 # cached x
@@ -604,7 +606,8 @@ end
 #! Point b = (x', y' inf') | b = e * a
 #!
 #! See https://github.com/itzmeanjan/secp256k1/blob/cbbe199/point.py#L174-L186 for source of inpiration.
-export.mul.40
+@locals(40)
+pub proc mul
     loc_storew_be.0
     dropw
     loc_store.4 # cached base_x
@@ -741,7 +744,8 @@ end
 #! Point b = (x, y, inf) | b = e * G
 #!
 #! See https://github.com/itzmeanjan/secp256k1/blob/cbbe199/point.py#L174-L186 for source of inpiration.
-export.gen_mul.32
+@locals(32)
+pub proc gen_mul
     loc_storew_be.0
     dropw
     loc_storew_be.4

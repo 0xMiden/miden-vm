@@ -18,7 +18,7 @@ Event names should be as unique as possible to avoid collisions with other libra
 
 ```miden
 # Using a constant
-const.MY_EVENT=event("miden::transfer::initiated")
+const MY_EVENT = event("miden::transfer::initiated")
 emit.MY_EVENT
 
 # Inline form
@@ -36,7 +36,7 @@ push.<felt> emit drop
 
 ## Tracing
 
-Miden assembly also supports code tracing, which works similar to the event emitting. 
+Miden assembly also supports code tracing, which works similar to the event emitting.
 
 A trace can be emitted via the `trace.<trace_id>` assembly instruction where `<trace_id>` can be any 32-bit value specified either directly or via a [named constant](./code_organization.md#constants). For example:
 

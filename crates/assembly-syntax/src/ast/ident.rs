@@ -73,6 +73,9 @@ pub struct Ident {
 }
 
 impl Ident {
+    /// Reserved name for a main procedure.
+    pub const MAIN: &'static str = "$main";
+
     /// Creates an [Ident] from `source`.
     ///
     /// This can fail if:
@@ -124,13 +127,28 @@ impl Ident {
         self.name.as_ref()
     }
 
+    /// Returns true if this identifier is a valid constant identifier
+    pub fn is_constant_ident(&self) -> bool {
+        self.name
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+    }
+
+    /// Returns true if this identifier must be quoted in Miden Assembly syntax
+    pub fn requires_quoting(&self) -> bool {
+        !self.name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '$')
+    }
+
     /// Applies the default [Ident] validation rules to `source`.
     pub fn validate(source: impl AsRef<str>) -> Result<(), IdentError> {
         let source = source.as_ref();
         if source.is_empty() {
             return Err(IdentError::Empty);
         }
-        if !source.chars().all(|c| c.is_ascii_graphic() || c.is_alphanumeric()) {
+        if !source
+            .chars()
+            .all(|c| (c.is_ascii_graphic() || c.is_alphanumeric()) && c != '#')
+        {
             return Err(IdentError::InvalidChars { ident: source.into() });
         }
         Ok(())
@@ -247,8 +265,8 @@ impl Deserializable for Ident {
 }
 
 #[cfg(feature = "arbitrary")]
-pub(crate) mod testing {
-    use alloc::string::String;
+pub mod arbitrary {
+    use alloc::{borrow::Cow, string::String};
 
     use proptest::{char::CharStrategy, collection::vec, prelude::*};
 
@@ -291,6 +309,22 @@ pub(crate) mod testing {
     const PREFERRED_RANGES: &[core::ops::RangeInclusive<char>] = &['a'..='z', 'A'..='Z'];
     const EXTRA_RANGES: &[core::ops::RangeInclusive<char>] = &['0'..='9', 'à'..='ö', 'ø'..='ÿ'];
 
+    const PREFERRED_CONSTANT_RANGES: &[core::ops::RangeInclusive<char>] = &['A'..='Z'];
+    const EXTRA_CONSTANT_RANGES: &[core::ops::RangeInclusive<char>] = &['0'..='9'];
+
+    prop_compose! {
+        /// A strategy to produce a random character from a more restricted dictionary for bare
+        /// identifiers
+        fn bare_ident_chars()
+                      (c in CharStrategy::new_borrowed(
+                          &['_'],
+                          PREFERRED_RANGES,
+                          &['0'..='9']
+                      )) -> char {
+            c
+        }
+    }
+
     prop_compose! {
         /// A strategy to produce a random character from our valid dictionary, using the rules
         /// for selection provided by `CharStrategy`
@@ -305,13 +339,74 @@ pub(crate) mod testing {
     }
 
     prop_compose! {
-        /// A strategy to produce a raw String of length `length`, containing any characers from
-        /// our dictionary.
+        /// Like `ident_chars`, but for constants
+        fn const_ident_chars()
+                      (c in CharStrategy::new_borrowed(
+                          &['_'],
+                          PREFERRED_CONSTANT_RANGES,
+                          EXTRA_CONSTANT_RANGES
+                      )) -> char {
+            c
+        }
+    }
+
+    prop_compose! {
+        /// A strategy to produce a raw String of no more than length `length` bytes, containing any
+        /// characters from our dictionary.
         ///
         /// The returned string will always be at least 1 characters.
         fn ident_raw_any(length: u32)
-                        (chars in vec(ident_chars(), 1..=(length as usize))) -> String {
-            String::from_iter(chars)
+                        ((leading_char, rest) in (
+                            proptest::char::ranges(Cow::Borrowed(&['a'..='z', '_'..='_'])),
+                            vec(ident_chars(), 0..=(length as usize))
+                        )) -> String {
+            let mut buf = String::with_capacity(length as usize);
+            buf.push(leading_char);
+            for c in rest {
+                if !buf.is_empty() && buf.len() + c.len_utf8() > length as usize {
+                    break;
+                }
+                buf.push(c);
+            }
+            buf
+        }
+    }
+
+    prop_compose! {
+        /// Like `ident_raw_any`, but for bare identifiers
+        fn bare_ident_raw_any(length: u32)
+                        ((leading_char, rest) in (
+                            proptest::char::range('a', 'z'),
+                            vec(bare_ident_chars(), 0..=(length as usize))
+                        )) -> String {
+            let mut buf = String::with_capacity(length as usize);
+            buf.push(leading_char);
+            for c in rest {
+                if !buf.is_empty() && buf.len() + c.len_utf8() > length as usize {
+                    break;
+                }
+                buf.push(c);
+            }
+            buf
+        }
+    }
+
+    prop_compose! {
+        /// Like `ident_raw_any`, but for constants
+        fn const_ident_raw_any(length: u32)
+                        ((leading_char, rest) in (
+                            proptest::char::range('A', 'Z'),
+                            vec(const_ident_chars(), 0..=(length as usize))
+                        )) -> String {
+            let mut buf = String::with_capacity(length as usize);
+            buf.push(leading_char);
+            for c in rest {
+                if !buf.is_empty() && buf.len() + c.len_utf8() > length as usize {
+                    break;
+                }
+                buf.push(c);
+            }
+            buf
         }
     }
 
@@ -329,10 +424,81 @@ pub(crate) mod testing {
     }
 
     prop_compose! {
+        /// Generate a random bare identifier of `length` containing any characters from our
+        /// dictionary
+        pub fn bare_ident_any(length: u32)
+                    (raw in bare_ident_raw_any(length)
+                        .prop_filter(
+                            "identifiers must be valid",
+                            |s| Ident::validate(s).is_ok()
+                        )
+                    ) -> Ident {
+            Ident::from_raw_parts(Span::new(SourceSpan::UNKNOWN, raw.into_boxed_str().into()))
+        }
+    }
+
+    prop_compose! {
+        /// Generate a random constant identifier of `length` containing any characters from our
+        /// constant dictionary
+        pub fn const_ident_any(length: u32)
+                    (raw in const_ident_raw_any(length)
+                        .prop_filter(
+                            "identifiers must be valid",
+                            |s| Ident::validate(s).is_ok()
+                        )
+                    ) -> Ident {
+            let id = Ident::from_raw_parts(Span::new(SourceSpan::UNKNOWN, raw.into_boxed_str().into()));
+            assert!(id.is_constant_ident());
+            id
+        }
+    }
+
+    prop_compose! {
+        /// Generate a random type identifier corresponding to of one of the built-in types
+        pub fn builtin_type_any()
+                                (name in prop_oneof![
+                                    Just(crate::ast::types::Type::I1),
+                                    Just(crate::ast::types::Type::I8),
+                                    Just(crate::ast::types::Type::U8),
+                                    Just(crate::ast::types::Type::I16),
+                                    Just(crate::ast::types::Type::U16),
+                                    Just(crate::ast::types::Type::I32),
+                                    Just(crate::ast::types::Type::U32),
+                                    Just(crate::ast::types::Type::I64),
+                                    Just(crate::ast::types::Type::U64),
+                                    Just(crate::ast::types::Type::I128),
+                                    Just(crate::ast::types::Type::U128),
+                                    Just(crate::ast::types::Type::Felt),
+                                ]) -> Ident {
+            Ident::from_raw_parts(Span::new(SourceSpan::UNKNOWN, name.to_string().into_boxed_str().into()))
+        }
+    }
+
+    prop_compose! {
         /// Generate a random identifier of `length` containing any characters from our dictionary
         pub fn ident_any_random_length()
             (length in 1..u8::MAX)
             (id in ident_any(length as u32)) -> Ident {
+            id
+        }
+    }
+
+    prop_compose! {
+        /// Generate a random bare identifier of `length` containing any characters from our
+        /// dictionary
+        pub fn bare_ident_any_random_length()
+            (length in 1..u8::MAX)
+            (id in ident_any(length as u32)) -> Ident {
+            id
+        }
+    }
+
+    prop_compose! {
+        /// Generate a random constant identifier of `length` containing any characters from our
+        /// dictionary
+        pub fn const_ident_any_random_length()
+            (length in 1..u8::MAX)
+            (id in const_ident_any(length as u32)) -> Ident {
             id
         }
     }

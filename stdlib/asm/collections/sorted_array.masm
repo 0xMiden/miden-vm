@@ -1,9 +1,9 @@
-use.std::word
+use std::word
 
 # CONSTANTS
 # =================================================================================================
-const.LOWERBOUND_ARRAY_EVENT=event("stdlib::collections::sorted_array::lowerbound_array")
-const.LOWERBOUND_KEY_VALUE_EVENT=event("stdlib::collections::sorted_array::lowerbound_key_value")
+const LOWERBOUND_ARRAY_EVENT = event("stdlib::collections::sorted_array::lowerbound_array")
+const LOWERBOUND_KEY_VALUE_EVENT = event("stdlib::collections::sorted_array::lowerbound_key_value")
 
 # ===== ARRAY UTILITIES ============================================================================
 
@@ -23,7 +23,7 @@ const.LOWERBOUND_KEY_VALUE_EVENT=event("stdlib::collections::sorted_array::lower
 #!   Value doesn't exist and is smaller than all elements: 151 cycles
 #!   Value doesn't exist and is larger than all elements: 149 cycles
 #!   Value doesn't exist: 286 cycles
-export.find_word
+pub proc find_word
     # Call the non-deterministic lowerbound advisor (5 cycles)
     emit.LOWERBOUND_ARRAY_EVENT
     adv_push.2
@@ -47,7 +47,7 @@ export.find_word
         #=> [is_value_found, maybe_value_ptr, start_ptr, end_ptr]
     else
         # the value was not found
-        
+
         # pre-compute is_start_ptr, is_end_ptr to reduce the depth of the generated MAST
         # (6 cycles)
         dup.6 dup.1 eq
@@ -121,7 +121,7 @@ export.find_word
                 # dereference maybe_value_ptr (8 cycles)
                 padw dup.12 mem_loadw_be
                 #=> [MAYBE_VALUE, VALUE, VALUE, maybe_value_ptr, start_ptr, end_ptr]
-                
+
                 # there was no match, MAYBE_VALUE must be larger than VALUE (123 cycles)
                 exec.word::lt
                 assert.err="lowerbound_array invariant: *maybe_value_ptr not greater than VALUE"
@@ -129,11 +129,11 @@ export.find_word
                 # dereference `maybe_value_ptr-4` (11 cycles)
                 padw dup.8 sub.4 mem_loadw_be
                 #=> [MAYBE_VALUE_PREV, VALUE, maybe_value_ptr, start_ptr, end_ptr]
-                
+
                 # there was no match, MAYBE_VALUE_PREV must be smaller than VALUE (119 cycles)
                 exec.word::gt
                 assert.err="lowerbound_array invariant: *(maybe_value_ptr-4) not smaller than VALUE"
-                
+
                 # No value was found (1 cycle)
                 push.0
                 #=> [is_value_found = 0, maybe_value_ptr, start_ptr, end_ptr]
@@ -160,7 +160,7 @@ end
 #!
 #! Inputs: [KEY, start_ptr, end_ptr]
 #! Output: [is_key_found, key_ptr, start_ptr, end_ptr]
-export.find_key_value
+pub proc find_key_value
     push.1
     # => [use_full_key = 1, KEY, start_ptr, end_ptr]
 
@@ -187,7 +187,7 @@ end
 #! - end_ptr is not double-word-aligned with the start_ptr:
 #!     - `(end_ptr - start_ptr)` must be divisible by 8
 #! - `start_ptr > end_ptr`
-export.find_half_key_value
+pub proc find_half_key_value
     push.0 movdn.2 push.0 movdn.2
     # => [key_prefix, key_suffix, 0, 0, start_ptr, end_ptr]
     # => [KEY, start_ptr, end_ptr]
@@ -227,7 +227,8 @@ end
 #!   Key doesn't exist and is smaller than all stored keys: 166 cycles
 #!   Key doesn't exist and is larger than all stored keys: 162 cycles
 #!   Key doesn't exist: 322 cycles
-proc.find_partial_key_value.1
+@locals(1)
+proc find_partial_key_value
     # Call the non-deterministic lowerbound advisor (5 cycles)
     emit.LOWERBOUND_KEY_VALUE_EVENT
     # => [KEY, start_ptr, end_ptr, use_full_key]
@@ -355,11 +356,11 @@ proc.find_partial_key_value.1
 
                 loc_load.0 exec.load_key
                 #=> [MAYBE_KEY_PREV, KEY, maybe_key_ptr, start_ptr, end_ptr]
-                
+
                 # there was no match, `*(maybe_key_ptr-8)` must be smaller than KEY (119 cycles)
                 exec.word::gt
                 assert.err="lowerbound_key_value invariant: MAYBE_KEY_PREV not smaller than KEY"
-                
+
                 # No value was found (1 cycle)
                 push.0
                 #=> [is_key_found = 0, maybe_key_ptr, start_ptr, end_ptr]
@@ -379,7 +380,7 @@ end
 #! Outputs: [KEY]
 #!
 #! Cycles: 16
-proc.load_key
+proc load_key
     padw movup.5 mem_loadw_be
     # => [FULL_KEY, use_full_key]
 

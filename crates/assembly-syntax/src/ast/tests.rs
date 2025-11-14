@@ -1,11 +1,11 @@
-use alloc::{string::ToString, sync::Arc, vec::Vec};
+use alloc::{string::ToString, vec::Vec};
 
 use miden_debug_types::{SourceSpan, Span};
 use miden_utils_diagnostics::Report;
 use pretty_assertions::assert_eq;
 
 use crate::{
-    Felt, LibraryNamespace, LibraryPath, assert_diagnostic, assert_diagnostic_lines,
+    Felt, PathBuf, assert_diagnostic, assert_diagnostic_lines,
     ast::{types::Type, *},
     parser::{IntValue, WordValue},
     regex, source_file,
@@ -22,6 +22,20 @@ macro_rules! id {
     };
 }
 
+macro_rules! path {
+    ($path:literal) => {
+        Span::unknown(PathBuf::new($path).expect("invalid path"))
+    };
+
+    ($path:ident) => {
+        Span::unknown(PathBuf::new(stringify!($path)).expect("invalid path"))
+    };
+
+    ($path:ty) => {
+        Span::unknown(PathBuf::new(stringify!($path)).expect("invalid path"))
+    };
+}
+
 macro_rules! inst {
     ($inst:ident($value:expr)) => {
         Op::Inst(Span::unknown(Instruction::$inst($value)))
@@ -34,34 +48,29 @@ macro_rules! inst {
 
 macro_rules! exec {
     ($name:ident) => {
-        inst!(Exec(InvocationTarget::ProcedureName(
+        inst!(Exec(InvocationTarget::Symbol(
             stringify!($name).parse().expect("invalid procedure name")
         )))
     };
 
     ($name:path) => {{
-        let path = stringify!($name);
-        let (module, name) = path.split_once("::").expect("invalid procedure path");
-        let name = Ident::new(Span::unknown(Arc::from(name.to_string().into_boxed_str())))
-            .expect("invalid identifier");
-        let name = ProcedureName::new(name).expect("invalid procedure name");
+        let path = stringify!($name).parse::<PathBuf>().expect("invalid procedure path");
+        let path = path.into_boxed_path().into();
 
-        inst!(Exec(InvocationTarget::ProcedurePath { name, module: module.parse().unwrap() }))
+        inst!(Exec(InvocationTarget::Path(Span::unknown(path))))
     }};
 }
 
 #[allow(unused_macros)]
 macro_rules! call {
     ($name:ident) => {
-        inst!(Call(InvocationTarget::ProcedureName(stringify!($name).parse())))
+        inst!(Call(InvocationTarget::Symbol(stringify!($name).parse())))
     };
 
     ($name:path) => {{
-        let path = stringify!($name);
-        let (module, name) = path.split_once("::").expect("invalid procedure path");
-        let name = ProcedureName::new(Default::default(), name).expect("invalid procedure name");
+        let path = stringify!($name).parse().expect("invalid procedure path");
 
-        inst!(Call(InvocationTarget::ProcedurePath { name, module }))
+        inst!(Call(InvocationTarget::Path(path)))
     }};
 }
 
@@ -123,21 +132,25 @@ macro_rules! while_true {
 
 macro_rules! type_alias {
     ($alias:ident, $ty:expr) => {
-        Form::Type(TypeAlias::new(id!($alias), $ty.into()))
+        Form::Type(TypeAlias::new(Visibility::Private, id!($alias), $ty.into()))
     };
 
     ($alias:ty, $ty:expr) => {
-        Form::Type(TypeAlias::new(id!($alias), $ty.into()))
+        Form::Type(TypeAlias::new(Visibility::Private, id!($alias), $ty.into()))
     };
 }
 
 macro_rules! type_ref {
+    ($path:literal) => {
+        TypeExpr::Ref(path!($path))
+    };
+
     ($alias:ident) => {
-        TypeExpr::Ref(id!($alias))
+        TypeExpr::Ref(path!($alias))
     };
 
     ($alias:ty) => {
-        TypeExpr::Ref(id!($alias))
+        TypeExpr::Ref(path!($alias))
     };
 }
 
@@ -169,11 +182,11 @@ macro_rules! function_ty {
 
 macro_rules! enum_ty {
     ($name:ident, $ty:expr, $($variant:expr),+) => {
-        Form::Enum(EnumType::new(id!($name), $ty.into(), [$($variant),*]))
+        Form::Enum(EnumType::new(Visibility::Private, id!($name), $ty.into(), [$($variant),*]))
     };
 
     ($name:ty, $ty:expr, $($variant:expr),+) => {
-        Form::Enum(EnumType::new(id!($name), $ty.into(), [$($variant),*]))
+        Form::Enum(EnumType::new(Visibility::Private, id!($name), $ty.into(), [$($variant),*]))
     };
 }
 
@@ -190,8 +203,12 @@ macro_rules! const_int {
 }
 
 macro_rules! const_ref {
+    ($path:literal) => {
+        ConstantExpr::Var(path!($path))
+    };
+
     ($name:ident) => {
-        ConstantExpr::Var(id!($name))
+        ConstantExpr::Var(path!($name))
     };
 }
 
@@ -219,41 +236,35 @@ macro_rules! const_add {
 
 macro_rules! import {
     ($name:literal) => {{
-        let path: crate::LibraryPath = $name.parse().expect("invalid import path");
-        let name = path.last().parse().unwrap();
-        Form::Import(Import {
-            span: SourceSpan::default(),
+        let path = $name.parse::<PathBuf>().expect("invalid import path");
+        let name = Ident::new(path.last().unwrap()).unwrap();
+        Form::Alias(Alias::new(
+            Visibility::Private,
             name,
-            path,
-            uses: 0,
-        })
+            AliasTarget::Path(Span::unknown(path.into())),
+        ))
     }};
 
     ($name:literal -> $alias:literal) => {
-        let path: LibraryPath = $name.parse().expect("invalid import path");
+        let path = $name.parse::<PathBuf>().expect("invalid import path").into();
         let name = $alias.parse().expect("invalid import alias");
-        Form::Import(Import {
-            span: SourceSpan::default(),
-            name,
-            path,
-            uses: 0,
-        })
+        Form::Alias(Alias::new(Visibility::Private, name, AliasTarget::Path(Span::unknown(path))))
     };
 }
 
 macro_rules! proc {
     ($name:ident, $num_locals:literal, $body:expr) => {
-        Form::Procedure(Export::Procedure(Procedure::new(
+        Form::Procedure(Procedure::new(
             Default::default(),
             Visibility::Private,
             stringify!($name).parse().expect("invalid procedure name"),
             $num_locals,
             $body,
-        )))
+        ))
     };
 
     ([$($attr:expr),*], $name:ident, $num_locals:literal, $body:expr) => {
-        Form::Procedure(Export::Procedure(
+        Form::Procedure(
             Procedure::new(
                 Default::default(),
                 Visibility::Private,
@@ -262,11 +273,11 @@ macro_rules! proc {
                 $body,
             )
             .with_attributes([$($attr),*]),
-        ))
+        )
     };
 
     ($docs:literal, $name:ident, $num_locals:literal, $body:expr) => {
-        Form::Procedure(Export::Procedure(
+        Form::Procedure(
             Procedure::new(
                 Default::default(),
                 Visibility::Private,
@@ -275,11 +286,11 @@ macro_rules! proc {
                 $body,
             )
             .with_docs(Some(Span::unknown($docs.to_string()))),
-        ))
+        )
     };
 
     ($docs:literal, [$($attr:expr),*], $name:ident, $num_locals:literal, $body:expr) => {
-        Form::Procedure(Export::Procedure(
+        Form::Procedure(
             Procedure::new(
                 Default::default(),
                 Visibility::Private,
@@ -289,23 +300,23 @@ macro_rules! proc {
             )
             .with_docs($docs)
             .with_attributes([$($attr),*]),
-        ))
+        )
     };
 }
 
 macro_rules! export {
     ($name:ident, $num_locals:literal, $body:expr) => {
-        Form::Procedure(Export::Procedure(Procedure::new(
+        Form::Procedure(Procedure::new(
             Default::default(),
             Visibility::Public,
             stringify!($name).parse().expect("invalid procedure name"),
             $num_locals,
             $body,
-        )))
+        ))
     };
 
     ($docs:expr, $name:ident, $num_locals:literal, $body:expr) => {
-        Form::Procedure(Export::Procedure(
+        Form::Procedure(
             Procedure::new(
                 Default::default(),
                 Visibility::Public,
@@ -314,13 +325,13 @@ macro_rules! export {
                 $body,
             )
             .with_docs(Some(Span::unknown($docs.to_string()))),
-        ))
+        )
     };
 }
 
 macro_rules! typed_export {
     ($name:ident, $num_locals:literal, $signature:expr, $body:expr) => {
-        Form::Procedure(Export::Procedure(
+        Form::Procedure(
             Procedure::new(
                 Default::default(),
                 Visibility::Public,
@@ -329,11 +340,11 @@ macro_rules! typed_export {
                 $body,
             )
             .with_signature($signature),
-        ))
+        )
     };
 
     ($docs:expr, $name:ident, $num_locals:literal, $signature:expr, $body:expr) => {
-        Form::Procedure(Export::Procedure(
+        Form::Procedure(
             Procedure::new(
                 Default::default(),
                 Visibility::Public,
@@ -343,7 +354,7 @@ macro_rules! typed_export {
             )
             .with_signature($signature)
             .with_docs(Some(Span::unknown($docs.to_string()))),
-        ))
+        )
     };
 }
 
@@ -423,6 +434,7 @@ macro_rules! assert_module_diagnostic_lines {
     }};
 }
 
+#[allow(unused_macros)]
 macro_rules! assert_program_diagnostic_lines {
     ($context:ident, $source:expr, $($expected:literal),+) => {{
         let error = $context
@@ -558,10 +570,12 @@ fn test_ast_parsing_program_proc() -> Result<(), Report> {
     let source = source_file!(
         &context,
         r#"
-    proc.foo.1
+    @locals(1)
+    proc foo
         loc_load.0
     end
-    proc.bar.2
+    @locals(2)
+    proc bar
         padw
     end
     begin
@@ -586,7 +600,8 @@ fn test_ast_parsing_module() -> Result<(), Report> {
     let source = source_file!(
         &context,
         r#"
-    export.foo.1
+    @locals(1)
+    pub proc foo
         loc_load.0
     end"#
     );
@@ -642,7 +657,7 @@ fn test_ast_parsing_use() -> Result<(), Report> {
     let source = source_file!(
         &context,
         r#"
-    use.std::abc::foo
+    use std::abc::foo
     begin
         exec.foo::bar
     end"#
@@ -659,7 +674,7 @@ fn test_ast_parsing_module_nested_if() -> Result<(), Report> {
     let source = source_file!(
         &context,
         r#"
-    proc.foo
+    proc foo
         push.1
         if.true
             push.0
@@ -709,7 +724,7 @@ fn test_ast_parsing_module_sequential_if() -> Result<(), Report> {
     let source = source_file!(
         &context,
         r#"
-    proc.foo
+    proc foo
         push.1
         if.true
             push.5
@@ -788,13 +803,15 @@ fn test_ast_parsing_attributes() -> Result<(), Report> {
         r#"
     # Simple marker attribute
     @inline
-    proc.foo.1
+    @locals(1)
+    proc foo
         loc_load.0
     end
 
     # List attribute
     @inline(always)
-    proc.bar.2
+    @locals(2)
+    proc bar
         padw
     end
 
@@ -802,7 +819,8 @@ fn test_ast_parsing_attributes() -> Result<(), Report> {
     @numbers(decimal = 1, hex = 0xdeadbeef)
     @props(name = baz)
     @props(string = "not a valid quoted identifier")
-    proc.baz.2
+    @locals(2)
+    proc baz
         padw
     end
 
@@ -838,36 +856,6 @@ fn test_ast_parsing_attributes() -> Result<(), Report> {
     Ok(())
 }
 
-// PROCEDURE IMPORTS
-// ================================================================================================
-
-#[test]
-fn test_missing_import() {
-    let context = SyntaxTestContext::new();
-    let source = source_file!(
-        &context,
-        r#"
-    begin
-        exec.u64::add
-    end"#
-    );
-
-    assert_program_diagnostic_lines!(
-        context,
-        source,
-        "syntax error",
-        "help: see emitted diagnostics for details",
-        "missing import: the referenced module has not been imported",
-        regex!(r#",-\[test[\d]+:3:19\]"#),
-        "2 |     begin",
-        "3 |         exec.u64::add",
-        "  :                   ^|^",
-        "  :                    `-- this reference is invalid without a corresponding import",
-        "4 |     end",
-        "  `----"
-    );
-}
-
 // INVALID BODY TESTS
 // ================================================================================================
 
@@ -877,7 +865,8 @@ fn test_use_in_proc_body() {
     let source = source_file!(
         &context,
         r#"
-    export.foo.1
+    @locals(1)
+    pub proc foo
         loc_load.0
         use
     end"#
@@ -886,12 +875,12 @@ fn test_use_in_proc_body() {
     assert_parse_diagnostic_lines!(
         source,
         "invalid syntax",
-        regex!(r#",-\[test[\d]+:4:9\]"#),
-        "3 |         loc_load.0",
-        "4 |         use",
+        regex!(r#",-\[test[\d]+:5:9\]"#),
+        "4 |         loc_load.0",
+        "5 |         use",
         " :         ^|^",
         "  :          `-- found a use here",
-        "5 |     end",
+        "6 |     end",
         "  `----",
         r#" help: expected primitive opcode (e.g. "add"), or "end", or control flow opcode (e.g. "if.true")"#
     );
@@ -900,13 +889,13 @@ fn test_use_in_proc_body() {
 #[test]
 fn test_unterminated_proc() {
     let context = SyntaxTestContext::default();
-    let source = source_file!(&context, "proc.foo add mul begin push.1 end");
+    let source = source_file!(&context, "proc foo add mul begin push.1 end");
 
     assert_parse_diagnostic_lines!(
         source,
         "invalid syntax",
         regex!(r#",-\[test[\d]+:1:18\]"#),
-        "1 | proc.foo add mul begin push.1 end",
+        "1 | proc foo add mul begin push.1 end",
         "  :                  ^^|^^",
         "  :                    `-- found a begin here",
         "  `----",
@@ -917,13 +906,13 @@ fn test_unterminated_proc() {
 #[test]
 fn test_unterminated_if() {
     let context = SyntaxTestContext::default();
-    let source = source_file!(&context, "proc.foo add mul if.true add.2 begin push.1 end");
+    let source = source_file!(&context, "proc foo add mul if.true add.2 begin push.1 end");
 
     assert_parse_diagnostic_lines!(
         source,
         "invalid syntax",
         regex!(r#",-\[test[\d]+:1:32\]"#),
-        "1 | proc.foo add mul if.true add.2 begin push.1 end",
+        "1 | proc foo add mul if.true add.2 begin push.1 end",
         "  :                                ^^|^^",
         "  :                                  `-- found a begin here",
         "  `----",
@@ -941,7 +930,8 @@ fn test_ast_parsing_simple_docs() -> Result<(), Report> {
         &context,
         r#"
     #! proc doc
-    export.foo.1
+    @locals(1)
+    pub proc foo
         loc_load.0
     end"#
     );
@@ -969,21 +959,24 @@ fn test_ast_parsing_module_docs_valid() {
 #! consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.
 #! This comment is intentionally longer than 256 characters, since we need to be sure that the size
 #! of the comments is correctly parsed. There was a bug here earlier.
-export.foo.1
+@locals(1)
+pub proc foo
     loc_load.0
 end
 
 #! Test documentation for internal procedure bar in parsing test. Lorem ipsum dolor sit amet,
 #! consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna
 #! aliqua.
-proc.bar.2
+@locals(2)
+proc bar
     padw
 end
 
 #! Test documentation for export procedure baz in parsing test. Lorem ipsum dolor sit amet,
 #! consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna
 #! aliqua.
-export.baz.3
+@locals(3)
+pub proc baz
     padw
     push.0
 end"
@@ -1044,7 +1037,8 @@ fn test_ast_parsing_module_docs_fail() {
     #! module doc
 
     #! proc doc
-    export.foo.1
+    @locals(1)
+    pub proc foo
         loc_load.0
     end
 
@@ -1057,12 +1051,12 @@ fn test_ast_parsing_module_docs_fail() {
         "syntax error",
         "help: see emitted diagnostics for details",
         "Warning:   ! unused docstring",
-        regex!(r#",-\[test[\d]+:8:5\]"#),
-        "7 |",
-        "8 |     #! malformed doc",
-        "  :     ^^^^^^^^^^^^^^^^^",
-        "9 |",
-        "  `----",
+        regex!(r#",-\[test[\d]+:9:5\]"#),
+        " 8 |",
+        " 9 |     #! malformed doc",
+        "   :     ^^^^^^^^^^^^^^^^^",
+        "10 |",
+        "   `----",
         "help: this docstring is immediately followed by at least one empty line, then another docstring,if you intended these to be a single docstring, you should remove the empty lines"
     );
 
@@ -1070,7 +1064,8 @@ fn test_ast_parsing_module_docs_fail() {
         &context,
         "\
     #! proc doc
-    export.foo.1
+    @locals(1)
+    pub proc foo
         loc_load.0
     end
 
@@ -1083,11 +1078,11 @@ fn test_ast_parsing_module_docs_fail() {
         "syntax error",
         "help: see emitted diagnostics for details",
         "Warning:   ! unused docstring",
-        regex!(r#",-\[test[\d]+:6:5\]"#),
-        "5 |",
-        "6 |     #! malformed doc",
+        regex!(r#",-\[test[\d]+:7:5\]"#),
+        "6 |",
+        "7 |     #! malformed doc",
         "  :     ^^^^^^^^^^^^^^^^^",
-        "7 |",
+        "8 |",
         "  `----",
         "help: this docstring is immediately followed by at least one empty line, then another docstring,if you intended these to be a single docstring, you should remove the empty lines"
     );
@@ -1118,7 +1113,8 @@ fn test_ast_parsing_module_docs_fail() {
     let source = source_file!(
         &context,
         "\
-    export.foo.1
+    @locals(1)
+    pub proc foo
         loc_load.0
     end
 
@@ -1131,11 +1127,11 @@ fn test_ast_parsing_module_docs_fail() {
         "syntax error",
         "help: see emitted diagnostics for details",
         "Warning:   ! unused docstring",
-        regex!(r#",-\[test[\d]+:5:5\]"#),
-        "4 |",
-        "5 |     #! malformed doc",
+        regex!(r#",-\[test[\d]+:6:5\]"#),
+        "5 |",
+        "6 |     #! malformed doc",
         "  :     ^^^^^^^^^^^^^^^^^",
-        "6 |",
+        "7 |",
         "  `----",
         "help: this docstring is immediately followed by at least one empty line, then another docstring,if you intended these to be a single docstring, you should remove the empty lines"
     );
@@ -1145,7 +1141,8 @@ fn test_ast_parsing_module_docs_fail() {
         "\
     #! module doc
 
-    export.foo.1
+    @locals(1)
+    pub proc foo
         loc_load.0
     end
 
@@ -1158,11 +1155,11 @@ fn test_ast_parsing_module_docs_fail() {
         "syntax error",
         "help: see emitted diagnostics for details",
         "Warning:   ! unused docstring",
-        regex!(r#",-\[test[\d]+:7:5\]"#),
-        "6 |",
-        "7 |     #! malformed doc",
+        regex!(r#",-\[test[\d]+:8:5\]"#),
+        "7 |",
+        "8 |     #! malformed doc",
         "  :     ^^^^^^^^^^^^^^^^^",
-        "8 |",
+        "9 |",
         "  `----",
         "help: this docstring is immediately followed by at least one empty line, then another docstring,if you intended these to be a single docstring, you should remove the empty lines"
     );
@@ -1171,7 +1168,8 @@ fn test_ast_parsing_module_docs_fail() {
         &context,
         "\
     #! proc doc
-    export.foo.1
+    @locals(1)
+    pub proc foo
         #! malformed doc
         loc_load.0
     end
@@ -1181,13 +1179,13 @@ fn test_ast_parsing_module_docs_fail() {
         context,
         source,
         "invalid syntax",
-        regex!(r#",-\[test[\d]+:3:9\]"#),
-        "2 |     export.foo.1",
-        "3 |         #! malformed doc",
+        regex!(r#",-\[test[\d]+:4:9\]"#),
+        "3 |     pub proc foo",
+        "4 |         #! malformed doc",
         "  :         ^^^^^^^^|^^^^^^^^",
         "  :                 `-- found a doc comment here",
-        "4 |         loc_load.0",
-        "5 |     end",
+        "5 |         loc_load.0",
+        "6 |     end",
         "  `----",
         r#" help: expected "(", or primitive opcode (e.g. "add"), or control flow opcode (e.g. "if.true")"#
     );
@@ -1301,7 +1299,7 @@ fn assert_parsing_line_unexpected_token() {
     let source = source_file!(
         &context,
         "\
-    proc.foo
+    proc foo
       add
     end
 
@@ -1316,7 +1314,7 @@ fn assert_parsing_line_unexpected_token() {
         "  :     ^|^",
         "  :      `-- found a mul here",
         "  `----",
-        r#" help: expected "@", or "adv_map", or "begin", or "const", or "enum", or "export", or "proc", or "pub", or "type", or "use", or end of file, or doc comment"#
+        r#" help: expected "@", or "adv_map", or "begin", or "const", or "enum", or "proc", or "pub", or "type", or "use", or end of file, or doc comment"#
     );
 }
 
@@ -1383,12 +1381,8 @@ end
     let context = SyntaxTestContext::default();
     let source = source_file!(&context, source);
 
-    let module = Module::parse(
-        LibraryPath::new_from_components(LibraryNamespace::Exec, []),
-        ModuleKind::Executable,
-        source,
-    )
-    .unwrap_or_else(|err| panic!("{err}"));
+    let module = Module::parse(Path::exec_path(), ModuleKind::Executable, source)
+        .unwrap_or_else(|err| panic!("{err}"));
 
     let formatted = module.to_string();
     let expected = "\
@@ -1445,8 +1439,8 @@ end
 #[test]
 fn test_words_roundtrip_formatting() {
     let source = "\
-const.A=0x0200000000000000030000000000000004000000000000000500000000000000
-const.B=[2,3,4,5]
+const A = 0x0200000000000000030000000000000004000000000000000500000000000000
+const B = [2,3,4,5]
 begin
     push.0x0200000000000000030000000000000004000000000000000500000000000000
     push.A.6
@@ -1459,12 +1453,7 @@ end
     let context = SyntaxTestContext::default();
     let source = source_file!(&context, source);
 
-    let module = Module::parse(
-        LibraryPath::new_from_components(LibraryNamespace::Exec, []),
-        ModuleKind::Executable,
-        source,
-    )
-    .unwrap();
+    let module = Module::parse(Path::exec_path(), ModuleKind::Executable, source).unwrap();
 
     let formatted = module.to_string();
     let expected = "\
@@ -1492,7 +1481,7 @@ fn cannot_mem_store_word() {
     let source = source_file!(
         &context,
         r#"
-const.A=[2,3,4,5]
+const A = [2,3,4,5]
 begin
     mem_store.A
 end"#
@@ -1501,12 +1490,8 @@ end"#
     // Instead of the usual macro that does only parsing we need to use this
     // parse function that also performs the semantic analysis to realize that
     // the constant is of the wrong type.
-    let error = Module::parse(
-        LibraryPath::new_from_components(LibraryNamespace::Exec, []),
-        ModuleKind::Executable,
-        source,
-    )
-    .expect_err("expected diagnostic to be raised, but parsing succeeded");
+    let error = Module::parse(Path::exec_path(), ModuleKind::Executable, source)
+        .expect_err("expected diagnostic to be raised, but parsing succeeded");
 
     assert_diagnostic_lines!(
         error,

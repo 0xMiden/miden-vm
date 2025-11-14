@@ -1,11 +1,16 @@
 use alloc::string::ToString;
 
 use miden_crypto::{Felt, ONE, Word};
+use miden_utils_indexing::Idx;
 
 use super::*;
 use crate::{
-    AssemblyOp, DebugOptions, Decorator, Idx,
-    mast::{BasicBlockNode, MastForestError, MastNodeExt, node::MastNodeErrorContext},
+    AssemblyOp, DebugOptions, Decorator,
+    mast::{
+        BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, ExternalNodeBuilder,
+        JoinNodeBuilder, LoopNodeBuilder, MastForestContributor, MastForestError, MastNodeExt,
+        SplitNodeBuilder, node::MastNodeErrorContext,
+    },
     operations::Operation,
 };
 
@@ -247,7 +252,21 @@ fn serialize_deserialize_all_nodes() {
             (num_operations, Decorator::Trace(55)),
         ];
 
-        mast_forest.add_block_with_raw_decorators(operations, decorators).unwrap()
+        {
+            // Convert raw decorators to decorator list by adding them to the forest first
+            let decorator_list: Vec<(usize, crate::mast::DecoratorId)> = decorators
+            .into_iter()
+            .map(|(idx, decorator)| -> Result<(usize, crate::mast::DecoratorId), MastForestError> {
+                let decorator_id = mast_forest.add_decorator(decorator)?;
+                Ok((idx, decorator_id))
+            })
+            .collect::<Result<Vec<_>, MastForestError>>()
+            .unwrap();
+
+            BasicBlockNodeBuilder::new(operations, decorator_list)
+                .add_to_forest(&mut mast_forest)
+                .unwrap()
+        }
     };
 
     // Decorators to add to following nodes
@@ -255,44 +274,60 @@ fn serialize_deserialize_all_nodes() {
     let decorator_id2 = mast_forest.add_decorator(Decorator::Trace(2)).unwrap();
 
     // Call node
-    let call_node_id = mast_forest.add_call(basic_block_id).unwrap();
-    mast_forest[call_node_id].append_before_enter(&[decorator_id1]);
-    mast_forest[call_node_id].append_after_exit(&[decorator_id2]);
+    let call_node_id = CallNodeBuilder::new(basic_block_id)
+        .with_before_enter(vec![decorator_id1])
+        .with_after_exit(vec![decorator_id2])
+        .add_to_forest(&mut mast_forest)
+        .unwrap();
 
     // Syscall node
-    let syscall_node_id = mast_forest.add_syscall(basic_block_id).unwrap();
-    mast_forest[syscall_node_id].append_before_enter(&[decorator_id1]);
-    mast_forest[syscall_node_id].append_after_exit(&[decorator_id2]);
+    let syscall_node_id = CallNodeBuilder::new_syscall(basic_block_id)
+        .with_before_enter(vec![decorator_id1])
+        .with_after_exit(vec![decorator_id2])
+        .add_to_forest(&mut mast_forest)
+        .unwrap();
 
     // Loop node
-    let loop_node_id = mast_forest.add_loop(basic_block_id).unwrap();
-    mast_forest[loop_node_id].append_before_enter(&[decorator_id1]);
-    mast_forest[loop_node_id].append_after_exit(&[decorator_id2]);
+    let loop_node_id = LoopNodeBuilder::new(basic_block_id)
+        .with_before_enter(vec![decorator_id1])
+        .with_after_exit(vec![decorator_id2])
+        .add_to_forest(&mut mast_forest)
+        .unwrap();
 
     // Join node
-    let join_node_id = mast_forest.add_join(basic_block_id, call_node_id).unwrap();
-    mast_forest[join_node_id].append_before_enter(&[decorator_id1]);
-    mast_forest[join_node_id].append_after_exit(&[decorator_id2]);
+    let join_node_id = JoinNodeBuilder::new([basic_block_id, call_node_id])
+        .with_before_enter(vec![decorator_id1])
+        .with_after_exit(vec![decorator_id2])
+        .add_to_forest(&mut mast_forest)
+        .unwrap();
 
     // Split node
-    let split_node_id = mast_forest.add_split(basic_block_id, call_node_id).unwrap();
-    mast_forest[split_node_id].append_before_enter(&[decorator_id1]);
-    mast_forest[split_node_id].append_after_exit(&[decorator_id2]);
+    let split_node_id = SplitNodeBuilder::new([basic_block_id, call_node_id])
+        .with_before_enter(vec![decorator_id1])
+        .with_after_exit(vec![decorator_id2])
+        .add_to_forest(&mut mast_forest)
+        .unwrap();
 
     // Dyn node
-    let dyn_node_id = mast_forest.add_dyn().unwrap();
-    mast_forest[dyn_node_id].append_before_enter(&[decorator_id1]);
-    mast_forest[dyn_node_id].append_after_exit(&[decorator_id2]);
+    let dyn_node_id = DynNodeBuilder::new_dyn()
+        .with_before_enter(vec![decorator_id1])
+        .with_after_exit(vec![decorator_id2])
+        .add_to_forest(&mut mast_forest)
+        .unwrap();
 
     // Dyncall node
-    let dyncall_node_id = mast_forest.add_dyncall().unwrap();
-    mast_forest[dyncall_node_id].append_before_enter(&[decorator_id1]);
-    mast_forest[dyncall_node_id].append_after_exit(&[decorator_id2]);
+    let dyncall_node_id = DynNodeBuilder::new_dyncall()
+        .with_before_enter(vec![decorator_id1])
+        .with_after_exit(vec![decorator_id2])
+        .add_to_forest(&mut mast_forest)
+        .unwrap();
 
     // External node
-    let external_node_id = mast_forest.add_external(Word::default()).unwrap();
-    mast_forest[external_node_id].append_before_enter(&[decorator_id1]);
-    mast_forest[external_node_id].append_after_exit(&[decorator_id2]);
+    let external_node_id = ExternalNodeBuilder::new(Word::default())
+        .with_before_enter(vec![decorator_id1])
+        .with_after_exit(vec![decorator_id2])
+        .add_to_forest(&mut mast_forest)
+        .unwrap();
 
     mast_forest.make_root(join_node_id);
     mast_forest.make_root(syscall_node_id);
@@ -315,10 +350,16 @@ fn mast_forest_serialize_deserialize_with_child_ids_exceeding_parent_id() {
     let mut forest = MastForest::new();
     let deco0 = forest.add_decorator(Decorator::Trace(0)).unwrap();
     let deco1 = forest.add_decorator(Decorator::Trace(1)).unwrap();
-    let zero = forest.add_block(vec![Operation::U32div], Vec::new()).unwrap();
-    let first = forest.add_block(vec![Operation::U32add], vec![(0, deco0)]).unwrap();
-    let second = forest.add_block(vec![Operation::U32and], vec![(1, deco1)]).unwrap();
-    forest.add_join(first, second).unwrap();
+    let zero = BasicBlockNodeBuilder::new(vec![Operation::U32div], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let first = BasicBlockNodeBuilder::new(vec![Operation::U32add], vec![(0, deco0)])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let second = BasicBlockNodeBuilder::new(vec![Operation::U32and], vec![(1, deco1)])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    JoinNodeBuilder::new([first, second]).add_to_forest(&mut forest).unwrap();
 
     // Move the Join node before its child nodes and remove the temporary zero node.
     forest.nodes.swap_remove(zero.to_usize());
@@ -331,10 +372,16 @@ fn mast_forest_serialize_deserialize_with_child_ids_exceeding_parent_id() {
 #[test]
 fn mast_forest_serialize_deserialize_with_overflowing_ids_fails() {
     let mut overflow_forest = MastForest::new();
-    let id0 = overflow_forest.add_block(vec![Operation::Eqz], Vec::new()).unwrap();
-    overflow_forest.add_block(vec![Operation::Eqz], Vec::new()).unwrap();
-    let id2 = overflow_forest.add_block(vec![Operation::Eqz], Vec::new()).unwrap();
-    let id_join = overflow_forest.add_join(id0, id2).unwrap();
+    let id0 = BasicBlockNodeBuilder::new(vec![Operation::Eqz], Vec::new())
+        .add_to_forest(&mut overflow_forest)
+        .unwrap();
+    BasicBlockNodeBuilder::new(vec![Operation::Eqz], Vec::new())
+        .add_to_forest(&mut overflow_forest)
+        .unwrap();
+    let id2 = BasicBlockNodeBuilder::new(vec![Operation::Eqz], Vec::new())
+        .add_to_forest(&mut overflow_forest)
+        .unwrap();
+    let id_join = JoinNodeBuilder::new([id0, id2]).add_to_forest(&mut overflow_forest).unwrap();
 
     let join_node = overflow_forest[id_join].clone();
 
@@ -342,8 +389,12 @@ fn mast_forest_serialize_deserialize_with_overflowing_ids_fails() {
     let mut forest = MastForest::new();
     let deco0 = forest.add_decorator(Decorator::Trace(0)).unwrap();
     let deco1 = forest.add_decorator(Decorator::Trace(1)).unwrap();
-    forest.add_block(vec![Operation::U32add], vec![(0, deco0), (1, deco1)]).unwrap();
-    forest.add_node(join_node).unwrap();
+    BasicBlockNodeBuilder::new(vec![Operation::U32add], vec![(0, deco0), (1, deco1)])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    // hack to force addition of a node which builder would return an error at runtime
+    // don't use this in production
+    forest.nodes.push(join_node).unwrap();
 
     assert_matches!(
         MastForest::read_from_bytes(&forest.to_bytes()),
@@ -355,38 +406,59 @@ fn mast_forest_serialize_deserialize_with_overflowing_ids_fails() {
 fn mast_forest_invalid_node_id() {
     // Hydrate a forest smaller than the second
     let mut forest = MastForest::new();
-    let first = forest.add_block(vec![Operation::U32div], Vec::new()).unwrap();
-    let second = forest.add_block(vec![Operation::U32div], Vec::new()).unwrap();
+    let first = BasicBlockNodeBuilder::new(vec![Operation::U32div], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let second = BasicBlockNodeBuilder::new(vec![Operation::U32div], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
 
     // Hydrate a forest larger than the first to get an overflow MastNodeId
     let mut overflow_forest = MastForest::new();
 
-    overflow_forest.add_block(vec![Operation::U32div], Vec::new()).unwrap();
-    overflow_forest.add_block(vec![Operation::U32div], Vec::new()).unwrap();
-    overflow_forest.add_block(vec![Operation::U32div], Vec::new()).unwrap();
-    let overflow = overflow_forest.add_block(vec![Operation::U32div], Vec::new()).unwrap();
+    BasicBlockNodeBuilder::new(vec![Operation::U32div], Vec::new())
+        .add_to_forest(&mut overflow_forest)
+        .unwrap();
+    BasicBlockNodeBuilder::new(vec![Operation::U32div], Vec::new())
+        .add_to_forest(&mut overflow_forest)
+        .unwrap();
+    BasicBlockNodeBuilder::new(vec![Operation::U32div], Vec::new())
+        .add_to_forest(&mut overflow_forest)
+        .unwrap();
+    let overflow = BasicBlockNodeBuilder::new(vec![Operation::U32div], Vec::new())
+        .add_to_forest(&mut overflow_forest)
+        .unwrap();
 
     // Attempt to join with invalid ids
-    let join = forest.add_join(overflow, second);
+    let join = JoinNodeBuilder::new([overflow, second]).add_to_forest(&mut forest);
     assert_eq!(join, Err(MastForestError::NodeIdOverflow(overflow, 2)));
-    let join = forest.add_join(first, overflow);
+    let join = JoinNodeBuilder::new([first, overflow]).add_to_forest(&mut forest);
     assert_eq!(join, Err(MastForestError::NodeIdOverflow(overflow, 2)));
 
     // Attempt to split with invalid ids
-    let split = forest.add_split(overflow, second);
+    let split = SplitNodeBuilder::new([overflow, second]).add_to_forest(&mut forest);
     assert_eq!(split, Err(MastForestError::NodeIdOverflow(overflow, 2)));
-    let split = forest.add_split(first, overflow);
+    let split = SplitNodeBuilder::new([first, overflow]).add_to_forest(&mut forest);
     assert_eq!(split, Err(MastForestError::NodeIdOverflow(overflow, 2)));
 
     // Attempt to loop with invalid ids
-    assert_eq!(forest.add_loop(overflow), Err(MastForestError::NodeIdOverflow(overflow, 2)));
+    assert_eq!(
+        LoopNodeBuilder::new(overflow).add_to_forest(&mut forest),
+        Err(MastForestError::NodeIdOverflow(overflow, 2))
+    );
 
     // Attempt to call with invalid ids
-    assert_eq!(forest.add_call(overflow), Err(MastForestError::NodeIdOverflow(overflow, 2)));
-    assert_eq!(forest.add_syscall(overflow), Err(MastForestError::NodeIdOverflow(overflow, 2)));
+    assert_eq!(
+        CallNodeBuilder::new(overflow).add_to_forest(&mut forest),
+        Err(MastForestError::NodeIdOverflow(overflow, 2))
+    );
+    assert_eq!(
+        CallNodeBuilder::new_syscall(overflow).add_to_forest(&mut forest),
+        Err(MastForestError::NodeIdOverflow(overflow, 2))
+    );
 
     // Validate normal operations
-    forest.add_join(first, second).unwrap();
+    JoinNodeBuilder::new([first, second]).add_to_forest(&mut forest).unwrap();
 }
 
 /// Test `MastForest::advice_map` serialization and deserialization.
@@ -395,9 +467,13 @@ fn mast_forest_serialize_deserialize_advice_map() {
     let mut forest = MastForest::new();
     let deco0 = forest.add_decorator(Decorator::Trace(0)).unwrap();
     let deco1 = forest.add_decorator(Decorator::Trace(1)).unwrap();
-    let first = forest.add_block(vec![Operation::U32add], vec![(0, deco0)]).unwrap();
-    let second = forest.add_block(vec![Operation::U32and], vec![(1, deco1)]).unwrap();
-    forest.add_join(first, second).unwrap();
+    let first = BasicBlockNodeBuilder::new(vec![Operation::U32add], vec![(0, deco0)])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let second = BasicBlockNodeBuilder::new(vec![Operation::U32and], vec![(1, deco1)])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    JoinNodeBuilder::new([first, second]).add_to_forest(&mut forest).unwrap();
 
     let key = Word::new([ONE, ONE, ONE, ONE]);
     let value = vec![ONE, ONE];
@@ -423,14 +499,13 @@ fn mast_forest_basic_block_serialization_no_decorator_duplication() {
     let op_deco = forest.add_decorator(Decorator::Trace(2)).unwrap();
     let after_exit_deco = forest.add_decorator(Decorator::Trace(3)).unwrap();
 
-    // Create a basic block with all types of decorators
+    // Create a basic block with all types of decorators using builder pattern
     let operations = vec![Operation::Add, Operation::Mul];
-    let mut block = BasicBlockNode::new(operations, vec![(0, op_deco)]).unwrap();
-    block.append_before_enter(&[before_enter_deco]);
-    block.append_after_exit(&[after_exit_deco]);
-
-    // Add the block to the forest
-    let block_id = forest.add_node(block).unwrap();
+    let block_id = BasicBlockNodeBuilder::new(operations, vec![(0, op_deco)])
+        .with_before_enter(vec![before_enter_deco])
+        .with_after_exit(vec![after_exit_deco])
+        .add_to_forest(&mut forest)
+        .unwrap();
     forest.make_root(block_id);
 
     // Serialize and deserialize the forest
@@ -448,18 +523,19 @@ fn mast_forest_basic_block_serialization_no_decorator_duplication() {
 
     // Verify that each decorator appears exactly once in the deserialized structure
     assert_eq!(
-        deserialized_block.before_enter(),
+        deserialized_block.before_enter(&deserialized),
         &[before_enter_deco],
         "before_enter decorator should appear exactly once"
     );
     assert_eq!(
-        deserialized_block.after_exit(),
+        deserialized_block.after_exit(&deserialized),
         &[after_exit_deco],
         "after_exit decorator should appear exactly once"
     );
 
     // Verify that the op-indexed decorator is only in the indexed decorator list
-    let indexed_decorators: Vec<_> = deserialized_block.indexed_decorator_iter().collect();
+    let indexed_decorators: Vec<_> =
+        deserialized_block.indexed_decorator_iter(&deserialized).collect();
     assert_eq!(indexed_decorators.len(), 1, "Should have exactly one op-indexed decorator");
     assert_eq!(indexed_decorators[0].1, op_deco, "Op-indexed decorator should be preserved");
 
@@ -474,7 +550,7 @@ fn mast_forest_basic_block_serialization_no_decorator_duplication() {
     );
 
     // Verify that all decorators() method returns all decorators (this is the full iterator)
-    let all_decorators: Vec<_> = deserialized_block.decorators().collect();
+    let all_decorators: Vec<_> = deserialized_block.decorators(&forest).collect();
     assert_eq!(all_decorators.len(), 3, "decorators() should return all 3 decorators");
 
     // Verify the order: before_enter, op-indexed, after_exit

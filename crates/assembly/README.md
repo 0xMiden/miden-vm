@@ -88,7 +88,7 @@ standard library procedures by importing them from the namespace of
 the library, as shown next:
 
 ```masm
-use.std::math::u64
+use std::math::u64
 
 begin
     push.1.0
@@ -126,7 +126,7 @@ or by compiling a kernel module from source, as shown below:
 
 // First, assemble the kernel library
 let kernel_lib = Assembler::new(source_manager.clone())
-    .assemble_kernel("export.foo add end")
+    .assemble_kernel("pub proc foo add end")
     .unwrap();
 
 // Create assembler with the kernel
@@ -146,7 +146,7 @@ Programs compiled by this assembler will be able to make calls to the
 
 // First, assemble the kernel library
 let kernel_lib = Assembler::new(source_manager.clone())
-    .assemble_kernel("export.foo add end")
+    .assemble_kernel("pub proc foo add end")
     .unwrap();
 
 // Create assembler with the kernel and assemble program
@@ -194,7 +194,7 @@ use miden_stdlib::StdLibrary;
 use std::sync::Arc;
 
 // Source code of the kernel module
-let kernel = "export.foo add end";
+let kernel = "pub proc foo add end";
 
 // Create a source manager
 let source_manager = Arc::new(DefaultSourceManager::default());

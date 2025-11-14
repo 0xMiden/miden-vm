@@ -9,7 +9,7 @@ use miden_utils_diagnostics::{
 #[cfg(feature = "std")]
 use crate::diagnostics::reporting::set_panic_hook;
 use crate::{
-    LibraryPath, Parse, ParseOptions,
+    Parse, ParseOptions, Path,
     ast::{Form, Module, ModuleKind},
 };
 
@@ -130,14 +130,14 @@ impl SyntaxTestContext {
     #[track_caller]
     pub fn parse_module_with_path(
         &self,
-        path: LibraryPath,
+        path: impl AsRef<Path>,
         source: impl Parse,
     ) -> Result<Box<Module>, Report> {
         source.parse_with_options(
             self.source_manager.as_ref(),
             ParseOptions {
                 warnings_as_errors: self.warnings_as_errors,
-                ..ParseOptions::new(ModuleKind::Library, path).unwrap()
+                ..ParseOptions::new(ModuleKind::Library, path)
             },
         )
     }
