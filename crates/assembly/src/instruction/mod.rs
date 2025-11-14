@@ -75,7 +75,7 @@ impl Assembler {
         let opt_new_node_id =
             self.compile_instruction_impl(instruction, block_builder, proc_ctx, decorators)?;
 
-        // If we’re in debug mode but didn’t create a node, set the cycle count after compilation.
+        // If we're in debug mode but didn't create a node, set the cycle count after compilation.
         if self.in_debug_mode() && !can_create_node {
             let _ = block_builder.set_instruction_cycle_count();
         }

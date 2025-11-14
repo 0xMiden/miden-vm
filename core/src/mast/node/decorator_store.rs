@@ -56,9 +56,7 @@ impl DecoratorStore {
     pub fn before_enter<'a>(&'a self, forest: &'a crate::mast::MastForest) -> &'a [DecoratorId] {
         match self {
             DecoratorStore::Owned { before_enter, .. } => before_enter,
-            DecoratorStore::Linked { id } => {
-                forest.node_decorator_storage.get_before_decorators(*id)
-            },
+            DecoratorStore::Linked { id } => forest.before_enter_decorators(*id),
         }
     }
 
@@ -66,9 +64,7 @@ impl DecoratorStore {
     pub fn after_exit<'a>(&'a self, forest: &'a crate::mast::MastForest) -> &'a [DecoratorId] {
         match self {
             DecoratorStore::Owned { after_exit, .. } => after_exit,
-            DecoratorStore::Linked { id } => {
-                forest.node_decorator_storage.get_after_decorators(*id)
-            },
+            DecoratorStore::Linked { id } => forest.after_exit_decorators(*id),
         }
     }
 
