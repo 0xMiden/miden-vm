@@ -577,11 +577,7 @@ impl Process {
         // the last clock cycle of the BASIC BLOCK ops.
         // For the linked case, check for decorators at an operation index beyond the last operation
         let num_ops = basic_block.num_operations() as usize;
-        let decorator_ids = program.decorator_indices_for_op(node_id, num_ops);
-        for &decorator_id in decorator_ids {
-            let decorator = program
-                .decorator_by_id(decorator_id)
-                .ok_or(ExecutionError::DecoratorNotFoundInForest { decorator_id })?;
+        for decorator in program.decorators_for_op(node_id, num_ops) {
             self.execute_decorator(decorator, host)?;
         }
 
@@ -620,13 +616,9 @@ impl Process {
 
         // execute operations in the batch one by one
         for (i, &op) in batch.ops().iter().enumerate() {
-            // Use the forest's decorator storage to get decorator IDs for this operation
+            // Use the forest's decorator storage to get decorators for this operation
             let current_op_idx = i + op_offset;
-            let decorator_ids = program.decorator_indices_for_op(node_id, current_op_idx);
-            for &decorator_id in decorator_ids {
-                let decorator = program
-                    .decorator_by_id(decorator_id)
-                    .ok_or(ExecutionError::DecoratorNotFoundInForest { decorator_id })?;
+            for decorator in program.decorators_for_op(node_id, current_op_idx) {
                 self.execute_decorator(decorator, host)?;
             }
 
