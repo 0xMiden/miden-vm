@@ -5,14 +5,14 @@ use miden_core::{
     AdviceMap,
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
-use miden_debug_types::{SourceFile, SourceSpan, Span, Spanned};
+use miden_debug_types::{SourceFile, SourceManager, SourceSpan, Span, Spanned};
 use miden_utils_diagnostics::Report;
 use smallvec::SmallVec;
 
 use super::{
     Alias, Constant, DocString, EnumType, Export, FunctionType, GlobalItemIndex, ItemIndex,
-    LocalSymbolResolutionError, LocalSymbolResolver, Path, Procedure, ProcedureName,
-    QualifiedProcedureName, SymbolResolution, TypeAlias, TypeDecl, TypeResolver, Variant,
+    LocalSymbolResolver, Path, Procedure, ProcedureName, QualifiedProcedureName, SymbolResolution,
+    SymbolResolutionError, TypeAlias, TypeDecl, TypeResolver, Variant,
 };
 use crate::{
     PathBuf,
@@ -298,8 +298,14 @@ impl Module {
 
     /// Defines a procedure, raising an error if the procedure is invalid, or conflicts with a
     /// previous definition
-    pub fn define_procedure(&mut self, procedure: Procedure) -> Result<(), SemanticAnalysisError> {
-        if let Some(prev) = self.resolve(procedure.name().as_ref())? {
+    pub fn define_procedure(
+        &mut self,
+        procedure: Procedure,
+        source_manager: Arc<dyn SourceManager>,
+    ) -> Result<(), SemanticAnalysisError> {
+        let name = procedure.name();
+        let name = Span::new(name.span(), name.as_str());
+        if let Ok(prev) = self.resolve(name, source_manager) {
             let prev_span = prev.span();
             Err(SemanticAnalysisError::SymbolConflict { span: procedure.span(), prev_span })
         } else {
@@ -310,11 +316,17 @@ impl Module {
 
     /// Defines an item alias, raising an error if the alias is invalid, or conflicts with a
     /// previous definition
-    pub fn define_alias(&mut self, item: Alias) -> Result<(), SemanticAnalysisError> {
+    pub fn define_alias(
+        &mut self,
+        item: Alias,
+        source_manager: Arc<dyn SourceManager>,
+    ) -> Result<(), SemanticAnalysisError> {
         if self.is_kernel() && item.visibility().is_public() {
             return Err(SemanticAnalysisError::ReexportFromKernel { span: item.span() });
         }
-        if let Some(prev) = self.resolve(item.name())? {
+        let name = item.name();
+        let name = Span::new(name.span(), name.as_str());
+        if let Ok(prev) = self.resolve(name, source_manager) {
             let prev_span = prev.span();
             Err(SemanticAnalysisError::SymbolConflict { span: item.span(), prev_span })
         } else {
@@ -331,10 +343,11 @@ impl Module {
         name: impl AsRef<Path>,
         kind: ModuleKind,
         source_file: Arc<SourceFile>,
+        source_manager: Arc<dyn SourceManager>,
     ) -> Result<Box<Self>, Report> {
         let name = name.as_ref();
         let mut parser = Self::parser(kind);
-        parser.parse(name, source_file)
+        parser.parse(name, source_file, source_manager)
     }
 
     /// Get a [ModuleParser] for parsing modules of the provided [ModuleKind]
@@ -479,14 +492,14 @@ impl Module {
         })
     }
 
-    /// Get an iterator over the items in this module.
-    pub fn items(&self) -> core::slice::Iter<'_, Export> {
-        self.items.iter()
+    /// Get a reference to the items stored in this module
+    pub fn items(&self) -> &[Export] {
+        &self.items
     }
 
-    /// Same as [Module::items], but returns mutable references.
-    pub fn items_mut(&mut self) -> core::slice::IterMut<'_, Export> {
-        self.items.iter_mut()
+    /// Get a mutable reference to the storage for items defined in this module
+    pub fn items_mut(&mut self) -> &mut Vec<Export> {
+        &mut self.items
     }
 
     /// Returns items exported from this module.
@@ -540,9 +553,10 @@ impl Module {
     /// Resolves `name` to an item within the local scope of this module
     pub fn resolve(
         &self,
-        name: &str,
-    ) -> Result<Option<SymbolResolution>, ast::LocalSymbolResolutionError> {
-        let resolver = self.resolver();
+        name: Span<&str>,
+        source_manager: Arc<dyn SourceManager>,
+    ) -> Result<SymbolResolution, SymbolResolutionError> {
+        let resolver = self.resolver(source_manager);
         resolver.resolve(name)
     }
 
@@ -550,15 +564,16 @@ impl Module {
     pub fn resolve_path(
         &self,
         path: Span<&Path>,
-    ) -> Result<Option<SymbolResolution>, ast::LocalSymbolResolutionError> {
-        let resolver = self.resolver();
+        source_manager: Arc<dyn SourceManager>,
+    ) -> Result<SymbolResolution, SymbolResolutionError> {
+        let resolver = self.resolver(source_manager);
         resolver.resolve_path(path)
     }
 
     /// Construct a search structure that can resolve procedure names local to this module
     #[inline]
-    pub fn resolver(&self) -> LocalSymbolResolver {
-        LocalSymbolResolver::from(self)
+    pub fn resolver(&self, source_manager: Arc<dyn SourceManager>) -> LocalSymbolResolver {
+        LocalSymbolResolver::new(self, source_manager)
     }
 
     /// Resolves `module_name` to an [Alias] within the context of this module
@@ -581,14 +596,18 @@ impl Module {
     pub fn resolve_type(
         &self,
         ty: &ast::TypeExpr,
-    ) -> Result<Option<types::Type>, LocalSymbolResolutionError> {
-        let type_resolver = ModuleTypeResolver::new(self);
+        source_manager: Arc<dyn SourceManager>,
+    ) -> Result<Option<types::Type>, SymbolResolutionError> {
+        let type_resolver = ModuleTypeResolver::new(self, source_manager);
         type_resolver.resolve(ty)
     }
 
     /// Get a type resolver for this module
-    pub fn type_resolver(&self) -> impl TypeResolver<LocalSymbolResolutionError> + '_ {
-        ModuleTypeResolver::new(self)
+    pub fn type_resolver(
+        &self,
+        source_manager: Arc<dyn SourceManager>,
+    ) -> impl TypeResolver<SymbolResolutionError> + '_ {
+        ModuleTypeResolver::new(self, source_manager)
     }
 }
 
@@ -664,24 +683,11 @@ impl crate::prettier::PrettyPrint for Module {
             .map(|docstring| docstring.render() + nl())
             .unwrap_or(Document::Empty);
 
-        let mut item_index = 0;
-        for item in self.items.iter() {
-            if item.is_main() {
-                continue;
-            }
-
+        for (item_index, item) in self.items.iter().enumerate() {
             if item_index > 0 {
                 doc += nl();
             }
             doc += item.render();
-            item_index += 1;
-        }
-
-        if let Some(main) = self.items.iter().find(|item| item.is_main()) {
-            if item_index > 0 {
-                doc += nl();
-            }
-            doc += main.render();
         }
 
         doc
@@ -694,45 +700,49 @@ struct ModuleTypeResolver<'a> {
 }
 
 impl<'a> ModuleTypeResolver<'a> {
-    pub fn new(module: &'a Module) -> Self {
-        let resolver = module.resolver();
+    pub fn new(module: &'a Module, source_manager: Arc<dyn SourceManager>) -> Self {
+        let resolver = module.resolver(source_manager);
         Self { module, resolver }
     }
 }
 
-impl TypeResolver<LocalSymbolResolutionError> for ModuleTypeResolver<'_> {
+impl TypeResolver<SymbolResolutionError> for ModuleTypeResolver<'_> {
+    fn source_manager(&self) -> Arc<dyn SourceManager> {
+        self.resolver.source_manager()
+    }
     fn get_type(
         &self,
         context: SourceSpan,
         _gid: GlobalItemIndex,
-    ) -> Result<ast::types::Type, LocalSymbolResolutionError> {
-        Err(LocalSymbolResolutionError::UndefinedSymbol { span: context })
+    ) -> Result<ast::types::Type, SymbolResolutionError> {
+        Err(SymbolResolutionError::undefined(context, &self.resolver.source_manager()))
     }
     fn get_local_type(
         &self,
         context: SourceSpan,
         id: ItemIndex,
-    ) -> Result<Option<ast::types::Type>, LocalSymbolResolutionError> {
+    ) -> Result<Option<ast::types::Type>, SymbolResolutionError> {
         match &self.module[id] {
             super::Export::Type(ty) => match ty {
                 TypeDecl::Alias(ty) => self.resolve(&ty.ty),
                 TypeDecl::Enum(ty) => Ok(Some(ty.ty().clone())),
             },
-            item => Err(self.resolve_local_failed(LocalSymbolResolutionError::InvalidSymbolType {
-                expected: "type",
-                span: context,
-                actual: item.span(),
-            })),
+            item => Err(self.resolve_local_failed(SymbolResolutionError::invalid_symbol_type(
+                context,
+                "type",
+                item.span(),
+                &self.resolver.source_manager(),
+            ))),
         }
     }
     #[inline(always)]
-    fn resolve_local_failed(&self, err: LocalSymbolResolutionError) -> LocalSymbolResolutionError {
+    fn resolve_local_failed(&self, err: SymbolResolutionError) -> SymbolResolutionError {
         err
     }
     fn resolve_type_ref(
         &self,
         path: Span<&Path>,
-    ) -> Result<Option<SymbolResolution>, LocalSymbolResolutionError> {
+    ) -> Result<SymbolResolution, SymbolResolutionError> {
         self.resolver.resolve_path(path)
     }
 }
