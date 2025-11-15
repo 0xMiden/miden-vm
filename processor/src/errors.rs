@@ -1,7 +1,7 @@
 // Allow unused assignments - required by miette::Diagnostic derive macro
 #![allow(unused_assignments)]
 
-use alloc::{sync::Arc, vec::Vec};
+use alloc::{string::String, sync::Arc, vec::Vec};
 
 use miden_air::RowIndex;
 use miden_core::{
@@ -266,6 +266,8 @@ pub enum ExecutionError {
     },
     #[error("execution yielded unexpected precompiles")]
     UnexpectedPrecompiles,
+    #[error("failed to generate trace fragment: {message}")]
+    TraceGenerationError { message: String },
 }
 
 impl ExecutionError {
@@ -426,6 +428,10 @@ impl ExecutionError {
     pub fn failed_arithmetic_evaluation(err_ctx: &impl ErrorContext, error: AceError) -> Self {
         let (label, source_file) = err_ctx.label_and_source_file();
         Self::AceChipError { label, source_file, error }
+    }
+
+    pub fn trace_generation_error(message: String) -> Self {
+        Self::TraceGenerationError { message }
     }
 }
 
