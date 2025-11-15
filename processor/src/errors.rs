@@ -266,6 +266,19 @@ pub enum ExecutionError {
     },
     #[error("execution yielded unexpected precompiles")]
     UnexpectedPrecompiles,
+    #[error(
+        "invalid crypto operation: Merkle path length {path_len} does not match expected depth {depth} at clock cycle {clk}"
+    )]
+    #[diagnostic()]
+    InvalidCryptoInput {
+        #[label]
+        label: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<SourceFile>>,
+        clk: RowIndex,
+        path_len: usize,
+        depth: Felt,
+    },
 }
 
 impl ExecutionError {
@@ -426,6 +439,16 @@ impl ExecutionError {
     pub fn failed_arithmetic_evaluation(err_ctx: &impl ErrorContext, error: AceError) -> Self {
         let (label, source_file) = err_ctx.label_and_source_file();
         Self::AceChipError { label, source_file, error }
+    }
+
+    pub fn invalid_crypto_input(
+        clk: RowIndex,
+        path_len: usize,
+        depth: Felt,
+        err_ctx: &impl ErrorContext,
+    ) -> Self {
+        let (label, source_file) = err_ctx.label_and_source_file();
+        Self::InvalidCryptoInput { label, source_file, clk, path_len, depth }
     }
 }
 

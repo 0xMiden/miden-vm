@@ -129,14 +129,17 @@ pub(super) fn op_not<P: Processor>(
 pub(super) fn op_eq<P: Processor>(
     processor: &mut P,
     tracer: &mut impl Tracer,
-) -> [Felt; NUM_USER_OP_HELPERS] {
+) -> Result<[Felt; NUM_USER_OP_HELPERS], ExecutionError> {
     let b = processor.stack().get(0);
     let a = processor.stack().get(1);
-    // TODO(plafer): cleanup; pop2_applyfn_push() isn't the best abstraction here, since
-    // we need to return user op helpers.
-    pop2_applyfn_push(processor, |a, b| if a == b { Ok(ONE) } else { Ok(ZERO) }, tracer).unwrap();
 
-    P::HelperRegisters::op_eq_registers(a, b)
+    // Directly manipulate the stack instead of using pop2_applyfn_push() since we need
+    // to return user op helpers, which makes the abstraction less suitable here.
+    processor.stack().decrement_size(tracer);
+    let result = if a == b { ONE } else { ZERO };
+    processor.stack().set(0, result);
+
+    Ok(P::HelperRegisters::op_eq_registers(a, b))
 }
 
 /// Pops an element off the stack and compares it to ZERO. If the element is ZERO, pushes ONE

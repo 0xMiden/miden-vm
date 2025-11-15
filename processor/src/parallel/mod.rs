@@ -22,7 +22,7 @@ use miden_core::{
     mast::{BasicBlockNode, MastForest, MastNode, MastNodeExt, MastNodeId, OpBatch},
     precompile::PrecompileTranscriptState,
     stack::MIN_STACK_DEPTH,
-    utils::{range, uninit_vector},
+    utils::range,
 };
 use rayon::prelude::*;
 use winter_prover::{crypto::RandomCoin, math::batch_inversion};
@@ -313,20 +313,17 @@ fn fixup_stack_and_system_rows(
     }
 
     // Initialize subsequent fragments with their corresponding rows from the previous fragment
-    // TODO(plafer): use zip
-    for (i, fragment) in fragments.iter_mut().enumerate().skip(1) {
-        if fragment.row_count() > 0 && i - 1 < stack_rows.len() && i - 1 < system_rows.len() {
-            // Copy the system_row to the first row of this fragment
-            let system_row = &system_rows[i - 1];
-            for (col_idx, &value) in system_row.iter().enumerate() {
-                fragment.columns[col_idx][0] = value;
-            }
+    for (fragment, (system_row, stack_row)) in
+        fragments.iter_mut().skip(1).zip(system_rows.iter().zip(stack_rows.iter()))
+    {
+        // Copy the system_row to the first row of this fragment
+        for (col_idx, &value) in system_row.iter().enumerate() {
+            fragment.columns[col_idx][0] = value;
+        }
 
-            // Copy the stack_row to the first row of this fragment
-            let stack_row = &stack_rows[i - 1];
-            for (col_idx, &value) in stack_row.iter().enumerate() {
-                fragment.columns[STACK_TRACE_OFFSET + col_idx][0] = value;
-            }
+        // Copy the stack_row to the first row of this fragment
+        for (col_idx, &value) in stack_row.iter().enumerate() {
+            fragment.columns[STACK_TRACE_OFFSET + col_idx][0] = value;
         }
     }
 }
@@ -778,15 +775,24 @@ struct CoreTraceFragment {
 }
 
 impl CoreTraceFragment {
-    /// Creates a new CoreTraceFragment with *uninitialized* columns of length `num_rows`.
+    /// Creates a new CoreTraceFragment with uninitialized columns of length `num_rows`.
     ///
     /// # Safety
-    /// The caller is responsible for ensuring that the columns are properly initialized
-    /// before use.
-    pub unsafe fn new_uninit(num_rows: usize) -> Self {
+    /// All elements must be properly initialized before being read.
+    /// The CoreTraceFragmentGenerator guarantees this by filling all rows
+    /// or truncating unused rows before the fragment is accessed.
+    pub fn new_uninit(num_rows: usize) -> Self {
+        // Use MaybeUninit for safe uninitialized memory allocation
         Self {
-            // TODO(plafer): Don't use uninit_vector
-            columns: core::array::from_fn(|_| unsafe { uninit_vector(num_rows) }),
+            columns: core::array::from_fn(|_| {
+                // Create a Vec with uninitialized elements using MaybeUninit
+                let mut vec: Vec<core::mem::MaybeUninit<Felt>> = Vec::with_capacity(num_rows);
+                unsafe { vec.set_len(num_rows) };
+
+                // Safety: The caller (CoreTraceFragmentGenerator) guarantees all elements
+                // are initialized before first read
+                unsafe { core::mem::transmute(vec) }
+            }),
         }
     }
 
@@ -814,7 +820,7 @@ impl CoreTraceFragmentGenerator {
             // Safety: the `CoreTraceFragmentGenerator` will fill in all the rows, or truncate any
             // unused rows if a `HALT` operation occurs before `fragment_size` have
             // been executed.
-            fragment: unsafe { CoreTraceFragment::new_uninit(fragment_size) },
+            fragment: CoreTraceFragment::new_uninit(fragment_size),
             context,
             span_context: None,
             stack_rows: None,
@@ -1961,9 +1967,6 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
 // HELPERS
 // ================================================================================================
 
-// TODO(plafer): If we want to keep this strategy, then move the `op_eval_circuit()` method
-// implementation to the `Processor` trait, and have `FastProcessor` and
-// `CoreTraceFragmentGenerator` both use it.
 /// Identical to `[chiplets::ace::eval_circuit]` but adapted for use with `[FastProcessor]`.
 #[allow(clippy::too_many_arguments)]
 fn eval_circuit_fast_(
