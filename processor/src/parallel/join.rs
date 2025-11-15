@@ -7,7 +7,7 @@ use miden_core::{
 
 use super::{CoreTraceFragmentGenerator, trace_builder::OperationTraceConfig};
 
-impl CoreTraceFragmentGenerator {
+impl<'a> CoreTraceFragmentGenerator<'a> {
     /// Adds a trace row for starting a JOIN operation to the main trace fragment.
     pub fn add_join_start_trace_row(
         &mut self,
