@@ -13,6 +13,7 @@ use miden_core::sys_events::SystemEvent;
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum SystemEventNode {
     PushMapVal,
+    PushMapValCount,
     PushMapValN,
     HasMapKey,
     PushMtNode,
@@ -28,6 +29,7 @@ impl From<&SystemEventNode> for SystemEvent {
         use SystemEventNode::*;
         match value {
             PushMapVal => Self::MapValueToStack,
+            PushMapValCount => Self::MapValueCountToStack,
             PushMapValN => Self::MapValueToStackN,
             HasMapKey => Self::HasMapKey,
             PushMtNode => Self::MerkleNodeToStack,
@@ -50,6 +52,7 @@ impl fmt::Display for SystemEventNode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::PushMapVal => write!(f, "push_mapval"),
+            Self::PushMapValCount => write!(f, "push_mapval_count"),
             Self::PushMapValN => write!(f, "push_mapvaln"),
             Self::HasMapKey => write!(f, "has_mapkey"),
             Self::PushMtNode => write!(f, "push_mtnode"),
