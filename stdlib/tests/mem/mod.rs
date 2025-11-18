@@ -95,7 +95,7 @@ fn test_memcopy_words() {
 }
 
 #[test]
-fn test_memcopy_felts() {
+fn test_memcopy_elements() {
     use miden_stdlib::StdLibrary;
 
     let source = "
@@ -108,7 +108,7 @@ fn test_memcopy_felts() {
         push.13.14.15.16.1012 mem_storew_be dropw
         push.17.18.19.20.1016 mem_storew_be dropw
 
-        push.2002.1001.18 exec.mem::memcopy_felts
+        push.2002.1001.18 exec.mem::memcopy_elements
     end
     ";
 

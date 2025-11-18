@@ -60,18 +60,18 @@ pub proc memcopy_words
   dropw drop drop drop
 end
 
-#! Copies `n` felts from `read_ptr` to `write_ptr`.
+#! Copies `n` elements from `read_ptr` to `write_ptr`.
 #!
 #! Inputs:  [n, read_ptr, write_ptr]
 #! Outputs: []
 #!
 #! Where:
-#! - n is the number of felts which should be copied.
-#! - read_ptr is the memory pointer where the felts to copy are stored.
-#! - write_ptr is the memory pointer where the felts will be copied.
+#! - n is the number of elements which should be copied.
+#! - read_ptr is the memory pointer where the elements to copy are stored.
+#! - write_ptr is the memory pointer where the elements will be copied.
 #!
-#! Total cycles: 7 + 14 * num_felts
-pub proc memcopy_felts
+#! Total cycles: 7 + 14 * num_elements
+pub proc memcopy_elements
     # The loop variable is changed with an `add` instead of `sub` because the former uses one fewer 
     # cycle. So here the counter is negated. (1 cycle)
     neg
