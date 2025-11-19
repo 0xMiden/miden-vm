@@ -914,33 +914,7 @@ impl CoreTraceFragmentGenerator {
                 self.add_span_end_trace_row(basic_block_node)?;
             },
             NodeExecutionState::LoopRepeat(node_id) => {
-                // TODO(plafer): merge with the `Continuation::FinishLoop` case
-                let loop_node = initial_mast_forest
-                    .get_node_by_id(node_id)
-                    .expect("node should exist")
-                    .unwrap_loop();
-
-                let mut condition = self.get(0);
-                self.decrement_size(&mut NoopTracer);
-
-                while condition == ONE {
-                    self.add_loop_repeat_trace_row(
-                        loop_node,
-                        &initial_mast_forest,
-                        self.context.state.decoder.current_addr,
-                    )?;
-
-                    self.execute_mast_node(loop_node.body(), &initial_mast_forest)?;
-
-                    condition = self.get(0);
-                    self.decrement_size(&mut NoopTracer);
-                }
-
-                // 3. Add "end LOOP" row
-                //
-                // Note that we don't confirm that the condition is properly ZERO here, as
-                // the FastProcessor already ran that check.
-                self.add_end_trace_row(loop_node.digest())?;
+                execute_loop_node(self, node_id, &initial_mast_forest)?;
             },
             // TODO(plafer): there's a big overlap between `NodeExecutionPhase::End` and
             // `Continuation::Finish*`. We can probably reconcile.
@@ -1009,32 +983,7 @@ impl CoreTraceFragmentGenerator {
                     self.add_end_trace_row(mast_node.digest())?;
                 },
                 Continuation::FinishLoop(node_id) => {
-                    let loop_node = current_forest
-                        .get_node_by_id(node_id)
-                        .expect("node should exist")
-                        .unwrap_loop();
-
-                    let mut condition = self.get(0);
-                    self.decrement_size(&mut NoopTracer);
-
-                    while condition == ONE {
-                        self.add_loop_repeat_trace_row(
-                            loop_node,
-                            &current_forest,
-                            self.context.state.decoder.current_addr,
-                        )?;
-
-                        self.execute_mast_node(loop_node.body(), &current_forest)?;
-
-                        condition = self.get(0);
-                        self.decrement_size(&mut NoopTracer);
-                    }
-
-                    // 3. Add "end LOOP" row
-                    //
-                    // Note that we don't confirm that the condition is properly ZERO here, as
-                    // the FastProcessor already ran that check.
-                    self.add_end_trace_row(loop_node.digest())?;
+                    execute_loop_node(self, node_id, &current_forest)?;
                 },
                 Continuation::FinishCall(node_id) => {
                     let mast_node =
@@ -1954,6 +1903,47 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
 
 // HELPERS
 // ================================================================================================
+
+/// Executes a loop node by processing its body repeatedly while the condition is true.
+///
+/// This function is shared between `NodeExecutionState::LoopRepeat` and `Continuation::FinishLoop`
+/// to eliminate code duplication. Both cases have identical logic for handling loop execution.
+#[inline(always)]
+fn execute_loop_node(
+    processor: &mut CoreTraceFragmentGenerator,
+    node_id: MastNodeId,
+    mast_forest: &MastForest,
+) -> ControlFlow<()> {
+    let loop_node = mast_forest.get_node_by_id(node_id).expect("node should exist").unwrap_loop();
+
+    let mut condition = processor.get(0);
+    processor.decrement_size(&mut NoopTracer);
+
+    while condition == ONE {
+        if let ControlFlow::Break(_) = processor.add_loop_repeat_trace_row(
+            loop_node,
+            mast_forest,
+            processor.context.state.decoder.current_addr,
+        ) {
+            return ControlFlow::Break(());
+        }
+
+        if let ControlFlow::Break(_) = processor.execute_mast_node(loop_node.body(), mast_forest) {
+            return ControlFlow::Break(());
+        }
+
+        condition = processor.get(0);
+        processor.decrement_size(&mut NoopTracer);
+    }
+
+    // 3. Add "end LOOP" row
+    //
+    // Note that we don't confirm that the condition is properly ZERO here, as
+    // the FastProcessor already ran that check.
+    processor.add_end_trace_row(loop_node.digest())?;
+
+    ControlFlow::Continue(())
+}
 
 /// Identical to `[chiplets::ace::eval_circuit]` but adapted for use with
 /// `[CoreTraceFragmentGenerator]`.
