@@ -14,7 +14,8 @@ use crate::{
     errors::AceError,
     fast::{FastProcessor, STACK_BUFFER_SIZE, Tracer, memory::Memory},
     processor::{
-        HasherInterface, OperationHelperRegisters, Processor, StackInterface, SystemInterface,
+        HasherInterface, MemoryInterface, OperationHelperRegisters, Processor, StackInterface,
+        SystemInterface,
     },
 };
 
@@ -387,13 +388,13 @@ impl OperationHelperRegisters for NoopHelperRegisters {
 
 /// Identical to `[chiplets::ace::eval_circuit]` but adapted for use with `[FastProcessor]`.
 #[allow(clippy::too_many_arguments)]
-fn eval_circuit_fast_(
+pub fn eval_circuit_fast_(
     ctx: ContextId,
     ptr: Felt,
     clk: RowIndex,
     num_vars: Felt,
     num_eval: Felt,
-    mem: &mut Memory,
+    mem: &mut impl MemoryInterface,
     err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
 ) -> Result<CircuitEvaluation, ExecutionError> {
