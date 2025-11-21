@@ -83,7 +83,8 @@ fn build_trace(c: &mut Criterion) {
                                 trace_generation_context,
                                 program.hash(),
                                 program.kernel().clone(),
-                            );
+                            )
+                            .unwrap();
                             black_box(trace);
                         },
                         BatchSize::SmallInput,
