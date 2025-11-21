@@ -1,0 +1,40 @@
+---
+source: air/src/trace/tests.rs
+expression: layout
+---
+MAIN TRACE LAYOUT
+===================
+
+Minimum trace length: 64
+
+System Trace:
+  Offset: 0
+  Width: 6
+  Range: 0..6
+  - Clock column index: 0
+  - Context column index: 1
+  - Function hash offset: 2
+  - Function hash range: 2..6
+
+Decoder Trace:
+  Offset: 6
+  Width: 24
+  Range: 6..30
+
+Stack Trace:
+  Offset: 30
+  Width: 19
+  Range: 30..49
+
+Range Check Trace:
+  Offset: 49
+  Width: 2
+  Range: 49..51
+
+Chiplets Trace:
+  Offset: 51
+  Width: 20
+  Range: 51..71
+
+Total Trace Width: 71
+Padded Trace Width: 72

@@ -10,6 +10,9 @@ pub mod range;
 pub mod rows;
 pub mod stack;
 
+#[cfg(test)]
+mod tests;
+
 // CONSTANTS
 // ================================================================================================
 

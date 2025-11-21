@@ -39,5 +39,6 @@ miden-utils-indexing.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
+insta.workspace = true
 proptest.workspace = true
 winter-rand-utils.workspace = true

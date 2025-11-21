@@ -1,0 +1,30 @@
+---
+source: air/src/trace/tests.rs
+expression: layout
+---
+BITWISE CHIPLET LAYOUT
+===========================
+
+Chiplet Selectors:
+  Number of bitwise selectors: 2
+  Trace offset: 53
+  Selector column index: 53
+
+Input Columns:
+  Input A column index: 54
+  Input B column index: 55
+  Input A bit decomposition range: 56..60
+  Input B bit decomposition range: 60..64
+
+Output Columns:
+  Previous output column index: 64
+  Output column index: 65
+
+Trace Range:
+  Bitwise trace range: 53..66
+
+Other Constants:
+  Number of selectors: 1
+  Trace width: 13
+  Operation cycle length: 8
+  Number of decomposed bits per row: 4
