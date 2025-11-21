@@ -2,6 +2,7 @@ use std::{
     env,
     io::{self, Write},
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 use fs_err as fs;
@@ -157,7 +158,7 @@ fn parse_module_with_ast(label: &str, file_path: &Path) -> io::Result<DocPayload
     let path = masm::Path::new(label);
     let module = file_path
         .parse_with_options(
-            &DefaultSourceManager::default(),
+            Arc::new(DefaultSourceManager::default()),
             ParseOptions {
                 kind: ModuleKind::Library,
                 warnings_as_errors: false,

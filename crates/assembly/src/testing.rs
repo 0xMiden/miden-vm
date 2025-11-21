@@ -68,6 +68,11 @@ impl TestContext {
         Self { source_manager, assembler }
     }
 
+    #[inline]
+    fn assembler(&self) -> Assembler {
+        self.assembler.clone()
+    }
+
     pub fn with_debug_info(mut self, yes: bool) -> Self {
         self.assembler.set_debug_mode(yes);
         self
@@ -95,7 +100,7 @@ impl TestContext {
     #[track_caller]
     pub fn parse_program(&self, source: impl Parse) -> Result<Box<Module>, Report> {
         source.parse_with_options(
-            self.source_manager.as_ref(),
+            self.source_manager.clone(),
             ParseOptions {
                 warnings_as_errors: self.assembler.warnings_as_errors(),
                 ..Default::default()
@@ -111,7 +116,7 @@ impl TestContext {
     #[track_caller]
     pub fn parse_kernel(&self, source: impl Parse) -> Result<Box<Module>, Report> {
         source.parse_with_options(
-            self.source_manager.as_ref(),
+            self.source_manager.clone(),
             ParseOptions {
                 warnings_as_errors: self.assembler.warnings_as_errors(),
                 ..ParseOptions::for_kernel()
@@ -126,7 +131,7 @@ impl TestContext {
     #[track_caller]
     pub fn parse_module(&self, source: impl Parse) -> Result<Box<Module>, Report> {
         source.parse_with_options(
-            self.source_manager.as_ref(),
+            self.source_manager.clone(),
             ParseOptions {
                 warnings_as_errors: self.assembler.warnings_as_errors(),
                 ..ParseOptions::for_library()
@@ -142,7 +147,7 @@ impl TestContext {
         source: impl Parse,
     ) -> Result<Box<Module>, Report> {
         source.parse_with_options(
-            self.source_manager.as_ref(),
+            self.source_manager.clone(),
             ParseOptions {
                 warnings_as_errors: self.assembler.warnings_as_errors(),
                 ..ParseOptions::new(ModuleKind::Library, path.as_ref().to_absolute())
@@ -169,7 +174,7 @@ impl TestContext {
         source: impl Parse,
     ) -> Result<(), Report> {
         let module = source.parse_with_options(
-            &self.source_manager,
+            self.source_manager.clone(),
             ParseOptions {
                 path: Some(path.as_ref().into()),
                 ..ParseOptions::for_library()
@@ -190,7 +195,7 @@ impl TestContext {
     /// module represented in `source`.
     #[track_caller]
     pub fn assemble(&self, source: impl Parse) -> Result<Program, Report> {
-        self.assembler.clone().assemble_program(source)
+        self.assembler().assemble_program(source)
     }
 
     /// Compile a [Library] from `modules` using the [Assembler] constructed by this
@@ -202,7 +207,7 @@ impl TestContext {
         &self,
         modules: impl IntoIterator<Item = Box<Module>>,
     ) -> Result<Library, Report> {
-        self.assembler.clone().assemble_library(modules)
+        self.assembler().assemble_library(modules)
     }
 
     /// Compile a module from `source`, with the fully-qualified name `path`, to MAST, returning

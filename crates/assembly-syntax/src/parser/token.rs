@@ -114,14 +114,11 @@ pub struct WordValue(pub [Felt; 4]);
 
 impl fmt::Display for WordValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{:#08x}{:08x}{:08x}{:08x}",
-            &self.0[0].as_int(),
-            &self.0[1].as_int(),
-            &self.0[2].as_int(),
-            &self.0[3].as_int(),
-        )
+        let mut builder = f.debug_list();
+        for value in self.0 {
+            builder.entry(&value.as_int());
+        }
+        builder.finish()
     }
 }
 

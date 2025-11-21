@@ -662,13 +662,15 @@ fn get_proc_name_of_unknown_module() -> TestResult {
 
     assert_diagnostic_lines!(
         report,
-        "undefined module '::module::path::two'",
+        "undefined symbol reference",
         regex!(r#",-\[test[\d]+:2:9\]"#),
         "1 |",
         "2 |     use module::path::two",
-        "  :         ^^^^^^^^^^^^^^^^^",
+        "  :         ^^^^^^^^|^^^^^^^^",
+        "  :                 `-- this symbol path could not be resolved",
         "3 |",
-        "  `----"
+        "  `----",
+        "help: maybe you are missing an import?"
     );
 
     Ok(())
@@ -790,10 +792,11 @@ fn constant_err_const_not_initialized() -> TestResult {
         source,
         "syntax error",
         "help: see emitted diagnostics for details",
-        "symbol undefined: 'A' not in scope",
+        "undefined constant 'A'",
         regex!(r#",-\[test[\d]+:1:25\]"#),
         "1 | const TEST_CONSTANT = 5+A begin push.TEST_CONSTANT end",
-        "  :                         ^",
+        "  :                         |",
+        "  :                         `-- the constant referenced here is not defined in the current scope",
         "  `----",
         " help: are you missing an import?"
     );
@@ -1027,13 +1030,14 @@ fn constant_not_found() -> TestResult {
         source,
         "syntax error",
         "help: see emitted diagnostics for details",
-        "symbol undefined: 'CONSTANT' not in scope",
+        "undefined constant 'CONSTANT'",
         regex!(r#",-\[test[\d]+:2:16\]"#),
         "1 |",
         "2 |     begin push.CONSTANT end",
-        "  :                ^^^^^^^^",
+        "  :                ^^^^|^^^",
+        "  :                    `-- the constant referenced here is not defined in the current scope",
         "  `----",
-        "        help: are you missing an import?"
+        "help: are you missing an import?"
     );
     Ok(())
 }
@@ -1467,6 +1471,123 @@ fn test_push_word_slice_invalid() -> TestResult {
     Ok(())
 }
 
+#[test]
+fn link_time_const_evaluation_succeeds() -> TestResult {
+    let context = TestContext::default();
+    let a = r#"
+            pub const FOO = 1
+            pub proc f
+                push.FOO
+            end
+        "#;
+    let a = parse_module!(&context, "lib::a", a);
+
+    let lib = Assembler::new(context.source_manager()).assemble_library([a])?;
+
+    let program_source = source_file!(
+        &context,
+        "\
+        use lib::a
+        use a::FOO
+        begin
+            push.FOO
+            exec.a::f
+            add
+            add
+        end"
+    );
+
+    let program = Assembler::new(context.source_manager())
+        .with_dynamic_library(lib)?
+        .assemble_program(program_source)?;
+    insta::assert_snapshot!(program);
+
+    Ok(())
+}
+
+#[test]
+fn link_time_const_evaluation_undefined_symbol() -> TestResult {
+    let context = TestContext::default();
+    let a = r#"
+            pub proc f
+                push.1
+            end
+        "#;
+    let a = parse_module!(&context, "lib::a", a);
+
+    let lib = Assembler::new(context.source_manager()).assemble_library([a])?;
+
+    let source = source_file!(
+        &context,
+        "\
+        use lib::a::FOO
+        begin
+            push.FOO
+            exec.a::f
+            add
+        end"
+    );
+
+    let error = Assembler::new(context.source_manager())
+        .with_dynamic_library(lib)?
+        .assemble_program(source)
+        .expect_err("expected diagnostic to be raised, but compilation succeeded");
+    assert_diagnostic_lines!(
+        error,
+        "undefined symbol reference",
+        regex!(r#",-\[test[\d]+:1:5\]"#),
+        "1 | use lib::a::FOO",
+        "  :     ^^^^^|^^^^^",
+        "  :          `-- this symbol path could not be resolved",
+        "2 |         begin",
+        "  `----",
+        "help: maybe you are missing an import?"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn link_time_const_evaluation_invalid_constant() -> TestResult {
+    let context = TestContext::default();
+    let a = r#"
+            pub proc f
+                push.1
+            end
+        "#;
+    let a = parse_module!(&context, "lib::a", a);
+
+    let lib = Assembler::new(context.source_manager()).assemble_library([a])?;
+
+    let source = source_file!(
+        &context,
+        "\
+    use lib::a::f
+    begin
+        push.f
+    end"
+    );
+
+    let error = Assembler::new(context.source_manager())
+        .with_dynamic_library(lib)?
+        .assemble_program(source)
+        .expect_err("expected diagnostic to be raised, but compilation succeeded");
+
+    assert_diagnostic_lines!(
+        error,
+        "invalid syntax",
+        regex!(r#",-\[test[\d]+:3:14\]"#),
+        "2 |     begin",
+        "3 |         push.f",
+        "  :              |",
+        "  :              `-- found a identifier here",
+        "4 |     end",
+        "  `----",
+        "help: expected \"[\", or constant identifier, or hex-encoded literal, or hex_word, or integer literal"
+    );
+
+    Ok(())
+}
 // DECORATORS
 // ================================================================================================
 
@@ -2318,7 +2439,7 @@ fn program_with_reexported_proc_in_same_library() -> TestResult {
 
     let mut context = TestContext::new();
     let mut parser = Module::parser(ModuleKind::Library);
-    let ast = parser.parse_str(MODULE, MODULE_BODY, &context.source_manager()).unwrap();
+    let ast = parser.parse_str(MODULE, MODULE_BODY, context.source_manager()).unwrap();
 
     // check docs
     let docs_checked_eqz = ast
@@ -2343,9 +2464,7 @@ fn program_with_reexported_proc_in_same_library() -> TestResult {
     );
 
     let mut parser = Module::parser(ModuleKind::Library);
-    let ref_ast = parser
-        .parse_str(REF_MODULE, REF_MODULE_BODY, &context.source_manager())
-        .unwrap();
+    let ref_ast = parser.parse_str(REF_MODULE, REF_MODULE_BODY, context.source_manager()).unwrap();
 
     let library = Assembler::new(context.source_manager())
         .assemble_library([ast, ref_ast])
@@ -2403,12 +2522,10 @@ fn program_with_reexported_custom_alias_in_same_library() -> TestResult {
 
     let mut context = TestContext::new();
     let mut parser = Module::parser(ModuleKind::Library);
-    let ast = parser.parse_str(MODULE, MODULE_BODY, &context.source_manager()).unwrap();
+    let ast = parser.parse_str(MODULE, MODULE_BODY, context.source_manager()).unwrap();
 
     let mut parser = Module::parser(ModuleKind::Library);
-    let ref_ast = parser
-        .parse_str(REF_MODULE, REF_MODULE_BODY, &context.source_manager())
-        .unwrap();
+    let ref_ast = parser.parse_str(REF_MODULE, REF_MODULE_BODY, context.source_manager()).unwrap();
 
     let library = Assembler::new(context.source_manager())
         .assemble_library([ast, ref_ast])
@@ -2464,9 +2581,9 @@ fn program_with_reexported_proc_in_another_library() -> TestResult {
     let mut parser = Module::parser(ModuleKind::Library);
     let source_manager = context.source_manager();
     // We reference code in this module
-    let ref_ast = parser.parse_str(REF_MODULE, REF_MODULE_BODY, &source_manager)?;
+    let ref_ast = parser.parse_str(REF_MODULE, REF_MODULE_BODY, source_manager.clone())?;
     // But only exports from this module are exposed by the library
-    let ast = parser.parse_str(MODULE, MODULE_BODY, &source_manager)?;
+    let ast = parser.parse_str(MODULE, MODULE_BODY, source_manager.clone())?;
 
     let dummy_library = {
         let mut assembler = Assembler::new(source_manager);
@@ -2512,13 +2629,15 @@ fn program_with_reexported_proc_in_another_library() -> TestResult {
     assert_assembler_diagnostic!(
         context,
         source,
-        "undefined module '::dummy2::math::u64'",
+        "undefined symbol reference",
         regex!(r#",-\[test[\d]+:2:13\]"#),
         "1 |",
         "2 |         use dummy2::math::u64",
-        "  :             ^^^^^^^^^^^^^^^^^",
+        "  :             ^^^^^^^^|^^^^^^^^",
+        "  :                     `-- this symbol path could not be resolved",
         "3 |         begin",
-        "  `----"
+        "  `----",
+        "help: maybe you are missing an import?"
     );
     Ok(())
 }
@@ -2543,7 +2662,7 @@ fn module_alias() -> TestResult {
     let mut context = TestContext::default();
     let source_manager = context.source_manager();
     let mut parser = Module::parser(ModuleKind::Library);
-    let ast = parser.parse_str(MODULE, PROCEDURE, &source_manager).unwrap();
+    let ast = parser.parse_str(MODULE, PROCEDURE, source_manager.clone()).unwrap();
     let library = Assembler::new(source_manager).assemble_library([ast]).unwrap();
 
     context.add_library(&library)?;
@@ -2588,6 +2707,35 @@ fn module_alias() -> TestResult {
         "  `----",
         r#" help: expected "@", or "adv_map", or "begin", or "const", or "enum", or "proc", or "pub", or "type", or "use", or end of file, or doc comment"#
     );
+
+    Ok(())
+}
+
+#[test]
+#[ignore = "disabled until unused import accuracy is improved"]
+fn module_alias_unused_import() -> TestResult {
+    const MODULE: &str = "dummy::math::u64";
+    const PROCEDURE: &str = r#"
+        pub proc checked_add
+            swap
+            movup.3
+            u32assert2
+            u32overflowing_add
+            movup.3
+            movup.3
+            u32assert2
+            u32overflowing_add3
+            eq.0
+            assert
+        end"#;
+
+    let mut context = TestContext::default();
+    let source_manager = context.source_manager();
+    let mut parser = Module::parser(ModuleKind::Library);
+    let ast = parser.parse_str(MODULE, PROCEDURE, source_manager.clone()).unwrap();
+    let library = Assembler::new(source_manager).assemble_library([ast]).unwrap();
+
+    context.add_library(&library)?;
 
     // --- duplicate module import --------------------------------------------
     let source = source_file!(
@@ -2658,12 +2806,14 @@ fn program_with_import_errors() {
     assert_assembler_diagnostic!(
         context,
         source,
-        "undefined module '::std::math::u512'",
+        "undefined symbol reference",
         regex!(r#",-\[test[\d]+:1:5\]"#),
         "1 | use std::math::u512",
-        "  :     ^^^^^^^^^^^^^^^",
+        "  :     ^^^^^^^|^^^^^^^",
+        "  :            `-- this symbol path could not be resolved",
         "2 |         begin push.4 push.3 exec.u512::iszero_unsafe end",
-        "  `----"
+        "  `----",
+        "help: maybe you are missing an import?"
     );
 
     // --- non-existent procedure in import -----------------------------------
@@ -2680,12 +2830,14 @@ fn program_with_import_errors() {
     assert_assembler_diagnostic!(
         context,
         source,
-        "undefined module '::std::math::u256'",
+        "undefined symbol reference",
         regex!(r#",-\[test[\d]+:1:5\]"#),
         "1 | use std::math::u256",
-        "  :     ^^^^^^^^^^^^^^^",
+        "  :     ^^^^^^^|^^^^^^^",
+        "  :            `-- this symbol path could not be resolved",
         "2 |         begin push.4 push.3 exec.u256::foo end",
-        "  `----"
+        "  `----",
+        "help: maybe you are missing an import?"
     );
 }
 
@@ -2941,14 +3093,15 @@ fn missing_import() {
     assert_assembler_diagnostic!(
         context,
         source,
-        "undefined item '::u64::add'",
+        "undefined symbol reference",
         regex!(r#",-\[test[\d]+:3:14\]"#),
         "2 |     begin",
         "3 |         exec.u64::add",
-        "  :              ^^^^^^^^",
+        "  :              ^^^^|^^^",
+        "  :                  `-- this symbol path could not be resolved",
         "4 |     end",
         "  `----",
-        "help: you might be missing an import, or the containing library has not been linked"
+        "help: maybe you are missing an import?"
     );
 }
 
@@ -3169,7 +3322,9 @@ fn test_compiled_library() {
     end
     "
         );
-        mod_parser.parse(PathBuf::new("mylib::mod1").unwrap(), source).unwrap()
+        mod_parser
+            .parse(PathBuf::new("mylib::mod1").unwrap(), source, context.source_manager())
+            .unwrap()
     };
 
     let mod2 = {
@@ -3187,7 +3342,9 @@ fn test_compiled_library() {
     end
     "
         );
-        mod_parser.parse(PathBuf::new("mylib::mod2").unwrap(), source).unwrap()
+        mod_parser
+            .parse(PathBuf::new("mylib::mod2").unwrap(), source, context.source_manager())
+            .unwrap()
     };
 
     let compiled_library = {
@@ -3236,7 +3393,9 @@ fn test_reexported_proc_with_same_name_as_local_proc_diff_locals() {
             end
             "
         );
-        mod_parser.parse(PathBuf::new("test::mod1").unwrap(), source).unwrap()
+        mod_parser
+            .parse(PathBuf::new("test::mod1").unwrap(), source, context.source_manager())
+            .unwrap()
     };
 
     let mod2 = {
@@ -3248,7 +3407,9 @@ fn test_reexported_proc_with_same_name_as_local_proc_diff_locals() {
             end
             "
         );
-        mod_parser.parse(PathBuf::new("test::mod2").unwrap(), source).unwrap()
+        mod_parser
+            .parse(PathBuf::new("test::mod2").unwrap(), source, context.source_manager())
+            .unwrap()
     };
 
     let compiled_library = {
@@ -3343,13 +3504,17 @@ fn vendoring() -> TestResult {
     let mut mod_parser = ModuleParser::new(ModuleKind::Library);
     let vendor_lib = {
         let source = source_file!(&context, "pub proc bar push.1 end pub proc prune push.2 end");
-        let mod1 = mod_parser.parse(PathBuf::new("test::mod1").unwrap(), source).unwrap();
+        let mod1 = mod_parser
+            .parse(PathBuf::new("test::mod1").unwrap(), source, context.source_manager())
+            .unwrap();
         Assembler::default().assemble_library([mod1]).unwrap()
     };
 
     let lib = {
         let source = source_file!(&context, "pub proc foo exec.::test::mod1::bar end");
-        let mod2 = mod_parser.parse(PathBuf::new("test::mod2").unwrap(), source).unwrap();
+        let mod2 = mod_parser
+            .parse(PathBuf::new("test::mod2").unwrap(), source, context.source_manager())
+            .unwrap();
 
         let mut assembler = Assembler::default();
         assembler.link_static_library(vendor_lib)?;
@@ -3358,7 +3523,9 @@ fn vendoring() -> TestResult {
 
     let expected_lib = {
         let source = source_file!(&context, "pub proc foo push.1 end");
-        let mod2 = mod_parser.parse(PathBuf::new("test::mod2").unwrap(), source).unwrap();
+        let mod2 = mod_parser
+            .parse(PathBuf::new("test::mod2").unwrap(), source, context.source_manager())
+            .unwrap();
         Assembler::default().assemble_library([mod2]).unwrap()
     };
     assert!(lib == expected_lib);
