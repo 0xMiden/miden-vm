@@ -64,7 +64,7 @@ fn assert_eq_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::FailedAssertion{ clk, err_code, err_msg, label: _, source_file: _ }
+        ExecutionError::FailedAssertion{ clk, err_code, err_msg, .. }
         if clk == RowIndex::from(7) && err_code == ZERO && err_msg.is_none()
     );
 
@@ -72,7 +72,7 @@ fn assert_eq_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::FailedAssertion{ clk, err_code, err_msg, label: _, source_file: _ }
+        ExecutionError::FailedAssertion{ clk, err_code, err_msg, .. }
         if clk == RowIndex::from(7) && err_code == ZERO && err_msg.is_none()
     );
 }
