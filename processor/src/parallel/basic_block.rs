@@ -17,7 +17,7 @@ use super::{CoreTraceFragmentGenerator, trace_builder::OperationTraceConfig};
 
 const HASH_CYCLE_LEN: Felt = Felt::new(miden_air::trace::chiplets::hasher::HASH_CYCLE_LEN as u64);
 
-impl CoreTraceFragmentGenerator {
+impl<'a> CoreTraceFragmentGenerator<'a> {
     // TODO(plafer): cleanup to use `add_control_flow_trace_row()`
     /// Adds a trace row for SPAN start operation to the main trace fragment.
     ///
@@ -36,30 +36,29 @@ impl CoreTraceFragmentGenerator {
 
         // Populate decoder trace columns
         // Set the address to the parent address
-        self.fragment.columns[DECODER_TRACE_OFFSET + ADDR_COL_IDX][row_idx] = parent_addr;
+        self.fragment[DECODER_TRACE_OFFSET + ADDR_COL_IDX][row_idx] = parent_addr;
 
         self.append_opcode(Operation::Span.op_code(), row_idx);
 
         // Set the hasher state to the groups of the first op batch
         for (i, &group) in first_op_batch.groups().iter().enumerate() {
-            self.fragment.columns[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + i][row_idx] = group;
+            self.fragment[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + i][row_idx] = group;
         }
 
         // Set in_span to ZERO (we are starting a span, not inside one yet)
-        self.fragment.columns[DECODER_TRACE_OFFSET + IN_SPAN_COL_IDX][row_idx] = ZERO;
+        self.fragment[DECODER_TRACE_OFFSET + IN_SPAN_COL_IDX][row_idx] = ZERO;
 
         // Set group_count to the total number of operation groups in the basic block
-        self.fragment.columns[DECODER_TRACE_OFFSET + GROUP_COUNT_COL_IDX][row_idx] = num_groups;
+        self.fragment[DECODER_TRACE_OFFSET + GROUP_COUNT_COL_IDX][row_idx] = num_groups;
 
         // Set operation index to ZERO
-        self.fragment.columns[DECODER_TRACE_OFFSET + OP_INDEX_COL_IDX][row_idx] = ZERO;
+        self.fragment[DECODER_TRACE_OFFSET + OP_INDEX_COL_IDX][row_idx] = ZERO;
 
         // Set the op_batch_flags based on the number of operation groups
         {
             let op_batch_flags = get_op_batch_flags(num_groups);
             for (i, flag) in op_batch_flags.iter().enumerate().take(NUM_OP_BATCH_FLAGS) {
-                self.fragment.columns[DECODER_TRACE_OFFSET + OP_BATCH_FLAGS_OFFSET + i][row_idx] =
-                    *flag;
+                self.fragment[DECODER_TRACE_OFFSET + OP_BATCH_FLAGS_OFFSET + i][row_idx] = *flag;
             }
         }
 
@@ -138,29 +137,28 @@ impl CoreTraceFragmentGenerator {
         self.populate_system_trace_columns(row_idx);
 
         // populate decoder trace columns
-        self.fragment.columns[DECODER_TRACE_OFFSET + ADDR_COL_IDX][row_idx] =
+        self.fragment[DECODER_TRACE_OFFSET + ADDR_COL_IDX][row_idx] =
             self.context.state.decoder.current_addr;
 
         self.append_opcode(Operation::Respan.op_code(), row_idx);
 
         // Set hasher state to op groups of the next op batch
         for (i, &group) in op_batch.groups().iter().enumerate() {
-            self.fragment.columns[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + i][row_idx] = group;
+            self.fragment[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + i][row_idx] = group;
         }
 
         // Set in_span to ZERO (we are starting a span, not inside one yet)
-        self.fragment.columns[DECODER_TRACE_OFFSET + IN_SPAN_COL_IDX][row_idx] = ZERO;
+        self.fragment[DECODER_TRACE_OFFSET + IN_SPAN_COL_IDX][row_idx] = ZERO;
         // Set group_count to the total number of operation groups left to process in the basic
         // block
-        self.fragment.columns[DECODER_TRACE_OFFSET + GROUP_COUNT_COL_IDX][row_idx] = group_count;
+        self.fragment[DECODER_TRACE_OFFSET + GROUP_COUNT_COL_IDX][row_idx] = group_count;
         // Reset operation index to ZERO
-        self.fragment.columns[DECODER_TRACE_OFFSET + OP_INDEX_COL_IDX][row_idx] = ZERO;
+        self.fragment[DECODER_TRACE_OFFSET + OP_INDEX_COL_IDX][row_idx] = ZERO;
 
         // Set the op_batch_flags based on the current operation group count
         let op_batch_flags = get_op_batch_flags(group_count);
         for (i, flag) in op_batch_flags.iter().enumerate().take(NUM_OP_BATCH_FLAGS) {
-            self.fragment.columns[DECODER_TRACE_OFFSET + OP_BATCH_FLAGS_OFFSET + i][row_idx] =
-                *flag;
+            self.fragment[DECODER_TRACE_OFFSET + OP_BATCH_FLAGS_OFFSET + i][row_idx] = *flag;
         }
 
         // Populate stack trace columns
@@ -188,7 +186,7 @@ impl CoreTraceFragmentGenerator {
         self.append_opcode(operation.op_code(), row_idx);
 
         // set the address column to the current block address
-        self.fragment.columns[DECODER_TRACE_OFFSET + ADDR_COL_IDX][row_idx] =
+        self.fragment[DECODER_TRACE_OFFSET + ADDR_COL_IDX][row_idx] =
             self.context.state.decoder.current_addr;
 
         let ctx = self.span_context.as_mut().expect("not in span");
@@ -197,36 +195,34 @@ impl CoreTraceFragmentGenerator {
         ctx.group_ops_left = remove_opcode_from_group(ctx.group_ops_left, operation);
 
         // hasher trace: group_ops_left and parent address
-        self.fragment.columns[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET][row_idx] =
-            ctx.group_ops_left;
-        self.fragment.columns[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 1][row_idx] =
+        self.fragment[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET][row_idx] = ctx.group_ops_left;
+        self.fragment[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 1][row_idx] =
             self.context.state.decoder.parent_addr;
 
         // hasher trace: user op helpers
         {
             let user_op_helpers = user_op_helpers.unwrap_or([ZERO; NUM_USER_OP_HELPERS]);
-            self.fragment.columns[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 2][row_idx] =
+            self.fragment[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 2][row_idx] =
                 user_op_helpers[0];
-            self.fragment.columns[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 3][row_idx] =
+            self.fragment[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 3][row_idx] =
                 user_op_helpers[1];
-            self.fragment.columns[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 4][row_idx] =
+            self.fragment[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 4][row_idx] =
                 user_op_helpers[2];
-            self.fragment.columns[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 5][row_idx] =
+            self.fragment[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 5][row_idx] =
                 user_op_helpers[3];
-            self.fragment.columns[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 6][row_idx] =
+            self.fragment[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 6][row_idx] =
                 user_op_helpers[4];
-            self.fragment.columns[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 7][row_idx] =
+            self.fragment[DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 7][row_idx] =
                 user_op_helpers[5];
         }
 
-        self.fragment.columns[DECODER_TRACE_OFFSET + IN_SPAN_COL_IDX][row_idx] = ONE;
-        self.fragment.columns[DECODER_TRACE_OFFSET + GROUP_COUNT_COL_IDX][row_idx] =
-            ctx.num_groups_left;
-        self.fragment.columns[DECODER_TRACE_OFFSET + OP_INDEX_COL_IDX][row_idx] =
+        self.fragment[DECODER_TRACE_OFFSET + IN_SPAN_COL_IDX][row_idx] = ONE;
+        self.fragment[DECODER_TRACE_OFFSET + GROUP_COUNT_COL_IDX][row_idx] = ctx.num_groups_left;
+        self.fragment[DECODER_TRACE_OFFSET + OP_INDEX_COL_IDX][row_idx] =
             Felt::from(op_idx_in_group as u32);
 
         for i in 0..NUM_OP_BATCH_FLAGS {
-            self.fragment.columns[DECODER_TRACE_OFFSET + OP_BATCH_FLAGS_OFFSET + i][row_idx] = ZERO;
+            self.fragment[DECODER_TRACE_OFFSET + OP_BATCH_FLAGS_OFFSET + i][row_idx] = ZERO;
         }
 
         if operation.imm_value().is_some() {
