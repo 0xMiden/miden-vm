@@ -101,6 +101,7 @@ impl FastProcessor {
             current_forest,
         );
 
+        #[cfg(not(feature = "no_err_ctx"))]
         let call_node = current_forest[node_id].unwrap_call();
         let err_ctx = err_ctx!(current_forest, call_node, host);
         // when returning from a function call or a syscall, restore the

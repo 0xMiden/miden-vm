@@ -113,11 +113,7 @@ impl FastProcessor {
         // last clock cycle of the BASIC BLOCK ops.
         // For the linked case, check for decorators at an operation index beyond the last operation
         let num_ops = basic_block_node.num_operations() as usize;
-        let decorator_ids = current_forest.decorator_indices_for_op(node_id, num_ops);
-        for &decorator_id in decorator_ids {
-            let decorator = program
-                .get_decorator_by_id(decorator_id)
-                .ok_or(ExecutionError::DecoratorNotFoundInForest { decorator_id })?;
+        for decorator in current_forest.decorators_for_op(node_id, num_ops) {
             self.execute_decorator(decorator, host)?;
         }
 
@@ -146,15 +142,11 @@ impl FastProcessor {
         for (op_idx_in_batch, op) in batch.ops().iter().enumerate() {
             let op_idx_in_block = batch_offset_in_block + op_idx_in_batch;
 
-            // Use the forest's decorator storage to get decorator IDs for this operation
+            // Use the forest's decorator storage to get decorators for this operation
             let node_id = basic_block
                 .linked_id()
                 .expect("basic block node should be linked when executing operations");
-            let decorator_ids = current_forest.decorator_indices_for_op(node_id, op_idx_in_block);
-            for &decorator_id in decorator_ids {
-                let decorator = program
-                    .get_decorator_by_id(decorator_id)
-                    .ok_or(ExecutionError::DecoratorNotFoundInForest { decorator_id })?;
+            for decorator in current_forest.decorators_for_op(node_id, op_idx_in_block) {
                 self.execute_decorator(decorator, host)?;
             }
 
