@@ -13,7 +13,7 @@
 #!
 #! For reference implementation in high level language, see
 #! https://github.com/pornin/ecgfp5/blob/ce059c6/python/ecGFp5.py#L607-L616
-export.add
+pub proc add
     repeat.5
         movup.5
         add
@@ -36,7 +36,7 @@ end
 #!
 #! For reference implementation in high level language, see
 #! https://github.com/pornin/ecgfp5/blob/ce059c6/python/ecGFp5.py#L629-L638
-export.sub
+pub proc sub
     repeat.5
         movup.5
         sub
@@ -60,7 +60,7 @@ end
 #!
 #! For reference implementation in high level language, see
 #! https://github.com/pornin/ecgfp5/blob/ce059c6/python/ecGFp5.py#L676-L689
-export.mul
+pub proc mul
     # compute {c0, c1, c2, c3, c4} - five coefficients of resulting
     # degree-4 polynomial
 
@@ -238,7 +238,7 @@ end
 #!
 #! For reference implementation in high level language, see
 #! https://github.com/pornin/ecgfp5/blob/ce059c6/python/ecGFp5.py#L709-L715
-export.square
+pub proc square
     # compute {b0, b1, b2, b3, b4} - five coefficients of resulting
     # degree-4 polynomial
 
@@ -353,7 +353,7 @@ end
 #!
 #! See https://github.com/pornin/ecgfp5/blob/ce059c6/python/ecGFp5.py#L723-L737
 #! for reference implementation in high-level language.
-proc.frobenius_once
+proc frobenius_once
     movup.4
     mul.1373043270956696022
 
@@ -382,7 +382,7 @@ end
 #!
 #! See https://github.com/pornin/ecgfp5/blob/ce059c6/python/ecGFp5.py#L739-L749
 #! for reference implementation in high-level language.
-proc.frobenius_twice
+proc frobenius_twice
     movup.4
     mul.211587555138949697
 
@@ -415,7 +415,7 @@ end
 #! https://github.com/pornin/ecgfp5/blob/ce059c6/python/ecGFp5.py#L751-L775
 #!
 #! Note, this routine will not panic even when operand `a` is zero.
-export.inv
+pub proc inv
     repeat.5
         dup.4
     end
@@ -510,7 +510,7 @@ end
 #!
 #! For reference implementation in high level language, see
 #! https://github.com/pornin/ecgfp5/blob/ce059c6/python/ecGFp5.py#L777-L781
-export.div
+pub proc div
     repeat.5
         movup.9
     end
@@ -532,7 +532,7 @@ end
 #!
 #! See https://github.com/pornin/ecgfp5/blob/ce059c6/python/ecGFp5.py#L461-L469
 #! for reference implementation in higher level language
-proc.base_msquare
+proc base_msquare
     swap
     dup
     neq.0
@@ -567,7 +567,7 @@ end
 #!
 #! See https://github.com/pornin/ecgfp5/blob/ce059c6/python/ecGFp5.py#L349-L446
 #! for reference implementation in higher level language.
-proc.base_sqrt
+proc base_sqrt
     dup # = x
 
     push.31
@@ -1384,7 +1384,7 @@ end
 #!
 #! See https://github.com/pornin/ecgfp5/blob/ce059c6/python/ecGFp5.py#L448-L459
 #! for reference implementation in higher level language.
-proc.base_legendre
+proc base_legendre
     repeat.31
         dup
         mul
@@ -1418,7 +1418,7 @@ end
 #!
 #! See https://github.com/pornin/ecgfp5/blob/ce059c6/python/ecGFp5.py#L857-L877
 #! for reference implementation in higher level language.
-export.legendre
+pub proc legendre
     repeat.5
         dup.4
     end
@@ -1489,7 +1489,7 @@ end
 #!
 #! See https://github.com/pornin/ecgfp5/blob/ce059c6/python/ecGFp5.py#L879-L910
 #! for reference implementation in higher level language.
-export.sqrt
+pub proc sqrt
     repeat.5
         dup.4
     end
@@ -1596,7 +1596,7 @@ end
 #!
 #! See https://github.com/pornin/ecgfp5/blob/ce059c6/python/ecGFp5.py#L797-L806
 #! for reference implementation.
-export.eq
+pub proc eq
     push.1
 
     swap
@@ -1640,7 +1640,7 @@ end
 #!
 #! See https://github.com/pornin/ecgfp5/blob/ce059c6/python/ecGFp5.py#L813-L822
 #! for reference implementation.
-export.neq
+pub proc neq
     push.0
 
     swap

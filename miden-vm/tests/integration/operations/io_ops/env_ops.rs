@@ -1,6 +1,9 @@
 use miden_core::{
     FMP_INIT_VALUE, Operation,
-    mast::{CallNode, MastForest, MastNode, MastNodeExt},
+    mast::{
+        BasicBlockNodeBuilder, CallNodeBuilder, MastForest, MastForestContributor, MastNode,
+        MastNodeExt,
+    },
 };
 use miden_debug_types::{SourceLanguage, SourceManager};
 use miden_utils_testing::{MIN_STACK_DEPTH, StackInputs, Test, Word, build_op_test, build_test};
@@ -50,7 +53,8 @@ fn locaddr() {
 
     // --- locaddr returns expected address -------------------------------------------------------
     let source = "
-        proc.foo.5
+        @locals(5)
+        proc foo
             locaddr.0
             locaddr.4
         end
@@ -66,7 +70,8 @@ fn locaddr() {
 
     // --- accessing mem via locaddr updates the correct variables --------------------------------
     let source = "
-        proc.foo.8
+        @locals(8)
+        proc foo
             locaddr.0
             mem_store
             locaddr.4
@@ -89,12 +94,14 @@ fn locaddr() {
         "
         {TRUNCATE_STACK_PROC}
 
-        proc.foo.12
+        @locals(12)
+        proc foo
             locaddr.0
             locaddr.4
             locaddr.8
         end
-        proc.bar.8
+        @locals(8)
+        proc bar
             locaddr.0
             exec.foo
             locaddr.4
@@ -122,7 +129,8 @@ fn locaddr() {
 
     // --- accessing mem via locaddr in nested procedures updates the correct variables -----------
     let source = "
-        proc.foo.8
+        @locals(8)
+        proc foo
             locaddr.0
             mem_store
             locaddr.4
@@ -132,7 +140,8 @@ fn locaddr() {
             loc_loadw_be.4
             loc_load.0
         end
-        proc.bar.8
+        @locals(8)
+        proc bar
             locaddr.0
             mem_store
             loc_store.4
@@ -156,13 +165,13 @@ fn locaddr() {
 #[test]
 fn caller() {
     let kernel_source = "
-        export.foo
+        pub proc foo
             caller
         end
     ";
 
     let program_source = "
-        proc.bar
+        proc bar
             syscall.foo
         end
 
@@ -190,9 +199,12 @@ fn caller() {
 fn build_bar_hash() -> [u64; 4] {
     let mut mast_forest = MastForest::new();
 
-    let foo_root_id = mast_forest.add_block(vec![Operation::Caller], Vec::new()).unwrap();
+    let foo_root_id = BasicBlockNodeBuilder::new(vec![Operation::Caller], Vec::new())
+        .add_to_forest(&mut mast_forest)
+        .unwrap();
 
-    let bar_root: MastNode = CallNode::new_syscall(foo_root_id, &mast_forest).unwrap().into();
+    let bar_root: MastNode =
+        CallNodeBuilder::new_syscall(foo_root_id).build(&mast_forest).unwrap().into();
     let bar_hash: Word = bar_root.digest();
     [
         bar_hash[0].as_int(),
@@ -211,7 +223,7 @@ fn clk() {
     test.expect_stack(&[6]);
 
     let source = "
-        proc.foo
+        proc foo
             push.5
             push.4
             clk

@@ -71,7 +71,8 @@ To better illustrate what happens as we execute procedures in different contexts
 ```
 kernel
 --------------------
-export.baz.2
+@locals(2)
+pub proc baz
     <instructions>
     caller
     <instructions>
@@ -79,13 +80,15 @@ end
 
 program
 --------------------
-proc.bar.1
+@locals(1)
+proc bar
     <instructions>
     syscall.baz
     <instructions>
 end
 
-proc.foo.3
+@locals(3)
+proc foo
     <instructions>
     call.bar
     <instructions>

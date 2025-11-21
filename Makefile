@@ -45,7 +45,7 @@ FEATURES_LOG_TREE        := --features concurrent,executable,tracing-forest
 # Per-crate default features
 FEATURES_air             := testing
 FEATURES_assembly        := testing
-FEATURES_assembly-syntax := testing
+FEATURES_assembly-syntax := testing,serde
 FEATURES_core            :=
 FEATURES_miden-vm        := concurrent,executable,metal,internal
 FEATURES_processor       := concurrent,testing,bus-debugger

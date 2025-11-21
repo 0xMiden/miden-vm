@@ -32,12 +32,15 @@ The meaning of columns in the above is as follows:
 
 ## Constraints
 
-> Note: the following assumes the ACE chiplet is included in the previous slot, whose documentation will be included
-> in a subsequent PR.
+We first define the selector flag $f_{krom}$ that is active in all rows of the kernel ROM chiplet.
+
+>$$
+> f_{krom} = s_0 \cdot s_1 \cdot s_2 \cdot s_3 \cdot (1 - s_4) \text{ | degree} = 5
+>$$
+
+where $s_i$ are the chiplet selector flags. Refer to the [chiplets order](./index.md#chiplets-order) for more information.
 
 The following constraints are required to enforce the correctness of the kernel ROM trace.
-
-_Note: Unless otherwise stated, these constraints should also be multiplied by chiplets module's virtual flag $f_{krom}$ which is active in all rows the kernel ROM chiplet._
 
 The $s_{first}$ column is a selector indicating the start of a new digest included in the kernel ROM chiplet trace.
 In this row, the chiplet responds to a bus request made by the verifier to ensure consistency with the set of kernel procedure digests given as public inputs.
@@ -45,31 +48,29 @@ In this row, the chiplet responds to a bus request made by the verifier to ensur
 As $s_{first}$ is a selector, it must be binary.
 
 > $$
-> s_{first}^2 - s_{first} = 0 \text{ | degree} = 2
+> f_{krom} \cdot (s_{first}^2 - s_{first}) = 0 \text{ | degree} = 7
 > $$
 
 
 The flag $s_{first}$ must be set to be 1 in the first row of the kernel ROM chiplet.
 Otherwise, the digest in this row would not be matched with one of the input procedure roots.
 This constraint is enforced in the last row of the previous trace, using selector columns from the [chiplets](index.md) module.
-More precisely, we use the virtual $f_{ACE}$ flag from the chiplet selectors $s_0, s_1, \ldots, s_{ACE}$ which is active in all rows of the previous (in this case ACE) chiplet,
-along with the selector $s_{ACE}$ which transitions from 0 to 1 in the last row, allowing us to target the first row of the kernel ROM trace.
+More precisely, we use the virtual $f_{ACE}$ flag, which is active in all rows of the ACE chiplet (which comes right before this chiplet),
+along with the selector $s_3$ which transitions from 0 to 1 in the last row, allowing us to target the first row of the kernel ROM trace.
 
 > $$
-> f_{ACE} \cdot s_{ACE}' \cdot (1 - s_{first}') = 0 \text{ | degree} = \deg(f_{prev}) + 2
+> f_{ACE} \cdot s_{3}' \cdot (1 - s_{first}') = 0 \text{ | degree} = 6
 > $$
-
-_Note that this selector need not be multiplied by the kernel ROM chiplet flag $chip\_s_4$, since it is only active when the previous chiplet is active._
 
 The contiguity of the digests in a block is ensured by enforcing equality between digests across two consecutive rows, whenever the next row is not the start of a new block.
 That is, when $s_{first}' = 0$, it must hold that $r_i = r_i'$.
-We disable this constraint in the last row of the kernel ROM chiplet trace by using the kernel ROM chiplet selector $s_4'$, since the latter transitions from 0 to 1 when the next chiplet starts.
+We disable this constraint in the last row of the kernel ROM chiplet trace by using the kernel ROM chiplet selector $s_4'$, since the latter transitions from 0 to 1 in the first row of the next chiplet.
+
+For $i \in \{0,1,2,3\}$,
 
 > $$
-> (1 - s_4') \cdot (1 - s_{first}') \cdot (r_i' - r_i) = 0 \text{ | degree} = 3
+> f_{krom} \cdot (1 - s_4') \cdot (1 - s_{first}') \cdot (r_i' - r_i) = 0 \text{ | degree} = 8
 > $$
-
-_**Note**: we could technically remove the selector $(1-s_4')$ since $s_4$ and $s_{first}$ correspond to the same column. We include it here for completeness though._
 
 ### Chiplets bus constraints
 

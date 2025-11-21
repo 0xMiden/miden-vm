@@ -170,8 +170,9 @@ impl proptest::arbitrary::Arbitrary for WordValue {
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         use proptest::{array::uniform4, strategy::Strategy};
-        uniform4((0..=crate::FIELD_MODULUS).prop_map(Felt::new))
+        uniform4((0..crate::FIELD_MODULUS).prop_map(Felt::new))
             .prop_map(WordValue)
+            .no_shrink()  // Pure random values, no meaningful shrinking pattern
             .boxed()
     }
 
@@ -382,12 +383,23 @@ impl proptest::arbitrary::Arbitrary for IntValue {
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         use proptest::{num, prop_oneof, strategy::Strategy};
         prop_oneof![
+            // U8 values - full range
             num::u8::ANY.prop_map(IntValue::U8),
-            ((u8::MAX as u16 + 1)..=u16::MAX).prop_map(IntValue::U16),
-            ((u16::MAX as u32 + 1)..=u32::MAX).prop_map(IntValue::U32),
-            ((u32::MAX as u64 + 1)..=crate::FIELD_MODULUS)
-                .prop_map(|n| IntValue::Felt(Felt::new(n))),
+            // U16 values that don't overlap with U8 to preserve variant during serialization
+            (u8::MAX as u16 + 1..=u16::MAX).prop_map(IntValue::U16),
+            // U32 values - full range
+            num::u32::ANY.prop_map(IntValue::U32),
+            // Felt values - values that don't fit in u32 but are within field modulus
+            (num::u64::ANY)
+                .prop_filter_map("valid felt value", |n| {
+                    if n > u32::MAX as u64 && n < crate::FIELD_MODULUS {
+                        Some(IntValue::Felt(Felt::new(n)))
+                    } else {
+                        None
+                    }
+                }),
         ]
+        .no_shrink()  // Pure random values, no meaningful shrinking pattern
         .boxed()
     }
 

@@ -1,5 +1,5 @@
-use.std::crypto::hashes::blake3
-use.std::sys
+use std::crypto::hashes::blake3
+use std::sys
 
 begin
     # Push the number of iterations on the stack, and assess if we should loop

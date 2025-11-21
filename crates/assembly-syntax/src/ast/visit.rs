@@ -84,17 +84,29 @@ pub trait Visit<T = ()> {
     fn visit_module(&mut self, module: &Module) -> ControlFlow<T> {
         visit_module(self, module)
     }
-    fn visit_import(&mut self, import: &Import) -> ControlFlow<T> {
-        visit_import(self, import)
-    }
     fn visit_export(&mut self, export: &Export) -> ControlFlow<T> {
         visit_export(self, export)
     }
     fn visit_procedure(&mut self, procedure: &Procedure) -> ControlFlow<T> {
         visit_procedure(self, procedure)
     }
-    fn visit_procedure_alias(&mut self, alias: &ProcedureAlias) -> ControlFlow<T> {
-        visit_procedure_alias(self, alias)
+    fn visit_constant(&mut self, constant: &Constant) -> ControlFlow<T> {
+        visit_constant(self, constant)
+    }
+    fn visit_type_decl(&mut self, ty: &TypeDecl) -> ControlFlow<T> {
+        visit_type_decl(self, ty)
+    }
+    fn visit_type_alias(&mut self, ty: &TypeAlias) -> ControlFlow<T> {
+        visit_type_alias(self, ty)
+    }
+    fn visit_enum(&mut self, ty: &EnumType) -> ControlFlow<T> {
+        visit_enum(self, ty)
+    }
+    fn visit_enum_variant(&mut self, variant: &Variant) -> ControlFlow<T> {
+        visit_enum_variant(self, variant)
+    }
+    fn visit_alias(&mut self, alias: &Alias) -> ControlFlow<T> {
+        visit_alias(self, alias)
     }
     fn visit_block(&mut self, block: &Block) -> ControlFlow<T> {
         visit_block(self, block)
@@ -159,17 +171,26 @@ where
     fn visit_module(&mut self, module: &Module) -> ControlFlow<T> {
         (**self).visit_module(module)
     }
-    fn visit_import(&mut self, import: &Import) -> ControlFlow<T> {
-        (**self).visit_import(import)
-    }
     fn visit_export(&mut self, export: &Export) -> ControlFlow<T> {
         (**self).visit_export(export)
     }
     fn visit_procedure(&mut self, procedure: &Procedure) -> ControlFlow<T> {
         (**self).visit_procedure(procedure)
     }
-    fn visit_procedure_alias(&mut self, alias: &ProcedureAlias) -> ControlFlow<T> {
-        (**self).visit_procedure_alias(alias)
+    fn visit_constant(&mut self, constant: &Constant) -> ControlFlow<T> {
+        (**self).visit_constant(constant)
+    }
+    fn visit_type_decl(&mut self, ty: &TypeDecl) -> ControlFlow<T> {
+        (**self).visit_type_decl(ty)
+    }
+    fn visit_enum(&mut self, ty: &EnumType) -> ControlFlow<T> {
+        (**self).visit_enum(ty)
+    }
+    fn visit_enum_variant(&mut self, variant: &Variant) -> ControlFlow<T> {
+        (**self).visit_enum_variant(variant)
+    }
+    fn visit_alias(&mut self, alias: &Alias) -> ControlFlow<T> {
+        (**self).visit_alias(alias)
     }
     fn visit_block(&mut self, block: &Block) -> ControlFlow<T> {
         (**self).visit_block(block)
@@ -231,21 +252,10 @@ pub fn visit_module<V, T>(visitor: &mut V, module: &Module) -> ControlFlow<T>
 where
     V: ?Sized + Visit<T>,
 {
-    for import in module.imports() {
-        visitor.visit_import(import)?;
-    }
-    for export in module.procedures() {
+    for export in module.items() {
         visitor.visit_export(export)?;
     }
 
-    ControlFlow::Continue(())
-}
-
-#[inline(always)]
-pub fn visit_import<V, T>(_visitor: &mut V, _import: &Import) -> ControlFlow<T>
-where
-    V: ?Sized + Visit<T>,
-{
     ControlFlow::Continue(())
 }
 
@@ -254,8 +264,10 @@ where
     V: ?Sized + Visit<T>,
 {
     match export {
-        Export::Procedure(procedure) => visitor.visit_procedure(procedure),
-        Export::Alias(alias) => visitor.visit_procedure_alias(alias),
+        Export::Procedure(item) => visitor.visit_procedure(item),
+        Export::Constant(item) => visitor.visit_constant(item),
+        Export::Type(item) => visitor.visit_type_decl(item),
+        Export::Alias(item) => visitor.visit_alias(item),
     }
 }
 
@@ -267,7 +279,50 @@ where
 }
 
 #[inline(always)]
-pub fn visit_procedure_alias<V, T>(visitor: &mut V, alias: &ProcedureAlias) -> ControlFlow<T>
+pub fn visit_constant<V, T>(_visitor: &mut V, _constant: &Constant) -> ControlFlow<T>
+where
+    V: ?Sized + Visit<T>,
+{
+    ControlFlow::Continue(())
+}
+
+pub fn visit_type_decl<V, T>(visitor: &mut V, ty: &TypeDecl) -> ControlFlow<T>
+where
+    V: ?Sized + Visit<T>,
+{
+    match ty {
+        TypeDecl::Alias(ty) => visitor.visit_type_alias(ty),
+        TypeDecl::Enum(ty) => visitor.visit_enum(ty),
+    }
+}
+
+#[inline(always)]
+pub fn visit_type_alias<V, T>(_visitor: &mut V, _ty: &TypeAlias) -> ControlFlow<T>
+where
+    V: ?Sized + Visit<T>,
+{
+    ControlFlow::Continue(())
+}
+
+pub fn visit_enum<V, T>(visitor: &mut V, ty: &EnumType) -> ControlFlow<T>
+where
+    V: ?Sized + Visit<T>,
+{
+    for variant in ty.variants() {
+        visitor.visit_enum_variant(variant)?;
+    }
+    ControlFlow::Continue(())
+}
+
+pub fn visit_enum_variant<V, T>(_visitor: &mut V, _variant: &Variant) -> ControlFlow<T>
+where
+    V: ?Sized + Visit<T>,
+{
+    ControlFlow::Continue(())
+}
+
+#[inline(always)]
+pub fn visit_alias<V, T>(visitor: &mut V, alias: &Alias) -> ControlFlow<T>
 where
     V: ?Sized + Visit<T>,
 {
@@ -537,17 +592,29 @@ pub trait VisitMut<T = ()> {
     fn visit_mut_module(&mut self, module: &mut Module) -> ControlFlow<T> {
         visit_mut_module(self, module)
     }
-    fn visit_mut_import(&mut self, import: &mut Import) -> ControlFlow<T> {
-        visit_mut_import(self, import)
-    }
     fn visit_mut_export(&mut self, export: &mut Export) -> ControlFlow<T> {
         visit_mut_export(self, export)
     }
     fn visit_mut_procedure(&mut self, procedure: &mut Procedure) -> ControlFlow<T> {
         visit_mut_procedure(self, procedure)
     }
-    fn visit_mut_procedure_alias(&mut self, alias: &mut ProcedureAlias) -> ControlFlow<T> {
-        visit_mut_procedure_alias(self, alias)
+    fn visit_mut_constant(&mut self, constant: &mut Constant) -> ControlFlow<T> {
+        visit_mut_constant(self, constant)
+    }
+    fn visit_mut_type_decl(&mut self, ty: &mut TypeDecl) -> ControlFlow<T> {
+        visit_mut_type_decl(self, ty)
+    }
+    fn visit_mut_type_alias(&mut self, ty: &mut TypeAlias) -> ControlFlow<T> {
+        visit_mut_type_alias(self, ty)
+    }
+    fn visit_mut_enum(&mut self, ty: &mut EnumType) -> ControlFlow<T> {
+        visit_mut_enum(self, ty)
+    }
+    fn visit_mut_enum_variant(&mut self, variant: &mut Variant) -> ControlFlow<T> {
+        visit_mut_enum_variant(self, variant)
+    }
+    fn visit_mut_alias(&mut self, alias: &mut Alias) -> ControlFlow<T> {
+        visit_mut_alias(self, alias)
     }
     fn visit_mut_block(&mut self, block: &mut Block) -> ControlFlow<T> {
         visit_mut_block(self, block)
@@ -612,17 +679,26 @@ where
     fn visit_mut_module(&mut self, module: &mut Module) -> ControlFlow<T> {
         (**self).visit_mut_module(module)
     }
-    fn visit_mut_import(&mut self, import: &mut Import) -> ControlFlow<T> {
-        (**self).visit_mut_import(import)
-    }
     fn visit_mut_export(&mut self, export: &mut Export) -> ControlFlow<T> {
         (**self).visit_mut_export(export)
     }
     fn visit_mut_procedure(&mut self, procedure: &mut Procedure) -> ControlFlow<T> {
         (**self).visit_mut_procedure(procedure)
     }
-    fn visit_mut_procedure_alias(&mut self, alias: &mut ProcedureAlias) -> ControlFlow<T> {
-        (**self).visit_mut_procedure_alias(alias)
+    fn visit_mut_constant(&mut self, constant: &mut Constant) -> ControlFlow<T> {
+        (**self).visit_mut_constant(constant)
+    }
+    fn visit_mut_type_decl(&mut self, ty: &mut TypeDecl) -> ControlFlow<T> {
+        (**self).visit_mut_type_decl(ty)
+    }
+    fn visit_mut_enum(&mut self, ty: &mut EnumType) -> ControlFlow<T> {
+        (**self).visit_mut_enum(ty)
+    }
+    fn visit_mut_enum_variant(&mut self, variant: &mut Variant) -> ControlFlow<T> {
+        (**self).visit_mut_enum_variant(variant)
+    }
+    fn visit_mut_alias(&mut self, alias: &mut Alias) -> ControlFlow<T> {
+        (**self).visit_mut_alias(alias)
     }
     fn visit_mut_block(&mut self, block: &mut Block) -> ControlFlow<T> {
         (**self).visit_mut_block(block)
@@ -684,21 +760,10 @@ pub fn visit_mut_module<V, T>(visitor: &mut V, module: &mut Module) -> ControlFl
 where
     V: ?Sized + VisitMut<T>,
 {
-    for import in module.imports_mut() {
-        visitor.visit_mut_import(import)?;
-    }
-    for export in module.procedures_mut() {
+    for export in module.items_mut() {
         visitor.visit_mut_export(export)?;
     }
 
-    ControlFlow::Continue(())
-}
-
-#[inline(always)]
-pub fn visit_mut_import<V, T>(_visitor: &mut V, _import: &mut Import) -> ControlFlow<T>
-where
-    V: ?Sized + VisitMut<T>,
-{
     ControlFlow::Continue(())
 }
 
@@ -707,8 +772,10 @@ where
     V: ?Sized + VisitMut<T>,
 {
     match export {
-        Export::Procedure(procedure) => visitor.visit_mut_procedure(procedure),
-        Export::Alias(alias) => visitor.visit_mut_procedure_alias(alias),
+        Export::Procedure(item) => visitor.visit_mut_procedure(item),
+        Export::Constant(item) => visitor.visit_mut_constant(item),
+        Export::Type(item) => visitor.visit_mut_type_decl(item),
+        Export::Alias(item) => visitor.visit_mut_alias(item),
     }
 }
 
@@ -720,10 +787,51 @@ where
 }
 
 #[inline(always)]
-pub fn visit_mut_procedure_alias<V, T>(
-    visitor: &mut V,
-    alias: &mut ProcedureAlias,
-) -> ControlFlow<T>
+pub fn visit_mut_constant<V, T>(_visitor: &mut V, _constant: &mut Constant) -> ControlFlow<T>
+where
+    V: ?Sized + VisitMut<T>,
+{
+    ControlFlow::Continue(())
+}
+
+pub fn visit_mut_type_decl<V, T>(visitor: &mut V, ty: &mut TypeDecl) -> ControlFlow<T>
+where
+    V: ?Sized + VisitMut<T>,
+{
+    match ty {
+        TypeDecl::Alias(ty) => visitor.visit_mut_type_alias(ty),
+        TypeDecl::Enum(ty) => visitor.visit_mut_enum(ty),
+    }
+}
+
+#[inline(always)]
+pub fn visit_mut_type_alias<V, T>(_visitor: &mut V, _ty: &mut TypeAlias) -> ControlFlow<T>
+where
+    V: ?Sized + VisitMut<T>,
+{
+    ControlFlow::Continue(())
+}
+
+pub fn visit_mut_enum<V, T>(visitor: &mut V, ty: &mut EnumType) -> ControlFlow<T>
+where
+    V: ?Sized + VisitMut<T>,
+{
+    for variant in ty.variants_mut() {
+        visitor.visit_mut_enum_variant(variant)?;
+    }
+    ControlFlow::Continue(())
+}
+
+#[inline(always)]
+pub fn visit_mut_enum_variant<V, T>(_visitor: &mut V, _variant: &mut Variant) -> ControlFlow<T>
+where
+    V: ?Sized + VisitMut<T>,
+{
+    ControlFlow::Continue(())
+}
+
+#[inline(always)]
+pub fn visit_mut_alias<V, T>(visitor: &mut V, alias: &mut Alias) -> ControlFlow<T>
 where
     V: ?Sized + VisitMut<T>,
 {

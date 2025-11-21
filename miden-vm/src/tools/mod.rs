@@ -372,7 +372,7 @@ mod tests {
 
     #[test]
     fn analyze_test() {
-        let source = "proc.foo.1 loc_store.0 end begin mem_storew_be.4 dropw push.17 push.1 movdn.2 exec.foo drop end";
+        let source = "@locals(1) proc foo loc_store.0 end begin mem_storew_be.4 dropw push.17 push.1 movdn.2 exec.foo drop end";
         let stack_inputs = StackInputs::default();
         let advice_inputs = AdviceInputs::default();
         let host = DefaultHost::default();

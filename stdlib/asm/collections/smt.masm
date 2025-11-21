@@ -1,15 +1,15 @@
-use.std::crypto::hashes::rpo
-use.std::collections::sorted_array
-use.std::math::u64
-use.std::mem
-use.std::sys
-use.std::word
+use std::crypto::hashes::rpo
+use std::collections::sorted_array
+use std::math::u64
+use std::mem
+use std::sys
+use std::word
 
 # Constant value for the depth at which leaves sit
-const.LEAF_DEPTH=64
+const LEAF_DEPTH = 64
 
 # Each key-value pair is two words, and a leaf can hold up to 1024 pairs.
-const.MAX_LEAF_SIZE=8192
+const MAX_LEAF_SIZE = 8192
 
 # EXPORTS
 # =================================================================================================
@@ -33,7 +33,7 @@ const.MAX_LEAF_SIZE=8192
 #!   Leaf single: 115 cycles
 #!   Leaf multiple, non-empty value: 189 + 3 * pair_count
 #!   Leaf multiple, empty value: 186 + 3 * pair_count
-export.get
+pub proc get
     # Prepare for `mtree_get`
     # (6 cycles)
     dupw.1 dup.4 push.LEAF_DEPTH
@@ -133,7 +133,7 @@ end
 #!     insertion (leaf becomes multiple): X cycles
 #!   Leaf multiple
 #!     X cycles
-export.set
+pub proc set
     # Prepare stack for adv.push_mtnode
     # (X cycles)
     movupw.2 dup.8 push.LEAF_DEPTH
@@ -219,7 +219,8 @@ end
 #! Cycles:
 #!  Non-empty: 125 + 3 * pair_count
 #!  Empty: 122 + 3 * pair_count
-proc.get_multi_leaf_value.8192
+@locals(8192)
+proc get_multi_leaf_value
     # First, we'll pipe all the pairs in the leaf from the advice stack.
     # We'll need a pointer, the count of words to copy, and a "commitment" that it should hash to.
     # The node value (its hash) is our commitment, and we can just divide `leaf_size` to get the
@@ -295,7 +296,7 @@ end
 #! Cycles
 #!   Insert empty value: X cycles
 #!   Insert non-empty value: X cycles
-proc.set_empty_leaf
+proc set_empty_leaf
     # Check if we're inserting the empty value (X cycles)
     padw eqw
     #=> [V == ZERO, ZERO, V, K, R]
@@ -362,7 +363,7 @@ end
 #!   Remove: X cycles
 #!   Insert; leaf single after insertion: X cycles
 #!   Insert; leaf multiple after insertion: X cycles
-proc.set_single_leaf
+proc set_single_leaf
     # Check if we're inserting or removing a value
     # (X cycles)
     padw eqw
@@ -403,7 +404,7 @@ end
 #! Cycles:
 #!   Leaf single after insertion: X cycles
 #!   Leaf multiple after insertion: X cycles
-proc.insert_single_leaf
+proc insert_single_leaf
     # Push the leaf pre-image on stack
     # (X cycles)
     adv_push.8
@@ -470,7 +471,8 @@ end
 #! - `V` is the new value to insert.
 #! - `R` is the root of the original SMT.
 #! - `R_new` is the root of the SMT after the insertion.
-proc.insert_single_to_multi_leaf.16
+@locals(16)
+proc insert_single_to_multi_leaf
 
     # Pairs in leaves are sorted by key, so we need to compare the new key against the existing
     # key.
@@ -544,7 +546,7 @@ proc.insert_single_to_multi_leaf.16
     exec.hash_and_insert_mem
     # => [NV_old, R_new]
 
-    # By nature, if an update transforms a single-leaf to a multi-leaf then 
+    # By nature, if an update transforms a single-leaf to a multi-leaf then
     # we are inserting a new key at this leaf_index. The old value never existed,
     # so it must be an empty word.
 
@@ -564,7 +566,7 @@ end
 #!   Operand stack: [V_old, R_new, ...]
 #!
 #! Cycles: X
-proc.remove_single_leaf
+proc remove_single_leaf
     # Push the leaf pre-image on stack
     # (0 cycles)
     adv_push.8
@@ -653,7 +655,8 @@ end
 #!
 #! Outputs:
 #!   Operand stack: [V_old, R_new]
-proc.set_multi_leaf.8192
+@locals(8192)
+proc set_multi_leaf
     # We'll have to pipe all the pairs from the advice stack. Let's get the
     # stack ready for pipe_double_words_preimage_to_memory.
 
@@ -678,7 +681,7 @@ proc.set_multi_leaf.8192
 
     exec.mem::pipe_double_words_preimage_to_memory
     # => [end_ptr; NV, K, V, leaf_size, R]
-    
+
     movdn.12
     # => [NV, K, V, end_ptr, leaf_size, R]
     swapw.2
@@ -772,7 +775,8 @@ end
 #! - pairs_array_end: pointer to the end of the original leaf data
 #! - cur_read: pointer to the current read position in the original leaf data
 #! - cur_write: pointer to the current write position
-proc.insert_into_leaf.8196
+@locals(8196)
+proc insert_into_leaf
     # => [key_ptr, start_ptr, end_ptr, V, K, R]
 
     # Ensure we have space to insert without exceeding the maximum size of 1024 k-v pairs.
@@ -882,7 +886,7 @@ proc.insert_into_leaf.8196
 end
 
 #! Updates the value associated with the given key in a multi-leaf.
-proc.replace_in_multi_leaf
+proc replace_in_multi_leaf
     # => [key_ptr, start_ptr, end_ptr, V, K, R]
 
     add.4
@@ -947,7 +951,8 @@ end
 #! - pairs_array_end: pointer to the end of the original leaf data
 #! - cur_read: pointer to the current read position in the original leaf data
 #! - cur_write: pointer to the current write position
-proc.remove_in_multi_leaf.8196
+@locals(8196)
+proc remove_in_multi_leaf
     # => [key_ptr, start_ptr, end_ptr, V=EMPTY, K, R]
 
     # LOCALS:
@@ -1025,7 +1030,7 @@ end
 #! Where:
 #! - `read_ptr'` is `read_start_ptr` plus the count of elements that were copied.
 #! - `write_ptr'` is `write_ptr` plus the count of elements that were copied.
-proc.memcopy_word_range_and_advance_ptrs
+proc memcopy_word_range_and_advance_ptrs
     # => [read_start_ptr, read_end_ptr, write_ptr]
 
     # => [cur_read=read_start_ptr, read_end, cur_write=write_ptr]
@@ -1077,7 +1082,7 @@ end
 #!
 #! Inputs: [start_addr, end_addr, leaf_index, R]
 #! Outputs: [NV_old, R_new]
-proc.hash_and_insert_mem
+proc hash_and_insert_mem
     # => [start_addr, end_addr, leaf_index, R, ...]
 
     dup.1 dup.1

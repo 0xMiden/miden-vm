@@ -3,7 +3,7 @@
 #! Asserts that both values at the top of the stack are u64 values.
 #! The input values are assumed to be represented using 32 bit limbs, fails if they are not.
 #! This takes 6 cycles.
-proc.u32assert4
+proc u32assert4
     u32assert2
     movup.3
     movup.3
@@ -19,7 +19,7 @@ end
 #! Stack transition looks as follows:
 #! [b_hi, b_lo, a_hi, a_lo, ...] -> [overflowing_flag, c_hi, c_lo, ...], where c = (a + b) % 2^64
 #! This takes 6 cycles.
-export.overflowing_add
+pub proc overflowing_add(b: u64, a: u64) -> (i1, u64)
     swap
     movup.3
     u32overflowing_add
@@ -33,7 +33,7 @@ end
 #! Stack transition looks as follows:
 #! [b_hi, b_lo, a_hi, a_lo, ...] -> [c_hi, c_lo, ...], where c = (a + b) % 2^64
 #! This takes 7 cycles.
-export.wrapping_add
+pub proc wrapping_add(b: u64, a: u64) -> u64
     exec.overflowing_add
     drop
 end
@@ -45,7 +45,7 @@ end
 #! Stack transition looks as follows:
 #! [b_hi, b_lo, a_hi, a_lo, ...] -> [c_hi, c_lo, ...], where c = (a - b) % 2^64
 #! This takes 10 cycles.
-export.wrapping_sub
+pub proc wrapping_sub(b: u64, a: u64) -> u64
     movup.3
     movup.2
     u32overflowing_sub
@@ -63,7 +63,7 @@ end
 #! Stack transition looks as follows:
 #! [b_hi, b_lo, a_hi, a_lo, ...] -> [underflowing_flag, c_hi, c_lo, ...], where c = (a - b) % 2^64
 #! This takes 11 cycles.
-export.overflowing_sub
+pub proc overflowing_sub(b: u64, a: u64) -> (i1, u64)
     movup.3
     movup.2
     u32overflowing_sub
@@ -84,7 +84,7 @@ end
 #! Stack transition looks as follows:
 #! [b_hi, b_lo, a_hi, a_lo, ...] -> [c_hi, c_lo, ...], where c = (a * b) % 2^64
 #! This takes 11 cycles.
-export.wrapping_mul
+pub proc wrapping_mul(b: u64, a: u64) -> u64
     dup.3
     dup.2
     u32overflowing_mul
@@ -103,7 +103,7 @@ end
 #! Stack transition looks as follows:
 #! [b_hi, b_lo, a_hi, a_lo, ...] -> [c_hi, c_mid_hi, c_mid_lo, c_lo, ...], where c = (a * b) % 2^64
 #! This takes 18 cycles.
-export.overflowing_mul
+pub proc overflowing_mul(b: u64, a: u64) -> (i1, u64)
     dup.3
     dup.2
     u32overflowing_mul
@@ -131,7 +131,7 @@ end
 #! Stack transition looks as follows:
 #! [b_hi, b_lo, a_hi, a_lo, ...] -> [c, ...], where c = 1 when a < b, and 0 otherwise.
 #! This takes 11 cycles.
-export.lt
+pub proc lt(b: u64, a: u64) -> i1
     movup.3
     movup.2
     u32overflowing_sub
@@ -150,7 +150,7 @@ end
 #! Stack transition looks as follows:
 #! [b_hi, b_lo, a_hi, a_lo, ...] -> [c, ...], where c = 1 when a > b, and 0 otherwise.
 #! This takes 11 cycles.
-export.gt
+pub proc gt(b: u64, a: u64) -> i1
     movup.2
     u32overflowing_sub
     movup.2
@@ -169,7 +169,7 @@ end
 #! Stack transition looks as follows:
 #! [b_hi, b_lo, a_hi, a_lo, ...] -> [c, ...], where c = 1 when a <= b, and 0 otherwise.
 #! This takes 12 cycles.
-export.lte
+pub proc lte(b: u64, a: u64) -> i1
     exec.gt
     not
 end
@@ -179,7 +179,7 @@ end
 #! Stack transition looks as follows:
 #! [b_hi, b_lo, a_hi, a_lo, ...] -> [c, ...], where c = 1 when a >= b, and 0 otherwise.
 #! This takes 12 cycles.
-export.gte
+pub proc gte(b: u64, a: u64) -> i1
     exec.lt
     not
 end
@@ -189,7 +189,7 @@ end
 #! Stack transition looks as follows:
 #! [b_hi, b_lo, a_hi, a_lo, ...] -> [c, ...], where c = 1 when a == b, and 0 otherwise.
 #! This takes 6 cycles.
-export.eq
+pub proc eq(b: u64, a: u64) -> i1
     movup.2
     eq
     swap
@@ -203,7 +203,7 @@ end
 #! Stack transition looks as follows:
 #! [b_hi, b_lo, a_hi, a_lo, ...] -> [c, ...], where c = 1 when a != b, and 0 otherwise.
 #! This takes 6 cycles.
-export.neq
+pub proc neq(b: u64, a: u64) -> i1
     movup.2
     neq
     swap
@@ -217,7 +217,7 @@ end
 #! Stack transition looks as follows:
 #! [a_hi, a_lo, ...] -> [c, ...], where c = 1 when a == 0, and 0 otherwise.
 #! This takes 4 cycles.
-export.eqz
+pub proc eqz(b: u64, a: u64) -> i1
     eq.0
     swap
     eq.0
@@ -229,7 +229,7 @@ end
 #! Stack transition looks as follows:
 #! [b_hi, b_lo, a_hi, a_lo, ...] -> [c_hi, c_lo, ...], where c = a when a < b, and b otherwise.
 #! This takes 23 cycles.
-export.min
+pub proc min(b: u64, a: u64) -> u64
     dupw
     exec.gt
     movup.4
@@ -245,7 +245,7 @@ end
 #! Stack transition looks as follows:
 #! [b_hi, b_lo, a_hi, a_lo, ...] -> [c_hi, c_lo, ...], where c = a when a > b, and b otherwise.
 #! This takes 23 cycles.
-export.max
+pub proc max(b: u64, a: u64) -> u64
     dupw
     exec.lt
     movup.4
@@ -258,14 +258,14 @@ end
 
 # ===== DIVISION ==================================================================================
 
-const.U64_DIV_EVENT=event("stdlib::math::u64::u64_div")
+const U64_DIV_EVENT = event("stdlib::math::u64::u64_div")
 
 #! Performs division of two unsigned 64 bit integers discarding the remainder.
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition looks as follows:
 #! [b_hi, b_lo, a_hi, a_lo, ...] -> [c_hi, c_lo, ...], where c = a // b
 #! This takes 54 cycles.
-export.div
+pub proc div(b: u64, a: u64) -> u64
     emit.U64_DIV_EVENT  # push the quotient and the remainder onto the advice stack
 
     adv_push.2          # pop the quotient from the advice stack and assert it consists of
@@ -322,7 +322,7 @@ end
 #! Stack transition looks as follows:
 #! [b_hi, b_lo, a_hi, a_lo, ...] -> [c_hi, c_lo, ...], where c = a % b
 #! This takes 54 cycles.
-export.mod
+pub proc mod(b: u64, a: u64) -> u64
     emit.U64_DIV_EVENT  # push the quotient and the remainder onto the advice stack
 
     adv_push.2          # pop the quotient from the advice stack and assert it consists of
@@ -379,7 +379,7 @@ end
 #! Stack transition looks as follows:
 #! [b_hi, b_lo, a_hi, a_lo, ...] -> [r_hi, r_lo, q_hi, q_lo ...], where r = a % b, q = a / b
 #! This takes 54 cycles.
-export.divmod
+pub proc divmod(b: u64, a: u64) -> (remainder: u64, quotient: u64)
     emit.U64_DIV_EVENT  # push the quotient and the remainder onto the advice stack
 
     adv_push.2          # pop the quotient from the advice stack and assert it consists of
@@ -436,7 +436,7 @@ end
 #! Stack transition looks as follows:
 #! [b_hi, b_lo, a_hi, a_lo, ...] -> [c_hi, c_lo, ...], where c = a AND b.
 #! This takes 6 cycles.
-export.and
+pub proc and(b: u64, a: u64) -> u64
     swap
     movup.3
     u32and
@@ -450,7 +450,7 @@ end
 #! Stack transition looks as follows:
 #! [b_hi, b_lo, a_hi, a_lo, ...] -> [c_hi, c_lo, ...], where c = a OR b.
 #! This takes 16 cycles.
-export.or
+pub proc or(b: u64, a: u64) -> u64
     swap
     movup.3
     u32or
@@ -464,7 +464,7 @@ end
 #! Stack transition looks as follows:
 #! [b_hi, b_lo, a_hi, a_lo, ...] -> [c_hi, c_lo, ...], where c = a XOR b.
 #! This takes 6 cycles.
-export.xor
+pub proc xor(b: u64, a: u64) -> u64
     swap
     movup.3
     u32xor
@@ -480,7 +480,7 @@ end
 #! Stack transition looks as follows:
 #! [b, a_hi, a_lo, ...] -> [c_hi, c_lo, ...], where c = a << b mod 2^64.
 #! This takes 28 cycles.
-export.shl
+pub proc shl(b: u64, a: u64) -> u64
     pow2
     u32split
     exec.wrapping_mul
@@ -494,7 +494,7 @@ end
 #! Stack transition looks as follows:
 #! [b, a_hi, a_lo, ...] -> [c_hi, c_lo, ...], where c = a >> b.
 #! This takes 44 cycles.
-export.shr
+pub proc shr(b: u64, a: u64) -> u64
     pow2
     u32split
 
@@ -533,7 +533,7 @@ end
 #! Stack transition looks as follows:
 #! [b, a_hi, a_lo, ...] -> [c_hi, c_lo, ...], where c = a << b mod 2^64.
 #! This takes 35 cycles.
-export.rotl
+pub proc rotl(b: u64, a: u64) -> u64
     push.31
     dup.1
     u32overflowing_sub
@@ -571,7 +571,7 @@ end
 #! Stack transition looks as follows:
 #! [b, a_hi, a_lo, ...] -> [c_hi, c_lo, ...], where c = a << b mod 2^64.
 #! This takes 44 cycles.
-export.rotr
+pub proc rotr(b: u64, a: u64) -> u64
     push.31
     dup.1
     u32lt
@@ -612,7 +612,7 @@ end
 #! Stack transition looks as follows:
 #! [n_hi, n_lo, ...] -> [clz, ...], where clz is a number of leading zeros of value n.
 #! This takes 48 cycles.
-export.clz
+pub proc clz(n: u64) -> u8
     dup.0
     eq.0
 
@@ -632,7 +632,7 @@ end
 #! Stack transition looks as follows:
 #! [n_hi, n_lo, ...] -> [ctz, ...], where ctz is a number of trailing zeros of value n.
 #! This takes 41 cycles.
-export.ctz
+pub proc ctz(n: u64) -> u8
     swap
     dup.0
     eq.0
@@ -653,7 +653,7 @@ end
 #! Stack transition looks as follows:
 #! [n_hi, n_lo, ...] -> [clo, ...], where clo is a number of leading ones of value n.
 #! This takes 47 cycles.
-export.clo
+pub proc clo(n: u64) -> u8
     dup.0
     eq.4294967295
 
@@ -673,7 +673,7 @@ end
 #! Stack transition looks as follows:
 #! [n_hi, n_lo, ...] -> [cto, ...], where cto is a number of trailing ones of value n.
 #! This takes 40 cycles.
-export.cto
+pub proc cto(n: u64) -> u8
     swap
     dup.0
     eq.4294967295

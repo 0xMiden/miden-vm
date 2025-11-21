@@ -151,7 +151,7 @@ Using the `!use` command with a module name will add the specified module to the
 >> !use std::math::u64
 
 >> !program
-use.std::math::u64
+use std::math::u64
 
 begin
 

@@ -509,7 +509,7 @@ impl<'input> Lexer<'input> {
         }
 
         match self.slice() {
-            id @ ("$kernel" | "$exec" | "$anon") => Ok(Token::Ident(id)),
+            id @ ("$kernel" | "$exec") => Ok(Token::Ident(id)),
             _ => {
                 let start = self.span().start();
                 let span = SourceSpan::at(self.span().source_id(), start);

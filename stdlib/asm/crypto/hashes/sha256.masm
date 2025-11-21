@@ -5,7 +5,7 @@
 #!
 #! Where y = σ_0(x), as defined in SHA specification
 #! See https://github.com/itzmeanjan/merklize-sha/blob/8a2c006/include/sha2.hpp#L73-L79
-proc.small_sigma_0
+proc small_sigma_0
     dup
     u32rotr.7
 
@@ -29,7 +29,7 @@ end
 #!
 #! Where y = σ_1(x), as defined in SHA specification
 #! See https://github.com/itzmeanjan/merklize-sha/blob/8a2c006/include/sha2.hpp#L81-L87
-proc.small_sigma_1
+proc small_sigma_1
     dup
     u32rotr.17
 
@@ -53,7 +53,7 @@ end
 #!
 #! Where y = Σ_0(x), as defined in SHA specification
 #! See https://github.com/itzmeanjan/merklize-sha/blob/8a2c006/include/sha2.hpp#L57-L63
-proc.cap_sigma_0
+proc cap_sigma_0
     dup
     u32rotr.2
 
@@ -77,7 +77,7 @@ end
 #!
 #! Where y = Σ_1(x), as defined in SHA specification
 #! See https://github.com/itzmeanjan/merklize-sha/blob/8a2c006/include/sha2.hpp#L65-L71
-proc.cap_sigma_1
+proc cap_sigma_1
     dup
     u32rotr.6
 
@@ -101,7 +101,7 @@ end
 #!
 #! Where o = ch(x, y, z), as defined in SHA specification
 #! See https://github.com/itzmeanjan/merklize-sha/blob/8a2c006/include/sha2.hpp#L37-L45
-proc.ch
+proc ch
     swap
     dup.1
     u32and
@@ -122,7 +122,7 @@ end
 #!
 #! Where o = maj(x, y, z), as defined in SHA specification
 #! See https://github.com/itzmeanjan/merklize-sha/blob/8a2c006/include/sha2.hpp#L47-L55
-proc.maj
+proc maj
     dup.1
     dup.1
     u32and
@@ -144,7 +144,7 @@ end
 #! Input: [a, b, c, d, ...]
 #! Output: [d, c, b, a, ...]
 #! Cycles: 3
-proc.rev_element_order
+proc rev_element_order
     swap
     movup.2
     movup.3
@@ -167,7 +167,7 @@ end
 #! t0 = small_sigma_1(a) + b
 #! t1 = small_sigma_0(c) + d
 #! r = t0 + t1
-proc.compute_message_schedule_word
+proc compute_message_schedule_word
     exec.small_sigma_1
     movup.2
     exec.small_sigma_0
@@ -186,7 +186,7 @@ end
 #! - i ∈ [0, 64)
 #! - a through h are working variables of SHA256 ( i.e. hash state )
 #! See https://github.com/itzmeanjan/merklize-sha/blob/8a2c006/include/sha2_256.hpp#L165-L175
-proc.consume_message_word
+proc consume_message_word
     dup.6
     dup.6
     dup.6
@@ -233,7 +233,8 @@ end
 #! - msg0 through msg15 are the 64 -bytes input message (in terms of 16 SHA256 words)
 #! See https://github.com/itzmeanjan/merklize-sha/blob/8a2c006/include/sha2.hpp#L89-L113
 #! & https://github.com/itzmeanjan/merklize-sha/blob/8a2c006/include/sha2_256.hpp#L148-L187 ( loop body execution )
-proc.prepare_message_schedule_and_consume.16
+@locals(16)
+proc prepare_message_schedule_and_consume
     loc_storew_be.0
     loc_storew_be.8
     dropw
@@ -1083,7 +1084,7 @@ end
 #!
 #! See https://github.com/itzmeanjan/merklize-sha/blob/8a2c006/include/sha2_256.hpp#L148-L187 ( loop
 #! body execution when i = 1 i.e. consuming padding bytes )
-proc.consume_padding_message_schedule
+proc consume_padding_message_schedule
     dupw.1
     dupw.1
 
@@ -1522,7 +1523,7 @@ end
 #! maintaining big endian byte order.
 #!
 #! SHA256 digest is represented in terms of eight 32 -bit words ( big endian byte order ).
-export.hash_2to1
+pub proc hash_2to1
     push.0x5be0cd19.0x1f83d9ab.0x9b05688c.0x510e527f
     push.0xa54ff53a.0x3c6ef372.0xbb67ae85.0x6a09e667
 
@@ -1544,7 +1545,7 @@ end
 #! maintaining big endian byte order.
 #!
 #! SHA256 digest is represented in terms of eight 32 -bit words ( big endian byte order ).
-export.hash_1to1
+pub proc hash_1to1
     # apply padding, see padding rule in section 5.1.1 of
     # https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.180-4.pdf
     push.256.0.0.0.0.0.0.2147483648
@@ -1563,7 +1564,8 @@ end
 #!
 #! Input:  [addr, len, ...]
 #! Output: [dig0, dig1, dig2, dig3, dig4, dig5, dig6, dig7, ...]
-export.hash_memory.48
+@locals(48)
+pub proc hash_memory
     # loc.0 (input address)
     loc_store.0
 

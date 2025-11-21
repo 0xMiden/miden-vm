@@ -258,8 +258,8 @@ fn test_ec_ext5_scalar_mont_mul() {
 
     let source = format!(
         "
-    use.std::math::ecgfp5::scalar_field
-    use.std::sys
+    use std::math::ecgfp5::scalar_field
+    use std::sys
 
     begin
         {inputs}
@@ -281,8 +281,8 @@ fn test_ec_ext5_scalar_mont_mul() {
 #[test]
 fn test_ec_ext5_scalar_to_and_from_mont_repr() {
     let source = "
-    use.std::math::ecgfp5::scalar_field
-    use.std::sys
+    use std::math::ecgfp5::scalar_field
+    use std::sys
 
     begin
         exec.scalar_field::to_mont
@@ -327,8 +327,8 @@ fn test_ec_ext5_scalar_to_and_from_mont_repr() {
 #[test]
 fn test_ec_ext5_scalar_inv() {
     let source = "
-    use.std::math::ecgfp5::scalar_field
-    use.std::sys
+    use std::math::ecgfp5::scalar_field
+    use std::sys
 
     begin
         exec.scalar_field::inv

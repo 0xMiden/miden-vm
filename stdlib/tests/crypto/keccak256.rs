@@ -99,8 +99,8 @@ fn test_keccak_hash_memory_impl(input_u8: &[u8]) {
 
     let source = format!(
         r#"
-            use.std::sys
-            use.std::crypto::hashes::keccak256
+            use std::sys
+            use std::crypto::hashes::keccak256
 
             begin
                 # Store packed u32 values in memory
@@ -152,8 +152,8 @@ fn test_keccak_hash_memory(input_u8: &[u8]) {
 
     let source = format!(
         r#"
-            use.std::sys
-            use.std::crypto::hashes::keccak256
+            use std::sys
+            use std::crypto::hashes::keccak256
 
             begin
                 # Store packed u32 values in memory
@@ -186,8 +186,8 @@ fn test_keccak_hash_1to1() {
 
     let source = format!(
         r#"
-            use.std::sys
-            use.std::crypto::hashes::keccak256
+            use std::sys
+            use std::crypto::hashes::keccak256
 
             begin
                 # Push input to stack as words with temporary memory pointer
@@ -217,8 +217,8 @@ fn test_keccak_hash_2to1() {
 
     let source = format!(
         r#"
-            use.std::sys
-            use.std::crypto::hashes::keccak256
+            use std::sys
+            use std::crypto::hashes::keccak256
 
             begin
                 # Push input to stack as words with temporary memory pointer

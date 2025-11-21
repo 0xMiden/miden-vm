@@ -1,16 +1,12 @@
 use alloc::sync::Arc;
 
 use miden_assembly_syntax::{
-    ast::types::FunctionType,
+    ast::{Path, Visibility, types::FunctionType},
     debuginfo::{SourceManager, SourceSpan, Spanned},
 };
 use miden_core::{Word, mast::MastNodeId};
 
-use super::GlobalProcedureIndex;
-use crate::{
-    LibraryPath,
-    ast::{ProcedureName, QualifiedProcedureName, Visibility},
-};
+use super::GlobalItemIndex;
 
 // PROCEDURE CONTEXT
 // ================================================================================================
@@ -18,10 +14,10 @@ use crate::{
 /// Information about a procedure currently being compiled.
 pub struct ProcedureContext {
     source_manager: Arc<dyn SourceManager>,
-    gid: GlobalProcedureIndex,
+    gid: GlobalItemIndex,
     is_program_entrypoint: bool,
     span: SourceSpan,
-    name: QualifiedProcedureName,
+    path: Arc<Path>,
     signature: Option<Arc<FunctionType>>,
     visibility: Visibility,
     is_kernel: bool,
@@ -32,9 +28,9 @@ pub struct ProcedureContext {
 /// Constructors
 impl ProcedureContext {
     pub fn new(
-        gid: GlobalProcedureIndex,
+        gid: GlobalItemIndex,
         is_program_entrypoint: bool,
-        name: QualifiedProcedureName,
+        path: Arc<Path>,
         visibility: Visibility,
         signature: Option<Arc<FunctionType>>,
         is_kernel: bool,
@@ -44,8 +40,8 @@ impl ProcedureContext {
             source_manager,
             gid,
             is_program_entrypoint,
-            span: name.span(),
-            name,
+            span: SourceSpan::UNKNOWN,
+            path,
             visibility,
             signature,
             is_kernel,
@@ -68,7 +64,7 @@ impl ProcedureContext {
 // ------------------------------------------------------------------------------------------------
 /// Public accessors
 impl ProcedureContext {
-    pub fn id(&self) -> GlobalProcedureIndex {
+    pub fn id(&self) -> GlobalItemIndex {
         self.gid
     }
 
@@ -76,8 +72,8 @@ impl ProcedureContext {
         self.is_program_entrypoint
     }
 
-    pub fn name(&self) -> &QualifiedProcedureName {
-        &self.name
+    pub fn path(&self) -> &Arc<Path> {
+        &self.path
     }
 
     pub fn signature(&self) -> Option<Arc<FunctionType>> {
@@ -92,9 +88,8 @@ impl ProcedureContext {
         self.num_locals
     }
 
-    #[allow(unused)]
-    pub fn module(&self) -> &LibraryPath {
-        &self.name.module
+    pub fn module(&self) -> &Path {
+        self.path.parent().unwrap()
     }
 
     /// Returns true if the procedure is being assembled for a kernel.
@@ -124,10 +119,12 @@ impl ProcedureContext {
     /// forest under `mast_node_id` must have the digest equal to the `mast_root`.
     /// </div>
     pub fn into_procedure(self, mast_root: Word, mast_node_id: MastNodeId) -> Procedure {
+        let is_syscall = self.is_kernel && self.visibility.is_public();
         Procedure::new(
-            self.name,
+            self.path,
             self.visibility,
             self.signature,
+            is_syscall,
             self.num_locals as u32,
             mast_root,
             mast_node_id,
@@ -157,9 +154,10 @@ impl Spanned for ProcedureContext {
 #[derive(Clone, Debug)]
 pub struct Procedure {
     span: SourceSpan,
-    path: QualifiedProcedureName,
+    path: Arc<Path>,
     signature: Option<Arc<FunctionType>>,
     visibility: Visibility,
+    is_syscall: bool,
     num_locals: u32,
     /// The MAST root of the procedure.
     mast_root: Word,
@@ -171,9 +169,10 @@ pub struct Procedure {
 /// Constructors
 impl Procedure {
     fn new(
-        path: QualifiedProcedureName,
+        path: Arc<Path>,
         visibility: Visibility,
         signature: Option<Arc<FunctionType>>,
+        is_syscall: bool,
         num_locals: u32,
         mast_root: Word,
         body_node_id: MastNodeId,
@@ -183,6 +182,7 @@ impl Procedure {
             path,
             visibility,
             signature,
+            is_syscall,
             num_locals,
             mast_root,
             body_node_id,
@@ -198,15 +198,15 @@ impl Procedure {
 // ------------------------------------------------------------------------------------------------
 /// Public accessors
 impl Procedure {
-    /// Returns a reference to the name of this procedure
-    #[allow(unused)]
-    pub fn name(&self) -> &ProcedureName {
-        &self.path.name
+    /// Returns a reference to the fully-qualified name of this procedure
+    pub fn path(&self) -> &Arc<Path> {
+        &self.path
     }
 
-    /// Returns a reference to the fully-qualified name of this procedure
-    pub fn fully_qualified_name(&self) -> &QualifiedProcedureName {
-        &self.path
+    /// Returns true if this procedure is a syscallable procedure
+    #[inline(always)]
+    pub const fn is_syscall(&self) -> bool {
+        self.is_syscall
     }
 
     /// Returns the visibility of this procedure as expressed in the original source code
@@ -215,8 +215,8 @@ impl Procedure {
     }
 
     /// Returns a reference to the fully-qualified module path of this procedure
-    pub fn path(&self) -> &LibraryPath {
-        &self.path.module
+    pub fn module(&self) -> &Path {
+        self.path.parent().unwrap()
     }
 
     /// Returns a reference to the type signature of this procedure

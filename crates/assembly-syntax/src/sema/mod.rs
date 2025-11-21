@@ -18,7 +18,7 @@ pub use self::{
     context::AnalysisContext,
     errors::{SemanticAnalysisError, SyntaxError},
 };
-use crate::{LibraryPath, ast::*, parser::WordValue};
+use crate::{ast::*, parser::WordValue};
 
 /// Constructs and validates a [Module], given the forms constituting the module body.
 ///
@@ -33,7 +33,7 @@ use crate::{LibraryPath, ast::*, parser::WordValue};
 pub fn analyze(
     source: Arc<SourceFile>,
     kind: ModuleKind,
-    path: LibraryPath,
+    path: &Path,
     forms: Vec<Form>,
     warnings_as_errors: bool,
 ) -> Result<Box<Module>, SyntaxError> {
@@ -68,6 +68,7 @@ pub fn analyze(
                     analyzer.define_constant(Constant {
                         span: *span,
                         docs: None,
+                        visibility: ty.visibility(),
                         name: name.clone(),
                         value: discriminant.clone(),
                     })?;
@@ -79,29 +80,25 @@ pub fn analyze(
             Form::Constant(constant) => {
                 analyzer.define_constant(constant.with_docs(docs.take()))?;
             },
-            Form::Import(import) => {
-                if let Some(docs) = docs.take() {
-                    analyzer.error(SemanticAnalysisError::ImportDocstring { span: docs.span() });
-                }
-                define_import(import, &mut module, &mut analyzer)?;
-            },
-            Form::Procedure(export @ Export::Alias(_)) => match kind {
+            Form::Alias(item) if item.visibility().is_public() => match kind {
                 ModuleKind::Kernel if module.is_kernel() => {
                     docs.take();
-                    analyzer
-                        .error(SemanticAnalysisError::ReexportFromKernel { span: export.span() });
+                    analyzer.error(SemanticAnalysisError::ReexportFromKernel { span: item.span() });
                 },
                 ModuleKind::Executable => {
                     docs.take();
-                    analyzer.error(SemanticAnalysisError::UnexpectedExport { span: export.span() });
+                    analyzer.error(SemanticAnalysisError::UnexpectedExport { span: item.span() });
                 },
                 _ => {
-                    define_procedure(export.with_docs(docs.take()), &mut module, &mut analyzer)?;
+                    define_alias(item.with_docs(docs.take()), &mut module, &mut analyzer)?;
                 },
+            },
+            Form::Alias(item) => {
+                define_alias(item.with_docs(docs.take()), &mut module, &mut analyzer)?
             },
             Form::Procedure(export) => match kind {
                 ModuleKind::Executable
-                    if export.visibility().is_exported() && !export.is_main() =>
+                    if export.visibility().is_public() && !export.is_entrypoint() =>
                 {
                     docs.take();
                     analyzer.error(SemanticAnalysisError::UnexpectedExport { span: export.span() });
@@ -115,7 +112,7 @@ pub fn analyze(
                 let procedure =
                     Procedure::new(body.span(), Visibility::Public, ProcedureName::main(), 0, body)
                         .with_docs(docs);
-                define_procedure(Export::Procedure(procedure), &mut module, &mut analyzer)?;
+                define_procedure(procedure, &mut module, &mut analyzer)?;
             },
             Form::Begin(body) => {
                 docs.take();
@@ -151,11 +148,11 @@ pub fn analyze(
 
     analyzer.has_failed()?;
 
-    // Run procedure checks
-    visit_procedures(&mut module, &mut analyzer)?;
+    // Run item checks
+    visit_items(&mut module, &mut analyzer)?;
 
     // Check unused imports
-    for import in module.imports() {
+    for import in module.aliases() {
         if !import.is_used() {
             analyzer.error(SemanticAnalysisError::UnusedImport { span: import.span() });
         }
@@ -164,25 +161,21 @@ pub fn analyze(
     analyzer.into_result().map(move |_| module)
 }
 
-/// Visit all of the procedures of the current analysis context,
-/// and apply various transformation and analysis passes.
+/// Visit all of the items of the current analysis context, and apply various transformation and
+/// analysis passes.
 ///
-/// When this function returns, all local analysis is complete,
-/// and all that remains is construction of a module graph and
-/// global program analysis to perform any remaining transformations.
-fn visit_procedures(
-    module: &mut Module,
-    analyzer: &mut AnalysisContext,
-) -> Result<(), SyntaxError> {
+/// When this function returns, all local analysis is complete, and all that remains is construction
+/// of a module graph and global program analysis to perform any remaining transformations.
+fn visit_items(module: &mut Module, analyzer: &mut AnalysisContext) -> Result<(), SyntaxError> {
     let is_kernel = module.is_kernel();
-    let locals = BTreeSet::from_iter(module.procedures().map(|p| p.name().clone()));
-    let mut procedures = VecDeque::from(core::mem::take(&mut module.procedures));
-    while let Some(procedure) = procedures.pop_front() {
-        match procedure {
+    let locals = BTreeSet::from_iter(module.items().map(|p| p.name().clone()));
+    let mut items = VecDeque::from(core::mem::take(&mut module.items));
+    while let Some(item) = items.pop_front() {
+        match item {
             Export::Procedure(mut procedure) => {
                 // Rewrite visibility for exported kernel procedures
-                if is_kernel && matches!(procedure.visibility(), Visibility::Public) {
-                    procedure.set_visibility(Visibility::Syscall);
+                if is_kernel && procedure.visibility().is_public() {
+                    procedure.set_syscall(true);
                 }
 
                 // Evaluate all named immediates to their concrete values
@@ -202,26 +195,22 @@ fn visit_procedures(
                         analyzer,
                         module,
                         &locals,
-                        procedure.name().clone(),
+                        Some(procedure.name().clone()),
                     );
                     let _ = visitor.visit_mut_procedure(&mut procedure);
                 }
-                module.procedures.push(Export::Procedure(procedure));
+                module.items.push(Export::Procedure(procedure));
             },
-            Export::Alias(alias) => {
-                // Resolve the underlying import, and mark it used if successful
-                if let AliasTarget::ProcedurePath(target) = alias.target() {
-                    let imported_module =
-                        target.module.namespace().to_ident().with_span(target.span);
-                    if let Some(import) = module.resolve_import_mut(&imported_module) {
-                        // Mark the backing import as used
-                        import.uses += 1;
-                    } else {
-                        // Missing import
-                        analyzer.error(SemanticAnalysisError::MissingImport { span: alias.span() });
-                    }
+            Export::Alias(mut alias) => {
+                log::debug!(target: "verify-invoke", "visiting alias {}", alias.target());
+                {
+                    let mut visitor = VerifyInvokeTargets::new(analyzer, module, &locals, None);
+                    let _ = visitor.visit_mut_alias(&mut alias);
                 }
-                module.procedures.push(Export::Alias(alias));
+                module.items.push(Export::Alias(alias));
+            },
+            item @ (Export::Constant(_) | Export::Type(_)) => {
+                module.items.push(item);
             },
         }
     }
@@ -229,14 +218,14 @@ fn visit_procedures(
     Ok(())
 }
 
-fn define_import(
-    import: Import,
+fn define_alias(
+    item: Alias,
     module: &mut Module,
     context: &mut AnalysisContext,
 ) -> Result<(), SyntaxError> {
-    if let Err(err) = module.define_import(import) {
+    if let Err(err) = module.define_alias(item) {
         match err {
-            SemanticAnalysisError::ImportConflict { .. } => {
+            SemanticAnalysisError::SymbolConflict { .. } => {
                 // Proceed anyway, to try and capture more errors
                 context.error(err);
             },
@@ -252,12 +241,12 @@ fn define_import(
 }
 
 fn define_procedure(
-    export: Export,
+    procedure: Procedure,
     module: &mut Module,
     context: &mut AnalysisContext,
 ) -> Result<(), SyntaxError> {
-    let name = export.name().clone();
-    if let Err(err) = module.define_procedure(export) {
+    let name = procedure.name().clone();
+    if let Err(err) = module.define_procedure(procedure) {
         match err {
             SemanticAnalysisError::SymbolConflict { .. } => {
                 // Proceed anyway, to try and capture more errors
@@ -291,6 +280,7 @@ fn add_advice_map_entry(
     };
     let cst = Constant::new(
         entry.span,
+        Visibility::Private,
         entry.name.clone(),
         ConstantExpr::Word(Span::new(entry.span, WordValue(*key))),
     );

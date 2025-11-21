@@ -1,4 +1,4 @@
-use.std::math::secp256k1::base_field
+use std::math::secp256k1::base_field
 
 #! Given a secp256k1 point in projective coordinate system ( i.e. with x, y, z -coordinates
 #! as secp256k1 prime field elements, represented in Montgomery form ), this routine adds
@@ -35,7 +35,8 @@ use.std::math::secp256k1::base_field
 #! Stack at end of execution of routine looks like
 #!
 #!   [x3_addr[0..4], x3_addr[4..8], y3_addr[0..4], y3_addr[4..8], z3_addr[0..4], z3_addr[4..8]]
-export.double.48
+@locals(48)
+pub proc double
   dup.3
   push.0.0.0.0
   movup.4
@@ -333,7 +334,8 @@ end
 #! Stack at end of execution of routine looks like
 #!
 #!   [x3_addr[0..4], x3_addr[4..8], y3_addr[0..4], y3_addr[4..8], z3_addr[0..4], z3_addr[4..8]]
-export.add.64
+@locals(64)
+pub proc add
   dup.6
   dup.8
 
@@ -977,7 +979,8 @@ end
 #!
 #! If base point being multiplied is secp256k1 curve generator point, one should use `gen_point` routine,
 #! which is almost 2x faster !
-export.mul.72
+@locals(72)
+pub proc mul
   # initialize `base`
   push.0.0.0.0
 
@@ -1205,7 +1208,8 @@ end
 #!
 #! Note, this routine is a specialised instantiation of secp256k1 point multiplication, where we know what the base
 #! point is, so we enjoy faster computation ( because all point doublings can be precomputed, saving us 256 point doublings ! ).
-export.gen_mul.80
+@locals(80)
+pub proc gen_mul
   # identity point of group (0, 1, 0) in projective coordinate
   # see https://github.com/itzmeanjan/secp256k1/blob/d23ea7d/point.py#L40-L45
   push.0.0.0.0

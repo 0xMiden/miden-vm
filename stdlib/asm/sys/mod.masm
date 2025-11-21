@@ -9,7 +9,8 @@
 #! Output: Stack with only the original top 16 elements.
 #!
 #! Cycles: 17 + 11 * overflow_words, where `overflow_words` is the number of words needed to drop.
-export.truncate_stack.4
+@locals(4)
+pub proc truncate_stack()
     # save the first word to memory and bring elements to be dropped to the top of the stack
     loc_storew_be.0 dropw movupw.3
     # => [X, B, C, D, ...]
@@ -30,7 +31,7 @@ export.truncate_stack.4
 end
 
 #! Drop 16 values from the stack.
-export.drop_stack_top
+pub proc drop_stack_top()
     dropw dropw dropw dropw
 end
 
@@ -39,7 +40,7 @@ end
 #! Input: `[COMM, TAG, ...]`
 #! Output: Stack without the three helper words `[R1, R0, CAP_NEXT]`.
 #! Cycles: 1 (plus cost of the underlying `log_precompile` instruction).
-export.log_precompile_request
+pub proc log_precompile_request
     padw movdnw.2
     # => [COMM, TAG, PAD, ...]
     log_precompile

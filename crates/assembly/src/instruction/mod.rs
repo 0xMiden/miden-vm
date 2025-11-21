@@ -1,3 +1,5 @@
+use alloc::vec::Vec;
+
 use miden_assembly_syntax::{
     ast::{ImmU16, Instruction},
     debuginfo::{Span, Spanned},
@@ -31,47 +33,54 @@ impl Assembler {
         block_builder: &mut BasicBlockBuilder,
         proc_ctx: &mut ProcedureContext,
     ) -> Result<Option<MastNodeId>, Report> {
-        // if the assembler is in debug mode, start tracking the instruction about to be executed;
-        // this will allow us to map the instruction to the sequence of operations which were
-        // executed as a part of this instruction.
+        // Determine whether this instruction can create a new node
+        let can_create_node = matches!(
+            instruction.inner(),
+            Instruction::Call(_)
+                | Instruction::SysCall(_)
+                | Instruction::DynExec
+                | Instruction::DynCall
+        );
+
+        // Always collect decorators into a single Vec; it will remain empty if not needed.
+        let mut decorators = Vec::new();
+
         if self.in_debug_mode() {
+            // if the assembler is in debug mode, start tracking the instruction about to be
+            // executed; this will allow us to map the instruction to the sequence of
+            // operations which were executed as a part of this instruction.
             block_builder.track_instruction(instruction, proc_ctx)?;
-        }
 
-        let new_node_id = self.compile_instruction_impl(instruction, block_builder, proc_ctx)?;
-
-        if self.in_debug_mode() {
-            // compute and update the cycle count of the instruction which just finished executing
-            let maybe_asm_op_id = block_builder.set_instruction_cycle_count();
-
-            if let Some(node_id) = new_node_id {
-                // New node was created, so we are done building the current block. We then want to
-                // add the assembly operation to the new node - for example call, dyncall, if/else
-                // statements, loops, etc. However, `exec` instructions are compiled away and not
-                // added to the trace, so we should ignore them. Theoretically, we
-                // could probably add them anyways, but it currently breaks the
-                // `VmStateIterator`.
-                if !matches!(instruction.inner(), &Instruction::Exec(_)) {
-                    let asm_op_id = maybe_asm_op_id.expect("no asmop decorator");
-
-                    // set the cycle count to 1
-                    {
-                        let assembly_op = &mut block_builder.mast_forest_builder_mut()[asm_op_id];
-                        if let Decorator::AsmOp(assembly_op) = assembly_op {
-                            assembly_op.set_num_cycles(1);
-                        } else {
-                            panic!("expected AsmOp decorator");
-                        }
-                    }
-
-                    block_builder
-                        .mast_forest_builder_mut()
-                        .append_before_enter(node_id, &[asm_op_id]);
+            // New node is being created, so we are done building the current block. We then want to
+            // add the assembly operation to the new node - for example call, dyncall, if/else
+            // statements, loops, etc. However, `exec` instructions are compiled away and not
+            // added to the trace, so we should ignore them. Theoretically, we
+            // could probably add them anyways, but it currently breaks the
+            // `VmStateIterator`.
+            if can_create_node
+                && !matches!(instruction.inner(), Instruction::Exec(_))
+                && let Some(asm_op_id) = block_builder.set_instruction_cycle_count()
+            {
+                // Set the cycle count for this assembly op to 1
+                let assembly_op = &mut block_builder.mast_forest_builder_mut()[asm_op_id];
+                match assembly_op {
+                    Decorator::AsmOp(op) => op.set_num_cycles(1),
+                    _ => panic!("expected AsmOp decorator"),
                 }
+                decorators.push(asm_op_id);
             }
         }
 
-        Ok(new_node_id)
+        // Compile the instruction, passing the decorators (which may be empty).
+        let opt_new_node_id =
+            self.compile_instruction_impl(instruction, block_builder, proc_ctx, decorators)?;
+
+        // If we’re in debug mode but didn’t create a node, set the cycle count after compilation.
+        if self.in_debug_mode() && !can_create_node {
+            let _ = block_builder.set_instruction_cycle_count();
+        }
+
+        Ok(opt_new_node_id)
     }
 
     fn compile_instruction_impl(
@@ -79,6 +88,7 @@ impl Assembler {
         instruction: &Span<Instruction>,
         block_builder: &mut BasicBlockBuilder,
         proc_ctx: &mut ProcedureContext,
+        before_enter: Vec<miden_core::mast::DecoratorId>,
     ) -> Result<Option<MastNodeId>, Report> {
         use Operation::*;
 
@@ -533,6 +543,7 @@ impl Assembler {
                         callee,
                         proc_ctx.id(),
                         block_builder.mast_forest_builder_mut(),
+                        before_enter,
                     )
                     .map(Into::into);
             },
@@ -543,6 +554,7 @@ impl Assembler {
                         callee,
                         proc_ctx.id(),
                         block_builder.mast_forest_builder_mut(),
+                        before_enter,
                     )
                     .map(Into::into);
             },
@@ -553,11 +565,16 @@ impl Assembler {
                         callee,
                         proc_ctx.id(),
                         block_builder.mast_forest_builder_mut(),
+                        before_enter,
                     )
                     .map(Into::into);
             },
-            Instruction::DynExec => return self.dynexec(block_builder.mast_forest_builder_mut()),
-            Instruction::DynCall => return self.dyncall(block_builder.mast_forest_builder_mut()),
+            Instruction::DynExec => {
+                return self.dynexec(block_builder.mast_forest_builder_mut(), before_enter);
+            },
+            Instruction::DynCall => {
+                return self.dyncall(block_builder.mast_forest_builder_mut(), before_enter);
+            },
             Instruction::ProcRef(callee) => self.procref(callee, proc_ctx.id(), block_builder)?,
 
             // ----- debug decorators -------------------------------------------------------------
