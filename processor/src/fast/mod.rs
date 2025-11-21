@@ -21,6 +21,7 @@ use crate::{
 pub mod execution_tracer;
 mod memory;
 mod operation;
+pub use operation::eval_circuit_fast_;
 pub mod trace_state;
 mod tracer;
 pub use tracer::{NoopTracer, Tracer};

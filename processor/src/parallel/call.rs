@@ -1,7 +1,7 @@
 use core::ops::ControlFlow;
 
 use miden_core::{
-    Felt, Word,
+    Word,
     mast::{CallNode, MastNodeExt},
 };
 
@@ -13,7 +13,6 @@ impl CoreTraceFragmentGenerator {
         &mut self,
         call_node: &CallNode,
         program: &miden_core::mast::MastForest,
-        parent_addr: Felt,
     ) -> ControlFlow<()> {
         // For CALL/SYSCALL operations, the hasher state in start operations contains the callee
         // hash in the first half, and zeros in the second half (since CALL only has one
@@ -31,7 +30,7 @@ impl CoreTraceFragmentGenerator {
                 miden_core::Operation::Call.op_code()
             },
             hasher_state: (callee_hash, zero_hash),
-            addr: parent_addr,
+            addr: self.context.state.decoder.parent_addr,
         };
 
         self.add_control_flow_trace_row(config)

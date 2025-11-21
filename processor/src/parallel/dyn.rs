@@ -7,15 +7,11 @@ use crate::decoder::block_stack::ExecutionContextInfo;
 
 impl CoreTraceFragmentGenerator {
     /// Adds a trace row for the start of a DYN operation.
-    pub fn add_dyn_start_trace_row(
-        &mut self,
-        parent_addr: Felt,
-        callee_hash: Word,
-    ) -> ControlFlow<()> {
+    pub fn add_dyn_start_trace_row(&mut self, callee_hash: Word) -> ControlFlow<()> {
         let config = OperationTraceConfig {
             opcode: Operation::Dyn.op_code(),
             hasher_state: (callee_hash, Word::default()),
-            addr: parent_addr,
+            addr: self.context.state.decoder.parent_addr,
         };
 
         self.add_control_flow_trace_row(config)
@@ -30,7 +26,6 @@ impl CoreTraceFragmentGenerator {
     /// values).
     pub fn add_dyncall_start_trace_row(
         &mut self,
-        parent_addr: Felt,
         callee_hash: Word,
         ctx_info: ExecutionContextInfo,
     ) -> ControlFlow<()> {
@@ -45,7 +40,7 @@ impl CoreTraceFragmentGenerator {
         let config = OperationTraceConfig {
             opcode: Operation::Dyncall.op_code(),
             hasher_state: (callee_hash, second_hasher_state),
-            addr: parent_addr,
+            addr: self.context.state.decoder.parent_addr,
         };
 
         self.add_control_flow_trace_row(config)
