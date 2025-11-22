@@ -15,7 +15,7 @@ use miden_assembly::{
 use miden_stdlib::StdLibrary;
 use miden_vm::{ExecutionProof, Program, StackOutputs, Word, utils::SliceReader};
 use serde::{Deserialize, Serialize};
-use tracing::instrument;
+use tracing::{instrument, Span};
 
 // HELPERS
 // ================================================================================================
@@ -208,7 +208,7 @@ impl ProofFile {
     #[instrument(name = "write_data_to_proof_file",
                  fields(
                     path = %proof_path.clone().unwrap_or(program_path.with_extension("proof")).display(),
-                    size = format!("{} KB", proof.to_bytes().len() / 1024)), skip_all)]
+                    size = tracing::field::Empty), skip_all)]
     pub fn write(
         proof: ExecutionProof,
         proof_path: &Option<PathBuf>,
@@ -226,6 +226,7 @@ impl ProofFile {
             .map_err(|err| format!("Failed to create proof file `{}` - {}", path.display(), err))?;
 
         let proof_bytes = proof.to_bytes();
+        Span::current().record("size", &format_args!("{} KB", proof_bytes.len() / 1024));
 
         // write proof bytes to file
         file.write_all(&proof_bytes)
