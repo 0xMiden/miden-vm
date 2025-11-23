@@ -75,7 +75,7 @@ fn sha256_2_to_1_hash() {
     use std::crypto::hashes::sha256
 
     begin
-        exec.sha256::hash_2to1
+        exec.sha256::merge
     end";
 
     let input0 = rand_array::<Felt, 4>().into_bytes();
@@ -110,7 +110,7 @@ fn sha256_1_to_1_hash() {
     use std::crypto::hashes::sha256
 
     begin
-        exec.sha256::hash_1to1
+        exec.sha256::hash
     end";
 
     let ibytes = rand_array::<Felt, 4>().into_bytes();

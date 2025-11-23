@@ -194,7 +194,7 @@ fn test_keccak_hash_1to1() {
                 {stack_stores_source}
                 # => [INPUT_LO, INPUT_HI]
 
-                exec.keccak256::hash_1to1
+                exec.keccak256::hash
                 # => [DIGEST_U32[8]]
 
                 exec.sys::truncate_stack
@@ -225,7 +225,7 @@ fn test_keccak_hash_2to1() {
                 {stack_stores_source}
                 # => [INPUT_L_U32[8], INPUT_R_U32[8]]
 
-                exec.keccak256::hash_2to1
+                exec.keccak256::merge
                 # => [DIGEST_U32[8]]
 
                 exec.sys::truncate_stack

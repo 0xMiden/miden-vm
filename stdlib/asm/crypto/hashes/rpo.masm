@@ -381,3 +381,55 @@ pub proc hash_memory
     exec.hash_memory_with_state
     # => [HASH]
 end
+
+#! Computes RPO hash of a single 256-bit input (1 word = 4 field elements).
+#!
+#! Input: [A, ...]
+#! Output: [B, ...]
+#!
+#! Where:
+#! - A = [a_0, a_1, a_2, a_3] represents 4 field elements (1 word)
+#! - B = [b_0, b_1, b_2, b_3] = RPO256(A)
+pub proc hash
+    hash
+end
+
+#! Merges two 256-bit digests (2 words = 8 field elements) via RPO hash.
+#!
+#! Input: [B, A, ...]
+#! Output: [C, ...]
+#!
+#! Where:
+#! - A = [a_0, a_1, a_2, a_3] represents first digest (1 word)
+#! - B = [b_0, b_1, b_2, b_3] represents second digest (1 word)
+#! - C = [c_0, c_1, c_2, c_3] = RPO256(A || B)
+pub proc merge
+    hmerge
+end
+
+#! Deprecated: Use `hash` instead. This is a backward compatibility wrapper.
+#! Computes RPO hash of a single 256-bit input (8 field elements).
+#!
+#! Input: [INPUT[8], ...]
+#! Output: [DIGEST[4], ...]
+#!
+#! Where:
+#! - INPUT[8] = [e_0, ..., e_7] represents 8 field elements
+#! - DIGEST[4] = [d_0, d_1, d_2, d_3] = RPO256(INPUT[8])
+pub proc hash_1to1
+    exec.hash
+end
+
+#! Deprecated: Use `merge` instead. This is a backward compatibility wrapper.
+#! Merges two 256-bit digests (8 field elements) via RPO hash.
+#!
+#! Input: [INPUT_L[4], INPUT_R[4], ...]
+#! Output: [DIGEST[4], ...]
+#!
+#! Where:
+#! - INPUT_L[4] = [l_0, l_1, l_2, l_3] represents left digest
+#! - INPUT_R[4] = [r_0, r_1, r_2, r_3] represents right digest
+#! - DIGEST[4] = [d_0, d_1, d_2, d_3] = RPO256(INPUT_L[4] || INPUT_R[4])
+pub proc hash_2to1
+    exec.merge
+end

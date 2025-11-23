@@ -39,16 +39,9 @@ pub proc hash_memory
     # => [DIGEST_U32[8], ...]
 end
 
-#! Computes Keccak256 hash of a single 256-bit input.
-#!
-#! Input: [INPUT_U32[8], ...]
-#! Output: [DIGEST_U32[8], ...]
-#!
-#! Where
-#! - DIGEST_U32[8] = [d_0, ..., d_7] = Keccak256(INPUT_U8[32])
-#! - INPUT_U32[8] = [i_0, ..., i_7] = [INPUT_LO, INPUT_HI] ~ INPUT_U8[32] with u32 packing
+#! Internal procedure for computing Keccak256 hash of a single 256-bit input.
 @locals(8)
-pub proc hash_1to1
+proc hash_internal
     # Store [INPUT_LO, INPUT_HI] in local memory
     exec.word::reverse loc_storew_be.0 dropw
     exec.word::reverse loc_storew_be.4 dropw
@@ -57,6 +50,33 @@ pub proc hash_1to1
     # => [ptr, 32]
 
     exec.hash_memory
+end
+
+#! Internal procedure for merging two digests via Keccak256 hash.
+@locals(16)
+proc merge_internal
+    # Store [INPUT_L_LO, INPUT_L_HI, INPUT_R_LO, INPUT_R_HI] in local memory
+    exec.word::reverse loc_storew_be.0 dropw
+    exec.word::reverse loc_storew_be.4 dropw
+    exec.word::reverse loc_storew_be.8 dropw
+    exec.word::reverse loc_storew_be.12 dropw
+
+    push.64 locaddr.0
+    # => [ptr, 64]
+
+    exec.hash_memory
+end
+
+#! Computes Keccak256 hash of a single 256-bit input.
+#!
+#! Input: [INPUT_U32[8], ...]
+#! Output: [DIGEST_U32[8], ...]
+#!
+#! Where
+#! - DIGEST_U32[8] = [d_0, ..., d_7] = Keccak256(INPUT_U8[32])
+#! - INPUT_U32[8] = [i_0, ..., i_7] = [INPUT_LO, INPUT_HI] ~ INPUT_U8[32] with u32 packing
+pub proc hash
+    exec.hash_internal
 end
 
 #! Merges two 256-bit digests via Keccak256 hash.
@@ -68,18 +88,35 @@ end
 #! - INPUT_L_U32[8] = [l_0, ..., l_7] = [INPUT_L_LO, INPUT_L_HI] ~ INPUT_L_U8[32]
 #! - INPUT_R_U32[8] = [r_0, ..., r_7] = [INPUT_R_LO, INPUT_R_HI] ~ INPUT_R_U8[32]
 #! - DIGEST_U32[8] = [d_0, ..., d_7] = Keccak256(INPUT_L_U8[32] || INPUT_R_U8[32])
-@locals(16)
+pub proc merge
+    exec.merge_internal
+end
+
+#! Deprecated: Use `hash` instead. This is a backward compatibility wrapper.
+#! Computes Keccak256 hash of a single 256-bit input.
+#!
+#! Input: [INPUT_U32[8], ...]
+#! Output: [DIGEST_U32[8], ...]
+#!
+#! Where
+#! - DIGEST_U32[8] = [d_0, ..., d_7] = Keccak256(INPUT_U8[32])
+#! - INPUT_U32[8] = [i_0, ..., i_7] = [INPUT_LO, INPUT_HI] ~ INPUT_U8[32] with u32 packing
+pub proc hash_1to1
+    exec.hash
+end
+
+#! Deprecated: Use `merge` instead. This is a backward compatibility wrapper.
+#! Merges two 256-bit digests via Keccak256 hash.
+#!
+#! Input: [INPUT_L_U32[8], INPUT_R_U32[8], ...]
+#! Output: [DIGEST_U32[8], ...]
+#!
+#! Where
+#! - INPUT_L_U32[8] = [l_0, ..., l_7] = [INPUT_L_LO, INPUT_L_HI] ~ INPUT_L_U8[32]
+#! - INPUT_R_U32[8] = [r_0, ..., r_7] = [INPUT_R_LO, INPUT_R_HI] ~ INPUT_R_U8[32]
+#! - DIGEST_U32[8] = [d_0, ..., d_7] = Keccak256(INPUT_L_U8[32] || INPUT_R_U8[32])
 pub proc hash_2to1
-    # Store [INPUT_L_LO, INPUT_L_HI, INPUT_R_LO, INPUT_R_HI] in local memory
-    exec.word::reverse loc_storew_be.0 dropw
-    exec.word::reverse loc_storew_be.4 dropw
-    exec.word::reverse loc_storew_be.8 dropw
-    exec.word::reverse loc_storew_be.12 dropw
-
-    push.64 locaddr.0
-    # => [ptr, 64]
-
-    exec.hash_memory
+    exec.merge
 end
 
 # INTERNAL PROCEDURES
