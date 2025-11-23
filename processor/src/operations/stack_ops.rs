@@ -35,102 +35,71 @@ impl Process {
         Ok(())
     }
 
-    /// Swaps stack elements 0, 1, 2, and 3 with elements 4, 5, 6, and 7.
-    pub(super) fn op_swapw(&mut self) -> Result<(), ExecutionError> {
+    /// Swaps stack elements 0, 1, 2, and 3 with elements at offset (n * 4).
+    ///
+    /// For n=1: swaps with elements 4, 5, 6, 7 (SWAPW)
+    /// For n=2: swaps with elements 8, 9, 10, 11 (SWAPW2)
+    /// For n=3: swaps with elements 12, 13, 14, 15 (SWAPW3)
+    ///
+    /// Elements between positions 4 and (n * 4) are preserved in their original positions.
+    fn op_swapw_nth(&mut self, n: usize) -> Result<(), ExecutionError> {
+        const WORD_SIZE: usize = 4;
+        let offset = n * WORD_SIZE;
+
+        // Read the first word (elements 0-3)
         let a0 = self.stack.get(0);
         let a1 = self.stack.get(1);
         let a2 = self.stack.get(2);
         let a3 = self.stack.get(3);
-        let b0 = self.stack.get(4);
-        let b1 = self.stack.get(5);
-        let b2 = self.stack.get(6);
-        let b3 = self.stack.get(7);
+
+        // Read the word at offset (elements offset to offset+3)
+        let b0 = self.stack.get(offset);
+        let b1 = self.stack.get(offset + 1);
+        let b2 = self.stack.get(offset + 2);
+        let b3 = self.stack.get(offset + 3);
+
+        // Swap the first word with the word at offset
 
         self.stack.set(0, b0);
         self.stack.set(1, b1);
         self.stack.set(2, b2);
         self.stack.set(3, b3);
-        self.stack.set(4, a0);
-        self.stack.set(5, a1);
-        self.stack.set(6, a2);
-        self.stack.set(7, a3);
+        self.stack.set(offset, a0);
+        self.stack.set(offset + 1, a1);
+        self.stack.set(offset + 2, a2);
+        self.stack.set(offset + 3, a3);
 
-        self.stack.copy_state(8);
+        // For n > 1, we need to preserve intermediate elements between positions 4 and offset.
+        // These elements are not modified by the swap, but we need to explicitly set them
+        // for the next clock cycle (matching the original implementation).
+        if n > 1 {
+            // Read and preserve intermediate elements from position 4 to offset (exclusive)
+            for i in WORD_SIZE..offset {
+                let value = self.stack.get(i);
+                self.stack.set(i, value);
+            }
+        }
+
+        // Copy state from the position after the swapped region
+        let copy_from = offset + WORD_SIZE;
+        self.stack.copy_state(copy_from);
+
         Ok(())
+    }
+
+    /// Swaps stack elements 0, 1, 2, and 3 with elements 4, 5, 6, and 7.
+    pub(super) fn op_swapw(&mut self) -> Result<(), ExecutionError> {
+        self.op_swapw_nth(1)
     }
 
     /// Swaps stack elements 0, 1, 2, and 3 with elements 8, 9, 10, and 11.
     pub(super) fn op_swapw2(&mut self) -> Result<(), ExecutionError> {
-        let a0 = self.stack.get(0);
-        let a1 = self.stack.get(1);
-        let a2 = self.stack.get(2);
-        let a3 = self.stack.get(3);
-        let b0 = self.stack.get(4);
-        let b1 = self.stack.get(5);
-        let b2 = self.stack.get(6);
-        let b3 = self.stack.get(7);
-        let c0 = self.stack.get(8);
-        let c1 = self.stack.get(9);
-        let c2 = self.stack.get(10);
-        let c3 = self.stack.get(11);
-
-        self.stack.set(0, c0);
-        self.stack.set(1, c1);
-        self.stack.set(2, c2);
-        self.stack.set(3, c3);
-        self.stack.set(4, b0);
-        self.stack.set(5, b1);
-        self.stack.set(6, b2);
-        self.stack.set(7, b3);
-        self.stack.set(8, a0);
-        self.stack.set(9, a1);
-        self.stack.set(10, a2);
-        self.stack.set(11, a3);
-
-        self.stack.copy_state(12);
-        Ok(())
+        self.op_swapw_nth(2)
     }
 
     /// Swaps stack elements 0, 1, 2, and 3, with elements 12, 13, 14, and 15.
     pub(super) fn op_swapw3(&mut self) -> Result<(), ExecutionError> {
-        let a0 = self.stack.get(0);
-        let a1 = self.stack.get(1);
-        let a2 = self.stack.get(2);
-        let a3 = self.stack.get(3);
-        let b0 = self.stack.get(4);
-        let b1 = self.stack.get(5);
-        let b2 = self.stack.get(6);
-        let b3 = self.stack.get(7);
-        let c0 = self.stack.get(8);
-        let c1 = self.stack.get(9);
-        let c2 = self.stack.get(10);
-        let c3 = self.stack.get(11);
-        let d0 = self.stack.get(12);
-        let d1 = self.stack.get(13);
-        let d2 = self.stack.get(14);
-        let d3 = self.stack.get(15);
-
-        self.stack.set(0, d0);
-        self.stack.set(1, d1);
-        self.stack.set(2, d2);
-        self.stack.set(3, d3);
-        self.stack.set(4, b0);
-        self.stack.set(5, b1);
-        self.stack.set(6, b2);
-        self.stack.set(7, b3);
-        self.stack.set(8, c0);
-        self.stack.set(9, c1);
-        self.stack.set(10, c2);
-        self.stack.set(11, c3);
-        self.stack.set(12, a0);
-        self.stack.set(13, a1);
-        self.stack.set(14, a2);
-        self.stack.set(15, a3);
-
-        // this is needed to ensure stack helper registers are copied over correctly
-        self.stack.copy_state(16);
-
-        Ok(())
+        self.op_swapw_nth(3)
     }
 
     /// Swaps the top two words pair wise.
