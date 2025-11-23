@@ -40,6 +40,7 @@
 - [BREAKING] Added `kind` field to `Package` struct to indicate package type (Executable, AccountComponent, NoteScript, TxScript, AuthComponent) ([#2403](https://github.com/0xMiden/miden-vm/pull/2403)).
 - [BREAKING] Make the Assembler work in debug mode, remove optionality ([#2396](https://github.com/0xMiden/miden-vm/pull/2396)).
 - [BREAKING] Normalize naming of `verify` procedures of ECDSA precompile ([#2413](https://github.com/0xMiden/miden-vm/issues/2413)).
+- refactor Blake3_256 fingerprints to allocate less ([#2375](https://github.com/0xMiden/miden-vm/pull/2375)).
 
 ## 0.19.1 (2025-11-6)
 
