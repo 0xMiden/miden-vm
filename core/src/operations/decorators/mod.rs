@@ -42,18 +42,22 @@ impl Decorator {
     pub fn fingerprint(&self) -> DecoratorFingerprint {
         match self {
             Self::AsmOp(asm_op) => {
-                let mut bytes_to_hash = Vec::new();
+                let bytes_to_hash_suffix = [
+                    asm_op.context_name().as_bytes(),
+                    asm_op.op().as_bytes(),
+                    &[asm_op.num_cycles()],
+                    &[asm_op.should_break() as u8],
+                ];
                 if let Some(location) = asm_op.location() {
-                    bytes_to_hash.extend(location.uri.as_str().as_bytes());
-                    bytes_to_hash.extend(location.start.to_u32().to_le_bytes());
-                    bytes_to_hash.extend(location.end.to_u32().to_le_bytes());
+                    let bytes_to_hash = [
+                        location.uri.as_str().as_bytes(),
+                        &location.start.to_u32().to_le_bytes()[..],
+                        &location.end.to_u32().to_le_bytes()[..],
+                    ];
+                    Blake3_256::hash_iter(bytes_to_hash.into_iter().chain(bytes_to_hash_suffix))
+                } else {
+                    Blake3_256::hash_iter(bytes_to_hash_suffix.into_iter())
                 }
-                bytes_to_hash.extend(asm_op.context_name().as_bytes());
-                bytes_to_hash.extend(asm_op.op().as_bytes());
-                bytes_to_hash.push(asm_op.num_cycles());
-                bytes_to_hash.push(asm_op.should_break() as u8);
-
-                Blake3_256::hash(&bytes_to_hash)
             },
             Self::Debug(debug) => Blake3_256::hash(debug.to_string().as_bytes()),
             Self::Trace(trace) => Blake3_256::hash(&trace.to_le_bytes()),
