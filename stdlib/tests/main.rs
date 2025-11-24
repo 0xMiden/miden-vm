@@ -32,5 +32,7 @@ mod helpers;
 mod mast_forest_merge;
 mod math;
 mod mem;
+mod pcs;
+mod stark;
 mod sys;
 mod word;

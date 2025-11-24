@@ -27,6 +27,7 @@ std = [
 serde = [
     "dep:serde",
     "dep:serde-untagged",
+    "miden-core/serde",
     "miden-debug-types/serde",
     "midenc-hir-type/serde",
     "semver/serde",

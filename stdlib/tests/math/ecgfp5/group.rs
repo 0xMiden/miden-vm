@@ -214,7 +214,7 @@ impl Add for ECExt5 {
 #[test_case(13777379982711219130, 14715168412651470168, 17942199593791635585, 6188824164976547520, 15461469634034461986, false; "[13] should not validate")]
 fn test_ec_ext5_point_validate(a0: u64, a1: u64, a2: u64, a3: u64, a4: u64, should_validate: bool) {
     let source = "
-    use.std::math::ecgfp5::group
+    use std::math::ecgfp5::group
 
     begin
         exec.group::validate
@@ -250,8 +250,8 @@ fn test_ec_ext5_point_validate(a0: u64, a1: u64, a2: u64, a3: u64, a4: u64, shou
 #[test_case(13777379982711219130, 14715168412651470168, 17942199593791635585, 6188824164976547520, 15461469634034461986, false; "[13] should not decode")]
 fn test_ec_ext5_point_decode(a0: u64, a1: u64, a2: u64, a3: u64, a4: u64, should_decode: bool) {
     let source = "
-    use.std::math::ecgfp5::group
-    use.std::sys
+    use std::math::ecgfp5::group
+    use std::sys
 
     begin
         exec.group::decode
@@ -294,7 +294,7 @@ fn test_ec_ext5_point_decode(a0: u64, a1: u64, a2: u64, a3: u64, a4: u64, should
 #[test_case(9420857400785992333, 4695934009314206363, 14471922162341187302, 13395190104221781928, 16359223219913018041; "[7] should decode")]
 fn test_ec_ext5_point_encode(a0: u64, a1: u64, a2: u64, a3: u64, a4: u64) {
     let source = "
-    use.std::math::ecgfp5::group
+    use std::math::ecgfp5::group
 
     begin
         exec.group::encode
@@ -398,8 +398,8 @@ fn test_ec_ext5_point_addition(
 
     let source = format!(
         "
-    use.std::math::ecgfp5::group
-    use.std::sys
+    use std::math::ecgfp5::group
+    use std::sys
 
     begin
         {inputs}
@@ -443,8 +443,8 @@ fn test_ec_ext5_point_doubling(
     b4: u64,
 ) {
     let source = "
-    use.std::math::ecgfp5::group
-    use.std::sys
+    use std::math::ecgfp5::group
+    use std::sys
 
     begin
         exec.group::double
@@ -558,8 +558,8 @@ fn test_ec_ext5_point_multiplication() {
 
     let source = format!(
         "
-    use.std::math::ecgfp5::group
-    use.std::sys
+    use std::math::ecgfp5::group
+    use std::sys
 
     begin
         {inputs}
@@ -590,8 +590,8 @@ fn test_ec_ext5_point_multiplication() {
 #[test]
 fn test_ec_ext5_gen_multiplication() {
     let source = "
-    use.std::math::ecgfp5::group
-    use.std::sys
+    use std::math::ecgfp5::group
+    use std::sys
 
     begin
         exec.group::gen_mul

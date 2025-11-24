@@ -10,6 +10,8 @@ pub use miden_core::{Felt, FieldElement, StarkField, Word, prettier, utils::Disp
 pub use miden_debug_types as debuginfo;
 pub use miden_utils_diagnostics::{self as diagnostics, Report};
 
+#[cfg(feature = "arbitrary")]
+pub mod arbitrary;
 pub mod ast;
 pub mod library;
 mod parse;
@@ -19,10 +21,8 @@ pub mod testing;
 
 #[doc(hidden)]
 pub use self::{
-    library::{
-        KernelLibrary, Library, LibraryError, LibraryNamespace, LibraryPath, LibraryPathComponent,
-        PathError, Version, VersionError,
-    },
+    ast::{Path, PathBuf, PathComponent, PathError},
+    library::{KernelLibrary, Library, LibraryError, Version, VersionError},
     parser::{ModuleParser, ParsingError},
 };
 pub use self::{

@@ -1,7 +1,7 @@
-use.std::crypto::hashes::keccak256
-use.std::crypto::hashes::rpo
-use.std::sys
-use.std::word
+use std::crypto::hashes::keccak256
+use std::crypto::hashes::rpo
+use std::sys
+use std::word
 
 # ENCODING CONVENTIONS
 # ================================================================================================
@@ -15,11 +15,11 @@ use.std::word
 # Constants
 # ================================================================================================
 
-const.ECDSA_VERIFY_EVENT=event("stdlib::crypto::dsa::ecdsa::verify")
+const ECDSA_VERIFY_EVENT = event("stdlib::crypto::dsa::ecdsa::verify")
 
-const.PK_LEN_FELTS=9     # 33.div_ceil(4)
-const.DIGEST_LEN_FELTS=8 # 32.div_ceil(4)
-const.SIG_LEN_FELTS=17   # 66.div_ceil(4)
+const PK_LEN_FELTS = 9     # 33.div_ceil(4)
+const DIGEST_LEN_FELTS = 8 # 32.div_ceil(4)
+const SIG_LEN_FELTS = 17   # 66.div_ceil(4)
 
 # PROCEDURES
 # ================================================================================================
@@ -46,7 +46,8 @@ const.SIG_LEN_FELTS=17   # 66.div_ceil(4)
 #!
 #! The procedure traps if the public key in the advice stack does not hash to `PK_COMM`;
 #! otherwise it returns cleanly after emitting the deferred verification request.
-export.verify_ecdsa_k256_keccak.48
+@locals(48)
+pub proc verify_ecdsa_k256_keccak
     # Load the compressed public key (9 felts) into local memory at locaddr.[0..9]
     adv_push.4 loc_storew_be.0
     adv_loadw  loc_storew_be.4 dropw
@@ -106,7 +107,7 @@ end
 #!
 #! All data must be stored in memory as packed u32 values (little-endian), with unused bytes
 #! in the final u32 set to zero.
-export.verify
+pub proc verify
     exec.verify_impl
     # => [COMM, TAG, result, ...]
 
@@ -138,7 +139,7 @@ end
 #!       `Rpo256(Rpo256(Rpo256(pk) || Rpo256(digest)) || Rpo256(sig))`
 #! - `TAG`: `[ECDSA_VERIFY_EVENT, result, 0, 0]`
 #! - `result`: 1 if signature is valid, 0 if invalid
-export.verify_impl
+pub proc verify_impl
     emit.ECDSA_VERIFY_EVENT
     # => [pk_ptr, digest_ptr, sig_ptr, ...]
 

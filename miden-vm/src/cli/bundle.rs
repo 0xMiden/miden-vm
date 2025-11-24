@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use miden_assembly::{
-    Assembler, Library, LibraryNamespace,
+    Assembler, Library, PathBuf as LibraryPath,
     diagnostics::{IntoDiagnostic, Report},
 };
 use miden_stdlib::StdLibrary;
@@ -77,7 +77,7 @@ impl BundleCmd {
                     Some(namespace) => namespace.to_string(),
                     None => dir.to_string_lossy().into_owned(),
                 };
-                let library_namespace = namespace.parse::<LibraryNamespace>()?;
+                let library_namespace = LibraryPath::new(&namespace).into_diagnostic()?;
                 assembler.link_dynamic_library(StdLibrary::default())?;
                 let library = assembler.assemble_library_from_dir(&self.dir, library_namespace)?;
                 library.write_to_file(output_file).into_diagnostic()?;

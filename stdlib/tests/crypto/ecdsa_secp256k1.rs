@@ -46,8 +46,8 @@ fn test_ecdsa_verify_cases() {
 
         let source = format!(
             "
-                use.std::crypto::dsa::ecdsa::secp256k1
-                use.std::sys
+                use std::crypto::dsa::ecdsa::secp256k1
+                use std::sys
 
                 begin
                     # Store test data in memory
@@ -91,8 +91,8 @@ fn test_ecdsa_verify_impl_commitment() {
 
         let source = format!(
             "
-            use.std::crypto::dsa::ecdsa::secp256k1
-            use.std::sys
+            use std::crypto::dsa::ecdsa::secp256k1
+            use std::sys
 
             begin
                 # Store test data in memory
@@ -189,7 +189,7 @@ fn test_ecdsa_verify_bis_wrapper() {
 
     let source = format!(
         "
-        use.std::crypto::dsa::ecdsa::secp256k1
+        use std::crypto::dsa::ecdsa::secp256k1
 
         begin
             push.{message} push.{pk_commitment}

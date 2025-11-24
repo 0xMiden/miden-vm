@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 
 use miden_core::{
     Decorator, Kernel, Operation,
-    mast::{BasicBlockNode, DecoratorId, MastForest, MastNodeExt},
+    mast::{BasicBlockNodeBuilder, DecoratorId, MastForest, MastForestContributor},
 };
 
 use crate::{
@@ -18,22 +18,22 @@ fn create_test_program(
 ) -> Program {
     let mut mast_forest = MastForest::new();
 
-    // Create the basic block with decorators
-    let mut basic_block = BasicBlockNode::new(operations.to_vec(), Vec::new()).unwrap();
+    // Collect decorator IDs
+    let before_enter_ids: Vec<_> = before_enter
+        .iter()
+        .map(|decorator| mast_forest.add_decorator(decorator.clone()).unwrap())
+        .collect();
+    let after_exit_ids: Vec<_> = after_exit
+        .iter()
+        .map(|decorator| mast_forest.add_decorator(decorator.clone()).unwrap())
+        .collect();
 
-    // Add before_enter decorators
-    for decorator in before_enter {
-        let decorator_id = mast_forest.add_decorator(decorator.clone()).unwrap();
-        basic_block.append_before_enter(&[decorator_id]);
-    }
-
-    // Add after_exit decorators
-    for decorator in after_exit {
-        let decorator_id = mast_forest.add_decorator(decorator.clone()).unwrap();
-        basic_block.append_after_exit(&[decorator_id]);
-    }
-
-    let basic_block_id = mast_forest.add_node(basic_block).unwrap();
+    // Create the basic block with decorators using builder pattern
+    let basic_block_id = BasicBlockNodeBuilder::new(operations.to_vec(), Vec::new())
+        .with_before_enter(before_enter_ids)
+        .with_after_exit(after_exit_ids)
+        .add_to_forest(&mut mast_forest)
+        .unwrap();
     mast_forest.make_root(basic_block_id);
 
     Program::new(mast_forest.into(), basic_block_id)
@@ -299,21 +299,22 @@ fn create_test_program_with_inner_decorators(
         })
         .collect();
 
-    let mut basic_block = BasicBlockNode::new(operations.to_vec(), inner_decorator_list).unwrap();
+    // Collect decorator IDs
+    let before_enter_ids: Vec<_> = before_enter
+        .iter()
+        .map(|decorator| mast_forest.add_decorator(decorator.clone()).unwrap())
+        .collect();
+    let after_exit_ids: Vec<_> = after_exit
+        .iter()
+        .map(|decorator| mast_forest.add_decorator(decorator.clone()).unwrap())
+        .collect();
 
-    // Add before_enter decorators
-    for decorator in before_enter {
-        let decorator_id = mast_forest.add_decorator(decorator.clone()).unwrap();
-        basic_block.append_before_enter(&[decorator_id]);
-    }
-
-    // Add after_exit decorators
-    for decorator in after_exit {
-        let decorator_id = mast_forest.add_decorator(decorator.clone()).unwrap();
-        basic_block.append_after_exit(&[decorator_id]);
-    }
-
-    let basic_block_id = mast_forest.add_node(basic_block).unwrap();
+    // Create the basic block with decorators using builder pattern
+    let basic_block_id = BasicBlockNodeBuilder::new(operations.to_vec(), inner_decorator_list)
+        .with_before_enter(before_enter_ids)
+        .with_after_exit(after_exit_ids)
+        .add_to_forest(&mut mast_forest)
+        .unwrap();
     mast_forest.make_root(basic_block_id);
 
     Program::new(mast_forest.into(), basic_block_id)

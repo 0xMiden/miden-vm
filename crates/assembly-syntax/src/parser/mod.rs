@@ -30,7 +30,7 @@ pub use self::{
     scanner::Scanner,
     token::{BinEncodedValue, DocumentationType, IntValue, PushValue, Token, WordValue},
 };
-use crate::{LibraryPath, ast, sema};
+use crate::{Path, ast, sema};
 
 // TYPE ALIASES
 // ================================================================================================
@@ -88,9 +88,10 @@ impl ModuleParser {
     /// Parse a [ast::Module] from `source`, and give it the provided `path`.
     pub fn parse(
         &mut self,
-        path: LibraryPath,
+        path: impl AsRef<Path>,
         source: Arc<SourceFile>,
     ) -> Result<Box<ast::Module>, Report> {
+        let path = path.as_ref();
         let forms = parse_forms_internal(source.clone(), &mut self.interned)
             .map_err(|err| Report::new(err).with_source_code(source.clone()))?;
         sema::analyze(source, self.kind, path, forms, self.warnings_as_errors).map_err(Report::new)
@@ -98,13 +99,14 @@ impl ModuleParser {
 
     /// Parse a [ast::Module], `name`, from `path`.
     #[cfg(feature = "std")]
-    pub fn parse_file<P>(
+    pub fn parse_file<N, P>(
         &mut self,
-        name: LibraryPath,
+        name: N,
         path: P,
         source_manager: &dyn SourceManager,
     ) -> Result<Box<ast::Module>, Report>
     where
+        N: AsRef<Path>,
         P: AsRef<std::path::Path>,
     {
         use miden_debug_types::SourceManagerExt;
@@ -121,13 +123,14 @@ impl ModuleParser {
     /// Parse a [ast::Module], `name`, from `source`.
     pub fn parse_str(
         &mut self,
-        name: LibraryPath,
+        name: impl AsRef<Path>,
         source: impl ToString,
         source_manager: &dyn SourceManager,
     ) -> Result<Box<ast::Module>, Report> {
         use miden_debug_types::SourceContent;
 
-        let uri = Uri::from(name.path().into_owned().into_boxed_str());
+        let name = name.as_ref();
+        let uri = Uri::from(name.as_str().to_string().into_boxed_str());
         let content = SourceContent::new(
             SourceLanguage::Masm,
             uri.clone(),
@@ -177,8 +180,8 @@ fn parse_forms_internal(
 /// Returns an iterator over all parsed modules.
 #[cfg(feature = "std")]
 pub fn read_modules_from_dir(
-    namespace: crate::LibraryNamespace,
     dir: impl AsRef<std::path::Path>,
+    namespace: impl AsRef<Path>,
     source_manager: &dyn SourceManager,
 ) -> Result<impl Iterator<Item = Box<ast::Module>>, Report> {
     use std::collections::{BTreeMap, btree_map::Entry};
@@ -198,18 +201,18 @@ pub fn read_modules_from_dir(
 
     let mut modules = BTreeMap::default();
 
-    let walker = WalkModules::new(namespace.clone(), dir)
+    let walker = WalkModules::new(namespace.as_ref().to_path_buf(), dir)
         .into_diagnostic()
         .wrap_err_with(|| format!("failed to load modules from '{}'", dir.display()))?;
     for entry in walker {
         let ModuleEntry { mut name, source_path } = entry?;
-        if name.last() == ast::Module::ROOT {
+        if name.last().unwrap() == ast::Module::ROOT {
             name.pop();
         }
 
         // Parse module at the given path
         let mut parser = ModuleParser::new(ast::ModuleKind::Library);
-        let ast = parser.parse_file(name.clone(), &source_path, source_manager)?;
+        let ast = parser.parse_file(&name, &source_path, source_manager)?;
         match modules.entry(name) {
             Entry::Occupied(ref entry) => {
                 return Err(report!("duplicate module '{0}'", entry.key().clone()));
@@ -234,21 +237,21 @@ mod module_walker {
 
     use miden_utils_diagnostics::{IntoDiagnostic, Report, report};
 
-    use crate::{LibraryNamespace, LibraryPath, ast::Module};
+    use crate::{Path as LibraryPath, PathBuf as LibraryPathBuf, ast::Module};
 
     pub struct ModuleEntry {
-        pub name: LibraryPath,
+        pub name: LibraryPathBuf,
         pub source_path: PathBuf,
     }
 
     pub struct WalkModules<'a> {
-        namespace: LibraryNamespace,
+        namespace: LibraryPathBuf,
         root: &'a Path,
         stack: alloc::collections::VecDeque<io::Result<DirEntry>>,
     }
 
     impl<'a> WalkModules<'a> {
-        pub fn new(namespace: LibraryNamespace, path: &'a Path) -> io::Result<Self> {
+        pub fn new(namespace: LibraryPathBuf, path: &'a Path) -> io::Result<Self> {
             use alloc::collections::VecDeque;
 
             let stack = VecDeque::from_iter(fs::read_dir(path)?);
@@ -289,13 +292,14 @@ mod module_walker {
                 .expect("expected path to be a child of the root directory");
 
             // Construct a [LibraryPath] from the path components, after validating them
-            let mut libpath = LibraryPath::from(self.namespace.clone());
+            let mut libpath = self.namespace.clone();
             for component in relative_path.iter() {
                 let component = component.to_str().ok_or_else(|| {
                     let p = entry.path();
                     report!("{} is an invalid directory entry", p.display())
                 })?;
-                libpath.push(component).into_diagnostic()?;
+                LibraryPath::validate(component).into_diagnostic()?;
+                libpath.push(component);
             }
             Ok(Some(ModuleEntry { name: libpath, source_path: entry.path() }))
         }
@@ -353,7 +357,7 @@ mod tests {
         let source_id = SourceId::default();
         let scanner = Scanner::new(
             "\
-const.ERR1=1
+const ERR1 = 1
 
 begin
     u32assertw
@@ -364,7 +368,6 @@ end
         );
         let mut lexer = Lexer::new(source_id, scanner).map(|result| result.map(|(_, t, _)| t));
         assert_matches!(lexer.next(), Some(Ok(Token::Const)));
-        assert_matches!(lexer.next(), Some(Ok(Token::Dot)));
         assert_matches!(lexer.next(), Some(Ok(Token::ConstantIdent("ERR1"))));
         assert_matches!(lexer.next(), Some(Ok(Token::Equal)));
         assert_matches!(lexer.next(), Some(Ok(Token::Int(1))));
