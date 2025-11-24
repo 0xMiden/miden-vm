@@ -1958,9 +1958,6 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
 // HELPERS
 // ================================================================================================
 
-// TODO(plafer): If we want to keep this strategy, then move the `op_eval_circuit()` method
-// implementation to the `Processor` trait, and have `FastProcessor` and
-// `CoreTraceFragmentGenerator` both use it.
 /// Identical to `[chiplets::ace::eval_circuit]` but adapted for use with `[FastProcessor]`.
 #[allow(clippy::too_many_arguments)]
 fn eval_circuit_fast_(
