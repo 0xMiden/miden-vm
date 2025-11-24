@@ -84,11 +84,7 @@ pub trait Processor: Sized {
         &mut self,
         _err_ctx: &impl ErrorContext,
         _tracer: &mut impl Tracer,
-    ) -> Result<(), ExecutionError> {
-        Err(ExecutionError::FailedToExecuteProgram(
-            "circuit evaluation not implemented for this processor",
-        ))
-    }
+    ) -> Result<(), ExecutionError>;
 
     /// Executes the provided synchronous operation.
     ///

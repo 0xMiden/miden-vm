@@ -914,7 +914,7 @@ impl CoreTraceFragmentGenerator {
                 self.add_span_end_trace_row(basic_block_node)?;
             },
             NodeExecutionState::LoopRepeat(node_id) => {
-                execute_loop_node(self, node_id, &initial_mast_forest)?;
+                finish_loop_node(self, node_id, &initial_mast_forest)?;
             },
             // TODO(plafer): there's a big overlap between `NodeExecutionPhase::End` and
             // `Continuation::Finish*`. We can probably reconcile.
@@ -983,7 +983,7 @@ impl CoreTraceFragmentGenerator {
                     self.add_end_trace_row(mast_node.digest())?;
                 },
                 Continuation::FinishLoop(node_id) => {
-                    execute_loop_node(self, node_id, &current_forest)?;
+                    finish_loop_node(self, node_id, &current_forest)?;
                 },
                 Continuation::FinishCall(node_id) => {
                     let mast_node =
@@ -1881,7 +1881,7 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
 /// This function is shared between `NodeExecutionState::LoopRepeat` and `Continuation::FinishLoop`
 /// to eliminate code duplication. Both cases have identical logic for handling loop execution.
 #[inline(always)]
-fn execute_loop_node(
+fn finish_loop_node(
     processor: &mut CoreTraceFragmentGenerator,
     node_id: MastNodeId,
     mast_forest: &MastForest,
