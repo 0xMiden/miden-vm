@@ -11,7 +11,7 @@ use miden_core::{Program, Word};
 use serde::{Deserialize, Serialize};
 
 pub use self::{
-    manifest::{PackageExport, PackageManifest},
+    manifest::{ConstantExport, PackageExport, PackageManifest, ProcedureExport, TypeExport},
     section::{InvalidSectionIdError, Section, SectionId},
 };
 use crate::MastArtifact;
@@ -88,14 +88,14 @@ impl Package {
 
         let module = library
             .module_infos()
-            .find(|info| info.path() == &entrypoint.module)
+            .find(|info| info.path() == entrypoint.namespace())
             .ok_or_else(|| {
                 Report::msg(format!(
                     "invalid entrypoint: library does not contain a module named '{}'",
-                    entrypoint.module
+                    entrypoint.namespace()
                 ))
             })?;
-        if let Some(digest) = module.get_procedure_digest_by_name(&entrypoint.name) {
+        if let Some(digest) = module.get_procedure_digest_by_name(entrypoint.name()) {
             let node_id = library.mast_forest().find_procedure_root(digest).ok_or_else(|| {
                 Report::msg(
                     "invalid entrypoint: malformed library - procedure exported, but digest has \
@@ -112,7 +112,10 @@ impl Package {
                     node_id,
                 ))),
                 manifest: PackageManifest::new(
-                    self.manifest.get_exports_by_digest(&digest).cloned(),
+                    self.manifest
+                        .get_procedures_by_digest(&digest)
+                        .cloned()
+                        .map(PackageExport::Procedure),
                 )
                 .with_dependencies(self.manifest.dependencies().cloned()),
                 sections: self.sections.clone(),

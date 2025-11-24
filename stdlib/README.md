@@ -15,7 +15,7 @@ Currently, Miden standard library contains just a few modules, which are listed 
 - [std::crypto::hashes::blake3](./docs/crypto/hashes/blake3.md)
 - [std::crypto::hashes::keccak256](./docs/crypto/hashes/keccak256.md)
 - [std::crypto::hashes::sha256](./docs/crypto/hashes/sha256.md)
-- [std::crypto::fri::frie2f4](./docs/crypto/fri/frie2f4.md)
+- [std::pcs::fri::frie2f4](./docs/pcs/frie2f4.md)
 - [std::math::u256](./docs/math/u256.md)
 - [std::math::u64](./docs/math/u64.md)
 - [std::math::secp256k1](./docs/math/secp256k1/group.md)

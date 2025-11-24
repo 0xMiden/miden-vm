@@ -18,7 +18,7 @@ fn wrapping_add() {
     let c = a.wrapping_add(b);
 
     let source = "
-        use.std::math::u64
+        use std::math::u64
         begin
             exec.u64::wrapping_add
         end";
@@ -34,7 +34,7 @@ fn wrapping_add() {
 #[test]
 fn overflowing_add() {
     let source = "
-        use.std::math::u64
+        use std::math::u64
         begin
             exec.u64::overflowing_add
         end";
@@ -72,7 +72,7 @@ fn wrapping_sub() {
     let c = a.wrapping_sub(b);
 
     let source = "
-        use.std::math::u64
+        use std::math::u64
         begin
             exec.u64::wrapping_sub
         end";
@@ -92,7 +92,7 @@ fn overflowing_sub() {
     let (c, flag) = a.overflowing_sub(b);
 
     let source = "
-        use.std::math::u64
+        use std::math::u64
         begin
             exec.u64::overflowing_sub
         end";
@@ -143,7 +143,7 @@ fn wrapping_mul() {
     let c = a.wrapping_mul(b);
 
     let source = "
-        use.std::math::u64
+        use std::math::u64
         begin
             exec.u64::wrapping_mul
         end";
@@ -159,7 +159,7 @@ fn wrapping_mul() {
 #[test]
 fn overflowing_mul() {
     let source = "
-    use.std::math::u64
+    use std::math::u64
     begin
         exec.u64::overflowing_mul
     end";
@@ -200,7 +200,7 @@ fn overflowing_mul() {
 fn unchecked_lt() {
     // test a few manual cases; randomized tests are done using proptest
     let source = "
-        use.std::math::u64
+        use std::math::u64
         begin
             exec.u64::lt
         end";
@@ -218,7 +218,7 @@ fn unchecked_lt() {
 #[test]
 fn unchecked_lte() {
     let source = "
-        use.std::math::u64
+        use std::math::u64
         begin
             exec.u64::lte
         end";
@@ -246,7 +246,7 @@ fn unchecked_lte() {
 fn unchecked_gt() {
     // test a few manual cases; randomized tests are done using proptest
     let source = "
-        use.std::math::u64
+        use std::math::u64
         begin
             exec.u64::gt
         end";
@@ -264,7 +264,7 @@ fn unchecked_gt() {
 #[test]
 fn unchecked_gte() {
     let source = "
-        use.std::math::u64
+        use std::math::u64
         begin
             exec.u64::gte
         end";
@@ -292,7 +292,7 @@ fn unchecked_gte() {
 fn unchecked_min() {
     // test a few manual cases; randomized tests are done using proptest
     let source = "
-        use.std::math::u64
+        use std::math::u64
         begin
             exec.u64::min
         end";
@@ -311,7 +311,7 @@ fn unchecked_min() {
 fn unchecked_max() {
     // test a few manual cases; randomized tests are done using proptest
     let source = "
-        use.std::math::u64
+        use std::math::u64
         begin
             exec.u64::max
         end";
@@ -329,7 +329,7 @@ fn unchecked_max() {
 #[test]
 fn unchecked_eq() {
     let source = "
-        use.std::math::u64
+        use std::math::u64
         begin
             exec.u64::eq
         end";
@@ -356,7 +356,7 @@ fn unchecked_eq() {
 #[test]
 fn unchecked_neq() {
     let source = "
-        use.std::math::u64
+        use std::math::u64
         begin
             exec.u64::neq
         end";
@@ -383,7 +383,7 @@ fn unchecked_neq() {
 #[test]
 fn unchecked_eqz() {
     let source = "
-        use.std::math::u64
+        use std::math::u64
         begin
             exec.u64::eqz
         end";
@@ -490,7 +490,7 @@ fn advice_push_u64div_local_procedure() {
     // push a/b onto the advice stack and then move these values onto the operand stack.
     let source = format!(
         "
-    proc.foo
+    proc foo
         emit.event(\"{U64_DIV_EVENT_NAME}\")
         adv_push.4
     end
@@ -558,7 +558,7 @@ fn unchecked_div() {
     let c = a / b;
 
     let source = "
-        use.std::math::u64
+        use std::math::u64
         begin
             exec.u64::div
         end";
@@ -582,7 +582,7 @@ fn unchecked_div() {
 #[test]
 fn ensure_div_doesnt_crash() {
     let source = "
-        use.std::math::u64
+        use std::math::u64
         begin
             exec.u64::div
         end";
@@ -642,7 +642,7 @@ fn unchecked_mod() {
     let c = a % b;
 
     let source = "
-        use.std::math::u64
+        use std::math::u64
         begin
             exec.u64::mod
         end";
@@ -672,7 +672,7 @@ fn unchecked_divmod() {
     let r = a % b;
 
     let source = "
-        use.std::math::u64
+        use std::math::u64
         begin
             exec.u64::divmod
         end";
@@ -696,7 +696,7 @@ fn checked_and() {
     let c = a & b;
 
     let source = "
-        use.std::math::u64
+        use std::math::u64
         begin
             exec.u64::and
         end";
@@ -718,7 +718,7 @@ fn checked_and_fail() {
     let b1: u64 = U32_BOUND;
 
     let source = "
-        use.std::math::u64
+        use std::math::u64
         begin
             exec.u64::and
         end";
@@ -742,7 +742,7 @@ fn checked_or() {
     let c = a | b;
 
     let source = "
-        use.std::math::u64
+        use std::math::u64
         begin
             exec.u64::or
         end";
@@ -764,7 +764,7 @@ fn checked_or_fail() {
     let b1: u64 = U32_BOUND;
 
     let source = "
-        use.std::math::u64
+        use std::math::u64
         begin
             exec.u64::or
         end";
@@ -788,7 +788,7 @@ fn checked_xor() {
     let c = a ^ b;
 
     let source = "
-        use.std::math::u64
+        use std::math::u64
         begin
             exec.u64::xor
         end";
@@ -810,7 +810,7 @@ fn checked_xor_fail() {
     let b1: u64 = U32_BOUND;
 
     let source = "
-        use.std::math::u64
+        use std::math::u64
         begin
             exec.u64::xor
         end";
@@ -830,7 +830,7 @@ fn checked_xor_fail() {
 #[test]
 fn unchecked_shl() {
     let source = "
-        use.std::math::u64
+        use std::math::u64
         begin
             exec.u64::shl
         end";
@@ -880,7 +880,7 @@ fn unchecked_shl() {
 #[test]
 fn unchecked_shr() {
     let source = "
-        use.std::math::u64
+        use std::math::u64
         begin
             exec.u64::shr
         end";
@@ -936,7 +936,7 @@ fn unchecked_shr() {
 #[test]
 fn unchecked_rotl() {
     let source = "
-        use.std::math::u64
+        use std::math::u64
         begin
             exec.u64::rotl
         end";
@@ -986,7 +986,7 @@ fn unchecked_rotl() {
 #[test]
 fn unchecked_rotr() {
     let source = "
-        use.std::math::u64
+        use std::math::u64
         begin
             exec.u64::rotr
         end";
@@ -1036,7 +1036,7 @@ fn unchecked_rotr() {
 #[test]
 fn clz() {
     let source = "
-    use.std::math::u64
+    use std::math::u64
     begin
         exec.u64::clz
     end";
@@ -1051,7 +1051,7 @@ fn clz() {
 #[test]
 fn ctz() {
     let source = "
-    use.std::math::u64
+    use std::math::u64
     begin
         exec.u64::ctz
     end";
@@ -1066,7 +1066,7 @@ fn ctz() {
 #[test]
 fn clo() {
     let source = "
-    use.std::math::u64
+    use std::math::u64
     begin
         exec.u64::clo
     end";
@@ -1081,7 +1081,7 @@ fn clo() {
 #[test]
 fn cto() {
     let source = "
-    use.std::math::u64
+    use std::math::u64
     begin
         exec.u64::cto
     end";
@@ -1105,7 +1105,7 @@ proptest! {
         let c = (a < b) as u64;
 
         let source = "
-            use.std::math::u64
+            use std::math::u64
             begin
                 exec.u64::lt
             end";
@@ -1121,7 +1121,7 @@ proptest! {
         let c = (a > b) as u64;
 
         let source = "
-            use.std::math::u64
+            use std::math::u64
             begin
                 exec.u64::gt
             end";
@@ -1137,7 +1137,7 @@ proptest! {
         let c = cmp::min(a, b);
         let (c1, c0) = split_u64(c);
         let source = "
-            use.std::math::u64
+            use std::math::u64
             begin
                 exec.u64::min
             end";
@@ -1153,7 +1153,7 @@ proptest! {
         let c = cmp::max(a, b);
         let (c1, c0) = split_u64(c);
         let source = "
-            use.std::math::u64
+            use std::math::u64
             begin
                 exec.u64::max
             end";
@@ -1171,7 +1171,7 @@ proptest! {
         let (c1, c0) = split_u64(c);
 
         let source = "
-            use.std::math::u64
+            use std::math::u64
             begin
                 exec.u64::div
             end";
@@ -1189,7 +1189,7 @@ proptest! {
         let (c1, c0) = split_u64(c);
 
         let source = "
-            use.std::math::u64
+            use std::math::u64
             begin
                 exec.u64::mod
             end";
@@ -1206,7 +1206,7 @@ proptest! {
         let (c1, c0) = split_u64(c);
 
         let source = "
-        use.std::math::u64
+        use std::math::u64
         begin
             exec.u64::shl
         end";
@@ -1223,7 +1223,7 @@ proptest! {
         let (c1, c0) = split_u64(c);
 
         let source = "
-        use.std::math::u64
+        use std::math::u64
         begin
             exec.u64::shr
         end";
@@ -1240,7 +1240,7 @@ proptest! {
         let (c1, c0) = split_u64(c);
 
         let source = "
-        use.std::math::u64
+        use std::math::u64
         begin
             exec.u64::rotl
         end";
@@ -1257,7 +1257,7 @@ proptest! {
         let (c1, c0) = split_u64(c);
 
         let source = "
-        use.std::math::u64
+        use std::math::u64
         begin
             exec.u64::rotr
         end";
@@ -1272,7 +1272,7 @@ proptest! {
         let c = a.leading_zeros() as u64;
 
         let source = "
-            use.std::math::u64
+            use std::math::u64
             begin
                 exec.u64::clz
             end";
@@ -1287,7 +1287,7 @@ proptest! {
         let c = a.trailing_zeros() as u64;
 
         let source = "
-            use.std::math::u64
+            use std::math::u64
             begin
                 exec.u64::ctz
             end";
@@ -1302,7 +1302,7 @@ proptest! {
         let c = a.leading_ones() as u64;
 
         let source = "
-            use.std::math::u64
+            use std::math::u64
             begin
                 exec.u64::clo
             end";
@@ -1317,7 +1317,7 @@ proptest! {
         let c = a.trailing_ones() as u64;
 
         let source = "
-            use.std::math::u64
+            use std::math::u64
             begin
                 exec.u64::cto
             end";

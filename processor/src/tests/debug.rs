@@ -213,7 +213,8 @@ fn test_debug_local() {
     let local_addr_4 = FMP_INIT_VALUE_U64 + 8 - 6 + 4;
     let source = format!(
         "
-        proc.test.6
+        @locals(6)
+        proc test
             # Get address of third local to show it has been initialized to an arbitrary value
             locaddr.4 push.{local_addr_4} assert_eq
 

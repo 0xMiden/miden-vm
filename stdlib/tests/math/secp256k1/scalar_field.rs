@@ -257,7 +257,7 @@ impl PartialEq for ScalarField {
 #[test]
 fn test_secp256k1_scalar_field_mul() {
     let source = "
-    use.std::math::secp256k1::scalar_field
+    use std::math::secp256k1::scalar_field
 
     begin
         exec.scalar_field::mul
@@ -279,7 +279,7 @@ fn test_secp256k1_scalar_field_mul() {
 #[test]
 fn test_secp256k1_scalar_field_inv() {
     let source = "
-    use.std::math::secp256k1::scalar_field
+    use std::math::secp256k1::scalar_field
 
     begin
         dupw.1

@@ -1,6 +1,6 @@
 use alloc::{
     boxed::Box,
-    collections::{VecDeque, BTreeSet, BTreeMap},
+    collections::{BTreeSet, BTreeMap},
     string::ToString,
     sync::Arc,
     vec::Vec,
@@ -10,7 +10,7 @@ use core::{marker::PhantomData, num::NonZeroU32, ops::Range};
 use miden_debug_types::{SourceId, SourceSpan, Span, Spanned};
 use smallvec::smallvec;
 
-use crate::{LibraryPath, LibraryNamespace, ast::{*, types::{AddressSpace, Type}}, Felt, FieldElement, StarkField, Word};
+use crate::{ast::{*, types::{AddressSpace, Type}}, Felt, FieldElement, StarkField, Word};
 use super::{
     BinEncodedValue, IntValue, PushValue, Token, WordValue, ParseError, ParsingError,
     LiteralErrorKind, DocumentationType
@@ -112,7 +112,6 @@ extern {
         "event" => Token::Event,
         "exp" => Token::Exp,
         "exp.u" => Token::ExpU,
-        "export" => Token::Export,
         "false" => Token::False,
         "felt" => Token::Felt,
         "fri_ext2fold4" => Token::FriExt2Fold4,
@@ -292,15 +291,6 @@ DotDelimited<T>: Vec<T> = {
 };
 
 
-// ::-delimited with at least one element, no trailing delimiter
-#[inline]
-PathComponents<T>: Vec<T> = {
-    <mut v:(<T> "::")*> <e:T> => {
-        v.push(e);
-        v
-    }
-};
-
 // TOP-LEVEL FORMS
 // ================================================================================================
 
@@ -332,12 +322,12 @@ Doc: Form = {
 }
 
 TypeDecl: Form = {
-    <l:@L> "type" <name:TypeName> "=" <ty:TypeExpr> <r:@R> => {
+    <l:@L> <vis:Visibility> "type" <name:BareIdent> "=" <ty:TypeExpr> <r:@R> => {
         let span = span!(source_id, l, r);
-        Form::Type(TypeAlias::new(name, ty).with_span(span))
+        Form::Type(TypeAlias::new(vis, name, ty).with_span(span))
     },
 
-    <l:@L> "enum" <name:TypeName> ":" <repr:IntType> "{" <variants:CommaDelimitedAllowTrailing<EnumVariant>> "}" <r:@R> => {
+    <l:@L> <vis:Visibility> "enum" <name:BareIdent> ":" <repr:IntType> "{" <variants:CommaDelimitedAllowTrailing<EnumVariant>> "}" <r:@R> => {
         let span = span!(source_id, l, r);
         let mut vs = Vec::with_capacity(variants.len());
         let mut next = ConstantExpr::Int(Span::new(span, IntValue::U8(0)));
@@ -350,7 +340,7 @@ TypeDecl: Form = {
                             next = ConstantExpr::BinaryOp {
                                 span,
                                 op: ConstantOp::Add,
-                                lhs: Box::new(ConstantExpr::Var(name)),
+                                lhs: Box::new(ConstantExpr::Var(Span::new(span, PathBuf::from(name)))),
                                 rhs: Box::new(ConstantExpr::Int(Span::new(span, IntValue::U8(1)))),
                             };
                         }
@@ -359,7 +349,7 @@ TypeDecl: Form = {
                             next = ConstantExpr::BinaryOp {
                                 span,
                                 op: ConstantOp::Add,
-                                lhs: Box::new(ConstantExpr::Var(name)),
+                                lhs: Box::new(ConstantExpr::Var(Span::new(span, PathBuf::from(name)))),
                                 rhs: Box::new(ConstantExpr::Int(Span::new(span, IntValue::U8(1)))),
                             };
                         }
@@ -369,14 +359,14 @@ TypeDecl: Form = {
                     let discriminant = core::mem::replace(&mut next, ConstantExpr::BinaryOp {
                         span,
                         op: ConstantOp::Add,
-                        lhs: Box::new(ConstantExpr::Var(name.clone())),
+                        lhs: Box::new(ConstantExpr::Var(Span::new(span, PathBuf::from(name.clone())))),
                         rhs: Box::new(ConstantExpr::Int(Span::new(span, IntValue::U8(1)))),
                     });
                     vs.push(Variant::new(name, discriminant).with_span(span));
                 }
             }
         }
-        Form::Enum(EnumType::new(name, repr, vs).with_span(span))
+        Form::Enum(EnumType::new(vis, name, repr, vs).with_span(span))
     }
 }
 
@@ -388,11 +378,35 @@ EnumVariant: (SourceSpan, Ident, Option<ConstantExpr>) = {
 }
 
 TypeExpr: TypeExpr = {
-    <l:@L> <t:PrimitiveType> <r:@R> => TypeExpr::Primitive(Span::new(span!(source_id, l, r), t)),
     <PointerType> => TypeExpr::Ptr(<>),
     <ArrayType> => TypeExpr::Array(<>),
     <StructType> => TypeExpr::Struct(<>),
-    <TypeName> => TypeExpr::Ref(<>),
+    <path:MaybeQualifiedTypePath> => {
+        // If we have a single identifier in the path, check if the identifier is a known built-in
+        // primitive type. If we don't recognize it, treat it as a reference to a type assumed to
+        // be defined in the same module
+        if let Some(name) = path.as_ident() {
+            let span = path.span();
+            TypeExpr::Primitive(Span::new(span, match name.as_str() {
+                "word" => Type::Array(Arc::clone(felt_type)),
+                "i1" => Type::I1,
+                "i8" => Type::I8,
+                "i16" => Type::I16,
+                "i32" => Type::I32,
+                "i64" => Type::I64,
+                "i128" => Type::I128,
+                "u8" => Type::U8,
+                "u16" => Type::U16,
+                "u32" => Type::U32,
+                "u64" => Type::U64,
+                "u128" => Type::U128,
+                "felt" => Type::Felt,
+                _ => return TypeExpr::Ref(path),
+            }))
+        } else {
+            TypeExpr::Ref(path)
+        }
+    },
 }
 
 PointerType: PointerType = {
@@ -541,14 +555,13 @@ FunctionParamType: TypeExpr = {
 }
 
 FunctionResultType: Vec<TypeExpr> = {
-    "(" <CommaDelimitedAllowTrailing<TypeExpr>> ")" => <>,
+    "(" <CommaDelimitedAllowTrailing<MaybeNamedResultType>> ")" => <>,
     <TypeExpr> => vec![<>],
 }
 
 #[inline]
-PrimitiveType: Type = {
-    IntType,
-    "word" => Type::Array(Arc::clone(felt_type)),
+MaybeNamedResultType: TypeExpr = {
+    <_param:(bare_ident ":")?> <t:TypeExpr> => t,
 }
 
 #[inline]
@@ -567,40 +580,27 @@ IntType: Type = {
     "felt" => Type::Felt,
 }
 
-#[inline]
-TypeName: Ident = {
-    <l:@L> <name:bare_ident> <r:@R> =>? {
-        let name = interned.get(name).cloned().unwrap_or_else(|| {
-            let name = Arc::<str>::from(name.to_string().into_boxed_str());
-            interned.insert(name.clone());
-            name
-        });
-        let span = span!(source_id, l, r);
-        Ident::validate(&name)
-            .map_err(|error| ParseError::User {
-                error: ParsingError::InvalidIdentifier { error, span },
-            })?;
-        Ok(Ident::from_raw_parts(Span::new(span, name)))
-    },
-}
-
 Import: Form = {
-    <l:@L> "use" "."? <path:MaybeQualifiedPath> <alias:("->" <BareIdent>)?> <r:@R> =>? {
+    <l:@L> <visibility:Visibility> "use" <target:AliasTarget> <alias:("->" <Ident>)?> <r:@R> =>? {
         let span = span!(source_id, l, r);
-        if path.num_components() == 1 {
-            return Err(ParseError::User {
-                error: ParsingError::UnqualifiedImport { span },
-            });
-        }
-        let name = alias.unwrap_or(path.last_component().to_ident());
-        Ok(Form::Import(Import { span, name, path: path.into_inner(), uses: 0 }))
+        let name = match alias {
+            Some(name) => name,
+            None => match &target {
+                AliasTarget::MastRoot(_) => return Err(ParseError::User {
+                    error: ParsingError::UnnamedReexportOfMastRoot { span },
+                }),
+                AliasTarget::Path(path) => Ident::from_raw_parts(Span::new(path.span(), path.last().unwrap().to_string().into_boxed_str().into())),
+            }
+        };
+        Ok(Form::Alias(Alias::new(visibility, name, target)))
     }
 }
 
 Const: Form = {
-    <l:@L> "const" "."? <name:ConstantName> "=" <value:ConstantExpr> <r:@R> => {
+    <l:@L> <vis:Visibility> "const" <name:ConstantName> "=" <value:ConstantExpr> <r:@R> => {
         Form::Constant(Constant::new(
             span!(source_id, l, r),
+            vis,
             name,
             value,
         ))
@@ -615,7 +615,7 @@ MaybeAdvMapKey: Option<Span<WordValue>> = {
 }
 
 AdvMap: Form = {
-    <l:@L> "adv_map" "."? <name:ConstantName> <key:MaybeAdvMapKey> "=" "[" <value:CommaDelimited<Felt>> "]" <r:@R> => {
+    <l:@L> "adv_map" <name:ConstantName> <key:MaybeAdvMapKey> "=" "[" <value:CommaDelimited<Felt>> "]" <r:@R> => {
         Form::AdviceMapEntry(AdviceMapEntry::new(
             span!(source_id, l, r),
             name,
@@ -636,6 +636,7 @@ Proc: Form = {
         use alloc::collections::btree_map::Entry;
         let attributes = proc.attributes_mut();
         let mut cc = None;
+        let mut num_locals = None;
         for attr in annotations {
             match attr {
                 Attribute::KeyValue(kv) => {
@@ -710,6 +711,36 @@ Proc: Form = {
                         }
                     }
                 }
+                Attribute::List(list) if list.name() == "locals" && list.len() == 1 => {
+                    match attributes.entry(list.id()) {
+                        AttributeSetEntry::Vacant(entry) => {
+                            let valid_num_locals = match &list.as_slice()[0] {
+                                MetaExpr::Int(cc) => match cc.inner() {
+                                    IntValue::U8(n) => Some(*n as u16),
+                                    IntValue::U16(n) => Some(*n),
+                                    _ => None,
+                                },
+                                other => return Err(ParseError::User {
+                                    error: ParsingError::InvalidLocalsAttr { span: other.span(), message: "expected an integer literal".into() },
+                                }),
+                            };
+                            if valid_num_locals.is_some() {
+                                num_locals = valid_num_locals;
+                                entry.insert(Attribute::List(list));
+                            } else {
+                                return Err(ParseError::User {
+                                    error: ParsingError::ImmediateOutOfRange { span: list.span(), range: 0..((u16::MAX as usize) + 1) },
+                                });
+                            }
+                        }
+                        AttributeSetEntry::Occupied(entry) => {
+                            let prev_attr = entry.get();
+                            return Err(ParseError::User {
+                                error: ParsingError::AttributeConflict { span: list.span(), prev: prev_attr.span() },
+                            });
+                        }
+                    }
+                }
                 attr => {
                     match attributes.entry(attr.id()) {
                         AttributeSetEntry::Vacant(entry) => {
@@ -726,94 +757,53 @@ Proc: Form = {
             }
         }
 
-        if let Some(cc) = cc {
+        if num_locals.is_some() {
+            // Strip the 'locals' attribute now that it is no longer needed
+            attributes.remove("locals");
+        }
+
+        if cc.is_some() {
             // Strip the 'callconv' attribute now that it is no longer needed
             attributes.remove("callconv");
+        }
+
+        if let Some(num_locals) = num_locals {
+            proc.set_num_locals(num_locals);
+        }
+
+        if let Some(cc) = cc {
             if let Some(signature) = proc.signature_mut() {
                 signature.cc = cc;
             }
         }
 
-        Ok(Form::Procedure(Export::Procedure(proc)))
+        Ok(Form::Procedure(proc))
     },
-    AliasDef => Form::Procedure(Export::Alias(<>)),
 }
 
 #[inline]
 ProcedureDef: Procedure = {
-    <l:@L> <visibility:Visibility> "."? <name:ProcedureName> <num_locals:MaybeParam<U16>> <ty:FunctionType?> <body:Block> "end" <r:@R> =>? {
-        let num_locals = num_locals.unwrap_or(0);
+    <l:@L> <visibility:Visibility> "proc" <name:ProcedureName> <ty:FunctionType?> <body:Block> "end" <r:@R> => {
         let procedure = Procedure::new(
             span!(source_id, l, r),
             visibility,
             name,
-            num_locals,
+            /*num_locals=*/0,
             body
         );
-        Ok(if let Some(ty) = ty {
+        if let Some(ty) = ty {
             procedure.with_signature(ty)
         } else {
             procedure
-        })
+        }
     },
 }
 
-#[inline]
-AliasDef: ProcedureAlias = {
-    <l:@L> <_pub:PubVisibility> "."? <name:MaybeQualifiedProcedurePath> <alias:("->" <ProcedureName>)?> <r:@R> =>? {
-        let span = span!(source_id, l, r);
-        let alias = match name {
-            InvocationTarget::ProcedureName(_) =>  return Err(ParseError::User {
-                error: ParsingError::UnqualifiedImport { span },
-            }),
-            InvocationTarget::MastRoot(digest) => {
-                if alias.is_none() {
-                    return Err(ParseError::User {
-                        error: ParsingError::UnnamedReexportOfMastRoot { span },
-                    });
-                }
-                ProcedureAlias::new(alias.unwrap(), AliasTarget::MastRoot(digest))
-            }
-            InvocationTarget::ProcedurePath { name, module } => {
-                let export_name = alias.unwrap_or_else(|| name.clone());
-                let module = match module.as_str() {
-                    LibraryNamespace::KERNEL_PATH => LibraryPath::new_from_components(LibraryNamespace::Kernel, []),
-                    LibraryNamespace::EXEC_PATH => LibraryPath::new_from_components(LibraryNamespace::Exec, []),
-                    LibraryNamespace::ANON_PATH => LibraryPath::new_from_components(LibraryNamespace::Anon, []),
-                    _ => LibraryPath::new_from_components(LibraryNamespace::User(module.into_inner()), []),
-                };
-                let target = QualifiedProcedureName {
-                    span,
-                    module,
-                    name,
-                };
-                ProcedureAlias::new(export_name, AliasTarget::ProcedurePath(target))
-            }
-            InvocationTarget::AbsoluteProcedurePath { name, path } => {
-                let export_name = alias.unwrap_or_else(|| name.clone());
-                let target = QualifiedProcedureName {
-                    span,
-                    module: path,
-                    name,
-                };
-                ProcedureAlias::new(export_name, AliasTarget::AbsoluteProcedurePath(target))
-            }
-        };
-        Ok(alias)
-    }
-}
 
 #[inline]
 Visibility: Visibility = {
-    "proc" => Visibility::Private,
-    "export" => Visibility::Public,
-    "pub" "."? "proc" => Visibility::Public,
-}
-
-#[inline]
-PubVisibility: Visibility = {
-    "export" => Visibility::Public,
-    "pub" "."? "proc" => Visibility::Public,
+    "pub" => Visibility::Public,
+    => Visibility::Private,
 }
 
 // ANNOTATIONS
@@ -1140,7 +1130,7 @@ Debug: Instruction = {
         }
     },
     "emit" => Instruction::Emit,
-    // emit.EVENT_CONST  where EVENT_CONST is defined via const.EVENT_CONST=event("...")
+    // emit.EVENT_CONST  where EVENT_CONST is defined via const EVENT_CONST = event("...")
     "emit" "." <name:ConstantName> => Instruction::EmitImm(Immediate::Constant(name)),
     // emit.event("...") inline hashing
     <l:@L> "emit" "." "event" "(" <s:string> ")" <r:@R> => {
@@ -1920,19 +1910,142 @@ Felt: Felt = {
 // ================================================================================================
 
 ProcedureName: ProcedureName = {
-    BareProcedureName,
-    QuotedProcedureName,
-}
-
-
-#[inline]
-BareProcedureName: ProcedureName = {
     <BareIdent> => ProcedureName::from_raw_parts(<>),
+    <QuotedIdent> => ProcedureName::from_raw_parts(<>),
+}
+
+
+InvocationTarget: InvocationTarget = {
+    <MastRoot> => InvocationTarget::MastRoot(<>),
+    <path:MaybeQualifiedProcedureOrTypePath> => {
+        if let Some(name) = path.as_ident() {
+            InvocationTarget::Symbol(name.with_span(path.span()))
+        } else {
+            InvocationTarget::Path(path.map(|p| p.into()))
+        }
+    },
+    <l:@L> <_invalid:hex_value> <r:@R> =>? Err(ParseError::User {
+        error: ParsingError::InvalidMastRoot { span: span!(source_id, l, r) },
+    }),
+}
+
+AliasTarget: AliasTarget = {
+    <MastRoot> =>  AliasTarget::MastRoot(<>),
+    <path:QualifiedItemPath> =>  AliasTarget::Path(path.map(|p| p.into())),
+    <l:@L> <_invalid:hex_value> <r:@R> =>? Err(ParseError::User {
+        error: ParsingError::InvalidMastRoot { span: span!(source_id, l, r) },
+    }),
+}
+
+QualifiedItemPath: Span<PathBuf> = {
+    <path:MaybeQualifiedItemPath> =>? {
+        if path.as_ident().is_some() {
+            return Err(ParseError::User {
+                error: ParsingError::UnqualifiedImport { span: path.span() },
+            });
+        }
+        Ok(path)
+    }
+}
+
+MaybeQualifiedItemPath: Span<PathBuf> = {
+    MaybeQualifiedConstantPath,
+    MaybeQualifiedProcedureOrTypePath,
+}
+
+
+#[inline]
+MaybeQualifiedProcedureOrTypePath: Span<PathBuf> = {
+    <l:@L> <is_absolute:MaybeAbsolute> <namespace:(<BareIdent> "::")*> <name:Ident> <r:@R> =>? {
+        let span = span!(source_id, l, r);
+        if is_absolute && namespace.is_empty() {
+            return Err(ParseError::User {
+                error: ParsingError::UnqualifiedImport { span },
+            });
+        }
+
+        let mut path = PathBuf::default();
+        for component in namespace.iter() {
+            path.push(component);
+        }
+        path.push(&name);
+
+        let path = if is_absolute {
+            path.to_absolute().into_owned()
+        } else {
+            path
+        };
+
+        Ok(Span::new(span, path))
+    },
+}
+
+MaybeQualifiedTypePath: Span<PathBuf> = {
+    <l:@L> <is_absolute:MaybeAbsolute> <namespace:(<BareIdent> "::")*> <name:TypeIdent> <r:@R> =>? {
+        let span = span!(source_id, l, r);
+        if is_absolute && namespace.is_empty() {
+            return Err(ParseError::User {
+                error: ParsingError::UnqualifiedImport { span },
+            });
+        }
+
+        let mut path = PathBuf::default();
+        for component in namespace.iter() {
+            path.push(component);
+        }
+        path.push(&name);
+
+        let path = if is_absolute {
+            path.to_absolute().into_owned()
+        } else {
+            path
+        };
+
+        Ok(Span::new(span, path))
+    },
 }
 
 #[inline]
-QuotedProcedureName: ProcedureName = {
-    <l:@L> <name:quoted_ident> <r:@R> =>? {
+MaybeQualifiedConstantPath: Span<PathBuf> = {
+    <l:@L> <is_absolute:MaybeAbsolute> <namespace:(<BareIdent> "::")*> <name:ConstantName> <r:@R> =>? {
+        let span = span!(source_id, l, r);
+
+        if is_absolute && namespace.is_empty() {
+            return Err(ParseError::User {
+                error: ParsingError::UnqualifiedImport { span },
+            });
+        }
+
+        let mut path = PathBuf::default();
+        for component in namespace.iter() {
+            path.push(component);
+        }
+        path.push(&name);
+
+        let path = if is_absolute {
+            path.to_absolute().into_owned()
+        } else {
+            path
+        };
+
+        Ok(Span::new(span, path))
+    }
+}
+
+#[inline]
+MaybeAbsolute: bool = {
+    "::" => true,
+    => false,
+}
+
+#[inline]
+Ident: Ident = {
+    BareIdent,
+    QuotedIdent,
+}
+
+TypeIdent: Ident = {
+    <l:@L> <name:bare_ident> <r:@R> =>? {
         let name = interned.get(name).cloned().unwrap_or_else(|| {
             let name = Arc::<str>::from(name.to_string().into_boxed_str());
             interned.insert(name.clone());
@@ -1943,62 +2056,21 @@ QuotedProcedureName: ProcedureName = {
             .map_err(|error| ParseError::User {
                 error: ParsingError::InvalidIdentifier { error, span },
             })?;
-        let id = Ident::from_raw_parts(Span::new(span, name));
-        Ok(ProcedureName::from_raw_parts(id))
-    }
-}
-
-InvocationTarget: InvocationTarget = {
-    <MastRoot> => InvocationTarget::MastRoot(<>),
-    MaybeQualifiedProcedurePath,
-    <l:@L> <_invalid:hex_value> <r:@R> =>? Err(ParseError::User {
-        error: ParsingError::InvalidMastRoot { span: span!(source_id, l, r) },
-    }),
-}
-
-MaybeQualifiedProcedurePath: InvocationTarget = {
-    "::" <components:(<BareIdent> "::")*> <name:ProcedureName> =>? {
-        // A fully-qualified path without a module is routed to the anonymous namespace
-        if components.is_empty() {
-            let path = LibraryPath::new_from_components(LibraryNamespace::Anon, []);
-            return Ok(InvocationTarget::AbsoluteProcedurePath { name, path });
-        }
-
-        // Otherwise, use the path specified
-        let mut components = VecDeque::from(components);
-        let ns = components.pop_front().unwrap();
-        let ns = match ns.as_str() {
-            // Disallow the use of special namespaces with other components
-            special_ns @ (
-                LibraryNamespace::EXEC_PATH
-                | LibraryNamespace::ANON_PATH
-            ) if !components.is_empty() => {
-                return Err(ParseError::User {
-                    error: ParsingError::InvalidLibraryPath {
-                        span: ns.span(),
-                        message: format!("the {special_ns} namespace cannot have submodules")
-                    },
-                });
-            }
-            LibraryNamespace::KERNEL_PATH => LibraryNamespace::Kernel,
-            LibraryNamespace::EXEC_PATH => LibraryNamespace::Exec,
-            LibraryNamespace::ANON_PATH => LibraryNamespace::Anon,
-            _ => LibraryNamespace::User(ns.into_inner()),
-        };
-        let path = LibraryPath::new_from_components(ns, components);
-        Ok(InvocationTarget::AbsoluteProcedurePath { name, path })
+        Ok(Ident::from_raw_parts(Span::new(span, name)))
     },
 
-    <module:(<BareIdent> "::")?> <name:ProcedureName> => {
-        if let Some(module) = module {
-            InvocationTarget::ProcedurePath { name, module }
-        } else {
-            InvocationTarget::ProcedureName(name)
-        }
-    }
+    TypeId,
+
+    <l:@L> <name:Opcode> <r:@R> => {
+        let name = interned.get(name).cloned().unwrap_or_else(|| {
+            let name = Arc::<str>::from(name.to_string().into_boxed_str());
+            interned.insert(name.clone());
+            name
+        });
+        Ident::from_raw_parts(Span::new(span!(source_id, l, r), name))
+    },
 }
 
-#[inline]
 BareIdent: Ident = {
     <l:@L> <name:bare_ident> <r:@R> =>? {
         let name = interned.get(name).cloned().unwrap_or_else(|| {
@@ -2014,80 +2086,29 @@ BareIdent: Ident = {
         Ok(Ident::from_raw_parts(Span::new(span, name)))
     },
 
-    OpcodeName,
-
-    TypeId,
+    Keyword,
 }
 
-MaybeQualifiedPath: Span<LibraryPath> = {
-    <l:@L> <_is_absolute:MaybeAbsolute> <mut components:PathComponents<BareIdent>> <r:@R> =>? {
+#[inline]
+QuotedIdent: Ident = {
+    <l:@L> <name:quoted_ident> <r:@R> =>? {
+        let name = interned.get(name).cloned().unwrap_or_else(|| {
+            let name = Arc::<str>::from(name.to_string().into_boxed_str());
+            interned.insert(name.clone());
+            name
+        });
         let span = span!(source_id, l, r);
-        let name = components.pop().unwrap();
-        if components.is_empty() {
-            let ns = LibraryNamespace::User(name.into_inner());
-            Ok(Span::new(span, LibraryPath::new_from_components(ns, [])))
-        } else {
-            let mut components = VecDeque::from(components);
-            let ns = components.pop_front().unwrap();
-            let ns = match ns.as_str() {
-                // Disallow the use of special namespaces with other components
-                special_ns @ (
-                    LibraryNamespace::EXEC_PATH
-                    | LibraryNamespace::ANON_PATH
-                ) if !components.is_empty() => {
-                    return Err(ParseError::User {
-                        error: ParsingError::InvalidLibraryPath {
-                            span: ns.span(),
-                            message: format!("the {special_ns} namespace cannot have submodules")
-                        },
-                    });
-                }
-                LibraryNamespace::KERNEL_PATH => LibraryNamespace::Kernel,
-                LibraryNamespace::EXEC_PATH => LibraryNamespace::Exec,
-                LibraryNamespace::ANON_PATH => LibraryNamespace::Anon,
-                _ => LibraryNamespace::User(ns.into_inner()),
-            };
-            components.push_back(name);
-            Ok(Span::new(span, LibraryPath::new_from_components(ns, components)))
-        }
+        Ident::validate(&name)
+            .map_err(|error| ParseError::User {
+                error: ParsingError::InvalidIdentifier { error, span },
+            })?;
+        Ok(Ident::from_raw_parts(Span::new(span, name)))
     }
 }
 
 #[inline]
-MaybeAbsolute: bool = {
-    "::" => true,
-    => false,
-}
-
-QualifiedName: (Ident, LibraryPath) = {
-    <l:@L> <first:(<BareIdent> "::")> <mut components:PathComponents<BareIdent>> <r:@R> =>? {
-        let span = span!(source_id, l, r);
-
-        let name = components.pop().unwrap();
-        let ns = match first.as_str() {
-            // Disallow the use of special namespaces with other components
-            special_ns @ (
-                LibraryNamespace::EXEC_PATH
-                | LibraryNamespace::ANON_PATH
-            ) if !components.is_empty() => {
-                return Err(ParseError::User {
-                    error: ParsingError::InvalidLibraryPath {
-                        span: first.span(),
-                        message: format!("the {special_ns} namespace cannot have submodules")
-                    },
-                });
-            }
-            LibraryNamespace::KERNEL_PATH => LibraryNamespace::Kernel,
-            LibraryNamespace::EXEC_PATH => LibraryNamespace::Exec,
-            LibraryNamespace::ANON_PATH => LibraryNamespace::Anon,
-            _ => LibraryNamespace::User(first.into_inner()),
-        };
-        Ok((name, LibraryPath::new_from_components(ns, components)))
-    }
-}
-
-OpcodeName: Ident = {
-    <l:@L> <name:Opcode> <r:@R> => {
+Keyword: Ident = {
+    <l:@L> <name:KeywordStr> <r:@R> => {
         let name = interned.get(name).cloned().unwrap_or_else(|| {
             let name = Arc::<str>::from(name.to_string().into_boxed_str());
             interned.insert(name.clone());
@@ -2095,6 +2116,13 @@ OpcodeName: Ident = {
         });
         Ident::from_raw_parts(Span::new(span!(source_id, l, r), name))
     }
+}
+
+#[inline]
+KeywordStr: &'static str = {
+    Opcode,
+    TypeIdStr,
+    TypeAttrStr,
 }
 
 Opcode: &'static str = {
@@ -2143,7 +2171,6 @@ Opcode: &'static str = {
     "exec" => "exec",
     "exp" => "exp",
     "exp.u" => "exp.u",
-    "export" => "export",
     "gt" => "gt",
     "gte" => "gte",
     "hash" => "hash",
@@ -2243,6 +2270,7 @@ Opcode: &'static str = {
     "xor" => "xor",
 }
 
+#[inline]
 TypeId: Ident = {
     <l:@L> <name:TypeIdStr> <r:@R> => {
         let name = interned.get(name).cloned().unwrap_or_else(|| {
@@ -2251,9 +2279,10 @@ TypeId: Ident = {
             name
         });
         Ident::from_raw_parts(Span::new(span!(source_id, l, r), name))
-    }
+    },
 }
 
+#[inline]
 TypeIdStr: &'static str = {
     "word" => "word",
     "i1" => "i1",
@@ -2269,6 +2298,10 @@ TypeIdStr: &'static str = {
     "i128" => "i128",
     "felt" => "felt",
     "ptr" => "ptr",
+}
+
+#[inline]
+TypeAttrStr: &'static str = {
     "addrspace" => "addrspace",
     "byte" => "byte",
 }
@@ -2383,7 +2416,7 @@ Term: ConstantExpr = {
 
     <QuotedString> => ConstantExpr::String(<>),
 
-    <ConstantName> => ConstantExpr::Var(<>),
+    <MaybeQualifiedConstantPath> => ConstantExpr::Var(<>),
 }
 
 NumericTerm: ConstantExpr = {
@@ -2393,7 +2426,7 @@ NumericTerm: ConstantExpr = {
         ConstantExpr::Int(Span::new(span!(source_id, l, r), value))
     },
 
-    <ConstantName> => ConstantExpr::Var(<>),
+    <MaybeQualifiedConstantPath> => ConstantExpr::Var(<>),
 }
 
 // Terminals

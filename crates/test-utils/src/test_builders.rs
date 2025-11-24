@@ -18,7 +18,8 @@
 macro_rules! build_op_test {
     ($op_str:expr) => {{
         let source = format!("
-proc.truncate_stack.4
+@locals(4)
+proc truncate_stack
     loc_storew_be.0 dropw movupw.3
     sdepth neq.16
     while.true
@@ -35,7 +36,8 @@ begin {} exec.truncate_stack end",
     }};
     ($op_str:expr, $($tail:tt)+) => {{
         let source = format!("
-proc.truncate_stack.4
+@locals(4)
+proc truncate_stack
     loc_storew_be.0 dropw movupw.3
     sdepth neq.16
     while.true

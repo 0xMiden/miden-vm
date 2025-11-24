@@ -6,13 +6,14 @@ use crate::test_utils::test_consistency_host::TestConsistencyHost;
 #[test]
 fn test_advice_provider() {
     let kernel_source = "
-        export.foo
+        pub proc foo
             push.2323 mem_store.100 trace.11
         end
     ";
 
     let program_source = "
-    proc.truncate_stack.4
+    @locals(4)
+    proc truncate_stack
         loc_storew_be.0 dropw movupw.3
         sdepth neq.16
         while.true
@@ -23,12 +24,12 @@ fn test_advice_provider() {
     end
 
     # mainly used to break basic blocks
-    proc.noop
+    proc noop
         swap swap
     end
 
     # Tests different cases of batch sizes
-    proc.basic_block
+    proc basic_block
         # batch with 1 group
         swap drop swap trace.1
 
@@ -59,26 +60,26 @@ fn test_advice_provider() {
         drop drop drop drop drop drop drop drop drop        trace.7
     end
 
-    proc.exec_me
+    proc exec_me
         push.22 mem_store.0
         trace.9
     end
 
-    proc.dyncall_me
+    proc dyncall_me
         push.23 mem_store.0
         trace.100
     end
 
-    proc.dynexec_me
+    proc dynexec_me
         push.24 mem_store.0
         trace.101
     end
 
-    proc.will_syscall
+    proc will_syscall
         syscall.foo
     end
 
-    proc.control_flow
+    proc control_flow
         # if true
         push.1 trace.16 if.true
             swap swap trace.17

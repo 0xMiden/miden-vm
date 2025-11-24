@@ -44,7 +44,7 @@ fn test_memcopy() {
 
     let source = format!(
         "
-    use.std::mem
+    use std::mem
 
     begin
         {store_testing_data_source}
@@ -69,7 +69,7 @@ fn test_memcopy() {
 
     let source = format!(
         "
-    use.std::mem
+    use std::mem
 
     begin
         {store_testing_data_source}
@@ -96,7 +96,7 @@ fn test_memcopy() {
 
     let source = format!(
         "
-    use.std::mem
+    use std::mem
 
     begin
         {store_testing_data_source}
@@ -122,7 +122,7 @@ fn test_memcopy() {
 
     let source = format!(
         "
-    use.std::mem
+    use std::mem
 
     begin
         {store_testing_data_source}
@@ -148,7 +148,7 @@ fn test_memcopy() {
 
     let source = format!(
         "
-    use.std::mem
+    use std::mem
 
     begin
         {store_testing_data_source}
@@ -175,7 +175,7 @@ fn test_memcopy_words() {
     use miden_stdlib::StdLibrary;
 
     let source = "
-    use.std::mem
+    use std::mem
 
     begin
         push.0.0.0.1.1000 mem_storew_be dropw
@@ -260,11 +260,11 @@ fn test_memcopy_words() {
 }
 
 #[test]
-fn test_memcopy_felts() {
+fn test_memcopy_elements() {
     use miden_stdlib::StdLibrary;
 
     let source = "
-    use.std::mem
+    use std::mem
 
     begin
         push.1.2.3.4.1000 mem_storew_be dropw
@@ -273,7 +273,7 @@ fn test_memcopy_felts() {
         push.13.14.15.16.1012 mem_storew_be dropw
         push.17.18.19.20.1016 mem_storew_be dropw
 
-        push.2002.1001.18 exec.mem::memcopy_felts
+        push.2002.1001.18 exec.mem::memcopy_elements
     end
     ";
 
@@ -311,8 +311,8 @@ fn test_pipe_double_words_to_memory() {
     let end_addr = 1008;
     let source = format!(
         "
-        use.std::mem
-        use.std::sys
+        use std::mem
+        use std::sys
 
         begin
             push.{end_addr}
@@ -342,8 +342,8 @@ fn test_pipe_words_to_memory() {
     let mem_addr = 1000;
     let one_word = format!(
         "
-        use.std::mem
-        use.std::crypto::hashes::rpo
+        use std::mem
+        use std::crypto::hashes::rpo
 
         begin
             push.{mem_addr} # target address
@@ -369,8 +369,8 @@ fn test_pipe_words_to_memory() {
 
     let three_words = format!(
         "
-        use.std::mem
-        use.std::crypto::hashes::rpo
+        use std::mem
+        use std::crypto::hashes::rpo
 
         begin
             push.{mem_addr} # target address
@@ -399,7 +399,7 @@ fn test_pipe_words_to_memory() {
 fn test_pipe_preimage_to_memory() {
     let mem_addr = 1000;
     let three_words = format!(
-        "use.std::mem
+        "use std::mem
 
         begin
             adv_push.4 # push commitment to stack
@@ -426,7 +426,7 @@ fn test_pipe_preimage_to_memory() {
 #[test]
 fn test_pipe_preimage_to_memory_invalid_preimage() {
     let three_words = "
-    use.std::mem
+    use std::mem
 
     begin
         adv_push.4  # push commitment to stack
@@ -452,7 +452,7 @@ fn test_pipe_double_words_preimage_to_memory() {
     // Word-aligned address, as required by `pipe_double_words_preimage_to_memory`.
     let mem_addr = 1000;
     let four_words = format!(
-        "use.std::mem
+        "use std::mem
 
         begin
             adv_push.4 # push commitment to stack
@@ -479,7 +479,7 @@ fn test_pipe_double_words_preimage_to_memory() {
 #[test]
 fn test_pipe_double_words_preimage_to_memory_invalid_preimage() {
     let four_words = "
-    use.std::mem
+    use std::mem
 
     begin
         adv_push.4  # push commitment to stack
@@ -503,7 +503,7 @@ fn test_pipe_double_words_preimage_to_memory_invalid_preimage() {
 #[test]
 fn test_pipe_double_words_preimage_to_memory_invalid_count() {
     let three_words = "
-    use.std::mem
+    use std::mem
 
     begin
         adv_push.4  # push commitment to stack

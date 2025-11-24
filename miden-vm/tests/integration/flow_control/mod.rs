@@ -1,6 +1,6 @@
 use alloc::sync::Arc;
 
-use miden_assembly::{Assembler, LibraryPath, Report, ast::ModuleKind};
+use miden_assembly::{Assembler, PathBuf, Report, ast::ModuleKind};
 use miden_debug_types::{SourceLanguage, SourceManager};
 use miden_processor::ExecutionError;
 use miden_prover::Word;
@@ -151,7 +151,7 @@ fn if_in_loop_in_if() {
 fn local_fn_call() {
     // returning from a function with non-empty overflow table should result in an error
     let source = "
-        proc.foo
+        proc foo
             push.1
         end
 
@@ -171,7 +171,7 @@ fn local_fn_call() {
     // in the overflow table from the parent execution context
     let source = format!(
         "
-        proc.foo
+        proc foo
             repeat.20
                 drop
             end
@@ -201,7 +201,7 @@ fn local_fn_call_with_mem_access() {
     // foo should be executed in a different memory context; thus, when we read from memory after
     // calling foo, the value saved into memory[0] before calling foo should still be there.
     let source = "
-        proc.foo
+        proc foo
             mem_store.0
         end
 
@@ -223,7 +223,7 @@ fn local_fn_call_with_mem_access() {
 #[test]
 fn simple_syscall() {
     let kernel_source = "
-        export.foo
+        pub proc foo
             add
         end
     ";
@@ -249,10 +249,10 @@ fn simple_syscall() {
 #[test]
 fn simple_syscall_2() {
     let kernel_source = "
-        export.foo
+        pub proc foo
             add
         end
-        export.bar
+        pub proc bar
             mul
         end
     ";
@@ -291,7 +291,8 @@ fn call_in_syscall() {
         # USER CONTEXT FUNCTIONS (i.e. not 0)
         # ====================================================================================
 
-        proc.userland.4
+        @locals(4)
+        proc userland
             # Ensure that the memory locals are fresh before we write to them
             loc_loadw_be.0 assertz assertz assertz assertz
 
@@ -308,7 +309,8 @@ fn call_in_syscall() {
         # CONTEXT 0 FUNCTIONS
         # ====================================================================================
 
-        export.second_kernel_entry.4
+        @locals(4)
+        pub proc second_kernel_entry
             # Ensure that the memory locals are fresh before we write to them
             loc_loadw_be.0 assertz assertz assertz assertz
 
@@ -317,7 +319,8 @@ fn call_in_syscall() {
             push.9.10.11.12 loc_storew_be.0 dropw
         end
 
-        export.first_kernel_entry.4
+        @locals(4)
+        pub proc first_kernel_entry
             # Ensure that the memory locals are fresh before we write to them
             loc_loadw_be.0 assertz assertz assertz assertz
 
@@ -333,7 +336,7 @@ fn call_in_syscall() {
     ";
 
     let program_source = "
-        proc.new_ctx
+        proc new_ctx
             syscall.first_kernel_entry
         end
 
@@ -357,14 +360,14 @@ fn call_in_syscall() {
 #[test]
 fn root_context_separate_overflows() {
     let kernel_source = "
-    export.foo
+    pub proc foo
         # Drop an element, which in the failing case removes the `100` from the overflow table
         drop
     end
     ";
 
     let program_source = "
-    proc.bar
+    proc bar
         syscall.foo
     end
 
@@ -398,7 +401,7 @@ fn root_context_separate_overflows() {
 #[test]
 fn simple_dyn_exec() {
     let program_source = "
-        proc.foo
+        proc foo
             add
         end
 
@@ -449,9 +452,9 @@ fn simple_dyn_exec() {
 #[test]
 fn dynexec_with_procref() {
     let program_source = "
-    use.external::module
+    use external::module
 
-    proc.foo
+    proc foo
         push.1.2
         u32wrapping_add
     end
@@ -473,9 +476,9 @@ fn dynexec_with_procref() {
     let mut test = build_test!(program_source, &[]);
     test.libraries.push(StdLibrary::default().library().clone());
     test.add_module(
-        "external::module".parse().unwrap(),
+        "external::module",
         "\
-        export.func
+        pub proc func
             u32wrapping_add.1
         end
         ",
@@ -487,7 +490,7 @@ fn dynexec_with_procref() {
 #[test]
 fn simple_dyncall() {
     let program_source = "
-        proc.foo
+        proc foo
             # test that the execution context has changed
             mem_load.0 assertz
 
@@ -565,13 +568,13 @@ fn simple_dyncall() {
 #[test]
 fn dyncall_with_syscall_and_caller() {
     let kernel_source = "
-        export.foo
+        pub proc foo
             caller
         end
     ";
 
     let program_source = "
-        proc.bar
+        proc bar
             syscall.foo
         end
 
@@ -613,10 +616,11 @@ fn dyncall_with_syscall_and_caller() {
 #[test]
 fn procref() -> Result<(), Report> {
     let module_source = "
-    use.std::math::u64
-    export.u64::overflowing_add
+    use std::math::u64
+    pub use u64::overflowing_add
 
-    export.foo.4
+    @locals(4)
+    pub proc foo
         push.3.4
     end
     ";
@@ -624,7 +628,7 @@ fn procref() -> Result<(), Report> {
     // obtain procedures' MAST roots by compiling them as module
     let mast_roots: Vec<Word> = {
         let source_manager = Arc::new(miden_assembly::DefaultSourceManager::default());
-        let module_path = "test::foo".parse::<LibraryPath>().unwrap();
+        let module_path = PathBuf::new("test::foo").unwrap();
         let mut parser = Module::parser(ModuleKind::Library);
         let module = parser.parse_str(module_path, module_source, &source_manager)?;
         let library = Assembler::new(source_manager)
@@ -639,10 +643,11 @@ fn procref() -> Result<(), Report> {
     };
 
     let source = "
-    use.std::math::u64
-    use.std::sys
+    use std::math::u64
+    use std::sys
 
-    proc.foo.4
+    @locals(4)
+    proc foo
         push.3.4
     end
 

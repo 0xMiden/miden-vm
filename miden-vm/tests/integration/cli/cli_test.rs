@@ -126,10 +126,10 @@ fn cli_bundle_output() {
     cmd.arg("bundle")
         .arg("./tests/integration/cli/data/lib")
         .arg("--output")
-        .arg("test.masl");
+        .arg("cli_bundle_output.masl");
     cmd.assert().success();
-    assert!(Path::new("test.masl").exists());
-    fs::remove_file("test.masl").unwrap()
+    assert!(Path::new("cli_bundle_output.masl").exists());
+    fs::remove_file("cli_bundle_output.masl").unwrap()
 }
 
 // First compile a library to a .masl file, then run a program that uses it.
@@ -139,17 +139,17 @@ fn cli_run_with_lib() -> Result<(), Box<dyn std::error::Error>> {
     cmd.arg("bundle")
         .arg("./tests/integration/cli/data/lib")
         .arg("--output")
-        .arg("lib.masl");
+        .arg("cli_run_with_lib.masl");
     cmd.assert().success();
 
     let mut cmd = bin_under_test().command();
     cmd.arg("run")
         .arg("./tests/integration/cli/data/main.masm")
         .arg("-l")
-        .arg("./lib.masl");
+        .arg("./cli_run_with_lib.masl");
     cmd.assert().success();
 
-    fs::remove_file("lib.masl").unwrap();
+    fs::remove_file("cli_run_with_lib.masl").unwrap();
     Ok(())
 }
 

@@ -2,8 +2,8 @@ use core::ops::ControlFlow;
 
 use crate::{
     ModuleIndex, Spanned,
-    ast::{InvocationTarget, InvokeKind, Module, visit::Visit},
-    linker::{CallerInfo, LinkerError, NameResolver, ResolvedTarget},
+    ast::{AliasTarget, InvocationTarget, InvokeKind, Module, SymbolResolution, visit::Visit},
+    linker::{LinkerError, SymbolResolutionContext, SymbolResolver},
 };
 
 // MAYBE REWRITE CHECK
@@ -19,11 +19,11 @@ use crate::{
 /// that occurs, we want to go back and rewrite all of the modules that can be further refined as a
 /// result of that additional information.
 pub struct MaybeRewriteCheck<'a, 'b: 'a> {
-    resolver: &'a NameResolver<'b>,
+    resolver: &'a SymbolResolver<'b>,
 }
 impl<'a, 'b: 'a> MaybeRewriteCheck<'a, 'b> {
     /// Create a new instance of this analysis with the given [NameResolver].
-    pub fn new(resolver: &'a NameResolver<'b>) -> Self {
+    pub fn new(resolver: &'a SymbolResolver<'b>) -> Self {
         Self { resolver }
     }
 
@@ -42,7 +42,7 @@ impl<'a, 'b: 'a> MaybeRewriteCheck<'a, 'b> {
 // ================================================================================================
 
 struct RewriteCheckVisitor<'a, 'b: 'a> {
-    resolver: &'a NameResolver<'b>,
+    resolver: &'a SymbolResolver<'b>,
     module_id: ModuleIndex,
 }
 
@@ -52,17 +52,20 @@ impl<'a, 'b: 'a> RewriteCheckVisitor<'a, 'b> {
         kind: InvokeKind,
         target: &InvocationTarget,
     ) -> ControlFlow<Result<bool, LinkerError>> {
-        let caller = CallerInfo {
+        let context = SymbolResolutionContext {
             span: target.span(),
             module: self.module_id,
-            kind,
+            kind: Some(kind),
         };
-        match self.resolver.resolve_target(&caller, target) {
+        match self.resolver.resolve_invoke_target(&context, target) {
             Err(err) => ControlFlow::Break(Err(err)),
-            Ok(ResolvedTarget::Resolved { .. }) => ControlFlow::Break(Ok(true)),
-            Ok(ResolvedTarget::Exact { .. } | ResolvedTarget::Phantom(_)) => {
-                ControlFlow::Continue(())
-            },
+            Ok(SymbolResolution::Exact { .. }) => ControlFlow::Break(Ok(true)),
+            Ok(
+                SymbolResolution::MastRoot(_)
+                | SymbolResolution::Module { .. }
+                | SymbolResolution::Local(_)
+                | SymbolResolution::External(_),
+            ) => ControlFlow::Continue(()),
         }
     }
 }
@@ -76,6 +79,33 @@ impl<'a, 'b: 'a> Visit<Result<bool, LinkerError>> for RewriteCheckVisitor<'a, 'b
     }
     fn visit_call(&mut self, target: &InvocationTarget) -> ControlFlow<Result<bool, LinkerError>> {
         self.resolve_target(InvokeKind::Call, target)
+    }
+    fn visit_alias_target(
+        &mut self,
+        target: &AliasTarget,
+    ) -> ControlFlow<Result<bool, LinkerError>> {
+        match target {
+            AliasTarget::MastRoot(_) => ControlFlow::Continue(()),
+            AliasTarget::Path(path) if path.is_absolute() => ControlFlow::Continue(()),
+            AliasTarget::Path(path) => {
+                let context = SymbolResolutionContext {
+                    span: path.span(),
+                    module: self.module_id,
+                    kind: None,
+                };
+                match self.resolver.resolve_path(&context, path.as_deref()) {
+                    Err(err) => ControlFlow::Break(Err(err)),
+                    Ok(SymbolResolution::Exact { .. } | SymbolResolution::Module { .. }) => {
+                        ControlFlow::Break(Ok(true))
+                    },
+                    Ok(
+                        SymbolResolution::MastRoot(_)
+                        | SymbolResolution::Local(_)
+                        | SymbolResolution::External(_),
+                    ) => ControlFlow::Continue(()),
+                }
+            },
+        }
     }
     fn visit_invoke_target(
         &mut self,
