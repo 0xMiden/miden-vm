@@ -79,9 +79,7 @@ pub trait Processor: Sized {
     /// [ptr, num_read, num_eval, ...] -> [ptr, num_read, num_eval, ...]
     ///
     /// # Note
-    /// This is a default implementation that should be overridden by processors that have
-    /// specific circuit evaluation capabilities. The default implementation returns an error
-    /// since not all processors support circuit evaluation.
+    /// All processors need to support this operation.
     fn op_eval_circuit(
         &mut self,
         _err_ctx: &impl ErrorContext,
