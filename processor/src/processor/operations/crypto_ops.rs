@@ -105,9 +105,10 @@ pub(super) fn op_mrupdate<P: Processor>(
         .update_merkle_node(claimed_old_root, depth, index, new_value)
         .map_err(|err| ExecutionError::advice_error(err, clk, err_ctx))?;
 
-    if let Some(path) = &path {
-        // TODO(plafer): return error instead of asserting
-        assert_eq!(path.len(), depth.as_int() as usize);
+    if let Some(path) = &path
+        && path.len() != depth.as_int() as usize
+    {
+        return Err(ExecutionError::invalid_crypto_input(clk, path.len(), depth, err_ctx));
     }
 
     let (addr, new_root) = processor.hasher().update_merkle_root(
