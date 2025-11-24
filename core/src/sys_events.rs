@@ -78,7 +78,7 @@ pub enum SystemEvent {
     ///
     /// Outputs:
     ///   Operand stack: [KEY, ...]
-    ///   Advice stack: [num_values, ...]
+    ///   Advice stack: [values.len(), ...]
     ///   Advice map: {KEY: values}
     MapValueCountToStack,
 

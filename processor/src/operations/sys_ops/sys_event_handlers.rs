@@ -305,7 +305,7 @@ fn copy_map_value_to_adv_stack(
 ///   Advice map: {KEY: values}
 ///
 /// Outputs:
-///   Advice stack: [values_len, ...]
+///   Advice stack: [values.len(), ...]
 ///   Advice map: {KEY: values}
 ///
 ///
