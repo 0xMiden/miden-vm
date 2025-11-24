@@ -1,10 +1,9 @@
-use core::convert::TryFrom;
-
 use miden_air::Felt;
 
 use crate::{
-    ErrorContext, ExecutionError, MemoryError,
+    ErrorContext, ExecutionError,
     fast::Tracer,
+    operations::utils::validate_dual_word_stream_addrs,
     processor::{
         AdviceProviderInterface, MemoryInterface, Processor, StackInterface, SystemInterface,
     },
@@ -278,23 +277,8 @@ pub(super) fn op_crypto_stream<P: Processor>(
     let src_addr = processor.stack().get(SRC_PTR_IDX);
     let dst_addr = processor.stack().get(DST_PTR_IDX);
 
-    if src_addr == dst_addr {
-        let addr_u64 = src_addr.as_int();
-        let addr = match u32::try_from(addr_u64) {
-            Ok(addr) => addr,
-            Err(_) => {
-                return Err(ExecutionError::MemoryError(MemoryError::address_out_of_bounds(
-                    addr_u64, err_ctx,
-                )));
-            },
-        };
-
-        return Err(ExecutionError::MemoryError(MemoryError::IllegalMemoryAccess {
-            ctx,
-            addr,
-            clk: Felt::from(clk),
-        }));
-    }
+    // Validate address ranges and check for overlap using half-open intervals.
+    validate_dual_word_stream_addrs(src_addr, dst_addr, ctx, clk, err_ctx)?;
 
     // Load plaintext from source memory (2 words = 8 elements)
     let src_addr_word2 = src_addr + WORD_SIZE_FELT;

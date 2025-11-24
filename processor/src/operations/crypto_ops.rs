@@ -5,7 +5,7 @@ use miden_air::trace::{
 use miden_core::mast::MastForest;
 
 use super::{ExecutionError, Operation, Process};
-use crate::{ErrorContext, Felt, MemoryError, Word};
+use crate::{ErrorContext, Felt, Word, operations::utils::validate_dual_word_stream_addrs};
 
 // CRYPTOGRAPHIC OPERATIONS
 // ================================================================================================
@@ -225,23 +225,8 @@ impl Process {
         let src_addr = self.stack.get(SRC_PTR_IDX);
         let dst_addr = self.stack.get(DST_PTR_IDX);
 
-        if src_addr == dst_addr {
-            let addr_u64 = src_addr.as_int();
-            let addr = match u32::try_from(addr_u64) {
-                Ok(addr) => addr,
-                Err(_) => {
-                    return Err(ExecutionError::MemoryError(MemoryError::address_out_of_bounds(
-                        addr_u64, err_ctx,
-                    )));
-                },
-            };
-
-            return Err(ExecutionError::MemoryError(MemoryError::IllegalMemoryAccess {
-                ctx,
-                addr,
-                clk: Felt::from(clk),
-            }));
-        }
+        // Validate address ranges and check for overlap
+        validate_dual_word_stream_addrs(src_addr, dst_addr, ctx, clk, err_ctx)?;
 
         // Load plaintext from source memory (2 words = 8 elements)
         let src_addr_word2 = src_addr + WORD_SIZE_FELT;
