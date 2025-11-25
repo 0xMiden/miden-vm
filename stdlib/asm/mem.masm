@@ -22,9 +22,10 @@ use std::crypto::hashes::rpo
 #! - read_ptr and write_ptr are not a u32 values.
 #!
 #! Total cycles:
-#! - if read and write pointers are mutually word-unaligned: 21 + 14 * num_elements
+#! - if read and write pointers are mutually word-unaligned: 27 + 14 * num_elements
+#! - if `n` is less than 12 elements: 27 + 14 * num_elements
 #! - if read and write pointers are mutually mutually word-aligned, it's equal to the sum of:
-#!   - prologue: 13 cycles
+#!   - prologue: 19 cycles
 #!   - prefix handling: 31 + 14 * num_prefix_elements, where num_prefix_elements is 
 #!     the number of elements required to make the read (and write) pointer word-aligned
 #!   - words handling: 15 + 16 * num_words
@@ -40,6 +41,11 @@ pub proc memcopy
     # Compute the remainders of dividing read_ptr and write_ptr by 4. Compare them to get the 
     # "alignment flag".
     dup.1 u32mod.4 dup.1 u32mod.4 eq # 11 cycles
+    # => [alignment_flag, read_ptr, write_ptr, n]
+
+    # if the number of elements to copy is small (less than 12), use only the `memcopy_elements`
+    # procedure 
+    dup.3 u32lt.12 or # 6 cycles
     # => [alignment_flag, read_ptr, write_ptr, n]
 
     if.true
