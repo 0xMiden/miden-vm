@@ -406,30 +406,3 @@ end
 pub proc merge
     hmerge
 end
-
-#! Deprecated: Use `hash` instead. This is a backward compatibility wrapper.
-#! Computes RPO hash of a single 256-bit input (8 field elements).
-#!
-#! Input: [INPUT[8], ...]
-#! Output: [DIGEST[4], ...]
-#!
-#! Where:
-#! - INPUT[8] = [e_0, ..., e_7] represents 8 field elements
-#! - DIGEST[4] = [d_0, d_1, d_2, d_3] = RPO256(INPUT[8])
-pub proc hash_1to1
-    exec.hash
-end
-
-#! Deprecated: Use `merge` instead. This is a backward compatibility wrapper.
-#! Merges two 256-bit digests (8 field elements) via RPO hash.
-#!
-#! Input: [INPUT_L[4], INPUT_R[4], ...]
-#! Output: [DIGEST[4], ...]
-#!
-#! Where:
-#! - INPUT_L[4] = [l_0, l_1, l_2, l_3] represents left digest
-#! - INPUT_R[4] = [r_0, r_1, r_2, r_3] represents right digest
-#! - DIGEST[4] = [d_0, d_1, d_2, d_3] = RPO256(INPUT_L[4] || INPUT_R[4])
-pub proc hash_2to1
-    exec.merge
-end

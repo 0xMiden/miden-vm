@@ -1511,15 +1511,6 @@ proc consume_padding_message_schedule
     movdn.7
 end
 
-#! Internal procedure for computing SHA256 2-to-1 hash
-proc merge_internal
-    push.0x5be0cd19.0x1f83d9ab.0x9b05688c.0x510e527f
-    push.0xa54ff53a.0x3c6ef372.0xbb67ae85.0x6a09e667
-
-    exec.prepare_message_schedule_and_consume
-    exec.consume_padding_message_schedule
-end
-
 #! SHA256 2-to-1 hash (merge): Given 64 -bytes input, computes 32 -bytes SHA256 digest
 #!
 #! Input: [m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, ...]
@@ -1533,20 +1524,11 @@ end
 #!
 #! SHA256 digest is represented in terms of eight 32 -bit words ( big endian byte order ).
 pub proc merge
-    exec.merge_internal
-end
-
-#! Internal procedure for computing SHA256 1-to-1 hash
-proc hash_internal
-    # apply padding, see padding rule in section 5.1.1 of
-    # https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.180-4.pdf
-    push.256.0.0.0.0.0.0.2147483648
-    swapdw
-
     push.0x5be0cd19.0x1f83d9ab.0x9b05688c.0x510e527f
     push.0xa54ff53a.0x3c6ef372.0xbb67ae85.0x6a09e667
 
     exec.prepare_message_schedule_and_consume
+    exec.consume_padding_message_schedule
 end
 
 #! SHA256 1-to-1 hash: Given 32 -bytes input, computes 32 -bytes SHA256 digest
@@ -1564,42 +1546,15 @@ end
 #!
 #! SHA256 digest is represented in terms of eight 32 -bit words ( big endian byte order ).
 pub proc hash
-    exec.hash_internal
-end
+    # apply padding, see padding rule in section 5.1.1 of
+    # https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.180-4.pdf
+    push.256.0.0.0.0.0.0.2147483648
+    swapdw
 
-#! Deprecated: Use `merge` instead. This is a backward compatibility wrapper.
-#! SHA256 2-to-1 hash (merge): Given 64 -bytes input, computes 32 -bytes SHA256 digest
-#!
-#! Input: [m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, ...]
-#! Output: [dig0, dig1, dig2, dig3, dig4, dig5, dig6, dig7, ...]
-#!
-#! Note, each SHA256 word is 32 -bit wide, so that's how input is expected.
-#! As you've 64 -bytes, consider packing 4 consecutive bytes into single word,
-#! maintaining big endian byte order.
-#!
-#! SHA256 digest is represented in terms of eight 32 -bit words ( big endian byte order ).
-pub proc hash_2to1
-    exec.merge
-end
+    push.0x5be0cd19.0x1f83d9ab.0x9b05688c.0x510e527f
+    push.0xa54ff53a.0x3c6ef372.0xbb67ae85.0x6a09e667
 
-#! Deprecated: Use `hash` instead. This is a backward compatibility wrapper.
-#! SHA256 1-to-1 hash: Given 32 -bytes input, computes 32 -bytes SHA256 digest
-#!
-#! Expected stack state:
-#!
-#! [m0, m1, m2, m3, m4, m5, m6, m7, ...]
-#!
-#! Final stack state:
-#!
-#! [dig0, dig1, dig2, dig3, dig4, dig5, dig6, dig7, ...]
-#!
-#! Note, each SHA256 word is 32 -bit wide, so that's how input is expected.
-#! As you've 32 -bytes, consider packing 4 consecutive bytes into single word,
-#! maintaining big endian byte order.
-#!
-#! SHA256 digest is represented in terms of eight 32 -bit words ( big endian byte order ).
-pub proc hash_1to1
-    exec.hash
+    exec.prepare_message_schedule_and_consume
 end
 
 #! Given a memory address and a message length in bytes, compute its sha256 digest
