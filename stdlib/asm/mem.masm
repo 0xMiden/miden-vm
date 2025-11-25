@@ -7,8 +7,8 @@ use std::crypto::hashes::rpo
 #! If possible, this procedure will copy word-aligned words internally using `memcopy_words` 
 #! procedure, decreasing the total number of cycles required to make a copy.
 #!
-#! It is advised to copy small chunks of memory using `memcopy_elements` procedure instead, since it
-#! won't have a computation logic overhead.
+#! It is advised to copy small chunks of memory (num_elements < 12) using `memcopy_elements` 
+#! procedure instead, since it won't have a computation logic overhead.
 #!
 #! Inputs:  [n, read_ptr, write_ptr]
 #! Outputs: []
@@ -22,14 +22,14 @@ use std::crypto::hashes::rpo
 #! - read_ptr and write_ptr are not a u32 values.
 #!
 #! Total cycles:
-#! - if read and write pointers are mutually word-unaligned: 23 + 14 * num_elements
+#! - if read and write pointers are mutually word-unaligned: 21 + 14 * num_elements
 #! - if read and write pointers are mutually mutually word-aligned, it's equal to the sum of:
-#!   - prologue: 14 cycles
-#!   - prefix handling (worst case): 28 + 14 * num_prefix_elements, where num_prefix_elements is 
+#!   - prologue: 13 cycles
+#!   - prefix handling: 31 + 14 * num_prefix_elements, where num_prefix_elements is 
 #!     the number of elements required to make the read (and write) pointer word-aligned
 #!   - words handling: 15 + 16 * num_words
 #!   - suffix handling: 9 + 14 * num_suffix_elements
-#!     - in total: 66 + 14 * num_prefix_elements + 16 * num_words + 14 * num_suffix_elements
+#!     - in total: 68 + 14 * num_prefix_elements + 16 * num_words + 14 * num_suffix_elements
 pub proc memcopy
     # check whether the difference between `read_ptr` and `write_ptr` is a multiple of 4, otherwise
     # these pointers will never be simultaneously word-alined, so we won't be able to use 
@@ -39,63 +39,36 @@ pub proc memcopy
 
     # Compute the remainders of dividing read_ptr and write_ptr by 4. Compare them to get the 
     # "alignment flag".
-    dup.1 u32mod.4 dup.1 u32mod.4 dup.1 eq # 12 cycles
-    # => [alignment_flag, write_ptr%4, read_ptr, write_ptr, n]
+    dup.1 u32mod.4 dup.1 u32mod.4 eq # 11 cycles
+    # => [alignment_flag, read_ptr, write_ptr, n]
 
     if.true
         # if read pointer and write pointer are mutually word-aligned (i.e. 
         # (read_ptr - write_ptr) mod 4 = 0) we will be able to use `memcopy_words` in the cycle to
         # optimize the copy
-        # => [write_ptr%4, read_ptr, write_ptr, n]
+        # => [read_ptr, write_ptr, n]
 
         ### "prefix" handling #####################################################################
 
-        # if the current read pointer (and write pointer, since inside this branch they are assumed
-        # to be mutually word-aligned) is not word-aligned and we need to copy at least the 
-        # (4 - write_ptr%4) values (so n >= (4 - write_ptr%4), meaning we have enough values to copy
-        # to make pointers word-aligned), use `memcopy_elements_internal` to copy values until it
-        # become word-aligned
-        dup neq.0 # 3 cycles
-        # => [is_not_word_aligned, write_ptr%4, read_ptr, write_ptr, n]
+        # copy `m` values, where `m` is the number of elements needed to make pointers word-aligned.
+        # If `m` > `n` (meaning we don't have enough values to make pointers word-aligned), copy all
+        # `n` available values.  
 
-        push.4 movup.2 sub # 4 cycles
-        # => [4 - write_ptr%4, is_not_word_aligned, read_ptr, write_ptr, n] 
-        
-        dup dup.5 u32lte # 7 cycles
-        # => [(4 - write_ptr%4) <= n, 4 - write_ptr%4, is_not_word_aligned, read_ptr, write_ptr, n]
+        # get the number of elements required to make read_ptr multiple of 4
+        dup.2 exec.elements_to_next_multiple_of_4 # 20 cycles
+        # => [m, read_ptr, write_ptr, n]
 
-        swap movdn.2 and # 3 cycles
-        # => [should_handle_prefix, 4 - write_ptr%4, read_ptr, write_ptr, n]
+        # update the total number of values left to copy
+        movup.3 dup.1 sub movdn.3 # 5 cycles
+        # => [m, read_ptr, write_ptr, n - m]
 
-        if.true
-            # in that case 4 - write_ptr%4 is the number of values we should copy until pointers
-            # become word-aligned
-            # => [4 - write_ptr%4, read_ptr, write_ptr, n]
+        # copy the prefix elements
+        exec.memcopy_elements_internal # 4 + 14 * num_prefix_elements cycles
+        # => [0, read_ptr + m, write_ptr + m, n - m]
 
-            dup movdn.3 # 2 cycles
-            # => [4 - write_ptr%4, read_ptr, write_ptr, 4 - write_ptr%4, n]
-
-            exec.memcopy_elements_internal # 4 + 14 * num_prefix_elements cycles
-            # => [0, wa_read_ptr, wa_write_ptr, 4 - write_ptr%4, n]
-
-            # update the total number of values left to copy
-            drop movup.3 movup.3 sub # 5 cycles
-            # => [n', wa_read_ptr, wa_write_ptr]
-        else
-            drop movup.2 # 2 cycles
-            # => [n, read_ptr, write_ptr]
-        end
-        # => [n', read_ptr', write_ptr']
-
-        # On that stage we could be in one of these cases:
-        # - Read and write pointers are word-aligned (we either handled the prefix element, making
-        #   the pointers word-aligned or if these pointers were word-aligned initially). In that
-        #   case we should proceed with words handling, copying the words with 
-        #   `memcopy_words_internal` procedure.
-        # - Pointers are still non-word-aligned, but with `n` less than the number of values 
-        #   required to make pointers word-aligned (e.g. pointer is 1001, but n = 2). In that case
-        #   the words handling will be skipped (we have 0 words to copy), so the copy of the
-        #   remaining values will be done by the memcopy_elements during the suffix handling.
+        # rearrange the stack for word copy
+        drop movup.2 # 2 cycles
+        # => [n - m, read_ptr + m, write_ptr + m]
 
         ### "words" handling ######################################################################
 
@@ -103,6 +76,7 @@ pub proc memcopy
         u32divmod.4 # 2 cycles
         # => [values_left, num_words, read_ptr', write_ptr']
 
+        # copy the words
         movdn.3 exec.memcopy_words_internal # 13 + 16 * num_words cycles
         # => [0, read_ptr'', write_ptr'', values_left]
 
@@ -114,12 +88,43 @@ pub proc memcopy
     else
         # if read pointer and write pointer are not word-aligned between each other, use 
         # `memcopy_elements` to copy values one-by-one
-        # => [write_ptr%4, read_ptr, write_ptr, n]
+        # => [read_ptr, write_ptr, n]
 
-        drop movup.2 exec.memcopy_elements # 9 + 14 * num_elements cycles
+        movup.2 exec.memcopy_elements # 8 + 14 * num_elements cycles
         # => []
     end
     # => []
+end
+
+#! Returns the number of elements required to make the provided memory pointer multiple of 4, or `n`
+#! if it is smaller than the above described value.
+#!
+#! Inputs:  [n, ptr]
+#! Outputs: [m, ptr]
+#!
+#! Where:
+#! - n is the value that limits the result from below: the result cannot be less than it.
+#! - ptr is the memory pointer relative to which the next multiple of 4 should be computed.
+#! - m is the value equal to the number of elements required to make the provided pointer multiple
+#!   of 4 or `n` if it is smaller than the above described value.
+#!
+#! Total cycles: 19 cycles
+proc elements_to_next_multiple_of_4
+    # get the quotient and the remainder of the division by 4
+    dup.1 u32divmod.4 # 3 cycles
+    # => [ptr mod 4, ptr / 4, n, ptr]
+
+    # get the memory pointer which is next multiple of 4
+    neq.0 add mul.4 # 5 cycles
+    # => [ptr + to_next_4, n, ptr]
+
+    # get the number of values required to make the pointer multiple of 4
+    dup.2 sub # 3 cycles
+    # => [to_next_4, n, ptr]
+
+    # leave the smallest of the two values on the stack
+    dup.1 dup.1 u32gte cdrop # 8 cycles
+    # => [m, ptr]
 end
 
 #! Copies `n` words from `read_ptr` to `write_ptr`.
@@ -204,8 +209,8 @@ end
 
 #! Copies `n` elements from `read_ptr` to `write_ptr`.
 #!
-#! It is advised to copy big chunks of memory using `memcopy` procedure instead, since it will 
-#! handle the memory more efficiently.
+#! It is advised to copy big chunks of memory (num_elements >= 12) using `memcopy` procedure 
+#! instead, since it will handle the memory more efficiently.
 #!
 #! Inputs:  [n, read_ptr, write_ptr]
 #! Outputs: []
