@@ -22,8 +22,8 @@ use std::crypto::hashes::rpo
 #! - read_ptr and write_ptr are not a u32 values.
 #!
 #! Total cycles:
-#! - if read and write pointers are mutually unaligned: 23 + 14 * num_elements
-#! - if read and write pointers are mutually aligned, it's equal to the sum of:
+#! - if read and write pointers are mutually word-unaligned: 23 + 14 * num_elements
+#! - if read and write pointers are mutually mutually word-aligned, it's equal to the sum of:
 #!   - prologue: 14 cycles
 #!   - prefix handling (worst case): 28 + 14 * num_prefix_elements, where num_prefix_elements is 
 #!     the number of elements required to make the read (and write) pointer word-aligned
@@ -31,8 +31,9 @@ use std::crypto::hashes::rpo
 #!   - suffix handling: 9 + 14 * num_suffix_elements
 #!     - in total: 66 + 14 * num_prefix_elements + 16 * num_words + 14 * num_suffix_elements
 pub proc memcopy
-    # check whether the difference between `read_ptr` and `write_ptr` is 4, otherwise these pointers 
-    # will never be simultaneously word-alined, so we won't be able to use `memcopy_words`
+    # check whether the difference between `read_ptr` and `write_ptr` is a multiple of 4, otherwise
+    # these pointers will never be simultaneously word-alined, so we won't be able to use 
+    # `memcopy_words`
     movdn.2 u32assert2.err="memory addresses must be valid u32 values" # 2 cycles
     # => [read_ptr, write_ptr, n]
 
@@ -42,16 +43,18 @@ pub proc memcopy
     # => [alignment_flag, write_ptr%4, read_ptr, write_ptr, n]
 
     if.true
-        # if read pointer and write pointer are word-aligned between each other, we will be able to
-        # use `memcopy_words` in the cycle to optimize the copy
+        # if read pointer and write pointer are mutually word-aligned (i.e. 
+        # (read_ptr - write_ptr) mod 4 = 0) we will be able to use `memcopy_words` in the cycle to
+        # optimize the copy
         # => [write_ptr%4, read_ptr, write_ptr, n]
 
         ### "prefix" handling #####################################################################
 
-        # if the current read pointer (and write pointer, since now they are in "sync") is not
-        # word-aligned and we need to copy at least the (4 - write_ptr%4) values (so
-        # n >= (4 - write_ptr%4), meaning we have enough values to copy to make pointers
-        # word-aligned), use `memcopy_elements_internal` to copy values until it become word-aligned
+        # if the current read pointer (and write pointer, since inside this branch they are assumed
+        # to be mutually word-aligned) is not word-aligned and we need to copy at least the 
+        # (4 - write_ptr%4) values (so n >= (4 - write_ptr%4), meaning we have enough values to copy
+        # to make pointers word-aligned), use `memcopy_elements_internal` to copy values until it
+        # become word-aligned
         dup neq.0 # 3 cycles
         # => [is_not_word_aligned, write_ptr%4, read_ptr, write_ptr, n]
 
@@ -59,7 +62,7 @@ pub proc memcopy
         # => [4 - write_ptr%4, is_not_word_aligned, read_ptr, write_ptr, n] 
         
         dup dup.5 u32lte # 7 cycles
-        # => [(4 - write_ptr%4) <= 4, 4 - write_ptr%4, is_not_word_aligned, read_ptr, write_ptr, n]
+        # => [(4 - write_ptr%4) <= n, 4 - write_ptr%4, is_not_word_aligned, read_ptr, write_ptr, n]
 
         swap movdn.2 and # 3 cycles
         # => [should_handle_prefix, 4 - write_ptr%4, read_ptr, write_ptr, n]
@@ -84,10 +87,15 @@ pub proc memcopy
         end
         # => [n', read_ptr', write_ptr']
 
-        # on that stage we either have word-aligned read and write pointers (if.true case or if 
-        # these pointers were word-aligned initially) or non-word-aligned pointers, but with `n`
-        # less than the number of values required to make pointers word-aligned (e.g. pointer is 
-        # 1001, but n = 2)
+        # On that stage we could be in one of these cases:
+        # - Read and write pointers are word-aligned (we either handled the prefix element, making
+        #   the pointers word-aligned or if these pointers were word-aligned initially). In that
+        #   case we should proceed with words handling, copying the words with 
+        #   `memcopy_words_internal` procedure.
+        # - Pointers are still non-word-aligned, but with `n` less than the number of values 
+        #   required to make pointers word-aligned (e.g. pointer is 1001, but n = 2). In that case
+        #   the words handling will be skipped (we have 0 words to copy), so the copy of the
+        #   remaining values will be done by the memcopy_elements during the suffix handling.
 
         ### "words" handling ######################################################################
 
