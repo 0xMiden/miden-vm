@@ -370,7 +370,7 @@ end
 #! - If number of elements divides by 8: 52 cycles + 3 * words
 #! - Else: 185 cycles + 3 * words
 #! where `words` is the number of quads of input values.
-pub proc hash_memory
+pub proc hash_elements
     # push the 0 as the pad_inputs flag: in the general case we should not pad the inputs
     push.0 movdn.2
     # => [ptr, num_elements, pad_inputs_flag]

@@ -393,7 +393,7 @@ fn test_copy_digest() {
 }
 
 #[test]
-fn test_hash_memory() {
+fn test_hash_elements() {
     // hash fewer than 8 elements
     let compute_inputs_hash_5 = "
     use std::crypto::hashes::rpo
@@ -405,7 +405,7 @@ fn test_hash_memory() {
 
         push.5.1000
 
-        exec.rpo::hash_memory
+        exec.rpo::hash_elements
 
         # truncate stack
         swapdw dropw dropw
@@ -431,7 +431,7 @@ fn test_hash_memory() {
 
         push.8.1000
 
-        exec.rpo::hash_memory
+        exec.rpo::hash_elements
 
         # truncate stack
         swapdw dropw dropw
@@ -459,7 +459,7 @@ fn test_hash_memory() {
 
         push.15.1000
 
-        exec.rpo::hash_memory
+        exec.rpo::hash_elements
 
         # truncate stack
         swapdw dropw dropw
@@ -479,7 +479,7 @@ fn test_hash_memory() {
 }
 
 #[test]
-fn test_hash_memory_empty() {
+fn test_hash_elements_empty() {
     // absorb_double_words_from_memory
     let source = "
     use std::sys
@@ -520,7 +520,7 @@ fn test_hash_memory_empty() {
 
     build_test!(source, &[]).expect_stack(&[0; 4]);
 
-    // hash_memory
+    // hash_elements
     let source = "
     use std::crypto::hashes::rpo
 
@@ -528,7 +528,7 @@ fn test_hash_memory_empty() {
         push.0    # number of elements to hash
         push.1000 # start address
 
-        exec.rpo::hash_memory
+        exec.rpo::hash_elements
 
         # truncate stack
         swapw dropw

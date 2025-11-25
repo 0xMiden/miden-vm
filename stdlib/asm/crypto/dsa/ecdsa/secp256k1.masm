@@ -54,7 +54,7 @@ pub proc verify_ecdsa_k256_keccak
     adv_push.1 loc_store.8
 
     # Compute the expected commitment and ensure it matches the provided PK_COMM
-    push.PK_LEN_FELTS locaddr.0 exec.rpo::hash_memory
+    push.PK_LEN_FELTS locaddr.0 exec.rpo::hash_elements
     assert_eqw.err="invalid public key commitment"
     # => [MSG, ...]
 
@@ -63,7 +63,7 @@ pub proc verify_ecdsa_k256_keccak
     # [...]
 
     # Hash the 32-byte message with Keccak256
-    push.32 locaddr.12 exec.keccak256::hash_memory
+    push.32 locaddr.12 exec.keccak256::hash_bytes
     # => [DIGEST[0..8], ...]
 
     # Store the resulting digest at locaddr.[20..28]
@@ -93,7 +93,7 @@ end
 #!
 #! The caller provides the public key, the pre-hashed message digest, and the signature data in
 #! memory. This routine forwards the request to the host precompile and returns the boolean result.
-#! In typical flows the digest is obtained from `keccak256::hash_memory`, but any 32-byte prehash
+#! In typical flows the digest is obtained from `keccak256::hash_bytes`, but any 32-byte prehash
 #! is accepted.
 #!
 #! Input: `[pk_ptr, digest_ptr, sig_ptr, ...]`
@@ -149,11 +149,11 @@ pub proc verify_impl
 
     # Compute commitment: COMM = Rpo256(Rpo256(Rpo256(pk) || Rpo256(digest)) || Rpo256(sig))
     # Compute COMM_PK = Rpo256(pk)
-    push.PK_LEN_FELTS movup.2 exec.rpo::hash_memory
+    push.PK_LEN_FELTS movup.2 exec.rpo::hash_elements
     # => [COMM_PK, result, digest_ptr, sig_ptr]
 
     # Compute COMM_DIGEST = Rpo256(digest_bytes)
-    push.DIGEST_LEN_FELTS movup.6 exec.rpo::hash_memory
+    push.DIGEST_LEN_FELTS movup.6 exec.rpo::hash_elements
     # => [COMM_DIGEST, COMM_PK, result, sig_ptr]
 
     # Merge COMM_PK and COMM_DIGEST into COMM_PK_DIGEST = Rpo256(Rpo256(pk) || Rpo256(digest))
@@ -161,7 +161,7 @@ pub proc verify_impl
     # => [COMM_PK_DIGEST, result, sig_ptr]
 
     # Compute COMM_SIG = Rpo256(sig_bytes)
-    push.SIG_LEN_FELTS movup.6 exec.rpo::hash_memory
+    push.SIG_LEN_FELTS movup.6 exec.rpo::hash_elements
     # => [COMM_SIG, COMM_PK_DIGEST, result]
 
     # Merge into final commitment COMM = Rpo256(COMM_PK_DIGEST || COMM_SIG)

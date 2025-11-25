@@ -1565,7 +1565,7 @@ end
 #! Input:  [addr, len, ...]
 #! Output: [dig0, dig1, dig2, dig3, dig4, dig5, dig6, dig7, ...]
 @locals(48)
-pub proc hash_memory
+pub proc hash_bytes
     # loc.0 (input address)
     loc_store.0
 
