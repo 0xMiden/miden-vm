@@ -440,6 +440,36 @@ impl PartialEq<Path> for PathBuf {
     }
 }
 
+impl PartialEq<&Path> for Path {
+    fn eq(&self, other: &&Path) -> bool {
+        self.inner == other.inner
+    }
+}
+
+impl PartialEq<alloc::boxed::Box<Path>> for Path {
+    fn eq(&self, other: &alloc::boxed::Box<Path>) -> bool {
+        self.inner == other.inner
+    }
+}
+
+impl PartialEq<alloc::rc::Rc<Path>> for Path {
+    fn eq(&self, other: &alloc::rc::Rc<Path>) -> bool {
+        self.inner == other.inner
+    }
+}
+
+impl PartialEq<alloc::sync::Arc<Path>> for Path {
+    fn eq(&self, other: &alloc::sync::Arc<Path>) -> bool {
+        self.inner == other.inner
+    }
+}
+
+impl PartialEq<alloc::borrow::Cow<'_, Path>> for Path {
+    fn eq(&self, other: &alloc::borrow::Cow<'_, Path>) -> bool {
+        self.inner == other.as_ref().inner
+    }
+}
+
 impl fmt::Display for Path {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.inner)

@@ -19,7 +19,7 @@ impl fmt::Debug for DisplayModuleGraph<'_> {
         f.debug_set()
             .entries(self.0.modules.iter().enumerate().flat_map(|(module_index, m)| {
                 let module_index = ModuleIndex::new(module_index);
-                (0..m.symbols.len())
+                (0..m.num_symbols())
                     .map(|i| {
                         let gid = module_index + ItemIndex::new(i);
                         let out_edges = self.0.callgraph.out_edges(gid);
@@ -40,14 +40,13 @@ impl fmt::Debug for DisplayModuleGraphNodes<'_> {
             .entries(self.0.iter().enumerate().flat_map(|(module_index, m)| {
                 let module_index = ModuleIndex::new(module_index);
 
-                m.symbols
-                    .iter()
+                m.symbols()
                     .enumerate()
                     .map(|(i, symbol)| DisplayModuleGraphNode {
                         id: module_index + ItemIndex::new(i),
-                        path: &m.path,
-                        name: &symbol.name,
-                        source: m.source,
+                        path: m.path(),
+                        name: symbol.name(),
+                        source: m.source(),
                     })
                     .collect::<Vec<_>>()
             }))

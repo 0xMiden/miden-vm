@@ -2,14 +2,13 @@ use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 
 use miden_debug_types::{SourceManager, Span, Spanned};
 
+use super::{SymbolResolution, SymbolResolutionError};
 use crate::{
     Path,
     ast::{AliasTarget, Ident, ItemIndex},
 };
 
-use super::{SymbolResolution, SymbolResolutionError};
-
-/// This trait abstracts over any type which acts as a symbol table, e.g. a [crate::Module].
+/// This trait abstracts over any type which acts as a symbol table, e.g. a [crate::ast::Module].
 pub trait SymbolTable {
     /// The concrete iterator type for the container.
     type SymbolIter: Iterator<Item = LocalSymbol>;

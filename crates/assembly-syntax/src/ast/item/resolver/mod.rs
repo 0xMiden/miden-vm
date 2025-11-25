@@ -1,17 +1,15 @@
 mod error;
 mod symbol_table;
 
-pub use self::{
-    error::SymbolResolutionError,
-    symbol_table::{LocalSymbol, SymbolTable},
-};
-
-use self::symbol_table::LocalSymbolTable;
-
 use alloc::sync::Arc;
 
 use miden_debug_types::{SourceManager, SourceSpan, Span, Spanned};
 
+use self::symbol_table::LocalSymbolTable;
+pub use self::{
+    error::SymbolResolutionError,
+    symbol_table::{LocalSymbol, SymbolTable},
+};
 use super::{GlobalItemIndex, ModuleIndex};
 use crate::{
     Path, Word,

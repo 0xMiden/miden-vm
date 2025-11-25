@@ -20,7 +20,7 @@ use crate::{
 #[repr(u8)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ConstantValue {
-    /// A literal [`Felt`] value.
+    /// A literal [`miden_core::Felt`] value.
     Int(Span<IntValue>) = 1,
     /// A plain spanned string.
     String(Ident),

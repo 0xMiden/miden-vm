@@ -1,6 +1,5 @@
-use core::ops::ControlFlow;
-
 use alloc::{borrow::Cow, boxed::Box, collections::BTreeSet, sync::Arc};
+use core::ops::ControlFlow;
 
 use miden_assembly_syntax::{
     ast::{
@@ -10,8 +9,7 @@ use miden_assembly_syntax::{
     diagnostics::RelatedLabel,
 };
 
-use super::Linker;
-use crate::{GlobalItemIndex, LinkerError, ModuleIndex};
+use crate::{GlobalItemIndex, LinkerError, ModuleIndex, linker::Linker};
 
 // HELPER STRUCTS
 // ================================================================================================
@@ -302,7 +300,7 @@ impl<'a> SymbolResolver<'a> {
     ) -> Result<SymbolResolution, LinkerError> {
         log::debug!(target: "name-resolver::import", "resolving import '{symbol}' from module index {}", context.module);
         let module = &self.graph[context.module];
-        log::debug!(target: "name-resolver::import", "context source type is '{:?}'", module.source);
+        log::debug!(target: "name-resolver::import", "context source type is '{:?}'", module.source());
 
         let found = module.resolve(symbol, self)?;
         log::debug!(target: "name-resolver::import", "local resolution for '{symbol}': {found:?}");
@@ -363,7 +361,7 @@ impl<'a> SymbolResolver<'a> {
         symbol: Span<&str>,
     ) -> Result<SymbolResolution, Box<SymbolResolutionError>> {
         let module = &self.graph[module];
-        log::debug!(target: "name-resolver::local", "resolving '{symbol}' in module {}", &module.path);
+        log::debug!(target: "name-resolver::local", "resolving '{symbol}' in module {}", module.path());
         log::debug!(target: "name-resolver::local", "module status: {:?}", &module.status());
         module.resolve(symbol, self)
     }
@@ -426,7 +424,7 @@ impl<'a> SymbolResolver<'a> {
             //
             // 1. `resolving` refers to a module, and that is how we will resolve it
             // 2. `resolving` refers to an item, so we need to resolve `resolving_parent` to a
-            //     module first, then resolve `resolving_symbol` relative to that module.
+            //    module first, then resolve `resolving_symbol` relative to that module.
             // 3. `resolving` refers to an undefined symbol
 
             // First, check if `resolving` refers to a module in the global module table
@@ -690,9 +688,9 @@ impl<'a> SymbolResolver<'a> {
         let path = path.to_absolute();
         log::debug!(target: "name-resolver", "looking up module index for global symbol {path}");
         self.graph.modules.iter().find_map(|m| {
-            log::debug!(target: "name-resolver::get_module_index_by_path", "checking against {}: {}", &m.path, path.as_ref() == m.path.as_ref());
-            if path.as_ref() == m.path.as_ref() {
-                Some(m.id)
+            log::debug!(target: "name-resolver::get_module_index_by_path", "checking against {}: {}", m.path(), path.as_ref() == m.path());
+            if path.as_ref() == m.path() {
+                Some(m.id())
             } else {
                 None
             }
@@ -701,13 +699,13 @@ impl<'a> SymbolResolver<'a> {
 
     #[inline]
     pub fn module_path(&self, module: ModuleIndex) -> &Path {
-        &self.graph[module].path
+        self.graph[module].path()
     }
 
     pub fn item_path(&self, item: GlobalItemIndex) -> Arc<Path> {
         let module = &self.graph[item.module];
-        let name = &module.symbols[item.index.as_usize()].name;
-        module.path.join(name).into()
+        let name = module[item.index].name();
+        module.path().join(name).into()
     }
 }
 

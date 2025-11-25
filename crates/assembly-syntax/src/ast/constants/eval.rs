@@ -1,3 +1,6 @@
+// Allow unused assignments - required by miette::Diagnostic derive macro
+#![allow(unused_assignments)]
+
 use alloc::{sync::Arc, vec::Vec};
 
 use smallvec::SmallVec;
@@ -229,7 +232,8 @@ pub trait ConstEnvironment {
 /// result of evaluation.
 ///
 /// If `expr` could not be fully evaluated, e.g. due to external references which are not yet
-/// available, the returned expression may be only partially evaluated, or even entirely unevaluated.
+/// available, the returned expression may be only partially evaluated, or even entirely
+/// unevaluated.
 ///
 /// It is up to `env` to determine how unresolved foreign symbols are to be handled. See the
 /// [ConstEnvironment] trait for more details.

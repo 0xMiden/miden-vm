@@ -1,8 +1,11 @@
 mod callgraph;
 mod debug;
 mod errors;
-mod name_resolver;
+mod library;
+mod module;
+mod resolver;
 mod rewrites;
+mod symbols;
 
 use alloc::{boxed::Box, collections::BTreeMap, string::ToString, sync::Arc, vec::Vec};
 use core::{
@@ -12,308 +15,28 @@ use core::{
 
 use miden_assembly_syntax::{
     ast::{
-        self, AliasTarget, AttributeSet, GlobalItemIndex, Ident, InvocationTarget, InvokeKind,
-        ItemIndex, LocalSymbol, LocalSymbolResolver, Module, ModuleIndex, Path, SymbolResolution,
-        SymbolResolutionError, SymbolTable, Visibility,
-        constants::{ConstEnvironment, eval::CachedConstantValue},
-        types,
+        self, AliasTarget, AttributeSet, GlobalItemIndex, InvocationTarget, InvokeKind, ItemIndex,
+        Module, ModuleIndex, Path, SymbolResolution, Visibility, types,
     },
-    debuginfo::{SourceFile, SourceManager, SourceSpan, Span, Spanned},
-    library::{ItemInfo, Library, ModuleInfo},
+    debuginfo::{SourceManager, SourceSpan, Span, Spanned},
+    library::{ItemInfo, ModuleInfo},
 };
 use miden_core::{AdviceMap, Kernel, Word};
 use smallvec::{SmallVec, smallvec};
 
-use self::rewrites::ModuleRewriter;
 pub use self::{
     callgraph::{CallGraph, CycleError},
     errors::LinkerError,
-    name_resolver::{SymbolResolutionContext, SymbolResolver},
+    library::{LinkLibrary, LinkLibraryKind},
+    resolver::{SymbolResolutionContext, SymbolResolver},
+    symbols::{Symbol, SymbolItem},
+};
+use self::{
+    module::{LinkModule, ModuleSource},
+    resolver::*,
 };
 
-// LINKER INPUTS
-// ================================================================================================
-
-/// Represents an assembled module or modules to use when resolving references while linking,
-/// as well as the method by which referenced symbols will be linked into the assembled MAST.
-#[derive(Clone)]
-pub struct LinkLibrary {
-    /// The library to link
-    pub library: Arc<Library>,
-    /// How to link against this library
-    pub kind: LinkLibraryKind,
-}
-
-impl LinkLibrary {
-    /// Dynamically link against `library`
-    pub fn dynamic(library: Arc<Library>) -> Self {
-        Self { library, kind: LinkLibraryKind::Dynamic }
-    }
-
-    /// Statically link `library`
-    pub fn r#static(library: Arc<Library>) -> Self {
-        Self { library, kind: LinkLibraryKind::Static }
-    }
-}
-
-/// Represents how a library should be linked into the assembled MAST
-#[derive(Default, Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub enum LinkLibraryKind {
-    /// A dynamically-linked library.
-    ///
-    /// References to symbols of dynamically-linked libraries expect to have those symbols resolved
-    /// at runtime, i.e. it is expected that the library was loaded (or will be loaded on-demand),
-    /// and that the referenced symbol is resolvable by the VM.
-    ///
-    /// Concretely, the digest corresponding to a referenced procedure symbol will be linked as a
-    /// [`miden_core::mast::ExternalNode`], rather than including the procedure in the assembled
-    /// MAST, and referencing the procedure via [`miden_core::mast::MastNodeId`].
-    #[default]
-    Dynamic,
-    /// A statically-linked library.
-    ///
-    /// References to symbols of statically-linked libraries expect to be resolvable by the linker,
-    /// during assembly, i.e. it is expected that the library was provided to the assembler/linker
-    /// as an input, and that the entire definition of the referenced symbol is available.
-    ///
-    /// Concretely, a statically linked procedure will have its root, and all reachable nodes found
-    /// in the MAST of the library, included in the assembled MAST, and referenced via
-    /// [`miden_core::mast::MastNodeId`].
-    ///
-    /// Statically linked symbols are thus merged into the assembled artifact as if they had been
-    /// defined in your own project, and the library they were originally defined in will not be
-    /// required to be provided at runtime, as is the case with dynamically-linked libraries.
-    Static,
-}
-
-#[derive(Debug, Clone)]
-pub enum SymbolItem {
-    /// An alias of an externally-defined item
-    Alias {
-        /// The original alias item
-        alias: ast::Alias,
-        /// Once the alias has been resolved, we set this to `Some(target_gid)` so that we can
-        /// simply shortcut to the resolved target once known.
-        resolved: Cell<Option<GlobalItemIndex>>,
-    },
-    /// A constant declaration in AST form
-    Constant(ast::Constant),
-    /// A type or enum declaration in AST form
-    Type(ast::TypeDecl),
-    /// Procedure symbols are wrapped in a `RefCell` to allow us to mutate the procedure body when
-    /// linking any externally-defined symbols it contains.
-    Procedure(RefCell<Box<ast::Procedure>>),
-    /// An already-assembled item
-    Compiled(ItemInfo),
-}
-
-#[derive(Debug, Clone)]
-pub struct Symbol {
-    name: Ident,
-    visibility: Visibility,
-    status: Cell<LinkStatus>,
-    item: SymbolItem,
-}
-
-impl Symbol {
-    #[inline(always)]
-    pub fn name(&self) -> &Ident {
-        &self.name
-    }
-
-    #[inline(always)]
-    pub fn visibility(&self) -> Visibility {
-        self.visibility
-    }
-
-    #[inline(always)]
-    pub fn item(&self) -> &SymbolItem {
-        &self.item
-    }
-
-    #[inline(always)]
-    pub fn status(&self) -> LinkStatus {
-        self.status.get()
-    }
-
-    #[inline]
-    pub fn is_unlinked(&self) -> bool {
-        matches!(self.status.get(), LinkStatus::Unlinked)
-    }
-
-    #[inline]
-    pub fn is_linked(&self) -> bool {
-        matches!(self.status.get(), LinkStatus::Linked)
-    }
-
-    pub fn is_procedure(&self) -> bool {
-        matches!(
-            &self.item,
-            SymbolItem::Compiled(ItemInfo::Procedure(_)) | SymbolItem::Procedure(_)
-        )
-    }
-}
-
-#[derive(Clone)]
-pub struct LinkModule {
-    id: ModuleIndex,
-    kind: ast::ModuleKind,
-    status: Cell<LinkStatus>,
-    source: ModuleSource,
-    path: Arc<Path>,
-    symbols: Vec<Symbol>,
-    advice_map: Option<AdviceMap>,
-}
-
-impl LinkModule {
-    #[inline(always)]
-    pub fn status(&self) -> LinkStatus {
-        self.status.get()
-    }
-
-    #[inline]
-    pub fn is_unlinked(&self) -> bool {
-        matches!(self.status.get(), LinkStatus::Unlinked)
-    }
-
-    #[inline]
-    pub fn is_linked(&self) -> bool {
-        matches!(self.status.get(), LinkStatus::Linked)
-    }
-
-    #[inline]
-    pub fn is_mast(&self) -> bool {
-        matches!(self.source, ModuleSource::Mast)
-    }
-
-    #[inline(always)]
-    pub fn kind(&self) -> ast::ModuleKind {
-        self.kind
-    }
-
-    #[inline(always)]
-    pub fn path(&self) -> &Arc<Path> {
-        &self.path
-    }
-
-    #[inline]
-    pub fn advice_map(&self) -> Option<&AdviceMap> {
-        self.advice_map.as_ref()
-    }
-
-    #[inline]
-    pub fn symbols(&self) -> core::slice::Iter<'_, Symbol> {
-        self.symbols.iter()
-    }
-
-    /// Find the [Symbol] named `name` in this module
-    pub fn get(&self, name: impl AsRef<str>) -> Option<&Symbol> {
-        let name = name.as_ref();
-        self.symbols.iter().find(|symbol| symbol.name.as_str() == name)
-    }
-
-    pub fn resolve(
-        &self,
-        name: Span<&str>,
-        resolver: &SymbolResolver<'_>,
-    ) -> Result<SymbolResolution, Box<SymbolResolutionError>> {
-        let container = LinkModuleIter { resolver, module: self };
-        let local_resolver = LocalSymbolResolver::new(container, resolver.source_manager_arc());
-        local_resolver.resolve(name).map_err(Box::new)
-    }
-
-    pub fn resolve_path(
-        &self,
-        path: Span<&Path>,
-        resolver: &SymbolResolver<'_>,
-    ) -> Result<SymbolResolution, Box<SymbolResolutionError>> {
-        let container = LinkModuleIter { resolver, module: self };
-        let local_resolver = LocalSymbolResolver::new(container, resolver.source_manager_arc());
-        local_resolver.resolve_path(path).map_err(Box::new)
-    }
-}
-
-struct LinkModuleIter<'a, 'b: 'a> {
-    resolver: &'a SymbolResolver<'b>,
-    module: &'a LinkModule,
-}
-
-impl<'a, 'b: 'a> SymbolTable for LinkModuleIter<'a, 'b> {
-    type SymbolIter = alloc::vec::IntoIter<LocalSymbol>;
-
-    fn symbols(&self, source_manager: Arc<dyn SourceManager>) -> Self::SymbolIter {
-        let symbols = self
-            .module
-            .symbols
-            .iter()
-            .enumerate()
-            .map(|(i, symbol)| {
-                let index = ItemIndex::new(i);
-                let gid = self.module.id + index;
-                match &symbol.item {
-                    SymbolItem::Compiled(_)
-                    | SymbolItem::Procedure(_)
-                    | SymbolItem::Constant(_)
-                    | SymbolItem::Type(_) => {
-                        let path = self.module.path.join(&symbol.name);
-                        ast::LocalSymbol::Item {
-                            name: symbol.name.clone(),
-                            resolved: SymbolResolution::Exact {
-                                gid,
-                                path: Span::new(symbol.name.span(), path.into()),
-                            },
-                        }
-                    },
-                    SymbolItem::Alias { alias, resolved } => {
-                        let name = alias.name().clone();
-                        let name = Span::new(name.span(), name.into_inner());
-                        if let Some(resolved) = resolved.get() {
-                            let path = self.resolver.item_path(gid);
-                            let span = name.span();
-                            ast::LocalSymbol::Import {
-                                name,
-                                resolution: Ok(SymbolResolution::Exact {
-                                    gid: resolved,
-                                    path: Span::new(span, path),
-                                }),
-                            }
-                        } else {
-                            match alias.target() {
-                                AliasTarget::MastRoot(root) => ast::LocalSymbol::Import {
-                                    name,
-                                    resolution: Ok(SymbolResolution::MastRoot(*root)),
-                                },
-                                AliasTarget::Path(path) => {
-                                    let resolution = LocalSymbolResolver::expand(
-                                        |name| {
-                                            self.module.get(name).and_then(|sym| match sym.item() {
-                                                SymbolItem::Alias { alias, .. } => {
-                                                    Some(alias.target().clone())
-                                                },
-                                                _ => None,
-                                            })
-                                        },
-                                        path.as_deref(),
-                                        &source_manager,
-                                    );
-                                    ast::LocalSymbol::Import { name, resolution }
-                                },
-                            }
-                        }
-                    },
-                }
-            })
-            .collect::<Vec<_>>();
-        symbols.into_iter()
-    }
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum ModuleSource {
-    Ast,
-    Mast,
-}
-
+/// Represents the current status of a symbol in the state of the [Linker]
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq)]
 pub enum LinkStatus {
     /// The module or item has not been visited by the linker
@@ -334,22 +57,21 @@ pub enum LinkStatus {
 ///
 /// The core conceptual data structure of the linker is the _module graph_, which is implemented
 /// by a vector of module nodes, and a _call graph_, which is implemented as an adjacency matrix
-/// of procedure nodes and the outgoing edges from those nodes, representing references from that
-/// procedure to another symbol (typically as the result of procedure invocation, hence "call"
-/// graph).
+/// of item nodes and the outgoing edges from those nodes, representing references from that item
+/// to another symbol (typically as the result of procedure invocation, hence "call" graph).
 ///
-/// Each procedure known to the linker is given a _global procedure index_, which is actually a
-/// pair of indices: a _module index_ (which indexes into the vector of module nodes), and a
-/// _procedure index_ (which indexes into the set of procedures defined by a module). These global
-/// procedure indices function as a unique identifier within the linker, to a specific procedure,
-/// and can be resolved to either the procedure AST, or to metadata about the procedure MAST.
+/// Each item/symbol known to the linker is given a _global item index_, which is actually a pair
+/// of indices: a _module index_ (which indexes into the vector of module nodes), and an _item
+/// index_ (which indexes into the items defined by a module). These global item indices function
+/// as a unique identifier within the linker, to a specific item, and can be resolved to either the
+/// original syntax tree of the item, or to metadata about the item retrieved from previously-
+/// assembled MAST.
 ///
 /// The process of linking involves two phases:
 ///
-/// 1. Setting up the linker context, by providing the set of libraries and/or input modules to link
-/// 2. Analyzing and rewriting the module graph, as needed, to ensure that all procedure references
-///    are resolved to either a concrete definition, or a "phantom" reference in the form of a MAST
-///    root.
+/// 1. Setting up the linker context, by providing the set of inputs to link together
+/// 2. Analyzing and rewriting the symbols known to the linker, as needed, to ensure that all symbol
+///    references are resolved to concrete definitions.
 ///
 /// The assembler will call [`Self::link`] once it has provided all inputs that it wants to link,
 /// which will, when successful, return the set of module indices corresponding to the modules that
@@ -465,23 +187,22 @@ impl Linker {
                 },
                 ItemInfo::Constant(_) | ItemInfo::Type(_) => (),
             }
-            symbols.push(Symbol {
-                name: item.name().clone(),
-                visibility: Visibility::Public,
-                status: Cell::new(LinkStatus::Linked),
-                item: SymbolItem::Compiled(item.clone()),
-            });
+            symbols.push(Symbol::new(
+                item.name().clone(),
+                Visibility::Public,
+                LinkStatus::Linked,
+                SymbolItem::Compiled(item.clone()),
+            ));
         }
 
-        let link_module = LinkModule {
-            id: module_index,
-            kind: ast::ModuleKind::Library,
-            status: Cell::new(LinkStatus::Linked),
-            source: ModuleSource::Mast,
-            path: module_path.into(),
-            advice_map: None,
-            symbols,
-        };
+        let link_module = LinkModule::new(
+            module_index,
+            ast::ModuleKind::Library,
+            LinkStatus::Linked,
+            ModuleSource::Mast,
+            module_path.into(),
+        )
+        .with_symbols(symbols);
 
         self.modules.push(link_module);
         Ok(module_index)
@@ -517,34 +238,25 @@ impl Linker {
     /// [ModuleIndex] value, `u16::MAX`.
     pub fn link_module(&mut self, module: &mut Module) -> Result<ModuleIndex, LinkerError> {
         log::debug!(target: "linker", "adding unprocessed module {}", module.path());
-        let module_path = module.path();
 
-        let is_duplicate = self.find_module_index(module_path).is_some();
+        let is_duplicate = self.find_module_index(module.path()).is_some();
         if is_duplicate {
-            return Err(LinkerError::DuplicateModule {
-                path: module_path.to_path_buf().into_boxed_path().into(),
-            });
+            return Err(LinkerError::DuplicateModule { path: module.path().into() });
         }
 
         let module_index = self.next_module_id();
-        let link_module = LinkModule {
-            id: module_index,
-            kind: module.kind(),
-            status: Cell::new(LinkStatus::Unlinked),
-            source: ModuleSource::Ast,
-            path: module_path.into(),
-            advice_map: Some(module.advice_map().clone()),
-            symbols: core::mem::take(module.items_mut())
+        let symbols = {
+            core::mem::take(module.items_mut())
                 .into_iter()
                 .enumerate()
                 .map(|(idx, item)| {
                     let gid = module_index + ast::ItemIndex::new(idx);
                     self.callgraph.get_or_insert_node(gid);
-                    Symbol {
-                        name: item.name().clone(),
-                        visibility: item.visibility(),
-                        status: Cell::new(LinkStatus::Unlinked),
-                        item: match item {
+                    Symbol::new(
+                        item.name().clone(),
+                        item.visibility(),
+                        LinkStatus::Unlinked,
+                        match item {
                             ast::Export::Alias(alias) => {
                                 SymbolItem::Alias { alias, resolved: Cell::new(None) }
                             },
@@ -554,10 +266,19 @@ impl Linker {
                                 SymbolItem::Procedure(RefCell::new(Box::new(item)))
                             },
                         },
-                    }
+                    )
                 })
-                .collect(),
+                .collect()
         };
+        let link_module = LinkModule::new(
+            module_index,
+            module.kind(),
+            LinkStatus::Unlinked,
+            ModuleSource::Ast,
+            module.path().into(),
+        )
+        .with_advice_map(module.advice_map().clone())
+        .with_symbols(symbols);
 
         self.modules.push(link_module);
         Ok(module_index)
@@ -642,8 +363,8 @@ impl Linker {
 
         // Set the module kind of all pending AST modules to Kernel, as we are linking a kernel
         for module in self.modules.iter_mut().take(module_index.as_usize()) {
-            if matches!(module.source, ModuleSource::Ast) {
-                module.kind = ast::ModuleKind::Kernel;
+            if matches!(module.source(), ModuleSource::Ast) {
+                module.set_kind(ast::ModuleKind::Kernel);
             }
         }
 
@@ -723,7 +444,7 @@ impl Linker {
 
             let module_index = ModuleIndex::new(module_index);
 
-            for (symbol_idx, symbol) in module.symbols.iter().enumerate() {
+            for (symbol_idx, symbol) in module.symbols().enumerate() {
                 assert!(
                     symbol.is_unlinked(),
                     "an unlinked module should only have unlinked symbols"
@@ -732,10 +453,10 @@ impl Linker {
                 let gid = module_index + ItemIndex::new(symbol_idx);
 
                 // Perform any applicable rewrites to this item
-                rewrite_symbol(gid, symbol, &resolver, &mut cache)?;
+                rewrites::rewrite_symbol(gid, symbol, &resolver, &mut cache)?;
 
                 // Update the linker graph
-                match &symbol.item {
+                match symbol.item() {
                     SymbolItem::Compiled(_) | SymbolItem::Type(_) | SymbolItem::Constant(_) => (),
                     SymbolItem::Alias { alias, resolved } => {
                         if let Some(resolved) = resolved.get() {
@@ -767,7 +488,8 @@ impl Linker {
                         }
                     },
                     SymbolItem::Procedure(proc) => {
-                        // Add edges to all transitive dependencies of this item due to calls/symbol refs
+                        // Add edges to all transitive dependencies of this item due to calls/symbol
+                        // refs
                         let proc = proc.borrow();
                         for invoke in proc.invoked() {
                             log::debug!(target: "linker", "  | recording {} dependency on {}", invoke.kind, &invoke.target);
@@ -794,7 +516,7 @@ impl Linker {
                 }
             }
 
-            module.status.set(LinkStatus::Linked);
+            module.set_status(LinkStatus::Linked);
         }
 
         edges
@@ -806,8 +528,8 @@ impl Linker {
             let iter = cycle.into_node_ids();
             let mut nodes = Vec::with_capacity(iter.len());
             for node in iter {
-                let module = &self[node.module].path;
-                let item = &self[node].name;
+                let module = self[node.module].path();
+                let item = self[node].name();
                 nodes.push(module.join(item).to_string());
             }
             LinkerError::Cycle { nodes: nodes.into() }
@@ -815,284 +537,6 @@ impl Linker {
 
         Ok(())
     }
-}
-
-#[derive(Default)]
-struct ResolverCache {
-    types: BTreeMap<GlobalItemIndex, ast::types::Type>,
-    constants: BTreeMap<GlobalItemIndex, ast::ConstantValue>,
-}
-
-struct Resolver<'a, 'b: 'a> {
-    resolver: &'a SymbolResolver<'b>,
-    cache: &'a mut ResolverCache,
-    current_module: ModuleIndex,
-}
-
-impl<'a, 'b: 'a> ConstEnvironment for Resolver<'a, 'b> {
-    type Error = LinkerError;
-
-    fn get_source_file_for(&self, span: SourceSpan) -> Option<Arc<SourceFile>> {
-        self.resolver.source_manager().get(span.source_id()).ok()
-    }
-
-    fn get(&self, name: &Ident) -> Result<Option<CachedConstantValue<'_>>, Self::Error> {
-        let context = SymbolResolutionContext {
-            span: name.span(),
-            module: self.current_module,
-            kind: None,
-        };
-        let gid = match self.resolver.resolve_local(&context, name)? {
-            SymbolResolution::Exact { gid, .. } => gid,
-            SymbolResolution::Local(index) => self.current_module + index.into_inner(),
-            SymbolResolution::MastRoot(_) | SymbolResolution::Module { .. } => {
-                return Err(LinkerError::InvalidConstantRef {
-                    span: context.span,
-                    source_file: self.get_source_file_for(context.span),
-                });
-            },
-            SymbolResolution::External(path) => {
-                return Err(LinkerError::UndefinedSymbol {
-                    span: context.span,
-                    source_file: self.get_source_file_for(context.span),
-                    path: path.into_inner(),
-                });
-            },
-        };
-
-        match self.cache.constants.get(&gid).map(CachedConstantValue::Hit) {
-            some @ Some(_) => Ok(some),
-            None => match &self.resolver.linker()[gid].item {
-                SymbolItem::Compiled(ItemInfo::Constant(info)) => {
-                    Ok(Some(CachedConstantValue::Hit(&info.value)))
-                },
-                SymbolItem::Constant(item) => Ok(Some(CachedConstantValue::Miss(&item.value))),
-                _ => Err(LinkerError::InvalidConstantRef {
-                    span: name.span(),
-                    source_file: self.get_source_file_for(name.span()),
-                }),
-            },
-        }
-    }
-
-    fn get_by_path(
-        &self,
-        path: Span<&Path>,
-    ) -> Result<Option<CachedConstantValue<'_>>, Self::Error> {
-        let context = SymbolResolutionContext {
-            span: path.span(),
-            module: self.current_module,
-            kind: None,
-        };
-        let gid = match self.resolver.resolve_path(&context, path)? {
-            SymbolResolution::Exact { gid, .. } => gid,
-            SymbolResolution::Local(index) => self.current_module + index.into_inner(),
-            SymbolResolution::MastRoot(_) | SymbolResolution::Module { .. } => {
-                return Err(LinkerError::InvalidConstantRef {
-                    span: context.span,
-                    source_file: self.get_source_file_for(context.span),
-                });
-            },
-            SymbolResolution::External(path) => {
-                return Err(LinkerError::UndefinedSymbol {
-                    span: context.span,
-                    source_file: self.get_source_file_for(context.span),
-                    path: path.into_inner(),
-                });
-            },
-        };
-        if let Some(cached) = self.cache.constants.get(&gid) {
-            return Ok(Some(CachedConstantValue::Hit(cached)));
-        }
-        match &self.resolver.linker()[gid].item {
-            SymbolItem::Compiled(ItemInfo::Constant(info)) => {
-                Ok(Some(CachedConstantValue::Hit(&info.value)))
-            },
-            SymbolItem::Constant(item) => Ok(Some(CachedConstantValue::Miss(&item.value))),
-            SymbolItem::Compiled(_) | SymbolItem::Procedure(_) | SymbolItem::Type(_) => {
-                Err(LinkerError::InvalidConstantRef {
-                    span: context.span,
-                    source_file: self.get_source_file_for(context.span),
-                })
-            },
-            SymbolItem::Alias { .. } => {
-                unreachable!("the resolver should have expanded all aliases")
-            },
-        }
-    }
-
-    /// Cache evaluated constants so long as they evaluated to a ConstantValue, and we can resolve
-    /// the path to a known GlobalItemIndex
-    fn on_eval_completed(&mut self, path: Span<&Path>, value: &ast::ConstantExpr) {
-        let Some(value) = value.as_value() else {
-            return;
-        };
-        let context = SymbolResolutionContext {
-            span: path.span(),
-            module: self.current_module,
-            kind: None,
-        };
-        let gid = match self.resolver.resolve_path(&context, path) {
-            Ok(SymbolResolution::Exact { gid, .. }) => gid,
-            Ok(SymbolResolution::Local(index)) => self.current_module + index.into_inner(),
-            _ => return,
-        };
-        self.cache.constants.insert(gid, value);
-    }
-}
-
-impl<'a, 'b: 'a> ast::TypeResolver<LinkerError> for Resolver<'a, 'b> {
-    #[inline]
-    fn source_manager(&self) -> Arc<dyn SourceManager> {
-        self.resolver.source_manager_arc()
-    }
-    #[inline]
-    fn resolve_local_failed(&self, err: SymbolResolutionError) -> LinkerError {
-        LinkerError::from(err)
-    }
-
-    fn get_type(
-        &self,
-        context: SourceSpan,
-        gid: GlobalItemIndex,
-    ) -> Result<types::Type, LinkerError> {
-        match &self.resolver.linker()[gid].item {
-            SymbolItem::Compiled(ItemInfo::Type(info)) => Ok(info.ty.clone()),
-            SymbolItem::Type(ast::TypeDecl::Enum(ty)) => Ok(ty.ty().clone()),
-            SymbolItem::Type(ast::TypeDecl::Alias(ty)) => {
-                Ok(ty.ty.resolve_type(self)?.expect("unreachable"))
-            },
-            SymbolItem::Compiled(_) | SymbolItem::Constant(_) | SymbolItem::Procedure(_) => {
-                Err(LinkerError::InvalidTypeRef {
-                    span: context,
-                    source_file: self.get_source_file_for(context),
-                })
-            },
-            SymbolItem::Alias { .. } => unreachable!("resolver should have expanded all aliases"),
-        }
-    }
-
-    fn get_local_type(
-        &self,
-        context: SourceSpan,
-        id: ItemIndex,
-    ) -> Result<Option<types::Type>, LinkerError> {
-        self.get_type(context, self.current_module + id).map(Some)
-    }
-
-    fn resolve_type_ref(&self, ty: Span<&Path>) -> Result<SymbolResolution, LinkerError> {
-        let context = SymbolResolutionContext {
-            span: ty.span(),
-            module: self.current_module,
-            kind: None,
-        };
-        match self.resolver.resolve_path(&context, ty)? {
-            exact @ SymbolResolution::Exact { .. } => Ok(exact),
-            SymbolResolution::Local(index) => {
-                let (span, index) = index.into_parts();
-                let current_module = &self.resolver.linker()[self.current_module];
-                let item = &current_module.symbols[index.as_usize()].name;
-                let path = Span::new(span, current_module.path.join(item).into());
-                Ok(SymbolResolution::Exact { gid: self.current_module + index, path })
-            },
-            SymbolResolution::MastRoot(_) | SymbolResolution::Module { .. } => {
-                Err(LinkerError::InvalidTypeRef {
-                    span: ty.span(),
-                    source_file: self.get_source_file_for(ty.span()),
-                })
-            },
-            SymbolResolution::External(path) => Err(LinkerError::UndefinedSymbol {
-                span: ty.span(),
-                source_file: self.get_source_file_for(ty.span()),
-                path: path.into_inner(),
-            }),
-        }
-    }
-}
-
-fn rewrite_symbol(
-    gid: GlobalItemIndex,
-    symbol: &Symbol,
-    resolver: &SymbolResolver<'_>,
-    cache: &mut ResolverCache,
-) -> Result<(), LinkerError> {
-    use ast::visit::VisitMut;
-
-    if matches!(symbol.status(), LinkStatus::Linked) {
-        return Ok(());
-    }
-
-    match &symbol.item {
-        SymbolItem::Compiled(item) => match item {
-            ItemInfo::Constant(value) => {
-                cache.constants.insert(gid, value.value.clone());
-            },
-            ItemInfo::Type(ty) => {
-                cache.types.insert(gid, ty.ty.clone());
-            },
-            ItemInfo::Procedure(_) => (),
-        },
-        SymbolItem::Alias { alias, resolved: resolved_gid } => {
-            let context = SymbolResolutionContext {
-                span: alias.span(),
-                module: gid.module,
-                kind: None,
-            };
-            match resolver.resolve_alias_target(&context, alias.target())? {
-                SymbolResolution::Exact { gid, .. } => {
-                    resolved_gid.set(Some(gid));
-                },
-                SymbolResolution::Local(local) => {
-                    resolved_gid.set(Some(gid.module + local.into_inner()));
-                },
-                SymbolResolution::MastRoot(root) => {
-                    if let Some(gid) = resolver.linker().get_procedure_index_by_digest(&root) {
-                        resolved_gid.set(Some(gid));
-                    }
-                },
-                SymbolResolution::Module { .. } => (),
-                SymbolResolution::External(path) => {
-                    let (span, path) = path.into_parts();
-                    return Err(LinkerError::UndefinedSymbol {
-                        span,
-                        source_file: resolver.source_manager().get(span.source_id()).ok(),
-                        path,
-                    });
-                },
-            }
-        },
-        SymbolItem::Procedure(proc) => {
-            let mut rewriter = ModuleRewriter::new(gid.module, resolver);
-            let mut proc = proc.borrow_mut();
-            if let ControlFlow::Break(err) = rewriter.visit_mut_procedure(&mut proc) {
-                return Err(err);
-            }
-        },
-        SymbolItem::Constant(item) => {
-            let mut resolver = Resolver {
-                resolver,
-                cache,
-                current_module: gid.module,
-            };
-            let value = ast::constants::eval::expr(&item.value, &mut resolver)?
-                .into_value()
-                .expect("value or error to have been raised");
-            resolver.cache.constants.insert(gid, value);
-        },
-        SymbolItem::Type(item) => {
-            let resolver = Resolver {
-                resolver,
-                cache,
-                current_module: gid.module,
-            };
-            let ty = item.ty().resolve_type(&resolver)?.expect("type or error to have been raised");
-            resolver.cache.types.insert(gid, ty);
-        },
-    }
-
-    symbol.status.set(LinkStatus::Linked);
-
-    Ok(())
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -1158,7 +602,7 @@ impl Linker {
         &self,
         gid: GlobalItemIndex,
     ) -> Result<Option<Arc<types::FunctionType>>, LinkerError> {
-        match &self[gid].item {
+        match self[gid].item() {
             SymbolItem::Compiled(ItemInfo::Procedure(proc)) => Ok(proc.signature.clone()),
             SymbolItem::Procedure(proc) => {
                 let proc = proc.borrow();
@@ -1241,7 +685,7 @@ impl Linker {
         &self,
         gid: GlobalItemIndex,
     ) -> Result<AttributeSet, LinkerError> {
-        match &self[gid].item {
+        match self[gid].item() {
             SymbolItem::Compiled(ItemInfo::Procedure(proc)) => Ok(proc.attributes.clone()),
             SymbolItem::Procedure(proc) => {
                 let proc = proc.borrow();
@@ -1325,28 +769,12 @@ impl Linker {
 
     /// Resolve a [Path] to a [ModuleIndex] in this graph
     pub fn find_module_index(&self, path: &Path) -> Option<ModuleIndex> {
-        self.modules.iter().position(|m| m.path.as_ref() == path).map(ModuleIndex::new)
+        self.modules.iter().position(|m| path == m.path()).map(ModuleIndex::new)
     }
 
     /// Resolve a [Path] to a [Module] in this graph
     pub fn find_module(&self, path: &Path) -> Option<&LinkModule> {
-        self.modules.iter().find(|m| m.path.as_ref() == path)
-    }
-}
-
-impl Index<ModuleIndex> for Linker {
-    type Output = LinkModule;
-
-    fn index(&self, index: ModuleIndex) -> &Self::Output {
-        &self.modules[index.as_usize()]
-    }
-}
-
-impl Index<GlobalItemIndex> for Linker {
-    type Output = Symbol;
-
-    fn index(&self, index: GlobalItemIndex) -> &Self::Output {
-        &self.modules[index.module.as_usize()].symbols[index.index.as_usize()]
+        self.modules.iter().find(|m| path == m.path())
     }
 }
 
@@ -1367,5 +795,21 @@ impl Linker {
         };
 
         ast::constants::eval::expr(expr, &mut resolver).map(|expr| expr.expect_value())
+    }
+}
+
+impl Index<ModuleIndex> for Linker {
+    type Output = LinkModule;
+
+    fn index(&self, index: ModuleIndex) -> &Self::Output {
+        &self.modules[index.as_usize()]
+    }
+}
+
+impl Index<GlobalItemIndex> for Linker {
+    type Output = Symbol;
+
+    fn index(&self, index: GlobalItemIndex) -> &Self::Output {
+        &self.modules[index.module.as_usize()][index.index]
     }
 }

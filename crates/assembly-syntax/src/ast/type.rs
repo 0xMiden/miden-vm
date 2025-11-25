@@ -20,8 +20,8 @@ use super::{
 /// us to share more of the resolution logic in both places.
 pub trait TypeResolver<E> {
     fn source_manager(&self) -> Arc<dyn SourceManager>;
-    /// Should be called by consumers of this resolver to convert a [LocalSymbolResolutionError]
-    /// to the error type used by the [TypeResolver] implementation.
+    /// Should be called by consumers of this resolver to convert a [SymbolResolutionError] to the
+    /// error type used by the [TypeResolver] implementation.
     fn resolve_local_failed(&self, err: SymbolResolutionError) -> E;
     /// Get the [Type] corresponding to the item given by `gid`
     fn get_type(&self, context: SourceSpan, gid: GlobalItemIndex) -> Result<Type, E>;

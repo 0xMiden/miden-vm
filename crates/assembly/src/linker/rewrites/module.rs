@@ -239,7 +239,7 @@ impl<'a, 'b: 'a> ConstEnvironment for ModuleRewriter<'a, 'b> {
         let name = Span::new(name.span(), name.as_str());
         let symbol = match module.resolve(name, self.resolver)? {
             SymbolResolution::Exact { gid, .. } => &self.resolver.linker()[gid],
-            SymbolResolution::Local(item) => &module.symbols[item.as_usize()],
+            SymbolResolution::Local(item) => &module[*item.inner()],
             SymbolResolution::External(path) => {
                 return self.get_by_path(path.as_deref());
             },
@@ -250,7 +250,7 @@ impl<'a, 'b: 'a> ConstEnvironment for ModuleRewriter<'a, 'b> {
                 });
             },
         };
-        match &symbol.item {
+        match symbol.item() {
             SymbolItem::Compiled(ItemInfo::Constant(info)) => {
                 Ok(Some(CachedConstantValue::Hit(&info.value)))
             },
@@ -285,7 +285,7 @@ impl<'a, 'b: 'a> ConstEnvironment for ModuleRewriter<'a, 'b> {
             },
             SymbolResolution::External(_) => unreachable!(),
         };
-        match &self.resolver.linker()[gid].item {
+        match self.resolver.linker()[gid].item() {
             SymbolItem::Compiled(ItemInfo::Constant(info)) => {
                 Ok(Some(CachedConstantValue::Hit(&info.value)))
             },
