@@ -30,7 +30,7 @@ use std::crypto::hashes::rpo
 #!     the number of elements required to make the read (and write) pointer word-aligned
 #!   - words handling: 15 + 16 * num_words
 #!   - suffix handling: 9 + 14 * num_suffix_elements
-#!     - in total: 68 + 14 * num_prefix_elements + 16 * num_words + 14 * num_suffix_elements
+#!     - in total: 74 + 14 * num_prefix_elements + 16 * num_words + 14 * num_suffix_elements
 pub proc memcopy
     # check whether the difference between `read_ptr` and `write_ptr` is a multiple of 4, otherwise
     # these pointers will never be simultaneously word-alined, so we won't be able to use 
