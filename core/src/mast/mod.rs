@@ -95,10 +95,7 @@ impl MastForest {
 
     /// Adds a decorator to the forest, and returns the associated [`DecoratorId`].
     pub fn add_decorator(&mut self, decorator: Decorator) -> Result<DecoratorId, MastForestError> {
-        self.debug_info
-            .decorators_mut()
-            .push(decorator)
-            .map_err(|_| MastForestError::TooManyDecorators)
+        self.debug_info.add_decorator(decorator)
     }
 
     /// Marks the given [`MastNodeId`] as being the root of a procedure.
@@ -218,7 +215,7 @@ impl MastForest {
         // extract decorator information from the nodes by converting them into builders
         let node_builders =
             nodes_to_add.into_iter().map(|node| node.to_builder(self)).collect::<Vec<_>>();
-        *self.debug_info.op_decorator_storage_mut() = OpToDecoratorIds::new();
+        self.debug_info.clear_op_decorator_storage();
         self.debug_info.clear_node_decorator_storage();
 
         // Add each node to the new MAST forest, making sure to rewrite any outdated internal
@@ -420,11 +417,7 @@ impl MastForest {
         before_enter: &[DecoratorId],
         after_exit: &[DecoratorId],
     ) {
-        self.debug_info.node_decorator_storage_mut().add_node_decorators(
-            node_id,
-            before_enter,
-            after_exit,
-        );
+        self.debug_info.add_node_decorators(node_id, before_enter, after_exit);
     }
 
     pub fn advice_map(&self) -> &AdviceMap {

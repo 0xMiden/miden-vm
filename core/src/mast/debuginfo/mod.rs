@@ -40,13 +40,13 @@
 //! method, which removes decorators while preserving critical information. This allows
 //! backward compatibility while enabling size optimization for deployment.
 
-use alloc::{collections::BTreeMap, sync::Arc};
+use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 
 use miden_utils_indexing::{Idx, IndexVec};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::{Decorator, DecoratorId, MastNodeId};
+use super::{Decorator, DecoratorId, MastForestError, MastNodeId};
 
 mod decorator_storage;
 pub use decorator_storage::{
@@ -147,19 +147,9 @@ impl DebugInfo {
         &self.op_decorator_storage
     }
 
-    /// Returns the operation decorator storage mutably.
-    pub fn op_decorator_storage_mut(&mut self) -> &mut OpToDecoratorIds {
-        &mut self.op_decorator_storage
-    }
-
     /// Returns the node decorator storage.
     pub fn node_decorator_storage(&self) -> &NodeToDecoratorIds {
         &self.node_decorator_storage
-    }
-
-    /// Returns the node decorator storage mutably.
-    pub fn node_decorator_storage_mut(&mut self) -> &mut NodeToDecoratorIds {
-        &mut self.node_decorator_storage
     }
 
     /// Inserts an error code with its message.
@@ -182,6 +172,11 @@ impl DebugInfo {
         self.error_codes.clear();
     }
 
+    /// Adds a decorator and returns its ID.
+    pub fn add_decorator(&mut self, decorator: Decorator) -> Result<DecoratorId, MastForestError> {
+        self.decorators.push(decorator).map_err(|_| MastForestError::TooManyDecorators)
+    }
+
     /// Adds node-level decorators (before_enter and after_exit) for the given node.
     pub fn add_node_decorators(
         &mut self,
@@ -191,6 +186,20 @@ impl DebugInfo {
     ) {
         self.node_decorator_storage
             .add_node_decorators(node_id, before_enter, after_exit);
+    }
+
+    /// Adds decorator info for operations within a node.
+    pub fn add_decorator_info_for_node(
+        &mut self,
+        node_id: MastNodeId,
+        decorators_info: Vec<(usize, DecoratorId)>,
+    ) -> Result<(), crate::mast::debuginfo::decorator_storage::DecoratorIndexError> {
+        self.op_decorator_storage.add_decorator_info_for_node(node_id, decorators_info)
+    }
+
+    /// Clears the operation decorator storage.
+    pub fn clear_op_decorator_storage(&mut self) {
+        self.op_decorator_storage = OpToDecoratorIds::new();
     }
 
     /// Strips all debug information, removing decorators and error codes.
@@ -205,11 +214,6 @@ impl DebugInfo {
     /// Returns true if this DebugInfo has no decorators or error codes.
     pub fn is_empty(&self) -> bool {
         self.decorators.is_empty() && self.error_codes.is_empty()
-    }
-
-    /// Returns a mutable reference to the decorators vector.
-    pub fn decorators_mut(&mut self) -> &mut IndexVec<DecoratorId, Decorator> {
-        &mut self.decorators
     }
 
     /// Returns a mutable reference to the error codes map.
