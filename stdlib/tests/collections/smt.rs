@@ -551,14 +551,13 @@ fn test_smt_set_remove_in_multi() {
 /// Tests `peek` on every key present in the SMT, as well as an empty leaf
 #[test]
 fn test_smt_peek() {
-    fn expect_value_from_get(key: Word, value: Word, smt: &Smt) {
+    fn expect_value_from_peek(key: Word, value: Word, smt: &Smt) {
         let source = "
             use std::collections::smt
 
             begin
                 # get the value
-                exec.smt::peek
-                adv_push.4
+                exec.smt::peek adv_push.4
                 # => [VALUE]
 
                 # truncate the stack
@@ -579,11 +578,11 @@ fn test_smt_peek() {
 
     // Get all leaves present in tree
     for (key, value) in LEAVES {
-        expect_value_from_get(key, value, &smt);
+        expect_value_from_peek(key, value, &smt);
     }
 
     // Get an empty leaf
-    expect_value_from_get(
+    expect_value_from_peek(
         Word::new([42_u32.into(), 42_u32.into(), 42_u32.into(), 42_u32.into()]),
         EMPTY_WORD,
         &smt,

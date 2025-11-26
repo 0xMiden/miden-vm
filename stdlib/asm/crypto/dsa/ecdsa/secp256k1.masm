@@ -12,7 +12,7 @@ use std::word
 # - Unused bytes in the final u32 must be set to zero
 # - Memory addresses must be word-aligned (divisible by 4)
 
-# Constants
+# CONSTANTS
 # ================================================================================================
 
 const ECDSA_VERIFY_EVENT = event("stdlib::crypto::dsa::ecdsa::verify")

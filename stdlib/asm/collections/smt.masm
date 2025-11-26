@@ -5,7 +5,7 @@ use std::mem
 use std::sys
 use std::word
 
-# Constants
+# CONSTANTS
 # ================================================================================================
 
 const SMT_PEEK_EVENT = event("stdlib::collections::smt::smt_peek")
