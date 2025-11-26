@@ -16,9 +16,9 @@ use crate::{DebugHandler, ExecutionError, Felt, ProcessState};
 pub struct StdoutWriter;
 
 impl fmt::Write for StdoutWriter {
-    fn write_str(&mut self, s: &str) -> fmt::Result {
+    fn write_str(&mut self, _s: &str) -> fmt::Result {
         #[cfg(feature = "std")]
-        std::print!("{}", s);
+        std::print!("{}", _s);
         Ok(())
     }
 }

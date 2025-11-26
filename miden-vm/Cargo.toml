@@ -68,7 +68,7 @@ std = [
 # maximal performance.
 no_err_ctx = ["miden-processor/no_err_ctx"]
 # For internal use, not meant to be used by users
-internal = ["dep:hex", "serde"]
+internal = ["dep:hex", "serde", "std"]
 
 [dependencies]
 # Miden dependencies

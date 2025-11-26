@@ -8,7 +8,7 @@ use core::{
 use miden_crypto::utils::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
-#[cfg(feature = "std")]
+#[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 use super::{ByteIndex, ByteOffset, SourceId};
