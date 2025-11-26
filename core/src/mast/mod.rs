@@ -215,6 +215,8 @@ impl MastForest {
         // extract decorator information from the nodes by converting them into builders
         let node_builders =
             nodes_to_add.into_iter().map(|node| node.to_builder(self)).collect::<Vec<_>>();
+
+        // Clear decorator storage after extracting builders (builders contain decorator data)
         self.debug_info.clear_decorators();
 
         // Add each node to the new MAST forest, making sure to rewrite any outdated internal
