@@ -48,7 +48,7 @@ In order to add a breakpoint, the user should insert a `breakpoint` instruction 
 The following example will halt on the third instruction of `foo`:
 
 ```
-proc.foo
+proc foo
     dup
     dup.2
     breakpoint

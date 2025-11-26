@@ -3,8 +3,10 @@ use alloc::{
     vec::Vec,
 };
 
+use miden_utils_indexing::Idx;
+
 use crate::{
-    Idx, Word,
+    Word,
     mast::{MastForest, MastForestError, MastNode, MastNodeId, node::MastNodeExt},
 };
 
@@ -305,7 +307,13 @@ pub(crate) enum MultiMastForestIteratorItem {
 mod tests {
 
     use super::*;
-    use crate::{Operation, Word, mast::BasicBlockNode};
+    use crate::{
+        Operation, Word,
+        mast::{
+            BasicBlockNode, BasicBlockNodeBuilder, CallNodeBuilder, ExternalNodeBuilder,
+            JoinNodeBuilder, MastForestContributor, SplitNodeBuilder,
+        },
+    };
 
     fn random_digest() -> Word {
         Word::new([winter_rand_utils::rand_value(); 4])
@@ -328,20 +336,25 @@ mod tests {
         let nodeb0_digest = random_digest();
 
         let mut forest_a = MastForest::new();
-        forest_a.add_external(nodea0_digest).unwrap();
-        let id1 = forest_a.add_external(nodea1_digest).unwrap();
-        let id2 = forest_a.add_external(nodea2_digest).unwrap();
-        let id3 = forest_a.add_external(nodea3_digest).unwrap();
-        let id_split = forest_a.add_split(id2, id3).unwrap();
-        let id_join = forest_a.add_join(id2, id_split).unwrap();
+        ExternalNodeBuilder::new(nodea0_digest).add_to_forest(&mut forest_a).unwrap();
+        let id1 = ExternalNodeBuilder::new(nodea1_digest).add_to_forest(&mut forest_a).unwrap();
+        let id2 = ExternalNodeBuilder::new(nodea2_digest).add_to_forest(&mut forest_a).unwrap();
+        let id3 = ExternalNodeBuilder::new(nodea3_digest).add_to_forest(&mut forest_a).unwrap();
+        let id_split = SplitNodeBuilder::new([id2, id3]).add_to_forest(&mut forest_a).unwrap();
+        let id_join = JoinNodeBuilder::new([id2, id_split]).add_to_forest(&mut forest_a).unwrap();
 
         forest_a.make_root(id_join);
         forest_a.make_root(id1);
 
         let mut forest_b = MastForest::new();
-        let id_ext_b = forest_b.add_external(nodeb0_digest).unwrap();
-        let id_block_b = forest_b.add_block(vec![Operation::Eqz], Vec::new()).unwrap();
-        let id_split_b = forest_b.add_split(id_ext_b, id_block_b).unwrap();
+        let id_ext_b =
+            ExternalNodeBuilder::new(nodeb0_digest).add_to_forest(&mut forest_b).unwrap();
+        let id_block_b = BasicBlockNodeBuilder::new(vec![Operation::Eqz], Vec::new())
+            .add_to_forest(&mut forest_b)
+            .unwrap();
+        let id_split_b = SplitNodeBuilder::new([id_ext_b, id_block_b])
+            .add_to_forest(&mut forest_b)
+            .unwrap();
 
         forest_b.make_root(id_split_b);
 
@@ -376,14 +389,20 @@ mod tests {
     fn multi_mast_forest_external_dependencies() {
         let block_foo = BasicBlockNode::new(vec![Operation::Drop], Vec::new()).unwrap();
         let mut forest_a = MastForest::new();
-        let id_foo_a = forest_a.add_external(block_foo.digest()).unwrap();
-        let id_call_a = forest_a.add_call(id_foo_a).unwrap();
+        let id_foo_a = ExternalNodeBuilder::new(block_foo.digest())
+            .add_to_forest(&mut forest_a)
+            .unwrap();
+        let id_call_a = CallNodeBuilder::new(id_foo_a).add_to_forest(&mut forest_a).unwrap();
         forest_a.make_root(id_call_a);
 
         let mut forest_b = MastForest::new();
-        let id_ext_b = forest_b.add_external(forest_a[id_call_a].digest()).unwrap();
-        let id_call_b = forest_b.add_call(id_ext_b).unwrap();
-        forest_b.add_node(block_foo).unwrap();
+        let id_ext_b = ExternalNodeBuilder::new(forest_a[id_call_a].digest())
+            .add_to_forest(&mut forest_b)
+            .unwrap();
+        let id_call_b = CallNodeBuilder::new(id_ext_b).add_to_forest(&mut forest_b).unwrap();
+        BasicBlockNodeBuilder::new(vec![Operation::Drop], Vec::new())
+            .add_to_forest(&mut forest_b)
+            .unwrap();
         forest_b.make_root(id_call_b);
 
         let nodes = MultiMastForestNodeIter::new(vec![&forest_a, &forest_b]).collect::<Vec<_>>();
@@ -456,10 +475,12 @@ mod tests {
     fn multi_mast_forest_child_duplicate() {
         let block_foo = BasicBlockNode::new(vec![Operation::Drop], Vec::new()).unwrap();
         let mut forest = MastForest::new();
-        let id_foo = forest.add_external(block_foo.digest()).unwrap();
-        let id_call1 = forest.add_call(id_foo).unwrap();
-        let id_call2 = forest.add_call(id_foo).unwrap();
-        let id_split = forest.add_split(id_call1, id_call2).unwrap();
+        let id_foo =
+            ExternalNodeBuilder::new(block_foo.digest()).add_to_forest(&mut forest).unwrap();
+        let id_call1 = CallNodeBuilder::new(id_foo).add_to_forest(&mut forest).unwrap();
+        let id_call2 = CallNodeBuilder::new(id_foo).add_to_forest(&mut forest).unwrap();
+        let id_split =
+            SplitNodeBuilder::new([id_call1, id_call2]).add_to_forest(&mut forest).unwrap();
         forest.make_root(id_split);
 
         let nodes = MultiMastForestNodeIter::new(vec![&forest]).collect::<Vec<_>>();

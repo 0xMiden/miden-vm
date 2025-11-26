@@ -1,10 +1,10 @@
-use.std::sys
-use.std::word
-use.std::crypto::hashes::rpo
+use std::sys
+use std::word
+use std::crypto::hashes::rpo
 
 # ENCODING CONVENTIONS
 # ================================================================================================
-# 
+#
 # This module uses the following notation for data representation:
 # - VALUE_U32[n] = arrays of n u32 values, denoted as [v_0, ..., v_{n-1}]
 # - VALUE_U8[n] = arrays of n u8 values, denoted as [b_0, ..., b_{n-1}]
@@ -15,7 +15,7 @@ use.std::crypto::hashes::rpo
 # Constants
 # ================================================================================================
 
-const.KECCAK_HASH_MEMORY_EVENT=event("stdlib::hash::keccak256::hash_memory")
+const KECCAK_HASH_MEMORY_EVENT = event("stdlib::hash::keccak256::hash_memory")
 
 # PROCEDURES
 # ================================================================================================
@@ -30,7 +30,7 @@ const.KECCAK_HASH_MEMORY_EVENT=event("stdlib::hash::keccak256::hash_memory")
 #! - len_bytes: number of bytes to hash
 #! - INPUT_U32[len_u32] ~ INPUT_U8[len_bytes] with u32 packing (unused bytes in final u32 must be 0)
 #! - DIGEST_U32[8] = [d_0, ..., d_7] = Keccak256(INPUT_U8[len_bytes])
-export.hash_memory
+pub proc hash_memory
     exec.hash_memory_impl
     # => [COMM, TAG, DIGEST_U32[8], ...]
 
@@ -47,7 +47,8 @@ end
 #! Where
 #! - DIGEST_U32[8] = [d_0, ..., d_7] = Keccak256(INPUT_U8[32])
 #! - INPUT_U32[8] = [i_0, ..., i_7] = [INPUT_LO, INPUT_HI] ~ INPUT_U8[32] with u32 packing
-export.hash_1to1.8
+@locals(8)
+pub proc hash_1to1
     # Store [INPUT_LO, INPUT_HI] in local memory
     exec.word::reverse loc_storew_be.0 dropw
     exec.word::reverse loc_storew_be.4 dropw
@@ -67,13 +68,14 @@ end
 #! - INPUT_L_U32[8] = [l_0, ..., l_7] = [INPUT_L_LO, INPUT_L_HI] ~ INPUT_L_U8[32]
 #! - INPUT_R_U32[8] = [r_0, ..., r_7] = [INPUT_R_LO, INPUT_R_HI] ~ INPUT_R_U8[32]
 #! - DIGEST_U32[8] = [d_0, ..., d_7] = Keccak256(INPUT_L_U8[32] || INPUT_R_U8[32])
-export.hash_2to1.16
+@locals(16)
+pub proc hash_2to1
     # Store [INPUT_L_LO, INPUT_L_HI, INPUT_R_LO, INPUT_R_HI] in local memory
     exec.word::reverse loc_storew_be.0 dropw
     exec.word::reverse loc_storew_be.4 dropw
     exec.word::reverse loc_storew_be.8 dropw
     exec.word::reverse loc_storew_be.12 dropw
-    
+
     push.64 locaddr.0
     # => [ptr, 64]
 
@@ -97,7 +99,7 @@ end
 #! - COMM: the calldata commitment `Rpo256(Rpo256(INPUT_U32[..]) || Rpo256(DIGEST_U32[..]))` consumed by `log_precompile`
 #! - TAG = [KECCAK_HASH_MEMORY_EVENT, len_bytes, 0, 0] encodes the precompile identifier and the byte length as metadata
 #! - DIGEST_U32[8] = [d_0, ..., d_7] = Keccak256(INPUT_U8[len_bytes])
-export.hash_memory_impl
+pub proc hash_memory_impl
     emit.KECCAK_HASH_MEMORY_EVENT
     # => [ptr, len_bytes, ...]
 

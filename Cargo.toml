@@ -46,6 +46,7 @@ miden-processor = { path = "./processor", version = "0.20", default-features = f
 miden-test-serde-macros = { path = "./crates/test-serde-macros", default-features = false }
 miden-prover = { path = "./prover", version = "0.20", default-features = false }
 miden-stdlib = { path = "./stdlib", version = "0.20", default-features = false }
+miden-utils-core-derive = { path = "./crates/utils-core-derive", default-features = false }
 miden-utils-diagnostics = { path = "./crates/utils-diagnostics", version = "0.20", default-features = false }
 miden-utils-indexing = { path = "./crates/utils-indexing", version = "0.20", default-features = false }
 miden-utils-sync = { path = "./crates/utils-sync", version = "0.20", default-features = false }
@@ -60,8 +61,10 @@ midenc-hir-type = { version = "0.4", default-features = false }
 # Third-party crates
 blake3 = { version = "1.8" }
 criterion = { version = "0.7" }
+derive_more = { version = "2.0", features = ["from"] }
 env_logger = { version = "0.11" }
 insta = { version = "1.43", default-features = false, features = ["colors"] }
+itertools = { version = "0.14", default-features = false, features = ["use_alloc"] }
 log = { version = "0.4", default-features = false }
 paste = { version = "1.0", default-features = false }
 proptest = { version = "1.8", default-features = false, features = ["no_std", "alloc"] }

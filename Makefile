@@ -22,7 +22,8 @@ help:
 	@printf "\nExamples:\n"
 	@printf "  make test-air test=\"some_test\"   # Test specific function\n"
 	@printf "  make test-fast                   # Fast tests (no proptests/CLI)\n"
-	@printf "  make test-skip-proptests         # All tests except proptests\n\n"
+	@printf "  make test-skip-proptests         # All tests except proptests\n"
+	@printf "  make check-features              # Check all feature combinations with cargo-hack\n\n"
 
 
 # -- environment toggles --------------------------------------------------------------------------
@@ -45,7 +46,7 @@ FEATURES_LOG_TREE        := --features concurrent,executable,tracing-forest
 # Per-crate default features
 FEATURES_air             := testing
 FEATURES_assembly        := testing
-FEATURES_assembly-syntax := testing
+FEATURES_assembly-syntax := testing,serde
 FEATURES_core            :=
 FEATURES_miden-vm        := concurrent,executable,metal,internal
 FEATURES_processor       := concurrent,testing,bus-debugger
@@ -174,6 +175,10 @@ test-loom: ## Runs all loom-based tests
 .PHONY: check
 check: ## Checks all targets and features for errors without code generation
 	$(BUILDDOCS) cargo check --all-targets ${ALL_FEATURES_BUT_ASYNC}
+
+.PHONY: check-features
+check-features: ## Checks all feature combinations compile without warnings using cargo-hack
+	@scripts/check-features.sh
 
 # --- building ------------------------------------------------------------------------------------
 

@@ -13,7 +13,6 @@ impl CoreTraceFragmentGenerator {
         &mut self,
         loop_node: &LoopNode,
         program: &MastForest,
-        parent_addr: Felt,
     ) -> ControlFlow<()> {
         // For LOOP operations, the hasher state in start operations contains the loop body hash in
         // the first half.
@@ -26,7 +25,7 @@ impl CoreTraceFragmentGenerator {
         let config = OperationTraceConfig {
             opcode: Operation::Loop.op_code(),
             hasher_state: (body_hash, zero_hash),
-            addr: parent_addr,
+            addr: self.context.state.decoder.parent_addr,
         };
 
         self.add_control_flow_trace_row(config)

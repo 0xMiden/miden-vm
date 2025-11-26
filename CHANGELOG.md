@@ -5,8 +5,25 @@
 
 #### Enhancements
 
+- Added new `adv.push_mapval_count` instruction ([#2349](https://github.com/0xMiden/miden-vm/pull/2349)).
+- Added new `memcopy_elements` procedure for the `std::mem` module. ([#2352](https://github.com/0xMiden/miden-vm/pull/2352)).
+
 #### Changes
+
 - Added missing implementations of `proptest::Arbitrary` for non-`BasicBlockNode` variants of `MastNode` ([#2335](https://github.com/0xMiden/miden-vm/pull/2335)).
+- [BREAKING] Added builder patterns for all `MastNode` types, made naked constructors module-private ([#2259](https://github.com/0xMiden/miden-vm/pull/2259)).
+- Extend builder patterns for all `MastNode` types ([#2274](https://github.com/0xMiden/miden-vm/pull/2274)).
+- Further extend builder patterns for all `MastNode` types, replace `enum-dispatch` by our own derivations ([#2291](https://github.com/0xMiden/miden-vm/pull/2291)).
+- Finish builder pattern conversion and delete old `MastNode` mutable APIs ([#2301](https://github.com/0xMiden/miden-vm/pull/2301)).
+- Hoist `BasicBlock` decorator storage to the `MastForest` after insertion in said `MastForest` ([#2310](https://github.com/0xMiden/miden-vm/pull/2310)).
+- [BREAKING] hoist before_enter and after_exit decorators to MastForest ([#2323](https://github.com/0xMiden/miden-vm/pull/2323)).
+- [BREAKING] Make argument order of `Assembler::compile_and_statically_link_from_dir` consistent with `Assembler::assemble_library_from_dir`
+- [BREAKING] Renamed `Library::get_procedure_root_by_name` to `Library::get_procedure_root_by_path`
+- Streamline MastNode APIs and remove redundant parameters from `execute_op_batch` functions ([#2360](https://github.com/0xMiden/miden-vm/pull/2360)).
+
+## 0.19.1 (2025-11-6)
+
+- Add `verify_ecdsa_k256_keccak` procedure for verifying signatures using the `miden-crypto` format ([#2344](https://github.com/0xMiden/miden-vm/pull/2344)).
 
 ## 0.19.0 (2025-11-1)
 
@@ -16,6 +33,9 @@
 - Added support for leaves with multiple pairs in `std::collections::smt::get` ([#2048](https://github.com/0xMiden/miden-vm/pull/2048)).
 - Added support for leaves with multiple pairs in `std::collections::smt::set` ([#2248](https://github.com/0xMiden/miden-vm/pull/2248)).
 - Made `miden-vm analyze` output analysis even if execution ultimately errored. ([#2204](https://github.com/0xMiden/miden-vm/pull/2204)).
+- Allow `CALL` and `DYNCALL` from a syscall context ([#2296](https://github.com/0xMiden/miden-vm/pull/2296))
+- Remove operations `FmpUpdate` and `FmpAdd`, as well as columns `fmp` and `in_syscall` ([#2308](https://github.com/0xMiden/miden-vm/pull/2308))
+- Reduce the constraints degree of `HORNERBASE` ([#2328](https://github.com/0xMiden/miden-vm/pull/2328))
 - [BREAKING] Implement ECDSA precompile ([#2277](https://github.com/0xMiden/miden-vm/pull/2277)).
 - Allowed `CALL` and `DYNCALL` from a syscall context ([#2296](https://github.com/0xMiden/miden-vm/pull/2296)).
 - Implemented `AdviceProvider::has_merkle_path()` method.

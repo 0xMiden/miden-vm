@@ -13,7 +13,7 @@ use miden_utils_testing::{
 #[test]
 fn test_num_leaves_to_num_peaks() {
     let hash_size = "
-    use.std::collections::mmr
+    use std::collections::mmr
 
     begin
       exec.mmr::num_leaves_to_num_peaks
@@ -35,7 +35,7 @@ fn test_num_leaves_to_num_peaks() {
 #[test]
 fn test_num_peaks_to_message_size() {
     let hash_size = "
-    use.std::collections::mmr
+    use std::collections::mmr
 
     begin
       exec.mmr::num_peaks_to_message_size
@@ -72,7 +72,7 @@ fn test_mmr_get_single_peak() -> Result<(), MerkleError> {
     for pos in 0..(leaves.len() as u64) {
         let source = format!(
             "
-            use.std::collections::mmr
+            use std::collections::mmr
 
             begin
                 push.{num_leaves} push.1000 mem_store # leaves count
@@ -132,7 +132,7 @@ fn test_mmr_get_two_peaks() -> Result<(), MerkleError> {
     for (absolute_pos, leaf) in examples {
         let source = format!(
             "
-            use.std::collections::mmr
+            use std::collections::mmr
 
             begin
                 push.{num_leaves} push.1000 mem_store # leaves count
@@ -182,7 +182,7 @@ fn test_mmr_tree_with_one_element() -> Result<(), MerkleError> {
     let advice_stack: Vec<u64> = merkle_root3.iter().map(StarkField::as_int).collect();
     let source = format!(
         "
-        use.std::collections::mmr
+        use std::collections::mmr
 
         begin
             push.{num_leaves} push.1000 mem_store # leaves count
@@ -208,7 +208,7 @@ fn test_mmr_tree_with_one_element() -> Result<(), MerkleError> {
     let num_leaves = leaves1.len() + leaves2.len() + leaves3.len();
     let source = format!(
         "
-        use.std::collections::mmr
+        use std::collections::mmr
 
         begin
             push.{num_leaves} push.1000 mem_store # leaves count
@@ -277,7 +277,7 @@ fn test_mmr_unpack() {
     ];
 
     let source = "
-        use.std::collections::mmr
+        use std::collections::mmr
         begin exec.mmr::unpack end
     ";
     let test = build_test!(source, &stack, advice_stack, store, advice_map.iter().cloned());
@@ -342,7 +342,7 @@ fn test_mmr_unpack_invalid_hash() {
     ];
 
     let source = "
-        use.std::collections::mmr
+        use std::collections::mmr
         begin exec.mmr::unpack end
     ";
     let test = build_test!(source, &stack, advice_stack, store, advice_map.iter().cloned());
@@ -400,7 +400,7 @@ fn test_mmr_unpack_large_mmr() {
     ];
 
     let source = "
-        use.std::collections::mmr
+        use std::collections::mmr
         begin exec.mmr::unpack end
     ";
     let test = build_test!(source, &stack, advice_stack, store, advice_map.iter().cloned());
@@ -463,7 +463,7 @@ fn test_mmr_pack_roundtrip() {
     ];
 
     let source = "
-        use.std::collections::mmr
+        use std::collections::mmr
 
         begin
             exec.mmr::unpack
@@ -491,7 +491,7 @@ fn test_mmr_pack_roundtrip() {
 #[test]
 fn test_mmr_pack() {
     let source = "
-        use.std::collections::mmr
+        use std::collections::mmr
 
         begin
             push.3.1000 mem_store  # num_leaves, 2 peaks
@@ -531,7 +531,7 @@ fn test_mmr_add_single() {
     let mmr_ptr = 1000;
     let source = format!(
         "
-        use.std::collections::mmr
+        use std::collections::mmr
 
         begin
             push.{mmr_ptr} # the address of the mmr
@@ -556,7 +556,7 @@ fn test_mmr_two() {
     let mmr_ptr = 1000;
     let source = format!(
         "
-        use.std::collections::mmr
+        use std::collections::mmr
 
         begin
             push.{mmr_ptr} # first peak
@@ -589,7 +589,7 @@ fn test_add_mmr_large() {
     let mmr_ptr = 1000;
     let source = format!(
         "
-        use.std::collections::mmr
+        use std::collections::mmr
 
         begin
             push.{mmr_ptr}.0.0.0.1 exec.mmr::add
@@ -668,7 +668,7 @@ fn test_mmr_large_add_roundtrip() {
 
     let source = format!(
         "
-        use.std::collections::mmr
+        use std::collections::mmr
 
         begin
             exec.mmr::unpack

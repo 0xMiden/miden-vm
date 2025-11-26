@@ -9,9 +9,9 @@ use alloc::{
 use miden_debug_types::{SourceContent, SourceFile, SourceLanguage, SourceManager, Uri};
 
 use crate::{
+    Path, PathBuf,
     ast::{Module, ModuleKind},
     diagnostics::{IntoDiagnostic, NamedSource, Report, SourceCode, WrapErr, report},
-    library::{LibraryNamespace, LibraryPath},
 };
 
 // PARSE OPTIONS
@@ -33,7 +33,7 @@ pub struct ParseOptions {
     /// If unset, and there is no name associated with the item being parsed (e.g. a file path)
     /// then the path will consist of just a namespace; using the value of `namespace` if provided,
     /// or deriving one from `kind`.
-    pub path: Option<LibraryPath>,
+    pub path: Option<Arc<Path>>,
 }
 
 impl Default for ParseOptions {
@@ -49,18 +49,14 @@ impl ParseOptions {
     /// Configure a set of [`ParseOptions`] to parse a [`Module`] with the given `kind` and `path`.
     ///
     /// This is primarily useful when compiling a module from source code that has no meaningful
-    /// [LibraryPath] associated with it, such as when compiling from a `str`. This will override
+    /// [Path] associated with it, such as when compiling from a `str`. This will override
     /// the default name derived from the given [ModuleKind].
-    pub fn new<P, E>(kind: ModuleKind, path: P) -> Result<Self, E>
-    where
-        P: TryInto<LibraryPath, Error = E>,
-    {
-        let path = path.try_into()?;
-        Ok(Self {
+    pub fn new(kind: ModuleKind, path: impl AsRef<Path>) -> Self {
+        Self {
             kind,
-            path: Some(path),
+            path: Some(path.as_ref().into()),
             ..Default::default()
-        })
+        }
     }
 
     /// Get the default [`ParseOptions`] for compiling a library module.
@@ -185,7 +181,8 @@ impl Parse for Arc<SourceFile> {
             None => source_file
                 .uri()
                 .path()
-                .parse::<LibraryPath>()
+                .parse::<PathBuf>()
+                .map(|p| p.into())
                 .into_diagnostic()
                 .wrap_err("cannot parse module as it has an invalid path/name")?,
         };
@@ -233,14 +230,12 @@ impl Parse for Box<str> {
         source_manager: &dyn SourceManager,
         options: ParseOptions,
     ) -> Result<Box<Module>, Report> {
-        let path = options.path.unwrap_or_else(|| {
-            LibraryPath::from(match options.kind {
-                ModuleKind::Library => LibraryNamespace::Anon,
-                ModuleKind::Executable => LibraryNamespace::Exec,
-                ModuleKind::Kernel => LibraryNamespace::Kernel,
-            })
+        let path = options.path.as_deref().unwrap_or_else(|| match options.kind {
+            ModuleKind::Library => Path::new("nofile"),
+            ModuleKind::Executable => Path::exec_path(),
+            ModuleKind::Kernel => Path::kernel_path(),
         });
-        let name = Uri::from(path.path().into_owned().into_boxed_str());
+        let name = Uri::from(path.as_str().to_string().into_boxed_str());
         let mut parser = Module::parser(options.kind);
         parser.set_warnings_as_errors(options.warnings_as_errors);
         let content = SourceContent::new(SourceLanguage::Masm, name.clone(), self);
@@ -323,7 +318,8 @@ where
             Some(path) => path,
             None => self
                 .name()
-                .parse::<LibraryPath>()
+                .parse::<PathBuf>()
+                .map(|p| p.into())
                 .into_diagnostic()
                 .wrap_err("cannot parse module as it has an invalid path/name")?,
         };
@@ -360,17 +356,16 @@ impl Parse for &std::path::Path {
 
         use miden_debug_types::SourceManagerExt;
 
-        use crate::{ast::Ident, library::PathError};
+        use crate::{Path, PathError};
 
         let path = match options.path {
             Some(path) => path,
             None => {
-                let ns = match options.kind {
-                    ModuleKind::Library => LibraryNamespace::Anon,
-                    ModuleKind::Executable => LibraryNamespace::Exec,
-                    ModuleKind::Kernel => LibraryNamespace::Kernel,
+                let mut buf = match options.kind {
+                    ModuleKind::Library => PathBuf::default(),
+                    ModuleKind::Executable => Path::exec_path().to_path_buf(),
+                    ModuleKind::Kernel => Path::kernel_path().to_path_buf(),
                 };
-                let mut parts = Vec::default();
                 self.components()
                     .skip_while(|component| {
                         matches!(
@@ -382,18 +377,19 @@ impl Parse for &std::path::Path {
                         )
                     })
                     .try_for_each(|component| {
-                        let part = component
+                        let part: &str = component
                             .as_os_str()
                             .to_str()
                             .ok_or(PathError::InvalidUtf8)
-                            .and_then(|s| Ident::new(s).map_err(PathError::InvalidComponent))
+                            .and_then(|s| Path::validate(s).map(|_| s))
                             .into_diagnostic()
                             .wrap_err("invalid module path")?;
-                        parts.push(part);
+                        buf.push(part);
 
                         Ok::<(), Report>(())
                     })?;
-                LibraryPath::new_from_components(ns, parts)
+
+                buf.into()
             },
         };
         let source_file = source_manager

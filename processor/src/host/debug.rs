@@ -16,9 +16,12 @@ use crate::{DebugHandler, ExecutionError, Felt, ProcessState};
 pub struct StdoutWriter;
 
 impl fmt::Write for StdoutWriter {
-    fn write_str(&mut self, s: &str) -> fmt::Result {
+    fn write_str(&mut self, _s: &str) -> fmt::Result {
+        // When the `std` feature is disabled, the parameter `_s` is unused because
+        // the std::print! macro is not available. We prefix with underscore to
+        // indicate this intentional unused state and suppress warnings.
         #[cfg(feature = "std")]
-        std::print!("{}", s);
+        std::print!("{}", _s);
         Ok(())
     }
 }

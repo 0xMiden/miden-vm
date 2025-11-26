@@ -4,10 +4,10 @@ use core::ops::ControlFlow;
 use crate::{
     ModuleIndex, SourceSpan, Spanned,
     ast::{
-        AliasTarget, InvocationTarget, Invoke, InvokeKind, Module, Procedure,
+        AliasTarget, InvocationTarget, Invoke, InvokeKind, Module, Procedure, SymbolResolution,
         visit::{self, VisitMut},
     },
-    linker::{CallerInfo, LinkerError, NameResolver, ResolvedTarget},
+    linker::{LinkerError, SymbolResolutionContext, SymbolResolver},
 };
 
 // MODULE REWRITE CHECK
@@ -20,7 +20,7 @@ use crate::{
 ///   rewriting those targets as concretely as possible OR as phantom calls representing procedures
 ///   referenced by MAST root for which we have no definition.
 pub struct ModuleRewriter<'a, 'b: 'a> {
-    resolver: &'a NameResolver<'b>,
+    resolver: &'a SymbolResolver<'b>,
     module_id: ModuleIndex,
     span: SourceSpan,
     invoked: BTreeSet<Invoke>,
@@ -28,7 +28,7 @@ pub struct ModuleRewriter<'a, 'b: 'a> {
 
 impl<'a, 'b: 'a> ModuleRewriter<'a, 'b> {
     /// Create a new [ModuleRewriter] with the given [NameResolver]
-    pub fn new(resolver: &'a NameResolver<'b>) -> Self {
+    pub fn new(resolver: &'a SymbolResolver<'b>) -> Self {
         Self {
             resolver,
             module_id: ModuleIndex::new(u16::MAX as usize),
@@ -59,27 +59,49 @@ impl<'a, 'b: 'a> ModuleRewriter<'a, 'b> {
         target: &mut InvocationTarget,
     ) -> ControlFlow<LinkerError> {
         log::debug!(target: "linker", "    * rewriting {kind} target {target}");
-        let caller = CallerInfo {
+        let context = SymbolResolutionContext {
             span: target.span(),
             module: self.module_id,
-            kind,
+            kind: Some(kind),
         };
-        match self.resolver.resolve_target(&caller, target) {
+        match self.resolver.resolve_invoke_target(&context, target) {
             Err(err) => {
                 log::error!(target: "linker", "    | failed to resolve target {target}");
                 return ControlFlow::Break(err);
             },
-            Ok(ResolvedTarget::Phantom(_)) => {
+            Ok(SymbolResolution::MastRoot(_)) => {
                 log::warn!(target: "linker", "    | resolved phantom target {target}");
             },
-            Ok(ResolvedTarget::Exact { .. }) => {
-                log::debug!(target: "linker", "    | target is already resolved exactly");
+            Ok(SymbolResolution::Exact { path, .. }) => {
+                log::debug!(target: "linker", "    | target resolved to {path}");
+                match &mut *target {
+                    InvocationTarget::MastRoot(_) => (),
+                    InvocationTarget::Path(old_path) => {
+                        *old_path = path.with_span(old_path.span());
+                    },
+                    target @ InvocationTarget::Symbol(_) => {
+                        *target = InvocationTarget::Path(path.with_span(target.span()));
+                    },
+                }
                 self.invoked.insert(Invoke { kind, target: target.clone() });
             },
-            Ok(ResolvedTarget::Resolved { target: new_target, .. }) => {
-                log::debug!(target: "linker", "    | target resolved to {new_target}");
-                *target = new_target;
-                self.invoked.insert(Invoke { kind, target: target.clone() });
+            Ok(SymbolResolution::Module { id, path }) => {
+                log::debug!(target: "linker", "    | target resolved to module {id}: '{path}'");
+            },
+            Ok(SymbolResolution::Local(item)) => {
+                log::debug!(target: "linker", "    | target is already resolved locally to {item}");
+            },
+            Ok(SymbolResolution::External(path)) => {
+                log::debug!(target: "linker", "    | target is externally defined at {path}");
+                match target {
+                    InvocationTarget::MastRoot(_) => unreachable!(),
+                    InvocationTarget::Path(old_path) => {
+                        *old_path = path.with_span(old_path.span());
+                    },
+                    target @ InvocationTarget::Symbol(_) => {
+                        *target = InvocationTarget::Path(path.with_span(target.span()));
+                    },
+                }
             },
         }
 
@@ -109,13 +131,32 @@ impl<'a, 'b: 'a> VisitMut<LinkerError> for ModuleRewriter<'a, 'b> {
         self.rewrite_target(InvokeKind::Exec, target)
     }
     fn visit_mut_alias_target(&mut self, target: &mut AliasTarget) -> ControlFlow<LinkerError> {
-        if matches!(target, AliasTarget::MastRoot(_)) {
-            return ControlFlow::Continue(());
+        match &*target {
+            AliasTarget::MastRoot(_) => return ControlFlow::Continue(()),
+            AliasTarget::Path(path) if path.is_absolute() => return ControlFlow::Continue(()),
+            AliasTarget::Path(_) => (),
         }
-        let mut invoke_target = (target as &AliasTarget).into();
-        self.rewrite_target(InvokeKind::ProcRef, &mut invoke_target)?;
-        // This will always succeed, as the original target is qualified by construction
-        *target = AliasTarget::try_from(invoke_target).unwrap();
+        log::debug!(target: "linker", "    * rewriting alias target {target}");
+        let span = target.span();
+        let context = SymbolResolutionContext { span, module: self.module_id, kind: None };
+        match self.resolver.resolve_alias_target(&context, target) {
+            Err(err) => {
+                log::error!(target: "linker", "    | failed to resolve target {target}");
+                return ControlFlow::Break(err);
+            },
+            Ok(SymbolResolution::Module { id, path }) => {
+                log::debug!(target: "linker", "    | target resolved to module '{path}' (id {id})");
+                *target = AliasTarget::Path(path.with_span(span));
+            },
+            Ok(SymbolResolution::Exact { gid, path }) => {
+                log::debug!(target: "linker", "    | target resolved to item '{path}' (id {gid})");
+                *target = AliasTarget::Path(path.with_span(span));
+            },
+            Ok(SymbolResolution::MastRoot(digest)) => {
+                log::warn!(target: "linker", "    | target resolved to mast root {digest}");
+            },
+            Ok(SymbolResolution::Local(_) | SymbolResolution::External(_)) => unreachable!(),
+        }
         ControlFlow::Continue(())
     }
 }

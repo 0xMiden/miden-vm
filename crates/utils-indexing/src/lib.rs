@@ -280,6 +280,16 @@ where
     }
 }
 
+impl<I, T> LookupByIdx<I, T> for DenseIdMap<I, T>
+where
+    I: Idx,
+    T: Idx,
+{
+    fn get(&self, id: I) -> Option<&T> {
+        IndexVec::get(&self.inner, id).and_then(Option::as_ref)
+    }
+}
+
 impl<I: Idx, T> IntoIterator for IndexVec<I, T> {
     type Item = T;
     type IntoIter = alloc::vec::IntoIter<T>;

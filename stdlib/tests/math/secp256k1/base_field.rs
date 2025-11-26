@@ -321,7 +321,7 @@ impl PartialEq for BaseField {
 #[test]
 fn test_secp256k1_base_field_montgomery_repr() {
     let source = "
-    use.std::math::secp256k1::base_field
+    use std::math::secp256k1::base_field
 
     begin
         exec.base_field::to_mont
@@ -340,7 +340,7 @@ fn test_secp256k1_base_field_montgomery_repr() {
 #[test]
 fn test_secp256k1_base_field_mul() {
     let source = "
-    use.std::math::secp256k1::base_field
+    use std::math::secp256k1::base_field
 
     begin
         exec.base_field::mul
@@ -362,7 +362,7 @@ fn test_secp256k1_base_field_mul() {
 #[test]
 fn test_secp256k1_base_field_add() {
     let source = "
-    use.std::math::secp256k1::base_field
+    use std::math::secp256k1::base_field
 
     begin
         exec.base_field::add
@@ -385,7 +385,7 @@ fn test_secp256k1_base_field_add() {
 #[allow(clippy::needless_range_loop)]
 fn test_secp256k1_base_field_neg() {
     let source = "
-    use.std::math::secp256k1::base_field
+    use std::math::secp256k1::base_field
 
     begin
         exec.base_field::neg
@@ -405,7 +405,7 @@ fn test_secp256k1_base_field_neg() {
 #[test]
 fn test_secp256k1_base_field_sub() {
     let source = "
-    use.std::math::secp256k1::base_field
+    use std::math::secp256k1::base_field
 
     begin
         exec.base_field::sub
@@ -427,14 +427,14 @@ fn test_secp256k1_base_field_sub() {
 #[test]
 fn test_secp256k1_base_field_add_then_sub() {
     let source_add = "
-    use.std::math::secp256k1::base_field
+    use std::math::secp256k1::base_field
 
     begin
         exec.base_field::add
     end";
 
     let source_sub = "
-    use.std::math::secp256k1::base_field
+    use std::math::secp256k1::base_field
 
     begin
         exec.base_field::sub
@@ -476,7 +476,7 @@ fn test_secp256k1_base_field_add_then_sub() {
 #[test]
 fn test_secp256k1_base_field_inv() {
     let source = "
-    use.std::math::secp256k1::base_field
+    use std::math::secp256k1::base_field
 
     begin
         dupw.1
