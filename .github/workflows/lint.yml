@@ -29,7 +29,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Optimize build space for Rust
-        uses: ./.github/actions/rust-build-space-optimizer
+        uses: easimon/maximize-build-space@master
+        with:
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-docker-images: 'true'
       - name: Clippy
         run: |
           rustup update --no-self-update nightly
@@ -42,7 +48,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Optimize build space for Rust
-        uses: ./.github/actions/rust-build-space-optimizer
+        uses: easimon/maximize-build-space@master
+        with:
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-docker-images: 'true'
       - name: Rustfmt
         run: |
           rustup update --no-self-update nightly
@@ -55,7 +67,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Optimize build space for Rust
-        uses: ./.github/actions/rust-build-space-optimizer
+        uses: easimon/maximize-build-space@master
+        with:
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-docker-images: 'true'
       - name: Build docs
         run: |
           rustup +stable update --no-self-update

@@ -21,7 +21,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Optimize build space for Rust
-        uses: ./.github/actions/rust-build-space-optimizer
+        uses: easimon/maximize-build-space@master
+        with:
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-docker-images: 'true'
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y jq
       - uses: dtolnay/rust-toolchain@stable

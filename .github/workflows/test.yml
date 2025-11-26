@@ -16,7 +16,13 @@ jobs:
     steps:
       - uses: actions/checkout@main
       - name: Optimize build space for Rust
-        uses: ./.github/actions/rust-build-space-optimizer
+        uses: easimon/maximize-build-space@master
+        with:
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-docker-images: 'true'
       - uses: taiki-e/install-action@nextest
       - uses: Swatinem/rust-cache@v2
         with:
@@ -77,7 +83,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Optimize build space for Rust
-        uses: ./.github/actions/rust-build-space-optimizer
+        uses: easimon/maximize-build-space@master
+        with:
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-docker-images: 'true'
       - uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
