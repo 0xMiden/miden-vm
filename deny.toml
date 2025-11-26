@@ -64,6 +64,9 @@ skip-tree = [
     # Allow windows-sys v0.48.x/v0.59.x - multiple Windows system libraries (hard to converge)
     { name = "windows-sys", version = "=0.48.0" },
     { name = "windows-sys", version = "=0.59.0" },
+    # Allow syn v1.x and v2.x - our derive macros need v1.x while ecosystem uses v2.x
+    { name = "syn", version = "=1.0.109" },
+    { name = "syn", version = "=2.0.111" },
 ]
 
 # Sources configuration
