@@ -41,7 +41,7 @@ serde = [
     "miden-utils-indexing/serde",
     "winter-math/serde",
 ]
-arbitrary = ["dep:proptest", "dep:proptest-derive"]
+arbitrary = ["dep:proptest", "dep:proptest-derive", "std"]
 testing = ["arbitrary" ]
 
 [dependencies]
