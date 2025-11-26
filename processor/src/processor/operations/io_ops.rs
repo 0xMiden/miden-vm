@@ -8,6 +8,15 @@ use crate::{
     },
 };
 
+/// Size of a word in field elements
+const WORD_SIZE_FELT: Felt = Felt::new(4);
+
+/// Size of a double word (2 words) in field elements
+const DOUBLE_WORD_SIZE: Felt = Felt::new(8);
+
+/// Stack index where memory address is stored for MSTREAM and PIPE operations
+const MEM_ADDR_STACK_IDX: usize = 12;
+
 #[inline(always)]
 pub(super) fn op_advpop<P: Processor>(
     processor: &mut P,
@@ -145,14 +154,6 @@ pub(super) fn op_mstream<P: Processor>(
     err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
 ) -> Result<(), ExecutionError> {
-    /// WORD_SIZE, but as a `Felt`.
-    const WORD_SIZE_FELT: Felt = Felt::new(4);
-    /// The size of a double-word.
-    const DOUBLE_WORD_SIZE: Felt = Felt::new(8);
-
-    // The stack index where the memory address to load the words from is stored.
-    const MEM_ADDR_STACK_IDX: usize = 12;
-
     let ctx = processor.system().ctx();
     let clk = processor.system().clk();
 
@@ -203,14 +204,6 @@ pub(super) fn op_pipe<P: Processor>(
     err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
 ) -> Result<(), ExecutionError> {
-    /// WORD_SIZE, but as a `Felt`.
-    const WORD_SIZE_FELT: Felt = Felt::new(4);
-    /// The size of a double-word.
-    const DOUBLE_WORD_SIZE: Felt = Felt::new(8);
-
-    // The stack index where the memory address to load the words from is stored.
-    const MEM_ADDR_STACK_IDX: usize = 12;
-
     let clk = processor.system().clk();
     let ctx = processor.system().ctx();
     let addr_first_word = processor.stack().get(MEM_ADDR_STACK_IDX);
