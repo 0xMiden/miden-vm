@@ -46,7 +46,7 @@ use miden_utils_indexing::{Idx, IndexVec};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::{Decorator, DecoratorId};
+use super::{Decorator, DecoratorId, MastNodeId};
 
 mod decorator_storage;
 pub use decorator_storage::{
@@ -128,12 +128,12 @@ impl DebugInfo {
     }
 
     /// Returns the before-enter decorators for the given node.
-    pub fn before_enter_decorators(&self, node_id: crate::mast::MastNodeId) -> &[DecoratorId] {
+    pub fn before_enter_decorators(&self, node_id: MastNodeId) -> &[DecoratorId] {
         self.node_decorator_storage.get_before_decorators(node_id)
     }
 
     /// Returns the after-exit decorators for the given node.
-    pub fn after_exit_decorators(&self, node_id: crate::mast::MastNodeId) -> &[DecoratorId] {
+    pub fn after_exit_decorators(&self, node_id: MastNodeId) -> &[DecoratorId] {
         self.node_decorator_storage.get_after_decorators(node_id)
     }
 
@@ -185,9 +185,9 @@ impl DebugInfo {
     /// Adds node-level decorators (before_enter and after_exit) for the given node.
     pub fn add_node_decorators(
         &mut self,
-        node_id: crate::mast::MastNodeId,
-        before_enter: &[crate::mast::DecoratorId],
-        after_exit: &[crate::mast::DecoratorId],
+        node_id: MastNodeId,
+        before_enter: &[DecoratorId],
+        after_exit: &[DecoratorId],
     ) {
         self.node_decorator_storage
             .add_node_decorators(node_id, before_enter, after_exit);
@@ -220,7 +220,7 @@ impl DebugInfo {
     /// Returns decorators for a specific operation within a node.
     pub fn decorators_for_operation(
         &self,
-        node_id: crate::mast::MastNodeId,
+        node_id: MastNodeId,
         local_op_idx: usize,
     ) -> &[DecoratorId] {
         self.op_decorator_storage
@@ -231,7 +231,7 @@ impl DebugInfo {
     /// Returns decorator links for a node, including operation indices.
     pub fn decorator_links_for_node(
         &self,
-        node_id: crate::mast::MastNodeId,
+        node_id: MastNodeId,
     ) -> Result<DecoratedLinks<'_>, DecoratorIndexError> {
         self.op_decorator_storage.decorator_links_for_node(node_id)
     }

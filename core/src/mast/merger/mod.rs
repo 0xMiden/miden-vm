@@ -165,7 +165,7 @@ impl MastForestMerger {
 
     fn merge_decorators(&mut self, other_forest: &MastForest) -> Result<(), MastForestError> {
         let mut decorator_id_remapping =
-            DenseIdMap::with_len(other_forest.debug_info.decorators().len());
+            DenseIdMap::with_len(other_forest.debug_info.num_decorators());
 
         for (merging_id, merging_decorator) in
             other_forest.debug_info.decorators().iter().enumerate()

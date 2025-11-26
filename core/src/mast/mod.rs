@@ -648,7 +648,7 @@ impl DecoratorId {
         value: u32,
         mast_forest: &MastForest,
     ) -> Result<Self, DeserializationError> {
-        Self::from_u32_bounded(value, mast_forest.debug_info.decorators().len())
+        Self::from_u32_bounded(value, mast_forest.debug_info.num_decorators())
     }
 
     /// Returns a new `DecoratorId` with the provided inner value, or an error if the provided
