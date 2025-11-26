@@ -28,6 +28,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Optimize build space for Rust
+        uses: ./.github/actions/rust-build-space-optimizer
       - name: Clippy
         run: |
           rustup update --no-self-update nightly
@@ -39,6 +41,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Optimize build space for Rust
+        uses: ./.github/actions/rust-build-space-optimizer
       - name: Rustfmt
         run: |
           rustup update --no-self-update nightly
@@ -50,6 +54,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Optimize build space for Rust
+        uses: ./.github/actions/rust-build-space-optimizer
       - name: Build docs
         run: |
           rustup +stable update --no-self-update

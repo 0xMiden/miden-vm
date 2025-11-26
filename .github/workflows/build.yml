@@ -21,6 +21,8 @@ jobs:
         toolchain: [stable, nightly]
     steps:
       - uses: actions/checkout@v4
+      - name: Optimize build space for Rust
+        uses: ./.github/actions/rust-build-space-optimizer
       - name: Build for no-std
         run: |
           rustup update --no-self-update ${{ matrix.toolchain }}
