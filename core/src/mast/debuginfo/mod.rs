@@ -167,11 +167,6 @@ impl DebugInfo {
         self.error_codes.iter()
     }
 
-    /// Clears all error codes.
-    pub fn clear_error_codes(&mut self) {
-        self.error_codes.clear();
-    }
-
     /// Adds a decorator and returns its ID.
     pub fn add_decorator(&mut self, decorator: Decorator) -> Result<DecoratorId, MastForestError> {
         self.decorators.push(decorator).map_err(|_| MastForestError::TooManyDecorators)
@@ -197,17 +192,18 @@ impl DebugInfo {
         self.op_decorator_storage.add_decorator_info_for_node(node_id, decorators_info)
     }
 
-    /// Clears the operation decorator storage.
-    pub fn clear_op_decorator_storage(&mut self) {
+    /// Clears all decorator information while preserving error codes.
+    /// This is used when rebuilding decorator information from nodes.
+    pub fn clear_decorators(&mut self) {
         self.op_decorator_storage = OpToDecoratorIds::new();
+        self.node_decorator_storage.clear();
     }
 
     /// Strips all debug information, removing decorators and error codes.
     /// This is used for release builds where debug info is not needed.
     pub fn strip(&mut self) {
+        self.clear_decorators();
         self.decorators = IndexVec::new();
-        self.op_decorator_storage = OpToDecoratorIds::new();
-        self.node_decorator_storage.clear();
         self.error_codes.clear();
     }
 
@@ -238,11 +234,6 @@ impl DebugInfo {
         node_id: MastNodeId,
     ) -> Result<DecoratedLinks<'_>, DecoratorIndexError> {
         self.op_decorator_storage.decorator_links_for_node(node_id)
-    }
-
-    /// Clears the node decorator storage.
-    pub fn clear_node_decorator_storage(&mut self) {
-        self.node_decorator_storage.clear();
     }
 }
 
