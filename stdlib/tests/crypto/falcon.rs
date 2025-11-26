@@ -12,7 +12,7 @@ use miden_utils_testing::{
     Word,
     crypto::{
         MerkleStore, Rpo256,
-        rpo_falcon512::{Polynomial, SecretKey},
+        falcon512_rpo::{Polynomial, SecretKey},
     },
     expect_exec_error_matches,
     proptest::proptest,

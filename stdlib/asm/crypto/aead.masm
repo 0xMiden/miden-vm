@@ -33,7 +33,7 @@ const.AEAD_DECRYPT_EVENT=event("stdlib::crypto::aead::decrypt")
 #! - key is a 4-element (1 word) key
 #! - rate(8) will contain the initial keystream
 #! - capacity(4) constains the capacity portion of the state
-export.init_state
+proc init_state
     # Stack: [nonce(4), key(4), ...]
 
     # Initialize capacity with all zeros
@@ -62,7 +62,7 @@ end
 #!
 #! This procedure replaces the rate with the AD padding block and increments the first
 #! capacity element (domain separation).
-proc.process_ad
+proc process_ad
     # Drop the existing rate (8 elements)
     dropw dropw
     # => [capacity(4), ...]
@@ -83,7 +83,7 @@ end
 #! This procedure encrypts plaintext and automatically adds a padding block at the end.
 #! The padding block [1, 0, 0, 0, 0, 0, 0, 0] is written to memory and encrypted, ensuring
 #! proper AEAD operation without requiring the caller to handle padding manually.
-#! This, however, requires the plaintext to be double-word aligned. This assumption is made
+#! This, however, requires the plaintext length to be a multiple of 8. This assumption is made
 #! both in this procedure as well as in the decryption procedure.
 #!
 #! Input: [nonce(4), key(4), src_ptr, dst_ptr, num_blocks, ...]
@@ -121,7 +121,12 @@ end
 #! - The procedure writes [1, 0, 0, 0, 0, 0, 0, 0] to dst_ptr + (num_blocks * 8)
 #! - This padding block is then encrypted along with the data
 #! - For empty plaintext (num_blocks = 0), only the padding block is encrypted
-export.encrypt
+#!
+#! Cycles (estimate): 77 + 2 * n
+#! Where:
+#! - n = number of field elements encrypted (includes the final padding block)
+#! - For num_blocks data blocks: n = 8 * (num_blocks + 1)
+pub proc encrypt
     # Stack: [nonce(4), key(4), src_ptr, dst_ptr, num_blocks, ...]
 
     # Input validation note: This procedure does not validate num_blocks or alignment.
@@ -281,7 +286,12 @@ end
 #! - Any deviation from correct plaintext causes assertion failure
 #!
 #! Note: This procedure does NOT remove padding. The caller must handle padding removal.
-export.decrypt
+#!
+#! Cycles (estimate): 177 + 3.5 * n
+#! Where:
+#! - n = number of field elements in the plaintext (excludes the padding block)
+#! - For num_blocks data blocks: n = 8 * num_blocks
+pub proc decrypt
     # Stack: [nonce(4), key(4), src_ptr, dst_ptr, num_blocks, ...]
 
     # Input validation note: This procedure does not validate num_blocks or alignment.

@@ -125,7 +125,7 @@ pub fn falcon_sign(sk: &[Felt], msg: Word) -> Option<Vec<Felt>> {
     use miden_core::{
         Felt,
         crypto::{
-            dsa::rpo_falcon512::{Polynomial, SecretKey},
+            dsa::falcon512_rpo::{Polynomial, SecretKey},
             hash::Rpo256,
         },
         utils::Deserializable,

@@ -172,7 +172,6 @@ pub(super) fn execute_sync_op(
         Operation::MStore => io_ops::op_mstore(processor, err_ctx, tracer)?,
         Operation::MStream => io_ops::op_mstream(processor, err_ctx, tracer)?,
         Operation::Pipe => io_ops::op_pipe(processor, err_ctx, tracer)?,
-        Operation::CryptoStream => io_ops::op_crypto_stream(processor, err_ctx, tracer)?,
 
         // ----- cryptographic operations -----------------------------------------------------
         Operation::HPerm => {
@@ -207,6 +206,7 @@ pub(super) fn execute_sync_op(
             let log_precompile_helpers = crypto_ops::op_log_precompile(processor, tracer);
             user_op_helpers = Some(log_precompile_helpers);
         },
+        Operation::CryptoStream => crypto_ops::op_crypto_stream(processor, err_ctx, tracer)?,
     }
 
     Ok(user_op_helpers)

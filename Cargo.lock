@@ -1424,11 +1424,12 @@ dependencies = [
 [[package]]
 name = "miden-crypto"
 version = "0.19.0"
-source = "git+https://github.com/0xMiden/crypto.git?branch=al-aead-constructors#5ec586ce05ddf4c004608d75135687675af7b0bc"
+source = "git+https://github.com/0xMiden/crypto.git?branch=next#4a1e6907de87edf80dc17321e86ad8ba3ee84a3b"
 dependencies = [
  "blake3",
  "cc",
  "chacha20poly1305",
+ "curve25519-dalek",
  "ed25519-dalek",
  "flume",
  "glob",
@@ -1442,6 +1443,7 @@ dependencies = [
  "rand_core 0.9.3",
  "rand_hc",
  "serde",
+ "sha2",
  "sha3",
  "subtle",
  "thiserror",
@@ -1454,7 +1456,7 @@ dependencies = [
 [[package]]
 name = "miden-crypto-derive"
 version = "0.19.0"
-source = "git+https://github.com/0xMiden/crypto.git?branch=al-aead-constructors#5ec586ce05ddf4c004608d75135687675af7b0bc"
+source = "git+https://github.com/0xMiden/crypto.git?branch=next#4a1e6907de87edf80dc17321e86ad8ba3ee84a3b"
 dependencies = [
  "quote",
  "syn 2.0.108",

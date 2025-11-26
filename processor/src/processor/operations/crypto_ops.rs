@@ -10,6 +10,7 @@ use miden_core::{
 use crate::{
     ErrorContext, ExecutionError,
     fast::Tracer,
+    operations::utils::validate_dual_word_stream_addrs,
     processor::{
         AdviceProviderInterface, HasherInterface, MemoryInterface, OperationHelperRegisters,
         Processor, StackInterface, SystemInterface,
@@ -206,67 +207,8 @@ pub(super) fn op_horner_eval_base<P: Processor>(
     Ok(P::HelperRegisters::op_horner_eval_registers(alpha, k0, k1, acc_tmp))
 }
 
-// LOG PRECOMPILE OPERATION
+// HORNER-BASED POLYNOMIAL EVALUATION OPERATIONS
 // ================================================================================================
-
-/// Logs a precompile event by absorbing `TAG` and `COMM` into the precompile sponge
-/// capacity.
-///
-/// Stack transition:
-/// `[COMM, TAG, PAD, ...] -> [R1, R0, CAP_NEXT, ...]`
-///
-/// Where:
-/// - The hasher computes: `[CAP_NEXT, R0, R1] = Rpo([CAP_PREV, TAG, COMM])`
-/// - `CAP_PREV` is the previous sponge capacity provided non-deterministically via helper
-///   registers.
-#[inline(always)]
-pub(super) fn op_log_precompile<P: Processor>(
-    processor: &mut P,
-    tracer: &mut impl Tracer,
-) -> [Felt; NUM_USER_OP_HELPERS] {
-    // Read TAG and COMM from stack
-    let comm = processor.stack().get_word(0);
-    let tag = processor.stack().get_word(4);
-
-    // Get the current precompile sponge capacity
-    let cap_prev = processor.precompile_transcript_state();
-
-    // Build the full 12-element hasher state for RPO permutation
-    // State layout: [CAP_PREV, TAG, COMM]
-    let mut hasher_state: [Felt; STATE_WIDTH] = [ZERO; 12];
-    hasher_state[STATE_CAP_RANGE].copy_from_slice(cap_prev.as_slice());
-    hasher_state[STATE_RATE_0_RANGE].copy_from_slice(tag.as_slice());
-    hasher_state[STATE_RATE_1_RANGE].copy_from_slice(comm.as_slice());
-
-    // Perform the RPO permutation
-    let (addr, output_state) = processor.hasher().permute(hasher_state);
-
-    // Extract CAP_NEXT (first 4 elements), R0 (next 4 elements), R1 (last 4 elements)
-    let cap_next: Word = output_state[STATE_CAP_RANGE.clone()]
-        .try_into()
-        .expect("cap_next slice has length 4");
-    let r0: Word = output_state[STATE_RATE_0_RANGE.clone()]
-        .try_into()
-        .expect("r0 slice has length 4");
-    let r1: Word = output_state[STATE_RATE_1_RANGE.clone()]
-        .try_into()
-        .expect("r1 slice has length 4");
-
-    // Update the processor's precompile sponge capacity
-    processor.set_precompile_transcript_state(cap_next);
-
-    // Write the output to the stack (top 12 elements): [R1, R0, CAP_NEXT, ...]
-    processor.stack().set_word(0, &r1);
-    processor.stack().set_word(4, &r0);
-    processor.stack().set_word(8, &cap_next);
-
-    // Record the hasher permutation for trace generation
-    tracer.record_hasher_permute(hasher_state, output_state);
-
-    // Return helper registers containing the hasher address and CAP_PREV
-    // Convert cap_prev Word to array for the helper registers
-    P::HelperRegisters::op_log_precompile_registers(addr, cap_prev)
-}
 
 /// Evaluates a polynomial using Horner's method (extension field).
 ///
@@ -330,4 +272,165 @@ pub(super) fn op_horner_eval_ext<P: Processor>(
 
     // Return the user operation helpers
     Ok(P::HelperRegisters::op_horner_eval_registers(alpha, k0, k1, acc_tmp))
+}
+
+// LOG PRECOMPILE OPERATION
+// ================================================================================================
+
+/// Logs a precompile event by absorbing `TAG` and `COMM` into the precompile sponge
+/// capacity.
+///
+/// Stack transition:
+/// `[COMM, TAG, PAD, ...] -> [R1, R0, CAP_NEXT, ...]`
+///
+/// Where:
+/// - The hasher computes: `[CAP_NEXT, R0, R1] = Rpo([CAP_PREV, TAG, COMM])`
+/// - `CAP_PREV` is the previous sponge capacity provided non-deterministically via helper
+///   registers.
+#[inline(always)]
+pub(super) fn op_log_precompile<P: Processor>(
+    processor: &mut P,
+    tracer: &mut impl Tracer,
+) -> [Felt; NUM_USER_OP_HELPERS] {
+    // Read TAG and COMM from stack
+    let comm = processor.stack().get_word(0);
+    let tag = processor.stack().get_word(4);
+
+    // Get the current precompile sponge capacity
+    let cap_prev = processor.precompile_transcript_state();
+
+    // Build the full 12-element hasher state for RPO permutation
+    // State layout: [CAP_PREV, TAG, COMM]
+    let mut hasher_state: [Felt; STATE_WIDTH] = [ZERO; 12];
+    hasher_state[STATE_CAP_RANGE].copy_from_slice(cap_prev.as_slice());
+    hasher_state[STATE_RATE_0_RANGE].copy_from_slice(tag.as_slice());
+    hasher_state[STATE_RATE_1_RANGE].copy_from_slice(comm.as_slice());
+
+    // Perform the RPO permutation
+    let (addr, output_state) = processor.hasher().permute(hasher_state);
+
+    // Extract CAP_NEXT (first 4 elements), R0 (next 4 elements), R1 (last 4 elements)
+    let cap_next: Word = output_state[STATE_CAP_RANGE.clone()]
+        .try_into()
+        .expect("cap_next slice has length 4");
+    let r0: Word = output_state[STATE_RATE_0_RANGE.clone()]
+        .try_into()
+        .expect("r0 slice has length 4");
+    let r1: Word = output_state[STATE_RATE_1_RANGE.clone()]
+        .try_into()
+        .expect("r1 slice has length 4");
+
+    // Update the processor's precompile sponge capacity
+    processor.set_precompile_transcript_state(cap_next);
+
+    // Write the output to the stack (top 12 elements): [R1, R0, CAP_NEXT, ...]
+    processor.stack().set_word(0, &r1);
+    processor.stack().set_word(4, &r0);
+    processor.stack().set_word(8, &cap_next);
+
+    // Record the hasher permutation for trace generation
+    tracer.record_hasher_permute(hasher_state, output_state);
+
+    // Return helper registers containing the hasher address and CAP_PREV
+    // Convert cap_prev Word to array for the helper registers
+    P::HelperRegisters::op_log_precompile_registers(addr, cap_prev)
+}
+
+// STREAM CIPHER OPERATION
+// ================================================================================================
+
+/// Encrypts data from source memory to destination memory using RPO.
+///
+/// Stack transition:
+/// [rate(8), cap(4), src_ptr, dst_ptr, ...] -> [ciphertext(8), cap(4), src_ptr+8, dst_ptr+8, ...]
+#[inline(always)]
+pub(super) fn op_crypto_stream<P: Processor>(
+    processor: &mut P,
+    err_ctx: &impl ErrorContext,
+    tracer: &mut impl Tracer,
+) -> Result<(), ExecutionError> {
+    use miden_core::Felt;
+
+    const WORD_SIZE_FELT: Felt = Felt::new(4);
+    const DOUBLE_WORD_SIZE: Felt = Felt::new(8);
+
+    // Stack layout: [rate(8), capacity(4), src_ptr, dst_ptr, ...]
+    const SRC_PTR_IDX: usize = 12;
+    const DST_PTR_IDX: usize = 13;
+
+    let ctx = processor.system().ctx();
+    let clk = processor.system().clk();
+
+    // Get source and destination pointers
+    let src_addr = processor.stack().get(SRC_PTR_IDX);
+    let dst_addr = processor.stack().get(DST_PTR_IDX);
+
+    // Validate address ranges and check for overlap using half-open intervals.
+    validate_dual_word_stream_addrs(src_addr, dst_addr, ctx, clk, err_ctx)?;
+
+    // Load plaintext from source memory (2 words = 8 elements)
+    let src_addr_word2 = src_addr + WORD_SIZE_FELT;
+    let plaintext_word1 = processor
+        .memory()
+        .read_word(ctx, src_addr, clk, err_ctx)
+        .map_err(ExecutionError::MemoryError)?;
+    tracer.record_memory_read_word(plaintext_word1, src_addr, ctx, clk);
+
+    let plaintext_word2 = processor
+        .memory()
+        .read_word(ctx, src_addr_word2, clk, err_ctx)
+        .map_err(ExecutionError::MemoryError)?;
+    tracer.record_memory_read_word(plaintext_word2, src_addr_word2, ctx, clk);
+
+    // Get rate (keystream) from stack[0..7] in stack order
+    let rate = [
+        processor.stack().get(7),
+        processor.stack().get(6),
+        processor.stack().get(5),
+        processor.stack().get(4),
+        processor.stack().get(3),
+        processor.stack().get(2),
+        processor.stack().get(1),
+        processor.stack().get(0),
+    ];
+
+    // Encrypt: ciphertext = plaintext + rate (element-wise addition in field)
+    let ciphertext_word1 = [
+        plaintext_word1[0] + rate[0],
+        plaintext_word1[1] + rate[1],
+        plaintext_word1[2] + rate[2],
+        plaintext_word1[3] + rate[3],
+    ]
+    .into();
+    let ciphertext_word2 = [
+        plaintext_word2[0] + rate[4],
+        plaintext_word2[1] + rate[5],
+        plaintext_word2[2] + rate[6],
+        plaintext_word2[3] + rate[7],
+    ]
+    .into();
+
+    // Write ciphertext to destination memory
+    let dst_addr_word2 = dst_addr + WORD_SIZE_FELT;
+    processor
+        .memory()
+        .write_word(ctx, dst_addr, clk, ciphertext_word1, err_ctx)
+        .map_err(ExecutionError::MemoryError)?;
+    tracer.record_memory_write_word(ciphertext_word1, dst_addr, ctx, clk);
+
+    processor
+        .memory()
+        .write_word(ctx, dst_addr_word2, clk, ciphertext_word2, err_ctx)
+        .map_err(ExecutionError::MemoryError)?;
+    tracer.record_memory_write_word(ciphertext_word2, dst_addr_word2, ctx, clk);
+
+    // Update stack[0..7] with ciphertext (becomes new rate for next hperm)
+    processor.stack().set_word(0, &ciphertext_word2);
+    processor.stack().set_word(4, &ciphertext_word1);
+
+    // Increment pointers by 8 (2 words)
+    processor.stack().set(SRC_PTR_IDX, src_addr + DOUBLE_WORD_SIZE);
+    processor.stack().set(DST_PTR_IDX, dst_addr + DOUBLE_WORD_SIZE);
+
+    Ok(())
 }
