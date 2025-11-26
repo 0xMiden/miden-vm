@@ -8,7 +8,7 @@ fn test_encrypt_zero_blocks_roundtrip() {
     // Verifies that aead::encrypt handles num_blocks = 0 by encrypting only the padding block
     // and producing a tag, and that aead::decrypt accepts it and succeeds.
     let source = r#"
-    use.std::crypto::aead
+    use std::crypto::aead
 
     begin
         # No plaintext needed; num_blocks = 0
@@ -70,7 +70,7 @@ fn test_encrypt_with_known_values() {
     // Build MASM test dynamically with extracted values
     let source = format!(
         "
-    use.std::crypto::aead
+    use std::crypto::aead
 
     begin
         # Store plaintext [10,11,12,13,14,15,16,17] at address 1000
@@ -148,7 +148,7 @@ fn test_decrypt_with_known_values() {
     // Build MASM test for decryption
     let source = format!(
         "
-    use.std::crypto::aead
+    use std::crypto::aead
 
     begin
         # Store ciphertext at address 1000 (data + padding + tag)
@@ -228,7 +228,7 @@ fn test_decrypt_with_wrong_key() {
     // Build MASM test that uses wrong key for decryption
     let source = format!(
         "
-    use.std::crypto::aead
+    use std::crypto::aead
 
     begin
         # Store ciphertext at address 1000

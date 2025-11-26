@@ -10,12 +10,12 @@
 #! Note: Associated data (AD) is currently NOT supported. Only empty AD is handled,
 #! which is represented by the padding block [1,0,0,0,0,0,0,0].
 
-use.std::crypto::hashes::rpo
+use std::crypto::hashes::rpo
 
 # Constants
 # ================================================================================================
 
-const.AEAD_DECRYPT_EVENT=event("stdlib::crypto::aead::decrypt")
+const AEAD_DECRYPT_EVENT=event("stdlib::crypto::aead::decrypt")
 
 # Procedures
 # ================================================================================================
