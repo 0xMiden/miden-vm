@@ -79,6 +79,9 @@ pub struct DebugInfo {
 }
 
 impl DebugInfo {
+    // CONSTRUCTORS
+    // ================================================================================================
+
     /// Creates a new empty DebugInfo.
     pub fn new() -> Self {
         Self {
@@ -107,6 +110,9 @@ impl DebugInfo {
             error_codes: BTreeMap::new(),
         }
     }
+
+    // PUBLIC ACCESSORS
+    // ================================================================================================
 
     /// Returns all decorators as a slice.
     pub fn decorators(&self) -> &[Decorator] {
@@ -142,30 +148,18 @@ impl DebugInfo {
         self.decorators.len()
     }
 
-    /// Returns the operation decorator storage.
-    pub fn op_decorator_storage(&self) -> &OpToDecoratorIds {
-        &self.op_decorator_storage
-    }
-
     /// Returns the node decorator storage.
     pub fn node_decorator_storage(&self) -> &NodeToDecoratorIds {
         &self.node_decorator_storage
     }
 
-    /// Inserts an error code with its message.
-    pub fn insert_error_code(&mut self, code: u64, msg: Arc<str>) {
-        self.error_codes.insert(code, msg);
+    /// Returns true if this DebugInfo has no decorators or error codes.
+    pub fn is_empty(&self) -> bool {
+        self.decorators.is_empty() && self.error_codes.is_empty()
     }
 
-    /// Returns an error message by code.
-    pub fn error_message(&self, code: u64) -> Option<Arc<str>> {
-        self.error_codes.get(&code).cloned()
-    }
-
-    /// Returns an iterator over error codes.
-    pub fn error_codes(&self) -> impl Iterator<Item = (&u64, &Arc<str>)> {
-        self.error_codes.iter()
-    }
+    // DECORATOR METHODS
+    // ================================================================================================
 
     /// Adds a decorator and returns its ID.
     pub fn add_decorator(&mut self, decorator: Decorator) -> Result<DecoratorId, MastForestError> {
@@ -192,31 +186,6 @@ impl DebugInfo {
         self.op_decorator_storage.add_decorator_info_for_node(node_id, decorators_info)
     }
 
-    /// Clears all decorator information while preserving error codes.
-    /// This is used when rebuilding decorator information from nodes.
-    pub fn clear_decorators(&mut self) {
-        self.op_decorator_storage = OpToDecoratorIds::new();
-        self.node_decorator_storage.clear();
-    }
-
-    /// Strips all debug information, removing decorators and error codes.
-    /// This is used for release builds where debug info is not needed.
-    pub fn strip(&mut self) {
-        self.clear_decorators();
-        self.decorators = IndexVec::new();
-        self.error_codes.clear();
-    }
-
-    /// Returns true if this DebugInfo has no decorators or error codes.
-    pub fn is_empty(&self) -> bool {
-        self.decorators.is_empty() && self.error_codes.is_empty()
-    }
-
-    /// Returns a mutable reference to the error codes map.
-    pub fn error_codes_mut(&mut self) -> &mut BTreeMap<u64, Arc<str>> {
-        &mut self.error_codes
-    }
-
     /// Returns decorators for a specific operation within a node.
     pub fn decorators_for_operation(
         &self,
@@ -234,6 +203,53 @@ impl DebugInfo {
         node_id: MastNodeId,
     ) -> Result<DecoratedLinks<'_>, DecoratorIndexError> {
         self.op_decorator_storage.decorator_links_for_node(node_id)
+    }
+
+    /// Clears all decorator information while preserving error codes.
+    /// This is used when rebuilding decorator information from nodes.
+    pub fn clear_decorators(&mut self) {
+        self.op_decorator_storage = OpToDecoratorIds::new();
+        self.node_decorator_storage.clear();
+    }
+
+    /// Strips all debug information, removing decorators and error codes.
+    /// This is used for release builds where debug info is not needed.
+    pub fn strip(&mut self) {
+        self.clear_decorators();
+        self.decorators = IndexVec::new();
+        self.error_codes.clear();
+    }
+
+    // ERROR CODE METHODS
+    // ================================================================================================
+
+    /// Inserts an error code with its message.
+    pub fn insert_error_code(&mut self, code: u64, msg: Arc<str>) {
+        self.error_codes.insert(code, msg);
+    }
+
+    /// Returns an error message by code.
+    pub fn error_message(&self, code: u64) -> Option<Arc<str>> {
+        self.error_codes.get(&code).cloned()
+    }
+
+    /// Returns an iterator over error codes.
+    pub fn error_codes(&self) -> impl Iterator<Item = (&u64, &Arc<str>)> {
+        self.error_codes.iter()
+    }
+
+    /// Returns a mutable reference to the error codes map.
+    pub fn error_codes_mut(&mut self) -> &mut BTreeMap<u64, Arc<str>> {
+        &mut self.error_codes
+    }
+
+    // PRIVATE METHODS
+    // ================================================================================================
+
+    /// Returns the operation decorator storage.
+    #[cfg(test)]
+    pub(crate) fn op_decorator_storage(&self) -> &OpToDecoratorIds {
+        &self.op_decorator_storage
     }
 }
 
