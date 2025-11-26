@@ -576,12 +576,12 @@ fn test_smt_peek() {
 
     let smt = Smt::with_entries(LEAVES).unwrap();
 
-    // Get all leaves present in tree
+    // Peek all leaves present in tree
     for (key, value) in LEAVES {
         expect_value_from_peek(key, value, &smt);
     }
 
-    // Get an empty leaf
+    // Peek an empty leaf
     expect_value_from_peek(
         Word::new([42_u32.into(), 42_u32.into(), 42_u32.into(), 42_u32.into()]),
         EMPTY_WORD,
