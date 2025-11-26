@@ -101,6 +101,10 @@ impl FastProcessor {
             current_forest,
         );
 
+        // When the `no_err_ctx` feature is enabled, the err_ctx! macro expands to `()`
+        // and doesn't use its parameters. In this case, _call_node would be unused,
+        // so we prefix it with underscore to indicate this intentional unused state
+        // and suppress warnings in feature combinations that include `no_err_ctx`.
         let _call_node = current_forest[node_id].unwrap_call();
         let err_ctx = err_ctx!(current_forest, _call_node, host);
         // when returning from a function call or a syscall, restore the
