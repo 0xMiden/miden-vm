@@ -157,6 +157,7 @@ The effect on the rest of the stack is:
 * **Left shift** starting from position $16$.
 
 ## HORNERBASE
+
 The `HORNERBASE` operation performs $8$ steps of the Horner method for evaluating a polynomial with coefficients over the base field at a point in the quadratic extension field. More precisely, it performs the following updates to the accumulator on the stack:
 $$
 \begin{align*}
@@ -165,6 +166,7 @@ $$
 \mathsf{acc}^{'} &= ((((\mathsf{tmp1} \cdot \alpha + c_5) \cdot \alpha + c_6) \cdot \alpha) + c_7)
 \end{align*}
 $$
+
 where $c_i$ are the coefficients of the polynomial, $\alpha$ the evaluation point, $\mathsf{acc}$ the current accumulator value, $\mathsf{acc}^{'}$ the updated accumulator value, and $\mathsf{tmp0}$, $\mathsf{tmp1}$ are helper variables used for constraint degree reduction.
 
 The stack for the operation is expected to be arranged as follows:
@@ -233,6 +235,7 @@ $$
 
 The effect on the rest of the stack is:
 * **No change.**
+
 ## HORNEREXT
 The `HORNEREXT` operation performs $4$ steps of the Horner method for evaluating a polynomial with coefficients over the quadratic extension field at a point in the quadratic extension field. More precisely, it performs the following update to the accumulator on the stack
     $$\mathsf{tmp} = (\mathsf{acc} \cdot \alpha + a_3) \cdot \alpha + a_2$$

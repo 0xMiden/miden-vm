@@ -113,8 +113,8 @@ pub(super) mod opcode_constants {
     pub const OPCODE_SPAN: u8           = 0b0101_0110;
     pub const OPCODE_JOIN: u8           = 0b0101_0111;
     pub const OPCODE_DYN: u8            = 0b0101_1000;
-    pub const OPCODE_HORNEREXT: u8      = 0b0101_1001;
-    pub const OPCODE_HORNERBASE: u8     = 0b0101_1010;
+    pub const OPCODE_HORNERBASE: u8     = 0b0101_1001;
+    pub const OPCODE_HORNEREXT: u8      = 0b0101_1010;
     pub const OPCODE_PUSH: u8           = 0b0101_1011;
     pub const OPCODE_DYNCALL: u8        = 0b0101_1100;
     pub const OPCODE_EVALCIRCUIT: u8    = 0b0101_1101;
